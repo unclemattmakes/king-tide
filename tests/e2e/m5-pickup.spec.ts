@@ -11,7 +11,11 @@ test.describe('M5 pickup + boost', () => {
     const initialHeld = await page.evaluate(() => window.__hover!.heldPickup())
     expect(initialHeld).toBeNull()
 
-    // Drive forward to pick up the boost at (0, 1.8, 28).
+    // Force the slot to 'boost' so this test is deterministic across the
+    // randomised pickup pool. (Driving over a real spawn would sometimes
+    // hand us missile / mine / shield instead.)
+    await page.evaluate(() => window.__hover!.setHeldPickup('boost'))
+
     await page.evaluate(() =>
       window.__hover!.setIntentOverride({
         throttle: 1,
@@ -23,7 +27,6 @@ test.describe('M5 pickup + boost', () => {
       }),
     )
 
-    await page.waitForFunction(() => window.__hover!.heldPickup() === 'boost', { timeout: 5000 })
     const heldAfter = await page.evaluate(() => window.__hover!.heldPickup())
     expect(heldAfter).toBe('boost')
 

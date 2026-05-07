@@ -8,6 +8,7 @@ import {
   RBHandle,
   RBHandleStore,
 } from '@/game/components'
+import { ShieldEffect, ShieldEffectStore } from '@/game/components/combat'
 import {
   BoostEffect,
   BoostEffectStore,
@@ -18,7 +19,15 @@ import {
   PickupSpawnTag,
   type PickupType,
 } from '@/game/components/pickup'
+import { createMine } from '@/game/entities/mine'
+import { createMissile } from '@/game/entities/missile'
 import { pickRandomPickupType } from '@/game/entities/pickup-spawn'
+import {
+  getMineDropPosition,
+  getMissileLaunchTransform,
+  pickMissileTarget,
+  SHIELD_DURATION,
+} from '@/game/systems/combat'
 
 const PICKUP_RADIUS = 2.5 // bike center within this many meters of box → collect
 const RESPAWN_DELAY = 4 // seconds
@@ -74,28 +83,50 @@ export function pickupSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): voi
 }
 
 /**
- * Consume a held pickup when the bike's intent.fire goes from false → true.
- * For M5 we only have boost, which sets a BoostEffect on the bike.
+ * Consume a held pickup when intent.fire is true. Each pickup type has its
+ * own effect: boost adds a BoostEffect to the firer; shield adds a
+ * ShieldEffect; mine spawns a Mine entity behind the firer; missile spawns
+ * a Missile entity in front, with a target acquired from the bikes ahead.
+ *
+ * Edge-triggering: this system runs once per physics step and PickupSlot is
+ * cleared on consumption, so a held fire button only fires once per pickup.
  */
-export function pickupUseSystem(sim: SimWorld, _phys: PhysicsWorld): void {
+export function pickupUseSystem(sim: SimWorld, phys: PhysicsWorld): void {
   const eids = query(sim, [BikeTag, ControlIntent, PickupSlot])
   for (const eid of eids) {
     const intent = ControlIntentStore.must(eid)
     const slot = PickupSlotStore.must(eid)
-    if (!intent.fire || !slot.held) {
-      // Track previous fire state via the slot itself? We don't have one yet.
-      // For M5: treat as edge-triggered by clearing fire after consumption.
-      // Caveat: relies on intent being mutated after use. Acceptable for now.
-      continue
-    }
-    if (slot.held === 'boost') {
-      // Apply boost effect.
-      if (!BoostEffectStore.has(eid)) {
-        addComponent(sim, eid, BoostEffect)
+    if (!intent.fire || !slot.held) continue
+
+    switch (slot.held) {
+      case 'boost': {
+        if (!BoostEffectStore.has(eid)) addComponent(sim, eid, BoostEffect)
+        BoostEffectStore.set(eid, {
+          remaining: BOOST_DURATION,
+          multiplier: BOOST_MULTIPLIER,
+        })
+        break
       }
-      BoostEffectStore.set(eid, { remaining: BOOST_DURATION, multiplier: BOOST_MULTIPLIER })
+      case 'shield': {
+        if (!ShieldEffectStore.has(eid)) addComponent(sim, eid, ShieldEffect)
+        ShieldEffectStore.set(eid, { remaining: SHIELD_DURATION })
+        break
+      }
+      case 'mine': {
+        const dropPos = getMineDropPosition(phys, eid)
+        if (dropPos) createMine(sim, dropPos, eid)
+        break
+      }
+      case 'missile': {
+        const launch = getMissileLaunchTransform(phys, eid)
+        if (launch) {
+          const target = pickMissileTarget(sim, phys, eid)
+          createMissile(sim, launch.position, launch.velocity, eid, target)
+        }
+        break
+      }
     }
-    // Future: missile/mine/shield branches.
+
     PickupSlotStore.set(eid, { held: null })
   }
 }

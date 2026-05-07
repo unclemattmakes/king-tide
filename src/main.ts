@@ -10,6 +10,7 @@ import {
 } from './engine/input'
 import { installCameraLookInput, tickCameraLook } from './engine/input/camera-look'
 import { createChaseCamera } from './engine/render/camera'
+import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createBikeRenderSystem } from './engine/render/render-systems'
@@ -29,6 +30,14 @@ import { createArena } from './game/entities/arena'
 import { createBike } from './game/entities/bike'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
 import { aiControlSystem } from './game/systems/ai-control'
+import {
+  explosionTickSystem,
+  mineSystem,
+  missileSystem,
+  shieldTickSystem,
+  stunOverrideSystem,
+  stunTickSystem,
+} from './game/systems/combat'
 import { hoverSystem } from './game/systems/hover'
 import { applyPlayerIntent } from './game/systems/input-apply'
 import {
@@ -140,6 +149,7 @@ async function boot() {
   const bikeRender = createBikeRenderSystem(scene, sim)
   const trailRender = createTrailRenderSystem(scene, sim)
   const pickupRender = createPickupRenderSystem(scene, sim)
+  const combatRender = createCombatRenderSystem(scene, sim)
   const dirArrow = createDirectionArrow()
   scene.add(dirArrow.mesh)
 
@@ -237,16 +247,24 @@ async function boot() {
     while (physAccum >= phys.fixedDt) {
       advanceWaveField(waveField, phys.fixedDt)
       // Player intent first; AI runs after and overwrites for entities tagged
-      // AITag (which now includes the player while auto-play is on).
+      // AITag (which now includes the player while auto-play is on). Stun
+      // runs LAST in the intent chain so spun-out bikes can't drive through
+      // their own hit reaction.
       if (!autoPlay) applyPlayerIntent(sim, state.intent)
       aiControlSystem(sim, phys, track)
+      stunOverrideSystem(sim)
       hoverSystem(sim, phys, waveField)
       phys.step()
       syncFromPhysics(sim, phys)
       raceTick(sim, phys, phys.fixedDt)
       pickupSystem(sim, phys, phys.fixedDt)
       pickupUseSystem(sim, phys)
+      mineSystem(sim, phys, phys.fixedDt)
+      missileSystem(sim, phys, phys.fixedDt)
+      explosionTickSystem(sim, phys.fixedDt)
       boostTickSystem(sim, phys.fixedDt)
+      shieldTickSystem(sim, phys.fixedDt)
+      stunTickSystem(sim, phys.fixedDt)
       rubberBandSystem(sim, track)
       physAccum -= phys.fixedDt
     }
@@ -292,6 +310,7 @@ async function boot() {
     bikeRender()
     trailRender(camera)
     pickupRender(dt)
+    combatRender(dt)
 
     // Direction arrow points the player to the next checkpoint.
     const racerNow = RacerStore.get(playerEid)

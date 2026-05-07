@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-07 (M9.4: kinematic roll lock). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-07 (M5 combat bundle). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -12,14 +12,14 @@ This doc captures the build's current state, controls, known issues, and next st
 - Gerstner wave water with buoyancy — bike rides waves, dives into troughs, launches off crests
 - Faceted water surface + horizon-fading sky dome
 - 4 AI racers with per-bike race-line offsets so they hold parallel lines (no convergence pile-up)
-- Pickup boxes around the loop (boost only for now)
+- Pickup boxes around the loop — full pool: boost, shield, mine, homing missile
 - Race lap counting with finish overlay
 - Direction arrow (Crazy Taxi style) above the player pointing to the next checkpoint
 - Sky beacon over the next gate
 - Auto-play mode (T or F1) — AI takes over the player bike for testing
 - Backspace = respawn at start
 - Mouse right-drag and gamepad right-stick orbit the camera (vertical inverted by default)
-- 13 e2e + 12 unit tests, all green
+- 17 e2e + 12 unit tests, all green
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
 
 ## Controls
@@ -115,12 +115,18 @@ In rough priority order. Each item is sized as **S/M/L** for effort.
 - **[S] Pitch attenuation tuning.** Maybe make pitch effect smaller (±15° instead of ±30°) so the bike stays more controllable. Or scale pitch with speed.
 - **[M] AI cornering tuning.** More aggressive brake-into-turn, look-ahead based on track curvature, racing-line offset that varies between inside/outside of corner.
 
-### Combat (M5 follow-on)
-Currently only `boost` pickup works. The other planned pickups:
-- **[M] Homing missile** — projectile entity, target acquisition (nearest racer ahead), hit reaction (spinout)
-- **[M] Mine** — drop in place behind the bike, proximity trigger, hit reaction
-- **[S] Shield** — temporary invulnerability, blocks one hit
-- **[S] Pickup variety** — randomised dispenser, varying pickup pool by track section
+### Combat (M5 — done)
+All four MVP pickups landed in M9.9 (the M5-completion bundle):
+- **Boost** — speed multiplier (was already in)
+- **Shield** — 6s bubble, absorbs one mine/missile hit then consumes
+- **Mine** — dropped behind the firer with a 0.6s arming delay; proximity trigger spinouts the victim
+- **Homing missile** — target acquisition picks nearest bike inside a forward cone (≤80m, dot ≥ 0.3); MISSILE_TURN_RATE 2.4 rad/s caps how sharply it can chase. 5s self-destruct.
+
+Shared hit reaction: linear-velocity damp ×0.55, ±12 rad/s yaw spinout, 1s `Stun` component that the `stunOverrideSystem` uses to zero throttle/steer/brake/pitch on the victim until it expires. Fire/boost are NOT zeroed during stun.
+
+Open polish:
+- Pool weighting feels OK at 2:1:1:1 (boost:shield:mine:missile) but only one race tested it. Tune if combat dominates.
+- AI doesn't fire pickups yet — it picks them up but never uses them. Easy follow-on once we want CPU bikes to feel threatening.
 
 ### Missing MVP items
 - **[L] Audio.** Engine pitch tied to speed, water ambient, pickup chime, boost whoosh, weapon SFX, music. Library SFX as planned in product plan.
@@ -150,12 +156,17 @@ Currently only `boost` pickup works. The other planned pickups:
 | M2 | Wave water + buoyancy | ✅ |
 | M3 | Tracks + checkpoints + lap counting | ✅ |
 | M4 | AI racers | ✅ (rough cornering remains) |
-| M5 | Combat | partial — pickup boxes + boost only |
+| M5 | Combat | ✅ — boost, shield, mine, homing missile, hit reaction |
 | M6 | Polish to MVP | partial — sky/water/UI in; audio + 2nd track open |
 | M7 | Real loop track | ✅ |
 | M8 | Stadium track + spawn on loop + gate-state fix | ✅ |
 | M9 | Smoothed kb + pitch + respawn + arrow + flip recovery | ✅ |
 | M9.4 | Kinematic roll lock — pitch+steer no longer rolls the bike | ✅ |
+| M9.5 | Bank into turns + lean sign correction | ✅ |
+| M9.6 | Surface alignment (kinematic pitch + roll on the wave normal) | ✅ |
+| M9.7 | surfaceFollow per-bike stat + per-bike motion trails | ✅ |
+| M9.8 | Camera-facing ribbon trails + arrow legibility | ✅ |
+| M9.9 | M5 combat bundle (shield, mine, missile, hit reaction) | ✅ |
 
 ## File / system map
 

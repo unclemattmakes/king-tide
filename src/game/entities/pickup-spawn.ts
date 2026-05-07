@@ -8,7 +8,10 @@ import {
   type PickupType,
 } from '@/game/components/pickup'
 
-const POOL: PickupType[] = ['boost', 'boost', 'boost'] // M5: just boost. M5.5+ adds others.
+// Boost is over-represented because it's the safe baseline — the offensive
+// pickups are higher-stakes, so they should feel more like a treat than a
+// default. Tune the ratio if combat starts dominating racing.
+const POOL: PickupType[] = ['boost', 'boost', 'missile', 'mine', 'shield']
 
 export function pickRandomPickupType(): PickupType {
   return POOL[Math.floor(Math.random() * POOL.length)] ?? 'boost'

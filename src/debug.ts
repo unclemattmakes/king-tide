@@ -1,10 +1,11 @@
-import { query } from 'bitecs'
+import { addComponent, query } from 'bitecs'
 import { type Intent, snapshotGamepads } from './engine/input'
 import type { RenderBackend } from './engine/render/renderer'
 import type { SimWorld } from './engine/sim/ecs/world'
 import type { PhysicsWorld } from './engine/sim/physics/rapier'
 import { BikeTag, ControlIntentStore, RBHandleStore } from './game/components'
-import type { PickupType } from './game/components/pickup'
+import { MineTag, MissileTag, ShieldEffectStore, StunStore } from './game/components/combat'
+import { PickupSlot, PickupSlotStore, type PickupType } from './game/components/pickup'
 import { getHeldPickup } from './game/systems/pickup'
 import { computeStandings, type Standing } from './game/systems/standings'
 import type { Track } from './game/tracks/types'
@@ -50,12 +51,23 @@ export type HoverDebug = {
   playerEid(): number | null
   /** Currently-held pickup type, or null. */
   heldPickup(): PickupType | null
+  /** Set the player's held pickup directly — for deterministic e2e tests. */
+  setHeldPickup(type: PickupType | null): void
+  /** Inspect combat state on the player bike. */
+  combat(): CombatDebugSnapshot
+  /** Count of live mine + missile entities (sim-side, regardless of render). */
+  combatEntityCounts(): { mines: number; missiles: number }
   /** Enumerate every bike's transform + intent — for AI debugging. */
   bikes(): BikeDebugSnapshot[]
   /** Toggle auto-play: when on, AI controls the player bike. Returns new state. */
   toggleAutoPlay(): boolean
   /** Current auto-play state. */
   isAutoPlay(): boolean
+}
+
+export type CombatDebugSnapshot = {
+  shieldRemaining: number
+  stunRemaining: number
 }
 
 export type BikeDebugSnapshot = {
@@ -113,6 +125,29 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     standings: () => (state.ready ? computeStandings(accessors.sim(), accessors.track()) : []),
     playerEid: () => (state.ready ? accessors.playerEid() : null),
     heldPickup: () => (state.ready ? getHeldPickup(accessors.playerEid()) : null),
+    setHeldPickup: (type) => {
+      if (!state.ready) return
+      const sim = accessors.sim()
+      const eid = accessors.playerEid()
+      if (!PickupSlotStore.has(eid)) addComponent(sim, eid, PickupSlot)
+      PickupSlotStore.set(eid, { held: type })
+    },
+    combat: () => {
+      if (!state.ready) return { shieldRemaining: 0, stunRemaining: 0 }
+      const eid = accessors.playerEid()
+      return {
+        shieldRemaining: ShieldEffectStore.get(eid)?.remaining ?? 0,
+        stunRemaining: StunStore.get(eid)?.remaining ?? 0,
+      }
+    },
+    combatEntityCounts: () => {
+      if (!state.ready) return { mines: 0, missiles: 0 }
+      const sim = accessors.sim()
+      return {
+        mines: query(sim, [MineTag]).length,
+        missiles: query(sim, [MissileTag]).length,
+      }
+    },
     toggleAutoPlay: () => accessors.toggleAutoPlay(),
     isAutoPlay: () => accessors.isAutoPlay(),
     bikes: () => {
