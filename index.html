@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Hoverbike</title>
+    <style>
+      :root { color-scheme: dark; }
+      html, body { margin: 0; padding: 0; background: #000; color: #eee; font-family: ui-monospace, monospace; overflow: hidden; }
+      #app { position: fixed; inset: 0; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #hud { position: fixed; top: 8px; left: 8px; pointer-events: none; user-select: none; font-size: 12px; line-height: 1.4; opacity: 0.85; }
+      #hud .row { background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 2px; margin-bottom: 2px; display: inline-block; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud">
+      <div class="row" id="hud-fps">fps: --</div>
+      <div class="row" id="hud-backend">backend: --</div>
+      <div class="row" id="hud-input">input: --</div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

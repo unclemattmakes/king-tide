@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.vite/
+.vercel/
+*.log
+.DS_Store
+Thumbs.db
+
+# tests
+test-results/
+playwright-report/
+playwright/.cache/
+coverage/
+
+# editor
+.vscode/
+.idea/
+.claude/
+
+# blender
+tracks-src/*.blend1
+tracks-src/*.blend@
