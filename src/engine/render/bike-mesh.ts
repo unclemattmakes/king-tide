@@ -5,12 +5,12 @@ import * as THREE from 'three'
  * and a glowing underside puck (the visual "hover thrust").
  * +Z is forward to match the physics convention.
  */
-export function createBikeMesh(): THREE.Object3D {
+export function createBikeMesh(opts?: { bodyColor?: number }): THREE.Object3D {
   const root = new THREE.Group()
   root.name = 'bike'
 
   const bodyMat = new THREE.MeshStandardMaterial({
-    color: 0xff7733,
+    color: opts?.bodyColor ?? 0xff7733,
     roughness: 0.4,
     metalness: 0.2,
   })

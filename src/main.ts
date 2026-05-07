@@ -21,11 +21,16 @@ import { HoverStateStore, RBHandleStore } from './game/components'
 import { RacerStore } from './game/components/race'
 import { createArena } from './game/entities/arena'
 import { createBike } from './game/entities/bike'
+import { aiControlSystem } from './game/systems/ai-control'
 import { hoverSystem } from './game/systems/hover'
 import { applyPlayerIntent } from './game/systems/input-apply'
 import { createRaceSystem } from './game/systems/race'
+import { rubberBandSystem } from './game/systems/rubber-band'
+import { computeStandings } from './game/systems/standings'
 import { syncFromPhysics } from './game/systems/sync-from-physics'
 import { createLagoonLoop } from './game/tracks/lagoon-loop'
+
+const NUM_AI = 4
 
 async function boot() {
   const appEl = document.getElementById('app')
@@ -54,22 +59,37 @@ async function boot() {
   const trackVisuals = createTrackVisuals(track)
   scene.add(trackVisuals.group)
 
+  // Player on grid pole position; AI fanned out to either side.
+  const startPos = track.start.position
   const playerEid = createBike(sim, phys, {
-    position: track.start.position,
+    position: startPos,
     yaw: track.start.yaw,
     isPlayer: true,
     asRacer: true,
   })
 
+  const aiEids: number[] = []
+  for (let i = 0; i < NUM_AI; i++) {
+    const offsetX = (i % 2 === 0 ? -1 : 1) * (Math.floor(i / 2) + 1) * 3
+    const offsetZ = -(Math.floor(i / 2) + 1) * 1.5
+    const aiEid = createBike(sim, phys, {
+      position: { x: startPos.x + offsetX, y: startPos.y, z: startPos.z + offsetZ },
+      yaw: track.start.yaw,
+      asRacer: true,
+      ai: { splineId: 'main' },
+    })
+    aiEids.push(aiEid)
+  }
+
   const raceTick = createRaceSystem(track, {
     onCheckpoint: (eid, idx) => {
-      // Repaint gate visuals based on the new "next" pointer.
+      // Visual gate state only follows the player.
+      if (eid !== playerEid) return
       const r = RacerStore.get(eid)
       if (!r) return
       for (const cp of track.checkpoints) {
         if (cp.index === r.nextCheckpoint) trackVisuals.setCheckpointState(cp.index, 'next')
         else if (idx >= cp.index && r.lap === 1) {
-          // Crude rule: in lap 1, anything before next is "passed".
           trackVisuals.setCheckpointState(cp.index, 'passed')
         } else {
           trackVisuals.setCheckpointState(cp.index, 'upcoming')
@@ -91,7 +111,12 @@ async function boot() {
     raceSnapshot: null as RaceSnapshot | null,
   }
 
-  installDebugApi(state)
+  installDebugApi(state, {
+    sim: () => sim,
+    phys: () => phys,
+    track: () => track,
+    playerEid: () => playerEid,
+  })
   if (backendEl) backendEl.textContent = `backend: ${backend}`
 
   const tmpPos = new THREE.Vector3()
@@ -112,10 +137,12 @@ async function boot() {
     while (physAccum >= phys.fixedDt) {
       advanceWaveField(waveField, phys.fixedDt)
       applyPlayerIntent(sim, state.intent)
+      aiControlSystem(sim, phys, track)
       hoverSystem(sim, phys, waveField)
       phys.step()
       syncFromPhysics(sim, phys)
       raceTick(sim, phys, phys.fixedDt)
+      rubberBandSystem(sim, track)
       physAccum -= phys.fixedDt
     }
 
@@ -172,10 +199,12 @@ async function boot() {
       }
       if (raceEl && state.raceSnapshot) {
         const rs = state.raceSnapshot
+        const standings = computeStandings(sim, track)
+        const me = standings.find((s) => s.eid === playerEid)
         const status = rs.finished
           ? 'FINISHED'
           : `cp ${rs.nextCheckpoint + 1}/${rs.totalCheckpoints}`
-        raceEl.textContent = `lap ${rs.lap}/${rs.lapsToFinish} | ${status} | ${rs.raceTime.toFixed(1)}s`
+        raceEl.textContent = `lap ${rs.lap}/${rs.lapsToFinish} | pos ${me?.position ?? '?'}/${standings.length} | ${status} | ${rs.raceTime.toFixed(1)}s`
       }
     }
     requestAnimationFrame(frame)

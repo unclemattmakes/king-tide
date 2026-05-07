@@ -1,22 +1,21 @@
 export type Vec3 = { x: number; y: number; z: number }
 export type Quat = { x: number; y: number; z: number; w: number }
 
-/** Rotate a vector by a quaternion. q must be unit-length. */
+/**
+ * Rotate a vector by a unit quaternion.
+ * v' = v + 2 * cross(q.xyz, cross(q.xyz, v) + q.w * v)
+ * (Equivalent to v' = q * v * q^(-1).)
+ */
 export function quatRotate(q: Quat, v: Vec3): Vec3 {
-  // v' = q * v * q^-1
-  // Using the standard formula expanded for performance:
-  const x = q.x
-  const y = q.y
-  const z = q.z
-  const w = q.w
-  const ix = w * v.x + y * v.z - z * v.y
-  const iy = w * v.y + z * v.x - x * v.z
-  const iz = w * v.z + x * v.y - y * v.x
-  const iw = -x * v.x - y * v.y - z * v.z
+  // t = 2 * (q.xyz × v)
+  const tx = 2 * (q.y * v.z - q.z * v.y)
+  const ty = 2 * (q.z * v.x - q.x * v.z)
+  const tz = 2 * (q.x * v.y - q.y * v.x)
+  // v' = v + q.w * t + (q.xyz × t)
   return {
-    x: ix * w + iw * -x + iy * -z - iz * -y,
-    y: iy * w + iw * -y + iz * -x - ix * -z,
-    z: iz * w + iw * -z + ix * -y - iy * -x,
+    x: v.x + q.w * tx + (q.y * tz - q.z * ty),
+    y: v.y + q.w * ty + (q.z * tx - q.x * tz),
+    z: v.z + q.w * tz + (q.x * ty - q.y * tx),
   }
 }
 

@@ -18,6 +18,7 @@ import {
   Transform,
   TransformStore,
 } from '@/game/components'
+import { AIController, AIControllerStore, AITag, defaultAIController } from '@/game/components/ai'
 import { Racer, RacerStore } from '@/game/components/race'
 
 export type CreateBikeOpts = {
@@ -27,6 +28,8 @@ export type CreateBikeOpts = {
   isPlayer?: boolean
   /** If true, attach a Racer component for race tracking. */
   asRacer?: boolean
+  /** If set, attaches AI components and follows the named spline. */
+  ai?: { splineId: string }
 }
 
 export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOpts): number {
@@ -78,6 +81,11 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
   addComponent(sim, eid, HoverState)
   HoverStateStore.set(eid, { groundDistance: 0, isGrounded: false })
   if (opts.isPlayer) addComponent(sim, eid, PlayerTag)
+  if (opts.ai) {
+    addComponent(sim, eid, AITag)
+    addComponent(sim, eid, AIController)
+    AIControllerStore.set(eid, defaultAIController(opts.ai.splineId))
+  }
   if (opts.asRacer) {
     addComponent(sim, eid, Racer)
     RacerStore.set(eid, {

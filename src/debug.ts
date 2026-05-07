@@ -1,5 +1,11 @@
+import { query } from 'bitecs'
 import { type Intent, snapshotGamepads } from './engine/input'
 import type { RenderBackend } from './engine/render/renderer'
+import type { SimWorld } from './engine/sim/ecs/world'
+import type { PhysicsWorld } from './engine/sim/physics/rapier'
+import { BikeTag, ControlIntentStore, RBHandleStore } from './game/components'
+import { computeStandings, type Standing } from './game/systems/standings'
+import type { Track } from './game/tracks/types'
 
 /**
  * Dev-only debug API. Lets Playwright (and Claude in a Chrome session) drive
@@ -37,6 +43,25 @@ export type HoverDebug = {
   setIntentOverride(i: Intent | null): void
   player(): PlayerSnapshot | null
   race(): RaceSnapshot | null
+  standings(): Standing[]
+  /** Player ECS entity id, once boot completes. */
+  playerEid(): number | null
+  /** Enumerate every bike's transform + intent — for AI debugging. */
+  bikes(): BikeDebugSnapshot[]
+}
+
+export type BikeDebugSnapshot = {
+  eid: number
+  pos: { x: number; y: number; z: number }
+  vel: { x: number; y: number; z: number }
+  intent: Intent
+}
+
+export type DebugAccessors = {
+  sim(): SimWorld
+  phys(): PhysicsWorld
+  track(): Track
+  playerEid(): number
 }
 
 declare global {
@@ -56,7 +81,7 @@ export type DebugState = {
   raceSnapshot: RaceSnapshot | null
 }
 
-export function installDebugApi(state: DebugState): HoverDebug {
+export function installDebugApi(state: DebugState, accessors: DebugAccessors): HoverDebug {
   const api: HoverDebug = {
     get ready() {
       return state.ready
@@ -71,6 +96,37 @@ export function installDebugApi(state: DebugState): HoverDebug {
     },
     player: () => state.playerSnapshot,
     race: () => state.raceSnapshot,
+    standings: () => (state.ready ? computeStandings(accessors.sim(), accessors.track()) : []),
+    playerEid: () => (state.ready ? accessors.playerEid() : null),
+    bikes: () => {
+      if (!state.ready) return []
+      const sim = accessors.sim()
+      const phys = accessors.phys()
+      const eids = query(sim, [BikeTag])
+      const out: BikeDebugSnapshot[] = []
+      for (const eid of eids) {
+        const handle = RBHandleStore.get(eid)
+        if (!handle) continue
+        const rb = phys.world.getRigidBody(handle.handle)
+        if (!rb) continue
+        const t = rb.translation()
+        const v = rb.linvel()
+        const intent = ControlIntentStore.get(eid) ?? {
+          throttle: 0,
+          steer: 0,
+          brake: 0,
+          fire: false,
+          boost: false,
+        }
+        out.push({
+          eid,
+          pos: { x: t.x, y: t.y, z: t.z },
+          vel: { x: v.x, y: v.y, z: v.z },
+          intent: { ...intent },
+        })
+      }
+      return out
+    },
   }
   if (import.meta.env.DEV || import.meta.env.MODE === 'test') {
     window.__hover = api

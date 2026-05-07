@@ -1,11 +1,14 @@
-import { query } from 'bitecs'
+import { hasComponent, query } from 'bitecs'
 import type * as THREE from 'three'
 import type { SimWorld } from '@/engine/sim/ecs/world'
-import { BikeTag, Transform, TransformStore } from '@/game/components'
+import { BikeTag, PlayerTag, Transform, TransformStore } from '@/game/components'
 import { createBikeMesh } from './bike-mesh'
+
+const AI_BODY_COLORS = [0x33aaff, 0x44dd66, 0xcc55ff, 0xffcc33, 0xff5577]
 
 export function createBikeRenderSystem(scene: THREE.Scene, sim: SimWorld) {
   const meshes = new Map<number, THREE.Object3D>()
+  let aiColorCursor = 0
 
   return function tick(): void {
     const eids = query(sim, [BikeTag, Transform])
@@ -14,7 +17,11 @@ export function createBikeRenderSystem(scene: THREE.Scene, sim: SimWorld) {
       live.add(eid)
       let mesh = meshes.get(eid)
       if (!mesh) {
-        mesh = createBikeMesh()
+        const isPlayer = hasComponent(sim, eid, PlayerTag)
+        const color = isPlayer
+          ? 0xff7733
+          : (AI_BODY_COLORS[aiColorCursor++ % AI_BODY_COLORS.length] ?? 0xaaaaaa)
+        mesh = createBikeMesh({ bodyColor: color })
         scene.add(mesh)
         meshes.set(eid, mesh)
       }
