@@ -3,7 +3,9 @@ import { expect, test } from '@playwright/test'
 test.describe('M4 AI', () => {
   test('AI bikes spawn and move forward from spawn under their own control', async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__hover?.bikes().length > 1, { timeout: 10000 })
+    await page.waitForFunction(() => (window.__hover?.bikes().length ?? 0) > 1, {
+      timeout: 10000,
+    })
 
     const initialBikes = await page.evaluate(() => window.__hover!.bikes())
     // Player + 4 AI = 5 bikes total.
