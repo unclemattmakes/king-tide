@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { installDebugApi, type PlayerSnapshot } from './debug'
+import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug'
 import {
   emptyIntent,
   type Intent,
@@ -11,17 +11,21 @@ import { createChaseCamera } from './engine/render/camera'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
 import { createScene } from './engine/render/scene'
+import { createTrackVisuals } from './engine/render/track-mesh'
 import { createWaterMesh } from './engine/render/water'
 import { createSimWorld } from './engine/sim/ecs/world'
 import { createPhysicsWorld } from './engine/sim/physics/rapier'
 import { vecHorizontalLength } from './engine/sim/physics/vec'
 import { advanceWaveField, createWaveField, defaultWaves } from './engine/sim/water/wave-field'
 import { HoverStateStore, RBHandleStore } from './game/components'
-import { createArena, ISLAND_TOP_Y } from './game/entities/arena'
+import { RacerStore } from './game/components/race'
+import { createArena } from './game/entities/arena'
 import { createBike } from './game/entities/bike'
 import { hoverSystem } from './game/systems/hover'
 import { applyPlayerIntent } from './game/systems/input-apply'
+import { createRaceSystem } from './game/systems/race'
 import { syncFromPhysics } from './game/systems/sync-from-physics'
+import { createLagoonLoop } from './game/tracks/lagoon-loop'
 
 async function boot() {
   const appEl = document.getElementById('app')
@@ -30,6 +34,7 @@ async function boot() {
   const fpsEl = document.getElementById('hud-fps')
   const backendEl = document.getElementById('hud-backend')
   const inputEl = document.getElementById('hud-input')
+  const raceEl = document.getElementById('hud-race')
 
   installInput()
 
@@ -39,15 +44,38 @@ async function boot() {
   const sim = createSimWorld()
   const chase = createChaseCamera(camera)
 
-  // Water field — sim-side state, sampled by buoyancy + water shader.
   const waveField = createWaveField(defaultWaves())
   const waterMesh = createWaterMesh(waveField, { size: 800, subdivisions: 96 })
   scene.add(waterMesh.mesh)
 
   createArena(phys)
+
+  const track = createLagoonLoop()
+  const trackVisuals = createTrackVisuals(track)
+  scene.add(trackVisuals.group)
+
   const playerEid = createBike(sim, phys, {
-    position: { x: 0, y: ISLAND_TOP_Y + 2, z: 0 },
+    position: track.start.position,
+    yaw: track.start.yaw,
     isPlayer: true,
+    asRacer: true,
+  })
+
+  const raceTick = createRaceSystem(track, {
+    onCheckpoint: (eid, idx) => {
+      // Repaint gate visuals based on the new "next" pointer.
+      const r = RacerStore.get(eid)
+      if (!r) return
+      for (const cp of track.checkpoints) {
+        if (cp.index === r.nextCheckpoint) trackVisuals.setCheckpointState(cp.index, 'next')
+        else if (idx >= cp.index && r.lap === 1) {
+          // Crude rule: in lap 1, anything before next is "passed".
+          trackVisuals.setCheckpointState(cp.index, 'passed')
+        } else {
+          trackVisuals.setCheckpointState(cp.index, 'upcoming')
+        }
+      }
+    },
   })
 
   const bikeRender = createBikeRenderSystem(scene, sim)
@@ -60,6 +88,7 @@ async function boot() {
     intent: emptyIntent() as Intent,
     intentOverride: null as Intent | null,
     playerSnapshot: null as PlayerSnapshot | null,
+    raceSnapshot: null as RaceSnapshot | null,
   }
 
   installDebugApi(state)
@@ -86,6 +115,7 @@ async function boot() {
       hoverSystem(sim, phys, waveField)
       phys.step()
       syncFromPhysics(sim, phys)
+      raceTick(sim, phys, phys.fixedDt)
       physAccum -= phys.fixedDt
     }
 
@@ -111,6 +141,19 @@ async function boot() {
       }
     }
 
+    const racer = RacerStore.get(playerEid)
+    if (racer) {
+      state.raceSnapshot = {
+        lap: racer.lap,
+        lapsToFinish: track.lapsToFinish,
+        nextCheckpoint: racer.nextCheckpoint,
+        checkpointsCrossed: racer.checkpointsCrossed,
+        totalCheckpoints: track.checkpoints.length,
+        finished: racer.finished,
+        raceTime: racer.raceTime,
+      }
+    }
+
     waterMesh.tick()
     bikeRender()
     renderer.render(scene, camera)
@@ -126,6 +169,13 @@ async function boot() {
         const i = state.intent
         const speed = state.playerSnapshot?.speed ?? 0
         inputEl.textContent = `${inputSourceLabel()} | thr ${i.throttle.toFixed(2)} steer ${i.steer.toFixed(2)} | ${speed.toFixed(1)} m/s`
+      }
+      if (raceEl && state.raceSnapshot) {
+        const rs = state.raceSnapshot
+        const status = rs.finished
+          ? 'FINISHED'
+          : `cp ${rs.nextCheckpoint + 1}/${rs.totalCheckpoints}`
+        raceEl.textContent = `lap ${rs.lap}/${rs.lapsToFinish} | ${status} | ${rs.raceTime.toFixed(1)}s`
       }
     }
     requestAnimationFrame(frame)

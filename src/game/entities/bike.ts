@@ -18,18 +18,32 @@ import {
   Transform,
   TransformStore,
 } from '@/game/components'
+import { Racer, RacerStore } from '@/game/components/race'
 
 export type CreateBikeOpts = {
   position: Vec3
+  /** Yaw in radians (0 = facing +Z). */
+  yaw?: number
   isPlayer?: boolean
+  /** If true, attach a Racer component for race tracking. */
+  asRacer?: boolean
 }
 
 export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOpts): number {
   const eid = addEntity(sim)
   const stats = defaultBikeStats()
 
+  const yaw = opts.yaw ?? 0
+  const halfYaw = yaw / 2
+  const startQuat = {
+    x: 0,
+    y: Math.sin(halfYaw),
+    z: 0,
+    w: Math.cos(halfYaw),
+  }
   const rbDesc = phys.rapier.RigidBodyDesc.dynamic()
     .setTranslation(opts.position.x, opts.position.y, opts.position.z)
+    .setRotation(startQuat)
     .setLinearDamping(0.05)
     .setAngularDamping(2.5)
   const rb = phys.world.createRigidBody(rbDesc)
@@ -52,10 +66,10 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
     x: opts.position.x,
     y: opts.position.y,
     z: opts.position.z,
-    qx: 0,
-    qy: 0,
-    qz: 0,
-    qw: 1,
+    qx: startQuat.x,
+    qy: startQuat.y,
+    qz: startQuat.z,
+    qw: startQuat.w,
   })
   addComponent(sim, eid, BikeStats)
   BikeStatsStore.set(eid, stats)
@@ -64,6 +78,16 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
   addComponent(sim, eid, HoverState)
   HoverStateStore.set(eid, { groundDistance: 0, isGrounded: false })
   if (opts.isPlayer) addComponent(sim, eid, PlayerTag)
+  if (opts.asRacer) {
+    addComponent(sim, eid, Racer)
+    RacerStore.set(eid, {
+      lap: 1,
+      nextCheckpoint: 0,
+      checkpointsCrossed: 0,
+      finished: false,
+      raceTime: 0,
+    })
+  }
 
   return eid
 }

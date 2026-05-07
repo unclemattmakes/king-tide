@@ -14,7 +14,17 @@ export type PlayerSnapshot = {
   velocity: { x: number; y: number; z: number }
   groundDistance: number
   isGrounded: boolean
-  speed: number // horizontal m/s
+  speed: number
+}
+
+export type RaceSnapshot = {
+  lap: number
+  lapsToFinish: number
+  nextCheckpoint: number
+  checkpointsCrossed: number
+  totalCheckpoints: number
+  finished: boolean
+  raceTime: number
 }
 
 export type HoverDebug = {
@@ -26,6 +36,7 @@ export type HoverDebug = {
   intent(): Intent
   setIntentOverride(i: Intent | null): void
   player(): PlayerSnapshot | null
+  race(): RaceSnapshot | null
 }
 
 declare global {
@@ -42,6 +53,7 @@ export type DebugState = {
   intent: Intent
   intentOverride: Intent | null
   playerSnapshot: PlayerSnapshot | null
+  raceSnapshot: RaceSnapshot | null
 }
 
 export function installDebugApi(state: DebugState): HoverDebug {
@@ -58,6 +70,7 @@ export function installDebugApi(state: DebugState): HoverDebug {
       state.intentOverride = i
     },
     player: () => state.playerSnapshot,
+    race: () => state.raceSnapshot,
   }
   if (import.meta.env.DEV || import.meta.env.MODE === 'test') {
     window.__hover = api
