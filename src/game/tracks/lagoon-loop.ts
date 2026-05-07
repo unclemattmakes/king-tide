@@ -95,7 +95,14 @@ export function createLagoonLoop(): Track {
     lapsToFinish: 3,
     checkpoints,
     surfaces: [],
-    pickupSpawns: [],
+    pickupSpawns: [
+      { x: 0, y: 1.8, z: 28 }, // right after the start line (player's first pickup)
+      { x: 30, y: 1.8, z: 60 }, // between cp 0 and cp 1, on the right
+      { x: 60, y: 1.8, z: 0 }, // halfway along cp 2 → cp 3
+      { x: 0, y: 1.8, z: -40 }, // along cp 3 → cp 4
+      { x: -60, y: 1.8, z: 0 }, // halfway along cp 4 → cp 5
+      { x: -30, y: 1.8, z: 60 }, // between cp 5 and cp 0, on the left
+    ],
     aiSplines: [{ id: 'main', points: aiPoints }],
   }
 }

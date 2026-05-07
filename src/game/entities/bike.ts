@@ -19,6 +19,7 @@ import {
   TransformStore,
 } from '@/game/components'
 import { AIController, AIControllerStore, AITag, defaultAIController } from '@/game/components/ai'
+import { PickupSlot, PickupSlotStore } from '@/game/components/pickup'
 import { Racer, RacerStore } from '@/game/components/race'
 
 export type CreateBikeOpts = {
@@ -80,6 +81,10 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
   ControlIntentStore.set(eid, emptyIntent())
   addComponent(sim, eid, HoverState)
   HoverStateStore.set(eid, { groundDistance: 0, isGrounded: false })
+  // Every bike has a pickup slot.
+  addComponent(sim, eid, PickupSlot)
+  PickupSlotStore.set(eid, { held: null })
+
   if (opts.isPlayer) addComponent(sim, eid, PlayerTag)
   if (opts.ai) {
     addComponent(sim, eid, AITag)

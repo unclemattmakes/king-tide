@@ -83,14 +83,13 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
     // atan2(lateral, forward): 0 = ahead, ±π/2 = sides, ±π = behind.
     const angle = Math.atan2(localX, localZ)
 
-    // PD steering. Convention (from hover.ts): positive steer applies negative Y
-    // torque, which decreases angvel.y. So positive steer drives angvel.y down.
-    // To damp existing rotation, we want steer to follow angvel.y in sign:
-    //   angvel.y very negative (spinning right hard) → steer pushes negative
-    //   to slow it; steer = angvel.y * KD (no extra sign flip).
+    // PD steering. Convention (from hover.ts): positive steer = right turn,
+    // which produces positive Y torque, which increases angvel.y.
+    // To damp existing rotation, steer should oppose current angvel.y:
+    //   angvel.y > 0 (already spinning right) → steer should reduce → damp = -angvel.y * KD.
     const KP = 1.4
     const KD = 0.25
-    const damp = angvel.y * KD
+    const damp = -angvel.y * KD
     let steer = angle * KP + damp
     steer = Math.max(-1, Math.min(1, steer))
 

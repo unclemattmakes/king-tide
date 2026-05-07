@@ -4,6 +4,8 @@ import type { RenderBackend } from './engine/render/renderer'
 import type { SimWorld } from './engine/sim/ecs/world'
 import type { PhysicsWorld } from './engine/sim/physics/rapier'
 import { BikeTag, ControlIntentStore, RBHandleStore } from './game/components'
+import type { PickupType } from './game/components/pickup'
+import { getHeldPickup } from './game/systems/pickup'
 import { computeStandings, type Standing } from './game/systems/standings'
 import type { Track } from './game/tracks/types'
 
@@ -46,6 +48,8 @@ export type HoverDebug = {
   standings(): Standing[]
   /** Player ECS entity id, once boot completes. */
   playerEid(): number | null
+  /** Currently-held pickup type, or null. */
+  heldPickup(): PickupType | null
   /** Enumerate every bike's transform + intent — for AI debugging. */
   bikes(): BikeDebugSnapshot[]
 }
@@ -98,6 +102,7 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     race: () => state.raceSnapshot,
     standings: () => (state.ready ? computeStandings(accessors.sim(), accessors.track()) : []),
     playerEid: () => (state.ready ? accessors.playerEid() : null),
+    heldPickup: () => (state.ready ? getHeldPickup(accessors.playerEid()) : null),
     bikes: () => {
       if (!state.ready) return []
       const sim = accessors.sim()

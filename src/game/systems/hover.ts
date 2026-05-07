@@ -14,6 +14,7 @@ import {
   RBHandle,
   RBHandleStore,
 } from '@/game/components'
+import { getCurrentBoostMultiplier } from '@/game/systems/pickup'
 
 const MAX_HOVER_PROBE = 6
 const GRAVITY = 25 // must match PhysicsWorld gravity magnitude
@@ -101,15 +102,20 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const direction = throttle >= 0 ? 1 : -1
     const scale = throttle >= 0 ? 1 : stats.reverseScale
     const speedFalloff = Math.max(0, 1 - speed / stats.topSpeed)
-    const boost = intent.boost ? stats.boostMul : 1
+    const heldBoost = intent.boost ? stats.boostMul : 1
+    const pickupBoost = getCurrentBoostMultiplier(eid)
+    const boost = heldBoost * pickupBoost
     const surfaceMul = probe.isWater ? 0.85 : 1.0
     const aThrust =
       Math.abs(throttle) * stats.accel * scale * speedFalloff * boost * direction * surfaceMul
     rb.applyImpulse({ x: fwd.x * aThrust * m * dt, y: 0, z: fwd.z * aThrust * m * dt }, true)
 
-    // Yaw torque — a hair more responsive on water for skim feel.
+    // Yaw torque. Convention: positive steer = right turn.
+    // Empirically (with the corrected quatRotate), +Y torque rotates the bike
+    // toward -X when facing +Z — that's a *right* turn from the rider's POV.
+    // So positive steer maps to positive Y torque.
     const turnMul = probe.isWater ? 1.1 : 1.0
-    const aTurn = -intent.steer * stats.turnTorque * turnMul
+    const aTurn = intent.steer * stats.turnTorque * turnMul
     rb.applyTorqueImpulse({ x: 0, y: aTurn * m * dt, z: 0 }, true)
 
     // Lateral drag — water has *more* lateral resistance (skis don't slide sideways easily).

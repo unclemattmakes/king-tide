@@ -8,6 +8,7 @@ import {
   readPlayerIntent,
 } from './engine/input'
 import { createChaseCamera } from './engine/render/camera'
+import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
 import { createScene } from './engine/render/scene'
@@ -21,9 +22,16 @@ import { HoverStateStore, RBHandleStore } from './game/components'
 import { RacerStore } from './game/components/race'
 import { createArena } from './game/entities/arena'
 import { createBike } from './game/entities/bike'
+import { createPickupSpawn } from './game/entities/pickup-spawn'
 import { aiControlSystem } from './game/systems/ai-control'
 import { hoverSystem } from './game/systems/hover'
 import { applyPlayerIntent } from './game/systems/input-apply'
+import {
+  boostTickSystem,
+  getHeldPickup,
+  pickupSystem,
+  pickupUseSystem,
+} from './game/systems/pickup'
 import { createRaceSystem } from './game/systems/race'
 import { rubberBandSystem } from './game/systems/rubber-band'
 import { computeStandings } from './game/systems/standings'
@@ -59,7 +67,11 @@ async function boot() {
   const trackVisuals = createTrackVisuals(track)
   scene.add(trackVisuals.group)
 
-  // Player on grid pole position; AI fanned out to either side.
+  // Pickup spawns from track.
+  for (let i = 0; i < track.pickupSpawns.length; i++) {
+    createPickupSpawn(sim, track.pickupSpawns[i]!, i)
+  }
+
   const startPos = track.start.position
   const playerEid = createBike(sim, phys, {
     position: startPos,
@@ -70,8 +82,12 @@ async function boot() {
 
   const aiEids: number[] = []
   for (let i = 0; i < NUM_AI; i++) {
-    const offsetX = (i % 2 === 0 ? -1 : 1) * (Math.floor(i / 2) + 1) * 3
-    const offsetZ = -(Math.floor(i / 2) + 1) * 1.5
+    // Stagger 2 rows of 2 BEHIND the player so initial physics jostling doesn't
+    // push the player off the line.
+    const row = Math.floor(i / 2)
+    const col = i % 2
+    const offsetX = (col === 0 ? -1 : 1) * 3
+    const offsetZ = -(row + 1) * 4 - 4 // 4..12m behind, increasing per row
     const aiEid = createBike(sim, phys, {
       position: { x: startPos.x + offsetX, y: startPos.y, z: startPos.z + offsetZ },
       yaw: track.start.yaw,
@@ -83,7 +99,6 @@ async function boot() {
 
   const raceTick = createRaceSystem(track, {
     onCheckpoint: (eid, idx) => {
-      // Visual gate state only follows the player.
       if (eid !== playerEid) return
       const r = RacerStore.get(eid)
       if (!r) return
@@ -99,6 +114,7 @@ async function boot() {
   })
 
   const bikeRender = createBikeRenderSystem(scene, sim)
+  const pickupRender = createPickupRenderSystem(scene, sim)
 
   const state = {
     ready: false,
@@ -142,6 +158,9 @@ async function boot() {
       phys.step()
       syncFromPhysics(sim, phys)
       raceTick(sim, phys, phys.fixedDt)
+      pickupSystem(sim, phys, phys.fixedDt)
+      pickupUseSystem(sim, phys)
+      boostTickSystem(sim, phys.fixedDt)
       rubberBandSystem(sim, track)
       physAccum -= phys.fixedDt
     }
@@ -183,6 +202,7 @@ async function boot() {
 
     waterMesh.tick()
     bikeRender()
+    pickupRender(dt)
     renderer.render(scene, camera)
 
     state.frame += 1
@@ -195,7 +215,8 @@ async function boot() {
       if (inputEl) {
         const i = state.intent
         const speed = state.playerSnapshot?.speed ?? 0
-        inputEl.textContent = `${inputSourceLabel()} | thr ${i.throttle.toFixed(2)} steer ${i.steer.toFixed(2)} | ${speed.toFixed(1)} m/s`
+        const held = getHeldPickup(playerEid) ?? '—'
+        inputEl.textContent = `${inputSourceLabel()} | thr ${i.throttle.toFixed(2)} steer ${i.steer.toFixed(2)} | ${speed.toFixed(1)} m/s | item: ${held}`
       }
       if (raceEl && state.raceSnapshot) {
         const rs = state.raceSnapshot
