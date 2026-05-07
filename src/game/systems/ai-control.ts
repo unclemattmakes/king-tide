@@ -88,15 +88,17 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
     const localZ = dirX * fwd.x + dirZ * fwd.z
     const angle = Math.atan2(localX, localZ)
 
-    // 5. PD steering. Convention (per hover.ts): positive steer = right turn
-    //    = NEGATIVE Y torque → eventually negative angvel.y. To damp existing
-    //    rotation (slow it as it goes), steer should follow angvel.y in sign:
-    //    angvel.y very negative (already turning right hard) → damp negative
-    //    → steer reduced. So damp = angvel.y * KD (no extra negation).
-    const KP = 1.6
-    const KD = 0.3
+    // 5. PD steering.
+    // Empirically (verified by e2e auto-play trajectory): with hover.ts's
+    // `aTurn = -intent.steer`, *positive* steer rotates the bike's forward from
+    // +Z toward -X — what the player perceives as a "right turn" via the chase
+    // cam (the world rotates right under them). For the AI to drive toward a
+    // target at +localX (right of the bike), it must therefore command a
+    // *negative* steer. Hence the angle sign flip below.
+    const KP = 0.85
+    const KD = 0.45
     const damp = angvel.y * KD
-    let steer = angle * KP + damp
+    let steer = -angle * KP + damp
     steer = Math.max(-1, Math.min(1, steer))
 
     // 6. Throttle scales down with angle. Brake into very sharp turns at speed.
@@ -104,8 +106,9 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
     const throttleScale = Math.max(0.4, 1 - angleAbs / Math.PI)
     const throttle = ai.topSpeedFactor * throttleScale
 
-    // Brake when we're going fast AND the angle ahead is sharp.
-    const brake = angleAbs > 0.6 && speedHoriz > 18 ? Math.min(1, (angleAbs - 0.6) * 1.5) : 0
+    // Brake when we're going fast AND the angle ahead is genuinely sharp.
+    // Gentle threshold so we don't slam brakes on every bend.
+    const brake = angleAbs > 1.0 && speedHoriz > 24 ? Math.min(0.8, (angleAbs - 1.0) * 1.2) : 0
 
     AIControllerStore.set(eid, { ...ai, lastClosestIndex: bestIdx })
     ControlIntentStore.set(eid, {

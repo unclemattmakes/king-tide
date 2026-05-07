@@ -7,6 +7,7 @@ import {
   installInput,
   readPlayerIntent,
 } from './engine/input'
+import { installCameraLookInput, tickCameraLook } from './engine/input/camera-look'
 import { createChaseCamera } from './engine/render/camera'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createBikeRenderSystem } from './engine/render/render-systems'
@@ -57,6 +58,7 @@ async function boot() {
   const finishTime = document.getElementById('finish-time')
 
   installInput()
+  installCameraLookInput()
 
   const { renderer, backend } = await createRenderer(appEl)
   const { scene, camera } = createScene()
@@ -218,6 +220,8 @@ async function boot() {
         const q = playerRb.rotation()
         tmpPos.set(t.x, t.y, t.z)
         tmpQuat.set(q.x, q.y, q.z, q.w)
+        const look = tickCameraLook(dt)
+        chase.setOrbit(look.yaw, look.pitch)
         chase.tick(tmpPos, tmpQuat, dt)
         state.playerSnapshot = {
           eid: playerEid,

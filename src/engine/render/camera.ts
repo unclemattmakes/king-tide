@@ -1,33 +1,56 @@
 import * as THREE from 'three'
 
 /**
- * Spring-damped chase camera. Sits behind+above the target in the target's
- * local space, looks slightly ahead of it. Smooths to its goal each frame.
+ * Spring-damped chase camera with optional orbit. Sits behind+above the
+ * target in target-local space; orbit yaw/pitch lets the player look around
+ * by dragging the mouse or pushing the right stick.
  */
 export type ChaseCamera = {
   tick(targetPos: THREE.Vector3, targetQuat: THREE.Quaternion, dt: number): void
   /** Snap immediately to the goal — useful on respawn. */
   snap(targetPos: THREE.Vector3, targetQuat: THREE.Quaternion): void
+  /** Set orbit target (radians). Camera will smoothly converge there. */
+  setOrbit(yaw: number, pitch: number): void
 }
 
 export function createChaseCamera(camera: THREE.PerspectiveCamera): ChaseCamera {
-  // Local-space offsets relative to the bike's orientation.
   const idealOffset = new THREE.Vector3(0, 3.0, -7.5)
   const idealLookAhead = new THREE.Vector3(0, 0.5, 6)
-  const damping = 6 // higher = stiffer
+  const damping = 6
+  const orbitDamping = 10
 
   const goalPos = new THREE.Vector3()
   const goalLook = new THREE.Vector3()
   const currentLook = new THREE.Vector3()
   let initialized = false
 
+  let orbitYawTarget = 0
+  let orbitPitchTarget = 0
+  let orbitYaw = 0
+  let orbitPitch = 0
+
+  const tmpEuler = new THREE.Euler(0, 0, 0, 'YXZ')
+  const tmpOffset = new THREE.Vector3()
+
   function compute(targetPos: THREE.Vector3, targetQuat: THREE.Quaternion) {
-    goalPos.copy(idealOffset).applyQuaternion(targetQuat).add(targetPos)
+    tmpEuler.set(orbitPitch, orbitYaw, 0, 'YXZ')
+    tmpOffset.copy(idealOffset).applyEuler(tmpEuler).applyQuaternion(targetQuat)
+    goalPos.copy(tmpOffset).add(targetPos)
     goalLook.copy(idealLookAhead).applyQuaternion(targetQuat).add(targetPos)
   }
 
   return {
+    setOrbit(yaw, pitch) {
+      orbitYawTarget = yaw
+      // Clamp pitch to a sane range — slight downward / mild upward.
+      orbitPitchTarget = Math.max(-Math.PI / 3, Math.min(Math.PI / 5, pitch))
+    },
     tick(targetPos, targetQuat, dt) {
+      // Lerp orbit toward target.
+      const ot = 1 - Math.exp(-dt * orbitDamping)
+      orbitYaw += (orbitYawTarget - orbitYaw) * ot
+      orbitPitch += (orbitPitchTarget - orbitPitch) * ot
+
       compute(targetPos, targetQuat)
       if (!initialized) {
         camera.position.copy(goalPos)
