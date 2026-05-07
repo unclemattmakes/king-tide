@@ -1,55 +1,45 @@
 import * as THREE from 'three'
 
 /**
- * M0 placeholder scene: a checkered floor + skydome + slowly rotating cube
- * to prove the render loop is alive.
+ * M1 scene: lighting, sky, and a flat ground that visually matches the
+ * physics ground collider. The bike mesh is added separately by the bike
+ * render system.
  */
-export function createPlaceholderScene(): {
+export function createScene(): {
   scene: THREE.Scene
   camera: THREE.PerspectiveCamera
-  tick: (dt: number) => void
 } {
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x12161c)
-  scene.fog = new THREE.Fog(0x12161c, 50, 250)
+  scene.fog = new THREE.Fog(0x12161c, 80, 400)
 
-  const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000)
-  camera.position.set(6, 4, 10)
+  const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 1000)
+  camera.position.set(0, 4, -10)
   camera.lookAt(0, 1, 0)
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight
     camera.updateProjectionMatrix()
   })
 
-  const hemi = new THREE.HemisphereLight(0xbbddff, 0x223040, 0.7)
-  scene.add(hemi)
+  // Lighting
+  scene.add(new THREE.HemisphereLight(0xbbddff, 0x223040, 0.8))
   const sun = new THREE.DirectionalLight(0xffeecc, 1.0)
-  sun.position.set(20, 30, 10)
+  sun.position.set(40, 60, 20)
   scene.add(sun)
 
-  // Checkered floor — stand-in for "ground"
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(200, 200, 1, 1),
-    new THREE.MeshStandardMaterial({ color: 0x445566, roughness: 0.9 }),
+  // Ground (matches Rapier static cuboid at y=-0.5..0)
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(1000, 1000),
+    new THREE.MeshStandardMaterial({ color: 0x3a4654, roughness: 0.95 }),
   )
-  floor.rotation.x = -Math.PI / 2
-  scene.add(floor)
-  const grid = new THREE.GridHelper(200, 40, 0x66aaff, 0x334455)
+  ground.rotation.x = -Math.PI / 2
+  ground.position.y = 0
+  scene.add(ground)
+
+  // Reference grid so motion is readable
+  const grid = new THREE.GridHelper(800, 80, 0x66aaff, 0x33445a)
   grid.position.y = 0.01
   scene.add(grid)
 
-  // Spinning cube — proves frames are advancing
-  const cube = new THREE.Mesh(
-    new THREE.BoxGeometry(1.5, 1.5, 1.5),
-    new THREE.MeshStandardMaterial({ color: 0xff7733, roughness: 0.4 }),
-  )
-  cube.position.set(0, 1.5, 0)
-  scene.add(cube)
-
-  const tick = (dt: number) => {
-    cube.rotation.y += dt * 0.6
-    cube.rotation.x += dt * 0.3
-  }
-
-  return { scene, camera, tick }
+  return { scene, camera }
 }

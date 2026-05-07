@@ -1,4 +1,5 @@
-import { installDebugApi } from './debug'
+import * as THREE from 'three'
+import { installDebugApi, type PlayerSnapshot } from './debug'
 import {
   emptyIntent,
   type Intent,
@@ -6,9 +7,18 @@ import {
   installInput,
   readPlayerIntent,
 } from './engine/input'
+import { createChaseCamera } from './engine/render/camera'
+import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
-import { createPlaceholderScene } from './engine/render/scene'
+import { createScene } from './engine/render/scene'
 import { createSimWorld } from './engine/sim/ecs/world'
+import { createPhysicsWorld } from './engine/sim/physics/rapier'
+import { vecHorizontalLength } from './engine/sim/physics/vec'
+import { HoverStateStore, RBHandleStore } from './game/components'
+import { createBike, createGround } from './game/entities/bike'
+import { hoverSystem } from './game/systems/hover'
+import { applyPlayerIntent } from './game/systems/input-apply'
+import { syncFromPhysics } from './game/systems/sync-from-physics'
 
 async function boot() {
   const appEl = document.getElementById('app')
@@ -21,10 +31,18 @@ async function boot() {
   installInput()
 
   const { renderer, backend } = await createRenderer(appEl)
-  const { scene, camera, tick } = createPlaceholderScene()
+  const { scene, camera } = createScene()
+  const phys = await createPhysicsWorld()
+  const sim = createSimWorld()
+  const chase = createChaseCamera(camera)
 
-  // Sim world (M0: empty — exists to prove the seam works)
-  const _world = createSimWorld()
+  createGround(phys)
+  const playerEid = createBike(sim, phys, {
+    position: { x: 0, y: 2, z: 0 },
+    isPlayer: true,
+  })
+
+  const bikeRender = createBikeRenderSystem(scene, sim)
 
   const state = {
     ready: false,
@@ -33,21 +51,58 @@ async function boot() {
     frame: 0,
     intent: emptyIntent() as Intent,
     intentOverride: null as Intent | null,
+    playerSnapshot: null as PlayerSnapshot | null,
   }
 
   installDebugApi(state)
   if (backendEl) backendEl.textContent = `backend: ${backend}`
 
+  const tmpPos = new THREE.Vector3()
+  const tmpQuat = new THREE.Quaternion()
+
   let last = performance.now()
+  let physAccum = 0
   let framesThisSecond = 0
   let fpsAccumStart = last
 
   function frame(now: number) {
-    const dt = Math.min((now - last) / 1000, 1 / 30) // clamp huge stalls
+    const dt = Math.min((now - last) / 1000, 1 / 15)
     last = now
 
     state.intent = state.intentOverride ?? readPlayerIntent()
-    tick(dt)
+
+    physAccum += dt
+    while (physAccum >= phys.fixedDt) {
+      applyPlayerIntent(sim, state.intent)
+      hoverSystem(sim, phys)
+      phys.step()
+      syncFromPhysics(sim, phys)
+      physAccum -= phys.fixedDt
+    }
+
+    const rbHandle = RBHandleStore.get(playerEid)
+    const hover = HoverStateStore.get(playerEid)
+    if (rbHandle && hover) {
+      const playerRb = phys.world.getRigidBody(rbHandle.handle)
+      if (playerRb) {
+        const t = playerRb.translation()
+        const v = playerRb.linvel()
+        const q = playerRb.rotation()
+        tmpPos.set(t.x, t.y, t.z)
+        tmpQuat.set(q.x, q.y, q.z, q.w)
+        chase.tick(tmpPos, tmpQuat, dt)
+        state.playerSnapshot = {
+          eid: playerEid,
+          position: { x: t.x, y: t.y, z: t.z },
+          velocity: { x: v.x, y: v.y, z: v.z },
+          groundDistance: hover.groundDistance,
+          isGrounded: hover.isGrounded,
+          speed: vecHorizontalLength({ x: v.x, y: 0, z: v.z }),
+        }
+      }
+    }
+
+    bikeRender()
     renderer.render(scene, camera)
 
     state.frame += 1
@@ -59,7 +114,8 @@ async function boot() {
       if (fpsEl) fpsEl.textContent = `fps: ${state.fps.toFixed(0)}`
       if (inputEl) {
         const i = state.intent
-        inputEl.textContent = `${inputSourceLabel()} | thr ${i.throttle.toFixed(2)} steer ${i.steer.toFixed(2)}`
+        const speed = state.playerSnapshot?.speed ?? 0
+        inputEl.textContent = `${inputSourceLabel()} | thr ${i.throttle.toFixed(2)} steer ${i.steer.toFixed(2)} | ${speed.toFixed(1)} m/s`
       }
     }
     requestAnimationFrame(frame)

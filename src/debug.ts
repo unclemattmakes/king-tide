@@ -2,21 +2,30 @@ import { type Intent, snapshotGamepads } from './engine/input'
 import type { RenderBackend } from './engine/render/renderer'
 
 /**
- * Dev-only debug API. Lets Playwright (and Claude in a Chrome session) drive the game
- * programmatically: query state, push synthetic input, etc.
+ * Dev-only debug API. Lets Playwright (and Claude in a Chrome session) drive
+ * the game programmatically: query state, push synthetic input, etc.
  *
- * Grows with each milestone. M0 surface is intentionally minimal.
+ * Grows with each milestone.
  */
+export type PlayerSnapshot = {
+  /** ECS entity id of the player bike, or null if not yet spawned. */
+  eid: number | null
+  position: { x: number; y: number; z: number }
+  velocity: { x: number; y: number; z: number }
+  groundDistance: number
+  isGrounded: boolean
+  speed: number // horizontal m/s
+}
+
 export type HoverDebug = {
   ready: boolean
   backend(): RenderBackend
   fps(): number
   frame(): number
   gamepads(): ReturnType<typeof snapshotGamepads>
-  /** Last intent observed by the input system. */
   intent(): Intent
-  /** Force an intent for testing. Set to null to release. */
   setIntentOverride(i: Intent | null): void
+  player(): PlayerSnapshot | null
 }
 
 declare global {
@@ -25,16 +34,17 @@ declare global {
   }
 }
 
-type Mut = {
+export type DebugState = {
   ready: boolean
   backend: RenderBackend
   fps: number
   frame: number
   intent: Intent
   intentOverride: Intent | null
+  playerSnapshot: PlayerSnapshot | null
 }
 
-export function installDebugApi(state: Mut): HoverDebug {
+export function installDebugApi(state: DebugState): HoverDebug {
   const api: HoverDebug = {
     get ready() {
       return state.ready
@@ -47,6 +57,7 @@ export function installDebugApi(state: Mut): HoverDebug {
     setIntentOverride: (i) => {
       state.intentOverride = i
     },
+    player: () => state.playerSnapshot,
   }
   if (import.meta.env.DEV || import.meta.env.MODE === 'test') {
     window.__hover = api
