@@ -52,6 +52,10 @@ export type HoverDebug = {
   heldPickup(): PickupType | null
   /** Enumerate every bike's transform + intent — for AI debugging. */
   bikes(): BikeDebugSnapshot[]
+  /** Toggle auto-play: when on, AI controls the player bike. Returns new state. */
+  toggleAutoPlay(): boolean
+  /** Current auto-play state. */
+  isAutoPlay(): boolean
 }
 
 export type BikeDebugSnapshot = {
@@ -66,6 +70,8 @@ export type DebugAccessors = {
   phys(): PhysicsWorld
   track(): Track
   playerEid(): number
+  toggleAutoPlay(): boolean
+  isAutoPlay(): boolean
 }
 
 declare global {
@@ -103,6 +109,8 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     standings: () => (state.ready ? computeStandings(accessors.sim(), accessors.track()) : []),
     playerEid: () => (state.ready ? accessors.playerEid() : null),
     heldPickup: () => (state.ready ? getHeldPickup(accessors.playerEid()) : null),
+    toggleAutoPlay: () => accessors.toggleAutoPlay(),
+    isAutoPlay: () => accessors.isAutoPlay(),
     bikes: () => {
       if (!state.ready) return []
       const sim = accessors.sim()

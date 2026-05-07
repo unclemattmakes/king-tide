@@ -23,6 +23,8 @@ import { RacerStore } from './game/components/race'
 import { createArena } from './game/entities/arena'
 import { createBike } from './game/entities/bike'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
+import { addComponent, hasComponent, removeComponent } from 'bitecs'
+import { AIController, AIControllerStore, AITag, defaultAIController } from './game/components/ai'
 import { aiControlSystem } from './game/systems/ai-control'
 import { hoverSystem } from './game/systems/hover'
 import { applyPlayerIntent } from './game/systems/input-apply'
@@ -137,15 +139,40 @@ async function boot() {
     phys: () => phys,
     track: () => track,
     playerEid: () => playerEid,
+    toggleAutoPlay: () => {
+      setAutoPlay(!autoPlay)
+      return autoPlay
+    },
+    isAutoPlay: () => autoPlay,
   })
   if (backendEl) backendEl.textContent = `backend: ${backend}`
   if (finishSub) finishSub.textContent = track.name
 
   let finishShown = false
-  // Press R to reload a fresh race once finished.
+  let autoPlay = false
+
+  /** Attach/detach AITag on the player. When attached, ai-control-system
+   *  drives the player's ControlIntent (overwriting applyPlayerIntent's write
+   *  because aiControlSystem runs after it). */
+  function setAutoPlay(on: boolean) {
+    autoPlay = on
+    if (on) {
+      if (!hasComponent(sim, playerEid, AITag)) {
+        addComponent(sim, playerEid, AITag)
+        addComponent(sim, playerEid, AIController)
+        AIControllerStore.set(playerEid, defaultAIController('main'))
+      }
+    } else if (hasComponent(sim, playerEid, AITag)) {
+      removeComponent(sim, playerEid, AITag)
+    }
+  }
+
+  // Keys: R to restart after finish; T (or F1) to toggle auto-play.
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyR' && finishShown) {
       window.location.reload()
+    } else if (e.code === 'KeyT' || e.code === 'F1') {
+      setAutoPlay(!autoPlay)
     }
   })
 
@@ -166,7 +193,9 @@ async function boot() {
     physAccum += dt
     while (physAccum >= phys.fixedDt) {
       advanceWaveField(waveField, phys.fixedDt)
-      applyPlayerIntent(sim, state.intent)
+      // Player intent first; AI runs after and overwrites for entities tagged
+      // AITag (which now includes the player while auto-play is on).
+      if (!autoPlay) applyPlayerIntent(sim, state.intent)
       aiControlSystem(sim, phys, track)
       hoverSystem(sim, phys, waveField)
       phys.step()
@@ -239,7 +268,8 @@ async function boot() {
         const status = rs.finished
           ? 'FINISHED'
           : `cp ${rs.nextCheckpoint + 1}/${rs.totalCheckpoints}`
-        raceEl.textContent = `lap ${rs.lap}/${rs.lapsToFinish} | pos ${me?.position ?? '?'}/${standings.length} | ${status} | ${rs.raceTime.toFixed(1)}s`
+        const auto = autoPlay ? ' [AUTO]' : ''
+        raceEl.textContent = `lap ${rs.lap}/${rs.lapsToFinish} | pos ${me?.position ?? '?'}/${standings.length} | ${status} | ${rs.raceTime.toFixed(1)}s${auto}`
 
         if (rs.finished && !finishShown && finishEl) {
           finishShown = true

@@ -88,11 +88,14 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
     const localZ = dirX * fwd.x + dirZ * fwd.z
     const angle = Math.atan2(localX, localZ)
 
-    // 5. PD steering. Convention (from hover.ts): positive steer = right turn
-    //    = positive Y torque = positive angvel.y. Damp opposes existing turn.
+    // 5. PD steering. Convention (per hover.ts): positive steer = right turn
+    //    = NEGATIVE Y torque → eventually negative angvel.y. To damp existing
+    //    rotation (slow it as it goes), steer should follow angvel.y in sign:
+    //    angvel.y very negative (already turning right hard) → damp negative
+    //    → steer reduced. So damp = angvel.y * KD (no extra negation).
     const KP = 1.6
     const KD = 0.3
-    const damp = -angvel.y * KD
+    const damp = angvel.y * KD
     let steer = angle * KP + damp
     steer = Math.max(-1, Math.min(1, steer))
 

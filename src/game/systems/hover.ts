@@ -126,13 +126,28 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       Math.abs(throttle) * stats.accel * scale * speedFalloff * boost * direction * surfaceMul
     rb.applyImpulse({ x: fwd.x * aThrust * m * dt, y: 0, z: fwd.z * aThrust * m * dt }, true)
 
-    // Yaw torque. Convention: positive steer = right turn.
-    // Empirically (with the corrected quatRotate), +Y torque rotates the bike
-    // toward -X when facing +Z — that's a *right* turn from the rider's POV.
-    // So positive steer maps to positive Y torque.
+    // Yaw torque. Convention: positive steer = right turn (D / right stick / right arrow).
+    // Per playtest, this requires NEGATIVE Y torque in Rapier's convention — empirical;
+    // my earlier sign analysis was inverted.
     const turnMul = probe.isWater ? 1.1 : 1.0
-    const aTurn = intent.steer * stats.turnTorque * turnMul
+    const aTurn = -intent.steer * stats.turnTorque * turnMul
     rb.applyTorqueImpulse({ x: 0, y: aTurn * m * dt, z: 0 }, true)
+
+    // Upright stabilizer: torque the bike back toward world-up. Without this,
+    // collisions with other bikes or the island can leave a bike on its side
+    // and keep it there (angular damping alone can't right it). The cross of
+    // world-up with the bike's local-up gives the axis we need to rotate
+    // around to re-align; magnitude is sin(tilt-angle).
+    const bikeUp = quatRotate(q, { x: 0, y: 1, z: 0 })
+    const STABILIZE = 14 // m/s^2 per unit deviation
+    rb.applyTorqueImpulse(
+      {
+        x: bikeUp.z * STABILIZE * m * dt,
+        y: 0,
+        z: -bikeUp.x * STABILIZE * m * dt,
+      },
+      true,
+    )
 
     // Lateral drag — water has *more* lateral resistance (skis don't slide sideways easily).
     const dragMul = probe.isWater ? 1.4 : 1.0
