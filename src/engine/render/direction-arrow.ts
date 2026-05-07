@@ -17,10 +17,19 @@ export function createDirectionArrow(): DirectionArrow {
   group.name = 'direction-arrow'
 
   const color = 0xffcc44
-  const mat = new THREE.MeshBasicMaterial({
+  // Shaded material so the cone has a clear lit side / shadowed side —
+  // a fullbright arrow reads as flat from any angle and you can't tell
+  // which way it's pointing. depthTest stays off so it floats over the
+  // bike, and a touch of emissive keeps it glowing in the dark side
+  // without losing the form.
+  const mat = new THREE.MeshStandardMaterial({
     color,
+    emissive: color,
+    emissiveIntensity: 0.25,
+    roughness: 0.55,
+    metalness: 0.1,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.95,
     depthTest: false,
     depthWrite: false,
   })
@@ -35,19 +44,6 @@ export function createDirectionArrow(): DirectionArrow {
   const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 1.2), mat)
   shaft.position.set(0, 0, -0.5)
   group.add(shaft)
-
-  // Halo — faint disc behind the arrow so the silhouette pops against the sky.
-  const haloMat = new THREE.MeshBasicMaterial({
-    color,
-    transparent: true,
-    opacity: 0.3,
-    side: THREE.DoubleSide,
-    depthTest: false,
-    depthWrite: false,
-  })
-  const halo = new THREE.Mesh(new THREE.CircleGeometry(2.2, 24), haloMat)
-  halo.position.set(0, 0, -0.7)
-  group.add(halo)
 
   group.renderOrder = 999
   group.visible = false

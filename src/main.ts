@@ -290,7 +290,7 @@ async function boot() {
 
     waterMesh.tick()
     bikeRender()
-    trailRender()
+    trailRender(camera)
     pickupRender(dt)
 
     // Direction arrow points the player to the next checkpoint.
