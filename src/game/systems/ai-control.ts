@@ -7,13 +7,17 @@ import { AIController, AIControllerStore, AITag } from '@/game/components/ai'
 import type { Track } from '@/game/tracks/types'
 
 /**
- * Spline-following AI: each tick, finds the spline point ahead by `lookAhead`,
- * computes the angle to it in the bike's local frame, and writes throttle/steer
+ * Spline-following AI: each tick, finds a target ahead on the spline and a
+ * stay-close-to-line target right under us, then writes throttle/steer/brake
  * into ControlIntent. Hover system drives the rigid body.
  *
- * Steering is angle-based (atan2 of target in bike-local frame) with a
- * derivative damping term on the bike's current angular velocity to prevent
- * the oversteer/spin-out failure mode of pure proportional control.
+ * Key design points after several iterations:
+ * - Lookahead scales with speed (~0.6s ahead) so faster bikes see further.
+ * - Steering blends look-ahead heading with a "pull toward the line" term
+ *   so the AI doesn't drift wide on long arcs and miss gates.
+ * - Brake fires when the upcoming direction sharply diverges from our current
+ *   heading AND we're going fast — converts momentum into a tighter line.
+ * - Throttle scales down with how sharply we'd have to turn at this speed.
  */
 export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track): void {
   const eids = query(sim, [AITag, AIController, RBHandle, ControlIntent])
@@ -32,15 +36,13 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
     const angvel = rb.angvel()
     const speedHoriz = Math.hypot(linvel.x, linvel.z)
 
-    // Dynamic look-ahead: ~0.6s ahead, with a floor so we don't chase the
-    // current spline point at low speed.
-    const lookDist = Math.max(8, speedHoriz * 0.6)
+    const lookDist = Math.max(6, speedHoriz * 0.4)
 
-    // Closest spline point search — small window around the previous closest.
+    // 1. Closest spline point — search a window around the cached cursor.
     const N = spline.points.length
     let bestIdx = ai.lastClosestIndex
     let bestDist = Number.POSITIVE_INFINITY
-    const window = 6
+    const window = 8
     for (let i = -window; i <= window; i++) {
       const idx = (ai.lastClosestIndex + i + N) % N
       const p = spline.points[idx]!
@@ -51,7 +53,7 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
       }
     }
 
-    // Walk forward along spline to cover `lookDist` meters.
+    // 2. Lookahead point.
     let cumulative = 0
     let lookIdx = (bestIdx + 1) % N
     for (let i = 0; i < N; i++) {
@@ -64,48 +66,49 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
         break
       }
     }
-    const target = spline.points[lookIdx]!
+    const lookTarget = spline.points[lookIdx]!
+    const lineTarget = spline.points[bestIdx]!
 
-    // Direction to target.
-    const dx = target.x - t.x
-    const dz = target.z - t.z
+    // 3. Blended target — 55% lookahead + 45% line. Pulls the AI back onto
+    // the racing line when it's drifting wide.
+    const blendT = 0.55
+    const targetX = lookTarget.x * blendT + lineTarget.x * (1 - blendT)
+    const targetZ = lookTarget.z * blendT + lineTarget.z * (1 - blendT)
+
+    const dx = targetX - t.x
+    const dz = targetZ - t.z
     const dlen = Math.hypot(dx, dz) || 1
     const dirX = dx / dlen
     const dirZ = dz / dlen
 
-    // Project into bike's local frame.
+    // 4. Local-frame angle.
     const fwd = quatRotate(q, { x: 0, y: 0, z: 1 })
     const right = quatRotate(q, { x: 1, y: 0, z: 0 })
-    const localX = dirX * right.x + dirZ * right.z // lateral (right = +)
-    const localZ = dirX * fwd.x + dirZ * fwd.z // forward
-
-    // Angle to target in bike-local horizontal frame.
-    // atan2(lateral, forward): 0 = ahead, ±π/2 = sides, ±π = behind.
+    const localX = dirX * right.x + dirZ * right.z
+    const localZ = dirX * fwd.x + dirZ * fwd.z
     const angle = Math.atan2(localX, localZ)
 
-    // PD steering. Convention (from hover.ts): positive steer = right turn,
-    // which produces positive Y torque, which increases angvel.y.
-    // To damp existing rotation, steer should oppose current angvel.y:
-    //   angvel.y > 0 (already spinning right) → steer should reduce → damp = -angvel.y * KD.
-    const KP = 1.4
-    const KD = 0.25
+    // 5. PD steering. Convention (from hover.ts): positive steer = right turn
+    //    = positive Y torque = positive angvel.y. Damp opposes existing turn.
+    const KP = 1.6
+    const KD = 0.3
     const damp = -angvel.y * KD
     let steer = angle * KP + damp
     steer = Math.max(-1, Math.min(1, steer))
 
-    // Throttle: scale down as the angle grows. At 0 deg: full speed. At 180 deg:
-    // 40% throttle (still moving — needed to keep hover engaged). The PD damping
-    // term will take care of "slowing down" via opposing torque; this prevents
-    // momentum from carrying us past the corner.
+    // 6. Throttle scales down with angle. Brake into very sharp turns at speed.
     const angleAbs = Math.abs(angle)
-    const angleScale = Math.max(0.4, 1 - angleAbs / Math.PI)
-    const throttle = ai.topSpeedFactor * angleScale
+    const throttleScale = Math.max(0.4, 1 - angleAbs / Math.PI)
+    const throttle = ai.topSpeedFactor * throttleScale
+
+    // Brake when we're going fast AND the angle ahead is sharp.
+    const brake = angleAbs > 0.6 && speedHoriz > 18 ? Math.min(1, (angleAbs - 0.6) * 1.5) : 0
 
     AIControllerStore.set(eid, { ...ai, lastClosestIndex: bestIdx })
     ControlIntentStore.set(eid, {
       throttle,
       steer,
-      brake: 0,
+      brake,
       fire: false,
       boost: false,
     })

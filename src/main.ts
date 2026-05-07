@@ -48,6 +48,11 @@ async function boot() {
   const backendEl = document.getElementById('hud-backend')
   const inputEl = document.getElementById('hud-input')
   const raceEl = document.getElementById('hud-race')
+  const finishEl = document.getElementById('finish')
+  const finishTitle = document.getElementById('finish-title')
+  const finishSub = document.getElementById('finish-sub')
+  const finishPos = document.getElementById('finish-pos')
+  const finishTime = document.getElementById('finish-time')
 
   installInput()
 
@@ -134,6 +139,15 @@ async function boot() {
     playerEid: () => playerEid,
   })
   if (backendEl) backendEl.textContent = `backend: ${backend}`
+  if (finishSub) finishSub.textContent = track.name
+
+  let finishShown = false
+  // Press R to reload a fresh race once finished.
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyR' && finishShown) {
+      window.location.reload()
+    }
+  })
 
   const tmpPos = new THREE.Vector3()
   const tmpQuat = new THREE.Quaternion()
@@ -226,6 +240,14 @@ async function boot() {
           ? 'FINISHED'
           : `cp ${rs.nextCheckpoint + 1}/${rs.totalCheckpoints}`
         raceEl.textContent = `lap ${rs.lap}/${rs.lapsToFinish} | pos ${me?.position ?? '?'}/${standings.length} | ${status} | ${rs.raceTime.toFixed(1)}s`
+
+        if (rs.finished && !finishShown && finishEl) {
+          finishShown = true
+          finishEl.classList.add('show')
+          if (finishPos && me) finishPos.textContent = ordinal(me.position)
+          if (finishTime) finishTime.textContent = formatTime(rs.raceTime)
+          if (finishTitle) finishTitle.textContent = me?.position === 1 ? 'WINNER' : 'FINISH'
+        }
       }
     }
     requestAnimationFrame(frame)
@@ -233,6 +255,18 @@ async function boot() {
 
   state.ready = true
   requestAnimationFrame(frame)
+}
+
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd']
+  const v = n % 100
+  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`
+}
+
+function formatTime(sec: number): string {
+  const m = Math.floor(sec / 60)
+  const s = sec - m * 60
+  return m > 0 ? `${m}:${s.toFixed(2).padStart(5, '0')}` : `${s.toFixed(2)}s`
 }
 
 boot().catch((err) => {

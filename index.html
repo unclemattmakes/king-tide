@@ -11,6 +11,22 @@
       canvas { display: block; width: 100%; height: 100%; }
       #hud { position: fixed; top: 8px; left: 8px; pointer-events: none; user-select: none; font-size: 12px; line-height: 1.4; opacity: 0.85; }
       #hud .row { background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 2px; margin-bottom: 2px; display: inline-block; }
+      #finish {
+        position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+        pointer-events: none; user-select: none;
+        background: radial-gradient(ellipse at center, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.2) 60%, transparent 100%);
+      }
+      #finish.show { display: flex; }
+      #finish .card {
+        font-family: ui-monospace, monospace; text-align: center; color: #fff;
+        background: rgba(20,30,45,0.85); border: 1px solid rgba(255,255,255,0.2);
+        padding: 28px 48px; border-radius: 8px; box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+      }
+      #finish .title { font-size: 32px; font-weight: bold; letter-spacing: 2px; margin-bottom: 6px; color: #ffcc66; }
+      #finish .sub { font-size: 14px; opacity: 0.85; margin-bottom: 18px; }
+      #finish .stat { font-size: 18px; line-height: 1.5; }
+      #finish .stat b { color: #ffcc66; }
+      #finish .hint { margin-top: 20px; font-size: 11px; opacity: 0.6; }
     </style>
   </head>
   <body>
@@ -20,6 +36,17 @@
       <div class="row" id="hud-backend">backend: --</div>
       <div class="row" id="hud-input">input: --</div>
       <div class="row" id="hud-race">lap: --</div>
+    </div>
+    <div id="finish">
+      <div class="card">
+        <div class="title" id="finish-title">FINISH</div>
+        <div class="sub" id="finish-sub">Lagoon Loop</div>
+        <div class="stat">
+          Position: <b id="finish-pos">—</b><br />
+          Time: <b id="finish-time">—</b>
+        </div>
+        <div class="hint">press R to race again</div>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -96,8 +96,24 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
 
     const fwd = quatRotate(q, { x: 0, y: 0, z: 1 })
 
-    // Forward thrust (water adds extra drag — slightly less responsive).
     const speed = vecHorizontalLength({ x: linvel.x, y: 0, z: linvel.z })
+
+    // Brake — opposes current horizontal velocity. Lets the AI (and the
+    // player) actually slow down before a corner instead of relying solely
+    // on letting off the throttle.
+    if (intent.brake > 0 && speed > 0.5) {
+      const brakeAccel = intent.brake * 18 // m/s^2 at full brake
+      rb.applyImpulse(
+        {
+          x: -(linvel.x / speed) * brakeAccel * m * dt,
+          y: 0,
+          z: -(linvel.z / speed) * brakeAccel * m * dt,
+        },
+        true,
+      )
+    }
+
+    // Forward thrust (water adds extra drag — slightly less responsive).
     const throttle = intent.throttle
     const direction = throttle >= 0 ? 1 : -1
     const scale = throttle >= 0 ? 1 : stats.reverseScale

@@ -23,7 +23,7 @@ import type { Checkpoint, Track } from './types'
  */
 export function createLagoonLoop(): Track {
   const cpY = 1.5
-  const halfWidth = 8
+  const halfWidth = 14 // wide gates — forgiving for AI cornering
   const height = 6
 
   // Ordered checkpoint positions.
@@ -69,12 +69,13 @@ export function createLagoonLoop(): Track {
     }
   })
 
-  // AI spline — denser sampling along the same ordered loop.
+  // AI spline — dense (12 sub-segments per checkpoint pair) so the AI's
+  // closest-point search resolves to a tight target, not a distant anchor.
   const aiPoints: Vec3[] = []
   for (let i = 0; i < positions.length; i++) {
     const here = positions[i]!
     const next = positions[(i + 1) % positions.length]!
-    const segments = 6
+    const segments = 12
     for (let s = 0; s < segments; s++) {
       const t = s / segments
       aiPoints.push({
