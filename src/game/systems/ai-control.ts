@@ -28,7 +28,13 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
 
     const t = rb.translation()
     const q = rb.rotation()
+    const linvel = rb.linvel()
     const angvel = rb.angvel()
+    const speedHoriz = Math.hypot(linvel.x, linvel.z)
+
+    // Dynamic look-ahead: ~0.6s ahead, with a floor so we don't chase the
+    // current spline point at low speed.
+    const lookDist = Math.max(8, speedHoriz * 0.6)
 
     // Closest spline point search — small window around the previous closest.
     const N = spline.points.length
@@ -45,7 +51,7 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
       }
     }
 
-    // Walk forward along spline to cover `lookAhead` meters.
+    // Walk forward along spline to cover `lookDist` meters.
     let cumulative = 0
     let lookIdx = (bestIdx + 1) % N
     for (let i = 0; i < N; i++) {
@@ -53,7 +59,7 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
       const b = spline.points[(bestIdx + i + 1) % N]!
       const seg = Math.hypot(b.x - a.x, b.z - a.z)
       cumulative += seg
-      if (cumulative >= ai.lookAhead) {
+      if (cumulative >= lookDist) {
         lookIdx = (bestIdx + i + 1) % N
         break
       }
@@ -88,11 +94,13 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
     let steer = angle * KP + damp
     steer = Math.max(-1, Math.min(1, steer))
 
-    // Throttle: full forward, scaled by AI top-speed factor (rubber band).
-    // If we're heading sharply away from target (target behind), back off
-    // throttle so we don't overshoot more.
-    const sharpTurn = Math.abs(angle) > Math.PI * 0.5
-    const throttle = sharpTurn ? 0.4 : ai.topSpeedFactor
+    // Throttle: scale down as the angle grows. At 0 deg: full speed. At 180 deg:
+    // 40% throttle (still moving — needed to keep hover engaged). The PD damping
+    // term will take care of "slowing down" via opposing torque; this prevents
+    // momentum from carrying us past the corner.
+    const angleAbs = Math.abs(angle)
+    const angleScale = Math.max(0.4, 1 - angleAbs / Math.PI)
+    const throttle = ai.topSpeedFactor * angleScale
 
     AIControllerStore.set(eid, { ...ai, lastClosestIndex: bestIdx })
     ControlIntentStore.set(eid, {
