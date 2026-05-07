@@ -30,7 +30,7 @@ export type CreateBikeOpts = {
   /** If true, attach a Racer component for race tracking. */
   asRacer?: boolean
   /** If set, attaches AI components and follows the named spline. */
-  ai?: { splineId: string }
+  ai?: { splineId: string; lineOffset?: number }
 }
 
 export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOpts): number {
@@ -89,7 +89,10 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
   if (opts.ai) {
     addComponent(sim, eid, AITag)
     addComponent(sim, eid, AIController)
-    AIControllerStore.set(eid, defaultAIController(opts.ai.splineId))
+    AIControllerStore.set(
+      eid,
+      defaultAIController(opts.ai.splineId, { lineOffset: opts.ai.lineOffset ?? 0 }),
+    )
   }
   if (opts.asRacer) {
     addComponent(sim, eid, Racer)

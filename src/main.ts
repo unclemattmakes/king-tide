@@ -1,3 +1,4 @@
+import { addComponent, hasComponent, removeComponent } from 'bitecs'
 import * as THREE from 'three'
 import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug'
 import {
@@ -20,12 +21,11 @@ import { createPhysicsWorld } from './engine/sim/physics/rapier'
 import { vecHorizontalLength } from './engine/sim/physics/vec'
 import { advanceWaveField, createWaveField, defaultWaves } from './engine/sim/water/wave-field'
 import { HoverStateStore, RBHandleStore } from './game/components'
+import { AIController, AIControllerStore, AITag, defaultAIController } from './game/components/ai'
 import { RacerStore } from './game/components/race'
 import { createArena } from './game/entities/arena'
 import { createBike } from './game/entities/bike'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
-import { addComponent, hasComponent, removeComponent } from 'bitecs'
-import { AIController, AIControllerStore, AITag, defaultAIController } from './game/components/ai'
 import { aiControlSystem } from './game/systems/ai-control'
 import { hoverSystem } from './game/systems/hover'
 import { applyPlayerIntent } from './game/systems/input-apply'
@@ -89,19 +89,23 @@ async function boot() {
     asRacer: true,
   })
 
+  // Spread AI bikes across a wide grid behind the player. Each gets a distinct
+  // lateral race-line offset so they don't all aim at the same target point and
+  // ram each other at the first gate.
   const aiEids: number[] = []
-  for (let i = 0; i < NUM_AI; i++) {
-    // Stagger 2 rows of 2 BEHIND the player so initial physics jostling doesn't
-    // push the player off the line.
-    const row = Math.floor(i / 2)
-    const col = i % 2
-    const offsetX = (col === 0 ? -1 : 1) * 3
-    const offsetZ = -(row + 1) * 4 - 4 // 4..12m behind, increasing per row
+  const aiSlots = [
+    { dx: -8, dz: -4, off: -6 },
+    { dx: -3, dz: -8, off: -2 },
+    { dx: 3, dz: -8, off: 2 },
+    { dx: 8, dz: -4, off: 6 },
+  ]
+  for (let i = 0; i < Math.min(NUM_AI, aiSlots.length); i++) {
+    const slot = aiSlots[i]!
     const aiEid = createBike(sim, phys, {
-      position: { x: startPos.x + offsetX, y: startPos.y, z: startPos.z + offsetZ },
+      position: { x: startPos.x + slot.dx, y: startPos.y, z: startPos.z + slot.dz },
       yaw: track.start.yaw,
       asRacer: true,
-      ai: { splineId: 'main' },
+      ai: { splineId: 'main', lineOffset: slot.off },
     })
     aiEids.push(aiEid)
   }
@@ -162,8 +166,10 @@ async function boot() {
       if (!hasComponent(sim, playerEid, AITag)) {
         addComponent(sim, playerEid, AITag)
         addComponent(sim, playerEid, AIController)
-        AIControllerStore.set(playerEid, defaultAIController('main'))
       }
+      // Always reset AI state on toggle — fresh closest-point search, no carry
+      // over from previous auto-play sessions on the same page.
+      AIControllerStore.set(playerEid, defaultAIController('main'))
     } else if (hasComponent(sim, playerEid, AITag)) {
       removeComponent(sim, playerEid, AITag)
     }

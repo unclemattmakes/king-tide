@@ -3,42 +3,52 @@ import { ISLAND_RADIUS, ISLAND_TOP_Y } from '@/game/entities/arena'
 import type { Checkpoint, Track } from './types'
 
 /**
- * Procedural test track: a rectangular loop on water surrounding the island.
+ * Procedural test track: a true closed loop around the island.
  *
- *   spawn (0,_,20)  →  cp0 (0,_,35)
- *                       │ +Z
- *                      cp1 (0,_,75)        — top
- *                       └─── east
- *                            cp2 (60,_,30) — east side
- *                       │ -Z
- *                            cp3 (60,_,-30)
- *                            └─── west ────────────────
- *                            cp4 (-60,_,-30) — south side
- *                       │ +Z
- *                            cp5 (-60,_,30)
- *                       └─── east ──── back to cp0
+ *   Player spawns just south of cp 0 facing +Z. Drives through cp 0
+ *   (start/finish), then up the centre, swings east through cp 2/3, sweeps
+ *   south through cp 4/5, comes back up the west side via cp 6/7, then a
+ *   final approach gate (cp 8) just south-west of the start so lap
+ *   completion lines up with cp 0's +Z crossing direction.
  *
- * Each gate's "forward" is the direction OUT of the gate (toward the next).
- * cp 0 specifically faces +Z so the player enters it head-on from the spawn.
+ *   Layout (top-down, +Z up):
+ *
+ *                  cp 7 ─── cp 1 ───── (top)
+ *                                         │
+ *                  cp 6                 cp 2
+ *                                         │
+ *                                       cp 3 (east straight)
+ *                                         │
+ *                  ............ cp 0      │
+ *                  cp 8         spawn     │
+ *                                       cp 4
+ *                                         │
+ *                  cp 5 ─────────── (bottom)
+ *
+ * cp 0's forward is hardcoded +Z so the player's first crossing
+ * (driving north out of the spawn) registers correctly. Other gates use
+ * the direction from the previous gate as their forward.
  */
 export function createLagoonLoop(): Track {
   const cpY = 1.5
-  const halfWidth = 14 // wide gates — forgiving for AI cornering
+  const halfWidth = 14
   const height = 6
 
-  // Ordered checkpoint positions.
   const positions: Vec3[] = [
-    { x: 0, y: cpY, z: 35 }, // 0 — start/finish, just past island
-    { x: 0, y: cpY, z: 78 }, // 1 — top straight
-    { x: 60, y: cpY, z: 50 }, // 2 — NE corner
-    { x: 60, y: cpY, z: -40 }, // 3 — east straight south
-    { x: -60, y: cpY, z: -40 }, // 4 — south straight west
-    { x: -60, y: cpY, z: 50 }, // 5 — NW corner
+    { x: 0, y: cpY, z: 30 }, // 0 — start/finish (forward = +Z)
+    { x: 0, y: cpY, z: 70 }, // 1 — north straight
+    { x: 60, y: cpY, z: 60 }, // 2 — NE corner
+    { x: 75, y: cpY, z: 0 }, // 3 — east straight (mid)
+    { x: 60, y: cpY, z: -60 }, // 4 — SE corner
+    { x: -60, y: cpY, z: -60 }, // 5 — SW corner (across the south)
+    { x: -75, y: cpY, z: 0 }, // 6 — west straight (mid)
+    { x: -60, y: cpY, z: 60 }, // 7 — NW corner
+    { x: -25, y: cpY, z: 10 }, // 8 — final approach, south of cp 0 so the bike
+    //     enters cp 0 from below for clean lap detection
   ]
 
-  // Forward (gate-cross direction) for each gate.
-  // cp 0 is special: the player enters from the spawn moving +Z.
-  // For cp i > 0, forward = direction from cp i-1 to cp i (the way the player approaches).
+  // Forward direction at each gate. cp 0 is special (player's start direction);
+  // other gates inherit the direction from the previous gate.
   const forwards: { fx: number; fz: number }[] = positions.map((_, i) => {
     if (i === 0) return { fx: 0, fz: 1 }
     const prev = positions[i - 1]!
@@ -51,7 +61,6 @@ export function createLagoonLoop(): Track {
 
   const checkpoints: Checkpoint[] = positions.map((pos, i) => {
     const { fx, fz } = forwards[i]!
-    // Quat that rotates (0,0,1) to (fx, 0, fz): Y-rotation by α = atan2(fx, fz).
     const alpha = Math.atan2(fx, fz)
     const halfA = alpha / 2
     const rotation: Quat = {
@@ -60,22 +69,16 @@ export function createLagoonLoop(): Track {
       z: 0,
       w: Math.cos(halfA),
     }
-    return {
-      index: i,
-      position: pos,
-      rotation,
-      halfWidth,
-      height,
-    }
+    return { index: i, position: pos, rotation, halfWidth, height }
   })
 
-  // AI spline — dense (12 sub-segments per checkpoint pair) so the AI's
-  // closest-point search resolves to a tight target, not a distant anchor.
+  // Dense AI spline — 10 sub-segments per checkpoint pair = 90 points around
+  // the loop, plenty of resolution for the closest-point search.
   const aiPoints: Vec3[] = []
   for (let i = 0; i < positions.length; i++) {
     const here = positions[i]!
     const next = positions[(i + 1) % positions.length]!
-    const segments = 12
+    const segments = 10
     for (let s = 0; s < segments; s++) {
       const t = s / segments
       aiPoints.push({
@@ -97,12 +100,14 @@ export function createLagoonLoop(): Track {
     checkpoints,
     surfaces: [],
     pickupSpawns: [
-      { x: 0, y: 1.8, z: 28 }, // right after the start line (player's first pickup)
-      { x: 30, y: 1.8, z: 60 }, // between cp 0 and cp 1, on the right
-      { x: 60, y: 1.8, z: 0 }, // halfway along cp 2 → cp 3
-      { x: 0, y: 1.8, z: -40 }, // along cp 3 → cp 4
-      { x: -60, y: 1.8, z: 0 }, // halfway along cp 4 → cp 5
-      { x: -30, y: 1.8, z: 60 }, // between cp 5 and cp 0, on the left
+      { x: 0, y: 1.8, z: 28 }, // right past the start line
+      { x: 30, y: 1.8, z: 70 }, // along cp 1 → cp 2
+      { x: 75, y: 1.8, z: 30 }, // east straight, top
+      { x: 75, y: 1.8, z: -30 }, // east straight, bottom
+      { x: 0, y: 1.8, z: -65 }, // bottom centre (cp 4 → cp 5)
+      { x: -75, y: 1.8, z: -30 }, // west straight, bottom
+      { x: -75, y: 1.8, z: 30 }, // west straight, top
+      { x: -40, y: 1.8, z: 35 }, // top-west (cp 7 → cp 8)
     ],
     aiSplines: [{ id: 'main', points: aiPoints }],
   }

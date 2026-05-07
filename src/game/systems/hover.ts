@@ -133,18 +133,18 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const aTurn = -intent.steer * stats.turnTorque * turnMul
     rb.applyTorqueImpulse({ x: 0, y: aTurn * m * dt, z: 0 }, true)
 
-    // Upright stabilizer: torque the bike back toward world-up. Without this,
-    // collisions with other bikes or the island can leave a bike on its side
-    // and keep it there (angular damping alone can't right it). The cross of
-    // world-up with the bike's local-up gives the axis we need to rotate
-    // around to re-align; magnitude is sin(tilt-angle).
+    // Upright stabilizer: torque the bike back toward world-up plus a damping
+    // term on the tilting angular velocity. Without the damping, the spring
+    // alone would oscillate forever on collisions. Together they're a PD
+    // controller on tilt-angle, fast and well-behaved.
     const bikeUp = quatRotate(q, { x: 0, y: 1, z: 0 })
-    const STABILIZE = 14 // m/s^2 per unit deviation
+    const STABILIZE_K = 38 // spring (m/s^2 per unit tilt component)
+    const STABILIZE_D = 6 // damper (m/s^2 per rad/s of tilting velocity)
     rb.applyTorqueImpulse(
       {
-        x: bikeUp.z * STABILIZE * m * dt,
+        x: (bikeUp.z * STABILIZE_K - rb.angvel().x * STABILIZE_D) * m * dt,
         y: 0,
-        z: -bikeUp.x * STABILIZE * m * dt,
+        z: (-bikeUp.x * STABILIZE_K - rb.angvel().z * STABILIZE_D) * m * dt,
       },
       true,
     )

@@ -17,14 +17,24 @@ export type AIControllerData = {
   lookAhead: number
   /** Desired top-speed factor (mutated by rubber-band). */
   topSpeedFactor: number
+  /**
+   * Lateral offset (m) perpendicular to the racing line. Each AI gets a
+   * slightly different value so they don't all converge on the same point.
+   * Positive = right of travel direction.
+   */
+  lineOffset: number
 }
 export const AIControllerStore = createStore<AIControllerData>('AIController')
 
-export function defaultAIController(splineId: string): AIControllerData {
+export function defaultAIController(
+  splineId: string,
+  opts?: { lineOffset?: number },
+): AIControllerData {
   return {
     splineId,
     lastClosestIndex: 0,
     lookAhead: 12,
     topSpeedFactor: 1,
+    lineOffset: opts?.lineOffset ?? 0,
   }
 }

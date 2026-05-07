@@ -1,13 +1,6 @@
 import * as THREE from 'three'
 import type { Checkpoint, Track } from '@/game/tracks/types'
 
-/**
- * Visual representation of track-level objects: checkpoint gates, start line,
- * and (later) surface meshes. Returns a group that the caller adds to the scene.
- *
- * Each gate exposes its index and current state (passed/active/upcoming) via
- * `setCheckpointState(index, state)` so the race system can highlight progress.
- */
 export type TrackVisuals = {
   group: THREE.Object3D
   setCheckpointState(index: number, state: CheckpointVisualState): void
@@ -36,7 +29,6 @@ export function createTrackVisuals(track: Track): TrackVisuals {
     gateMeshesByIndex.set(cp.index, gate)
   }
 
-  // Initial state: cp 0 is "next", rest are "upcoming".
   for (const cp of track.checkpoints) {
     setStateOn(gateMeshesByIndex.get(cp.index)!, cp.index === 0 ? 'next' : 'upcoming')
   }
@@ -56,8 +48,8 @@ export function createTrackVisuals(track: Track): TrackVisuals {
 
 type GateMesh = {
   root: THREE.Object3D
-  /** Pillars + crossbar — anything we re-color on state change. */
   recolorables: THREE.Mesh[]
+  beacon: THREE.Mesh
   dispose(): void
 }
 
@@ -80,20 +72,40 @@ function createGateMesh(cp: Checkpoint): GateMesh {
   root.add(right)
   recolorables.push(right)
 
-  // Crossbar — banner at the top
   const barGeom = new THREE.BoxGeometry(cp.halfWidth * 2, 0.8, 0.4)
   const bar = new THREE.Mesh(barGeom, pillarMat.clone())
   bar.position.set(0, cp.height + 0.4, 0)
   root.add(bar)
   recolorables.push(bar)
 
+  // Beacon — a tall, glowing column above the gate, visible from anywhere on
+  // the map. Only shown when the gate is the "next" target so the player can
+  // always see where to go.
+  const beaconHeight = 80
+  const beaconMat = new THREE.MeshBasicMaterial({
+    color: COLORS.next,
+    transparent: true,
+    opacity: 0.45,
+    depthWrite: false,
+  })
+  const beacon = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.5, 0.9, beaconHeight, 8, 1, true),
+    beaconMat,
+  )
+  beacon.position.set(0, beaconHeight / 2, 0)
+  beacon.visible = false
+  beacon.renderOrder = 2
+  root.add(beacon)
+
   function dispose() {
     pillarGeom.dispose()
     barGeom.dispose()
+    beaconMat.dispose()
+    beacon.geometry.dispose()
     for (const m of recolorables) (m.material as THREE.Material).dispose()
   }
 
-  return { root, recolorables, dispose }
+  return { root, recolorables, beacon, dispose }
 }
 
 function setStateOn(gate: GateMesh, state: CheckpointVisualState): void {
@@ -102,6 +114,7 @@ function setStateOn(gate: GateMesh, state: CheckpointVisualState): void {
     const mat = m.material as THREE.MeshStandardMaterial
     mat.color.setHex(color)
     mat.emissive.setHex(state === 'next' ? color : 0x000000)
-    mat.emissiveIntensity = state === 'next' ? 0.4 : 0
+    mat.emissiveIntensity = state === 'next' ? 0.6 : 0
   }
+  gate.beacon.visible = state === 'next'
 }

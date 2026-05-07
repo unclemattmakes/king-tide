@@ -46,7 +46,8 @@ export function installCameraLookInput(): void {
   window.addEventListener('mousemove', (e) => {
     if (!mouseDragging) return
     yaw += (e.clientX - lastMouseX) * MOUSE_SENS
-    pitch += (e.clientY - lastMouseY) * MOUSE_SENS
+    // Invert vertical: dragging mouse UP raises the camera (looks down at bike).
+    pitch -= (e.clientY - lastMouseY) * MOUSE_SENS
     lastMouseX = e.clientX
     lastMouseY = e.clientY
   })
@@ -60,12 +61,12 @@ export function tickCameraLook(dt: number): CameraLookState {
   const pad = navigator.getGamepads?.()?.[0]
   const stickX = pad?.axes[2] ?? 0
   const stickY = pad?.axes[3] ?? 0
-  const stickActive =
-    Math.abs(stickX) > STICK_DEADZONE || Math.abs(stickY) > STICK_DEADZONE
+  const stickActive = Math.abs(stickX) > STICK_DEADZONE || Math.abs(stickY) > STICK_DEADZONE
 
   if (stickActive) {
     yaw = stickX * STICK_YAW_RANGE
-    pitch = stickY * STICK_PITCH_RANGE
+    // Invert vertical: pushing stick up raises the camera (looks down at bike).
+    pitch = -stickY * STICK_PITCH_RANGE
   } else if (!mouseDragging) {
     // Decay back to zero.
     const k = Math.exp(-dt * RETURN_RATE)

@@ -68,12 +68,26 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
     }
     const lookTarget = spline.points[lookIdx]!
     const lineTarget = spline.points[bestIdx]!
+    const aheadOfLook = spline.points[(lookIdx + 1) % N]!
 
     // 3. Blended target — 55% lookahead + 45% line. Pulls the AI back onto
     // the racing line when it's drifting wide.
     const blendT = 0.55
-    const targetX = lookTarget.x * blendT + lineTarget.x * (1 - blendT)
-    const targetZ = lookTarget.z * blendT + lineTarget.z * (1 - blendT)
+    let targetX = lookTarget.x * blendT + lineTarget.x * (1 - blendT)
+    let targetZ = lookTarget.z * blendT + lineTarget.z * (1 - blendT)
+
+    // 3b. Per-AI lateral offset — perpendicular to the spline tangent so each
+    //    AI hugs a slightly different line. Prevents convergence pile-ups at gates.
+    if (ai.lineOffset !== 0) {
+      const tdx = aheadOfLook.x - lookTarget.x
+      const tdz = aheadOfLook.z - lookTarget.z
+      const tlen = Math.hypot(tdx, tdz) || 1
+      // Perpendicular (right of forward).
+      const perpX = tdz / tlen
+      const perpZ = -tdx / tlen
+      targetX += perpX * ai.lineOffset
+      targetZ += perpZ * ai.lineOffset
+    }
 
     const dx = targetX - t.x
     const dz = targetZ - t.z
