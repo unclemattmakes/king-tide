@@ -73,6 +73,46 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const rb = phys.world.getRigidBody(handle)
     if (!rb) continue
 
+    // Kinematic roll lock. Decompose orientation into YXZ intrinsic Euler
+    // (yaw around world-Y, then pitch around the new local-X, then roll
+    // around the new local-Z) and force the roll component to zero. Then
+    // strip out any rotation around bikeFwd from angvel so no roll velocity
+    // accumulates from misaligned-axis torque side-effects (the M9.x bug:
+    // pitch + steer caused the roll PD to over-correct false-positives and
+    // pump real roll velocity into the body). Yaw and pitch can do whatever.
+    {
+      const q0 = rb.rotation()
+      const r02 = 2 * (q0.x * q0.z + q0.y * q0.w)
+      const r10 = 2 * (q0.x * q0.y + q0.z * q0.w)
+      const r11 = 1 - 2 * (q0.x * q0.x + q0.z * q0.z)
+      const r12 = 2 * (q0.y * q0.z - q0.x * q0.w)
+      const r22 = 1 - 2 * (q0.x * q0.x + q0.y * q0.y)
+      const rollAngle = Math.atan2(r10, r11)
+      if (Math.abs(rollAngle) > 1e-5) {
+        const pitchAngle = Math.asin(Math.max(-1, Math.min(1, -r12)))
+        const yawAngle = Math.atan2(r02, r22)
+        const cy = Math.cos(yawAngle / 2)
+        const sy = Math.sin(yawAngle / 2)
+        const cp = Math.cos(pitchAngle / 2)
+        const sp = Math.sin(pitchAngle / 2)
+        rb.setRotation({ w: cy * cp, x: cy * sp, y: sy * cp, z: -sy * sp }, true)
+      }
+      const qNow = rb.rotation()
+      const fwdNow = quatRotate(qNow, { x: 0, y: 0, z: 1 })
+      const angvNow = rb.angvel()
+      const rollVel = angvNow.x * fwdNow.x + angvNow.y * fwdNow.y + angvNow.z * fwdNow.z
+      if (Math.abs(rollVel) > 1e-5) {
+        rb.setAngvel(
+          {
+            x: angvNow.x - rollVel * fwdNow.x,
+            y: angvNow.y - rollVel * fwdNow.y,
+            z: angvNow.z - rollVel * fwdNow.z,
+          },
+          true,
+        )
+      }
+    }
+
     const t = rb.translation()
     const q = rb.rotation()
     const linvel = rb.linvel()
@@ -126,22 +166,18 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       Math.abs(throttle) * stats.accel * scale * speedFalloff * boost * direction * surfaceMul
     rb.applyImpulse({ x: fwd.x * aThrust * m * dt, y: 0, z: fwd.z * aThrust * m * dt }, true)
 
-    // Yaw torque around the bike's LOCAL up axis (not world Y) so that
-    // steering doesn't couple into roll when the bike is pitched. Applying
-    // pure world-Y torque on a pitched bike has a non-zero projection onto
-    // the bike's roll axis, which would otherwise let "pitch + steer" tip
-    // the bike sideways.
+    // Yaw torque around WORLD Y. M9.3 tried bike-local up to avoid the
+    // direct projection onto the body's roll axis, but that produced a
+    // worse second-order bug: rotating around the tilted local-up axis
+    // spins the bike's right vector OUT of the world horizontal plane,
+    // so the roll PD (which reads bikeRight.y) registered yaw-induced
+    // tilt as roll and pumped real angular velocity into the roll axis.
+    // World-Y yaw keeps bikeRight.y at zero across any pitch, so the
+    // roll PD only ever sees actual roll. The first-order projection
+    // onto the roll axis is small and the strong roll PD eats it.
     const turnMul = probe.isWater ? 1.1 : 1.0
     const aTurn = -intent.steer * stats.turnTorque * turnMul
-    const bikeUpForYaw = quatRotate(q, { x: 0, y: 1, z: 0 })
-    rb.applyTorqueImpulse(
-      {
-        x: bikeUpForYaw.x * aTurn * m * dt,
-        y: bikeUpForYaw.y * aTurn * m * dt,
-        z: bikeUpForYaw.z * aTurn * m * dt,
-      },
-      true,
-    )
+    rb.applyTorqueImpulse({ x: 0, y: aTurn * m * dt, z: 0 }, true)
 
     // Pitch + roll attitude controller, decomposed in bike-local axes.
     //

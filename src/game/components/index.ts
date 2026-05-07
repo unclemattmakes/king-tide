@@ -34,7 +34,6 @@ export type BikeStatsData = {
   accel: number
   topSpeed: number
   turnTorque: number
-  pitchTorque: number
   lateralDrag: number
   reverseScale: number
   boostMul: number

@@ -62,6 +62,10 @@ export type BikeDebugSnapshot = {
   eid: number
   pos: { x: number; y: number; z: number }
   vel: { x: number; y: number; z: number }
+  /** World-space rotation quaternion. */
+  rot: { x: number; y: number; z: number; w: number }
+  /** World-space angular velocity (rad/s). */
+  angvel: { x: number; y: number; z: number }
   intent: Intent
 }
 
@@ -124,6 +128,8 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
         if (!rb) continue
         const t = rb.translation()
         const v = rb.linvel()
+        const q = rb.rotation()
+        const av = rb.angvel()
         const intent = ControlIntentStore.get(eid) ?? {
           throttle: 0,
           steer: 0,
@@ -136,6 +142,8 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
           eid,
           pos: { x: t.x, y: t.y, z: t.z },
           vel: { x: v.x, y: v.y, z: v.z },
+          rot: { x: q.x, y: q.y, z: q.z, w: q.w },
+          angvel: { x: av.x, y: av.y, z: av.z },
           intent: { ...intent },
         })
       }

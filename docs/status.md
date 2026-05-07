@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-07. Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-07 (M9.4: kinematic roll lock). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -79,11 +79,11 @@ See [implementation-plan.md](./implementation-plan.md) for repo layout and the a
 
 ## Known bugs / quirks
 
-### Pitch + roll coupling — *partially resolved*
-Pitching while moving still occasionally introduces some roll, especially in collisions or when AI bikes hit the player. The yaw-axis fix (M9.3) eliminated the steering-induced coupling, but the roll stabilizer's spring + damper isn't strong enough to keep the bike fully upright through every wave bump while pitched. **Workaround:** Backspace to respawn.
+### Pitch + roll coupling — *resolved (M9.4)*
+M9.3 was insufficient: pitching while turning produced wild roll oscillations (probe showed ±60° pitch, ±70° roll). Root cause was the roll PD reading `bikeRight.y` and false-positiving on the geometric tilt that yaw-while-pitched produces; the corrective torque pumped real angular velocity into the roll axis. M9.4 replaces the soft PD with a kinematic roll lock: at the top of `hoverSystem`, decompose the bike's rotation into YXZ Euler (yaw → pitch → roll), force roll = 0, recompose, and strip out the `bikeFwd` component of angvel. Roll velocity can no longer accumulate from misaligned-axis side-effects. Yaw + pitch behave as before.
 
-### Pitch + throttle weirdness on water
-Holding `pitch=+1` (dive) at full throttle on water makes the bike submerge and bounce — the buoyancy pop interacts poorly with the angled thrust direction (thrust still applied along bike's forward, which is partly downward). The bike can end up moving the wrong direction relative to what the player is pressing. Tunable; needs a "thrust direction projects to horizontal" rule or a separate water-drag term while underwater.
+### Pitch + throttle on water — *intentional, not a bug*
+Holding `pitch=+1` (dive) at full throttle makes the bike plant its nose into wave troughs and submerge-and-bounce, with speed swinging 10→25→10 m/s as buoyancy kicks back. This is the desired Wave Race-style feel — diving into a wave should *cost* you. Thrust is already projected to horizontal (always was); the apparent "dive" is the bike's collider being driven through the wave field at speed, not a thrust-direction bug. Don't "fix" it.
 
 ### AI navigation — works but rough
 - AI consistently makes it through cp 0, cp 1, cp 2 and into cp 3 in autoplay tests
@@ -104,7 +104,6 @@ Fixed in M4 — the `q*v*q⁻¹` expansion was producing wrong rotated vectors e
 The M3 race "checkpoints not in front are not counted" test occasionally needs a retry. Cause: physics-driven timing under CPU contention from 4 parallel Playwright workers. Workers capped at 4; retries enabled.
 
 ### Other small things
-- `pitchTorque` field in `BikeStatsData` is currently unused (M9.1 replaced torque-based pitch with a servo). Safe to remove.
 - The "infield island" cylinder in the middle of the loop is decorative — bike drives around it on water.
 - Boot sometimes needs a hard reload (Ctrl+F5) after big code changes — Vite HMR can leave stale state in stores.
 
@@ -113,10 +112,7 @@ The M3 race "checkpoints not in front are not counted" test occasionally needs a
 In rough priority order. Each item is sized as **S/M/L** for effort.
 
 ### Polish on what exists
-- **[S] Pitch + thrust interaction.** While pitched, project thrust onto horizontal so the bike doesn't dive into the water. Or apply extra underwater drag.
 - **[S] Pitch attenuation tuning.** Maybe make pitch effect smaller (±15° instead of ±30°) so the bike stays more controllable. Or scale pitch with speed.
-- **[M] Roll robustness when pitched.** Strengthen the roll stabilizer specifically when pitch input is active, since collisions are more likely to roll a pitched bike.
-- **[S] Remove unused `pitchTorque` stat field.**
 - **[M] AI cornering tuning.** More aggressive brake-into-turn, look-ahead based on track curvature, racing-line offset that varies between inside/outside of corner.
 
 ### Combat (M5 follow-on)
@@ -159,6 +155,7 @@ Currently only `boost` pickup works. The other planned pickups:
 | M7 | Real loop track | ✅ |
 | M8 | Stadium track + spawn on loop + gate-state fix | ✅ |
 | M9 | Smoothed kb + pitch + respawn + arrow + flip recovery | ✅ |
+| M9.4 | Kinematic roll lock — pitch+steer no longer rolls the bike | ✅ |
 
 ## File / system map
 
