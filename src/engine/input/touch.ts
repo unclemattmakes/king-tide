@@ -1,0 +1,249 @@
+import { emptyIntent, type Intent } from './intent'
+
+/**
+ * Virtual joystick + face buttons for mobile players.
+ *
+ * Layout: a thumb-stick anchored bottom-left drives steer (X) and throttle
+ * (Y, up = forward). A column of FIRE / BOOST / BRAKE pads sits bottom-right.
+ * Pulling the stick down past the deadzone counts as both reverse throttle
+ * and a brake, matching the keyboard's S behaviour.
+ *
+ * Self-contained: injects its own DOM + CSS into <body> when installed and
+ * stays inert (zeroed intent) on non-touch devices, so desktop users don't
+ * see overlay controls.
+ */
+const STICK_RANGE_PX = 50 // max knob travel from center
+const DEADZONE = 0.08
+
+type ButtonKey = 'fire' | 'boost' | 'brake'
+
+let installed = false
+let stickX = 0
+let stickY = 0
+const pressed = new Set<ButtonKey>()
+
+let stickEl: HTMLDivElement | null = null
+let knobEl: HTMLDivElement | null = null
+let stickTouchId: number | null = null
+let stickOriginX = 0
+let stickOriginY = 0
+
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v
+}
+
+/** Coarse pointer (phone/tablet) or explicit `?touch=1` URL flag for testing. */
+export function isTouchDevice(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    if (window.location?.search?.includes('touch=1')) return true
+  } catch {
+    /* ignore */
+  }
+  if (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches) {
+    return true
+  }
+  if ('ontouchstart' in window) return true
+  return (navigator?.maxTouchPoints ?? 0) > 0
+}
+
+/** True after `installTouch` has injected the overlay. */
+export function isTouchEnabled(): boolean {
+  return installed
+}
+
+/**
+ * Pure conversion from raw stick + button state to an Intent. Exposed so
+ * unit tests can pin the mapping without touching the DOM.
+ */
+export function computeTouchIntent(
+  rawStickX: number,
+  rawStickY: number,
+  buttons: { fire: boolean; boost: boolean; brake: boolean },
+): Intent {
+  const intent = emptyIntent()
+  const sx = Math.abs(rawStickX) < DEADZONE ? 0 : rawStickX
+  const sy = Math.abs(rawStickY) < DEADZONE ? 0 : rawStickY
+  intent.steer = clamp(sx, -1, 1)
+  if (sy > 0) {
+    intent.throttle = clamp(sy, 0, 1)
+  } else if (sy < 0) {
+    intent.throttle = clamp(sy, -1, 0)
+    intent.brake = clamp(-sy, 0, 1)
+  }
+  if (buttons.brake) intent.brake = 1
+  intent.fire = buttons.fire
+  intent.boost = buttons.boost
+  return intent
+}
+
+export function touchIntent(): Intent {
+  return computeTouchIntent(stickX, stickY, {
+    fire: pressed.has('fire'),
+    boost: pressed.has('boost'),
+    brake: pressed.has('brake'),
+  })
+}
+
+const STYLE = `
+#touch-ui { position: fixed; inset: 0; pointer-events: none; z-index: 100;
+  touch-action: none; -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent; }
+#touch-ui .stick {
+  position: absolute; bottom: max(28px, env(safe-area-inset-bottom));
+  left: max(28px, env(safe-area-inset-left));
+  width: 140px; height: 140px; border-radius: 50%;
+  background: rgba(255,255,255,0.06);
+  border: 2px solid rgba(255,255,255,0.22);
+  pointer-events: auto; touch-action: none;
+}
+#touch-ui .knob {
+  position: absolute; top: 50%; left: 50%; width: 60px; height: 60px;
+  margin: -30px 0 0 -30px; border-radius: 50%;
+  background: rgba(255,204,102,0.55);
+  border: 2px solid rgba(255,255,255,0.6);
+  transform: translate(0px, 0px);
+  pointer-events: none;
+}
+#touch-ui .buttons {
+  position: absolute; bottom: max(28px, env(safe-area-inset-bottom));
+  right: max(28px, env(safe-area-inset-right));
+  display: flex; flex-direction: column; gap: 12px; align-items: flex-end;
+  pointer-events: none;
+}
+#touch-ui .btn {
+  width: 76px; height: 76px; border-radius: 50%;
+  background: rgba(255,255,255,0.10);
+  border: 2px solid rgba(255,255,255,0.30);
+  color: #fff; font: bold 12px ui-monospace, monospace; letter-spacing: 1px;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: auto; touch-action: none; user-select: none;
+}
+#touch-ui .btn.fire { background: rgba(255,80,80,0.32); border-color: rgba(255,140,140,0.7); }
+#touch-ui .btn.boost { background: rgba(80,160,255,0.32); border-color: rgba(140,200,255,0.7); }
+#touch-ui .btn.brake { background: rgba(255,180,40,0.30); border-color: rgba(255,220,120,0.7); }
+#touch-ui .btn.active { background: rgba(255,255,255,0.45); }
+`
+
+function updateStickFromPoint(clientX: number, clientY: number) {
+  const dx = clientX - stickOriginX
+  const dy = clientY - stickOriginY
+  const len = Math.hypot(dx, dy)
+  let nx: number
+  let ny: number
+  if (len > STICK_RANGE_PX) {
+    nx = (dx / len) * STICK_RANGE_PX
+    ny = (dy / len) * STICK_RANGE_PX
+  } else {
+    nx = dx
+    ny = dy
+  }
+  stickX = nx / STICK_RANGE_PX
+  // Screen Y grows downward; gameplay Y up = forward throttle.
+  stickY = -ny / STICK_RANGE_PX
+  if (knobEl) knobEl.style.transform = `translate(${nx}px, ${ny}px)`
+}
+
+function resetStick() {
+  stickX = 0
+  stickY = 0
+  stickTouchId = null
+  if (knobEl) knobEl.style.transform = 'translate(0px, 0px)'
+}
+
+function installStickHandlers(stick: HTMLDivElement) {
+  stick.addEventListener(
+    'touchstart',
+    (e) => {
+      e.preventDefault()
+      if (stickTouchId !== null) return
+      const t = e.changedTouches[0]
+      if (!t) return
+      const rect = stick.getBoundingClientRect()
+      stickOriginX = rect.left + rect.width / 2
+      stickOriginY = rect.top + rect.height / 2
+      stickTouchId = t.identifier
+      updateStickFromPoint(t.clientX, t.clientY)
+    },
+    { passive: false },
+  )
+  window.addEventListener(
+    'touchmove',
+    (e) => {
+      if (stickTouchId === null) return
+      for (const t of Array.from(e.changedTouches)) {
+        if (t.identifier === stickTouchId) {
+          updateStickFromPoint(t.clientX, t.clientY)
+          e.preventDefault()
+          return
+        }
+      }
+    },
+    { passive: false },
+  )
+  const endTouch = (e: TouchEvent) => {
+    if (stickTouchId === null) return
+    for (const t of Array.from(e.changedTouches)) {
+      if (t.identifier === stickTouchId) {
+        resetStick()
+        return
+      }
+    }
+  }
+  window.addEventListener('touchend', endTouch)
+  window.addEventListener('touchcancel', endTouch)
+  window.addEventListener('blur', resetStick)
+}
+
+function makeButton(cls: string, label: string, key: ButtonKey): HTMLDivElement {
+  const b = document.createElement('div')
+  b.className = `btn ${cls}`
+  b.textContent = label
+  const press = (e: Event) => {
+    e.preventDefault()
+    pressed.add(key)
+    b.classList.add('active')
+  }
+  const release = () => {
+    pressed.delete(key)
+    b.classList.remove('active')
+  }
+  b.addEventListener('touchstart', press, { passive: false })
+  b.addEventListener('touchend', release)
+  b.addEventListener('touchcancel', release)
+  // Mouse fallback so desktop devtools "device emulation" can drive the UI.
+  b.addEventListener('mousedown', press)
+  window.addEventListener('mouseup', release)
+  return b
+}
+
+export function installTouch(): void {
+  if (installed) return
+  if (typeof window === 'undefined' || typeof document === 'undefined') return
+  if (!isTouchDevice()) return
+  installed = true
+
+  const style = document.createElement('style')
+  style.textContent = STYLE
+  document.head.appendChild(style)
+
+  const ui = document.createElement('div')
+  ui.id = 'touch-ui'
+
+  stickEl = document.createElement('div')
+  stickEl.className = 'stick'
+  knobEl = document.createElement('div')
+  knobEl.className = 'knob'
+  stickEl.appendChild(knobEl)
+  ui.appendChild(stickEl)
+
+  const buttons = document.createElement('div')
+  buttons.className = 'buttons'
+  buttons.appendChild(makeButton('boost', 'BOOST', 'boost'))
+  buttons.appendChild(makeButton('fire', 'FIRE', 'fire'))
+  buttons.appendChild(makeButton('brake', 'BRAKE', 'brake'))
+  ui.appendChild(buttons)
+
+  document.body.appendChild(ui)
+  installStickHandlers(stickEl)
+}
