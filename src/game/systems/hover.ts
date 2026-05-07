@@ -158,9 +158,14 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const angvPitch = angv.x * bikeRight.x + angv.y * bikeRight.y + angv.z * bikeRight.z
 
     // Stiff PD so external forces (waves, collisions) can't push past the limit.
+    // Sign note: positive intent.pitch (dive) maps to a negative targetPitch
+    // (since asin(bikeFwd.y) is negative when nose-down). The corrective
+    // torque in bike-local +X direction needs to be POSITIVE to rotate the
+    // bike's nose downward (+X rotation drives bikeFwd.y more negative). So
+    // the spring uses (current - target), not (target - current).
     const PITCH_SPRING = 38
     const PITCH_DAMP = 7
-    const aPitch = (targetPitch - currentPitch) * PITCH_SPRING - angvPitch * PITCH_DAMP
+    const aPitch = (currentPitch - targetPitch) * PITCH_SPRING - angvPitch * PITCH_DAMP
 
     // Roll servo to 0. Use bikeUp's bike-right component (= sin of roll angle
     // when bike is upright facing +Z; generalises to any yaw via the projection).
