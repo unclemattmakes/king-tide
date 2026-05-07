@@ -2,6 +2,7 @@ import { query } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { quatRotate, vecHorizontalLength } from '@/engine/sim/physics/vec'
+import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import {
   BikeStats,
   BikeStatsStore,
@@ -18,11 +19,51 @@ const MAX_HOVER_PROBE = 6
 const GRAVITY = 25 // must match PhysicsWorld gravity magnitude
 
 /**
- * Per-bike: probe ground, apply hover/thrust/steer/lateral-drag.
+ * Surface probe: looks below the bike for the closest "ride surface".
+ * Either a hard physical collider (raycast) or the wave field water surface,
+ * whichever is *higher* (closer to the bike) wins. This unifies driving on
+ * land and driving on water — same controller, different surface y.
+ */
+function probeSurface(
+  phys: PhysicsWorld,
+  field: WaveFieldState | null,
+  fromX: number,
+  fromY: number,
+  fromZ: number,
+  ignore: ReturnType<PhysicsWorld['world']['getRigidBody']>,
+): { surfaceY: number; isWater: boolean; hasSurface: boolean } {
+  const ray = new phys.rapier.Ray({ x: fromX, y: fromY, z: fromZ }, { x: 0, y: -1, z: 0 })
+  const hit = phys.world.castRay(
+    ray,
+    MAX_HOVER_PROBE,
+    true,
+    undefined,
+    undefined,
+    undefined,
+    ignore ?? undefined,
+  )
+  const groundY = hit ? fromY - hit.timeOfImpact : Number.NEGATIVE_INFINITY
+  const waterY = field ? sampleHeight(field, fromX, fromZ) : Number.NEGATIVE_INFINITY
+
+  // Higher surface wins — that's what the bike rides on.
+  if (groundY === Number.NEGATIVE_INFINITY && waterY === Number.NEGATIVE_INFINITY) {
+    return { surfaceY: 0, isWater: false, hasSurface: false }
+  }
+  if (groundY > waterY) {
+    return { surfaceY: groundY, isWater: false, hasSurface: true }
+  }
+  // Water can be sampled anywhere, so water is "always reachable" — but only
+  // counts as a ride surface if the bike is within probe range of it.
+  const reachable = fromY - waterY < MAX_HOVER_PROBE
+  return { surfaceY: waterY, isWater: true, hasSurface: reachable }
+}
+
+/**
+ * Per-bike: probe ground/water, apply hover/thrust/steer/lateral-drag.
  * All coefficients are in acceleration units (m/s^2 per unit). Impulses are
  * computed as accel * mass * dt so tuning stays decoupled from mass.
  */
-export function hoverSystem(sim: SimWorld, phys: PhysicsWorld): void {
+export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldState | null): void {
   const eids = query(sim, [BikeTag, RBHandle, BikeStats, ControlIntent, HoverState])
   for (const eid of eids) {
     const { handle } = RBHandleStore.must(eid)
@@ -37,19 +78,12 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld): void {
     const dt = phys.fixedDt
     const m = stats.mass
 
-    // 1. Ground probe.
-    const ray = new phys.rapier.Ray({ x: t.x, y: t.y, z: t.z }, { x: 0, y: -1, z: 0 })
-    const hit = phys.world.castRay(ray, MAX_HOVER_PROBE, true, undefined, undefined, undefined, rb)
+    const probe = probeSurface(phys, field, t.x, t.y, t.z, rb)
+    const groundDistance = probe.hasSurface ? t.y - probe.surfaceY : MAX_HOVER_PROBE
+    const isGrounded = probe.hasSurface && groundDistance < stats.hoverHeight * 1.6
 
-    let isGrounded = false
-    let groundDistance = MAX_HOVER_PROBE
-
-    if (hit) {
-      groundDistance = hit.timeOfImpact
-      isGrounded = groundDistance < stats.hoverHeight * 1.6
-
-      // PD hover with gravity compensation. At rest at target height, aUp = g
-      // exactly cancels gravity. Below target → push up; overshooting → damp.
+    if (probe.hasSurface) {
+      // PD hover with gravity comp. Same on land or water.
       const heightError = stats.hoverHeight - groundDistance
       const aUp = GRAVITY + heightError * stats.hoverSpring - linvel.y * stats.hoverDamp
       rb.applyImpulse({ x: 0, y: aUp * m * dt, z: 0 }, true)
@@ -59,30 +93,30 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld): void {
 
     if (!isGrounded) continue
 
-    // Local +Z is forward.
     const fwd = quatRotate(q, { x: 0, y: 0, z: 1 })
 
-    // 2. Forward thrust with speed-falloff.
+    // Forward thrust (water adds extra drag — slightly less responsive).
     const speed = vecHorizontalLength({ x: linvel.x, y: 0, z: linvel.z })
     const throttle = intent.throttle
     const direction = throttle >= 0 ? 1 : -1
     const scale = throttle >= 0 ? 1 : stats.reverseScale
     const speedFalloff = Math.max(0, 1 - speed / stats.topSpeed)
     const boost = intent.boost ? stats.boostMul : 1
-    const aThrust = Math.abs(throttle) * stats.accel * scale * speedFalloff * boost * direction
+    const surfaceMul = probe.isWater ? 0.85 : 1.0
+    const aThrust =
+      Math.abs(throttle) * stats.accel * scale * speedFalloff * boost * direction * surfaceMul
     rb.applyImpulse({ x: fwd.x * aThrust * m * dt, y: 0, z: fwd.z * aThrust * m * dt }, true)
 
-    // 3. Yaw torque from steer. Note: torque impulse units = N·m·s, applied to angular velocity
-    // proportional to inverse moment of inertia. For arcade purposes, we treat turnTorque as
-    // an angular acceleration coefficient and convert via mass (rough approximation — the
-    // collider's actual inertia is what Rapier uses, but mass scaling keeps tuning stable).
-    const aTurn = -intent.steer * stats.turnTorque
+    // Yaw torque — a hair more responsive on water for skim feel.
+    const turnMul = probe.isWater ? 1.1 : 1.0
+    const aTurn = -intent.steer * stats.turnTorque * turnMul
     rb.applyTorqueImpulse({ x: 0, y: aTurn * m * dt, z: 0 }, true)
 
-    // 4. Lateral drag — projects sideways velocity, applies counter-impulse.
+    // Lateral drag — water has *more* lateral resistance (skis don't slide sideways easily).
+    const dragMul = probe.isWater ? 1.4 : 1.0
     const right = quatRotate(q, { x: 1, y: 0, z: 0 })
     const lateralVel = linvel.x * right.x + linvel.z * right.z
-    const aDrag = -lateralVel * stats.lateralDrag
+    const aDrag = -lateralVel * stats.lateralDrag * dragMul
     rb.applyImpulse({ x: right.x * aDrag * m * dt, y: 0, z: right.z * aDrag * m * dt }, true)
   }
 }

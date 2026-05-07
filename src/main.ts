@@ -11,11 +11,14 @@ import { createChaseCamera } from './engine/render/camera'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
 import { createScene } from './engine/render/scene'
+import { createWaterMesh } from './engine/render/water'
 import { createSimWorld } from './engine/sim/ecs/world'
 import { createPhysicsWorld } from './engine/sim/physics/rapier'
 import { vecHorizontalLength } from './engine/sim/physics/vec'
+import { advanceWaveField, createWaveField, defaultWaves } from './engine/sim/water/wave-field'
 import { HoverStateStore, RBHandleStore } from './game/components'
-import { createBike, createGround } from './game/entities/bike'
+import { createArena, ISLAND_TOP_Y } from './game/entities/arena'
+import { createBike } from './game/entities/bike'
 import { hoverSystem } from './game/systems/hover'
 import { applyPlayerIntent } from './game/systems/input-apply'
 import { syncFromPhysics } from './game/systems/sync-from-physics'
@@ -36,9 +39,14 @@ async function boot() {
   const sim = createSimWorld()
   const chase = createChaseCamera(camera)
 
-  createGround(phys)
+  // Water field — sim-side state, sampled by buoyancy + water shader.
+  const waveField = createWaveField(defaultWaves())
+  const waterMesh = createWaterMesh(waveField, { size: 800, subdivisions: 96 })
+  scene.add(waterMesh.mesh)
+
+  createArena(phys)
   const playerEid = createBike(sim, phys, {
-    position: { x: 0, y: 2, z: 0 },
+    position: { x: 0, y: ISLAND_TOP_Y + 2, z: 0 },
     isPlayer: true,
   })
 
@@ -73,8 +81,9 @@ async function boot() {
 
     physAccum += dt
     while (physAccum >= phys.fixedDt) {
+      advanceWaveField(waveField, phys.fixedDt)
       applyPlayerIntent(sim, state.intent)
-      hoverSystem(sim, phys)
+      hoverSystem(sim, phys, waveField)
       phys.step()
       syncFromPhysics(sim, phys)
       physAccum -= phys.fixedDt
@@ -102,6 +111,7 @@ async function boot() {
       }
     }
 
+    waterMesh.tick()
     bikeRender()
     renderer.render(scene, camera)
 

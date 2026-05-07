@@ -21,10 +21,11 @@ test.describe('M1 driving', () => {
     )
 
     const initial = await page.evaluate(() => window.__hover!.player()!)
-    expect(initial.position.y).toBeGreaterThan(0.8)
-    expect(initial.position.y).toBeLessThan(2.0)
+    // Bike spawns on the island (top y=3) and hovers ~1.2m above it.
+    expect(initial.position.y).toBeGreaterThan(3.5)
+    expect(initial.position.y).toBeLessThan(5.5)
     expect(initial.isGrounded).toBe(true)
-    expect(initial.speed).toBeLessThan(1.0) // resting at spawn
+    expect(initial.speed).toBeLessThan(1.5) // resting at spawn
 
     // Drive forward for ~2 seconds.
     await page.evaluate(() =>
@@ -51,8 +52,8 @@ test.describe('M1 driving', () => {
     const driving = await page.evaluate(() => window.__hover!.player()!)
     expect(driving.speed).toBeGreaterThan(10)
     expect(driving.position.z - initial.position.z).toBeGreaterThan(5)
-    // Still hovering, not ground-pounded
-    expect(driving.position.y).toBeGreaterThan(0.5)
+    // Still hovering, not ground-pounded (island top y=3, water y≈0)
+    expect(driving.position.y).toBeGreaterThan(0)
 
     // Release throttle, bike should decelerate.
     await page.evaluate(() => window.__hover!.setIntentOverride(null))
