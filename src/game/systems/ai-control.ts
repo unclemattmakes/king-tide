@@ -131,6 +131,7 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
       brake,
       fire: false,
       boost: false,
+      pitch: 0,
     })
   }
 }

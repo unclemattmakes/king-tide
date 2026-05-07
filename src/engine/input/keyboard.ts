@@ -18,21 +18,56 @@ export function isKeyDown(code: string): boolean {
   return keys.has(code)
 }
 
+// Smoothed analog values — lerped each tick toward the binary key state.
+// Stops keyboard from feeling twitchy: pressing D for 50ms gives a small steer,
+// holding D ramps to full deflection over ~0.15s.
+let smoothSteer = 0
+let smoothThrottle = 0
+let smoothPitch = 0
+
+const RATE_STEER = 9 // rad/s of exponential decay coefficient
+const RATE_THROTTLE = 10
+const RATE_PITCH = 8
+
+function lerpToward(current: number, target: number, dt: number, rate: number): number {
+  const t = 1 - Math.exp(-dt * rate)
+  return current + (target - current) * t
+}
+
 /**
- * WASD/arrows fallback when no gamepad is connected.
- * W/Up = throttle, S/Down = brake/reverse, A/Left + D/Right = steer.
- * Space = fire, Shift = boost.
+ * WASD / arrows for movement, Q/E for pitch (Wave-Race-style lean forward/back).
+ *   W or ↑   = throttle forward
+ *   S or ↓   = brake / reverse
+ *   A or ←   = steer left
+ *   D or →   = steer right
+ *   Q        = pitch up   (lean back, jump off a wave)
+ *   E        = pitch down (lean forward, dive into a wave)
+ *   Space    = fire pickup
+ *   Shift    = boost
  */
-export function keyboardIntent(): Intent {
-  const intent = emptyIntent()
-  if (keys.has('KeyW') || keys.has('ArrowUp')) intent.throttle = 1
-  if (keys.has('KeyS') || keys.has('ArrowDown')) {
-    intent.throttle = intent.throttle === 1 ? 0 : -1
-    intent.brake = 1
-  }
-  if (keys.has('KeyA') || keys.has('ArrowLeft')) intent.steer -= 1
-  if (keys.has('KeyD') || keys.has('ArrowRight')) intent.steer += 1
+export function keyboardIntent(dt: number): Intent {
+  let steerTarget = 0
+  if (keys.has('KeyA') || keys.has('ArrowLeft')) steerTarget -= 1
+  if (keys.has('KeyD') || keys.has('ArrowRight')) steerTarget += 1
+
+  let throttleTarget = 0
+  if (keys.has('KeyW') || keys.has('ArrowUp')) throttleTarget = 1
+  if (keys.has('KeyS') || keys.has('ArrowDown')) throttleTarget = throttleTarget === 1 ? 0 : -1
+
+  let pitchTarget = 0
+  if (keys.has('KeyQ')) pitchTarget -= 1
+  if (keys.has('KeyE')) pitchTarget += 1
+
+  smoothSteer = lerpToward(smoothSteer, steerTarget, dt, RATE_STEER)
+  smoothThrottle = lerpToward(smoothThrottle, throttleTarget, dt, RATE_THROTTLE)
+  smoothPitch = lerpToward(smoothPitch, pitchTarget, dt, RATE_PITCH)
+
+  const intent: Intent = emptyIntent()
+  intent.throttle = smoothThrottle
+  intent.steer = smoothSteer
+  intent.brake = keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0
   intent.fire = keys.has('Space')
   intent.boost = keys.has('ShiftLeft') || keys.has('ShiftRight')
+  intent.pitch = smoothPitch
   return intent
 }

@@ -36,6 +36,7 @@ test.describe('M1 driving', () => {
         brake: 0,
         fire: false,
         boost: false,
+        pitch: 0,
       }),
     )
 
@@ -74,6 +75,7 @@ test.describe('M1 driving', () => {
         brake: 0,
         fire: false,
         boost: false,
+        pitch: 0,
       }),
     )
 

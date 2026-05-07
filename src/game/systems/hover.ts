@@ -133,18 +133,37 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const aTurn = -intent.steer * stats.turnTorque * turnMul
     rb.applyTorqueImpulse({ x: 0, y: aTurn * m * dt, z: 0 }, true)
 
-    // Upright stabilizer: torque the bike back toward world-up plus a damping
-    // term on the tilting angular velocity. Without the damping, the spring
-    // alone would oscillate forever on collisions. Together they're a PD
-    // controller on tilt-angle, fast and well-behaved.
-    const bikeUp = quatRotate(q, { x: 0, y: 1, z: 0 })
-    const STABILIZE_K = 38 // spring (m/s^2 per unit tilt component)
-    const STABILIZE_D = 6 // damper (m/s^2 per rad/s of tilting velocity)
+    // Pitch torque (Wave Race style lean): rotates the bike around its own
+    // right-axis. Positive intent.pitch = nose-down dive; negative = nose-up
+    // jump. Strongest on water where the player can ride/launch off swells.
+    const bikeRight = quatRotate(q, { x: 1, y: 0, z: 0 })
+    const pitchMul = probe.isWater ? 1.0 : 0.7
+    const aPitch = intent.pitch * stats.pitchTorque * pitchMul
     rb.applyTorqueImpulse(
       {
-        x: (bikeUp.z * STABILIZE_K - rb.angvel().x * STABILIZE_D) * m * dt,
+        x: bikeRight.x * aPitch * m * dt,
+        y: bikeRight.y * aPitch * m * dt,
+        z: bikeRight.z * aPitch * m * dt,
+      },
+      true,
+    )
+
+    // Upright stabilizer: PD controller pulling the bike's local-up back
+    // toward world-up. Boosted when the bike is more than 90° tilted (i.e.
+    // local-up has gone below horizontal) so flipped bikes self-right
+    // quickly. Reduced when the player is actively pitching so they can
+    // hold a lean.
+    const bikeUp = quatRotate(q, { x: 0, y: 1, z: 0 })
+    const upsideDownBoost = bikeUp.y < 0 ? 3.0 : 1.0
+    const pitchAttenuation = 1 - 0.55 * Math.min(1, Math.abs(intent.pitch))
+    const STABILIZE_K = 38 * upsideDownBoost * pitchAttenuation
+    const STABILIZE_D = 6 * upsideDownBoost
+    const angv = rb.angvel()
+    rb.applyTorqueImpulse(
+      {
+        x: (bikeUp.z * STABILIZE_K - angv.x * STABILIZE_D) * m * dt,
         y: 0,
-        z: (-bikeUp.x * STABILIZE_K - rb.angvel().z * STABILIZE_D) * m * dt,
+        z: (-bikeUp.x * STABILIZE_K - angv.z * STABILIZE_D) * m * dt,
       },
       true,
     )

@@ -10,6 +10,7 @@ import {
 } from './engine/input'
 import { installCameraLookInput, tickCameraLook } from './engine/input/camera-look'
 import { createChaseCamera } from './engine/render/camera'
+import { createDirectionArrow } from './engine/render/direction-arrow'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
@@ -137,6 +138,8 @@ async function boot() {
 
   const bikeRender = createBikeRenderSystem(scene, sim)
   const pickupRender = createPickupRenderSystem(scene, sim)
+  const dirArrow = createDirectionArrow()
+  scene.add(dirArrow.mesh)
 
   const state = {
     ready: false,
@@ -184,12 +187,33 @@ async function boot() {
     }
   }
 
-  // Keys: R to restart after finish; T (or F1) to toggle auto-play.
+  /** Snap the player back to the spawn pose with zero velocity. Useful after
+   *  collisions leave the bike upside-down, off-track, or unrecoverable. */
+  function respawnPlayer() {
+    const handle = RBHandleStore.get(playerEid)
+    if (!handle) return
+    const rb = phys.world.getRigidBody(handle.handle)
+    if (!rb) return
+    const halfYaw = track.start.yaw / 2
+    rb.setTranslation(
+      { x: track.start.position.x, y: track.start.position.y, z: track.start.position.z },
+      true,
+    )
+    rb.setRotation({ x: 0, y: Math.sin(halfYaw), z: 0, w: Math.cos(halfYaw) }, true)
+    rb.setLinvel({ x: 0, y: 0, z: 0 }, true)
+    rb.setAngvel({ x: 0, y: 0, z: 0 }, true)
+  }
+
+  // Keys: R to restart after finish; T (or F1) to toggle auto-play;
+  // Backspace to respawn the player in place.
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyR' && finishShown) {
       window.location.reload()
     } else if (e.code === 'KeyT' || e.code === 'F1') {
       setAutoPlay(!autoPlay)
+    } else if (e.code === 'Backspace') {
+      respawnPlayer()
+      e.preventDefault()
     }
   })
 
@@ -205,7 +229,7 @@ async function boot() {
     const dt = Math.min((now - last) / 1000, 1 / 15)
     last = now
 
-    state.intent = state.intentOverride ?? readPlayerIntent()
+    state.intent = state.intentOverride ?? readPlayerIntent(dt)
 
     physAccum += dt
     while (physAccum >= phys.fixedDt) {
@@ -265,6 +289,21 @@ async function boot() {
     waterMesh.tick()
     bikeRender()
     pickupRender(dt)
+
+    // Direction arrow points the player to the next checkpoint.
+    const racerNow = RacerStore.get(playerEid)
+    if (racerNow && !racerNow.finished) {
+      const nextCp = track.checkpoints[racerNow.nextCheckpoint]
+      if (nextCp) {
+        const targetVec = new THREE.Vector3(nextCp.position.x, nextCp.position.y, nextCp.position.z)
+        dirArrow.tick(tmpPos, targetVec, dt)
+      } else {
+        dirArrow.tick(tmpPos, null, dt)
+      }
+    } else {
+      dirArrow.tick(tmpPos, null, dt)
+    }
+
     renderer.render(scene, camera)
 
     state.frame += 1

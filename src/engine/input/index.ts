@@ -10,11 +10,11 @@ export function installInput(): void {
 
 /**
  * Merge keyboard + gamepad. For each axis, the input with the larger magnitude
- * wins; for booleans, OR. This means both work simultaneously — a player can
- * tap a key while a gamepad is connected without one overriding the other.
+ * wins; for booleans, OR. Both work simultaneously — a player can tap a key
+ * while a gamepad is connected without one overriding the other.
  */
-export function readPlayerIntent(): Intent {
-  const k = keyboardIntent()
+export function readPlayerIntent(dt: number): Intent {
+  const k = keyboardIntent(dt)
   const g = gamepadIntent()
 
   const pickAxis = (a: number, b: number) => (Math.abs(a) >= Math.abs(b) ? a : b)
@@ -25,6 +25,7 @@ export function readPlayerIntent(): Intent {
     brake: Math.max(k.brake, g.brake),
     fire: k.fire || g.fire,
     boost: k.boost || g.boost,
+    pitch: pickAxis(k.pitch, g.pitch),
   }
 }
 

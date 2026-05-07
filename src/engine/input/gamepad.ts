@@ -37,6 +37,9 @@ export function gamepadIntent(): Intent {
   if (!pad) return intent
 
   intent.steer = applyDeadzone(pad.axes[0] ?? 0)
+  // Left-stick Y for pitch. axes[1] is negative when pushed forward (toward
+  // the screen on a typical pad); invert so positive = nose-down dive.
+  intent.pitch = -applyDeadzone(pad.axes[1] ?? 0)
   intent.throttle = pad.buttons[7]?.value ?? 0
   intent.brake = pad.buttons[6]?.value ?? 0
   if (intent.brake > 0.1 && intent.throttle < 0.1) {

@@ -130,6 +130,7 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
           brake: 0,
           fire: false,
           boost: false,
+          pitch: 0,
         }
         out.push({
           eid,

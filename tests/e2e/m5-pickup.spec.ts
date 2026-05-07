@@ -19,6 +19,7 @@ test.describe('M5 pickup + boost', () => {
         brake: 0,
         fire: false,
         boost: false,
+        pitch: 0,
       }),
     )
 
@@ -37,6 +38,7 @@ test.describe('M5 pickup + boost', () => {
         brake: 0,
         fire: true,
         boost: false,
+        pitch: 0,
       }),
     )
 
@@ -53,6 +55,7 @@ test.describe('M5 pickup + boost', () => {
         brake: 0,
         fire: false,
         boost: false,
+        pitch: 0,
       }),
     )
 

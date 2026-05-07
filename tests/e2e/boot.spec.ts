@@ -43,6 +43,7 @@ test.describe('M0 boot', () => {
         brake: 0,
         fire: false,
         boost: false,
+        pitch: 0,
       }),
     )
 

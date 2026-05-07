@@ -28,6 +28,7 @@ test.describe('M3 race', () => {
         brake: 0,
         fire: false,
         boost: false,
+        pitch: 0,
       }),
     )
 
@@ -55,6 +56,7 @@ test.describe('M3 race', () => {
         brake: 0,
         fire: false,
         boost: false,
+        pitch: 0,
       }),
     )
 
