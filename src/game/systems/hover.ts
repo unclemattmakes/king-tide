@@ -92,10 +92,12 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       const liNow = rb.linvel()
       const speedNow = Math.hypot(liNow.x, liNow.z)
       const leanScale = Math.min(speedNow / LEAN_SPEED_FULL, 1)
-      // Sign convention: +γ rotation around bikeFwd lifts the right side
-      // (bike leans LEFT). steer=+1 means turn-right, which should lean
-      // the bike RIGHT — so the target roll is the negation of steer.
-      const targetRoll = -intent.steer * ROLL_LEAN_LIMIT * leanScale
+      // Sign is empirical, not analytical (same disclaimer as the steer
+      // and pitch sign conventions — see hoverSystem header). With the
+      // chase-cam in this project, +intent.steer * LIMIT produces a
+      // visible bank into the perceived turn; the negation read like an
+      // out-of-control car body-rolling to the outside.
+      const targetRoll = intent.steer * ROLL_LEAN_LIMIT * leanScale
 
       const q0 = rb.rotation()
       const r02 = 2 * (q0.x * q0.z + q0.y * q0.w)
