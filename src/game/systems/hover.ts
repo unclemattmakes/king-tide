@@ -133,37 +133,52 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const aTurn = -intent.steer * stats.turnTorque * turnMul
     rb.applyTorqueImpulse({ x: 0, y: aTurn * m * dt, z: 0 }, true)
 
-    // Pitch torque (Wave Race style lean): rotates the bike around its own
-    // right-axis. Positive intent.pitch = nose-down dive; negative = nose-up
-    // jump. Strongest on water where the player can ride/launch off swells.
+    // Pitch + roll attitude controller, decomposed in bike-local axes.
+    //
+    // Pitch is a SERVO: the player's intent.pitch maps to a target pitch
+    // angle (±60°) and a PD controller pulls the bike's nose toward that
+    // target. This naturally enforces the limit (no continuous somersaults)
+    // AND lets the player hold a lean while the spring keeps fighting against
+    // gravity disturbances.
+    //
+    // Roll is always servo'd to 0 (upright) at full strength, independent of
+    // pitch input — so leaning forward doesn't unlock barrel-rolling.
     const bikeRight = quatRotate(q, { x: 1, y: 0, z: 0 })
-    const pitchMul = probe.isWater ? 1.0 : 0.7
-    const aPitch = intent.pitch * stats.pitchTorque * pitchMul
-    rb.applyTorqueImpulse(
-      {
-        x: bikeRight.x * aPitch * m * dt,
-        y: bikeRight.y * aPitch * m * dt,
-        z: bikeRight.z * aPitch * m * dt,
-      },
-      true,
-    )
-
-    // Upright stabilizer: PD controller pulling the bike's local-up back
-    // toward world-up. Boosted when the bike is more than 90° tilted (i.e.
-    // local-up has gone below horizontal) so flipped bikes self-right
-    // quickly. Reduced when the player is actively pitching so they can
-    // hold a lean.
+    const bikeFwd = quatRotate(q, { x: 0, y: 0, z: 1 })
     const bikeUp = quatRotate(q, { x: 0, y: 1, z: 0 })
-    const upsideDownBoost = bikeUp.y < 0 ? 3.0 : 1.0
-    const pitchAttenuation = 1 - 0.55 * Math.min(1, Math.abs(intent.pitch))
-    const STABILIZE_K = 38 * upsideDownBoost * pitchAttenuation
-    const STABILIZE_D = 6 * upsideDownBoost
     const angv = rb.angvel()
+
+    const PITCH_LIMIT = Math.PI / 6 // 30° — enough for a visible lean without
+    //                                         losing forward thrust direction
+    const pitchMul = probe.isWater ? 1.0 : 0.7
+    // Positive intent.pitch = nose-down ⇒ negative target pitch angle (since
+    // currentPitch = asin(bikeFwd.y), and nose-down means bikeFwd.y < 0).
+    const targetPitch = -intent.pitch * PITCH_LIMIT * pitchMul
+    const currentPitch = Math.asin(Math.max(-1, Math.min(1, bikeFwd.y)))
+    const angvPitch = angv.x * bikeRight.x + angv.y * bikeRight.y + angv.z * bikeRight.z
+
+    // Stiff PD so external forces (waves, collisions) can't push past the limit.
+    const PITCH_SPRING = 38
+    const PITCH_DAMP = 7
+    const aPitch = (targetPitch - currentPitch) * PITCH_SPRING - angvPitch * PITCH_DAMP
+
+    // Roll servo to 0. Use bikeUp's bike-right component (= sin of roll angle
+    // when bike is upright facing +Z; generalises to any yaw via the projection).
+    const upsideDownBoost = bikeUp.y < 0 ? 3.0 : 1.0
+    const corrX = bikeUp.z
+    const corrZ = -bikeUp.x
+    const rollProj = corrX * bikeFwd.x + corrZ * bikeFwd.z
+    const angvRoll = angv.x * bikeFwd.x + angv.y * bikeFwd.y + angv.z * bikeFwd.z
+
+    const ROLL_SPRING = 38 * upsideDownBoost
+    const ROLL_DAMP = 6 * upsideDownBoost
+    const aRoll = rollProj * ROLL_SPRING - angvRoll * ROLL_DAMP
+
     rb.applyTorqueImpulse(
       {
-        x: (bikeUp.z * STABILIZE_K - angv.x * STABILIZE_D) * m * dt,
-        y: 0,
-        z: (-bikeUp.x * STABILIZE_K - angv.z * STABILIZE_D) * m * dt,
+        x: (aPitch * bikeRight.x + aRoll * bikeFwd.x) * m * dt,
+        y: (aPitch * bikeRight.y + aRoll * bikeFwd.y) * m * dt,
+        z: (aPitch * bikeRight.z + aRoll * bikeFwd.z) * m * dt,
       },
       true,
     )
