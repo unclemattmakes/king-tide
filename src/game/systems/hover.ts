@@ -73,14 +73,30 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const rb = phys.world.getRigidBody(handle)
     if (!rb) continue
 
-    // Kinematic roll lock. Decompose orientation into YXZ intrinsic Euler
-    // (yaw around world-Y, then pitch around the new local-X, then roll
-    // around the new local-Z) and force the roll component to zero. Then
-    // strip out any rotation around bikeFwd from angvel so no roll velocity
-    // accumulates from misaligned-axis torque side-effects (the M9.x bug:
-    // pitch + steer caused the roll PD to over-correct false-positives and
-    // pump real roll velocity into the body). Yaw and pitch can do whatever.
+    // Kinematic attitude shape. Decompose the bike's orientation into YXZ
+    // intrinsic Euler (yaw around world-Y, then pitch around the new
+    // local-X, then roll around the new local-Z), then RE-IMPOSE roll
+    // kinematically to a small target lean that's proportional to steer
+    // input and ramped by speed. Pitch and yaw evolve from physics.
+    //
+    // Two reasons for the kinematic roll:
+    // 1. M9.x bug: any non-zero roll PD using bikeRight.y as its measure
+    //    false-positives on yaw-while-pitched and pumps real roll velocity
+    //    back into the body. Owning the roll axis kinematically sidesteps
+    //    that entirely.
+    // 2. The bike should bank into turns like a jet ski / hover bike, not
+    //    skate flat like a hockey puck.
     {
+      const ROLL_LEAN_LIMIT = Math.PI / 15 // ~12° max lean into a turn
+      const LEAN_SPEED_FULL = 5 // m/s — full lean kicks in once moving meaningfully
+      const liNow = rb.linvel()
+      const speedNow = Math.hypot(liNow.x, liNow.z)
+      const leanScale = Math.min(speedNow / LEAN_SPEED_FULL, 1)
+      // Sign convention: +γ rotation around bikeFwd lifts the right side
+      // (bike leans LEFT). steer=+1 means turn-right, which should lean
+      // the bike RIGHT — so the target roll is the negation of steer.
+      const targetRoll = -intent.steer * ROLL_LEAN_LIMIT * leanScale
+
       const q0 = rb.rotation()
       const r02 = 2 * (q0.x * q0.z + q0.y * q0.w)
       const r10 = 2 * (q0.x * q0.y + q0.z * q0.w)
@@ -88,15 +104,27 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       const r12 = 2 * (q0.y * q0.z - q0.x * q0.w)
       const r22 = 1 - 2 * (q0.x * q0.x + q0.y * q0.y)
       const rollAngle = Math.atan2(r10, r11)
-      if (Math.abs(rollAngle) > 1e-5) {
+      if (Math.abs(rollAngle - targetRoll) > 1e-5) {
         const pitchAngle = Math.asin(Math.max(-1, Math.min(1, -r12)))
         const yawAngle = Math.atan2(r02, r22)
         const cy = Math.cos(yawAngle / 2)
         const sy = Math.sin(yawAngle / 2)
         const cp = Math.cos(pitchAngle / 2)
         const sp = Math.sin(pitchAngle / 2)
-        rb.setRotation({ w: cy * cp, x: cy * sp, y: sy * cp, z: -sy * sp }, true)
+        const cr = Math.cos(targetRoll / 2)
+        const sr = Math.sin(targetRoll / 2)
+        rb.setRotation(
+          {
+            w: cy * cp * cr + sy * sp * sr,
+            x: cy * sp * cr + sy * cp * sr,
+            y: sy * cp * cr - cy * sp * sr,
+            z: cy * cp * sr - sy * sp * cr,
+          },
+          true,
+        )
       }
+      // Strip any rotation around the (just-set) bikeFwd from angvel.
+      // The kinematic update owns roll; physics shouldn't accumulate any.
       const qNow = rb.rotation()
       const fwdNow = quatRotate(qNow, { x: 0, y: 0, z: 1 })
       const angvNow = rb.angvel()
