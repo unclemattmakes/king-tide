@@ -115,8 +115,10 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       // For YXZ Euler with bike-up = N: γ = -asin(nR), β = atan2(nZ, ny).
       // (Derived from R_y(yaw) R_x(β) R_z(γ) * (0,1,0) ≈ (-sin γ, cos β cos γ,
       // sin β cos γ) in the yawed frame, matched component-wise to N.)
-      surfaceRollTarget = -Math.asin(Math.max(-1, Math.min(1, nR)))
-      surfacePitchTarget = Math.atan2(nZ, ny)
+      // Scaled by stats.surfaceFollow so different bikes can feel sturdier
+      // (low) or more responsive to the chop (high) — see BikeStatsData.
+      surfaceRollTarget = stats.surfaceFollow * -Math.asin(Math.max(-1, Math.min(1, nR)))
+      surfacePitchTarget = stats.surfaceFollow * Math.atan2(nZ, ny)
     }
 
     // Kinematic attitude shape. Decompose the bike's orientation into YXZ

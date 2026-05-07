@@ -38,6 +38,13 @@ export type BikeStatsData = {
   reverseScale: number
   boostMul: number
   mass: number
+  /**
+   * How much the bike conforms to the wave/ground slope (0 = skates flat
+   * regardless of surface, 1 = perfectly perpendicular). Tunable per bike
+   * for feel: a heavy hover-cruiser plows through chop with low
+   * surfaceFollow (~0.3); a light agile bike rides every ripple at ~0.7.
+   */
+  surfaceFollow: number
 }
 export const BikeStatsStore = createStore<BikeStatsData>('BikeStats')
 

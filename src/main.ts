@@ -16,6 +16,7 @@ import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
 import { createScene } from './engine/render/scene'
 import { createTrackVisuals } from './engine/render/track-mesh'
+import { createTrailRenderSystem } from './engine/render/trail-render'
 import { createWaterMesh } from './engine/render/water'
 import { createSimWorld } from './engine/sim/ecs/world'
 import { createPhysicsWorld } from './engine/sim/physics/rapier'
@@ -137,6 +138,7 @@ async function boot() {
   })
 
   const bikeRender = createBikeRenderSystem(scene, sim)
+  const trailRender = createTrailRenderSystem(scene, sim)
   const pickupRender = createPickupRenderSystem(scene, sim)
   const dirArrow = createDirectionArrow()
   scene.add(dirArrow.mesh)
@@ -288,6 +290,7 @@ async function boot() {
 
     waterMesh.tick()
     bikeRender()
+    trailRender()
     pickupRender(dt)
 
     // Direction arrow points the player to the next checkpoint.
