@@ -89,15 +89,16 @@ async function boot() {
     asRacer: true,
   })
 
-  // Spread AI bikes across a wide grid behind the player. Each gets a distinct
-  // lateral race-line offset so they don't all aim at the same target point and
-  // ram each other at the first gate.
+  // Spread AI bikes across a 4-wide grid behind the player on the right
+  // straight, each with a different perpendicular race-line offset. The
+  // straight is 28m wide (gate halfWidth × 2), so we spread offsets across
+  // ±6m. Bikes spawn at the same lateral offset so they hold their lane.
   const aiEids: number[] = []
   const aiSlots = [
-    { dx: -8, dz: -4, off: -6 },
-    { dx: -3, dz: -8, off: -2 },
-    { dx: 3, dz: -8, off: 2 },
-    { dx: 8, dz: -4, off: 6 },
+    { dx: -6, dz: -5, off: -6 },
+    { dx: -2, dz: -10, off: -2 },
+    { dx: 2, dz: -10, off: 2 },
+    { dx: 6, dz: -5, off: 6 },
   ]
   for (let i = 0; i < Math.min(NUM_AI, aiSlots.length); i++) {
     const slot = aiSlots[i]!
@@ -110,14 +111,22 @@ async function boot() {
     aiEids.push(aiEid)
   }
 
+  // Mark the initial "next" gate (cp 0). After the first frame the race
+  // callback takes over.
+  trackVisuals.setCheckpointState(0, 'next')
+
   const raceTick = createRaceSystem(track, {
-    onCheckpoint: (eid, idx) => {
+    onCheckpoint: (eid, justCrossed) => {
       if (eid !== playerEid) return
       const r = RacerStore.get(eid)
       if (!r) return
+      // The race system has already advanced nextCheckpoint by the time this
+      // fires (post-update), so r.nextCheckpoint is the *upcoming* gate.
+      // Mark each gate by its relationship to that pointer.
       for (const cp of track.checkpoints) {
-        if (cp.index === r.nextCheckpoint) trackVisuals.setCheckpointState(cp.index, 'next')
-        else if (idx >= cp.index && r.lap === 1) {
+        if (cp.index === r.nextCheckpoint) {
+          trackVisuals.setCheckpointState(cp.index, 'next')
+        } else if (cp.index === justCrossed) {
           trackVisuals.setCheckpointState(cp.index, 'passed')
         } else {
           trackVisuals.setCheckpointState(cp.index, 'upcoming')

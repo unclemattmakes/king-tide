@@ -66,8 +66,6 @@ export function createRaceSystem(track: Track, events: RaceEvents = {}) {
       const insideVertically = vertical > -1.5 && vertical < cp.height + 2
 
       if (crossed && insideLaterally && insideVertically) {
-        events.onCheckpoint?.(eid, cp.index, racer.lap)
-
         const wasFirstCrossing = racer.checkpointsCrossed === 0
         const crossingFinishLine = cp.index === 0
         racer.checkpointsCrossed += 1
@@ -75,15 +73,26 @@ export function createRaceSystem(track: Track, events: RaceEvents = {}) {
 
         // Lap completes when crossing the start/finish line (cp 0) AFTER the
         // first one (the first cp 0 crossing simply *starts* lap 1).
+        let lapped = false
         if (crossingFinishLine && !wasFirstCrossing) {
           racer.lap += 1
-          events.onLap?.(eid, racer.lap)
+          lapped = true
           if (racer.lap > track.lapsToFinish) {
             racer.finished = true
-            events.onFinish?.(eid)
           }
         }
         RacerStore.set(eid, racer)
+
+        // Callbacks fire AFTER the state is updated so listeners see the new
+        // nextCheckpoint / lap. (Earlier ordering caused gate visuals to mark
+        // the just-crossed gate as still "next" because the index was stale.)
+        events.onCheckpoint?.(eid, cp.index, racer.lap)
+        if (lapped) {
+          events.onLap?.(eid, racer.lap)
+          if (racer.finished) {
+            events.onFinish?.(eid)
+          }
+        }
       }
     }
   }

@@ -21,11 +21,12 @@ test.describe('M1 driving', () => {
     )
 
     const initial = await page.evaluate(() => window.__hover!.player()!)
-    // Bike spawns on the island (top y=3) and hovers ~1.2m above it.
-    expect(initial.position.y).toBeGreaterThan(3.5)
-    expect(initial.position.y).toBeLessThan(5.5)
+    // Bike spawns on the right straight, over water; hovers ~1.2m above the
+    // wave surface (which oscillates a bit, so allow a generous range).
+    expect(initial.position.y).toBeGreaterThan(0.2)
+    expect(initial.position.y).toBeLessThan(3)
     expect(initial.isGrounded).toBe(true)
-    expect(initial.speed).toBeLessThan(1.5) // resting at spawn
+    expect(initial.speed).toBeLessThan(2.5) // resting at spawn (waves jostle a little)
 
     // Drive forward for ~2 seconds.
     await page.evaluate(() =>

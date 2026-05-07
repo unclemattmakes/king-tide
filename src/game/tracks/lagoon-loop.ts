@@ -1,57 +1,58 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
-import { ISLAND_RADIUS, ISLAND_TOP_Y } from '@/game/entities/arena'
 import type { Checkpoint, Track } from './types'
 
 /**
- * Procedural test track: a true closed loop around the island.
+ * Stadium-shaped racetrack — two long straights joined by two half-circle
+ * curves, NASCAR-style. The start line sits ALONG the loop (on the right
+ * straight), so the player spawns on the racing line itself rather than
+ * inside a separate infield and hopping on.
  *
- *   Player spawns just south of cp 0 facing +Z. Drives through cp 0
- *   (start/finish), then up the centre, swings east through cp 2/3, sweeps
- *   south through cp 4/5, comes back up the west side via cp 6/7, then a
- *   final approach gate (cp 8) just south-west of the start so lap
- *   completion lines up with cp 0's +Z crossing direction.
+ * Layout (top-down, +Z up):
  *
- *   Layout (top-down, +Z up):
+ *               cp3 — cp2  ← top curve (half-circle r=50 around (0, 50))
+ *              /         \
+ *           cp4           cp1
+ *            │             │
+ *            │   (infield  │
+ *            │   island    │
+ *            │   at        │
+ *            │   origin)   │
+ *            │             │
+ *           cp5    spawn → cp0 ← start line, +Z
+ *            │             │
+ *            │             │
+ *           cp5         cp8
+ *              \         /
+ *              cp6 — cp7 ← bottom curve (half-circle r=50 around (0, -50))
  *
- *                  cp 7 ─── cp 1 ───── (top)
- *                                         │
- *                  cp 6                 cp 2
- *                                         │
- *                                       cp 3 (east straight)
- *                                         │
- *                  ............ cp 0      │
- *                  cp 8         spawn     │
- *                                       cp 4
- *                                         │
- *                  cp 5 ─────────── (bottom)
- *
- * cp 0's forward is hardcoded +Z so the player's first crossing
- * (driving north out of the spawn) registers correctly. Other gates use
- * the direction from the previous gate as their forward.
+ * cp 0's forward direction is +Z (along the right straight). cp 8 → cp 0 is
+ * also pure +Z, so lap completion enters cp 0 in exactly the same direction
+ * as the player's first crossing — clean and symmetric.
  */
 export function createLagoonLoop(): Track {
   const cpY = 1.5
   const halfWidth = 14
   const height = 6
 
+  // Stadium dims: straights at x=±50 from z=-50 to +50; curves are
+  // half-circles of radius 50 around (0, ±50).
   const positions: Vec3[] = [
-    { x: 0, y: cpY, z: 30 }, // 0 — start/finish (forward = +Z)
-    { x: 0, y: cpY, z: 70 }, // 1 — north straight
-    { x: 60, y: cpY, z: 60 }, // 2 — NE corner
-    { x: 75, y: cpY, z: 0 }, // 3 — east straight (mid)
-    { x: 60, y: cpY, z: -60 }, // 4 — SE corner
-    { x: -60, y: cpY, z: -60 }, // 5 — SW corner (across the south)
-    { x: -75, y: cpY, z: 0 }, // 6 — west straight (mid)
-    { x: -60, y: cpY, z: 60 }, // 7 — NW corner
-    { x: -25, y: cpY, z: 10 }, // 8 — final approach, south of cp 0 so the bike
-    //     enters cp 0 from below for clean lap detection
+    { x: 50, y: cpY, z: 0 }, // 0 — START / FINISH (right straight, mid)
+    { x: 50, y: cpY, z: 50 }, // 1 — top of right straight
+    { x: 35, y: cpY, z: 85 }, // 2 — top curve, NE
+    { x: -35, y: cpY, z: 85 }, // 3 — top curve, NW
+    { x: -50, y: cpY, z: 50 }, // 4 — top of left straight
+    { x: -50, y: cpY, z: -50 }, // 5 — bottom of left straight
+    { x: -35, y: cpY, z: -85 }, // 6 — bottom curve, SW
+    { x: 35, y: cpY, z: -85 }, // 7 — bottom curve, SE
+    { x: 50, y: cpY, z: -50 }, // 8 — bottom of right straight (final approach to cp 0)
   ]
 
-  // Forward direction at each gate. cp 0 is special (player's start direction);
-  // other gates inherit the direction from the previous gate.
+  // Forward at each gate = direction the bike enters from the previous gate.
+  // cp 0's previous is cp 8 at (50, -50), so cp 0 forward = (0, 1) = pure +Z.
   const forwards: { fx: number; fz: number }[] = positions.map((_, i) => {
-    if (i === 0) return { fx: 0, fz: 1 }
-    const prev = positions[i - 1]!
+    const prevIdx = (i - 1 + positions.length) % positions.length
+    const prev = positions[prevIdx]!
     const here = positions[i]!
     const dx = here.x - prev.x
     const dz = here.z - prev.z
@@ -72,8 +73,8 @@ export function createLagoonLoop(): Track {
     return { index: i, position: pos, rotation, halfWidth, height }
   })
 
-  // Dense AI spline — 10 sub-segments per checkpoint pair = 90 points around
-  // the loop, plenty of resolution for the closest-point search.
+  // Dense AI spline. We follow the polyline through the gate centres; the
+  // closest-point search then gives the AI a smooth target progression.
   const aiPoints: Vec3[] = []
   for (let i = 0; i < positions.length; i++) {
     const here = positions[i]!
@@ -92,22 +93,23 @@ export function createLagoonLoop(): Track {
   return {
     id: 'lagoon-loop',
     name: 'Lagoon Loop',
+    // Player spawns on the right straight, just south of cp 0, facing +Z.
+    // No more "spawn in the middle and hop on" — straight off the line.
     start: {
-      position: { x: 0, y: ISLAND_TOP_Y + 2, z: ISLAND_RADIUS - 4 },
+      position: { x: 50, y: 2, z: -15 },
       yaw: 0,
     },
     lapsToFinish: 3,
     checkpoints,
     surfaces: [],
     pickupSpawns: [
-      { x: 0, y: 1.8, z: 28 }, // right past the start line
-      { x: 30, y: 1.8, z: 70 }, // along cp 1 → cp 2
-      { x: 75, y: 1.8, z: 30 }, // east straight, top
-      { x: 75, y: 1.8, z: -30 }, // east straight, bottom
-      { x: 0, y: 1.8, z: -65 }, // bottom centre (cp 4 → cp 5)
-      { x: -75, y: 1.8, z: -30 }, // west straight, bottom
-      { x: -75, y: 1.8, z: 30 }, // west straight, top
-      { x: -40, y: 1.8, z: 35 }, // top-west (cp 7 → cp 8)
+      { x: 50, y: 1.8, z: 25 }, // right straight, between cp 0 and cp 1
+      { x: 25, y: 1.8, z: 80 }, // top curve, NE
+      { x: -25, y: 1.8, z: 80 }, // top curve, NW
+      { x: -50, y: 1.8, z: 0 }, // left straight, mid
+      { x: -25, y: 1.8, z: -80 }, // bottom curve, SW
+      { x: 25, y: 1.8, z: -80 }, // bottom curve, SE
+      { x: 50, y: 1.8, z: -25 }, // right straight, between cp 8 and cp 0
     ],
     aiSplines: [{ id: 'main', points: aiPoints }],
   }
