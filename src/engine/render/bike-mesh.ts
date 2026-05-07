@@ -34,12 +34,24 @@ export function createBikeMesh(opts?: { bodyColor?: number }): THREE.Object3D {
   cockpit.position.set(0, 0.35, -0.05)
   root.add(cockpit)
 
-  // Forward fin — clearly indicates which way the bike is pointing.
-  const finGeom = new THREE.ConeGeometry(0.18, 0.6, 4)
+  // Forward fin — visibly points along +Z so the bike's facing is unambiguous.
+  // ConeGeometry's apex is at local +Y; rotating +π/2 about X puts the apex at
+  // local +Z (the bike's forward direction).
+  const finGeom = new THREE.ConeGeometry(0.22, 0.9, 4)
   const fin = new THREE.Mesh(finGeom, fwdMat)
-  fin.rotation.x = -Math.PI / 2
-  fin.position.set(0, 0.1, 1.05)
+  fin.rotation.x = Math.PI / 2
+  fin.position.set(0, 0.55, 0.7)
   root.add(fin)
+
+  // Tail light — small red ball at the back so the rear is also visually distinct.
+  const tailMat = new THREE.MeshStandardMaterial({
+    color: 0xff3344,
+    emissive: 0xff3344,
+    emissiveIntensity: 0.6,
+  })
+  const tail = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 8), tailMat)
+  tail.position.set(0, 0.4, -0.7)
+  root.add(tail)
 
   // Hover puck — glowing disc on the underside, visually communicates the hover gap.
   const puckGeom = new THREE.CylinderGeometry(0.55, 0.55, 0.08, 16)
