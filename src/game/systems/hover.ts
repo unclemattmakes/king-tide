@@ -126,12 +126,22 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       Math.abs(throttle) * stats.accel * scale * speedFalloff * boost * direction * surfaceMul
     rb.applyImpulse({ x: fwd.x * aThrust * m * dt, y: 0, z: fwd.z * aThrust * m * dt }, true)
 
-    // Yaw torque. Convention: positive steer = right turn (D / right stick / right arrow).
-    // Per playtest, this requires NEGATIVE Y torque in Rapier's convention — empirical;
-    // my earlier sign analysis was inverted.
+    // Yaw torque around the bike's LOCAL up axis (not world Y) so that
+    // steering doesn't couple into roll when the bike is pitched. Applying
+    // pure world-Y torque on a pitched bike has a non-zero projection onto
+    // the bike's roll axis, which would otherwise let "pitch + steer" tip
+    // the bike sideways.
     const turnMul = probe.isWater ? 1.1 : 1.0
     const aTurn = -intent.steer * stats.turnTorque * turnMul
-    rb.applyTorqueImpulse({ x: 0, y: aTurn * m * dt, z: 0 }, true)
+    const bikeUpForYaw = quatRotate(q, { x: 0, y: 1, z: 0 })
+    rb.applyTorqueImpulse(
+      {
+        x: bikeUpForYaw.x * aTurn * m * dt,
+        y: bikeUpForYaw.y * aTurn * m * dt,
+        z: bikeUpForYaw.z * aTurn * m * dt,
+      },
+      true,
+    )
 
     // Pitch + roll attitude controller, decomposed in bike-local axes.
     //
