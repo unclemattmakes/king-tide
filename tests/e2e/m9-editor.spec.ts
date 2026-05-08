@@ -1,44 +1,70 @@
 import { expect, test } from '@playwright/test'
 
 /**
- * M9.18 — in-app track editor smoke test. The editor should:
- *   1. Mount when `?track=calibration&edit=1`.
- *   2. Show the side panel with tool buttons.
- *   3. Render the existing track's gates / pickups / spline as helper meshes.
- *   4. Place a new pickup when the user clicks while the +Pickup tool is active.
+ * M9.18 — in-app track editor smoke test. Asserts:
+ *   1. The editor panel mounts on `?track=<id>&edit=1`.
+ *   2. `?edit=1` alone defaults to the lagoon-edit JSON snapshot.
+ *   3. The outliner lists all entities, grouped by kind.
+ *   4. Place + Mode toolbars are present.
+ *   5. Place-pickup → click canvas adds a row to the outliner.
+ *   6. Outliner click selects an entity and surfaces its props.
  *
- * We don't drive a Save here — the Vite middleware writes to disk and we
- * don't want a test polluting the repo. Save is exercised manually.
+ * Save is exercised manually (the dev middleware writes to disk; we don't
+ * want a test polluting the repo).
  */
 test.describe('M9.18 in-app editor', () => {
-  test('mounts editor panel and places pickups via click', async ({ page }) => {
+  test('defaults ?edit=1 to lagoon-edit and mounts outliner with all entity kinds', async ({
+    page,
+  }) => {
+    test.setTimeout(30_000)
+    await page.goto('/?edit=1')
+
+    const panel = page.locator('#editor-panel')
+    await expect(panel).toBeVisible()
+    await expect(panel).toContainText('EDITOR · lagoon-edit')
+
+    // Place + Mode toolbars present.
+    await expect(panel.locator('button[data-place="gate"]')).toBeVisible()
+    await expect(panel.locator('button[data-place="pickup"]')).toBeVisible()
+    await expect(panel.locator('button[data-place="pad"]')).toBeVisible()
+    await expect(panel.locator('button[data-place="spline"]')).toBeVisible()
+    await expect(panel.locator('button[data-mode="translate"]')).toBeVisible()
+    await expect(panel.locator('button[data-mode="rotate"]')).toBeVisible()
+    await expect(panel.locator('button[data-mode="scale"]')).toBeVisible()
+
+    // Outliner lists all four entity kinds with non-zero counts where
+    // expected (lagoon-edit has 9 gates, 7 pickups, 0 pads, 100 spline pts).
+    const outliner = panel.locator('#ed-outliner')
+    await expect(outliner).toContainText('Checkpoints (9)')
+    await expect(outliner).toContainText('Pickups (7)')
+    await expect(outliner).toContainText('Boost Pads (0)')
+    await expect(outliner).toContainText('Spline pts (100)')
+
+    // Click a checkpoint row → selection updates the props panel.
+    await outliner.locator('div[data-select="gate:0"]').click()
+    await expect(panel.locator('#ed-props')).toContainText('cp_00')
+    await expect(panel.locator('#ed-props')).toContainText('halfWidth')
+  })
+
+  test('place-pickup tool adds a pickup on canvas click', async ({ page }) => {
     test.setTimeout(30_000)
     await page.goto('/?track=calibration&edit=1')
 
-    // Panel mounts.
     const panel = page.locator('#editor-panel')
     await expect(panel).toBeVisible()
-    await expect(panel).toContainText('EDITOR · calibration')
+    await expect(panel.locator('#ed-outliner')).toContainText('Pickups (1)')
 
-    // Tool buttons present.
-    await expect(panel.locator('button[data-tool="select"]')).toBeVisible()
-    await expect(panel.locator('button[data-tool="pickup"]')).toBeVisible()
-    await expect(panel.locator('button[data-tool="gate"]')).toBeVisible()
-
-    // Initial counts reflect the calibration JSON: 4 gates, 1 pickup, 0 pads.
-    await expect(panel).toContainText('gates 4')
-    await expect(panel).toContainText('pickups 1')
-    await expect(panel).toContainText('pads 0')
-
-    // Switch to the +Pickup tool and click on the canvas to place one.
-    await panel.locator('button[data-tool="pickup"]').click()
+    // Activate +Pickup, click the canvas centre.
+    await panel.locator('button[data-place="pickup"]').click()
     const canvas = page.locator('#app canvas').first()
     await canvas.waitFor()
     const box = await canvas.boundingBox()
     if (!box) throw new Error('no canvas bounding box')
     await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5)
 
-    // Panel updates.
-    await expect(panel).toContainText('pickups 2')
+    // Outliner now shows 2 pickups; the new one is auto-selected and
+    // surfaces in the props panel.
+    await expect(panel.locator('#ed-outliner')).toContainText('Pickups (2)')
+    await expect(panel.locator('#ed-props')).toContainText('pickup_1')
   })
 })

@@ -46,26 +46,26 @@ describe('buildTrackFromJson', () => {
 
   it('rejects non-contiguous checkpoint indices', () => {
     const raw = baseTrack()
-    raw.checkpoints[1].index = 5
+    raw.checkpoints[1]!.index = 5
     expect(() => buildTrackFromJson(raw)).toThrow(/checkpoints\[1\]\.index = 5/)
   })
 
   it('rejects aiSplines without a "main" entry', () => {
     const raw = baseTrack()
-    raw.aiSplines[0].id = 'alt'
+    raw.aiSplines[0]!.id = 'alt'
     expect(() => buildTrackFromJson(raw)).toThrow(/missing aiSplines entry with id="main"/)
   })
 
   it('rejects splines with fewer than 2 points', () => {
     const raw = baseTrack()
-    raw.aiSplines[0].points = [{ x: 0, y: 0, z: 0 }]
+    raw.aiSplines[0]!.points = [{ x: 0, y: 0, z: 0 }]
     expect(() => buildTrackFromJson(raw)).toThrow(/at least 2 entries/)
   })
 
   it('reads optional environmentGlb + water but tolerates absence', () => {
     const raw = baseTrack()
-    delete raw.environmentGlb
-    delete raw.water
+    delete raw['environmentGlb']
+    delete raw['water']
     const track = buildTrackFromJson(raw)
     expect(track.environmentGlb).toBeUndefined()
     expect(track.water).toBeUndefined()
@@ -73,8 +73,8 @@ describe('buildTrackFromJson', () => {
 
   it('defaults missing pickupSpawns and boostPads to empty arrays', () => {
     const raw = baseTrack()
-    delete raw.pickupSpawns
-    delete raw.boostPads
+    delete (raw as { pickupSpawns?: unknown }).pickupSpawns
+    delete (raw as { boostPads?: unknown }).boostPads
     const track = buildTrackFromJson(raw)
     expect(track.pickupSpawns).toEqual([])
     expect(track.boostPads).toEqual([])
@@ -98,7 +98,15 @@ describe('buildTrackFromJson', () => {
   })
 })
 
-function baseTrack() {
+// Return type is intentionally mutable / index-able so tests can poke at
+// fields. We feed it back into the loader as `unknown` anyway, so the
+// loose typing doesn't reduce test fidelity.
+function baseTrack(): Record<string, unknown> & {
+  checkpoints: Array<Record<string, unknown>>
+  aiSplines: Array<{ id: string; points: Array<{ x: number; y: number; z: number }> }>
+  boostPads: Array<unknown>
+  pickupSpawns: Array<{ x: number; y: number; z: number }>
+} {
   return {
     id: 'unit-test',
     name: 'Unit Test',

@@ -105,8 +105,14 @@ async function boot() {
   // from `/tracks/<id>.json` — the new hybrid pipeline (gameplay data in
   // JSON authored via the in-app editor, optional environment .glb authored
   // in Blender).
+  //
+  // Edit mode (`?edit=1`) defaults to the `lagoon-edit` JSON snapshot of
+  // the procedural Lagoon Loop, so the editor opens on something familiar
+  // rather than the bare calibration scene.
+  const editModeFlag = params.get('edit') === '1'
   const rawTrack = params.get('track')
-  const trackId = rawTrack && rawTrack.length > 0 ? rawTrack : 'lagoon'
+  const trackId =
+    rawTrack && rawTrack.length > 0 ? rawTrack : editModeFlag ? 'lagoon-edit' : 'lagoon'
 
   // Bike variant. URL `?bike=cruiser|racer|stunt` picks the player's
   // archetype; AI bikes always use the racer baseline for now. Variant
@@ -140,7 +146,7 @@ async function boot() {
     scene.add(createRampMesh())
   }
 
-  const editMode = params.get('edit') === '1'
+  const editMode = editModeFlag
 
   let track: import('./game/tracks/types').Track
   if (trackId === 'cliffside') {
