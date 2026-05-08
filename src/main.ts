@@ -1,6 +1,7 @@
-import { addComponent, hasComponent, removeComponent } from 'bitecs'
+import { addComponent, hasComponent, query, removeComponent } from 'bitecs'
 import * as THREE from 'three'
 import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug'
+import { createAudioEngine } from './engine/audio/audio'
 import {
   emptyIntent,
   type Intent,
@@ -26,6 +27,8 @@ import { vecHorizontalLength } from './engine/sim/physics/vec'
 import { advanceWaveField, createWaveField, defaultWaves } from './engine/sim/water/wave-field'
 import { HoverStateStore, RBHandleStore } from './game/components'
 import { AIController, AIControllerStore, AITag, defaultAIController } from './game/components/ai'
+import { ExplosionTag, MineTag, MissileTag } from './game/components/combat'
+import type { PickupType } from './game/components/pickup'
 import { RacerStore } from './game/components/race'
 import { createArena } from './game/entities/arena'
 import { createBike } from './game/entities/bike'
@@ -65,6 +68,7 @@ async function boot() {
   const backendEl = document.getElementById('hud-backend')
   const inputEl = document.getElementById('hud-input')
   const raceEl = document.getElementById('hud-race')
+  const audioEl = document.getElementById('hud-audio')
   const finishEl = document.getElementById('finish')
   const finishTitle = document.getElementById('finish-title')
   const finishSub = document.getElementById('finish-sub')
@@ -158,6 +162,26 @@ async function boot() {
   const dirArrow = createDirectionArrow()
   scene.add(dirArrow.mesh)
 
+  // Audio: lazy-init AudioContext on first user gesture (browsers block
+  // autoplay until then). The engine itself is safe to call before
+  // `resume()` — every method early-returns without a context.
+  const audio = createAudioEngine()
+  const unlockAudio = () => {
+    audio.resume()
+    window.removeEventListener('keydown', unlockAudio)
+    window.removeEventListener('pointerdown', unlockAudio)
+  }
+  window.addEventListener('keydown', unlockAudio, { once: false })
+  window.addEventListener('pointerdown', unlockAudio, { once: false })
+
+  // Per-frame audio dispatch needs to remember "what was true last tick" so
+  // it can fire one-shots on transitions. Player slot for collect/fire
+  // events; sim entity counts for any-bike weapon spawns.
+  let prevPlayerHeld: PickupType | null = null
+  let prevMineCount = 0
+  let prevMissileCount = 0
+  let prevExplosionCount = 0
+
   const state = {
     ready: false,
     backend,
@@ -228,6 +252,8 @@ async function boot() {
       window.location.reload()
     } else if (e.code === 'KeyT' || e.code === 'F1') {
       setAutoPlay(!autoPlay)
+    } else if (e.code === 'KeyM') {
+      audio.setMuted(!audio.isMuted())
     } else if (e.code === 'Backspace') {
       respawnPlayer()
       e.preventDefault()
@@ -301,6 +327,39 @@ async function boot() {
       }
     }
 
+    // Audio dispatch — runs once per render frame, after physics.
+    // Continuous engine + wind layers are driven by the player's speed.
+    audio.tickEngine(state.playerSnapshot?.speed ?? 0)
+
+    // Player slot transitions: collected (null → X), or fired with a
+    // non-spawning effect (boost / shield). Mine and missile fires also
+    // empty the slot, but those sounds come from the entity-spawn path
+    // below — handling them here would double-fire on the player's
+    // firing tick.
+    const currentPlayerHeld = getHeldPickup(playerEid)
+    if (prevPlayerHeld === null && currentPlayerHeld !== null) {
+      audio.pickupCollect()
+    } else if (
+      prevPlayerHeld !== null &&
+      currentPlayerHeld === null &&
+      (prevPlayerHeld === 'boost' || prevPlayerHeld === 'shield')
+    ) {
+      audio.pickupFire(prevPlayerHeld)
+    }
+    prevPlayerHeld = currentPlayerHeld
+
+    // Combat entity spawns: any new mine/missile/explosion in the world
+    // gets a sound (so AI weapons are audible too, not just the player's).
+    const mineCount = query(sim, [MineTag]).length
+    if (mineCount > prevMineCount) audio.pickupFire('mine')
+    prevMineCount = mineCount
+    const missileCount = query(sim, [MissileTag]).length
+    if (missileCount > prevMissileCount) audio.pickupFire('missile')
+    prevMissileCount = missileCount
+    const explosionCount = query(sim, [ExplosionTag]).length
+    if (explosionCount > prevExplosionCount) audio.explosion()
+    prevExplosionCount = explosionCount
+
     const racer = RacerStore.get(playerEid)
     if (racer) {
       state.raceSnapshot = {
@@ -343,6 +402,7 @@ async function boot() {
       framesThisSecond = 0
       fpsAccumStart = now
       if (fpsEl) fpsEl.textContent = `fps: ${state.fps.toFixed(0)}`
+      if (audioEl) audioEl.textContent = `audio: ${audio.isMuted() ? 'muted (M)' : 'on (M)'}`
       if (inputEl) {
         const i = state.intent
         const speed = state.playerSnapshot?.speed ?? 0

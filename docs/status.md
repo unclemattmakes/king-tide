@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-07 (right-straight jump ramp). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-07 (procedural audio). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -20,7 +20,7 @@ This doc captures the build's current state, controls, known issues, and next st
 - Auto-play mode (T or F1) — AI takes over the player bike for testing
 - Backspace = respawn at start
 - Mouse right-drag and gamepad right-stick orbit the camera (vertical inverted by default)
-- 19 e2e + 35 unit tests, all green
+- 20 e2e + 35 unit tests, all green
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
 
 ## Controls
@@ -38,6 +38,7 @@ This doc captures the build's current state, controls, known issues, and next st
 | Shift | Boost |
 | Backspace | Respawn at start (snaps to spawn pose, zero velocity) |
 | T or F1 | Toggle auto-play (AI drives player bike) |
+| M | Toggle audio mute |
 | R | Restart race after finish |
 
 All keyboard axes are smoothed (~0.13s ramp) so taps give small inputs and holds give full deflection.
@@ -69,7 +70,7 @@ All keyboard axes are smoothed (~0.13s ramp) so taps give small inputs and holds
 | Physics | `@dimforge/rapier3d-compat` (deterministic build) |
 | ECS | bitECS 0.4 with side-table data stores (`engine/sim/ecs/store.ts`) |
 | Input | Native gamepad/keyboard API, smoothed |
-| Audio | Not yet implemented |
+| Audio | Web Audio API, procedurally synthesised (no SFX assets needed) |
 | Test (unit) | Vitest (sim layer only — no Three.js imports) |
 | Test (e2e) | Playwright (real Vite dev server, real WebGPU/WebGL2) |
 | Lint/format | Biome 2 |
@@ -135,7 +136,6 @@ Open polish:
 - Pool weighting feels OK at 2:1:1:1 (boost:shield:mine:missile) but only one race tested it. Tune if combat dominates.
 
 ### Missing MVP items
-- **[L] Audio.** Engine pitch tied to speed, water ambient, pickup chime, boost whoosh, weapon SFX, music. Library SFX as planned in product plan.
 - **[M] Second track.** Currently only Lagoon Loop. The product plan calls for 1–2 tracks at MVP. A track with verticality (a cliff drop into water) would be the JetMoto signature moment.
 - **[S] Bike variants.** 2–3 bikes with distinct stat tradeoffs (top speed / handling / accel). Stats are already parameterised per entity.
 - **[M] Bike select + track select menus.** Vanilla DOM, simple flow.
@@ -175,6 +175,7 @@ Open polish:
 | M9.9 | M5 combat bundle (shield, mine, missile, hit reaction) | ✅ |
 | M9.10 | AI fires pickups (boost / shield / mine / missile heuristics) | ✅ |
 | M9.11 | Jump ramp on right straight — verifies non-water surface behavior | ✅ |
+| M9.12 | Procedural audio (engine + ambient + pickup chime + weapon SFX) | ✅ |
 
 ## File / system map
 
