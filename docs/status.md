@@ -1,12 +1,13 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-07 (AI uses pickups). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-07 (right-straight jump ramp). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
 ## What works today
 
 - Stadium-shaped racetrack ("Lagoon Loop") with 9 gates: 2 straights + 2 half-circle curves
+- Jump ramp on the right straight (z = 25–37) — exercises raycast-vs-static-collider, surface alignment on a sloped normal, hover-spring release on launch, and water re-acquisition on landing
 - Player spawns on the racing line at the start gate, facing forward
 - Hover-bike physics (Rapier WASM, deterministic build)
 - Gerstner wave water with buoyancy — bike rides waves, dives into troughs, launches off crests
@@ -19,7 +20,7 @@ This doc captures the build's current state, controls, known issues, and next st
 - Auto-play mode (T or F1) — AI takes over the player bike for testing
 - Backspace = respawn at start
 - Mouse right-drag and gamepad right-stick orbit the camera (vertical inverted by default)
-- 18 e2e + 35 unit tests, all green
+- 19 e2e + 35 unit tests, all green
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
 
 ## Controls
@@ -173,6 +174,7 @@ Open polish:
 | M9.8 | Camera-facing ribbon trails + arrow legibility | ✅ |
 | M9.9 | M5 combat bundle (shield, mine, missile, hit reaction) | ✅ |
 | M9.10 | AI fires pickups (boost / shield / mine / missile heuristics) | ✅ |
+| M9.11 | Jump ramp on right straight — verifies non-water surface behavior | ✅ |
 
 ## File / system map
 

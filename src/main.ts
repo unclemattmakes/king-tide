@@ -13,6 +13,7 @@ import { createChaseCamera } from './engine/render/camera'
 import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
+import { createRampMesh } from './engine/render/ramp-mesh'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
 import { createScene } from './engine/render/scene'
@@ -29,6 +30,7 @@ import { RacerStore } from './game/components/race'
 import { createArena } from './game/entities/arena'
 import { createBike } from './game/entities/bike'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
+import { createRamp } from './game/entities/ramp'
 import { aiCombatSystem } from './game/systems/ai-combat'
 import { aiControlSystem } from './game/systems/ai-control'
 import {
@@ -83,6 +85,8 @@ async function boot() {
   scene.add(waterMesh.mesh)
 
   createArena(phys)
+  createRamp(phys)
+  scene.add(createRampMesh())
 
   const track = createLagoonLoop()
   const trackVisuals = createTrackVisuals(track)

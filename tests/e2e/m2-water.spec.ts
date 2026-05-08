@@ -26,9 +26,11 @@ test.describe('M2 water', () => {
       }),
     )
 
-    // Wait until the bike has moved off the island in z.
-    await page.waitForFunction(() => (window.__hover?.player()?.position.z ?? 0) > 30, {
-      timeout: 8000,
+    // Wait until the bike is past the right-straight ramp (which spans
+    // z=25..37) and back on water with room to settle. Sampling y inside
+    // the ramp's launch zone would conflate ramp height with wave bob.
+    await page.waitForFunction(() => (window.__hover?.player()?.position.z ?? 0) > 60, {
+      timeout: 12000,
     })
 
     // Now sample y over ~1.5s while still throttling on water — waves should
