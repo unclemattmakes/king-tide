@@ -3,6 +3,15 @@
 > For the full walk-through (setup, authoring a track, troubleshooting),
 > see [blender-pipeline-guide.md](./blender-pipeline-guide.md). This file
 > is the at-a-glance reference card.
+>
+> **Hybrid pipeline (M9.18+):** new tracks split gameplay data into
+> `public/tracks/<id>.json` (authored via the in-app editor — see
+> [track-editor-guide.md](./track-editor-guide.md)) and environment
+> geometry into a Blender `.glb` referenced from the JSON. Most of the
+> object kinds below (`checkpoint`, `ai_spline`, `pickup_spawn`, `start`)
+> are now redundant — the editor owns those. Keep `kind="track"` on
+> drivable surfaces; the rest are only needed for the legacy all-in-glb
+> pipeline that the calibration scene exercises.
 
 ## Object kinds
 

@@ -2,7 +2,15 @@
 
 > Concrete tech choices, repo layout, and milestones to deliver the Playable Demo MVP defined in [product-plan.md](./product-plan.md).
 >
-> **Status (2026-05-07):** MVP feature-complete. M0–M6 all shipped, plus M7–M9.x extension milestones (real loop track, kinematic attitude system, surface alignment, motion trails, combat bundle, AI pickup usage, jump ramp, audio, second track, garage menu + variants + save state). Live build at the Vercel URL in [README](../README.md). For the live state of features, gotchas, and what's still open, see [status.md](./status.md) — this doc covers the original architectural plan; status.md tracks the actual codebase.
+> **Status (2026-05-07):** MVP feature-complete. M0–M6 all shipped, plus
+> M7–M9.x extension milestones (real loop track, kinematic attitude
+> system, surface alignment, motion trails, combat bundle, AI pickup
+> usage, jump ramp, audio, second track, garage menu + variants + save
+> state, hybrid Blender + JSON track pipeline with in-app editor). Live
+> build at the Vercel URL in [README](../README.md). For the live state
+> of features, gotchas, and what's still open, see
+> [status.md](./status.md) — this doc covers the original architectural
+> plan; status.md tracks the actual codebase.
 
 ## Architectural principle: sim ↔ render split
 
@@ -42,10 +50,14 @@ hoverbike/
 ├── docs/
 │   ├── product-plan.md
 │   ├── implementation-plan.md
-│   └── blender-conventions.md     # naming + metadata cheat sheet for track authors
+│   ├── status.md                  # live state of the codebase
+│   ├── track-editor-guide.md      # in-app editor (gameplay data)
+│   ├── blender-pipeline-guide.md  # Blender side (environment geometry)
+│   └── blender-conventions.md     # quick-reference for the legacy all-in-glb path
 ├── public/
+│   ├── tracks/                    # JSON gameplay data (editor reads/writes here)
 │   └── assets/
-│       ├── tracks/                # exported .glb files
+│       ├── tracks/                # exported .glb environment geometry
 │       ├── bikes/                 # exported bike meshes
 │       └── audio/                 # SFX, music
 ├── src/
@@ -62,6 +74,7 @@ hoverbike/
 │   │   │   ├── camera.ts          # chase rig
 │   │   │   ├── water-shader.ts    # GPU Gerstner vertex shader
 │   │   │   └── render-systems.ts  # ECS → Three.js sync
+│   │   ├── editor/                # in-app track editor (TransformControls + outliner)
 │   │   ├── input/                 # gamepad + keyboard → intent
 │   │   ├── audio/                 # Web Audio buses, dynamic engine sound
 │   │   └── assets/                # glTF loader, manifest
@@ -75,7 +88,9 @@ hoverbike/
 │   │   └── ai/                    # spline follower, rubber-band
 │   └── ui/                        # HUD, menus (vanilla DOM)
 ├── tools/
-│   └── export-track.py            # Blender → glTF with metadata
+│   ├── export_track.py            # Blender → glTF with metadata (legacy all-in-glb)
+│   ├── build_calibration_scene.py # rebuild calibration.blend from script
+│   └── snapshot_lagoon.mjs        # generate lagoon-edit.json from procedural Lagoon
 ├── tracks-src/
 │   ├── calibration.blend          # one of every metadata object — pipeline reference
 │   └── README.md
@@ -104,27 +119,64 @@ hoverbike/
 10. `AudioSystem` *(render layer)* — engine pitch, spatial sounds
 11. `RenderSystem` *(render layer)* — draws frame
 
-## Asset pipeline (tracks)
+## Asset pipeline (tracks) — hybrid
 
-Tracks are authored in Blender and exported to glTF with metadata in `extras`:
+Tracks have **two source files** edited in two different tools, joined
+at runtime:
 
-| Object kind | Naming convention | glTF `extras` |
+| Source | Tool | Owns |
 |---|---|---|
-| Track surface mesh | any name; material `mat_track_*` | `{ kind: "track" }` |
-| Water volume | empty cube `water_volume_*` | `{ kind: "water", waveHeight, waveFreq }` |
-| Checkpoint | empty `cp_NN` (zero-padded, ordered) | `{ kind: "checkpoint", index }` |
-| AI spline | NURBS curve `ai_spline_main` | `{ kind: "ai_spline" }` |
-| Pickup spawn | empty `pickup_*` | `{ kind: "pickup_spawn" }` |
-| Player start | empty `start_NN` | `{ kind: "start", index }` |
+| `public/tracks/<id>.json` | In-app editor (`?track=<id>&edit=1`) | Gates, AI spline, pickups, boost pads, start pose, water tuning |
+| `public/assets/tracks/<id>.glb` *(optional)* | Blender + `tools/export_track.py` *(or vanilla glTF export)* | Collidable environment geometry — track surfaces, ramps, mesa, decorative meshes |
 
-`tools/export-track.py` is a Blender Python script that walks the scene, validates conventions, and writes the .glb. Conventions are documented in [blender-conventions.md](./blender-conventions.md).
+The JSON references the `.glb` via its `environmentGlb` field; the
+runtime fetches both and joins them at boot. The in-app editor saves
+the JSON live via a dev-only Vite middleware (`/__editor/save-track`,
+`apply: 'serve'`) — no editor write endpoint ships in production.
 
-### Calibration scene
+### In-app editor — the fast loop
 
-`tracks-src/calibration.blend` is a deliberately-minimal scene containing **exactly one** of every metadata object kind above, plus a flat track plane and a small water volume. Purposes:
-1. **Smoke-test the import/export pipeline** — if the calibration `.glb` loads cleanly, the conventions are intact.
-2. **Reference for future tracks** — open it, copy patterns.
-3. **Round-trip integration test** — exported by CI; loader asserts every expected entity appears.
+`?edit=1` (defaults to `lagoon-edit`, a JSON snapshot of Lagoon Loop)
+opens an outliner panel + Three.js `TransformControls` gizmos:
+
+- **Outliner** lists every entity grouped by kind. Click to select.
+- **Move (W) / Rotate (E) / Scale (R)** gizmo modes. Per-entity axis
+  gating: gates rotate Y only and scale X→halfWidth + Y→height; pads
+  scale X→halfWidth + Z→halfDepth; pickups + spline points are
+  translate-only.
+- **+ Gate / + Pickup / + Boost / + Spline pt** place new entities at
+  the next ground click.
+- **Save** writes back to `public/tracks/<id>.json`. **Play** reloads
+  without `?edit=1` so you immediately race the changes.
+
+See [track-editor-guide.md](./track-editor-guide.md) for the full
+walk-through.
+
+### Blender side — environment geometry
+
+For collidable terrain, the workflow is:
+1. Author meshes in Blender (any name; mark drivable surfaces with a
+   `mat_track_*` material and `kind = "track"` custom property).
+2. Export via `tools/export_track.py` *(validates conventions)* or
+   vanilla glTF export *(when no metadata is needed)*.
+3. Reference the `.glb` URL in your track's `environmentGlb` field.
+
+See [blender-pipeline-guide.md](./blender-pipeline-guide.md).
+
+### Calibration scene (legacy all-in-glb)
+
+`tracks-src/calibration.blend` is the historical reference for the
+all-in-glb pipeline (gates / spline / pickups baked into Blender
+`extras`). The runtime still loads this format via
+`src/game/tracks/glb-loader.ts`, but the JSON path is preferred for new
+tracks. Calibration today loads via JSON + env-glb (its `.glb` is just
+the floor mesh); the older all-in-glb loader is kept for back-compat.
+
+Purposes:
+1. **Smoke-test the import/export pipeline** — if the calibration
+   `.glb` loads cleanly, the conventions are intact.
+2. **Round-trip integration test** — `tests/e2e/m9-calibration-glb.spec.ts`
+   asserts every metadata kind survives.
 
 ## Testability — debug API
 
@@ -187,8 +239,26 @@ Each milestone was treated as a decision gate; M9.x sub-milestones came out of p
 
 ## What's next (post-MVP)
 
-- **Asset pipeline end-to-end.** Run `tools/build_calibration_scene.py` and `tools/export_track.py` against `tracks-src/calibration.blend`, then write a runtime `.glb` loader that reads `extras` metadata. Cliffside (procedural) is the reference layout — see [blender-conventions.md](./blender-conventions.md) for the procedural-to-Blender mapping.
-- **AI cornering polish.** Currently <50% lap completion through tight curves. Brake-into-turn + look-ahead based on track curvature.
-- **On-screen touch controls.** Touch input is wired in `src/engine/input/touch.ts`; needs an HTML overlay with virtual stick + buttons.
-- **Music.** Procedural audio covers SFX; background music is still missing.
-- Beyond MVP: multiplayer (Rapier deterministic build is ready), career mode, in-engine track editor.
+- **AI cornering polish.** Lagoon's parallel-line AI is solid; Cliffside's
+  mesa drop still snares the AI when it overshoots a corner. Either
+  widen the mesa, add side ramps, or teach the AI to detour to the
+  climb ramp when off-elevation.
+- **Editor — phase 3.** Undo/redo, numeric input fields in the
+  properties panel, env-glb preview *inside* edit mode, boost-pad
+  runtime behaviour (the data type is wired but the sim doesn't react
+  yet), garage-menu "Edit" entry-point.
+- **On-screen touch controls.** Touch input is wired in
+  `src/engine/input/touch.ts`; needs an HTML overlay with virtual
+  stick + buttons.
+- **Music.** Procedural audio covers SFX; background music is still
+  missing.
+- Beyond MVP: multiplayer (Rapier deterministic build is ready), career
+  mode.
+
+**Shipped in M9.16–M9.19** (originally listed here as future work):
+- ✅ End-to-end Blender → .glb pipeline (M9.16) — `tools/export_track.py`
+  validates the calibration scene and the runtime loader reads `extras`
+  metadata.
+- ✅ .glb mesh rendering (M9.17) — track surface visible at runtime.
+- ✅ Hybrid pipeline (M9.18) — JSON gameplay data + optional Blender .glb.
+- ✅ In-engine track editor (M9.19) — outliner + TransformControls.

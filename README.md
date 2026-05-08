@@ -7,7 +7,9 @@ Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics a
 - [Status](docs/status.md) — current state, controls, known issues, roadmap
 - [Product plan](docs/product-plan.md) — vision + MVP scope
 - [Implementation plan](docs/implementation-plan.md) — architecture + milestones
-- [Blender track conventions](docs/blender-conventions.md) — asset pipeline
+- [In-app track editor](docs/track-editor-guide.md) — authoring gameplay data
+- [Blender pipeline](docs/blender-pipeline-guide.md) — authoring environment geometry
+- [Blender conventions](docs/blender-conventions.md) — quick-reference for the legacy all-in-glb path
 
 ## What's playable
 
@@ -19,6 +21,7 @@ Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics a
 - **Best-lap save state** per (track, bike) in localStorage
 - **Garage menu** for picking bike + track + viewing records (HUD button top-right)
 - **Procedural audio** — engine pitch tied to speed, water ambient, pickup chime, weapon SFX, gate / lap cues, mute toggle (M)
+- **In-app track editor** — `?edit=1` opens a TransformControls-based editor over a JSON snapshot of the lagoon stadium; gates / pickups / boost pads / spline points are placeable + drag-manipulable; Save writes back to disk via a dev-only Vite middleware
 
 ## Develop
 
