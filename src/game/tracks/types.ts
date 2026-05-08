@@ -50,6 +50,12 @@ export type Checkpoint = {
   halfWidth: number
   /** Height of the gate (m). */
   height: number
+  /** Optional bind to the main AI spline. If set, the loader derives
+   *  `position` and `rotation` from the spline at parameter t (0..1
+   *  along the closed loop). The editor's translate gizmo then slides
+   *  the gate along the spline rather than allowing free placement.
+   *  Editing the curve auto-updates the gate's pose. */
+  splineT?: number
 }
 
 export type TrackSurface = {
@@ -60,8 +66,14 @@ export type TrackSurface = {
 
 export type AISpline = {
   id: string
-  /** Loop-closed sequence of points along the racing line. */
+  /** Loop-closed dense polyline along the racing line. The runtime AI
+   *  controller follows this directly. */
   points: Vec3[]
+  /** Optional sparse control points. When present, the loader samples
+   *  these via Catmull-Rom into `points` at load time and the editor
+   *  edits these (not the dense samples). Drag an anchor to reshape
+   *  the curve. The dense `points` array is regenerated on save. */
+  anchors?: Vec3[]
 }
 
 export type BoostPad = {

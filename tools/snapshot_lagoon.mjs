@@ -1,126 +1,68 @@
 // Generate public/tracks/lagoon-edit.json from the procedural Lagoon Loop
-// definition. Run once via `node tools/snapshot_lagoon.mjs` to refresh the
-// editable copy. Mirrors src/game/tracks/lagoon-loop.ts + spline-utils.ts.
+// definition. Run once via `node tools/snapshot_lagoon.mjs` to refresh
+// the editable copy.
 //
-// We reimplement the math here in plain JS (rather than importing the .ts
-// modules) to avoid pulling in a TS toolchain just for a one-shot. If you
-// change lagoon-loop.ts and want to refresh the JSON, also update this
-// script and re-run.
+// New format (M9.20+):
+//   - Spline lives in `aiSplines[0].anchors`, a sparse list of Catmull-Rom
+//     control points. The runtime loader samples these into the dense
+//     `points` polyline that the AI controller follows.
+//   - Each gate carries `splineT` (0..1 along the closed curve). The
+//     loader derives the gate's xz position + yaw from the spline at
+//     that parameter; the editor's translate gizmo slides bound gates
+//     along the curve rather than freely.
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const STADIUM_R = 50
-const APEX_INSET = 8
 
-function buildStadiumAISpline(yp) {
-  const points = []
-  const straightHalfSegs = 10
-  const leftStraightSegs = 20
-  const curveSegs = 30
+// Anchor layout — 8 control points placed at the natural corners of the
+// stadium. Catmull-Rom interpolates them into a smooth oval. This is
+// what the user actually sees and drags in the editor.
+function buildAnchors() {
+  const y = 1
+  return [
+    { x: STADIUM_R, y, z: 0 }, // 0 — start/finish straight, mid
+    { x: STADIUM_R, y, z: 50 }, // 1 — top-right of right straight
+    { x: 35, y, z: 90 }, // 2 — top-curve NE
+    { x: -35, y, z: 90 }, // 3 — top-curve NW
+    { x: -STADIUM_R, y, z: 50 }, // 4 — top-left of left straight
+    { x: -STADIUM_R, y, z: -50 }, // 5 — bottom-left of left straight
+    { x: -35, y, z: -90 }, // 6 — bottom-curve SW
+    { x: 35, y, z: -90 }, // 7 — bottom-curve SE
+    { x: STADIUM_R, y, z: -50 }, // 8 — bottom-right of right straight
+  ]
+}
 
-  for (let s = 0; s < straightHalfSegs; s++) {
-    const t = s / straightHalfSegs
-    points.push({
-      x: STADIUM_R,
-      y: yp.cp0Y + (yp.cp1Y - yp.cp0Y) * t,
-      z: STADIUM_R * t,
-    })
-  }
-
-  const apexHeight = STADIUM_R - APEX_INSET
-  const delta = (STADIUM_R * STADIUM_R - apexHeight * apexHeight) / (2 * apexHeight)
-  const arcRadius = apexHeight + delta
-  const topCenterZ = STADIUM_R - delta
-  const startAngle = Math.atan2(delta, STADIUM_R)
-  const endAngle = Math.PI - startAngle
-  for (let s = 0; s < curveSegs; s++) {
-    const t = s / curveSegs
-    const a = startAngle + (endAngle - startAngle) * t
-    points.push({
-      x: arcRadius * Math.cos(a),
-      y: yp.topCurveY,
-      z: topCenterZ + arcRadius * Math.sin(a),
-    })
-  }
-
-  for (let s = 0; s < leftStraightSegs; s++) {
-    const t = s / leftStraightSegs
-    points.push({
-      x: -STADIUM_R,
-      y: yp.topCurveY + (yp.cp5Y - yp.topCurveY) * t,
-      z: STADIUM_R - 2 * STADIUM_R * t,
-    })
-  }
-
-  const botStartAngle = Math.PI + startAngle
-  const botEndAngle = 2 * Math.PI - startAngle
-  for (let s = 0; s < curveSegs; s++) {
-    const t = s / curveSegs
-    const a = botStartAngle + (botEndAngle - botStartAngle) * t
-    points.push({
-      x: arcRadius * Math.cos(a),
-      y: yp.cp5Y + (yp.cp8Y - yp.cp5Y) * t,
-      z: -topCenterZ + arcRadius * Math.sin(a),
-    })
-  }
-
-  for (let s = 0; s < straightHalfSegs; s++) {
-    const t = s / straightHalfSegs
-    points.push({
-      x: STADIUM_R,
-      y: yp.cp8Y + (yp.cp0Y - yp.cp8Y) * t,
-      z: -STADIUM_R + STADIUM_R * t,
-    })
-  }
-
-  return points
+// Sparse (8) anchors → 9 gates evenly spaced via splineT. Catmull-Rom
+// gives ~uniform parameter spacing for our roughly-uniform anchors, so
+// equal-t spacing visually maps to equal-arc spacing reasonably well.
+function buildGateTs(numGates) {
+  const ts = []
+  for (let i = 0; i < numGates; i++) ts.push(i / numGates)
+  return ts
 }
 
 function buildLagoon() {
+  const anchors = buildAnchors()
   const cpY = 1.5
   const halfWidth = 14
   const height = 6
+  const numGates = 9
 
-  const positions = [
-    { x: 50, y: cpY, z: 0 },
-    { x: 50, y: cpY, z: 50 },
-    { x: 35, y: cpY, z: 85 },
-    { x: -35, y: cpY, z: 85 },
-    { x: -50, y: cpY, z: 50 },
-    { x: -50, y: cpY, z: -50 },
-    { x: -35, y: cpY, z: -85 },
-    { x: 35, y: cpY, z: -85 },
-    { x: 50, y: cpY, z: -50 },
-  ]
-
-  const checkpoints = positions.map((pos, i) => {
-    const prevIdx = (i - 1 + positions.length) % positions.length
-    const prev = positions[prevIdx]
-    const dx = pos.x - prev.x
-    const dz = pos.z - prev.z
-    const len = Math.hypot(dx, dz) || 1
-    const fx = dx / len
-    const fz = dz / len
-    const alpha = Math.atan2(fx, fz)
-    const halfA = alpha / 2
-    return {
-      index: i,
-      position: pos,
-      rotation: { x: 0, y: Math.sin(halfA), z: 0, w: Math.cos(halfA) },
-      halfWidth,
-      height,
-    }
-  })
-
-  const aiPoints = buildStadiumAISpline({
-    cp0Y: 1,
-    cp1Y: 1,
-    topCurveY: 1,
-    cp5Y: 1,
-    cp8Y: 1,
-  })
+  const gateTs = buildGateTs(numGates)
+  const checkpoints = gateTs.map((t, i) => ({
+    index: i,
+    // Position + rotation are placeholder; loader overwrites them from
+    // the spline. Keep cpY here so the gate's vertical placement is
+    // correct (the spline is xz-only at y=1).
+    position: { x: 0, y: cpY, z: 0 },
+    rotation: { x: 0, y: 0, z: 0, w: 1 },
+    halfWidth,
+    height,
+    splineT: t,
+  }))
 
   return {
     id: 'lagoon-edit',
@@ -129,7 +71,7 @@ function buildLagoon() {
     water: { height: 0, waveHeight: 1.0, waveFreq: 0.5 },
     start: { position: { x: 50, y: 2, z: -15 }, yaw: 0 },
     checkpoints,
-    aiSplines: [{ id: 'main', points: aiPoints }],
+    aiSplines: [{ id: 'main', points: [], anchors }],
     pickupSpawns: [
       { x: 50, y: 1.8, z: 25 },
       { x: 25, y: 1.8, z: 80 },
@@ -149,5 +91,5 @@ const data = buildLagoon()
 fs.writeFileSync(OUT, `${JSON.stringify(data, null, 2)}\n`, 'utf8')
 console.log(`wrote ${OUT}`)
 console.log(
-  `  ${data.checkpoints.length} checkpoints, ${data.aiSplines[0].points.length} spline pts, ${data.pickupSpawns.length} pickups`,
+  `  ${data.checkpoints.length} checkpoints (splineT-bound), ${data.aiSplines[0].anchors.length} anchors, ${data.pickupSpawns.length} pickups`,
 )

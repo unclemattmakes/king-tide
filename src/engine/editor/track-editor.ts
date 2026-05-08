@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
+import type { Vec3 } from '@/engine/sim/physics/vec'
+import { nearestT, pointAtT, sampleCatmullRom, tangentAtT } from '@/game/tracks/catmull-rom'
 import { trackToJson } from '@/game/tracks/json-loader'
 import type { BoostPad, Checkpoint, Track } from '@/game/tracks/types'
 
@@ -62,9 +64,6 @@ type EntitySel =
   | { kind: 'spline'; splineIndex: number; pointIndex: number }
   | null
 
-const SUPPORTS_ROTATE_SCALE = (k: NonNullable<EntitySel>['kind']): boolean =>
-  k === 'gate' || k === 'pad'
-
 export function installTrackEditor(opts: EditorOptions): EditorHandle {
   const { scene, camera, renderer, domEl, track } = opts
   const draft: Track = JSON.parse(JSON.stringify(track)) as Track
@@ -87,11 +86,14 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
 
   // ── Transform gizmo ─────────────────────────────────────────────────────
   const tc = new TransformControls(camera, canvasEl)
-  // Disable orbit while the user is dragging a gizmo handle.
+  // Disable orbit while the user is dragging a gizmo handle. Push an
+  // undo snapshot at drag start so Ctrl+Z reverts the entire drag, not
+  // each tiny axis update.
   tc.addEventListener('dragging-changed', (e) => {
     const dragging = Boolean(e.value)
     orbit.enabled = !dragging
-    if (!dragging) onGizmoDragEnd()
+    if (dragging) pushUndoSnapshot()
+    else onGizmoDragEnd()
   })
   // r150+ separates the visual helper from the controller. The helper goes
   // in the scene; the controller is just an event source.
@@ -101,6 +103,38 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   let mode: GizmoMode = 'translate'
   let placeTool: PlaceTool = 'none'
   let sel: EntitySel = null
+
+  // ── Undo stack ──────────────────────────────────────────────────────────
+  // Snapshots of the draft are pushed before every "commit-worthy" mutation
+  // (placement, delete, gizmo drag start). Ctrl+Z pops + restores.
+  const UNDO_LIMIT = 50
+  const undoStack: string[] = []
+
+  function pushUndoSnapshot(): void {
+    undoStack.push(JSON.stringify(draft))
+    if (undoStack.length > UNDO_LIMIT) undoStack.shift()
+  }
+
+  function tryUndo(): boolean {
+    const snap = undoStack.pop()
+    if (!snap) return false
+    const restored = JSON.parse(snap) as Track
+    // Mutate draft fields in-place so any external references stay valid.
+    draft.id = restored.id
+    draft.name = restored.name
+    draft.lapsToFinish = restored.lapsToFinish
+    draft.start = restored.start
+    draft.checkpoints = restored.checkpoints
+    draft.aiSplines = restored.aiSplines
+    draft.pickupSpawns = restored.pickupSpawns
+    draft.boostPads = restored.boostPads
+    if (restored.water) draft.water = restored.water
+    if (restored.environmentGlb) draft.environmentGlb = restored.environmentGlb
+    sel = null
+    rebuildHelpers()
+    renderPanel()
+    return true
+  }
 
   // ── Helpers (per-entity 3D objects) ─────────────────────────────────────
   const helpersGroup = new THREE.Group()
@@ -114,8 +148,49 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     return `${s.kind}:${s.index}`
   }
 
+  /**
+   * Returns the "editable" array of the main spline:
+   *  - For Catmull-Rom-anchored splines, that's `anchors`.
+   *  - For legacy polyline splines, that's `points`.
+   * The dense `points` is always the runtime-consumed output; anchors
+   * are the user-facing controls.
+   */
+  function editableSplinePoints(): Vec3[] {
+    const main = draft.aiSplines.find((s) => s.id === 'main')
+    if (!main) return []
+    return main.anchors ?? main.points
+  }
+
+  /**
+   * Resample the main spline (if anchored) and reposition any
+   * splineT-bound gates to match. Called whenever an anchor moves or
+   * a gate's splineT changes.
+   */
+  function recomputeSplineDerived(): void {
+    const main = draft.aiSplines.find((s) => s.id === 'main')
+    if (!main) return
+    if (main.anchors && main.anchors.length >= 2) {
+      main.points = sampleCatmullRom(main.anchors, {
+        divisionsPerSegment: 12,
+        closed: true,
+      })
+    }
+    for (const cp of draft.checkpoints) {
+      if (typeof cp.splineT === 'number') {
+        const p = pointAtT(main.points, cp.splineT)
+        const tan = tangentAtT(main.points, cp.splineT)
+        cp.position.x = p.x
+        cp.position.z = p.z
+        const yaw = Math.atan2(tan.x, tan.z)
+        const halfA = yaw / 2
+        cp.rotation = { x: 0, y: Math.sin(halfA), z: 0, w: Math.cos(halfA) }
+      }
+    }
+  }
+
   function rebuildHelpers(): void {
     tc.detach()
+    recomputeSplineDerived()
     for (const h of helpers.values()) {
       helpersGroup.remove(h)
       disposeObj(h)
@@ -150,15 +225,18 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     }
     const main = draft.aiSplines.find((s) => s.id === 'main')
     if (main) {
-      for (let pi = 0; pi < main.points.length; pi++) {
+      const anchors = editableSplinePoints()
+      const isAnchored = !!main.anchors
+      for (let pi = 0; pi < anchors.length; pi++) {
         const k = `spline:0:${pi}`
         const isSelected = isSel({ kind: 'spline', splineIndex: 0, pointIndex: pi })
-        const h = makeSplinePointHelper(main.points[pi]!, isSelected)
+        const h = makeAnchorHelper(anchors[pi]!, isSelected, isAnchored)
         h.userData.entityKey = k
         helpers.set(k, h)
         helpersGroup.add(h)
       }
-      splinePolyline = makeSplinePolyline(main.points)
+      // Smooth curve drawn from the dense (runtime) sample list.
+      splinePolyline = makeSplineCurve(main.points)
       helpersGroup.add(splinePolyline)
     }
 
@@ -219,10 +297,21 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     }
   }
 
-  function setMode(m: GizmoMode): void {
-    if (sel && !SUPPORTS_ROTATE_SCALE(sel.kind) && m !== 'translate') {
-      m = 'translate'
+  /** Returns whether the currently-selected entity supports a given gizmo
+   *  mode. Spline-bound gates derive their rotation from the curve, so
+   *  rotate is disabled for those. */
+  function selSupportsMode(m: GizmoMode): boolean {
+    if (!sel) return true
+    if (sel.kind === 'pickup' || sel.kind === 'spline') return m === 'translate'
+    if (sel.kind === 'gate') {
+      const cp = draft.checkpoints[sel.index]
+      if (cp && typeof cp.splineT === 'number' && m === 'rotate') return false
     }
+    return true
+  }
+
+  function setMode(m: GizmoMode): void {
+    if (!selSupportsMode(m)) m = 'translate'
     mode = m
     if (sel) {
       const h = helpers.get(entityKey(sel))
@@ -237,8 +326,9 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     if (sel) {
       const h = helpers.get(entityKey(sel))
       if (h) {
-        // Force translate mode for entities that don't support rotate/scale.
-        if (!SUPPORTS_ROTATE_SCALE(sel.kind)) mode = 'translate'
+        // Force translate mode for entities that don't support the
+        // current gizmo mode (eg spline-bound gates can't rotate).
+        if (!selSupportsMode(mode)) mode = 'translate'
         attachGizmo(h)
       }
     }
@@ -290,12 +380,9 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       // Also bake any pose drift that snuck in during the same drag.
       writeHelperPoseToDraft(h, sel)
       rebuildHelpers()
-    } else {
-      // For translate / rotate the live writes already updated the draft.
-      // We rebuild only the affected entity's appearance if it's geometry-
-      // sensitive (nothing right now — translation/rotation are pure pose).
-      // Spline polyline does need a refresh when a spline point moved.
-      if (sel.kind === 'spline') refreshSplinePolyline()
+    } else if (sel.kind === 'spline') {
+      // Anchor moved → regenerate dense samples + reposition bound gates.
+      rebuildHelpers()
     }
     renderPanel()
   }
@@ -304,6 +391,29 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     if (s.kind === 'gate') {
       const cp = draft.checkpoints[s.index]
       if (!cp) return
+      if (typeof cp.splineT === 'number') {
+        // Spline-bound: project the gizmo's xz onto the nearest point on
+        // the curve, snap the helper there, and update splineT. y stays
+        // freely editable (gates can sit at different heights).
+        const main = draft.aiSplines.find((s2) => s2.id === 'main')
+        if (main && main.points.length >= 2) {
+          const t = nearestT({ x: h.position.x, y: 0, z: h.position.z }, main.points)
+          cp.splineT = t
+          const p = pointAtT(main.points, t)
+          const tan = tangentAtT(main.points, t)
+          cp.position.x = p.x
+          cp.position.y = h.position.y
+          cp.position.z = p.z
+          const yaw = Math.atan2(tan.x, tan.z)
+          const halfA = yaw / 2
+          cp.rotation = { x: 0, y: Math.sin(halfA), z: 0, w: Math.cos(halfA) }
+          // Snap the helper to the resolved pose so the user sees the
+          // gate sticking to the curve mid-drag.
+          h.position.set(p.x, h.position.y, p.z)
+          h.quaternion.set(cp.rotation.x, cp.rotation.y, cp.rotation.z, cp.rotation.w)
+        }
+        return
+      }
       cp.position.x = h.position.x
       cp.position.y = h.position.y
       cp.position.z = h.position.z
@@ -328,21 +438,39 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       pad.rotation.z = h.quaternion.z
       pad.rotation.w = h.quaternion.w
     } else if (s.kind === 'spline') {
+      // Edits the editable array (anchors when present, points for legacy).
       const sp = draft.aiSplines[s.splineIndex]
-      const p = sp?.points[s.pointIndex]
+      if (!sp) return
+      const arr = sp.anchors ?? sp.points
+      const p = arr[s.pointIndex]
       if (!p) return
       p.x = h.position.x
       p.y = h.position.y
       p.z = h.position.z
+      // Live-update the curve + bound-gate poses. Geometry-only refresh
+      // (no full rebuildHelpers) for performance during drag.
+      recomputeSplineDerived()
+      refreshSplineCurveMesh()
+      refreshBoundGateHelpers()
     }
   }
 
-  function refreshSplinePolyline(): void {
+  function refreshSplineCurveMesh(): void {
     if (!splinePolyline) return
     const main = draft.aiSplines.find((s) => s.id === 'main')
-    if (!main) return
+    if (!main || main.points.length < 2) return
     const arr = (splinePolyline.geometry.attributes.position as THREE.BufferAttribute)
       .array as Float32Array
+    // Rebuild only if the buffer is the right size; otherwise rebuild
+    // the whole curve mesh.
+    const need = (main.points.length + 1) * 3
+    if (arr.length !== need) {
+      helpersGroup.remove(splinePolyline)
+      disposeObj(splinePolyline)
+      splinePolyline = makeSplineCurve(main.points)
+      helpersGroup.add(splinePolyline)
+      return
+    }
     for (let i = 0; i < main.points.length; i++) {
       arr[i * 3] = main.points[i]!.x
       arr[i * 3 + 1] = main.points[i]!.y + 0.2
@@ -352,6 +480,57 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     arr[main.points.length * 3 + 1] = main.points[0]!.y + 0.2
     arr[main.points.length * 3 + 2] = main.points[0]!.z
     ;(splinePolyline.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true
+  }
+
+  function refreshBoundGateHelpers(): void {
+    for (let i = 0; i < draft.checkpoints.length; i++) {
+      const cp = draft.checkpoints[i]!
+      if (typeof cp.splineT !== 'number') continue
+      const h = helpers.get(`gate:${i}`)
+      if (!h) continue
+      h.position.set(cp.position.x, cp.position.y, cp.position.z)
+      h.quaternion.set(cp.rotation.x, cp.rotation.y, cp.rotation.z, cp.rotation.w)
+    }
+  }
+
+  /**
+   * Find the index at which a new anchor should be inserted into
+   * `anchors` so the curve passes through the click as naturally as
+   * possible. Picks the segment whose midpoint is closest to the click.
+   */
+  function nearestAnchorInsertIndex(hit: THREE.Vector3, anchors: Vec3[]): number {
+    if (anchors.length === 0) return 0
+    let bestI = anchors.length
+    let bestD = Infinity
+    for (let i = 0; i < anchors.length; i++) {
+      const a = anchors[i]!
+      const b = anchors[(i + 1) % anchors.length]!
+      const d = distToSegmentXZ(hit.x, hit.z, a.x, a.z, b.x, b.z)
+      if (d < bestD) {
+        bestD = d
+        bestI = i + 1
+      }
+    }
+    return bestI
+  }
+
+  function distToSegmentXZ(
+    px: number,
+    pz: number,
+    ax: number,
+    az: number,
+    bx: number,
+    bz: number,
+  ): number {
+    const dx = bx - ax
+    const dz = bz - az
+    const len2 = dx * dx + dz * dz
+    if (len2 === 0) return Math.hypot(px - ax, pz - az)
+    let t = ((px - ax) * dx + (pz - az) * dz) / len2
+    t = Math.max(0, Math.min(1, t))
+    const cx = ax + t * dx
+    const cz = az + t * dz
+    return Math.hypot(px - cx, pz - cz)
   }
 
   // ── DOM panel ───────────────────────────────────────────────────────────
@@ -425,7 +604,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       `<div style="color:#778;font-size:10px;line-height:1.4">
         Click in outliner to select · drag gizmo to manipulate<br/>
         L-drag: orbit · R-drag: pan · wheel: zoom<br/>
-        Delete = remove selected
+        Delete = remove · Ctrl+Z = undo · Ctrl+S = save
        </div>`,
     ].join('')
   }
@@ -436,7 +615,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   }
   function modeBtn(m: GizmoMode, label: string): string {
     const on = m === mode
-    const allowed = !sel || SUPPORTS_ROTATE_SCALE(sel.kind) || m === 'translate'
+    const allowed = selSupportsMode(m)
     return `<button type="button" data-mode="${m}" ${allowed ? '' : 'disabled'} style="background:${on ? '#356' : '#234'};color:#dde;border:1px solid ${on ? '#7af' : '#456'};padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit;${allowed ? '' : 'opacity:0.4;cursor:not-allowed'}">${label}</button>`
   }
 
@@ -474,12 +653,16 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     )
     const main = draft.aiSplines.find((s) => s.id === 'main')
     if (main) {
+      const arr = main.anchors ?? main.points
+      const isAnchored = !!main.anchors
+      const title = isAnchored ? 'Spline anchors' : 'Spline pts'
+      const labelPrefix = isAnchored ? 'anchor' : 'pt'
       sections.push(
         outlinerSection(
-          'Spline pts',
-          main.points.map((p, i) => ({
+          title,
+          arr.map((p, i) => ({
             k: `spline:0:${i}`,
-            label: `pt_${String(i).padStart(3, '0')}  (${p.x.toFixed(0)}, ${p.z.toFixed(0)})`,
+            label: `${labelPrefix}_${String(i).padStart(2, '0')}  (${p.x.toFixed(0)}, ${p.z.toFixed(0)})`,
             sel: { kind: 'spline', splineIndex: 0, pointIndex: i } as EntitySel,
           })),
         ),
@@ -511,10 +694,15 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     if (sel.kind === 'gate') {
       const cp = draft.checkpoints[sel.index]
       if (!cp) return '(missing)'
+      const bound =
+        typeof cp.splineT === 'number'
+          ? `<div style="color:#7c9">⚓ bound to spline @ t=${cp.splineT.toFixed(3)}</div>`
+          : ''
       return [
         `<div><b>cp_${String(cp.index).padStart(2, '0')}</b></div>`,
         `<div>pos: ${fmtVec(cp.position)}</div>`,
         `<div>halfWidth: ${cp.halfWidth.toFixed(2)} · height: ${cp.height.toFixed(2)}</div>`,
+        bound,
       ].join('')
     }
     if (sel.kind === 'pickup') {
@@ -532,9 +720,12 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       ].join('')
     }
     const sp = draft.aiSplines[sel.splineIndex]
-    const p = sp?.points[sel.pointIndex]
+    if (!sp) return '(missing)'
+    const arr = sp.anchors ?? sp.points
+    const p = arr[sel.pointIndex]
     if (!p) return '(missing)'
-    return `<div><b>spline pt ${sel.pointIndex}</b></div><div>pos: ${fmtVec(p)}</div>`
+    const label = sp.anchors ? 'spline anchor' : 'spline pt'
+    return `<div><b>${label} ${sel.pointIndex}</b></div><div>pos: ${fmtVec(p)}</div>`
   }
 
   function wirePanelEvents(): void {
@@ -603,15 +794,23 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   })
 
   function placeAt(hit: THREE.Vector3, t: PlaceTool): void {
+    pushUndoSnapshot()
     if (t === 'gate') {
       const idx = draft.checkpoints.length
-      draft.checkpoints.push({
+      const main = draft.aiSplines.find((s) => s.id === 'main')
+      const useSpline = !!main && main.points.length >= 2
+      const cp: Checkpoint = {
         index: idx,
         position: { x: hit.x, y: 1.5, z: hit.z },
         rotation: { x: 0, y: 0, z: 0, w: 1 },
         halfWidth: 8,
         height: 4,
-      })
+      }
+      if (useSpline) {
+        // Auto-bind to the main spline at the click's nearest curve point.
+        cp.splineT = nearestT({ x: hit.x, y: 0, z: hit.z }, main!.points)
+      }
+      draft.checkpoints.push(cp)
       sel = { kind: 'gate', index: idx }
     } else if (t === 'pickup') {
       draft.pickupSpawns.push({ x: hit.x, y: 1.2, z: hit.z })
@@ -628,8 +827,18 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     } else if (t === 'spline') {
       const main = draft.aiSplines.find((s) => s.id === 'main')
       if (main) {
-        main.points.push({ x: hit.x, y: 0.5, z: hit.z })
-        sel = { kind: 'spline', splineIndex: 0, pointIndex: main.points.length - 1 }
+        // For Catmull-Rom-anchored splines: insert into anchors at the
+        // segment closest to the click so the curve stays continuous.
+        // For legacy point-only splines: append to points (preserving
+        // the old behavior).
+        if (main.anchors && main.anchors.length >= 2) {
+          const insertIdx = nearestAnchorInsertIndex(hit, main.anchors)
+          main.anchors.splice(insertIdx, 0, { x: hit.x, y: 0.5, z: hit.z })
+          sel = { kind: 'spline', splineIndex: 0, pointIndex: insertIdx }
+        } else {
+          main.points.push({ x: hit.x, y: 0.5, z: hit.z })
+          sel = { kind: 'spline', splineIndex: 0, pointIndex: main.points.length - 1 }
+        }
       }
     }
     rebuildHelpers()
@@ -650,6 +859,14 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     } else if (e.code === 'KeyS' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
       void save()
+    } else if (e.code === 'KeyZ' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+      e.preventDefault()
+      const ok = tryUndo()
+      const status = panel.querySelector<HTMLElement>('#ed-status')
+      if (status) {
+        status.textContent = ok ? `Undid (${undoStack.length} more)` : 'Nothing to undo'
+        status.style.color = ok ? '#7a8' : '#aa9'
+      }
     } else if (e.code === 'Escape') {
       placeTool = 'none'
       renderPanel()
@@ -659,6 +876,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
 
   function deleteSelected(): void {
     if (!sel) return
+    pushUndoSnapshot()
     if (sel.kind === 'gate') {
       draft.checkpoints.splice(sel.index, 1)
       for (let i = 0; i < draft.checkpoints.length; i++) draft.checkpoints[i]!.index = i
@@ -668,7 +886,10 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       draft.boostPads.splice(sel.index, 1)
     } else if (sel.kind === 'spline') {
       const sp = draft.aiSplines[sel.splineIndex]
-      if (sp && sp.points.length > 2) sp.points.splice(sel.pointIndex, 1)
+      if (sp) {
+        const arr = sp.anchors ?? sp.points
+        if (arr.length > 2) arr.splice(sel.pointIndex, 1)
+      }
     }
     sel = null
     tc.detach()
@@ -831,25 +1052,53 @@ function makePadHelper(pad: BoostPad, selected: boolean): THREE.Group {
   return g
 }
 
-function makeSplinePointHelper(
+/**
+ * Anchor / control-point helper. Bigger (1.2m) when this is a Catmull-Rom
+ * anchor — the user is meant to grab and drag these. Smaller (0.6m) for
+ * legacy dense polyline points where there are many.
+ */
+function makeAnchorHelper(
   p: { x: number; y: number; z: number },
   selected: boolean,
+  isAnchor: boolean,
 ): THREE.Group {
   const g = new THREE.Group()
   g.position.set(p.x, p.y + 0.2, p.z)
-  const baseColor = 0x88ccff
+  const baseColor = isAnchor ? 0x66bbff : 0x88ccff
   const selColor = 0xffff66
   const mat = new THREE.MeshBasicMaterial({ color: selected ? selColor : baseColor })
-  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.6, 8, 6), mat)
+  const radius = isAnchor ? 1.4 : 0.6
+  const segs = isAnchor ? 12 : 8
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(radius, segs, segs), mat)
   g.add(dot)
+  if (isAnchor) {
+    // Faint vertical post so anchors are visible when the camera is low.
+    const postMat = new THREE.MeshBasicMaterial({
+      color: baseColor,
+      transparent: true,
+      opacity: 0.4,
+    })
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 3, 6), postMat)
+    post.position.set(0, 1.5, 0)
+    g.add(post)
+  }
   g.userData.setSelected = (v: boolean) => {
     mat.color.setHex(v ? selColor : baseColor)
   }
   return g
 }
 
-function makeSplinePolyline(points: { x: number; y: number; z: number }[]): THREE.Line {
+/**
+ * Smooth curve drawn from the dense runtime-sample list. For anchored
+ * splines this is the Catmull-Rom output; for legacy splines it's just
+ * the polyline.
+ */
+function makeSplineCurve(points: { x: number; y: number; z: number }[]): THREE.Line {
   const geom = new THREE.BufferGeometry()
+  if (points.length < 2) {
+    geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3))
+    return new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x4488aa }))
+  }
   const arr = new Float32Array((points.length + 1) * 3)
   for (let i = 0; i < points.length; i++) {
     arr[i * 3] = points[i]!.x
@@ -860,8 +1109,8 @@ function makeSplinePolyline(points: { x: number; y: number; z: number }[]): THRE
   arr[points.length * 3 + 1] = points[0]!.y + 0.2
   arr[points.length * 3 + 2] = points[0]!.z
   geom.setAttribute('position', new THREE.BufferAttribute(arr, 3))
-  const line = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x4488aa }))
-  line.name = 'editor:spline-polyline'
+  const line = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x66aacc }))
+  line.name = 'editor:spline-curve'
   return line
 }
 

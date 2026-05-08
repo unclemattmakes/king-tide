@@ -33,17 +33,43 @@ test.describe('M9.18 in-app editor', () => {
     await expect(panel.locator('button[data-mode="scale"]')).toBeVisible()
 
     // Outliner lists all four entity kinds with non-zero counts where
-    // expected (lagoon-edit has 9 gates, 7 pickups, 0 pads, 100 spline pts).
+    // expected (lagoon-edit has 9 gates, 7 pickups, 0 pads, 9 spline anchors).
     const outliner = panel.locator('#ed-outliner')
     await expect(outliner).toContainText('Checkpoints (9)')
     await expect(outliner).toContainText('Pickups (7)')
     await expect(outliner).toContainText('Boost Pads (0)')
-    await expect(outliner).toContainText('Spline pts (100)')
+    await expect(outliner).toContainText('Spline anchors (9)')
 
     // Click a checkpoint row → selection updates the props panel.
     await outliner.locator('div[data-select="gate:0"]').click()
     await expect(panel.locator('#ed-props')).toContainText('cp_00')
     await expect(panel.locator('#ed-props')).toContainText('halfWidth')
+    // Lagoon-edit's gates are spline-bound, so the props panel should
+    // show the binding marker.
+    await expect(panel.locator('#ed-props')).toContainText('bound to spline')
+  })
+
+  test('Ctrl+Z undoes a placement', async ({ page }) => {
+    test.setTimeout(30_000)
+    await page.goto('/?track=calibration&edit=1')
+
+    const panel = page.locator('#editor-panel')
+    await expect(panel).toBeVisible()
+    const outliner = panel.locator('#ed-outliner')
+    await expect(outliner).toContainText('Pickups (1)')
+
+    // Place a new pickup.
+    await panel.locator('button[data-place="pickup"]').click()
+    const canvas = page.locator('#app canvas').first()
+    await canvas.waitFor()
+    const box = await canvas.boundingBox()
+    if (!box) throw new Error('no canvas bounding box')
+    await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5)
+    await expect(outliner).toContainText('Pickups (2)')
+
+    // Undo via Ctrl+Z — count should drop back.
+    await page.keyboard.press('Control+z')
+    await expect(outliner).toContainText('Pickups (1)')
   })
 
   test('place-pickup tool adds a pickup on canvas click', async ({ page }) => {

@@ -28,10 +28,14 @@ not editable here.
 
 - **Water plane** — the world's flat reference at y=0.
 - **Gates** as orange transparent goalposts (small forward-arrow shows
-  gate orientation), indexed `cp_NN`.
+  gate orientation), indexed `cp_NN`. Bound gates (the default) snap
+  to the AI spline; their pose is derived from the curve.
 - **Pickup spawns** as orange spheres.
 - **Boost pads** as cyan slabs with a forward-arrow.
-- **AI spline** as a polyline of blue dots; control points are draggable.
+- **AI spline** as a smooth Catmull-Rom curve passing through a small
+  set of bigger blue **anchors** (each with a faint vertical post).
+  Drag anchors to reshape the curve — the editor resamples and
+  repositions all bound gates live.
 - **Outliner panel** (top-left): every entity grouped by kind, click to
   select.
 
@@ -43,8 +47,15 @@ not editable here.
 3. **Drag a gizmo handle** to move, rotate, or scale.
 4. **Place new entities** with the **+ Gate / + Pickup / + Boost /
    + Spline pt** buttons — the next ground click drops the entity.
-5. **Save** writes `public/tracks/<id>.json` via the dev middleware.
-6. **Play** reloads without `?edit=1` so you immediately race the changes.
+   - Newly-placed gates auto-bind to the spline at the click's nearest
+     curve point (you can toggle this off later by hand-editing the
+     JSON to remove `splineT`).
+   - Newly-placed spline anchors insert into the segment closest to
+     the click so the curve stays continuous.
+5. **Undo** with Ctrl/Cmd+Z (or your platform equivalent). Stack depth
+   is 50; each placement, deletion, and gizmo drag is a single step.
+6. **Save** writes `public/tracks/<id>.json` via the dev middleware.
+7. **Play** reloads without `?edit=1` so you immediately race the changes.
 
 ## Gizmo modes
 
@@ -55,7 +66,12 @@ not editable here.
 | Scale | `R` | Resize (gates: halfWidth + height; pads: halfWidth + halfDepth) |
 
 - **Gates + Boost Pads** support all three modes.
-- **Pickups + Spline points** are translate-only — rotate / scale are
+- **Spline-bound gates** (the default for new gates) translate by
+  *sliding along the spline* — drag the gizmo and the gate snaps to
+  the nearest curve point, updating its `splineT`. Rotation is locked
+  (derived from the curve tangent); scale still works for halfWidth /
+  height.
+- **Pickups + Spline anchors** are translate-only — rotate / scale are
   meaningless for a single point.
 - The gizmo's restricted axes are reflected automatically (e.g. rotate
   on a gate only shows the Y ring; scale on a pad only shows X and Z).
@@ -84,7 +100,8 @@ camera above the water plane.)
 | Click outliner row | Select that entity |
 | Click `+ X` button | Arm placement; next ground click places |
 | Esc | Cancel current place tool |
-| Delete / Backspace | Remove selected entity (spline keeps ≥2 points) |
+| Delete / Backspace | Remove selected entity (spline keeps ≥2 anchors) |
+| Ctrl/Cmd + Z | Undo last placement / delete / gizmo drag (50 deep) |
 | Ctrl/Cmd + S | Save |
 
 ## Wiring the env .glb
@@ -103,9 +120,38 @@ export. Example for `public/tracks/mybeach.json`:
 In editor mode the .glb is **not** loaded (you author against the bare
 water plane without parallax distractions). It loads on Play.
 
+## Splines: anchors vs. legacy points
+
+The runtime AI controller follows a **dense polyline** of ~100+ points.
+Authors don't want to drag 100 dots, so the JSON supports two formats:
+
+- **`anchors`** *(preferred)* — sparse Catmull-Rom control points (8-12
+  is plenty for a stadium-style loop). The loader resamples them into
+  the dense polyline at boot. The editor edits anchors directly.
+- **`points`** *(legacy)* — the dense polyline as-is. Older tracks
+  (e.g. `calibration.json`) still use this. The editor will show every
+  individual point as a small dot — workable but tedious. Convert to
+  anchors by hand-editing the JSON when convenient.
+
+When a track has anchors, the dense `points` field is regenerated on
+every save (and stored as `[]` to keep the file small).
+
+## Spline-bound gates
+
+By default, new gates set `splineT` to bind themselves to the AI spline:
+
+- The loader derives the gate's xz position + yaw from the curve at
+  parameter t.
+- Translating the gate slides it along the spline (snaps to the
+  nearest curve point on each gizmo update).
+- Rotation is locked (the curve tangent decides yaw).
+- Reshaping the spline auto-updates every bound gate's pose.
+
+To unbind a gate from the spline, hand-edit the JSON to remove its
+`splineT` field. Phase-3 work will surface this as a panel toggle.
+
 ## Limitations
 
-- **No undo.** Save is the commit point; reload to abandon.
 - **No diff vs. saved.** Status appears under the Save button; the
   underlying file isn't watched for outside changes.
 - **Boost pads have no runtime effect yet.** They render and persist but
@@ -113,5 +159,6 @@ water plane without parallax distractions). It loads on Play.
 - **Numeric input boxes are read-only.** The properties panel shows
   values but you can't type into them — use the gizmo. Hand-edit the
   JSON for fine-grained control.
+- **No "unbind from spline" UI.** Hand-edit JSON to remove `splineT`.
 
 These are the next things to build.

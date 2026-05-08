@@ -59,7 +59,45 @@ describe('buildTrackFromJson', () => {
   it('rejects splines with fewer than 2 points', () => {
     const raw = baseTrack()
     raw.aiSplines[0]!.points = [{ x: 0, y: 0, z: 0 }]
-    expect(() => buildTrackFromJson(raw)).toThrow(/at least 2 entries/)
+    expect(() => buildTrackFromJson(raw)).toThrow(/needs either anchors\[≥2\] or points\[≥2\]/)
+  })
+
+  it('rejects anchored splines with fewer than 2 anchors', () => {
+    const raw = baseTrack()
+    ;(raw.aiSplines[0] as Record<string, unknown>).anchors = [{ x: 0, y: 0, z: 0 }]
+    expect(() => buildTrackFromJson(raw)).toThrow(/anchors must have at least 2 entries/)
+  })
+
+  it('samples anchors into a dense polyline at load time', () => {
+    const raw = baseTrack()
+    ;(raw.aiSplines[0] as Record<string, unknown>).anchors = [
+      { x: 0, y: 0, z: 0 },
+      { x: 10, y: 0, z: 0 },
+      { x: 10, y: 0, z: 10 },
+      { x: 0, y: 0, z: 10 },
+    ]
+    raw.aiSplines[0]!.points = []
+    const track = buildTrackFromJson(raw)
+    // Catmull-Rom samples 12 points per segment * 4 segments (closed loop).
+    expect(track.aiSplines[0]!.anchors).toHaveLength(4)
+    expect(track.aiSplines[0]!.points.length).toBeGreaterThan(40)
+  })
+
+  it('derives gate position + yaw from spline when splineT is set', () => {
+    const raw = baseTrack()
+    // Define a known straight spline along +Z at x=5.
+    ;(raw.aiSplines[0] as Record<string, unknown>).anchors = [
+      { x: 5, y: 1, z: 0 },
+      { x: 5, y: 1, z: 10 },
+      { x: 5, y: 1, z: 20 },
+      { x: 5, y: 1, z: 30 },
+    ]
+    raw.aiSplines[0]!.points = []
+    // Bind cp 0 at t=0.5 (about halfway around the closed loop).
+    ;(raw.checkpoints[0] as Record<string, unknown>).splineT = 0.0
+    const track = buildTrackFromJson(raw)
+    expect(track.checkpoints[0]!.splineT).toBeCloseTo(0)
+    expect(track.checkpoints[0]!.position.x).toBeCloseTo(5, 1)
   })
 
   it('reads optional environmentGlb + water but tolerates absence', () => {

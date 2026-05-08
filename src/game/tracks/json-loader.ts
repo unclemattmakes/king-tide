@@ -1,4 +1,5 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
+import { pointAtT, sampleCatmullRom, tangentAtT } from './catmull-rom'
 import type { AISpline, BoostPad, Checkpoint, Track, WaterConfig } from './types'
 
 /**
@@ -86,6 +87,23 @@ export function buildTrackFromJson(input: unknown): Track {
     throw new Error('track-json: missing aiSplines entry with id="main"')
   }
 
+  // Spline-bound gates derive position + rotation from the main spline at
+  // their `splineT`. Done after both arrays have been parsed so we can
+  // reach into the resolved sample list.
+  const main = aiSplines.find((s) => s.id === 'main')
+  if (main) {
+    for (const cp of checkpoints) {
+      if (typeof cp.splineT === 'number') {
+        const p = pointAtT(main.points, cp.splineT)
+        const tan = tangentAtT(main.points, cp.splineT)
+        cp.position = { x: p.x, y: cp.position.y, z: p.z }
+        const yaw = Math.atan2(tan.x, tan.z)
+        const halfA = yaw / 2
+        cp.rotation = { x: 0, y: Math.sin(halfA), z: 0, w: Math.cos(halfA) }
+      }
+    }
+  }
+
   const pickupSpawnsRaw = (input as { pickupSpawns?: unknown }).pickupSpawns ?? []
   if (!Array.isArray(pickupSpawnsRaw)) {
     throw new Error('track-json: pickupSpawns must be an array if present')
@@ -131,17 +149,33 @@ export function trackToJson(track: Track): TrackJson {
     name: track.name,
     lapsToFinish: track.lapsToFinish,
     start: { position: { ...track.start.position }, yaw: track.start.yaw },
-    checkpoints: track.checkpoints.map((cp) => ({
-      index: cp.index,
-      position: { ...cp.position },
-      rotation: { ...cp.rotation },
-      halfWidth: cp.halfWidth,
-      height: cp.height,
-    })),
-    aiSplines: track.aiSplines.map((s) => ({
-      id: s.id,
-      points: s.points.map((p) => ({ ...p })),
-    })),
+    checkpoints: track.checkpoints.map((cp) => {
+      const out: Checkpoint = {
+        index: cp.index,
+        position: { ...cp.position },
+        rotation: { ...cp.rotation },
+        halfWidth: cp.halfWidth,
+        height: cp.height,
+      }
+      if (typeof cp.splineT === 'number') out.splineT = cp.splineT
+      return out
+    }),
+    aiSplines: track.aiSplines.map((s) => {
+      // When anchors are present, save anchors only — the loader will
+      // resample on next load. We drop the dense `points` to keep the
+      // file small and avoid drift between the two representations.
+      if (s.anchors && s.anchors.length >= 2) {
+        return {
+          id: s.id,
+          // The points field is required by the on-disk type; keep an
+          // empty array so the JSON validates (loader prefers anchors
+          // when present).
+          points: [],
+          anchors: s.anchors.map((p) => ({ ...p })),
+        }
+      }
+      return { id: s.id, points: s.points.map((p) => ({ ...p })) }
+    }),
     pickupSpawns: track.pickupSpawns.map((p) => ({ ...p })),
     boostPads: track.boostPads.map((p) => ({
       position: { ...p.position },
@@ -159,22 +193,46 @@ export function trackToJson(track: Track): TrackJson {
 function readCheckpoint(raw: unknown, i: number): Checkpoint {
   if (!isObject(raw)) throw new Error(`track-json: checkpoints[${i}] must be an object`)
   const index = requireNumber(raw, 'index')
-  const position = readVec3(raw.position, `checkpoints[${i}].position`)
-  const rotation = readQuat(raw.rotation, `checkpoints[${i}].rotation`)
   const halfWidth = requireNumber(raw, 'halfWidth')
   const height = requireNumber(raw, 'height')
   if (halfWidth <= 0 || height <= 0) {
     throw new Error(`track-json: checkpoints[${i}] halfWidth/height must be positive`)
   }
-  return { index, position, rotation, halfWidth, height }
+  // splineT-bound gates get their position + rotation derived from the
+  // main spline; the JSON's stored values are still required so the gate
+  // has a sane y when the spline is xz-only. We use the JSON pose as the
+  // initial guess and overwrite xz/rotation in the post-pass above.
+  const splineTRaw = (raw as { splineT?: unknown }).splineT
+  const hasSplineT = typeof splineTRaw === 'number' && Number.isFinite(splineTRaw)
+  const position = readVec3(raw.position, `checkpoints[${i}].position`)
+  const rotation = readQuat(raw.rotation, `checkpoints[${i}].rotation`)
+  const out: Checkpoint = { index, position, rotation, halfWidth, height }
+  if (hasSplineT) out.splineT = (((splineTRaw as number) % 1) + 1) % 1
+  return out
 }
 
 function readSpline(raw: unknown, i: number): AISpline {
   if (!isObject(raw)) throw new Error(`track-json: aiSplines[${i}] must be an object`)
   const id = requireString(raw, 'id')
+
+  // Two source formats:
+  //   - `anchors` (preferred): sparse Catmull-Rom control points. The
+  //     loader samples them into the dense `points` array the runtime
+  //     consumes.
+  //   - `points` (legacy): the dense polyline directly.
+  const anchorsRaw = (raw as { anchors?: unknown }).anchors
+  if (Array.isArray(anchorsRaw)) {
+    if (anchorsRaw.length < 2) {
+      throw new Error(`track-json: aiSplines[${i}].anchors must have at least 2 entries`)
+    }
+    const anchors: Vec3[] = anchorsRaw.map((p, j) => readVec3(p, `aiSplines[${i}].anchors[${j}]`))
+    const points = sampleCatmullRom(anchors, { divisionsPerSegment: 12, closed: true })
+    return { id, points, anchors }
+  }
+
   const pts = (raw as { points?: unknown }).points
   if (!Array.isArray(pts) || pts.length < 2) {
-    throw new Error(`track-json: aiSplines[${i}].points must have at least 2 entries`)
+    throw new Error(`track-json: aiSplines[${i}] needs either anchors[≥2] or points[≥2]`)
   }
   const points: Vec3[] = pts.map((p, j) => readVec3(p, `aiSplines[${i}].points[${j}]`))
   return { id, points }

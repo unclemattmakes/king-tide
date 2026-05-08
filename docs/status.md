@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-07 (M9.19 editor outliner + Three.js manipulation gizmos — translate / rotate / scale on gates and boost pads via TransformControls). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-07 (M9.20 editor: undo, Catmull-Rom anchor splines, gates auto-bind to spline). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -244,6 +244,7 @@ Open follow-ups:
 | M9.17 | .glb mesh rendering — track surface visible in scene; collider attach best-effort | ✅ |
 | M9.18 | Hybrid pipeline — JSON gameplay data + optional Blender .glb env; in-app editor scaffold | ✅ |
 | M9.19 | Editor outliner + Three.js TransformControls (move/rotate/scale); defaults to lagoon-edit | ✅ |
+| M9.20 | Editor: undo stack, Catmull-Rom anchor splines (~10 control pts), gates auto-bind to spline | ✅ |
 
 ## File / system map
 
