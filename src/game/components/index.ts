@@ -45,6 +45,13 @@ export type BikeStatsData = {
    * surfaceFollow (~0.3); a light agile bike rides every ripple at ~0.7.
    */
   surfaceFollow: number
+  /**
+   * Render hint: the body color the bike mesh should use. Stored here
+   * (rather than in a separate component) because every variant needs
+   * one and the sim layer simply ignores the field — it's just a uint.
+   * Render-side imports the value when first creating the mesh.
+   */
+  bodyColor?: number
 }
 export const BikeStatsStore = createStore<BikeStatsData>('BikeStats')
 

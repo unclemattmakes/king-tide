@@ -6,6 +6,7 @@ import type { Vec3 } from '@/engine/sim/physics/vec'
 import { defaultBikeStats } from '@/game/bikes/stats'
 import {
   BikeStats,
+  type BikeStatsData,
   BikeStatsStore,
   BikeTag,
   ControlIntent,
@@ -31,11 +32,14 @@ export type CreateBikeOpts = {
   asRacer?: boolean
   /** If set, attaches AI components and follows the named spline. */
   ai?: { splineId: string; lineOffset?: number }
+  /** Optional sim-side stat override — used by bike variants. Defaults
+   *  to defaultBikeStats() if omitted. */
+  stats?: BikeStatsData
 }
 
 export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOpts): number {
   const eid = addEntity(sim)
-  const stats = defaultBikeStats()
+  const stats = opts.stats ?? defaultBikeStats()
 
   const yaw = opts.yaw ?? 0
   const halfYaw = yaw / 2

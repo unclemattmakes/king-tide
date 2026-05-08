@@ -1,12 +1,15 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-07 (Cliffside track + gate-cleared audio). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-07 (bike variants + garage menu + best-lap save). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
 ## What works today
 
 - Two tracks: **Lagoon Loop** (default; jump ramp on the right straight) and **Cliffside** (`?track=cliffside`; mesa with cliff drop, doubles as the Blender-export reference layout)
+- Three bike archetypes — **Cruiser** (heavy / fast top speed), **Racer** (default balanced), **Stunt** (light / agile) — selectable via the garage menu or `?bike=`
+- Garage menu (HUD button top-right) for picking bike + track + viewing / clearing best lap records
+- Best lap times saved per (track, bike) to localStorage, surfaced in the finish overlay and garage menu
 - Jump ramp on Lagoon's right straight (z = 25–37) — exercises raycast-vs-static-collider, surface alignment on a sloped normal, hover-spring release on launch, and water re-acquisition on landing
 - Player spawns on the racing line at the start gate, facing forward
 - Hover-bike physics (Rapier WASM, deterministic build)
@@ -20,7 +23,7 @@ This doc captures the build's current state, controls, known issues, and next st
 - Auto-play mode (T or F1) — AI takes over the player bike for testing
 - Backspace = respawn at start
 - Mouse right-drag and gamepad right-stick orbit the camera (vertical inverted by default)
-- 22 e2e + 35 unit tests, all green
+- 25 e2e + 49 unit tests, all green
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
 
 ## Controls
@@ -136,9 +139,7 @@ Open polish:
 - Pool weighting feels OK at 2:1:1:1 (boost:shield:mine:missile) but only one race tested it. Tune if combat dominates.
 
 ### Missing MVP items
-- **[S] Bike variants.** 2–3 bikes with distinct stat tradeoffs (top speed / handling / accel). Stats are already parameterised per entity.
-- **[M] Bike select + track select menus.** Vanilla DOM, simple flow.
-- **[S] Save state.** Local-storage-backed best lap times.
+*(MVP feature list is now complete. Remaining work is the asset pipeline + post-MVP polish — see below.)*
 
 ### Asset pipeline (deferred; tools exist)
 - **[L] Run the Blender pipeline end-to-end.** Build `tracks-src/calibration.blend` via `tools/build_calibration_scene.py`, export with `tools/export_track.py`, write the runtime `.glb` loader that reads the metadata from `extras`. Procedural Lagoon Loop will serve until the user decides to author tracks in Blender.
@@ -176,6 +177,7 @@ Open polish:
 | M9.11 | Jump ramp on right straight — verifies non-water surface behavior | ✅ |
 | M9.12 | Procedural audio (engine + ambient + pickup chime + weapon SFX) | ✅ |
 | M9.13 | Cliffside track (mesa + ramp + cliff drop) + gate/lap audio | ✅ |
+| M9.14 | Bike variants + garage menu + best-lap save state — MVP feature-complete | ✅ |
 
 ## File / system map
 

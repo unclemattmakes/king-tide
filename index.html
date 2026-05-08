@@ -27,6 +27,62 @@
       #finish .stat { font-size: 18px; line-height: 1.5; }
       #finish .stat b { color: #ffcc66; }
       #finish .hint { margin-top: 20px; font-size: 11px; opacity: 0.6; }
+
+      /* Garage button (HUD corner) */
+      #garage-toggle {
+        position: fixed; top: 8px; right: 8px;
+        background: rgba(20,30,45,0.7); color: #ffcc66;
+        border: 1px solid rgba(255,200,100,0.4); border-radius: 3px;
+        font: bold 12px ui-monospace, monospace; letter-spacing: 1px;
+        padding: 6px 12px; cursor: pointer; user-select: none;
+      }
+      #garage-toggle:hover { background: rgba(40,55,80,0.9); }
+      #garage-best { font-size: 10px; opacity: 0.75; margin-left: 6px; }
+
+      /* Garage overlay */
+      #garage {
+        position: fixed; inset: 0; display: none; align-items: center;
+        justify-content: center; z-index: 10;
+        background: rgba(0,0,0,0.75);
+      }
+      #garage.show { display: flex; }
+      #garage .card {
+        background: rgba(20,30,45,0.95); border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 8px; padding: 24px 32px;
+        font-family: ui-monospace, monospace; color: #eee;
+        max-width: 92vw; max-height: 90vh; overflow: auto;
+      }
+      #garage h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: 3px; color: #ffcc66; }
+      #garage .sub { font-size: 11px; opacity: 0.7; margin-bottom: 18px; }
+      #garage h2 { font-size: 12px; letter-spacing: 2px; opacity: 0.75; margin: 14px 0 6px; }
+      #garage .options { display: flex; gap: 8px; flex-wrap: wrap; }
+      #garage .opt {
+        flex: 1 1 180px; min-width: 160px; cursor: pointer;
+        background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12);
+        border-left: 3px solid var(--accent, #888);
+        border-radius: 4px; padding: 10px 12px; user-select: none;
+      }
+      #garage .opt:hover { background: rgba(255,255,255,0.08); }
+      #garage .opt.selected {
+        background: rgba(255,200,100,0.10);
+        border-color: rgba(255,200,100,0.55);
+        border-left-color: var(--accent, #ffcc66);
+      }
+      #garage .opt .name { font-size: 14px; font-weight: bold; letter-spacing: 1px; color: var(--accent, #fff); }
+      #garage .opt .tag { font-size: 11px; opacity: 0.75; margin-top: 3px; }
+      #garage .opt .best { font-size: 10px; opacity: 0.6; margin-top: 6px; font-style: italic; }
+      #garage .actions { margin-top: 22px; display: flex; gap: 10px; justify-content: flex-end; }
+      #garage button.action {
+        background: rgba(255,200,100,0.16); color: #ffcc66;
+        border: 1px solid rgba(255,200,100,0.5); border-radius: 3px;
+        font: bold 13px ui-monospace, monospace; letter-spacing: 1px;
+        padding: 8px 18px; cursor: pointer;
+      }
+      #garage button.action.secondary {
+        background: rgba(255,255,255,0.06); color: #ccc;
+        border-color: rgba(255,255,255,0.2);
+      }
+      #garage button.action:hover { filter: brightness(1.2); }
     </style>
   </head>
   <body>
@@ -44,9 +100,26 @@
         <div class="sub" id="finish-sub">Lagoon Loop</div>
         <div class="stat">
           Position: <b id="finish-pos">—</b><br />
-          Time: <b id="finish-time">—</b>
+          Time: <b id="finish-time">—</b><br />
+          <span id="finish-best"></span>
         </div>
         <div class="hint">press R to race again</div>
+      </div>
+    </div>
+    <button id="garage-toggle">GARAGE<span id="garage-best"></span></button>
+    <div id="garage">
+      <div class="card">
+        <h1>GARAGE</h1>
+        <div class="sub">Pick your bike and track. Best lap times below.</div>
+        <h2>BIKE</h2>
+        <div class="options" id="garage-bikes"></div>
+        <h2>TRACK</h2>
+        <div class="options" id="garage-tracks"></div>
+        <div class="actions">
+          <button class="action secondary" id="garage-cancel">CANCEL</button>
+          <button class="action secondary" id="garage-clear">CLEAR RECORDS</button>
+          <button class="action" id="garage-race">RACE</button>
+        </div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

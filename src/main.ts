@@ -2,6 +2,7 @@ import { addComponent, hasComponent, query, removeComponent } from 'bitecs'
 import * as THREE from 'three'
 import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug'
 import { createAudioEngine } from './engine/audio/audio'
+import { formatLap, installGarageMenu } from './engine/garage'
 import {
   emptyIntent,
   type Intent,
@@ -22,10 +23,12 @@ import { createScene } from './engine/render/scene'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { createTrailRenderSystem } from './engine/render/trail-render'
 import { createWaterMesh } from './engine/render/water'
+import { getBestLap, recordLapTime } from './engine/save-state'
 import { createSimWorld } from './engine/sim/ecs/world'
 import { createPhysicsWorld } from './engine/sim/physics/rapier'
 import { vecHorizontalLength } from './engine/sim/physics/vec'
 import { advanceWaveField, createWaveField, defaultWaves } from './engine/sim/water/wave-field'
+import { resolveBikeVariant } from './game/bikes/variants'
 import { HoverStateStore, RBHandleStore } from './game/components'
 import { AIController, AIControllerStore, AITag, defaultAIController } from './game/components/ai'
 import { ExplosionTag, MineTag, MissileTag } from './game/components/combat'
@@ -77,6 +80,7 @@ async function boot() {
   const finishSub = document.getElementById('finish-sub')
   const finishPos = document.getElementById('finish-pos')
   const finishTime = document.getElementById('finish-time')
+  const finishBest = document.getElementById('finish-best')
 
   installInput()
   installCameraLookInput()
@@ -91,13 +95,29 @@ async function boot() {
   const waterMesh = createWaterMesh(waveField, { size: 800, subdivisions: 96 })
   scene.add(waterMesh.mesh)
 
+  const params = new URLSearchParams(window.location.search)
+
   // Track selection. URL `?track=cliffside` switches to the second track;
   // anything else (or omitted) defaults to Lagoon Loop. Each track owns
   // its own terrain setup so they can swap out cleanly.
-  const trackId =
-    new URLSearchParams(window.location.search).get('track') === 'cliffside'
-      ? 'cliffside'
-      : 'lagoon'
+  const trackId = params.get('track') === 'cliffside' ? 'cliffside' : 'lagoon'
+
+  // Bike variant. URL `?bike=cruiser|racer|stunt` picks the player's
+  // archetype; AI bikes always use the racer baseline for now. Variant
+  // controls both stats and body color via BikeStats.bodyColor.
+  const playerVariant = resolveBikeVariant(params.get('bike'))
+
+  // Garage menu — DOM overlay opened from a HUD button.
+  installGarageMenu({ initialTrackId: trackId, initialBikeId: playerVariant.id })
+
+  // Best-lap tracking. We compare each completed lap to the saved best
+  // for (track, bike) and update on every personal-best.
+  let lapStartRaceTime = 0
+  let bestLapThisRace: number | null = null
+  let bestLapAllTime: number | null = getBestLap({
+    trackId,
+    bikeId: playerVariant.id,
+  })
 
   // Universal: backstop floor for any track.
   createSafetyFloor(phys)
@@ -127,6 +147,7 @@ async function boot() {
     yaw: track.start.yaw,
     isPlayer: true,
     asRacer: true,
+    stats: { ...playerVariant.stats, bodyColor: playerVariant.bodyColor },
   })
 
   // Spread AI bikes across a 4-wide grid behind the player on the right
@@ -172,14 +193,27 @@ async function boot() {
           trackVisuals.setCheckpointState(cp.index, 'upcoming')
         }
       }
-      // Audio cue. Lap-completion gets a richer arpeggio than a regular
-      // gate. We detect lap completion by "the gate we just crossed was
-      // the START gate (cp 0) AND we've already crossed at least one
-      // checkpoint this run" — a fresh-out-of-spawn cp0 crossing on the
-      // very first lap shouldn't celebrate.
-      const isLapEnd = justCrossed === 0 && r.checkpointsCrossed > 1
-      if (isLapEnd) {
+      // Audio cue + lap timing.
+      // - First cp 0 crossing (`checkpointsCrossed === 1`) is the
+      //   "engines on" moment: zero the lap timer so the spawn-to-line
+      //   drive doesn't pad lap 1.
+      // - Subsequent cp 0 crossings end a lap: emit the celebratory
+      //   arpeggio, record the time, persist if it beats the all-time
+      //   best for this (track, bike) combo.
+      // - Any other gate is just a quick ding.
+      if (justCrossed === 0 && r.checkpointsCrossed === 1) {
+        lapStartRaceTime = r.raceTime
+        audio.gateCleared()
+      } else if (justCrossed === 0 && r.checkpointsCrossed > 1) {
         audio.lapCompleted()
+        const lapTime = r.raceTime - lapStartRaceTime
+        lapStartRaceTime = r.raceTime
+        if (bestLapThisRace === null || lapTime < bestLapThisRace) {
+          bestLapThisRace = lapTime
+        }
+        if (recordLapTime({ trackId, bikeId: playerVariant.id }, lapTime)) {
+          bestLapAllTime = lapTime
+        }
       } else {
         audio.gateCleared()
       }
@@ -456,6 +490,17 @@ async function boot() {
           if (finishPos && me) finishPos.textContent = ordinal(me.position)
           if (finishTime) finishTime.textContent = formatTime(rs.raceTime)
           if (finishTitle) finishTitle.textContent = me?.position === 1 ? 'WINNER' : 'FINISH'
+          if (finishSub) finishSub.textContent = `${track.name} · ${playerVariant.name}`
+          if (finishBest) {
+            const parts: string[] = []
+            if (bestLapThisRace !== null) {
+              parts.push(`Best lap: <b>${formatLap(bestLapThisRace)}</b>`)
+            }
+            if (bestLapAllTime !== null) {
+              parts.push(`All-time: <b>${formatLap(bestLapAllTime)}</b>`)
+            }
+            finishBest.innerHTML = parts.length ? `<br />${parts.join(' · ')}` : ''
+          }
         }
       }
     }

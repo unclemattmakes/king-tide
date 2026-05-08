@@ -1,9 +1,10 @@
 import { hasComponent, query } from 'bitecs'
 import type * as THREE from 'three'
 import type { SimWorld } from '@/engine/sim/ecs/world'
-import { BikeTag, PlayerTag, Transform, TransformStore } from '@/game/components'
+import { BikeStatsStore, BikeTag, PlayerTag, Transform, TransformStore } from '@/game/components'
 import { createBikeMesh } from './bike-mesh'
 
+const PLAYER_FALLBACK_COLOR = 0xff7733
 const AI_BODY_COLORS = [0x33aaff, 0x44dd66, 0xcc55ff, 0xffcc33, 0xff5577]
 
 export function createBikeRenderSystem(scene: THREE.Scene, sim: SimWorld) {
@@ -18,8 +19,11 @@ export function createBikeRenderSystem(scene: THREE.Scene, sim: SimWorld) {
       let mesh = meshes.get(eid)
       if (!mesh) {
         const isPlayer = hasComponent(sim, eid, PlayerTag)
+        // Variant-driven body color (set on BikeStats.bodyColor) wins for
+        // the player; AI bikes still cycle through the accent palette.
+        const variantColor = BikeStatsStore.get(eid)?.bodyColor
         const color = isPlayer
-          ? 0xff7733
+          ? (variantColor ?? PLAYER_FALLBACK_COLOR)
           : (AI_BODY_COLORS[aiColorCursor++ % AI_BODY_COLORS.length] ?? 0xaaaaaa)
         mesh = createBikeMesh({ bodyColor: color })
         scene.add(mesh)
