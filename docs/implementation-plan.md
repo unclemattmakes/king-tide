@@ -1,6 +1,8 @@
 # Hoverbike — Implementation Plan v0.1
 
 > Concrete tech choices, repo layout, and milestones to deliver the Playable Demo MVP defined in [product-plan.md](./product-plan.md).
+>
+> **Status (2026-05-07):** MVP feature-complete. M0–M6 all shipped, plus M7–M9.x extension milestones (real loop track, kinematic attitude system, surface alignment, motion trails, combat bundle, AI pickup usage, jump ramp, audio, second track, garage menu + variants + save state). Live build at the Vercel URL in [README](../README.md). For the live state of features, gotchas, and what's still open, see [status.md](./status.md) — this doc covers the original architectural plan; status.md tracks the actual codebase.
 
 ## Architectural principle: sim ↔ render split
 
@@ -155,23 +157,26 @@ expect(snap.position.x).toBeGreaterThan(0)
 
 ## Milestones
 
-| # | Goal | Done when... |
+The original M0–M6 plan delivered the MVP scaffolding. Several extension milestones (M7+) followed to land the actual playable demo. status.md has the current ledger; this table is here for historical reference.
+
+| # | Goal | Status |
 |---|---|---|
-| **M0** | Skeleton boots | Vite + TS + Three.js WebGPU canvas, gamepad axes log, FPS counter, WebGL2 fallback path, `window.__hover` skeleton, Playwright smoke test green |
-| **M1** | Hover bike on flat ground | Rapier integrated, raycast hover controller, gamepad throttle/steer, chase cam. Drives "right" on a checkered plane. E2E: bike moves forward when throttle=1 |
-| **M2** | Wave water + buoyancy | Gerstner shader, CPU wave sampler, bike floats and gets thrown by waves. E2E: bike Y oscillates with wave field |
-| **M3** | First track + calibration scene | `tools/export-track.py` works end-to-end on `calibration.blend`. Test track with land+water+cliff+checkpoints+AI spline loads. Lap counting works. E2E: lap increments after crossing all checkpoints |
-| **M4** | AI racers | 5 AI bikes follow spline, rubber-band, race against player. E2E: AI finishes a lap unaided |
-| **M5** | Combat | 4 pickups + projectile system + hit reactions. E2E: missile homes, mine detonates, shield blocks |
-| **M6** | Polish to MVP | HUD, menu, audio mix, second track, WebGL2 fallback validated, deployed to Vercel |
+| **M0** | Skeleton boots — Vite + TS + Three.js WebGPU + gamepad + debug API + smoke test | ✅ |
+| **M1** | Hover bike on flat ground — Rapier, raycast hover, gamepad throttle/steer, chase cam | ✅ |
+| **M2** | Wave water + buoyancy — Gerstner shader, CPU sampler, bike floats + waves throw it | ✅ |
+| **M3** | First track + calibration scene — Blender pipeline scaffolded, lap counting works on a procedural Lagoon Loop. The end-to-end .blend → .glb run is still deferred; the loader will read `extras` metadata when it lands | ✅ scaffold / 🟡 e2e |
+| **M4** | AI racers — 4 spline-following bikes with rubber-band catchup | ✅ (cornering polish noted in status.md) |
+| **M5** | Combat — 4 pickups (boost / shield / mine / homing missile) + projectile system + shared hit reaction. AI fires its own (M9.10) | ✅ |
+| **M6** | Polish to MVP — HUD, garage menu, procedural audio, second track, WebGL2 fallback validated, push-to-deploy on Vercel | ✅ |
+| **M7+** | Extension milestones (real loop track, stadium gates, kinematic attitude / surface alignment, trails, jump ramp, Cliffside, bike variants, save state). See status.md for the full ledger. | ✅ |
 
-Each milestone is a decision gate — re-evaluate scope at the end before moving on.
+Each milestone was treated as a decision gate; M9.x sub-milestones came out of playtest feedback rather than the upfront plan.
 
-## Open decisions (resolve in M1/M2)
+## Open decisions — resolved
 
-- **Camera:** start with chase cam (offset + spring damping). Cinematic cam on cliff drops if motion sickness shows up.
-- **Lap target:** 60-90s lap, 3 laps. Tune at M3.
-- **Bike stats range:** stub now (`{topSpeed, accel, handling, mass}`), tune from M4 onward.
+- **Camera:** chase cam (offset + spring damping) with mouse / right-stick orbit. No motion sickness reports; cinematic cam not needed.
+- **Lap target:** 3 laps, ~25s/lap on Lagoon Loop. Cliffside laps run a bit longer.
+- **Bike stats:** stubbed in M1, tuned from M4 onward, locked to the variant table in `src/game/bikes/variants.ts` (M9.14). `surfaceFollow` was added in M9.7 once kinematic surface alignment landed.
 
 ## Deploy
 
@@ -180,18 +185,10 @@ Each milestone is a decision gate — re-evaluate scope at the end before moving
 - Cloudflare CDN/proxy added when a custom domain is attached. Until then, default `*.vercel.app` URLs.
 - No secrets needed at MVP (no backend).
 
-## Immediate next steps (M0)
+## What's next (post-MVP)
 
-1. `corepack enable` for pnpm
-2. `git init` + `.gitignore`
-3. `pnpm init` and install: `three`, `@dimforge/rapier3d-compat`, `bitecs`, `gl-matrix`; dev: `typescript`, `vite`, `vitest`, `@playwright/test`, `@biomejs/biome`
-4. Configure: `tsconfig.json` (strict), `vite.config.ts`, `biome.json`, `index.html`, `playwright.config.ts`
-5. Build M0:
-   - `src/main.ts` — boot, renderer detect, gamepad reader, FPS counter
-   - `src/debug.ts` — skeleton `window.__hover` (just enough to run the smoke test)
-   - `src/engine/sim/ecs/world.ts` — bitECS world bootstrap
-   - `tests/e2e/boot.spec.ts` — Playwright smoke: page loads, FPS counter ticks, debug API present
-6. Verify: `pnpm dev`, `pnpm test`, `pnpm e2e`
-7. Initial commit, push to GitHub
-
-Past M0, each milestone gets its own PR/branch with its own E2E test, then I check in with you before starting the next.
+- **Asset pipeline end-to-end.** Run `tools/build_calibration_scene.py` and `tools/export_track.py` against `tracks-src/calibration.blend`, then write a runtime `.glb` loader that reads `extras` metadata. Cliffside (procedural) is the reference layout — see [blender-conventions.md](./blender-conventions.md) for the procedural-to-Blender mapping.
+- **AI cornering polish.** Currently <50% lap completion through tight curves. Brake-into-turn + look-ahead based on track curvature.
+- **On-screen touch controls.** Touch input is wired in `src/engine/input/touch.ts`; needs an HTML overlay with virtual stick + buttons.
+- **Music.** Procedural audio covers SFX; background music is still missing.
+- Beyond MVP: multiplayer (Rapier deterministic build is ready), career mode, in-engine track editor.

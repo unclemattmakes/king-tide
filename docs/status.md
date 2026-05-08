@@ -163,7 +163,7 @@ Open polish:
 | M3 | Tracks + checkpoints + lap counting | ✅ |
 | M4 | AI racers | ✅ (rough cornering remains) |
 | M5 | Combat | ✅ — boost, shield, mine, homing missile, hit reaction |
-| M6 | Polish to MVP | partial — sky/water/UI in; audio + 2nd track open |
+| M6 | Polish to MVP | ✅ — sky/water/UI/audio/2nd-track/garage-menu all in |
 | M7 | Real loop track | ✅ |
 | M8 | Stadium track + spawn on loop + gate-state fix | ✅ |
 | M9 | Smoothed kb + pitch + respawn + arrow + flip recovery | ✅ |
@@ -183,52 +183,77 @@ Open polish:
 
 ```
 src/
-├── main.ts                    # boot + per-frame loop + key bindings
-├── debug.ts                   # window.__hover dev API
+├── main.ts                       # boot + per-frame loop + key bindings + URL params
+├── debug.ts                      # window.__hover dev API
 ├── engine/
-│   ├── sim/                   # NO Three.js imports
-│   │   ├── ecs/               # bitECS world + side-table stores
-│   │   ├── physics/           # Rapier wrapper + vec/quat utils
-│   │   └── water/             # Gerstner wave field + sampler
-│   ├── render/                # Three.js layer
-│   │   ├── renderer.ts        # WebGPU/WebGL2 detect
-│   │   ├── camera.ts          # chase cam with orbit
-│   │   ├── scene.ts           # sky, lighting, island
-│   │   ├── water.ts           # CPU-driven faceted water mesh
-│   │   ├── sky.ts             # gradient sky dome
-│   │   ├── direction-arrow.ts # 3D Crazy-Taxi arrow
-│   │   ├── track-mesh.ts      # gates + beacons
-│   │   ├── arena-mesh.ts      # infield island
-│   │   ├── bike-mesh.ts       # bike body, fin, tail light, hover puck
-│   │   ├── pickup-mesh.ts     # rotating glowing crate
+│   ├── audio/audio.ts            # procedural Web Audio engine + ambient + SFX
+│   ├── garage.ts                 # DOM overlay: bike + track picker, best-lap viewer
+│   ├── save-state.ts             # localStorage best-lap persistence
+│   ├── sim/                      # NO Three.js imports
+│   │   ├── ecs/                  # bitECS world + side-table stores
+│   │   ├── physics/              # Rapier wrapper + vec/quat utils
+│   │   └── water/                # Gerstner wave field + analytic normal sampler
+│   ├── render/                   # Three.js layer
+│   │   ├── renderer.ts           # WebGPU/WebGL2 detect
+│   │   ├── camera.ts             # chase cam with orbit
+│   │   ├── scene.ts              # sky, lighting
+│   │   ├── water.ts              # CPU-driven faceted water mesh
+│   │   ├── sky.ts                # gradient sky dome
+│   │   ├── direction-arrow.ts    # 3D Crazy-Taxi arrow with shaded material
+│   │   ├── track-mesh.ts         # gates + beacons
+│   │   ├── arena-mesh.ts         # Lagoon Loop's infield island
+│   │   ├── ramp-mesh.ts          # Lagoon Loop's chevron jump ramp
+│   │   ├── cliffside-mesh.ts     # Cliffside's mesa + climb ramp + cliff face
+│   │   ├── bike-mesh.ts          # bike body, fin, tail light, hover puck
+│   │   ├── pickup-mesh.ts        # rotating glowing crate (per-type colored)
 │   │   ├── pickup-render.ts
-│   │   └── render-systems.ts  # ECS → Three.js sync
+│   │   ├── trail-render.ts       # camera-facing ribbon tail-light streaks
+│   │   ├── combat-render.ts      # mines, missiles, shield bubbles, explosions
+│   │   └── render-systems.ts     # ECS → Three.js bike sync (variant body color)
 │   └── input/
-│       ├── intent.ts          # Intent type
-│       ├── keyboard.ts        # smoothed WASD/arrows + Q/E
-│       ├── gamepad.ts         # standard mapping
-│       ├── camera-look.ts     # mouse drag + right stick orbit
-│       └── index.ts           # merge keyboard + gamepad
+│       ├── intent.ts             # Intent type
+│       ├── keyboard.ts           # smoothed WASD/arrows + Q/E
+│       ├── gamepad.ts            # standard mapping
+│       ├── touch.ts              # virtual stick (no on-screen overlay yet)
+│       ├── camera-look.ts        # mouse drag + right stick orbit
+│       └── index.ts              # merge keyboard + gamepad + touch
 ├── game/
-│   ├── components/            # bitECS tags + side-table data types
-│   ├── systems/               # all sim-side ticking logic
-│   │   ├── hover.ts           # ride-height + thrust + steer + pitch + roll/yaw stabilizers
-│   │   ├── input-apply.ts
-│   │   ├── ai-control.ts      # spline follower with PD steering
-│   │   ├── rubber-band.ts     # AI top-speed adjusts to leader gap
-│   │   ├── race.ts            # checkpoint crossing detection + lap count
-│   │   ├── pickup.ts          # pickup detection, use, boost effect
-│   │   ├── standings.ts       # rank ordering
+│   ├── components/               # bitECS tags + side-table data types
+│   │   ├── index.ts              # Transform, BikeStats, ControlIntent, HoverState…
+│   │   ├── ai.ts                 # AIController state
+│   │   ├── pickup.ts             # PickupSpawn, PickupSlot, BoostEffect
+│   │   ├── combat.ts             # ShieldEffect, Stun, MineState, MissileState, ExplosionState
+│   │   └── race.ts               # Racer (lap, nextCheckpoint, raceTime)
+│   ├── systems/                  # all sim-side ticking logic
+│   │   ├── hover.ts              # ride-height + thrust + steer + kinematic pitch/roll
+│   │   ├── input-apply.ts        # player Intent → ControlIntent
+│   │   ├── ai-control.ts         # spline follower with PD steering
+│   │   ├── ai-combat.ts          # decides when AI fires its held pickup (pure shouldAIFire)
+│   │   ├── rubber-band.ts        # AI top-speed adjusts to leader gap
+│   │   ├── race.ts               # checkpoint crossing detection + lap count
+│   │   ├── pickup.ts             # collect/use system, boost effect
+│   │   ├── combat.ts             # mines, missiles, hit reaction, stun, shield ticks
+│   │   ├── standings.ts          # rank ordering
 │   │   └── sync-from-physics.ts
-│   ├── entities/              # factories
-│   ├── tracks/                # track type + procedural Lagoon Loop
-│   ├── bikes/                 # default stats
-│   └── ai/                    # (currently used only by ai-control.ts)
-└── ui/                        # (empty — HUD lives in index.html for now)
-tools/                          # Blender Python scripts (untouched since M3)
+│   ├── entities/                 # factories — physics + ECS wiring
+│   │   ├── arena.ts              # safety floor + Lagoon Loop island
+│   │   ├── ramp.ts               # Lagoon Loop's jump ramp
+│   │   ├── cliffside-terrain.ts  # Cliffside's mesa + climb ramp (constants reused by mesh)
+│   │   ├── bike.ts               # createBike with optional stats override
+│   │   ├── pickup-spawn.ts       # POOL of pickup types (boost-weighted)
+│   │   ├── mine.ts / missile.ts / explosion.ts  # one-shot combat entities
+│   ├── tracks/                   # Track type + procedural track configs
+│   │   ├── types.ts
+│   │   ├── lagoon-loop.ts        # default stadium track
+│   │   └── cliffside.ts          # mesa + cliff drop, also the Blender-export reference
+│   └── bikes/                    # stats + variants
+│       ├── stats.ts              # defaultBikeStats
+│       └── variants.ts           # cruiser / racer / stunt archetypes
+└── ui/                           # (empty — HUD lives in index.html)
+tools/                            # Blender Python scripts (pipeline scaffold; not run end-to-end yet)
 tests/
-├── unit/                       # Vitest, sim only
-└── e2e/                        # Playwright via real Vite server
+├── unit/                         # Vitest, sim only (49 tests)
+└── e2e/                          # Playwright via real Vite server (25 tests)
 ```
 
 ## Important conventions
@@ -239,7 +264,7 @@ These are the load-bearing decisions that future work needs to respect.
 
 2. **bitECS 0.4 components are tags only — data lives in side-table stores.** See `engine/sim/ecs/store.ts`. The component itself (e.g. `Transform`) is a unique object reference used for queries. The data (`TransformData`) lives in `TransformStore` keyed by entity id. This was a refactor after M0 because bitECS 0.4 doesn't store data on components without observable hooks.
 
-3. **Steer convention is empirical, NOT standard math.** `aTurn = -intent.steer * turnTorque` and yaw torque is applied along the bike's local up axis. Don't change the sign without playtesting on real hardware — the chase cam makes "physical-left = perceived-right" the natural feel. Same for pitch (`aPitch = (current - target) * spring`).
+3. **Sign conventions in `hover.ts` are empirical, NOT standard math.** Yaw torque is `-intent.steer * turnTorque` around **world Y** (M9.4 reverted M9.3's bike-local-up choice — see `feedback_hoverbike_conventions.md`). Lean roll target is `+intent.steer * LIMIT * speedScale` (positive coefficient — the chase-cam mirroring inverts what the math would predict, M9.5b). Pitch and roll are **kinematic** in YXZ Euler decomposition; only yaw evolves from physics torques. Don't change any sign without playtesting on real hardware.
 
 4. **Debug API is the testing surface.** `window.__hover` exposes `player()`, `race()`, `bikes()`, `setIntentOverride()`, `toggleAutoPlay()`, etc. This is how Playwright tests drive the game and how Claude inspects state. Keep it consistent with new features.
 
@@ -262,9 +287,10 @@ pnpm exec biome check --write .   # format + lint
 
 The conventions, bugs, and gotchas above are the load-bearing context. Some specific tips:
 
-- The `window.__hover` debug API + the Claude Preview MCP (`preview_eval`, `preview_screenshot`) are how to inspect runtime state. Use them eagerly.
+- The `window.__hover` debug API + the Claude Preview MCP (`preview_eval`, `preview_screenshot`) are how to inspect runtime state. Use them eagerly. The browser preview tab is often *hidden* during a session — `requestAnimationFrame` doesn't tick when hidden, so use a Playwright probe spec for any test that needs the sim to actually advance.
 - E2E tests double as integration tests. When changing physics or input, run `pnpm e2e` rather than just typechecking.
-- The `tests/e2e/m6-autoplay.spec.ts` test prints the player trajectory — invaluable for debugging AI behaviour and physics edge cases.
+- The `tests/e2e/m6-autoplay.spec.ts` test prints the player trajectory — invaluable for debugging AI behaviour and physics edge cases. Several other specs follow the same "drive a scenario then dump samples" pattern (see `m9-ramp.spec.ts` for the canonical example).
+- URL params: `?track=lagoon|cliffside` and `?bike=cruiser|racer|stunt`. Defaults are `lagoon` + `racer`. Players also reach these via the GARAGE button.
 - Vercel auto-deploys on push to `main`. There is no preview-deploy gate, so don't push half-broken code.
 - The user (matt / occ-matt) prefers tight, focused commits with explicit "why" in the message. Co-author tag is `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`.
 - The user is OK with auto mode pushing through routine tasks but wants to be the empirical source of truth on "feel" — playtest reports trump my analysis.

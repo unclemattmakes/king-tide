@@ -1,6 +1,8 @@
 # Hoverbike — Product Plan v0.1
 
 > Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics and light Mario Kart combat.
+>
+> **Status (2026-05-07):** MVP scope is feature-complete. Live build at the Vercel URL in [README](../README.md) / [status.md](./status.md). Remaining work is asset-pipeline polish and post-MVP items (multiplayer, career, mobile, original soundtrack).
 
 ## Vision
 
@@ -18,30 +20,31 @@ A web-first arcade racer in the spirit of **JetMoto**. Hover bikes that surf wav
 
 Casual-to-mid-core, plays desktop with a gamepad, remembers PS1/N64 arcade racers, wants short sessions — not a 40-hour career.
 
-## MVP — "Playable Demo"
+## MVP — "Playable Demo" — ✅ achieved
 
 **Done when:** a stranger lands on the page, races AI on a water+land+verticality course, uses 1-2 weapons, finishes 3 laps, and wants a rematch.
 
 ### In scope
 
-- 1-2 hand-authored tracks (Blender → glTF), each with water + land + verticality
-- 2-3 hover bikes with distinct stat tradeoffs (top speed / handling / accel)
-- 5-7 rubber-banded AI opponents per race
-- Single 3-lap race mode
-- 4 pickups: homing missile, mine, boost, shield
-- Gerstner-wave water with buoyancy & wake; raycast hover controller on land
-- Gamepad-first input, keyboard fallback
-- Library SFX + royalty-free music; engine SFX, weapon SFX, ambient
-- WebGPU-first renderer with WebGL2 fallback
+- ✅ 2 tracks (Lagoon Loop + Cliffside). Both procedural for now; the Blender → glTF pipeline is wired but not yet used end-to-end (Cliffside doubles as the procedural reference layout — see [blender-conventions.md](./blender-conventions.md))
+- ✅ 3 hover bikes with distinct stat tradeoffs — Cruiser / Racer / Stunt
+- ✅ 4 rubber-banded AI opponents per race
+- ✅ Single 3-lap race mode with finish overlay + best-lap save
+- ✅ 4 pickups: homing missile, mine, boost, shield. AI fires its own.
+- ✅ Gerstner-wave water with buoyancy + surface alignment; raycast hover controller for static colliders (island, mesa, ramps)
+- ✅ Gamepad-first input, keyboard fallback (smoothed). Touch input wired but no on-screen controls yet.
+- ✅ Procedural audio: speed-mapped engine, water ambient, pickup chime, weapon SFX, gate / lap cues. (Took the procedural path instead of library SFX — keeps the build asset-free.)
+- ✅ WebGPU-first renderer with WebGL2 fallback (auto-detected)
 
 ### Out of scope (v1)
 
 - Multiplayer (architecturally allowed via Rapier determinism — not built)
-- Career mode, unlocks, save state
-- Mobile / touch
-- Original soundtrack
+- Career mode / unlocks
+- ~~Save state~~ — landed (best-lap times per (track, bike) in localStorage)
+- Mobile / touch (touch *input* is wired but no on-screen control overlay)
+- Original soundtrack (no music yet — engine + ambient + SFX only)
 - Track editor
-- Final art direction (placeholders until physics feels right)
+- Final art direction (programmer-art placeholders throughout; the physics + feel are the focus)
 
 ## Tech decisions (locked)
 
@@ -57,11 +60,11 @@ Casual-to-mid-core, plays desktop with a gamepad, remembers PS1/N64 arcade racer
 
 ## Success criteria
 
-- Wave physics feel "Wave-Race-y" — pumping waves, launches, hard landings all readable
-- Cliff-to-water transitions feel dramatic, not janky
-- AI keeps the pack tight every race
-- Boots in <5s on broadband, holds 60 FPS on M1/Ryzen-class at 1080p
-- A non-gamer friend finishes a race without instruction
+- ✅ Wave physics feel "Wave-Race-y" — pumping waves, launches, hard landings all readable. (Surface alignment + per-bike `surfaceFollow` make different bikes ride waves visibly differently.)
+- ✅ Cliff-to-water transitions feel dramatic, not janky. (Cliffside's 15m drop ships in M9.13.)
+- 🟡 AI keeps the pack tight every race. (AI completes <50% of laps cleanly through the corners — a known polish item; works fine on straights, hits the apex hard.)
+- ✅ Boots in <5s on broadband, holds 60 FPS on M1/Ryzen-class at 1080p
+- 🟡 A non-gamer friend finishes a race without instruction. (Untested with a real non-gamer; HUD + direction arrow + trail visuals are designed for it.)
 
 ## Top risks
 
