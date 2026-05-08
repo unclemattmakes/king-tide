@@ -39,6 +39,30 @@ NAME_PATTERNS = [
 ]
 
 
+def bake_ai_splines() -> None:
+    """Sample every ai_spline_* curve into a flat [x0,y0,z0,...] custom
+    property on the same object. glTF doesn't carry NURBS curves natively,
+    so we bake the geometry into extras at export time. Authors keep
+    editing the curve in Blender; the exported .glb gets the points.
+    """
+    for obj in list(bpy.data.objects):
+        if not obj.name.startswith("ai_spline_") or obj.type != "CURVE":
+            continue
+        # `to_mesh` honours the curve's resolution_u and gives evaluated
+        # vertices in object-local space. We then transform to world.
+        mesh = obj.to_mesh()
+        try:
+            mw = obj.matrix_world
+            verts = [mw @ v.co for v in mesh.vertices]
+        finally:
+            obj.to_mesh_clear()
+        flat: list[float] = []
+        for v in verts:
+            flat.extend([float(v.x), float(v.y), float(v.z)])
+        obj["points"] = flat
+        print(f"[export] baked {obj.name}: {len(verts)} sampled points")
+
+
 def expected_kind(name: str) -> str | None:
     for pat, kind in NAME_PATTERNS:
         if pat.match(name):
@@ -69,10 +93,25 @@ def validate_scene() -> list[str]:
         if cp.get("index") != i:
             errors.append(f"{cp.name}: index={cp.get('index')} does not match position {i}")
 
-    # Exactly one ai_spline named ai_spline_main.
+    # Exactly one ai_spline named ai_spline_main, and it must have baked
+    # points (set by bake_ai_splines). Empty splines are useless to the
+    # runtime loader.
     splines = by_kind.get("ai_spline", [])
-    if not any(o.name == "ai_spline_main" for o in splines):
+    main = next((o for o in splines if o.name == "ai_spline_main"), None)
+    if main is None:
         errors.append("missing required object: ai_spline_main")
+    else:
+        pts = main.get("points")
+        if pts is None or len(pts) < 6:
+            errors.append(
+                f"ai_spline_main: needs at least 2 points (got {len(pts) if pts else 0} floats)"
+            )
+
+    # Each checkpoint must declare half_width and height for the gate envelope.
+    for cp in by_kind.get("checkpoint", []):
+        for prop in ("half_width", "height"):
+            if cp.get(prop) is None:
+                errors.append(f"{cp.name}: missing custom property '{prop}'")
 
     return errors
 
@@ -90,6 +129,7 @@ def output_path() -> str:
 
 def main() -> None:
     print(f"[export] validating {bpy.data.filepath or '<unsaved>'}")
+    bake_ai_splines()
     errors = validate_scene()
     if errors:
         print("[export] VALIDATION FAILED:", file=sys.stderr)

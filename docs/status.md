@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-07 (M9.15 AI cornering polish — smooth-arc spline + curvature look-ahead). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-07 (M9.16 Blender → .glb pipeline live; calibration scene round-trips). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -23,7 +23,8 @@ This doc captures the build's current state, controls, known issues, and next st
 - Auto-play mode (T or F1) — AI takes over the player bike for testing
 - Backspace = respawn at start
 - Mouse right-drag and gamepad right-stick orbit the camera (vertical inverted by default)
-- 26 e2e + 49 unit tests, all green
+- 27 e2e + 55 unit tests, all green
+- Blender → .glb track pipeline ready: `tools/build_calibration_scene.py` builds the reference .blend, `tools/export_track.py` bakes splines + exports to .glb with metadata in `extras`, the runtime loads it via `?track=calibration`
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
 
 ## Controls
@@ -166,9 +167,17 @@ Open polish:
 ### Missing MVP items
 *(MVP feature list is now complete. Remaining work is the asset pipeline + post-MVP polish — see below.)*
 
-### Asset pipeline (deferred; tools exist)
-- **[L] Run the Blender pipeline end-to-end.** Build `tracks-src/calibration.blend` via `tools/build_calibration_scene.py`, export with `tools/export_track.py`, write the runtime `.glb` loader that reads the metadata from `extras`. Procedural Lagoon Loop will serve until the user decides to author tracks in Blender.
-- **[M] Wire the calibration scene as an integration test.** Loader asserts every metadata kind appears.
+### Asset pipeline — *first pass live in M9.16*
+The calibration scene round-trips Blender → .glb → runtime Track. Open with
+`?track=calibration` for the loader smoke test.
+- ✅ **Build calibration .blend** via `tools/build_calibration_scene.py`
+- ✅ **Export to .glb** via `tools/export_track.py` (bakes ai_spline NURBS to flat point arrays in extras since glTF doesn't carry curves)
+- ✅ **Runtime loader** at `src/game/tracks/glb-loader.ts` — Three-free, parses the .glb JSON chunk manually, builds a Track with full validation
+- ✅ **Integration test** at `tests/e2e/m9-calibration-glb.spec.ts` — asserts every metadata kind survives the round trip
+
+Open follow-ups:
+- **[M] Render the .glb's track surface meshes.** Currently the loader builds the sim-side Track but doesn't pull mesh geometry off the .glb. The calibration scene's track plane is invisible at runtime; for a real track-from-Blender flow we need a Three.js GLTFLoader pass that adds meshes to the scene + creates Rapier colliders for `kind=track` meshes.
+- **[S] Author Lagoon Loop / Cliffside in Blender.** Once mesh-loading lands, port the procedural tracks to .blend files so future tracks live in the authoring tool, not in code.
 
 ### Beyond MVP
 - Multiplayer (architecturally unlocked by Rapier deterministic build)
@@ -204,6 +213,7 @@ Open polish:
 | M9.13 | Cliffside track (mesa + ramp + cliff drop) + gate/lap audio | ✅ |
 | M9.14 | Bike variants + garage menu + best-lap save state — MVP feature-complete | ✅ |
 | M9.15 | AI cornering polish — smooth-arc spline + curvature-aware look-ahead | ✅ |
+| M9.16 | Blender → .glb pipeline end-to-end — calibration scene round-trips at runtime | ✅ |
 
 ## File / system map
 
@@ -271,6 +281,7 @@ src/
 │   ├── tracks/                   # Track type + procedural track configs
 │   │   ├── types.ts
 │   │   ├── spline-utils.ts       # buildStadiumAISpline — smooth tangent-arc through curves
+│   │   ├── glb-loader.ts         # parse .glb JSON → Track (Three-free; loader for ?track=calibration)
 │   │   ├── lagoon-loop.ts        # default stadium track
 │   │   └── cliffside.ts          # mesa + cliff drop, also the Blender-export reference
 │   └── bikes/                    # stats + variants

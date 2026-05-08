@@ -62,6 +62,7 @@ import { rubberBandSystem } from './game/systems/rubber-band'
 import { computeStandings } from './game/systems/standings'
 import { syncFromPhysics } from './game/systems/sync-from-physics'
 import { createCliffside } from './game/tracks/cliffside'
+import { loadTrackFromGlb } from './game/tracks/glb-loader'
 import { createLagoonLoop } from './game/tracks/lagoon-loop'
 
 const NUM_AI = 4
@@ -98,9 +99,12 @@ async function boot() {
   const params = new URLSearchParams(window.location.search)
 
   // Track selection. URL `?track=cliffside` switches to the second track;
-  // anything else (or omitted) defaults to Lagoon Loop. Each track owns
-  // its own terrain setup so they can swap out cleanly.
-  const trackId = params.get('track') === 'cliffside' ? 'cliffside' : 'lagoon'
+  // `?track=calibration` loads the Blender pipeline's reference scene from a
+  // .glb (a smoke test for the asset pipeline — not a real race track).
+  // Anything else (or omitted) defaults to Lagoon Loop.
+  const rawTrack = params.get('track')
+  const trackId =
+    rawTrack === 'cliffside' ? 'cliffside' : rawTrack === 'calibration' ? 'calibration' : 'lagoon'
 
   // Bike variant. URL `?bike=cruiser|racer|stunt` picks the player's
   // archetype; AI bikes always use the racer baseline for now. Variant
@@ -122,17 +126,29 @@ async function boot() {
   // Universal: backstop floor for any track.
   createSafetyFloor(phys)
 
-  // Per-track terrain (physics + visuals).
+  // Per-track terrain (physics + visuals). Calibration is the asset-pipeline
+  // smoke-test scene — its track surface ships inside the .glb and we don't
+  // (yet) load it as a physics collider; the safety floor + universal water
+  // surface are enough for the loader to be exercised.
   if (trackId === 'cliffside') {
     createCliffsideTerrain(phys)
     scene.add(createCliffsideMesh())
-  } else {
+  } else if (trackId === 'lagoon') {
     createLagoonIsland(phys)
     createRamp(phys)
     scene.add(createRampMesh())
   }
 
-  const track = trackId === 'cliffside' ? createCliffside() : createLagoonLoop()
+  const track =
+    trackId === 'cliffside'
+      ? createCliffside()
+      : trackId === 'calibration'
+        ? await loadTrackFromGlb('/assets/tracks/calibration.glb', {
+            id: 'calibration',
+            name: 'Calibration',
+            lapsToFinish: 1,
+          })
+        : createLagoonLoop()
   const trackVisuals = createTrackVisuals(track)
   scene.add(trackVisuals.group)
 

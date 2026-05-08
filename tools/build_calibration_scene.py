@@ -76,6 +76,12 @@ def add_checkpoints() -> list[bpy.types.Object]:
         obj.name = f"cp_{i:02d}"
         obj["kind"] = "checkpoint"
         obj["index"] = i
+        # Gate envelope — half_width is half of the full gate horizontal
+        # span, height is the vertical clearance. Real tracks use 14 / 6.
+        # The calibration's track surface is only 12m wide so we use a
+        # tighter envelope here (4 / 2) to keep the gates inside.
+        obj["half_width"] = 4.0
+        obj["height"] = 2.0
         out.append(obj)
     return out
 
