@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-07 (M9.17 .glb mesh rendering — track surfaces visible at runtime). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-07 (M9.18 air-control — hang-time + pitch-vectored thrust). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -11,6 +11,7 @@ This doc captures the build's current state, controls, known issues, and next st
 - Garage menu (HUD button top-right) for picking bike + track + viewing / clearing best lap records
 - Best lap times saved per (track, bike) to localStorage, surfaced in the finish overlay and garage menu
 - Jump ramp on Lagoon's right straight (z = 25–37) — exercises raycast-vs-static-collider, surface alignment on a sloped normal, hover-spring release on launch, and water re-acquisition on landing
+- Airborne control (M9.18) — bike floats through arcs (40% gravity counter while in the air) instead of dropping like a rock; throttle while airborne pushes along the bike's forward direction so pitch-up extends air time and pitch-down dives
 - Player spawns on the racing line at the start gate, facing forward
 - Hover-bike physics (Rapier WASM, deterministic build)
 - Gerstner wave water with buoyancy — bike rides waves, dives into troughs, launches off crests
@@ -131,6 +132,13 @@ Fixed in M4 — the `q*v*q⁻¹` expansion was producing wrong rotated vectors e
 ### Pitch sign is empirical too (M9.2)
 `aPitch = (currentPitch - targetPitch) * SPRING` — note the order. (target - current) was the wrong sign and produced a backflip when the player pressed E. Document in `hover.ts`.
 
+### Body-frame fwd.y is inverted relative to player intent (M9.18)
+Empirically verified by probing `quatRotate(rb.rotation(), {0,0,1}).y` at runtime:
+- Q (intent.pitch=-1, "pitch up = jump off a wave") → body fwd.y ≈ **-0.5** (mathematically nose-DOWN)
+- E (intent.pitch=+1, "pitch down = dive into a wave") → body fwd.y ≈ **+0.5** (mathematically nose-UP)
+
+The kinematic YXZ Euler build at `hover.ts:154` does `targetPitch = -intent.pitch * PITCH_LIMIT`, which means Q ends up at mathematical pitch +π/6 and E at -π/6. R_x(+π/6) sends +Z to (0, -sin(π/6), cos(π/6)) = (0, -0.5, 0.866) — the body's forward axis points slightly down. Whether this matches the visual "lean back" perception depends on the chase-cam mirroring noted in M9.5b; either way, the convention is locked in by playtest, so anything that reads the bike's true forward vector to derive an intent-aligned thrust direction must invert `fwd.y`. The air-control system in `hover.ts` does this explicitly so Q produces upward thrust as the player expects.
+
 ### Tests sometimes flaky on parallel runs
 The M3 race "checkpoints not in front are not counted" test occasionally needs a retry. Cause: physics-driven timing under CPU contention from 4 parallel Playwright workers. Workers capped at 4; retries enabled.
 
@@ -144,6 +152,7 @@ In rough priority order. Each item is sized as **S/M/L** for effort.
 
 ### Polish on what exists
 - **[S] Pitch attenuation tuning.** Maybe make pitch effect smaller (±15° instead of ±30°) so the bike stays more controllable. Or scale pitch with speed.
+- **[S] Air-thrust tuning.** M9.18's `AIR_LIFT_FRAC=0.4` and `AIR_THRUST_MUL=0.7` are first-pass values. Q's lift authority is small in absolute terms (~1–2 m/s² at top speed) because thrust speedFalloff caps it. Bump if the hang-time still feels weak after playtest.
 - **[M] Cliffside AI recovery.** When the AI falls off the mesa mid-curve, it can't navigate back up the climb ramp. Either widen the mesa, add side ramps, or teach the AI to detour to the climb ramp when it's off-elevation.
 
 ### Combat (M5 — done)
@@ -219,6 +228,7 @@ Open follow-ups:
 | M9.15 | AI cornering polish — smooth-arc spline + curvature-aware look-ahead | ✅ |
 | M9.16 | Blender → .glb pipeline end-to-end — calibration scene round-trips at runtime | ✅ |
 | M9.17 | .glb mesh rendering — track surface visible in scene; collider attach best-effort | ✅ |
+| M9.18 | Air control — 40% gravity counter for hang-time + pitch-vectored airborne thrust | ✅ |
 
 ## File / system map
 

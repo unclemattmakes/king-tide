@@ -206,8 +206,11 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
 
     const q = rb.rotation()
 
-    if (probe.hasSurface) {
-      // PD hover with gravity comp. Same on land or water.
+    // Hover spring only fires while grounded. Above hoverHeight*1.6 the
+    // bike is airborne and uses air-lift / gravity instead — the spring's
+    // big restoring term would otherwise act as a "leash" that yanks the
+    // bike back down the moment it leaves a ramp, killing all hang-time.
+    if (probe.hasSurface && isGrounded) {
       const heightError = stats.hoverHeight - groundDistance
       const aUp = GRAVITY + heightError * stats.hoverSpring - linvel.y * stats.hoverDamp
       rb.applyImpulse({ x: 0, y: aUp * m * dt, z: 0 }, true)
@@ -215,7 +218,62 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
 
     HoverStateStore.set(eid, { groundDistance, isGrounded })
 
-    if (!isGrounded) continue
+    if (!isGrounded) {
+      // --- Air control ---
+      // Hang-time: counter ~40% of gravity so the bike floats through
+      // arcs JetMoto-style instead of dropping like a brick. Effective
+      // gravity in air ≈ 15 m/s² vs 25 on the ground.
+      const AIR_LIFT_FRAC = 0.4
+      rb.applyImpulse({ x: 0, y: GRAVITY * AIR_LIFT_FRAC * m * dt, z: 0 }, true)
+
+      // Pitch-vectored thrust: airborne thrust pushes along the bike's
+      // heading (horizontal) plus a vertical component driven by pitch.
+      // Pitching the nose up (Q) extends air time; pitching it down (E)
+      // dives. Slightly weaker than ground thrust so the player can't
+      // infinite-hover by aiming up + boost — speedFalloff in 3D also
+      // caps any sustained climb at topSpeed.
+      //
+      // Why we negate fwd.y rather than using it directly: the kinematic
+      // pitch convention is empirical (M9.2 / status doc). Pressing Q
+      // ("pitch up = jump off a wave") gives intent.pitch=-1, which the
+      // YXZ Euler build at line 153 turns into mathematical pitch +π/6,
+      // which rotates the body's +Z axis (the fin) to fwd.y ≈ -0.5.
+      // Using fwd.y directly would push the bike DOWN when the player
+      // pressed the "lift" key. Negating it aligns thrust direction with
+      // player intent: Q → +y thrust, E → -y thrust.
+      if (Math.abs(intent.throttle) > 0) {
+        const fwdAir = quatRotate(q, { x: 0, y: 0, z: 1 })
+        const speed3d = Math.hypot(linvel.x, linvel.y, linvel.z)
+        const dirAir = intent.throttle >= 0 ? 1 : -1
+        const scaleAir = intent.throttle >= 0 ? 1 : stats.reverseScale
+        const speedFalloff3d = Math.max(0, 1 - speed3d / stats.topSpeed)
+        const boostAir = (intent.boost ? stats.boostMul : 1) * getCurrentBoostMultiplier(eid)
+        const AIR_THRUST_MUL = 0.7
+        const aAir =
+          Math.abs(intent.throttle) *
+          stats.accel *
+          scaleAir *
+          speedFalloff3d *
+          boostAir *
+          dirAir *
+          AIR_THRUST_MUL
+        rb.applyImpulse(
+          {
+            x: fwdAir.x * aAir * m * dt,
+            y: -fwdAir.y * aAir * m * dt,
+            z: fwdAir.z * aAir * m * dt,
+          },
+          true,
+        )
+      }
+
+      // Reduced yaw authority for landing alignment.
+      const AIR_TURN_MUL = 0.3
+      const aTurnAir = -intent.steer * stats.turnTorque * AIR_TURN_MUL
+      rb.applyTorqueImpulse({ x: 0, y: aTurnAir * m * dt, z: 0 }, true)
+
+      continue
+    }
 
     const fwd = quatRotate(q, { x: 0, y: 0, z: 1 })
 
