@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-07 (M9.21 editor: undo, Catmull-Rom anchor splines, gates auto-bind to spline). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-08 (M9.22 altitude-faded surface follow — terrain reaction strengthens when low, smooths out when high). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -88,6 +88,9 @@ See [implementation-plan.md](./implementation-plan.md) for repo layout and the a
 
 ### Pitch + roll coupling — *resolved (M9.4)*
 M9.3 was insufficient: pitching while turning produced wild roll oscillations (probe showed ±60° pitch, ±70° roll). Root cause was the roll PD reading `bikeRight.y` and false-positiving on the geometric tilt that yaw-while-pitched produces; the corrective torque pumped real angular velocity into the roll axis. M9.4 replaces the soft PD with a kinematic roll lock: at the top of `hoverSystem`, decompose the bike's rotation into YXZ Euler (yaw → pitch → roll), force roll = 0, recompose, and strip out the `bikeFwd` component of angvel. Roll velocity can no longer accumulate from misaligned-axis side-effects. Yaw + pitch behave as before.
+
+### Surface follow is altitude-faded (M9.22) — *load-bearing for "hover" feel*
+`stats.surfaceFollow` sets the *peak* responsiveness; what actually gets applied to `surfacePitch/RollTarget` is `surfaceFollow * altitudeFactor`, where the factor falls linearly from 1.0 at the surface to 0 at the grounded/airborne boundary (`groundDistance = hoverHeight * 1.6`). At nominal hover (`groundDistance ≈ hoverHeight`) the factor sits around 0.37, so the effective racer follow is ~0.19 instead of the configured 0.5. Why: pre-M9.22 the bike read every wiggle of the wave normal at all altitudes, which made it read like a jet ski more than a hovercraft. Now dipping into a trough kicks the reaction back up while cresting a wave eases it off, so terrain interaction is strongest exactly when the bike is closest to the terrain. If wave riding feels too floaty, widen the fade (e.g. fade to 0 at `hoverHeight * 2.0` for a longer band) or raise the per-bike `surfaceFollow`. Implementation in `src/game/systems/hover.ts` inside the `isGrounded` branch.
 
 ### Pitch + throttle on water — *intentional, not a bug*
 Holding `pitch=+1` (dive) at full throttle makes the bike plant its nose into wave troughs and submerge-and-bounce, with speed swinging 10→25→10 m/s as buoyancy kicks back. This is the desired Wave Race-style feel — diving into a wave should *cost* you. Thrust is already projected to horizontal (always was); the apparent "dive" is the bike's collider being driven through the wave field at speed, not a thrust-direction bug. Don't "fix" it.
@@ -255,6 +258,7 @@ Open follow-ups:
 | M9.19 | Hybrid pipeline — JSON gameplay data + optional Blender .glb env; in-app editor scaffold | ✅ |
 | M9.20 | Editor outliner + Three.js TransformControls (move/rotate/scale); defaults to lagoon-edit | ✅ |
 | M9.21 | Editor: undo stack, Catmull-Rom anchor splines (~10 control pts), gates auto-bind to spline | ✅ |
+| M9.22 | Altitude-faded surface follow — strong terrain reaction when low, smooth ride when high | ✅ |
 
 ## File / system map
 

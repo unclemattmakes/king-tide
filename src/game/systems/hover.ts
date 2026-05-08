@@ -112,13 +112,20 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       // horizontal plane (the bike's yaw direction).
       const nR = nx * cy_ - nz * sy_
       const nZ = nx * sy_ + nz * cy_
+      // Altitude-faded follow: skimming the surface fully tracks terrain;
+      // riding high smooths out into a hover. Linear from 1.0 at the
+      // surface to 0.0 at the grounded/airborne boundary, so at nominal
+      // hover (groundDistance ≈ hoverHeight) the bike inherits ~37% of
+      // its base surfaceFollow. Dipping into a wave trough kicks the
+      // factor back up; cresting a wave eases it off.
+      const surfFadeFar = stats.hoverHeight * 1.6
+      const altitudeFactor = Math.max(0, Math.min(1, 1 - groundDistance / surfFadeFar))
+      const followNow = stats.surfaceFollow * altitudeFactor
       // For YXZ Euler with bike-up = N: γ = -asin(nR), β = atan2(nZ, ny).
       // (Derived from R_y(yaw) R_x(β) R_z(γ) * (0,1,0) ≈ (-sin γ, cos β cos γ,
       // sin β cos γ) in the yawed frame, matched component-wise to N.)
-      // Scaled by stats.surfaceFollow so different bikes can feel sturdier
-      // (low) or more responsive to the chop (high) — see BikeStatsData.
-      surfaceRollTarget = stats.surfaceFollow * -Math.asin(Math.max(-1, Math.min(1, nR)))
-      surfacePitchTarget = stats.surfaceFollow * Math.atan2(nZ, ny)
+      surfaceRollTarget = followNow * -Math.asin(Math.max(-1, Math.min(1, nR)))
+      surfacePitchTarget = followNow * Math.atan2(nZ, ny)
     }
 
     // Kinematic attitude shape. Decompose the bike's orientation into YXZ

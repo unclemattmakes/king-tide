@@ -228,7 +228,7 @@ Each milestone was treated as a decision gate; M9.x sub-milestones came out of p
 
 - **Camera:** chase cam (offset + spring damping) with mouse / right-stick orbit. No motion sickness reports; cinematic cam not needed.
 - **Lap target:** 3 laps, ~25s/lap on Lagoon Loop. Cliffside laps run a bit longer.
-- **Bike stats:** stubbed in M1, tuned from M4 onward, locked to the variant table in `src/game/bikes/variants.ts` (M9.14). `surfaceFollow` was added in M9.7 once kinematic surface alignment landed.
+- **Bike stats:** stubbed in M1, tuned from M4 onward, locked to the variant table in `src/game/bikes/variants.ts` (M9.14). `surfaceFollow` was added in M9.7 once kinematic surface alignment landed; M9.22 made the runtime application altitude-faded so the value behaves as a peak rather than a constant — see status.md.
 
 ## Deploy
 
