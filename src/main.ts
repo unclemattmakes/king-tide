@@ -2,6 +2,7 @@ import { addComponent, hasComponent, query, removeComponent } from 'bitecs'
 import * as THREE from 'three'
 import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug'
 import { createAudioEngine } from './engine/audio/audio'
+import { installTrackEditor } from './engine/editor/track-editor'
 import { formatLap, installGarageMenu } from './engine/garage'
 import {
   emptyIntent,
@@ -63,7 +64,7 @@ import { rubberBandSystem } from './game/systems/rubber-band'
 import { computeStandings } from './game/systems/standings'
 import { syncFromPhysics } from './game/systems/sync-from-physics'
 import { createCliffside } from './game/tracks/cliffside'
-import { buildTrackFromGltf } from './game/tracks/glb-loader'
+import { loadTrackFromJson } from './game/tracks/json-loader'
 import { createLagoonLoop } from './game/tracks/lagoon-loop'
 
 const NUM_AI = 4
@@ -99,13 +100,13 @@ async function boot() {
 
   const params = new URLSearchParams(window.location.search)
 
-  // Track selection. URL `?track=cliffside` switches to the second track;
-  // `?track=calibration` loads the Blender pipeline's reference scene from a
-  // .glb (a smoke test for the asset pipeline — not a real race track).
-  // Anything else (or omitted) defaults to Lagoon Loop.
+  // Track selection. Two procedural tracks are baked in: `lagoon` (default)
+  // and `cliffside`. Anything else is treated as a JSON track id and loaded
+  // from `/tracks/<id>.json` — the new hybrid pipeline (gameplay data in
+  // JSON authored via the in-app editor, optional environment .glb authored
+  // in Blender).
   const rawTrack = params.get('track')
-  const trackId =
-    rawTrack === 'cliffside' ? 'cliffside' : rawTrack === 'calibration' ? 'calibration' : 'lagoon'
+  const trackId = rawTrack && rawTrack.length > 0 ? rawTrack : 'lagoon'
 
   // Bike variant. URL `?bike=cruiser|racer|stunt` picks the player's
   // archetype; AI bikes always use the racer baseline for now. Variant
@@ -139,24 +140,37 @@ async function boot() {
     scene.add(createRampMesh())
   }
 
+  const editMode = params.get('edit') === '1'
+
   let track: import('./game/tracks/types').Track
   if (trackId === 'cliffside') {
     track = createCliffside()
-  } else if (trackId === 'calibration') {
-    // One fetch produces both visuals and sim data: GLTFLoader gives us a
-    // Three scene group + the parsed glTF JSON, which we feed straight to
-    // the sim-side Track builder. Static trimesh colliders are attached
-    // for any mesh the author tagged kind=track.
-    const loaded = await loadGlbTrackVisuals('/assets/tracks/calibration.glb')
-    scene.add(loaded.scene)
-    attachTrackColliders(loaded.scene, phys)
-    track = buildTrackFromGltf(loaded.parsedJson, {
-      id: 'calibration',
-      name: 'Calibration',
-      lapsToFinish: 1,
-    })
-  } else {
+  } else if (trackId === 'lagoon') {
     track = createLagoonLoop()
+  } else {
+    // JSON-authored track. Fetch + validate, then optionally load the
+    // referenced environment .glb for collidable terrain + visuals.
+    track = await loadTrackFromJson(`/tracks/${trackId}.json`)
+    if (track.environmentGlb && !editMode) {
+      const env = await loadGlbTrackVisuals(track.environmentGlb)
+      scene.add(env.scene)
+      attachTrackColliders(env.scene, phys)
+    }
+  }
+
+  // Edit mode: the editor owns the canvas, sim/physics are skipped, no AI
+  // bikes, no race system. The user authors the track and saves to disk;
+  // hitting "Play" reloads without `?edit=1` to drive the changes.
+  if (editMode) {
+    if (backendEl) backendEl.textContent = `editor · backend ${backend}`
+    const editor = installTrackEditor({ scene, camera, renderer, domEl: appEl, track })
+    function editFrame() {
+      waterMesh.tick()
+      editor.tick()
+      requestAnimationFrame(editFrame)
+    }
+    requestAnimationFrame(editFrame)
+    return
   }
   const trackVisuals = createTrackVisuals(track)
   scene.add(trackVisuals.group)

@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-07 (M9.17 .glb mesh rendering — track surfaces visible at runtime). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-07 (M9.18 hybrid track pipeline — JSON gameplay data + optional Blender .glb geometry, with in-app editor scaffold). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -167,17 +167,36 @@ Open polish:
 ### Missing MVP items
 *(MVP feature list is now complete. Remaining work is the asset pipeline + post-MVP polish — see below.)*
 
-### Asset pipeline — *M9.16 + M9.17 live*
-The calibration scene round-trips Blender → .glb → runtime Track + visible
-meshes. Open with `?track=calibration` to exercise the full path.
+### Asset pipeline — *M9.16 + M9.17 + M9.18 live*
+Tracks are now hybrid: gameplay data (gates, AI spline, pickups, boost
+pads, start, water) lives in `public/tracks/<id>.json`, optionally
+referencing a Blender-authored `.glb` for environment geometry. The
+in-app editor (`?track=<id>&edit=1`) edits the JSON live and saves via
+`/__editor/save-track`.
 
-> **Authoring a new track?** Start with [blender-pipeline-guide.md](./blender-pipeline-guide.md) — end-to-end walkthrough from "open Blender" to "play your track in the browser".
+> **Authoring a new track?**
+> - Gameplay placement → [track-editor-guide.md](./track-editor-guide.md)
+> - Environment geometry → [blender-pipeline-guide.md](./blender-pipeline-guide.md)
 
+- ✅ **Track JSON format** at `tracks-src/calibration.json` analogue
+  (canonical lives in `public/tracks/calibration.json`). Schema enforced
+  by `src/game/tracks/json-loader.ts` (Three-free).
+- ✅ **In-app editor** at `src/engine/editor/track-editor.ts` — top-down
+  orbit cam, tool palette (Select/Gate/Pickup/Boost/Spline), click-place,
+  drag-to-move, Save (POST → dev middleware) and Play (reload).
+- ✅ **Vite save endpoint** in `vite.config.ts` (`apply: 'serve'`, dev
+  only) — strict id regex, atomic write to `public/tracks/<id>.json`.
 - ✅ **Build calibration .blend** via `tools/build_calibration_scene.py`
-- ✅ **Export to .glb** via `tools/export_track.py` (bakes ai_spline NURBS to flat point arrays in extras since glTF doesn't carry curves)
-- ✅ **Sim-side loader** at `src/game/tracks/glb-loader.ts` — Three-free, parses the .glb JSON chunk manually, builds a Track with full validation
-- ✅ **Render-side loader** at `src/engine/render/glb-track.ts` — uses Three.GLTFLoader to add the .glb's meshes to the scene; one fetch is shared with the sim-side parser via `gltf.parser.json`
-- ✅ **Integration test** at `tests/e2e/m9-calibration-glb.spec.ts` — asserts every metadata kind survives the round trip
+- ✅ **Export to .glb** via `tools/export_track.py` (legacy all-in-glb
+  path; still supported, but the JSON path is preferred for new tracks)
+- ✅ **Sim-side legacy loader** at `src/game/tracks/glb-loader.ts` — kept
+  for the older all-in-glb format.
+- ✅ **Render-side loader** at `src/engine/render/glb-track.ts` — used by
+  both pipelines for the visual meshes + collider attach.
+- ✅ **Integration test** at `tests/e2e/m9-calibration-glb.spec.ts` —
+  asserts the calibration round-trip (now via JSON + env-glb).
+- ✅ **Boost pad data type** in `Track`. Renders a cyan slab; sim does
+  not react yet (next task).
 
 Open follow-ups:
 - **[M] Drivable physics colliders from .glb.** `attachTrackColliders` registers a static trimesh per `kind=track` mesh (with double-winding indices to be normal-direction-independent). `world.castRay` against it returns the expected hit, but Rapier 0.19's broadphase doesn't reliably catch a fast-falling capsule on a thin trimesh plane on its first downward step — the bike tunnels through. The safety floor + universal water surface keep the calibration playthrough sane meanwhile. Likely fix: enable CCD on dynamic bodies + thicken the plane mesh, or switch to Rapier heightfields for terrain.
@@ -219,6 +238,7 @@ Open follow-ups:
 | M9.15 | AI cornering polish — smooth-arc spline + curvature-aware look-ahead | ✅ |
 | M9.16 | Blender → .glb pipeline end-to-end — calibration scene round-trips at runtime | ✅ |
 | M9.17 | .glb mesh rendering — track surface visible in scene; collider attach best-effort | ✅ |
+| M9.18 | Hybrid pipeline — JSON gameplay data + optional Blender .glb env; in-app editor scaffold | ✅ |
 
 ## File / system map
 

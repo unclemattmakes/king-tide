@@ -1,14 +1,27 @@
-# Blender → Hoverbike Track Pipeline
+# Track authoring pipeline
 
-End-to-end guide for authoring a track in Blender and seeing it run in the
-game. The pipeline lives in two places: scripts under `tools/` that build
-and validate the .blend → .glb conversion, and a runtime loader at
-`src/game/tracks/glb-loader.ts` (sim-side) + `src/engine/render/glb-track.ts`
-(render-side) that turns the .glb into a playable Track.
+A track has two sources, edited in two different tools, joined at runtime:
 
-If you're just trying to add a metadata kind to an existing track, jump to
-the [Object kinds reference](#object-kinds-reference). If something errored
-mid-export, jump to [Troubleshooting](#troubleshooting).
+- **`public/tracks/<id>.json`** — gameplay data (gates, AI spline, pickup
+  spawns, boost pads, start pose, water tuning). Authored in the **in-app
+  editor** (`?track=<id>&edit=1`); saved by clicking *Save*. Hand-editable
+  if you prefer.
+- **`public/assets/tracks/<id>.glb`** *(optional)* — environment geometry
+  the bike collides with. Authored in **Blender**, exported with the
+  standard glTF exporter or the `tools/export_track.py` script.
+
+The JSON references the .glb via `environmentGlb`; at boot the runtime
+fetches both, registers the .glb's meshes as collidable terrain, and
+spawns the bike using the JSON's `start`. **Edit gameplay placement in
+the editor; build geometry in Blender.** Iterate the gameplay loop
+without ever opening Blender.
+
+This page covers the Blender side. For the in-app editor see
+[track-editor-guide.md](./track-editor-guide.md).
+
+If you're just trying to add a metadata kind to an existing legacy
+all-in-glb track, jump to the [Object kinds reference](#object-kinds-reference).
+If something errored mid-export, jump to [Troubleshooting](#troubleshooting).
 
 ## TL;DR — the 30-second workflow
 
