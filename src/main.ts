@@ -95,7 +95,7 @@ async function boot() {
   const chase = createChaseCamera(camera)
 
   const waveField = createWaveField(defaultWaves())
-  const waterMesh = createWaterMesh(waveField, { size: 800, subdivisions: 96 })
+  const waterMesh = createWaterMesh(waveField, { size: 800, subdivisions: 256 })
   scene.add(waterMesh.mesh)
 
   const params = new URLSearchParams(window.location.search)
