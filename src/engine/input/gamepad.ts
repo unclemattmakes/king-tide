@@ -27,9 +27,15 @@ export function snapshotGamepads(): GamepadSnapshot[] {
 }
 
 /**
- * Standard gamepad → racing intent.
- * Throttle = right trigger (button 7), brake/reverse = left trigger (button 6).
- * Steer = left stick X. Fire = X/A (button 0). Boost = A/B (button 1).
+ * Standard gamepad → racing intent (W3C "standard" mapping):
+ *   Left stick X (axes[0])  → steer
+ *   Left stick Y (axes[1])  → pitch (pull back = nose up, push forward = dive)
+ *   A / Cross    (button 0) → throttle
+ *   B / Circle   (button 1) → emergency brake (hard stop, no reverse)
+ *   LB / L1      (button 4) → boost
+ *   RB / R1      (button 5) → fire pickup
+ *   LT / L2      (button 6) → analog brake; if held with no throttle, reverses
+ *   RT / R2      (button 7) → throttle
  */
 export function gamepadIntent(): Intent {
   const intent = emptyIntent()
@@ -37,15 +43,25 @@ export function gamepadIntent(): Intent {
   if (!pad) return intent
 
   intent.steer = applyDeadzone(pad.axes[0] ?? 0)
-  // Left-stick Y for pitch. axes[1] is negative when pushed forward (toward
-  // the screen on a typical pad); invert so positive = nose-down dive.
+  // axes[1] is negative when the stick is pushed forward (away from player).
+  // Intent convention: positive pitch = nose down dive, negative = nose up.
+  // So pulling stick BACK (axes[1] = +1) → pitch = -1 → nose up. ✓
   intent.pitch = -applyDeadzone(pad.axes[1] ?? 0)
-  intent.throttle = pad.buttons[7]?.value ?? 0
-  intent.brake = pad.buttons[6]?.value ?? 0
-  if (intent.brake > 0.1 && intent.throttle < 0.1) {
-    intent.throttle = -intent.brake
+
+  const rt = pad.buttons[7]?.value ?? 0
+  const a = pad.buttons[0]?.pressed ? 1 : 0
+  intent.throttle = Math.max(rt, a)
+
+  const lt = pad.buttons[6]?.value ?? 0
+  const bBtn = pad.buttons[1]?.pressed ? 1 : 0
+  intent.brake = Math.max(lt, bBtn)
+  // LT-only reverse: holding LT with no throttle reverses the bike.
+  // B button is emergency brake — never reverses.
+  if (lt > 0.1 && intent.throttle < 0.1 && bBtn === 0) {
+    intent.throttle = -lt
   }
-  intent.fire = pad.buttons[0]?.pressed ?? false
-  intent.boost = pad.buttons[1]?.pressed ?? false
+
+  intent.fire = pad.buttons[5]?.pressed ?? false
+  intent.boost = pad.buttons[4]?.pressed ?? false
   return intent
 }
