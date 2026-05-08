@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { Checkpoint, Track } from '@/game/tracks/types'
+import type { BoostPad, Checkpoint, Track } from '@/game/tracks/types'
 
 export type TrackVisuals = {
   group: THREE.Object3D
@@ -31,6 +31,10 @@ export function createTrackVisuals(track: Track): TrackVisuals {
 
   for (const cp of track.checkpoints) {
     setStateOn(gateMeshesByIndex.get(cp.index)!, cp.index === 0 ? 'next' : 'upcoming')
+  }
+
+  for (const pad of track.boostPads) {
+    group.add(createBoostPadMesh(pad))
   }
 
   function setCheckpointState(index: number, state: CheckpointVisualState) {
@@ -106,6 +110,48 @@ function createGateMesh(cp: Checkpoint): GateMesh {
   }
 
   return { root, recolorables, beacon, dispose }
+}
+
+/**
+ * Boost pad placeholder visual — a flat cyan rectangle with directional
+ * chevrons. The boost behaviour itself is not yet wired into the sim;
+ * this is the editor's placement-confirmation rendering.
+ */
+function createBoostPadMesh(pad: BoostPad): THREE.Object3D {
+  const root = new THREE.Group()
+  root.name = 'boost_pad'
+  root.position.set(pad.position.x, pad.position.y + 0.05, pad.position.z)
+  root.quaternion.set(pad.rotation.x, pad.rotation.y, pad.rotation.z, pad.rotation.w)
+
+  const w = pad.halfWidth * 2
+  const d = pad.halfDepth * 2
+  const slabGeom = new THREE.PlaneGeometry(w, d)
+  slabGeom.rotateX(-Math.PI / 2)
+  const slabMat = new THREE.MeshBasicMaterial({
+    color: 0x33ddff,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  })
+  const slab = new THREE.Mesh(slabGeom, slabMat)
+  root.add(slab)
+
+  const chevGeom = new THREE.PlaneGeometry(w * 0.6, d * 0.18)
+  chevGeom.rotateX(-Math.PI / 2)
+  const chevMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.8,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  })
+  for (const offsetZ of [-d * 0.3, 0, d * 0.3]) {
+    const c = new THREE.Mesh(chevGeom, chevMat)
+    c.position.set(0, 0.02, offsetZ)
+    root.add(c)
+  }
+  return root
 }
 
 function setStateOn(gate: GateMesh, state: CheckpointVisualState): void {

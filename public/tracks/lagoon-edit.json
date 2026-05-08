@@ -1,0 +1,264 @@
+{
+  "id": "lagoon-edit",
+  "name": "Lagoon Loop (editable)",
+  "lapsToFinish": 3,
+  "water": {
+    "height": 0,
+    "waveHeight": 1,
+    "waveFreq": 0.5
+  },
+  "start": {
+    "position": {
+      "x": 50,
+      "y": 2,
+      "z": -15
+    },
+    "yaw": 0
+  },
+  "checkpoints": [
+    {
+      "index": 0,
+      "position": {
+        "x": 0,
+        "y": 1.5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "halfWidth": 14,
+      "height": 6,
+      "splineT": 0
+    },
+    {
+      "index": 1,
+      "position": {
+        "x": 0,
+        "y": 1.5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "halfWidth": 14,
+      "height": 6,
+      "splineT": 0.1111111111111111
+    },
+    {
+      "index": 2,
+      "position": {
+        "x": 0,
+        "y": 1.5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "halfWidth": 14,
+      "height": 6,
+      "splineT": 0.2222222222222222
+    },
+    {
+      "index": 3,
+      "position": {
+        "x": 0,
+        "y": 1.5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "halfWidth": 14,
+      "height": 6,
+      "splineT": 0.3333333333333333
+    },
+    {
+      "index": 4,
+      "position": {
+        "x": 0,
+        "y": 1.5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "halfWidth": 14,
+      "height": 6,
+      "splineT": 0.4444444444444444
+    },
+    {
+      "index": 5,
+      "position": {
+        "x": 0,
+        "y": 1.5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "halfWidth": 14,
+      "height": 6,
+      "splineT": 0.5555555555555556
+    },
+    {
+      "index": 6,
+      "position": {
+        "x": 0,
+        "y": 1.5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "halfWidth": 14,
+      "height": 6,
+      "splineT": 0.6666666666666666
+    },
+    {
+      "index": 7,
+      "position": {
+        "x": 0,
+        "y": 1.5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "halfWidth": 14,
+      "height": 6,
+      "splineT": 0.7777777777777778
+    },
+    {
+      "index": 8,
+      "position": {
+        "x": 0,
+        "y": 1.5,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "halfWidth": 14,
+      "height": 6,
+      "splineT": 0.8888888888888888
+    }
+  ],
+  "aiSplines": [
+    {
+      "id": "main",
+      "points": [],
+      "anchors": [
+        {
+          "x": 50,
+          "y": 1,
+          "z": 0
+        },
+        {
+          "x": 50,
+          "y": 1,
+          "z": 50
+        },
+        {
+          "x": 35,
+          "y": 1,
+          "z": 90
+        },
+        {
+          "x": -35,
+          "y": 1,
+          "z": 90
+        },
+        {
+          "x": -50,
+          "y": 1,
+          "z": 50
+        },
+        {
+          "x": -50,
+          "y": 1,
+          "z": -50
+        },
+        {
+          "x": -35,
+          "y": 1,
+          "z": -90
+        },
+        {
+          "x": 35,
+          "y": 1,
+          "z": -90
+        },
+        {
+          "x": 50,
+          "y": 1,
+          "z": -50
+        }
+      ]
+    }
+  ],
+  "pickupSpawns": [
+    {
+      "x": 50,
+      "y": 1.8,
+      "z": 25
+    },
+    {
+      "x": 25,
+      "y": 1.8,
+      "z": 80
+    },
+    {
+      "x": -25,
+      "y": 1.8,
+      "z": 80
+    },
+    {
+      "x": -50,
+      "y": 1.8,
+      "z": 0
+    },
+    {
+      "x": -25,
+      "y": 1.8,
+      "z": -80
+    },
+    {
+      "x": 25,
+      "y": 1.8,
+      "z": -80
+    },
+    {
+      "x": 50,
+      "y": 1.8,
+      "z": -25
+    }
+  ],
+  "boostPads": []
+}
