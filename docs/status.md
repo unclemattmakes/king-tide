@@ -170,6 +170,9 @@ Open polish:
 ### Asset pipeline — *M9.16 + M9.17 live*
 The calibration scene round-trips Blender → .glb → runtime Track + visible
 meshes. Open with `?track=calibration` to exercise the full path.
+
+> **Authoring a new track?** Start with [blender-pipeline-guide.md](./blender-pipeline-guide.md) — end-to-end walkthrough from "open Blender" to "play your track in the browser".
+
 - ✅ **Build calibration .blend** via `tools/build_calibration_scene.py`
 - ✅ **Export to .glb** via `tools/export_track.py` (bakes ai_spline NURBS to flat point arrays in extras since glTF doesn't carry curves)
 - ✅ **Sim-side loader** at `src/game/tracks/glb-loader.ts` — Three-free, parses the .glb JSON chunk manually, builds a Track with full validation
