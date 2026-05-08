@@ -15,6 +15,7 @@ import { createChaseCamera } from './engine/render/camera'
 import { createCliffsideMesh } from './engine/render/cliffside-mesh'
 import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
+import { attachTrackColliders, loadGlbTrackVisuals } from './engine/render/glb-track'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createRampMesh } from './engine/render/ramp-mesh'
 import { createBikeRenderSystem } from './engine/render/render-systems'
@@ -62,7 +63,7 @@ import { rubberBandSystem } from './game/systems/rubber-band'
 import { computeStandings } from './game/systems/standings'
 import { syncFromPhysics } from './game/systems/sync-from-physics'
 import { createCliffside } from './game/tracks/cliffside'
-import { loadTrackFromGlb } from './game/tracks/glb-loader'
+import { buildTrackFromGltf } from './game/tracks/glb-loader'
 import { createLagoonLoop } from './game/tracks/lagoon-loop'
 
 const NUM_AI = 4
@@ -126,10 +127,9 @@ async function boot() {
   // Universal: backstop floor for any track.
   createSafetyFloor(phys)
 
-  // Per-track terrain (physics + visuals). Calibration is the asset-pipeline
-  // smoke-test scene — its track surface ships inside the .glb and we don't
-  // (yet) load it as a physics collider; the safety floor + universal water
-  // surface are enough for the loader to be exercised.
+  // Per-track terrain (physics + visuals). Procedural tracks build their
+  // own terrain in code; .glb-backed tracks load mesh + collider geometry
+  // straight from the asset.
   if (trackId === 'cliffside') {
     createCliffsideTerrain(phys)
     scene.add(createCliffsideMesh())
@@ -139,16 +139,25 @@ async function boot() {
     scene.add(createRampMesh())
   }
 
-  const track =
-    trackId === 'cliffside'
-      ? createCliffside()
-      : trackId === 'calibration'
-        ? await loadTrackFromGlb('/assets/tracks/calibration.glb', {
-            id: 'calibration',
-            name: 'Calibration',
-            lapsToFinish: 1,
-          })
-        : createLagoonLoop()
+  let track: import('./game/tracks/types').Track
+  if (trackId === 'cliffside') {
+    track = createCliffside()
+  } else if (trackId === 'calibration') {
+    // One fetch produces both visuals and sim data: GLTFLoader gives us a
+    // Three scene group + the parsed glTF JSON, which we feed straight to
+    // the sim-side Track builder. Static trimesh colliders are attached
+    // for any mesh the author tagged kind=track.
+    const loaded = await loadGlbTrackVisuals('/assets/tracks/calibration.glb')
+    scene.add(loaded.scene)
+    attachTrackColliders(loaded.scene, phys)
+    track = buildTrackFromGltf(loaded.parsedJson, {
+      id: 'calibration',
+      name: 'Calibration',
+      lapsToFinish: 1,
+    })
+  } else {
+    track = createLagoonLoop()
+  }
   const trackVisuals = createTrackVisuals(track)
   scene.add(trackVisuals.group)
 

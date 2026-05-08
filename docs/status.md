@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-07 (M9.16 Blender → .glb pipeline live; calibration scene round-trips). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-07 (M9.17 .glb mesh rendering — track surfaces visible at runtime). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -167,17 +167,18 @@ Open polish:
 ### Missing MVP items
 *(MVP feature list is now complete. Remaining work is the asset pipeline + post-MVP polish — see below.)*
 
-### Asset pipeline — *first pass live in M9.16*
-The calibration scene round-trips Blender → .glb → runtime Track. Open with
-`?track=calibration` for the loader smoke test.
+### Asset pipeline — *M9.16 + M9.17 live*
+The calibration scene round-trips Blender → .glb → runtime Track + visible
+meshes. Open with `?track=calibration` to exercise the full path.
 - ✅ **Build calibration .blend** via `tools/build_calibration_scene.py`
 - ✅ **Export to .glb** via `tools/export_track.py` (bakes ai_spline NURBS to flat point arrays in extras since glTF doesn't carry curves)
-- ✅ **Runtime loader** at `src/game/tracks/glb-loader.ts` — Three-free, parses the .glb JSON chunk manually, builds a Track with full validation
+- ✅ **Sim-side loader** at `src/game/tracks/glb-loader.ts` — Three-free, parses the .glb JSON chunk manually, builds a Track with full validation
+- ✅ **Render-side loader** at `src/engine/render/glb-track.ts` — uses Three.GLTFLoader to add the .glb's meshes to the scene; one fetch is shared with the sim-side parser via `gltf.parser.json`
 - ✅ **Integration test** at `tests/e2e/m9-calibration-glb.spec.ts` — asserts every metadata kind survives the round trip
 
 Open follow-ups:
-- **[M] Render the .glb's track surface meshes.** Currently the loader builds the sim-side Track but doesn't pull mesh geometry off the .glb. The calibration scene's track plane is invisible at runtime; for a real track-from-Blender flow we need a Three.js GLTFLoader pass that adds meshes to the scene + creates Rapier colliders for `kind=track` meshes.
-- **[S] Author Lagoon Loop / Cliffside in Blender.** Once mesh-loading lands, port the procedural tracks to .blend files so future tracks live in the authoring tool, not in code.
+- **[M] Drivable physics colliders from .glb.** `attachTrackColliders` registers a static trimesh per `kind=track` mesh (with double-winding indices to be normal-direction-independent). `world.castRay` against it returns the expected hit, but Rapier 0.19's broadphase doesn't reliably catch a fast-falling capsule on a thin trimesh plane on its first downward step — the bike tunnels through. The safety floor + universal water surface keep the calibration playthrough sane meanwhile. Likely fix: enable CCD on dynamic bodies + thicken the plane mesh, or switch to Rapier heightfields for terrain.
+- **[S] Author Lagoon Loop / Cliffside in Blender.** Procedural tracks remain canonical until physics colliders are reliable.
 
 ### Beyond MVP
 - Multiplayer (architecturally unlocked by Rapier deterministic build)
@@ -214,6 +215,7 @@ Open follow-ups:
 | M9.14 | Bike variants + garage menu + best-lap save state — MVP feature-complete | ✅ |
 | M9.15 | AI cornering polish — smooth-arc spline + curvature-aware look-ahead | ✅ |
 | M9.16 | Blender → .glb pipeline end-to-end — calibration scene round-trips at runtime | ✅ |
+| M9.17 | .glb mesh rendering — track surface visible in scene; collider attach best-effort | ✅ |
 
 ## File / system map
 
@@ -230,6 +232,7 @@ src/
 │   │   ├── physics/              # Rapier wrapper + vec/quat utils
 │   │   └── water/                # Gerstner wave field + analytic normal sampler
 │   ├── render/                   # Three.js layer
+│   │   ├── glb-track.ts          # GLTFLoader + attachTrackColliders (calibration scene render)
 │   │   ├── renderer.ts           # WebGPU/WebGL2 detect
 │   │   ├── camera.ts             # chase cam with orbit
 │   │   ├── scene.ts              # sky, lighting
