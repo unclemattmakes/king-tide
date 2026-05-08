@@ -220,27 +220,26 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
 
     if (!isGrounded) {
       // --- Air control ---
-      // Hang-time: counter ~40% of gravity so the bike floats through
+      // Hang-time: counter ~60% of gravity so the bike floats through
       // arcs JetMoto-style instead of dropping like a brick. Effective
-      // gravity in air ≈ 15 m/s² vs 25 on the ground.
-      const AIR_LIFT_FRAC = 0.4
+      // gravity in air ≈ 10 m/s² vs 25 on the ground — close to
+      // real-world Earth pull, well below arcade ground gravity.
+      const AIR_LIFT_FRAC = 0.6
       rb.applyImpulse({ x: 0, y: GRAVITY * AIR_LIFT_FRAC * m * dt, z: 0 }, true)
 
       // Pitch-vectored thrust: airborne thrust pushes along the bike's
-      // heading (horizontal) plus a vertical component driven by pitch.
-      // Pitching the nose up (Q) extends air time; pitching it down (E)
-      // dives. Slightly weaker than ground thrust so the player can't
-      // infinite-hover by aiming up + boost — speedFalloff in 3D also
-      // caps any sustained climb at topSpeed.
-      //
-      // Why we negate fwd.y rather than using it directly: the kinematic
-      // pitch convention is empirical (M9.2 / status doc). Pressing Q
-      // ("pitch up = jump off a wave") gives intent.pitch=-1, which the
-      // YXZ Euler build at line 153 turns into mathematical pitch +π/6,
-      // which rotates the body's +Z axis (the fin) to fwd.y ≈ -0.5.
-      // Using fwd.y directly would push the bike DOWN when the player
-      // pressed the "lift" key. Negating it aligns thrust direction with
-      // player intent: Q → +y thrust, E → -y thrust.
+      // true forward direction. The bike's visual nose orientation
+      // matches its body +Z axis, so:
+      //   Q (intent.pitch=-1) → fwd.y < 0 (nose visibly down) → thrust
+      //     along fwd pushes the bike DOWN = dives.
+      //   E (intent.pitch=+1) → fwd.y > 0 (nose visibly up) → thrust
+      //     pushes the bike UP = extends air time.
+      // The keyboard.ts comments ("Q = pitch up / jump off a wave")
+      // describe the rider's body action ("lean back"), not the bike's
+      // pitch — playtest is the source of truth here. Slightly weaker
+      // than ground thrust so the player can't infinite-hover by aiming
+      // up + boost; speedFalloff in 3D also caps any sustained climb at
+      // topSpeed.
       if (Math.abs(intent.throttle) > 0) {
         const fwdAir = quatRotate(q, { x: 0, y: 0, z: 1 })
         const speed3d = Math.hypot(linvel.x, linvel.y, linvel.z)
@@ -248,7 +247,7 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         const scaleAir = intent.throttle >= 0 ? 1 : stats.reverseScale
         const speedFalloff3d = Math.max(0, 1 - speed3d / stats.topSpeed)
         const boostAir = (intent.boost ? stats.boostMul : 1) * getCurrentBoostMultiplier(eid)
-        const AIR_THRUST_MUL = 0.7
+        const AIR_THRUST_MUL = 0.85
         const aAir =
           Math.abs(intent.throttle) *
           stats.accel *
@@ -260,7 +259,7 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         rb.applyImpulse(
           {
             x: fwdAir.x * aAir * m * dt,
-            y: -fwdAir.y * aAir * m * dt,
+            y: fwdAir.y * aAir * m * dt,
             z: fwdAir.z * aAir * m * dt,
           },
           true,

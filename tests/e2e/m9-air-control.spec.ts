@@ -8,19 +8,21 @@ import { expect, test } from '@playwright/test'
  * is clearly airborne. Compares trajectories:
  *
  *  - baseline: throttle=0 pitch=0 — gravity + hang-time only.
- *  - noseUp:   throttle=1 pitch=-1 (Q) — pitch-vectored thrust pushes UP.
- *  - noseDown: throttle=1 pitch=+1 (E) — pitch-vectored thrust pushes DOWN.
+ *  - dive_Q:   throttle=1 pitch=-1 (Q, nose visibly down) — thrust along
+ *              fwd pushes the bike DOWN.
+ *  - lift_E:   throttle=1 pitch=+1 (E, nose visibly up) — thrust along
+ *              fwd pushes the bike UP.
  *
  * Pass conditions:
  *  - All three scenarios actually go airborne (sanity check).
- *  - noseUp's average vy across the airborne window is GREATER (less
- *    negative / more positive) than baseline. Q + throttle should fight
- *    gravity, not aid it.
- *  - noseDown's average vy is LESS than baseline (E dives faster).
+ *  - dive_Q's average vy across the airborne window is LESS than
+ *    baseline (Q dives faster than free fall).
+ *  - lift_E's average vy is GREATER (less negative / more positive)
+ *    than baseline (E fights gravity, extending air time).
  *
  * Looking for the relative ordering, not absolute magnitudes — the
  * launch state has frame-to-frame jitter and the magnitudes shift with
- * tuning. As long as Q > baseline > E in vy, the sign convention is
+ * tuning. As long as E > baseline > Q in vy, the sign convention is
  * correct.
  */
 type Sample = {
@@ -172,32 +174,32 @@ test('air control: pitch-vectored thrust + hang-time work as designed', async ({
   // Run each scenario 3× to average out launch-state noise.
   const TRIALS = 3
   const baseAccs: number[] = []
-  const upAccs: number[] = []
-  const downAccs: number[] = []
-  const downSampleDumps: string[] = []
+  const diveAccs: number[] = []
+  const liftAccs: number[] = []
+  const diveSampleDumps: string[] = []
   for (let i = 0; i < TRIALS; i++) {
     const baseline = await runScenario(
       page,
       { throttle: 0, steer: 0, brake: 0, fire: false, boost: false, pitch: 0 },
       'baseline',
     )
-    const noseUp = await runScenario(
+    const dive = await runScenario(
       page,
       { throttle: 1, steer: 0, brake: 0, fire: false, boost: false, pitch: -1 },
-      'noseUp_Q',
+      'dive_Q',
     )
-    const noseDown = await runScenario(
+    const lift = await runScenario(
       page,
       { throttle: 1, steer: 0, brake: 0, fire: false, boost: false, pitch: +1 },
-      'noseDown_E',
+      'lift_E',
     )
     baseAccs.push(airborneAccel(baseline))
-    upAccs.push(airborneAccel(noseUp))
-    downAccs.push(airborneAccel(noseDown))
-    // Detailed dump of E samples — to debug when E doesn't dive.
-    downSampleDumps.push(
-      `\n  TRIAL ${i + 1} E samples (launchVy=${noseDown.launchVy.toFixed(2)}):\n` +
-        noseDown.samples
+    diveAccs.push(airborneAccel(dive))
+    liftAccs.push(airborneAccel(lift))
+    // Detailed dump of dive samples — to debug when Q doesn't dive.
+    diveSampleDumps.push(
+      `\n  TRIAL ${i + 1} Q (dive) samples (launchVy=${dive.launchVy.toFixed(2)}):\n` +
+        dive.samples
           .map(
             (s) =>
               `    t=${s.t.toFixed(2)} y=${s.y.toFixed(2)} vy=${s.vy.toFixed(2)} grd=${s.grounded ? 'T' : 'F'} fwdY=${s.fwdY.toFixed(3)} pitch=${s.intentPitch.toFixed(2)}`,
@@ -207,26 +209,26 @@ test('air control: pitch-vectored thrust + hang-time work as designed', async ({
   }
 
   const baseA = median(baseAccs)
-  const upA = median(upAccs)
-  const downA = median(downAccs)
+  const diveA = median(diveAccs)
+  const liftA = median(liftAccs)
 
   // biome-ignore lint/suspicious/noConsole: diagnostic
   console.log(
-    `\nair control summary (median of ${TRIALS} trials, vertical acceleration m/s²):\n  baseline   (thr0 pitch0):  trials=[${baseAccs.map((v) => v.toFixed(2)).join(', ')}]  median=${baseA.toFixed(2)}\n  noseUp Q   (thr1 pitch-1): trials=[${upAccs.map((v) => v.toFixed(2)).join(', ')}]  median=${upA.toFixed(2)}\n  noseDown E (thr1 pitch+1): trials=[${downAccs.map((v) => v.toFixed(2)).join(', ')}]  median=${downA.toFixed(2)}` +
-      downSampleDumps.join('\n'),
+    `\nair control summary (median of ${TRIALS} trials, vertical acceleration m/s²):\n  baseline (thr0 pitch0):  trials=[${baseAccs.map((v) => v.toFixed(2)).join(', ')}]  median=${baseA.toFixed(2)}\n  dive_Q   (thr1 pitch-1): trials=[${diveAccs.map((v) => v.toFixed(2)).join(', ')}]  median=${diveA.toFixed(2)}\n  lift_E   (thr1 pitch+1): trials=[${liftAccs.map((v) => v.toFixed(2)).join(', ')}]  median=${liftA.toFixed(2)}` +
+      diveSampleDumps.join('\n'),
   )
 
-  // Hang-time sanity: with 40% gravity counter the air-accel should be
-  // softer than raw gravity (-25). We're targeting around -15.
+  // Hang-time sanity: with 60% gravity counter the air-accel should be
+  // softer than raw gravity (-25). We're targeting around -10.
   expect(baseA, 'baseline air-accel should be softer than raw gravity').toBeGreaterThan(-22)
 
-  // Q (nose up + throttle) should fight gravity — accel strictly
-  // higher (less negative) than baseline.
-  expect(upA, 'Q (nose up + throttle) should fight gravity vs baseline').toBeGreaterThan(baseA + 1)
+  // Q (nose visibly down + throttle) should DIVE — accel strictly more
+  // negative than baseline.
+  expect(diveA, 'Q (nose down + throttle) should dive faster than baseline').toBeLessThan(baseA - 1)
 
-  // E (nose down + throttle) should dive — accel strictly more negative
-  // than baseline.
-  expect(downA, 'E (nose down + throttle) should add to gravity vs baseline').toBeLessThan(
-    baseA - 1,
+  // E (nose visibly up + throttle) should LIFT — accel strictly higher
+  // (less negative) than baseline.
+  expect(liftA, 'E (nose up + throttle) should fight gravity vs baseline').toBeGreaterThan(
+    baseA + 1,
   )
 })

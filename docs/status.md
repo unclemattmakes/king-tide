@@ -11,7 +11,7 @@ This doc captures the build's current state, controls, known issues, and next st
 - Garage menu (HUD button top-right) for picking bike + track + viewing / clearing best lap records
 - Best lap times saved per (track, bike) to localStorage, surfaced in the finish overlay and garage menu
 - Jump ramp on Lagoon's right straight (z = 25–37) — exercises raycast-vs-static-collider, surface alignment on a sloped normal, hover-spring release on launch, and water re-acquisition on landing
-- Airborne control (M9.18) — bike floats through arcs (40% gravity counter while in the air) instead of dropping like a rock; throttle while airborne pushes along the bike's forward direction so pitch-up extends air time and pitch-down dives
+- Airborne control (M9.18) — bike floats through arcs (60% gravity counter while in the air, effective ~10 m/s² fall rate) instead of dropping like a rock; throttle while airborne pushes along the bike's forward direction so pitch-up extends air time and pitch-down dives
 - Player spawns on the racing line at the start gate, facing forward
 - Hover-bike physics (Rapier WASM, deterministic build)
 - Gerstner wave water with buoyancy — bike rides waves, dives into troughs, launches off crests
@@ -132,12 +132,12 @@ Fixed in M4 — the `q*v*q⁻¹` expansion was producing wrong rotated vectors e
 ### Pitch sign is empirical too (M9.2)
 `aPitch = (currentPitch - targetPitch) * SPRING` — note the order. (target - current) was the wrong sign and produced a backflip when the player pressed E. Document in `hover.ts`.
 
-### Body-frame fwd.y is inverted relative to player intent (M9.18)
-Empirically verified by probing `quatRotate(rb.rotation(), {0,0,1}).y` at runtime:
-- Q (intent.pitch=-1, "pitch up = jump off a wave") → body fwd.y ≈ **-0.5** (mathematically nose-DOWN)
-- E (intent.pitch=+1, "pitch down = dive into a wave") → body fwd.y ≈ **+0.5** (mathematically nose-UP)
+### Q dives, E lifts — keyboard.ts comments are misleading (M9.18)
+Empirically verified by probe + playtest:
+- **Q (intent.pitch=-1)** → body fwd.y ≈ **-0.5** (nose visibly DOWN). Player presses Q to **dive**.
+- **E (intent.pitch=+1)** → body fwd.y ≈ **+0.5** (nose visibly UP). Player presses E to **lift / extend air**.
 
-The kinematic YXZ Euler build at `hover.ts:154` does `targetPitch = -intent.pitch * PITCH_LIMIT`, which means Q ends up at mathematical pitch +π/6 and E at -π/6. R_x(+π/6) sends +Z to (0, -sin(π/6), cos(π/6)) = (0, -0.5, 0.866) — the body's forward axis points slightly down. Whether this matches the visual "lean back" perception depends on the chase-cam mirroring noted in M9.5b; either way, the convention is locked in by playtest, so anything that reads the bike's true forward vector to derive an intent-aligned thrust direction must invert `fwd.y`. The air-control system in `hover.ts` does this explicitly so Q produces upward thrust as the player expects.
+The keyboard.ts and intent.ts comments call Q "pitch up = jump off a wave" and E "pitch down = dive". That language describes the rider's body action ("lean back" → Q), not the bike's pitch — which is the opposite. **The visual orientation matches the math:** the YXZ Euler build at `hover.ts:154` does `targetPitch = -intent.pitch * PITCH_LIMIT`, so Q ends up at mathematical pitch +π/6 (R_x(+π/6) sends +Z down to (0, -0.5, 0.866) — fin pointing down). Anything that reads the bike's true forward vector to derive an intent-aligned thrust direction should use `fwd.y` directly — no negation. The air-control system in `hover.ts` does so, which is why throttle + Q drives the bike into the ground and throttle + E lifts it skyward, matching what the player sees.
 
 ### Tests sometimes flaky on parallel runs
 The M3 race "checkpoints not in front are not counted" test occasionally needs a retry. Cause: physics-driven timing under CPU contention from 4 parallel Playwright workers. Workers capped at 4; retries enabled.
