@@ -1,5 +1,6 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import { MESA_TOP_Y } from '@/game/entities/cliffside-terrain'
+import { buildStadiumAISpline } from './spline-utils'
 import type { Checkpoint, Track } from './types'
 
 /**
@@ -68,24 +69,16 @@ export function createCliffside(): Track {
     return { index: i, position: pos, rotation, halfWidth, height }
   })
 
-  // AI spline. Same xz path as Lagoon Loop's spline; y values follow the
-  // surface profile so the closest-point search picks up the curve cleanly.
-  // (The AI's steer math only uses x/z, but giving the spline a sensible y
-  // keeps any later 3D-aware logic correct.)
-  const aiPoints: Vec3[] = []
-  for (let i = 0; i < positions.length; i++) {
-    const here = positions[i]!
-    const next = positions[(i + 1) % positions.length]!
-    const segments = 10
-    for (let s = 0; s < segments; s++) {
-      const t = s / segments
-      aiPoints.push({
-        x: here.x + (next.x - here.x) * t,
-        y: here.y + (next.y - here.y) * t,
-        z: here.z + (next.z - here.z) * t,
-      })
-    }
-  }
+  // Smooth-arc AI spline. xz layout matches Lagoon Loop; y values follow the
+  // mesa profile (cp 1..cp 4 high, cp 5..cp 8 low). The AI's steer math only
+  // uses x/z, but a sensible y keeps later 3D-aware logic correct.
+  const aiPoints: Vec3[] = buildStadiumAISpline({
+    cp0Y: lowY,
+    cp1Y: highY,
+    topCurveY: highY,
+    cp5Y: lowY,
+    cp8Y: lowY,
+  })
 
   return {
     id: 'cliffside',

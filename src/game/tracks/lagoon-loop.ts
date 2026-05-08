@@ -1,4 +1,5 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
+import { buildStadiumAISpline } from './spline-utils'
 import type { Checkpoint, Track } from './types'
 
 /**
@@ -73,22 +74,16 @@ export function createLagoonLoop(): Track {
     return { index: i, position: pos, rotation, halfWidth, height }
   })
 
-  // Dense AI spline. We follow the polyline through the gate centres; the
-  // closest-point search then gives the AI a smooth target progression.
-  const aiPoints: Vec3[] = []
-  for (let i = 0; i < positions.length; i++) {
-    const here = positions[i]!
-    const next = positions[(i + 1) % positions.length]!
-    const segments = 10
-    for (let s = 0; s < segments; s++) {
-      const t = s / segments
-      aiPoints.push({
-        x: here.x + (next.x - here.x) * t,
-        y: 1,
-        z: here.z + (next.z - here.z) * t,
-      })
-    }
-  }
+  // Smooth-arc AI spline. The previous chord polyline gave the AI three sharp
+  // jogs per curve; with the proper half-circle arc, lookahead sees a
+  // continuously bending path and the AI can hold speed through the corners.
+  const aiPoints: Vec3[] = buildStadiumAISpline({
+    cp0Y: 1,
+    cp1Y: 1,
+    topCurveY: 1,
+    cp5Y: 1,
+    cp8Y: 1,
+  })
 
   return {
     id: 'lagoon-loop',

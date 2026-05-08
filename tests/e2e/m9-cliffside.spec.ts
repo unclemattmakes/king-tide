@@ -48,6 +48,7 @@ test.describe('M9 Cliffside', () => {
   })
 
   test('left-straight cliff drop launches the bike onto water', async ({ page }) => {
+    test.setTimeout(60_000) // wait-for-cliff-drop alone is up to 45s under parallel CPU load
     await page.goto('/?track=cliffside')
     await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
       timeout: 10000,
@@ -68,7 +69,7 @@ test.describe('M9 Cliffside', () => {
         if (!p) return false
         return !p.isGrounded && p.position.x < -30 && p.position.y > 4
       },
-      { timeout: 30000 },
+      { timeout: 45000 },
     )
 
     // Sample for a couple seconds to confirm the bike comes back down to

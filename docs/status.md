@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-07 (bike variants + garage menu + best-lap save). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-07 (M9.15 AI cornering polish — smooth-arc spline + curvature look-ahead). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -23,7 +23,7 @@ This doc captures the build's current state, controls, known issues, and next st
 - Auto-play mode (T or F1) — AI takes over the player bike for testing
 - Backspace = respawn at start
 - Mouse right-drag and gamepad right-stick orbit the camera (vertical inverted by default)
-- 25 e2e + 49 unit tests, all green
+- 26 e2e + 49 unit tests, all green
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
 
 ## Controls
@@ -90,11 +90,36 @@ M9.3 was insufficient: pitching while turning produced wild roll oscillations (p
 ### Pitch + throttle on water — *intentional, not a bug*
 Holding `pitch=+1` (dive) at full throttle makes the bike plant its nose into wave troughs and submerge-and-bounce, with speed swinging 10→25→10 m/s as buoyancy kicks back. This is the desired Wave Race-style feel — diving into a wave should *cost* you. Thrust is already projected to horizontal (always was); the apparent "dive" is the bike's collider being driven through the wave field at speed, not a thrust-direction bug. Don't "fix" it.
 
-### AI navigation — works but rough
-- AI consistently makes it through cp 0, cp 1, cp 2 and into cp 3 in autoplay tests
-- They sometimes overshoot tight curves (cp 1 → cp 2) and have to recover
-- Per-bike line offsets prevent dogpiles at gates, but on heavy interactions they can still bump each other
-- Lap completion rate by AI is below 50% over a 30s window — the controller is correct, just not refined enough to consistently navigate corners while braking
+### AI navigation — Lagoon solid, Cliffside still rough
+*Updated M9.15.* The AI now runs a smooth-arc racing spline through the
+half-circle curves (`tracks/spline-utils.ts`), and the controller scans
+~1.5s of upcoming spline ahead, derives an implied corner radius, and
+caps target speed at √(latAccel × radius). Brake fires when current speed
+exceeds that target; without this, brake only ever fired *during* a sharp
+corner — too late to actually take it.
+
+- Lagoon Loop: autoplay completes a full lap in ~24s game time (the
+  `m9-ai-laps` probe asserts ≥10 checkpoint crossings). AI bikes hold
+  parallel lines through curves with their per-AI line offsets; no more
+  cp 1 / cp 4 overshoot.
+- Cliffside: the climb ramp + cliff drop create a dead-end the AI can't
+  recover from. If the bike launches off the climb at an angle and lands
+  off the mesa, or falls off the mesa mid-curve, it cannot get back up
+  to the mesa to cross cps 3 / 4. The bottom half of the track is fine.
+  This is a content/level-design limitation, not a controller bug —
+  procedural recovery onto a separate elevation surface is non-trivial.
+- Per-bike line offsets prevent dogpiles at gates; bumps still happen on
+  heavy interactions but no longer compound into pile-ups.
+
+### Curve apex inset (M9.15) — *load-bearing for Cliffside*
+The natural radius-50 half-circle through the gates has its apex at
+z = ±100, which is exactly Cliffside's mesa edge (mesa half-extent z = 25
+around z = 75 → north edge at z = 100). Any inertial overshoot puts the
+bike off the cliff on the wrong side. `buildStadiumAISpline` solves the
+unique tangent arc that has corner endpoints at (±50, ±50) but apex at
+(0, ±92) — 8m inside the mesa edge. APEX_INSET in `spline-utils.ts`
+controls the margin; reducing it gives a tighter racing line at the cost
+of cliffside safety.
 
 ### `quatRotate` was buggy in M0–M3
 Fixed in M4 — the `q*v*q⁻¹` expansion was producing wrong rotated vectors except at identity. All systems that read bike orientation were affected; fixing it surfaced the steer-sign issue.
@@ -118,7 +143,7 @@ In rough priority order. Each item is sized as **S/M/L** for effort.
 
 ### Polish on what exists
 - **[S] Pitch attenuation tuning.** Maybe make pitch effect smaller (±15° instead of ±30°) so the bike stays more controllable. Or scale pitch with speed.
-- **[M] AI cornering tuning.** More aggressive brake-into-turn, look-ahead based on track curvature, racing-line offset that varies between inside/outside of corner.
+- **[M] Cliffside AI recovery.** When the AI falls off the mesa mid-curve, it can't navigate back up the climb ramp. Either widen the mesa, add side ramps, or teach the AI to detour to the climb ramp when it's off-elevation.
 
 ### Combat (M5 — done)
 All four MVP pickups landed in M9.9 (the M5-completion bundle):
@@ -178,6 +203,7 @@ Open polish:
 | M9.12 | Procedural audio (engine + ambient + pickup chime + weapon SFX) | ✅ |
 | M9.13 | Cliffside track (mesa + ramp + cliff drop) + gate/lap audio | ✅ |
 | M9.14 | Bike variants + garage menu + best-lap save state — MVP feature-complete | ✅ |
+| M9.15 | AI cornering polish — smooth-arc spline + curvature-aware look-ahead | ✅ |
 
 ## File / system map
 
@@ -244,6 +270,7 @@ src/
 │   │   ├── mine.ts / missile.ts / explosion.ts  # one-shot combat entities
 │   ├── tracks/                   # Track type + procedural track configs
 │   │   ├── types.ts
+│   │   ├── spline-utils.ts       # buildStadiumAISpline — smooth tangent-arc through curves
 │   │   ├── lagoon-loop.ts        # default stadium track
 │   │   └── cliffside.ts          # mesa + cliff drop, also the Blender-export reference
 │   └── bikes/                    # stats + variants

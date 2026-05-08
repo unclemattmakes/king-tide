@@ -12,13 +12,25 @@ import type { Track } from '@/game/tracks/types'
  * into ControlIntent. Hover system drives the rigid body.
  *
  * Key design points after several iterations:
- * - Lookahead scales with speed (~0.6s ahead) so faster bikes see further.
+ * - Lookahead scales with speed (~0.4s ahead) so faster bikes see further.
  * - Steering blends look-ahead heading with a "pull toward the line" term
  *   so the AI doesn't drift wide on long arcs and miss gates.
- * - Brake fires when the upcoming direction sharply diverges from our current
- *   heading AND we're going fast — converts momentum into a tighter line.
- * - Throttle scales down with how sharply we'd have to turn at this speed.
+ * - Curvature scan looks 1.5s ahead along the spline and measures the
+ *   total bend. Tight upcoming curves drop the target speed; the AI brakes
+ *   when current speed > target. Without this, brake only ever fired
+ *   *during* a sharp corner — too late to actually take it.
+ * - Throttle scales down with target speed (curvature-driven), not just
+ *   with current angle to target.
  */
+/** Max lateral acceleration the AI will plan for, m/s^2. Lower = more
+ *  conservative cornering. ~9 m/s² gives ~21 m/s through a 50m-radius arc. */
+const AI_MAX_LATERAL_ACCEL = 11
+/** How far ahead (in seconds) we scan the spline for upcoming curvature. */
+const CURVATURE_LOOKAHEAD_SECONDS = 1.6
+/** Minimum scan distance even at low speed (m), so we still see the next corner. */
+const CURVATURE_LOOKAHEAD_MIN = 18
+/** Margin: brake when current speed exceeds target speed by this much (m/s). */
+const BRAKE_TRIGGER_MARGIN = 1.5
 export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track): void {
   const eids = query(sim, [AITag, AIController, RBHandle, ControlIntent])
   for (const eid of eids) {
@@ -115,14 +127,59 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
     let steer = -angle * KP + damp
     steer = Math.max(-1, Math.min(1, steer))
 
-    // 6. Throttle scales down with angle. Brake into very sharp turns at speed.
-    const angleAbs = Math.abs(angle)
-    const throttleScale = Math.max(0.4, 1 - angleAbs / Math.PI)
-    const throttle = ai.topSpeedFactor * throttleScale
+    // 6. Curvature look-ahead. Walk ~1.5s ahead along the spline summing arc
+    // length, then take the heading-change between (here→lookSegStart) and
+    // (lookSegStart→lookSegEnd) as a measure of the upcoming bend. We also
+    // sample a wider window's worth of cumulative bend so a long arc (like
+    // the half-circle curves) registers the same way a sharp single corner
+    // would. The radius implied by total bend over scanned arclength gives
+    // us a target speed via v = sqrt(latAccel * r).
+    const scanDist = Math.max(CURVATURE_LOOKAHEAD_MIN, speedHoriz * CURVATURE_LOOKAHEAD_SECONDS)
+    let scanned = 0
+    let totalBend = 0
+    let prevDx = 0
+    let prevDz = 0
+    let initialized = false
+    for (let i = 0; i < N && scanned < scanDist; i++) {
+      const a = spline.points[(bestIdx + i) % N]!
+      const b = spline.points[(bestIdx + i + 1) % N]!
+      const segDx = b.x - a.x
+      const segDz = b.z - a.z
+      const segLen = Math.hypot(segDx, segDz)
+      if (segLen < 1e-6) continue
+      if (initialized) {
+        const cross = prevDx * segDz - prevDz * segDx
+        const dot = prevDx * segDx + prevDz * segDz
+        totalBend += Math.abs(Math.atan2(cross, dot))
+      }
+      prevDx = segDx
+      prevDz = segDz
+      initialized = true
+      scanned += segLen
+    }
+    // Implied corner radius: bend (rad) over arclength (m) → curvature (1/m).
+    // Cap min radius at 8m so missing data doesn't produce a near-stop target.
+    const curvature = scanned > 0 ? totalBend / scanned : 0
+    const impliedRadius = curvature > 1e-4 ? Math.max(8, 1 / curvature) : 1e6
+    const cornerSpeedCap = Math.sqrt(AI_MAX_LATERAL_ACCEL * impliedRadius)
+    const baseTopSpeed = ai.topSpeedFactor * 30 // ~bike topSpeed; a soft target, not a hard cap
+    const targetSpeed = Math.min(baseTopSpeed, cornerSpeedCap)
 
-    // Brake when we're going fast AND the angle ahead is genuinely sharp.
-    // Gentle threshold so we don't slam brakes on every bend.
-    const brake = angleAbs > 1.0 && speedHoriz > 24 ? Math.min(0.8, (angleAbs - 1.0) * 1.2) : 0
+    // Throttle: scale down as we approach the target speed, with a small
+    // angle-error term so a steering correction also pulls throttle.
+    const angleAbs = Math.abs(angle)
+    const speedHeadroom = Math.max(0, (targetSpeed - speedHoriz) / Math.max(targetSpeed, 1))
+    const angleScale = Math.max(0.55, 1 - angleAbs / Math.PI)
+    const throttle = Math.min(1, ai.topSpeedFactor * (0.45 + 0.65 * speedHeadroom) * angleScale)
+
+    // Brake when current speed exceeds the target by more than the margin.
+    // Magnitude scales with overshoot, capped at 0.9 (full brake bogs the
+    // chassis and breaks the lean-into-turn weight transfer).
+    const overshoot = speedHoriz - targetSpeed
+    const brake =
+      overshoot > BRAKE_TRIGGER_MARGIN
+        ? Math.min(0.9, (overshoot - BRAKE_TRIGGER_MARGIN) * 0.18)
+        : 0
 
     AIControllerStore.set(eid, { ...ai, lastClosestIndex: bestIdx })
     ControlIntentStore.set(eid, {
