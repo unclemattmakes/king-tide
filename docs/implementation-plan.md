@@ -255,10 +255,12 @@ Each milestone was treated as a decision gate; M9.x sub-milestones came out of p
 - Beyond MVP: multiplayer (Rapier deterministic build is ready), career
   mode.
 
-**Shipped in M9.16–M9.19** (originally listed here as future work):
+**Shipped in M9.16–M9.21** (originally listed here as future work):
 - ✅ End-to-end Blender → .glb pipeline (M9.16) — `tools/export_track.py`
   validates the calibration scene and the runtime loader reads `extras`
   metadata.
 - ✅ .glb mesh rendering (M9.17) — track surface visible at runtime.
-- ✅ Hybrid pipeline (M9.18) — JSON gameplay data + optional Blender .glb.
-- ✅ In-engine track editor (M9.19) — outliner + TransformControls.
+- ✅ Hybrid pipeline (M9.19) — JSON gameplay data + optional Blender .glb.
+- ✅ In-engine track editor (M9.20 + M9.21) — outliner + TransformControls
+  with translate / rotate / scale, undo, Catmull-Rom anchor splines, and
+  gates auto-bound to the spline.

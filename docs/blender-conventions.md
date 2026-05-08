@@ -4,7 +4,7 @@
 > see [blender-pipeline-guide.md](./blender-pipeline-guide.md). This file
 > is the at-a-glance reference card.
 >
-> **Hybrid pipeline (M9.18+):** new tracks split gameplay data into
+> **Hybrid pipeline (M9.19+):** new tracks split gameplay data into
 > `public/tracks/<id>.json` (authored via the in-app editor — see
 > [track-editor-guide.md](./track-editor-guide.md)) and environment
 > geometry into a Blender `.glb` referenced from the JSON. Most of the
