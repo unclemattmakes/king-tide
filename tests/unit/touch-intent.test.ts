@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { computeTouchIntent } from '../../src/engine/input/touch'
 
-const NO_BTN = { fire: false, boost: false, brake: false }
+const NO_BTN = { fire: false, boost: false, brake: false, thrust: false }
 
 describe('computeTouchIntent', () => {
   it('zero stick + no buttons = zeroed intent', () => {
@@ -9,20 +9,33 @@ describe('computeTouchIntent', () => {
     expect(i.throttle).toBe(0)
     expect(i.steer).toBe(0)
     expect(i.brake).toBe(0)
+    expect(i.pitch).toBe(0)
     expect(i.fire).toBe(false)
     expect(i.boost).toBe(false)
   })
 
-  it('full forward stick = full throttle, no brake', () => {
-    const i = computeTouchIntent(0, 1, NO_BTN)
+  it('thrust button = full throttle', () => {
+    const i = computeTouchIntent(0, 0, { ...NO_BTN, thrust: true })
     expect(i.throttle).toBe(1)
     expect(i.brake).toBe(0)
   })
 
-  it('full back stick = reverse throttle + full brake', () => {
+  it('stick alone never produces throttle (thrust is button-only)', () => {
+    const fwd = computeTouchIntent(0, 1, NO_BTN)
+    expect(fwd.throttle).toBe(0)
+    const back = computeTouchIntent(0, -1, NO_BTN)
+    expect(back.throttle).toBe(0)
+    expect(back.brake).toBe(0)
+  })
+
+  it('stick up = positive pitch (nose-down dive, matching gamepad)', () => {
+    const i = computeTouchIntent(0, 1, NO_BTN)
+    expect(i.pitch).toBe(1)
+  })
+
+  it('stick down = negative pitch (nose up)', () => {
     const i = computeTouchIntent(0, -1, NO_BTN)
-    expect(i.throttle).toBe(-1)
-    expect(i.brake).toBe(1)
+    expect(i.pitch).toBe(-1)
   })
 
   it('right stick = positive steer', () => {
@@ -38,26 +51,26 @@ describe('computeTouchIntent', () => {
   it('deadzone clears small inputs', () => {
     const i = computeTouchIntent(0.05, 0.05, NO_BTN)
     expect(i.steer).toBe(0)
-    expect(i.throttle).toBe(0)
+    expect(i.pitch).toBe(0)
   })
 
   it('clamps out-of-range values', () => {
     const i = computeTouchIntent(1.5, -1.5, NO_BTN)
     expect(i.steer).toBe(1)
-    expect(i.throttle).toBe(-1)
-    expect(i.brake).toBe(1)
+    expect(i.pitch).toBe(-1)
   })
 
-  it('button press maps through to flags / brake', () => {
-    const i = computeTouchIntent(0, 0, { fire: true, boost: true, brake: true })
+  it('button presses map through to flags / brake / throttle', () => {
+    const i = computeTouchIntent(0, 0, { fire: true, boost: true, brake: true, thrust: true })
     expect(i.fire).toBe(true)
     expect(i.boost).toBe(true)
     expect(i.brake).toBe(1)
+    expect(i.throttle).toBe(1)
   })
 
-  it('brake button overrides a forward stick brake of 0', () => {
-    const i = computeTouchIntent(0, 0.8, { fire: false, boost: false, brake: true })
-    expect(i.throttle).toBeCloseTo(0.8)
+  it('thrust + brake together: brake holds, throttle still on (player decides)', () => {
+    const i = computeTouchIntent(0, 0, { ...NO_BTN, thrust: true, brake: true })
+    expect(i.throttle).toBe(1)
     expect(i.brake).toBe(1)
   })
 })

@@ -3,10 +3,10 @@ import { emptyIntent, type Intent } from './intent'
 /**
  * Virtual joystick + face buttons for mobile players.
  *
- * Layout: a thumb-stick anchored bottom-left drives steer (X) and throttle
- * (Y, up = forward). A column of FIRE / BOOST / BRAKE pads sits bottom-right.
- * Pulling the stick down past the deadzone counts as both reverse throttle
- * and a brake, matching the keyboard's S behaviour.
+ * Layout: a thumb-stick anchored bottom-left drives steer (X) and pitch
+ * (Y, matching gamepad: up = nose-down dive). A column of BOOST / FIRE /
+ * BRAKE / THRUST pads sits bottom-right; THRUST is the dedicated forward
+ * gas pedal so the stick stays free for steering and pitch.
  *
  * Self-contained: injects its own DOM + CSS into <body> when installed and
  * stays inert (zeroed intent) on non-touch devices, so desktop users don't
@@ -15,7 +15,7 @@ import { emptyIntent, type Intent } from './intent'
 const STICK_RANGE_PX = 50 // max knob travel from center
 const DEADZONE = 0.08
 
-type ButtonKey = 'fire' | 'boost' | 'brake'
+type ButtonKey = 'fire' | 'boost' | 'brake' | 'thrust'
 
 let installed = false
 let stickX = 0
@@ -59,19 +59,17 @@ export function isTouchEnabled(): boolean {
 export function computeTouchIntent(
   rawStickX: number,
   rawStickY: number,
-  buttons: { fire: boolean; boost: boolean; brake: boolean },
+  buttons: { fire: boolean; boost: boolean; brake: boolean; thrust: boolean },
 ): Intent {
   const intent = emptyIntent()
   const sx = Math.abs(rawStickX) < DEADZONE ? 0 : rawStickX
   const sy = Math.abs(rawStickY) < DEADZONE ? 0 : rawStickY
   intent.steer = clamp(sx, -1, 1)
-  if (sy > 0) {
-    intent.throttle = clamp(sy, 0, 1)
-  } else if (sy < 0) {
-    intent.throttle = clamp(sy, -1, 0)
-    intent.brake = clamp(-sy, 0, 1)
-  }
-  if (buttons.brake) intent.brake = 1
+  // Stick Y → pitch, matching gamepad: push up (toward top of screen) =
+  // positive pitch = nose-down dive.
+  intent.pitch = clamp(sy, -1, 1)
+  intent.throttle = buttons.thrust ? 1 : 0
+  intent.brake = buttons.brake ? 1 : 0
   intent.fire = buttons.fire
   intent.boost = buttons.boost
   return intent
@@ -82,6 +80,7 @@ export function touchIntent(): Intent {
     fire: pressed.has('fire'),
     boost: pressed.has('boost'),
     brake: pressed.has('brake'),
+    thrust: pressed.has('thrust'),
   })
 }
 
@@ -122,6 +121,7 @@ const STYLE = `
 #touch-ui .btn.fire { background: rgba(255,80,80,0.32); border-color: rgba(255,140,140,0.7); }
 #touch-ui .btn.boost { background: rgba(80,160,255,0.32); border-color: rgba(140,200,255,0.7); }
 #touch-ui .btn.brake { background: rgba(255,180,40,0.30); border-color: rgba(255,220,120,0.7); }
+#touch-ui .btn.thrust { background: rgba(120,220,120,0.34); border-color: rgba(180,255,180,0.75); }
 #touch-ui .btn.active { background: rgba(255,255,255,0.45); }
 `
 
@@ -242,6 +242,7 @@ export function installTouch(): void {
   buttons.appendChild(makeButton('boost', 'BOOST', 'boost'))
   buttons.appendChild(makeButton('fire', 'FIRE', 'fire'))
   buttons.appendChild(makeButton('brake', 'BRAKE', 'brake'))
+  buttons.appendChild(makeButton('thrust', 'THRUST', 'thrust'))
   ui.appendChild(buttons)
 
   document.body.appendChild(ui)
