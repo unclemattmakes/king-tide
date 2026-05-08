@@ -37,3 +37,22 @@ Blender → glTF uses Y-up by default in glTF. Three.js is also Y-up. Z forward 
 ## Scale
 
 1 Blender unit = 1 meter. Don't change units. Bikes are roughly 2.5m long.
+
+## Reference layout: Cliffside
+
+While the .blend → .glb pipeline is still being wired, the **Cliffside** track (`src/game/tracks/cliffside.ts` + `src/game/entities/cliffside-terrain.ts` + `src/engine/render/cliffside-mesh.ts`) is the procedural reference for what a Blender-authored track should look like. Each procedural piece maps 1:1 to an object you'd author in Blender:
+
+| Procedural code | Blender equivalent |
+|---|---|
+| `MESA_*` cuboid | mesh `track_mesa`, material `mat_track_mesa`, `extras = { kind: "track" }` |
+| `CLIMB_RAMP_*` tilted cuboid | mesh `track_climb_ramp`, material `mat_track_ramp`, `extras = { kind: "track" }` |
+| `CLIFF_FACE_*` cuboid (visual only) | mesh `cliff_face_visual`, no `extras.kind` (renders only, no physics body) |
+| `track.start.*` Vec3 + yaw | empty `start_00`, `extras = { kind: "start", index: 0 }` |
+| `track.checkpoints[i]` | empty `cp_NN`, `extras = { kind: "checkpoint", index: NN }` |
+| `track.aiSplines[0].points` | curve `ai_spline_main`, `extras = { kind: "ai_spline" }` |
+| `track.pickupSpawns[i]` | empty `pickup_NN`, `extras = { kind: "pickup_spawn" }` |
+| Universal wave field (everywhere outside surface meshes) | empty cube `water_volume_main`, `extras = { kind: "water", waveHeight: 0.6, waveFreq: 0.5 }` |
+
+Open the running game with `?track=cliffside` to playtest the layout, then port it to a `.blend` once the loader lands.
+
+Try it locally: `pnpm dev` → http://localhost:5191/?track=cliffside

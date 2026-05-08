@@ -1,13 +1,13 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-07 (procedural audio). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-07 (Cliffside track + gate-cleared audio). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
 ## What works today
 
-- Stadium-shaped racetrack ("Lagoon Loop") with 9 gates: 2 straights + 2 half-circle curves
-- Jump ramp on the right straight (z = 25–37) — exercises raycast-vs-static-collider, surface alignment on a sloped normal, hover-spring release on launch, and water re-acquisition on landing
+- Two tracks: **Lagoon Loop** (default; jump ramp on the right straight) and **Cliffside** (`?track=cliffside`; mesa with cliff drop, doubles as the Blender-export reference layout)
+- Jump ramp on Lagoon's right straight (z = 25–37) — exercises raycast-vs-static-collider, surface alignment on a sloped normal, hover-spring release on launch, and water re-acquisition on landing
 - Player spawns on the racing line at the start gate, facing forward
 - Hover-bike physics (Rapier WASM, deterministic build)
 - Gerstner wave water with buoyancy — bike rides waves, dives into troughs, launches off crests
@@ -20,7 +20,7 @@ This doc captures the build's current state, controls, known issues, and next st
 - Auto-play mode (T or F1) — AI takes over the player bike for testing
 - Backspace = respawn at start
 - Mouse right-drag and gamepad right-stick orbit the camera (vertical inverted by default)
-- 20 e2e + 35 unit tests, all green
+- 22 e2e + 35 unit tests, all green
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
 
 ## Controls
@@ -136,7 +136,6 @@ Open polish:
 - Pool weighting feels OK at 2:1:1:1 (boost:shield:mine:missile) but only one race tested it. Tune if combat dominates.
 
 ### Missing MVP items
-- **[M] Second track.** Currently only Lagoon Loop. The product plan calls for 1–2 tracks at MVP. A track with verticality (a cliff drop into water) would be the JetMoto signature moment.
 - **[S] Bike variants.** 2–3 bikes with distinct stat tradeoffs (top speed / handling / accel). Stats are already parameterised per entity.
 - **[M] Bike select + track select menus.** Vanilla DOM, simple flow.
 - **[S] Save state.** Local-storage-backed best lap times.
@@ -176,6 +175,7 @@ Open polish:
 | M9.10 | AI fires pickups (boost / shield / mine / missile heuristics) | ✅ |
 | M9.11 | Jump ramp on right straight — verifies non-water surface behavior | ✅ |
 | M9.12 | Procedural audio (engine + ambient + pickup chime + weapon SFX) | ✅ |
+| M9.13 | Cliffside track (mesa + ramp + cliff drop) + gate/lap audio | ✅ |
 
 ## File / system map
 

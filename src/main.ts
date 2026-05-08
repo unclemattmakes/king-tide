@@ -11,6 +11,7 @@ import {
 } from './engine/input'
 import { installCameraLookInput, tickCameraLook } from './engine/input/camera-look'
 import { createChaseCamera } from './engine/render/camera'
+import { createCliffsideMesh } from './engine/render/cliffside-mesh'
 import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
@@ -30,8 +31,9 @@ import { AIController, AIControllerStore, AITag, defaultAIController } from './g
 import { ExplosionTag, MineTag, MissileTag } from './game/components/combat'
 import type { PickupType } from './game/components/pickup'
 import { RacerStore } from './game/components/race'
-import { createArena } from './game/entities/arena'
+import { createLagoonIsland, createSafetyFloor } from './game/entities/arena'
 import { createBike } from './game/entities/bike'
+import { createCliffsideTerrain } from './game/entities/cliffside-terrain'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
 import { createRamp } from './game/entities/ramp'
 import { aiCombatSystem } from './game/systems/ai-combat'
@@ -56,6 +58,7 @@ import { createRaceSystem } from './game/systems/race'
 import { rubberBandSystem } from './game/systems/rubber-band'
 import { computeStandings } from './game/systems/standings'
 import { syncFromPhysics } from './game/systems/sync-from-physics'
+import { createCliffside } from './game/tracks/cliffside'
 import { createLagoonLoop } from './game/tracks/lagoon-loop'
 
 const NUM_AI = 4
@@ -88,11 +91,28 @@ async function boot() {
   const waterMesh = createWaterMesh(waveField, { size: 800, subdivisions: 96 })
   scene.add(waterMesh.mesh)
 
-  createArena(phys)
-  createRamp(phys)
-  scene.add(createRampMesh())
+  // Track selection. URL `?track=cliffside` switches to the second track;
+  // anything else (or omitted) defaults to Lagoon Loop. Each track owns
+  // its own terrain setup so they can swap out cleanly.
+  const trackId =
+    new URLSearchParams(window.location.search).get('track') === 'cliffside'
+      ? 'cliffside'
+      : 'lagoon'
 
-  const track = createLagoonLoop()
+  // Universal: backstop floor for any track.
+  createSafetyFloor(phys)
+
+  // Per-track terrain (physics + visuals).
+  if (trackId === 'cliffside') {
+    createCliffsideTerrain(phys)
+    scene.add(createCliffsideMesh())
+  } else {
+    createLagoonIsland(phys)
+    createRamp(phys)
+    scene.add(createRampMesh())
+  }
+
+  const track = trackId === 'cliffside' ? createCliffside() : createLagoonLoop()
   const trackVisuals = createTrackVisuals(track)
   scene.add(trackVisuals.group)
 
@@ -151,6 +171,17 @@ async function boot() {
         } else {
           trackVisuals.setCheckpointState(cp.index, 'upcoming')
         }
+      }
+      // Audio cue. Lap-completion gets a richer arpeggio than a regular
+      // gate. We detect lap completion by "the gate we just crossed was
+      // the START gate (cp 0) AND we've already crossed at least one
+      // checkpoint this run" — a fresh-out-of-spawn cp0 crossing on the
+      // very first lap shouldn't celebrate.
+      const isLapEnd = justCrossed === 0 && r.checkpointsCrossed > 1
+      if (isLapEnd) {
+        audio.lapCompleted()
+      } else {
+        audio.gateCleared()
       }
     },
   })

@@ -33,6 +33,10 @@ export interface AudioEngine {
   pickupFire(type: PickupSoundType): void
   /** A new explosion entity just spawned (mine or missile detonation). */
   explosion(): void
+  /** The player just crossed a checkpoint (any but the lap-completion one). */
+  gateCleared(): void
+  /** The player just completed a lap. */
+  lapCompleted(): void
 }
 
 const MASTER_VOLUME = 0.6
@@ -225,7 +229,49 @@ export function createAudioEngine(): AudioEngine {
       noise.start(now)
       noise.stop(now + 0.5)
     },
+
+    gateCleared() {
+      const c = ctx
+      if (!c || !masterGain) return
+      // Quick two-note "ding-DING" hop, distinct from the pickup
+      // arpeggio so the player can tell at a glance which event fired.
+      // G5 → C6 with sharp triangle envelopes.
+      gatePulse(c, masterGain, c.currentTime, 783.99, 0.05, 0.12)
+      gatePulse(c, masterGain, c.currentTime + 0.07, 1046.5, 0.05, 0.16)
+    },
+
+    lapCompleted() {
+      const c = ctx
+      if (!c || !masterGain) return
+      // Triumphant up-arpeggio: C5 → E5 → G5 → C6, slightly louder
+      // and longer than a normal gate ding.
+      const notes = [523.25, 659.25, 783.99, 1046.5]
+      for (let i = 0; i < notes.length; i++) {
+        gatePulse(c, masterGain, c.currentTime + i * 0.08, notes[i]!, 0.06, 0.2)
+      }
+    },
   }
+}
+
+function gatePulse(
+  c: AudioContext,
+  dest: GainNode,
+  start: number,
+  freq: number,
+  attack: number,
+  release: number,
+): void {
+  const osc = c.createOscillator()
+  osc.type = 'triangle'
+  osc.frequency.value = freq
+  const g = c.createGain()
+  g.gain.setValueAtTime(0, start)
+  g.gain.linearRampToValueAtTime(0.22, start + attack)
+  g.gain.exponentialRampToValueAtTime(0.001, start + attack + release)
+  osc.connect(g)
+  g.connect(dest)
+  osc.start(start)
+  osc.stop(start + attack + release + 0.02)
 }
 
 function makeNoiseBuffer(ctx: AudioContext, durationSec: number): AudioBuffer {
