@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-07 (M5 combat bundle). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-07 (AI uses pickups). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -19,7 +19,7 @@ This doc captures the build's current state, controls, known issues, and next st
 - Auto-play mode (T or F1) — AI takes over the player bike for testing
 - Backspace = respawn at start
 - Mouse right-drag and gamepad right-stick orbit the camera (vertical inverted by default)
-- 17 e2e + 12 unit tests, all green
+- 18 e2e + 35 unit tests, all green
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
 
 ## Controls
@@ -124,9 +124,14 @@ All four MVP pickups landed in M9.9 (the M5-completion bundle):
 
 Shared hit reaction: linear-velocity damp ×0.55, ±12 rad/s yaw spinout, 1s `Stun` component that the `stunOverrideSystem` uses to zero throttle/steer/brake/pitch on the victim until it expires. Fire/boost are NOT zeroed during stun.
 
+**AI pickup usage** (M9.10): the four AI bikes now fire their pickups via a new `aiCombatSystem` that runs between `aiControlSystem` and `stunOverrideSystem`. Decision logic is in the pure `shouldAIFire(held, throttle, |steer|, hasChaser, hasMissileTarget)` helper (12 unit tests cover the gates):
+- **boost** — fires when `throttle > 0.85` (i.e. on a clean straight; never burns it scaled-down mid-corner)
+- **shield** — fires whenever held; sitting on it can't help
+- **mine** — fires when a non-self bike is within 12m and behind us (`dot < -0.4`), OR mid-corner (`|steer| > 0.4`) to hazard the racing line
+- **missile** — fires when `throttle > 0.8` AND `pickMissileTarget()` finds a bike in our forward cone (≤80m, dot ≥ 0.3)
+
 Open polish:
 - Pool weighting feels OK at 2:1:1:1 (boost:shield:mine:missile) but only one race tested it. Tune if combat dominates.
-- AI doesn't fire pickups yet — it picks them up but never uses them. Easy follow-on once we want CPU bikes to feel threatening.
 
 ### Missing MVP items
 - **[L] Audio.** Engine pitch tied to speed, water ambient, pickup chime, boost whoosh, weapon SFX, music. Library SFX as planned in product plan.
@@ -167,6 +172,7 @@ Open polish:
 | M9.7 | surfaceFollow per-bike stat + per-bike motion trails | ✅ |
 | M9.8 | Camera-facing ribbon trails + arrow legibility | ✅ |
 | M9.9 | M5 combat bundle (shield, mine, missile, hit reaction) | ✅ |
+| M9.10 | AI fires pickups (boost / shield / mine / missile heuristics) | ✅ |
 
 ## File / system map
 

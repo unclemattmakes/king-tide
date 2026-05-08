@@ -29,6 +29,7 @@ import { RacerStore } from './game/components/race'
 import { createArena } from './game/entities/arena'
 import { createBike } from './game/entities/bike'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
+import { aiCombatSystem } from './game/systems/ai-combat'
 import { aiControlSystem } from './game/systems/ai-control'
 import {
   explosionTickSystem,
@@ -247,11 +248,14 @@ async function boot() {
     while (physAccum >= phys.fixedDt) {
       advanceWaveField(waveField, phys.fixedDt)
       // Player intent first; AI runs after and overwrites for entities tagged
-      // AITag (which now includes the player while auto-play is on). Stun
-      // runs LAST in the intent chain so spun-out bikes can't drive through
-      // their own hit reaction.
+      // AITag (which now includes the player while auto-play is on). After
+      // ai-control writes the racing-line intent, ai-combat decides whether
+      // to flip fire=true based on the AI's held pickup. Stun runs LAST in
+      // the intent chain so spun-out bikes can't drive through their own
+      // hit reaction.
       if (!autoPlay) applyPlayerIntent(sim, state.intent)
       aiControlSystem(sim, phys, track)
+      aiCombatSystem(sim, phys)
       stunOverrideSystem(sim)
       hoverSystem(sim, phys, waveField)
       phys.step()

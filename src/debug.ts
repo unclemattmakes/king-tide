@@ -53,6 +53,8 @@ export type HoverDebug = {
   heldPickup(): PickupType | null
   /** Set the player's held pickup directly — for deterministic e2e tests. */
   setHeldPickup(type: PickupType | null): void
+  /** Set ANY bike's held pickup directly — for AI-fires-pickup e2e tests. */
+  setBikeHeldPickup(eid: number, type: PickupType | null): void
   /** Inspect combat state on the player bike. */
   combat(): CombatDebugSnapshot
   /** Count of live mine + missile entities (sim-side, regardless of render). */
@@ -79,6 +81,8 @@ export type BikeDebugSnapshot = {
   /** World-space angular velocity (rad/s). */
   angvel: { x: number; y: number; z: number }
   intent: Intent
+  /** Currently-held pickup, or null. */
+  held: PickupType | null
 }
 
 export type DebugAccessors = {
@@ -132,6 +136,12 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
       if (!PickupSlotStore.has(eid)) addComponent(sim, eid, PickupSlot)
       PickupSlotStore.set(eid, { held: type })
     },
+    setBikeHeldPickup: (eid, type) => {
+      if (!state.ready) return
+      const sim = accessors.sim()
+      if (!PickupSlotStore.has(eid)) addComponent(sim, eid, PickupSlot)
+      PickupSlotStore.set(eid, { held: type })
+    },
     combat: () => {
       if (!state.ready) return { shieldRemaining: 0, stunRemaining: 0 }
       const eid = accessors.playerEid()
@@ -180,6 +190,7 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
           rot: { x: q.x, y: q.y, z: q.z, w: q.w },
           angvel: { x: av.x, y: av.y, z: av.z },
           intent: { ...intent },
+          held: PickupSlotStore.get(eid)?.held ?? null,
         })
       }
       return out
