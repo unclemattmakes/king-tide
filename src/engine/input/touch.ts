@@ -65,8 +65,8 @@ export function computeTouchIntent(
   const sx = Math.abs(rawStickX) < DEADZONE ? 0 : rawStickX
   const sy = Math.abs(rawStickY) < DEADZONE ? 0 : rawStickY
   intent.steer = clamp(sx, -1, 1)
-  // Stick Y → pitch, matching gamepad: push up (toward top of screen) =
-  // positive pitch = nose-down dive.
+  // Stick Y → pitch. Push up (toward top of screen) → positive pitch =
+  // nose UP / lift (per intent.ts post-M9.18 convention).
   intent.pitch = clamp(sy, -1, 1)
   intent.throttle = buttons.thrust ? 1 : 0
   intent.brake = buttons.brake ? 1 : 0

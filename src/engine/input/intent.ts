@@ -4,7 +4,12 @@ export type Intent = {
   brake: number // 0..1
   fire: boolean
   boost: boolean
-  /** -1..1. Positive = nose down (dive into wave). Negative = nose up (jump off wave). */
+  /**
+   * -1..1. Positive = nose UP / lift (jump off a wave, climb in air).
+   * Negative = nose DOWN / dive into wave.
+   * Convention set by M9.18 follow-up — hover.ts vectors air thrust along
+   * the bike's nose, so positive pitch produces upward acceleration.
+   */
   pitch: number
 }
 

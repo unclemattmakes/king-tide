@@ -43,10 +43,12 @@ export function gamepadIntent(): Intent {
   if (!pad) return intent
 
   intent.steer = applyDeadzone(pad.axes[0] ?? 0)
-  // axes[1] is negative when the stick is pushed forward (away from player).
-  // Intent convention: positive pitch = nose down dive, negative = nose up.
-  // So pulling stick BACK (axes[1] = +1) → pitch = -1 → nose up. ✓
-  intent.pitch = -applyDeadzone(pad.axes[1] ?? 0)
+  // axes[1] is negative when the stick is pushed forward (away from player),
+  // positive when pulled back. Hover sim convention (post-M9.18 follow-up):
+  // positive intent.pitch = nose UP / lift, negative = nose DOWN / dive.
+  // So pull back (axes[1] = +1) → pitch +1 → lift; push forward (axes[1] = -1)
+  // → pitch -1 → dive. No sign flip needed.
+  intent.pitch = applyDeadzone(pad.axes[1] ?? 0)
 
   const rt = pad.buttons[7]?.value ?? 0
   const a = pad.buttons[0]?.pressed ? 1 : 0
