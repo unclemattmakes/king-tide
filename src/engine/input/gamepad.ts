@@ -1,9 +1,8 @@
+import { devSettings } from '../dev-settings'
 import { emptyIntent, type Intent } from './intent'
 
-const DEADZONE = 0.12
-
 function applyDeadzone(v: number): number {
-  return Math.abs(v) < DEADZONE ? 0 : v
+  return Math.abs(v) < devSettings.gamepadDeadzone ? 0 : v
 }
 
 export type GamepadSnapshot = {

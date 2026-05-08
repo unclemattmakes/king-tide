@@ -7,12 +7,13 @@
  *   Stick wins over mouse when active.
  * - When neither input is active, target decays back to (0, 0) so the
  *   camera returns to the default chase position automatically.
+ *
+ * Sensitivity, deadzone, range, and Y-invert are read from `devSettings`
+ * each tick so the dev settings menu can tune feel live.
  */
 
-const MOUSE_SENS = 0.005
-const STICK_DEADZONE = 0.18
-const STICK_YAW_RANGE = Math.PI * 0.9 // almost full 180° each side
-const STICK_PITCH_RANGE = Math.PI / 4
+import { devSettings } from '../dev-settings'
+
 const RETURN_RATE = 3 // exponential decay coefficient when no input
 
 export type CameraLookState = {
@@ -45,9 +46,12 @@ export function installCameraLookInput(): void {
   })
   window.addEventListener('mousemove', (e) => {
     if (!mouseDragging) return
-    yaw += (e.clientX - lastMouseX) * MOUSE_SENS
-    // Invert vertical: dragging mouse UP raises the camera (looks down at bike).
-    pitch -= (e.clientY - lastMouseY) * MOUSE_SENS
+    const sens = devSettings.cameraMouseSens
+    yaw += (e.clientX - lastMouseX) * sens
+    // Invert vertical (default): dragging mouse UP raises the camera. Dev
+    // settings menu can flip this — when not inverted, dragging up looks down.
+    const ySign = devSettings.cameraInvertY ? -1 : 1
+    pitch += (e.clientY - lastMouseY) * sens * ySign
     lastMouseX = e.clientX
     lastMouseY = e.clientY
   })
@@ -61,12 +65,14 @@ export function tickCameraLook(dt: number): CameraLookState {
   const pad = navigator.getGamepads?.()?.[0]
   const stickX = pad?.axes[2] ?? 0
   const stickY = pad?.axes[3] ?? 0
-  const stickActive = Math.abs(stickX) > STICK_DEADZONE || Math.abs(stickY) > STICK_DEADZONE
+  const dz = devSettings.cameraStickDeadzone
+  const stickActive = Math.abs(stickX) > dz || Math.abs(stickY) > dz
 
   if (stickActive) {
-    yaw = stickX * STICK_YAW_RANGE
-    // Invert vertical: pushing stick up raises the camera (looks down at bike).
-    pitch = -stickY * STICK_PITCH_RANGE
+    yaw = stickX * devSettings.cameraStickYawRange
+    // Invert vertical (default): pushing stick UP raises the camera.
+    const ySign = devSettings.cameraInvertY ? -1 : 1
+    pitch = stickY * devSettings.cameraStickPitchRange * ySign
   } else if (!mouseDragging) {
     // Decay back to zero.
     const k = Math.exp(-dt * RETURN_RATE)

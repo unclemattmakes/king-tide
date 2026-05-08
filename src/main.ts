@@ -2,6 +2,8 @@ import { addComponent, hasComponent, query, removeComponent } from 'bitecs'
 import * as THREE from 'three'
 import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug'
 import { createAudioEngine } from './engine/audio/audio'
+import { loadDevSettings } from './engine/dev-settings'
+import { installDevSettingsMenu } from './engine/dev-settings-menu'
 import { installTrackEditor } from './engine/editor/track-editor'
 import { formatLap, installGarageMenu } from './engine/garage'
 import {
@@ -85,6 +87,7 @@ async function boot() {
   const finishTime = document.getElementById('finish-time')
   const finishBest = document.getElementById('finish-best')
 
+  loadDevSettings()
   installInput()
   installCameraLookInput()
 
@@ -121,6 +124,9 @@ async function boot() {
 
   // Garage menu — DOM overlay opened from a HUD button.
   installGarageMenu({ initialTrackId: trackId, initialBikeId: playerVariant.id })
+
+  // Dev settings — live-tunable input/camera feel knobs.
+  installDevSettingsMenu()
 
   // Best-lap tracking. We compare each completed lap to the saved best
   // for (track, bike) and update on every personal-best.

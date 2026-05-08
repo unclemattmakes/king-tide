@@ -83,6 +83,61 @@
         border-color: rgba(255,255,255,0.2);
       }
       #garage button.action:hover { filter: brightness(1.2); }
+
+      /* Dev settings button — sits below garage button */
+      #devsettings-toggle {
+        position: fixed; top: 40px; right: 8px;
+        background: rgba(20,30,45,0.7); color: #88ccff;
+        border: 1px solid rgba(120,180,255,0.4); border-radius: 3px;
+        font: bold 11px ui-monospace, monospace; letter-spacing: 1px;
+        padding: 4px 10px; cursor: pointer; user-select: none;
+      }
+      #devsettings-toggle:hover { background: rgba(40,55,80,0.9); }
+
+      /* Dev settings overlay */
+      #devsettings {
+        position: fixed; inset: 0; display: none; align-items: center;
+        justify-content: center; z-index: 11;
+        background: rgba(0,0,0,0.75);
+      }
+      #devsettings.show { display: flex; }
+      #devsettings .card {
+        background: rgba(20,30,45,0.95); border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 8px; padding: 24px 32px;
+        font-family: ui-monospace, monospace; color: #eee;
+        width: 540px; max-width: 92vw; max-height: 90vh; overflow: auto;
+      }
+      #devsettings h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: 3px; color: #88ccff; }
+      #devsettings .sub { font-size: 11px; opacity: 0.7; margin-bottom: 18px; }
+      #devsettings h2 {
+        font-size: 11px; letter-spacing: 2px; opacity: 0.75;
+        margin: 16px 0 8px; padding-bottom: 4px;
+        border-bottom: 1px solid rgba(255,255,255,0.12);
+      }
+      #devsettings .row {
+        display: grid; grid-template-columns: 180px 1fr 70px;
+        gap: 10px; align-items: center;
+        padding: 5px 0; font-size: 12px;
+      }
+      #devsettings .row label { opacity: 0.85; }
+      #devsettings .row input[type="range"] { width: 100%; accent-color: #88ccff; }
+      #devsettings .row .val { font-variant-numeric: tabular-nums; opacity: 0.8; text-align: right; }
+      #devsettings .row.toggle {
+        grid-template-columns: 180px 1fr;
+      }
+      #devsettings .row.toggle input[type="checkbox"] { accent-color: #88ccff; transform: scale(1.2); }
+      #devsettings .actions { margin-top: 22px; display: flex; gap: 10px; justify-content: flex-end; }
+      #devsettings button.action {
+        background: rgba(120,180,255,0.16); color: #88ccff;
+        border: 1px solid rgba(120,180,255,0.5); border-radius: 3px;
+        font: bold 12px ui-monospace, monospace; letter-spacing: 1px;
+        padding: 8px 16px; cursor: pointer;
+      }
+      #devsettings button.action.secondary {
+        background: rgba(255,255,255,0.06); color: #ccc;
+        border-color: rgba(255,255,255,0.2);
+      }
+      #devsettings button.action:hover { filter: brightness(1.2); }
     </style>
   </head>
   <body>
@@ -107,6 +162,68 @@
       </div>
     </div>
     <button id="garage-toggle">GARAGE<span id="garage-best"></span></button>
+    <button id="devsettings-toggle" title="Tune controller + camera sensitivity">DEV SETTINGS</button>
+    <div id="devsettings">
+      <div class="card">
+        <h1>DEV SETTINGS</h1>
+        <div class="sub">Live-tune input feel. Saved to this browser.</div>
+
+        <h2>CAMERA</h2>
+        <div class="row">
+          <label for="ds-mouse-sens">Mouse sensitivity</label>
+          <input id="ds-mouse-sens" type="range" min="0.001" max="0.02" step="0.0005" />
+          <span class="val" id="ds-mouse-sens-v"></span>
+        </div>
+        <div class="row">
+          <label for="ds-stick-yaw">Stick yaw range</label>
+          <input id="ds-stick-yaw" type="range" min="0.5" max="3.14" step="0.05" />
+          <span class="val" id="ds-stick-yaw-v"></span>
+        </div>
+        <div class="row">
+          <label for="ds-stick-pitch">Stick pitch range</label>
+          <input id="ds-stick-pitch" type="range" min="0.2" max="1.5" step="0.05" />
+          <span class="val" id="ds-stick-pitch-v"></span>
+        </div>
+        <div class="row">
+          <label for="ds-stick-dz">Stick deadzone</label>
+          <input id="ds-stick-dz" type="range" min="0" max="0.5" step="0.01" />
+          <span class="val" id="ds-stick-dz-v"></span>
+        </div>
+        <div class="row toggle">
+          <label for="ds-invert-y">Invert Y axis</label>
+          <input id="ds-invert-y" type="checkbox" />
+        </div>
+
+        <h2>GAMEPAD DRIVING</h2>
+        <div class="row">
+          <label for="ds-gp-dz">Stick deadzone</label>
+          <input id="ds-gp-dz" type="range" min="0" max="0.4" step="0.01" />
+          <span class="val" id="ds-gp-dz-v"></span>
+        </div>
+
+        <h2>KEYBOARD SMOOTHING</h2>
+        <div class="row">
+          <label for="ds-kb-steer">Steer rate</label>
+          <input id="ds-kb-steer" type="range" min="2" max="30" step="0.5" />
+          <span class="val" id="ds-kb-steer-v"></span>
+        </div>
+        <div class="row">
+          <label for="ds-kb-throttle">Throttle rate</label>
+          <input id="ds-kb-throttle" type="range" min="2" max="30" step="0.5" />
+          <span class="val" id="ds-kb-throttle-v"></span>
+        </div>
+        <div class="row">
+          <label for="ds-kb-pitch">Pitch rate</label>
+          <input id="ds-kb-pitch" type="range" min="2" max="30" step="0.5" />
+          <span class="val" id="ds-kb-pitch-v"></span>
+        </div>
+
+        <div class="actions">
+          <button class="action secondary" id="ds-reset">RESET</button>
+          <button class="action" id="ds-close">DONE</button>
+        </div>
+      </div>
+    </div>
     <div id="garage">
       <div class="card">
         <h1>GARAGE</h1>

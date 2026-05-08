@@ -1,3 +1,4 @@
+import { devSettings } from '../dev-settings'
 import { emptyIntent, type Intent } from './intent'
 
 const keys = new Set<string>()
@@ -25,9 +26,8 @@ let smoothSteer = 0
 let smoothThrottle = 0
 let smoothPitch = 0
 
-const RATE_STEER = 9 // rad/s of exponential decay coefficient
-const RATE_THROTTLE = 10
-const RATE_PITCH = 8
+// Smoothing rates live on devSettings (keyboardSteerRate / ThrottleRate / PitchRate)
+// so the dev settings menu can tune feel live without a reload.
 
 function lerpToward(current: number, target: number, dt: number, rate: number): number {
   const t = 1 - Math.exp(-dt * rate)
@@ -58,9 +58,9 @@ export function keyboardIntent(dt: number): Intent {
   if (keys.has('KeyQ')) pitchTarget -= 1
   if (keys.has('KeyE')) pitchTarget += 1
 
-  smoothSteer = lerpToward(smoothSteer, steerTarget, dt, RATE_STEER)
-  smoothThrottle = lerpToward(smoothThrottle, throttleTarget, dt, RATE_THROTTLE)
-  smoothPitch = lerpToward(smoothPitch, pitchTarget, dt, RATE_PITCH)
+  smoothSteer = lerpToward(smoothSteer, steerTarget, dt, devSettings.keyboardSteerRate)
+  smoothThrottle = lerpToward(smoothThrottle, throttleTarget, dt, devSettings.keyboardThrottleRate)
+  smoothPitch = lerpToward(smoothPitch, pitchTarget, dt, devSettings.keyboardPitchRate)
 
   const intent: Intent = emptyIntent()
   intent.throttle = smoothThrottle
