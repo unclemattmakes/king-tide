@@ -221,6 +221,42 @@ additions:
 Hoisted `heightFactor` out of the IIFE so both the scatter blend and
 the new sun-glow share it. No physics change.
 
+### Water — shoreline foam + richer bike foam pass (M9.32)
+Water-on-land transitions are a recurring on-track moment (lagoon ramp,
+gate posts, cliffside cliff base, future islands), so the water shader
+gained a depth-buffer-driven shoreline foam plus a richer bike-water
+interaction pass.
+
+1. **Shoreline foam (intersection foam).** Reads `viewportDepthTexture()`
+   at each fragment's screen position, converts to view-Z via
+   `perspectiveDepthToViewZ(near, far)`, and compares to the water's own
+   `positionView.z`. When the difference is small (terrain top ~0–1.5m
+   below water surface) → foam. Two gates handle edge cases:
+   `behindGate = smoothstep(-0.05, 0.05, closenessSigned)` ensures
+   opaque objects rendered IN FRONT of water (e.g. bikes between camera
+   and water surface) don't false-trigger foam where they occlude the
+   water plane; `depthFade` controls the falloff over `FOAM_INTERSECTION_RANGE = 1.5m`.
+   Combined with the existing wave/bike foam via `max()` rather than
+   addition so gate posts don't get unnaturally over-bright at the
+   water-line. Off in classic mode for clean A/B.
+
+2. **Richer bike foam pass.** Two additions on top of the existing hull
+   ring + V-wake stripe:
+   - **Speed-modulated hull ring**: `ring · (1 + 0.6·speedGate)` —
+     ring foam reads ~1.6× brighter at race speeds vs. idle, communicating
+     the hull's active interaction with the water.
+   - **Bow spray ("moustache")**: forward-facing foam arc using the same
+     Kelvin-V geometry as the back wake but with a tighter half-angle
+     (0.35 vs the wake's 0.4 tan) and a faster `exp(-1.6·ahead)` longitudinal
+     falloff. Speed-gated, so a parked bike doesn't spray. Reads as the
+     bike actively pushing water forward at race pace.
+
+Per-fragment cost stays trivial — one extra texture sample for the
+depth read, plus a few muls/adds for the bow spray geometry. No
+per-vertex cost. Renders correctly through the existing transparency
+sort (water is rendered after opaque, so the depth buffer is populated
+with terrain depth at water-shade time).
+
 ### Water — stateless foam accumulator (M9.31)
 Foam now lingers ~1s behind passing crests instead of vanishing the
 moment the wave moves on — the "trail" character of real ocean foam.
