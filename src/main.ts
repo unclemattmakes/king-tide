@@ -207,29 +207,55 @@ async function boot() {
     // a per-track branch here.
     const jsonUrl = `/tracks/${trackId}.json`
     const jsonRes = await fetch(jsonUrl)
-    if (jsonRes.ok) {
+    // Vite's SPA fallback returns 200 + index.html for missing static
+    // files, so a "real" JSON track has to be both 200 AND served as
+    // application/json. Anything else falls through to the GLB / draft
+    // path below as a missing track.
+    const jsonContentType = jsonRes.headers.get('content-type') ?? ''
+    const jsonExists = jsonRes.ok && jsonContentType.includes('json')
+    if (jsonExists) {
       track = buildTrackFromJson(JSON.parse(await jsonRes.text()))
       if (track.environmentGlb && !editMode) {
         const env = await loadGlbTrackVisuals(track.environmentGlb)
         scene.add(env.scene)
         attachTrackColliders(env.scene, phys)
       }
-    } else if (jsonRes.status === 404) {
-      const glbUrl = `/assets/tracks/${trackId}.glb`
-      track = await loadTrackFromGlb(glbUrl, {
-        id: trackId,
-        name: trackId,
-        lapsToFinish: 3,
-      })
-      if (!editMode) {
-        const env = await loadGlbTrackVisuals(glbUrl)
-        scene.add(env.scene)
-        attachTrackColliders(env.scene, phys)
-      }
-    } else {
+    } else if (!jsonRes.ok && jsonRes.status !== 404) {
       throw new Error(
         `track: fetch ${jsonUrl} failed: ${jsonRes.status} ${jsonRes.statusText}`,
       )
+    } else {
+      // No JSON. Two paths:
+      //   - GLB exists: load it as the legacy all-in-glb track.
+      //   - Edit mode + no GLB: stub an empty draft so the editor can
+      //     open a fresh track for the user to author. Saving from the
+      //     editor materialises `public/tracks/<id>.json`.
+      const glbUrl = `/assets/tracks/${trackId}.glb`
+      const glbHead = await fetch(glbUrl, { method: 'HEAD' })
+      const glbContentType = glbHead.headers.get('content-type') ?? ''
+      const glbExists =
+        glbHead.ok &&
+        (glbContentType.includes('octet-stream') ||
+          glbContentType.includes('gltf') ||
+          glbContentType.includes('binary'))
+      if (glbExists) {
+        track = await loadTrackFromGlb(glbUrl, {
+          id: trackId,
+          name: trackId,
+          lapsToFinish: 3,
+        })
+        if (!editMode) {
+          const env = await loadGlbTrackVisuals(glbUrl)
+          scene.add(env.scene)
+          attachTrackColliders(env.scene, phys)
+        }
+      } else if (editMode) {
+        track = emptyDraftTrack(trackId)
+      } else {
+        throw new Error(
+          `track: no JSON at ${jsonUrl} and no GLB at ${glbUrl}`,
+        )
+      }
     }
   }
 
@@ -722,6 +748,61 @@ async function boot() {
 
   state.ready = true
   requestAnimationFrame(frame)
+}
+
+/**
+ * Empty starter track used when the editor is opened on an id that
+ * has neither a JSON nor a GLB. The user authors the layout from
+ * scratch and the first Save materialises `public/tracks/<id>.json`.
+ *
+ * Two seed checkpoints + two seed spline anchors so the editor's
+ * loader (which validates non-empty arrays) and the
+ * runtime-derived spline-bound gates have something to work with.
+ */
+function emptyDraftTrack(id: string): import('./game/tracks/types').Track {
+  return {
+    id,
+    name: id,
+    lapsToFinish: 3,
+    start: { position: { x: 0, y: 0.5, z: 0 }, yaw: 0 },
+    checkpoints: [
+      {
+        index: 0,
+        position: { x: 0, y: 1.5, z: 20 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        halfWidth: 8,
+        height: 4,
+      },
+      {
+        index: 1,
+        position: { x: 0, y: 1.5, z: -20 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        halfWidth: 8,
+        height: 4,
+      },
+    ],
+    aiSplines: [
+      {
+        id: 'main',
+        points: [
+          { x: 0, y: 0.5, z: 20 },
+          { x: 20, y: 0.5, z: 0 },
+          { x: 0, y: 0.5, z: -20 },
+          { x: -20, y: 0.5, z: 0 },
+        ],
+        anchors: [
+          { x: 0, y: 0.5, z: 20 },
+          { x: 20, y: 0.5, z: 0 },
+          { x: 0, y: 0.5, z: -20 },
+          { x: -20, y: 0.5, z: 0 },
+        ],
+      },
+    ],
+    pickupSpawns: [],
+    boostPads: [],
+    props: [],
+    surfaces: [],
+  }
 }
 
 function ordinal(n: number): string {
