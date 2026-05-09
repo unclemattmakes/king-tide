@@ -41,8 +41,9 @@ describe('wave field', () => {
     const f = createWaveField(defaultWaves())
     let min = Infinity
     let max = -Infinity
-    // Sample a grid at multiple times — confirm the field is nonzero and bounded.
-    for (let ti = 0; ti < 10; ti++) {
+    // Sample a grid over a full set-beat period (~30s) so the test sees both
+    // calm windows and big-swell peaks.
+    for (let ti = 0; ti < 60; ti++) {
       advanceWaveField(f, 0.5)
       for (let x = -20; x <= 20; x += 5) {
         for (let z = -20; z <= 20; z += 5) {
@@ -54,9 +55,10 @@ describe('wave field', () => {
     }
     expect(max).toBeGreaterThan(0.3)
     expect(min).toBeLessThan(-0.3)
-    // Sum of amplitudes is the upper bound; clamp generously.
-    expect(max).toBeLessThan(2.0)
-    expect(min).toBeGreaterThan(-2.0)
+    // Sum of amplitudes is the upper bound; clamp generously to allow
+    // constructive interference of all swell + chop components.
+    expect(max).toBeLessThan(3.0)
+    expect(min).toBeGreaterThan(-3.0)
   })
 
   it('sampleSurface returns unit normal', () => {
@@ -66,5 +68,69 @@ describe('wave field', () => {
     expect(len).toBeCloseTo(1, 5)
     // Normal y should be positive (water surface points up overall).
     expect(s.ny).toBeGreaterThan(0)
+  })
+
+  it('wake source displaces water behind a moving bike', () => {
+    // Empty wave field so we measure ONLY the wake contribution.
+    const f = createWaveField([])
+    f.wakes.push({ x: 0, z: 0, vx: 12, vz: 0, weight: 1 })
+    // Sample several points behind the bike (negative x) along its line.
+    // The wake oscillates in sign, so look at the absolute envelope.
+    let maxAbs = 0
+    for (let bx = -2; bx >= -30; bx -= 0.25) {
+      const y = sampleHeight(f, bx, 0)
+      maxAbs = Math.max(maxAbs, Math.abs(y))
+    }
+    expect(maxAbs).toBeGreaterThan(0.05)
+
+    // Sample WAY off to the side (perpendicular distance >> V boundary):
+    // wake should be effectively zero.
+    const ySide = sampleHeight(f, -10, 30)
+    expect(Math.abs(ySide)).toBeLessThan(0.01)
+
+    // Sample IN FRONT of the bike (positive x = behind = 0): no wake.
+    const yFront = sampleHeight(f, 10, 0)
+    expect(yFront).toBe(0)
+  })
+
+  it('wake fades to zero at low speed', () => {
+    const f = createWaveField([])
+    f.wakes.push({ x: 0, z: 0, vx: 0.5, vz: 0, weight: 1 })
+    // Below WAKE_SPEED_LOW, wake function returns 0 entirely.
+    let maxAbs = 0
+    for (let bx = -1; bx >= -20; bx -= 0.5) {
+      maxAbs = Math.max(maxAbs, Math.abs(sampleHeight(f, bx, 0)))
+    }
+    expect(maxAbs).toBe(0)
+  })
+
+  it('wake scales with weight', () => {
+    const f = createWaveField([])
+    // Sample at same time + position with different weights — amplitude
+    // is linear in weight.
+    f.wakes = [{ x: 0, z: 0, vx: 12, vz: 0, weight: 1 }]
+    let peakFull = 0
+    for (let bx = -1; bx >= -20; bx -= 0.05) {
+      peakFull = Math.max(peakFull, Math.abs(sampleHeight(f, bx, 0)))
+    }
+    f.wakes = [{ x: 0, z: 0, vx: 12, vz: 0, weight: 0.5 }]
+    let peakHalf = 0
+    for (let bx = -1; bx >= -20; bx -= 0.05) {
+      peakHalf = Math.max(peakHalf, Math.abs(sampleHeight(f, bx, 0)))
+    }
+    expect(peakHalf).toBeCloseTo(peakFull * 0.5, 4)
+  })
+
+  it('wake produces non-trivial slope (a real bump, not just color)', () => {
+    const f = createWaveField([])
+    f.wakes.push({ x: 0, z: 0, vx: 12, vz: 0, weight: 1 })
+    // Walk along the wake axis and confirm the surface normal tilts
+    // somewhere — peak normal-X should exceed 0.05 (≈ 3°).
+    let maxNxAbs = 0
+    for (let bx = -1; bx >= -20; bx -= 0.05) {
+      const s = sampleSurface(f, bx, 0)
+      maxNxAbs = Math.max(maxNxAbs, Math.abs(s.nx))
+    }
+    expect(maxNxAbs).toBeGreaterThan(0.1)
   })
 })

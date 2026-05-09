@@ -113,6 +113,36 @@ if the bike feels too buoyant, lower `BUOYANCY_CAP`. The water mesh now
 uses `transparent: true, opacity: 0.75` so the submerged portion is
 visible.
 
+### Bike wakes are physical, not cosmetic (M9.26) — *load-bearing*
+The water shader's V-stripe behind each bike used to be foam-only. As of
+M9.26 the same wake function (a transverse-feathered sine, decaying
+exponentially behind the bike) also displaces the water *and* contributes
+to buoyancy via the sim's `WaveFieldState.wakes` array. Result: a trailing
+rider can feel and "jump" the leader's wake. The wake math lives in
+`engine/sim/water/wave-field.ts` (`sampleWakeFromSource`), is mirrored
+bit-for-bit in `engine/render/water.ts` (`wakeSum` Fn block in the TSL
+shader), and the same constants (`WAKE_DISP_AMP`, `WAKE_DISP_WAVELENGTH`,
+`WAKE_DISP_OMEGA`, decay/ramp/feather) are imported from the sim module so
+they can't drift apart. `wakeUpdateSystem` (in `game/systems/wake-update.ts`)
+populates `field.wakes` once per fixed step BEFORE `hoverSystem` reads the
+surface — that's what makes the lead bike's wake felt by trailing
+buoyancy. The bike's own wake doesn't affect itself (`behind > 0` gate).
+
+Vertex subdivisions stay at 128 (1.875 m spacing on the 240 m water
+plane), with `WAKE_DISP_CULL_R = 40 m` early-out per-bike per-vertex.
+Bumping subs to 192 looks crisper on real hardware but tanks the headless
+WebGL2 software fallback (SwiftShader, used by Playwright) to ~3 fps,
+which broke a chunk of the e2e suite. If/when we drop the headless WebGL2
+path, raise to 192+.
+
+### Periodic swell sets (M9.26)
+`defaultWaves()` now includes two long-wavelength swells (60 m + 85 m,
+amplitudes 0.5 m + 0.36 m) with slightly different periods (~6.0 s vs
+~7.7 s). They beat against each other so big "sets" come in roughly every
+25–30 s automatically (constructive interference of two sines = no extra
+logic needed). Existing chop is trimmed slightly so the combined max
+peak stays under ~3 m even at full alignment.
+
 ### Pitch-modulated ride height (M9.24)
 Above water, the hover-spring's target height is offset by pitch input:
 `effectiveHoverHeight = stats.hoverHeight + intent.pitch * 0.5`. Pulling
@@ -293,6 +323,8 @@ Open follow-ups:
 | M9.22 | Altitude-faded surface follow — strong terrain reaction when low, smooth ride when high | ✅ |
 | M9.23 | Underwater dive — buoyancy + drag below surface, one-sided hoverDamp, transparent water | ✅ |
 | M9.24 | Slingshot pop (asymmetric Y-drag) + pitch-modulated ride height | ✅ |
+| M9.25 | GPU water shader (TSL) — Gerstner + dimple + wake foam on the GPU | ✅ |
+| M9.26 | Wake displaces water (visual + buoyancy) + periodic swell sets | ✅ |
 
 ## File / system map
 

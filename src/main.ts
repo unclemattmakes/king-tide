@@ -36,10 +36,9 @@ import {
   advanceWaveField,
   createWaveField,
   defaultWaves,
-  sampleHeight,
 } from './engine/sim/water/wave-field'
 import { resolveBikeVariant } from './game/bikes/variants'
-import { BikeTag, HoverStateStore, RBHandleStore, TransformStore } from './game/components'
+import { HoverStateStore, RBHandleStore } from './game/components'
 import { AIController, AIControllerStore, AITag, defaultAIController } from './game/components/ai'
 import { ExplosionTag, MineTag, MissileTag } from './game/components/combat'
 import type { PickupType } from './game/components/pickup'
@@ -62,6 +61,7 @@ import {
 } from './game/systems/combat'
 import { hoverSystem } from './game/systems/hover'
 import { applyPlayerIntent } from './game/systems/input-apply'
+import { wakeUpdateSystem } from './game/systems/wake-update'
 import {
   boostTickSystem,
   getHeldPickup,
@@ -399,31 +399,14 @@ async function boot() {
   const tmpQuat = new THREE.Quaternion()
 
   // Reused per-frame buffer for the GPU water shader's bike impact array.
-  // Each frame we query every BikeTag entity, sample the wave height under
-  // it, and translate altitude → impact weight (1 = on water, 0 = airborne).
-  // The water shader uses these to depress the surface (hull dimple) and
-  // draw a V-wake stripe behind moving bikes.
+  // Sourced from `waveField.wakes`, which `wakeUpdateSystem` populated in
+  // the physics loop above. Single source of truth: the displacement the
+  // shader draws is the same displacement buoyancy reads.
   const bikeImpacts: BikeImpact[] = []
   function gatherBikeImpacts(): readonly BikeImpact[] {
     bikeImpacts.length = 0
-    const eids = query(sim, [BikeTag])
-    for (const eid of eids) {
-      const t = TransformStore.get(eid)
-      const rbh = RBHandleStore.get(eid)
-      if (!t || !rbh) continue
-      const rb = phys.world.getRigidBody(rbh.handle)
-      if (!rb) continue
-      const v = rb.linvel()
-      // Altitude above the *wave-displaced* surface at the bike's XZ. The
-      // shader's dimple/wake should fade out as the bike lifts off — full
-      // strength at the water line, zero by the time it's clearly airborne.
-      const surfaceY = sampleHeight(waveField, t.x, t.z)
-      const altitude = t.y - surfaceY
-      let weight = 1
-      if (altitude > 0.5) {
-        weight = Math.max(0, 1 - (altitude - 0.5) / 1.5)
-      }
-      bikeImpacts.push({ x: t.x, z: t.z, vx: v.x, vz: v.z, weight })
+    for (const w of waveField.wakes) {
+      bikeImpacts.push({ x: w.x, z: w.z, vx: w.vx, vz: w.vz, weight: w.weight })
     }
     return bikeImpacts
   }
@@ -442,6 +425,11 @@ async function boot() {
     physAccum += dt
     while (physAccum >= phys.fixedDt) {
       advanceWaveField(waveField, phys.fixedDt)
+      // Refresh wake sources from the current bike rigid bodies BEFORE
+      // hoverSystem reads the wave field for buoyancy. This is what makes
+      // the lead bike's wake felt by trailing riders (and visible in the
+      // GPU shader, which reads the same impact data via waterMesh.tick).
+      wakeUpdateSystem(sim, phys, waveField)
       // Player intent first; AI runs after and overwrites for entities tagged
       // AITag (which now includes the player while auto-play is on). After
       // ai-control writes the racing-line intent, ai-combat decides whether
