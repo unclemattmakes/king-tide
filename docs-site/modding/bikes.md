@@ -151,7 +151,22 @@ The viewer loads the bike GLB, drops it on a grid, and gives you `OrbitControls`
 
 If you need new chassis shapes, fairing styles, or thruster meshes, edit `tools/blender/lib/bike_parts.blend` directly. Saving the `.blend` triggers a rebuild of every bike against the new kit. To start from a clean placeholder, re-run `tools/blender/seed_bike_kit.py`.
 
-The kit opens dressed as the **scout** bike — that's the canonical reference layout the seed is tuned to. You see chassis + fairing_swept + fork_single + 2 thrusters at scout's spacing (one being a preview-only mirror named `thruster_unit_preview_l`, ignored by the build), wearing scout's livery/metal/glow colors. Variant parts (`fairing_bare`, `fairing_full`, `fork_dual`) are present but `hide_viewport`/`hide_render` so they don't clutter the silhouette — toggle them on in the outliner to edit them. Object viewport positions are layout-only — they don't influence the build (`tools/blender/lib_loader.py` resets transforms on append). Mesh edits *do* ride through.
+The kit's outliner is organized into collections that mirror the in-game `?viewer=<id>` page. Flick a collection visible to switch which bike you're previewing:
+
+```
+Source                        ← canonical parts (hidden by default)
+Bike: Calibration Bike        ← preview (hidden)
+Bike: Cruiser                 ← preview (hidden)
+Bike: Racer                   ← preview (hidden)
+Bike: Scout                   ← preview (visible by default)
+Bike: Stunt                   ← preview (hidden)
+```
+
+Each `Bike: <name>` collection contains *linked-data instances* of the canonical parts, scaled and positioned per the spec at `specs/bikes/<id>.json`. Mesh data is **shared** with the Source collection — edit a mesh once and every preview updates instantly. The materials are scout's livery (the kit's placeholder palette); the build replaces them with spec-driven materials per bike, so livery differences between bikes only show up in `?viewer`, not in the kit.
+
+To **edit a part**, toggle the Source collection on in the outliner. To **add a new variant**, drop a new mesh into Source and update both `seed_bike_kit.py` (so re-seeding includes it) and `build_bike.py` (so the build picks it). To **add a new bike spec**, drop a new `specs/bikes/<id>.json` and re-run the seed — a new `Bike: <name>` collection appears automatically.
+
+Object viewport positions are layout-only — they don't influence the build (`tools/blender/lib_loader.py` resets transforms on append). Mesh edits *do* ride through.
 
 Open `?viewer=scout` in another tab to compare the kit's silhouette against what the runtime ships — they should be the same modulo material differences (the kit uses static placeholder materials; the build creates spec-driven ones).
 
