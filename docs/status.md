@@ -221,6 +221,42 @@ additions:
 Hoisted `heightFactor` out of the IIFE so both the scatter blend and
 the new sun-glow share it. No physics change.
 
+### Water — shoreline lapping + wake polish (M9.33)
+Round of polish on the foam pass shipped in M9.32:
+
+1. **Shared `foamTurbulence` field.** A world-XZ + time-scrolled hash
+   noise used by shoreline foam, wake, and bow spray to break up their
+   otherwise-too-clean edges. Multiplier in `[0.5, 1.0]` so foam is
+   never erased — just patched into turbulent intensity. NOT applied to
+   wave-driven foam (slope/Jacobian/accumulator), since natural whitecap
+   foam already has its own variation from the wave field — adding more
+   noise on top reads as TV-static. Shoreline, wake, bow spray, and
+   stern propwash now share a unified visual rhythm.
+
+2. **Shoreline lapping.** The depth threshold for shoreline foam now
+   breathes ±0.4m around its 1.5m base via `foamNoiseRaw - 0.5`. Where
+   the noise is high, foam reaches further off-shore (1.9m); where low,
+   it pulls back (1.1m). Combined with the static depth intersection,
+   this reads as the surf "lapping" against the shore rather than a
+   fixed water-line. Verified by capturing two ramp shots 2s apart —
+   foam coverage differs visibly between frames.
+
+3. **Stern propwash.** Bright concentrated foam directly behind the
+   bike (~0.3m back, fades to 0 by ~2.5m, centered on the wake axis).
+   Distinct from the V-wake outline — the propwash is a solid mass of
+   foam that the bike actively generates, what gives the wake its
+   kinetic "boat is here" feel rather than a pure outline. NOT
+   noise-modulated — it's the bike's "exhaust" foam.
+
+4. **Wake + bow spray noise modulation.** Both get multiplied by
+   `foamTurbulence`, so their edges break up into patches instead of
+   reading as stamped templates. The same noise field also drives the
+   shoreline lapping, giving all interactive foam a unified visual
+   character.
+
+No physics change. No per-vertex cost added; the foam noise is one
+extra hash per fragment (negligible).
+
 ### Water — shoreline foam + richer bike foam pass (M9.32)
 Water-on-land transitions are a recurring on-track moment (lagoon ramp,
 gate posts, cliffside cliff base, future islands), so the water shader

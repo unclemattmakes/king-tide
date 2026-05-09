@@ -603,6 +603,29 @@ export function createWaterMesh(
       })()
     : foamAccumFrag
 
+  // Shared turbulent foam noise — world XZ + time scroll. Used to break
+  // up the otherwise-too-clean foam edges of shoreline, wake, and bow
+  // spray so they read as living turbulence instead of stamped outlines.
+  // NOT applied to wave-driven foam (slope / Jacobian / accumulator),
+  // since natural whitecap foam already has its own variation from the
+  // wave field — adding more noise on top reads as TV-static.
+  //
+  // The same noise is sampled by:
+  //   - shoreline foam range (lapping in/out by ±0.2m via `foamNoiseRaw`)
+  //   - wake foam intensity (multiplicative `foamTurbulence`)
+  //   - bow spray intensity (multiplicative `foamTurbulence`)
+  // so all interactive foam moves with a unified visual rhythm.
+  const foamNoiseUV = positionWorld.xz
+    .mul(0.35)
+    .add(vec2(tNode.mul(-0.18), tNode.mul(0.13)))
+  const foamNoiseRaw = fract(
+    sin(foamNoiseUV.x.mul(12.9898).add(foamNoiseUV.y.mul(78.233))).mul(43758.5453),
+  )
+  const foamNoiseSmooth = smoothstep(float(0.2), float(0.85), foamNoiseRaw)
+  // Multiplier in [0.5, 1.0] — never erases foam, just breaks up its
+  // intensity into turbulent patches.
+  const foamTurbulence = mix(float(0.5), float(1.0), foamNoiseSmooth)
+
   // Per-bike foam: hull ring + V-wake stripe. We wrap the per-bike work in
   // a Fn() so we can use If(...) to early-out for slots whose bike is far
   // from this fragment — most fragments are far from every bike, so this
@@ -658,12 +681,36 @@ export function createWaterMesh(
         const ringSpeedBoost = float(1).add(speedGate.mul(0.6))
         const ring = ringInner.mul(ringOuter).mul(weight).mul(0.55).mul(ringSpeedBoost)
 
-        // V-wake foam stripe behind the bike.
+        // V-wake foam stripe behind the bike. Multiplied by `foamTurbulence`
+        // so the edges break up into patches instead of a clean Kelvin-V
+        // outline — that's what made the prior wake feel "stamped".
         const wakeWidth = behind.mul(WAKE_HALF_ANGLE_TAN).add(float(WAKE_BASE_WIDTH))
         const behindGate = smoothstep(float(0.0), float(0.3), behind)
         const decay = exp(behind.mul(-WAKE_LONG_DECAY))
         const edgeBlur = smoothstep(wakeWidth.add(0.4), wakeWidth.sub(0.5), perp)
-        const wake = behindGate.mul(speedGate).mul(decay).mul(edgeBlur).mul(weight).mul(0.7)
+        const wake = behindGate
+          .mul(speedGate)
+          .mul(decay)
+          .mul(edgeBlur)
+          .mul(weight)
+          .mul(0.7)
+          .mul(foamTurbulence)
+
+        // Stern propwash (M9.33): bright concentrated foam directly behind
+        // the bike (peaks at ~0.3m, fades to 0 by ~2.5m). Centered on the
+        // wake axis (perp ≈ 0). What gives the wake its kinetic "boat is
+        // here" feel rather than a pure V outline. NOT noise-modulated —
+        // the propwash is a solid mass of foam that the bike actively
+        // generates, distinct from the turbulent edges trailing behind.
+        const propwashFalloff = exp(behind.mul(-1.0))
+        const propwashLateral = float(1).sub(smoothstep(float(0), float(0.7), perp))
+        const propwashGate = smoothstep(float(0.0), float(0.2), behind)
+        const propwash = propwashGate
+          .mul(speedGate)
+          .mul(propwashFalloff)
+          .mul(propwashLateral)
+          .mul(weight)
+          .mul(0.65)
 
         // Bow spray: forward foam "moustache" in front of the bike,
         // peaking just ahead and fading to 0 by ~1.5m forward. Same
@@ -671,7 +718,8 @@ export function createWaterMesh(
         // tighter half-angle, so the spray reads as a sharp arc rather
         // than a long trail. Speed-gated so a parked bike doesn't spray.
         // The bike's hull pushes water forward at race pace; this is
-        // the visual cue for that interaction.
+        // the visual cue for that interaction. Noise-modulated for the
+        // same turbulent character as the wake.
         const splashHalfAngle = 0.35
         const splashWidth = ahead.mul(splashHalfAngle).add(float(0.35))
         const aheadGate = smoothstep(float(0.0), float(0.25), ahead)
@@ -683,8 +731,9 @@ export function createWaterMesh(
           .mul(splashEdge)
           .mul(weight)
           .mul(0.85)
+          .mul(foamTurbulence)
 
-        sum.addAssign(ring.add(wake).add(bowSpray))
+        sum.addAssign(ring.add(wake).add(propwash).add(bowSpray))
       })
     }
     return sum
@@ -712,7 +761,7 @@ export function createWaterMesh(
   const intersectionFoam = isClassic
     ? float(0)
     : (() => {
-        const FOAM_INTERSECTION_RANGE = 1.5
+        const FOAM_INTERSECTION_BASE = 1.5
         // viewportDepthTexture() samples the opaque depth at this fragment.
         // .r is the non-linear depth in [0, 1].
         // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
@@ -725,10 +774,21 @@ export function createWaterMesh(
         // sceneViewZ is more negative (further away).
         const closenessSigned = waterViewZ.sub(sceneViewZ)
         const behindGate = smoothstep(float(-0.05), float(0.05), closenessSigned)
+        // Lapping shoreline (M9.33): the depth threshold breathes ±0.4m
+        // around the 1.5m base as the shared foam noise scrolls. Where
+        // noise is high, the foam reaches further off-shore (1.9m); where
+        // low, it pulls back (1.1m). Combined with the static depth
+        // intersection, this reads as the surf "lapping" against the
+        // shore rather than a static water-line.
+        const noiseRangeOffset = foamNoiseRaw.sub(float(0.5)).mul(float(0.8))
+        const foamRangeNow = float(FOAM_INTERSECTION_BASE).add(noiseRangeOffset)
         const depthFade = float(1).sub(
-          smoothstep(float(0), float(FOAM_INTERSECTION_RANGE), max(float(0), closenessSigned)),
+          smoothstep(float(0), foamRangeNow, max(float(0), closenessSigned)),
         )
-        return behindGate.mul(depthFade)
+        // Slight intensity modulation on top so the foam itself has
+        // texture (not just a moving edge).
+        const intensityModulator = mix(float(0.7), float(1.0), foamNoiseSmooth)
+        return behindGate.mul(depthFade).mul(intensityModulator)
       })()
 
   // Intersection foam is full-opaque white where it fires (we want the
