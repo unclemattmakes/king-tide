@@ -27,14 +27,19 @@ import { createRenderer } from './engine/render/renderer'
 import { createScene } from './engine/render/scene'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { createTrailRenderSystem } from './engine/render/trail-render'
-import { createWaterMesh } from './engine/render/water'
+import { type BikeImpact, createWaterMesh } from './engine/render/water'
 import { getBestLap, recordLapTime } from './engine/save-state'
 import { createSimWorld } from './engine/sim/ecs/world'
 import { createPhysicsWorld } from './engine/sim/physics/rapier'
 import { vecHorizontalLength } from './engine/sim/physics/vec'
-import { advanceWaveField, createWaveField, defaultWaves } from './engine/sim/water/wave-field'
+import {
+  advanceWaveField,
+  createWaveField,
+  defaultWaves,
+  sampleHeight,
+} from './engine/sim/water/wave-field'
 import { resolveBikeVariant } from './game/bikes/variants'
-import { HoverStateStore, RBHandleStore } from './game/components'
+import { BikeTag, HoverStateStore, RBHandleStore, TransformStore } from './game/components'
 import { AIController, AIControllerStore, AITag, defaultAIController } from './game/components/ai'
 import { ExplosionTag, MineTag, MissileTag } from './game/components/combat'
 import type { PickupType } from './game/components/pickup'
@@ -100,6 +105,12 @@ async function boot() {
   const chase = createChaseCamera(camera)
 
   const waveField = createWaveField(defaultWaves())
+  // Subdivision count drives vertex-stage Gerstner cost. 96 is plenty
+  // once the wave gradient is analytic (per-vertex, interpolated to
+  // fragment); see notes in `engine/render/water.ts`. The earlier
+  // CPU-driven version needed 256 to keep wave detail crisp, then was
+  // reverted (commit 19caac6) for FPS — the GPU shader gets equivalent
+  // smoothness at the lower vertex count.
   const waterMesh = createWaterMesh(waveField, { size: 800, subdivisions: 96 })
   scene.add(waterMesh.mesh)
 
@@ -387,6 +398,36 @@ async function boot() {
   const tmpPos = new THREE.Vector3()
   const tmpQuat = new THREE.Quaternion()
 
+  // Reused per-frame buffer for the GPU water shader's bike impact array.
+  // Each frame we query every BikeTag entity, sample the wave height under
+  // it, and translate altitude → impact weight (1 = on water, 0 = airborne).
+  // The water shader uses these to depress the surface (hull dimple) and
+  // draw a V-wake stripe behind moving bikes.
+  const bikeImpacts: BikeImpact[] = []
+  function gatherBikeImpacts(): readonly BikeImpact[] {
+    bikeImpacts.length = 0
+    const eids = query(sim, [BikeTag])
+    for (const eid of eids) {
+      const t = TransformStore.get(eid)
+      const rbh = RBHandleStore.get(eid)
+      if (!t || !rbh) continue
+      const rb = phys.world.getRigidBody(rbh.handle)
+      if (!rb) continue
+      const v = rb.linvel()
+      // Altitude above the *wave-displaced* surface at the bike's XZ. The
+      // shader's dimple/wake should fade out as the bike lifts off — full
+      // strength at the water line, zero by the time it's clearly airborne.
+      const surfaceY = sampleHeight(waveField, t.x, t.z)
+      const altitude = t.y - surfaceY
+      let weight = 1
+      if (altitude > 0.5) {
+        weight = Math.max(0, 1 - (altitude - 0.5) / 1.5)
+      }
+      bikeImpacts.push({ x: t.x, z: t.z, vx: v.x, vz: v.z, weight })
+    }
+    return bikeImpacts
+  }
+
   let last = performance.now()
   let physAccum = 0
   let framesThisSecond = 0
@@ -497,7 +538,7 @@ async function boot() {
       }
     }
 
-    waterMesh.tick()
+    waterMesh.tick(gatherBikeImpacts())
     bikeRender()
     trailRender(camera)
     pickupRender(dt)

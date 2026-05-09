@@ -1,4 +1,5 @@
-import * as THREE from 'three'
+import type * as THREE from 'three'
+import { WebGPURenderer } from 'three/webgpu'
 
 export type RenderBackend = 'webgpu' | 'webgl2'
 
@@ -11,22 +12,21 @@ export type RendererBundle = {
 }
 
 /**
- * Try WebGPURenderer first; fall back to WebGLRenderer on failure or unsupported browser.
+ * Always uses Three.js's `WebGPURenderer`, which auto-falls-back to a WebGL2
+ * backend internally when WebGPU is unavailable. We probe `navigator.gpu`
+ * first so we can report the *actual* backend in the HUD instead of waiting
+ * for the silent fallback.
  *
- * Note: Three.js's WebGPURenderer extends the same public surface as WebGLRenderer
- * for most code paths (scene + camera + render). We type the return as WebGLRenderer
- * which is structurally compatible for our usage.
+ * Going through WebGPURenderer (rather than the legacy WebGLRenderer) is
+ * load-bearing for the GPU water shader: only the new node-material pipeline
+ * (TSL) supports the unified backend abstraction. The water mesh wires its
+ * Gerstner displacement + per-fragment lighting through TSL nodes that
+ * compile to WGSL on WebGPU and GLSL on the WebGL2 fallback.
  */
 export async function createRenderer(parent: HTMLElement): Promise<RendererBundle> {
   const canvas = document.createElement('canvas')
   parent.appendChild(canvas)
 
-  let renderer: THREE.WebGLRenderer
-  let backend: RenderBackend
-
-  // Probe for a real WebGPU adapter first — Three.js's WebGPURenderer will
-  // silently fall back to WebGL2 internally if it can't get one, which makes
-  // backend reporting misleading. Probing avoids that.
   let hasWebGpu = false
   if ('gpu' in navigator) {
     try {
@@ -37,22 +37,18 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
     }
   }
 
-  if (hasWebGpu) {
-    try {
-      const webgpuMod = await import('three/webgpu')
-      const r = new webgpuMod.WebGPURenderer({ canvas, antialias: true })
-      await r.init()
-      renderer = r as unknown as THREE.WebGLRenderer
-      backend = 'webgpu'
-    } catch (err) {
-      console.warn('[renderer] WebGPU init failed, falling back to WebGL2', err)
-      renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
-      backend = 'webgl2'
-    }
-  } else {
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
-    backend = 'webgl2'
-  }
+  const r = new WebGPURenderer({
+    canvas,
+    antialias: true,
+    forceWebGL: !hasWebGpu,
+  })
+  await r.init()
+
+  // WebGPURenderer is API-compatible with WebGLRenderer for our usage
+  // (setSize, setPixelRatio, render, dispose). The cast keeps the existing
+  // type signature stable for the rest of the engine.
+  const renderer = r as unknown as THREE.WebGLRenderer
+  const backend: RenderBackend = hasWebGpu ? 'webgpu' : 'webgl2'
 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.setSize(window.innerWidth, window.innerHeight, false)

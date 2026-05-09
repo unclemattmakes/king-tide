@@ -1,7 +1,15 @@
 import { expect, test } from '@playwright/test'
 
+// The GPU water shader added in M9.25 has a per-fragment foam loop that
+// hammers SwiftShader (the WebGL2 software fallback used by headless
+// Chromium). On real hardware with a GPU it runs at full speed; in
+// headless Playwright the sim ends up running ~5× slower than wall-clock
+// because rendering is a few FPS. The conditions these tests assert are
+// still real (bike rides waves, doesn't sink) — we just need more wall
+// time for the sim to advance enough to observe them.
 test.describe('M2 water', () => {
   test('bike drives off the island onto water and rides waves', async ({ page }) => {
+    test.setTimeout(90_000)
     const errors: string[] = []
     page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
     page.on('console', (msg) => {
@@ -10,7 +18,7 @@ test.describe('M2 water', () => {
 
     await page.goto('/')
     await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
-      timeout: 10000,
+      timeout: 15000,
     })
 
     // Drive forward at full throttle for 4 seconds — long enough to leave the
@@ -30,7 +38,7 @@ test.describe('M2 water', () => {
     // z=25..37) and back on water with room to settle. Sampling y inside
     // the ramp's launch zone would conflate ramp height with wave bob.
     await page.waitForFunction(() => (window.__hover?.player()?.position.z ?? 0) > 60, {
-      timeout: 12000,
+      timeout: 60_000,
     })
 
     // Now sample y over ~1.5s while still throttling on water — waves should
@@ -61,9 +69,10 @@ test.describe('M2 water', () => {
   })
 
   test('bike floats on water from rest (does not sink)', async ({ page }) => {
+    test.setTimeout(90_000)
     await page.goto('/')
     await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
-      timeout: 10000,
+      timeout: 15000,
     })
 
     // Coast off the island (no throttle), let physics settle.
@@ -78,7 +87,7 @@ test.describe('M2 water', () => {
       }),
     )
     await page.waitForFunction(() => (window.__hover?.player()?.position.z ?? 0) > 35, {
-      timeout: 10000,
+      timeout: 60_000,
     })
     await page.evaluate(() => window.__hover!.setIntentOverride(null))
 
