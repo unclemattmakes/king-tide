@@ -54,6 +54,16 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
     .setRotation(startQuat)
     .setLinearDamping(0.05)
     .setAngularDamping(2.5)
+    // Continuous Collision Detection: at top speed (~28 m/s) plus
+    // gravity-fed dives off ramps the capsule moves >0.5m per fixed
+    // step (1/60s). Without CCD, the discrete broadphase can miss a
+    // thin trimesh surface — `attachTrackColliders` registers a
+    // 0-thickness plane today and bikes tunnel through. CCD does a
+    // swept-shape check per step, which catches the surface before
+    // we punch through. The cost is a few % of physics CPU; cheap
+    // for one body. (Slab-extruding spec-driven surfaces in
+    // build_track.py is the complementary fix on the geometry side.)
+    .setCcdEnabled(true)
   const rb = phys.world.createRigidBody(rbDesc)
 
   // Capsule body, length along Z (forward).

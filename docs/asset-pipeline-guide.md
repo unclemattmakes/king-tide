@@ -65,11 +65,26 @@ track JSON, and the runtime preloads the GLB at boot.
 ### Tracks (`specs/tracks/<id>.json`)
 
 Declarative replacement for the legacy
-`tools/build_calibration_scene.py`. Specifies surface size, water
-volume, checkpoints (with `halfWidth`/`height` envelopes), AI spline
-control points (NURBS), starts, and pickups. The builder constructs
-the `.blend`, saves it to `tracks-src/<id>.blend` (so authors can open
-and tweak), then invokes `tools/export_track.py` for the GLB.
+`tools/build_calibration_scene.py`. Specifies surface size + thickness,
+water volume, checkpoints (with `halfWidth`/`height` envelopes), AI
+spline control points, starts (each `[x, y, z]` or `[x, y, z, yaw]`
+with yaw in radians), and pickups. `pnpm gen:tracks` builds:
+
+  - `tracks-src/<id>.blend` — for follow-up Blender authoring
+  - `public/assets/tracks/<id>.glb` — environment geometry the runtime
+    fetches via `environmentGlb`
+  - `public/tracks/<id>.json` — gameplay JSON (gates, spline, pickups,
+    start pose, water tuning) the runtime loads first. **Existing
+    files are preserved** by default — once you've tuned a track in
+    the in-app editor, the spec is no longer the source of truth for
+    placement. Set `HOVERBIKE_FORCE_GAMEPLAY_JSON=1` to overwrite.
+
+The track surface is built as a 1m-thick **slab** (configurable via
+`surface.thickness`) rather than a 0-thickness plane — that gives the
+trimesh enough volume that Rapier's discrete broadphase can catch a
+fast-falling capsule on its first downward step. This pairs with
+`setCcdEnabled(true)` on the bike to keep the bike on track even at
+top speed off ramps. Both fixes were added in M9.27.
 
 For tracks **with hand-authored geometry**, the gameplay-data JSON
 under `public/tracks/<id>.json` (authored via the in-app editor)

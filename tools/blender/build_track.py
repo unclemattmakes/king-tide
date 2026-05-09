@@ -41,13 +41,26 @@ from tools.blender.common import (  # noqa: E402
 
 
 def add_track_surface(spec: dict) -> bpy.types.Object:
+    """Drivable surface, exported as a SLAB rather than a 0-thickness
+    plane. A flat plane is the worst case for Rapier's discrete
+    broadphase — a fast-falling capsule can tunnel through between
+    physics steps. A volumetric slab (1m thick by default) gives the
+    trimesh enough geometry to catch the bike on any approach.
+
+    Top face sits at Blender z=0 (= three y=0) so the bike drives on
+    the visible surface; the bottom face is at z=-thickness."""
     surface = spec.get("surface", {})
     size = surface.get("size", [12, 18])
-    bpy.ops.mesh.primitive_plane_add(size=1, location=(0, 0, 0))
+    thickness = float(surface.get("thickness", 1.0))
+    half_t = thickness * 0.5
+    # primitive_cube_add is centered; offset down so the top face is
+    # at z=0. After yup export the slab sits below three y=0 with its
+    # top face at y=0.
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, -half_t))
     obj = bpy.context.active_object
     obj.name = "track_surface"
-    obj.scale = (float(size[0]), float(size[1]), 1.0)
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    obj.scale = (float(size[0]) * 0.5, float(size[1]) * 0.5, half_t)
+    bpy.ops.object.transform_apply(location=True, rotation=False, scale=True)
     mat = bpy.data.materials.new(name="mat_track_main")
     obj.data.materials.append(mat)
     obj["kind"] = "track"
@@ -122,11 +135,24 @@ def add_player_starts(spec: dict) -> list[bpy.types.Object]:
     starts = spec.get("starts", [])
     out: list[bpy.types.Object] = []
     for i, p in enumerate(starts):
-        bpy.ops.object.empty_add(type="ARROWS", location=tuple(float(x) for x in p))
+        # Each start entry is [x, y, z] (Blender axes) or [x, y, z, yaw]
+        # where yaw is in radians, in the runtime frame (0 = facing
+        # three +Z forward, π/2 = facing three +X right). The runtime
+        # reads yaw from the GLB node rotation, so we bake it as a
+        # Y-axis rotation in Blender (which yup-exports to a runtime
+        # quaternion the readYaw() helper decodes correctly).
+        loc = (float(p[0]), float(p[1]), float(p[2]))
+        yaw = float(p[3]) if len(p) >= 4 else 0.0
+        bpy.ops.object.empty_add(type="ARROWS", location=loc)
         obj = bpy.context.active_object
         obj.name = f"start_{i:02d}"
         obj["kind"] = "start"
         obj["index"] = i
+        # Runtime yaw is around three's +Y (world up). Blender's +Z is
+        # the same up axis after yup export, so we rotate this empty
+        # around its local Z by `yaw` and the conversion preserves the
+        # rotation. Sign matches the runtime's readYaw() helper.
+        obj.rotation_euler = (0.0, 0.0, yaw)
         out.append(obj)
     return out
 
@@ -165,7 +191,9 @@ def emit_gameplay_json(spec: dict, glb_url: str) -> dict:
 
     if not starts_spec:
         raise ValueError("track spec must have at least one entry in `starts`")
-    start = b2t(starts_spec[0])
+    start_entry = starts_spec[0]
+    start = b2t(start_entry)
+    start_yaw = float(start_entry[3]) if len(start_entry) >= 4 else 0.0
 
     json_body: dict = {
         "id": spec["id"],
@@ -179,15 +207,22 @@ def emit_gameplay_json(spec: dict, glb_url: str) -> dict:
         },
         "start": {
             "position": start,
-            # Default yaw 0 — pointing at the first checkpoint. Authors
-            # who need a specific yaw can hand-edit after first emit.
-            "yaw": 0.0,
+            # `yaw` (radians) carried from the spec. 0 = facing three's
+            # +Z forward; π/2 = facing +X right. Same convention as
+            # createBike() in src/game/entities/bike.ts.
+            "yaw": start_yaw,
         },
         "checkpoints": checkpoints,
+        # Spec aiSpline points are sparse control points; emit them as
+        # `anchors` so the json-loader Catmull-Rom-samples them into a
+        # dense polyline at boot. The GLB also bakes a dense version
+        # via Blender's NURBS resolution, but the runtime AI follows
+        # the JSON-side densified points.
         "aiSplines": [
             {
                 "id": "main",
-                "points": [b2t(p) for p in spline_pts_spec],
+                "points": [],
+                "anchors": [b2t(p) for p in spline_pts_spec],
             }
         ],
         "pickupSpawns": [b2t(p) for p in pickups_spec],
