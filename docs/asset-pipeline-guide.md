@@ -114,6 +114,69 @@ If you want to start from a clean placeholder, re-run
 `tools/blender/seed_bike_kit.py` (or `seed_prop_kit.py`) — those
 scripts regenerate the placeholders from scratch.
 
+#### Edit-in-context
+
+Kit objects are laid out at their **exact assembled-bike positions**
+in the .blend so the kit reads as a fully-built bike on open — chassis
+at the centre, fairing on top, fork at the nose, thruster at the tail.
+Variants overlap their primary (all three fairings sit on top of the
+chassis; both forks live at the nose); hide the ones you don't care
+about in the outliner if you need to see only the active variant. The
+prop kit is laid out as a row along +X.
+
+The viewport position of an object in the kit is **layout-only**.
+`tools/blender/lib_loader.append_objects` resets each appended object's
+location/rotation/scale to identity, so the build only sees the part's
+mesh data and positions it programmatically per the spec. Rules of
+thumb:
+
+- ✅ Free to drag (G), rotate (R), or scale (S) kit objects in the
+  viewport to find a better viewing layout — the build ignores it.
+- ✅ Edit mesh data freely (Edit Mode → move vertices, extrude, etc.).
+  Mesh edits ride through to every bike/prop that uses that part.
+- ⚠️ Don't apply object transforms (Object → Apply → All Transforms)
+  with the part at a layout position — that bakes the layout offset
+  into the mesh, which **does** ride through and will render the part
+  in the wrong place at build time.
+
+If you accidentally bake a layout offset into the mesh, fix it by
+re-running the seed script (which restores the canonical mesh +
+layout) or by editing the mesh back to origin-centred in Edit Mode.
+
+#### Mounts and anchors
+
+Where bike parts attach to the chassis is controlled by **mount
+empties** authored in the kit, not by hardcoded math in
+`build_bike.py`. The chassis carries small `mount_<role>` empties
+(`mount_fairing`, `mount_fork`, `mount_fin`, `mount_tail`) that say
+"the fairing/fork/fin/tail attaches *here*." At build time the script
+positions each part so its origin (or its `anchor` child empty if
+present) lands on the matching mount.
+
+To **move** an attachment point — say the fork should sit further
+forward — open `tools/blender/lib/bike_parts.blend`, select
+`mount_fork` (parented under `chassis_base`), and translate it.
+Re-export. No code change needed.
+
+To **add a new attachment** — author a new empty
+`mount_<your_role>` parented to the chassis, then add the matching
+`snap_to_mount(part, chassis, "<your_role>")` call in
+`build_bike.py`.
+
+The mount positions are stored in chassis-local space (a unit cube
+spanning ±0.5), so they scale with `chassis.scale = (W, L, H)` at
+build time — change the chassis dimensions in the spec and the mount
+points scale with it.
+
+Mounts (and any optional `anchor` empties on child parts) are
+**stripped from the GLB before export** by `strip_build_helpers()`,
+so they never ship to the runtime. Runtime `socket_*` empties (seat,
+nose_cam, fx_*) are a separate concept and do ride into the GLB.
+
+Thrusters stay parametric — their count and X spacing come from
+`spec.geometry.thrusterCount`/`thrusterSpacing` and the build code
+does the math directly. Too dynamic to express as fixed mounts.
+
 ### Add a brand-new bike
 
 1. Copy `specs/bikes/scout.json` to `specs/bikes/<new-id>.json`. Edit

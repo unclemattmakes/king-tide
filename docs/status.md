@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-09 (M9.28 trimesh tunneling fix — bike body has CCD enabled, spec-driven track surfaces author as 1m slabs instead of 0-thickness planes; build_track.py now also emits `public/tracks/<id>.json` with start yaw + Catmull-Rom anchors so a single `pnpm gen:tracks` produces a fully playable track). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-09 (M9.28 trimesh tunneling fix — bike body has CCD enabled, spec-driven track surfaces author as 1m slabs instead of 0-thickness planes; build_track.py now also emits `public/tracks/<id>.json` with start yaw + Catmull-Rom anchors so a single `pnpm gen:tracks` produces a fully playable track. Bike kit now edits-in-context: parts laid out at assembled positions in `bike_parts.blend` and attachment points are author-controlled `mount_*` empties on `chassis_base` rather than hardcoded math in `build_bike.py`). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -25,7 +25,7 @@ This doc captures the build's current state, controls, known issues, and next st
 - Backspace = respawn at start
 - Mouse right-drag and gamepad right-stick orbit the camera (vertical inverted by default)
 - 27 e2e + 55 unit tests, all green
-- Spec → GLB asset pipeline (M9.27): `specs/{bikes,props,tracks}/*.json` + `tools/blender/build_*.py` produce `public/assets/<cat>/*.glb` and `public/assets/manifest.json` via `pnpm gen:all`. Bike-loader instantiates the player + AI bike GLBs at boot; prop-loader pre-fetches asset-prop GLBs referenced by track JSON. Track spec `calibration.json` round-trips through `tools/blender/build_track.py` (replaces the retired `build_calibration_scene.py`)
+- Spec → GLB asset pipeline (M9.27): `specs/{bikes,props,tracks}/*.json` + `tools/blender/build_*.py` produce `public/assets/<cat>/*.glb` and `public/assets/manifest.json` via `pnpm gen:all`. Bike-loader instantiates the player + AI bike GLBs at boot; prop-loader pre-fetches asset-prop GLBs referenced by track JSON. Track spec `calibration.json` round-trips through `tools/blender/build_track.py` (replaces the retired `build_calibration_scene.py`). Bike kit edits in context — parts laid out at assembled positions in `bike_parts.blend` and attachment points are `mount_*` empties on `chassis_base` (`tools/blender/mounts.py`); move an empty in Blender to retune where the fairing/fork/fin/tail attaches, no code change.
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
 
 ## Controls

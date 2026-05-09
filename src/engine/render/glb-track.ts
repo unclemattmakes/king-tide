@@ -29,19 +29,11 @@ export async function loadGlbTrackVisuals(url: string): Promise<LoadedGlbTrack> 
 }
 
 /**
- * Walk the loaded scene; for every mesh whose `userData.kind === 'track'`
- * (Blender → glTF copies node extras into userData), create a static Rapier
- * trimesh collider mirroring the mesh's world-space geometry.
- *
- * Caveat: rapier 0.19's broadphase doesn't reliably catch a fast-falling
- * dynamic capsule landing on a thin trimesh plane (the calibration scene's
- * 12×18 plane is the trip wire). The collider is registered correctly —
- * `world.castRay` against it returns the expected hit — but a freshly-
- * spawned bike capsule sometimes tunnels through on its first downward
- * step. Until that's resolved (likely via setCcdEnabled on dynamic bodies
- * + a thicker plane), the safety floor + universal water surface keep the
- * calibration-scene playthrough sane. This function is still useful for
- * raycast-based hover queries; it's just not load-bearing yet.
+ * Walk the loaded scene and create a static Rapier trimesh collider for
+ * every mesh, mirroring its world-space geometry. Opt-out: tag a mesh with
+ * custom property `kind = "decoration"` in Blender to make it render-only.
+ * (Pre-2026-05 the rule was opt-IN via `kind = "track"`; we flipped it
+ * because decorative-only meshes are the rare case.)
  *
  * The track group should already be added to the scene (or its world
  * matrix manually updated) before calling.
@@ -51,7 +43,7 @@ export function attachTrackColliders(group: THREE.Object3D, phys: PhysicsWorld):
   let attached = 0
   group.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh)) return
-    if (obj.userData?.kind !== 'track') return
+    if (obj.userData?.kind === 'decoration') return
 
     const geom = obj.geometry as THREE.BufferGeometry
     const posAttr = geom.attributes.position
