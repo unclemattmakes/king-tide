@@ -21,25 +21,28 @@ Authoring convention (matters because the builder relies on it):
 
 Named objects produced (materials prefixed ``mat_kit_bike_*`` so the
 renamer in build_bike.py can find them). Each part's *mesh data* is
-authored origin-centred; the **object transform** lays the parts out
-in their assembled-bike positions so authors can edit in context. The
-transform is reset on append (see ``lib_loader.append_objects``), so
-re-positioning parts in the kit viewport is purely cosmetic — only
-mesh edits ride through to the build.
+authored origin-centred; the **object transform** places parts at
+their exact assembled-bike positions so authors see a fully-built
+bike when opening the kit. Variants overlap their primary (both forks
+at the nose, all fairings on top of the chassis); hide the ones you
+don't care about in the outliner. The transform is reset on append
+(see ``lib_loader.append_objects``), so kit-file positions are purely
+an authoring convenience — only mesh edits ride through to the build.
 
   chassis_base       — 1x1x1 cube; builder scales per spec. Centered
                        on the bike's chassis volume.
   fairing_bare       — minimal flat fairing (low + thin); on top of
                        the chassis.
-  fairing_swept      — wedge with the front edge tilted down. Variant
-                       parked off to the right of the bike.
+  fairing_swept      — wedge with the front edge tilted down. Same
+                       on-top-of-chassis position as fairing_bare.
   fairing_full       — bulkier box that wraps more of the chassis.
-                       Variant parked off to the left.
+                       Same position as the other fairings.
   thruster_unit      — short cylinder along Blender +Y (bike-length);
-                       at the bike's tail (+Y).
+                       at the bike's tail (+Y), centreline. Builder
+                       duplicates per spec.thrusterCount.
   fork_single        — single vertical column; at the bike's nose (-Y).
   fork_dual          — two parallel vertical columns (joined mesh).
-                       Variant parked off to the right of fork_single.
+                       Same position as fork_single.
   fin_marker         — small cone, builder places at chassis nose (-Y)
                        with a livery-colored material. Restores the
                        visual "this end is forward" cue the procedural
@@ -229,34 +232,37 @@ def make_fork_dual(material: bpy.types.Material) -> bpy.types.Object:
 
 
 def lay_out_in_context() -> None:
-    """Place each kit part at an assembled-bike position so authors can
-    edit in context. Only the **object transform** is moved; mesh data
-    is untouched. ``lib_loader.append_objects`` resets the transform on
-    append, so these positions are purely an authoring convenience.
+    """Place each kit part at its **exact** assembled-bike position so
+    the kit reads as a fully-built bike when opened. Only the object
+    transform is moved; mesh data is untouched. ``lib_loader.append_
+    objects`` resets the transform on append, so these positions are
+    purely an authoring convenience.
 
-    The layout uses representative geometry numbers from
-    ``specs/bikes/scout.json`` (W=0.6, L=2.5, H=0.4) so the in-viewport
-    silhouette roughly matches the built bike. Variants (alternate
-    fairings, fork_dual) are parked at ±X offsets so they're visible
-    next to the assembled centre layout."""
+    The layout mirrors the placement logic in ``build_bike.py`` using
+    representative geometry numbers from ``specs/bikes/scout.json``
+    (W=0.6, L=2.5, H=0.4). **Variants overlap their primary** — both
+    forks live at the same nose position; all three fairings sit on
+    top of the chassis. Hide the variants you don't care about in the
+    outliner if you need to see only the active one."""
     W, L, H = 0.6, 2.5, 0.4
     nose_y = -L * 0.5 + 0.1
     tail_y = L * 0.5 - 0.15
-    variant_dx = 2.5  # how far variants sit off to the side
 
-    # Centre column — the assembled bike.
+    fairing_pos = (0.0, 0.0, H + 0.15)
+    fork_pos = (0.0, nose_y, H * 0.4)
+
     placements: dict[str, tuple[float, float, float]] = {
         "chassis_base": (0.0, 0.0, H * 0.5),
-        "fairing_bare": (0.0, 0.0, H + 0.15),
-        "thruster_unit": (0.3, tail_y, H * 0.35),
-        "fork_single": (0.0, nose_y, H * 0.4),
+        "fairing_bare": fairing_pos,
+        "fairing_swept": fairing_pos,
+        "fairing_full": fairing_pos,
+        # Single thruster_unit at the centreline — build_bike.py
+        # duplicates and offsets per spec.thrusterCount/Spacing.
+        "thruster_unit": (0.0, tail_y, H * 0.35),
+        "fork_single": fork_pos,
+        "fork_dual": fork_pos,
         "fin_marker": (0.0, -L * 0.5 + 0.05, H + 0.35),
         "tail_marker": (0.0, L * 0.5 - 0.05, H + 0.05),
-        # Off-centre variants — same Y/Z as their centre counterparts so
-        # the row reads as "alternate fairing/fork choices".
-        "fairing_swept": (variant_dx, 0.0, H + 0.15),
-        "fairing_full": (-variant_dx, 0.0, H + 0.15),
-        "fork_dual": (variant_dx, nose_y, H * 0.4),
     }
 
     # Match build_bike.py: chassis is a unit cube the builder scales to
