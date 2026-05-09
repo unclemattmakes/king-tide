@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import {
   abs,
+  cameraFar,
+  cameraNear,
   cameraPosition,
   clamp,
   cos,
@@ -14,7 +16,9 @@ import {
   min,
   mix,
   normalize,
+  perspectiveDepthToViewZ,
   positionLocal,
+  positionView,
   positionWorld,
   pow,
   sin,
@@ -25,6 +29,7 @@ import {
   varying,
   vec2,
   vec3,
+  viewportDepthTexture,
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
 import {
@@ -36,6 +41,9 @@ import {
   WAKE_LONG_RAMP,
   WAKE_SPEED_HIGH,
   WAKE_SPEED_LOW,
+  WAKE_TRANS_AMP,
+  WAKE_TRANS_K,
+  WAKE_TRANS_OMEGA,
   type WaveFieldState,
 } from '@/engine/sim/water/wave-field'
 
@@ -65,6 +73,15 @@ export type WaterMesh = {
    * array (e.g. in editor mode) to leave the surface clean.
    */
   tick(impacts?: readonly BikeImpact[], originXZ?: { x: number; z: number }): void
+  /**
+   * Updates the water shader's sun-direction uniform from a world-space
+   * sun position (typically the directional light's position). The
+   * vector is normalized internally; pass either a position or already-
+   * normalized direction. Used by the day-night cycle in `main.ts` to
+   * keep the water's sun-glow + scatter blend in sync with the moving
+   * directional light.
+   */
+  setSunDirection(x: number, y: number, z: number): void
   dispose(): void
 }
 
@@ -136,6 +153,21 @@ export function createWaterMesh(
   // single-vertex shimmer. 384² ≈ 147 k verts is trivial on a real GPU.
   const subs = opts?.subdivisions ?? 384
 
+  // ---- Debug toggles ----------------------------------------------------
+  // `?water=classic` falls back to vertical-only Gerstner + the original
+  // single-color albedo gradient (no horizontal pinching, no scatter blend).
+  // Useful for A/B-ing the SoT-style upgrade in playtest.
+  // `?water=wire` (handled later) renders wireframe — see end of function.
+  // `?steep=<n>` overrides the initial steepness scale (0..1.5 recommended).
+  const params =
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+  const waterMode = params?.get('water') ?? 'v2'
+  const isClassic = waterMode === 'classic'
+  // `?wire=1` is an ORTHOGONAL toggle — works with classic, v2, and any
+  // future shader variant. The old `?water=wire` is still honored for
+  // backward compatibility.
+  const wireFlag = params?.get('wire') === '1' || waterMode === 'wire'
+
   const geom = new THREE.PlaneGeometry(size, size, subs, subs)
   geom.rotateX(-Math.PI / 2)
 
@@ -143,6 +175,16 @@ export function createWaterMesh(
   // (rather than wall-clock) keeps rendering deterministic and matches
   // buoyancy exactly across rewinds / fixed-step runs.
   const tNode = uniform(field.time)
+
+  // Global steepness scale Q ∈ [0, ~1.5]. 0 = vertical-only Gerstner (round
+  // bumps); higher values pinch crests laterally (Sea-of-Thieves-style
+  // ridges). Each wave has a per-wave Q_BASE in waveConsts (chops sharper
+  // than swells); this uniform multiplies all of them. Default 0.7 keeps the
+  // sum Σ Q_eff · k · A well below the loop-formation limit (~1).
+  const initialSteepness = isClassic
+    ? 0
+    : Math.max(0, Math.min(1.5, Number(params?.get('steep') ?? '0.7')))
+  const steepnessUniform = uniform(initialSteepness)
 
   // World-XZ origin of the mesh — set by `tick(...)` to the camera's XZ
   // each frame so the mesh follows the camera. The wave / wake math
@@ -174,8 +216,17 @@ export function createWaterMesh(
     dirZ: number
     amp: number
     phase: number
+    /** Per-wave steepness coefficient (multiplied at runtime by the global
+     * `steepnessUniform`). Higher values pinch the wave's crest laterally;
+     * 0 falls back to a pure heightfield (no horizontal displacement).
+     * Tuned per-wave so chops are sharper (more "ridge"-like) than the
+     * long swells (which stay rolling). */
+    qBase: number
   }
-  const waveConsts: WaveConst[] = field.waves.map((w) => {
+  // Per-wave Q defaults — index-aligned to defaultWaves(): two long swells,
+  // four chop scales. Swells stay gentle; chops get sharp ridges.
+  const Q_BASE_DEFAULTS = [0.35, 0.35, 0.85, 0.95, 1.0, 1.0]
+  const waveConsts: WaveConst[] = field.waves.map((w, i) => {
     const k = (2 * Math.PI) / w.wavelength
     return {
       k,
@@ -184,12 +235,15 @@ export function createWaterMesh(
       dirZ: w.dirZ,
       amp: w.amplitude,
       phase: w.phase,
+      qBase: Q_BASE_DEFAULTS[i] ?? 0.7,
     }
   })
 
-  // Gerstner sum-of-sines, returned as vec3(height, dy/dx, dy/dz). Waves
-  // are unrolled at build time so the resulting shader has no dynamic loop.
-  const gerstner = Fn(([x, z, t]: [unknown, unknown, unknown]) => {
+  // Gerstner — heightfield part: returns vec3(y, dy/dx, dy/dz). These are the
+  // same values you'd get from a vertical-only sum of sines, used both for the
+  // wave's vertical displacement and for the x/z components of the surface
+  // normal (cosine slopes). Waves are unrolled at build time.
+  const gerstnerHeight = Fn(([x, z, t]: [unknown, unknown, unknown]) => {
     const xN = x as ReturnType<typeof float>
     const zN = z as ReturnType<typeof float>
     const tN = t as ReturnType<typeof float>
@@ -209,6 +263,40 @@ export function createWaterMesh(
       dydz.addAssign(c.mul(w.amp * w.k * w.dirZ))
     }
     return vec3(y, dydx, dydz)
+  })
+
+  // Gerstner — horizontal-displacement part: returns vec3(dx, dz, qSum).
+  // The horizontal displacement is what produces the SoT-style pinched
+  // ridges (vs round bumps). qSum is the y-component reduction in the
+  // normal formula (GPU Gems eq.13: N.y = 1 - Σ Q·k·A·sin(phase)).
+  // Two-Fn split (rather than one monolithic Fn) is forced by TSL's single-
+  // node return; the duplicated sin/cos per wave is trivial on a real GPU.
+  // With Q=0 (`?water=classic`) this Fn returns vec3(0, 0, 0) and the
+  // surface collapses to the pure heightfield case.
+  const gerstnerDisp = Fn(([x, z, t]: [unknown, unknown, unknown]) => {
+    const xN = x as ReturnType<typeof float>
+    const zN = z as ReturnType<typeof float>
+    const tN = t as ReturnType<typeof float>
+    const dx = float(0).toVar()
+    const dz = float(0).toVar()
+    const qSum = float(0).toVar()
+    for (const w of waveConsts) {
+      const phase = float(w.k * w.dirX)
+        .mul(xN)
+        .add(float(w.k * w.dirZ).mul(zN))
+        .sub(tN.mul(w.omega))
+        .add(float(w.phase))
+      const s = sin(phase)
+      const c = cos(phase)
+      const qScaled = steepnessUniform.mul(float(w.qBase))
+      // Horizontal displacement: P.x += Q·A·D.x · cos(phase),
+      //                          P.z += Q·A·D.z · cos(phase)
+      dx.addAssign(qScaled.mul(float(w.amp * w.dirX)).mul(c))
+      dz.addAssign(qScaled.mul(float(w.amp * w.dirZ)).mul(c))
+      // Normal y-component reduction: Σ Q · k · A · sin(phase)
+      qSum.addAssign(qScaled.mul(float(w.k * w.amp)).mul(s))
+    }
+    return vec3(dx, dz, qSum)
   })
 
   // Fused per-bike vertex contribution: hull dimple (subtractive) + wake
@@ -293,6 +381,15 @@ export function createWaterMesh(
           const transverseSigned = insidePart.mul(fadeOut)
           const longRamp = float(1).sub(exp(behind.mul(-WAKE_LONG_RAMP)))
           const longDecay = exp(behind.mul(-WAKE_LONG_DECAY))
+          // Transverse "scallops" (M9.35): mirrors sampleWakeFromSource.
+          // sin(K · behind − ω · t) modulates the V's amplitude along its
+          // length; the pattern drifts backward in the bike's frame as t
+          // advances, giving the wake the live oscillating ridges of a
+          // real Kelvin wake.
+          const longPhase = tN
+            .mul(-WAKE_TRANS_OMEGA)
+            .add(behind.mul(WAKE_TRANS_K))
+          const transverseMod = float(1).add(sin(longPhase).mul(WAKE_TRANS_AMP))
           // biome-ignore lint/suspicious/noExplicitAny: TSL UniformArrayElementNode lacks float-typing in TS
           const weight = weightsUniform.element(i) as any
           const amp = float(WAKE_DISP_AMP)
@@ -300,6 +397,7 @@ export function createWaterMesh(
             .mul(speedGate)
             .mul(longRamp)
             .mul(longDecay)
+            .mul(transverseMod)
           y.addAssign(amp.mul(transverseSigned))
           // Approximate gradient: dominated by the perp direction (the V
           // shape's slope). Use the inside-V slope as a uniform-ish
@@ -329,45 +427,226 @@ export function createWaterMesh(
   // sign handling). The mesh slides under the camera each frame, so we
   // sample the wave/wake field at WORLD coords (`positionLocal + meshOrigin`)
   // — that keeps the surface continuous in world space even as the mesh's
-  // local origin moves. We compute the gradient here too and forward it
+  // local origin moves.
+  //
+  // We use the standard Gerstner formulation (GPU Gems Ch.1) — vertices
+  // are displaced both horizontally and vertically, so crests pinch into
+  // ridges instead of being round bumps:
+  //
+  //   P.x = x0 + Σ Q_i · A_i · D_i.x · cos(phase_i)
+  //   P.y = y0 + Σ A_i · sin(phase_i)
+  //   P.z = z0 + Σ Q_i · A_i · D_i.z · cos(phase_i)
+  //
+  // The closed-form normal from GPU Gems eq. 13:
+  //   N = (-Σ A·k·D.x·cos, 1 - Σ Q·k·A·sin, -Σ A·k·D.z·cos)
+  //
+  // Note that the heightfield slopes (Σ A·k·D.x·cos) are the SAME values
+  // we'd compute for a pure heightfield Gerstner; the only new term in
+  // the normal is the y-component reduction (`qSum`). With Q=0 (classic
+  // mode) the formula collapses exactly to the old heightfield normal.
+  //
+  // We compute the gradients here at the vertex stage and forward them
   // via `varying(...)` so the fragment can build the surface normal from
-  // interpolated values instead of re-running the Gerstner sum per pixel
-  // (several sin/cos per wave per fragment is fine on a real GPU but tanks
-  // the headless WebGL2 software fallback to single-digit fps). Per-vertex
-  // + interp is visually indistinguishable here because the mesh
-  // resolution (≈ 0.6 m) is finer than the wave gradient.
+  // interpolated values instead of re-running the Gerstner sum per pixel.
+  // Per-vertex + interp is visually indistinguishable here because the
+  // mesh resolution (≈ 0.6 m) is finer than the wave gradient.
+  //
+  // Physics-side note: wave-field.ts (CPU buoyancy) keeps the simpler
+  // vertical-only formulation. With low-to-moderate Q, the rendered
+  // surface and the buoyancy field stay within ~0.4 m of each other
+  // horizontally — well below visible disconnect for a hoverbike skimming
+  // the surface. If steepness is pushed past 1, consider a Newton iteration
+  // on the CPU side to recover the rest position from world XZ.
   const worldX = positionLocal.x.add(meshOriginX)
   const worldZ = positionLocal.z.add(meshOriginZ)
-  const vertexWave = gerstner(worldX, worldZ, tNode)
+  const vertexHeight = gerstnerHeight(worldX, worldZ, tNode)
+  const vertexDisp = gerstnerDisp(worldX, worldZ, tNode)
   const vertexBike = bikeSurfaceContrib(worldX, worldZ, tNode)
-  const totalHeight = vertexWave.x.add(vertexBike.x)
-  const totalDydx = vertexWave.y.add(vertexBike.y)
-  const totalDydz = vertexWave.z.add(vertexBike.z)
+  // vertexHeight = vec3(y, dy/dx, dy/dz)
+  // vertexDisp   = vec3(dx, dz, qSum)
+  // vertexBike   = vec3(deltaY, ddelta/dx, ddelta/dz)
+  const totalHeight = vertexHeight.x.add(vertexBike.x)
+  const totalDydx = vertexHeight.y.add(vertexBike.y)
+  const totalDydz = vertexHeight.z.add(vertexBike.z)
+
+  // Foam accumulator (stateless, no render targets needed).
+  //
+  // The trick: waves are deterministic functions of (x, z, t), so "did this
+  // position have a crest 0.5s ago?" reduces to evaluating gerstner(x, z,
+  // t-0.5). We sample the foam-trigger signal (slopeFoam OR foldFoam) at
+  // N time steps in the recent past, decay each by exp(-i·dt·k), and take
+  // the max. The result: foam appears AT a crest and lingers behind for
+  // ~1s as the wave moves on, instead of vanishing the moment the crest
+  // passes. That's what gives ocean foam its "trail" character — the
+  // crest moves on but the whitecap doesn't.
+  //
+  // This is the cheap stateless cousin of SoT's persistent foam texture
+  // (which uses an FFT Jacobian + render-target ping-pong). For our
+  // arcade racer, 4 time samples × 6 waves × 2 trig per call ≈ 96 trig
+  // per vertex on top of the existing 24 — well within the per-frame
+  // budget on any real GPU.
+  //
+  // Wakes are NOT included in the time history (would need historical
+  // bike positions). Wake foam stays current-time only via bikeFoam below.
+  // Off in classic mode for clean A/B comparison.
+  const foamAccumulator = Fn(([x, z, t]: [unknown, unknown, unknown]) => {
+    const xN = x as ReturnType<typeof float>
+    const zN = z as ReturnType<typeof float>
+    const tN = t as ReturnType<typeof float>
+    const maxFoam = float(0).toVar()
+    const NUM_SAMPLES = 4
+    const DT = 0.25
+    const DECAY_RATE = 1.5 // half-life ≈ 0.46s
+    for (let i = 0; i < NUM_SAMPLES; i++) {
+      const dt = i * DT
+      const tShifted = tN.sub(float(dt))
+      const h = gerstnerHeight(xN, zN, tShifted)
+      const d = gerstnerDisp(xN, zN, tShifted)
+      // h.y, h.z are dy/dx, dy/dz at this time sample.
+      const slope = sqrt(h.y.mul(h.y).add(h.z.mul(h.z)))
+      const slopeFoam = smoothstep(float(0.4), float(0.9), slope)
+      const foldFoam = smoothstep(float(0.12), float(0.35), d.z)
+      const localFoam = max(slopeFoam, foldFoam)
+      const decay = float(Math.exp(-dt * DECAY_RATE))
+      maxFoam.assign(max(maxFoam, localFoam.mul(decay)))
+    }
+    return maxFoam
+  })
+  const vertexFoamAccum = isClassic ? float(0) : foamAccumulator(worldX, worldZ, tNode)
 
   // positionNode is in mesh-local space; the mesh translation
   // (mesh.position.x/z = camera XZ) carries the vertex out to world.
-  const positionNode = vec3(positionLocal.x, totalHeight, positionLocal.z)
+  // Adding the Gerstner horizontal displacement to positionLocal.x/z applies
+  // the pinching in mesh-local space — equivalent to world-space because
+  // the mesh transform is a pure translation.
+  const positionNode = vec3(
+    positionLocal.x.add(vertexDisp.x),
+    totalHeight,
+    positionLocal.z.add(vertexDisp.y),
+  )
 
-  // Forward height + gradient to fragment via varyings. The framework
-  // marks these as vertex-stage and inserts the interpolated reads.
+  // Forward height + gradient + qSum + accumulated foam to fragment via
+  // varyings. The framework marks these as vertex-stage and inserts the
+  // interpolated reads.
   const heightFrag = varying(totalHeight)
   const dydx = varying(totalDydx)
   const dydz = varying(totalDydz)
+  const qSumFrag = varying(vertexDisp.z)
+  const foamAccumFrag = varying(vertexFoamAccum)
 
-  // Surface normal of y = f(x, z) is (-dy/dx, 1, -dy/dz), normalized.
-  const normalNode = normalize(vec3(dydx.negate(), float(1.0), dydz.negate()))
-
-  // Albedo: deep blue in troughs, brighter cyan on crests.
-  const heightNorm = smoothstep(float(-0.9), float(0.9), heightFrag)
-  const deepColor = vec3(0.04, 0.18, 0.4)
-  const shallowColor = vec3(0.16, 0.55, 0.78)
-  const baseColor = mix(deepColor, shallowColor, heightNorm)
-
-  // Wave-driven crest foam: high + steep crests break.
-  const slopeMag = sqrt(dydx.mul(dydx).add(dydz.mul(dydz)))
-  const waveFoam = smoothstep(float(0.55), float(0.95), heightNorm).add(
-    smoothstep(float(0.45), float(0.9), slopeMag).mul(0.5),
+  // GPU Gems eq.13 normal: (-Σdy/dx, 1 - Σ Q·k·A·sin, -Σdy/dz).
+  // The wake's gradients are folded into dydx/dydz; the wake has no
+  // horizontal-displacement term so it doesn't contribute to qSum.
+  const normalNode = normalize(
+    vec3(dydx.negate(), float(1).sub(qSumFrag), dydz.negate()),
   )
+
+  // View vector + ndotv computed once and reused by both the scatter blend
+  // (base color) and the fresnel sky-tint emissive below.
+  const viewDir = normalize(cameraPosition.sub(positionWorld))
+  const ndotv = max(dot(normalNode, viewDir), float(0))
+
+  // Albedo: two-color scatter blend.
+  //
+  // Sea-of-Thieves-style: a deep teal in troughs blends to a bright
+  // cyan-green "scatter color" on crests, on grazing-view-angle samples,
+  // AND on waves backlit by the sun. The three contributions stack:
+  //
+  //   heightFactor   — crest faces scatter, troughs don't
+  //   viewFactor     — sub-surface scattering makes wave bodies brightest
+  //                    when viewed nearly along the surface (grazing)
+  //   sunBackscatter — light passing through a wave from sun-side to eye-
+  //                    side; peaks when the line of sight points roughly
+  //                    toward the sun
+  //
+  // Classic mode (`?water=classic`) keeps the original blue→cyan mix with
+  // pure height-driven blending for A/B comparison.
+  const heightNorm = smoothstep(float(-0.9), float(0.9), heightFrag)
+  const heightFactor = isClassic
+    ? heightNorm
+    : smoothstep(float(-0.7), float(0.8), heightFrag)
+  const deepColor = isClassic ? vec3(0.04, 0.18, 0.4) : vec3(0.02, 0.12, 0.22)
+  const scatterColor = isClassic ? vec3(0.16, 0.55, 0.78) : vec3(0.22, 0.7, 0.65)
+
+  // Sun-direction back-scatter. uSunDir matches the scene's
+  // DirectionalLight (50, 70, 70) — see scene.ts. Stored normalized as a
+  // uniform so a future day/night cycle can animate it. The dot is
+  // viewDir.negate() · sunDir = (line-of-sight) · (toward-sun); peaks at
+  // 1.0 when the camera is looking toward the sun, falls to 0 when
+  // looking perpendicular, < 0 when looking away (clamped). Squared so
+  // the boost is concentrated near the sun direction.
+  const sunDirUniform = uniform(new THREE.Vector3(50, 70, 70).normalize())
+  const sunBackscatter = isClassic
+    ? float(0)
+    : pow(max(float(0), dot(viewDir.negate(), sunDirUniform)), float(2))
+
+  const scatterAmount = isClassic
+    ? heightNorm
+    : (() => {
+        // Crest scatter ramps with height; grazing view bumps it; sun
+        // backlight bumps it further. Combined boost can exceed 1.0 (we
+        // clamp at the end so deep troughs stay dark even with sun
+        // alignment).
+        const viewFactor = float(1).sub(ndotv)
+        const baseBoost = mix(float(0.55), float(1.0), viewFactor)
+        const sunBoost = sunBackscatter.mul(0.55)
+        return clamp(heightFactor.mul(baseBoost.add(sunBoost)), float(0), float(1))
+      })()
+  const baseColor = mix(deepColor, scatterColor, scatterAmount)
+
+  // Sun glow emissive — additive on top of the scatter blend for the
+  // unmistakable SoT "lit-from-behind" wave glow. Peaks on tall crests
+  // (`heightFactor`) lit from behind (`sunBackscatter`), tinted with
+  // scatterColor. Off in classic mode.
+  const sunGlow = isClassic
+    ? vec3(0, 0, 0)
+    : scatterColor.mul(sunBackscatter.mul(heightFactor).mul(float(0.6)))
+
+  // Wave-driven foam.
+  //
+  // v2 mode: pre-baked at the vertex stage by the foam accumulator (see
+  // comment block above the Fn definition) — sampled at 4 time steps in
+  // the recent past, decayed exponentially, max-reduced. Foam lingers
+  // ~1s behind passing crests, which is what gives ocean foam its trail
+  // character. We DON'T apply a height gate to the accumulator output:
+  // foam should persist on what's now a trough if it WAS a crest a
+  // moment ago.
+  //
+  // Classic mode: original physically-motivated foam (slope OR Jacobian
+  // onset, height-gated) — no time accumulation, but still fixes the
+  // pre-M9.29 height-driven trigger. The qSum branch evaluates to 0 when
+  // steepness=0 so only slopeFoam contributes here.
+  const slopeMag = sqrt(dydx.mul(dydx).add(dydz.mul(dydz)))
+  const waveFoam = isClassic
+    ? (() => {
+        const slopeFoam = smoothstep(float(0.4), float(0.9), slopeMag)
+        const heightGate = smoothstep(float(-0.4), float(0.3), heightFrag)
+        return slopeFoam.mul(heightGate)
+      })()
+    : foamAccumFrag
+
+  // Shared turbulent foam noise — world XZ + time scroll. Used to break
+  // up the otherwise-too-clean foam edges of shoreline, wake, and bow
+  // spray so they read as living turbulence instead of stamped outlines.
+  // NOT applied to wave-driven foam (slope / Jacobian / accumulator),
+  // since natural whitecap foam already has its own variation from the
+  // wave field — adding more noise on top reads as TV-static.
+  //
+  // The same noise is sampled by:
+  //   - shoreline foam range (lapping in/out by ±0.2m via `foamNoiseRaw`)
+  //   - wake foam intensity (multiplicative `foamTurbulence`)
+  //   - bow spray intensity (multiplicative `foamTurbulence`)
+  // so all interactive foam moves with a unified visual rhythm.
+  const foamNoiseUV = positionWorld.xz
+    .mul(0.35)
+    .add(vec2(tNode.mul(-0.18), tNode.mul(0.13)))
+  const foamNoiseRaw = fract(
+    sin(foamNoiseUV.x.mul(12.9898).add(foamNoiseUV.y.mul(78.233))).mul(43758.5453),
+  )
+  const foamNoiseSmooth = smoothstep(float(0.2), float(0.85), foamNoiseRaw)
+  // Multiplier in [0.5, 1.0] — never erases foam, just breaks up its
+  // intensity into turbulent patches.
+  const foamTurbulence = mix(float(0.5), float(1.0), foamNoiseSmooth)
 
   // Per-bike foam: hull ring + V-wake stripe. We wrap the per-bike work in
   // a Fn() so we can use If(...) to early-out for slots whose bike is far
@@ -397,12 +676,6 @@ export function createWaterMesh(
         // biome-ignore lint/suspicious/noExplicitAny: TSL UniformArrayElementNode lacks float-typing in TS
         const weight = weightsUniform.element(i) as any
 
-        // Hull foam ring: bright at the dimple's outer edge, fading
-        // inward and outward over a small band.
-        const ringInner = smoothstep(float(BIKE_DIMPLE_R - 1.0), float(BIKE_DIMPLE_R - 0.2), r)
-        const ringOuter = smoothstep(float(BIKE_DIMPLE_R + 0.6), float(BIKE_DIMPLE_R - 0.2), r)
-        const ring = ringInner.mul(ringOuter).mul(weight).mul(0.55)
-
         // V-wake foam stripe behind the bike.
         // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
         const vx = slot.z as any
@@ -414,31 +687,151 @@ export function createWaterMesh(
         const hatZ = vz.div(safeSpeed)
         const parallel = dxRel.mul(hatX).add(dzRel.mul(hatZ))
         const behind = max(parallel.negate(), float(0))
+        const ahead = max(parallel, float(0))
         // 2D perpendicular distance via cross-product magnitude (cheaper
         // than `length(d - hat * parallel)`).
         const perp = abs(dxRel.mul(hatZ).sub(dzRel.mul(hatX)))
+        const speedGate = smoothstep(float(WAKE_SPEED_LOW), float(WAKE_SPEED_HIGH), speed)
+
+        // Hull foam ring: bright at the dimple's outer edge, fading
+        // inward and outward over a small band. Speed-modulated so it
+        // reads more dramatically at race pace — at full speed the ring
+        // is ~1.6× brighter than at idle, communicating the hull's
+        // active interaction with the water.
+        const ringInner = smoothstep(float(BIKE_DIMPLE_R - 1.0), float(BIKE_DIMPLE_R - 0.2), r)
+        const ringOuter = smoothstep(float(BIKE_DIMPLE_R + 0.6), float(BIKE_DIMPLE_R - 0.2), r)
+        const ringSpeedBoost = float(1).add(speedGate.mul(0.6))
+        const ring = ringInner.mul(ringOuter).mul(weight).mul(0.55).mul(ringSpeedBoost)
+
+        // V-wake foam stripe behind the bike. Multiplied by `foamTurbulence`
+        // so the edges break up into patches instead of a clean Kelvin-V
+        // outline — that's what made the prior wake feel "stamped".
         const wakeWidth = behind.mul(WAKE_HALF_ANGLE_TAN).add(float(WAKE_BASE_WIDTH))
         const behindGate = smoothstep(float(0.0), float(0.3), behind)
-        const speedGate = smoothstep(float(WAKE_SPEED_LOW), float(WAKE_SPEED_HIGH), speed)
         const decay = exp(behind.mul(-WAKE_LONG_DECAY))
         const edgeBlur = smoothstep(wakeWidth.add(0.4), wakeWidth.sub(0.5), perp)
-        const wake = behindGate.mul(speedGate).mul(decay).mul(edgeBlur).mul(weight).mul(0.7)
+        const wake = behindGate
+          .mul(speedGate)
+          .mul(decay)
+          .mul(edgeBlur)
+          .mul(weight)
+          .mul(0.7)
+          .mul(foamTurbulence)
 
-        sum.addAssign(ring.add(wake))
+        // Stern propwash (M9.33): bright concentrated foam directly behind
+        // the bike (peaks at ~0.3m, fades to 0 by ~2.5m). Centered on the
+        // wake axis (perp ≈ 0). What gives the wake its kinetic "boat is
+        // here" feel rather than a pure V outline. NOT noise-modulated —
+        // the propwash is a solid mass of foam that the bike actively
+        // generates, distinct from the turbulent edges trailing behind.
+        const propwashFalloff = exp(behind.mul(-1.0))
+        const propwashLateral = float(1).sub(smoothstep(float(0), float(0.7), perp))
+        const propwashGate = smoothstep(float(0.0), float(0.2), behind)
+        const propwash = propwashGate
+          .mul(speedGate)
+          .mul(propwashFalloff)
+          .mul(propwashLateral)
+          .mul(weight)
+          .mul(0.65)
+
+        // Bow spray: forward foam "moustache" in front of the bike,
+        // peaking just ahead and fading to 0 by ~1.5m forward. Same
+        // Kelvin-V geometry as the wake but FORWARD-facing with a
+        // tighter half-angle, so the spray reads as a sharp arc rather
+        // than a long trail. Speed-gated so a parked bike doesn't spray.
+        // The bike's hull pushes water forward at race pace; this is
+        // the visual cue for that interaction. Noise-modulated for the
+        // same turbulent character as the wake.
+        const splashHalfAngle = 0.35
+        const splashWidth = ahead.mul(splashHalfAngle).add(float(0.35))
+        const aheadGate = smoothstep(float(0.0), float(0.25), ahead)
+        const aheadFalloff = exp(ahead.mul(-1.6))
+        const splashEdge = smoothstep(splashWidth.add(0.3), splashWidth.sub(0.4), perp)
+        const bowSpray = aheadGate
+          .mul(speedGate)
+          .mul(aheadFalloff)
+          .mul(splashEdge)
+          .mul(weight)
+          .mul(0.85)
+          .mul(foamTurbulence)
+
+        sum.addAssign(ring.add(wake).add(propwash).add(bowSpray))
       })
     }
     return sum
   })
   const bikeFoam = computeBikeFoam()
 
-  const foamMask = clamp(waveFoam.add(bikeFoam), float(0), float(0.92))
+  // Shoreline foam (M9.32): white foam where terrain is just below the
+  // water surface — the visual cue for "you're approaching land". Works
+  // by reading the opaque scene depth buffer at this fragment's screen
+  // position and comparing to the water fragment's own view-space Z. When
+  // the difference is small (terrain top ~0–1.5m below water), foam shows;
+  // farther down, foam fades to 0.
+  //
+  // Two gates handle the edge cases:
+  //   - `behindGate`: only triggers when scene is BEHIND water (positive
+  //     closeness). Without this, opaque objects rendered in front of the
+  //     water (e.g. bikes between camera and water surface) would falsely
+  //     trigger foam wherever they occlude the water plane.
+  //   - `depthFade`: smooth fade from full foam at the intersection to 0
+  //     at FOAM_INTERSECTION_RANGE meters depth.
+  //
+  // Off in classic mode (it's a v2 feature; classic preserves the original
+  // single-foam path for clean A/B). The depth read is cheap on real GPU
+  // (one texture sample + one viewZ conversion) — no per-vertex cost.
+  const intersectionFoam = isClassic
+    ? float(0)
+    : (() => {
+        const FOAM_INTERSECTION_BASE = 1.5
+        // viewportDepthTexture() samples the opaque depth at this fragment.
+        // .r is the non-linear depth in [0, 1].
+        // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+        const sceneDepthRaw = (viewportDepthTexture() as any).r
+        const sceneViewZ = perspectiveDepthToViewZ(sceneDepthRaw, cameraNear, cameraFar)
+        const waterViewZ = positionView.z
+        // closenessSigned > 0 means terrain is BEHIND water (deeper into
+        // the scene from camera's POV). View-Z is negative for points in
+        // front of camera, so waterViewZ − sceneViewZ is positive when
+        // sceneViewZ is more negative (further away).
+        const closenessSigned = waterViewZ.sub(sceneViewZ)
+        const behindGate = smoothstep(float(-0.05), float(0.05), closenessSigned)
+        // Lapping shoreline (M9.33): the depth threshold breathes ±0.4m
+        // around the 1.5m base as the shared foam noise scrolls. Where
+        // noise is high, the foam reaches further off-shore (1.9m); where
+        // low, it pulls back (1.1m). Combined with the static depth
+        // intersection, this reads as the surf "lapping" against the
+        // shore rather than a static water-line.
+        const noiseRangeOffset = foamNoiseRaw.sub(float(0.5)).mul(float(0.8))
+        const foamRangeNow = float(FOAM_INTERSECTION_BASE).add(noiseRangeOffset)
+        const depthFade = float(1).sub(
+          smoothstep(float(0), foamRangeNow, max(float(0), closenessSigned)),
+        )
+        // Slight intensity modulation on top so the foam itself has
+        // texture (not just a moving edge).
+        const intensityModulator = mix(float(0.7), float(1.0), foamNoiseSmooth)
+        return behindGate.mul(depthFade).mul(intensityModulator)
+      })()
+
+  // Intersection foam is full-opaque white where it fires (we want the
+  // shoreline edge to read clearly against the water), so we max-combine
+  // it with the (waveFoam + bikeFoam) sum rather than adding — additive
+  // would create unnaturally over-bright zones at gate posts where the
+  // ramp hits water.
+  const foamMask = clamp(
+    max(waveFoam.add(bikeFoam), intersectionFoam.mul(0.95)),
+    float(0),
+    float(0.95),
+  )
   const foamColor = vec3(0.92, 0.96, 1.0)
   const albedo = mix(baseColor, foamColor, foamMask)
 
   // Fresnel: tint with sky color at grazing angles. We push this into the
   // emissive channel so it adds even where the sun isn't catching the wave.
-  const viewDir = normalize(cameraPosition.sub(positionWorld))
-  const ndotv = max(dot(normalNode, viewDir), float(0))
+  // (viewDir + ndotv computed earlier and shared with the scatter blend.)
+  // Tone curve is gentler in v2 mode since the scatter blend already
+  // brightens grazing-angle samples — too much fresnel on top reads as
+  // chrome. Classic mode preserves the original 0.5 mix.
   const f0 = float(0.02)
   const fresnel = f0.add(
     float(1)
@@ -446,21 +839,40 @@ export function createWaterMesh(
       .mul(pow(float(1).sub(ndotv), 5)),
   )
   const skyTint = vec3(0.55, 0.72, 0.95)
-  const fresnelEmissive = skyTint.mul(fresnel.mul(0.5))
+  const fresnelEmissive = skyTint.mul(fresnel.mul(isClassic ? 0.5 : 0.32))
 
   // Sparkle: cheap hash on world XZ + animated UV scroll, gated to crests.
+  // Two-layer mask so we get both broad "glistening areas" (low-frequency
+  // bright patches) and pin-prick highlights (high-frequency hash). The
+  // pin-pricks feed the additive emissive (the dancing white pixels you
+  // see on the wave faces); the broad mask drops the local roughness so
+  // the PBR specular lobe tightens INTO sparkle bursts where the sun
+  // catches the surface — that's the SoT-style glistening. Without the
+  // roughness modulation, sparkle was purely additive and read as
+  // "fairy dust on top" rather than highlights breaking up.
   const sparkleSeed = positionWorld.xz.mul(0.6).add(vec2(tNode.mul(0.27), tNode.mul(-0.19)))
   const sparkleNoise = fract(
     sin(sparkleSeed.x.mul(12.9898).add(sparkleSeed.y.mul(78.233))).mul(43758.5453),
   )
-  const sparkleMask = smoothstep(float(0.985), float(1.0), sparkleNoise).mul(
-    smoothstep(float(0.45), float(0.85), heightNorm),
-  )
+  const sparkleHeightGate = smoothstep(float(0.45), float(0.85), heightNorm)
+  const sparkleMask = smoothstep(float(0.985), float(1.0), sparkleNoise).mul(sparkleHeightGate)
   const sparkleEmissive = vec3(1.0, 1.0, 1.0).mul(sparkleMask)
+
+  // Broader sparkle "patches" for the roughness modulation. Lower-frequency
+  // seed, animated independently — produces wandering bright zones that
+  // tighten the specular highlight rather than discrete pixels.
+  const broadSeed = positionWorld.xz.mul(0.18).add(vec2(tNode.mul(-0.11), tNode.mul(0.08)))
+  const broadNoise = fract(
+    sin(broadSeed.x.mul(12.9898).add(broadSeed.y.mul(78.233))).mul(43758.5453),
+  )
+  const broadMask = smoothstep(float(0.55), float(0.85), broadNoise).mul(sparkleHeightGate)
 
   const mat = new MeshStandardNodeMaterial({
     transparent: true,
     metalness: 0.45,
+    // roughness is now driven by `roughnessNode` below; this constant is the
+    // base value (used when `roughnessNode` evaluates to 1.0 — i.e. away
+    // from sparkle patches).
     roughness: 0.18,
     envMapIntensity: 0.9,
   })
@@ -468,19 +880,36 @@ export function createWaterMesh(
   mat.positionNode = positionNode
   mat.normalNode = normalNode
   mat.colorNode = albedo
-  mat.emissiveNode = fresnelEmissive.add(sparkleEmissive)
+  mat.emissiveNode = fresnelEmissive.add(sparkleEmissive).add(sunGlow)
   mat.opacityNode = float(0.78)
+  // Noise-modulated roughness. In sparkle patches roughness drops from 0.18
+  // to ~0.04, tightening the specular lobe and producing crisp highlights.
+  // Classic mode keeps the constant 0.18 so the A/B comparison is clean.
+  if (!isClassic) {
+    mat.roughnessNode = mix(float(0.18), float(0.04), broadMask)
+  }
 
   // Debug: ?water=wire renders the water mesh as wireframe so you can see
   // the actual vertex displacement (vs. just shaded color). Useful when
   // tuning the wake / dimple / wave amplitudes — turn it on, drive the
   // bike, see the actual ridges in the geometry.
   if (typeof window !== 'undefined') {
-    const q = new URLSearchParams(window.location.search)
-    if (q.get('water') === 'wire') {
+    if (wireFlag) {
       mat.wireframe = true
       mat.transparent = false
       mat.opacityNode = float(1)
+    }
+    // Live tuning hook for playtest: in the dev console, call
+    //   __waterSteepness(0.9)
+    // to scrub the global Q multiplier without reloading. Returns the
+    // clamped value actually applied. 0 = vertical-only blobs, 0.7 = SoT
+    // default, 1+ = ridge-y / chop-heavy. Past ~1.3 the sum may form loops
+    // (vertices crossing) — visually jagged but not crashing.
+    // biome-ignore lint/suspicious/noExplicitAny: dev-only debug hook
+    ;(window as any).__waterSteepness = (s: number) => {
+      const clamped = Math.max(0, Math.min(1.5, Number(s) || 0))
+      steepnessUniform.value = clamped
+      return clamped
     }
   }
 
@@ -518,10 +947,15 @@ export function createWaterMesh(
     }
   }
 
+  function setSunDirection(x: number, y: number, z: number): void {
+    const len = Math.hypot(x, y, z) || 1
+    sunDirUniform.value.set(x / len, y / len, z / len)
+  }
+
   function dispose() {
     geom.dispose()
     mat.dispose()
   }
 
-  return { mesh, tick, dispose }
+  return { mesh, tick, setSunDirection, dispose }
 }

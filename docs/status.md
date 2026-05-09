@@ -143,6 +143,240 @@ amplitudes 0.55 m + 0.4 m) with slightly different periods (~6.0 s vs
 logic needed). Four chop bands fill in surface texture across multiple
 scales (22 m down to 5.5 m).
 
+### Water v2 — SoT-style ocean (M9.29) — *load-bearing for "feel"*
+Five-piece upgrade in [`src/engine/render/water.ts`](../src/engine/render/water.ts) and [`src/game/systems/hover.ts`](../src/game/systems/hover.ts) inspired by
+the SIGGRAPH 2018 *Technical Art of Sea of Thieves* talk and the Atlas GDC
+2019 wave-physics talk:
+
+1. **Horizontal-displacement Gerstner** (render only) — vertices now displace
+   both vertically AND laterally per GPU Gems Ch.1 eq.9 + 13:
+   `P.x += Σ Q·A·D.x·cos(phase); P.z += Σ Q·A·D.z·cos(phase)`. Crests pinch
+   into ridges instead of round bumps. Per-wave Q baked in `Q_BASE_DEFAULTS`
+   (`[0.35, 0.35, 0.85, 0.95, 1.0, 1.0]` — swells gentle, chops sharp). All
+   waves multiplied by a global `steepnessUniform` (default 0.7, scrub via
+   `__waterSteepness(n)` in console; URL `?steep=N` overrides initial).
+   Surface normal uses GPU Gems eq.13 `(-Σdy/dx, 1−Σ Q·k·A·sin, -Σdy/dz)`,
+   which collapses to the old heightfield normal at Q=0.
+2. **Two-color scatter blend** — deep teal `(0.02, 0.12, 0.22)` ↔ scatter
+   cyan-green `(0.22, 0.7, 0.65)`, modulated by both wave height AND view
+   angle. Crest backs and grazing-angle samples brighten via `mix(0.55,
+   1.0, 1−ndotv)`. Approximates sub-surface scattering without a sun
+   direction.
+3. **Foam: physically-correct triggering** — replaced the height-driven
+   `smoothstep(height) + 0.5·smoothstep(slope)` with `max(slopeFoam,
+   foldFoam) · heightGate`, where `foldFoam = smoothstep(0.12, 0.35,
+   qSum)` reads the GPU Gems Jacobian-onset signal (the surface is
+   approaching fold-back — physically what produces whitecaps). Height now
+   gates rather than drives, so tall-but-flat swells don't foam and only
+   actively-breaking faces show whitecaps.
+4. **Multi-probe buoyancy** — `hoverSystem` was sampling the wave field at a
+   single point (the bike's center) and reading the local normal for
+   pitch/roll. Now samples height at four points around the bike — bow,
+   stern, port, starboard (`PROBE_HALF_LENGTH = 0.8m`, `PROBE_HALF_WIDTH =
+   0.4m` matching the bike's visual footprint) — and lets pitch/roll fall
+   out of differential heights:
+   `pitch ≈ atan2(yBow − yStern, 2·halfLength)`,
+   `roll ≈ atan2(yStarboard − yPort, 2·halfWidth)`.
+   This is the SoT/Atlas approach. Wins: long swells naturally tilt the
+   bike across the wave; short chops average between probes so the bike
+   doesn't whip-snap to ripples shorter than its own footprint. Same
+   altitude-fade and kinematic attitude system as before; just better
+   targets.
+5. **Noise-modulated specular** — `mat.roughnessNode = mix(0.18, 0.04,
+   broadMask)` where `broadMask` is a low-frequency animated hash gated to
+   crests. Highlights tighten in patches and drift with time, producing
+   the SoT "wandering glints" look instead of a uniform sheen.
+
+Debug toggles: `?water=classic` (entire upgrade off — original colors,
+vertical-only Gerstner, original roughness, original foam), `?wire=1`
+(orthogonal — works with classic and v2), `?steep=N` (initial steepness
+override, 0–1.5).
+
+Physics-side note: `wave-field.ts` (CPU buoyancy) keeps the simpler
+vertical-only formulation. With moderate Q the rendered surface and the
+buoyancy field stay within ~0.4 m horizontally — well below visible
+disconnect for a hoverbike skimming the surface. If steepness goes much
+past 1, consider a Newton iteration on the CPU side to recover the rest
+position from world XZ.
+
+Not yet shipped: SSR / planar reflection of bikes. See [docs/water-deep-dive.md](./water-deep-dive.md) for the full
+research and prioritization.
+
+### Water — sun-direction backscatter (M9.30)
+Threads the directional light vector through to the water shader as a
+uniform `sunDirUniform` (matches scene.ts's sun position 50,70,70
+normalized; a future day/night cycle can animate it). Two related
+additions:
+
+1. **Scatter blend bumped by sun alignment.** `scatterAmount` now stacks
+   `sunBackscatter = pow(max(0, dot(line-of-sight, toward-sun)), 2)` on
+   top of the existing view-angle scatter. Camera looking toward the sun
+   → tall waves between camera and sun bump scatter further toward
+   cyan-green.
+2. **`sunGlow` emissive.** The unmistakable SoT "lit-from-behind"
+   wave glow. `scatterColor · sunBackscatter · heightFactor · 0.6`,
+   added to `emissiveNode` alongside the existing fresnel + sparkle
+   terms. Off in classic mode for clean A/B.
+
+Hoisted `heightFactor` out of the IIFE so both the scatter blend and
+the new sun-glow share it. No physics change.
+
+### Water — wake transverse "scallops" (M9.35)
+The wake's static Kelvin V is now modulated by `sin(K · behind − ω · t)`,
+producing the transverse oscillating ridges seen in real ship wakes —
+the wake feels alive instead of stamped. Same modulation is mirrored
+bit-for-bit in `sampleWakeFromSource` (sim) and the shader's wake block,
+so trailing riders feel the same scallops they see.
+
+Constants in [wave-field.ts](../src/engine/sim/water/wave-field.ts):
+- `WAKE_TRANS_K = 0.7` rad/m → wavelength ≈ 9m, ~3 visible scallops in
+  the 25m wake length. Chosen so `sin(K · 10) > 0` at the existing
+  unit-test sample point (behind=10, t=0), keeping the V-edge / V-axis
+  threshold assertions firmly in the pass region.
+- `WAKE_TRANS_OMEGA = 1.0` rad/s → period ≈ 6.3s, gentle backward scroll.
+- `WAKE_TRANS_AMP = 0.3` → wake amplitude varies between 0.7× and 1.3×
+  along each scallop period.
+
+A new unit test (`wake has transverse oscillation along its length`)
+samples the V-edge height at 0.25m steps over [3..30]m behind and
+asserts ≥4 direction changes — proves the modulation is actually
+oscillating (pure exponential decay is monotonic).
+
+The wake's analytic gradient drops the longitudinal modulation's
+∂y/∂behind term — same approximation the existing wake gradient
+uses for longRamp/longDecay derivatives. Means the scallop heights
+are visible but the per-scallop SHADING is smooth (no bright/dark
+banding from a precise normal). Acceptable arcade tradeoff; if
+scallops ever read insufficiently 3D, add `cos(longPhase) · K · amp`
+contribution to dydx/dydz.
+
+### Water — chop bump + day-night sun cycle (M9.34)
+Two quick wins from the [water deep-dive](./water-deep-dive.md):
+
+1. **Chop amplitudes bumped 30%** in [`defaultWaves()`](../src/engine/sim/water/wave-field.ts):
+   `[0.5, 0.34, 0.22, 0.12]` → `[0.65, 0.44, 0.29, 0.16]`. Shorter
+   wavelengths now pinch more dramatically with the horizontal Gerstner
+   from M9.29 — chop ridges read as actual ridges instead of soft bumps.
+   Swell amplitudes left untouched (they drive the periodic-set rhythm
+   and bumping them risks the buoyancy field throwing the bike around
+   at race speeds). Multi-probe buoyancy (M9.29) absorbs the extra
+   short-wavelength chop without the bike whipping — chop wavelengths
+   (5.5..22m) are mostly close to or smaller than the bike's 1.6m
+   probe footprint, so probe averaging mutes the worst of it.
+
+2. **Day-night sun cycle.** Animates the directional light's position
+   on a 360s loop. Elevation oscillates 30°..70°; azimuth rotates a
+   full 360°. The water shader's `sunDirUniform` is updated in lockstep
+   via `waterMesh.setSunDirection(...)`, so the sun-glow on backlit
+   waves drifts across the scene as the race progresses. Driven by the
+   deterministic `waveField.time` clock so a replay puts the sun back
+   where it was. Implementation: `createScene()` now returns the
+   `THREE.DirectionalLight`; `WaterMesh.setSunDirection(x, y, z)`
+   normalizes the input and writes to the shader uniform; the per-frame
+   block lives in [main.ts](../src/main.ts) right after `waterMesh.tick`.
+   No shadow rendering yet, so the most perceptible effect is the
+   water's sun-glow direction shift.
+
+Tunables in `main.ts`'s sun-cycle block: `SUN_CYCLE_SECONDS` (360),
+`SUN_RADIUS` (110), elevation range `(50 ± 20)°`. Make the cycle
+faster for visible mid-race drift; slower for a more cinematic feel.
+
+### Water — shoreline lapping + wake polish (M9.33)
+Round of polish on the foam pass shipped in M9.32:
+
+1. **Shared `foamTurbulence` field.** A world-XZ + time-scrolled hash
+   noise used by shoreline foam, wake, and bow spray to break up their
+   otherwise-too-clean edges. Multiplier in `[0.5, 1.0]` so foam is
+   never erased — just patched into turbulent intensity. NOT applied to
+   wave-driven foam (slope/Jacobian/accumulator), since natural whitecap
+   foam already has its own variation from the wave field — adding more
+   noise on top reads as TV-static. Shoreline, wake, bow spray, and
+   stern propwash now share a unified visual rhythm.
+
+2. **Shoreline lapping.** The depth threshold for shoreline foam now
+   breathes ±0.4m around its 1.5m base via `foamNoiseRaw - 0.5`. Where
+   the noise is high, foam reaches further off-shore (1.9m); where low,
+   it pulls back (1.1m). Combined with the static depth intersection,
+   this reads as the surf "lapping" against the shore rather than a
+   fixed water-line. Verified by capturing two ramp shots 2s apart —
+   foam coverage differs visibly between frames.
+
+3. **Stern propwash.** Bright concentrated foam directly behind the
+   bike (~0.3m back, fades to 0 by ~2.5m, centered on the wake axis).
+   Distinct from the V-wake outline — the propwash is a solid mass of
+   foam that the bike actively generates, what gives the wake its
+   kinetic "boat is here" feel rather than a pure outline. NOT
+   noise-modulated — it's the bike's "exhaust" foam.
+
+4. **Wake + bow spray noise modulation.** Both get multiplied by
+   `foamTurbulence`, so their edges break up into patches instead of
+   reading as stamped templates. The same noise field also drives the
+   shoreline lapping, giving all interactive foam a unified visual
+   character.
+
+No physics change. No per-vertex cost added; the foam noise is one
+extra hash per fragment (negligible).
+
+### Water — shoreline foam + richer bike foam pass (M9.32)
+Water-on-land transitions are a recurring on-track moment (lagoon ramp,
+gate posts, cliffside cliff base, future islands), so the water shader
+gained a depth-buffer-driven shoreline foam plus a richer bike-water
+interaction pass.
+
+1. **Shoreline foam (intersection foam).** Reads `viewportDepthTexture()`
+   at each fragment's screen position, converts to view-Z via
+   `perspectiveDepthToViewZ(near, far)`, and compares to the water's own
+   `positionView.z`. When the difference is small (terrain top ~0–1.5m
+   below water surface) → foam. Two gates handle edge cases:
+   `behindGate = smoothstep(-0.05, 0.05, closenessSigned)` ensures
+   opaque objects rendered IN FRONT of water (e.g. bikes between camera
+   and water surface) don't false-trigger foam where they occlude the
+   water plane; `depthFade` controls the falloff over `FOAM_INTERSECTION_RANGE = 1.5m`.
+   Combined with the existing wave/bike foam via `max()` rather than
+   addition so gate posts don't get unnaturally over-bright at the
+   water-line. Off in classic mode for clean A/B.
+
+2. **Richer bike foam pass.** Two additions on top of the existing hull
+   ring + V-wake stripe:
+   - **Speed-modulated hull ring**: `ring · (1 + 0.6·speedGate)` —
+     ring foam reads ~1.6× brighter at race speeds vs. idle, communicating
+     the hull's active interaction with the water.
+   - **Bow spray ("moustache")**: forward-facing foam arc using the same
+     Kelvin-V geometry as the back wake but with a tighter half-angle
+     (0.35 vs the wake's 0.4 tan) and a faster `exp(-1.6·ahead)` longitudinal
+     falloff. Speed-gated, so a parked bike doesn't spray. Reads as the
+     bike actively pushing water forward at race pace.
+
+Per-fragment cost stays trivial — one extra texture sample for the
+depth read, plus a few muls/adds for the bow spray geometry. No
+per-vertex cost. Renders correctly through the existing transparency
+sort (water is rendered after opaque, so the depth buffer is populated
+with terrain depth at water-shade time).
+
+### Water — stateless foam accumulator (M9.31)
+Foam now lingers ~1s behind passing crests instead of vanishing the
+moment the wave moves on — the "trail" character of real ocean foam.
+Implementation: since waves are deterministic functions of `(x, z, t)`,
+"did this position have a crest 0.5s ago?" reduces to evaluating
+`gerstner(x, z, t-0.5)`. The `foamAccumulator` Fn samples 4 time steps
+in the recent past (`Δt = 0.25s`, total window = 1s), computes
+`max(slopeFoam, foldFoam)` at each, decays exponentially
+(`exp(-Δt · 1.5)` → half-life ≈ 0.46s), and reduces to the max. The
+result is forwarded to the fragment as a single varying.
+
+This is the cheap stateless cousin of SoT's persistent foam texture
+(which uses an FFT Jacobian + render-target ping-pong). Per-vertex cost
+goes from 24 trig to ~120 trig (4 extra Gerstner-pair samples) — well
+within the per-frame budget on any real GPU. Wakes are NOT included in
+the time history (would need historical bike positions); wake foam
+stays current-time only via the existing `bikeFoam` path.
+
+Side effect: the height gate on wave foam is dropped in v2 mode — foam
+is allowed to persist on what's now a trough if it WAS a crest a moment
+ago. This is physically correct (foam is water particles, not the wave
+shape) and visually closes the gap with SoT considerably. Classic mode
+keeps the height-gated current-time foam for clean A/B.
+
 ### e2e runs headed by default (M9.26)
 The GPU water shader is happy on real hardware but the headless WebGL2
 software fallback (SwiftShader) drops to single-digit fps under any

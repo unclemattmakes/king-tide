@@ -140,4 +140,32 @@ describe('wave field', () => {
     }
     expect(maxAbs).toBeGreaterThan(0.1)
   })
+
+  it('wake has transverse oscillation along its length (M9.35 scallops)', () => {
+    // Sample the V's edge-ridge height at many points along the wake's
+    // length. With pure exponential decay (pre-M9.35), the height profile
+    // is monotonically decreasing — direction changes ≤ 1. With the
+    // longitudinal sin modulation, peaks and troughs of the scallop
+    // pattern create multiple direction changes. We sample over [3..30]m
+    // (well within the wake's visible range, longDecay ~25m e-fold) at
+    // 0.25m steps; the K=0.7 wavenumber gives ~3 full periods over that
+    // range, expecting ≥4 direction changes (each period has up + down).
+    const f = createWaveField([])
+    f.wakes.push({ x: 0, z: 0, vx: 12, vz: 0, weight: 1 })
+    const samples: number[] = []
+    for (let b = 3; b <= 30; b += 0.25) {
+      const wakeWidth = b * 0.4 + 0.55
+      samples.push(sampleHeight(f, -b, wakeWidth))
+    }
+    let directionChanges = 0
+    let lastDir = 0
+    for (let i = 1; i < samples.length; i++) {
+      const dir = Math.sign(samples[i]! - samples[i - 1]!)
+      if (dir !== 0 && dir !== lastDir && lastDir !== 0) {
+        directionChanges++
+      }
+      if (dir !== 0) lastDir = dir
+    }
+    expect(directionChanges).toBeGreaterThanOrEqual(4)
+  })
 })
