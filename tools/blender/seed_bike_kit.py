@@ -61,6 +61,13 @@ import bpy
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+# Blender runs this script via ``--python`` with the parent dir off
+# sys.path, so import via the package path rooted at REPO_ROOT.
+from tools.blender.mounts import add_mount  # noqa: E402
+
 OUTPUT_PATH = os.path.join(REPO_ROOT, "tools", "blender", "lib", "bike_parts.blend")
 
 
@@ -281,6 +288,29 @@ def lay_out_in_context() -> None:
         obj.location = loc
         if name in obj_scales:
             obj.scale = obj_scales[name]
+
+    # Mount empties on the chassis. Positions are in chassis-LOCAL
+    # space (unit cube spanning ±0.5 along each axis). At build time
+    # the chassis is scaled by (W, L, H) and lifted by H/2, so a
+    # mount at chassis-local (lx, ly, lz) ends up at world
+    # (W*lx, L*ly, H*lz + H/2). The values below were chosen to
+    # reproduce the world positions that ``build_bike.py`` previously
+    # hardcoded for the scout bike (W=0.6, L=2.5, H=0.4):
+    #
+    #   mount_fairing  →  world (0,    0,     H+0.15) = (0,    0,    0.55)
+    #   mount_fork     →  world (0,   -L/2+0.1, H*0.4) = (0, -1.15, 0.16)
+    #   mount_fin      →  world (0,   -L/2+0.05, H+0.35) = (0, -1.20, 0.75)
+    #   mount_tail     →  world (0,    L/2-0.05, H+0.05) = (0,  1.20, 0.45)
+    #
+    # Behaviour change vs. the previous baked math: world positions
+    # now scale strictly with chassis dims. Old code mixed scaled
+    # (H*0.4) and absolute (H+0.15) terms, so non-scout bikes drift
+    # by a few millimetres. Authors can re-tune any mount in the kit.
+    chassis = bpy.data.objects["chassis_base"]
+    add_mount(chassis, "fairing", (0.0, 0.0, 0.875))
+    add_mount(chassis, "fork", (0.0, -0.46, -0.1))
+    add_mount(chassis, "fin", (0.0, -0.48, 1.375))
+    add_mount(chassis, "tail", (0.0, 0.48, 0.625))
 
 
 def main() -> None:
