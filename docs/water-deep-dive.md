@@ -2,9 +2,9 @@
 
 Reference for the SoT-style ocean upgrade. Original research compiled 2026-05-09; first wave of changes shipped as M9.29 (see [status.md](./status.md)).
 
-## Current state (M9.29 → M9.32)
+## Current state (M9.29 → M9.33)
 
-Render: horizontal-displacement Gerstner (per-wave Q + global scale uniform), two-color scatter blend (deep teal ↔ cyan-green, view + sun-direction modulated, with sun-glow emissive on backlit crests), stateless foam accumulator (lingering whitecaps via 4 time-shifted Gerstner samples, no render targets needed), depth-buffer shoreline foam (water/land intersection), richer bike foam pass (speed-modulated hull ring + bow spray + V-wake), noise-modulated roughness for SoT-style "wandering glints", existing analytic normal + Fresnel sky-tint emissive + wake-displacement V-stripe.
+Render: horizontal-displacement Gerstner (per-wave Q + global scale uniform), two-color scatter blend (deep teal ↔ cyan-green, view + sun-direction modulated, with sun-glow emissive on backlit crests), stateless foam accumulator (lingering whitecaps via 4 time-shifted Gerstner samples, no render targets needed), depth-buffer shoreline foam with lapping noise scroll (water/land intersection breathes ±0.4m), richer bike foam pass (speed-modulated hull ring + stern propwash + bow spray + V-wake, all noise-modulated for turbulent edges), noise-modulated roughness for SoT-style "wandering glints", existing analytic normal + Fresnel sky-tint emissive + wake-displacement V-stripe.
 
 Sim: vertical-only Gerstner (unchanged — the simpler formulation with no inverse solve required), multi-probe buoyancy (4 sample points around the bike's footprint, pitch/roll from differential heights), unchanged underwater dive + buoyancy + asymmetric drag.
 
@@ -35,15 +35,14 @@ The reference is Sea of Thieves. Rare's published pipeline (SIGGRAPH 2018 *The T
 
 ### Possible next wins
 
-- **[S] Ship-wake-into-wave-field feedback loop polish.** We already have it (trailing riders feel the lead's wake — see M9.26 entry in status.md), but the current wake is hand-authored as a Kelvin V. Atlas writes the actual ship-wake displacement *into* the wave field with a small height-field render target. Worth comparing if our V-stripe ever feels too "stamped."
 - **[S] Chop amplitude bump.** Default chop amplitudes (`0.5, 0.34, 0.22, 0.12`) feel modest at racing speeds — bumping by ~30% would give more dramatic short-wavelength pinching with the new horizontal Gerstner. Affects buoyancy too — playtest before committing.
 - **[S] Animated sun direction / day-night cycle.** `sunDirUniform` is already a uniform; just needs a clock to drive it for sunrise→noon→sunset variation in scatter color, sun-glow direction, and shadowing.
+- **[M] Wake transverse waves.** Real ship wakes have transverse oscillating ridges following the boat (the "scallops" in addition to the diverging V). Could add `sin(K · behind − ω · t)` modulation to the wake displacement function in `wave-field.ts` — but watch the existing wake unit tests (they assert a positive ridge at the V edge, so any longitudinal modulation that can be negative would need to stay above floor).
 
 ### Heavier lifts (defer until needed)
 
 - **[L] SSR (or planar bike reflection).** Real screen-space reflections in a TSL node material are non-trivial; planar reflection of just the bikes onto the water plane is much cheaper and gives 80% of the perceptual gain. SoT uses SSR + cubemap blended by Fresnel. Biggest "AAA water" tell, but most expensive to land.
 - **[L] FFT migration.** Only worth it if we ever want crest-folding-with-overhang, multi-cascade scale separation (200m swell + 50m chop + 10m ripple as separate cascades), or genuine Jacobian-folding foam. None of which we need for an arcade racer — and the stateless foam accumulator (M9.31) closes most of the perceptual gap with FFT-based foam already.
-- **[S] Shoreline foam noise scroll.** M9.32 added the depth-comparison shoreline foam, but the foam line is currently static where it fires. Adding a tiled noise scroll to modulate the intensity (and slightly displace the foam edge along its tangent) would make the foam line "lap" against the shore rather than sit motionless. Cheap.
 
 ## Tuning knobs at a glance
 
@@ -59,3 +58,5 @@ The reference is Sea of Thieves. Rare's published pipeline (SIGGRAPH 2018 *The T
 | Shoreline foam range | `FOAM_INTERSECTION_RANGE` in `water.ts` | 1.5m | depth below water at which shoreline foam fades to 0 |
 | Hull-ring speed boost | `1 + speedGate · 0.6` in bike foam | 1.0 → 1.6× | bumps ring brightness at race speeds |
 | Bow-spray half-angle | `splashHalfAngle` in bike foam | 0.35 (tan) | lower = sharper moustache, higher = wider arc |
+| Foam turbulence range | `mix(0.5, 1.0, foamNoiseSmooth)` | 0.5..1.0 | lower bound = more dramatic patchiness |
+| Shoreline lapping range | `foamNoiseRaw - 0.5 ·  0.8` offset | ±0.4m | breathes the foam edge in/out for the surf-lapping effect |
