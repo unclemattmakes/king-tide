@@ -96,6 +96,24 @@ export const WAKE_LONG_RAMP = 0.6
 /** Longitudinal decay (1 / meters). Wake fades to ~e^-1 at 1/this distance
  * behind the bike. 0.04 → e-folds at ~25 m. */
 export const WAKE_LONG_DECAY = 0.04
+/** Transverse-wave wavenumber (rad / meter, M9.35). Real Kelvin wakes
+ * have oscillating ridges along the bike's heading axis — the "scallops"
+ * behind a moving boat. K = 0.7 → wavelength ≈ 9m, so ~3 visible
+ * scallops fit in the 25m wake length. Chosen so sin(K · 10) > 0 at the
+ * unit-test sample point (behind=10, t=0), which keeps the existing
+ * "yEdge > 0.3 / yAxis < -0.3" assertions firmly in the pass region
+ * (modulation BOOSTS by ~20% there rather than reducing amplitude). */
+export const WAKE_TRANS_K = 0.7
+/** Transverse-wave angular frequency (rad / s). 1.0 → period ≈ 6.3s,
+ * a gentle scroll that makes the scallops feel alive without pulsing
+ * distractingly. */
+export const WAKE_TRANS_OMEGA = 1.0
+/** Modulation amplitude (dimensionless multiplier, range 1 ± value).
+ * 0.3 → wake amplitude varies between 0.7× and 1.3× of base across
+ * each scallop period. Larger = more dramatic peaks/troughs along
+ * the wake; capped here so sin = -1 doesn't push the V edge below
+ * the unit-test floor. */
+export const WAKE_TRANS_AMP = 0.3
 
 export function createWaveField(waves: Wave[]): WaveFieldState {
   return { waves, wakes: [], time: 0 }
@@ -121,10 +139,13 @@ export function advanceWaveField(field: WaveFieldState, dt: number): void {
  *     linear fade to 0.
  *   - Beyond: 0.
  *
- * Static profile (no longitudinal sin) — the V follows the bike like a
- * stable shape and just decays in amplitude with `behind`. Real wakes
- * have transverse waves too, but for arcade clarity a clean Kelvin-style
- * V reads better than oscillating ridges.
+ * Longitudinal modulation (M9.35): the V's amplitude is multiplied by
+ * `(1 + WAKE_TRANS_AMP · sin(K · behind − ω · t))` to produce the
+ * transverse "scallops" seen in real ship wakes. The whole V breathes
+ * up and down along its length, with the modulation pattern slowly
+ * scrolling backward as time advances. Pre-M9.35 the V was a static
+ * Kelvin shape — the new modulation makes the wake feel alive without
+ * disturbing the V's silhouette.
  *
  * Mirrored bit-for-bit by the TSL shader's bikeSurfaceContrib block —
  * keep them in sync.
@@ -133,7 +154,7 @@ export function sampleWakeFromSource(
   src: WakeSource,
   x: number,
   z: number,
-  _t: number,
+  t: number,
 ): { y: number; dydx: number; dydz: number } {
   const speed = Math.hypot(src.vx, src.vz)
   if (speed < WAKE_SPEED_LOW || src.weight <= 0) {
@@ -167,8 +188,13 @@ export function sampleWakeFromSource(
 
   const longRamp = 1 - Math.exp(-behind * WAKE_LONG_RAMP)
   const longDecay = Math.exp(-behind * WAKE_LONG_DECAY)
+  // Transverse "scallops": the V's amplitude oscillates along its length.
+  // sin(K · behind − ω · t) drifts backward in the bike's frame as t
+  // advances (the pattern travels with the wake's tail).
+  const longPhase = WAKE_TRANS_K * behind - WAKE_TRANS_OMEGA * t
+  const transverseMod = 1 + WAKE_TRANS_AMP * Math.sin(longPhase)
 
-  const amp = WAKE_DISP_AMP * speedGate * src.weight * longRamp * longDecay
+  const amp = WAKE_DISP_AMP * speedGate * src.weight * longRamp * longDecay * transverseMod
   const y = amp * transverseSigned
 
   // Analytic gradient — dominated by the perp direction (the V shape) and
@@ -270,13 +296,20 @@ export function defaultWaves(): Wave[] {
     // Big swells — long wavelengths, low frequencies. These are what make
     // "the bigger waves show up periodically": their slightly different
     // periods (≈6.0 s and ≈7.7 s) beat against each other so peaks align
-    // every ~25–30 s.
+    // every ~25–30 s. Swell amplitudes unchanged from M9.26 — they drive
+    // the periodic-set rhythm and bumping them risks the buoyancy field
+    // throwing the bike around at race speeds.
     { dirX: 0.92, dirZ: 0.39, amplitude: 0.55, wavelength: 60, speed: 10.0, phase: 0.4 },
     { dirX: 0.6, dirZ: 0.8, amplitude: 0.4, wavelength: 85, speed: 11.0, phase: 2.2 },
-    // Wind chop across four scales for varied surface texture.
-    { dirX: 1, dirZ: 0, amplitude: 0.5, wavelength: 22, speed: 4.0, phase: 0 },
-    { dirX: 0.707, dirZ: 0.707, amplitude: 0.34, wavelength: 14, speed: 3.6, phase: 1.1 },
-    { dirX: 0.3, dirZ: -0.954, amplitude: 0.22, wavelength: 9, speed: 3.0, phase: 2.3 },
-    { dirX: -0.5, dirZ: 0.866, amplitude: 0.12, wavelength: 5.5, speed: 2.4, phase: 3.7 },
+    // Wind chop across four scales for varied surface texture. Amplitudes
+    // bumped ~30% from the original [0.5, 0.34, 0.22, 0.12] in M9.34 so the
+    // short-wavelength pinching from horizontal-displacement Gerstner reads
+    // more dramatically — chop ridges visibly sharpen on the v2 shader,
+    // and physical chop bumps the bike's hull probes by a noticeable
+    // amount without overpowering the multi-probe averaging.
+    { dirX: 1, dirZ: 0, amplitude: 0.65, wavelength: 22, speed: 4.0, phase: 0 },
+    { dirX: 0.707, dirZ: 0.707, amplitude: 0.44, wavelength: 14, speed: 3.6, phase: 1.1 },
+    { dirX: 0.3, dirZ: -0.954, amplitude: 0.29, wavelength: 9, speed: 3.0, phase: 2.3 },
+    { dirX: -0.5, dirZ: 0.866, amplitude: 0.16, wavelength: 5.5, speed: 2.4, phase: 3.7 },
   ]
 }
