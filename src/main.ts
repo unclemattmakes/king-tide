@@ -15,10 +15,12 @@ import {
 } from './engine/input'
 import { installCameraLookInput, tickCameraLook } from './engine/input/camera-look'
 import { createChaseCamera } from './engine/render/camera'
+import { createIslandMesh } from './engine/render/arena-mesh'
 import { createCliffsideMesh } from './engine/render/cliffside-mesh'
 import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
 import { attachTrackColliders, loadGlbTrackVisuals } from './engine/render/glb-track'
+import { loadTrackFromGlb } from './game/tracks/glb-loader'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
 import { createRampMesh } from './engine/render/ramp-mesh'
@@ -173,6 +175,7 @@ async function boot() {
     scene.add(createCliffsideMesh())
   } else if (trackId === 'lagoon') {
     createLagoonIsland(phys)
+    scene.add(createIslandMesh())
     createRamp(phys)
     scene.add(createRampMesh())
   }
@@ -184,6 +187,18 @@ async function boot() {
     track = createCliffside()
   } else if (trackId === 'lagoon') {
     track = createLagoonLoop()
+  } else if (trackId === 'test-custom-track') {
+    const glbUrl = '/assets/tracks/test-custom-track.glb'
+    track = await loadTrackFromGlb(glbUrl, {
+      id: 'test-custom-track',
+      name: 'Test Custom Track',
+      lapsToFinish: 3,
+    })
+    if (!editMode) {
+      const env = await loadGlbTrackVisuals(glbUrl)
+      scene.add(env.scene)
+      attachTrackColliders(env.scene, phys)
+    }
   } else {
     // JSON-authored track. Fetch + validate, then optionally load the
     // referenced environment .glb for collidable terrain + visuals.

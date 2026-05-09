@@ -116,11 +116,13 @@ and is rebuilt from `specs/tracks/calibration.json` by `pnpm gen:tracks`
 
 A real track typically needs:
 
-- **Track surfaces.** One or more meshes for whatever the bike drives on.
-  Material name should start with `mat_track_*`. Set custom property
-  `kind = "track"` on the object. The runtime registers a static Rapier
-  trimesh collider for each (see [Limitations](#known-limitations) for
-  the broadphase caveat).
+- **Track surfaces / collidable geometry.** Every mesh in the .glb gets
+  a static Rapier trimesh collider by default. To make a mesh
+  render-only (decorative — banners, distant scenery), set custom
+  property `kind = "decoration"` on it. Material name should start with
+  `mat_track_*` for primary track surfaces (authoring convention; the
+  runtime doesn't key off it yet). See [Limitations](#known-limitations)
+  for the broadphase caveat.
 - **A water volume.** Empty cube (Add → Empty → Cube). Name
   `water_volume_main`, custom props `kind = "water"`, `wave_height =
   1.0`, `wave_freq = 0.5`. The runtime applies the wave field over the
@@ -217,7 +219,8 @@ Hit `T` to enable autoplay and watch the AI follow your spline. Use
 
 | Kind | Naming pattern | Required Blender type | Required `extras` |
 |---|---|---|---|
-| Track surface | any name; material starts `mat_track_*` | mesh | `{ kind: "track" }` |
+| Track surface | any name; material starts `mat_track_*` | mesh | (none — collidable by default) |
+| Decoration | any name | mesh | `{ kind: "decoration" }` (opt out of collider) |
 | Water volume | `water_volume_*` | empty (cube) | `{ kind: "water", wave_height, wave_freq }` |
 | Checkpoint | `cp_NN` (zero-padded, contiguous from 0) | empty | `{ kind: "checkpoint", index, half_width, height }` |
 | AI spline | `ai_spline_main` (or `ai_spline_alt_*`) | NURBS curve | `{ kind: "ai_spline", branch }` |

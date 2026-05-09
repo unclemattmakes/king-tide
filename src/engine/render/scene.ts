@@ -1,10 +1,10 @@
 import * as THREE from 'three'
-import { createIslandMesh } from './arena-mesh'
 import { createSkyDome } from './sky'
 
 /**
- * M6 scene: gradient sky + lighting + island. Water + bikes + pickups are
- * added by their respective systems.
+ * M6 scene: gradient sky + lighting. Water + bikes + pickups + per-track
+ * terrain (island, mesa, ramps, .glb meshes) are added by their respective
+ * systems.
  */
 export function createScene(): {
   scene: THREE.Scene
@@ -28,8 +28,6 @@ export function createScene(): {
   const sun = new THREE.DirectionalLight(0xfff2dc, 1.4)
   sun.position.set(50, 70, 70) // matches sky's uSunDir roughly
   scene.add(sun)
-
-  scene.add(createIslandMesh())
 
   return { scene, camera }
 }
