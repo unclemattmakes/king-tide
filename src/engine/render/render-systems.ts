@@ -1,13 +1,39 @@
 import { hasComponent, query } from 'bitecs'
 import type * as THREE from 'three'
 import type { SimWorld } from '@/engine/sim/ecs/world'
+import { cloneLoadedBike, type LoadedBike } from '@/game/assets/bike-loader'
 import { BikeStatsStore, BikeTag, PlayerTag, Transform, TransformStore } from '@/game/components'
 import { createBikeMesh } from './bike-mesh'
 
 const PLAYER_FALLBACK_COLOR = 0xff7733
 const AI_BODY_COLORS = [0x33aaff, 0x44dd66, 0xcc55ff, 0xffcc33, 0xff5577]
 
-export function createBikeRenderSystem(scene: THREE.Scene, sim: SimWorld) {
+export type BikeRenderRegistry = {
+  /** Resolve a variant id to a loaded GLB. Falls back to `default` when
+   *  the id is unknown. */
+  byVariantId: Record<string, LoadedBike>
+  /** Default GLB used when no variant id is set or the id misses
+   *  (typically the racer baseline). */
+  default: LoadedBike
+}
+
+/**
+ * Bike render system.
+ *
+ * If a `registry` is supplied (the runtime path), each bike's mesh is
+ * cloned from a loaded bike GLB — the player gets their picked variant,
+ * AI bikes use the default visual with their slot's accent color
+ * tinting the livery material so the field reads varied.
+ *
+ * Without a registry the system falls back to the procedural
+ * `createBikeMesh()` (kept for tests and any path that doesn't want to
+ * fetch a GLB at boot).
+ */
+export function createBikeRenderSystem(
+  scene: THREE.Scene,
+  sim: SimWorld,
+  registry?: BikeRenderRegistry,
+) {
   const meshes = new Map<number, THREE.Object3D>()
   let aiColorCursor = 0
 
@@ -19,13 +45,24 @@ export function createBikeRenderSystem(scene: THREE.Scene, sim: SimWorld) {
       let mesh = meshes.get(eid)
       if (!mesh) {
         const isPlayer = hasComponent(sim, eid, PlayerTag)
-        // Variant-driven body color (set on BikeStats.bodyColor) wins for
-        // the player; AI bikes still cycle through the accent palette.
-        const variantColor = BikeStatsStore.get(eid)?.bodyColor
-        const color = isPlayer
-          ? (variantColor ?? PLAYER_FALLBACK_COLOR)
-          : (AI_BODY_COLORS[aiColorCursor++ % AI_BODY_COLORS.length] ?? 0xaaaaaa)
-        mesh = createBikeMesh({ bodyColor: color })
+        const stats = BikeStatsStore.get(eid)
+        const variantId = stats?.variantId
+        const variantColor = stats?.bodyColor
+
+        if (registry) {
+          const loaded = (variantId && registry.byVariantId[variantId]) || registry.default
+          if (isPlayer) {
+            mesh = cloneLoadedBike(loaded).root
+          } else {
+            const tint = AI_BODY_COLORS[aiColorCursor++ % AI_BODY_COLORS.length] ?? 0xaaaaaa
+            mesh = cloneLoadedBike(loaded, { tintLivery: tint }).root
+          }
+        } else {
+          const color = isPlayer
+            ? (variantColor ?? PLAYER_FALLBACK_COLOR)
+            : (AI_BODY_COLORS[aiColorCursor++ % AI_BODY_COLORS.length] ?? 0xaaaaaa)
+          mesh = createBikeMesh({ bodyColor: color })
+        }
         scene.add(mesh)
         meshes.set(eid, mesh)
       }

@@ -20,3 +20,9 @@ coverage/
 # blender
 tracks-src/*.blend1
 tracks-src/*.blend@
+tools/blender/lib/*.blend1
+tools/blender/lib/*.blend@
+
+# python bytecode (Blender headless scripts)
+__pycache__/
+*.pyc

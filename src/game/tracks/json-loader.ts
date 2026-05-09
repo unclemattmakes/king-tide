@@ -2,7 +2,7 @@ import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import { pointAtT, sampleCatmullRom, tangentAtT } from './catmull-rom'
 import type { AISpline, BoostPad, Checkpoint, Prop, PropType, Track, WaterConfig } from './types'
 
-const PROP_TYPES: readonly PropType[] = ['box', 'sphere', 'cylinder', 'pipe', 'halfpipe']
+const PROP_TYPES: readonly PropType[] = ['box', 'sphere', 'cylinder', 'pipe', 'halfpipe', 'asset']
 
 /**
  * JSON track loader. The new (and preferred) authoring format:
@@ -202,6 +202,7 @@ export function trackToJson(track: Track): TrackJson {
         size: { ...p.size },
       }
       if (p.color) out.color = p.color
+      if (p.assetId) out.assetId = p.assetId
       return out
     }),
   }
@@ -285,6 +286,11 @@ function readProp(raw: unknown, i: number): Prop {
   const out: Prop = { type: typeRaw as PropType, position, rotation, size }
   const colorRaw = (raw as { color?: unknown }).color
   if (typeof colorRaw === 'string' && colorRaw.length > 0) out.color = colorRaw
+  const assetIdRaw = (raw as { assetId?: unknown }).assetId
+  if (typeof assetIdRaw === 'string' && assetIdRaw.length > 0) out.assetId = assetIdRaw
+  if (typeRaw === 'asset' && !out.assetId) {
+    throw new Error(`track-json: props[${i}] type='asset' requires an assetId`)
+  }
   return out
 }
 
