@@ -21,6 +21,12 @@
           "minItems": 2,
           "maxItems": 2,
           "description": "[width, length] in metres (Blender X, Y)."
+        },
+        "thickness": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 50,
+          "description": "Slab thickness (m). Default 1.0. The top face sits at three y=0; the slab extrudes downward. Avoid 0 — flat-plane trimeshes are tunnel-prone in Rapier 0.19's discrete broadphase."
         }
       }
     },
@@ -75,7 +81,8 @@
         "type": "array",
         "items": { "type": "number" },
         "minItems": 3,
-        "maxItems": 3
+        "maxItems": 4,
+        "description": "[x, y, z] (Blender axes) or [x, y, z, yaw] (yaw in radians; 0 = facing three +Z forward, π/2 = facing three +X right). yaw is optional, default 0."
       },
       "minItems": 1
     },

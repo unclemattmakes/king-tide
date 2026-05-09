@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-09 (M9.27 spec → GLB asset pipeline: bikes/props/tracks all driven by `specs/*.json`, headless Blender builders, manifest, Vite watch, CI; player bike now loads from `racer.glb`. Riders deferred). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-09 (M9.28 trimesh tunneling fix — bike body has CCD enabled, spec-driven track surfaces author as 1m slabs instead of 0-thickness planes; build_track.py now also emits `public/tracks/<id>.json` with start yaw + Catmull-Rom anchors so a single `pnpm gen:tracks` produces a fully playable track). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -334,6 +334,7 @@ Open follow-ups:
 | M9.25 | GPU water shader (TSL) — Gerstner + dimple + wake foam on the GPU | ✅ |
 | M9.26 | Wake displaces water (visual + buoyancy) + periodic swell sets | ✅ |
 | M9.27 | Spec → GLB asset pipeline (bikes + props + tracks) — JSON specs, headless Blender builders, manifest, Vite watch, CI; player bike now loads from `racer.glb` | ✅ |
+| M9.28 | Trimesh tunneling fix — CCD on bike rigid body + 1m slab-extruded spec track surfaces (replaces 0-thickness planes); `build_track.py` now also emits `public/tracks/<id>.json` with start yaw + spline anchors so `pnpm gen:tracks` produces a fully playable track in one step | ✅ |
 
 ## File / system map
 

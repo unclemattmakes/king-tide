@@ -235,15 +235,21 @@ Hit `T` to enable autoplay and watch the AI follow your spline. Use
 
 ## Known limitations
 
-- **Trimesh colliders are best-effort.** `attachTrackColliders` registers
-  a static Rapier trimesh per `kind=track` mesh, with double-winding
-  indices so it's normal-direction-independent. `world.castRay` against
-  it returns the expected hit, but Rapier 0.19's broadphase can let a
-  fast-falling capsule tunnel through on its first downward step. Until
-  that's resolved (likely via `setCcdEnabled(true)` on dynamic bodies +
-  thicker collider geometry), the safety floor + universal water surface
-  are the load-bearing colliders. Don't ship a track that depends on
-  trimesh colliders for non-fatal correctness yet.
+- **Trimesh colliders — tunneling fixed in M9.27 via CCD + slab
+  surfaces.** `attachTrackColliders` registers a static Rapier trimesh
+  per `kind=track` mesh with double-winding indices. Pre-M9.27 a
+  fast-falling capsule could tunnel through a 0-thickness plane on its
+  first downward step. Two fixes:
+    1. `createBike()` now sets `setCcdEnabled(true)` on the dynamic
+       rigid body — Rapier's swept-shape Continuous Collision
+       Detection catches fast bodies before they punch through.
+    2. Spec-driven track surfaces (`pnpm gen:tracks`) author a 1m-thick
+       slab instead of a flat plane. Hand-authored Blender tracks
+       should follow the same convention — give your `kind=track`
+       meshes real volume.
+  E2E coverage: `tests/e2e/m9-trimesh-tunneling.spec.ts` autoplays a
+  full lap on `?track=test-ring` (a slab-surface ring) and asserts
+  the bike never falls below the slab's bottom face.
 - **No mesh-loaded track collider variation.** Every `kind=track` mesh
   gets the same friction (0.6) and restitution (0.05). Per-material
   parameter passthrough is a future improvement.

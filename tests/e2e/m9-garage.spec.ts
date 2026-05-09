@@ -29,11 +29,20 @@ test.describe('M9 garage', () => {
       { timeout: 1000 },
     )
 
-    // Both lists are populated.
+    // Both lists are populated. Bikes are the three hardcoded variants
+    // (cruiser/racer/stunt). Tracks are the two procedural built-ins
+    // (lagoon/cliffside) plus any spec-driven tracks emitted by
+    // `pnpm gen:tracks` into the manifest, so we assert the floor and
+    // that the procedural ones are still present.
     const bikeCount = await page.locator('#garage-bikes .opt').count()
     expect(bikeCount).toBe(3)
     const trackCount = await page.locator('#garage-tracks .opt').count()
-    expect(trackCount).toBe(2)
+    expect(trackCount).toBeGreaterThanOrEqual(2)
+    const trackNames = await page
+      .locator('#garage-tracks .opt .name')
+      .allInnerTexts()
+    expect(trackNames).toContain('Lagoon Loop')
+    expect(trackNames).toContain('Cliffside')
   })
 
   test('selecting Stunt + RACE reloads with ?bike=stunt and applies the green body color', async ({

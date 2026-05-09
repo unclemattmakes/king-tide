@@ -18,14 +18,17 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 1,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
-    baseURL: 'http://localhost:5191',
+    // E2E uses a dedicated port so the suite isn't fragile to whatever
+    // is squatting Vite's default 5191 (multi-session local dev,
+    // earlier preview servers, etc.). Override via E2E_PORT.
+    baseURL: `http://localhost:${process.env.E2E_PORT ?? 5391}`,
     trace: 'on-first-retry',
     headless,
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: 'pnpm dev',
-    url: 'http://localhost:5191',
+    command: `pnpm dev --port ${process.env.E2E_PORT ?? 5391} --strictPort`,
+    url: `http://localhost:${process.env.E2E_PORT ?? 5391}`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },
