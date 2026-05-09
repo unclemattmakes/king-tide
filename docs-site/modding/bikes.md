@@ -63,13 +63,23 @@ To make it selectable from the Garage menu, also wire it into [`src/game/bikes/v
 
 | Field | Range | Notes |
 |---|---|---|
-| `chassisLength` | (0, 6] m | Longitudinal extent of the chassis box. |
-| `chassisWidth` | (0, 3] m | Lateral extent. |
-| `chassisHeight` | (0, 2] m | Vertical extent. |
+| `chassisLength` | (0, 6] m | Longitudinal extent. Drives collider half-extents and thruster/socket positioning. |
+| `chassisWidth` | (0, 3] m | Lateral extent. Same role as length. |
+| `chassisHeight` | (0, 2] m | Vertical extent. Same role. |
+| `chassisVariant` | string (optional) | Kit-part name override. When set, the build appends `chassis_<variant>` from `bike_parts.blend` and ships it at author-modelled size — no per-spec scaling. Use this when you want bespoke chassis geometry instead of stretching the generic `chassis_base` cube. |
 | `fairingStyle` | `bare` \| `swept` \| `full` | Visual fairing variant from the kit. |
 | `thrusterCount` | 1–4 | Number of thrusters mounted under the chassis. |
 | `thrusterSpacing` | [0, 2] m | Lateral spacing between thrusters. 0 stacks them at center. |
 | `fork` | `single` \| `dual` | Front fork visual variant. |
+
+::: tip Authoring a custom chassis
+1. Open `tools/blender/lib/bike_parts.blend`. Toggle the `Source` collection on.
+2. Duplicate `chassis_base`, rename to `chassis_<your_id>` (e.g. `chassis_dragster`). Sculpt it at the size you want — no scaling will be applied.
+3. Save the kit. Add `"chassisVariant": "dragster"` to your spec's `geometry` block.
+4. `pnpm gen:bikes`. The build appends `chassis_dragster` and uses the existing chassis-local mounts to place fairing/fork/fin/tail.
+
+`chassisLength`/`Width`/`Height` are still required — the collider, thruster positions, fin/tail world positions, and fork world position are all derived from them. Match them to your sculpted mesh's actual dims.
+:::
 
 ### `physics`
 
@@ -154,17 +164,21 @@ If you need new chassis shapes, fairing styles, or thruster meshes, edit `tools/
 The kit's outliner is organized into collections that mirror the in-game `?viewer=<id>` page. Flick a collection visible to switch which bike you're previewing:
 
 ```
-Source                        ← canonical parts (hidden by default)
-Bike: Calibration Bike        ← preview (hidden)
-Bike: Cruiser                 ← preview (hidden)
-Bike: Racer                   ← preview (hidden)
-Bike: Scout                   ← preview (visible by default)
-Bike: Stunt                   ← preview (hidden)
+Source                        ← editable canonical parts (visible by default)
+Bike: Calibration Bike        ← snapshot (hidden)
+Bike: Cruiser                 ← snapshot (hidden)
+Bike: Racer                   ← snapshot (hidden)
+Bike: Scout                   ← snapshot (hidden)
+Bike: Stunt                   ← snapshot (hidden)
 ```
 
-Each `Bike: <name>` collection contains *linked-data instances* of the canonical parts, scaled and positioned per the spec at `specs/bikes/<id>.json`. Mesh data is **shared** with the Source collection — edit a mesh once and every preview updates instantly. The materials are scout's livery (the kit's placeholder palette); the build replaces them with spec-driven materials per bike, so livery differences between bikes only show up in `?viewer`, not in the kit.
+Source is where you **edit**. Each variant fairing, fork, fin, and tail is *parented* to its corresponding `mount_*` empty so **moving a mount in the viewport drags the dependent geometry along** — same live-attach feel as the in-game viewer. Move `mount_fairing` in the viewport and all three fairing variants follow.
 
-To **edit a part**, toggle the Source collection on in the outliner. To **add a new variant**, drop a new mesh into Source and update both `seed_bike_kit.py` (so re-seeding includes it) and `build_bike.py` (so the build picks it). To **add a new bike spec**, drop a new `specs/bikes/<id>.json` and re-run the seed — a new `Bike: <name>` collection appears automatically.
+Each `Bike: <name>` collection is a **static snapshot** built from the spec at seed time. They contain linked-data instances of the canonical parts, scaled and positioned per `specs/bikes/<id>.json`. Mesh data is shared with Source — mesh edits propagate, but **mount moves don't** retroactively reposition snapshot instances. To refresh a snapshot, re-run `tools/blender/seed_bike_kit.py`. Snapshots are useful for eyeballing how a different spec resolves without leaving Blender.
+
+The kit's materials are scout's livery (placeholder palette); the build replaces them with spec-driven materials per bike, so livery differences between bikes only show up in `?viewer`, not in the kit.
+
+To **add a new variant**, drop a new mesh into Source, parent it to the appropriate mount, and update both `seed_bike_kit.py` (so re-seeding parents the new variant) and `build_bike.py` (so the build picks it). To **add a new bike spec**, drop a new `specs/bikes/<id>.json` and re-run the seed — a new `Bike: <name>` snapshot appears automatically.
 
 Object viewport positions are layout-only — they don't influence the build (`tools/blender/lib_loader.py` resets transforms on append). Mesh edits *do* ride through.
 

@@ -108,6 +108,35 @@ def append_objects(blend_path: str, names: Iterable[str]) -> list[bpy.types.Obje
         except RuntimeError:
             pass
 
+    # libraries.load follows parent → child links to keep the loaded
+    # set self-consistent — so when we ask for ``fairing_swept`` (kit-
+    # parented to ``mount_fairing`` to drive the in-Blender preview),
+    # Blender also pulls in fresh ``mount_fairing.NNN`` and
+    # ``chassis_base.NNN`` copies. The build doesn't need that chain;
+    # it positions parts via ``snap_to_mount`` against the chassis it
+    # appended separately. Unparent the requested object from any
+    # transitive dep, then sweep dep dupes out of the scene so they
+    # don't leak into the GLB.
+    requested_set = set(requested)
+    for r_name in requested_set:
+        r_obj = bpy.data.objects.get(r_name)
+        if r_obj is None:
+            continue
+        if r_obj.parent is not None and r_obj.parent.name not in requested_set:
+            r_obj.parent = None
+    for n in list(new_object_names):
+        if n in requested_set:
+            continue
+        # Not requested — a transitive dep that snuck in. Drop it.
+        # Use ``do_unlink=True`` so any remaining scene collection
+        # references release before removal.
+        obj = bpy.data.objects.get(n)
+        if obj is not None:
+            bpy.data.objects.remove(obj, do_unlink=True)
+    # Refresh the new-names list to only the survivors so the
+    # downstream loop doesn't try to dereference a removed object.
+    new_object_names = [n for n in new_object_names if n in requested_set]
+
     out: list[bpy.types.Object] = []
     for name in requested:
         obj = bpy.data.objects.get(name)

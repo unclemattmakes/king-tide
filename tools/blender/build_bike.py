@@ -170,19 +170,37 @@ def build() -> None:
     # — Blender re-links the parent reference inside the destination
     # scene because they're appended in the same operation.
     #
+    # If the spec sets ``geometry.chassisVariant``, we pull
+    # ``chassis_<variant>`` from the kit instead of the generic
+    # ``chassis_base`` cube. The variant is treated as authored at
+    # final size, so we *don't* apply (W, L, H) scaling — the kit
+    # mesh is what ships. Spec dimensions still drive the collider
+    # and thruster/socket positions.
+    #
     # NOTE: we deliberately *defer* ``apply_transforms(chassis)`` until
     # after every part has been snapped to a mount. While the chassis
-    # carries its (W, L, H) scale, the mount children report correct
+    # carries its scale + location, the mount children report correct
     # world positions for fairing/fork/fin/tail attachment. Bake too
     # early and the mounts flatten back to chassis-local positions.
+    chassis_variant = geom.get("chassisVariant")
+    if chassis_variant:
+        chassis_kit_name = f"chassis_{chassis_variant}"
+    else:
+        chassis_kit_name = "chassis_base"
     chassis_kit_objs = append_objects(
         KIT_BLEND,
-        ["chassis_base", "mount_fairing", "mount_fork", "mount_fin", "mount_tail"],
+        [chassis_kit_name, "mount_fairing", "mount_fork", "mount_fin", "mount_tail"],
     )
     chassis = chassis_kit_objs[0]
     chassis.name = "bike_body"
-    chassis.scale = (width, length, height)
-    chassis.location = (0.0, 0.0, height * 0.5)
+    if chassis_variant:
+        # Variant chassis ships at author-modelled size; only lift it
+        # so its base sits on the ground plane (matches scaled-cube
+        # behaviour where chassis spans z=0 to z=H).
+        chassis.location = (0.0, 0.0, height * 0.5)
+    else:
+        chassis.scale = (width, length, height)
+        chassis.location = (0.0, 0.0, height * 0.5)
     chassis.data.materials.clear()
     chassis.data.materials.append(chassis_mat)
 
