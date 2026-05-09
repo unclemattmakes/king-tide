@@ -1,0 +1,66 @@
+name: asset-pipeline
+
+# Re-runs `pnpm gen:all` on PRs that touch the asset-pipeline source of
+# truth (specs and kit .blends). Catches schema-validation regressions
+# and Blender script breakage before merge.
+
+on:
+  pull_request:
+    paths:
+      - 'specs/**'
+      - 'tools/blender/**'
+
+# Avoid double-runs when a PR is force-pushed.
+concurrency:
+  group: asset-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gen-all:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Blender install
+        id: blender-cache
+        uses: actions/cache@v4
+        with:
+          path: /opt/blender
+          key: blender-5.1.0-linux
+
+      - name: Install Blender
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /opt/blender
+          curl -fsSL https://download.blender.org/release/Blender5.1/blender-5.1.0-linux-x64.tar.xz \
+            | tar -xJ -C /opt/blender --strip-components=1
+
+      - name: Add Blender to PATH
+        run: echo "/opt/blender" >> "$GITHUB_PATH"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate specs + build all GLBs
+        run: pnpm gen:all
+        env:
+          BLENDER_EXE: /opt/blender/blender
+          # Skip the watch plugin when the dev server isn't running anyway.
+          HOVERBIKE_NO_ASSET_WATCH: '1'
+
+      - name: Upload manifest as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: asset-manifest
+          path: public/assets/manifest.json
+          retention-days: 14

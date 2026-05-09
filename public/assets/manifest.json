@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "bikes": [
+    {
+      "id": "calibration",
+      "displayName": "Calibration Bike",
+      "url": "/assets/bikes/calibration.glb",
+      "specPath": "specs/bikes/calibration.json",
+      "physics": {
+        "massKg": 120,
+        "topSpeedMps": 28,
+        "hoverHeight": 1.2
+      },
+      "appearance": {
+        "liveryColor": "#888888",
+        "metalColor": "#444444",
+        "glowColor": "#ffffff",
+        "glowIntensity": 1
+      }
+    },
+    {
+      "id": "cruiser",
+      "displayName": "Cruiser",
+      "url": "/assets/bikes/cruiser.glb",
+      "specPath": "specs/bikes/cruiser.json",
+      "physics": {
+        "massKg": 160,
+        "topSpeedMps": 32,
+        "hoverHeight": 1.2
+      },
+      "appearance": {
+        "liveryColor": "#335599",
+        "metalColor": "#1a1c20",
+        "glowColor": "#55aaff",
+        "glowIntensity": 1.2
+      }
+    },
+    {
+      "id": "racer",
+      "displayName": "Racer",
+      "url": "/assets/bikes/racer.glb",
+      "specPath": "specs/bikes/racer.json",
+      "physics": {
+        "massKg": 120,
+        "topSpeedMps": 28,
+        "hoverHeight": 1.2
+      },
+      "appearance": {
+        "liveryColor": "#ff7733",
+        "metalColor": "#222428",
+        "glowColor": "#ffaa55",
+        "glowIntensity": 1.4
+      }
+    },
+    {
+      "id": "scout",
+      "displayName": "Scout",
+      "url": "/assets/bikes/scout.glb",
+      "specPath": "specs/bikes/scout.json",
+      "physics": {
+        "massKg": 220,
+        "topSpeedMps": 65,
+        "hoverHeight": 0.8
+      },
+      "appearance": {
+        "liveryColor": "#ff6633",
+        "metalColor": "#222428",
+        "glowColor": "#5cf2ff",
+        "glowIntensity": 1.4
+      }
+    },
+    {
+      "id": "stunt",
+      "displayName": "Stunt",
+      "url": "/assets/bikes/stunt.glb",
+      "specPath": "specs/bikes/stunt.json",
+      "physics": {
+        "massKg": 90,
+        "topSpeedMps": 25,
+        "hoverHeight": 1.2
+      },
+      "appearance": {
+        "liveryColor": "#33aa66",
+        "metalColor": "#1c2620",
+        "glowColor": "#66ff99",
+        "glowIntensity": 1.6
+      }
+    }
+  ],
+  "props": [
+    {
+      "id": "barrier_low",
+      "displayName": "Low Barrier",
+      "url": "/assets/props/barrier_low.glb",
+      "specPath": "specs/props/barrier_low.json",
+      "category": "barrier"
+    },
+    {
+      "id": "barrier_tall",
+      "displayName": "Tall Barrier",
+      "url": "/assets/props/barrier_tall.glb",
+      "specPath": "specs/props/barrier_tall.json",
+      "category": "barrier"
+    },
+    {
+      "id": "crate_small",
+      "displayName": "Small Crate",
+      "url": "/assets/props/crate_small.glb",
+      "specPath": "specs/props/crate_small.json",
+      "category": "crate"
+    },
+    {
+      "id": "lamppost_tall",
+      "displayName": "Tall Lamppost",
+      "url": "/assets/props/lamppost_tall.glb",
+      "specPath": "specs/props/lamppost_tall.json",
+      "category": "lamppost"
+    },
+    {
+      "id": "pylon_orange",
+      "displayName": "Orange Pylon",
+      "url": "/assets/props/pylon_orange.glb",
+      "specPath": "specs/props/pylon_orange.json",
+      "category": "pylon"
+    }
+  ],
+  "riders": [],
+  "tracks": [
+    {
+      "id": "calibration",
+      "displayName": "Calibration",
+      "url": "/assets/tracks/calibration.glb",
+      "specPath": "specs/tracks/calibration.json"
+    }
+  ],
+  "generatedAt": "2026-05-09T07:12:11.011Z"
+}
