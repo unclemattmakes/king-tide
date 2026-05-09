@@ -7,8 +7,8 @@ GLBs. Bikes, props, and tracks share the framework in
 scripts.
 
 > **End-to-end walkthrough:**
-> [`docs/asset-pipeline-guide.md`](../docs/asset-pipeline-guide.md)
-> (forthcoming) — for the design rationale see
+> [`docs/asset-pipeline-guide.md`](../docs/asset-pipeline-guide.md) —
+> for the original design rationale see
 > [`docs/asset-pipeline-plan.md`](../docs/asset-pipeline-plan.md). The
 > track-specific authoring guide remains
 > [`docs/blender-pipeline-guide.md`](../docs/blender-pipeline-guide.md).
@@ -44,20 +44,33 @@ tools/
 └── blender/                     ← shared headless pipeline
     ├── __init__.py              ← package marker
     ├── common.py                ← reset_scene, read_spec, export_glb, validate_required_kinds
-    ├── lib_loader.py            ← append_objects from kit .blends
-    ├── sockets.py               ← socket-empty creation + validation
+    ├── lib_loader.py            ← append_objects from kit .blends (libraries.load; preserves parent links)
+    ├── sockets.py               ← runtime socket_* empty creation + validation
+    ├── mounts.py                ← build-time mount_/anchor empties + snap_to_mount + strip_build_helpers
     ├── colliders.py             ← primitive collider helpers
     ├── inspect_glb.mjs          ← node script — dumps a GLB's nodes + extras
     ├── run.mjs                  ← Node CLI — wraps `blender --background` per spec
-    ├── seed_bike_kit.py         ← (re)build tools/blender/lib/bike_parts.blend
+    ├── seed_bike_kit.py         ← (re)build tools/blender/lib/bike_parts.blend (with mount empties)
     ├── seed_prop_kit.py         ← (re)build tools/blender/lib/prop_kit.blend
     ├── build_bike.py            ← spec → bike GLB (chassis + fairing + thrusters + sockets + collider)
     ├── build_prop.py            ← spec → prop GLB
     ├── build_track.py           ← spec → tracks-src/<id>.blend → GLB (replaces build_calibration_scene.py)
     └── lib/                     ← committed kit .blend files (source art)
-        ├── bike_parts.blend
+        ├── bike_parts.blend     ← parts + mount_* attachment empties on chassis_base
         └── prop_kit.blend
 ```
+
+### Build-time helpers vs. runtime sockets
+
+Two empty-prefix conventions show up in the kit `.blend` files. They look similar but live in different layers:
+
+| Prefix | Lives in | Stripped on export? | Used by |
+|---|---|---|---|
+| `mount_<role>` | parent kit part (e.g. `chassis_base`) | yes | `build_bike.py` to position children |
+| `anchor` | child kit part (optional) | yes | `snap_to_mount` to align the child to the mount |
+| `socket_<slot>` | bike root | no — rides into GLB | runtime (`bike-loader.ts`) for rider/camera/FX attach |
+
+`tools/blender/mounts.py` defines `snap_to_mount(part, parent, role)` and `strip_build_helpers()`; the build invokes them so authors can move attachment points by translating an empty in Blender instead of editing pseudocode.
 
 ## Spec → GLB contract
 

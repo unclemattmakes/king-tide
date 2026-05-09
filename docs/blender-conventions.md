@@ -57,6 +57,18 @@ Blender → glTF uses Y-up via `export_yup=True`. Three.js is also Y-up. Z forwa
 
 1 Blender unit = 1 metre. Don't change units. Bikes are roughly 2.5m long; gates are typically 28m wide (`half_width = 14`) and 6m tall.
 
+## Bike kit reference (`bike_parts.blend`)
+
+Separate from the track conventions above. Authoring `tools/blender/lib/bike_parts.blend` for `build_bike.py`:
+
+| Empty | Lives on | Lifecycle | Purpose |
+|---|---|---|---|
+| `mount_<role>` | parented to a kit "parent" part (chassis_base) | **build-time only** — stripped from GLB | Marks where a child part attaches. Roles: `fairing`, `fork`, `fin`, `tail`. |
+| `anchor` | parented to a kit "child" part (optional) | **build-time only** — stripped from GLB | The point on the child that snaps to the parent's mount. Defaults to part origin if absent. |
+| `socket_<slot>` | added by builder onto bike_root | rides into GLB | Runtime attach points (`seat`, `nose_cam`, `fx_thruster_l/r`, `fx_exhaust`). |
+
+Mount positions are stored in chassis-local unit-cube space (±0.5 = chassis edge), so they scale with `spec.geometry.chassisLength` / `chassisWidth` / `chassisHeight` automatically. Move a mount in Blender to retune an attachment point — no code change. See [`asset-pipeline-guide.md`](./asset-pipeline-guide.md#mounts-and-anchors).
+
 ## Reference layout — Cliffside
 
 While we wait for someone to actually author a track in Blender, the **Cliffside** track ([`src/game/tracks/cliffside.ts`](../src/game/tracks/cliffside.ts) + [`src/game/entities/cliffside-terrain.ts`](../src/game/entities/cliffside-terrain.ts) + [`src/engine/render/cliffside-mesh.ts`](../src/engine/render/cliffside-mesh.ts)) is the procedural reference for what a Blender-authored track should look like. Each piece of procedural code maps 1:1 to an object you'd author in Blender:

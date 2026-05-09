@@ -64,6 +64,10 @@ Declarative replacement for the legacy `tools/build_calibration_scene.py`. Speci
 3. Saving a `.blend` triggers the same watcher → all bikes (or props) are rebuilt against the new kit.
 4. Reload.
 
+The bike kit opens with parts laid out at their assembled-bike positions (chassis at centre, fairing on top, fork at nose, etc.) so you see a real bike on open. Mesh edits ride through to the build; viewport object positions are layout-only.
+
+To **move where a part attaches** (e.g. fairing sits 5 cm further forward), translate the matching `mount_*` empty parented to `chassis_base` in the kit — no code change. The build's `snap_to_mount` reads the mount's world position and snaps the part to it. See [Authoring bikes → Moving an attachment point](/modding/bikes#moving-an-attachment-point-no-code-change).
+
 If you want to start from a clean placeholder, re-run `tools/blender/seed_bike_kit.py` (or `seed_prop_kit.py`) — those scripts regenerate the placeholders from scratch.
 
 ### Add a brand-new bike / prop
