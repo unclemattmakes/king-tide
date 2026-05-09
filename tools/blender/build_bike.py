@@ -215,6 +215,35 @@ def build() -> None:
         t.data.materials.clear()
         t.data.materials.append(thruster_mat)
 
+    # Front-facing fin marker — restores the visual nose cue the
+    # procedural bike-mesh.ts had (yellow cone pointing +Z).
+    fin_mat = make_material(
+        f"mat_bike_{bike_id}_fin", appear["liveryColor"],
+        emissive_hex=appear["liveryColor"], emissive_intensity=0.5,
+        metallic=0.2, roughness=0.4,
+    )
+    [fin] = append_objects(KIT_BLEND, ["fin_marker"])
+    fin.name = "bike_fin"
+    fin.location = (0.0, -length * 0.5 + 0.05, height + 0.35)
+    apply_transforms(fin)
+    fin.parent = bike_root
+    fin.data.materials.clear()
+    fin.data.materials.append(fin_mat)
+
+    # Rear tail-light marker — mirrors the procedural red tail.
+    tail_mat = make_material(
+        f"mat_bike_{bike_id}_tail", "#ff3333",
+        emissive_hex="#ff3333", emissive_intensity=1.0,
+        metallic=0.0, roughness=0.4,
+    )
+    [tail] = append_objects(KIT_BLEND, ["tail_marker"])
+    tail.name = "bike_tail"
+    tail.location = (0.0, length * 0.5 - 0.05, height + 0.05)
+    apply_transforms(tail)
+    tail.parent = bike_root
+    tail.data.materials.clear()
+    tail.data.materials.append(tail_mat)
+
     # Sockets — placed in Blender authoring frame; the GLTFLoader
     # converts them to three's axes correctly via standard yup export.
     #
