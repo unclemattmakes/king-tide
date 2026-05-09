@@ -1,10 +1,11 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
+import { buildPropGeometry } from '@/engine/render/props-geometry'
 import type { Vec3 } from '@/engine/sim/physics/vec'
 import { nearestT, pointAtT, sampleCatmullRom, tangentAtT } from '@/game/tracks/catmull-rom'
 import { trackToJson } from '@/game/tracks/json-loader'
-import type { BoostPad, Checkpoint, Track } from '@/game/tracks/types'
+import type { BoostPad, Checkpoint, Prop, PropType, Track } from '@/game/tracks/types'
 
 /**
  * In-app track editor.
@@ -55,18 +56,40 @@ export type EditorHandle = {
 }
 
 type GizmoMode = 'translate' | 'rotate' | 'scale'
-type PlaceTool = 'none' | 'gate' | 'pickup' | 'pad' | 'spline'
+type PlaceTool =
+  | 'none'
+  | 'gate'
+  | 'pickup'
+  | 'pad'
+  | 'spline'
+  | 'box'
+  | 'sphere'
+  | 'cylinder'
+  | 'pipe'
+  | 'halfpipe'
 
 type EntitySel =
   | { kind: 'gate'; index: number }
   | { kind: 'pickup'; index: number }
   | { kind: 'pad'; index: number }
   | { kind: 'spline'; splineIndex: number; pointIndex: number }
+  | { kind: 'prop'; index: number }
+  | { kind: 'start' }
   | null
+
+const PROP_PLACE_TOOLS: PlaceTool[] = ['box', 'sphere', 'cylinder', 'pipe', 'halfpipe']
+const PROP_LABELS: Record<PropType, string> = {
+  box: 'Box',
+  sphere: 'Sphere',
+  cylinder: 'Cylinder',
+  pipe: 'Pipe',
+  halfpipe: 'Half Pipe',
+}
 
 export function installTrackEditor(opts: EditorOptions): EditorHandle {
   const { scene, camera, renderer, domEl, track } = opts
   const draft: Track = JSON.parse(JSON.stringify(track)) as Track
+  if (!Array.isArray(draft.props)) draft.props = []
   const canvasEl = renderer.domElement
 
   // ── Camera + orbit ──────────────────────────────────────────────────────
@@ -128,6 +151,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     draft.aiSplines = restored.aiSplines
     draft.pickupSpawns = restored.pickupSpawns
     draft.boostPads = restored.boostPads
+    draft.props = Array.isArray(restored.props) ? restored.props : []
     if (restored.water) draft.water = restored.water
     if (restored.environmentGlb) draft.environmentGlb = restored.environmentGlb
     sel = null
@@ -145,6 +169,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
 
   function entityKey(s: NonNullable<EntitySel>): string {
     if (s.kind === 'spline') return `spline:${s.splineIndex}:${s.pointIndex}`
+    if (s.kind === 'start') return 'start'
     return `${s.kind}:${s.index}`
   }
 
@@ -202,9 +227,23 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       splinePolyline = null
     }
 
+    {
+      const k = 'start'
+      const h = makeStartHelper(draft.start, isSel({ kind: 'start' }))
+      h.userData.entityKey = k
+      helpers.set(k, h)
+      helpersGroup.add(h)
+    }
     for (let i = 0; i < draft.checkpoints.length; i++) {
       const k = `gate:${i}`
       const h = makeGateHelper(draft.checkpoints[i]!, isSel({ kind: 'gate', index: i }))
+      h.userData.entityKey = k
+      helpers.set(k, h)
+      helpersGroup.add(h)
+    }
+    for (let i = 0; i < draft.props.length; i++) {
+      const k = `prop:${i}`
+      const h = makePropHelper(draft.props[i]!, isSel({ kind: 'prop', index: i }))
       h.userData.entityKey = k
       helpers.set(k, h)
       helpersGroup.add(h)
@@ -253,6 +292,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     if (sel.kind === 'spline' && target.kind === 'spline') {
       return sel.pointIndex === target.pointIndex && sel.splineIndex === target.splineIndex
     }
+    if (sel.kind === 'start' && target.kind === 'start') return true
     return (sel as { index: number }).index === (target as { index: number }).index
   }
 
@@ -266,7 +306,11 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
         ? 'pad'
         : k.startsWith('pickup')
           ? 'pickup'
-          : 'spline'
+          : k.startsWith('prop')
+            ? 'prop'
+            : k === 'start'
+              ? 'start'
+              : 'spline'
     // Per-entity axis gating.
     if (kind === 'pickup' || kind === 'spline') {
       // Translate-only entities. Show all three axes for translation.
@@ -274,19 +318,31 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       tc.showY = true
       tc.showZ = true
     } else if (mode === 'rotate') {
-      // Gates / pads rotate around Y only (yaw).
-      tc.showX = false
-      tc.showY = true
-      tc.showZ = false
+      // Start / gates / pads rotate around Y only (yaw). Props rotate
+      // around all three axes so the user can lay a pipe sideways, etc.
+      if (kind === 'prop') {
+        tc.showX = true
+        tc.showY = true
+        tc.showZ = true
+      } else {
+        tc.showX = false
+        tc.showY = true
+        tc.showZ = false
+      }
     } else if (mode === 'scale') {
       // Gates: scale X (halfWidth), Y (height). Pads: scale X (halfWidth), Z (halfDepth).
+      // Props: scale on all three axes — interpretation per type.
       if (kind === 'gate') {
         tc.showX = true
         tc.showY = true
         tc.showZ = false
-      } else {
+      } else if (kind === 'pad') {
         tc.showX = true
         tc.showY = false
+        tc.showZ = true
+      } else {
+        tc.showX = true
+        tc.showY = true
         tc.showZ = true
       }
     } else {
@@ -307,6 +363,8 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       const cp = draft.checkpoints[sel.index]
       if (cp && typeof cp.splineT === 'number' && m === 'rotate') return false
     }
+    // Start: translate + rotate (yaw); no scale.
+    if (sel.kind === 'start' && m === 'scale') return false
     return true
   }
 
@@ -375,6 +433,13 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
         if (pad) {
           pad.halfWidth = clampPositive(pad.halfWidth * sx, 0.5, 50)
           pad.halfDepth = clampPositive(pad.halfDepth * sz, 0.5, 100)
+        }
+      } else if (sel.kind === 'prop') {
+        const p = draft.props[sel.index]
+        if (p) {
+          p.size.x = clampPositive(p.size.x * sx, 0.1, 200)
+          p.size.y = clampPositive(p.size.y * sy, 0.1, 200)
+          p.size.z = clampPositive(p.size.z * sz, 0.05, 200)
         }
       }
       // Also bake any pose drift that snuck in during the same drag.
@@ -452,6 +517,22 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       recomputeSplineDerived()
       refreshSplineCurveMesh()
       refreshBoundGateHelpers()
+    } else if (s.kind === 'prop') {
+      const p = draft.props[s.index]
+      if (!p) return
+      p.position.x = h.position.x
+      p.position.y = h.position.y
+      p.position.z = h.position.z
+      p.rotation.x = h.quaternion.x
+      p.rotation.y = h.quaternion.y
+      p.rotation.z = h.quaternion.z
+      p.rotation.w = h.quaternion.w
+    } else if (s.kind === 'start') {
+      // Start stores yaw as a number; derive it from the helper's Y rotation.
+      draft.start.position.x = h.position.x
+      draft.start.position.y = h.position.y
+      draft.start.position.z = h.position.z
+      draft.start.yaw = yawFromQuaternion(h.quaternion)
     }
   }
 
@@ -581,6 +662,14 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
            ${placeBtn('pad', '+ Boost')}
            ${placeBtn('spline', '+ Spline pt')}
          </div>
+         <div style="color:#9bb;margin-top:4px">Shapes</div>
+         <div style="display:flex;flex-wrap:wrap;gap:4px">
+           ${placeBtn('box', '+ Box')}
+           ${placeBtn('sphere', '+ Sphere')}
+           ${placeBtn('cylinder', '+ Cylinder')}
+           ${placeBtn('pipe', '+ Pipe')}
+           ${placeBtn('halfpipe', '+ Half Pipe')}
+         </div>
        </div>`,
       `<div style="display:flex;flex-direction:column;gap:6px">
          <div style="color:#9bb">Mode (W / E / R)</div>
@@ -621,6 +710,25 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
 
   function outlinerHtml(): string {
     const sections: string[] = []
+    sections.push(
+      outlinerSection('Start', [
+        {
+          k: 'start',
+          label: `start  (${draft.start.position.x.toFixed(0)}, ${draft.start.position.z.toFixed(0)})  yaw ${((draft.start.yaw * 180) / Math.PI).toFixed(0)}°`,
+          sel: { kind: 'start' } as EntitySel,
+        },
+      ]),
+    )
+    sections.push(
+      outlinerSection(
+        'Shapes',
+        draft.props.map((p, i) => ({
+          k: `prop:${i}`,
+          label: `${PROP_LABELS[p.type]}_${i}  (${p.position.x.toFixed(0)}, ${p.position.z.toFixed(0)})`,
+          sel: { kind: 'prop', index: i } as EntitySel,
+        })),
+      ),
+    )
     sections.push(
       outlinerSection(
         'Checkpoints',
@@ -691,6 +799,24 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
 
   function selectedPropsHtml(): string {
     if (!sel) return '<span style="color:#566">No selection</span>'
+    if (sel.kind === 'start') {
+      return [
+        `<div><b>start</b></div>`,
+        `<div>pos: ${fmtVec(draft.start.position)}</div>`,
+        `<div>yaw: ${((draft.start.yaw * 180) / Math.PI).toFixed(1)}°</div>`,
+        `<div style="color:#7c9">controls position + facing for the player and the AI grid</div>`,
+      ].join('')
+    }
+    if (sel.kind === 'prop') {
+      const p = draft.props[sel.index]
+      if (!p) return '(missing)'
+      return [
+        `<div><b>${PROP_LABELS[p.type]}_${sel.index}</b></div>`,
+        `<div>pos: ${fmtVec(p.position)}</div>`,
+        `<div>size: ${fmtVec(p.size)}</div>`,
+        `<div style="color:#7c9">${propSizeHint(p.type)}</div>`,
+      ].join('')
+    }
     if (sel.kind === 'gate') {
       const cp = draft.checkpoints[sel.index]
       if (!cp) return '(missing)'
@@ -760,9 +886,11 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   }
 
   function parseKey(k: string): EntitySel {
+    if (k === 'start') return { kind: 'start' }
     if (k.startsWith('gate:')) return { kind: 'gate', index: Number(k.slice(5)) }
     if (k.startsWith('pickup:')) return { kind: 'pickup', index: Number(k.slice(7)) }
     if (k.startsWith('pad:')) return { kind: 'pad', index: Number(k.slice(4)) }
+    if (k.startsWith('prop:')) return { kind: 'prop', index: Number(k.slice(5)) }
     if (k.startsWith('spline:')) {
       const [, si, pi] = k.split(':')
       return { kind: 'spline', splineIndex: Number(si), pointIndex: Number(pi) }
@@ -778,7 +906,6 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
 
   canvasEl.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return
-    if (placeTool === 'none') return
     // Don't intercept drags on the gizmo — only handle bare ground clicks.
     // tc.dragging is true while a handle is grabbed; orbit.enabled flips
     // to false too, but we just guard by checking the gizmo dragging flag.
@@ -787,10 +914,37 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
     mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
     raycaster.setFromCamera(mouse, camera)
-    if (!raycaster.ray.intersectPlane(groundPlane, tmpHit)) return
-    placeAt(tmpHit, placeTool)
-    placeTool = 'none'
-    renderPanel()
+
+    if (placeTool !== 'none') {
+      if (!raycaster.ray.intersectPlane(groundPlane, tmpHit)) return
+      placeAt(tmpHit, placeTool)
+      placeTool = 'none'
+      renderPanel()
+      return
+    }
+
+    // Viewport selection: raycast against helper geometry and pick the
+    // owning helper group via its userData.entityKey marker.
+    const hits = raycaster.intersectObjects(helpersGroup.children, true)
+    let pickedKey: string | null = null
+    for (const hit of hits) {
+      let cur: THREE.Object3D | null = hit.object
+      while (cur && cur !== helpersGroup) {
+        const ek = cur.userData.entityKey as string | undefined
+        if (ek) {
+          pickedKey = ek
+          break
+        }
+        cur = cur.parent
+      }
+      if (pickedKey) break
+    }
+    if (pickedKey) {
+      setSel(parseKey(pickedKey))
+    } else {
+      // Click on empty space → deselect.
+      setSel(null)
+    }
   })
 
   function placeAt(hit: THREE.Vector3, t: PlaceTool): void {
@@ -824,6 +978,18 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
         strength: 1.5,
       })
       sel = { kind: 'pad', index: draft.boostPads.length - 1 }
+    } else if (PROP_PLACE_TOOLS.includes(t)) {
+      const propType = t as PropType
+      const defaultSize: Vec3 = defaultPropSize(propType)
+      // Drop the prop above the click so it sits on top of the ground at y=0.
+      const dropY = defaultPropDropY(propType, defaultSize)
+      draft.props.push({
+        type: propType,
+        position: { x: hit.x, y: dropY, z: hit.z },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        size: defaultSize,
+      })
+      sel = { kind: 'prop', index: draft.props.length - 1 }
     } else if (t === 'spline') {
       const main = draft.aiSplines.find((s) => s.id === 'main')
       if (main) {
@@ -876,6 +1042,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
 
   function deleteSelected(): void {
     if (!sel) return
+    if (sel.kind === 'start') return // start is a singleton — cannot be deleted
     pushUndoSnapshot()
     if (sel.kind === 'gate') {
       draft.checkpoints.splice(sel.index, 1)
@@ -884,6 +1051,8 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       draft.pickupSpawns.splice(sel.index, 1)
     } else if (sel.kind === 'pad') {
       draft.boostPads.splice(sel.index, 1)
+    } else if (sel.kind === 'prop') {
+      draft.props.splice(sel.index, 1)
     } else if (sel.kind === 'spline') {
       const sp = draft.aiSplines[sel.splineIndex]
       if (sp) {
@@ -1112,6 +1281,130 @@ function makeSplineCurve(points: { x: number; y: number; z: number }[]): THREE.L
   const line = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x66aacc }))
   line.name = 'editor:spline-curve'
   return line
+}
+
+/**
+ * Player-start helper. A pad on the ground with a forward-pointing arrow,
+ * tinted bright green so it stands out from the orange gates.
+ */
+function makeStartHelper(start: { position: Vec3; yaw: number }, selected: boolean): THREE.Group {
+  const g = new THREE.Group()
+  g.position.set(start.position.x, start.position.y, start.position.z)
+  const halfA = start.yaw / 2
+  g.quaternion.set(0, Math.sin(halfA), 0, Math.cos(halfA))
+
+  const baseColor = 0x33ff88
+  const selColor = 0xaaffcc
+  const padMat = new THREE.MeshBasicMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.55,
+    side: THREE.DoubleSide,
+  })
+  const padGeom = new THREE.PlaneGeometry(6, 8)
+  padGeom.rotateX(-Math.PI / 2)
+  const pad = new THREE.Mesh(padGeom, padMat)
+  pad.position.set(0, 0.05, 0)
+  g.add(pad)
+
+  const arrowMat = new THREE.MeshBasicMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.95,
+  })
+  const arrowGeom = new THREE.ConeGeometry(1.0, 2.4, 4)
+  arrowGeom.rotateX(Math.PI / 2)
+  const arrow = new THREE.Mesh(arrowGeom, arrowMat)
+  arrow.position.set(0, 0.5, 2.6)
+  g.add(arrow)
+
+  // Vertical post so the start is visible from far away.
+  const postMat = new THREE.MeshBasicMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.5,
+  })
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 4, 8), postMat)
+  post.position.set(0, 2, -2)
+  g.add(post)
+
+  g.userData.setSelected = (v: boolean) => {
+    padMat.color.setHex(v ? selColor : baseColor)
+    arrowMat.color.setHex(v ? selColor : baseColor)
+    postMat.color.setHex(v ? selColor : baseColor)
+  }
+  return g
+}
+
+function defaultPropSize(t: PropType): Vec3 {
+  if (t === 'box') return { x: 4, y: 1.5, z: 4 }
+  if (t === 'sphere') return { x: 3, y: 3, z: 3 }
+  if (t === 'cylinder') return { x: 2.5, y: 2, z: 2.5 }
+  // pipes default to a 5m radius, 10m long, 0.6m wall — large enough to ride.
+  return { x: 5, y: 5, z: 0.6 }
+}
+
+function defaultPropDropY(t: PropType, size: Vec3): number {
+  // Drop boxes / cylinders so they sit ON the water plane (y=0) rather than
+  // floating in mid-air. Spheres rest on radius. Pipes lay on their outer
+  // radius.
+  if (t === 'box') return size.y
+  if (t === 'sphere') return size.x
+  if (t === 'cylinder') return size.y
+  return size.x // pipe / halfpipe rest on outer radius
+}
+
+function propSizeHint(t: PropType): string {
+  if (t === 'box') return 'size = halfWidth, halfHeight, halfDepth'
+  if (t === 'sphere') return 'size.x = radius'
+  if (t === 'cylinder') return 'size.x = radius, size.y = halfHeight'
+  return 'size = outerRadius, halfLength, wallThickness'
+}
+
+const PROP_DEFAULT_COLORS: Record<PropType, number> = {
+  box: 0xc0a070,
+  sphere: 0xddaa66,
+  cylinder: 0x9999bb,
+  pipe: 0x99ccdd,
+  halfpipe: 0xaadddd,
+}
+
+function makePropHelper(p: Prop, selected: boolean): THREE.Group {
+  const g = new THREE.Group()
+  g.position.set(p.position.x, p.position.y, p.position.z)
+  g.quaternion.set(p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w)
+  const baseColor = p.color
+    ? new THREE.Color(p.color).getHex()
+    : PROP_DEFAULT_COLORS[p.type]
+  const selColor = 0xffff66
+  const mat = new THREE.MeshLambertMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.85,
+    side: THREE.DoubleSide,
+  })
+  const geom = buildPropGeometry(p.type, p.size)
+  const mesh = new THREE.Mesh(geom, mat)
+  g.add(mesh)
+  // A wireframe overlay helps gauge size against the gizmo.
+  const wireMat = new THREE.LineBasicMaterial({
+    color: selected ? selColor : 0x000000,
+    transparent: true,
+    opacity: 0.25,
+  })
+  const wire = new THREE.LineSegments(new THREE.WireframeGeometry(geom), wireMat)
+  g.add(wire)
+  g.userData.setSelected = (v: boolean) => {
+    mat.color.setHex(v ? selColor : baseColor)
+    wireMat.color.setHex(v ? selColor : 0x000000)
+  }
+  return g
+}
+
+/** Yaw (rotation around +Y) extracted from a quaternion via the YXZ Euler. */
+function yawFromQuaternion(q: THREE.Quaternion): number {
+  const e = new THREE.Euler().setFromQuaternion(q, 'YXZ')
+  return e.y
 }
 
 // ── Misc utils ────────────────────────────────────────────────────────────

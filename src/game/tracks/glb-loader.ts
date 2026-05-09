@@ -172,6 +172,7 @@ export function buildTrackFromGltf(gltf: GltfRoot, opts: LoadTrackOptions): Trac
     lapsToFinish: opts.lapsToFinish,
     surfaces: [],
     boostPads: [],
+    props: [],
     pickupSpawns,
     aiSplines,
   }

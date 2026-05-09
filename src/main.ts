@@ -20,6 +20,7 @@ import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
 import { attachTrackColliders, loadGlbTrackVisuals } from './engine/render/glb-track'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
+import { createPropsMesh } from './engine/render/props-mesh'
 import { createRampMesh } from './engine/render/ramp-mesh'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
@@ -42,6 +43,7 @@ import { createLagoonIsland, createSafetyFloor } from './game/entities/arena'
 import { createBike } from './game/entities/bike'
 import { createCliffsideTerrain } from './game/entities/cliffside-terrain'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
+import { createPropColliders } from './game/entities/props'
 import { createRamp } from './game/entities/ramp'
 import { aiCombatSystem } from './game/systems/ai-combat'
 import { aiControlSystem } from './game/systems/ai-control'
@@ -186,6 +188,12 @@ async function boot() {
   }
   const trackVisuals = createTrackVisuals(track)
   scene.add(trackVisuals.group)
+
+  // Editor-authored props: render meshes + static colliders.
+  if (track.props.length > 0) {
+    scene.add(createPropsMesh(track.props))
+    createPropColliders(phys, track.props)
+  }
 
   // Pickup spawns from track.
   for (let i = 0; i < track.pickupSpawns.length; i++) {
