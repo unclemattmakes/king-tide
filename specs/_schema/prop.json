@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://hoverbike.local/specs/prop.json",
+  "title": "Prop spec",
+  "description": "Parametric definition of a placeable track prop. The Blender headless builder appends a kit part, scales/tints it, and writes public/assets/props/<id>.glb.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id", "displayName", "category", "geometry", "collider"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$"
+    },
+    "displayName": { "type": "string", "minLength": 1 },
+    "category": {
+      "type": "string",
+      "enum": ["barrier", "lamppost", "crate", "pylon", "decor"]
+    },
+    "geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kitPart", "scale", "tint"],
+      "properties": {
+        "kitPart": {
+          "type": "string",
+          "description": "Name of the source object in tools/blender/lib/prop_kit.blend."
+        },
+        "scale": {
+          "type": "array",
+          "items": { "type": "number", "exclusiveMinimum": 0 },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "tint": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+      }
+    },
+    "collider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shape"],
+      "properties": {
+        "shape": { "enum": ["box", "capsule", "cylinder", "sphere"] },
+        "halfExtents": {
+          "type": "array",
+          "items": { "type": "number", "exclusiveMinimum": 0 },
+          "minItems": 3,
+          "maxItems": 3,
+          "description": "Box: [hx, hy, hz] in three.js axes [right, up, forward]."
+        },
+        "radius": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    }
+  }
+}

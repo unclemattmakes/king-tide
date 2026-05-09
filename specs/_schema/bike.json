@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://hoverbike.local/specs/bike.json",
+  "title": "Bike spec",
+  "description": "Parametric definition of a hoverbike asset. The Blender headless builder reads this file, assembles a GLB from kit parts, and writes public/assets/bikes/<id>.glb.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id", "displayName", "geometry", "physics", "appearance", "rider"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "description": "Stable identifier — also the GLB filename."
+    },
+    "displayName": { "type": "string", "minLength": 1 },
+    "geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chassisLength",
+        "chassisWidth",
+        "chassisHeight",
+        "fairingStyle",
+        "thrusterCount",
+        "thrusterSpacing",
+        "fork"
+      ],
+      "properties": {
+        "chassisLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 6 },
+        "chassisWidth": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
+        "chassisHeight": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+        "fairingStyle": { "enum": ["bare", "swept", "full"] },
+        "thrusterCount": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "thrusterSpacing": { "type": "number", "minimum": 0, "maximum": 2 },
+        "fork": { "enum": ["single", "dual"] }
+      }
+    },
+    "physics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["massKg", "topSpeedMps", "hoverHeight"],
+      "properties": {
+        "massKg": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+        "topSpeedMps": { "type": "number", "exclusiveMinimum": 0, "maximum": 200 },
+        "hoverHeight": { "type": "number", "exclusiveMinimum": 0, "maximum": 4 }
+      }
+    },
+    "appearance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["liveryColor", "metalColor", "glowColor", "glowIntensity"],
+      "properties": {
+        "liveryColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "metalColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "glowColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "glowIntensity": { "type": "number", "minimum": 0, "maximum": 8 }
+      }
+    },
+    "rider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seatOffset"],
+      "properties": {
+        "seatOffset": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3,
+          "description": "[x, y, z] in bike-root local space (Y up, +Z forward)."
+        }
+      }
+    }
+  }
+}

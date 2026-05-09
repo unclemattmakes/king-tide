@@ -1,0 +1,15 @@
+{
+  "$schema": "../_schema/prop.json",
+  "id": "crate_small",
+  "displayName": "Small Crate",
+  "category": "crate",
+  "geometry": {
+    "kitPart": "crate",
+    "scale": [0.7, 0.7, 0.7],
+    "tint": "#7a4a20"
+  },
+  "collider": {
+    "shape": "box",
+    "halfExtents": [0.35, 0.35, 0.35]
+  }
+}
