@@ -385,6 +385,45 @@ headed, opting in to the real GPU; set `E2E_HEADLESS=1` to flip it back
 (e.g. CI without a display server). A pop-up Chromium window per worker
 during local `pnpm e2e` is the visible side effect.
 
+### Pitch heaviness + lean baseline + auto-orient to ramps (M9.36)
+Three feel passes on the chassis controller in
+[`src/game/systems/hover.ts`](../src/game/systems/hover.ts):
+
+1. **Pitch smoothing.** Kinematic pitch was previously snap-to-target each
+   fixed step (effectively rate=∞), which read as twitchy on the stick.
+   The kinematic pitch now lerps toward target with two
+   exponential rates: `PITCH_RATE_ACTIVE = 12` (≈250 ms to 95% while the
+   stick is held) and `PITCH_RATE_RELEASE = 3` (≈1 s to 95% when the
+   stick is at neutral). The 4× release-vs-active ratio is intentional:
+   letting off the stick should feel *heavy*, like the bike retains its
+   attitude instead of snapping back. Side effect: the bike holds its
+   launch angle for ~1 s after leaving a ramp (since `surfacePitchTarget`
+   drops to 0 when airborne but the lerp drains it slowly), which reads
+   as natural "ballistic carry" rather than an instant pop to flat. Roll
+   still snaps — steer-driven lean is meant to read instant.
+
+2. **Lean baseline (`LEAN_BASE = 0.5`).** Previously the steer-driven roll
+   lean scaled linearly from 0 at zero forward speed to full at 5 m/s. Now
+   it's `LEAN_BASE + (1 − LEAN_BASE) · min(speed/5, 1)`, so a stationary
+   bike at full steer leans 50% of the limit (~6°), and the lean ramps to
+   the full 12° once moving at speed. The bike "knows" it's turning even
+   when parked — feels less like a static prop on a turntable when
+   maneuvering at low speed.
+
+3. **Auto-orient to ramps.** `probeSurface` now uses
+   `castRayAndGetNormal`, and the surface-alignment block has a ground
+   branch that decomposes the world normal into yaw-aligned components
+   and reads pitch/roll directly:
+   `pitch = atan2(n_yaw.z, n_yaw.y)`,
+   `roll  = -asin(n_yaw.x)`.
+   Strength is `GROUND_FOLLOW · altitudeFactor` with `GROUND_FOLLOW = 1.0`
+   (vs water's per-bike `surfaceFollow` of 0.5) — ramps are clean
+   surfaces that don't need the chop-averaging dampening the water probe
+   applies, so the bike fully matches a ramp's slope. The Lagoon ramp
+   (14° slope) now reads as the bike "settling onto" the ramp on
+   approach and launching from that as its new neutral attitude, instead
+   of needing the player to hold pitch+E to compensate.
+
 ### Pitch-modulated ride height (M9.24)
 Above water, the hover-spring's target height is offset by pitch input:
 `effectiveHoverHeight = stats.hoverHeight + intent.pitch * 0.5`. Pulling
