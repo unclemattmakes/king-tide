@@ -385,6 +385,34 @@ headed, opting in to the real GPU; set `E2E_HEADLESS=1` to flip it back
 (e.g. CI without a display server). A pop-up Chromium window per worker
 during local `pnpm e2e` is the visible side effect.
 
+### Unified multi-probe surface alignment (M9.37)
+Auto-orient ground branch (M9.36) reworked to use the same 4-probe footprint
+sampling as water — bow / stern / port / starboard, each taking
+`max(ground raycast, wave field height)`. Wins:
+
+- **Sub-footprint terrain bumps average out.** A trimesh ramp lip or rocky
+  patch shorter than the bike's 1.6m × 0.8m footprint gets averaged across
+  probes instead of whip-snapping the chassis to a single normal.
+- **Mixed water/terrain transitions read continuously.** Bow over a ramp
+  while the stern is still on a wave, or bike straddling a shoreline lip:
+  each probe independently picks its surface, so the differential height
+  smoothly transfers from "rolling on water" to "climbing the ramp" with
+  no isWater-branch flicker.
+- **One code path.** Single multi-probe block runs whether the center
+  probe is over water, over ground, or transitioning. The center probe's
+  `isWater` only picks the *baseline follow strength* (water uses per-bike
+  `surfaceFollow` for chop dampening; ground uses 1.0 for full ramp match).
+
+The single-normal `castRayAndGetNormal` path from M9.36 is retired —
+`probeSurface` is back to a plain `castRay`, and a new `probeSurfaceY`
+helper does the four corner casts (returns max of ground+water; falls
+back to the center probe's surface if neither side hits, e.g. bike
+overhanging a cliff edge).
+
+Cost: 5 raycasts per bike per fixed step (1 center + 4 corners) instead
+of 1. With ~5 bikes that's 25 raycasts at 60Hz = ~1500/sec, well under
+Rapier's broadphase ceiling.
+
 ### Pitch heaviness + lean baseline + auto-orient to ramps (M9.36)
 Three feel passes on the chassis controller in
 [`src/game/systems/hover.ts`](../src/game/systems/hover.ts):
