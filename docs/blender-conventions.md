@@ -67,7 +67,11 @@ Separate from the track conventions above. Authoring `tools/blender/lib/bike_par
 | `anchor` | parented to a kit "child" part (optional) | **build-time only** — stripped from GLB | The point on the child that snaps to the parent's mount. Defaults to part origin if absent. |
 | `socket_<slot>` | added by builder onto bike_root | rides into GLB | Runtime attach points (`seat`, `nose_cam`, `fx_thruster_l/r`, `fx_exhaust`). |
 
-Mount positions are stored in chassis-local unit-cube space (±0.5 = chassis edge), so they scale with `spec.geometry.chassisLength` / `chassisWidth` / `chassisHeight` automatically. Move a mount in Blender to retune an attachment point — no code change. See [`asset-pipeline-guide.md`](./asset-pipeline-guide.md#mounts-and-anchors).
+Mount positions are stored in chassis-local space. Variants are *parented* to mounts so moving a mount in the viewport drags the dependent geometry live. For the default `chassis_base`, mounts scale with `spec.geometry.chassisLength` / `chassisWidth` / `chassisHeight` (the chassis is a unit cube the build scales). For specs that set `geometry.chassisVariant: "<name>"`, the build appends `chassis_<name>` from the kit at author-modelled size — no scaling — so kit-local mount positions resolve to the same world positions in-game.
+
+The kit's outliner is split into a `Source` collection (canonical editable parts) plus one `Bike: <name>` snapshot per spec. Snapshots are static (linked-data instances refreshed on re-seed); edit in Source, eyeball cross-spec via the snapshots or `?viewer=<id>`.
+
+See [`asset-pipeline-guide.md`](./asset-pipeline-guide.md#mounts-and-anchors).
 
 ## Reference layout — Cliffside
 

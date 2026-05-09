@@ -44,21 +44,28 @@ tools/
 └── blender/                     ← shared headless pipeline
     ├── __init__.py              ← package marker
     ├── common.py                ← reset_scene, read_spec, export_glb, validate_required_kinds
-    ├── lib_loader.py            ← append_objects from kit .blends (libraries.load; preserves parent links)
+    ├── lib_loader.py            ← append_objects from kit .blends (libraries.load; preserves parent links, prunes transitive deps)
     ├── sockets.py               ← runtime socket_* empty creation + validation
     ├── mounts.py                ← build-time mount_/anchor empties + snap_to_mount + strip_build_helpers
     ├── colliders.py             ← primitive collider helpers
     ├── inspect_glb.mjs          ← node script — dumps a GLB's nodes + extras
     ├── run.mjs                  ← Node CLI — wraps `blender --background` per spec
-    ├── seed_bike_kit.py         ← (re)build tools/blender/lib/bike_parts.blend (with mount empties)
+    ├── seed_bike_kit.py         ← (re)build tools/blender/lib/bike_parts.blend — Source collection + per-spec snapshot collections, variants parented to mounts
     ├── seed_prop_kit.py         ← (re)build tools/blender/lib/prop_kit.blend
-    ├── build_bike.py            ← spec → bike GLB (chassis + fairing + thrusters + sockets + collider)
+    ├── build_bike.py            ← spec → bike GLB. Picks chassis_<variant> when geometry.chassisVariant is set, else scales chassis_base.
     ├── build_prop.py            ← spec → prop GLB
     ├── build_track.py           ← spec → tracks-src/<id>.blend → GLB (replaces build_calibration_scene.py)
     └── lib/                     ← committed kit .blend files (source art)
-        ├── bike_parts.blend     ← parts + mount_* attachment empties on chassis_base
+        ├── bike_parts.blend     ← Source collection (canonical parts + mounts) + Bike: <name> snapshot per spec
         └── prop_kit.blend
 ```
+
+The runtime ships a stand-alone bike viewer at
+[`src/viewer/bike-viewer.ts`](../src/viewer/bike-viewer.ts), reachable
+via `?viewer=<bikeId>`. It loads one bike GLB on a turntable with
+`OrbitControls`, surfaces sockets and the box collider as gizmos, and
+gives a quick-switch row across the manifest's bikes — useful for
+eyeballing the Blender kit against what the build actually ships.
 
 ### Build-time helpers vs. runtime sockets
 

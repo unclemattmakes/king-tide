@@ -447,8 +447,27 @@ Pseudocode:
 > into kit-side empties — `mount_<role>` parented to the chassis part.
 > `tools/blender/mounts.py` provides `snap_to_mount(part, parent,
 > role)` and `strip_build_helpers()`. Authors retune attachment points
-> by translating an empty in Blender, not by editing pseudocode. See
+> by translating an empty in Blender, not by editing pseudocode.
+> Variants are *parented* to the mounts so moving a mount drags
+> dependent geometry live in the kit. See
 > [`asset-pipeline-guide.md`](./asset-pipeline-guide.md#mounts-and-anchors).
+>
+> **Optional `chassisVariant` (added post-mount-system):** specs may
+> set `geometry.chassisVariant: "<name>"` to ship `chassis_<name>`
+> from the kit at author-modelled size — no per-spec scaling. The
+> default (variant absent) keeps the legacy `chassis_base` cube +
+> `(W, L, H)` scale path. `chassisLength`/`Width`/`Height` stay
+> required in either case (collider, thruster, fin/tail mount math
+> still uses them). Authoring path: open Source in `bike_parts.blend`,
+> duplicate `chassis_base` to `chassis_<your_id>`, sculpt to the
+> shape you want, set `chassisVariant` in the spec.
+>
+> **Per-bike preview collections (in-Blender viewer):** the kit
+> outliner ships with one `Bike: <name>` collection per spec, each a
+> static snapshot built from the matching JSON (linked-data
+> instances, mesh data shared with Source). Snapshots refresh on
+> re-seed. The runtime equivalent is `?viewer=<id>` — see
+> [`src/viewer/bike-viewer.ts`](../src/viewer/bike-viewer.ts).
 
 ### `build_prop.py`
 

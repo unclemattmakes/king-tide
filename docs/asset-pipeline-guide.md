@@ -53,6 +53,29 @@ with:
 The runtime path lives in
 [`src/game/assets/bike-loader.ts`](../src/game/assets/bike-loader.ts).
 
+#### Custom chassis geometry (`chassisVariant`)
+
+The default chassis is `chassis_base` (a generic cube) scaled per
+spec. To ship bespoke chassis geometry instead — own mesh per bike,
+no scaling — author `chassis_<your_id>` in `bike_parts.blend` and add
+`"chassisVariant": "<your_id>"` to the spec's `geometry` block. The
+build appends the named variant at author-modelled size and skips the
+`scale = (W, L, H)` step. `chassisLength`/`Width`/`Height` stay
+required — they still drive the box collider, the thruster placement,
+and the fork/fin/tail mount world positions, so keep them aligned
+with the sculpted mesh's actual dims.
+
+#### In-game viewer (`?viewer=<bikeId>`)
+
+For visual verification of a built bike GLB, navigate to
+`/?viewer=<id>` (e.g. `/?viewer=scout`). Skips the entire game boot
+and renders one bike on a turntable with `OrbitControls`. The HUD
+shows mass, top speed, hover height, world bbox, livery/metal/glow
+swatches, every socket, and a quick-switch row across the manifest's
+bikes. Sockets render as small green dots; the box collider as an
+orange wireframe. See
+[`src/viewer/bike-viewer.ts`](../src/viewer/bike-viewer.ts).
+
 ### Props (`specs/props/<id>.json`)
 
 Editor-placeable static decor. Spec picks a kit part by name, applies
@@ -116,19 +139,41 @@ scripts regenerate the placeholders from scratch.
 
 #### Edit-in-context
 
-Kit objects are laid out at their **exact assembled-bike positions**
-in the .blend so the kit reads as a fully-built bike on open — chassis
-at the centre, fairing on top, fork at the nose, thruster at the tail.
-Variants overlap their primary (all three fairings sit on top of the
-chassis; both forks live at the nose); hide the ones you don't care
-about in the outliner if you need to see only the active variant. The
-prop kit is laid out as a row along +X.
+The bike kit is organized into Blender collections that mirror the
+in-game `?viewer=<id>` switch experience. The default outliner state:
+
+```
+Source                        ← editable canonical parts (visible by default)
+Bike: Calibration Bike        ← snapshot (hidden)
+Bike: Cruiser                 ← snapshot (hidden)
+Bike: Racer                   ← snapshot (hidden)
+Bike: Scout                   ← snapshot (hidden)
+Bike: Stunt                   ← snapshot (hidden)
+```
+
+Source contains the **editable** canonical parts. Each variant
+fairing, fork, fin, and tail is parented to its corresponding
+`mount_*` empty, so **moving a mount in the viewport drags the
+dependent geometry along** — same live-attach feel as the in-game
+viewer. Move `mount_fairing` and all three fairing variants follow.
+
+`Bike: <name>` collections are **static snapshots** built from the
+spec at seed time. They contain linked-data instances of the
+canonical parts (mesh data shared with Source — mesh edits propagate
+instantly). To **refresh a snapshot** after mount edits, re-run
+`tools/blender/seed_bike_kit.py`. Toggle a snapshot visible to
+eyeball how a different spec resolves without leaving Blender.
+
+The prop kit is laid out as a row along +X — props don't have the
+collection structure since they don't share a chassis or vary as
+parametrically.
 
 The viewport position of an object in the kit is **layout-only**.
 `tools/blender/lib_loader.append_objects` resets each appended object's
-location/rotation/scale to identity, so the build only sees the part's
-mesh data and positions it programmatically per the spec. Rules of
-thumb:
+location/rotation/scale to identity (skipping `mount_*` / `anchor*`
+helpers, whose transforms ARE the data), so the build only sees the
+part's mesh data and positions it programmatically per the spec.
+Rules of thumb:
 
 - ✅ Free to drag (G), rotate (R), or scale (S) kit objects in the
   viewport to find a better viewing layout — the build ignores it.
@@ -155,18 +200,24 @@ present) lands on the matching mount.
 
 To **move** an attachment point — say the fork should sit further
 forward — open `tools/blender/lib/bike_parts.blend`, select
-`mount_fork` (parented under `chassis_base`), and translate it.
-Re-export. No code change needed.
+`mount_fork` (parented under `chassis_base`), and translate it. The
+fork variants follow live (they're parented to the mount), so you
+can eyeball the new pose immediately. Save and re-export — no code
+change needed.
 
 To **add a new attachment** — author a new empty
-`mount_<your_role>` parented to the chassis, then add the matching
+`mount_<your_role>` parented to the chassis, parent the relevant
+part(s) to it, then add the matching
 `snap_to_mount(part, chassis, "<your_role>")` call in
 `build_bike.py`.
 
-The mount positions are stored in chassis-local space (a unit cube
-spanning ±0.5), so they scale with `chassis.scale = (W, L, H)` at
-build time — change the chassis dimensions in the spec and the mount
-points scale with it.
+For the default `chassis_base` (no `chassisVariant`), mount positions
+are in chassis-local space — they scale with `chassis.scale = (W, L,
+H)` at build time, so changing the spec's chassis dims moves the
+mounts proportionally. For a `chassisVariant`-based bike, the variant
+ships at author-modelled size (no scaling), so the mount's
+chassis-local position resolves to the same world position as in
+Blender.
 
 Mounts (and any optional `anchor` empties on child parts) are
 **stripped from the GLB before export** by `strip_build_helpers()`,
