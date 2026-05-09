@@ -143,6 +143,66 @@ amplitudes 0.55 m + 0.4 m) with slightly different periods (~6.0 s vs
 logic needed). Four chop bands fill in surface texture across multiple
 scales (22 m down to 5.5 m).
 
+### Water v2 — SoT-style ocean (M9.29) — *load-bearing for "feel"*
+Five-piece upgrade in [`src/engine/render/water.ts`](../src/engine/render/water.ts) and [`src/game/systems/hover.ts`](../src/game/systems/hover.ts) inspired by
+the SIGGRAPH 2018 *Technical Art of Sea of Thieves* talk and the Atlas GDC
+2019 wave-physics talk:
+
+1. **Horizontal-displacement Gerstner** (render only) — vertices now displace
+   both vertically AND laterally per GPU Gems Ch.1 eq.9 + 13:
+   `P.x += Σ Q·A·D.x·cos(phase); P.z += Σ Q·A·D.z·cos(phase)`. Crests pinch
+   into ridges instead of round bumps. Per-wave Q baked in `Q_BASE_DEFAULTS`
+   (`[0.35, 0.35, 0.85, 0.95, 1.0, 1.0]` — swells gentle, chops sharp). All
+   waves multiplied by a global `steepnessUniform` (default 0.7, scrub via
+   `__waterSteepness(n)` in console; URL `?steep=N` overrides initial).
+   Surface normal uses GPU Gems eq.13 `(-Σdy/dx, 1−Σ Q·k·A·sin, -Σdy/dz)`,
+   which collapses to the old heightfield normal at Q=0.
+2. **Two-color scatter blend** — deep teal `(0.02, 0.12, 0.22)` ↔ scatter
+   cyan-green `(0.22, 0.7, 0.65)`, modulated by both wave height AND view
+   angle. Crest backs and grazing-angle samples brighten via `mix(0.55,
+   1.0, 1−ndotv)`. Approximates sub-surface scattering without a sun
+   direction.
+3. **Foam: physically-correct triggering** — replaced the height-driven
+   `smoothstep(height) + 0.5·smoothstep(slope)` with `max(slopeFoam,
+   foldFoam) · heightGate`, where `foldFoam = smoothstep(0.12, 0.35,
+   qSum)` reads the GPU Gems Jacobian-onset signal (the surface is
+   approaching fold-back — physically what produces whitecaps). Height now
+   gates rather than drives, so tall-but-flat swells don't foam and only
+   actively-breaking faces show whitecaps.
+4. **Multi-probe buoyancy** — `hoverSystem` was sampling the wave field at a
+   single point (the bike's center) and reading the local normal for
+   pitch/roll. Now samples height at four points around the bike — bow,
+   stern, port, starboard (`PROBE_HALF_LENGTH = 0.8m`, `PROBE_HALF_WIDTH =
+   0.4m` matching the bike's visual footprint) — and lets pitch/roll fall
+   out of differential heights:
+   `pitch ≈ atan2(yBow − yStern, 2·halfLength)`,
+   `roll ≈ atan2(yStarboard − yPort, 2·halfWidth)`.
+   This is the SoT/Atlas approach. Wins: long swells naturally tilt the
+   bike across the wave; short chops average between probes so the bike
+   doesn't whip-snap to ripples shorter than its own footprint. Same
+   altitude-fade and kinematic attitude system as before; just better
+   targets.
+5. **Noise-modulated specular** — `mat.roughnessNode = mix(0.18, 0.04,
+   broadMask)` where `broadMask` is a low-frequency animated hash gated to
+   crests. Highlights tighten in patches and drift with time, producing
+   the SoT "wandering glints" look instead of a uniform sheen.
+
+Debug toggles: `?water=classic` (entire upgrade off — original colors,
+vertical-only Gerstner, original roughness, original foam), `?wire=1`
+(orthogonal — works with classic and v2), `?steep=N` (initial steepness
+override, 0–1.5).
+
+Physics-side note: `wave-field.ts` (CPU buoyancy) keeps the simpler
+vertical-only formulation. With moderate Q the rendered surface and the
+buoyancy field stay within ~0.4 m horizontally — well below visible
+disconnect for a hoverbike skimming the surface. If steepness goes much
+past 1, consider a Newton iteration on the CPU side to recover the rest
+position from world XZ.
+
+Not yet shipped: foam accumulator (lingering whitecaps in a render
+target), SSR / planar reflection of bikes. See [docs/water-deep-dive.md](./water-deep-dive.md) for the full
+research and prioritization.
+
 ### e2e runs headed by default (M9.26)
 The GPU water shader is happy on real hardware but the headless WebGL2
 software fallback (SwiftShader) drops to single-digit fps under any

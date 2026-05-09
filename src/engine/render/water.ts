@@ -136,6 +136,21 @@ export function createWaterMesh(
   // single-vertex shimmer. 384² ≈ 147 k verts is trivial on a real GPU.
   const subs = opts?.subdivisions ?? 384
 
+  // ---- Debug toggles ----------------------------------------------------
+  // `?water=classic` falls back to vertical-only Gerstner + the original
+  // single-color albedo gradient (no horizontal pinching, no scatter blend).
+  // Useful for A/B-ing the SoT-style upgrade in playtest.
+  // `?water=wire` (handled later) renders wireframe — see end of function.
+  // `?steep=<n>` overrides the initial steepness scale (0..1.5 recommended).
+  const params =
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+  const waterMode = params?.get('water') ?? 'v2'
+  const isClassic = waterMode === 'classic'
+  // `?wire=1` is an ORTHOGONAL toggle — works with classic, v2, and any
+  // future shader variant. The old `?water=wire` is still honored for
+  // backward compatibility.
+  const wireFlag = params?.get('wire') === '1' || waterMode === 'wire'
+
   const geom = new THREE.PlaneGeometry(size, size, subs, subs)
   geom.rotateX(-Math.PI / 2)
 
@@ -143,6 +158,16 @@ export function createWaterMesh(
   // (rather than wall-clock) keeps rendering deterministic and matches
   // buoyancy exactly across rewinds / fixed-step runs.
   const tNode = uniform(field.time)
+
+  // Global steepness scale Q ∈ [0, ~1.5]. 0 = vertical-only Gerstner (round
+  // bumps); higher values pinch crests laterally (Sea-of-Thieves-style
+  // ridges). Each wave has a per-wave Q_BASE in waveConsts (chops sharper
+  // than swells); this uniform multiplies all of them. Default 0.7 keeps the
+  // sum Σ Q_eff · k · A well below the loop-formation limit (~1).
+  const initialSteepness = isClassic
+    ? 0
+    : Math.max(0, Math.min(1.5, Number(params?.get('steep') ?? '0.7')))
+  const steepnessUniform = uniform(initialSteepness)
 
   // World-XZ origin of the mesh — set by `tick(...)` to the camera's XZ
   // each frame so the mesh follows the camera. The wave / wake math
@@ -174,8 +199,17 @@ export function createWaterMesh(
     dirZ: number
     amp: number
     phase: number
+    /** Per-wave steepness coefficient (multiplied at runtime by the global
+     * `steepnessUniform`). Higher values pinch the wave's crest laterally;
+     * 0 falls back to a pure heightfield (no horizontal displacement).
+     * Tuned per-wave so chops are sharper (more "ridge"-like) than the
+     * long swells (which stay rolling). */
+    qBase: number
   }
-  const waveConsts: WaveConst[] = field.waves.map((w) => {
+  // Per-wave Q defaults — index-aligned to defaultWaves(): two long swells,
+  // four chop scales. Swells stay gentle; chops get sharp ridges.
+  const Q_BASE_DEFAULTS = [0.35, 0.35, 0.85, 0.95, 1.0, 1.0]
+  const waveConsts: WaveConst[] = field.waves.map((w, i) => {
     const k = (2 * Math.PI) / w.wavelength
     return {
       k,
@@ -184,12 +218,15 @@ export function createWaterMesh(
       dirZ: w.dirZ,
       amp: w.amplitude,
       phase: w.phase,
+      qBase: Q_BASE_DEFAULTS[i] ?? 0.7,
     }
   })
 
-  // Gerstner sum-of-sines, returned as vec3(height, dy/dx, dy/dz). Waves
-  // are unrolled at build time so the resulting shader has no dynamic loop.
-  const gerstner = Fn(([x, z, t]: [unknown, unknown, unknown]) => {
+  // Gerstner — heightfield part: returns vec3(y, dy/dx, dy/dz). These are the
+  // same values you'd get from a vertical-only sum of sines, used both for the
+  // wave's vertical displacement and for the x/z components of the surface
+  // normal (cosine slopes). Waves are unrolled at build time.
+  const gerstnerHeight = Fn(([x, z, t]: [unknown, unknown, unknown]) => {
     const xN = x as ReturnType<typeof float>
     const zN = z as ReturnType<typeof float>
     const tN = t as ReturnType<typeof float>
@@ -209,6 +246,40 @@ export function createWaterMesh(
       dydz.addAssign(c.mul(w.amp * w.k * w.dirZ))
     }
     return vec3(y, dydx, dydz)
+  })
+
+  // Gerstner — horizontal-displacement part: returns vec3(dx, dz, qSum).
+  // The horizontal displacement is what produces the SoT-style pinched
+  // ridges (vs round bumps). qSum is the y-component reduction in the
+  // normal formula (GPU Gems eq.13: N.y = 1 - Σ Q·k·A·sin(phase)).
+  // Two-Fn split (rather than one monolithic Fn) is forced by TSL's single-
+  // node return; the duplicated sin/cos per wave is trivial on a real GPU.
+  // With Q=0 (`?water=classic`) this Fn returns vec3(0, 0, 0) and the
+  // surface collapses to the pure heightfield case.
+  const gerstnerDisp = Fn(([x, z, t]: [unknown, unknown, unknown]) => {
+    const xN = x as ReturnType<typeof float>
+    const zN = z as ReturnType<typeof float>
+    const tN = t as ReturnType<typeof float>
+    const dx = float(0).toVar()
+    const dz = float(0).toVar()
+    const qSum = float(0).toVar()
+    for (const w of waveConsts) {
+      const phase = float(w.k * w.dirX)
+        .mul(xN)
+        .add(float(w.k * w.dirZ).mul(zN))
+        .sub(tN.mul(w.omega))
+        .add(float(w.phase))
+      const s = sin(phase)
+      const c = cos(phase)
+      const qScaled = steepnessUniform.mul(float(w.qBase))
+      // Horizontal displacement: P.x += Q·A·D.x · cos(phase),
+      //                          P.z += Q·A·D.z · cos(phase)
+      dx.addAssign(qScaled.mul(float(w.amp * w.dirX)).mul(c))
+      dz.addAssign(qScaled.mul(float(w.amp * w.dirZ)).mul(c))
+      // Normal y-component reduction: Σ Q · k · A · sin(phase)
+      qSum.addAssign(qScaled.mul(float(w.k * w.amp)).mul(s))
+    }
+    return vec3(dx, dz, qSum)
   })
 
   // Fused per-bike vertex contribution: hull dimple (subtractive) + wake
@@ -329,45 +400,128 @@ export function createWaterMesh(
   // sign handling). The mesh slides under the camera each frame, so we
   // sample the wave/wake field at WORLD coords (`positionLocal + meshOrigin`)
   // — that keeps the surface continuous in world space even as the mesh's
-  // local origin moves. We compute the gradient here too and forward it
+  // local origin moves.
+  //
+  // We use the standard Gerstner formulation (GPU Gems Ch.1) — vertices
+  // are displaced both horizontally and vertically, so crests pinch into
+  // ridges instead of being round bumps:
+  //
+  //   P.x = x0 + Σ Q_i · A_i · D_i.x · cos(phase_i)
+  //   P.y = y0 + Σ A_i · sin(phase_i)
+  //   P.z = z0 + Σ Q_i · A_i · D_i.z · cos(phase_i)
+  //
+  // The closed-form normal from GPU Gems eq. 13:
+  //   N = (-Σ A·k·D.x·cos, 1 - Σ Q·k·A·sin, -Σ A·k·D.z·cos)
+  //
+  // Note that the heightfield slopes (Σ A·k·D.x·cos) are the SAME values
+  // we'd compute for a pure heightfield Gerstner; the only new term in
+  // the normal is the y-component reduction (`qSum`). With Q=0 (classic
+  // mode) the formula collapses exactly to the old heightfield normal.
+  //
+  // We compute the gradients here at the vertex stage and forward them
   // via `varying(...)` so the fragment can build the surface normal from
-  // interpolated values instead of re-running the Gerstner sum per pixel
-  // (several sin/cos per wave per fragment is fine on a real GPU but tanks
-  // the headless WebGL2 software fallback to single-digit fps). Per-vertex
-  // + interp is visually indistinguishable here because the mesh
-  // resolution (≈ 0.6 m) is finer than the wave gradient.
+  // interpolated values instead of re-running the Gerstner sum per pixel.
+  // Per-vertex + interp is visually indistinguishable here because the
+  // mesh resolution (≈ 0.6 m) is finer than the wave gradient.
+  //
+  // Physics-side note: wave-field.ts (CPU buoyancy) keeps the simpler
+  // vertical-only formulation. With low-to-moderate Q, the rendered
+  // surface and the buoyancy field stay within ~0.4 m of each other
+  // horizontally — well below visible disconnect for a hoverbike skimming
+  // the surface. If steepness is pushed past 1, consider a Newton iteration
+  // on the CPU side to recover the rest position from world XZ.
   const worldX = positionLocal.x.add(meshOriginX)
   const worldZ = positionLocal.z.add(meshOriginZ)
-  const vertexWave = gerstner(worldX, worldZ, tNode)
+  const vertexHeight = gerstnerHeight(worldX, worldZ, tNode)
+  const vertexDisp = gerstnerDisp(worldX, worldZ, tNode)
   const vertexBike = bikeSurfaceContrib(worldX, worldZ, tNode)
-  const totalHeight = vertexWave.x.add(vertexBike.x)
-  const totalDydx = vertexWave.y.add(vertexBike.y)
-  const totalDydz = vertexWave.z.add(vertexBike.z)
+  // vertexHeight = vec3(y, dy/dx, dy/dz)
+  // vertexDisp   = vec3(dx, dz, qSum)
+  // vertexBike   = vec3(deltaY, ddelta/dx, ddelta/dz)
+  const totalHeight = vertexHeight.x.add(vertexBike.x)
+  const totalDydx = vertexHeight.y.add(vertexBike.y)
+  const totalDydz = vertexHeight.z.add(vertexBike.z)
 
   // positionNode is in mesh-local space; the mesh translation
   // (mesh.position.x/z = camera XZ) carries the vertex out to world.
-  const positionNode = vec3(positionLocal.x, totalHeight, positionLocal.z)
+  // Adding the Gerstner horizontal displacement to positionLocal.x/z applies
+  // the pinching in mesh-local space — equivalent to world-space because
+  // the mesh transform is a pure translation.
+  const positionNode = vec3(
+    positionLocal.x.add(vertexDisp.x),
+    totalHeight,
+    positionLocal.z.add(vertexDisp.y),
+  )
 
-  // Forward height + gradient to fragment via varyings. The framework
+  // Forward height + gradient + qSum to fragment via varyings. The framework
   // marks these as vertex-stage and inserts the interpolated reads.
   const heightFrag = varying(totalHeight)
   const dydx = varying(totalDydx)
   const dydz = varying(totalDydz)
+  const qSumFrag = varying(vertexDisp.z)
 
-  // Surface normal of y = f(x, z) is (-dy/dx, 1, -dy/dz), normalized.
-  const normalNode = normalize(vec3(dydx.negate(), float(1.0), dydz.negate()))
-
-  // Albedo: deep blue in troughs, brighter cyan on crests.
-  const heightNorm = smoothstep(float(-0.9), float(0.9), heightFrag)
-  const deepColor = vec3(0.04, 0.18, 0.4)
-  const shallowColor = vec3(0.16, 0.55, 0.78)
-  const baseColor = mix(deepColor, shallowColor, heightNorm)
-
-  // Wave-driven crest foam: high + steep crests break.
-  const slopeMag = sqrt(dydx.mul(dydx).add(dydz.mul(dydz)))
-  const waveFoam = smoothstep(float(0.55), float(0.95), heightNorm).add(
-    smoothstep(float(0.45), float(0.9), slopeMag).mul(0.5),
+  // GPU Gems eq.13 normal: (-Σdy/dx, 1 - Σ Q·k·A·sin, -Σdy/dz).
+  // The wake's gradients are folded into dydx/dydz; the wake has no
+  // horizontal-displacement term so it doesn't contribute to qSum.
+  const normalNode = normalize(
+    vec3(dydx.negate(), float(1).sub(qSumFrag), dydz.negate()),
   )
+
+  // View vector + ndotv computed once and reused by both the scatter blend
+  // (base color) and the fresnel sky-tint emissive below.
+  const viewDir = normalize(cameraPosition.sub(positionWorld))
+  const ndotv = max(dot(normalNode, viewDir), float(0))
+
+  // Albedo: two-color scatter blend.
+  //
+  // Sea-of-Thieves-style: a deep teal in troughs blends to a bright
+  // cyan-green "scatter color" on crests AND at grazing view angles.
+  // The grazing-angle component approximates sub-surface scattering — the
+  // back of a crest looks brightest when you're looking *along* the
+  // surface (not down through it), because more light has refracted into
+  // the wave body and out toward your eye. We don't have a sun direction
+  // wired through the shader yet, so view-only is a reasonable proxy.
+  //
+  // Classic mode (`?water=classic`) keeps the original blue→cyan mix with
+  // pure height-driven blending for A/B comparison.
+  const heightNorm = smoothstep(float(-0.9), float(0.9), heightFrag)
+  const deepColor = isClassic ? vec3(0.04, 0.18, 0.4) : vec3(0.02, 0.12, 0.22)
+  const scatterColor = isClassic ? vec3(0.16, 0.55, 0.78) : vec3(0.22, 0.7, 0.65)
+  const scatterAmount = isClassic
+    ? heightNorm
+    : (() => {
+        // Crests scatter strongly; troughs barely. Grazing view bumps
+        // scatter by up to 1.6×, so even mid-height swell faces light
+        // up at low view angles.
+        const heightFactor = smoothstep(float(-0.7), float(0.8), heightFrag)
+        const viewFactor = float(1).sub(ndotv)
+        const viewBoost = mix(float(0.55), float(1.0), viewFactor)
+        return clamp(heightFactor.mul(viewBoost), float(0), float(1))
+      })()
+  const baseColor = mix(deepColor, scatterColor, scatterAmount)
+
+  // Wave-driven foam — physically motivated as "where waves are breaking",
+  // not "where waves are tall". Two triggers, both about steepness/folding:
+  //
+  //   slopeFoam   = steep heightfield slope (the wave face is climbing fast
+  //                 enough to be near-breaking)
+  //   foldFoam    = qSum approaching 1 (GPU Gems Jacobian-onset signal —
+  //                 the Gerstner sum is folding the surface onto itself,
+  //                 which is what physically produces whitecaps)
+  //
+  // We take their max (either condition triggers), then gate by height so
+  // troughs don't foam even if they happen to be momentarily steep. Note:
+  // height is a GATE, not a driver — a tall but flat swell crest reads as
+  // "smooth water" not "foamy whitecap", which is what real ocean does.
+  //
+  // Classic mode: qSum ≡ 0, so foldFoam is 0 and only slopeFoam contributes.
+  const slopeMag = sqrt(dydx.mul(dydx).add(dydz.mul(dydz)))
+  const slopeFoam = smoothstep(float(0.4), float(0.9), slopeMag)
+  const foldFoam = isClassic
+    ? float(0)
+    : smoothstep(float(0.12), float(0.35), qSumFrag)
+  const heightGate = smoothstep(float(-0.4), float(0.3), heightFrag)
+  const waveFoam = max(slopeFoam, foldFoam).mul(heightGate)
 
   // Per-bike foam: hull ring + V-wake stripe. We wrap the per-bike work in
   // a Fn() so we can use If(...) to early-out for slots whose bike is far
@@ -437,8 +591,10 @@ export function createWaterMesh(
 
   // Fresnel: tint with sky color at grazing angles. We push this into the
   // emissive channel so it adds even where the sun isn't catching the wave.
-  const viewDir = normalize(cameraPosition.sub(positionWorld))
-  const ndotv = max(dot(normalNode, viewDir), float(0))
+  // (viewDir + ndotv computed earlier and shared with the scatter blend.)
+  // Tone curve is gentler in v2 mode since the scatter blend already
+  // brightens grazing-angle samples — too much fresnel on top reads as
+  // chrome. Classic mode preserves the original 0.5 mix.
   const f0 = float(0.02)
   const fresnel = f0.add(
     float(1)
@@ -446,21 +602,40 @@ export function createWaterMesh(
       .mul(pow(float(1).sub(ndotv), 5)),
   )
   const skyTint = vec3(0.55, 0.72, 0.95)
-  const fresnelEmissive = skyTint.mul(fresnel.mul(0.5))
+  const fresnelEmissive = skyTint.mul(fresnel.mul(isClassic ? 0.5 : 0.32))
 
   // Sparkle: cheap hash on world XZ + animated UV scroll, gated to crests.
+  // Two-layer mask so we get both broad "glistening areas" (low-frequency
+  // bright patches) and pin-prick highlights (high-frequency hash). The
+  // pin-pricks feed the additive emissive (the dancing white pixels you
+  // see on the wave faces); the broad mask drops the local roughness so
+  // the PBR specular lobe tightens INTO sparkle bursts where the sun
+  // catches the surface — that's the SoT-style glistening. Without the
+  // roughness modulation, sparkle was purely additive and read as
+  // "fairy dust on top" rather than highlights breaking up.
   const sparkleSeed = positionWorld.xz.mul(0.6).add(vec2(tNode.mul(0.27), tNode.mul(-0.19)))
   const sparkleNoise = fract(
     sin(sparkleSeed.x.mul(12.9898).add(sparkleSeed.y.mul(78.233))).mul(43758.5453),
   )
-  const sparkleMask = smoothstep(float(0.985), float(1.0), sparkleNoise).mul(
-    smoothstep(float(0.45), float(0.85), heightNorm),
-  )
+  const sparkleHeightGate = smoothstep(float(0.45), float(0.85), heightNorm)
+  const sparkleMask = smoothstep(float(0.985), float(1.0), sparkleNoise).mul(sparkleHeightGate)
   const sparkleEmissive = vec3(1.0, 1.0, 1.0).mul(sparkleMask)
+
+  // Broader sparkle "patches" for the roughness modulation. Lower-frequency
+  // seed, animated independently — produces wandering bright zones that
+  // tighten the specular highlight rather than discrete pixels.
+  const broadSeed = positionWorld.xz.mul(0.18).add(vec2(tNode.mul(-0.11), tNode.mul(0.08)))
+  const broadNoise = fract(
+    sin(broadSeed.x.mul(12.9898).add(broadSeed.y.mul(78.233))).mul(43758.5453),
+  )
+  const broadMask = smoothstep(float(0.55), float(0.85), broadNoise).mul(sparkleHeightGate)
 
   const mat = new MeshStandardNodeMaterial({
     transparent: true,
     metalness: 0.45,
+    // roughness is now driven by `roughnessNode` below; this constant is the
+    // base value (used when `roughnessNode` evaluates to 1.0 — i.e. away
+    // from sparkle patches).
     roughness: 0.18,
     envMapIntensity: 0.9,
   })
@@ -470,17 +645,34 @@ export function createWaterMesh(
   mat.colorNode = albedo
   mat.emissiveNode = fresnelEmissive.add(sparkleEmissive)
   mat.opacityNode = float(0.78)
+  // Noise-modulated roughness. In sparkle patches roughness drops from 0.18
+  // to ~0.04, tightening the specular lobe and producing crisp highlights.
+  // Classic mode keeps the constant 0.18 so the A/B comparison is clean.
+  if (!isClassic) {
+    mat.roughnessNode = mix(float(0.18), float(0.04), broadMask)
+  }
 
   // Debug: ?water=wire renders the water mesh as wireframe so you can see
   // the actual vertex displacement (vs. just shaded color). Useful when
   // tuning the wake / dimple / wave amplitudes — turn it on, drive the
   // bike, see the actual ridges in the geometry.
   if (typeof window !== 'undefined') {
-    const q = new URLSearchParams(window.location.search)
-    if (q.get('water') === 'wire') {
+    if (wireFlag) {
       mat.wireframe = true
       mat.transparent = false
       mat.opacityNode = float(1)
+    }
+    // Live tuning hook for playtest: in the dev console, call
+    //   __waterSteepness(0.9)
+    // to scrub the global Q multiplier without reloading. Returns the
+    // clamped value actually applied. 0 = vertical-only blobs, 0.7 = SoT
+    // default, 1+ = ridge-y / chop-heavy. Past ~1.3 the sum may form loops
+    // (vertices crossing) — visually jagged but not crashing.
+    // biome-ignore lint/suspicious/noExplicitAny: dev-only debug hook
+    ;(window as any).__waterSteepness = (s: number) => {
+      const clamped = Math.max(0, Math.min(1.5, Number(s) || 0))
+      steepnessUniform.value = clamped
+      return clamped
     }
   }
 
