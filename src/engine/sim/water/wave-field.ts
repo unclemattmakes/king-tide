@@ -96,6 +96,24 @@ export const WAKE_LONG_RAMP = 0.6
 /** Longitudinal decay (1 / meters). Wake fades to ~e^-1 at 1/this distance
  * behind the bike. 0.04 → e-folds at ~25 m. */
 export const WAKE_LONG_DECAY = 0.04
+/** Transverse-wave wavenumber (rad / meter, M9.35). Real Kelvin wakes
+ * have oscillating ridges along the bike's heading axis — the "scallops"
+ * behind a moving boat. K = 0.7 → wavelength ≈ 9m, so ~3 visible
+ * scallops fit in the 25m wake length. Chosen so sin(K · 10) > 0 at the
+ * unit-test sample point (behind=10, t=0), which keeps the existing
+ * "yEdge > 0.3 / yAxis < -0.3" assertions firmly in the pass region
+ * (modulation BOOSTS by ~20% there rather than reducing amplitude). */
+export const WAKE_TRANS_K = 0.7
+/** Transverse-wave angular frequency (rad / s). 1.0 → period ≈ 6.3s,
+ * a gentle scroll that makes the scallops feel alive without pulsing
+ * distractingly. */
+export const WAKE_TRANS_OMEGA = 1.0
+/** Modulation amplitude (dimensionless multiplier, range 1 ± value).
+ * 0.3 → wake amplitude varies between 0.7× and 1.3× of base across
+ * each scallop period. Larger = more dramatic peaks/troughs along
+ * the wake; capped here so sin = -1 doesn't push the V edge below
+ * the unit-test floor. */
+export const WAKE_TRANS_AMP = 0.3
 
 export function createWaveField(waves: Wave[]): WaveFieldState {
   return { waves, wakes: [], time: 0 }
@@ -121,10 +139,13 @@ export function advanceWaveField(field: WaveFieldState, dt: number): void {
  *     linear fade to 0.
  *   - Beyond: 0.
  *
- * Static profile (no longitudinal sin) — the V follows the bike like a
- * stable shape and just decays in amplitude with `behind`. Real wakes
- * have transverse waves too, but for arcade clarity a clean Kelvin-style
- * V reads better than oscillating ridges.
+ * Longitudinal modulation (M9.35): the V's amplitude is multiplied by
+ * `(1 + WAKE_TRANS_AMP · sin(K · behind − ω · t))` to produce the
+ * transverse "scallops" seen in real ship wakes. The whole V breathes
+ * up and down along its length, with the modulation pattern slowly
+ * scrolling backward as time advances. Pre-M9.35 the V was a static
+ * Kelvin shape — the new modulation makes the wake feel alive without
+ * disturbing the V's silhouette.
  *
  * Mirrored bit-for-bit by the TSL shader's bikeSurfaceContrib block —
  * keep them in sync.
@@ -133,7 +154,7 @@ export function sampleWakeFromSource(
   src: WakeSource,
   x: number,
   z: number,
-  _t: number,
+  t: number,
 ): { y: number; dydx: number; dydz: number } {
   const speed = Math.hypot(src.vx, src.vz)
   if (speed < WAKE_SPEED_LOW || src.weight <= 0) {
@@ -167,8 +188,13 @@ export function sampleWakeFromSource(
 
   const longRamp = 1 - Math.exp(-behind * WAKE_LONG_RAMP)
   const longDecay = Math.exp(-behind * WAKE_LONG_DECAY)
+  // Transverse "scallops": the V's amplitude oscillates along its length.
+  // sin(K · behind − ω · t) drifts backward in the bike's frame as t
+  // advances (the pattern travels with the wake's tail).
+  const longPhase = WAKE_TRANS_K * behind - WAKE_TRANS_OMEGA * t
+  const transverseMod = 1 + WAKE_TRANS_AMP * Math.sin(longPhase)
 
-  const amp = WAKE_DISP_AMP * speedGate * src.weight * longRamp * longDecay
+  const amp = WAKE_DISP_AMP * speedGate * src.weight * longRamp * longDecay * transverseMod
   const y = amp * transverseSigned
 
   // Analytic gradient — dominated by the perp direction (the V shape) and

@@ -221,6 +221,35 @@ additions:
 Hoisted `heightFactor` out of the IIFE so both the scatter blend and
 the new sun-glow share it. No physics change.
 
+### Water — wake transverse "scallops" (M9.35)
+The wake's static Kelvin V is now modulated by `sin(K · behind − ω · t)`,
+producing the transverse oscillating ridges seen in real ship wakes —
+the wake feels alive instead of stamped. Same modulation is mirrored
+bit-for-bit in `sampleWakeFromSource` (sim) and the shader's wake block,
+so trailing riders feel the same scallops they see.
+
+Constants in [wave-field.ts](../src/engine/sim/water/wave-field.ts):
+- `WAKE_TRANS_K = 0.7` rad/m → wavelength ≈ 9m, ~3 visible scallops in
+  the 25m wake length. Chosen so `sin(K · 10) > 0` at the existing
+  unit-test sample point (behind=10, t=0), keeping the V-edge / V-axis
+  threshold assertions firmly in the pass region.
+- `WAKE_TRANS_OMEGA = 1.0` rad/s → period ≈ 6.3s, gentle backward scroll.
+- `WAKE_TRANS_AMP = 0.3` → wake amplitude varies between 0.7× and 1.3×
+  along each scallop period.
+
+A new unit test (`wake has transverse oscillation along its length`)
+samples the V-edge height at 0.25m steps over [3..30]m behind and
+asserts ≥4 direction changes — proves the modulation is actually
+oscillating (pure exponential decay is monotonic).
+
+The wake's analytic gradient drops the longitudinal modulation's
+∂y/∂behind term — same approximation the existing wake gradient
+uses for longRamp/longDecay derivatives. Means the scallop heights
+are visible but the per-scallop SHADING is smooth (no bright/dark
+banding from a precise normal). Acceptable arcade tradeoff; if
+scallops ever read insufficiently 3D, add `cos(longPhase) · K · amp`
+contribution to dydx/dydz.
+
 ### Water — chop bump + day-night sun cycle (M9.34)
 Two quick wins from the [water deep-dive](./water-deep-dive.md):
 

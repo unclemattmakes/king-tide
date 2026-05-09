@@ -41,6 +41,9 @@ import {
   WAKE_LONG_RAMP,
   WAKE_SPEED_HIGH,
   WAKE_SPEED_LOW,
+  WAKE_TRANS_AMP,
+  WAKE_TRANS_K,
+  WAKE_TRANS_OMEGA,
   type WaveFieldState,
 } from '@/engine/sim/water/wave-field'
 
@@ -378,6 +381,15 @@ export function createWaterMesh(
           const transverseSigned = insidePart.mul(fadeOut)
           const longRamp = float(1).sub(exp(behind.mul(-WAKE_LONG_RAMP)))
           const longDecay = exp(behind.mul(-WAKE_LONG_DECAY))
+          // Transverse "scallops" (M9.35): mirrors sampleWakeFromSource.
+          // sin(K · behind − ω · t) modulates the V's amplitude along its
+          // length; the pattern drifts backward in the bike's frame as t
+          // advances, giving the wake the live oscillating ridges of a
+          // real Kelvin wake.
+          const longPhase = tN
+            .mul(-WAKE_TRANS_OMEGA)
+            .add(behind.mul(WAKE_TRANS_K))
+          const transverseMod = float(1).add(sin(longPhase).mul(WAKE_TRANS_AMP))
           // biome-ignore lint/suspicious/noExplicitAny: TSL UniformArrayElementNode lacks float-typing in TS
           const weight = weightsUniform.element(i) as any
           const amp = float(WAKE_DISP_AMP)
@@ -385,6 +397,7 @@ export function createWaterMesh(
             .mul(speedGate)
             .mul(longRamp)
             .mul(longDecay)
+            .mul(transverseMod)
           y.addAssign(amp.mul(transverseSigned))
           // Approximate gradient: dominated by the perp direction (the V
           // shape's slope). Use the inside-V slope as a uniform-ish
