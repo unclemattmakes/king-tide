@@ -19,13 +19,38 @@ Authoring convention (matters because the builder relies on it):
               positions instances.
   Blender +Z = up. Maps to three +Y (up).
 
+### Outliner layout
+
+The kit is organized into collections so the outliner reads like the
+in-game ``?viewer=<id>`` page — flick a collection visible to switch
+which bike you're previewing.
+
+  Source                         (canonical parts; hidden by default)
+    ├── chassis_base + mounts
+    ├── fairing_bare / swept / full
+    ├── fork_single / dual
+    ├── thruster_unit
+    └── fin_marker, tail_marker
+  Bike: Calibration Bike         (hidden)
+  Bike: Cruiser                  (hidden)
+  Bike: Racer                    (hidden)
+  Bike: Scout                    (visible by default)
+  Bike: Stunt                    (hidden)
+
+Each ``Bike: <name>`` collection contains *linked-data instances* of
+the canonical parts, scaled and positioned per the spec at
+``specs/bikes/<id>.json``. Mesh data is shared with Source — edit a
+mesh in Source and every preview updates. Toggle Source visible when
+you want to add a part or rework a variant; otherwise leave it off
+and treat the bike collections as a read-only preview gallery.
+
+### Canonical part list
+
 Named objects produced (materials prefixed ``mat_kit_bike_*`` so the
 renamer in build_bike.py can find them). Each part's *mesh data* is
 authored origin-centred; the **object transform** places parts at
-their exact assembled-bike positions so authors see a fully-built
-bike when opening the kit. Variants overlap their primary (both forks
-at the nose, all fairings on top of the chassis); hide the ones you
-don't care about in the outliner. The transform is reset on append
+their exact assembled-bike positions so editing in the Source
+collection reads as a real bike. The transform is reset on append
 (see ``lib_loader.append_objects``), so kit-file positions are purely
 an authoring convenience — only mesh edits ride through to the build.
 
@@ -54,8 +79,10 @@ an authoring convenience — only mesh edits ride through to the build.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+from typing import Any
 
 import bpy
 
@@ -69,6 +96,12 @@ if REPO_ROOT not in sys.path:
 from tools.blender.mounts import add_mount  # noqa: E402
 
 OUTPUT_PATH = os.path.join(REPO_ROOT, "tools", "blender", "lib", "bike_parts.blend")
+SPECS_DIR = os.path.join(REPO_ROOT, "specs", "bikes")
+
+# Collection visible by default in the kit's outliner. Pick the bike
+# whose silhouette best represents the canonical "this is what the
+# bike looks like" pose. Authors flick visibility to switch previews.
+DEFAULT_VISIBLE_BIKE_ID = "scout"
 
 
 def reset_scene() -> None:
@@ -351,28 +384,195 @@ def lay_out_in_context() -> None:
     add_mount(chassis, "fin", (0.0, -0.48, 1.375))
     add_mount(chassis, "tail", (0.0, 0.48, 0.625))
 
-    # Hide variant parts so the kit reads as scout's chosen build out
-    # of the box. They stay in the file — toggle visibility in the
-    # outliner to edit them. ``lib_loader.append_objects`` ignores
-    # these flags entirely; visibility is purely a viewport thing.
-    for name in ("fairing_bare", "fairing_full", "fork_dual"):
-        v = bpy.data.objects.get(name)
-        if v is not None:
-            v.hide_viewport = True
-            v.hide_render = True
+    # The kit's per-bike preview collections (built later in
+    # build_per_bike_collections) supply spec-correct multi-thruster
+    # previews via linked-data instances. The standalone
+    # ``thruster_unit_preview_l`` mirror is redundant once those exist.
+    # Variants live in the Source collection; per-bike collections
+    # show only the active variant, so we don't hide-by-name here —
+    # collection visibility handles it.
 
-    # Mirror thruster preview. Shares the canonical thruster's mesh
-    # data so future mesh edits to thruster_unit propagate to both.
-    # Named off-pattern so the build's name-based append never picks
-    # it up — it lives strictly for the in-Blender 2-thruster preview.
-    canonical = bpy.data.objects.get("thruster_unit")
-    if canonical is not None and "thruster_unit_preview_l" not in bpy.data.objects:
-        preview = bpy.data.objects.new("thruster_unit_preview_l", canonical.data)
-        bpy.context.scene.collection.objects.link(preview)
-        preview.location = (thruster_x_l, tail_y, thruster_z)
-        # Inherit the canonical's bake-time rotation (cylinder rotated
-        # to lie along Y — see add_cylinder).
-        preview.rotation_euler = canonical.rotation_euler.copy()
+
+def _ensure_collection(name: str) -> bpy.types.Collection:
+    coll = bpy.data.collections.get(name)
+    if coll is None:
+        coll = bpy.data.collections.new(name)
+        bpy.context.scene.collection.children.link(coll)
+    return coll
+
+
+def _move_obj_to_collection(obj: bpy.types.Object, target: bpy.types.Collection) -> None:
+    """Unlink an object from every collection it's in, then link to ``target``.
+
+    Children parented to ``obj`` are NOT auto-moved — Blender's parenting
+    is independent of collection membership. Caller can pass children
+    separately if it wants them to ride along."""
+    for coll in list(obj.users_collection):
+        coll.objects.unlink(obj)
+    target.objects.link(obj)
+
+
+def _set_collection_visibility(coll: bpy.types.Collection, *, hidden: bool) -> None:
+    """Hide/show a collection at both the data level (eye-with-monitor
+    icon) and the layer-collection level (outliner eye icon). Both
+    flags need flipping for an "off by default" experience."""
+    coll.hide_viewport = hidden
+    coll.hide_render = hidden
+    layer = bpy.context.view_layer.layer_collection.children.get(coll.name)
+    if layer is not None:
+        layer.hide_viewport = hidden
+
+
+def organize_canonical_into_source() -> bpy.types.Collection:
+    """Move every object currently in the scene into a ``Source``
+    collection so per-bike preview collections can be added alongside
+    without crowding the outliner. The Source collection holds the
+    *editable* canonical parts (chassis_base, fairings, forks,
+    thrusters, fin, tail, mounts). It's hidden by default — toggle it
+    on when you want to edit a part."""
+    src = _ensure_collection("Source")
+    for obj in list(bpy.data.objects):
+        _move_obj_to_collection(obj, src)
+    return src
+
+
+def _read_bike_specs() -> list[dict[str, Any]]:
+    """Load every JSON spec under ``specs/bikes/`` so we can build a
+    preview collection per bike. Returns specs sorted by id."""
+    if not os.path.isdir(SPECS_DIR):
+        print(f"[seed-bike-kit] no specs dir at {SPECS_DIR}; skipping per-bike previews")
+        return []
+    specs: list[dict[str, Any]] = []
+    for fname in sorted(os.listdir(SPECS_DIR)):
+        if not fname.endswith(".json"):
+            continue
+        path = os.path.join(SPECS_DIR, fname)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                specs.append(json.load(f))
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"[seed-bike-kit] skipping {fname}: {e}")
+    specs.sort(key=lambda s: s.get("id", ""))
+    return specs
+
+
+def _link_instance(
+    coll: bpy.types.Collection,
+    name: str,
+    source: bpy.types.Object,
+    *,
+    location: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    scale: tuple[float, float, float] = (1.0, 1.0, 1.0),
+) -> bpy.types.Object | None:
+    """Create a new object that **shares mesh data** with ``source``,
+    place it, and link it into ``coll``. Mesh edits to source ride
+    through to every instance."""
+    if source is None or source.data is None:
+        return None
+    obj = bpy.data.objects.new(name, source.data)
+    obj.location = location
+    obj.scale = scale
+    obj.rotation_euler = source.rotation_euler.copy()
+    coll.objects.link(obj)
+    return obj
+
+
+def build_preview_collection_for_spec(spec: dict[str, Any]) -> bpy.types.Collection | None:
+    """Build a ``Bike: <DisplayName>`` collection containing linked-
+    data instances of the canonical parts, scaled and positioned per
+    ``spec``. The result is what the ?viewer=<id> page would render —
+    a ready-to-eyeball assembled bike for that spec.
+
+    Mesh data is shared with the canonical parts in the Source
+    collection, so any mesh edit you make in the Source collection
+    propagates into every preview instantly."""
+    bike_id = spec.get("id")
+    geom = spec.get("geometry")
+    if not isinstance(bike_id, str) or not isinstance(geom, dict):
+        return None
+
+    display = spec.get("displayName", bike_id)
+    coll_name = f"Bike: {display}"
+    coll = _ensure_collection(coll_name)
+    # Wipe any stale objects from a prior seed run so re-seeding is
+    # idempotent.
+    for obj in list(coll.objects):
+        coll.objects.unlink(obj)
+        if obj.users == 0:
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+    W = float(geom.get("chassisWidth", 0.6))
+    L = float(geom.get("chassisLength", 2.5))
+    H = float(geom.get("chassisHeight", 0.4))
+    nose_y = -L * 0.5 + 0.1
+    tail_y = L * 0.5 - 0.15
+    thruster_z = H * 0.35
+    thruster_count = int(geom.get("thrusterCount", 2))
+    thruster_spacing = float(geom.get("thrusterSpacing", 0.4))
+    fairing_style = str(geom.get("fairingStyle", "swept"))
+    fork_kind = str(geom.get("fork", "single"))
+
+    chassis_src = bpy.data.objects.get("chassis_base")
+    if chassis_src is None:
+        return coll  # nothing to instance against; bail gracefully
+
+    _link_instance(
+        coll, f"preview_{bike_id}_chassis", chassis_src,
+        location=(0.0, 0.0, H * 0.5),
+        scale=(W, L, H),
+    )
+
+    fairing_src = bpy.data.objects.get(f"fairing_{fairing_style}")
+    _link_instance(
+        coll, f"preview_{bike_id}_fairing", fairing_src,
+        location=(0.0, 0.0, H + 0.15),
+        scale=(W, L, 1.0),
+    )
+
+    fork_src = bpy.data.objects.get(f"fork_{fork_kind}")
+    _link_instance(
+        coll, f"preview_{bike_id}_fork", fork_src,
+        location=(0.0, nose_y, H * 0.4),
+    )
+
+    thruster_src = bpy.data.objects.get("thruster_unit")
+    for i in range(thruster_count):
+        offset_x = thruster_spacing * (i - (thruster_count - 1) / 2.0)
+        _link_instance(
+            coll, f"preview_{bike_id}_thruster_{i}", thruster_src,
+            location=(offset_x, tail_y, thruster_z),
+        )
+
+    fin_src = bpy.data.objects.get("fin_marker")
+    _link_instance(
+        coll, f"preview_{bike_id}_fin", fin_src,
+        location=(0.0, -L * 0.5 + 0.05, H + 0.35),
+    )
+
+    tail_src = bpy.data.objects.get("tail_marker")
+    _link_instance(
+        coll, f"preview_{bike_id}_tail", tail_src,
+        location=(0.0, L * 0.5 - 0.05, H + 0.05),
+    )
+
+    return coll
+
+
+def build_per_bike_collections() -> None:
+    """Top-level: move canonical parts into Source, then build a
+    preview collection per spec. Hides Source + every bike collection
+    except DEFAULT_VISIBLE_BIKE_ID so opening the kit shows one bike
+    at a time, like the ?viewer=<id> page."""
+    src = organize_canonical_into_source()
+    _set_collection_visibility(src, hidden=True)
+
+    specs = _read_bike_specs()
+    for spec in specs:
+        coll = build_preview_collection_for_spec(spec)
+        if coll is None:
+            continue
+        is_default = spec.get("id") == DEFAULT_VISIBLE_BIKE_ID
+        _set_collection_visibility(coll, hidden=not is_default)
 
 
 def main() -> None:
@@ -427,11 +627,13 @@ def main() -> None:
     make_tail_marker(tail_mat)
 
     lay_out_in_context()
+    build_per_bike_collections()
 
     bpy.ops.wm.save_as_mainfile(filepath=OUTPUT_PATH)
+    collections = ", ".join(c.name for c in bpy.data.collections)
     print(
-        f"[seed-bike-kit] done — {len(bpy.data.objects)} objects: "
-        f"{', '.join(o.name for o in bpy.data.objects)}"
+        f"[seed-bike-kit] done — {len(bpy.data.objects)} objects, "
+        f"collections: [{collections}]"
     )
 
 
