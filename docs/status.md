@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-09 (M9.26 spec → GLB asset pipeline: bikes/props/tracks all driven by `specs/*.json`, headless Blender builders, manifest, Vite watch, CI; player bike now loads from `racer.glb`. Riders deferred). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-09 (M9.27 spec → GLB asset pipeline: bikes/props/tracks all driven by `specs/*.json`, headless Blender builders, manifest, Vite watch, CI; player bike now loads from `racer.glb`. Riders deferred). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -25,7 +25,7 @@ This doc captures the build's current state, controls, known issues, and next st
 - Backspace = respawn at start
 - Mouse right-drag and gamepad right-stick orbit the camera (vertical inverted by default)
 - 27 e2e + 55 unit tests, all green
-- Spec → GLB asset pipeline (M9.25): `specs/{bikes,props,tracks}/*.json` + `tools/blender/build_*.py` produce `public/assets/<cat>/*.glb` and `public/assets/manifest.json` via `pnpm gen:all`. Bike-loader instantiates the player + AI bike GLBs at boot; prop-loader pre-fetches asset-prop GLBs referenced by track JSON. Track spec `calibration.json` round-trips through `tools/blender/build_track.py` (replaces the retired `build_calibration_scene.py`)
+- Spec → GLB asset pipeline (M9.27): `specs/{bikes,props,tracks}/*.json` + `tools/blender/build_*.py` produce `public/assets/<cat>/*.glb` and `public/assets/manifest.json` via `pnpm gen:all`. Bike-loader instantiates the player + AI bike GLBs at boot; prop-loader pre-fetches asset-prop GLBs referenced by track JSON. Track spec `calibration.json` round-trips through `tools/blender/build_track.py` (replaces the retired `build_calibration_scene.py`)
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
 
 ## Controls
@@ -112,6 +112,44 @@ the slingshot feels too aggressive, raise `DRAG_K_RISE` toward 0.06–0.08;
 if the bike feels too buoyant, lower `BUOYANCY_CAP`. The water mesh now
 uses `transparent: true, opacity: 0.75` so the submerged portion is
 visible.
+
+### Bike wakes are physical, not cosmetic (M9.26) — *load-bearing*
+The water shader's V-stripe behind each bike used to be foam-only. As of
+M9.26 the same wake function (a transverse-feathered sine, decaying
+exponentially behind the bike) also displaces the water *and* contributes
+to buoyancy via the sim's `WaveFieldState.wakes` array. Result: a trailing
+rider can feel and "jump" the leader's wake. The wake math lives in
+`engine/sim/water/wave-field.ts` (`sampleWakeFromSource`), is mirrored
+bit-for-bit in `engine/render/water.ts` (`wakeSum` Fn block in the TSL
+shader), and the same constants (`WAKE_DISP_AMP`, `WAKE_DISP_WAVELENGTH`,
+`WAKE_DISP_OMEGA`, decay/ramp/feather) are imported from the sim module so
+they can't drift apart. `wakeUpdateSystem` (in `game/systems/wake-update.ts`)
+populates `field.wakes` once per fixed step BEFORE `hoverSystem` reads the
+surface — that's what makes the lead bike's wake felt by trailing
+buoyancy. The bike's own wake doesn't affect itself (`behind > 0` gate).
+
+Vertex subdivisions: 192 (1.25 m spacing on the 240 m plane), with
+`WAKE_DISP_CULL_R = 40 m` early-out per-bike per-vertex. Tests run headed
+(real GPU) via `playwright.config.ts` — the headless WebGL2 software
+fallback (SwiftShader) tanks any non-trivial vertex shader to single-digit
+fps under parallel workers. Set `E2E_HEADLESS=1` to opt back into headless
+(e.g. CI without a display).
+
+### Periodic swell sets (M9.26)
+`defaultWaves()` now includes two long-wavelength swells (60 m + 85 m,
+amplitudes 0.55 m + 0.4 m) with slightly different periods (~6.0 s vs
+~7.7 s). They beat against each other so big "sets" come in roughly every
+25–30 s automatically (constructive interference of two sines = no extra
+logic needed). Four chop bands fill in surface texture across multiple
+scales (22 m down to 5.5 m).
+
+### e2e runs headed by default (M9.26)
+The GPU water shader is happy on real hardware but the headless WebGL2
+software fallback (SwiftShader) drops to single-digit fps under any
+non-trivial vertex/fragment work. `playwright.config.ts` now defaults to
+headed, opting in to the real GPU; set `E2E_HEADLESS=1` to flip it back
+(e.g. CI without a display server). A pop-up Chromium window per worker
+during local `pnpm e2e` is the visible side effect.
 
 ### Pitch-modulated ride height (M9.24)
 Above water, the hover-spring's target height is offset by pitch input:
@@ -293,8 +331,9 @@ Open follow-ups:
 | M9.22 | Altitude-faded surface follow — strong terrain reaction when low, smooth ride when high | ✅ |
 | M9.23 | Underwater dive — buoyancy + drag below surface, one-sided hoverDamp, transparent water | ✅ |
 | M9.24 | Slingshot pop (asymmetric Y-drag) + pitch-modulated ride height | ✅ |
-| M9.25 | Editor shapes + viewport-pick + editable Start | ✅ |
-| M9.26 | Spec → GLB asset pipeline (bikes + props + tracks) — JSON specs, headless Blender builders, manifest, Vite watch, CI; player bike now loads from `racer.glb` | ✅ |
+| M9.25 | GPU water shader (TSL) — Gerstner + dimple + wake foam on the GPU | ✅ |
+| M9.26 | Wake displaces water (visual + buoyancy) + periodic swell sets | ✅ |
+| M9.27 | Spec → GLB asset pipeline (bikes + props + tracks) — JSON specs, headless Blender builders, manifest, Vite watch, CI; player bike now loads from `racer.glb` | ✅ |
 
 ## File / system map
 
