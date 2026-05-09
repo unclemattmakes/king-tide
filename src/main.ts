@@ -87,6 +87,18 @@ async function boot() {
   const appEl = document.getElementById('app')
   if (!appEl) throw new Error('#app not found')
 
+  // Stand-alone bike viewer: `?viewer=<bikeId>` (or `?viewer=1` for
+  // the manifest's first bike). Skips the entire game boot — no
+  // track, no physics, no AI, no audio. See src/viewer/bike-viewer.ts.
+  const earlyParams = new URLSearchParams(window.location.search)
+  const viewerParam = earlyParams.get('viewer')
+  if (viewerParam !== null) {
+    const { bootBikeViewer } = await import('./viewer/bike-viewer')
+    const bikeId = viewerParam === '1' || viewerParam === '' ? null : viewerParam
+    await bootBikeViewer(appEl, { bikeId })
+    return
+  }
+
   const fpsEl = document.getElementById('hud-fps')
   const backendEl = document.getElementById('hud-backend')
   const inputEl = document.getElementById('hud-input')
