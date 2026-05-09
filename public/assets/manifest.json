@@ -131,7 +131,13 @@
       "displayName": "Calibration",
       "url": "/assets/tracks/calibration.glb",
       "specPath": "specs/tracks/calibration.json"
+    },
+    {
+      "id": "test-ring",
+      "displayName": "Test Ring",
+      "url": "/assets/tracks/test-ring.glb",
+      "specPath": "specs/tracks/test-ring.json"
     }
   ],
-  "generatedAt": "2026-05-09T15:55:01.309Z"
+  "generatedAt": "2026-05-09T16:15:56.506Z"
 }

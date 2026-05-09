@@ -20,6 +20,7 @@ runs that don't want to write into the source tree). To skip the
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -130,6 +131,71 @@ def add_player_starts(spec: dict) -> list[bpy.types.Object]:
     return out
 
 
+def emit_gameplay_json(spec: dict, glb_url: str) -> dict:
+    """Build the runtime gameplay JSON (`public/tracks/<id>.json`) from
+    the same spec the GLB was built from.
+
+    Axis convention: spec coords are Blender (X right, Y forward, Z up)
+    matching the export_track.py yup conversion. We flip into three.js
+    axes (X right, Y up, Z forward; Blender +Y → three -Z) so the
+    runtime can use the JSON without remapping.
+    """
+    cps_spec = spec.get("checkpoints", [])
+    starts_spec = spec.get("starts", [])
+    pickups_spec = spec.get("pickups", [])
+    spline_pts_spec = spec.get("aiSpline", [])
+    water_spec = spec.get("water") or {}
+
+    def b2t(p: list[float]) -> dict:
+        # Blender (x, y, z) → three (x, z, -y).
+        return {"x": float(p[0]), "y": float(p[2]), "z": -float(p[1])}
+
+    checkpoints = []
+    for i, cp in enumerate(cps_spec):
+        cx = float(cp.get("x", 0.0))
+        cy = float(cp.get("y", 0.0))
+        cz = float(cp.get("z", 1.5))
+        checkpoints.append({
+            "index": i,
+            "position": {"x": cx, "y": cz, "z": -cy},
+            "rotation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+            "halfWidth": float(cp["halfWidth"]),
+            "height": float(cp["height"]),
+        })
+
+    if not starts_spec:
+        raise ValueError("track spec must have at least one entry in `starts`")
+    start = b2t(starts_spec[0])
+
+    json_body: dict = {
+        "id": spec["id"],
+        "name": spec.get("displayName", spec["id"]),
+        "lapsToFinish": int(spec.get("lapsToFinish", 1)),
+        "environmentGlb": glb_url,
+        "water": {
+            "height": 0.0,
+            "waveHeight": float(water_spec.get("waveHeight", 1.0)),
+            "waveFreq": float(water_spec.get("waveFreq", 0.5)),
+        },
+        "start": {
+            "position": start,
+            # Default yaw 0 — pointing at the first checkpoint. Authors
+            # who need a specific yaw can hand-edit after first emit.
+            "yaw": 0.0,
+        },
+        "checkpoints": checkpoints,
+        "aiSplines": [
+            {
+                "id": "main",
+                "points": [b2t(p) for p in spline_pts_spec],
+            }
+        ],
+        "pickupSpawns": [b2t(p) for p in pickups_spec],
+        "boostPads": [],
+    }
+    return json_body
+
+
 def add_lighting() -> None:
     bpy.ops.object.light_add(type="SUN", location=(10, 10, 20))
     sun = bpy.context.active_object
@@ -191,6 +257,28 @@ def build() -> None:
         print(f"[build-track] done -> {out_glb}")
     else:
         raise SystemExit(f"[build-track] tools/export_track.py not found at {export_track_path}")
+
+    # Also emit the runtime gameplay JSON so a single `pnpm gen:tracks`
+    # produces a fully playable track. Path:
+    # `public/tracks/<id>.json`. We DON'T overwrite an existing file by
+    # default — once the in-app editor has saved a tuned version, the
+    # spec is no longer the source of truth for gameplay placement.
+    # Override with HOVERBIKE_FORCE_GAMEPLAY_JSON=1 to overwrite.
+    gameplay_path = os.path.join(REPO_ROOT, "public", "tracks", f"{track_id}.json")
+    glb_rel_url = f"/assets/tracks/{track_id}.glb"
+    body = emit_gameplay_json(spec, glb_rel_url)
+    force = os.environ.get("HOVERBIKE_FORCE_GAMEPLAY_JSON") == "1"
+    if os.path.exists(gameplay_path) and not force:
+        print(
+            f"[build-track] preserving existing {gameplay_path} "
+            f"(set HOVERBIKE_FORCE_GAMEPLAY_JSON=1 to overwrite)"
+        )
+    else:
+        os.makedirs(os.path.dirname(gameplay_path), exist_ok=True)
+        with open(gameplay_path, "w", encoding="utf-8") as f:
+            json.dump(body, f, indent=2)
+            f.write("\n")
+        print(f"[build-track] wrote {gameplay_path}")
 
 
 if __name__ == "__main__":

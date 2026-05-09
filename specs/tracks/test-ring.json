@@ -1,0 +1,40 @@
+{
+  "$schema": "../_schema/track.json",
+  "id": "test-ring",
+  "displayName": "Test Ring",
+  "lapsToFinish": 3,
+  "surface": {
+    "size": [60, 60]
+  },
+  "water": {
+    "center": [0, 0, 0],
+    "extents": [120, 120, 4],
+    "waveHeight": 0.6,
+    "waveFreq": 0.4
+  },
+  "checkpoints": [
+    { "x":  20, "y":   0, "z": 1.5, "halfWidth": 6, "height": 4 },
+    { "x":   0, "y":  20, "z": 1.5, "halfWidth": 6, "height": 4 },
+    { "x": -20, "y":   0, "z": 1.5, "halfWidth": 6, "height": 4 },
+    { "x":   0, "y": -20, "z": 1.5, "halfWidth": 6, "height": 4 }
+  ],
+  "aiSpline": [
+    [ 20,   0, 0.5],
+    [ 14,  14, 0.5],
+    [  0,  20, 0.5],
+    [-14,  14, 0.5],
+    [-20,   0, 0.5],
+    [-14, -14, 0.5],
+    [  0, -20, 0.5],
+    [ 14, -14, 0.5],
+    [ 20,   0, 0.5]
+  ],
+  "starts": [
+    [-2, -25, 0.5],
+    [ 2, -25, 0.5]
+  ],
+  "pickups": [
+    [ 20,   8, 1.0],
+    [-20,  -8, 1.0]
+  ]
+}

@@ -10,6 +10,7 @@
     "$schema": { "type": "string" },
     "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
     "displayName": { "type": "string", "minLength": 1 },
+    "lapsToFinish": { "type": "integer", "minimum": 1, "maximum": 99 },
     "surface": {
       "type": "object",
       "additionalProperties": false,
