@@ -1,6 +1,8 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import { pointAtT, sampleCatmullRom, tangentAtT } from './catmull-rom'
-import type { AISpline, BoostPad, Checkpoint, Track, WaterConfig } from './types'
+import type { AISpline, BoostPad, Checkpoint, Prop, PropType, Track, WaterConfig } from './types'
+
+const PROP_TYPES: readonly PropType[] = ['box', 'sphere', 'cylinder', 'pipe', 'halfpipe']
 
 /**
  * JSON track loader. The new (and preferred) authoring format:
@@ -28,6 +30,7 @@ export type TrackJson = {
   aiSplines: AISpline[]
   pickupSpawns: Vec3[]
   boostPads?: BoostPad[]
+  props?: Prop[]
   environmentGlb?: string
   water?: WaterConfig
 }
@@ -116,6 +119,12 @@ export function buildTrackFromJson(input: unknown): Track {
   }
   const boostPads: BoostPad[] = boostPadsRaw.map((p, i) => readBoostPad(p, i))
 
+  const propsRaw = (input as { props?: unknown }).props ?? []
+  if (!Array.isArray(propsRaw)) {
+    throw new Error('track-json: props must be an array if present')
+  }
+  const props: Prop[] = propsRaw.map((p, i) => readProp(p, i))
+
   const water = readOptionalWater((input as { water?: unknown }).water)
   const environmentGlb = (input as { environmentGlb?: unknown }).environmentGlb
   if (environmentGlb !== undefined && typeof environmentGlb !== 'string') {
@@ -131,6 +140,7 @@ export function buildTrackFromJson(input: unknown): Track {
     aiSplines,
     pickupSpawns,
     boostPads,
+    props,
     surfaces: [],
   }
   if (environmentGlb) track.environmentGlb = environmentGlb
@@ -184,6 +194,16 @@ export function trackToJson(track: Track): TrackJson {
       halfDepth: p.halfDepth,
       strength: p.strength,
     })),
+    props: track.props.map((p) => {
+      const out: Prop = {
+        type: p.type,
+        position: { ...p.position },
+        rotation: { ...p.rotation },
+        size: { ...p.size },
+      }
+      if (p.color) out.color = p.color
+      return out
+    }),
   }
   if (track.environmentGlb) out.environmentGlb = track.environmentGlb
   if (track.water) out.water = { ...track.water }
@@ -249,6 +269,23 @@ function readBoostPad(raw: unknown, i: number): BoostPad {
     throw new Error(`track-json: boostPads[${i}] halfWidth/halfDepth must be positive`)
   }
   return { position, rotation, halfWidth, halfDepth, strength }
+}
+
+function readProp(raw: unknown, i: number): Prop {
+  if (!isObject(raw)) throw new Error(`track-json: props[${i}] must be an object`)
+  const typeRaw = raw.type
+  if (typeof typeRaw !== 'string' || !PROP_TYPES.includes(typeRaw as PropType)) {
+    throw new Error(
+      `track-json: props[${i}].type must be one of ${PROP_TYPES.join(', ')} (got ${String(typeRaw)})`,
+    )
+  }
+  const position = readVec3(raw.position, `props[${i}].position`)
+  const rotation = readQuat(raw.rotation, `props[${i}].rotation`)
+  const size = readVec3(raw.size, `props[${i}].size`)
+  const out: Prop = { type: typeRaw as PropType, position, rotation, size }
+  const colorRaw = (raw as { color?: unknown }).color
+  if (typeof colorRaw === 'string' && colorRaw.length > 0) out.color = colorRaw
+  return out
 }
 
 function readOptionalWater(raw: unknown): WaterConfig | null {

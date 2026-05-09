@@ -20,6 +20,7 @@ import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
 import { attachTrackColliders, loadGlbTrackVisuals } from './engine/render/glb-track'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
+import { createPropsMesh } from './engine/render/props-mesh'
 import { createRampMesh } from './engine/render/ramp-mesh'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
@@ -47,6 +48,7 @@ import { createLagoonIsland, createSafetyFloor } from './game/entities/arena'
 import { createBike } from './game/entities/bike'
 import { createCliffsideTerrain } from './game/entities/cliffside-terrain'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
+import { createPropColliders } from './game/entities/props'
 import { createRamp } from './game/entities/ramp'
 import { aiCombatSystem } from './game/systems/ai-combat'
 import { aiControlSystem } from './game/systems/ai-control'
@@ -105,9 +107,10 @@ async function boot() {
   const waveField = createWaveField(defaultWaves())
   // Subdivision count drives vertex-stage Gerstner cost. 96 is plenty
   // once the wave gradient is analytic (per-vertex, interpolated to
-  // fragment); see notes in `engine/render/water.ts`. The CPU-driven
-  // version needed 256 to keep wave detail crisp; the shader gets the
-  // same visible smoothness with far fewer verts.
+  // fragment); see notes in `engine/render/water.ts`. The earlier
+  // CPU-driven version needed 256 to keep wave detail crisp, then was
+  // reverted (commit 19caac6) for FPS — the GPU shader gets equivalent
+  // smoothness at the lower vertex count.
   const waterMesh = createWaterMesh(waveField, { size: 800, subdivisions: 96 })
   scene.add(waterMesh.mesh)
 
@@ -196,6 +199,12 @@ async function boot() {
   }
   const trackVisuals = createTrackVisuals(track)
   scene.add(trackVisuals.group)
+
+  // Editor-authored props: render meshes + static colliders.
+  if (track.props.length > 0) {
+    scene.add(createPropsMesh(track.props))
+    createPropColliders(phys, track.props)
+  }
 
   // Pickup spawns from track.
   for (let i = 0; i < track.pickupSpawns.length; i++) {

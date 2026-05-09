@@ -26,6 +26,9 @@ export type Track = {
   aiSplines: AISpline[]
   /** Boost pads — speed-up volumes the bike triggers by driving over. */
   boostPads: BoostPad[]
+  /** Editor-authored static props (boxes, pipes, half-pipes, etc).
+   *  Rendered + collidable at runtime. Empty for procedural tracks. */
+  props: Prop[]
   /** Optional .glb URL for collidable environment geometry. JSON-authored
    *  tracks reference a Blender-exported asset here; the runtime loads it
    *  via the render-side glb loader and registers static colliders. */
@@ -88,6 +91,32 @@ export type BoostPad = {
   /** Multiplier applied to top speed while bike is on pad. 1.0 = no boost. */
   strength: number
 }
+
+/**
+ * Editor-authored static prop. The `type` discriminator decides how `size`
+ * is interpreted and what mesh + collider the runtime builds.
+ *
+ *   - `box`       → cuboid. size = { halfWidth, halfHeight, halfDepth }
+ *   - `sphere`    → ball.   size.x = radius (y, z unused)
+ *   - `cylinder`  → solid cylinder. size = { radius, halfHeight, _unused }
+ *   - `pipe`      → hollow tube. size = { outerRadius, halfHeight, wallThickness }
+ *   - `halfpipe`  → upper half removed (open-top tube ridable from inside).
+ *                   size = { outerRadius, halfHeight, wallThickness }
+ *
+ * The cylinder's local axis is +Y. Pipe / halfpipe are oriented so the
+ * tube runs along local +Z (drive-through axis); their "open" face for
+ * halfpipe is +Y (sky).
+ */
+export type Prop = {
+  type: PropType
+  position: Vec3
+  rotation: Quat
+  size: Vec3
+  /** Optional hex tint for the rendered mesh, e.g. "#88ccff". */
+  color?: string
+}
+
+export type PropType = 'box' | 'sphere' | 'cylinder' | 'pipe' | 'halfpipe'
 
 export type WaterConfig = {
   /** Mean water surface y (m). 0 by default. */

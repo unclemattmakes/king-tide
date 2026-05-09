@@ -93,6 +93,7 @@ export function createCliffside(): Track {
     checkpoints,
     surfaces: [],
     boostPads: [],
+    props: [],
     pickupSpawns: [
       { x: 50, y: 1.8, z: -25 }, // right straight south, before the climb
       { x: 50, y: highY + 0.3, z: 70 }, // mesa, near cp 1 → cp 2 corner
