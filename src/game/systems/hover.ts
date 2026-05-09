@@ -217,10 +217,65 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // bike is airborne and uses air-lift / gravity instead — the spring's
     // big restoring term would otherwise act as a "leash" that yanks the
     // bike back down the moment it leaves a ramp, killing all hang-time.
+    //
+    // Underwater branch (M9.23 — Wave Race feel): when the bike has dived
+    // below the water surface (groundDistance < 0 on water), replace the
+    // hover spring with depth-proportional buoyancy + quadratic drag.
+    // Symmetric spring would slam the bike back up the instant it dipped
+    // below; instead we let dive momentum carry it under, drag bleeds the
+    // momentum off (so deeper = slower), and once velocity is killed the
+    // capped buoyancy walks the bike back up — at which point the regular
+    // spring takes over and pops it out. Tuning targets a peak depth
+    // around 1–2m on a hard dive.
     if (probe.hasSurface && isGrounded) {
-      const heightError = stats.hoverHeight - groundDistance
-      const aUp = GRAVITY + heightError * stats.hoverSpring - linvel.y * stats.hoverDamp
-      rb.applyImpulse({ x: 0, y: aUp * m * dt, z: 0 }, true)
+      if (probe.isWater && groundDistance < 0) {
+        const submersion = -groundDistance
+        const BUOYANCY_PER_M = 14
+        const BUOYANCY_CAP = 20
+        // Asymmetric Y-axis drag: full strength when SINKING (kills dive
+        // momentum so the bike actually slows as it reaches max depth),
+        // much weaker when RISING so the accumulated buoyancy isn't
+        // fought by drag on the way up. Net effect: the bike "loads"
+        // potential energy as it sinks and releases it as a slingshot
+        // pop on the way out. Horizontal drag stays symmetric — water is
+        // thick laterally regardless of which way you're moving through it.
+        const DRAG_K_HORIZ = 0.1
+        const DRAG_K_SINK = 0.1
+        const DRAG_K_RISE = 0.03
+        const aBuoy = Math.min(submersion * BUOYANCY_PER_M, BUOYANCY_CAP)
+        const speed = Math.hypot(linvel.x, linvel.y, linvel.z)
+        const horizDragCoef = -DRAG_K_HORIZ * speed
+        const yDragK = linvel.y > 0 ? DRAG_K_RISE : DRAG_K_SINK
+        const yDragCoef = -yDragK * speed
+        // Cancel gravity (GRAVITY+) so buoyancy is the net upward force —
+        // decouples buoyancy tuning from the gravity constant.
+        rb.applyImpulse(
+          {
+            x: linvel.x * horizDragCoef * m * dt,
+            y: (GRAVITY + aBuoy + linvel.y * yDragCoef) * m * dt,
+            z: linvel.z * horizDragCoef * m * dt,
+          },
+          true,
+        )
+      } else {
+        // One-sided damp: only damp UPWARD velocity (anti-bounce on a wave
+        // crest or when the spring overshoots) — let descents flow through
+        // unbraked so dive momentum off a ramp can carry the bike into the
+        // underwater branch instead of dying in the spring zone above water.
+        //
+        // Pitch-modulated ride height: pulling back on the stick (intent.pitch>0,
+        // nose up) raises the target hover height; pushing forward (nose down)
+        // lowers it. Spring's PD smooths the transition so it feels like the
+        // bike "leans into" the new altitude rather than snapping. ±0.5m
+        // limit keeps the bike from popping out of the wave field at full lift
+        // or grinding the surface at full dive.
+        const PITCH_HEIGHT_RANGE = 0.5
+        const effectiveHoverHeight = stats.hoverHeight + intent.pitch * PITCH_HEIGHT_RANGE
+        const heightError = effectiveHoverHeight - groundDistance
+        const dampVy = Math.max(linvel.y, 0)
+        const aUp = GRAVITY + heightError * stats.hoverSpring - dampVy * stats.hoverDamp
+        rb.applyImpulse({ x: 0, y: aUp * m * dt, z: 0 }, true)
+      }
     }
 
     HoverStateStore.set(eid, { groundDistance, isGrounded })

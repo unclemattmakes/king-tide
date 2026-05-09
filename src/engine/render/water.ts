@@ -33,6 +33,8 @@ export function createWaterMesh(
     metalness: 0.25,
     flatShading: true,
     envMapIntensity: 0.8,
+    transparent: true,
+    opacity: 0.75,
   })
 
   const mesh = new THREE.Mesh(geom, mat)
