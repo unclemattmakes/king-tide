@@ -61,6 +61,7 @@ from tools.blender.common import (  # noqa: E402
     validate_required_kinds,
 )
 from tools.blender.lib_loader import append_objects  # noqa: E402
+from tools.blender.mounts import snap_to_mount, strip_build_helpers  # noqa: E402
 
 KIT_BLEND = os.path.join(REPO_ROOT, "tools", "blender", "lib", "bike_parts.blend")
 
@@ -164,13 +165,24 @@ def build() -> None:
         hover_height=float(phys_["hoverHeight"]),
     )
 
-    # Chassis: scale unit cube to (W, L, H) and lift so its base sits at Z=0.
-    [chassis] = append_objects(KIT_BLEND, ["chassis_base"])
+    # Chassis + its mount-point empties. ``wm.append`` doesn't bring a
+    # parent's children automatically, so we list the mounts explicitly
+    # — Blender re-links the parent reference inside the destination
+    # scene because they're appended in the same operation.
+    #
+    # NOTE: we deliberately *defer* ``apply_transforms(chassis)`` until
+    # after every part has been snapped to a mount. While the chassis
+    # carries its (W, L, H) scale, the mount children report correct
+    # world positions for fairing/fork/fin/tail attachment. Bake too
+    # early and the mounts flatten back to chassis-local positions.
+    chassis_kit_objs = append_objects(
+        KIT_BLEND,
+        ["chassis_base", "mount_fairing", "mount_fork", "mount_fin", "mount_tail"],
+    )
+    chassis = chassis_kit_objs[0]
     chassis.name = "bike_body"
     chassis.scale = (width, length, height)
     chassis.location = (0.0, 0.0, height * 0.5)
-    apply_transforms(chassis)
-    chassis.parent = bike_root
     chassis.data.materials.clear()
     chassis.data.materials.append(chassis_mat)
 
@@ -179,7 +191,7 @@ def build() -> None:
     [fairing] = append_objects(KIT_BLEND, [fairing_name])
     fairing.name = "bike_fairing"
     fairing.scale = (width, length, 1.0)
-    fairing.location = (0.0, 0.0, height + 0.15)
+    snap_to_mount(fairing, chassis, "fairing")
     apply_transforms(fairing)
     fairing.parent = bike_root
     fairing.data.materials.clear()
@@ -189,16 +201,15 @@ def build() -> None:
     fork_name = f"fork_{geom['fork']}"
     [fork] = append_objects(KIT_BLEND, [fork_name])
     fork.name = "bike_fork"
-    nose_y = -length * 0.5 + 0.1
-    fork.location = (0.0, nose_y, height * 0.4)
+    snap_to_mount(fork, chassis, "fork")
     apply_transforms(fork)
     fork.parent = bike_root
     fork.data.materials.clear()
     fork.data.materials.append(fork_mat)
 
     # Thrusters: duplicate kit unit per spec.thrusterCount, spread on X
-    # by spec.thrusterSpacing. They sit at the tail (Blender +Y) at half
-    # chassis height.
+    # by spec.thrusterSpacing. Stays parametric — count/spacing are
+    # too dynamic to express as fixed mounts.
     thruster_count = int(geom["thrusterCount"])
     spacing = float(geom["thrusterSpacing"])
     tail_y = length * 0.5 - 0.15
@@ -224,7 +235,7 @@ def build() -> None:
     )
     [fin] = append_objects(KIT_BLEND, ["fin_marker"])
     fin.name = "bike_fin"
-    fin.location = (0.0, -length * 0.5 + 0.05, height + 0.35)
+    snap_to_mount(fin, chassis, "fin")
     apply_transforms(fin)
     fin.parent = bike_root
     fin.data.materials.clear()
@@ -238,11 +249,17 @@ def build() -> None:
     )
     [tail] = append_objects(KIT_BLEND, ["tail_marker"])
     tail.name = "bike_tail"
-    tail.location = (0.0, length * 0.5 - 0.05, height + 0.05)
+    snap_to_mount(tail, chassis, "tail")
     apply_transforms(tail)
     tail.parent = bike_root
     tail.data.materials.clear()
     tail.data.materials.append(tail_mat)
+
+    # Now that every mount has been read, strip the build-time helper
+    # empties (mount_*, anchor*) and bake the chassis transform.
+    strip_build_helpers()
+    apply_transforms(chassis)
+    chassis.parent = bike_root
 
     # Sockets — placed in Blender authoring frame; the GLTFLoader
     # converts them to three's axes correctly via standard yup export.

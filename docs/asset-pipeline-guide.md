@@ -143,6 +143,40 @@ If you accidentally bake a layout offset into the mesh, fix it by
 re-running the seed script (which restores the canonical mesh +
 layout) or by editing the mesh back to origin-centred in Edit Mode.
 
+#### Mounts and anchors
+
+Where bike parts attach to the chassis is controlled by **mount
+empties** authored in the kit, not by hardcoded math in
+`build_bike.py`. The chassis carries small `mount_<role>` empties
+(`mount_fairing`, `mount_fork`, `mount_fin`, `mount_tail`) that say
+"the fairing/fork/fin/tail attaches *here*." At build time the script
+positions each part so its origin (or its `anchor` child empty if
+present) lands on the matching mount.
+
+To **move** an attachment point — say the fork should sit further
+forward — open `tools/blender/lib/bike_parts.blend`, select
+`mount_fork` (parented under `chassis_base`), and translate it.
+Re-export. No code change needed.
+
+To **add a new attachment** — author a new empty
+`mount_<your_role>` parented to the chassis, then add the matching
+`snap_to_mount(part, chassis, "<your_role>")` call in
+`build_bike.py`.
+
+The mount positions are stored in chassis-local space (a unit cube
+spanning ±0.5), so they scale with `chassis.scale = (W, L, H)` at
+build time — change the chassis dimensions in the spec and the mount
+points scale with it.
+
+Mounts (and any optional `anchor` empties on child parts) are
+**stripped from the GLB before export** by `strip_build_helpers()`,
+so they never ship to the runtime. Runtime `socket_*` empties (seat,
+nose_cam, fx_*) are a separate concept and do ride into the GLB.
+
+Thrusters stay parametric — their count and X spacing come from
+`spec.geometry.thrusterCount`/`thrusterSpacing` and the build code
+does the math directly. Too dynamic to express as fixed mounts.
+
 ### Add a brand-new bike
 
 1. Copy `specs/bikes/scout.json` to `specs/bikes/<new-id>.json`. Edit
