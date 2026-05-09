@@ -270,13 +270,20 @@ export function defaultWaves(): Wave[] {
     // Big swells — long wavelengths, low frequencies. These are what make
     // "the bigger waves show up periodically": their slightly different
     // periods (≈6.0 s and ≈7.7 s) beat against each other so peaks align
-    // every ~25–30 s.
+    // every ~25–30 s. Swell amplitudes unchanged from M9.26 — they drive
+    // the periodic-set rhythm and bumping them risks the buoyancy field
+    // throwing the bike around at race speeds.
     { dirX: 0.92, dirZ: 0.39, amplitude: 0.55, wavelength: 60, speed: 10.0, phase: 0.4 },
     { dirX: 0.6, dirZ: 0.8, amplitude: 0.4, wavelength: 85, speed: 11.0, phase: 2.2 },
-    // Wind chop across four scales for varied surface texture.
-    { dirX: 1, dirZ: 0, amplitude: 0.5, wavelength: 22, speed: 4.0, phase: 0 },
-    { dirX: 0.707, dirZ: 0.707, amplitude: 0.34, wavelength: 14, speed: 3.6, phase: 1.1 },
-    { dirX: 0.3, dirZ: -0.954, amplitude: 0.22, wavelength: 9, speed: 3.0, phase: 2.3 },
-    { dirX: -0.5, dirZ: 0.866, amplitude: 0.12, wavelength: 5.5, speed: 2.4, phase: 3.7 },
+    // Wind chop across four scales for varied surface texture. Amplitudes
+    // bumped ~30% from the original [0.5, 0.34, 0.22, 0.12] in M9.34 so the
+    // short-wavelength pinching from horizontal-displacement Gerstner reads
+    // more dramatically — chop ridges visibly sharpen on the v2 shader,
+    // and physical chop bumps the bike's hull probes by a noticeable
+    // amount without overpowering the multi-probe averaging.
+    { dirX: 1, dirZ: 0, amplitude: 0.65, wavelength: 22, speed: 4.0, phase: 0 },
+    { dirX: 0.707, dirZ: 0.707, amplitude: 0.44, wavelength: 14, speed: 3.6, phase: 1.1 },
+    { dirX: 0.3, dirZ: -0.954, amplitude: 0.29, wavelength: 9, speed: 3.0, phase: 2.3 },
+    { dirX: -0.5, dirZ: 0.866, amplitude: 0.16, wavelength: 5.5, speed: 2.4, phase: 3.7 },
   ]
 }

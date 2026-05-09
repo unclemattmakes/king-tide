@@ -70,6 +70,15 @@ export type WaterMesh = {
    * array (e.g. in editor mode) to leave the surface clean.
    */
   tick(impacts?: readonly BikeImpact[], originXZ?: { x: number; z: number }): void
+  /**
+   * Updates the water shader's sun-direction uniform from a world-space
+   * sun position (typically the directional light's position). The
+   * vector is normalized internally; pass either a position or already-
+   * normalized direction. Used by the day-night cycle in `main.ts` to
+   * keep the water's sun-glow + scatter blend in sync with the moving
+   * directional light.
+   */
+  setSunDirection(x: number, y: number, z: number): void
   dispose(): void
 }
 
@@ -925,10 +934,15 @@ export function createWaterMesh(
     }
   }
 
+  function setSunDirection(x: number, y: number, z: number): void {
+    const len = Math.hypot(x, y, z) || 1
+    sunDirUniform.value.set(x / len, y / len, z / len)
+  }
+
   function dispose() {
     geom.dispose()
     mat.dispose()
   }
 
-  return { mesh, tick, dispose }
+  return { mesh, tick, setSunDirection, dispose }
 }

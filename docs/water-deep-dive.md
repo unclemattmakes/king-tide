@@ -2,9 +2,13 @@
 
 Reference for the SoT-style ocean upgrade. Original research compiled 2026-05-09; first wave of changes shipped as M9.29 (see [status.md](./status.md)).
 
-## Current state (M9.29 → M9.33)
+## Current state (M9.29 → M9.34)
 
-Render: horizontal-displacement Gerstner (per-wave Q + global scale uniform), two-color scatter blend (deep teal ↔ cyan-green, view + sun-direction modulated, with sun-glow emissive on backlit crests), stateless foam accumulator (lingering whitecaps via 4 time-shifted Gerstner samples, no render targets needed), depth-buffer shoreline foam with lapping noise scroll (water/land intersection breathes ±0.4m), richer bike foam pass (speed-modulated hull ring + stern propwash + bow spray + V-wake, all noise-modulated for turbulent edges), noise-modulated roughness for SoT-style "wandering glints", existing analytic normal + Fresnel sky-tint emissive + wake-displacement V-stripe.
+Render: horizontal-displacement Gerstner (per-wave Q + global scale uniform, with chop amplitudes bumped 30% in M9.34 for more dramatic short-wavelength pinching), two-color scatter blend (deep teal ↔ cyan-green, view + sun-direction modulated, with sun-glow emissive on backlit crests, sun direction now animated by the day-night cycle), stateless foam accumulator (lingering whitecaps via 4 time-shifted Gerstner samples, no render targets needed), depth-buffer shoreline foam with lapping noise scroll (water/land intersection breathes ±0.4m), richer bike foam pass (speed-modulated hull ring + stern propwash + bow spray + V-wake, all noise-modulated for turbulent edges), noise-modulated roughness for SoT-style "wandering glints", existing analytic normal + Fresnel sky-tint emissive + wake-displacement V-stripe.
+
+Sim: vertical-only Gerstner (unchanged at the formulation level, with new bumped chop amplitudes in M9.34), multi-probe buoyancy (4 sample points around the bike's footprint, pitch/roll from differential heights), unchanged underwater dive + buoyancy + asymmetric drag.
+
+Lighting: directional sun light animated on a 360s loop (M9.34 — elevation 30..70°, azimuth full rotation). Position synced to the water shader's `sunDirUniform` each frame via `waterMesh.setSunDirection`.
 
 Sim: vertical-only Gerstner (unchanged — the simpler formulation with no inverse solve required), multi-probe buoyancy (4 sample points around the bike's footprint, pitch/roll from differential heights), unchanged underwater dive + buoyancy + asymmetric drag.
 
@@ -35,8 +39,6 @@ The reference is Sea of Thieves. Rare's published pipeline (SIGGRAPH 2018 *The T
 
 ### Possible next wins
 
-- **[S] Chop amplitude bump.** Default chop amplitudes (`0.5, 0.34, 0.22, 0.12`) feel modest at racing speeds — bumping by ~30% would give more dramatic short-wavelength pinching with the new horizontal Gerstner. Affects buoyancy too — playtest before committing.
-- **[S] Animated sun direction / day-night cycle.** `sunDirUniform` is already a uniform; just needs a clock to drive it for sunrise→noon→sunset variation in scatter color, sun-glow direction, and shadowing.
 - **[M] Wake transverse waves.** Real ship wakes have transverse oscillating ridges following the boat (the "scallops" in addition to the diverging V). Could add `sin(K · behind − ω · t)` modulation to the wake displacement function in `wave-field.ts` — but watch the existing wake unit tests (they assert a positive ridge at the V edge, so any longitudinal modulation that can be negative would need to stay above floor).
 
 ### Heavier lifts (defer until needed)
@@ -60,3 +62,6 @@ The reference is Sea of Thieves. Rare's published pipeline (SIGGRAPH 2018 *The T
 | Bow-spray half-angle | `splashHalfAngle` in bike foam | 0.35 (tan) | lower = sharper moustache, higher = wider arc |
 | Foam turbulence range | `mix(0.5, 1.0, foamNoiseSmooth)` | 0.5..1.0 | lower bound = more dramatic patchiness |
 | Shoreline lapping range | `foamNoiseRaw - 0.5 ·  0.8` offset | ±0.4m | breathes the foam edge in/out for the surf-lapping effect |
+| Sun cycle period | `SUN_CYCLE_SECONDS` in `main.ts` | 360s | smaller = more visible mid-race drift; larger = cinematic |
+| Sun elevation range | `50 ± 20` degrees in main.ts | 30..70° | low = warmer/longer "sunset" feel; high = brighter overhead |
+| Chop amplitudes | `defaultWaves()` chop entries | 0.65 / 0.44 / 0.29 / 0.16 | scale up for stormier, down for calmer racing surface |

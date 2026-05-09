@@ -102,7 +102,7 @@ async function boot() {
   installCameraLookInput()
 
   const { renderer, backend } = await createRenderer(appEl)
-  const { scene, camera } = createScene()
+  const { scene, camera, sun } = createScene()
   const phys = await createPhysicsWorld()
   const sim = createSimWorld()
   const chase = createChaseCamera(camera)
@@ -584,6 +584,36 @@ async function boot() {
     }
 
     waterMesh.tick(gatherBikeImpacts(), { x: camera.position.x, z: camera.position.z })
+    // Day-night cycle: animate the directional sun light around the scene
+    // and keep the water shader's sun-direction uniform in sync. The sun
+    // makes a full 360° azimuth rotation while bobbing in elevation
+    // between ~30°..70° over SUN_CYCLE_SECONDS, so over a 1–3 lap race
+    // the sun-glow on backlit waves visibly drifts across the scene
+    // (the most perceptible effect — we don't render shadows, so the
+    // shading direction matters mostly for the water shader).
+    //
+    // Driven by the deterministic wave-field clock (`waveField.time`) so
+    // a replay or rollback would put the sun back where it was.
+    {
+      const SUN_CYCLE_SECONDS = 360 // 6 minutes per full rotation
+      const SUN_RADIUS = 110
+      const t = waveField.time
+      const phase = (t / SUN_CYCLE_SECONDS) * Math.PI * 2
+      // Elevation: 30°..70°, full rise+fall once per cycle. Phase offset
+      // 0.7×phase staggers it from the azimuth so sun doesn't trace a
+      // simple circle — adds variety to the lighting arc.
+      const elev = (50 + 20 * Math.sin(phase * 0.7)) * (Math.PI / 180)
+      // Azimuth: starts at 45° (matching the original (50, 70, 70) sun
+      // position) and rotates a full 360° per cycle.
+      const azimuth = (45 * Math.PI) / 180 + phase
+      const cosE = Math.cos(elev)
+      sun.position.set(
+        SUN_RADIUS * cosE * Math.cos(azimuth),
+        SUN_RADIUS * Math.sin(elev),
+        SUN_RADIUS * cosE * Math.sin(azimuth),
+      )
+      waterMesh.setSunDirection(sun.position.x, sun.position.y, sun.position.z)
+    }
     bikeRender()
     trailRender(camera)
     pickupRender(dt)

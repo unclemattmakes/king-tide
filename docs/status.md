@@ -221,6 +221,37 @@ additions:
 Hoisted `heightFactor` out of the IIFE so both the scatter blend and
 the new sun-glow share it. No physics change.
 
+### Water — chop bump + day-night sun cycle (M9.34)
+Two quick wins from the [water deep-dive](./water-deep-dive.md):
+
+1. **Chop amplitudes bumped 30%** in [`defaultWaves()`](../src/engine/sim/water/wave-field.ts):
+   `[0.5, 0.34, 0.22, 0.12]` → `[0.65, 0.44, 0.29, 0.16]`. Shorter
+   wavelengths now pinch more dramatically with the horizontal Gerstner
+   from M9.29 — chop ridges read as actual ridges instead of soft bumps.
+   Swell amplitudes left untouched (they drive the periodic-set rhythm
+   and bumping them risks the buoyancy field throwing the bike around
+   at race speeds). Multi-probe buoyancy (M9.29) absorbs the extra
+   short-wavelength chop without the bike whipping — chop wavelengths
+   (5.5..22m) are mostly close to or smaller than the bike's 1.6m
+   probe footprint, so probe averaging mutes the worst of it.
+
+2. **Day-night sun cycle.** Animates the directional light's position
+   on a 360s loop. Elevation oscillates 30°..70°; azimuth rotates a
+   full 360°. The water shader's `sunDirUniform` is updated in lockstep
+   via `waterMesh.setSunDirection(...)`, so the sun-glow on backlit
+   waves drifts across the scene as the race progresses. Driven by the
+   deterministic `waveField.time` clock so a replay puts the sun back
+   where it was. Implementation: `createScene()` now returns the
+   `THREE.DirectionalLight`; `WaterMesh.setSunDirection(x, y, z)`
+   normalizes the input and writes to the shader uniform; the per-frame
+   block lives in [main.ts](../src/main.ts) right after `waterMesh.tick`.
+   No shadow rendering yet, so the most perceptible effect is the
+   water's sun-glow direction shift.
+
+Tunables in `main.ts`'s sun-cycle block: `SUN_CYCLE_SECONDS` (360),
+`SUN_RADIUS` (110), elevation range `(50 ± 20)°`. Make the cycle
+faster for visible mid-race drift; slower for a more cinematic feel.
+
 ### Water — shoreline lapping + wake polish (M9.33)
 Round of polish on the foam pass shipped in M9.32:
 
