@@ -78,7 +78,7 @@ import { rubberBandSystem } from './game/systems/rubber-band'
 import { computeStandings } from './game/systems/standings'
 import { syncFromPhysics } from './game/systems/sync-from-physics'
 import { createCliffside } from './game/tracks/cliffside'
-import { loadTrackFromJson } from './game/tracks/json-loader'
+import { buildTrackFromJson } from './game/tracks/json-loader'
 import { createLagoonLoop } from './game/tracks/lagoon-loop'
 
 const NUM_AI = 4
@@ -199,26 +199,37 @@ async function boot() {
     track = createCliffside()
   } else if (trackId === 'lagoon') {
     track = createLagoonLoop()
-  } else if (trackId === 'test-custom-track') {
-    const glbUrl = '/assets/tracks/test-custom-track.glb'
-    track = await loadTrackFromGlb(glbUrl, {
-      id: 'test-custom-track',
-      name: 'Test Custom Track',
-      lapsToFinish: 3,
-    })
-    if (!editMode) {
-      const env = await loadGlbTrackVisuals(glbUrl)
-      scene.add(env.scene)
-      attachTrackColliders(env.scene, phys)
-    }
   } else {
-    // JSON-authored track. Fetch + validate, then optionally load the
-    // referenced environment .glb for collidable terrain + visuals.
-    track = await loadTrackFromJson(`/tracks/${trackId}.json`)
-    if (track.environmentGlb && !editMode) {
-      const env = await loadGlbTrackVisuals(track.environmentGlb)
-      scene.add(env.scene)
-      attachTrackColliders(env.scene, phys)
+    // Try a JSON-authored track first (gameplay data from the in-app
+    // editor or hand-edited spec). On 404, fall back to a hand-authored
+    // Blender export at the conventional GLB path so anything produced
+    // by `tools/export_track.py` is playable via `?track=<id>` without
+    // a per-track branch here.
+    const jsonUrl = `/tracks/${trackId}.json`
+    const jsonRes = await fetch(jsonUrl)
+    if (jsonRes.ok) {
+      track = buildTrackFromJson(JSON.parse(await jsonRes.text()))
+      if (track.environmentGlb && !editMode) {
+        const env = await loadGlbTrackVisuals(track.environmentGlb)
+        scene.add(env.scene)
+        attachTrackColliders(env.scene, phys)
+      }
+    } else if (jsonRes.status === 404) {
+      const glbUrl = `/assets/tracks/${trackId}.glb`
+      track = await loadTrackFromGlb(glbUrl, {
+        id: trackId,
+        name: trackId,
+        lapsToFinish: 3,
+      })
+      if (!editMode) {
+        const env = await loadGlbTrackVisuals(glbUrl)
+        scene.add(env.scene)
+        attachTrackColliders(env.scene, phys)
+      }
+    } else {
+      throw new Error(
+        `track: fetch ${jsonUrl} failed: ${jsonRes.status} ${jsonRes.statusText}`,
+      )
     }
   }
 
