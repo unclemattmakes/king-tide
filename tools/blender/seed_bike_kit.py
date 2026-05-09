@@ -25,24 +25,31 @@ The kit is organized into collections so the outliner reads like the
 in-game ``?viewer=<id>`` page — flick a collection visible to switch
 which bike you're previewing.
 
-  Source                         (canonical parts; hidden by default)
-    ├── chassis_base + mounts
-    ├── fairing_bare / swept / full
-    ├── fork_single / dual
-    ├── thruster_unit
-    └── fin_marker, tail_marker
-  Bike: Calibration Bike         (hidden)
-  Bike: Cruiser                  (hidden)
-  Bike: Racer                    (hidden)
-  Bike: Scout                    (visible by default)
-  Bike: Stunt                    (hidden)
+  Source                         (visible by default — edit here)
+    ├── chassis_base
+    │     ├── mount_fairing → fairing_bare / swept / full
+    │     ├── mount_fork → fork_single / dual
+    │     ├── mount_fin → fin_marker
+    │     └── mount_tail → tail_marker
+    └── thruster_unit
+  Bike: Calibration Bike         (snapshot, hidden)
+  Bike: Cruiser                  (snapshot, hidden)
+  Bike: Racer                    (snapshot, hidden)
+  Bike: Scout                    (snapshot, hidden)
+  Bike: Stunt                    (snapshot, hidden)
 
-Each ``Bike: <name>`` collection contains *linked-data instances* of
-the canonical parts, scaled and positioned per the spec at
-``specs/bikes/<id>.json``. Mesh data is shared with Source — edit a
-mesh in Source and every preview updates. Toggle Source visible when
-you want to add a part or rework a variant; otherwise leave it off
-and treat the bike collections as a read-only preview gallery.
+Source holds the **editable** canonical parts. Each variant fairing,
+fork, fin, and tail is *parented* to its corresponding ``mount_*``
+empty so moving a mount in the viewport drags the dependent geometry
+along — the same live-attach feel as the in-game viewer.
+
+Each ``Bike: <name>`` collection contains *static linked-data
+instances* of the canonical parts, positioned per the spec at
+``specs/bikes/<id>.json``. Mesh data is shared with Source — mesh
+edits propagate, but **mount moves do NOT** retroactively reposition
+snapshot instances; re-run ``seed_bike_kit.py`` to refresh them.
+Toggle a snapshot visible to eyeball how a different spec resolves
+without leaving Blender.
 
 ### Canonical part list
 
@@ -97,11 +104,6 @@ from tools.blender.mounts import add_mount  # noqa: E402
 
 OUTPUT_PATH = os.path.join(REPO_ROOT, "tools", "blender", "lib", "bike_parts.blend")
 SPECS_DIR = os.path.join(REPO_ROOT, "specs", "bikes")
-
-# Collection visible by default in the kit's outliner. Pick the bike
-# whose silhouette best represents the canonical "this is what the
-# bike looks like" pose. Authors flick visibility to switch previews.
-DEFAULT_VISIBLE_BIKE_ID = "scout"
 
 
 def reset_scene() -> None:
@@ -384,7 +386,36 @@ def lay_out_in_context() -> None:
     add_mount(chassis, "fin", (0.0, -0.48, 1.375))
     add_mount(chassis, "tail", (0.0, 0.48, 0.625))
 
-    # The kit's per-bike preview collections (built later in
+    # Parent each canonical part to its mount so moving the mount in
+    # the viewport drags the dependent geometry along — same idea as
+    # the in-game ?viewer page, but live while editing. Each variant
+    # (e.g. all three fairings) parents to the SAME mount; toggle
+    # variant visibility in the outliner to swap which one is shown.
+    #
+    # ``matrix_parent_inverse.identity()`` makes ``part.location =
+    # (0, 0, 0)`` the natural origin → child sits exactly on the
+    # mount. Build-time ``snap_to_mount`` reads each mount's world
+    # position and writes part.location, so the build remains
+    # independent of this parenting.
+    parent_to_mount: list[tuple[str, str]] = [
+        ("fairing_bare", "mount_fairing"),
+        ("fairing_swept", "mount_fairing"),
+        ("fairing_full", "mount_fairing"),
+        ("fork_single", "mount_fork"),
+        ("fork_dual", "mount_fork"),
+        ("fin_marker", "mount_fin"),
+        ("tail_marker", "mount_tail"),
+    ]
+    for part_name, mount_name in parent_to_mount:
+        part = bpy.data.objects.get(part_name)
+        mount = bpy.data.objects.get(mount_name)
+        if part is None or mount is None:
+            continue
+        part.parent = mount
+        part.matrix_parent_inverse.identity()
+        part.location = (0.0, 0.0, 0.0)
+
+    # Per-bike preview collections (built later in
     # build_per_bike_collections) supply spec-correct multi-thruster
     # previews via linked-data instances. The standalone
     # ``thruster_unit_preview_l`` mirror is redundant once those exist.
@@ -560,19 +591,23 @@ def build_preview_collection_for_spec(spec: dict[str, Any]) -> bpy.types.Collect
 
 def build_per_bike_collections() -> None:
     """Top-level: move canonical parts into Source, then build a
-    preview collection per spec. Hides Source + every bike collection
-    except DEFAULT_VISIBLE_BIKE_ID so opening the kit shows one bike
-    at a time, like the ?viewer=<id> page."""
+    preview collection per spec.
+
+    Default visibility: **Source visible**, all per-bike collections
+    hidden. Source holds the canonical parts parented to their
+    mount empties — moving a mount drags its child geometry, which
+    is the natural editing surface. Per-bike collections are
+    static snapshots (re-seed to refresh); flip one visible to
+    eyeball that spec without leaving Blender."""
     src = organize_canonical_into_source()
-    _set_collection_visibility(src, hidden=True)
+    _set_collection_visibility(src, hidden=False)
 
     specs = _read_bike_specs()
     for spec in specs:
         coll = build_preview_collection_for_spec(spec)
         if coll is None:
             continue
-        is_default = spec.get("id") == DEFAULT_VISIBLE_BIKE_ID
-        _set_collection_visibility(coll, hidden=not is_default)
+        _set_collection_visibility(coll, hidden=True)
 
 
 def main() -> None:

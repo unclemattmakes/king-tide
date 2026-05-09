@@ -30,6 +30,11 @@
         "chassisLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 6 },
         "chassisWidth": { "type": "number", "exclusiveMinimum": 0, "maximum": 3 },
         "chassisHeight": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+        "chassisVariant": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "description": "Optional kit-part name override. When set, the build appends `chassis_<variant>` from `bike_parts.blend` instead of scaling the generic `chassis_base` cube — author bespoke geometry per bike instead of stretching a unit cube. The collider + thruster/socket positioning still derive from chassisLength/Width/Height."
+        },
         "fairingStyle": { "enum": ["bare", "swept", "full"] },
         "thrusterCount": { "type": "integer", "minimum": 1, "maximum": 4 },
         "thrusterSpacing": { "type": "number", "minimum": 0, "maximum": 2 },
