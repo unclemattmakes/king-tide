@@ -29,6 +29,13 @@ Named objects produced (all at origin, all materials prefixed
   thruster_unit      — short cylinder along Blender +Y (bike-length).
   fork_single        — single vertical column.
   fork_dual          — two parallel vertical columns (joined mesh).
+  fin_marker         — small cone, builder places at chassis nose (-Y)
+                       with a livery-colored material. Restores the
+                       visual "this end is forward" cue the procedural
+                       bike-mesh.ts had.
+  tail_marker        — small sphere, builder places at chassis tail
+                       (+Y) with a red emissive material. Mirror of
+                       the procedural tail-light.
 """
 
 from __future__ import annotations
@@ -159,6 +166,34 @@ def make_fork_single(material: bpy.types.Material) -> bpy.types.Object:
     return add_box("fork_single", (0.1, 0.1, 0.6), material)
 
 
+def make_fin_marker(material: bpy.types.Material) -> bpy.types.Object:
+    """Small cone pointing along Blender -Y so after yup export its
+    apex points at three +Z (forward). Cone primitive's apex is at
+    local +Z by default; rotating -90° about X aligns it with -Y."""
+    bpy.ops.mesh.primitive_cone_add(
+        radius1=0.18, radius2=0.0, depth=0.6, vertices=8, location=(0, 0, 0)
+    )
+    obj = bpy.context.active_object
+    obj.name = "fin_marker"
+    obj.rotation_euler = (-1.5707963, 0.0, 0.0)
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+    obj.data.name = "fin_marker_mesh"
+    obj.data.materials.clear()
+    obj.data.materials.append(material)
+    return obj
+
+
+def make_tail_marker(material: bpy.types.Material) -> bpy.types.Object:
+    """Small sphere — emissive in the builder via material override."""
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.12, segments=12, ring_count=8, location=(0, 0, 0))
+    obj = bpy.context.active_object
+    obj.name = "tail_marker"
+    obj.data.name = "tail_marker_mesh"
+    obj.data.materials.clear()
+    obj.data.materials.append(material)
+    return obj
+
+
 def make_fork_dual(material: bpy.types.Material) -> bpy.types.Object:
     """Two parallel vertical columns (Z up). Joined into one mesh."""
     bpy.ops.mesh.primitive_cube_add(size=1, location=(0.18, 0.0, 0.0))
@@ -191,6 +226,8 @@ def main() -> None:
     fairing_mat = get_or_create_material("mat_kit_bike_fairing", (0.85, 0.40, 0.20, 1.0))
     thruster_mat = get_or_create_material("mat_kit_bike_thruster", (0.36, 0.94, 1.00, 1.0))
     fork_mat = get_or_create_material("mat_kit_bike_fork", (0.20, 0.20, 0.22, 1.0))
+    fin_mat = get_or_create_material("mat_kit_bike_fin", (1.00, 0.80, 0.30, 1.0))
+    tail_mat = get_or_create_material("mat_kit_bike_tail", (1.00, 0.20, 0.20, 1.0))
 
     make_chassis_base(chassis_mat)
     make_fairing_bare(fairing_mat)
@@ -199,6 +236,8 @@ def main() -> None:
     make_thruster_unit(thruster_mat)
     make_fork_single(fork_mat)
     make_fork_dual(fork_mat)
+    make_fin_marker(fin_mat)
+    make_tail_marker(tail_mat)
 
     bpy.ops.wm.save_as_mainfile(filepath=OUTPUT_PATH)
     print(
