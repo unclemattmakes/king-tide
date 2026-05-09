@@ -25,6 +25,16 @@ const GRAVITY = 25 // must match PhysicsWorld gravity magnitude
  * whichever is *higher* (closer to the bike) wins. This unifies driving on
  * land and driving on water — same controller, different surface y.
  */
+type SurfaceProbe = {
+  surfaceY: number
+  isWater: boolean
+  hasSurface: boolean
+  /** Ground surface normal in world space (only valid when isWater=false and hasSurface=true). */
+  normalX: number
+  normalY: number
+  normalZ: number
+}
+
 function probeSurface(
   phys: PhysicsWorld,
   field: WaveFieldState | null,
@@ -32,9 +42,12 @@ function probeSurface(
   fromY: number,
   fromZ: number,
   ignore: ReturnType<PhysicsWorld['world']['getRigidBody']>,
-): { surfaceY: number; isWater: boolean; hasSurface: boolean } {
+): SurfaceProbe {
   const ray = new phys.rapier.Ray({ x: fromX, y: fromY, z: fromZ }, { x: 0, y: -1, z: 0 })
-  const hit = phys.world.castRay(
+  // castRayAndGetNormal so we can auto-orient the chassis to ramps below.
+  // The normal is only used when the ground wins over water; otherwise it's
+  // ignored and the wave-field's analytic gradient drives surface follow.
+  const hit = phys.world.castRayAndGetNormal(
     ray,
     MAX_HOVER_PROBE,
     true,
@@ -48,15 +61,30 @@ function probeSurface(
 
   // Higher surface wins — that's what the bike rides on.
   if (groundY === Number.NEGATIVE_INFINITY && waterY === Number.NEGATIVE_INFINITY) {
-    return { surfaceY: 0, isWater: false, hasSurface: false }
+    return { surfaceY: 0, isWater: false, hasSurface: false, normalX: 0, normalY: 1, normalZ: 0 }
   }
-  if (groundY > waterY) {
-    return { surfaceY: groundY, isWater: false, hasSurface: true }
+  if (groundY > waterY && hit) {
+    const n = hit.normal
+    return {
+      surfaceY: groundY,
+      isWater: false,
+      hasSurface: true,
+      normalX: n.x,
+      normalY: n.y,
+      normalZ: n.z,
+    }
   }
   // Water can be sampled anywhere, so water is "always reachable" — but only
   // counts as a ride surface if the bike is within probe range of it.
   const reachable = fromY - waterY < MAX_HOVER_PROBE
-  return { surfaceY: waterY, isWater: true, hasSurface: reachable }
+  return {
+    surfaceY: waterY,
+    isWater: true,
+    hasSurface: reachable,
+    normalX: 0,
+    normalY: 1,
+    normalZ: 0,
+  }
 }
 
 /**
@@ -104,12 +132,12 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     //      to every ripple shorter than its own footprint, removing a
     //      whole class of high-frequency attitude jitter.
     //
-    // Ground: single-probe (raycast normal would require multiple casts;
-    // for our flat lagoon island that's overkill, and the current single
-    // raycast already gives `surfaceY` accurate enough that world-up
-    // alignment looks fine). If we ever need ground multi-probe, the same
-    // fwd/right offset pattern below applies — just call probeSurface at
-    // four points instead of sampleHeight.
+    // Ground: single raycast + normal. probeSurface uses
+    // `castRayAndGetNormal`, so a ramp's slope normal feeds straight into
+    // pitch/roll targets — the rider doesn't have to manually tilt to
+    // match a ramp's angle, and the slope becomes the new "neutral"
+    // attitude. Multi-probe (a la water) is overkill for ramps, which are
+    // smooth enough that a single normal is stable.
     let surfacePitchTarget = 0
     let surfaceRollTarget = 0
     if (isGrounded) {
@@ -170,12 +198,41 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         //   starboard > port → right side high → POSITIVE roll.
         // Verified against the previous single-probe formulation (same
         // signs in the limit of small wavelength relative to footprint).
-        surfacePitchTarget =
-          followNow * -Math.atan2(yBow - yStern, 2 * PROBE_HALF_LENGTH)
-        surfaceRollTarget =
-          followNow * Math.atan2(yStarboard - yPort, 2 * PROBE_HALF_WIDTH)
+        surfacePitchTarget = followNow * -Math.atan2(yBow - yStern, 2 * PROBE_HALF_LENGTH)
+        surfaceRollTarget = followNow * Math.atan2(yStarboard - yPort, 2 * PROBE_HALF_WIDTH)
+      } else if (probe.hasSurface) {
+        // Ground branch: align local-up to the surface normal so the bike
+        // auto-orients to ramps and slopes — the rider doesn't need to
+        // manually tilt to match a ramp's angle, and "neutral" pitch becomes
+        // the slope's pitch. Decompose the world normal into the bike's
+        // yaw-aligned frame, then read pitch (about bike-right) and roll
+        // (about bike-fwd) directly.
+        //
+        // Derivation (YXZ Euler R = R_y(yaw)·R_x(pitch)·R_z(roll), local up
+        // = (0,1,0)). The yaw-aligned normal is n_yaw = R_y(-yaw) · n_world:
+        //   n_yaw.x =  cos(yaw)·n.x − sin(yaw)·n.z   → -sin(roll)
+        //   n_yaw.y =  n.y                           →  cos(roll)·cos(pitch)
+        //   n_yaw.z =  sin(yaw)·n.x + cos(yaw)·n.z   →  cos(roll)·sin(pitch)
+        // → roll  = -asin(n_yaw.x)
+        // → pitch =  atan2(n_yaw.z, n_yaw.y)
+        //
+        // Sanity check: bike facing +Z climbing a ramp (n.z < 0, n.y > 0) →
+        //   yaw=0 → n_yaw.z = n.z < 0 → pitch < 0 (nose up). ✓
+        // Right side higher (n.x < 0) → yaw=0 → n_yaw.x = n.x < 0 →
+        //   roll = -asin(n.x) > 0 (right side up). ✓
+        //
+        // Use a stronger follow than water — ramps are clean surfaces that
+        // don't need the chop-averaging dampening the water probe applies.
+        // We still respect altitudeFactor so the bike doesn't read terrain
+        // attitude when riding high above it.
+        const GROUND_FOLLOW = 1.0
+        const groundFollowNow = GROUND_FOLLOW * altitudeFactor
+        const nyx = cy_ * probe.normalX - sy_ * probe.normalZ
+        const nyy = probe.normalY
+        const nyz = sy_ * probe.normalX + cy_ * probe.normalZ
+        surfacePitchTarget = groundFollowNow * Math.atan2(nyz, nyy)
+        surfaceRollTarget = groundFollowNow * -Math.asin(Math.max(-1, Math.min(1, nyx)))
       }
-      // Ground branch: targets stay 0 (world-up alignment, flat island top).
     }
 
     // Kinematic attitude shape. Decompose the bike's orientation into YXZ
@@ -200,10 +257,23 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const PITCH_LIMIT = Math.PI / 6 // 30° max player-driven pitch
     const ROLL_LEAN_LIMIT = Math.PI / 15 // ~12° max steer-driven lean
     const LEAN_SPEED_FULL = 5 // m/s — full lean kicks in once moving
+    // Lean baseline: bike still leans into a turn at zero forward speed.
+    // 0.5 means stationary lean is half full; LEAN_SPEED_FULL+ is full.
+    // The user wanted "still leans, even more when moving" — base + (1-base)·speedFrac
+    // gives both: visible lean at idle, stronger when racing.
+    const LEAN_BASE = 0.5
+    // Pitch smoothing rates (exponential approach, units 1/s). Active = stick
+    // is being held; release = stick at neutral. Release is intentionally 4×
+    // slower than active so letting off the stick feels heavy — the bike
+    // retains its attitude rather than snapping back to flat. Tuneable; the
+    // earlier behaviour was effectively rate=∞ (snap each fixed step).
+    const PITCH_RATE_ACTIVE = 12 // 95% of target in ~250ms
+    const PITCH_RATE_RELEASE = 3 // 95% of target in ~1s
     const pitchMul = probe.isWater ? 1.0 : 0.7
     {
       const speedNow = Math.hypot(linvel.x, linvel.z)
-      const leanScale = Math.min(speedNow / LEAN_SPEED_FULL, 1)
+      const speedFrac = Math.min(speedNow / LEAN_SPEED_FULL, 1)
+      const leanScale = LEAN_BASE + (1 - LEAN_BASE) * speedFrac
       // Sign convention is empirical (see hoverSystem header). steer=+1
       // banks INTO the perceived turn; intent.pitch=+1 dives (nose down,
       // negative pitch angle in our YXZ convention).
@@ -218,15 +288,21 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       const r22 = 1 - 2 * (q0.x * q0.x + q0.y * q0.y)
       const currentRoll = Math.atan2(r10, r11)
       const currentPitch = Math.asin(Math.max(-1, Math.min(1, -r12)))
-      if (
-        Math.abs(currentRoll - targetRoll) > 1e-5 ||
-        Math.abs(currentPitch - targetPitch) > 1e-5
-      ) {
+
+      // Smooth pitch toward target with active/release rates. Roll snaps
+      // (steer-driven lean is meant to read instant). The lerp uses the
+      // exponential-time-constant formulation `1 − exp(−rate·dt)` so the
+      // motion is frame-rate-independent and stable at any rate.
+      const pitchInputActive = Math.abs(intent.pitch) > 0.05
+      const pitchRate = pitchInputActive ? PITCH_RATE_ACTIVE : PITCH_RATE_RELEASE
+      const pitchAlpha = 1 - Math.exp(-pitchRate * dt)
+      const newPitch = currentPitch + (targetPitch - currentPitch) * pitchAlpha
+      if (Math.abs(currentRoll - targetRoll) > 1e-5 || Math.abs(currentPitch - newPitch) > 1e-5) {
         const yawAngle = Math.atan2(r02, r22)
         const cy = Math.cos(yawAngle / 2)
         const sy = Math.sin(yawAngle / 2)
-        const cp = Math.cos(targetPitch / 2)
-        const sp = Math.sin(targetPitch / 2)
+        const cp = Math.cos(newPitch / 2)
+        const sp = Math.sin(newPitch / 2)
         const cr = Math.cos(targetRoll / 2)
         const sr = Math.sin(targetRoll / 2)
         rb.setRotation(
