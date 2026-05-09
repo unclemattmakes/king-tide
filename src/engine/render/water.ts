@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import {
   abs,
+  cameraFar,
+  cameraNear,
   cameraPosition,
   clamp,
   cos,
@@ -14,7 +16,9 @@ import {
   min,
   mix,
   normalize,
+  perspectiveDepthToViewZ,
   positionLocal,
+  positionView,
   positionWorld,
   pow,
   sin,
@@ -25,6 +29,7 @@ import {
   varying,
   vec2,
   vec3,
+  viewportDepthTexture,
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
 import {
@@ -626,12 +631,6 @@ export function createWaterMesh(
         // biome-ignore lint/suspicious/noExplicitAny: TSL UniformArrayElementNode lacks float-typing in TS
         const weight = weightsUniform.element(i) as any
 
-        // Hull foam ring: bright at the dimple's outer edge, fading
-        // inward and outward over a small band.
-        const ringInner = smoothstep(float(BIKE_DIMPLE_R - 1.0), float(BIKE_DIMPLE_R - 0.2), r)
-        const ringOuter = smoothstep(float(BIKE_DIMPLE_R + 0.6), float(BIKE_DIMPLE_R - 0.2), r)
-        const ring = ringInner.mul(ringOuter).mul(weight).mul(0.55)
-
         // V-wake foam stripe behind the bike.
         // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
         const vx = slot.z as any
@@ -643,24 +642,105 @@ export function createWaterMesh(
         const hatZ = vz.div(safeSpeed)
         const parallel = dxRel.mul(hatX).add(dzRel.mul(hatZ))
         const behind = max(parallel.negate(), float(0))
+        const ahead = max(parallel, float(0))
         // 2D perpendicular distance via cross-product magnitude (cheaper
         // than `length(d - hat * parallel)`).
         const perp = abs(dxRel.mul(hatZ).sub(dzRel.mul(hatX)))
+        const speedGate = smoothstep(float(WAKE_SPEED_LOW), float(WAKE_SPEED_HIGH), speed)
+
+        // Hull foam ring: bright at the dimple's outer edge, fading
+        // inward and outward over a small band. Speed-modulated so it
+        // reads more dramatically at race pace — at full speed the ring
+        // is ~1.6× brighter than at idle, communicating the hull's
+        // active interaction with the water.
+        const ringInner = smoothstep(float(BIKE_DIMPLE_R - 1.0), float(BIKE_DIMPLE_R - 0.2), r)
+        const ringOuter = smoothstep(float(BIKE_DIMPLE_R + 0.6), float(BIKE_DIMPLE_R - 0.2), r)
+        const ringSpeedBoost = float(1).add(speedGate.mul(0.6))
+        const ring = ringInner.mul(ringOuter).mul(weight).mul(0.55).mul(ringSpeedBoost)
+
+        // V-wake foam stripe behind the bike.
         const wakeWidth = behind.mul(WAKE_HALF_ANGLE_TAN).add(float(WAKE_BASE_WIDTH))
         const behindGate = smoothstep(float(0.0), float(0.3), behind)
-        const speedGate = smoothstep(float(WAKE_SPEED_LOW), float(WAKE_SPEED_HIGH), speed)
         const decay = exp(behind.mul(-WAKE_LONG_DECAY))
         const edgeBlur = smoothstep(wakeWidth.add(0.4), wakeWidth.sub(0.5), perp)
         const wake = behindGate.mul(speedGate).mul(decay).mul(edgeBlur).mul(weight).mul(0.7)
 
-        sum.addAssign(ring.add(wake))
+        // Bow spray: forward foam "moustache" in front of the bike,
+        // peaking just ahead and fading to 0 by ~1.5m forward. Same
+        // Kelvin-V geometry as the wake but FORWARD-facing with a
+        // tighter half-angle, so the spray reads as a sharp arc rather
+        // than a long trail. Speed-gated so a parked bike doesn't spray.
+        // The bike's hull pushes water forward at race pace; this is
+        // the visual cue for that interaction.
+        const splashHalfAngle = 0.35
+        const splashWidth = ahead.mul(splashHalfAngle).add(float(0.35))
+        const aheadGate = smoothstep(float(0.0), float(0.25), ahead)
+        const aheadFalloff = exp(ahead.mul(-1.6))
+        const splashEdge = smoothstep(splashWidth.add(0.3), splashWidth.sub(0.4), perp)
+        const bowSpray = aheadGate
+          .mul(speedGate)
+          .mul(aheadFalloff)
+          .mul(splashEdge)
+          .mul(weight)
+          .mul(0.85)
+
+        sum.addAssign(ring.add(wake).add(bowSpray))
       })
     }
     return sum
   })
   const bikeFoam = computeBikeFoam()
 
-  const foamMask = clamp(waveFoam.add(bikeFoam), float(0), float(0.92))
+  // Shoreline foam (M9.32): white foam where terrain is just below the
+  // water surface — the visual cue for "you're approaching land". Works
+  // by reading the opaque scene depth buffer at this fragment's screen
+  // position and comparing to the water fragment's own view-space Z. When
+  // the difference is small (terrain top ~0–1.5m below water), foam shows;
+  // farther down, foam fades to 0.
+  //
+  // Two gates handle the edge cases:
+  //   - `behindGate`: only triggers when scene is BEHIND water (positive
+  //     closeness). Without this, opaque objects rendered in front of the
+  //     water (e.g. bikes between camera and water surface) would falsely
+  //     trigger foam wherever they occlude the water plane.
+  //   - `depthFade`: smooth fade from full foam at the intersection to 0
+  //     at FOAM_INTERSECTION_RANGE meters depth.
+  //
+  // Off in classic mode (it's a v2 feature; classic preserves the original
+  // single-foam path for clean A/B). The depth read is cheap on real GPU
+  // (one texture sample + one viewZ conversion) — no per-vertex cost.
+  const intersectionFoam = isClassic
+    ? float(0)
+    : (() => {
+        const FOAM_INTERSECTION_RANGE = 1.5
+        // viewportDepthTexture() samples the opaque depth at this fragment.
+        // .r is the non-linear depth in [0, 1].
+        // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+        const sceneDepthRaw = (viewportDepthTexture() as any).r
+        const sceneViewZ = perspectiveDepthToViewZ(sceneDepthRaw, cameraNear, cameraFar)
+        const waterViewZ = positionView.z
+        // closenessSigned > 0 means terrain is BEHIND water (deeper into
+        // the scene from camera's POV). View-Z is negative for points in
+        // front of camera, so waterViewZ − sceneViewZ is positive when
+        // sceneViewZ is more negative (further away).
+        const closenessSigned = waterViewZ.sub(sceneViewZ)
+        const behindGate = smoothstep(float(-0.05), float(0.05), closenessSigned)
+        const depthFade = float(1).sub(
+          smoothstep(float(0), float(FOAM_INTERSECTION_RANGE), max(float(0), closenessSigned)),
+        )
+        return behindGate.mul(depthFade)
+      })()
+
+  // Intersection foam is full-opaque white where it fires (we want the
+  // shoreline edge to read clearly against the water), so we max-combine
+  // it with the (waveFoam + bikeFoam) sum rather than adding — additive
+  // would create unnaturally over-bright zones at gate posts where the
+  // ramp hits water.
+  const foamMask = clamp(
+    max(waveFoam.add(bikeFoam), intersectionFoam.mul(0.95)),
+    float(0),
+    float(0.95),
+  )
   const foamColor = vec3(0.92, 0.96, 1.0)
   const albedo = mix(baseColor, foamColor, foamMask)
 
