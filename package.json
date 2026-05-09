@@ -13,7 +13,12 @@
     "e2e": "playwright test",
     "e2e:install": "playwright install chromium",
     "lint": "biome check .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "gen:bikes": "node tools/blender/run.mjs build_bike specs/bikes",
+    "gen:props": "node tools/blender/run.mjs build_prop specs/props",
+    "gen:tracks": "node tools/blender/run.mjs build_track specs/tracks",
+    "gen:all": "node tools/blender/run.mjs build_all",
+    "gen:manifest": "node tools/blender/run.mjs manifest"
   },
   "engines": {
     "node": ">=20"
@@ -26,6 +31,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.14",
+    "ajv": "^8.17.1",
     "@playwright/test": "^1.59.1",
     "@types/node": "^25.6.0",
     "@types/three": "^0.184.1",

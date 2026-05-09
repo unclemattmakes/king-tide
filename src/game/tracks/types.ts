@@ -114,9 +114,13 @@ export type Prop = {
   size: Vec3
   /** Optional hex tint for the rendered mesh, e.g. "#88ccff". */
   color?: string
+  /** Asset-prop reference. When set, the runtime ignores `type/size/color`
+   *  and instantiates from `public/assets/props/<assetId>.glb` instead.
+   *  Sourced from the asset manifest (built by `pnpm gen:props`). */
+  assetId?: string
 }
 
-export type PropType = 'box' | 'sphere' | 'cylinder' | 'pipe' | 'halfpipe'
+export type PropType = 'box' | 'sphere' | 'cylinder' | 'pipe' | 'halfpipe' | 'asset'
 
 export type WaterConfig = {
   /** Mean water surface y (m). 0 by default. */
