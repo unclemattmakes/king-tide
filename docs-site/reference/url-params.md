@@ -7,6 +7,7 @@ The game accepts query-string parameters at the root URL. They compose freely.
 | `track` | `lagoon` \| `cliffside` \| `calibration` \| `test-ring` \| any id under `public/tracks/` | `lagoon` | Picks the track. JSON-driven tracks are loaded from `public/tracks/<id>.json`. |
 | `bike` | `cruiser` \| `racer` \| `stunt` \| any id under `public/assets/bikes/` | `racer` | Picks the player bike variant. |
 | `edit` | `1` | off | Opens the in-app track editor instead of the racer. Defaults the track to `lagoon-edit` if `track` isn't set. See [Authoring tracks → Editor-driven](/modding/tracks#editor-driven-authoring). |
+| `viewer` | any bike id, or `1` for the first manifest entry | off | Opens the stand-alone bike viewer — a turntable with `OrbitControls` for inspecting one built bike GLB. Skips the entire game boot (no track / physics / AI). See [Authoring bikes → In-game bike viewer](/modding/bikes#in-game-bike-viewer). |
 
 ## Examples
 
@@ -18,6 +19,7 @@ The game accepts query-string parameters at the root URL. They compose freely.
 | `http://localhost:5191/?track=cliffside&bike=stunt` | "The most fun config" per the README |
 | `http://localhost:5191/?edit=1` | Track editor over `lagoon-edit` |
 | `http://localhost:5191/?track=mybeach&edit=1` | Editor over a specific (or new) JSON track |
+| `http://localhost:5191/?viewer=scout` | Stand-alone bike viewer — turntable with orbit controls, inspect one built bike |
 
 ## Persistence
 
