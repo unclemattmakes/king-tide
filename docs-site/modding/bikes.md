@@ -135,11 +135,25 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
 
 Then update the `BikeVariantId` union in the same file. The Garage menu populates from `BIKE_VARIANTS` at boot.
 
+## In-game bike viewer
+
+To eyeball a built bike in isolation — handy for verifying the kit and the in-game render line up — open `?viewer=<bikeId>`:
+
+```
+http://localhost:5191/?viewer=scout
+http://localhost:5191/?viewer=cruiser
+http://localhost:5191/?viewer=1          # first manifest entry
+```
+
+The viewer loads the bike GLB, drops it on a grid, and gives you `OrbitControls`. The HUD panel (top-left) shows the bike's id, mass, top speed, hover height, world bbox, livery/metal/glow swatches, every socket, and a quick-switch row to flip between bikes without reloading. Sockets render as small green dots; the box collider renders as an orange wireframe — both invisible in normal gameplay. The viewer skips the entire game boot (no track, physics, AI, audio), so it's a pure render of what `bike-loader.ts` produces.
+
 ## Re-authoring kit geometry
 
 If you need new chassis shapes, fairing styles, or thruster meshes, edit `tools/blender/lib/bike_parts.blend` directly. Saving the `.blend` triggers a rebuild of every bike against the new kit. To start from a clean placeholder, re-run `tools/blender/seed_bike_kit.py`.
 
-The kit opens with parts laid out at their **assembled-bike positions** so you see a fully-built bike, not a pile of overlapping pieces at the origin. Variants overlap their primary (all three fairings sit on top of the chassis; both forks live at the nose). Hide any variant you don't care about in the outliner if you need to focus on one. Object viewport positions are layout-only — they don't influence the build (`tools/blender/lib_loader.py` resets transforms on append). Mesh edits *do* ride through.
+The kit opens dressed as the **scout** bike — that's the canonical reference layout the seed is tuned to. You see chassis + fairing_swept + fork_single + 2 thrusters at scout's spacing (one being a preview-only mirror named `thruster_unit_preview_l`, ignored by the build), wearing scout's livery/metal/glow colors. Variant parts (`fairing_bare`, `fairing_full`, `fork_dual`) are present but `hide_viewport`/`hide_render` so they don't clutter the silhouette — toggle them on in the outliner to edit them. Object viewport positions are layout-only — they don't influence the build (`tools/blender/lib_loader.py` resets transforms on append). Mesh edits *do* ride through.
+
+Open `?viewer=scout` in another tab to compare the kit's silhouette against what the runtime ships — they should be the same modulo material differences (the kit uses static placeholder materials; the build creates spec-driven ones).
 
 ### Moving an attachment point — no code change
 
