@@ -16,8 +16,12 @@ For props the orientation matters less than for bikes (most are
 symmetric), but we still author Z-up so kit objects align with the
 runtime's gravity axis after export.
 
-Named objects produced (all at origin, materials prefixed
-``mat_kit_prop_*``):
+Named objects produced (materials prefixed ``mat_kit_prop_*``). Each
+part's *mesh data* is authored origin-centred (or bottom-on-floor for
+upright shapes); the **object transform** spreads the parts along
++X with bottoms on z=0 so authors can see every variant side-by-side.
+The transform is reset on append (see ``lib_loader.append_objects``),
+so the layout is purely cosmetic — only mesh edits ride through.
 
   barrier_a      — short rectangular barrier (low + wide).
   barrier_b      — taller curved barrier suggestion.
@@ -137,6 +141,19 @@ def make_pylon(material: bpy.types.Material):
     return obj
 
 
+def lay_out_in_row() -> None:
+    """Spread parts along +X so authors can see every variant. Object
+    transforms are layout-only; ``lib_loader.append_objects`` resets
+    them on append so the build is unaffected."""
+    spacing = 3.0
+    order = ["barrier_a", "barrier_b", "lamppost", "crate", "pylon"]
+    for i, name in enumerate(order):
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            continue
+        obj.location = (i * spacing, 0.0, obj.location.z)
+
+
 def main() -> None:
     print(f"[seed-prop-kit] writing {OUTPUT_PATH}")
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
@@ -152,6 +169,8 @@ def main() -> None:
     make_lamppost(metal_mat)
     make_crate(crate_mat)
     make_pylon(pylon_mat)
+
+    lay_out_in_row()
 
     bpy.ops.wm.save_as_mainfile(filepath=OUTPUT_PATH)
     print(

@@ -114,6 +114,33 @@ If you want to start from a clean placeholder, re-run
 `tools/blender/seed_bike_kit.py` (or `seed_prop_kit.py`) — those
 scripts regenerate the placeholders from scratch.
 
+#### Edit-in-context
+
+Kit objects are laid out in their **assembled-bike positions** in the
+.blend so you can see parts in context while editing — chassis at the
+centre, fairing on top, fork at the nose, thruster at the tail. Fairing
+and fork variants are parked at ±X offsets so they're visible side-by-
+side. The prop kit is laid out as a row along +X.
+
+The viewport position of an object in the kit is **layout-only**.
+`tools/blender/lib_loader.append_objects` resets each appended object's
+location/rotation/scale to identity, so the build only sees the part's
+mesh data and positions it programmatically per the spec. Rules of
+thumb:
+
+- ✅ Free to drag (G), rotate (R), or scale (S) kit objects in the
+  viewport to find a better viewing layout — the build ignores it.
+- ✅ Edit mesh data freely (Edit Mode → move vertices, extrude, etc.).
+  Mesh edits ride through to every bike/prop that uses that part.
+- ⚠️ Don't apply object transforms (Object → Apply → All Transforms)
+  with the part at a layout position — that bakes the layout offset
+  into the mesh, which **does** ride through and will render the part
+  in the wrong place at build time.
+
+If you accidentally bake a layout offset into the mesh, fix it by
+re-running the seed script (which restores the canonical mesh +
+layout) or by editing the mesh back to origin-centred in Edit Mode.
+
 ### Add a brand-new bike
 
 1. Copy `specs/bikes/scout.json` to `specs/bikes/<new-id>.json`. Edit
