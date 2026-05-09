@@ -18,7 +18,10 @@
     "gen:props": "node tools/blender/run.mjs build_prop specs/props",
     "gen:tracks": "node tools/blender/run.mjs build_track specs/tracks",
     "gen:all": "node tools/blender/run.mjs build_all",
-    "gen:manifest": "node tools/blender/run.mjs manifest"
+    "gen:manifest": "node tools/blender/run.mjs manifest",
+    "docs:dev": "vitepress dev docs-site",
+    "docs:build": "vitepress build docs-site",
+    "docs:preview": "vitepress preview docs-site"
   },
   "engines": {
     "node": ">=20"
@@ -31,12 +34,13 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.14",
-    "ajv": "^8.17.1",
     "@playwright/test": "^1.59.1",
     "@types/node": "^25.6.0",
     "@types/three": "^0.184.1",
+    "ajv": "^8.17.1",
     "typescript": "^6.0.3",
     "vite": "^8.0.10",
+    "vitepress": "^1.6.4",
     "vitest": "^4.1.5"
   }
 }
