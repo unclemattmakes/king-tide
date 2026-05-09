@@ -1,0 +1,28 @@
+{
+  "$schema": "../_schema/bike.json",
+  "id": "scout",
+  "displayName": "Scout",
+  "geometry": {
+    "chassisLength": 2.5,
+    "chassisWidth": 0.6,
+    "chassisHeight": 0.4,
+    "fairingStyle": "swept",
+    "thrusterCount": 2,
+    "thrusterSpacing": 0.4,
+    "fork": "single"
+  },
+  "physics": {
+    "massKg": 220,
+    "topSpeedMps": 65,
+    "hoverHeight": 0.8
+  },
+  "appearance": {
+    "liveryColor": "#ff6633",
+    "metalColor": "#222428",
+    "glowColor": "#5cf2ff",
+    "glowIntensity": 1.4
+  },
+  "rider": {
+    "seatOffset": [0, 0.55, -0.1]
+  }
+}

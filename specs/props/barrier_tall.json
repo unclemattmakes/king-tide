@@ -1,0 +1,15 @@
+{
+  "$schema": "../_schema/prop.json",
+  "id": "barrier_tall",
+  "displayName": "Tall Barrier",
+  "category": "barrier",
+  "geometry": {
+    "kitPart": "barrier_b",
+    "scale": [1, 1, 1],
+    "tint": "#888888"
+  },
+  "collider": {
+    "shape": "box",
+    "halfExtents": [0.75, 0.75, 0.15]
+  }
+}

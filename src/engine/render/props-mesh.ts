@@ -1,13 +1,16 @@
 import * as THREE from 'three'
+import { cloneLoadedProp, type LoadedProp } from '@/game/assets/prop-loader'
 import type { Prop, PropType } from '@/game/tracks/types'
 import { buildPropGeometry } from './props-geometry'
 
 /**
- * Build a Three.js group containing one mesh per editor-authored prop. The
- * runtime adds this group to the scene; physics colliders are attached
- * separately via `attachPropColliders`.
+ * Build a Three.js group containing one mesh per editor-authored prop.
+ * Procedural prop types (box/sphere/etc) are rendered via
+ * buildPropGeometry; asset-prop types (`type === 'asset'` with an
+ * `assetId`) are cloned from a pre-loaded GLB. Physics colliders are
+ * attached separately by `createPropColliders`.
  */
-const DEFAULT_COLORS: Record<PropType, number> = {
+const DEFAULT_COLORS: Record<Exclude<PropType, 'asset'>, number> = {
   box: 0xc0a070,
   sphere: 0xddaa66,
   cylinder: 0x9999bb,
@@ -15,10 +18,26 @@ const DEFAULT_COLORS: Record<PropType, number> = {
   halfpipe: 0xaadddd,
 }
 
-export function createPropsMesh(props: Prop[]): THREE.Group {
+/** Pre-loaded prop GLBs keyed by `assetId`. Provided by main.ts after
+ *  the boot pre-load step finishes. Empty when no asset-props are in
+ *  the track (procedural-only). */
+export type PropAssetRegistry = Map<string, LoadedProp>
+
+export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THREE.Group {
   const group = new THREE.Group()
   group.name = 'track:props'
   for (const p of props) {
+    if (p.type === 'asset') {
+      const loaded = p.assetId ? assets?.get(p.assetId) : undefined
+      if (!loaded) continue // silently skip; caller logs missing assets at boot
+      const inst = cloneLoadedProp(loaded)
+      inst.position.set(p.position.x, p.position.y, p.position.z)
+      inst.quaternion.set(p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w)
+      inst.scale.set(Math.max(0.01, p.size.x), Math.max(0.01, p.size.y), Math.max(0.01, p.size.z))
+      inst.userData.kind = 'prop'
+      group.add(inst)
+      continue
+    }
     const color = p.color ? new THREE.Color(p.color).getHex() : DEFAULT_COLORS[p.type]
     const mat = new THREE.MeshLambertMaterial({
       color,

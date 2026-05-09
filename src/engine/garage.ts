@@ -1,3 +1,4 @@
+import type { TrackManifestEntry } from '@/game/assets/manifest'
 import { BIKE_VARIANTS, type BikeVariantId, DEFAULT_BIKE_VARIANT } from '@/game/bikes/variants'
 import { clearBestLaps, getBestLap } from './save-state'
 
@@ -15,7 +16,9 @@ import { clearBestLaps, getBestLap } from './save-state'
  * boots in under half a second on modern hardware.
  */
 
-const TRACKS: Array<{ id: string; name: string; tagline: string; accent: number }> = [
+type TrackEntry = { id: string; name: string; tagline: string; accent: number }
+
+const PROCEDURAL_TRACKS: TrackEntry[] = [
   {
     id: 'lagoon',
     name: 'Lagoon Loop',
@@ -30,6 +33,10 @@ const TRACKS: Array<{ id: string; name: string; tagline: string; accent: number 
   },
 ]
 
+/** Mutable list — procedural built-ins stay first, manifest-driven
+ *  tracks (from `pnpm gen:tracks`) are appended at install time. */
+const TRACKS: TrackEntry[] = [...PROCEDURAL_TRACKS]
+
 export type GarageInstance = {
   open(): void
   close(): void
@@ -39,6 +46,9 @@ export type GarageInstance = {
 export function installGarageMenu(opts: {
   initialTrackId: string
   initialBikeId: BikeVariantId
+  /** Track entries pulled from the asset manifest (built via
+   *  `pnpm gen:tracks`). Merged with the procedural built-ins. */
+  manifestTracks?: TrackManifestEntry[]
 }): GarageInstance {
   const overlayMaybe = document.getElementById('garage')
   const toggleMaybe = document.getElementById('garage-toggle')
@@ -72,6 +82,23 @@ export function installGarageMenu(opts: {
 
   let pickedBike: BikeVariantId = opts.initialBikeId
   let pickedTrack: string = opts.initialTrackId
+
+  // Merge manifest tracks once at install. Procedural built-ins stay
+  // first; new spec-driven tracks land at the bottom.
+  if (opts.manifestTracks) {
+    const known = new Set(TRACKS.map((t) => t.id))
+    for (const m of opts.manifestTracks) {
+      if (!known.has(m.id)) {
+        TRACKS.push({
+          id: m.id,
+          name: m.displayName,
+          tagline: 'JSON-authored track.',
+          accent: 0x88aabb,
+        })
+        known.add(m.id)
+      }
+    }
+  }
 
   function rebuildBikes() {
     bikesEl.innerHTML = ''

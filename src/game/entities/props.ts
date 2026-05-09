@@ -1,6 +1,11 @@
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
+import type { LoadedProp } from '@/game/assets/prop-loader'
 import type { Prop } from '@/game/tracks/types'
+
+/** Pre-loaded prop GLBs keyed by `assetId`. Empty / undefined when no
+ *  asset-props are in the track. */
+export type PropAssetRegistry = Map<string, LoadedProp>
 
 /**
  * Static physics colliders for editor-authored props.
@@ -16,8 +21,19 @@ import type { Prop } from '@/game/tracks/types'
  *                 thickness ≥ 0.3m is recommended.
  *  - halfpipe   → trimesh, same as pipe (upper half omitted).
  */
-export function createPropColliders(phys: PhysicsWorld, props: Prop[]): void {
+export function createPropColliders(
+  phys: PhysicsWorld,
+  props: Prop[],
+  assets?: PropAssetRegistry,
+): void {
   for (const p of props) {
+    if (p.type === 'asset') {
+      if (!p.assetId) continue
+      const loaded = assets?.get(p.assetId)
+      if (!loaded) continue
+      addAssetPropColliders(phys, p, loaded)
+      continue
+    }
     if (p.type === 'box') {
       const desc = phys.rapier.RigidBodyDesc.fixed().setTranslation(
         p.position.x,
@@ -75,6 +91,63 @@ export function createPropColliders(phys: PhysicsWorld, props: Prop[]): void {
       .setRestitution(0.05)
     phys.world.createCollider(col, rb)
   }
+}
+
+/**
+ * Static colliders for an asset-prop instance. Reads the shape from the
+ * GLB's first `collider_*` extras, applies the prop's spec scale, then
+ * positions the rigid body at the editor-authored pose.
+ *
+ * The prop's `size` field is repurposed as a uniform-ish scale on each
+ * axis when the type is `asset`. The collider is scaled by the
+ * average of the size components so non-uniform scaling doesn't
+ * deform a sphere/capsule into something Rapier doesn't support.
+ */
+function addAssetPropColliders(phys: PhysicsWorld, p: Prop, loaded: LoadedProp): void {
+  if (loaded.colliders.length === 0) return
+  const c = loaded.colliders[0]!
+  const sx = Math.max(0.01, p.size.x)
+  const sy = Math.max(0.01, p.size.y)
+  const sz = Math.max(0.01, p.size.z)
+  const sAvg = (sx + sy + sz) / 3
+  const desc = phys.rapier.RigidBodyDesc.fixed().setTranslation(
+    p.position.x,
+    p.position.y,
+    p.position.z,
+  )
+  desc.setRotation(p.rotation)
+  const rb = phys.world.createRigidBody(desc)
+  let col: ReturnType<PhysicsWorld['rapier']['ColliderDesc']['cuboid']> | null = null
+  if (c.shape === 'box' && c.halfExtents) {
+    col = phys.rapier.ColliderDesc.cuboid(
+      Math.max(0.05, c.halfExtents[0] * sx),
+      Math.max(0.05, c.halfExtents[1] * sy),
+      Math.max(0.05, c.halfExtents[2] * sz),
+    )
+  } else if (c.shape === 'sphere' && typeof c.radius === 'number') {
+    col = phys.rapier.ColliderDesc.ball(Math.max(0.05, c.radius * sAvg))
+  } else if (
+    c.shape === 'cylinder' &&
+    typeof c.radius === 'number' &&
+    typeof c.height === 'number'
+  ) {
+    col = phys.rapier.ColliderDesc.cylinder(
+      Math.max(0.05, c.height * 0.5 * sy),
+      Math.max(0.05, c.radius * sAvg),
+    )
+  } else if (
+    c.shape === 'capsule' &&
+    typeof c.radius === 'number' &&
+    typeof c.height === 'number'
+  ) {
+    col = phys.rapier.ColliderDesc.capsule(
+      Math.max(0.05, c.height * 0.5 * sy),
+      Math.max(0.05, c.radius * sAvg),
+    )
+  }
+  if (!col) return
+  col.setFriction(0.6)
+  phys.world.createCollider(col, rb)
 }
 
 /**
@@ -186,4 +259,3 @@ function quatRotate(q: Quat, x: number, y: number, z: number): Vec3 {
     z: z + q.w * tz + (q.x * ty - q.y * tx),
   }
 }
-

@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
@@ -67,8 +68,80 @@ function trackEditorSavePlugin(): Plugin {
   }
 }
 
+// Watch specs/<cat>/*.json and tools/blender/lib/*.blend. Whenever
+// one changes, debounce 600ms and spawn the appropriate
+// `node tools/blender/run.mjs build_<category> specs/<category>` to
+// regenerate the affected GLBs. Outputs land in `public/assets/`,
+// which Vite serves as static assets — clients pick up the new files
+// on the next reload (no HMR plumbing needed for binary GLBs).
+//
+// Disabled when HOVERBIKE_NO_ASSET_WATCH=1 is set (CI / focused
+// sessions where Blender startup would be a distraction).
+function assetPipelineWatchPlugin(): Plugin {
+  const running = new Set<string>()
+  const queue = new Map<string, NodeJS.Timeout>()
+
+  function schedule(category: 'bikes' | 'props' | 'tracks', why: string) {
+    const existing = queue.get(category)
+    if (existing) clearTimeout(existing)
+    const handle = setTimeout(() => {
+      queue.delete(category)
+      if (running.has(category)) {
+        // Coalesce: if a build is already running, schedule another
+        // pass right after it finishes.
+        queue.set(
+          category,
+          setTimeout(() => schedule(category, why), 100),
+        )
+        return
+      }
+      running.add(category)
+      const builderArg = `build_${category.replace(/s$/, '')}`
+      console.log(`[asset-watch] ${why} → pnpm gen:${category}`)
+      const child = spawn('node', ['tools/blender/run.mjs', builderArg, `specs/${category}`], {
+        cwd: REPO_ROOT,
+        stdio: 'inherit',
+        shell: false,
+      })
+      child.on('close', (code) => {
+        running.delete(category)
+        console.log(`[asset-watch] ${category} build exited ${code}`)
+      })
+    }, 600)
+    queue.set(category, handle)
+  }
+
+  return {
+    name: 'hoverbike:asset-pipeline-watch',
+    apply: 'serve',
+    configureServer(server) {
+      if (process.env.HOVERBIKE_NO_ASSET_WATCH === '1') return
+      server.watcher.add([
+        path.resolve(REPO_ROOT, 'specs'),
+        path.resolve(REPO_ROOT, 'tools', 'blender', 'lib'),
+      ])
+      const handler = (file: string) => {
+        const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/')
+        if (rel.startsWith('specs/bikes/') && rel.endsWith('.json')) {
+          schedule('bikes', `spec ${path.basename(file)} changed`)
+        } else if (rel.startsWith('specs/props/') && rel.endsWith('.json')) {
+          schedule('props', `spec ${path.basename(file)} changed`)
+        } else if (rel.startsWith('specs/tracks/') && rel.endsWith('.json')) {
+          schedule('tracks', `spec ${path.basename(file)} changed`)
+        } else if (rel === 'tools/blender/lib/bike_parts.blend') {
+          schedule('bikes', 'bike_parts.blend changed')
+        } else if (rel === 'tools/blender/lib/prop_kit.blend') {
+          schedule('props', 'prop_kit.blend changed')
+        }
+      }
+      server.watcher.on('change', handler)
+      server.watcher.on('add', handler)
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [trackEditorSavePlugin()],
+  plugins: [trackEditorSavePlugin(), assetPipelineWatchPlugin()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

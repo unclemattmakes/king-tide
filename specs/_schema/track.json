@@ -1,0 +1,91 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://hoverbike.local/specs/track.json",
+  "title": "Track spec",
+  "description": "Declarative description of a track scene. The Blender headless builder reads this file, constructs the scene programmatically (matching build_calibration_scene.py's output), and exports a GLB via tools/export_track.py.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id", "displayName"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+    "displayName": { "type": "string", "minLength": 1 },
+    "surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size": {
+          "type": "array",
+          "items": { "type": "number", "exclusiveMinimum": 0 },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[width, length] in metres (Blender X, Y)."
+        }
+      }
+    },
+    "water": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "center": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "extents": {
+          "type": "array",
+          "items": { "type": "number", "exclusiveMinimum": 0 },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "waveHeight": { "type": "number", "minimum": 0 },
+        "waveFreq": { "type": "number", "minimum": 0 }
+      }
+    },
+    "checkpoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["y", "halfWidth", "height"],
+        "properties": {
+          "x": { "type": "number" },
+          "y": { "type": "number" },
+          "z": { "type": "number" },
+          "halfWidth": { "type": "number", "exclusiveMinimum": 0 },
+          "height": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    },
+    "aiSpline": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "number" },
+        "minItems": 3,
+        "maxItems": 3
+      },
+      "minItems": 2
+    },
+    "starts": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "number" },
+        "minItems": 3,
+        "maxItems": 3
+      },
+      "minItems": 1
+    },
+    "pickups": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "number" },
+        "minItems": 3,
+        "maxItems": 3
+      }
+    }
+  }
+}
