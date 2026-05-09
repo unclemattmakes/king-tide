@@ -71,7 +71,7 @@ const BIKE_DIMPLE_R = 1.6
 const BIKE_DIMPLE_DEPTH = 0.32
 /** Squared cull radius for the vertex-stage dimple. exp(-r²/R²) is below
  * 1e-7 outside ~6σ, so we can skip the exp entirely past this distance. */
-const BIKE_DIMPLE_CULL_R_SQ = (BIKE_DIMPLE_R * 6) * (BIKE_DIMPLE_R * 6)
+const BIKE_DIMPLE_CULL_R_SQ = BIKE_DIMPLE_R * 6 * (BIKE_DIMPLE_R * 6)
 /** Speed (m/s) at which the wake stripe just starts to appear. */
 const WAKE_SPEED_LOW = 1.5
 /** Speed (m/s) at which the wake is at full strength. */
