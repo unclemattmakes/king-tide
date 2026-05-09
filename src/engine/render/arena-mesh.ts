@@ -16,6 +16,8 @@ export function createIslandMesh(): THREE.Object3D {
     [sideMat, beachMat, sideMat], // [side, top, bottom]
   )
   cyl.position.y = ISLAND_TOP_Y - ISLAND_HEIGHT / 2
+  cyl.castShadow = true
+  cyl.receiveShadow = true
   root.add(cyl)
 
   // Subtle radial grid on top so motion is readable

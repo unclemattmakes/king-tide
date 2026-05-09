@@ -652,15 +652,19 @@ async function boot() {
     // and keep the water shader's sun-direction uniform in sync. The sun
     // makes a full 360° azimuth rotation while bobbing in elevation
     // between ~30°..70° over SUN_CYCLE_SECONDS, so over a 1–3 lap race
-    // the sun-glow on backlit waves visibly drifts across the scene
-    // (the most perceptible effect — we don't render shadows, so the
-    // shading direction matters mostly for the water shader).
+    // the sun-glow on backlit waves visibly drifts across the scene.
+    //
+    // The sun light is positioned along the computed direction *from the
+    // player*, with `sun.target` set to the player. This keeps the shadow
+    // camera's orthographic frustum (configured in createScene) centered
+    // on the bike so shadows stay crisp wherever the track wanders, while
+    // still feeding the water shader the right directional vector.
     //
     // Driven by the deterministic wave-field clock (`waveField.time`) so
     // a replay or rollback would put the sun back where it was.
     {
       const SUN_CYCLE_SECONDS = 360 // 6 minutes per full rotation
-      const SUN_RADIUS = 110
+      const SUN_DISTANCE = 220 // far enough to act directional; > shadow.camera.far/2 OK
       const t = waveField.time
       const phase = (t / SUN_CYCLE_SECONDS) * Math.PI * 2
       // Elevation: 30°..70°, full rise+fall once per cycle. Phase offset
@@ -671,12 +675,19 @@ async function boot() {
       // position) and rotates a full 360° per cycle.
       const azimuth = (45 * Math.PI) / 180 + phase
       const cosE = Math.cos(elev)
+      const dirX = cosE * Math.cos(azimuth)
+      const dirY = Math.sin(elev)
+      const dirZ = cosE * Math.sin(azimuth)
+      const followX = state.playerSnapshot?.position.x ?? 0
+      const followZ = state.playerSnapshot?.position.z ?? 0
       sun.position.set(
-        SUN_RADIUS * cosE * Math.cos(azimuth),
-        SUN_RADIUS * Math.sin(elev),
-        SUN_RADIUS * cosE * Math.sin(azimuth),
+        followX + dirX * SUN_DISTANCE,
+        dirY * SUN_DISTANCE,
+        followZ + dirZ * SUN_DISTANCE,
       )
-      waterMesh.setSunDirection(sun.position.x, sun.position.y, sun.position.z)
+      sun.target.position.set(followX, 0, followZ)
+      sun.target.updateMatrixWorld()
+      waterMesh.setSunDirection(dirX, dirY, dirZ)
     }
     bikeRender()
     trailRender(camera)

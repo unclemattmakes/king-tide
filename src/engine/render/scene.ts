@@ -32,7 +32,24 @@ export function createScene(): {
   scene.add(new THREE.HemisphereLight(0xa6c8e8, 0x223040, 0.85))
   const sun = new THREE.DirectionalLight(0xfff2dc, 1.4)
   sun.position.set(50, 70, 70) // matches sky's uSunDir roughly; animated over time by sunCycleSystem
+  // Shadow map: orthographic frustum sized to follow the player (main.ts
+  // re-positions sun + target each frame). ±90 m covers the visible play
+  // area at any reasonable elevation; 2048² gives ~9 cm/texel — crisp
+  // enough for bike + prop shadows without tanking GPU cost.
+  sun.castShadow = true
+  sun.shadow.mapSize.set(2048, 2048)
+  sun.shadow.camera.near = 1
+  sun.shadow.camera.far = 500
+  sun.shadow.camera.left = -90
+  sun.shadow.camera.right = 90
+  sun.shadow.camera.top = 90
+  sun.shadow.camera.bottom = -90
+  sun.shadow.bias = -0.0004
+  sun.shadow.normalBias = 0.05
   scene.add(sun)
+  // Target must be in the scene for its world matrix to update when
+  // main.ts moves it to track the player.
+  scene.add(sun.target)
 
   return { scene, camera, sun }
 }

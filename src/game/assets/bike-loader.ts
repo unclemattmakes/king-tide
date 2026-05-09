@@ -152,10 +152,18 @@ export function cloneLoadedBike(loaded: LoadedBike, opts?: { tintLivery?: number
 
   // Hide collider proxies — they were exported only so headless
   // builders can reason about extras; the visual scene shouldn't
-  // render their gizmo geometry.
+  // render their gizmo geometry. Visible meshes are flagged as
+  // shadow casters + receivers so bikes drop a shadow on terrain
+  // and self-shade against each other on the grid.
   root.traverse((obj) => {
     if (obj.userData?.kind === 'collider' || obj.userData?.kind === 'socket') {
       obj.visible = false
+      return
+    }
+    const mesh = obj as THREE.Mesh
+    if (mesh.isMesh) {
+      mesh.castShadow = true
+      mesh.receiveShadow = true
     }
   })
 

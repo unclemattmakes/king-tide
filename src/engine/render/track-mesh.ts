@@ -68,17 +68,23 @@ function createGateMesh(cp: Checkpoint): GateMesh {
 
   const left = new THREE.Mesh(pillarGeom, pillarMat.clone())
   left.position.set(-cp.halfWidth, cp.height / 2, 0)
+  left.castShadow = true
+  left.receiveShadow = true
   root.add(left)
   recolorables.push(left)
 
   const right = new THREE.Mesh(pillarGeom, pillarMat.clone())
   right.position.set(cp.halfWidth, cp.height / 2, 0)
+  right.castShadow = true
+  right.receiveShadow = true
   root.add(right)
   recolorables.push(right)
 
   const barGeom = new THREE.BoxGeometry(cp.halfWidth * 2, 0.8, 0.4)
   const bar = new THREE.Mesh(barGeom, pillarMat.clone())
   bar.position.set(0, cp.height + 0.4, 0)
+  bar.castShadow = true
+  bar.receiveShadow = true
   root.add(bar)
   recolorables.push(bar)
 

@@ -35,6 +35,13 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
       inst.quaternion.set(p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w)
       inst.scale.set(Math.max(0.01, p.size.x), Math.max(0.01, p.size.y), Math.max(0.01, p.size.z))
       inst.userData.kind = 'prop'
+      inst.traverse((obj) => {
+        const mesh = obj as THREE.Mesh
+        if (mesh.isMesh) {
+          mesh.castShadow = true
+          mesh.receiveShadow = true
+        }
+      })
       group.add(inst)
       continue
     }
@@ -50,8 +57,8 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
     const mesh = new THREE.Mesh(geom, mat)
     mesh.position.set(p.position.x, p.position.y, p.position.z)
     mesh.quaternion.set(p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w)
-    mesh.castShadow = false
-    mesh.receiveShadow = false
+    mesh.castShadow = true
+    mesh.receiveShadow = true
     mesh.userData.kind = 'prop'
     group.add(mesh)
   }

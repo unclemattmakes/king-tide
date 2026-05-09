@@ -29,6 +29,8 @@ export function createRampMesh(): THREE.Object3D {
     ),
     [sideMat, sideMat, topMat, sideMat, sideMat, sideMat], // [+X, -X, +Y, -Y, +Z, -Z]
   )
+  slab.castShadow = true
+  slab.receiveShadow = true
   root.add(slab)
 
   // Chevron stripes painted on the top face: thin black bars across the
@@ -45,6 +47,7 @@ export function createRampMesh(): THREE.Object3D {
       RAMP_HALF_EXTENTS.y, // sit on the top face
       -RAMP_HALF_EXTENTS.z + spacing * (i + 1),
     )
+    stripe.receiveShadow = true
     root.add(stripe)
   }
 
