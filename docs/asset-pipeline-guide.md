@@ -116,11 +116,13 @@ scripts regenerate the placeholders from scratch.
 
 #### Edit-in-context
 
-Kit objects are laid out in their **assembled-bike positions** in the
-.blend so you can see parts in context while editing — chassis at the
-centre, fairing on top, fork at the nose, thruster at the tail. Fairing
-and fork variants are parked at ±X offsets so they're visible side-by-
-side. The prop kit is laid out as a row along +X.
+Kit objects are laid out at their **exact assembled-bike positions**
+in the .blend so the kit reads as a fully-built bike on open — chassis
+at the centre, fairing on top, fork at the nose, thruster at the tail.
+Variants overlap their primary (all three fairings sit on top of the
+chassis; both forks live at the nose); hide the ones you don't care
+about in the outliner if you need to see only the active variant. The
+prop kit is laid out as a row along +X.
 
 The viewport position of an object in the kit is **layout-only**.
 `tools/blender/lib_loader.append_objects` resets each appended object's
