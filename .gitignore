@@ -6,6 +6,10 @@ dist/
 .DS_Store
 Thumbs.db
 
+# vitepress
+docs-site/.vitepress/cache/
+docs-site/.vitepress/dist/
+
 # tests
 test-results/
 playwright-report/

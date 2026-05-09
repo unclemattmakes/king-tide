@@ -19,16 +19,30 @@ Authoring convention (matters because the builder relies on it):
               positions instances.
   Blender +Z = up. Maps to three +Y (up).
 
-Named objects produced (all at origin, all materials prefixed
-``mat_kit_bike_*`` so the renamer in build_bike.py can find them):
+Named objects produced (materials prefixed ``mat_kit_bike_*`` so the
+renamer in build_bike.py can find them). Each part's *mesh data* is
+authored origin-centred; the **object transform** places parts at
+their exact assembled-bike positions so authors see a fully-built
+bike when opening the kit. Variants overlap their primary (both forks
+at the nose, all fairings on top of the chassis); hide the ones you
+don't care about in the outliner. The transform is reset on append
+(see ``lib_loader.append_objects``), so kit-file positions are purely
+an authoring convenience — only mesh edits ride through to the build.
 
-  chassis_base       — 1x1x1 cube; builder scales per spec.
-  fairing_bare       — minimal flat fairing (low + thin).
-  fairing_swept      — wedge with the front edge tilted down.
+  chassis_base       — 1x1x1 cube; builder scales per spec. Centered
+                       on the bike's chassis volume.
+  fairing_bare       — minimal flat fairing (low + thin); on top of
+                       the chassis.
+  fairing_swept      — wedge with the front edge tilted down. Same
+                       on-top-of-chassis position as fairing_bare.
   fairing_full       — bulkier box that wraps more of the chassis.
-  thruster_unit      — short cylinder along Blender +Y (bike-length).
-  fork_single        — single vertical column.
+                       Same position as the other fairings.
+  thruster_unit      — short cylinder along Blender +Y (bike-length);
+                       at the bike's tail (+Y), centreline. Builder
+                       duplicates per spec.thrusterCount.
+  fork_single        — single vertical column; at the bike's nose (-Y).
   fork_dual          — two parallel vertical columns (joined mesh).
+                       Same position as fork_single.
   fin_marker         — small cone, builder places at chassis nose (-Y)
                        with a livery-colored material. Restores the
                        visual "this end is forward" cue the procedural
@@ -47,6 +61,13 @@ import bpy
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+# Blender runs this script via ``--python`` with the parent dir off
+# sys.path, so import via the package path rooted at REPO_ROOT.
+from tools.blender.mounts import add_mount  # noqa: E402
+
 OUTPUT_PATH = os.path.join(REPO_ROOT, "tools", "blender", "lib", "bike_parts.blend")
 
 
@@ -217,6 +238,81 @@ def make_fork_dual(material: bpy.types.Material) -> bpy.types.Object:
     return obj
 
 
+def lay_out_in_context() -> None:
+    """Place each kit part at its **exact** assembled-bike position so
+    the kit reads as a fully-built bike when opened. Only the object
+    transform is moved; mesh data is untouched. ``lib_loader.append_
+    objects`` resets the transform on append, so these positions are
+    purely an authoring convenience.
+
+    The layout mirrors the placement logic in ``build_bike.py`` using
+    representative geometry numbers from ``specs/bikes/scout.json``
+    (W=0.6, L=2.5, H=0.4). **Variants overlap their primary** — both
+    forks live at the same nose position; all three fairings sit on
+    top of the chassis. Hide the variants you don't care about in the
+    outliner if you need to see only the active one."""
+    W, L, H = 0.6, 2.5, 0.4
+    nose_y = -L * 0.5 + 0.1
+    tail_y = L * 0.5 - 0.15
+
+    fairing_pos = (0.0, 0.0, H + 0.15)
+    fork_pos = (0.0, nose_y, H * 0.4)
+
+    placements: dict[str, tuple[float, float, float]] = {
+        "chassis_base": (0.0, 0.0, H * 0.5),
+        "fairing_bare": fairing_pos,
+        "fairing_swept": fairing_pos,
+        "fairing_full": fairing_pos,
+        # Single thruster_unit at the centreline — build_bike.py
+        # duplicates and offsets per spec.thrusterCount/Spacing.
+        "thruster_unit": (0.0, tail_y, H * 0.35),
+        "fork_single": fork_pos,
+        "fork_dual": fork_pos,
+        "fin_marker": (0.0, -L * 0.5 + 0.05, H + 0.35),
+        "tail_marker": (0.0, L * 0.5 - 0.05, H + 0.05),
+    }
+
+    # Match build_bike.py: chassis is a unit cube the builder scales to
+    # (W, L, H) at build time. Author-time we apply the same scale to
+    # the kit object so the visual silhouette reads as a real bike.
+    # The build resets all kit transforms on append, so this is layout-
+    # only — the mesh is still a 1m cube.
+    obj_scales: dict[str, tuple[float, float, float]] = {
+        "chassis_base": (W, L, H),
+    }
+
+    for name, loc in placements.items():
+        obj = bpy.data.objects.get(name)
+        if obj is None:
+            continue
+        obj.location = loc
+        if name in obj_scales:
+            obj.scale = obj_scales[name]
+
+    # Mount empties on the chassis. Positions are in chassis-LOCAL
+    # space (unit cube spanning ±0.5 along each axis). At build time
+    # the chassis is scaled by (W, L, H) and lifted by H/2, so a
+    # mount at chassis-local (lx, ly, lz) ends up at world
+    # (W*lx, L*ly, H*lz + H/2). The values below were chosen to
+    # reproduce the world positions that ``build_bike.py`` previously
+    # hardcoded for the scout bike (W=0.6, L=2.5, H=0.4):
+    #
+    #   mount_fairing  →  world (0,    0,     H+0.15) = (0,    0,    0.55)
+    #   mount_fork     →  world (0,   -L/2+0.1, H*0.4) = (0, -1.15, 0.16)
+    #   mount_fin      →  world (0,   -L/2+0.05, H+0.35) = (0, -1.20, 0.75)
+    #   mount_tail     →  world (0,    L/2-0.05, H+0.05) = (0,  1.20, 0.45)
+    #
+    # Behaviour change vs. the previous baked math: world positions
+    # now scale strictly with chassis dims. Old code mixed scaled
+    # (H*0.4) and absolute (H+0.15) terms, so non-scout bikes drift
+    # by a few millimetres. Authors can re-tune any mount in the kit.
+    chassis = bpy.data.objects["chassis_base"]
+    add_mount(chassis, "fairing", (0.0, 0.0, 0.875))
+    add_mount(chassis, "fork", (0.0, -0.46, -0.1))
+    add_mount(chassis, "fin", (0.0, -0.48, 1.375))
+    add_mount(chassis, "tail", (0.0, 0.48, 0.625))
+
+
 def main() -> None:
     print(f"[seed-bike-kit] writing {OUTPUT_PATH}")
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
@@ -238,6 +334,8 @@ def main() -> None:
     make_fork_dual(fork_mat)
     make_fin_marker(fin_mat)
     make_tail_marker(tail_mat)
+
+    lay_out_in_context()
 
     bpy.ops.wm.save_as_mainfile(filepath=OUTPUT_PATH)
     print(
