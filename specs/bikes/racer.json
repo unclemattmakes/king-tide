@@ -1,0 +1,28 @@
+{
+  "$schema": "../_schema/bike.json",
+  "id": "racer",
+  "displayName": "Racer",
+  "geometry": {
+    "chassisLength": 2.5,
+    "chassisWidth": 0.6,
+    "chassisHeight": 0.4,
+    "fairingStyle": "swept",
+    "thrusterCount": 2,
+    "thrusterSpacing": 0.4,
+    "fork": "single"
+  },
+  "physics": {
+    "massKg": 120,
+    "topSpeedMps": 28,
+    "hoverHeight": 1.2
+  },
+  "appearance": {
+    "liveryColor": "#ff7733",
+    "metalColor": "#222428",
+    "glowColor": "#ffaa55",
+    "glowIntensity": 1.4
+  },
+  "rider": {
+    "seatOffset": [0, 0.55, -0.1]
+  }
+}

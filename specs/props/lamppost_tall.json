@@ -1,0 +1,16 @@
+{
+  "$schema": "../_schema/prop.json",
+  "id": "lamppost_tall",
+  "displayName": "Tall Lamppost",
+  "category": "lamppost",
+  "geometry": {
+    "kitPart": "lamppost",
+    "scale": [1, 1, 1.5],
+    "tint": "#202428"
+  },
+  "collider": {
+    "shape": "cylinder",
+    "radius": 0.2,
+    "height": 6
+  }
+}

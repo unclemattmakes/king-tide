@@ -109,7 +109,8 @@ its `kind` and other props are set. That's the template.
 
 `File → Save As… → tracks-src/<your-track>.blend`. Don't save into the
 repo as `calibration.blend` — that's reserved for the smoke-test fixture
-and is rebuilt by `tools/build_calibration_scene.py`.
+and is rebuilt from `specs/tracks/calibration.json` by `pnpm gen:tracks`
+(driven by [`tools/blender/build_track.py`](../tools/blender/build_track.py)).
 
 ### 3. Build your layout
 
@@ -287,10 +288,11 @@ safety floor and water surface will catch them.
 
 ## See also
 
-- [`tools/build_calibration_scene.py`](../tools/build_calibration_scene.py)
-  — the fixture builder. Recreates `tracks-src/calibration.blend` from
-  scratch; useful as a code reference for what each metadata setup
-  looks like programmatically.
+- [`specs/tracks/calibration.json`](../specs/tracks/calibration.json)
+  + [`tools/blender/build_track.py`](../tools/blender/build_track.py)
+  — the spec-driven fixture builder. Run `pnpm gen:tracks` to rebuild
+  `tracks-src/calibration.blend` and the GLB. Replaces the legacy
+  `tools/build_calibration_scene.py` (deleted in 2026-05).
 - [`tools/export_track.py`](../tools/export_track.py) — the export +
   validation script.
 - [`src/game/tracks/glb-loader.ts`](../src/game/tracks/glb-loader.ts)

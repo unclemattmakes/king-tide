@@ -1,0 +1,23 @@
+{
+  "$schema": "../_schema/track.json",
+  "id": "calibration",
+  "displayName": "Calibration",
+  "surface": {
+    "size": [12, 18]
+  },
+  "water": {
+    "center": [0, 12, 0],
+    "extents": [40, 40, 4],
+    "waveHeight": 1.0,
+    "waveFreq": 0.5
+  },
+  "checkpoints": [
+    { "y": -6, "halfWidth": 4, "height": 2 },
+    { "y": -2, "halfWidth": 4, "height": 2 },
+    { "y": 2, "halfWidth": 4, "height": 2 },
+    { "y": 6, "halfWidth": 4, "height": 2 }
+  ],
+  "aiSpline": [[0, -8, 0.5], [0, -4, 0.5], [0, 0, 0.5], [0, 4, 0.5], [0, 8, 0.5]],
+  "starts": [[-1, -10, 0.5], [1, -10, 0.5]],
+  "pickups": [[0, 0, 1.0]]
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "../_schema/prop.json",
+  "id": "pylon_orange",
+  "displayName": "Orange Pylon",
+  "category": "pylon",
+  "geometry": {
+    "kitPart": "pylon",
+    "scale": [1, 1, 1],
+    "tint": "#ff7733"
+  },
+  "collider": {
+    "shape": "cylinder",
+    "radius": 0.6,
+    "height": 1.5
+  }
+}

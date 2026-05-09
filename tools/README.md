@@ -1,50 +1,111 @@
-# Track authoring tools
+# Asset pipeline tools
 
-Blender Python scripts for the track import/export pipeline. Run with Blender 5.x.
+Headless Blender + Node scripts that turn JSON specs into runtime
+GLBs. Bikes, props, and tracks share the framework in
+[`tools/blender/`](./blender); the higher-level driver is
+[`tools/blender/run.mjs`](./blender/run.mjs), surfaced as `pnpm gen:*`
+scripts.
 
-> **Most authors should read [`docs/blender-pipeline-guide.md`](../docs/blender-pipeline-guide.md) instead** — it's the end-to-end walkthrough. This file is just the script reference.
+> **End-to-end walkthrough:**
+> [`docs/asset-pipeline-guide.md`](../docs/asset-pipeline-guide.md)
+> (forthcoming) — for the design rationale see
+> [`docs/asset-pipeline-plan.md`](../docs/asset-pipeline-plan.md). The
+> track-specific authoring guide remains
+> [`docs/blender-pipeline-guide.md`](../docs/blender-pipeline-guide.md).
 
 ## One-time setup
 
-Put `blender` on PATH (Windows: typically `C:\Program Files\Blender Foundation\Blender 5.1\blender.exe`; macOS: `/Applications/Blender.app/Contents/MacOS/Blender`). The pipeline guide has full setup details.
+Put `blender` on PATH (Windows: typically
+`C:\Program Files\Blender Foundation\Blender 5.1\blender.exe`; macOS:
+`/Applications/Blender.app/Contents/MacOS/Blender`). The pipeline
+guide has full setup details. Override via `BLENDER_EXE`.
 
-## Build the calibration scene
-
-The calibration scene is the reference scene containing exactly one of every metadata object kind. It's both a smoke test for the import/export pipeline and a template for new tracks.
-
-```bash
-blender --background --python tools/build_calibration_scene.py
-```
-
-This writes `tracks-src/calibration.blend`. The .blend is committed to the repo, so you only need to re-run this if you've edited the build script.
-
-## Export a track to glTF
-
-After authoring (or building) a `.blend`, export it:
+## Generate everything
 
 ```bash
-blender --background tracks-src/calibration.blend --python tools/export_track.py
+pnpm gen:all          # bikes + props + tracks, then writes manifest.json
+pnpm gen:bikes        # specs/bikes/*.json     → public/assets/bikes/*.glb
+pnpm gen:props        # specs/props/*.json     → public/assets/props/*.glb
+pnpm gen:tracks       # specs/tracks/*.json    → public/assets/tracks/*.glb (+ tracks-src/<id>.blend)
+pnpm gen:manifest     # rebuild manifest.json from existing GLBs (no Blender)
 ```
 
-Output goes to `public/assets/tracks/<basename>.glb` by default. Override with `HOVERBIKE_OUTPUT`:
+Each spec is validated against its JSON Schema in `specs/_schema/`
+before Blender starts. Any builder failure aborts the run with a
+non-zero exit code.
+
+## Layout
+
+```
+tools/
+├── README.md                    ← this file
+├── export_track.py              ← KEEP — track-specific glTF exporter (validates + bakes spline)
+├── snapshot_lagoon.mjs          ← KEEP — captures procedural Lagoon Loop as JSON
+└── blender/                     ← shared headless pipeline
+    ├── __init__.py              ← package marker
+    ├── common.py                ← reset_scene, read_spec, export_glb, validate_required_kinds
+    ├── lib_loader.py            ← append_objects from kit .blends
+    ├── sockets.py               ← socket-empty creation + validation
+    ├── colliders.py             ← primitive collider helpers
+    ├── inspect_glb.mjs          ← node script — dumps a GLB's nodes + extras
+    ├── run.mjs                  ← Node CLI — wraps `blender --background` per spec
+    ├── seed_bike_kit.py         ← (re)build tools/blender/lib/bike_parts.blend
+    ├── seed_prop_kit.py         ← (re)build tools/blender/lib/prop_kit.blend
+    ├── build_bike.py            ← spec → bike GLB (chassis + fairing + thrusters + sockets + collider)
+    ├── build_prop.py            ← spec → prop GLB
+    ├── build_track.py           ← spec → tracks-src/<id>.blend → GLB (replaces build_calibration_scene.py)
+    └── lib/                     ← committed kit .blend files (source art)
+        ├── bike_parts.blend
+        └── prop_kit.blend
+```
+
+## Spec → GLB contract
+
+The runtime resolves nodes by their glTF `extras.kind` tag. The
+builders all use the helpers in `tools/blender/common.py` to apply
+those extras consistently.
+
+| `kind` | Where written | Required co-extras |
+|---|---|---|
+| `bike` | `bike_root` empty | `bike_id`, `mass_kg`, `top_speed_mps`, `hover_height` |
+| `prop` | `prop_root` empty | `prop_id`, `category` |
+| `socket` | `socket_<slot>` empty | `slot` |
+| `collider` | `collider_*` empty | `shape` (+ `half_extents` \| `radius` \| `height`) |
+| `track` | track-surface meshes | — |
+| `water` | water-volume empty | `wave_height`, `wave_freq` |
+| `checkpoint` | `cp_NN` empty | `index`, `half_width`, `height` |
+| `ai_spline` | NURBS curve | `branch` (+ `points` baked at export time) |
+| `pickup_spawn` | `pickup_*` empty | — |
+| `start` | `start_NN` empty | `index` |
+
+## Track exporter (still relevant)
+
+`tools/export_track.py` is the track-specific exporter. `build_track.py`
+runs it internally after constructing the scene from a spec. To
+export an already-authored `.blend` directly (e.g. after editing in
+Blender by hand):
 
 ```bash
 HOVERBIKE_OUTPUT=public/assets/tracks/my-track.glb \
   blender --background tracks-src/my-track.blend --python tools/export_track.py
 ```
 
-## What the exporter does
+## What the track exporter validates
 
-Beyond the validation listed below, the exporter also **bakes any NURBS curve named `ai_spline_*` into a flat point array** stored on the same node's `extras.points` (since glTF doesn't carry curve geometry natively). Authors keep editing the curve in Blender; the exported .glb gets the sampled points.
+- Each object whose name matches a convention pattern (e.g. `cp_*`,
+  `water_volume_*`) must carry a `kind` custom property that matches
+  the convention.
+- Checkpoint indices (`cp_00`, `cp_01`, ...) must be contiguous from
+  0 and each checkpoint must declare `half_width` and `height`.
+- The scene must contain `ai_spline_main`, and its baked points array
+  must be non-empty.
 
-## What the exporter validates
-
-- Each object whose name matches a convention pattern (e.g. `cp_*`, `water_volume_*`) must carry a `kind` custom property that matches the convention.
-- Checkpoint indices (`cp_00`, `cp_01`, ...) must be contiguous from 0 and each checkpoint must declare `half_width` and `height`.
-- The scene must contain `ai_spline_main`, and its baked points array must be non-empty.
-
-If validation fails, the script prints the offending objects and exits non-zero.
+The bike and prop builders run their own kind/socket validators in
+`build_<category>.py`.
 
 ## Conventions
 
-See [`docs/blender-conventions.md`](../docs/blender-conventions.md) for the at-a-glance reference card, or [`docs/blender-pipeline-guide.md`](../docs/blender-pipeline-guide.md) for the full guide.
+See [`docs/blender-conventions.md`](../docs/blender-conventions.md)
+for the at-a-glance reference card, or
+[`docs/blender-pipeline-guide.md`](../docs/blender-pipeline-guide.md)
+for the full track-author guide.

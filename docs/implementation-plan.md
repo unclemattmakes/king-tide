@@ -89,8 +89,11 @@ hoverbike/
 │   └── ui/                        # HUD, menus (vanilla DOM)
 ├── tools/
 │   ├── export_track.py            # Blender → glTF with metadata (legacy all-in-glb)
-│   ├── build_calibration_scene.py # rebuild calibration.blend from script
-│   └── snapshot_lagoon.mjs        # generate lagoon-edit.json from procedural Lagoon
+│   ├── snapshot_lagoon.mjs        # generate lagoon-edit.json from procedural Lagoon
+│   └── blender/                   # spec-driven asset pipeline (bikes, props, tracks)
+│       ├── run.mjs                # CLI: pnpm gen:bikes / gen:props / gen:tracks / gen:all
+│       ├── build_{bike,prop,track}.py
+│       └── lib/{bike_parts,prop_kit}.blend
 ├── tracks-src/
 │   ├── calibration.blend          # one of every metadata object — pipeline reference
 │   └── README.md

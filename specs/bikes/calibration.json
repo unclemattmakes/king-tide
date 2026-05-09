@@ -1,0 +1,28 @@
+{
+  "$schema": "../_schema/bike.json",
+  "id": "calibration",
+  "displayName": "Calibration Bike",
+  "geometry": {
+    "chassisLength": 2.5,
+    "chassisWidth": 0.6,
+    "chassisHeight": 0.4,
+    "fairingStyle": "bare",
+    "thrusterCount": 1,
+    "thrusterSpacing": 0,
+    "fork": "single"
+  },
+  "physics": {
+    "massKg": 120,
+    "topSpeedMps": 28,
+    "hoverHeight": 1.2
+  },
+  "appearance": {
+    "liveryColor": "#888888",
+    "metalColor": "#444444",
+    "glowColor": "#ffffff",
+    "glowIntensity": 1.0
+  },
+  "rider": {
+    "seatOffset": [0, 0.55, -0.1]
+  }
+}

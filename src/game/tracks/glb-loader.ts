@@ -17,9 +17,10 @@ import type { Checkpoint, Track } from './types'
  * `export_yup=True`; Three.js + this project's Track type are also Y-up.
  * Translations and rotations therefore round-trip without a basis change.
  *
- * Sister tools — see tools/build_calibration_scene.py + tools/export_track.py
- * for the authoring-side conventions. The exporter bakes NURBS curves into
- * `extras.points` (flat [x0,y0,z0,...]) since glTF doesn't carry curves.
+ * Sister tools — see tools/blender/build_track.py (spec-driven scene
+ * builder) + tools/export_track.py (validating exporter that bakes
+ * NURBS curves into `extras.points` since glTF doesn't carry curves)
+ * for the authoring-side conventions.
  */
 
 type GltfPrimitiveExtras = {
@@ -31,6 +32,10 @@ type GltfPrimitiveExtras = {
   points?: number[]
   wave_height?: number
   wave_freq?: number
+  // Bike / prop / collider / socket extras — open-ended since the
+  // headless builders also emit shape-specific keys (half_extents,
+  // slot, mass_kg, etc.). Test code reads these directly.
+  [k: string]: unknown
 }
 
 type GltfNode = {

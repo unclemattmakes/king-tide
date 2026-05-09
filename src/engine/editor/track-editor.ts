@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import { buildPropGeometry } from '@/engine/render/props-geometry'
 import type { Vec3 } from '@/engine/sim/physics/vec'
+import type { PropManifestEntry } from '@/game/assets/manifest'
 import { nearestT, pointAtT, sampleCatmullRom, tangentAtT } from '@/game/tracks/catmull-rom'
 import { trackToJson } from '@/game/tracks/json-loader'
 import type { BoostPad, Checkpoint, Prop, PropType, Track } from '@/game/tracks/types'
@@ -48,6 +49,10 @@ export type EditorOptions = {
   renderer: THREE.WebGLRenderer
   domEl: HTMLElement
   track: Track
+  /** Available asset-prop manifest entries. Surfaces a +Asset placement
+   *  dropdown that drops `{ type: 'asset', assetId }` props the runtime
+   *  later loads from `public/assets/props/<assetId>.glb`. */
+  propAssets?: PropManifestEntry[]
 }
 
 export type EditorHandle = {
@@ -67,6 +72,7 @@ type PlaceTool =
   | 'cylinder'
   | 'pipe'
   | 'halfpipe'
+  | 'asset'
 
 type EntitySel =
   | { kind: 'gate'; index: number }
@@ -84,6 +90,7 @@ const PROP_LABELS: Record<PropType, string> = {
   cylinder: 'Cylinder',
   pipe: 'Pipe',
   halfpipe: 'Half Pipe',
+  asset: 'Asset',
 }
 
 export function installTrackEditor(opts: EditorOptions): EditorHandle {
@@ -126,6 +133,10 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   let mode: GizmoMode = 'translate'
   let placeTool: PlaceTool = 'none'
   let sel: EntitySel = null
+
+  // Manifest-driven asset props for the +Asset placer.
+  const propAssets: PropManifestEntry[] = opts.propAssets ?? []
+  let pickedAssetId: string = propAssets[0]?.id ?? ''
 
   // ── Undo stack ──────────────────────────────────────────────────────────
   // Snapshots of the draft are pushed before every "commit-worthy" mutation
@@ -670,6 +681,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
            ${placeBtn('pipe', '+ Pipe')}
            ${placeBtn('halfpipe', '+ Half Pipe')}
          </div>
+         ${assetSectionHtml()}
        </div>`,
       `<div style="display:flex;flex-direction:column;gap:6px">
          <div style="color:#9bb">Mode (W / E / R)</div>
@@ -701,6 +713,23 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   function placeBtn(t: PlaceTool, label: string): string {
     const on = t === placeTool
     return `<button type="button" data-place="${t}" style="background:${on ? '#a73' : '#234'};color:${on ? '#fff' : '#dde'};border:1px solid ${on ? '#fc8' : '#456'};padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit">${label}</button>`
+  }
+
+  function assetSectionHtml(): string {
+    if (propAssets.length === 0) {
+      return `<div style="color:#778;font-size:10px;margin-top:4px">No prop assets — run <code>pnpm gen:props</code></div>`
+    }
+    const opts = propAssets
+      .map(
+        (a) =>
+          `<option value="${escapeHtml(a.id)}"${a.id === pickedAssetId ? ' selected' : ''}>${escapeHtml(a.displayName)}</option>`,
+      )
+      .join('')
+    return `<div style="color:#9bb;margin-top:4px">Assets</div>
+       <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+         <select id="ed-asset-pick" style="background:#234;color:#dde;border:1px solid #456;padding:3px 4px;border-radius:3px;font:inherit;flex:1;min-width:0">${opts}</select>
+         ${placeBtn('asset', '+ Place')}
+       </div>`
   }
   function modeBtn(m: GizmoMode, label: string): string {
     const on = m === mode
@@ -875,6 +904,12 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
         setSel(parseKey(k))
       })
     })
+    const assetSelect = root.querySelector<HTMLSelectElement>('#ed-asset-pick')
+    if (assetSelect) {
+      assetSelect.addEventListener('change', () => {
+        pickedAssetId = assetSelect.value
+      })
+    }
     root.querySelector('#ed-save')?.addEventListener('click', () => {
       void save()
     })
@@ -988,6 +1023,18 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
         position: { x: hit.x, y: dropY, z: hit.z },
         rotation: { x: 0, y: 0, z: 0, w: 1 },
         size: defaultSize,
+      })
+      sel = { kind: 'prop', index: draft.props.length - 1 }
+    } else if (t === 'asset') {
+      if (!pickedAssetId) return
+      // Asset props use `size` as a uniform-ish scale (1,1,1 = native size).
+      // The runtime applies it to the cloned GLB and to the collider dims.
+      draft.props.push({
+        type: 'asset',
+        assetId: pickedAssetId,
+        position: { x: hit.x, y: 0, z: hit.z },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        size: { x: 1, y: 1, z: 1 },
       })
       sel = { kind: 'prop', index: draft.props.length - 1 }
     } else if (t === 'spline') {
@@ -1367,15 +1414,14 @@ const PROP_DEFAULT_COLORS: Record<PropType, number> = {
   cylinder: 0x9999bb,
   pipe: 0x99ccdd,
   halfpipe: 0xaadddd,
+  asset: 0x88ccff,
 }
 
 function makePropHelper(p: Prop, selected: boolean): THREE.Group {
   const g = new THREE.Group()
   g.position.set(p.position.x, p.position.y, p.position.z)
   g.quaternion.set(p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w)
-  const baseColor = p.color
-    ? new THREE.Color(p.color).getHex()
-    : PROP_DEFAULT_COLORS[p.type]
+  const baseColor = p.color ? new THREE.Color(p.color).getHex() : PROP_DEFAULT_COLORS[p.type]
   const selColor = 0xffff66
   const mat = new THREE.MeshLambertMaterial({
     color: selected ? selColor : baseColor,
@@ -1383,7 +1429,17 @@ function makePropHelper(p: Prop, selected: boolean): THREE.Group {
     opacity: 0.85,
     side: THREE.DoubleSide,
   })
-  const geom = buildPropGeometry(p.type, p.size)
+  // Asset props don't have parametric geometry; their `size` is a scale
+  // applied to the runtime-loaded GLB. Editor shows a translucent
+  // placeholder box scaled by `size` so users can position them.
+  const geom =
+    p.type === 'asset'
+      ? new THREE.BoxGeometry(
+          Math.max(0.1, p.size.x * 2),
+          Math.max(0.1, p.size.y * 2),
+          Math.max(0.1, p.size.z * 2),
+        )
+      : buildPropGeometry(p.type, p.size)
   const mesh = new THREE.Mesh(geom, mat)
   g.add(mesh)
   // A wireframe overlay helps gauge size against the gizmo.
