@@ -34,15 +34,20 @@ type Refs = {
 
 export async function bootBikeViewer(parent: HTMLElement, opts: ViewerOpts): Promise<void> {
   const manifest = await loadManifest()
-  if (manifest.bikes.length === 0) {
+  // Empty-check + a local that the compiler tracks as defined (the
+  // length check alone doesn't narrow ``manifest.bikes[0]`` under
+  // ``noUncheckedIndexedAccess``).
+  const firstBike = manifest.bikes[0]
+  if (!firstBike) {
     parent.innerHTML =
       '<div style="padding:24px;color:#fff;font-family:system-ui">No bikes in the manifest. ' +
       'Run <code>pnpm gen:bikes</code> first.</div>'
     return
   }
 
-  const initialId = opts.bikeId ?? manifest.bikes[0].id
-  let current = manifest.bikes.find((b) => b.id === initialId) ?? manifest.bikes[0]
+  const initialId = opts.bikeId ?? firstBike.id
+  let current: BikeManifestEntry =
+    manifest.bikes.find((b) => b.id === initialId) ?? firstBike
 
   // ── Scene + renderer ─────────────────────────────────────────────────────
   const { renderer, backend, canvas, resize } = await createRenderer(parent)
