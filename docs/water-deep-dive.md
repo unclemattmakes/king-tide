@@ -2,13 +2,13 @@
 
 Reference for the SoT-style ocean upgrade. Original research compiled 2026-05-09; first wave of changes shipped as M9.29 (see [status.md](./status.md)).
 
-## Current state (M9.29)
+## Current state (M9.29 → M9.31)
 
-Render: horizontal-displacement Gerstner (per-wave Q + global scale uniform), two-color scatter blend (deep teal ↔ cyan-green, view-modulated), Jacobian-onset foam (slope OR `qSum` near fold, height-gated), noise-modulated roughness for SoT-style "wandering glints", existing analytic normal + Fresnel sky-tint emissive + wake-displacement V-stripe.
+Render: horizontal-displacement Gerstner (per-wave Q + global scale uniform), two-color scatter blend (deep teal ↔ cyan-green, view + sun-direction modulated, with sun-glow emissive on backlit crests), stateless foam accumulator (lingering whitecaps via 4 time-shifted Gerstner samples, no render targets needed), noise-modulated roughness for SoT-style "wandering glints", existing analytic normal + Fresnel sky-tint emissive + wake-displacement V-stripe.
 
 Sim: vertical-only Gerstner (unchanged — the simpler formulation with no inverse solve required), multi-probe buoyancy (4 sample points around the bike's footprint, pitch/roll from differential heights), unchanged underwater dive + buoyancy + asymmetric drag.
 
-Debug knobs: `?water=classic` (full upgrade off), `?wire=1` (orthogonal wireframe), `?steep=N` (0..1.5), `__waterSteepness(n)` console hook.
+Debug knobs: `?water=classic` (full upgrade off — original colors, vertical-only Gerstner, original roughness, original foam, no sun-glow, no foam history), `?wire=1` (orthogonal wireframe), `?steep=N` (0..1.5), `__waterSteepness(n)` console hook.
 
 ## Why these particular changes
 
@@ -35,15 +35,14 @@ The reference is Sea of Thieves. Rare's published pipeline (SIGGRAPH 2018 *The T
 
 ### Possible next wins
 
-- **[M] Foam accumulator (lingering whitecaps).** Persistent screen- or world-space foam texture: each frame `accumulate += stepFoam · k`, decay `*= 0.96`. Currently foam is instant — when a wave passes, the foam vanishes with it. With an accumulator, whitecaps linger after the wave moves on, which is most of the SoT foam character. Requires a render-target ping-pong.
 - **[S] Ship-wake-into-wave-field feedback loop polish.** We already have it (trailing riders feel the lead's wake — see M9.26 entry in status.md), but the current wake is hand-authored as a Kelvin V. Atlas writes the actual ship-wake displacement *into* the wave field with a small height-field render target. Worth comparing if our V-stripe ever feels too "stamped."
-- **[S] Sun-direction-driven scatter.** The current view-modulated scatter approximates sub-surface scattering without a sun direction. Threading the directional light's vector through to the water shader would let us brighten waves *backlit by the sun* (the strongest SoT effect), not just grazing-view ones.
 - **[S] Chop amplitude bump.** Default chop amplitudes (`0.5, 0.34, 0.22, 0.12`) feel modest at racing speeds — bumping by ~30% would give more dramatic short-wavelength pinching with the new horizontal Gerstner. Affects buoyancy too — playtest before committing.
+- **[S] Animated sun direction / day-night cycle.** `sunDirUniform` is already a uniform; just needs a clock to drive it for sunrise→noon→sunset variation in scatter color, sun-glow direction, and shadowing.
 
 ### Heavier lifts (defer until needed)
 
 - **[L] SSR (or planar bike reflection).** Real screen-space reflections in a TSL node material are non-trivial; planar reflection of just the bikes onto the water plane is much cheaper and gives 80% of the perceptual gain. SoT uses SSR + cubemap blended by Fresnel. Biggest "AAA water" tell, but most expensive to land.
-- **[L] FFT migration.** Only worth it if we ever want crest-folding-with-overhang, multi-cascade scale separation (200m swell + 50m chop + 10m ripple as separate cascades), or genuine Jacobian-folding foam. None of which we need for an arcade racer.
+- **[L] FFT migration.** Only worth it if we ever want crest-folding-with-overhang, multi-cascade scale separation (200m swell + 50m chop + 10m ripple as separate cascades), or genuine Jacobian-folding foam. None of which we need for an arcade racer — and the stateless foam accumulator (M9.31) closes most of the perceptual gap with FFT-based foam already.
 - **[M] Shoreline / depth foam.** Depth-buffer comparison: foam intensity = `1 − smoothstep(0, foamWidth, sceneDepth − waterDepth)`, animated with a noise scroll. Becomes relevant if we add islands the bike races near.
 
 ## Tuning knobs at a glance

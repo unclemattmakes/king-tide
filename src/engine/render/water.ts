@@ -442,6 +442,51 @@ export function createWaterMesh(
   const totalDydx = vertexHeight.y.add(vertexBike.y)
   const totalDydz = vertexHeight.z.add(vertexBike.z)
 
+  // Foam accumulator (stateless, no render targets needed).
+  //
+  // The trick: waves are deterministic functions of (x, z, t), so "did this
+  // position have a crest 0.5s ago?" reduces to evaluating gerstner(x, z,
+  // t-0.5). We sample the foam-trigger signal (slopeFoam OR foldFoam) at
+  // N time steps in the recent past, decay each by exp(-i·dt·k), and take
+  // the max. The result: foam appears AT a crest and lingers behind for
+  // ~1s as the wave moves on, instead of vanishing the moment the crest
+  // passes. That's what gives ocean foam its "trail" character — the
+  // crest moves on but the whitecap doesn't.
+  //
+  // This is the cheap stateless cousin of SoT's persistent foam texture
+  // (which uses an FFT Jacobian + render-target ping-pong). For our
+  // arcade racer, 4 time samples × 6 waves × 2 trig per call ≈ 96 trig
+  // per vertex on top of the existing 24 — well within the per-frame
+  // budget on any real GPU.
+  //
+  // Wakes are NOT included in the time history (would need historical
+  // bike positions). Wake foam stays current-time only via bikeFoam below.
+  // Off in classic mode for clean A/B comparison.
+  const foamAccumulator = Fn(([x, z, t]: [unknown, unknown, unknown]) => {
+    const xN = x as ReturnType<typeof float>
+    const zN = z as ReturnType<typeof float>
+    const tN = t as ReturnType<typeof float>
+    const maxFoam = float(0).toVar()
+    const NUM_SAMPLES = 4
+    const DT = 0.25
+    const DECAY_RATE = 1.5 // half-life ≈ 0.46s
+    for (let i = 0; i < NUM_SAMPLES; i++) {
+      const dt = i * DT
+      const tShifted = tN.sub(float(dt))
+      const h = gerstnerHeight(xN, zN, tShifted)
+      const d = gerstnerDisp(xN, zN, tShifted)
+      // h.y, h.z are dy/dx, dy/dz at this time sample.
+      const slope = sqrt(h.y.mul(h.y).add(h.z.mul(h.z)))
+      const slopeFoam = smoothstep(float(0.4), float(0.9), slope)
+      const foldFoam = smoothstep(float(0.12), float(0.35), d.z)
+      const localFoam = max(slopeFoam, foldFoam)
+      const decay = float(Math.exp(-dt * DECAY_RATE))
+      maxFoam.assign(max(maxFoam, localFoam.mul(decay)))
+    }
+    return maxFoam
+  })
+  const vertexFoamAccum = isClassic ? float(0) : foamAccumulator(worldX, worldZ, tNode)
+
   // positionNode is in mesh-local space; the mesh translation
   // (mesh.position.x/z = camera XZ) carries the vertex out to world.
   // Adding the Gerstner horizontal displacement to positionLocal.x/z applies
@@ -453,12 +498,14 @@ export function createWaterMesh(
     positionLocal.z.add(vertexDisp.y),
   )
 
-  // Forward height + gradient + qSum to fragment via varyings. The framework
-  // marks these as vertex-stage and inserts the interpolated reads.
+  // Forward height + gradient + qSum + accumulated foam to fragment via
+  // varyings. The framework marks these as vertex-stage and inserts the
+  // interpolated reads.
   const heightFrag = varying(totalHeight)
   const dydx = varying(totalDydx)
   const dydz = varying(totalDydz)
   const qSumFrag = varying(vertexDisp.z)
+  const foamAccumFrag = varying(vertexFoamAccum)
 
   // GPU Gems eq.13 normal: (-Σdy/dx, 1 - Σ Q·k·A·sin, -Σdy/dz).
   // The wake's gradients are folded into dydx/dydz; the wake has no
@@ -528,28 +575,28 @@ export function createWaterMesh(
     ? vec3(0, 0, 0)
     : scatterColor.mul(sunBackscatter.mul(heightFactor).mul(float(0.6)))
 
-  // Wave-driven foam — physically motivated as "where waves are breaking",
-  // not "where waves are tall". Two triggers, both about steepness/folding:
+  // Wave-driven foam.
   //
-  //   slopeFoam   = steep heightfield slope (the wave face is climbing fast
-  //                 enough to be near-breaking)
-  //   foldFoam    = qSum approaching 1 (GPU Gems Jacobian-onset signal —
-  //                 the Gerstner sum is folding the surface onto itself,
-  //                 which is what physically produces whitecaps)
+  // v2 mode: pre-baked at the vertex stage by the foam accumulator (see
+  // comment block above the Fn definition) — sampled at 4 time steps in
+  // the recent past, decayed exponentially, max-reduced. Foam lingers
+  // ~1s behind passing crests, which is what gives ocean foam its trail
+  // character. We DON'T apply a height gate to the accumulator output:
+  // foam should persist on what's now a trough if it WAS a crest a
+  // moment ago.
   //
-  // We take their max (either condition triggers), then gate by height so
-  // troughs don't foam even if they happen to be momentarily steep. Note:
-  // height is a GATE, not a driver — a tall but flat swell crest reads as
-  // "smooth water" not "foamy whitecap", which is what real ocean does.
-  //
-  // Classic mode: qSum ≡ 0, so foldFoam is 0 and only slopeFoam contributes.
+  // Classic mode: original physically-motivated foam (slope OR Jacobian
+  // onset, height-gated) — no time accumulation, but still fixes the
+  // pre-M9.29 height-driven trigger. The qSum branch evaluates to 0 when
+  // steepness=0 so only slopeFoam contributes here.
   const slopeMag = sqrt(dydx.mul(dydx).add(dydz.mul(dydz)))
-  const slopeFoam = smoothstep(float(0.4), float(0.9), slopeMag)
-  const foldFoam = isClassic
-    ? float(0)
-    : smoothstep(float(0.12), float(0.35), qSumFrag)
-  const heightGate = smoothstep(float(-0.4), float(0.3), heightFrag)
-  const waveFoam = max(slopeFoam, foldFoam).mul(heightGate)
+  const waveFoam = isClassic
+    ? (() => {
+        const slopeFoam = smoothstep(float(0.4), float(0.9), slopeMag)
+        const heightGate = smoothstep(float(-0.4), float(0.3), heightFrag)
+        return slopeFoam.mul(heightGate)
+      })()
+    : foamAccumFrag
 
   // Per-bike foam: hull ring + V-wake stripe. We wrap the per-bike work in
   // a Fn() so we can use If(...) to early-out for slots whose bike is far

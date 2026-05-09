@@ -199,9 +199,51 @@ disconnect for a hoverbike skimming the surface. If steepness goes much
 past 1, consider a Newton iteration on the CPU side to recover the rest
 position from world XZ.
 
-Not yet shipped: foam accumulator (lingering whitecaps in a render
-target), SSR / planar reflection of bikes. See [docs/water-deep-dive.md](./water-deep-dive.md) for the full
+Not yet shipped: SSR / planar reflection of bikes. See [docs/water-deep-dive.md](./water-deep-dive.md) for the full
 research and prioritization.
+
+### Water — sun-direction backscatter (M9.30)
+Threads the directional light vector through to the water shader as a
+uniform `sunDirUniform` (matches scene.ts's sun position 50,70,70
+normalized; a future day/night cycle can animate it). Two related
+additions:
+
+1. **Scatter blend bumped by sun alignment.** `scatterAmount` now stacks
+   `sunBackscatter = pow(max(0, dot(line-of-sight, toward-sun)), 2)` on
+   top of the existing view-angle scatter. Camera looking toward the sun
+   → tall waves between camera and sun bump scatter further toward
+   cyan-green.
+2. **`sunGlow` emissive.** The unmistakable SoT "lit-from-behind"
+   wave glow. `scatterColor · sunBackscatter · heightFactor · 0.6`,
+   added to `emissiveNode` alongside the existing fresnel + sparkle
+   terms. Off in classic mode for clean A/B.
+
+Hoisted `heightFactor` out of the IIFE so both the scatter blend and
+the new sun-glow share it. No physics change.
+
+### Water — stateless foam accumulator (M9.31)
+Foam now lingers ~1s behind passing crests instead of vanishing the
+moment the wave moves on — the "trail" character of real ocean foam.
+Implementation: since waves are deterministic functions of `(x, z, t)`,
+"did this position have a crest 0.5s ago?" reduces to evaluating
+`gerstner(x, z, t-0.5)`. The `foamAccumulator` Fn samples 4 time steps
+in the recent past (`Δt = 0.25s`, total window = 1s), computes
+`max(slopeFoam, foldFoam)` at each, decays exponentially
+(`exp(-Δt · 1.5)` → half-life ≈ 0.46s), and reduces to the max. The
+result is forwarded to the fragment as a single varying.
+
+This is the cheap stateless cousin of SoT's persistent foam texture
+(which uses an FFT Jacobian + render-target ping-pong). Per-vertex cost
+goes from 24 trig to ~120 trig (4 extra Gerstner-pair samples) — well
+within the per-frame budget on any real GPU. Wakes are NOT included in
+the time history (would need historical bike positions); wake foam
+stays current-time only via the existing `bikeFoam` path.
+
+Side effect: the height gate on wave foam is dropped in v2 mode — foam
+is allowed to persist on what's now a trough if it WAS a crest a moment
+ago. This is physically correct (foam is water particles, not the wave
+shape) and visually closes the gap with SoT considerably. Classic mode
+keeps the height-gated current-time foam for clean A/B.
 
 ### e2e runs headed by default (M9.26)
 The GPU water shader is happy on real hardware but the headless WebGL2
