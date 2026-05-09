@@ -105,13 +105,14 @@ async function boot() {
   const chase = createChaseCamera(camera)
 
   const waveField = createWaveField(defaultWaves())
-  // Subdivision count drives vertex-stage Gerstner cost. 96 is plenty
-  // once the wave gradient is analytic (per-vertex, interpolated to
-  // fragment); see notes in `engine/render/water.ts`. The earlier
-  // CPU-driven version needed 256 to keep wave detail crisp, then was
-  // reverted (commit 19caac6) for FPS — the GPU shader gets equivalent
-  // smoothness at the lower vertex count.
-  const waterMesh = createWaterMesh(waveField, { size: 800, subdivisions: 96 })
+  // Camera-locked water: the mesh follows the camera XZ so its dense
+  // vertex region always covers the visible patch. Size shrinks from the
+  // legacy 800 m world plane to 240 m centered on the camera (= 120 m
+  // out in any direction, plenty of horizon). Subdivisions stay at the
+  // shader default (384), giving ≈ 0.625 m vertex spacing — the 4 m wake
+  // wavelength resolves at ~6.4 verts per crest, so ridges read as real
+  // geometry instead of single-vertex shimmer.
+  const waterMesh = createWaterMesh(waveField)
   scene.add(waterMesh.mesh)
 
   const params = new URLSearchParams(window.location.search)
@@ -526,7 +527,7 @@ async function boot() {
       }
     }
 
-    waterMesh.tick(gatherBikeImpacts())
+    waterMesh.tick(gatherBikeImpacts(), { x: camera.position.x, z: camera.position.z })
     bikeRender()
     trailRender(camera)
     pickupRender(dt)

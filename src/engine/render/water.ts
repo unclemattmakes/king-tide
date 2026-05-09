@@ -11,6 +11,7 @@ import {
   fract,
   If,
   max,
+  min,
   mix,
   normalize,
   positionLocal,
@@ -29,14 +30,12 @@ import { MeshStandardNodeMaterial } from 'three/webgpu'
 import {
   WAKE_BASE_WIDTH,
   WAKE_DISP_AMP,
-  WAKE_DISP_OMEGA,
-  WAKE_DISP_WAVELENGTH,
+  WAKE_EDGE_BELL_HALFWIDTH,
   WAKE_HALF_ANGLE_TAN,
   WAKE_LONG_DECAY,
   WAKE_LONG_RAMP,
   WAKE_SPEED_HIGH,
   WAKE_SPEED_LOW,
-  WAKE_TRANSVERSE_FEATHER,
   type WaveFieldState,
 } from '@/engine/sim/water/wave-field'
 
@@ -60,10 +59,12 @@ export type WaterMesh = {
   mesh: THREE.Mesh
   /**
    * Updates the time uniform from the field clock and pushes per-bike
-   * impact data into the shader's uniform array. Pass an empty / omitted
+   * impact data into the shader's uniform array. Pass `originXZ` (the
+   * camera's XZ position) to lock the mesh to the camera so vertex
+   * density tracks the visible region. Pass an empty / omitted impacts
    * array (e.g. in editor mode) to leave the surface clean.
    */
-  tick(impacts?: readonly BikeImpact[]): void
+  tick(impacts?: readonly BikeImpact[], originXZ?: { x: number; z: number }): void
   dispose(): void
 }
 
@@ -91,9 +92,6 @@ const BIKE_DIMPLE_CULL_R_SQ = (BIKE_DIMPLE_R * 6) * (BIKE_DIMPLE_R * 6)
  * out cheaply or headless WebGL2 (SwiftShader) tanks to ~3 fps. */
 const WAKE_DISP_CULL_R = 40.0
 const WAKE_DISP_CULL_R_SQ = WAKE_DISP_CULL_R * WAKE_DISP_CULL_R
-/** Wave-number for the wake's longitudinal oscillation. Mirror of the sim
- * constant. */
-const WAKE_K = (2 * Math.PI) / WAKE_DISP_WAVELENGTH
 
 const INACTIVE_FAR = 1e6
 
@@ -129,13 +127,14 @@ export function createWaterMesh(
   opts?: { size?: number; subdivisions?: number },
 ): WaterMesh {
   const size = opts?.size ?? 240
-  // 192 subs × 240 m ≈ 1.25 m vertex spacing — fine enough to resolve the
-  // 3.5 m wake oscillation (Nyquist ≈ 1.75 m) with comfortable headroom,
-  // and the wake's transverse-feathered ridges show up as crisp ripples
-  // rather than slightly aliased blocks. The vertex math runs on the real
-  // GPU (we run e2e headed via playwright.config.ts), so the cost here is
-  // mostly memory + draw bandwidth.
-  const subs = opts?.subdivisions ?? 192
+  // 384 subs × 240 m ≈ 0.625 m vertex spacing. The mesh follows the
+  // camera (see `tick`'s `originXZ` arg + the meshOrigin uniform), so the
+  // 240 m of mesh stays centered on the visible patch instead of being
+  // anchored at world origin (with the player at z ≈ 90 sitting near the
+  // edge). Combined with the higher subdivision, the 4 m wake wavelength
+  // gets ~6.4 verts per crest — ridges show up as actual geometry, not a
+  // single-vertex shimmer. 384² ≈ 147 k verts is trivial on a real GPU.
+  const subs = opts?.subdivisions ?? 384
 
   const geom = new THREE.PlaneGeometry(size, size, subs, subs)
   geom.rotateX(-Math.PI / 2)
@@ -144,6 +143,15 @@ export function createWaterMesh(
   // (rather than wall-clock) keeps rendering deterministic and matches
   // buoyancy exactly across rewinds / fixed-step runs.
   const tNode = uniform(field.time)
+
+  // World-XZ origin of the mesh — set by `tick(...)` to the camera's XZ
+  // each frame so the mesh follows the camera. The wave / wake math
+  // samples at WORLD coords (positionLocal + meshOrigin), so the surface
+  // stays continuous in world space even though the mesh slides under
+  // the camera. This keeps the dense-vertex region pinned to the visible
+  // area regardless of where the player has driven on the lagoon.
+  const meshOriginX = uniform(0)
+  const meshOriginZ = uniform(0)
 
   // Bike slot uniform array. Each vec4 = (px, pz, vx, vz). Inactive slots
   // are parked at INACTIVE_FAR so their Gaussian + wake fall off to zero.
@@ -269,9 +277,20 @@ export function createWaterMesh(
           const perp = abs(dx.mul(hatZ).sub(dz.mul(hatX)))
           const speedGate = smoothstep(float(WAKE_SPEED_LOW), float(WAKE_SPEED_HIGH), speed)
           const wakeWidth = behind.mul(WAKE_HALF_ANGLE_TAN).add(float(WAKE_BASE_WIDTH))
-          const transverse = float(1).sub(
-            smoothstep(wakeWidth, wakeWidth.add(float(WAKE_TRANSVERSE_FEATHER)), perp),
+          // Two-piece signed transverse profile (Kelvin-style V):
+          //   inside V (perp < wakeWidth):   -cos(π · perp / wakeWidth)
+          //                                   → -1 at axis (trough), +1 at edge (ridge)
+          //   outside V (perp >= wakeWidth): linear fade 1 → 0 over halfwidth
+          // Combined: `insidePart * fadeOut`. For perp <= wakeWidth, fadeOut=1
+          // so the cosine dominates. For perp > wakeWidth, insidePart clamps
+          // to +1 (cos(π) = -1, negated → 1) and fadeOut handles the falloff.
+          const insideArg = min(perp, wakeWidth).div(wakeWidth).mul(Math.PI)
+          const insidePart = cos(insideArg).negate()
+          const fadeOut = max(
+            float(0),
+            float(1).sub(max(float(0), perp.sub(wakeWidth)).div(float(WAKE_EDGE_BELL_HALFWIDTH))),
           )
+          const transverseSigned = insidePart.mul(fadeOut)
           const longRamp = float(1).sub(exp(behind.mul(-WAKE_LONG_RAMP)))
           const longDecay = exp(behind.mul(-WAKE_LONG_DECAY))
           // biome-ignore lint/suspicious/noExplicitAny: TSL UniformArrayElementNode lacks float-typing in TS
@@ -279,16 +298,26 @@ export function createWaterMesh(
           const amp = float(WAKE_DISP_AMP)
             .mul(weight)
             .mul(speedGate)
-            .mul(transverse)
             .mul(longRamp)
             .mul(longDecay)
-          const phase = behind.mul(WAKE_K).sub(tN.mul(WAKE_DISP_OMEGA))
-          const s = sin(phase)
-          const c = cos(phase)
-          y.addAssign(amp.mul(s))
-          const cosAmp = amp.mul(c)
-          dydx.addAssign(cosAmp.mul(hatX).mul(-WAKE_K))
-          dydz.addAssign(cosAmp.mul(hatZ).mul(-WAKE_K))
+          y.addAssign(amp.mul(transverseSigned))
+          // Approximate gradient: dominated by the perp direction (the V
+          // shape's slope). Use the inside-V slope as a uniform-ish
+          // approximation across the wake — visible shading on the V's
+          // inner trough wall, less accurate at the outer fade. Drops the
+          // longitudinal-decay cross-term (small effect at typical scale).
+          // ∂profile/∂perp ≈ (π / wakeWidth) · sin(π · perp / wakeWidth) inside V.
+          const dProfileDPerp = sin(insideArg).mul(float(Math.PI).div(wakeWidth))
+          // ∂perp/∂x = sign(dx·hatZ − dz·hatX) · hatZ. We don't have a
+          // built-in sign() — recover it as c / |c| where |c| = perp (with
+          // a small floor to avoid div-by-zero on-axis).
+          const c = dx.mul(hatZ).sub(dz.mul(hatX))
+          const signC = c.div(max(perp, float(0.0001)))
+          const dPerpDx = signC.mul(hatZ)
+          const dPerpDz = signC.mul(hatX).negate()
+          const ampDProfile = amp.mul(dProfileDPerp)
+          dydx.addAssign(ampDProfile.mul(dPerpDx))
+          dydz.addAssign(ampDProfile.mul(dPerpDz))
         })
       })
     }
@@ -297,19 +326,26 @@ export function createWaterMesh(
 
   // Vertex stage: ambient Gerstner waves + fused per-bike contribution
   // (hull dimple subtracts, wake adds — see `bikeSurfaceContrib` for the
-  // sign handling). We compute the gradient here too and forward it via
-  // `varying(...)` so the fragment can build the surface normal from
+  // sign handling). The mesh slides under the camera each frame, so we
+  // sample the wave/wake field at WORLD coords (`positionLocal + meshOrigin`)
+  // — that keeps the surface continuous in world space even as the mesh's
+  // local origin moves. We compute the gradient here too and forward it
+  // via `varying(...)` so the fragment can build the surface normal from
   // interpolated values instead of re-running the Gerstner sum per pixel
-  // (which would be several sin/cos per wave per fragment — fine on a real
-  // GPU but tanks the headless WebGL2 software fallback to single-digit
-  // fps). Per-vertex + interp is visually indistinguishable here because
-  // the mesh resolution is finer than the wave gradient.
-  const vertexWave = gerstner(positionLocal.x, positionLocal.z, tNode)
-  const vertexBike = bikeSurfaceContrib(positionLocal.x, positionLocal.z, tNode)
+  // (several sin/cos per wave per fragment is fine on a real GPU but tanks
+  // the headless WebGL2 software fallback to single-digit fps). Per-vertex
+  // + interp is visually indistinguishable here because the mesh
+  // resolution (≈ 0.6 m) is finer than the wave gradient.
+  const worldX = positionLocal.x.add(meshOriginX)
+  const worldZ = positionLocal.z.add(meshOriginZ)
+  const vertexWave = gerstner(worldX, worldZ, tNode)
+  const vertexBike = bikeSurfaceContrib(worldX, worldZ, tNode)
   const totalHeight = vertexWave.x.add(vertexBike.x)
   const totalDydx = vertexWave.y.add(vertexBike.y)
   const totalDydz = vertexWave.z.add(vertexBike.z)
 
+  // positionNode is in mesh-local space; the mesh translation
+  // (mesh.position.x/z = camera XZ) carries the vertex out to world.
   const positionNode = vec3(positionLocal.x, totalHeight, positionLocal.z)
 
   // Forward height + gradient to fragment via varyings. The framework
@@ -435,12 +471,40 @@ export function createWaterMesh(
   mat.emissiveNode = fresnelEmissive.add(sparkleEmissive)
   mat.opacityNode = float(0.78)
 
+  // Debug: ?water=wire renders the water mesh as wireframe so you can see
+  // the actual vertex displacement (vs. just shaded color). Useful when
+  // tuning the wake / dimple / wave amplitudes — turn it on, drive the
+  // bike, see the actual ridges in the geometry.
+  if (typeof window !== 'undefined') {
+    const q = new URLSearchParams(window.location.search)
+    if (q.get('water') === 'wire') {
+      mat.wireframe = true
+      mat.transparent = false
+      mat.opacityNode = float(1)
+    }
+  }
+
   const mesh = new THREE.Mesh(geom, mat as unknown as THREE.Material)
   mesh.name = 'water'
   mesh.position.y = 0
 
-  function tick(impacts?: readonly BikeImpact[]): void {
+  function tick(
+    impacts?: readonly BikeImpact[],
+    originXZ?: { x: number; z: number },
+  ): void {
     tNode.value = field.time
+    if (originXZ) {
+      // Snap to integer-meter grid so the mesh doesn't crawl under high-
+      // frequency camera jitter — keeps wave phase visually stable when
+      // the camera bobbles by < 1 m. The shader still samples world
+      // coords so larger camera moves slide the mesh smoothly.
+      const ox = Math.round(originXZ.x)
+      const oz = Math.round(originXZ.z)
+      meshOriginX.value = ox
+      meshOriginZ.value = oz
+      mesh.position.x = ox
+      mesh.position.z = oz
+    }
     for (let i = 0; i < MAX_BIKES; i++) {
       const slot = bikeSlots[i]!
       const im = impacts?.[i]

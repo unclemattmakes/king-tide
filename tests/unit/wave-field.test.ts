@@ -70,25 +70,31 @@ describe('wave field', () => {
     expect(s.ny).toBeGreaterThan(0)
   })
 
-  it('wake source displaces water behind a moving bike', () => {
+  it('wake forms a V with raised edges and a sunken middle', () => {
     // Empty wave field so we measure ONLY the wake contribution.
     const f = createWaveField([])
     f.wakes.push({ x: 0, z: 0, vx: 12, vz: 0, weight: 1 })
-    // Sample several points behind the bike (negative x) along its line.
-    // The wake oscillates in sign, so look at the absolute envelope.
-    let maxAbs = 0
-    for (let bx = -2; bx >= -30; bx -= 0.25) {
-      const y = sampleHeight(f, bx, 0)
-      maxAbs = Math.max(maxAbs, Math.abs(y))
-    }
-    expect(maxAbs).toBeGreaterThan(0.05)
+    // The V's right edge sits at z = behind * WAKE_HALF_ANGLE_TAN
+    // + WAKE_BASE_WIDTH, with the bike at origin moving +X.
+    const behind = 10
+    const wakeWidth = behind * 0.4 + 0.55 // = 4.55
+    const bx = -behind
 
-    // Sample WAY off to the side (perpendicular distance >> V boundary):
-    // wake should be effectively zero.
-    const ySide = sampleHeight(f, -10, 30)
+    // On the V edge: positive peak (the visible ridge).
+    const yEdge = sampleHeight(f, bx, wakeWidth)
+    expect(yEdge).toBeGreaterThan(0.3)
+
+    // On the bike's central axis (perp=0): trough — water is below
+    // ambient. This is what makes the wake feel like a real channel
+    // carved through the surface.
+    const yAxis = sampleHeight(f, bx, 0)
+    expect(yAxis).toBeLessThan(-0.3)
+
+    // WAY off to the side (perp >> wakeWidth + halfwidth): zero.
+    const ySide = sampleHeight(f, bx, 30)
     expect(Math.abs(ySide)).toBeLessThan(0.01)
 
-    // Sample IN FRONT of the bike (positive x = behind = 0): no wake.
+    // IN FRONT of the bike (behind = 0): no wake.
     const yFront = sampleHeight(f, 10, 0)
     expect(yFront).toBe(0)
   })
@@ -96,41 +102,42 @@ describe('wave field', () => {
   it('wake fades to zero at low speed', () => {
     const f = createWaveField([])
     f.wakes.push({ x: 0, z: 0, vx: 0.5, vz: 0, weight: 1 })
-    // Below WAKE_SPEED_LOW, wake function returns 0 entirely.
-    let maxAbs = 0
-    for (let bx = -1; bx >= -20; bx -= 0.5) {
-      maxAbs = Math.max(maxAbs, Math.abs(sampleHeight(f, bx, 0)))
-    }
-    expect(maxAbs).toBe(0)
+    // Below WAKE_SPEED_LOW, wake function returns 0 entirely. Sample
+    // both axis (would be trough) and edge (would be ridge).
+    const behind = 10
+    const wakeWidth = behind * 0.4 + 0.55
+    expect(sampleHeight(f, -behind, 0)).toBe(0)
+    expect(sampleHeight(f, -behind, wakeWidth)).toBe(0)
   })
 
   it('wake scales with weight', () => {
     const f = createWaveField([])
-    // Sample at same time + position with different weights — amplitude
-    // is linear in weight.
+    const behind = 10
+    const wakeWidth = behind * 0.4 + 0.55
     f.wakes = [{ x: 0, z: 0, vx: 12, vz: 0, weight: 1 }]
-    let peakFull = 0
-    for (let bx = -1; bx >= -20; bx -= 0.05) {
-      peakFull = Math.max(peakFull, Math.abs(sampleHeight(f, bx, 0)))
-    }
+    const edgeFull = sampleHeight(f, -behind, wakeWidth)
+    const axisFull = sampleHeight(f, -behind, 0)
     f.wakes = [{ x: 0, z: 0, vx: 12, vz: 0, weight: 0.5 }]
-    let peakHalf = 0
-    for (let bx = -1; bx >= -20; bx -= 0.05) {
-      peakHalf = Math.max(peakHalf, Math.abs(sampleHeight(f, bx, 0)))
-    }
-    expect(peakHalf).toBeCloseTo(peakFull * 0.5, 4)
+    const edgeHalf = sampleHeight(f, -behind, wakeWidth)
+    const axisHalf = sampleHeight(f, -behind, 0)
+    // Linear scaling on both the ridge peak and the trough.
+    expect(edgeHalf).toBeCloseTo(edgeFull * 0.5, 4)
+    expect(axisHalf).toBeCloseTo(axisFull * 0.5, 4)
   })
 
-  it('wake produces non-trivial slope (a real bump, not just color)', () => {
+  it('wake produces non-trivial slope between trough and ridge', () => {
     const f = createWaveField([])
     f.wakes.push({ x: 0, z: 0, vx: 12, vz: 0, weight: 1 })
-    // Walk along the wake axis and confirm the surface normal tilts
-    // somewhere — peak normal-X should exceed 0.05 (≈ 3°).
-    let maxNxAbs = 0
-    for (let bx = -1; bx >= -20; bx -= 0.05) {
-      const s = sampleSurface(f, bx, 0)
-      maxNxAbs = Math.max(maxNxAbs, Math.abs(s.nx))
+    // The V's slope is steepest somewhere between the central trough
+    // and the edge ridge. Sample the surface normal across the trough
+    // wall — at least one sample should tilt by ≥ 0.1 in nz.
+    const behind = 10
+    const wakeWidth = behind * 0.4 + 0.55
+    let maxAbs = 0
+    for (let z = 0.1; z < wakeWidth; z += 0.05) {
+      const s = sampleSurface(f, -behind, z)
+      maxAbs = Math.max(maxAbs, Math.abs(s.nz))
     }
-    expect(maxNxAbs).toBeGreaterThan(0.1)
+    expect(maxAbs).toBeGreaterThan(0.1)
   })
 })

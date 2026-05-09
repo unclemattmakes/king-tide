@@ -74,15 +74,9 @@ export type WaveFieldState = {
 // `src/engine/render/water.ts`. Any change here without a matching shader
 // change will desync visuals from buoyancy.
 
-/** Peak vertical displacement of the wake oscillation, meters. */
-export const WAKE_DISP_AMP = 0.32
-/** Wake wavelength (meters between crests along the wake's axis). */
-export const WAKE_DISP_WAVELENGTH = 3.5
-/** Wake angular frequency, rad/s. Chosen so phase is roughly stationary in
- * world space when the bike moves at ~8 m/s — wakes left at typical race
- * speed look "set" in the water rather than scrolling backward with the
- * bike. */
-export const WAKE_DISP_OMEGA = ((2 * Math.PI) / WAKE_DISP_WAVELENGTH) * 8
+/** Peak vertical displacement of the wake's ridge, meters. The wake
+ * appears as a real bump in the geometry, not just a foam stripe. */
+export const WAKE_DISP_AMP = 0.6
 /** Speed at which the wake starts to appear (m/s). */
 export const WAKE_SPEED_LOW = 1.5
 /** Speed at which the wake reaches full strength (m/s). */
@@ -91,17 +85,17 @@ export const WAKE_SPEED_HIGH = 8.0
 export const WAKE_HALF_ANGLE_TAN = 0.4
 /** Width of the V-wake at the bike before it widens behind, meters. */
 export const WAKE_BASE_WIDTH = 0.55
-/** Transverse feathering — softens the wake's outer edge across this many
- * meters past the V boundary. */
-export const WAKE_TRANSVERSE_FEATHER = 1.2
+/** Half-width of the amplitude bell that rides along each V edge, meters.
+ * The wake's height peaks AT the V boundary (real Kelvin-style diverging
+ * wave look) rather than uniformly across the inside of the V. Anything
+ * past this many meters from the boundary fades to zero. */
+export const WAKE_EDGE_BELL_HALFWIDTH = 0.7
 /** Longitudinal ramp-in (1 / meters). Gives the wake a soft start so it
  * doesn't punch up directly under the bike. */
 export const WAKE_LONG_RAMP = 0.6
 /** Longitudinal decay (1 / meters). Wake fades to ~e^-1 at 1/this distance
  * behind the bike. 0.04 → e-folds at ~25 m. */
 export const WAKE_LONG_DECAY = 0.04
-
-const WAKE_K = (2 * Math.PI) / WAKE_DISP_WAVELENGTH
 
 export function createWaveField(waves: Wave[]): WaveFieldState {
   return { waves, wakes: [], time: 0 }
@@ -112,16 +106,34 @@ export function advanceWaveField(field: WaveFieldState, dt: number): void {
 }
 
 /**
- * Wake displacement at (x, z) from a single source at time t. Returns 0 when
- * the source is in front, slow, or perpendicular to a non-V band.
+ * Wake displacement at (x, z) from a single source at time t. Returns 0
+ * when the source is in front of the sample point, slow, or off in
+ * perpendicular space.
  *
- * Mirrored bit-for-bit by the TSL shader's `wakeAt` block. Keep them in sync.
+ * Profile across the V (perp = perpendicular distance from the bike's
+ * heading axis):
+ *   - Inside the V (perp < wakeWidth): a half-cosine trough, going from
+ *     -AMP at perp=0 to +AMP at perp=wakeWidth. The water "channels"
+ *     down between the diverging wave arms.
+ *   - At the boundary (perp = wakeWidth): peak (+AMP), the wake's
+ *     visible ridge.
+ *   - Just outside (wakeWidth < perp < wakeWidth + EDGE_BELL_HALFWIDTH):
+ *     linear fade to 0.
+ *   - Beyond: 0.
+ *
+ * Static profile (no longitudinal sin) — the V follows the bike like a
+ * stable shape and just decays in amplitude with `behind`. Real wakes
+ * have transverse waves too, but for arcade clarity a clean Kelvin-style
+ * V reads better than oscillating ridges.
+ *
+ * Mirrored bit-for-bit by the TSL shader's bikeSurfaceContrib block —
+ * keep them in sync.
  */
 export function sampleWakeFromSource(
   src: WakeSource,
   x: number,
   z: number,
-  t: number,
+  _t: number,
 ): { y: number; dydx: number; dydz: number } {
   const speed = Math.hypot(src.vx, src.vz)
   if (speed < WAKE_SPEED_LOW || src.weight <= 0) {
@@ -138,25 +150,52 @@ export function sampleWakeFromSource(
 
   const speedGate = smoothstep(WAKE_SPEED_LOW, WAKE_SPEED_HIGH, speed)
   const wakeWidth = behind * WAKE_HALF_ANGLE_TAN + WAKE_BASE_WIDTH
-  // Transverse envelope: peak inside the V, fades over WAKE_TRANSVERSE_FEATHER
-  // past the boundary.
-  const transverse = 1 - smoothstep(wakeWidth, wakeWidth + WAKE_TRANSVERSE_FEATHER, perp)
+
+  // Two-piece signed profile across the V:
+  //   inside V:  -cos(π · perp / wakeWidth)         // -1..+1
+  //   outside V: 1 · max(0, 1 - (perp - wakeWidth) / halfwidth)  // fade 1→0
+  // Combined via min/max so it's branchless-friendly for the shader.
+  const insideArg = (Math.min(perp, wakeWidth) / wakeWidth) * Math.PI
+  const insidePart = -Math.cos(insideArg) // varies -1 (perp=0) → +1 (perp=wakeWidth)
+  const fadeOut = Math.max(
+    0,
+    1 - Math.max(0, perp - wakeWidth) / WAKE_EDGE_BELL_HALFWIDTH,
+  )
+  // For perp <= wakeWidth: insidePart∈[-1,1], fadeOut=1. profile = insidePart.
+  // For perp > wakeWidth:  insidePart=1 (clamped),  fadeOut∈[0,1]. profile = fadeOut.
+  const transverseSigned = insidePart * fadeOut
+
   const longRamp = 1 - Math.exp(-behind * WAKE_LONG_RAMP)
   const longDecay = Math.exp(-behind * WAKE_LONG_DECAY)
 
-  const amp = WAKE_DISP_AMP * speedGate * src.weight * transverse * longRamp * longDecay
-  const phase = WAKE_K * behind - WAKE_DISP_OMEGA * t
-  const s = Math.sin(phase)
-  const c = Math.cos(phase)
+  const amp = WAKE_DISP_AMP * speedGate * src.weight * longRamp * longDecay
+  const y = amp * transverseSigned
 
-  const y = amp * s
-  // Approximate gradient: dominated by sin(phase) variation; the slowly-
-  // varying envelope contributes a smaller cross-term we ignore. ∂phase/∂x
-  // = k · ∂behind/∂x = -k · hatX (and similarly for z) when behind > 0.
-  const dpdx = -WAKE_K * hatX
-  const dpdz = -WAKE_K * hatZ
-  const dydx = amp * c * dpdx
-  const dydz = amp * c * dpdz
+  // Analytic gradient — dominated by the perp direction (the V shape) and
+  // by the longitudinal decay (slow change with `behind`). The cross
+  // terms involving ∂(longRamp·longDecay)/∂behind are small relative to
+  // the perp slope at typical arcade scales; including them complicates
+  // the shader without a visible payoff.
+  //
+  // d transverseSigned / d perp:
+  //   inside V:  (π / wakeWidth) · sin(π · perp / wakeWidth)
+  //   in fade:   -1 / EDGE_BELL_HALFWIDTH
+  //   outside:   0
+  let dProfileDPerp: number
+  if (perp < wakeWidth) {
+    dProfileDPerp = (Math.PI / wakeWidth) * Math.sin(insideArg)
+  } else if (perp < wakeWidth + WAKE_EDGE_BELL_HALFWIDTH) {
+    dProfileDPerp = -1 / WAKE_EDGE_BELL_HALFWIDTH
+  } else {
+    dProfileDPerp = 0
+  }
+  // ∂perp/∂x = sign(c) · hatZ, where c = dx·hatZ − dz·hatX.
+  const c = dx * hatZ - dz * hatX
+  const signC = c >= 0 ? 1 : -1
+  const dPerpDx = signC * hatZ
+  const dPerpDz = -signC * hatX
+  const dydx = amp * dProfileDPerp * dPerpDx
+  const dydz = amp * dProfileDPerp * dPerpDz
   return { y, dydx, dydz }
 }
 
