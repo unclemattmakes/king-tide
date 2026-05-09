@@ -39,14 +39,31 @@ NAME_PATTERNS = [
 ]
 
 
+def is_object_visible(obj: bpy.types.Object) -> bool:
+    """True iff the object is visible in the active view layer.
+
+    Hidden objects (eye icon off, or in a hidden collection) are
+    skipped by validation, baking, and the GLB export so authors
+    can stage WIP or reference geometry without it leaking into the
+    game build.
+    """
+    try:
+        return bool(obj.visible_get())
+    except RuntimeError:
+        return False
+
+
 def bake_ai_splines() -> None:
-    """Sample every ai_spline_* curve into a flat [x0,y0,z0,...] custom
-    property on the same object. glTF doesn't carry NURBS curves natively,
-    so we bake the geometry into extras at export time. Authors keep
-    editing the curve in Blender; the exported .glb gets the points.
+    """Sample every visible ai_spline_* curve into a flat
+    [x0,y0,z0,...] custom property on the same object. glTF doesn't
+    carry NURBS curves natively, so we bake the geometry into extras
+    at export time. Authors keep editing the curve in Blender; the
+    exported .glb gets the points. Hidden curves are skipped.
     """
     for obj in list(bpy.data.objects):
         if not obj.name.startswith("ai_spline_") or obj.type != "CURVE":
+            continue
+        if not is_object_visible(obj):
             continue
         # `to_mesh` honours the curve's resolution_u and gives evaluated
         # vertices in object-local space. We then transform to world.
@@ -77,6 +94,8 @@ def validate_scene() -> list[str]:
     for obj in bpy.data.objects:
         kind = expected_kind(obj.name)
         if kind is None:
+            continue
+        if not is_object_visible(obj):
             continue
         if "kind" not in obj.keys():
             errors.append(f"{obj.name}: missing custom property 'kind'")
@@ -144,6 +163,11 @@ def main() -> None:
     # Make sure all objects export — Blender's glTF exporter only includes
     # selected/visible-collection-default depending on version. We force-export
     # the entire scene with extras.
+    # Visible-only export: hidden objects (eye icon off in the
+    # outliner, or in a hidden collection) are excluded. Mirrors the
+    # validation + bake filters above so an author can park WIP /
+    # reference geometry in the .blend without it bleeding into the
+    # game build.
     bpy.ops.export_scene.gltf(
         filepath=out,
         export_format="GLB",
@@ -151,7 +175,7 @@ def main() -> None:
         export_yup=True,
         export_apply=True,
         use_selection=False,
-        use_visible=False,
+        use_visible=True,
         use_renderable=False,
         use_active_collection=False,
         export_cameras=False,

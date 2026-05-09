@@ -560,6 +560,14 @@ in-app editor (`?track=<id>&edit=1`) edits the JSON live and saves via
 > **Authoring a new track?**
 > - Gameplay placement → [track-editor-guide.md](./track-editor-guide.md)
 > - Environment geometry → [blender-pipeline-guide.md](./blender-pipeline-guide.md)
+>
+> The Blender side now has a one-click **Export to Game** button (install
+> `tools/blender/hoverbike_addon.py` once). The button validates the
+> scene, writes the GLB, and on first export materialises a starter
+> JSON from the .blend's checkpoints / spline / pickups / start. The
+> in-app editor's panel has **Open…** and **New…** controls listing
+> every track in `public/tracks/` + `public/assets/tracks/`, served by
+> a dev-only `/__editor/list-tracks` endpoint.
 
 - ✅ **Track JSON format** at `tracks-src/calibration.json` analogue
   (canonical lives in `public/tracks/calibration.json`). Schema enforced

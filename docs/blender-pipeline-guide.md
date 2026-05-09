@@ -8,7 +8,8 @@ A track has two sources, edited in two different tools, joined at runtime:
   if you prefer.
 - **`public/assets/tracks/<id>.glb`** *(optional)* — environment geometry
   the bike collides with. Authored in **Blender**, exported with the
-  standard glTF exporter or the `tools/export_track.py` script.
+  one-click "Export to Game" addon (recommended) or the legacy
+  `tools/export_track.py` script.
 
 The JSON references the .glb via `environmentGlb`; at boot the runtime
 fetches both, registers the .glb's meshes as collidable terrain, and
@@ -23,25 +24,47 @@ If you're just trying to add a metadata kind to an existing legacy
 all-in-glb track, jump to the [Object kinds reference](#object-kinds-reference).
 If something errored mid-export, jump to [Troubleshooting](#troubleshooting).
 
-## TL;DR — the 30-second workflow
+## TL;DR — the 15-second workflow (with the addon)
+
+1. Install the addon **once**:
+   *Edit → Preferences → Add-ons → Install…* and pick
+   [`tools/blender/hoverbike_addon.py`](../tools/blender/hoverbike_addon.py).
+   Tick the checkbox to enable.
+2. Open or save your track as `tracks-src/<id>.blend` (the basename of
+   the file becomes the in-game track id).
+3. In the 3D viewport, press **N** → **Hoverbike** tab → **Export to
+   Game**. The addon validates the scene, writes
+   `public/assets/tracks/<id>.glb`, and on first export creates a
+   starter `public/tracks/<id>.json` from the .blend's checkpoints,
+   spline, pickups, and start.
+4. Playtest: in your browser, open
+   `http://localhost:5191/?track=<id>` (or use the **Copy Play URL**
+   button in the addon panel). The dev server is already aware of the
+   new track — no code change needed; the in-app editor's File menu
+   will list it on next reload.
+
+After the first export the JSON is the source of truth for gameplay
+placement. Re-exporting from Blender refreshes the GLB but **never
+overwrites** the JSON unless you Shift-click the button (or toggle
+*Overwrite JSON* in the operator's redo panel). That way edits made
+in the in-app editor — placing pickups, sliding gates along the
+spline, retuning water — survive subsequent Blender exports.
+
+## Headless / CI fallback
+
+The legacy script still works for scripted runs (CI, batch builds,
+no GUI):
 
 ```bash
-# 1. Author. Open the calibration scene as a starting template.
-"C:/Program Files/Blender Foundation/Blender 5.1/blender.exe" tracks-src/calibration.blend
-
-# 2. Save your track as a new .blend in tracks-src/
-#    (e.g. tracks-src/my-track.blend)
-
-# 3. Export. The script validates conventions; non-zero exit on any error.
 HOVERBIKE_OUTPUT=public/assets/tracks/my-track.glb \
   "C:/Program Files/Blender Foundation/Blender 5.1/blender.exe" \
   --background tracks-src/my-track.blend --python tools/export_track.py
-
-# 4. Wire it into the runtime (one line in src/main.ts — see below).
-
-# 5. Playtest:
-pnpm dev    # http://localhost:5191/?track=my-track
 ```
+
+The script does **not** create a starter JSON — that's an addon-only
+convenience. For batch builds the spec-driven pipeline
+(`pnpm gen:tracks`) is the right tool; it derives both the .blend and
+the JSON from `specs/tracks/<id>.json`.
 
 ## One-time setup
 
@@ -156,64 +179,42 @@ complete name-pattern + extras matrix.
 
 ### 4. Export
 
-```bash
-HOVERBIKE_OUTPUT=public/assets/tracks/my-track.glb \
-  "C:/Program Files/Blender Foundation/Blender 5.1/blender.exe" \
-  --background tracks-src/my-track.blend --python tools/export_track.py
-```
-
-If validation passes you'll see something like:
+In Blender, press **N** to open the sidebar, switch to the **Hoverbike**
+tab, and click **Export to Game**. The addon prints to Blender's info
+bar:
 
 ```
-[export] validating C:\...\my-track.blend
-[export] baked ai_spline_main: 49 sampled points
-[export] writing C:\...\public\assets\tracks\my-track.glb
-[export] done
+Exported → public/assets/tracks/my-track.glb (created public/tracks/my-track.json)
 ```
 
-If it fails the script prints the offending objects and exits non-zero —
-fix the .blend, re-run.
+If validation fails, each error appears as a red toast in Blender's
+status bar — fix the offending object and click again.
 
-### 5. Wire into the runtime
+The first export writes BOTH the GLB and a starter JSON. Subsequent
+exports rewrite only the GLB and preserve the JSON (so the in-app
+editor's saves are never blown away by a Blender re-export). To
+force-rewrite the JSON, **Shift-click** the Export button.
 
-The runtime currently has a hard-coded URL-param → track mapping in
-`src/main.ts`. To add `?track=my-track`, find the block that resolves
-the track id and add a branch:
+### 5. Playtest
 
-```ts
-const trackId =
-  rawTrack === 'cliffside'
-    ? 'cliffside'
-    : rawTrack === 'calibration'
-      ? 'calibration'
-      : rawTrack === 'my-track'
-        ? 'my-track'                    // ← new
-        : 'lagoon'
+The track is automatically discoverable — `src/main.ts` resolves any
+unknown `?track=<id>` against `public/tracks/<id>.json` first and
+`public/assets/tracks/<id>.glb` as a fallback. **No code change
+needed.**
 
-// …later, in the track-build switch:
-} else if (trackId === 'my-track') {
-  const loaded = await loadGlbTrackVisuals('/assets/tracks/my-track.glb')
-  scene.add(loaded.scene)
-  attachTrackColliders(loaded.scene, phys)
-  track = buildTrackFromGltf(loaded.parsedJson, {
-    id: 'my-track',
-    name: 'My Track',
-    lapsToFinish: 3,
-  })
-}
+```
+pnpm dev    # already running
+http://localhost:5191/?track=my-track
 ```
 
-Eventually we'll want a track registry so this is data-driven. For now,
-inline branches.
-
-### 6. Playtest
-
-```bash
-pnpm dev    # http://localhost:5191/?track=my-track
-```
+Or click **Copy Play URL** in the addon panel and paste it into your
+browser.
 
 Hit `T` to enable autoplay and watch the AI follow your spline. Use
-[Backspace] to respawn at start_00 if a bike gets stuck.
+[Backspace] to respawn at start_00 if a bike gets stuck. To tune
+gameplay placement (gates, pickup spawns) without re-opening Blender,
+switch into edit mode: `?track=my-track&edit=1` (or click **Open…**
+in the editor panel).
 
 ## Object kinds reference
 
@@ -235,6 +236,19 @@ Hit `T` to enable autoplay and watch the AI follow your spline. Use
   red tail light at -Z.
 - **Scale: 1 Blender unit = 1 metre.** Don't change scene units. Bikes
   are roughly 2.5m long.
+
+## Hidden objects are skipped
+
+Toggling the **eye icon** off in the outliner (or hiding a whole
+collection) excludes that object from the export entirely — GLB,
+validation, and JSON derivation all filter on `visible_get()`. This
+lets you park WIP geometry, alternate spline branches, or reference
+empties in a hidden collection without breaking the
+contiguous-checkpoint or single-`ai_spline_main` checks. Want it
+back? Toggle the eye on and re-export.
+
+(Render-only hide — the camera icon — does **not** affect this. The
+export always uses viewport visibility.)
 
 ## Known limitations
 

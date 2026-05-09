@@ -6,6 +6,7 @@ import { defineConfig, type Plugin } from 'vite'
 
 const REPO_ROOT = fileURLToPath(new URL('.', import.meta.url))
 const TRACKS_DIR = path.resolve(REPO_ROOT, 'public', 'tracks')
+const ASSET_TRACKS_DIR = path.resolve(REPO_ROOT, 'public', 'assets', 'tracks')
 
 /**
  * Dev-only POST endpoint for the in-app track editor. The editor sends
@@ -22,6 +23,45 @@ function trackEditorSavePlugin(): Plugin {
     name: 'hoverbike:track-editor-save',
     apply: 'serve',
     configureServer(server) {
+      // GET /__editor/list-tracks — returns every track the editor can
+      // open. JSONs in public/tracks/ are first-class (the editor edits
+      // their gameplay placement). GLBs in public/assets/tracks/ that
+      // don't yet have a JSON are listed as "glb-only" — opening one
+      // creates a starter draft from the GLB's metadata at edit time.
+      server.middlewares.use('/__editor/list-tracks', (req, res) => {
+        if (req.method !== 'GET') {
+          res.statusCode = 405
+          res.end('method not allowed')
+          return
+        }
+        try {
+          const jsonIds = new Set<string>()
+          const glbIds = new Set<string>()
+          if (fs.existsSync(TRACKS_DIR)) {
+            for (const f of fs.readdirSync(TRACKS_DIR)) {
+              if (f.endsWith('.json')) jsonIds.add(f.slice(0, -5))
+            }
+          }
+          if (fs.existsSync(ASSET_TRACKS_DIR)) {
+            for (const f of fs.readdirSync(ASSET_TRACKS_DIR)) {
+              if (f.endsWith('.glb')) glbIds.add(f.slice(0, -4))
+            }
+          }
+          const allIds = [...new Set([...jsonIds, ...glbIds])].sort()
+          const tracks = allIds.map((id) => ({
+            id,
+            kind: jsonIds.has(id) ? ('json' as const) : ('glb-only' as const),
+            hasGlb: glbIds.has(id),
+          }))
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ tracks }))
+        } catch (e) {
+          res.statusCode = 500
+          res.end(`list-tracks: ${(e as Error).message}`)
+        }
+      })
+
       server.middlewares.use('/__editor/save-track', (req, res) => {
         if (req.method !== 'POST') {
           res.statusCode = 405

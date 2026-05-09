@@ -664,7 +664,13 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
 
   function panelHtml(): string {
     return [
-      `<div style="font-weight:bold;color:#7fc7ff;font-size:13px">EDITOR · ${escapeHtml(draft.id)}</div>`,
+      `<div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+         <div style="font-weight:bold;color:#7fc7ff;font-size:13px">EDITOR · ${escapeHtml(draft.id)}</div>
+       </div>`,
+      `<div style="display:flex;gap:4px">
+         <button type="button" id="ed-open" style="flex:1;background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit">Open…</button>
+         <button type="button" id="ed-new" style="flex:1;background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit">New…</button>
+       </div>`,
       `<div style="display:flex;flex-direction:column;gap:6px">
          <div style="color:#9bb">Place</div>
          <div style="display:flex;flex-wrap:wrap;gap:4px">
@@ -918,6 +924,201 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       url.searchParams.delete('edit')
       window.location.href = url.toString()
     })
+    root.querySelector('#ed-open')?.addEventListener('click', () => {
+      void openTrackPicker()
+    })
+    root.querySelector('#ed-new')?.addEventListener('click', () => {
+      promptNewTrack()
+    })
+  }
+
+  /**
+   * Returns true if the editor has unsaved changes (the Save button has
+   * been clicked less recently than the most recent edit). We approximate
+   * "is dirty" by "any undo snapshot has been pushed since the last save"
+   * — close enough for an authoring tool and avoids deep-diffing the draft.
+   */
+  function isDirty(): boolean {
+    return undoStack.length > savedAtUndoDepth
+  }
+  let savedAtUndoDepth = 0
+
+  function confirmDiscard(action: string): boolean {
+    if (!isDirty()) return true
+    return window.confirm(
+      `You have unsaved changes. ${action} anyway?\n\nUnsaved changes will be lost.`,
+    )
+  }
+
+  /**
+   * Fetches /__editor/list-tracks and renders a modal listing every track
+   * the editor can open. Clicking a row navigates to that track in edit
+   * mode (full reload — the editor doesn't support in-place swap).
+   */
+  async function openTrackPicker(): Promise<void> {
+    const status = panel.querySelector<HTMLElement>('#ed-status')
+    if (status) {
+      status.textContent = 'Loading tracks…'
+      status.style.color = '#7a8'
+    }
+    let tracks: { id: string; kind: 'json' | 'glb-only'; hasGlb: boolean }[]
+    try {
+      const res = await fetch('/__editor/list-tracks')
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+      const body = (await res.json()) as {
+        tracks?: { id: string; kind: 'json' | 'glb-only'; hasGlb: boolean }[]
+      }
+      tracks = Array.isArray(body.tracks) ? body.tracks : []
+    } catch (e) {
+      if (status) {
+        status.textContent = `Open failed: ${(e as Error).message}`
+        status.style.color = '#f88'
+      }
+      return
+    }
+    if (status) status.textContent = ''
+    showTrackPickerModal(tracks)
+  }
+
+  function showTrackPickerModal(
+    tracks: { id: string; kind: 'json' | 'glb-only'; hasGlb: boolean }[],
+  ): void {
+    const overlay = document.createElement('div')
+    overlay.style.cssText = [
+      'position: fixed',
+      'inset: 0',
+      'background: rgba(0,0,0,0.5)',
+      'display: flex',
+      'align-items: center',
+      'justify-content: center',
+      'z-index: 200',
+      'pointer-events: auto',
+    ].join(';')
+
+    const dialog = document.createElement('div')
+    dialog.style.cssText = [
+      'background: #1a2028',
+      'color: #d8e6f0',
+      'font: 12px ui-monospace, Menlo, Consolas, monospace',
+      'border: 1px solid #345',
+      'border-radius: 8px',
+      'padding: 14px 16px',
+      'min-width: 320px',
+      'max-height: 70vh',
+      'display: flex',
+      'flex-direction: column',
+      'gap: 10px',
+    ].join(';')
+
+    const title = document.createElement('div')
+    title.style.cssText = 'font-weight:bold;font-size:14px;color:#7fc7ff'
+    title.textContent = 'Open Track'
+    dialog.appendChild(title)
+
+    if (tracks.length === 0) {
+      const empty = document.createElement('div')
+      empty.style.cssText = 'color:#aab;padding:8px 0'
+      empty.textContent =
+        'No tracks found. Create one in Blender (Export to Game) or click New… to start a draft.'
+      dialog.appendChild(empty)
+    } else {
+      const list = document.createElement('div')
+      list.style.cssText =
+        'display:flex;flex-direction:column;gap:2px;overflow-y:auto;max-height:50vh;border:1px solid #345;border-radius:4px;padding:4px;background:#101418'
+      for (const t of tracks) {
+        const row = document.createElement('div')
+        const isCurrent = t.id === draft.id
+        row.style.cssText = [
+          'padding: 6px 10px',
+          'cursor: pointer',
+          'border-radius: 3px',
+          isCurrent ? 'background:#356;color:#fff' : 'color:#cde',
+          'display: flex',
+          'justify-content: space-between',
+          'gap: 8px',
+        ].join(';')
+        const tag =
+          t.kind === 'json'
+            ? t.hasGlb
+              ? 'JSON + GLB'
+              : 'JSON'
+            : 'GLB only'
+        row.innerHTML = `
+          <span>${escapeHtml(t.id)}${isCurrent ? '  <span style="color:#7fc">(current)</span>' : ''}</span>
+          <span style="color:#789;font-size:11px">${tag}</span>
+        `
+        row.addEventListener('mouseenter', () => {
+          if (!isCurrent) row.style.background = '#234'
+        })
+        row.addEventListener('mouseleave', () => {
+          if (!isCurrent) row.style.background = ''
+        })
+        row.addEventListener('click', () => {
+          if (t.id === draft.id) {
+            close()
+            return
+          }
+          if (!confirmDiscard(`Open "${t.id}"`)) return
+          const url = new URL(window.location.href)
+          url.searchParams.set('track', t.id)
+          url.searchParams.set('edit', '1')
+          window.location.href = url.toString()
+        })
+        list.appendChild(row)
+      }
+      dialog.appendChild(list)
+    }
+
+    const btnRow = document.createElement('div')
+    btnRow.style.cssText = 'display:flex;gap:6px;justify-content:flex-end'
+    const cancelBtn = document.createElement('button')
+    cancelBtn.type = 'button'
+    cancelBtn.textContent = 'Cancel'
+    cancelBtn.style.cssText =
+      'background:#234;color:#dde;border:1px solid #456;padding:5px 12px;border-radius:3px;cursor:pointer;font:inherit'
+    cancelBtn.addEventListener('click', () => close())
+    btnRow.appendChild(cancelBtn)
+    dialog.appendChild(btnRow)
+
+    function close(): void {
+      overlay.remove()
+      window.removeEventListener('keydown', onModalKey)
+    }
+    function onModalKey(e: KeyboardEvent): void {
+      if (e.code === 'Escape') {
+        e.preventDefault()
+        close()
+      }
+    }
+    window.addEventListener('keydown', onModalKey)
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close()
+    })
+    overlay.appendChild(dialog)
+    document.body.appendChild(overlay)
+  }
+
+  function promptNewTrack(): void {
+    const raw = window.prompt(
+      'New track id (lowercase letters, digits, dashes):',
+      'untitled',
+    )
+    if (raw == null) return
+    const id = raw.trim()
+    if (!/^[a-z0-9-]+$/.test(id)) {
+      window.alert('Track id must match /^[a-z0-9-]+$/. Try again.')
+      return
+    }
+    if (id === draft.id) {
+      window.alert('That is the current track.')
+      return
+    }
+    if (!confirmDiscard(`Open new draft "${id}"`)) return
+    const url = new URL(window.location.href)
+    url.searchParams.set('track', id)
+    url.searchParams.set('edit', '1')
+    window.location.href = url.toString()
   }
 
   function parseKey(k: string): EntitySel {
@@ -1131,6 +1332,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
         throw new Error(`${res.status}: ${txt}`)
       }
       const body = (await res.json()) as { path?: string }
+      savedAtUndoDepth = undoStack.length
       if (status) {
         status.textContent = `Saved → ${body.path ?? 'public/tracks/'}`
         status.style.color = '#7a8'
