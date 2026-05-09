@@ -20,19 +20,21 @@ const MAX_HOVER_PROBE = 6
 const GRAVITY = 25 // must match PhysicsWorld gravity magnitude
 
 /**
- * Surface probe: looks below the bike for the closest "ride surface".
+ * Surface probe: looks below an XZ point for the closest "ride surface".
  * Either a hard physical collider (raycast) or the wave field water surface,
  * whichever is *higher* (closer to the bike) wins. This unifies driving on
  * land and driving on water — same controller, different surface y.
+ *
+ * Used both as the *center probe* (one per bike, drives hover spring +
+ * grounded gating + dive logic) and as the *footprint probes* (four per
+ * bike at bow / stern / port / starboard, drive surface alignment). The
+ * footprint version (`probeSurfaceY`) only needs the height — it doesn't
+ * care about isWater/hasSurface gating.
  */
 type SurfaceProbe = {
   surfaceY: number
   isWater: boolean
   hasSurface: boolean
-  /** Ground surface normal in world space (only valid when isWater=false and hasSurface=true). */
-  normalX: number
-  normalY: number
-  normalZ: number
 }
 
 function probeSurface(
@@ -44,10 +46,7 @@ function probeSurface(
   ignore: ReturnType<PhysicsWorld['world']['getRigidBody']>,
 ): SurfaceProbe {
   const ray = new phys.rapier.Ray({ x: fromX, y: fromY, z: fromZ }, { x: 0, y: -1, z: 0 })
-  // castRayAndGetNormal so we can auto-orient the chassis to ramps below.
-  // The normal is only used when the ground wins over water; otherwise it's
-  // ignored and the wave-field's analytic gradient drives surface follow.
-  const hit = phys.world.castRayAndGetNormal(
+  const hit = phys.world.castRay(
     ray,
     MAX_HOVER_PROBE,
     true,
@@ -61,30 +60,46 @@ function probeSurface(
 
   // Higher surface wins — that's what the bike rides on.
   if (groundY === Number.NEGATIVE_INFINITY && waterY === Number.NEGATIVE_INFINITY) {
-    return { surfaceY: 0, isWater: false, hasSurface: false, normalX: 0, normalY: 1, normalZ: 0 }
+    return { surfaceY: 0, isWater: false, hasSurface: false }
   }
-  if (groundY > waterY && hit) {
-    const n = hit.normal
-    return {
-      surfaceY: groundY,
-      isWater: false,
-      hasSurface: true,
-      normalX: n.x,
-      normalY: n.y,
-      normalZ: n.z,
-    }
+  if (groundY > waterY) {
+    return { surfaceY: groundY, isWater: false, hasSurface: true }
   }
   // Water can be sampled anywhere, so water is "always reachable" — but only
   // counts as a ride surface if the bike is within probe range of it.
   const reachable = fromY - waterY < MAX_HOVER_PROBE
-  return {
-    surfaceY: waterY,
-    isWater: true,
-    hasSurface: reachable,
-    normalX: 0,
-    normalY: 1,
-    normalZ: 0,
+  return { surfaceY: waterY, isWater: true, hasSurface: reachable }
+}
+
+/**
+ * Footprint probe: just the height at (x, z), max of ground raycast and
+ * wave field. Returns NEGATIVE_INFINITY if neither is found (caller falls
+ * back to the center probe — see surface alignment block).
+ */
+function probeSurfaceY(
+  phys: PhysicsWorld,
+  field: WaveFieldState | null,
+  x: number,
+  fromY: number,
+  z: number,
+  ignore: ReturnType<PhysicsWorld['world']['getRigidBody']>,
+): number {
+  const ray = new phys.rapier.Ray({ x, y: fromY, z }, { x: 0, y: -1, z: 0 })
+  const hit = phys.world.castRay(
+    ray,
+    MAX_HOVER_PROBE,
+    true,
+    undefined,
+    undefined,
+    undefined,
+    ignore ?? undefined,
+  )
+  const groundY = hit ? fromY - hit.timeOfImpact : Number.NEGATIVE_INFINITY
+  const waterY = field ? sampleHeight(field, x, z) : Number.NEGATIVE_INFINITY
+  if (groundY === Number.NEGATIVE_INFINITY && waterY === Number.NEGATIVE_INFINITY) {
+    return Number.NEGATIVE_INFINITY
   }
+  return Math.max(groundY, waterY)
 }
 
 /**
@@ -115,29 +130,24 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // bike is heading toward, so the targets stay 0 and the bike just holds
     // its current attitude.
     //
-    // Water: multi-probe sampling (SoT/Atlas-style). We read the wave
-    // height at four points around the bike — bow, stern, port, starboard
-    // — and let pitch/roll fall out of differential heights:
+    // Multi-probe sampling (SoT/Atlas-style), unified across water + ground.
+    // Read the surface height at four points around the bike — bow, stern,
+    // port, starboard — and let pitch/roll fall out of differential heights:
     //
     //     pitch ≈ atan2(y_bow − y_stern, 2·halfLength)
     //     roll  ≈ atan2(y_starboard − y_port, 2·halfWidth)
     //
-    // This is *more correct* than reading the local wave normal under the
-    // bike's center, because the bike has a real footprint in world space.
-    // Two wins over single-probe-normal:
-    //   1. Long swells naturally tilt the bike across the wave (the bike
-    //      *spans* a portion of the wave instead of instantly snapping to
-    //      whatever slope is at one infinitesimal point).
-    //   2. Short chops average between probes — the bike doesn't whip-snap
-    //      to every ripple shorter than its own footprint, removing a
-    //      whole class of high-frequency attitude jitter.
-    //
-    // Ground: single raycast + normal. probeSurface uses
-    // `castRayAndGetNormal`, so a ramp's slope normal feeds straight into
-    // pitch/roll targets — the rider doesn't have to manually tilt to
-    // match a ramp's angle, and the slope becomes the new "neutral"
-    // attitude. Multi-probe (a la water) is overkill for ramps, which are
-    // smooth enough that a single normal is stable.
+    // Each probe takes max(ground raycast, wave field height), so a bike
+    // straddling the shoreline correctly reads the high terrain on one side
+    // and the wave on the other. This is *more correct* than reading the
+    // local wave normal under the bike's center, because the bike has a
+    // real footprint in world space:
+    //   1. Long swells naturally tilt the bike across the wave.
+    //   2. Short chops + sub-footprint terrain bumps average between probes
+    //      so the bike doesn't whip-snap to every ripple or trimesh edge.
+    //   3. Mixed water/terrain transitions (water lapping a ledge, bow over
+    //      a ramp with stern still on water) read continuously instead of
+    //      flickering between water-only and ground-only branches.
     let surfacePitchTarget = 0
     let surfaceRollTarget = 0
     if (isGrounded) {
@@ -155,84 +165,50 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       // riding high smooths out into a hover. Linear from 1.0 at the
       // surface to 0.0 at the grounded/airborne boundary, so at nominal
       // hover (groundDistance ≈ hoverHeight) the bike inherits ~37% of
-      // its base surfaceFollow. Dipping into a wave trough kicks the
-      // factor back up; cresting a wave eases it off.
+      // its base follow. Dipping into a trough or skimming a ramp kicks
+      // the factor back up.
+      //
+      // Base follow: water uses the per-bike `surfaceFollow` (chop is
+      // noisy enough that 0.5 reads as a sturdy hover bike); ground uses
+      // 1.0 so the chassis fully matches a clean ramp slope as the new
+      // neutral attitude. The center probe's surface type picks which
+      // baseline applies — straddling-the-shoreline transitions briefly
+      // hand off as the center crosses, which is fine: the multi-probe
+      // height differential is what's doing the heavy lifting either way.
       const surfFadeFar = stats.hoverHeight * 1.6
       const altitudeFactor = Math.max(0, Math.min(1, 1 - groundDistance / surfFadeFar))
-      const followNow = stats.surfaceFollow * altitudeFactor
+      const baseFollow = probe.isWater ? stats.surfaceFollow : 1.0
+      const followNow = baseFollow * altitudeFactor
 
-      if (probe.isWater && field) {
-        // Probe footprint matches the bike's visual scale (~1.6m × 0.8m).
-        // sampleHeight already includes the wake field, so trailing riders
-        // get the lead's wake correctly read at their bow/stern.
-        const PROBE_HALF_LENGTH = 0.8
-        const PROBE_HALF_WIDTH = 0.4
-        // Bike-fwd in world XZ: (sin(yaw), cos(yaw)).
-        // Bike-right in world XZ: (cos(yaw), -sin(yaw)).
-        const fwdX = sy_
-        const fwdZ = cy_
-        const rightX = cy_
-        const rightZ = -sy_
-        const yBow = sampleHeight(
-          field,
-          t.x + fwdX * PROBE_HALF_LENGTH,
-          t.z + fwdZ * PROBE_HALF_LENGTH,
-        )
-        const yStern = sampleHeight(
-          field,
-          t.x - fwdX * PROBE_HALF_LENGTH,
-          t.z - fwdZ * PROBE_HALF_LENGTH,
-        )
-        const yStarboard = sampleHeight(
-          field,
-          t.x + rightX * PROBE_HALF_WIDTH,
-          t.z + rightZ * PROBE_HALF_WIDTH,
-        )
-        const yPort = sampleHeight(
-          field,
-          t.x - rightX * PROBE_HALF_WIDTH,
-          t.z - rightZ * PROBE_HALF_WIDTH,
-        )
-        // Sign convention (YXZ Euler):
-        //   bow > stern → bike climbing → nose up → NEGATIVE pitch.
-        //   starboard > port → right side high → POSITIVE roll.
-        // Verified against the previous single-probe formulation (same
-        // signs in the limit of small wavelength relative to footprint).
-        surfacePitchTarget = followNow * -Math.atan2(yBow - yStern, 2 * PROBE_HALF_LENGTH)
-        surfaceRollTarget = followNow * Math.atan2(yStarboard - yPort, 2 * PROBE_HALF_WIDTH)
-      } else if (probe.hasSurface) {
-        // Ground branch: align local-up to the surface normal so the bike
-        // auto-orients to ramps and slopes — the rider doesn't need to
-        // manually tilt to match a ramp's angle, and "neutral" pitch becomes
-        // the slope's pitch. Decompose the world normal into the bike's
-        // yaw-aligned frame, then read pitch (about bike-right) and roll
-        // (about bike-fwd) directly.
-        //
-        // Derivation (YXZ Euler R = R_y(yaw)·R_x(pitch)·R_z(roll), local up
-        // = (0,1,0)). The yaw-aligned normal is n_yaw = R_y(-yaw) · n_world:
-        //   n_yaw.x =  cos(yaw)·n.x − sin(yaw)·n.z   → -sin(roll)
-        //   n_yaw.y =  n.y                           →  cos(roll)·cos(pitch)
-        //   n_yaw.z =  sin(yaw)·n.x + cos(yaw)·n.z   →  cos(roll)·sin(pitch)
-        // → roll  = -asin(n_yaw.x)
-        // → pitch =  atan2(n_yaw.z, n_yaw.y)
-        //
-        // Sanity check: bike facing +Z climbing a ramp (n.z < 0, n.y > 0) →
-        //   yaw=0 → n_yaw.z = n.z < 0 → pitch < 0 (nose up). ✓
-        // Right side higher (n.x < 0) → yaw=0 → n_yaw.x = n.x < 0 →
-        //   roll = -asin(n.x) > 0 (right side up). ✓
-        //
-        // Use a stronger follow than water — ramps are clean surfaces that
-        // don't need the chop-averaging dampening the water probe applies.
-        // We still respect altitudeFactor so the bike doesn't read terrain
-        // attitude when riding high above it.
-        const GROUND_FOLLOW = 1.0
-        const groundFollowNow = GROUND_FOLLOW * altitudeFactor
-        const nyx = cy_ * probe.normalX - sy_ * probe.normalZ
-        const nyy = probe.normalY
-        const nyz = sy_ * probe.normalX + cy_ * probe.normalZ
-        surfacePitchTarget = groundFollowNow * Math.atan2(nyz, nyy)
-        surfaceRollTarget = groundFollowNow * -Math.asin(Math.max(-1, Math.min(1, nyx)))
+      // Probe footprint matches the bike's visual scale (~1.6m × 0.8m).
+      const PROBE_HALF_LENGTH = 0.8
+      const PROBE_HALF_WIDTH = 0.4
+      // Bike-fwd in world XZ: (sin(yaw), cos(yaw)).
+      // Bike-right in world XZ: (cos(yaw), -sin(yaw)).
+      const fwdX = sy_
+      const fwdZ = cy_
+      const rightX = cy_
+      const rightZ = -sy_
+      // Each probe casts from the bike's center Y so terrain sticking up in
+      // front of the bike (e.g. a wall, a ramp lip) is correctly intersected.
+      // probeSurfaceY returns max(ground, water) per location; falls back to
+      // the center probe's surfaceY if neither hit (bike overhanging an edge
+      // with nothing below — read the missing side as flat with the center
+      // rather than NaN).
+      const fallbackY = probe.surfaceY
+      const sampleAt = (px: number, pz: number): number => {
+        const y = probeSurfaceY(phys, field, px, t.y, pz, rb)
+        return y === Number.NEGATIVE_INFINITY ? fallbackY : y
       }
+      const yBow = sampleAt(t.x + fwdX * PROBE_HALF_LENGTH, t.z + fwdZ * PROBE_HALF_LENGTH)
+      const yStern = sampleAt(t.x - fwdX * PROBE_HALF_LENGTH, t.z - fwdZ * PROBE_HALF_LENGTH)
+      const yStarboard = sampleAt(t.x + rightX * PROBE_HALF_WIDTH, t.z + rightZ * PROBE_HALF_WIDTH)
+      const yPort = sampleAt(t.x - rightX * PROBE_HALF_WIDTH, t.z - rightZ * PROBE_HALF_WIDTH)
+      // Sign convention (YXZ Euler):
+      //   bow > stern → bike climbing → nose up → NEGATIVE pitch.
+      //   starboard > port → right side high → POSITIVE roll.
+      surfacePitchTarget = followNow * -Math.atan2(yBow - yStern, 2 * PROBE_HALF_LENGTH)
+      surfaceRollTarget = followNow * Math.atan2(yStarboard - yPort, 2 * PROBE_HALF_WIDTH)
     }
 
     // Kinematic attitude shape. Decompose the bike's orientation into YXZ
