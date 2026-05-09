@@ -59,5 +59,13 @@ export function createBikeMesh(opts?: { bodyColor?: number }): THREE.Object3D {
   puck.position.set(0, -0.45, 0)
   root.add(puck)
 
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh
+    if (mesh.isMesh) {
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+    }
+  })
+
   return root
 }

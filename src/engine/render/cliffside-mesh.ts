@@ -36,6 +36,8 @@ export function createCliffsideMesh(): THREE.Object3D {
       [sideMat, sideMat, topMat, sideMat, sideMat, sideMat], // [+X, -X, +Y, -Y, +Z, -Z]
     )
     mesh.position.set(MESA_CENTER.x, MESA_CENTER.y, MESA_CENTER.z)
+    mesh.castShadow = true
+    mesh.receiveShadow = true
     root.add(mesh)
   }
 
@@ -52,6 +54,8 @@ export function createCliffsideMesh(): THREE.Object3D {
       ),
       [sideMat, sideMat, topMat, sideMat, sideMat, sideMat],
     )
+    slab.castShadow = true
+    slab.receiveShadow = true
     const ramp = new THREE.Group()
     ramp.add(slab)
 
@@ -71,6 +75,7 @@ export function createCliffsideMesh(): THREE.Object3D {
         CLIMB_RAMP_HALF_EXTENTS.y,
         -CLIMB_RAMP_HALF_EXTENTS.z + spacing * (i + 1),
       )
+      stripe.receiveShadow = true
       ramp.add(stripe)
     }
 
@@ -94,6 +99,8 @@ export function createCliffsideMesh(): THREE.Object3D {
       cliffMat,
     )
     cliff.position.set(CLIFF_FACE_CENTER.x, CLIFF_FACE_CENTER.y, CLIFF_FACE_CENTER.z)
+    cliff.castShadow = true
+    cliff.receiveShadow = true
     root.add(cliff)
   }
 

@@ -916,6 +916,14 @@ export function createWaterMesh(
   const mesh = new THREE.Mesh(geom, mat as unknown as THREE.Material)
   mesh.name = 'water'
   mesh.position.y = 0
+  // Receive shadows from bikes / props / terrain. The node-material's
+  // colorNode is treated as albedo by the standard lighting model, so
+  // shadow attenuation darkens the deep-blue/cyan diffuse while the
+  // emissiveNode (sun glow, fresnel sky tint, foam, sparkle) stays
+  // bright — highlights still pop in shadow. We deliberately don't set
+  // `castShadow` on water: bumpy wave normals would alias the shadow
+  // map and self-shadow ugly.
+  mesh.receiveShadow = true
 
   function tick(
     impacts?: readonly BikeImpact[],

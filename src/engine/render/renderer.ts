@@ -1,4 +1,4 @@
-import type * as THREE from 'three'
+import * as THREE from 'three'
 import { WebGPURenderer } from 'three/webgpu'
 
 export type RenderBackend = 'webgpu' | 'webgl2'
@@ -52,6 +52,13 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.setSize(window.innerWidth, window.innerHeight, false)
+
+  // Soft directional-sun shadows. Casters/receivers are flagged on each
+  // mesh by the systems that build them (bike clones, props, terrain).
+  // Water is intentionally excluded — its node-material shader drives its
+  // own lighting and we don't want the surface mottled by shadow maps.
+  renderer.shadowMap.enabled = true
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap
 
   const resize = () => {
     renderer.setSize(window.innerWidth, window.innerHeight, false)

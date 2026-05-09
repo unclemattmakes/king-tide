@@ -25,7 +25,20 @@ export async function loadGlbTrackVisuals(url: string): Promise<LoadedGlbTrack> 
   const loader = new GLTFLoader()
   const gltf = await loader.loadAsync(url)
   const parsedJson = (gltf.parser as unknown as { json: GltfRoot }).json
-  return { scene: gltf.scene as unknown as THREE.Group, parsedJson }
+  const scene = gltf.scene as unknown as THREE.Group
+  // Track environment is the dominant shadow receiver in any race —
+  // and chunky meshes (mesa edges, hangar walls, ramps) should also
+  // throw shadow themselves. Flag every mesh; we don't try to be
+  // clever about decoration vs collision since the visual cost is
+  // tied to the bike+sun shadow camera, not the per-mesh count.
+  scene.traverse((obj) => {
+    const mesh = obj as THREE.Mesh
+    if (mesh.isMesh) {
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+    }
+  })
+  return { scene, parsedJson }
 }
 
 /**
