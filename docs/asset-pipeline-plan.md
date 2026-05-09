@@ -413,22 +413,42 @@ HOVERBIKE_OUTPUT=public/assets/bikes/scout.glb \
 Pseudocode:
 
 ```
-1. read_spec()
-2. reset_scene()
-3. lib_loader.append_from(
-     "tools/blender/lib/bike_parts.blend",
-     ["chassis_base", f"fairing_{spec.geometry.fairingStyle}", "thruster_unit"]
-   )
-4. assemble bike_root (empty), parent chassis, fairing, thrusters according to spec
-5. duplicate thruster_unit per spec.geometry.thrusterCount, place per spacing
-6. apply spec.appearance to the materials (rename to mat_bike_<id>_*)
-7. add sockets: socket_seat (from spec.rider.seatOffset),
-   socket_nose_cam, socket_fx_thruster_{l,r}, socket_fx_exhaust
-8. add primitive collider_body box from spec.geometry dimensions
-9. set bike_root extras: { kind: "bike", bike_id, mass_kg, top_speed_mps }
-10. validate_required_kinds({ "bike": 1, "socket": >=4, "collider": >=1 })
-11. export_glb(output_path)
+ 1. read_spec()
+ 2. reset_scene()
+ 3. lib_loader.append_objects(
+      "tools/blender/lib/bike_parts.blend",
+      ["chassis_base",                                # parent kit part
+       "mount_fairing", "mount_fork",                 # build-time attachment empties
+       "mount_fin", "mount_tail",                     # parented to chassis_base
+       f"fairing_{spec.geometry.fairingStyle}",
+       f"fork_{spec.geometry.fork}",
+       "fin_marker", "tail_marker", "thruster_unit"],
+    )
+ 4. assemble bike_root (empty); set chassis scale/loc but DON'T bake yet
+ 5. for each child part:
+      snap_to_mount(part, chassis, role)               # reads mount.matrix_world
+      apply_transforms(part)                           # bake position into mesh
+ 6. thrusters: parametric — duplicate per spec.thrusterCount, spread on X
+ 7. apply spec.appearance to the materials (rename to mat_bike_<id>_*)
+ 8. add sockets: socket_seat (from spec.rider.seatOffset),
+      socket_nose_cam, socket_fx_thruster_{l,r}, socket_fx_exhaust
+ 9. add primitive collider_body box from spec.geometry dimensions
+10. set bike_root extras: { kind: "bike", bike_id, mass_kg, top_speed_mps }
+11. strip_build_helpers()                              # delete mount_* / anchor*
+12. apply_transforms(chassis); parent chassis to bike_root
+13. validate_required_kinds({ "bike": 1, "socket": >=4, "collider": >=1 })
+14. export_glb(output_path)
 ```
+
+> **Mount/anchor system (added post-M9.27):** the original draft of
+> this plan put the chassis-relative offsets (fairing at `H+0.15`,
+> fork at `nose_y - 0.1`, etc.) inside `build_bike.py` as hardcoded
+> math. The current pipeline lifts those positions out of code and
+> into kit-side empties — `mount_<role>` parented to the chassis part.
+> `tools/blender/mounts.py` provides `snap_to_mount(part, parent,
+> role)` and `strip_build_helpers()`. Authors retune attachment points
+> by translating an empty in Blender, not by editing pseudocode. See
+> [`asset-pipeline-guide.md`](./asset-pipeline-guide.md#mounts-and-anchors).
 
 ### `build_prop.py`
 
@@ -488,8 +508,14 @@ Three kit files under `tools/blender/lib/`:
 
 - **`bike_parts.blend`** — named objects: `chassis_base`,
   `fairing_bare`, `fairing_swept`, `fairing_full`, `thruster_unit`,
-  `fork_single`, `fork_dual`. All at origin in their own collection.
-  Materials prefixed `mat_kit_bike_*` so the renamer can find them.
+  `fork_single`, `fork_dual`, `fin_marker`, `tail_marker`. Parts are
+  laid out in their assembled-bike positions (chassis at centre,
+  fairing on top, fork at the nose, etc.) so authors can edit in
+  context — viewport positions are layout-only and `lib_loader.py`
+  resets them on append. The chassis carries small `mount_<role>`
+  empty children (`mount_fairing`, `mount_fork`, `mount_fin`,
+  `mount_tail`) that the build snaps each part to. Materials prefixed
+  `mat_kit_bike_*` so the renamer can find them.
 - **`prop_kit.blend`** — named objects per spec'd `kitPart` value.
   Start with: `barrier_a`, `barrier_b`, `lamppost_short`,
   `lamppost_tall`, `crate_small`, `crate_large`, `holo_billboard`,

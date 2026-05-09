@@ -138,3 +138,26 @@ Then update the `BikeVariantId` union in the same file. The Garage menu populate
 ## Re-authoring kit geometry
 
 If you need new chassis shapes, fairing styles, or thruster meshes, edit `tools/blender/lib/bike_parts.blend` directly. Saving the `.blend` triggers a rebuild of every bike against the new kit. To start from a clean placeholder, re-run `tools/blender/seed_bike_kit.py`.
+
+The kit opens with parts laid out at their **assembled-bike positions** so you see a fully-built bike, not a pile of overlapping pieces at the origin. Variants overlap their primary (all three fairings sit on top of the chassis; both forks live at the nose). Hide any variant you don't care about in the outliner if you need to focus on one. Object viewport positions are layout-only — they don't influence the build (`tools/blender/lib_loader.py` resets transforms on append). Mesh edits *do* ride through.
+
+### Moving an attachment point — no code change
+
+Where the fairing/fork/fin/tail attach to the chassis is controlled by **mount empties** authored in the kit. Inside `bike_parts.blend`, expand `chassis_base` in the outliner and you'll see four small empties parented to it:
+
+| Mount | Controls |
+|---|---|
+| `mount_fairing` | Where the fairing snaps onto the chassis |
+| `mount_fork` | Where the fork attaches at the nose |
+| `mount_fin` | Where the front fin marker sits |
+| `mount_tail` | Where the rear tail-light sits |
+
+Translate any of those empties in the viewport, save, and re-run `pnpm gen:bikes` (or just save while `pnpm dev` is running). No code change. Mount positions are stored in chassis-local unit-cube space so they scale with `chassisLength` / `chassisWidth` / `chassisHeight` automatically.
+
+To add a brand-new attachment point, author another empty `mount_<your_role>` parented to `chassis_base`, then add a matching `snap_to_mount(part, chassis, "<your_role>")` line in `tools/blender/build_bike.py`. The mount and any optional `anchor` empty on the child part are stripped from the GLB before export by `strip_build_helpers()` — they never ship to the runtime.
+
+::: tip Mounts vs. sockets
+**Mounts** (`mount_*`) are *build-time* — they tell the kit assembler where to attach parts. They're stripped before export. **Sockets** (`socket_*`, e.g. `socket_seat`, `socket_nose_cam`, `socket_fx_*`) are *runtime* — they ride into the GLB and the runtime resolves them by name to attach the rider, place the chase camera, etc. Different prefix, different lifecycle.
+:::
+
+Thrusters stay parametric — their count and X spacing come from `spec.geometry.thrusterCount` / `thrusterSpacing` and the build code does the math directly.
