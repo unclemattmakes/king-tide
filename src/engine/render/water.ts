@@ -475,30 +475,58 @@ export function createWaterMesh(
   // Albedo: two-color scatter blend.
   //
   // Sea-of-Thieves-style: a deep teal in troughs blends to a bright
-  // cyan-green "scatter color" on crests AND at grazing view angles.
-  // The grazing-angle component approximates sub-surface scattering — the
-  // back of a crest looks brightest when you're looking *along* the
-  // surface (not down through it), because more light has refracted into
-  // the wave body and out toward your eye. We don't have a sun direction
-  // wired through the shader yet, so view-only is a reasonable proxy.
+  // cyan-green "scatter color" on crests, on grazing-view-angle samples,
+  // AND on waves backlit by the sun. The three contributions stack:
+  //
+  //   heightFactor   — crest faces scatter, troughs don't
+  //   viewFactor     — sub-surface scattering makes wave bodies brightest
+  //                    when viewed nearly along the surface (grazing)
+  //   sunBackscatter — light passing through a wave from sun-side to eye-
+  //                    side; peaks when the line of sight points roughly
+  //                    toward the sun
   //
   // Classic mode (`?water=classic`) keeps the original blue→cyan mix with
   // pure height-driven blending for A/B comparison.
   const heightNorm = smoothstep(float(-0.9), float(0.9), heightFrag)
+  const heightFactor = isClassic
+    ? heightNorm
+    : smoothstep(float(-0.7), float(0.8), heightFrag)
   const deepColor = isClassic ? vec3(0.04, 0.18, 0.4) : vec3(0.02, 0.12, 0.22)
   const scatterColor = isClassic ? vec3(0.16, 0.55, 0.78) : vec3(0.22, 0.7, 0.65)
+
+  // Sun-direction back-scatter. uSunDir matches the scene's
+  // DirectionalLight (50, 70, 70) — see scene.ts. Stored normalized as a
+  // uniform so a future day/night cycle can animate it. The dot is
+  // viewDir.negate() · sunDir = (line-of-sight) · (toward-sun); peaks at
+  // 1.0 when the camera is looking toward the sun, falls to 0 when
+  // looking perpendicular, < 0 when looking away (clamped). Squared so
+  // the boost is concentrated near the sun direction.
+  const sunDirUniform = uniform(new THREE.Vector3(50, 70, 70).normalize())
+  const sunBackscatter = isClassic
+    ? float(0)
+    : pow(max(float(0), dot(viewDir.negate(), sunDirUniform)), float(2))
+
   const scatterAmount = isClassic
     ? heightNorm
     : (() => {
-        // Crests scatter strongly; troughs barely. Grazing view bumps
-        // scatter by up to 1.6×, so even mid-height swell faces light
-        // up at low view angles.
-        const heightFactor = smoothstep(float(-0.7), float(0.8), heightFrag)
+        // Crest scatter ramps with height; grazing view bumps it; sun
+        // backlight bumps it further. Combined boost can exceed 1.0 (we
+        // clamp at the end so deep troughs stay dark even with sun
+        // alignment).
         const viewFactor = float(1).sub(ndotv)
-        const viewBoost = mix(float(0.55), float(1.0), viewFactor)
-        return clamp(heightFactor.mul(viewBoost), float(0), float(1))
+        const baseBoost = mix(float(0.55), float(1.0), viewFactor)
+        const sunBoost = sunBackscatter.mul(0.55)
+        return clamp(heightFactor.mul(baseBoost.add(sunBoost)), float(0), float(1))
       })()
   const baseColor = mix(deepColor, scatterColor, scatterAmount)
+
+  // Sun glow emissive — additive on top of the scatter blend for the
+  // unmistakable SoT "lit-from-behind" wave glow. Peaks on tall crests
+  // (`heightFactor`) lit from behind (`sunBackscatter`), tinted with
+  // scatterColor. Off in classic mode.
+  const sunGlow = isClassic
+    ? vec3(0, 0, 0)
+    : scatterColor.mul(sunBackscatter.mul(heightFactor).mul(float(0.6)))
 
   // Wave-driven foam — physically motivated as "where waves are breaking",
   // not "where waves are tall". Two triggers, both about steepness/folding:
@@ -643,7 +671,7 @@ export function createWaterMesh(
   mat.positionNode = positionNode
   mat.normalNode = normalNode
   mat.colorNode = albedo
-  mat.emissiveNode = fresnelEmissive.add(sparkleEmissive)
+  mat.emissiveNode = fresnelEmissive.add(sparkleEmissive).add(sunGlow)
   mat.opacityNode = float(0.78)
   // Noise-modulated roughness. In sparkle patches roughness drops from 0.18
   // to ~0.04, tightening the specular lobe and producing crisp highlights.
