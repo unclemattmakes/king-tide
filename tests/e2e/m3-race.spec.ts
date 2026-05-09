@@ -3,7 +3,9 @@ import { expect, test } from '@playwright/test'
 test.describe('M3 race', () => {
   test('lap counter starts at 1, advances after crossing all checkpoints', async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__hover?.race() !== null, { timeout: 10000 })
+    await page.waitForFunction(() => !!window.__hover && window.__hover.race() !== null, {
+      timeout: 10000,
+    })
 
     const initial = await page.evaluate(() => window.__hover!.race()!)
     expect(initial.lap).toBe(1)
@@ -18,7 +20,9 @@ test.describe('M3 race', () => {
     page,
   }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__hover?.race() !== null, { timeout: 10000 })
+    await page.waitForFunction(() => !!window.__hover && window.__hover.race() !== null, {
+      timeout: 10000,
+    })
 
     // Drive forward — crosses cp 0 (start/finish line).
     await page.evaluate(() =>
@@ -46,7 +50,9 @@ test.describe('M3 race', () => {
 
   test('checkpoints not in front are not counted', async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__hover?.race() !== null, { timeout: 10000 })
+    await page.waitForFunction(() => !!window.__hover && window.__hover.race() !== null, {
+      timeout: 10000,
+    })
 
     // Reverse — bike should NOT cross any checkpoint behind it.
     await page.evaluate(() =>

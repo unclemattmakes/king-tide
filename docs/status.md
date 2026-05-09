@@ -128,20 +128,28 @@ populates `field.wakes` once per fixed step BEFORE `hoverSystem` reads the
 surface — that's what makes the lead bike's wake felt by trailing
 buoyancy. The bike's own wake doesn't affect itself (`behind > 0` gate).
 
-Vertex subdivisions stay at 128 (1.875 m spacing on the 240 m water
-plane), with `WAKE_DISP_CULL_R = 40 m` early-out per-bike per-vertex.
-Bumping subs to 192 looks crisper on real hardware but tanks the headless
-WebGL2 software fallback (SwiftShader, used by Playwright) to ~3 fps,
-which broke a chunk of the e2e suite. If/when we drop the headless WebGL2
-path, raise to 192+.
+Vertex subdivisions: 192 (1.25 m spacing on the 240 m plane), with
+`WAKE_DISP_CULL_R = 40 m` early-out per-bike per-vertex. Tests run headed
+(real GPU) via `playwright.config.ts` — the headless WebGL2 software
+fallback (SwiftShader) tanks any non-trivial vertex shader to single-digit
+fps under parallel workers. Set `E2E_HEADLESS=1` to opt back into headless
+(e.g. CI without a display).
 
 ### Periodic swell sets (M9.26)
 `defaultWaves()` now includes two long-wavelength swells (60 m + 85 m,
-amplitudes 0.5 m + 0.36 m) with slightly different periods (~6.0 s vs
+amplitudes 0.55 m + 0.4 m) with slightly different periods (~6.0 s vs
 ~7.7 s). They beat against each other so big "sets" come in roughly every
 25–30 s automatically (constructive interference of two sines = no extra
-logic needed). Existing chop is trimmed slightly so the combined max
-peak stays under ~3 m even at full alignment.
+logic needed). Four chop bands fill in surface texture across multiple
+scales (22 m down to 5.5 m).
+
+### e2e runs headed by default (M9.26)
+The GPU water shader is happy on real hardware but the headless WebGL2
+software fallback (SwiftShader) drops to single-digit fps under any
+non-trivial vertex/fragment work. `playwright.config.ts` now defaults to
+headed, opting in to the real GPU; set `E2E_HEADLESS=1` to flip it back
+(e.g. CI without a display server). A pop-up Chromium window per worker
+during local `pnpm e2e` is the visible side effect.
 
 ### Pitch-modulated ride height (M9.24)
 Above water, the hover-spring's target height is offset by pitch input:

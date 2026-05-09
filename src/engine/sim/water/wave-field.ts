@@ -218,7 +218,13 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
  * Default wave preset — a swell-plus-chop mix tuned to feel Wave-Race-y at
  * arcade speeds. Two long-period swells beat against each other so big
  * "sets" come in periodically (constructive interference around every ~30
- * seconds), while the shorter chop fills in surface texture.
+ * seconds); the four chop bands fill in surface texture across multiple
+ * scales (22 m down to 5.5 m).
+ *
+ * Each wave is unrolled into the vertex shader as a sin+cos pair, so the
+ * count is a direct multiplier on per-vertex cost. Tests run headed (real
+ * GPU) so we don't need to keep this as small as the headless WebGL2
+ * software fallback would prefer.
  */
 export function defaultWaves(): Wave[] {
   return [
@@ -226,10 +232,9 @@ export function defaultWaves(): Wave[] {
     // "the bigger waves show up periodically": their slightly different
     // periods (≈6.0 s and ≈7.7 s) beat against each other so peaks align
     // every ~25–30 s.
-    { dirX: 0.92, dirZ: 0.39, amplitude: 0.5, wavelength: 60, speed: 10.0, phase: 0.4 },
-    { dirX: 0.6, dirZ: 0.8, amplitude: 0.36, wavelength: 85, speed: 11.0, phase: 2.2 },
-    // Wind chop — original arcade preset, slightly trimmed to keep the
-    // combined max in a sane range.
+    { dirX: 0.92, dirZ: 0.39, amplitude: 0.55, wavelength: 60, speed: 10.0, phase: 0.4 },
+    { dirX: 0.6, dirZ: 0.8, amplitude: 0.4, wavelength: 85, speed: 11.0, phase: 2.2 },
+    // Wind chop across four scales for varied surface texture.
     { dirX: 1, dirZ: 0, amplitude: 0.5, wavelength: 22, speed: 4.0, phase: 0 },
     { dirX: 0.707, dirZ: 0.707, amplitude: 0.34, wavelength: 14, speed: 3.6, phase: 1.1 },
     { dirX: 0.3, dirZ: -0.954, amplitude: 0.22, wavelength: 9, speed: 3.0, phase: 2.3 },

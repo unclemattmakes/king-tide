@@ -129,15 +129,13 @@ export function createWaterMesh(
   opts?: { size?: number; subdivisions?: number },
 ): WaterMesh {
   const size = opts?.size ?? 240
-  // 128 subs × 240 m ≈ 1.875 m vertex spacing. The 3.5 m wake wavelength
-  // resolves at ~53% of Nyquist (well above aliasing) once each crest
-  // travels primarily along the bike's heading — vertices spaced along the
-  // wake see <1 wavelength between samples. Going higher (e.g. 192) tanks
-  // the headless WebGL2 software fallback (SwiftShader) to single-digit
-  // fps, which breaks several e2e tests; the per-vertex wake math is the
-  // dominant cost. Real GPU has plenty of headroom and would be fine at
-  // 192+, but keep the default conservative for the test path.
-  const subs = opts?.subdivisions ?? 128
+  // 192 subs × 240 m ≈ 1.25 m vertex spacing — fine enough to resolve the
+  // 3.5 m wake oscillation (Nyquist ≈ 1.75 m) with comfortable headroom,
+  // and the wake's transverse-feathered ridges show up as crisp ripples
+  // rather than slightly aliased blocks. The vertex math runs on the real
+  // GPU (we run e2e headed via playwright.config.ts), so the cost here is
+  // mostly memory + draw bandwidth.
+  const subs = opts?.subdivisions ?? 192
 
   const geom = new THREE.PlaneGeometry(size, size, subs, subs)
   geom.rotateX(-Math.PI / 2)
