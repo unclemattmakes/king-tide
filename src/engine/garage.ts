@@ -1,5 +1,6 @@
 import type { TrackManifestEntry } from '@/game/assets/manifest'
 import { BIKE_VARIANTS, type BikeVariantId, DEFAULT_BIKE_VARIANT } from '@/game/bikes/variants'
+import { parseReplay } from './replay/format'
 import { clearBestLaps, getBestLap } from './save-state'
 
 /**
@@ -58,6 +59,8 @@ export function installGarageMenu(opts: {
   const cancelBtnMaybe = document.getElementById('garage-cancel')
   const clearBtnMaybe = document.getElementById('garage-clear')
   const headerBestMaybe = document.getElementById('garage-best')
+  const loadReplayBtnMaybe = document.getElementById('garage-load-replay')
+  const replayInputMaybe = document.getElementById('garage-replay-input') as HTMLInputElement | null
   if (
     !overlayMaybe ||
     !toggleMaybe ||
@@ -171,6 +174,37 @@ export function installGarageMenu(opts: {
     rebuildTracks()
     refreshHeaderBest()
   })
+
+  // Load Replay flow: file picker → parse → stash in sessionStorage →
+  // navigate to ?replay=session, which the boot path picks up. The
+  // sessionStorage handoff (rather than a direct hot-swap) keeps the
+  // single-page reload-on-mode-change pattern the garage already uses.
+  if (loadReplayBtnMaybe && replayInputMaybe) {
+    const loadReplayBtn = loadReplayBtnMaybe
+    const replayInput = replayInputMaybe
+    loadReplayBtn.addEventListener('click', () => {
+      replayInput.value = '' // allow re-selecting the same file
+      replayInput.click()
+    })
+    replayInput.addEventListener('change', async () => {
+      const file = replayInput.files?.[0]
+      if (!file) return
+      try {
+        const text = await file.text()
+        // Validate before navigating so a bad file surfaces an error here
+        // rather than after a reload (which would hide the cause).
+        parseReplay(text)
+        sessionStorage.setItem('hover-replay-pending', text)
+        const url = new URL(window.location.href)
+        url.searchParams.set('replay', 'session')
+        url.searchParams.delete('track')
+        url.searchParams.delete('bike')
+        window.location.assign(url.toString())
+      } catch (err) {
+        alert(`Invalid replay file: ${(err as Error).message}`)
+      }
+    })
+  }
 
   refreshHeaderBest()
 
