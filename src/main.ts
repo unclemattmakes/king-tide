@@ -30,7 +30,6 @@ import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
 import { createScene } from './engine/render/scene'
 import { createTrackVisuals } from './engine/render/track-mesh'
-import { createTrailRenderSystem } from './engine/render/trail-render'
 import { type BikeImpact, createWaterMesh } from './engine/render/water'
 import { getBestLap, recordLapTime } from './engine/save-state'
 import { createSimWorld } from './engine/sim/ecs/world'
@@ -414,7 +413,6 @@ async function boot() {
     byVariantId: { [playerVariant.id]: playerBikeGlb, racer: racerBikeGlb },
     default: racerBikeGlb,
   })
-  const trailRender = createTrailRenderSystem(scene, sim)
   const pickupRender = createPickupRenderSystem(scene, sim)
   const combatRender = createCombatRenderSystem(scene, sim)
   const fxTick = createFxSystem(scene, sim, phys)
@@ -726,7 +724,6 @@ async function boot() {
       waterMesh.setSunDirection(dirX, dirY, dirZ)
     }
     bikeRender()
-    trailRender(camera)
     pickupRender(dt)
     combatRender(dt)
     fxTick(dt)

@@ -7,6 +7,11 @@ import { createBikeMesh } from './bike-mesh'
 
 const PLAYER_FALLBACK_COLOR = 0xff7733
 const AI_BODY_COLORS = [0x33aaff, 0x44dd66, 0xcc55ff, 0xffcc33, 0xff5577]
+// Exhaust glow tints — formerly the long-ribbon trail colors. The thruster
+// cone material (`mat_bike_*_glow`) is retinted per-bike so each racer
+// stays color-identifiable now that the ribbon trails are gone.
+const PLAYER_EXHAUST_COLOR = 0xffaa55
+const AI_EXHAUST_COLORS = [0x55ccff, 0x66ee88, 0xdd66ff, 0xffdd44, 0xff7799]
 
 // Visual-only bike scale. Physics colliders (read from the GLB at bike
 // creation) stay at authored size — only the rendered mesh is scaled,
@@ -58,10 +63,12 @@ export function createBikeRenderSystem(
         if (registry) {
           const loaded = (variantId && registry.byVariantId[variantId]) || registry.default
           if (isPlayer) {
-            mesh = cloneLoadedBike(loaded).root
+            mesh = cloneLoadedBike(loaded, { tintExhaust: PLAYER_EXHAUST_COLOR }).root
           } else {
-            const tint = AI_BODY_COLORS[aiColorCursor++ % AI_BODY_COLORS.length] ?? 0xaaaaaa
-            mesh = cloneLoadedBike(loaded, { tintLivery: tint }).root
+            const slot = aiColorCursor++ % AI_BODY_COLORS.length
+            const tintLivery = AI_BODY_COLORS[slot] ?? 0xaaaaaa
+            const tintExhaust = AI_EXHAUST_COLORS[slot] ?? 0xffffff
+            mesh = cloneLoadedBike(loaded, { tintLivery, tintExhaust }).root
           }
         } else {
           const color = isPlayer
