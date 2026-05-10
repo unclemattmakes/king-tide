@@ -931,30 +931,23 @@ export function createWaterMesh(
     ? vec3(0, 0, 0)
     : skyTint.mul(fresnel.mul(isClassic ? 0.5 : 0.32))
 
-  // Sparkle: cheap hash on world XZ + animated UV scroll, gated to crests.
-  // Two-layer mask so we get both broad "glistening areas" (low-frequency
-  // bright patches) and pin-prick highlights (high-frequency hash). The
-  // pin-pricks feed the additive emissive (the dancing white pixels you
-  // see on the wave faces); the broad mask drops the local roughness so
-  // the PBR specular lobe tightens INTO sparkle bursts where the sun
-  // catches the surface — that's the SoT-style glistening. Without the
-  // roughness modulation, sparkle was purely additive and read as
-  // "fairy dust on top" rather than highlights breaking up.
-  const sparkleSeed = positionWorld.xz.mul(0.6).add(vec2(tNode.mul(0.27), tNode.mul(-0.19)))
-  const sparkleNoise = fract(
-    sin(sparkleSeed.x.mul(12.9898).add(sparkleSeed.y.mul(78.233))).mul(43758.5453),
-  )
-  const sparkleHeightGate = smoothstep(float(0.45), float(0.85), heightNorm)
-  const sparkleMask = smoothstep(float(0.985), float(1.0), sparkleNoise).mul(sparkleHeightGate)
-  const sparkleEmissive = vec3(1.0, 1.0, 1.0).mul(sparkleMask)
-
-  // Broader sparkle "patches" for the roughness modulation. Lower-frequency
-  // seed, animated independently — produces wandering bright zones that
-  // tighten the specular highlight rather than discrete pixels.
+  // Sparkle: low-frequency hash on world XZ + animated UV scroll, gated to
+  // crests. Drops the local roughness so the PBR specular lobe tightens
+  // INTO sparkle bursts where the sun catches the surface — that's the
+  // SoT-style glistening, realised entirely through the lighting model
+  // rather than additive emissive.
+  //
+  // We deliberately do NOT stack a high-frequency per-pixel emissive on
+  // top: that pin-prick layer alias-flickers as TV-static at any distance
+  // the camera can't pixel-resolve the noise cell, and even tightly
+  // distance-faded it reads as noise rather than glint on the close-in
+  // band. The roughness modulation alone gives the wandering-glint
+  // character without sampling a hash per fragment.
   const broadSeed = positionWorld.xz.mul(0.18).add(vec2(tNode.mul(-0.11), tNode.mul(0.08)))
   const broadNoise = fract(
     sin(broadSeed.x.mul(12.9898).add(broadSeed.y.mul(78.233))).mul(43758.5453),
   )
+  const sparkleHeightGate = smoothstep(float(0.45), float(0.85), heightNorm)
   const broadMask = smoothstep(float(0.55), float(0.85), broadNoise).mul(sparkleHeightGate)
 
   const mat = new MeshStandardNodeMaterial({
@@ -970,7 +963,7 @@ export function createWaterMesh(
   mat.positionNode = positionNode
   mat.normalNode = normalNode
   mat.colorNode = albedo
-  mat.emissiveNode = fresnelEmissive.add(sparkleEmissive).add(sunGlow)
+  mat.emissiveNode = fresnelEmissive.add(sunGlow)
   mat.opacityNode = float(0.78)
   // Noise-modulated roughness. In sparkle patches roughness drops from 0.18
   // to ~0.04, tightening the specular lobe and producing crisp highlights.
