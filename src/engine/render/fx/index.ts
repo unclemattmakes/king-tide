@@ -53,18 +53,43 @@ import {
  */
 
 // Per-effect emission tuning. Rates ramp linearly between MIN and FULL speed.
+// 80/s × ~0.8 s avg life ≈ 64 alive per bike at top speed — enough for a
+// clean Kelvin-style V wake without over-saturating the surface.
 const FOAM_MAX_RATE = 80 // particles/sec at full strength (per bike)
-const SPARK_MAX_RATE = 60
 const FOAM_SPEED_FULL = 25
-const SPARK_SPEED_FULL = 30
 const FOAM_MIN_SPEED = 3
-const SPARK_MIN_SPEED = 8
+// V-wake half-angle. The Kelvin wake is ~19° in nature; a touch wider
+// reads more visible at game scale and matches the water shader wake.
+const FOAM_V_HALF_ANGLE = 0.55 // ~31°
+
+// Sparks fire only when the bike is genuinely scraping ground — not
+// while hovering at normal height. Threshold sits well below the bike's
+// 1.2 m hover target so casual driving over land doesn't shed sparks;
+// only ramps, curbs, hard bottom-outs (groundDistance pushed near zero
+// by the spring overshoot or a vertical impact) trigger them.
+const SPARK_MAX_RATE = 80
+const SPARK_MIN_SPEED = 4
+const SPARK_SPEED_FULL = 22
+const SPARK_GROUND_DIST_MAX = 0.4
+
+// Dust kicked up by the hover thrust when the bike is *near* the ground
+// but not scraping it — i.e. cruising in the hover zone over land. Reads
+// as the rotor-wash blowing fine particulate outward in a fan.
+const DUST_MAX_RATE = 60
+const DUST_MIN_SPEED = 2
+const DUST_SPEED_FULL = 18
+// Sits just above the spark scrape threshold; ceiling is at ~80% of the
+// grounded-cutoff so we never emit dust while airborne.
+const DUST_GROUND_DIST_MIN = 0.4
+const DUST_GROUND_DIST_MAX = 1.6
+
 // Engine exhaust — emits while the bike is actively throttling. Boost
 // (held shift OR a boost pickup) ramps the rate up to BOOST_MAX_RATE
 // for that "thruster firing" beat.
 const EXHAUST_THROTTLE_RATE = 35 // particles/sec at full forward throttle
 const EXHAUST_BOOST_RATE = 90 // additional rate while boost is active
 const EXHAUST_THROTTLE_MIN = 0.2 // dead-zone — no exhaust on micro inputs
+
 // Emission origins in bike-local coords. The bike's render-systems.ts
 // applies a 2× visual scale to the mesh while keeping the physics body
 // at authored size — the bike's *transform* still uses physics-space
@@ -80,7 +105,11 @@ const EXHAUST_OFFSET = new THREE.Vector3(0, -0.2, -1.6)
 // six emitting bikes with margin. Sparks are short (lifetime ~0.4 s, rate
 // ~60/s → ~24 alive per bike), so 200 is comfortable.
 const FOAM_CAPACITY = 480
+// Sparks now event-driven only (scrape contact). Few alive at a time.
 const SPARK_CAPACITY = 200
+// Dust similar shape to foam: continuous emission while in the hover zone
+// over land. Lifetime ~0.7 s × ~60/s × ~3 active bikes ≈ 130 alive peak.
+const DUST_CAPACITY = 320
 // Exhaust: shorter lifetime than foam (~0.5s at boost) but higher peak
 // rate when boosting (~125/s = ~63 alive per bike, plus regular throttle
 // emission), so 320 covers ~5 boosting bikes plus margin.
@@ -316,6 +345,7 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
   const foamTex = makeRadialTexture([235, 245, 255])
   const sparkTex = makeRadialTexture([255, 200, 120])
   const exhaustTex = makeRadialTexture([255, 130, 60])
+  const dustTex = makeRadialTexture([195, 180, 155])
 
   const foam = createPool({
     capacity: FOAM_CAPACITY,
@@ -343,24 +373,40 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
     gravity: 0.8,
     drag: 2.4,
   })
+  const dust = createPool({
+    capacity: DUST_CAPACITY,
+    // Slightly bigger than foam puffs — dust clouds read better at scale.
+    defaultSize: 1.2,
+    texture: dustTex,
+    blending: THREE.NormalBlending,
+    // Faint upward drift + heavy drag so puffs hang and dissipate, not
+    // shoot like exhaust.
+    gravity: 0.3,
+    drag: 3.5,
+  })
 
   scene.add(foam.mesh)
   scene.add(sparks.mesh)
   scene.add(exhaust.mesh)
+  scene.add(dust.mesh)
 
   // Reusable scratch math.
   const sternWorld = new THREE.Vector3()
   const sparkWorld = new THREE.Vector3()
   const exhaustWorld = new THREE.Vector3()
+  const dustWorld = new THREE.Vector3()
   const tmpQuat = new THREE.Quaternion()
   const tmpPos = new THREE.Vector3()
-  const fwd = new THREE.Vector3()
   const back = new THREE.Vector3()
+  const right = new THREE.Vector3()
 
   // Per-bike fractional emission accumulators — emit rate × dt is usually
   // < 1 per frame, so we accumulate the fraction across frames and emit
   // when it crosses a whole particle.
-  const emitAccum = new Map<number, { foam: number; sparks: number; exhaust: number }>()
+  const emitAccum = new Map<
+    number,
+    { foam: number; sparks: number; exhaust: number; dust: number }
+  >()
 
   // Debug hook so the headed-browser verification can introspect rates,
   // free-slot counts, and live-particle counts. Removed when the dust
@@ -370,11 +416,13 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
       foam,
       sparks,
       exhaust,
+      dust,
       emitAccum,
       stats: () => ({
         foamAlive: foam.capacity - foam.freeCount,
         sparkAlive: sparks.capacity - sparks.freeCount,
         exhaustAlive: exhaust.capacity - exhaust.freeCount,
+        dustAlive: dust.capacity - dust.freeCount,
       }),
     }
   }
@@ -398,11 +446,14 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
 
       let acc = emitAccum.get(eid)
       if (!acc) {
-        acc = { foam: 0, sparks: 0, exhaust: 0 }
+        acc = { foam: 0, sparks: 0, exhaust: 0, dust: 0 }
         emitAccum.set(eid, acc)
       }
 
-      // Foam — bike stern, water + speed.
+      // Foam — V-shaped Kelvin wake behind the stern with an upward bias.
+      // Each spawn picks a side (alternating L/R) and ejects along
+      // (back · cos θ ± right · sin θ), matching the V-shape the water
+      // displacement shader carves into the surface.
       if (hover.isGrounded && hover.surfaceIsWater && speed > FOAM_MIN_SPEED) {
         const rate =
           Math.min(1, (speed - FOAM_MIN_SPEED) / (FOAM_SPEED_FULL - FOAM_MIN_SPEED)) *
@@ -412,33 +463,49 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
         if (n > 0) {
           acc.foam -= n
           sternWorld.copy(STERN_OFFSET).applyQuaternion(tmpQuat).add(tmpPos)
-          // Toss puffs slightly outward (away from bike heading) so the
-          // wake reads as a fan, not a solid stripe. Forward direction:
-          // bike-fwd in world is (sin(yaw), 0, cos(yaw)).
-          fwd.set(0, 0, -1).applyQuaternion(tmpQuat) // backward in bike-local
-          emit(
-            foam,
-            sternWorld.x,
-            sternWorld.y,
-            sternWorld.z,
-            fwd.x * 1.5,
-            0.4,
-            fwd.z * 1.5,
-            1.2,
-            0.6,
-            1.0,
-            // Slight per-particle size jitter so the wake reads as varied
-            // puffs rather than uniform stamps.
-            foam.defaultSize * (0.7 + Math.random() * 0.6),
-            n,
-          )
+          back.set(0, 0, -1).applyQuaternion(tmpQuat)
+          right.set(1, 0, 0).applyQuaternion(tmpQuat)
+          const sinH = Math.sin(FOAM_V_HALF_ANGLE)
+          const cosH = Math.cos(FOAM_V_HALF_ANGLE)
+          // Wake speed scales with bike speed so the V opens proportionally.
+          const wakeSpeed = 1.5 + speed * 0.07
+          for (let k = 0; k < n; k++) {
+            const side = (k & 1) === 0 ? -1 : 1
+            const vx = back.x * cosH * wakeSpeed + right.x * sinH * side * wakeSpeed
+            const vz = back.z * cosH * wakeSpeed + right.z * sinH * side * wakeSpeed
+            // Strong upward spray reads as a real water plume.
+            const vy = 1.6 + Math.random() * 0.6
+            emit(
+              foam,
+              sternWorld.x,
+              sternWorld.y,
+              sternWorld.z,
+              vx,
+              vy,
+              vz,
+              0.4, // small spherical jitter on top of the V direction
+              0.6,
+              1.0,
+              foam.defaultSize * (0.7 + Math.random() * 0.6),
+              1,
+            )
+          }
         }
       } else {
         acc.foam = 0
       }
 
-      // Sparks — bike base, land + speed.
-      if (hover.isGrounded && !hover.surfaceIsWater && speed > SPARK_MIN_SPEED) {
+      // Sparks — only when the bike is genuinely scraping the ground.
+      // We gate on `groundDistance < SPARK_GROUND_DIST_MAX` (well below
+      // the bike's 1.2 m hover target) so casual driving over land
+      // doesn't shed sparks; only ramp lips, bottom-outs from a hard
+      // landing, or curb scrapes light up.
+      if (
+        hover.isGrounded &&
+        !hover.surfaceIsWater &&
+        hover.groundDistance < SPARK_GROUND_DIST_MAX &&
+        speed > SPARK_MIN_SPEED
+      ) {
         const rate =
           Math.min(1, (speed - SPARK_MIN_SPEED) / (SPARK_SPEED_FULL - SPARK_MIN_SPEED)) *
           SPARK_MAX_RATE
@@ -464,6 +531,59 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
         }
       } else {
         acc.sparks = 0
+      }
+
+      // Dust — rotor-wash kicked up while in the hover zone over land
+      // but NOT scraping. Reads as fine particulate blowing radially
+      // outward at ground level. Window:
+      //   DUST_GROUND_DIST_MIN < groundDistance < DUST_GROUND_DIST_MAX
+      // Below MIN we hand off to sparks (scraping); above MAX we're
+      // either airborne or fading into "barely grounded" where there's
+      // not enough downwash to stir up dust.
+      if (
+        hover.isGrounded &&
+        !hover.surfaceIsWater &&
+        hover.groundDistance > DUST_GROUND_DIST_MIN &&
+        hover.groundDistance < DUST_GROUND_DIST_MAX &&
+        speed > DUST_MIN_SPEED
+      ) {
+        const rate =
+          Math.min(1, (speed - DUST_MIN_SPEED) / (DUST_SPEED_FULL - DUST_MIN_SPEED)) *
+          DUST_MAX_RATE
+        acc.dust += rate * dt
+        const n = Math.floor(acc.dust)
+        if (n > 0) {
+          acc.dust -= n
+          // Spawn at ground level directly under the bike, not at the
+          // bike body. The rotor-wash hits the ground and fans outward
+          // from there.
+          const groundY = transform.y - hover.groundDistance + 0.05
+          for (let k = 0; k < n; k++) {
+            // Random radial direction in XZ for outward blow.
+            const ang = Math.random() * Math.PI * 2
+            const sx = Math.cos(ang)
+            const sz = Math.sin(ang)
+            // Eject speed scales with bike speed so faster passes
+            // produce more dramatic dust.
+            const ejectSpeed = 1.5 + speed * 0.18
+            emit(
+              dust,
+              transform.x + sx * 0.3,
+              groundY,
+              transform.z + sz * 0.3,
+              sx * ejectSpeed,
+              0.4 + Math.random() * 0.5,
+              sz * ejectSpeed,
+              0.5,
+              0.5,
+              0.9,
+              dust.defaultSize * (0.7 + Math.random() * 0.7),
+              1,
+            )
+          }
+        }
+      } else {
+        acc.dust = 0
       }
 
       // Exhaust — emits while the bike is throttling forward, blossoming
@@ -513,5 +633,6 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
     advance(foam, dt)
     advance(sparks, dt)
     advance(exhaust, dt)
+    advance(dust, dt)
   }
 }
