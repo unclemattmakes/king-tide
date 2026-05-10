@@ -2,9 +2,9 @@
 
 Reference for the SoT-style ocean upgrade. Original research compiled 2026-05-09; first wave of changes shipped as M9.29 (see [status.md](./status.md)).
 
-## Current state (M9.29 → M9.35)
+## Current state (M9.29 → M9.38)
 
-Render: horizontal-displacement Gerstner (per-wave Q + global scale uniform, with chop amplitudes bumped 30% in M9.34 for more dramatic short-wavelength pinching), two-color scatter blend (deep teal ↔ cyan-green, view + sun-direction modulated, with sun-glow emissive on backlit crests, sun direction now animated by the day-night cycle), stateless foam accumulator (lingering whitecaps via 4 time-shifted Gerstner samples, no render targets needed), depth-buffer shoreline foam with lapping noise scroll (water/land intersection breathes ±0.4m), richer bike foam pass (speed-modulated hull ring + stern propwash + bow spray + V-wake, all noise-modulated for turbulent edges), noise-modulated roughness for SoT-style "wandering glints", existing analytic normal + Fresnel sky-tint emissive + wake-displacement V-stripe with transverse scallops (M9.35).
+Render: horizontal-displacement Gerstner (per-wave Q + global scale uniform, with chop amplitudes bumped 30% in M9.34 for more dramatic short-wavelength pinching), two-color scatter blend (deep teal ↔ cyan-green, view + sun-direction modulated, with sun-glow emissive on backlit crests, sun direction now animated by the day-night cycle), stateless foam accumulator (lingering whitecaps via 4 time-shifted Gerstner samples, no render targets needed), depth-buffer shoreline foam with lapping noise scroll (water/land intersection breathes ±0.4m), richer bike foam pass (speed-modulated hull ring + stern propwash + bow spray + V-wake, all noise-modulated for turbulent edges), noise-modulated roughness for SoT-style "wandering glints", planar reflection via TSL `reflector()` node (M9.38 — Fresnel-mixed into base color, wave-normal-distorted UV, replaces the prior fresnelEmissive sky tint), existing analytic normal + wake-displacement V-stripe with transverse scallops (M9.35).
 
 Sim: vertical-only Gerstner (unchanged at the formulation level, with new bumped chop amplitudes in M9.34), multi-probe buoyancy (4 sample points around the bike's footprint, pitch/roll from differential heights), wake transverse modulation mirrored on the CPU sampler so trailing riders feel the same scallops they see (M9.35), unchanged underwater dive + buoyancy + asymmetric drag.
 
@@ -25,6 +25,7 @@ The reference is Sea of Thieves. Rare's published pipeline (SIGGRAPH 2018 *The T
 | FFT Jacobian whitecaps | Gerstner `qSum` (Σ Q·k·A·sin) + slope | Mathematically the closed-form analogue of the FFT Jacobian for Gerstner; fires on the same physical condition (surface approaching fold-back) |
 | Multi-probe ship buoyancy | 4-probe hoverbike (bow/stern/port/starboard) | Same approach, smaller footprint matching the bike's scale |
 | Noise-disrupted specular | Noise-modulated roughness | Same effect (highlights break into wandering glints), just realized via PBR roughness rather than a custom specular lobe |
+| SSR + cubemap blended by Fresnel | Planar reflection via TSL `reflector()` (M9.38) | Mirror-camera + half-res render target gives accurate reflections of the (mostly horizontal) scene at a fraction of SSR's cost. SoT uses SSR primarily for off-water reflection of nearby ships' hulls; for an arcade racer where bikes hover ON the water and most reflected content is sky + horizon, the planar approximation reads identically |
 
 ## Key sources
 
@@ -42,8 +43,8 @@ The reference is Sea of Thieves. Rare's published pipeline (SIGGRAPH 2018 *The T
 
 ### Heavier lifts (defer until needed)
 
-- **[L] SSR (or planar bike reflection).** Real screen-space reflections in a TSL node material are non-trivial; planar reflection of just the bikes onto the water plane is much cheaper and gives 80% of the perceptual gain. SoT uses SSR + cubemap blended by Fresnel. Biggest "AAA water" tell, but most expensive to land.
 - **[L] FFT migration.** Only worth it if we ever want crest-folding-with-overhang, multi-cascade scale separation (200m swell + 50m chop + 10m ripple as separate cascades), or genuine Jacobian-folding foam. None of which we need for an arcade racer — and the stateless foam accumulator (M9.31) closes most of the perceptual gap with FFT-based foam already.
+- **[L] True SSR (instead of the M9.38 planar reflector).** SSR walks rays through the scene depth buffer and would catch reflections of off-plane geometry (e.g. a bike hopping a wave casts the underside of the chassis onto the water beneath it). Our planar reflector treats the water as a flat mirror at y = 0 and renders the scene from the mirrored camera — for an arcade racer where bikes hover at small Δy above the surface, the difference is invisible. SSR also breaks at screen edges where the rays leave the framebuffer. Only worth it if reflection accuracy ever becomes a notable tell.
 
 ## Tuning knobs at a glance
 
@@ -67,3 +68,6 @@ The reference is Sea of Thieves. Rare's published pipeline (SIGGRAPH 2018 *The T
 | Wake scallop wavelength | `WAKE_TRANS_K` | 0.7 rad/m (~9m) | smaller K = longer scallops, larger K = tighter ripple. Watch the unit-test sample point (sin(K·10) > 0 at t=0 keeps tests passing) |
 | Wake scallop drift speed | `WAKE_TRANS_OMEGA` | 1.0 rad/s (~6.3s period) | how fast the scallop pattern scrolls backward in the bike's frame |
 | Wake scallop strength | `WAKE_TRANS_AMP` | 0.3 | wake amplitude varies between (1−amp)× and (1+amp)× along each scallop period; >0.3 risks unit-test threshold |
+| Reflection resolution | `resolutionScale` arg to `reflector(...)` | 0.5 | half-res reflection target. Drop to 0.33 if reflection cost ever shows up in profiling; raise to 1.0 for crisp mirror at the cost of one more render pass at full res |
+| Reflection strength cap | `fresnel.mul(0.85)` in water.ts | 0.85 | maximum reflectivity at grazing angles. Lower for milder mirror (more deep/scatter color showing through); higher for chrome-like glaze |
+| Reflection distortion | `0.02 + 0.6 / (camDist + 2)` | gentle close, mirror-flat at horizon | base 0.02 sets minimum distortion; the inverse-distance term makes near samples distort while horizon stays mirror-clear |
