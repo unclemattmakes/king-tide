@@ -1,16 +1,27 @@
-"""Headless bike GLB builder. Spec → GLB.
+"""Headless bike GLB builder. ``bikes-src/<id>.blend`` → GLB.
 
 Run:
     HOVERBIKE_SPEC=specs/bikes/racer.json \\
     HOVERBIKE_OUTPUT=public/assets/bikes/racer.glb \\
       blender --background --python tools/blender/build_bike.py
 
-Reads the spec, appends kit parts from tools/blender/lib/bike_parts.blend,
-assembles a `bike_root` empty with chassis + fairing + thrusters + fork,
-applies spec-driven appearance to materials (renamed `mat_bike_<id>_*`),
-wires up sockets (seat, nose_cam, fx_thruster_l/r, fx_exhaust), adds a
-primitive collider derived from spec.geometry, validates the kind/socket
-contract, exports.
+Mirrors the track pipeline: every bike has a standalone ``.blend`` at
+``bikes-src/<id>.blend`` that authors edit directly (no shared kit).
+The builder opens that ``.blend``, optionally overlays spec-driven
+material colours + extras, validates the structure, and exports the
+GLB.
+
+Spec is loaded for two purposes:
+
+1. **Resolving the source ``.blend``** — ``spec.id`` picks
+   ``bikes-src/<id>.blend``.
+2. **Optional overrides.** ``spec.appearance.*`` recolours any
+   ``mat_bike_<id>_*`` materials present in the ``.blend`` (so colour
+   tuning stays JSON-fast without reopening Blender). ``spec.physics``
+   + ``displayName`` are written into ``bike_root`` extras so the
+   runtime manifest + viewer HUD can read them. Both blocks are
+   optional — drop them from the spec to use whatever's authored in
+   the ``.blend``.
 
 ### Authoring frame
 
@@ -22,16 +33,8 @@ maps Blender (X, Y, Z) → three (X, Z, -Y), so:
   Blender -Y          → three +Z (forward, where the bike's nose ends up)
   Blender +Y          → three -Z (back)
 
-We place the bike's NOSE at Blender -Y so it lands at three +Z forward —
-matching docs/status.md's "+Z is forward" convention and the procedural
-`createBikeMesh()` mesh that this builder replaces.
-
-### Extras axis swap
-
-`extras` values are pass-through — the exporter writes the literal JSON.
-Where extras carry axis-aligned data (`half_extents`, `seatOffset`),
-the builder writes them already in three's axes ([right, up, forward])
-so the runtime can use them without remapping.
+Place the bike's NOSE at Blender -Y so the exported nose ends up at
+three +Z forward — matches docs/status.md's "+Z is forward" convention.
 """
 
 from __future__ import annotations
@@ -40,8 +43,8 @@ import os
 import sys
 
 # When Blender runs this script via --python, the parent dir isn't on
-# sys.path. We import shared helpers as `tools.blender.<mod>` — put the
-# repo root on sys.path so that resolves.
+# sys.path. Put the repo root there so shared helpers import cleanly
+# under their package paths.
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.dirname(os.path.dirname(_SCRIPT_DIR))
 if _REPO_ROOT not in sys.path:
@@ -49,7 +52,6 @@ if _REPO_ROOT not in sys.path:
 
 import bpy  # noqa: E402
 
-from tools.blender import colliders as colliders_mod  # noqa: E402
 from tools.blender import sockets as sockets_mod  # noqa: E402
 from tools.blender.common import (  # noqa: E402
     REPO_ROOT,
@@ -57,18 +59,12 @@ from tools.blender.common import (  # noqa: E402
     export_glb,
     output_path,
     read_spec,
-    reset_scene,
     validate_required_kinds,
 )
-from tools.blender.lib_loader import append_objects  # noqa: E402
-from tools.blender.mounts import snap_to_mount, strip_build_helpers  # noqa: E402
-
-KIT_BLEND = os.path.join(REPO_ROOT, "tools", "blender", "lib", "bike_parts.blend")
 
 
 def hex_to_rgba(s: str) -> tuple[float, float, float, float]:
-    """#rrggbb → linear RGBA. Blender's principled BSDF expects linear
-    space; sRGB→linear approximated via 2.2 power."""
+    """``#rrggbb`` → linear-space RGBA (sRGB→linear via 2.2 gamma)."""
     s = s.lstrip("#")
     r = int(s[0:2], 16) / 255.0
     g = int(s[2:4], 16) / 255.0
@@ -76,283 +72,143 @@ def hex_to_rgba(s: str) -> tuple[float, float, float, float]:
     return (r ** 2.2, g ** 2.2, b ** 2.2, 1.0)
 
 
-def make_material(
-    name: str,
-    color_hex: str,
-    *,
-    emissive_hex: str | None = None,
-    emissive_intensity: float = 0.0,
-    metallic: float = 0.2,
-    roughness: float = 0.5,
-) -> bpy.types.Material:
-    mat = bpy.data.materials.new(name=name)
-    mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
-    if bsdf is None:
-        return mat
-    bsdf.inputs["Base Color"].default_value = hex_to_rgba(color_hex)
-    if "Roughness" in bsdf.inputs:
-        bsdf.inputs["Roughness"].default_value = roughness
-    if "Metallic" in bsdf.inputs:
-        bsdf.inputs["Metallic"].default_value = metallic
-    if emissive_hex is not None:
-        if "Emission" in bsdf.inputs:
-            bsdf.inputs["Emission"].default_value = hex_to_rgba(emissive_hex)
-        if "Emission Color" in bsdf.inputs:
-            bsdf.inputs["Emission Color"].default_value = hex_to_rgba(emissive_hex)
-        if "Emission Strength" in bsdf.inputs:
-            bsdf.inputs["Emission Strength"].default_value = emissive_intensity
-    return mat
-
-
-def select_only(obj: bpy.types.Object) -> None:
-    bpy.ops.object.select_all(action="DESELECT")
-    obj.select_set(True)
-    bpy.context.view_layer.objects.active = obj
-
-
-def apply_transforms(obj: bpy.types.Object) -> None:
-    select_only(obj)
-    bpy.ops.object.transform_apply(location=True, rotation=False, scale=True)
-
-
-def build() -> None:
-    spec = read_spec()
+def open_source_blend(spec: dict) -> str:
+    """Resolve and open ``bikes-src/<id>.blend``. Errors if missing."""
     bike_id = spec["id"]
-    geom = spec["geometry"]
-    phys_ = spec["physics"]
-    appear = spec["appearance"]
-    rider = spec["rider"]
+    blend_path = os.path.join(REPO_ROOT, "bikes-src", f"{bike_id}.blend")
+    if not os.path.exists(blend_path):
+        raise SystemExit(
+            f"[build-bike] source .blend not found: {blend_path}\n"
+            f"  Author one in Blender (see docs/blender-pipeline-guide.md), "
+            f"or run the bootstrap seeder if your repo predates the per-variant "
+            f"flow."
+        )
+    print(f"[build-bike] opening {blend_path}")
+    bpy.ops.wm.open_mainfile(filepath=blend_path)
+    return blend_path
 
-    out = output_path()
-    print(f"[build-bike] {bike_id} -> {out}")
 
-    reset_scene()
+def apply_spec_overrides(spec: dict) -> None:
+    """Overlay JSON-driven tuning on top of what's authored in the
+    ``.blend``: bike_root extras (so the runtime sees the spec's
+    physics + display name) and ``mat_bike_<id>_*`` material colours
+    (so palette tweaks don't need a Blender round-trip).
 
-    width = float(geom["chassisWidth"])
-    length = float(geom["chassisLength"])
-    height = float(geom["chassisHeight"])
+    Both blocks are optional: a fully-authored ``.blend`` with no
+    overrides ships unchanged. The match-by-name approach for
+    materials means the .blend's other materials (lights, helpers)
+    are untouched.
+    """
+    bike_id = spec["id"]
 
-    chassis_mat = make_material(
-        f"mat_bike_{bike_id}_chassis", appear["metalColor"], metallic=0.6, roughness=0.4,
-    )
-    fairing_mat = make_material(
-        f"mat_bike_{bike_id}_livery", appear["liveryColor"], metallic=0.3, roughness=0.45,
-    )
-    thruster_mat = make_material(
-        f"mat_bike_{bike_id}_glow",
-        appear["glowColor"],
-        emissive_hex=appear["glowColor"],
-        emissive_intensity=appear["glowIntensity"],
-        metallic=0.1,
-        roughness=0.3,
-    )
-    fork_mat = make_material(
-        f"mat_bike_{bike_id}_fork", appear["metalColor"], metallic=0.7, roughness=0.35,
-    )
+    # ── bike_root extras ────────────────────────────────────────────────────
+    bike_root = bpy.data.objects.get("bike_root")
+    if bike_root is None:
+        # Validation will catch this and abort with a helpful error;
+        # don't crash here on the override step.
+        return
 
-    # bike_root: canonical entry node. Runtime reads kind="bike" off it
-    # and resolves socket children by name.
-    bpy.ops.object.empty_add(type="PLAIN_AXES", location=(0, 0, 0))
-    bike_root = bpy.context.active_object
-    bike_root.name = "bike_root"
-    apply_extras(
-        bike_root,
-        kind="bike",
-        bike_id=bike_id,
-        mass_kg=float(phys_["massKg"]),
-        top_speed_mps=float(phys_["topSpeedMps"]),
-        hover_height=float(phys_["hoverHeight"]),
-    )
+    display_name = spec.get("displayName")
+    if display_name is not None:
+        bike_root["display_name"] = str(display_name)
+    bike_root["bike_id"] = bike_id
 
-    # Chassis + its mount-point empties. ``wm.append`` doesn't bring a
-    # parent's children automatically, so we list the mounts explicitly
-    # — Blender re-links the parent reference inside the destination
-    # scene because they're appended in the same operation.
-    #
-    # If the spec sets ``geometry.chassisVariant``, we pull
-    # ``chassis_<variant>`` from the kit instead of the generic
-    # ``chassis_base`` cube. The variant is treated as authored at
-    # final size, so we *don't* apply (W, L, H) scaling — the kit
-    # mesh is what ships. Spec dimensions still drive the collider
-    # and thruster/socket positions.
-    #
-    # NOTE: we deliberately *defer* ``apply_transforms(chassis)`` until
-    # after every part has been snapped to a mount. While the chassis
-    # carries its scale + location, the mount children report correct
-    # world positions for fairing/fork/fin/tail attachment. Bake too
-    # early and the mounts flatten back to chassis-local positions.
-    chassis_variant = geom.get("chassisVariant")
-    if chassis_variant:
-        chassis_kit_name = f"chassis_{chassis_variant}"
-    else:
-        chassis_kit_name = "chassis_base"
-    chassis_kit_objs = append_objects(
-        KIT_BLEND,
-        [chassis_kit_name, "mount_fairing", "mount_fork", "mount_fin", "mount_tail"],
-    )
-    chassis = chassis_kit_objs[0]
-    chassis.name = "bike_body"
-    if chassis_variant:
-        # Variant chassis ships at author-modelled size; only lift it
-        # so its base sits on the ground plane (matches scaled-cube
-        # behaviour where chassis spans z=0 to z=H).
-        chassis.location = (0.0, 0.0, height * 0.5)
-    else:
-        chassis.scale = (width, length, height)
-        chassis.location = (0.0, 0.0, height * 0.5)
-    chassis.data.materials.clear()
-    chassis.data.materials.append(chassis_mat)
+    phys_ = spec.get("physics") or {}
+    if "massKg" in phys_:
+        bike_root["mass_kg"] = float(phys_["massKg"])
+    if "topSpeedMps" in phys_:
+        bike_root["top_speed_mps"] = float(phys_["topSpeedMps"])
+    if "hoverHeight" in phys_:
+        bike_root["hover_height"] = float(phys_["hoverHeight"])
 
-    # Fairing on top of the chassis, scaled to chassis footprint.
-    fairing_name = f"fairing_{geom['fairingStyle']}"
-    [fairing] = append_objects(KIT_BLEND, [fairing_name])
-    fairing.name = "bike_fairing"
-    fairing.scale = (width, length, 1.0)
-    snap_to_mount(fairing, chassis, "fairing")
-    apply_transforms(fairing)
-    fairing.parent = bike_root
-    fairing.data.materials.clear()
-    fairing.data.materials.append(fairing_mat)
+    # ── material colours ────────────────────────────────────────────────────
+    appear = spec.get("appearance") or {}
+    overrides: dict[str, dict] = {}
+    if "metalColor" in appear:
+        # The chassis + fork share the metal palette (different
+        # roughness/metallic per the seeder; we only retint base
+        # colour here so author tweaks to roughness ride through).
+        overrides[f"mat_bike_{bike_id}_chassis"] = {"color": appear["metalColor"]}
+        overrides[f"mat_bike_{bike_id}_fork"] = {"color": appear["metalColor"]}
+    if "liveryColor" in appear:
+        overrides[f"mat_bike_{bike_id}_livery"] = {"color": appear["liveryColor"]}
+        # Fin uses livery colour both as base AND emissive — keep both
+        # in sync when the spec retints.
+        overrides[f"mat_bike_{bike_id}_fin"] = {
+            "color": appear["liveryColor"],
+            "emissive": appear["liveryColor"],
+        }
+    if "glowColor" in appear:
+        overrides[f"mat_bike_{bike_id}_glow"] = {
+            "color": appear["glowColor"],
+            "emissive": appear["glowColor"],
+        }
+        if "glowIntensity" in appear:
+            overrides[f"mat_bike_{bike_id}_glow"]["emissive_intensity"] = float(
+                appear["glowIntensity"]
+            )
 
-    # Fork at the front of the chassis (Blender -Y = bike nose).
-    fork_name = f"fork_{geom['fork']}"
-    [fork] = append_objects(KIT_BLEND, [fork_name])
-    fork.name = "bike_fork"
-    snap_to_mount(fork, chassis, "fork")
-    apply_transforms(fork)
-    fork.parent = bike_root
-    fork.data.materials.clear()
-    fork.data.materials.append(fork_mat)
+    for mat_name, ovr in overrides.items():
+        mat = bpy.data.materials.get(mat_name)
+        if mat is None or not mat.use_nodes:
+            continue
+        bsdf = mat.node_tree.nodes.get("Principled BSDF")
+        if bsdf is None:
+            continue
+        if "color" in ovr:
+            bsdf.inputs["Base Color"].default_value = hex_to_rgba(ovr["color"])
+        if "emissive" in ovr:
+            for em_input in ("Emission", "Emission Color"):
+                if em_input in bsdf.inputs:
+                    bsdf.inputs[em_input].default_value = hex_to_rgba(ovr["emissive"])
+        if "emissive_intensity" in ovr and "Emission Strength" in bsdf.inputs:
+            bsdf.inputs["Emission Strength"].default_value = float(
+                ovr["emissive_intensity"]
+            )
 
-    # Thrusters: duplicate kit unit per spec.thrusterCount, spread on X
-    # by spec.thrusterSpacing. Stays parametric — count/spacing are
-    # too dynamic to express as fixed mounts.
-    thruster_count = int(geom["thrusterCount"])
-    spacing = float(geom["thrusterSpacing"])
-    tail_y = length * 0.5 - 0.15
-    thruster_z = height * 0.35
-    for i in range(thruster_count):
-        # Symmetric layout: x = spacing * (i - (N-1)/2) — N=1 → 0; N=2 →
-        # ±s/2; N=4 → ±s/2, ±3s/2.
-        offset = spacing * (i - (thruster_count - 1) / 2.0)
-        [t] = append_objects(KIT_BLEND, ["thruster_unit"])
-        t.name = f"bike_thruster_{i}"
-        t.location = (offset, tail_y, thruster_z)
-        apply_transforms(t)
-        t.parent = bike_root
-        t.data.materials.clear()
-        t.data.materials.append(thruster_mat)
 
-    # Front-facing fin marker — restores the visual nose cue the
-    # procedural bike-mesh.ts had (yellow cone pointing +Z).
-    fin_mat = make_material(
-        f"mat_bike_{bike_id}_fin", appear["liveryColor"],
-        emissive_hex=appear["liveryColor"], emissive_intensity=0.5,
-        metallic=0.2, roughness=0.4,
-    )
-    [fin] = append_objects(KIT_BLEND, ["fin_marker"])
-    fin.name = "bike_fin"
-    snap_to_mount(fin, chassis, "fin")
-    apply_transforms(fin)
-    fin.parent = bike_root
-    fin.data.materials.clear()
-    fin.data.materials.append(fin_mat)
+REQUIRED_SLOTS = ["seat", "nose_cam", "fx_thruster_l", "fx_thruster_r", "fx_exhaust"]
 
-    # Rear tail-light marker — mirrors the procedural red tail.
-    tail_mat = make_material(
-        f"mat_bike_{bike_id}_tail", "#ff3333",
-        emissive_hex="#ff3333", emissive_intensity=1.0,
-        metallic=0.0, roughness=0.4,
-    )
-    [tail] = append_objects(KIT_BLEND, ["tail_marker"])
-    tail.name = "bike_tail"
-    snap_to_mount(tail, chassis, "tail")
-    apply_transforms(tail)
-    tail.parent = bike_root
-    tail.data.materials.clear()
-    tail.data.materials.append(tail_mat)
 
-    # Now that every mount has been read, strip the build-time helper
-    # empties (mount_*, anchor*) and bake the chassis transform.
-    strip_build_helpers()
-    apply_transforms(chassis)
-    chassis.parent = bike_root
+def validators_factory(spec: dict):
+    """Run after overrides so the .blend's authored kinds + the spec's
+    bike_id agree. Two cheap checks beyond the standard kind census:
+    bike_root's ``bike_id`` matches ``spec.id``, and every required
+    socket slot is present (the addon validates these too)."""
 
-    # Sockets — placed in Blender authoring frame; the GLTFLoader
-    # converts them to three's axes correctly via standard yup export.
-    #
-    # spec.rider.seatOffset is in **three.js** axes ([right, up, forward])
-    # because that's how it's consumed by the runtime. We swap it back
-    # to Blender axes (X, Y, Z) = (right, -forward, up).
-    seat_offset = rider["seatOffset"]
-    seat_xyz_blender = (seat_offset[0], -seat_offset[2], seat_offset[1])
-    sockets_mod.add_socket(
-        "socket_seat", bike_root, slot="seat", location=seat_xyz_blender
-    )
-    # Nose camera anchor: just past the bike's nose, slightly above chassis top.
-    sockets_mod.add_socket(
-        "socket_nose_cam",
-        bike_root,
-        slot="nose_cam",
-        location=(0.0, -length * 0.5 - 0.2, height * 0.6),
-    )
-    # FX anchors at the outer thrusters' rear edge.
-    fx_x = (
-        max(0.15, spacing * (thruster_count - 1) / 2.0)
-        if thruster_count > 1
-        else 0.15
-    )
-    sockets_mod.add_socket(
-        "socket_fx_thruster_l",
-        bike_root,
-        slot="fx_thruster_l",
-        location=(-fx_x, tail_y + 0.25, thruster_z),
-    )
-    sockets_mod.add_socket(
-        "socket_fx_thruster_r",
-        bike_root,
-        slot="fx_thruster_r",
-        location=(fx_x, tail_y + 0.25, thruster_z),
-    )
-    sockets_mod.add_socket(
-        "socket_fx_exhaust",
-        bike_root,
-        slot="fx_exhaust",
-        location=(0.0, tail_y + 0.4, thruster_z * 0.5),
-    )
-
-    # Primitive box collider. Authoring transform stays in Blender axes;
-    # the GLTFLoader converts at load time. But `extras.half_extents` is
-    # opaque to the exporter, so we write it pre-converted to three's
-    # axes (right, up, forward) = (W/2, H/2, L/2).
-    bpy.ops.object.empty_add(type="CUBE", location=(0.0, 0.0, height * 0.5))
-    collider = bpy.context.active_object
-    collider.name = "collider_body"
-    collider.scale = (width * 0.55, length * 0.5, height * 0.6)
-    collider.parent = bike_root
-    apply_extras(
-        collider,
-        kind="collider",
-        shape="box",
-        half_extents=[width * 0.55, height * 0.6, length * 0.5],
-    )
-
-    def validators() -> list[str]:
+    def _validate() -> list[str]:
         errs: list[str] = []
         errs.extend(
             validate_required_kinds(
                 {"bike": 1, "socket": (5, None), "collider": (1, None)}
             )
         )
-        errs.extend(
-            sockets_mod.validate_sockets(
-                ["seat", "nose_cam", "fx_thruster_l", "fx_thruster_r", "fx_exhaust"],
-            )
-        )
+        errs.extend(sockets_mod.validate_sockets(REQUIRED_SLOTS))
+
+        bike_root = bpy.data.objects.get("bike_root")
+        if bike_root is None:
+            errs.append("missing object: bike_root")
+        else:
+            stored = bike_root.get("bike_id")
+            if stored != spec["id"]:
+                errs.append(
+                    f"bike_root.extras.bike_id={stored!r} does not match "
+                    f"spec.id={spec['id']!r} — re-run the seeder or fix the "
+                    f"custom property"
+                )
         return errs
 
-    export_glb(out, validators=[validators])
+    return _validate
+
+
+def build() -> None:
+    spec = read_spec()
+    out = output_path()
+    print(f"[build-bike] {spec['id']} -> {out}")
+
+    open_source_blend(spec)
+    apply_spec_overrides(spec)
+    export_glb(out, validators=[validators_factory(spec)])
 
 
 if __name__ == "__main__":

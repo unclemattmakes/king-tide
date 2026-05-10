@@ -1,5 +1,10 @@
 # Track authoring pipeline
 
+> Authoring **bikes**? See the bike section in
+> [asset-pipeline-guide.md](./asset-pipeline-guide.md#bikes-bikes-srcidblend--specsbikesidjson)
+> — same one-click flow, but the .blend is the source of truth for
+> geometry instead of a JSON spec.
+
 A track has two sources, edited in two different tools, joined at runtime:
 
 - **`public/tracks/<id>.json`** — gameplay data (gates, AI spline, pickup
@@ -32,11 +37,12 @@ If something errored mid-export, jump to [Troubleshooting](#troubleshooting).
    Tick the checkbox to enable.
 2. Open or save your track as `tracks-src/<id>.blend` (the basename of
    the file becomes the in-game track id).
-3. In the 3D viewport, press **N** → **Hoverbike** tab → **Export to
-   Game**. The addon validates the scene, writes
+3. In the 3D viewport, press **N** → **Hoverbike** tab → **Export
+   Track to Game**. The addon validates the scene, writes
    `public/assets/tracks/<id>.glb`, and on first export creates a
    starter `public/tracks/<id>.json` from the .blend's checkpoints,
-   spline, pickups, and start.
+   spline, pickups, and start. (The same panel offers
+   **Export Bike to Game** when the open .blend is in `bikes-src/`.)
 4. Playtest: in your browser, open
    `http://localhost:5191/?track=<id>` (or use the **Copy Play URL**
    button in the addon panel). The dev server is already aware of the

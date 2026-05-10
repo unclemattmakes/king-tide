@@ -6,30 +6,33 @@ Single-file addon. Install once via:
     pick: tools/blender/hoverbike_addon.py
     enable the checkbox next to "Hoverbike: Export to Game"
 
-After installing, the 3D viewport sidebar (press N) shows a
-"Hoverbike" tab with two buttons:
+The 3D viewport sidebar (press N) shows a "Hoverbike" tab whose UI
+adapts to which kind of asset you're editing — detected from the
+``.blend``'s parent directory:
 
-    [ Export to Game ]   ← validate + write GLB + (if missing) starter JSON
-    [ Open Game in Browser ]  ← copies the playtest URL to the clipboard
+  ``tracks-src/<id>.blend`` → track mode
+  ``bikes-src/<id>.blend``  → bike mode
 
-The addon does NOT need a running Vite dev server. It writes files
-directly into the cloned repo. Repo root is auto-detected by walking
-up from the currently-open .blend until a `package.json` is found.
+In track mode the button is **Export Track to Game**: validates the
+scene, writes the GLB into ``public/assets/tracks/``, and on first
+export materialises a starter ``public/tracks/<id>.json`` from the
+.blend's checkpoints / spline / pickups / start. Subsequent exports
+preserve the JSON so in-app editor saves aren't blown away;
+Shift-click rewrites it.
 
-The validation rules + GLB export options match the legacy
-`tools/export_track.py` script (which is still supported for headless
-CI / scripted runs). On first export of a track, a starter JSON is
-written to `public/tracks/<id>.json` so the in-app editor can open
-it. Subsequent exports do NOT overwrite that JSON — once you've
-edited gameplay placement in the in-app editor, that file is the
-source of truth, and only the GLB rebuilds. To force-rewrite the
-JSON from the .blend, hold Shift while clicking the button (or set
-the operator's "force_json" toggle from the Adjust Last Operation
-panel).
+In bike mode the button is **Export Bike to Game**: validates the
+scene, writes the GLB into ``public/assets/bikes/``, and on first
+export materialises a starter ``specs/bikes/<id>.json`` derived from
+``bike_root``'s extras + the bike's authored materials. Subsequent
+exports preserve the spec; Shift-click rewrites it.
 
-Track id is derived from the .blend filename, e.g.
-`tracks-src/my-track.blend` → id `my-track`. Override per-scene by
-adding a string Custom Property `hoverbike_track_id` to the scene.
+Both modes share repo-root discovery (walk up to the first dir
+containing ``package.json`` + ``public/``) and asset-id derivation
+(.blend basename, overridable via the scene custom property
+``hoverbike_track_id`` or ``hoverbike_bike_id``).
+
+The addon does NOT require a running Vite dev server — it writes
+files straight into the cloned repo.
 """
 
 from __future__ import annotations
@@ -47,10 +50,10 @@ from bpy.types import Operator, Panel
 bl_info = {
     "name": "Hoverbike: Export to Game",
     "author": "Hoverbike",
-    "version": (1, 0, 0),
+    "version": (2, 0, 0),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > Hoverbike",
-    "description": "One-click export from Blender to the running hoverbike game.",
+    "description": "One-click export of bikes and tracks from Blender to the running hoverbike game.",
     "category": "Import-Export",
 }
 
@@ -59,10 +62,9 @@ bl_info = {
 
 
 def find_repo_root(start: str | None) -> str | None:
-    """Walk up from `start` looking for a directory containing
-    package.json + a `public/` folder. Returns the absolute path or
-    None if the .blend isn't inside a hoverbike clone.
-    """
+    """Walk up from ``start`` looking for a directory containing
+    ``package.json`` + a ``public/`` folder. Returns the absolute
+    path or None if the .blend isn't inside a hoverbike clone."""
     if not start:
         return None
     cur = os.path.dirname(os.path.abspath(start))
@@ -80,11 +82,32 @@ def find_repo_root(start: str | None) -> str | None:
     return None
 
 
-def derive_track_id() -> str | None:
-    """Pick the track id from a scene custom property, falling back
-    to the .blend filename's basename. Returns None if no .blend is
-    saved (operator refuses to run in that case)."""
-    scene_id = bpy.context.scene.get("hoverbike_track_id")
+# ── Mode detection ──────────────────────────────────────────────────────────
+
+
+def detect_mode(blend_path: str | None) -> str | None:
+    """Returns ``'track'`` if the .blend lives in ``tracks-src/``,
+    ``'bike'`` if it lives in ``bikes-src/``, or ``None`` otherwise.
+
+    Mode dictates which validator + exporter the panel uses. We key
+    off the parent directory rather than scene contents so an empty
+    .blend in the right folder still surfaces the right UI.
+    """
+    if not blend_path:
+        return None
+    parent = os.path.basename(os.path.dirname(os.path.abspath(blend_path)))
+    if parent == "tracks-src":
+        return "track"
+    if parent == "bikes-src":
+        return "bike"
+    return None
+
+
+def derive_asset_id(scene_prop: str) -> str | None:
+    """Pick the asset id from a scene custom property
+    (``hoverbike_track_id`` / ``hoverbike_bike_id``), falling back to
+    the .blend filename basename. None if no .blend is saved."""
+    scene_id = bpy.context.scene.get(scene_prop)
     if isinstance(scene_id, str) and scene_id.strip():
         return scene_id.strip()
     blend = bpy.data.filepath
@@ -94,7 +117,7 @@ def derive_track_id() -> str | None:
     return base or None
 
 
-# ── Validation (mirrors tools/export_track.py) ──────────────────────────────
+# ── Track validation (mirrors tools/export_track.py) ────────────────────────
 
 NAME_PATTERNS = [
     (re.compile(r"^water_volume(_.*)?$"), "water"),
@@ -114,27 +137,23 @@ def expected_kind(name: str) -> str | None:
 
 def is_object_visible(obj: bpy.types.Object) -> bool:
     """True iff the object is currently visible in the active view
-    layer. Combines the eye icon (`hide_get()`), the monitor icon
-    (`hide_viewport`), and ancestor-collection visibility.
+    layer. Combines the eye icon (``hide_get()``), the monitor icon
+    (``hide_viewport``), and ancestor-collection visibility.
 
     Hidden objects are skipped by validation, baking, JSON
     derivation, and the GLB export — letting authors stage WIP or
     decorative geometry in the .blend without it leaking into the
-    game build.
-    """
+    game build."""
     try:
         return bool(obj.visible_get())
     except RuntimeError:
-        # `visible_get()` raises if the object isn't in the current
-        # view layer at all (e.g. linked-data corner cases). Treat
-        # those as not-exported.
         return False
 
 
 def bake_ai_splines() -> None:
-    """Sample every visible ai_spline_* curve into a flat
-    [x0,y0,z0,...] custom property on the same object. Hidden curves
-    are skipped (mirrors the export filter)."""
+    """Sample every visible ``ai_spline_*`` curve into a flat
+    ``[x0,y0,z0,...]`` custom property on the same object. Hidden
+    curves are skipped."""
     for obj in list(bpy.data.objects):
         if not obj.name.startswith("ai_spline_") or obj.type != "CURVE":
             continue
@@ -152,7 +171,7 @@ def bake_ai_splines() -> None:
         obj["points"] = flat
 
 
-def validate_scene() -> list[str]:
+def validate_track_scene() -> list[str]:
     errors: list[str] = []
     by_kind: dict[str, list[bpy.types.Object]] = defaultdict(list)
 
@@ -160,10 +179,6 @@ def validate_scene() -> list[str]:
         kind = expected_kind(obj.name)
         if kind is None:
             continue
-        # Hidden objects are not part of the export — don't validate
-        # them. This lets authors keep WIP / reference cp_* / spline
-        # objects parked in a hidden collection without tripping the
-        # contiguous-index or single-spline checks.
         if not is_object_visible(obj):
             continue
         if "kind" not in obj.keys():
@@ -199,33 +214,85 @@ def validate_scene() -> list[str]:
     return errors
 
 
-# ── JSON derivation (mirrors tools/blender/build_track.py::emit_gameplay_json) ──
+# ── Bike validation ─────────────────────────────────────────────────────────
+
+REQUIRED_BIKE_SLOTS = (
+    "seat",
+    "nose_cam",
+    "fx_thruster_l",
+    "fx_thruster_r",
+    "fx_exhaust",
+)
+
+
+def validate_bike_scene() -> list[str]:
+    """Required-shape check: exactly one ``bike_root``, every required
+    socket present, at least one collider. Mirrors the headless
+    ``build_bike.py`` validators_factory so addon-exported GLBs and
+    ``pnpm gen:bikes`` outputs validate identically.
+    """
+    errors: list[str] = []
+    by_kind: dict[str, list[bpy.types.Object]] = defaultdict(list)
+    sockets_by_slot: dict[str, list[bpy.types.Object]] = defaultdict(list)
+
+    for obj in bpy.data.objects:
+        if not is_object_visible(obj):
+            continue
+        kind = obj.get("kind")
+        if isinstance(kind, str):
+            by_kind[kind].append(obj)
+            if kind == "socket":
+                slot = obj.get("slot")
+                if isinstance(slot, str):
+                    sockets_by_slot[slot].append(obj)
+
+    bike_count = len(by_kind.get("bike", []))
+    if bike_count != 1:
+        errors.append(
+            f"expected exactly 1 bike_root (kind=bike); found {bike_count}. "
+            f"Add a top-level empty named 'bike_root' with custom property kind='bike'."
+        )
+
+    if len(by_kind.get("collider", [])) < 1:
+        errors.append(
+            "missing collider (kind='collider'). Add an empty named 'collider_body' "
+            "with extras kind='collider', shape='box', half_extents=[w/2, h/2, l/2]."
+        )
+
+    for slot in REQUIRED_BIKE_SLOTS:
+        n = len(sockets_by_slot.get(slot, []))
+        if n == 0:
+            errors.append(
+                f"missing socket: slot='{slot}'. Add an empty named 'socket_{slot}' "
+                f"with extras kind='socket', slot='{slot}'."
+            )
+        elif n > 1:
+            errors.append(f"duplicate socket: slot='{slot}' (count={n})")
+
+    bike_root = next(iter(by_kind.get("bike", [])), None)
+    if bike_root is not None:
+        bike_id_prop = bike_root.get("bike_id")
+        if not isinstance(bike_id_prop, str) or not bike_id_prop.strip():
+            errors.append(
+                "bike_root: missing or empty extras.bike_id (set custom property 'bike_id')."
+            )
+
+    return errors
+
+
+# ── Track JSON derivation (mirrors build_track.py::emit_gameplay_json) ──────
 
 
 def _b2t(x: float, y: float, z: float) -> dict[str, float]:
-    """Blender (X right, Y forward, Z up) → three.js (X right, Y up, Z forward).
-
-    Blender +Y forward maps to three.js +Z forward via -Y, matching
-    what gltf export does with `export_yup=True`.
-    """
+    """Blender (X right, Y forward, Z up) → three.js (X right, Y up, Z forward)."""
     return {"x": float(x), "y": float(z), "z": -float(y)}
 
 
 def _yaw_from_z_euler(obj: bpy.types.Object) -> float:
-    """A start_NN empty stores its facing direction as a Z-axis
-    Euler rotation. Convert to the runtime yaw (rotation around
-    three's +Y, sign convention matches createBike())."""
     return float(obj.rotation_euler.z)
 
 
 def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
-    """Build a runtime gameplay JSON from the currently-open .blend's
-    metadata objects.
-
-    Mirrors `tools/blender/build_track.py::emit_gameplay_json` but
-    sources its data from `bpy.data.objects` rather than a spec file.
-    The output matches the schema in `src/game/tracks/json-loader.ts`.
-    """
     by_kind: dict[str, list[bpy.types.Object]] = defaultdict(list)
     for obj in bpy.data.objects:
         if not is_object_visible(obj):
@@ -234,7 +301,6 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         if kind:
             by_kind[kind].append(obj)
 
-    # Checkpoints — sorted by name for stable cp_00, cp_01, ... order.
     cps = sorted(by_kind.get("checkpoint", []), key=lambda o: o.name)
     checkpoints: list[dict[str, Any]] = []
     for i, cp in enumerate(cps):
@@ -243,17 +309,12 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
             {
                 "index": i,
                 "position": _b2t(loc.x, loc.y, loc.z),
-                # No rotation conversion yet — the empty's rotation is
-                # ignored on first import; spline-bound gates get their
-                # facing from the spline tangent at boot. Authors
-                # tweak gate yaw in the in-app editor.
                 "rotation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
                 "halfWidth": float(cp.get("half_width", 6.0)),
                 "height": float(cp.get("height", 4.0)),
             }
         )
 
-    # Starts — pick start_00 if present, else any start, else origin.
     starts = sorted(by_kind.get("start", []), key=lambda o: o.name)
     if starts:
         s0 = starts[0]
@@ -264,12 +325,6 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         start_pos = {"x": 0.0, "y": 0.5, "z": 0.0}
         start_yaw = 0.0
 
-    # AI spline — sample the dense vertex list from the curve and
-    # emit it as `anchors` (Catmull-Rom control points). 12 anchors is
-    # a good starting point for a stadium-style loop; the editor lets
-    # the author add/remove/move them later. We sample evenly across
-    # the dense polyline rather than using all of it (would produce
-    # ~50+ anchors which is unwieldy in the editor).
     anchors: list[dict[str, float]] = []
     main = next(
         (o for o in by_kind.get("ai_spline", []) if o.name == "ai_spline_main"), None
@@ -287,13 +342,11 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
             sampled = [dense[i] for i in range(0, len(dense), step)][:target]
             anchors = [_b2t(p.x, p.y, p.z) for p in sampled]
 
-    # Pickup spawns.
     pickups: list[dict[str, float]] = []
     for p in by_kind.get("pickup_spawn", []):
         loc = p.matrix_world.translation
         pickups.append(_b2t(loc.x, loc.y, loc.z))
 
-    # Water volume tuning.
     water = next(iter(by_kind.get("water", [])), None)
     water_block: dict[str, float] = {
         "height": 0.0,
@@ -320,19 +373,103 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
     return body
 
 
-# ── Operators ──────────────────────────────────────────────────────────────
+# ── Bike spec derivation ────────────────────────────────────────────────────
 
 
-class HOVERBIKE_OT_export_to_game(Operator):
-    """Validate the scene, export the GLB into the cloned repo's
-    public/assets/tracks/, and on first export write a starter JSON
-    to public/tracks/. Subsequent exports preserve the JSON (the
-    in-app editor owns it). Hold Shift to overwrite the JSON."""
+def _read_principled_basecolor_hex(mat: bpy.types.Material) -> str | None:
+    """Pull a #rrggbb base-colour string out of a Principled BSDF.
+    Inverts the linear-space → sRGB approximation used by the
+    seeder/builder (``c**(1/2.2)``) so the round-trip lands close to
+    the original hex authored in the spec."""
+    if not mat.use_nodes or mat.node_tree is None:
+        return None
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is None or "Base Color" not in bsdf.inputs:
+        return None
+    rgba = bsdf.inputs["Base Color"].default_value
+    r, g, b = rgba[0], rgba[1], rgba[2]
+    inv = 1.0 / 2.2
+    r8 = max(0, min(255, int(round(pow(max(0.0, r), inv) * 255))))
+    g8 = max(0, min(255, int(round(pow(max(0.0, g), inv) * 255))))
+    b8 = max(0, min(255, int(round(pow(max(0.0, b), inv) * 255))))
+    return f"#{r8:02x}{g8:02x}{b8:02x}"
 
-    bl_idname = "hoverbike.export_to_game"
-    bl_label = "Export to Game"
+
+def _read_emission_strength(mat: bpy.types.Material) -> float | None:
+    if not mat.use_nodes or mat.node_tree is None:
+        return None
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is None or "Emission Strength" not in bsdf.inputs:
+        return None
+    return float(bsdf.inputs["Emission Strength"].default_value)
+
+
+def derive_bike_spec(bike_id: str) -> dict[str, Any]:
+    """Build a runtime spec from ``bike_root`` extras + the materials
+    in the scene. Only the fields the manifest + viewer surface get
+    emitted; the geometry block is intentionally omitted (the .blend
+    is the source of truth for geometry in the new pipeline)."""
+    bike_root = bpy.data.objects.get("bike_root")
+    extras = bike_root.items() if bike_root is not None else []
+    extras_dict = {k: v for k, v in extras}
+
+    display_name = extras_dict.get("display_name") or bike_id.title()
+
+    livery_mat = bpy.data.materials.get(f"mat_bike_{bike_id}_livery")
+    metal_mat = bpy.data.materials.get(f"mat_bike_{bike_id}_chassis")
+    glow_mat = bpy.data.materials.get(f"mat_bike_{bike_id}_glow")
+
+    appearance: dict[str, Any] = {}
+    if livery_mat is not None:
+        hex_ = _read_principled_basecolor_hex(livery_mat)
+        if hex_:
+            appearance["liveryColor"] = hex_
+    if metal_mat is not None:
+        hex_ = _read_principled_basecolor_hex(metal_mat)
+        if hex_:
+            appearance["metalColor"] = hex_
+    if glow_mat is not None:
+        hex_ = _read_principled_basecolor_hex(glow_mat)
+        if hex_:
+            appearance["glowColor"] = hex_
+        gi = _read_emission_strength(glow_mat)
+        if gi is not None:
+            appearance["glowIntensity"] = gi
+
+    physics: dict[str, Any] = {}
+    if "mass_kg" in extras_dict:
+        physics["massKg"] = float(extras_dict["mass_kg"])
+    if "top_speed_mps" in extras_dict:
+        physics["topSpeedMps"] = float(extras_dict["top_speed_mps"])
+    if "hover_height" in extras_dict:
+        physics["hoverHeight"] = float(extras_dict["hover_height"])
+
+    spec: dict[str, Any] = {
+        "$schema": "../_schema/bike.json",
+        "id": bike_id,
+        "displayName": str(display_name),
+    }
+    if physics:
+        spec["physics"] = physics
+    if appearance:
+        spec["appearance"] = appearance
+    return spec
+
+
+# ── Track operator (existing) ───────────────────────────────────────────────
+
+
+class HOVERBIKE_OT_export_track(Operator):
+    """Validate the track scene, write
+    ``public/assets/tracks/<id>.glb``, and on first export materialise
+    a starter ``public/tracks/<id>.json`` from the .blend's metadata
+    objects. Subsequent exports preserve the JSON (the in-app editor
+    owns it). Hold Shift to overwrite the JSON."""
+
+    bl_idname = "hoverbike.export_track"
+    bl_label = "Export Track to Game"
     bl_description = (
-        "Validate scene, export GLB, and (on first export) write a starter JSON. "
+        "Validate scene, export track GLB, and (on first export) write a starter JSON. "
         "Hold Shift to force-rewrite the JSON from the .blend."
     )
     bl_options = {"REGISTER"}
@@ -348,7 +485,6 @@ class HOVERBIKE_OT_export_to_game(Operator):
     )
 
     def invoke(self, context: bpy.types.Context, event: bpy.types.Event) -> set[str]:
-        # Shift-click in the UI → set force_json=True.
         if event.shift:
             self.force_json = True
         return self.execute(context)
@@ -368,7 +504,7 @@ class HOVERBIKE_OT_export_to_game(Operator):
             )
             return {"CANCELLED"}
 
-        track_id = derive_track_id()
+        track_id = derive_asset_id("hoverbike_track_id")
         if not track_id:
             self.report({"ERROR"}, "Couldn't derive a track id from the .blend filename.")
             return {"CANCELLED"}
@@ -383,20 +519,13 @@ class HOVERBIKE_OT_export_to_game(Operator):
         glb_path = os.path.join(repo, "public", "assets", "tracks", f"{track_id}.glb")
         json_path = os.path.join(repo, "public", "tracks", f"{track_id}.json")
 
-        # 1. Validate (after baking the ai splines so the validator
-        #    has the points to count).
         bake_ai_splines()
-        errors = validate_scene()
+        errors = validate_track_scene()
         if errors:
             for e in errors:
                 self.report({"ERROR"}, f"validation: {e}")
             return {"CANCELLED"}
 
-        # 2. Export GLB. Visible-only: the eye icon in Blender's
-        #    outliner toggles inclusion in the export. Mirrors what
-        #    validation + JSON derivation already filter on, so an
-        #    object hidden in the viewport disappears from the GLB,
-        #    the gameplay JSON, and the validator equally.
         os.makedirs(os.path.dirname(glb_path), exist_ok=True)
         try:
             bpy.ops.export_scene.gltf(
@@ -416,8 +545,6 @@ class HOVERBIKE_OT_export_to_game(Operator):
             self.report({"ERROR"}, f"GLB export failed: {e}")
             return {"CANCELLED"}
 
-        # 3. JSON: starter on first export, preserved on subsequent
-        #    exports unless force_json is set.
         json_existed = os.path.exists(json_path)
         wrote_json = False
         if not json_existed or self.force_json:
@@ -440,13 +567,140 @@ class HOVERBIKE_OT_export_to_game(Operator):
         return {"FINISHED"}
 
 
-class HOVERBIKE_OT_copy_play_url(Operator):
-    """Copy http://localhost:5191/?track=<id>&edit=1 to the clipboard
-    so the user can paste it into a browser. Doesn't open a browser
-    itself — playtests should run in the user's already-open dev
-    browser, not a fresh one launched by Blender."""
+# ── Bike operator (new) ─────────────────────────────────────────────────────
 
-    bl_idname = "hoverbike.copy_play_url"
+
+class HOVERBIKE_OT_export_bike(Operator):
+    """Validate the bike scene, write
+    ``public/assets/bikes/<id>.glb``, and on first export materialise
+    a starter ``specs/bikes/<id>.json`` from ``bike_root`` extras +
+    the bike's authored materials. Subsequent exports preserve the
+    spec; Shift-click rewrites it from the .blend."""
+
+    bl_idname = "hoverbike.export_bike"
+    bl_label = "Export Bike to Game"
+    bl_description = (
+        "Validate scene, export bike GLB, and (on first export) write a starter spec JSON. "
+        "Hold Shift to force-rewrite the spec from the .blend."
+    )
+    bl_options = {"REGISTER"}
+
+    force_spec: BoolProperty(  # type: ignore[valid-type]
+        name="Overwrite spec",
+        description=(
+            "Rewrite specs/bikes/<id>.json from the .blend, even if one already "
+            "exists. Off by default so JSON-side tuning isn't blown away by a "
+            "re-export of the .blend."
+        ),
+        default=False,
+    )
+
+    def invoke(self, context: bpy.types.Context, event: bpy.types.Event) -> set[str]:
+        if event.shift:
+            self.force_spec = True
+        return self.execute(context)
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        blend = bpy.data.filepath
+        if not blend:
+            self.report({"ERROR"}, "Save your .blend first (Ctrl+S).")
+            return {"CANCELLED"}
+
+        repo = find_repo_root(blend)
+        if not repo:
+            self.report(
+                {"ERROR"},
+                f"No package.json + public/ found in any ancestor of {blend}. "
+                "Save your .blend inside a hoverbike clone (typically bikes-src/).",
+            )
+            return {"CANCELLED"}
+
+        bike_id = derive_asset_id("hoverbike_bike_id")
+        if not bike_id:
+            self.report({"ERROR"}, "Couldn't derive a bike id from the .blend filename.")
+            return {"CANCELLED"}
+        if not re.fullmatch(r"[a-z0-9-]+", bike_id):
+            self.report(
+                {"ERROR"},
+                f"Bike id '{bike_id}' must be lowercase letters, digits, or dashes. "
+                "Rename the .blend or set the scene custom property 'hoverbike_bike_id'.",
+            )
+            return {"CANCELLED"}
+
+        # If bike_root.extras.bike_id is missing, fill it in from the
+        # filename — saves a manual step on the first export of a
+        # freshly-renamed variant.
+        bike_root = bpy.data.objects.get("bike_root")
+        if bike_root is not None and not bike_root.get("bike_id"):
+            bike_root["bike_id"] = bike_id
+
+        glb_path = os.path.join(repo, "public", "assets", "bikes", f"{bike_id}.glb")
+        spec_path = os.path.join(repo, "specs", "bikes", f"{bike_id}.json")
+
+        errors = validate_bike_scene()
+        # Cross-check the bike_root's bike_id against the filename id.
+        if bike_root is not None:
+            stored = bike_root.get("bike_id")
+            if isinstance(stored, str) and stored != bike_id:
+                errors.append(
+                    f"bike_root.extras.bike_id={stored!r} does not match "
+                    f"derived id '{bike_id}'. Rename the .blend or update the "
+                    f"custom property."
+                )
+        if errors:
+            for e in errors:
+                self.report({"ERROR"}, f"validation: {e}")
+            return {"CANCELLED"}
+
+        os.makedirs(os.path.dirname(glb_path), exist_ok=True)
+        try:
+            bpy.ops.export_scene.gltf(
+                filepath=glb_path,
+                export_format="GLB",
+                export_extras=True,
+                export_yup=True,
+                export_apply=True,
+                use_selection=False,
+                use_visible=True,
+                use_renderable=False,
+                use_active_collection=False,
+                export_cameras=False,
+                export_lights=False,
+            )
+        except Exception as e:  # noqa: BLE001
+            self.report({"ERROR"}, f"GLB export failed: {e}")
+            return {"CANCELLED"}
+
+        spec_existed = os.path.exists(spec_path)
+        wrote_spec = False
+        if not spec_existed or self.force_spec:
+            os.makedirs(os.path.dirname(spec_path), exist_ok=True)
+            body = derive_bike_spec(bike_id)
+            with open(spec_path, "w", encoding="utf-8") as f:
+                json.dump(body, f, indent=2)
+                f.write("\n")
+            wrote_spec = True
+
+        rel_glb = os.path.relpath(glb_path, repo).replace("\\", "/")
+        rel_spec = os.path.relpath(spec_path, repo).replace("\\", "/")
+        if wrote_spec:
+            tag = "rewrote" if spec_existed else "created"
+            msg = f"Exported → {rel_glb} ({tag} {rel_spec})"
+        else:
+            msg = f"Exported → {rel_glb} (kept {rel_spec})"
+        self.report({"INFO"}, msg)
+        print(f"[hoverbike-addon] {msg}")
+        return {"FINISHED"}
+
+
+# ── URL helpers ─────────────────────────────────────────────────────────────
+
+
+class HOVERBIKE_OT_copy_track_url(Operator):
+    """Copy ``http://localhost:5191/?track=<id>`` (optionally
+    ``&edit=1``) to the clipboard. Doesn't open a browser itself."""
+
+    bl_idname = "hoverbike.copy_track_url"
     bl_label = "Copy Play URL"
     bl_description = "Copy the dev-server URL for this track to the clipboard."
     bl_options = {"REGISTER"}
@@ -458,13 +712,43 @@ class HOVERBIKE_OT_copy_play_url(Operator):
     )
 
     def execute(self, context: bpy.types.Context) -> set[str]:
-        track_id = derive_track_id()
+        track_id = derive_asset_id("hoverbike_track_id")
         if not track_id:
             self.report({"ERROR"}, "Save your .blend first to derive a track id.")
             return {"CANCELLED"}
         url = f"http://localhost:5191/?track={track_id}"
         if self.edit:
             url += "&edit=1"
+        context.window_manager.clipboard = url
+        self.report({"INFO"}, f"Copied to clipboard: {url}")
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_copy_bike_url(Operator):
+    """Copy ``http://localhost:5191/?bike=<id>`` (or
+    ``?viewer=<id>``) to the clipboard."""
+
+    bl_idname = "hoverbike.copy_bike_url"
+    bl_label = "Copy Play URL"
+    bl_description = "Copy the dev-server URL for this bike to the clipboard."
+    bl_options = {"REGISTER"}
+
+    viewer: BoolProperty(  # type: ignore[valid-type]
+        name="Viewer mode",
+        description=(
+            "Use ?viewer=<id> instead of ?bike=<id> so the URL opens the "
+            "stand-alone bike viewer instead of a full game."
+        ),
+        default=False,
+    )
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        bike_id = derive_asset_id("hoverbike_bike_id")
+        if not bike_id:
+            self.report({"ERROR"}, "Save your .blend first to derive a bike id.")
+            return {"CANCELLED"}
+        param = "viewer" if self.viewer else "bike"
+        url = f"http://localhost:5191/?{param}={bike_id}"
         context.window_manager.clipboard = url
         self.report({"INFO"}, f"Copied to clipboard: {url}")
         return {"FINISHED"}
@@ -487,8 +771,18 @@ class HOVERBIKE_PT_panel(Panel):
             layout.label(text="Save your .blend first.", icon="ERROR")
             return
 
-        track_id = derive_track_id() or "<unknown>"
         repo = find_repo_root(blend)
+        mode = detect_mode(blend)
+
+        if mode == "track":
+            self._draw_track(layout, blend, repo)
+        elif mode == "bike":
+            self._draw_bike(layout, blend, repo)
+        else:
+            self._draw_unknown(layout, blend, repo)
+
+    def _draw_track(self, layout, blend: str, repo: str | None) -> None:
+        track_id = derive_asset_id("hoverbike_track_id") or "<unknown>"
 
         box = layout.box()
         box.label(text=f"Track: {track_id}", icon="WORLD_DATA")
@@ -498,27 +792,20 @@ class HOVERBIKE_PT_panel(Panel):
             box.label(text="Repo not found", icon="ERROR")
             box.label(text="Save .blend inside a hoverbike/ clone.")
 
-        # Big primary button.
         row = layout.row()
         row.scale_y = 1.6
-        row.operator("hoverbike.export_to_game", icon="EXPORT")
+        row.operator("hoverbike.export_track", icon="EXPORT")
 
-        # URL helpers.
         col = layout.column(align=True)
         op_play = col.operator(
-            "hoverbike.copy_play_url",
-            text="Copy Play URL",
-            icon="URL",
+            "hoverbike.copy_track_url", text="Copy Play URL", icon="URL"
         )
         op_play.edit = False
         op_edit = col.operator(
-            "hoverbike.copy_play_url",
-            text="Copy Edit URL",
-            icon="GREASEPENCIL",
+            "hoverbike.copy_track_url", text="Copy Edit URL", icon="GREASEPENCIL"
         )
         op_edit.edit = True
 
-        # Hint about Shift-click.
         layout.separator()
         col = layout.column(align=True)
         col.scale_y = 0.85
@@ -526,12 +813,58 @@ class HOVERBIKE_PT_panel(Panel):
         col.label(text="overwrite the JSON")
         col.label(text="from the .blend.")
 
+    def _draw_bike(self, layout, blend: str, repo: str | None) -> None:
+        bike_id = derive_asset_id("hoverbike_bike_id") or "<unknown>"
+
+        box = layout.box()
+        box.label(text=f"Bike: {bike_id}", icon="AUTO")
+        if repo:
+            box.label(text=f"Repo: {os.path.basename(repo)}", icon="FILE_FOLDER")
+        else:
+            box.label(text="Repo not found", icon="ERROR")
+            box.label(text="Save .blend inside a hoverbike/ clone.")
+
+        row = layout.row()
+        row.scale_y = 1.6
+        row.operator("hoverbike.export_bike", icon="EXPORT")
+
+        col = layout.column(align=True)
+        op_play = col.operator(
+            "hoverbike.copy_bike_url", text="Copy Play URL", icon="URL"
+        )
+        op_play.viewer = False
+        op_view = col.operator(
+            "hoverbike.copy_bike_url", text="Copy Viewer URL", icon="HIDE_OFF"
+        )
+        op_view.viewer = True
+
+        layout.separator()
+        col = layout.column(align=True)
+        col.scale_y = 0.85
+        col.label(text="Shift-click Export:", icon="INFO")
+        col.label(text="overwrite the spec")
+        col.label(text="from the .blend.")
+
+    def _draw_unknown(self, layout, blend: str, repo: str | None) -> None:
+        box = layout.box()
+        box.label(text="Unknown asset type", icon="QUESTION")
+        box.label(text="Save your .blend in:")
+        box.label(text="  • tracks-src/<id>.blend")
+        box.label(text="  • bikes-src/<id>.blend")
+        if repo:
+            box.label(text=f"Repo: {os.path.basename(repo)}", icon="FILE_FOLDER")
+        else:
+            box.label(text="Repo not found", icon="ERROR")
+            box.label(text="Save .blend inside a hoverbike/ clone.")
+
 
 # ── Registration ───────────────────────────────────────────────────────────
 
 _classes = (
-    HOVERBIKE_OT_export_to_game,
-    HOVERBIKE_OT_copy_play_url,
+    HOVERBIKE_OT_export_track,
+    HOVERBIKE_OT_export_bike,
+    HOVERBIKE_OT_copy_track_url,
+    HOVERBIKE_OT_copy_bike_url,
     HOVERBIKE_PT_panel,
 )
 
