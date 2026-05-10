@@ -1,5 +1,8 @@
 import { addComponent, hasComponent, query, removeComponent } from 'bitecs'
 import * as THREE from 'three'
+import { spawnBikes } from './boot/spawn-bikes'
+import { loadTrackForBoot } from './boot/track-loader'
+import { downloadReplay, formatTime, ordinal } from './boot/utils'
 import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug'
 import { createAudioEngine } from './engine/audio/audio'
 import { loadDevSettings } from './engine/dev-settings'
@@ -14,29 +17,20 @@ import {
   readPlayerIntent,
 } from './engine/input'
 import { installCameraLookInput, tickCameraLook } from './engine/input/camera-look'
-import { createIslandMesh } from './engine/render/arena-mesh'
 import { createChaseCamera } from './engine/render/camera'
-import { createCliffsideMesh } from './engine/render/cliffside-mesh'
 import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
 import { createFxSystem } from './engine/render/fx'
-import { attachTrackColliders, loadGlbTrackVisuals } from './engine/render/glb-track'
 import { createPhysicsDebugRenderer } from './engine/render/physics-debug'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
 import { createRaceHud } from './engine/render/race-hud'
-import { createRampMesh } from './engine/render/ramp-mesh'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
 import { createScene } from './engine/render/scene'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { type BikeImpact, createWaterMesh } from './engine/render/water'
-import {
-  parseReplay,
-  type ReplayBike,
-  type ReplayFile,
-  serializeReplay,
-} from './engine/replay/format'
+import { parseReplay, type ReplayBike, type ReplayFile } from './engine/replay/format'
 import { createReplayPlayer, makePoseBuffer } from './engine/replay/player'
 import { createReplayRecorder, type ReplayRecorder } from './engine/replay/recorder'
 import { createSpectatorCamera } from './engine/replay/spectator-camera'
@@ -56,12 +50,8 @@ import { AIController, AIControllerStore, AITag, defaultAIController } from './g
 import { ExplosionTag, MineTag, MissileTag } from './game/components/combat'
 import type { PickupType } from './game/components/pickup'
 import { RacerStore } from './game/components/race'
-import { createLagoonIsland, createSafetyFloor } from './game/entities/arena'
-import { createBike } from './game/entities/bike'
-import { createCliffsideTerrain } from './game/entities/cliffside-terrain'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
 import { createPropColliders } from './game/entities/props'
-import { createRamp } from './game/entities/ramp'
 import { aiCombatSystem } from './game/systems/ai-combat'
 import { aiControlSystem } from './game/systems/ai-control'
 import {
@@ -85,12 +75,6 @@ import { rubberBandSystem } from './game/systems/rubber-band'
 import { computeStandings } from './game/systems/standings'
 import { syncFromPhysics } from './game/systems/sync-from-physics'
 import { wakeUpdateSystem } from './game/systems/wake-update'
-import { createCliffside } from './game/tracks/cliffside'
-import { loadTrackFromGlb } from './game/tracks/glb-loader'
-import { buildTrackFromJson } from './game/tracks/json-loader'
-import { createLagoonLoop } from './game/tracks/lagoon-loop'
-
-const NUM_AI = 4
 
 /**
  * Boot sequence — phases, in order:
@@ -108,10 +92,10 @@ const NUM_AI = 4
  *      water tuning. Heavy debug overlays bind lazy click handlers here
  *      (their UI modules dynamic-import on first toggle).
  *   4. Asset load. Manifest fetch → bike GLB(s) → track (procedural,
- *      JSON, or GLB) → props.
- *   5. Entity spawn. Player bike first (deterministic eid for the replay
- *      recorder's slot 0), then AI bikes, pickups, mines/missiles handled
- *      by the combat system.
+ *      JSON, or GLB → see `src/boot/track-loader.ts`) → props.
+ *   5. Entity spawn. See `src/boot/spawn-bikes.ts`. Player bike first
+ *      (deterministic eid for the replay recorder's slot 0), then AI
+ *      bikes, pickups, mines/missiles handled by the combat system.
  *   6. Render systems. Bike, pickup, combat, FX. The fx system needs
  *      `phys` for wake/dust ground sampling; combat/pickup just need the
  *      sim world. See `docs/code-review-2026-05.md` §1.3 for the shared
@@ -121,6 +105,9 @@ const NUM_AI = 4
  *      further down (search for "Replay-playback mode").
  *   8. Edit mode (alternative to phase 7). `installTrackEditor` takes
  *      the canvas; sim/physics tick is skipped.
+ *
+ * Pure helpers (downloadReplay, emptyDraftTrack, ordinal, formatTime)
+ * live in `src/boot/utils.ts`.
  */
 async function boot() {
   const appEl = document.getElementById('app')
@@ -259,84 +246,12 @@ async function boot() {
     bikeId: playerVariant.id,
   })
 
-  // Universal: backstop floor for any track.
-  createSafetyFloor(phys)
-
-  // Per-track terrain (physics + visuals). Procedural tracks build their
-  // own terrain in code; .glb-backed tracks load mesh + collider geometry
-  // straight from the asset.
-  if (trackId === 'cliffside') {
-    createCliffsideTerrain(phys)
-    scene.add(createCliffsideMesh())
-  } else if (trackId === 'lagoon') {
-    createLagoonIsland(phys)
-    scene.add(createIslandMesh())
-    createRamp(phys)
-    scene.add(createRampMesh())
-  }
-
   const editMode = editModeFlag
 
-  let track: import('./game/tracks/types').Track
-  if (trackId === 'cliffside') {
-    track = createCliffside()
-  } else if (trackId === 'lagoon') {
-    track = createLagoonLoop()
-  } else {
-    // Try a JSON-authored track first (gameplay data from the in-app
-    // editor or hand-edited spec). On 404, fall back to a hand-authored
-    // Blender export at the conventional GLB path so anything produced
-    // by `tools/export_track.py` is playable via `?track=<id>` without
-    // a per-track branch here.
-    const jsonUrl = `/tracks/${trackId}.json`
-    const jsonRes = await fetch(jsonUrl)
-    // Vite's SPA fallback returns 200 + index.html for missing static
-    // files, so a "real" JSON track has to be both 200 AND served as
-    // application/json. Anything else falls through to the GLB / draft
-    // path below as a missing track.
-    const jsonContentType = jsonRes.headers.get('content-type') ?? ''
-    const jsonExists = jsonRes.ok && jsonContentType.includes('json')
-    if (jsonExists) {
-      track = buildTrackFromJson(JSON.parse(await jsonRes.text()))
-      if (track.environmentGlb && !editMode) {
-        const env = await loadGlbTrackVisuals(track.environmentGlb)
-        scene.add(env.scene)
-        attachTrackColliders(env.scene, phys)
-      }
-    } else if (!jsonRes.ok && jsonRes.status !== 404) {
-      throw new Error(`track: fetch ${jsonUrl} failed: ${jsonRes.status} ${jsonRes.statusText}`)
-    } else {
-      // No JSON. Two paths:
-      //   - GLB exists: load it as the legacy all-in-glb track.
-      //   - Edit mode + no GLB: stub an empty draft so the editor can
-      //     open a fresh track for the user to author. Saving from the
-      //     editor materialises `public/tracks/<id>.json`.
-      const glbUrl = `/assets/tracks/${trackId}.glb`
-      const glbHead = await fetch(glbUrl, { method: 'HEAD' })
-      const glbContentType = glbHead.headers.get('content-type') ?? ''
-      const glbExists =
-        glbHead.ok &&
-        (glbContentType.includes('octet-stream') ||
-          glbContentType.includes('gltf') ||
-          glbContentType.includes('binary'))
-      if (glbExists) {
-        track = await loadTrackFromGlb(glbUrl, {
-          id: trackId,
-          name: trackId,
-          lapsToFinish: 3,
-        })
-        if (!editMode) {
-          const env = await loadGlbTrackVisuals(glbUrl)
-          scene.add(env.scene)
-          attachTrackColliders(env.scene, phys)
-        }
-      } else if (editMode) {
-        track = emptyDraftTrack(trackId)
-      } else {
-        throw new Error(`track: no JSON at ${jsonUrl} and no GLB at ${glbUrl}`)
-      }
-    }
-  }
+  // Track terrain + data. See `src/boot/track-loader.ts` — handles
+  // procedural tracks, JSON tracks, GLB tracks, and the empty-draft
+  // fallback for editor on a fresh id.
+  const track = await loadTrackForBoot({ trackId, scene, phys, editMode })
 
   // Edit mode: the editor owns the canvas, sim/physics are skipped, no AI
   // bikes, no race system. The user authors the track and saves to disk;
@@ -404,69 +319,16 @@ async function boot() {
     loadBike('/assets/bikes/racer.glb'),
   ])
 
-  const startPos = track.start.position
-
-  // In replay mode the bike roster comes straight from the recording: one
-  // bike per slot, spawned with the recorded variant's stats/colors so the
-  // visuals match the original race. They're not Racer-tagged (no race
-  // tracking during playback) and not AI-tagged (no AI control during
-  // playback) — they're just kinematic ghosts whose transforms are written
-  // each frame from the interpolated replay data.
-  const aiEids: number[] = []
-  const replayBikeEids: number[] = []
-  let playerEid: number
-  if (activeReplay) {
-    for (let i = 0; i < activeReplay.bikes.length; i++) {
-      const b = activeReplay.bikes[i]!
-      const variant = resolveBikeVariant(b.variantId)
-      const eid = createBike(sim, phys, {
-        position: startPos,
-        yaw: track.start.yaw,
-        isPlayer: i === 0,
-        asRacer: false,
-        stats: {
-          ...variant.stats,
-          bodyColor: variant.bodyColor,
-          variantId: variant.id,
-        },
-      })
-      replayBikeEids.push(eid)
-    }
-    playerEid = replayBikeEids[0]!
-  } else {
-    playerEid = createBike(sim, phys, {
-      position: startPos,
-      yaw: track.start.yaw,
-      isPlayer: true,
-      asRacer: true,
-      stats: {
-        ...playerVariant.stats,
-        bodyColor: playerVariant.bodyColor,
-        variantId: playerVariant.id,
-      },
-    })
-
-    // Spread AI bikes across a 4-wide grid behind the player on the right
-    // straight, each with a different perpendicular race-line offset. The
-    // straight is 28m wide (gate halfWidth × 2), so we spread offsets across
-    // ±6m. Bikes spawn at the same lateral offset so they hold their lane.
-    const aiSlots = [
-      { dx: -6, dz: -5, off: -6 },
-      { dx: -2, dz: -10, off: -2 },
-      { dx: 2, dz: -10, off: 2 },
-      { dx: 6, dz: -5, off: 6 },
-    ]
-    for (let i = 0; i < Math.min(NUM_AI, aiSlots.length); i++) {
-      const slot = aiSlots[i]!
-      const aiEid = createBike(sim, phys, {
-        position: { x: startPos.x + slot.dx, y: startPos.y, z: startPos.z + slot.dz },
-        yaw: track.start.yaw,
-        asRacer: true,
-        ai: { splineId: 'main', lineOffset: slot.off },
-      })
-      aiEids.push(aiEid)
-    }
-  }
+  // Spawn bikes — see `src/boot/spawn-bikes.ts`. Order is deterministic
+  // (player slot 0 then AI 1..N, or replay-recording order) so the
+  // recorder / player downstream see consistent slot numbering.
+  const { playerEid, aiEids, replayBikeEids } = spawnBikes({
+    sim,
+    phys,
+    track,
+    playerVariant,
+    activeReplay,
+  })
 
   // Mark the initial "next" gate (cp 0). After the first frame the race
   // callback takes over.
@@ -1276,93 +1138,6 @@ async function boot() {
   state.ready = true
   requestAnimationFrame(frame)
 }
-
-/**
- * Trigger a browser download of a serialized replay file. Filename
- * embeds the track id + a short timestamp so multiple saves from the
- * same browser don't overwrite each other.
- */
-function downloadReplay(replay: ReplayFile): void {
-  const text = serializeReplay(replay)
-  const blob = new Blob([text], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const stamp = new Date(replay.meta.recordedAt).toISOString().replace(/[:.]/g, '-')
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `hoverbike-${replay.meta.trackId}-${stamp}.replay`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
-
-/**
- * Empty starter track used when the editor is opened on an id that
- * has neither a JSON nor a GLB. The user authors the layout from
- * scratch and the first Save materialises `public/tracks/<id>.json`.
- *
- * Two seed checkpoints + two seed spline anchors so the editor's
- * loader (which validates non-empty arrays) and the
- * runtime-derived spline-bound gates have something to work with.
- */
-function emptyDraftTrack(id: string): import('./game/tracks/types').Track {
-  return {
-    id,
-    name: id,
-    lapsToFinish: 3,
-    start: { position: { x: 0, y: 0.5, z: 0 }, yaw: 0 },
-    checkpoints: [
-      {
-        index: 0,
-        position: { x: 0, y: 1.5, z: 20 },
-        rotation: { x: 0, y: 0, z: 0, w: 1 },
-        halfWidth: 8,
-        height: 4,
-      },
-      {
-        index: 1,
-        position: { x: 0, y: 1.5, z: -20 },
-        rotation: { x: 0, y: 0, z: 0, w: 1 },
-        halfWidth: 8,
-        height: 4,
-      },
-    ],
-    aiSplines: [
-      {
-        id: 'main',
-        points: [
-          { x: 0, y: 0.5, z: 20 },
-          { x: 20, y: 0.5, z: 0 },
-          { x: 0, y: 0.5, z: -20 },
-          { x: -20, y: 0.5, z: 0 },
-        ],
-        anchors: [
-          { x: 0, y: 0.5, z: 20 },
-          { x: 20, y: 0.5, z: 0 },
-          { x: 0, y: 0.5, z: -20 },
-          { x: -20, y: 0.5, z: 0 },
-        ],
-      },
-    ],
-    pickupSpawns: [],
-    boostPads: [],
-    props: [],
-    surfaces: [],
-  }
-}
-
-function ordinal(n: number): string {
-  const s = ['th', 'st', 'nd', 'rd']
-  const v = n % 100
-  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`
-}
-
-function formatTime(sec: number): string {
-  const m = Math.floor(sec / 60)
-  const s = sec - m * 60
-  return m > 0 ? `${m}:${s.toFixed(2).padStart(5, '0')}` : `${s.toFixed(2)}s`
-}
-
 boot().catch((err) => {
   console.error('[boot] fatal', err)
   const el = document.getElementById('hud-backend')
