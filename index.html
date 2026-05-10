@@ -28,6 +28,15 @@
       #finish .stat { font-size: 18px; line-height: 1.5; }
       #finish .stat b { color: #ffcc66; }
       #finish .hint { margin-top: 20px; font-size: 11px; opacity: 0.6; }
+      #finish .actions { margin-top: 18px; display: flex; gap: 10px; justify-content: center; pointer-events: auto; }
+      #finish button.action {
+        background: rgba(255,200,100,0.16); color: #ffcc66;
+        border: 1px solid rgba(255,200,100,0.5); border-radius: 3px;
+        font: bold 12px ui-monospace, monospace; letter-spacing: 1px;
+        padding: 6px 14px; cursor: pointer;
+      }
+      #finish button.action:hover { filter: brightness(1.2); }
+      #finish button.action:disabled { opacity: 0.6; cursor: default; }
 
       /* Garage button (HUD corner) */
       #garage-toggle {
@@ -305,6 +314,9 @@
           Time: <b id="finish-time">—</b><br />
           <span id="finish-best"></span>
         </div>
+        <div class="actions">
+          <button class="action" id="finish-save-replay" style="display:none;">SAVE REPLAY</button>
+        </div>
         <div class="hint">press R to race again</div>
       </div>
     </div>
@@ -394,8 +406,10 @@
         <div class="actions">
           <button class="action secondary" id="garage-cancel">CANCEL</button>
           <button class="action secondary" id="garage-clear">CLEAR RECORDS</button>
+          <button class="action secondary" id="garage-load-replay">LOAD REPLAY</button>
           <button class="action" id="garage-race">RACE</button>
         </div>
+        <input id="garage-replay-input" type="file" accept=".replay,application/json" style="display:none;" />
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
