@@ -2,15 +2,6 @@
   "$schema": "../_schema/bike.json",
   "id": "stunt",
   "displayName": "Stunt",
-  "geometry": {
-    "chassisLength": 2.1,
-    "chassisWidth": 0.5,
-    "chassisHeight": 0.35,
-    "fairingStyle": "bare",
-    "thrusterCount": 2,
-    "thrusterSpacing": 0.5,
-    "fork": "single"
-  },
   "physics": {
     "massKg": 90,
     "topSpeedMps": 25,
@@ -21,8 +12,5 @@
     "metalColor": "#1c2620",
     "glowColor": "#66ff99",
     "glowIntensity": 1.6
-  },
-  "rider": {
-    "seatOffset": [0, 0.45, -0.05]
   }
 }
