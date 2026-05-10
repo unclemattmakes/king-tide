@@ -73,5 +73,11 @@ export type HoverStateData = {
    *  emission (water) and spark/dust emission (land). Defaults to `false`
    *  when there is no surface (airborne). */
   surfaceIsWater: boolean
+  /** Smoothed player-input pitch bias (radians). Tracked separately from the
+   *  surface-alignment pitch so the bike can follow the wave field at a fast
+   *  rate (visible on all bikes, AI included) while the player's input bias
+   *  decays slowly when the stick is released — preserves the "bike retains
+   *  its attitude after a wave-jump" feel without damping wave tracking. */
+  inputPitch: number
 }
 export const HoverStateStore = createStore<HoverStateData>('HoverState')
