@@ -21,6 +21,7 @@ import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
 import { attachTrackColliders, loadGlbTrackVisuals } from './engine/render/glb-track'
 import { loadTrackFromGlb } from './game/tracks/glb-loader'
+import { createPhysicsDebugRenderer } from './engine/render/physics-debug'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
 import { createRampMesh } from './engine/render/ramp-mesh'
@@ -418,6 +419,16 @@ async function boot() {
   const dirArrow = createDirectionArrow()
   scene.add(dirArrow.mesh)
 
+  // Collision wireframe overlay — pulls `world.debugRender()` each frame
+  // when enabled. Toggle: F2 key, `?debug=collision` URL param, or
+  // `window.__hover.toggleCollisionDebug()`. Cheap when off (early-return
+  // in tick), so it stays in the scene at all times.
+  const physicsDebug = createPhysicsDebugRenderer(phys)
+  scene.add(physicsDebug.mesh)
+  if (params.get('debug') === 'collision') {
+    physicsDebug.setEnabled(true)
+  }
+
   // Audio: lazy-init AudioContext on first user gesture (browsers block
   // autoplay until then). The engine itself is safe to call before
   // `resume()` — every method early-returns without a context.
@@ -459,6 +470,12 @@ async function boot() {
       return autoPlay
     },
     isAutoPlay: () => autoPlay,
+    toggleCollisionDebug: () => {
+      const on = physicsDebug.toggle()
+      updateCollisionPill()
+      return on
+    },
+    isCollisionDebugOn: () => physicsDebug.isEnabled(),
   })
   if (backendEl) backendEl.textContent = `backend: ${backend}`
   if (finishSub) finishSub.textContent = track.name
@@ -502,12 +519,16 @@ async function boot() {
   }
 
   // Keys: R to restart after finish; T (or F1) to toggle auto-play;
-  // Backspace to respawn the player in place.
+  // F2 to toggle collision debug overlay; Backspace to respawn.
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyR' && finishShown) {
       window.location.reload()
     } else if (e.code === 'KeyT' || e.code === 'F1') {
       setAutoPlay(!autoPlay)
+    } else if (e.code === 'F2') {
+      physicsDebug.toggle()
+      updateCollisionPill()
+      e.preventDefault()
     } else if (e.code === 'KeyM') {
       audio.setMuted(!audio.isMuted())
     } else if (e.code === 'Backspace') {
@@ -515,6 +536,19 @@ async function boot() {
       e.preventDefault()
     }
   })
+
+  // HUD pill showing the collision debug state. Hidden when off.
+  const collisionPill = document.getElementById('hud-collision')
+  function updateCollisionPill() {
+    if (!collisionPill) return
+    if (physicsDebug.isEnabled()) {
+      collisionPill.textContent = 'collision: ON (F2)'
+      collisionPill.style.display = 'inline-block'
+    } else {
+      collisionPill.style.display = 'none'
+    }
+  }
+  updateCollisionPill()
 
   const tmpPos = new THREE.Vector3()
   const tmpQuat = new THREE.Quaternion()
@@ -693,6 +727,7 @@ async function boot() {
     trailRender(camera)
     pickupRender(dt)
     combatRender(dt)
+    physicsDebug.tick()
 
     // Direction arrow points the player to the next checkpoint.
     const racerNow = RacerStore.get(playerEid)

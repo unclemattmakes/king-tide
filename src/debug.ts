@@ -65,6 +65,10 @@ export type HoverDebug = {
   toggleAutoPlay(): boolean
   /** Current auto-play state. */
   isAutoPlay(): boolean
+  /** Toggle the Rapier collision wireframe overlay. Returns new state. */
+  toggleCollisionDebug(): boolean
+  /** Current collision-debug overlay state. */
+  isCollisionDebugOn(): boolean
 }
 
 export type CombatDebugSnapshot = {
@@ -92,6 +96,8 @@ export type DebugAccessors = {
   playerEid(): number
   toggleAutoPlay(): boolean
   isAutoPlay(): boolean
+  toggleCollisionDebug(): boolean
+  isCollisionDebugOn(): boolean
 }
 
 declare global {
@@ -160,6 +166,8 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     },
     toggleAutoPlay: () => accessors.toggleAutoPlay(),
     isAutoPlay: () => accessors.isAutoPlay(),
+    toggleCollisionDebug: () => accessors.toggleCollisionDebug(),
+    isCollisionDebugOn: () => accessors.isCollisionDebugOn(),
     bikes: () => {
       if (!state.ready) return []
       const sim = accessors.sim()

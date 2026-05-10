@@ -8,6 +8,12 @@ import { createBikeMesh } from './bike-mesh'
 const PLAYER_FALLBACK_COLOR = 0xff7733
 const AI_BODY_COLORS = [0x33aaff, 0x44dd66, 0xcc55ff, 0xffcc33, 0xff5577]
 
+// Visual-only bike scale. Physics colliders (read from the GLB at bike
+// creation) stay at authored size — only the rendered mesh is scaled,
+// so collisions / hover heights / wake source positions don't shift.
+// Camera framing (camera.ts) is tuned around this 2× scale.
+const BIKE_VISUAL_SCALE = 2.0
+
 export type BikeRenderRegistry = {
   /** Resolve a variant id to a loaded GLB. Falls back to `default` when
    *  the id is unknown. */
@@ -63,6 +69,7 @@ export function createBikeRenderSystem(
             : (AI_BODY_COLORS[aiColorCursor++ % AI_BODY_COLORS.length] ?? 0xaaaaaa)
           mesh = createBikeMesh({ bodyColor: color })
         }
+        mesh.scale.setScalar(BIKE_VISUAL_SCALE)
         scene.add(mesh)
         meshes.set(eid, mesh)
       }

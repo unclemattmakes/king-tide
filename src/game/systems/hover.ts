@@ -239,12 +239,14 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // gives both: visible lean at idle, stronger when racing.
     const LEAN_BASE = 0.5
     // Pitch smoothing rates (exponential approach, units 1/s). Active = stick
-    // is being held; release = stick at neutral. Release is intentionally 4×
-    // slower than active so letting off the stick feels heavy — the bike
-    // retains its attitude rather than snapping back to flat. Tuneable; the
-    // earlier behaviour was effectively rate=∞ (snap each fixed step).
-    const PITCH_RATE_ACTIVE = 12 // 95% of target in ~250ms
-    const PITCH_RATE_RELEASE = 3 // 95% of target in ~1s
+    // is being held; release = stick at neutral. Release ≈ active/2 so
+    // letting off the stick feels heavy — the bike retains its attitude
+    // rather than snapping back to flat. Tuneable; the earlier behaviour
+    // was effectively rate=∞ (snap each fixed step). Slowed from the
+    // original (12, 3) — the snappier rates read as twitchy on the stick
+    // when combined with the closer camera.
+    const PITCH_RATE_ACTIVE = 4 // 95% of target in ~750ms
+    const PITCH_RATE_RELEASE = 2 // 95% of target in ~1.5s
     const pitchMul = probe.isWater ? 1.0 : 0.7
     {
       const speedNow = Math.hypot(linvel.x, linvel.z)
