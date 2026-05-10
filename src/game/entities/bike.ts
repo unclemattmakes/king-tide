@@ -94,7 +94,7 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
   addComponent(sim, eid, ControlIntent)
   ControlIntentStore.set(eid, emptyIntent())
   addComponent(sim, eid, HoverState)
-  HoverStateStore.set(eid, { groundDistance: 0, isGrounded: false })
+  HoverStateStore.set(eid, { groundDistance: 0, isGrounded: false, surfaceIsWater: false })
   // Every bike has a pickup slot.
   addComponent(sim, eid, PickupSlot)
   PickupSlotStore.set(eid, { held: null })

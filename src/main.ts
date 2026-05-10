@@ -19,6 +19,7 @@ import { createIslandMesh } from './engine/render/arena-mesh'
 import { createCliffsideMesh } from './engine/render/cliffside-mesh'
 import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
+import { createFxSystem } from './engine/render/fx'
 import { attachTrackColliders, loadGlbTrackVisuals } from './engine/render/glb-track'
 import { loadTrackFromGlb } from './game/tracks/glb-loader'
 import { createPhysicsDebugRenderer } from './engine/render/physics-debug'
@@ -416,6 +417,7 @@ async function boot() {
   const trailRender = createTrailRenderSystem(scene, sim)
   const pickupRender = createPickupRenderSystem(scene, sim)
   const combatRender = createCombatRenderSystem(scene, sim)
+  const fxTick = createFxSystem(scene, sim, phys)
   const dirArrow = createDirectionArrow()
   scene.add(dirArrow.mesh)
 
@@ -727,6 +729,7 @@ async function boot() {
     trailRender(camera)
     pickupRender(dt)
     combatRender(dt)
+    fxTick(dt)
     physicsDebug.tick()
 
     // Direction arrow points the player to the next checkpoint.
