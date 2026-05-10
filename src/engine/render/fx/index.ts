@@ -549,7 +549,13 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
       }
       lastGrounded.set(eid, hover.isGrounded)
 
-      // Foam — V-shaped Kelvin wake behind the stern with an upward bias.
+      // Foam — V-shaped Kelvin wake springing from the *water surface*
+      // behind the bike's stern, not from the bike body. Spawning at
+      // water level (transform.y − groundDistance) makes the wake read
+      // as the surface being disturbed by the hull, not as exhaust
+      // shooting from the stern. Mirrors how dust spawns at ground
+      // level under the bike.
+      //
       // Each spawn picks a side (alternating L/R) and ejects along
       // (back · cos θ ± right · sin θ), matching the V-shape the water
       // displacement shader carves into the surface.
@@ -561,7 +567,11 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
         const n = Math.floor(acc.foam)
         if (n > 0) {
           acc.foam -= n
+          // Stern XZ comes from the bike-local offset; Y is overridden
+          // to the water surface so the wake originates at the
+          // disturbed surface, not the bike's hull.
           sternWorld.copy(STERN_OFFSET).applyQuaternion(tmpQuat).add(tmpPos)
+          sternWorld.y = transform.y - hover.groundDistance + 0.05
           back.set(0, 0, -1).applyQuaternion(tmpQuat)
           right.set(1, 0, 0).applyQuaternion(tmpQuat)
           const sinH = Math.sin(FOAM_V_HALF_ANGLE)
