@@ -20,9 +20,10 @@ export function defaultBikeStats(): BikeStatsData {
     reverseScale: 0.4,
     boostMul: 1.6,
     mass: 120,
-    // 0.5 reads as a sturdy hover bike that's aware of the chop but isn't
-    // tossed around by it. Future bike variants can dial this up (~0.7 for
-    // a twitchy jet ski) or down (~0.3 for a heavy cruiser).
-    surfaceFollow: 0.5,
+    // 0.7 reads as an attentive hover bike that rocks/rolls with chop and
+    // swells without getting whipped around. Future bike variants can dial
+    // this up (~1.0 for a twitchy jet ski that fully matches the surface
+    // differential) or down (~0.4 for a heavy cruiser that ploughs through).
+    surfaceFollow: 0.7,
   }
 }
