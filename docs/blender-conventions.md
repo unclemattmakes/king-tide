@@ -59,7 +59,7 @@ Blender → glTF uses Y-up via `export_yup=True`. Three.js is also Y-up. Z forwa
 
 ## Bike reference (`bikes-src/<id>.blend`)
 
-Separate from the track conventions above. As of M9.38 each bike
+Separate from the track conventions above. As of M9.39 each bike
 variant lives in its own `bikes-src/<id>.blend` (no shared kit, no
 propagation between variants). Author the bike directly, click
 *Hoverbike → Export Bike to Game* in the addon. What the .blend

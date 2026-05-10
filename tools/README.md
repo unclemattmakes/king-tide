@@ -51,13 +51,13 @@ tools/
     ├── inspect_glb.mjs          ← node script — dumps a GLB's nodes + extras
     ├── run.mjs                  ← Node CLI — wraps `blender --background` per spec
     ├── seed_prop_kit.py         ← (re)build tools/blender/lib/prop_kit.blend
-    ├── seed_bike_kit.py         ← LEGACY — kit seeder; superseded by per-variant flow in M9.38
+    ├── seed_bike_kit.py         ← LEGACY — kit seeder; superseded by per-variant flow in M9.39
     ├── mounts.py                ← LEGACY — kit-only build helper; no longer wired up
     ├── build_bike.py            ← bikes-src/<id>.blend → bike GLB (with optional spec.appearance/physics overrides)
     ├── build_prop.py            ← spec → prop GLB
     ├── build_track.py           ← spec → tracks-src/<id>.blend → GLB
     └── lib/                     ← committed kit .blend files (source art)
-        ├── bike_parts.blend     ← LEGACY — superseded by per-variant bikes-src/<id>.blend in M9.38
+        ├── bike_parts.blend     ← LEGACY — superseded by per-variant bikes-src/<id>.blend in M9.39
         └── prop_kit.blend
 ```
 
