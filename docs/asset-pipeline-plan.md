@@ -1,7 +1,20 @@
 # Asset pipeline plan — vehicles, props, tracks, riders
 
-> **Status:** proposal, not implemented. This document is the brief for a
-> Claude Code instance to execute. It extends the existing track pipeline
+> **Status:** historical design brief. The pipeline shipped in M9.27 and
+> matches this plan for **props** and **tracks**. The **bike** half was
+> flipped in M9.39 to a per-variant `.blend` flow that doesn't match the
+> spec-driven kit-assembly described below — author each bike directly
+> in `bikes-src/<id>.blend` and click *Hoverbike → Export Bike to Game*.
+> The current bike authoring guide is
+> [`docs/asset-pipeline-guide.md`](./asset-pipeline-guide.md#bikes-bikes-srcidblend--specsbikesidjson)
+> and [`docs-site/modding/bikes.md`](../docs-site/modding/bikes.md).
+> The bike-specific sections of this plan (the kit, the mounts, the
+> `geometry.*` spec block, `chassisVariant`) are kept here for
+> historical context but no longer reflect the runtime pipeline.
+
+> **Original status (M9.27):** proposal, not implemented. This document
+> is the brief for a Claude Code instance to execute. It extends the
+> existing track pipeline
 > ([blender-pipeline-guide.md](./blender-pipeline-guide.md),
 > [blender-conventions.md](./blender-conventions.md)) to cover the rest
 > of the game's asset categories with a consistent, spec-driven,

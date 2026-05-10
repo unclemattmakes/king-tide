@@ -108,12 +108,24 @@ function trackEditorSavePlugin(): Plugin {
   }
 }
 
-// Watch specs/<cat>/*.json and tools/blender/lib/*.blend. Whenever
-// one changes, debounce 600ms and spawn the appropriate
-// `node tools/blender/run.mjs build_<category> specs/<category>` to
-// regenerate the affected GLBs. Outputs land in `public/assets/`,
-// which Vite serves as static assets — clients pick up the new files
-// on the next reload (no HMR plumbing needed for binary GLBs).
+// Watch specs/<cat>/*.json, tools/blender/lib/*.blend, and
+// bikes-src/*.blend. Whenever one changes, debounce 600ms and spawn
+// the appropriate `node tools/blender/run.mjs build_<category>
+// specs/<category>` to regenerate the affected GLBs. Outputs land
+// in `public/assets/`, which Vite serves as static assets — clients
+// pick up the new files on the next reload (no HMR plumbing needed
+// for binary GLBs).
+//
+// `bikes-src/<id>.blend` is the source of truth for bike geometry as
+// of M9.39, so saving any of those files re-runs `pnpm gen:bikes` —
+// matches the spec-watching ergonomics for props/tracks. The addon's
+// "Export Bike to Game" button still works (it writes the GLB
+// directly without going through this watcher), so authors can pick
+// between Ctrl+S → headless rebuild and an explicit click.
+//
+// `tracks-src/<id>.blend` is intentionally NOT watched — tracks have
+// the in-app editor and the addon button covering the same ground,
+// and tracks-src/ saves are too frequent to make a useful trigger.
 //
 // Disabled when HOVERBIKE_NO_ASSET_WATCH=1 is set (CI / focused
 // sessions where Blender startup would be a distraction).
@@ -159,6 +171,7 @@ function assetPipelineWatchPlugin(): Plugin {
       server.watcher.add([
         path.resolve(REPO_ROOT, 'specs'),
         path.resolve(REPO_ROOT, 'tools', 'blender', 'lib'),
+        path.resolve(REPO_ROOT, 'bikes-src'),
       ])
       const handler = (file: string) => {
         const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/')
@@ -168,7 +181,13 @@ function assetPipelineWatchPlugin(): Plugin {
           schedule('props', `spec ${path.basename(file)} changed`)
         } else if (rel.startsWith('specs/tracks/') && rel.endsWith('.json')) {
           schedule('tracks', `spec ${path.basename(file)} changed`)
+        } else if (rel.startsWith('bikes-src/') && rel.endsWith('.blend')) {
+          schedule('bikes', `${path.basename(file)} changed`)
         } else if (rel === 'tools/blender/lib/bike_parts.blend') {
+          // Legacy kit — no longer wired up by the bike build path
+          // (M9.39 flipped to per-variant .blend files), but keep
+          // the trigger so anyone still iterating on the old kit
+          // gets a rebuild.
           schedule('bikes', 'bike_parts.blend changed')
         } else if (rel === 'tools/blender/lib/prop_kit.blend') {
           schedule('props', 'prop_kit.blend changed')

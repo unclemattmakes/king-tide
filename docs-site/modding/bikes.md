@@ -1,23 +1,95 @@
 # Authoring bikes
 
-A bike is one JSON spec under `specs/bikes/<id>.json` plus the kit parts in `tools/blender/lib/bike_parts.blend`. Save the spec → the watcher rebuilds → reload your browser tab → the new bike is in the manifest.
+Each bike variant is a standalone Blender file at `bikes-src/<id>.blend` plus a slim metadata spec at `specs/bikes/<id>.json`. Open the .blend, edit the variant directly, click **Hoverbike → Export Bike to Game** in the addon — the GLB updates and the runtime picks it up on next reload.
+
+There is **no shared kit**: editing `racer.blend` does not propagate to `cruiser.blend`. Each variant is its own scene.
 
 ## Quick add
 
 ```bash
-# 1. Copy an existing spec
-cp specs/bikes/scout.json specs/bikes/falcon.json
+# 1. Save-as an existing variant
+#    File → Save As… → bikes-src/falcon.blend
+#    (open Blender on bikes-src/scout.blend, then save-as)
 
-# 2. Edit id + displayName + the knobs you care about
-#    (open specs/bikes/falcon.json in your editor)
+# 2. Edit the variant — sculpt meshes, drag sockets, recolour materials.
 
-# 3. Save — Vite's watcher rebuilds public/assets/bikes/falcon.glb
+# 3. In the 3D viewport: N → Hoverbike tab → Export Bike to Game.
+#    The addon validates the scene, writes public/assets/bikes/falcon.glb,
+#    and on first export creates a starter specs/bikes/falcon.json.
 
 # 4. Try it in-game
 open http://localhost:5191/?bike=falcon
 ```
 
-To make it selectable from the Garage menu, also wire it into [`src/game/bikes/variants.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/bikes/variants.ts). Otherwise the URL parameter is the only entry.
+To make the new bike selectable from the Garage menu, also wire it into [`src/game/bikes/variants.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/bikes/variants.ts). Otherwise the URL parameter is the only entry.
+
+::: tip Where the bike id comes from
+The .blend's filename basename is the id (`bikes-src/falcon.blend` → `falcon`). The addon backfills `bike_root.extras.bike_id` from that filename on first export, but if you ever want the id to differ from the filename, set the scene custom property `hoverbike_bike_id`.
+:::
+
+### Headless / CI
+
+`pnpm gen:bikes` opens each `bikes-src/<id>.blend` in `--background` mode, applies any spec overrides, and exports — same output as the addon button, runs without a GUI.
+
+## What the .blend must contain
+
+The validator runs both in the addon (before export) and in `build_bike.py` (before headless export), and rejects the build if any of these are missing:
+
+| Object | Required | Purpose |
+|---|---|---|
+| `bike_root` (empty) | exactly 1 | Runtime entry node. Must carry `extras.kind="bike"` and `bike_id` (the addon backfills the id from the filename). Optional but recommended extras: `mass_kg`, `top_speed_mps`, `hover_height`, `display_name`. |
+| `socket_seat` (empty) | yes | Where the rider parents to the bike. `extras.kind="socket"`, `slot="seat"`. |
+| `socket_nose_cam` (empty) | yes | Chase-camera anchor at the nose. `extras.kind="socket"`, `slot="nose_cam"`. |
+| `socket_fx_thruster_l` (empty) | yes | Left thruster FX emitter origin. |
+| `socket_fx_thruster_r` (empty) | yes | Right thruster FX emitter origin. |
+| `socket_fx_exhaust` (empty) | yes | Centre exhaust FX origin. |
+| At least one collider (empty) | yes | `extras.kind="collider"`, `shape="box"`, `half_extents=[hx, hy, hz]` in three's axes (right, up, forward). The conventional name is `collider_body`, but only the extras matter. |
+
+Visual meshes are everything else — there's no minimum. The runtime renders any mesh that isn't tagged `kind=collider` or `kind=socket`.
+
+## Naming + parenting (what actually matters)
+
+The runtime walks the GLB by `extras.kind`, **never by name** ([`bike-loader.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/assets/bike-loader.ts)). That means:
+
+| What | Naming matters? | Why |
+|---|---|---|
+| Mesh objects (`bike_body`, `bike_fairing`, …) | **No** — call them whatever helps you author. | The runtime walks every non-tagged mesh and renders it. The conventional names are just useful for the outliner. |
+| `bike_root` empty | Yes (resolved by name + `extras.kind="bike"`). | Runtime entry point. |
+| `socket_<slot>` empties | Slot value in extras is what matters; the object name is convenience. | Runtime resolves attach points by `(extras.kind="socket", slot=<slot>)`. |
+| Material names | Sometimes — see below. | |
+
+Two material-name conventions do leak into runtime / build behaviour:
+
+- **`_livery` substring** in any material name → that material gets cloned + tinted per-AI-bike at instantiation time, so AI riders show distinct colors without their own GLBs ([`bike-loader.ts:178`](https://github.com/occ-matt/hoverbike/blob/main/src/game/assets/bike-loader.ts)). If you want a part to recolour for AI bikes, give its material a name that includes `_livery`. If not, use any other name.
+- **`mat_bike_<bike_id>_{chassis,livery,glow,fork,fin,tail}`** → the headless build's `spec.appearance` overrides find materials by this exact pattern and recolour them. If you don't use the spec's `appearance` block, the pattern is a no-op and you can name materials anything.
+
+### Don't parent geo under sockets
+
+Tempting pattern: parent the thruster mesh under `socket_fx_thruster_l` so moving the socket drags the geo. **Don't** — for two reasons:
+
+1. **Sockets are hidden at clone time.** [`cloneLoadedBike`](https://github.com/occ-matt/hoverbike/blob/main/src/game/assets/bike-loader.ts) sets `visible = false` on every `kind=socket` and `kind=collider` empty. Three.js propagates invisibility down the subtree, so geo parented under a socket never renders in the game. (It would still show up in the bike viewer if you toggle visibility on, but that's a debug surface.)
+2. **Socket positions are a runtime contract.** The rider parents at `socket_seat`. The chase camera anchors at `socket_nose_cam`. FX emitters spawn at `socket_fx_*`. If a geo edit silently shifts a socket, you've broken those anchors with no error.
+
+The pattern that gives you the "live attach" feel without the gotchas: **parent the socket under the geo, not the geo under the socket.** Example: `socket_fx_thruster_l` as a child of your `bike_thruster_l` mesh. Move the thruster, the FX socket follows automatically.
+
+For everything else, the simplest layout is flat siblings:
+
+```
+bike_root
+├── bike_body            (mesh — name doesn't matter)
+├── bike_fairing         (mesh)
+├── bike_fork            (mesh)
+├── bike_thruster_0      (mesh) [optional: socket_fx_thruster_l as child]
+├── bike_thruster_1      (mesh) [optional: socket_fx_thruster_r as child]
+├── bike_fin             (mesh)
+├── bike_tail            (mesh)
+├── socket_seat          (empty, kind=socket, slot=seat)
+├── socket_nose_cam      (empty, kind=socket, slot=nose_cam)
+├── socket_fx_thruster_l (empty, kind=socket, slot=fx_thruster_l)  ← OR child of bike_thruster_0
+├── socket_fx_thruster_r (empty, kind=socket, slot=fx_thruster_r)  ← OR child of bike_thruster_1
+├── socket_fx_exhaust    (empty, kind=socket, slot=fx_exhaust)
+└── collider_body        (empty, kind=collider, shape=box, half_extents=...)
+```
 
 ## Spec format
 
@@ -26,15 +98,6 @@ To make it selectable from the Garage menu, also wire it into [`src/game/bikes/v
   "$schema": "../_schema/bike.json",
   "id": "racer",
   "displayName": "Racer",
-  "geometry": {
-    "chassisLength": 2.5,
-    "chassisWidth": 0.6,
-    "chassisHeight": 0.4,
-    "fairingStyle": "swept",
-    "thrusterCount": 2,
-    "thrusterSpacing": 0.4,
-    "fork": "single"
-  },
   "physics": {
     "massKg": 120,
     "topSpeedMps": 28,
@@ -45,77 +108,58 @@ To make it selectable from the Garage menu, also wire it into [`src/game/bikes/v
     "metalColor": "#222428",
     "glowColor": "#ffaa55",
     "glowIntensity": 1.4
-  },
-  "rider": {
-    "seatOffset": [0, 0.55, -0.1]
   }
 }
 ```
+
+Both `physics` and `appearance` are optional overlays. Drop them and the build uses whatever `bike_root.extras` and authored materials hold in the .blend.
 
 ### Top-level fields
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `id` | string | yes | Stable identifier matching `^[a-z][a-z0-9_-]*$`. Becomes the GLB filename. |
-| `displayName` | string | yes | Shown in the manifest + the Garage menu. |
+| `id` | string | yes | Stable identifier matching `^[a-z][a-z0-9_-]*$`. Becomes the GLB filename. Must match the .blend's basename (or `bike_root.extras.bike_id`, or the scene's `hoverbike_bike_id` custom property). |
+| `displayName` | string | yes | Shown in the manifest, the Garage menu, and the bike viewer HUD. |
 
-### `geometry`
+### `physics` (optional override)
 
-| Field | Range | Notes |
-|---|---|---|
-| `chassisLength` | (0, 6] m | Longitudinal extent. Drives collider half-extents and thruster/socket positioning. |
-| `chassisWidth` | (0, 3] m | Lateral extent. Same role as length. |
-| `chassisHeight` | (0, 2] m | Vertical extent. Same role. |
-| `chassisVariant` | string (optional) | Kit-part name override. When set, the build appends `chassis_<variant>` from `bike_parts.blend` and ships it at author-modelled size — no per-spec scaling. Use this when you want bespoke chassis geometry instead of stretching the generic `chassis_base` cube. |
-| `fairingStyle` | `bare` \| `swept` \| `full` | Visual fairing variant from the kit. |
-| `thrusterCount` | 1–4 | Number of thrusters mounted under the chassis. |
-| `thrusterSpacing` | [0, 2] m | Lateral spacing between thrusters. 0 stacks them at center. |
-| `fork` | `single` \| `dual` | Front fork visual variant. |
-
-::: tip Authoring a custom chassis
-1. Open `tools/blender/lib/bike_parts.blend`. Toggle the `Source` collection on.
-2. Duplicate `chassis_base`, rename to `chassis_<your_id>` (e.g. `chassis_dragster`). Sculpt it at the size you want — no scaling will be applied.
-3. Save the kit. Add `"chassisVariant": "dragster"` to your spec's `geometry` block.
-4. `pnpm gen:bikes`. The build appends `chassis_dragster` and uses the existing chassis-local mounts to place fairing/fork/fin/tail.
-
-`chassisLength`/`Width`/`Height` are still required — the collider, thruster positions, fin/tail world positions, and fork world position are all derived from them. Match them to your sculpted mesh's actual dims.
-:::
-
-### `physics`
+Written into `bike_root` extras at build time so the runtime + viewer HUD see the spec's values without you reopening Blender. If absent, the .blend's authored extras are used unchanged.
 
 | Field | Range | Notes |
 |---|---|---|
-| `massKg` | (0, 1000] kg | Rapier rigid-body mass. |
-| `topSpeedMps` | (0, 200] m/s | Soft cap on forward speed. |
-| `hoverHeight` | (0, 4] m | Target ride height above the surface. |
+| `massKg` | (0, 1000] kg | Goes to `bike_root.extras.mass_kg`. |
+| `topSpeedMps` | (0, 200] m/s | Goes to `bike_root.extras.top_speed_mps`. |
+| `hoverHeight` | (0, 4] m | Goes to `bike_root.extras.hover_height`. |
 
 ::: tip Bike stats vs. variant stats
-The spec's `physics` block is what the **GLB asset** carries. Sim-side handling (turn torque, accel, lateral drag, surface follow, hover spring/damp, boostMul) lives in the **variant** wired up at [`src/game/bikes/variants.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/bikes/variants.ts). Today the spec is the source of truth for `mass`, `topSpeed`, and `hoverHeight` only — everything else is per-variant in code.
+The spec's `physics` and the GLB's extras are surface metadata for the manifest and viewer. **Sim-side handling** (turn torque, accel, lateral drag, surface follow, hover spring/damp, boost multiplier) lives in the **variant** wired up at [`src/game/bikes/variants.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/bikes/variants.ts). Editing the spec doesn't change how the bike feels under your hands — change the variant for that.
 :::
 
-### `appearance`
+### `appearance` (optional override)
+
+Recolour overlays applied to materials matching `mat_bike_<id>_<role>` (`<role>` = `chassis`, `livery`, `glow`, `fork`, `fin`, `tail`). If absent, the .blend's authored materials ride through unchanged. Used for the Garage menu's color swatches.
 
 | Field | Format | Notes |
 |---|---|---|
-| `liveryColor` | `#RRGGBB` | Primary chassis paint. |
-| `metalColor` | `#RRGGBB` | Secondary metallic surfaces. |
-| `glowColor` | `#RRGGBB` | Emissive parts (thrusters, taillight). |
-| `glowIntensity` | [0, 8] | Multiplier on the emissive material. 1 is mild, 4+ is bloom-territory. |
+| `liveryColor` | `#RRGGBB` | Recolours `mat_bike_<id>_livery` (and `_fin`'s base + emissive). |
+| `metalColor` | `#RRGGBB` | Recolours `mat_bike_<id>_chassis` and `_fork`. |
+| `glowColor` | `#RRGGBB` | Recolours `mat_bike_<id>_glow`'s base + emissive. |
+| `glowIntensity` | [0, 8] | Multiplier on the `_glow` material's emissive strength. |
 
-### `rider`
+### Legacy fields (`geometry`, `rider`)
 
-| Field | Notes |
-|---|---|
-| `seatOffset` | `[x, y, z]` in bike-root local space (Y up, +Z forward). Where the rider mesh attaches. |
+Older specs that predate M9.39 have `geometry` and `rider` blocks. The schema still accepts them for backward compatibility, but the build **ignores** both — geometry lives in the .blend, the seat anchor is `socket_seat`. New specs should omit them.
 
-## What the GLB ends up containing
+## What the GLB ships
 
-The headless builder produces:
-
-- A `bike_root` empty with `extras = { kind: "bike", id, mass, topSpeed, hoverHeight }`.
-- Visual meshes (chassis, fairing, thrusters, fork) parented under it.
-- Five **sockets** — `seat`, `nose_cam`, `fx_thruster_l`, `fx_thruster_r`, `fx_exhaust` — each an empty with `extras = { kind: "socket", slot: <name> }`.
-- One `collider_body` empty with `extras = { kind: "collider", shape: "box", half_extents: [hx, hy, hz] }` already in three.js axes (right, up, forward).
+```
+bike_root              (extras: kind=bike, bike_id, mass_kg, top_speed_mps,
+                        hover_height, display_name)
+├── visible meshes     (cast + receive shadows)
+├── socket_*           (extras: kind=socket, slot=<slot>; hidden at runtime)
+└── collider_*         (extras: kind=collider, shape=..., half_extents=...;
+                        hidden at runtime)
+```
 
 The runtime path that consumes this is [`src/game/assets/bike-loader.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/assets/bike-loader.ts).
 
@@ -147,7 +191,7 @@ Then update the `BikeVariantId` union in the same file. The Garage menu populate
 
 ## In-game bike viewer
 
-To eyeball a built bike in isolation — handy for verifying the kit and the in-game render line up — open `?viewer=<bikeId>`:
+To eyeball a built bike in isolation — handy for verifying the .blend round-trip — open `?viewer=<bikeId>` (also reachable from the addon's **Copy Viewer URL** button):
 
 ```
 http://localhost:5191/?viewer=scout
@@ -155,52 +199,28 @@ http://localhost:5191/?viewer=cruiser
 http://localhost:5191/?viewer=1          # first manifest entry
 ```
 
-The viewer loads the bike GLB, drops it on a grid, and gives you `OrbitControls`. The HUD panel (top-left) shows the bike's id, mass, top speed, hover height, world bbox, livery/metal/glow swatches, every socket, and a quick-switch row to flip between bikes without reloading. Sockets render as small green dots; the box collider renders as an orange wireframe — both invisible in normal gameplay. The viewer skips the entire game boot (no track, physics, AI, audio), so it's a pure render of what `bike-loader.ts` produces.
+The viewer drops the bike on a grid with `OrbitControls`. The HUD panel (top-left) shows the bike's id, mass, top speed, hover height, world bbox, livery / metal / glow swatches, every socket slot, and a quick-switch row to flip between bikes without reloading. Sockets render as small green dots; the box collider renders as an orange wireframe — both invisible in normal gameplay. The viewer skips the entire game boot (no track, physics, AI, audio), so it's a pure render of what `bike-loader.ts` produces.
 
-## Re-authoring kit geometry
+## Tips
 
-If you need new chassis shapes, fairing styles, or thruster meshes, edit `tools/blender/lib/bike_parts.blend` directly. Saving the `.blend` triggers a rebuild of every bike against the new kit. To start from a clean placeholder, re-run `tools/blender/seed_bike_kit.py`.
+### Studio lighting in the .blend
 
-The kit's outliner is organized into collections that mirror the in-game `?viewer=<id>` page. Flick a collection visible to switch which bike you're previewing:
+The seeder bakes a sun + soft fill into each `bikes-src/<id>.blend` so the in-Blender preview looks like the in-game viewer. The GLB exporter strips lights (`export_lights=False`), so they never reach the runtime — feel free to add more lights to taste.
 
-```
-Source                        ← editable canonical parts (visible by default)
-Bike: Calibration Bike        ← snapshot (hidden)
-Bike: Cruiser                 ← snapshot (hidden)
-Bike: Racer                   ← snapshot (hidden)
-Bike: Scout                   ← snapshot (hidden)
-Bike: Stunt                   ← snapshot (hidden)
-```
+### Hidden objects are skipped on export
 
-Source is where you **edit**. Each variant fairing, fork, fin, and tail is *parented* to its corresponding `mount_*` empty so **moving a mount in the viewport drags the dependent geometry along** — same live-attach feel as the in-game viewer. Move `mount_fairing` in the viewport and all three fairing variants follow.
+Toggling the eye icon off in the outliner excludes that object from the GLB. Useful for staging WIP geometry next to the live bike without it leaking into the build.
 
-Each `Bike: <name>` collection is a **static snapshot** built from the spec at seed time. They contain linked-data instances of the canonical parts, scaled and positioned per `specs/bikes/<id>.json`. Mesh data is shared with Source — mesh edits propagate, but **mount moves don't** retroactively reposition snapshot instances. To refresh a snapshot, re-run `tools/blender/seed_bike_kit.py`. Snapshots are useful for eyeballing how a different spec resolves without leaving Blender.
+### Materials follow the convention so spec overrides keep working
 
-The kit's materials are scout's livery (placeholder palette); the build replaces them with spec-driven materials per bike, so livery differences between bikes only show up in `?viewer`, not in the kit.
+If you author your own materials, name them `mat_bike_<id>_<role>` (`<role>` ∈ `chassis`, `livery`, `glow`, `fork`, `fin`, `tail`) and the spec's `appearance.*` recolour will keep working. Skip the convention and the spec block becomes a no-op for that material — your authored colour ships as-is.
 
-To **add a new variant**, drop a new mesh into Source, parent it to the appropriate mount, and update both `seed_bike_kit.py` (so re-seeding parents the new variant) and `build_bike.py` (so the build picks it). To **add a new bike spec**, drop a new `specs/bikes/<id>.json` and re-run the seed — a new `Bike: <name>` snapshot appears automatically.
+### Forgetting `kind` on bike_root / sockets / collider
 
-Object viewport positions are layout-only — they don't influence the build (`tools/blender/lib_loader.py` resets transforms on append). Mesh edits *do* ride through.
+Most authoring mistakes surface as a clear validator error in Blender's status bar. The custom property panel on each empty needs:
 
-Open `?viewer=scout` in another tab to compare the kit's silhouette against what the runtime ships — they should be the same modulo material differences (the kit uses static placeholder materials; the build creates spec-driven ones).
+- `bike_root` → `kind = "bike"`, `bike_id = "<id>"`.
+- Each socket → `kind = "socket"`, `slot = "<slot>"`.
+- The collider → `kind = "collider"`, `shape = "box"`, `half_extents = [hx, hy, hz]`.
 
-### Moving an attachment point — no code change
-
-Where the fairing/fork/fin/tail attach to the chassis is controlled by **mount empties** authored in the kit. Inside `bike_parts.blend`, expand `chassis_base` in the outliner and you'll see four small empties parented to it:
-
-| Mount | Controls |
-|---|---|
-| `mount_fairing` | Where the fairing snaps onto the chassis |
-| `mount_fork` | Where the fork attaches at the nose |
-| `mount_fin` | Where the front fin marker sits |
-| `mount_tail` | Where the rear tail-light sits |
-
-Translate any of those empties in the viewport, save, and re-run `pnpm gen:bikes` (or just save while `pnpm dev` is running). No code change. Mount positions are stored in chassis-local unit-cube space so they scale with `chassisLength` / `chassisWidth` / `chassisHeight` automatically.
-
-To add a brand-new attachment point, author another empty `mount_<your_role>` parented to `chassis_base`, then add a matching `snap_to_mount(part, chassis, "<your_role>")` line in `tools/blender/build_bike.py`. The mount and any optional `anchor` empty on the child part are stripped from the GLB before export by `strip_build_helpers()` — they never ship to the runtime.
-
-::: tip Mounts vs. sockets
-**Mounts** (`mount_*`) are *build-time* — they tell the kit assembler where to attach parts. They're stripped before export. **Sockets** (`socket_*`, e.g. `socket_seat`, `socket_nose_cam`, `socket_fx_*`) are *runtime* — they ride into the GLB and the runtime resolves them by name to attach the rider, place the chase camera, etc. Different prefix, different lifecycle.
-:::
-
-Thrusters stay parametric — their count and X spacing come from `spec.geometry.thrusterCount` / `thrusterSpacing` and the build code does the math directly.
+The seeded variants (`bikes-src/{calibration,cruiser,racer,scout,stunt}.blend`) are the canonical reference — copy a custom-property panel from there if you're unsure.
