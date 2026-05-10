@@ -1,12 +1,36 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
-import { buildPropGeometry } from '@/engine/render/props-geometry'
 import type { Vec3 } from '@/engine/sim/physics/vec'
 import type { PropManifestEntry } from '@/game/assets/manifest'
 import { nearestT, pointAtT, sampleCatmullRom, tangentAtT } from '@/game/tracks/catmull-rom'
 import { trackToJson } from '@/game/tracks/json-loader'
-import type { BoostPad, Checkpoint, Prop, PropType, Track } from '@/game/tracks/types'
+import type { Checkpoint, PropType, Track } from '@/game/tracks/types'
+import {
+  defaultPropDropY,
+  defaultPropSize,
+  disposeObj,
+  makeAnchorHelper,
+  makeGateHelper,
+  makePadHelper,
+  makePickupHelper,
+  makePropHelper,
+  makeSplineCurve,
+  makeStartHelper,
+  yawFromQuaternion,
+} from './editor-helpers'
+import {
+  createEditorPanel,
+  type EditorPanelHandle,
+  entityKey,
+  type EntitySel,
+  type GizmoMode,
+  openTrackPickerFlow,
+  parseEntityKey,
+  type PlaceTool,
+  PROP_PLACE_TOOLS,
+  promptNewTrackFlow,
+} from './editor-ui'
 
 /**
  * In-app track editor.
@@ -58,39 +82,6 @@ export type EditorOptions = {
 export type EditorHandle = {
   tick(): void
   dispose(): void
-}
-
-type GizmoMode = 'translate' | 'rotate' | 'scale'
-type PlaceTool =
-  | 'none'
-  | 'gate'
-  | 'pickup'
-  | 'pad'
-  | 'spline'
-  | 'box'
-  | 'sphere'
-  | 'cylinder'
-  | 'pipe'
-  | 'halfpipe'
-  | 'asset'
-
-type EntitySel =
-  | { kind: 'gate'; index: number }
-  | { kind: 'pickup'; index: number }
-  | { kind: 'pad'; index: number }
-  | { kind: 'spline'; splineIndex: number; pointIndex: number }
-  | { kind: 'prop'; index: number }
-  | { kind: 'start' }
-  | null
-
-const PROP_PLACE_TOOLS: PlaceTool[] = ['box', 'sphere', 'cylinder', 'pipe', 'halfpipe']
-const PROP_LABELS: Record<PropType, string> = {
-  box: 'Box',
-  sphere: 'Sphere',
-  cylinder: 'Cylinder',
-  pipe: 'Pipe',
-  halfpipe: 'Half Pipe',
-  asset: 'Asset',
 }
 
 export function installTrackEditor(opts: EditorOptions): EditorHandle {
@@ -177,12 +168,6 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   scene.add(helpersGroup)
   const helpers = new Map<string, THREE.Group>()
   let splinePolyline: THREE.Line | null = null
-
-  function entityKey(s: NonNullable<EntitySel>): string {
-    if (s.kind === 'spline') return `spline:${s.splineIndex}:${s.pointIndex}`
-    if (s.kind === 'start') return 'start'
-    return `${s.kind}:${s.index}`
-  }
 
   /**
    * Returns the "editable" array of the main spline:
@@ -626,310 +611,55 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   }
 
   // ── DOM panel ───────────────────────────────────────────────────────────
-  const panel = document.createElement('div')
-  panel.id = 'editor-panel'
-  panel.style.cssText = [
-    'position: fixed',
-    'top: 10px',
-    'left: 10px',
-    'background: rgba(20,24,30,0.94)',
-    'color: #d8e6f0',
-    'font: 12px ui-monospace, Menlo, Consolas, monospace',
-    'padding: 10px 12px',
-    'border: 1px solid #2a3a4a',
-    'border-radius: 6px',
-    'width: 280px',
-    'max-height: calc(100vh - 20px)',
-    'display: flex',
-    'flex-direction: column',
-    'gap: 8px',
-    'z-index: 30',
-    'pointer-events: auto',
-  ].join(';')
-  document.body.appendChild(panel)
-  // Block pointer events from reaching the renderer when over the panel.
-  panel.addEventListener('pointerdown', (e) => e.stopPropagation())
-  panel.addEventListener('wheel', (e) => e.stopPropagation())
-
-  function renderPanel(): void {
-    panel.innerHTML = panelHtml()
-    wirePanelEvents()
-  }
-  // For high-frequency updates (gizmo dragging) — only update the
-  // selected-properties block, not the whole panel.
-  function renderPanelLight(): void {
-    const propsEl = panel.querySelector('#ed-props')
-    if (propsEl) propsEl.innerHTML = selectedPropsHtml()
-  }
-
-  function panelHtml(): string {
-    return [
-      `<div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
-         <div style="font-weight:bold;color:#7fc7ff;font-size:13px">EDITOR · ${escapeHtml(draft.id)}</div>
-       </div>`,
-      `<div style="display:flex;gap:4px">
-         <button type="button" id="ed-open" style="flex:1;background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit">Open…</button>
-         <button type="button" id="ed-new" style="flex:1;background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit">New…</button>
-       </div>`,
-      `<div style="display:flex;flex-direction:column;gap:6px">
-         <div style="color:#9bb">Place</div>
-         <div style="display:flex;flex-wrap:wrap;gap:4px">
-           ${placeBtn('gate', '+ Gate')}
-           ${placeBtn('pickup', '+ Pickup')}
-           ${placeBtn('pad', '+ Boost')}
-           ${placeBtn('spline', '+ Spline pt')}
-         </div>
-         <div style="color:#9bb;margin-top:4px">Shapes</div>
-         <div style="display:flex;flex-wrap:wrap;gap:4px">
-           ${placeBtn('box', '+ Box')}
-           ${placeBtn('sphere', '+ Sphere')}
-           ${placeBtn('cylinder', '+ Cylinder')}
-           ${placeBtn('pipe', '+ Pipe')}
-           ${placeBtn('halfpipe', '+ Half Pipe')}
-         </div>
-         ${assetSectionHtml()}
-       </div>`,
-      `<div style="display:flex;flex-direction:column;gap:6px">
-         <div style="color:#9bb">Mode (W / E / R)</div>
-         <div style="display:flex;flex-wrap:wrap;gap:4px">
-           ${modeBtn('translate', 'Move')}
-           ${modeBtn('rotate', 'Rotate')}
-           ${modeBtn('scale', 'Scale')}
-         </div>
-       </div>`,
-      `<div id="ed-outliner" style="border-top:1px solid #2a3a4a;padding-top:8px;flex:1;overflow-y:auto;min-height:140px">
-         ${outlinerHtml()}
-       </div>`,
-      `<div id="ed-props" style="border-top:1px solid #2a3a4a;padding-top:8px;font-size:11px;color:#bcd">
-         ${selectedPropsHtml()}
-       </div>`,
-      `<div style="display:flex;gap:6px;border-top:1px solid #2a3a4a;padding-top:8px">
-         <button type="button" id="ed-save" style="flex:1;background:#284;color:#dfd;border:1px solid #4a6;padding:6px 10px;border-radius:3px;cursor:pointer">Save</button>
-         <button type="button" id="ed-play" style="flex:1;background:#246;color:#dde;border:1px solid #468;padding:6px 10px;border-radius:3px;cursor:pointer">Play</button>
-       </div>`,
-      `<div id="ed-status" style="color:#7a8;min-height:14px;font-size:11px"></div>`,
-      `<div style="color:#778;font-size:10px;line-height:1.4">
-        Click in outliner to select · drag gizmo to manipulate<br/>
-        L-drag: orbit · R-drag: pan · wheel: zoom<br/>
-        Delete = remove · Ctrl+Z = undo · Ctrl+S = save
-       </div>`,
-    ].join('')
-  }
-
-  function placeBtn(t: PlaceTool, label: string): string {
-    const on = t === placeTool
-    return `<button type="button" data-place="${t}" style="background:${on ? '#a73' : '#234'};color:${on ? '#fff' : '#dde'};border:1px solid ${on ? '#fc8' : '#456'};padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit">${label}</button>`
-  }
-
-  function assetSectionHtml(): string {
-    if (propAssets.length === 0) {
-      return `<div style="color:#778;font-size:10px;margin-top:4px">No prop assets — run <code>pnpm gen:props</code></div>`
-    }
-    const opts = propAssets
-      .map(
-        (a) =>
-          `<option value="${escapeHtml(a.id)}"${a.id === pickedAssetId ? ' selected' : ''}>${escapeHtml(a.displayName)}</option>`,
-      )
-      .join('')
-    return `<div style="color:#9bb;margin-top:4px">Assets</div>
-       <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
-         <select id="ed-asset-pick" style="background:#234;color:#dde;border:1px solid #456;padding:3px 4px;border-radius:3px;font:inherit;flex:1;min-width:0">${opts}</select>
-         ${placeBtn('asset', '+ Place')}
-       </div>`
-  }
-  function modeBtn(m: GizmoMode, label: string): string {
-    const on = m === mode
-    const allowed = selSupportsMode(m)
-    return `<button type="button" data-mode="${m}" ${allowed ? '' : 'disabled'} style="background:${on ? '#356' : '#234'};color:#dde;border:1px solid ${on ? '#7af' : '#456'};padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit;${allowed ? '' : 'opacity:0.4;cursor:not-allowed'}">${label}</button>`
-  }
-
-  function outlinerHtml(): string {
-    const sections: string[] = []
-    sections.push(
-      outlinerSection('Start', [
-        {
-          k: 'start',
-          label: `start  (${draft.start.position.x.toFixed(0)}, ${draft.start.position.z.toFixed(0)})  yaw ${((draft.start.yaw * 180) / Math.PI).toFixed(0)}°`,
-          sel: { kind: 'start' } as EntitySel,
-        },
-      ]),
-    )
-    sections.push(
-      outlinerSection(
-        'Shapes',
-        draft.props.map((p, i) => ({
-          k: `prop:${i}`,
-          label: `${PROP_LABELS[p.type]}_${i}  (${p.position.x.toFixed(0)}, ${p.position.z.toFixed(0)})`,
-          sel: { kind: 'prop', index: i } as EntitySel,
-        })),
-      ),
-    )
-    sections.push(
-      outlinerSection(
-        'Checkpoints',
-        draft.checkpoints.map((cp, i) => ({
-          k: `gate:${i}`,
-          label: `cp_${String(cp.index).padStart(2, '0')}  (${cp.position.x.toFixed(0)}, ${cp.position.z.toFixed(0)})`,
-          sel: { kind: 'gate', index: i } as EntitySel,
-        })),
-      ),
-    )
-    sections.push(
-      outlinerSection(
-        'Pickups',
-        draft.pickupSpawns.map((p, i) => ({
-          k: `pickup:${i}`,
-          label: `pickup_${i}  (${p.x.toFixed(0)}, ${p.z.toFixed(0)})`,
-          sel: { kind: 'pickup', index: i } as EntitySel,
-        })),
-      ),
-    )
-    sections.push(
-      outlinerSection(
-        'Boost Pads',
-        draft.boostPads.map((p, i) => ({
-          k: `pad:${i}`,
-          label: `pad_${i}  (${p.position.x.toFixed(0)}, ${p.position.z.toFixed(0)})`,
-          sel: { kind: 'pad', index: i } as EntitySel,
-        })),
-      ),
-    )
-    const main = draft.aiSplines.find((s) => s.id === 'main')
-    if (main) {
-      const arr = main.anchors ?? main.points
-      const isAnchored = !!main.anchors
-      const title = isAnchored ? 'Spline anchors' : 'Spline pts'
-      const labelPrefix = isAnchored ? 'anchor' : 'pt'
-      sections.push(
-        outlinerSection(
-          title,
-          arr.map((p, i) => ({
-            k: `spline:0:${i}`,
-            label: `${labelPrefix}_${String(i).padStart(2, '0')}  (${p.x.toFixed(0)}, ${p.z.toFixed(0)})`,
-            sel: { kind: 'spline', splineIndex: 0, pointIndex: i } as EntitySel,
-          })),
-        ),
-      )
-    }
-    return sections.join('')
-  }
-
-  function outlinerSection(
-    title: string,
-    items: { k: string; label: string; sel: EntitySel }[],
-  ): string {
-    const rows = items
-      .map((it) => {
-        const selected = sel != null && entityKey(sel) === it.k
-        const bg = selected ? '#356' : 'transparent'
-        const color = selected ? '#fff' : '#bcd'
-        return `<div data-select="${it.k}" style="padding:2px 6px;cursor:pointer;border-radius:2px;background:${bg};color:${color}">${escapeHtml(it.label)}</div>`
-      })
-      .join('')
-    return `<div style="margin-bottom:6px">
-      <div style="color:#9bb;margin-bottom:2px;font-weight:bold">${title} (${items.length})</div>
-      ${rows || '<div style="color:#566;font-size:11px;padding-left:6px">(none)</div>'}
-    </div>`
-  }
-
-  function selectedPropsHtml(): string {
-    if (!sel) return '<span style="color:#566">No selection</span>'
-    if (sel.kind === 'start') {
-      return [
-        `<div><b>start</b></div>`,
-        `<div>pos: ${fmtVec(draft.start.position)}</div>`,
-        `<div>yaw: ${((draft.start.yaw * 180) / Math.PI).toFixed(1)}°</div>`,
-        `<div style="color:#7c9">controls position + facing for the player and the AI grid</div>`,
-      ].join('')
-    }
-    if (sel.kind === 'prop') {
-      const p = draft.props[sel.index]
-      if (!p) return '(missing)'
-      return [
-        `<div><b>${PROP_LABELS[p.type]}_${sel.index}</b></div>`,
-        `<div>pos: ${fmtVec(p.position)}</div>`,
-        `<div>size: ${fmtVec(p.size)}</div>`,
-        `<div style="color:#7c9">${propSizeHint(p.type)}</div>`,
-      ].join('')
-    }
-    if (sel.kind === 'gate') {
-      const cp = draft.checkpoints[sel.index]
-      if (!cp) return '(missing)'
-      const bound =
-        typeof cp.splineT === 'number'
-          ? `<div style="color:#7c9">⚓ bound to spline @ t=${cp.splineT.toFixed(3)}</div>`
-          : ''
-      return [
-        `<div><b>cp_${String(cp.index).padStart(2, '0')}</b></div>`,
-        `<div>pos: ${fmtVec(cp.position)}</div>`,
-        `<div>halfWidth: ${cp.halfWidth.toFixed(2)} · height: ${cp.height.toFixed(2)}</div>`,
-        bound,
-      ].join('')
-    }
-    if (sel.kind === 'pickup') {
-      const p = draft.pickupSpawns[sel.index]
-      if (!p) return '(missing)'
-      return `<div><b>pickup_${sel.index}</b></div><div>pos: ${fmtVec(p)}</div>`
-    }
-    if (sel.kind === 'pad') {
-      const pad = draft.boostPads[sel.index]
-      if (!pad) return '(missing)'
-      return [
-        `<div><b>pad_${sel.index}</b></div>`,
-        `<div>pos: ${fmtVec(pad.position)}</div>`,
-        `<div>halfWidth: ${pad.halfWidth.toFixed(2)} · halfDepth: ${pad.halfDepth.toFixed(2)} · strength: ${pad.strength.toFixed(2)}</div>`,
-      ].join('')
-    }
-    const sp = draft.aiSplines[sel.splineIndex]
-    if (!sp) return '(missing)'
-    const arr = sp.anchors ?? sp.points
-    const p = arr[sel.pointIndex]
-    if (!p) return '(missing)'
-    const label = sp.anchors ? 'spline anchor' : 'spline pt'
-    return `<div><b>${label} ${sel.pointIndex}</b></div><div>pos: ${fmtVec(p)}</div>`
-  }
-
-  function wirePanelEvents(): void {
-    const root = panel
-    root.querySelectorAll<HTMLElement>('[data-place]').forEach((el) => {
-      el.addEventListener('click', () => {
-        const t = el.dataset.place as PlaceTool
+  // The panel UI itself lives in `editor-ui.ts`. We pass a `getState`
+  // callback so the panel reads the current sel/mode/placeTool on each
+  // render, and a callbacks bag so user interactions flow back into the
+  // closure mutations (setMode/setSel/save/etc).
+  let panelHandle: EditorPanelHandle
+  panelHandle = createEditorPanel({
+    draft,
+    propAssets,
+    getState: () => ({ sel, mode, placeTool, pickedAssetId }),
+    callbacks: {
+      onPlaceTool: (t) => {
         placeTool = placeTool === t ? 'none' : t
-        renderPanel()
-      })
-    })
-    root.querySelectorAll<HTMLElement>('[data-mode]').forEach((el) => {
-      el.addEventListener('click', () => {
-        const m = el.dataset.mode as GizmoMode
-        setMode(m)
-      })
-    })
-    root.querySelectorAll<HTMLElement>('[data-select]').forEach((el) => {
-      el.addEventListener('click', () => {
-        const k = el.dataset.select as string
-        setSel(parseKey(k))
-      })
-    })
-    const assetSelect = root.querySelector<HTMLSelectElement>('#ed-asset-pick')
-    if (assetSelect) {
-      assetSelect.addEventListener('change', () => {
-        pickedAssetId = assetSelect.value
-      })
-    }
-    root.querySelector('#ed-save')?.addEventListener('click', () => {
-      void save()
-    })
-    root.querySelector('#ed-play')?.addEventListener('click', () => {
-      const url = new URL(window.location.href)
-      url.searchParams.delete('edit')
-      window.location.href = url.toString()
-    })
-    root.querySelector('#ed-open')?.addEventListener('click', () => {
-      void openTrackPicker()
-    })
-    root.querySelector('#ed-new')?.addEventListener('click', () => {
-      promptNewTrack()
-    })
+        panelHandle.render()
+      },
+      onMode: (m) => setMode(m),
+      onSelect: (s) => setSel(s),
+      onAssetPick: (id) => {
+        pickedAssetId = id
+      },
+      onSave: () => {
+        void save()
+      },
+      onPlay: () => {
+        const url = new URL(window.location.href)
+        url.searchParams.delete('edit')
+        window.location.href = url.toString()
+      },
+      onOpen: () => {
+        void openTrackPickerFlow({
+          currentTrackId: draft.id,
+          confirmDiscard,
+          setStatus: (msg, color) => panelHandle.setStatus(msg, color),
+        })
+      },
+      onNew: () => {
+        promptNewTrackFlow({ currentTrackId: draft.id, confirmDiscard })
+      },
+      selSupportsMode,
+    },
+  })
+
+  // Lightweight aliases so the rest of the closure can keep calling
+  // `renderPanel()` / `renderPanelLight()` without threading the handle
+  // through every callsite.
+  function renderPanel(): void {
+    panelHandle.render()
+  }
+  function renderPanelLight(): void {
+    panelHandle.renderLight()
   }
 
   /**
@@ -950,189 +680,6 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     )
   }
 
-  /**
-   * Fetches /__editor/list-tracks and renders a modal listing every track
-   * the editor can open. Clicking a row navigates to that track in edit
-   * mode (full reload — the editor doesn't support in-place swap).
-   */
-  async function openTrackPicker(): Promise<void> {
-    const status = panel.querySelector<HTMLElement>('#ed-status')
-    if (status) {
-      status.textContent = 'Loading tracks…'
-      status.style.color = '#7a8'
-    }
-    let tracks: { id: string; kind: 'json' | 'glb-only'; hasGlb: boolean }[]
-    try {
-      const res = await fetch('/__editor/list-tracks')
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-      const body = (await res.json()) as {
-        tracks?: { id: string; kind: 'json' | 'glb-only'; hasGlb: boolean }[]
-      }
-      tracks = Array.isArray(body.tracks) ? body.tracks : []
-    } catch (e) {
-      if (status) {
-        status.textContent = `Open failed: ${(e as Error).message}`
-        status.style.color = '#f88'
-      }
-      return
-    }
-    if (status) status.textContent = ''
-    showTrackPickerModal(tracks)
-  }
-
-  function showTrackPickerModal(
-    tracks: { id: string; kind: 'json' | 'glb-only'; hasGlb: boolean }[],
-  ): void {
-    const overlay = document.createElement('div')
-    overlay.style.cssText = [
-      'position: fixed',
-      'inset: 0',
-      'background: rgba(0,0,0,0.5)',
-      'display: flex',
-      'align-items: center',
-      'justify-content: center',
-      'z-index: 200',
-      'pointer-events: auto',
-    ].join(';')
-
-    const dialog = document.createElement('div')
-    dialog.style.cssText = [
-      'background: #1a2028',
-      'color: #d8e6f0',
-      'font: 12px ui-monospace, Menlo, Consolas, monospace',
-      'border: 1px solid #345',
-      'border-radius: 8px',
-      'padding: 14px 16px',
-      'min-width: 320px',
-      'max-height: 70vh',
-      'display: flex',
-      'flex-direction: column',
-      'gap: 10px',
-    ].join(';')
-
-    const title = document.createElement('div')
-    title.style.cssText = 'font-weight:bold;font-size:14px;color:#7fc7ff'
-    title.textContent = 'Open Track'
-    dialog.appendChild(title)
-
-    if (tracks.length === 0) {
-      const empty = document.createElement('div')
-      empty.style.cssText = 'color:#aab;padding:8px 0'
-      empty.textContent =
-        'No tracks found. Create one in Blender (Export to Game) or click New… to start a draft.'
-      dialog.appendChild(empty)
-    } else {
-      const list = document.createElement('div')
-      list.style.cssText =
-        'display:flex;flex-direction:column;gap:2px;overflow-y:auto;max-height:50vh;border:1px solid #345;border-radius:4px;padding:4px;background:#101418'
-      for (const t of tracks) {
-        const row = document.createElement('div')
-        const isCurrent = t.id === draft.id
-        row.style.cssText = [
-          'padding: 6px 10px',
-          'cursor: pointer',
-          'border-radius: 3px',
-          isCurrent ? 'background:#356;color:#fff' : 'color:#cde',
-          'display: flex',
-          'justify-content: space-between',
-          'gap: 8px',
-        ].join(';')
-        const tag =
-          t.kind === 'json'
-            ? t.hasGlb
-              ? 'JSON + GLB'
-              : 'JSON'
-            : 'GLB only'
-        row.innerHTML = `
-          <span>${escapeHtml(t.id)}${isCurrent ? '  <span style="color:#7fc">(current)</span>' : ''}</span>
-          <span style="color:#789;font-size:11px">${tag}</span>
-        `
-        row.addEventListener('mouseenter', () => {
-          if (!isCurrent) row.style.background = '#234'
-        })
-        row.addEventListener('mouseleave', () => {
-          if (!isCurrent) row.style.background = ''
-        })
-        row.addEventListener('click', () => {
-          if (t.id === draft.id) {
-            close()
-            return
-          }
-          if (!confirmDiscard(`Open "${t.id}"`)) return
-          const url = new URL(window.location.href)
-          url.searchParams.set('track', t.id)
-          url.searchParams.set('edit', '1')
-          window.location.href = url.toString()
-        })
-        list.appendChild(row)
-      }
-      dialog.appendChild(list)
-    }
-
-    const btnRow = document.createElement('div')
-    btnRow.style.cssText = 'display:flex;gap:6px;justify-content:flex-end'
-    const cancelBtn = document.createElement('button')
-    cancelBtn.type = 'button'
-    cancelBtn.textContent = 'Cancel'
-    cancelBtn.style.cssText =
-      'background:#234;color:#dde;border:1px solid #456;padding:5px 12px;border-radius:3px;cursor:pointer;font:inherit'
-    cancelBtn.addEventListener('click', () => close())
-    btnRow.appendChild(cancelBtn)
-    dialog.appendChild(btnRow)
-
-    function close(): void {
-      overlay.remove()
-      window.removeEventListener('keydown', onModalKey)
-    }
-    function onModalKey(e: KeyboardEvent): void {
-      if (e.code === 'Escape') {
-        e.preventDefault()
-        close()
-      }
-    }
-    window.addEventListener('keydown', onModalKey)
-
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) close()
-    })
-    overlay.appendChild(dialog)
-    document.body.appendChild(overlay)
-  }
-
-  function promptNewTrack(): void {
-    const raw = window.prompt(
-      'New track id (lowercase letters, digits, dashes):',
-      'untitled',
-    )
-    if (raw == null) return
-    const id = raw.trim()
-    if (!/^[a-z0-9-]+$/.test(id)) {
-      window.alert('Track id must match /^[a-z0-9-]+$/. Try again.')
-      return
-    }
-    if (id === draft.id) {
-      window.alert('That is the current track.')
-      return
-    }
-    if (!confirmDiscard(`Open new draft "${id}"`)) return
-    const url = new URL(window.location.href)
-    url.searchParams.set('track', id)
-    url.searchParams.set('edit', '1')
-    window.location.href = url.toString()
-  }
-
-  function parseKey(k: string): EntitySel {
-    if (k === 'start') return { kind: 'start' }
-    if (k.startsWith('gate:')) return { kind: 'gate', index: Number(k.slice(5)) }
-    if (k.startsWith('pickup:')) return { kind: 'pickup', index: Number(k.slice(7)) }
-    if (k.startsWith('pad:')) return { kind: 'pad', index: Number(k.slice(4)) }
-    if (k.startsWith('prop:')) return { kind: 'prop', index: Number(k.slice(5)) }
-    if (k.startsWith('spline:')) {
-      const [, si, pi] = k.split(':')
-      return { kind: 'spline', splineIndex: Number(si), pointIndex: Number(pi) }
-    }
-    return null
-  }
 
   // ── Pointer for placement only (selection is via outliner) ──────────────
   const raycaster = new THREE.Raycaster()
@@ -1176,7 +723,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       if (pickedKey) break
     }
     if (pickedKey) {
-      setSel(parseKey(pickedKey))
+      setSel(parseEntityKey(pickedKey))
     } else {
       // Click on empty space → deselect.
       setSel(null)
@@ -1276,11 +823,10 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     } else if (e.code === 'KeyZ' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
       e.preventDefault()
       const ok = tryUndo()
-      const status = panel.querySelector<HTMLElement>('#ed-status')
-      if (status) {
-        status.textContent = ok ? `Undid (${undoStack.length} more)` : 'Nothing to undo'
-        status.style.color = ok ? '#7a8' : '#aa9'
-      }
+      panelHandle.setStatus(
+        ok ? `Undid (${undoStack.length} more)` : 'Nothing to undo',
+        ok ? '#7a8' : '#aa9',
+      )
     } else if (e.code === 'Escape') {
       placeTool = 'none'
       renderPanel()
@@ -1316,11 +862,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
 
   // ── Save ────────────────────────────────────────────────────────────────
   async function save(): Promise<void> {
-    const status = panel.querySelector<HTMLElement>('#ed-status')
-    if (status) {
-      status.textContent = 'Saving…'
-      status.style.color = '#7a8'
-    }
+    panelHandle.setStatus('Saving…', '#7a8')
     try {
       const res = await fetch('/__editor/save-track', {
         method: 'POST',
@@ -1333,15 +875,9 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       }
       const body = (await res.json()) as { path?: string }
       savedAtUndoDepth = undoStack.length
-      if (status) {
-        status.textContent = `Saved → ${body.path ?? 'public/tracks/'}`
-        status.style.color = '#7a8'
-      }
+      panelHandle.setStatus(`Saved → ${body.path ?? 'public/tracks/'}`, '#7a8')
     } catch (e) {
-      if (status) {
-        status.textContent = `Save failed: ${(e as Error).message}`
-        status.style.color = '#f88'
-      }
+      panelHandle.setStatus(`Save failed: ${(e as Error).message}`, '#f88')
     }
   }
 
@@ -1356,7 +892,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
 
   function dispose(): void {
     window.removeEventListener('keydown', onKey)
-    panel.remove()
+    panelHandle.dispose()
     tc.detach()
     tc.dispose()
     orbit.dispose()
@@ -1372,333 +908,11 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   return { tick, dispose }
 }
 
-// ── Helper builders ───────────────────────────────────────────────────────
-
-function makeGateHelper(cp: Checkpoint, selected: boolean): THREE.Group {
-  const g = new THREE.Group()
-  g.position.set(cp.position.x, cp.position.y, cp.position.z)
-  g.quaternion.set(cp.rotation.x, cp.rotation.y, cp.rotation.z, cp.rotation.w)
-  // helper.scale stays (1,1,1) — geometry is built at the entity's real
-  // dims so the gizmo's scale gestures are intuitive (drag = stretch).
-
-  const baseColor = 0xff7733
-  const selColor = 0xffcc66
-  const mat = new THREE.MeshBasicMaterial({
-    color: selected ? selColor : baseColor,
-    transparent: true,
-    opacity: 0.9,
-  })
-
-  const pillarGeom = new THREE.CylinderGeometry(0.5, 0.5, cp.height, 8)
-  const left = new THREE.Mesh(pillarGeom, mat)
-  left.position.set(-cp.halfWidth, cp.height / 2, 0)
-  g.add(left)
-  const right = new THREE.Mesh(pillarGeom, mat.clone())
-  right.position.set(cp.halfWidth, cp.height / 2, 0)
-  g.add(right)
-  const barGeom = new THREE.BoxGeometry(cp.halfWidth * 2, 0.5, 0.4)
-  const bar = new THREE.Mesh(barGeom, mat.clone())
-  bar.position.set(0, cp.height + 0.25, 0)
-  g.add(bar)
-  // Forward arrow — small triangle pointing +Z to show gate orientation.
-  const arrowGeom = new THREE.ConeGeometry(0.7, 1.4, 4)
-  arrowGeom.rotateX(Math.PI / 2) // cone tip toward +Z
-  const arrow = new THREE.Mesh(arrowGeom, mat.clone())
-  arrow.position.set(0, 0.7, 1.2)
-  g.add(arrow)
-
-  g.userData.setSelected = (v: boolean) => {
-    g.traverse((c) => {
-      const m = (c as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined
-      if (m) m.color.setHex(v ? selColor : baseColor)
-    })
-  }
-  return g
-}
-
-function makePickupHelper(p: { x: number; y: number; z: number }, selected: boolean): THREE.Group {
-  const g = new THREE.Group()
-  g.position.set(p.x, p.y, p.z)
-  const baseColor = 0xffaa00
-  const selColor = 0xffff66
-  const mat = new THREE.MeshBasicMaterial({
-    color: selected ? selColor : baseColor,
-    transparent: true,
-    opacity: 0.9,
-  })
-  const m = new THREE.Mesh(new THREE.SphereGeometry(1.0, 14, 10), mat)
-  g.add(m)
-  g.userData.setSelected = (v: boolean) => {
-    mat.color.setHex(v ? selColor : baseColor)
-  }
-  return g
-}
-
-function makePadHelper(pad: BoostPad, selected: boolean): THREE.Group {
-  const g = new THREE.Group()
-  g.position.set(pad.position.x, pad.position.y + 0.1, pad.position.z)
-  g.quaternion.set(pad.rotation.x, pad.rotation.y, pad.rotation.z, pad.rotation.w)
-
-  const baseColor = 0x33ddff
-  const selColor = 0x99ffff
-  const w = pad.halfWidth * 2
-  const d = pad.halfDepth * 2
-
-  const mat = new THREE.MeshBasicMaterial({
-    color: selected ? selColor : baseColor,
-    transparent: true,
-    opacity: 0.65,
-    side: THREE.DoubleSide,
-  })
-  const slabGeom = new THREE.PlaneGeometry(w, d)
-  slabGeom.rotateX(-Math.PI / 2)
-  const slab = new THREE.Mesh(slabGeom, mat)
-  g.add(slab)
-  // Direction arrow pointing +Z (boost direction).
-  const arrowGeom = new THREE.ConeGeometry(0.6, 1.2, 4)
-  arrowGeom.rotateX(Math.PI / 2)
-  const arrow = new THREE.Mesh(
-    arrowGeom,
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 }),
-  )
-  arrow.position.set(0, 0.05, d * 0.3)
-  g.add(arrow)
-
-  g.userData.setSelected = (v: boolean) => {
-    mat.color.setHex(v ? selColor : baseColor)
-  }
-  return g
-}
-
-/**
- * Anchor / control-point helper. Bigger (1.2m) when this is a Catmull-Rom
- * anchor — the user is meant to grab and drag these. Smaller (0.6m) for
- * legacy dense polyline points where there are many.
- */
-function makeAnchorHelper(
-  p: { x: number; y: number; z: number },
-  selected: boolean,
-  isAnchor: boolean,
-): THREE.Group {
-  const g = new THREE.Group()
-  g.position.set(p.x, p.y + 0.2, p.z)
-  const baseColor = isAnchor ? 0x66bbff : 0x88ccff
-  const selColor = 0xffff66
-  const mat = new THREE.MeshBasicMaterial({ color: selected ? selColor : baseColor })
-  const radius = isAnchor ? 1.4 : 0.6
-  const segs = isAnchor ? 12 : 8
-  const dot = new THREE.Mesh(new THREE.SphereGeometry(radius, segs, segs), mat)
-  g.add(dot)
-  if (isAnchor) {
-    // Faint vertical post so anchors are visible when the camera is low.
-    const postMat = new THREE.MeshBasicMaterial({
-      color: baseColor,
-      transparent: true,
-      opacity: 0.4,
-    })
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 3, 6), postMat)
-    post.position.set(0, 1.5, 0)
-    g.add(post)
-  }
-  g.userData.setSelected = (v: boolean) => {
-    mat.color.setHex(v ? selColor : baseColor)
-  }
-  return g
-}
-
-/**
- * Smooth curve drawn from the dense runtime-sample list. For anchored
- * splines this is the Catmull-Rom output; for legacy splines it's just
- * the polyline.
- */
-function makeSplineCurve(points: { x: number; y: number; z: number }[]): THREE.Line {
-  const geom = new THREE.BufferGeometry()
-  if (points.length < 2) {
-    geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3))
-    return new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x4488aa }))
-  }
-  const arr = new Float32Array((points.length + 1) * 3)
-  for (let i = 0; i < points.length; i++) {
-    arr[i * 3] = points[i]!.x
-    arr[i * 3 + 1] = points[i]!.y + 0.2
-    arr[i * 3 + 2] = points[i]!.z
-  }
-  arr[points.length * 3] = points[0]!.x
-  arr[points.length * 3 + 1] = points[0]!.y + 0.2
-  arr[points.length * 3 + 2] = points[0]!.z
-  geom.setAttribute('position', new THREE.BufferAttribute(arr, 3))
-  const line = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x66aacc }))
-  line.name = 'editor:spline-curve'
-  return line
-}
-
-/**
- * Player-start helper. A pad on the ground with a forward-pointing arrow,
- * tinted bright green so it stands out from the orange gates.
- */
-function makeStartHelper(start: { position: Vec3; yaw: number }, selected: boolean): THREE.Group {
-  const g = new THREE.Group()
-  g.position.set(start.position.x, start.position.y, start.position.z)
-  const halfA = start.yaw / 2
-  g.quaternion.set(0, Math.sin(halfA), 0, Math.cos(halfA))
-
-  const baseColor = 0x33ff88
-  const selColor = 0xaaffcc
-  const padMat = new THREE.MeshBasicMaterial({
-    color: selected ? selColor : baseColor,
-    transparent: true,
-    opacity: 0.55,
-    side: THREE.DoubleSide,
-  })
-  const padGeom = new THREE.PlaneGeometry(6, 8)
-  padGeom.rotateX(-Math.PI / 2)
-  const pad = new THREE.Mesh(padGeom, padMat)
-  pad.position.set(0, 0.05, 0)
-  g.add(pad)
-
-  const arrowMat = new THREE.MeshBasicMaterial({
-    color: selected ? selColor : baseColor,
-    transparent: true,
-    opacity: 0.95,
-  })
-  const arrowGeom = new THREE.ConeGeometry(1.0, 2.4, 4)
-  arrowGeom.rotateX(Math.PI / 2)
-  const arrow = new THREE.Mesh(arrowGeom, arrowMat)
-  arrow.position.set(0, 0.5, 2.6)
-  g.add(arrow)
-
-  // Vertical post so the start is visible from far away.
-  const postMat = new THREE.MeshBasicMaterial({
-    color: selected ? selColor : baseColor,
-    transparent: true,
-    opacity: 0.5,
-  })
-  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 4, 8), postMat)
-  post.position.set(0, 2, -2)
-  g.add(post)
-
-  g.userData.setSelected = (v: boolean) => {
-    padMat.color.setHex(v ? selColor : baseColor)
-    arrowMat.color.setHex(v ? selColor : baseColor)
-    postMat.color.setHex(v ? selColor : baseColor)
-  }
-  return g
-}
-
-function defaultPropSize(t: PropType): Vec3 {
-  if (t === 'box') return { x: 4, y: 1.5, z: 4 }
-  if (t === 'sphere') return { x: 3, y: 3, z: 3 }
-  if (t === 'cylinder') return { x: 2.5, y: 2, z: 2.5 }
-  // pipes default to a 5m radius, 10m long, 0.6m wall — large enough to ride.
-  return { x: 5, y: 5, z: 0.6 }
-}
-
-function defaultPropDropY(t: PropType, size: Vec3): number {
-  // Drop boxes / cylinders so they sit ON the water plane (y=0) rather than
-  // floating in mid-air. Spheres rest on radius. Pipes lay on their outer
-  // radius.
-  if (t === 'box') return size.y
-  if (t === 'sphere') return size.x
-  if (t === 'cylinder') return size.y
-  return size.x // pipe / halfpipe rest on outer radius
-}
-
-function propSizeHint(t: PropType): string {
-  if (t === 'box') return 'size = halfWidth, halfHeight, halfDepth'
-  if (t === 'sphere') return 'size.x = radius'
-  if (t === 'cylinder') return 'size.x = radius, size.y = halfHeight'
-  return 'size = outerRadius, halfLength, wallThickness'
-}
-
-const PROP_DEFAULT_COLORS: Record<PropType, number> = {
-  box: 0xc0a070,
-  sphere: 0xddaa66,
-  cylinder: 0x9999bb,
-  pipe: 0x99ccdd,
-  halfpipe: 0xaadddd,
-  asset: 0x88ccff,
-}
-
-function makePropHelper(p: Prop, selected: boolean): THREE.Group {
-  const g = new THREE.Group()
-  g.position.set(p.position.x, p.position.y, p.position.z)
-  g.quaternion.set(p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w)
-  const baseColor = p.color ? new THREE.Color(p.color).getHex() : PROP_DEFAULT_COLORS[p.type]
-  const selColor = 0xffff66
-  const mat = new THREE.MeshLambertMaterial({
-    color: selected ? selColor : baseColor,
-    transparent: true,
-    opacity: 0.85,
-    side: THREE.DoubleSide,
-  })
-  // Asset props don't have parametric geometry; their `size` is a scale
-  // applied to the runtime-loaded GLB. Editor shows a translucent
-  // placeholder box scaled by `size` so users can position them.
-  const geom =
-    p.type === 'asset'
-      ? new THREE.BoxGeometry(
-          Math.max(0.1, p.size.x * 2),
-          Math.max(0.1, p.size.y * 2),
-          Math.max(0.1, p.size.z * 2),
-        )
-      : buildPropGeometry(p.type, p.size)
-  const mesh = new THREE.Mesh(geom, mat)
-  g.add(mesh)
-  // A wireframe overlay helps gauge size against the gizmo.
-  const wireMat = new THREE.LineBasicMaterial({
-    color: selected ? selColor : 0x000000,
-    transparent: true,
-    opacity: 0.25,
-  })
-  const wire = new THREE.LineSegments(new THREE.WireframeGeometry(geom), wireMat)
-  g.add(wire)
-  g.userData.setSelected = (v: boolean) => {
-    mat.color.setHex(v ? selColor : baseColor)
-    wireMat.color.setHex(v ? selColor : 0x000000)
-  }
-  return g
-}
-
-/** Yaw (rotation around +Y) extracted from a quaternion via the YXZ Euler. */
-function yawFromQuaternion(q: THREE.Quaternion): number {
-  const e = new THREE.Euler().setFromQuaternion(q, 'YXZ')
-  return e.y
-}
-
 // ── Misc utils ────────────────────────────────────────────────────────────
-
-function fmtVec(v: { x: number; y: number; z: number }): string {
-  return `(${v.x.toFixed(1)}, ${v.y.toFixed(1)}, ${v.z.toFixed(1)})`
-}
 
 function clampPositive(n: number, min: number, max: number): number {
   if (!Number.isFinite(n) || n <= 0) return min
   if (n < min) return min
   if (n > max) return max
   return n
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => {
-    if (c === '&') return '&amp;'
-    if (c === '<') return '&lt;'
-    if (c === '>') return '&gt;'
-    if (c === '"') return '&quot;'
-    return '&#39;'
-  })
-}
-
-function disposeObj(o: THREE.Object3D): void {
-  o.traverse((c) => {
-    const geom = (c as THREE.Mesh).geometry
-    if (geom) geom.dispose()
-    const m = (c as THREE.Mesh).material
-    if (m) {
-      if (Array.isArray(m)) {
-        for (const mm of m) mm.dispose()
-      } else {
-        m.dispose()
-      }
-    }
-  })
 }

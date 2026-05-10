@@ -1,0 +1,328 @@
+/**
+ * Pure helper-mesh factories used by the track editor. Each function
+ * takes plain entity data and returns a self-contained THREE.Group with
+ * a `userData.setSelected(v: boolean)` callback so the editor can
+ * re-tint markers without rebuilding geometry.
+ *
+ * Extracted from `track-editor.ts` so the orchestration file stays
+ * focused on state + gizmo + I/O. None of these functions touch the
+ * editor closure.
+ */
+
+import * as THREE from 'three'
+import { buildPropGeometry } from '@/engine/render/props-geometry'
+import type { Vec3 } from '@/engine/sim/physics/vec'
+import type { BoostPad, Checkpoint, Prop, PropType } from '@/game/tracks/types'
+
+export function makeGateHelper(cp: Checkpoint, selected: boolean): THREE.Group {
+  const g = new THREE.Group()
+  g.position.set(cp.position.x, cp.position.y, cp.position.z)
+  g.quaternion.set(cp.rotation.x, cp.rotation.y, cp.rotation.z, cp.rotation.w)
+  // helper.scale stays (1,1,1) — geometry is built at the entity's real
+  // dims so the gizmo's scale gestures are intuitive (drag = stretch).
+
+  const baseColor = 0xff7733
+  const selColor = 0xffcc66
+  const mat = new THREE.MeshBasicMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.9,
+  })
+
+  const pillarGeom = new THREE.CylinderGeometry(0.5, 0.5, cp.height, 8)
+  const left = new THREE.Mesh(pillarGeom, mat)
+  left.position.set(-cp.halfWidth, cp.height / 2, 0)
+  g.add(left)
+  const right = new THREE.Mesh(pillarGeom, mat.clone())
+  right.position.set(cp.halfWidth, cp.height / 2, 0)
+  g.add(right)
+  const barGeom = new THREE.BoxGeometry(cp.halfWidth * 2, 0.5, 0.4)
+  const bar = new THREE.Mesh(barGeom, mat.clone())
+  bar.position.set(0, cp.height + 0.25, 0)
+  g.add(bar)
+  // Forward arrow — small triangle pointing +Z to show gate orientation.
+  const arrowGeom = new THREE.ConeGeometry(0.7, 1.4, 4)
+  arrowGeom.rotateX(Math.PI / 2) // cone tip toward +Z
+  const arrow = new THREE.Mesh(arrowGeom, mat.clone())
+  arrow.position.set(0, 0.7, 1.2)
+  g.add(arrow)
+
+  g.userData.setSelected = (v: boolean) => {
+    g.traverse((c) => {
+      const m = (c as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined
+      if (m) m.color.setHex(v ? selColor : baseColor)
+    })
+  }
+  return g
+}
+
+export function makePickupHelper(
+  p: { x: number; y: number; z: number },
+  selected: boolean,
+): THREE.Group {
+  const g = new THREE.Group()
+  g.position.set(p.x, p.y, p.z)
+  const baseColor = 0xffaa00
+  const selColor = 0xffff66
+  const mat = new THREE.MeshBasicMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.9,
+  })
+  const m = new THREE.Mesh(new THREE.SphereGeometry(1.0, 14, 10), mat)
+  g.add(m)
+  g.userData.setSelected = (v: boolean) => {
+    mat.color.setHex(v ? selColor : baseColor)
+  }
+  return g
+}
+
+export function makePadHelper(pad: BoostPad, selected: boolean): THREE.Group {
+  const g = new THREE.Group()
+  g.position.set(pad.position.x, pad.position.y + 0.1, pad.position.z)
+  g.quaternion.set(pad.rotation.x, pad.rotation.y, pad.rotation.z, pad.rotation.w)
+
+  const baseColor = 0x33ddff
+  const selColor = 0x99ffff
+  const w = pad.halfWidth * 2
+  const d = pad.halfDepth * 2
+
+  const mat = new THREE.MeshBasicMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.65,
+    side: THREE.DoubleSide,
+  })
+  const slabGeom = new THREE.PlaneGeometry(w, d)
+  slabGeom.rotateX(-Math.PI / 2)
+  const slab = new THREE.Mesh(slabGeom, mat)
+  g.add(slab)
+  // Direction arrow pointing +Z (boost direction).
+  const arrowGeom = new THREE.ConeGeometry(0.6, 1.2, 4)
+  arrowGeom.rotateX(Math.PI / 2)
+  const arrow = new THREE.Mesh(
+    arrowGeom,
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 }),
+  )
+  arrow.position.set(0, 0.05, d * 0.3)
+  g.add(arrow)
+
+  g.userData.setSelected = (v: boolean) => {
+    mat.color.setHex(v ? selColor : baseColor)
+  }
+  return g
+}
+
+/**
+ * Anchor / control-point helper. Bigger (1.2m) when this is a Catmull-Rom
+ * anchor — the user is meant to grab and drag these. Smaller (0.6m) for
+ * legacy dense polyline points where there are many.
+ */
+export function makeAnchorHelper(
+  p: { x: number; y: number; z: number },
+  selected: boolean,
+  isAnchor: boolean,
+): THREE.Group {
+  const g = new THREE.Group()
+  g.position.set(p.x, p.y + 0.2, p.z)
+  const baseColor = isAnchor ? 0x66bbff : 0x88ccff
+  const selColor = 0xffff66
+  const mat = new THREE.MeshBasicMaterial({ color: selected ? selColor : baseColor })
+  const radius = isAnchor ? 1.4 : 0.6
+  const segs = isAnchor ? 12 : 8
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(radius, segs, segs), mat)
+  g.add(dot)
+  if (isAnchor) {
+    // Faint vertical post so anchors are visible when the camera is low.
+    const postMat = new THREE.MeshBasicMaterial({
+      color: baseColor,
+      transparent: true,
+      opacity: 0.4,
+    })
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 3, 6), postMat)
+    post.position.set(0, 1.5, 0)
+    g.add(post)
+  }
+  g.userData.setSelected = (v: boolean) => {
+    mat.color.setHex(v ? selColor : baseColor)
+  }
+  return g
+}
+
+/**
+ * Smooth curve drawn from the dense runtime-sample list. For anchored
+ * splines this is the Catmull-Rom output; for legacy splines it's just
+ * the polyline.
+ */
+export function makeSplineCurve(points: { x: number; y: number; z: number }[]): THREE.Line {
+  const geom = new THREE.BufferGeometry()
+  if (points.length < 2) {
+    geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3))
+    return new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x4488aa }))
+  }
+  const arr = new Float32Array((points.length + 1) * 3)
+  for (let i = 0; i < points.length; i++) {
+    arr[i * 3] = points[i]!.x
+    arr[i * 3 + 1] = points[i]!.y + 0.2
+    arr[i * 3 + 2] = points[i]!.z
+  }
+  arr[points.length * 3] = points[0]!.x
+  arr[points.length * 3 + 1] = points[0]!.y + 0.2
+  arr[points.length * 3 + 2] = points[0]!.z
+  geom.setAttribute('position', new THREE.BufferAttribute(arr, 3))
+  const line = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x66aacc }))
+  line.name = 'editor:spline-curve'
+  return line
+}
+
+/**
+ * Player-start helper. A pad on the ground with a forward-pointing arrow,
+ * tinted bright green so it stands out from the orange gates.
+ */
+export function makeStartHelper(
+  start: { position: Vec3; yaw: number },
+  selected: boolean,
+): THREE.Group {
+  const g = new THREE.Group()
+  g.position.set(start.position.x, start.position.y, start.position.z)
+  const halfA = start.yaw / 2
+  g.quaternion.set(0, Math.sin(halfA), 0, Math.cos(halfA))
+
+  const baseColor = 0x33ff88
+  const selColor = 0xaaffcc
+  const padMat = new THREE.MeshBasicMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.55,
+    side: THREE.DoubleSide,
+  })
+  const padGeom = new THREE.PlaneGeometry(6, 8)
+  padGeom.rotateX(-Math.PI / 2)
+  const pad = new THREE.Mesh(padGeom, padMat)
+  pad.position.set(0, 0.05, 0)
+  g.add(pad)
+
+  const arrowMat = new THREE.MeshBasicMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.95,
+  })
+  const arrowGeom = new THREE.ConeGeometry(1.0, 2.4, 4)
+  arrowGeom.rotateX(Math.PI / 2)
+  const arrow = new THREE.Mesh(arrowGeom, arrowMat)
+  arrow.position.set(0, 0.5, 2.6)
+  g.add(arrow)
+
+  // Vertical post so the start is visible from far away.
+  const postMat = new THREE.MeshBasicMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.5,
+  })
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 4, 8), postMat)
+  post.position.set(0, 2, -2)
+  g.add(post)
+
+  g.userData.setSelected = (v: boolean) => {
+    padMat.color.setHex(v ? selColor : baseColor)
+    arrowMat.color.setHex(v ? selColor : baseColor)
+    postMat.color.setHex(v ? selColor : baseColor)
+  }
+  return g
+}
+
+const PROP_DEFAULT_COLORS: Record<PropType, number> = {
+  box: 0xc0a070,
+  sphere: 0xddaa66,
+  cylinder: 0x9999bb,
+  pipe: 0x99ccdd,
+  halfpipe: 0xaadddd,
+  asset: 0x88ccff,
+}
+
+export function makePropHelper(p: Prop, selected: boolean): THREE.Group {
+  const g = new THREE.Group()
+  g.position.set(p.position.x, p.position.y, p.position.z)
+  g.quaternion.set(p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w)
+  const baseColor = p.color ? new THREE.Color(p.color).getHex() : PROP_DEFAULT_COLORS[p.type]
+  const selColor = 0xffff66
+  const mat = new THREE.MeshLambertMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.85,
+    side: THREE.DoubleSide,
+  })
+  // Asset props don't have parametric geometry; their `size` is a scale
+  // applied to the runtime-loaded GLB. Editor shows a translucent
+  // placeholder box scaled by `size` so users can position them.
+  const geom =
+    p.type === 'asset'
+      ? new THREE.BoxGeometry(
+          Math.max(0.1, p.size.x * 2),
+          Math.max(0.1, p.size.y * 2),
+          Math.max(0.1, p.size.z * 2),
+        )
+      : buildPropGeometry(p.type, p.size)
+  const mesh = new THREE.Mesh(geom, mat)
+  g.add(mesh)
+  // A wireframe overlay helps gauge size against the gizmo.
+  const wireMat = new THREE.LineBasicMaterial({
+    color: selected ? selColor : 0x000000,
+    transparent: true,
+    opacity: 0.25,
+  })
+  const wire = new THREE.LineSegments(new THREE.WireframeGeometry(geom), wireMat)
+  g.add(wire)
+  g.userData.setSelected = (v: boolean) => {
+    mat.color.setHex(v ? selColor : baseColor)
+    wireMat.color.setHex(v ? selColor : 0x000000)
+  }
+  return g
+}
+
+export function defaultPropSize(t: PropType): Vec3 {
+  if (t === 'box') return { x: 4, y: 1.5, z: 4 }
+  if (t === 'sphere') return { x: 3, y: 3, z: 3 }
+  if (t === 'cylinder') return { x: 2.5, y: 2, z: 2.5 }
+  // pipes default to a 5m radius, 10m long, 0.6m wall — large enough to ride.
+  return { x: 5, y: 5, z: 0.6 }
+}
+
+export function defaultPropDropY(t: PropType, size: Vec3): number {
+  // Drop boxes / cylinders so they sit ON the water plane (y=0) rather than
+  // floating in mid-air. Spheres rest on radius. Pipes lay on their outer
+  // radius.
+  if (t === 'box') return size.y
+  if (t === 'sphere') return size.x
+  if (t === 'cylinder') return size.y
+  return size.x // pipe / halfpipe rest on outer radius
+}
+
+export function propSizeHint(t: PropType): string {
+  if (t === 'box') return 'size = halfWidth, halfHeight, halfDepth'
+  if (t === 'sphere') return 'size.x = radius'
+  if (t === 'cylinder') return 'size.x = radius, size.y = halfHeight'
+  return 'size = outerRadius, halfLength, wallThickness'
+}
+
+/** Yaw (rotation around +Y) extracted from a quaternion via the YXZ Euler. */
+export function yawFromQuaternion(q: THREE.Quaternion): number {
+  const e = new THREE.Euler().setFromQuaternion(q, 'YXZ')
+  return e.y
+}
+
+/** Recursively dispose a THREE.Object3D's geometries + materials. */
+export function disposeObj(o: THREE.Object3D): void {
+  o.traverse((c) => {
+    const geom = (c as THREE.Mesh).geometry
+    if (geom) geom.dispose()
+    const m = (c as THREE.Mesh).material
+    if (m) {
+      if (Array.isArray(m)) {
+        for (const mm of m) mm.dispose()
+      } else {
+        m.dispose()
+      }
+    }
+  })
+}
