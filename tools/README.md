@@ -44,21 +44,29 @@ tools/
 └── blender/                     ← shared headless pipeline
     ├── __init__.py              ← package marker
     ├── common.py                ← reset_scene, read_spec, export_glb, validate_required_kinds
-    ├── lib_loader.py            ← append_objects from kit .blends (libraries.load; preserves parent links, prunes transitive deps)
+    ├── lib_loader.py            ← append_objects from kit .blends (used by build_prop.py)
     ├── sockets.py               ← runtime socket_* empty creation + validation
-    ├── mounts.py                ← build-time mount_/anchor empties + snap_to_mount + strip_build_helpers
     ├── colliders.py             ← primitive collider helpers
+    ├── hoverbike_addon.py       ← in-Blender addon — Hoverbike sidebar with Export Bike/Track to Game
     ├── inspect_glb.mjs          ← node script — dumps a GLB's nodes + extras
     ├── run.mjs                  ← Node CLI — wraps `blender --background` per spec
-    ├── seed_bike_kit.py         ← (re)build tools/blender/lib/bike_parts.blend — Source collection + per-spec snapshot collections, variants parented to mounts
     ├── seed_prop_kit.py         ← (re)build tools/blender/lib/prop_kit.blend
-    ├── build_bike.py            ← spec → bike GLB. Picks chassis_<variant> when geometry.chassisVariant is set, else scales chassis_base.
+    ├── seed_bike_kit.py         ← LEGACY — kit seeder; superseded by per-variant flow in M9.38
+    ├── mounts.py                ← LEGACY — kit-only build helper; no longer wired up
+    ├── build_bike.py            ← bikes-src/<id>.blend → bike GLB (with optional spec.appearance/physics overrides)
     ├── build_prop.py            ← spec → prop GLB
-    ├── build_track.py           ← spec → tracks-src/<id>.blend → GLB (replaces build_calibration_scene.py)
+    ├── build_track.py           ← spec → tracks-src/<id>.blend → GLB
     └── lib/                     ← committed kit .blend files (source art)
-        ├── bike_parts.blend     ← Source collection (canonical parts + mounts) + Bike: <name> snapshot per spec
+        ├── bike_parts.blend     ← LEGACY — superseded by per-variant bikes-src/<id>.blend in M9.38
         └── prop_kit.blend
 ```
+
+The bikes themselves live one level up at `bikes-src/<id>.blend` —
+one .blend per variant, the source of truth for bike geometry,
+sockets, and colliders. See
+[`docs/asset-pipeline-guide.md`](../docs/asset-pipeline-guide.md#bikes-bikes-srcidblend--specsbikesidjson).
+Tracks similarly live at `tracks-src/<id>.blend` (see
+[blender-pipeline-guide.md](../docs/blender-pipeline-guide.md)).
 
 The runtime ships a stand-alone bike viewer at
 [`src/viewer/bike-viewer.ts`](../src/viewer/bike-viewer.ts), reachable
@@ -67,17 +75,14 @@ via `?viewer=<bikeId>`. It loads one bike GLB on a turntable with
 gives a quick-switch row across the manifest's bikes — useful for
 eyeballing the Blender kit against what the build actually ships.
 
-### Build-time helpers vs. runtime sockets
+### Sockets
 
-Two empty-prefix conventions show up in the kit `.blend` files. They look similar but live in different layers:
-
-| Prefix | Lives in | Stripped on export? | Used by |
-|---|---|---|---|
-| `mount_<role>` | parent kit part (e.g. `chassis_base`) | yes | `build_bike.py` to position children |
-| `anchor` | child kit part (optional) | yes | `snap_to_mount` to align the child to the mount |
-| `socket_<slot>` | bike root | no — rides into GLB | runtime (`bike-loader.ts`) for rider/camera/FX attach |
-
-`tools/blender/mounts.py` defines `snap_to_mount(part, parent, role)` and `strip_build_helpers()`; the build invokes them so authors can move attachment points by translating an empty in Blender instead of editing pseudocode.
+`socket_<slot>` empties on `bike_root` ride into the GLB and are
+resolved at runtime (`bike-loader.ts`) for rider seat / nose camera /
+FX attach. The bike .blend must contain all five required slots
+(`seat`, `nose_cam`, `fx_thruster_l`, `fx_thruster_r`, `fx_exhaust`)
+or the addon's *Export Bike to Game* + headless `pnpm gen:bikes` will
+both fail validation.
 
 ## Spec → GLB contract
 

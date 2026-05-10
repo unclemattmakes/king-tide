@@ -57,21 +57,28 @@ Blender → glTF uses Y-up via `export_yup=True`. Three.js is also Y-up. Z forwa
 
 1 Blender unit = 1 metre. Don't change units. Bikes are roughly 2.5m long; gates are typically 28m wide (`half_width = 14`) and 6m tall.
 
-## Bike kit reference (`bike_parts.blend`)
+## Bike reference (`bikes-src/<id>.blend`)
 
-Separate from the track conventions above. Authoring `tools/blender/lib/bike_parts.blend` for `build_bike.py`:
+Separate from the track conventions above. As of M9.38 each bike
+variant lives in its own `bikes-src/<id>.blend` (no shared kit, no
+propagation between variants). Author the bike directly, click
+*Hoverbike → Export Bike to Game* in the addon. What the .blend
+must contain:
 
-| Empty | Lives on | Lifecycle | Purpose |
+| Object | Required | Lifecycle | Purpose |
 |---|---|---|---|
-| `mount_<role>` | parented to a kit "parent" part (chassis_base) | **build-time only** — stripped from GLB | Marks where a child part attaches. Roles: `fairing`, `fork`, `fin`, `tail`. |
-| `anchor` | parented to a kit "child" part (optional) | **build-time only** — stripped from GLB | The point on the child that snaps to the parent's mount. Defaults to part origin if absent. |
-| `socket_<slot>` | added by builder onto bike_root | rides into GLB | Runtime attach points (`seat`, `nose_cam`, `fx_thruster_l/r`, `fx_exhaust`). |
+| `bike_root` (empty) | yes — exactly one | rides into GLB | Runtime entry node. Extras: `kind=bike`, `bike_id`, `mass_kg`, `top_speed_mps`, `hover_height`, `display_name`. |
+| `bike_body` / `bike_fairing` / `bike_fork` / `bike_thruster_*` / `bike_fin` / `bike_tail` (meshes) | typical loadout — at least the visual mesh you want rendered | rides into GLB | Parented to `bike_root`. Materials follow `mat_bike_<id>_*` so the spec's `appearance.*` overrides can recolour them at build time. |
+| `socket_<slot>` (empties) | yes — all five slots | rides into GLB | Runtime attach points: `seat`, `nose_cam`, `fx_thruster_l/r`, `fx_exhaust`. |
+| `collider_body` (empty) | yes — at least one | rides into GLB | Extras: `kind=collider`, `shape=box`, `half_extents=[hx, hy, hz]` in three's axes (right, up, forward). |
 
-Mount positions are stored in chassis-local space. Variants are *parented* to mounts so moving a mount in the viewport drags the dependent geometry live. For the default `chassis_base`, mounts scale with `spec.geometry.chassisLength` / `chassisWidth` / `chassisHeight` (the chassis is a unit cube the build scales). For specs that set `geometry.chassisVariant: "<name>"`, the build appends `chassis_<name>` from the kit at author-modelled size — no scaling — so kit-local mount positions resolve to the same world positions in-game.
+Studio lights baked into the .blend make the in-Blender preview
+match the in-game viewer; the GLB exporter strips lights so they
+never reach the runtime. The legacy kit (`bike_parts.blend`,
+`mounts.py`, `seed_bike_kit.py`) is no longer wired up — kept on
+disk pending cleanup.
 
-The kit's outliner is split into a `Source` collection (canonical editable parts) plus one `Bike: <name>` snapshot per spec. Snapshots are static (linked-data instances refreshed on re-seed); edit in Source, eyeball cross-spec via the snapshots or `?viewer=<id>`.
-
-See [`asset-pipeline-guide.md`](./asset-pipeline-guide.md#mounts-and-anchors).
+See [`asset-pipeline-guide.md`](./asset-pipeline-guide.md#bikes-bikes-srcidblend--specsbikesidjson).
 
 ## Reference layout — Cliffside
 
