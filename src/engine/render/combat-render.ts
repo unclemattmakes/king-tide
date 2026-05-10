@@ -15,11 +15,16 @@ import {
   ShieldEffect,
   ShieldEffectStore,
 } from '@/game/components/combat'
+import { syncEntityMeshes } from './mesh-sync'
 
 /**
  * Render-side bookkeeping for combat visuals: mines, missiles, shield
- * bubbles, and explosions. Each entity type has its own per-eid mesh map;
- * orphans are removed when their sim-side entities go away.
+ * bubbles, and explosions. Each entity type owns its own per-eid mesh
+ * map; orphans are removed when their sim-side entities go away.
+ *
+ * The four lifecycle blocks share their structure via `syncEntityMeshes`
+ * — each one supplies a factory, an update function, and (optionally) a
+ * predicate to skip entities whose visual is inactive.
  */
 export function createCombatRenderSystem(scene: THREE.Scene, sim: SimWorld) {
   const mineMeshes = new Map<number, THREE.Object3D>()
@@ -28,19 +33,13 @@ export function createCombatRenderSystem(scene: THREE.Scene, sim: SimWorld) {
   const explosionMeshes = new Map<number, THREE.Object3D>()
 
   return function tick(_dt: number): void {
-    // --- Mines ---
-    {
-      const eids = query(sim, [MineTag, MineState])
-      const live = new Set<number>()
-      for (const eid of eids) {
-        live.add(eid)
+    syncEntityMeshes({
+      scene,
+      meshes: mineMeshes,
+      eids: query(sim, [MineTag, MineState]),
+      factory: createMineMesh,
+      update: (mesh, eid) => {
         const m = MineStateStore.must(eid)
-        let mesh = mineMeshes.get(eid)
-        if (!mesh) {
-          mesh = createMineMesh()
-          scene.add(mesh)
-          mineMeshes.set(eid, mesh)
-        }
         mesh.position.set(m.position.x, m.position.y, m.position.z)
         // Spin the disc.
         mesh.rotation.y = m.ageSec * 4
@@ -49,29 +48,16 @@ export function createCombatRenderSystem(scene: THREE.Scene, sim: SimWorld) {
         const glowMat = glow.material as THREE.MeshBasicMaterial
         const pulse = 0.45 + 0.25 * Math.cos(m.ageSec * 6)
         glowMat.opacity = m.detonated ? 0 : pulse
-      }
-      for (const [eid, mesh] of mineMeshes) {
-        if (!live.has(eid)) {
-          scene.remove(mesh)
-          disposeMesh(mesh)
-          mineMeshes.delete(eid)
-        }
-      }
-    }
+      },
+    })
 
-    // --- Missiles ---
-    {
-      const eids = query(sim, [MissileTag, MissileState])
-      const live = new Set<number>()
-      for (const eid of eids) {
-        live.add(eid)
+    syncEntityMeshes({
+      scene,
+      meshes: missileMeshes,
+      eids: query(sim, [MissileTag, MissileState]),
+      factory: createMissileMesh,
+      update: (mesh, eid) => {
         const m = MissileStateStore.must(eid)
-        let mesh = missileMeshes.get(eid)
-        if (!mesh) {
-          mesh = createMissileMesh()
-          scene.add(mesh)
-          missileMeshes.set(eid, mesh)
-        }
         mesh.position.set(m.position.x, m.position.y, m.position.z)
         // Orient along velocity (cone tip points +Z, so look-at the
         // anti-velocity direction with up = world up).
@@ -84,78 +70,49 @@ export function createCombatRenderSystem(scene: THREE.Scene, sim: SimWorld) {
           )
           mesh.lookAt(lookTarget)
         }
-      }
-      for (const [eid, mesh] of missileMeshes) {
-        if (!live.has(eid)) {
-          scene.remove(mesh)
-          disposeMesh(mesh)
-          missileMeshes.delete(eid)
-        }
-      }
-    }
+      },
+    })
 
-    // --- Shield bubbles (one per bike with ShieldEffect.remaining > 0) ---
-    {
-      const bikeEids = query(sim, [BikeTag, Transform])
-      const live = new Set<number>()
-      for (const bEid of bikeEids) {
-        const shield = ShieldEffectStore.get(bEid)
-        if (!shield || shield.remaining <= 0) continue
-        // Make sure the bike actually has the ShieldEffect component
-        // attached (not just a stale store entry from an old hit).
-        if (!hasComponent(sim, bEid, ShieldEffect)) continue
-        live.add(bEid)
-        let mesh = shieldMeshes.get(bEid)
-        if (!mesh) {
-          mesh = createShieldMesh()
-          scene.add(mesh)
-          shieldMeshes.set(bEid, mesh)
-        }
-        const t = TransformStore.must(bEid)
+    // Shield bubbles: one per bike with a live ShieldEffect. The filter
+    // also guards against stale store entries from old hits where the
+    // component itself has already been detached.
+    syncEntityMeshes({
+      scene,
+      meshes: shieldMeshes,
+      eids: query(sim, [BikeTag, Transform]),
+      filter: (eid) => {
+        const shield = ShieldEffectStore.get(eid)
+        if (!shield || shield.remaining <= 0) return false
+        return hasComponent(sim, eid, ShieldEffect)
+      },
+      factory: createShieldMesh,
+      update: (mesh, eid) => {
+        const shield = ShieldEffectStore.must(eid)
+        const t = TransformStore.must(eid)
         mesh.position.set(t.x, t.y, t.z)
         // Fade out as it expires (last second drops to 0).
         const opacity = Math.min(1, shield.remaining) * 0.45
         const inner = mesh.children[0] as THREE.Mesh
         const innerMat = inner.material as THREE.MeshBasicMaterial
         innerMat.opacity = opacity
-      }
-      for (const [eid, mesh] of shieldMeshes) {
-        if (!live.has(eid)) {
-          scene.remove(mesh)
-          disposeMesh(mesh)
-          shieldMeshes.delete(eid)
-        }
-      }
-    }
+      },
+    })
 
-    // --- Explosions ---
-    {
-      const eids = query(sim, [ExplosionTag, ExplosionState])
-      const live = new Set<number>()
-      for (const eid of eids) {
-        live.add(eid)
+    syncEntityMeshes({
+      scene,
+      meshes: explosionMeshes,
+      eids: query(sim, [ExplosionTag, ExplosionState]),
+      factory: (eid) => createExplosionMesh(ExplosionStateStore.must(eid).color),
+      update: (mesh, eid) => {
         const e = ExplosionStateStore.must(eid)
-        let mesh = explosionMeshes.get(eid)
-        if (!mesh) {
-          mesh = createExplosionMesh(e.color)
-          scene.add(mesh)
-          explosionMeshes.set(eid, mesh)
-        }
         mesh.position.set(e.position.x, e.position.y, e.position.z)
         const u = Math.min(1, e.ageSec / e.lifetime)
         const scale = 0.6 + u * 4.0 // grow from 0.6× to ~4.6× over lifetime
         mesh.scale.setScalar(scale)
         const mat = (mesh as THREE.Mesh).material as THREE.MeshBasicMaterial
         mat.opacity = (1 - u) * 0.9
-      }
-      for (const [eid, mesh] of explosionMeshes) {
-        if (!live.has(eid)) {
-          scene.remove(mesh)
-          disposeMesh(mesh)
-          explosionMeshes.delete(eid)
-        }
-      }
-    }
+      },
+    })
   }
 }
 
@@ -246,18 +203,4 @@ function createExplosionMesh(color: number): THREE.Object3D {
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 8), mat)
   mesh.frustumCulled = false
   return mesh
-}
-
-function disposeMesh(obj: THREE.Object3D): void {
-  obj.traverse((child) => {
-    if (child instanceof THREE.Mesh) {
-      child.geometry?.dispose()
-      const m = child.material
-      if (Array.isArray(m)) {
-        for (const mm of m) mm.dispose()
-      } else if (m) {
-        m.dispose()
-      }
-    }
-  })
 }
