@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-09 (M9.28 trimesh tunneling fix — bike body has CCD enabled, spec-driven track surfaces author as 1m slabs instead of 0-thickness planes; build_track.py now also emits `public/tracks/<id>.json` with start yaw + Catmull-Rom anchors so a single `pnpm gen:tracks` produces a fully playable track. Bike kit now edits-in-context: parts laid out at assembled positions in `bike_parts.blend`, attachment points are author-controlled `mount_*` empties parented to `chassis_base` (variants parented under each mount → moving a mount drags geometry live), one `Bike: <name>` snapshot per spec mirrors the in-game `?viewer=<id>` switch UX, and `geometry.chassisVariant` opts a spec into bespoke `chassis_<variant>` geometry instead of stretching the generic cube). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-09 (M9.38 planar water reflection — TSL `reflector()` node mirrors bikes / sky / terrain onto the water with wave-normal distortion, Fresnel-mixed; `?reflect=0` and `?water=classic` keep the fresnelEmissive sky-tint fallback for A/B. M9.28 trimesh tunneling fix — bike body has CCD enabled, spec-driven track surfaces author as 1m slabs instead of 0-thickness planes; build_track.py now also emits `public/tracks/<id>.json` with start yaw + Catmull-Rom anchors so a single `pnpm gen:tracks` produces a fully playable track. Bike kit now edits-in-context: parts laid out at assembled positions in `bike_parts.blend`, attachment points are author-controlled `mount_*` empties parented to `chassis_base` (variants parented under each mount → moving a mount drags geometry live), one `Bike: <name>` snapshot per spec mirrors the in-game `?viewer=<id>` switch UX, and `geometry.chassisVariant` opts a spec into bespoke `chassis_<variant>` geometry instead of stretching the generic cube). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -199,8 +199,12 @@ disconnect for a hoverbike skimming the surface. If steepness goes much
 past 1, consider a Newton iteration on the CPU side to recover the rest
 position from world XZ.
 
-Not yet shipped: SSR / planar reflection of bikes. See [docs/water-deep-dive.md](./water-deep-dive.md) for the full
-research and prioritization.
+Planar reflection landed in M9.38 — the water surface mirrors bikes / sky /
+terrain via TSL's built-in `reflector()` node, distorted by the wave normal
+and Fresnel-mixed into the base color. SSR (true screen-space reflection
+of arbitrary scene depth) is still deferred and likely overkill for an
+arcade racer; see [docs/water-deep-dive.md](./water-deep-dive.md) for the
+full research and prioritization.
 
 ### Water — sun-direction backscatter (M9.30)
 Threads the directional light vector through to the water shader as a
@@ -220,6 +224,64 @@ additions:
 
 Hoisted `heightFactor` out of the IIFE so both the scatter blend and
 the new sun-glow share it. No physics change.
+
+### Water — planar reflection (M9.38)
+The water surface now mirrors the scene — bikes, props, terrain, and sky
+all show up in the reflection, distorted by the wave normal so the mirror
+image ripples with the surface. Implementation uses Three.js's TSL
+[`reflector()`](https://github.com/mrdoob/three.js/blob/master/src/nodes/utils/ReflectorNode.js)
+node, which manages a virtual mirror camera + half-resolution render
+target internally. Each frame the reflector renders the scene from the
+camera reflected across the water plane (y = 0), into a half-res target,
+which the water shader samples via `screenUV` (the reflector's default
+UV node, with our wave-gradient distortion added on top).
+
+Key wiring choices in [`src/engine/render/water.ts`](../src/engine/render/water.ts):
+
+1. **Mirror plane = the camera-locked water mesh.** The reflector's
+   `target` Object3D is parented to the water mesh with `rotation.x =
+   -π/2`, so its local +Z (= the plane's normal direction) aligns with
+   world +Y. The mesh slides under the camera in X/Z each frame, but
+   reflection across an infinite horizontal plane is independent of the
+   in-plane offset — only the world-Y of the target matters, and that
+   stays at 0.
+
+2. **Distortion from wave gradient.** The varying'd surface normal slopes
+   `dydx`/`dydz` are added to the reflector's UV, scaled by an
+   inverse-distance factor: `0.02 + 0.6 / (camDist + 2)`. Closer waves
+   distort visibly while horizon samples stay nearly mirror-flat — the
+   same trick the Three.js WaterMesh example uses, sized for our wave
+   amplitudes. Without distortion the mirror image looks glassy and the
+   wave geometry feels disconnected from what's painted on it.
+
+3. **Fresnel-weighted blend, not full replace.** Reflection strength is
+   `Schlick fresnel × 0.85` — 85% reflective at grazing angles, ~2% at
+   the zenith (the F0 = 0.02 floor is correct for water). The remaining
+   15% at grazing keeps a hint of the deep/scatter color in the surface
+   so it reads as "water reflecting" rather than "mirror painted on
+   water". Mixed BEFORE foam is composited so foam stays opaque white
+   where it fires (foam is water particles, not the surface — it
+   shouldn't reflect).
+
+4. **Replaces fresnelEmissive sky tint.** The pre-M9.38 grazing-angle
+   bright band was a fake `skyTint × fresnel` emissive — a stand-in for
+   the sky reflection. With the real reflection in place, that fake is
+   redundant (the actual sky is now in the reflection texture) and
+   stacking both reads as chrome. The fake is preserved in classic
+   mode (`?water=classic`) and `?reflect=0` so the A/B comparison still
+   shows the same baseline as before.
+
+Cost: one additional render pass at 0.5× resolution scale per frame.
+On a 1080p framebuffer that's a 540p target — a few hundred k pixels —
+trivial on real GPUs (130–180 fps unchanged on WebGPU). The reflector's
+internal `bounces: false` short-circuits the (would-be infinite) recursion
+of nested reflectors, and its `forceUpdate = false` skips the render
+entirely when the camera is looking up from below the water (the
+reflector would have nothing to mirror in that case).
+
+Debug knob: `?reflect=0` falls back to the fresnelEmissive sky tint for
+A/B; classic mode (`?water=classic`) also disables it, since classic was
+authored against the sky-tint emissive.
 
 ### Water — wake transverse "scallops" (M9.35)
 The wake's static Kelvin V is now modulated by `sin(K · behind − ω · t)`,
@@ -664,6 +726,7 @@ Open follow-ups:
 | M9.26 | Wake displaces water (visual + buoyancy) + periodic swell sets | ✅ |
 | M9.27 | Spec → GLB asset pipeline (bikes + props + tracks) — JSON specs, headless Blender builders, manifest, Vite watch, CI; player bike now loads from `racer.glb` | ✅ |
 | M9.28 | Trimesh tunneling fix — CCD on bike rigid body + 1m slab-extruded spec track surfaces (replaces 0-thickness planes); `build_track.py` now also emits `public/tracks/<id>.json` with start yaw + spline anchors so `pnpm gen:tracks` produces a fully playable track in one step | ✅ |
+| M9.38 | Planar water reflection — TSL `reflector()` node mirrors scene onto water with wave-normal-distorted UV, Fresnel-mixed into base color | ✅ |
 
 ## File / system map
 

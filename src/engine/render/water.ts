@@ -21,6 +21,7 @@ import {
   positionView,
   positionWorld,
   pow,
+  reflector,
   screenUV,
   sin,
   smoothstep,
@@ -828,9 +829,7 @@ export function createWaterMesh(
         const bandFoam = sqrt(bandLinear)
         // Tight peak right at the intersection — bright lip on top of the
         // band, regardless of band thickness.
-        const peakFoam = float(1).sub(
-          smoothstep(float(0), float(PEAK_RANGE), closeness),
-        )
+        const peakFoam = float(1).sub(smoothstep(float(0), float(PEAK_RANGE), closeness))
         // Intensity modulation: bumped to 0.85..1.15 so foam can punch
         // brighter than the wave/bike foam ceiling — turbulent peaks
         // saturate on the final clamp instead of sitting at 70%.
@@ -844,28 +843,93 @@ export function createWaterMesh(
   // would create unnaturally over-bright zones at gate posts where the
   // ramp hits water. Final clamp raised from 0.95 to 1.0 so the bright
   // peak at the water-line can reach pure white.
-  const foamMask = clamp(
-    max(waveFoam.add(bikeFoam), intersectionFoam),
-    float(0),
-    float(1),
-  )
+  const foamMask = clamp(max(waveFoam.add(bikeFoam), intersectionFoam), float(0), float(1))
   const foamColor = vec3(0.92, 0.96, 1.0)
-  const albedo = mix(baseColor, foamColor, foamMask)
 
-  // Fresnel: tint with sky color at grazing angles. We push this into the
-  // emissive channel so it adds even where the sun isn't catching the wave.
+  // Fresnel: standard Schlick approximation. Used both as a strength
+  // weight for the planar reflection (below) and as the fallback sky-tint
+  // emissive when reflections are off (classic mode / `?reflect=0`).
   // (viewDir + ndotv computed earlier and shared with the scatter blend.)
-  // Tone curve is gentler in v2 mode since the scatter blend already
-  // brightens grazing-angle samples — too much fresnel on top reads as
-  // chrome. Classic mode preserves the original 0.5 mix.
   const f0 = float(0.02)
   const fresnel = f0.add(
     float(1)
       .sub(f0)
       .mul(pow(float(1).sub(ndotv), 5)),
   )
+
+  // Planar reflection (M9.38). The TSL `reflector()` node manages a
+  // virtual mirror camera + render-target, samples them via screenUV. The
+  // call returns a TextureNode whose .rgb gives the reflected scene color.
+  //
+  // We distort the reflection UV by the wave-normal slopes (dydx, dydz)
+  // so the reflection ripples with the surface — without distortion the
+  // mirror image looks glassy and the wave geometry feels disconnected
+  // from what's painted on it. Distortion magnitude tapers with
+  // view-distance so distant waves don't smear the reflection across the
+  // screen (typical mirror-distortion trick: closer = more refraction).
+  //
+  // The reflection is mixed into the base water color via Fresnel — at
+  // grazing angles the surface reflects strongly (sky/horizon hits the
+  // eye), at the zenith the diffuse scatter color dominates. The fresnel
+  // sky-tint emissive that previously approximated this is dropped when
+  // reflections are on (the actual reflected sky subsumes it); classic
+  // mode and `?reflect=0` preserve the cheap fake.
+  //
+  // Cost: a full additional render pass at half-res per frame. Rendered
+  // scene includes sky + bikes + terrain + props but excludes the water
+  // itself (the reflector toggles `material.visible = false` during its
+  // pass). At 0.5 resolutionScale on a 1080p framebuffer that's 540p, a
+  // few hundred k pixels — trivial on real GPUs, fine on WebGPU + WebGL2.
+  const reflectFlag = !isClassic && params?.get('reflect') !== '0'
+  let reflectionRgb: ReturnType<typeof vec3> | null = null
+  let reflectorTarget: THREE.Object3D | null = null
+  if (reflectFlag) {
+    const mirror = reflector({
+      resolutionScale: 0.5,
+      bounces: false,
+      generateMipmaps: false,
+    })
+    // Distortion: scale wave-normal gradients by an inverse-distance
+    // factor so the close-in 1–2 m of water in front of the camera
+    // distorts visibly while horizon samples stay nearly mirror-flat.
+    // The 0.04 base is the gentlest setting that still reads as "moving
+    // water" rather than "glass"; bump if the reflection feels too
+    // perfect, drop if it smears.
+    const camDist = cameraPosition.sub(positionWorld).length()
+    const distortAmt = float(0.02).add(float(0.6).div(camDist.add(float(2.0))))
+    const distortion = vec2(dydx, dydz).mul(distortAmt)
+    // biome-ignore lint/suspicious/noExplicitAny: TSL ReflectorNode TS surface lacks .uvNode/.rgb/.target getters
+    const m = mirror as any
+    m.uvNode = m.uvNode.add(distortion)
+    reflectionRgb = m.rgb
+    reflectorTarget = m.target
+  }
+
+  // Albedo composition: deep/scatter blend → planar reflection (Fresnel-
+  // weighted) → foam paints over the result. Reflection goes between
+  // base + foam so foam still reads as opaque white where it fires
+  // (foam is water particles, not the surface — it shouldn't reflect).
+  let waterAlbedo = mix(baseColor, foamColor, foamMask)
+  if (reflectionRgb) {
+    // Reflection strength: Fresnel × cap. Capping at ~0.85 keeps a hint
+    // of the deep-water color in even the most grazing-angle samples,
+    // so the surface reads as "water reflecting" not "mirror painted on
+    // water" — important for sunlit crests where the scatter blend
+    // contributes meaningful color even at the horizon.
+    const reflStrength = fresnel.mul(float(0.85))
+    const reflectedBase = mix(baseColor, reflectionRgb, reflStrength)
+    waterAlbedo = mix(reflectedBase, foamColor, foamMask)
+  }
+  const albedo = waterAlbedo
+
+  // Sky-tint emissive: only used as a fallback when reflections are off
+  // (classic mode or `?reflect=0`). When the reflection is active, the
+  // actual reflected sky already paints the grazing-angle bright band
+  // and stacking a fake sky tint on top reads as chrome.
   const skyTint = vec3(0.55, 0.72, 0.95)
-  const fresnelEmissive = skyTint.mul(fresnel.mul(isClassic ? 0.5 : 0.32))
+  const fresnelEmissive = reflectionRgb
+    ? vec3(0, 0, 0)
+    : skyTint.mul(fresnel.mul(isClassic ? 0.5 : 0.32))
 
   // Sparkle: cheap hash on world XZ + animated UV scroll, gated to crests.
   // Two-layer mask so we get both broad "glistening areas" (low-frequency
@@ -950,6 +1014,19 @@ export function createWaterMesh(
   // `castShadow` on water: bumpy wave normals would alias the shadow
   // map and self-shadow ugly.
   mesh.receiveShadow = true
+
+  // Reflector target: the Object3D that anchors the mirror plane. Its
+  // local +Z axis is the plane normal, so we rotate -90° around X to
+  // align local +Z with world +Y for a horizontal water mirror. Parented
+  // to the (camera-locked) water mesh — the plane reference position
+  // moves in X/Z but reflection across an infinite horizontal plane is
+  // independent of the in-plane offset, so the math still holds. Without
+  // this wiring the reflector falls back to `_defaultRT` (a 1x1 cleared
+  // texture) and renders nothing.
+  if (reflectorTarget) {
+    reflectorTarget.rotation.x = -Math.PI / 2
+    mesh.add(reflectorTarget)
+  }
 
   // Pre-water depth snapshot. Three.js calls `onBeforeRender` per object
   // right before its draw is encoded — by the time water (transparent)
