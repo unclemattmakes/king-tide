@@ -6,6 +6,8 @@ import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import {
   BikeTag,
+  ControlIntent,
+  ControlIntentStore,
   HoverState,
   HoverStateStore,
   RBHandle,
@@ -57,13 +59,21 @@ const FOAM_SPEED_FULL = 25
 const SPARK_SPEED_FULL = 30
 const FOAM_MIN_SPEED = 3
 const SPARK_MIN_SPEED = 8
-// Emission origin in bike-local coords. The bike's render-systems.ts
+// Engine exhaust — emits while the bike is actively throttling. Boost
+// (held shift OR a boost pickup) ramps the rate up to BOOST_MAX_RATE
+// for that "thruster firing" beat.
+const EXHAUST_THROTTLE_RATE = 35 // particles/sec at full forward throttle
+const EXHAUST_BOOST_RATE = 90 // additional rate while boost is active
+const EXHAUST_THROTTLE_MIN = 0.2 // dead-zone — no exhaust on micro inputs
+// Emission origins in bike-local coords. The bike's render-systems.ts
 // applies a 2× visual scale to the mesh while keeping the physics body
 // at authored size — the bike's *transform* still uses physics-space
 // coordinates, so these offsets are scaled to land at the visible stern
-// (foam) and visible base (sparks) of the rendered bike.
+// (foam), visible base (sparks), and visible rear-bottom (exhaust) of
+// the rendered bike.
 const STERN_OFFSET = new THREE.Vector3(0, 0.1, -1.4)
 const SPARK_OFFSET = new THREE.Vector3(0, -0.2, 0)
+const EXHAUST_OFFSET = new THREE.Vector3(0, -0.2, -1.6)
 
 // Pool capacities — sized for ~5–8 bikes at full emission. Foam drifts
 // longer (lifetime ~1 s, rate ~80/s → ~80 alive per bike), so 480 covers
@@ -71,6 +81,10 @@ const SPARK_OFFSET = new THREE.Vector3(0, -0.2, 0)
 // ~60/s → ~24 alive per bike), so 200 is comfortable.
 const FOAM_CAPACITY = 480
 const SPARK_CAPACITY = 200
+// Exhaust: shorter lifetime than foam (~0.5s at boost) but higher peak
+// rate when boosting (~125/s = ~63 alive per bike, plus regular throttle
+// emission), so 320 covers ~5 boosting bikes plus margin.
+const EXHAUST_CAPACITY = 320
 
 function makeRadialTexture(rgb: [number, number, number]): THREE.Texture {
   const size = 64
@@ -301,6 +315,7 @@ function advance(pool: Pool, dt: number): void {
 export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsWorld) {
   const foamTex = makeRadialTexture([235, 245, 255])
   const sparkTex = makeRadialTexture([255, 200, 120])
+  const exhaustTex = makeRadialTexture([255, 130, 60])
 
   const foam = createPool({
     capacity: FOAM_CAPACITY,
@@ -319,21 +334,33 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
     gravity: -16,
     drag: 0.8,
   })
+  const exhaust = createPool({
+    capacity: EXHAUST_CAPACITY,
+    defaultSize: 0.45,
+    texture: exhaustTex,
+    blending: THREE.AdditiveBlending,
+    // Slight upward drift to read as hot air rising; drag dissipates it.
+    gravity: 0.8,
+    drag: 2.4,
+  })
 
   scene.add(foam.mesh)
   scene.add(sparks.mesh)
+  scene.add(exhaust.mesh)
 
   // Reusable scratch math.
   const sternWorld = new THREE.Vector3()
   const sparkWorld = new THREE.Vector3()
+  const exhaustWorld = new THREE.Vector3()
   const tmpQuat = new THREE.Quaternion()
   const tmpPos = new THREE.Vector3()
   const fwd = new THREE.Vector3()
+  const back = new THREE.Vector3()
 
   // Per-bike fractional emission accumulators — emit rate × dt is usually
   // < 1 per frame, so we accumulate the fraction across frames and emit
-  // when it crosses a whole particle. Map<eid, { foam, sparks }>.
-  const emitAccum = new Map<number, { foam: number; sparks: number }>()
+  // when it crosses a whole particle.
+  const emitAccum = new Map<number, { foam: number; sparks: number; exhaust: number }>()
 
   // Debug hook so the headed-browser verification can introspect rates,
   // free-slot counts, and live-particle counts. Removed when the dust
@@ -342,31 +369,18 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
     ;(window as unknown as { __fx?: unknown }).__fx = {
       foam,
       sparks,
+      exhaust,
       emitAccum,
       stats: () => ({
         foamAlive: foam.capacity - foam.freeCount,
         sparkAlive: sparks.capacity - sparks.freeCount,
-        foamFirstAlive: (() => {
-          for (let i = 0; i < foam.capacity; i++) {
-            if (foam.alphas[i]! > 0) {
-              return {
-                i,
-                x: foam.positions[i * 3 + 0],
-                y: foam.positions[i * 3 + 1],
-                z: foam.positions[i * 3 + 2],
-                size: foam.sizes[i],
-                alpha: foam.alphas[i],
-              }
-            }
-          }
-          return null
-        })(),
+        exhaustAlive: exhaust.capacity - exhaust.freeCount,
       }),
     }
   }
 
   return function tick(dt: number): void {
-    const eids = query(sim, [BikeTag, Transform, HoverState])
+    const eids = query(sim, [BikeTag, Transform, HoverState, ControlIntent])
 
     for (const eid of eids) {
       if (!hasComponent(sim, eid, RBHandle)) continue
@@ -375,6 +389,7 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
       if (!rb) continue
       const transform = TransformStore.must(eid)
       const hover = HoverStateStore.must(eid)
+      const intent = ControlIntentStore.must(eid)
       const v = rb.linvel()
       const speed = Math.hypot(v.x, v.z)
 
@@ -383,7 +398,7 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
 
       let acc = emitAccum.get(eid)
       if (!acc) {
-        acc = { foam: 0, sparks: 0 }
+        acc = { foam: 0, sparks: 0, exhaust: 0 }
         emitAccum.set(eid, acc)
       }
 
@@ -450,9 +465,53 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
       } else {
         acc.sparks = 0
       }
+
+      // Exhaust — emits while the bike is throttling forward, blossoming
+      // when boost is active. Emits regardless of surface (over water,
+      // on land, or airborne) — a bike actively burning fuel produces
+      // exhaust everywhere. Reverse throttle is intentionally excluded
+      // so the rear-thruster read stays consistent with bike motion.
+      const throttleMag = Math.max(0, intent.throttle) // forward only
+      if (throttleMag > EXHAUST_THROTTLE_MIN || intent.boost) {
+        const rate =
+          throttleMag * EXHAUST_THROTTLE_RATE + (intent.boost ? EXHAUST_BOOST_RATE : 0)
+        acc.exhaust += rate * dt
+        const n = Math.floor(acc.exhaust)
+        if (n > 0) {
+          acc.exhaust -= n
+          exhaustWorld.copy(EXHAUST_OFFSET).applyQuaternion(tmpQuat).add(tmpPos)
+          // Fire backward in bike-local -Z (the bike's forward is +Z).
+          back.set(0, 0, -1).applyQuaternion(tmpQuat)
+          // Boost gets a stronger blast and slightly larger sprites for
+          // a "thruster firing" beat distinct from idle exhaust.
+          const boosting = intent.boost
+          const ejectSpeed = boosting ? 9 : 5
+          const sizeMul = boosting ? 1.3 : 1.0
+          const lifeMul = boosting ? 1.0 : 0.7
+          emit(
+            exhaust,
+            exhaustWorld.x,
+            exhaustWorld.y,
+            exhaustWorld.z,
+            back.x * ejectSpeed,
+            back.y * ejectSpeed + 0.3,
+            back.z * ejectSpeed,
+            // Wider cone when boosting reads as turbulent thrust; tighter
+            // when idle-throttling reads as a clean stream.
+            boosting ? 2.5 : 1.2,
+            0.25 * lifeMul,
+            0.55 * lifeMul,
+            exhaust.defaultSize * sizeMul * (0.7 + Math.random() * 0.6),
+            n,
+          )
+        }
+      } else {
+        acc.exhaust = 0
+      }
     }
 
     advance(foam, dt)
     advance(sparks, dt)
+    advance(exhaust, dt)
   }
 }
