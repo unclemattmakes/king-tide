@@ -1,7 +1,7 @@
-import { addComponent, query, removeEntity } from 'bitecs'
+import { addComponent, query, type QueryResult, removeEntity } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
-import { quatRotate } from '@/engine/sim/physics/vec'
+import { distanceSquared, quatRotate } from '@/engine/sim/physics/vec'
 import {
   BikeTag,
   ControlIntent,
@@ -32,11 +32,13 @@ export const SHIELD_DURATION = 6 // seconds of bubble protection
 const STUN_DURATION = 1.0 // seconds of forced-neutral input after a hit
 const MINE_ARMING_DELAY = 0.6 // seconds before a fresh mine triggers on its owner
 const MINE_TRIGGER_RADIUS = 2.4 // meters
+const MINE_TRIGGER_RADIUS_SQ = MINE_TRIGGER_RADIUS * MINE_TRIGGER_RADIUS
 const MINE_DETONATION_LIFETIME = 0.5 // seconds the despawned mine remains for visual fade
 const MISSILE_SPEED = 38 // m/s
 const MISSILE_TURN_RATE = 2.4 // rad/s — limits how sharply it can chase
 const MISSILE_LIFETIME = 5 // seconds of flight before self-destruct
 const MISSILE_HIT_RADIUS = 1.6 // meters — bike center within this radius = impact
+const MISSILE_HIT_RADIUS_SQ = MISSILE_HIT_RADIUS * MISSILE_HIT_RADIUS
 const MISSILE_TARGET_CONE_DOT = 0.3 // dot(forward, dirToTarget) > this counts as "ahead"
 const MISSILE_TARGET_MAX_RANGE = 80 // meters — beyond this, no acquisition
 const MINE_DROP_OFFSET = -2.2 // meters along bike-fwd (negative = behind)
@@ -154,10 +156,7 @@ export function mineSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): void 
       const rb = phys.world.getRigidBody(handle.handle)
       if (!rb) continue
       const t = rb.translation()
-      const dx = t.x - mine.position.x
-      const dy = t.y - mine.position.y
-      const dz = t.z - mine.position.z
-      if (dx * dx + dy * dy + dz * dz > MINE_TRIGGER_RADIUS * MINE_TRIGGER_RADIUS) continue
+      if (distanceSquared(t, mine.position) > MINE_TRIGGER_RADIUS_SQ) continue
 
       const reaction = applyHitReaction(sim, phys, bEid)
       const color = reaction.shielded ? 0x66ff99 : 0xff7733
@@ -179,8 +178,17 @@ export function mineSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): void 
 /**
  * Pick the nearest other bike that's roughly in front of the firer and
  * within range. Returns the eid or -1.
+ *
+ * Callers in tight per-frame loops (e.g. aiCombatSystem) can pass a
+ * pre-fetched `bikeEids` array to avoid re-running the ECS query for
+ * each AI on the same tick.
  */
-export function pickMissileTarget(sim: SimWorld, phys: PhysicsWorld, firerEid: number): number {
+export function pickMissileTarget(
+  sim: SimWorld,
+  phys: PhysicsWorld,
+  firerEid: number,
+  bikeEids?: QueryResult,
+): number {
   const handle = RBHandleStore.get(firerEid)
   if (!handle) return -1
   const rb = phys.world.getRigidBody(handle.handle)
@@ -191,8 +199,8 @@ export function pickMissileTarget(sim: SimWorld, phys: PhysicsWorld, firerEid: n
 
   let bestEid = -1
   let bestDist = MISSILE_TARGET_MAX_RANGE
-  const bikeEids = query(sim, [BikeTag, RBHandle])
-  for (const bEid of bikeEids) {
+  const bikes = bikeEids ?? query(sim, [BikeTag, RBHandle])
+  for (const bEid of bikes) {
     if (bEid === firerEid) continue
     const otherHandle = RBHandleStore.must(bEid)
     const otherRb = phys.world.getRigidBody(otherHandle.handle)
@@ -276,10 +284,7 @@ export function missileSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): vo
       const rb = phys.world.getRigidBody(handle.handle)
       if (!rb) continue
       const bt = rb.translation()
-      const dx = bt.x - m.position.x
-      const dy = bt.y - m.position.y
-      const dz = bt.z - m.position.z
-      if (dx * dx + dy * dy + dz * dz <= MISSILE_HIT_RADIUS * MISSILE_HIT_RADIUS) {
+      if (distanceSquared(bt, m.position) <= MISSILE_HIT_RADIUS_SQ) {
         hitEid = bEid
         break
       }

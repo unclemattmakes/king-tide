@@ -1,6 +1,7 @@
 import { addComponent, query } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
+import { distanceSquared } from '@/engine/sim/physics/vec'
 import {
   BikeTag,
   ControlIntent,
@@ -30,6 +31,7 @@ import {
 } from '@/game/systems/combat'
 
 const PICKUP_RADIUS = 2.5 // bike center within this many meters of box → collect
+const PICKUP_RADIUS_SQ = PICKUP_RADIUS * PICKUP_RADIUS
 const RESPAWN_DELAY = 4 // seconds
 const BOOST_DURATION = 1.8
 const BOOST_MULTIPLIER = 1.6
@@ -67,10 +69,7 @@ export function pickupSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): voi
       const rb = phys.world.getRigidBody(handle)
       if (!rb) continue
       const t = rb.translation()
-      const dx = t.x - spawn.position.x
-      const dy = t.y - spawn.position.y
-      const dz = t.z - spawn.position.z
-      if (dx * dx + dy * dy + dz * dz > PICKUP_RADIUS * PICKUP_RADIUS) continue
+      if (distanceSquared(t, spawn.position) > PICKUP_RADIUS_SQ) continue
 
       // Collect.
       PickupSlotStore.set(bEid, { held: spawn.nextType })
