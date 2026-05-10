@@ -2,15 +2,6 @@
   "$schema": "../_schema/bike.json",
   "id": "cruiser",
   "displayName": "Cruiser",
-  "geometry": {
-    "chassisLength": 3.0,
-    "chassisWidth": 0.8,
-    "chassisHeight": 0.5,
-    "fairingStyle": "full",
-    "thrusterCount": 4,
-    "thrusterSpacing": 0.3,
-    "fork": "dual"
-  },
   "physics": {
     "massKg": 160,
     "topSpeedMps": 32,
@@ -21,8 +12,5 @@
     "metalColor": "#1a1c20",
     "glowColor": "#55aaff",
     "glowIntensity": 1.2
-  },
-  "rider": {
-    "seatOffset": [0, 0.65, -0.2]
   }
 }

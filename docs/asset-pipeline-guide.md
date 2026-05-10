@@ -25,25 +25,49 @@ pnpm dev              # http://localhost:5191 — Vite watches specs/ and kits a
 | Path | Owner | Notes |
 |---|---|---|
 | `specs/_schema/*.json` | this guide | JSON Schemas. Validated by `tools/blender/run.mjs` (ajv) before Blender runs. |
-| `specs/bikes/*.json`, `specs/props/*.json`, `specs/tracks/*.json` | authors | Source of truth for parametric assets. |
-| `tools/blender/lib/*.blend` | authors | Kit `.blend` files — committed source art. The seed scripts (`seed_bike_kit.py`, `seed_prop_kit.py`) regenerate the placeholders. |
-| `tools/blender/build_*.py` | pipeline | Headless builders. Each reads one spec via `HOVERBIKE_SPEC` env var. |
+| `specs/bikes/*.json`, `specs/props/*.json`, `specs/tracks/*.json` | authors | Bike specs are slim (display name + physics + appearance overrides); the geometry source of truth is `bikes-src/<id>.blend`. Prop + track specs remain parametric. |
+| `bikes-src/<id>.blend` | authors | One per bike variant — open, edit, click *Export Bike to Game* in the addon. The runtime GLB is built from this directly. |
+| `tracks-src/<id>.blend` | authors | One per track — same flow with *Export Track to Game*. |
+| `tools/blender/lib/*.blend` | authors | Prop kit `.blend` (`prop_kit.blend`); the legacy `bike_parts.blend` is no longer consumed by the bike builder but kept around for reference. |
+| `tools/blender/build_*.py` | pipeline | Headless builders. `build_bike.py` opens `bikes-src/<id>.blend` + applies spec overrides; `build_prop.py` + `build_track.py` are spec-driven. |
 | `tools/blender/run.mjs` | pipeline | Cross-platform Node wrapper. Discovers specs, validates, spawns Blender per spec, writes the manifest. |
 | `public/assets/<cat>/*.glb` | generated | Output GLBs. Committed today; Phase 5 will gitignore. |
 | `public/assets/manifest.json` | generated | Index of every built asset. The runtime + editor read it. |
 
 ## The three categories
 
-### Bikes (`specs/bikes/<id>.json`)
+### Bikes (`bikes-src/<id>.blend` + `specs/bikes/<id>.json`)
 
-Parametric chassis built from kit parts in `bike_parts.blend`. Shape
-knobs (`chassisLength`, `fairingStyle`, `thrusterCount`), physics
-(`massKg`, `topSpeedMps`, `hoverHeight`), appearance (livery, glow,
-metal colors), and rider seat offset. Each spec emits one bike GLB
-with:
+**The `.blend` is the source of truth for geometry.** Author each
+variant directly in `bikes-src/<id>.blend` — chassis, fairing, fork,
+thrusters, fin, tail, sockets, and collider all live there. No shared
+kit; no parametric assembly; no propagation across variants. Edit a
+bike, click *Export Bike to Game* in the Blender addon, the GLB
+updates and the runtime picks it up on next reload. (Headless
+`pnpm gen:bikes` opens each `.blend` and rebuilds non-interactively
+for CI.)
 
-- `bike_root` empty, `extras.kind="bike"` + bike-id/mass/top-speed.
-- Visual meshes (chassis, fairing, thrusters, fork) parented under it.
+The slim `specs/bikes/<id>.json` carries:
+
+- `displayName` — for the garage menu + manifest.
+- `physics.{massKg, topSpeedMps, hoverHeight}` — written into
+  `bike_root` extras at build time so the runtime + viewer HUD see
+  spec-driven values without reopening Blender. Optional.
+- `appearance.{liveryColor, metalColor, glowColor, glowIntensity}` —
+  recolour overrides applied to matching `mat_bike_<id>_*` materials
+  at build time so palette tweaks don't need a Blender round-trip.
+  Used by the garage menu's swatches. Optional.
+
+Drop either block from the spec to use whatever's authored in the
+`.blend`. (Older `geometry` and `rider` blocks are accepted by the
+schema for backward compatibility but ignored by the builder.)
+
+Each built bike GLB ships with:
+
+- `bike_root` empty, `extras.kind="bike"` + bike-id/mass/top-speed/
+  hover-height/display-name.
+- Visual meshes (`bike_body`, `bike_fairing`, `bike_thruster_*`,
+  `bike_fork`, `bike_fin`, `bike_tail`) parented under it.
 - Five sockets — `seat`, `nose_cam`, `fx_thruster_l`, `fx_thruster_r`,
   `fx_exhaust` — each an empty with `extras.kind="socket"` and `slot`.
 - One `collider_body` empty with `extras.kind="collider", shape="box",
@@ -53,24 +77,13 @@ with:
 The runtime path lives in
 [`src/game/assets/bike-loader.ts`](../src/game/assets/bike-loader.ts).
 
-#### Custom chassis geometry (`chassisVariant`)
-
-The default chassis is `chassis_base` (a generic cube) scaled per
-spec. To ship bespoke chassis geometry instead — own mesh per bike,
-no scaling — author `chassis_<your_id>` in `bike_parts.blend` and add
-`"chassisVariant": "<your_id>"` to the spec's `geometry` block. The
-build appends the named variant at author-modelled size and skips the
-`scale = (W, L, H)` step. `chassisLength`/`Width`/`Height` stay
-required — they still drive the box collider, the thruster placement,
-and the fork/fin/tail mount world positions, so keep them aligned
-with the sculpted mesh's actual dims.
-
 #### In-game viewer (`?viewer=<bikeId>`)
 
 For visual verification of a built bike GLB, navigate to
-`/?viewer=<id>` (e.g. `/?viewer=scout`). Skips the entire game boot
-and renders one bike on a turntable with `OrbitControls`. The HUD
-shows mass, top speed, hover height, world bbox, livery/metal/glow
+`/?viewer=<id>` (e.g. `/?viewer=scout`) — also reachable via the
+addon's **Copy Viewer URL** button. Skips the entire game boot and
+renders one bike on a turntable with `OrbitControls`. The HUD shows
+mass, top speed, hover height, world bbox, livery/metal/glow
 swatches, every socket, and a quick-switch row across the manifest's
 bikes. Sockets render as small green dots; the box collider as an
 orange wireframe. See
@@ -125,115 +138,73 @@ remains the higher-level entry point — that file references an
 3. Reload the browser tab (binary GLBs aren't HMR-able; Vite serves
    the new file but the runtime won't swap a live mesh).
 
-### Re-author kit geometry in Blender
+### Edit a bike directly (one-click flow)
 
-1. Open `tools/blender/lib/bike_parts.blend` (or `prop_kit.blend`).
-2. Edit. Save.
-3. Saving a `.blend` triggers the same watcher → all bikes (or props)
-   are rebuilt against the new kit.
-4. Reload.
+1. Install the addon once: *Edit → Preferences → Add-ons → Install…*
+   pick `tools/blender/hoverbike_addon.py`, tick the checkbox.
+2. Open `bikes-src/<id>.blend` (e.g. `bikes-src/racer.blend`).
+3. Edit. Move `bike_fairing`, sculpt `bike_body`, drag `socket_seat`,
+   recolour materials — whatever the variant needs. Each variant is
+   independent; nothing propagates between them.
+4. Press **N** → **Hoverbike** tab → **Export Bike to Game**. The
+   addon validates (one `bike_root`, all five required sockets, at
+   least one collider), writes `public/assets/bikes/<id>.glb`, and on
+   first export materialises a starter `specs/bikes/<id>.json` from
+   `bike_root` extras + the bike's authored materials. Subsequent
+   exports preserve the spec; **Shift-click** rewrites it from the
+   `.blend`.
+5. Reload `http://localhost:5191/?bike=<id>` (or the **Copy Play
+   URL** button in the addon panel). The dev server picks up the new
+   GLB on next request.
 
-If you want to start from a clean placeholder, re-run
-`tools/blender/seed_bike_kit.py` (or `seed_prop_kit.py`) — those
-scripts regenerate the placeholders from scratch.
-
-#### Edit-in-context
-
-The bike kit is organized into Blender collections that mirror the
-in-game `?viewer=<id>` switch experience. The default outliner state:
+What lives in each `bikes-src/<id>.blend`:
 
 ```
-Source                        ← editable canonical parts (visible by default)
-Bike: Calibration Bike        ← snapshot (hidden)
-Bike: Cruiser                 ← snapshot (hidden)
-Bike: Racer                   ← snapshot (hidden)
-Bike: Scout                   ← snapshot (hidden)
-Bike: Stunt                   ← snapshot (hidden)
+bike_root                    (empty; extras kind=bike, bike_id, ...)
+  ├── bike_body              (mesh)
+  ├── bike_fairing           (mesh)
+  ├── bike_fork              (mesh)
+  ├── bike_thruster_0..N     (mesh)
+  ├── bike_fin               (mesh)
+  ├── bike_tail              (mesh)
+  ├── socket_seat            (empty; kind=socket, slot=seat)
+  ├── socket_nose_cam        (empty; kind=socket, slot=nose_cam)
+  ├── socket_fx_thruster_l   (empty; kind=socket, slot=...)
+  ├── socket_fx_thruster_r   (empty; kind=socket, slot=...)
+  ├── socket_fx_exhaust      (empty; kind=socket, slot=...)
+  └── collider_body          (empty; kind=collider, shape=box,
+                              half_extents=[hx, hy, hz] in three axes)
 ```
 
-Source contains the **editable** canonical parts. Each variant
-fairing, fork, fin, and tail is parented to its corresponding
-`mount_*` empty, so **moving a mount in the viewport drags the
-dependent geometry along** — same live-attach feel as the in-game
-viewer. Move `mount_fairing` and all three fairing variants follow.
+Materials follow the convention `mat_bike_<id>_*` (`_chassis`,
+`_livery`, `_glow`, `_fork`, `_fin`, `_tail`) so the spec's
+`appearance.*` block can recolour them at build time without
+clobbering the .blend's roughness/metallic settings.
 
-`Bike: <name>` collections are **static snapshots** built from the
-spec at seed time. They contain linked-data instances of the
-canonical parts (mesh data shared with Source — mesh edits propagate
-instantly). To **refresh a snapshot** after mount edits, re-run
-`tools/blender/seed_bike_kit.py`. Toggle a snapshot visible to
-eyeball how a different spec resolves without leaving Blender.
+Studio lights baked into the .blend make the in-Blender preview look
+like the in-game viewer; the GLB exporter strips lights
+(`export_lights=False`), so they never reach the runtime.
 
-The prop kit is laid out as a row along +X — props don't have the
-collection structure since they don't share a chassis or vary as
-parametrically.
+### Re-author the prop kit
 
-The viewport position of an object in the kit is **layout-only**.
-`tools/blender/lib_loader.append_objects` resets each appended object's
-location/rotation/scale to identity (skipping `mount_*` / `anchor*`
-helpers, whose transforms ARE the data), so the build only sees the
-part's mesh data and positions it programmatically per the spec.
-Rules of thumb:
-
-- ✅ Free to drag (G), rotate (R), or scale (S) kit objects in the
-  viewport to find a better viewing layout — the build ignores it.
-- ✅ Edit mesh data freely (Edit Mode → move vertices, extrude, etc.).
-  Mesh edits ride through to every bike/prop that uses that part.
-- ⚠️ Don't apply object transforms (Object → Apply → All Transforms)
-  with the part at a layout position — that bakes the layout offset
-  into the mesh, which **does** ride through and will render the part
-  in the wrong place at build time.
-
-If you accidentally bake a layout offset into the mesh, fix it by
-re-running the seed script (which restores the canonical mesh +
-layout) or by editing the mesh back to origin-centred in Edit Mode.
-
-#### Mounts and anchors
-
-Where bike parts attach to the chassis is controlled by **mount
-empties** authored in the kit, not by hardcoded math in
-`build_bike.py`. The chassis carries small `mount_<role>` empties
-(`mount_fairing`, `mount_fork`, `mount_fin`, `mount_tail`) that say
-"the fairing/fork/fin/tail attaches *here*." At build time the script
-positions each part so its origin (or its `anchor` child empty if
-present) lands on the matching mount.
-
-To **move** an attachment point — say the fork should sit further
-forward — open `tools/blender/lib/bike_parts.blend`, select
-`mount_fork` (parented under `chassis_base`), and translate it. The
-fork variants follow live (they're parented to the mount), so you
-can eyeball the new pose immediately. Save and re-export — no code
-change needed.
-
-To **add a new attachment** — author a new empty
-`mount_<your_role>` parented to the chassis, parent the relevant
-part(s) to it, then add the matching
-`snap_to_mount(part, chassis, "<your_role>")` call in
-`build_bike.py`.
-
-For the default `chassis_base` (no `chassisVariant`), mount positions
-are in chassis-local space — they scale with `chassis.scale = (W, L,
-H)` at build time, so changing the spec's chassis dims moves the
-mounts proportionally. For a `chassisVariant`-based bike, the variant
-ships at author-modelled size (no scaling), so the mount's
-chassis-local position resolves to the same world position as in
-Blender.
-
-Mounts (and any optional `anchor` empties on child parts) are
-**stripped from the GLB before export** by `strip_build_helpers()`,
-so they never ship to the runtime. Runtime `socket_*` empties (seat,
-nose_cam, fx_*) are a separate concept and do ride into the GLB.
-
-Thrusters stay parametric — their count and X spacing come from
-`spec.geometry.thrusterCount`/`thrusterSpacing` and the build code
-does the math directly. Too dynamic to express as fixed mounts.
+Props still use the shared kit at `tools/blender/lib/prop_kit.blend`
+(parametric small set, no per-prop .blend yet). Edit + save → watcher
+rebuilds. Use `tools/blender/seed_prop_kit.py` to regenerate
+placeholders.
 
 ### Add a brand-new bike
 
-1. Copy `specs/bikes/scout.json` to `specs/bikes/<new-id>.json`. Edit
-   `id`, `displayName`, geometry, physics, appearance.
-2. Save → watcher rebuilds.
-3. The new bike appears in the manifest. Wire it into
+1. Save-as an existing variant: open `bikes-src/scout.blend`, then
+   *File → Save As… → bikes-src/<new-id>.blend*. The .blend basename
+   becomes the new bike id.
+2. Update `bike_root`'s `bike_id` custom property to match the new id
+   (or leave it — the addon backfills from the filename on first
+   export).
+3. Edit the variant: sculpt, recolour, drag sockets, etc.
+4. **Hoverbike → Export Bike to Game**. The addon writes the GLB and
+   creates a starter `specs/bikes/<new-id>.json` derived from extras
+   + materials.
+5. The new bike appears in the manifest. Wire it into
    `src/game/bikes/variants.ts` if you want it selectable from the
    garage; otherwise reach it via `?bike=<new-id>`.
 
