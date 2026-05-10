@@ -1,4 +1,4 @@
-import { query } from 'bitecs'
+import { query, type QueryResult } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { quatRotate } from '@/engine/sim/physics/vec'
@@ -74,6 +74,9 @@ export function shouldAIFire(
 
 export function aiCombatSystem(sim: SimWorld, phys: PhysicsWorld): void {
   const eids = query(sim, [AITag, BikeTag, ControlIntent, PickupSlot, RBHandle])
+  // Cache the bike list once per tick; isChaserBehind and pickMissileTarget
+  // would otherwise re-run the same ECS query for every AI.
+  const bikeEids = query(sim, [BikeTag, RBHandle])
   for (const eid of eids) {
     const slot = PickupSlotStore.must(eid)
     if (!slot.held) continue
@@ -81,9 +84,9 @@ export function aiCombatSystem(sim: SimWorld, phys: PhysicsWorld): void {
     const intent = ControlIntentStore.must(eid)
     if (intent.fire) continue // someone (or something) already wants us to fire
 
-    const hasChaser = slot.held === 'mine' ? isChaserBehind(sim, phys, eid) : false
+    const hasChaser = slot.held === 'mine' ? isChaserBehind(phys, eid, bikeEids) : false
     const hasMissileTarget =
-      slot.held === 'missile' ? pickMissileTarget(sim, phys, eid) >= 0 : false
+      slot.held === 'missile' ? pickMissileTarget(sim, phys, eid, bikeEids) >= 0 : false
 
     if (
       shouldAIFire(slot.held, intent.throttle, Math.abs(intent.steer), hasChaser, hasMissileTarget)
@@ -93,7 +96,7 @@ export function aiCombatSystem(sim: SimWorld, phys: PhysicsWorld): void {
   }
 }
 
-function isChaserBehind(sim: SimWorld, phys: PhysicsWorld, selfEid: number): boolean {
+function isChaserBehind(phys: PhysicsWorld, selfEid: number, bikeEids: QueryResult): boolean {
   const handle = RBHandleStore.get(selfEid)
   if (!handle) return false
   const rb = phys.world.getRigidBody(handle.handle)
@@ -102,8 +105,7 @@ function isChaserBehind(sim: SimWorld, phys: PhysicsWorld, selfEid: number): boo
   const q = rb.rotation()
   const fwd = quatRotate(q, { x: 0, y: 0, z: 1 })
 
-  const others = query(sim, [BikeTag, RBHandle])
-  for (const otherEid of others) {
+  for (const otherEid of bikeEids) {
     if (otherEid === selfEid) continue
     const otherHandle = RBHandleStore.must(otherEid)
     const otherRb = phys.world.getRigidBody(otherHandle.handle)

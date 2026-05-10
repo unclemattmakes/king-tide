@@ -30,3 +30,27 @@ export function vecHorizontalLength(v: Vec3): number {
 export function vecScale(v: Vec3, s: number): Vec3 {
   return { x: v.x * s, y: v.y * s, z: v.z * s }
 }
+
+/**
+ * Squared distance between two points. Use this for radius checks
+ * (compare against `r * r`) — it's cheaper than `Math.hypot` because it
+ * skips the sqrt.
+ */
+export function distanceSquared(a: Vec3, b: Vec3): number {
+  const dx = a.x - b.x
+  const dy = a.y - b.y
+  const dz = a.z - b.z
+  return dx * dx + dy * dy + dz * dz
+}
+
+/**
+ * Normalize a 3-vector in place-style (returns a new Vec3). If the input
+ * has length below `epsilon` the original vector is returned unchanged
+ * (callers should treat this as "no direction" and skip the operation
+ * that needed the unit vector).
+ */
+export function normalize3D(v: Vec3, epsilon = 1e-6): Vec3 {
+  const len = Math.hypot(v.x, v.y, v.z)
+  if (len < epsilon) return v
+  return { x: v.x / len, y: v.y / len, z: v.z / len }
+}
