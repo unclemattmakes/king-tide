@@ -68,5 +68,10 @@ export const HoverState = { name: 'HoverState' as const }
 export type HoverStateData = {
   groundDistance: number
   isGrounded: boolean
+  /** True if the surface under the bike is the wave field, false if it's a
+   *  hard collider. Used by the render-side FX to route between foam-puff
+   *  emission (water) and spark/dust emission (land). Defaults to `false`
+   *  when there is no surface (airborne). */
+  surfaceIsWater: boolean
 }
 export const HoverStateStore = createStore<HoverStateData>('HoverState')

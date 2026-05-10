@@ -382,7 +382,11 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       }
     }
 
-    HoverStateStore.set(eid, { groundDistance, isGrounded })
+    HoverStateStore.set(eid, {
+      groundDistance,
+      isGrounded,
+      surfaceIsWater: probe.hasSurface && probe.isWater,
+    })
 
     if (!isGrounded) {
       // --- Air control ---
