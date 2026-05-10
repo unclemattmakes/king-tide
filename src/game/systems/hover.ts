@@ -231,13 +231,22 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // roll velocity into the body (M9.x bug). Pitch had its own version
     // of the same problem under surface alignment.
     const PITCH_LIMIT = Math.PI / 6 // 30° max player-driven pitch
-    const ROLL_LEAN_LIMIT = Math.PI / 15 // ~12° max steer-driven lean
-    const LEAN_SPEED_FULL = 5 // m/s — full lean kicks in once moving
+    // Steer-driven lean. Two-stage curve: a base ramp from idle to
+    // LEAN_SPEED_FULL where the bike reaches its "normal" lean (1.0×
+    // ROLL_LEAN_LIMIT), then a slower second ramp up to LEAN_SPEED_HIGH
+    // where the bike progressively lays over further (up to
+    // 1 + LEAN_HIGH_SPEED_BOOST × ROLL_LEAN_LIMIT). Empirical playtest
+    // (M9.41): the M9.40 cap of ~30° at top speed still read as "tilting,"
+    // not "committing." Now ~40° base / ~60° at top speed — properly laid
+    // over at the apex, motorcycle-style.
+    const ROLL_LEAN_LIMIT = (40 * Math.PI) / 180 // 40° at "normal" speed
+    const LEAN_SPEED_FULL = 6 // m/s — base lean curve hits 1.0 here
+    const LEAN_SPEED_HIGH = 24 // m/s — high-speed boost saturates here
+    const LEAN_HIGH_SPEED_BOOST = 0.5 // adds up to 50% more lean at top speed → ~60°
     // Lean baseline: bike still leans into a turn at zero forward speed.
-    // 0.5 means stationary lean is half full; LEAN_SPEED_FULL+ is full.
-    // The user wanted "still leans, even more when moving" — base + (1-base)·speedFrac
-    // gives both: visible lean at idle, stronger when racing.
-    const LEAN_BASE = 0.5
+    // 0.4 means stationary lean is 40% of base limit (~16°);
+    // LEAN_SPEED_FULL+ is full (~40°).
+    const LEAN_BASE = 0.4
     // Pitch smoothing rates (exponential approach, units 1/s). Active = stick
     // is being held; release = stick at neutral. Release ≈ active/2 so
     // letting off the stick feels heavy — the bike retains its attitude
@@ -251,7 +260,12 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     {
       const speedNow = Math.hypot(linvel.x, linvel.z)
       const speedFrac = Math.min(speedNow / LEAN_SPEED_FULL, 1)
-      const leanScale = LEAN_BASE + (1 - LEAN_BASE) * speedFrac
+      const baseLeanScale = LEAN_BASE + (1 - LEAN_BASE) * speedFrac
+      const highSpeedFrac = Math.min(
+        Math.max(speedNow - LEAN_SPEED_FULL, 0) / (LEAN_SPEED_HIGH - LEAN_SPEED_FULL),
+        1,
+      )
+      const leanScale = baseLeanScale + highSpeedFrac * LEAN_HIGH_SPEED_BOOST
       // Sign convention is empirical (see hoverSystem header). steer=+1
       // banks INTO the perceived turn; intent.pitch=+1 dives (nose down,
       // negative pitch angle in our YXZ convention).
@@ -475,6 +489,30 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const aThrust =
       Math.abs(throttle) * stats.accel * scale * speedFalloff * boost * direction * surfaceMul
     rb.applyImpulse({ x: fwd.x * aThrust * m * dt, y: 0, z: fwd.z * aThrust * m * dt }, true)
+
+    // Slope momentum — going down a wave is faster than climbing one.
+    // The chassis tilts to track the surface (multi-probe alignment above),
+    // so the bike's forward axis acquires a vertical component (`fwd.y`) on
+    // sloped terrain. Projecting gravity along the horizontal forward axis
+    // gives the marble-on-incline behaviour: nose-down (`fwd.y < 0`) →
+    // accelerate downhill; nose-up (`fwd.y > 0`) → decelerate. The hover
+    // spring cancels gravity vertically, so without this the chassis would
+    // pitch but coast at the same horizontal speed regardless of wave face.
+    // SLOPE_MOMENTUM well below 1.0 — overpowered slope force on a steep
+    // ramp would just launch the bike past topSpeed.
+    const SLOPE_MOMENTUM = 0.55
+    const fwdHorizLen = Math.hypot(fwd.x, fwd.z)
+    if (fwdHorizLen > 0.01) {
+      const aSlope = -fwd.y * GRAVITY * SLOPE_MOMENTUM
+      rb.applyImpulse(
+        {
+          x: (fwd.x / fwdHorizLen) * aSlope * m * dt,
+          y: 0,
+          z: (fwd.z / fwdHorizLen) * aSlope * m * dt,
+        },
+        true,
+      )
+    }
 
     // Yaw torque around WORLD Y. M9.3 tried bike-local up to avoid the
     // direct projection onto the body's roll axis, but that produced a

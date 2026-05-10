@@ -4,9 +4,10 @@ import { emptyIntent, type Intent } from './intent'
  * Virtual joystick + face buttons for mobile players.
  *
  * Layout: a thumb-stick anchored bottom-left drives steer (X) and pitch
- * (Y, matching gamepad: up = nose-down dive). A column of BOOST / FIRE /
- * BRAKE / THRUST pads sits bottom-right; THRUST is the dedicated forward
- * gas pedal so the stick stays free for steering and pitch.
+ * (Y, inverted to match flight-stick / gamepad: stick UP = nose-down dive,
+ * stick DOWN = nose-up lift). A column of BOOST / FIRE / BRAKE / THRUST
+ * pads sits bottom-right; THRUST is the dedicated forward gas pedal so
+ * the stick stays free for steering and pitch.
  *
  * Self-contained: injects its own DOM + CSS into <body> when installed and
  * stays inert (zeroed intent) on non-touch devices, so desktop users don't
@@ -65,9 +66,14 @@ export function computeTouchIntent(
   const sx = Math.abs(rawStickX) < DEADZONE ? 0 : rawStickX
   const sy = Math.abs(rawStickY) < DEADZONE ? 0 : rawStickY
   intent.steer = clamp(sx, -1, 1)
-  // Stick Y → pitch. Push up (toward top of screen) → positive pitch =
-  // nose UP / lift (per intent.ts post-M9.18 convention).
-  intent.pitch = clamp(sy, -1, 1)
+  // Stick Y → pitch, inverted to match the "flight stick" / gamepad convention:
+  // push the stick UP (away from the player, toward the top of the screen)
+  // → negative pitch → nose DOWN / dive. Pull DOWN → positive pitch → lift.
+  // Mirrors the gamepad mapping where pushing the left stick forward dives
+  // (gamepad axes[1] = -1 forward → intent.pitch = -1).
+  // `0 - sy` instead of `-sy` to preserve +0 (the unary minus would flip
+  // a deadzoned 0 into -0 and break Object.is-based test equality).
+  intent.pitch = clamp(0 - sy, -1, 1)
   intent.throttle = buttons.thrust ? 1 : 0
   intent.brake = buttons.brake ? 1 : 0
   intent.fire = buttons.fire
@@ -139,7 +145,9 @@ function updateStickFromPoint(clientX: number, clientY: number) {
     ny = dy
   }
   stickX = nx / STICK_RANGE_PX
-  // Screen Y grows downward; gameplay Y up = forward throttle.
+  // Screen Y grows downward; flip so positive stickY = stick pushed UP.
+  // computeTouchIntent then inverts again (stick up → pitch -1 = dive)
+  // to match the gamepad/flight-stick convention.
   stickY = -ny / STICK_RANGE_PX
   if (knobEl) knobEl.style.transform = `translate(${nx}px, ${ny}px)`
 }
