@@ -1,13 +1,19 @@
 # Asset pipeline overview
 
-Three categories of asset live in this codebase: **bikes**, **props**, and **tracks**. Each one has the same shape:
+Three categories of asset live in this codebase: **bikes**, **props**, and **tracks**. The shape differs per category:
 
 ```
-specs/<category>/<id>.json   →   tools/blender/build_<category>.py   →   public/assets/<category>/<id>.glb
-                                          (headless Blender)                    + public/assets/manifest.json
+# Bikes — the .blend is the source of truth
+bikes-src/<id>.blend  +  specs/<id>.json  →  tools/blender/build_bike.py  →  public/assets/bikes/<id>.glb
+   (geometry / sockets         (slim metadata           (open the .blend, overlay
+    / collider)                  + recolour overrides)    spec extras + colours, export)
+
+# Props + tracks — spec-driven, kit-assembled
+specs/<category>/<id>.json  →  tools/blender/build_<category>.py  →  public/assets/<category>/<id>.glb
+                                       (headless Blender)                   + public/assets/manifest.json
 ```
 
-You edit a JSON spec. The pipeline validates it, runs Blender headlessly to assemble a GLB from kit parts (`tools/blender/lib/*.blend`), and writes the output. The runtime auto-loads everything from `public/assets/manifest.json` at boot.
+For **bikes**, you author each variant directly in `bikes-src/<id>.blend` and click *Hoverbike → Export Bike to Game* in the in-Blender addon (or run `pnpm gen:bikes` headless). The slim spec carries display name, physics, and optional colour overrides. For **props** and **tracks**, you edit a JSON spec and the headless builder assembles a GLB from kit parts. The runtime auto-loads everything from `public/assets/manifest.json` at boot.
 
 For the architectural rationale and full design, see [`docs/asset-pipeline-plan.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/asset-pipeline-plan.md). For a quick-reference on Blender naming + extras, see [`docs/blender-conventions.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-conventions.md).
 
@@ -17,10 +23,17 @@ For the architectural rationale and full design, see [`docs/asset-pipeline-plan.
 pnpm install
 pnpm gen:all          # validates every spec, builds every GLB, writes manifest
 pnpm dev              # http://localhost:5191
-                      # Vite watches specs/ and tools/blender/lib/*.blend and
-                      # auto-runs gen:bikes / gen:props / gen:tracks on change
+                      # Vite watches specs/, tools/blender/lib/*.blend, and
+                      # bikes-src/*.blend, and auto-runs gen:bikes / gen:props /
+                      # gen:tracks on change.
 
-# Iterate: edit specs/bikes/scout.json → save → wait ~3 s → reload tab
+# Iterate on a bike (geometry): open bikes-src/<id>.blend → edit → Ctrl+S →
+#                                wait ~3 s for headless rebuild → reload tab.
+#                                (Or click *Export Bike to Game* in the addon to
+#                                bypass the headless rebuild and write the GLB
+#                                directly.)
+# Iterate on appearance: edit specs/bikes/<id>.json → save → wait ~3 s → reload
+# Iterate on a prop/track: edit specs/<cat>/<id>.json → save → wait ~3 s → reload
 ```
 
 ## What lives where
@@ -28,18 +41,22 @@ pnpm dev              # http://localhost:5191
 | Path | Owner | Notes |
 |---|---|---|
 | `specs/_schema/*.json` | this site | JSON Schemas. ajv-validated by `tools/blender/run.mjs` before Blender runs. |
-| `specs/bikes/*.json`, `specs/props/*.json`, `specs/tracks/*.json` | authors | Source of truth for parametric assets. |
-| `tools/blender/lib/*.blend` | authors | Kit `.blend` files — committed source art. The `seed_*_kit.py` scripts regenerate the placeholders if you want to start clean. |
-| `tools/blender/build_*.py` | pipeline | Headless builders. Each reads one spec via `HOVERBIKE_SPEC` env var. |
+| `bikes-src/<id>.blend` | authors | One per bike variant — source of truth for bike geometry, sockets, collider. Edit directly in Blender, click *Export Bike to Game* in the addon. |
+| `tracks-src/<id>.blend` | authors | One per track — same flow with *Export Track to Game*. |
+| `specs/bikes/*.json` | authors | Slim metadata + recolour overrides for each variant. `geometry` and `rider` blocks accepted but ignored (legacy). |
+| `specs/props/*.json`, `specs/tracks/*.json` | authors | Parametric specs for kit-assembled props and declarative tracks. |
+| `tools/blender/lib/prop_kit.blend` | authors | Prop kit `.blend` — committed source art. `seed_prop_kit.py` regenerates placeholders. The legacy `bike_parts.blend` + `seed_bike_kit.py` are kept for reference but no longer wired up. |
+| `tools/blender/hoverbike_addon.py` | pipeline | In-Blender addon — installs a Hoverbike sidebar with *Export Bike to Game* / *Export Track to Game* buttons that auto-pick mode by the .blend's parent dir. |
+| `tools/blender/build_*.py` | pipeline | Headless builders. `build_bike.py` opens `bikes-src/<id>.blend`; `build_prop.py` and `build_track.py` are spec-driven. Each reads one spec via `HOVERBIKE_SPEC` env var. |
 | `tools/blender/run.mjs` | pipeline | Cross-platform Node wrapper. Discovers specs, validates, spawns Blender per spec, writes the manifest. |
 | `public/assets/<cat>/*.glb` | generated | Output GLBs. Currently committed; future work will gitignore them. |
 | `public/assets/manifest.json` | generated | Index of every built asset. The runtime + editor read it. |
 
 ## The three categories
 
-### Bikes — `specs/bikes/<id>.json`
+### Bikes — `bikes-src/<id>.blend` + `specs/bikes/<id>.json`
 
-Parametric chassis built from kit parts in `bike_parts.blend`. Shape knobs (`chassisLength`, `fairingStyle`, `thrusterCount`), physics (`massKg`, `topSpeedMps`, `hoverHeight`), appearance (livery, glow, metal colors), and rider seat offset. → [Authoring bikes](/modding/bikes)
+Each variant is a standalone `.blend` (no shared kit, no propagation between variants). Open it in Blender, edit the geometry / sockets / collider directly, click **Hoverbike → Export Bike to Game**. The slim spec carries `displayName`, optional `physics` overrides written into `bike_root` extras at build, and optional `appearance` recolour hex strings applied to `mat_bike_<id>_*` materials. → [Authoring bikes](/modding/bikes)
 
 ### Props — `specs/props/<id>.json`
 
@@ -51,24 +68,35 @@ Declarative replacement for the legacy `tools/build_calibration_scene.py`. Speci
 
 ## Iteration loops
 
-### Fastest — tweak a spec parameter
+### Fastest for bikes — edit the .blend, save (or click Export)
+
+There are two paths from "edit a bike" to "see the change in-game":
+
+1. **Ctrl+S in Blender → Vite watcher rebuilds.** The dev server watches `bikes-src/*.blend`; saving any of them debounces 600 ms and runs `pnpm gen:bikes`. ~3 s later the new GLB is on disk; reload the tab. Best when you're iterating tightly and just want save-to-test parity with the spec/track flows.
+2. **N → Hoverbike → Export Bike to Game.** The addon writes the GLB directly without going through the headless rebuild — faster (skips the Blender boot), and on first export materialises a starter `specs/bikes/<id>.json`. **Shift-click** to rewrite the spec from the .blend. Best when you're done editing and want an explicit "ship it" gesture.
+
+Either way, reload your browser tab. (Headless `pnpm gen:bikes` runs the same code path as path 1, without a GUI, for CI / batch builds.)
+
+### Fastest for props + tracks — tweak a spec parameter
 
 1. Edit a JSON file in `specs/`.
 2. Save. Vite's watcher debounces 600 ms then runs `pnpm gen:<cat>` for that category (visible in the dev-server terminal).
 3. Reload the browser tab. Binary GLBs aren't HMR-able; Vite serves the new file but the runtime won't swap a live mesh.
 
-### Re-author kit geometry in Blender
+### Tweak a bike's appearance via JSON (no Blender round-trip)
 
-1. Open `tools/blender/lib/bike_parts.blend` (or `prop_kit.blend`).
+The slim `specs/bikes/<id>.json` carries optional `appearance` and `physics` overlays that the headless build applies on top of what's in the .blend. Editing those JSON values and re-running `pnpm gen:bikes` (or letting the watcher fire) recolours `mat_bike_<id>_*` materials and rewrites `bike_root` extras without opening Blender. Use this for palette tuning between playtests.
+
+### Re-author the prop kit
+
+Props still use a shared kit at `tools/blender/lib/prop_kit.blend`.
+
+1. Open `prop_kit.blend`.
 2. Edit. Save.
-3. Saving a `.blend` triggers the same watcher → all bikes (or props) are rebuilt against the new kit.
+3. Saving the `.blend` triggers the watcher → all props are rebuilt against the new kit.
 4. Reload.
 
-The bike kit opens with parts laid out at their assembled-bike positions (chassis at centre, fairing on top, fork at nose, etc.) so you see a real bike on open. Mesh edits ride through to the build; viewport object positions are layout-only.
-
-To **move where a part attaches** (e.g. fairing sits 5 cm further forward), translate the matching `mount_*` empty parented to `chassis_base` in the kit — no code change. The build's `snap_to_mount` reads the mount's world position and snaps the part to it. See [Authoring bikes → Moving an attachment point](/modding/bikes#moving-an-attachment-point-no-code-change).
-
-If you want to start from a clean placeholder, re-run `tools/blender/seed_bike_kit.py` (or `seed_prop_kit.py`) — those scripts regenerate the placeholders from scratch.
+If you want to start from a clean placeholder, re-run `tools/blender/seed_prop_kit.py`.
 
 ### Add a brand-new bike / prop
 
