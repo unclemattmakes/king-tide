@@ -22,7 +22,7 @@ export function createTrackVisuals(track: Track): TrackVisuals {
   const gateMeshesByIndex = new Map<number, GateMesh>()
 
   for (const cp of track.checkpoints) {
-    const gate = createGateMesh(cp)
+    const gate = createGateMesh(cp, cp.index === 0)
     gate.root.position.set(cp.position.x, cp.position.y, cp.position.z)
     gate.root.quaternion.set(cp.rotation.x, cp.rotation.y, cp.rotation.z, cp.rotation.w)
     group.add(gate.root)
@@ -57,7 +57,7 @@ type GateMesh = {
   dispose(): void
 }
 
-function createGateMesh(cp: Checkpoint): GateMesh {
+function createGateMesh(cp: Checkpoint, isFinishLine: boolean): GateMesh {
   const root = new THREE.Group()
   root.name = `gate:${cp.index}`
 
@@ -87,6 +87,52 @@ function createGateMesh(cp: Checkpoint): GateMesh {
   bar.receiveShadow = true
   root.add(bar)
   recolorables.push(bar)
+
+  // The start/finish gate gets a checkered banner under the cross-bar
+  // and a checkered strip stamped on the ground between the pillars,
+  // so it reads as the "finish line" from any approach angle. This is
+  // purely visual — gate behaviour (lap completion on cp 0) is identical
+  // to any other checkpoint.
+  if (isFinishLine) {
+    const checker = makeCheckerTexture(16, 4)
+    const bannerHeight = 1.6
+    const bannerGeom = new THREE.PlaneGeometry(cp.halfWidth * 2, bannerHeight)
+    const bannerMat = new THREE.MeshBasicMaterial({
+      map: checker,
+      side: THREE.DoubleSide,
+    })
+    const bannerFront = new THREE.Mesh(bannerGeom, bannerMat)
+    bannerFront.position.set(0, cp.height - bannerHeight / 2 - 0.4, 0)
+    root.add(bannerFront)
+
+    const stripeGeom = new THREE.PlaneGeometry(cp.halfWidth * 2, 1.6)
+    stripeGeom.rotateX(-Math.PI / 2)
+    const stripeMat = new THREE.MeshBasicMaterial({
+      map: checker,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+    })
+    const stripe = new THREE.Mesh(stripeGeom, stripeMat)
+    // Sit just above the gate's local ground plane so it doesn't
+    // z-fight with the water/track beneath.
+    stripe.position.set(0, -cp.position.y + 0.05, 0)
+    stripe.renderOrder = 1
+    root.add(stripe)
+
+    const finishLabelMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+    })
+    const finishLabel = new THREE.Mesh(
+      new THREE.BoxGeometry(cp.halfWidth * 0.6, 0.6, 0.1),
+      finishLabelMat,
+    )
+    finishLabel.position.set(0, cp.height + 1.4, 0)
+    root.add(finishLabel)
+  }
 
   // Beacon — a tall, glowing column above the gate, visible from anywhere on
   // the map. Only shown when the gate is the "next" target so the player can
@@ -158,6 +204,35 @@ function createBoostPadMesh(pad: BoostPad): THREE.Object3D {
     root.add(c)
   }
   return root
+}
+
+/**
+ * Procedural black/white checker texture used on the start/finish gate's
+ * banner and ground stripe. Built once per gate; cheap (16×16 canvas).
+ */
+function makeCheckerTexture(repeats: number, rows: number): THREE.Texture {
+  const cellSize = 16
+  const width = repeats * cellSize
+  const height = rows * cellSize
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (ctx) {
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < repeats; x++) {
+        ctx.fillStyle = (x + y) % 2 === 0 ? '#ffffff' : '#111111'
+        ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize)
+      }
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.magFilter = THREE.NearestFilter
+  tex.minFilter = THREE.NearestFilter
+  tex.wrapS = THREE.ClampToEdgeWrapping
+  tex.wrapT = THREE.ClampToEdgeWrapping
+  tex.needsUpdate = true
+  return tex
 }
 
 function setStateOn(gate: GateMesh, state: CheckpointVisualState): void {

@@ -24,6 +24,7 @@ import { attachTrackColliders, loadGlbTrackVisuals } from './engine/render/glb-t
 import { createPhysicsDebugRenderer } from './engine/render/physics-debug'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
+import { createRaceHud } from './engine/render/race-hud'
 import { createRampMesh } from './engine/render/ramp-mesh'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
@@ -215,6 +216,7 @@ async function boot() {
   // for (track, bike) and update on every personal-best.
   let lapStartRaceTime = 0
   let bestLapThisRace: number | null = null
+  let lastLapTime: number | null = null
   let bestLapAllTime: number | null = getBestLap({
     trackId,
     bikeId: playerVariant.id,
@@ -433,11 +435,27 @@ async function boot() {
   // callback takes over.
   trackVisuals.setCheckpointState(0, 'next')
 
+  const raceHud = createRaceHud({
+    track,
+    onCountdownTick: (n) => {
+      // Light audio cue: re-use the gate "ding" for each tick, lap fanfare for GO.
+      if (n === 0) audio.lapCompleted()
+      else audio.gateCleared()
+    },
+  })
+
   const raceTick = createRaceSystem(track, {
     onCheckpoint: (eid, justCrossed) => {
+      const racerNow = RacerStore.get(eid)
+      if (!racerNow) return
+
+      // Record every racer's crossing for the gap-to-leader table. Indexed by
+      // checkpointsCrossed (cumulative, lap-aware) — the first racer to reach
+      // the Nth crossing seeds the leader time at that progress marker.
+      raceHud.recordRacerCheckpoint(eid, racerNow.checkpointsCrossed, racerNow.raceTime)
+
       if (eid !== playerEid) return
-      const r = RacerStore.get(eid)
-      if (!r) return
+      const r = racerNow
       // The race system has already advanced nextCheckpoint by the time this
       // fires (post-update), so r.nextCheckpoint is the *upcoming* gate.
       // Mark each gate by its relationship to that pointer.
@@ -464,6 +482,7 @@ async function boot() {
       } else if (justCrossed === 0 && r.checkpointsCrossed > 1) {
         audio.lapCompleted()
         const lapTime = r.raceTime - lapStartRaceTime
+        lastLapTime = lapTime
         lapStartRaceTime = r.raceTime
         if (bestLapThisRace === null || lapTime < bestLapThisRace) {
           bestLapThisRace = lapTime
@@ -473,6 +492,13 @@ async function boot() {
         }
       } else {
         audio.gateCleared()
+      }
+
+      // Gap-to-leader toast — fired only on non-start crossings (the very
+      // first crossing of cp 0 is the race-start "engines on" moment, where
+      // every racer is essentially tied).
+      if (r.checkpointsCrossed > 0) {
+        raceHud.reportPlayerCheckpoint(r.checkpointsCrossed, r.raceTime)
       }
     },
   })
@@ -579,6 +605,7 @@ async function boot() {
       return on
     },
     isCollisionDebugOn: () => physicsDebug.isEnabled(),
+    skipCountdown: () => raceHud.skipCountdown(),
   })
   if (backendEl) backendEl.textContent = `backend: ${backend}`
   if (finishSub) finishSub.textContent = track.name
@@ -698,14 +725,23 @@ async function boot() {
       // to flip fire=true based on the AI's held pickup. Stun runs LAST in
       // the intent chain so spun-out bikes can't drive through their own
       // hit reaction.
-      if (!autoPlay) applyPlayerIntent(sim, state.intent)
-      aiControlSystem(sim, phys, track)
+      const locked = raceHud.isLocked()
+      if (locked) {
+        // During countdown: throttle/steer/AI control are suppressed so all
+        // bikes idle on their hover pads and no one launches before "GO!".
+        applyPlayerIntent(sim, emptyIntent())
+      } else if (!autoPlay) {
+        applyPlayerIntent(sim, state.intent)
+      }
+      if (!locked) aiControlSystem(sim, phys, track)
       aiCombatSystem(sim, phys)
       stunOverrideSystem(sim)
       hoverSystem(sim, phys, waveField)
       phys.step()
       syncFromPhysics(sim, phys)
-      raceTick(sim, phys, phys.fixedDt)
+      // Race time is paused during the countdown so lap timers count from
+      // the GO! moment rather than from window load.
+      if (!locked) raceTick(sim, phys, phys.fixedDt)
       pickupSystem(sim, phys, phys.fixedDt)
       pickupUseSystem(sim, phys)
       mineSystem(sim, phys, phys.fixedDt)
@@ -859,6 +895,49 @@ async function boot() {
     fxTick(dt)
     physicsDebug.tick()
 
+    // Race HUD — countdown banner, race/lap timers, gap toast, minimap.
+    // Always ticked: while locked, the timers stay at zero and the
+    // banner counts 3..2..1..GO.
+    {
+      const racerForHud = RacerStore.get(playerEid)
+      const standings = computeStandings(sim, track)
+      const me = standings.find((s) => s.eid === playerEid)
+
+      const bikes: { x: number; z: number; isPlayer: boolean; isLeader: boolean }[] = []
+      for (const s of standings) {
+        const handle = RBHandleStore.get(s.eid)
+        if (!handle) continue
+        const rb = phys.world.getRigidBody(handle.handle)
+        if (!rb) continue
+        const t = rb.translation()
+        bikes.push({
+          x: t.x,
+          z: t.z,
+          isPlayer: s.eid === playerEid,
+          isLeader: s.position === 1 && s.eid !== playerEid,
+        })
+      }
+
+      const raceTimeForHud = racerForHud?.raceTime ?? 0
+      const currentLap =
+        racerForHud && racerForHud.checkpointsCrossed >= 1 ? raceTimeForHud - lapStartRaceTime : 0
+
+      raceHud.tick({
+        dt,
+        raceTime: raceTimeForHud,
+        lap: racerForHud?.lap ?? 1,
+        lapsToFinish: track.lapsToFinish,
+        finished: racerForHud?.finished ?? false,
+        currentLapTime: currentLap,
+        lastLapTime,
+        bestLapTime: bestLapThisRace ?? bestLapAllTime,
+        bikes,
+        playerNextCheckpoint: racerForHud?.nextCheckpoint ?? 0,
+        playerPosition: me?.position ?? 1,
+        totalRacers: standings.length,
+      })
+    }
+
     // Direction arrow points the player to the next checkpoint.
     const racerNow = RacerStore.get(playerEid)
     if (racerNow && !racerNow.finished) {
@@ -983,10 +1062,16 @@ async function boot() {
     hud.show()
 
     // Hide HUD bits that don't apply to playback. The race + audio rows
-    // would just show stale zeros; the FPS row is fine to keep.
+    // would just show stale zeros; the FPS row is fine to keep. Same for
+    // the arcade race HUD (countdown banner, timer card, gap toast,
+    // minimap) — those are tied to a live race the spectator isn't in.
     if (raceEl) raceEl.style.display = 'none'
     if (inputEl) inputEl.style.display = 'none'
     if (audioEl) audioEl.style.display = 'none'
+    for (const id of ['race-banner', 'race-timer', 'race-gap', 'race-minimap']) {
+      const el = document.getElementById(id)
+      if (el) el.style.display = 'none'
+    }
     if (backendEl) backendEl.textContent = `replay · backend ${backend}`
 
     // Free-orbit input: left mouse drag on canvas rotates, wheel zooms.

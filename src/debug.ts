@@ -98,6 +98,9 @@ export type DebugAccessors = {
   isAutoPlay(): boolean
   toggleCollisionDebug(): boolean
   isCollisionDebugOn(): boolean
+  /** Fast-forward the start countdown — used implicitly when an intent
+   *  override is set so e2e tests don't have to wait through 3-2-1. */
+  skipCountdown(): void
 }
 
 declare global {
@@ -129,6 +132,10 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     intent: () => ({ ...state.intent }),
     setIntentOverride: (i) => {
       state.intentOverride = i
+      // Scripted intent comes from tests / debug shells, which don't want
+      // the bike held during the start countdown. Skip ahead so the
+      // override takes effect immediately.
+      if (i !== null) accessors.skipCountdown()
     },
     player: () => state.playerSnapshot,
     race: () => state.raceSnapshot,

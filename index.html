@@ -195,6 +195,104 @@
         border-color: rgba(255,255,255,0.2);
       }
       #devsettings button.action:hover { filter: brightness(1.2); }
+
+      /* ───────────── Arcade race HUD ───────────── */
+
+      /* Countdown banner — big number / "GO!" overlay in the centre. */
+      #race-banner {
+        position: fixed; inset: 0;
+        display: none; align-items: center; justify-content: center;
+        pointer-events: none; user-select: none; z-index: 9;
+      }
+      #race-banner.show { display: flex; }
+      #race-banner .race-banner-text {
+        font: 900 140px/1 ui-monospace, monospace;
+        letter-spacing: 6px;
+        color: #ffcc66;
+        text-shadow:
+          0 0 12px rgba(255, 200, 100, 0.7),
+          0 8px 24px rgba(0, 0, 0, 0.85);
+        padding: 12px 36px;
+        background: radial-gradient(ellipse at center, rgba(0,0,0,0.45) 0%, transparent 70%);
+        transform: scale(1);
+      }
+      @keyframes race-banner-pop {
+        0% { transform: scale(0.4); opacity: 0; }
+        25% { transform: scale(1.18); opacity: 1; }
+        100% { transform: scale(1); opacity: 1; }
+      }
+      #race-banner.pop .race-banner-text {
+        animation: race-banner-pop 0.35s ease-out;
+      }
+      #race-banner.flash-go .race-banner-text {
+        color: #66ff99;
+        text-shadow:
+          0 0 18px rgba(120, 255, 160, 0.85),
+          0 8px 28px rgba(0, 0, 0, 0.9);
+      }
+
+      /* Race / lap timer — top-centre slab. */
+      #race-timer {
+        position: fixed; top: 8px; left: 50%; transform: translateX(-50%);
+        background: rgba(8, 14, 24, 0.78);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 6px;
+        padding: 8px 14px 6px;
+        font-family: ui-monospace, monospace;
+        color: #eee;
+        pointer-events: none; user-select: none;
+        text-align: center;
+        min-width: 160px;
+        line-height: 1.2;
+      }
+      #race-timer .race-timer-row {
+        display: flex; align-items: baseline; justify-content: space-between;
+        gap: 14px;
+      }
+      #race-timer .race-timer-label {
+        font-size: 10px; letter-spacing: 2px; opacity: 0.65;
+      }
+      #race-timer .race-timer-value {
+        font-size: 22px; font-weight: bold; font-variant-numeric: tabular-nums;
+        color: #ffcc66;
+      }
+      #race-timer .race-timer-current { color: #fff; font-size: 18px; }
+      #race-timer .race-timer-meta {
+        margin-top: 4px; padding-top: 4px;
+        border-top: 1px solid rgba(255,255,255,0.1);
+        display: flex; justify-content: space-between;
+        font-size: 10px; letter-spacing: 1px; opacity: 0.7;
+        font-variant-numeric: tabular-nums;
+      }
+      #race-timer.finished { border-color: rgba(255, 200, 100, 0.6); }
+
+      /* Checkpoint gap toast — flashes briefly when crossing a gate. */
+      #race-gap {
+        position: fixed; top: 110px; left: 50%; transform: translateX(-50%) translateY(8px);
+        font: 900 36px/1 ui-monospace, monospace;
+        letter-spacing: 2px;
+        padding: 8px 18px;
+        border-radius: 6px;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        opacity: 0;
+        transition: opacity 0.25s ease, transform 0.35s ease;
+        pointer-events: none; user-select: none;
+        font-variant-numeric: tabular-nums;
+      }
+      #race-gap.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+      #race-gap.gap-ahead { color: #66ff99; text-shadow: 0 0 12px rgba(80, 255, 140, 0.55); border-color: rgba(80, 255, 140, 0.45); }
+      #race-gap.gap-behind { color: #ff7799; text-shadow: 0 0 12px rgba(255, 100, 130, 0.55); border-color: rgba(255, 100, 130, 0.45); }
+
+      /* Minimap — bottom-right canvas. */
+      #race-minimap {
+        position: fixed; bottom: 14px; right: 14px;
+        width: 180px; height: 180px;
+        border-radius: 8px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+        pointer-events: none; user-select: none;
+        image-rendering: -webkit-optimize-contrast;
+      }
     </style>
   </head>
   <body>
