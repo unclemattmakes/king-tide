@@ -15,6 +15,14 @@ import {
   Transform,
   TransformStore,
 } from '@/game/components'
+import {
+  ExplosionState,
+  ExplosionStateStore,
+  ExplosionTag,
+  MissileState,
+  MissileStateStore,
+  MissileTag,
+} from '@/game/components/combat'
 
 /**
  * Hand-rolled particle FX driven by TSL node materials.
@@ -90,6 +98,10 @@ const EXHAUST_THROTTLE_RATE = 35 // particles/sec at full forward throttle
 const EXHAUST_BOOST_RATE = 90 // additional rate while boost is active
 const EXHAUST_THROTTLE_MIN = 0.2 // dead-zone — no exhaust on micro inputs
 
+// Missile trail — fired per frame from each in-flight missile. Reads
+// as a smoky exhaust streak in the missile's wake.
+const MISSILE_TRAIL_RATE = 35 // particles/sec per missile
+
 // Emission origins in bike-local coords. The bike's render-systems.ts
 // applies a 2× visual scale to the mesh while keeping the physics body
 // at authored size — the bike's *transform* still uses physics-space
@@ -114,6 +126,12 @@ const DUST_CAPACITY = 320
 // rate when boosting (~125/s = ~63 alive per bike, plus regular throttle
 // emission), so 320 covers ~5 boosting bikes plus margin.
 const EXHAUST_CAPACITY = 320
+// Explosion: bursts of ~30 particles per detonation, lifetime ~0.7 s.
+// Peak comes from a multi-mine pile-up — 6 simultaneous = 180 alive.
+const EXPLOSION_CAPACITY = 240
+// Missile trail: continuous emission along missile path. ~30/s × 0.6 s
+// life × up to 4 missiles in flight = ~72 peak; 200 covers boost cases.
+const MISSILE_CAPACITY = 200
 
 function makeRadialTexture(rgb: [number, number, number]): THREE.Texture {
   const size = 64
@@ -346,6 +364,8 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
   const sparkTex = makeRadialTexture([255, 200, 120])
   const exhaustTex = makeRadialTexture([255, 130, 60])
   const dustTex = makeRadialTexture([195, 180, 155])
+  const explosionTex = makeRadialTexture([255, 165, 50])
+  const missileTrailTex = makeRadialTexture([220, 220, 230])
 
   const foam = createPool({
     capacity: FOAM_CAPACITY,
@@ -384,11 +404,29 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
     gravity: 0.3,
     drag: 3.5,
   })
+  const explosion = createPool({
+    capacity: EXPLOSION_CAPACITY,
+    defaultSize: 1.4,
+    texture: explosionTex,
+    blending: THREE.AdditiveBlending,
+    gravity: 1.0, // hot fireball rises briefly
+    drag: 2.6,
+  })
+  const missileTrail = createPool({
+    capacity: MISSILE_CAPACITY,
+    defaultSize: 0.55,
+    texture: missileTrailTex,
+    blending: THREE.NormalBlending,
+    gravity: 0.6, // smoke rises
+    drag: 2.4,
+  })
 
   scene.add(foam.mesh)
   scene.add(sparks.mesh)
   scene.add(exhaust.mesh)
   scene.add(dust.mesh)
+  scene.add(explosion.mesh)
+  scene.add(missileTrail.mesh)
 
   // Reusable scratch math.
   const sternWorld = new THREE.Vector3()
@@ -408,6 +446,20 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
     { foam: number; sparks: number; exhaust: number; dust: number }
   >()
 
+  // Per-bike transition memory for event-driven bursts. We need the
+  // previous frame's grounded state to detect "just landed on water"
+  // (splash) and "just touched down hard" (impact dust). Initialised
+  // lazily on first sight of each bike.
+  const lastGrounded = new Map<number, boolean>()
+
+  // Combat FX bookkeeping. We burst once per explosion entity at
+  // detonation, then leave it alone — the engine's explosion system
+  // handles its own visual decay. Missile trail emits per-frame from
+  // each in-flight missile and uses a fractional accumulator so the
+  // trail rate is frame-rate independent.
+  const explosionsBurst = new Set<number>()
+  const missileEmitAccum = new Map<number, number>()
+
   // Debug hook so the headed-browser verification can introspect rates,
   // free-slot counts, and live-particle counts. Removed when the dust
   // settles, but cheap to keep in dev. Strip in a future cleanup pass.
@@ -418,11 +470,15 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
       exhaust,
       dust,
       emitAccum,
+      explosion,
+      missileTrail,
       stats: () => ({
         foamAlive: foam.capacity - foam.freeCount,
         sparkAlive: sparks.capacity - sparks.freeCount,
         exhaustAlive: exhaust.capacity - exhaust.freeCount,
         dustAlive: dust.capacity - dust.freeCount,
+        explosionAlive: explosion.capacity - explosion.freeCount,
+        missileTrailAlive: missileTrail.capacity - missileTrail.freeCount,
       }),
     }
   }
@@ -449,6 +505,49 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
         acc = { foam: 0, sparks: 0, exhaust: 0, dust: 0 }
         emitAccum.set(eid, acc)
       }
+
+      // Splash burst — bike just transitioned from airborne to grounded
+      // *on water*, indicating a re-entry from a jump or ramp. Fire a
+      // ring of foam particles upward + outward in a flat cone for the
+      // belly-flop read. Uses the foam pool.
+      const wasGrounded = lastGrounded.get(eid) ?? hover.isGrounded
+      if (
+        !wasGrounded &&
+        hover.isGrounded &&
+        hover.surfaceIsWater &&
+        Math.abs(v.y) > 2 // landed with appreciable downward velocity
+      ) {
+        const splashCount = 18 + Math.min(20, Math.floor(Math.abs(v.y) * 1.5))
+        // Splash origin is the bike base at impact, which is roughly the
+        // water surface (groundDistance ≈ 0).
+        const sx = transform.x
+        const sz = transform.z
+        const sy = transform.y - hover.groundDistance + 0.05
+        for (let k = 0; k < splashCount; k++) {
+          const ang = Math.random() * Math.PI * 2
+          const cx = Math.cos(ang)
+          const cz = Math.sin(ang)
+          // Outward ring + strong upward burst. Faster impacts splash
+          // higher and wider.
+          const outSpeed = 2 + Math.abs(v.y) * 0.6 + Math.random() * 1.5
+          const upSpeed = 2.5 + Math.abs(v.y) * 0.8 + Math.random() * 1.5
+          emit(
+            foam,
+            sx + cx * 0.2,
+            sy,
+            sz + cz * 0.2,
+            cx * outSpeed,
+            upSpeed,
+            cz * outSpeed,
+            0.6,
+            0.5,
+            0.9,
+            foam.defaultSize * (0.8 + Math.random() * 0.7),
+            1,
+          )
+        }
+      }
+      lastGrounded.set(eid, hover.isGrounded)
 
       // Foam — V-shaped Kelvin wake behind the stern with an upward bias.
       // Each spawn picks a side (alternating L/R) and ejects along
@@ -630,9 +729,100 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
       }
     }
 
+    // Missile trail — query every in-flight missile, emit smoky puffs
+    // along its path. Per-missile accumulator so a missile that just
+    // spawned starts emitting immediately rather than waiting for its
+    // accumulator to reach 1.
+    const missileEids = query(sim, [MissileTag, MissileState])
+    const liveMissiles = new Set<number>()
+    for (const eid of missileEids) {
+      liveMissiles.add(eid)
+      const m = MissileStateStore.get(eid)
+      if (!m || m.detonated) continue
+      let acc = missileEmitAccum.get(eid) ?? 0
+      acc += MISSILE_TRAIL_RATE * dt
+      const n = Math.floor(acc)
+      if (n > 0) {
+        acc -= n
+        for (let k = 0; k < n; k++) {
+          // Emit slightly behind the missile (against its velocity) so
+          // the trail tracks the path the missile flew over.
+          const vlen = Math.hypot(m.velocity.x, m.velocity.y, m.velocity.z) || 1
+          const back_x = -m.velocity.x / vlen
+          const back_y = -m.velocity.y / vlen
+          const back_z = -m.velocity.z / vlen
+          emit(
+            missileTrail,
+            m.position.x + back_x * 0.4,
+            m.position.y + back_y * 0.4,
+            m.position.z + back_z * 0.4,
+            back_x * 1.5,
+            0.3,
+            back_z * 1.5,
+            0.5,
+            0.4,
+            0.7,
+            missileTrail.defaultSize * (0.7 + Math.random() * 0.6),
+            1,
+          )
+        }
+      }
+      missileEmitAccum.set(eid, acc)
+    }
+    // Drop accumulator entries for missiles that no longer exist.
+    for (const eid of missileEmitAccum.keys()) {
+      if (!liveMissiles.has(eid)) missileEmitAccum.delete(eid)
+    }
+
+    // Explosion bursts — query every explosion entity, burst once per
+    // entity at detonation. We track which eids we've already burst in
+    // a Set; an explosion's lifetime is short (~0.5–1 s) so the Set
+    // stays bounded. Entries are pruned when the explosion entity is no
+    // longer in the world.
+    const explosionEids = query(sim, [ExplosionTag, ExplosionState])
+    const liveExplosions = new Set<number>()
+    for (const eid of explosionEids) {
+      liveExplosions.add(eid)
+      if (explosionsBurst.has(eid)) continue
+      explosionsBurst.add(eid)
+      const e = ExplosionStateStore.get(eid)
+      if (!e) continue
+      // Burst ~30 particles in a sphere, mostly upward + outward.
+      const burstCount = 30
+      for (let k = 0; k < burstCount; k++) {
+        // Random unit vector — square sample then renormalise.
+        const u = Math.random() * 2 - 1
+        const t = Math.random() * Math.PI * 2
+        const r = Math.sqrt(1 - u * u)
+        const dx = Math.cos(t) * r
+        const dy = u * 0.6 + 0.6 // bias upward
+        const dz = Math.sin(t) * r
+        const speed_ = 6 + Math.random() * 4
+        emit(
+          explosion,
+          e.position.x,
+          e.position.y,
+          e.position.z,
+          dx * speed_,
+          dy * speed_,
+          dz * speed_,
+          1.2,
+          0.4,
+          0.85,
+          explosion.defaultSize * (0.7 + Math.random() * 0.7),
+          1,
+        )
+      }
+    }
+    for (const eid of explosionsBurst) {
+      if (!liveExplosions.has(eid)) explosionsBurst.delete(eid)
+    }
+
     advance(foam, dt)
     advance(sparks, dt)
     advance(exhaust, dt)
     advance(dust, dt)
+    advance(explosion, dt)
+    advance(missileTrail, dt)
   }
 }
