@@ -1,6 +1,6 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-09 (M9.39 bike pipeline flip — every variant is now a standalone `bikes-src/<id>.blend` (no more shared kit + propagation). Author the bike directly, click *Hoverbike → Export Bike to Game* in the addon, GLB updates and the runtime picks it up on next reload. The addon's panel auto-detects bike vs track based on the .blend's parent dir (`bikes-src/` vs `tracks-src/`). Spec JSON slimmed to display name + physics + appearance recolour overrides; geometry is owned by the .blend. Headless `pnpm gen:bikes` opens each .blend, applies overrides, exports. Old kit (`bike_parts.blend`, `mounts.py`, `seed_bike_kit.py`) is no longer wired up but kept on disk pending cleanup. M9.38 planar water reflection — TSL `reflector()` node mirrors bikes / sky / terrain onto the water with wave-normal distortion, Fresnel-mixed; `?reflect=0` and `?water=classic` keep the fresnelEmissive sky-tint fallback for A/B.). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-09 (M9.41 lean crank — `ROLL_LEAN_LIMIT` doubled from 20° to 40°, so the high-speed boost takes the bike to ~60° at top speed (was ~30° in M9.40); the bike now visibly puts a knee down through the apex. M9.40 feel pass — slope momentum projects gravity along the bike's forward axis so coasting down a wave's leeward face accelerates and climbing the windward face decelerates; mobile virtual-joystick Y is inverted to match the gamepad/flight-stick convention (stick up = nose-down dive). M9.39 bike pipeline flip — every variant is now a standalone `bikes-src/<id>.blend` (no more shared kit + propagation). Author the bike directly, click *Hoverbike → Export Bike to Game* in the addon, GLB updates and the runtime picks it up on next reload.). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
@@ -495,6 +495,46 @@ Cost: 5 raycasts per bike per fixed step (1 center + 4 corners) instead
 of 1. With ~5 bikes that's 25 raycasts at 60Hz = ~1500/sec, well under
 Rapier's broadphase ceiling.
 
+### Feel pass — lean curve, slope momentum, mobile pitch invert (M9.40)
+Three independent tweaks in [`src/game/systems/hover.ts`](../src/game/systems/hover.ts) and [`src/engine/input/touch.ts`](../src/engine/input/touch.ts):
+
+1. **Lean curve grows past full-speed.** `ROLL_LEAN_LIMIT` bumped from
+   `π/15` (~12°) to `40°` (M9.40 → M9.41 crank-up — the original 20°
+   step still read as "tilting" rather than "committing"). The
+   speed→lean ramp is two-stage: a base ramp `LEAN_BASE → 1.0` over
+   `[0, LEAN_SPEED_FULL = 6 m/s]`, plus a second ramp `0 →
+   LEAN_HIGH_SPEED_BOOST (= 0.5)` over `[LEAN_SPEED_FULL,
+   LEAN_SPEED_HIGH = 24 m/s]`. Net result: stationary bike at full
+   steer leans ~16°, "moving normally" leans ~40°, and at top speed
+   the racer lays over to ~60°. The two-stage shape preserves the
+   existing low-speed feel (parking, garage) while making racing
+   visibly committed — the bike actually puts a knee down through the
+   apex.
+
+2. **Slope momentum.** Previously the chassis tilted to track the
+   surface but horizontal speed was independent of the wave face — going
+   down a wave was no faster than going up one. The thrust block now
+   projects gravity along the bike's horizontal forward axis:
+   `aSlope = -fwd.y · GRAVITY · SLOPE_MOMENTUM` where `SLOPE_MOMENTUM =
+   0.55`. Nose-down (`fwd.y < 0`, e.g. cresting onto the leeward face of
+   a swell) accelerates downhill; nose-up decelerates. The hover spring
+   already cancels gravity vertically — without this the chassis pitched
+   but coasted at the same horizontal speed regardless of the slope.
+   Limited to the grounded thrust path (above-water hover and on-ground)
+   so airborne ballistic and underwater dive dynamics are unaffected.
+   Coefficient kept well below 1.0 so a steep ramp doesn't slingshot
+   past `topSpeed` (the existing `speedFalloff` already taps that off
+   for *thrust*, but slope momentum is added on top).
+
+3. **Mobile virtual-joystick Y inverted.** The touch stick was mapped
+   "stick up → pitch +1 → nose UP / lift", which contradicted the
+   gamepad ("push forward = dive") and the flight-stick convention. Now
+   `intent.pitch = clamp(0 − sy, −1, 1)`: stick up → nose down dive,
+   stick down → lift. The `0 − sy` form (rather than unary `−sy`)
+   preserves `+0` so the deadzone path returns `+0` rather than `−0`
+   (Object.is-equality breaks otherwise). Touch unit tests flipped to
+   match the new convention; gamepad and keyboard mappings are unchanged.
+
 ### Pitch heaviness + lean baseline + auto-orient to ramps (M9.36)
 Three feel passes on the chassis controller in
 [`src/game/systems/hover.ts`](../src/game/systems/hover.ts):
@@ -728,6 +768,8 @@ Open follow-ups:
 | M9.28 | Trimesh tunneling fix — CCD on bike rigid body + 1m slab-extruded spec track surfaces (replaces 0-thickness planes); `build_track.py` now also emits `public/tracks/<id>.json` with start yaw + spline anchors so `pnpm gen:tracks` produces a fully playable track in one step | ✅ |
 | M9.38 | Planar water reflection — TSL `reflector()` node mirrors scene onto water with wave-normal-distorted UV, Fresnel-mixed into base color | ✅ |
 | M9.39 | Bike pipeline flip — one `bikes-src/<id>.blend` per variant (no shared kit, no propagation), Blender addon's *Export Bike to Game* writes GLB + starter spec JSON, addon panel auto-detects bike vs track mode by parent dir, headless `pnpm gen:bikes` opens each .blend and applies spec recolour overlays | ✅ |
+| M9.40 | Feel pass — lean limit bumped to ~20° with two-stage speed curve (lays over to ~30° at top speed), slope-projected gravity along bike forward (wave-down accelerates / wave-up decelerates), mobile virtual joystick Y inverted to match gamepad/flight-stick convention | ✅ |
+| M9.41 | Lean crank — `ROLL_LEAN_LIMIT` doubled to 40°, so the high-speed boost reaches ~60° at top speed (was ~30°). Bike now visibly lays over through the apex. | ✅ |
 
 ## File / system map
 

@@ -28,14 +28,14 @@ describe('computeTouchIntent', () => {
     expect(back.brake).toBe(0)
   })
 
-  it('stick up = positive pitch (nose-down dive, matching gamepad)', () => {
+  it('stick up = negative pitch (nose-down dive, matching gamepad/flight stick)', () => {
     const i = computeTouchIntent(0, 1, NO_BTN)
-    expect(i.pitch).toBe(1)
+    expect(i.pitch).toBe(-1)
   })
 
-  it('stick down = negative pitch (nose up)', () => {
+  it('stick down = positive pitch (nose up / lift)', () => {
     const i = computeTouchIntent(0, -1, NO_BTN)
-    expect(i.pitch).toBe(-1)
+    expect(i.pitch).toBe(1)
   })
 
   it('right stick = positive steer', () => {
@@ -57,7 +57,8 @@ describe('computeTouchIntent', () => {
   it('clamps out-of-range values', () => {
     const i = computeTouchIntent(1.5, -1.5, NO_BTN)
     expect(i.steer).toBe(1)
-    expect(i.pitch).toBe(-1)
+    // rawStickY = -1.5 → inverted to +1.5 → clamps to +1.
+    expect(i.pitch).toBe(1)
   })
 
   it('button presses map through to flags / brake / throttle', () => {
