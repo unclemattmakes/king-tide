@@ -135,28 +135,51 @@ mark for deprecation.
 
 ## Priority Matrix
 
-| Issue                                       | File(s)                          | Effort  | Impact                |
-|---------------------------------------------|----------------------------------|---------|-----------------------|
-| `distanceSquared` / `normalize3D` utilities | `vec.ts` + 4 systems             | Low     | Medium (clarity)      |
-| Pre-compute `*_SQ` radius constants         | `combat.ts`, `pickup.ts`         | Trivial | Low (micro)           |
-| Cache bike query per frame                  | `combat.ts`, `ai-combat.ts`      | Low     | Medium (scales w/ N)  |
-| Cache spline lookups in AI                  | `ai-control.ts`                  | Medium  | Medium                |
-| Mesh entity pool                            | `combat-render.ts`               | Medium  | Medium (maintain.)    |
-| Split `main.ts`                             | `main.ts`                        | High    | High (maintain.)      |
-| Split `track-editor.ts`                     | `track-editor.ts`                | High    | High (maintain.)      |
-| Extract spline utilities                    | new `tracks/spline.ts`           | Medium  | Medium (DRY)          |
-| Lazy-load debug UIs                         | `*-debug-menu.ts`                | Low     | Low (bundle)          |
-| ADRs + boot-sequence comment                | `docs/adr/`, `main.ts` header    | Low     | Medium (onboarding)   |
+| Issue                                       | File(s)                          | Effort  | Impact                | Status                       |
+|---------------------------------------------|----------------------------------|---------|-----------------------|------------------------------|
+| `distanceSquared` / `normalize3D` utilities | `vec.ts` + 4 systems             | Low     | Medium (clarity)      | ✅ PR #39                    |
+| Pre-compute `*_SQ` radius constants         | `combat.ts`, `pickup.ts`         | Trivial | Low (micro)           | ✅ PR #39                    |
+| Cache bike query per frame                  | `combat.ts`, `ai-combat.ts`      | Low     | Medium (scales w/ N)  | ✅ PR #39                    |
+| Cache spline lookups in AI                  | `ai-control.ts`                  | Medium  | Medium                | partial (lastClosestIndex)   |
+| Mesh entity pool                            | `combat-render.ts`               | Medium  | Medium (maintain.)    | ✅ PR #39                    |
+| Split `main.ts`                             | `main.ts`                        | High    | High (maintain.)      | open                         |
+| Split `track-editor.ts`                     | `track-editor.ts`                | High    | High (maintain.)      | open                         |
+| Extract spline utilities                    | new `tracks/spline-query.ts`     | Medium  | Medium (DRY)          | ✅ PR #39                    |
+| Lazy-load debug UIs                         | `*-debug-menu.ts`                | Low     | Low (bundle)          | ✅ PR #40                    |
+| ADRs + boot-sequence comment                | `docs/adr/`, `main.ts` header    | Low     | Medium (onboarding)   | ✅ PR #40                    |
 
-## First Batch (this PR)
+## Batch 1 — PR #39 (merged)
 
-The lowest-risk, highest-leverage starting point:
+1. `distanceSquared` / `normalize3D` extracted to `vec.ts`; migrated the
+   inline copies in `combat.ts` / `pickup.ts`.
+2. `*_SQ` radius constants in `combat.ts` and `pickup.ts`.
+3. Bike entity query cached once per tick in `aiCombatSystem` and
+   threaded into `pickMissileTarget` / `isChaserBehind`.
+4. `spline-query.ts` extracted from `ai-control.ts` (closest-index,
+   lookahead, curvature scan) with unit tests.
+5. `syncEntityMeshes` extracted from `combat-render.ts` — four parallel
+   lifecycle blocks collapsed onto one helper.
 
-1. Add `distanceSquared` and `normalize3D` to the shared vector utility,
-   migrate the inline copies.
-2. Add `*_SQ` radius constants in `combat.ts` and `pickup.ts`.
-3. Cache the bike entity query per frame in `combat.ts` and
-   `ai-combat.ts`.
+## Batch 2 — PR #40 (this PR)
 
-No behavior change, all small surface area, easy to revert. Larger
-refactors (`main.ts`, mesh pool, ADRs) deserve their own PRs.
+1. **Lazy-load debug UIs.** `dev-settings-menu` and `water-debug-menu`
+   are now dynamic-imported on first toggle-button click via
+   `bindLazyMenuButton` in `src/engine/lazy-menu.ts`. The persisted
+   water tuning still applies eagerly through the new lightweight
+   `water-debug-storage.ts` module so the visible water doesn't
+   regress to defaults until the user opens the menu. Vite splits
+   each menu into its own chunk (~2 kB / ~4 kB minified).
+2. **Boot-sequence header in `main.ts`.** A JSDoc on `boot()` lays out
+   the eight phases (mode dispatch → subsystem setup → params →
+   asset load → entity spawn → render systems → game loop → edit
+   mode) with pointers to where each lives.
+3. **ADR scaffolding** in `docs/adr/`. Four short ADRs capture the
+   load-bearing decisions: bitECS, sim/render separation, Three.js
+   with WebGPU-first, and Rapier deterministic physics. Index in
+   `docs/adr/README.md`.
+
+## Remaining
+
+Spinning out as a separate task: split the two big files (`main.ts`,
+`track-editor.ts`) into focused modules. These are the only "High"
+items left and each warrants its own PR with extra testing.

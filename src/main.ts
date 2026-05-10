@@ -3,8 +3,8 @@ import * as THREE from 'three'
 import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug'
 import { createAudioEngine } from './engine/audio/audio'
 import { loadDevSettings } from './engine/dev-settings'
-import { installDevSettingsMenu } from './engine/dev-settings-menu'
 import { installTrackEditor } from './engine/editor/track-editor'
+import { bindLazyMenuButton } from './engine/lazy-menu'
 import { formatLap, installGarageMenu } from './engine/garage'
 import {
   emptyIntent,
@@ -46,7 +46,7 @@ import { createSimWorld } from './engine/sim/ecs/world'
 import { createPhysicsWorld } from './engine/sim/physics/rapier'
 import { vecHorizontalLength } from './engine/sim/physics/vec'
 import { advanceWaveField, createWaveField, defaultWaves } from './engine/sim/water/wave-field'
-import { installWaterDebugMenu } from './engine/water-debug-menu'
+import { applyStoredWaterTuning } from './engine/water-debug-storage'
 import { loadBike } from './game/assets/bike-loader'
 import { loadManifest } from './game/assets/manifest'
 import { type LoadedProp, loadProp } from './game/assets/prop-loader'
@@ -92,6 +92,36 @@ import { createLagoonLoop } from './game/tracks/lagoon-loop'
 
 const NUM_AI = 4
 
+/**
+ * Boot sequence — phases, in order:
+ *
+ *   1. Mode dispatch. `?viewer=<id>` short-circuits into the stand-alone
+ *      bike viewer and returns; everything below is skipped.
+ *      `?replay=session` parses the pending replay from sessionStorage so
+ *      the rest of boot can branch on `activeReplay`.
+ *      `?edit=1` switches the player track to `lagoon-edit` and arms
+ *      the editor instead of the live game loop.
+ *   2. Subsystem setup. Renderer, scene, physics world, sim world, chase
+ *      camera, water mesh, wave field. Order matters: physics needs the
+ *      Rapier WASM ready before any collider is attached.
+ *   3. URL params + persisted prefs. Track id, bike variant, dev settings,
+ *      water tuning. Heavy debug overlays bind lazy click handlers here
+ *      (their UI modules dynamic-import on first toggle).
+ *   4. Asset load. Manifest fetch → bike GLB(s) → track (procedural,
+ *      JSON, or GLB) → props.
+ *   5. Entity spawn. Player bike first (deterministic eid for the replay
+ *      recorder's slot 0), then AI bikes, pickups, mines/missiles handled
+ *      by the combat system.
+ *   6. Render systems. Bike, pickup, combat, FX. The fx system needs
+ *      `phys` for wake/dust ground sampling; combat/pickup just need the
+ *      sim world. See `docs/code-review-2026-05.md` §1.3 for the shared
+ *      `syncEntityMeshes` lifecycle these systems use.
+ *   7. Game loop. The live-race branch starts around the `requestFrame`
+ *      callback below; replay-playback mode replaces the frame body
+ *      further down (search for "Replay-playback mode").
+ *   8. Edit mode (alternative to phase 7). `installTrackEditor` takes
+ *      the canvas; sim/physics tick is skipped.
+ */
 async function boot() {
   const appEl = document.getElementById('app')
   if (!appEl) throw new Error('#app not found')
@@ -205,12 +235,19 @@ async function boot() {
     manifestTracks: manifest.tracks,
   })
 
-  // Dev settings — live-tunable input/camera feel knobs.
-  installDevSettingsMenu()
-
-  // Water debug — live-tunable wave + shader knobs. Loads + applies any
-  // persisted settings from a previous tuning session.
-  installWaterDebugMenu(waterMesh)
+  // Apply any persisted water tuning eagerly, so the page opens in the
+  // visual state the user last left. The tuning sliders themselves —
+  // along with the dev-settings sliders — are dynamic-imported on first
+  // toggle-button click so their UI code stays out of the main bundle.
+  applyStoredWaterTuning(waterMesh)
+  bindLazyMenuButton('devsettings-toggle', async () => {
+    const { installDevSettingsMenu } = await import('./engine/dev-settings-menu')
+    return installDevSettingsMenu()
+  })
+  bindLazyMenuButton('water-debug-toggle', async () => {
+    const { installWaterDebugMenu } = await import('./engine/water-debug-menu')
+    return installWaterDebugMenu(waterMesh)
+  })
 
   // Best-lap tracking. We compare each completed lap to the saved best
   // for (track, bike) and update on every personal-best.

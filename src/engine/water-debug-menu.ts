@@ -17,21 +17,14 @@
  * static surface the install function needs.
  */
 
-import type { WaterDebugDefaults, WaterMesh } from './render/water'
-
-const STORAGE_KEY = 'hoverbike.waterDebug.v1'
-
-type WaterDebugSettings = {
-  steepness: number
-  swellScale: number
-  chopScale: number
-  timeScale: number
-  reflectionStrength: number
-  sunGlow: number
-  roughBase: number
-  roughSparkle: number
-  wireframe: boolean
-}
+import type { WaterMesh } from './render/water'
+import {
+  applyWaterSettings,
+  defaultsToSettings,
+  loadStoredWaterSettings,
+  persistWaterSettings,
+  type WaterDebugSettings,
+} from './water-debug-storage'
 
 type SliderDef = {
   key: Exclude<keyof WaterDebugSettings, 'wireframe'>
@@ -120,68 +113,6 @@ const SLIDERS: SliderDef[] = [
   },
 ]
 
-function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
-  return {
-    steepness: d.steepness,
-    swellScale: d.swellScale,
-    chopScale: d.chopScale,
-    timeScale: d.timeScale,
-    reflectionStrength: d.reflectionStrength,
-    sunGlow: d.sunGlow,
-    roughBase: d.roughBase,
-    roughSparkle: d.roughSparkle,
-    wireframe: d.wireframe,
-  }
-}
-
-function loadStored(defaults: WaterDebugDefaults): WaterDebugSettings {
-  const base = defaultsToSettings(defaults)
-  let raw: string | null = null
-  try {
-    raw = window.localStorage.getItem(STORAGE_KEY)
-  } catch {
-    return base
-  }
-  if (!raw) return base
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return base
-  }
-  if (!parsed || typeof parsed !== 'object') return base
-  const p = parsed as Record<string, unknown>
-  for (const k of Object.keys(base) as Array<keyof WaterDebugSettings>) {
-    const v = p[k]
-    if (k === 'wireframe') {
-      if (typeof v === 'boolean') base[k] = v
-    } else if (typeof v === 'number' && Number.isFinite(v)) {
-      ;(base as unknown as Record<string, number>)[k] = v
-    }
-  }
-  return base
-}
-
-function persist(s: WaterDebugSettings): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
-  } catch {
-    // ignore — settings still take effect for this session.
-  }
-}
-
-function applyAll(water: WaterMesh, s: WaterDebugSettings): void {
-  water.debug.setSteepness(s.steepness)
-  water.debug.setSwellScale(s.swellScale)
-  water.debug.setChopScale(s.chopScale)
-  water.debug.setTimeScale(s.timeScale)
-  water.debug.setReflectionStrength(s.reflectionStrength)
-  water.debug.setSunGlow(s.sunGlow)
-  water.debug.setRoughBase(s.roughBase)
-  water.debug.setRoughSparkle(s.roughSparkle)
-  water.debug.setWireframe(s.wireframe)
-}
-
 export type WaterDebugMenu = {
   open(): void
   close(): void
@@ -204,8 +135,8 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
     return { open() {}, close() {}, isOpen: () => false }
   }
 
-  const settings = loadStored(water.debug.defaults)
-  applyAll(water, settings)
+  const settings = loadStoredWaterSettings(water.debug.defaults)
+  applyWaterSettings(water, settings)
 
   type Bound = { def: SliderDef; input: HTMLInputElement; valEl: HTMLElement }
   const bound: Bound[] = []
@@ -271,7 +202,7 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
       }
     })
-    input.addEventListener('change', () => persist(settings))
+    input.addEventListener('change', () => persistWaterSettings(settings))
   }
 
   // Wireframe toggle row.
@@ -291,7 +222,7 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
   wireInput.addEventListener('change', () => {
     settings.wireframe = wireInput.checked
     water.debug.setWireframe(wireInput.checked)
-    persist(settings)
+    persistWaterSettings(settings)
   })
 
   function syncUI(): void {
@@ -314,9 +245,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
   closeBtn.addEventListener('click', close)
   resetBtn.addEventListener('click', () => {
     Object.assign(settings, defaultsToSettings(water.debug.defaults))
-    applyAll(water, settings)
+    applyWaterSettings(water, settings)
     syncUI()
-    persist(settings)
+    persistWaterSettings(settings)
   })
   // Esc closes when open. Doesn't intercept when other overlays own the key.
   window.addEventListener('keydown', (e) => {
