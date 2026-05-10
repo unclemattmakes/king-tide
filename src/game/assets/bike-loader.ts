@@ -136,10 +136,17 @@ export type ClonedBike = {
  * Clone the loaded bike's root for a new instance.
  *
  * Geometries and materials are shared with the source by default; pass
- * a `tintLivery` color hex to clone-and-tint the livery material so
- * AI bikes can have unique colors without their own GLBs.
+ * `tintLivery` / `tintExhaust` color hexes to clone-and-tint the matching
+ * material (`mat_bike_<id>_livery` / `mat_bike_<id>_glow`) so each bike
+ * in the field reads as visually distinct without needing its own GLB.
+ * The exhaust tint sets both base color and emissive on the glow
+ * material — that's the thruster cone behind the bike, which doubles as
+ * the per-player accent color now that the long ribbon trails are gone.
  */
-export function cloneLoadedBike(loaded: LoadedBike, opts?: { tintLivery?: number }): ClonedBike {
+export function cloneLoadedBike(
+  loaded: LoadedBike,
+  opts?: { tintLivery?: number; tintExhaust?: number },
+): ClonedBike {
   const root = loaded.root.clone(true)
 
   // Resolve sockets on the clone — getObjectByName works because
@@ -167,17 +174,25 @@ export function cloneLoadedBike(loaded: LoadedBike, opts?: { tintLivery?: number
     }
   })
 
-  if (opts?.tintLivery !== undefined) {
-    const tint = opts.tintLivery
+  const tintLivery = opts?.tintLivery
+  const tintExhaust = opts?.tintExhaust
+  if (tintLivery !== undefined || tintExhaust !== undefined) {
     root.traverse((obj) => {
       const mesh = obj as THREE.Mesh
       if (!mesh.isMesh || !mesh.material) return
       const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
       const replaced = mats.map((m) => {
         const standard = m as THREE.MeshStandardMaterial
-        if (typeof standard.name === 'string' && standard.name.includes('_livery')) {
+        const name = typeof standard.name === 'string' ? standard.name : ''
+        if (tintLivery !== undefined && name.includes('_livery')) {
           const cloned = standard.clone()
-          cloned.color.setHex(tint)
+          cloned.color.setHex(tintLivery)
+          return cloned
+        }
+        if (tintExhaust !== undefined && name.includes('_glow')) {
+          const cloned = standard.clone()
+          cloned.color.setHex(tintExhaust)
+          if (cloned.emissive) cloned.emissive.setHex(tintExhaust)
           return cloned
         }
         return m

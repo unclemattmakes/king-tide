@@ -758,9 +758,8 @@ src/
 │   │   ├── bike-mesh.ts          # bike body, fin, tail light, hover puck
 │   │   ├── pickup-mesh.ts        # rotating glowing crate (per-type colored)
 │   │   ├── pickup-render.ts
-│   │   ├── trail-render.ts       # camera-facing ribbon tail-light streaks
 │   │   ├── combat-render.ts      # mines, missiles, shield bubbles, explosions
-│   │   └── render-systems.ts     # ECS → Three.js bike sync (variant body color)
+│   │   └── render-systems.ts     # ECS → Three.js bike sync (livery + exhaust glow tints)
 │   └── input/
 │       ├── intent.ts             # Intent type
 │       ├── keyboard.ts           # smoothed WASD/arrows + Q/E

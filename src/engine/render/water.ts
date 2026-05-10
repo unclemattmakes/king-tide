@@ -952,7 +952,15 @@ export function createWaterMesh(
 
   const mat = new MeshStandardNodeMaterial({
     transparent: true,
-    metalness: 0.45,
+    // Water is a dielectric, so metalness must be 0 — F0 stays at the PBR
+    // dielectric default (~0.04) and Schlick correctly drives specular
+    // toward white at grazing angles. The previous 0.45 was blending F0
+    // toward the deep-teal baseColor, which tinted near-zenith sun glints
+    // a dark blue and made the surface look like blued steel from above.
+    // From below the surface, ndotv was already clamped to 0 (Fresnel = 1),
+    // so the wrong F0 was hidden — which is why the above-water view read
+    // worse than the below-water view despite using the same material.
+    metalness: 0,
     // roughness is now driven by `roughnessNode` below; this constant is the
     // base value (used when `roughnessNode` evaluates to 1.0 — i.e. away
     // from sparkle patches).
