@@ -31,6 +31,7 @@ import { createRenderer } from './engine/render/renderer'
 import { createScene } from './engine/render/scene'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { type BikeImpact, createWaterMesh } from './engine/render/water'
+import { installWaterDebugMenu } from './engine/water-debug-menu'
 import { getBestLap, recordLapTime } from './engine/save-state'
 import { createSimWorld } from './engine/sim/ecs/world'
 import { createPhysicsWorld } from './engine/sim/physics/rapier'
@@ -167,6 +168,10 @@ async function boot() {
 
   // Dev settings — live-tunable input/camera feel knobs.
   installDevSettingsMenu()
+
+  // Water debug — live-tunable wave + shader knobs. Loads + applies any
+  // persisted settings from a previous tuning session.
+  installWaterDebugMenu(waterMesh)
 
   // Best-lap tracking. We compare each completed lap to the saved best
   // for (track, bike) and update on every personal-best.
@@ -579,7 +584,11 @@ async function boot() {
 
     physAccum += dt
     while (physAccum >= phys.fixedDt) {
-      advanceWaveField(waveField, phys.fixedDt)
+      // Wave-field clock advances at `fixedDt × waterDebugTimeScale` so the
+      // water debug menu can speed up / slow down / freeze the waves
+      // independently of the physics step. At the default 1× this is the
+      // original behavior.
+      advanceWaveField(waveField, phys.fixedDt * waterMesh.debug.getTimeScale())
       // Refresh wake sources from the current bike rigid bodies BEFORE
       // hoverSystem reads the wave field for buoyancy. This is what makes
       // the lead bike's wake felt by trailing riders (and visible in the

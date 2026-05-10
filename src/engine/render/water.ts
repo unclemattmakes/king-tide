@@ -84,7 +84,53 @@ export type WaterMesh = {
    * directional light.
    */
   setSunDirection(x: number, y: number, z: number): void
+  /** Live-tunable knobs for the water debug menu. All setters apply
+   *  immediately — no material rebuild, no reload. */
+  debug: {
+    /** Defaults captured at construction so the menu's RESET button can
+     *  restore them without hard-coding values that may drift. */
+    readonly defaults: WaterDebugDefaults
+    /** Global Gerstner steepness multiplier (Q). 0 = round bumps,
+     *  ~0.7 = SoT default, >1.3 risks crests folding. */
+    setSteepness(s: number): void
+    /** Multiplier on the two long-period swell amplitudes (waves 0–1).
+     *  Mutates `field.waves[i].amplitude` so CPU buoyancy follows. */
+    setSwellScale(s: number): void
+    /** Multiplier on the four wind-chop amplitudes (waves 2–5).
+     *  Mutates `field.waves[i].amplitude` so CPU buoyancy follows. */
+    setChopScale(s: number): void
+    /** Multiplier on `dt` passed to `advanceWaveField` from the main
+     *  loop. The main loop reads `getTimeScale()` each step. */
+    setTimeScale(s: number): void
+    /** Fresnel cap on the planar reflection (0..1). 0 disables the
+     *  reflection entirely; 0.85 is the v2 default. */
+    setReflectionStrength(s: number): void
+    /** Multiplier on the sun-backlight glow on tall crests. */
+    setSunGlow(s: number): void
+    /** Material base roughness (away from sparkle patches). */
+    setRoughBase(s: number): void
+    /** Material roughness inside sparkle patches (lower = brighter
+     *  pin-point glints). */
+    setRoughSparkle(s: number): void
+    /** Render the wave geometry as wireframe. Useful for tuning wave /
+     *  wake amplitudes against the actual displacement. */
+    setWireframe(on: boolean): void
+    /** Time-scale getter for the main loop. */
+    getTimeScale(): number
+  }
   dispose(): void
+}
+
+export type WaterDebugDefaults = {
+  steepness: number
+  swellScale: number
+  chopScale: number
+  timeScale: number
+  reflectionStrength: number
+  sunGlow: number
+  roughBase: number
+  roughSparkle: number
+  wireframe: boolean
 }
 
 /** Maximum bikes the shader supports per frame. Today's race is player +
@@ -187,6 +233,33 @@ export function createWaterMesh(
     : Math.max(0, Math.min(1.5, Number(params?.get('steep') ?? '0.7')))
   const steepnessUniform = uniform(initialSteepness)
 
+  // ---- Tunable scalars (water debug menu) -------------------------------
+  // Each is a uniform so the menu can scrub it live without rebuilding the
+  // material. Defaults match the values the v2 shader was authored against;
+  // RESET in the menu restores them via `waterMesh.debug.defaults`.
+  const REFLECTION_STRENGTH_DEFAULT = 0.85
+  const SUN_GLOW_DEFAULT = 0.6
+  const ROUGH_BASE_DEFAULT = 0.18
+  const ROUGH_SPARKLE_DEFAULT = 0.04
+  const reflStrengthUniform = uniform(REFLECTION_STRENGTH_DEFAULT)
+  const sunGlowUniform = uniform(SUN_GLOW_DEFAULT)
+  const roughBaseUniform = uniform(ROUGH_BASE_DEFAULT)
+  const roughSparkleUniform = uniform(ROUGH_SPARKLE_DEFAULT)
+  // Per-group amplitude scales — one for swells (waves 0–1), one for chops
+  // (waves 2–5). Both default to 1.0 (no scale). The shader multiplies the
+  // baked per-wave constants by these uniforms; the CPU buoyancy mirrors
+  // by mutating `field.waves[i].amplitude` directly so the two paths stay
+  // in lockstep. Baseline amplitudes are captured here so toggling the
+  // scales preserves the relative balance of the wave preset.
+  const SWELL_INDICES = new Set([0, 1])
+  const swellScaleUniform = uniform(1)
+  const chopScaleUniform = uniform(1)
+  const baseAmplitudes = field.waves.map((w) => w.amplitude)
+  // Time scale for the main loop. Stored here rather than as a uniform
+  // because dt is consumed by `advanceWaveField` on the CPU side; the
+  // shader reads `field.time` regardless of how fast it advances.
+  let timeScale = 1
+
   // World-XZ origin of the mesh — set by `tick(...)` to the camera's XZ
   // each frame so the mesh follows the camera. The wave / wake math
   // samples at WORLD coords (positionLocal + meshOrigin), so the surface
@@ -243,7 +316,9 @@ export function createWaterMesh(
   // Gerstner — heightfield part: returns vec3(y, dy/dx, dy/dz). These are the
   // same values you'd get from a vertical-only sum of sines, used both for the
   // wave's vertical displacement and for the x/z components of the surface
-  // normal (cosine slopes). Waves are unrolled at build time.
+  // normal (cosine slopes). Waves are unrolled at build time. Per-wave amp
+  // is multiplied by `swellScaleUniform` (waves 0–1) or `chopScaleUniform`
+  // (waves 2–5) so the debug menu can rebalance swell vs chop live.
   const gerstnerHeight = Fn(([x, z, t]: [unknown, unknown, unknown]) => {
     const xN = x as ReturnType<typeof float>
     const zN = z as ReturnType<typeof float>
@@ -251,7 +326,9 @@ export function createWaterMesh(
     const y = float(0).toVar()
     const dydx = float(0).toVar()
     const dydz = float(0).toVar()
-    for (const w of waveConsts) {
+    for (let i = 0; i < waveConsts.length; i++) {
+      const w = waveConsts[i]!
+      const ampScale = SWELL_INDICES.has(i) ? swellScaleUniform : chopScaleUniform
       const phase = float(w.k * w.dirX)
         .mul(xN)
         .add(float(w.k * w.dirZ).mul(zN))
@@ -259,9 +336,9 @@ export function createWaterMesh(
         .add(float(w.phase))
       const s = sin(phase)
       const c = cos(phase)
-      y.addAssign(s.mul(w.amp))
-      dydx.addAssign(c.mul(w.amp * w.k * w.dirX))
-      dydz.addAssign(c.mul(w.amp * w.k * w.dirZ))
+      y.addAssign(s.mul(w.amp).mul(ampScale))
+      dydx.addAssign(c.mul(w.amp * w.k * w.dirX).mul(ampScale))
+      dydz.addAssign(c.mul(w.amp * w.k * w.dirZ).mul(ampScale))
     }
     return vec3(y, dydx, dydz)
   })
@@ -281,7 +358,9 @@ export function createWaterMesh(
     const dx = float(0).toVar()
     const dz = float(0).toVar()
     const qSum = float(0).toVar()
-    for (const w of waveConsts) {
+    for (let i = 0; i < waveConsts.length; i++) {
+      const w = waveConsts[i]!
+      const ampScale = SWELL_INDICES.has(i) ? swellScaleUniform : chopScaleUniform
       const phase = float(w.k * w.dirX)
         .mul(xN)
         .add(float(w.k * w.dirZ).mul(zN))
@@ -292,10 +371,10 @@ export function createWaterMesh(
       const qScaled = steepnessUniform.mul(float(w.qBase))
       // Horizontal displacement: P.x += Q·A·D.x · cos(phase),
       //                          P.z += Q·A·D.z · cos(phase)
-      dx.addAssign(qScaled.mul(float(w.amp * w.dirX)).mul(c))
-      dz.addAssign(qScaled.mul(float(w.amp * w.dirZ)).mul(c))
+      dx.addAssign(qScaled.mul(float(w.amp * w.dirX)).mul(c).mul(ampScale))
+      dz.addAssign(qScaled.mul(float(w.amp * w.dirZ)).mul(c).mul(ampScale))
       // Normal y-component reduction: Σ Q · k · A · sin(phase)
-      qSum.addAssign(qScaled.mul(float(w.k * w.amp)).mul(s))
+      qSum.addAssign(qScaled.mul(float(w.k * w.amp)).mul(s).mul(ampScale))
     }
     return vec3(dx, dz, qSum)
   })
@@ -595,7 +674,7 @@ export function createWaterMesh(
   // scatterColor. Off in classic mode.
   const sunGlow = isClassic
     ? vec3(0, 0, 0)
-    : scatterColor.mul(sunBackscatter.mul(heightFactor).mul(float(0.6)))
+    : scatterColor.mul(sunBackscatter.mul(heightFactor).mul(sunGlowUniform))
 
   // Wave-driven foam.
   //
@@ -915,8 +994,9 @@ export function createWaterMesh(
     // of the deep-water color in even the most grazing-angle samples,
     // so the surface reads as "water reflecting" not "mirror painted on
     // water" — important for sunlit crests where the scatter blend
-    // contributes meaningful color even at the horizon.
-    const reflStrength = fresnel.mul(float(0.85))
+    // contributes meaningful color even at the horizon. The cap is a
+    // uniform so the debug menu can dim or disable the reflection.
+    const reflStrength = fresnel.mul(reflStrengthUniform)
     const reflectedBase = mix(baseColor, reflectionRgb, reflStrength)
     waterAlbedo = mix(reflectedBase, foamColor, foamMask)
   }
@@ -976,8 +1056,68 @@ export function createWaterMesh(
   // Noise-modulated roughness. In sparkle patches roughness drops from 0.18
   // to ~0.04, tightening the specular lobe and producing crisp highlights.
   // Classic mode keeps the constant 0.18 so the A/B comparison is clean.
+  // Both base + sparkle ends are uniforms so the debug menu can scrub them.
   if (!isClassic) {
-    mat.roughnessNode = mix(float(0.18), float(0.04), broadMask)
+    mat.roughnessNode = mix(roughBaseUniform, roughSparkleUniform, broadMask)
+  }
+
+  // Debug knob surface (water-debug-menu.ts talks to this). All setters
+  // clamp inputs and apply to the relevant uniform / mesh state. The amp
+  // scales also mutate `field.waves[i].amplitude` so the CPU buoyancy
+  // sampler stays in lockstep with the GPU shader.
+  const defaults: WaterDebugDefaults = {
+    steepness: initialSteepness,
+    swellScale: 1,
+    chopScale: 1,
+    timeScale: 1,
+    reflectionStrength: REFLECTION_STRENGTH_DEFAULT,
+    sunGlow: SUN_GLOW_DEFAULT,
+    roughBase: ROUGH_BASE_DEFAULT,
+    roughSparkle: ROUGH_SPARKLE_DEFAULT,
+    wireframe: wireFlag,
+  }
+  const clamp01 = (n: number, lo: number, hi: number) =>
+    Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo))
+  function applySwellScale(s: number): void {
+    const v = clamp01(s, 0, 3)
+    swellScaleUniform.value = v
+    for (let i = 0; i < field.waves.length; i++) {
+      if (SWELL_INDICES.has(i)) field.waves[i]!.amplitude = baseAmplitudes[i]! * v
+    }
+  }
+  function applyChopScale(s: number): void {
+    const v = clamp01(s, 0, 3)
+    chopScaleUniform.value = v
+    for (let i = 0; i < field.waves.length; i++) {
+      if (!SWELL_INDICES.has(i)) field.waves[i]!.amplitude = baseAmplitudes[i]! * v
+    }
+  }
+  const debug: WaterMesh['debug'] = {
+    defaults,
+    setSteepness(s) {
+      steepnessUniform.value = clamp01(s, 0, 1.5)
+    },
+    setSwellScale: applySwellScale,
+    setChopScale: applyChopScale,
+    setTimeScale(s) {
+      timeScale = clamp01(s, 0, 5)
+    },
+    getTimeScale: () => timeScale,
+    setReflectionStrength(s) {
+      reflStrengthUniform.value = clamp01(s, 0, 1)
+    },
+    setSunGlow(s) {
+      sunGlowUniform.value = clamp01(s, 0, 3)
+    },
+    setRoughBase(s) {
+      roughBaseUniform.value = clamp01(s, 0, 1)
+    },
+    setRoughSparkle(s) {
+      roughSparkleUniform.value = clamp01(s, 0, 1)
+    },
+    setWireframe(on) {
+      mat.wireframe = !!on
+    },
   }
 
   // Debug: ?water=wire renders the water mesh as wireframe so you can see
@@ -998,9 +1138,8 @@ export function createWaterMesh(
     // (vertices crossing) — visually jagged but not crashing.
     // biome-ignore lint/suspicious/noExplicitAny: dev-only debug hook
     ;(window as any).__waterSteepness = (s: number) => {
-      const clamped = Math.max(0, Math.min(1.5, Number(s) || 0))
-      steepnessUniform.value = clamped
-      return clamped
+      debug.setSteepness(s)
+      return steepnessUniform.value
     }
   }
 
@@ -1096,5 +1235,5 @@ export function createWaterMesh(
     mat.dispose()
   }
 
-  return { mesh, tick, setSunDirection, dispose }
+  return { mesh, tick, setSunDirection, debug, dispose }
 }
