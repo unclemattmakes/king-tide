@@ -21,15 +21,16 @@ import {
   positionView,
   positionWorld,
   pow,
+  screenUV,
   sin,
   smoothstep,
   sqrt,
+  texture,
   uniform,
   uniformArray,
   varying,
   vec2,
   vec3,
-  viewportDepthTexture,
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
 import {
@@ -101,7 +102,7 @@ const BIKE_DIMPLE_R = 1.6
 const BIKE_DIMPLE_DEPTH = 0.32
 /** Squared cull radius for the vertex-stage dimple. exp(-r²/R²) is below
  * 1e-7 outside ~6σ, so we can skip the exp entirely past this distance. */
-const BIKE_DIMPLE_CULL_R_SQ = (BIKE_DIMPLE_R * 6) * (BIKE_DIMPLE_R * 6)
+const BIKE_DIMPLE_CULL_R_SQ = BIKE_DIMPLE_R * 6 * (BIKE_DIMPLE_R * 6)
 /** Cull radius for vertex-stage wake displacement. The wake's exponential
  * decay (exp(-behind · LONG_DECAY)) reaches ~20% of peak by 40m, so the
  * residual is below visual noise. Tighter than the foam radius because the
@@ -159,8 +160,7 @@ export function createWaterMesh(
   // Useful for A/B-ing the SoT-style upgrade in playtest.
   // `?water=wire` (handled later) renders wireframe — see end of function.
   // `?steep=<n>` overrides the initial steepness scale (0..1.5 recommended).
-  const params =
-    typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
   const waterMode = params?.get('water') ?? 'v2'
   const isClassic = waterMode === 'classic'
   // `?wire=1` is an ORTHOGONAL toggle — works with classic, v2, and any
@@ -386,9 +386,7 @@ export function createWaterMesh(
           // length; the pattern drifts backward in the bike's frame as t
           // advances, giving the wake the live oscillating ridges of a
           // real Kelvin wake.
-          const longPhase = tN
-            .mul(-WAKE_TRANS_OMEGA)
-            .add(behind.mul(WAKE_TRANS_K))
+          const longPhase = tN.mul(-WAKE_TRANS_OMEGA).add(behind.mul(WAKE_TRANS_K))
           const transverseMod = float(1).add(sin(longPhase).mul(WAKE_TRANS_AMP))
           // biome-ignore lint/suspicious/noExplicitAny: TSL UniformArrayElementNode lacks float-typing in TS
           const weight = weightsUniform.element(i) as any
@@ -537,9 +535,7 @@ export function createWaterMesh(
   // GPU Gems eq.13 normal: (-Σdy/dx, 1 - Σ Q·k·A·sin, -Σdy/dz).
   // The wake's gradients are folded into dydx/dydz; the wake has no
   // horizontal-displacement term so it doesn't contribute to qSum.
-  const normalNode = normalize(
-    vec3(dydx.negate(), float(1).sub(qSumFrag), dydz.negate()),
-  )
+  const normalNode = normalize(vec3(dydx.negate(), float(1).sub(qSumFrag), dydz.negate()))
 
   // View vector + ndotv computed once and reused by both the scatter blend
   // (base color) and the fresnel sky-tint emissive below.
@@ -562,9 +558,7 @@ export function createWaterMesh(
   // Classic mode (`?water=classic`) keeps the original blue→cyan mix with
   // pure height-driven blending for A/B comparison.
   const heightNorm = smoothstep(float(-0.9), float(0.9), heightFrag)
-  const heightFactor = isClassic
-    ? heightNorm
-    : smoothstep(float(-0.7), float(0.8), heightFrag)
+  const heightFactor = isClassic ? heightNorm : smoothstep(float(-0.7), float(0.8), heightFrag)
   const deepColor = isClassic ? vec3(0.04, 0.18, 0.4) : vec3(0.02, 0.12, 0.22)
   const scatterColor = isClassic ? vec3(0.16, 0.55, 0.78) : vec3(0.22, 0.7, 0.65)
 
@@ -637,9 +631,7 @@ export function createWaterMesh(
   //   - wake foam intensity (multiplicative `foamTurbulence`)
   //   - bow spray intensity (multiplicative `foamTurbulence`)
   // so all interactive foam moves with a unified visual rhythm.
-  const foamNoiseUV = positionWorld.xz
-    .mul(0.35)
-    .add(vec2(tNode.mul(-0.18), tNode.mul(0.13)))
+  const foamNoiseUV = positionWorld.xz.mul(0.35).add(vec2(tNode.mul(-0.18), tNode.mul(0.13)))
   const foamNoiseRaw = fract(
     sin(foamNoiseUV.x.mul(12.9898).add(foamNoiseUV.y.mul(78.233))).mul(43758.5453),
   )
@@ -780,14 +772,38 @@ export function createWaterMesh(
   // Off in classic mode (it's a v2 feature; classic preserves the original
   // single-foam path for clean A/B). The depth read is cheap on real GPU
   // (one texture sample + one viewZ conversion) — no per-vertex cost.
+  //
+  // Why our own DepthTexture instead of Three.js's `viewportDepthTexture()`:
+  // that helper's `updateBefore` fires once per render at the first node
+  // referencing it — under WebGPURenderer that resolves to BEFORE any
+  // opaque has been encoded into the active pass, so the texture captures
+  // a cleared depth buffer (= 1.0 everywhere). The intersection compare
+  // then reads the scene as "all at the far plane" and no foam ever fires.
+  // Instead we manage our own `DepthTexture` and call
+  // `renderer.copyFramebufferToTexture` from the water mesh's
+  // `onBeforeRender` (see below); by that point all opaques have been
+  // encoded into the pass, so the snapshot reflects the real post-opaque
+  // depth that the foam comparison actually needs.
+  const sceneDepthTexture = new THREE.DepthTexture(1, 1)
+  sceneDepthTexture.name = 'water:sceneDepth'
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+  const sceneDepthSampleNode = texture(sceneDepthTexture, screenUV) as any
   const intersectionFoam = isClassic
     ? float(0)
     : (() => {
-        const FOAM_INTERSECTION_BASE = 1.5
-        // viewportDepthTexture() samples the opaque depth at this fragment.
+        // Wide band of soft foam that reaches 3 m off-shore + a tight
+        // bright peak right at the water-line. Two layers maxed together:
+        //   - `bandFoam`   — 0..1 over a 3 m breathing depth range, with
+        //                    the falloff biased so the half-mark is still
+        //                    quite bright (sqrt curve). Reads as a
+        //                    surf zone rather than a thin ribbon.
+        //   - `peakFoam`   — narrow bright lip in the first ~0.5 m of
+        //                    submersion. This is the unmistakable "foam at
+        //                    the geometry edge" beat.
+        const FOAM_BAND_BASE = 3.0
+        const PEAK_RANGE = 0.6
         // .r is the non-linear depth in [0, 1].
-        // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
-        const sceneDepthRaw = (viewportDepthTexture() as any).r
+        const sceneDepthRaw = sceneDepthSampleNode.r
         const sceneViewZ = perspectiveDepthToViewZ(sceneDepthRaw, cameraNear, cameraFar)
         const waterViewZ = positionView.z
         // closenessSigned > 0 means terrain is BEHIND water (deeper into
@@ -796,32 +812,42 @@ export function createWaterMesh(
         // sceneViewZ is more negative (further away).
         const closenessSigned = waterViewZ.sub(sceneViewZ)
         const behindGate = smoothstep(float(-0.05), float(0.05), closenessSigned)
-        // Lapping shoreline (M9.33): the depth threshold breathes ±0.4m
-        // around the 1.5m base as the shared foam noise scrolls. Where
-        // noise is high, the foam reaches further off-shore (1.9m); where
-        // low, it pulls back (1.1m). Combined with the static depth
+        // Lapping shoreline (M9.33): the depth threshold breathes ±0.7m
+        // around the 3.0m base as the shared foam noise scrolls. Where
+        // noise is high, foam reaches further off-shore (3.7m); where
+        // low, it pulls back (2.3m). Combined with the static depth
         // intersection, this reads as the surf "lapping" against the
         // shore rather than a static water-line.
-        const noiseRangeOffset = foamNoiseRaw.sub(float(0.5)).mul(float(0.8))
-        const foamRangeNow = float(FOAM_INTERSECTION_BASE).add(noiseRangeOffset)
-        const depthFade = float(1).sub(
-          smoothstep(float(0), foamRangeNow, max(float(0), closenessSigned)),
+        const closeness = max(float(0), closenessSigned)
+        const noiseRangeOffset = foamNoiseRaw.sub(float(0.5)).mul(float(1.4))
+        const bandRangeNow = float(FOAM_BAND_BASE).add(noiseRangeOffset)
+        // Sqrt-shaped falloff: full-bright near the edge, half-bright at
+        // ~25% of the band, fading to 0 at the band edge. Much more
+        // pronounced than a linear / smoothstep falloff.
+        const bandLinear = float(1).sub(clamp(closeness.div(bandRangeNow), float(0), float(1)))
+        const bandFoam = sqrt(bandLinear)
+        // Tight peak right at the intersection — bright lip on top of the
+        // band, regardless of band thickness.
+        const peakFoam = float(1).sub(
+          smoothstep(float(0), float(PEAK_RANGE), closeness),
         )
-        // Slight intensity modulation on top so the foam itself has
-        // texture (not just a moving edge).
-        const intensityModulator = mix(float(0.7), float(1.0), foamNoiseSmooth)
-        return behindGate.mul(depthFade).mul(intensityModulator)
+        // Intensity modulation: bumped to 0.85..1.15 so foam can punch
+        // brighter than the wave/bike foam ceiling — turbulent peaks
+        // saturate on the final clamp instead of sitting at 70%.
+        const intensityModulator = mix(float(0.85), float(1.15), foamNoiseSmooth)
+        return behindGate.mul(max(bandFoam, peakFoam)).mul(intensityModulator)
       })()
 
   // Intersection foam is full-opaque white where it fires (we want the
   // shoreline edge to read clearly against the water), so we max-combine
   // it with the (waveFoam + bikeFoam) sum rather than adding — additive
   // would create unnaturally over-bright zones at gate posts where the
-  // ramp hits water.
+  // ramp hits water. Final clamp raised from 0.95 to 1.0 so the bright
+  // peak at the water-line can reach pure white.
   const foamMask = clamp(
-    max(waveFoam.add(bikeFoam), intersectionFoam.mul(0.95)),
+    max(waveFoam.add(bikeFoam), intersectionFoam),
     float(0),
-    float(0.95),
+    float(1),
   )
   const foamColor = vec3(0.92, 0.96, 1.0)
   const albedo = mix(baseColor, foamColor, foamMask)
@@ -925,10 +951,37 @@ export function createWaterMesh(
   // map and self-shadow ugly.
   mesh.receiveShadow = true
 
-  function tick(
-    impacts?: readonly BikeImpact[],
-    originXZ?: { x: number; z: number },
-  ): void {
+  // Pre-water depth snapshot. Three.js calls `onBeforeRender` per object
+  // right before its draw is encoded — by the time water (transparent)
+  // gets here, all opaques have been encoded into the same pass, so a
+  // copy of the framebuffer's depth attachment at this point captures
+  // post-opaque depth. `copyFramebufferToTexture` ends the active render
+  // pass on the encoder, copies the depth, then begins a new pass with
+  // `loadOp = Load` so the depth values survive. The shoreline foam in the
+  // shader samples `sceneDepthTexture` at `screenUV` and compares to the
+  // water fragment's view-Z; without this manual snapshot, the equivalent
+  // `viewportDepthTexture()` helper captures a cleared depth buffer too
+  // early in the frame and the comparison reads the scene as "all at the
+  // far plane" — no foam ever fires.
+  const _sceneDepthSize = new THREE.Vector2()
+  mesh.onBeforeRender = (renderer) => {
+    // biome-ignore lint/suspicious/noExplicitAny: WebGPURenderer cast
+    const r = renderer as any
+    r.getDrawingBufferSize(_sceneDepthSize)
+    const w = _sceneDepthSize.x | 0
+    const h = _sceneDepthSize.y | 0
+    if (w <= 0 || h <= 0) return
+    if (sceneDepthTexture.image.width !== w || sceneDepthTexture.image.height !== h) {
+      sceneDepthTexture.image.width = w
+      sceneDepthTexture.image.height = h
+      sceneDepthTexture.needsUpdate = true
+    }
+    if (typeof r.copyFramebufferToTexture === 'function') {
+      r.copyFramebufferToTexture(sceneDepthTexture)
+    }
+  }
+
+  function tick(impacts?: readonly BikeImpact[], originXZ?: { x: number; z: number }): void {
     tNode.value = field.time
     if (originXZ) {
       // Snap to integer-meter grid so the mesh doesn't crawl under high-

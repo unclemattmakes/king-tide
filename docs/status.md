@@ -323,8 +323,15 @@ gate posts, cliffside cliff base, future islands), so the water shader
 gained a depth-buffer-driven shoreline foam plus a richer bike-water
 interaction pass.
 
-1. **Shoreline foam (intersection foam).** Reads `viewportDepthTexture()`
-   at each fragment's screen position, converts to view-Z via
+> **Regression test:** drive `?track=foam-test` —
+> [`public/tracks/foam-test.json`](../public/tracks/foam-test.json) is a
+> static demo scene (cylinders / spheres / boxes / pipe / halfpipe at
+> assorted submersion depths) authored specifically to make missing
+> intersection foam impossible to overlook. If you change anything in
+> the foam pass, eyeball this track first.
+
+1. **Shoreline foam (intersection foam).** Reads the opaque-pass scene
+   depth at each fragment's screen position, converts to view-Z via
    `perspectiveDepthToViewZ(near, far)`, and compares to the water's own
    `positionView.z`. When the difference is small (terrain top ~0–1.5m
    below water surface) → foam. Two gates handle edge cases:
@@ -335,6 +342,19 @@ interaction pass.
    Combined with the existing wave/bike foam via `max()` rather than
    addition so gate posts don't get unnaturally over-bright at the
    water-line. Off in classic mode for clean A/B.
+
+   Depth source (load-bearing): the shader does NOT use Three.js's
+   `viewportDepthTexture()` helper. Under WebGPURenderer that helper's
+   `updateBefore` fires at the very start of the render pass — before
+   any opaque has been encoded — so the captured depth buffer is at the
+   clear value (= 1.0 = far plane) and the comparison reads the entire
+   scene as "infinitely far," producing zero foam. Instead the water
+   mesh holds its own `THREE.DepthTexture` and copies the live
+   framebuffer depth into it from `mesh.onBeforeRender`; by the time
+   that callback fires for the (transparent) water object, all opaques
+   have been encoded into the same pass, so the snapshot reflects real
+   post-opaque depth. See `sceneDepthTexture` in
+   [src/engine/render/water.ts](../src/engine/render/water.ts).
 
 2. **Richer bike foam pass.** Two additions on top of the existing hull
    ring + V-wake stripe:
