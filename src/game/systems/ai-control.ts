@@ -4,6 +4,11 @@ import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { quatRotate } from '@/engine/sim/physics/vec'
 import { ControlIntent, ControlIntentStore, RBHandle, RBHandleStore } from '@/game/components'
 import { AIController, AIControllerStore, AITag } from '@/game/components/ai'
+import {
+  curvatureAheadLooped,
+  findClosestIndexLooped,
+  lookaheadIndexLooped,
+} from '@/game/tracks/spline-query'
 import type { Track } from '@/game/tracks/types'
 
 /**
@@ -31,6 +36,8 @@ const CURVATURE_LOOKAHEAD_SECONDS = 1.6
 const CURVATURE_LOOKAHEAD_MIN = 18
 /** Margin: brake when current speed exceeds target speed by this much (m/s). */
 const BRAKE_TRIGGER_MARGIN = 1.5
+/** Index window for the cached closest-point search around lastClosestIndex. */
+const CLOSEST_SEARCH_WINDOW = 8
 export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track): void {
   const eids = query(sim, [AITag, AIController, RBHandle, ControlIntent])
   for (const eid of eids) {
@@ -49,35 +56,19 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
     const speedHoriz = Math.hypot(linvel.x, linvel.z)
 
     const lookDist = Math.max(6, speedHoriz * 0.4)
+    const N = spline.points.length
 
     // 1. Closest spline point — search a window around the cached cursor.
-    const N = spline.points.length
-    let bestIdx = ai.lastClosestIndex
-    let bestDist = Number.POSITIVE_INFINITY
-    const window = 8
-    for (let i = -window; i <= window; i++) {
-      const idx = (ai.lastClosestIndex + i + N) % N
-      const p = spline.points[idx]!
-      const d = (p.x - t.x) ** 2 + (p.z - t.z) ** 2
-      if (d < bestDist) {
-        bestDist = d
-        bestIdx = idx
-      }
-    }
+    const bestIdx = findClosestIndexLooped(
+      spline.points,
+      t.x,
+      t.z,
+      ai.lastClosestIndex,
+      CLOSEST_SEARCH_WINDOW,
+    )
 
     // 2. Lookahead point.
-    let cumulative = 0
-    let lookIdx = (bestIdx + 1) % N
-    for (let i = 0; i < N; i++) {
-      const a = spline.points[(bestIdx + i) % N]!
-      const b = spline.points[(bestIdx + i + 1) % N]!
-      const seg = Math.hypot(b.x - a.x, b.z - a.z)
-      cumulative += seg
-      if (cumulative >= lookDist) {
-        lookIdx = (bestIdx + i + 1) % N
-        break
-      }
-    }
+    const lookIdx = lookaheadIndexLooped(spline.points, bestIdx, lookDist)
     const lookTarget = spline.points[lookIdx]!
     const lineTarget = spline.points[bestIdx]!
     const aheadOfLook = spline.points[(lookIdx + 1) % N]!
@@ -128,38 +119,13 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
     steer = Math.max(-1, Math.min(1, steer))
 
     // 6. Curvature look-ahead. Walk ~1.5s ahead along the spline summing arc
-    // length, then take the heading-change between (here→lookSegStart) and
-    // (lookSegStart→lookSegEnd) as a measure of the upcoming bend. We also
-    // sample a wider window's worth of cumulative bend so a long arc (like
-    // the half-circle curves) registers the same way a sharp single corner
-    // would. The radius implied by total bend over scanned arclength gives
-    // us a target speed via v = sqrt(latAccel * r).
+    // length and total absolute bend; the implied radius gives a target
+    // speed via v = sqrt(latAccel * r).
     const scanDist = Math.max(CURVATURE_LOOKAHEAD_MIN, speedHoriz * CURVATURE_LOOKAHEAD_SECONDS)
-    let scanned = 0
-    let totalBend = 0
-    let prevDx = 0
-    let prevDz = 0
-    let initialized = false
-    for (let i = 0; i < N && scanned < scanDist; i++) {
-      const a = spline.points[(bestIdx + i) % N]!
-      const b = spline.points[(bestIdx + i + 1) % N]!
-      const segDx = b.x - a.x
-      const segDz = b.z - a.z
-      const segLen = Math.hypot(segDx, segDz)
-      if (segLen < 1e-6) continue
-      if (initialized) {
-        const cross = prevDx * segDz - prevDz * segDx
-        const dot = prevDx * segDx + prevDz * segDz
-        totalBend += Math.abs(Math.atan2(cross, dot))
-      }
-      prevDx = segDx
-      prevDz = segDz
-      initialized = true
-      scanned += segLen
-    }
+    const { totalBend, scannedDist } = curvatureAheadLooped(spline.points, bestIdx, scanDist)
     // Implied corner radius: bend (rad) over arclength (m) → curvature (1/m).
     // Cap min radius at 8m so missing data doesn't produce a near-stop target.
-    const curvature = scanned > 0 ? totalBend / scanned : 0
+    const curvature = scannedDist > 0 ? totalBend / scannedDist : 0
     const impliedRadius = curvature > 1e-4 ? Math.max(8, 1 / curvature) : 1e6
     const cornerSpeedCap = Math.sqrt(AI_MAX_LATERAL_ACCEL * impliedRadius)
     const baseTopSpeed = ai.topSpeedFactor * 30 // ~bike topSpeed; a soft target, not a hard cap
