@@ -1,0 +1,331 @@
+/**
+ * Water debug menu — DOM overlay for live-tuning the wave field + water
+ * shader. Mirrors the dev-settings-menu pattern: bind once at boot,
+ * sliders mutate the WaterMesh's debug surface on `input` (every drag
+ * tick) and persist on `change` (drag end).
+ *
+ * The menu writes through `WaterMesh.debug.set*` setters which clamp +
+ * apply each value to the relevant TSL uniform (and, for amplitude
+ * scales, to `field.waves[i].amplitude` so CPU buoyancy stays locked
+ * to what the shader is drawing). Persistence uses localStorage so a
+ * tuning session survives reloads; RESET restores the constructor
+ * defaults captured by the WaterMesh.
+ *
+ * The menu is built in JS rather than declared in HTML — these knobs
+ * are tuning-only and shouldn't bloat the HUD markup. The shell
+ * (`#water-debug` overlay + `#water-debug-toggle` button) is the only
+ * static surface the install function needs.
+ */
+
+import type { WaterDebugDefaults, WaterMesh } from './render/water'
+
+const STORAGE_KEY = 'hoverbike.waterDebug.v1'
+
+type WaterDebugSettings = {
+  steepness: number
+  swellScale: number
+  chopScale: number
+  timeScale: number
+  reflectionStrength: number
+  sunGlow: number
+  roughBase: number
+  roughSparkle: number
+  wireframe: boolean
+}
+
+type SliderDef = {
+  key: Exclude<keyof WaterDebugSettings, 'wireframe'>
+  label: string
+  min: number
+  max: number
+  step: number
+  format: (n: number) => string
+  hint?: string
+}
+
+const SLIDERS: SliderDef[] = [
+  // Wave shape — the load-bearing knobs for "tuning the waves".
+  {
+    key: 'steepness',
+    label: 'Steepness (Q)',
+    min: 0,
+    max: 1.5,
+    step: 0.01,
+    format: (n) => n.toFixed(2),
+    hint: '0 = round bumps · 0.7 = SoT default · >1.3 risks crests folding',
+  },
+  {
+    key: 'swellScale',
+    label: 'Swell amplitude',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: 'Multiplier on long-period swells (waves 0–1). Affects buoyancy.',
+  },
+  {
+    key: 'chopScale',
+    label: 'Chop amplitude',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: 'Multiplier on wind chop (waves 2–5). Affects buoyancy.',
+  },
+  {
+    key: 'timeScale',
+    label: 'Time scale',
+    min: 0,
+    max: 3,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: '0 = freeze waves · 1 = realtime',
+  },
+  // Look — surface response + lighting feel.
+  {
+    key: 'reflectionStrength',
+    label: 'Reflection cap',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    format: (n) => n.toFixed(2),
+    hint: '0 disables planar reflection · 0.85 = v2 default',
+  },
+  {
+    key: 'sunGlow',
+    label: 'Sun glow',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: 'Backlit-crest glow strength',
+  },
+  {
+    key: 'roughBase',
+    label: 'Roughness (base)',
+    min: 0,
+    max: 0.5,
+    step: 0.01,
+    format: (n) => n.toFixed(2),
+    hint: 'Lower = wetter / more specular',
+  },
+  {
+    key: 'roughSparkle',
+    label: 'Roughness (sparkle)',
+    min: 0,
+    max: 0.3,
+    step: 0.01,
+    format: (n) => n.toFixed(2),
+    hint: 'Roughness inside sparkle patches — lower = brighter glints',
+  },
+]
+
+function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
+  return {
+    steepness: d.steepness,
+    swellScale: d.swellScale,
+    chopScale: d.chopScale,
+    timeScale: d.timeScale,
+    reflectionStrength: d.reflectionStrength,
+    sunGlow: d.sunGlow,
+    roughBase: d.roughBase,
+    roughSparkle: d.roughSparkle,
+    wireframe: d.wireframe,
+  }
+}
+
+function loadStored(defaults: WaterDebugDefaults): WaterDebugSettings {
+  const base = defaultsToSettings(defaults)
+  let raw: string | null = null
+  try {
+    raw = window.localStorage.getItem(STORAGE_KEY)
+  } catch {
+    return base
+  }
+  if (!raw) return base
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return base
+  }
+  if (!parsed || typeof parsed !== 'object') return base
+  const p = parsed as Record<string, unknown>
+  for (const k of Object.keys(base) as Array<keyof WaterDebugSettings>) {
+    const v = p[k]
+    if (k === 'wireframe') {
+      if (typeof v === 'boolean') base[k] = v
+    } else if (typeof v === 'number' && Number.isFinite(v)) {
+      ;(base as unknown as Record<string, number>)[k] = v
+    }
+  }
+  return base
+}
+
+function persist(s: WaterDebugSettings): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
+  } catch {
+    // ignore — settings still take effect for this session.
+  }
+}
+
+function applyAll(water: WaterMesh, s: WaterDebugSettings): void {
+  water.debug.setSteepness(s.steepness)
+  water.debug.setSwellScale(s.swellScale)
+  water.debug.setChopScale(s.chopScale)
+  water.debug.setTimeScale(s.timeScale)
+  water.debug.setReflectionStrength(s.reflectionStrength)
+  water.debug.setSunGlow(s.sunGlow)
+  water.debug.setRoughBase(s.roughBase)
+  water.debug.setRoughSparkle(s.roughSparkle)
+  water.debug.setWireframe(s.wireframe)
+}
+
+export type WaterDebugMenu = {
+  open(): void
+  close(): void
+  isOpen(): boolean
+}
+
+/**
+ * Mounts the water debug overlay. On boot, loads any persisted settings
+ * and applies them to the water mesh so the visible state matches the
+ * sliders the user last left. Returns a small handle for programmatic
+ * open/close (matching `installDevSettingsMenu`).
+ */
+export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
+  const overlay = document.getElementById('water-debug')
+  const toggle = document.getElementById('water-debug-toggle')
+  const closeBtn = document.getElementById('wd-close')
+  const resetBtn = document.getElementById('wd-reset')
+  const body = document.getElementById('wd-body')
+  if (!overlay || !toggle || !closeBtn || !resetBtn || !body) {
+    return { open() {}, close() {}, isOpen: () => false }
+  }
+
+  const settings = loadStored(water.debug.defaults)
+  applyAll(water, settings)
+
+  type Bound = { def: SliderDef; input: HTMLInputElement; valEl: HTMLElement }
+  const bound: Bound[] = []
+
+  // Build the sliders from the SLIDERS table.
+  for (const def of SLIDERS) {
+    const row = document.createElement('div')
+    row.className = 'row'
+
+    const label = document.createElement('label')
+    label.htmlFor = `wd-${def.key}`
+    label.textContent = def.label
+    if (def.hint) label.title = def.hint
+    row.appendChild(label)
+
+    const input = document.createElement('input')
+    input.type = 'range'
+    input.id = `wd-${def.key}`
+    input.min = String(def.min)
+    input.max = String(def.max)
+    input.step = String(def.step)
+    input.value = String(settings[def.key])
+    row.appendChild(input)
+
+    const valEl = document.createElement('span')
+    valEl.className = 'val'
+    valEl.textContent = def.format(settings[def.key])
+    row.appendChild(valEl)
+
+    body.appendChild(row)
+    bound.push({ def, input, valEl })
+
+    input.addEventListener('input', () => {
+      const v = Number.parseFloat(input.value)
+      if (!Number.isFinite(v)) return
+      ;(settings as unknown as Record<string, number>)[def.key] = v
+      valEl.textContent = def.format(v)
+      // Apply directly — no need to call applyAll on every drag tick.
+      switch (def.key) {
+        case 'steepness':
+          water.debug.setSteepness(v)
+          break
+        case 'swellScale':
+          water.debug.setSwellScale(v)
+          break
+        case 'chopScale':
+          water.debug.setChopScale(v)
+          break
+        case 'timeScale':
+          water.debug.setTimeScale(v)
+          break
+        case 'reflectionStrength':
+          water.debug.setReflectionStrength(v)
+          break
+        case 'sunGlow':
+          water.debug.setSunGlow(v)
+          break
+        case 'roughBase':
+          water.debug.setRoughBase(v)
+          break
+        case 'roughSparkle':
+          water.debug.setRoughSparkle(v)
+          break
+      }
+    })
+    input.addEventListener('change', () => persist(settings))
+  }
+
+  // Wireframe toggle row.
+  const wireRow = document.createElement('div')
+  wireRow.className = 'row toggle'
+  const wireLabel = document.createElement('label')
+  wireLabel.htmlFor = 'wd-wire'
+  wireLabel.textContent = 'Wireframe'
+  wireLabel.title = 'Render the wave geometry as wireframe — shows the actual displacement'
+  wireRow.appendChild(wireLabel)
+  const wireInput = document.createElement('input')
+  wireInput.type = 'checkbox'
+  wireInput.id = 'wd-wire'
+  wireInput.checked = settings.wireframe
+  wireRow.appendChild(wireInput)
+  body.appendChild(wireRow)
+  wireInput.addEventListener('change', () => {
+    settings.wireframe = wireInput.checked
+    water.debug.setWireframe(wireInput.checked)
+    persist(settings)
+  })
+
+  function syncUI(): void {
+    for (const b of bound) {
+      const v = settings[b.def.key]
+      b.input.value = String(v)
+      b.valEl.textContent = b.def.format(v)
+    }
+    wireInput.checked = settings.wireframe
+  }
+
+  function open(): void {
+    overlay!.classList.add('show')
+  }
+  function close(): void {
+    overlay!.classList.remove('show')
+  }
+
+  toggle.addEventListener('click', open)
+  closeBtn.addEventListener('click', close)
+  resetBtn.addEventListener('click', () => {
+    Object.assign(settings, defaultsToSettings(water.debug.defaults))
+    applyAll(water, settings)
+    syncUI()
+    persist(settings)
+  })
+  // Esc closes when open. Doesn't intercept when other overlays own the key.
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape' && overlay!.classList.contains('show')) close()
+  })
+
+  return {
+    open,
+    close,
+    isOpen: () => overlay!.classList.contains('show'),
+  }
+}

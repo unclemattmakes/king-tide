@@ -95,6 +95,53 @@
       }
       #devsettings-toggle:hover { background: rgba(40,55,80,0.9); }
 
+      /* Water debug button — sits below dev settings button */
+      #water-debug-toggle {
+        position: fixed; top: 72px; right: 8px;
+        background: rgba(20,30,45,0.7); color: #66ddcc;
+        border: 1px solid rgba(110,220,200,0.4); border-radius: 3px;
+        font: bold 11px ui-monospace, monospace; letter-spacing: 1px;
+        padding: 4px 10px; cursor: pointer; user-select: none;
+      }
+      #water-debug-toggle:hover { background: rgba(40,55,80,0.9); }
+      /* Water debug overlay — same layout as devsettings, teal accent */
+      #water-debug {
+        position: fixed; inset: 0; display: none; align-items: center;
+        justify-content: center; z-index: 11;
+        background: rgba(0,0,0,0.75);
+      }
+      #water-debug.show { display: flex; }
+      #water-debug .card {
+        background: rgba(20,30,45,0.95); border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 8px; padding: 24px 32px;
+        font-family: ui-monospace, monospace; color: #eee;
+        width: 540px; max-width: 92vw; max-height: 90vh; overflow: auto;
+      }
+      #water-debug h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: 3px; color: #66ddcc; }
+      #water-debug .sub { font-size: 11px; opacity: 0.7; margin-bottom: 18px; }
+      #water-debug .row {
+        display: grid; grid-template-columns: 180px 1fr 70px;
+        gap: 10px; align-items: center;
+        padding: 5px 0; font-size: 12px;
+      }
+      #water-debug .row label { opacity: 0.85; }
+      #water-debug .row input[type="range"] { width: 100%; accent-color: #66ddcc; }
+      #water-debug .row .val { font-variant-numeric: tabular-nums; opacity: 0.8; text-align: right; }
+      #water-debug .row.toggle { grid-template-columns: 180px 1fr; }
+      #water-debug .row.toggle input[type="checkbox"] { accent-color: #66ddcc; transform: scale(1.2); }
+      #water-debug .actions { margin-top: 22px; display: flex; gap: 10px; justify-content: flex-end; }
+      #water-debug button.action {
+        background: rgba(110,220,200,0.16); color: #66ddcc;
+        border: 1px solid rgba(110,220,200,0.5); border-radius: 3px;
+        font: bold 12px ui-monospace, monospace; letter-spacing: 1px;
+        padding: 8px 16px; cursor: pointer;
+      }
+      #water-debug button.action.secondary {
+        background: rgba(255,255,255,0.06); color: #ccc;
+        border-color: rgba(255,255,255,0.2);
+      }
+      #water-debug button.action:hover { filter: brightness(1.2); }
+
       /* Dev settings overlay */
       #devsettings {
         position: fixed; inset: 0; display: none; align-items: center;
@@ -165,6 +212,18 @@
     </div>
     <button id="garage-toggle">GARAGE<span id="garage-best"></span></button>
     <button id="devsettings-toggle" title="Tune controller + camera sensitivity">DEV SETTINGS</button>
+    <button id="water-debug-toggle" title="Tune wave + water shader values live">WATER</button>
+    <div id="water-debug">
+      <div class="card">
+        <h1>WATER DEBUG</h1>
+        <div class="sub">Live-tune the wave field + water shader. Saved to this browser.</div>
+        <div id="wd-body"></div>
+        <div class="actions">
+          <button class="action secondary" id="wd-reset">RESET</button>
+          <button class="action" id="wd-close">DONE</button>
+        </div>
+      </div>
+    </div>
     <div id="devsettings">
       <div class="card">
         <h1>DEV SETTINGS</h1>
