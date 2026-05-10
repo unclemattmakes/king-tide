@@ -66,9 +66,11 @@ import {
 const FOAM_MAX_RATE = 80 // particles/sec at full strength (per bike)
 const FOAM_SPEED_FULL = 25
 const FOAM_MIN_SPEED = 3
-// V-wake half-angle. The Kelvin wake is ~19° in nature; a touch wider
-// reads more visible at game scale and matches the water shader wake.
-const FOAM_V_HALF_ANGLE = 0.55 // ~31°
+// Wake spread half-arc. Particles eject in a random direction within
+// (back ± halfArc) so the wake reads as a turbulent fan plume rather
+// than two crisp diagonals. Mirrors how dust randomises its radial
+// angle for a full-spread look. ~63° gives a wide V-blossom.
+const FOAM_V_HALF_ANGLE = 1.1
 
 // Sparks fire only when the bike is genuinely scraping ground — not
 // while hovering at normal height. Threshold sits well below the bike's
@@ -549,16 +551,19 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
       }
       lastGrounded.set(eid, hover.isGrounded)
 
-      // Foam — V-shaped Kelvin wake springing from the *water surface*
+      // Foam — turbulent spray plume springing from the *water surface*
       // behind the bike's stern, not from the bike body. Spawning at
       // water level (transform.y − groundDistance) makes the wake read
       // as the surface being disturbed by the hull, not as exhaust
       // shooting from the stern. Mirrors how dust spawns at ground
       // level under the bike.
       //
-      // Each spawn picks a side (alternating L/R) and ejects along
-      // (back · cos θ ± right · sin θ), matching the V-shape the water
-      // displacement shader carves into the surface.
+      // Each spawn picks a random angle within the backward arc
+      // (±FOAM_V_HALF_ANGLE) and a random outward speed. The result is
+      // a fanned-out blossom matching the hover-wash dust pattern,
+      // rather than two crisp parallel V lines. Spawn position is
+      // jittered within a small disc around the stern so the trail
+      // doesn't read as a single source point.
       if (hover.isGrounded && hover.surfaceIsWater && speed > FOAM_MIN_SPEED) {
         const rate =
           Math.min(1, (speed - FOAM_MIN_SPEED) / (FOAM_SPEED_FULL - FOAM_MIN_SPEED)) *
@@ -574,25 +579,35 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
           sternWorld.y = transform.y - hover.groundDistance + 0.05
           back.set(0, 0, -1).applyQuaternion(tmpQuat)
           right.set(1, 0, 0).applyQuaternion(tmpQuat)
-          const sinH = Math.sin(FOAM_V_HALF_ANGLE)
-          const cosH = Math.cos(FOAM_V_HALF_ANGLE)
-          // Wake speed scales with bike speed so the V opens proportionally.
-          const wakeSpeed = 1.5 + speed * 0.07
+          const baseWakeSpeed = 1.5 + speed * 0.07
           for (let k = 0; k < n; k++) {
-            const side = (k & 1) === 0 ? -1 : 1
-            const vx = back.x * cosH * wakeSpeed + right.x * sinH * side * wakeSpeed
-            const vz = back.z * cosH * wakeSpeed + right.z * sinH * side * wakeSpeed
+            // Random angle in [-halfArc, +halfArc] from straight-back.
+            const ang = (Math.random() * 2 - 1) * FOAM_V_HALF_ANGLE
+            const cosA = Math.cos(ang)
+            const sinA = Math.sin(ang)
+            const dx = back.x * cosA + right.x * sinA
+            const dz = back.z * cosA + right.z * sinA
+            // Per-particle speed jitter so the fan has depth instead of
+            // a hard outer ring.
+            const wakeSpeed = baseWakeSpeed * (0.5 + Math.random() * 0.9)
+            // Spawn-point jitter within a small disc around the stern,
+            // so the source reads as a chunk of disturbed water rather
+            // than a single emission point.
+            const spawnAng = Math.random() * Math.PI * 2
+            const spawnRadius = Math.random() * 0.5
+            const sxOff = Math.cos(spawnAng) * spawnRadius
+            const szOff = Math.sin(spawnAng) * spawnRadius
             // Strong upward spray reads as a real water plume.
-            const vy = 1.6 + Math.random() * 0.6
+            const vy = 1.4 + Math.random() * 0.9
             emit(
               foam,
-              sternWorld.x,
+              sternWorld.x + sxOff,
               sternWorld.y,
-              sternWorld.z,
-              vx,
+              sternWorld.z + szOff,
+              dx * wakeSpeed,
               vy,
-              vz,
-              0.4, // small spherical jitter on top of the V direction
+              dz * wakeSpeed,
+              0.5, // spherical jitter on top of the angled vector
               0.6,
               1.0,
               foam.defaultSize * (0.7 + Math.random() * 0.6),
