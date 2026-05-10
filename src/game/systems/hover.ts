@@ -247,16 +247,30 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // 0.4 means stationary lean is 40% of base limit (~16°);
     // LEAN_SPEED_FULL+ is full (~40°).
     const LEAN_BASE = 0.4
-    // Pitch smoothing rates (exponential approach, units 1/s). Active = stick
-    // is being held; release = stick at neutral. Release ≈ active/2 so
-    // letting off the stick feels heavy — the bike retains its attitude
-    // rather than snapping back to flat. Tuneable; the earlier behaviour
-    // was effectively rate=∞ (snap each fixed step). Slowed from the
-    // original (12, 3) — the snappier rates read as twitchy on the stick
-    // when combined with the closer camera.
-    const PITCH_RATE_ACTIVE = 4 // 95% of target in ~750ms
-    const PITCH_RATE_RELEASE = 2 // 95% of target in ~1.5s
+    // Pitch smoothing rates (exponential approach, units 1/s).
+    //
+    // Two independent smoothers, applied to two independent components of
+    // the bike's pitch:
+    //
+    //   1. SURFACE pitch (wave/ramp following): always tracked at the fast
+    //      rate. This is what makes the bike visibly heave on swells and
+    //      the AI's chassis read as alive on the water — without a separate
+    //      rate, the slow input-release rate (below) would dampen the
+    //      surface signal too on any bike that wasn't actively pitching,
+    //      i.e. all the AI bikes (intent.pitch == 0 every tick).
+    //   2. INPUT pitch bias (player Q/E or right-stick-Y): held in
+    //      `HoverState.inputPitch` and chased toward the player's target
+    //      with active/release rates. Release ≈ active/2 so letting off
+    //      the stick feels heavy — the bike retains the rider's commanded
+    //      attitude rather than snapping back through the surface signal.
+    //
+    // Final target pitch = surfacePitchTarget + storedInputPitch, lerped
+    // toward by currentPitch at the SURFACE rate.
+    const PITCH_RATE_SURFACE = 4 // 95% of surface target in ~750ms — applies to all bikes
+    const PITCH_RATE_INPUT_ACTIVE = 4 // stick held: chase target at the same rate as surface
+    const PITCH_RATE_INPUT_RELEASE = 2 // stick released: ~1.5s decay back to neutral
     const pitchMul = probe.isWater ? 1.0 : 0.7
+    let inputPitchNow = HoverStateStore.get(eid)?.inputPitch ?? 0
     {
       const speedNow = Math.hypot(linvel.x, linvel.z)
       const speedFrac = Math.min(speedNow / LEAN_SPEED_FULL, 1)
@@ -270,7 +284,16 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       // banks INTO the perceived turn; intent.pitch=+1 dives (nose down,
       // negative pitch angle in our YXZ convention).
       const targetRoll = surfaceRollTarget + intent.steer * ROLL_LEAN_LIMIT * leanScale
-      const targetPitch = surfacePitchTarget + -intent.pitch * PITCH_LIMIT * pitchMul
+
+      // Smooth the player's pitch INPUT bias separately so its slow release
+      // doesn't drag the surface tracking with it.
+      const inputPitchTarget = -intent.pitch * PITCH_LIMIT * pitchMul
+      const pitchInputActive = Math.abs(intent.pitch) > 0.05
+      const inputRate = pitchInputActive ? PITCH_RATE_INPUT_ACTIVE : PITCH_RATE_INPUT_RELEASE
+      const inputAlpha = 1 - Math.exp(-inputRate * dt)
+      inputPitchNow = inputPitchNow + (inputPitchTarget - inputPitchNow) * inputAlpha
+
+      const targetPitch = surfacePitchTarget + inputPitchNow
 
       const q0 = rb.rotation()
       const r02 = 2 * (q0.x * q0.z + q0.y * q0.w)
@@ -281,13 +304,11 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       const currentRoll = Math.atan2(r10, r11)
       const currentPitch = Math.asin(Math.max(-1, Math.min(1, -r12)))
 
-      // Smooth pitch toward target with active/release rates. Roll snaps
-      // (steer-driven lean is meant to read instant). The lerp uses the
-      // exponential-time-constant formulation `1 − exp(−rate·dt)` so the
-      // motion is frame-rate-independent and stable at any rate.
-      const pitchInputActive = Math.abs(intent.pitch) > 0.05
-      const pitchRate = pitchInputActive ? PITCH_RATE_ACTIVE : PITCH_RATE_RELEASE
-      const pitchAlpha = 1 - Math.exp(-pitchRate * dt)
+      // Lerp toward target at the surface rate (fast, identical for all
+      // bikes). The slow input release lives inside `inputPitchNow`, not
+      // here — so AI bikes (intent.pitch == 0 always) get full-rate wave
+      // tracking instead of the previous slow path.
+      const pitchAlpha = 1 - Math.exp(-PITCH_RATE_SURFACE * dt)
       const newPitch = currentPitch + (targetPitch - currentPitch) * pitchAlpha
       if (Math.abs(currentRoll - targetRoll) > 1e-5 || Math.abs(currentPitch - newPitch) > 1e-5) {
         const yawAngle = Math.atan2(r02, r22)
@@ -400,6 +421,7 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       groundDistance,
       isGrounded,
       surfaceIsWater: probe.hasSurface && probe.isWater,
+      inputPitch: inputPitchNow,
     })
 
     if (!isGrounded) {
