@@ -40,6 +40,7 @@ import { createPhysicsDebugRenderer } from './engine/render/physics-debug'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
 import { createRaceHud } from './engine/render/race-hud'
+import { installLobbyOverlay } from './engine/render/lobby-overlay'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
 import { createScene } from './engine/render/scene'
@@ -486,6 +487,62 @@ async function boot() {
     return remoteEids.get(record.ownerPeerId) ?? null
   }
 
+  // M10.12 — lobby overlay. Created lazily when a room exists. Shows
+  // peer list + ready indicators + a big "READY" / "NOT READY" button.
+  // Auto-hides once `raceHud.armCountdown()` fires (all peers ready, or
+  // a `start-race` arrives from the server, or we joined an already-
+  // running race via the `raceStarted` flag in `hello`). Declared
+  // BEFORE the net config below so the `onConnected` callback can
+  // safely reference `lobby` / `refreshLobbyView` / `armRace` etc.
+  const lobby = roomId !== null ? installLobbyOverlay({ roomId }) : null
+  let localReady = false
+  let raceArmed = false
+  function armRace(): void {
+    if (raceArmed) return
+    raceArmed = true
+    // `raceHud` is declared further below as a `const`. armRace is only
+    // ever called from network callbacks (which fire after boot's
+    // synchronous body completes) or from the keydown handler (which
+    // fires after first frame), so the binding is initialised by then.
+    raceHud.armCountdown()
+    lobby?.hide()
+  }
+  function tryArmFromLobby(): void {
+    if (raceArmed) return
+    if (!net?.ready) return
+    // All visible peers (us + remotes) must be ready, and there must
+    // be at least one (so a peer alone in the room can still solo).
+    const ready = net.latestPeerReady
+    if (ready.size === 0) return
+    for (const v of ready.values()) if (!v) return
+    armRace()
+    // Tell the server so any future late-joiners arm immediately on
+    // hello, AND so other peers whose local view hasn't yet observed
+    // all-ready (network reorder) catch up.
+    net.sendStartRace()
+  }
+  function toggleLocalReady(): void {
+    if (raceArmed) return
+    if (!net) return
+    localReady = !localReady
+    net.sendReady(localReady)
+    refreshLobbyView()
+    tryArmFromLobby()
+  }
+  function refreshLobbyView(): void {
+    if (!lobby || !net) return
+    const myId = net.peerId
+    const peers: { peerId: number; ready: boolean; isYou: boolean }[] = []
+    for (const [pid, r] of net.latestPeerReady) {
+      peers.push({ peerId: pid, ready: r, isYou: pid === myId })
+    }
+    peers.sort((a, b) => a.peerId - b.peerId)
+    lobby.render({ peers, localReady, connecting: !net.ready })
+  }
+  if (lobby) {
+    ;(lobby as unknown as { onToggle: () => void }).onToggle = toggleLocalReady
+  }
+
   if (roomId) {
     renderRoomChip()
     net = createNetRoom({
@@ -517,9 +574,9 @@ async function boot() {
         }
         applySnapshot(sim, phys, snap, snapshotLookup)
       },
-      onConnected: (peerId, others) => {
+      onConnected: (peerId, others, raceStarted) => {
         console.log(
-          `[net] joined room "${roomId}" as peer ${peerId}, others: [${others.join(', ')}]`,
+          `[net] joined room "${roomId}" as peer ${peerId}, others: [${others.join(', ')}], raceStarted: ${raceStarted}`,
         )
         // The local player bike was spawned with the placeholder slot 0
         // (correct for single-player). Now that the relay has assigned our
@@ -532,18 +589,35 @@ async function boot() {
         for (const p of others) spawnRemoteBike(p)
         applyHostRole(isHostFor(peerId, others))
         renderRoomChip()
+        // M10.12 — if joining a race already in progress, arm
+        // immediately. Otherwise the lobby UI is now valid; render it.
+        if (raceStarted) armRace()
+        else refreshLobbyView()
       },
       onPeerJoined: (peerId) => {
         console.log(`[net] peer ${peerId} joined`)
         spawnRemoteBike(peerId)
         if (net) applyHostRole(isHostFor(net.peerId, net.remotePeers))
         renderRoomChip()
+        refreshLobbyView()
       },
       onPeerLeft: (peerId) => {
         console.log(`[net] peer ${peerId} left`)
         despawnRemoteBike(peerId)
         if (net) applyHostRole(isHostFor(net.peerId, net.remotePeers))
         renderRoomChip()
+        refreshLobbyView()
+        // Their departure may have flipped "all ready" true — try.
+        tryArmFromLobby()
+      },
+      onPeerReady: (peerId, ready) => {
+        console.log(`[net] peer ${peerId} ready: ${ready}`)
+        refreshLobbyView()
+        tryArmFromLobby()
+      },
+      onStartRace: () => {
+        console.log('[net] start-race received')
+        armRace()
       },
       onRoomFull: () => {
         console.warn(`[net] room "${roomId}" is full`)
@@ -554,6 +628,9 @@ async function boot() {
         }
       },
     })
+    // Initial lobby render (pre-connect placeholder). The chip + overlay
+    // will update again when `hello` arrives.
+    refreshLobbyView()
   }
 
   // Mark the initial "next" gate (cp 0). After the first frame the race
@@ -567,6 +644,9 @@ async function boot() {
       if (n === 0) audio.lapCompleted()
       else audio.gateCleared()
     },
+    // M10.12 lobby — hold the countdown until everyone in the room has
+    // ready'd up. Single-player + e2e (no `?room=`) keep auto-start.
+    deferStart: roomId !== null,
   })
 
   const raceTick = createRaceSystem(track, {
@@ -807,6 +887,15 @@ async function boot() {
   // Keys: R to restart after finish; T (or F1) to toggle auto-play;
   // F2 to toggle collision debug overlay; Backspace to respawn.
   window.addEventListener('keydown', (e) => {
+    // M10.12 lobby — Enter toggles local ready while the lobby is
+    // visible. Captured before other shortcuts so it doesn't conflict
+    // with menu/finish-screen handlers that might also listen for
+    // Enter in the future.
+    if (lobby?.isShown() && (e.code === 'Enter' || e.code === 'NumpadEnter')) {
+      toggleLocalReady()
+      e.preventDefault()
+      return
+    }
     if (e.code === 'KeyR' && finishShown) {
       window.location.reload()
     } else if (e.code === 'KeyT' || e.code === 'F1') {

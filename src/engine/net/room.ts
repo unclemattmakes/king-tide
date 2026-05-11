@@ -24,7 +24,7 @@ import {
   INPUT_FRAME_WIRE_BYTES,
   type InputFrame,
 } from './input-frame'
-import type { ServerControlMessage } from './protocol'
+import type { ClientControlMessage, ServerControlMessage } from './protocol'
 import {
   decodeTransformSnapshotFrom,
   MESSAGE_TAG_INPUT_FRAME,
@@ -47,10 +47,21 @@ export type NetRoomConfig = {
   onPeerJoined?: (peerId: number) => void
   /** Called when another peer leaves. */
   onPeerLeft?: (peerId: number) => void
-  /** Called when the server assigns us our slot. */
-  onConnected?: (myPeerId: number, otherPeers: readonly number[]) => void
+  /** Called when the server assigns us our slot. `raceStarted` is true
+   *  iff we're joining a room whose race has already begun (M10.12);
+   *  the caller arms the countdown immediately to skip the lobby. */
+  onConnected?: (myPeerId: number, otherPeers: readonly number[], raceStarted: boolean) => void
   /** Called when the server reports the room is full. */
   onRoomFull?: () => void
+  /** M10.12 lobby — called when any remote peer toggles their ready
+   *  state. Local toggles are NOT echoed; `latestPeerReady` is updated
+   *  locally on `sendReady` to keep the source of truth in one map. */
+  onPeerReady?: (peerId: number, ready: boolean) => void
+  /** M10.12 lobby — called when the server broadcasts that the race
+   *  has started (some peer's local view found everyone ready and
+   *  signalled `start-race`). Idempotent on the caller side — receiving
+   *  this is the cue to arm the countdown if not already armed. */
+  onStartRace?: () => void
 }
 
 export type NetRoom = {
@@ -78,6 +89,21 @@ export type NetRoom = {
   /** Total snapshots received since connect. Useful as an e2e wait signal
    *  ("wait until tab 2 has applied at least one snapshot from tab 1"). */
   readonly snapshotsReceived: number
+  /** M10.12 lobby — broadcast our ready state. Updates `latestPeerReady`
+   *  locally too so the caller doesn't need a second source of truth.
+   *  No-ops until ready (frames are dropped, but we still update local
+   *  state so the lobby UI behaves correctly during the brief
+   *  pre-connect window). */
+  sendReady(ready: boolean): void
+  /** M10.12 lobby — broadcast that all peers (per our local view) are
+   *  ready and the race should begin. Server sets the sticky
+   *  `raceStarted` bit so late joiners skip the lobby. Idempotent. */
+  sendStartRace(): void
+  /** Live ready-state per peer slot, including the local peer (keyed by
+   *  `peerId`). Pre-connect: empty. On disconnect: cleared. Cleared
+   *  entries for departed peers prevent a stale "ready" from a previous
+   *  occupant of a recycled slot. */
+  readonly latestPeerReady: ReadonlyMap<number, boolean>
   close(): void
 }
 
@@ -110,6 +136,10 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
   let socketOpen = false
   let snapshotsReceived = 0
   const remotePeers = new Set<number>()
+  // M10.12 lobby — peer slot → ready boolean. Includes self once
+  // sendReady is called. New peers are added with `false` on
+  // peer-joined / hello; cleared on peer-left + on disconnect.
+  const latestPeerReady = new Map<number, boolean>()
   // Last-write-wins intent buffer per remote peer slot. Sized at most
   // MAX_PEERS_PER_ROOM - 1 entries. Cleared on disconnect; entries
   // pruned on peer-left.
@@ -129,6 +159,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
     myPeerId = -1
     remotePeers.clear()
     latestPeerIntents.clear()
+    latestPeerReady.clear()
     snapshotsReceived = 0
   })
 
@@ -141,11 +172,21 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
         case 'hello':
           myPeerId = msg.peerId
           remotePeers.clear()
-          for (const p of msg.otherPeers) remotePeers.add(p)
-          cfg.onConnected?.(msg.peerId, [...remotePeers])
+          latestPeerReady.clear()
+          // Seed every visible slot (us + others) as not-ready. Local
+          // ready state is overwritten the first time `sendReady` is
+          // called.
+          latestPeerReady.set(msg.peerId, false)
+          for (const p of msg.otherPeers) {
+            remotePeers.add(p)
+            latestPeerReady.set(p, false)
+          }
+          cfg.onConnected?.(msg.peerId, [...remotePeers], msg.raceStarted)
+          if (msg.raceStarted) cfg.onStartRace?.()
           break
         case 'peer-joined':
           remotePeers.add(msg.peerId)
+          latestPeerReady.set(msg.peerId, false)
           cfg.onPeerJoined?.(msg.peerId)
           break
         case 'peer-left':
@@ -153,7 +194,20 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
           // Drop the departed peer's buffered intent so a future room
           // member assigned the same slot doesn't inherit stale controls.
           latestPeerIntents.delete(msg.peerId)
+          latestPeerReady.delete(msg.peerId)
           cfg.onPeerLeft?.(msg.peerId)
+          break
+        case 'ready':
+          // Defensive: drop self-echoes (server shouldn't send these,
+          // but the local sendReady path already updates our own slot
+          // so a duplicate is harmless either way).
+          if (msg.peerId !== myPeerId) {
+            latestPeerReady.set(msg.peerId, msg.ready)
+            cfg.onPeerReady?.(msg.peerId, msg.ready)
+          }
+          break
+        case 'start-race':
+          cfg.onStartRace?.()
           break
         case 'room-full':
           cfg.onRoomFull?.()
@@ -226,6 +280,23 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
       // after this returns — so we own a copy regardless.
       const copy = buf.slice(0).buffer
       socket.send(copy)
+    },
+    sendReady(ready: boolean) {
+      // Always update local state (the lobby UI reads from this map),
+      // even if the socket isn't ready — we'll re-broadcast on connect
+      // if the local state diverged in the meantime.
+      if (myPeerId >= 0) latestPeerReady.set(myPeerId, ready)
+      if (!socketOpen || myPeerId < 0) return
+      const msg: ClientControlMessage = { type: 'ready', ready }
+      socket.send(JSON.stringify(msg))
+    },
+    sendStartRace() {
+      if (!socketOpen || myPeerId < 0) return
+      const msg: ClientControlMessage = { type: 'start-race' }
+      socket.send(JSON.stringify(msg))
+    },
+    get latestPeerReady() {
+      return latestPeerReady
     },
     get snapshotsReceived() {
       return snapshotsReceived
