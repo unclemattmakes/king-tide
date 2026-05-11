@@ -4,6 +4,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import type { Vec3 } from '@/engine/sim/physics/vec'
 import type { PropManifestEntry } from '@/game/assets/manifest'
 import { nearestT, pointAtT, sampleCatmullRom, tangentAtT } from '@/game/tracks/catmull-rom'
+import { DEFAULT_GATE_SPACING_M, resampleByArcLength } from '@/game/tracks/gate-placement'
 import { trackToJson } from '@/game/tracks/json-loader'
 import type { Checkpoint, PropType, Track } from '@/game/tracks/types'
 import {
@@ -647,6 +648,43 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       },
       onNew: () => {
         promptNewTrackFlow({ currentTrackId: draft.id, confirmDiscard })
+      },
+      onAutoPlaceGates: () => {
+        const main = draft.aiSplines.find((s) => s.id === 'main')
+        if (!main || main.points.length < 2) {
+          panelHandle.setStatus('Auto-place: no main spline available', '#f88')
+          return
+        }
+        const spacing =
+          typeof draft.gateSpacing === 'number' && draft.gateSpacing > 0
+            ? draft.gateSpacing
+            : DEFAULT_GATE_SPACING_M
+        const placements = resampleByArcLength(main.points, spacing)
+        if (placements.length === 0) {
+          panelHandle.setStatus('Auto-place: spline has zero length', '#f88')
+          return
+        }
+        if (!confirmDiscard('Replace gates')) return
+        pushUndoSnapshot()
+        // Preserve halfWidth / height from the existing first gate if present;
+        // fall back to the project's canonical gate dimensions otherwise.
+        const inheritedHalfWidth = draft.checkpoints[0]?.halfWidth ?? 14
+        const inheritedHeight = draft.checkpoints[0]?.height ?? 6
+        draft.checkpoints = placements.map((p, i) => ({
+          index: i,
+          position: { x: p.position.x, y: 1.5, z: p.position.z },
+          rotation: { x: 0, y: 0, z: 0, w: 1 },
+          halfWidth: inheritedHalfWidth,
+          height: inheritedHeight,
+          splineT: p.t,
+        }))
+        sel = null
+        rebuildHelpers()
+        panelHandle.render()
+        panelHandle.setStatus(
+          `Placed ${placements.length} gates at ${spacing.toFixed(0)}m`,
+          '#7d8',
+        )
       },
       selSupportsMode,
     },

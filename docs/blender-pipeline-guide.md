@@ -333,3 +333,60 @@ safety floor and water surface will catch them.
   — procedural reference layout. Each piece of code maps 1:1 to an
   object you'd author in Blender (the file's docstring is the mapping
   table).
+
+## Scattered props (Item 4)
+
+The export pipeline now emits `EXT_mesh_gpu_instancing` for Geometry
+Nodes scatter output. A track with 800 palms costs roughly what 1 palm
+costs in mesh memory and draw-call count, plus a per-instance transform
+buffer.
+
+### Authoring convention
+
+1. Put a top-level **Empty** in the scene named `scatter_<zone>` (e.g.
+   `scatter_palms`, `scatter_rocks`). The instance output of the GN
+   tree must be a child of this Empty. Blender's exporter restricts
+   `EXT_mesh_gpu_instancing` to children of an Empty, so the parent
+   matters.
+2. Attach a **Geometry Nodes** modifier on a mesh child of that Empty.
+   The graph's final output uses `Instance on Points` (with a
+   prop-collection input) or `Realize Instances` *off* — instances
+   must remain as instances all the way to export, not be flattened
+   into mesh data.
+3. Source props: link a Collection from `tracks-src/props-library.blend`
+   (per Item 3) or any local collection. Drop it in via Geometry Nodes'
+   `Collection Info` node in **Instance** mode.
+
+The four export sites (`tools/export_track.py`,
+`tools/blender/common.py`, and the two Hoverbike-addon operators) all
+pass `export_gpu_instances=True` and `export_gn_mesh=True`. No
+per-track flag toggle needed.
+
+### Runtime behaviour
+
+- **Render side**: Three.js's stock `GLTFLoader` recognises the
+  extension and produces `THREE.InstancedMesh` nodes automatically.
+  Castshadow / receiveShadow / frustum culling all work natively.
+- **Collider side**: scattered instances are **render-only by
+  default**. `attachTrackColliders` in `src/engine/render/glb-track.ts`
+  skips `InstancedMesh` so the prototype's transform isn't accidentally
+  registered as a single misplaced collider. The intended pattern: if
+  a designer needs collidable scatter, the asset's `kind` extra opts
+  in (currently a TODO — collidable scatter isn't wired yet; raise it
+  in a Linear ticket when first needed).
+
+### Sanity check
+
+After an export, the produced `.glb` should contain
+`"extensionsUsed": ["EXT_mesh_gpu_instancing", ...]` in its JSON chunk.
+The `parseGlbJson` helper used by `glb-loader.ts` reads that field
+directly. Quick verification from a unit test:
+
+```bash
+node -e 'import("./tools/blender/inspect_glb.mjs").then((m) =>
+  m.inspect("public/assets/tracks/<id>.glb"))'
+```
+
+If the extension isn't emitted, the most common cause is the scattered
+output sitting outside an Empty parent — re-parent and re-export.
+

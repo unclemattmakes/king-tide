@@ -26,6 +26,12 @@ export type Track = {
   aiSplines: AISpline[]
   /** Boost pads — speed-up volumes the bike triggers by driving over. */
   boostPads: BoostPad[]
+  /** Target gate spacing in metres, used by the editor's "Auto-place gates
+   *  from spline" action and Blender's gate-preview overlay. The actual
+   *  count is rounded to fit the closed-loop arc length cleanly; see
+   *  `gate-placement.ts` for the algorithm. Defaults to
+   *  `DEFAULT_GATE_SPACING_M` when absent from the JSON. */
+  gateSpacing?: number
   /** Editor-authored static props (boxes, pipes, half-pipes, etc).
    *  Rendered + collidable at runtime. Empty for procedural tracks. */
   props: Prop[]

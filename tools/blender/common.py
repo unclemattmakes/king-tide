@@ -164,6 +164,8 @@ def export_glb(
         use_active_collection=False,
         export_cameras=False,
         export_lights=False,
+        export_gpu_instances=True,
+        export_gn_mesh=True,
         export_animations=export_animations,
         export_skins=export_skins,
     )

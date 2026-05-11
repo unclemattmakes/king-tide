@@ -19,6 +19,7 @@ import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { type BikeVariant, resolveBikeVariant } from '@/game/bikes/variants'
 import { createBike } from '@/game/entities/bike'
 import type { Track } from '@/game/tracks/types'
+import { AI_GRID_SLOTS } from './grid-offsets'
 
 /** Maximum number of AI opponents in a live race. The grid below has
  *  four slots; bumping this also requires extending `aiSlots`. */
@@ -27,13 +28,12 @@ export const NUM_AI = 4
 /** Player-relative grid offsets for AI spawn positions. The straight
  *  is 28m wide (gate halfWidth × 2); AI bikes spread across ±6m and
  *  hold those lateral offsets via the spline `lineOffset` knob so they
- *  don't all converge on the same racing line. */
-const AI_SLOTS = [
-  { dx: -6, dz: -5, off: -6 },
-  { dx: -2, dz: -10, off: -2 },
-  { dx: 2, dz: -10, off: 2 },
-  { dx: 6, dz: -5, off: 6 },
-] as const
+ *  don't all converge on the same racing line.
+ *
+ *  Source of truth: `specs/grid-offsets.json`. The Blender addon's
+ *  racer-at-start preview reads the same file, so the in-Blender
+ *  preview matches the actual spawn layout. */
+const AI_SLOTS = AI_GRID_SLOTS.map((s) => ({ dx: s.dx, dz: s.dz, off: s.lineOffset }))
 
 export type SpawnBikesResult = {
   /** Always set. In replay mode this is the recording's slot-0 bike. */
