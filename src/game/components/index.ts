@@ -8,6 +8,18 @@ import { createStore } from '@/engine/sim/ecs/store'
 export const PlayerTag = { name: 'PlayerTag' as const }
 export const BikeTag = { name: 'BikeTag' as const }
 
+// --- PeerControlled: a bike whose ControlIntent comes from a network peer
+// (or from the local input on slot 0). Distinct from PlayerTag so render /
+// HUD / camera code can still ask "which bike is the LOCAL human's?" via
+// PlayerTag while the sim layer dispatches inputs per peer slot. M10.5.
+export const PeerControlled = { name: 'PeerControlled' as const }
+export type PeerControlledData = {
+  /** Network peer slot 0..MAX_PEERS_PER_ROOM-1. Slot 0 is the local peer
+   *  in single-player; in multiplayer it's the room host. */
+  peerId: number
+}
+export const PeerControlledStore = createStore<PeerControlledData>('PeerControlled')
+
 // --- Data components: tag + store pair ---
 
 export const Transform = { name: 'Transform' as const }

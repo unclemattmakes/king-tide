@@ -87,6 +87,9 @@ export function spawnBikes(opts: {
       position: startPos,
       yaw: track.start.yaw,
       isPlayer: true,
+      // Slot 0 is the local human in single-player AND the room host's
+      // own bike in multiplayer. Future remote-peer bikes get slot 1+.
+      peerId: 0,
       asRacer: true,
       stats: {
         ...playerVariant.stats,

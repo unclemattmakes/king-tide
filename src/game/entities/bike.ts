@@ -13,6 +13,8 @@ import {
   ControlIntentStore,
   HoverState,
   HoverStateStore,
+  PeerControlled,
+  PeerControlledStore,
   PlayerTag,
   RBHandle,
   RBHandleStore,
@@ -28,6 +30,11 @@ export type CreateBikeOpts = {
   /** Yaw in radians (0 = facing +Z). */
   yaw?: number
   isPlayer?: boolean
+  /** If set, the bike is controlled by network peer N (M10.5+). Single-
+   *  player local bike gets `peerId: 0`. AI-driven bikes do NOT receive
+   *  this — their ControlIntent is overwritten each tick by
+   *  `aiControlSystem`. */
+  peerId?: number
   /** If true, attach a Racer component for race tracking. */
   asRacer?: boolean
   /** If set, attaches AI components and follows the named spline. */
@@ -105,6 +112,10 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
   PickupSlotStore.set(eid, { held: null })
 
   if (opts.isPlayer) addComponent(sim, eid, PlayerTag)
+  if (opts.peerId !== undefined) {
+    addComponent(sim, eid, PeerControlled)
+    PeerControlledStore.set(eid, { peerId: opts.peerId })
+  }
   if (opts.ai) {
     addComponent(sim, eid, AITag)
     addComponent(sim, eid, AIController)
