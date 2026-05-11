@@ -52,7 +52,7 @@ export function pickupSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): voi
       if (remain <= 0) {
         spawn.active = true
         spawn.respawnIn = 0
-        spawn.nextType = pickRandomPickupType()
+        spawn.nextType = pickRandomPickupType(sim.rng)
       } else {
         spawn.respawnIn = remain
       }

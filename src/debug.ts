@@ -1,11 +1,14 @@
 import { addComponent, query } from 'bitecs'
-import { type Intent, snapshotGamepads } from './engine/input'
+import { emptyIntent, type Intent, snapshotGamepads } from './engine/input'
 import type { RenderBackend } from './engine/render/renderer'
 import type { SimWorld } from './engine/sim/ecs/world'
 import type { PhysicsWorld } from './engine/sim/physics/rapier'
+import { captureSnapshot, snapshotToString } from './engine/sim/snapshot'
+import type { WaveFieldState } from './engine/sim/water/wave-field'
 import { BikeTag, ControlIntentStore, RBHandleStore } from './game/components'
 import { MineTag, MissileTag, ShieldEffectStore, StunStore } from './game/components/combat'
 import { PickupSlot, PickupSlotStore, type PickupType } from './game/components/pickup'
+import { type RaceTick, simulateStep } from './game/sim-step'
 import { getHeldPickup } from './game/systems/pickup'
 import { computeStandings, type Standing } from './game/systems/standings'
 import type { Track } from './game/tracks/types'
@@ -69,6 +72,24 @@ export type HoverDebug = {
   toggleCollisionDebug(): boolean
   /** Current collision-debug overlay state. */
   isCollisionDebugOn(): boolean
+  /** M10.2 determinism harness. Present only when ?determinism=1 was set
+   *  at boot. The sim's RAF-driven step is gated off in that mode; the
+   *  harness drives `simulateStep` here. */
+  determinism?: DeterminismHarness
+}
+
+export type DeterminismHarness = {
+  /** True once boot finished in determinism mode. */
+  ready: boolean
+  /** Stable string snapshot of sim state. Two sims that ran from the same
+   *  seed + same inputs MUST produce the same string. */
+  snapshot(): string
+  /** Drive simulateStep `ticks` times. `intents` is sampled by tick index;
+   *  if it's shorter than `ticks`, the last entry repeats. Returns the
+   *  snapshot taken after the final tick. Inputs forced to `locked: false`,
+   *  `autoPlay: false`, `waveTimeScale: 1` so behavior is independent of
+   *  HUD state or debug menus. */
+  run(intents: Intent[], ticks: number): string
 }
 
 export type CombatDebugSnapshot = {
@@ -101,6 +122,16 @@ export type DebugAccessors = {
   /** Fast-forward the start countdown — used implicitly when an intent
    *  override is set so e2e tests don't have to wait through 3-2-1. */
   skipCountdown(): void
+  /** When true, ?determinism=1 was set and the live sim loop is gated off.
+   *  The harness on __hover.determinism drives ticks directly. */
+  determinismMode(): boolean
+  /** Wave field state — needed by the determinism harness to drive
+   *  simulateStep. Render and live-loop code already have it captured by
+   *  closure; this exposes it to debug.ts. */
+  waveField(): WaveFieldState
+  /** Race-event tick function returned by createRaceSystem. The determinism
+   *  harness threads this through simulateStep. */
+  raceTick(): RaceTick
 }
 
 declare global {
@@ -211,7 +242,47 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
       return out
     },
   }
-  if (import.meta.env.DEV || import.meta.env.MODE === 'test') {
+
+  if (accessors.determinismMode()) {
+    const harness: DeterminismHarness = {
+      get ready() {
+        return state.ready
+      },
+      snapshot: () =>
+        snapshotToString(captureSnapshot(accessors.sim(), accessors.phys(), accessors.waveField())),
+      run: (intents, ticks) => {
+        const sim = accessors.sim()
+        const phys = accessors.phys()
+        const waveField = accessors.waveField()
+        const track = accessors.track()
+        const raceTick = accessors.raceTick()
+        // Fall back to emptyIntent if the caller passed an empty array.
+        const sample = (i: number): Intent => intents[Math.min(i, intents.length - 1)] ?? emptyIntent()
+        for (let i = 0; i < ticks; i++) {
+          simulateStep(sim, phys, waveField, track, raceTick, {
+            playerIntent: sample(i),
+            locked: false,
+            autoPlay: false,
+            waveTimeScale: 1,
+          })
+        }
+        return snapshotToString(captureSnapshot(sim, phys, waveField))
+      },
+    }
+    api.determinism = harness
+  }
+
+  // Normally __hover is dev/test only — exposing setIntentOverride etc.
+  // in a public build would let anyone drive the bike from devtools. The
+  // determinism harness is the exception: read-only snapshot() plus a
+  // self-contained run() that doesn't touch shared state, and we need it
+  // reachable on a Vercel preview to do cross-machine determinism testing.
+  // So when ?determinism=1 is set, attach the API even in prod.
+  if (
+    import.meta.env.DEV ||
+    import.meta.env.MODE === 'test' ||
+    accessors.determinismMode()
+  ) {
     window.__hover = api
   }
   return api
