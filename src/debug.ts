@@ -1,11 +1,17 @@
-import { addComponent, query } from 'bitecs'
+import { addComponent, hasComponent, query } from 'bitecs'
 import { emptyIntent, type Intent, snapshotGamepads } from './engine/input'
 import type { RenderBackend } from './engine/render/renderer'
 import type { SimWorld } from './engine/sim/ecs/world'
 import type { PhysicsWorld } from './engine/sim/physics/rapier'
 import { captureSnapshot, snapshotToString } from './engine/sim/snapshot'
 import type { WaveFieldState } from './engine/sim/water/wave-field'
-import { BikeTag, ControlIntentStore, RBHandleStore } from './game/components'
+import {
+  BikeTag,
+  ControlIntentStore,
+  PeerControlledStore,
+  RBHandleStore,
+} from './game/components'
+import { AITag } from './game/components/ai'
 import { MineTag, MissileTag, ShieldEffectStore, StunStore } from './game/components/combat'
 import { PickupSlot, PickupSlotStore, type PickupType } from './game/components/pickup'
 import { type RaceTick, simulateStep } from './game/sim-step'
@@ -89,12 +95,19 @@ export type NetDebugProbe = {
   peerId(): number
   /** Slots currently held by remote peers in our room. */
   remotePeers(): readonly number[]
+  /** M10.11 — true if we're the AI host for the current room state.
+   *  Lowest-slot peer wins. Single-player → always true. */
+  isHost(): boolean
   /** Last N InputFrames received from remote peers (most recent last).
    *  Bounded — earlier frames are dropped. */
   recentRemoteFrames(): ReadonlyArray<{ tick: number; peerId: number; intent: Intent }>
   /** Last-write-wins intent buffer per remote peer slot. This is what
    *  the sim loop drains into per-tick `peerInputs` each fixed step. */
   latestPeerIntents(): Record<number, Intent>
+  /** M10.11 — count of TransformSnapshot messages received from peers
+   *  since connect. Useful as an e2e wait point ("wait until tab 2 has
+   *  applied at least one snapshot from tab 1"). */
+  snapshotsReceived(): number
 }
 
 export type DeterminismHarness = {
@@ -127,6 +140,14 @@ export type BikeDebugSnapshot = {
   intent: Intent
   /** Currently-held pickup, or null. */
   held: PickupType | null
+  /** M10.11 — rigid body type. Dynamic = locally simulated; Kinematic =
+   *  pose-driven by network snapshots; Fixed = static (shouldn't happen
+   *  on bikes today). 'unknown' = couldn't resolve the body. */
+  bodyType: 'dynamic' | 'kinematic-position' | 'kinematic-velocity' | 'fixed' | 'unknown'
+  /** M10.11 — has the AITag component (AI controller is driving). */
+  hasAI: boolean
+  /** M10.11 — has the PeerControlled component (and its peerId, if so). */
+  peerControlled: { peerId: number } | null
 }
 
 export type DebugAccessors = {
@@ -251,6 +272,19 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
           boost: false,
           pitch: 0,
         }
+        const rapierBT = phys.rapier.RigidBodyType
+        const bodyTypeRaw = rb.bodyType()
+        const bodyType: BikeDebugSnapshot['bodyType'] =
+          bodyTypeRaw === rapierBT.Dynamic
+            ? 'dynamic'
+            : bodyTypeRaw === rapierBT.KinematicPositionBased
+              ? 'kinematic-position'
+              : bodyTypeRaw === rapierBT.KinematicVelocityBased
+                ? 'kinematic-velocity'
+                : bodyTypeRaw === rapierBT.Fixed
+                  ? 'fixed'
+                  : 'unknown'
+        const peerControlled = PeerControlledStore.get(eid) ?? null
         out.push({
           eid,
           pos: { x: t.x, y: t.y, z: t.z },
@@ -259,6 +293,9 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
           angvel: { x: av.x, y: av.y, z: av.z },
           intent: { ...intent },
           held: PickupSlotStore.get(eid)?.held ?? null,
+          bodyType,
+          hasAI: hasComponent(sim, eid, AITag),
+          peerControlled,
         })
       }
       return out

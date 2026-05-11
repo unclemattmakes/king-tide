@@ -25,6 +25,11 @@ export type HelloMessage = {
   peerId: number
   /** Slots currently held by other connected peers (excludes me). */
   otherPeers: number[]
+  /** M10.12 lobby — true once any peer in this room session has
+   *  signalled `start-race`. Late joiners read this and immediately arm
+   *  their countdown so they don't get stuck in the lobby waiting for
+   *  already-racing peers to re-emit ready toggles. */
+  raceStarted: boolean
 }
 
 /** Sent by the server to existing peers when a new peer connects. */
@@ -45,8 +50,41 @@ export type RoomFullMessage = {
   type: 'room-full'
 }
 
+/** M10.12 lobby — peer announces their ready/not-ready state. Sent
+ *  client→server (server stamps the sender's slot before broadcasting,
+ *  so peers can't spoof each other's slot) AND server→other peers (with
+ *  the originating slot in `peerId`). Same shape both directions for
+ *  simplicity; the relay just fills in `peerId` from the connection's
+ *  assigned slot when forwarding. */
+export type ReadyMessage = {
+  type: 'ready'
+  peerId: number
+  ready: boolean
+}
+
+/** Server → all peers when the room transitions out of lobby into
+ *  countdown. Sent once per room session; mid-race joiners don't get one
+ *  (they fall through into the active race at their own pace). The
+ *  payload is empty for now — adding it as a typed message reserves the
+ *  shape for future fields (e.g. agreed starting position list). */
+export type StartRaceMessage = {
+  type: 'start-race'
+}
+
 export type ServerControlMessage =
   | HelloMessage
   | PeerJoinedMessage
   | PeerLeftMessage
   | RoomFullMessage
+  | ReadyMessage
+  | StartRaceMessage
+
+/** Messages sent from a client to the server.
+ *  - `ready`: lobby ready toggle. Server re-broadcasts as a `ReadyMessage`.
+ *  - `start-race`: a peer's local view found all peers ready and is
+ *    arming the countdown. Server sets `raceStarted` and broadcasts a
+ *    `StartRaceMessage` to everyone else so they arm too. Late joiners
+ *    are told via the `raceStarted` flag in their `HelloMessage`. */
+export type ClientControlMessage =
+  | { type: 'ready'; ready: boolean }
+  | { type: 'start-race' }
