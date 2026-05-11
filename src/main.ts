@@ -151,14 +151,18 @@ async function boot() {
   const params = new URLSearchParams(window.location.search)
 
   // M10.4 — optional multiplayer relay. `?room=<id>` opts the client into
-  // a PartyKit room; otherwise the game runs single-player as before. The
-  // host defaults to localhost:1999 (the `pnpm party:dev` server); pass
-  // `?host=<h>` to override (e.g. a deployed `hoverbike.<user>.partykit.dev`).
+  // a PartyKit room; otherwise the game runs single-player as before.
+  // Host default flips on build mode: dev builds (vite dev) target
+  // `localhost:1999` so `pnpm party:dev` works out of the box; production
+  // builds target the deployed PartyKit endpoint. Pass `?host=<h>` to
+  // override either way (e.g. point a prod build at localhost for testing).
   // Connection is deferred until after the local bike + asset registry
   // are ready so the join/leave callbacks can spawn/despawn remote-peer
   // bikes safely (M10.7).
+  const PROD_PARTY_HOST = 'hoverbike.occ-matt.partykit.dev'
   const roomId = params.get('room')
-  const netHost = params.get('host') ?? 'localhost:1999'
+  const netHost =
+    params.get('host') ?? (import.meta.env.DEV ? 'localhost:1999' : PROD_PARTY_HOST)
   const recentRemoteFrames: InputFrame[] = []
   let net: NetRoom | null = null
 
