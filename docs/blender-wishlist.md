@@ -92,26 +92,43 @@ unit = 1 metre. The hybrid pipeline (M9.19+) keeps environment geometry in the
 `.blend` and gameplay placement in `public/tracks/<id>.json`, joined at runtime
 via `environmentGlb`.
 
-## Item 1 — Geometry-Nodes level template
+## Item 1 — Geometry-Nodes level template ✅ Shipped 2026-05-11
 
-A starter `tracks-src/template-island.blend` that defaults to:
+`tracks-src/template-island.blend` ships with a live Geometry Nodes
+modifier (`HV_Island`) that procedurally generates a volcanic-tropical
+heightfield — inspired by St. Lucia. The terrain is a single 1024 × 1024
+m subdivided plane (~150 k verts) carrying both above-water and
+below-water geometry: cone-shaped peaks with optional craters,
+continental shelves descending to a deep-water floor, fringing reef
+rings around each island, multi-octave noise modulated by altitude.
 
-- Islands separated by water (a horizontal water plane + a small number of
-  primitive island meshes positioned along the track curve).
-- A track curve that defines the racing line.
-- An optional dirt-road ribbon following the curve segments classified as
-  "on land".
+Authoring is GUI-driven: drop `peak_NN` empties into the scene, drag
+them around in the viewport (XY = position, Z = height, scale.X = base
+radius, scale.Z = crater flag), and the terrain reshapes live. Modifier
+panel exposes seven global knobs (shelf depth/radius, reef
+inset/height/width, noise scale/seed, roughness above/below).
 
-### Realism: partial
+The graph supports **up to 8 peaks** by design — unused slots
+contribute a sentinel that loses the max-combine, so empty slots are
+free. The default seeded scene has 1 central peak with crater, 2
+flanking medium peaks, and 1 submerged shoal. COLOR_0 is stamped per
+the [vertex-attribute spec](./vertex-attribute-spec.md) (R=0 sway, G=1
+AO placeholder, B=0 path-worn, A=biome).
 
-A *toy* template along the lines above is reasonable. A real procedural
-island generator (heightfields, Voronoi shorelines, biome falloffs,
-shoreline foam) is a several-hundred-node Geometry Nodes graph that's an
-order of magnitude more painful to author through `bpy.data.node_groups`
-than through Blender's GUI. Claude can scaffold the skeleton and the
-deterministic build script (`tools/blender/build_template_island.py`,
-matching the existing `build_track.py` pattern), but the GN graph polish
-should happen in-GUI.
+Build script: [`tools/blender/seed_template_island.py`](../tools/blender/seed_template_island.py) —
+one-shot scaffolder analogous to `seed_bike_kit.py`. Authoring guide:
+[`blender-pipeline-guide.md`](./blender-pipeline-guide.md#procedural-island-template-item-1).
+
+Realism note from the original brief — that a *real* procedural island
+generator (Voronoi shorelines, biome falloffs, shoreline foam) would
+be a several-hundred-node GN graph painful to author through `bpy` —
+held up. The shipped graph is ~67 nodes across two groups; aesthetic
+polish (real materials, foliage scatter, AO bake) is left as in-GUI
+follow-up.
+
+Deferred: real PBR terrain material (the seed ships a placeholder
+vertex-color ramp), AO baking, racing-line painting of the `COLOR_0.B`
+path-worn channel.
 
 ## Item 2 — Tighter Blender ↔ in-app editor link for gate placement ✅ Shipped 2026-05-11
 

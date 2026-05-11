@@ -390,3 +390,96 @@ node -e 'import("./tools/blender/inspect_glb.mjs").then((m) =>
 If the extension isn't emitted, the most common cause is the scattered
 output sitting outside an Empty parent — re-parent and re-export.
 
+## Procedural island template (Item 1)
+
+`tracks-src/template-island.blend` ships with a live Geometry Nodes
+modifier that procedurally generates a volcanic-tropical heightfield
+inspired by St. Lucia: cone-shaped peaks with optional craters,
+continental shelves descending to a deep-water floor, fringing reef
+rings, and altitude-modulated multi-octave noise. Drop new peak
+empties, drag them around, retune the modifier inputs — terrain
+reshapes live.
+
+### Forking the template for a new island track
+
+1. **Copy** `tracks-src/template-island.blend` to
+   `tracks-src/<your-id>.blend` and open it.
+2. **Reposition / retune peaks.** Each `peak_NN` empty packs four
+   parameters into its transform:
+     - `location.xy` → peak centre in world XY
+     - `location.z`  → peak height (m above sea)
+     - `scale.x`     → base radius (m)
+     - `scale.z`     → crater flag (0 = smooth summit, 1 = carve crater)
+   Move the empty in the viewport to drag the peak with it. Lift it
+   along Z to grow taller; widen X to broaden the base.
+3. **Add / remove peaks.** The modifier exposes 8 slots (`Peak 0`
+   … `Peak 7`). Bind any unused slot to a new empty, or unbind a
+   slot to delete its peak. The default scene uses 4 of 8.
+4. **Tune global knobs** in the modifier panel (Properties → Modifier
+   → HV_Island):
+     - `Shelf Depth` / `Shelf Radius` — deep-water floor depth and how
+       far offshore the shelf descends from each peak's coastline.
+     - `Reef Inset` / `Reef Height` / `Reef Width` — fringing reef ring.
+     - `Roughness Above` / `Roughness Below` — noise amplitude on land
+       vs. underwater. Default 6 m / 1.5 m.
+     - `Noise Scale` (smaller = bigger features) and `Noise Seed`
+       (re-roll for variation).
+5. **Apply the modifier** when the silhouette reads right. Object →
+   Convert → Mesh, then add the standard track furniture on top:
+     - Update or delete the starter `ai_spline_main` curve to follow
+       your racing line.
+     - Place gates either by editing `cp_NN` empties or hitting the
+       addon's *Rebuild Gate Preview* button after setting
+       `gateSpacing` on the track JSON.
+     - Move `start_00` / `start_01` to your grid.
+     - Adjust `water_volume_main`'s extents if needed.
+6. **Export** via the addon's *Export Track to Game* — identical
+   pipeline to every other track.
+
+### Re-seeding the template from scratch
+
+If the bundled `template-island.blend` is ever lost or you want a
+clean reset, regenerate it via the seed script:
+
+```bash
+"C:/Program Files/Blender Foundation/Blender 5.1/blender.exe" \
+  --background --python tools/blender/seed_template_island.py
+```
+
+This writes `tracks-src/template-island.blend` from scratch, including
+the full GN graph (~38 nodes in the parent, 29 in the
+`HV_PeakProfile` sub-group) and the starter scene.
+
+### Vertex attribute contract
+
+The GN graph stamps `COLOR_0` on the terrain per the
+[Item 6 spec](./vertex-attribute-spec.md):
+
+| Channel | Meaning | Stamped value |
+|---|---|---|
+| R | Sway | `0` (terrain doesn't sway) |
+| G | AO multiplier | `1` (placeholder — real AO bake is a GUI pass) |
+| B | Path-worn mask | `0` (filled later when the racing line is painted) |
+| A | Biome index | `0` deep / `0.33` shallow / `0.67` beach / `1.0` jungle |
+
+Downstream consumers (terrain shader, foliage scatter density
+filter) read these channels through the existing
+[`foliage-sway.ts`](../src/engine/render/foliage-sway.ts) plumbing.
+
+### Known limitations
+
+- **8 peak cap.** Going past 8 requires editing the GN graph to add
+  more sub-group instances. Author who wants ≥9 peaks: open
+  `HV_TemplateIsland`, duplicate one of the inner sub-group instances,
+  wire it through another `MAX` node in the cascade, and add a `Peak 8`
+  Group Input.
+- **Steep volcanic slopes may not be drivable.** Cone sides above
+  ~40° are too steep for the hover controller in some directions.
+  Hand-flatten saddles where the racing line crosses ridges.
+- **Trimesh count is ~150 k tris** at default 384² subdivision.
+  Comfortable for Rapier but on the heavy end for static colliders.
+  Reduce `SUBDIV` in the seed script if you need a lighter file.
+- **Material is placeholder.** The vertex-color biome ramp is set
+  dressing — author a real shader with sand/jungle textures keyed off
+  `COLOR_0.A` as the next polish pass.
+
