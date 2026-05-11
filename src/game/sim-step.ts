@@ -37,6 +37,14 @@ export type StepInputs = {
    *  scrubbed by the water debug menu in single-player. Lockstep multiplayer
    *  pins this to 1 so peers agree on the surface. */
   waveTimeScale: number
+  /** M10.11 — run AI control / combat / rubber-band this tick. Default
+   *  true. Non-host multiplayer peers pass `false`: the host owns the AI
+   *  sim and broadcasts AI bike transforms; on non-hosts the AI bikes are
+   *  kinematic and pose-driven by `applySnapshot`, with no AITag, so the
+   *  systems' tag-gated queries are already empty — this flag is belt-
+   *  and-suspenders against future non-tag dependencies, and saves the
+   *  no-op query traversal each tick. */
+  runAI?: boolean
 }
 
 /**
@@ -66,8 +74,9 @@ export function simulateStep(
   } else if (!inputs.autoPlay) {
     applyPeerInputs(sim, inputs.peerInputs)
   }
-  if (!inputs.locked) aiControlSystem(sim, phys, track)
-  aiCombatSystem(sim, phys)
+  const runAI = inputs.runAI ?? true
+  if (!inputs.locked && runAI) aiControlSystem(sim, phys, track)
+  if (runAI) aiCombatSystem(sim, phys)
   stunOverrideSystem(sim)
 
   hoverSystem(sim, phys, waveField)
@@ -83,5 +92,5 @@ export function simulateStep(
   boostTickSystem(sim, phys.fixedDt)
   shieldTickSystem(sim, phys.fixedDt)
   stunTickSystem(sim, phys.fixedDt)
-  rubberBandSystem(sim, track)
+  if (runAI) rubberBandSystem(sim, track)
 }

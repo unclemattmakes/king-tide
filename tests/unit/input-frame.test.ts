@@ -1,5 +1,6 @@
 /**
  * M10.4 — InputFrame wire format round-trip tests.
+ * M10.11 — wire size grew from 10 → 11 bytes (1-byte tag at offset 0).
  *
  * The codec is the contract between the local input layer and the future
  * PartyKit relay. Any precision loss or layout drift here would manifest
@@ -16,6 +17,7 @@ import {
   encodeInputFrame,
   encodeInputFrameInto,
   INPUT_FRAME_BYTES,
+  INPUT_FRAME_WIRE_BYTES,
   type InputFrame,
 } from '../../src/engine/net/input-frame'
 
@@ -33,10 +35,13 @@ function expectIntentClose(actual: Intent, expected: Intent): void {
 }
 
 describe('InputFrame codec', () => {
-  it('encodes to a fixed 10-byte buffer', () => {
+  it('encodes to a fixed 11-byte buffer (tag + 10-byte payload)', () => {
     const buf = encodeInputFrame({ tick: 0, peerId: 0, intent: emptyIntent() })
-    expect(buf.byteLength).toBe(INPUT_FRAME_BYTES)
+    expect(buf.byteLength).toBe(INPUT_FRAME_WIRE_BYTES)
+    expect(INPUT_FRAME_WIRE_BYTES).toBe(11)
     expect(INPUT_FRAME_BYTES).toBe(10)
+    // Tag byte is 0x01 at offset 0.
+    expect(buf[0]).toBe(0x01)
   })
 
   it('round-trips an empty frame', () => {
@@ -117,18 +122,19 @@ describe('InputFrame codec', () => {
     expect(out.pitch).toBe(-1)
   })
 
-  it('writes little-endian — first byte is the tick LSB', () => {
-    // tick = 0x04030201 → bytes [0x01, 0x02, 0x03, 0x04]
+  it('writes little-endian — tag at byte 0, tick LSB at byte 1', () => {
+    // tick = 0x04030201 → bytes [tag, 0x01, 0x02, 0x03, 0x04, ...]
     const buf = encodeInputFrame({ tick: 0x04030201, peerId: 0, intent: emptyIntent() })
-    expect(buf[0]).toBe(0x01)
-    expect(buf[1]).toBe(0x02)
-    expect(buf[2]).toBe(0x03)
-    expect(buf[3]).toBe(0x04)
+    expect(buf[0]).toBe(0x01) // tag
+    expect(buf[1]).toBe(0x01)
+    expect(buf[2]).toBe(0x02)
+    expect(buf[3]).toBe(0x03)
+    expect(buf[4]).toBe(0x04)
   })
 
   it('encodes/decodes multiple frames in one buffer via into/from helpers', () => {
     const N = 4
-    const buf = new ArrayBuffer(INPUT_FRAME_BYTES * N)
+    const buf = new ArrayBuffer(INPUT_FRAME_WIRE_BYTES * N)
     const view = new DataView(buf)
     const frames: InputFrame[] = Array.from({ length: N }, (_, i) => ({
       tick: 1000 + i,
@@ -136,10 +142,10 @@ describe('InputFrame codec', () => {
       intent: makeIntent({ throttle: i * 0.25 - 0.5, fire: i % 2 === 0 }),
     }))
     for (let i = 0; i < N; i++) {
-      encodeInputFrameInto(view, i * INPUT_FRAME_BYTES, frames[i]!)
+      encodeInputFrameInto(view, i * INPUT_FRAME_WIRE_BYTES, frames[i]!)
     }
     for (let i = 0; i < N; i++) {
-      const decoded = decodeInputFrameFrom(view, i * INPUT_FRAME_BYTES)
+      const decoded = decodeInputFrameFrom(view, i * INPUT_FRAME_WIRE_BYTES)
       expect(decoded.tick).toBe(frames[i]!.tick)
       expect(decoded.peerId).toBe(frames[i]!.peerId)
       expectIntentClose(decoded.intent, frames[i]!.intent)
@@ -148,7 +154,7 @@ describe('InputFrame codec', () => {
 
   it('decodes from a Uint8Array slice (byteOffset > 0)', () => {
     // Common when reading frames out of a larger network message.
-    const wrapper = new Uint8Array(INPUT_FRAME_BYTES + 4)
+    const wrapper = new Uint8Array(INPUT_FRAME_WIRE_BYTES + 4)
     const inner = wrapper.subarray(4)
     const original: InputFrame = {
       tick: 42,
@@ -161,5 +167,18 @@ describe('InputFrame codec', () => {
     expect(decoded.tick).toBe(42)
     expect(decoded.peerId).toBe(1)
     expectIntentClose(decoded.intent, original.intent)
+  })
+
+  it('throws when decoding a buffer whose first byte is not the InputFrame tag', () => {
+    const buf = new Uint8Array(INPUT_FRAME_WIRE_BYTES)
+    // Build a valid-looking payload but with the wrong tag (e.g. 0x02 = snapshot).
+    const valid = encodeInputFrame({ tick: 7, peerId: 2, intent: emptyIntent() })
+    buf.set(valid)
+    buf[0] = 0x02
+    expect(() => decodeInputFrame(buf)).toThrow(/bad tag/i)
+
+    // Also test a totally bogus tag byte.
+    buf[0] = 0xff
+    expect(() => decodeInputFrame(buf)).toThrow(/bad tag/i)
   })
 })

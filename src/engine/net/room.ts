@@ -19,12 +19,18 @@ import PartySocket from 'partysocket'
 
 import type { Intent } from '../input/intent'
 import {
-  decodeInputFrame,
+  decodeInputFrameFrom,
   encodeInputFrame,
-  INPUT_FRAME_BYTES,
+  INPUT_FRAME_WIRE_BYTES,
   type InputFrame,
 } from './input-frame'
 import type { ServerControlMessage } from './protocol'
+import {
+  decodeTransformSnapshotFrom,
+  MESSAGE_TAG_INPUT_FRAME,
+  MESSAGE_TAG_TRANSFORM_SNAPSHOT,
+  type TransformSnapshot,
+} from './transform-snapshot'
 
 export type NetRoomConfig = {
   /** PartyKit host. In dev: 'localhost:1999'. In prod: 'hoverbike.occ-matt.partykit.dev'. */
@@ -33,6 +39,10 @@ export type NetRoomConfig = {
   roomId: string
   /** Called when a remote peer's InputFrame arrives. */
   onRemoteFrame?: (frame: InputFrame) => void
+  /** Called when a remote peer's TransformSnapshot arrives (M10.11). The
+   *  snapshot's senderPeerId is guaranteed != our slot (server doesn't
+   *  echo back; defensive filter below also drops self-echoes). */
+  onSnapshot?: (snapshot: TransformSnapshot) => void
   /** Called when another peer joins the room (after we did). */
   onPeerJoined?: (peerId: number) => void
   /** Called when another peer leaves. */
@@ -61,6 +71,13 @@ export type NetRoom = {
    * peer is NOT included (callers always know their own intent firsthand).
    */
   readonly latestPeerIntents: ReadonlyMap<number, Intent>
+  /** Send a pre-encoded binary payload (e.g. a TransformSnapshot). Caller
+   *  owns the buffer's bytes; this method copies into its own send slot.
+   *  No-ops until ready, same as `sendFrame`. */
+  sendBinary(buf: Uint8Array): void
+  /** Total snapshots received since connect. Useful as an e2e wait signal
+   *  ("wait until tab 2 has applied at least one snapshot from tab 1"). */
+  readonly snapshotsReceived: number
   close(): void
 }
 
@@ -87,10 +104,11 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
   // share the buffer with main.ts's sim-loop view; that one is decoded
   // back into an Intent the moment after it's written, so it's free
   // again. This one is held for the duration of the send().
-  const sendBuf = new Uint8Array(INPUT_FRAME_BYTES)
+  const sendBuf = new Uint8Array(INPUT_FRAME_WIRE_BYTES)
 
   let myPeerId = -1
   let socketOpen = false
+  let snapshotsReceived = 0
   const remotePeers = new Set<number>()
   // Last-write-wins intent buffer per remote peer slot. Sized at most
   // MAX_PEERS_PER_ROOM - 1 entries. Cleared on disconnect; entries
@@ -111,6 +129,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
     myPeerId = -1
     remotePeers.clear()
     latestPeerIntents.clear()
+    snapshotsReceived = 0
   })
 
   socket.addEventListener('message', (event: MessageEvent) => {
@@ -143,13 +162,35 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
       return
     }
     if (data instanceof ArrayBuffer) {
-      const frame = decodeInputFrame(data)
-      // Defensive: a misconfigured peer could send a frame stamped with
-      // our own slot. Ignore those — we always trust our local input.
-      if (frame.peerId !== myPeerId) {
-        latestPeerIntents.set(frame.peerId, frame.intent)
+      // M10.11 — two binary message types share this socket, distinguished
+      // by a 1-byte tag at offset 0. Cheaper than length-based dispatch
+      // and explicit so future types (snapshot ACKs, event broadcasts,
+      // etc.) can land here without ambiguity.
+      if (data.byteLength < 1) return
+      const view = new DataView(data)
+      const tag = view.getUint8(0)
+      if (tag === MESSAGE_TAG_INPUT_FRAME) {
+        const frame = decodeInputFrameFrom(view, 0)
+        // Defensive: a misconfigured peer could send a frame stamped with
+        // our own slot. Ignore those — we always trust our local input.
+        if (frame.peerId !== myPeerId) {
+          latestPeerIntents.set(frame.peerId, frame.intent)
+        }
+        cfg.onRemoteFrame?.(frame)
+        return
       }
-      cfg.onRemoteFrame?.(frame)
+      if (tag === MESSAGE_TAG_TRANSFORM_SNAPSHOT) {
+        const snap = decodeTransformSnapshotFrom(view, 0, data.byteLength)
+        // Same defensive guard as for InputFrames: drop self-echoes.
+        if (snap.senderPeerId !== myPeerId) {
+          snapshotsReceived++
+          cfg.onSnapshot?.(snap)
+        }
+        return
+      }
+      // Unknown tag — log once at console level and drop. Don't crash the
+      // socket on a forwards-compat message we don't recognise.
+      console.warn(`[net] unknown binary tag 0x${tag.toString(16)} (${data.byteLength}B), dropping`)
     }
   })
 
@@ -176,6 +217,18 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
       sendBuf.set(encoded)
       // partysocket's send accepts ArrayBuffer/Uint8Array directly.
       socket.send(sendBuf)
+    },
+    sendBinary(buf: Uint8Array) {
+      if (!ready()) return
+      // Slice into a fresh ArrayBuffer of exactly the right size.
+      // partysocket's typing requires ArrayBuffer (not SharedArrayBuffer)
+      // backing, and the caller is allowed to reuse `buf` immediately
+      // after this returns — so we own a copy regardless.
+      const copy = buf.slice(0).buffer
+      socket.send(copy)
+    },
+    get snapshotsReceived() {
+      return snapshotsReceived
     },
     close() {
       socket.close()
