@@ -52,7 +52,12 @@ import { loadBike } from './game/assets/bike-loader'
 import { loadManifest } from './game/assets/manifest'
 import { type LoadedProp, loadProp } from './game/assets/prop-loader'
 import { resolveBikeVariant } from './game/bikes/variants'
-import { HoverStateStore, RBHandleStore, TransformStore } from './game/components'
+import {
+  HoverStateStore,
+  PeerControlledStore,
+  RBHandleStore,
+  TransformStore,
+} from './game/components'
 import { AIController, AIControllerStore, AITag, defaultAIController } from './game/components/ai'
 import { ExplosionTag, MineTag, MissileTag } from './game/components/combat'
 import type { PickupType } from './game/components/pickup'
@@ -418,6 +423,12 @@ async function boot() {
         console.log(
           `[net] joined room "${roomId}" as peer ${peerId}, others: [${others.join(', ')}]`,
         )
+        // The local player bike was spawned with the placeholder slot 0
+        // (correct for single-player). Now that the relay has assigned our
+        // real slot, re-tag PeerControlled so applyPeerInputs routes our
+        // local input to our own bike — without this, every tab's bike
+        // collides on slot 0 and the host's frames drive everyone.
+        PeerControlledStore.set(playerEid, { peerId })
         // Existing peers in the room need their bikes spawned too —
         // peer-joined only fires for joins AFTER us.
         for (const p of others) spawnRemoteBike(p)
