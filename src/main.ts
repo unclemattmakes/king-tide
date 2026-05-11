@@ -340,10 +340,16 @@ async function boot() {
 
   // M10.7 — remote-peer bike spawn. Each connected remote peer gets a
   // PeerControlled bike whose ControlIntent is driven by the relay's
-  // last-known intent for that slot (drained in the sim loop). Not
-  // Racer-tagged for now — remote bikes are visible avatars, not
-  // competing for the local race result. Variant defaults to racer; a
-  // future slice can negotiate variant + livery over the room.
+  // last-known intent for that slot (drained in the sim loop). Variant
+  // defaults to racer; variant negotiation over the room is a future slice.
+  //
+  // M10.8 — remote bikes are now Racer-tagged so the local race system
+  // tracks their checkpoint crossings, lap progress, and finish state.
+  // The position HUD updates as remote bikes pass gates. Mid-race joiners
+  // start at lap 1 / cp 0 — they naturally land at the back of the field.
+  // Each peer computes standings against the local sim, so views may
+  // diverge from one another by network latency; full reconciliation is
+  // a later slice.
   const remoteEids = new Map<number, number>()
   function spawnRemoteBike(peerId: number): number {
     const racer = resolveBikeVariant('racer')
@@ -359,7 +365,7 @@ async function boot() {
       },
       yaw: track.start.yaw,
       peerId,
-      asRacer: false,
+      asRacer: true,
       stats: {
         ...racer.stats,
         bodyColor: racer.bodyColor,
