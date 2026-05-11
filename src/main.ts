@@ -7,7 +7,6 @@ import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug
 import { createAudioEngine } from './engine/audio/audio'
 import { loadDevSettings } from './engine/dev-settings'
 import { installTrackEditor } from './engine/editor/track-editor'
-import { bindLazyMenuButton } from './engine/lazy-menu'
 import { formatLap, installGarageMenu } from './engine/garage'
 import {
   emptyIntent,
@@ -17,6 +16,14 @@ import {
   readPlayerIntent,
 } from './engine/input'
 import { installCameraLookInput, tickCameraLook } from './engine/input/camera-look'
+import { bindLazyMenuButton } from './engine/lazy-menu'
+import {
+  decodeInputFrameFrom,
+  encodeInputFrameInto,
+  INPUT_FRAME_BYTES,
+  type InputFrame,
+} from './engine/net/input-frame'
+import { createNetRoom, type NetRoom } from './engine/net/room'
 import { createChaseCamera } from './engine/render/camera'
 import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
@@ -52,10 +59,10 @@ import type { PickupType } from './game/components/pickup'
 import { RacerStore } from './game/components/race'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
 import { createPropColliders } from './game/entities/props'
+import { simulateStep } from './game/sim-step'
 import { getHeldPickup } from './game/systems/pickup'
 import { createRaceSystem } from './game/systems/race'
 import { computeStandings } from './game/systems/standings'
-import { simulateStep } from './game/sim-step'
 
 /**
  * Boot sequence — phases, in order:
@@ -141,12 +148,44 @@ async function boot() {
 
   const params = new URLSearchParams(window.location.search)
 
+  // M10.4 — optional multiplayer relay. `?room=<id>` opts the client into
+  // a PartyKit room; otherwise the game runs single-player as before. The
+  // host defaults to localhost:1999 (the `pnpm party:dev` server); pass
+  // `?host=<h>` to override (e.g. a deployed `hoverbike.<user>.partykit.dev`).
+  // For now the room is a pure relay — local InputFrames go out, remote
+  // frames come in and are buffered for inspection via __hover.net but
+  // NOT yet applied to remote sim entities. Lockstep / rollback consumption
+  // ships in a later slice.
+  const roomId = params.get('room')
+  const netHost = params.get('host') ?? 'localhost:1999'
+  const recentRemoteFrames: InputFrame[] = []
+  let net: NetRoom | null = null
+  if (roomId) {
+    net = createNetRoom({
+      host: netHost,
+      roomId,
+      onRemoteFrame: (frame) => {
+        // Bounded ring so devtools probes can see the latest activity
+        // without growing the buffer forever.
+        recentRemoteFrames.push(frame)
+        if (recentRemoteFrames.length > 64) recentRemoteFrames.shift()
+      },
+      onConnected: (peerId, others) =>
+        console.log(
+          `[net] joined room "${roomId}" as peer ${peerId}, others: [${others.join(', ')}]`,
+        ),
+      onPeerJoined: (peerId) => console.log(`[net] peer ${peerId} joined`),
+      onPeerLeft: (peerId) => console.log(`[net] peer ${peerId} left`),
+      onRoomFull: () => console.warn(`[net] room "${roomId}" is full`),
+    })
+  }
+
   // M10.2 determinism harness. When ?determinism=1 is set, the fixed-step
   // sim loop is gated off so the Playwright probe can drive `simulateStep`
   // directly via __hover.determinism.run(). Render still runs so the page
   // is alive; only the sim is frozen.
   const determinismMode = params.get('determinism') === '1'
-  let determinismPaused = determinismMode
+  const determinismPaused = determinismMode
 
   // Replay playback mode. `?replay=session` reads a JSON replay payload
   // from sessionStorage (stashed there by the garage's Load Replay flow,
@@ -496,6 +535,23 @@ async function boot() {
     determinismMode: () => determinismMode,
     waveField: () => waveField,
     raceTick: () => raceTick,
+    netProbe: () => {
+      if (!net) return null
+      // Capture under a const so subsequent ts narrowing survives.
+      const room = net
+      return {
+        ready: () => room.ready,
+        peerId: () => room.peerId,
+        remotePeers: () => room.remotePeers,
+        recentRemoteFrames: () =>
+          // Shallow-copy so devtools probes can't mutate the live buffer.
+          recentRemoteFrames.map((f) => ({
+            tick: f.tick,
+            peerId: f.peerId,
+            intent: { ...f.intent },
+          })),
+      }
+    },
   })
   if (backendEl) backendEl.textContent = `backend: ${backend}`
   if (finishSub) finishSub.textContent = track.name
@@ -591,6 +647,17 @@ async function boot() {
   let framesThisSecond = 0
   let fpsAccumStart = last
 
+  // M10.4 — wire-encoded input round-trip. simTick is the monotonic count
+  // of fixed-step sim ticks driven by simulateStep; it lines up across
+  // peers in lockstep multiplayer because both sides advance one tick per
+  // delivered InputFrame batch. The DataView is reused per tick to avoid
+  // a per-frame allocation. LOCAL_PEER_ID is the slot in a future room;
+  // in single-player there is exactly one peer (slot 0).
+  const LOCAL_PEER_ID = 0
+  let simTick = 0
+  const inputFrameBuffer = new ArrayBuffer(INPUT_FRAME_BYTES)
+  const inputFrameView = new DataView(inputFrameBuffer)
+
   function frame(now: number) {
     const dt = Math.min((now - last) / 1000, 1 / 15)
     last = now
@@ -603,12 +670,31 @@ async function boot() {
     // we don't spike on unpause.
     while (physAccum >= phys.fixedDt) {
       if (!determinismPaused) {
+        // M10.4 — drive the sim from a wire-encoded InputFrame even in
+        // single-player. The round-trip is cheap (~10 bytes / one alloc)
+        // and ensures the same quantization is applied locally as remotely,
+        // so any feel changes from the wire format are visible day one.
+        // When connected to a room, stamp the frame with the assigned
+        // peerId (falls back to LOCAL_PEER_ID otherwise) and ship it to
+        // the relay BEFORE stepping locally — that ordering means a
+        // future lockstep gate could pause here waiting on remote frames
+        // without changing the encode/decode contract.
+        const myPeerId = net?.ready ? net.peerId : LOCAL_PEER_ID
+        const localFrame = {
+          tick: simTick,
+          peerId: myPeerId,
+          intent: state.intent,
+        }
+        encodeInputFrameInto(inputFrameView, 0, localFrame)
+        net?.sendFrame(localFrame)
+        const decodedIntent = decodeInputFrameFrom(inputFrameView, 0).intent
         simulateStep(sim, phys, waveField, track, raceTick, {
-          playerIntent: state.intent,
+          playerIntent: decodedIntent,
           locked: raceHud.isLocked(),
           autoPlay,
           waveTimeScale: waterMesh.debug.getTimeScale(),
         })
+        simTick++
       }
       physAccum -= phys.fixedDt
     }
