@@ -115,6 +115,11 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const intent = ControlIntentStore.must(eid)
     const rb = phys.world.getRigidBody(handle)
     if (!rb) continue
+    // M10.11 — kinematic bikes (remote players on non-host, AI bikes on
+    // non-host) are pose-driven by network snapshots. The hover spring,
+    // surface alignment, and angular damping below all mutate the rigid
+    // body, which would fight `setNextKinematicTranslation`. Skip.
+    if (!rb.isDynamic()) continue
 
     const t = rb.translation()
     const linvel = rb.linvel()

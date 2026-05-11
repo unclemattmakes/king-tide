@@ -1,4 +1,12 @@
 import { addComponent, hasComponent, query, removeComponent, removeEntity } from 'bitecs'
+import { isHostFor } from './engine/net/host-election'
+import {
+  encodeTransformSnapshotInto,
+  snapshotByteLength,
+  type BikeSnapshotRecord,
+  type TransformSnapshot,
+} from './engine/net/transform-snapshot'
+import { applySnapshot } from './game/systems/apply-snapshot'
 import * as THREE from 'three'
 import { spawnBikes } from './boot/spawn-bikes'
 import { loadTrackForBoot } from './boot/track-loader'
@@ -20,7 +28,7 @@ import { bindLazyMenuButton } from './engine/lazy-menu'
 import {
   decodeInputFrameFrom,
   encodeInputFrameInto,
-  INPUT_FRAME_BYTES,
+  INPUT_FRAME_WIRE_BYTES,
   type InputFrame,
 } from './engine/net/input-frame'
 import { createNetRoom, type NetRoom } from './engine/net/room'
@@ -367,6 +375,11 @@ async function boot() {
     // grid, so they don't visually overlap the AI bikes on spawn.
     const dx = (peerId - 4) * 4
     const dz = -15
+    // M10.11 — remote bikes do NOT get PeerControlled. Their pose is
+    // driven by inbound TransformSnapshots via `applySnapshot`, not by
+    // replaying inputs through the local sim. Skip `peerId:` here so
+    // createBike leaves the entity untagged for input dispatch; the
+    // `remoteEids` map below is the canonical peer → eid mapping.
     const eid = createBike(sim, phys, {
       position: {
         x: track.start.position.x + dx,
@@ -374,7 +387,6 @@ async function boot() {
         z: track.start.position.z + dz,
       },
       yaw: track.start.yaw,
-      peerId,
       asRacer: true,
       stats: {
         ...racer.stats,
@@ -383,6 +395,14 @@ async function boot() {
       },
     })
     remoteEids.set(peerId, eid)
+    // Flip the rigid body kinematic so the local hover spring / surface
+    // alignment / physics integrator leave it alone — the next snapshot
+    // dictates its pose.
+    const handle = RBHandleStore.get(eid)
+    if (handle) {
+      const rb = phys.world.getRigidBody(handle.handle)
+      if (rb) rb.setBodyType(phys.rapier.RigidBodyType.KinematicPositionBased, true)
+    }
     return eid
   }
   function despawnRemoteBike(peerId: number): void {
@@ -406,8 +426,64 @@ async function boot() {
     }
     const remote = net.remotePeers
     const peers = remote.length === 0 ? 'alone' : `+ P${remote.join(', P')}`
+    const hostMark = isHostFor(net.peerId, remote) ? ' [host]' : ''
     roomEl.style.display = ''
-    roomEl.textContent = `room: ${roomId} | you: P${net.peerId} | ${peers}`
+    roomEl.textContent = `room: ${roomId} | you: P${net.peerId}${hostMark} | ${peers}`
+  }
+
+  // M10.11 — host role toggles between dynamic + AI-tagged (host) and
+  // kinematic + untagged (non-host) for AI bikes. The local player bike
+  // stays Dynamic + PeerControlled. Remote-peer bikes stay Kinematic.
+  // Called whenever the peer set changes (onConnected / onPeerJoined /
+  // onPeerLeft) so a leaving host hands off cleanly to the next slot.
+  let currentlyHost = true // pre-connect: single-player → always host
+  function applyHostRole(iAmHost: boolean): void {
+    if (iAmHost === currentlyHost) return
+    currentlyHost = iAmHost
+    for (const eid of aiEids) {
+      const handle = RBHandleStore.get(eid)
+      if (!handle) continue
+      const rb = phys.world.getRigidBody(handle.handle)
+      if (!rb) continue
+      if (iAmHost) {
+        rb.setBodyType(phys.rapier.RigidBodyType.Dynamic, true)
+        if (!hasComponent(sim, eid, AITag)) {
+          addComponent(sim, eid, AITag)
+          addComponent(sim, eid, AIController)
+          // Re-derive controller state — the host changed, so any stale
+          // closest-point cache from a previous AI-host stint is invalid.
+          // splineId 'main' is the only one in use today (see spawn-bikes.ts).
+          AIControllerStore.set(eid, defaultAIController('main'))
+        }
+      } else {
+        rb.setBodyType(phys.rapier.RigidBodyType.KinematicPositionBased, true)
+        if (hasComponent(sim, eid, AITag)) {
+          removeComponent(sim, eid, AITag)
+          removeComponent(sim, eid, AIController)
+        }
+        // Kinematic bodies don't decay velocity, but the body type flip
+        // doesn't zero linvel — clamp it so the bike isn't carrying its
+        // last-dynamic-frame motion when the next snapshot arrives.
+        rb.setLinvel({ x: 0, y: 0, z: 0 }, true)
+        rb.setAngvel({ x: 0, y: 0, z: 0 }, true)
+      }
+    }
+  }
+
+  // M10.11 — snapshot resolution. Maps a record to a local eid. Returns
+  // null for records we don't have a matching entity for (e.g. an AI
+  // index out of range, or a remote-peer record whose spawn hasn't
+  // happened on our side yet). `applySnapshot` then silently skips.
+  function snapshotLookup(record: BikeSnapshotRecord): number | null {
+    if (record.bikeKind === 1) {
+      return aiEids[record.bikeIndex] ?? null
+    }
+    // bikeKind 0 (player). If the snapshot is from a peer we know,
+    // route to that peer's remote bike. If it claims to be from
+    // ourselves (shouldn't happen — relay doesn't echo and room.ts
+    // double-filters), ignore.
+    if (record.ownerPeerId === (net?.ready ? net.peerId : -1)) return null
+    return remoteEids.get(record.ownerPeerId) ?? null
   }
 
   if (roomId) {
@@ -418,6 +494,28 @@ async function boot() {
       onRemoteFrame: (frame) => {
         recentRemoteFrames.push(frame)
         if (recentRemoteFrames.length > 64) recentRemoteFrames.shift()
+      },
+      onSnapshot: (snap) => {
+        // M10.11 — pose-driven update for remote-peer bikes + AI bikes
+        // (the latter only on non-host tabs; host snapshots ignored
+        // there are no-ops since the lookup returns aiEids[...] which
+        // is dynamic on the host and overwriting a dynamic body via
+        // applySnapshot would clobber the host's authoritative sim).
+        // Guarded: only apply AI records when we're NOT the host.
+        if (currentlyHost) {
+          // Apply only the player record(s); skip AI records.
+          const playerRecords = snap.bikes.filter((b) => b.bikeKind === 0)
+          if (playerRecords.length > 0) {
+            applySnapshot(
+              sim,
+              phys,
+              { ...snap, bikes: playerRecords },
+              snapshotLookup,
+            )
+          }
+          return
+        }
+        applySnapshot(sim, phys, snap, snapshotLookup)
       },
       onConnected: (peerId, others) => {
         console.log(
@@ -432,16 +530,19 @@ async function boot() {
         // Existing peers in the room need their bikes spawned too —
         // peer-joined only fires for joins AFTER us.
         for (const p of others) spawnRemoteBike(p)
+        applyHostRole(isHostFor(peerId, others))
         renderRoomChip()
       },
       onPeerJoined: (peerId) => {
         console.log(`[net] peer ${peerId} joined`)
         spawnRemoteBike(peerId)
+        if (net) applyHostRole(isHostFor(net.peerId, net.remotePeers))
         renderRoomChip()
       },
       onPeerLeft: (peerId) => {
         console.log(`[net] peer ${peerId} left`)
         despawnRemoteBike(peerId)
+        if (net) applyHostRole(isHostFor(net.peerId, net.remotePeers))
         renderRoomChip()
       },
       onRoomFull: () => {
@@ -641,6 +742,7 @@ async function boot() {
         ready: () => room.ready,
         peerId: () => room.peerId,
         remotePeers: () => room.remotePeers,
+        isHost: () => (room.ready ? isHostFor(room.peerId, room.remotePeers) : true),
         recentRemoteFrames: () =>
           // Shallow-copy so devtools probes can't mutate the live buffer.
           recentRemoteFrames.map((f) => ({
@@ -657,6 +759,7 @@ async function boot() {
           }
           return out
         },
+        snapshotsReceived: () => room.snapshotsReceived,
       }
     },
   })
@@ -762,11 +865,74 @@ async function boot() {
   // in single-player there is exactly one peer (slot 0).
   const LOCAL_PEER_ID = 0
   let simTick = 0
-  const inputFrameBuffer = new ArrayBuffer(INPUT_FRAME_BYTES)
+  const inputFrameBuffer = new ArrayBuffer(INPUT_FRAME_WIRE_BYTES)
   const inputFrameView = new DataView(inputFrameBuffer)
   // Reused per-tick to feed simulateStep without allocating a fresh Map
   // each frame. cleared at the top of each tick before population.
   const tickPeerInputs = new Map<number, Intent>()
+
+  // M10.11 — TransformSnapshot broadcast. 20 Hz (every 3 sim ticks at
+  // 60 Hz). Each peer broadcasts its own player bike; the AI host also
+  // includes the NUM_AI=4 AI bikes in the same message. Reused buffer
+  // sized for 5 records (max we ever send) so we don't allocate per send.
+  const SNAPSHOT_TICKS = 3
+  const MAX_SNAPSHOT_BIKES = 1 + 4
+  const snapshotSendBuf = new Uint8Array(snapshotByteLength(MAX_SNAPSHOT_BIKES))
+  const snapshotSendView = new DataView(snapshotSendBuf.buffer)
+  // Reused snapshot literal — bikes array is rebuilt per send to avoid
+  // allocating a fresh TransformSnapshot wrapper.
+  const snapshotScratch: TransformSnapshot = { senderPeerId: 0, tick: 0, bikes: [] }
+  const snapshotRecords: BikeSnapshotRecord[] = []
+  function buildAndSendSnapshot(tick: number, iAmHost: boolean): void {
+    if (!net?.ready) return
+    if (net.remotePeers.length === 0) return // nobody listening
+    snapshotRecords.length = 0
+    const myPeerId = net.peerId
+    // Own player bike.
+    const pHandle = RBHandleStore.get(playerEid)
+    const pRb = pHandle ? phys.world.getRigidBody(pHandle.handle) : null
+    if (pRb) {
+      const t = pRb.translation()
+      const q = pRb.rotation()
+      const v = pRb.linvel()
+      snapshotRecords.push({
+        ownerPeerId: myPeerId,
+        bikeKind: 0,
+        bikeIndex: 0,
+        flags: 0,
+        position: { x: t.x, y: t.y, z: t.z },
+        rotation: { x: q.x, y: q.y, z: q.z, w: q.w },
+        velocity: { x: v.x, y: v.y, z: v.z },
+      })
+    }
+    // AI bikes — host only.
+    if (iAmHost) {
+      for (let i = 0; i < aiEids.length; i++) {
+        const eid = aiEids[i] as number
+        const h = RBHandleStore.get(eid)
+        const rb = h ? phys.world.getRigidBody(h.handle) : null
+        if (!rb) continue
+        const t = rb.translation()
+        const q = rb.rotation()
+        const v = rb.linvel()
+        snapshotRecords.push({
+          ownerPeerId: myPeerId,
+          bikeKind: 1,
+          bikeIndex: i,
+          flags: 0,
+          position: { x: t.x, y: t.y, z: t.z },
+          rotation: { x: q.x, y: q.y, z: q.z, w: q.w },
+          velocity: { x: v.x, y: v.y, z: v.z },
+        })
+      }
+    }
+    if (snapshotRecords.length === 0) return
+    snapshotScratch.senderPeerId = myPeerId
+    snapshotScratch.tick = tick
+    snapshotScratch.bikes = snapshotRecords
+    const byteLength = encodeTransformSnapshotInto(snapshotSendView, 0, snapshotScratch)
+    net.sendBinary(snapshotSendBuf.subarray(0, byteLength))
+  }
 
   function frame(now: number) {
     const dt = Math.min((now - last) / 1000, 1 / 15)
@@ -811,12 +977,18 @@ async function boot() {
             if (pid !== decoded.peerId) tickPeerInputs.set(pid, intent)
           }
         }
+        const iAmHost = net?.ready ? isHostFor(net.peerId, net.remotePeers) : true
         simulateStep(sim, phys, waveField, track, raceTick, {
           peerInputs: tickPeerInputs,
           locked: raceHud.isLocked(),
           autoPlay,
           waveTimeScale: waterMesh.debug.getTimeScale(),
+          runAI: iAmHost,
         })
+        // M10.11 — broadcast at 20 Hz. The send is gated on `net.ready &&
+        // remotePeers > 0` inside `buildAndSendSnapshot`, so this no-ops
+        // outside a room.
+        if (simTick % SNAPSHOT_TICKS === 0) buildAndSendSnapshot(simTick, iAmHost)
         simTick++
       }
       physAccum -= phys.fixedDt
