@@ -76,6 +76,22 @@ export type HoverDebug = {
    *  at boot. The sim's RAF-driven step is gated off in that mode; the
    *  harness drives `simulateStep` here. */
   determinism?: DeterminismHarness
+  /** M10.4 PartyKit relay probe. Present only when ?room=<id> was set at
+   *  boot. Use for verifying the wire-format round-trip across peers in a
+   *  two-tab dev session. Read-only. */
+  net?: NetDebugProbe
+}
+
+export type NetDebugProbe = {
+  /** True once the server has assigned us a slot AND the socket is OPEN. */
+  ready(): boolean
+  /** Our assigned peer slot, or -1 before the server's hello arrives. */
+  peerId(): number
+  /** Slots currently held by remote peers in our room. */
+  remotePeers(): readonly number[]
+  /** Last N InputFrames received from remote peers (most recent last).
+   *  Bounded — earlier frames are dropped. */
+  recentRemoteFrames(): ReadonlyArray<{ tick: number; peerId: number; intent: Intent }>
 }
 
 export type DeterminismHarness = {
@@ -132,6 +148,9 @@ export type DebugAccessors = {
   /** Race-event tick function returned by createRaceSystem. The determinism
    *  harness threads this through simulateStep. */
   raceTick(): RaceTick
+  /** Optional accessor for the M10.4 net probe. Returns null when no
+   *  ?room=<id> was provided at boot (single-player). */
+  netProbe?(): NetDebugProbe | null
 }
 
 declare global {
@@ -257,7 +276,8 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
         const track = accessors.track()
         const raceTick = accessors.raceTick()
         // Fall back to emptyIntent if the caller passed an empty array.
-        const sample = (i: number): Intent => intents[Math.min(i, intents.length - 1)] ?? emptyIntent()
+        const sample = (i: number): Intent =>
+          intents[Math.min(i, intents.length - 1)] ?? emptyIntent()
         for (let i = 0; i < ticks; i++) {
           simulateStep(sim, phys, waveField, track, raceTick, {
             playerIntent: sample(i),
@@ -272,17 +292,18 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     api.determinism = harness
   }
 
+  const netProbe = accessors.netProbe?.() ?? null
+  if (netProbe) {
+    api.net = netProbe
+  }
+
   // Normally __hover is dev/test only — exposing setIntentOverride etc.
   // in a public build would let anyone drive the bike from devtools. The
   // determinism harness is the exception: read-only snapshot() plus a
   // self-contained run() that doesn't touch shared state, and we need it
   // reachable on a Vercel preview to do cross-machine determinism testing.
   // So when ?determinism=1 is set, attach the API even in prod.
-  if (
-    import.meta.env.DEV ||
-    import.meta.env.MODE === 'test' ||
-    accessors.determinismMode()
-  ) {
+  if (import.meta.env.DEV || import.meta.env.MODE === 'test' || accessors.determinismMode()) {
     window.__hover = api
   }
   return api
