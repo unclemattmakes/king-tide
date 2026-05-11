@@ -119,6 +119,7 @@ async function boot() {
   const inputEl = document.getElementById('hud-input')
   const raceEl = document.getElementById('hud-race')
   const audioEl = document.getElementById('hud-audio')
+  const roomEl = document.getElementById('hud-room')
   const finishEl = document.getElementById('finish')
   const finishTitle = document.getElementById('finish-title')
   const finishSub = document.getElementById('finish-sub')
@@ -387,7 +388,21 @@ async function boot() {
     remoteEids.delete(peerId)
   }
 
+  function renderRoomChip(): void {
+    if (!roomEl) return
+    if (!net || !net.ready) {
+      roomEl.style.display = roomId ? '' : 'none'
+      roomEl.textContent = roomId ? `room: ${roomId} (connecting…)` : 'room: --'
+      return
+    }
+    const remote = net.remotePeers
+    const peers = remote.length === 0 ? 'alone' : `+ P${remote.join(', P')}`
+    roomEl.style.display = ''
+    roomEl.textContent = `room: ${roomId} | you: P${net.peerId} | ${peers}`
+  }
+
   if (roomId) {
+    renderRoomChip()
     net = createNetRoom({
       host: netHost,
       roomId,
@@ -402,16 +417,26 @@ async function boot() {
         // Existing peers in the room need their bikes spawned too —
         // peer-joined only fires for joins AFTER us.
         for (const p of others) spawnRemoteBike(p)
+        renderRoomChip()
       },
       onPeerJoined: (peerId) => {
         console.log(`[net] peer ${peerId} joined`)
         spawnRemoteBike(peerId)
+        renderRoomChip()
       },
       onPeerLeft: (peerId) => {
         console.log(`[net] peer ${peerId} left`)
         despawnRemoteBike(peerId)
+        renderRoomChip()
       },
-      onRoomFull: () => console.warn(`[net] room "${roomId}" is full`),
+      onRoomFull: () => {
+        console.warn(`[net] room "${roomId}" is full`)
+        if (roomEl) {
+          roomEl.style.display = ''
+          roomEl.style.color = '#ff7777'
+          roomEl.textContent = `room: ${roomId} FULL`
+        }
+      },
     })
   }
 
