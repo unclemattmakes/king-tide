@@ -35,6 +35,16 @@ export interface RaceHud {
   skipCountdown(): void
   /** Reset gate-time table + countdown (used on respawn / replay). */
   reset(): void
+  /** M10.12 lobby — when the HUD is constructed with `deferStart: true`,
+   *  the countdown does NOT auto-start on first tick. Call this once the
+   *  lobby gate is cleared (e.g. all peers ready) to begin 3-2-1-GO.
+   *  No-op if the countdown is already running / done, or if the HUD
+   *  was built without `deferStart`. */
+  armCountdown(): void
+  /** M10.12 lobby — true if the HUD is in deferred-start mode AND
+   *  hasn't been armed yet. While this is true, `isLocked()` also
+   *  returns true. The lobby UI uses this to decide visibility. */
+  isWaitingForLobby(): boolean
 }
 
 export interface RaceHudInput {
@@ -78,6 +88,12 @@ const COUNTDOWN_TOTAL = COUNTDOWN_PREROLL + COUNTDOWN_TICK_SECONDS * 3 + COUNTDO
 export interface RaceHudOptions {
   track: Track
   onCountdownTick?: (number: 3 | 2 | 1 | 0) => void
+  /** M10.12 lobby — when true, the countdown does NOT auto-start on
+   *  first tick. Stays gated (and `isLocked()` returns true) until the
+   *  caller invokes `armCountdown()`. Used by multiplayer rooms; single-
+   *  player leaves this off so the existing immediate-start behavior is
+   *  preserved. */
+  deferStart?: boolean
 }
 
 export function createRaceHud(opts: RaceHudOptions): RaceHud {
@@ -124,6 +140,10 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
   let countdownStartMs = -1
   let countdownDone = false
   let lastTickValue: 3 | 2 | 1 | 0 | -1 = -1
+  // M10.12 lobby — when true, the countdown is held until `armCountdown`
+  // is called. Defaults to false so single-player + e2e harness still
+  // auto-start.
+  let waitingForLobby = opts.deferStart === true
 
   // ---- Gap toast state -----------------------------------------------------
   let gapVisibleFor = 0 // seconds remaining
@@ -183,6 +203,10 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
 
   function tickCountdown(): void {
     if (countdownDone) return
+    // M10.12 lobby — hold the countdown gate. While waiting, the banner
+    // stays whatever the lobby UI sets it to (we don't clobber it here);
+    // `isLocked()` returns true; the sim doesn't advance the race.
+    if (waitingForLobby) return
     if (countdownStartMs < 0) countdownStartMs = performance.now()
     const countdownElapsed = (performance.now() - countdownStartMs) / 1000
 
@@ -399,6 +423,8 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
   }
 
   function skipCountdown(): void {
+    // Skip implies arming, so lobby holds also release.
+    waitingForLobby = false
     // Drop the anchor far enough in the past that the next tickCountdown
     // call observes "elapsed >= total" and shuts the banner down.
     countdownStartMs = performance.now() - COUNTDOWN_TOTAL * 1000 - 1
@@ -407,9 +433,19 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     bannerText.textContent = ''
   }
 
+  function armCountdown(): void {
+    if (!waitingForLobby) return
+    waitingForLobby = false
+    // Re-anchor as if the first tick is happening right now so the
+    // preroll + 3-2-1 plays out from a clean wall clock — no time lost
+    // to however long the lobby took to clear.
+    countdownStartMs = -1
+  }
+
   return {
     tick,
     isLocked: () => {
+      if (waitingForLobby) return true
       if (countdownDone) return false
       if (countdownStartMs < 0) return true
       const elapsed = (performance.now() - countdownStartMs) / 1000
@@ -419,6 +455,8 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     reportPlayerCheckpoint,
     skipCountdown,
     reset,
+    armCountdown,
+    isWaitingForLobby: () => waitingForLobby,
   }
 }
 
