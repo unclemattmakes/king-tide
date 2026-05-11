@@ -1,4 +1,4 @@
-import { addComponent, hasComponent, query, removeComponent } from 'bitecs'
+import { addComponent, hasComponent, query, removeComponent, removeEntity } from 'bitecs'
 import * as THREE from 'three'
 import { spawnBikes } from './boot/spawn-bikes'
 import { loadTrackForBoot } from './boot/track-loader'
@@ -57,6 +57,7 @@ import { AIController, AIControllerStore, AITag, defaultAIController } from './g
 import { ExplosionTag, MineTag, MissileTag } from './game/components/combat'
 import type { PickupType } from './game/components/pickup'
 import { RacerStore } from './game/components/race'
+import { createBike } from './game/entities/bike'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
 import { createPropColliders } from './game/entities/props'
 import { simulateStep } from './game/sim-step'
@@ -152,33 +153,13 @@ async function boot() {
   // a PartyKit room; otherwise the game runs single-player as before. The
   // host defaults to localhost:1999 (the `pnpm party:dev` server); pass
   // `?host=<h>` to override (e.g. a deployed `hoverbike.<user>.partykit.dev`).
-  // For now the room is a pure relay — local InputFrames go out, remote
-  // frames come in and are buffered for inspection via __hover.net but
-  // NOT yet applied to remote sim entities. Lockstep / rollback consumption
-  // ships in a later slice.
+  // Connection is deferred until after the local bike + asset registry
+  // are ready so the join/leave callbacks can spawn/despawn remote-peer
+  // bikes safely (M10.7).
   const roomId = params.get('room')
   const netHost = params.get('host') ?? 'localhost:1999'
   const recentRemoteFrames: InputFrame[] = []
   let net: NetRoom | null = null
-  if (roomId) {
-    net = createNetRoom({
-      host: netHost,
-      roomId,
-      onRemoteFrame: (frame) => {
-        // Bounded ring so devtools probes can see the latest activity
-        // without growing the buffer forever.
-        recentRemoteFrames.push(frame)
-        if (recentRemoteFrames.length > 64) recentRemoteFrames.shift()
-      },
-      onConnected: (peerId, others) =>
-        console.log(
-          `[net] joined room "${roomId}" as peer ${peerId}, others: [${others.join(', ')}]`,
-        ),
-      onPeerJoined: (peerId) => console.log(`[net] peer ${peerId} joined`),
-      onPeerLeft: (peerId) => console.log(`[net] peer ${peerId} left`),
-      onRoomFull: () => console.warn(`[net] room "${roomId}" is full`),
-    })
-  }
 
   // M10.2 determinism harness. When ?determinism=1 is set, the fixed-step
   // sim loop is gated off so the Playwright probe can drive `simulateStep`
@@ -356,6 +337,77 @@ async function boot() {
     playerVariant,
     activeReplay,
   })
+
+  // M10.7 — remote-peer bike spawn. Each connected remote peer gets a
+  // PeerControlled bike whose ControlIntent is driven by the relay's
+  // last-known intent for that slot (drained in the sim loop). Not
+  // Racer-tagged for now — remote bikes are visible avatars, not
+  // competing for the local race result. Variant defaults to racer; a
+  // future slice can negotiate variant + livery over the room.
+  const remoteEids = new Map<number, number>()
+  function spawnRemoteBike(peerId: number): number {
+    const racer = resolveBikeVariant('racer')
+    // Spread peers 4m apart across the start line, 15m behind the local
+    // grid, so they don't visually overlap the AI bikes on spawn.
+    const dx = (peerId - 4) * 4
+    const dz = -15
+    const eid = createBike(sim, phys, {
+      position: {
+        x: track.start.position.x + dx,
+        y: track.start.position.y,
+        z: track.start.position.z + dz,
+      },
+      yaw: track.start.yaw,
+      peerId,
+      asRacer: false,
+      stats: {
+        ...racer.stats,
+        bodyColor: racer.bodyColor,
+        variantId: racer.id,
+      },
+    })
+    remoteEids.set(peerId, eid)
+    return eid
+  }
+  function despawnRemoteBike(peerId: number): void {
+    const eid = remoteEids.get(peerId)
+    if (eid === undefined) return
+    const handle = RBHandleStore.get(eid)
+    if (handle) {
+      const rb = phys.world.getRigidBody(handle.handle)
+      if (rb) phys.world.removeRigidBody(rb)
+    }
+    removeEntity(sim, eid)
+    remoteEids.delete(peerId)
+  }
+
+  if (roomId) {
+    net = createNetRoom({
+      host: netHost,
+      roomId,
+      onRemoteFrame: (frame) => {
+        recentRemoteFrames.push(frame)
+        if (recentRemoteFrames.length > 64) recentRemoteFrames.shift()
+      },
+      onConnected: (peerId, others) => {
+        console.log(
+          `[net] joined room "${roomId}" as peer ${peerId}, others: [${others.join(', ')}]`,
+        )
+        // Existing peers in the room need their bikes spawned too —
+        // peer-joined only fires for joins AFTER us.
+        for (const p of others) spawnRemoteBike(p)
+      },
+      onPeerJoined: (peerId) => {
+        console.log(`[net] peer ${peerId} joined`)
+        spawnRemoteBike(peerId)
+      },
+      onPeerLeft: (peerId) => {
+        console.log(`[net] peer ${peerId} left`)
+        despawnRemoteBike(peerId)
+      },
+      onRoomFull: () => console.warn(`[net] room "${roomId}" is full`),
+    })
+  }
 
   // Mark the initial "next" gate (cp 0). After the first frame the race
   // callback takes over.
