@@ -92,6 +92,9 @@ export type NetDebugProbe = {
   /** Last N InputFrames received from remote peers (most recent last).
    *  Bounded — earlier frames are dropped. */
   recentRemoteFrames(): ReadonlyArray<{ tick: number; peerId: number; intent: Intent }>
+  /** Last-write-wins intent buffer per remote peer slot. This is what
+   *  the sim loop drains into per-tick `peerInputs` each fixed step. */
+  latestPeerIntents(): Record<number, Intent>
 }
 
 export type DeterminismHarness = {

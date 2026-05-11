@@ -550,6 +550,15 @@ async function boot() {
             peerId: f.peerId,
             intent: { ...f.intent },
           })),
+        latestPeerIntents: () => {
+          // Snapshot the live Map into a plain object for devtools JSON
+          // serialization; the underlying map is mutated each tick.
+          const out: Record<number, Intent> = {}
+          for (const [pid, intent] of room.latestPeerIntents) {
+            out[pid] = { ...intent }
+          }
+          return out
+        },
       }
     },
   })
@@ -692,10 +701,18 @@ async function boot() {
         net?.sendFrame(localFrame)
         const decoded = decodeInputFrameFrom(inputFrameView, 0)
         // M10.5 — sim consumes a per-peer input map. Single-player passes
-        // exactly one entry (slot 0). Future slices add remote peers from
-        // the relay's buffered frames here without changing simulateStep.
+        // exactly one entry (slot 0). M10.6 — when a room is connected,
+        // drain the last-known intent for each remote peer in too; any
+        // PeerControlled bike whose peerId is in the map receives that
+        // intent. Remote-peer bike spawning lands in a follow-up slice;
+        // until then these remote entries match no entity and are no-ops.
         tickPeerInputs.clear()
         tickPeerInputs.set(decoded.peerId, decoded.intent)
+        if (net) {
+          for (const [pid, intent] of net.latestPeerIntents) {
+            if (pid !== decoded.peerId) tickPeerInputs.set(pid, intent)
+          }
+        }
         simulateStep(sim, phys, waveField, track, raceTick, {
           peerInputs: tickPeerInputs,
           locked: raceHud.isLocked(),

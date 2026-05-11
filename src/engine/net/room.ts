@@ -17,6 +17,7 @@
  */
 import PartySocket from 'partysocket'
 
+import type { Intent } from '../input/intent'
 import {
   decodeInputFrame,
   encodeInputFrame,
@@ -52,6 +53,14 @@ export type NetRoom = {
   /** Slots currently held by remote peers. Live — mutated on join/leave. */
   readonly remotePeers: readonly number[]
   sendFrame(frame: InputFrame): void
+  /**
+   * Latest-known `Intent` per remote peer slot, mutated each time a remote
+   * frame arrives. Sim loop drains this into the per-tick peer-input map
+   * passed to `simulateStep`. This is a "last-write-wins" buffer — no tick
+   * ordering or jitter buffering yet; that's a later slice. The local
+   * peer is NOT included (callers always know their own intent firsthand).
+   */
+  readonly latestPeerIntents: ReadonlyMap<number, Intent>
   close(): void
 }
 
@@ -83,6 +92,10 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
   let myPeerId = -1
   let socketOpen = false
   const remotePeers = new Set<number>()
+  // Last-write-wins intent buffer per remote peer slot. Sized at most
+  // MAX_PEERS_PER_ROOM - 1 entries. Cleared on disconnect; entries
+  // pruned on peer-left.
+  const latestPeerIntents = new Map<number, Intent>()
 
   const socket = new PartySocket({
     host: cfg.host,
@@ -97,6 +110,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
     socketOpen = false
     myPeerId = -1
     remotePeers.clear()
+    latestPeerIntents.clear()
   })
 
   socket.addEventListener('message', (event: MessageEvent) => {
@@ -117,6 +131,9 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
           break
         case 'peer-left':
           remotePeers.delete(msg.peerId)
+          // Drop the departed peer's buffered intent so a future room
+          // member assigned the same slot doesn't inherit stale controls.
+          latestPeerIntents.delete(msg.peerId)
           cfg.onPeerLeft?.(msg.peerId)
           break
         case 'room-full':
@@ -126,7 +143,13 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
       return
     }
     if (data instanceof ArrayBuffer) {
-      cfg.onRemoteFrame?.(decodeInputFrame(data))
+      const frame = decodeInputFrame(data)
+      // Defensive: a misconfigured peer could send a frame stamped with
+      // our own slot. Ignore those — we always trust our local input.
+      if (frame.peerId !== myPeerId) {
+        latestPeerIntents.set(frame.peerId, frame.intent)
+      }
+      cfg.onRemoteFrame?.(frame)
     }
   })
 
@@ -143,6 +166,9 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
     },
     get remotePeers() {
       return [...remotePeers]
+    },
+    get latestPeerIntents() {
+      return latestPeerIntents
     },
     sendFrame(frame: InputFrame) {
       if (!ready()) return
