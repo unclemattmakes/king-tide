@@ -116,7 +116,13 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
   const positionEl = document.getElementById('race-position') as HTMLElement
 
   // ---- Countdown state -----------------------------------------------------
-  let countdownElapsed = 0
+  // Anchored on a wall-clock timestamp captured on the first tick so the
+  // countdown phases out at real-time pace regardless of frame jitter,
+  // first-paint stalls, or short tab-focus drops. Earlier versions
+  // accumulated `dt` and lost time on heavy first frames, which read as
+  // "the countdown didn't run".
+  let countdownStartMs = -1
+  let countdownDone = false
   let lastTickValue: 3 | 2 | 1 | 0 | -1 = -1
 
   // ---- Gap toast state -----------------------------------------------------
@@ -175,13 +181,17 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     return { cx: tx * w, cy: tz * h }
   }
 
-  function tickCountdown(dt: number): void {
+  function tickCountdown(): void {
+    if (countdownDone) return
+    if (countdownStartMs < 0) countdownStartMs = performance.now()
+    const countdownElapsed = (performance.now() - countdownStartMs) / 1000
+
     if (countdownElapsed >= COUNTDOWN_TOTAL) {
-      banner.classList.remove('show', 'flash-go')
+      banner.classList.remove('show', 'flash-go', 'pop')
       bannerText.textContent = ''
+      countdownDone = true
       return
     }
-    countdownElapsed += dt
 
     // Decide which "phase" we're in.
     // [0, preroll)                               → blank (settle)
@@ -234,7 +244,7 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
   }
 
   function tick(input: RaceHudInput): void {
-    tickCountdown(input.dt)
+    tickCountdown()
 
     // ---- Timer card -------------------------------------------------------
     timeValue.textContent = formatTime(input.raceTime)
@@ -381,21 +391,30 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
   }
 
   function reset(): void {
-    countdownElapsed = 0
+    countdownStartMs = -1
+    countdownDone = false
     lastTickValue = -1
     gapVisibleFor = 0
     bestCrossingTime.clear()
   }
 
   function skipCountdown(): void {
-    countdownElapsed = COUNTDOWN_TOTAL
+    // Drop the anchor far enough in the past that the next tickCountdown
+    // call observes "elapsed >= total" and shuts the banner down.
+    countdownStartMs = performance.now() - COUNTDOWN_TOTAL * 1000 - 1
+    countdownDone = true
     banner.classList.remove('show', 'flash-go', 'pop')
     bannerText.textContent = ''
   }
 
   return {
     tick,
-    isLocked: () => countdownElapsed < COUNTDOWN_PREROLL + COUNTDOWN_TICK_SECONDS * 3,
+    isLocked: () => {
+      if (countdownDone) return false
+      if (countdownStartMs < 0) return true
+      const elapsed = (performance.now() - countdownStartMs) / 1000
+      return elapsed < COUNTDOWN_PREROLL + COUNTDOWN_TICK_SECONDS * 3
+    },
     recordRacerCheckpoint,
     reportPlayerCheckpoint,
     skipCountdown,

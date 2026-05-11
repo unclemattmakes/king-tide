@@ -63,7 +63,12 @@ export function createRaceSystem(track: Track, events: RaceEvents = {}) {
       // moving in +fwd direction).
       const crossed = prev !== undefined && prev < 0 && signed >= 0
       const insideLaterally = Math.abs(lateral) < cp.halfWidth
-      const insideVertically = vertical > -1.5 && vertical < cp.height + 2
+      // Trigger extends 2× further below the gate origin than its original
+      // tight box, so a bike skimming the water or briefly dipping below
+      // the gate's base still registers the crossing. Slipping under was
+      // a common bug — the player would pass between the pillars but at a
+      // y the trigger rejected.
+      const insideVertically = vertical > -3 && vertical < cp.height + 2
 
       if (crossed && insideLaterally && insideVertically) {
         const wasFirstCrossing = racer.checkpointsCrossed === 0

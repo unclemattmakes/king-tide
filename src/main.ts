@@ -843,12 +843,12 @@ async function boot() {
       const nextCp = track.checkpoints[racerNow.nextCheckpoint]
       if (nextCp) {
         const targetVec = new THREE.Vector3(nextCp.position.x, nextCp.position.y, nextCp.position.z)
-        dirArrow.tick(tmpPos, targetVec, dt)
+        dirArrow.tick(camera, tmpPos, targetVec, dt)
       } else {
-        dirArrow.tick(tmpPos, null, dt)
+        dirArrow.tick(camera, tmpPos, null, dt)
       }
     } else {
-      dirArrow.tick(tmpPos, null, dt)
+      dirArrow.tick(camera, tmpPos, null, dt)
     }
 
     renderer.render(scene, camera)
