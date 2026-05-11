@@ -75,9 +75,10 @@ function applyHitReaction(
       const v = rb.linvel()
       rb.setLinvel({ x: v.x * HIT_LINEAR_DAMPING, y: v.y, z: v.z * HIT_LINEAR_DAMPING }, true)
       const av = rb.angvel()
-      // Spin around world-Y (yaw spinout). Direction randomised so it
-      // doesn't always feel the same way.
-      const dir = Math.random() < 0.5 ? -1 : 1
+      // Spin around world-Y (yaw spinout). Direction randomised via the
+      // sim PRNG (not Math.random) so two lockstep clients agree on which
+      // way the victim spins.
+      const dir = sim.rng.next() < 0.5 ? -1 : 1
       rb.setAngvel({ x: av.x, y: av.y + dir * HIT_SPIN_TORQUE, z: av.z }, true)
     }
   }

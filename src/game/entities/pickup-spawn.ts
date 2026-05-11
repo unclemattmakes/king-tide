@@ -1,6 +1,7 @@
 import { addComponent, addEntity } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { Vec3 } from '@/engine/sim/physics/vec'
+import type { Rng } from '@/engine/sim/rng'
 import {
   PickupSpawnState,
   PickupSpawnStateStore,
@@ -13,8 +14,8 @@ import {
 // default. Tune the ratio if combat starts dominating racing.
 const POOL: PickupType[] = ['boost', 'boost', 'missile', 'mine', 'shield']
 
-export function pickRandomPickupType(): PickupType {
-  return POOL[Math.floor(Math.random() * POOL.length)] ?? 'boost'
+export function pickRandomPickupType(rng: Rng): PickupType {
+  return POOL[rng.nextInt(POOL.length)] ?? 'boost'
 }
 
 export function createPickupSpawn(sim: SimWorld, position: Vec3, spawnIndex: number): number {
@@ -26,7 +27,7 @@ export function createPickupSpawn(sim: SimWorld, position: Vec3, spawnIndex: num
     position,
     active: true,
     respawnIn: 0,
-    nextType: pickRandomPickupType(),
+    nextType: pickRandomPickupType(sim.rng),
   })
   return eid
 }

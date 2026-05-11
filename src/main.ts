@@ -52,29 +52,10 @@ import type { PickupType } from './game/components/pickup'
 import { RacerStore } from './game/components/race'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
 import { createPropColliders } from './game/entities/props'
-import { aiCombatSystem } from './game/systems/ai-combat'
-import { aiControlSystem } from './game/systems/ai-control'
-import {
-  explosionTickSystem,
-  mineSystem,
-  missileSystem,
-  shieldTickSystem,
-  stunOverrideSystem,
-  stunTickSystem,
-} from './game/systems/combat'
-import { hoverSystem } from './game/systems/hover'
-import { applyPlayerIntent } from './game/systems/input-apply'
-import {
-  boostTickSystem,
-  getHeldPickup,
-  pickupSystem,
-  pickupUseSystem,
-} from './game/systems/pickup'
+import { getHeldPickup } from './game/systems/pickup'
 import { createRaceSystem } from './game/systems/race'
-import { rubberBandSystem } from './game/systems/rubber-band'
 import { computeStandings } from './game/systems/standings'
-import { syncFromPhysics } from './game/systems/sync-from-physics'
-import { wakeUpdateSystem } from './game/systems/wake-update'
+import { simulateStep } from './game/sim-step'
 
 /**
  * Boot sequence — phases, in order:
@@ -159,6 +140,13 @@ async function boot() {
   scene.add(waterMesh.mesh)
 
   const params = new URLSearchParams(window.location.search)
+
+  // M10.2 determinism harness. When ?determinism=1 is set, the fixed-step
+  // sim loop is gated off so the Playwright probe can drive `simulateStep`
+  // directly via __hover.determinism.run(). Render still runs so the page
+  // is alive; only the sim is frozen.
+  const determinismMode = params.get('determinism') === '1'
+  let determinismPaused = determinismMode
 
   // Replay playback mode. `?replay=session` reads a JSON replay payload
   // from sessionStorage (stashed there by the garage's Load Replay flow,
@@ -505,6 +493,9 @@ async function boot() {
     },
     isCollisionDebugOn: () => physicsDebug.isEnabled(),
     skipCountdown: () => raceHud.skipCountdown(),
+    determinismMode: () => determinismMode,
+    waveField: () => waveField,
+    raceTick: () => raceTick,
   })
   if (backendEl) backendEl.textContent = `backend: ${backend}`
   if (finishSub) finishSub.textContent = track.name
@@ -607,49 +598,18 @@ async function boot() {
     state.intent = state.intentOverride ?? readPlayerIntent(dt)
 
     physAccum += dt
+    // In determinism mode the sim is gated off — the harness drives ticks
+    // manually via __hover.determinism.run(). physAccum keeps draining so
+    // we don't spike on unpause.
     while (physAccum >= phys.fixedDt) {
-      // Wave-field clock advances at `fixedDt × waterDebugTimeScale` so the
-      // water debug menu can speed up / slow down / freeze the waves
-      // independently of the physics step. At the default 1× this is the
-      // original behavior.
-      advanceWaveField(waveField, phys.fixedDt * waterMesh.debug.getTimeScale())
-      // Refresh wake sources from the current bike rigid bodies BEFORE
-      // hoverSystem reads the wave field for buoyancy. This is what makes
-      // the lead bike's wake felt by trailing riders (and visible in the
-      // GPU shader, which reads the same impact data via waterMesh.tick).
-      wakeUpdateSystem(sim, phys, waveField)
-      // Player intent first; AI runs after and overwrites for entities tagged
-      // AITag (which now includes the player while auto-play is on). After
-      // ai-control writes the racing-line intent, ai-combat decides whether
-      // to flip fire=true based on the AI's held pickup. Stun runs LAST in
-      // the intent chain so spun-out bikes can't drive through their own
-      // hit reaction.
-      const locked = raceHud.isLocked()
-      if (locked) {
-        // During countdown: throttle/steer/AI control are suppressed so all
-        // bikes idle on their hover pads and no one launches before "GO!".
-        applyPlayerIntent(sim, emptyIntent())
-      } else if (!autoPlay) {
-        applyPlayerIntent(sim, state.intent)
+      if (!determinismPaused) {
+        simulateStep(sim, phys, waveField, track, raceTick, {
+          playerIntent: state.intent,
+          locked: raceHud.isLocked(),
+          autoPlay,
+          waveTimeScale: waterMesh.debug.getTimeScale(),
+        })
       }
-      if (!locked) aiControlSystem(sim, phys, track)
-      aiCombatSystem(sim, phys)
-      stunOverrideSystem(sim)
-      hoverSystem(sim, phys, waveField)
-      phys.step()
-      syncFromPhysics(sim, phys)
-      // Race time is paused during the countdown so lap timers count from
-      // the GO! moment rather than from window load.
-      if (!locked) raceTick(sim, phys, phys.fixedDt)
-      pickupSystem(sim, phys, phys.fixedDt)
-      pickupUseSystem(sim, phys)
-      mineSystem(sim, phys, phys.fixedDt)
-      missileSystem(sim, phys, phys.fixedDt)
-      explosionTickSystem(sim, phys.fixedDt)
-      boostTickSystem(sim, phys.fixedDt)
-      shieldTickSystem(sim, phys.fixedDt)
-      stunTickSystem(sim, phys.fixedDt)
-      rubberBandSystem(sim, track)
       physAccum -= phys.fixedDt
     }
 
