@@ -33,6 +33,7 @@ export type TrackJson = {
   props?: Prop[]
   environmentGlb?: string
   water?: WaterConfig
+  gateSpacing?: number
 }
 
 export async function loadTrackFromJson(url: string): Promise<Track> {
@@ -130,6 +131,16 @@ export function buildTrackFromJson(input: unknown): Track {
   if (environmentGlb !== undefined && typeof environmentGlb !== 'string') {
     throw new Error('track-json: environmentGlb must be a string if present')
   }
+  const gateSpacingRaw = (input as { gateSpacing?: unknown }).gateSpacing
+  let gateSpacing: number | undefined
+  if (gateSpacingRaw !== undefined) {
+    if (typeof gateSpacingRaw !== 'number' || !(gateSpacingRaw > 0)) {
+      throw new Error(
+        `track-json: gateSpacing must be a positive number if present (got ${String(gateSpacingRaw)})`,
+      )
+    }
+    gateSpacing = gateSpacingRaw
+  }
 
   const track: Track = {
     id,
@@ -145,6 +156,7 @@ export function buildTrackFromJson(input: unknown): Track {
   }
   if (environmentGlb) track.environmentGlb = environmentGlb
   if (water) track.water = water
+  if (gateSpacing !== undefined) track.gateSpacing = gateSpacing
   return track
 }
 
@@ -208,6 +220,7 @@ export function trackToJson(track: Track): TrackJson {
   }
   if (track.environmentGlb) out.environmentGlb = track.environmentGlb
   if (track.water) out.water = { ...track.water }
+  if (track.gateSpacing !== undefined) out.gateSpacing = track.gateSpacing
   return out
 }
 

@@ -180,6 +180,8 @@ def main() -> None:
         use_active_collection=False,
         export_cameras=False,
         export_lights=False,
+        export_gpu_instances=True,
+        export_gn_mesh=True,
     )
     print("[export] done")
 

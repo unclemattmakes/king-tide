@@ -57,6 +57,16 @@ export function attachTrackColliders(group: THREE.Object3D, phys: PhysicsWorld):
   group.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh)) return
     if (obj.userData?.kind === 'decoration') return
+    // EXT_mesh_gpu_instancing produces THREE.InstancedMesh — scattered
+    // props from Blender's GN scatter pipeline land here. The mesh's
+    // matrixWorld is the prototype's transform, not the per-instance
+    // transforms (those live in instanceMatrix). Registering one
+    // trimesh against the prototype transform would put a single
+    // collider in the wrong place. Per the Item 4 V1 scope in
+    // docs/blender-wishlist.md, scatter is render-only by default;
+    // a future `kind = "collidable_scatter"` extra can opt in by
+    // iterating instanceMatrix here.
+    if (obj instanceof THREE.InstancedMesh) return
 
     const geom = obj.geometry as THREE.BufferGeometry
     const posAttr = geom.attributes.position

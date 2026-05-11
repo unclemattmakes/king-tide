@@ -29,6 +29,48 @@ This doc captures the build's current state, controls, known issues, and next st
 - Spec → GLB asset pipeline (M9.27, flipped to per-variant in M9.39): `specs/{bikes,props,tracks}/*.json` + `tools/blender/build_*.py` produce `public/assets/<cat>/*.glb` and `public/assets/manifest.json` via `pnpm gen:all`. Bike-loader instantiates the player + AI bike GLBs at boot; prop-loader pre-fetches asset-prop GLBs referenced by track JSON. **Bikes:** one `bikes-src/<id>.blend` per variant — open it in Blender, edit the variant directly (no shared kit, no propagation), click *Hoverbike → Export Bike to Game*, the GLB updates and the runtime picks it up on next reload. The same addon serves tracks via *Export Track to Game* and switches mode based on the .blend's parent dir. Headless `pnpm gen:bikes` opens each .blend, overlays spec.appearance recolour + spec.physics extras, exports. **Tracks:** spec-driven `build_track.py` round-trips through `tracks-src/<id>.blend` and emits both the GLB and a starter gameplay JSON. **Bike viewer** (`?viewer=<bikeId>` or the addon's *Copy Viewer URL*) opens a turntable with OrbitControls, sockets/colliders surfaced as gizmos.
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
 
+### Authoring — gate placement (2026-05-11)
+- **Editor** `?edit=1` has a new "Auto-place gates from spline" button.
+  Resamples the main AI spline by arc length at the track's `gateSpacing` (default 60m) and rebuilds the `checkpoints` array with new `splineT` values. One-shot: gates stay individually editable
+  afterwards.
+- **Blender addon** has matching "Rebuild Gate Preview" / "Hide
+  Gate Preview" buttons in the N-key Hoverbike tab. Builds a
+  render-disabled `_hoverbike_gate_preview` collection so the
+  gizmos never reach the exported `.glb`. See
+  [docs/blender-wishlist.md](./blender-wishlist.md) for the full
+  Item 2 writeup.
+- **Blender addon** also has "Rebuild Racer Preview" / "Hide Racer
+  Preview" buttons that drop a bike silhouette at `start_00` plus
+  the AI grid. Grid offsets come from
+  [`specs/grid-offsets.json`](../specs/grid-offsets.json), shared
+  with `src/boot/spawn-bikes.ts` so what you see in Blender matches
+  what spawns in-game. See Item 7 in
+  [docs/blender-wishlist.md](./blender-wishlist.md).
+- **Vertex attribute spec** locked. Procedural assets carry a
+  canonical `COLOR_0` attribute; foliage uses R/G/B/A for
+  sway/AO/phase/free, terrain reuses it for AO + path-worn mask
+  + biome blend. See [docs/vertex-attribute-spec.md](./vertex-attribute-spec.md).
+  Shared sway hook at `src/engine/render/foliage-sway.ts`;
+  Blender authoring helper at `tools/blender/vertex_attrs.py`.
+  Nothing in-game uses it yet — scaffolding for Items 3/4.
+- **Water preview** in Blender — "Rebuild Water Preview" / "Hide
+  Water Preview" buttons drop a vertex-displaced plane around
+  `water_volume_main` using the same 6-wave Gerstner preset the
+  runtime ships. Adjustable size / subdivisions / sample time via
+  N-key panel. See Item 5 in [docs/blender-wishlist.md](./blender-wishlist.md).
+- **Scatter pipeline** now round-trips Geometry Nodes instances as
+  `EXT_mesh_gpu_instancing`. Blender exports it; Three.js's
+  `GLTFLoader` produces `InstancedMesh` automatically; the collider
+  pass skips instanced meshes so scatter is render-only by default.
+  Authoring convention: a top-level Empty named `scatter_<zone>`
+  with a Geometry Nodes graph below it producing instances.
+  See [docs/blender-pipeline-guide.md#scattered-props-item-4](./blender-pipeline-guide.md#scattered-props-item-4).
+- **Turn indicators** in Blender — "Rebuild Turn Indicators" /
+  "Hide Turn Indicators" buttons drop chevron arrows at high-
+  curvature spots along `ai_spline_main`. Threshold + min-spacing
+  adjustable from the N-key panel. Defaults pick out ≤50m-radius
+  corners.
+
 ## Controls
 
 ### Keyboard

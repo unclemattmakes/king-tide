@@ -92,6 +92,10 @@ export type EditorPanelCallbacks = {
   onPlay(): void
   onOpen(): void
   onNew(): void
+  /** Resample the main AI spline at the track's gateSpacing and write
+   *  gate positions back into the draft. One-shot — after running, gates
+   *  remain individually editable. */
+  onAutoPlaceGates(): void
   /** Whether the currently-selected entity supports a given gizmo mode.
    *  Used to disable / grey out mode buttons that wouldn't apply. */
   selSupportsMode(m: GizmoMode): boolean
@@ -198,6 +202,10 @@ export function createEditorPanel(opts: {
            ${modeBtn('rotate', 'Rotate')}
            ${modeBtn('scale', 'Scale')}
          </div>
+       </div>`,
+      `<div style="display:flex;flex-direction:column;gap:6px">
+         <div style="color:#9bb">Spline tools</div>
+         <button type="button" id="ed-auto-gates" style="background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit;text-align:left">Auto-place gates from spline</button>
        </div>`,
       `<div id="ed-outliner" style="border-top:1px solid #2a3a4a;padding-top:8px;flex:1;overflow-y:auto;min-height:140px">
          ${outlinerHtml()}
@@ -424,6 +432,7 @@ export function createEditorPanel(opts: {
     panel.querySelector('#ed-play')?.addEventListener('click', callbacks.onPlay)
     panel.querySelector('#ed-open')?.addEventListener('click', callbacks.onOpen)
     panel.querySelector('#ed-new')?.addEventListener('click', callbacks.onNew)
+    panel.querySelector('#ed-auto-gates')?.addEventListener('click', callbacks.onAutoPlaceGates)
   }
 
   return { render, renderLight, setStatus, dispose }
