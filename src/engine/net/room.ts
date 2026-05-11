@@ -27,7 +27,7 @@ import {
 import type { ServerControlMessage } from './protocol'
 
 export type NetRoomConfig = {
-  /** PartyKit host. In dev: 'localhost:1999'. In prod: '<project>.<user>.partykit.dev'. */
+  /** PartyKit host. In dev: 'localhost:1999'. In prod: 'hoverbike.occ-matt.partykit.dev'. */
   host: string
   /** Room identifier. All peers in the same room id see each other's frames. */
   roomId: string
