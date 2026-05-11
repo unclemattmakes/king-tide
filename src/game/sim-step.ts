@@ -1,4 +1,3 @@
-import { emptyIntent } from '@/engine/input'
 import type { Intent } from '@/engine/input/intent'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
@@ -15,7 +14,7 @@ import {
   stunTickSystem,
 } from './systems/combat'
 import { hoverSystem } from './systems/hover'
-import { applyPlayerIntent } from './systems/input-apply'
+import { applyPeerInputs, EMPTY_PEER_INPUTS } from './systems/input-apply'
 import { boostTickSystem, pickupSystem, pickupUseSystem } from './systems/pickup'
 import { rubberBandSystem } from './systems/rubber-band'
 import { syncFromPhysics } from './systems/sync-from-physics'
@@ -24,8 +23,12 @@ import { wakeUpdateSystem } from './systems/wake-update'
 export type RaceTick = (sim: SimWorld, phys: PhysicsWorld, dt: number) => void
 
 export type StepInputs = {
-  /** Player 0 control intent for this tick. */
-  playerIntent: Intent
+  /** Per-peer control intents for this tick, keyed by peer slot. Bikes
+   *  tagged `PeerControlled { peerId }` look themselves up in this map;
+   *  any peer slot with no entry receives an empty intent (handles
+   *  packet loss / late-joining peers gracefully). In single-player the
+   *  caller passes `Map { 0 → localIntent }`. */
+  peerInputs: ReadonlyMap<number, Intent>
   /** True during pre-race countdown — suppresses controls and the race timer. */
   locked: boolean
   /** True when the player bike is being driven by AI (test mode). */
@@ -59,9 +62,9 @@ export function simulateStep(
   wakeUpdateSystem(sim, phys, waveField)
 
   if (inputs.locked) {
-    applyPlayerIntent(sim, emptyIntent())
+    applyPeerInputs(sim, EMPTY_PEER_INPUTS)
   } else if (!inputs.autoPlay) {
-    applyPlayerIntent(sim, inputs.playerIntent)
+    applyPeerInputs(sim, inputs.peerInputs)
   }
   if (!inputs.locked) aiControlSystem(sim, phys, track)
   aiCombatSystem(sim, phys)

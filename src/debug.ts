@@ -278,9 +278,14 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
         // Fall back to emptyIntent if the caller passed an empty array.
         const sample = (i: number): Intent =>
           intents[Math.min(i, intents.length - 1)] ?? emptyIntent()
+        // Reused single-entry peer-input map — the determinism harness
+        // only ever drives slot 0 (the local peer).
+        const peerInputs = new Map<number, Intent>()
         for (let i = 0; i < ticks; i++) {
+          peerInputs.clear()
+          peerInputs.set(0, sample(i))
           simulateStep(sim, phys, waveField, track, raceTick, {
-            playerIntent: sample(i),
+            peerInputs,
             locked: false,
             autoPlay: false,
             waveTimeScale: 1,

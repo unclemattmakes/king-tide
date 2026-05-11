@@ -657,6 +657,9 @@ async function boot() {
   let simTick = 0
   const inputFrameBuffer = new ArrayBuffer(INPUT_FRAME_BYTES)
   const inputFrameView = new DataView(inputFrameBuffer)
+  // Reused per-tick to feed simulateStep without allocating a fresh Map
+  // each frame. cleared at the top of each tick before population.
+  const tickPeerInputs = new Map<number, Intent>()
 
   function frame(now: number) {
     const dt = Math.min((now - last) / 1000, 1 / 15)
@@ -687,9 +690,14 @@ async function boot() {
         }
         encodeInputFrameInto(inputFrameView, 0, localFrame)
         net?.sendFrame(localFrame)
-        const decodedIntent = decodeInputFrameFrom(inputFrameView, 0).intent
+        const decoded = decodeInputFrameFrom(inputFrameView, 0)
+        // M10.5 — sim consumes a per-peer input map. Single-player passes
+        // exactly one entry (slot 0). Future slices add remote peers from
+        // the relay's buffered frames here without changing simulateStep.
+        tickPeerInputs.clear()
+        tickPeerInputs.set(decoded.peerId, decoded.intent)
         simulateStep(sim, phys, waveField, track, raceTick, {
-          playerIntent: decodedIntent,
+          peerInputs: tickPeerInputs,
           locked: raceHud.isLocked(),
           autoPlay,
           waveTimeScale: waterMesh.debug.getTimeScale(),
