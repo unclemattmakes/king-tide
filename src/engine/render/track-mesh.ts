@@ -53,7 +53,6 @@ export function createTrackVisuals(track: Track): TrackVisuals {
 type GateMesh = {
   root: THREE.Object3D
   recolorables: THREE.Mesh[]
-  beacon: THREE.Mesh
   dispose(): void
 }
 
@@ -134,34 +133,17 @@ function createGateMesh(cp: Checkpoint, isFinishLine: boolean): GateMesh {
     root.add(finishLabel)
   }
 
-  // Beacon — a tall, glowing column above the gate, visible from anywhere on
-  // the map. Only shown when the gate is the "next" target so the player can
-  // always see where to go.
-  const beaconHeight = 80
-  const beaconMat = new THREE.MeshBasicMaterial({
-    color: COLORS.next,
-    transparent: true,
-    opacity: 0.45,
-    depthWrite: false,
-  })
-  const beacon = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.5, 0.9, beaconHeight, 8, 1, true),
-    beaconMat,
-  )
-  beacon.position.set(0, beaconHeight / 2, 0)
-  beacon.visible = false
-  beacon.renderOrder = 2
-  root.add(beacon)
+  // Note: the "next" gate used to also wear a tall glowing beacon column,
+  // but the recolor + on-screen direction arrow already make the target
+  // gate unmistakable — the beacon was visual noise.
 
   function dispose() {
     pillarGeom.dispose()
     barGeom.dispose()
-    beaconMat.dispose()
-    beacon.geometry.dispose()
     for (const m of recolorables) (m.material as THREE.Material).dispose()
   }
 
-  return { root, recolorables, beacon, dispose }
+  return { root, recolorables, dispose }
 }
 
 /**
@@ -243,5 +225,4 @@ function setStateOn(gate: GateMesh, state: CheckpointVisualState): void {
     mat.emissive.setHex(state === 'next' ? color : 0x000000)
     mat.emissiveIntensity = state === 'next' ? 0.6 : 0
   }
-  gate.beacon.visible = state === 'next'
 }
