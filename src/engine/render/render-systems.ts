@@ -2,7 +2,15 @@ import { hasComponent, query } from 'bitecs'
 import type * as THREE from 'three'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import { cloneLoadedBike, type LoadedBike } from '@/game/assets/bike-loader'
-import { BikeStatsStore, BikeTag, PlayerTag, Transform, TransformStore } from '@/game/components'
+import {
+  BikeStatsStore,
+  BikeTag,
+  PeerControlled,
+  PeerControlledStore,
+  PlayerTag,
+  Transform,
+  TransformStore,
+} from '@/game/components'
 import { createBikeMesh } from './bike-mesh'
 
 const PLAYER_FALLBACK_COLOR = 0xff7733
@@ -65,7 +73,17 @@ export function createBikeRenderSystem(
           if (isPlayer) {
             mesh = cloneLoadedBike(loaded, { tintExhaust: PLAYER_EXHAUST_COLOR }).root
           } else {
-            const slot = aiColorCursor++ % AI_BODY_COLORS.length
+            // M10.9 — remote-peer bikes (tagged PeerControlled) use a
+            // deterministic peerId-based color slot so a peer who
+            // reconnects gets the same hue. AI bikes (no PeerControlled)
+            // fall back to the cursor cycle.
+            const peer = hasComponent(sim, eid, PeerControlled)
+              ? PeerControlledStore.get(eid)
+              : null
+            const slot =
+              peer !== null && peer !== undefined
+                ? peer.peerId % AI_BODY_COLORS.length
+                : aiColorCursor++ % AI_BODY_COLORS.length
             const tintLivery = AI_BODY_COLORS[slot] ?? 0xaaaaaa
             const tintExhaust = AI_EXHAUST_COLORS[slot] ?? 0xffffff
             mesh = cloneLoadedBike(loaded, { tintLivery, tintExhaust }).root
