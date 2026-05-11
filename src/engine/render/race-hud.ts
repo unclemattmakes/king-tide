@@ -168,8 +168,10 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     const w = minimap.width
     const h = minimap.height
     const tx = (x - mapMinX) / (mapMaxX - mapMinX)
-    // Flip Z so +Z (north on track) is "up" on the minimap.
-    const tz = 1 - (z - mapMinZ) / (mapMaxZ - mapMinZ)
+    // True top-down projection (looking down -Y): +Z maps to bottom of the
+    // canvas. Flipping Z to put "north up" inverts handedness and makes the
+    // race read counter-clockwise even though it runs clockwise in-world.
+    const tz = (z - mapMinZ) / (mapMaxZ - mapMinZ)
     return { cx: tx * w, cy: tz * h }
   }
 
