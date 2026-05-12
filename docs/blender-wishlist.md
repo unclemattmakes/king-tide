@@ -102,18 +102,28 @@ below-water geometry: cone-shaped peaks with optional craters,
 continental shelves descending to a deep-water floor, fringing reef
 rings around each island, multi-octave noise modulated by altitude.
 
-Authoring is GUI-driven: drop `peak_NN` empties into the scene, drag
-them around in the viewport (XY = position, Z = height, scale.X = base
-radius, scale.Z = crater flag), and the terrain reshapes live. Modifier
-panel exposes seven global knobs (shelf depth/radius, reef
-inset/height/width, noise scale/seed, roughness above/below).
+Authoring is GUI-driven via **paired empties** — drag
+`peak_NN_base` (CIRCLE footprint) to move the entire island, drag
+`peak_NN_top` (SPHERE apex) to retune height, lopsided offset, and
+crater flag. The top empty is wired to the base via a *Copy Location*
+constraint, so moving the base drags the top along. The modifier
+panel exposes 11 global knobs: shelf depth/radius, reef
+inset/height/width (reef defaults off), cone erosion + erosion scale,
+roughness above/below, noise scale/seed.
 
-The graph supports **up to 8 peaks** by design — unused slots
+The graph supports **up to 8 peak pairs** by design — unused slots
 contribute a sentinel that loses the max-combine, so empty slots are
-free. The default seeded scene has 1 central peak with crater, 2
-flanking medium peaks, and 1 submerged shoal. COLOR_0 is stamped per
-the [vertex-attribute spec](./vertex-attribute-spec.md) (R=0 sway, G=1
-AO placeholder, B=0 path-worn, A=biome).
+free. The default seeded scene has 1 central peak with crater (apex
+shifted ~25 m NE for a lopsided silhouette), 2 flanking medium peaks
+(one straight, one lopsided E), and 1 submerged shoal. COLOR_0 is
+stamped per the [vertex-attribute spec](./vertex-attribute-spec.md)
+(R=0 sway, G=1 AO placeholder, B=0 path-worn, A=biome). Biome bands
+are tuned so most underwater reads as sandy seafloor, with deep-blue
+appearing only at the deepest shelf floor.
+
+The seed script also invokes the addon's *Rebuild Water Preview*
+helper so the seeded `.blend` opens with a visible wave-displaced
+water surface — useful when sizing islands against the water plane.
 
 Build script: [`tools/blender/seed_template_island.py`](../tools/blender/seed_template_island.py) —
 one-shot scaffolder analogous to `seed_bike_kit.py`. Authoring guide:
