@@ -52,6 +52,73 @@
       body.menu-active #race-minimap,
       body.menu-active #finish { display: none !important; }
 
+      /* Loading overlay — paints before any subsystem is ready so the
+         initial blank canvas is never visible. Hidden by adding
+         `.loading-hidden`; see src/boot/loading-screen.ts. */
+      #loading-screen {
+        position: fixed; inset: 0; z-index: 50;
+        display: flex; align-items: center; justify-content: center;
+        background: radial-gradient(ellipse at center, #0c1a30 0%, #06101e 60%, #020812 100%);
+        color: var(--bc-ink);
+        font-family: var(--bc-font-sans);
+        user-select: none;
+        opacity: 1;
+        transition: opacity 280ms ease;
+      }
+      #loading-screen.loading-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #loading-screen .ls-card {
+        text-align: center;
+        padding: 32px 56px;
+        border-left: 6px solid var(--bc-cyan);
+        background: linear-gradient(180deg, rgba(12, 26, 48, 0.85), rgba(6, 16, 30, 0.85));
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+        min-width: 360px;
+      }
+      #loading-screen .ls-brand {
+        font-family: var(--bc-font-display);
+        font-size: 14px; letter-spacing: 0.32em;
+        color: var(--bc-cyan);
+        margin-bottom: 10px;
+      }
+      #loading-screen .ls-title {
+        font-family: var(--bc-font-display);
+        font-size: 56px; line-height: 1; letter-spacing: 0.08em;
+        color: var(--bc-ink);
+        margin-bottom: 20px;
+      }
+      #loading-screen .ls-bar {
+        position: relative;
+        width: 100%; height: 4px;
+        background: rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+        margin-bottom: 14px;
+      }
+      #loading-screen .ls-bar::after {
+        content: '';
+        position: absolute; top: 0; bottom: 0; left: -40%;
+        width: 40%;
+        background: linear-gradient(90deg, transparent, var(--bc-cyan), transparent);
+        animation: ls-sweep 1.1s linear infinite;
+      }
+      @keyframes ls-sweep {
+        from { left: -40%; }
+        to   { left: 100%; }
+      }
+      #loading-screen .ls-msg {
+        font-family: var(--bc-font-mono);
+        font-size: 12px; letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--bc-ink-dim);
+        min-height: 1.2em;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #loading-screen .ls-bar::after { animation: none; left: 0; width: 100%; opacity: 0.4; }
+        #loading-screen { transition: none; }
+      }
+
       #finish {
         position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
         user-select: none;
@@ -995,6 +1062,19 @@
     </style>
   </head>
   <body>
+    <!-- Loading overlay. Visible by default (paints before any JS runs) so
+         the user never sees a blank canvas while assets stream in. The
+         boot sequence in src/main.ts updates the message per phase and
+         hides this once the live game / menu / viewer / editor is ready.
+         See src/boot/loading-screen.ts. -->
+    <div id="loading-screen">
+      <div class="ls-card">
+        <div class="ls-brand">HOVERBIKE</div>
+        <div class="ls-title">LOADING</div>
+        <div class="ls-bar"></div>
+        <div class="ls-msg" id="loading-screen-msg">Booting&hellip;</div>
+      </div>
+    </div>
     <div id="app"></div>
     <div id="hud">
       <div class="row" id="hud-fps">fps: --</div>
