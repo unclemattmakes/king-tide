@@ -1059,6 +1059,168 @@
         background: rgba(255, 255, 255, 0.05);
         color: var(--bc-ink);
       }
+
+      /* ───────────── Mobile (≤720px) ─────────────
+         The broadcast UI was sized for desktop — typography, padding, and
+         column counts all need to come in for phone viewports. Card grids
+         collapse to one column, fixed-width finish/pause cards become
+         viewport-fluid, the in-race HUD shrinks, and dev-only chrome
+         hides so the canvas stays playable. */
+      @media (max-width: 720px) {
+        /* Top chyron: drop the clock, tighten brand + crumbs. */
+        .bc-header {
+          grid-template-columns: auto 1fr;
+          gap: 12px;
+          padding: 10px 14px 8px;
+        }
+        .bc-brand { gap: 8px; }
+        .bc-brand .bar { width: 5px; height: 22px; }
+        .bc-brand .name { font-size: 20px; letter-spacing: 0.12em; }
+        .bc-brand .live { font-size: 10px; padding: 2px 6px; }
+        .bc-crumbs { font-size: 11px; letter-spacing: 0.16em; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+        .bc-crumb { padding: 2px 4px; }
+        .bc-clock { display: none; }
+
+        .bc-stage { padding: 18px 14px; }
+
+        /* All card grids collapse to a single column. */
+        .bc-cards.cols-2, .bc-cards.cols-3 { grid-template-columns: 1fr; }
+
+        /* Section head wraps; the giant numeral and right-meta come down. */
+        .bc-section-head {
+          flex-wrap: wrap;
+          gap: 10px;
+          margin-bottom: 16px;
+          padding-bottom: 8px;
+        }
+        .bc-section-head .num { font-size: 48px; }
+        .bc-section-head .title { font-size: 26px; }
+        .bc-section-head .sub { font-size: 11px; letter-spacing: 0.18em; }
+        .bc-section-head .meta { display: none; }
+
+        /* Mode cards: less vertical bulk, headline scales with viewport. */
+        .bc-mode-card { min-height: 180px; padding: 20px 22px 18px; gap: 10px; }
+        .bc-mode-card .hd { font-size: clamp(36px, 11vw, 56px); }
+        .bc-mode-card .desc { font-size: 13px; max-width: none; }
+        .bc-mode-card .stripe { width: 160px; height: 160px; right: -40px; bottom: -40px; }
+
+        /* Action row: stack so the primary button is full-width. */
+        .bc-actions {
+          flex-direction: column-reverse;
+          align-items: stretch;
+          gap: 10px;
+          margin-top: 18px;
+        }
+        .bc-actions .left, .bc-actions .right { width: 100%; }
+        .bc-actions .left .bc-link,
+        .bc-actions .right .bc-btn {
+          width: 100%; text-align: center;
+        }
+        .bc-btn { font-size: 15px; padding: 12px 20px; }
+        /* The clip-path arrow looks awkward on a full-width button — drop it. */
+        .bc-btn.primary { clip-path: none; padding-right: 20px; }
+
+        /* Lobby pickers + slots. */
+        .bc-lobby { gap: 16px; }
+        .bc-lobby-side { padding: 14px; gap: 12px; }
+        .bc-pick { grid-template-columns: 56px 1fr auto; gap: 8px; padding: 10px; }
+        .bc-pick .value { font-size: 16px; }
+        .bc-pick .nav button { padding: 8px 12px; font-size: 14px; min-width: 36px; }
+        .bc-slot { min-height: 108px; padding: 10px 12px; }
+        .bc-slot .slot-name { font-size: 18px; }
+
+        /* Bottom chyron: keyboard hint hides (irrelevant for touch). */
+        .bc-chyron { grid-template-columns: auto 1fr; }
+        .bc-chyron .tag { font-size: 13px; padding: 10px 16px; }
+        .bc-chyron .text { font-size: 12px; padding: 10px 14px; letter-spacing: 0.06em; }
+        .bc-chyron .keys { display: none; }
+
+        /* Title screen + recap. */
+        .bc-title { padding: 12px 0; }
+        .bc-title .tagline { margin-top: 20px; }
+        .bc-title .cta { margin-top: 24px; gap: 12px; }
+        .bc-recap { padding: 14px 16px 12px; margin: 22px auto 0; }
+        .bc-recap-val { font-size: 24px; }
+        .bc-recap-val.small { font-size: 13px; }
+        .bc-recap-val .of { font-size: 12px; }
+
+        /* Room-entry form. */
+        .bc-form .row-pair { grid-template-columns: 1fr; }
+        .bc-form input[type="text"] { font-size: 16px; /* keep ≥16px so iOS doesn't zoom on focus */ }
+
+        /* Finish + pause cards: fill the screen instead of overflowing. */
+        #finish .card,
+        #pause-menu .card {
+          min-width: 0;
+          width: calc(100vw - 24px);
+          max-width: 480px;
+          padding: 22px 22px 18px;
+        }
+        #finish .title { font-size: 44px; }
+        #finish .sub { font-size: 14px; margin-bottom: 16px; }
+        #finish .stat .row { grid-template-columns: 100px 1fr; }
+        #finish .actions { gap: 8px; margin-top: 18px; }
+        #finish button.action {
+          flex: 1 1 calc(50% - 4px);
+          padding: 11px 14px;
+          font-size: 13px;
+          letter-spacing: 0.12em;
+        }
+        #finish button.action.primary { clip-path: none; padding-right: 14px; flex-basis: 100%; }
+        #pause-menu .title { font-size: 40px; }
+        #pause-menu .sub { font-size: 12px; margin-bottom: 16px; }
+        #pause-menu button.pm { font-size: 15px; padding: 14px 16px; letter-spacing: 0.14em; }
+
+        /* In-race HUD: smaller everything; pull above iOS bottom bar. */
+        #race-minimap {
+          width: 110px; height: 110px;
+          right: 10px;
+          bottom: max(10px, env(safe-area-inset-bottom, 0px));
+        }
+        #race-timer { min-width: 128px; padding: 6px 10px 5px; }
+        #race-timer .race-timer-value { font-size: 18px; }
+        #race-timer .race-timer-current { font-size: 15px; }
+        #race-banner .race-banner-text { font-size: 80px; padding: 8px 18px; letter-spacing: 3px; }
+        #race-gap { font-size: 24px; top: 88px; padding: 6px 12px; }
+        #hud { font-size: 11px; }
+
+        /* Dev / debug buttons are noisy on phones — hide entirely. */
+        #garage-toggle, #devsettings-toggle, #water-debug-toggle { display: none !important; }
+
+        /* Devsettings / water-debug overlays: single column rows. */
+        #devsettings .card, #water-debug .card { padding: 18px 18px; }
+        #devsettings .row, #water-debug .row {
+          grid-template-columns: 1fr 50px;
+          column-gap: 8px;
+          row-gap: 2px;
+        }
+        #devsettings .row label, #water-debug .row label { grid-column: 1 / -1; }
+        #devsettings .row input[type="range"], #water-debug .row input[type="range"] {
+          grid-column: 1 / 2;
+        }
+        #devsettings .row.toggle, #water-debug .row.toggle {
+          grid-template-columns: 1fr auto;
+        }
+        #devsettings .row.toggle label, #water-debug .row.toggle label { grid-column: 1; }
+      }
+
+      /* iOS notch / dynamic island — keep top chrome below safe-area. */
+      @supports (padding: max(0px)) {
+        .bc-header { padding-top: max(16px, env(safe-area-inset-top)); }
+      }
+
+      /* Touch devices: bump tap targets to ~44px regardless of viewport size. */
+      @media (hover: none) and (pointer: coarse) {
+        .bc-btn { min-height: 44px; }
+        .bc-link { min-height: 44px; padding: 12px 14px; }
+        .bc-pick .nav button { min-height: 40px; min-width: 40px; }
+        #finish button.action,
+        #pause-menu button.pm { min-height: 44px; }
+        .bc-card { min-height: 44px; }
+        /* Don't reveal hover-only outlines on tap. */
+        .bc-card:hover { transform: none; }
+        .bc-mode-card:hover { transform: none; }
+      }
     </style>
   </head>
   <body>
