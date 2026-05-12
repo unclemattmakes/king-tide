@@ -59,6 +59,7 @@ matches the way real volcanic morphology decouples *footprint* from
 | Billow Scale | 0.004 | Seafloor billow frequency (smaller = larger dunes) |
 | Land Billow | 6 m | Mirror pass above the waterline. Adds hills/gulleys to cone slopes + beach plateaus. |
 | Land Scale | 0.012 | Land billow frequency (smaller = larger hills) |
+| Shoreline Width | 1.5 m | Half-width of the smooth ring around the waterline where neither billow pass acts. Tight beach = 0.5–1; wide sandy band = 5+. |
 
 ### Authoring loop
 
@@ -488,6 +489,12 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     # Gated above z=+2 m so it never reaches into the shoreline.
     _new_socket(g, "Land Billow",     "INPUT", "NodeSocketFloat",   6.0, 0.0, 30.0)
     _new_socket(g, "Land Scale",      "INPUT", "NodeSocketFloat",   0.012, 0.0001, 1.0)
+    # Half-width (m) of the smooth no-billow ring around the shoreline.
+    # Each side's mask fades to 0 within this distance of the waterline:
+    # seafloor billow tops out at z = -Shoreline Width, land billow
+    # bottoms out at z = +Shoreline Width. Set to 0.5–1 m for a tight
+    # crisp shoreline; raise to 5+ m for a wide sandy beach band.
+    _new_socket(g, "Shoreline Width", "INPUT", "NodeSocketFloat",   1.5, 0.0, 30.0)
     _new_socket(g, "Geometry", "OUTPUT", "NodeSocketGeometry")
 
     p_in  = _add_node(g, "NodeGroupInput",  -1600, 0)
@@ -569,12 +576,23 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     n_billow_signed.inputs[1].default_value =  2.0
     n_billow_signed.inputs[2].default_value = -1.4
     g.links.new(n_billow_noise.outputs["Fac"], n_billow_signed.inputs[0])
-    # Underwater mask: full strength below z=-8, fades out between -8
-    # and -1 m so billows never break the waterline.
+    # Underwater mask: full strength below z = -(Shoreline Width + 7),
+    # fades out to zero at z = -Shoreline Width so the band of smooth
+    # seafloor around each shoreline is author-tunable. The 7 m ramp
+    # width keeps the transition visually soft (matches the land pass).
+    n_sw_neg_far  = _add_node(g, "ShaderNodeMath", -800, -2200, operation="ADD")
+    n_sw_neg_far.inputs[1].default_value = 7.0  # extra ramp width
+    g.links.new(p_in.outputs["Shoreline Width"], n_sw_neg_far.inputs[0])
+    n_sw_neg_far_neg = _add_node(g, "ShaderNodeMath", -600, -2200, operation="MULTIPLY")
+    n_sw_neg_far_neg.inputs[1].default_value = -1.0
+    g.links.new(n_sw_neg_far.outputs[0], n_sw_neg_far_neg.inputs[0])
+    n_sw_neg_near = _add_node(g, "ShaderNodeMath", -600, -2300, operation="MULTIPLY")
+    n_sw_neg_near.inputs[1].default_value = -1.0
+    g.links.new(p_in.outputs["Shoreline Width"], n_sw_neg_near.inputs[0])
     n_billow_mask = _add_node(g, "ShaderNodeMapRange", 0, -2400,
                               interpolation_type="SMOOTHSTEP", clamp=True)
-    n_billow_mask.inputs["From Min"].default_value = -8.0
-    n_billow_mask.inputs["From Max"].default_value = -1.0
+    g.links.new(n_sw_neg_far_neg.outputs[0], n_billow_mask.inputs["From Min"])
+    g.links.new(n_sw_neg_near.outputs[0],    n_billow_mask.inputs["From Max"])
     n_billow_mask.inputs["To Min"].default_value =    1.0
     n_billow_mask.inputs["To Max"].default_value =    0.0
     g.links.new(prev, n_billow_mask.inputs["Value"])
@@ -608,13 +626,20 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     n_land_signed.inputs[1].default_value =  2.0
     n_land_signed.inputs[2].default_value = -1.0
     g.links.new(n_land_noise.outputs["Fac"], n_land_signed.inputs[0])
-    # Above-water mask: full strength above z=+2, fades to zero between
-    # +2 and -1 m so the pass never drags terrain into the water (which
-    # would conflict with the seafloor billows on the other side).
+    # Above-water mask: full strength above z = +(Shoreline Width + 3),
+    # fades to zero at z = +Shoreline Width so the pass leaves a smooth
+    # author-tunable beach band around the waterline. 3 m ramp width
+    # keeps the transition visually soft.
+    n_sw_pos_near = _add_node(g, "ShaderNodeMath", -800, -2900, operation="ADD")
+    n_sw_pos_near.inputs[1].default_value = 0.0
+    g.links.new(p_in.outputs["Shoreline Width"], n_sw_pos_near.inputs[0])
+    n_sw_pos_far  = _add_node(g, "ShaderNodeMath", -800, -3000, operation="ADD")
+    n_sw_pos_far.inputs[1].default_value = 3.0  # ramp width above the cutoff
+    g.links.new(p_in.outputs["Shoreline Width"], n_sw_pos_far.inputs[0])
     n_land_mask = _add_node(g, "ShaderNodeMapRange", 0, -3100,
                             interpolation_type="SMOOTHSTEP", clamp=True)
-    n_land_mask.inputs["From Min"].default_value = -1.0
-    n_land_mask.inputs["From Max"].default_value =  2.0
+    g.links.new(n_sw_pos_near.outputs[0], n_land_mask.inputs["From Min"])
+    g.links.new(n_sw_pos_far.outputs[0],  n_land_mask.inputs["From Max"])
     n_land_mask.inputs["To Min"].default_value =    0.0
     n_land_mask.inputs["To Max"].default_value =    1.0
     g.links.new(prev, n_land_mask.inputs["Value"])
