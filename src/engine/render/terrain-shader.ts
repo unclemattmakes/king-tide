@@ -226,7 +226,9 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   // geometry's color attribute has — 3- or 4-component depending on
   // how Blender exported COLOR_0. Both shapes expose ``.g`` and ``.b``
   // accessors so the AO + path-worn reads work uniformly.
-  const vc = attribute('color')
+  // Typed as vec4 for swizzle access; runtime TSL auto-detects the actual
+  // component count from the geometry's COLOR_0 attribute either way.
+  const vc = attribute('color') as Node<'vec4'>
   // AO multiplies into the colour with a 0.55 floor so deep cavities
   // darken visibly but never go to black. ``vc.g`` ∈ [0, 1].
   const ao = clamp(vc.g, float(0), float(1))
