@@ -48,7 +48,12 @@ import { createScene } from './engine/render/scene'
 import { createSkySystem } from './engine/render/sky'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { type BikeImpact, createWaterMesh, updateUnderwaterFog } from './engine/render/water'
-import { parseReplay, type ReplayBike, type ReplayFile } from './engine/replay/format'
+import {
+  parseReplay,
+  type ReplayBike,
+  type ReplayFile,
+  serializeReplay,
+} from './engine/replay/format'
 import { createReplayPlayer, makePoseBuffer } from './engine/replay/player'
 import { createReplayRecorder, type ReplayRecorder } from './engine/replay/recorder'
 import { createSpectatorCamera } from './engine/replay/spectator-camera'
@@ -863,6 +868,36 @@ async function boot() {
     }
   }
 
+  // Pause menu state. Toggled by Esc during a live race (after the
+  // countdown, before the finish screen). In single-player the sim is
+  // frozen while paused (physAccum is held at 0 so unpause is instant
+  // — no catch-up burst). In multiplayer the menu still appears but the
+  // sim keeps advancing, since pausing one peer can't pause the relay.
+  let pausedForMenu = false
+  const pauseMenuEl = document.getElementById('pause-menu')
+  const pauseSubtitleEl = document.getElementById('pause-subtitle')
+  function openPauseMenu(): void {
+    if (pausedForMenu) return
+    if (raceHud.isLocked()) return // can't pause during countdown
+    if (finishShown) return
+    pausedForMenu = true
+    pauseMenuEl?.classList.add('show')
+    if (pauseSubtitleEl) {
+      const racer = RacerStore.get(playerEid)
+      const lap = racer ? Math.min(racer.lap, track.lapsToFinish) : 1
+      pauseSubtitleEl.textContent = `${track.name.toUpperCase()} · LAP ${lap}/${track.lapsToFinish}`
+    }
+    // Focus RESUME so Enter resumes immediately if the player wants.
+    ;(document.getElementById('pause-resume') as HTMLButtonElement | null)?.focus({
+      preventScroll: true,
+    })
+  }
+  function closePauseMenu(): void {
+    if (!pausedForMenu) return
+    pausedForMenu = false
+    pauseMenuEl?.classList.remove('show')
+  }
+
   // Finish-screen actions. NEXT advances to the next track in the
   // catalogue rotation (wrapping); RETRY reloads the same combo; EXIT
   // navigates to a bare URL so boot re-enters the menu flow. All three
@@ -891,6 +926,40 @@ async function boot() {
     url.searchParams.set('back', '1')
     window.location.assign(url.toString())
   }
+  // Wire pause-menu buttons exactly once (the DOM is shared across the
+  // session, so re-binding on every open would leak click handlers).
+  ;(document.getElementById('pause-resume') as HTMLButtonElement | null)?.addEventListener(
+    'click',
+    closePauseMenu,
+  )
+  ;(document.getElementById('pause-restart') as HTMLButtonElement | null)?.addEventListener(
+    'click',
+    retryRace,
+  )
+  ;(document.getElementById('pause-exit') as HTMLButtonElement | null)?.addEventListener(
+    'click',
+    exitToMenu,
+  )
+  ;(document.getElementById('pause-settings') as HTMLButtonElement | null)?.addEventListener(
+    'click',
+    () => {
+      // Hide pause menu while settings are open so the user lands on
+      // a single overlay. The existing dev-settings toggle handles the
+      // lazy-import + open; we just click it.
+      closePauseMenu()
+      ;(document.getElementById('devsettings-toggle') as HTMLButtonElement | null)?.click()
+    },
+  )
+  // Multiplayer can't restart a race solo — disable that button when
+  // we're connected to a room. (The button is still visible so the
+  // pause menu reads consistently across modes.)
+  if (roomId) {
+    const restartBtn = document.getElementById('pause-restart') as HTMLButtonElement | null
+    if (restartBtn) {
+      restartBtn.disabled = true
+      restartBtn.title = 'Disabled in multiplayer'
+    }
+  }
 
   /** Snap the player back to the spawn pose with zero velocity. Useful after
    *  collisions leave the bike upside-down, off-track, or unrecoverable. */
@@ -909,9 +978,12 @@ async function boot() {
     rb.setAngvel({ x: 0, y: 0, z: 0 }, true)
   }
 
-  // Keys: R to retry, Enter to advance to NEXT RACE, Esc to bail to
-  // the menu. The finish-screen DOM buttons mirror these. Out of the
-  // finish overlay, R/Enter are no-ops so they don't restart by accident.
+  // Keys:
+  //   Esc — toggle pause menu (in-race only; finish-screen Esc exits)
+  //   Enter/R — NEXT/RETRY on the finish screen; on pause menu, Enter
+  //             resumes (the focused button's default action) and R
+  //             restarts; Q exits to menu.
+  //   T/F1 — auto-play; F2 — collision debug; M — mute; Backspace — respawn.
   window.addEventListener('keydown', (e) => {
     if (finishShown && (e.code === 'Enter' || e.code === 'NumpadEnter')) {
       goToNextRace()
@@ -922,6 +994,31 @@ async function boot() {
       exitToMenu()
       e.preventDefault()
       return
+    }
+    // Pause menu — Esc toggles open/closed during a live race. Once
+    // open, R restarts and Q bails to the menu so you don't have to
+    // mouse over the buttons.
+    if (e.code === 'Escape' && !finishShown) {
+      if (pausedForMenu) closePauseMenu()
+      else openPauseMenu()
+      e.preventDefault()
+      return
+    }
+    if (pausedForMenu) {
+      if (e.code === 'KeyR' && !roomId) {
+        retryRace()
+        e.preventDefault()
+        return
+      }
+      if (e.code === 'KeyQ') {
+        exitToMenu()
+        e.preventDefault()
+        return
+      }
+      // Eat other gameplay keys so they don't fire while paused.
+      if (e.code !== 'Enter' && e.code !== 'NumpadEnter') {
+        return
+      }
     }
     if (e.code === 'KeyR' && finishShown) {
       retryRace()
@@ -1073,6 +1170,12 @@ async function boot() {
     state.intent = state.intentOverride ?? readPlayerIntent(dt)
 
     physAccum += dt
+    // Pause menu gates the sim in single-player. Reset the accumulator
+    // so unpause doesn't trigger a burst of catch-up steps. Multiplayer
+    // keeps stepping — pausing one peer can't pause the relay.
+    if (pausedForMenu && !roomId) {
+      physAccum = 0
+    }
     // In determinism mode the sim is gated off — the harness drives ticks
     // manually via __hover.determinism.run(). physAccum keeps draining so
     // we don't spike on unpause.
@@ -1355,27 +1458,73 @@ async function boot() {
             }
             finishBest.innerHTML = parts.length ? parts.join(' · ') : '—'
           }
-          // Save-replay button: finalize the recorder once and offer
-          // a download. Hidden if no recorder (e.g., replay-playback
-          // branch — guarded just in case).
+          // Stash a last-race summary for the menu's title-screen
+          // recap card. Stored in sessionStorage so it survives the
+          // navigation to `?back=1` but doesn't outlive the tab.
+          try {
+            sessionStorage.setItem(
+              'hover-last-race',
+              JSON.stringify({
+                trackId,
+                trackName: track.name,
+                bikeId: playerVariant.id,
+                bikeName: playerVariant.name,
+                position: meStanding?.position ?? null,
+                totalRacers: standings.length,
+                time: rs.raceTime,
+                bestLap: bestLapThisRace,
+                wonRace,
+                finishedAt: Date.now(),
+              }),
+            )
+          } catch {
+            /* sessionStorage may be unavailable in privacy modes */
+          }
+          // Replay buttons. The recorder has been capturing throughout
+          // the race; finalize it once, then offer both a one-click
+          // WATCH (sessionStorage → ?replay=session navigation, reusing
+          // the existing replay-playback boot path) and SAVE (download
+          // the .replay file). Hidden if no recorder (replay-playback
+          // branch can't reach this code, but guard anyway).
+          const watchBtn = document.getElementById(
+            'finish-watch-replay',
+          ) as HTMLButtonElement | null
           const saveBtn = document.getElementById('finish-save-replay') as HTMLButtonElement | null
-          if (saveBtn && recorder) {
+          if (recorder) {
             const replay = recorder.finalize({
               finishPosition: meStanding?.position ?? null,
               finishTime: rs.raceTime,
               bestLap: bestLapThisRace,
             })
-            saveBtn.style.display = 'inline-block'
-            saveBtn.disabled = false
-            saveBtn.textContent = 'WATCH REPLAY'
-            saveBtn.onclick = () => {
-              downloadReplay(replay)
-              saveBtn.textContent = 'SAVED ✓'
-              saveBtn.disabled = true
+            if (watchBtn) {
+              watchBtn.style.display = 'inline-block'
+              watchBtn.disabled = false
+              watchBtn.onclick = () => {
+                try {
+                  sessionStorage.setItem('hover-replay-pending', serializeReplay(replay))
+                } catch {
+                  /* fall through — download instead */
+                  downloadReplay(replay)
+                  return
+                }
+                const url = new URL(window.location.href)
+                url.search = ''
+                url.searchParams.set('replay', 'session')
+                window.location.assign(url.toString())
+              }
+            }
+            if (saveBtn) {
+              saveBtn.style.display = 'inline-block'
+              saveBtn.disabled = false
+              saveBtn.textContent = 'SAVE'
+              saveBtn.onclick = () => {
+                downloadReplay(replay)
+                saveBtn.textContent = 'SAVED ✓'
+                saveBtn.disabled = true
+              }
             }
           }
-          // Action buttons: NEXT (default), RETRY, EXIT. The replay
-          // button is the existing save-replay element above.
+          // Action buttons: NEXT (default), RETRY, EXIT.
           const nextBtn = document.getElementById('finish-next') as HTMLButtonElement | null
           const retryBtn = document.getElementById('finish-retry') as HTMLButtonElement | null
           const exitBtn = document.getElementById('finish-exit') as HTMLButtonElement | null

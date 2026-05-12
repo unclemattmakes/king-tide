@@ -233,10 +233,21 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       const el = document.createElement('section')
       el.className = 'bc-screen bc-title'
       const headline = opts.reason === 'exit-from-race' ? 'BACK TO THE BOOTH' : 'TONIGHT’S CARD'
+      const recap = readLastRaceRecap()
+      // Stash the most recently-watched track/bike back into the picks
+      // so the next race defaults to whatever the player just exited.
+      if (recap) {
+        if (recap.trackId) picks.trackId = recap.trackId
+        if (recap.bikeId && recap.bikeId in { cruiser: 1, racer: 1, stunt: 1 }) {
+          picks.bikeId = recap.bikeId as BikeVariantId
+        }
+      }
+      const recapHtml = recap ? renderRecapHtml(recap) : ''
       el.innerHTML = `
         <span class="word">HOVER</span>
         <span class="word alt">BIKE</span>
         <div class="tagline">${escapeHtml(headline)}</div>
+        ${recapHtml}
         <div class="cta">
           <button class="bc-btn primary" id="title-start" type="button">PRESS START</button>
           <div class="cta-blink">[ ENTER / CLICK TO BEGIN ]</div>
@@ -485,6 +496,86 @@ function escapeHtml(s: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
+}
+
+/** Last-race recap stashed by main.ts when the player hits EXIT TO
+ *  MENU on the finish screen. Lives in sessionStorage so it survives
+ *  the URL navigation but doesn't outlive the tab. */
+type LastRaceRecap = {
+  trackId: string
+  trackName: string
+  bikeId: string
+  bikeName: string
+  position: number | null
+  totalRacers: number
+  time: number
+  bestLap: number | null
+  wonRace: boolean
+  finishedAt: number
+}
+
+function readLastRaceRecap(): LastRaceRecap | null {
+  try {
+    const raw = sessionStorage.getItem('hover-last-race')
+    if (!raw) return null
+    // Clear after read — the recap is a one-shot post-race banner, not
+    // a persistent leaderboard. The full best-lap ledger lives in
+    // localStorage via the save-state module.
+    sessionStorage.removeItem('hover-last-race')
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && typeof parsed.trackId === 'string') {
+      return parsed as LastRaceRecap
+    }
+  } catch {
+    /* corrupt blob — ignore */
+  }
+  return null
+}
+
+function formatRecapTime(seconds: number): string {
+  if (!Number.isFinite(seconds)) return '—'
+  const m = Math.floor(seconds / 60)
+  const s = seconds - m * 60
+  if (m > 0) return `${m}:${s.toFixed(2).padStart(5, '0')}`
+  return `${s.toFixed(2)}s`
+}
+
+function renderRecapHtml(r: LastRaceRecap): string {
+  const place =
+    r.position === null
+      ? '—'
+      : r.position === 1
+        ? '1ST'
+        : r.position === 2
+          ? '2ND'
+          : r.position === 3
+            ? '3RD'
+            : `${r.position}TH`
+  const placeColor = r.wonRace ? 'var(--bc-yellow)' : 'var(--bc-cyan)'
+  const best = r.bestLap != null ? formatRecapTime(r.bestLap) : '—'
+  return `
+    <div class="bc-recap">
+      <div class="bc-recap-tag">LAST RACE</div>
+      <div class="bc-recap-grid">
+        <div>
+          <div class="bc-recap-lbl">FINISH</div>
+          <div class="bc-recap-val" style="color: ${placeColor};">${escapeHtml(place)}<span class="of">/${r.totalRacers}</span></div>
+        </div>
+        <div>
+          <div class="bc-recap-lbl">TIME</div>
+          <div class="bc-recap-val">${escapeHtml(formatRecapTime(r.time))}</div>
+        </div>
+        <div>
+          <div class="bc-recap-lbl">BEST LAP</div>
+          <div class="bc-recap-val" style="color: var(--bc-yellow);">${escapeHtml(best)}</div>
+        </div>
+        <div>
+          <div class="bc-recap-lbl">VENUE</div>
+          <div class="bc-recap-val small">${escapeHtml(r.trackName.toUpperCase())} &middot; ${escapeHtml(r.bikeName.toUpperCase())}</div>
+        </div>
+      </div>
+    </div>
+  `
 }
 
 // Suppress "imported but unused" if TrackEntry is only used as a value
