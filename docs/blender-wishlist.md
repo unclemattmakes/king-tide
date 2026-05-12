@@ -420,3 +420,81 @@ Open questions:
   JSON once, gates are then individually editable) or a live mode (gates
   are derived on every spline edit, can't be manually moved)? The
   one-shot path matches the editor's existing UX.
+
+## Next-wave wishlist (post-color-pass, 2026-05-11)
+
+A revised set of items to chase next, ranked by how much they'd unlock
+or fix in the current authoring loop:
+
+1. **Vertex-attribute bakers — AO + path-worn.** The COLOR_0 stamp from
+   the GN graph ships `G=1` (placeholder) and `B=0` (placeholder). Real
+   values would let the runtime terrain shader darken cavities and
+   visibly wear a racing line into the surface. Plan:
+   - **AO bake.** A *Bake to Vertex Color* operator that runs Cycles'
+     AO bake into COLOR_0.G. One-click, idempotent. Needed because the
+     procedural-island heightfield has no UVs to bake an AO texture
+     against, so vertex-attribute bake is the only path.
+   - **Path-worn bake.** Sample the AI spline → for each terrain vertex
+     within a falloff radius of the spline, scale COLOR_0.B by a
+     distance-based mask. Reads as a worn dirt track in-game.
+2. **Runtime terrain-shader sliders in the addon panel.** Right now the
+   slope-mix range, altitude band, variation noise scale, and wet-band
+   width are TS constants in `src/engine/render/terrain-shader.ts`.
+   Exposing them as scene custom properties + an addon panel — and
+   writing them into `public/tracks/<id>.json` at export — would let
+   authors tune the in-game look without a code edit + reload.
+3. **Track stats / sanity panel.** A read-only panel that shows: AI
+   spline length, lap-time estimate at constant 25 m/s, count of gates
+   / pickups / starts / boost pads, max & min terrain y, water
+   coverage %. Catches authoring mistakes ("track is 87 m long")
+   before the export.
+4. **Item 3 props library — rocks + palms + buoys, finally.** Items 3
+   and 4 (props + scatter) are still the biggest single visual upgrade
+   left in the pipeline. With Item 6's vertex-attribute spec settled
+   and Item 4's scatter round-trip already verified, the remaining
+   work is *building* the prop GN groups in `tracks-src/props-library.blend`.
+   Buoy bobbing animation hooks into the same Gerstner wave field the
+   water shader uses (`src/engine/sim/water/wave-field.ts`).
+5. **Real-time runtime-shader-match in Blender preview.** The Blender
+   `mat_terrain_main` shader was tuned to match the *intended* runtime
+   look; the actual runtime shader I shipped today is close but not
+   pixel-perfect (variation noise frequency, ramp interpolation method,
+   wet-band tint). Bringing them into 1:1 alignment — either by porting
+   the GLSL into Blender or vice versa — closes the
+   what-you-see-is-what-you-get loop.
+6. **Heightmap import.** A *Heightmap → terrain* operator that reads a
+   .png or .exr 16-bit greyscale and replaces the GN modifier with a
+   displaced-from-image plane. Useful for prototyping a real-world
+   coastline or a hand-painted heightmap before committing to the
+   procedural template.
+7. **Spline curvature visualizer.** Item 3's turn-indicator chevrons
+   are placed where |κ| > threshold but the threshold itself is opaque
+   to the author. A small overlay that colours the AI spline by signed
+   curvature (red = tight right, blue = tight left, neutral = straight)
+   would make the threshold tunable by eye.
+
+### Realism assessment
+
+- **(1) AO + path-worn bakers** — *high*. Both are short Python operators
+  using bpy's built-in baking API; the AO bake reuses Cycles' existing
+  output to vertex colour. ~4 hours of work.
+- **(2) Addon-panel runtime sliders** — *medium-high*. Needs three sides
+  to agree: addon UI writes scene props → export writes them to
+  `public/tracks/<id>.json` → runtime reads them as uniforms in
+  `terrain-shader.ts`. Cleanest if we settle on a single schema first.
+- **(3) Track stats panel** — *high*. Pure Python over data already in
+  the scene.
+- **(4) Props library** — *medium*. The structural work (GN groups,
+  asset marking, build_props.py scaffold) is straightforward; the
+  *visual* tuning of rock noise, palm leaf silhouettes, buoy
+  proportions is the bulk of the time and benefits from in-Blender
+  GUI iteration rather than scripting.
+- **(5) Blender ↔ runtime parity** — *medium*. Mechanical port but
+  benefits from one author owning both sides so the look stays in sync.
+- **(6) Heightmap import** — *high*. ~50 lines of Python.
+- **(7) Curvature visualizer** — *high*. The curvature math already
+  exists for Item 3; just wire the per-sample κ into a per-vertex
+  colour on a duplicate of the spline.
+
+Recommend tackling **(1) + (3)** first — both small, both immediately
+useful, both prerequisites for the bigger Items 3/4 push.

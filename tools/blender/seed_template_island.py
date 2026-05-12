@@ -1183,35 +1183,71 @@ def organize_collections() -> None:
             move(obj, col_gameplay)
 
 
-def add_water_preview() -> None:
-    """Run the hoverbike addon's water-preview helper so the seeded scene
-    opens with a visible water surface. Pure preview — lives in the
-    addon's render-disabled collection and never reaches GLB export.
-
-    Loads the addon from the disk path (``tools/blender/hoverbike_addon.py``)
-    via ``importlib.util.spec_from_file_location`` rather than ``import
-    hoverbike_addon``, because Blender's installed-addons directory may
-    contain an older registered copy that gets picked up first and would
-    otherwise produce a vertically-oriented water plane (pre Item 5 fix)."""
+def _load_addon_module():
+    """Import the in-repo ``hoverbike_addon.py`` via its file path rather
+    than the registered-addon name. The installed-addons copy at
+    ``%APPDATA%/.../addons/hoverbike_addon.py`` may lag the working tree
+    on a fresh seed run; loading by file path guarantees we get the
+    current source's preview helpers regardless of what Blender has
+    registered."""
     import importlib.util
     addon_file = os.path.join(SCRIPT_DIR, "hoverbike_addon.py")
     if not os.path.exists(addon_file):
-        print(f"[seed-template-island] WARNING: {addon_file} not found; skipping water preview")
-        return
+        print(f"[seed-template-island] WARNING: {addon_file} not found; skipping previews")
+        return None
     spec = importlib.util.spec_from_file_location("hoverbike_addon_disk", addon_file)
     if spec is None or spec.loader is None:
-        print(f"[seed-template-island] WARNING: could not load spec for {addon_file}; skipping water preview")
-        return
+        print(f"[seed-template-island] WARNING: could not load spec for {addon_file}; skipping previews")
+        return None
     addon = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(addon)
+    return addon
+
+
+def add_previews() -> None:
+    """Build every addon preview so the seeded .blend opens with the full
+    authoring HUD visible — water surface, gate gizmos, racer
+    silhouettes, turn-indicator chevrons — instead of a bare terrain
+    that requires clicking four buttons before it's readable.
+
+    All previews live in their own ``_hoverbike_*_preview`` collections
+    which the export-track operator excludes from GLB output (see
+    ``_PreviewCollectionsHidden`` in hoverbike_addon.py), so this is
+    pure authoring sugar."""
+    addon = _load_addon_module()
+    if addon is None:
+        return
+    scene = bpy.context.scene
 
     summary = addon._rebuild_water_preview(
-        bpy.context.scene,
+        scene,
         size=WATER_PREVIEW_SIZE,
         subdivisions=WATER_PREVIEW_SUBDIVISIONS,
         time=0.0,
     )
     print(f"[seed-template-island] water preview: {summary['vert_count']} verts centered on {summary['centered_on']}")
+
+    n_gates = addon._rebuild_gate_preview(
+        scene,
+        spacing=60.0,  # mirrors addon's DEFAULT_GATE_SPACING_M
+        half_width=14.0,
+        height=6.0,
+    )
+    print(f"[seed-template-island] gate preview: {n_gates} gates at 60.0m spacing")
+
+    racer_summary = addon._rebuild_racer_preview(scene)
+    print(
+        "[seed-template-island] racer preview: "
+        f"1 player + {racer_summary['ai_count']} AI bikes "
+        f"({racer_summary['grid_source']})"
+    )
+
+    turn_summary = addon._rebuild_turn_indicators(
+        scene,
+        kappa_threshold=0.02,        # matches addon panel default
+        min_spacing_m=20.0,
+    )
+    print(f"[seed-template-island] turn indicators: {turn_summary['peak_count']} chevrons")
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -1240,7 +1276,7 @@ def seed() -> None:
     organize_collections()
 
     bpy.context.view_layer.update()
-    add_water_preview()
+    add_previews()
     bpy.context.view_layer.update()
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
