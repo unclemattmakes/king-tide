@@ -1,8 +1,13 @@
 import * as THREE from 'three'
+import {
+  type BikePose,
+  type BroadcastDirector,
+  createBroadcastDirector,
+} from '../render/broadcast-director'
 import { type ChaseCamera, createChaseCamera } from '../render/camera'
 
 /**
- * Spectator camera for replay playback. Two modes:
+ * Spectator camera for replay playback. Three modes:
  *
  * - `chase`: wraps the existing ChaseCamera so the same spring-damped
  *   follow behaviour the player sees during a race is reused for the
@@ -11,8 +16,14 @@ import { type ChaseCamera, createChaseCamera } from '../render/camera'
  * - `orbit`: free third-person camera. Mouse drag rotates yaw/pitch around
  *   the followed bike's position; wheel zooms distance in/out. Useful for
  *   getting hero shots of the recorded run.
+ *
+ * - `auto`: broadcast-director mode. Cycles cinematic camera shots over
+ *   the field on a timer — chase, side, low, crane, orbit, hero — and
+ *   picks a new bike to focus on between cuts. This is the default mode
+ *   for replay so saved races feel like a live TV broadcast. The HUD's
+ *   FOLLOW pills still work in chase/orbit; in auto the director picks.
  */
-export type SpectatorCameraMode = 'chase' | 'orbit'
+export type SpectatorCameraMode = 'chase' | 'orbit' | 'auto'
 
 export type SpectatorCamera = {
   mode: SpectatorCameraMode
@@ -23,10 +34,26 @@ export type SpectatorCamera = {
   zoom(delta: number): void
   /** Snap the camera to the current target — e.g. when switching followed bike. */
   snap(targetPos: THREE.Vector3, targetQuat: THREE.Quaternion): void
-  /** Update the camera. Call once per render frame. */
-  tick(targetPos: THREE.Vector3, targetQuat: THREE.Quaternion, dt: number): void
+  /** Update the camera. Call once per render frame.
+   *  `allPoses` is only consulted in `auto` mode — chase/orbit use the
+   *  followed bike's pose alone. */
+  tick(
+    targetPos: THREE.Vector3,
+    targetQuat: THREE.Quaternion,
+    dt: number,
+    allPoses?: ReadonlyArray<BikePose>,
+  ): void
   /** Reset orbit yaw/pitch/distance to defaults. */
   resetOrbit(): void
+  /** Force the broadcast director to cut on its next frame.
+   *  No-op outside `auto` mode. */
+  cutAuto(): void
+  /** Currently followed bike id when in `auto` mode, or `null` if no
+   *  cut has happened yet (or not in auto). The HUD reads this to draw
+   *  the lower-third tag for the right rider. */
+  getAutoFocusId(): number | null
+  /** Most-recent director shot label, used by the HUD. */
+  getAutoShotLabel(): string | null
 }
 
 const ORBIT_MIN_PITCH = -Math.PI / 2.2
@@ -39,8 +66,9 @@ const ORBIT_PIX_TO_RAD = 0.005
 
 export function createSpectatorCamera(camera: THREE.PerspectiveCamera): SpectatorCamera {
   const chase: ChaseCamera = createChaseCamera(camera)
+  const director: BroadcastDirector = createBroadcastDirector({ camera })
 
-  let mode: SpectatorCameraMode = 'chase'
+  let mode: SpectatorCameraMode = 'auto'
   let orbitYaw = 0
   let orbitPitch = ORBIT_DEFAULT_PITCH
   let orbitDist = ORBIT_DEFAULT_DIST
@@ -49,8 +77,6 @@ export function createSpectatorCamera(camera: THREE.PerspectiveCamera): Spectato
   const tmpLook = new THREE.Vector3()
 
   function tickOrbit(targetPos: THREE.Vector3, _targetQuat: THREE.Quaternion, _dt: number) {
-    // Spherical offset around the bike. Yaw 0 / pitch 0 puts the camera
-    // due north of the target at orbitDist metres, looking at the bike.
     const cosP = Math.cos(orbitPitch)
     const sinP = Math.sin(orbitPitch)
     const cosY = Math.cos(orbitYaw)
@@ -68,6 +94,9 @@ export function createSpectatorCamera(camera: THREE.PerspectiveCamera): Spectato
     setMode(next) {
       if (mode === next) return
       mode = next
+      // Force a re-snap on next tick in chase/orbit; in auto, command a
+      // fresh cut so the operator-style transition kicks in immediately.
+      if (next === 'auto') director.cut()
     },
     rotate(dxPx, dyPx) {
       if (mode !== 'orbit') return
@@ -78,7 +107,6 @@ export function createSpectatorCamera(camera: THREE.PerspectiveCamera): Spectato
     },
     zoom(delta) {
       if (mode !== 'orbit') return
-      // Multiplicative so zoom feels symmetric in/out across the dist range.
       orbitDist *= delta > 0 ? 1.1 : 1 / 1.1
       if (orbitDist < ORBIT_MIN_DIST) orbitDist = ORBIT_MIN_DIST
       if (orbitDist > ORBIT_MAX_DIST) orbitDist = ORBIT_MAX_DIST
@@ -86,22 +114,37 @@ export function createSpectatorCamera(camera: THREE.PerspectiveCamera): Spectato
     snap(targetPos, targetQuat) {
       if (mode === 'chase') {
         chase.snap(targetPos, targetQuat)
-      } else {
+      } else if (mode === 'orbit') {
         tickOrbit(targetPos, targetQuat, 0)
+      } else {
+        // Auto: director snaps on its next tick.
+        director.cut()
       }
     },
-    tick(targetPos, targetQuat, dt) {
+    tick(targetPos, targetQuat, dt, allPoses) {
       if (mode === 'chase') {
         chase.setOrbit(0, 0)
         chase.tick(targetPos, targetQuat, dt)
-      } else {
+      } else if (mode === 'orbit') {
         tickOrbit(targetPos, targetQuat, dt)
+      } else if (allPoses && allPoses.length > 0) {
+        director.tick(allPoses, dt)
       }
     },
     resetOrbit() {
       orbitYaw = 0
       orbitPitch = ORBIT_DEFAULT_PITCH
       orbitDist = ORBIT_DEFAULT_DIST
+    },
+    cutAuto() {
+      if (mode === 'auto') director.cut()
+    },
+    getAutoFocusId() {
+      return mode === 'auto' ? director.getFocusId() : null
+    },
+    getAutoShotLabel() {
+      if (mode !== 'auto') return null
+      return director.getCurrentShot().kind
     },
   }
 }
