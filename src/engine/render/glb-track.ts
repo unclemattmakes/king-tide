@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { applyTerrainShaderToScene } from '@/engine/render/terrain-shader'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import type { GltfRoot } from '@/game/tracks/glb-loader'
+import type { TerrainShaderConfig } from '@/game/tracks/types'
 
 /**
  * Render-side .glb track loader. Wraps Three.GLTFLoader so we get one fetch
@@ -22,7 +23,10 @@ export type LoadedGlbTrack = {
   parsedJson: GltfRoot
 }
 
-export async function loadGlbTrackVisuals(url: string): Promise<LoadedGlbTrack> {
+export async function loadGlbTrackVisuals(
+  url: string,
+  opts?: { terrainShader?: TerrainShaderConfig },
+): Promise<LoadedGlbTrack> {
   const loader = new GLTFLoader()
   const gltf = await loader.loadAsync(url)
   const parsedJson = (gltf.parser as unknown as { json: GltfRoot }).json
@@ -43,8 +47,11 @@ export async function loadGlbTrackVisuals(url: string): Promise<LoadedGlbTrack> 
   // the slope/altitude shader (see terrain-shader.ts). glTF can't carry
   // Blender's shader graph, so without this the runtime terrain reads
   // as a flat constant colour — the slope-aware look from the .blend
-  // preview is recomputed per-fragment here.
-  applyTerrainShaderToScene(scene)
+  // preview is recomputed per-fragment here. ``opts.terrainShader`` is
+  // the optional per-track override block from
+  // ``public/tracks/<id>.json`` — when present, the addon authored
+  // these values in its "Terrain shader (runtime)" panel.
+  applyTerrainShaderToScene(scene, opts?.terrainShader ?? {})
   return { scene, parsedJson }
 }
 

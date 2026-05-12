@@ -359,6 +359,27 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         ),
     }
 
+    # Runtime terrain-shader knobs (Item 3). Live on the scene; the
+    # runtime applies them as uniforms when it builds the terrain
+    # material. Omitted entirely when no scene props are set so older
+    # tracks keep their stock shader defaults.
+    scn = bpy.context.scene
+    shader_block: dict[str, Any] | None = None
+    if hasattr(scn, "hoverbike_shader_slope_start"):
+        shader_block = {
+            "altMin": float(scn.hoverbike_shader_alt_min),
+            "altMax": float(scn.hoverbike_shader_alt_max),
+            "slopeStart": float(scn.hoverbike_shader_slope_start),
+            "slopeEnd": float(scn.hoverbike_shader_slope_end),
+            "variation": float(scn.hoverbike_shader_variation),
+            "wetBand": float(scn.hoverbike_shader_wet_band),
+            "pathTint": [
+                float(scn.hoverbike_shader_path_tint_r),
+                float(scn.hoverbike_shader_path_tint_g),
+                float(scn.hoverbike_shader_path_tint_b),
+            ],
+        }
+
     body: dict[str, Any] = {
         "id": track_id,
         "name": track_id,
@@ -371,6 +392,8 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         "pickupSpawns": pickups,
         "boostPads": [],
     }
+    if shader_block is not None:
+        body["terrainShader"] = shader_block
     return body
 
 
@@ -1346,6 +1369,305 @@ class HOVERBIKE_OT_hide_gate_preview(Operator):
         return {"FINISHED"}
 
 
+# ── Terrain attribute bakers ────────────────────────────────────────────────
+#
+# Fill the `baked_ao` (FLOAT_COLOR) and `baked_path` (FLOAT) attributes on
+# the source terrain mesh so the GN graph can route them into COLOR_0.G
+# (AO multiplier) and COLOR_0.B (racing-line wear). The seeded GN graph
+# samples these as Named Attributes; the runtime terrain shader reads
+# both channels and uses them to darken cavities and tint a worn dirt
+# line into the surface where the racing line runs.
+#
+# AO uses Cycles' vertex-colour bake — fastest path on consumer GPUs and
+# handles the GN-evaluated terrain geometry correctly (Cycles internally
+# applies modifiers before baking). Path-worn uses a KDTree over a
+# densely sampled spline polyline — pure Python, ~1 s on a 150 k-vert
+# terrain.
+
+BAKED_AO_ATTR = "baked_ao"
+BAKED_PATH_ATTR = "baked_path"
+BAKE_TEMP_ATTR = "_hoverbike_bake_target"
+PATH_WEAR_INNER_M = 4.0      # full wear within this distance of the spline
+PATH_WEAR_OUTER_M = 14.0     # zero wear beyond this distance
+
+
+def _ensure_baked_attrs(terrain: bpy.types.Object) -> None:
+    """Make sure the source terrain mesh has the baked-* attributes the
+    GN graph reads. Both stored as plain FLOAT so glTF's vertex-colour
+    heuristic doesn't pick them up and stomp the GN-stamped COLOR_0 in
+    the export. Idempotent — pre-existing attributes are left alone."""
+    me = terrain.data
+    if BAKED_AO_ATTR not in me.attributes:
+        attr = me.attributes.new(name=BAKED_AO_ATTR, type="FLOAT", domain="POINT")
+        for i in range(len(attr.data)):
+            attr.data[i].value = 1.0  # default = no occlusion
+    if BAKED_PATH_ATTR not in me.attributes:
+        attr = me.attributes.new(name=BAKED_PATH_ATTR, type="FLOAT", domain="POINT")
+        for i in range(len(attr.data)):
+            attr.data[i].value = 0.0  # default = no wear
+
+
+def _bake_ao_cycles(terrain: bpy.types.Object, samples: int = 16, distance: float = 30.0) -> None:
+    """Bake Cycles AO into the terrain's ``baked_ao`` FLOAT attribute.
+    Cycles needs a vertex *colour* attribute as its target, but a
+    FLOAT_COLOR on the source mesh would be picked up by glTF's
+    auto-export heuristic and shipped as COLOR_0, fighting the
+    GN-stamped COLOR_0. We work around that by creating a throwaway
+    FLOAT_COLOR (``_hoverbike_bake_target``) for Cycles to write into,
+    copying the R channel into the persistent ``baked_ao`` float, and
+    deleting the temporary attribute on the way out. Net effect: the
+    source mesh ships with only FLOAT attributes, and the GN graph's
+    ``Named Attribute`` sampler reads ``baked_ao`` for COLOR_0.G."""
+    scene = bpy.context.scene
+    me = terrain.data
+    prev_engine = scene.render.engine
+
+    # Create the throwaway bake target.
+    if BAKE_TEMP_ATTR in me.color_attributes:
+        me.color_attributes.remove(me.color_attributes[BAKE_TEMP_ATTR])
+    target = me.color_attributes.new(name=BAKE_TEMP_ATTR, type="FLOAT_COLOR", domain="POINT")
+    me.color_attributes.active_color_index = me.color_attributes.find(BAKE_TEMP_ATTR)
+
+    scene.render.engine = "CYCLES"
+    scene.cycles.bake_type = "AO"
+    scene.cycles.samples = samples
+    scene.render.bake.target = "VERTEX_COLORS"
+    if scene.world is not None:
+        try:
+            scene.world.light_settings.use_ambient_occlusion = True
+            scene.world.light_settings.distance = distance
+        except AttributeError:
+            pass
+
+    prev_active_obj = bpy.context.view_layer.objects.active
+    # ``selected_objects`` isn't available on every context (e.g. when
+    # the operator runs from a non-VIEW_3D context like MCP/headless).
+    prev_selection = list(getattr(bpy.context, "selected_objects", []))
+    for o in prev_selection:
+        o.select_set(False)
+    bpy.context.view_layer.objects.active = terrain
+    terrain.select_set(True)
+    try:
+        bpy.ops.object.bake(type="AO")
+        # Transfer Cycles' RGB output (greyscale, R == G == B for AO)
+        # into the persistent FLOAT attribute.
+        ao_attr = me.attributes[BAKED_AO_ATTR]
+        for i in range(len(target.data)):
+            ao_attr.data[i].value = float(target.data[i].color[0])
+    finally:
+        terrain.select_set(False)
+        for o in prev_selection:
+            o.select_set(True)
+        bpy.context.view_layer.objects.active = prev_active_obj
+        scene.render.engine = prev_engine
+        if BAKE_TEMP_ATTR in me.color_attributes:
+            me.color_attributes.remove(me.color_attributes[BAKE_TEMP_ATTR])
+
+
+def _bake_path_wear(terrain: bpy.types.Object, spline: bpy.types.Object) -> int:
+    """Compute per-vertex distance from the AI spline, run it through a
+    smoothstep falloff, and write the result to ``baked_path`` on the
+    source terrain. Reads the *evaluated* terrain mesh (post-GN) so
+    vertex world positions reflect the actual displaced terrain —
+    distance-from-spline only makes sense in the played world, not on a
+    flat undisplaced plane. The vertex-index mapping back to the source
+    mesh is one-to-one because the GN graph doesn't add/remove verts."""
+    import math
+    from mathutils import Vector
+    from mathutils.kdtree import KDTree
+
+    if spline is None or spline.type != "CURVE":
+        raise RuntimeError("path-wear bake needs an ai_spline_main curve")
+
+    dg = bpy.context.evaluated_depsgraph_get()
+
+    # Dense polyline samples from the spline. Step ~1 m so a KDTree
+    # nearest-neighbour is a very tight distance estimate.
+    cobj = spline.evaluated_get(dg)
+    cme = cobj.to_mesh()
+    try:
+        sw = spline.matrix_world
+        spline_pts = [sw @ Vector(v.co) for v in cme.vertices]
+    finally:
+        try:
+            cobj.to_mesh_clear()
+        except ReferenceError:
+            pass
+    if len(spline_pts) < 2:
+        raise RuntimeError("ai_spline_main has too few sampled points")
+
+    tree = KDTree(len(spline_pts))
+    for i, p in enumerate(spline_pts):
+        tree.insert(p, i)
+    tree.balance()
+
+    eobj = terrain.evaluated_get(dg)
+    eme = eobj.to_mesh()
+    n_verts = 0
+    try:
+        if len(eme.vertices) != len(terrain.data.vertices):
+            raise RuntimeError(
+                f"vertex-count mismatch (source {len(terrain.data.vertices)}, "
+                f"evaluated {len(eme.vertices)}) — GN graph appears to add/remove verts"
+            )
+        mw = terrain.matrix_world
+        path_attr = terrain.data.attributes[BAKED_PATH_ATTR]
+        outer = float(PATH_WEAR_OUTER_M)
+        inner = float(PATH_WEAR_INNER_M)
+        span = max(outer - inner, 1e-6)
+        n_verts = len(eme.vertices)
+        for i, v in enumerate(eme.vertices):
+            world = mw @ Vector(v.co)
+            _, _, dist = tree.find(world)
+            # Smoothstep from outer (wear=0) to inner (wear=1).
+            t = max(0.0, min(1.0, (outer - dist) / span))
+            wear = t * t * (3.0 - 2.0 * t)
+            path_attr.data[i].value = wear
+    finally:
+        try:
+            eobj.to_mesh_clear()
+        except ReferenceError:
+            # Cycles' bake can invalidate the cached evaluated mesh
+            # mid-operator; the per-vertex writes above already happened
+            # so the bake is complete — we just can't clean up the cache
+            # reference any more. Safe to swallow.
+            pass
+    return n_verts
+
+
+class HOVERBIKE_OT_bake_terrain_attrs(Operator):
+    """Bake AO + racing-line wear into the source terrain's
+    ``baked_ao`` / ``baked_path`` attributes. The HV_Island GN graph
+    samples both via Named Attribute nodes and routes them into
+    COLOR_0.G (AO multiplier) and COLOR_0.B (path-worn), which the
+    runtime terrain shader reads to darken cavities and stamp a worn
+    dirt line into the racing surface."""
+
+    bl_idname = "hoverbike.bake_terrain_attrs"
+    bl_label = "Bake AO + Path Wear"
+    bl_description = (
+        "Bake ambient occlusion (Cycles) and AI-spline path wear (Python KDTree) "
+        "into the terrain's baked_ao + baked_path attributes. ~10-20 s on a 150k-vert terrain."
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        terrain = bpy.data.objects.get("terrain")
+        if terrain is None or terrain.type != "MESH":
+            self.report({"ERROR"}, "no `terrain` mesh in scene")
+            return {"CANCELLED"}
+        spline = bpy.data.objects.get("ai_spline_main")
+        if spline is None or spline.type != "CURVE":
+            self.report({"ERROR"}, "no `ai_spline_main` curve in scene")
+            return {"CANCELLED"}
+
+        _ensure_baked_attrs(terrain)
+        try:
+            _bake_ao_cycles(terrain)
+        except Exception as e:  # noqa: BLE001
+            self.report({"ERROR"}, f"AO bake failed: {e}")
+            return {"CANCELLED"}
+        try:
+            n = _bake_path_wear(terrain, spline)
+        except Exception as e:  # noqa: BLE001
+            self.report({"ERROR"}, f"path-wear bake failed: {e}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Baked AO + path wear over {n} vertices")
+        return {"FINISHED"}
+
+
+# ── Track stats panel ───────────────────────────────────────────────────────
+
+
+def _spline_arc_length(spline_obj: bpy.types.Object) -> float:
+    """Sum the straight-line distances between consecutive sampled
+    points on the spline's polyline. Closes the loop for cyclic
+    splines — most race tracks are cyclic."""
+    import math
+    if spline_obj is None or spline_obj.type != "CURVE":
+        return 0.0
+    pts = _sample_curve_to_polyline(spline_obj)
+    if len(pts) < 2:
+        return 0.0
+    total = 0.0
+    for i in range(len(pts) - 1):
+        a = pts[i]
+        b = pts[i + 1]
+        total += math.hypot(b[0] - a[0], b[1] - a[1])
+    # Cyclic close.
+    cyclic = any(
+        getattr(sp, "use_cyclic_u", False) for sp in spline_obj.data.splines
+    )
+    if cyclic:
+        a = pts[-1]
+        b = pts[0]
+        total += math.hypot(b[0] - a[0], b[1] - a[1])
+    return total
+
+
+def _terrain_height_extents() -> tuple[float, float, float] | None:
+    """Min Y / max Y / under-water fraction for the evaluated terrain
+    mesh. Returns None if the terrain isn't present. Heavy enough
+    (~150 k verts) that we only call this on demand via the panel's
+    Refresh button, not on every redraw."""
+    terrain = bpy.data.objects.get("terrain")
+    if terrain is None or terrain.type != "MESH":
+        return None
+    dg = bpy.context.evaluated_depsgraph_get()
+    eobj = terrain.evaluated_get(dg)
+    me = eobj.to_mesh()
+    try:
+        if not me.vertices:
+            return None
+        mw = terrain.matrix_world
+        zmin = float("inf")
+        zmax = float("-inf")
+        below = 0
+        for v in me.vertices:
+            wz = (mw @ v.co).z
+            if wz < zmin:
+                zmin = wz
+            if wz > zmax:
+                zmax = wz
+            if wz < 0.0:
+                below += 1
+        frac = below / len(me.vertices)
+        return zmin, zmax, frac
+    finally:
+        eobj.to_mesh_clear()
+
+
+class HOVERBIKE_OT_refresh_track_stats(Operator):
+    """Recompute the terrain min/max y + water-coverage stats and stash
+    them on scene custom properties so the panel can show them. Splits
+    out from the cheap counts (gates, starts, …) which the panel
+    recomputes on every redraw."""
+
+    bl_idname = "hoverbike.refresh_track_stats"
+    bl_label = "Refresh Terrain Stats"
+    bl_description = "Evaluate the terrain mesh and update the min/max y + water-coverage readouts."
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        ext = _terrain_height_extents()
+        scene = context.scene
+        if ext is None:
+            scene["_hoverbike_stats_terrain_min_y"] = 0.0
+            scene["_hoverbike_stats_terrain_max_y"] = 0.0
+            scene["_hoverbike_stats_terrain_water_frac"] = 0.0
+            self.report({"WARNING"}, "no terrain mesh — stats reset")
+            return {"FINISHED"}
+        zmin, zmax, frac = ext
+        scene["_hoverbike_stats_terrain_min_y"] = float(zmin)
+        scene["_hoverbike_stats_terrain_max_y"] = float(zmax)
+        scene["_hoverbike_stats_terrain_water_frac"] = float(frac)
+        self.report(
+            {"INFO"},
+            f"Terrain: y∈[{zmin:.1f}, {zmax:.1f}] m, water coverage {frac * 100:.0f}%",
+        )
+        return {"FINISHED"}
+
+
 class HOVERBIKE_OT_export_track(Operator):
     """Validate the track scene, write
     ``public/assets/tracks/<id>.glb``, and on first export materialise
@@ -1430,6 +1752,13 @@ class HOVERBIKE_OT_export_track(Operator):
                     export_lights=False,
                     export_gpu_instances=True,
                     export_gn_mesh=True,
+                    # Force the active vertex-colour through even when
+                    # the Eevee material doesn't reference it. The
+                    # GN-stamped COLOR_0 (R=0, G=AO, B=path-worn,
+                    # A=biome) is the active color on the source mesh.
+                    export_vertex_color="ACTIVE",
+                    export_all_vertex_colors=False,
+                    export_active_vertex_color_when_no_material=True,
                 )
         except Exception as e:  # noqa: BLE001
             self.report({"ERROR"}, f"GLB export failed: {e}")
@@ -1735,6 +2064,70 @@ class HOVERBIKE_PT_panel(Panel):
         row.operator("hoverbike.rebuild_turn_indicators", icon="FILE_REFRESH")
         row.operator("hoverbike.hide_turn_indicators", icon="HIDE_ON")
 
+        # Vertex-attribute bakers — fill COLOR_0.G + .B with real AO and
+        # racing-line wear data. The runtime terrain shader reads both.
+        bake_box = layout.box()
+        bake_box.label(text="Terrain bakes", icon="MATERIAL")
+        bake_box.label(text="Fills baked_ao + baked_path", icon="NODE_TEXTURE")
+        bake_box.operator("hoverbike.bake_terrain_attrs", icon="MOD_NOISE")
+
+        # Item 3 — runtime terrain-shader knobs. These are written into
+        # public/tracks/<id>.json on export and read as uniforms by
+        # src/engine/render/terrain-shader.ts. Changing them re-tunes the
+        # in-game terrain without a code edit.
+        sh_box = layout.box()
+        sh_box.label(text="Terrain shader (runtime)", icon="SHADING_RENDERED")
+        row = sh_box.row(align=True)
+        row.prop(context.scene, "hoverbike_shader_alt_min", text="Alt min")
+        row.prop(context.scene, "hoverbike_shader_alt_max", text="Alt max")
+        row = sh_box.row(align=True)
+        row.prop(context.scene, "hoverbike_shader_slope_start", text="Slope start")
+        row.prop(context.scene, "hoverbike_shader_slope_end", text="Slope end")
+        row = sh_box.row(align=True)
+        row.prop(context.scene, "hoverbike_shader_variation", text="Variation")
+        row.prop(context.scene, "hoverbike_shader_wet_band", text="Wet band")
+        sh_box.label(text="Path tint:")
+        row = sh_box.row(align=True)
+        row.prop(context.scene, "hoverbike_shader_path_tint_r", text="R")
+        row.prop(context.scene, "hoverbike_shader_path_tint_g", text="G")
+        row.prop(context.scene, "hoverbike_shader_path_tint_b", text="B")
+
+        # Item 2 — track stats. Cheap counts + spline length recompute
+        # every redraw; min/max Y + water-coverage require an evaluated
+        # mesh (~150 k verts) so they're behind an explicit refresh.
+        stats_box = layout.box()
+        stats_box.label(text="Track stats", icon="INFO")
+        sp = bpy.data.objects.get("ai_spline_main")
+        arc_len = _spline_arc_length(sp) if sp else 0.0
+        lap_25 = arc_len / 25.0 if arc_len > 0 else 0.0
+        stats_box.label(text=f"Spline length: {arc_len:,.1f} m")
+        stats_box.label(text=f"Lap estimate @25 m/s: {lap_25:.1f} s")
+        # Cheap counts from object names.
+        counts = {"starts": 0, "checkpoints": 0, "pickups": 0, "boosts": 0}
+        for obj in bpy.context.scene.objects:
+            n = obj.name
+            if n.startswith("start_"): counts["starts"] += 1
+            elif n.startswith("cp_"): counts["checkpoints"] += 1
+            elif n.startswith("pickup"): counts["pickups"] += 1
+            elif n.startswith("boost"): counts["boosts"] += 1
+        row = stats_box.row(align=True)
+        row.label(text=f"Starts: {counts['starts']}")
+        row.label(text=f"Gates: {counts['checkpoints']}")
+        row = stats_box.row(align=True)
+        row.label(text=f"Pickups: {counts['pickups']}")
+        row.label(text=f"Boosts: {counts['boosts']}")
+        # Cached terrain stats (require depsgraph eval).
+        scn = bpy.context.scene
+        zmin = scn.get("_hoverbike_stats_terrain_min_y")
+        zmax = scn.get("_hoverbike_stats_terrain_max_y")
+        frac = scn.get("_hoverbike_stats_terrain_water_frac")
+        if zmin is not None and zmax is not None and frac is not None:
+            stats_box.label(text=f"Terrain y: [{float(zmin):,.1f}, {float(zmax):,.1f}] m")
+            stats_box.label(text=f"Water coverage: {float(frac) * 100:.0f}%")
+        else:
+            stats_box.label(text="Terrain y / water: refresh below", icon="QUESTION")
+        stats_box.operator("hoverbike.refresh_track_stats", icon="FILE_REFRESH")
+
         layout.separator()
         col = layout.column(align=True)
         col.scale_y = 0.85
@@ -1798,6 +2191,8 @@ _classes = (
     HOVERBIKE_OT_hide_water_preview,
     HOVERBIKE_OT_rebuild_turn_indicators,
     HOVERBIKE_OT_hide_turn_indicators,
+    HOVERBIKE_OT_bake_terrain_attrs,
+    HOVERBIKE_OT_refresh_track_stats,
     HOVERBIKE_OT_export_track,
     HOVERBIKE_OT_export_bike,
     HOVERBIKE_OT_copy_track_url,
@@ -1872,6 +2267,51 @@ def register() -> None:
         precision=1,
     )
 
+    # Runtime terrain-shader tuning. These mirror constants in
+    # ``src/engine/render/terrain-shader.ts``; ``hoverbike.export_track``
+    # writes them into ``public/tracks/<id>.json`` so the runtime can
+    # rebuild the material with the author's chosen values without
+    # touching the .ts.
+    bpy.types.Scene.hoverbike_shader_slope_start = FloatProperty(
+        name="Slope start (cos θ)",
+        description="Cosine of the slope angle below which terrain reads as the flat (sand/grass) ramp. 0.85 ≈ 30°.",
+        default=0.85, min=0.0, max=1.0, precision=3,
+    )
+    bpy.types.Scene.hoverbike_shader_slope_end = FloatProperty(
+        name="Slope end (cos θ)",
+        description="Cosine of the slope angle above which terrain reads as full cliff/rock. 0.55 ≈ 55°.",
+        default=0.55, min=0.0, max=1.0, precision=3,
+    )
+    bpy.types.Scene.hoverbike_shader_variation = FloatProperty(
+        name="Variation strength",
+        description="±brightness perturbation from the per-vertex value-noise. 0 = flat ramps, 0.3 = soft, 0.6 = strong.",
+        default=0.30, min=0.0, max=1.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_shader_wet_band = FloatProperty(
+        name="Wet band (m)",
+        description="Half-height of the |y|-mask that darkens the terrain colour around the waterline.",
+        default=2.0, min=0.0, max=20.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_shader_alt_min = FloatProperty(
+        name="Altitude band min (m)",
+        description="World-Y mapped to ramp position 0 (deepest abyssal blue / dark rock).",
+        default=-50.0, min=-500.0, max=0.0, precision=1,
+    )
+    bpy.types.Scene.hoverbike_shader_alt_max = FloatProperty(
+        name="Altitude band max (m)",
+        description="World-Y mapped to ramp position 1 (volcanic top / brightest alpine).",
+        default=120.0, min=0.0, max=500.0, precision=1,
+    )
+    bpy.types.Scene.hoverbike_shader_path_tint_r = FloatProperty(
+        name="Path tint R", default=0.30, min=0.0, max=2.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_shader_path_tint_g = FloatProperty(
+        name="Path tint G", default=0.24, min=0.0, max=2.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_shader_path_tint_b = FloatProperty(
+        name="Path tint B", default=0.18, min=0.0, max=2.0, precision=2,
+    )
+
 
 def unregister() -> None:
     for cls in reversed(_classes):
@@ -1879,7 +2319,16 @@ def unregister() -> None:
             bpy.utils.unregister_class(cls)
         except RuntimeError:
             pass
-    for prop in ("hoverbike_gate_spacing", "hoverbike_gate_half_width", "hoverbike_gate_height", "hoverbike_water_size", "hoverbike_water_subdivisions", "hoverbike_water_time", "hoverbike_turn_kappa", "hoverbike_turn_min_spacing"):
+    for prop in (
+        "hoverbike_gate_spacing", "hoverbike_gate_half_width", "hoverbike_gate_height",
+        "hoverbike_water_size", "hoverbike_water_subdivisions", "hoverbike_water_time",
+        "hoverbike_turn_kappa", "hoverbike_turn_min_spacing",
+        "hoverbike_shader_slope_start", "hoverbike_shader_slope_end",
+        "hoverbike_shader_variation", "hoverbike_shader_wet_band",
+        "hoverbike_shader_alt_min", "hoverbike_shader_alt_max",
+        "hoverbike_shader_path_tint_r", "hoverbike_shader_path_tint_g",
+        "hoverbike_shader_path_tint_b",
+    ):
         if hasattr(bpy.types.Scene, prop):
             try:
                 delattr(bpy.types.Scene, prop)

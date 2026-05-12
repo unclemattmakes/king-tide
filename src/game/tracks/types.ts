@@ -43,6 +43,40 @@ export type Track = {
   water?: WaterConfig
   /** Optional sky / atmosphere tuning. If absent, the runtime defaults are used. */
   sky?: SkyConfig
+  /** Optional terrain-shader knobs. Authored in the Blender addon panel and
+   *  written into the JSON on export. The runtime applies these as uniforms
+   *  when it builds the terrain material — see
+   *  [terrain-shader.ts](../../engine/render/terrain-shader.ts). Absent
+   *  → runtime defaults (matches the seeded Blender preview). */
+  terrainShader?: TerrainShaderConfig
+}
+
+/**
+ * Author-tunable knobs on the runtime slope/altitude terrain shader. All
+ * fields optional — missing fields fall back to the constants baked into
+ * ``terrain-shader.ts``. See the addon panel "Terrain shader (runtime)"
+ * box in [hoverbike_addon.py](../../../tools/blender/hoverbike_addon.py)
+ * for the authoring side.
+ */
+export type TerrainShaderConfig = {
+  /** World-Y mapped to ramp position 0 (deepest abyssal blue). Default -50. */
+  altMin?: number
+  /** World-Y mapped to ramp position 1 (volcanic top). Default 120. */
+  altMax?: number
+  /** Cos of slope angle below which terrain uses the flat (sand/grass)
+   *  ramp. Default 0.85 ≈ 30°. */
+  slopeStart?: number
+  /** Cos of slope angle above which terrain uses the cliff (rock) ramp.
+   *  Default 0.55 ≈ 55°. */
+  slopeEnd?: number
+  /** ±brightness variation from the per-vertex value noise. Default 0.30. */
+  variation?: number
+  /** Half-height (m) of the |y|-mask wet-band darken around the waterline.
+   *  Default 2.0. */
+  wetBand?: number
+  /** RGB tint mixed in where the baked racing-line wear (COLOR_0.B) is
+   *  high. Default [0.30, 0.24, 0.18] — packed-dirt brown. */
+  pathTint?: [number, number, number]
 }
 
 export type PlayerStart = {
