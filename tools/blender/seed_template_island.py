@@ -55,6 +55,8 @@ matches the way real volcanic morphology decouples *footprint* from
 | Roughness Below | 1 m | Global background noise amplitude below water |
 | Noise Scale | 0.008 | Global noise frequency |
 | Noise Seed | 0 | Re-roll value for noise variation |
+| Seafloor Billow | 6 m | Low-frequency distorted noise amplitude, gated to underwater. Reads as ridged silt rather than a flat seafloor plateau. |
+| Billow Scale | 0.004 | Billow noise frequency (smaller = larger dunes) |
 
 ### Authoring loop
 
@@ -469,6 +471,14 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     _new_socket(g, "Roughness Below", "INPUT", "NodeSocketFloat",   1.0, 0.0, 20.0)
     _new_socket(g, "Noise Scale",     "INPUT", "NodeSocketFloat",   0.008, 0.0001, 1.0)
     _new_socket(g, "Noise Seed",      "INPUT", "NodeSocketFloat",   0.0, 0.0, 1000.0)
+    # Billowy seafloor: low-frequency, high-distortion noise that pushes the
+    # underwater floor up and down so it reads as ridged silt rather than a
+    # flat plateau. Gated by a smooth underwater mask so peaks never poke
+    # through the waterline. Defaults are deliberately aggressive — silt
+    # trenches reach well below the nominal -25 m shelf, giving the
+    # seafloor a dramatic eroded silhouette rather than a kiddie-pool floor.
+    _new_socket(g, "Seafloor Billow", "INPUT", "NodeSocketFloat",  10.0, 0.0, 30.0)
+    _new_socket(g, "Billow Scale",    "INPUT", "NodeSocketFloat",   0.004, 0.0001, 1.0)
     _new_socket(g, "Geometry", "OUTPUT", "NodeSocketGeometry")
 
     p_in  = _add_node(g, "NodeGroupInput",  -1600, 0)
@@ -523,13 +533,59 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     n_perturb = _add_node(g, "ShaderNodeMath", 200, -1900, operation="MULTIPLY")
     g.links.new(n_gsigned.outputs[0], n_perturb.inputs[0])
     g.links.new(n_amp.outputs["Result"], n_perturb.inputs[1])
+
+    # Seafloor billows — low-frequency distorted noise gated to underwater.
+    # ``normalize=False`` keeps the noise's natural variance instead of
+    # squashing it toward 0.5. Multi-octave (Detail=4) plus moderate
+    # Distortion gives the puffy / cloudy silhouette of silty dunes.
+    n_billow_noise = _add_node(g, "ShaderNodeTexNoise", -400, -2400)
+    n_billow_noise.noise_dimensions = "4D"
+    n_billow_noise.normalize = False
+    n_billow_noise.inputs["Detail"].default_value = 4.0
+    n_billow_noise.inputs["Roughness"].default_value = 0.55
+    n_billow_noise.inputs["Distortion"].default_value = 1.2
+    g.links.new(p_pos.outputs["Position"],     n_billow_noise.inputs["Vector"])
+    g.links.new(p_in.outputs["Billow Scale"],  n_billow_noise.inputs["Scale"])
+    # De-correlate the billow seed from the cone-erosion + global noise seeds.
+    n_billow_seed = _add_node(g, "ShaderNodeMath", -600, -2600, operation="ADD")
+    n_billow_seed.inputs[1].default_value = 53.0
+    g.links.new(p_in.outputs["Noise Seed"], n_billow_seed.inputs[0])
+    g.links.new(n_billow_seed.outputs[0], n_billow_noise.inputs["W"])
+    # Signed remap centred on 0.5 with a downward bias: map
+    # [0, 1] → [-1.4, +0.6]. Without ``normalize`` the noise output can
+    # poke outside [0, 1], which we *want* — the rare extremes carve
+    # the dramatic silt trenches that make the seafloor read as eroded
+    # rather than dialled-in.
+    n_billow_signed = _add_node(g, "ShaderNodeMath", -200, -2400, operation="MULTIPLY_ADD")
+    n_billow_signed.inputs[1].default_value =  2.0
+    n_billow_signed.inputs[2].default_value = -1.4
+    g.links.new(n_billow_noise.outputs["Fac"], n_billow_signed.inputs[0])
+    # Underwater mask: full strength below z=-8, fades out between -8
+    # and -1 m so billows never break the waterline.
+    n_billow_mask = _add_node(g, "ShaderNodeMapRange", 0, -2400,
+                              interpolation_type="SMOOTHSTEP", clamp=True)
+    n_billow_mask.inputs["From Min"].default_value = -8.0
+    n_billow_mask.inputs["From Max"].default_value = -1.0
+    n_billow_mask.inputs["To Min"].default_value =    1.0
+    n_billow_mask.inputs["To Max"].default_value =    0.0
+    g.links.new(prev, n_billow_mask.inputs["Value"])
+    n_billow_mul = _add_node(g, "ShaderNodeMath", 200, -2400, operation="MULTIPLY")
+    g.links.new(n_billow_signed.outputs[0], n_billow_mul.inputs[0])
+    g.links.new(n_billow_mask.outputs["Result"], n_billow_mul.inputs[1])
+    n_billow = _add_node(g, "ShaderNodeMath", 400, -2400, operation="MULTIPLY")
+    g.links.new(n_billow_mul.outputs[0], n_billow.inputs[0])
+    g.links.new(p_in.outputs["Seafloor Billow"], n_billow.inputs[1])
+
     n_final = _add_node(g, "ShaderNodeMath", 600, -800, operation="ADD")
     g.links.new(prev, n_final.inputs[0])
     g.links.new(n_perturb.outputs[0], n_final.inputs[1])
+    n_final2 = _add_node(g, "ShaderNodeMath", 800, -800, operation="ADD")
+    g.links.new(n_final.outputs[0],   n_final2.inputs[0])
+    g.links.new(n_billow.outputs[0],  n_final2.inputs[1])
 
     # Set Position
     n_comb = _add_node(g, "ShaderNodeCombineXYZ", 1100, -300)
-    g.links.new(n_final.outputs[0], n_comb.inputs["Z"])
+    g.links.new(n_final2.outputs[0], n_comb.inputs["Z"])
     n_setpos = _add_node(g, "GeometryNodeSetPosition", 1400, 0)
     g.links.new(p_in.outputs["Geometry"], n_setpos.inputs["Geometry"])
     g.links.new(n_comb.outputs["Vector"], n_setpos.inputs["Offset"])
@@ -743,11 +799,20 @@ def add_sun() -> None:
 
 
 def build_terrain_material(terrain: bpy.types.Object) -> None:
-    """Vertex-color-driven biome ramp. Sandy seafloor is the underwater
-    default; deep blue appears only where the shelf floor descends past
-    -22m (visible at the map corners where no peak's shelf shallows the
-    floor). Water surface colour is handled by the runtime water shader,
-    not by this material."""
+    """Slope- and altitude-aware terrain shader for the Blender preview.
+
+    Mixes two altitude ramps — a "flat" ramp (sandy / grass / forest) and
+    a "cliff" ramp (wet rock / cliff stone / volcanic) — driven by the
+    surface normal's tilt. A low-frequency variation noise breaks the
+    bands so neither sand nor grass reads as a flat fill. Roughness
+    lifts on rocks; near the waterline the shader darkens slightly to
+    suggest wet sand / wet rock.
+
+    This material is **author-only**: the runtime ships its own terrain
+    shader that reads ``COLOR_0`` from the exported .glb. The vertex-
+    color stamp is still written by the GN graph, so when we wire the
+    runtime shader to honour it the in-game look will match this
+    preview's intent."""
     name = "mat_terrain_main"
     if name in bpy.data.materials:
         bpy.data.materials.remove(bpy.data.materials[name])
@@ -756,25 +821,148 @@ def build_terrain_material(terrain: bpy.types.Object) -> None:
     nt = mat.node_tree
     for n in list(nt.nodes):
         nt.nodes.remove(n)
-    n_out  = nt.nodes.new("ShaderNodeOutputMaterial"); n_out.location = (400, 0)
-    n_bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled"); n_bsdf.location = (200, 0)
-    n_attr = nt.nodes.new("ShaderNodeAttribute"); n_attr.location = (-400, 0)
-    n_attr.attribute_name = "COLOR_0"
-    n_ramp = nt.nodes.new("ShaderNodeValToRGB"); n_ramp.location = (-200, 0)
-    nt.links.new(n_attr.outputs["Alpha"], n_ramp.inputs["Fac"])
-    cr = n_ramp.color_ramp
-    cr.interpolation = "LINEAR"
-    while len(cr.elements) > 1:
-        cr.elements.remove(cr.elements[1])
-    cr.elements[0].position = 0.0
-    cr.elements[0].color = (0.03, 0.08, 0.20, 1.0)   # deep abyssal blue
-    e1 = cr.elements.new(0.333); e1.color = (0.92, 0.86, 0.72, 1.0)  # sandy seafloor
-    e2 = cr.elements.new(0.667); e2.color = (0.78, 0.70, 0.50, 1.0)  # beach tan
-    e3 = cr.elements.new(1.0);   e3.color = (0.20, 0.45, 0.25, 1.0)  # jungle green
-    nt.links.new(n_ramp.outputs["Color"], n_bsdf.inputs["Base Color"])
-    n_bsdf.inputs["Roughness"].default_value = 0.85
+
+    def add(kind, x, y, **kw):
+        n = nt.nodes.new(kind); n.location = (x, y)
+        for k, v in kw.items():
+            setattr(n, k, v)
+        return n
+
+    n_out  = add("ShaderNodeOutputMaterial",  1800,    0)
+    n_bsdf = add("ShaderNodeBsdfPrincipled",  1500,    0)
+
+    # --- inputs: position + normal ------------------------------------
+    n_geom = add("ShaderNodeNewGeometry",    -1600,  200)
+    n_pos_xyz = add("ShaderNodeSeparateXYZ", -1400,  300)
+    nt.links.new(n_geom.outputs["Position"], n_pos_xyz.inputs["Vector"])
+    n_nrm_xyz = add("ShaderNodeSeparateXYZ", -1400,    0)
+    nt.links.new(n_geom.outputs["Normal"], n_nrm_xyz.inputs["Vector"])
+
+    # --- slope mask: 0 on flat tops, 1 on cliffs ----------------------
+    # Normal.z drops from 1 (flat) to 0 (vertical). Smoothstep between
+    # ~30° (cos ≈ 0.85) and ~55° (cos ≈ 0.57) so gentle slopes still
+    # read as grass / sand.
+    n_slope_mr = add("ShaderNodeMapRange",   -1200,    0,
+                     interpolation_type="SMOOTHSTEP", clamp=True)
+    n_slope_mr.inputs["From Min"].default_value = 0.85
+    n_slope_mr.inputs["From Max"].default_value = 0.55
+    n_slope_mr.inputs["To Min"].default_value =   0.0
+    n_slope_mr.inputs["To Max"].default_value =   1.0
+    nt.links.new(n_nrm_xyz.outputs["Z"], n_slope_mr.inputs["Value"])
+
+    # --- altitude -> [0, 1] fac for the ramps -------------------------
+    # Map z ∈ [-50, 120] → [0, 1]. The flat / cliff ramps are tuned to
+    # this range; if peaks ever exceed 120 m, ramp tops just clamp.
+    n_alt_mr = add("ShaderNodeMapRange",     -1200,  300, clamp=True)
+    n_alt_mr.inputs["From Min"].default_value = -50.0
+    n_alt_mr.inputs["From Max"].default_value = 120.0
+    n_alt_mr.inputs["To Min"].default_value =     0.0
+    n_alt_mr.inputs["To Max"].default_value =     1.0
+    nt.links.new(n_pos_xyz.outputs["Z"], n_alt_mr.inputs["Value"])
+
+    def _ramp(x, y, stops):
+        r = add("ShaderNodeValToRGB", x, y)
+        cr = r.color_ramp
+        cr.interpolation = "LINEAR"
+        while len(cr.elements) > 1:
+            cr.elements.remove(cr.elements[1])
+        cr.elements[0].position = stops[0][0]
+        cr.elements[0].color = stops[0][1]
+        for pos, col in stops[1:]:
+            e = cr.elements.new(pos)
+            e.color = col
+        return r
+
+    # --- flat ramp: deep blue → sandy → wet beach → grass → forest → bare ---
+    n_flat_ramp = _ramp(-800, 400, [
+        (0.000, (0.03, 0.08, 0.20, 1.0)),   # abyssal blue   (z≈-50)
+        (0.180, (0.22, 0.30, 0.40, 1.0)),   # blue-sand      (z≈-19)
+        (0.270, (0.68, 0.66, 0.55, 1.0)),   # silty sand     (z≈-4)
+        (0.300, (0.92, 0.86, 0.72, 1.0)),   # bright sand    (z= 1)
+        (0.345, (0.78, 0.70, 0.50, 1.0)),   # wet beach tan  (z= 9)
+        (0.430, (0.36, 0.55, 0.27, 1.0)),   # grass          (z=23)
+        (0.620, (0.22, 0.40, 0.18, 1.0)),   # forest         (z=55)
+        (0.820, (0.30, 0.27, 0.21, 1.0)),   # alpine stone   (z=89)
+        (1.000, (0.18, 0.15, 0.13, 1.0)),   # volcanic top   (z=120)
+    ])
+    nt.links.new(n_alt_mr.outputs["Result"], n_flat_ramp.inputs["Fac"])
+
+    # --- cliff ramp: cool deep → wet rock → cliff stone → volcanic ---
+    n_cliff_ramp = _ramp(-800, 100, [
+        (0.000, (0.07, 0.10, 0.16, 1.0)),   # dark abyssal rock
+        (0.220, (0.20, 0.22, 0.24, 1.0)),   # wet rock
+        (0.300, (0.34, 0.32, 0.28, 1.0)),   # sea cliff
+        (0.500, (0.42, 0.39, 0.34, 1.0)),   # grey rock
+        (0.750, (0.30, 0.25, 0.22, 1.0)),   # warmer rock
+        (1.000, (0.16, 0.13, 0.13, 1.0)),   # volcanic
+    ])
+    nt.links.new(n_alt_mr.outputs["Result"], n_cliff_ramp.inputs["Fac"])
+
+    # --- mix flat + cliff by slope ------------------------------------
+    n_mix_slope = add("ShaderNodeMix", -400, 250, data_type="RGBA")
+    n_mix_slope.blend_type = "MIX"
+    n_mix_slope.clamp_factor = True
+    nt.links.new(n_slope_mr.outputs["Result"], n_mix_slope.inputs[0])
+    nt.links.new(n_flat_ramp.outputs["Color"],  n_mix_slope.inputs[6])
+    nt.links.new(n_cliff_ramp.outputs["Color"], n_mix_slope.inputs[7])
+
+    # --- variation noise: breaks ramp banding via Brightness/Contrast ---
+    # Two-octave noise drives a signed brightness offset (±0.10) so neither
+    # sand nor grass reads as a flat fill. Using Brightness/Contrast avoids
+    # ColorRamp's 0..1 colour clamping, which would otherwise lose the
+    # "brighten" half of the variation.
+    n_var_noise = add("ShaderNodeTexNoise", -1200, -300)
+    n_var_noise.noise_dimensions = "3D"; n_var_noise.normalize = True
+    n_var_noise.inputs["Scale"].default_value = 1.2
+    n_var_noise.inputs["Detail"].default_value = 6.0
+    n_var_noise.inputs["Roughness"].default_value = 0.55
+    nt.links.new(n_geom.outputs["Position"], n_var_noise.inputs["Vector"])
+    n_var_signed = add("ShaderNodeMapRange", -900, -300, clamp=True)
+    n_var_signed.inputs["From Min"].default_value =  0.0
+    n_var_signed.inputs["From Max"].default_value =  1.0
+    n_var_signed.inputs["To Min"].default_value =   -0.10
+    n_var_signed.inputs["To Max"].default_value =    0.10
+    nt.links.new(n_var_noise.outputs["Fac"], n_var_signed.inputs["Value"])
+    n_color_var = add("ShaderNodeBrightContrast", -200, -100)
+    nt.links.new(n_mix_slope.outputs[2],            n_color_var.inputs["Color"])
+    nt.links.new(n_var_signed.outputs["Result"],    n_color_var.inputs["Bright"])
+
+    # --- wet-band darken near waterline -------------------------------
+    # Triangular |z|-mask: peaks at z=0 (shoreline) and falls to 0 at
+    # |z|≥2. Pulls saturation down on damp sand / wave-washed rock
+    # without bleeding into the abyssal floor (~-25 m).
+    n_wet_abs = add("ShaderNodeMath",        -1400, -600, operation="ABSOLUTE")
+    nt.links.new(n_pos_xyz.outputs["Z"], n_wet_abs.inputs[0])
+    n_wet_mr = add("ShaderNodeMapRange",     -1200, -600,
+                   interpolation_type="SMOOTHSTEP", clamp=True)
+    n_wet_mr.inputs["From Min"].default_value =  0.0
+    n_wet_mr.inputs["From Max"].default_value =  2.0
+    n_wet_mr.inputs["To Min"].default_value =    1.0
+    n_wet_mr.inputs["To Max"].default_value =    0.0
+    nt.links.new(n_wet_abs.outputs[0], n_wet_mr.inputs["Value"])
+    n_wet_tint = add("ShaderNodeRGB", -900, -600)
+    n_wet_tint.outputs[0].default_value = (0.78, 0.78, 0.82, 1.0)
+    n_wet_mix = add("ShaderNodeMix", 100, -300, data_type="RGBA")
+    n_wet_mix.blend_type = "MULTIPLY"
+    n_wet_mix.clamp_factor = True
+    nt.links.new(n_wet_mr.outputs["Result"], n_wet_mix.inputs[0])
+    nt.links.new(n_color_var.outputs["Color"], n_wet_mix.inputs[6])
+    nt.links.new(n_wet_tint.outputs[0],  n_wet_mix.inputs[7])
+
+    nt.links.new(n_wet_mix.outputs[2], n_bsdf.inputs["Base Color"])
+
+    # --- roughness: rocks rougher than sand / grass --------------------
+    n_rough_mr = add("ShaderNodeMapRange", 300, -100, clamp=True)
+    n_rough_mr.inputs["From Min"].default_value = 0.0
+    n_rough_mr.inputs["From Max"].default_value = 1.0
+    n_rough_mr.inputs["To Min"].default_value =   0.78
+    n_rough_mr.inputs["To Max"].default_value =   0.95
+    nt.links.new(n_slope_mr.outputs["Result"], n_rough_mr.inputs["Value"])
+    nt.links.new(n_rough_mr.outputs["Result"], n_bsdf.inputs["Roughness"])
+
     n_bsdf.inputs["Metallic"].default_value = 0.0
     nt.links.new(n_bsdf.outputs["BSDF"], n_out.inputs["Surface"])
+
     if terrain.data.materials:
         terrain.data.materials[0] = mat
     else:

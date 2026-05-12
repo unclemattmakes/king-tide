@@ -39,6 +39,48 @@ NAME_PATTERNS = [
 ]
 
 
+# Mirror of PREVIEW_COLLECTION_PREFIX / SUFFIX in tools/blender/hoverbike_addon.py.
+# Any view-layer collection whose name matches the addon's preview prefix is
+# author-only (wave-displaced water plane, gate gizmos, racer silhouettes,
+# turn indicators) and must not ride into the .glb.
+PREVIEW_COLLECTION_PREFIX = "_hoverbike_"
+PREVIEW_COLLECTION_SUFFIX = "_preview"
+
+
+def _iter_preview_layer_collections(view_layer):
+    def walk(lc):
+        name = lc.collection.name
+        if name.startswith(PREVIEW_COLLECTION_PREFIX) and name.endswith(
+            PREVIEW_COLLECTION_SUFFIX
+        ):
+            yield lc
+        for child in lc.children:
+            yield from walk(child)
+
+    yield from walk(view_layer.layer_collection)
+
+
+class _PreviewCollectionsHidden:
+    """Exclude every addon-built preview LayerCollection for the duration
+    of the ``with`` block, restoring prior state on exit."""
+
+    def __init__(self, view_layer):
+        self._view_layer = view_layer
+        self._prior: list = []
+
+    def __enter__(self):
+        for lc in _iter_preview_layer_collections(self._view_layer):
+            self._prior.append((lc, lc.exclude))
+            lc.exclude = True
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        for lc, prior in self._prior:
+            lc.exclude = prior
+        self._prior.clear()
+        return False
+
+
 def is_object_visible(obj: bpy.types.Object) -> bool:
     """True iff the object is visible in the active view layer.
 
@@ -168,21 +210,22 @@ def main() -> None:
     # validation + bake filters above so an author can park WIP /
     # reference geometry in the .blend without it bleeding into the
     # game build.
-    bpy.ops.export_scene.gltf(
-        filepath=out,
-        export_format="GLB",
-        export_extras=True,
-        export_yup=True,
-        export_apply=True,
-        use_selection=False,
-        use_visible=True,
-        use_renderable=False,
-        use_active_collection=False,
-        export_cameras=False,
-        export_lights=False,
-        export_gpu_instances=True,
-        export_gn_mesh=True,
-    )
+    with _PreviewCollectionsHidden(bpy.context.view_layer):
+        bpy.ops.export_scene.gltf(
+            filepath=out,
+            export_format="GLB",
+            export_extras=True,
+            export_yup=True,
+            export_apply=True,
+            use_selection=False,
+            use_visible=True,
+            use_renderable=False,
+            use_active_collection=False,
+            export_cameras=False,
+            export_lights=False,
+            export_gpu_instances=True,
+            export_gn_mesh=True,
+        )
     print("[export] done")
 
 

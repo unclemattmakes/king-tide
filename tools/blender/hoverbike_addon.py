@@ -460,6 +460,58 @@ def derive_bike_spec(bike_id: str) -> dict[str, Any]:
 # ── Track operator (existing) ───────────────────────────────────────────────
 
 
+# ── Preview-collection bookkeeping ──────────────────────────────────────────
+#
+# All "*_preview" collections built by the addon (gate gizmos, water plane,
+# racer silhouettes, turn indicators) share the ``_hoverbike_*_preview``
+# prefix so the export operator can scrub them in one pass. The GLB export
+# is configured with ``use_visible=True, use_renderable=False`` — viewport-
+# hidden objects are excluded but per-object ``hide_render`` is not. Without
+# this scrubbing the wave-displaced water plane (and any other visible
+# preview) would ride into the .glb and stomp the runtime water layer.
+
+PREVIEW_COLLECTION_PREFIX = "_hoverbike_"
+PREVIEW_COLLECTION_SUFFIX = "_preview"
+
+
+def _iter_preview_layer_collections(view_layer):
+    """Yield every LayerCollection under ``view_layer`` whose name marks
+    it as an addon-built preview."""
+
+    def walk(lc):
+        name = lc.collection.name
+        if name.startswith(PREVIEW_COLLECTION_PREFIX) and name.endswith(
+            PREVIEW_COLLECTION_SUFFIX
+        ):
+            yield lc
+        for child in lc.children:
+            yield from walk(child)
+
+    yield from walk(view_layer.layer_collection)
+
+
+class _PreviewCollectionsHidden:
+    """Context manager that excludes every preview LayerCollection in the
+    active view layer for the duration of the ``with`` block, then
+    restores each one's prior ``exclude`` state on exit."""
+
+    def __init__(self, view_layer):
+        self._view_layer = view_layer
+        self._prior: list[tuple[Any, bool]] = []
+
+    def __enter__(self):
+        for lc in _iter_preview_layer_collections(self._view_layer):
+            self._prior.append((lc, lc.exclude))
+            lc.exclude = True
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        for lc, prior in self._prior:
+            lc.exclude = prior
+        self._prior.clear()
+        return False
+
+
 # ── Gate placement (Item 2 from docs/blender-wishlist.md) ────────────────
 #
 # Mirror of `src/game/tracks/gate-placement.ts`. The TypeScript runtime
@@ -1363,21 +1415,22 @@ class HOVERBIKE_OT_export_track(Operator):
 
         os.makedirs(os.path.dirname(glb_path), exist_ok=True)
         try:
-            bpy.ops.export_scene.gltf(
-                filepath=glb_path,
-                export_format="GLB",
-                export_extras=True,
-                export_yup=True,
-                export_apply=True,
-                use_selection=False,
-                use_visible=True,
-                use_renderable=False,
-                use_active_collection=False,
-                export_cameras=False,
-                export_lights=False,
-        export_gpu_instances=True,
-        export_gn_mesh=True,
-            )
+            with _PreviewCollectionsHidden(context.view_layer):
+                bpy.ops.export_scene.gltf(
+                    filepath=glb_path,
+                    export_format="GLB",
+                    export_extras=True,
+                    export_yup=True,
+                    export_apply=True,
+                    use_selection=False,
+                    use_visible=True,
+                    use_renderable=False,
+                    use_active_collection=False,
+                    export_cameras=False,
+                    export_lights=False,
+                    export_gpu_instances=True,
+                    export_gn_mesh=True,
+                )
         except Exception as e:  # noqa: BLE001
             self.report({"ERROR"}, f"GLB export failed: {e}")
             return {"CANCELLED"}
@@ -1491,21 +1544,22 @@ class HOVERBIKE_OT_export_bike(Operator):
 
         os.makedirs(os.path.dirname(glb_path), exist_ok=True)
         try:
-            bpy.ops.export_scene.gltf(
-                filepath=glb_path,
-                export_format="GLB",
-                export_extras=True,
-                export_yup=True,
-                export_apply=True,
-                use_selection=False,
-                use_visible=True,
-                use_renderable=False,
-                use_active_collection=False,
-                export_cameras=False,
-                export_lights=False,
-        export_gpu_instances=True,
-        export_gn_mesh=True,
-            )
+            with _PreviewCollectionsHidden(context.view_layer):
+                bpy.ops.export_scene.gltf(
+                    filepath=glb_path,
+                    export_format="GLB",
+                    export_extras=True,
+                    export_yup=True,
+                    export_apply=True,
+                    use_selection=False,
+                    use_visible=True,
+                    use_renderable=False,
+                    use_active_collection=False,
+                    export_cameras=False,
+                    export_lights=False,
+                    export_gpu_instances=True,
+                    export_gn_mesh=True,
+                )
         except Exception as e:  # noqa: BLE001
             self.report({"ERROR"}, f"GLB export failed: {e}")
             return {"CANCELLED"}
@@ -1614,13 +1668,13 @@ class HOVERBIKE_PT_panel(Panel):
         mode = detect_mode(blend)
 
         if mode == "track":
-            self._draw_track(layout, blend, repo)
+            self._draw_track(context, layout, blend, repo)
         elif mode == "bike":
-            self._draw_bike(layout, blend, repo)
+            self._draw_bike(context, layout, blend, repo)
         else:
-            self._draw_unknown(layout, blend, repo)
+            self._draw_unknown(context, layout, blend, repo)
 
-    def _draw_track(self, layout, blend: str, repo: str | None) -> None:
+    def _draw_track(self, context, layout, blend: str, repo: str | None) -> None:
         track_id = derive_asset_id("hoverbike_track_id") or "<unknown>"
 
         box = layout.box()
@@ -1688,7 +1742,7 @@ class HOVERBIKE_PT_panel(Panel):
         col.label(text="overwrite the JSON")
         col.label(text="from the .blend.")
 
-    def _draw_bike(self, layout, blend: str, repo: str | None) -> None:
+    def _draw_bike(self, context, layout, blend: str, repo: str | None) -> None:
         bike_id = derive_asset_id("hoverbike_bike_id") or "<unknown>"
 
         box = layout.box()
@@ -1720,7 +1774,7 @@ class HOVERBIKE_PT_panel(Panel):
         col.label(text="overwrite the spec")
         col.label(text="from the .blend.")
 
-    def _draw_unknown(self, layout, blend: str, repo: str | None) -> None:
+    def _draw_unknown(self, context, layout, blend: str, repo: str | None) -> None:
         box = layout.box()
         box.label(text="Unknown asset type", icon="QUESTION")
         box.label(text="Save your .blend in:")
