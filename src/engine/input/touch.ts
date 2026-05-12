@@ -1,3 +1,4 @@
+import { devSettings } from '../dev-settings'
 import { emptyIntent, type Intent } from './intent'
 
 /**
@@ -33,6 +34,19 @@ function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v
 }
 
+/**
+ * Touch stick share the same deadzone-rescale + curve shape as the gamepad
+ * so the bike responds identically across input devices. Deadzone here is a
+ * hardcoded fraction of the virtual stick radius (the touch UI has its own
+ * tuning baked into the SVG); curve reads from `devSettings.stickCurve`.
+ */
+function shapeTouchAxis(v: number): number {
+  const mag = Math.abs(v)
+  if (mag < DEADZONE) return 0
+  const t = Math.min((mag - DEADZONE) / (1 - DEADZONE), 1)
+  return Math.sign(v) * Math.pow(t, devSettings.stickCurve)
+}
+
 /** Coarse pointer (phone/tablet) or explicit `?touch=1` URL flag for testing. */
 export function isTouchDevice(): boolean {
   if (typeof window === 'undefined') return false
@@ -63,9 +77,9 @@ export function computeTouchIntent(
   buttons: { fire: boolean; boost: boolean; brake: boolean; thrust: boolean },
 ): Intent {
   const intent = emptyIntent()
-  const sx = Math.abs(rawStickX) < DEADZONE ? 0 : rawStickX
-  const sy = Math.abs(rawStickY) < DEADZONE ? 0 : rawStickY
-  intent.steer = clamp(sx, -1, 1)
+  const sx = shapeTouchAxis(clamp(rawStickX, -1, 1))
+  const sy = shapeTouchAxis(clamp(rawStickY, -1, 1))
+  intent.steer = sx
   // Stick Y → pitch, inverted to match the "flight stick" / gamepad convention:
   // push the stick UP (away from the player, toward the top of the screen)
   // → negative pitch → nose DOWN / dive. Pull DOWN → positive pitch → lift.
@@ -73,7 +87,7 @@ export function computeTouchIntent(
   // (gamepad axes[1] = -1 forward → intent.pitch = -1).
   // `0 - sy` instead of `-sy` to preserve +0 (the unary minus would flip
   // a deadzoned 0 into -0 and break Object.is-based test equality).
-  intent.pitch = clamp(0 - sy, -1, 1)
+  intent.pitch = 0 - sy
   intent.throttle = buttons.thrust ? 1 : 0
   intent.brake = buttons.brake ? 1 : 0
   intent.fire = buttons.fire

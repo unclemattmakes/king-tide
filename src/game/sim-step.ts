@@ -70,9 +70,9 @@ export function simulateStep(
   wakeUpdateSystem(sim, phys, waveField)
 
   if (inputs.locked) {
-    applyPeerInputs(sim, EMPTY_PEER_INPUTS)
+    applyPeerInputs(sim, EMPTY_PEER_INPUTS, phys.fixedDt)
   } else if (!inputs.autoPlay) {
-    applyPeerInputs(sim, inputs.peerInputs)
+    applyPeerInputs(sim, inputs.peerInputs, phys.fixedDt)
   }
   const runAI = inputs.runAI ?? true
   if (!inputs.locked && runAI) aiControlSystem(sim, phys, track)
