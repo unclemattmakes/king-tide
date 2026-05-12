@@ -84,6 +84,15 @@ export type WaterMesh = {
    * directional light.
    */
   setSunDirection(x: number, y: number, z: number): void
+  /**
+   * Updates the horizon-haze color used for the aerial-perspective fade
+   * at long view distances. The sky module calls this each tick with the
+   * current palette horizon color so distant water naturally picks up
+   * sunset / dawn warmth, twilight blue, etc. — keeps the horizon line
+   * in tonal harmony with the sky behind it instead of reading as a
+   * fixed teal-grey haze. RGB values are linear, in [0, 1].
+   */
+  setHorizonColor(r: number, g: number, b: number): void
   /** Live-tunable knobs for the water debug menu. All setters apply
    *  immediately — no material rebuild, no reload. */
   debug: {
@@ -728,6 +737,13 @@ export function createWaterMesh(
   // looking perpendicular, < 0 when looking away (clamped). Squared so
   // the boost is concentrated near the sun direction.
   const sunDirUniform = uniform(new THREE.Vector3(50, 70, 70).normalize())
+  // Horizon haze color — what the surface fades toward at long view
+  // distances (aerial perspective; see the `aerialMix` block in the
+  // albedo composition below). Default is a desaturated cool teal that
+  // works at midday; the sky module mutates it each tick via
+  // `setHorizonColor(...)` so sunset / dawn / dusk water picks up the
+  // matching sky warmth automatically.
+  const horizonHazeUniform = uniform(new THREE.Vector3(0.4, 0.55, 0.6))
   const sunBackscatter = isClassic
     ? float(0)
     : pow(max(float(0), dot(viewDir.negate(), sunDirUniform)), float(2))
@@ -744,7 +760,55 @@ export function createWaterMesh(
         const sunBoost = sunBackscatter.mul(0.55)
         return clamp(heightFactor.mul(baseBoost.add(sunBoost)), float(0), float(1))
       })()
-  const baseColor = mix(tintedDeepColor, scatterColor, scatterAmount)
+  const baseColorPreCaustic = mix(tintedDeepColor, scatterColor, scatterAmount)
+
+  // Caustics — bright veining where sunlight refracts through wave
+  // crests and concentrates on the seabed. Real caustics are projected
+  // onto the underwater geometry; we cheat by painting them onto the
+  // water surface itself, modulated to only appear where the water
+  // reads "clear" (shallow + looking-down), so the player's brain
+  // attributes the pattern to the seabed below.
+  //
+  // Pattern: two grids of `abs(sin)*abs(sin)` checkerboards at different
+  // scales / rotations, intersected (min) and powered up. The
+  // intersection produces curving veining where both grids happen to
+  // brighten — that's the hallmark caustic look.
+  //
+  // Visibility is gated by:
+  //   - `shallowFactor`: only show in shallows. Out in deep ocean, no
+  //     caustics — that's correct, real caustics dim with depth.
+  //   - `ndotv`: only when looking through clear (mostly down) water.
+  //     At grazing the surface is opaque (Beer-Lambert) so caustics
+  //     wouldn't be visible through it anyway.
+  //   - distance fade: aliases hard past ~60 m, so fade to 0 there.
+  //   - sun visibility (via the lighting model, since this is a
+  //     baseColor contribution and not emissive): no sun → no caustics,
+  //     shadow on water → no caustics in that patch. Both correct.
+  //
+  // Off in classic mode for clean A/B.
+  // Layer 1: uniform-scale grid scrolling at one velocity.
+  const causticAX = positionWorld.x.mul(float(0.5)).add(tNode.mul(float(0.18)))
+  const causticAY = positionWorld.z.mul(float(0.5)).add(tNode.mul(float(-0.13)))
+  // Layer 2: anisotropic scale + opposite scroll direction so the two
+  // grids slide past each other; the intersections that brighten form
+  // the wandering caustic veining.
+  const causticBX = positionWorld.x.mul(float(0.42)).add(tNode.mul(float(-0.22)))
+  const causticBY = positionWorld.z.mul(float(0.58)).add(tNode.mul(float(0.16)))
+  const causticLayer1 = abs(sin(causticAX).mul(sin(causticAY)))
+  const causticLayer2 = abs(sin(causticBX).mul(sin(causticBY)))
+  const causticPattern = pow(min(causticLayer1, causticLayer2), float(2.5))
+  const causticDistFade = float(1).sub(smoothstep(float(20), float(70), camDist))
+  const causticIntensity = isClassic
+    ? float(0)
+    : causticPattern.mul(shallowFactor).mul(ndotv).mul(causticDistFade).mul(float(0.55))
+  // A cool aqua boost — same family as scatterColor but a touch lighter
+  // so caustics read as "bright spots on the sand" rather than "more
+  // surface color". Goes through the lighting model so shadow + night
+  // dim it naturally.
+  const causticColor = vec3(0.45, 0.85, 0.78)
+  const baseColor = isClassic
+    ? baseColorPreCaustic
+    : baseColorPreCaustic.add(causticColor.mul(causticIntensity))
 
   // Sun glow emissive — additive on top of the scatter blend for the
   // unmistakable SoT "lit-from-behind" wave glow. Peaks on tall crests
@@ -1059,17 +1123,18 @@ export function createWaterMesh(
   // ~150 m takes on a flattened, hazier tone as the atmosphere absorbs /
   // scatters along the long view path. Without this, the horizon water
   // reads as the same color as foreground water and the scene loses its
-  // sense of scale. The horizon color is a desaturated cool tone biased
-  // slightly toward the sky's grazing tint; it intentionally does NOT
-  // match the sun-side sky, since we'd then lose the water-vs-sky
-  // contrast that defines the horizon line. Off in classic.
-  const horizonHazeColor = vec3(0.4, 0.55, 0.6)
+  // sense of scale. The horizon color is driven from the sky palette via
+  // `horizonHazeUniform` (see `setHorizonColor` + the sky module's tick),
+  // so sunset water picks up warmth, twilight reads cool blue, etc. Same
+  // color the scene fog uses — water and sky horizon stay tonally aligned.
+  // Capped at 0.5 mix so the horizon water still reads as water-coloured
+  // beneath the haze, not solid sky. Off in classic.
   const aerialMix = isClassic
     ? float(0)
     : smoothstep(float(120), float(280), camDist).mul(float(0.5))
   const surfaceColor = isClassic
     ? reflectedOrBase
-    : mix(reflectedOrBase, horizonHazeColor, aerialMix)
+    : mix(reflectedOrBase, horizonHazeUniform, aerialMix)
 
   const albedo = mix(surfaceColor, foamColor, foamMask)
 
@@ -1321,10 +1386,42 @@ export function createWaterMesh(
     sunDirUniform.value.set(x / len, y / len, z / len)
   }
 
+  function setHorizonColor(r: number, g: number, b: number): void {
+    horizonHazeUniform.value.set(r, g, b)
+  }
+
   function dispose() {
     geom.dispose()
     mat.dispose()
   }
 
-  return { mesh, tick, setSunDirection, debug, dispose }
+  return { mesh, tick, setSunDirection, setHorizonColor, debug, dispose }
+}
+
+/**
+ * Underwater-fog override. Call once per frame AFTER the sky system has
+ * updated `scene.fog` for the day-night palette. When the camera is
+ * clearly below the resting water surface, this overwrites the fog with
+ * a dense water-tinted version — distant terrain disappears into the
+ * abyss, nearby geometry gets a teal cast. Above water it leaves the fog
+ * alone so the sky module's per-tick color update stands.
+ *
+ * Subnautica-style: the dense water fog is what sells "you are underwater"
+ * more than any single visual on its own. Bonus: the fog respects the
+ * existing receiveShadow / lighting flow, so it just works for terrain,
+ * bikes, and props without per-material plumbing.
+ *
+ * Hysteresis: triggers at `cameraY < -0.5` so the camera bobbing through
+ * the wave crest line doesn't flicker between modes.
+ */
+export function updateUnderwaterFog(scene: THREE.Scene, cameraY: number): void {
+  const fog = scene.fog
+  if (!(fog instanceof THREE.Fog)) return
+  if (cameraY < -0.5) {
+    // Saturated underwater teal — slightly brighter than the deep-water
+    // albedo so the fog reads as "fluid medium" rather than "black void".
+    fog.color.setRGB(0.04, 0.20, 0.30)
+    fog.near = 0
+    fog.far = 28
+  }
 }
