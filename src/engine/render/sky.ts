@@ -46,7 +46,11 @@ import type { SkyConfig } from '@/game/tracks/types'
 
 const SUN_CYCLE_SECONDS = 360 // 6 minutes per full rotation
 const SUN_DISTANCE = 220 // matches the legacy main.ts value; > shadow far/2 OK
-const PMREM_INTERVAL = 1.0 // seconds of sim time between env-map bakes
+// Seconds between env-map rebakes. The day-night cycle is 360 s long, so the
+// sun moves ~1° per 4 s — visually indistinguishable on a blurred PMREM mip
+// chain. Keeping this low caused a once-per-second GPU stall (cube-render +
+// roughness pre-filter + render-target reallocation).
+const PMREM_INTERVAL = 4.0
 
 const DEFAULT_SKY: Required<SkyConfig> = {
   tint: '#ffffff',
@@ -440,14 +444,20 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
     }
 
     // ── Periodic PMREM bake ──────────────────────────────────────────────
+    // We bake into `next`, then swap it in as `scene.environment` BEFORE
+    // disposing the previous target. Three.js' material cache keys on the
+    // texture object, so disposing first would invalidate every PBR
+    // material's bind group on the next render — a multi-ms stall. Holding
+    // both targets briefly costs a few MB but eliminates the hitch.
     pmremAccum += dt
     if (pmremEnabled && pmremAccum >= PMREM_INTERVAL) {
       pmremAccum = 0
       try {
         const next = pmremGen.fromScene(pmremScene, 0)
-        if (currentEnv) currentEnv.dispose()
+        const prev = currentEnv
         currentEnv = next
         scene.environment = next.texture
+        if (prev) prev.dispose()
       } catch (err) {
         // First failure: warn once and stop attempting. The scene still
         // renders; PBR materials fall back to whatever IBL Three provides

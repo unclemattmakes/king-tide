@@ -951,6 +951,15 @@ async function boot() {
 
   const tmpPos = new THREE.Vector3()
   const tmpQuat = new THREE.Quaternion()
+  const tmpTarget = new THREE.Vector3()
+
+  // Reused per-frame minimap-dot buffer. raceHud copies the array each tick
+  // (it sorts a shallow clone), so we can safely truncate and mutate in place.
+  // The dot objects themselves live in `hudBikePool` and are mutated by index
+  // so the population path is allocation-free once the pool is warm.
+  type HudBike = { x: number; z: number; isPlayer: boolean; isLeader: boolean }
+  const hudBikes: HudBike[] = []
+  const hudBikePool: HudBike[] = []
 
   // Reused per-frame buffer for the GPU water shader's bike impact array.
   // Sourced from `waveField.wakes`, which `wakeUpdateSystem` populated in
@@ -991,6 +1000,12 @@ async function boot() {
   const SNAPSHOT_TICKS = 3
   const MAX_SNAPSHOT_BIKES = 1 + 4
   const snapshotSendBuf = new Uint8Array(snapshotByteLength(MAX_SNAPSHOT_BIKES))
+
+  // Reused scratch buffers for the replay recorder. The recorder copies into
+  // its own storage when it accepts a sample (rate-limited), so feeding it the
+  // same buffer each frame is safe. Slot list is fixed for the session.
+  const replaySlots: number[] = [playerEid, ...aiEids]
+  const replayFlat = new Float64Array(replaySlots.length * 7)
   const snapshotSendView = new DataView(snapshotSendBuf.buffer)
   // Reused snapshot literal — bikes array is rebuilt per send to avoid
   // allocating a fresh TransformSnapshot wrapper.
@@ -1114,20 +1129,32 @@ async function boot() {
     // cleanly at the moment of crossing the line.
     if (recorder && !finishShown) {
       const elapsed = (now - recorderStart) / 1000
-      const slots = [playerEid, ...aiEids]
-      const flat: number[] = []
-      for (const eid of slots) {
+      for (let i = 0; i < replaySlots.length; i++) {
+        const eid = replaySlots[i] as number
         const handle = RBHandleStore.get(eid)
         const rb = handle ? phys.world.getRigidBody(handle.handle) : null
+        const o = i * 7
         if (!rb) {
-          flat.push(0, 0, 0, 0, 0, 0, 1)
+          replayFlat[o] = 0
+          replayFlat[o + 1] = 0
+          replayFlat[o + 2] = 0
+          replayFlat[o + 3] = 0
+          replayFlat[o + 4] = 0
+          replayFlat[o + 5] = 0
+          replayFlat[o + 6] = 1
           continue
         }
         const t = rb.translation()
         const q = rb.rotation()
-        flat.push(t.x, t.y, t.z, q.x, q.y, q.z, q.w)
+        replayFlat[o] = t.x
+        replayFlat[o + 1] = t.y
+        replayFlat[o + 2] = t.z
+        replayFlat[o + 3] = q.x
+        replayFlat[o + 4] = q.y
+        replayFlat[o + 5] = q.z
+        replayFlat[o + 6] = q.w
       }
-      recorder.sample(elapsed, flat)
+      recorder.sample(elapsed, replayFlat)
     }
 
     const rbHandle = RBHandleStore.get(playerEid)
@@ -1219,24 +1246,30 @@ async function boot() {
     // Race HUD — countdown banner, race/lap timers, gap toast, minimap.
     // Always ticked: while locked, the timers stay at zero and the
     // banner counts 3..2..1..GO.
+    // `standings` is also reused by the FPS-sampled status line below so
+    // we only call computeStandings once per render frame.
+    const standings = computeStandings(sim, track)
+    const meStanding = standings.find((s) => s.eid === playerEid)
     {
       const racerForHud = RacerStore.get(playerEid)
-      const standings = computeStandings(sim, track)
-      const me = standings.find((s) => s.eid === playerEid)
 
-      const bikes: { x: number; z: number; isPlayer: boolean; isLeader: boolean }[] = []
+      hudBikes.length = 0
       for (const s of standings) {
         const handle = RBHandleStore.get(s.eid)
         if (!handle) continue
         const rb = phys.world.getRigidBody(handle.handle)
         if (!rb) continue
         const t = rb.translation()
-        bikes.push({
-          x: t.x,
-          z: t.z,
-          isPlayer: s.eid === playerEid,
-          isLeader: s.position === 1 && s.eid !== playerEid,
-        })
+        let dot = hudBikePool[hudBikes.length]
+        if (!dot) {
+          dot = { x: 0, z: 0, isPlayer: false, isLeader: false }
+          hudBikePool.push(dot)
+        }
+        dot.x = t.x
+        dot.z = t.z
+        dot.isPlayer = s.eid === playerEid
+        dot.isLeader = s.position === 1 && s.eid !== playerEid
+        hudBikes.push(dot)
       }
 
       const raceTimeForHud = racerForHud?.raceTime ?? 0
@@ -1252,9 +1285,9 @@ async function boot() {
         currentLapTime: currentLap,
         lastLapTime,
         bestLapTime: bestLapThisRace ?? bestLapAllTime,
-        bikes,
+        bikes: hudBikes,
         playerNextCheckpoint: racerForHud?.nextCheckpoint ?? 0,
-        playerPosition: me?.position ?? 1,
+        playerPosition: meStanding?.position ?? 1,
         totalRacers: standings.length,
       })
     }
@@ -1264,8 +1297,8 @@ async function boot() {
     if (racerNow && !racerNow.finished) {
       const nextCp = track.checkpoints[racerNow.nextCheckpoint]
       if (nextCp) {
-        const targetVec = new THREE.Vector3(nextCp.position.x, nextCp.position.y, nextCp.position.z)
-        dirArrow.tick(camera, tmpPos, targetVec, dt)
+        tmpTarget.set(nextCp.position.x, nextCp.position.y, nextCp.position.z)
+        dirArrow.tick(camera, tmpPos, tmpTarget, dt)
       } else {
         dirArrow.tick(camera, tmpPos, null, dt)
       }
@@ -1291,20 +1324,19 @@ async function boot() {
       }
       if (raceEl && state.raceSnapshot) {
         const rs = state.raceSnapshot
-        const standings = computeStandings(sim, track)
-        const me = standings.find((s) => s.eid === playerEid)
         const status = rs.finished
           ? 'FINISHED'
           : `cp ${rs.nextCheckpoint + 1}/${rs.totalCheckpoints}`
         const auto = autoPlay ? ' [AUTO]' : ''
-        raceEl.textContent = `lap ${rs.lap}/${rs.lapsToFinish} | pos ${me?.position ?? '?'}/${standings.length} | ${status} | ${rs.raceTime.toFixed(1)}s${auto}`
+        raceEl.textContent = `lap ${rs.lap}/${rs.lapsToFinish} | pos ${meStanding?.position ?? '?'}/${standings.length} | ${status} | ${rs.raceTime.toFixed(1)}s${auto}`
 
         if (rs.finished && !finishShown && finishEl) {
           finishShown = true
           finishEl.classList.add('show')
-          if (finishPos && me) finishPos.textContent = ordinal(me.position)
+          if (finishPos && meStanding) finishPos.textContent = ordinal(meStanding.position)
           if (finishTime) finishTime.textContent = formatTime(rs.raceTime)
-          if (finishTitle) finishTitle.textContent = me?.position === 1 ? 'WINNER' : 'FINISH'
+          if (finishTitle)
+            finishTitle.textContent = meStanding?.position === 1 ? 'WINNER' : 'FINISH'
           if (finishSub) finishSub.textContent = `${track.name} · ${playerVariant.name}`
           if (finishBest) {
             const parts: string[] = []
@@ -1324,7 +1356,7 @@ async function boot() {
           const saveBtn = document.getElementById('finish-save-replay') as HTMLButtonElement | null
           if (saveBtn && recorder) {
             const replay = recorder.finalize({
-              finishPosition: me?.position ?? null,
+              finishPosition: meStanding?.position ?? null,
               finishTime: rs.raceTime,
               bestLap: bestLapThisRace,
             })
