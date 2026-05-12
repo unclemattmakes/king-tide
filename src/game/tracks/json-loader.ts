@@ -1,6 +1,15 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import { pointAtT, sampleCatmullRom, tangentAtT } from './catmull-rom'
-import type { AISpline, BoostPad, Checkpoint, Prop, PropType, Track, WaterConfig } from './types'
+import type {
+  AISpline,
+  BoostPad,
+  Checkpoint,
+  Prop,
+  PropType,
+  SkyConfig,
+  Track,
+  WaterConfig,
+} from './types'
 
 const PROP_TYPES: readonly PropType[] = ['box', 'sphere', 'cylinder', 'pipe', 'halfpipe', 'asset']
 
@@ -33,6 +42,7 @@ export type TrackJson = {
   props?: Prop[]
   environmentGlb?: string
   water?: WaterConfig
+  sky?: SkyConfig
   gateSpacing?: number
 }
 
@@ -127,6 +137,7 @@ export function buildTrackFromJson(input: unknown): Track {
   const props: Prop[] = propsRaw.map((p, i) => readProp(p, i))
 
   const water = readOptionalWater((input as { water?: unknown }).water)
+  const sky = readOptionalSky((input as { sky?: unknown }).sky)
   const environmentGlb = (input as { environmentGlb?: unknown }).environmentGlb
   if (environmentGlb !== undefined && typeof environmentGlb !== 'string') {
     throw new Error('track-json: environmentGlb must be a string if present')
@@ -156,6 +167,7 @@ export function buildTrackFromJson(input: unknown): Track {
   }
   if (environmentGlb) track.environmentGlb = environmentGlb
   if (water) track.water = water
+  if (sky) track.sky = sky
   if (gateSpacing !== undefined) track.gateSpacing = gateSpacing
   return track
 }
@@ -220,6 +232,7 @@ export function trackToJson(track: Track): TrackJson {
   }
   if (track.environmentGlb) out.environmentGlb = track.environmentGlb
   if (track.water) out.water = { ...track.water }
+  if (track.sky) out.sky = { ...track.sky }
   if (track.gateSpacing !== undefined) out.gateSpacing = track.gateSpacing
   return out
 }
@@ -315,6 +328,38 @@ function readOptionalWater(raw: unknown): WaterConfig | null {
     waveHeight: requireNumber(raw, 'waveHeight'),
     waveFreq: requireNumber(raw, 'waveFreq'),
   }
+}
+
+function readOptionalSky(raw: unknown): SkyConfig | null {
+  if (raw === undefined || raw === null) return null
+  if (!isObject(raw)) throw new Error('track-json: sky must be an object if present')
+  const out: SkyConfig = {}
+  if ('tint' in raw) {
+    const v = raw.tint
+    if (typeof v !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(v)) {
+      throw new Error('track-json: sky.tint must be a 6-digit hex color (e.g. "#ffe4c4")')
+    }
+    out.tint = v
+  }
+  for (const key of ['cloudiness', 'sunIntensity', 'fogNear', 'fogFar'] as const) {
+    if (key in raw) {
+      const v = raw[key]
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new Error(`track-json: sky.${key} must be a finite number if present`)
+      }
+      out[key] = v
+    }
+  }
+  if (out.cloudiness !== undefined && (out.cloudiness < 0 || out.cloudiness > 1)) {
+    throw new Error(`track-json: sky.cloudiness must be in [0,1] (got ${out.cloudiness})`)
+  }
+  if (out.sunIntensity !== undefined && out.sunIntensity < 0) {
+    throw new Error(`track-json: sky.sunIntensity must be >= 0 (got ${out.sunIntensity})`)
+  }
+  if (out.fogNear !== undefined && out.fogFar !== undefined && out.fogNear >= out.fogFar) {
+    throw new Error(`track-json: sky.fogNear (${out.fogNear}) must be < sky.fogFar (${out.fogFar})`)
+  }
+  return out
 }
 
 function readVec3(raw: unknown, ctx: string): Vec3 {

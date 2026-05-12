@@ -41,6 +41,8 @@ export type Track = {
   environmentGlb?: string
   /** Optional water tuning. If absent, the runtime defaults are used. */
   water?: WaterConfig
+  /** Optional sky / atmosphere tuning. If absent, the runtime defaults are used. */
+  sky?: SkyConfig
 }
 
 export type PlayerStart = {
@@ -135,4 +137,26 @@ export type WaterConfig = {
   waveHeight: number
   /** Wave frequency scalar passed to the wave field. */
   waveFreq: number
+}
+
+/**
+ * Per-track sky / atmosphere overrides. All fields optional — the sky system
+ * fills in defaults from `DEFAULT_SKY_CONFIG`. Authoring lives alongside
+ * `water` in `tracks-src/<id>.json`.
+ *
+ *   tint           — hex string (e.g. "#ffe4c4") multiplied onto the base
+ *                    palette. Use to bias a track warm/cool without rewriting
+ *                    the palette ramps. Defaults to white (no tint).
+ *   cloudiness     — 0..1. 0 = clear sky, 1 = solid overcast. Default 0.45.
+ *   sunIntensity   — multiplier on the directional sun-light intensity and
+ *                    sun-disc brightness in the dome shader. Default 1.0.
+ *   fogNear/fogFar — exponential fog distances in metres. Defaults 250/900,
+ *                    matching the historical horizon blend.
+ */
+export type SkyConfig = {
+  tint?: string
+  cloudiness?: number
+  sunIntensity?: number
+  fogNear?: number
+  fogFar?: number
 }
