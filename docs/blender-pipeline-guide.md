@@ -390,6 +390,93 @@ node -e 'import("./tools/blender/inspect_glb.mjs").then((m) =>
 If the extension isn't emitted, the most common cause is the scattered
 output sitting outside an Empty parent — re-parent and re-export.
 
+## Procedural props library (Item 3)
+
+`tracks-src/props-library.blend` is a shared library of procedural
+track props, registered as Blender Assets so authors can drag them
+into any track `.blend` from the Asset Browser.
+
+Five prop kinds ship in the seeded library:
+
+| Catalogue            | Collection            | Geometry                                | Live knobs (HV_Prop modifier) |
+|---|---|---|---|
+| Track Props/Rocks    | `prop_rock`           | Distorted icosphere, FBM displacement   | Size, Jaggedness, Noise Scale, Seed |
+| Track Props/Palms    | `prop_palm`           | Tapered trunk + radial fronds           | Scale (shape/frond-count regen by re-running the seed) |
+| Track Props/Buoys    | `prop_buoy`           | Pylon + skirt + emissive top cap        | static (no GN modifier; edit verts to retune) |
+| Track Props/Gates    | `prop_gate`           | Two posts + crossbar at 28m × 6m gizmo dimensions | static |
+| Track Props/Indicators | `prop_turn_indicator` | Flat chevron (+X = bend direction)   | static |
+
+Each collection is marked as a Blender Asset with a description, tags,
+and a catalogue assignment. Every mesh carries `COLOR_0` per the
+[vertex-attribute spec](./vertex-attribute-spec.md): the palm stamps a
+linear sway gradient in `R` (trunk base → leaf tip); rocks / buoys /
+gates / indicators carry terrain defaults (R=1, G=1, B=0, A=0) with
+the buoy's top-cap ring tagged `A=1` so the runtime emissive material
+can read its glow strength from the attribute.
+
+Material naming follows the runtime convention: `mat_foliage_palm`
+opts the palm into the foliage sway shader at load time
+([`foliage-sway.ts`](../src/engine/render/foliage-sway.ts)); the rest
+use `mat_prop_*` and render statically.
+
+### One-time setup
+
+1. Run the seed once to produce the library:
+   ```bash
+   "C:/Program Files/Blender Foundation/Blender 5.1/blender.exe" \
+     --background --python tools/blender/seed_props_library.py
+   ```
+   Writes `tracks-src/props-library.blend` and
+   `tracks-src/blender_assets.cats.txt`. Re-running nukes any
+   hand-edits — treat the .blend as the source of truth after the
+   first run, and re-tune in Blender via the modifier panel.
+2. Register `tracks-src/` as an asset library: in Blender, Edit →
+   Preferences → File Paths → Asset Libraries → Add… and pick the
+   `tracks-src/` folder. Name it "Hoverbike" (or anything).
+
+### Authoring loop
+
+1. Open your track `.blend` (e.g. `tracks-src/<id>.blend`).
+2. Open an Asset Browser editor (split a viewport or use the *Asset
+   Browser* workspace). Select the Hoverbike library and the
+   *Track Props* catalogue.
+3. Drag a prop into the viewport. Blender drops it in as a
+   **Collection Instance** — a single Empty whose `instance_collection`
+   points at the source library. The geometry isn't copied; subsequent
+   re-seeds will refresh every instance.
+4. Position / scale the instance. Each instance is independent.
+5. Re-export the track via the addon's *Export Track to Game* button.
+   Instances export as separate scene nodes; if many props sit under
+   an Empty named `scatter_<zone>`, they become
+   `EXT_mesh_gpu_instancing` instances (see [Scattered props](#scattered-props-item-4)).
+
+### Using props with the scatter pipeline
+
+Every prop collection has a `scatter_source = True` custom property,
+so a Geometry Nodes graph can use them as instance sources directly:
+
+```
+Object Info (the terrain mesh)
+  → Distribute Points on Faces
+  → Instance on Points
+    └─ Collection Info (Instance mode, Reset Children OFF) ─ pick `prop_palm`
+  → Realize Instances OFF
+  → (output to a mesh child of `scatter_palms` Empty)
+```
+
+The result rides through the export as one `EXT_mesh_gpu_instancing`
+node with N transforms, so a track with 800 palms costs roughly what
+1 palm costs in mesh memory.
+
+### Aesthetic polish — deferred to GUI work
+
+The seeded geometry is *functional* placeholder. Per the wishlist's
+"scaffold + hand off" guidance, real PBR materials, sculpted rock
+silhouettes, palm-leaf textures, and per-prop preview thumbnails are
+all left for hand tuning in Blender. Iterate the .blend directly; just
+don't re-run `seed_props_library.py` afterwards unless you want a
+nuke-and-pave.
+
 ## Procedural island template (Item 1)
 
 `tracks-src/template-island.blend` ships with a live Geometry Nodes
