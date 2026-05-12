@@ -599,8 +599,32 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     g.links.new(prev, n_amp.inputs["Value"])
     g.links.new(p_in.outputs["Roughness Below"], n_amp.inputs["To Min"])
     g.links.new(p_in.outputs["Roughness Above"], n_amp.inputs["To Max"])
-    n_perturb = _add_node(g, "ShaderNodeMath", 200, -1900, operation="MULTIPLY")
-    g.links.new(n_gsigned.outputs[0], n_perturb.inputs[0])
+    # Same shoreline-protection trick as the land billow: split the
+    # global noise's signed value into positive and negative halves and
+    # fade the negative half to zero at the waterline. Without this the
+    # ±~1 m global perturbation can still dig a shallow moat at the cone
+    # foot even after the land billow's own dips are gone.
+    n_g_pos = _add_node(g, "ShaderNodeMath", 0, -2000, operation="MAXIMUM")
+    n_g_pos.inputs[1].default_value = 0.0
+    g.links.new(n_gsigned.outputs[0], n_g_pos.inputs[0])
+    n_g_neg = _add_node(g, "ShaderNodeMath", 0, -2100, operation="MINIMUM")
+    n_g_neg.inputs[1].default_value = 0.0
+    g.links.new(n_gsigned.outputs[0], n_g_neg.inputs[0])
+    n_g_neg_fade = _add_node(g, "ShaderNodeMapRange", 0, -2200,
+                             interpolation_type="SMOOTHSTEP", clamp=True)
+    n_g_neg_fade.inputs["From Min"].default_value = 0.0
+    n_g_neg_fade.inputs["From Max"].default_value = 15.0
+    n_g_neg_fade.inputs["To Min"].default_value =   0.0
+    n_g_neg_fade.inputs["To Max"].default_value =   1.0
+    g.links.new(prev, n_g_neg_fade.inputs["Value"])
+    n_g_neg_eff = _add_node(g, "ShaderNodeMath", 100, -2100, operation="MULTIPLY")
+    g.links.new(n_g_neg.outputs[0], n_g_neg_eff.inputs[0])
+    g.links.new(n_g_neg_fade.outputs["Result"], n_g_neg_eff.inputs[1])
+    n_g_signed_eff = _add_node(g, "ShaderNodeMath", 200, -2000, operation="ADD")
+    g.links.new(n_g_pos.outputs[0], n_g_signed_eff.inputs[0])
+    g.links.new(n_g_neg_eff.outputs[0], n_g_signed_eff.inputs[1])
+    n_perturb = _add_node(g, "ShaderNodeMath", 300, -1900, operation="MULTIPLY")
+    g.links.new(n_g_signed_eff.outputs[0], n_perturb.inputs[0])
     g.links.new(n_amp.outputs["Result"], n_perturb.inputs[1])
 
     # Seafloor billows — low-frequency distorted noise gated to underwater.
@@ -681,13 +705,13 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     g.links.new(n_land_noise.outputs["Fac"], n_land_signed.inputs[0])
 
     # Suppress negative swings near the waterline. At z=0 the cone is at
-    # its foot and the bare cone profile is gently sloped, so any down-
-    # swing would carve a dip that reads as a "moat" between the cone
-    # and the shelf. We fade the *negative* half of ``signed`` from 0 at
-    # the waterline to full at z=8 m, keeping positives at full strength
-    # throughout. Result: the foot only ever gains height from this pass,
-    # while higher up the slope retains the symmetric hills-and-gulleys
-    # character.
+    # its foot and the bare cone profile is only gently sloped — any
+    # down-swing reads as a "moat" between the cone and the shelf. We
+    # fade the *negative* half of ``signed`` from 0 at the waterline to
+    # full at z=25 m, keeping positives at full strength throughout. The
+    # long fade range matters: the cone slope is shallowest in its
+    # bottom 20 m (peak-height × smoothstep tail), so that's where any
+    # residual negative contribution shows up as a visible dip.
     n_land_pos = _add_node(g, "ShaderNodeMath", 0, -3000, operation="MAXIMUM")
     n_land_pos.inputs[1].default_value = 0.0
     g.links.new(n_land_signed.outputs[0], n_land_pos.inputs[0])
@@ -697,7 +721,7 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     n_land_neg_fade = _add_node(g, "ShaderNodeMapRange", 0, -3400,
                                 interpolation_type="SMOOTHSTEP", clamp=True)
     n_land_neg_fade.inputs["From Min"].default_value = 0.0
-    n_land_neg_fade.inputs["From Max"].default_value = 8.0
+    n_land_neg_fade.inputs["From Max"].default_value = 25.0
     n_land_neg_fade.inputs["To Min"].default_value =   0.0
     n_land_neg_fade.inputs["To Max"].default_value =   1.0
     g.links.new(prev, n_land_neg_fade.inputs["Value"])
