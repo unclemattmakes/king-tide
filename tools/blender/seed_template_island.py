@@ -127,10 +127,13 @@ AI_SPLINE_ANCHORS: list[tuple[float, float, float]] = [
     ( 200.0, -150.0, 5.0),
 ]
 
-STARTS: list[tuple[tuple[float, float, float], float]] = [
-    ((-30.0, -330.0, 5.0), 0.0),
-    (( 30.0, -330.0, 5.0), 0.0),
-]
+# Player starts are placed by sampling ``ai_spline_main`` at parameter
+# ``START_T`` ∈ [0, 1] of arc length. The starts spawn perpendicular to
+# the spline tangent at that point (so the grid faces along the racing
+# line). Default 0.0 = right at the first spline anchor.
+START_T = 0.0
+START_GRID_SPACING_M = 4.0  # lateral distance between start_00 and start_01
+START_Z = 5.0                # altitude above water
 
 CHECKPOINTS: list[tuple[float, float, float]] = [
     (-200.0, -150.0, 5.0),
@@ -604,8 +607,13 @@ def bind_peak_inputs(mod: bpy.types.Modifier, ng: bpy.types.NodeTree) -> None:
 def add_peaks() -> None:
     for idx, base_loc, radius, top_local, crater in PEAKS:
         base = bpy.data.objects.new(f"peak_{idx}_base", None)
-        base.empty_display_type = "CIRCLE"
-        base.empty_display_size = 1.0  # CIRCLE radius = scale.x
+        # SPHERE display with scale.z=0 reads as a horizontal great circle
+        # plus collapsed-but-visible orthogonal arcs through the centre.
+        # More visually prominent than CIRCLE — matches the visibility of
+        # the original single-empty peak controls. scale.z is unused by
+        # the GN graph for the base (crater flag lives on the top empty).
+        base.empty_display_type = "SPHERE"
+        base.empty_display_size = 1.0  # SPHERE radius = scale magnitude
         base.location = base_loc
         base.scale = (radius, radius, 0.0)
         base["kind"] = "peak_base"
@@ -655,14 +663,61 @@ def add_ai_spline() -> None:
     bpy.context.scene.collection.objects.link(obj)
 
 
+def _sample_spline_at_t(t: float) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Sample the AI spline polyline at arc-length parameter t ∈ [0, 1].
+    Returns ((sample_x, sample_y), (tangent_x, tangent_y)). Tangent is
+    normalized."""
+    anchors = AI_SPLINE_ANCHORS
+    # Cyclic loop — close the polyline by appending the first anchor.
+    pts = list(anchors) + [anchors[0]]
+    seg_lengths = []
+    for i in range(len(pts) - 1):
+        dx = pts[i + 1][0] - pts[i][0]
+        dy = pts[i + 1][1] - pts[i][1]
+        seg_lengths.append(math.hypot(dx, dy))
+    total = sum(seg_lengths)
+    target = max(0.0, min(1.0, t)) * total
+
+    accum = 0.0
+    for i, seg_len in enumerate(seg_lengths):
+        if accum + seg_len >= target or i == len(seg_lengths) - 1:
+            f = (target - accum) / seg_len if seg_len > 0 else 0.0
+            ax, ay = pts[i][0], pts[i][1]
+            bx, by = pts[i + 1][0], pts[i + 1][1]
+            sx = ax + f * (bx - ax)
+            sy = ay + f * (by - ay)
+            tx = bx - ax
+            ty = by - ay
+            tmag = math.hypot(tx, ty) or 1.0
+            return (sx, sy), (tx / tmag, ty / tmag)
+        accum += seg_len
+    # Should be unreachable given the loop's i==last fallback, but keep a safe default.
+    return (pts[0][0], pts[0][1]), (0.0, 1.0)
+
+
 def add_player_starts() -> None:
-    for i, (loc, yaw) in enumerate(STARTS):
+    """Spawn player starts on the racing line. ``START_T`` picks the
+    arc-length parameter (0.0 = first spline anchor). The two starts sit
+    perpendicular to the tangent, ``START_GRID_SPACING_M`` apart, both
+    facing along the tangent — matches a typical race-start grid."""
+    (sx, sy), (tx, ty) = _sample_spline_at_t(START_T)
+    # Yaw: runtime convention is yaw=0 → +Y forward, yaw=π/2 → +X.
+    # forward unit = (sin(yaw), cos(yaw)); solve yaw = atan2(tx, ty).
+    yaw = math.atan2(tx, ty)
+    # Right vector (perpendicular to forward, in XY): (cos(yaw), -sin(yaw)) = (ty, -tx)
+    rx, ry = ty, -tx
+    offsets = [(-START_GRID_SPACING_M * 0.5, "-"), (+START_GRID_SPACING_M * 0.5, "+")]
+    for i, (off, _label) in enumerate(offsets):
+        x = sx + rx * off
+        y = sy + ry * off
         obj = bpy.data.objects.new(f"start_{i:02d}", None)
         obj.empty_display_type = "ARROWS"
-        obj.location = loc
+        obj.empty_display_size = 6.0
+        obj.location = (x, y, START_Z)
         obj.rotation_euler = (0.0, 0.0, yaw)
         obj["kind"] = "start"
         obj["index"] = i
+        obj["start_t"] = float(START_T)
         bpy.context.scene.collection.objects.link(obj)
 
 
@@ -764,13 +819,26 @@ def organize_collections() -> None:
 def add_water_preview() -> None:
     """Run the hoverbike addon's water-preview helper so the seeded scene
     opens with a visible water surface. Pure preview — lives in the
-    addon's render-disabled collection and never reaches GLB export."""
-    try:
-        import hoverbike_addon
-    except ImportError as e:
-        print(f"[seed-template-island] WARNING: could not import hoverbike_addon ({e}); skipping water preview")
+    addon's render-disabled collection and never reaches GLB export.
+
+    Loads the addon from the disk path (``tools/blender/hoverbike_addon.py``)
+    via ``importlib.util.spec_from_file_location`` rather than ``import
+    hoverbike_addon``, because Blender's installed-addons directory may
+    contain an older registered copy that gets picked up first and would
+    otherwise produce a vertically-oriented water plane (pre Item 5 fix)."""
+    import importlib.util
+    addon_file = os.path.join(SCRIPT_DIR, "hoverbike_addon.py")
+    if not os.path.exists(addon_file):
+        print(f"[seed-template-island] WARNING: {addon_file} not found; skipping water preview")
         return
-    summary = hoverbike_addon._rebuild_water_preview(
+    spec = importlib.util.spec_from_file_location("hoverbike_addon_disk", addon_file)
+    if spec is None or spec.loader is None:
+        print(f"[seed-template-island] WARNING: could not load spec for {addon_file}; skipping water preview")
+        return
+    addon = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(addon)
+
+    summary = addon._rebuild_water_preview(
         bpy.context.scene,
         size=WATER_PREVIEW_SIZE,
         subdivisions=WATER_PREVIEW_SUBDIVISIONS,

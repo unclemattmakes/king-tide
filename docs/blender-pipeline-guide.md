@@ -407,7 +407,7 @@ Each volcanic peak uses **two empties**:
 
 | Empty | Visual | Encoded fields |
 |---|---|---|
-| `peak_NN_base` (CIRCLE) | Footprint at sea level | `location.xy`: peak centre in world XY. `scale.x`: base radius (m). |
+| `peak_NN_base` (SPHERE, Z-flattened) | Footprint ring at sea level | `location.xy`: peak centre in world XY. `scale.x`: base radius (m). `scale.z` is held at 0 so the wireframe sphere reads as a horizontal great circle. |
 | `peak_NN_top` (SPHERE) | Apex / summit | `location` (offset from base via a *Copy Location* constraint): apex XY-offset and Z height. `scale.z`: crater flag (0/1). |
 
 Drag the **base** empty to move the entire island — the *Copy Location*
@@ -450,10 +450,27 @@ child's position.
      - Place gates either by editing `cp_NN` empties or hitting the
        addon's *Rebuild Gate Preview* button after setting
        `gateSpacing` on the track JSON.
-     - Move `start_00` / `start_01` to your grid.
+     - Move `start_00` / `start_01` to your grid (see *Starting line*
+       below if you want them re-derived from the spline).
      - Adjust `water_volume_main`'s extents if needed.
 5. **Export** via the addon's *Export Track to Game* — identical
    pipeline to every other track.
+
+### Starting line — sampled from the spline
+
+`start_00` / `start_01` are placed by sampling `ai_spline_main` at
+arc-length parameter `START_T` ∈ [0, 1] (default 0.0 = first anchor).
+The two starts spawn perpendicular to the spline tangent, 4 m apart
+(`START_GRID_SPACING_M`), both facing along the racing line.
+
+To shift the starting line further down the loop, edit `START_T` near
+the top of `tools/blender/seed_template_island.py` and re-seed. Each
+start carries its `start_t` value as a custom property so you can read
+it back from the .blend.
+
+To pin the starts at hand-authored positions instead, just move them
+in the viewport after the seed runs — they're plain `ARROWS` empties
+once placed.
 
 ### Re-seeding the template from scratch
 
