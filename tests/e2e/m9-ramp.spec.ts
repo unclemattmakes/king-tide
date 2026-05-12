@@ -14,7 +14,7 @@ import { expect, test } from '@playwright/test'
  * re-acquisition of water on landing.
  */
 test('bike launches off the ramp on the right straight', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/?autostart=1')
   await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
     timeout: 10000,
   })

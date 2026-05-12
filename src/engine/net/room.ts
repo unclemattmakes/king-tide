@@ -55,13 +55,26 @@ export type NetRoomConfig = {
   onRoomFull?: () => void
   /** M10.12 lobby — called when any remote peer toggles their ready
    *  state. Local toggles are NOT echoed; `latestPeerReady` is updated
-   *  locally on `sendReady` to keep the source of truth in one map. */
-  onPeerReady?: (peerId: number, ready: boolean) => void
+   *  locally on `sendReady` to keep the source of truth in one map. The
+   *  `picks` payload carries the latest bike + track selection that
+   *  arrived with the ready toggle, so the lobby UI can paint per-slot
+   *  loadout pills without an extra round-trip. */
+  onPeerReady?: (peerId: number, ready: boolean, picks: PeerPicks) => void
   /** M10.12 lobby — called when the server broadcasts that the race
    *  has started (some peer's local view found everyone ready and
    *  signalled `start-race`). Idempotent on the caller side — receiving
-   *  this is the cue to arm the countdown if not already armed. */
-  onStartRace?: () => void
+   *  this is the cue to arm the countdown if not already armed. The
+   *  optional `trackId` carries the agreed-upon track chosen by the
+   *  caller (smash-bros-style random over picks); when absent, the
+   *  receiver falls back to its current URL track. */
+  onStartRace?: (trackId?: string) => void
+}
+
+/** Per-peer lobby-flow selections. Both fields are optional — clients
+ *  may toggle ready before settling on picks. */
+export type PeerPicks = {
+  selectedBikeId?: string | undefined
+  selectedTrackId?: string | undefined
 }
 
 export type NetRoom = {
@@ -89,21 +102,24 @@ export type NetRoom = {
   /** Total snapshots received since connect. Useful as an e2e wait signal
    *  ("wait until tab 2 has applied at least one snapshot from tab 1"). */
   readonly snapshotsReceived: number
-  /** M10.12 lobby — broadcast our ready state. Updates `latestPeerReady`
-   *  locally too so the caller doesn't need a second source of truth.
-   *  No-ops until ready (frames are dropped, but we still update local
-   *  state so the lobby UI behaves correctly during the brief
-   *  pre-connect window). */
-  sendReady(ready: boolean): void
+  /** M10.12 lobby — broadcast our ready state plus the latest bike +
+   *  track picks. Updates `latestPeerReady` + `latestPeerPicks` locally
+   *  too so the caller doesn't need a second source of truth. No-ops on
+   *  the socket until connected. */
+  sendReady(ready: boolean, picks?: PeerPicks): void
   /** M10.12 lobby — broadcast that all peers (per our local view) are
    *  ready and the race should begin. Server sets the sticky
-   *  `raceStarted` bit so late joiners skip the lobby. Idempotent. */
-  sendStartRace(): void
+   *  `raceStarted` bit so late joiners skip the lobby. The optional
+   *  `trackId` is the chosen track (e.g. smash-bros-style random pick
+   *  across the lobby's votes); receivers reload into the race with
+   *  that track. Idempotent. */
+  sendStartRace(trackId?: string): void
   /** Live ready-state per peer slot, including the local peer (keyed by
-   *  `peerId`). Pre-connect: empty. On disconnect: cleared. Cleared
-   *  entries for departed peers prevent a stale "ready" from a previous
-   *  occupant of a recycled slot. */
+   *  `peerId`). Pre-connect: empty. On disconnect: cleared. */
   readonly latestPeerReady: ReadonlyMap<number, boolean>
+  /** Live per-slot picks (bike + track). Mirrors `latestPeerReady`'s
+   *  lifecycle. Self-entries are written locally on `sendReady`. */
+  readonly latestPeerPicks: ReadonlyMap<number, PeerPicks>
   close(): void
 }
 
@@ -140,6 +156,9 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
   // sendReady is called. New peers are added with `false` on
   // peer-joined / hello; cleared on peer-left + on disconnect.
   const latestPeerReady = new Map<number, boolean>()
+  // Last-known bike + track picks per peer slot, including self.
+  // Mirrors latestPeerReady's lifecycle.
+  const latestPeerPicks = new Map<number, PeerPicks>()
   // Last-write-wins intent buffer per remote peer slot. Sized at most
   // MAX_PEERS_PER_ROOM - 1 entries. Cleared on disconnect; entries
   // pruned on peer-left.
@@ -160,6 +179,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
     remotePeers.clear()
     latestPeerIntents.clear()
     latestPeerReady.clear()
+    latestPeerPicks.clear()
     snapshotsReceived = 0
   })
 
@@ -173,6 +193,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
           myPeerId = msg.peerId
           remotePeers.clear()
           latestPeerReady.clear()
+          latestPeerPicks.clear()
           // Seed every visible slot (us + others) as not-ready. Local
           // ready state is overwritten the first time `sendReady` is
           // called.
@@ -181,8 +202,22 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
             remotePeers.add(p)
             latestPeerReady.set(p, false)
           }
+          // Replay any picks the server has on file (peers who readied
+          // before we joined). Bare-bones for back-compat: missing
+          // peerPicks just leaves the map empty.
+          if (msg.peerPicks) {
+            for (const [k, v] of Object.entries(msg.peerPicks)) {
+              const slot = Number(k)
+              if (!Number.isFinite(slot)) continue
+              latestPeerPicks.set(slot, {
+                selectedBikeId: v.selectedBikeId,
+                selectedTrackId: v.selectedTrackId,
+              })
+              if (typeof v.ready === 'boolean') latestPeerReady.set(slot, v.ready)
+            }
+          }
           cfg.onConnected?.(msg.peerId, [...remotePeers], msg.raceStarted)
-          if (msg.raceStarted) cfg.onStartRace?.()
+          if (msg.raceStarted) cfg.onStartRace?.(msg.raceTrackId)
           break
         case 'peer-joined':
           remotePeers.add(msg.peerId)
@@ -191,10 +226,12 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
           break
         case 'peer-left':
           remotePeers.delete(msg.peerId)
-          // Drop the departed peer's buffered intent so a future room
-          // member assigned the same slot doesn't inherit stale controls.
+          // Drop the departed peer's buffered intent + picks so a future
+          // room member assigned the same slot doesn't inherit stale
+          // controls or selections.
           latestPeerIntents.delete(msg.peerId)
           latestPeerReady.delete(msg.peerId)
+          latestPeerPicks.delete(msg.peerId)
           cfg.onPeerLeft?.(msg.peerId)
           break
         case 'ready':
@@ -203,11 +240,23 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
           // so a duplicate is harmless either way).
           if (msg.peerId !== myPeerId) {
             latestPeerReady.set(msg.peerId, msg.ready)
-            cfg.onPeerReady?.(msg.peerId, msg.ready)
+            const picks: PeerPicks = {
+              selectedBikeId: msg.selectedBikeId,
+              selectedTrackId: msg.selectedTrackId,
+            }
+            // Merge — keep prior pick fields if the new message omitted
+            // them. (Clients are free to send a bare ready toggle.)
+            const prior = latestPeerPicks.get(msg.peerId)
+            const merged: PeerPicks = {
+              selectedBikeId: picks.selectedBikeId ?? prior?.selectedBikeId,
+              selectedTrackId: picks.selectedTrackId ?? prior?.selectedTrackId,
+            }
+            latestPeerPicks.set(msg.peerId, merged)
+            cfg.onPeerReady?.(msg.peerId, msg.ready, merged)
           }
           break
         case 'start-race':
-          cfg.onStartRace?.()
+          cfg.onStartRace?.(msg.trackId)
           break
         case 'room-full':
           cfg.onRoomFull?.()
@@ -281,22 +330,39 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
       const copy = buf.slice(0).buffer
       socket.send(copy)
     },
-    sendReady(ready: boolean) {
+    sendReady(ready: boolean, picks?: PeerPicks) {
       // Always update local state (the lobby UI reads from this map),
       // even if the socket isn't ready — we'll re-broadcast on connect
       // if the local state diverged in the meantime.
-      if (myPeerId >= 0) latestPeerReady.set(myPeerId, ready)
+      if (myPeerId >= 0) {
+        latestPeerReady.set(myPeerId, ready)
+        if (picks) {
+          const prior = latestPeerPicks.get(myPeerId)
+          latestPeerPicks.set(myPeerId, {
+            selectedBikeId: picks.selectedBikeId ?? prior?.selectedBikeId,
+            selectedTrackId: picks.selectedTrackId ?? prior?.selectedTrackId,
+          })
+        }
+      }
       if (!socketOpen || myPeerId < 0) return
-      const msg: ClientControlMessage = { type: 'ready', ready }
+      const msg: ClientControlMessage = {
+        type: 'ready',
+        ready,
+        selectedBikeId: picks?.selectedBikeId,
+        selectedTrackId: picks?.selectedTrackId,
+      }
       socket.send(JSON.stringify(msg))
     },
-    sendStartRace() {
+    sendStartRace(trackId?: string) {
       if (!socketOpen || myPeerId < 0) return
-      const msg: ClientControlMessage = { type: 'start-race' }
+      const msg: ClientControlMessage = { type: 'start-race', trackId }
       socket.send(JSON.stringify(msg))
     },
     get latestPeerReady() {
       return latestPeerReady
+    },
+    get latestPeerPicks() {
+      return latestPeerPicks
     },
     get snapshotsReceived() {
       return snapshotsReceived

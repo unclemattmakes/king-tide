@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 test.describe('M5 pickup + boost', () => {
   test('drives through pickup, slot fills, fire consumes + boost engages', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
       timeout: 10000,
     })

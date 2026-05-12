@@ -10,7 +10,7 @@ test.describe('M0 boot', () => {
       if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`)
     })
 
-    await page.goto('/')
+    await page.goto('/?autostart=1')
 
     // Debug API present and ready
     await page.waitForFunction(() => window.__hover?.ready === true, { timeout: 8000 })
@@ -33,7 +33,7 @@ test.describe('M0 boot', () => {
   })
 
   test('intent override flows through to state', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => window.__hover?.ready === true, { timeout: 8000 })
 
     await page.evaluate(() =>

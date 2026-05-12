@@ -16,7 +16,7 @@ test.describe('M2 water', () => {
       if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`)
     })
 
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
       timeout: 15000,
     })
@@ -70,7 +70,7 @@ test.describe('M2 water', () => {
 
   test('bike floats on water from rest (does not sink)', async ({ page }) => {
     test.setTimeout(90_000)
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
       timeout: 15000,
     })

@@ -2,8 +2,9 @@
  * M10.4 — control-channel protocol shared by the PartyKit relay and the
  * client `NetRoom`. The binary `InputFrame` codec already lives in
  * `./input-frame`; this file covers the JSON-text "control" messages
- * (peer-id assignment, peer join/leave notifications) so the two sides
- * can't drift on field names or string casing.
+ * (peer-id assignment, peer join/leave notifications, lobby ready
+ * state + race start) so the two sides can't drift on field names or
+ * string casing.
  *
  * Wire choice: control messages are JSON text frames, InputFrames are
  * binary frames. The client routes on `typeof message`. Two-tier on one
@@ -30,6 +31,23 @@ export type HelloMessage = {
    *  their countdown so they don't get stuck in the lobby waiting for
    *  already-racing peers to re-emit ready toggles. */
   raceStarted: boolean
+  /** Menu-flow extension — track + bike picks of every currently-
+   *  connected peer, so a fresh join can paint the lobby UI without
+   *  waiting for each peer to re-emit their ready state. Indexed by
+   *  peer slot. Missing entries mean "no pick yet". */
+  peerPicks?:
+    | Record<
+        number,
+        {
+          selectedBikeId?: string | undefined
+          selectedTrackId?: string | undefined
+          ready?: boolean | undefined
+        }
+      >
+    | undefined
+  /** Once `raceStarted` flips, the host's chosen track gets stamped here
+   *  so late joiners can navigate to the same race environment. */
+  raceTrackId?: string | undefined
 }
 
 /** Sent by the server to existing peers when a new peer connects. */
@@ -50,25 +68,36 @@ export type RoomFullMessage = {
   type: 'room-full'
 }
 
-/** M10.12 lobby — peer announces their ready/not-ready state. Sent
- *  client→server (server stamps the sender's slot before broadcasting,
- *  so peers can't spoof each other's slot) AND server→other peers (with
- *  the originating slot in `peerId`). Same shape both directions for
- *  simplicity; the relay just fills in `peerId` from the connection's
- *  assigned slot when forwarding. */
+/** M10.12 lobby — peer announces their ready/not-ready state and
+ *  optional bike + track picks. Sent client→server (server stamps the
+ *  sender's slot before broadcasting, so peers can't spoof each other's
+ *  slot) AND server→other peers (with the originating slot in `peerId`).
+ *  Same shape both directions for simplicity; the relay fills in
+ *  `peerId` from the connection's assigned slot when forwarding. */
 export type ReadyMessage = {
   type: 'ready'
   peerId: number
   ready: boolean
+  /** Lobby-flow extension. Reading peers use this to render the
+   *  per-slot "this player picked X" indicator and to feed the
+   *  smash-bros-style random pick when the race starts. Optional so
+   *  legacy clients (pre-menu-flow) can still emit a bare ready toggle. */
+  selectedBikeId?: string | undefined
+  selectedTrackId?: string | undefined
 }
 
 /** Server → all peers when the room transitions out of lobby into
  *  countdown. Sent once per room session; mid-race joiners don't get one
  *  (they fall through into the active race at their own pace). The
- *  payload is empty for now — adding it as a typed message reserves the
- *  shape for future fields (e.g. agreed starting position list). */
+ *  chosen track id is stamped on the message so every peer reloads into
+ *  the same environment. */
 export type StartRaceMessage = {
   type: 'start-race'
+  /** Track id agreed for the race (selected by the calling client via
+   *  smash-bros-style random pick from the lobby's votes). Optional for
+   *  back-compat with clients that armed the countdown without sharing
+   *  a track. */
+  trackId?: string | undefined
 }
 
 export type ServerControlMessage =
@@ -80,11 +109,18 @@ export type ServerControlMessage =
   | StartRaceMessage
 
 /** Messages sent from a client to the server.
- *  - `ready`: lobby ready toggle. Server re-broadcasts as a `ReadyMessage`.
+ *  - `ready`: lobby ready toggle (with current picks). Server re-broadcasts
+ *    as a `ReadyMessage` carrying the originating slot.
  *  - `start-race`: a peer's local view found all peers ready and is
  *    arming the countdown. Server sets `raceStarted` and broadcasts a
- *    `StartRaceMessage` to everyone else so they arm too. Late joiners
- *    are told via the `raceStarted` flag in their `HelloMessage`. */
+ *    `StartRaceMessage` (with the chosen `trackId`) to everyone else
+ *    so they arm too. Late joiners are told via the `raceStarted` flag
+ *    in their `HelloMessage`. */
 export type ClientControlMessage =
-  | { type: 'ready'; ready: boolean }
-  | { type: 'start-race' }
+  | {
+      type: 'ready'
+      ready: boolean
+      selectedBikeId?: string | undefined
+      selectedTrackId?: string | undefined
+    }
+  | { type: 'start-race'; trackId?: string | undefined }

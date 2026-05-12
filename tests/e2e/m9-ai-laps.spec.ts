@@ -22,7 +22,7 @@ test.describe('M9 AI cornering — lap completion', () => {
   test('autoplay completes a full lap on Lagoon (parallel-load tolerant)', async ({ page }) => {
     test.setTimeout(180_000)
 
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
       timeout: 15000,
     })

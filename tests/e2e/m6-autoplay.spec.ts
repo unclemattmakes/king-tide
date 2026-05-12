@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 test.describe('M6 auto-play', () => {
   test('toggling auto-play makes the AI drive the player', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
       timeout: 10000,
     })

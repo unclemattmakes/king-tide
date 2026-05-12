@@ -6,37 +6,138 @@
     <link rel="icon" href="data:," />
     <title>Hoverbike</title>
     <style>
-      :root { color-scheme: dark; }
+      :root {
+        color-scheme: dark;
+
+        /* Broadcast theme tokens — used by the menu flow + finish screen. */
+        --bc-ink: #f3f7ff;
+        --bc-ink-dim: #97a8c2;
+        --bc-navy: #06101e;
+        --bc-navy-2: #0c1a30;
+        --bc-cyan: #00d4ff;
+        --bc-orange: #ff5a1f;
+        --bc-yellow: #ffd200;
+        --bc-red: #ff2a55;
+        --bc-green: #29e07a;
+        --bc-line: rgba(255, 255, 255, 0.12);
+        --bc-font-display: 'Anton', 'Oswald', 'Bebas Neue', 'Impact', 'Arial Narrow Bold',
+          system-ui, sans-serif;
+        --bc-font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+        --bc-font-mono: ui-monospace, 'JetBrains Mono', monospace;
+      }
       html, body { margin: 0; padding: 0; background: #000; color: #eee; font-family: ui-monospace, monospace; overflow: hidden; }
       #app { position: fixed; inset: 0; }
       canvas { display: block; width: 100%; height: 100%; }
       #hud { position: fixed; top: 8px; left: 8px; pointer-events: none; user-select: none; font-size: 12px; line-height: 1.4; opacity: 0.85; }
       #hud .row { background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 2px; margin-bottom: 2px; display: inline-block; }
+
+      /* While the cold-boot menu is up, hide every in-race overlay so the
+         broadcast frame stays clean. The menu is its own canvas. */
+      body.menu-active #hud,
+      body.menu-active #garage-toggle,
+      body.menu-active #devsettings-toggle,
+      body.menu-active #water-debug-toggle,
+      body.menu-active #race-banner,
+      body.menu-active #race-timer,
+      body.menu-active #race-gap,
+      body.menu-active #race-minimap,
+      body.menu-active #finish { display: none !important; }
+
       #finish {
         position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
-        pointer-events: none; user-select: none;
-        background: radial-gradient(ellipse at center, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.2) 60%, transparent 100%);
+        user-select: none;
+        background: radial-gradient(ellipse at center, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.4) 60%, rgba(0,0,0,0.85) 100%);
+        font-family: var(--bc-font-sans);
+        z-index: 12;
       }
       #finish.show { display: flex; }
       #finish .card {
-        font-family: ui-monospace, monospace; text-align: center; color: #fff;
-        background: rgba(20,30,45,0.85); border: 1px solid rgba(255,255,255,0.2);
-        padding: 28px 48px; border-radius: 8px; box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+        position: relative;
+        text-align: left; color: var(--bc-ink);
+        background: linear-gradient(180deg, rgba(12, 26, 48, 0.96), rgba(6, 16, 30, 0.96));
+        border: 1px solid var(--bc-line);
+        border-left: 6px solid var(--bc-yellow);
+        padding: 28px 40px 24px;
+        box-shadow: 0 20px 70px rgba(0,0,0,0.7);
+        min-width: 520px;
       }
-      #finish .title { font-size: 32px; font-weight: bold; letter-spacing: 2px; margin-bottom: 6px; color: #ffcc66; }
-      #finish .sub { font-size: 14px; opacity: 0.85; margin-bottom: 18px; }
-      #finish .stat { font-size: 18px; line-height: 1.5; }
-      #finish .stat b { color: #ffcc66; }
-      #finish .hint { margin-top: 20px; font-size: 11px; opacity: 0.6; }
-      #finish .actions { margin-top: 18px; display: flex; gap: 10px; justify-content: center; pointer-events: auto; }
+      #finish .card::after {
+        content: ''; position: absolute; top: 0; right: 0;
+        width: 90px; height: 28px;
+        background: var(--bc-yellow);
+        clip-path: polygon(20px 0, 100% 0, 100% 100%, 0 100%);
+      }
+      #finish .ribbon {
+        position: absolute; top: 6px; right: 14px;
+        font-family: var(--bc-font-display);
+        font-size: 13px; letter-spacing: 0.24em;
+        color: var(--bc-navy);
+        z-index: 1;
+      }
+      #finish .title {
+        font-family: var(--bc-font-display);
+        font-size: 64px; line-height: 1; letter-spacing: 0.06em;
+        color: var(--bc-yellow);
+        text-shadow: 0 0 24px rgba(255, 210, 0, 0.28);
+        margin-bottom: 2px;
+      }
+      #finish .sub {
+        font-family: var(--bc-font-display);
+        font-size: 16px; letter-spacing: 0.18em;
+        color: var(--bc-ink-dim);
+        margin-bottom: 22px;
+      }
+      #finish .stat {
+        display: grid; gap: 6px;
+        font-family: var(--bc-font-mono);
+        font-size: 14px;
+        letter-spacing: 0.03em;
+      }
+      #finish .stat .row {
+        display: grid; grid-template-columns: 140px 1fr;
+        padding: 6px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      #finish .stat .row .lbl {
+        font-family: var(--bc-font-display);
+        letter-spacing: 0.18em;
+        color: var(--bc-ink-dim);
+        font-size: 13px;
+      }
+      #finish .stat .row b {
+        color: var(--bc-cyan); font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      #finish .stat .row .best { color: var(--bc-yellow); }
+      #finish .hint {
+        margin-top: 20px; font-size: 11px; opacity: 0.55;
+        font-family: var(--bc-font-mono); letter-spacing: 0.16em;
+      }
+      #finish .actions {
+        margin-top: 22px; display: flex; gap: 10px;
+        flex-wrap: wrap;
+      }
       #finish button.action {
-        background: rgba(255,200,100,0.16); color: #ffcc66;
-        border: 1px solid rgba(255,200,100,0.5); border-radius: 3px;
-        font: bold 12px ui-monospace, monospace; letter-spacing: 1px;
-        padding: 6px 14px; cursor: pointer;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid var(--bc-line);
+        color: var(--bc-ink);
+        font-family: var(--bc-font-display);
+        font-size: 15px; letter-spacing: 0.16em;
+        padding: 11px 22px;
+        cursor: pointer;
+        transition: background 0.12s ease, filter 0.12s ease;
       }
-      #finish button.action:hover { filter: brightness(1.2); }
-      #finish button.action:disabled { opacity: 0.6; cursor: default; }
+      #finish button.action:hover { background: rgba(255, 255, 255, 0.12); }
+      #finish button.action.primary {
+        background: var(--bc-cyan);
+        color: var(--bc-navy);
+        border-color: var(--bc-cyan);
+        clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%);
+        padding-right: 32px;
+      }
+      #finish button.action.primary:hover { filter: brightness(1.15); }
+      #finish button.action.danger { color: var(--bc-red); }
+      #finish button.action:disabled { opacity: 0.55; cursor: default; }
 
       /* Garage button (HUD corner) */
       #garage-toggle {
@@ -48,51 +149,6 @@
       }
       #garage-toggle:hover { background: rgba(40,55,80,0.9); }
       #garage-best { font-size: 10px; opacity: 0.75; margin-left: 6px; }
-
-      /* Garage overlay */
-      #garage {
-        position: fixed; inset: 0; display: none; align-items: center;
-        justify-content: center; z-index: 10;
-        background: rgba(0,0,0,0.75);
-      }
-      #garage.show { display: flex; }
-      #garage .card {
-        background: rgba(20,30,45,0.95); border: 1px solid rgba(255,255,255,0.18);
-        border-radius: 8px; padding: 24px 32px;
-        font-family: ui-monospace, monospace; color: #eee;
-        max-width: 92vw; max-height: 90vh; overflow: auto;
-      }
-      #garage h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: 3px; color: #ffcc66; }
-      #garage .sub { font-size: 11px; opacity: 0.7; margin-bottom: 18px; }
-      #garage h2 { font-size: 12px; letter-spacing: 2px; opacity: 0.75; margin: 14px 0 6px; }
-      #garage .options { display: flex; gap: 8px; flex-wrap: wrap; }
-      #garage .opt {
-        flex: 1 1 180px; min-width: 160px; cursor: pointer;
-        background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12);
-        border-left: 3px solid var(--accent, #888);
-        border-radius: 4px; padding: 10px 12px; user-select: none;
-      }
-      #garage .opt:hover { background: rgba(255,255,255,0.08); }
-      #garage .opt.selected {
-        background: rgba(255,200,100,0.10);
-        border-color: rgba(255,200,100,0.55);
-        border-left-color: var(--accent, #ffcc66);
-      }
-      #garage .opt .name { font-size: 14px; font-weight: bold; letter-spacing: 1px; color: var(--accent, #fff); }
-      #garage .opt .tag { font-size: 11px; opacity: 0.75; margin-top: 3px; }
-      #garage .opt .best { font-size: 10px; opacity: 0.6; margin-top: 6px; font-style: italic; }
-      #garage .actions { margin-top: 22px; display: flex; gap: 10px; justify-content: flex-end; }
-      #garage button.action {
-        background: rgba(255,200,100,0.16); color: #ffcc66;
-        border: 1px solid rgba(255,200,100,0.5); border-radius: 3px;
-        font: bold 13px ui-monospace, monospace; letter-spacing: 1px;
-        padding: 8px 18px; cursor: pointer;
-      }
-      #garage button.action.secondary {
-        background: rgba(255,255,255,0.06); color: #ccc;
-        border-color: rgba(255,255,255,0.2);
-      }
-      #garage button.action:hover { filter: brightness(1.2); }
 
       /* Dev settings button — sits below garage button */
       #devsettings-toggle {
@@ -293,6 +349,507 @@
         pointer-events: none; user-select: none;
         image-rendering: -webkit-optimize-contrast;
       }
+
+      /* ───────────── Broadcast menu (cold-boot flow) ───────────── */
+
+      #menu {
+        position: fixed; inset: 0; z-index: 40;
+        display: none; flex-direction: column;
+        background:
+          radial-gradient(ellipse 90% 60% at 50% -10%, rgba(0, 212, 255, 0.18), transparent 55%),
+          radial-gradient(ellipse 60% 50% at 100% 100%, rgba(255, 90, 31, 0.10), transparent 60%),
+          linear-gradient(180deg, var(--bc-navy) 0%, #050a14 100%);
+        color: var(--bc-ink);
+        font-family: var(--bc-font-sans);
+        overflow: hidden;
+      }
+      #menu.show { display: flex; }
+
+      /* Subtle scanlines + vignette for the broadcast feel. */
+      #menu::before {
+        content: ''; position: absolute; inset: 0;
+        background: repeating-linear-gradient(180deg,
+          transparent 0, transparent 2px,
+          rgba(255, 255, 255, 0.025) 2px, rgba(255, 255, 255, 0.025) 3px);
+        pointer-events: none; z-index: 1;
+      }
+      #menu::after {
+        content: ''; position: absolute; inset: 0;
+        background: radial-gradient(ellipse at center, transparent 38%, rgba(0, 0, 0, 0.75) 100%);
+        pointer-events: none; z-index: 1;
+      }
+      #menu > * { position: relative; z-index: 2; }
+
+      /* Scoreboard header (top chyron). */
+      .bc-header {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 28px;
+        padding: 16px 36px 14px;
+        border-bottom: 1px solid var(--bc-line);
+        background: linear-gradient(180deg, rgba(255,255,255,0.04), transparent);
+      }
+      .bc-brand { display: flex; align-items: center; gap: 14px; }
+      .bc-brand .bar {
+        display: inline-block; width: 8px; height: 30px;
+        background: var(--bc-cyan);
+        box-shadow: 0 0 18px rgba(0, 212, 255, 0.6);
+      }
+      .bc-brand .name {
+        font-family: var(--bc-font-display);
+        font-size: 28px; letter-spacing: 0.16em; font-weight: 900;
+        color: var(--bc-ink);
+      }
+      .bc-brand .live {
+        font-family: var(--bc-font-display);
+        font-size: 12px; letter-spacing: 0.2em;
+        background: var(--bc-red); color: #fff;
+        padding: 3px 8px;
+        animation: bc-live 1.6s ease-in-out infinite;
+      }
+      @keyframes bc-live {
+        0%, 100% { opacity: 1; box-shadow: 0 0 14px rgba(255, 42, 85, 0.4); }
+        50% { opacity: 0.82; box-shadow: 0 0 4px rgba(255, 42, 85, 0.2); }
+      }
+
+      .bc-crumbs {
+        display: flex; justify-content: center; align-items: center; gap: 10px;
+        font-family: var(--bc-font-display);
+        font-size: 13px; letter-spacing: 0.24em;
+        color: var(--bc-ink-dim);
+      }
+      .bc-crumb { padding: 4px 10px; }
+      .bc-crumb.is-current {
+        color: var(--bc-yellow);
+        border-bottom: 2px solid var(--bc-yellow);
+      }
+      .bc-crumb-sep { opacity: 0.35; }
+
+      .bc-clock {
+        font-family: var(--bc-font-mono);
+        font-size: 12px;
+        color: var(--bc-ink-dim);
+        letter-spacing: 0.08em;
+      }
+
+      /* Stage area (one screen visible at a time). */
+      .bc-stage {
+        flex: 1;
+        display: flex; align-items: center; justify-content: center;
+        padding: 32px 48px;
+        overflow: auto;
+      }
+      .bc-screen { display: none; width: 100%; max-width: 1280px; }
+      .bc-screen.show { display: block; }
+
+      /* Title screen. */
+      .bc-title { text-align: center; padding: 24px 0; }
+      .bc-title .word {
+        display: block;
+        font-family: var(--bc-font-display);
+        font-weight: 900;
+        font-size: clamp(72px, 14vw, 220px);
+        line-height: 0.85;
+        letter-spacing: 0.03em;
+        background: linear-gradient(180deg, #ffffff 0%, #99c8e6 70%, #5b7da0 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        text-shadow: 0 0 40px rgba(0, 212, 255, 0.12);
+      }
+      .bc-title .word.alt {
+        background: none;
+        color: var(--bc-cyan);
+        -webkit-text-fill-color: var(--bc-cyan);
+        text-shadow: 0 0 30px rgba(0, 212, 255, 0.45);
+      }
+      .bc-title .tagline {
+        margin-top: 30px;
+        font-family: var(--bc-font-display);
+        font-size: clamp(14px, 1.5vw, 20px);
+        letter-spacing: 0.32em;
+        color: var(--bc-ink-dim);
+      }
+      .bc-title .cta { margin-top: 56px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+      .bc-title .cta-blink {
+        font-family: var(--bc-font-mono);
+        font-size: 11px; letter-spacing: 0.4em;
+        color: var(--bc-ink-dim);
+        animation: bc-blink 1.4s steps(2) infinite;
+      }
+      @keyframes bc-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0.25; } }
+
+      /* Section headers across screens. */
+      .bc-section-head {
+        display: flex; align-items: flex-end; gap: 18px;
+        margin-bottom: 26px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--bc-line);
+      }
+      .bc-section-head .num {
+        font-family: var(--bc-font-display);
+        font-size: 76px; line-height: 0.85;
+        color: var(--bc-cyan);
+        text-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+      }
+      .bc-section-head .title {
+        font-family: var(--bc-font-display);
+        font-size: 40px; letter-spacing: 0.06em;
+        color: var(--bc-ink);
+        line-height: 1;
+      }
+      .bc-section-head .sub {
+        font-size: 12px; letter-spacing: 0.24em;
+        color: var(--bc-ink-dim);
+        margin-top: 4px;
+      }
+      .bc-section-head .meta { margin-left: auto; text-align: right; }
+
+      /* Card grid. */
+      .bc-cards { display: grid; gap: 14px; }
+      .bc-cards.cols-2 { grid-template-columns: 1fr 1fr; }
+      .bc-cards.cols-3 { grid-template-columns: repeat(3, 1fr); }
+      .bc-cards.cols-auto { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+
+      .bc-card {
+        position: relative;
+        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+        border: 1px solid var(--bc-line);
+        padding: 20px 22px 18px;
+        cursor: pointer;
+        display: flex; flex-direction: column;
+        transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+        outline: none;
+      }
+      .bc-card::before {
+        content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+        background: var(--accent, var(--bc-cyan));
+        transition: width 0.12s ease, box-shadow 0.12s ease;
+      }
+      .bc-card:hover, .bc-card:focus-visible {
+        border-color: rgba(255, 255, 255, 0.32);
+        background: rgba(255, 255, 255, 0.06);
+        transform: translateX(2px);
+      }
+      .bc-card.selected {
+        border-color: var(--accent, var(--bc-cyan));
+        background: linear-gradient(135deg, rgba(0, 212, 255, 0.10), rgba(255,255,255,0.02));
+      }
+      .bc-card.selected::before {
+        width: 6px;
+        box-shadow: 0 0 18px var(--accent, var(--bc-cyan));
+      }
+      .bc-card .label {
+        font-family: var(--bc-font-display);
+        font-size: 11px; letter-spacing: 0.28em;
+        color: var(--bc-ink-dim);
+      }
+      .bc-card .name {
+        font-family: var(--bc-font-display);
+        font-size: 34px; letter-spacing: 0.04em;
+        color: var(--bc-ink);
+        margin: 4px 0 6px;
+        line-height: 1;
+      }
+      .bc-card .tag {
+        font-size: 13px; line-height: 1.45;
+        color: var(--bc-ink-dim);
+        margin-bottom: 14px;
+      }
+      .bc-card .stats {
+        margin-top: auto;
+        display: grid; gap: 5px;
+        font-family: var(--bc-font-mono);
+        font-size: 11px;
+        color: var(--bc-ink-dim);
+      }
+      .bc-card .stat-row { display: grid; grid-template-columns: 70px 1fr 32px; align-items: center; gap: 8px; }
+      .bc-card .stat-row .lbl { letter-spacing: 0.12em; opacity: 0.7; }
+      .bc-card .stat-row .bar { background: rgba(255,255,255,0.07); height: 4px; position: relative; }
+      .bc-card .stat-row .bar > i {
+        position: absolute; left: 0; top: 0; bottom: 0;
+        background: var(--accent, var(--bc-cyan));
+      }
+      .bc-card .stat-row .val { color: var(--bc-ink); font-variant-numeric: tabular-nums; text-align: right; }
+      .bc-card .record {
+        margin-top: 10px;
+        font-family: var(--bc-font-mono);
+        font-size: 11px;
+        color: var(--bc-yellow);
+        letter-spacing: 0.08em;
+      }
+      .bc-card .corner {
+        position: absolute; top: 10px; right: 10px;
+        font-family: var(--bc-font-display);
+        font-size: 11px; letter-spacing: 0.2em;
+        color: var(--bc-ink-dim);
+      }
+
+      /* Oversized mode cards (SINGLEPLAYER / MULTIPLAYER). */
+      .bc-mode-card {
+        position: relative;
+        min-height: 280px;
+        background:
+          linear-gradient(135deg, rgba(0,212,255,0.10), rgba(0,212,255,0) 60%),
+          rgba(255,255,255,0.02);
+        border: 1px solid var(--bc-line);
+        cursor: pointer;
+        padding: 28px 32px 24px;
+        display: flex; flex-direction: column; gap: 12px;
+        overflow: hidden;
+        transition: border-color 0.12s ease, transform 0.12s ease;
+      }
+      .bc-mode-card[data-mode='mp'] {
+        background:
+          linear-gradient(135deg, rgba(255, 90, 31, 0.12), rgba(255, 90, 31, 0) 60%),
+          rgba(255, 255, 255, 0.02);
+      }
+      .bc-mode-card:hover, .bc-mode-card:focus-visible {
+        border-color: rgba(255, 255, 255, 0.5);
+        transform: translateY(-2px);
+      }
+      .bc-mode-card .badge {
+        align-self: flex-start;
+        font-family: var(--bc-font-display);
+        font-size: 12px; letter-spacing: 0.22em;
+        padding: 4px 10px;
+        background: var(--bc-cyan); color: var(--bc-navy);
+      }
+      .bc-mode-card[data-mode='mp'] .badge {
+        background: var(--bc-orange); color: #fff;
+      }
+      .bc-mode-card .hd {
+        font-family: var(--bc-font-display);
+        font-size: clamp(48px, 5.6vw, 84px);
+        letter-spacing: 0.02em;
+        line-height: 0.95;
+      }
+      .bc-mode-card .desc {
+        font-size: 14px; line-height: 1.5;
+        color: var(--bc-ink-dim);
+        max-width: 38ch;
+      }
+      .bc-mode-card .stripe {
+        position: absolute; right: -60px; bottom: -60px;
+        width: 240px; height: 240px;
+        background: var(--bc-cyan);
+        opacity: 0.04;
+        transform: rotate(35deg);
+      }
+      .bc-mode-card[data-mode='mp'] .stripe { background: var(--bc-orange); opacity: 0.06; }
+
+      /* Generic input row (room entry form). */
+      .bc-form { display: flex; flex-direction: column; gap: 16px; max-width: 540px; margin: 0 auto; }
+      .bc-form label {
+        font-family: var(--bc-font-display);
+        font-size: 12px; letter-spacing: 0.2em;
+        color: var(--bc-ink-dim);
+      }
+      .bc-form input[type="text"] {
+        font-family: var(--bc-font-mono);
+        font-size: 18px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--bc-line);
+        color: var(--bc-ink);
+        padding: 12px 14px;
+        letter-spacing: 0.06em;
+        outline: none;
+        transition: border-color 0.12s ease;
+      }
+      .bc-form input[type="text"]:focus { border-color: var(--bc-cyan); }
+      .bc-form .hint {
+        font-size: 11px; color: var(--bc-ink-dim); letter-spacing: 0.1em;
+        font-family: var(--bc-font-mono);
+      }
+      .bc-form .row-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+      /* Lobby (2-column: slot grid + your controls). */
+      .bc-lobby {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 380px;
+        gap: 24px;
+        width: 100%;
+      }
+      @media (max-width: 980px) { .bc-lobby { grid-template-columns: 1fr; } }
+
+      .bc-slot-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        grid-auto-rows: 1fr;
+        gap: 10px;
+      }
+      @media (max-width: 720px) { .bc-slot-grid { grid-template-columns: repeat(2, 1fr); } }
+
+      .bc-slot {
+        position: relative;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid var(--bc-line);
+        padding: 12px 14px;
+        min-height: 130px;
+        display: flex; flex-direction: column; gap: 4px;
+        opacity: 0.45;
+        transition: opacity 0.12s, border-color 0.12s;
+      }
+      .bc-slot.filled { opacity: 1; }
+      .bc-slot.you {
+        border-color: var(--bc-cyan);
+        box-shadow: 0 0 18px rgba(0, 212, 255, 0.15);
+      }
+      .bc-slot .slot-id {
+        font-family: var(--bc-font-display);
+        font-size: 13px; letter-spacing: 0.18em; color: var(--bc-ink-dim);
+      }
+      .bc-slot.filled .slot-id { color: var(--bc-cyan); }
+      .bc-slot .slot-name {
+        font-family: var(--bc-font-display);
+        font-size: 22px; line-height: 1.05;
+      }
+      .bc-slot .slot-pick {
+        margin-top: 6px;
+        font-size: 11px; color: var(--bc-ink-dim);
+        font-family: var(--bc-font-mono);
+        letter-spacing: 0.06em;
+      }
+      .bc-slot .slot-pick b { color: var(--bc-ink); font-weight: 600; }
+      .bc-slot .slot-ready {
+        position: absolute; top: 8px; right: 8px;
+        font-family: var(--bc-font-display); font-size: 10px;
+        letter-spacing: 0.16em;
+        padding: 3px 7px;
+        background: rgba(255,255,255,0.06);
+        color: var(--bc-ink-dim);
+      }
+      .bc-slot.ready .slot-ready { background: var(--bc-green); color: var(--bc-navy); }
+
+      .bc-lobby-side {
+        display: flex; flex-direction: column; gap: 14px;
+        padding: 18px;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid var(--bc-line);
+        align-self: start;
+      }
+      .bc-lobby-side h3 {
+        margin: 0;
+        font-family: var(--bc-font-display);
+        letter-spacing: 0.18em;
+        font-size: 18px;
+        color: var(--bc-cyan);
+      }
+      .bc-lobby-side .sub {
+        font-size: 11px; color: var(--bc-ink-dim);
+        letter-spacing: 0.08em; font-family: var(--bc-font-mono);
+      }
+      .bc-pick {
+        display: grid; grid-template-columns: 60px 1fr auto; align-items: center; gap: 10px;
+        padding: 10px 12px;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid var(--bc-line);
+      }
+      .bc-pick .label { font-family: var(--bc-font-display); font-size: 11px; letter-spacing: 0.18em; color: var(--bc-ink-dim); }
+      .bc-pick .value { font-family: var(--bc-font-display); font-size: 18px; color: var(--bc-ink); }
+      .bc-pick .nav { display: flex; gap: 4px; }
+      .bc-pick .nav button {
+        background: rgba(255,255,255,0.06); border: 1px solid var(--bc-line);
+        color: var(--bc-ink); padding: 4px 10px; cursor: pointer;
+        font-family: var(--bc-font-mono); font-size: 12px;
+      }
+      .bc-pick .nav button:hover { background: rgba(255,255,255,0.12); }
+
+      .bc-lobby-room {
+        font-family: var(--bc-font-mono); font-size: 13px;
+        color: var(--bc-yellow);
+        background: rgba(255, 210, 0, 0.06);
+        padding: 10px 12px;
+        border: 1px dashed rgba(255, 210, 0, 0.3);
+        letter-spacing: 0.06em;
+        display: flex; flex-direction: column; gap: 4px;
+      }
+      .bc-lobby-room .copy-hint { color: var(--bc-ink-dim); font-size: 10px; letter-spacing: 0.14em; }
+      .bc-lobby-pickbanner {
+        display: none; padding: 14px;
+        font-family: var(--bc-font-display);
+        letter-spacing: 0.18em;
+        background: rgba(0, 212, 255, 0.10);
+        border: 1px solid var(--bc-cyan);
+        color: var(--bc-cyan);
+      }
+      .bc-lobby-pickbanner.show { display: block; }
+      .bc-lobby-pickbanner b { color: var(--bc-yellow); }
+
+      /* Action / button primitives. */
+      .bc-actions {
+        margin-top: 28px;
+        display: flex; gap: 14px; justify-content: space-between; align-items: center;
+      }
+      .bc-actions .left, .bc-actions .right { display: flex; gap: 10px; }
+      .bc-btn {
+        font-family: var(--bc-font-display);
+        font-size: 17px; letter-spacing: 0.16em;
+        padding: 12px 26px;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid var(--bc-line);
+        color: var(--bc-ink);
+        cursor: pointer;
+        transition: background 0.12s ease, filter 0.12s ease, color 0.12s ease;
+      }
+      .bc-btn:hover { background: rgba(255,255,255,0.12); }
+      .bc-btn:disabled { opacity: 0.45; cursor: default; }
+      .bc-btn.primary {
+        background: var(--bc-cyan);
+        color: var(--bc-navy);
+        border-color: var(--bc-cyan);
+        clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%);
+        padding-right: 36px;
+      }
+      .bc-btn.primary:hover { filter: brightness(1.12); }
+      .bc-btn.danger { color: var(--bc-red); }
+
+      .bc-link {
+        background: none; border: 0; color: var(--bc-ink-dim);
+        font-family: var(--bc-font-display);
+        font-size: 13px; letter-spacing: 0.2em;
+        padding: 6px 10px; cursor: pointer;
+      }
+      .bc-link:hover { color: var(--bc-ink); }
+
+      /* Bottom chyron — broadcast "next up" bar. */
+      .bc-chyron {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: stretch;
+        margin-top: auto;
+        border-top: 1px solid var(--bc-line);
+        background: linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.88));
+      }
+      .bc-chyron .tag {
+        font-family: var(--bc-font-display);
+        font-size: 17px; letter-spacing: 0.22em;
+        padding: 14px 22px;
+        background: var(--bc-orange);
+        color: #fff;
+        clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 50%, calc(100% - 16px) 100%, 0 100%);
+      }
+      .bc-chyron .text {
+        display: flex; align-items: center;
+        padding: 14px 24px;
+        font-size: 14px; letter-spacing: 0.08em;
+        color: var(--bc-ink);
+        font-family: var(--bc-font-display);
+      }
+      .bc-chyron .keys {
+        display: flex; align-items: center; gap: 8px;
+        padding: 14px 22px;
+        font-size: 11px; color: var(--bc-ink-dim);
+        letter-spacing: 0.1em;
+        font-family: var(--bc-font-mono);
+      }
+      .bc-key {
+        display: inline-block; padding: 3px 7px;
+        border: 1px solid var(--bc-line); border-radius: 2px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--bc-ink);
+      }
     </style>
   </head>
   <body>
@@ -308,20 +865,24 @@
     </div>
     <div id="finish">
       <div class="card">
+        <div class="ribbon" id="finish-ribbon">FINAL</div>
         <div class="title" id="finish-title">FINISH</div>
         <div class="sub" id="finish-sub">Lagoon Loop</div>
         <div class="stat">
-          Position: <b id="finish-pos">—</b><br />
-          Time: <b id="finish-time">—</b><br />
-          <span id="finish-best"></span>
+          <div class="row"><span class="lbl">POSITION</span><b id="finish-pos">—</b></div>
+          <div class="row"><span class="lbl">RACE TIME</span><b id="finish-time">—</b></div>
+          <div class="row"><span class="lbl">BEST LAP</span><b id="finish-best">—</b></div>
         </div>
         <div class="actions">
+          <button class="action primary" id="finish-next">NEXT RACE</button>
+          <button class="action" id="finish-retry">RETRY</button>
           <button class="action" id="finish-save-replay" style="display:none;">SAVE REPLAY</button>
+          <button class="action danger" id="finish-exit">EXIT TO MENU</button>
         </div>
-        <div class="hint">press R to race again</div>
+        <div class="hint">[ENTER] next race · [R] retry · [ESC] menu</div>
       </div>
     </div>
-    <button id="garage-toggle">GARAGE<span id="garage-best"></span></button>
+    <button id="garage-toggle" style="display:none;">GARAGE<span id="garage-best"></span></button>
     <button id="devsettings-toggle" title="Tune controller + camera sensitivity">DEV SETTINGS</button>
     <button id="water-debug-toggle" title="Tune wave + water shader values live">WATER</button>
     <div id="water-debug">
@@ -396,22 +957,28 @@
         </div>
       </div>
     </div>
-    <div id="garage">
-      <div class="card">
-        <h1>GARAGE</h1>
-        <div class="sub">Pick your bike and track. Best lap times below.</div>
-        <h2>BIKE</h2>
-        <div class="options" id="garage-bikes"></div>
-        <h2>TRACK</h2>
-        <div class="options" id="garage-tracks"></div>
-        <div class="actions">
-          <button class="action secondary" id="garage-cancel">CANCEL</button>
-          <button class="action secondary" id="garage-clear">CLEAR RECORDS</button>
-          <button class="action secondary" id="garage-load-replay">LOAD REPLAY</button>
-          <button class="action" id="garage-race">RACE</button>
+    <!-- Cold-boot menu — title → mode → track → bike (SP) or room entry → lobby (MP). -->
+    <div id="menu">
+      <header class="bc-header">
+        <div class="bc-brand">
+          <span class="bar"></span>
+          <span class="name">HOVERBIKE</span>
+          <span class="live">LIVE</span>
         </div>
-        <input id="garage-replay-input" type="file" accept=".replay,application/json" style="display:none;" />
+        <nav class="bc-crumbs" id="menu-crumbs"></nav>
+        <div class="bc-clock" id="menu-clock">--:--</div>
+      </header>
+      <div class="bc-stage" id="menu-stage">
+        <!-- Screens are injected by src/engine/menus/* and only one is .show at a time. -->
       </div>
+      <footer class="bc-chyron">
+        <div class="tag" id="menu-chyron-tag">NEXT UP</div>
+        <div class="text" id="menu-chyron-text">Press a button to begin.</div>
+        <div class="keys" id="menu-chyron-keys">
+          <span class="bc-key">ENTER</span><span>select</span>
+          <span class="bc-key">ESC</span><span>back</span>
+        </div>
+      </footer>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
