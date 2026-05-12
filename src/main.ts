@@ -1,5 +1,6 @@
 import { addComponent, hasComponent, query, removeComponent, removeEntity } from 'bitecs'
 import * as THREE from 'three'
+import { hideLoadingScreen, setLoadingMessage } from './boot/loading-screen'
 import { spawnBikes } from './boot/spawn-bikes'
 import { loadTrackForBoot } from './boot/track-loader'
 import { downloadReplay, formatTime, ordinal } from './boot/utils'
@@ -130,9 +131,11 @@ async function boot() {
   const earlyParams = new URLSearchParams(window.location.search)
   const viewerParam = earlyParams.get('viewer')
   if (viewerParam !== null) {
+    setLoadingMessage('Loading bike viewer…')
     const { bootBikeViewer } = await import('./viewer/bike-viewer')
     const bikeId = viewerParam === '1' || viewerParam === '' ? null : viewerParam
     await bootBikeViewer(appEl, { bikeId })
+    hideLoadingScreen()
     return
   }
 
@@ -154,8 +157,10 @@ async function boot() {
   ]
   const hasGameSignal = GAME_SIGNALS.some((k) => earlyParams.has(k))
   if (!hasGameSignal) {
+    setLoadingMessage('Loading manifest…')
     const manifest = await loadManifest()
     const reason = earlyParams.get('back') === '1' ? 'exit-from-race' : 'cold'
+    hideLoadingScreen()
     const result = await runMenuFlow({
       manifestTracks: manifest.tracks,
       reason,
@@ -170,12 +175,14 @@ async function boot() {
   // whose `hello` arrives with `raceStarted` skip the lobby and
   // navigate straight into the active race.
   if (earlyParams.has('room') && !earlyParams.has('race')) {
+    setLoadingMessage('Loading lobby…')
     const manifest = await loadManifest()
     const PROD_PARTY_HOST_LOBBY = 'hoverbike.occ-matt.partykit.dev'
     const netHost =
       earlyParams.get('host') ?? (import.meta.env.DEV ? 'localhost:1999' : PROD_PARTY_HOST_LOBBY)
     const bikeParam = earlyParams.get('bike')
     const trackParam = earlyParams.get('track')
+    hideLoadingScreen()
     const result = await runMpLobby({
       roomId: earlyParams.get('room')!,
       netHost,
@@ -300,6 +307,7 @@ async function boot() {
   // prop GLB lookups + (via the cold-boot menu) the track picker. The
   // legacy garage overlay was replaced by the menu flow; tracks come
   // from URL params now, with sensible defaults.
+  setLoadingMessage('Loading manifest…')
   const manifest = await loadManifest()
 
   // Apply any persisted water tuning eagerly, so the page opens in the
@@ -331,6 +339,7 @@ async function boot() {
   // Track terrain + data. See `src/boot/track-loader.ts` — handles
   // procedural tracks, JSON tracks, GLB tracks, and the empty-draft
   // fallback for editor on a fresh id.
+  setLoadingMessage(`Loading track${trackId ? ` · ${trackId}` : '…'}`)
   const track = await loadTrackForBoot({ trackId, scene, phys, editMode })
 
   // Sky / atmosphere system. Owns the dome mesh, fog + hemi-light palette,
@@ -374,6 +383,7 @@ async function boot() {
       editor.tick()
       requestAnimationFrame(editFrame)
     }
+    hideLoadingScreen()
     requestAnimationFrame(editFrame)
     return
   }
@@ -389,6 +399,7 @@ async function boot() {
   }
   const propAssets = new Map<string, LoadedProp>()
   if (assetIds.size > 0) {
+    setLoadingMessage(`Loading props · ${assetIds.size}`)
     const loaded = await Promise.all(
       [...assetIds].map(async (id) => {
         try {
@@ -417,6 +428,7 @@ async function boot() {
   // racer baseline (used by AI bikes, and as the fallback if the
   // player's variant fetch fails). The cache in bike-loader dedupes
   // when the player's variant already is the racer.
+  setLoadingMessage('Loading bikes…')
   const [playerBikeGlb, racerBikeGlb] = await Promise.all([
     loadBike(`/assets/bikes/${playerVariant.id}.glb`),
     loadBike('/assets/bikes/racer.glb'),
@@ -1733,15 +1745,18 @@ async function boot() {
       requestAnimationFrame(replayFrame)
     }
     state.ready = true
+    hideLoadingScreen()
     requestAnimationFrame(replayFrame)
     return
   }
 
   state.ready = true
+  hideLoadingScreen()
   requestAnimationFrame(frame)
 }
 boot().catch((err) => {
   console.error('[boot] fatal', err)
   const el = document.getElementById('hud-backend')
   if (el) el.textContent = `boot failed: ${String(err)}`
+  setLoadingMessage(`Boot failed · ${String(err)}`)
 })
