@@ -107,19 +107,41 @@ and [blender-conventions.md](./blender-conventions.md).
   an addon UX picker that wires `Collection Info → Instance on Points`
   templates, and a vitest fixture .glb that pins the round-trip.
 
-- **Item 3 partial — Turn-indicator preview (2026-05-11).** New
-  "Rebuild Turn Indicators" / "Hide Turn Indicators" buttons in the
-  addon panel. Samples signed curvature along `ai_spline_main`,
-  finds local maxima above `|κ|` threshold (default 0.02 1/m ≈ 50m
-  radius — matches the stadium-track corner radius), collapses
-  neighbours within 20m, and places chevron-shaped arrow gizmos
-  pointing in the bend direction. Live-verified on test-custom-
-  track: 3 indicators at the canonical tight corners.
+- **Item 3 — Procedural props library (2026-05-11).**
+  `tracks-src/props-library.blend` built deterministically by
+  [`tools/blender/seed_props_library.py`](../tools/blender/seed_props_library.py).
+  Five prop collections — rocks, palms, buoys, gates, turn indicators
+  — each marked as a Blender Asset under the `Hoverbike/Track Props`
+  catalogue (catalogue file: `tracks-src/blender_assets.cats.txt`).
+  Authors register `tracks-src/` as an asset library once, then drag
+  props into any track .blend as Collection Instances. Rocks and palms
+  carry GN modifiers (`HV_Prop_Rock`, `HV_Prop_Palm`) so size /
+  jaggedness / scale stay tunable per-instance; buoys / gates /
+  indicators ship as static mesh assets. Every mesh stamps `COLOR_0`
+  per the Item 6 vertex-attribute spec; the palm uses the foliage
+  channel (linear sway gradient `R=0` at trunk base → `R=1` at leaf
+  tips) so the runtime sway shader animates the fronds via
+  `mat_foliage_palm`. Every collection carries
+  `scatter_source = True` so Item 4's scatter graphs can list them as
+  Collection-Info sources. Headless seed verified — all 5 collections
+  asset-marked with right metadata, all meshes carry `COLOR_0`, GN
+  modifiers evaluate to expected bounds (rock ≈ ±1.3m, palm = 4.8m
+  tall, gate = ±14.35m × 6m). Authoring guide:
+  [`blender-pipeline-guide.md`](./blender-pipeline-guide.md#procedural-props-library-item-3).
 
-  This is the fully-scriptable sub-piece of Item 3. The remaining
-  props (rocks, palms, buoys, gates as real meshes) all require
-  in-Blender GUI work for aesthetics and are left as a fresh-
-  session deliberate piece — scaffolding (Items 4 + 6) is ready.
+  Earlier turn-indicator partial (2026-05-11): "Rebuild Turn
+  Indicators" / "Hide Turn Indicators" buttons in the addon panel
+  remain the canonical placement — they sample signed curvature along
+  `ai_spline_main`, find local maxima above `|κ|` threshold
+  (default 0.02 1/m ≈ 50m radius), collapse neighbours within 20m, and
+  place chevrons pointing in the bend direction. The library's static
+  chevron is for fixed-position author use.
+
+  Deferred to in-Blender GUI iteration (same caveat as Item 1): real
+  PBR materials, sculpted rock silhouettes, palm-leaf textures,
+  per-prop preview thumbnails. Buoy bobbing is a runtime concern
+  (water shader handles flotsam) — the buoy asset is intentionally
+  static.
 
 - **Water-preview orientation fix (2026-05-11).** Caught the day
   Item 5 shipped: the runtime wave-field uses Y-up (Three.js)
@@ -214,7 +236,7 @@ Cleanest scope, biggest iteration-loop improvement. Each side is a
 self-contained change; the algorithm is small enough to live in one
 shared spec doc. Claude is confident here.
 
-## Item 3 — Geometry-Nodes-based props
+## Item 3 — Geometry-Nodes-based props ✅ Shipped 2026-05-11
 
 A `tracks-src/props-library.blend` that registers reusable props as Blender
 Assets, browsable from any track `.blend` via the Asset Browser. Wanted
@@ -448,13 +470,14 @@ or fix in the current authoring loop:
    / pickups / starts / boost pads, max & min terrain y, water
    coverage %. Catches authoring mistakes ("track is 87 m long")
    before the export.
-4. **Item 3 props library — rocks + palms + buoys, finally.** Items 3
-   and 4 (props + scatter) are still the biggest single visual upgrade
-   left in the pipeline. With Item 6's vertex-attribute spec settled
-   and Item 4's scatter round-trip already verified, the remaining
-   work is *building* the prop GN groups in `tracks-src/props-library.blend`.
-   Buoy bobbing animation hooks into the same Gerstner wave field the
-   water shader uses (`src/engine/sim/water/wave-field.ts`).
+4. **~~Item 3 props library — rocks + palms + buoys, finally.~~**
+   Shipped 2026-05-11. `tracks-src/props-library.blend` produced by
+   `tools/blender/seed_props_library.py`, five collections marked as
+   Blender Assets under the `Hoverbike/Track Props` catalogue. The
+   *aesthetic* polish (real PBR materials, sculpted silhouettes, palm
+   leaf textures, preview thumbnails) is still the biggest visual
+   upgrade left and benefits from in-Blender GUI iteration on the
+   shipped scaffold rather than further scripting.
 5. **Real-time runtime-shader-match in Blender preview.** The Blender
    `mat_terrain_main` shader was tuned to match the *intended* runtime
    look; the actual runtime shader I shipped today is close but not
