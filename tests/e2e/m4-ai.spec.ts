@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 test.describe('M4 AI', () => {
   test('AI bikes spawn and move forward from spawn under their own control', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => (window.__hover?.bikes().length ?? 0) > 1, {
       timeout: 10000,
     })
@@ -39,7 +39,7 @@ test.describe('M4 AI', () => {
   })
 
   test('standings include all racers (player + AI)', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => (window.__hover?.standings().length ?? 0) >= 5, {
       timeout: 10000,
     })

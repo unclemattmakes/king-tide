@@ -8,7 +8,7 @@ test.describe('M1 driving', () => {
       if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`)
     })
 
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => window.__hover?.ready === true, { timeout: 10000 })
 
     // Wait for the bike to spawn and reach hover height (~1.2m).
@@ -62,7 +62,7 @@ test.describe('M1 driving', () => {
   })
 
   test('steering produces yaw', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
       timeout: 10000,
     })

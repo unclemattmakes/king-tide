@@ -129,7 +129,7 @@ async function runScenario(
 test('air control: pitch-vectored thrust + hang-time work as designed', async ({ page }) => {
   // Three scenarios × 3 trials each; bump default 30s timeout.
   test.setTimeout(120000)
-  await page.goto('/')
+  await page.goto('/?autostart=1')
   await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
     timeout: 10000,
   })

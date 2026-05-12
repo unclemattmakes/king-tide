@@ -1,12 +1,4 @@
 import { addComponent, hasComponent, query, removeComponent, removeEntity } from 'bitecs'
-import { isHostFor } from './engine/net/host-election'
-import {
-  encodeTransformSnapshotInto,
-  snapshotByteLength,
-  type BikeSnapshotRecord,
-  type TransformSnapshot,
-} from './engine/net/transform-snapshot'
-import { applySnapshot } from './game/systems/apply-snapshot'
 import * as THREE from 'three'
 import { spawnBikes } from './boot/spawn-bikes'
 import { loadTrackForBoot } from './boot/track-loader'
@@ -15,7 +7,7 @@ import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug
 import { createAudioEngine } from './engine/audio/audio'
 import { loadDevSettings } from './engine/dev-settings'
 import { installTrackEditor } from './engine/editor/track-editor'
-import { formatLap, installGarageMenu } from './engine/garage'
+import { formatLap } from './engine/garage'
 import {
   emptyIntent,
   type Intent,
@@ -25,6 +17,10 @@ import {
 } from './engine/input'
 import { installCameraLookInput, tickCameraLook } from './engine/input/camera-look'
 import { bindLazyMenuButton } from './engine/lazy-menu'
+import { buildTrackList, nextTrackId } from './engine/menus/catalog'
+import { runMenuFlow } from './engine/menus/menu-flow'
+import { runMpLobby } from './engine/menus/mp-lobby'
+import { isHostFor } from './engine/net/host-election'
 import {
   decodeInputFrameFrom,
   encodeInputFrameInto,
@@ -32,6 +28,12 @@ import {
   type InputFrame,
 } from './engine/net/input-frame'
 import { createNetRoom, type NetRoom } from './engine/net/room'
+import {
+  type BikeSnapshotRecord,
+  encodeTransformSnapshotInto,
+  snapshotByteLength,
+  type TransformSnapshot,
+} from './engine/net/transform-snapshot'
 import { createChaseCamera } from './engine/render/camera'
 import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
@@ -40,7 +42,6 @@ import { createPhysicsDebugRenderer } from './engine/render/physics-debug'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
 import { createRaceHud } from './engine/render/race-hud'
-import { installLobbyOverlay } from './engine/render/lobby-overlay'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
 import { createScene } from './engine/render/scene'
@@ -76,6 +77,7 @@ import { createBike } from './game/entities/bike'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
 import { createPropColliders } from './game/entities/props'
 import { simulateStep } from './game/sim-step'
+import { applySnapshot } from './game/systems/apply-snapshot'
 import { getHeldPickup } from './game/systems/pickup'
 import { createRaceSystem } from './game/systems/race'
 import { computeStandings } from './game/systems/standings'
@@ -129,6 +131,57 @@ async function boot() {
     return
   }
 
+  // Cold-boot menu flow — sports-broadcast styled title → mode → track
+  // → bike (single-player) or → room (multiplayer). The menu only runs
+  // when no game-mode URL param is present, so deep links + tests with
+  // `?autostart=1` (or `?race=1`, `?track=`, `?room=`, etc.) skip
+  // straight into boot. Hitting the title resolves with a fully-formed
+  // race URL; we navigate and let the page reload pick it up.
+  const GAME_SIGNALS = [
+    'race',
+    'autostart',
+    'track',
+    'bike',
+    'room',
+    'edit',
+    'replay',
+    'determinism',
+  ]
+  const hasGameSignal = GAME_SIGNALS.some((k) => earlyParams.has(k))
+  if (!hasGameSignal) {
+    const manifest = await loadManifest()
+    const reason = earlyParams.get('back') === '1' ? 'exit-from-race' : 'cold'
+    const result = await runMenuFlow({
+      manifestTracks: manifest.tracks,
+      reason,
+    })
+    window.location.assign(result.href)
+    return
+  }
+
+  // Multiplayer lobby phase: `?room=<id>` without `race=1` shows the
+  // lobby overlay (per-player bike + track picks + smash-bros vote)
+  // and resolves with the race URL once everyone's ready. Late joiners
+  // whose `hello` arrives with `raceStarted` skip the lobby and
+  // navigate straight into the active race.
+  if (earlyParams.has('room') && !earlyParams.has('race')) {
+    const manifest = await loadManifest()
+    const PROD_PARTY_HOST_LOBBY = 'hoverbike.occ-matt.partykit.dev'
+    const netHost =
+      earlyParams.get('host') ?? (import.meta.env.DEV ? 'localhost:1999' : PROD_PARTY_HOST_LOBBY)
+    const bikeParam = earlyParams.get('bike')
+    const trackParam = earlyParams.get('track')
+    const result = await runMpLobby({
+      roomId: earlyParams.get('room')!,
+      netHost,
+      manifestTracks: manifest.tracks,
+      ...(bikeParam ? { initialBikeId: bikeParam as 'cruiser' | 'racer' | 'stunt' } : {}),
+      ...(trackParam ? { initialTrackId: trackParam } : {}),
+    })
+    window.location.assign(result.href)
+    return
+  }
+
   const fpsEl = document.getElementById('hud-fps')
   const backendEl = document.getElementById('hud-backend')
   const inputEl = document.getElementById('hud-input')
@@ -176,8 +229,7 @@ async function boot() {
   // bikes safely (M10.7).
   const PROD_PARTY_HOST = 'hoverbike.occ-matt.partykit.dev'
   const roomId = params.get('room')
-  const netHost =
-    params.get('host') ?? (import.meta.env.DEV ? 'localhost:1999' : PROD_PARTY_HOST)
+  const netHost = params.get('host') ?? (import.meta.env.DEV ? 'localhost:1999' : PROD_PARTY_HOST)
   const recentRemoteFrames: InputFrame[] = []
   let net: NetRoom | null = null
 
@@ -239,16 +291,11 @@ async function boot() {
     ? resolveBikeVariant(activeReplay.bikes[0]?.variantId ?? null)
     : resolveBikeVariant(params.get('bike'))
 
-  // Asset manifest — generated by `pnpm gen:all`. Fed to the garage
-  // menu so spec-driven tracks land in the picker without code changes.
+  // Asset manifest — generated by `pnpm gen:all`. Used downstream for
+  // prop GLB lookups + (via the cold-boot menu) the track picker. The
+  // legacy garage overlay was replaced by the menu flow; tracks come
+  // from URL params now, with sensible defaults.
   const manifest = await loadManifest()
-
-  // Garage menu — DOM overlay opened from a HUD button.
-  installGarageMenu({
-    initialTrackId: trackId,
-    initialBikeId: playerVariant.id,
-    manifestTracks: manifest.tracks,
-  })
 
   // Apply any persisted water tuning eagerly, so the page opens in the
   // visual state the user last left. The tuning sliders themselves —
@@ -511,62 +558,10 @@ async function boot() {
     return remoteEids.get(record.ownerPeerId) ?? null
   }
 
-  // M10.12 — lobby overlay. Created lazily when a room exists. Shows
-  // peer list + ready indicators + a big "READY" / "NOT READY" button.
-  // Auto-hides once `raceHud.armCountdown()` fires (all peers ready, or
-  // a `start-race` arrives from the server, or we joined an already-
-  // running race via the `raceStarted` flag in `hello`). Declared
-  // BEFORE the net config below so the `onConnected` callback can
-  // safely reference `lobby` / `refreshLobbyView` / `armRace` etc.
-  const lobby = roomId !== null ? installLobbyOverlay({ roomId }) : null
-  let localReady = false
-  let raceArmed = false
-  function armRace(): void {
-    if (raceArmed) return
-    raceArmed = true
-    // `raceHud` is declared further below as a `const`. armRace is only
-    // ever called from network callbacks (which fire after boot's
-    // synchronous body completes) or from the keydown handler (which
-    // fires after first frame), so the binding is initialised by then.
-    raceHud.armCountdown()
-    lobby?.hide()
-  }
-  function tryArmFromLobby(): void {
-    if (raceArmed) return
-    if (!net?.ready) return
-    // All visible peers (us + remotes) must be ready, and there must
-    // be at least one (so a peer alone in the room can still solo).
-    const ready = net.latestPeerReady
-    if (ready.size === 0) return
-    for (const v of ready.values()) if (!v) return
-    armRace()
-    // Tell the server so any future late-joiners arm immediately on
-    // hello, AND so other peers whose local view hasn't yet observed
-    // all-ready (network reorder) catch up.
-    net.sendStartRace()
-  }
-  function toggleLocalReady(): void {
-    if (raceArmed) return
-    if (!net) return
-    localReady = !localReady
-    net.sendReady(localReady)
-    refreshLobbyView()
-    tryArmFromLobby()
-  }
-  function refreshLobbyView(): void {
-    if (!lobby || !net) return
-    const myId = net.peerId
-    const peers: { peerId: number; ready: boolean; isYou: boolean }[] = []
-    for (const [pid, r] of net.latestPeerReady) {
-      peers.push({ peerId: pid, ready: r, isYou: pid === myId })
-    }
-    peers.sort((a, b) => a.peerId - b.peerId)
-    lobby.render({ peers, localReady, connecting: !net.ready })
-  }
-  if (lobby) {
-    ;(lobby as unknown as { onToggle: () => void }).onToggle = toggleLocalReady
-  }
-
+  // Lobby phase has already concluded by the time we reach this code
+  // path (see runMpLobby in src/engine/menus/mp-lobby.ts). A `?room=`
+  // here means we're entering the race itself, so the countdown
+  // auto-starts and the race HUD is built without `deferStart`.
   if (roomId) {
     renderRoomChip()
     net = createNetRoom({
@@ -587,20 +582,15 @@ async function boot() {
           // Apply only the player record(s); skip AI records.
           const playerRecords = snap.bikes.filter((b) => b.bikeKind === 0)
           if (playerRecords.length > 0) {
-            applySnapshot(
-              sim,
-              phys,
-              { ...snap, bikes: playerRecords },
-              snapshotLookup,
-            )
+            applySnapshot(sim, phys, { ...snap, bikes: playerRecords }, snapshotLookup)
           }
           return
         }
         applySnapshot(sim, phys, snap, snapshotLookup)
       },
-      onConnected: (peerId, others, raceStarted) => {
+      onConnected: (peerId, others, _raceStarted) => {
         console.log(
-          `[net] joined room "${roomId}" as peer ${peerId}, others: [${others.join(', ')}], raceStarted: ${raceStarted}`,
+          `[net] joined room "${roomId}" as peer ${peerId}, others: [${others.join(', ')}]`,
         )
         // The local player bike was spawned with the placeholder slot 0
         // (correct for single-player). Now that the relay has assigned our
@@ -613,35 +603,18 @@ async function boot() {
         for (const p of others) spawnRemoteBike(p)
         applyHostRole(isHostFor(peerId, others))
         renderRoomChip()
-        // M10.12 — if joining a race already in progress, arm
-        // immediately. Otherwise the lobby UI is now valid; render it.
-        if (raceStarted) armRace()
-        else refreshLobbyView()
       },
       onPeerJoined: (peerId) => {
         console.log(`[net] peer ${peerId} joined`)
         spawnRemoteBike(peerId)
         if (net) applyHostRole(isHostFor(net.peerId, net.remotePeers))
         renderRoomChip()
-        refreshLobbyView()
       },
       onPeerLeft: (peerId) => {
         console.log(`[net] peer ${peerId} left`)
         despawnRemoteBike(peerId)
         if (net) applyHostRole(isHostFor(net.peerId, net.remotePeers))
         renderRoomChip()
-        refreshLobbyView()
-        // Their departure may have flipped "all ready" true — try.
-        tryArmFromLobby()
-      },
-      onPeerReady: (peerId, ready) => {
-        console.log(`[net] peer ${peerId} ready: ${ready}`)
-        refreshLobbyView()
-        tryArmFromLobby()
-      },
-      onStartRace: () => {
-        console.log('[net] start-race received')
-        armRace()
       },
       onRoomFull: () => {
         console.warn(`[net] room "${roomId}" is full`)
@@ -652,9 +625,6 @@ async function boot() {
         }
       },
     })
-    // Initial lobby render (pre-connect placeholder). The chip + overlay
-    // will update again when `hello` arrives.
-    refreshLobbyView()
   }
 
   // Mark the initial "next" gate (cp 0). After the first frame the race
@@ -668,9 +638,11 @@ async function boot() {
       if (n === 0) audio.lapCompleted()
       else audio.gateCleared()
     },
-    // M10.12 lobby — hold the countdown until everyone in the room has
-    // ready'd up. Single-player + e2e (no `?room=`) keep auto-start.
-    deferStart: roomId !== null,
+    // The lobby phase concludes before we reach this code, so the
+    // countdown can auto-start for both single-player and multiplayer
+    // race entry. Late joiners drop in mid-race; their countdown is
+    // skipped further down via raceHud.skipCountdown() once a remote
+    // race state is detected.
   })
 
   const raceTick = createRaceSystem(track, {
@@ -891,6 +863,35 @@ async function boot() {
     }
   }
 
+  // Finish-screen actions. NEXT advances to the next track in the
+  // catalogue rotation (wrapping); RETRY reloads the same combo; EXIT
+  // navigates to a bare URL so boot re-enters the menu flow. All three
+  // do a full page reload — boot is cheap (< 500ms) and a reload keeps
+  // the asset/physics teardown story trivial.
+  function buildRaceUrl(args: { trackId: string; bikeId: string }): string {
+    const url = new URL(window.location.href)
+    url.search = ''
+    if (roomId) url.searchParams.set('room', roomId)
+    url.searchParams.set('race', '1')
+    url.searchParams.set('track', args.trackId)
+    url.searchParams.set('bike', args.bikeId)
+    return url.toString()
+  }
+  function goToNextRace(): void {
+    const tracksList = buildTrackList(manifest.tracks)
+    const nextId = nextTrackId(tracksList, trackId)
+    window.location.assign(buildRaceUrl({ trackId: nextId, bikeId: playerVariant.id }))
+  }
+  function retryRace(): void {
+    window.location.assign(buildRaceUrl({ trackId, bikeId: playerVariant.id }))
+  }
+  function exitToMenu(): void {
+    const url = new URL(window.location.href)
+    url.search = ''
+    url.searchParams.set('back', '1')
+    window.location.assign(url.toString())
+  }
+
   /** Snap the player back to the spawn pose with zero velocity. Useful after
    *  collisions leave the bike upside-down, off-track, or unrecoverable. */
   function respawnPlayer() {
@@ -908,20 +909,23 @@ async function boot() {
     rb.setAngvel({ x: 0, y: 0, z: 0 }, true)
   }
 
-  // Keys: R to restart after finish; T (or F1) to toggle auto-play;
-  // F2 to toggle collision debug overlay; Backspace to respawn.
+  // Keys: R to retry, Enter to advance to NEXT RACE, Esc to bail to
+  // the menu. The finish-screen DOM buttons mirror these. Out of the
+  // finish overlay, R/Enter are no-ops so they don't restart by accident.
   window.addEventListener('keydown', (e) => {
-    // M10.12 lobby — Enter toggles local ready while the lobby is
-    // visible. Captured before other shortcuts so it doesn't conflict
-    // with menu/finish-screen handlers that might also listen for
-    // Enter in the future.
-    if (lobby?.isShown() && (e.code === 'Enter' || e.code === 'NumpadEnter')) {
-      toggleLocalReady()
+    if (finishShown && (e.code === 'Enter' || e.code === 'NumpadEnter')) {
+      goToNextRace()
+      e.preventDefault()
+      return
+    }
+    if (finishShown && e.code === 'Escape') {
+      exitToMenu()
       e.preventDefault()
       return
     }
     if (e.code === 'KeyR' && finishShown) {
-      window.location.reload()
+      retryRace()
+      e.preventDefault()
     } else if (e.code === 'KeyT' || e.code === 'F1') {
       setAutoPlay(!autoPlay)
     } else if (e.code === 'F2') {
@@ -1333,26 +1337,27 @@ async function boot() {
         if (rs.finished && !finishShown && finishEl) {
           finishShown = true
           finishEl.classList.add('show')
+          const finishRibbon = document.getElementById('finish-ribbon')
           if (finishPos && meStanding) finishPos.textContent = ordinal(meStanding.position)
           if (finishTime) finishTime.textContent = formatTime(rs.raceTime)
-          if (finishTitle)
-            finishTitle.textContent = meStanding?.position === 1 ? 'WINNER' : 'FINISH'
-          if (finishSub) finishSub.textContent = `${track.name} · ${playerVariant.name}`
+          const wonRace = meStanding?.position === 1
+          if (finishTitle) finishTitle.textContent = wonRace ? 'CHAMPION' : 'FINAL'
+          if (finishRibbon) finishRibbon.textContent = wonRace ? 'WINNER' : 'FINAL'
+          if (finishSub)
+            finishSub.textContent = `${track.name.toUpperCase()} · ${playerVariant.name.toUpperCase()}`
           if (finishBest) {
             const parts: string[] = []
             if (bestLapThisRace !== null) {
-              parts.push(`Best lap: <b>${formatLap(bestLapThisRace)}</b>`)
+              parts.push(`${formatLap(bestLapThisRace)} (race)`)
             }
             if (bestLapAllTime !== null) {
-              parts.push(`All-time: <b>${formatLap(bestLapAllTime)}</b>`)
+              parts.push(`<span class="best">${formatLap(bestLapAllTime)} (PB)</span>`)
             }
-            finishBest.innerHTML = parts.length ? `<br />${parts.join(' · ')}` : ''
+            finishBest.innerHTML = parts.length ? parts.join(' · ') : '—'
           }
-          // Wire the Save Replay button. The recorder has been capturing
-          // throughout the race; finalize it now and offer a download.
-          // Hidden if no recorder (e.g., this branch was reached via
-          // replay-playback, which can't happen because we don't drive the
-          // race finish event in that path — but guard anyway).
+          // Save-replay button: finalize the recorder once and offer
+          // a download. Hidden if no recorder (e.g., replay-playback
+          // branch — guarded just in case).
           const saveBtn = document.getElementById('finish-save-replay') as HTMLButtonElement | null
           if (saveBtn && recorder) {
             const replay = recorder.finalize({
@@ -1362,13 +1367,24 @@ async function boot() {
             })
             saveBtn.style.display = 'inline-block'
             saveBtn.disabled = false
-            saveBtn.textContent = 'SAVE REPLAY'
+            saveBtn.textContent = 'WATCH REPLAY'
             saveBtn.onclick = () => {
               downloadReplay(replay)
               saveBtn.textContent = 'SAVED ✓'
               saveBtn.disabled = true
             }
           }
+          // Action buttons: NEXT (default), RETRY, EXIT. The replay
+          // button is the existing save-replay element above.
+          const nextBtn = document.getElementById('finish-next') as HTMLButtonElement | null
+          const retryBtn = document.getElementById('finish-retry') as HTMLButtonElement | null
+          const exitBtn = document.getElementById('finish-exit') as HTMLButtonElement | null
+          if (nextBtn) {
+            nextBtn.onclick = goToNextRace
+            nextBtn.focus({ preventScroll: true })
+          }
+          if (retryBtn) retryBtn.onclick = retryRace
+          if (exitBtn) exitBtn.onclick = exitToMenu
         }
       }
     }

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 test.describe('M3 race', () => {
   test('lap counter starts at 1, advances after crossing all checkpoints', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => !!window.__hover && window.__hover.race() !== null, {
       timeout: 10000,
     })
@@ -19,7 +19,7 @@ test.describe('M3 race', () => {
   test('crossing the start gate advances to next checkpoint without incrementing lap', async ({
     page,
   }) => {
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => !!window.__hover && window.__hover.race() !== null, {
       timeout: 10000,
     })
@@ -49,7 +49,7 @@ test.describe('M3 race', () => {
   })
 
   test('checkpoints not in front are not counted', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => !!window.__hover && window.__hover.race() !== null, {
       timeout: 10000,
     })

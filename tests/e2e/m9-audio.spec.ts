@@ -16,7 +16,7 @@ test('audio HUD + M-key mute toggle, no errors at boot', async ({ page }) => {
     if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`)
   })
 
-  await page.goto('/')
+  await page.goto('/?autostart=1')
   await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
     timeout: 10000,
   })

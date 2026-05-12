@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 test.describe('M5 combat', () => {
   test('shield pickup: fire while holding shield arms the bubble', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
       timeout: 10000,
     })
@@ -30,7 +30,7 @@ test.describe('M5 combat', () => {
   })
 
   test('mine pickup: fire drops a mine sim entity', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
       timeout: 10000,
     })
@@ -56,7 +56,7 @@ test.describe('M5 combat', () => {
   })
 
   test('missile pickup: fire spawns a missile sim entity', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
       timeout: 10000,
     })
@@ -82,7 +82,7 @@ test.describe('M5 combat', () => {
   })
 
   test('shield absorbs missile hit', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/?autostart=1')
     await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
       timeout: 10000,
     })

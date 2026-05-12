@@ -8,7 +8,7 @@ import { expect, test } from '@playwright/test'
  * line-shape preconditions needed).
  */
 test('AI fires shield within a few seconds of being handed one', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/?autostart=1')
   await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
     timeout: 10000,
   })
