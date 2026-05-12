@@ -154,8 +154,14 @@ export type SkyDeps = {
   renderer: THREE.WebGLRenderer
   sun: THREE.DirectionalLight
   hemi: THREE.HemisphereLight
-  /** Optional consumer kept in sync with the sun direction. */
-  water?: { setSunDirection(x: number, y: number, z: number): void } | undefined
+  /** Optional consumer kept in sync with the sun direction and the
+   *  current palette horizon color. Both are pushed every tick. */
+  water?:
+    | {
+        setSunDirection(x: number, y: number, z: number): void
+        setHorizonColor(r: number, g: number, b: number): void
+      }
+    | undefined
   /** Per-track overrides. */
   config?: SkyConfig | undefined
 }
@@ -423,7 +429,15 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
       sun.intensity = baseSunIntensity * scratch.sunMul * cfg.sunIntensity
     }
 
-    if (water) water.setSunDirection(dirX, dirY, dirZ)
+    if (water) {
+      water.setSunDirection(dirX, dirY, dirZ)
+      // Hand the current palette horizon color to the water shader so the
+      // aerial-perspective haze on distant water tracks the sky's mood
+      // (sunset warmth, dawn pink, twilight blue, midday teal) instead of
+      // sitting on a fixed cool tone. Same color the scene fog uses, so
+      // distant water and the sky behind it stay tonally aligned.
+      water.setHorizonColor(scratch.horizon.r, scratch.horizon.g, scratch.horizon.b)
+    }
 
     // ── Periodic PMREM bake ──────────────────────────────────────────────
     pmremAccum += dt

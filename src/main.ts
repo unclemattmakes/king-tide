@@ -46,7 +46,7 @@ import { createRenderer } from './engine/render/renderer'
 import { createScene } from './engine/render/scene'
 import { createSkySystem } from './engine/render/sky'
 import { createTrackVisuals } from './engine/render/track-mesh'
-import { type BikeImpact, createWaterMesh } from './engine/render/water'
+import { type BikeImpact, createWaterMesh, updateUnderwaterFog } from './engine/render/water'
 import { parseReplay, type ReplayBike, type ReplayFile } from './engine/replay/format'
 import { createReplayPlayer, makePoseBuffer } from './engine/replay/player'
 import { createReplayRecorder, type ReplayRecorder } from './engine/replay/recorder'
@@ -317,6 +317,7 @@ async function boot() {
       // PMREM bake cadence; the time argument advances slowly so authors
       // can preview lighting across the cycle without re-launching.
       sky.tick(waveField.time, dt, { x: camera.position.x, z: camera.position.z })
+      updateUnderwaterFog(scene, camera.position.y)
       waterMesh.tick()
       editor.tick()
       requestAnimationFrame(editFrame)
@@ -1208,6 +1209,7 @@ async function boot() {
       x: state.playerSnapshot?.position.x ?? 0,
       z: state.playerSnapshot?.position.z ?? 0,
     })
+    updateUnderwaterFog(scene, camera.position.y)
     bikeRender()
     pickupRender(dt)
     combatRender(dt)
@@ -1513,6 +1515,7 @@ async function boot() {
       // Sky/atmosphere — same call as the live loop; sun follows the focal
       // bike so shadows stay framed during spectator pans.
       sky.tick(waveField.time, dt, { x: focalPos.x, z: focalPos.z })
+      updateUnderwaterFog(scene, camera.position.y)
       bikeRender()
       pickupRender(dt)
       combatRender(dt)
