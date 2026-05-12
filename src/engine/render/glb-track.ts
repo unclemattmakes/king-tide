@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { applyTerrainShaderToScene } from '@/engine/render/terrain-shader'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import type { GltfRoot } from '@/game/tracks/glb-loader'
 
@@ -38,6 +39,12 @@ export async function loadGlbTrackVisuals(url: string): Promise<LoadedGlbTrack> 
       mesh.receiveShadow = true
     }
   })
+  // Replace the stock baseColor on every authored-as-terrain mesh with
+  // the slope/altitude shader (see terrain-shader.ts). glTF can't carry
+  // Blender's shader graph, so without this the runtime terrain reads
+  // as a flat constant colour — the slope-aware look from the .blend
+  // preview is recomputed per-fragment here.
+  applyTerrainShaderToScene(scene)
   return { scene, parsedJson }
 }
 
