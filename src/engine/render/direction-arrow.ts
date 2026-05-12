@@ -72,11 +72,11 @@ export function createDirectionArrow(): DirectionArrow {
 
   // Camera-relative anchor: distance ahead of the camera along its
   // forward axis, and a target screen-space vertical position expressed
-  // in NDC (-1 bottom, +1 top). 0.5 puts the arrow on the top-quarter
-  // line — divide the screen into four horizontal strips and the arrow
-  // sits on the line one quarter down from the top.
+  // in NDC (-1 bottom, +1 top). 0.8 sits the arrow near the top of the
+  // window — roughly co-located with the lap timer slab — without
+  // pushing it so high that the cone tip clips against the top edge.
   const ANCHOR_FORWARD = 7
-  const ANCHOR_NDC_Y = 0.5
+  const ANCHOR_NDC_Y = 0.8
 
   function tick(
     camera: THREE.PerspectiveCamera,
