@@ -643,6 +643,40 @@ export function createWaterMesh(
   const normalNode = normalize(mix(rawNormal, vec3(0, 1, 0), normalFlatten))
   const ndotv = max(dot(normalNode, viewDir), float(0))
 
+  // Scene-depth sample. The texture is populated via
+  // `renderer.copyFramebufferToTexture` from this mesh's `onBeforeRender`
+  // (near the bottom of the file), AFTER all opaque objects have been
+  // encoded into the active pass — that's the moment when the depth
+  // attachment reflects "scene minus water". `closeness` derived from it
+  // feeds two consumers:
+  //   1. The shallow-water tint in `baseColor` below (this block),
+  //   2. The shoreline intersection foam further down in the fragment.
+  //
+  // Why our own DepthTexture instead of Three.js's
+  // `viewportDepthTexture()`: that helper's `updateBefore` fires once
+  // per render at the first node referencing it — under WebGPURenderer
+  // that resolves to BEFORE any opaque has been encoded into the active
+  // pass, so the texture captures a cleared depth buffer (= 1.0
+  // everywhere). With the helper, the depth compare reads the scene as
+  // "all at the far plane" and the shallow tint + intersection foam
+  // never fire.
+  const sceneDepthTexture = new THREE.DepthTexture(1, 1)
+  sceneDepthTexture.name = 'water:sceneDepth'
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+  const sceneDepthSampleNode = texture(sceneDepthTexture, screenUV) as any
+  const sceneDepthRaw = sceneDepthSampleNode.r
+  const sceneViewZ = perspectiveDepthToViewZ(sceneDepthRaw, cameraNear, cameraFar)
+  const waterViewZ = positionView.z
+  // Positive = terrain is BEHIND water (deeper into the scene from the
+  // camera's POV). View-space Z is negative for points in front of the
+  // camera, so waterViewZ − sceneViewZ is positive when sceneViewZ is
+  // more negative. This is the distance along the VIEW RAY between the
+  // water surface and the seabed / shoreline terrain — at grazing angles
+  // that path is much longer than the vertical depth, which is exactly
+  // the Beer-Lambert path-length we want for absorption tinting.
+  const closenessSigned = waterViewZ.sub(sceneViewZ)
+  const closeness = max(float(0), closenessSigned)
+
   // Albedo: two-color scatter blend.
   //
   // Sea-of-Thieves-style: a deep teal in troughs blends to a bright
@@ -660,8 +694,31 @@ export function createWaterMesh(
   // pure height-driven blending for A/B comparison.
   const heightNorm = smoothstep(float(-0.9), float(0.9), heightFrag)
   const heightFactor = isClassic ? heightNorm : smoothstep(float(-0.7), float(0.8), heightFrag)
-  const deepColor = isClassic ? vec3(0.04, 0.18, 0.4) : vec3(0.02, 0.12, 0.22)
+  // v2 deep was (0.02, 0.12, 0.22) — readable as "dark blue water" but a
+  // bit muddy and unsaturated. Pushed toward a punchier deep teal that
+  // reads as a real ocean color when stacked with the new aerial
+  // perspective + shallow-tint layers below.
+  const deepColor = isClassic ? vec3(0.04, 0.18, 0.4) : vec3(0.012, 0.10, 0.18)
   const scatterColor = isClassic ? vec3(0.16, 0.55, 0.78) : vec3(0.22, 0.7, 0.65)
+
+  // Shallow-water tint. When the view ray is short between water surface
+  // and terrain (e.g. lagoon shoreline, sandy floor), short Beer-Lambert
+  // path → less blue absorption → water reads brighter turquoise. This is
+  // SoT's "shelf glow" + Subnautica's tropical shallows effect. Off in
+  // classic mode (preserves the original A/B palette).
+  //
+  // `closeness` is the path-length between water surface and the next
+  // opaque surface, so this already accounts for the grazing-angle path
+  // exaggeration — looking straight down through 2 m of water reads
+  // shallow, looking the same vertical 2 m through a grazing ray reads
+  // as 10+ m of path and stays full deep.
+  const shallowTintColor = vec3(0.16, 0.5, 0.5)
+  const shallowFactor = isClassic
+    ? float(0)
+    : float(1).sub(smoothstep(float(0), float(8), closeness))
+  const tintedDeepColor = isClassic
+    ? deepColor
+    : mix(deepColor, shallowTintColor, shallowFactor.mul(float(0.55)))
 
   // Sun-direction back-scatter. uSunDir matches the scene's
   // DirectionalLight (50, 70, 70) — see scene.ts. Stored normalized as a
@@ -687,7 +744,7 @@ export function createWaterMesh(
         const sunBoost = sunBackscatter.mul(0.55)
         return clamp(heightFactor.mul(baseBoost.add(sunBoost)), float(0), float(1))
       })()
-  const baseColor = mix(deepColor, scatterColor, scatterAmount)
+  const baseColor = mix(tintedDeepColor, scatterColor, scatterAmount)
 
   // Sun glow emissive — additive on top of the scatter blend for the
   // unmistakable SoT "lit-from-behind" wave glow. Peaks on tall crests
@@ -862,40 +919,15 @@ export function createWaterMesh(
   })
   const bikeFoam = computeBikeFoam()
 
-  // Shoreline foam (M9.32): white foam where terrain is just below the
-  // water surface — the visual cue for "you're approaching land". Works
-  // by reading the opaque scene depth buffer at this fragment's screen
-  // position and comparing to the water fragment's own view-space Z. When
-  // the difference is small (terrain top ~0–1.5m below water), foam shows;
-  // farther down, foam fades to 0.
-  //
-  // Two gates handle the edge cases:
-  //   - `behindGate`: only triggers when scene is BEHIND water (positive
-  //     closeness). Without this, opaque objects rendered in front of the
-  //     water (e.g. bikes between camera and water surface) would falsely
-  //     trigger foam wherever they occlude the water plane.
-  //   - `depthFade`: smooth fade from full foam at the intersection to 0
-  //     at FOAM_INTERSECTION_RANGE meters depth.
-  //
-  // Off in classic mode (it's a v2 feature; classic preserves the original
-  // single-foam path for clean A/B). The depth read is cheap on real GPU
-  // (one texture sample + one viewZ conversion) — no per-vertex cost.
-  //
-  // Why our own DepthTexture instead of Three.js's `viewportDepthTexture()`:
-  // that helper's `updateBefore` fires once per render at the first node
-  // referencing it — under WebGPURenderer that resolves to BEFORE any
-  // opaque has been encoded into the active pass, so the texture captures
-  // a cleared depth buffer (= 1.0 everywhere). The intersection compare
-  // then reads the scene as "all at the far plane" and no foam ever fires.
-  // Instead we manage our own `DepthTexture` and call
-  // `renderer.copyFramebufferToTexture` from the water mesh's
-  // `onBeforeRender` (see below); by that point all opaques have been
-  // encoded into the pass, so the snapshot reflects the real post-opaque
-  // depth that the foam comparison actually needs.
-  const sceneDepthTexture = new THREE.DepthTexture(1, 1)
-  sceneDepthTexture.name = 'water:sceneDepth'
-  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
-  const sceneDepthSampleNode = texture(sceneDepthTexture, screenUV) as any
+  // Shoreline foam: white foam where terrain is just below the water
+  // surface. Reads from the shared `closeness` / `closenessSigned`
+  // values lifted to the top of the fragment composition (originally
+  // local to this block) so the shallow-water color tint in `baseColor`
+  // can read the same depth signal. `behindGate` keeps foam from firing
+  // where opaque objects (e.g. a bike) occlude the water plane between
+  // camera and the actual water surface — without it, those samples
+  // would read negative closeness and falsely trigger foam. Off in
+  // classic mode for clean A/B.
   const intersectionFoam = isClassic
     ? float(0)
     : (() => {
@@ -916,21 +948,12 @@ export function createWaterMesh(
         // belt rather than a thin highlight you have to hunt for.
         const FOAM_BAND_BASE = 6.0
         const PEAK_RANGE = 1.0
-        // .r is the non-linear depth in [0, 1].
-        const sceneDepthRaw = sceneDepthSampleNode.r
-        const sceneViewZ = perspectiveDepthToViewZ(sceneDepthRaw, cameraNear, cameraFar)
-        const waterViewZ = positionView.z
-        // closenessSigned > 0 means terrain is BEHIND water (deeper into
-        // the scene from camera's POV). View-Z is negative for points in
-        // front of camera, so waterViewZ − sceneViewZ is positive when
-        // sceneViewZ is more negative (further away).
-        const closenessSigned = waterViewZ.sub(sceneViewZ)
         const behindGate = smoothstep(float(-0.05), float(0.05), closenessSigned)
         // Lapping shoreline: the depth threshold breathes ±1.0 m around
         // the 6.0 m base as the shared foam noise scrolls. Bumped from
         // ±0.7 m so the surf "tongue" extends further at peaks of the
-        // turbulence — reads as a more lively shoreline.
-        const closeness = max(float(0), closenessSigned)
+        // turbulence — reads as a more lively shoreline. `closeness` is
+        // the shared view-ray water-column path from the top of the file.
         const noiseRangeOffset = foamNoiseRaw.sub(float(0.5)).mul(float(2.0))
         const bandRangeNow = float(FOAM_BAND_BASE).add(noiseRangeOffset)
         // Pow-0.4 falloff: fuller-bright across more of the band than the
@@ -1024,22 +1047,31 @@ export function createWaterMesh(
   }
 
   // Albedo composition: deep/scatter blend → planar reflection (Fresnel-
-  // weighted) → foam paints over the result. Reflection goes between
-  // base + foam so foam still reads as opaque white where it fires
-  // (foam is water particles, not the surface — it shouldn't reflect).
-  let waterAlbedo = mix(baseColor, foamColor, foamMask)
-  if (reflectionRgb) {
-    // Reflection strength: Fresnel × cap. Capping at ~0.85 keeps a hint
-    // of the deep-water color in even the most grazing-angle samples,
-    // so the surface reads as "water reflecting" not "mirror painted on
-    // water" — important for sunlit crests where the scatter blend
-    // contributes meaningful color even at the horizon. The cap is a
-    // uniform so the debug menu can dim or disable the reflection.
-    const reflStrength = fresnel.mul(reflStrengthUniform)
-    const reflectedBase = mix(baseColor, reflectionRgb, reflStrength)
-    waterAlbedo = mix(reflectedBase, foamColor, foamMask)
-  }
-  const albedo = waterAlbedo
+  // weighted) → aerial perspective haze → foam paints over the result.
+  // Foam comes LAST so it still reads as opaque white where it fires
+  // (foam is water particles, not the surface — it shouldn't reflect
+  // and shouldn't get blue-shifted by aerial perspective).
+  const reflectedOrBase = reflectionRgb
+    ? mix(baseColor, reflectionRgb, fresnel.mul(reflStrengthUniform))
+    : baseColor
+
+  // Aerial perspective: distant water reads denser. Real ocean past
+  // ~150 m takes on a flattened, hazier tone as the atmosphere absorbs /
+  // scatters along the long view path. Without this, the horizon water
+  // reads as the same color as foreground water and the scene loses its
+  // sense of scale. The horizon color is a desaturated cool tone biased
+  // slightly toward the sky's grazing tint; it intentionally does NOT
+  // match the sun-side sky, since we'd then lose the water-vs-sky
+  // contrast that defines the horizon line. Off in classic.
+  const horizonHazeColor = vec3(0.4, 0.55, 0.6)
+  const aerialMix = isClassic
+    ? float(0)
+    : smoothstep(float(120), float(280), camDist).mul(float(0.5))
+  const surfaceColor = isClassic
+    ? reflectedOrBase
+    : mix(reflectedOrBase, horizonHazeColor, aerialMix)
+
+  const albedo = mix(surfaceColor, foamColor, foamMask)
 
   // Sky-tint emissive: only used as a fallback when reflections are off
   // (classic mode or `?reflect=0`). When the reflection is active, the
@@ -1097,12 +1129,21 @@ export function createWaterMesh(
   // half of the "looks very transparent" feeling.
   const foamEmissive = foamColor.mul(foamMask).mul(float(0.18))
   mat.emissiveNode = fresnelEmissive.add(sunGlow).add(foamEmissive)
-  // Drive opacity from foamMask. The base water surface stays at 0.78
-  // (terrain reads through), but where foam fires the alpha lifts to
-  // 0.98 so foam reads as opaque scattered air bubbles instead of a
-  // translucent tint of the dark water behind it. This is the largest
-  // single contributor to "foam now looks like foam".
-  mat.opacityNode = mix(float(0.78), float(0.98), foamMask)
+  // View-angle-dependent base opacity. Beer-Lambert: the optical path
+  // length through water along the view ray scales as ~1/ndotv, so
+  // grazing samples accumulate ~5–10× more absorption than samples
+  // looking straight down. Reading this as alpha:
+  //   - ndotv → 1 (looking down): drop alpha to 0.55, so the seabed
+  //     directly below the camera reads through clearly. This is the
+  //     "perpendicular" half of Matt's request — water feels clearer.
+  //   - ndotv → 0 (grazing): lift alpha to 0.96, so the horizon water
+  //     reads as a continuous opaque mass and the surface doesn't feel
+  //     like a glass plate laid over the terrain. This is the "thicker
+  //     when horizontal" half.
+  // Then foam stamps full opacity on top so the surf zone still reads
+  // as solid scattered air regardless of view angle.
+  const baseAlpha = mix(float(0.55), float(0.96), float(1).sub(ndotv))
+  mat.opacityNode = mix(baseAlpha, float(0.98), foamMask)
   // Noise-modulated roughness. In sparkle patches roughness drops from 0.18
   // to ~0.04, tightening the specular lobe and producing crisp highlights.
   // Classic mode keeps the constant 0.18 so the A/B comparison is clean.
