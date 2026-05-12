@@ -4,65 +4,78 @@ Run:
     "C:/Program Files/Blender Foundation/Blender 5.1/blender.exe" \\
       --background --python tools/blender/seed_template_island.py
 
-This is a **one-shot scaffolder**, analogous to ``seed_bike_kit.py`` and
-``seed_prop_kit.py``. It builds the .blend from scratch — re-running
-nukes-and-paves. After the seed, the .blend is the source of truth;
-all iteration happens in Blender via the Geometry Nodes modifier panel
-and viewport empties.
+This is a **one-shot scaffolder**, analogous to ``seed_bike_kit.py``
+and ``seed_prop_kit.py``. It builds the .blend from scratch —
+re-running nukes-and-paves. After the seed, the .blend is the source
+of truth; all iteration happens in Blender via the Geometry Nodes
+modifier panel and viewport empties.
 
 ### What the seed produces
 
-A single 1024×1024 m tile of subdivided plane (~150 k verts at 384²)
-carrying a live ``HV_Island`` Geometry Nodes modifier. The modifier
-samples up to 8 ``peak_NN`` empties in the scene and composes a
-volcanic-island heightfield: cone-shaped peaks with optional crater
-caves, smoothstep continental shelves descending to a deep-water
-floor, reef pulses fringing each peak base, and multi-octave noise
-modulated by altitude (rougher above water, gentler below).
+A 1024×1024 m subdivided plane (~150 k verts at 384²) carrying a live
+``HV_Island`` Geometry Nodes modifier. The modifier samples up to 8
+**peak pairs** — a `peak_NN_base` (footprint circle) and a
+`peak_NN_top` (apex sphere) — and composes a volcanic-island
+heightfield: shear-tilted cones for lopsided volcanoes, optional
+summit craters, continental shelves descending to a deep-water floor,
+cone-masked erosion noise, plus a global low-amplitude background
+noise field modulated by altitude.
+
+Reef rings (disabled by default — ``Reef Height = 0``) are still
+available in the graph for authors who want a visible fringing reef.
+
+### Per-peak controls
+
+Each peak uses **two empties**:
+
+| Empty | Visual | Encoded fields |
+|---|---|---|
+| ``peak_NN_base`` (CIRCLE) | the island footprint at sea level | ``location.xy``: peak centre. ``scale.x``: base radius (m). |
+| ``peak_NN_top``  (SPHERE) | the apex / summit | ``location`` (read via Copy Location constraint on ``peak_NN_base``): apex XY-offset + Z height. ``scale.z``: crater flag (0/1). |
+
+Dragging ``peak_NN_base`` moves the entire island (the constraint
+drags ``peak_NN_top`` along). Dragging ``peak_NN_top`` changes the
+apex offset and height — sliding it sideways makes a lopsided cone.
+A separate position-and-radius control plus an apex-and-height control
+matches the way real volcanic morphology decouples *footprint* from
+*summit*.
+
+### Global modifier knobs (Properties → Modifier → HV_Island)
+
+| Knob | Default | Purpose |
+|---|---|---|
+| Shelf Depth | -25 m | Deep-water floor depth |
+| Shelf Radius | 200 m | How far offshore the shelf descends from each peak's coastline |
+| Reef Inset | 20 m | Distance from coast to centre of reef ring |
+| Reef Height | 0 m | Reef pulse amplitude (default off) |
+| Reef Width | 25 m | Reef pulse Gaussian σ |
+| Cone Erosion | 12 m | Per-cone noise amplitude (slope gulleys / outcrops). Masked by cone height — zero off the cone. |
+| Erosion Scale | 0.035 | Noise frequency for cone erosion (smaller = larger features) |
+| Roughness Above | 2 m | Global background noise amplitude above water |
+| Roughness Below | 1 m | Global background noise amplitude below water |
+| Noise Scale | 0.008 | Global noise frequency |
+| Noise Seed | 0 | Re-roll value for noise variation |
 
 ### Authoring loop
 
 1. Open ``tracks-src/template-island.blend``. Default scene has 4
-   peaks (1 central with crater, 2 flanking medium, 1 submerged
-   shoal) yielding a St. Lucia-style silhouette.
-2. **Move peak empties** in the viewport to relocate islands. The
-   terrain reshapes live.
-3. **Tweak per-peak custom properties** (encoded in each empty's
-   transform):
-     - ``location.xy`` → peak center in world XY
-     - ``location.z``  → peak height (m)
-     - ``scale.x``     → base radius (m)
-     - ``scale.z``     → crater flag (0=off, 1=on)
-4. **Tweak global knobs** in the modifier panel (Properties >
-   Modifier > HV_Island):
-     - Shelf Depth / Shelf Radius — deep-water floor and how far
-       offshore the shelf descends
-     - Reef Inset / Reef Height / Reef Width — fringing reef ring
-     - Roughness Above / Roughness Below — noise amplitude on land vs
-       below water
-     - Noise Scale / Noise Seed — feature size and variation
-5. When the silhouette reads right, **Apply the modifier** (bakes to
-   static mesh), edit the AI spline / gates / starts on top, and
+   peaks (1 central with crater, 2 flanking medium, 1 submerged shoal).
+2. Drag ``peak_NN_base`` empties to reposition islands.
+3. Drag ``peak_NN_top`` empties to retune apex height / lopsided
+   offset / crater toggle.
+4. Tweak modifier-panel global knobs for shelf depth, erosion, etc.
+5. When the silhouette reads right, **Apply the modifier** (Object →
+   Convert → Mesh), edit the AI spline / gates / starts on top, then
    export via the Hoverbike addon's *Export Track to Game* button.
 
-### Encoding choices
+### COLOR_0 stamp (per the Item 6 vertex-attribute spec)
 
-* ``peak_NN`` empties pack four parameters into their transform:
-  ``location.xy`` (centre), ``location.z`` (height), ``scale.x``
-  (base radius), ``scale.z`` (crater flag). Both author-friendly
-  (drag the empty up = taller peak; widen X = broader base) and GN-
-  friendly (Object Info gives location + scale directly).
-* Up to **8 peak slots** by design — the GN graph unrolls 8 instances
-  of the ``HV_PeakProfile`` sub-group and max-combines them. Unbound
-  slots contribute a -10 000 sentinel that loses every max comparison,
-  so empty slots are free.
-* ``COLOR_0`` per-vertex attribute is stamped per the Item 6 spec
-  (``docs/vertex-attribute-spec.md``):
-     - R = 0 (sway — terrain doesn't sway)
-     - G = 1 (AO multiplier placeholder — real AO bake is GUI work)
-     - B = 0 (path-worn — filled later when the author paints the
-              racing line)
-     - A = biome index (0 deep / 0.33 shallow / 0.67 beach / 1.0 jungle)
+| Channel | Stamped value |
+|---|---|
+| R | 0 — terrain doesn't sway |
+| G | 1 — AO multiplier placeholder |
+| B | 0 — path-worn mask (filled later when the racing line is painted) |
+| A | Biome index: 0 deep (z < -22) / 0.33 sandy seafloor (-22 ≤ z < 0) / 0.67 beach (0 ≤ z < 4) / 1.0 jungle (z ≥ 4) |
 """
 
 from __future__ import annotations
@@ -79,26 +92,30 @@ REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+# Add tools/blender to path so we can import the addon for its
+# water-preview helper.
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
 OUTPUT_PATH = os.path.join(REPO_ROOT, "tracks-src", "template-island.blend")
 
 # ────────────────────────────────────────────────────────────────────
 # Default scene parameters
 # ────────────────────────────────────────────────────────────────────
 
-TILE_SIZE = 1024.0  # metres; matches `test-custom-track.blend`'s Landscape extent
-SUBDIV = 384        # → 385² verts ≈ 148k, ~2.7m cell spacing; tractable trimesh
+TILE_SIZE = 1024.0
+SUBDIV = 384
 
-# Starter peaks (St. Lucia-style: one big stratovolcano + two flanking + one
-# submerged shoal). Each tuple is (name, (x, y, height_m), (base_radius_m,
-# base_radius_m, crater_flag_0_or_1)). Editable directly in Blender post-seed.
-PEAKS: list[tuple[str, tuple[float, float, float], tuple[float, float, float]]] = [
-    ("peak_00", (   0.0,    0.0, 140.0), (240.0, 240.0, 1.0)),
-    ("peak_01", (-380.0,  200.0,  90.0), (180.0, 180.0, 0.0)),
-    ("peak_02", ( 320.0,  280.0,  60.0), (140.0, 140.0, 0.0)),
-    ("peak_03", (-100.0, -360.0,  -1.0), ( 80.0,  80.0, 0.0)),
+# Starter peaks. Each is (idx, base.location, base_radius, top_offset_xyz, crater_flag).
+# top_offset is the apex position relative to the base centre — XY is the lopsided
+# offset, Z is the peak height.
+PEAKS: list[tuple[str, tuple[float, float, float], float, tuple[float, float, float], float]] = [
+    ("00", (   0.0,    0.0, 0.0), 240.0, (-20.0,  15.0, 140.0), 1.0),  # central, lopsided NE, crater
+    ("01", (-380.0,  200.0, 0.0), 180.0, ( 30.0, -10.0,  90.0), 0.0),  # SW medium, lopsided E
+    ("02", ( 320.0,  280.0, 0.0), 140.0, (  0.0,   0.0,  60.0), 0.0),  # NE small, straight
+    ("03", (-100.0, -360.0, 0.0),  80.0, (  0.0,   0.0,  -1.0), 0.0),  # SW shoal, submerged
 ]
 
-# AI racing line — weaves over water between islands, sea-level (z=5m).
 AI_SPLINE_ANCHORS: list[tuple[float, float, float]] = [
     (   0.0, -300.0, 5.0),
     (-200.0, -200.0, 5.0),
@@ -125,6 +142,9 @@ CHECKPOINTS: list[tuple[float, float, float]] = [
 CHECKPOINT_HALF_WIDTH = 14.0
 CHECKPOINT_HEIGHT = 6.0
 
+WATER_PREVIEW_SIZE = 800.0       # m — wider than the 1024m tile so the rim is visible
+WATER_PREVIEW_SUBDIVISIONS = 120
+
 NODE_GROUP_NAME = "HV_TemplateIsland"
 PEAK_SUBGROUP_NAME = "HV_PeakProfile"
 
@@ -138,7 +158,7 @@ def reset_scene() -> None:
 
 
 # ────────────────────────────────────────────────────────────────────
-# Terrain mesh (subdivided plane)
+# Terrain mesh
 # ────────────────────────────────────────────────────────────────────
 
 def build_terrain_mesh() -> bpy.types.Object:
@@ -154,19 +174,17 @@ def build_terrain_mesh() -> bpy.types.Object:
     bm.to_mesh(mesh)
     bm.free()
     mesh.update()
-
-    # Smooth shading so the GN-modified terrain reads cleanly.
     for poly in mesh.polygons:
         poly.use_smooth = True
 
     terrain = bpy.data.objects.new("terrain", mesh)
     bpy.context.scene.collection.objects.link(terrain)
-    terrain["kind"] = "track"  # export_track.py reads this for trimesh collider
+    terrain["kind"] = "track"
     return terrain
 
 
 # ────────────────────────────────────────────────────────────────────
-# HV_PeakProfile — sub-node-group, per-peak height contribution
+# Node-group helpers
 # ────────────────────────────────────────────────────────────────────
 
 def _new_socket(group, name, in_out, stype, default=None, mn=None, mx=None):
@@ -185,142 +203,247 @@ def _add_node(group, kind, x, y, **kw):
     return n
 
 
+# ────────────────────────────────────────────────────────────────────
+# HV_PeakProfile — per-peak height contribution
+# ────────────────────────────────────────────────────────────────────
+
 def build_peak_profile_group() -> bpy.types.NodeTree:
-    """One peak's contribution to the height field. Cone + crater + shelf +
-    reef, gated by an active-mask so unbound slots contribute a sentinel
-    that always loses the parent's max-combine."""
+    """Per-peak height contribution. Reads a Base empty for the footprint
+    (location.xy = centre, scale.x = base radius) and a Top empty for the
+    apex (location.xyz = apex world position; scale.z = crater flag).
+
+    The cone is built using a one-iteration shear that lets the apex
+    sit anywhere within the base circle — producing lopsided volcanoes
+    without solving the full tilted-cone quadratic.
+
+    Sentinel value gates unbound slots: when base.scale.x ≤ 0.01 the
+    output is the sentinel (large negative) which loses the parent's
+    max-combine."""
     if PEAK_SUBGROUP_NAME in bpy.data.node_groups:
         bpy.data.node_groups.remove(bpy.data.node_groups[PEAK_SUBGROUP_NAME])
     g = bpy.data.node_groups.new(PEAK_SUBGROUP_NAME, "GeometryNodeTree")
 
-    _new_socket(g, "Position",     "INPUT",  "NodeSocketVector")
-    _new_socket(g, "Peak",         "INPUT",  "NodeSocketObject")
-    _new_socket(g, "Shelf Depth",  "INPUT",  "NodeSocketFloat", -25.0)
-    _new_socket(g, "Shelf Radius", "INPUT",  "NodeSocketFloat", 200.0)
-    _new_socket(g, "Reef Inset",   "INPUT",  "NodeSocketFloat",  20.0)
-    _new_socket(g, "Reef Height",  "INPUT",  "NodeSocketFloat",  12.0)
-    _new_socket(g, "Reef Width",   "INPUT",  "NodeSocketFloat",  25.0)
-    _new_socket(g, "Sentinel",     "INPUT",  "NodeSocketFloat", -10000.0)
-    _new_socket(g, "Height",       "OUTPUT", "NodeSocketFloat")
+    _new_socket(g, "Position",      "INPUT",  "NodeSocketVector")
+    _new_socket(g, "Base",          "INPUT",  "NodeSocketObject")
+    _new_socket(g, "Top",           "INPUT",  "NodeSocketObject")
+    _new_socket(g, "Shelf Depth",   "INPUT",  "NodeSocketFloat", -25.0)
+    _new_socket(g, "Shelf Radius",  "INPUT",  "NodeSocketFloat", 200.0)
+    _new_socket(g, "Reef Inset",    "INPUT",  "NodeSocketFloat",  20.0)
+    _new_socket(g, "Reef Height",   "INPUT",  "NodeSocketFloat",   0.0)
+    _new_socket(g, "Reef Width",    "INPUT",  "NodeSocketFloat",  25.0)
+    _new_socket(g, "Cone Erosion",  "INPUT",  "NodeSocketFloat",  12.0)
+    _new_socket(g, "Erosion Scale", "INPUT",  "NodeSocketFloat",   0.035)
+    _new_socket(g, "Noise Seed",    "INPUT",  "NodeSocketFloat",   0.0)
+    _new_socket(g, "Sentinel",      "INPUT",  "NodeSocketFloat", -10000.0)
+    _new_socket(g, "Height",        "OUTPUT", "NodeSocketFloat")
 
-    n_in  = _add_node(g, "NodeGroupInput",  -1600, 0)
-    n_out = _add_node(g, "NodeGroupOutput",  1400, 0)
+    gi = _add_node(g, "NodeGroupInput",  -2000, 0)
+    go = _add_node(g, "NodeGroupOutput",  2000, 0)
 
-    # Current vertex xy from Position input.
-    n_pos_xyz = _add_node(g, "ShaderNodeSeparateXYZ", -1400, -200)
-    g.links.new(n_in.outputs["Position"], n_pos_xyz.inputs["Vector"])
+    # Vertex xy from Position
+    n_pos_xyz = _add_node(g, "ShaderNodeSeparateXYZ", -1800, -200)
+    g.links.new(gi.outputs["Position"], n_pos_xyz.inputs["Vector"])
 
-    # Peak transform → location.xy + height (in z), base_radius (in scale.x), crater (in scale.z).
-    n_obj = _add_node(g, "GeometryNodeObjectInfo", -1400, -500, transform_space="RELATIVE")
-    g.links.new(n_in.outputs["Peak"], n_obj.inputs["Object"])
-    n_peak_loc = _add_node(g, "ShaderNodeSeparateXYZ", -1200, -500)
-    g.links.new(n_obj.outputs["Location"], n_peak_loc.inputs["Vector"])
-    n_peak_scl = _add_node(g, "ShaderNodeSeparateXYZ", -1200, -700)
-    g.links.new(n_obj.outputs["Scale"], n_peak_scl.inputs["Vector"])
+    # Base info: location.xy = centre, scale.x = base radius
+    n_base = _add_node(g, "GeometryNodeObjectInfo", -1800, -500, transform_space="RELATIVE")
+    g.links.new(gi.outputs["Base"], n_base.inputs["Object"])
+    n_base_loc = _add_node(g, "ShaderNodeSeparateXYZ", -1600, -500)
+    g.links.new(n_base.outputs["Location"], n_base_loc.inputs["Vector"])
+    n_base_scl = _add_node(g, "ShaderNodeSeparateXYZ", -1600, -700)
+    g.links.new(n_base.outputs["Scale"], n_base_scl.inputs["Vector"])
 
-    # dist = hypot(pos.xy - peak.xy)
-    n_dx = _add_node(g, "ShaderNodeMath", -1000, -300, operation="SUBTRACT")
+    # Top info: world location (apex world pos); scale.z = crater flag.
+    # Top is tied to Base via a Copy Location constraint with use_offset,
+    # so its world location = base.location + top.local_offset. Subtracting
+    # base.xy from top.xy recovers the apex offset.
+    n_top = _add_node(g, "GeometryNodeObjectInfo", -1800, -900, transform_space="RELATIVE")
+    g.links.new(gi.outputs["Top"], n_top.inputs["Object"])
+    n_top_loc = _add_node(g, "ShaderNodeSeparateXYZ", -1600, -900)
+    g.links.new(n_top.outputs["Location"], n_top_loc.inputs["Vector"])
+    n_top_scl = _add_node(g, "ShaderNodeSeparateXYZ", -1600, -1100)
+    g.links.new(n_top.outputs["Scale"], n_top_scl.inputs["Vector"])
+
+    n_apex_dx = _add_node(g, "ShaderNodeMath", -1400, -700, operation="SUBTRACT")
+    g.links.new(n_top_loc.outputs["X"], n_apex_dx.inputs[0])
+    g.links.new(n_base_loc.outputs["X"], n_apex_dx.inputs[1])
+    n_apex_dy = _add_node(g, "ShaderNodeMath", -1400, -850, operation="SUBTRACT")
+    g.links.new(n_top_loc.outputs["Y"], n_apex_dy.inputs[0])
+    g.links.new(n_base_loc.outputs["Y"], n_apex_dy.inputs[1])
+
+    # Vertex offset from base centre.
+    n_dx = _add_node(g, "ShaderNodeMath", -1400, -300, operation="SUBTRACT")
     g.links.new(n_pos_xyz.outputs["X"], n_dx.inputs[0])
-    g.links.new(n_peak_loc.outputs["X"], n_dx.inputs[1])
-    n_dy = _add_node(g, "ShaderNodeMath", -1000, -450, operation="SUBTRACT")
+    g.links.new(n_base_loc.outputs["X"], n_dx.inputs[1])
+    n_dy = _add_node(g, "ShaderNodeMath", -1400, -450, operation="SUBTRACT")
     g.links.new(n_pos_xyz.outputs["Y"], n_dy.inputs[0])
-    g.links.new(n_peak_loc.outputs["Y"], n_dy.inputs[1])
-    n_dx2 = _add_node(g, "ShaderNodeMath", -800, -300, operation="POWER"); n_dx2.inputs[1].default_value = 2.0
+    g.links.new(n_base_loc.outputs["Y"], n_dy.inputs[1])
+
+    # d_naive = hypot(dx, dy)
+    n_dx2 = _add_node(g, "ShaderNodeMath", -1200, -300, operation="POWER"); n_dx2.inputs[1].default_value = 2.0
     g.links.new(n_dx.outputs[0], n_dx2.inputs[0])
-    n_dy2 = _add_node(g, "ShaderNodeMath", -800, -450, operation="POWER"); n_dy2.inputs[1].default_value = 2.0
+    n_dy2 = _add_node(g, "ShaderNodeMath", -1200, -450, operation="POWER"); n_dy2.inputs[1].default_value = 2.0
     g.links.new(n_dy.outputs[0], n_dy2.inputs[0])
-    n_sumsq = _add_node(g, "ShaderNodeMath", -600, -375, operation="ADD")
-    g.links.new(n_dx2.outputs[0], n_sumsq.inputs[0])
-    g.links.new(n_dy2.outputs[0], n_sumsq.inputs[1])
-    n_dist = _add_node(g, "ShaderNodeMath", -400, -375, operation="SQRT")
-    g.links.new(n_sumsq.outputs[0], n_dist.inputs[0])
+    n_d_sumsq = _add_node(g, "ShaderNodeMath", -1000, -375, operation="ADD")
+    g.links.new(n_dx2.outputs[0], n_d_sumsq.inputs[0])
+    g.links.new(n_dy2.outputs[0], n_d_sumsq.inputs[1])
+    n_d_naive = _add_node(g, "ShaderNodeMath", -800, -375, operation="SQRT")
+    g.links.new(n_d_sumsq.outputs[0], n_d_naive.inputs[0])
 
-    n_zero = _add_node(g, "ShaderNodeValue", -1000, -900); n_zero.outputs[0].default_value = 0.0
+    n_zero = _add_node(g, "ShaderNodeValue", -1400, -1300); n_zero.outputs[0].default_value = 0.0
+    n_one  = _add_node(g, "ShaderNodeValue", -1400, -1400); n_one.outputs[0].default_value = 1.0
 
-    # CONE: peak.height * smoothstep(peak_radius -> 0, dist)
-    n_mr_cone = _add_node(g, "ShaderNodeMapRange", -100, -200, interpolation_type="SMOOTHSTEP", clamp=True)
-    g.links.new(n_dist.outputs[0],        n_mr_cone.inputs["Value"])
-    g.links.new(n_peak_scl.outputs["X"],  n_mr_cone.inputs["From Min"])  # peak_radius
-    g.links.new(n_zero.outputs[0],        n_mr_cone.inputs["From Max"])
-    g.links.new(n_zero.outputs[0],        n_mr_cone.inputs["To Min"])
-    g.links.new(n_peak_loc.outputs["Z"],  n_mr_cone.inputs["To Max"])   # peak_height
+    # t_naive = smoothstep(base_radius → 0, d_naive); 1 at centre, 0 at base perimeter.
+    n_mr_t = _add_node(g, "ShaderNodeMapRange", -600, -375, interpolation_type="SMOOTHSTEP", clamp=True)
+    g.links.new(n_d_naive.outputs[0],   n_mr_t.inputs["Value"])
+    g.links.new(n_base_scl.outputs["X"], n_mr_t.inputs["From Min"])
+    g.links.new(n_zero.outputs[0],      n_mr_t.inputs["From Max"])
+    g.links.new(n_zero.outputs[0],      n_mr_t.inputs["To Min"])
+    g.links.new(n_one.outputs[0],       n_mr_t.inputs["To Max"])
 
-    # CRATER carve: subtract an inverted cone at the summit when scale.z>0.
-    n_crater_r = _add_node(g, "ShaderNodeMath", -100, -1100, operation="MULTIPLY")
-    n_crater_r.inputs[1].default_value = 0.15  # crater takes up 15% of peak radius
-    g.links.new(n_peak_scl.outputs["X"], n_crater_r.inputs[0])
-    n_cd1 = _add_node(g, "ShaderNodeMath", -100, -1300, operation="MULTIPLY")
-    n_cd1.inputs[1].default_value = 0.3  # 30% of peak height dropped at summit
-    g.links.new(n_peak_loc.outputs["Z"], n_cd1.inputs[0])
-    n_crater_depth = _add_node(g, "ShaderNodeMath", 100, -1300, operation="MULTIPLY")
+    # One-iteration shear: shift the cone centre toward the apex offset by t_naive.
+    n_shift_x = _add_node(g, "ShaderNodeMath", -400, -700, operation="MULTIPLY")
+    g.links.new(n_apex_dx.outputs[0], n_shift_x.inputs[0])
+    g.links.new(n_mr_t.outputs["Result"], n_shift_x.inputs[1])
+    n_shift_y = _add_node(g, "ShaderNodeMath", -400, -850, operation="MULTIPLY")
+    g.links.new(n_apex_dy.outputs[0], n_shift_y.inputs[0])
+    g.links.new(n_mr_t.outputs["Result"], n_shift_y.inputs[1])
+    n_sx = _add_node(g, "ShaderNodeMath", -200, -300, operation="SUBTRACT")
+    g.links.new(n_dx.outputs[0], n_sx.inputs[0])
+    g.links.new(n_shift_x.outputs[0], n_sx.inputs[1])
+    n_sy = _add_node(g, "ShaderNodeMath", -200, -450, operation="SUBTRACT")
+    g.links.new(n_dy.outputs[0], n_sy.inputs[0])
+    g.links.new(n_shift_y.outputs[0], n_sy.inputs[1])
+    n_sx2 = _add_node(g, "ShaderNodeMath", 0, -300, operation="POWER"); n_sx2.inputs[1].default_value = 2.0
+    g.links.new(n_sx.outputs[0], n_sx2.inputs[0])
+    n_sy2 = _add_node(g, "ShaderNodeMath", 0, -450, operation="POWER"); n_sy2.inputs[1].default_value = 2.0
+    g.links.new(n_sy.outputs[0], n_sy2.inputs[0])
+    n_s_sumsq = _add_node(g, "ShaderNodeMath", 200, -375, operation="ADD")
+    g.links.new(n_sx2.outputs[0], n_s_sumsq.inputs[0])
+    g.links.new(n_sy2.outputs[0], n_s_sumsq.inputs[1])
+    n_d_sheared = _add_node(g, "ShaderNodeMath", 400, -375, operation="SQRT")
+    g.links.new(n_s_sumsq.outputs[0], n_d_sheared.inputs[0])
+
+    # CONE: peak_height * smoothstep(base_radius → 0, d_sheared)
+    n_mr_cone = _add_node(g, "ShaderNodeMapRange", 600, -200, interpolation_type="SMOOTHSTEP", clamp=True)
+    g.links.new(n_d_sheared.outputs[0], n_mr_cone.inputs["Value"])
+    g.links.new(n_base_scl.outputs["X"], n_mr_cone.inputs["From Min"])
+    g.links.new(n_zero.outputs[0],     n_mr_cone.inputs["From Max"])
+    g.links.new(n_zero.outputs[0],     n_mr_cone.inputs["To Min"])
+    g.links.new(n_top_loc.outputs["Z"], n_mr_cone.inputs["To Max"])
+
+    # CRATER: carve summit when top.scale.z > 0.
+    n_crater_r = _add_node(g, "ShaderNodeMath", 200, -1100, operation="MULTIPLY")
+    n_crater_r.inputs[1].default_value = 0.15
+    g.links.new(n_base_scl.outputs["X"], n_crater_r.inputs[0])
+    n_cd1 = _add_node(g, "ShaderNodeMath", 200, -1300, operation="MULTIPLY"); n_cd1.inputs[1].default_value = 0.3
+    g.links.new(n_top_loc.outputs["Z"], n_cd1.inputs[0])
+    n_crater_depth = _add_node(g, "ShaderNodeMath", 400, -1300, operation="MULTIPLY")
     g.links.new(n_cd1.outputs[0], n_crater_depth.inputs[0])
-    g.links.new(n_peak_scl.outputs["Z"], n_crater_depth.inputs[1])  # crater flag (0/1)
-    n_mr_crater = _add_node(g, "ShaderNodeMapRange", 300, -1200, interpolation_type="SMOOTHSTEP", clamp=True)
-    g.links.new(n_dist.outputs[0],         n_mr_crater.inputs["Value"])
+    g.links.new(n_top_scl.outputs["Z"], n_crater_depth.inputs[1])
+    n_mr_crater = _add_node(g, "ShaderNodeMapRange", 600, -1200, interpolation_type="SMOOTHSTEP", clamp=True)
+    g.links.new(n_d_sheared.outputs[0],    n_mr_crater.inputs["Value"])
     g.links.new(n_zero.outputs[0],         n_mr_crater.inputs["From Min"])
     g.links.new(n_crater_r.outputs[0],     n_mr_crater.inputs["From Max"])
     g.links.new(n_crater_depth.outputs[0], n_mr_crater.inputs["To Min"])
     g.links.new(n_zero.outputs[0],         n_mr_crater.inputs["To Max"])
-    n_cone_carved = _add_node(g, "ShaderNodeMath", 500, -200, operation="SUBTRACT")
+    n_cone_carved = _add_node(g, "ShaderNodeMath", 800, -200, operation="SUBTRACT")
     g.links.new(n_mr_cone.outputs["Result"],   n_cone_carved.inputs[0])
     g.links.new(n_mr_crater.outputs["Result"], n_cone_carved.inputs[1])
 
-    # SHELF: smoothstep ramp from 0 at coast (dist=peak_radius) down to
-    # Shelf Depth at dist=peak_radius+Shelf Radius; clamped beyond.
-    n_shelf_outer = _add_node(g, "ShaderNodeMath", -200, -500, operation="ADD")
-    g.links.new(n_peak_scl.outputs["X"],  n_shelf_outer.inputs[0])
-    g.links.new(n_in.outputs["Shelf Radius"], n_shelf_outer.inputs[1])
-    n_mr_shelf = _add_node(g, "ShaderNodeMapRange", 0, -500, interpolation_type="SMOOTHSTEP", clamp=True)
-    g.links.new(n_dist.outputs[0],          n_mr_shelf.inputs["Value"])
-    g.links.new(n_peak_scl.outputs["X"],    n_mr_shelf.inputs["From Min"])
-    g.links.new(n_shelf_outer.outputs[0],   n_mr_shelf.inputs["From Max"])
-    g.links.new(n_zero.outputs[0],          n_mr_shelf.inputs["To Min"])
-    g.links.new(n_in.outputs["Shelf Depth"], n_mr_shelf.inputs["To Max"])
+    # CONE EROSION: noise field masked by cone contribution. Strong on slopes,
+    # zero off the cone.
+    n_erode_noise = _add_node(g, "ShaderNodeTexNoise", 200, -1700)
+    n_erode_noise.noise_dimensions = "4D"
+    n_erode_noise.normalize = True
+    n_erode_noise.inputs["Detail"].default_value = 6.0
+    n_erode_noise.inputs["Roughness"].default_value = 0.6
+    n_erode_noise.inputs["Distortion"].default_value = 0.3
+    g.links.new(gi.outputs["Position"],      n_erode_noise.inputs["Vector"])
+    g.links.new(gi.outputs["Erosion Scale"], n_erode_noise.inputs["Scale"])
+    # Offset seed for erosion so it's de-correlated from global noise.
+    n_erode_seed = _add_node(g, "ShaderNodeMath", 0, -1900, operation="ADD")
+    n_erode_seed.inputs[1].default_value = 100.0
+    g.links.new(gi.outputs["Noise Seed"], n_erode_seed.inputs[0])
+    g.links.new(n_erode_seed.outputs[0], n_erode_noise.inputs["W"])
+    n_erode_signed = _add_node(g, "ShaderNodeMath", 400, -1700, operation="MULTIPLY_ADD")
+    n_erode_signed.inputs[1].default_value = 2.0
+    n_erode_signed.inputs[2].default_value = -1.0
+    g.links.new(n_erode_noise.outputs["Fac"], n_erode_signed.inputs[0])
 
-    # REEF: positive pulse centred at peak_radius + Reef Inset,
-    # smoothstep falloff over Reef Width to either side.
-    n_reef_center = _add_node(g, "ShaderNodeMath", -200, -800, operation="ADD")
-    g.links.new(n_peak_scl.outputs["X"], n_reef_center.inputs[0])
-    g.links.new(n_in.outputs["Reef Inset"], n_reef_center.inputs[1])
-    n_reef_delta = _add_node(g, "ShaderNodeMath", 0, -800, operation="SUBTRACT")
-    g.links.new(n_dist.outputs[0], n_reef_delta.inputs[0])
+    # Mask = clamp(cone_carved / max(peak_height, 1), 0, 1)
+    n_safe_h = _add_node(g, "ShaderNodeMath", 200, -1500, operation="MAXIMUM")
+    n_safe_h.inputs[1].default_value = 1.0
+    g.links.new(n_top_loc.outputs["Z"], n_safe_h.inputs[0])
+    n_mask = _add_node(g, "ShaderNodeMath", 400, -1500, operation="DIVIDE")
+    g.links.new(n_cone_carved.outputs[0], n_mask.inputs[0])
+    g.links.new(n_safe_h.outputs[0], n_mask.inputs[1])
+    n_mask_c = _add_node(g, "ShaderNodeClamp", 600, -1500)
+    n_mask_c.inputs["Min"].default_value = 0.0
+    n_mask_c.inputs["Max"].default_value = 1.0
+    g.links.new(n_mask.outputs[0], n_mask_c.inputs["Value"])
+
+    n_erode_mul1 = _add_node(g, "ShaderNodeMath", 600, -1700, operation="MULTIPLY")
+    g.links.new(n_erode_signed.outputs[0], n_erode_mul1.inputs[0])
+    g.links.new(n_mask_c.outputs["Result"], n_erode_mul1.inputs[1])
+    n_erosion = _add_node(g, "ShaderNodeMath", 800, -1700, operation="MULTIPLY")
+    g.links.new(n_erode_mul1.outputs[0], n_erosion.inputs[0])
+    g.links.new(gi.outputs["Cone Erosion"], n_erosion.inputs[1])
+    n_cone_eroded = _add_node(g, "ShaderNodeMath", 1000, -200, operation="ADD")
+    g.links.new(n_cone_carved.outputs[0], n_cone_eroded.inputs[0])
+    g.links.new(n_erosion.outputs[0], n_cone_eroded.inputs[1])
+
+    # SHELF (uses naive d, not sheared — keeps underwater plateau centred on
+    # the base regardless of apex offset).
+    n_shelf_outer = _add_node(g, "ShaderNodeMath", -200, -550, operation="ADD")
+    g.links.new(n_base_scl.outputs["X"], n_shelf_outer.inputs[0])
+    g.links.new(gi.outputs["Shelf Radius"], n_shelf_outer.inputs[1])
+    n_mr_shelf = _add_node(g, "ShaderNodeMapRange", 0, -550, interpolation_type="SMOOTHSTEP", clamp=True)
+    g.links.new(n_d_naive.outputs[0],      n_mr_shelf.inputs["Value"])
+    g.links.new(n_base_scl.outputs["X"],   n_mr_shelf.inputs["From Min"])
+    g.links.new(n_shelf_outer.outputs[0],  n_mr_shelf.inputs["From Max"])
+    g.links.new(n_zero.outputs[0],         n_mr_shelf.inputs["To Min"])
+    g.links.new(gi.outputs["Shelf Depth"], n_mr_shelf.inputs["To Max"])
+
+    # REEF (default Reef Height=0 keeps it invisible; available if dialed up).
+    n_reef_center = _add_node(g, "ShaderNodeMath", -200, -750, operation="ADD")
+    g.links.new(n_base_scl.outputs["X"], n_reef_center.inputs[0])
+    g.links.new(gi.outputs["Reef Inset"], n_reef_center.inputs[1])
+    n_reef_delta = _add_node(g, "ShaderNodeMath", 0, -750, operation="SUBTRACT")
+    g.links.new(n_d_naive.outputs[0], n_reef_delta.inputs[0])
     g.links.new(n_reef_center.outputs[0], n_reef_delta.inputs[1])
-    n_reef_abs = _add_node(g, "ShaderNodeMath", 200, -800, operation="ABSOLUTE")
+    n_reef_abs = _add_node(g, "ShaderNodeMath", 200, -750, operation="ABSOLUTE")
     g.links.new(n_reef_delta.outputs[0], n_reef_abs.inputs[0])
-    n_mr_reef = _add_node(g, "ShaderNodeMapRange", 400, -800, interpolation_type="SMOOTHSTEP", clamp=True)
-    g.links.new(n_reef_abs.outputs[0],        n_mr_reef.inputs["Value"])
-    g.links.new(n_zero.outputs[0],            n_mr_reef.inputs["From Min"])
-    g.links.new(n_in.outputs["Reef Width"],   n_mr_reef.inputs["From Max"])
-    g.links.new(n_in.outputs["Reef Height"],  n_mr_reef.inputs["To Min"])
-    g.links.new(n_zero.outputs[0],            n_mr_reef.inputs["To Max"])
+    n_mr_reef = _add_node(g, "ShaderNodeMapRange", 400, -750, interpolation_type="SMOOTHSTEP", clamp=True)
+    g.links.new(n_reef_abs.outputs[0],      n_mr_reef.inputs["Value"])
+    g.links.new(n_zero.outputs[0],          n_mr_reef.inputs["From Min"])
+    g.links.new(gi.outputs["Reef Width"],   n_mr_reef.inputs["From Max"])
+    g.links.new(gi.outputs["Reef Height"],  n_mr_reef.inputs["To Min"])
+    g.links.new(n_zero.outputs[0],          n_mr_reef.inputs["To Max"])
 
-    # profile = cone_carved + shelf + reef
-    n_h1 = _add_node(g, "ShaderNodeMath", 700, -400, operation="ADD")
-    g.links.new(n_cone_carved.outputs[0],     n_h1.inputs[0])
+    # profile = cone_eroded + shelf + reef
+    n_h1 = _add_node(g, "ShaderNodeMath", 1200, -400, operation="ADD")
+    g.links.new(n_cone_eroded.outputs[0], n_h1.inputs[0])
     g.links.new(n_mr_shelf.outputs["Result"], n_h1.inputs[1])
-    n_profile = _add_node(g, "ShaderNodeMath", 900, -500, operation="ADD")
+    n_profile = _add_node(g, "ShaderNodeMath", 1400, -500, operation="ADD")
     g.links.new(n_h1.outputs[0], n_profile.inputs[0])
     g.links.new(n_mr_reef.outputs["Result"], n_profile.inputs[1])
 
-    # ACTIVE mask: peak.base_radius > 0.01 means this slot is bound.
-    n_mask = _add_node(g, "ShaderNodeMath", 700, -700, operation="GREATER_THAN")
-    n_mask.inputs[1].default_value = 0.01
-    g.links.new(n_peak_scl.outputs["X"], n_mask.inputs[0])
-
-    # height = mix(sentinel, profile, mask)
-    n_mix = _add_node(g, "ShaderNodeMix", 1100, -400)
-    n_mix.data_type = "FLOAT"
-    n_mix.clamp_factor = False
-    g.links.new(n_mask.outputs[0],     n_mix.inputs[0])      # Factor (Float)
-    g.links.new(n_in.outputs["Sentinel"], n_mix.inputs["A"])
+    # Active mask & sentinel mix
+    n_active = _add_node(g, "ShaderNodeMath", 1200, -700, operation="GREATER_THAN")
+    n_active.inputs[1].default_value = 0.01
+    g.links.new(n_base_scl.outputs["X"], n_active.inputs[0])
+    n_mix = _add_node(g, "ShaderNodeMix", 1600, -400)
+    n_mix.data_type = "FLOAT"; n_mix.clamp_factor = False
+    g.links.new(n_active.outputs[0],   n_mix.inputs[0])
+    g.links.new(gi.outputs["Sentinel"], n_mix.inputs["A"])
     g.links.new(n_profile.outputs[0],  n_mix.inputs["B"])
-    g.links.new(n_mix.outputs[0], n_out.inputs["Height"])
+    g.links.new(n_mix.outputs[0], go.inputs["Height"])
 
     return g
 
 
 # ────────────────────────────────────────────────────────────────────
-# HV_TemplateIsland — parent group, 8-peak unroll + roughness + biome
+# HV_TemplateIsland — 8-peak unroll + global noise + biome stamp
 # ────────────────────────────────────────────────────────────────────
 
 def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
@@ -330,38 +453,44 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
 
     _new_socket(g, "Geometry", "INPUT", "NodeSocketGeometry")
     for i in range(8):
-        _new_socket(g, f"Peak {i}", "INPUT", "NodeSocketObject")
+        _new_socket(g, f"Base {i}", "INPUT", "NodeSocketObject")
+        _new_socket(g, f"Top {i}",  "INPUT", "NodeSocketObject")
     _new_socket(g, "Shelf Depth",     "INPUT", "NodeSocketFloat", -25.0, -200.0, 0.0)
     _new_socket(g, "Shelf Radius",    "INPUT", "NodeSocketFloat", 200.0, 0.0, 1000.0)
     _new_socket(g, "Reef Inset",      "INPUT", "NodeSocketFloat",  20.0, 0.0, 200.0)
-    _new_socket(g, "Reef Height",     "INPUT", "NodeSocketFloat",  12.0, 0.0, 50.0)
+    _new_socket(g, "Reef Height",     "INPUT", "NodeSocketFloat",   0.0, 0.0, 50.0)
     _new_socket(g, "Reef Width",      "INPUT", "NodeSocketFloat",  25.0, 1.0, 200.0)
-    _new_socket(g, "Roughness Above", "INPUT", "NodeSocketFloat",   6.0, 0.0, 50.0)
-    _new_socket(g, "Roughness Below", "INPUT", "NodeSocketFloat",   1.5, 0.0, 20.0)
-    _new_socket(g, "Noise Scale",     "INPUT", "NodeSocketFloat",   0.01, 0.0001, 1.0)
+    _new_socket(g, "Cone Erosion",    "INPUT", "NodeSocketFloat",  12.0, 0.0, 50.0)
+    _new_socket(g, "Erosion Scale",   "INPUT", "NodeSocketFloat",   0.035, 0.0001, 1.0)
+    _new_socket(g, "Roughness Above", "INPUT", "NodeSocketFloat",   2.0, 0.0, 50.0)
+    _new_socket(g, "Roughness Below", "INPUT", "NodeSocketFloat",   1.0, 0.0, 20.0)
+    _new_socket(g, "Noise Scale",     "INPUT", "NodeSocketFloat",   0.008, 0.0001, 1.0)
     _new_socket(g, "Noise Seed",      "INPUT", "NodeSocketFloat",   0.0, 0.0, 1000.0)
     _new_socket(g, "Geometry", "OUTPUT", "NodeSocketGeometry")
 
     p_in  = _add_node(g, "NodeGroupInput",  -1600, 0)
     p_out = _add_node(g, "NodeGroupOutput",  2800, 0)
     p_pos = _add_node(g, "GeometryNodeInputPosition", -1400, -200)
-
     n_sentinel = _add_node(g, "ShaderNodeValue", -1400, -400)
     n_sentinel.outputs[0].default_value = -10000.0
 
-    # Instantiate the sub-group 8 times and max-cascade their outputs.
+    # 8 sub-group instances, max-cascade
     prev = None
     for i in range(8):
         inst = _add_node(g, "GeometryNodeGroup", -800, -100 - i * 200)
         inst.node_tree = sub
-        g.links.new(p_pos.outputs["Position"],          inst.inputs["Position"])
-        g.links.new(p_in.outputs[f"Peak {i}"],          inst.inputs["Peak"])
-        g.links.new(p_in.outputs["Shelf Depth"],        inst.inputs["Shelf Depth"])
-        g.links.new(p_in.outputs["Shelf Radius"],       inst.inputs["Shelf Radius"])
-        g.links.new(p_in.outputs["Reef Inset"],         inst.inputs["Reef Inset"])
-        g.links.new(p_in.outputs["Reef Height"],        inst.inputs["Reef Height"])
-        g.links.new(p_in.outputs["Reef Width"],         inst.inputs["Reef Width"])
-        g.links.new(n_sentinel.outputs[0],              inst.inputs["Sentinel"])
+        g.links.new(p_pos.outputs["Position"],     inst.inputs["Position"])
+        g.links.new(p_in.outputs[f"Base {i}"],     inst.inputs["Base"])
+        g.links.new(p_in.outputs[f"Top {i}"],      inst.inputs["Top"])
+        g.links.new(p_in.outputs["Shelf Depth"],   inst.inputs["Shelf Depth"])
+        g.links.new(p_in.outputs["Shelf Radius"],  inst.inputs["Shelf Radius"])
+        g.links.new(p_in.outputs["Reef Inset"],    inst.inputs["Reef Inset"])
+        g.links.new(p_in.outputs["Reef Height"],   inst.inputs["Reef Height"])
+        g.links.new(p_in.outputs["Reef Width"],    inst.inputs["Reef Width"])
+        g.links.new(p_in.outputs["Cone Erosion"],  inst.inputs["Cone Erosion"])
+        g.links.new(p_in.outputs["Erosion Scale"], inst.inputs["Erosion Scale"])
+        g.links.new(p_in.outputs["Noise Seed"],    inst.inputs["Noise Seed"])
+        g.links.new(n_sentinel.outputs[0],         inst.inputs["Sentinel"])
         if prev is None:
             prev = inst.outputs["Height"]
         else:
@@ -370,77 +499,66 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
             g.links.new(inst.outputs["Height"], n_max.inputs[1])
             prev = n_max.outputs[0]
 
-    # Roughness — single multi-octave noise field, altitude-modulated amplitude.
-    n_noise = _add_node(g, "ShaderNodeTexNoise", -400, -1900)
-    n_noise.noise_dimensions = "4D"
-    n_noise.normalize = True
-    n_noise.inputs["Detail"].default_value = 4.0
-    n_noise.inputs["Roughness"].default_value = 0.55
-    n_noise.inputs["Distortion"].default_value = 0.0
-    g.links.new(p_pos.outputs["Position"],   n_noise.inputs["Vector"])
-    g.links.new(p_in.outputs["Noise Scale"], n_noise.inputs["Scale"])
-    g.links.new(p_in.outputs["Noise Seed"],  n_noise.inputs["W"])
-
-    n_signed = _add_node(g, "ShaderNodeMath", -200, -1900, operation="MULTIPLY_ADD")
-    n_signed.inputs[1].default_value = 2.0
-    n_signed.inputs[2].default_value = -1.0
-    g.links.new(n_noise.outputs["Fac"], n_signed.inputs[0])
-
+    # Global low-amplitude background noise (multi-octave), altitude-modulated.
+    n_gnoise = _add_node(g, "ShaderNodeTexNoise", -400, -1900)
+    n_gnoise.noise_dimensions = "4D"; n_gnoise.normalize = True
+    n_gnoise.inputs["Detail"].default_value = 3.0
+    n_gnoise.inputs["Roughness"].default_value = 0.5
+    n_gnoise.inputs["Distortion"].default_value = 0.0
+    g.links.new(p_pos.outputs["Position"],   n_gnoise.inputs["Vector"])
+    g.links.new(p_in.outputs["Noise Scale"], n_gnoise.inputs["Scale"])
+    g.links.new(p_in.outputs["Noise Seed"],  n_gnoise.inputs["W"])
+    n_gsigned = _add_node(g, "ShaderNodeMath", -200, -1900, operation="MULTIPLY_ADD")
+    n_gsigned.inputs[1].default_value = 2.0; n_gsigned.inputs[2].default_value = -1.0
+    g.links.new(n_gnoise.outputs["Fac"], n_gsigned.inputs[0])
     n_amp = _add_node(g, "ShaderNodeMapRange", 0, -1900, interpolation_type="SMOOTHSTEP", clamp=True)
     n_amp.inputs["From Min"].default_value = -1.0
-    n_amp.inputs["From Max"].default_value = 2.0
+    n_amp.inputs["From Max"].default_value =  2.0
     g.links.new(prev, n_amp.inputs["Value"])
     g.links.new(p_in.outputs["Roughness Below"], n_amp.inputs["To Min"])
     g.links.new(p_in.outputs["Roughness Above"], n_amp.inputs["To Max"])
-
     n_perturb = _add_node(g, "ShaderNodeMath", 200, -1900, operation="MULTIPLY")
-    g.links.new(n_signed.outputs[0], n_perturb.inputs[0])
+    g.links.new(n_gsigned.outputs[0], n_perturb.inputs[0])
     g.links.new(n_amp.outputs["Result"], n_perturb.inputs[1])
+    n_final = _add_node(g, "ShaderNodeMath", 600, -800, operation="ADD")
+    g.links.new(prev, n_final.inputs[0])
+    g.links.new(n_perturb.outputs[0], n_final.inputs[1])
 
-    # final_height = max_profile + perturb
-    n_final_h = _add_node(g, "ShaderNodeMath", 600, -800, operation="ADD")
-    g.links.new(prev, n_final_h.inputs[0])
-    g.links.new(n_perturb.outputs[0], n_final_h.inputs[1])
-
-    # Set Position: offset Z by final_height.
-    n_combine = _add_node(g, "ShaderNodeCombineXYZ", 1100, -300)
-    g.links.new(n_final_h.outputs[0], n_combine.inputs["Z"])
+    # Set Position
+    n_comb = _add_node(g, "ShaderNodeCombineXYZ", 1100, -300)
+    g.links.new(n_final.outputs[0], n_comb.inputs["Z"])
     n_setpos = _add_node(g, "GeometryNodeSetPosition", 1400, 0)
     g.links.new(p_in.outputs["Geometry"], n_setpos.inputs["Geometry"])
-    g.links.new(n_combine.outputs["Vector"], n_setpos.inputs["Offset"])
+    g.links.new(n_comb.outputs["Vector"], n_setpos.inputs["Offset"])
 
-    # ── Biome stamp into COLOR_0 ───────────────────────────────────
-    # Read Position AGAIN after SetPosition — gets the modified Z.
+    # Biome stamp: 4 bands. Deep band only at z<-22, so most underwater
+    # reads as sandy.
     n_pos2 = _add_node(g, "GeometryNodeInputPosition", 1600, -300)
     n_pos2_xyz = _add_node(g, "ShaderNodeSeparateXYZ", 1800, -300)
     g.links.new(n_pos2.outputs["Position"], n_pos2_xyz.inputs["Vector"])
-
-    def _step(z_socket, threshold, x, y):
+    def _step(z, thresh, x, y):
         n = _add_node(g, "ShaderNodeMath", x, y, operation="GREATER_THAN")
-        n.inputs[1].default_value = threshold
-        g.links.new(z_socket, n.inputs[0])
+        n.inputs[1].default_value = thresh
+        g.links.new(z, n.inputs[0])
         return n
-
-    n_b1 = _step(n_pos2_xyz.outputs["Z"], -3.0, 2000, -100)
-    n_b2 = _step(n_pos2_xyz.outputs["Z"],  0.0, 2000, -250)
-    n_b3 = _step(n_pos2_xyz.outputs["Z"],  4.0, 2000, -400)
-    n_bsum1 = _add_node(g, "ShaderNodeMath", 2200, -175, operation="ADD")
-    g.links.new(n_b1.outputs[0], n_bsum1.inputs[0])
-    g.links.new(n_b2.outputs[0], n_bsum1.inputs[1])
-    n_bsum2 = _add_node(g, "ShaderNodeMath", 2200, -325, operation="ADD")
-    g.links.new(n_bsum1.outputs[0], n_bsum2.inputs[0])
-    g.links.new(n_b3.outputs[0], n_bsum2.inputs[1])
+    n_b1 = _step(n_pos2_xyz.outputs["Z"], -22.0, 2000, -100)
+    n_b2 = _step(n_pos2_xyz.outputs["Z"],   0.0, 2000, -250)
+    n_b3 = _step(n_pos2_xyz.outputs["Z"],   4.0, 2000, -400)
+    n_bs1 = _add_node(g, "ShaderNodeMath", 2200, -175, operation="ADD")
+    g.links.new(n_b1.outputs[0], n_bs1.inputs[0]); g.links.new(n_b2.outputs[0], n_bs1.inputs[1])
+    n_bs2 = _add_node(g, "ShaderNodeMath", 2200, -325, operation="ADD")
+    g.links.new(n_bs1.outputs[0], n_bs2.inputs[0]); g.links.new(n_b3.outputs[0], n_bs2.inputs[1])
     n_biome = _add_node(g, "ShaderNodeMath", 2200, -475, operation="DIVIDE")
     n_biome.inputs[1].default_value = 3.0
-    g.links.new(n_bsum2.outputs[0], n_biome.inputs[0])
+    g.links.new(n_bs2.outputs[0], n_biome.inputs[0])
 
     n_zero_p = _add_node(g, "ShaderNodeValue", 2200, -625); n_zero_p.outputs[0].default_value = 0.0
     n_one_p  = _add_node(g, "ShaderNodeValue", 2200, -775); n_one_p.outputs[0].default_value = 1.0
     n_color = _add_node(g, "FunctionNodeCombineColor", 2400, -300, mode="RGB")
-    g.links.new(n_zero_p.outputs[0], n_color.inputs["Red"])    # sway
-    g.links.new(n_one_p.outputs[0],  n_color.inputs["Green"])  # AO placeholder
-    g.links.new(n_zero_p.outputs[0], n_color.inputs["Blue"])   # path-worn (filled later)
-    g.links.new(n_biome.outputs[0],  n_color.inputs["Alpha"])  # biome 0..1
+    g.links.new(n_zero_p.outputs[0], n_color.inputs["Red"])
+    g.links.new(n_one_p.outputs[0],  n_color.inputs["Green"])
+    g.links.new(n_zero_p.outputs[0], n_color.inputs["Blue"])
+    g.links.new(n_biome.outputs[0],  n_color.inputs["Alpha"])
 
     n_store = _add_node(g, "GeometryNodeStoreNamedAttribute", 2600, 0,
                         data_type="FLOAT_COLOR", domain="POINT")
@@ -470,9 +588,13 @@ def bind_peak_inputs(mod: bpy.types.Modifier, ng: bpy.types.NodeTree) -> None:
     for item in ng.interface.items_tree:
         if getattr(item, "item_type", None) == "SOCKET" and getattr(item, "in_out", None) == "INPUT":
             ids[item.name] = item.identifier
-    for i, (name, _, _) in enumerate(PEAKS):
-        if name in bpy.data.objects:
-            mod[ids[f"Peak {i}"]] = bpy.data.objects[name]
+    for i, (idx, _, _, _, _) in enumerate(PEAKS):
+        base_name = f"peak_{idx}_base"
+        top_name  = f"peak_{idx}_top"
+        if base_name in bpy.data.objects:
+            mod[ids[f"Base {i}"]] = bpy.data.objects[base_name]
+        if top_name in bpy.data.objects:
+            mod[ids[f"Top {i}"]] = bpy.data.objects[top_name]
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -480,14 +602,30 @@ def bind_peak_inputs(mod: bpy.types.Modifier, ng: bpy.types.NodeTree) -> None:
 # ────────────────────────────────────────────────────────────────────
 
 def add_peaks() -> None:
-    for name, loc, scl in PEAKS:
-        obj = bpy.data.objects.new(name, None)
-        obj.empty_display_type = "SPHERE"
-        obj.empty_display_size = 1.0
-        obj.location = loc
-        obj.scale = scl
-        obj["kind"] = "peak"
-        bpy.context.scene.collection.objects.link(obj)
+    for idx, base_loc, radius, top_local, crater in PEAKS:
+        base = bpy.data.objects.new(f"peak_{idx}_base", None)
+        base.empty_display_type = "CIRCLE"
+        base.empty_display_size = 1.0  # CIRCLE radius = scale.x
+        base.location = base_loc
+        base.scale = (radius, radius, 0.0)
+        base["kind"] = "peak_base"
+        bpy.context.scene.collection.objects.link(base)
+
+        top = bpy.data.objects.new(f"peak_{idx}_top", None)
+        top.empty_display_type = "SPHERE"
+        top.empty_display_size = 5.0  # visible at map scale
+        top.location = top_local
+        top.scale = (1.0, 1.0, crater)
+        top["kind"] = "peak_top"
+        bpy.context.scene.collection.objects.link(top)
+
+        # Copy Location constraint: top's world position = base + top.location.
+        # Avoids the scale-inheritance issue that parenting introduces when
+        # base.scale.x encodes the radius.
+        con = top.constraints.new("COPY_LOCATION")
+        con.target = base
+        con.use_offset = True
+        con.use_x = True; con.use_y = True; con.use_z = True
 
 
 def add_water_volume() -> None:
@@ -550,8 +688,11 @@ def add_sun() -> None:
 
 
 def build_terrain_material(terrain: bpy.types.Object) -> None:
-    """Vertex-color-driven biome ramp. Placeholder — author wires a real
-    material in Blender later."""
+    """Vertex-color-driven biome ramp. Sandy seafloor is the underwater
+    default; deep blue appears only where the shelf floor descends past
+    -22m (visible at the map corners where no peak's shelf shallows the
+    floor). Water surface colour is handled by the runtime water shader,
+    not by this material."""
     name = "mat_terrain_main"
     if name in bpy.data.materials:
         bpy.data.materials.remove(bpy.data.materials[name])
@@ -560,7 +701,7 @@ def build_terrain_material(terrain: bpy.types.Object) -> None:
     nt = mat.node_tree
     for n in list(nt.nodes):
         nt.nodes.remove(n)
-    n_out = nt.nodes.new("ShaderNodeOutputMaterial"); n_out.location = (400, 0)
+    n_out  = nt.nodes.new("ShaderNodeOutputMaterial"); n_out.location = (400, 0)
     n_bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled"); n_bsdf.location = (200, 0)
     n_attr = nt.nodes.new("ShaderNodeAttribute"); n_attr.location = (-400, 0)
     n_attr.attribute_name = "COLOR_0"
@@ -571,10 +712,10 @@ def build_terrain_material(terrain: bpy.types.Object) -> None:
     while len(cr.elements) > 1:
         cr.elements.remove(cr.elements[1])
     cr.elements[0].position = 0.0
-    cr.elements[0].color = (0.05, 0.15, 0.35, 1.0)   # deep
-    e1 = cr.elements.new(0.333); e1.color = (0.15, 0.55, 0.65, 1.0)  # shallow
-    e2 = cr.elements.new(0.667); e2.color = (0.75, 0.70, 0.45, 1.0)  # beach
-    e3 = cr.elements.new(1.0);   e3.color = (0.20, 0.45, 0.25, 1.0)  # jungle
+    cr.elements[0].color = (0.03, 0.08, 0.20, 1.0)   # deep abyssal blue
+    e1 = cr.elements.new(0.333); e1.color = (0.92, 0.86, 0.72, 1.0)  # sandy seafloor
+    e2 = cr.elements.new(0.667); e2.color = (0.78, 0.70, 0.50, 1.0)  # beach tan
+    e3 = cr.elements.new(1.0);   e3.color = (0.20, 0.45, 0.25, 1.0)  # jungle green
     nt.links.new(n_ramp.outputs["Color"], n_bsdf.inputs["Base Color"])
     n_bsdf.inputs["Roughness"].default_value = 0.85
     n_bsdf.inputs["Metallic"].default_value = 0.0
@@ -620,6 +761,24 @@ def organize_collections() -> None:
             move(obj, col_gameplay)
 
 
+def add_water_preview() -> None:
+    """Run the hoverbike addon's water-preview helper so the seeded scene
+    opens with a visible water surface. Pure preview — lives in the
+    addon's render-disabled collection and never reaches GLB export."""
+    try:
+        import hoverbike_addon
+    except ImportError as e:
+        print(f"[seed-template-island] WARNING: could not import hoverbike_addon ({e}); skipping water preview")
+        return
+    summary = hoverbike_addon._rebuild_water_preview(
+        bpy.context.scene,
+        size=WATER_PREVIEW_SIZE,
+        subdivisions=WATER_PREVIEW_SUBDIVISIONS,
+        time=0.0,
+    )
+    print(f"[seed-template-island] water preview: {summary['vert_count']} verts centered on {summary['centered_on']}")
+
+
 # ────────────────────────────────────────────────────────────────────
 # Main
 # ────────────────────────────────────────────────────────────────────
@@ -645,8 +804,8 @@ def seed() -> None:
     build_terrain_material(terrain)
     organize_collections()
 
-    # Force depsgraph evaluation so the modifier evaluates before save —
-    # gives a cleaner viewport state when the file is reopened.
+    bpy.context.view_layer.update()
+    add_water_preview()
     bpy.context.view_layer.update()
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)

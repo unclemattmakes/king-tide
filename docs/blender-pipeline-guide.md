@@ -394,37 +394,56 @@ output sitting outside an Empty parent — re-parent and re-export.
 
 `tracks-src/template-island.blend` ships with a live Geometry Nodes
 modifier that procedurally generates a volcanic-tropical heightfield
-inspired by St. Lucia: cone-shaped peaks with optional craters,
-continental shelves descending to a deep-water floor, fringing reef
-rings, and altitude-modulated multi-octave noise. Drop new peak
-empties, drag them around, retune the modifier inputs — terrain
-reshapes live.
+inspired by St. Lucia: shear-tilted cones for lopsided volcanoes,
+optional summit craters, continental shelves descending to a deep-
+water floor, cone-masked erosion noise, and a low-amplitude global
+background noise field. The seeded file also runs the addon's water-
+preview helper so a wave-displaced water surface is visible from the
+moment you open it.
+
+### Per-peak controls — base + top empty pair
+
+Each volcanic peak uses **two empties**:
+
+| Empty | Visual | Encoded fields |
+|---|---|---|
+| `peak_NN_base` (CIRCLE) | Footprint at sea level | `location.xy`: peak centre in world XY. `scale.x`: base radius (m). |
+| `peak_NN_top` (SPHERE) | Apex / summit | `location` (offset from base via a *Copy Location* constraint): apex XY-offset and Z height. `scale.z`: crater flag (0/1). |
+
+Drag the **base** empty to move the entire island — the *Copy Location*
+constraint drags the top along. Drag the **top** empty to slide the
+apex sideways (producing a lopsided cone) or push it up (taller peak).
+Toggle `scale.z` between 0 and 1 on the top to carve a summit crater.
+
+The constraint approach (vs. parenting) avoids the scale-inheritance
+issue that would otherwise propagate `base.scale.x = radius` into the
+child's position.
 
 ### Forking the template for a new island track
 
 1. **Copy** `tracks-src/template-island.blend` to
    `tracks-src/<your-id>.blend` and open it.
-2. **Reposition / retune peaks.** Each `peak_NN` empty packs four
-   parameters into its transform:
-     - `location.xy` → peak centre in world XY
-     - `location.z`  → peak height (m above sea)
-     - `scale.x`     → base radius (m)
-     - `scale.z`     → crater flag (0 = smooth summit, 1 = carve crater)
-   Move the empty in the viewport to drag the peak with it. Lift it
-   along Z to grow taller; widen X to broaden the base.
-3. **Add / remove peaks.** The modifier exposes 8 slots (`Peak 0`
-   … `Peak 7`). Bind any unused slot to a new empty, or unbind a
-   slot to delete its peak. The default scene uses 4 of 8.
-4. **Tune global knobs** in the modifier panel (Properties → Modifier
+2. **Reposition / retune peaks** as described above. Up to 8 pairs
+   supported (`Base 0`..`Base 7`, `Top 0`..`Top 7`); unbound slots are
+   inert.
+3. **Tune global knobs** in the modifier panel (Properties → Modifier
    → HV_Island):
-     - `Shelf Depth` / `Shelf Radius` — deep-water floor depth and how
-       far offshore the shelf descends from each peak's coastline.
-     - `Reef Inset` / `Reef Height` / `Reef Width` — fringing reef ring.
-     - `Roughness Above` / `Roughness Below` — noise amplitude on land
-       vs. underwater. Default 6 m / 1.5 m.
-     - `Noise Scale` (smaller = bigger features) and `Noise Seed`
-       (re-roll for variation).
-5. **Apply the modifier** when the silhouette reads right. Object →
+
+   | Knob | Default | Purpose |
+   |---|---|---|
+   | Shelf Depth | -25 m | Deep-water floor |
+   | Shelf Radius | 200 m | How far offshore the shelf descends from each coast |
+   | Reef Inset | 20 m | Distance from coast to centre of reef ring |
+   | Reef Height | 0 m | Reef pulse amplitude (default off — dial up if you want fringing reefs) |
+   | Reef Width | 25 m | Reef Gaussian σ |
+   | Cone Erosion | 12 m | Per-cone noise amplitude (slope gulleys / outcrops). Mask-driven by cone contribution — zero off the cone. |
+   | Erosion Scale | 0.035 | Erosion noise frequency (smaller = larger features) |
+   | Roughness Above | 2 m | Global background-noise amplitude above water |
+   | Roughness Below | 1 m | Global background-noise amplitude below water |
+   | Noise Scale | 0.008 | Global noise frequency |
+   | Noise Seed | 0 | Re-roll for variation |
+
+4. **Apply the modifier** when the silhouette reads right. Object →
    Convert → Mesh, then add the standard track furniture on top:
      - Update or delete the starter `ai_spline_main` curve to follow
        your racing line.
@@ -433,7 +452,7 @@ reshapes live.
        `gateSpacing` on the track JSON.
      - Move `start_00` / `start_01` to your grid.
      - Adjust `water_volume_main`'s extents if needed.
-6. **Export** via the addon's *Export Track to Game* — identical
+5. **Export** via the addon's *Export Track to Game* — identical
    pipeline to every other track.
 
 ### Re-seeding the template from scratch
@@ -447,8 +466,8 @@ clean reset, regenerate it via the seed script:
 ```
 
 This writes `tracks-src/template-island.blend` from scratch, including
-the full GN graph (~38 nodes in the parent, 29 in the
-`HV_PeakProfile` sub-group) and the starter scene.
+the GN graph (parent + `HV_PeakProfile` sub-group, ~90 nodes total) and
+the starter scene with the water-preview plane already rebuilt.
 
 ### Vertex attribute contract
 
@@ -460,19 +479,25 @@ The GN graph stamps `COLOR_0` on the terrain per the
 | R | Sway | `0` (terrain doesn't sway) |
 | G | AO multiplier | `1` (placeholder — real AO bake is a GUI pass) |
 | B | Path-worn mask | `0` (filled later when the racing line is painted) |
-| A | Biome index | `0` deep / `0.33` shallow / `0.67` beach / `1.0` jungle |
+| A | Biome index | `0` deep (z < -22) / `0.33` sandy seafloor (-22 ≤ z < 0) / `0.67` beach (0 ≤ z < 4) / `1.0` jungle (z ≥ 4) |
 
-Downstream consumers (terrain shader, foliage scatter density
-filter) read these channels through the existing
-[`foliage-sway.ts`](../src/engine/render/foliage-sway.ts) plumbing.
+The biome thresholds are intentionally tuned so that most underwater
+terrain reads as **sandy seafloor**, with deep-blue only appearing at
+the very deepest shelf floor (near the map corners where no peak's
+shelf shallows the depth). Water *surface* colour is the runtime
+water shader's responsibility, not this material's.
 
 ### Known limitations
 
-- **8 peak cap.** Going past 8 requires editing the GN graph to add
-  more sub-group instances. Author who wants ≥9 peaks: open
+- **8 peak-pair cap.** Going past 8 requires editing the GN graph to
+  add more sub-group instances. Author who wants ≥9 peaks: open
   `HV_TemplateIsland`, duplicate one of the inner sub-group instances,
-  wire it through another `MAX` node in the cascade, and add a `Peak 8`
-  Group Input.
+  wire it through another `MAX` node in the cascade, and add `Base 8`
+  / `Top 8` Group Inputs.
+- **Lopsided cone is a one-iteration shear, not exact.** Strong apex
+  offsets (top empty pushed far from the base centre) read as
+  visually tilted but aren't geometrically a true slanted cone. The
+  approximation is good enough for typical St. Lucia-style apex shifts.
 - **Steep volcanic slopes may not be drivable.** Cone sides above
   ~40° are too steep for the hover controller in some directions.
   Hand-flatten saddles where the racing line crosses ridges.
