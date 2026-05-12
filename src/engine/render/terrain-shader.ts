@@ -41,6 +41,7 @@
  */
 
 import * as THREE from 'three'
+import type Node from 'three/src/nodes/core/Node.js'
 import {
   abs,
   clamp,
@@ -202,13 +203,13 @@ export function buildTerrainMaterial(): MeshStandardNodeMaterial {
  * Bilinear value noise sampled on an XY plane. Hash-based, no texture.
  * Two octaves blended 1.0 + 0.5; output ≈ [0, 1].
  */
-function valueNoiseOctave2D(p: ReturnType<typeof positionWorld.xz.mul>) {
+function valueNoiseOctave2D(p: Node<'vec2'>) {
   const layer1 = valueNoise2D(p)
   const layer2 = valueNoise2D(p.mul(2.03))
   return layer1.mul(0.667).add(layer2.mul(0.333))
 }
 
-function valueNoise2D(p: ReturnType<typeof positionWorld.xz.mul>) {
+function valueNoise2D(p: Node<'vec2'>) {
   const i = p.floor()
   const f = p.fract()
   const u = f.mul(f).mul(float(3).sub(f.mul(2)))
@@ -219,7 +220,7 @@ function valueNoise2D(p: ReturnType<typeof positionWorld.xz.mul>) {
   return mix(mix(n00, n10, u.x), mix(n01, n11, u.x), u.y)
 }
 
-function hash2(p: ReturnType<typeof positionWorld.xz>) {
+function hash2(p: Node<'vec2'>) {
   return fract(sin(dot(p, vec2(127.1, 311.7))).mul(43758.5453))
 }
 
