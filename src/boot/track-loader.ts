@@ -78,7 +78,7 @@ export async function loadTrackForBoot(opts: {
     const track = buildTrackFromJson(JSON.parse(await jsonRes.text()))
     if (track.environmentGlb && !editMode) {
       const env = await loadGlbTrackVisuals(track.environmentGlb, {
-        terrainShader: track.terrainShader,
+        ...(track.terrainShader ? { terrainShader: track.terrainShader } : {}),
       })
       scene.add(env.scene)
       attachTrackColliders(env.scene, phys)
