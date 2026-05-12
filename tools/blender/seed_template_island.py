@@ -679,6 +679,34 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     n_land_signed.inputs[1].default_value =  2.0
     n_land_signed.inputs[2].default_value = -1.0
     g.links.new(n_land_noise.outputs["Fac"], n_land_signed.inputs[0])
+
+    # Suppress negative swings near the waterline. At z=0 the cone is at
+    # its foot and the bare cone profile is gently sloped, so any down-
+    # swing would carve a dip that reads as a "moat" between the cone
+    # and the shelf. We fade the *negative* half of ``signed`` from 0 at
+    # the waterline to full at z=8 m, keeping positives at full strength
+    # throughout. Result: the foot only ever gains height from this pass,
+    # while higher up the slope retains the symmetric hills-and-gulleys
+    # character.
+    n_land_pos = _add_node(g, "ShaderNodeMath", 0, -3000, operation="MAXIMUM")
+    n_land_pos.inputs[1].default_value = 0.0
+    g.links.new(n_land_signed.outputs[0], n_land_pos.inputs[0])
+    n_land_neg = _add_node(g, "ShaderNodeMath", 0, -3200, operation="MINIMUM")
+    n_land_neg.inputs[1].default_value = 0.0
+    g.links.new(n_land_signed.outputs[0], n_land_neg.inputs[0])
+    n_land_neg_fade = _add_node(g, "ShaderNodeMapRange", 0, -3400,
+                                interpolation_type="SMOOTHSTEP", clamp=True)
+    n_land_neg_fade.inputs["From Min"].default_value = 0.0
+    n_land_neg_fade.inputs["From Max"].default_value = 8.0
+    n_land_neg_fade.inputs["To Min"].default_value =   0.0
+    n_land_neg_fade.inputs["To Max"].default_value =   1.0
+    g.links.new(prev, n_land_neg_fade.inputs["Value"])
+    n_land_neg_eff = _add_node(g, "ShaderNodeMath", 200, -3200, operation="MULTIPLY")
+    g.links.new(n_land_neg.outputs[0], n_land_neg_eff.inputs[0])
+    g.links.new(n_land_neg_fade.outputs["Result"], n_land_neg_eff.inputs[1])
+    n_land_signed_eff = _add_node(g, "ShaderNodeMath", 400, -3100, operation="ADD")
+    g.links.new(n_land_pos.outputs[0], n_land_signed_eff.inputs[0])
+    g.links.new(n_land_neg_eff.outputs[0], n_land_signed_eff.inputs[1])
     # Above-water mask: full strength above z = +3 m, fades to zero at
     # the waterline (z = 0). Keeping the lower edge fixed at the
     # waterline rather than at +Shoreline_Width lets the cone slope's
@@ -693,8 +721,8 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     n_land_mask.inputs["To Min"].default_value =    0.0
     n_land_mask.inputs["To Max"].default_value =    1.0
     g.links.new(prev, n_land_mask.inputs["Value"])
-    n_land_mul = _add_node(g, "ShaderNodeMath", 200, -3100, operation="MULTIPLY")
-    g.links.new(n_land_signed.outputs[0], n_land_mul.inputs[0])
+    n_land_mul = _add_node(g, "ShaderNodeMath", 600, -3100, operation="MULTIPLY")
+    g.links.new(n_land_signed_eff.outputs[0], n_land_mul.inputs[0])
     g.links.new(n_land_mask.outputs["Result"], n_land_mul.inputs[1])
     n_land = _add_node(g, "ShaderNodeMath", 400, -3100, operation="MULTIPLY")
     g.links.new(n_land_mul.outputs[0], n_land.inputs[0])
