@@ -26,6 +26,11 @@ export type DevSettings = {
   // Gamepad driving
   /** Left-stick magnitude below which steer/pitch read as zero. */
   gamepadDeadzone: number
+  /** Power applied to the rescaled-past-deadzone stick magnitude. 1.0 is
+   *  linear; 2.0+ is heavily soft-centered. Default ~1.6 reads as modern
+   *  racing/flight feel — fine corrections in the center, full authority
+   *  at the rim. Shared by gamepad + touch sticks. */
+  stickCurve: number
 
   // Keyboard smoothing — exponential decay rate (1/s).
   // Higher = snappier (less smoothing); lower = more analog-feeling.
@@ -42,6 +47,7 @@ export const DEFAULT_DEV_SETTINGS: Readonly<DevSettings> = Object.freeze({
   cameraInvertY: true,
 
   gamepadDeadzone: 0.12,
+  stickCurve: 1.6,
 
   keyboardSteerRate: 9,
   keyboardThrottleRate: 10,
@@ -77,6 +83,7 @@ export function loadDevSettings(): void {
     'cameraStickPitchRange',
     'cameraStickDeadzone',
     'gamepadDeadzone',
+    'stickCurve',
     'keyboardSteerRate',
     'keyboardThrottleRate',
     'keyboardPitchRate',

@@ -29,6 +29,7 @@ type NumericKey =
   | 'cameraStickPitchRange'
   | 'cameraStickDeadzone'
   | 'gamepadDeadzone'
+  | 'stickCurve'
   | 'keyboardSteerRate'
   | 'keyboardThrottleRate'
   | 'keyboardPitchRate'
@@ -66,6 +67,12 @@ const SLIDERS: SliderSpec[] = [
     format: (n) => n.toFixed(2),
   },
   { key: 'gamepadDeadzone', inputId: 'ds-gp-dz', valId: 'ds-gp-dz-v', format: (n) => n.toFixed(2) },
+  {
+    key: 'stickCurve',
+    inputId: 'ds-stick-curve',
+    valId: 'ds-stick-curve-v',
+    format: (n) => n.toFixed(2),
+  },
   {
     key: 'keyboardSteerRate',
     inputId: 'ds-kb-steer',

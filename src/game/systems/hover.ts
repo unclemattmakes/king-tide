@@ -167,21 +167,26 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       const sy_ = Math.sin(yaw_)
 
       // Altitude-faded follow: skimming the surface fully tracks terrain;
-      // riding high smooths out into a hover. Linear from 1.0 at the
-      // surface to 0.0 at the grounded/airborne boundary, so at nominal
-      // hover (groundDistance ≈ hoverHeight) the bike inherits ~37% of
-      // its base follow. Dipping into a trough or skimming a ramp kicks
-      // the factor back up.
+      // riding high holds onto a meaningful slice so banked turns still
+      // bank at nominal hover height. Linear from 1.0 at the surface down
+      // to FOLLOW_FAR_MIN at the grounded/airborne boundary, so at
+      // nominal hover (groundDistance ≈ hoverHeight) the bike inherits
+      // roughly 70% of its base follow — enough that a banked corner
+      // reads as a banked corner even when the rider isn't deliberately
+      // skimming the wall. Dipping into a trough kicks it back to 1.0.
       //
       // Base follow: water uses the per-bike `surfaceFollow` (chop is
-      // noisy enough that 0.5 reads as a sturdy hover bike); ground uses
+      // noisy enough that 0.85 reads as a sturdy hover bike); ground uses
       // 1.0 so the chassis fully matches a clean ramp slope as the new
       // neutral attitude. The center probe's surface type picks which
       // baseline applies — straddling-the-shoreline transitions briefly
       // hand off as the center crosses, which is fine: the multi-probe
       // height differential is what's doing the heavy lifting either way.
       const surfFadeFar = stats.hoverHeight * 1.6
-      const altitudeFactor = Math.max(0, Math.min(1, 1 - groundDistance / surfFadeFar))
+      const FOLLOW_FAR_MIN = 0.5 // never below 50% inside the grounded zone
+      const altitudeFactor =
+        FOLLOW_FAR_MIN +
+        (1 - FOLLOW_FAR_MIN) * Math.max(0, Math.min(1, 1 - groundDistance / surfFadeFar))
       const baseFollow = probe.isWater ? stats.surfaceFollow : 1.0
       const followNow = baseFollow * altitudeFactor
 

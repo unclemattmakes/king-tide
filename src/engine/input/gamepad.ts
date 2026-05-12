@@ -1,8 +1,20 @@
 import { devSettings } from '../dev-settings'
 import { emptyIntent, type Intent } from './intent'
 
-function applyDeadzone(v: number): number {
-  return Math.abs(v) < devSettings.gamepadDeadzone ? 0 : v
+/**
+ * Modern radial response: subtract the deadzone, rescale the remainder to
+ * [0, 1] so the response starts at zero immediately past the deadzone, then
+ * raise to `stickCurve` to soften the center and keep full authority at the
+ * rim. Default curve ~1.6 reads as the "racing / flight stick" feel —
+ * Forza/Halo/etc. — a quarter-stick correction barely moves the bike, but
+ * the rim is still 1.0.
+ */
+function shapeAxis(v: number): number {
+  const dz = devSettings.gamepadDeadzone
+  const mag = Math.abs(v)
+  if (mag < dz) return 0
+  const t = (mag - dz) / (1 - dz)
+  return Math.sign(v) * Math.pow(Math.min(t, 1), devSettings.stickCurve)
 }
 
 export type GamepadSnapshot = {
@@ -41,13 +53,13 @@ export function gamepadIntent(): Intent {
   const pad = navigator.getGamepads?.()?.[0]
   if (!pad) return intent
 
-  intent.steer = applyDeadzone(pad.axes[0] ?? 0)
+  intent.steer = shapeAxis(pad.axes[0] ?? 0)
   // axes[1] is negative when the stick is pushed forward (away from player),
   // positive when pulled back. Hover sim convention (post-M9.18 follow-up):
   // positive intent.pitch = nose UP / lift, negative = nose DOWN / dive.
   // So pull back (axes[1] = +1) → pitch +1 → lift; push forward (axes[1] = -1)
   // → pitch -1 → dive. No sign flip needed.
-  intent.pitch = applyDeadzone(pad.axes[1] ?? 0)
+  intent.pitch = shapeAxis(pad.axes[1] ?? 0)
 
   const rt = pad.buttons[7]?.value ?? 0
   const a = pad.buttons[0]?.pressed ? 1 : 0
