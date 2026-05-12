@@ -615,11 +615,32 @@ export function createWaterMesh(
   // GPU Gems eq.13 normal: (-Σdy/dx, 1 - Σ Q·k·A·sin, -Σdy/dz).
   // The wake's gradients are folded into dydx/dydz; the wake has no
   // horizontal-displacement term so it doesn't contribute to qSum.
-  const normalNode = normalize(vec3(dydx.negate(), float(1).sub(qSumFrag), dydz.negate()))
+  const rawNormal = normalize(vec3(dydx.negate(), float(1).sub(qSumFrag), dydz.negate()))
 
   // View vector + ndotv computed once and reused by both the scatter blend
   // (base color) and the fresnel sky-tint emissive below.
   const viewDir = normalize(cameraPosition.sub(positionWorld))
+
+  // Camera-to-fragment distance. Used in four places:
+  //  - to fade high-frequency hash noise toward its mean at long range
+  //    (kills pixel-speckle aliasing on the foam and shoreline patches),
+  //  - to flatten the wave normal toward (0, 1, 0) on the horizon
+  //    (kills specular sparkle aliasing where wave gradients run sub-pixel),
+  //  - to distance-attenuate the planar-reflection distortion (the existing
+  //    use, now sharing this single length() instead of recomputing),
+  //  - to soften the wave-driven foam threshold at distance so the
+  //    crest-foam edge doesn't shimmer on receding waves.
+  const camDist = cameraPosition.sub(positionWorld).length()
+
+  // Lerp the per-pixel wave normal toward the flat surface normal as the
+  // fragment recedes. The Gerstner gradient is high-frequency relative to
+  // the camera-space wavelength at the horizon, so the PBR specular lobe
+  // catches single-pixel glints that flicker frame-to-frame. Past ~120 m
+  // the normal is essentially flat and only the wave color modulation
+  // carries the surface shape. Reflection distortion still uses the raw
+  // dydx/dydz (already faded by camDist there).
+  const normalFlatten = smoothstep(float(40), float(180), camDist)
+  const normalNode = normalize(mix(rawNormal, vec3(0, 1, 0), normalFlatten))
   const ndotv = max(dot(normalNode, viewDir), float(0))
 
   // Albedo: two-color scatter blend.
@@ -712,9 +733,16 @@ export function createWaterMesh(
   //   - bow spray intensity (multiplicative `foamTurbulence`)
   // so all interactive foam moves with a unified visual rhythm.
   const foamNoiseUV = positionWorld.xz.mul(0.35).add(vec2(tNode.mul(-0.18), tNode.mul(0.13)))
-  const foamNoiseRaw = fract(
+  const foamNoiseRawHF = fract(
     sin(foamNoiseUV.x.mul(12.9898).add(foamNoiseUV.y.mul(78.233))).mul(43758.5453),
   )
+  // Distance-fade the hash toward its mean (0.5). The 2.86 m wavelength of
+  // the hash aliases badly once one screen pixel covers >1 noise cell, which
+  // happens between ~30 and ~80 m at typical FOV / 1080p. Past the fade
+  // window the noise collapses to a constant — distant shoreline + wake
+  // foam reads as a smooth bright band instead of pixel-speckle.
+  const foamNoiseAntialias = float(1).sub(smoothstep(float(30), float(80), camDist))
+  const foamNoiseRaw = mix(float(0.5), foamNoiseRawHF, foamNoiseAntialias)
   const foamNoiseSmooth = smoothstep(float(0.2), float(0.85), foamNoiseRaw)
   // Multiplier in [0.5, 1.0] — never erases foam, just breaks up its
   // intensity into turbulent patches.
@@ -880,8 +908,14 @@ export function createWaterMesh(
         //   - `peakFoam`   — narrow bright lip in the first ~0.5 m of
         //                    submersion. This is the unmistakable "foam at
         //                    the geometry edge" beat.
-        const FOAM_BAND_BASE = 3.0
-        const PEAK_RANGE = 0.6
+        // Wider, brighter than v2. Recent shoreline-cone work made the
+        // terrain drop steeply at the water-line, which compressed the
+        // 3 m band to a sub-pixel sliver. Reaching out to 6 m gives the
+        // surf zone room to breathe in screen space, and the peak band
+        // (now 1.0 m) makes the actual waterline lip read as a solid
+        // belt rather than a thin highlight you have to hunt for.
+        const FOAM_BAND_BASE = 6.0
+        const PEAK_RANGE = 1.0
         // .r is the non-linear depth in [0, 1].
         const sceneDepthRaw = sceneDepthSampleNode.r
         const sceneViewZ = perspectiveDepthToViewZ(sceneDepthRaw, cameraNear, cameraFar)
@@ -892,27 +926,29 @@ export function createWaterMesh(
         // sceneViewZ is more negative (further away).
         const closenessSigned = waterViewZ.sub(sceneViewZ)
         const behindGate = smoothstep(float(-0.05), float(0.05), closenessSigned)
-        // Lapping shoreline (M9.33): the depth threshold breathes ±0.7m
-        // around the 3.0m base as the shared foam noise scrolls. Where
-        // noise is high, foam reaches further off-shore (3.7m); where
-        // low, it pulls back (2.3m). Combined with the static depth
-        // intersection, this reads as the surf "lapping" against the
-        // shore rather than a static water-line.
+        // Lapping shoreline: the depth threshold breathes ±1.0 m around
+        // the 6.0 m base as the shared foam noise scrolls. Bumped from
+        // ±0.7 m so the surf "tongue" extends further at peaks of the
+        // turbulence — reads as a more lively shoreline.
         const closeness = max(float(0), closenessSigned)
-        const noiseRangeOffset = foamNoiseRaw.sub(float(0.5)).mul(float(1.4))
+        const noiseRangeOffset = foamNoiseRaw.sub(float(0.5)).mul(float(2.0))
         const bandRangeNow = float(FOAM_BAND_BASE).add(noiseRangeOffset)
-        // Sqrt-shaped falloff: full-bright near the edge, half-bright at
-        // ~25% of the band, fading to 0 at the band edge. Much more
-        // pronounced than a linear / smoothstep falloff.
+        // Pow-0.4 falloff: fuller-bright across more of the band than the
+        // sqrt curve. At half the band depth, foam still reads at ~0.76
+        // brightness (sqrt put it at 0.71). Combined with the wider base,
+        // the surf zone reads as a solid sand-edge band rather than a
+        // gradient that fades to nothing.
         const bandLinear = float(1).sub(clamp(closeness.div(bandRangeNow), float(0), float(1)))
-        const bandFoam = sqrt(bandLinear)
-        // Tight peak right at the intersection — bright lip on top of the
-        // band, regardless of band thickness.
-        const peakFoam = float(1).sub(smoothstep(float(0), float(PEAK_RANGE), closeness))
-        // Intensity modulation: bumped to 0.85..1.15 so foam can punch
-        // brighter than the wave/bike foam ceiling — turbulent peaks
-        // saturate on the final clamp instead of sitting at 70%.
-        const intensityModulator = mix(float(0.85), float(1.15), foamNoiseSmooth)
+        const bandFoam = pow(bandLinear, float(0.4))
+        // Tight bright peak right at the intersection — the unmistakable
+        // waterline lip on top of the wider band. Wider PEAK_RANGE (was
+        // 0.6) so the lip survives steep shorelines where terrain drops
+        // sub-meter into the water within a few pixels of the surface.
+        const peakLinear = float(1).sub(smoothstep(float(0), float(PEAK_RANGE), closeness))
+        const peakFoam = peakLinear.mul(float(1.15))
+        // Intensity modulation: 0.9..1.2 — slightly punchier than v2's
+        // 0.85..1.15 so turbulent peaks saturate the final clamp.
+        const intensityModulator = mix(float(0.9), float(1.2), foamNoiseSmooth)
         return behindGate.mul(max(bandFoam, peakFoam)).mul(intensityModulator)
       })()
 
@@ -923,7 +959,11 @@ export function createWaterMesh(
   // ramp hits water. Final clamp raised from 0.95 to 1.0 so the bright
   // peak at the water-line can reach pure white.
   const foamMask = clamp(max(waveFoam.add(bikeFoam), intersectionFoam), float(0), float(1))
-  const foamColor = vec3(0.92, 0.96, 1.0)
+  // Slightly warmer / brighter than v2's (0.92, 0.96, 1.0). Real surf
+  // foam reads near-white-with-a-warm-tilt under sunlight; the previous
+  // cool tint was getting tugged blue by the deep-water albedo it sat on
+  // top of, especially while the alpha was 0.78.
+  const foamColor = vec3(0.97, 0.99, 1.0)
 
   // Fresnel: standard Schlick approximation. Used both as a strength
   // weight for the planar reflection (below) and as the fallback sky-tint
@@ -974,7 +1014,6 @@ export function createWaterMesh(
     // The 0.04 base is the gentlest setting that still reads as "moving
     // water" rather than "glass"; bump if the reflection feels too
     // perfect, drop if it smears.
-    const camDist = cameraPosition.sub(positionWorld).length()
     const distortAmt = float(0.02).add(float(0.6).div(camDist.add(float(2.0))))
     const distortion = vec2(dydx, dydz).mul(distortAmt)
     // biome-ignore lint/suspicious/noExplicitAny: TSL ReflectorNode TS surface lacks .uvNode/.rgb/.target getters
@@ -1051,8 +1090,19 @@ export function createWaterMesh(
   mat.positionNode = positionNode
   mat.normalNode = normalNode
   mat.colorNode = albedo
-  mat.emissiveNode = fresnelEmissive.add(sunGlow)
-  mat.opacityNode = float(0.78)
+  // Foam needs a small constant emissive lift. Real foam scatters sky
+  // light independently of the direct sun, so it stays readably bright
+  // even when the surface is in shadow (cliff side, behind a bike) —
+  // without this, foam in shadowed shoreline reads as grey, which was
+  // half of the "looks very transparent" feeling.
+  const foamEmissive = foamColor.mul(foamMask).mul(float(0.18))
+  mat.emissiveNode = fresnelEmissive.add(sunGlow).add(foamEmissive)
+  // Drive opacity from foamMask. The base water surface stays at 0.78
+  // (terrain reads through), but where foam fires the alpha lifts to
+  // 0.98 so foam reads as opaque scattered air bubbles instead of a
+  // translucent tint of the dark water behind it. This is the largest
+  // single contributor to "foam now looks like foam".
+  mat.opacityNode = mix(float(0.78), float(0.98), foamMask)
   // Noise-modulated roughness. In sparkle patches roughness drops from 0.18
   // to ~0.04, tightening the specular lobe and producing crisp highlights.
   // Classic mode keeps the constant 0.18 so the A/B comparison is clean.
