@@ -12,6 +12,43 @@ and [blender-conventions.md](./blender-conventions.md).
 
 ## Shipped so far
 
+- **Template-island polish + preview-export scrub (2026-05-11).** Four
+  small follow-ups on top of Item 1:
+  - **Billowy ocean floor.** New `Seafloor Billow` (default 10 m)
+    + `Billow Scale` (0.004) sockets on `HV_TemplateIsland`. A
+    distorted FBM noise gated by a smoothstep mask (full at
+    z=-8 m, zero at z=-1 m) carves the sub-shelf floor into ridged
+    silt rather than a flat plateau. Live-verified on
+    `tracks-src/template-island.blend`: underwater verts span
+    roughly z∈[-55, -10] m with σ≈10 m of relief, while the
+    shoreline mask keeps billows from poking through the waterline.
+  - **Slope-aware terrain shader.** `mat_terrain_main` rebuilt to
+    mix a *flat* altitude ramp (deep blue → blue-sand → bright
+    sand → wet beach → grass → forest → alpine stone → volcanic top)
+    against a *cliff* ramp (dark abyssal rock → wet rock → sea cliff
+    → grey rock → warmer rock → volcanic), blended by the surface
+    normal's tilt (smoothstep from cos 30° to cos 55°). A
+    low-frequency variation noise drives `BrightContrast` for
+    ±0.10 unbanding without ColorRamp clamping, and a triangular
+    |z|-mask around the waterline tints damp sand / wet rock. Eevee
+    preview now reads as volcanic tropical island rather than a flat
+    vertex-colour ramp.
+  - **Preview collections excluded from export.** New
+    `_PreviewCollectionsHidden` context manager scrubs every
+    `_hoverbike_*_preview` layer-collection during glTF export in
+    both the addon's *Export Track to Game* and the headless
+    `tools/export_track.py`. The wave-displaced water plane, gate
+    gizmos, racer silhouettes, and turn indicators are now
+    guaranteed not to ride into `<id>.glb` even with the addon's
+    visibility toggles flipped on.
+  - **Gate-preview button regression fix.** `HOVERBIKE_PT_panel`'s
+    `_draw_track` / `_draw_bike` / `_draw_unknown` were referencing
+    `context.scene.*` without `context` in scope — a NameError
+    aborted panel draw partway through, leaving the Gate Preview
+    box visible without its spacing knob or Rebuild/Hide buttons
+    (the "dark grey thing" Matt couldn't click). Methods now
+    receive `context` from `draw()`.
+
 - **Item 2 — Gate placement link (2026-05-11).** `gateSpacing` field on
   the track JSON, shared `resampleByArcLength()` in
   [`src/game/tracks/gate-placement.ts`](../src/game/tracks/gate-placement.ts),
