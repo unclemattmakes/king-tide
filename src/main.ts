@@ -44,6 +44,7 @@ import { installLobbyOverlay } from './engine/render/lobby-overlay'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
 import { createScene } from './engine/render/scene'
+import { createSkySystem } from './engine/render/sky'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { type BikeImpact, createWaterMesh } from './engine/render/water'
 import { parseReplay, type ReplayBike, type ReplayFile } from './engine/replay/format'
@@ -146,7 +147,7 @@ async function boot() {
   installCameraLookInput()
 
   const { renderer, backend } = await createRenderer(appEl)
-  const { scene, camera, sun } = createScene()
+  const { scene, camera, sun, hemi } = createScene()
   const phys = await createPhysicsWorld()
   const sim = createSimWorld()
   const chase = createChaseCamera(camera)
@@ -280,6 +281,20 @@ async function boot() {
   // fallback for editor on a fresh id.
   const track = await loadTrackForBoot({ trackId, scene, phys, editMode })
 
+  // Sky / atmosphere system. Owns the dome mesh, the day-night cycle, fog
+  // + hemi-light palette, and the periodic PMREM env-map bake. Created here
+  // (post-track-load) so per-track overrides in `track.sky` get applied
+  // from the first frame; gets ticked from both the live and replay loops
+  // below, plus a one-shot tick in editor mode for a static lit palette.
+  const sky = createSkySystem({
+    scene,
+    renderer,
+    sun,
+    hemi,
+    water: waterMesh,
+    config: track.sky,
+  })
+
   // Edit mode: the editor owns the canvas, sim/physics are skipped, no AI
   // bikes, no race system. The user authors the track and saves to disk;
   // hitting "Play" reloads without `?edit=1` to drive the changes.
@@ -293,7 +308,15 @@ async function boot() {
       track,
       propAssets: manifest.props,
     })
+    let editLastT = performance.now()
     function editFrame() {
+      const now = performance.now()
+      const dt = Math.min(0.1, (now - editLastT) / 1000)
+      editLastT = now
+      // Editor: no sim, so drive the sky off wall-clock. dt is for the
+      // PMREM bake cadence; the time argument advances slowly so authors
+      // can preview lighting across the cycle without re-launching.
+      sky.tick(waveField.time, dt, { x: camera.position.x, z: camera.position.z })
       waterMesh.tick()
       editor.tick()
       requestAnimationFrame(editFrame)
@@ -1177,47 +1200,14 @@ async function boot() {
     }
 
     waterMesh.tick(gatherBikeImpacts(), { x: camera.position.x, z: camera.position.z })
-    // Day-night cycle: animate the directional sun light around the scene
-    // and keep the water shader's sun-direction uniform in sync. The sun
-    // makes a full 360° azimuth rotation while bobbing in elevation
-    // between ~30°..70° over SUN_CYCLE_SECONDS, so over a 1–3 lap race
-    // the sun-glow on backlit waves visibly drifts across the scene.
-    //
-    // The sun light is positioned along the computed direction *from the
-    // player*, with `sun.target` set to the player. This keeps the shadow
-    // camera's orthographic frustum (configured in createScene) centered
-    // on the bike so shadows stay crisp wherever the track wanders, while
-    // still feeding the water shader the right directional vector.
-    //
-    // Driven by the deterministic wave-field clock (`waveField.time`) so
-    // a replay or rollback would put the sun back where it was.
-    {
-      const SUN_CYCLE_SECONDS = 360 // 6 minutes per full rotation
-      const SUN_DISTANCE = 220 // far enough to act directional; > shadow.camera.far/2 OK
-      const t = waveField.time
-      const phase = (t / SUN_CYCLE_SECONDS) * Math.PI * 2
-      // Elevation: 30°..70°, full rise+fall once per cycle. Phase offset
-      // 0.7×phase staggers it from the azimuth so sun doesn't trace a
-      // simple circle — adds variety to the lighting arc.
-      const elev = (50 + 20 * Math.sin(phase * 0.7)) * (Math.PI / 180)
-      // Azimuth: starts at 45° (matching the original (50, 70, 70) sun
-      // position) and rotates a full 360° per cycle.
-      const azimuth = (45 * Math.PI) / 180 + phase
-      const cosE = Math.cos(elev)
-      const dirX = cosE * Math.cos(azimuth)
-      const dirY = Math.sin(elev)
-      const dirZ = cosE * Math.sin(azimuth)
-      const followX = state.playerSnapshot?.position.x ?? 0
-      const followZ = state.playerSnapshot?.position.z ?? 0
-      sun.position.set(
-        followX + dirX * SUN_DISTANCE,
-        dirY * SUN_DISTANCE,
-        followZ + dirZ * SUN_DISTANCE,
-      )
-      sun.target.position.set(followX, 0, followZ)
-      sun.target.updateMatrixWorld()
-      waterMesh.setSunDirection(dirX, dirY, dirZ)
-    }
+    // Day-night cycle + fog/hemi palette + PMREM env-map bake. The sky
+    // system owns the directional-sun follow (shadow-camera centred on the
+    // bike) and the water shader's sun-direction uniform. Time is the
+    // deterministic wave-field clock so replays and rollbacks line up.
+    sky.tick(waveField.time, dt, {
+      x: state.playerSnapshot?.position.x ?? 0,
+      z: state.playerSnapshot?.position.z ?? 0,
+    })
     bikeRender()
     pickupRender(dt)
     combatRender(dt)
@@ -1520,27 +1510,9 @@ async function boot() {
 
       waterMesh.tick([], { x: camera.position.x, z: camera.position.z })
 
-      // Day-night cycle, same as normal frame — sun follows the focal bike.
-      {
-        const SUN_CYCLE_SECONDS = 360
-        const SUN_DISTANCE = 220
-        const t = waveField.time
-        const phase = (t / SUN_CYCLE_SECONDS) * Math.PI * 2
-        const elev = (50 + 20 * Math.sin(phase * 0.7)) * (Math.PI / 180)
-        const azimuth = (45 * Math.PI) / 180 + phase
-        const cosE = Math.cos(elev)
-        const dirX = cosE * Math.cos(azimuth)
-        const dirY = Math.sin(elev)
-        const dirZ = cosE * Math.sin(azimuth)
-        sun.position.set(
-          focalPos.x + dirX * SUN_DISTANCE,
-          dirY * SUN_DISTANCE,
-          focalPos.z + dirZ * SUN_DISTANCE,
-        )
-        sun.target.position.set(focalPos.x, 0, focalPos.z)
-        sun.target.updateMatrixWorld()
-        waterMesh.setSunDirection(dirX, dirY, dirZ)
-      }
+      // Sky/atmosphere — same call as the live loop; sun follows the focal
+      // bike so shadows stay framed during spectator pans.
+      sky.tick(waveField.time, dt, { x: focalPos.x, z: focalPos.z })
       bikeRender()
       pickupRender(dt)
       combatRender(dt)

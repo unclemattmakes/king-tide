@@ -118,6 +118,66 @@ describe('buildTrackFromJson', () => {
     expect(track.boostPads).toEqual([])
   })
 
+  it('round-trips an optional sky config block', () => {
+    const raw = baseTrack()
+    raw.sky = {
+      tint: '#ffe4c4',
+      cloudiness: 0.7,
+      sunIntensity: 1.2,
+      fogNear: 100,
+      fogFar: 1200,
+    }
+    const built = buildTrackFromJson(raw)
+    expect(built.sky).toEqual({
+      tint: '#ffe4c4',
+      cloudiness: 0.7,
+      sunIntensity: 1.2,
+      fogNear: 100,
+      fogFar: 1200,
+    })
+    const back = trackToJson(built)
+    const rebuilt = buildTrackFromJson(back)
+    expect(rebuilt.sky).toEqual(built.sky)
+  })
+
+  it('treats sky as fully optional (omitted on tracks that do not need it)', () => {
+    const raw = baseTrack()
+    expect('sky' in raw).toBe(false)
+    const built = buildTrackFromJson(raw)
+    expect(built.sky).toBeUndefined()
+  })
+
+  it('rejects malformed sky.tint', () => {
+    const raw = baseTrack()
+    raw.sky = { tint: 'orange' }
+    expect(() => buildTrackFromJson(raw)).toThrow(/sky\.tint must be a 6-digit hex color/)
+  })
+
+  it('rejects sky.cloudiness out of [0,1]', () => {
+    const raw = baseTrack()
+    raw.sky = { cloudiness: 1.5 }
+    expect(() => buildTrackFromJson(raw)).toThrow(/sky\.cloudiness must be in \[0,1\]/)
+  })
+
+  it('rejects sky.sunIntensity below zero', () => {
+    const raw = baseTrack()
+    raw.sky = { sunIntensity: -0.1 }
+    expect(() => buildTrackFromJson(raw)).toThrow(/sky\.sunIntensity must be >= 0/)
+  })
+
+  it('rejects sky.fogNear >= sky.fogFar', () => {
+    const raw = baseTrack()
+    raw.sky = { fogNear: 500, fogFar: 400 }
+    expect(() => buildTrackFromJson(raw)).toThrow(/sky\.fogNear .* must be < sky\.fogFar/)
+  })
+
+  it('accepts a partial sky config (only the keys present)', () => {
+    const raw = baseTrack()
+    raw.sky = { cloudiness: 0.2 }
+    const built = buildTrackFromJson(raw)
+    expect(built.sky).toEqual({ cloudiness: 0.2 })
+  })
+
   it('reads boost pad fields', () => {
     const raw = baseTrack()
     raw.boostPads = [
