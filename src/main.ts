@@ -160,11 +160,35 @@ async function boot() {
     setLoadingMessage('Loading manifest…')
     const manifest = await loadManifest()
     const reason = earlyParams.get('back') === '1' ? 'exit-from-race' : 'cold'
+
+    // Kick off the attract-mode background race in parallel with the
+    // menu render. The menu paints immediately (CSS-only) while the
+    // attract loop streams in scene + bikes; once the first attract
+    // frame renders we drop the menu's solid backdrop so the live
+    // footage becomes the menu's background.
+    const attractStage = ensureAttractStage()
+    const { bootAttractMode } = await import('./boot/attract-mode')
+    const attractPromise = bootAttractMode({ parent: attractStage }).then((handle) => {
+      const watchLive = () => {
+        if (handle.isLive()) {
+          document.body.classList.add('attract-live')
+        } else {
+          requestAnimationFrame(watchLive)
+        }
+      }
+      watchLive()
+      return handle
+    })
+
     hideLoadingScreen()
     const result = await runMenuFlow({
       manifestTracks: manifest.tracks,
       reason,
     })
+    // Final commit — tear the attract loop down so the next page load
+    // boots a fresh renderer into the live race without two canvases
+    // competing for the GPU.
+    attractPromise.then((handle) => handle.dispose()).catch(() => undefined)
     window.location.assign(result.href)
     return
   }
@@ -182,6 +206,23 @@ async function boot() {
       earlyParams.get('host') ?? (import.meta.env.DEV ? 'localhost:1999' : PROD_PARTY_HOST_LOBBY)
     const bikeParam = earlyParams.get('bike')
     const trackParam = earlyParams.get('track')
+
+    // Same broadcast attract feed sits behind the lobby — keeps the
+    // hand-off into the live race feeling cohesive.
+    const attractStage = ensureAttractStage()
+    const { bootAttractMode: bootMp } = await import('./boot/attract-mode')
+    const attractPromise = bootMp({ parent: attractStage }).then((handle) => {
+      const watchLive = () => {
+        if (handle.isLive()) {
+          document.body.classList.add('attract-live')
+        } else {
+          requestAnimationFrame(watchLive)
+        }
+      }
+      watchLive()
+      return handle
+    })
+
     hideLoadingScreen()
     const result = await runMpLobby({
       roomId: earlyParams.get('room')!,
@@ -190,6 +231,7 @@ async function boot() {
       ...(bikeParam ? { initialBikeId: bikeParam as 'cruiser' | 'racer' | 'stunt' } : {}),
       ...(trackParam ? { initialTrackId: trackParam } : {}),
     })
+    attractPromise.then((handle) => handle.dispose()).catch(() => undefined)
     window.location.assign(result.href)
     return
   }
@@ -1564,6 +1606,15 @@ async function boot() {
 
     const focalPos = new THREE.Vector3()
     const focalQuat = new THREE.Quaternion()
+    // Re-used pose array for the broadcast director — same indices as
+    // replayBikeEids so `id` maps cleanly back to a replay slot. The
+    // director only consults the array in AUTO mode.
+    const replayBikePoses = activeReplay.bikes.map((_, i) => ({
+      id: i,
+      position: new THREE.Vector3(),
+      quaternion: new THREE.Quaternion(),
+      score: 1,
+    }))
 
     const hud = installSpectatorHud({
       replay: activeReplay,
@@ -1649,8 +1700,15 @@ async function boot() {
       } else if (e.code === 'ArrowRight') {
         replayPlayer.seek(replayPlayer.time + 5)
       } else if (e.code === 'KeyF') {
-        spectator.setMode(spectator.mode === 'chase' ? 'orbit' : 'chase')
-        if (spectator.mode === 'orbit') spectator.resetOrbit()
+        // F now cycles AUTO → CHASE → FREE (orbit) → AUTO so each press
+        // moves to a distinct broadcast paradigm.
+        const next =
+          spectator.mode === 'auto' ? 'chase' : spectator.mode === 'chase' ? 'orbit' : 'auto'
+        spectator.setMode(next)
+        if (next === 'orbit') spectator.resetOrbit()
+      } else if (e.code === 'KeyC') {
+        // Broadcast cut — only effective in AUTO mode, no-op elsewhere.
+        spectator.cutAuto()
       } else if (e.code.startsWith('Digit')) {
         const n = Number(e.code.slice(5))
         if (n >= 1 && n <= replayBikeEids.length) {
@@ -1717,7 +1775,22 @@ async function boot() {
       const fp = poseBuffer[followedSlot] ?? poseBuffer[0]!
       focalPos.set(fp.x, fp.y, fp.z)
       focalQuat.set(fp.qx, fp.qy, fp.qz, fp.qw)
-      spectator.tick(focalPos, focalQuat, dt)
+      // AUTO mode needs the full field of poses so the director can cut
+      // between bikes; chase/orbit ignore the array and use focalPos.
+      for (let i = 0; i < replayBikePoses.length; i++) {
+        const p = poseBuffer[i]
+        if (!p) continue
+        const pose = replayBikePoses[i]!
+        pose.position.set(p.x, p.y, p.z)
+        pose.quaternion.set(p.qx, p.qy, p.qz, p.qw)
+      }
+      spectator.tick(focalPos, focalQuat, dt, replayBikePoses)
+      // Keep `followedSlot` in lockstep with the director's focus so the
+      // HUD's FOLLOW pills + the camera agree on who's on screen.
+      if (spectator.mode === 'auto') {
+        const auto = spectator.getAutoFocusId()
+        if (auto !== null && auto !== followedSlot) followedSlot = auto
+      }
 
       waterMesh.tick([], { x: camera.position.x, z: camera.position.z })
 
@@ -1754,6 +1827,19 @@ async function boot() {
   hideLoadingScreen()
   requestAnimationFrame(frame)
 }
+/** Lazily create a fixed-position container that hosts the attract-mode
+ *  canvas. Sits behind the cold-boot menu and the multiplayer lobby so
+ *  AI racers + cinematic camera cuts are the live backdrop for every
+ *  broadcast surface. Created once per page lifetime. */
+function ensureAttractStage(): HTMLElement {
+  let stage = document.getElementById('attract-stage')
+  if (stage) return stage
+  stage = document.createElement('div')
+  stage.id = 'attract-stage'
+  document.body.appendChild(stage)
+  return stage
+}
+
 boot().catch((err) => {
   console.error('[boot] fatal', err)
   const el = document.getElementById('hud-backend')
