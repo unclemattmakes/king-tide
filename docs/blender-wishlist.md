@@ -12,7 +12,7 @@ and [blender-conventions.md](./blender-conventions.md).
 
 ## Shipped so far
 
-- **Template-island polish + preview-export scrub (2026-05-11).** Four
+- **Template-island polish + preview-export scrub (2026-05-11).** Five
   small follow-ups on top of Item 1:
   - **Billowy ocean floor.** New `Seafloor Billow` (default 10 m)
     + `Billow Scale` (0.004) sockets on `HV_TemplateIsland`. A
@@ -22,6 +22,13 @@ and [blender-conventions.md](./blender-conventions.md).
     `tracks-src/template-island.blend`: underwater verts span
     roughly z∈[-55, -10] m with σ≈10 m of relief, while the
     shoreline mask keeps billows from poking through the waterline.
+  - **Billowy above-water terrain.** Mirror pass — `Land Billow`
+    (default 6 m) + `Land Scale` (0.012). Symmetric signed noise
+    (no bias) gated above z=+2 m so cones gain craggy outcrops /
+    gulleys and beach plateaus pick up rolling-hill texture, without
+    touching the shoreline. Cones now read as eroded volcanic peaks
+    instead of smooth ice-cream silhouettes; the seafloor pass is
+    unaffected because the masks meet around the waterline.
   - **Slope-aware terrain shader.** `mat_terrain_main` rebuilt to
     mix a *flat* altitude ramp (deep blue → blue-sand → bright
     sand → wet beach → grass → forest → alpine stone → volcanic top)
