@@ -55,8 +55,10 @@ matches the way real volcanic morphology decouples *footprint* from
 | Roughness Below | 1 m | Global background noise amplitude below water |
 | Noise Scale | 0.008 | Global noise frequency |
 | Noise Seed | 0 | Re-roll value for noise variation |
-| Seafloor Billow | 6 m | Low-frequency distorted noise amplitude, gated to underwater. Reads as ridged silt rather than a flat seafloor plateau. |
-| Billow Scale | 0.004 | Billow noise frequency (smaller = larger dunes) |
+| Seafloor Billow | 10 m | Low-frequency distorted noise amplitude, gated to underwater. Reads as ridged silt rather than a flat seafloor plateau. |
+| Billow Scale | 0.004 | Seafloor billow frequency (smaller = larger dunes) |
+| Land Billow | 6 m | Mirror pass above the waterline. Adds hills/gulleys to cone slopes + beach plateaus. |
+| Land Scale | 0.012 | Land billow frequency (smaller = larger hills) |
 
 ### Authoring loop
 
@@ -479,6 +481,13 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     # seafloor a dramatic eroded silhouette rather than a kiddie-pool floor.
     _new_socket(g, "Seafloor Billow", "INPUT", "NodeSocketFloat",  10.0, 0.0, 30.0)
     _new_socket(g, "Billow Scale",    "INPUT", "NodeSocketFloat",   0.004, 0.0001, 1.0)
+    # Land billows: mirror pass above the waterline. Adds rolling-hill /
+    # eroded-ridge displacement to cone slopes and beach plateaus so the
+    # above-water silhouette doesn't read as a smooth ice-cream cone.
+    # Symmetric (no bias) so the pass produces both hills and gulleys.
+    # Gated above z=+2 m so it never reaches into the shoreline.
+    _new_socket(g, "Land Billow",     "INPUT", "NodeSocketFloat",   6.0, 0.0, 30.0)
+    _new_socket(g, "Land Scale",      "INPUT", "NodeSocketFloat",   0.012, 0.0001, 1.0)
     _new_socket(g, "Geometry", "OUTPUT", "NodeSocketGeometry")
 
     p_in  = _add_node(g, "NodeGroupInput",  -1600, 0)
@@ -576,16 +585,59 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     g.links.new(n_billow_mul.outputs[0], n_billow.inputs[0])
     g.links.new(p_in.outputs["Seafloor Billow"], n_billow.inputs[1])
 
+    # Land billows — mirror pass above the waterline. Distorted FBM gives
+    # cone slopes + beach plateaus a billowy / eroded silhouette. Centred
+    # signed range so the pass adds both hills and gulleys.
+    n_land_noise = _add_node(g, "ShaderNodeTexNoise", -400, -3100)
+    n_land_noise.noise_dimensions = "4D"
+    n_land_noise.normalize = False
+    n_land_noise.inputs["Detail"].default_value = 4.0
+    n_land_noise.inputs["Roughness"].default_value = 0.55
+    n_land_noise.inputs["Distortion"].default_value = 1.2
+    g.links.new(p_pos.outputs["Position"],   n_land_noise.inputs["Vector"])
+    g.links.new(p_in.outputs["Land Scale"],  n_land_noise.inputs["Scale"])
+    # De-correlate the land seed from the seafloor / global / erosion seeds.
+    n_land_seed = _add_node(g, "ShaderNodeMath", -600, -3300, operation="ADD")
+    n_land_seed.inputs[1].default_value = 211.0
+    g.links.new(p_in.outputs["Noise Seed"], n_land_seed.inputs[0])
+    g.links.new(n_land_seed.outputs[0], n_land_noise.inputs["W"])
+    # Centred signed remap: [0, 1] → [-1, +1]. Symmetric so the pass adds
+    # both hills and gulleys to above-water terrain. The un-normalised
+    # noise can occasionally swing wider — we want the dramatic extremes.
+    n_land_signed = _add_node(g, "ShaderNodeMath", -200, -3100, operation="MULTIPLY_ADD")
+    n_land_signed.inputs[1].default_value =  2.0
+    n_land_signed.inputs[2].default_value = -1.0
+    g.links.new(n_land_noise.outputs["Fac"], n_land_signed.inputs[0])
+    # Above-water mask: full strength above z=+2, fades to zero between
+    # +2 and -1 m so the pass never drags terrain into the water (which
+    # would conflict with the seafloor billows on the other side).
+    n_land_mask = _add_node(g, "ShaderNodeMapRange", 0, -3100,
+                            interpolation_type="SMOOTHSTEP", clamp=True)
+    n_land_mask.inputs["From Min"].default_value = -1.0
+    n_land_mask.inputs["From Max"].default_value =  2.0
+    n_land_mask.inputs["To Min"].default_value =    0.0
+    n_land_mask.inputs["To Max"].default_value =    1.0
+    g.links.new(prev, n_land_mask.inputs["Value"])
+    n_land_mul = _add_node(g, "ShaderNodeMath", 200, -3100, operation="MULTIPLY")
+    g.links.new(n_land_signed.outputs[0], n_land_mul.inputs[0])
+    g.links.new(n_land_mask.outputs["Result"], n_land_mul.inputs[1])
+    n_land = _add_node(g, "ShaderNodeMath", 400, -3100, operation="MULTIPLY")
+    g.links.new(n_land_mul.outputs[0], n_land.inputs[0])
+    g.links.new(p_in.outputs["Land Billow"], n_land.inputs[1])
+
     n_final = _add_node(g, "ShaderNodeMath", 600, -800, operation="ADD")
     g.links.new(prev, n_final.inputs[0])
     g.links.new(n_perturb.outputs[0], n_final.inputs[1])
     n_final2 = _add_node(g, "ShaderNodeMath", 800, -800, operation="ADD")
     g.links.new(n_final.outputs[0],   n_final2.inputs[0])
     g.links.new(n_billow.outputs[0],  n_final2.inputs[1])
+    n_final3 = _add_node(g, "ShaderNodeMath", 1000, -800, operation="ADD")
+    g.links.new(n_final2.outputs[0], n_final3.inputs[0])
+    g.links.new(n_land.outputs[0],   n_final3.inputs[1])
 
     # Set Position
     n_comb = _add_node(g, "ShaderNodeCombineXYZ", 1100, -300)
-    g.links.new(n_final2.outputs[0], n_comb.inputs["Z"])
+    g.links.new(n_final3.outputs[0], n_comb.inputs["Z"])
     n_setpos = _add_node(g, "GeometryNodeSetPosition", 1400, 0)
     g.links.new(p_in.outputs["Geometry"], n_setpos.inputs["Geometry"])
     g.links.new(n_comb.outputs["Vector"], n_setpos.inputs["Offset"])
