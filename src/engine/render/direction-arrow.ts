@@ -6,9 +6,9 @@ import * as THREE from 'three'
  * world (no depth test) so the bike's body never occludes it.
  *
  * The arrow is anchored to the *camera*, not the bike: a fixed forward
- * distance ahead of the camera with a slight downward offset, so it sits
- * in roughly the same screen real-estate every frame regardless of the
- * bike's pitch/roll. Yaw still uses world-space direction from the player
+ * distance ahead of the camera and an upward offset sized to the vertical
+ * FOV so it projects to the top quarter line of the screen, clear of the
+ * bike's silhouette. Yaw still uses world-space direction from the player
  * to the target, so it points at where you need to go in the world.
  */
 export type DirectionArrow = {
@@ -66,15 +66,17 @@ export function createDirectionArrow(): DirectionArrow {
 
   // Scratch vectors to keep tick() allocation-free.
   const camForward = new THREE.Vector3()
+  const camUp = new THREE.Vector3()
   const anchor = new THREE.Vector3()
+  const LOCAL_UP = new THREE.Vector3(0, 1, 0)
 
-  // Camera-relative anchor: how far ahead of the camera along its
-  // horizontal forward to place the arrow, and how far below its
-  // optical centre (down in world space). Tuned so the arrow sits
-  // around the lower-third of the frame at the default chase camera —
-  // visible without covering the racing line.
+  // Camera-relative anchor: distance ahead of the camera along its
+  // forward axis, and a target screen-space vertical position expressed
+  // in NDC (-1 bottom, +1 top). 0.5 puts the arrow on the top-quarter
+  // line — divide the screen into four horizontal strips and the arrow
+  // sits on the line one quarter down from the top.
   const ANCHOR_FORWARD = 7
-  const ANCHOR_DOWN = 1.6
+  const ANCHOR_NDC_Y = 0.5
 
   function tick(
     camera: THREE.PerspectiveCamera,
@@ -89,19 +91,21 @@ export function createDirectionArrow(): DirectionArrow {
     group.visible = true
     tAccum += dt
 
-    // Anchor in front of and just below the camera. Forward is taken from
-    // the camera's view direction with Y zeroed so a pitch tilt doesn't
-    // walk the arrow up or down the screen between frames.
+    // Use the camera's full local forward + up so the arrow stays locked
+    // to the same screen position regardless of camera pitch/roll. The
+    // vertical offset is derived from the camera's vertical FOV so the
+    // arrow projects to NDC y = ANCHOR_NDC_Y at any focal length.
     camera.getWorldDirection(camForward)
-    camForward.y = 0
-    if (camForward.lengthSq() < 1e-6) camForward.set(0, 0, 1)
-    else camForward.normalize()
+    camUp.copy(LOCAL_UP).applyQuaternion(camera.quaternion)
 
+    const halfHeight =
+      ANCHOR_FORWARD * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)
+    const upOffset = halfHeight * ANCHOR_NDC_Y
     const bob = Math.sin(tAccum * 2) * 0.12
     anchor
       .copy(camera.position)
       .addScaledVector(camForward, ANCHOR_FORWARD)
-    anchor.y -= ANCHOR_DOWN - bob
+      .addScaledVector(camUp, upOffset + bob)
     group.position.copy(anchor)
 
     // Yaw uses world-space direction from the *player* to the target so
