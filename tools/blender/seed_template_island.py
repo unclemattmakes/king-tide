@@ -51,6 +51,8 @@ matches the way real volcanic morphology decouples *footprint* from
 | Reef Width | 25 m | Reef pulse Gaussian σ |
 | Cone Erosion | 12 m | Per-cone noise amplitude (slope gulleys / outcrops). Masked by cone height — zero off the cone. |
 | Erosion Scale | 0.035 | Noise frequency for cone erosion (smaller = larger features) |
+| Ring Break | 20 m | World-space noise added to each peak's radial distance, jittering the cone foot and shelf rim so they're not perfect circles. 0 = clean circle, 30+ = wildly irregular outline. |
+| Ring Scale | 0.015 | Frequency of the ring-break noise (smaller = larger, smoother wiggles) |
 | Roughness Above | 2 m | Global background noise amplitude above water |
 | Roughness Below | 1 m | Global background noise amplitude below water |
 | Noise Scale | 0.008 | Global noise frequency |
@@ -59,7 +61,7 @@ matches the way real volcanic morphology decouples *footprint* from
 | Billow Scale | 0.004 | Seafloor billow frequency (smaller = larger dunes) |
 | Land Billow | 6 m | Mirror pass above the waterline. Adds hills/gulleys to cone slopes + beach plateaus. |
 | Land Scale | 0.012 | Land billow frequency (smaller = larger hills) |
-| Shoreline Width | 1.5 m | Half-width of the smooth ring around the waterline where neither billow pass acts. Tight beach = 0.5–1; wide sandy band = 5+. |
+| Shoreline Width | 1.5 m | Underwater dead-zone (m) where the seafloor billow fades out as it nears the waterline. Tight crisp shoreline = 0.5–1; wide sandy lagoon = 5+. (Land billow now always activates at z=0 so the cone slope's texture meets the beach without a ring.) |
 
 ### Authoring loop
 
@@ -242,6 +244,8 @@ def build_peak_profile_group() -> bpy.types.NodeTree:
     _new_socket(g, "Cone Erosion",  "INPUT",  "NodeSocketFloat",  12.0)
     _new_socket(g, "Erosion Scale", "INPUT",  "NodeSocketFloat",   0.035)
     _new_socket(g, "Noise Seed",    "INPUT",  "NodeSocketFloat",   0.0)
+    _new_socket(g, "Ring Break",    "INPUT",  "NodeSocketFloat",  20.0)
+    _new_socket(g, "Ring Scale",    "INPUT",  "NodeSocketFloat",   0.015)
     _new_socket(g, "Sentinel",      "INPUT",  "NodeSocketFloat", -10000.0)
     _new_socket(g, "Height",        "OUTPUT", "NodeSocketFloat")
 
@@ -286,7 +290,7 @@ def build_peak_profile_group() -> bpy.types.NodeTree:
     g.links.new(n_pos_xyz.outputs["Y"], n_dy.inputs[0])
     g.links.new(n_base_loc.outputs["Y"], n_dy.inputs[1])
 
-    # d_naive = hypot(dx, dy)
+    # d_naive_raw = hypot(dx, dy)
     n_dx2 = _add_node(g, "ShaderNodeMath", -1200, -300, operation="POWER"); n_dx2.inputs[1].default_value = 2.0
     g.links.new(n_dx.outputs[0], n_dx2.inputs[0])
     n_dy2 = _add_node(g, "ShaderNodeMath", -1200, -450, operation="POWER"); n_dy2.inputs[1].default_value = 2.0
@@ -294,8 +298,44 @@ def build_peak_profile_group() -> bpy.types.NodeTree:
     n_d_sumsq = _add_node(g, "ShaderNodeMath", -1000, -375, operation="ADD")
     g.links.new(n_dx2.outputs[0], n_d_sumsq.inputs[0])
     g.links.new(n_dy2.outputs[0], n_d_sumsq.inputs[1])
-    n_d_naive = _add_node(g, "ShaderNodeMath", -800, -375, operation="SQRT")
-    g.links.new(n_d_sumsq.outputs[0], n_d_naive.inputs[0])
+    n_d_naive_raw = _add_node(g, "ShaderNodeMath", -800, -375, operation="SQRT")
+    g.links.new(n_d_sumsq.outputs[0], n_d_naive_raw.inputs[0])
+
+    # Ring-break perturbation: world-space noise pushes the cone foot
+    # and shelf rim in/out by ``Ring Break`` metres, breaking up the
+    # perfect concentric circles that the radial smoothsteps would
+    # otherwise produce. The same noise is added to BOTH d_naive and
+    # d_sheared so the cone foot and shelf rim wiggle together.
+    n_ring_noise = _add_node(g, "ShaderNodeTexNoise", -1200, -50)
+    n_ring_noise.noise_dimensions = "4D"
+    n_ring_noise.normalize = False
+    n_ring_noise.inputs["Detail"].default_value = 2.5
+    n_ring_noise.inputs["Roughness"].default_value = 0.5
+    n_ring_noise.inputs["Distortion"].default_value = 0.6
+    g.links.new(gi.outputs["Position"],   n_ring_noise.inputs["Vector"])
+    g.links.new(gi.outputs["Ring Scale"], n_ring_noise.inputs["Scale"])
+    # De-correlate the ring-break seed from cone-erosion / global noise.
+    n_ring_seed = _add_node(g, "ShaderNodeMath", -1400, -50, operation="ADD")
+    n_ring_seed.inputs[1].default_value = 337.0
+    g.links.new(gi.outputs["Noise Seed"], n_ring_seed.inputs[0])
+    g.links.new(n_ring_seed.outputs[0], n_ring_noise.inputs["W"])
+    # [0,1] → [-1, +1] signed perturbation. Then × Ring Break amplitude.
+    n_ring_signed = _add_node(g, "ShaderNodeMath", -1000, -50, operation="MULTIPLY_ADD")
+    n_ring_signed.inputs[1].default_value =  2.0
+    n_ring_signed.inputs[2].default_value = -1.0
+    g.links.new(n_ring_noise.outputs["Fac"], n_ring_signed.inputs[0])
+    n_ring_perturb = _add_node(g, "ShaderNodeMath", -800, -50, operation="MULTIPLY")
+    g.links.new(n_ring_signed.outputs[0], n_ring_perturb.inputs[0])
+    g.links.new(gi.outputs["Ring Break"], n_ring_perturb.inputs[1])
+
+    # d_naive = d_naive_raw + ring_perturb (clamped to non-negative so a
+    # large negative perturbation can't flip the sign of the distance).
+    n_d_naive_pre = _add_node(g, "ShaderNodeMath", -600, -375, operation="ADD")
+    g.links.new(n_d_naive_raw.outputs[0], n_d_naive_pre.inputs[0])
+    g.links.new(n_ring_perturb.outputs[0], n_d_naive_pre.inputs[1])
+    n_d_naive = _add_node(g, "ShaderNodeMath", -500, -375, operation="MAXIMUM")
+    n_d_naive.inputs[1].default_value = 0.0
+    g.links.new(n_d_naive_pre.outputs[0], n_d_naive.inputs[0])
 
     n_zero = _add_node(g, "ShaderNodeValue", -1400, -1300); n_zero.outputs[0].default_value = 0.0
     n_one  = _add_node(g, "ShaderNodeValue", -1400, -1400); n_one.outputs[0].default_value = 1.0
@@ -328,8 +368,16 @@ def build_peak_profile_group() -> bpy.types.NodeTree:
     n_s_sumsq = _add_node(g, "ShaderNodeMath", 200, -375, operation="ADD")
     g.links.new(n_sx2.outputs[0], n_s_sumsq.inputs[0])
     g.links.new(n_sy2.outputs[0], n_s_sumsq.inputs[1])
-    n_d_sheared = _add_node(g, "ShaderNodeMath", 400, -375, operation="SQRT")
-    g.links.new(n_s_sumsq.outputs[0], n_d_sheared.inputs[0])
+    n_d_sheared_raw = _add_node(g, "ShaderNodeMath", 400, -375, operation="SQRT")
+    g.links.new(n_s_sumsq.outputs[0], n_d_sheared_raw.inputs[0])
+    # Same ring-break perturbation as d_naive, so cone foot wiggles in
+    # lockstep with the shelf rim.
+    n_d_sheared_pre = _add_node(g, "ShaderNodeMath", 550, -375, operation="ADD")
+    g.links.new(n_d_sheared_raw.outputs[0], n_d_sheared_pre.inputs[0])
+    g.links.new(n_ring_perturb.outputs[0],  n_d_sheared_pre.inputs[1])
+    n_d_sheared = _add_node(g, "ShaderNodeMath", 650, -375, operation="MAXIMUM")
+    n_d_sheared.inputs[1].default_value = 0.0
+    g.links.new(n_d_sheared_pre.outputs[0], n_d_sheared.inputs[0])
 
     # CONE: peak_height * smoothstep(base_radius → 0, d_sheared)
     n_mr_cone = _add_node(g, "ShaderNodeMapRange", 600, -200, interpolation_type="SMOOTHSTEP", clamp=True)
@@ -470,6 +518,8 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     _new_socket(g, "Reef Width",      "INPUT", "NodeSocketFloat",  25.0, 1.0, 200.0)
     _new_socket(g, "Cone Erosion",    "INPUT", "NodeSocketFloat",  12.0, 0.0, 50.0)
     _new_socket(g, "Erosion Scale",   "INPUT", "NodeSocketFloat",   0.035, 0.0001, 1.0)
+    _new_socket(g, "Ring Break",      "INPUT", "NodeSocketFloat",  20.0, 0.0, 200.0)
+    _new_socket(g, "Ring Scale",      "INPUT", "NodeSocketFloat",   0.015, 0.0001, 1.0)
     _new_socket(g, "Roughness Above", "INPUT", "NodeSocketFloat",   2.0, 0.0, 50.0)
     _new_socket(g, "Roughness Below", "INPUT", "NodeSocketFloat",   1.0, 0.0, 20.0)
     _new_socket(g, "Noise Scale",     "INPUT", "NodeSocketFloat",   0.008, 0.0001, 1.0)
@@ -489,11 +539,12 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     # Gated above z=+2 m so it never reaches into the shoreline.
     _new_socket(g, "Land Billow",     "INPUT", "NodeSocketFloat",   6.0, 0.0, 30.0)
     _new_socket(g, "Land Scale",      "INPUT", "NodeSocketFloat",   0.012, 0.0001, 1.0)
-    # Half-width (m) of the smooth no-billow ring around the shoreline.
-    # Each side's mask fades to 0 within this distance of the waterline:
-    # seafloor billow tops out at z = -Shoreline Width, land billow
-    # bottoms out at z = +Shoreline Width. Set to 0.5–1 m for a tight
-    # crisp shoreline; raise to 5+ m for a wide sandy beach band.
+    # Underwater dead-zone (m) above which the seafloor billow tapers
+    # off as it approaches the waterline. Set to 0.5–1 m for a tight
+    # crisp shoreline; raise to 5+ m for a wide sandy lagoon.
+    # NOTE: this only governs the underwater side. The land billow now
+    # always activates from z=0 so the cone slope's craggy texture
+    # blends smoothly into the beach without a visible ring.
     _new_socket(g, "Shoreline Width", "INPUT", "NodeSocketFloat",   1.5, 0.0, 30.0)
     _new_socket(g, "Geometry", "OUTPUT", "NodeSocketGeometry")
 
@@ -519,6 +570,8 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
         g.links.new(p_in.outputs["Cone Erosion"],  inst.inputs["Cone Erosion"])
         g.links.new(p_in.outputs["Erosion Scale"], inst.inputs["Erosion Scale"])
         g.links.new(p_in.outputs["Noise Seed"],    inst.inputs["Noise Seed"])
+        g.links.new(p_in.outputs["Ring Break"],    inst.inputs["Ring Break"])
+        g.links.new(p_in.outputs["Ring Scale"],    inst.inputs["Ring Scale"])
         g.links.new(n_sentinel.outputs[0],         inst.inputs["Sentinel"])
         if prev is None:
             prev = inst.outputs["Height"]
@@ -626,20 +679,17 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     n_land_signed.inputs[1].default_value =  2.0
     n_land_signed.inputs[2].default_value = -1.0
     g.links.new(n_land_noise.outputs["Fac"], n_land_signed.inputs[0])
-    # Above-water mask: full strength above z = +(Shoreline Width + 3),
-    # fades to zero at z = +Shoreline Width so the pass leaves a smooth
-    # author-tunable beach band around the waterline. 3 m ramp width
-    # keeps the transition visually soft.
-    n_sw_pos_near = _add_node(g, "ShaderNodeMath", -800, -2900, operation="ADD")
-    n_sw_pos_near.inputs[1].default_value = 0.0
-    g.links.new(p_in.outputs["Shoreline Width"], n_sw_pos_near.inputs[0])
-    n_sw_pos_far  = _add_node(g, "ShaderNodeMath", -800, -3000, operation="ADD")
-    n_sw_pos_far.inputs[1].default_value = 3.0  # ramp width above the cutoff
-    g.links.new(p_in.outputs["Shoreline Width"], n_sw_pos_far.inputs[0])
+    # Above-water mask: full strength above z = +3 m, fades to zero at
+    # the waterline (z = 0). Keeping the lower edge fixed at the
+    # waterline rather than at +Shoreline_Width lets the cone slope's
+    # billow texture flow continuously down to where the shelf starts,
+    # eliminating the smooth "ring" that previously formed at the
+    # cone foot. ``Shoreline Width`` therefore now only governs the
+    # underwater side of the no-billow band.
     n_land_mask = _add_node(g, "ShaderNodeMapRange", 0, -3100,
                             interpolation_type="SMOOTHSTEP", clamp=True)
-    g.links.new(n_sw_pos_near.outputs[0], n_land_mask.inputs["From Min"])
-    g.links.new(n_sw_pos_far.outputs[0],  n_land_mask.inputs["From Max"])
+    n_land_mask.inputs["From Min"].default_value =  0.0
+    n_land_mask.inputs["From Max"].default_value =  3.0
     n_land_mask.inputs["To Min"].default_value =    0.0
     n_land_mask.inputs["To Max"].default_value =    1.0
     g.links.new(prev, n_land_mask.inputs["Value"])
