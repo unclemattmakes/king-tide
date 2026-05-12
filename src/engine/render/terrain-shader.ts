@@ -43,6 +43,7 @@
 import * as THREE from 'three'
 import {
   abs,
+  attribute,
   clamp,
   dot,
   float,
@@ -58,6 +59,7 @@ import {
   vec3,
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
+import type { TerrainShaderConfig } from '@/game/tracks/types'
 
 type ColorStop = { pos: number; color: [number, number, number] }
 
@@ -150,9 +152,32 @@ function sharedRamps(): { flat: THREE.DataTexture; cliff: THREE.DataTexture } {
  * Build the terrain material as a fresh ``MeshStandardNodeMaterial`` with
  * a TSL colour graph. Cheap to call — the only allocated state is the
  * material itself; the ramps are shared across calls.
+ *
+ * The optional ``config`` overrides the slope-mix range, altitude band,
+ * variation strength, wet-band width, and path tint. Authors edit these
+ * in the addon's "Terrain shader (runtime)" panel; the export pipeline
+ * writes them to ``public/tracks/<id>.json`` and the track loader
+ * threads them through to here.
+ *
+ * The material also reads the baked ``COLOR_0`` vertex attribute:
+ *
+ *   - ``.g`` — ambient occlusion (1 = no occlusion). Multiplies into
+ *     the final diffuse so authored cavities darken without darkening
+ *     the lighting model.
+ *   - ``.b`` — racing-line wear (0 = pristine, 1 = full wear). Mixes
+ *     the diffuse toward ``pathTint`` so the runtime stamps a worn
+ *     dirt track into the surface where the AI spline runs.
  */
-export function buildTerrainMaterial(): MeshStandardNodeMaterial {
+export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStandardNodeMaterial {
   const { flat, cliff } = sharedRamps()
+
+  const altMin = config.altMin ?? ALT_MIN
+  const altMax = config.altMax ?? ALT_MAX
+  const slopeStart = config.slopeStart ?? 0.85
+  const slopeEnd = config.slopeEnd ?? 0.55
+  const variation = config.variation ?? 0.30
+  const wetBand = config.wetBand ?? 2.0
+  const pathTint = config.pathTint ?? [0.30, 0.24, 0.18]
 
   const mat = new MeshStandardNodeMaterial({ metalness: 0 })
   mat.name = 'mat_terrain_runtime'
@@ -162,13 +187,14 @@ export function buildTerrainMaterial(): MeshStandardNodeMaterial {
   // Slope mask: 0 on horizontal faces (worldNormal.y == 1), 1 on
   // verticals. Smoothstep cos 30°..cos 55° so gentle slopes still read
   // as grass / sand rather than rock.
-  const slope = smoothstep(float(0.85), float(0.55), worldNorm.y)
+  const slope = smoothstep(float(slopeStart), float(slopeEnd), worldNorm.y)
 
   // Altitude -> ramp parameter. Heights outside the configured range
   // clamp; deepest abyssal blue / brightest volcanic top sit at the
   // ramps' ends.
+  const altSpan = Math.max(altMax - altMin, 1)
   const altT = clamp(
-    positionWorld.y.sub(ALT_MIN).div(ALT_MAX - ALT_MIN),
+    positionWorld.y.sub(altMin).div(altSpan),
     float(0),
     float(1),
   )
@@ -182,15 +208,35 @@ export function buildTerrainMaterial(): MeshStandardNodeMaterial {
   // and looks plenty natural on terrain (the dominant variation axis is
   // horizontal). ~16 m base feature size + half-amplitude second octave.
   const varN = valueNoiseOctave2D(positionWorld.xz.mul(0.060))
-  const variedBaseCol = blended.mul(float(0.85).add(varN.mul(0.30)))
+  const variedBaseCol = blended.mul(float(1.0 - variation * 0.5).add(varN.mul(variation)))
 
   // Wet band: triangular |y|-mask around the waterline pulls saturation
   // down and tints slightly cool to read as damp sand / wave-washed
-  // rock. Full at y=0, zero beyond |y|≥2 m.
-  const wet = smoothstep(float(2.0), float(0.0), abs(positionWorld.y))
+  // rock. Full at y=0, zero beyond |y|≥wetBand m.
+  const wet = smoothstep(float(wetBand), float(0.0), abs(positionWorld.y))
   const withWet = mix(variedBaseCol, variedBaseCol.mul(vec3(0.78, 0.78, 0.85)), wet)
 
-  mat.colorNode = withWet
+  // Vertex-baked AO + racing-line wear from the addon's "Bake AO + Path
+  // Wear" operator. The GN graph stamps these into COLOR_0.G and
+  // COLOR_0.B respectively (R is sway-unused, A is the biome flag).
+  // GLB authoring without the bake leaves both at their attribute
+  // defaults (1 / 0) so this collapses to a no-op for unbaked terrain.
+  // TSL's ``attribute('color')`` resolves to whatever shape the
+  // geometry's color attribute has — 3- or 4-component depending on
+  // how Blender exported COLOR_0. Both shapes expose ``.g`` and ``.b``
+  // accessors so the AO + path-worn reads work uniformly.
+  const vc = attribute('color')
+  // AO multiplies into the colour with a 0.55 floor so deep cavities
+  // darken visibly but never go to black. ``vc.g`` ∈ [0, 1].
+  const ao = clamp(vc.g, float(0), float(1))
+  const withAO = withWet.mul(mix(float(0.55), float(1.0), ao))
+  // Path-worn mixes the diffuse toward the dirt-track tint. Capped at
+  // 0.8 so even fully worn vertices keep a hint of the underlying
+  // biome colour.
+  const path = clamp(vc.b, float(0), float(1))
+  const withPath = mix(withAO, vec3(pathTint[0], pathTint[1], pathTint[2]), path.mul(0.8))
+
+  mat.colorNode = withPath
   // Slope-driven roughness lift — rocks rougher than sand / grass so
   // lighting doesn't go uniformly matte across the island.
   mat.roughnessNode = mix(float(0.78), float(0.95), slope)
@@ -232,7 +278,10 @@ function hash2(p: ReturnType<typeof positionWorld.xz>) {
  *
  * Returns the number of materials replaced, for caller logging.
  */
-export function applyTerrainShaderToScene(root: THREE.Object3D): number {
+export function applyTerrainShaderToScene(
+  root: THREE.Object3D,
+  config: TerrainShaderConfig = {},
+): number {
   let count = 0
   root.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh)) return
@@ -244,7 +293,7 @@ export function applyTerrainShaderToScene(root: THREE.Object3D): number {
       kind === 'track' ||
       (Array.isArray(mat) ? mat.some(isTerrainName) : isTerrainName(mat))
     if (!isTerrain) return
-    const next = buildTerrainMaterial()
+    const next = buildTerrainMaterial(config)
     // Dispose the original glTF material to free its baseColor texture etc.
     const dispose = (m: THREE.Material) => {
       try {

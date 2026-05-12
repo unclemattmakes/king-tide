@@ -190,6 +190,38 @@ def build_terrain_mesh() -> bpy.types.Object:
     terrain = bpy.data.objects.new("terrain", mesh)
     bpy.context.scene.collection.objects.link(terrain)
     terrain["kind"] = "track"
+
+    # Pre-create the per-vertex attributes that the HV_Island GN graph
+    # samples for COLOR_0.G (AO) and COLOR_0.B (path-worn). Both as
+    # plain ``FLOAT`` so they don't get picked up by glTF's vertex-
+    # colour heuristic and exported as COLOR_0 / COLOR_1 alongside the
+    # actual GN-stamped COLOR_0. The addon's "Bake AO + Path Wear"
+    # operator uses a throwaway FLOAT_COLOR for Cycles' bake target,
+    # then copies the result back into these source-mesh floats.
+    ao = mesh.attributes.new(name="baked_ao", type="FLOAT", domain="POINT")
+    for i in range(len(ao.data)):
+        ao.data[i].value = 1.0  # default = no occlusion
+    path = mesh.attributes.new(name="baked_path", type="FLOAT", domain="POINT")
+    for i in range(len(path.data)):
+        path.data[i].value = 0.0
+    # Anchor color attribute so glTF's color-export path engages and
+    # the GN graph's ``COLOR_0`` (added on the evaluated mesh) actually
+    # ships in the .glb. Without this the exporter sees zero source
+    # color attributes and skips all colour data — even the
+    # modifier-output COLOR_0 doesn't survive. The values don't matter
+    # (the exporter prefers the evaluated COLOR_0); we only need the
+    # attribute to *exist* with the same name.
+    anchor = mesh.color_attributes.new(name="COLOR_0", type="FLOAT_COLOR", domain="POINT")
+    for i in range(len(anchor.data)):
+        anchor.data[i].color = (1.0, 1.0, 1.0, 1.0)
+    # Mark it as the *active* color attribute so glTF export picks it
+    # up — combined with ``export_vertex_color="ACTIVE"`` in
+    # ``hoverbike.export_track`` this guarantees the GN-stamped
+    # COLOR_0 (added on the evaluated mesh) actually rides into the
+    # .glb. The Mesh API requires going through ``active_color`` (the
+    # attribute reference) rather than the int index here.
+    mesh.color_attributes.active_color = anchor
+    mesh.color_attributes.render_color_index = mesh.color_attributes.find("COLOR_0")
     return terrain
 
 
@@ -791,12 +823,24 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     g.links.new(n_bs2.outputs[0], n_biome.inputs[0])
 
     n_zero_p = _add_node(g, "ShaderNodeValue", 2200, -625); n_zero_p.outputs[0].default_value = 0.0
-    n_one_p  = _add_node(g, "ShaderNodeValue", 2200, -775); n_one_p.outputs[0].default_value = 1.0
+    # Named-attribute samplers for the baked vertex data — written by the
+    # addon's "Bake AO + Path Wear" operator into ``baked_ao`` (FLOAT_COLOR)
+    # and ``baked_path`` (FLOAT) on the source terrain mesh. Defaults if
+    # the attributes don't exist yet: Named-Attribute returns 0, which is
+    # right for path-worn (no wear) but wrong for AO (we want 1 = no
+    # occlusion). The seeded attributes default to 1.0 / 0.0 so the
+    # zero-fallback never bites in practice.
+    n_ao_attr = _add_node(g, "GeometryNodeInputNamedAttribute", 2200, -775,
+                          data_type="FLOAT")
+    n_ao_attr.inputs["Name"].default_value = "baked_ao"
+    n_path_attr = _add_node(g, "GeometryNodeInputNamedAttribute", 2200, -925,
+                            data_type="FLOAT")
+    n_path_attr.inputs["Name"].default_value = "baked_path"
     n_color = _add_node(g, "FunctionNodeCombineColor", 2400, -300, mode="RGB")
-    g.links.new(n_zero_p.outputs[0], n_color.inputs["Red"])
-    g.links.new(n_one_p.outputs[0],  n_color.inputs["Green"])
-    g.links.new(n_zero_p.outputs[0], n_color.inputs["Blue"])
-    g.links.new(n_biome.outputs[0],  n_color.inputs["Alpha"])
+    g.links.new(n_zero_p.outputs[0],          n_color.inputs["Red"])
+    g.links.new(n_ao_attr.outputs["Attribute"], n_color.inputs["Green"])
+    g.links.new(n_path_attr.outputs["Attribute"], n_color.inputs["Blue"])
+    g.links.new(n_biome.outputs[0],           n_color.inputs["Alpha"])
 
     n_store = _add_node(g, "GeometryNodeStoreNamedAttribute", 2600, 0,
                         data_type="FLOAT_COLOR", domain="POINT")
@@ -1009,6 +1053,16 @@ def build_terrain_material(terrain: bpy.types.Object) -> None:
 
     n_out  = add("ShaderNodeOutputMaterial",  1800,    0)
     n_bsdf = add("ShaderNodeBsdfPrincipled",  1500,    0)
+
+    # An Attribute node reading COLOR_0 — connected through to BSDF
+    # Emission so the Blender glTF exporter's heuristic ("does this
+    # material reference any vertex-colour attribute?") returns true
+    # and the GN-stamped COLOR_0 actually ships in the .glb. The
+    # emission weight is zero so it doesn't affect the Eevee preview.
+    n_color0 = add("ShaderNodeAttribute",    -1600,  500)
+    n_color0.attribute_name = "COLOR_0"
+    nt.links.new(n_color0.outputs["Color"], n_bsdf.inputs["Emission Color"])
+    n_bsdf.inputs["Emission Strength"].default_value = 0.0
 
     # --- inputs: position + normal ------------------------------------
     n_geom = add("ShaderNodeNewGeometry",    -1600,  200)

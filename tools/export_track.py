@@ -225,6 +225,12 @@ def main() -> None:
             export_lights=False,
             export_gpu_instances=True,
             export_gn_mesh=True,
+            # See addon comment: force the active vertex color through
+            # so the GN-stamped COLOR_0 (R=0, G=AO, B=path, A=biome)
+            # actually ships in the .glb.
+            export_vertex_color="ACTIVE",
+            export_all_vertex_colors=False,
+            export_active_vertex_color_when_no_material=True,
         )
     print("[export] done")
 
