@@ -186,6 +186,11 @@ export type WaterConfig = {
  *                    sun-disc brightness in the dome shader. Default 1.0.
  *   fogNear/fogFar — exponential fog distances in metres. Defaults 250/900,
  *                    matching the historical horizon blend.
+ *   timeOfDay      — seconds into the sky system's 360 s day-night cycle. The
+ *                    sun is positioned once at level load and held there for
+ *                    the whole race (so the env-map bake stays one-shot and
+ *                    we don't hitch every few seconds). Default 0 ≈ a high
+ *                    mid-morning sun. See sky.ts for the elevation/azimuth math.
  */
 export type SkyConfig = {
   tint?: string
@@ -193,4 +198,5 @@ export type SkyConfig = {
   sunIntensity?: number
   fogNear?: number
   fogFar?: number
+  timeOfDay?: number
 }

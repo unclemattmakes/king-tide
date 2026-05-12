@@ -281,11 +281,11 @@ async function boot() {
   // fallback for editor on a fresh id.
   const track = await loadTrackForBoot({ trackId, scene, phys, editMode })
 
-  // Sky / atmosphere system. Owns the dome mesh, the day-night cycle, fog
-  // + hemi-light palette, and the periodic PMREM env-map bake. Created here
-  // (post-track-load) so per-track overrides in `track.sky` get applied
-  // from the first frame; gets ticked from both the live and replay loops
-  // below, plus a one-shot tick in editor mode for a static lit palette.
+  // Sky / atmosphere system. Owns the dome mesh, fog + hemi-light palette,
+  // and the PMREM env-map. The sun position and env-map are picked once
+  // here (driven by `track.sky.timeOfDay`) and frozen for the whole race —
+  // previously we re-baked every 4 s and that bake was a noticeable hitch.
+  // Per-frame `tick()`s below only keep the shadow camera on the player.
   const sky = createSkySystem({
     scene,
     renderer,
@@ -313,9 +313,9 @@ async function boot() {
       const now = performance.now()
       const dt = Math.min(0.1, (now - editLastT) / 1000)
       editLastT = now
-      // Editor: no sim, so drive the sky off wall-clock. dt is for the
-      // PMREM bake cadence; the time argument advances slowly so authors
-      // can preview lighting across the cycle without re-launching.
+      // Editor: lighting is fixed at the track's `timeOfDay` (the dome
+      // bakes a single env-map at load), so this tick is just shadow-
+      // camera focus tracking off the editor camera.
       sky.tick(waveField.time, dt, { x: camera.position.x, z: camera.position.z })
       updateUnderwaterFog(scene, camera.position.y)
       waterMesh.tick()

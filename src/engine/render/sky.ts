@@ -34,23 +34,21 @@ import type { SkyConfig } from '@/game/tracks/types'
  * Everything lives in TSL so the shader compiles to WGSL under WebGPU and
  * GLSL under the WebGL2 fallback — the same pipeline the water mesh uses.
  *
- * The system also owns the day-night cycle: it moves the scene's
- * `DirectionalLight` along the deterministic wave-field clock (so replays
- * line up), updates the `Fog` colour and `HemisphereLight` to match the
- * current palette, and periodically bakes the dome to a PMREM cube which
- * is assigned as `scene.environment` for PBR materials and the planar-
- * reflected water surface.
+ * The system picks one time of day at construction (from `config.timeOfDay`,
+ * a position along the 360 s cycle) and freezes it for the lifetime of the
+ * scene: the `DirectionalLight` colour/intensity, `Fog` colour, `HemisphereLight`
+ * palette, and the PMREM env-map are all computed once and held. Previously
+ * we re-baked the cube every 4 s to track the moving sun; that bake (cube
+ * render + roughness pre-filter + render-target alloc) was the main source
+ * of mid-race hitches, and the visual delta across a single race was small
+ * enough that no one noticed it was gone. `tick()` still runs each frame to
+ * keep the shadow-camera target on the player and scroll cloud noise.
  *
  * The sim layer never touches Three.js, so the system is purely render-side.
  */
 
 const SUN_CYCLE_SECONDS = 360 // 6 minutes per full rotation
 const SUN_DISTANCE = 220 // matches the legacy main.ts value; > shadow far/2 OK
-// Seconds between env-map rebakes. The day-night cycle is 360 s long, so the
-// sun moves ~1° per 4 s — visually indistinguishable on a blurred PMREM mip
-// chain. Keeping this low caused a once-per-second GPU stall (cube-render +
-// roughness pre-filter + render-target reallocation).
-const PMREM_INTERVAL = 4.0
 
 const DEFAULT_SKY: Required<SkyConfig> = {
   tint: '#ffffff',
@@ -58,6 +56,9 @@ const DEFAULT_SKY: Required<SkyConfig> = {
   sunIntensity: 1.0,
   fogNear: 250,
   fogFar: 900,
+  // 0 lands at azimuth 45°, elevation 22.5° — a clean mid-morning sun,
+  // matching the historical first-tick look before we froze the cycle.
+  timeOfDay: 0,
 }
 
 /**
@@ -141,10 +142,14 @@ export type SkySystem = {
   /** The inverted-sphere mesh added to the scene. */
   mesh: THREE.Mesh
   /**
-   * Advance the day-night cycle. `time` is the deterministic wave-field
-   * clock (in seconds) used everywhere else in the engine so replays line
-   * up; `dt` is the frame delta in seconds. `focus` is the world-space XZ
-   * point the shadow camera should follow (typically the player bike).
+   * Per-frame update. Sun position, palette, and env-map are frozen at
+   * construction, so this only:
+   *   - keeps the directional-sun shadow camera centred on `focus` (the
+   *     player bike's XZ), so the shadow cascade tracks the racer; and
+   *   - advances the cloud-shader time uniform by `dt` so wind still moves.
+   *
+   * `time` is accepted for call-site compatibility with the live and replay
+   * loops but is no longer used to drive the sun. Pass any seconds value.
    */
   tick(time: number, dt: number, focus: { x: number; z: number }): void
   /** Read the current normalised sun direction (origin → sun). */
@@ -317,8 +322,9 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
 
   // ── PMREM bake plumbing ────────────────────────────────────────────────
   // Dedicated tiny scene with a clone of the sky mesh sharing the same
-  // material (so uniforms drive both). Cloning avoids re-parenting the
-  // main-scene mesh between renders, which would skip a frame.
+  // material (so the same uniforms drive both). We bake exactly once below,
+  // after the static palette is applied; the cube is held for the rest of
+  // the scene's lifetime and disposed alongside the system.
   // The engine carries the renderer as `WebGLRenderer` for shared call-site
   // ergonomics (see renderer.ts), but at runtime it's a `WebGPURenderer`
   // and PMREMGenerator from `three/webgpu` wants that concrete type.
@@ -328,9 +334,6 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   pmremDome.frustumCulled = false
   pmremScene.add(pmremDome)
   let currentEnv: { dispose(): void; texture: THREE.Texture } | null = null
-  // Guard so a single failure disables PMREM rather than spamming every tick.
-  let pmremEnabled = true
-  let pmremAccum = 0
 
   // ── Sun direction read-out vector (kept in sync with uniform) ───────────
   const sunDirOut = new THREE.Vector3()
@@ -384,12 +387,18 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
     out.elev = elev
   }
 
-  function tick(time: number, dt: number, focus: { x: number; z: number }): void {
-    // ── Sun position along the deterministic cycle ────────────────────────
+  /**
+   * One-shot setup that positions the sun at the configured time-of-day,
+   * evaluates the palette, and pushes the result into every consumer
+   * (shader uniforms, fog, hemi/sun lights, water shader, PMREM env-map).
+   * Called once during construction; nothing here runs per frame.
+   */
+  function applyStaticState(time: number): void {
+    // ── Sun position along the (frozen) day-night cycle ──────────────────
     // Elevation centred at +22.5° with ±47.5° swing → range [-25°..+70°],
     // i.e. proper night when below the horizon and a reasonable noon arc.
     // The 0.7 phase factor staggers elevation from azimuth so the sun
-    // doesn't trace a flat circle.
+    // doesn't trace a flat circle as `timeOfDay` is varied per track.
     const phase = (time / SUN_CYCLE_SECONDS) * Math.PI * 2
     const elevRad = (22.5 + 47.5 * Math.sin(phase * 0.7)) * (Math.PI / 180)
     const azimuth = (45 * Math.PI) / 180 + phase
@@ -400,7 +409,6 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
 
     sunDirOut.set(dirX, dirY, dirZ)
     uSunDir.value.copy(sunDirOut)
-    uTime.value = time
 
     // ── Palette eval ─────────────────────────────────────────────────────
     samplePalette(dirY, scratch)
@@ -422,12 +430,10 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
     const aboveHorizon = dirY > 0.02
     sun.visible = aboveHorizon
     if (aboveHorizon) {
-      sun.position.set(
-        focus.x + dirX * SUN_DISTANCE,
-        dirY * SUN_DISTANCE,
-        focus.z + dirZ * SUN_DISTANCE,
-      )
-      sun.target.position.set(focus.x, 0, focus.z)
+      // Initial placement around the origin; `tick()` re-aims the shadow
+      // camera at the player each frame so the cascade tracks the racer.
+      sun.position.set(dirX * SUN_DISTANCE, dirY * SUN_DISTANCE, dirZ * SUN_DISTANCE)
+      sun.target.position.set(0, 0, 0)
       sun.target.updateMatrixWorld()
       sun.color.copy(scratch.sunLight)
       sun.intensity = baseSunIntensity * scratch.sunMul * cfg.sunIntensity
@@ -435,37 +441,47 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
 
     if (water) {
       water.setSunDirection(dirX, dirY, dirZ)
-      // Hand the current palette horizon color to the water shader so the
-      // aerial-perspective haze on distant water tracks the sky's mood
-      // (sunset warmth, dawn pink, twilight blue, midday teal) instead of
-      // sitting on a fixed cool tone. Same color the scene fog uses, so
-      // distant water and the sky behind it stay tonally aligned.
+      // Hand the palette horizon color to the water shader so the aerial-
+      // perspective haze on distant water tracks the sky's mood (sunset
+      // warmth, dawn pink, twilight blue, midday teal) instead of sitting
+      // on a fixed cool tone. Same color the scene fog uses, so distant
+      // water and the sky behind it stay tonally aligned.
       water.setHorizonColor(scratch.horizon.r, scratch.horizon.g, scratch.horizon.b)
     }
 
-    // ── Periodic PMREM bake ──────────────────────────────────────────────
-    // We bake into `next`, then swap it in as `scene.environment` BEFORE
-    // disposing the previous target. Three.js' material cache keys on the
-    // texture object, so disposing first would invalidate every PBR
-    // material's bind group on the next render — a multi-ms stall. Holding
-    // both targets briefly costs a few MB but eliminates the hitch.
-    pmremAccum += dt
-    if (pmremEnabled && pmremAccum >= PMREM_INTERVAL) {
-      pmremAccum = 0
-      try {
-        const next = pmremGen.fromScene(pmremScene, 0)
-        const prev = currentEnv
-        currentEnv = next
-        scene.environment = next.texture
-        if (prev) prev.dispose()
-      } catch (err) {
-        // First failure: warn once and stop attempting. The scene still
-        // renders; PBR materials fall back to whatever IBL Three provides
-        // (usually none) while the gradient sky keeps driving the visuals.
-        // eslint-disable-next-line no-console
-        console.warn('[sky] PMREM bake failed; disabling env-map updates:', err)
-        pmremEnabled = false
-      }
+    // ── One-shot PMREM bake ──────────────────────────────────────────────
+    // Bakes the dome shader (with the static palette already applied) into
+    // a roughness-prefiltered cube and installs it as `scene.environment`.
+    // PBR materials and the planar-reflected water surface sample this for
+    // IBL. Previously we re-baked every 4 s to chase the moving sun; the
+    // cube render + prefilter caused a noticeable hitch and is no longer
+    // needed now that the sun is frozen.
+    try {
+      currentEnv = pmremGen.fromScene(pmremScene, 0)
+      scene.environment = currentEnv.texture
+    } catch (err) {
+      // PBR materials fall back to whatever IBL Three provides (usually
+      // none); the gradient sky keeps driving the visuals either way.
+      // eslint-disable-next-line no-console
+      console.warn('[sky] PMREM bake failed; scene.environment left unset:', err)
+    }
+  }
+
+  function tick(_time: number, dt: number, focus: { x: number; z: number }): void {
+    // Keep wind moving even with the sun frozen — uniform writes are free
+    // and a fully static cloud field reads as "paused game".
+    uTime.value += dt
+
+    // Re-aim the directional sun so its shadow camera centres on the player;
+    // direction (and therefore lighting) is fixed by applyStaticState().
+    if (sun.visible) {
+      sun.position.set(
+        focus.x + sunDirOut.x * SUN_DISTANCE,
+        sunDirOut.y * SUN_DISTANCE,
+        focus.z + sunDirOut.z * SUN_DISTANCE,
+      )
+      sun.target.position.set(focus.x, 0, focus.z)
+      sun.target.updateMatrixWorld()
     }
   }
 
@@ -485,8 +501,9 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
     pmremGen.dispose()
   }
 
-  // Seed the first frame so we don't pop from uniform defaults on tick 0.
-  tick(0, 0, { x: 0, z: 0 })
+  // Sun, palette, lights, fog, water uniforms, and the PMREM env-map are
+  // all computed once here and held for the lifetime of the system.
+  applyStaticState(cfg.timeOfDay)
 
   return { mesh, tick, getSunDirection, dispose }
 }
