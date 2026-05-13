@@ -35,20 +35,24 @@ import type { SkyShared } from '@/engine/render/sky'
  */
 
 const RING_SEGMENTS = 192
-const DEFAULT_RADIUS = 1700
-const DEFAULT_PEAK = 240
+const DEFAULT_RADIUS = 1400
+const DEFAULT_PEAK = 300
 const RING_BASE_Y = -40 // well below water; fog + below-horizon clip hide the seam
 
 export type HorizonRingConfig = {
-  /** Ring radius in metres. Default 1700 — far enough that bike traverse
-   *  parallax is negligible, close enough for the silhouette to read clearly. */
+  /** Ring radius in metres. Default 1400 — close enough that the
+   *  silhouette survives the scene fog (~53 % density at this distance
+   *  with the default 500-2200 m fog band) and large enough that bike
+   *  traverse parallax is negligible. */
   radius?: number
-  /** Maximum peak height above y=0, in metres. Default 240. */
+  /** Maximum peak height above y=0, in metres. Default 300. */
   peakHeight?: number
   /** PRNG seed driving the heightfield's phase offsets. Per-track variety. */
   seed?: number
   /** Multiplier on the sampled horizon colour. < 1 darkens to silhouette,
-   *  > 1 lifts toward a lighter haze. Default 0.74. */
+   *  > 1 lifts toward a lighter haze. Default 0.45 — combined with the
+   *  fog density at the default ring distance, peaks read as ~26 %
+   *  darker than the sky directly behind them. */
   silhouetteDark?: number
 }
 
@@ -97,7 +101,7 @@ export function createHorizonRing(deps: HorizonRingDeps): HorizonRing {
   const radius = config?.radius ?? DEFAULT_RADIUS
   const peak = config?.peakHeight ?? DEFAULT_PEAK
   const seed = config?.seed ?? 1337
-  const silhouetteDark = config?.silhouetteDark ?? 0.74
+  const silhouetteDark = config?.silhouetteDark ?? 0.45
 
   // ── Geometry ──────────────────────────────────────────────────────────
   // 2 verts per angle (top, bottom). 6 indices per quad segment. Wraps
@@ -162,19 +166,21 @@ export function createHorizonRing(deps: HorizonRingDeps): HorizonRing {
   geom.computeBoundingSphere()
 
   // ── Shader ────────────────────────────────────────────────────────────
-  // Vertical gradient: a bit darker at the base, a bit lighter at the
-  // peak. The base sample is `horizonColor * silhouetteDark` so the ring
-  // always reads darker than the sky directly behind it. Sun-side tint
-  // adds a touch of `sunGlow` to peaks pointing at the sun (`outward.xz
-  // · sunDir.xz`), faking aerial forward-scatter without extra noise.
+  // Vertical gradient: peaks are the darkest part of the silhouette (the
+  // signature "distant mountain against bright sky" look), the base
+  // slightly lifted toward the sky as atmospheric haze pools at ground
+  // level. Sun-side tint adds a touch of `sunGlow` to peaks pointing at
+  // the sun (`outward.xz · sunDir.xz`), faking aerial forward-scatter
+  // without extra noise.
   const t = attribute('heightT') as unknown as Node<'float'>
   const outVec = attribute('outward') as unknown as Node<'vec3'>
   const horizonColor = shared.horizonColor as unknown as Node<'vec3'>
   const sunGlow = shared.sunGlow as unknown as Node<'vec3'>
 
-  const baseDark = horizonColor.mul(float(silhouetteDark))
-  const baseLight = horizonColor.mul(float(silhouetteDark + 0.18))
-  const vertical = mix(baseDark, baseLight, smoothstep(float(0), float(0.85), t))
+  const peakDark = horizonColor.mul(float(silhouetteDark))
+  const baseHaze = horizonColor.mul(float(Math.min(silhouetteDark + 0.20, 0.95)))
+  // t=0 at the base → baseHaze, t=1 at the peak → peakDark.
+  const vertical = mix(baseHaze, peakDark, smoothstep(float(0.1), float(0.9), t))
 
   // 2-D dot of outward direction against sun direction (project both onto
   // XZ via .xz, ignore Y). Positive → this side of the ring faces the sun.
