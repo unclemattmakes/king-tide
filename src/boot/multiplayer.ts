@@ -39,6 +39,7 @@ import { PeerControlledStore, RBHandleStore } from '@/game/components'
 import { AIController, AIControllerStore, AITag, defaultAIController } from '@/game/components/ai'
 import { createBike } from '@/game/entities/bike'
 import { applySnapshot } from '@/game/systems/apply-snapshot'
+import { clearRemoteInterp, pushRemoteSnapshot } from '@/game/systems/remote-interp'
 import type { Track } from '@/game/tracks/types'
 
 /** Upper bound on the number of bike records the AI host can pack into a
@@ -96,14 +97,18 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
   // M10.7 — remote-peer bike spawn. Each connected remote peer gets a
   // PeerControlled bike whose ControlIntent is driven by the relay's
   // last-known intent for that slot (drained in the sim loop). Variant
-  // defaults to racer; variant negotiation over the room is a future slice.
+  // is resolved from `net.latestPeerPicks[peerId].selectedBikeId` (the
+  // pick that peer broadcast via `sendReady` during the lobby); falls
+  // back to the racer default when no pick is on file (mid-race join
+  // without a lobby pass).
   //
   // M10.8 — remote bikes are now Racer-tagged so the local race system
   // tracks their checkpoint crossings, lap progress, and finish state.
   // The position HUD updates as remote bikes pass gates. Mid-race joiners
   // start at lap 1 / cp 0 — they naturally land at the back of the field.
   function spawnRemoteBike(peerId: number): number {
-    const racer = resolveBikeVariant('racer')
+    const picks = net?.latestPeerPicks.get(peerId)
+    const variant = resolveBikeVariant(picks?.selectedBikeId)
     // Spread peers 4m apart across the start line, 15m behind the local
     // grid, so they don't visually overlap the AI bikes on spawn.
     const dx = (peerId - 4) * 4
@@ -122,9 +127,9 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
       yaw: track.start.yaw,
       asRacer: true,
       stats: {
-        ...racer.stats,
-        bodyColor: racer.bodyColor,
-        variantId: racer.id,
+        ...variant.stats,
+        bodyColor: variant.bodyColor,
+        variantId: variant.id,
       },
     })
     remoteEids.set(peerId, eid)
@@ -147,6 +152,7 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
       const rb = phys.world.getRigidBody(handle.handle)
       if (rb) phys.world.removeRigidBody(rb)
     }
+    clearRemoteInterp(eid)
     removeEntity(sim, eid)
     remoteEids.delete(peerId)
   }
@@ -181,6 +187,10 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
       if (!rb) continue
       if (iAmHost) {
         rb.setBodyType(phys.rapier.RigidBodyType.Dynamic, true)
+        // We're now authoritative for this bike — drop any buffered
+        // remote-interp samples from the previous non-host stint so they
+        // don't reapply if/when we flip back to non-host later.
+        clearRemoteInterp(eid)
         if (!hasComponent(sim, eid, AITag)) {
           addComponent(sim, eid, AITag)
           addComponent(sim, eid, AIController)
@@ -240,15 +250,33 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
         // is dynamic on the host and overwriting a dynamic body via
         // applySnapshot would clobber the host's authoritative sim).
         // Guarded: only apply AI records when we're NOT the host.
-        if (currentlyHost) {
-          // Apply only the player record(s); skip AI records.
-          const playerRecords = snap.bikes.filter((b) => b.bikeKind === 0)
-          if (playerRecords.length > 0) {
-            applySnapshot(sim, phys, { ...snap, bikes: playerRecords }, snapshotLookup)
+        //
+        // Kinematic targets (remote-peer bikes everywhere, AI bikes on
+        // non-host) are routed through the snapshot-interp buffer rather
+        // than `applySnapshot` so the per-frame pose is a lerp between
+        // the two most recent samples instead of a per-snapshot teleport.
+        // Dynamic targets (only seen during a brief host changeover when
+        // the body type hasn't flipped yet) still take the hard-set path
+        // via `applySnapshot` — they're rare and need to lock immediately.
+        const now = performance.now()
+        const dynamicRecords: BikeSnapshotRecord[] = []
+        for (const record of snap.bikes) {
+          if (currentlyHost && record.bikeKind === 1) continue
+          const eid = snapshotLookup(record)
+          if (eid === null) continue
+          const handle = RBHandleStore.get(eid)
+          if (!handle) continue
+          const rb = phys.world.getRigidBody(handle.handle)
+          if (!rb) continue
+          if (rb.bodyType() === phys.rapier.RigidBodyType.Dynamic) {
+            dynamicRecords.push(record)
+          } else {
+            pushRemoteSnapshot(eid, record, now)
           }
-          return
         }
-        applySnapshot(sim, phys, snap, snapshotLookup)
+        if (dynamicRecords.length > 0) {
+          applySnapshot(sim, phys, { ...snap, bikes: dynamicRecords }, snapshotLookup)
+        }
       },
       onConnected: (peerId, others, _raceStarted) => {
         console.log(
