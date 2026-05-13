@@ -49,12 +49,23 @@ If something errored mid-export, jump to [Troubleshooting](#troubleshooting).
    new track — no code change needed; the in-app editor's File menu
    will list it on next reload.
 
-After the first export the JSON is the source of truth for gameplay
-placement. Re-exporting from Blender refreshes the GLB but **never
-overwrites** the JSON unless you Shift-click the button (or toggle
-*Overwrite JSON* in the operator's redo panel). That way edits made
-in the in-app editor — placing pickups, sliding gates along the
-spline, retuning water — survive subsequent Blender exports.
+**JSON ↔ .blend round-trip.** Opening a track `.blend` auto-pulls the
+parametric fields from `public/tracks/<id>.json` into the scene — gate
+spacing, terrain shader knobs, water wave height/freq, and the
+`start_00` pose all reflect whatever the in-app editor last saved.
+Editing those knobs in Blender and clicking *Export Track to Game*
+merges them back onto the JSON; the in-app editor's hand-placed gates,
+pickups, props, and sky stay intact. The *Reload from JSON* button in
+the Hoverbike sidebar re-runs the auto-sync on demand, so changes made
+in the editor while Blender is already open can be picked up without
+closing the file.
+
+Hybrid-pipeline rule of thumb: if the .blend has `cp_NN` / `pickup_*`
+empties, Blender wins for that track (those positions overwrite the
+JSON on export). If it doesn't, the editor wins for hand-placed
+gameplay objects. The Blender-owned fields — `environmentGlb`, `water`,
+`terrainShader`, `aiSplines`, `gateSpacing`, `start` — always come from
+the .blend.
 
 ## Headless / CI fallback
 
@@ -533,7 +544,11 @@ child's position.
 4. **Apply the modifier** when the silhouette reads right. Object →
    Convert → Mesh, then add the standard track furniture on top:
      - Update or delete the starter `ai_spline_main` curve to follow
-       your racing line.
+       your racing line. After the first *Rebuild Gate Preview* /
+       *Rebuild Turn Indicators* click, both previews auto-follow the
+       spline as you edit it — control-point moves and spacing
+       changes trigger a debounced rebuild (~0.2 s) so the gates and
+       chevrons slide along with the curve.
      - Place gates either by editing `cp_NN` empties or hitting the
        addon's *Rebuild Gate Preview* button after setting
        `gateSpacing` on the track JSON.

@@ -18,6 +18,97 @@ with the headless `pnpm gen:*` pipeline. The existing pipeline is in
 
 ## Shipped so far
 
+- **Road + ramp authoring tools (2026-05-12).** Two new operators that
+  cover the "I want to author a real track feature, not just place a
+  prop" use case:
+  - **Road tool.** *Add Road Curve* drops a 4-point Bezier named
+    `road_curve_main`. The author edits it to draw the racing line
+    they want; *Build Road* samples the curve along its arc length,
+    raycasts each sample onto the terrain, smooths the resulting
+    height profile (1-2-1 binomial, default 4 passes), builds a road
+    strip mesh tagged `kind=track` with the new `mat_track_road`
+    asphalt-grey material, *and* deforms the terrain in a
+    `width/2 + blend_radius` band so it conforms to the road's
+    altitude. Inner band flattens fully; outer band smoothsteps. The
+    operator warns if the terrain still has active modifiers (GN
+    output would overwrite the deformation — apply first). Re-runs
+    replace the prior road; Ctrl+Z restores the prior terrain.
+  - **Ramp tool.** *Add Ramp* drops a parametric stunt-ramp wedge at
+    the 3D cursor, tagged `kind=track` (collidable on export) with
+    the new `mat_track_ramp` saturated-orange material. Length /
+    width / peak height / approach run-up are scene props; *Curved
+    kicker* toggles between a smoothstep launch profile (default,
+    natural launch tangent) and a flat linear wedge. Ramps get
+    sequential `ramp_NN` names so repeated placement doesn't stomp.
+
+- **Authoring loop overhaul (2026-05-12).** Six follow-ups on top of
+  the live-preview pass:
+  - **Real prop-mesh gate gizmos.** The gate preview now links
+    `prop_gate_mesh` from `tracks-src/props-library.blend` and
+    instances it at each placement (with a fix-up Rx(-90°) so the
+    author's Z-up posts land on the gizmo's local +Y up axis). Scales
+    linearly with the scene's gate half-width / height. Falls back to
+    the wireframe gizmo if the library isn't present so empty repos
+    still preview.
+  - **Snap spline to terrain.** New *Snap Spline to Terrain* button
+    raycasts every NURBS / Bezier control point on `ai_spline_main`
+    straight down and lifts it by the configured hover height
+    (default 3 m). Preview collections are excluded from the cast so
+    the gate / racer / water gizmos can't catch the ray. Pairs with
+    the live gate preview — re-snap after a terrain edit and the
+    gates slide back into place automatically.
+  - **Heightmap importer.** New *Import Heightmap* button reads a
+    greyscale PNG/EXR, samples luminance bilinearly, and emits a
+    subdivided plane tagged `kind=track` so it exports as collidable
+    terrain. Size / Δz / base elevation / subdivisions are scene
+    props; the file path is remembered between imports.
+  - **Ghost lap + chase cam.** New *Rebuild Ghost Lap* button drops a
+    bike silhouette bound to `ai_spline_main` via a Follow Path
+    constraint, plus a chase camera parented to the bike with a
+    Track-To constraint pointing back at the racer. Sets the scene
+    frame range to `arc_length / target_speed * fps` so Spacebar plays
+    exactly one lap at the configured speed (default 25 m/s, 30 fps).
+    The chase cam becomes the scene's active camera so view-from-camera
+    frames the lap immediately.
+  - **JSON ↔ .blend round-trip.** New *Reload from JSON* button + a
+    `load_post` handler pull scalar / parametric fields from
+    `public/tracks/<id>.json` into the .blend on every open (gate
+    spacing, terrain shader, water, start pose). Export always writes
+    the JSON now, merging Blender-owned keys onto whatever the editor
+    last saved — the *Shift-click to overwrite* mode is gone since
+    the merge is non-destructive by default (hybrid-pipeline `cp_NN`
+    empties still win when present, so the legacy flow keeps working).
+  - **`gateSpacing` round-trips.** `derive_track_json` now writes
+    `gateSpacing` from the scene prop; reload pulls it back. Editing
+    spacing in either Blender or the in-app editor flows through one
+    place.
+
+- **Live preview auto-rebuild + racer orientation fix (2026-05-12).**
+  Three correctness + UX fixes to the preview gizmos:
+  - **Racer preview no longer appears vertical.** `_bike_silhouette_mesh`
+    was built in runtime axes (length along +Z, height along +Y) and
+    dropped into Blender's Z-up world without any conversion, so each
+    bike stood on its tail. The mesh is now Blender-native (length
+    along ±Y, height along +Z); inheriting the `start_NN` empty's
+    yaw rotation around world-Z rotates each bike in the horizontal
+    plane while keeping it upright. The AI grid was stacking AI bikes
+    *vertically* (adding `slot.dz` to Blender's Z) — fixed to translate
+    along Blender −Y, matching three.js +Z forward.
+  - **Spline-driven previews now follow edits.** A `@persistent`
+    `depsgraph_update_post` handler watches `ai_spline_main`,
+    `start_00`, and `water_volume_main`, debounces (~0.2 s), and
+    rebuilds whichever preview collections (`_hoverbike_gate_preview`,
+    `_hoverbike_turn_preview`, `_hoverbike_racer_preview`,
+    `_hoverbike_water_preview`) exist. Editing a NURBS control point
+    on the AI spline now slides the gates and chevrons along with
+    it — no more click-Rebuild round-trips.
+  - **Gate / turn / water scene props now live-update.** The
+    `FloatProperty` registrations gained `update=` callbacks that
+    funnel through the same debounce, so scrubbing gate spacing, gate
+    half-width/height, turn |κ|, or wave time live-refreshes the
+    preview as you drag. The N-panel shows a "Live: follows spline
+    edits" hint once the gate collection exists.
+
 - **Template-island polish + preview-export scrub (2026-05-11).** Five
   small follow-ups on top of Item 1:
   - **Billowy ocean floor.** New `Seafloor Billow` (default 10 m)
@@ -491,11 +582,10 @@ or fix in the current authoring loop:
    wet-band tint). Bringing them into 1:1 alignment — either by porting
    the GLSL into Blender or vice versa — closes the
    what-you-see-is-what-you-get loop.
-6. **Heightmap import.** A *Heightmap → terrain* operator that reads a
-   .png or .exr 16-bit greyscale and replaces the GN modifier with a
-   displaced-from-image plane. Useful for prototyping a real-world
-   coastline or a hand-painted heightmap before committing to the
-   procedural template.
+6. **~~Heightmap import.~~** Shipped 2026-05-12. *Import Heightmap*
+   button reads a greyscale PNG/EXR and emits a subdivided
+   `kind=track` plane luminance-displaced by the image. Re-import
+   replaces any prior `terrain_heightmap` mesh.
 7. **Spline curvature visualizer.** Item 3's turn-indicator chevrons
    are placed where |κ| > threshold but the threshold itself is opaque
    to the author. A small overlay that colours the AI spline by signed
