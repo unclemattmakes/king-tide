@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import type Node from 'three/src/nodes/core/Node.js'
 import {
   abs,
   clamp,
@@ -54,8 +55,13 @@ const DEFAULT_SKY: Required<SkyConfig> = {
   tint: '#ffffff',
   cloudiness: 0.45,
   sunIntensity: 1.0,
-  fogNear: 250,
-  fogFar: 900,
+  // Distances are sized to the 512 m authored track footprint plus the
+  // 1700 m horizon-ring silhouette: geometry stays sharp through the play
+  // area, then dissolves into the haze that sells the horizon's depth.
+  // The horizon ring sits ~75 % through this range, so it reads as a
+  // tinted silhouette rather than a hard distant edge.
+  fogNear: 500,
+  fogFar: 2200,
   // 0 lands at azimuth 45°, elevation 22.5° — a clean mid-morning sun,
   // matching the historical first-tick look before we froze the cycle.
   timeOfDay: 0,
@@ -138,6 +144,25 @@ const PALETTE: PaletteSample[] = [
   },
 ]
 
+/**
+ * TSL uniforms the sky owns and updates from its palette. Other render
+ * systems (horizon ring, cloud shadows on terrain, future post-fx) read
+ * these directly so their look stays tonally aligned with the dome
+ * without redundant CPU pushes from main.ts.
+ */
+export type SkyShared = {
+  /** Normalised origin→sun direction. Frozen for the race. */
+  sunDir: Node<'vec3'>
+  /** Active palette horizon colour (RGB linear). */
+  horizonColor: Node<'vec3'>
+  /** Warm sun-glow colour from the active palette. */
+  sunGlow: Node<'vec3'>
+  /** Seconds clock, advanced each tick. Wraps cleanly via fract() in shaders. */
+  time: Node<'float'>
+  /** 0..1 cloud cover, frozen per track. */
+  cloudiness: Node<'float'>
+}
+
 export type SkySystem = {
   /** The inverted-sphere mesh added to the scene. */
   mesh: THREE.Mesh
@@ -145,8 +170,12 @@ export type SkySystem = {
    * Per-frame update. Sun position, palette, and env-map are frozen at
    * construction, so this only:
    *   - keeps the directional-sun shadow camera centred on `focus` (the
-   *     player bike's XZ), so the shadow cascade tracks the racer; and
-   *   - advances the cloud-shader time uniform by `dt` so wind still moves.
+   *     player bike's XZ), so the shadow cascade tracks the racer;
+   *   - advances the cloud-shader time uniform by `dt` so wind still moves; and
+   *   - re-tints `scene.fog.color` toward the warm sun-glow when the
+   *     camera is looking toward the sun, away from the cool horizon tone
+   *     when it's looking away. Cheap CPU lerp; sells aerial-perspective
+   *     "the air is warmer near the sun" without touching any material.
    *
    * `time` is accepted for call-site compatibility with the live and replay
    * loops but is no longer used to drive the sun. Pass any seconds value.
@@ -154,6 +183,8 @@ export type SkySystem = {
   tick(time: number, dt: number, focus: { x: number; z: number }): void
   /** Read the current normalised sun direction (origin → sun). */
   getSunDirection(): THREE.Vector3
+  /** Shared TSL uniforms (read-only consumers: horizon ring, cloud shadows). */
+  shared: SkyShared
   /** Drop GPU resources. */
   dispose(): void
 }
@@ -161,6 +192,9 @@ export type SkySystem = {
 export type SkyDeps = {
   scene: THREE.Scene
   renderer: THREE.WebGLRenderer
+  /** Active perspective camera. The sky reads `getWorldDirection` each
+   *  tick to tint scene fog toward the sun when the player looks at it. */
+  camera: THREE.PerspectiveCamera
   sun: THREE.DirectionalLight
   hemi: THREE.HemisphereLight
   /** Optional consumer kept in sync with the sun direction and the
@@ -180,7 +214,7 @@ export type SkyDeps = {
  * Safe to call once per scene; no global state.
  */
 export function createSkySystem(deps: SkyDeps): SkySystem {
-  const { scene, renderer, sun, hemi, water, config } = deps
+  const { scene, renderer, camera, sun, hemi, water, config } = deps
 
   // Resolve per-track config with defaults.
   const cfg: Required<SkyConfig> = { ...DEFAULT_SKY, ...config }
@@ -320,6 +354,19 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
     fog.far = cfg.fogFar
   }
 
+  // Aerial-perspective fog state. The palette's `horizon` colour is the
+  // cool/neutral "facing away from sun" tone; `sunGlow` is the warm "facing
+  // toward sun" tone. Per tick we lerp between them by the camera's
+  // forward-vs-sun dot, so the same scene fog reads warmer when the player
+  // looks at the sun and cooler when they look the other way — the cheapest
+  // approximation of Mie forward scattering that still feels physical.
+  // Stored as separate fields so `applyStaticState` can refresh the
+  // endpoints once per palette change and `tick()` only does the lerp.
+  const fogHorizonColor = new THREE.Color(0x9ec1e0)
+  const fogSunGlowColor = new THREE.Color(0xffd9a8)
+  const fogScratch = new THREE.Color()
+  const camForward = new THREE.Vector3()
+
   // ── PMREM bake plumbing ────────────────────────────────────────────────
   // Dedicated tiny scene with a clone of the sky mesh sharing the same
   // material (so the same uniforms drive both). We bake exactly once below,
@@ -418,6 +465,11 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
     uStarOpacity.value = scratch.starOpacity
 
     // ── Fog + lights ─────────────────────────────────────────────────────
+    // Store palette endpoints for the per-frame aerial-perspective lerp in
+    // tick(). The initial fog.color write covers the first frame before
+    // tick() runs (e.g. loading-screen handoff).
+    fogHorizonColor.copy(scratch.horizon)
+    fogSunGlowColor.copy(scratch.sunGlow)
     if (fog) fog.color.copy(scratch.horizon)
     hemi.color.copy(scratch.hemiSky)
     hemi.groundColor.copy(scratch.hemiGround)
@@ -483,6 +535,19 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
       sun.target.position.set(focus.x, 0, focus.z)
       sun.target.updateMatrixWorld()
     }
+
+    // Aerial-perspective fog tint. Lerp scene fog between the palette
+    // horizon (cool/neutral) and the sun-glow (warm) by how aligned the
+    // camera's forward is with the sun direction. Squared dot peaks near
+    // the sun and falls off broadly; scaled by 0.55 so the warm endpoint
+    // never fully takes over — the fog should look like air, not paint.
+    if (fog) {
+      camera.getWorldDirection(camForward)
+      const align = Math.max(camForward.dot(sunDirOut), 0)
+      const warmth = align * align * 0.55
+      fogScratch.copy(fogHorizonColor).lerp(fogSunGlowColor, warmth)
+      fog.color.copy(fogScratch)
+    }
   }
 
   function getSunDirection(): THREE.Vector3 {
@@ -505,5 +570,13 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   // all computed once here and held for the lifetime of the system.
   applyStaticState(cfg.timeOfDay)
 
-  return { mesh, tick, getSunDirection, dispose }
+  const shared: SkyShared = {
+    sunDir: uSunDir as unknown as Node<'vec3'>,
+    horizonColor: uHorizon as unknown as Node<'vec3'>,
+    sunGlow: uSunGlow as unknown as Node<'vec3'>,
+    time: uTime as unknown as Node<'float'>,
+    cloudiness: uCloudiness as unknown as Node<'float'>,
+  }
+
+  return { mesh, tick, getSunDirection, shared, dispose }
 }

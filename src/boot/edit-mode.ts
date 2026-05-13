@@ -10,6 +10,7 @@
 
 import type * as THREE from 'three'
 import { installTrackEditor } from '@/engine/editor/track-editor'
+import type { HorizonRing } from '@/engine/render/horizon-ring'
 import type { SkySystem } from '@/engine/render/sky'
 import { updateUnderwaterFog } from '@/engine/render/water'
 import type { WaveFieldState } from '@/engine/sim/water/wave-field'
@@ -25,6 +26,7 @@ export interface EditModeWiringOpts {
   track: Track
   propAssets: PropManifestEntry[] | undefined
   sky: SkySystem
+  horizonRing: HorizonRing
   waterMesh: { tick: () => void }
   waveField: WaveFieldState
   backend: string
@@ -32,8 +34,19 @@ export interface EditModeWiringOpts {
 }
 
 export function startEditMode(opts: EditModeWiringOpts): void {
-  const { scene, camera, renderer, appEl, track, propAssets, sky, waterMesh, waveField, backend } =
-    opts
+  const {
+    scene,
+    camera,
+    renderer,
+    appEl,
+    track,
+    propAssets,
+    sky,
+    horizonRing,
+    waterMesh,
+    waveField,
+    backend,
+  } = opts
   if (opts.backendEl) opts.backendEl.textContent = `editor · backend ${backend}`
   const editor = installTrackEditor({
     scene,
@@ -52,6 +65,9 @@ export function startEditMode(opts: EditModeWiringOpts): void {
     // bakes a single env-map at load), so this tick is just shadow-
     // camera focus tracking off the editor camera.
     sky.tick(waveField.time, dt, { x: camera.position.x, z: camera.position.z })
+    // Horizon silhouette follows the editor's free-fly camera so the
+    // distant landform always wraps the author's viewpoint.
+    horizonRing.tick({ x: camera.position.x, z: camera.position.z })
     updateUnderwaterFog(scene, camera.position.y)
     waterMesh.tick()
     editor.tick()

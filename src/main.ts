@@ -16,9 +16,11 @@ import { installCameraLookInput } from './engine/input/camera-look'
 import { bindLazyMenuButton } from './engine/lazy-menu'
 import { isHostFor } from './engine/net/host-election'
 import { createChaseCamera } from './engine/render/camera'
+import { applyCloudShadowsToScene, buildCloudShadowMultiplier } from './engine/render/cloud-shadows'
 import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
 import { createFxSystem } from './engine/render/fx'
+import { createHorizonRing } from './engine/render/horizon-ring'
 import { createPhysicsDebugRenderer } from './engine/render/physics-debug'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
@@ -234,14 +236,43 @@ async function boot() {
   // and the PMREM env-map. The sun position and env-map are picked once
   // here (driven by `track.sky.timeOfDay`) and frozen for the whole race —
   // previously we re-baked every 4 s and that bake was a noticeable hitch.
-  // Per-frame `tick()`s below only keep the shadow camera on the player.
+  // Per-frame `tick()`s below only keep the shadow camera on the player
+  // and re-tint scene fog toward the sun based on the camera's heading.
   const sky = createSkySystem({
     scene,
     renderer,
+    camera,
     sun,
     hemi,
     water: waterMesh,
     config: track.sky,
+  })
+
+  // Cloud-shadow injection. With sky's shared uniforms in hand we build a
+  // sun-projected FBM multiplier and stamp it onto every terrain material
+  // already in the scene (GLB-authored terrain only — procedural arena /
+  // ramps / cliffside use stock MeshStandardMaterial and aren't picked up).
+  // Done once after track + sky are both ready; the multiplier reads
+  // sky.shared.time each frame so shadows scroll with the wind for free.
+  if (!editMode) {
+    const cloudShadow = buildCloudShadowMultiplier(sky.shared)
+    const decorated = applyCloudShadowsToScene(scene, cloudShadow)
+    if (decorated > 0) {
+      // eslint-disable-next-line no-console
+      console.info(`[boot] cloud shadows applied to ${decorated} terrain material(s)`)
+    }
+  }
+
+  // Distant horizon silhouette ring. Procedural shape seeded off the
+  // track id so different tracks get different silhouettes from the same
+  // shader. Camera-locked XZ so it wraps the player; fades into the sky
+  // via Three.js fog (now sky-tinted by sky.ts so the ring blends into
+  // whatever palette is active).
+  const horizonRingSeed = hashStringSeed(trackId)
+  const horizonRing = createHorizonRing({
+    scene,
+    shared: sky.shared,
+    config: { seed: horizonRingSeed },
   })
 
   // Edit mode: the editor owns the canvas, sim/physics are skipped, no AI
@@ -256,6 +287,7 @@ async function boot() {
       track,
       propAssets: manifest.props,
       sky,
+      horizonRing,
       waterMesh,
       waveField,
       backend,
@@ -599,6 +631,7 @@ async function boot() {
       camera,
       renderer,
       sky,
+      horizonRing,
       waveField,
       waterMesh,
       bikeRender,
@@ -630,6 +663,7 @@ async function boot() {
     waveField,
     waterMesh,
     sky,
+    horizonRing,
     trackVisuals,
     raceHud,
     raceTick,
@@ -672,6 +706,19 @@ async function boot() {
       controls.setFinishShown(true)
     },
   })
+}
+
+/**
+ * Stable per-track hash → seed for the horizon-ring layered-sine
+ * generator. djb2 is plenty random for visual variety and stays
+ * deterministic across reloads so replays match. Multiplied to a
+ * reasonable phase range (the generator uses seed * i * 1.731 in its
+ * octave offsets, so seeds of single digits would all look similar).
+ */
+function hashStringSeed(s: string): number {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+  return Math.abs(h % 9973) * 0.137
 }
 
 boot().catch((err) => {

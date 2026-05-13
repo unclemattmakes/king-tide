@@ -19,11 +19,19 @@ export function createScene(): {
 } {
   const scene = new THREE.Scene()
   // Fog: the sky system overwrites colour + distances each tick from the
-  // active palette / SkyConfig. The starting values match the historical
-  // horizon blend so any frame before the first sky tick still looks sane.
-  scene.fog = new THREE.Fog(0x9ec1e0, 250, 900)
+  // active palette / SkyConfig. Distances are tuned for the 512 m authored
+  // track footprint (≈724 m corner-to-corner): geometry stays sharp through
+  // the whole playable area (fog near at 500 m) and dissolves into the
+  // horizon ring + sky between 500 m and 2200 m. Beyond 2200 m only the
+  // sky dome and the horizon-ring silhouette remain, and the dome opts
+  // out of fog so the haze never eats the gradient.
+  scene.fog = new THREE.Fog(0x9ec1e0, 500, 2200)
 
-  const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 3000)
+  // Far plane 4000 m comfortably contains the 2000 m sky dome, the 1700 m
+  // horizon ring, and the 2200 m fog cut-off with headroom. Shadow camera
+  // far stays at 500 m (sized to the bike + nearby props), so the bump
+  // here only costs depth precision — fine on the WebGPU 32-bit pipeline.
+  const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 4000)
   camera.position.set(0, 6, -14)
   camera.lookAt(0, 3, 0)
   window.addEventListener('resize', () => {
