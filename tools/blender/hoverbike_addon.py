@@ -572,6 +572,78 @@ def _merge_export_json(derived: dict, existing: dict | None) -> dict:
     return merged
 
 
+def _id_to_display_name(track_id: str) -> str:
+    """Title-case a dashed id for the menu's track-picker card.
+
+    `oval-loop` → `Oval Loop`. The Blender export doesn't have a place
+    for the author to type a display name yet; the id is the only signal.
+    """
+    return " ".join(part.capitalize() for part in track_id.split("-") if part)
+
+
+def _upsert_manifest_track(repo_root: str, track_id: str, glb_url: str, json_path: str) -> None:
+    """Add or refresh the track's entry in `public/assets/manifest.json`.
+
+    The manifest is the canonical track list the in-game menu reads
+    (via `loadManifest()` → `buildTrackList()`). Tracks authored
+    headlessly by `pnpm gen:tracks` get listed automatically because the
+    builder writes the manifest. Tracks authored interactively in
+    Blender used to *not* show up — the user had to remember to manually
+    edit manifest.json or live with `?track=<id>` URLs. This helper
+    closes that gap by upserting the entry after every Export.
+
+    Existing entries by the same `id` are replaced; entries for other
+    tracks are preserved. The on-disk write uses a deterministic JSON
+    layout (`indent=2`, trailing newline) so diffs stay clean.
+    """
+    manifest_path = os.path.join(repo_root, "public", "assets", "manifest.json")
+    data: dict[str, Any] = {
+        "schemaVersion": 1,
+        "bikes": [],
+        "props": [],
+        "riders": [],
+        "tracks": [],
+    }
+    if os.path.isfile(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as fh:
+                existing = json.load(fh)
+            if isinstance(existing, dict):
+                data = existing
+        except (OSError, ValueError):
+            # Fall through with the empty default; the next write fixes
+            # the file even if it was corrupt.
+            pass
+    data.setdefault("bikes", [])
+    data.setdefault("props", [])
+    data.setdefault("riders", [])
+    tracks = data.setdefault("tracks", [])
+    spec_path_rel = os.path.relpath(json_path, repo_root).replace("\\", "/")
+    new_entry = {
+        "id": track_id,
+        "displayName": _id_to_display_name(track_id),
+        "url": glb_url,
+        "specPath": spec_path_rel,
+    }
+    # Preserve a hand-edited displayName if the entry already has one
+    # (the auto-derived `_id_to_display_name` is just a fallback).
+    for entry in tracks:
+        if entry.get("id") == track_id:
+            existing_name = entry.get("displayName")
+            if isinstance(existing_name, str) and existing_name and existing_name != track_id:
+                new_entry["displayName"] = existing_name
+            break
+    tracks = [e for e in tracks if e.get("id") != track_id]
+    tracks.append(new_entry)
+    tracks.sort(key=lambda e: e.get("id", ""))
+    data["tracks"] = tracks
+    data["schemaVersion"] = 1
+    os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+    with open(manifest_path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+        fh.write("\n")
+
+
 # ── Bike spec derivation ────────────────────────────────────────────────────
 
 
@@ -3423,6 +3495,20 @@ class HOVERBIKE_OT_export_track(Operator):
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(body, f, indent=2)
             f.write("\n")
+
+        # Make sure the in-game level picker sees this track. The menu
+        # reads `public/assets/manifest.json`; tracks authored
+        # interactively in Blender (vs. via `pnpm gen:tracks`) need
+        # their entry upserted here.
+        try:
+            _upsert_manifest_track(
+                repo,
+                track_id=track_id,
+                glb_url=f"/assets/tracks/{track_id}.glb",
+                json_path=json_path,
+            )
+        except Exception as e:  # noqa: BLE001 — informational; export still succeeded
+            self.report({"WARNING"}, f"manifest update skipped: {e}")
 
         rel_glb = os.path.relpath(glb_path, repo).replace("\\", "/")
         rel_json = os.path.relpath(json_path, repo).replace("\\", "/")
