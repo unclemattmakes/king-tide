@@ -88,3 +88,35 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  # Deploys the PartyKit relay (party/relay.ts) when main moves. Vercel
+  # auto-deploys the static client, but the relay is a separate target —
+  # without this step the client and server drift apart (we lost a few
+  # days of the M10.12 lobby being broken in prod because of exactly that).
+  # Requires PARTYKIT_LOGIN + PARTYKIT_TOKEN repo secrets; the step skips
+  # cleanly if they're missing so forked PRs don't fail.
+  partykit-deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: check-and-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Deploy PartyKit relay
+        env:
+          PARTYKIT_LOGIN: ${{ secrets.PARTYKIT_LOGIN }}
+          PARTYKIT_TOKEN: ${{ secrets.PARTYKIT_TOKEN }}
+        run: |
+          if [ -z "$PARTYKIT_TOKEN" ]; then
+            echo "::warning::PARTYKIT_TOKEN not set — skipping relay deploy. Add PARTYKIT_LOGIN + PARTYKIT_TOKEN secrets to enable."
+            exit 0
+          fi
+          pnpm party:deploy
