@@ -216,14 +216,23 @@ function buildAll() {
 }
 
 function writeManifest(built) {
-  const manifest = {
-    schemaVersion: 1,
-    generatedAt: new Date().toISOString(),
-    bikes: [],
-    props: [],
-    riders: [],
-    tracks: [],
+  // Start from whatever's on disk so addon-authored tracks (entries
+  // not produced by `gen:*`) survive a `build_all`. The spec pipeline
+  // upserts by id for tracks; bikes / props / riders get wipe-and-
+  // replaced since the spec pipeline is the only authoring path.
+  const manifestPath = path.join(REPO_ROOT, 'public', 'assets', 'manifest.json')
+  let existing = { schemaVersion: 1, bikes: [], props: [], riders: [], tracks: [] }
+  if (existsSync(manifestPath)) {
+    try {
+      existing = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    } catch {
+      // corrupt → fall back to a fresh manifest
+    }
   }
+  existing.bikes = []
+  existing.props = []
+  existing.riders = existing.riders ?? []
+  existing.tracks = existing.tracks ?? []
   for (const item of built) {
     const url = `/assets/${item.category}/${item.id}.glb`
     const specPath = path.relative(REPO_ROOT, item.specPath).replace(/\\/g, '/')
@@ -236,21 +245,25 @@ function writeManifest(built) {
     if (item.category === 'bikes') {
       entry.physics = item.spec.physics
       entry.appearance = item.spec.appearance
-      manifest.bikes.push(entry)
+      existing.bikes.push(entry)
     } else if (item.category === 'props') {
       entry.category = item.spec.category
-      manifest.props.push(entry)
+      existing.props.push(entry)
     } else if (item.category === 'tracks') {
-      manifest.tracks.push(entry)
+      // Upsert: same id → replace; new id → append; addon-built entries
+      // already on disk are preserved.
+      const idx = existing.tracks.findIndex((e) => e.id === item.id)
+      if (idx >= 0) existing.tracks[idx] = entry
+      else existing.tracks.push(entry)
     }
   }
-  // Stable order by id within each category.
   for (const k of ['bikes', 'props', 'riders', 'tracks']) {
-    manifest[k].sort((a, b) => a.id.localeCompare(b.id))
+    existing[k].sort((a, b) => a.id.localeCompare(b.id))
   }
-  const manifestPath = path.join(REPO_ROOT, 'public', 'assets', 'manifest.json')
+  existing.schemaVersion = 1
+  existing.generatedAt = new Date().toISOString()
   mkdirSync(path.dirname(manifestPath), { recursive: true })
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+  writeFileSync(manifestPath, `${JSON.stringify(existing, null, 2)}\n`, 'utf8')
   console.log(`[run] wrote ${path.relative(REPO_ROOT, manifestPath)}`)
 }
 
@@ -273,13 +286,21 @@ if (action === 'build_bike' || action === 'build_prop' || action === 'build_trac
     }
   }
   const category = builderToCategory[action]
-  // Replace this category's entries; keep others.
+  // Per-category merge policy:
+  //   - bikes / props / riders: wipe-and-replace, since the only author
+  //     for those is the spec pipeline.
+  //   - tracks: upsert by id. Tracks authored interactively by the
+  //     Blender addon (see `_upsert_manifest_track` in hoverbike_addon.py)
+  //     have specPath under public/tracks/; the spec pipeline's tracks
+  //     live under specs/. We let `gen:tracks` refresh the spec-driven
+  //     entries by id but preserve any other ids that are already
+  //     present, so addon-built tracks survive a `gen:tracks` run.
   existing.bikes = existing.bikes ?? []
   existing.props = existing.props ?? []
   existing.riders = existing.riders ?? []
   existing.tracks = existing.tracks ?? []
-  existing[category] = []
-  for (const item of built) {
+
+  function buildEntry(item) {
     const url = `/assets/${item.category}/${item.id}.glb`
     const specPath = path.relative(REPO_ROOT, item.specPath).replace(/\\/g, '/')
     const entry = {
@@ -294,7 +315,17 @@ if (action === 'build_bike' || action === 'build_prop' || action === 'build_trac
     } else if (item.category === 'props') {
       entry.category = item.spec.category
     }
-    existing[category].push(entry)
+    return entry
+  }
+
+  if (category === 'tracks') {
+    const byId = new Map(existing.tracks.map((e) => [e.id, e]))
+    for (const item of built) {
+      byId.set(item.id, buildEntry(item))
+    }
+    existing.tracks = [...byId.values()]
+  } else {
+    existing[category] = built.map(buildEntry)
   }
   existing[category].sort((a, b) => a.id.localeCompare(b.id))
   existing.schemaVersion = 1

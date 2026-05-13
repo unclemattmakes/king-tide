@@ -389,10 +389,11 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
             ],
         }
 
+    laps = int(getattr(scn, "hoverbike_laps_to_finish", 3) or 3)
     body: dict[str, Any] = {
         "id": track_id,
         "name": track_id,
-        "lapsToFinish": 3,
+        "lapsToFinish": laps,
         "environmentGlb": glb_url,
         "water": water_block,
         "start": {"position": start_pos, "yaw": start_yaw},
@@ -439,6 +440,7 @@ BLENDER_OWNED_JSON_KEYS = (
     "terrainShader",
     "aiSplines",
     "gateSpacing",
+    "lapsToFinish",
     "start",
 )
 
@@ -477,6 +479,11 @@ def reload_track_from_json(json_path: str) -> dict:
     if isinstance(gs, (int, float)) and gs > 0 and hasattr(scene, "hoverbike_gate_spacing"):
         scene.hoverbike_gate_spacing = float(gs)
         summary["gateSpacing"] = float(gs)
+
+    laps = data.get("lapsToFinish")
+    if isinstance(laps, int) and laps > 0 and hasattr(scene, "hoverbike_laps_to_finish"):
+        scene.hoverbike_laps_to_finish = int(laps)
+        summary["lapsToFinish"] = int(laps)
 
     ts = data.get("terrainShader")
     if isinstance(ts, dict):
@@ -2067,6 +2074,213 @@ class HOVERBIKE_OT_import_heightmap(Operator):
         return {"FINISHED"}
 
 
+# ── Spline-aligned cursor + ramp placement helpers ────────────────────────
+#
+# Authoring ramps along a spline used to mean computing the tangent in
+# Python and setting the 3D cursor's rotation by hand. These operators
+# replace that ritual:
+#
+#   - HOVERBIKE_OT_cursor_snap_to_spline_t  → moves the 3D cursor to a
+#     parameter t in [0, 1] on `ai_spline_main` (or another curve via
+#     scene prop), with rotation aligned to the racing tangent.
+#   - HOVERBIKE_OT_add_ramp_at_spline_t     → snaps the cursor, then
+#     immediately drops a ramp via `hoverbike.add_ramp`. One-click.
+#   - HOVERBIKE_OT_auto_place_ramps         → reuses the curvature-peak
+#     detector from the turn-indicator operator to spread ramps across
+#     the spline at the corners that need them most.
+
+
+def _yaw_from_tangent_xy(tx: float, ty: float) -> float:
+    """Z-axis rotation that makes Blender's +Y (ramp / asset forward)
+    align with the (tx, ty) tangent. Identity rotation maps +Y to
+    world +Y; we want +Y to map to (tx, ty), so α = atan2(-tx, ty)."""
+    return math.atan2(-tx, ty)
+
+
+def _sample_curve_at_t(curve_obj: bpy.types.Object, t: float) -> dict | None:
+    """Return {x, y, z, tx, ty} at parameter t in [0, 1] along the
+    horizontal arc length of `curve_obj`'s first spline. Same sampling
+    as the road tool so cursor / ramp placement lines up with the
+    road. Returns None for degenerate curves."""
+    raw = _sample_curve_to_polyline(curve_obj)
+    if len(raw) < 2:
+        return None
+    cum = [0.0]
+    for i in range(len(raw) - 1):
+        a, b = raw[i], raw[i + 1]
+        cum.append(cum[-1] + math.hypot(b[0] - a[0], b[1] - a[1]))
+    total = cum[-1]
+    if total <= 0:
+        return None
+    t = max(0.0, min(1.0 - 1e-6, float(t)))
+    target = t * total
+    j = 0
+    while j < len(cum) - 1 and cum[j + 1] < target:
+        j += 1
+    seg_len = cum[j + 1] - cum[j] if (j + 1) < len(cum) else 1.0
+    frac = (target - cum[j]) / seg_len if seg_len > 0 else 0.0
+    a = raw[j]
+    b = raw[j + 1] if (j + 1) < len(raw) else raw[j]
+    x = a[0] + (b[0] - a[0]) * frac
+    y = a[1] + (b[1] - a[1]) * frac
+    z = a[2] + (b[2] - a[2]) * frac
+    dx = b[0] - a[0]
+    dy = b[1] - a[1]
+    tl = math.hypot(dx, dy) or 1.0
+    return {"x": x, "y": y, "z": z, "tx": dx / tl, "ty": dy / tl}
+
+
+def _spline_source_for_placement(scene) -> bpy.types.Object | None:
+    """Resolve the curve placement operators should sample. Mirrors the
+    road tool's preference order so `ai_spline_main` is the natural
+    racing-line source when the user hasn't authored a separate road."""
+    name = getattr(scene, "hoverbike_placement_curve_name", "") or "ai_spline_main"
+    obj = bpy.data.objects.get(name)
+    if obj is not None and obj.type == "CURVE":
+        return obj
+    # Fall back to the road curve if the AI spline isn't there.
+    return _resolve_road_curve()
+
+
+def _cursor_road_z_at(scene, x: float, y: float, fallback_z: float) -> float:
+    """Cast down at (x, y) to find what the bike would land on. Used
+    to seat a ramp's base on the road's surface (so the wedge isn't
+    floating mid-air, and isn't buried in the slab either)."""
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    origin = mathutils.Vector((x, y, 10000.0))
+    down = mathutils.Vector((0.0, 0.0, -1.0))
+    hit, loc, *_ = scene.ray_cast(depsgraph, origin, down)
+    return float(loc.z) if hit else fallback_z
+
+
+class HOVERBIKE_OT_cursor_snap_to_spline(Operator):
+    """Move the 3D cursor to `ai_spline_main` at the configured
+    parameter `t` in [0, 1], with rotation_z aligned to the racing
+    tangent. Useful for placing props, decorations, gates, or anything
+    else that should sit on the racing line at a known fraction along
+    the lap. Cursor Z lands on the road / terrain surface beneath
+    the sample so the wedge sits flush."""
+
+    bl_idname = "hoverbike.cursor_snap_to_spline"
+    bl_label = "Cursor → Spline"
+    bl_description = "Move the 3D cursor to a parameter t on the racing line, aligned tangent-forward"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scene = context.scene
+        curve = _spline_source_for_placement(scene)
+        if curve is None:
+            self.report({"ERROR"}, "No source curve found (need `ai_spline_main` or `road_curve_main`).")
+            return {"CANCELLED"}
+        t = float(scene.hoverbike_placement_t)
+        s = _sample_curve_at_t(curve, t)
+        if s is None:
+            self.report({"ERROR"}, f"Couldn't sample {curve.name!r} at t={t}.")
+            return {"CANCELLED"}
+        z = _cursor_road_z_at(scene, s["x"], s["y"], s["z"])
+        scene.cursor.location = (s["x"], s["y"], z)
+        scene.cursor.rotation_euler = (0.0, 0.0, _yaw_from_tangent_xy(s["tx"], s["ty"]))
+        self.report({"INFO"}, f"Cursor → {curve.name} @ t={t:.3f} ({s['x']:.1f}, {s['y']:.1f}, {z:.2f}).")
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_add_ramp_at_spline_t(Operator):
+    """Combine *Cursor → Spline* with *Add Ramp*. Snaps the cursor to
+    the configured parameter t on the racing line, then drops a ramp
+    aligned to the tangent. Repeated invocations with different `t`
+    values are the fastest way to litter a track with jumps."""
+
+    bl_idname = "hoverbike.add_ramp_at_spline_t"
+    bl_label = "Add Ramp at t"
+    bl_description = "Snap cursor to t on the racing line, then drop a tangent-aligned ramp"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        # Just delegate — Blender's undo wraps both into a single step.
+        snap = bpy.ops.hoverbike.cursor_snap_to_spline()
+        if snap != {"FINISHED"}:
+            return snap
+        return bpy.ops.hoverbike.add_ramp()
+
+
+class HOVERBIKE_OT_auto_place_ramps(Operator):
+    """Place ramps automatically at the high-curvature points along
+    `ai_spline_main`. Reuses the same signed-curvature peak detector
+    that powers the Turn Indicators preview, so ramps land at the
+    same hand-of-god corners the chevrons mark. Each ramp is rotated
+    tangent to the racing line at its anchor.
+
+    Re-runs delete prior auto-placed ramps (named `ramp_auto_NN`) but
+    leave hand-placed ramps (`ramp_NN` / any other prefix) intact.
+    """
+
+    bl_idname = "hoverbike.auto_place_ramps"
+    bl_label = "Auto-place Ramps"
+    bl_description = "Drop tangent-aligned ramps at every curvature peak above |κ|"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scene = context.scene
+        sp = bpy.data.objects.get("ai_spline_main")
+        if sp is None or sp.type != "CURVE":
+            self.report({"ERROR"}, "Auto-place ramps needs `ai_spline_main` in the scene.")
+            return {"CANCELLED"}
+
+        # Wipe prior auto-placed ramps so re-runs don't pile up.
+        for name in list(bpy.data.objects.keys()):
+            if name.startswith("ramp_auto_"):
+                d = bpy.data.objects[name].data
+                bpy.data.objects.remove(bpy.data.objects[name], do_unlink=True)
+                if isinstance(d, bpy.types.Mesh) and d.users == 0:
+                    bpy.data.meshes.remove(d)
+
+        points = _sample_curve_to_polyline(sp)
+        peaks = _signed_curvature_peaks(
+            points,
+            kappa_threshold=float(scene.hoverbike_auto_ramp_kappa),
+            min_spacing_m=float(scene.hoverbike_auto_ramp_min_spacing),
+        )
+        if not peaks:
+            self.report({"WARNING"}, "No curvature peaks above threshold — no ramps placed.")
+            return {"CANCELLED"}
+
+        # Build ramp mesh shared across all auto-placed ramps to keep
+        # the .blend lean. Per-instance scale could vary the look later.
+        length = float(scene.hoverbike_ramp_length)
+        width = float(scene.hoverbike_ramp_width)
+        peak_h = float(scene.hoverbike_ramp_height)
+        approach = float(scene.hoverbike_ramp_approach)
+        segments = int(scene.hoverbike_ramp_segments)
+        curved = bool(scene.hoverbike_ramp_curved)
+        if length <= 0 or width <= 0 or peak_h <= 0 or approach >= length:
+            self.report({"ERROR"}, "Invalid ramp dimensions — fix length/width/peak/approach first.")
+            return {"CANCELLED"}
+
+        placed = 0
+        for i, p in enumerate(peaks):
+            x, y, _ = p["position"]
+            tx, ty, _ = p["tangent"]
+            yaw = _yaw_from_tangent_xy(tx, ty)
+            z = _cursor_road_z_at(scene, x, y, float(p["position"][2])) + 0.01
+            me = _build_ramp_mesh(
+                f"ramp_auto_{i:02d}_mesh",
+                length=length, width=width, peak_height=peak_h,
+                approach=approach, segments=segments, curved=curved,
+            )
+            me.materials.append(_ramp_material())
+            obj = bpy.data.objects.new(f"ramp_auto_{i:02d}", me)
+            obj["kind"] = "track"
+            obj["ramp_height"] = peak_h
+            obj["ramp_length"] = length
+            obj.location = (x, y, z)
+            obj.rotation_euler = (0.0, 0.0, yaw)
+            scene.collection.objects.link(obj)
+            placed += 1
+
+        self.report({"INFO"}, f"Placed {placed} auto-ramps at curvature peaks (|κ| > {scene.hoverbike_auto_ramp_kappa:.3f}).")
+        return {"FINISHED"}
+
+
 # ── Snap spline to terrain ─────────────────────────────────────────────────
 #
 # Raycasts each ai_spline_main control point straight down and lifts it
@@ -2140,18 +2354,67 @@ ROAD_MATERIAL_NAME = "mat_track_road"
 
 
 def _ensure_road_material() -> bpy.types.Material:
+    """Asphalt road surface. Layered: a value-noise texture darkens the
+    base colour slightly so the road doesn't read as a single flat
+    tint, and a low-frequency Voronoi pattern adds tire-groove streaks
+    when viewed up close. Aesthetic baseline only — hand-tune the
+    shader graph in Blender after first generation for production polish."""
     mat = bpy.data.materials.get(ROAD_MATERIAL_NAME)
     if mat is not None:
         return mat
     mat = bpy.data.materials.new(ROAD_MATERIAL_NAME)
     mat.use_nodes = True
+    nt = mat.node_tree
+    bsdf = nt.nodes.get("Principled BSDF")
+    output = nt.nodes.get("Material Output")
+    if bsdf is None or output is None:
+        return mat
+
+    bsdf.inputs["Base Color"].default_value = (0.11, 0.11, 0.12, 1.0)
+    bsdf.inputs["Roughness"].default_value = 0.85
+    spec = bsdf.inputs.get("Specular IOR Level") or bsdf.inputs.get("Specular")
+    if spec is not None:
+        spec.default_value = 0.2
+
+    # Grain: a stretchy Noise → BrightContrast → ColorRamp chain darkens
+    # the asphalt non-uniformly. UV-less so the noise samples in world
+    # space and tiles naturally as the road bends.
+    tex_coord = nt.nodes.new(type="ShaderNodeTexCoord")
+    tex_coord.location = (-900, 0)
+    noise = nt.nodes.new(type="ShaderNodeTexNoise")
+    noise.location = (-700, 0)
+    noise.inputs["Scale"].default_value = 8.0
+    noise.inputs["Detail"].default_value = 4.0
+    noise.inputs["Roughness"].default_value = 0.65
+    ramp = nt.nodes.new(type="ShaderNodeValToRGB")
+    ramp.location = (-450, 0)
+    # Two-stop ramp: most asphalt mid-grey, dark patches a notch darker.
+    ramp.color_ramp.elements[0].position = 0.35
+    ramp.color_ramp.elements[0].color = (0.08, 0.08, 0.09, 1.0)
+    ramp.color_ramp.elements[1].position = 0.75
+    ramp.color_ramp.elements[1].color = (0.13, 0.13, 0.14, 1.0)
+    nt.links.new(tex_coord.outputs["Object"], noise.inputs["Vector"])
+    nt.links.new(noise.outputs["Fac"], ramp.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
+    return mat
+
+
+ROAD_UNDERSIDE_MATERIAL_NAME = "mat_track_road_underside"
+
+
+def _ensure_road_underside_material() -> bpy.types.Material:
+    """Bridge / underside material — flat concrete grey, lighter than the
+    asphalt so the underside reads as structure rather than disappearing
+    into ground shadow on cross-valley shots."""
+    mat = bpy.data.materials.get(ROAD_UNDERSIDE_MATERIAL_NAME)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(ROAD_UNDERSIDE_MATERIAL_NAME)
+    mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
     if bsdf is not None:
-        bsdf.inputs["Base Color"].default_value = (0.10, 0.10, 0.11, 1.0)
-        bsdf.inputs["Roughness"].default_value = 0.85
-        spec = bsdf.inputs.get("Specular IOR Level") or bsdf.inputs.get("Specular")
-        if spec is not None:
-            spec.default_value = 0.2
+        bsdf.inputs["Base Color"].default_value = (0.30, 0.29, 0.27, 1.0)
+        bsdf.inputs["Roughness"].default_value = 0.7
     return mat
 
 
@@ -2236,6 +2499,56 @@ def _add_road_starter_curve(scene) -> bpy.types.Object:
     return obj
 
 
+def _resolve_road_curve() -> bpy.types.Object | None:
+    """Pick the curve the road tool should follow. Prefers the dedicated
+    `road_curve_main` if it exists, falls back to `ai_spline_main` so
+    authors who don't want two curves with the same shape can just
+    author the racing line and have the road follow it. Returns None
+    if neither is present."""
+    for name in (ROAD_CURVE_NAME, "ai_spline_main"):
+        obj = bpy.data.objects.get(name)
+        if obj is not None and obj.type == "CURVE":
+            return obj
+    return None
+
+
+def _curve_control_radii(curve_obj: bpy.types.Object) -> tuple[list[float], bool]:
+    """Return (radii, cyclic) for the curve's first spline. NURBS
+    `point.radius` and Bezier `bezier_point.radius` both live in [0, ∞);
+    Blender defaults to 1.0. Authors can set per-point radius in edit
+    mode (N-panel → Curve → Radius). The road tool reads these as a
+    width multiplier so apexes can be wider than straights."""
+    if not curve_obj.data.splines:
+        return [], False
+    spline = curve_obj.data.splines[0]
+    if spline.type == "BEZIER":
+        radii = [float(bp.radius) for bp in spline.bezier_points]
+    else:
+        radii = [float(pt.radius) for pt in spline.points]
+    return radii, bool(spline.use_cyclic_u)
+
+
+def _radius_at_t(radii: list[float], t: float, cyclic: bool) -> float:
+    """Linearly interpolate a control-point radius array at parameter
+    t in [0, 1]. Cyclic splines wrap around; open splines clamp at
+    both ends."""
+    n = len(radii)
+    if n == 0:
+        return 1.0
+    if n == 1:
+        return radii[0]
+    if cyclic:
+        f = (t * n) % n
+        i0 = int(f) % n
+        i1 = (i0 + 1) % n
+    else:
+        f = t * (n - 1)
+        i0 = min(int(f), n - 1)
+        i1 = min(i0 + 1, n - 1)
+    frac = f - int(f)
+    return radii[i0] * (1.0 - frac) + radii[i1] * frac
+
+
 def _sample_road_path(
     curve_obj: bpy.types.Object,
     terrain_obj: bpy.types.Object,
@@ -2264,6 +2577,7 @@ def _sample_road_path(
     if total <= 0:
         return []
 
+    radii, cyclic = _curve_control_radii(curve_obj)
     samples: list[dict] = []
     denom = max(1, n_samples - 1)
     j = 0
@@ -2280,7 +2594,9 @@ def _sample_road_path(
         dx = b[0] - a[0]
         dy = b[1] - a[1]
         tl = math.hypot(dx, dy) or 1.0
-        samples.append({"x": x, "y": y, "z": 0.0, "tx": dx / tl, "ty": dy / tl})
+        t_norm = i / denom
+        r = _radius_at_t(radii, t_norm, cyclic)
+        samples.append({"x": x, "y": y, "z": 0.0, "tx": dx / tl, "ty": dy / tl, "r": r, "t": t_norm})
 
     # Raycast each sample's (x, y) downward onto the scene. The depsgraph
     # has to be re-fetched *after* the preview collections are hidden,
@@ -2370,19 +2686,25 @@ def _build_road_strip_mesh(
         nx = -s["ty"]
         ny = s["tx"]
         z_road = s["z"] + lift
+        # Per-sample radius from the curve's control-point `radius`
+        # field (linearly interpolated, default 1.0). Scales width and
+        # curb-band horizontally so apexes can be wider than straights.
+        r = float(s.get("r", 1.0))
+        hw = half_w * r
+        outer_h = outer_half * r
         if has_curbs:
             z_curb = z_road + curb_height
-            verts.append((s["x"] - nx * outer_half, s["y"] - ny * outer_half, z_curb))
-            verts.append((s["x"] - nx * half_w,    s["y"] - ny * half_w,    z_road))
-            verts.append((s["x"] + nx * half_w,    s["y"] + ny * half_w,    z_road))
-            verts.append((s["x"] + nx * outer_half, s["y"] + ny * outer_half, z_curb))
+            verts.append((s["x"] - nx * outer_h, s["y"] - ny * outer_h, z_curb))
+            verts.append((s["x"] - nx * hw,      s["y"] - ny * hw,      z_road))
+            verts.append((s["x"] + nx * hw,      s["y"] + ny * hw,      z_road))
+            verts.append((s["x"] + nx * outer_h, s["y"] + ny * outer_h, z_curb))
         else:
-            verts.append((s["x"] - nx * outer_half, s["y"] - ny * outer_half, z_road))
-            verts.append((s["x"] + nx * outer_half, s["y"] + ny * outer_half, z_road))
+            verts.append((s["x"] - nx * outer_h, s["y"] - ny * outer_h, z_road))
+            verts.append((s["x"] + nx * outer_h, s["y"] + ny * outer_h, z_road))
         if has_thickness:
             z_bot = z_road - thickness
-            verts.append((s["x"] - nx * outer_half, s["y"] - ny * outer_half, z_bot))
-            verts.append((s["x"] + nx * outer_half, s["y"] + ny * outer_half, z_bot))
+            verts.append((s["x"] - nx * outer_h, s["y"] - ny * outer_h, z_bot))
+            verts.append((s["x"] + nx * outer_h, s["y"] + ny * outer_h, z_bot))
 
     faces: list[tuple[int, int, int, int]] = []
     face_mats: list[int] = []
@@ -2412,15 +2734,20 @@ def _build_road_strip_mesh(
         else:
             faces.append((a + 0, b + 0, b + 1, a + 1)); face_mats.append(0)
         if has_thickness:
+            # Slab sides and bottom use the underside material (slot 3
+            # when curbs are present, slot 1 when they aren't). The
+            # underside reads as concrete bridge structure on
+            # cross-valley shots instead of disappearing into asphalt.
+            underside_slot = 3 if has_curbs else 1
             # Left side: outer-top → bottom-left, span sample i→i+1.
             faces.append((a + L_OUT_TOP, a + L_BOT, b + L_BOT, b + L_OUT_TOP))
-            face_mats.append(0)
+            face_mats.append(underside_slot)
             # Right side: bottom-right → outer-top.
             faces.append((a + R_OUT_TOP, b + R_OUT_TOP, b + R_BOT, a + R_BOT))
-            face_mats.append(0)
+            face_mats.append(underside_slot)
             # Bottom face — normal faces -Z (CCW seen from below).
             faces.append((a + L_BOT, a + R_BOT, b + R_BOT, b + L_BOT))
-            face_mats.append(0)
+            face_mats.append(underside_slot)
         arc += seg_len
 
     # End caps so the slab reads as solid from the front/back. Skipped
@@ -2428,13 +2755,14 @@ def _build_road_strip_mesh(
     if has_thickness and len(samples) >= 2:
         first = 0
         last = (len(samples) - 1) * cols_per_sample
+        underside_slot = 3 if has_curbs else 1
         # Front cap at sample 0: outer-L-top → outer-R-top → bottom-R → bottom-L.
         # Winding so the normal points OPPOSITE the road tangent.
         faces.append((first + L_OUT_TOP, first + L_BOT, first + R_BOT, first + R_OUT_TOP))
-        face_mats.append(0)
+        face_mats.append(underside_slot)
         # Back cap at last sample: reversed winding.
         faces.append((last + L_OUT_TOP, last + R_OUT_TOP, last + R_BOT, last + L_BOT))
-        face_mats.append(0)
+        face_mats.append(underside_slot)
 
     me.from_pydata(verts, [], faces)
     me.update()
@@ -2622,11 +2950,17 @@ class HOVERBIKE_OT_build_road(Operator):
     )
 
     def execute(self, context):
-        curve_obj = bpy.data.objects.get(ROAD_CURVE_NAME)
-        if curve_obj is None or curve_obj.type != "CURVE":
+        # Single-curve mode: prefer `road_curve_main` if present, else
+        # fall back to `ai_spline_main`. Authors who want one curve for
+        # both racing line and road can author only the AI spline and
+        # the road follows it; authors who want a different road shape
+        # (e.g., wider apex) add a separate `road_curve_main`.
+        curve_obj = _resolve_road_curve()
+        if curve_obj is None:
             self.report(
                 {"ERROR"},
-                f"{ROAD_CURVE_NAME!r} not found — click *Add Road Curve* first.",
+                "No road curve found — click *Add Road Curve* or "
+                "create an `ai_spline_main` curve.",
             )
             return {"CANCELLED"}
 
@@ -2711,13 +3045,16 @@ class HOVERBIKE_OT_build_road(Operator):
             curb_height=curb_height,
             curb_stripe_length=curb_stripe,
         )
-        # Slots: 0 = asphalt, 1 = curb white, 2 = curb red. When curbs
-        # are off the latter two are unused but still slotted for
-        # consistency on re-runs.
+        # Slot order MUST match the face material_index values emitted
+        # by `_build_road_strip_mesh`:
+        #   curbs ON:  0 asphalt | 1 curb-white | 2 curb-red | 3 underside
+        #   curbs OFF: 0 asphalt | 1 underside
         me.materials.append(_ensure_road_material())
         if curb_width > 0:
             me.materials.append(_ensure_curb_material(red=False))
             me.materials.append(_ensure_curb_material(red=True))
+        if thickness > 0:
+            me.materials.append(_ensure_road_underside_material())
         obj = bpy.data.objects.new(ROAD_OBJECT_NAME, me)
         obj["kind"] = "track"
         scene.collection.objects.link(obj)
@@ -2936,14 +3273,16 @@ def _snap_spline_to_terrain(curve_obj: bpy.types.Object, *, hover_m: float) -> d
 
     Preview collections are excluded during the raycast so the gate /
     racer / water gizmos never catch the ray — only authored terrain
-    can land a hit. The depsgraph has to be re-fetched *inside* the
-    `with` block: capturing it before the exclusion takes effect leaves
-    the cast still hitting gizmos."""
+    can land a hit. `road_main` (if present) is temporarily hidden
+    during the cast too so the spline lands on terrain rather than on
+    the road slab it lives above — otherwise re-snapping after a road
+    build would lift the spline by `lift + hover_m` every iteration.
+    The depsgraph has to be re-fetched *inside* the `with` block:
+    capturing it before the exclusion takes effect leaves the cast
+    still hitting gizmos."""
     scene = bpy.context.scene
     hits = 0
     misses = 0
-    # Start the ray well above the highest currently-authored vertex on
-    # the curve so we never start inside terrain.
     high_z = 0.0
     for *_rest, world_co, _ in _spline_iter_points(curve_obj):
         if world_co.z > high_z:
@@ -2951,22 +3290,33 @@ def _snap_spline_to_terrain(curve_obj: bpy.types.Object, *, hover_m: float) -> d
     origin_z = high_z + 1000.0
     down = mathutils.Vector((0.0, 0.0, -1.0))
 
-    with _PreviewCollectionsHidden(bpy.context.view_layer):
-        bpy.context.view_layer.update()
-        depsgraph = bpy.context.evaluated_depsgraph_get()
-        for _spline, _pt, world_co, setter in _spline_iter_points(curve_obj):
-            origin = mathutils.Vector((world_co.x, world_co.y, origin_z))
-            result, location, _normal, _index, _obj, _matrix = scene.ray_cast(
-                depsgraph, origin, down
-            )
-            if result:
-                new_co = mathutils.Vector(
-                    (world_co.x, world_co.y, location.z + hover_m)
+    # Temporarily hide `road_main` so the snap reads true terrain
+    # altitude even after a Build Road has elevated the road above it.
+    road_obj = bpy.data.objects.get(ROAD_OBJECT_NAME)
+    prior_road_hidden = road_obj.hide_viewport if road_obj is not None else None
+
+    try:
+        if road_obj is not None:
+            road_obj.hide_viewport = True
+        with _PreviewCollectionsHidden(bpy.context.view_layer):
+            bpy.context.view_layer.update()
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            for _spline, _pt, world_co, setter in _spline_iter_points(curve_obj):
+                origin = mathutils.Vector((world_co.x, world_co.y, origin_z))
+                result, location, _normal, _index, _obj, _matrix = scene.ray_cast(
+                    depsgraph, origin, down
                 )
-                setter(new_co)
-                hits += 1
-            else:
-                misses += 1
+                if result:
+                    new_co = mathutils.Vector(
+                        (world_co.x, world_co.y, location.z + hover_m)
+                    )
+                    setter(new_co)
+                    hits += 1
+                else:
+                    misses += 1
+    finally:
+        if road_obj is not None and prior_road_hidden is not None:
+            road_obj.hide_viewport = prior_road_hidden
 
     # Force a depsgraph refresh so the spline polyline samples the new
     # control points immediately (the gate/turn previews will follow via
@@ -3351,6 +3701,181 @@ class HOVERBIKE_OT_refresh_track_stats(Operator):
             {"INFO"},
             f"Terrain: y∈[{zmin:.1f}, {zmax:.1f}] m, water coverage {frac * 100:.0f}%",
         )
+        return {"FINISHED"}
+
+
+# ── Track lint ─────────────────────────────────────────────────────────────
+#
+# Pre-export sanity checks. Pure inspection — never mutates the scene.
+# Each check returns (severity, message) tuples; the operator surfaces
+# them via Blender's report system. Authors can lint before export to
+# catch the "why doesn't my track work in-game" failures (no road
+# under start, racing line dives underwater, etc.) without having to
+# launch the runtime first.
+
+
+def _lint_track(scene) -> tuple[list[str], list[str]]:
+    """Return (errors, warnings) for the current track scene. ERRORS
+    are blockers (won't drive); WARNINGS are smells (might race oddly).
+    Cheap — no Cycles bake, no GLB export. ~10 raycasts + spline math.
+
+    Preview gizmos (`_hoverbike_*_preview` collections) are hidden
+    during the raycasts so we lint against the *exported* state, not
+    against gate / water / racer previews that get scrubbed at export."""
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    sp = bpy.data.objects.get("ai_spline_main")
+    start_00 = bpy.data.objects.get("start_00")
+    terrain = _largest_terrain_mesh()
+
+    down = mathutils.Vector((0.0, 0.0, -1.0))
+    water_h = 0.0
+    vol = bpy.data.objects.get("water_volume_main")
+    if vol is not None:
+        water_h = float(vol.matrix_world.translation.z)
+
+    with _PreviewCollectionsHidden(bpy.context.view_layer):
+        bpy.context.view_layer.update()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+
+        if sp is None or sp.type != "CURVE":
+            errors.append("Missing `ai_spline_main` — no racing line authored.")
+        else:
+            arc_m = _spline_arc_length(sp)
+            if arc_m < 60.0:
+                warnings.append(f"AI spline arc length is {arc_m:.0f} m (very short — laps will be < 3s).")
+            gate_spacing = float(getattr(scene, "hoverbike_gate_spacing", 60.0) or 60.0)
+            gate_count = max(1, round(arc_m / gate_spacing))
+            if gate_count < 4:
+                warnings.append(
+                    f"Gate spacing {gate_spacing:.0f} m × {gate_count} gates is sparse for a "
+                    f"{arc_m:.0f} m lap — consider tightening spacing."
+                )
+            elif gate_count > 40:
+                warnings.append(
+                    f"{gate_count} gates at {gate_spacing:.0f} m spacing is busy for a "
+                    f"{arc_m:.0f} m lap."
+                )
+
+            underwater_count = 0
+            miss_count = 0
+            wrong_kind_count = 0
+            mw = sp.matrix_world
+            for spline in sp.data.splines:
+                pts = spline.bezier_points if spline.type == "BEZIER" else spline.points
+                for pt in pts:
+                    if spline.type == "BEZIER":
+                        local = pt.co
+                    else:
+                        local = mathutils.Vector((pt.co[0], pt.co[1], pt.co[2]))
+                    w = mw @ local
+                    if w.z < water_h - 0.5:
+                        underwater_count += 1
+                    origin = mathutils.Vector((w.x, w.y, max(w.z, 0.0) + 1000.0))
+                    hit, _loc, _n, _i, hit_obj, _ = bpy.context.scene.ray_cast(depsgraph, origin, down)
+                    if not hit:
+                        miss_count += 1
+                    elif hit_obj is not None and hit_obj.get("kind") != "track":
+                        wrong_kind_count += 1
+            if underwater_count > 0:
+                warnings.append(
+                    f"{underwater_count} spline point(s) sit below the water surface "
+                    f"(z < {water_h - 0.5:.1f}). The racing line will dive underwater unless you "
+                    f"snap it back up or lift `water_volume_main`."
+                )
+            if miss_count > 0:
+                errors.append(
+                    f"{miss_count} spline point(s) have no terrain or track beneath — bikes will fall."
+                )
+            if wrong_kind_count > 0:
+                warnings.append(
+                    f"{wrong_kind_count} spline point(s) sit above a non-`kind=track` mesh; "
+                    f"the runtime won't collide with decoration."
+                )
+
+        if start_00 is None:
+            errors.append("Missing `start_00` — no player spawn authored.")
+        else:
+            sloc = start_00.matrix_world.translation
+            origin = mathutils.Vector((sloc.x, sloc.y, max(sloc.z, 0.0) + 1000.0))
+            hit, _loc, _n, _i, hit_obj, _ = bpy.context.scene.ray_cast(depsgraph, origin, down)
+            if not hit:
+                errors.append("No surface beneath `start_00` — the player will spawn in the void.")
+            elif hit_obj is not None and hit_obj.get("kind") != "track":
+                warnings.append(
+                    f"`start_00` sits above {hit_obj.name!r} which isn't kind=track; "
+                    f"the bike may sink or fall through."
+                )
+
+    if terrain is None:
+        warnings.append("No `kind=track` terrain mesh found. Tag your terrain mesh's `kind` to `track`.")
+
+    return errors, warnings
+
+
+class HOVERBIKE_OT_lint_track(Operator):
+    """Pre-export sanity check. Walks the spline, the start pose, and
+    the terrain looking for the playability traps that hit the runtime
+    after authors haven't double-checked: spline points underwater,
+    starts in the void, no kind=track terrain, weird gate density."""
+
+    bl_idname = "hoverbike.lint_track"
+    bl_label = "Lint Track"
+    bl_description = "Sanity-check the scene for common playability issues before export"
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        errors, warnings = _lint_track(context.scene)
+        if not errors and not warnings:
+            self.report({"INFO"}, "Lint: scene looks playable — nothing flagged.")
+            return {"FINISHED"}
+        for w in warnings:
+            self.report({"WARNING"}, w)
+        for e in errors:
+            self.report({"ERROR"}, e)
+        self.report(
+            {"INFO"},
+            f"Lint: {len(errors)} error(s), {len(warnings)} warning(s). See the info bar.",
+        )
+        return {"FINISHED"} if not errors else {"CANCELLED"}
+
+
+# ── Playtest button ────────────────────────────────────────────────────────
+
+
+class HOVERBIKE_OT_open_play_url(Operator):
+    """Open the current track's Play URL in the default browser. The
+    addon already has *Copy Play URL*; this is the one-click version
+    that skips clipboard + paste. Assumes the dev server is running at
+    `http://localhost:5191` (Vite's default for the project)."""
+
+    bl_idname = "hoverbike.open_play_url"
+    bl_label = "Open in Browser"
+    bl_description = "Open the dev server's Play URL for this track"
+    bl_options = {"REGISTER"}
+
+    edit: BoolProperty(  # type: ignore[valid-type]
+        name="Edit mode",
+        description="Append `&edit=1` to open the in-app editor for this track instead of racing it",
+        default=False,
+    )
+
+    def execute(self, context):
+        track_id = derive_asset_id("hoverbike_track_id")
+        if not track_id:
+            self.report({"ERROR"}, "Couldn't derive a track id from the .blend filename.")
+            return {"CANCELLED"}
+        url = f"http://localhost:5191/?track={track_id}"
+        if self.edit:
+            url += "&edit=1"
+        try:
+            import webbrowser
+            webbrowser.open(url)
+        except Exception as e:  # noqa: BLE001 — webbrowser fallbacks vary by platform
+            self.report({"ERROR"}, f"Couldn't launch browser: {e}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Opened {url}")
         return {"FINISHED"}
 
 
@@ -3919,13 +4444,21 @@ class HOVERBIKE_PT_panel(Panel):
         row.operator("hoverbike.export_track", icon="EXPORT")
 
         col = layout.column(align=True)
+        col.prop(context.scene, "hoverbike_laps_to_finish", text="Laps")
+        col.operator("hoverbike.lint_track", icon="CHECKMARK")
         col.operator("hoverbike.reload_track_json", icon="FILE_REFRESH")
-        op_play = col.operator(
+        row = col.row(align=True)
+        op_play_open = row.operator("hoverbike.open_play_url", text="Play", icon="PLAY")
+        op_play_open.edit = False
+        op_edit_open = row.operator("hoverbike.open_play_url", text="Edit", icon="GREASEPENCIL")
+        op_edit_open.edit = True
+        row = col.row(align=True)
+        op_play = row.operator(
             "hoverbike.copy_track_url", text="Copy Play URL", icon="URL"
         )
         op_play.edit = False
-        op_edit = col.operator(
-            "hoverbike.copy_track_url", text="Copy Edit URL", icon="GREASEPENCIL"
+        op_edit = row.operator(
+            "hoverbike.copy_track_url", text="Copy Edit URL", icon="URL"
         )
         op_edit.edit = True
 
@@ -3934,6 +4467,14 @@ class HOVERBIKE_PT_panel(Panel):
         sp_box.label(text="Spline tools", icon="CURVE_NCURVE")
         sp_box.prop(context.scene, "hoverbike_snap_hover_height", text="Hover (m)")
         sp_box.operator("hoverbike.snap_spline_to_terrain", icon="SNAP_FACE")
+        row = sp_box.row(align=True)
+        row.prop(context.scene, "hoverbike_placement_t", text="t")
+        row.operator("hoverbike.cursor_snap_to_spline", text="Cursor →", icon="PIVOT_CURSOR")
+        sp_box.operator("hoverbike.add_ramp_at_spline_t", icon="ADD")
+        row = sp_box.row(align=True)
+        row.prop(context.scene, "hoverbike_auto_ramp_kappa", text="|κ|")
+        row.prop(context.scene, "hoverbike_auto_ramp_min_spacing", text="Spacing")
+        sp_box.operator("hoverbike.auto_place_ramps", icon="MOD_PARTICLES")
 
         road_box = layout.box()
         road_box.label(text="Road tool", icon="MOD_CURVE")
@@ -4160,10 +4701,15 @@ _classes = (
     HOVERBIKE_OT_rebuild_ghost_lap,
     HOVERBIKE_OT_hide_ghost_lap,
     HOVERBIKE_OT_snap_spline_to_terrain,
+    HOVERBIKE_OT_cursor_snap_to_spline,
+    HOVERBIKE_OT_add_ramp_at_spline_t,
+    HOVERBIKE_OT_auto_place_ramps,
     HOVERBIKE_OT_add_road_starter_curve,
     HOVERBIKE_OT_build_road,
     HOVERBIKE_OT_add_ramp,
     HOVERBIKE_OT_import_heightmap,
+    HOVERBIKE_OT_lint_track,
+    HOVERBIKE_OT_open_play_url,
     HOVERBIKE_OT_reload_track_json,
     HOVERBIKE_OT_bake_terrain_attrs,
     HOVERBIKE_OT_refresh_track_stats,
@@ -4420,6 +4966,35 @@ def register() -> None:
         default=30, min=12, max=120,
     )
 
+    # Spline-aligned placement helpers.
+    bpy.types.Scene.hoverbike_placement_t = FloatProperty(
+        name="Spline t",
+        description="Parameter in [0, 1] along the racing line. 0 = first control point; 0.5 = halfway around the lap.",
+        default=0.25, min=0.0, max=1.0, precision=3,
+    )
+    bpy.types.Scene.hoverbike_placement_curve_name = StringProperty(
+        name="Source curve",
+        description="Object name to sample for cursor / ramp-at-t placement. Defaults to `ai_spline_main`.",
+        default="ai_spline_main",
+    )
+    bpy.types.Scene.hoverbike_auto_ramp_kappa = FloatProperty(
+        name="Auto-ramp |κ| min (1/m)",
+        description="Curvature threshold for auto-placed ramps. Same family as turn indicators; lower = more ramps.",
+        default=0.025, min=0.001, max=2.0, precision=4,
+    )
+    bpy.types.Scene.hoverbike_auto_ramp_min_spacing = FloatProperty(
+        name="Auto-ramp min spacing (m)",
+        description="Minimum arc-length distance between consecutive auto-placed ramps.",
+        default=40.0, min=1.0, max=500.0, precision=1,
+    )
+
+    # Per-track lap count — round-trips through track JSON.
+    bpy.types.Scene.hoverbike_laps_to_finish = IntProperty(
+        name="Laps to finish",
+        description="Number of laps required to finish the race. Round-trips through public/tracks/<id>.json.",
+        default=3, min=1, max=99,
+    )
+
     # Persistent depsgraph hook so previews follow source edits across
     # file reloads. Idempotent — guard against re-registering if the
     # addon is reloaded.
@@ -4476,6 +5051,9 @@ def unregister() -> None:
         "hoverbike_ramp_length", "hoverbike_ramp_width",
         "hoverbike_ramp_height", "hoverbike_ramp_approach",
         "hoverbike_ramp_segments", "hoverbike_ramp_curved",
+        "hoverbike_placement_t", "hoverbike_placement_curve_name",
+        "hoverbike_auto_ramp_kappa", "hoverbike_auto_ramp_min_spacing",
+        "hoverbike_laps_to_finish",
     ):
         if hasattr(bpy.types.Scene, prop):
             try:
