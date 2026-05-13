@@ -6,15 +6,14 @@ export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
 
-  head: [
-    ['link', { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }],
-  ],
+  head: [['link', { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }]],
 
   themeConfig: {
     nav: [
       { text: 'Build', link: '/build/setup' },
       { text: 'Gameplay', link: '/gameplay/bikes' },
       { text: 'Modding', link: '/modding/overview' },
+      { text: 'Contributing', link: '/contributing/' },
       { text: 'Reference', link: '/reference/conventions' },
       {
         text: 'Live build',
@@ -64,11 +63,20 @@ export default defineConfig({
           ],
         },
       ],
+      '/contributing/': [
+        {
+          text: 'Contributing',
+          items: [
+            { text: 'Overview', link: '/contributing/' },
+            { text: 'Architecture', link: '/contributing/architecture' },
+            { text: 'Testing', link: '/contributing/testing' },
+            { text: 'Code review', link: '/contributing/code-review' },
+          ],
+        },
+      ],
     },
 
-    socialLinks: [
-      { icon: 'github', link: 'https://github.com/occ-matt/hoverbike' },
-    ],
+    socialLinks: [{ icon: 'github', link: 'https://github.com/occ-matt/hoverbike' }],
 
     editLink: {
       pattern: 'https://github.com/occ-matt/hoverbike/edit/main/docs-site/:path',

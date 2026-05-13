@@ -1,0 +1,10 @@
+# Default owner — gets auto-requested on every PR.
+*                                   @occ-matt
+
+# Subsystem owners — uncomment + replace handles as contributors take ownership.
+# /src/engine/sim/                  @occ-matt
+# /src/engine/render/               @occ-matt
+# /src/engine/net/                  @occ-matt
+# /tools/blender/                   @occ-matt
+# /docs/                            @occ-matt
+# /docs-site/                       @occ-matt

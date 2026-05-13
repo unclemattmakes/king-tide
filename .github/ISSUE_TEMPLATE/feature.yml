@@ -1,0 +1,43 @@
+name: Feature request / idea
+description: Suggest a new feature, a tweak to feel/balance, or a quality-of-life change.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, check [`docs/product-plan.md`](../docs/product-plan.md) and
+        [`docs/status.md`](../docs/status.md) — it might already be planned, in
+        progress, or explicitly out of scope.
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: One paragraph. What is it and what's the player experience?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it matters
+      description: What gap does this fill? Reference playtest observations if any.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface?
+      options:
+        - Gameplay
+        - Multiplayer / netcode
+        - Editor
+        - Asset pipeline
+        - Audio
+        - HUD / menus
+        - Tooling / DX
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered

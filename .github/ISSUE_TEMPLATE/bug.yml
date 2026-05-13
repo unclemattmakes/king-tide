@@ -1,0 +1,68 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly in the game, editor, or asset pipeline.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. The more we know about your setup the faster we can reproduce.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the problem. Screenshots / short clips welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: |
+        Step-by-step. Include the URL params you used
+        (e.g. `?track=cliffside&bike=stunt`, `?edit=1`, `?room=foo`, `?replay=...`).
+      placeholder: |
+        1. Open `?track=cliffside&bike=racer`
+        2. Lap 2, hit the wall on the cliff descent
+        3. Bike phases through the mesh
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface?
+      options:
+        - Gameplay (driving, racing, AI, combat)
+        - Multiplayer / netcode
+        - Editor (`?edit=1`)
+        - Asset pipeline (`pnpm gen:*`, Blender addon)
+        - Audio
+        - HUD / menus
+        - Build / dev server / tests
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser + OS
+      placeholder: "Chrome 132 on macOS 15.2"
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit / build URL
+      description: Either a commit SHA (`git rev-parse HEAD`) or the Vercel preview URL.
+      placeholder: "abc1234 or https://hoverbike-...vercel.app"
+  - type: textarea
+    id: console
+    attributes:
+      label: Console errors
+      description: Anything in the DevTools console at the time of the bug. Paste verbatim.
+      render: text
