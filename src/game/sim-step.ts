@@ -5,6 +5,7 @@ import { advanceWaveField, type WaveFieldState } from '@/engine/sim/water/wave-f
 import type { Track } from '@/game/tracks/types'
 import { aiCombatSystem } from './systems/ai-combat'
 import { aiControlSystem } from './systems/ai-control'
+import { boostPadSystem } from './systems/boost-pad'
 import {
   explosionTickSystem,
   mineSystem,
@@ -89,6 +90,7 @@ export function simulateStep(
   mineSystem(sim, phys, phys.fixedDt)
   missileSystem(sim, phys, phys.fixedDt)
   explosionTickSystem(sim, phys.fixedDt)
+  boostPadSystem(sim, phys, track)
   boostTickSystem(sim, phys.fixedDt)
   shieldTickSystem(sim, phys.fixedDt)
   stunTickSystem(sim, phys.fixedDt)
