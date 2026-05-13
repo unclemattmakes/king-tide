@@ -18,6 +18,7 @@ This doc captures the build's current state, controls, known issues, and next st
 - Faceted water surface + horizon-fading sky dome
 - 4 AI racers with per-bike race-line offsets so they hold parallel lines (no convergence pile-up)
 - Pickup boxes around the loop — full pool: boost, shield, mine, homing missile
+- Boost pads — author-placed oriented rectangles (`+Boost` in `?edit=1`, `BoostPad` in the track JSON) refresh the bike's `BoostEffect` while overlapping. Strength multiplier = pad.strength; never weakens a stronger active boost. Implemented in `src/game/systems/boost-pad.ts`
 - Race lap counting with finish overlay
 - Direction arrow (Crazy Taxi style) above the player pointing to the next checkpoint
 - Sky beacon over the next gate
