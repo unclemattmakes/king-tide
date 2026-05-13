@@ -66,6 +66,10 @@ export type WaveFieldState = {
    * the surface for buoyancy. Empty by default. */
   wakes: WakeSource[]
   time: number
+  /** Mean sea level (m). Wave amplitudes oscillate around this Y. Set
+   *  from `track.water.height` at boot; defaults to 0 for tracks that
+   *  don't specify a custom level. */
+  baseY: number
 }
 
 // ---- Wake parameters -----------------------------------------------------
@@ -115,8 +119,8 @@ export const WAKE_TRANS_OMEGA = 1.0
  * the unit-test floor. */
 export const WAKE_TRANS_AMP = 0.3
 
-export function createWaveField(waves: Wave[]): WaveFieldState {
-  return { waves, wakes: [], time: 0 }
+export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveFieldState {
+  return { waves, wakes: [], time: 0, baseY: opts?.baseY ?? 0 }
 }
 
 export function advanceWaveField(field: WaveFieldState, dt: number): void {
@@ -229,7 +233,7 @@ function smoothstep(a: number, b: number, x: number): number {
 
 /** Surface y only — the cheap path used per-bike per-tick. */
 export function sampleHeight(field: WaveFieldState, x: number, z: number): number {
-  let y = 0
+  let y = field.baseY
   const t = field.time
   for (const w of field.waves) {
     const k = (2 * Math.PI) / w.wavelength
@@ -245,7 +249,7 @@ export function sampleHeight(field: WaveFieldState, x: number, z: number): numbe
 
 /** Full sample including normal and ∂y/∂t. */
 export function sampleSurface(field: WaveFieldState, x: number, z: number): WaveSample {
-  let y = 0
+  let y = field.baseY
   let dydx = 0
   let dydz = 0
   let vy = 0

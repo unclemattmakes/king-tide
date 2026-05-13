@@ -351,8 +351,15 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         pickups.append(_b2t(loc.x, loc.y, loc.z))
 
     water = next(iter(by_kind.get("water", [])), None)
+    # Water surface y comes from the water_volume_main empty's Z position
+    # (Blender Z is the same up axis as three.js Y after the yup export),
+    # so authors drag the empty up/down in the viewport to change the
+    # sea level. Wave parameters live as custom props on the same empty.
+    water_height = (
+        float(water.matrix_world.translation.z) if water is not None else 0.0
+    )
     water_block: dict[str, float] = {
-        "height": 0.0,
+        "height": water_height,
         "waveHeight": (
             float(water.get("wave_height", 1.0)) if water is not None else 1.0
         ),
@@ -499,6 +506,12 @@ def reload_track_from_json(json_path: str) -> dict:
     water = data.get("water")
     vol = bpy.data.objects.get("water_volume_main")
     if isinstance(water, dict) and vol is not None:
+        # JSON height → Blender Z (both are world-up). The empty's
+        # transform is the source of truth in the .blend; custom props
+        # carry wave amp / freq.
+        h = water.get("height")
+        if isinstance(h, (int, float)):
+            vol.location.z = float(h)
         wh = water.get("waveHeight")
         if isinstance(wh, (int, float)):
             vol["wave_height"] = float(wh)
@@ -2070,6 +2083,26 @@ def _ensure_road_material() -> bpy.types.Material:
     return mat
 
 
+def _ensure_curb_material(*, red: bool) -> bpy.types.Material:
+    """F1-style curb material — saturated red or white, mat-prefixed so
+    it groups with the other track materials. Two-tone alternation
+    happens at the mesh level via `material_index` on each curb quad."""
+    name = "mat_track_curb_red" if red else "mat_track_curb_white"
+    mat = bpy.data.materials.get(name)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is not None:
+        if red:
+            bsdf.inputs["Base Color"].default_value = (0.85, 0.08, 0.10, 1.0)
+        else:
+            bsdf.inputs["Base Color"].default_value = (0.92, 0.92, 0.92, 1.0)
+        bsdf.inputs["Roughness"].default_value = 0.6
+    return mat
+
+
 def _ramp_material() -> bpy.types.Material:
     name = "mat_track_ramp"
     mat = bpy.data.materials.get(name)
@@ -2216,32 +2249,102 @@ def _sample_road_path(
     return samples
 
 
-def _build_road_strip_mesh(samples: list[dict], width: float, lift: float) -> bpy.types.Mesh:
-    """Build a road-strip mesh from the (x, y, z, tx, ty) samples. Each
-    sample emits a pair of verts perpendicular to its tangent in the
-    horizontal plane (left and right), elevated by `lift`."""
+def _build_road_strip_mesh(
+    samples: list[dict],
+    *,
+    width: float,
+    lift: float,
+    curb_width: float = 0.0,
+    curb_height: float = 0.0,
+    curb_stripe_length: float = 2.0,
+) -> bpy.types.Mesh:
+    """Build a road-strip mesh from the (x, y, z, tx, ty) samples.
+
+    Layout per sample (4 or 6 vertex columns, left-to-right):
+
+        curb_L_outer ─ curb_L_inner = road_L ──── road_R = curb_R_inner ─ curb_R_outer
+                       (when curb_width > 0)               (when curb_width > 0)
+
+    The curb verts are elevated by `curb_height` above the road surface;
+    each curb stripe (one quad along the road's tangent) gets a
+    `material_index` of 1 (white) or 2 (red) on an alternating
+    `curb_stripe_length`-metre cadence, producing F1-style serrated
+    rumble strips. With `curb_width = 0` the function degrades to the
+    original 2-column flat strip.
+    """
     if ROAD_MESH_NAME in bpy.data.meshes:
         bpy.data.meshes.remove(bpy.data.meshes[ROAD_MESH_NAME])
     me = bpy.data.meshes.new(ROAD_MESH_NAME)
-    verts: list[tuple[float, float, float]] = []
     half_w = width / 2.0
+    has_curbs = curb_width > 0 and curb_height >= 0
+
+    # Per-sample vertex columns. When curbs are off: 2 cols.
+    # When on: 4 cols (curb-outer-left, road-left/curb-inner-left,
+    # road-right/curb-inner-right, curb-outer-right). The road and
+    # inner-curb columns share a vertex so the road-edge → curb seam
+    # is welded — no gap, no z-fighting.
+    cols_per_sample = 4 if has_curbs else 2
+
+    verts: list[tuple[float, float, float]] = []
     for s in samples:
-        # Horizontal perpendicular = 90° CCW rotation of the tangent.
-        # +X-right when the road goes "north", which feels natural.
         nx = -s["ty"]
         ny = s["tx"]
-        z = s["z"] + lift
-        verts.append((s["x"] - nx * half_w, s["y"] - ny * half_w, z))
-        verts.append((s["x"] + nx * half_w, s["y"] + ny * half_w, z))
+        z_road = s["z"] + lift
+        if has_curbs:
+            z_curb = z_road + curb_height
+            # curb-outer-left
+            verts.append((
+                s["x"] - nx * (half_w + curb_width),
+                s["y"] - ny * (half_w + curb_width),
+                z_curb,
+            ))
+            # road-left (= curb-inner-left)
+            verts.append((s["x"] - nx * half_w, s["y"] - ny * half_w, z_road))
+            # road-right (= curb-inner-right)
+            verts.append((s["x"] + nx * half_w, s["y"] + ny * half_w, z_road))
+            # curb-outer-right
+            verts.append((
+                s["x"] + nx * (half_w + curb_width),
+                s["y"] + ny * (half_w + curb_width),
+                z_curb,
+            ))
+        else:
+            verts.append((s["x"] - nx * half_w, s["y"] - ny * half_w, z_road))
+            verts.append((s["x"] + nx * half_w, s["y"] + ny * half_w, z_road))
+
     faces: list[tuple[int, int, int, int]] = []
+    # Material slots: 0 = road, 1 = curb-white, 2 = curb-red.
+    # Track arc length cumulatively so stripe colour alternates by
+    # distance along the road, not by segment count (segments aren't
+    # equal-length when smoothing varies).
+    arc = 0.0
+    face_mats: list[int] = []
     for i in range(len(samples) - 1):
-        a = i * 2
-        # Wind CCW so the normal faces +Z up.
-        faces.append((a, a + 2, a + 3, a + 1))
+        a = i * cols_per_sample
+        b = (i + 1) * cols_per_sample
+        # Segment length in the horizontal plane.
+        seg_len = math.hypot(
+            samples[i + 1]["x"] - samples[i]["x"],
+            samples[i + 1]["y"] - samples[i]["y"],
+        )
+        stripe_idx = int(arc // max(curb_stripe_length, 0.01)) if has_curbs else 0
+        curb_mat = 1 + (stripe_idx % 2)  # toggles 1 / 2
+        if has_curbs:
+            # Left curb quad (cols 0 ↔ 1) — wind CCW for +Z normal.
+            faces.append((a + 0, b + 0, b + 1, a + 1)); face_mats.append(curb_mat)
+            # Road quad (cols 1 ↔ 2).
+            faces.append((a + 1, b + 1, b + 2, a + 2)); face_mats.append(0)
+            # Right curb quad (cols 2 ↔ 3).
+            faces.append((a + 2, b + 2, b + 3, a + 3)); face_mats.append(curb_mat)
+        else:
+            faces.append((a + 0, b + 0, b + 1, a + 1)); face_mats.append(0)
+        arc += seg_len
+
     me.from_pydata(verts, [], faces)
     me.update()
-    for poly in me.polygons:
-        poly.use_smooth = False  # roads read better with hard shading
+    for i, poly in enumerate(me.polygons):
+        poly.use_smooth = False
+        poly.material_index = face_mats[i]
     return me
 
 
@@ -2251,11 +2354,25 @@ def _conform_terrain_to_road(
     *,
     width: float,
     blend_radius: float,
+    lift: float,
+    curb_width: float = 0.0,
+    clearance: float = 0.05,
 ) -> dict:
-    """Push each terrain vertex within `(width/2 + blend_radius)` of the
-    road centerline toward the road's local Z. Within the inner band
-    (`d < width/2`) the vertex snaps fully; the outer band falls off
-    with a smoothstep so the join is seamless.
+    """Push each terrain vertex within `(width/2 + curb_width + blend_radius)`
+    of the road centerline toward the road's local Z. Inside the road
+    footprint (`d ≤ width/2`) the vertex snaps to the road's reference
+    altitude (`sample_z`), so the road strip mesh sits `lift` metres
+    above. Inside the curb band (`d ≤ width/2 + curb_width`) the same
+    snap applies — the curbs themselves rise `curb_height` above the
+    road, so terrain can't pop through them. The outer band smoothsteps
+    back to natural terrain.
+
+    A `clearance` cap (default 5 cm) clamps the result so a steep
+    hillside can never poke up *through* the drivable surface — the
+    earlier "terrain jumped" symptom on the template island was a
+    coarse-grid vertex inside the blend band ending up above the road
+    surface and slicing through the strip mesh. The cap follows the
+    same smoothstep so the visual transition stays seamless.
 
     Returns a summary `{flattened, blended}` count for the report."""
     from mathutils.kdtree import KDTree
@@ -2263,11 +2380,18 @@ def _conform_terrain_to_road(
     if not samples:
         return {"flattened": 0, "blended": 0}
 
-    inner = width / 2.0
+    half_w = width / 2.0
+    # The "fully flattened" zone now spans the road *plus* the curbs so
+    # the curb stripes themselves don't fight the terrain.
+    inner = half_w + max(0.0, curb_width)
     outer = inner + max(0.0, blend_radius)
+    # Cap ceiling: clamped to the *road* surface (= sample_z + lift),
+    # NOT the curb top. Curbs rise above the road and we want terrain
+    # to sit below the lowest drivable point so nothing pokes through
+    # the road quad. Curbs themselves are a separate elevated mesh and
+    # their bases meet flush with the terrain at the road edge.
+    surface_lift = lift
 
-    # KDTree over (x, y) samples, Z zero so 2D lookups in the horizontal
-    # plane are exact.
     kd = KDTree(len(samples))
     for i, s in enumerate(samples):
         kd.insert((s["x"], s["y"], 0.0), i)
@@ -2295,6 +2419,12 @@ def _conform_terrain_to_road(
             blend = t * t * (3.0 - 2.0 * t)  # smoothstep
             blended += 1
         new_world_z = world.z * (1.0 - blend) + target_z * blend
+        # Cap: never let the terrain rise above the drivable surface.
+        # The cap rises with (1 - blend) so it disappears at d=outer.
+        surface_z = target_z + surface_lift - clearance
+        max_allowed = surface_z + (world.z - surface_z) * (1.0 - blend)
+        if new_world_z > max_allowed:
+            new_world_z = max_allowed
         v.co = mw_inv @ mathutils.Vector((world.x, world.y, new_world_z))
 
     me.update()
@@ -2431,6 +2561,17 @@ class HOVERBIKE_OT_build_road(Operator):
                 return {"CANCELLED"}
 
         scene = context.scene
+        # Wipe any prior road_main BEFORE sampling — _sample_road_path's
+        # downward raycast would otherwise hit the existing road strip
+        # and treat it as terrain. Each re-run would then lift the road
+        # by another `lift` metres, racing the terrain up.
+        old_road = bpy.data.objects.get(ROAD_OBJECT_NAME)
+        if old_road is not None:
+            old_road_mesh = old_road.data
+            bpy.data.objects.remove(old_road, do_unlink=True)
+            if isinstance(old_road_mesh, bpy.types.Mesh) and old_road_mesh.users == 0:
+                bpy.data.meshes.remove(old_road_mesh)
+
         samples = _sample_road_path(
             curve_obj,
             terrain,
@@ -2444,20 +2585,41 @@ class HOVERBIKE_OT_build_road(Operator):
         width = float(scene.hoverbike_road_width)
         lift = float(scene.hoverbike_road_lift)
         blend_radius = float(scene.hoverbike_road_blend_radius)
+        curb_width = float(scene.hoverbike_road_curb_width)
+        curb_height = float(scene.hoverbike_road_curb_height)
+        curb_stripe = float(scene.hoverbike_road_curb_stripe_length)
 
         # Deform terrain first, then build the road strip — that way the
         # road's Z (sampled before deformation) sits on the *original*
-        # surface and the terrain rises/falls to meet it.
+        # surface and the terrain rises/falls to meet it. The conform
+        # treats the curb band as part of the road footprint so curbs
+        # don't fight the surrounding terrain.
         deform_summary = _conform_terrain_to_road(
-            terrain, samples, width=width, blend_radius=blend_radius
+            terrain,
+            samples,
+            width=width,
+            blend_radius=blend_radius,
+            lift=lift,
+            curb_width=curb_width,
         )
 
-        # Build / replace the road strip mesh.
-        old = bpy.data.objects.get(ROAD_OBJECT_NAME)
-        if old is not None:
-            bpy.data.objects.remove(old, do_unlink=True)
-        me = _build_road_strip_mesh(samples, width=width, lift=lift)
+        # Build the road strip mesh (the prior `road_main`, if any, was
+        # removed before sampling above so the raycast saw fresh terrain).
+        me = _build_road_strip_mesh(
+            samples,
+            width=width,
+            lift=lift,
+            curb_width=curb_width,
+            curb_height=curb_height,
+            curb_stripe_length=curb_stripe,
+        )
+        # Slots: 0 = asphalt, 1 = curb white, 2 = curb red. When curbs
+        # are off the latter two are unused but still slotted for
+        # consistency on re-runs.
         me.materials.append(_ensure_road_material())
+        if curb_width > 0:
+            me.materials.append(_ensure_curb_material(red=False))
+            me.materials.append(_ensure_curb_material(red=True))
         obj = bpy.data.objects.new(ROAD_OBJECT_NAME, me)
         obj["kind"] = "track"
         scene.collection.objects.link(obj)
@@ -3656,6 +3818,11 @@ class HOVERBIKE_PT_panel(Panel):
         row.prop(context.scene, "hoverbike_road_blend_radius", text="Blend")
         row.prop(context.scene, "hoverbike_road_samples", text="Samples")
         road_box.prop(context.scene, "hoverbike_road_smooth_passes", text="Smooth passes")
+        road_box.label(text="F1 curbs:", icon="SEQ_STRIP_DUPLICATE")
+        row = road_box.row(align=True)
+        row.prop(context.scene, "hoverbike_road_curb_width", text="Curb w")
+        row.prop(context.scene, "hoverbike_road_curb_height", text="Curb h")
+        road_box.prop(context.scene, "hoverbike_road_curb_stripe_length", text="Stripe (m)")
         road_box.operator("hoverbike.build_road", icon="MESH_PLANE")
         if bpy.data.objects.get(ROAD_CURVE_NAME):
             road_box.label(text="Edit road_curve_main, then Build", icon="INFO")
@@ -4059,6 +4226,21 @@ def register() -> None:
         description="1-2-1 binomial passes applied to the height profile so the road doesn't follow every terrain bump.",
         default=4, min=0, max=32,
     )
+    bpy.types.Scene.hoverbike_road_curb_width = FloatProperty(
+        name="Curb width (m)",
+        description="Width of each F1-style curb strip. 0 disables curbs entirely.",
+        default=0.6, min=0.0, max=5.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_road_curb_height = FloatProperty(
+        name="Curb height (m)",
+        description="Vertical rise of the curbs above the road surface.",
+        default=0.12, min=0.0, max=1.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_road_curb_stripe_length = FloatProperty(
+        name="Stripe length (m)",
+        description="Length of each red/white stripe along the road. Shorter = busier rumble.",
+        default=2.0, min=0.2, max=20.0, precision=2,
+    )
 
     # Ramp-tool settings.
     bpy.types.Scene.hoverbike_ramp_length = FloatProperty(
@@ -4155,6 +4337,8 @@ def unregister() -> None:
         "hoverbike_road_width", "hoverbike_road_lift",
         "hoverbike_road_blend_radius", "hoverbike_road_samples",
         "hoverbike_road_smooth_passes",
+        "hoverbike_road_curb_width", "hoverbike_road_curb_height",
+        "hoverbike_road_curb_stripe_length",
         "hoverbike_ramp_length", "hoverbike_ramp_width",
         "hoverbike_ramp_height", "hoverbike_ramp_approach",
         "hoverbike_ramp_segments", "hoverbike_ramp_curved",
