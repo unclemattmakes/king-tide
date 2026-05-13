@@ -1,25 +1,9 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
-import type { Vec3 } from '@/engine/sim/physics/vec'
 import type { PropManifestEntry } from '@/game/assets/manifest'
-import { nearestT, pointAtT, sampleCatmullRom, tangentAtT } from '@/game/tracks/catmull-rom'
 import { DEFAULT_GATE_SPACING_M, resampleByArcLength } from '@/game/tracks/gate-placement'
-import { trackToJson } from '@/game/tracks/json-loader'
-import type { Checkpoint, PropType, Track } from '@/game/tracks/types'
-import {
-  defaultPropDropY,
-  defaultPropSize,
-  disposeObj,
-  makeAnchorHelper,
-  makeGateHelper,
-  makePadHelper,
-  makePickupHelper,
-  makePropHelper,
-  makeSplineCurve,
-  makeStartHelper,
-  yawFromQuaternion,
-} from './editor-helpers'
+import type { Track } from '@/game/tracks/types'
 import {
   createEditorPanel,
   type EditorPanelHandle,
@@ -28,10 +12,21 @@ import {
   type GizmoMode,
   openTrackPickerFlow,
   type PlaceTool,
-  PROP_PLACE_TOOLS,
   parseEntityKey,
   promptNewTrackFlow,
 } from './editor-ui'
+import {
+  bakeScaleToDraft,
+  configureGizmoAxes,
+  entityKindFromKey,
+  selSupportsMode as selSupportsModeFor,
+  writeHelperPoseToDraft,
+} from './gizmos'
+import { createHelpersScene } from './helpers-scene'
+import { deleteSelected as deleteSelectedFromDraft, placeAt } from './placement'
+import { saveTrack } from './save'
+import { recomputeSplineDerived } from './spline-ops'
+import { createUndoStack } from './undo-redo'
 
 /**
  * In-app track editor.
@@ -66,6 +61,17 @@ import {
  * uniformly). On drag end we bake the scale into the entity's halfWidth
  * / halfDepth / height fields and rebuild the helper at the new size
  * with scale reset.
+ *
+ * This file is the orchestrator — gizmo wiring, raycast routing, panel
+ * callbacks, hotkey routing. Per-concern helpers live in sibling files:
+ *   - `editor-helpers.ts` — per-entity 3D helper-mesh factories
+ *   - `editor-ui.ts` — DOM panel + modal flows
+ *   - `gizmos.ts` — gizmo axis gating + helper-pose write-back
+ *   - `helpers-scene.ts` — owns the helpers-group + rebuild + tint refresh
+ *   - `placement.ts` — placeAt + deleteSelected per-kind branches
+ *   - `spline-ops.ts` — spline math (resampling, nearest-segment)
+ *   - `save.ts` — save POST
+ *   - `undo-redo.ts` — snapshot stack
  */
 
 export type EditorOptions = {
@@ -86,7 +92,7 @@ export type EditorHandle = {
 }
 
 export function installTrackEditor(opts: EditorOptions): EditorHandle {
-  const { scene, camera, renderer, domEl, track } = opts
+  const { scene, camera, renderer, track } = opts
   const draft: Track = JSON.parse(JSON.stringify(track)) as Track
   if (!Array.isArray(draft.props)) draft.props = []
   const canvasEl = renderer.domElement
@@ -114,7 +120,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   tc.addEventListener('dragging-changed', (e) => {
     const dragging = Boolean(e.value)
     orbit.enabled = !dragging
-    if (dragging) pushUndoSnapshot()
+    if (dragging) undo.push()
     else onGizmoDragEnd()
   })
   // r150+ separates the visual helper from the controller. The helper goes
@@ -131,245 +137,41 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   let pickedAssetId: string = propAssets[0]?.id ?? ''
 
   // ── Undo stack ──────────────────────────────────────────────────────────
-  // Snapshots of the draft are pushed before every "commit-worthy" mutation
-  // (placement, delete, gizmo drag start). Ctrl+Z pops + restores.
-  const UNDO_LIMIT = 50
-  const undoStack: string[] = []
-
-  function pushUndoSnapshot(): void {
-    undoStack.push(JSON.stringify(draft))
-    if (undoStack.length > UNDO_LIMIT) undoStack.shift()
-  }
-
-  function tryUndo(): boolean {
-    const snap = undoStack.pop()
-    if (!snap) return false
-    const restored = JSON.parse(snap) as Track
-    // Mutate draft fields in-place so any external references stay valid.
-    draft.id = restored.id
-    draft.name = restored.name
-    draft.lapsToFinish = restored.lapsToFinish
-    draft.start = restored.start
-    draft.checkpoints = restored.checkpoints
-    draft.aiSplines = restored.aiSplines
-    draft.pickupSpawns = restored.pickupSpawns
-    draft.boostPads = restored.boostPads
-    draft.props = Array.isArray(restored.props) ? restored.props : []
-    if (restored.water) draft.water = restored.water
-    if (restored.environmentGlb) draft.environmentGlb = restored.environmentGlb
+  const undo = createUndoStack(draft, () => {
     sel = null
     rebuildHelpers()
     renderPanel()
-    return true
-  }
+  })
 
-  // ── Helpers (per-entity 3D objects) ─────────────────────────────────────
-  const helpersGroup = new THREE.Group()
-  helpersGroup.name = 'editor:helpers'
-  scene.add(helpersGroup)
-  const helpers = new Map<string, THREE.Group>()
-  let splinePolyline: THREE.Line | null = null
-
-  /**
-   * Returns the "editable" array of the main spline:
-   *  - For Catmull-Rom-anchored splines, that's `anchors`.
-   *  - For legacy polyline splines, that's `points`.
-   * The dense `points` is always the runtime-consumed output; anchors
-   * are the user-facing controls.
-   */
-  function editableSplinePoints(): Vec3[] {
-    const main = draft.aiSplines.find((s) => s.id === 'main')
-    if (!main) return []
-    return main.anchors ?? main.points
-  }
-
-  /**
-   * Resample the main spline (if anchored) and reposition any
-   * splineT-bound gates to match. Called whenever an anchor moves or
-   * a gate's splineT changes.
-   */
-  function recomputeSplineDerived(): void {
-    const main = draft.aiSplines.find((s) => s.id === 'main')
-    if (!main) return
-    if (main.anchors && main.anchors.length >= 2) {
-      main.points = sampleCatmullRom(main.anchors, {
-        divisionsPerSegment: 12,
-        closed: true,
-      })
-    }
-    for (const cp of draft.checkpoints) {
-      if (typeof cp.splineT === 'number') {
-        const p = pointAtT(main.points, cp.splineT)
-        const tan = tangentAtT(main.points, cp.splineT)
-        cp.position.x = p.x
-        cp.position.z = p.z
-        const yaw = Math.atan2(tan.x, tan.z)
-        const halfA = yaw / 2
-        cp.rotation = { x: 0, y: Math.sin(halfA), z: 0, w: Math.cos(halfA) }
-      }
-    }
-  }
+  // ── Helpers scene ───────────────────────────────────────────────────────
+  const helpersScene = createHelpersScene({ scene, draft, getSel: () => sel })
 
   function rebuildHelpers(): void {
     tc.detach()
-    recomputeSplineDerived()
-    for (const h of helpers.values()) {
-      helpersGroup.remove(h)
-      disposeObj(h)
-    }
-    helpers.clear()
-    if (splinePolyline) {
-      helpersGroup.remove(splinePolyline)
-      disposeObj(splinePolyline)
-      splinePolyline = null
-    }
-
-    {
-      const k = 'start'
-      const h = makeStartHelper(draft.start, isSel({ kind: 'start' }))
-      h.userData.entityKey = k
-      helpers.set(k, h)
-      helpersGroup.add(h)
-    }
-    for (let i = 0; i < draft.checkpoints.length; i++) {
-      const k = `gate:${i}`
-      const h = makeGateHelper(draft.checkpoints[i]!, isSel({ kind: 'gate', index: i }))
-      h.userData.entityKey = k
-      helpers.set(k, h)
-      helpersGroup.add(h)
-    }
-    for (let i = 0; i < draft.props.length; i++) {
-      const k = `prop:${i}`
-      const h = makePropHelper(draft.props[i]!, isSel({ kind: 'prop', index: i }))
-      h.userData.entityKey = k
-      helpers.set(k, h)
-      helpersGroup.add(h)
-    }
-    for (let i = 0; i < draft.pickupSpawns.length; i++) {
-      const k = `pickup:${i}`
-      const h = makePickupHelper(draft.pickupSpawns[i]!, isSel({ kind: 'pickup', index: i }))
-      h.userData.entityKey = k
-      helpers.set(k, h)
-      helpersGroup.add(h)
-    }
-    for (let i = 0; i < draft.boostPads.length; i++) {
-      const k = `pad:${i}`
-      const h = makePadHelper(draft.boostPads[i]!, isSel({ kind: 'pad', index: i }))
-      h.userData.entityKey = k
-      helpers.set(k, h)
-      helpersGroup.add(h)
-    }
-    const main = draft.aiSplines.find((s) => s.id === 'main')
-    if (main) {
-      const anchors = editableSplinePoints()
-      const isAnchored = !!main.anchors
-      for (let pi = 0; pi < anchors.length; pi++) {
-        const k = `spline:0:${pi}`
-        const isSelected = isSel({ kind: 'spline', splineIndex: 0, pointIndex: pi })
-        const h = makeAnchorHelper(anchors[pi]!, isSelected, isAnchored)
-        h.userData.entityKey = k
-        helpers.set(k, h)
-        helpersGroup.add(h)
-      }
-      // Smooth curve drawn from the dense (runtime) sample list.
-      splinePolyline = makeSplineCurve(main.points)
-      helpersGroup.add(splinePolyline)
-    }
-
+    helpersScene.rebuild()
     if (sel) {
-      const h = helpers.get(entityKey(sel))
+      const h = helpersScene.helpers.get(entityKey(sel))
       if (h) attachGizmo(h)
       else sel = null
     }
-  }
-
-  function isSel(target: NonNullable<EntitySel>): boolean {
-    if (!sel) return false
-    if (sel.kind !== target.kind) return false
-    if (sel.kind === 'spline' && target.kind === 'spline') {
-      return sel.pointIndex === target.pointIndex && sel.splineIndex === target.splineIndex
-    }
-    if (sel.kind === 'start' && target.kind === 'start') return true
-    return (sel as { index: number }).index === (target as { index: number }).index
   }
 
   function attachGizmo(h: THREE.Object3D): void {
     tc.attach(h)
     tc.setMode(mode)
     const k = (h.userData.entityKey as string) ?? ''
-    const kind = k.startsWith('gate')
-      ? 'gate'
-      : k.startsWith('pad')
-        ? 'pad'
-        : k.startsWith('pickup')
-          ? 'pickup'
-          : k.startsWith('prop')
-            ? 'prop'
-            : k === 'start'
-              ? 'start'
-              : 'spline'
-    // Per-entity axis gating.
-    if (kind === 'pickup' || kind === 'spline') {
-      // Translate-only entities. Show all three axes for translation.
-      tc.showX = true
-      tc.showY = true
-      tc.showZ = true
-    } else if (mode === 'rotate') {
-      // Start / gates / pads rotate around Y only (yaw). Props rotate
-      // around all three axes so the user can lay a pipe sideways, etc.
-      if (kind === 'prop') {
-        tc.showX = true
-        tc.showY = true
-        tc.showZ = true
-      } else {
-        tc.showX = false
-        tc.showY = true
-        tc.showZ = false
-      }
-    } else if (mode === 'scale') {
-      // Gates: scale X (halfWidth), Y (height). Pads: scale X (halfWidth), Z (halfDepth).
-      // Props: scale on all three axes — interpretation per type.
-      if (kind === 'gate') {
-        tc.showX = true
-        tc.showY = true
-        tc.showZ = false
-      } else if (kind === 'pad') {
-        tc.showX = true
-        tc.showY = false
-        tc.showZ = true
-      } else {
-        tc.showX = true
-        tc.showY = true
-        tc.showZ = true
-      }
-    } else {
-      // translate
-      tc.showX = true
-      tc.showY = true
-      tc.showZ = true
-    }
+    configureGizmoAxes(tc, entityKindFromKey(k), mode)
   }
 
-  /** Returns whether the currently-selected entity supports a given gizmo
-   *  mode. Spline-bound gates derive their rotation from the curve, so
-   *  rotate is disabled for those. */
   function selSupportsMode(m: GizmoMode): boolean {
-    if (!sel) return true
-    if (sel.kind === 'pickup' || sel.kind === 'spline') return m === 'translate'
-    if (sel.kind === 'gate') {
-      const cp = draft.checkpoints[sel.index]
-      if (cp && typeof cp.splineT === 'number' && m === 'rotate') return false
-    }
-    // Start: translate + rotate (yaw); no scale.
-    if (sel.kind === 'start' && m === 'scale') return false
-    return true
+    return selSupportsModeFor(draft, sel, m)
   }
 
   function setMode(m: GizmoMode): void {
     if (!selSupportsMode(m)) m = 'translate'
     mode = m
     if (sel) {
-      const h = helpers.get(entityKey(sel))
+      const h = helpersScene.helpers.get(entityKey(sel))
       if (h) attachGizmo(h)
     }
     renderPanel()
@@ -379,7 +181,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     sel = newSel
     tc.detach()
     if (sel) {
-      const h = helpers.get(entityKey(sel))
+      const h = helpersScene.helpers.get(entityKey(sel))
       if (h) {
         // Force translate mode for entities that don't support the
         // current gizmo mode (eg spline-bound gates can't rotate).
@@ -388,16 +190,8 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       }
     }
     // Re-tint selection markers without a full rebuild.
-    refreshHelperTints()
+    helpersScene.refreshTints(sel)
     renderPanel()
-  }
-
-  function refreshHelperTints(): void {
-    for (const [k, h] of helpers) {
-      const selected = sel != null && k === entityKey(sel)
-      const recolor = h.userData.setSelected as ((v: boolean) => void) | undefined
-      if (recolor) recolor(selected)
-    }
   }
 
   // ── Gizmo write-back ────────────────────────────────────────────────────
@@ -405,42 +199,30 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     const h = tc.object as THREE.Object3D | null
     if (!h || !sel) return
     // Translate + rotate write back live; scale waits for drag end.
-    if (mode !== 'scale') writeHelperPoseToDraft(h, sel)
+    if (mode !== 'scale') {
+      const { splineMoved } = writeHelperPoseToDraft(draft, h, sel)
+      if (splineMoved) {
+        // Anchor moved: regenerate dense curve samples + reposition any
+        // bound gates. Geometry-only refresh (no full rebuildHelpers) for
+        // perf during drag.
+        recomputeSplineDerived(draft)
+        helpersScene.refreshSplineCurveMesh()
+        helpersScene.refreshBoundGateHelpers()
+      }
+    }
     renderPanelLight()
   })
 
   function onGizmoDragEnd(): void {
     if (!sel) return
-    const h = helpers.get(entityKey(sel))
+    const h = helpersScene.helpers.get(entityKey(sel))
     if (!h) return
     if (mode === 'scale') {
       // Bake scale into the entity's dimension fields, rebuild geometry at
       // the new size, reset helper.scale to (1,1,1).
-      const sx = h.scale.x
-      const sy = h.scale.y
-      const sz = h.scale.z
-      if (sel.kind === 'gate') {
-        const cp = draft.checkpoints[sel.index]
-        if (cp) {
-          cp.halfWidth = clampPositive(cp.halfWidth * sx, 0.5, 200)
-          cp.height = clampPositive(cp.height * sy, 0.5, 50)
-        }
-      } else if (sel.kind === 'pad') {
-        const pad = draft.boostPads[sel.index]
-        if (pad) {
-          pad.halfWidth = clampPositive(pad.halfWidth * sx, 0.5, 50)
-          pad.halfDepth = clampPositive(pad.halfDepth * sz, 0.5, 100)
-        }
-      } else if (sel.kind === 'prop') {
-        const p = draft.props[sel.index]
-        if (p) {
-          p.size.x = clampPositive(p.size.x * sx, 0.1, 200)
-          p.size.y = clampPositive(p.size.y * sy, 0.1, 200)
-          p.size.z = clampPositive(p.size.z * sz, 0.05, 200)
-        }
-      }
+      bakeScaleToDraft(draft, h, sel)
       // Also bake any pose drift that snuck in during the same drag.
-      writeHelperPoseToDraft(h, sel)
+      writeHelperPoseToDraft(draft, h, sel)
       rebuildHelpers()
     } else if (sel.kind === 'spline') {
       // Anchor moved → regenerate dense samples + reposition bound gates.
@@ -449,175 +231,12 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     renderPanel()
   }
 
-  function writeHelperPoseToDraft(h: THREE.Object3D, s: NonNullable<EntitySel>): void {
-    if (s.kind === 'gate') {
-      const cp = draft.checkpoints[s.index]
-      if (!cp) return
-      if (typeof cp.splineT === 'number') {
-        // Spline-bound: project the gizmo's xz onto the nearest point on
-        // the curve, snap the helper there, and update splineT. y stays
-        // freely editable (gates can sit at different heights).
-        const main = draft.aiSplines.find((s2) => s2.id === 'main')
-        if (main && main.points.length >= 2) {
-          const t = nearestT({ x: h.position.x, y: 0, z: h.position.z }, main.points)
-          cp.splineT = t
-          const p = pointAtT(main.points, t)
-          const tan = tangentAtT(main.points, t)
-          cp.position.x = p.x
-          cp.position.y = h.position.y
-          cp.position.z = p.z
-          const yaw = Math.atan2(tan.x, tan.z)
-          const halfA = yaw / 2
-          cp.rotation = { x: 0, y: Math.sin(halfA), z: 0, w: Math.cos(halfA) }
-          // Snap the helper to the resolved pose so the user sees the
-          // gate sticking to the curve mid-drag.
-          h.position.set(p.x, h.position.y, p.z)
-          h.quaternion.set(cp.rotation.x, cp.rotation.y, cp.rotation.z, cp.rotation.w)
-        }
-        return
-      }
-      cp.position.x = h.position.x
-      cp.position.y = h.position.y
-      cp.position.z = h.position.z
-      cp.rotation.x = h.quaternion.x
-      cp.rotation.y = h.quaternion.y
-      cp.rotation.z = h.quaternion.z
-      cp.rotation.w = h.quaternion.w
-    } else if (s.kind === 'pickup') {
-      const p = draft.pickupSpawns[s.index]
-      if (!p) return
-      p.x = h.position.x
-      p.y = h.position.y
-      p.z = h.position.z
-    } else if (s.kind === 'pad') {
-      const pad = draft.boostPads[s.index]
-      if (!pad) return
-      pad.position.x = h.position.x
-      pad.position.y = h.position.y
-      pad.position.z = h.position.z
-      pad.rotation.x = h.quaternion.x
-      pad.rotation.y = h.quaternion.y
-      pad.rotation.z = h.quaternion.z
-      pad.rotation.w = h.quaternion.w
-    } else if (s.kind === 'spline') {
-      // Edits the editable array (anchors when present, points for legacy).
-      const sp = draft.aiSplines[s.splineIndex]
-      if (!sp) return
-      const arr = sp.anchors ?? sp.points
-      const p = arr[s.pointIndex]
-      if (!p) return
-      p.x = h.position.x
-      p.y = h.position.y
-      p.z = h.position.z
-      // Live-update the curve + bound-gate poses. Geometry-only refresh
-      // (no full rebuildHelpers) for performance during drag.
-      recomputeSplineDerived()
-      refreshSplineCurveMesh()
-      refreshBoundGateHelpers()
-    } else if (s.kind === 'prop') {
-      const p = draft.props[s.index]
-      if (!p) return
-      p.position.x = h.position.x
-      p.position.y = h.position.y
-      p.position.z = h.position.z
-      p.rotation.x = h.quaternion.x
-      p.rotation.y = h.quaternion.y
-      p.rotation.z = h.quaternion.z
-      p.rotation.w = h.quaternion.w
-    } else if (s.kind === 'start') {
-      // Start stores yaw as a number; derive it from the helper's Y rotation.
-      draft.start.position.x = h.position.x
-      draft.start.position.y = h.position.y
-      draft.start.position.z = h.position.z
-      draft.start.yaw = yawFromQuaternion(h.quaternion)
-    }
-  }
-
-  function refreshSplineCurveMesh(): void {
-    if (!splinePolyline) return
-    const main = draft.aiSplines.find((s) => s.id === 'main')
-    if (!main || main.points.length < 2) return
-    const arr = (splinePolyline.geometry.attributes.position as THREE.BufferAttribute)
-      .array as Float32Array
-    // Rebuild only if the buffer is the right size; otherwise rebuild
-    // the whole curve mesh.
-    const need = (main.points.length + 1) * 3
-    if (arr.length !== need) {
-      helpersGroup.remove(splinePolyline)
-      disposeObj(splinePolyline)
-      splinePolyline = makeSplineCurve(main.points)
-      helpersGroup.add(splinePolyline)
-      return
-    }
-    for (let i = 0; i < main.points.length; i++) {
-      arr[i * 3] = main.points[i]!.x
-      arr[i * 3 + 1] = main.points[i]!.y + 0.2
-      arr[i * 3 + 2] = main.points[i]!.z
-    }
-    arr[main.points.length * 3] = main.points[0]!.x
-    arr[main.points.length * 3 + 1] = main.points[0]!.y + 0.2
-    arr[main.points.length * 3 + 2] = main.points[0]!.z
-    ;(splinePolyline.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true
-  }
-
-  function refreshBoundGateHelpers(): void {
-    for (let i = 0; i < draft.checkpoints.length; i++) {
-      const cp = draft.checkpoints[i]!
-      if (typeof cp.splineT !== 'number') continue
-      const h = helpers.get(`gate:${i}`)
-      if (!h) continue
-      h.position.set(cp.position.x, cp.position.y, cp.position.z)
-      h.quaternion.set(cp.rotation.x, cp.rotation.y, cp.rotation.z, cp.rotation.w)
-    }
-  }
-
-  /**
-   * Find the index at which a new anchor should be inserted into
-   * `anchors` so the curve passes through the click as naturally as
-   * possible. Picks the segment whose midpoint is closest to the click.
-   */
-  function nearestAnchorInsertIndex(hit: THREE.Vector3, anchors: Vec3[]): number {
-    if (anchors.length === 0) return 0
-    let bestI = anchors.length
-    let bestD = Infinity
-    for (let i = 0; i < anchors.length; i++) {
-      const a = anchors[i]!
-      const b = anchors[(i + 1) % anchors.length]!
-      const d = distToSegmentXZ(hit.x, hit.z, a.x, a.z, b.x, b.z)
-      if (d < bestD) {
-        bestD = d
-        bestI = i + 1
-      }
-    }
-    return bestI
-  }
-
-  function distToSegmentXZ(
-    px: number,
-    pz: number,
-    ax: number,
-    az: number,
-    bx: number,
-    bz: number,
-  ): number {
-    const dx = bx - ax
-    const dz = bz - az
-    const len2 = dx * dx + dz * dz
-    if (len2 === 0) return Math.hypot(px - ax, pz - az)
-    let t = ((px - ax) * dx + (pz - az) * dz) / len2
-    t = Math.max(0, Math.min(1, t))
-    const cx = ax + t * dx
-    const cz = az + t * dz
-    return Math.hypot(px - cx, pz - cz)
-  }
-
   // ── DOM panel ───────────────────────────────────────────────────────────
   // The panel UI itself lives in `editor-ui.ts`. We pass a `getState`
   // callback so the panel reads the current sel/mode/placeTool on each
   // render, and a callbacks bag so user interactions flow back into the
   // closure mutations (setMode/setSel/save/etc).
-  let panelHandle: EditorPanelHandle
-  panelHandle = createEditorPanel({
+  const panelHandle: EditorPanelHandle = createEditorPanel({
     draft,
     propAssets,
     getState: () => ({ sel, mode, placeTool, pickedAssetId }),
@@ -665,7 +284,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
           return
         }
         if (!confirmDiscard('Replace gates')) return
-        pushUndoSnapshot()
+        undo.push()
         // Preserve halfWidth / height from the existing first gate if present;
         // fall back to the project's canonical gate dimensions otherwise.
         const inheritedHalfWidth = draft.checkpoints[0]?.halfWidth ?? 14
@@ -697,19 +316,8 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     panelHandle.renderLight()
   }
 
-  /**
-   * Returns true if the editor has unsaved changes (the Save button has
-   * been clicked less recently than the most recent edit). We approximate
-   * "is dirty" by "any undo snapshot has been pushed since the last save"
-   * — close enough for an authoring tool and avoids deep-diffing the draft.
-   */
-  function isDirty(): boolean {
-    return undoStack.length > savedAtUndoDepth
-  }
-  let savedAtUndoDepth = 0
-
   function confirmDiscard(action: string): boolean {
-    if (!isDirty()) return true
+    if (!undo.isDirty()) return true
     return window.confirm(
       `You have unsaved changes. ${action} anyway?\n\nUnsaved changes will be lost.`,
     )
@@ -734,19 +342,21 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
 
     if (placeTool !== 'none') {
       if (!raycaster.ray.intersectPlane(groundPlane, tmpHit)) return
-      placeAt(tmpHit, placeTool)
+      undo.push()
+      sel = placeAt({ draft, hit: tmpHit, tool: placeTool, pickedAssetId })
       placeTool = 'none'
+      rebuildHelpers()
       renderPanel()
       return
     }
 
     // Viewport selection: raycast against helper geometry and pick the
     // owning helper group via its userData.entityKey marker.
-    const hits = raycaster.intersectObjects(helpersGroup.children, true)
+    const hits = raycaster.intersectObjects(helpersScene.group.children, true)
     let pickedKey: string | null = null
     for (const hit of hits) {
       let cur: THREE.Object3D | null = hit.object
-      while (cur && cur !== helpersGroup) {
+      while (cur && cur !== helpersScene.group) {
         const ek = cur.userData.entityKey as string | undefined
         if (ek) {
           pickedKey = ek
@@ -763,81 +373,6 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       setSel(null)
     }
   })
-
-  function placeAt(hit: THREE.Vector3, t: PlaceTool): void {
-    pushUndoSnapshot()
-    if (t === 'gate') {
-      const idx = draft.checkpoints.length
-      const main = draft.aiSplines.find((s) => s.id === 'main')
-      const useSpline = !!main && main.points.length >= 2
-      const cp: Checkpoint = {
-        index: idx,
-        position: { x: hit.x, y: 1.5, z: hit.z },
-        rotation: { x: 0, y: 0, z: 0, w: 1 },
-        halfWidth: 8,
-        height: 4,
-      }
-      if (useSpline) {
-        // Auto-bind to the main spline at the click's nearest curve point.
-        cp.splineT = nearestT({ x: hit.x, y: 0, z: hit.z }, main!.points)
-      }
-      draft.checkpoints.push(cp)
-      sel = { kind: 'gate', index: idx }
-    } else if (t === 'pickup') {
-      draft.pickupSpawns.push({ x: hit.x, y: 1.2, z: hit.z })
-      sel = { kind: 'pickup', index: draft.pickupSpawns.length - 1 }
-    } else if (t === 'pad') {
-      draft.boostPads.push({
-        position: { x: hit.x, y: 0.05, z: hit.z },
-        rotation: { x: 0, y: 0, z: 0, w: 1 },
-        halfWidth: 3,
-        halfDepth: 6,
-        strength: 1.5,
-      })
-      sel = { kind: 'pad', index: draft.boostPads.length - 1 }
-    } else if (PROP_PLACE_TOOLS.includes(t)) {
-      const propType = t as PropType
-      const defaultSize: Vec3 = defaultPropSize(propType)
-      // Drop the prop above the click so it sits on top of the ground at y=0.
-      const dropY = defaultPropDropY(propType, defaultSize)
-      draft.props.push({
-        type: propType,
-        position: { x: hit.x, y: dropY, z: hit.z },
-        rotation: { x: 0, y: 0, z: 0, w: 1 },
-        size: defaultSize,
-      })
-      sel = { kind: 'prop', index: draft.props.length - 1 }
-    } else if (t === 'asset') {
-      if (!pickedAssetId) return
-      // Asset props use `size` as a uniform-ish scale (1,1,1 = native size).
-      // The runtime applies it to the cloned GLB and to the collider dims.
-      draft.props.push({
-        type: 'asset',
-        assetId: pickedAssetId,
-        position: { x: hit.x, y: 0, z: hit.z },
-        rotation: { x: 0, y: 0, z: 0, w: 1 },
-        size: { x: 1, y: 1, z: 1 },
-      })
-      sel = { kind: 'prop', index: draft.props.length - 1 }
-    } else if (t === 'spline') {
-      const main = draft.aiSplines.find((s) => s.id === 'main')
-      if (main) {
-        // For Catmull-Rom-anchored splines: insert into anchors at the
-        // segment closest to the click so the curve stays continuous.
-        // For legacy point-only splines: append to points (preserving
-        // the old behavior).
-        if (main.anchors && main.anchors.length >= 2) {
-          const insertIdx = nearestAnchorInsertIndex(hit, main.anchors)
-          main.anchors.splice(insertIdx, 0, { x: hit.x, y: 0.5, z: hit.z })
-          sel = { kind: 'spline', splineIndex: 0, pointIndex: insertIdx }
-        } else {
-          main.points.push({ x: hit.x, y: 0.5, z: hit.z })
-          sel = { kind: 'spline', splineIndex: 0, pointIndex: main.points.length - 1 }
-        }
-      }
-    }
-    rebuildHelpers()
-  }
 
   // ── Hotkeys ─────────────────────────────────────────────────────────────
   function onKey(e: KeyboardEvent) {
@@ -856,9 +391,9 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       void save()
     } else if (e.code === 'KeyZ' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
       e.preventDefault()
-      const ok = tryUndo()
+      const ok = undo.tryUndo()
       panelHandle.setStatus(
-        ok ? `Undid (${undoStack.length} more)` : 'Nothing to undo',
+        ok ? `Undid (${undo.depth()} more)` : 'Nothing to undo',
         ok ? '#7a8' : '#aa9',
       )
     } else if (e.code === 'Escape') {
@@ -871,23 +406,8 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   function deleteSelected(): void {
     if (!sel) return
     if (sel.kind === 'start') return // start is a singleton — cannot be deleted
-    pushUndoSnapshot()
-    if (sel.kind === 'gate') {
-      draft.checkpoints.splice(sel.index, 1)
-      for (let i = 0; i < draft.checkpoints.length; i++) draft.checkpoints[i]!.index = i
-    } else if (sel.kind === 'pickup') {
-      draft.pickupSpawns.splice(sel.index, 1)
-    } else if (sel.kind === 'pad') {
-      draft.boostPads.splice(sel.index, 1)
-    } else if (sel.kind === 'prop') {
-      draft.props.splice(sel.index, 1)
-    } else if (sel.kind === 'spline') {
-      const sp = draft.aiSplines[sel.splineIndex]
-      if (sp) {
-        const arr = sp.anchors ?? sp.points
-        if (arr.length > 2) arr.splice(sel.pointIndex, 1)
-      }
-    }
+    undo.push()
+    deleteSelectedFromDraft(draft, sel)
     sel = null
     tc.detach()
     rebuildHelpers()
@@ -896,23 +416,11 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
 
   // ── Save ────────────────────────────────────────────────────────────────
   async function save(): Promise<void> {
-    panelHandle.setStatus('Saving…', '#7a8')
-    try {
-      const res = await fetch('/__editor/save-track', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: draft.id, json: trackToJson(draft) }),
-      })
-      if (!res.ok) {
-        const txt = await res.text()
-        throw new Error(`${res.status}: ${txt}`)
-      }
-      const body = (await res.json()) as { path?: string }
-      savedAtUndoDepth = undoStack.length
-      panelHandle.setStatus(`Saved → ${body.path ?? 'public/tracks/'}`, '#7a8')
-    } catch (e) {
-      panelHandle.setStatus(`Save failed: ${(e as Error).message}`, '#f88')
-    }
+    await saveTrack({
+      draft,
+      setStatus: (msg, color) => panelHandle.setStatus(msg, color),
+      onSaved: () => undo.markSaved(),
+    })
   }
 
   // ── Boot ────────────────────────────────────────────────────────────────
@@ -931,22 +439,8 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     tc.dispose()
     orbit.dispose()
     scene.remove(tc.getHelper())
-    for (const h of helpers.values()) {
-      helpersGroup.remove(h)
-      disposeObj(h)
-    }
-    helpers.clear()
-    scene.remove(helpersGroup)
+    helpersScene.dispose()
   }
 
   return { tick, dispose }
-}
-
-// ── Misc utils ────────────────────────────────────────────────────────────
-
-function clampPositive(n: number, min: number, max: number): number {
-  if (!Number.isFinite(n) || n <= 0) return min
-  if (n < min) return min
-  if (n > max) return max
-  return n
 }
