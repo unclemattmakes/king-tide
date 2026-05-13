@@ -529,12 +529,7 @@ function showTrackPickerModal(
         'justify-content: space-between',
         'gap: 8px',
       ].join(';')
-      const tag =
-        t.kind === 'json'
-          ? t.hasGlb
-            ? 'JSON + GLB'
-            : 'JSON'
-          : 'GLB only'
+      const tag = t.kind === 'json' ? (t.hasGlb ? 'JSON + GLB' : 'JSON') : 'GLB only'
       row.innerHTML = `
         <span>${escapeHtml(t.id)}${isCurrent ? '  <span style="color:#7fc">(current)</span>' : ''}</span>
         <span style="color:#789;font-size:11px">${tag}</span>

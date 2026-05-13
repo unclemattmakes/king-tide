@@ -140,7 +140,9 @@ export function buildTrackFromJson(input: unknown): Track {
 
   const water = readOptionalWater((input as { water?: unknown }).water)
   const sky = readOptionalSky((input as { sky?: unknown }).sky)
-  const terrainShader = readOptionalTerrainShader((input as { terrainShader?: unknown }).terrainShader)
+  const terrainShader = readOptionalTerrainShader(
+    (input as { terrainShader?: unknown }).terrainShader,
+  )
   const environmentGlb = (input as { environmentGlb?: unknown }).environmentGlb
   if (environmentGlb !== undefined && typeof environmentGlb !== 'string') {
     throw new Error('track-json: environmentGlb must be a string if present')
@@ -338,7 +340,14 @@ function readOptionalTerrainShader(raw: unknown): TerrainShaderConfig | null {
   if (raw === undefined || raw === null) return null
   if (!isObject(raw)) throw new Error('track-json: terrainShader must be an object if present')
   const out: TerrainShaderConfig = {}
-  for (const key of ['altMin', 'altMax', 'slopeStart', 'slopeEnd', 'variation', 'wetBand'] as const) {
+  for (const key of [
+    'altMin',
+    'altMax',
+    'slopeStart',
+    'slopeEnd',
+    'variation',
+    'wetBand',
+  ] as const) {
     if (key in raw) {
       const v = raw[key]
       if (typeof v !== 'number' || !Number.isFinite(v)) {
@@ -349,7 +358,11 @@ function readOptionalTerrainShader(raw: unknown): TerrainShaderConfig | null {
   }
   if ('pathTint' in raw) {
     const v = raw.pathTint
-    if (!Array.isArray(v) || v.length !== 3 || v.some((n) => typeof n !== 'number' || !Number.isFinite(n))) {
+    if (
+      !Array.isArray(v) ||
+      v.length !== 3 ||
+      v.some((n) => typeof n !== 'number' || !Number.isFinite(n))
+    ) {
       throw new Error('track-json: terrainShader.pathTint must be a 3-element number array')
     }
     out.pathTint = [v[0] as number, v[1] as number, v[2] as number]

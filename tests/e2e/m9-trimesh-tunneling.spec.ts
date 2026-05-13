@@ -61,7 +61,10 @@ test.describe('M9.27 trimesh + CCD — no tunneling', () => {
       await page.waitForTimeout(200)
     }
 
-    expect(tunneled, `bike fell below y=${TUNNEL_Y} (minY=${minY.toFixed(2)}, maxSpeed=${maxSpeed.toFixed(1)})`).toBe(false)
+    expect(
+      tunneled,
+      `bike fell below y=${TUNNEL_Y} (minY=${minY.toFixed(2)}, maxSpeed=${maxSpeed.toFixed(1)})`,
+    ).toBe(false)
     // Sanity: the AI did get the bike moving; the test isn't accidentally
     // passing because the bike sat still.
     expect(maxSpeed).toBeGreaterThan(8)

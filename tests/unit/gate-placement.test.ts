@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Vec3 } from '@/engine/sim/physics/vec'
 import { sampleCatmullRom } from '@/game/tracks/catmull-rom'
-import {
-  DEFAULT_GATE_SPACING_M,
-  resampleByArcLength,
-} from '@/game/tracks/gate-placement'
+import { DEFAULT_GATE_SPACING_M, resampleByArcLength } from '@/game/tracks/gate-placement'
 
 /** Closed square of side 100, axis-aligned in xz. Perimeter 400. */
 const square: Vec3[] = [

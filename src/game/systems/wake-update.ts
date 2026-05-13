@@ -16,11 +16,7 @@ import { BikeTag, RBHandle, RBHandleStore } from '@/game/components'
  * (we just cleared them), so weight is driven by wave altitude only — no
  * feedback loop.
  */
-export function wakeUpdateSystem(
-  sim: SimWorld,
-  phys: PhysicsWorld,
-  field: WaveFieldState,
-): void {
+export function wakeUpdateSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldState): void {
   field.wakes.length = 0
   const eids = query(sim, [BikeTag, RBHandle])
   for (const eid of eids) {

@@ -70,24 +70,24 @@ type ColorStop = { pos: number; color: [number, number, number] }
  * matches the Blender preview.
  */
 const FLAT_STOPS: ColorStop[] = [
-  { pos: 0.000, color: [0.03, 0.08, 0.20] },   // abyssal blue   (y≈-50)
-  { pos: 0.180, color: [0.22, 0.30, 0.40] },   // blue-sand      (y≈-19)
-  { pos: 0.270, color: [0.68, 0.66, 0.55] },   // silty sand     (y≈ -4)
-  { pos: 0.300, color: [0.92, 0.86, 0.72] },   // bright sand    (y=   1)
-  { pos: 0.345, color: [0.78, 0.70, 0.50] },   // wet beach tan  (y=   9)
-  { pos: 0.430, color: [0.36, 0.55, 0.27] },   // grass          (y=  23)
-  { pos: 0.620, color: [0.22, 0.40, 0.18] },   // forest         (y=  55)
-  { pos: 0.820, color: [0.30, 0.27, 0.21] },   // alpine stone   (y=  89)
-  { pos: 1.000, color: [0.18, 0.15, 0.13] },   // volcanic top   (y= 120)
+  { pos: 0.0, color: [0.03, 0.08, 0.2] }, // abyssal blue   (y≈-50)
+  { pos: 0.18, color: [0.22, 0.3, 0.4] }, // blue-sand      (y≈-19)
+  { pos: 0.27, color: [0.68, 0.66, 0.55] }, // silty sand     (y≈ -4)
+  { pos: 0.3, color: [0.92, 0.86, 0.72] }, // bright sand    (y=   1)
+  { pos: 0.345, color: [0.78, 0.7, 0.5] }, // wet beach tan  (y=   9)
+  { pos: 0.43, color: [0.36, 0.55, 0.27] }, // grass          (y=  23)
+  { pos: 0.62, color: [0.22, 0.4, 0.18] }, // forest         (y=  55)
+  { pos: 0.82, color: [0.3, 0.27, 0.21] }, // alpine stone   (y=  89)
+  { pos: 1.0, color: [0.18, 0.15, 0.13] }, // volcanic top   (y= 120)
 ]
 
 const CLIFF_STOPS: ColorStop[] = [
-  { pos: 0.000, color: [0.07, 0.10, 0.16] },   // dark abyssal rock
-  { pos: 0.220, color: [0.20, 0.22, 0.24] },   // wet rock
-  { pos: 0.300, color: [0.34, 0.32, 0.28] },   // sea cliff
-  { pos: 0.500, color: [0.42, 0.39, 0.34] },   // grey rock
-  { pos: 0.750, color: [0.30, 0.25, 0.22] },   // warmer rock
-  { pos: 1.000, color: [0.16, 0.13, 0.13] },   // volcanic
+  { pos: 0.0, color: [0.07, 0.1, 0.16] }, // dark abyssal rock
+  { pos: 0.22, color: [0.2, 0.22, 0.24] }, // wet rock
+  { pos: 0.3, color: [0.34, 0.32, 0.28] }, // sea cliff
+  { pos: 0.5, color: [0.42, 0.39, 0.34] }, // grey rock
+  { pos: 0.75, color: [0.3, 0.25, 0.22] }, // warmer rock
+  { pos: 1.0, color: [0.16, 0.13, 0.13] }, // volcanic
 ]
 
 /** World-Y range mapped to ramp parameter 0..1. Matches the Blender
@@ -176,9 +176,9 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   const altMax = config.altMax ?? ALT_MAX
   const slopeStart = config.slopeStart ?? 0.85
   const slopeEnd = config.slopeEnd ?? 0.55
-  const variation = config.variation ?? 0.30
+  const variation = config.variation ?? 0.3
   const wetBand = config.wetBand ?? 2.0
-  const pathTint = config.pathTint ?? [0.30, 0.24, 0.18]
+  const pathTint = config.pathTint ?? [0.3, 0.24, 0.18]
 
   const mat = new MeshStandardNodeMaterial({ metalness: 0 })
   mat.name = 'mat_terrain_runtime'
@@ -194,11 +194,7 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   // clamp; deepest abyssal blue / brightest volcanic top sit at the
   // ramps' ends.
   const altSpan = Math.max(altMax - altMin, 1)
-  const altT = clamp(
-    positionWorld.y.sub(altMin).div(altSpan),
-    float(0),
-    float(1),
-  )
+  const altT = clamp(positionWorld.y.sub(altMin).div(altSpan), float(0), float(1))
 
   const flatCol = texture(flat, vec2(altT, float(0.5))).rgb
   const cliffCol = texture(cliff, vec2(altT, float(0.5))).rgb
@@ -208,7 +204,7 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   // banding via 2D rather than 3D keeps the TSL node count manageable
   // and looks plenty natural on terrain (the dominant variation axis is
   // horizontal). ~16 m base feature size + half-amplitude second octave.
-  const varN = valueNoiseOctave2D(positionWorld.xz.mul(0.060))
+  const varN = valueNoiseOctave2D(positionWorld.xz.mul(0.06))
   const variedBaseCol = blended.mul(float(1.0 - variation * 0.5).add(varN.mul(variation)))
 
   // Wet band: triangular |y|-mask around the waterline pulls saturation
@@ -293,8 +289,7 @@ export function applyTerrainShaderToScene(
     const kind = obj.userData?.kind
     const isTerrainName = (m: THREE.Material) => m.name === 'mat_terrain_main'
     const isTerrain =
-      kind === 'track' ||
-      (Array.isArray(mat) ? mat.some(isTerrainName) : isTerrainName(mat))
+      kind === 'track' || (Array.isArray(mat) ? mat.some(isTerrainName) : isTerrainName(mat))
     if (!isTerrain) return
     const next = buildTerrainMaterial(config)
     // Dispose the original glTF material to free its baseColor texture etc.

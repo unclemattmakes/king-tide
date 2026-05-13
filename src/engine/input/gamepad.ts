@@ -14,7 +14,7 @@ function shapeAxis(v: number): number {
   const mag = Math.abs(v)
   if (mag < dz) return 0
   const t = (mag - dz) / (1 - dz)
-  return Math.sign(v) * Math.pow(Math.min(t, 1), devSettings.stickCurve)
+  return Math.sign(v) * Math.min(t, 1) ** devSettings.stickCurve
 }
 
 export type GamepadSnapshot = {

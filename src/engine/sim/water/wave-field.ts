@@ -178,10 +178,7 @@ export function sampleWakeFromSource(
   // Combined via min/max so it's branchless-friendly for the shader.
   const insideArg = (Math.min(perp, wakeWidth) / wakeWidth) * Math.PI
   const insidePart = -Math.cos(insideArg) // varies -1 (perp=0) → +1 (perp=wakeWidth)
-  const fadeOut = Math.max(
-    0,
-    1 - Math.max(0, perp - wakeWidth) / WAKE_EDGE_BELL_HALFWIDTH,
-  )
+  const fadeOut = Math.max(0, 1 - Math.max(0, perp - wakeWidth) / WAKE_EDGE_BELL_HALFWIDTH)
   // For perp <= wakeWidth: insidePart∈[-1,1], fadeOut=1. profile = insidePart.
   // For perp > wakeWidth:  insidePart=1 (clamped),  fadeOut∈[0,1]. profile = fadeOut.
   const transverseSigned = insidePart * fadeOut

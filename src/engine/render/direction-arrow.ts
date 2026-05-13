@@ -98,8 +98,7 @@ export function createDirectionArrow(): DirectionArrow {
     camera.getWorldDirection(camForward)
     camUp.copy(LOCAL_UP).applyQuaternion(camera.quaternion)
 
-    const halfHeight =
-      ANCHOR_FORWARD * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)
+    const halfHeight = ANCHOR_FORWARD * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)
     const upOffset = halfHeight * ANCHOR_NDC_Y
     const bob = Math.sin(tAccum * 2) * 0.12
     anchor

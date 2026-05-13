@@ -5,12 +5,7 @@ import type { SimWorld } from './engine/sim/ecs/world'
 import type { PhysicsWorld } from './engine/sim/physics/rapier'
 import { captureSnapshot, snapshotToString } from './engine/sim/snapshot'
 import type { WaveFieldState } from './engine/sim/water/wave-field'
-import {
-  BikeTag,
-  ControlIntentStore,
-  PeerControlledStore,
-  RBHandleStore,
-} from './game/components'
+import { BikeTag, ControlIntentStore, PeerControlledStore, RBHandleStore } from './game/components'
 import { AITag } from './game/components/ai'
 import { MineTag, MissileTag, ShieldEffectStore, StunStore } from './game/components/combat'
 import { PickupSlot, PickupSlotStore, type PickupType } from './game/components/pickup'

@@ -11,7 +11,7 @@
  * hand on two different machines comparing the printed snapshot. This
  * file only proves intra-machine.
  */
-import { expect, test, type Browser } from '@playwright/test'
+import { type Browser, expect, test } from '@playwright/test'
 
 const SCRIPTED_INTENT = {
   throttle: 1,

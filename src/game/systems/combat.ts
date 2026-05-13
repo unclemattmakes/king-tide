@@ -1,4 +1,4 @@
-import { addComponent, query, type QueryResult, removeEntity } from 'bitecs'
+import { addComponent, type QueryResult, query, removeEntity } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { distanceSquared, quatRotate } from '@/engine/sim/physics/vec'
