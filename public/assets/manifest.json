@@ -133,6 +133,18 @@
       "specPath": "specs/tracks/calibration.json"
     },
     {
+      "id": "figure-eight",
+      "displayName": "Figure Eight",
+      "url": "/assets/tracks/figure-eight.glb",
+      "specPath": "public/tracks/figure-eight.json"
+    },
+    {
+      "id": "oval-loop",
+      "displayName": "Oval Loop",
+      "url": "/assets/tracks/oval-loop.glb",
+      "specPath": "public/tracks/oval-loop.json"
+    },
+    {
       "id": "test-ring",
       "displayName": "Test Ring",
       "url": "/assets/tracks/test-ring.glb",
