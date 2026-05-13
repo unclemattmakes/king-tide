@@ -50,6 +50,7 @@ import { RacerStore } from '@/game/components/race'
 import type { RaceTick } from '@/game/sim-step'
 import { simulateStep } from '@/game/sim-step'
 import { getHeldPickup } from '@/game/systems/pickup'
+import { tickRemoteInterp } from '@/game/systems/remote-interp'
 import { computeStandings } from '@/game/systems/standings'
 import type { Track } from '@/game/tracks/types'
 import type { MultiplayerHandle } from './multiplayer'
@@ -299,6 +300,13 @@ export function startGameLoop(opts: GameLoopOpts): void {
           }
         }
         const iAmHost = multiplayer.isHost()
+        // M10.11+ — advance every buffered remote-bike sample to its
+        // wall-clock-interpolated pose for this tick BEFORE phys.step().
+        // simulateStep's own `phys.step()` then commits the kinematic
+        // next-pose, so the next syncFromPhysics + render sees a smooth
+        // motion instead of the per-snapshot teleport that direct
+        // setNextKinematic produces at 20 Hz vs 60 Hz tick rate.
+        tickRemoteInterp(phys, performance.now())
         simulateStep(sim, phys, waveField, track, raceTick, {
           peerInputs: tickPeerInputs,
           locked: raceHud.isLocked(),
