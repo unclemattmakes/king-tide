@@ -115,6 +115,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     const sky = createSkySystem({
       scene,
       renderer,
+      camera,
       sun,
       hemi,
       water: waterMesh,

@@ -19,6 +19,7 @@
  */
 
 import * as THREE from 'three'
+import type { HorizonRing } from '@/engine/render/horizon-ring'
 import type { SkySystem } from '@/engine/render/sky'
 import type { BikeImpact } from '@/engine/render/water'
 import { updateUnderwaterFog } from '@/engine/render/water'
@@ -37,6 +38,7 @@ export interface ReplayModeOpts {
   camera: THREE.PerspectiveCamera
   renderer: THREE.WebGLRenderer
   sky: SkySystem
+  horizonRing: HorizonRing
   waveField: WaveFieldState
   waterMesh: {
     tick: (impacts: readonly BikeImpact[], focus: { x: number; z: number }) => void
@@ -75,6 +77,7 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     camera,
     renderer,
     sky,
+    horizonRing,
     waveField,
     waterMesh,
     bikeRender,
@@ -288,6 +291,9 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     // Sky/atmosphere — same call as the live loop; sun follows the focal
     // bike so shadows stay framed during spectator pans.
     sky.tick(waveField.time, dt, { x: focalPos.x, z: focalPos.z })
+    // Horizon silhouette follows the spectator camera so wide pans don't
+    // expose the ring's centre offset from the player.
+    horizonRing.tick({ x: camera.position.x, z: camera.position.z })
     updateUnderwaterFog(scene, camera.position.y)
     bikeRender()
     pickupRender(dt)

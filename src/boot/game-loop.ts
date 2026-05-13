@@ -31,6 +31,7 @@ import {
 } from '@/engine/net/input-frame'
 import type { ChaseCamera } from '@/engine/render/camera'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
+import type { HorizonRing } from '@/engine/render/horizon-ring'
 import type { RaceHud } from '@/engine/render/race-hud'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
@@ -107,6 +108,7 @@ export interface GameLoopOpts {
     debug: { getTimeScale: () => number }
   }
   sky: SkySystem
+  horizonRing: HorizonRing
   trackVisuals: TrackVisuals
   raceHud: RaceHud
   raceTick: RaceTick
@@ -161,6 +163,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     waveField,
     waterMesh,
     sky,
+    horizonRing,
     trackVisuals: _trackVisuals,
     raceHud,
     raceTick,
@@ -437,6 +440,10 @@ export function startGameLoop(opts: GameLoopOpts): void {
       x: state.playerSnapshot?.position.x ?? 0,
       z: state.playerSnapshot?.position.z ?? 0,
     })
+    // Keep the distant horizon silhouette wrapped around the chase camera
+    // so the player never appears to outrun it. Tracks the camera (not the
+    // bike) so look-back / spectator pans don't shift the horizon.
+    horizonRing.tick({ x: camera.position.x, z: camera.position.z })
     updateUnderwaterFog(scene, camera.position.y)
     bikeRender()
     pickupRender(dt)
