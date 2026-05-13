@@ -617,3 +617,168 @@ or fix in the current authoring loop:
 
 Recommend tackling **(1) + (3)** first — both small, both immediately
 useful, both prerequisites for the bigger Items 3/4 push.
+
+## Post-track-build assessment (2026-05-13)
+
+Notes after using the addon to build two showcase tracks end-to-end
+(`oval-loop.blend` and `figure-eight.blend`). Ranked by how much each
+would have cut friction during the build, with realism estimates.
+
+### 1. Make `ai_spline_main` and `road_curve_main` one curve
+
+Today the racing line and the road centerline are two separate
+NURBS objects that need to be authored to match. For both new tracks
+I hand-wrote the same control points twice — error-prone and slow.
+
+Fix: the road tool should default to `ai_spline_main` as its source
+curve, with `road_curve_main` only used when explicitly set. The Add
+Road Curve operator becomes optional ("I want a separate road shape
+from the racing line"). Affects `_sample_road_path` and the operator's
+curve-lookup. ~50 lines of Python. **High value, low effort.**
+
+### 2. Place ramps along the spline at curvature peaks (or arbitrary t)
+
+I had to compute the spline tangent in Python and place ramps with the
+3D cursor for every ramp. Two operators would close this:
+
+- **Add Ramp at Spline t** — pick a curve, pick a parameter t in [0, 1],
+  drop a ramp tangent-aligned to that point. Uses the existing
+  `_sample_curve_to_polyline` + arc-length math.
+- **Auto-place Ramps on Spline** — reuse the turn-indicator's signed-
+  curvature detector (`_signed_curvature_peaks`) to place a ramp at
+  every detected apex. Honors a min-spacing knob so racers aren't
+  jumping every 30 m.
+
+~100 lines of Python total; both reuse code that already exists.
+**High value, low effort.**
+
+### 3. Variable road width (taper)
+
+The road's width is uniform — the same value at every sample. F1
+tracks widen at apex and narrow on straights. Authors want this for
+visual variety and racing line interest.
+
+Fix: store a per-sample width multiplier on each spline control point
+(via the NURBS point's `radius` field — it's already there) and have
+`_build_road_strip_mesh` scale `half_w` by the interpolated radius.
+Curbs scale with the road. Same idea applies to lift (banked
+corners). **Medium effort** — needs sampling-side interpolation, plus
+a panel hint that radius drives width.
+
+### 4. Active fail when terrain has no peaks under the road
+
+In oval-loop, the terrain inside the oval was completely flat (z=0)
+because HV_Island only contributes height where peaks are authored.
+The racing surface ended up featureless. Two angles:
+
+- **Terrain detail layer**: add a low-amplitude rolling-bump pass to
+  the HV_Island GN graph that's always on (not gated by peaks),
+  governed by a new "Surface noise" knob (default 0.5 m). Authors
+  who want pancake-flat dial it to zero.
+- **A second template** — `seed_template_<style>.py` variants for
+  desert / valley / archipelago, picking different terrain colours
+  and base heightfields. The current "tropical island" template is
+  one of N, not the only.
+
+**Medium-high effort.** Mostly aesthetic but matters for "the new
+tracks look different from each other".
+
+### 5. Track lint before export
+
+I almost shipped tracks where the racing line dipped underwater on
+short bridges, and one where the start position had no road
+underneath. A pre-export lint pass would catch these:
+
+- Each AI spline point: raycast down, confirm we hit `kind=track` (not
+  water, not nothing).
+- `start_00` / `start_01`: raycast down, confirm a track surface
+  exists below within hover range.
+- `road_main` exists if a road curve was authored.
+- Lap-length sanity: AI spline arc length ≥ 60 m (avoid the
+  "87 m track" gag).
+- `gateSpacing` × N gates ≈ arc length (warn on extreme densities).
+
+Show as ERROR (refuse export) for fatal issues, WARNING (allow but
+report) for soft ones. **High value, ~150 lines.**
+
+### 6. Playtest button → opens the browser at the track
+
+I closed Blender and typed the URL multiple times. The addon already
+has *Copy Play URL*; add a sibling *Open in Browser* that calls
+`webbrowser.open(url)` from the Python stdlib. **Trivial. ~5 lines.**
+
+### 7. Manifest authority handoff
+
+The addon's export now upserts `public/assets/manifest.json`, but
+`pnpm gen:tracks` rewrites the file from scratch using only
+`specs/tracks/*.json`. If you run `pnpm gen:tracks` after exporting
+addon-built tracks, those entries vanish. Two options:
+
+- Make `gen:tracks` *merge* into the existing manifest's track list
+  rather than replace. Preserves addon-built entries.
+- Or: have the addon also write a `specs/tracks/<id>.json` stub when
+  exporting, so `gen:tracks` rediscovers the track. Heavier — adds a
+  fake spec file per addon-built track.
+
+The merge path is cleaner. **Medium effort, important for stability.**
+
+### 8. Tangent-aligned cursor
+
+The 3D cursor's rotation is what drives ramp orientation, but
+Blender's stock cursor controls don't let you snap rotation to a
+spline tangent. An operator *Cursor → Snap to Spline Tangent at t*
+would unify all the manual `math.atan2` work that ramp / prop / start
+placement currently needs. **Low effort, ~30 lines, used everywhere.**
+
+### 9. Road texture (the asphalt looks like a tablet)
+
+`mat_track_road` is a flat dark-grey BSDF. Real roads have a noise
+texture, tire grooves, faint centerlines. The artistic value is huge
+but it benefits from in-Blender material iteration — scaffold an
+asphalt node group, then let the user hand-tune. The shipped material
+should at minimum have a value-noise pattern so the surface doesn't
+read as a pure painted shape from a distance. **Medium effort —
+material work, not code.**
+
+### 10. Mirror the road on the underside
+
+The slab fix made the road look like a real structure, but only from
+above. The road's underside (when crossing a valley or chasm) is a
+flat dark face that reads cheap. A simple fix: the bottom of the slab
+gets a separate `mat_track_road_underside` (concrete grey, slight
+ribbing) so cross-valley shots read as bridge-like. **Trivial — one
+material assignment + face winding tweak.**
+
+### Pain points worth surfacing even if we don't fix them yet
+
+- **The cursor's rotation_euler is read on add_ramp but lost on
+  re-add.** Re-rotating the cursor between placements is finicky.
+  Operator-level rotation arg would help.
+- **No undo for the road build.** A bad spline tweak → Build Road →
+  the terrain gets re-conformed cumulatively. Ctrl+Z reverses ONE
+  vertex pass; the iterations remain. A pre-build snapshot would let
+  the operator unwind cleanly.
+- **Snap-to-terrain hits anything with `kind=track`.** Including the
+  road itself if it's already been built. Workaround is currently to
+  hide road_main before snapping. The snap operator should know to
+  exclude road_main from its cast.
+- **No way to set per-track lap count from Blender.** `lapsToFinish`
+  defaults to 3 and lives only in the JSON — Blender export preserves
+  whatever's there but the addon offers no UI to change it.
+- **Race direction is implicit.** The first AI spline control point
+  becomes the start of the lap. There's no visual indicator in
+  Blender showing which way the racing line flows; you find out by
+  testing.
+
+### Recommended order
+
+1. **(1)** Single-curve mode — unblocks every future track build.
+2. **(7)** Manifest merge — prevents silent data loss.
+3. **(5)** Track lint — catches the 80% of "why doesn't my track
+   work" before they hit the runtime.
+4. **(2)** Ramp placement helpers — reuses code already shipped.
+5. **(6) + (8)** — tiny, immediately useful ergonomic wins.
+6. **(3)** Variable road width — visual variety on demand.
+7. **(4)** Terrain detail / template variants — biggest aesthetic
+   upgrade for new tracks.
+8. **(9) + (10)** — material polish, hand-tuning territory.

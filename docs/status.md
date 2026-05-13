@@ -6,7 +6,7 @@ This doc captures the build's current state, controls, known issues, and next st
 
 ## What works today
 
-- Two tracks: **Lagoon Loop** (default; jump ramp on the right straight) and **Cliffside** (`?track=cliffside`; mesa with cliff drop, doubles as the Blender-export reference layout)
+- Tracks on the level-select carousel: **Lagoon Loop** (default; jump ramp on the right straight), **Cliffside** (mesa with cliff drop, doubles as the Blender-export reference layout), **Calibration** (smoke-test fixture), **Test Ring** (collision tunneling regression), and two new procedural-island showcases — **Oval Loop** and **Figure Eight** — authored end-to-end in Blender using the addon's road / ramp / spline tools on a fresh HV_Island terrain. The two new tracks are the canonical proof that the Blender authoring stack (road slab + F1 curbs + ramp + snap + JSON sync + manifest upsert) can produce shippable courses without leaving Blender.
 - Three bike archetypes — **Cruiser** (heavy / fast top speed), **Racer** (default balanced), **Stunt** (light / agile) — selectable via the garage menu or `?bike=`
 - Garage menu (HUD button top-right) for picking bike + track + viewing / clearing best lap records
 - Best lap times saved per (track, bike) to localStorage, surfaced in the finish overlay and garage menu
@@ -30,6 +30,53 @@ This doc captures the build's current state, controls, known issues, and next st
 - **Multiplayer state sync (M10.4–M10.11)** — opt-in via `?room=<id>` URL param. Local dev needs `pnpm party:dev` (PartyKit relay on :1999) alongside `pnpm dev` (Vite on :5191). The stateless relay (`party/relay.ts`) assigns peer slots 0..7 and broadcasts two binary message types distinguished by a 1-byte tag at offset 0: `InputFrame` (0x01, 11 B, 60 Hz) carries each peer's controls; `TransformSnapshot` (0x02, 8 + 24×N B, 20 Hz) carries owner-authoritative bike poses. The lowest-slot peer is the AI host: it alone runs `aiControlSystem` and broadcasts the 4 AI bike poses. Every peer also broadcasts its own player bike. Receivers' AI bikes and remote-peer bikes are kinematic-position rigid bodies whose pose is set from inbound snapshots, replacing the input-replay path which couldn't converge (each tab simulated AI independently). Local human's bike stays Dynamic + PeerControlled and is driven by its own input. Host changeover (e.g. peer 0 leaves) re-tags AI bikes via `applyHostRole` between fixed steps; new host re-derives `AIController` closest-point cache via `defaultAIController('main')`. `#hud-room` chip shows `[host]` when this peer owns AI. `__hover.net` probe surfaces `peerId()`, `remotePeers()`, `isHost()`, `recentRemoteFrames()`, `latestPeerIntents()`, `snapshotsReceived()`; `__hover.bikes()` now includes per-bike `bodyType`, `hasAI`, `peerControlled` for cross-tab diagnostics. **Not yet implemented**: render-side smoothing of the 20 Hz snaps (M10.12), owner-authoritative combat (M10.13), snapshot interpolation/extrapolation (M10.14), host-authoritative race state (M10.15), variant negotiation per peer, anti-cheat.
 - Spec → GLB asset pipeline (M9.27, flipped to per-variant in M9.39): `specs/{bikes,props,tracks}/*.json` + `tools/blender/build_*.py` produce `public/assets/<cat>/*.glb` and `public/assets/manifest.json` via `pnpm gen:all`. Bike-loader instantiates the player + AI bike GLBs at boot; prop-loader pre-fetches asset-prop GLBs referenced by track JSON. **Bikes:** one `bikes-src/<id>.blend` per variant — open it in Blender, edit the variant directly (no shared kit, no propagation), click *Hoverbike → Export Bike to Game*, the GLB updates and the runtime picks it up on next reload. The same addon serves tracks via *Export Track to Game* and switches mode based on the .blend's parent dir. Headless `pnpm gen:bikes` opens each .blend, overlays spec.appearance recolour + spec.physics extras, exports. **Tracks:** spec-driven `build_track.py` round-trips through `tracks-src/<id>.blend` and emits both the GLB and a starter gameplay JSON. **Bike viewer** (`?viewer=<bikeId>` or the addon's *Copy Viewer URL*) opens a turntable with OrbitControls, sockets/colliders surfaced as gizmos.
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
+
+### Authoring — Blender road / ramp / track tools (2026-05-13)
+- **Road tool.** Bezier curve → drivable road slab tagged `kind=track`
+  with `mat_track_road` asphalt + optional F1-style red/white curbs
+  (`mat_track_curb_red`, `mat_track_curb_white`). Scene props for width,
+  lift, slab thickness, curb width/height, stripe length, samples,
+  smoothing. Terrain is conformed to the road's altitude in a
+  `width/2 + curb_width + blend_radius` band with a smoothstep falloff
+  and an upper cap clamping each vertex below the drivable surface so
+  steep slopes can't poke through. Errors out on active terrain
+  modifiers by default; opt-in `apply_modifiers=True` toggle bakes the
+  GN graph into the source mesh before deforming.
+- **Ramp tool.** Parametric stunt-ramp wedge at the 3D cursor — length /
+  width / peak / approach / segments / curved (smoothstep). 30 cm
+  foundation depth so the wedge is always a closed solid; tagged
+  `kind=track` with `mat_track_ramp`. Each ramp gets a fresh `ramp_NN`
+  name so repeated placement doesn't stomp.
+- **Snap Spline to Terrain.** Raycasts every NURBS / Bezier control
+  point of `ai_spline_main` straight down onto the scene and lifts by
+  the configured hover height. The depsgraph is refreshed inside the
+  preview-hidden context so gate / racer / water gizmos can't catch
+  the ray.
+- **Heightmap importer.** Greyscale PNG/EXR → subdivided plane tagged
+  `kind=track`. Size, Δz, base elevation, subdivisions are scene props;
+  re-import replaces any prior `terrain_heightmap` cleanly.
+- **Ghost lap + chase cam.** Bike silhouette bound to `ai_spline_main`
+  via a Follow Path constraint, parented chase camera with Track-To,
+  scene frame range set to one full lap at target speed. Spacebar plays
+  the lap; chase cam is the scene's active camera.
+- **JSON ↔ .blend round-trip.** `load_post` handler auto-reloads the
+  track JSON when a `tracks-src/<id>.blend` opens (gate spacing, terrain
+  shader, water knobs, start pose). Export merges Blender-owned fields
+  onto whatever the editor last saved; legacy `cp_NN` / `pickup_*`
+  empties still win when authored locally. Manifest upsert ensures
+  addon-authored tracks surface on the level-select screen without a
+  separate `pnpm gen:tracks` step.
+- **Live previews follow source edits.** Debounced
+  `depsgraph_update_post` handler watches `ai_spline_main`, `start_00`,
+  `water_volume_main` and rebuilds gate / turn / racer / water previews
+  ~200 ms after the user releases. Scene-prop `update=` callbacks for
+  spacing, curb dims, wave time go through the same scheduler so
+  slider scrubs are live.
+- **Two new showcase tracks.** `tracks-src/oval-loop.blend` and
+  `tracks-src/figure-eight.blend` were built end-to-end through the
+  addon (apply GN island → snap spline → build road with curbs → drop
+  ramps → export) and ship as the canonical proof that the authoring
+  stack produces playable maps without leaving Blender.
 
 ### Authoring — gate placement (2026-05-11)
 - **Editor** `?edit=1` has a new "Auto-place gates from spline" button.
