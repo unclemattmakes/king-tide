@@ -1,4 +1,4 @@
-import { query, type QueryResult } from 'bitecs'
+import { type QueryResult, query } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { quatRotate } from '@/engine/sim/physics/vec'

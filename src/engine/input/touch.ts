@@ -44,7 +44,7 @@ function shapeTouchAxis(v: number): number {
   const mag = Math.abs(v)
   if (mag < DEADZONE) return 0
   const t = Math.min((mag - DEADZONE) / (1 - DEADZONE), 1)
-  return Math.sign(v) * Math.pow(t, devSettings.stickCurve)
+  return Math.sign(v) * t ** devSettings.stickCurve
 }
 
 /** Coarse pointer (phone/tablet) or explicit `?touch=1` URL flag for testing. */

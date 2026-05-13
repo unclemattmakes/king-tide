@@ -19,7 +19,14 @@
     "rules": {
       "recommended": true,
       "suspicious": { "noExplicitAny": "warn" },
-      "style": { "useNodejsImportProtocol": "error" }
+      "style": {
+        "useNodejsImportProtocol": "error",
+        "noNonNullAssertion": "warn",
+        "noDescendingSpecificity": "warn"
+      },
+      "complexity": {
+        "noImportantStyles": "warn"
+      }
     }
   }
 }

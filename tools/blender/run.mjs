@@ -250,7 +250,7 @@ function writeManifest(built) {
   }
   const manifestPath = path.join(REPO_ROOT, 'public', 'assets', 'manifest.json')
   mkdirSync(path.dirname(manifestPath), { recursive: true })
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8')
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
   console.log(`[run] wrote ${path.relative(REPO_ROOT, manifestPath)}`)
 }
 
@@ -300,7 +300,7 @@ if (action === 'build_bike' || action === 'build_prop' || action === 'build_trac
   existing.schemaVersion = 1
   existing.generatedAt = new Date().toISOString()
   mkdirSync(path.dirname(manifestPath), { recursive: true })
-  writeFileSync(manifestPath, JSON.stringify(existing, null, 2) + '\n', 'utf8')
+  writeFileSync(manifestPath, `${JSON.stringify(existing, null, 2)}\n`, 'utf8')
   console.log(`[run] wrote ${path.relative(REPO_ROOT, manifestPath)}`)
   if (failed.length > 0) {
     console.error(`[run] ${failed.length} builder(s) failed`)

@@ -11,7 +11,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   type BikeSnapshotRecord,
-  type TransformSnapshot,
   decodeTransformSnapshot,
   decodeTransformSnapshotFrom,
   encodeTransformSnapshot,
@@ -21,6 +20,7 @@ import {
   SNAPSHOT_BIKE_BYTES,
   SNAPSHOT_HEADER_BYTES,
   snapshotByteLength,
+  type TransformSnapshot,
 } from '../../src/engine/net/transform-snapshot'
 
 /** Tolerances baked into the wire format. See `transform-snapshot.ts` doc. */

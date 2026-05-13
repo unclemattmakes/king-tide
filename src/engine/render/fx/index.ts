@@ -566,8 +566,7 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
       // doesn't read as a single source point.
       if (hover.isGrounded && hover.surfaceIsWater && speed > FOAM_MIN_SPEED) {
         const rate =
-          Math.min(1, (speed - FOAM_MIN_SPEED) / (FOAM_SPEED_FULL - FOAM_MIN_SPEED)) *
-          FOAM_MAX_RATE
+          Math.min(1, (speed - FOAM_MIN_SPEED) / (FOAM_SPEED_FULL - FOAM_MIN_SPEED)) * FOAM_MAX_RATE
         acc.foam += rate * dt
         const n = Math.floor(acc.foam)
         if (n > 0) {
@@ -672,8 +671,7 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
         speed > DUST_MIN_SPEED
       ) {
         const rate =
-          Math.min(1, (speed - DUST_MIN_SPEED) / (DUST_SPEED_FULL - DUST_MIN_SPEED)) *
-          DUST_MAX_RATE
+          Math.min(1, (speed - DUST_MIN_SPEED) / (DUST_SPEED_FULL - DUST_MIN_SPEED)) * DUST_MAX_RATE
         acc.dust += rate * dt
         const n = Math.floor(acc.dust)
         if (n > 0) {
@@ -717,8 +715,7 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
       // so the rear-thruster read stays consistent with bike motion.
       const throttleMag = Math.max(0, intent.throttle) // forward only
       if (throttleMag > EXHAUST_THROTTLE_MIN || intent.boost) {
-        const rate =
-          throttleMag * EXHAUST_THROTTLE_RATE + (intent.boost ? EXHAUST_BOOST_RATE : 0)
+        const rate = throttleMag * EXHAUST_THROTTLE_RATE + (intent.boost ? EXHAUST_BOOST_RATE : 0)
         acc.exhaust += rate * dt
         const n = Math.floor(acc.exhaust)
         if (n > 0) {

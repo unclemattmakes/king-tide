@@ -380,10 +380,25 @@ export function createWaterMesh(
       const qScaled = steepnessUniform.mul(float(w.qBase))
       // Horizontal displacement: P.x += Q·A·D.x · cos(phase),
       //                          P.z += Q·A·D.z · cos(phase)
-      dx.addAssign(qScaled.mul(float(w.amp * w.dirX)).mul(c).mul(ampScale))
-      dz.addAssign(qScaled.mul(float(w.amp * w.dirZ)).mul(c).mul(ampScale))
+      dx.addAssign(
+        qScaled
+          .mul(float(w.amp * w.dirX))
+          .mul(c)
+          .mul(ampScale),
+      )
+      dz.addAssign(
+        qScaled
+          .mul(float(w.amp * w.dirZ))
+          .mul(c)
+          .mul(ampScale),
+      )
       // Normal y-component reduction: Σ Q · k · A · sin(phase)
-      qSum.addAssign(qScaled.mul(float(w.k * w.amp)).mul(s).mul(ampScale))
+      qSum.addAssign(
+        qScaled
+          .mul(float(w.k * w.amp))
+          .mul(s)
+          .mul(ampScale),
+      )
     }
     return vec3(dx, dz, qSum)
   })
@@ -707,7 +722,7 @@ export function createWaterMesh(
   // bit muddy and unsaturated. Pushed toward a punchier deep teal that
   // reads as a real ocean color when stacked with the new aerial
   // perspective + shallow-tint layers below.
-  const deepColor = isClassic ? vec3(0.04, 0.18, 0.4) : vec3(0.012, 0.10, 0.18)
+  const deepColor = isClassic ? vec3(0.04, 0.18, 0.4) : vec3(0.012, 0.1, 0.18)
   const scatterColor = isClassic ? vec3(0.16, 0.55, 0.78) : vec3(0.22, 0.7, 0.65)
 
   // Shallow-water tint. When the view ray is short between water surface
@@ -1420,7 +1435,7 @@ export function updateUnderwaterFog(scene: THREE.Scene, cameraY: number): void {
   if (cameraY < -0.5) {
     // Saturated underwater teal — slightly brighter than the deep-water
     // albedo so the fog reads as "fluid medium" rather than "black void".
-    fog.color.setRGB(0.04, 0.20, 0.30)
+    fog.color.setRGB(0.04, 0.2, 0.3)
     fog.near = 0
     fog.far = 28
   }

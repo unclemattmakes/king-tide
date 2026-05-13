@@ -29,7 +29,9 @@ let windFrequency = 1.4
 /** Single per-frame time uniform shared across all swayed materials.
  *  Updated once per frame from the render loop via `updateSwayTime`. */
 const SWAY_TIME = { value: 0 }
-const SWAY_WIND = { value: new THREE.Vector3(WIND_DIR.x * windStrength, 0, WIND_DIR.z * windStrength) }
+const SWAY_WIND = {
+  value: new THREE.Vector3(WIND_DIR.x * windStrength, 0, WIND_DIR.z * windStrength),
+}
 const SWAY_FREQ = { value: windFrequency }
 
 const PATCHED = Symbol.for('hoverbike.foliageSwayPatched')
@@ -111,7 +113,7 @@ uniform float uSwayWindScale;`,
   // shader path. Set it via `vertexColors = true` so three.js plumbs the
   // attribute through even though we're using it for parameters, not tint.
   if ('vertexColors' in m) {
-    (m as unknown as { vertexColors: boolean }).vertexColors = true
+    ;(m as unknown as { vertexColors: boolean }).vertexColors = true
   }
   m.needsUpdate = true
 }

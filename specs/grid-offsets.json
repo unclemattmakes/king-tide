@@ -2,9 +2,9 @@
   "$schema": "./_schema/grid-offsets.json",
   "comment": "Player-relative spawn offsets for AI bikes on the starting grid. Indexed by the AI bike's slot (0..N-1). dx/dz are added directly to track.start.position (no yaw rotation — the runtime assumes the start direction is +Z-aligned). lineOffset is the lateral racing-line bias the AI controller holds through the spline.",
   "slots": [
-    { "dx": -6, "dz": -5,  "lineOffset": -6 },
+    { "dx": -6, "dz": -5, "lineOffset": -6 },
     { "dx": -2, "dz": -10, "lineOffset": -2 },
-    { "dx":  2, "dz": -10, "lineOffset":  2 },
-    { "dx":  6, "dz": -5,  "lineOffset":  6 }
+    { "dx": 2, "dz": -10, "lineOffset": 2 },
+    { "dx": 6, "dz": -5, "lineOffset": 6 }
   ]
 }

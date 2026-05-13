@@ -14,8 +14,8 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { createRenderer } from '../engine/render/renderer'
-import { loadBike, type LoadedBike } from '../game/assets/bike-loader'
-import { loadManifest, type AssetManifest, type BikeManifestEntry } from '../game/assets/manifest'
+import { type LoadedBike, loadBike } from '../game/assets/bike-loader'
+import { type AssetManifest, type BikeManifestEntry, loadManifest } from '../game/assets/manifest'
 
 type ViewerOpts = {
   /** Bike id from the manifest, or null to use the first manifest entry. */
@@ -46,8 +46,7 @@ export async function bootBikeViewer(parent: HTMLElement, opts: ViewerOpts): Pro
   }
 
   const initialId = opts.bikeId ?? firstBike.id
-  let current: BikeManifestEntry =
-    manifest.bikes.find((b) => b.id === initialId) ?? firstBike
+  const current: BikeManifestEntry = manifest.bikes.find((b) => b.id === initialId) ?? firstBike
 
   // ── Scene + renderer ─────────────────────────────────────────────────────
   const { renderer, backend, canvas, resize } = await createRenderer(parent)
@@ -61,12 +60,7 @@ export async function bootBikeViewer(parent: HTMLElement, opts: ViewerOpts): Pro
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x1a1d22)
 
-  const camera = new THREE.PerspectiveCamera(
-    50,
-    window.innerWidth / window.innerHeight,
-    0.05,
-    200,
-  )
+  const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 200)
   camera.position.set(2.5, 1.4, 2.5)
   camera.lookAt(0, 0.3, 0)
 
@@ -155,11 +149,7 @@ export async function bootBikeViewer(parent: HTMLElement, opts: ViewerOpts): Pro
 
 /** Add bike root to scene, surface sockets + colliders, return the
  * cloned root so it can be replaced on switch. */
-function mountBike(
-  scene: THREE.Scene,
-  axesGroup: THREE.Group,
-  loaded: LoadedBike,
-): THREE.Object3D {
+function mountBike(scene: THREE.Scene, axesGroup: THREE.Group, loaded: LoadedBike): THREE.Object3D {
   const node = loaded.root.clone(true)
 
   // Counter the build's yup-export so the kit's Blender axes match the
@@ -226,7 +216,11 @@ async function switchBike(refs: Refs, bikeId: string): Promise<void> {
     const mesh = obj as THREE.Mesh
     if (mesh.isMesh) {
       mesh.geometry?.dispose?.()
-      const mats = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []
+      const mats = Array.isArray(mesh.material)
+        ? mesh.material
+        : mesh.material
+          ? [mesh.material]
+          : []
       for (const m of mats) (m as THREE.Material).dispose?.()
     }
   })

@@ -54,9 +54,7 @@ export function resampleByArcLength(
 ): GatePlacement[] {
   if (points.length < 2) return []
   if (!(targetSpacing > 0)) {
-    throw new Error(
-      `resampleByArcLength: targetSpacing must be positive (got ${targetSpacing})`,
-    )
+    throw new Error(`resampleByArcLength: targetSpacing must be positive (got ${targetSpacing})`)
   }
 
   // Cumulative xz arc length at each vertex. cum[i] = length from

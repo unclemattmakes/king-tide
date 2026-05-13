@@ -17,9 +17,15 @@
         "additionalProperties": false,
         "required": ["dx", "dz", "lineOffset"],
         "properties": {
-          "dx":         { "type": "number", "description": "Offset along world +X from the player start." },
-          "dz":         { "type": "number", "description": "Offset along world +Z from the player start (negative = behind)." },
-          "lineOffset": { "type": "number", "description": "Lateral racing-line bias the AI controller holds, in metres." }
+          "dx": { "type": "number", "description": "Offset along world +X from the player start." },
+          "dz": {
+            "type": "number",
+            "description": "Offset along world +Z from the player start (negative = behind)."
+          },
+          "lineOffset": {
+            "type": "number",
+            "description": "Lateral racing-line bias the AI controller holds, in metres."
+          }
         }
       }
     }

@@ -23,13 +23,13 @@ import {
 import {
   createEditorPanel,
   type EditorPanelHandle,
-  entityKey,
   type EntitySel,
+  entityKey,
   type GizmoMode,
   openTrackPickerFlow,
-  parseEntityKey,
   type PlaceTool,
   PROP_PLACE_TOOLS,
+  parseEntityKey,
   promptNewTrackFlow,
 } from './editor-ui'
 
@@ -681,10 +681,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
         sel = null
         rebuildHelpers()
         panelHandle.render()
-        panelHandle.setStatus(
-          `Placed ${placements.length} gates at ${spacing.toFixed(0)}m`,
-          '#7d8',
-        )
+        panelHandle.setStatus(`Placed ${placements.length} gates at ${spacing.toFixed(0)}m`, '#7d8')
       },
       selSupportsMode,
     },
@@ -717,7 +714,6 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       `You have unsaved changes. ${action} anyway?\n\nUnsaved changes will be lost.`,
     )
   }
-
 
   // ── Pointer for placement only (selection is via outliner) ──────────────
   const raycaster = new THREE.Raycaster()
