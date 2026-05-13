@@ -29,6 +29,10 @@ features:
     details: Author bikes, props, and tracks from JSON specs. Headless Blender builds the GLBs; the runtime auto-loads them.
     link: /modding/overview
     linkText: Pipeline overview
+  - title: Contributing
+    details: Architecture rules, testing strategy, and the PR workflow for hacking on the engine itself.
+    link: /contributing/
+    linkText: Start here
   - title: Reference
     details: Coordinate conventions, the window.__hover debug API, and the URL parameters the game accepts.
     link: /reference/conventions
@@ -41,8 +45,9 @@ This is the **dev + modder-facing** documentation. If you're trying to:
 
 - **Run the game locally** or wire up a controller → start in [Build & Run](/build/setup).
 - **Make a new bike, prop, or track** → [Modding](/modding/overview).
+- **Hack on the engine itself** → [Contributing](/contributing/).
 - **Look up a number** (top speed, hover height, pickup behavior) → [Gameplay](/gameplay/bikes).
-- **Hack on the engine itself** → see the in-repo [`docs/`](https://github.com/occ-matt/hoverbike/tree/main/docs) plan files (`status.md`, `implementation-plan.md`, `product-plan.md`). This site links to them where relevant; it does not duplicate them.
+- **Read the deep design docs** → in-repo [`docs/`](https://github.com/occ-matt/hoverbike/tree/main/docs) plan files (`status.md`, `implementation-plan.md`, `product-plan.md`, ADRs). This site links to them where relevant; it does not duplicate them.
 
 ## Project at a glance
 

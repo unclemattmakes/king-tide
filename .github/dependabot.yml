@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      three-stack:
+        patterns:
+          - three
+          - "@types/three"
+      dev-tooling:
+        patterns:
+          - "@biomejs/*"
+          - "@playwright/*"
+          - vitest
+          - vite
+          - vitepress
+          - typescript
+          - "@types/node"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

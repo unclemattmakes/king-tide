@@ -1,13 +1,19 @@
-# Blender automation wishlist
+# Blender automation roadmap
 
-Captured from a conversation on 2026-05-11, the day the Blender MCP connector
-went live in Matt's setup. This file enumerates the things Matt wants Claude to
-help build *on top of* the connector, and Claude's realism assessment of each.
+Open items for Blender-side automation. Each item below was scoped during
+the design phase with a realism assessment; the **Shipped so far** section
+tracks what's landed and the rest is open for contribution.
 
-The connector itself is documented in the top-level
-[CLAUDE.md](../CLAUDE.md#blender-connector--installed-and-ready). The existing
-pipeline it builds on is in [blender-pipeline-guide.md](./blender-pipeline-guide.md)
-and [blender-conventions.md](./blender-conventions.md).
+**Contributors:** pick an item and open a draft PR or an issue to claim
+it. The items are roughly independent — start anywhere. Items 1–7 are
+sequenced by historical interest; later additions are not.
+
+The connector documented in the top-level
+[CLAUDE.md](../CLAUDE.md#blender-connector--optional) is one way to drive
+Blender from a Claude session, but every item here can also be built
+with the headless `pnpm gen:*` pipeline. The existing pipeline is in
+[blender-pipeline-guide.md](./blender-pipeline-guide.md) and
+[blender-conventions.md](./blender-conventions.md).
 
 
 ## Shipped so far

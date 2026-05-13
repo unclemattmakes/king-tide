@@ -130,6 +130,23 @@ See [implementation-plan.md](./implementation-plan.md) for repo layout and the a
 
 ## Known bugs / quirks
 
+### Multiplayer e2e coverage — *deferred*
+M10.11 transform-snapshot sync is covered by unit tests
+(`host-election`, `transform-snapshot`, `apply-snapshot`) and was
+verified end-to-end via Chrome MCP for solo / two-peer / late-joiner
+scenarios. A two-tab Playwright probe (`tests/e2e/m10-11-state-sync.spec.ts`)
+was sketched in the design doc §10 but is not yet automated. Bugs
+that only manifest cross-tab need to be reproduced manually until
+that lands. Good first-PR target for someone with Playwright
+experience — design notes in [`docs/m10-11-state-sync.md`](./m10-11-state-sync.md).
+
+### Cliffside AI mesa recovery — *open level-design fix*
+Detailed in [AI navigation — Lagoon solid, Cliffside still rough](#ai-navigation--lagoon-solid-cliffside-still-rough)
+below: AI bikes that fall off the Cliffside mesa mid-corner can't
+get back up. The decision is to widen the mesa / add side ramps in
+Blender rather than write code-level recovery logic. Tracked here
+so external playtesters / contributors don't file it as a regression.
+
 ### Pitch + roll coupling — *resolved (M9.4)*
 M9.3 was insufficient: pitching while turning produced wild roll oscillations (probe showed ±60° pitch, ±70° roll). Root cause was the roll PD reading `bikeRight.y` and false-positiving on the geometric tilt that yaw-while-pitched produces; the corrective torque pumped real angular velocity into the roll axis. M9.4 replaces the soft PD with a kinematic roll lock: at the top of `hoverSystem`, decompose the bike's rotation into YXZ Euler (yaw → pitch → roll), force roll = 0, recompose, and strip out the `bikeFwd` component of angvel. Roll velocity can no longer accumulate from misaligned-axis side-effects. Yaw + pitch behave as before.
 

@@ -25,9 +25,9 @@ write to Three.js objects, never the other way around.
   (`tools/blender/hoverbike_addon.py`) is the user-facing entry point;
   `build_*.py` files regenerate `.blend`s from JSON specs.
 
-## Blender connector — INSTALLED AND READY
+## Blender connector — optional
 
-A Blender MCP connection is configured and live. This means Claude can:
+If a Blender MCP connection is configured for the session, Claude can:
 
 - Read the active `.blend` file's contents (objects, modifiers, materials,
   collections, custom properties) without exporting.
@@ -37,20 +37,22 @@ A Blender MCP connection is configured and live. This means Claude can:
   render thumbnails.
 - Search the bundled Blender Python API reference and user manual.
 
-Components:
+Setup (optional — code-only work doesn't need it):
 
-- **Cowork-side MCP server** — installed as a Cowork extension. Source:
-  [projects.blender.org/lab/blender_mcp](https://projects.blender.org/lab/blender_mcp).
-- **In-Blender extension** — built from the same repo's `addon/blender_mcp_addon/`,
-  installed as the user-default extension named "MCP". Listens on `localhost:9876`,
-  auto-starts on Blender launch. `BLENDER_PATH` should point at
-  `C:\Program Files\Blender Foundation\Blender 5.1\blender.exe` for the `_for_cli`
-  tools.
+- **Server side** — [projects.blender.org/lab/blender_mcp](https://projects.blender.org/lab/blender_mcp).
+- **In-Blender extension** — built from the same repo's `addon/blender_mcp_addon/`.
+  Listens on `localhost:9876`, auto-starts on Blender launch.
+- **`BLENDER_EXE`** should point at the Blender 5.1 executable for the `_for_cli`
+  tools and `pnpm gen:*` scripts. Examples:
+  - Linux: `/opt/blender/blender`
+  - macOS: `/Applications/Blender.app/Contents/MacOS/Blender`
+  - Windows: `C:\Program Files\Blender Foundation\Blender 5.1\blender.exe`
 
 If Claude can't reach Blender, the usual cause is Blender not running, or the
 addon's TCP server having been stopped from its preferences panel.
 
-## Wishlist for Blender-side automation
+## Blender automation roadmap
 
-Things Matt wants Claude to build on top of the connector: see
-[docs/blender-wishlist.md](docs/blender-wishlist.md).
+Open items for Blender-side automation live in
+[docs/blender-wishlist.md](docs/blender-wishlist.md). These are good
+contribution targets.
