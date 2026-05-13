@@ -233,6 +233,131 @@ gameplay placement (gates, pickup spawns) without re-opening Blender,
 switch into edit mode: `?track=my-track&edit=1` (or click **Open…**
 in the editor panel).
 
+## Authoring tools (Hoverbike sidebar)
+
+Press **N** in the 3D viewport, switch to the **Hoverbike** tab. The
+panel re-renders based on whether the `.blend` lives in `tracks-src/`
+(track mode) or `bikes-src/` (bike mode). This section covers the track
+authoring tools, top to bottom.
+
+### Spline tools
+
+- **Snap Spline to Terrain** raycasts each control point of
+  `ai_spline_main` straight down onto the scene, then lifts each
+  hit by *Hover (m)*. Pairs with the live gate preview — after a
+  terrain edit, snap the spline back onto the new surface and the
+  gates follow. Preview collections (`_hoverbike_*_preview`) are
+  hidden during the cast so gizmos can't catch the ray.
+
+### Road tool
+
+Draw a curve, build a drivable road slab that conforms the terrain
+to its altitude profile and decorates the edges with F1-style curbs.
+
+1. **Add Road Curve** drops a 4-point Bezier named `road_curve_main`
+   at the scene origin. Tab into edit mode to shape it.
+2. Set the dimensions:
+   - *Width* (default 8 m) — total road surface width.
+   - *Lift* (0.15 m) — small Z offset so the road reads above terrain.
+   - *Slab (m)* (0.6 m) — extrusion depth. Set to 0 for the legacy
+     paper-thin ribbon; any positive value gives a real volumetric
+     slab so the silhouette reads as road and the underside is well
+     below the conformed terrain.
+   - *Blend* radius (6 m) — outer falloff band; terrain smoothsteps
+     back to natural beyond the road's footprint.
+   - *Samples* (64) — arc-length sample count.
+   - *Smooth* passes (4) — 1-2-1 binomial smoothing on the height
+     profile so the road doesn't follow every terrain bump.
+3. F1 curbs (optional — set *Curb w* = 0 to disable):
+   - *Curb w* (0.6 m) and *Curb h* (0.12 m) — width and rise of each
+     side strip.
+   - *Stripe (m)* (2.0) — length of each red / white stripe along the
+     road.
+4. **Build Road** samples the curve, conforms the terrain to the
+   sampled altitude in a `width/2 + curb_width + blend_radius` band,
+   then emits the road mesh tagged `kind=track` with materials:
+   - `mat_track_road` (asphalt, slot 0)
+   - `mat_track_curb_white` (slot 1)
+   - `mat_track_curb_red` (slot 2)
+
+**Active modifiers on terrain.** Geometry-Nodes graphs (the
+`HV_Island` template, Displace, Subsurf, etc.) override raw vertex
+edits and can stack their displacement on top of the road tool's
+flatten, producing terrain spikes through the road. The operator
+errors out by default; toggle *Apply modifiers first* in the redo
+panel to bake the modifier into the source mesh before deforming.
+This is one-way — you lose parametric tunability of the procedural
+template once it's applied, so save the .blend first.
+
+### Ramp tool
+
+Drop a parametric stunt-ramp wedge at the 3D cursor, tagged
+`kind=track` with `mat_track_ramp`. Curved (smoothstep) or linear
+kicker profile. The mesh has a 30 cm foundation depth so the wedge
+is always a closed solid — no degenerate top/bottom coplanar quads.
+
+To align the ramp to the road's tangent at placement, set the 3D
+cursor's rotation around Z before clicking **Add Ramp** (or move /
+rotate after placement with G / R). Each ramp gets a fresh
+`ramp_NN` name so repeated drops don't stomp prior ones.
+
+### Heightmap import
+
+Read a greyscale PNG/EXR and emit a subdivided plane whose verts are
+luminance-displaced. The output mesh `terrain_heightmap` is tagged
+`kind=track` and ships as collidable terrain at export. Configure
+*Size (m)*, *Subdiv*, *Δz (m)*, and *Base z* on the panel; the file
+picker remembers the last imported path. Re-import replaces the
+previous heightmap mesh idempotently.
+
+### Gate / racer / water previews
+
+These are render-disabled gizmo collections (`_hoverbike_*_preview`).
+They never reach the GLB export.
+
+- **Gate preview** instances the real `prop_gate_mesh` from
+  `tracks-src/props-library.blend` at every `gateSpacing` step along
+  `ai_spline_main`. Adjust *Spacing*, *Half-width*, *Height* on the
+  panel — the gates rebuild live as you scrub.
+- **Racer preview** drops a bike silhouette at `start_00` plus one per
+  AI slot loaded from `specs/grid-offsets.json` — same file the
+  runtime reads.
+- **Water preview** builds a wave-displaced plane around
+  `water_volume_main` using the same Gerstner waves the runtime uses.
+
+### Ghost lap + chase cam
+
+**Rebuild Ghost Lap** binds a bike silhouette to `ai_spline_main` via
+a Follow Path constraint, attaches a chase camera with Track-To, and
+sets the scene's frame range to one full lap at *Target speed (m/s)*.
+Hit Spacebar in the viewport to fly the lap; the chase cam becomes
+the scene's active camera so view-from-camera frames the bike.
+
+### Auto-rebuild
+
+A persistent `depsgraph_update_post` handler watches `ai_spline_main`,
+`start_00`, and `water_volume_main`. Edits to any of them schedule a
+debounced (~200 ms) rebuild of the matching preview collections, so
+the gates, turn-indicator chevrons, racer grid, and water plane
+follow source edits without manual rebuilds. The `update=` callbacks
+on the spacing / curb / wave-time scene props go through the same
+scheduler, so scrub interactions are also live.
+
+### Reload JSON & manifest sync
+
+- **Reload from JSON** pulls scalar fields from
+  `public/tracks/<id>.json` into the scene custom properties — gate
+  spacing, terrain shader, water knobs, and the `start_00` pose.
+  Runs automatically on `.blend` open (via the addon's `load_post`
+  handler) so the edit-in-app → reopen-in-Blender loop is seamless.
+- **Export Track to Game** rewrites the JSON merging Blender-owned
+  fields (`environmentGlb`, `water`, `terrainShader`, `aiSplines`,
+  `gateSpacing`, `start`) onto whatever the editor last saved, and
+  upserts the track's entry into `public/assets/manifest.json` so
+  the in-game level picker surfaces the track. Existing manifest
+  entries for other tracks and any hand-edited `displayName` are
+  preserved.
+
 ## Object kinds reference
 
 | Kind | Naming pattern | Required Blender type | Required `extras` |
