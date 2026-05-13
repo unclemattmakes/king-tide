@@ -27,7 +27,7 @@ export interface EditModeWiringOpts {
   propAssets: PropManifestEntry[] | undefined
   sky: SkySystem
   horizonRing: HorizonRing
-  waterMesh: { tick: () => void }
+  waterMesh: { tick: () => void; mesh: THREE.Object3D }
   waveField: WaveFieldState
   backend: string
   backendEl: HTMLElement | null
@@ -55,6 +55,10 @@ export function startEditMode(opts: EditModeWiringOpts): void {
     domEl: appEl,
     track,
     ...(propAssets ? { propAssets } : {}),
+    setWaterHeight: (h) => {
+      waveField.baseY = h
+      waterMesh.mesh.position.y = h
+    },
   })
   let editLastT = performance.now()
   function editFrame(): void {

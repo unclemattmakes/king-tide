@@ -84,6 +84,10 @@ export type EditorOptions = {
    *  dropdown that drops `{ type: 'asset', assetId }` props the runtime
    *  later loads from `public/assets/props/<assetId>.glb`. */
   propAssets?: PropManifestEntry[]
+  /** Live-shifts the rendered sea level when the panel's water-height
+   *  slider drags. Optional so headless / test wiring still works.
+   *  Wave amplitudes oscillate around this Y. */
+  setWaterHeight?: (heightM: number) => void
 }
 
 export type EditorHandle = {
@@ -135,6 +139,11 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   // Manifest-driven asset props for the +Asset placer.
   const propAssets: PropManifestEntry[] = opts.propAssets ?? []
   let pickedAssetId: string = propAssets[0]?.id ?? ''
+  // Water-height slider: coalesce undo across one drag session so
+  // Ctrl+Z reverts the whole adjustment rather than each ~1mm tick.
+  // Cleared whenever the user mouseups (next non-water interaction
+  // pushes its own snapshot).
+  let waterDragSnapshotted = false
 
   // ── Undo stack ──────────────────────────────────────────────────────────
   const undo = createUndoStack(draft, () => {
@@ -267,6 +276,27 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       },
       onNew: () => {
         promptNewTrackFlow({ currentTrackId: draft.id, confirmDiscard })
+      },
+      onWaterHeightCommit: () => {
+        waterDragSnapshotted = false
+      },
+      onWaterHeightChange: (h: number) => {
+        // The slider streams every tick — coalesce undo by snapshotting
+        // once when the user *first* nudges the value this session and
+        // letting subsequent drags overwrite. Cheap heuristic: if the
+        // last undo entry already snapped at the current value, skip.
+        const current = draft.water?.height ?? 0
+        if (Math.abs(current - h) < 1e-4) return
+        if (!waterDragSnapshotted) {
+          undo.push()
+          waterDragSnapshotted = true
+        }
+        if (!draft.water) {
+          draft.water = { height: h, waveHeight: 1.0, waveFreq: 0.5 }
+        } else {
+          draft.water.height = h
+        }
+        opts.setWaterHeight?.(h)
       },
       onAutoPlaceGates: () => {
         const main = draft.aiSplines.find((s) => s.id === 'main')

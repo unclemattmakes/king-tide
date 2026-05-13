@@ -96,6 +96,14 @@ export type EditorPanelCallbacks = {
    *  gate positions back into the draft. One-shot — after running, gates
    *  remain individually editable. */
   onAutoPlaceGates(): void
+  /** Live-edit the track's mean sea level (`track.water.height`). The
+   *  panel sends every slider tick; the receiver decides whether to
+   *  push an undo entry or coalesce. */
+  onWaterHeightChange(heightM: number): void
+  /** Fires on slider mouseup (commit) so the receiver knows the drag
+   *  session is over and the next change should push a fresh undo
+   *  snapshot. */
+  onWaterHeightCommit(): void
   /** Whether the currently-selected entity supports a given gizmo mode.
    *  Used to disable / grey out mode buttons that wouldn't apply. */
   selSupportsMode(m: GizmoMode): boolean
@@ -207,6 +215,7 @@ export function createEditorPanel(opts: {
          <div style="color:#9bb">Spline tools</div>
          <button type="button" id="ed-auto-gates" style="background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit;text-align:left">Auto-place gates from spline</button>
        </div>`,
+      trackSettingsHtml(),
       `<div id="ed-outliner" style="border-top:1px solid #2a3a4a;padding-top:8px;flex:1;overflow-y:auto;min-height:140px">
          ${outlinerHtml()}
        </div>`,
@@ -224,6 +233,18 @@ export function createEditorPanel(opts: {
         Delete = remove · Ctrl+Z = undo · Ctrl+S = save
        </div>`,
     ].join('')
+  }
+
+  function trackSettingsHtml(): string {
+    const h = draft.water?.height ?? 0
+    return `<div style="display:flex;flex-direction:column;gap:4px">
+        <div style="color:#9bb">Track settings</div>
+        <label style="display:flex;align-items:center;gap:6px">
+          <span style="width:70px">Sea level</span>
+          <input id="ed-water-height" type="range" min="-50" max="50" step="0.1" value="${h}" style="flex:1" />
+          <span id="ed-water-height-val" style="width:48px;text-align:right;color:#cdf">${h.toFixed(1)}m</span>
+        </label>
+      </div>`
   }
 
   function placeBtn(t: PlaceTool, label: string): string {
@@ -433,6 +454,20 @@ export function createEditorPanel(opts: {
     panel.querySelector('#ed-open')?.addEventListener('click', callbacks.onOpen)
     panel.querySelector('#ed-new')?.addEventListener('click', callbacks.onNew)
     panel.querySelector('#ed-auto-gates')?.addEventListener('click', callbacks.onAutoPlaceGates)
+    const waterSlider = panel.querySelector<HTMLInputElement>('#ed-water-height')
+    if (waterSlider) {
+      const label = panel.querySelector<HTMLElement>('#ed-water-height-val')
+      waterSlider.addEventListener('input', () => {
+        const v = parseFloat(waterSlider.value)
+        if (Number.isFinite(v)) {
+          if (label) label.textContent = `${v.toFixed(1)}m`
+          callbacks.onWaterHeightChange(v)
+        }
+      })
+      waterSlider.addEventListener('change', () => {
+        callbacks.onWaterHeightCommit()
+      })
+    }
   }
 
   return { render, renderLight, setStatus, dispose }

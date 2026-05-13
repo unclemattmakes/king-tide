@@ -232,6 +232,14 @@ async function boot() {
   setLoadingMessage(`Loading track${trackId ? ` · ${trackId}` : '…'}`)
   const track = await loadTrackForBoot({ trackId, scene, phys, editMode })
 
+  // Track-driven sea level: shift both the water mesh and the buoyancy
+  // sampler so the surface reads as a custom Y for tracks that want
+  // mountain lakes, sunken arenas, etc. `track.water.height` defaults
+  // to 0 when absent, so legacy tracks behave exactly as before.
+  const waterHeight = track.water?.height ?? 0
+  waveField.baseY = waterHeight
+  waterMesh.mesh.position.y = waterHeight
+
   // Sky / atmosphere system. Owns the dome mesh, fog + hemi-light palette,
   // and the PMREM env-map. The sun position and env-map are picked once
   // here (driven by `track.sky.timeOfDay`) and frozen for the whole race —
