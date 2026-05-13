@@ -2254,13 +2254,14 @@ def _build_road_strip_mesh(
     *,
     width: float,
     lift: float,
+    thickness: float = 0.0,
     curb_width: float = 0.0,
     curb_height: float = 0.0,
     curb_stripe_length: float = 2.0,
 ) -> bpy.types.Mesh:
-    """Build a road-strip mesh from the (x, y, z, tx, ty) samples.
+    """Build a road-slab mesh from the (x, y, z, tx, ty) samples.
 
-    Layout per sample (4 or 6 vertex columns, left-to-right):
+    Top-face column layout (left to right):
 
         curb_L_outer ─ curb_L_inner = road_L ──── road_R = curb_R_inner ─ curb_R_outer
                        (when curb_width > 0)               (when curb_width > 0)
@@ -2269,21 +2270,28 @@ def _build_road_strip_mesh(
     each curb stripe (one quad along the road's tangent) gets a
     `material_index` of 1 (white) or 2 (red) on an alternating
     `curb_stripe_length`-metre cadence, producing F1-style serrated
-    rumble strips. With `curb_width = 0` the function degrades to the
-    original 2-column flat strip.
+    rumble strips.
+
+    When `thickness > 0` the strip is extruded downward into a slab —
+    two extra outer-edge verts per sample at `z_road - thickness`, plus
+    side / bottom / end-cap faces. The thicker silhouette reads as a
+    real banked road (vs. a paper ribbon) and pushes the road's
+    underside well below the conformed terrain so Z-fighting along the
+    flattened band is gone.
     """
     if ROAD_MESH_NAME in bpy.data.meshes:
         bpy.data.meshes.remove(bpy.data.meshes[ROAD_MESH_NAME])
     me = bpy.data.meshes.new(ROAD_MESH_NAME)
     half_w = width / 2.0
     has_curbs = curb_width > 0 and curb_height >= 0
+    has_thickness = thickness > 0
+    outer_half = half_w + (curb_width if has_curbs else 0.0)
 
-    # Per-sample vertex columns. When curbs are off: 2 cols.
-    # When on: 4 cols (curb-outer-left, road-left/curb-inner-left,
-    # road-right/curb-inner-right, curb-outer-right). The road and
-    # inner-curb columns share a vertex so the road-edge → curb seam
-    # is welded — no gap, no z-fighting.
-    cols_per_sample = 4 if has_curbs else 2
+    # Per-sample TOP cols: 2 (no curb) or 4 (with curb).
+    top_cols = 4 if has_curbs else 2
+    # Per-sample BOTTOM cols when thickness > 0: 2 at the outer edges.
+    bot_cols = 2 if has_thickness else 0
+    cols_per_sample = top_cols + bot_cols
 
     verts: list[tuple[float, float, float]] = []
     for s in samples:
@@ -2292,53 +2300,69 @@ def _build_road_strip_mesh(
         z_road = s["z"] + lift
         if has_curbs:
             z_curb = z_road + curb_height
-            # curb-outer-left
-            verts.append((
-                s["x"] - nx * (half_w + curb_width),
-                s["y"] - ny * (half_w + curb_width),
-                z_curb,
-            ))
-            # road-left (= curb-inner-left)
-            verts.append((s["x"] - nx * half_w, s["y"] - ny * half_w, z_road))
-            # road-right (= curb-inner-right)
-            verts.append((s["x"] + nx * half_w, s["y"] + ny * half_w, z_road))
-            # curb-outer-right
-            verts.append((
-                s["x"] + nx * (half_w + curb_width),
-                s["y"] + ny * (half_w + curb_width),
-                z_curb,
-            ))
+            verts.append((s["x"] - nx * outer_half, s["y"] - ny * outer_half, z_curb))
+            verts.append((s["x"] - nx * half_w,    s["y"] - ny * half_w,    z_road))
+            verts.append((s["x"] + nx * half_w,    s["y"] + ny * half_w,    z_road))
+            verts.append((s["x"] + nx * outer_half, s["y"] + ny * outer_half, z_curb))
         else:
-            verts.append((s["x"] - nx * half_w, s["y"] - ny * half_w, z_road))
-            verts.append((s["x"] + nx * half_w, s["y"] + ny * half_w, z_road))
+            verts.append((s["x"] - nx * outer_half, s["y"] - ny * outer_half, z_road))
+            verts.append((s["x"] + nx * outer_half, s["y"] + ny * outer_half, z_road))
+        if has_thickness:
+            z_bot = z_road - thickness
+            verts.append((s["x"] - nx * outer_half, s["y"] - ny * outer_half, z_bot))
+            verts.append((s["x"] + nx * outer_half, s["y"] + ny * outer_half, z_bot))
 
     faces: list[tuple[int, int, int, int]] = []
-    # Material slots: 0 = road, 1 = curb-white, 2 = curb-red.
-    # Track arc length cumulatively so stripe colour alternates by
-    # distance along the road, not by segment count (segments aren't
-    # equal-length when smoothing varies).
-    arc = 0.0
     face_mats: list[int] = []
+
+    # Indices within a sample's column block. The bottom row sits after
+    # whatever top cols are present, so its slot indices are fixed
+    # relative to `top_cols`.
+    L_OUT_TOP = 0
+    R_OUT_TOP = top_cols - 1  # last top col is always the right outer edge
+    L_BOT = top_cols          # first bottom col
+    R_BOT = top_cols + 1
+
+    arc = 0.0
     for i in range(len(samples) - 1):
         a = i * cols_per_sample
         b = (i + 1) * cols_per_sample
-        # Segment length in the horizontal plane.
         seg_len = math.hypot(
             samples[i + 1]["x"] - samples[i]["x"],
             samples[i + 1]["y"] - samples[i]["y"],
         )
         stripe_idx = int(arc // max(curb_stripe_length, 0.01)) if has_curbs else 0
-        curb_mat = 1 + (stripe_idx % 2)  # toggles 1 / 2
+        curb_mat = 1 + (stripe_idx % 2)
         if has_curbs:
-            # Left curb quad (cols 0 ↔ 1) — wind CCW for +Z normal.
             faces.append((a + 0, b + 0, b + 1, a + 1)); face_mats.append(curb_mat)
-            # Road quad (cols 1 ↔ 2).
             faces.append((a + 1, b + 1, b + 2, a + 2)); face_mats.append(0)
-            # Right curb quad (cols 2 ↔ 3).
             faces.append((a + 2, b + 2, b + 3, a + 3)); face_mats.append(curb_mat)
         else:
             faces.append((a + 0, b + 0, b + 1, a + 1)); face_mats.append(0)
+        if has_thickness:
+            # Left side: outer-top → bottom-left, span sample i→i+1.
+            faces.append((a + L_OUT_TOP, a + L_BOT, b + L_BOT, b + L_OUT_TOP))
+            face_mats.append(0)
+            # Right side: bottom-right → outer-top.
+            faces.append((a + R_OUT_TOP, b + R_OUT_TOP, b + R_BOT, a + R_BOT))
+            face_mats.append(0)
+            # Bottom face — normal faces -Z (CCW seen from below).
+            faces.append((a + L_BOT, a + R_BOT, b + R_BOT, b + L_BOT))
+            face_mats.append(0)
         arc += seg_len
+
+    # End caps so the slab reads as solid from the front/back. Skipped
+    # when thickness == 0 (the ribbon doesn't need them).
+    if has_thickness and len(samples) >= 2:
+        first = 0
+        last = (len(samples) - 1) * cols_per_sample
+        # Front cap at sample 0: outer-L-top → outer-R-top → bottom-R → bottom-L.
+        # Winding so the normal points OPPOSITE the road tangent.
+        faces.append((first + L_OUT_TOP, first + L_BOT, first + R_BOT, first + R_OUT_TOP))
+        face_mats.append(0)
+        # Back cap at last sample: reversed winding.
+        faces.append((last + L_OUT_TOP, last + R_OUT_TOP, last + R_BOT, last + L_BOT))
+        face_mats.append(0)
 
     me.from_pydata(verts, [], faces)
     me.update()
@@ -2588,6 +2612,7 @@ class HOVERBIKE_OT_build_road(Operator):
         curb_width = float(scene.hoverbike_road_curb_width)
         curb_height = float(scene.hoverbike_road_curb_height)
         curb_stripe = float(scene.hoverbike_road_curb_stripe_length)
+        thickness = float(scene.hoverbike_road_thickness)
 
         # Deform terrain first, then build the road strip — that way the
         # road's Z (sampled before deformation) sits on the *original*
@@ -2609,6 +2634,7 @@ class HOVERBIKE_OT_build_road(Operator):
             samples,
             width=width,
             lift=lift,
+            thickness=thickness,
             curb_width=curb_width,
             curb_height=curb_height,
             curb_stripe_length=curb_stripe,
@@ -2664,6 +2690,10 @@ def _ramp_height_profile(y: float, *, length: float, approach: float, peak: floa
     return peak * t
 
 
+RAMP_FOUNDATION_DEPTH = 0.3  # metres — bottom slab thickness so the
+# wedge always has volume (top and bottom never coincide, no z-fighting)
+
+
 def _build_ramp_mesh(
     name: str,
     *,
@@ -2674,64 +2704,75 @@ def _build_ramp_mesh(
     segments: int,
     curved: bool,
 ) -> bpy.types.Mesh:
-    """Build a wedge-shaped ramp mesh in local coords (length along +Y,
-    width along ±X, height along +Z). Z-up, matches Blender world axes."""
+    """Build a solid wedge in local coords. Length along +Y, width
+    along ±X, height along +Z. The bottom face sits `RAMP_FOUNDATION_DEPTH`
+    below the local origin so the run-up at y < approach still has
+    real volume — without it the top and bottom faces collapse to
+    a single plane and z-fight against the road / terrain underneath.
+
+    Face winding is consistent: top normals +Z (drivable surface),
+    bottom normals -Z, sides outward, so backface culling and normal
+    smoothing read correctly."""
     if name in bpy.data.meshes:
         bpy.data.meshes.remove(bpy.data.meshes[name])
     me = bpy.data.meshes.new(name)
     half_w = width / 2.0
     n = max(2, int(segments))
+    bot_z = -RAMP_FOUNDATION_DEPTH
 
     verts: list[tuple[float, float, float]] = []
-    # Bottom verts (row by row along +Y).
+    # Bottom row first (row stride 2). i goes from 0 to n inclusive.
     for i in range(n + 1):
         y = (i / n) * length
-        verts.append((-half_w, y, 0.0))
-        verts.append(( half_w, y, 0.0))
+        verts.append((-half_w, y, bot_z))
+        verts.append(( half_w, y, bot_z))
     top_start = len(verts)
-    # Top verts (same XY columns, elevated by the height profile).
+    # Top row: height profile, with a small floor so the run-up isn't
+    # coincident with the bottom (≥ 1mm above the local origin keeps
+    # the wedge non-degenerate even for approach == length).
     for i in range(n + 1):
         y = (i / n) * length
         z = _ramp_height_profile(
             y, length=length, approach=approach, peak=peak_height, curved=curved
         )
-        verts.append((-half_w, y, z))
-        verts.append(( half_w, y, z))
+        verts.append((-half_w, y,  max(z, 0.0)))
+        verts.append(( half_w, y,  max(z, 0.0)))
 
     faces: list[tuple[int, ...]] = []
-    # Bottom face (one big n-gon? simpler as a strip of quads CCW).
-    for i in range(n):
-        a = i * 2
-        # Reverse winding so the normal faces -Z.
-        faces.append((a, a + 1, a + 3, a + 2))
     # Top (drivable surface) — winding so normal faces +Z.
+    # For verts a=(-hw,y0,z), b=(hw,y0,z), c=(-hw,y1,z'), d=(hw,y1,z'):
+    # (a, b, d, c) winds CCW from above → +Z normal.
     for i in range(n):
         a = top_start + i * 2
+        faces.append((a, a + 1, a + 3, a + 2))
+    # Bottom — same vertex topology but reversed winding for -Z normal.
+    for i in range(n):
+        a = i * 2
         faces.append((a, a + 2, a + 3, a + 1))
     # Left side (x = -half_w): rows i and i+1, top + bottom.
+    # Verts: bot_i (-hw,y0,bot), top_i (-hw,y0,top), top_{i+1} (-hw,y1,top'),
+    # bot_{i+1} (-hw,y1,bot). Looking from -X (outside), CCW winding
+    # gives -X normal.
     for i in range(n):
         bot_a = i * 2
         bot_b = bot_a + 2
         top_a = top_start + i * 2
         top_b = top_a + 2
         faces.append((bot_a, top_a, top_b, bot_b))
-    # Right side (x = +half_w).
+    # Right side (x = +half_w). Reverse winding so normal faces +X.
     for i in range(n):
         bot_a = i * 2 + 1
         bot_b = bot_a + 2
         top_a = top_start + i * 2 + 1
         top_b = top_a + 2
         faces.append((bot_a, bot_b, top_b, top_a))
-    # End caps. Back (y=0): bottom verts 0/1 and top verts at top_start/+1.
-    # Skip if top verts coincide with bottom (z=0 at y=0 always — degenerate quad).
-    if peak_height > 0 and approach < length:
-        # Front cap at y=length: last 4 verts.
-        last_bot = n * 2
-        last_top = top_start + n * 2
-        faces.append((last_bot, last_top, last_top + 1, last_bot + 1))
-    # Back cap (y=0) — degenerate at z=0; only emit if approach > 0 and
-    # we want a visible vertical face. With z=0 at i=0 the back is
-    # naturally flush with the ground, so skip.
+    # Back cap at y = 0 (verts 0, 1, top_start, top_start+1).
+    # Looking from -Y, CCW: (1, 0, top_start, top_start+1).
+    faces.append((1, 0, top_start, top_start + 1))
+    # Front cap at y = length (last 4 verts).
+    last_bot = n * 2
+    last_top = top_start + n * 2
+    faces.append((last_bot, last_bot + 1, last_top + 1, last_top))
 
     me.from_pydata(verts, [], faces)
     me.update()
@@ -3817,7 +3858,9 @@ class HOVERBIKE_PT_panel(Panel):
         row = road_box.row(align=True)
         row.prop(context.scene, "hoverbike_road_blend_radius", text="Blend")
         row.prop(context.scene, "hoverbike_road_samples", text="Samples")
-        road_box.prop(context.scene, "hoverbike_road_smooth_passes", text="Smooth passes")
+        row = road_box.row(align=True)
+        row.prop(context.scene, "hoverbike_road_smooth_passes", text="Smooth")
+        row.prop(context.scene, "hoverbike_road_thickness", text="Slab (m)")
         road_box.label(text="F1 curbs:", icon="SEQ_STRIP_DUPLICATE")
         row = road_box.row(align=True)
         row.prop(context.scene, "hoverbike_road_curb_width", text="Curb w")
@@ -4241,6 +4284,11 @@ def register() -> None:
         description="Length of each red/white stripe along the road. Shorter = busier rumble.",
         default=2.0, min=0.2, max=20.0, precision=2,
     )
+    bpy.types.Scene.hoverbike_road_thickness = FloatProperty(
+        name="Slab thickness (m)",
+        description="Vertical extrusion of the road into a solid slab. 0 keeps the legacy paper-thin ribbon.",
+        default=0.6, min=0.0, max=10.0, precision=2,
+    )
 
     # Ramp-tool settings.
     bpy.types.Scene.hoverbike_ramp_length = FloatProperty(
@@ -4338,7 +4386,7 @@ def unregister() -> None:
         "hoverbike_road_blend_radius", "hoverbike_road_samples",
         "hoverbike_road_smooth_passes",
         "hoverbike_road_curb_width", "hoverbike_road_curb_height",
-        "hoverbike_road_curb_stripe_length",
+        "hoverbike_road_curb_stripe_length", "hoverbike_road_thickness",
         "hoverbike_ramp_length", "hoverbike_ramp_width",
         "hoverbike_ramp_height", "hoverbike_ramp_approach",
         "hoverbike_ramp_segments", "hoverbike_ramp_curved",
