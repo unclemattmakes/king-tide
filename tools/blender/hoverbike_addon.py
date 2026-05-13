@@ -38,6 +38,7 @@ files straight into the cloned repo.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from collections import defaultdict
@@ -45,7 +46,8 @@ from typing import Any
 
 import bpy
 import mathutils
-from bpy.props import BoolProperty, FloatProperty, IntProperty
+from bpy.app.handlers import persistent
+from bpy.props import BoolProperty, FloatProperty, IntProperty, StringProperty
 from bpy.types import Operator, Panel
 
 bl_info = {
@@ -392,9 +394,169 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         "pickupSpawns": pickups,
         "boostPads": [],
     }
+    # gateSpacing round-trips through the JSON so the in-app editor's
+    # "Auto-place gates from spline" and Blender's gate preview see the
+    # same number. The runtime falls back to DEFAULT_GATE_SPACING_M
+    # when the field is absent.
+    if hasattr(scn, "hoverbike_gate_spacing"):
+        body["gateSpacing"] = float(scn.hoverbike_gate_spacing)
     if shader_block is not None:
         body["terrainShader"] = shader_block
     return body
+
+
+# ── JSON ↔ Blender sync ────────────────────────────────────────────────────
+#
+# `derive_track_json` above goes Blender → JSON. The mirror direction
+# (JSON → Blender) lives here: pull scalar / parametric fields from
+# `public/tracks/<id>.json` into the scene's custom properties so the
+# .blend reflects whatever the in-app editor most recently saved.
+#
+# Scope is intentionally narrow — we only sync data that has an obvious
+# Blender home (scene properties or named-object customs). We do NOT
+# rebuild the AI spline from JSON anchors (the Blender NURBS is richer
+# than the sampled polyline), and we do NOT recreate cp_NN / pickup_*
+# empties (the hybrid pipeline retired them; the in-app editor owns
+# gate / pickup positions in the JSON).
+
+# Fields that are Blender-canonical at export time. Whatever the .blend
+# holds for these wins; existing JSON values are overwritten. Everything
+# *outside* this set (checkpoints, pickupSpawns, boostPads, props, sky,
+# lapsToFinish) is editor-canonical — we merge into the existing JSON
+# rather than clobber. See `_merge_export_json` for the exact merge.
+BLENDER_OWNED_JSON_KEYS = (
+    "id",
+    "name",
+    "environmentGlb",
+    "water",
+    "terrainShader",
+    "aiSplines",
+    "gateSpacing",
+    "start",
+)
+
+
+def _three_to_blender(pos: dict) -> tuple[float, float, float]:
+    """three.js (Y up, +Z forward) → Blender (Z up, +Y forward)."""
+    return (float(pos.get("x", 0.0)), -float(pos.get("z", 0.0)), float(pos.get("y", 0.0)))
+
+
+def reload_track_from_json(json_path: str) -> dict:
+    """Pull scalar / parametric track data from `json_path` into the
+    current Blender scene. Returns a summary dict of what was synced.
+
+    Behaviour:
+      - `gateSpacing` → `scene.hoverbike_gate_spacing` (triggers the
+        live gate-preview rebuild via the existing update callback).
+      - `terrainShader.*` → `scene.hoverbike_shader_*`.
+      - `water.{waveHeight, waveFreq}` → `water_volume_main` custom
+        props (the runtime reads these from extras at GLB-load time).
+      - `start.{position, yaw}` → `start_00` transform.
+
+    Silently skips fields that aren't present in the JSON or whose
+    Blender targets are absent."""
+    if not os.path.isfile(json_path):
+        raise RuntimeError(f"track JSON not found: {json_path}")
+    with open(json_path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+
+    scene = bpy.context.scene
+    if scene is None:
+        return {}
+
+    summary: dict[str, Any] = {"json": os.path.basename(json_path)}
+
+    gs = data.get("gateSpacing")
+    if isinstance(gs, (int, float)) and gs > 0 and hasattr(scene, "hoverbike_gate_spacing"):
+        scene.hoverbike_gate_spacing = float(gs)
+        summary["gateSpacing"] = float(gs)
+
+    ts = data.get("terrainShader")
+    if isinstance(ts, dict):
+        for key, prop in (
+            ("altMin", "hoverbike_shader_alt_min"),
+            ("altMax", "hoverbike_shader_alt_max"),
+            ("slopeStart", "hoverbike_shader_slope_start"),
+            ("slopeEnd", "hoverbike_shader_slope_end"),
+            ("variation", "hoverbike_shader_variation"),
+            ("wetBand", "hoverbike_shader_wet_band"),
+        ):
+            v = ts.get(key)
+            if isinstance(v, (int, float)) and hasattr(scene, prop):
+                setattr(scene, prop, float(v))
+        tint = ts.get("pathTint")
+        if (
+            isinstance(tint, list)
+            and len(tint) == 3
+            and all(isinstance(c, (int, float)) for c in tint)
+            and hasattr(scene, "hoverbike_shader_path_tint_r")
+        ):
+            scene.hoverbike_shader_path_tint_r = float(tint[0])
+            scene.hoverbike_shader_path_tint_g = float(tint[1])
+            scene.hoverbike_shader_path_tint_b = float(tint[2])
+        summary["terrainShader"] = True
+
+    water = data.get("water")
+    vol = bpy.data.objects.get("water_volume_main")
+    if isinstance(water, dict) and vol is not None:
+        wh = water.get("waveHeight")
+        if isinstance(wh, (int, float)):
+            vol["wave_height"] = float(wh)
+        wf = water.get("waveFreq")
+        if isinstance(wf, (int, float)):
+            vol["wave_freq"] = float(wf)
+        summary["water"] = True
+
+    start = data.get("start")
+    s0 = bpy.data.objects.get("start_00")
+    if isinstance(start, dict) and s0 is not None:
+        pos = start.get("position")
+        if isinstance(pos, dict):
+            s0.location = _three_to_blender(pos)
+        yaw = start.get("yaw")
+        if isinstance(yaw, (int, float)):
+            s0.rotation_euler = (0.0, 0.0, float(yaw))
+        summary["start"] = True
+
+    return summary
+
+
+def _merge_export_json(derived: dict, existing: dict | None) -> dict:
+    """Build the final track JSON for export. Blender wins on
+    parametric / geometry-shaped fields; the editor wins on hand-tuned
+    placement (checkpoints, pickups, boost pads, props, sky) unless the
+    .blend explicitly authors those via cp_NN / pickup_NN empties (the
+    legacy pipeline).
+
+    `existing` is the JSON that's already on disk, if any."""
+    if not existing:
+        return dict(derived)
+    merged = dict(existing)
+    for key in BLENDER_OWNED_JSON_KEYS:
+        if key in derived:
+            merged[key] = derived[key]
+        elif key in merged and key not in derived:
+            # If derive_track_json deliberately omits a key (e.g. no
+            # terrainShader scene props) we keep whatever the JSON had.
+            pass
+    # Hybrid-pipeline guard: if the .blend authors checkpoints /
+    # pickups locally (the legacy `cp_NN` / `pickup_*` empties), let
+    # them overwrite the JSON. Otherwise preserve the editor's saves.
+    has_cp_empties = any(
+        o.name.startswith("cp_") and is_object_visible(o) for o in bpy.data.objects
+    )
+    has_pickup_empties = any(
+        o.name.startswith("pickup") and is_object_visible(o) for o in bpy.data.objects
+    )
+    if has_cp_empties and "checkpoints" in derived:
+        merged["checkpoints"] = derived["checkpoints"]
+    if has_pickup_empties and "pickupSpawns" in derived:
+        merged["pickupSpawns"] = derived["pickupSpawns"]
+    # `lapsToFinish` defaults to 3 in `derive_track_json`; keep an
+    # existing JSON value if the editor set something else.
+    if "lapsToFinish" not in merged and "lapsToFinish" in derived:
+        merged["lapsToFinish"] = derived["lapsToFinish"]
+    return merged
 
 
 # ── Bike spec derivation ────────────────────────────────────────────────────
@@ -669,9 +831,49 @@ def _wipe_gate_preview() -> None:
         bpy.data.collections.remove(coll)
 
 
+PROP_GATE_MESH_NAME = "prop_gate_mesh"
+# Author dims of prop_gate_mesh in tracks-src/props-library.blend: posts at
+# ±14m along X, crossbar at z=6m. The mesh sits in Blender Z-up so we
+# fix-up rotate by Rx(-90°) before placing so author +Z (height) maps to
+# the gate gizmo's local +Y (world up) and author +Y (post thickness)
+# maps to local +Z (along the racing-line tangent). Same orientation the
+# wireframe `_gate_gizmo_mesh` uses, so the wireframe fallback below
+# reads identical to the real prop.
+PROP_GATE_AUTHOR_HALF_WIDTH = 14.0
+PROP_GATE_AUTHOR_HEIGHT = 6.0
+
+
+def _ensure_prop_gate_mesh_linked(repo_root: str | None) -> bpy.types.Mesh | None:
+    """Link `prop_gate_mesh` from `tracks-src/props-library.blend` so the
+    gate-preview gizmos can render as the real prop instead of the
+    wireframe placeholder. Idempotent — returns the existing local /
+    linked datablock if it's already present.
+
+    Returns None if the library file is missing — callers fall back to
+    `_gate_gizmo_mesh`. Linking (rather than appending) keeps a single
+    source of truth: re-running `tools/blender/seed_props_library.py`
+    re-flows every track .blend that's been opened since."""
+    me = bpy.data.meshes.get(PROP_GATE_MESH_NAME)
+    if me is not None:
+        return me
+    if not repo_root:
+        return None
+    library_path = os.path.join(repo_root, "tracks-src", "props-library.blend")
+    if not os.path.isfile(library_path):
+        return None
+    try:
+        with bpy.data.libraries.load(library_path, link=True) as (data_from, data_to):
+            if PROP_GATE_MESH_NAME in data_from.meshes:
+                data_to.meshes = [PROP_GATE_MESH_NAME]
+    except Exception:  # noqa: BLE001 — library load can throw a wide range
+        return None
+    return bpy.data.meshes.get(PROP_GATE_MESH_NAME)
+
+
 def _rebuild_gate_preview(scene, *, spacing: float, half_width: float, height: float) -> int:
     """Rebuild the gate-preview collection in the scene. Returns the
     number of gates placed."""
+    import math
     sp = bpy.data.objects.get("ai_spline_main")
     if sp is None or sp.type != "CURVE":
         raise RuntimeError(
@@ -681,17 +883,42 @@ def _rebuild_gate_preview(scene, *, spacing: float, half_width: float, height: f
     placements = _resample_by_arc_length(points, spacing, vertical_axis=2)
 
     _wipe_gate_preview()
-    me = _gate_gizmo_mesh(half_width, height)
     coll = bpy.data.collections.new(GATE_PREVIEW_COLLECTION)
     scene.collection.children.link(coll)
+
+    # Prefer the real prop_gate mesh if the props library is available;
+    # otherwise fall back to the wireframe gizmo so the preview still
+    # works in fresh .blends that don't yet see the library.
+    repo = find_repo_root(bpy.data.filepath) if bpy.data.filepath else None
+    prop_me = _ensure_prop_gate_mesh_linked(repo)
+    using_prop = prop_me is not None
+    if using_prop:
+        me = prop_me
+        # Rx(-π/2): author +Z (height) → local +Y (up), author +Y → local +Z.
+        fix_up = mathutils.Quaternion((1.0, 0.0, 0.0), -math.pi / 2.0)
+        scale = (
+            half_width / PROP_GATE_AUTHOR_HALF_WIDTH,
+            1.0,
+            height / PROP_GATE_AUTHOR_HEIGHT,
+        )
+    else:
+        me = _gate_gizmo_mesh(half_width, height)
+        fix_up = None
+        scale = (1.0, 1.0, 1.0)
 
     for i, p in enumerate(placements):
         obj = bpy.data.objects.new(f"gate_preview_{i:02d}", me)
         obj.location = p["position"]
         obj.rotation_mode = "QUATERNION"
-        obj.rotation_quaternion = _gate_rotation(p["tangent"])
+        if fix_up is not None:
+            obj.rotation_quaternion = _gate_rotation(p["tangent"]) @ fix_up
+        else:
+            obj.rotation_quaternion = _gate_rotation(p["tangent"])
+        obj.scale = scale
         obj.hide_render = True
-        obj.show_in_front = True
+        # Real prop reads in the regular shaded view; the wireframe gizmo
+        # needs X-ray to stay visible against terrain.
+        obj.show_in_front = not using_prop
         coll.objects.link(obj)
 
     return len(placements)
@@ -711,30 +938,37 @@ RACER_PREVIEW_MESH_AI = "_hoverbike_racer_ai"
 
 
 def _bike_silhouette_mesh(name: str, with_rider_hump: bool):
-    """Wireframe bike silhouette in local coords. Length along local +Z
-    (matches the project convention: +Z forward through the racing
-    direction). Width along ±X. Height along +Y."""
+    """Wireframe bike silhouette in Blender-native local coords: length
+    along local +Y (Blender forward), width along ±X, height along +Z.
+    A `start_NN` empty in Blender carries a pure rotation around world
+    Z (yaw), so inheriting that rotation rotates the bike correctly in
+    the horizontal plane while it remains upright.
+
+    Earlier versions of this mesh used the runtime (Y-up, +Z forward)
+    convention, which caused the preview to appear vertical — Blender's
+    +Z is up, so a length axis along +Z made the bike stand on its tail.
+    """
     if name in bpy.data.meshes:
         bpy.data.meshes.remove(bpy.data.meshes[name])
     me = bpy.data.meshes.new(name)
     # Bike body box: 2.5m long × 1m wide × 0.6m tall.
     half_w = 0.5
-    half_h_lo = 0.0
-    half_h_hi = 0.6
-    z_tail = -1.25
-    z_nose_base = 1.0
-    z_nose_tip = 1.5
+    z_lo = 0.0          # ground-skimming hover deck
+    z_hi = 0.6
+    y_tail = -1.25
+    y_nose_base = 1.0
+    y_nose_tip = 1.5
     verts = [
-        (-half_w, half_h_lo, z_tail),       # 0 bottom tail-L
-        ( half_w, half_h_lo, z_tail),       # 1 bottom tail-R
-        ( half_w, half_h_lo, z_nose_base),  # 2 bottom nose-base-R
-        (-half_w, half_h_lo, z_nose_base),  # 3 bottom nose-base-L
-        (-half_w, half_h_hi, z_tail),       # 4 top tail-L
-        ( half_w, half_h_hi, z_tail),       # 5 top tail-R
-        ( half_w, half_h_hi, z_nose_base),  # 6 top nose-base-R
-        (-half_w, half_h_hi, z_nose_base),  # 7 top nose-base-L
-        ( 0,      half_h_lo, z_nose_tip),   # 8 nose tip (bottom)
-        ( 0,      half_h_hi, z_nose_tip),   # 9 nose tip (top)
+        (-half_w, y_tail,      z_lo),  # 0 bottom tail-L
+        ( half_w, y_tail,      z_lo),  # 1 bottom tail-R
+        ( half_w, y_nose_base, z_lo),  # 2 bottom nose-base-R
+        (-half_w, y_nose_base, z_lo),  # 3 bottom nose-base-L
+        (-half_w, y_tail,      z_hi),  # 4 top tail-L
+        ( half_w, y_tail,      z_hi),  # 5 top tail-R
+        ( half_w, y_nose_base, z_hi),  # 6 top nose-base-R
+        (-half_w, y_nose_base, z_hi),  # 7 top nose-base-L
+        ( 0,      y_nose_tip,  z_lo),  # 8 nose tip (bottom)
+        ( 0,      y_nose_tip,  z_hi),  # 9 nose tip (top)
     ]
     edges = [
         # bottom rect
@@ -748,9 +982,9 @@ def _bike_silhouette_mesh(name: str, with_rider_hump: bool):
     ]
     if with_rider_hump:
         # A small hump above the body to mark the player visually.
-        hump_top = (0, half_h_hi + 0.55, 0)
-        hump_back = (0, half_h_hi + 0.1, -0.5)
-        hump_front = (0, half_h_hi + 0.1, 0.5)
+        hump_top = (0, 0,    z_hi + 0.55)
+        hump_back = (0, -0.5, z_hi + 0.1)
+        hump_front = (0, 0.5,  z_hi + 0.1)
         base_idx = len(verts)
         verts.extend([hump_top, hump_back, hump_front])
         edges.extend([
@@ -834,12 +1068,18 @@ def _rebuild_racer_preview(scene) -> dict:
     coll.objects.link(player)
 
     ai_objs = []
+    # `slot.dx` and `slot.dz` come from specs/grid-offsets.json in the
+    # runtime frame (three Y-up, +Z forward). Map to Blender (Z-up,
+    # +Y forward): three +X → Blender +X, three +Z → Blender −Y, three
+    # +Y → Blender +Z. The grid is purely horizontal so we leave the
+    # vertical Z alone — earlier versions added dz to Blender Z, stacking
+    # the AI bikes above/below the player instead of behind them.
     for i, slot in enumerate(slots):
         obj = bpy.data.objects.new(f"racer_preview_ai_{i:02d}", me_ai)
         obj.location = (
             start_loc.x + float(slot.get("dx", 0)),
-            start_loc.y,
-            start_loc.z + float(slot.get("dz", 0)),
+            start_loc.y - float(slot.get("dz", 0)),
+            start_loc.z,
         )
         obj.rotation_mode = "QUATERNION"
         obj.rotation_quaternion = start_rot
@@ -1323,6 +1563,1177 @@ class HOVERBIKE_OT_hide_turn_indicators(Operator):
         return {"FINISHED"}
 
 
+# ── Ghost lap overlay + chase cam ──────────────────────────────────────────
+#
+# Animate a bike silhouette along `ai_spline_main` at a constant target
+# speed and attach a chase camera so the author can hit Spacebar and see
+# the lap as the player will. The ghost lives in `_hoverbike_ghost_lap`
+# (a preview collection that the export scrubs out), uses a Follow Path
+# constraint so the curve's actual NURBS shape drives the motion, and
+# parents the camera to the ghost with a back-and-up offset.
+#
+# Why Follow Path over per-frame keyframes: the spline is already the
+# source of truth — Follow Path automatically interpolates between
+# control points and reuses Blender's existing path-animation evaluator.
+# Frame keyframes would diverge if the spline were re-edited mid-lap.
+
+GHOST_LAP_COLLECTION = "_hoverbike_ghost_lap_preview"
+GHOST_BIKE_NAME = "ghost_bike"
+GHOST_CAMERA_NAME = "ghost_chase_cam"
+GHOST_DEFAULT_SPEED_MS = 25.0  # constant target speed for the lap
+
+
+def _ghost_bike_mesh(name: str) -> bpy.types.Mesh:
+    """Wireframe bike for the ghost — same geometry as the racer
+    preview but slightly larger so it reads at viewport scale during
+    the fly-around."""
+    if name in bpy.data.meshes:
+        bpy.data.meshes.remove(bpy.data.meshes[name])
+    me = bpy.data.meshes.new(name)
+    half_w = 0.7
+    z_lo = 0.0
+    z_hi = 0.8
+    y_tail = -1.5
+    y_nose_base = 1.2
+    y_nose_tip = 1.8
+    verts = [
+        (-half_w, y_tail,      z_lo), ( half_w, y_tail,      z_lo),
+        ( half_w, y_nose_base, z_lo), (-half_w, y_nose_base, z_lo),
+        (-half_w, y_tail,      z_hi), ( half_w, y_tail,      z_hi),
+        ( half_w, y_nose_base, z_hi), (-half_w, y_nose_base, z_hi),
+        ( 0,      y_nose_tip,  z_lo), ( 0,      y_nose_tip,  z_hi),
+        (0, 0,    z_hi + 0.65),   # rider hump top
+        (0, -0.6, z_hi + 0.15),
+        (0,  0.6, z_hi + 0.15),
+    ]
+    edges = [
+        (0, 1), (1, 2), (2, 3), (3, 0),
+        (4, 5), (5, 6), (6, 7), (7, 4),
+        (0, 4), (1, 5), (2, 6), (3, 7),
+        (2, 8), (3, 8), (6, 9), (7, 9), (8, 9),
+        (10, 11), (10, 12), (11, 12),
+    ]
+    me.from_pydata(verts, edges, [])
+    me.update()
+    return me
+
+
+def _wipe_ghost_lap() -> None:
+    coll = bpy.data.collections.get(GHOST_LAP_COLLECTION)
+    if coll:
+        for obj in list(coll.objects):
+            # Drop the camera datablock too so the file doesn't accumulate
+            # stale orphan cameras after repeated rebuilds.
+            data = obj.data
+            bpy.data.objects.remove(obj, do_unlink=True)
+            if isinstance(data, (bpy.types.Camera, bpy.types.Mesh)) and data.users == 0:
+                if isinstance(data, bpy.types.Camera):
+                    bpy.data.cameras.remove(data)
+                else:
+                    bpy.data.meshes.remove(data)
+        bpy.data.collections.remove(coll)
+
+
+def _rebuild_ghost_lap(scene, *, target_speed_ms: float, fps: int) -> dict:
+    """Build (or rebuild) the ghost-lap collection: one bike silhouette
+    bound to `ai_spline_main` via Follow Path, plus a chase camera
+    parented behind it. Sets the scene frame range to one full lap at
+    constant speed.
+
+    Returns a summary for the operator report."""
+    sp = bpy.data.objects.get("ai_spline_main")
+    if sp is None or sp.type != "CURVE":
+        raise RuntimeError("Ghost lap needs an `ai_spline_main` curve in the scene.")
+    if not (target_speed_ms > 0):
+        raise RuntimeError("Target speed must be positive (m/s).")
+
+    arc = _spline_arc_length(sp)
+    if arc <= 0:
+        raise RuntimeError("`ai_spline_main` has zero arc length — can't animate.")
+
+    lap_seconds = arc / target_speed_ms
+    fps_safe = max(1, int(fps))
+    lap_frames = max(2, int(round(lap_seconds * fps_safe)))
+
+    _wipe_ghost_lap()
+    coll = bpy.data.collections.new(GHOST_LAP_COLLECTION)
+    scene.collection.children.link(coll)
+
+    # Configure the curve for animation. `use_path` enables the eval-
+    # time animation; we keyframe `eval_time` from 0 to `path_duration`
+    # over the scene frame range so the ghost sweeps the whole loop.
+    sp.data.use_path = True
+    sp.data.path_duration = lap_frames
+    # `use_path_follow` makes Follow Path rotate the bike to match the
+    # curve tangent — without it the bike would slide sideways.
+    sp.data.use_radius = False
+
+    # Ghost bike — empty mesh + Follow Path constraint.
+    bike_mesh = _ghost_bike_mesh(GHOST_BIKE_NAME + "_mesh")
+    bike = bpy.data.objects.new(GHOST_BIKE_NAME, bike_mesh)
+    bike.hide_render = True
+    coll.objects.link(bike)
+    follow = bike.constraints.new(type="FOLLOW_PATH")
+    follow.target = sp
+    # Blender's Follow Path forward / up convention: forward is the
+    # constraint's `forward_axis`. Our bike silhouette's length runs
+    # along +Y, so set forward = +Y, up = +Z.
+    follow.forward_axis = "FORWARD_Y"
+    follow.up_axis = "UP_Z"
+    follow.use_curve_follow = True
+
+    # Animate the curve's eval_time: 0 at frame 1 → path_duration at
+    # frame 1 + lap_frames. Linear interpolation = constant speed.
+    # Blender 4.4+ replaced the legacy `Action.fcurves.new(...)` API
+    # with the slot-aware `fcurve_ensure_for_datablock(...)` helper;
+    # we go through it so the action's layer + slot + channelbag are
+    # all created correctly.
+    sp.data.animation_data_clear()
+    sp.data.animation_data_create()
+    action = bpy.data.actions.new(name="hoverbike_ghost_lap")
+    sp.data.animation_data.action = action
+    fcu = action.fcurve_ensure_for_datablock(sp.data, "eval_time")
+    # Clear any prior keys (re-runs reuse the same fcurve via slot).
+    while len(fcu.keyframe_points) > 0:
+        fcu.keyframe_points.remove(fcu.keyframe_points[0])
+    kp0 = fcu.keyframe_points.insert(frame=1.0, value=0.0)
+    kp0.interpolation = "LINEAR"
+    kp1 = fcu.keyframe_points.insert(frame=1.0 + lap_frames, value=float(lap_frames))
+    kp1.interpolation = "LINEAR"
+
+    # Chase camera — parented to the ghost so it inherits the spline
+    # follow. Offset: 8m back along bike's -Y (tail), 3m up Z. A Track-To
+    # constraint keeps it pointed at the bike no matter how the spline
+    # twists, with the world-Z "up" guard so the horizon doesn't roll
+    # through banked corners.
+    cam_data = bpy.data.cameras.new(GHOST_CAMERA_NAME)
+    cam_data.lens = 28.0
+    cam_data.clip_start = 0.5
+    cam_data.clip_end = 2000.0
+    cam = bpy.data.objects.new(GHOST_CAMERA_NAME, cam_data)
+    cam.parent = bike
+    cam.location = (0.0, -8.0, 3.0)
+    coll.objects.link(cam)
+    track = cam.constraints.new(type="TRACK_TO")
+    track.target = bike
+    track.track_axis = "TRACK_NEGATIVE_Z"
+    track.up_axis = "UP_Y"
+
+    # Snap the scene's playback range to the ghost lap so Spacebar
+    # plays exactly one lap, looping at the end.
+    scene.frame_start = 1
+    scene.frame_end = 1 + lap_frames
+    scene.frame_set(1)
+    scene.render.fps = fps_safe
+
+    # Make the chase cam the active scene camera so View → Cameras →
+    # Active Camera frames the lap immediately.
+    scene.camera = cam
+
+    # Reveal the ghost-lap collection (clear stale exclusion).
+    lc = _find_layer_collection(
+        bpy.context.view_layer.layer_collection, GHOST_LAP_COLLECTION
+    )
+    if lc:
+        lc.exclude = False
+
+    return {
+        "arc_m": arc,
+        "lap_seconds": lap_seconds,
+        "lap_frames": lap_frames,
+        "fps": fps_safe,
+        "speed_ms": target_speed_ms,
+    }
+
+
+class HOVERBIKE_OT_rebuild_ghost_lap(Operator):
+    """Animate a bike silhouette along `ai_spline_main` at the configured
+    target speed and attach a chase camera. Hit Spacebar in the viewport
+    afterwards to play one lap; the chase camera is automatically set
+    as the scene's active camera."""
+
+    bl_idname = "hoverbike.rebuild_ghost_lap"
+    bl_label = "Rebuild Ghost Lap"
+    bl_description = (
+        "Set up a ghost-bike + chase cam that fly the AI spline at a "
+        "constant target speed"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scene = context.scene
+        try:
+            summary = _rebuild_ghost_lap(
+                scene,
+                target_speed_ms=float(scene.hoverbike_ghost_speed),
+                fps=int(scene.hoverbike_ghost_fps),
+            )
+        except RuntimeError as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        self.report(
+            {"INFO"},
+            f"Ghost lap: {summary['arc_m']:.0f}m @ {summary['speed_ms']:.0f}m/s = "
+            f"{summary['lap_seconds']:.1f}s ({summary['lap_frames']} frames @ {summary['fps']} fps)",
+        )
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_hide_ghost_lap(Operator):
+    """Hide the ghost-lap collection without deleting it. Re-run Rebuild
+    to bring it back, or *Wipe* to fully tear it down (the underlying
+    animation lingers on `ai_spline_main` either way)."""
+
+    bl_idname = "hoverbike.hide_ghost_lap"
+    bl_label = "Hide Ghost Lap"
+    bl_description = "Hide the ghost-lap preview without deleting it"
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        lc = _find_layer_collection(
+            context.view_layer.layer_collection, GHOST_LAP_COLLECTION
+        )
+        if lc:
+            lc.exclude = True
+        return {"FINISHED"}
+
+
+# ── Heightmap import ───────────────────────────────────────────────────────
+#
+# Read a greyscale PNG/EXR and emit a subdivided plane mesh whose
+# vertices are displaced by the image's luminance. Useful for
+# prototyping real-world coastlines or hand-painted terrain without
+# building a Geometry Nodes graph from scratch.
+
+HEIGHTMAP_TERRAIN_NAME = "terrain_heightmap"
+HEIGHTMAP_MATERIAL_NAME = "mat_terrain_heightmap"
+
+
+def _import_heightmap(
+    image_path: str,
+    *,
+    map_size_m: float,
+    height_scale_m: float,
+    base_elevation_m: float,
+    subdivisions: int,
+) -> dict:
+    """Load `image_path` as a Blender Image and build a subdivided plane
+    whose verts are displaced by the image's luminance. Returns a summary
+    dict for the operator report.
+
+    Sampling is point-bilinear: each vertex looks up four nearest pixels
+    and blends. Image alpha / colour channels are reduced to luminance
+    (R * 0.299 + G * 0.587 + B * 0.114). Out-of-bounds reads clamp to
+    the edge, so the plane's border matches the image border."""
+    import math
+    if not os.path.isfile(image_path):
+        raise RuntimeError(f"Heightmap file not found: {image_path}")
+    img = bpy.data.images.load(image_path, check_existing=False)
+    try:
+        img.colorspace_settings.name = "Non-Color"
+        width = img.size[0]
+        height = img.size[1]
+        if width < 2 or height < 2:
+            raise RuntimeError(
+                f"Heightmap is {width}×{height}px — needs ≥ 2 px each side."
+            )
+        channels = img.channels
+        # img.pixels is a flat float array (R, G, B, A, R, G, B, A, ...).
+        # Pull it into a Python list once — Blender's Image.pixels access
+        # is *very* slow when subscripted per-element.
+        pixels = list(img.pixels[:])
+
+        def sample(u: float, v: float) -> float:
+            x = max(0.0, min(width - 1.0001, u * (width - 1)))
+            y = max(0.0, min(height - 1.0001, v * (height - 1)))
+            x0 = int(x)
+            y0 = int(y)
+            tx = x - x0
+            ty = y - y0
+            x1 = min(x0 + 1, width - 1)
+            y1 = min(y0 + 1, height - 1)
+
+            def lum(px: int, py: int) -> float:
+                idx = (py * width + px) * channels
+                r = pixels[idx]
+                g = pixels[idx + 1] if channels >= 2 else r
+                b = pixels[idx + 2] if channels >= 3 else r
+                return 0.299 * r + 0.587 * g + 0.114 * b
+
+            l00 = lum(x0, y0)
+            l10 = lum(x1, y0)
+            l01 = lum(x0, y1)
+            l11 = lum(x1, y1)
+            top = l00 * (1.0 - tx) + l10 * tx
+            bot = l01 * (1.0 - tx) + l11 * tx
+            return top * (1.0 - ty) + bot * ty
+
+        # Wipe any prior heightmap-imported terrain (idempotent
+        # re-import).
+        old = bpy.data.objects.get(HEIGHTMAP_TERRAIN_NAME)
+        if old is not None:
+            old_data = old.data
+            bpy.data.objects.remove(old, do_unlink=True)
+            if isinstance(old_data, bpy.types.Mesh) and old_data.users == 0:
+                bpy.data.meshes.remove(old_data)
+
+        n = max(2, int(subdivisions))
+        step = map_size_m / n
+        half = map_size_m / 2.0
+        me = bpy.data.meshes.new(f"{HEIGHTMAP_TERRAIN_NAME}_mesh")
+        verts: list[tuple[float, float, float]] = []
+        for j in range(n + 1):
+            for i in range(n + 1):
+                u = i / n
+                v = j / n
+                x = -half + i * step
+                y = -half + j * step
+                z = base_elevation_m + sample(u, v) * height_scale_m
+                verts.append((x, y, z))
+        faces: list[tuple[int, int, int, int]] = []
+        for j in range(n):
+            for i in range(n):
+                a = j * (n + 1) + i
+                b = a + 1
+                c = a + (n + 1)
+                d = c + 1
+                faces.append((a, b, d, c))
+        me.from_pydata(verts, [], faces)
+        me.update()
+        for poly in me.polygons:
+            poly.use_smooth = True
+        # Tag the mesh as a terrain track surface so the export picks it
+        # up with kind="track" (collidable). Authors can override the
+        # material name; the gltf exporter doesn't care.
+        obj = bpy.data.objects.new(HEIGHTMAP_TERRAIN_NAME, me)
+        obj["kind"] = "track"
+        bpy.context.scene.collection.objects.link(obj)
+
+        # Bare placeholder material so the mesh shows up shaded; authors
+        # tune via the terrain-shader scene props on export.
+        if HEIGHTMAP_MATERIAL_NAME not in bpy.data.materials:
+            mat = bpy.data.materials.new(HEIGHTMAP_MATERIAL_NAME)
+            mat.use_nodes = True
+        me.materials.append(bpy.data.materials[HEIGHTMAP_MATERIAL_NAME])
+
+        return {
+            "image": os.path.basename(image_path),
+            "image_px": (width, height),
+            "vert_count": len(verts),
+            "face_count": len(faces),
+            "extent_m": map_size_m,
+            "height_m": height_scale_m,
+        }
+    finally:
+        # Keep the image loaded so re-imports are cheap. Image datablocks
+        # are tiny compared to terrain meshes.
+        pass
+
+
+class HOVERBIKE_OT_import_heightmap(Operator):
+    """Read a greyscale PNG/EXR and emit a subdivided plane whose verts
+    are luminance-displaced. Replaces any prior `terrain_heightmap`
+    object. The mesh ships out as `kind=track` so it's collidable at
+    runtime."""
+
+    bl_idname = "hoverbike.import_heightmap"
+    bl_label = "Import Heightmap"
+    bl_description = "Build a displaced-plane terrain from a greyscale PNG/EXR"
+    bl_options = {"REGISTER", "UNDO"}
+
+    filepath: StringProperty(  # type: ignore[valid-type]
+        name="Heightmap",
+        description="Path to a greyscale PNG/EXR. Luminance drives Z displacement.",
+        subtype="FILE_PATH",
+    )
+
+    def invoke(self, context, event):
+        # Pre-fill from the scene's last-used path so re-imports don't
+        # need to navigate from scratch each time.
+        last = getattr(context.scene, "hoverbike_heightmap_path", "") or ""
+        if last:
+            self.filepath = last
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        scene = context.scene
+        if not self.filepath:
+            self.report({"ERROR"}, "Pick a heightmap file first.")
+            return {"CANCELLED"}
+        try:
+            summary = _import_heightmap(
+                self.filepath,
+                map_size_m=float(scene.hoverbike_heightmap_size),
+                height_scale_m=float(scene.hoverbike_heightmap_height),
+                base_elevation_m=float(scene.hoverbike_heightmap_base),
+                subdivisions=int(scene.hoverbike_heightmap_subdivisions),
+            )
+        except RuntimeError as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        scene.hoverbike_heightmap_path = self.filepath
+        self.report(
+            {"INFO"},
+            f"Imported {summary['image']} ({summary['image_px'][0]}×{summary['image_px'][1]}px) → "
+            f"{summary['vert_count']} verts, {summary['extent_m']:.0f}×{summary['extent_m']:.0f}m, "
+            f"Δz={summary['height_m']:.1f}m",
+        )
+        return {"FINISHED"}
+
+
+# ── Snap spline to terrain ─────────────────────────────────────────────────
+#
+# Raycasts each ai_spline_main control point straight down and lifts it
+# by a configurable hover height. Drops the "edit terrain, then walk the
+# spline by hand to re-fit it" loop. Skips preview collections during the
+# cast so the gizmos themselves don't catch the ray.
+
+
+def _spline_iter_points(curve_obj: bpy.types.Object):
+    """Yield (spline, point, world_coord_setter) for every NURBS / poly /
+    bezier control point on a curve. The setter takes a world-space
+    Vector and writes the matrix-inverse local position back into the
+    point — so callers can move points without juggling matrix math."""
+    mw = curve_obj.matrix_world
+    mw_inv = mw.inverted_safe()
+    for spline in curve_obj.data.splines:
+        if spline.type == "BEZIER":
+            for bp in spline.bezier_points:
+                def make_setter(point=bp):
+                    def setter(world_co):
+                        # Shift the handles along with the control point
+                        # so the curve's local shape is preserved.
+                        old_local = point.co.copy()
+                        new_local = mw_inv @ world_co
+                        delta = new_local - old_local
+                        point.co = new_local
+                        point.handle_left = point.handle_left + delta
+                        point.handle_right = point.handle_right + delta
+                    return setter
+                world_co = mw @ bp.co
+                yield spline, bp, world_co, make_setter()
+        else:
+            # NURBS / POLY: spline.points carries 4D coords (x, y, z, w).
+            for sp_pt in spline.points:
+                def make_setter(point=sp_pt):
+                    def setter(world_co):
+                        local = mw_inv @ world_co
+                        point.co = (local.x, local.y, local.z, point.co[3])
+                    return setter
+                local_co = mathutils.Vector(
+                    (sp_pt.co[0], sp_pt.co[1], sp_pt.co[2])
+                )
+                world_co = mw @ local_co
+                yield spline, sp_pt, world_co, make_setter()
+
+
+# ── Road tool ──────────────────────────────────────────────────────────────
+#
+# The road tool turns a Bezier curve (`road_curve_main`) into two things
+# at once:
+#   1. A drivable road strip mesh tagged ``kind=track`` that sits a hair
+#      above the terrain along the curve. Material `mat_track_road` is
+#      a saturated asphalt grey so the road reads against the natural
+#      ground colours.
+#   2. A deformation pass that pushes terrain vertices within
+#      ``half_width + blend_radius`` of the road toward the road's local
+#      altitude profile, with a smoothstep falloff so the outer band
+#      eases off rather than producing a hard step.
+#
+# Caveat: this works on the *source* terrain mesh, not on a procedural
+# modifier output. If the terrain has an active Geometry Nodes modifier
+# (the `HV_Island` graph on the template), the modifier will overwrite
+# the deformation on next evaluation. Apply the modifier first
+# (Object → Apply → Visual Geometry to Mesh) before building a road on
+# a procedural island.
+
+ROAD_CURVE_NAME = "road_curve_main"
+ROAD_OBJECT_NAME = "road_main"
+ROAD_MESH_NAME = "road_main_mesh"
+ROAD_MATERIAL_NAME = "mat_track_road"
+
+
+def _ensure_road_material() -> bpy.types.Material:
+    mat = bpy.data.materials.get(ROAD_MATERIAL_NAME)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(ROAD_MATERIAL_NAME)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is not None:
+        bsdf.inputs["Base Color"].default_value = (0.10, 0.10, 0.11, 1.0)
+        bsdf.inputs["Roughness"].default_value = 0.85
+        spec = bsdf.inputs.get("Specular IOR Level") or bsdf.inputs.get("Specular")
+        if spec is not None:
+            spec.default_value = 0.2
+    return mat
+
+
+def _ramp_material() -> bpy.types.Material:
+    name = "mat_track_ramp"
+    mat = bpy.data.materials.get(name)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is not None:
+        # Saturated orange — same family as turn-indicator chevrons so
+        # the eye reads it as a "track feature" by colour family.
+        bsdf.inputs["Base Color"].default_value = (0.92, 0.45, 0.08, 1.0)
+        bsdf.inputs["Roughness"].default_value = 0.5
+    return mat
+
+
+def _largest_terrain_mesh() -> bpy.types.Object | None:
+    """Pick the most likely terrain target: largest visible mesh whose
+    ``kind`` custom prop is ``"track"``. Used as a fallback when the
+    user hasn't explicitly selected a terrain object."""
+    best: bpy.types.Object | None = None
+    best_verts = 0
+    for obj in bpy.data.objects:
+        if obj.type != "MESH":
+            continue
+        if obj.get("kind") != "track":
+            continue
+        if not is_object_visible(obj):
+            continue
+        n = len(obj.data.vertices)
+        if n > best_verts:
+            best_verts = n
+            best = obj
+    return best
+
+
+def _add_road_starter_curve(scene) -> bpy.types.Object:
+    """Create a 4-point Bezier curve named ``road_curve_main`` straddling
+    the centre of the scene. The user edits it (Tab into edit mode, move
+    handles) before clicking Build Road."""
+    existing = bpy.data.objects.get(ROAD_CURVE_NAME)
+    if existing is not None:
+        return existing
+    curve_data = bpy.data.curves.new(ROAD_CURVE_NAME, type="CURVE")
+    curve_data.dimensions = "3D"
+    spline = curve_data.splines.new(type="BEZIER")
+    # 4 control points spanning ~80m along Y with a gentle S-curve.
+    spline.bezier_points.add(3)  # we start with 1 implicit point
+    coords = [(-40, -40, 0), (-15, -10, 0), (15, 10, 0), (40, 40, 0)]
+    for bp, (x, y, z) in zip(spline.bezier_points, coords):
+        bp.co = (x, y, z)
+        bp.handle_left_type = "AUTO"
+        bp.handle_right_type = "AUTO"
+    spline.use_cyclic_u = False
+    curve_data.resolution_u = 24
+    obj = bpy.data.objects.new(ROAD_CURVE_NAME, curve_data)
+    obj["kind"] = "road_curve"
+    scene.collection.objects.link(obj)
+    return obj
+
+
+def _sample_road_path(
+    curve_obj: bpy.types.Object,
+    terrain_obj: bpy.types.Object,
+    *,
+    n_samples: int,
+    smooth_passes: int,
+) -> list[dict]:
+    """Sample `curve_obj` at `n_samples` arc-length steps, raycast each
+    sample down onto the scene's terrain, smooth the resulting Z
+    profile, and return a list of {x, y, z, tx, ty} dicts. The Z values
+    are world-space terrain heights with `smooth_passes` of 1-2-1
+    binomial smoothing applied so the road doesn't follow every bump.
+
+    Preview collections are hidden during the raycast so gizmos can't
+    catch the ray. The terrain object is preferred but any other
+    `kind=track` mesh under the curve will also produce hits."""
+    raw = _sample_curve_to_polyline(curve_obj)
+    if len(raw) < 2:
+        return []
+    # Cumulative arc length in the horizontal plane.
+    cum = [0.0]
+    for i in range(len(raw) - 1):
+        a, b = raw[i], raw[i + 1]
+        cum.append(cum[-1] + math.hypot(b[0] - a[0], b[1] - a[1]))
+    total = cum[-1]
+    if total <= 0:
+        return []
+
+    samples: list[dict] = []
+    denom = max(1, n_samples - 1)
+    j = 0
+    for i in range(n_samples):
+        target = (i / denom) * total
+        while j < len(cum) - 1 and cum[j + 1] < target:
+            j += 1
+        seg_len = (cum[j + 1] - cum[j]) if (j + 1 < len(cum)) else 1.0
+        frac = (target - cum[j]) / seg_len if seg_len > 0 else 0.0
+        a = raw[j]
+        b = raw[j + 1] if (j + 1 < len(raw)) else raw[j]
+        x = a[0] + (b[0] - a[0]) * frac
+        y = a[1] + (b[1] - a[1]) * frac
+        dx = b[0] - a[0]
+        dy = b[1] - a[1]
+        tl = math.hypot(dx, dy) or 1.0
+        samples.append({"x": x, "y": y, "z": 0.0, "tx": dx / tl, "ty": dy / tl})
+
+    # Raycast each sample's (x, y) downward onto the scene. The depsgraph
+    # has to be re-fetched *after* the preview collections are hidden,
+    # otherwise it still references them and the cast lands on gate /
+    # racer / water gizmos instead of the real terrain underneath.
+    scene = bpy.context.scene
+    down = mathutils.Vector((0.0, 0.0, -1.0))
+    ray_origin_z = 10000.0
+    misses = 0
+    with _PreviewCollectionsHidden(bpy.context.view_layer):
+        bpy.context.view_layer.update()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        for s in samples:
+            origin = mathutils.Vector((s["x"], s["y"], ray_origin_z))
+            result, location, _normal, _index, hit_obj, _matrix = scene.ray_cast(
+                depsgraph, origin, down
+            )
+            if result:
+                s["z"] = float(location.z)
+                if terrain_obj is not None and hit_obj != terrain_obj:
+                    # Hit a prop or another track mesh; still useful but
+                    # we count it for the report.
+                    pass
+            else:
+                misses += 1
+
+    # Smooth the height profile (1-2-1 binomial, in place).
+    for _ in range(max(0, int(smooth_passes))):
+        new_z = []
+        n = len(samples)
+        for i in range(n):
+            zp = samples[max(0, i - 1)]["z"]
+            zn = samples[min(n - 1, i + 1)]["z"]
+            new_z.append((zp + samples[i]["z"] * 2 + zn) / 4.0)
+        for i, z in enumerate(new_z):
+            samples[i]["z"] = z
+
+    return samples
+
+
+def _build_road_strip_mesh(samples: list[dict], width: float, lift: float) -> bpy.types.Mesh:
+    """Build a road-strip mesh from the (x, y, z, tx, ty) samples. Each
+    sample emits a pair of verts perpendicular to its tangent in the
+    horizontal plane (left and right), elevated by `lift`."""
+    if ROAD_MESH_NAME in bpy.data.meshes:
+        bpy.data.meshes.remove(bpy.data.meshes[ROAD_MESH_NAME])
+    me = bpy.data.meshes.new(ROAD_MESH_NAME)
+    verts: list[tuple[float, float, float]] = []
+    half_w = width / 2.0
+    for s in samples:
+        # Horizontal perpendicular = 90° CCW rotation of the tangent.
+        # +X-right when the road goes "north", which feels natural.
+        nx = -s["ty"]
+        ny = s["tx"]
+        z = s["z"] + lift
+        verts.append((s["x"] - nx * half_w, s["y"] - ny * half_w, z))
+        verts.append((s["x"] + nx * half_w, s["y"] + ny * half_w, z))
+    faces: list[tuple[int, int, int, int]] = []
+    for i in range(len(samples) - 1):
+        a = i * 2
+        # Wind CCW so the normal faces +Z up.
+        faces.append((a, a + 2, a + 3, a + 1))
+    me.from_pydata(verts, [], faces)
+    me.update()
+    for poly in me.polygons:
+        poly.use_smooth = False  # roads read better with hard shading
+    return me
+
+
+def _conform_terrain_to_road(
+    terrain_obj: bpy.types.Object,
+    samples: list[dict],
+    *,
+    width: float,
+    blend_radius: float,
+) -> dict:
+    """Push each terrain vertex within `(width/2 + blend_radius)` of the
+    road centerline toward the road's local Z. Within the inner band
+    (`d < width/2`) the vertex snaps fully; the outer band falls off
+    with a smoothstep so the join is seamless.
+
+    Returns a summary `{flattened, blended}` count for the report."""
+    from mathutils.kdtree import KDTree
+
+    if not samples:
+        return {"flattened": 0, "blended": 0}
+
+    inner = width / 2.0
+    outer = inner + max(0.0, blend_radius)
+
+    # KDTree over (x, y) samples, Z zero so 2D lookups in the horizontal
+    # plane are exact.
+    kd = KDTree(len(samples))
+    for i, s in enumerate(samples):
+        kd.insert((s["x"], s["y"], 0.0), i)
+    kd.balance()
+
+    me = terrain_obj.data
+    mw = terrain_obj.matrix_world
+    mw_inv = mw.inverted_safe()
+
+    flattened = 0
+    blended = 0
+    for v in me.vertices:
+        world = mw @ v.co
+        _, idx, _ = kd.find((world.x, world.y, 0.0))
+        s = samples[idx]
+        d = math.hypot(world.x - s["x"], world.y - s["y"])
+        if d >= outer:
+            continue
+        target_z = s["z"]
+        if d <= inner:
+            blend = 1.0
+            flattened += 1
+        else:
+            t = (outer - d) / (outer - inner)
+            blend = t * t * (3.0 - 2.0 * t)  # smoothstep
+            blended += 1
+        new_world_z = world.z * (1.0 - blend) + target_z * blend
+        v.co = mw_inv @ mathutils.Vector((world.x, world.y, new_world_z))
+
+    me.update()
+    me.calc_loop_triangles()
+    return {"flattened": flattened, "blended": blended}
+
+
+def _terrain_active_modifiers(obj: bpy.types.Object) -> list[str]:
+    """Return names of every viewport-enabled modifier on `obj`. The
+    road tool conforms by writing to source-mesh verts; any active
+    modifier (Geometry Nodes, Subsurf, Displace) overrides them on
+    next evaluation — *or worse*, adds its own displacement on top so
+    the terrain spikes wildly where the road wrote a non-zero Z."""
+    return [m.name for m in obj.modifiers if m.show_viewport] if obj.modifiers else []
+
+
+def _apply_all_viewport_modifiers(obj: bpy.types.Object) -> list[str]:
+    """Apply every viewport-enabled modifier on `obj` in stack order,
+    using the user's selection context. Returns the list of applied
+    modifier names so callers can include it in their status report.
+
+    The modifier operator needs the object to be active and selected,
+    so we snapshot selection state and restore it on exit."""
+    applied: list[str] = []
+    view_layer = bpy.context.view_layer
+    prev_active = view_layer.objects.active
+    prev_selection = [o for o in view_layer.objects if o.select_get()]
+    try:
+        for o in prev_selection:
+            o.select_set(False)
+        view_layer.objects.active = obj
+        obj.select_set(True)
+        # `modifier_apply` removes the modifier from the stack, so we
+        # iterate over a snapshot of names rather than the live list.
+        names_to_apply = [m.name for m in obj.modifiers if m.show_viewport]
+        for name in names_to_apply:
+            try:
+                bpy.ops.object.modifier_apply(modifier=name)
+                applied.append(name)
+            except RuntimeError:
+                # Some modifiers can't be applied (e.g., Armature
+                # without pose data); skip but report.
+                pass
+    finally:
+        obj.select_set(False)
+        for o in prev_selection:
+            if o.name in view_layer.objects:
+                o.select_set(True)
+        view_layer.objects.active = prev_active
+    return applied
+
+
+class HOVERBIKE_OT_add_road_starter_curve(Operator):
+    """Create a 4-point Bezier curve named ``road_curve_main`` straddling
+    the scene centre. Tab into edit mode to drag the handles into the
+    road shape you want, then click *Build Road*."""
+
+    bl_idname = "hoverbike.add_road_starter_curve"
+    bl_label = "Add Road Curve"
+    bl_description = "Drop a 4-point starter Bezier curve for the road tool to follow"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        obj = _add_road_starter_curve(context.scene)
+        self.report({"INFO"}, f"Created {obj.name}. Tab into edit mode to shape it, then Build Road.")
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_build_road(Operator):
+    """Sample `road_curve_main` along its arc length, raycast onto the
+    terrain to get each sample's altitude, smooth the height profile,
+    build a road-strip mesh with `mat_track_road`, and deform the
+    terrain so it conforms to the road in a `width + blend_radius` band.
+    Re-runs replace any prior road mesh; the terrain deformation
+    accumulates, so undo (Ctrl+Z) is your friend during iteration.
+
+    If the terrain has active modifiers (e.g. a Geometry Nodes
+    procedural island), they'd override the road's vertex edits — or
+    worse, add their displacement on top so the terrain spikes upward.
+    Toggle *Apply modifiers first* to bake them in before deforming
+    (one-way: GN parametric tunability is lost in exchange for a
+    drivable road)."""
+
+    bl_idname = "hoverbike.build_road"
+    bl_label = "Build Road"
+    bl_description = (
+        "Conform terrain to road_curve_main and build a kind=track road strip"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    apply_modifiers: BoolProperty(  # type: ignore[valid-type]
+        name="Apply modifiers first",
+        description=(
+            "Bake terrain modifiers (e.g. Geometry Nodes island) into the "
+            "mesh before deforming. Required to deform procedural terrain; "
+            "loses parametric tunability of the source modifier."
+        ),
+        default=False,
+    )
+
+    def execute(self, context):
+        curve_obj = bpy.data.objects.get(ROAD_CURVE_NAME)
+        if curve_obj is None or curve_obj.type != "CURVE":
+            self.report(
+                {"ERROR"},
+                f"{ROAD_CURVE_NAME!r} not found — click *Add Road Curve* first.",
+            )
+            return {"CANCELLED"}
+
+        # Pick terrain: the active mesh, else the largest kind=track mesh.
+        terrain = context.active_object
+        if terrain is None or terrain.type != "MESH" or terrain.get("kind") != "track":
+            terrain = _largest_terrain_mesh()
+        if terrain is None:
+            self.report(
+                {"ERROR"},
+                "No terrain mesh found. Select a kind=track mesh, or set kind='track' on your terrain.",
+            )
+            return {"CANCELLED"}
+
+        active_mods = _terrain_active_modifiers(terrain)
+        applied_mods: list[str] = []
+        if active_mods:
+            if self.apply_modifiers:
+                applied_mods = _apply_all_viewport_modifiers(terrain)
+            else:
+                self.report(
+                    {"ERROR"},
+                    f"{terrain.name} has active modifiers ({', '.join(active_mods)}) — they'd "
+                    "spike the terrain wildly because GN adds its displacement on top of the "
+                    "road's vertex edits. Toggle *Apply modifiers first* in the redo panel, or "
+                    "apply them manually (Object → Apply → Visual Geometry to Mesh) and re-run.",
+                )
+                return {"CANCELLED"}
+
+        scene = context.scene
+        samples = _sample_road_path(
+            curve_obj,
+            terrain,
+            n_samples=int(scene.hoverbike_road_samples),
+            smooth_passes=int(scene.hoverbike_road_smooth_passes),
+        )
+        if len(samples) < 2:
+            self.report({"ERROR"}, "Couldn't sample road curve — does it have ≥ 2 control points?")
+            return {"CANCELLED"}
+
+        width = float(scene.hoverbike_road_width)
+        lift = float(scene.hoverbike_road_lift)
+        blend_radius = float(scene.hoverbike_road_blend_radius)
+
+        # Deform terrain first, then build the road strip — that way the
+        # road's Z (sampled before deformation) sits on the *original*
+        # surface and the terrain rises/falls to meet it.
+        deform_summary = _conform_terrain_to_road(
+            terrain, samples, width=width, blend_radius=blend_radius
+        )
+
+        # Build / replace the road strip mesh.
+        old = bpy.data.objects.get(ROAD_OBJECT_NAME)
+        if old is not None:
+            bpy.data.objects.remove(old, do_unlink=True)
+        me = _build_road_strip_mesh(samples, width=width, lift=lift)
+        me.materials.append(_ensure_road_material())
+        obj = bpy.data.objects.new(ROAD_OBJECT_NAME, me)
+        obj["kind"] = "track"
+        scene.collection.objects.link(obj)
+
+        applied_msg = f" (applied {', '.join(applied_mods)})" if applied_mods else ""
+        self.report(
+            {"INFO"},
+            f"Road built: {len(samples)} samples, width {width:.1f}m. "
+            f"Terrain: {deform_summary['flattened']} verts flattened, "
+            f"{deform_summary['blended']} blended{applied_msg}.",
+        )
+        return {"FINISHED"}
+
+
+# ── Ramp tool ──────────────────────────────────────────────────────────────
+#
+# Build a parametric stunt ramp at the 3D cursor. The ramp is a solid
+# wedge with an optional flat run-up before the launch kicker, tagged
+# `kind=track` so it ships out as a collidable surface, and shaded with
+# `mat_track_ramp` (saturated orange — same colour family as the turn-
+# indicator chevrons so the eye reads "track feature" instantly).
+#
+# Geometry: subdivided along ±Y (travel direction). Width is along ±X.
+# The bottom face stays at z=0; the top face rises along a smoothstep
+# curve from the end of the approach to the launch lip. Use the
+# `Curved kicker` toggle off for a plain linear wedge instead.
+
+RAMP_OBJECT_PREFIX = "ramp_"
+
+
+def _ramp_height_profile(y: float, *, length: float, approach: float, peak: float, curved: bool) -> float:
+    """Z elevation of the top face at distance `y` along the ramp.
+    Approach run-up stays at 0; the kicker rises to `peak` at y=length.
+    Smoothstep curve makes the launch lip naturally tangent to vertical
+    so the bike's nose lofts cleanly off the end."""
+    if y <= approach or length <= approach:
+        return 0.0
+    t = (y - approach) / (length - approach)
+    t = max(0.0, min(1.0, t))
+    if curved:
+        return peak * t * t * (3.0 - 2.0 * t)
+    return peak * t
+
+
+def _build_ramp_mesh(
+    name: str,
+    *,
+    length: float,
+    width: float,
+    peak_height: float,
+    approach: float,
+    segments: int,
+    curved: bool,
+) -> bpy.types.Mesh:
+    """Build a wedge-shaped ramp mesh in local coords (length along +Y,
+    width along ±X, height along +Z). Z-up, matches Blender world axes."""
+    if name in bpy.data.meshes:
+        bpy.data.meshes.remove(bpy.data.meshes[name])
+    me = bpy.data.meshes.new(name)
+    half_w = width / 2.0
+    n = max(2, int(segments))
+
+    verts: list[tuple[float, float, float]] = []
+    # Bottom verts (row by row along +Y).
+    for i in range(n + 1):
+        y = (i / n) * length
+        verts.append((-half_w, y, 0.0))
+        verts.append(( half_w, y, 0.0))
+    top_start = len(verts)
+    # Top verts (same XY columns, elevated by the height profile).
+    for i in range(n + 1):
+        y = (i / n) * length
+        z = _ramp_height_profile(
+            y, length=length, approach=approach, peak=peak_height, curved=curved
+        )
+        verts.append((-half_w, y, z))
+        verts.append(( half_w, y, z))
+
+    faces: list[tuple[int, ...]] = []
+    # Bottom face (one big n-gon? simpler as a strip of quads CCW).
+    for i in range(n):
+        a = i * 2
+        # Reverse winding so the normal faces -Z.
+        faces.append((a, a + 1, a + 3, a + 2))
+    # Top (drivable surface) — winding so normal faces +Z.
+    for i in range(n):
+        a = top_start + i * 2
+        faces.append((a, a + 2, a + 3, a + 1))
+    # Left side (x = -half_w): rows i and i+1, top + bottom.
+    for i in range(n):
+        bot_a = i * 2
+        bot_b = bot_a + 2
+        top_a = top_start + i * 2
+        top_b = top_a + 2
+        faces.append((bot_a, top_a, top_b, bot_b))
+    # Right side (x = +half_w).
+    for i in range(n):
+        bot_a = i * 2 + 1
+        bot_b = bot_a + 2
+        top_a = top_start + i * 2 + 1
+        top_b = top_a + 2
+        faces.append((bot_a, bot_b, top_b, top_a))
+    # End caps. Back (y=0): bottom verts 0/1 and top verts at top_start/+1.
+    # Skip if top verts coincide with bottom (z=0 at y=0 always — degenerate quad).
+    if peak_height > 0 and approach < length:
+        # Front cap at y=length: last 4 verts.
+        last_bot = n * 2
+        last_top = top_start + n * 2
+        faces.append((last_bot, last_top, last_top + 1, last_bot + 1))
+    # Back cap (y=0) — degenerate at z=0; only emit if approach > 0 and
+    # we want a visible vertical face. With z=0 at i=0 the back is
+    # naturally flush with the ground, so skip.
+
+    me.from_pydata(verts, [], faces)
+    me.update()
+    for poly in me.polygons:
+        poly.use_smooth = False  # crisp wedge silhouette
+    return me
+
+
+def _next_ramp_object_name() -> str:
+    """First free `ramp_NN` name. Avoids stomping prior ramps the user
+    has placed and tuned, while keeping the numbering tidy."""
+    i = 0
+    while True:
+        candidate = f"{RAMP_OBJECT_PREFIX}{i:02d}"
+        if candidate not in bpy.data.objects:
+            return candidate
+        i += 1
+
+
+class HOVERBIKE_OT_add_ramp(Operator):
+    """Drop a parametric stunt-ramp wedge at the 3D cursor. Solid mesh
+    tagged `kind=track` so it's collidable on export. Tune length /
+    width / peak height / approach run-up in the panel; toggle *Curved
+    kicker* for a smoothstep launch profile vs. a flat linear wedge."""
+
+    bl_idname = "hoverbike.add_ramp"
+    bl_label = "Add Ramp"
+    bl_description = "Place a kind=track stunt ramp at the 3D cursor"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scene = context.scene
+        length = float(scene.hoverbike_ramp_length)
+        width = float(scene.hoverbike_ramp_width)
+        peak = float(scene.hoverbike_ramp_height)
+        approach = float(scene.hoverbike_ramp_approach)
+        segments = int(scene.hoverbike_ramp_segments)
+        curved = bool(scene.hoverbike_ramp_curved)
+
+        if length <= 0 or width <= 0 or peak <= 0:
+            self.report({"ERROR"}, "Ramp dimensions must all be positive.")
+            return {"CANCELLED"}
+        if approach >= length:
+            self.report({"ERROR"}, "Approach must be shorter than total length.")
+            return {"CANCELLED"}
+
+        name = _next_ramp_object_name()
+        mesh_name = f"{name}_mesh"
+        me = _build_ramp_mesh(
+            mesh_name,
+            length=length,
+            width=width,
+            peak_height=peak,
+            approach=approach,
+            segments=segments,
+            curved=curved,
+        )
+        me.materials.append(_ramp_material())
+        obj = bpy.data.objects.new(name, me)
+        obj["kind"] = "track"
+        obj["ramp_height"] = peak
+        obj["ramp_length"] = length
+        # Drop at 3D cursor with no extra rotation — user can R/G to
+        # align after placement. The cursor already encodes their
+        # intended position from viewport interaction.
+        cursor = context.scene.cursor
+        obj.location = cursor.location.copy()
+        obj.rotation_euler = cursor.rotation_euler.copy()
+        scene.collection.objects.link(obj)
+        # Select + activate the new ramp so the user can immediately
+        # rotate it with R or fine-tune the transform.
+        for o in context.selected_objects:
+            o.select_set(False)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+
+        self.report(
+            {"INFO"},
+            f"Added {name}: {length:.1f}m × {width:.1f}m, peak {peak:.1f}m "
+            f"(approach {approach:.1f}m, {'curved' if curved else 'linear'}).",
+        )
+        return {"FINISHED"}
+
+
+def _snap_spline_to_terrain(curve_obj: bpy.types.Object, *, hover_m: float) -> dict:
+    """Drop each control point of `curve_obj` straight down onto the
+    nearest mesh under it (via Blender's scene ray-cast), then lift by
+    `hover_m`. Returns counts of hits/misses for the operator report.
+
+    Preview collections are excluded during the raycast so the gate /
+    racer / water gizmos never catch the ray — only authored terrain
+    can land a hit. The depsgraph has to be re-fetched *inside* the
+    `with` block: capturing it before the exclusion takes effect leaves
+    the cast still hitting gizmos."""
+    scene = bpy.context.scene
+    hits = 0
+    misses = 0
+    # Start the ray well above the highest currently-authored vertex on
+    # the curve so we never start inside terrain.
+    high_z = 0.0
+    for *_rest, world_co, _ in _spline_iter_points(curve_obj):
+        if world_co.z > high_z:
+            high_z = world_co.z
+    origin_z = high_z + 1000.0
+    down = mathutils.Vector((0.0, 0.0, -1.0))
+
+    with _PreviewCollectionsHidden(bpy.context.view_layer):
+        bpy.context.view_layer.update()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        for _spline, _pt, world_co, setter in _spline_iter_points(curve_obj):
+            origin = mathutils.Vector((world_co.x, world_co.y, origin_z))
+            result, location, _normal, _index, _obj, _matrix = scene.ray_cast(
+                depsgraph, origin, down
+            )
+            if result:
+                new_co = mathutils.Vector(
+                    (world_co.x, world_co.y, location.z + hover_m)
+                )
+                setter(new_co)
+                hits += 1
+            else:
+                misses += 1
+
+    # Force a depsgraph refresh so the spline polyline samples the new
+    # control points immediately (the gate/turn previews will follow via
+    # the auto-rebuild handler).
+    curve_obj.data.update_tag()
+    return {"hits": hits, "misses": misses}
+
+
+class HOVERBIKE_OT_snap_spline_to_terrain(Operator):
+    """Drop every control point on ai_spline_main onto the nearest
+    surface below it, then lift by the configured hover height. Pairs
+    with the live gate preview — re-snapping after a terrain edit slides
+    the racing line back onto the terrain in one click."""
+
+    bl_idname = "hoverbike.snap_spline_to_terrain"
+    bl_label = "Snap Spline to Terrain"
+    bl_description = (
+        "Raycast each ai_spline_main control point onto the terrain and "
+        "lift by the configured hover height"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        sp = bpy.data.objects.get("ai_spline_main")
+        if sp is None or sp.type != "CURVE":
+            self.report({"ERROR"}, "ai_spline_main not found.")
+            return {"CANCELLED"}
+        hover = float(getattr(context.scene, "hoverbike_snap_hover_height", 3.0))
+        summary = _snap_spline_to_terrain(sp, hover_m=hover)
+        if summary["misses"]:
+            self.report(
+                {"WARNING"},
+                f"Snapped {summary['hits']} points; {summary['misses']} missed (no terrain below).",
+            )
+        else:
+            self.report(
+                {"INFO"},
+                f"Snapped {summary['hits']} spline points to terrain (+{hover:.1f}m hover).",
+            )
+        return {"FINISHED"}
+
+
 class HOVERBIKE_OT_rebuild_gate_preview(Operator):
     """Sample `ai_spline_main`, resample by arc length at the scene's
     `hoverbike_gate_spacing` (metres), and rebuild a preview collection of
@@ -1668,34 +3079,65 @@ class HOVERBIKE_OT_refresh_track_stats(Operator):
         return {"FINISHED"}
 
 
+class HOVERBIKE_OT_reload_track_json(Operator):
+    """Pull scalar / parametric fields from ``public/tracks/<id>.json``
+    into the scene's custom properties (gate spacing, terrain shader,
+    water knobs, start pose). Lets edits made in the in-app editor
+    flow back into the .blend without re-launching the addon."""
+
+    bl_idname = "hoverbike.reload_track_json"
+    bl_label = "Reload from JSON"
+    bl_description = (
+        "Sync gate spacing, terrain shader, water knobs, and the start "
+        "pose from public/tracks/<id>.json into the .blend"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        blend = bpy.data.filepath
+        if not blend:
+            self.report({"ERROR"}, "Save your .blend first (Ctrl+S).")
+            return {"CANCELLED"}
+        repo = find_repo_root(blend)
+        if not repo:
+            self.report({"ERROR"}, "No repo root found — .blend isn't inside a hoverbike clone.")
+            return {"CANCELLED"}
+        track_id = derive_asset_id("hoverbike_track_id")
+        if not track_id:
+            self.report({"ERROR"}, "Couldn't derive a track id from the .blend filename.")
+            return {"CANCELLED"}
+        json_path = os.path.join(repo, "public", "tracks", f"{track_id}.json")
+        if not os.path.isfile(json_path):
+            self.report({"WARNING"}, f"No JSON yet at public/tracks/{track_id}.json — export once to create it.")
+            return {"CANCELLED"}
+        try:
+            summary = reload_track_from_json(json_path)
+        except (RuntimeError, ValueError) as e:
+            self.report({"ERROR"}, f"Reload failed: {e}")
+            return {"CANCELLED"}
+        synced = [k for k in ("gateSpacing", "terrainShader", "water", "start") if k in summary]
+        self.report({"INFO"}, f"Reloaded {summary['json']}: {', '.join(synced) or 'no syncable fields'}")
+        return {"FINISHED"}
+
+
 class HOVERBIKE_OT_export_track(Operator):
     """Validate the track scene, write
-    ``public/assets/tracks/<id>.glb``, and on first export materialise
-    a starter ``public/tracks/<id>.json`` from the .blend's metadata
-    objects. Subsequent exports preserve the JSON (the in-app editor
-    owns it). Hold Shift to overwrite the JSON."""
+    ``public/assets/tracks/<id>.glb``, and rewrite
+    ``public/tracks/<id>.json`` with the .blend's parametric state
+    merged on top of the existing JSON. Editor-owned fields (hand-
+    placed gates, pickups, props) are preserved; Blender-owned fields
+    (gate spacing, terrain shader, water, spline anchors, start) come
+    from the .blend."""
 
     bl_idname = "hoverbike.export_track"
     bl_label = "Export Track to Game"
     bl_description = (
-        "Validate scene, export track GLB, and (on first export) write a starter JSON. "
-        "Hold Shift to force-rewrite the JSON from the .blend."
+        "Validate scene, export track GLB, and merge Blender-side "
+        "parametric fields into public/tracks/<id>.json"
     )
     bl_options = {"REGISTER"}
 
-    force_json: BoolProperty(  # type: ignore[valid-type]
-        name="Overwrite JSON",
-        description=(
-            "Rewrite public/tracks/<id>.json from the .blend, even if a tuned "
-            "version exists. Off by default so the in-app editor's saves are "
-            "never blown away by a re-export of the .blend."
-        ),
-        default=False,
-    )
-
     def invoke(self, context: bpy.types.Context, event: bpy.types.Event) -> set[str]:
-        if event.shift:
-            self.force_json = True
         return self.execute(context)
 
     def execute(self, context: bpy.types.Context) -> set[str]:
@@ -1765,22 +3207,24 @@ class HOVERBIKE_OT_export_track(Operator):
             return {"CANCELLED"}
 
         json_existed = os.path.exists(json_path)
-        wrote_json = False
-        if not json_existed or self.force_json:
-            os.makedirs(os.path.dirname(json_path), exist_ok=True)
-            body = derive_track_json(track_id, f"/assets/tracks/{track_id}.glb")
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(body, f, indent=2)
-                f.write("\n")
-            wrote_json = True
+        existing: dict | None = None
+        if json_existed:
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+            except (OSError, ValueError):
+                existing = None
+        os.makedirs(os.path.dirname(json_path), exist_ok=True)
+        derived = derive_track_json(track_id, f"/assets/tracks/{track_id}.glb")
+        body = _merge_export_json(derived, existing)
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(body, f, indent=2)
+            f.write("\n")
 
         rel_glb = os.path.relpath(glb_path, repo).replace("\\", "/")
         rel_json = os.path.relpath(json_path, repo).replace("\\", "/")
-        if wrote_json:
-            tag = "rewrote" if json_existed else "created"
-            msg = f"Exported → {rel_glb} ({tag} {rel_json})"
-        else:
-            msg = f"Exported → {rel_glb} (kept {rel_json})"
+        tag = "merged" if json_existed else "created"
+        msg = f"Exported → {rel_glb} ({tag} {rel_json})"
         self.report({"INFO"}, msg)
         print(f"[hoverbike-addon] {msg}")
         return {"FINISHED"}
@@ -1976,6 +3420,173 @@ class HOVERBIKE_OT_copy_bike_url(Operator):
         return {"FINISHED"}
 
 
+# ── Live preview auto-rebuild ──────────────────────────────────────────────
+#
+# Make the spline-driven previews (gates, turn indicators, racer grid,
+# water plane) follow their source edits without the author having to
+# click Rebuild after every move. We watch the source objects via a
+# persistent depsgraph_update_post handler, plus the relevant scene
+# props via FloatProperty `update=` callbacks, debounce both into a
+# single deferred batch via a one-shot bpy.app.timer (~0.2s), and only
+# rebuild a preview if its collection already exists — so the user
+# still opts in explicitly by clicking *Rebuild* once, then enjoys
+# automatic updates.
+
+# Names of source objects whose edits should trigger a rebuild. Any
+# datablock update that matches one of these (object or its data —
+# moving a curve's control points updates the Curve, not the Object)
+# schedules the listed preview kinds.
+_WATCHED_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("ai_spline_main",   ("gates", "turns")),
+    ("start_00",         ("racer",)),
+    ("water_volume_main", ("water",)),
+)
+
+_pending_rebuilds: set[str] = set()
+_rebuild_timer_scheduled = False
+_REBUILD_DEBOUNCE_S = 0.2
+
+
+def _schedule_rebuild(kind: str) -> None:
+    """Mark a preview kind dirty and arm the single shared timer. Safe
+    to call from depsgraph handlers and property update callbacks."""
+    global _rebuild_timer_scheduled
+    _pending_rebuilds.add(kind)
+    if _rebuild_timer_scheduled:
+        return
+    _rebuild_timer_scheduled = True
+    bpy.app.timers.register(_run_pending_rebuilds, first_interval=_REBUILD_DEBOUNCE_S)
+
+
+def _run_pending_rebuilds():
+    """Fire each pending rebuild. Only acts on a preview kind if its
+    collection already exists — the *Hide* operator only toggles
+    view-layer visibility (`exclude=True`) and leaves the collection
+    in place, so hidden previews still auto-update silently and become
+    fresh when the user un-hides them."""
+    global _rebuild_timer_scheduled
+    _rebuild_timer_scheduled = False
+    pending = set(_pending_rebuilds)
+    _pending_rebuilds.clear()
+
+    scene = bpy.context.scene
+    if scene is None:
+        return None
+
+    if "gates" in pending and bpy.data.collections.get(GATE_PREVIEW_COLLECTION):
+        try:
+            _rebuild_gate_preview(
+                scene,
+                spacing=float(scene.hoverbike_gate_spacing),
+                half_width=float(scene.hoverbike_gate_half_width),
+                height=float(scene.hoverbike_gate_height),
+            )
+        except (RuntimeError, AttributeError):
+            pass
+
+    if "turns" in pending and bpy.data.collections.get(TURN_PREVIEW_COLLECTION):
+        try:
+            _rebuild_turn_indicators(
+                scene,
+                kappa_threshold=float(scene.hoverbike_turn_kappa),
+                min_spacing_m=float(scene.hoverbike_turn_min_spacing),
+            )
+        except (RuntimeError, AttributeError):
+            pass
+
+    if "racer" in pending and bpy.data.collections.get(RACER_PREVIEW_COLLECTION):
+        try:
+            _rebuild_racer_preview(scene)
+        except (RuntimeError, AttributeError):
+            pass
+
+    if "water" in pending and bpy.data.collections.get(WATER_PREVIEW_COLLECTION):
+        try:
+            _rebuild_water_preview(
+                scene,
+                size=float(scene.hoverbike_water_size),
+                subdivisions=int(scene.hoverbike_water_subdivisions),
+                time=float(scene.hoverbike_water_time),
+            )
+        except (RuntimeError, AttributeError):
+            pass
+
+    return None  # one-shot — don't reschedule
+
+
+def _update_matches_source(upd, source_name: str) -> bool:
+    """True if a depsgraph update refers to the named object or its
+    data datablock. NURBS edits land as Curve-data updates, not Object
+    updates, so we have to check both.
+
+    `upd.id` in Blender 4.4+ is the *evaluated* copy; equality against
+    the original datablock returns False. `.original` walks back to
+    the source so the comparison works."""
+    obj = bpy.data.objects.get(source_name)
+    if obj is None:
+        return False
+    orig = getattr(upd.id, "original", upd.id)
+    if orig == obj:
+        return True
+    if obj.data is not None and orig == obj.data:
+        return True
+    return False
+
+
+@persistent
+def _hoverbike_load_post(*_args):
+    """Auto-sync the track .blend with its JSON when the file is
+    opened. Silently no-ops outside of `tracks-src/` so bike .blends and
+    arbitrary scenes are unaffected. Runs after the file's data is in
+    memory so `bpy.data.objects` is populated."""
+    blend = bpy.data.filepath
+    if not blend or detect_mode(blend) != "track":
+        return
+    repo = find_repo_root(blend)
+    if not repo:
+        return
+    track_id = derive_asset_id("hoverbike_track_id")
+    if not track_id:
+        return
+    json_path = os.path.join(repo, "public", "tracks", f"{track_id}.json")
+    if not os.path.isfile(json_path):
+        return
+    try:
+        reload_track_from_json(json_path)
+    except Exception as e:  # noqa: BLE001 — informational only
+        print(f"[hoverbike] auto-reload-from-JSON skipped: {e}")
+
+
+@persistent
+def _hoverbike_depsgraph_post(scene, depsgraph):
+    """Run on every depsgraph evaluation; cheap unless something we
+    care about just changed. The actual rebuild runs from a debounced
+    timer outside this callback, so we never block evaluation."""
+    try:
+        updates = depsgraph.updates
+    except AttributeError:
+        return
+    for upd in updates:
+        for source_name, kinds in _WATCHED_SOURCES:
+            if _update_matches_source(upd, source_name):
+                for k in kinds:
+                    _schedule_rebuild(k)
+
+
+def _on_gate_prop_changed(self, context):
+    """FloatProperty update callback — fires when the user scrubs gate
+    spacing / half-width / height in the panel."""
+    _schedule_rebuild("gates")
+
+
+def _on_turn_prop_changed(self, context):
+    _schedule_rebuild("turns")
+
+
+def _on_water_prop_changed(self, context):
+    _schedule_rebuild("water")
+
+
 # ── Sidebar panel ──────────────────────────────────────────────────────────
 
 
@@ -2019,6 +3630,7 @@ class HOVERBIKE_PT_panel(Panel):
         row.operator("hoverbike.export_track", icon="EXPORT")
 
         col = layout.column(align=True)
+        col.operator("hoverbike.reload_track_json", icon="FILE_REFRESH")
         op_play = col.operator(
             "hoverbike.copy_track_url", text="Copy Play URL", icon="URL"
         )
@@ -2027,6 +3639,49 @@ class HOVERBIKE_PT_panel(Panel):
             "hoverbike.copy_track_url", text="Copy Edit URL", icon="GREASEPENCIL"
         )
         op_edit.edit = True
+
+        layout.separator()
+        sp_box = layout.box()
+        sp_box.label(text="Spline tools", icon="CURVE_NCURVE")
+        sp_box.prop(context.scene, "hoverbike_snap_hover_height", text="Hover (m)")
+        sp_box.operator("hoverbike.snap_spline_to_terrain", icon="SNAP_FACE")
+
+        road_box = layout.box()
+        road_box.label(text="Road tool", icon="MOD_CURVE")
+        road_box.operator("hoverbike.add_road_starter_curve", icon="CURVE_BEZCURVE")
+        row = road_box.row(align=True)
+        row.prop(context.scene, "hoverbike_road_width", text="Width")
+        row.prop(context.scene, "hoverbike_road_lift", text="Lift")
+        row = road_box.row(align=True)
+        row.prop(context.scene, "hoverbike_road_blend_radius", text="Blend")
+        row.prop(context.scene, "hoverbike_road_samples", text="Samples")
+        road_box.prop(context.scene, "hoverbike_road_smooth_passes", text="Smooth passes")
+        road_box.operator("hoverbike.build_road", icon="MESH_PLANE")
+        if bpy.data.objects.get(ROAD_CURVE_NAME):
+            road_box.label(text="Edit road_curve_main, then Build", icon="INFO")
+
+        ramp_box = layout.box()
+        ramp_box.label(text="Ramp tool", icon="EVENT_R")
+        row = ramp_box.row(align=True)
+        row.prop(context.scene, "hoverbike_ramp_length", text="Length")
+        row.prop(context.scene, "hoverbike_ramp_width", text="Width")
+        row = ramp_box.row(align=True)
+        row.prop(context.scene, "hoverbike_ramp_height", text="Peak")
+        row.prop(context.scene, "hoverbike_ramp_approach", text="Approach")
+        row = ramp_box.row(align=True)
+        row.prop(context.scene, "hoverbike_ramp_segments", text="Segments")
+        row.prop(context.scene, "hoverbike_ramp_curved", text="Curved")
+        ramp_box.operator("hoverbike.add_ramp", icon="ADD")
+
+        hm_box = layout.box()
+        hm_box.label(text="Heightmap import", icon="IMAGE_DATA")
+        row = hm_box.row(align=True)
+        row.prop(context.scene, "hoverbike_heightmap_size", text="Size")
+        row.prop(context.scene, "hoverbike_heightmap_subdivisions", text="Subdiv")
+        row = hm_box.row(align=True)
+        row.prop(context.scene, "hoverbike_heightmap_height", text="Δz (m)")
+        row.prop(context.scene, "hoverbike_heightmap_base", text="Base z")
+        hm_box.operator("hoverbike.import_heightmap", icon="IMPORT")
 
         layout.separator()
         gp_box = layout.box()
@@ -2038,12 +3693,26 @@ class HOVERBIKE_PT_panel(Panel):
         row = gp_box.row(align=True)
         row.operator("hoverbike.rebuild_gate_preview", icon="FILE_REFRESH")
         row.operator("hoverbike.hide_gate_preview", icon="HIDE_ON")
+        # Live-follow signal: once the user clicks Rebuild, edits to the
+        # spline or to these knobs auto-refresh the gates.
+        if bpy.data.collections.get(GATE_PREVIEW_COLLECTION):
+            gp_box.label(text="Live: follows spline edits", icon="LINKED")
 
         rp_box = layout.box()
         rp_box.label(text="Racer preview", icon="AUTO")
         row = rp_box.row(align=True)
         row.operator("hoverbike.rebuild_racer_preview", icon="FILE_REFRESH")
         row.operator("hoverbike.hide_racer_preview", icon="HIDE_ON")
+
+        gl_box = layout.box()
+        gl_box.label(text="Ghost lap + chase cam", icon="CAMERA_DATA")
+        row = gl_box.row(align=True)
+        row.prop(context.scene, "hoverbike_ghost_speed", text="Speed (m/s)")
+        row.prop(context.scene, "hoverbike_ghost_fps", text="FPS")
+        row = gl_box.row(align=True)
+        row.operator("hoverbike.rebuild_ghost_lap", icon="FILE_REFRESH")
+        row.operator("hoverbike.hide_ghost_lap", icon="HIDE_ON")
+        gl_box.label(text="Press Spacebar to fly the lap", icon="PLAY")
 
         wp_box = layout.box()
         wp_box.label(text="Water preview", icon="MOD_OCEAN")
@@ -2131,9 +3800,10 @@ class HOVERBIKE_PT_panel(Panel):
         layout.separator()
         col = layout.column(align=True)
         col.scale_y = 0.85
-        col.label(text="Shift-click Export:", icon="INFO")
-        col.label(text="overwrite the JSON")
-        col.label(text="from the .blend.")
+        col.label(text="Export merges Blender knobs", icon="INFO")
+        col.label(text="(spacing, water, shader, start)")
+        col.label(text="onto the existing JSON;")
+        col.label(text="editor-placed gates stay.")
 
     def _draw_bike(self, context, layout, blend: str, repo: str | None) -> None:
         bike_id = derive_asset_id("hoverbike_bike_id") or "<unknown>"
@@ -2191,6 +3861,14 @@ _classes = (
     HOVERBIKE_OT_hide_water_preview,
     HOVERBIKE_OT_rebuild_turn_indicators,
     HOVERBIKE_OT_hide_turn_indicators,
+    HOVERBIKE_OT_rebuild_ghost_lap,
+    HOVERBIKE_OT_hide_ghost_lap,
+    HOVERBIKE_OT_snap_spline_to_terrain,
+    HOVERBIKE_OT_add_road_starter_curve,
+    HOVERBIKE_OT_build_road,
+    HOVERBIKE_OT_add_ramp,
+    HOVERBIKE_OT_import_heightmap,
+    HOVERBIKE_OT_reload_track_json,
     HOVERBIKE_OT_bake_terrain_attrs,
     HOVERBIKE_OT_refresh_track_stats,
     HOVERBIKE_OT_export_track,
@@ -2212,6 +3890,7 @@ def register() -> None:
         min=1.0,
         max=1000.0,
         precision=1,
+        update=_on_gate_prop_changed,
     )
     bpy.types.Scene.hoverbike_gate_half_width = FloatProperty(
         name="Gate half-width (m)",
@@ -2219,6 +3898,7 @@ def register() -> None:
         min=1.0,
         max=200.0,
         precision=1,
+        update=_on_gate_prop_changed,
     )
     bpy.types.Scene.hoverbike_gate_height = FloatProperty(
         name="Gate height (m)",
@@ -2226,6 +3906,7 @@ def register() -> None:
         min=1.0,
         max=100.0,
         precision=1,
+        update=_on_gate_prop_changed,
     )
     bpy.types.Scene.hoverbike_water_size = FloatProperty(
         name="Water plane size (m)",
@@ -2234,6 +3915,7 @@ def register() -> None:
         min=10.0,
         max=2000.0,
         precision=1,
+        update=_on_water_prop_changed,
     )
     bpy.types.Scene.hoverbike_water_subdivisions = IntProperty(
         name="Water subdivisions",
@@ -2241,6 +3923,7 @@ def register() -> None:
         default=80,
         min=8,
         max=400,
+        update=_on_water_prop_changed,
     )
     bpy.types.Scene.hoverbike_water_time = FloatProperty(
         name="Wave time (s)",
@@ -2249,6 +3932,7 @@ def register() -> None:
         min=-60.0,
         max=60.0,
         precision=2,
+        update=_on_water_prop_changed,
     )
     bpy.types.Scene.hoverbike_turn_kappa = FloatProperty(
         name="Turn |κ| min (1/m)",
@@ -2257,6 +3941,7 @@ def register() -> None:
         min=0.001,
         max=2.0,
         precision=4,
+        update=_on_turn_prop_changed,
     )
     bpy.types.Scene.hoverbike_turn_min_spacing = FloatProperty(
         name="Turn min spacing (m)",
@@ -2265,6 +3950,7 @@ def register() -> None:
         min=1.0,
         max=200.0,
         precision=1,
+        update=_on_turn_prop_changed,
     )
 
     # Runtime terrain-shader tuning. These mirror constants in
@@ -2312,8 +3998,141 @@ def register() -> None:
         name="Path tint B", default=0.18, min=0.0, max=2.0, precision=2,
     )
 
+    # Snap-spline-to-terrain hover height. Matches a typical hoverbike
+    # ride height so the racing line sits just above the surface.
+    bpy.types.Scene.hoverbike_snap_hover_height = FloatProperty(
+        name="Snap hover (m)",
+        description="Vertical clearance to lift each control point above the surface it lands on.",
+        default=3.0, min=0.0, max=50.0, precision=2,
+    )
+
+    # Heightmap importer settings.
+    bpy.types.Scene.hoverbike_heightmap_path = StringProperty(
+        name="Last heightmap",
+        description="Most recently imported heightmap file (pre-fills the file picker).",
+        default="", subtype="FILE_PATH",
+    )
+    bpy.types.Scene.hoverbike_heightmap_size = FloatProperty(
+        name="Map size (m)",
+        description="Edge length of the imported terrain plane.",
+        default=1024.0, min=16.0, max=8192.0, precision=1,
+    )
+    bpy.types.Scene.hoverbike_heightmap_height = FloatProperty(
+        name="Δz (m)",
+        description="Maximum vertical displacement at image luminance = 1.0.",
+        default=120.0, min=1.0, max=2000.0, precision=1,
+    )
+    bpy.types.Scene.hoverbike_heightmap_base = FloatProperty(
+        name="Base elevation (m)",
+        description="World-Z offset applied to every vertex (use a negative value to seat the terrain below sea level).",
+        default=-30.0, min=-500.0, max=500.0, precision=1,
+    )
+    bpy.types.Scene.hoverbike_heightmap_subdivisions = IntProperty(
+        name="Subdivisions",
+        description="Per-edge subdivisions of the imported plane. Higher = more terrain detail, more verts.",
+        default=256, min=8, max=2048,
+    )
+
+    # Road-tool settings.
+    bpy.types.Scene.hoverbike_road_width = FloatProperty(
+        name="Road width (m)",
+        description="Total width of the road strip; terrain inside this band flattens fully to the road.",
+        default=8.0, min=0.5, max=80.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_road_lift = FloatProperty(
+        name="Road lift (m)",
+        description="Small vertical offset above terrain so the road's surface is visible against the ground.",
+        default=0.15, min=0.0, max=5.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_road_blend_radius = FloatProperty(
+        name="Blend radius (m)",
+        description="Outer falloff band where terrain blends from flattened to natural via smoothstep.",
+        default=6.0, min=0.0, max=50.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_road_samples = IntProperty(
+        name="Samples",
+        description="Number of arc-length samples along the road curve. Higher = smoother road, slower build.",
+        default=64, min=4, max=512,
+    )
+    bpy.types.Scene.hoverbike_road_smooth_passes = IntProperty(
+        name="Smoothing passes",
+        description="1-2-1 binomial passes applied to the height profile so the road doesn't follow every terrain bump.",
+        default=4, min=0, max=32,
+    )
+
+    # Ramp-tool settings.
+    bpy.types.Scene.hoverbike_ramp_length = FloatProperty(
+        name="Ramp length (m)",
+        description="Total length of the ramp along its travel axis (+Y).",
+        default=12.0, min=1.0, max=200.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_ramp_width = FloatProperty(
+        name="Ramp width (m)",
+        description="Width of the ramp along ±X.",
+        default=8.0, min=0.5, max=80.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_ramp_height = FloatProperty(
+        name="Peak height (m)",
+        description="Height of the launch lip at the end of the ramp.",
+        default=3.0, min=0.1, max=50.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_ramp_approach = FloatProperty(
+        name="Approach (m)",
+        description="Flat run-up at the start of the ramp before the kicker rises. 0 = wedge from y=0.",
+        default=4.0, min=0.0, max=100.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_ramp_segments = IntProperty(
+        name="Segments",
+        description="Subdivisions along the ramp's length. More = smoother kicker curve.",
+        default=12, min=2, max=128,
+    )
+    bpy.types.Scene.hoverbike_ramp_curved = BoolProperty(
+        name="Curved kicker",
+        description="Smoothstep height profile (natural launch tangent). Off = linear wedge.",
+        default=True,
+    )
+
+    # Ghost-lap settings.
+    bpy.types.Scene.hoverbike_ghost_speed = FloatProperty(
+        name="Target speed (m/s)",
+        description="Constant speed at which the ghost-bike traverses ai_spline_main.",
+        default=GHOST_DEFAULT_SPEED_MS, min=1.0, max=200.0, precision=1,
+    )
+    bpy.types.Scene.hoverbike_ghost_fps = IntProperty(
+        name="Playback FPS",
+        description="Scene frame rate while ghost-lap is active. 24 fps reads as cinematic; 60 is buttery for tuning.",
+        default=30, min=12, max=120,
+    )
+
+    # Persistent depsgraph hook so previews follow source edits across
+    # file reloads. Idempotent — guard against re-registering if the
+    # addon is reloaded.
+    if _hoverbike_depsgraph_post not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(_hoverbike_depsgraph_post)
+    # Auto-reload track JSON when a track .blend opens.
+    if _hoverbike_load_post not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_hoverbike_load_post)
+
 
 def unregister() -> None:
+    # Detach handlers first so a partially-unregistered state can't fire
+    # a callback into nonexistent properties.
+    try:
+        bpy.app.handlers.depsgraph_update_post.remove(_hoverbike_depsgraph_post)
+    except ValueError:
+        pass
+    try:
+        bpy.app.handlers.load_post.remove(_hoverbike_load_post)
+    except ValueError:
+        pass
+    # Drop any pending debounced rebuild so we don't try to fire after
+    # the operators / scene props are gone.
+    _pending_rebuilds.clear()
+    try:
+        bpy.app.timers.unregister(_run_pending_rebuilds)
+    except (ValueError, TypeError):
+        pass
+
     for cls in reversed(_classes):
         try:
             bpy.utils.unregister_class(cls)
@@ -2328,6 +4147,17 @@ def unregister() -> None:
         "hoverbike_shader_alt_min", "hoverbike_shader_alt_max",
         "hoverbike_shader_path_tint_r", "hoverbike_shader_path_tint_g",
         "hoverbike_shader_path_tint_b",
+        "hoverbike_snap_hover_height",
+        "hoverbike_heightmap_path", "hoverbike_heightmap_size",
+        "hoverbike_heightmap_height", "hoverbike_heightmap_base",
+        "hoverbike_heightmap_subdivisions",
+        "hoverbike_ghost_speed", "hoverbike_ghost_fps",
+        "hoverbike_road_width", "hoverbike_road_lift",
+        "hoverbike_road_blend_radius", "hoverbike_road_samples",
+        "hoverbike_road_smooth_passes",
+        "hoverbike_ramp_length", "hoverbike_ramp_width",
+        "hoverbike_ramp_height", "hoverbike_ramp_approach",
+        "hoverbike_ramp_segments", "hoverbike_ramp_curved",
     ):
         if hasattr(bpy.types.Scene, prop):
             try:
