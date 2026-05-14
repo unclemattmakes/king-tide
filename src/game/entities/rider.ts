@@ -35,6 +35,7 @@ import {
   RiderBoneTag,
   type RiderData,
   type RiderJoint,
+  type RiderJointKind,
   RiderStore,
   RiderTag,
 } from '@/game/components/rider'
@@ -59,13 +60,14 @@ type BoneDim = {
 
 const BONES: Record<RiderBoneName, BoneDim> = {
   pelvis: { halfHeight: 0.18, radius: 0.18, mass: 8 },
-  // Chest is now strictly torso — head is its own bone, no more cosmetic
-  // sphere parented to the chest mesh.
-  chest: { halfHeight: 0.3, radius: 0.22, mass: 16 },
+  // Spine is now TWO segments. Splitting the torso in half makes the
+  // bounce-pitch reactive flex visibly travel up the body instead of
+  // collapsing into a single hinge.
+  abdomen: { halfHeight: 0.14, radius: 0.2, mass: 9 },
+  chest: { halfHeight: 0.16, radius: 0.22, mass: 11 },
   // Head — short capsule (effectively a sphere because halfHeight is
-  // small). Render side draws this with SphereGeometry for the right
-  // silhouette; physics treats it as a capsule for consistency with the
-  // rest of the bone family.
+  // small). Render side draws this as a CUBE + forward visor so rotation
+  // is legible; physics treats it as a capsule for consistency.
   head: { halfHeight: 0.05, radius: 0.16, mass: 5 },
   upper_arm_L: { halfHeight: 0.18, radius: 0.07, mass: 2.5 },
   lower_arm_L: { halfHeight: 0.18, radius: 0.06, mass: 1.8 },
@@ -87,6 +89,9 @@ const BONES: Record<RiderBoneName, BoneDim> = {
 type AnatomyEdge = {
   parent: RiderBoneName
   child: RiderBoneName
+  /** Anatomical-joint kind — drives which tuning entry the live pose
+   *  system reads each tick. */
+  kind: RiderJointKind
   parentLocal: Vec3
   childLocal: Vec3
   /** Target relative rotation of child in parent's frame for the seated
@@ -131,13 +136,17 @@ function buildAnatomy(): AnatomyEdge[] {
   // Yaw around bone Z (rarely used here).
 
   // pelvis rest: capsule along Z (front-back). Pelvis +Y is the rider's up.
-  // chest rest: capsule along Y, sits atop pelvis.
+  // abdomen + chest: capsules along Y, stacked atop pelvis.
   // upper limbs: capsule along Y, hanging from joint.
-  // Spine: chest pitches forward 22°. (Motocross "attack" lean.)
-  const spinePitch = pitch(22)
+  //
+  // Spine is split into TWO joints — lower (pelvis→abdomen) + upper
+  // (abdomen→chest). The bounce-pitch reactive offset is applied at BOTH
+  // so a small flex compounds visibly up the torso. Half the rest pitch
+  // each so the total motocross lean stays the same ~22°.
+  const spineLowerPitch = pitch(11)
+  const spineUpperPitch = pitch(11)
   // Neck: head pitches back slightly relative to forward-leaning chest so
-  // the rider's gaze stays parallel to the ground at speed. Total head
-  // pitch = chest 22° + neck -22° = level head, "looking ahead".
+  // the rider's gaze stays parallel to the ground at speed.
   const neckPitch = pitch(-22)
   // Hips: legs swing forward to reach the footpegs.
   //
@@ -170,15 +179,25 @@ function buildAnatomy(): AnatomyEdge[] {
   // first few ticks compounds quickly. Tune up after visual confirmation
   // that the base case (rider holds pose under gravity) is stable.
   return [
-    // SPINE
+    // SPINE LOWER (pelvis → abdomen)
     {
       parent: 'pelvis',
-      child: 'chest',
-      // pelvis local: top of pelvis (+Y a bit). Pelvis is squat, so top ~0.18.
+      child: 'abdomen',
+      kind: 'spine_lower',
       parentLocal: { x: 0, y: 0.18, z: 0 },
-      // chest local: bottom of chest capsule (-Y by half-length).
-      childLocal: { x: 0, y: -0.3, z: 0 },
-      targetRelRot: spinePitch,
+      childLocal: { x: 0, y: -0.14, z: 0 },
+      targetRelRot: spineLowerPitch,
+      kp: 80,
+      kd: 16,
+    },
+    // SPINE UPPER (abdomen → chest)
+    {
+      parent: 'abdomen',
+      child: 'chest',
+      kind: 'spine_upper',
+      parentLocal: { x: 0, y: 0.14, z: 0 },
+      childLocal: { x: 0, y: -0.16, z: 0 },
+      targetRelRot: spineUpperPitch,
       kp: 80,
       kd: 16,
     },
@@ -186,11 +205,8 @@ function buildAnatomy(): AnatomyEdge[] {
     {
       parent: 'chest',
       child: 'head',
-      // chest local: top of chest capsule.
-      parentLocal: { x: 0, y: 0.3, z: 0 },
-      // head local: bottom of head capsule (head is short — halfHeight=0.05,
-      // radius=0.16, so total height ≈ 0.42m; anchor at -halfHeight-radius
-      // would clip the chest, so anchor right at the chest seam = -halfHeight).
+      kind: 'neck',
+      parentLocal: { x: 0, y: 0.16, z: 0 },
       childLocal: { x: 0, y: -0.16, z: 0 },
       targetRelRot: neckPitch,
       kp: 30,
@@ -200,9 +216,8 @@ function buildAnatomy(): AnatomyEdge[] {
     {
       parent: 'chest',
       child: 'upper_arm_L',
-      // Chest is now 0.3 halfHeight (was 0.35) — shoulder anchor is the
-      // top edge of the chest capsule, offset outward by the radius.
-      parentLocal: { x: 0.22, y: 0.25, z: 0 },
+      kind: 'shoulder_L',
+      parentLocal: { x: 0.22, y: 0.12, z: 0 },
       childLocal: { x: 0, y: 0.18, z: 0 },
       targetRelRot: shoulderPitchL,
       kp: 40,
@@ -211,7 +226,8 @@ function buildAnatomy(): AnatomyEdge[] {
     {
       parent: 'chest',
       child: 'upper_arm_R',
-      parentLocal: { x: -0.22, y: 0.25, z: 0 },
+      kind: 'shoulder_R',
+      parentLocal: { x: -0.22, y: 0.12, z: 0 },
       childLocal: { x: 0, y: 0.18, z: 0 },
       targetRelRot: shoulderPitchR,
       kp: 40,
@@ -221,6 +237,7 @@ function buildAnatomy(): AnatomyEdge[] {
     {
       parent: 'upper_arm_L',
       child: 'lower_arm_L',
+      kind: 'elbow_L',
       parentLocal: { x: 0, y: -0.18, z: 0 },
       childLocal: { x: 0, y: 0.18, z: 0 },
       targetRelRot: elbowPitch,
@@ -230,6 +247,7 @@ function buildAnatomy(): AnatomyEdge[] {
     {
       parent: 'upper_arm_R',
       child: 'lower_arm_R',
+      kind: 'elbow_R',
       parentLocal: { x: 0, y: -0.18, z: 0 },
       childLocal: { x: 0, y: 0.18, z: 0 },
       targetRelRot: elbowPitch,
@@ -240,6 +258,7 @@ function buildAnatomy(): AnatomyEdge[] {
     {
       parent: 'pelvis',
       child: 'upper_leg_L',
+      kind: 'hip_L',
       parentLocal: { x: 0.13, y: -0.05, z: 0 },
       childLocal: { x: 0, y: 0.24, z: 0 },
       targetRelRot: hipPitch,
@@ -249,16 +268,18 @@ function buildAnatomy(): AnatomyEdge[] {
     {
       parent: 'pelvis',
       child: 'upper_leg_R',
+      kind: 'hip_R',
       parentLocal: { x: -0.13, y: -0.05, z: 0 },
       childLocal: { x: 0, y: 0.24, z: 0 },
       targetRelRot: hipPitch,
       kp: 100,
       kd: 18,
     },
-    // KNEES
+    // KNEES (see comments after the L/R block)
     {
       parent: 'upper_leg_L',
       child: 'lower_leg_L',
+      kind: 'knee_L',
       parentLocal: { x: 0, y: -0.24, z: 0 },
       childLocal: { x: 0, y: 0.24, z: 0 },
       targetRelRot: kneePitch,
@@ -268,6 +289,7 @@ function buildAnatomy(): AnatomyEdge[] {
     {
       parent: 'upper_leg_R',
       child: 'lower_leg_R',
+      kind: 'knee_R',
       parentLocal: { x: 0, y: -0.24, z: 0 },
       childLocal: { x: 0, y: 0.24, z: 0 },
       targetRelRot: kneePitch,
@@ -441,6 +463,7 @@ export function createRider(sim: SimWorld, phys: PhysicsWorld, opts: CreateRider
     joints.push({
       parentName: e.parent,
       childName: e.child,
+      kind: e.kind,
       parentEid,
       childEid,
       parentRbHandle: RBHandleStore.must(parentEid).handle,

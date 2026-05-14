@@ -44,6 +44,7 @@ import { ControlIntentStore, RBHandleStore } from '@/game/components'
 import {
   Rider,
   type RiderBoneName,
+  type RiderJointKind,
   type RiderPoseResponse,
   RiderStore,
 } from '@/game/components/rider'
@@ -162,6 +163,79 @@ export const RIDER_POSE_TUNING = {
    *  rest pose only (no IK). Future: ramp to 0 during stun / launch
    *  transitions so the arms flop instead of snapping. */
   handIKStrength: 1,
+
+  /** Rest-pose joint angles (degrees). Read live each tick — the
+   *  calibration scene's slider panel mutates these directly so the rider
+   *  re-poses without a respawn. Single-axis joints store one number;
+   *  shoulder needs pitch + outward roll. */
+  restAngles: {
+    /** Lower spine forward pitch (degrees). Adds with spine_upper for the
+     *  total motocross "attack" lean. */
+    spine_lower: 11,
+    spine_upper: 11,
+    /** Neck pitch — negative tilts the head back so it stays level when
+     *  the chest is leaning forward. */
+    neck: -22,
+    /** Shoulder forward pitch (both sides share). */
+    shoulder_pitch: 75,
+    /** Shoulder outward roll (positive). Left side gets +roll, right gets
+     *  -roll to mirror the stance. */
+    shoulder_roll: 18,
+    /** Elbow bend. Mostly cosmetic because IK overrides. */
+    elbow: -55,
+    /** Hip pitch — negative because of the +Y-end attachment convention
+     *  (positive pitch sends the knee backward into the bike). */
+    hip: -80,
+    /** Knee bend relative to upper leg. Pairs with hip so the lower leg
+     *  drops vertical to the footpeg. */
+    knee: 80,
+  },
+  /** Per-spine-segment fraction of `bouncePitch` applied as a reactive
+   *  offset. Two segments → two entries, summing to 1.0 so the total
+   *  flex equals `bouncePitch`. Tweak the distribution to bias lower or
+   *  upper spine compression. */
+  bounceDistribution: {
+    spine_lower: 0.55,
+    spine_upper: 0.45,
+  },
+}
+
+/** Convert degrees → radians. */
+const D2R = Math.PI / 180
+
+/** Compute the rest-pose `targetRelRot` for a joint kind from the live
+ *  tuning angles. Replaces the static `joint.targetRelRot` that was baked
+ *  at spawn time, so the calibration scene's sliders take effect with no
+ *  respawn. Pure of inputs — same kind + same tuning → same quat. */
+function targetRelRotFor(kind: RiderJointKind): Quat {
+  const a = RIDER_POSE_TUNING.restAngles
+  switch (kind) {
+    case 'spine_lower':
+      return quatAxisAngle(1, 0, 0, a.spine_lower * D2R)
+    case 'spine_upper':
+      return quatAxisAngle(1, 0, 0, a.spine_upper * D2R)
+    case 'neck':
+      return quatAxisAngle(1, 0, 0, a.neck * D2R)
+    case 'shoulder_L':
+      return quatMul(
+        quatAxisAngle(1, 0, 0, a.shoulder_pitch * D2R),
+        quatAxisAngle(0, 1, 0, a.shoulder_roll * D2R),
+      )
+    case 'shoulder_R':
+      return quatMul(
+        quatAxisAngle(1, 0, 0, a.shoulder_pitch * D2R),
+        quatAxisAngle(0, 1, 0, -a.shoulder_roll * D2R),
+      )
+    case 'elbow_L':
+    case 'elbow_R':
+      return quatAxisAngle(1, 0, 0, a.elbow * D2R)
+    case 'hip_L':
+    case 'hip_R':
+      return quatAxisAngle(1, 0, 0, a.hip * D2R)
+    case 'knee_L':
+    case 'knee_R':
+      return quatAxisAngle(1, 0, 0, a.knee * D2R)
+  }
 }
 
 function zeroPoseResponse(r: RiderPoseResponse): void {
@@ -175,16 +249,28 @@ function zeroPoseResponse(r: RiderPoseResponse): void {
   r.headPitch = 0
 }
 
-/** Per-bone reactive rotation offset that the chain walker right-multiplies
- *  onto the joint's `targetRelRot`. Only chest + head get one. */
-function reactiveOffsetFor(name: RiderBoneName, resp: RiderPoseResponse): Quat {
-  if (name === 'chest') {
-    // Bounce around chest's local X (pitch), flow around chest's local Y (yaw).
-    const pitchQ = quatAxisAngle(1, 0, 0, resp.bouncePitch)
+/** Per-joint reactive rotation offset that the chain walker right-multiplies
+ *  onto the live `targetRelRotFor(kind)` quaternion.
+ *
+ *  - **spine_lower / spine_upper** — each gets a fraction of the chest's
+ *    bouncePitch so the flex visibly travels up the torso through both
+ *    segments. The chest joint (spine_upper) ALSO carries flowYaw so the
+ *    upper body twists from the abdomen.
+ *  - **neck** — head yaw + head pitch.
+ *  - All other joints: identity (no reactive offset).
+ */
+function reactiveOffsetFor(kind: RiderJointKind, resp: RiderPoseResponse): Quat {
+  if (kind === 'spine_lower') {
+    const share = RIDER_POSE_TUNING.bounceDistribution.spine_lower
+    return quatAxisAngle(1, 0, 0, resp.bouncePitch * share)
+  }
+  if (kind === 'spine_upper') {
+    const share = RIDER_POSE_TUNING.bounceDistribution.spine_upper
+    const pitchQ = quatAxisAngle(1, 0, 0, resp.bouncePitch * share)
     const yawQ = quatAxisAngle(0, 1, 0, resp.flowYaw)
     return quatMul(yawQ, pitchQ)
   }
-  if (name === 'head') {
+  if (kind === 'neck') {
     const yawQ = quatAxisAngle(0, 1, 0, resp.headYaw)
     const pitchQ = quatAxisAngle(1, 0, 0, resp.headPitch)
     return quatMul(yawQ, pitchQ)
@@ -399,12 +485,15 @@ export function riderPoseSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): 
     })
 
     // Joints are authored parent-before-child in buildAnatomy(), so a
-    // single forward pass resolves the whole tree.
+    // single forward pass resolves the whole tree. `targetRelRotFor`
+    // reads RIDER_POSE_TUNING.restAngles each call, so slider edits in
+    // the calibration scene take effect with no respawn.
     for (const j of rider.joints) {
       const parent = poses.get(j.parentName)
       if (!parent) continue
-      const offset = reactiveOffsetFor(j.childName, rider.poseResponse)
-      const childRot = quatMul(parent.rot, quatMul(j.targetRelRot, offset))
+      const baseRel = targetRelRotFor(j.kind)
+      const offset = reactiveOffsetFor(j.kind, rider.poseResponse)
+      const childRot = quatMul(parent.rot, quatMul(baseRel, offset))
       const parentAnchorWorld = rotByQuat(
         parent.rot,
         j.parentLocal.x,
