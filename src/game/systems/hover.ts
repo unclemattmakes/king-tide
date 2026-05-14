@@ -75,6 +75,14 @@ function probeSurface(
  * Footprint probe: just the height at (x, z), max of ground raycast and
  * wave field. Returns NEGATIVE_INFINITY if neither is found (caller falls
  * back to the center probe — see surface alignment block).
+ *
+ * `lift` raises the ray origin above the bike center so the cast can see
+ * terrain rising ABOVE the bike — critical for ramp anticipation. A bow
+ * probe at t.y casting down will MISS an upcoming ramp face that climbs
+ * higher than the bike's current Y. Lifting the origin lets the same
+ * ray hit that face from above instead of passing through the air over it.
+ * Cast distance grows to compensate so the same set of terrain below
+ * remains reachable.
  */
 function probeSurfaceY(
   phys: PhysicsWorld,
@@ -83,18 +91,20 @@ function probeSurfaceY(
   fromY: number,
   z: number,
   ignore: ReturnType<PhysicsWorld['world']['getRigidBody']>,
+  lift = 0,
 ): number {
-  const ray = new phys.rapier.Ray({ x, y: fromY, z }, { x: 0, y: -1, z: 0 })
+  const originY = fromY + lift
+  const ray = new phys.rapier.Ray({ x, y: originY, z }, { x: 0, y: -1, z: 0 })
   const hit = phys.world.castRay(
     ray,
-    MAX_HOVER_PROBE,
+    MAX_HOVER_PROBE + lift,
     true,
     undefined,
     undefined,
     undefined,
     ignore ?? undefined,
   )
-  const groundY = hit ? fromY - hit.timeOfImpact : Number.NEGATIVE_INFINITY
+  const groundY = hit ? originY - hit.timeOfImpact : Number.NEGATIVE_INFINITY
   const waterY = field ? sampleHeight(field, x, z) : Number.NEGATIVE_INFINITY
   if (groundY === Number.NEGATIVE_INFINITY && waterY === Number.NEGATIVE_INFINITY) {
     return Number.NEGATIVE_INFINITY
@@ -153,8 +163,14 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     //   3. Mixed water/terrain transitions (water lapping a ledge, bow over
     //      a ramp with stern still on water) read continuously instead of
     //      flickering between water-only and ground-only branches.
+    //
+    // `surfaceForwardSlope` is the bow→stern height differential as a
+    // dy/dx ratio along the bike's forward direction (negative ⇒ downslope
+    // ahead). Captured outside the grounded gate so the landing-redirect
+    // block below can read it without re-sampling.
     let surfacePitchTarget = 0
     let surfaceRollTarget = 0
+    let surfaceForwardSlope = 0
     if (isGrounded) {
       // Yaw-only frame for projecting bike-fwd/right into world XZ. Same
       // yaw is recomputed in the kinematic block below; the duplication
@@ -190,8 +206,15 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       const baseFollow = probe.isWater ? stats.surfaceFollow : 1.0
       const followNow = baseFollow * altitudeFactor
 
-      // Probe footprint matches the bike's visual scale (~1.6m × 0.8m).
-      const PROBE_HALF_LENGTH = 0.8
+      // Probe footprint matches the bike's visual scale (~1.6m × 0.8m) at
+      // rest, then extends fore/aft with horizontal speed. The point of
+      // the speed scaling is *anticipation*: at 25 m/s the bow probe is
+      // ~2m out in front of the chassis, so the bike starts pitching to
+      // match the slope it's about to hit, not the flat ground it's
+      // currently on. Width stays small — no need to anticipate sideways
+      // terrain, the bike doesn't strafe.
+      const speedHoriz = Math.hypot(linvel.x, linvel.z)
+      const PROBE_HALF_LENGTH = 0.8 + Math.min(speedHoriz * 0.05, 1.4)
       const PROBE_HALF_WIDTH = 0.4
       // Bike-fwd in world XZ: (sin(yaw), cos(yaw)).
       // Bike-right in world XZ: (cos(yaw), -sin(yaw)).
@@ -199,15 +222,22 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       const fwdZ = cy_
       const rightX = cy_
       const rightZ = -sy_
-      // Each probe casts from the bike's center Y so terrain sticking up in
-      // front of the bike (e.g. a wall, a ramp lip) is correctly intersected.
+      // Each probe casts from PROBE_LIFT *above* the bike center so a
+      // rising surface in front of the bike (a ramp face, a hill) is
+      // correctly intersected from above. Previously the ray started at
+      // t.y and went down, so any terrain whose surface y was higher than
+      // the bike's center was invisible — the bike would charge into ramps
+      // blind, then bang its nose as the hover spring reacted on contact.
+      // With the lift, the bow probe sees the incoming slope and the
+      // pitch target updates *before* the chassis collides.
+      const PROBE_LIFT = 3
       // probeSurfaceY returns max(ground, water) per location; falls back to
       // the center probe's surfaceY if neither hit (bike overhanging an edge
       // with nothing below — read the missing side as flat with the center
       // rather than NaN).
       const fallbackY = probe.surfaceY
       const sampleAt = (px: number, pz: number): number => {
-        const y = probeSurfaceY(phys, field, px, t.y, pz, rb)
+        const y = probeSurfaceY(phys, field, px, t.y, pz, rb, PROBE_LIFT)
         return y === Number.NEGATIVE_INFINITY ? fallbackY : y
       }
       const yBow = sampleAt(t.x + fwdX * PROBE_HALF_LENGTH, t.z + fwdZ * PROBE_HALF_LENGTH)
@@ -217,7 +247,8 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       // Sign convention (YXZ Euler):
       //   bow > stern → bike climbing → nose up → NEGATIVE pitch.
       //   starboard > port → right side high → POSITIVE roll.
-      surfacePitchTarget = followNow * -Math.atan2(yBow - yStern, 2 * PROBE_HALF_LENGTH)
+      surfaceForwardSlope = (yBow - yStern) / (2 * PROBE_HALF_LENGTH)
+      surfacePitchTarget = followNow * -Math.atan(surfaceForwardSlope)
       surfaceRollTarget = followNow * Math.atan2(yStarboard - yPort, 2 * PROBE_HALF_WIDTH)
     }
 
@@ -262,12 +293,8 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // Two independent smoothers, applied to two independent components of
     // the bike's pitch:
     //
-    //   1. SURFACE pitch (wave/ramp following): always tracked at the fast
-    //      rate. This is what makes the bike visibly heave on swells and
-    //      the AI's chassis read as alive on the water — without a separate
-    //      rate, the slow input-release rate (below) would dampen the
-    //      surface signal too on any bike that wasn't actively pitching,
-    //      i.e. all the AI bikes (intent.pitch == 0 every tick).
+    //   1. SURFACE pitch (wave/ramp following): tracked at PITCH_RATE_SURFACE
+    //      below. Different rate grounded vs. airborne — see comment there.
     //   2. INPUT pitch bias (player Q/E or right-stick-Y): held in
     //      `HoverState.inputPitch` and chased toward the player's target
     //      with active/release rates. Release ≈ active/2 so letting off
@@ -276,11 +303,23 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     //
     // Final target pitch = surfacePitchTarget + storedInputPitch, lerped
     // toward by currentPitch at the SURFACE rate.
-    const PITCH_RATE_SURFACE = 4 // 95% of surface target in ~750ms — applies to all bikes
-    const PITCH_RATE_INPUT_ACTIVE = 4 // stick held: chase target at the same rate as surface
+    //
+    // Grounded rate is high (~95% in 300ms): when the bike rolls onto a
+    // ramp or wave face the chassis snaps to match the surface contour
+    // within roughly one bike-length of travel at race speed. Airborne
+    // rate stays gentle so a launch retains its take-off attitude through
+    // the air — the player-input bias and air-control thrust drive
+    // re-orientation while flying, not surface tracking (there's no
+    // surface to track to anyway, surfacePitchTarget stays at 0).
+    const PITCH_RATE_SURFACE_GROUNDED = 10
+    const PITCH_RATE_SURFACE_AIR = 4
+    const pitchRateSurface = isGrounded ? PITCH_RATE_SURFACE_GROUNDED : PITCH_RATE_SURFACE_AIR
+    const PITCH_RATE_INPUT_ACTIVE = 4 // stick held: chase target
     const PITCH_RATE_INPUT_RELEASE = 2 // stick released: ~1.5s decay back to neutral
     const pitchMul = probe.isWater ? 1.0 : 0.7
-    let inputPitchNow = HoverStateStore.get(eid)?.inputPitch ?? 0
+    const prevHover = HoverStateStore.get(eid)
+    const prevGrounded = prevHover?.isGrounded ?? false
+    let inputPitchNow = prevHover?.inputPitch ?? 0
     {
       const speedNow = Math.hypot(linvel.x, linvel.z)
       const speedFrac = Math.min(speedNow / LEAN_SPEED_FULL, 1)
@@ -290,9 +329,10 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         1,
       )
       const leanScale = baseLeanScale + highSpeedFrac * LEAN_HIGH_SPEED_BOOST
-      // Sign convention is empirical (see hoverSystem header). steer=+1
-      // banks INTO the perceived turn; intent.pitch=+1 dives (nose down,
-      // negative pitch angle in our YXZ convention).
+      // Sign convention is empirical: steer=+1 banks INTO the perceived
+      // turn; intent.pitch=-1 (Q) dives (nose down → fwd.y < 0); intent.pitch=+1
+      // (E) lifts (nose up → fwd.y > 0). The negation on `inputPitchTarget`
+      // below maps stick → world pitch in the YXZ-Euler convention used here.
       const targetRoll = surfaceRollTarget + intent.steer * ROLL_LEAN_LIMIT * leanScale
 
       // Smooth the player's pitch INPUT bias separately so its slow release
@@ -314,11 +354,11 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       const currentRoll = Math.atan2(r10, r11)
       const currentPitch = Math.asin(Math.max(-1, Math.min(1, -r12)))
 
-      // Lerp toward target at the surface rate (fast, identical for all
-      // bikes). The slow input release lives inside `inputPitchNow`, not
-      // here — so AI bikes (intent.pitch == 0 always) get full-rate wave
-      // tracking instead of the previous slow path.
-      const pitchAlpha = 1 - Math.exp(-PITCH_RATE_SURFACE * dt)
+      // Lerp toward target at the surface rate. The slow input release
+      // lives inside `inputPitchNow`, not here — so AI bikes
+      // (intent.pitch == 0 always) get full-rate wave tracking instead of
+      // the previous slow path.
+      const pitchAlpha = 1 - Math.exp(-pitchRateSurface * dt)
       const newPitch = currentPitch + (targetPitch - currentPitch) * pitchAlpha
       if (Math.abs(currentRoll - targetRoll) > 1e-5 || Math.abs(currentPitch - newPitch) > 1e-5) {
         const yawAngle = Math.atan2(r02, r22)
@@ -530,17 +570,59 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // accelerate downhill; nose-up (`fwd.y > 0`) → decelerate. The hover
     // spring cancels gravity vertically, so without this the chassis would
     // pitch but coast at the same horizontal speed regardless of wave face.
-    // SLOPE_MOMENTUM well below 1.0 — overpowered slope force on a steep
-    // ramp would just launch the bike past topSpeed.
-    const SLOPE_MOMENTUM = 0.55
+    //
+    // Asymmetric coupling — motocross feel: a strong downhill push (1.0×
+    // gravity) makes hitting a downslope read as the slingshot it is; the
+    // uphill brake stays gentle (0.5×) so a long climb doesn't grind the
+    // bike to a crawl. On a 16° downramp that's +6.9 m/s² of forward push
+    // (enough to easily exceed topSpeed with momentum), while climbing the
+    // same slope costs only -3.4 m/s² of drag, which the bike's 19 m/s²
+    // thrust eats through comfortably.
+    const SLOPE_DOWN_GAIN = 1.0
+    const SLOPE_UP_BRAKE = 0.5
+    const slopeGain = fwd.y < 0 ? SLOPE_DOWN_GAIN : SLOPE_UP_BRAKE
     const fwdHorizLen = Math.hypot(fwd.x, fwd.z)
     if (fwdHorizLen > 0.01) {
-      const aSlope = -fwd.y * GRAVITY * SLOPE_MOMENTUM
+      const aSlope = -fwd.y * GRAVITY * slopeGain
       rb.applyImpulse(
         {
           x: (fwd.x / fwdHorizLen) * aSlope * m * dt,
           y: 0,
           z: (fwd.z / fwdHorizLen) * aSlope * m * dt,
+        },
+        true,
+      )
+    }
+
+    // Landing momentum redirect — the motocross "hit the lip right" reward.
+    // On the airborne→grounded transition, if the bike is descending onto a
+    // downward-sloping surface, convert part of the vertical descent into
+    // forward velocity along the slope direction. The hover spring would
+    // otherwise eat the descent (its damp term kills upward velocity, but
+    // the descending kinetic energy gets traded out for height-error work
+    // — wasted as wobble). Redirecting before the spring does its thing
+    // means a clean ramp landing reads as a slingshot exit, not a slap.
+    //
+    // Gated by all three of:
+    //   - prev tick was airborne (one impulse per landing, not every tick)
+    //   - descent rate is meaningful (|vy| > 2; trivial dips don't qualify)
+    //   - surface ahead of the bike is sloping DOWN (slope < -0.1, i.e.
+    //     >5.7° of downslope)
+    // Plus an alignment factor that scales redirect strength with how
+    // steep the down-slope actually is, so a 6° dip is a hint and a 30°
+    // drop is a payoff.
+    if (!prevGrounded && linvel.y < -2 && surfaceForwardSlope < -0.1 && fwdHorizLen > 0.01) {
+      const descend = -linvel.y // positive m/s
+      const slopeAngle = Math.atan(-surfaceForwardSlope) // positive radians
+      const REDIRECT_MAX = 0.7 // fraction of descent converted at full alignment
+      const REDIRECT_SLOPE_FULL = Math.PI / 4 // 45° of downslope = full payoff
+      const redirectFrac = Math.min(slopeAngle / REDIRECT_SLOPE_FULL, 1) * REDIRECT_MAX
+      const dvForward = descend * redirectFrac
+      rb.applyImpulse(
+        {
+          x: (fwd.x / fwdHorizLen) * dvForward * m,
+          y: 0,
+          z: (fwd.z / fwdHorizLen) * dvForward * m,
         },
         true,
       )
