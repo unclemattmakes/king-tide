@@ -32,19 +32,19 @@
     "@dimforge/rapier3d-compat": "^0.19.3",
     "bitecs": "^0.4.0",
     "gl-matrix": "^3.4.4",
-    "partysocket": "^1.1.18",
+    "partysocket": "^1.1.19",
     "three": "^0.184.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.14",
-    "@playwright/test": "^1.59.1",
-    "@types/node": "^25.6.0",
+    "@biomejs/biome": "^2.4.15",
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.7.0",
     "@types/three": "^0.184.1",
     "ajv": "^8.17.1",
     "partykit": "^0.0.115",
     "typescript": "^6.0.3",
-    "vite": "^8.0.10",
+    "vite": "^8.0.12",
     "vitepress": "^1.6.4",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.6"
   }
 }
