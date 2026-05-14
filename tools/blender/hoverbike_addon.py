@@ -128,6 +128,7 @@ NAME_PATTERNS = [
     (re.compile(r"^ai_spline_(.+)$"), "ai_spline"),
     (re.compile(r"^pickup(_.*)?$"), "pickup_spawn"),
     (re.compile(r"^start_(\d+)$"), "start"),
+    (re.compile(r"^boost_(\d+)$"), "boost_pad"),
 ]
 
 
@@ -213,6 +214,21 @@ def validate_track_scene() -> list[str]:
         for prop in ("half_width", "height"):
             if cp.get(prop) is None:
                 errors.append(f"{cp.name}: missing custom property '{prop}'")
+
+    # Boost pad sanity. Each boost_NN empty needs positive half_width /
+    # half_depth — the runtime's `boostPadSystem` rejects non-positive
+    # dimensions. Strength can be ≥1 (≤1 is a no-op pad which is silly
+    # but not invalid).
+    for bp in by_kind.get("boost_pad", []):
+        for prop in ("half_width", "half_depth", "strength"):
+            if bp.get(prop) is None:
+                errors.append(f"{bp.name}: missing custom property '{prop}'")
+        hw = bp.get("half_width")
+        hd = bp.get("half_depth")
+        if isinstance(hw, (int, float)) and hw <= 0:
+            errors.append(f"{bp.name}: half_width must be > 0 (got {hw}).")
+        if isinstance(hd, (int, float)) and hd <= 0:
+            errors.append(f"{bp.name}: half_depth must be > 0 (got {hd}).")
 
     return errors
 
@@ -350,6 +366,31 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         loc = p.matrix_world.translation
         pickups.append(_b2t(loc.x, loc.y, loc.z))
 
+    # Boost pads. Empty's +Y axis (Blender forward) maps to three.js +Z
+    # (the runtime "boost direction" axis); rotation_euler.z is the yaw
+    # in the horizontal plane. Right-handed rotation around Blender +Z by
+    # `yaw` is identical to right-handed rotation around three.js +Y by
+    # the same angle (both up axes; XY plane is preserved through the
+    # b2t mapping), so the quaternion is `(0, sin(y/2), 0, cos(y/2))`
+    # without a sign flip — same convention used by `start.yaw` so the
+    # bike spawn pose and pad-direction code agree on what "yaw" means.
+    boost_pads: list[dict[str, Any]] = []
+    for bp in by_kind.get("boost_pad", []):
+        loc = bp.matrix_world.translation
+        yaw = float(bp.rotation_euler.z)
+        half = yaw * 0.5
+        qy = math.sin(half)
+        qw = math.cos(half)
+        boost_pads.append(
+            {
+                "position": _b2t(loc.x, loc.y, loc.z),
+                "rotation": {"x": 0.0, "y": qy, "z": 0.0, "w": qw},
+                "halfWidth": float(bp.get("half_width", 3.0)),
+                "halfDepth": float(bp.get("half_depth", 6.0)),
+                "strength": float(bp.get("strength", 1.5)),
+            }
+        )
+
     water = next(iter(by_kind.get("water", [])), None)
     # Water surface y comes from the water_volume_main empty's Z position
     # (Blender Z is the same up axis as three.js Y after the yup export),
@@ -400,7 +441,7 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         "checkpoints": checkpoints,
         "aiSplines": [{"id": "main", "points": [], "anchors": anchors}],
         "pickupSpawns": pickups,
-        "boostPads": [],
+        "boostPads": boost_pads,
     }
     # gateSpacing round-trips through the JSON so the in-app editor's
     # "Auto-place gates from spline" and Blender's gate preview see the
@@ -568,10 +609,19 @@ def _merge_export_json(derived: dict, existing: dict | None) -> dict:
     has_pickup_empties = any(
         o.name.startswith("pickup") and is_object_visible(o) for o in bpy.data.objects
     )
+    # Same opt-in rule for boost pads: if the .blend has any `boost_NN`
+    # empties, Blender owns the boostPads list. Otherwise the editor's
+    # pad placements stay intact through re-exports.
+    has_boost_empties = any(
+        re.match(r"^boost_\d+$", o.name) and is_object_visible(o)
+        for o in bpy.data.objects
+    )
     if has_cp_empties and "checkpoints" in derived:
         merged["checkpoints"] = derived["checkpoints"]
     if has_pickup_empties and "pickupSpawns" in derived:
         merged["pickupSpawns"] = derived["pickupSpawns"]
+    if has_boost_empties and "boostPads" in derived:
+        merged["boostPads"] = derived["boostPads"]
     # `lapsToFinish` defaults to 3 in `derive_track_json`; keep an
     # existing JSON value if the editor set something else.
     if "lapsToFinish" not in merged and "lapsToFinish" in derived:
@@ -1392,6 +1442,76 @@ class HOVERBIKE_OT_rebuild_water_preview(Operator):
         return {"FINISHED"}
 
 
+# ── Water-height authoring ─────────────────────────────────────────────────
+#
+# `water_volume_main`'s Z position IS the in-game sea level — the export
+# already reads it into `water.height` and the JSON-reload writes it back
+# (see derive_track_json + reload_track_from_json). What was missing: a
+# discoverable knob in the panel so authors can scrub the height without
+# hunting for the empty in the outliner. The property below proxies the
+# empty's Z, creates the empty on demand if it doesn't exist yet, and
+# fires the same debounced rebuild handler that follows viewport drags
+# of the empty so the wave preview stays in sync.
+
+WATER_VOLUME_NAME = "water_volume_main"
+
+
+def _ensure_water_volume(scene) -> bpy.types.Object:
+    """Return the canonical water volume empty, creating it if missing.
+    The empty carries the wave knobs as custom props (read by
+    derive_track_json) and its Z position is the world sea level."""
+    obj = bpy.data.objects.get(WATER_VOLUME_NAME)
+    if obj is not None:
+        return obj
+    obj = bpy.data.objects.new(WATER_VOLUME_NAME, None)
+    obj.empty_display_type = "CUBE"
+    obj.empty_display_size = 50.0
+    obj["kind"] = "water"
+    obj["wave_height"] = 1.0
+    obj["wave_freq"] = 0.5
+    obj.location = (0.0, 0.0, 0.0)
+    scene.collection.objects.link(obj)
+    return obj
+
+
+def _get_water_height(self) -> float:
+    obj = bpy.data.objects.get(WATER_VOLUME_NAME)
+    return float(obj.location.z) if obj is not None else 0.0
+
+
+def _set_water_height(self, value: float) -> None:
+    obj = bpy.data.objects.get(WATER_VOLUME_NAME)
+    if obj is None:
+        # Lazily create — first scrub of the slider makes the volume
+        # appear, no separate "Add Water" button needed.
+        obj = _ensure_water_volume(bpy.context.scene)
+    obj.location.z = float(value)
+    # Trigger the same depsgraph-fed rebuild path a viewport drag would,
+    # so the wave preview slides up/down with the slider.
+    _schedule_rebuild("water")
+
+
+class HOVERBIKE_OT_add_water_volume(Operator):
+    """Drop a `water_volume_main` empty at the world origin if the scene
+    doesn't already have one. Sets `kind=water` + sane wave defaults so
+    the new empty round-trips through derive_track_json on the next
+    export. Existing volumes are left alone."""
+
+    bl_idname = "hoverbike.add_water_volume"
+    bl_label = "Add Water Volume"
+    bl_description = "Create a `water_volume_main` empty at world origin (drag in viewport to set sea level)"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        existed = bpy.data.objects.get(WATER_VOLUME_NAME) is not None
+        obj = _ensure_water_volume(context.scene)
+        if existed:
+            self.report({"INFO"}, f"{WATER_VOLUME_NAME} already exists at z={obj.location.z:.2f}.")
+        else:
+            self.report({"INFO"}, f"Created {WATER_VOLUME_NAME} at z=0; drag it up/down to set sea level.")
+        return {"FINISHED"}
+
+
 class HOVERBIKE_OT_hide_water_preview(Operator):
     """Toggle the water-preview collection's visibility off without
     deleting it. Re-run Rebuild to bring it back."""
@@ -1421,37 +1541,109 @@ class HOVERBIKE_OT_hide_water_preview(Operator):
 TURN_PREVIEW_COLLECTION = "_hoverbike_turn_preview"
 TURN_PREVIEW_MESH = "_hoverbike_turn_chevron"
 
-# Default curvature threshold in radians-per-metre. ~0.05 ≈ 50m radius
-# corner; tighter than that gets an indicator. Authors tune via the
-# scene property.
-DEFAULT_TURN_KAPPA = 0.02
+# Default curvature threshold in radians-per-metre. ~0.02 ≈ 50 m corner
+# radius; tighter than that gets an indicator. The previous default of
+# 0.02 missed gentle ovals (200-400 m anchor spacing → broad arcs that
+# never crossed the threshold) so authors saw zero chevrons placed and
+# assumed the operator was broken. Lowering to 0.01 picks up ~100 m
+# radius bends, which is the smallest sweep most JetMoto-style tracks
+# author. Authors tune up if a track has too many indicators.
+DEFAULT_TURN_KAPPA = 0.01
 DEFAULT_TURN_LOOKAHEAD = 20.0  # min metres between consecutive markers
+TURN_INDICATOR_MATERIAL_NAME = "mat_turn_indicator_preview"
 
 
-def _turn_chevron_mesh(name: str, size: float = 2.5):
-    """Chevron arrow that points along local +X. The local +Y axis runs
-    along the curve's tangent; the operator rotates each instance so
-    local +X aligns with the bend direction."""
+def _turn_indicator_material() -> bpy.types.Material:
+    """Bright orange unshaded material so the chevron reads against any
+    terrain colour at any time of day in the viewport. Same family as
+    `mat_track_ramp` so the eye groups them as track features."""
+    mat = bpy.data.materials.get(TURN_INDICATOR_MATERIAL_NAME)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(TURN_INDICATOR_MATERIAL_NAME)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is not None:
+        bsdf.inputs["Base Color"].default_value = (1.0, 0.42, 0.05, 1.0)
+        bsdf.inputs["Roughness"].default_value = 0.4
+        # Self-emit a little so the chevron stays visible in shaded
+        # viewport without depending on scene lighting.
+        try:
+            bsdf.inputs["Emission Color"].default_value = (1.0, 0.42, 0.05, 1.0)
+            bsdf.inputs["Emission Strength"].default_value = 1.5
+        except KeyError:
+            pass
+    return mat
+
+
+def _turn_chevron_mesh(
+    name: str,
+    *,
+    width: float = 12.0,
+    depth: float = 6.0,
+    height: float = 2.5,
+    thickness: float = 0.4,
+):
+    """Solid chevron arrow that points along local +X (the bend
+    direction). Width = wingspan across, depth = how far the tip
+    extends ahead of the wing roots, height = vertical extrusion so the
+    sign reads as a 3D pylon rather than a flat decal lying on the
+    ground.
+
+    Earlier iterations of this gizmo were a 2.5 m wireframe lying flat
+    in XY, invisible against terrain at track scale. Solidifying and
+    standing it upright closes the "I rebuilt the indicators but
+    don't see them" complaint."""
     if name in bpy.data.meshes:
         bpy.data.meshes.remove(bpy.data.meshes[name])
     me = bpy.data.meshes.new(name)
-    s = size
-    verts = [
-        (0,        0,    0),       # 0 tail centre
-        (s,        0,    0),       # 1 head tip
-        (s * 0.6,  s * 0.4, 0),    # 2 wing top-front
-        (s * 0.6, -s * 0.4, 0),    # 3 wing bottom-front
-        (s * 0.3,  s * 0.4, 0),    # 4 wing top-back (parallels for chunk)
-        (s * 0.3, -s * 0.4, 0),    # 5 wing bottom-back
+    hw = width * 0.5
+    d = depth
+    t = thickness
+    h = height
+    # Footprint (top view, +X to the right = bend direction):
+    #
+    #   wing-back-T ────────── wing-tip-T
+    #         │                       \
+    #         │           tip-T ─────── tip-T+depth
+    #         │                       /
+    #   wing-back-B ────────── wing-tip-B
+    #
+    # 8 verts on each Z slab (low + high) → 16 total. Twelve quads:
+    # top, bottom, and outer rim.
+    base = [
+        (-d * 0.4, -hw,        0.0),  # 0 back-left
+        ( 0.0,     -hw * 0.55, 0.0),  # 1 wing-root-left
+        ( d,        0.0,       0.0),  # 2 tip
+        ( 0.0,      hw * 0.55, 0.0),  # 3 wing-root-right
+        (-d * 0.4,  hw,        0.0),  # 4 back-right
+        (-d * 0.1,  hw * 0.45, 0.0),  # 5 inner-right
+        (-d * 0.1,  0.0,       0.0),  # 6 inner-tail
+        (-d * 0.1, -hw * 0.45, 0.0),  # 7 inner-left
     ]
-    # Edges: shaft + chevron wings
-    edges = [
-        (0, 1),       # shaft tail→tip
-        (1, 2), (1, 3),  # head wings outwards
-        (4, 2), (5, 3),  # closing the chevron bracket
-    ]
-    me.from_pydata(verts, edges, [])
+    verts: list[tuple[float, float, float]] = []
+    # Bottom slab at z=0, top slab at z=h. Pylon stands +Z up.
+    for x, y, _z in base:
+        verts.append((x, y, 0.0))
+    for x, y, _z in base:
+        verts.append((x, y, h))
+    # Faces: top + bottom + 8 side rims
+    n = 8
+    faces: list[tuple[int, ...]] = []
+    # Top face (CCW seen from +Z)
+    faces.append((n + 0, n + 1, n + 2, n + 3, n + 4, n + 5, n + 6, n + 7))
+    # Bottom face (reverse winding)
+    faces.append((7, 6, 5, 4, 3, 2, 1, 0))
+    # Side quads — one per outer edge of the chevron silhouette
+    for i in range(n):
+        a = i
+        b = (i + 1) % n
+        faces.append((a, b, n + b, n + a))
+    me.from_pydata(verts, [], faces)
     me.update()
+    for poly in me.polygons:
+        poly.use_smooth = False
+    me.materials.append(_turn_indicator_material())
     return me
 
 
@@ -1597,12 +1789,17 @@ def _rebuild_turn_indicators(scene, *, kappa_threshold: float, min_spacing_m: fl
 
     for i, p in enumerate(peaks):
         obj = bpy.data.objects.new(f"turn_indicator_{i:02d}", me)
-        # Position a little above the spline so the arrow is readable.
-        obj.location = (p["position"][0], p["position"][1], p["position"][2] + 0.5)
+        # Sit the pylon's base on (or just above) the spline's z so it
+        # reads as planted on the surface. The chevron mesh is built
+        # standing upright (+Z height), so no extra fix-up rotation is
+        # needed beyond the in-plane bend-direction rotation.
+        obj.location = (p["position"][0], p["position"][1], p["position"][2] + 0.1)
         obj.rotation_mode = "QUATERNION"
         obj.rotation_quaternion = _chevron_rotation(p["perp"])
         obj.hide_render = True
-        obj.show_in_front = True
+        # Don't ghost-through-terrain by default. The chevron is solid
+        # and big enough to be legible without the X-ray hack.
+        obj.show_in_front = False
         coll.objects.link(obj)
 
     lc = _find_layer_collection(
@@ -1629,12 +1826,29 @@ class HOVERBIKE_OT_rebuild_turn_indicators(Operator):
 
     def execute(self, context):
         scene = context.scene
+        threshold = float(scene.hoverbike_turn_kappa)
         summary = _rebuild_turn_indicators(
             scene,
-            kappa_threshold=float(scene.hoverbike_turn_kappa),
+            kappa_threshold=threshold,
             min_spacing_m=float(scene.hoverbike_turn_min_spacing),
         )
-        self.report({"INFO"}, f"Placed {summary['peak_count']} turn indicators (max |κ|={summary['max_abs_kappa']:.3f})")
+        if summary["peak_count"] == 0:
+            # Common cause: threshold higher than the track's tightest
+            # corner. Surface the hint so the author isn't left
+            # wondering why nothing appeared.
+            max_k = summary["max_abs_kappa"]
+            self.report(
+                {"WARNING"},
+                f"No turns placed — strongest curvature on ai_spline_main is "
+                f"|κ|={max_k:.4f} 1/m, below threshold {threshold:.4f}. Lower "
+                f"the |κ| min in the panel, or sharpen the spline's bends.",
+            )
+        else:
+            self.report(
+                {"INFO"},
+                f"Placed {summary['peak_count']} turn indicators "
+                f"(max |κ|={summary['max_abs_kappa']:.3f}, threshold {threshold:.3f}).",
+            )
         return {"FINISHED"}
 
 
@@ -2074,6 +2288,268 @@ class HOVERBIKE_OT_import_heightmap(Operator):
         return {"FINISHED"}
 
 
+# ── Terrain sculpt helpers ─────────────────────────────────────────────────
+#
+# The bigger templates (HV_Island, HV_Dunes, HV_Mesa) author terrain
+# parametrically through Geometry Nodes. Sculpting that procedural output
+# is a no-op because the GN graph re-evaluates after every brush stroke.
+# These operators flip the workflow to be sculpt-friendly: apply the
+# modifier stack so the verts become editable, then drop the user into
+# Sculpt Mode on the resulting mesh.
+#
+# Smooth-pass operator gives a one-click way to soften an entire terrain
+# without learning Blender's brush UI. Useful right after `Apply Mods`
+# when the procedural sliver-noise looks too aggressive at race scale.
+
+
+def _sculptable_terrain(context) -> bpy.types.Object | None:
+    """Pick the terrain mesh sculpt operations should target. Prefers the
+    user's active selection if it's a `kind=track` mesh; falls back to
+    the largest one in the scene. Returns None if no candidate is found."""
+    ao = context.active_object
+    if (
+        ao is not None
+        and ao.type == "MESH"
+        and ao.get("kind") == "track"
+    ):
+        return ao
+    return _largest_terrain_mesh()
+
+
+class HOVERBIKE_OT_apply_terrain_modifiers(Operator):
+    """Bake every viewport-enabled modifier on the terrain mesh into its
+    vertex data. After this, the `HV_Island` (or any other procedural)
+    GN graph stops contributing — the mesh is a plain editable surface
+    and Sculpt Mode brushes work as expected. One-way: re-tuning the
+    procedural sliders is no longer possible. Save the .blend first."""
+
+    bl_idname = "hoverbike.apply_terrain_modifiers"
+    bl_label = "Apply Terrain Modifiers"
+    bl_description = (
+        "Bake all viewport-enabled modifiers (HV_Island, etc.) into the "
+        "terrain mesh so vertex edits / sculpt brushes survive evaluation"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        terrain = _sculptable_terrain(context)
+        if terrain is None:
+            self.report({"ERROR"}, "No `kind=track` terrain mesh found. Select your terrain first.")
+            return {"CANCELLED"}
+        active_mods = _terrain_active_modifiers(terrain)
+        if not active_mods:
+            self.report({"INFO"}, f"{terrain.name}: no active modifiers to apply.")
+            return {"FINISHED"}
+        applied = _apply_all_viewport_modifiers(terrain)
+        self.report({"INFO"}, f"Applied {len(applied)} modifier(s) on {terrain.name}: {', '.join(applied)}.")
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_enter_sculpt_mode(Operator):
+    """Switch into Sculpt Mode on the active terrain. If the terrain
+    still has procedural modifiers in the stack, this errors out — the
+    GN output would overwrite every brush stroke. Run *Apply Terrain
+    Modifiers* first.
+
+    Sculpt Mode unlocks Blender's full brush set: Draw, Smooth,
+    Flatten, Inflate, Grab, Crease. The Hoverbike addon doesn't ship
+    custom brushes; the goal here is just to remove the friction of
+    finding the right object + mode for terrain shaping."""
+
+    bl_idname = "hoverbike.enter_sculpt_mode"
+    bl_label = "Sculpt Terrain"
+    bl_description = "Select the terrain and switch into Sculpt Mode for hand-shaping"
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        terrain = _sculptable_terrain(context)
+        if terrain is None:
+            self.report({"ERROR"}, "No `kind=track` terrain mesh found.")
+            return {"CANCELLED"}
+        if _terrain_active_modifiers(terrain):
+            self.report(
+                {"ERROR"},
+                f"{terrain.name} has active modifiers — sculpt brushes won't stick. "
+                "Click *Apply Terrain Modifiers* first.",
+            )
+            return {"CANCELLED"}
+        # Make sure the terrain is the active + selected object — Sculpt
+        # Mode operates on the active object only.
+        for o in context.selected_objects:
+            o.select_set(False)
+        terrain.select_set(True)
+        context.view_layer.objects.active = terrain
+        try:
+            bpy.ops.object.mode_set(mode="SCULPT")
+        except RuntimeError as e:
+            self.report({"ERROR"}, f"Couldn't enter Sculpt Mode: {e}")
+            return {"CANCELLED"}
+        self.report(
+            {"INFO"},
+            f"Sculpt Mode on {terrain.name}: F=brush size, Shift+F=strength, Ctrl=invert.",
+        )
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_smooth_terrain(Operator):
+    """Run a Laplacian-smoothing pass over every vertex on the terrain.
+    Cheaper than a manual smooth-brush sweep when you just want to
+    soften the entire heightfield by one notch.
+
+    Iteration count and per-pass weight are scene properties so the
+    user can dial in subtle (1 iter, 0.3 weight) vs. heavy (8 iters,
+    0.8 weight) smoothing without leaving the panel."""
+
+    bl_idname = "hoverbike.smooth_terrain"
+    bl_label = "Smooth Terrain"
+    bl_description = "Apply a global Laplacian smoothing pass to the terrain mesh"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        terrain = _sculptable_terrain(context)
+        if terrain is None:
+            self.report({"ERROR"}, "No `kind=track` terrain mesh found.")
+            return {"CANCELLED"}
+        if _terrain_active_modifiers(terrain):
+            self.report(
+                {"ERROR"},
+                f"{terrain.name} has active modifiers — smooth would be overwritten. Apply first.",
+            )
+            return {"CANCELLED"}
+        scene = context.scene
+        iters = max(1, int(scene.hoverbike_sculpt_smooth_iters))
+        weight = max(0.0, min(1.0, float(scene.hoverbike_sculpt_smooth_weight)))
+
+        # Build a vertex-neighbour map once — one pass over the edges.
+        me = terrain.data
+        neighbours: list[list[int]] = [[] for _ in range(len(me.vertices))]
+        for e in me.edges:
+            a, b = e.vertices
+            neighbours[a].append(b)
+            neighbours[b].append(a)
+        # Z-only smoothing: keep XY locked so the heightfield stays a
+        # heightfield (no horizontal drift). Each pass averages each
+        # vertex's Z toward the mean of its neighbours.
+        zs = [v.co.z for v in me.vertices]
+        for _ in range(iters):
+            new_zs = list(zs)
+            for i, nbrs in enumerate(neighbours):
+                if not nbrs:
+                    continue
+                avg = sum(zs[j] for j in nbrs) / len(nbrs)
+                new_zs[i] = zs[i] * (1.0 - weight) + avg * weight
+            zs = new_zs
+        for i, v in enumerate(me.vertices):
+            v.co.z = zs[i]
+        me.update()
+        self.report({"INFO"}, f"Smoothed {terrain.name}: {iters} pass(es) × {weight:.2f} weight.")
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_subdivide_terrain(Operator):
+    """Subdivide the terrain mesh once (each face becomes 4). Useful
+    after `Apply Terrain Modifiers` if the procedural mesh is too coarse
+    to sculpt detail at race scale. Doubles vertex count per click."""
+
+    bl_idname = "hoverbike.subdivide_terrain"
+    bl_label = "Subdivide Terrain"
+    bl_description = "Subdivide the terrain mesh once (each face → 4)"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        terrain = _sculptable_terrain(context)
+        if terrain is None:
+            self.report({"ERROR"}, "No `kind=track` terrain mesh found.")
+            return {"CANCELLED"}
+        if _terrain_active_modifiers(terrain):
+            self.report(
+                {"ERROR"},
+                f"{terrain.name} has active modifiers — subdivide first applies them.",
+            )
+            return {"CANCELLED"}
+        for o in context.selected_objects:
+            o.select_set(False)
+        terrain.select_set(True)
+        context.view_layer.objects.active = terrain
+        prev_mode = terrain.mode
+        try:
+            bpy.ops.object.mode_set(mode="EDIT")
+            bpy.ops.mesh.select_all(action="SELECT")
+            bpy.ops.mesh.subdivide(number_cuts=1)
+        except RuntimeError as e:
+            self.report({"ERROR"}, f"Subdivide failed: {e}")
+            return {"CANCELLED"}
+        finally:
+            try:
+                bpy.ops.object.mode_set(mode=prev_mode)
+            except RuntimeError:
+                pass
+        self.report({"INFO"}, f"Subdivided {terrain.name} → {len(terrain.data.vertices)} verts.")
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_raise_lower_terrain(Operator):
+    """Raise (or lower) the terrain inside a circle around the 3D cursor.
+    Falls off with smoothstep from the cursor's XY position out to the
+    configured radius. Quick way to bump up a hill or carve a basin
+    without learning the brush UI.
+
+    Direction (raise vs. lower) is the operator's `lower` argument,
+    bound from the panel via two operator instances. Magnitude and
+    radius are scene properties shared with the smooth tool."""
+
+    bl_idname = "hoverbike.raise_lower_terrain"
+    bl_label = "Raise/Lower Terrain"
+    bl_description = "Raise or lower the terrain inside a circle around the 3D cursor"
+    bl_options = {"REGISTER", "UNDO"}
+
+    lower: BoolProperty(  # type: ignore[valid-type]
+        name="Lower",
+        description="Push terrain DOWN by `Δz` instead of up. Same falloff.",
+        default=False,
+    )
+
+    def execute(self, context):
+        terrain = _sculptable_terrain(context)
+        if terrain is None:
+            self.report({"ERROR"}, "No `kind=track` terrain mesh found.")
+            return {"CANCELLED"}
+        if _terrain_active_modifiers(terrain):
+            self.report(
+                {"ERROR"},
+                f"{terrain.name} has active modifiers — apply them before raising/lowering.",
+            )
+            return {"CANCELLED"}
+        scene = context.scene
+        radius = float(scene.hoverbike_sculpt_radius)
+        magnitude = float(scene.hoverbike_sculpt_magnitude)
+        if self.lower:
+            magnitude = -magnitude
+        cursor = scene.cursor.location
+        cx, cy = float(cursor.x), float(cursor.y)
+        me = terrain.data
+        mw = terrain.matrix_world
+        mw_inv = mw.inverted_safe()
+        moved = 0
+        for v in me.vertices:
+            world = mw @ v.co
+            d = math.hypot(world.x - cx, world.y - cy)
+            if d >= radius:
+                continue
+            t = max(0.0, min(1.0, (radius - d) / radius))
+            falloff = t * t * (3.0 - 2.0 * t)  # smoothstep
+            new_world = mathutils.Vector((world.x, world.y, world.z + magnitude * falloff))
+            v.co = mw_inv @ new_world
+            moved += 1
+        me.update()
+        verb = "Lowered" if self.lower else "Raised"
+        self.report(
+            {"INFO"},
+            f"{verb} {moved} verts within {radius:.1f}m of cursor (Δz peak {magnitude:+.2f}m).",
+        )
+        return {"FINISHED"}
+
+
 # ── Spline-aligned cursor + ramp placement helpers ────────────────────────
 #
 # Authoring ramps along a spline used to mean computing the tangent in
@@ -2341,37 +2817,33 @@ class HOVERBIKE_OT_auto_place_ramps(Operator):
             self.report({"WARNING"}, "No curvature peaks above threshold — no ramps placed.")
             return {"CANCELLED"}
 
-        # Build ramp mesh shared across all auto-placed ramps to keep
-        # the .blend lean. Per-instance scale could vary the look later.
+        # Read shared dimensions for every auto-placed ramp from the
+        # standard ramp sliders. Per-instance tweaks happen after the
+        # fact via the GN modifier on each ramp's mesh.
         length = float(scene.hoverbike_ramp_length)
-        width = float(scene.hoverbike_ramp_width)
-        peak_h = float(scene.hoverbike_ramp_height)
-        approach = float(scene.hoverbike_ramp_approach)
-        segments = int(scene.hoverbike_ramp_segments)
-        curved = bool(scene.hoverbike_ramp_curved)
-        if length <= 0 or width <= 0 or peak_h <= 0 or approach >= length:
-            self.report({"ERROR"}, "Invalid ramp dimensions — fix length/width/peak/approach first.")
+        width  = float(scene.hoverbike_ramp_width)
+        height = float(scene.hoverbike_ramp_height)
+        if length <= 0 or width <= 0 or height <= 0:
+            self.report({"ERROR"}, "Invalid ramp dimensions — fix length/width/height first.")
             return {"CANCELLED"}
 
+        # _create_gn_ramp picks `ramp_NN`. Auto-placed ramps used to
+        # carry the `ramp_auto_NN` prefix so re-runs could wipe just
+        # those; with the unified GN-ramp pipeline they share the
+        # `ramp_NN` namespace. Re-runs leave prior placements alone —
+        # delete them by hand if you want a clean re-roll.
         placed = 0
-        for i, p in enumerate(peaks):
+        for p in peaks:
             x, y, _ = p["position"]
             tx, ty, _ = p["tangent"]
             yaw = _yaw_from_tangent_xy(tx, ty)
             z = _cursor_road_z_at(scene, x, y, float(p["position"][2])) + 0.01
-            me = _build_ramp_mesh(
-                f"ramp_auto_{i:02d}_mesh",
-                length=length, width=width, peak_height=peak_h,
-                approach=approach, segments=segments, curved=curved,
+            _create_gn_ramp(
+                scene,
+                location=(x, y, z),
+                rotation_z=yaw,
+                length=length, width=width, height=height,
             )
-            me.materials.append(_ramp_material())
-            obj = bpy.data.objects.new(f"ramp_auto_{i:02d}", me)
-            obj["kind"] = "track"
-            obj["ramp_height"] = peak_h
-            obj["ramp_length"] = length
-            obj.location = (x, y, z)
-            obj.rotation_euler = (0.0, 0.0, yaw)
-            scene.collection.objects.link(obj)
             placed += 1
 
         self.report({"INFO"}, f"Placed {placed} auto-ramps at curvature peaks (|κ| > {scene.hoverbike_auto_ramp_kappa:.3f}).")
@@ -2625,6 +3097,21 @@ def _curve_control_radii(curve_obj: bpy.types.Object) -> tuple[list[float], bool
     return radii, bool(spline.use_cyclic_u)
 
 
+def _curve_control_tilts(curve_obj: bpy.types.Object) -> list[float]:
+    """Return per-control-point tilt (radians) for the curve's first
+    spline. Blender exposes `tilt` on both NURBS / Bezier points; the
+    road tool reads it as an *additive* bank angle on top of the auto
+    bank from curvature, so an author can hand-tune corners without
+    fighting the curvature-driven default. Empty list when the spline
+    has no points."""
+    if not curve_obj.data.splines:
+        return []
+    spline = curve_obj.data.splines[0]
+    if spline.type == "BEZIER":
+        return [float(bp.tilt) for bp in spline.bezier_points]
+    return [float(pt.tilt) for pt in spline.points]
+
+
 def _radius_at_t(radii: list[float], t: float, cyclic: bool) -> float:
     """Linearly interpolate a control-point radius array at parameter
     t in [0, 1]. Cyclic splines wrap around; open splines clamp at
@@ -2644,6 +3131,119 @@ def _radius_at_t(radii: list[float], t: float, cyclic: bool) -> float:
         i1 = min(i0 + 1, n - 1)
     frac = f - int(f)
     return radii[i0] * (1.0 - frac) + radii[i1] * frac
+
+
+def _tilt_at_t(tilts: list[float], t: float, cyclic: bool) -> float:
+    """Linearly interpolate a control-point tilt array (radians) at
+    parameter t in [0, 1]. Same wrap rules as `_radius_at_t` so a
+    radius / tilt pair on the same control point land at the same
+    sample. Returns 0.0 when no tilts are set (preserving backwards
+    compat with curves that predate this knob)."""
+    n = len(tilts)
+    if n == 0:
+        return 0.0
+    if n == 1:
+        return tilts[0]
+    if cyclic:
+        f = (t * n) % n
+        i0 = int(f) % n
+        i1 = (i0 + 1) % n
+    else:
+        f = t * (n - 1)
+        i0 = min(int(f), n - 1)
+        i1 = min(i0 + 1, n - 1)
+    frac = f - int(f)
+    return tilts[i0] * (1.0 - frac) + tilts[i1] * frac
+
+
+def _compute_per_sample_bank(
+    samples: list[dict],
+    *,
+    bank_strength: float,
+    bank_max_rad: float,
+    cyclic: bool = False,
+    smoothing_passes: int = 6,
+) -> None:
+    """Stamp `bank` (signed radians around the road tangent) onto each
+    sample. Positive bank tilts the cross-section so the *inside* of the
+    corner is lower than the outside — racing-game banking convention,
+    matches what JetMoto / WipEout players expect.
+
+    Per-sample curvature is the signed angle between the tangent at i-1
+    and the tangent at i+1, divided by the local arc length. Multiply by
+    `bank_strength`, clamp to `bank_max_rad`, then smooth so the bank
+    transitions in/out of corners are gentle (a hard step would pinch
+    the road mesh).
+
+    Per-control-point `tilt` is added on top so authors who want to
+    hand-tune a specific corner can edit the bezier point's tilt and
+    have it stack with the curvature-driven default.
+
+    `cyclic` controls how the endpoint samples are handled. Open curves
+    (default) duplicate the endpoint tangent so the first/last samples
+    don't pick up a bogus curvature from wrapping around. Closed loops
+    wrap so the join doesn't get a fake straight bit."""
+    n = len(samples)
+    if n < 3 or bank_strength <= 0:
+        for s in samples:
+            s["bank"] = float(s.get("tilt", 0.0))
+        return
+
+    def neighbour_indices(i: int) -> tuple[int, int]:
+        if cyclic:
+            return (i - 1) % n, (i + 1) % n
+        # Open: clamp to endpoints. The endpoint sample's curvature
+        # then collapses to 0 (consecutive segments are identical),
+        # so banks ease to neutral at the road ends.
+        return max(0, i - 1), min(n - 1, i + 1)
+
+    raw_bank: list[float] = [0.0] * n
+    for i in range(n):
+        i_prev, i_next = neighbour_indices(i)
+        ax = samples[i]["x"] - samples[i_prev]["x"]
+        ay = samples[i]["y"] - samples[i_prev]["y"]
+        bx = samples[i_next]["x"] - samples[i]["x"]
+        by = samples[i_next]["y"] - samples[i]["y"]
+        la = math.hypot(ax, ay) or 1e-6
+        lb = math.hypot(bx, by) or 1e-6
+        cross = ax * by - ay * bx
+        dot = ax * bx + ay * by
+        angle = math.atan2(cross, dot)
+        seg = 0.5 * (la + lb)
+        kappa = angle / seg if seg > 0 else 0.0
+        # bank_strength has units of seconds² (effectively v² × time-of-bank);
+        # using a sane physical scale for "speed" — bikes settle around
+        # 50 m/s on straights — gives kappa * v² ≈ comfortable bank rad.
+        ref_v_sq = 50.0 * 50.0
+        bank = kappa * ref_v_sq * bank_strength * 0.001
+        # Clamp signed.
+        if bank > bank_max_rad:
+            bank = bank_max_rad
+        elif bank < -bank_max_rad:
+            bank = -bank_max_rad
+        raw_bank[i] = bank
+
+    # Smooth with a 1-2-1 binomial pass — bank should ease into corners,
+    # not snap. Open-ended profiles use clamped boundaries; closed loops
+    # wrap. Authors typically work with open road_curve_main, but the AI
+    # spline (which can drive the road in single-curve mode) is usually
+    # cyclic.
+    smoothed = list(raw_bank)
+    for _ in range(max(0, int(smoothing_passes))):
+        new = [0.0] * n
+        for i in range(n):
+            if cyclic:
+                l = smoothed[(i - 1) % n]
+                r = smoothed[(i + 1) % n]
+            else:
+                l = smoothed[i - 1] if i > 0 else smoothed[i]
+                r = smoothed[i + 1] if i < n - 1 else smoothed[i]
+            new[i] = (l + 2.0 * smoothed[i] + r) * 0.25
+        smoothed = new
+
+    for i, s in enumerate(samples):
+        author_tilt = float(s.get("tilt", 0.0))
+        s["bank"] = smoothed[i] + author_tilt
 
 
 def _sample_road_path(
@@ -2675,6 +3275,7 @@ def _sample_road_path(
         return []
 
     radii, cyclic = _curve_control_radii(curve_obj)
+    tilts = _curve_control_tilts(curve_obj)
     samples: list[dict] = []
     denom = max(1, n_samples - 1)
     j = 0
@@ -2693,7 +3294,12 @@ def _sample_road_path(
         tl = math.hypot(dx, dy) or 1.0
         t_norm = i / denom
         r = _radius_at_t(radii, t_norm, cyclic)
-        samples.append({"x": x, "y": y, "z": 0.0, "tx": dx / tl, "ty": dy / tl, "r": r, "t": t_norm})
+        tilt = _tilt_at_t(tilts, t_norm, cyclic)
+        samples.append({
+            "x": x, "y": y, "z": 0.0,
+            "tx": dx / tl, "ty": dy / tl,
+            "r": r, "t": t_norm, "tilt": tilt,
+        })
 
     # Raycast each sample's (x, y) downward onto the scene. The depsgraph
     # has to be re-fetched *after* the preview collections are hidden,
@@ -2789,19 +3395,76 @@ def _build_road_strip_mesh(
         r = float(s.get("r", 1.0))
         hw = half_w * r
         outer_h = outer_half * r
+        # Bank: rotate the cross-section around the tangent axis so the
+        # outside edge of a corner lifts and the inside drops. `bank`
+        # is signed radians; positive bank corresponds to a positive
+        # signed-curvature corner (CCW / left turn in Blender XY where
+        # the cross product of consecutive segments is positive).
+        #
+        # Geometry: for tangent (tx, ty), the cross-section perp
+        # `(nx, ny) = (-ty, tx)` points toward the LEFT side of the
+        # road (the *inside* of a left turn). Racing-line banking
+        # convention: tilt so the inside is LOWER than the outside.
+        # Therefore positive bank should LOWER the +nx side and LIFT
+        # the -nx side — opposite the naive "lat * bank" lift.
+        #
+        # We use the linear-tangent approximation (sin ≈ bank) since
+        # at the configured 25° max the error is < 3% and it's one
+        # less trig per vertex.
+        bank = float(s.get("bank", 0.0))
+
+        def _lift_for(lat: float) -> float:
+            # `lat` positive = +nx side (left / inside of left turn);
+            # negative = -nx side (right / outside of left turn).
+            # Negating ensures positive bank tilts the road INTO the
+            # corner as authors expect.
+            return -lat * bank
+
         if has_curbs:
             z_curb = z_road + curb_height
-            verts.append((s["x"] - nx * outer_h, s["y"] - ny * outer_h, z_curb))
-            verts.append((s["x"] - nx * hw,      s["y"] - ny * hw,      z_road))
-            verts.append((s["x"] + nx * hw,      s["y"] + ny * hw,      z_road))
-            verts.append((s["x"] + nx * outer_h, s["y"] + ny * outer_h, z_curb))
+            verts.append((
+                s["x"] - nx * outer_h,
+                s["y"] - ny * outer_h,
+                z_curb + _lift_for(-outer_h),
+            ))
+            verts.append((
+                s["x"] - nx * hw,
+                s["y"] - ny * hw,
+                z_road + _lift_for(-hw),
+            ))
+            verts.append((
+                s["x"] + nx * hw,
+                s["y"] + ny * hw,
+                z_road + _lift_for(hw),
+            ))
+            verts.append((
+                s["x"] + nx * outer_h,
+                s["y"] + ny * outer_h,
+                z_curb + _lift_for(outer_h),
+            ))
         else:
-            verts.append((s["x"] - nx * outer_h, s["y"] - ny * outer_h, z_road))
-            verts.append((s["x"] + nx * outer_h, s["y"] + ny * outer_h, z_road))
+            verts.append((
+                s["x"] - nx * outer_h,
+                s["y"] - ny * outer_h,
+                z_road + _lift_for(-outer_h),
+            ))
+            verts.append((
+                s["x"] + nx * outer_h,
+                s["y"] + ny * outer_h,
+                z_road + _lift_for(outer_h),
+            ))
         if has_thickness:
             z_bot = z_road - thickness
-            verts.append((s["x"] - nx * outer_h, s["y"] - ny * outer_h, z_bot))
-            verts.append((s["x"] + nx * outer_h, s["y"] + ny * outer_h, z_bot))
+            verts.append((
+                s["x"] - nx * outer_h,
+                s["y"] - ny * outer_h,
+                z_bot + _lift_for(-outer_h),
+            ))
+            verts.append((
+                s["x"] + nx * outer_h,
+                s["y"] + ny * outer_h,
+                z_bot + _lift_for(outer_h),
+            ))
 
     faces: list[tuple[int, int, int, int]] = []
     face_mats: list[int] = []
@@ -3116,6 +3779,22 @@ class HOVERBIKE_OT_build_road(Operator):
         curb_height = float(scene.hoverbike_road_curb_height)
         curb_stripe = float(scene.hoverbike_road_curb_stripe_length)
         thickness = float(scene.hoverbike_road_thickness)
+        bank_strength = float(scene.hoverbike_road_bank_strength)
+        bank_max_rad = math.radians(float(scene.hoverbike_road_bank_max_deg))
+
+        # Stamp the bank angle on each sample. Mutates `samples` in
+        # place to add an `s["bank"]` field that `_build_road_strip_mesh`
+        # consumes when laying out the cross-section. The curve's
+        # cyclic flag matters here — a closed loop wraps so the join
+        # doesn't get a fake straight, while an open road clamps so
+        # the endpoints don't pick up a wrap-around bogus curvature.
+        curve_cyclic = bool(curve_obj.data.splines and curve_obj.data.splines[0].use_cyclic_u)
+        _compute_per_sample_bank(
+            samples,
+            bank_strength=bank_strength,
+            bank_max_rad=bank_max_rad,
+            cyclic=curve_cyclic,
+        )
 
         # Deform terrain first, then build the road strip — that way the
         # road's Z (sampled before deformation) sits on the *original*
@@ -3168,123 +3847,247 @@ class HOVERBIKE_OT_build_road(Operator):
 
 # ── Ramp tool ──────────────────────────────────────────────────────────────
 #
-# Build a parametric stunt ramp at the 3D cursor. The ramp is a solid
-# wedge with an optional flat run-up before the launch kicker, tagged
-# `kind=track` so it ships out as a collidable surface, and shaded with
-# `mat_track_ramp` (saturated orange — same colour family as the turn-
-# indicator chevrons so the eye reads "track feature" instantly).
+# Geometry-Nodes-driven simple wedge ramp. Each ramp is an empty + child
+# mesh:
 #
-# Geometry: subdivided along ±Y (travel direction). Width is along ±X.
-# The bottom face stays at z=0; the top face rises along a smoothstep
-# curve from the end of the approach to the launch lip. Use the
-# `Curved kicker` toggle off for a plain linear wedge instead.
+#   ramp_NN       — parent empty. G/R/S in the viewport positions /
+#                    aims / scales the whole ramp. The empty's Z-axis
+#                    rotation aims the ramp's launch direction.
+#                    kind="ramp" so Blender-side tooling reads it as one
+#                    logical thing.
+#   ramp_NN_mesh  — child mesh with the HV_Ramp Geometry-Nodes modifier.
+#                    Three inputs (Length, Width, Height) drive a clean
+#                    linear wedge — sharp leading edge at z=0, vertical
+#                    back wall of height = Height. Mesh updates live as
+#                    the sliders / empty transform change.
+#                    kind="track" so the runtime trimesh-collider
+#                    attaches at GLB-load time.
 
-RAMP_OBJECT_PREFIX = "ramp_"
-
-
-def _ramp_height_profile(y: float, *, length: float, approach: float, peak: float, curved: bool) -> float:
-    """Z elevation of the top face at distance `y` along the ramp.
-    Approach run-up stays at 0; the kicker rises to `peak` at y=length.
-    Smoothstep curve makes the launch lip naturally tangent to vertical
-    so the bike's nose lofts cleanly off the end."""
-    if y <= approach or length <= approach:
-        return 0.0
-    t = (y - approach) / (length - approach)
-    t = max(0.0, min(1.0, t))
-    if curved:
-        return peak * t * t * (3.0 - 2.0 * t)
-    return peak * t
+HV_RAMP_GROUP_NAME = "HV_Ramp"
 
 
-RAMP_FOUNDATION_DEPTH = 0.3  # metres — bottom slab thickness so the
-# wedge always has volume (top and bottom never coincide, no z-fighting)
+def _ensure_hv_ramp_group() -> bpy.types.NodeTree:
+    """Construct the `HV_Ramp` Geometry-Nodes group from scratch and
+    return the NodeTree. Idempotent — drops the prior group first so
+    we always rebuild from the current code.
+
+    Topology: build a Mesh Cube sized (Width, Length, Height), shift it
+    so the bottom face sits at z=0, then per-vertex move TOP verts to
+    z = Height × ((y + L/2) / L). This collapses the front-top edge to
+    the front-bottom edge (z=0 at the leading edge) and leaves the
+    back-top edge at z=Height. Result: a clean linear wedge with no
+    foundation slab, no profile curve, no taper math.
+
+    The graph was iterated live in Blender via MCP and verified
+    numerically before being baked here."""
+    if HV_RAMP_GROUP_NAME in bpy.data.node_groups:
+        bpy.data.node_groups.remove(bpy.data.node_groups[HV_RAMP_GROUP_NAME])
+    g = bpy.data.node_groups.new(HV_RAMP_GROUP_NAME, "GeometryNodeTree")
+
+    def add_socket(name, in_out, stype, default=None, mn=None, mx=None):
+        s = g.interface.new_socket(name, in_out=in_out, socket_type=stype)
+        if default is not None: s.default_value = default
+        if mn is not None: s.min_value = mn
+        if mx is not None: s.max_value = mx
+        return s
+
+    add_socket("Geometry", "INPUT",  "NodeSocketGeometry")
+    add_socket("Length",   "INPUT",  "NodeSocketFloat", 12.0, 0.1, 500.0)
+    add_socket("Width",    "INPUT",  "NodeSocketFloat",  8.0, 0.1, 200.0)
+    add_socket("Height",   "INPUT",  "NodeSocketFloat",  3.0, 0.0, 200.0)
+    add_socket("Geometry", "OUTPUT", "NodeSocketGeometry")
+
+    def add(kind, x, y, **kw):
+        n = g.nodes.new(kind); n.location = (x, y)
+        for k, v in kw.items():
+            setattr(n, k, v)
+        return n
+
+    gi = add("NodeGroupInput",  -1500, 0)
+    go = add("NodeGroupOutput",  1200, 0)
+
+    # Mesh Cube (W, L, H). Vertices Z=2 keeps it a hollow shell; the
+    # top + bottom faces are single quads, no interior subdivisions.
+    n_size = add("ShaderNodeCombineXYZ", -1300, 200)
+    g.links.new(gi.outputs["Width"],  n_size.inputs["X"])
+    g.links.new(gi.outputs["Length"], n_size.inputs["Y"])
+    g.links.new(gi.outputs["Height"], n_size.inputs["Z"])
+    n_cube = add("GeometryNodeMeshCube", -1100, 0)
+    g.links.new(n_size.outputs[0], n_cube.inputs["Size"])
+    n_cube.inputs["Vertices X"].default_value = 2
+    n_cube.inputs["Vertices Y"].default_value = 2
+    n_cube.inputs["Vertices Z"].default_value = 2
+
+    # Shift so the bottom face sits at z=0 (offset by +Height/2).
+    n_half_h = add("ShaderNodeMath", -1100, -250, operation="DIVIDE")
+    n_half_h.inputs[1].default_value = 2.0
+    g.links.new(gi.outputs["Height"], n_half_h.inputs[0])
+    n_shift_vec = add("ShaderNodeCombineXYZ", -900, -250)
+    g.links.new(n_half_h.outputs[0], n_shift_vec.inputs["Z"])
+    n_shift = add("GeometryNodeSetPosition", -700, 0)
+    g.links.new(n_cube.outputs["Mesh"], n_shift.inputs["Geometry"])
+    g.links.new(n_shift_vec.outputs[0], n_shift.inputs["Offset"])
+
+    # Per-vertex Position + classifier (is_top = z > Height/2).
+    n_pos = add("GeometryNodeInputPosition", -500, -200)
+    n_xyz = add("ShaderNodeSeparateXYZ",     -300, -200)
+    g.links.new(n_pos.outputs["Position"], n_xyz.inputs["Vector"])
+    n_is_top = add("FunctionNodeCompare", -100, -300, data_type="FLOAT", operation="GREATER_THAN")
+    g.links.new(n_xyz.outputs["Z"], n_is_top.inputs["A"])
+    g.links.new(n_half_h.outputs[0], n_is_top.inputs["B"])
+
+    # factor = (y + L/2) / L  (per-vertex normalized arc-length)
+    n_half_l = add("ShaderNodeMath", -500, -500, operation="DIVIDE")
+    n_half_l.inputs[1].default_value = 2.0
+    g.links.new(gi.outputs["Length"], n_half_l.inputs[0])
+    n_yshift = add("ShaderNodeMath", -300, -500, operation="ADD")
+    g.links.new(n_xyz.outputs["Y"], n_yshift.inputs[0])
+    g.links.new(n_half_l.outputs[0], n_yshift.inputs[1])
+    n_factor = add("ShaderNodeMath", -100, -500, operation="DIVIDE", use_clamp=True)
+    g.links.new(n_yshift.outputs[0], n_factor.inputs[0])
+    g.links.new(gi.outputs["Length"], n_factor.inputs[1])
+
+    # top_z = Height × factor — linear ramp from 0 (entry) to Height (back).
+    n_top_z = add("ShaderNodeMath", 100, -500, operation="MULTIPLY")
+    g.links.new(gi.outputs["Height"], n_top_z.inputs[0])
+    g.links.new(n_factor.outputs[0],  n_top_z.inputs[1])
+
+    # Switch z by is_top: top verts → top_z, bottom verts → 0 (literal default)
+    n_switch = add("GeometryNodeSwitch", 400, -300, input_type="FLOAT")
+    g.links.new(n_is_top.outputs["Result"], n_switch.inputs["Switch"])
+    n_switch.inputs["False"].default_value = 0.0
+    g.links.new(n_top_z.outputs[0], n_switch.inputs["True"])
+
+    # Final position: keep X/Y, replace Z.
+    n_combine = add("ShaderNodeCombineXYZ", 600, -200)
+    g.links.new(n_xyz.outputs["X"], n_combine.inputs["X"])
+    g.links.new(n_xyz.outputs["Y"], n_combine.inputs["Y"])
+    g.links.new(n_switch.outputs["Output"], n_combine.inputs["Z"])
+    n_setpos = add("GeometryNodeSetPosition", 800, 0)
+    g.links.new(n_shift.outputs["Geometry"], n_setpos.inputs["Geometry"])
+    g.links.new(n_combine.outputs[0], n_setpos.inputs["Position"])
+
+    g.links.new(n_setpos.outputs["Geometry"], go.inputs["Geometry"])
+    return g
 
 
-def _build_ramp_mesh(
-    name: str,
+def _socket_id_map(node_tree: bpy.types.NodeTree) -> dict[str, str]:
+    """Map socket display name → identifier for a GN group's INPUT
+    sockets. GN modifier inputs are addressed by `mod[identifier]`,
+    not by display name; identifiers are auto-generated like
+    `Socket_2` and survive across reloads but read poorly. This
+    helper hides the identifier dance from the rest of the code."""
+    out: dict[str, str] = {}
+    for s in node_tree.interface.items_tree:
+        if s.in_out == "INPUT":
+            out[s.name] = s.identifier
+    return out
+
+
+def _create_gn_ramp(
+    scene,
     *,
+    location: tuple[float, float, float],
+    rotation_z: float,
     length: float,
     width: float,
-    peak_height: float,
-    approach: float,
-    segments: int,
-    curved: bool,
-) -> bpy.types.Mesh:
-    """Build a solid wedge in local coords. Length along +Y, width
-    along ±X, height along +Z. The bottom face sits `RAMP_FOUNDATION_DEPTH`
-    below the local origin so the run-up at y < approach still has
-    real volume — without it the top and bottom faces collapse to
-    a single plane and z-fight against the road / terrain underneath.
+    height: float,
+) -> tuple[bpy.types.Object, bpy.types.Object]:
+    """Spawn a GN-driven ramp pair (empty + mesh) at `location`, with
+    the empty's Z-axis rotated by `rotation_z` so G/R/S on the empty
+    positions/aims the ramp.
 
-    Face winding is consistent: top normals +Z (drivable surface),
-    bottom normals -Z, sides outward, so backface culling and normal
-    smoothing read correctly."""
-    if name in bpy.data.meshes:
-        bpy.data.meshes.remove(bpy.data.meshes[name])
-    me = bpy.data.meshes.new(name)
-    half_w = width / 2.0
-    n = max(2, int(segments))
-    bot_z = -RAMP_FOUNDATION_DEPTH
+    Returns (empty, mesh_obj) so callers can wire them up further
+    (e.g. select the empty for the user)."""
+    group = _ensure_hv_ramp_group()
+    name = _next_ramp_object_name()
 
-    verts: list[tuple[float, float, float]] = []
-    # Bottom row first (row stride 2). i goes from 0 to n inclusive.
-    for i in range(n + 1):
-        y = (i / n) * length
-        verts.append((-half_w, y, bot_z))
-        verts.append(( half_w, y, bot_z))
-    top_start = len(verts)
-    # Top row: height profile, with a small floor so the run-up isn't
-    # coincident with the bottom (≥ 1mm above the local origin keeps
-    # the wedge non-degenerate even for approach == length).
-    for i in range(n + 1):
-        y = (i / n) * length
-        z = _ramp_height_profile(
-            y, length=length, approach=approach, peak=peak_height, curved=curved
+    empty = bpy.data.objects.new(name, None)
+    empty.empty_display_type = "ARROWS"
+    empty.empty_display_size = max(2.0, min(6.0, length * 0.3))
+    empty["kind"] = "ramp"
+    empty["ramp_height"] = float(height)
+    empty["ramp_length"] = float(length)
+    empty.location = location
+    empty.rotation_euler = (0.0, 0.0, float(rotation_z))
+    scene.collection.objects.link(empty)
+
+    me = bpy.data.meshes.new(f"{name}_mesh_data")
+    mesh_obj = bpy.data.objects.new(f"{name}_mesh", me)
+    mesh_obj.parent = empty
+    mesh_obj.matrix_parent_inverse.identity()
+    # Mesh inherits the empty's transform via parenting. Empty carries
+    # kind=ramp; the mesh ships into the GLB with kind=track so the
+    # runtime collider attaches.
+    mesh_obj["kind"] = "track"
+    mesh_obj.data.materials.append(_ramp_material())
+    scene.collection.objects.link(mesh_obj)
+
+    mod = mesh_obj.modifiers.new(name="HV_Ramp", type="NODES")
+    mod.node_group = group
+    ids = _socket_id_map(group)
+    mod[ids["Length"]] = float(length)
+    mod[ids["Width"]]  = float(width)
+    mod[ids["Height"]] = float(height)
+
+    mesh_obj.update_tag()
+    return empty, mesh_obj
+
+
+class HOVERBIKE_OT_add_ramp(Operator):
+    """Drop a wedge ramp at the 3D cursor. Two objects appear:
+
+        ramp_NN       — parent empty. G/R/S to position / aim / scale.
+                         Empty's Z-axis rotation aims the ramp.
+        ramp_NN_mesh  — kind=track mesh with the HV_Ramp GN modifier.
+                         Three sliders (Length, Width, Height) drive a
+                         clean linear wedge: sharp leading edge at
+                         ground level, vertical back wall = Height.
+                         Mesh re-evaluates live when sliders change.
+
+    Tune Length / Width / Height from the panel BEFORE clicking. To
+    retune a placed ramp without affecting siblings, open the
+    Modifiers tab on its mesh and edit the inputs directly."""
+
+    bl_idname = "hoverbike.add_ramp"
+    bl_label = "Add Ramp"
+    bl_description = "Drop a parametric wedge ramp at the 3D cursor"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scene = context.scene
+        length = float(scene.hoverbike_ramp_length)
+        width  = float(scene.hoverbike_ramp_width)
+        height = float(scene.hoverbike_ramp_height)
+
+        if length <= 0 or width <= 0 or height <= 0:
+            self.report({"ERROR"}, "Length / width / height must be positive.")
+            return {"CANCELLED"}
+
+        cursor = scene.cursor
+        empty, mesh_obj = _create_gn_ramp(
+            scene,
+            location=tuple(cursor.location),
+            rotation_z=float(cursor.rotation_euler.z),
+            length=length, width=width, height=height,
         )
-        verts.append((-half_w, y,  max(z, 0.0)))
-        verts.append(( half_w, y,  max(z, 0.0)))
 
-    faces: list[tuple[int, ...]] = []
-    # Top (drivable surface) — winding so normal faces +Z.
-    # For verts a=(-hw,y0,z), b=(hw,y0,z), c=(-hw,y1,z'), d=(hw,y1,z'):
-    # (a, b, d, c) winds CCW from above → +Z normal.
-    for i in range(n):
-        a = top_start + i * 2
-        faces.append((a, a + 1, a + 3, a + 2))
-    # Bottom — same vertex topology but reversed winding for -Z normal.
-    for i in range(n):
-        a = i * 2
-        faces.append((a, a + 2, a + 3, a + 1))
-    # Left side (x = -half_w): rows i and i+1, top + bottom.
-    # Verts: bot_i (-hw,y0,bot), top_i (-hw,y0,top), top_{i+1} (-hw,y1,top'),
-    # bot_{i+1} (-hw,y1,bot). Looking from -X (outside), CCW winding
-    # gives -X normal.
-    for i in range(n):
-        bot_a = i * 2
-        bot_b = bot_a + 2
-        top_a = top_start + i * 2
-        top_b = top_a + 2
-        faces.append((bot_a, top_a, top_b, bot_b))
-    # Right side (x = +half_w). Reverse winding so normal faces +X.
-    for i in range(n):
-        bot_a = i * 2 + 1
-        bot_b = bot_a + 2
-        top_a = top_start + i * 2 + 1
-        top_b = top_a + 2
-        faces.append((bot_a, bot_b, top_b, top_a))
-    # Back cap at y = 0 (verts 0, 1, top_start, top_start+1).
-    # Looking from -Y, CCW: (1, 0, top_start, top_start+1).
-    faces.append((1, 0, top_start, top_start + 1))
-    # Front cap at y = length (last 4 verts).
-    last_bot = n * 2
-    last_top = top_start + n * 2
-    faces.append((last_bot, last_bot + 1, last_top + 1, last_top))
+        # Select the empty so the next G/R/S keystroke moves the whole
+        # ramp without the user having to click in the outliner.
+        for o in context.selected_objects:
+            o.select_set(False)
+        empty.select_set(True)
+        context.view_layer.objects.active = empty
 
-    me.from_pydata(verts, [], faces)
-    me.update()
-    for poly in me.polygons:
-        poly.use_smooth = False  # crisp wedge silhouette
-    return me
+        self.report(
+            {"INFO"},
+            f"Added {empty.name}: {length:.1f}m × {width:.1f}m × {height:.1f}m. "
+            f"Edit dimensions on the mesh's HV_Ramp modifier.",
+        )
+        return {"FINISHED"}
+
+
+RAMP_OBJECT_PREFIX = "ramp_"
 
 
 def _next_ramp_object_name() -> str:
@@ -3298,68 +4101,237 @@ def _next_ramp_object_name() -> str:
         i += 1
 
 
-class HOVERBIKE_OT_add_ramp(Operator):
-    """Drop a parametric stunt-ramp wedge at the 3D cursor. Solid mesh
-    tagged `kind=track` so it's collidable on export. Tune length /
-    width / peak height / approach run-up in the panel; toggle *Curved
-    kicker* for a smoothstep launch profile vs. a flat linear wedge."""
+# ── Boost pads ─────────────────────────────────────────────────────────────
+#
+# Author boost pads as `boost_NN` empties — same hybrid-pipeline pattern as
+# `cp_NN` checkpoints. Each empty's local +Y axis is the boost direction
+# (matches three.js +Z forward via the b2t mapping), Z position is the
+# pad's height in world coords, custom props carry the runtime knobs.
+#
+# Visual: a flat slab mesh, child of the empty so it transforms with it.
+# The slab's geometry tracks `half_width` / `half_depth` so authors can
+# scrub those sliders and watch the pad resize in the viewport.
 
-    bl_idname = "hoverbike.add_ramp"
-    bl_label = "Add Ramp"
-    bl_description = "Place a kind=track stunt ramp at the 3D cursor"
+BOOST_PAD_OBJECT_PREFIX = "boost_"
+BOOST_PAD_GIZMO_MATERIAL = "mat_boost_pad_preview"
+
+
+def _boost_pad_material() -> bpy.types.Material:
+    """Cyan emissive slab material so the pad reads as a glowing boost
+    plate against any terrain. Same colour family as the in-game
+    boost-pad helper (`makePadHelper` in editor-helpers.ts)."""
+    mat = bpy.data.materials.get(BOOST_PAD_GIZMO_MATERIAL)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(BOOST_PAD_GIZMO_MATERIAL)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is not None:
+        bsdf.inputs["Base Color"].default_value = (0.20, 0.85, 1.0, 1.0)
+        bsdf.inputs["Roughness"].default_value = 0.4
+        try:
+            bsdf.inputs["Emission Color"].default_value = (0.20, 0.85, 1.0, 1.0)
+            bsdf.inputs["Emission Strength"].default_value = 1.5
+        except KeyError:
+            pass
+    return mat
+
+
+def _build_boost_pad_gizmo_mesh(name: str, *, half_width: float, half_depth: float) -> bpy.types.Mesh:
+    """Pad slab in local +Y-forward coords: a flat rectangle in the XY
+    plane (slab thickness ~0.1 m) with a forward-pointing arrow on top
+    so the boost direction is unambiguous in the viewport. The slab
+    matches the runtime collider's `halfWidth × halfDepth` bounds so
+    visual placement reflects the actual trigger volume."""
+    if name in bpy.data.meshes:
+        bpy.data.meshes.remove(bpy.data.meshes[name])
+    me = bpy.data.meshes.new(name)
+    hw = half_width
+    hd = half_depth
+    z_lo = 0.0
+    z_hi = 0.1
+    arr_len = hd * 0.6
+    arr_w = hw * 0.4
+    verts = [
+        # Slab bottom rect (4)
+        (-hw, -hd, z_lo), ( hw, -hd, z_lo),
+        ( hw,  hd, z_lo), (-hw,  hd, z_lo),
+        # Slab top rect (4)
+        (-hw, -hd, z_hi), ( hw, -hd, z_hi),
+        ( hw,  hd, z_hi), (-hw,  hd, z_hi),
+        # Top-face arrow (3) — points along +Y so the empty's +Y
+        # carries the visual direction.
+        (-arr_w, -arr_len * 0.4, z_hi + 0.02),
+        ( arr_w, -arr_len * 0.4, z_hi + 0.02),
+        ( 0.0,    arr_len,        z_hi + 0.02),
+    ]
+    faces = [
+        (0, 1, 2, 3),       # bottom
+        (4, 7, 6, 5),       # top (CCW from +Z)
+        (0, 4, 5, 1),       # -Y side
+        (1, 5, 6, 2),       # +X side
+        (2, 6, 7, 3),       # +Y side
+        (3, 7, 4, 0),       # -X side
+        (8, 9, 10),         # arrow on top
+    ]
+    me.from_pydata(verts, [], faces)
+    me.update()
+    me.materials.append(_boost_pad_material())
+    return me
+
+
+def _next_boost_pad_name() -> str:
+    """First free `boost_NN` slot. Zero-padded to two digits to match
+    the `cp_NN` / `start_NN` convention (lexicographic sort = numeric)."""
+    i = 0
+    while True:
+        name = f"{BOOST_PAD_OBJECT_PREFIX}{i:02d}"
+        if name not in bpy.data.objects:
+            return name
+        i += 1
+
+
+BOOST_PAD_PREVIEW_COLLECTION = "_hoverbike_boost_pad_preview"
+
+
+def _refresh_boost_pad_gizmos(scene) -> int:
+    """Rebuild every `boost_NN` empty's child slab so the visual
+    geometry tracks the empty's `half_width` / `half_depth` props after
+    they're scrubbed. Gizmos live in `_hoverbike_boost_pad_preview` so
+    `_PreviewCollectionsHidden` scrubs them at export time — only the
+    boost_NN empty itself round-trips through the JSON, and the runtime
+    builds its own visual via `makePadHelper`. Safe no-op if there are
+    no boost pads in the scene."""
+    coll = bpy.data.collections.get(BOOST_PAD_PREVIEW_COLLECTION)
+    boost_empties = [
+        o for o in scene.objects if re.match(r"^boost_(\d+)$", o.name)
+    ]
+    if not boost_empties:
+        # Tear down the empty preview collection so it doesn't dangle.
+        if coll is not None:
+            for o in list(coll.objects):
+                bpy.data.objects.remove(o, do_unlink=True)
+            bpy.data.collections.remove(coll)
+        return 0
+    if coll is None:
+        coll = bpy.data.collections.new(BOOST_PAD_PREVIEW_COLLECTION)
+        scene.collection.children.link(coll)
+
+    # Drop gizmos that no longer correspond to any empty (renames /
+    # deletes leave orphans otherwise).
+    valid_gizmo_names = {f"{o.name}_gizmo" for o in boost_empties}
+    for o in list(coll.objects):
+        if o.name not in valid_gizmo_names:
+            data = o.data
+            bpy.data.objects.remove(o, do_unlink=True)
+            if isinstance(data, bpy.types.Mesh) and data.users == 0:
+                bpy.data.meshes.remove(data)
+
+    refreshed = 0
+    for obj in boost_empties:
+        hw = float(obj.get("half_width", 3.0))
+        hd = float(obj.get("half_depth", 6.0))
+        gizmo_name = f"{obj.name}_gizmo"
+        mesh_name = f"{obj.name}_gizmo_mesh"
+        mesh = _build_boost_pad_gizmo_mesh(mesh_name, half_width=hw, half_depth=hd)
+        gizmo = bpy.data.objects.get(gizmo_name)
+        if gizmo is None:
+            gizmo = bpy.data.objects.new(gizmo_name, mesh)
+            coll.objects.link(gizmo)
+        else:
+            # Gizmo exists but might be in the wrong collection (e.g. an
+            # earlier addon revision parked it in scene.collection).
+            for c in list(gizmo.users_collection):
+                c.objects.unlink(gizmo)
+            coll.objects.link(gizmo)
+            old_mesh = gizmo.data
+            gizmo.data = mesh
+            if isinstance(old_mesh, bpy.types.Mesh) and old_mesh.users == 0 and old_mesh.name != mesh.name:
+                bpy.data.meshes.remove(old_mesh)
+        if gizmo.parent != obj:
+            gizmo.parent = obj
+            gizmo.matrix_parent_inverse.identity()
+            gizmo.location = (0.0, 0.0, 0.0)
+            gizmo.rotation_euler = (0.0, 0.0, 0.0)
+        gizmo.hide_render = True
+        gizmo.hide_select = True
+        refreshed += 1
+    return refreshed
+
+
+def _on_boost_pad_prop_changed(self, context):
+    """Custom-property update callback fires when half_width / half_depth
+    / strength are scrubbed on a `boost_NN` empty. Rebuild the gizmos so
+    the visual matches the new bounds immediately."""
+    scene = context.scene if context is not None else bpy.context.scene
+    if scene is not None:
+        _refresh_boost_pad_gizmos(scene)
+
+
+class HOVERBIKE_OT_add_boost_pad(Operator):
+    """Drop a `boost_NN` empty at the 3D cursor. The empty carries the
+    pad's runtime knobs as custom properties (`half_width`, `half_depth`,
+    `strength`) and exports as one entry in `boostPads[]` on the next
+    *Export Track to Game*. Boost direction is the empty's local +Y
+    (Blender forward → three.js +Z); rotate the empty around Z to aim it.
+
+    A flat cyan slab mesh is parented to the empty as a viewport gizmo
+    so authors can see the pad's footprint and direction at a glance.
+    The gizmo is tagged `kind=decoration` so the export keeps it as
+    visible chrome but never registers a collider for it; the actual
+    boost trigger is the JSON-side overlap test in `boostPadSystem`."""
+
+    bl_idname = "hoverbike.add_boost_pad"
+    bl_label = "Add Boost Pad"
+    bl_description = "Drop a boost_NN empty at the 3D cursor (boost direction = local +Y)"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
         scene = context.scene
-        length = float(scene.hoverbike_ramp_length)
-        width = float(scene.hoverbike_ramp_width)
-        peak = float(scene.hoverbike_ramp_height)
-        approach = float(scene.hoverbike_ramp_approach)
-        segments = int(scene.hoverbike_ramp_segments)
-        curved = bool(scene.hoverbike_ramp_curved)
-
-        if length <= 0 or width <= 0 or peak <= 0:
-            self.report({"ERROR"}, "Ramp dimensions must all be positive.")
-            return {"CANCELLED"}
-        if approach >= length:
-            self.report({"ERROR"}, "Approach must be shorter than total length.")
-            return {"CANCELLED"}
-
-        name = _next_ramp_object_name()
-        mesh_name = f"{name}_mesh"
-        me = _build_ramp_mesh(
-            mesh_name,
-            length=length,
-            width=width,
-            peak_height=peak,
-            approach=approach,
-            segments=segments,
-            curved=curved,
-        )
-        me.materials.append(_ramp_material())
-        obj = bpy.data.objects.new(name, me)
-        obj["kind"] = "track"
-        obj["ramp_height"] = peak
-        obj["ramp_length"] = length
-        # Drop at 3D cursor with no extra rotation — user can R/G to
-        # align after placement. The cursor already encodes their
-        # intended position from viewport interaction.
+        name = _next_boost_pad_name()
+        obj = bpy.data.objects.new(name, None)
+        obj.empty_display_type = "ARROWS"
+        obj.empty_display_size = 4.0
+        obj["kind"] = "boost_pad"
+        # Defaults match the editor's `placement.ts` boost-pad defaults
+        # so a Blender-authored pad behaves identically to one placed in
+        # the in-app editor.
+        obj["half_width"] = 3.0
+        obj["half_depth"] = 6.0
+        obj["strength"] = 1.5
         cursor = context.scene.cursor
         obj.location = cursor.location.copy()
         obj.rotation_euler = cursor.rotation_euler.copy()
         scene.collection.objects.link(obj)
-        # Select + activate the new ramp so the user can immediately
-        # rotate it with R or fine-tune the transform.
+
+        # Build the visual slab now so the pad reads in the viewport.
+        _refresh_boost_pad_gizmos(scene)
+
+        # Select the new empty so the user can immediately rotate (R) or
+        # drag (G) it without picking it from the outliner.
         for o in context.selected_objects:
             o.select_set(False)
         obj.select_set(True)
         context.view_layer.objects.active = obj
 
-        self.report(
-            {"INFO"},
-            f"Added {name}: {length:.1f}m × {width:.1f}m, peak {peak:.1f}m "
-            f"(approach {approach:.1f}m, {'curved' if curved else 'linear'}).",
-        )
+        self.report({"INFO"}, f"Added {name} (strength {obj['strength']}, {obj['half_width']*2:.1f}m × {obj['half_depth']*2:.1f}m). Rotate around Z to aim.")
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_refresh_boost_pads(Operator):
+    """Rebuild every boost_NN empty's child slab gizmo. Use after editing
+    `half_width` / `half_depth` custom props directly on a pad in the
+    Properties panel — the panel doesn't trigger the auto-refresh that
+    addon-managed sliders do."""
+
+    bl_idname = "hoverbike.refresh_boost_pads"
+    bl_label = "Refresh Boost Pad Visuals"
+    bl_description = "Rebuild every boost_NN gizmo to match its current half_width / half_depth"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        n = _refresh_boost_pad_gizmos(context.scene)
+        self.report({"INFO"}, f"Refreshed {n} boost pad gizmo(s).")
         return {"FINISHED"}
 
 
@@ -4453,6 +5425,12 @@ def _run_pending_rebuilds():
         except (RuntimeError, AttributeError):
             pass
 
+    if "boosts" in pending:
+        try:
+            _refresh_boost_pad_gizmos(scene)
+        except (RuntimeError, AttributeError):
+            pass
+
     return None  # one-shot — don't reschedule
 
 
@@ -4513,6 +5491,17 @@ def _hoverbike_depsgraph_post(scene, depsgraph):
             if _update_matches_source(upd, source_name):
                 for k in kinds:
                     _schedule_rebuild(k)
+        # Boost pads use a name pattern (boost_NN) rather than a single
+        # canonical name, so we walk the update list separately. The
+        # `original` attribute is the source datablock; we match its
+        # name against the pad regex.
+        try:
+            orig = getattr(upd.id, "original", upd.id)
+            name = getattr(orig, "name", "") or ""
+        except (AttributeError, ReferenceError):
+            continue
+        if re.match(r"^boost_\d+$", name):
+            _schedule_rebuild("boosts")
 
 
 def _on_gate_prop_changed(self, context):
@@ -4557,6 +5546,11 @@ class HOVERBIKE_PT_panel(Panel):
             self._draw_unknown(context, layout, blend, repo)
 
     def _draw_track(self, context, layout, blend: str, repo: str | None) -> None:
+        """Parent-panel content for track-mode .blends. The bulk of the
+        UI lives in sub-panels (HOVERBIKE_PT_track_*) so authors can
+        collapse the sections they aren't currently using. This method
+        just shows the always-relevant header: track id, big Export
+        button, lint / reload / play / URL actions."""
         track_id = derive_asset_id("hoverbike_track_id") or "<unknown>"
 
         box = layout.box()
@@ -4590,188 +5584,9 @@ class HOVERBIKE_PT_panel(Panel):
         )
         op_edit.edit = True
 
-        layout.separator()
-        sp_box = layout.box()
-        sp_box.label(text="Spline tools", icon="CURVE_NCURVE")
-        sp_box.prop(context.scene, "hoverbike_snap_hover_height", text="Hover (m)")
-        sp_box.operator("hoverbike.snap_spline_to_terrain", icon="SNAP_FACE")
-        row = sp_box.row(align=True)
-        row.prop(context.scene, "hoverbike_placement_t", text="t")
-        row.operator("hoverbike.cursor_snap_to_spline", text="Cursor →", icon="PIVOT_CURSOR")
-        row = sp_box.row(align=True)
-        row.prop(context.scene, "hoverbike_start_grid_spacing", text="Start gap")
-        row.operator("hoverbike.snap_starts_to_spline", text="Snap Starts", icon="OUTLINER_OB_ARROWS")
-        sp_box.operator("hoverbike.add_ramp_at_spline_t", icon="ADD")
-        row = sp_box.row(align=True)
-        row.prop(context.scene, "hoverbike_auto_ramp_kappa", text="|κ|")
-        row.prop(context.scene, "hoverbike_auto_ramp_min_spacing", text="Spacing")
-        sp_box.operator("hoverbike.auto_place_ramps", icon="MOD_PARTICLES")
-
-        road_box = layout.box()
-        road_box.label(text="Road tool", icon="MOD_CURVE")
-        road_box.operator("hoverbike.add_road_starter_curve", icon="CURVE_BEZCURVE")
-        row = road_box.row(align=True)
-        row.prop(context.scene, "hoverbike_road_width", text="Width")
-        row.prop(context.scene, "hoverbike_road_lift", text="Lift")
-        row = road_box.row(align=True)
-        row.prop(context.scene, "hoverbike_road_blend_radius", text="Blend")
-        row.prop(context.scene, "hoverbike_road_samples", text="Samples")
-        row = road_box.row(align=True)
-        row.prop(context.scene, "hoverbike_road_smooth_passes", text="Smooth")
-        row.prop(context.scene, "hoverbike_road_thickness", text="Slab (m)")
-        road_box.label(text="F1 curbs:", icon="SEQ_STRIP_DUPLICATE")
-        row = road_box.row(align=True)
-        row.prop(context.scene, "hoverbike_road_curb_width", text="Curb w")
-        row.prop(context.scene, "hoverbike_road_curb_height", text="Curb h")
-        road_box.prop(context.scene, "hoverbike_road_curb_stripe_length", text="Stripe (m)")
-        road_box.operator("hoverbike.build_road", icon="MESH_PLANE")
-        if bpy.data.objects.get(ROAD_CURVE_NAME):
-            road_box.label(text="Edit road_curve_main, then Build", icon="INFO")
-
-        ramp_box = layout.box()
-        ramp_box.label(text="Ramp tool", icon="EVENT_R")
-        row = ramp_box.row(align=True)
-        row.prop(context.scene, "hoverbike_ramp_length", text="Length")
-        row.prop(context.scene, "hoverbike_ramp_width", text="Width")
-        row = ramp_box.row(align=True)
-        row.prop(context.scene, "hoverbike_ramp_height", text="Peak")
-        row.prop(context.scene, "hoverbike_ramp_approach", text="Approach")
-        row = ramp_box.row(align=True)
-        row.prop(context.scene, "hoverbike_ramp_segments", text="Segments")
-        row.prop(context.scene, "hoverbike_ramp_curved", text="Curved")
-        ramp_box.operator("hoverbike.add_ramp", icon="ADD")
-
-        hm_box = layout.box()
-        hm_box.label(text="Heightmap import", icon="IMAGE_DATA")
-        row = hm_box.row(align=True)
-        row.prop(context.scene, "hoverbike_heightmap_size", text="Size")
-        row.prop(context.scene, "hoverbike_heightmap_subdivisions", text="Subdiv")
-        row = hm_box.row(align=True)
-        row.prop(context.scene, "hoverbike_heightmap_height", text="Δz (m)")
-        row.prop(context.scene, "hoverbike_heightmap_base", text="Base z")
-        hm_box.operator("hoverbike.import_heightmap", icon="IMPORT")
-
-        layout.separator()
-        gp_box = layout.box()
-        gp_box.label(text="Gate preview", icon="MOD_ARRAY")
-        gp_box.prop(context.scene, "hoverbike_gate_spacing", text="Spacing (m)")
-        row = gp_box.row(align=True)
-        row.prop(context.scene, "hoverbike_gate_half_width", text="Half-width")
-        row.prop(context.scene, "hoverbike_gate_height", text="Height")
-        row = gp_box.row(align=True)
-        row.operator("hoverbike.rebuild_gate_preview", icon="FILE_REFRESH")
-        row.operator("hoverbike.hide_gate_preview", icon="HIDE_ON")
-        # Live-follow signal: once the user clicks Rebuild, edits to the
-        # spline or to these knobs auto-refresh the gates.
-        if bpy.data.collections.get(GATE_PREVIEW_COLLECTION):
-            gp_box.label(text="Live: follows spline edits", icon="LINKED")
-
-        rp_box = layout.box()
-        rp_box.label(text="Racer preview", icon="AUTO")
-        row = rp_box.row(align=True)
-        row.operator("hoverbike.rebuild_racer_preview", icon="FILE_REFRESH")
-        row.operator("hoverbike.hide_racer_preview", icon="HIDE_ON")
-
-        gl_box = layout.box()
-        gl_box.label(text="Ghost lap + chase cam", icon="CAMERA_DATA")
-        row = gl_box.row(align=True)
-        row.prop(context.scene, "hoverbike_ghost_speed", text="Speed (m/s)")
-        row.prop(context.scene, "hoverbike_ghost_fps", text="FPS")
-        row = gl_box.row(align=True)
-        row.operator("hoverbike.rebuild_ghost_lap", icon="FILE_REFRESH")
-        row.operator("hoverbike.hide_ghost_lap", icon="HIDE_ON")
-        gl_box.label(text="Press Spacebar to fly the lap", icon="PLAY")
-
-        wp_box = layout.box()
-        wp_box.label(text="Water preview", icon="MOD_OCEAN")
-        wp_box.prop(context.scene, "hoverbike_water_size", text="Size (m)")
-        row = wp_box.row(align=True)
-        row.prop(context.scene, "hoverbike_water_subdivisions", text="Subdiv")
-        row.prop(context.scene, "hoverbike_water_time", text="Time (s)")
-        row = wp_box.row(align=True)
-        row.operator("hoverbike.rebuild_water_preview", icon="FILE_REFRESH")
-        row.operator("hoverbike.hide_water_preview", icon="HIDE_ON")
-
-        ti_box = layout.box()
-        ti_box.label(text="Turn indicators", icon="TRACKING_FORWARDS")
-        row = ti_box.row(align=True)
-        row.prop(context.scene, "hoverbike_turn_kappa", text="|κ| min (1/m)")
-        row.prop(context.scene, "hoverbike_turn_min_spacing", text="Spacing (m)")
-        row = ti_box.row(align=True)
-        row.operator("hoverbike.rebuild_turn_indicators", icon="FILE_REFRESH")
-        row.operator("hoverbike.hide_turn_indicators", icon="HIDE_ON")
-
-        # Vertex-attribute bakers — fill COLOR_0.G + .B with real AO and
-        # racing-line wear data. The runtime terrain shader reads both.
-        bake_box = layout.box()
-        bake_box.label(text="Terrain bakes", icon="MATERIAL")
-        bake_box.label(text="Fills baked_ao + baked_path", icon="NODE_TEXTURE")
-        bake_box.operator("hoverbike.bake_terrain_attrs", icon="MOD_NOISE")
-
-        # Item 3 — runtime terrain-shader knobs. These are written into
-        # public/tracks/<id>.json on export and read as uniforms by
-        # src/engine/render/terrain-shader.ts. Changing them re-tunes the
-        # in-game terrain without a code edit.
-        sh_box = layout.box()
-        sh_box.label(text="Terrain shader (runtime)", icon="SHADING_RENDERED")
-        row = sh_box.row(align=True)
-        row.prop(context.scene, "hoverbike_shader_alt_min", text="Alt min")
-        row.prop(context.scene, "hoverbike_shader_alt_max", text="Alt max")
-        row = sh_box.row(align=True)
-        row.prop(context.scene, "hoverbike_shader_slope_start", text="Slope start")
-        row.prop(context.scene, "hoverbike_shader_slope_end", text="Slope end")
-        row = sh_box.row(align=True)
-        row.prop(context.scene, "hoverbike_shader_variation", text="Variation")
-        row.prop(context.scene, "hoverbike_shader_wet_band", text="Wet band")
-        sh_box.label(text="Path tint:")
-        row = sh_box.row(align=True)
-        row.prop(context.scene, "hoverbike_shader_path_tint_r", text="R")
-        row.prop(context.scene, "hoverbike_shader_path_tint_g", text="G")
-        row.prop(context.scene, "hoverbike_shader_path_tint_b", text="B")
-
-        # Item 2 — track stats. Cheap counts + spline length recompute
-        # every redraw; min/max Y + water-coverage require an evaluated
-        # mesh (~150 k verts) so they're behind an explicit refresh.
-        stats_box = layout.box()
-        stats_box.label(text="Track stats", icon="INFO")
-        sp = bpy.data.objects.get("ai_spline_main")
-        arc_len = _spline_arc_length(sp) if sp else 0.0
-        lap_25 = arc_len / 25.0 if arc_len > 0 else 0.0
-        stats_box.label(text=f"Spline length: {arc_len:,.1f} m")
-        stats_box.label(text=f"Lap estimate @25 m/s: {lap_25:.1f} s")
-        # Cheap counts from object names.
-        counts = {"starts": 0, "checkpoints": 0, "pickups": 0, "boosts": 0}
-        for obj in bpy.context.scene.objects:
-            n = obj.name
-            if n.startswith("start_"): counts["starts"] += 1
-            elif n.startswith("cp_"): counts["checkpoints"] += 1
-            elif n.startswith("pickup"): counts["pickups"] += 1
-            elif n.startswith("boost"): counts["boosts"] += 1
-        row = stats_box.row(align=True)
-        row.label(text=f"Starts: {counts['starts']}")
-        row.label(text=f"Gates: {counts['checkpoints']}")
-        row = stats_box.row(align=True)
-        row.label(text=f"Pickups: {counts['pickups']}")
-        row.label(text=f"Boosts: {counts['boosts']}")
-        # Cached terrain stats (require depsgraph eval).
-        scn = bpy.context.scene
-        zmin = scn.get("_hoverbike_stats_terrain_min_y")
-        zmax = scn.get("_hoverbike_stats_terrain_max_y")
-        frac = scn.get("_hoverbike_stats_terrain_water_frac")
-        if zmin is not None and zmax is not None and frac is not None:
-            stats_box.label(text=f"Terrain y: [{float(zmin):,.1f}, {float(zmax):,.1f}] m")
-            stats_box.label(text=f"Water coverage: {float(frac) * 100:.0f}%")
-        else:
-            stats_box.label(text="Terrain y / water: refresh below", icon="QUESTION")
-        stats_box.operator("hoverbike.refresh_track_stats", icon="FILE_REFRESH")
-
-        layout.separator()
         col = layout.column(align=True)
         col.scale_y = 0.85
-        col.label(text="Export merges Blender knobs", icon="INFO")
-        col.label(text="(spacing, water, shader, start)")
-        col.label(text="onto the existing JSON;")
-        col.label(text="editor-placed gates stay.")
+        col.label(text="Tools below; collapse any section.", icon="INFO")
 
     def _draw_bike(self, context, layout, blend: str, repo: str | None) -> None:
         bike_id = derive_asset_id("hoverbike_bike_id") or "<unknown>"
@@ -4818,6 +5633,324 @@ class HOVERBIKE_PT_panel(Panel):
             box.label(text="Save .blend inside a hoverbike/ clone.")
 
 
+# ── Track sub-panels ────────────────────────────────────────────────────────
+#
+# Each sub-panel is a child of HOVERBIKE_PT_panel and only renders in
+# track mode. Splitting the original wall-of-tools into collapsible
+# sections lets authors hide whatever they aren't using on a given pass
+# (e.g. shader knobs are once-per-track so they stay default-closed).
+# All sub-panels share the same `poll()` so adding a new one is just a
+# matter of subclassing _HoverbikeTrackSubPanelBase + implementing draw.
+
+
+class _HoverbikeTrackSubPanelBase:
+    """Mixin: panel constants + poll() shared by every track sub-panel.
+    Sub-panels live under the parent `HOVERBIKE_PT_panel` and only render
+    in track mode (.blend in `tracks-src/`)."""
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Hoverbike"
+    bl_parent_id = "HOVERBIKE_PT_panel"
+
+    @classmethod
+    def poll(cls, context):
+        return detect_mode(bpy.data.filepath) == "track"
+
+
+class HOVERBIKE_PT_track_spline(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: AI-spline editing helpers + start placement + the
+    spline-aligned cursor / ramp-at-t / auto-ramp operators."""
+    bl_label = "Spline tools"
+    bl_idname = "HOVERBIKE_PT_track_spline"
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        layout.prop(scene, "hoverbike_snap_hover_height", text="Hover (m)")
+        layout.operator("hoverbike.snap_spline_to_terrain", icon="SNAP_FACE")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_placement_t", text="t")
+        row.operator("hoverbike.cursor_snap_to_spline", text="Cursor →", icon="PIVOT_CURSOR")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_start_grid_spacing", text="Start gap")
+        row.operator("hoverbike.snap_starts_to_spline", text="Snap Starts", icon="EMPTY_ARROWS")
+        layout.separator()
+        layout.label(text="Auto-ramp from curvature:")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_auto_ramp_kappa", text="|κ|")
+        row.prop(scene, "hoverbike_auto_ramp_min_spacing", text="Spacing")
+        layout.operator("hoverbike.add_ramp_at_spline_t", icon="ADD")
+        layout.operator("hoverbike.auto_place_ramps", icon="MOD_PARTICLES")
+
+
+class HOVERBIKE_PT_track_road(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: road-curve authoring + width / banking / curb knobs +
+    Build Road. Long enough to deserve its own collapsible section."""
+    bl_label = "Road tool"
+    bl_idname = "HOVERBIKE_PT_track_road"
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        layout.operator("hoverbike.add_road_starter_curve", icon="CURVE_BEZCURVE")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_road_width", text="Width")
+        row.prop(scene, "hoverbike_road_lift", text="Lift")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_road_blend_radius", text="Blend")
+        row.prop(scene, "hoverbike_road_samples", text="Samples")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_road_smooth_passes", text="Smooth")
+        row.prop(scene, "hoverbike_road_thickness", text="Slab (m)")
+        layout.separator()
+        layout.label(text="Banking:")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_road_bank_strength", text="Bank")
+        row.prop(scene, "hoverbike_road_bank_max_deg", text="Max°")
+        layout.label(text="(per-point: edit Tilt in N→Curve)", icon="INFO")
+        layout.separator()
+        layout.label(text="F1 curbs:")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_road_curb_width", text="Curb w")
+        row.prop(scene, "hoverbike_road_curb_height", text="Curb h")
+        layout.prop(scene, "hoverbike_road_curb_stripe_length", text="Stripe (m)")
+        layout.operator("hoverbike.build_road", icon="MESH_PLANE")
+        if bpy.data.objects.get(ROAD_CURVE_NAME):
+            layout.label(text="Edit road_curve_main, then Build", icon="INFO")
+
+
+class HOVERBIKE_PT_track_ramps(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: simple wedge ramp. Three sliders set the next ramp's
+    dimensions; clicking *Add Ramp* drops it at the 3D cursor.
+
+    Each ramp is a parent empty (G/R/S to position/aim) plus a child
+    mesh driven by the HV_Ramp Geometry-Nodes modifier. To resize a
+    placed ramp, open its mesh's Modifiers tab and edit Length /
+    Width / Height directly — the mesh re-evaluates live."""
+    bl_label = "Ramps"
+    bl_idname = "HOVERBIKE_PT_track_ramps"
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_ramp_length", text="Length")
+        row.prop(scene, "hoverbike_ramp_width", text="Width")
+        layout.prop(scene, "hoverbike_ramp_height", text="Height")
+        layout.operator("hoverbike.add_ramp", icon="ADD")
+        layout.label(text="Edit Length/Width/Height on the", icon="INFO")
+        layout.label(text="mesh's HV_Ramp modifier to resize.")
+
+
+class HOVERBIKE_PT_track_terrain(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: heightmap import, sculpt entry-points, AO/path-wear
+    bakers. Anything that touches the terrain mesh's geometry."""
+    bl_label = "Terrain"
+    bl_idname = "HOVERBIKE_PT_track_terrain"
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+
+        layout.label(text="Heightmap import:", icon="IMAGE_DATA")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_heightmap_size", text="Size")
+        row.prop(scene, "hoverbike_heightmap_subdivisions", text="Subdiv")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_heightmap_height", text="Δz (m)")
+        row.prop(scene, "hoverbike_heightmap_base", text="Base z")
+        layout.operator("hoverbike.import_heightmap", icon="IMPORT")
+        layout.separator()
+
+        layout.label(text="Sculpt:", icon="SCULPTMODE_HLT")
+        layout.operator("hoverbike.apply_terrain_modifiers", icon="MODIFIER_DATA")
+        layout.operator("hoverbike.subdivide_terrain", icon="MOD_SUBSURF")
+        layout.operator("hoverbike.enter_sculpt_mode", icon="BRUSH_DATA")
+        layout.separator()
+
+        layout.label(text="Bulk shape @ cursor:")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_sculpt_radius", text="Radius (m)")
+        row.prop(scene, "hoverbike_sculpt_magnitude", text="Δz (m)")
+        row = layout.row(align=True)
+        op_up = row.operator("hoverbike.raise_lower_terrain", text="Raise", icon="TRIA_UP")
+        op_up.lower = False
+        op_dn = row.operator("hoverbike.raise_lower_terrain", text="Lower", icon="TRIA_DOWN")
+        op_dn.lower = True
+        layout.separator()
+
+        layout.label(text="Smooth:", icon="MOD_SMOOTH")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_sculpt_smooth_iters", text="Iters")
+        row.prop(scene, "hoverbike_sculpt_smooth_weight", text="Weight")
+        layout.operator("hoverbike.smooth_terrain", icon="MOD_SMOOTH")
+        layout.separator()
+
+        layout.label(text="Vertex bakes:", icon="MATERIAL")
+        layout.label(text="Fills baked_ao + baked_path", icon="NODE_TEXTURE")
+        layout.operator("hoverbike.bake_terrain_attrs", icon="MOD_NOISE")
+
+
+class HOVERBIKE_PT_track_water(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: sea-level slider (proxies water_volume_main.z) + the
+    Gerstner-wave preview plane controls."""
+    bl_label = "Water"
+    bl_idname = "HOVERBIKE_PT_track_water"
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        if bpy.data.objects.get(WATER_VOLUME_NAME) is None:
+            layout.label(text="No water_volume_main", icon="ERROR")
+            layout.operator("hoverbike.add_water_volume", icon="ADD")
+        else:
+            layout.prop(scene, "hoverbike_water_height", text="Sea level (m)")
+        layout.separator()
+        layout.label(text="Wave preview:", icon="HIDE_OFF")
+        layout.prop(scene, "hoverbike_water_size", text="Size (m)")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_water_subdivisions", text="Subdiv")
+        row.prop(scene, "hoverbike_water_time", text="Time (s)")
+        row = layout.row(align=True)
+        row.operator("hoverbike.rebuild_water_preview", icon="FILE_REFRESH")
+        row.operator("hoverbike.hide_water_preview", icon="HIDE_ON")
+
+
+class HOVERBIKE_PT_track_gameplay(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: gates + boost pads + racers + turn indicators. The
+    high-level "what does the player interact with" placement section."""
+    bl_label = "Gameplay"
+    bl_idname = "HOVERBIKE_PT_track_gameplay"
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+
+        layout.label(text="Gates:", icon="MOD_ARRAY")
+        layout.prop(scene, "hoverbike_gate_spacing", text="Spacing (m)")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_gate_half_width", text="Half-width")
+        row.prop(scene, "hoverbike_gate_height", text="Height")
+        row = layout.row(align=True)
+        row.operator("hoverbike.rebuild_gate_preview", icon="FILE_REFRESH")
+        row.operator("hoverbike.hide_gate_preview", icon="HIDE_ON")
+        if bpy.data.collections.get(GATE_PREVIEW_COLLECTION):
+            layout.label(text="Live: follows spline edits", icon="LINKED")
+        layout.separator()
+
+        layout.label(text="Boost pads:", icon="FORCE_FORCE")
+        layout.operator("hoverbike.add_boost_pad", icon="ADD")
+        n_pads = sum(
+            1 for obj in bpy.data.objects if re.match(r"^boost_(\d+)$", obj.name)
+        )
+        if n_pads > 0:
+            layout.label(text=f"{n_pads} pad(s) — drag, R to aim")
+            layout.operator("hoverbike.refresh_boost_pads", icon="FILE_REFRESH")
+            layout.label(text="Custom Properties tunes each pad", icon="INFO")
+        layout.separator()
+
+        layout.label(text="Racer preview:", icon="AUTO")
+        row = layout.row(align=True)
+        row.operator("hoverbike.rebuild_racer_preview", icon="FILE_REFRESH")
+        row.operator("hoverbike.hide_racer_preview", icon="HIDE_ON")
+        layout.separator()
+
+        layout.label(text="Turn indicators:", icon="TRACKING_FORWARDS")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_turn_kappa", text="|κ| min (1/m)")
+        row.prop(scene, "hoverbike_turn_min_spacing", text="Spacing (m)")
+        row = layout.row(align=True)
+        row.operator("hoverbike.rebuild_turn_indicators", icon="FILE_REFRESH")
+        row.operator("hoverbike.hide_turn_indicators", icon="HIDE_ON")
+
+
+class HOVERBIKE_PT_track_ghost(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: ghost-lap preview cinematic. Default-closed since it's
+    a once-per-session 'play the lap to feel it' tool, not part of the
+    core authoring loop."""
+    bl_label = "Ghost lap + chase cam"
+    bl_idname = "HOVERBIKE_PT_track_ghost"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_ghost_speed", text="Speed (m/s)")
+        row.prop(scene, "hoverbike_ghost_fps", text="FPS")
+        row = layout.row(align=True)
+        row.operator("hoverbike.rebuild_ghost_lap", icon="FILE_REFRESH")
+        row.operator("hoverbike.hide_ghost_lap", icon="HIDE_ON")
+        layout.label(text="Press Spacebar to fly the lap", icon="PLAY")
+
+
+class HOVERBIKE_PT_track_shader(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: runtime terrain-shader knobs that round-trip through
+    `terrainShader` in the JSON. Default-closed since these are usually
+    set once per track."""
+    bl_label = "Terrain shader (runtime)"
+    bl_idname = "HOVERBIKE_PT_track_shader"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_shader_alt_min", text="Alt min")
+        row.prop(scene, "hoverbike_shader_alt_max", text="Alt max")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_shader_slope_start", text="Slope start")
+        row.prop(scene, "hoverbike_shader_slope_end", text="Slope end")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_shader_variation", text="Variation")
+        row.prop(scene, "hoverbike_shader_wet_band", text="Wet band")
+        layout.label(text="Path tint:")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_shader_path_tint_r", text="R")
+        row.prop(scene, "hoverbike_shader_path_tint_g", text="G")
+        row.prop(scene, "hoverbike_shader_path_tint_b", text="B")
+
+
+class HOVERBIKE_PT_track_stats(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: read-only counts + spline-length / lap-time estimate +
+    terrain min/max + water coverage. Helpful for sanity-checking before
+    export. Default-closed."""
+    bl_label = "Track stats"
+    bl_idname = "HOVERBIKE_PT_track_stats"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        sp = bpy.data.objects.get("ai_spline_main")
+        arc_len = _spline_arc_length(sp) if sp else 0.0
+        lap_25 = arc_len / 25.0 if arc_len > 0 else 0.0
+        layout.label(text=f"Spline length: {arc_len:,.1f} m")
+        layout.label(text=f"Lap estimate @25 m/s: {lap_25:.1f} s")
+        counts = {"starts": 0, "checkpoints": 0, "pickups": 0, "boosts": 0}
+        for obj in context.scene.objects:
+            n = obj.name
+            if n.startswith("start_"): counts["starts"] += 1
+            elif n.startswith("cp_"): counts["checkpoints"] += 1
+            elif n.startswith("pickup"): counts["pickups"] += 1
+            elif n.startswith("boost") and "_gizmo" not in n: counts["boosts"] += 1
+        row = layout.row(align=True)
+        row.label(text=f"Starts: {counts['starts']}")
+        row.label(text=f"Gates: {counts['checkpoints']}")
+        row = layout.row(align=True)
+        row.label(text=f"Pickups: {counts['pickups']}")
+        row.label(text=f"Boosts: {counts['boosts']}")
+        scn = context.scene
+        zmin = scn.get("_hoverbike_stats_terrain_min_y")
+        zmax = scn.get("_hoverbike_stats_terrain_max_y")
+        frac = scn.get("_hoverbike_stats_terrain_water_frac")
+        if zmin is not None and zmax is not None and frac is not None:
+            layout.label(text=f"Terrain y: [{float(zmin):,.1f}, {float(zmax):,.1f}] m")
+            layout.label(text=f"Water coverage: {float(frac) * 100:.0f}%")
+        else:
+            layout.label(text="Terrain y / water: refresh below", icon="QUESTION")
+        layout.operator("hoverbike.refresh_track_stats", icon="FILE_REFRESH")
+
+
 # ── Registration ───────────────────────────────────────────────────────────
 
 _classes = (
@@ -4825,6 +5958,7 @@ _classes = (
     HOVERBIKE_OT_hide_gate_preview,
     HOVERBIKE_OT_rebuild_racer_preview,
     HOVERBIKE_OT_hide_racer_preview,
+    HOVERBIKE_OT_add_water_volume,
     HOVERBIKE_OT_rebuild_water_preview,
     HOVERBIKE_OT_hide_water_preview,
     HOVERBIKE_OT_rebuild_turn_indicators,
@@ -4840,6 +5974,13 @@ _classes = (
     HOVERBIKE_OT_build_road,
     HOVERBIKE_OT_add_ramp,
     HOVERBIKE_OT_import_heightmap,
+    HOVERBIKE_OT_apply_terrain_modifiers,
+    HOVERBIKE_OT_enter_sculpt_mode,
+    HOVERBIKE_OT_smooth_terrain,
+    HOVERBIKE_OT_subdivide_terrain,
+    HOVERBIKE_OT_raise_lower_terrain,
+    HOVERBIKE_OT_add_boost_pad,
+    HOVERBIKE_OT_refresh_boost_pads,
     HOVERBIKE_OT_lint_track,
     HOVERBIKE_OT_open_play_url,
     HOVERBIKE_OT_reload_track_json,
@@ -4850,6 +5991,15 @@ _classes = (
     HOVERBIKE_OT_copy_track_url,
     HOVERBIKE_OT_copy_bike_url,
     HOVERBIKE_PT_panel,
+    HOVERBIKE_PT_track_spline,
+    HOVERBIKE_PT_track_road,
+    HOVERBIKE_PT_track_ramps,
+    HOVERBIKE_PT_track_terrain,
+    HOVERBIKE_PT_track_water,
+    HOVERBIKE_PT_track_gameplay,
+    HOVERBIKE_PT_track_ghost,
+    HOVERBIKE_PT_track_shader,
+    HOVERBIKE_PT_track_stats,
 )
 
 
@@ -4881,6 +6031,20 @@ def register() -> None:
         max=100.0,
         precision=1,
         update=_on_gate_prop_changed,
+    )
+    # Sea level — proxies water_volume_main.location.z so the panel can
+    # read/write the sea level without selecting the empty in the
+    # outliner. The setter creates the empty if missing so the slider
+    # is always usable.
+    bpy.types.Scene.hoverbike_water_height = FloatProperty(
+        name="Sea level (m)",
+        description="Z position of `water_volume_main` (= world sea level). Drag the empty in the viewport or scrub here; both write to `water.height` in the JSON on export.",
+        default=0.0,
+        min=-500.0,
+        max=500.0,
+        precision=2,
+        get=_get_water_height,
+        set=_set_water_height,
     )
     bpy.types.Scene.hoverbike_water_size = FloatProperty(
         name="Water plane size (m)",
@@ -5007,6 +6171,30 @@ def register() -> None:
         default=256, min=8, max=2048,
     )
 
+    # Terrain sculpt knobs — drive the bulk-shape and smooth operators.
+    # Radius / magnitude are world-space metres so they scale predictably
+    # with the rest of the addon's authoring UI.
+    bpy.types.Scene.hoverbike_sculpt_radius = FloatProperty(
+        name="Radius (m)",
+        description="Radius of the raise/lower brush, centred on the 3D cursor.",
+        default=20.0, min=0.5, max=2000.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_sculpt_magnitude = FloatProperty(
+        name="Δz peak (m)",
+        description="Maximum vertical displacement at the brush centre. Smoothstep falloff to zero at the edge.",
+        default=4.0, min=0.01, max=200.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_sculpt_smooth_iters = IntProperty(
+        name="Smooth iters",
+        description="Number of Laplacian smoothing passes. 1 = subtle; 8 = heavy.",
+        default=2, min=1, max=64,
+    )
+    bpy.types.Scene.hoverbike_sculpt_smooth_weight = FloatProperty(
+        name="Smooth weight",
+        description="Per-pass blend weight toward the neighbour mean. 0 = no smoothing; 1 = collapse onto mean each pass.",
+        default=0.5, min=0.0, max=1.0, precision=2,
+    )
+
     # Road-tool settings.
     bpy.types.Scene.hoverbike_road_width = FloatProperty(
         name="Road width (m)",
@@ -5053,6 +6241,22 @@ def register() -> None:
         description="Vertical extrusion of the road into a solid slab. 0 keeps the legacy paper-thin ribbon.",
         default=0.6, min=0.0, max=10.0, precision=2,
     )
+    # Road banking — auto-tilt cross-section based on per-sample
+    # curvature. Bank strength is a multiplier on the (kappa × ref_v²)
+    # product; max-deg caps the total signed angle so steep corners
+    # don't roll the road past comfortable racing angles. 0 strength
+    # disables auto-bank entirely (per-control-point Tilt still
+    # contributes).
+    bpy.types.Scene.hoverbike_road_bank_strength = FloatProperty(
+        name="Bank strength",
+        description="Auto-bank multiplier driven by curvature. 0 disables auto-bank; 0.5 = subtle; 1.0 = pronounced; >1 = aggressive.",
+        default=0.6, min=0.0, max=4.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_road_bank_max_deg = FloatProperty(
+        name="Bank max (deg)",
+        description="Hard cap on the road's bank angle in degrees. 25° is a typical road race banking; 45° is NASCAR-superspeedway extreme.",
+        default=25.0, min=0.0, max=80.0, precision=1,
+    )
 
     # Ramp-tool settings.
     bpy.types.Scene.hoverbike_ramp_length = FloatProperty(
@@ -5066,24 +6270,9 @@ def register() -> None:
         default=8.0, min=0.5, max=80.0, precision=2,
     )
     bpy.types.Scene.hoverbike_ramp_height = FloatProperty(
-        name="Peak height (m)",
-        description="Height of the launch lip at the end of the ramp.",
+        name="Ramp height (m)",
+        description="Height of the back edge — the linear wedge rises from 0 at the leading edge to this value at the back.",
         default=3.0, min=0.1, max=50.0, precision=2,
-    )
-    bpy.types.Scene.hoverbike_ramp_approach = FloatProperty(
-        name="Approach (m)",
-        description="Flat run-up at the start of the ramp before the kicker rises. 0 = wedge from y=0.",
-        default=4.0, min=0.0, max=100.0, precision=2,
-    )
-    bpy.types.Scene.hoverbike_ramp_segments = IntProperty(
-        name="Segments",
-        description="Subdivisions along the ramp's length. More = smoother kicker curve.",
-        default=12, min=2, max=128,
-    )
-    bpy.types.Scene.hoverbike_ramp_curved = BoolProperty(
-        name="Curved kicker",
-        description="Smoothstep height profile (natural launch tangent). Off = linear wedge.",
-        default=True,
     )
 
     # Ghost-lap settings.
@@ -5171,6 +6360,7 @@ def unregister() -> None:
             pass
     for prop in (
         "hoverbike_gate_spacing", "hoverbike_gate_half_width", "hoverbike_gate_height",
+        "hoverbike_water_height",
         "hoverbike_water_size", "hoverbike_water_subdivisions", "hoverbike_water_time",
         "hoverbike_turn_kappa", "hoverbike_turn_min_spacing",
         "hoverbike_shader_slope_start", "hoverbike_shader_slope_end",
@@ -5182,15 +6372,16 @@ def unregister() -> None:
         "hoverbike_heightmap_path", "hoverbike_heightmap_size",
         "hoverbike_heightmap_height", "hoverbike_heightmap_base",
         "hoverbike_heightmap_subdivisions",
+        "hoverbike_sculpt_radius", "hoverbike_sculpt_magnitude",
+        "hoverbike_sculpt_smooth_iters", "hoverbike_sculpt_smooth_weight",
         "hoverbike_ghost_speed", "hoverbike_ghost_fps",
         "hoverbike_road_width", "hoverbike_road_lift",
         "hoverbike_road_blend_radius", "hoverbike_road_samples",
         "hoverbike_road_smooth_passes",
         "hoverbike_road_curb_width", "hoverbike_road_curb_height",
         "hoverbike_road_curb_stripe_length", "hoverbike_road_thickness",
-        "hoverbike_ramp_length", "hoverbike_ramp_width",
-        "hoverbike_ramp_height", "hoverbike_ramp_approach",
-        "hoverbike_ramp_segments", "hoverbike_ramp_curved",
+        "hoverbike_road_bank_strength", "hoverbike_road_bank_max_deg",
+        "hoverbike_ramp_length", "hoverbike_ramp_width", "hoverbike_ramp_height",
         "hoverbike_placement_t", "hoverbike_placement_curve_name",
         "hoverbike_auto_ramp_kappa", "hoverbike_auto_ramp_min_spacing",
         "hoverbike_start_grid_spacing",
