@@ -268,12 +268,19 @@ to its altitude profile and decorates the edges with F1-style curbs.
    - *Samples* (64) — arc-length sample count.
    - *Smooth* passes (4) — 1-2-1 binomial smoothing on the height
      profile so the road doesn't follow every terrain bump.
-3. F1 curbs (optional — set *Curb w* = 0 to disable):
+3. Banking (set *Bank* = 0 to disable):
+   - *Bank* (0.6) — multiplier on the curvature-driven auto-bank.
+     0 disables auto-bank; 1.0 is pronounced; >1 is aggressive.
+   - *Max°* (25°) — hard cap on signed bank angle so steep corners
+     don't exceed comfortable racing angles.
+   - Per-control-point: edit a Bezier point's **Tilt** (N-panel →
+     Curve → Tilt) to add a hand-tuned bank on top of the auto-bank.
+4. F1 curbs (optional — set *Curb w* = 0 to disable):
    - *Curb w* (0.6 m) and *Curb h* (0.12 m) — width and rise of each
      side strip.
    - *Stripe (m)* (2.0) — length of each red / white stripe along the
      road.
-4. **Build Road** samples the curve, conforms the terrain to the
+5. **Build Road** samples the curve, conforms the terrain to the
    sampled altitude in a `width/2 + curb_width + blend_radius` band,
    then emits the road mesh tagged `kind=track` with materials:
    - `mat_track_road` (asphalt, slot 0)
@@ -309,6 +316,60 @@ luminance-displaced. The output mesh `terrain_heightmap` is tagged
 *Size (m)*, *Subdiv*, *Δz (m)*, and *Base z* on the panel; the file
 picker remembers the last imported path. Re-import replaces the
 previous heightmap mesh idempotently.
+
+### Terrain sculpt
+
+A small toolset for shaping the terrain after the procedural template
+has been baked. Workflow:
+
+1. **Apply Terrain Modifiers** — bakes `HV_Island` (or any other
+   active modifier) into vertex data. One-way: parametric tunability
+   of the GN sliders is lost in exchange for sculptable verts. Save
+   first.
+2. **Subdivide Terrain** — one cut per click (each face → 4) for when
+   the procedural mesh is too coarse to add detail.
+3. **Sculpt Terrain** — selects the terrain and switches into Blender's
+   Sculpt Mode. From there: Draw, Smooth, Flatten, Inflate, Grab,
+   Crease — Blender's stock brushes work as expected once the
+   modifier stack is empty.
+4. **Raise / Lower @ cursor** — bulk-shape operator. Set *Radius (m)*
+   and *Δz peak (m)*; click to apply with smoothstep falloff from
+   the 3D cursor. Faster than brush strokes for large hills / basins.
+5. **Smooth Terrain** — Laplacian-Z pass over every vertex. *Iters*
+   and *Weight* control the bite; XY positions stay locked so the
+   heightfield stays a heightfield.
+
+### Water (sea level + preview)
+
+`water_volume_main`'s Z position is the in-game sea level. Two ways
+to set it:
+
+- Drag the empty up/down in the viewport (live; the wave preview
+  follows via the depsgraph hook).
+- Scrub *Sea level (m)* in the Water box (creates the empty if it's
+  missing).
+
+Either path round-trips through `water.height` in the JSON on export
+(and re-loading the JSON on a fresh open writes back to the empty's Z).
+
+### Boost pads
+
+Drop a `boost_NN` empty at the 3D cursor with **Add Boost Pad**. The
+empty's local +Y axis (Blender forward) is the boost direction; rotate
+around Z to aim. A cyan-emissive slab is parented under the empty as
+a viewport gizmo (lives in `_hoverbike_boost_pad_preview` so it's
+scrubbed at export — the runtime builds its own visual via
+`makePadHelper`).
+
+Custom properties on the empty (defaults match the in-app editor):
+- `half_width` (3.0 m) — extent across the pad
+- `half_depth` (6.0 m) — extent along the boost direction
+- `strength` (1.5) — top-speed multiplier on overlap
+
+Boost pads round-trip through `boostPads[]` in the JSON. The JSON
+merge respects opt-in: if the .blend has any `boost_NN` empties,
+Blender owns the list; otherwise the in-app editor's placements
+stay through re-exports.
 
 ### Gate / racer / water previews
 
@@ -369,6 +430,7 @@ scheduler, so scrub interactions are also live.
 | AI spline | `ai_spline_main` (or `ai_spline_alt_*`) | NURBS curve | `{ kind: "ai_spline", branch }` |
 | Pickup spawn | `pickup_*` | empty | `{ kind: "pickup_spawn" }` |
 | Player start | `start_NN` (zero-padded, NN = grid position) | empty | `{ kind: "start", index }` |
+| Boost pad | `boost_NN` (zero-padded) | empty | `{ kind: "boost_pad", half_width, half_depth, strength }` |
 
 ## Coordinate system
 

@@ -133,6 +133,12 @@
       "specPath": "public/tracks/alpine-sprint.json"
     },
     {
+      "id": "big-bay",
+      "displayName": "Big Bay",
+      "url": "/assets/tracks/big-bay.glb",
+      "specPath": "public/tracks/big-bay.json"
+    },
+    {
       "id": "calibration",
       "displayName": "Calibration",
       "url": "/assets/tracks/calibration.glb",

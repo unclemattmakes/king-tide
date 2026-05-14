@@ -18,6 +18,48 @@ with the headless `pnpm gen:*` pipeline. The existing pipeline is in
 
 ## Shipped so far
 
+- **Five authoring tools to round out the iteration loop (2026-05-13).**
+  Five additions covering visible features authors couldn't easily
+  reach from the addon:
+  - **Sea level slider.** New *Sea level (m)* row in the Water box —
+    proxies `water_volume_main.location.z`, lazily creates the empty
+    on first scrub. Drag the empty in the viewport or scrub the
+    slider; both write to `water.height` on export.
+  - **Boost pads.** New `boost_NN` empty pattern with custom props
+    `half_width` / `half_depth` / `strength` (defaults match the
+    in-app editor's placement.ts). *Add Boost Pad* drops one at the
+    3D cursor with a cyan-emissive slab gizmo parented under it
+    (lives in `_hoverbike_boost_pad_preview` so the export scrubs
+    the visual). Empty's local +Y is the boost direction; rotate the
+    empty around Z to aim. Round-trips through `boostPads[]` in the
+    JSON; the merge respects opt-in (no `boost_NN` empties → editor
+    keeps its placements).
+  - **Road banking.** Two new road-tool sliders (*Bank* + *Max°*)
+    auto-tilt the cross-section based on per-sample signed
+    curvature, with smoothing so the bank eases in/out of corners.
+    Bezier control-point `tilt` (N-panel → Curve → Tilt) is added on
+    top, so authors can hand-tune a specific corner. Open curves
+    don't get spurious endpoint banks; cyclic curves wrap cleanly.
+    25° default cap, ~1.7° auto-bank on a 50 m radius corner.
+  - **Terrain sculpt panel.** New section with five operators:
+    *Apply Terrain Modifiers* (bake HV_Island into editable verts),
+    *Subdivide Terrain*, *Sculpt Terrain* (one-click into Sculpt
+    Mode with proper active-object setup), *Raise / Lower @ cursor*
+    (smoothstep falloff, Δz + radius sliders), *Smooth Terrain*
+    (global Laplacian pass with iter / weight knobs).
+  - **Turn indicator visibility fix.** The wireframe-chevron gizmo
+    was 2.5 m of edges lying flat on a 1 km terrain — invisible at
+    track scale, leaving the *Rebuild Turn Indicators* button feeling
+    broken. Replaced with a 12 m × 6 m × 2.5 m solid upright pylon in
+    bright orange (emissive `mat_turn_indicator_preview`). Default
+    |κ| threshold lowered from 0.02 to 0.01 1/m so gentler
+    JetMoto-style sweeps register. The *zero peaks* case now reports
+    a WARNING with the strongest curvature on the spline, so authors
+    know whether to lower the threshold or sharpen the bends.
+
+  Reinstall `tools/blender/hoverbike_addon.py` in Blender to pick
+  these up.
+
 - **Road + ramp authoring tools (2026-05-12).** Two new operators that
   cover the "I want to author a real track feature, not just place a
   prop" use case:
