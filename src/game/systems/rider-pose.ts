@@ -188,14 +188,22 @@ export const RIDER_POSE_TUNING = {
     /** Neck pitch — negative tilts the head back so it stays level when
      *  the chest is leaning forward. */
     neck: -22,
-    /** Shoulder forward pitch (shared L/R). */
-    shoulder_pitch: 75,
+    /** Shoulder forward pitch (shared L/R).
+     *
+     *  SIGN CONVENTION (matters): upper_arm attaches to chest via its +Y
+     *  END (top of the capsule). Positive pitch around X rotates the top
+     *  of the bone forward, which sends the rest of the bone (and the
+     *  hand) BACKWARD. To swing the arm forward to the handlebars — what
+     *  the IK target is derived from — we need a NEGATIVE pitch. This
+     *  matches the convention used by `hip_pitch`. */
+    shoulder_pitch: -55,
     /** Shoulder twist around the bone's long axis. Mirrored on the right. */
     shoulder_yaw: 0,
     /** Shoulder outward roll. Left side gets +roll, right gets -roll. */
-    shoulder_roll: 18,
-    /** Elbow bend. Mostly cosmetic because hand IK overrides. */
-    elbow: -55,
+    shoulder_roll: 12,
+    /** Elbow bend. Positive so the forearm continues forward-and-down
+     *  rather than folding back toward the shoulder. */
+    elbow: 35,
     /** Hip pitch — negative because of the +Y-end attachment convention
      *  (positive pitch sends the knee backward into the bike). */
     hip_pitch: -80,
@@ -657,11 +665,18 @@ export function riderPoseSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): 
     const footTargetL = toWorld(footLocalL)
     const footTargetR = toWorld(footLocalR)
 
-    // Pole hints — bone-local "preferred elbow / knee direction" rotated by
-    // bike rotation. Elbows bend DOWN+BACK; knees bend DOWN+BACK (the
-    // calf trails the thigh on a forward swing).
-    const armPoleLocal: Vec3 = { x: 0, y: -1, z: -0.4 }
-    const legPoleLocal: Vec3 = { x: 0, y: -1, z: -0.5 }
+    // Pole hints — "preferred elbow / knee direction" in bike-local space,
+    // rotated into world by bike orientation. The IK projects this onto
+    // the plane perpendicular to shoulder→hand (or hip→foot) and uses it
+    // to pick which side the bend points to.
+    //
+    // For motocross sitting: elbows hang DOWN (slightly forward) below
+    // the shoulder→grip line, and knees jut FORWARD ahead of the
+    // hip→peg line. Earlier pole values pointed BACK on both, which
+    // bent the elbow + knee the wrong way — matching the "arms and
+    // legs look backwards" feedback.
+    const armPoleLocal: Vec3 = { x: 0, y: -1, z: 0.2 }
+    const legPoleLocal: Vec3 = { x: 0, y: -0.3, z: 1 }
     const armPole = rotByQuat(bikeRot, armPoleLocal.x, armPoleLocal.y, armPoleLocal.z)
     const legPole = rotByQuat(bikeRot, legPoleLocal.x, legPoleLocal.y, legPoleLocal.z)
 
