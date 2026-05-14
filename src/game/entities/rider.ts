@@ -91,8 +91,6 @@ type AnatomyEdge = {
   kd: number
 }
 
-const IDENT: Quat = { x: 0, y: 0, z: 0, w: 1 }
-
 /** Quaternion from axis (unit) + angle (radians). */
 function quatFromAxisAngle(ax: number, ay: number, az: number, angle: number): Quat {
   const h = angle * 0.5
@@ -120,11 +118,9 @@ function quatMul(a: Quat, b: Quat): Quat {
  */
 function buildAnatomy(): AnatomyEdge[] {
   // Forward pitch helpers (rotation around bone X axis).
-  const pitch = (deg: number) =>
-    quatFromAxisAngle(1, 0, 0, (deg * Math.PI) / 180)
+  const pitch = (deg: number) => quatFromAxisAngle(1, 0, 0, (deg * Math.PI) / 180)
   // Roll around bone Y (for arm "outward from torso" angle).
-  const roll = (deg: number) =>
-    quatFromAxisAngle(0, 1, 0, (deg * Math.PI) / 180)
+  const roll = (deg: number) => quatFromAxisAngle(0, 1, 0, (deg * Math.PI) / 180)
   // Yaw around bone Z (rarely used here).
 
   // pelvis rest: capsule along Z (front-back). Pelvis +Y is the rider's up.
@@ -258,9 +254,7 @@ function computeRestPositions(
   for (const e of edges) {
     const parent = out[e.parent]
     if (!parent) {
-      throw new Error(
-        `rider: parent ${e.parent} not yet placed when laying out child ${e.child}`,
-      )
+      throw new Error(`rider: parent ${e.parent} not yet placed when laying out child ${e.child}`)
     }
     const childRot = quatMul(parent.rot, e.targetRelRot)
     // World offset from parent center to joint anchor on parent.
@@ -348,11 +342,7 @@ export type CreateRiderOpts = {
   bikeRot: Quat
 }
 
-export function createRider(
-  sim: SimWorld,
-  phys: PhysicsWorld,
-  opts: CreateRiderOpts,
-): number {
+export function createRider(sim: SimWorld, phys: PhysicsWorld, opts: CreateRiderOpts): number {
   const riderEid = addEntity(sim)
   addComponent(sim, riderEid, RiderTag)
 

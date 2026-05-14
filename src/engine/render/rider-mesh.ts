@@ -57,10 +57,7 @@ export function createRiderBoneMesh(
 
   if (name === 'chest') {
     // Visual head on top of chest. Sized roughly to a real head.
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(radius * 0.85, 16, 12),
-      getMaterial(color),
-    )
+    const head = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.85, 16, 12), getMaterial(color))
     head.position.set(0, halfHeight + radius * 0.9, 0)
     head.castShadow = true
     head.receiveShadow = true
