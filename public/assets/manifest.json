@@ -127,10 +127,28 @@
   "riders": [],
   "tracks": [
     {
+      "id": "alpine-sprint",
+      "displayName": "Alpine Sprint",
+      "url": "/assets/tracks/alpine-sprint.glb",
+      "specPath": "public/tracks/alpine-sprint.json"
+    },
+    {
       "id": "calibration",
       "displayName": "Calibration",
       "url": "/assets/tracks/calibration.glb",
       "specPath": "specs/tracks/calibration.json"
+    },
+    {
+      "id": "canyon-run",
+      "displayName": "Canyon Run",
+      "url": "/assets/tracks/canyon-run.glb",
+      "specPath": "public/tracks/canyon-run.json"
+    },
+    {
+      "id": "dune-rally",
+      "displayName": "Dune Rally",
+      "url": "/assets/tracks/dune-rally.glb",
+      "specPath": "public/tracks/dune-rally.json"
     },
     {
       "id": "figure-eight",
