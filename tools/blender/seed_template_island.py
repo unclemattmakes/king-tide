@@ -260,7 +260,20 @@ def build_peak_profile_group() -> bpy.types.NodeTree:
 
     Sentinel value gates unbound slots: when base.scale.x ≤ 0.01 the
     output is the sentinel (large negative) which loses the parent's
-    max-combine."""
+    max-combine.
+
+    BASELINE ASSUMPTION (worth flagging if you copy this for a new biome):
+    this sub-group emits *height above zero*, not *absolute altitude*.
+    Vertices outside the peak's footprint get cone=0 + shelf=0 + reef=0
+    = 0, and the parent graph adds shelf+reef etc. on top. That works
+    because the implicit baseline elsewhere is 0 too. Biomes with a
+    NON-ZERO baseline (mesa/canyon at -8 m, alpine valley at -5 m)
+    can't reuse this pattern: a vertex outside any plateau still needs
+    to return *the baseline*, not 0, so MAX(0, -8) doesn't trap the
+    output at 0. The mesa + alpine sub-groups solve that by taking the
+    canyon-floor scalar as an explicit input and lerping
+    baseline → plateau-top across the cliff smoothstep — see
+    HV_MesaProfile / HV_RidgeProfile."""
     if PEAK_SUBGROUP_NAME in bpy.data.node_groups:
         bpy.data.node_groups.remove(bpy.data.node_groups[PEAK_SUBGROUP_NAME])
     g = bpy.data.node_groups.new(PEAK_SUBGROUP_NAME, "GeometryNodeTree")
