@@ -397,7 +397,7 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
       <div><span style="color:#888">intent   </span>${intentLabel}</div>
       <div style="margin-top:6px;color:#aaa;font-weight:600">pose response</div>
       <div><span style="color:#888">bouncePitch</span> ${p.bouncePitch.toFixed(3)} rad (vel ${p.bouncePitchVel.toFixed(3)})</div>
-      <div><span style="color:#888">flowRoll  </span>${p.flowRoll.toFixed(3)} rad</div>
+      <div><span style="color:#888">flowYaw   </span>${p.flowYaw.toFixed(3)} rad</div>
       <div><span style="color:#888">headYaw   </span>${p.headYaw.toFixed(3)} rad</div>
       <div><span style="color:#888">headPitch </span>${p.headPitch.toFixed(3)} rad</div>
       <div style="margin-top:8px;color:#7cf;font-size:11px">

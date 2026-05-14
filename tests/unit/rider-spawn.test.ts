@@ -179,7 +179,7 @@ describe('createRider', () => {
     const rider = RiderStore.must(riderEid)
     expect(rider.poseResponse.bouncePitch).toBe(0)
     expect(rider.poseResponse.bouncePitchVel).toBe(0)
-    expect(rider.poseResponse.flowRoll).toBe(0)
+    expect(rider.poseResponse.flowYaw).toBe(0)
     expect(rider.poseResponse.headYaw).toBe(0)
     expect(rider.poseResponse.headPitch).toBe(0)
   })
