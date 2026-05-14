@@ -45,6 +45,7 @@ export interface ReplayModeOpts {
     debug: { getTimeScale: () => number }
   }
   bikeRender: () => void
+  riderRender: () => void
   pickupRender: (dt: number) => void
   combatRender: (dt: number) => void
   fxTick: (dt: number) => void
@@ -81,6 +82,7 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     waveField,
     waterMesh,
     bikeRender,
+    riderRender,
     pickupRender,
     combatRender,
     fxTick,
@@ -296,6 +298,7 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     horizonRing.tick({ x: camera.position.x, z: camera.position.z })
     updateUnderwaterFog(scene, camera.position.y)
     bikeRender()
+    riderRender()
     pickupRender(dt)
     combatRender(dt)
     fxTick(dt)

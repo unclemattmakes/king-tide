@@ -115,6 +115,7 @@ export interface GameLoopOpts {
   dirArrow: DirectionArrow
   physicsDebug: { tick: () => void }
   bikeRender: () => void
+  riderRender: () => void
   pickupRender: (dt: number) => void
   combatRender: (dt: number) => void
   fxTick: (dt: number) => void
@@ -170,6 +171,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     dirArrow,
     physicsDebug,
     bikeRender,
+    riderRender,
     pickupRender,
     combatRender,
     fxTick,
@@ -446,6 +448,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     horizonRing.tick({ x: camera.position.x, z: camera.position.z })
     updateUnderwaterFog(scene, camera.position.y)
     bikeRender()
+    riderRender()
     pickupRender(dt)
     combatRender(dt)
     fxTick(dt)

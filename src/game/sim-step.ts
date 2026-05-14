@@ -17,6 +17,8 @@ import {
 import { hoverSystem } from './systems/hover'
 import { applyPeerInputs, EMPTY_PEER_INPUTS } from './systems/input-apply'
 import { boostTickSystem, pickupSystem, pickupUseSystem } from './systems/pickup'
+import { riderCrashSystem } from './systems/rider-crash'
+import { riderPoseSystem } from './systems/rider-pose'
 import { rubberBandSystem } from './systems/rubber-band'
 import { syncFromPhysics } from './systems/sync-from-physics'
 import { wakeUpdateSystem } from './systems/wake-update'
@@ -81,8 +83,19 @@ export function simulateStep(
   stunOverrideSystem(sim)
 
   hoverSystem(sim, phys, waveField)
+  // Rider pose runs just before the physics step — applies PD torque
+  // impulses to drive the active ragdoll toward its target stance. Must
+  // run after hoverSystem (which writes bike pose) so the pelvis-to-bike
+  // pose driver sees the bike's final orientation for this tick.
+  riderPoseSystem(sim, phys, phys.fixedDt)
   phys.step()
   syncFromPhysics(sim, phys)
+
+  // Rider crash detection runs after syncFromPhysics so it can compare
+  // the post-step bike velocity against the previous tick's velocity.
+  // Triggering on Δv catches wall hits, mine blasts, and bike-on-bike
+  // sideswipes without needing collision-event subscription.
+  riderCrashSystem(sim, phys, phys.fixedDt)
 
   if (!inputs.locked) raceTick(sim, phys, phys.fixedDt)
   pickupSystem(sim, phys, phys.fixedDt)

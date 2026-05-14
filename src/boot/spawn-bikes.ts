@@ -17,7 +17,9 @@ import type { ReplayFile } from '@/engine/replay/format'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { type BikeVariant, resolveBikeVariant } from '@/game/bikes/variants'
+import { RBHandleStore } from '@/game/components'
 import { createBike } from '@/game/entities/bike'
+import { createRider } from '@/game/entities/rider'
 import type { Track } from '@/game/tracks/types'
 import { AI_GRID_SLOTS } from './grid-offsets'
 
@@ -61,6 +63,25 @@ export function spawnBikes(opts: {
   const replayBikeEids: number[] = []
   let playerEid: number
 
+  const startYaw = track.start.yaw
+  const halfYaw = startYaw / 2
+  const startQuat = {
+    x: 0,
+    y: Math.sin(halfYaw),
+    z: 0,
+    w: Math.cos(halfYaw),
+  }
+  const spawnRider = (bikeEid: number, pos: { x: number; y: number; z: number }) => {
+    const handle = RBHandleStore.get(bikeEid)
+    if (!handle) return
+    createRider(sim, phys, {
+      bikeEid,
+      bikeRbHandle: handle.handle,
+      bikePos: pos,
+      bikeRot: startQuat,
+    })
+  }
+
   if (activeReplay) {
     if (activeReplay.bikes.length === 0) {
       throw new Error('spawnBikes: replay has no bikes')
@@ -78,6 +99,7 @@ export function spawnBikes(opts: {
           variantId: variant.id,
         },
       })
+      spawnRider(eid, startPos)
       replayBikeEids.push(eid)
     })
     // Safe — guarded above. Slot 0 is the player by recording convention.
@@ -97,15 +119,18 @@ export function spawnBikes(opts: {
         variantId: playerVariant.id,
       },
     })
+    spawnRider(playerEid, startPos)
 
     const grid = AI_SLOTS.slice(0, NUM_AI)
     for (const slot of grid) {
+      const aiPos = { x: startPos.x + slot.dx, y: startPos.y, z: startPos.z + slot.dz }
       const aiEid = createBike(sim, phys, {
-        position: { x: startPos.x + slot.dx, y: startPos.y, z: startPos.z + slot.dz },
+        position: aiPos,
         yaw: track.start.yaw,
         asRacer: true,
         ai: { splineId: 'main', lineOffset: slot.off },
       })
+      spawnRider(aiEid, aiPos)
       aiEids.push(aiEid)
     }
   }

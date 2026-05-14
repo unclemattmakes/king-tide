@@ -6,6 +6,7 @@ import { createFxSystem } from '@/engine/render/fx'
 import { createPickupRenderSystem } from '@/engine/render/pickup-render'
 import { createPropsMesh } from '@/engine/render/props-mesh'
 import { createBikeRenderSystem } from '@/engine/render/render-systems'
+import { createRiderRenderSystem } from '@/engine/render/rider-systems'
 import { createRenderer } from '@/engine/render/renderer'
 import { createScene } from '@/engine/render/scene'
 import { createSkySystem } from '@/engine/render/sky'
@@ -21,6 +22,7 @@ import { resolveBikeVariant } from '@/game/bikes/variants'
 import { ControlIntentStore, RBHandleStore } from '@/game/components'
 import { createBike } from '@/game/entities/bike'
 import { createPropColliders } from '@/game/entities/props'
+import { createRider } from '@/game/entities/rider'
 import { simulateStep } from '@/game/sim-step'
 import type { Track } from '@/game/tracks/types'
 import { AI_GRID_SLOTS } from './grid-offsets'
@@ -169,14 +171,22 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     const racerVariant = resolveBikeVariant('racer')
     const grid = AI_GRID_SLOTS.slice(0, 5)
     const aiEids: number[] = []
+    const halfStartYaw = track.start.yaw / 2
+    const startQuat = {
+      x: 0,
+      y: Math.sin(halfStartYaw),
+      z: 0,
+      w: Math.cos(halfStartYaw),
+    }
     for (let i = 0; i < grid.length; i++) {
       const slot = grid[i]!
+      const pos = {
+        x: track.start.position.x + slot.dx,
+        y: track.start.position.y,
+        z: track.start.position.z + slot.dz,
+      }
       const eid = createBike(sim, phys, {
-        position: {
-          x: track.start.position.x + slot.dx,
-          y: track.start.position.y,
-          z: track.start.position.z + slot.dz,
-        },
+        position: pos,
         yaw: track.start.yaw,
         asRacer: false,
         stats: {
@@ -186,6 +196,15 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
         },
         ai: { splineId: 'main', lineOffset: slot.lineOffset },
       })
+      const handle = RBHandleStore.get(eid)
+      if (handle) {
+        createRider(sim, phys, {
+          bikeEid: eid,
+          bikeRbHandle: handle.handle,
+          bikePos: pos,
+          bikeRot: startQuat,
+        })
+      }
       aiEids.push(eid)
     }
     // Stagger AI bikes along the spline so they don't all start in a
@@ -196,6 +215,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
       byVariantId: { racer: racerBikeGlb },
       default: racerBikeGlb,
     })
+    const riderRender = createRiderRenderSystem(scene, sim)
     const pickupRender = createPickupRenderSystem(scene, sim)
     const combatRender = createCombatRenderSystem(scene, sim)
     const fxTick = createFxSystem(scene, sim, phys)
@@ -262,6 +282,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
       sky.tick(waveField.time, dt, { x: camera.position.x, z: camera.position.z })
       updateUnderwaterFog(scene, camera.position.y)
       bikeRender()
+      riderRender()
       pickupRender(dt)
       combatRender(dt)
       fxTick(dt)

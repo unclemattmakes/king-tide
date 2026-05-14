@@ -26,6 +26,7 @@ import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
 import { createRaceHud } from './engine/render/race-hud'
 import { createBikeRenderSystem } from './engine/render/render-systems'
+import { createRiderRenderSystem } from './engine/render/rider-systems'
 import { createRenderer } from './engine/render/renderer'
 import { createScene } from './engine/render/scene'
 import { createSkySystem } from './engine/render/sky'
@@ -490,6 +491,7 @@ async function boot() {
     byVariantId: { [playerVariant.id]: playerBikeGlb, racer: racerBikeGlb },
     default: racerBikeGlb,
   })
+  const riderRender = createRiderRenderSystem(scene, sim)
   const pickupRender = createPickupRenderSystem(scene, sim)
   const combatRender = createCombatRenderSystem(scene, sim)
   const fxTick = createFxSystem(scene, sim, phys)
@@ -643,6 +645,7 @@ async function boot() {
       waveField,
       waterMesh,
       bikeRender,
+      riderRender,
       pickupRender,
       combatRender,
       fxTick,
@@ -678,6 +681,7 @@ async function boot() {
     dirArrow,
     physicsDebug,
     bikeRender,
+    riderRender,
     pickupRender,
     combatRender,
     fxTick,
