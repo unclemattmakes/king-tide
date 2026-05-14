@@ -1418,25 +1418,37 @@ export function createWaterMesh(
  * updated `scene.fog` for the day-night palette. When the camera is
  * clearly below the resting water surface, this overwrites the fog with
  * a dense water-tinted version — distant terrain disappears into the
- * abyss, nearby geometry gets a teal cast. Above water it leaves the fog
- * alone so the sky module's per-tick color update stands.
+ * abyss, nearby geometry gets a teal cast. Above water it restores the
+ * sky module's near/far so the per-tick color update reads as air again.
  *
  * Subnautica-style: the dense water fog is what sells "you are underwater"
  * more than any single visual on its own. Bonus: the fog respects the
  * existing receiveShadow / lighting flow, so it just works for terrain,
  * bikes, and props without per-material plumbing.
  *
- * Hysteresis: triggers at `cameraY < -0.5` so the camera bobbing through
- * the wave crest line doesn't flicker between modes.
+ * Hysteresis: enter underwater at `cameraY < -0.5`, exit at `cameraY > 0`,
+ * so camera bob through the wave crest line doesn't flicker between modes.
  */
+const airFogRanges = new WeakMap<THREE.Fog, { near: number; far: number }>()
+
 export function updateUnderwaterFog(scene: THREE.Scene, cameraY: number): void {
   const fog = scene.fog
   if (!(fog instanceof THREE.Fog)) return
   if (cameraY < -0.5) {
+    if (!airFogRanges.has(fog)) {
+      airFogRanges.set(fog, { near: fog.near, far: fog.far })
+    }
     // Saturated underwater teal — slightly brighter than the deep-water
     // albedo so the fog reads as "fluid medium" rather than "black void".
     fog.color.setRGB(0.04, 0.2, 0.3)
     fog.near = 0
     fog.far = 28
+  } else if (cameraY > 0) {
+    const air = airFogRanges.get(fog)
+    if (air) {
+      fog.near = air.near
+      fog.far = air.far
+      airFogRanges.delete(fog)
+    }
   }
 }
