@@ -254,185 +254,306 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
   }
 
   function buildTuner() {
-    const ra = RIDER_POSE_TUNING.restAngles
-    const hl = RIDER_POSE_TUNING.handlebarLocal
+    const t = RIDER_POSE_TUNING
+    const ra = t.restAngles
+    const sl = t.seatLocal
+    const bd = t.bounceDistribution
+    // Builds a numeric slider spec — terser than the per-property objects
+    // used in the first cut, keeps this block scannable.
+    const S = (
+      label: string,
+      min: number,
+      max: number,
+      step: number,
+      get: () => number,
+      set: (v: number) => void,
+    ): SliderSpec => ({ label, min, max, step, get, set })
+
     const sliders: { section: string; specs: SliderSpec[] }[] = [
       {
-        section: 'REST POSE (deg)',
+        section: 'SEAT (bike-local m)',
         specs: [
-          {
-            label: 'spine lower',
-            min: -30,
-            max: 60,
-            step: 1,
-            get: () => ra.spine_lower,
-            set: (v) => {
+          S(
+            'seat X',
+            -0.3,
+            0.3,
+            0.01,
+            () => sl.x,
+            (v) => {
+              sl.x = v
+            },
+          ),
+          S(
+            'seat Y (up)',
+            0,
+            1.2,
+            0.01,
+            () => sl.y,
+            (v) => {
+              sl.y = v
+            },
+          ),
+          S(
+            'seat Z (fwd)',
+            -1,
+            1,
+            0.01,
+            () => sl.z,
+            (v) => {
+              sl.z = v
+            },
+          ),
+        ],
+      },
+      {
+        section: 'SPINE / HEAD (deg)',
+        specs: [
+          S(
+            'spine lower',
+            -30,
+            60,
+            1,
+            () => ra.spine_lower,
+            (v) => {
               ra.spine_lower = v
             },
-          },
-          {
-            label: 'spine upper',
-            min: -30,
-            max: 60,
-            step: 1,
-            get: () => ra.spine_upper,
-            set: (v) => {
+          ),
+          S(
+            'spine upper',
+            -30,
+            60,
+            1,
+            () => ra.spine_upper,
+            (v) => {
               ra.spine_upper = v
             },
-          },
-          {
-            label: 'neck',
-            min: -60,
-            max: 30,
-            step: 1,
-            get: () => ra.neck,
-            set: (v) => {
+          ),
+          S(
+            'neck',
+            -60,
+            30,
+            1,
+            () => ra.neck,
+            (v) => {
               ra.neck = v
             },
-          },
-          {
-            label: 'shoulder pitch',
-            min: 0,
-            max: 120,
-            step: 1,
-            get: () => ra.shoulder_pitch,
-            set: (v) => {
+          ),
+        ],
+      },
+      {
+        section: 'SHOULDERS (deg, R mirrors)',
+        specs: [
+          S(
+            'pitch',
+            0,
+            120,
+            1,
+            () => ra.shoulder_pitch,
+            (v) => {
               ra.shoulder_pitch = v
             },
-          },
-          {
-            label: 'shoulder roll',
-            min: -30,
-            max: 45,
-            step: 1,
-            get: () => ra.shoulder_roll,
-            set: (v) => {
+          ),
+          S(
+            'yaw (twist)',
+            -90,
+            90,
+            1,
+            () => ra.shoulder_yaw,
+            (v) => {
+              ra.shoulder_yaw = v
+            },
+          ),
+          S(
+            'roll (out)',
+            -30,
+            60,
+            1,
+            () => ra.shoulder_roll,
+            (v) => {
               ra.shoulder_roll = v
             },
-          },
-          {
-            label: 'elbow',
-            min: -120,
-            max: 30,
-            step: 1,
-            get: () => ra.elbow,
-            set: (v) => {
+          ),
+          S(
+            'elbow',
+            -120,
+            30,
+            1,
+            () => ra.elbow,
+            (v) => {
               ra.elbow = v
             },
-          },
-          {
-            label: 'hip',
-            min: -120,
-            max: 30,
-            step: 1,
-            get: () => ra.hip,
-            set: (v) => {
-              ra.hip = v
+          ),
+        ],
+      },
+      {
+        section: 'HIPS (deg, R mirrors)',
+        specs: [
+          S(
+            'pitch (fwd)',
+            -120,
+            30,
+            1,
+            () => ra.hip_pitch,
+            (v) => {
+              ra.hip_pitch = v
             },
-          },
-          {
-            label: 'knee',
-            min: -30,
-            max: 120,
-            step: 1,
-            get: () => ra.knee,
-            set: (v) => {
+          ),
+          S(
+            'yaw (twist)',
+            -90,
+            90,
+            1,
+            () => ra.hip_yaw,
+            (v) => {
+              ra.hip_yaw = v
+            },
+          ),
+          S(
+            'roll (splay)',
+            -45,
+            45,
+            1,
+            () => ra.hip_roll,
+            (v) => {
+              ra.hip_roll = v
+            },
+          ),
+          S(
+            'knee',
+            -30,
+            120,
+            1,
+            () => ra.knee,
+            (v) => {
               ra.knee = v
             },
-          },
+          ),
         ],
       },
       {
-        section: 'HANDLEBAR (bike-local m)',
+        section: 'BOUNCE RESPONSE',
         specs: [
-          {
-            label: 'left X',
-            min: -0.5,
-            max: 0.5,
-            step: 0.01,
-            get: () => hl.L.x,
-            set: (v) => {
-              hl.L.x = v
-              hl.R.x = -v
+          S(
+            'force gain',
+            0,
+            0.4,
+            0.005,
+            () => t.bounceForceGain,
+            (v) => {
+              t.bounceForceGain = v
             },
-          },
-          {
-            label: 'Y (height)',
-            min: 0,
-            max: 1.2,
-            step: 0.01,
-            get: () => hl.L.y,
-            set: (v) => {
-              hl.L.y = v
-              hl.R.y = v
+          ),
+          S(
+            'spring k',
+            3,
+            80,
+            1,
+            () => t.bounceSpringK,
+            (v) => {
+              t.bounceSpringK = v
             },
-          },
-          {
-            label: 'Z (forward)',
-            min: -0.5,
-            max: 1.0,
-            step: 0.01,
-            get: () => hl.L.z,
-            set: (v) => {
-              hl.L.z = v
-              hl.R.z = v
+          ),
+          S(
+            'damping',
+            0,
+            20,
+            0.2,
+            () => t.bounceSpringDamping,
+            (v) => {
+              t.bounceSpringDamping = v
             },
-          },
+          ),
+          S(
+            'max pitch (rad)',
+            0.1,
+            1.5,
+            0.02,
+            () => t.bounceMaxPitch,
+            (v) => {
+              t.bounceMaxPitch = v
+            },
+          ),
+          S(
+            'lower share',
+            0,
+            1,
+            0.02,
+            () => bd.spine_lower,
+            (v) => {
+              bd.spine_lower = v
+              bd.spine_upper = 1 - v
+            },
+          ),
         ],
       },
       {
-        section: 'RESPONSE GAINS',
+        section: 'FLOW / HEAD',
         specs: [
-          {
-            label: 'flow yaw/yaw_rate',
-            min: 0,
-            max: 1.5,
-            step: 0.02,
-            get: () => RIDER_POSE_TUNING.flowYawPerYawRate,
-            set: (v) => {
-              RIDER_POSE_TUNING.flowYawPerYawRate = v
+          S(
+            'flow yaw/yawrate',
+            0,
+            1.5,
+            0.02,
+            () => t.flowYawPerYawRate,
+            (v) => {
+              t.flowYawPerYawRate = v
             },
-          },
-          {
-            label: 'flow max yaw',
-            min: 0,
-            max: 1.5,
-            step: 0.02,
-            get: () => RIDER_POSE_TUNING.flowMaxYaw,
-            set: (v) => {
-              RIDER_POSE_TUNING.flowMaxYaw = v
+          ),
+          S(
+            'flow max yaw',
+            0,
+            1.5,
+            0.02,
+            () => t.flowMaxYaw,
+            (v) => {
+              t.flowMaxYaw = v
             },
-          },
-          {
-            label: 'bounce force gain',
-            min: 0,
-            max: 0.2,
-            step: 0.002,
-            get: () => RIDER_POSE_TUNING.bounceForceGain,
-            set: (v) => {
-              RIDER_POSE_TUNING.bounceForceGain = v
+          ),
+          S(
+            'head yaw max',
+            0,
+            1.5,
+            0.02,
+            () => t.headYawMax,
+            (v) => {
+              t.headYawMax = v
             },
-          },
-          {
-            label: 'bounce spring k',
-            min: 5,
-            max: 80,
-            step: 1,
-            get: () => RIDER_POSE_TUNING.bounceSpringK,
-            set: (v) => {
-              RIDER_POSE_TUNING.bounceSpringK = v
+          ),
+          S(
+            'head pitch max',
+            0,
+            0.6,
+            0.01,
+            () => t.headPitchMax,
+            (v) => {
+              t.headPitchMax = v
             },
-          },
-          {
-            label: 'head yaw max',
-            min: 0,
-            max: 1.5,
-            step: 0.02,
-            get: () => RIDER_POSE_TUNING.headYawMax,
-            set: (v) => {
-              RIDER_POSE_TUNING.headYawMax = v
+          ),
+        ],
+      },
+      {
+        section: 'IK STRENGTH',
+        specs: [
+          S(
+            'hand IK',
+            0,
+            1,
+            0.05,
+            () => t.handIKStrength,
+            (v) => {
+              t.handIKStrength = v
             },
-          },
+          ),
+          S(
+            'foot IK',
+            0,
+            1,
+            0.05,
+            () => t.footIKStrength,
+            (v) => {
+              t.footIKStrength = v
+            },
+          ),
         ],
       },
     ]
@@ -486,8 +607,18 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
       'margin-top:10px;width:100%;background:#2c4060;color:#cfe;border:1px solid #4080a0;padding:5px;cursor:pointer;font-family:inherit;font-size:10px;border-radius:3px'
     resetBtn.addEventListener('click', () => {
       Object.assign(RIDER_POSE_TUNING.restAngles, DEFAULT_REST_ANGLES)
-      Object.assign(RIDER_POSE_TUNING.handlebarLocal.L, DEFAULT_HANDLEBAR.L)
-      Object.assign(RIDER_POSE_TUNING.handlebarLocal.R, DEFAULT_HANDLEBAR.R)
+      Object.assign(RIDER_POSE_TUNING.seatLocal, DEFAULT_SEAT)
+      Object.assign(RIDER_POSE_TUNING.bounceDistribution, DEFAULT_BOUNCE_DIST)
+      RIDER_POSE_TUNING.bounceForceGain = DEFAULTS.bounceForceGain
+      RIDER_POSE_TUNING.bounceSpringK = DEFAULTS.bounceSpringK
+      RIDER_POSE_TUNING.bounceSpringDamping = DEFAULTS.bounceSpringDamping
+      RIDER_POSE_TUNING.bounceMaxPitch = DEFAULTS.bounceMaxPitch
+      RIDER_POSE_TUNING.flowYawPerYawRate = DEFAULTS.flowYawPerYawRate
+      RIDER_POSE_TUNING.flowMaxYaw = DEFAULTS.flowMaxYaw
+      RIDER_POSE_TUNING.headYawMax = DEFAULTS.headYawMax
+      RIDER_POSE_TUNING.headPitchMax = DEFAULTS.headPitchMax
+      RIDER_POSE_TUNING.handIKStrength = DEFAULTS.handIKStrength
+      RIDER_POSE_TUNING.footIKStrength = DEFAULTS.footIKStrength
       buildTuner()
     })
     tunerEl.appendChild(resetBtn)
@@ -495,9 +626,19 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
 
   // Snapshot defaults at boot so the reset button has a target.
   const DEFAULT_REST_ANGLES = { ...RIDER_POSE_TUNING.restAngles }
-  const DEFAULT_HANDLEBAR = {
-    L: { ...RIDER_POSE_TUNING.handlebarLocal.L },
-    R: { ...RIDER_POSE_TUNING.handlebarLocal.R },
+  const DEFAULT_SEAT = { ...RIDER_POSE_TUNING.seatLocal }
+  const DEFAULT_BOUNCE_DIST = { ...RIDER_POSE_TUNING.bounceDistribution }
+  const DEFAULTS = {
+    bounceForceGain: RIDER_POSE_TUNING.bounceForceGain,
+    bounceSpringK: RIDER_POSE_TUNING.bounceSpringK,
+    bounceSpringDamping: RIDER_POSE_TUNING.bounceSpringDamping,
+    bounceMaxPitch: RIDER_POSE_TUNING.bounceMaxPitch,
+    flowYawPerYawRate: RIDER_POSE_TUNING.flowYawPerYawRate,
+    flowMaxYaw: RIDER_POSE_TUNING.flowMaxYaw,
+    headYawMax: RIDER_POSE_TUNING.headYawMax,
+    headPitchMax: RIDER_POSE_TUNING.headPitchMax,
+    handIKStrength: RIDER_POSE_TUNING.handIKStrength,
+    footIKStrength: RIDER_POSE_TUNING.footIKStrength,
   }
   buildTuner()
 

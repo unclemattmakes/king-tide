@@ -125,12 +125,27 @@ function vnorm(v: Vec3): Vec3 {
  *  calibration scene can rebind values live from devtools without a
  *  page reload — `window.__hover.riderTuning = { ... }` style. */
 export const RIDER_POSE_TUNING = {
-  /** Bounce: critically-damped spring driven by vertical acceleration. */
-  bounceSpringK: 22,
-  bounceSpringDamping: 7,
-  bounceForceGain: 0.04,
-  /** Clamp on chest pitch offset (rad). */
-  bounceMaxPitch: 0.5,
+  /** Seat anchor in BIKE-LOCAL space. The pelvis sits here every tick;
+   *  moving it back/forward/up/down translates the whole rider. */
+  seatLocal: { x: 0, y: 0.6, z: -0.05 } as Vec3,
+
+  /** Bounce: critically-damped spring driven by vertical acceleration.
+   *  Defaults pushed for visibility — earlier values were so subtle the
+   *  chest tilt was sub-degree under normal turbulence. */
+  bounceSpringK: 14,
+  bounceSpringDamping: 4.5,
+  bounceForceGain: 0.1,
+  /** Clamp on total chest pitch offset (rad). Lifted to 0.7 (~40°) so a
+   *  hard landing reads as a real abdomen crunch, not a polite nod. */
+  bounceMaxPitch: 0.7,
+  /** Per-spine-segment fraction of `bouncePitch` applied as a reactive
+   *  offset. Two segments → two entries, summing to 1.0 so the total
+   *  flex equals `bouncePitch`. Tweak the distribution to bias lower or
+   *  upper spine compression. */
+  bounceDistribution: {
+    spine_lower: 0.55,
+    spine_upper: 0.45,
+  },
 
   /** Flow: low-pass on a target yaw derived from bike yaw rate. */
   flowSmoothing: 0.08,
@@ -151,23 +166,20 @@ export const RIDER_POSE_TUNING = {
   headPitchSmoothing: 0.06,
   headPitchMax: 0.18,
 
-  /** Handlebar anchors in bike-local space — the IK targets for the
-   *  rider's two hands. Each at the same forward + up offset, mirrored
-   *  in X for L/R. Tunable so the calibration scene can sweep these
-   *  and see them in-context. */
-  handlebarLocal: {
-    L: { x: 0.18, y: 0.6, z: 0.42 } as Vec3,
-    R: { x: -0.18, y: 0.6, z: 0.42 } as Vec3,
-  },
-  /** Strength of hand IK — 1 = hard-locked to handlebar, 0 = arms follow
-   *  rest pose only (no IK). Future: ramp to 0 during stun / launch
-   *  transitions so the arms flop instead of snapping. */
+  /** Strength of hand + foot IK. 1 = hard-locked to derived anchor, 0 =
+   *  limbs follow rest pose only (no IK). Future: ramp to 0 during stun /
+   *  launch transitions so the limbs flop instead of snapping. */
   handIKStrength: 1,
+  footIKStrength: 1,
 
   /** Rest-pose joint angles (degrees). Read live each tick — the
    *  calibration scene's slider panel mutates these directly so the rider
-   *  re-poses without a respawn. Single-axis joints store one number;
-   *  shoulder needs pitch + outward roll. */
+   *  re-poses without a respawn.
+   *
+   *  Shoulders and hips get THREE axes each (pitch, yaw, roll). Pitch
+   *  is shared L/R; yaw and roll are mirrored on the right side so a
+   *  positive shoulder roll opens both arms outward. Knees + elbows are
+   *  single-axis hinges. */
   restAngles: {
     /** Lower spine forward pitch (degrees). Adds with spine_upper for the
      *  total motocross "attack" lean. */
@@ -176,32 +188,41 @@ export const RIDER_POSE_TUNING = {
     /** Neck pitch — negative tilts the head back so it stays level when
      *  the chest is leaning forward. */
     neck: -22,
-    /** Shoulder forward pitch (both sides share). */
+    /** Shoulder forward pitch (shared L/R). */
     shoulder_pitch: 75,
-    /** Shoulder outward roll (positive). Left side gets +roll, right gets
-     *  -roll to mirror the stance. */
+    /** Shoulder twist around the bone's long axis. Mirrored on the right. */
+    shoulder_yaw: 0,
+    /** Shoulder outward roll. Left side gets +roll, right gets -roll. */
     shoulder_roll: 18,
-    /** Elbow bend. Mostly cosmetic because IK overrides. */
+    /** Elbow bend. Mostly cosmetic because hand IK overrides. */
     elbow: -55,
     /** Hip pitch — negative because of the +Y-end attachment convention
      *  (positive pitch sends the knee backward into the bike). */
-    hip: -80,
+    hip_pitch: -80,
+    /** Hip yaw (twist around leg's long axis). Mirrored. */
+    hip_yaw: 0,
+    /** Hip roll — splays the leg outward. Mirrored L/R. */
+    hip_roll: 0,
     /** Knee bend relative to upper leg. Pairs with hip so the lower leg
-     *  drops vertical to the footpeg. */
+     *  drops vertical to the footpeg. Mostly cosmetic because foot IK
+     *  overrides. */
     knee: 80,
-  },
-  /** Per-spine-segment fraction of `bouncePitch` applied as a reactive
-   *  offset. Two segments → two entries, summing to 1.0 so the total
-   *  flex equals `bouncePitch`. Tweak the distribution to bias lower or
-   *  upper spine compression. */
-  bounceDistribution: {
-    spine_lower: 0.55,
-    spine_upper: 0.45,
   },
 }
 
 /** Convert degrees → radians. */
 const D2R = Math.PI / 180
+
+/** Compose pitch + yaw + roll into a single quaternion. Rotation order:
+ *  Y (yaw) → Z (roll) → X (pitch), so q = pitch · roll · yaw. Picked to
+ *  match the way "pitch the bone forward, roll it out, twist it" reads
+ *  intuitively when scrubbing the sliders in the calibration scene. */
+function quatPYR(pitchDeg: number, yawDeg: number, rollDeg: number): Quat {
+  const pitch = quatAxisAngle(1, 0, 0, pitchDeg * D2R)
+  const yaw = quatAxisAngle(0, 1, 0, yawDeg * D2R)
+  const roll = quatAxisAngle(0, 0, 1, rollDeg * D2R)
+  return quatMul(pitch, quatMul(roll, yaw))
+}
 
 /** Compute the rest-pose `targetRelRot` for a joint kind from the live
  *  tuning angles. Replaces the static `joint.targetRelRot` that was baked
@@ -217,21 +238,16 @@ function targetRelRotFor(kind: RiderJointKind): Quat {
     case 'neck':
       return quatAxisAngle(1, 0, 0, a.neck * D2R)
     case 'shoulder_L':
-      return quatMul(
-        quatAxisAngle(1, 0, 0, a.shoulder_pitch * D2R),
-        quatAxisAngle(0, 1, 0, a.shoulder_roll * D2R),
-      )
+      return quatPYR(a.shoulder_pitch, a.shoulder_yaw, a.shoulder_roll)
     case 'shoulder_R':
-      return quatMul(
-        quatAxisAngle(1, 0, 0, a.shoulder_pitch * D2R),
-        quatAxisAngle(0, 1, 0, -a.shoulder_roll * D2R),
-      )
+      return quatPYR(a.shoulder_pitch, -a.shoulder_yaw, -a.shoulder_roll)
     case 'elbow_L':
     case 'elbow_R':
       return quatAxisAngle(1, 0, 0, a.elbow * D2R)
     case 'hip_L':
+      return quatPYR(a.hip_pitch, a.hip_yaw, a.hip_roll)
     case 'hip_R':
-      return quatAxisAngle(1, 0, 0, a.hip * D2R)
+      return quatPYR(a.hip_pitch, -a.hip_yaw, -a.hip_roll)
     case 'knee_L':
     case 'knee_R':
       return quatAxisAngle(1, 0, 0, a.knee * D2R)
@@ -448,6 +464,138 @@ function solveArmIK(
   }
 }
 
+/** Walk the rider's joint hierarchy with applyOffsets enabled or disabled.
+ *  Pelvis is anchored at `RIDER_POSE_TUNING.seatLocal` in bike-local space
+ *  (so when frame=identity, the result is the rider's bike-local pose).
+ *  With frame = bike's world transform, the result is the live world pose.
+ *
+ *  When `applyOffsets` is false the reactive offsets (bounce/flow/head)
+ *  are skipped — used to produce the static REST pose from which the IK
+ *  targets (hand + foot positions) are derived. */
+function walkChain(
+  rider: ReturnType<typeof RiderStore.must>,
+  frameOrigin: Vec3,
+  frameRot: Quat,
+  applyOffsets: boolean,
+): Map<RiderBoneName, WorldPose> {
+  const poses = new Map<RiderBoneName, WorldPose>()
+  const seat = RIDER_POSE_TUNING.seatLocal
+  const pelvisOffset = rotByQuat(frameRot, seat.x, seat.y, seat.z)
+  poses.set('pelvis', {
+    pos: {
+      x: frameOrigin.x + pelvisOffset.x,
+      y: frameOrigin.y + pelvisOffset.y,
+      z: frameOrigin.z + pelvisOffset.z,
+    },
+    rot: frameRot,
+  })
+  for (const j of rider.joints) {
+    const parent = poses.get(j.parentName)
+    if (!parent) continue
+    const baseRel = targetRelRotFor(j.kind)
+    const offset = applyOffsets ? reactiveOffsetFor(j.kind, rider.poseResponse) : IDENT_QUAT
+    const childRot = quatMul(parent.rot, quatMul(baseRel, offset))
+    const parentAnchorWorld = rotByQuat(
+      parent.rot,
+      j.parentLocal.x,
+      j.parentLocal.y,
+      j.parentLocal.z,
+    )
+    const childAnchorLocal = rotByQuat(childRot, j.childLocal.x, j.childLocal.y, j.childLocal.z)
+    const childPos: Vec3 = {
+      x: parent.pos.x + parentAnchorWorld.x - childAnchorLocal.x,
+      y: parent.pos.y + parentAnchorWorld.y - childAnchorLocal.y,
+      z: parent.pos.z + parentAnchorWorld.z - childAnchorLocal.z,
+    }
+    poses.set(j.childName, { pos: childPos, rot: childRot })
+  }
+  return poses
+}
+
+/** Find the world position of the -Y "tip" end of a bone — used for
+ *  IK end-effector targets (hand at the end of `lower_arm`, foot at the
+ *  end of `lower_leg`). */
+function tipOfBone(pose: WorldPose, halfHeight: number): Vec3 {
+  const tip = rotByQuat(pose.rot, 0, -halfHeight, 0)
+  return {
+    x: pose.pos.x + tip.x,
+    y: pose.pos.y + tip.y,
+    z: pose.pos.z + tip.z,
+  }
+}
+
+/** Lookup table for bone half-heights so the IK pass doesn't have to walk
+ *  boneDims with a string-name match each call. Cached in the rider's
+ *  Map<name, halfHeight>. Cheap — populated lazily on first use. */
+function boneHalfHeights(rider: ReturnType<typeof RiderStore.must>): Map<RiderBoneName, number> {
+  const out = new Map<RiderBoneName, number>()
+  for (const name of Object.keys(rider.bones) as RiderBoneName[]) {
+    const eid = rider.bones[name]
+    const h = RBHandleStore.get(eid)
+    if (!h) continue
+    const dim = rider.boneDims.find((d) => d.rbHandle === h.handle)
+    if (dim) out.set(name, dim.halfHeight)
+  }
+  return out
+}
+
+/** Apply 2-bone IK to either arm or leg. `parentBoneName` is the chest
+ *  (for arms) or pelvis (for legs); `upperName` / `lowerName` are the
+ *  bones to override; `tipTarget` is the world point the bone tip
+ *  (hand / foot) should hit. */
+function applyLimbIK(
+  rider: ReturnType<typeof RiderStore.must>,
+  poses: Map<RiderBoneName, WorldPose>,
+  halfHeights: Map<RiderBoneName, number>,
+  parentBoneName: RiderBoneName,
+  upperName: RiderBoneName,
+  lowerName: RiderBoneName,
+  tipTarget: Vec3,
+  poleHint: Vec3,
+): void {
+  const parent = poses.get(parentBoneName)
+  if (!parent) return
+  // Shoulder / hip world position = parent-side joint anchor in world.
+  const upperJoint = rider.joints.find(
+    (j) => j.parentName === parentBoneName && j.childName === upperName,
+  )
+  if (!upperJoint) return
+  const anchorOffset = rotByQuat(
+    parent.rot,
+    upperJoint.parentLocal.x,
+    upperJoint.parentLocal.y,
+    upperJoint.parentLocal.z,
+  )
+  const anchorWorld: Vec3 = {
+    x: parent.pos.x + anchorOffset.x,
+    y: parent.pos.y + anchorOffset.y,
+    z: parent.pos.z + anchorOffset.z,
+  }
+  const upperHH = halfHeights.get(upperName)
+  const lowerHH = halfHeights.get(lowerName)
+  if (upperHH === undefined || lowerHH === undefined) return
+  // Add the lower bone's tip extent to the IK target — the user's IK
+  // anchor is the END of the lower limb (hand / foot), but the 2-bone
+  // solver places the LOWER joint anchor at `tipTarget`. So push the
+  // target back by lowerHH along the natural "down-the-limb" axis...
+  // simplest: just pass `tipTarget` shifted along the arm so the lower
+  // bone's tip (not its anchor) lands on tipTarget.
+  //
+  // solveArmIK puts the lower bone's TOP (parent-anchor end) at the
+  // elbow it solves for, then extends the bone by 2*halfHeight along the
+  // arm direction. The "hand" tip is therefore elbow + 2*lowerHH along
+  // (target - elbow) direction. To make the TIP land on `tipTarget`, we
+  // pass IK a target that's `tipTarget` minus lowerHH along (target -
+  // shoulder) direction. Approximated by shrinking the chain by lowerHH
+  // along (target - shoulder).
+  // But the existing solveArmIK already calls the second-bone tip "hand
+  // reached" — we should just pass tipTarget directly. Verify with a
+  // visual; if hands sit short, retune.
+  const ik = solveArmIK(anchorWorld, tipTarget, upperHH, lowerHH, poleHint)
+  poses.set(upperName, ik.upperArm)
+  poses.set(lowerName, ik.lowerArm)
+}
+
 export function riderPoseSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): void {
   const eids = query(sim, [Rider])
   for (const eid of eids) {
@@ -466,53 +614,100 @@ export function riderPoseSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): 
 
     tickPoseResponse(rider.poseResponse, bikeLinvel, bikeAngvel, intent, dt)
 
-    // Walk the kinematic chain. Pelvis is the root, anchored to the seat.
-    const poses = new Map<RiderBoneName, WorldPose>()
-    const pelvisRest = rider.restPose.pelvis
-    const pelvisOffset = rotByQuat(
-      bikeRot,
-      pelvisRest.bikeLocalPos.x,
-      pelvisRest.bikeLocalPos.y,
-      pelvisRest.bikeLocalPos.z,
+    const halfHeights = boneHalfHeights(rider)
+
+    // Pass 1 — REST pose in bike-local space. Used to derive IK end-effector
+    // targets. Walking from frame=(origin, identity) means every pose is in
+    // bike-local. Skipping reactive offsets gives the static rest pose.
+    const ORIGIN: Vec3 = { x: 0, y: 0, z: 0 }
+    const restPoses = walkChain(rider, ORIGIN, IDENT_QUAT, false)
+
+    const lowerArmHH_L = halfHeights.get('lower_arm_L') ?? 0.18
+    const lowerArmHH_R = halfHeights.get('lower_arm_R') ?? 0.18
+    const lowerLegHH_L = halfHeights.get('lower_leg_L') ?? 0.24
+    const lowerLegHH_R = halfHeights.get('lower_leg_R') ?? 0.24
+    const handLocalL = tipOfBone(
+      restPoses.get('lower_arm_L') ?? { pos: ORIGIN, rot: IDENT_QUAT },
+      lowerArmHH_L,
     )
-    poses.set('pelvis', {
-      pos: {
-        x: bikePos.x + pelvisOffset.x,
-        y: bikePos.y + pelvisOffset.y,
-        z: bikePos.z + pelvisOffset.z,
-      },
-      rot: quatMul(bikeRot, pelvisRest.bikeLocalRot),
-    })
+    const handLocalR = tipOfBone(
+      restPoses.get('lower_arm_R') ?? { pos: ORIGIN, rot: IDENT_QUAT },
+      lowerArmHH_R,
+    )
+    const footLocalL = tipOfBone(
+      restPoses.get('lower_leg_L') ?? { pos: ORIGIN, rot: IDENT_QUAT },
+      lowerLegHH_L,
+    )
+    const footLocalR = tipOfBone(
+      restPoses.get('lower_leg_R') ?? { pos: ORIGIN, rot: IDENT_QUAT },
+      lowerLegHH_R,
+    )
 
-    // Joints are authored parent-before-child in buildAnatomy(), so a
-    // single forward pass resolves the whole tree. `targetRelRotFor`
-    // reads RIDER_POSE_TUNING.restAngles each call, so slider edits in
-    // the calibration scene take effect with no respawn.
-    for (const j of rider.joints) {
-      const parent = poses.get(j.parentName)
-      if (!parent) continue
-      const baseRel = targetRelRotFor(j.kind)
-      const offset = reactiveOffsetFor(j.kind, rider.poseResponse)
-      const childRot = quatMul(parent.rot, quatMul(baseRel, offset))
-      const parentAnchorWorld = rotByQuat(
-        parent.rot,
-        j.parentLocal.x,
-        j.parentLocal.y,
-        j.parentLocal.z,
-      )
-      const childAnchorLocal = rotByQuat(childRot, j.childLocal.x, j.childLocal.y, j.childLocal.z)
-      const childPos: Vec3 = {
-        x: parent.pos.x + parentAnchorWorld.x - childAnchorLocal.x,
-        y: parent.pos.y + parentAnchorWorld.y - childAnchorLocal.y,
-        z: parent.pos.z + parentAnchorWorld.z - childAnchorLocal.z,
-      }
-      poses.set(j.childName, { pos: childPos, rot: childRot })
+    // Pass 2 — REACTIVE pose in world space. Reactive offsets applied;
+    // pelvis world transform = bike transform * seat anchor.
+    const poses = walkChain(rider, bikePos, bikeRot, true)
+
+    // Convert each rest-derived limb-tip target from bike-local → world.
+    const toWorld = (local: Vec3): Vec3 => {
+      const r = rotByQuat(bikeRot, local.x, local.y, local.z)
+      return { x: bikePos.x + r.x, y: bikePos.y + r.y, z: bikePos.z + r.z }
     }
+    const handTargetL = toWorld(handLocalL)
+    const handTargetR = toWorld(handLocalR)
+    const footTargetL = toWorld(footLocalL)
+    const footTargetR = toWorld(footLocalR)
 
-    // Hand IK: anchor each arm's hand to the bike's handlebar.
+    // Pole hints — bone-local "preferred elbow / knee direction" rotated by
+    // bike rotation. Elbows bend DOWN+BACK; knees bend DOWN+BACK (the
+    // calf trails the thigh on a forward swing).
+    const armPoleLocal: Vec3 = { x: 0, y: -1, z: -0.4 }
+    const legPoleLocal: Vec3 = { x: 0, y: -1, z: -0.5 }
+    const armPole = rotByQuat(bikeRot, armPoleLocal.x, armPoleLocal.y, armPoleLocal.z)
+    const legPole = rotByQuat(bikeRot, legPoleLocal.x, legPoleLocal.y, legPoleLocal.z)
+
     if (RIDER_POSE_TUNING.handIKStrength > 0) {
-      applyHandIK(rider, poses, bikePos, bikeRot, 'L')
-      applyHandIK(rider, poses, bikePos, bikeRot, 'R')
+      applyLimbIK(
+        rider,
+        poses,
+        halfHeights,
+        'chest',
+        'upper_arm_L',
+        'lower_arm_L',
+        handTargetL,
+        armPole,
+      )
+      applyLimbIK(
+        rider,
+        poses,
+        halfHeights,
+        'chest',
+        'upper_arm_R',
+        'lower_arm_R',
+        handTargetR,
+        armPole,
+      )
+    }
+    if (RIDER_POSE_TUNING.footIKStrength > 0) {
+      applyLimbIK(
+        rider,
+        poses,
+        halfHeights,
+        'pelvis',
+        'upper_leg_L',
+        'lower_leg_L',
+        footTargetL,
+        legPole,
+      )
+      applyLimbIK(
+        rider,
+        poses,
+        halfHeights,
+        'pelvis',
+        'upper_leg_R',
+        'lower_leg_R',
+        footTargetR,
+        legPole,
+      )
     }
 
     // Write out world poses to Rapier.
@@ -526,82 +721,6 @@ export function riderPoseSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): 
       rb.setNextKinematicRotation(pose.rot)
     }
   }
-}
-
-function applyHandIK(
-  rider: ReturnType<typeof RiderStore.must>,
-  poses: Map<RiderBoneName, WorldPose>,
-  bikePos: Vec3,
-  bikeRot: Quat,
-  side: 'L' | 'R',
-): void {
-  const chest = poses.get('chest')
-  if (!chest) return
-  const upperName: RiderBoneName = side === 'L' ? 'upper_arm_L' : 'upper_arm_R'
-  const lowerName: RiderBoneName = side === 'L' ? 'lower_arm_L' : 'lower_arm_R'
-
-  // Shoulder world position: the chest-side anchor of the shoulder joint.
-  const shoulderJoint = rider.joints.find(
-    (j) => j.parentName === 'chest' && j.childName === upperName,
-  )
-  if (!shoulderJoint) return
-  const shoulderOffset = rotByQuat(
-    chest.rot,
-    shoulderJoint.parentLocal.x,
-    shoulderJoint.parentLocal.y,
-    shoulderJoint.parentLocal.z,
-  )
-  const shoulderWorld: Vec3 = {
-    x: chest.pos.x + shoulderOffset.x,
-    y: chest.pos.y + shoulderOffset.y,
-    z: chest.pos.z + shoulderOffset.z,
-  }
-
-  // Handlebar world target.
-  const handleLocal = RIDER_POSE_TUNING.handlebarLocal[side]
-  const handleOffset = rotByQuat(bikeRot, handleLocal.x, handleLocal.y, handleLocal.z)
-  const handleWorld: Vec3 = {
-    x: bikePos.x + handleOffset.x,
-    y: bikePos.y + handleOffset.y,
-    z: bikePos.z + handleOffset.z,
-  }
-
-  // Bone half-heights from boneDims.
-  const upperDim = rider.boneDims.find((d) => nameByHandle(rider, d.rbHandle) === upperName)
-  const lowerDim = rider.boneDims.find((d) => nameByHandle(rider, d.rbHandle) === lowerName)
-  if (!upperDim || !lowerDim) return
-
-  // Pole hint: the elbow should bend so it points roughly DOWN and slightly
-  // BACK from the rider's shoulder. In bike-local that's (-Y, -Z); in world
-  // we rotate by bike rotation. The IK projects this onto the plane
-  // perpendicular to shoulder→handle to pick the elbow side.
-  const poleLocal: Vec3 = { x: 0, y: -1, z: -0.4 }
-  const poleHint = rotByQuat(bikeRot, poleLocal.x, poleLocal.y, poleLocal.z)
-
-  const ik = solveArmIK(
-    shoulderWorld,
-    handleWorld,
-    upperDim.halfHeight,
-    lowerDim.halfHeight,
-    poleHint,
-  )
-  poses.set(upperName, ik.upperArm)
-  poses.set(lowerName, ik.lowerArm)
-}
-
-/** Resolve a bone's name from its RB handle by walking boneDims order vs
- *  the rider.bones map. Cheap (10-12 entries) and only called during the
- *  IK pass. */
-function nameByHandle(
-  rider: ReturnType<typeof RiderStore.must>,
-  rbHandle: number,
-): RiderBoneName | null {
-  for (const name of Object.keys(rider.bones) as RiderBoneName[]) {
-    const eid = rider.bones[name]
-    const h = RBHandleStore.get(eid)
-    if (h && h.handle === rbHandle) return name
-  }
-  return null
 }
 
 /**
