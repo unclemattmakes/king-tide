@@ -3268,21 +3268,35 @@ class HOVERBIKE_OT_add_ramp(Operator):
 
 def _snap_spline_to_terrain(curve_obj: bpy.types.Object, *, hover_m: float) -> dict:
     """Drop each control point of `curve_obj` straight down onto the
-    nearest mesh under it (via Blender's scene ray-cast), then lift by
-    `hover_m`. Returns counts of hits/misses for the operator report.
+    nearest drivable surface and lift by `hover_m`.
+
+    Two surfaces are considered drivable: solid terrain *above* the
+    water level, and the water surface itself (the hover bike rides
+    waves). Solid terrain *below* water (seafloor) is NOT drivable —
+    the bike sinks through it. Earlier versions of this operator
+    snapped to whatever the ray hit first, which dragged spline points
+    down onto the seafloor wherever the racing line crossed open
+    water. The current rule:
+
+      hit terrain at z = h
+      water surface at z = w
+      target = max(h, w) + hover_m
+
+    so off-shore points clamp to the wave surface and on-shore points
+    sit above the actual ground. Returns counts of hits / misses /
+    water-snaps for the operator report.
 
     Preview collections are excluded during the raycast so the gate /
-    racer / water gizmos never catch the ray — only authored terrain
-    can land a hit. `road_main` (if present) is temporarily hidden
-    during the cast too so the spline lands on terrain rather than on
-    the road slab it lives above — otherwise re-snapping after a road
-    build would lift the spline by `lift + hover_m` every iteration.
-    The depsgraph has to be re-fetched *inside* the `with` block:
+    racer / water gizmos never catch the ray. `road_main` (if present)
+    is temporarily hidden during the cast too so the spline lands on
+    terrain rather than on the road slab it lives above. The
+    depsgraph has to be re-fetched *inside* the `with` block:
     capturing it before the exclusion takes effect leaves the cast
     still hitting gizmos."""
     scene = bpy.context.scene
     hits = 0
     misses = 0
+    water_snaps = 0
     high_z = 0.0
     for *_rest, world_co, _ in _spline_iter_points(curve_obj):
         if world_co.z > high_z:
@@ -3290,8 +3304,13 @@ def _snap_spline_to_terrain(curve_obj: bpy.types.Object, *, hover_m: float) -> d
     origin_z = high_z + 1000.0
     down = mathutils.Vector((0.0, 0.0, -1.0))
 
-    # Temporarily hide `road_main` so the snap reads true terrain
-    # altitude even after a Build Road has elevated the road above it.
+    # Water surface y comes from `water_volume_main`'s Z (the empty's
+    # position is the source of truth — see derive_track_json /
+    # reload_track_from_json). Tracks without a water volume default
+    # to water_z = -inf so the max() check collapses to terrain only.
+    vol = bpy.data.objects.get("water_volume_main")
+    water_z = float(vol.matrix_world.translation.z) if vol is not None else float("-inf")
+
     road_obj = bpy.data.objects.get(ROAD_OBJECT_NAME)
     prior_road_hidden = road_obj.hide_viewport if road_obj is not None else None
 
@@ -3306,14 +3325,21 @@ def _snap_spline_to_terrain(curve_obj: bpy.types.Object, *, hover_m: float) -> d
                 result, location, _normal, _index, _obj, _matrix = scene.ray_cast(
                     depsgraph, origin, down
                 )
-                if result:
-                    new_co = mathutils.Vector(
-                        (world_co.x, world_co.y, location.z + hover_m)
-                    )
-                    setter(new_co)
-                    hits += 1
-                else:
+                terrain_z = float(location.z) if result else float("-inf")
+                # Clamp to the water surface where terrain is below it.
+                # `target_surface` is the drivable Y at this xy.
+                target_surface = max(terrain_z, water_z)
+                if target_surface == float("-inf"):
+                    # No terrain hit AND no water — leave the point alone.
                     misses += 1
+                    continue
+                new_co = mathutils.Vector(
+                    (world_co.x, world_co.y, target_surface + hover_m)
+                )
+                setter(new_co)
+                hits += 1
+                if water_z > terrain_z:
+                    water_snaps += 1
     finally:
         if road_obj is not None and prior_road_hidden is not None:
             road_obj.hide_viewport = prior_road_hidden
@@ -3322,7 +3348,7 @@ def _snap_spline_to_terrain(curve_obj: bpy.types.Object, *, hover_m: float) -> d
     # control points immediately (the gate/turn previews will follow via
     # the auto-rebuild handler).
     curve_obj.data.update_tag()
-    return {"hits": hits, "misses": misses}
+    return {"hits": hits, "misses": misses, "water_snaps": water_snaps}
 
 
 class HOVERBIKE_OT_snap_spline_to_terrain(Operator):
@@ -3346,15 +3372,20 @@ class HOVERBIKE_OT_snap_spline_to_terrain(Operator):
             return {"CANCELLED"}
         hover = float(getattr(context.scene, "hoverbike_snap_hover_height", 3.0))
         summary = _snap_spline_to_terrain(sp, hover_m=hover)
+        water_note = (
+            f" ({summary.get('water_snaps', 0)} clamped to water surface)"
+            if summary.get("water_snaps", 0) > 0 else ""
+        )
         if summary["misses"]:
             self.report(
                 {"WARNING"},
-                f"Snapped {summary['hits']} points; {summary['misses']} missed (no terrain below).",
+                f"Snapped {summary['hits']} points{water_note}; "
+                f"{summary['misses']} missed (no terrain or water below).",
             )
         else:
             self.report(
                 {"INFO"},
-                f"Snapped {summary['hits']} spline points to terrain (+{hover:.1f}m hover).",
+                f"Snapped {summary['hits']} spline points{water_note} (+{hover:.1f}m hover).",
             )
         return {"FINISHED"}
 
