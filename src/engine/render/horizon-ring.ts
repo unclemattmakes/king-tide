@@ -178,7 +178,7 @@ export function createHorizonRing(deps: HorizonRingDeps): HorizonRing {
   const sunGlow = shared.sunGlow as unknown as Node<'vec3'>
 
   const peakDark = horizonColor.mul(float(silhouetteDark))
-  const baseHaze = horizonColor.mul(float(Math.min(silhouetteDark + 0.20, 0.95)))
+  const baseHaze = horizonColor.mul(float(Math.min(silhouetteDark + 0.2, 0.95)))
   // t=0 at the base → baseHaze, t=1 at the peak → peakDark.
   const vertical = mix(baseHaze, peakDark, smoothstep(float(0.1), float(0.9), t))
 
