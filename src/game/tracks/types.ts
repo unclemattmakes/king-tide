@@ -77,6 +77,33 @@ export type TerrainShaderConfig = {
   /** RGB tint mixed in where the baked racing-line wear (COLOR_0.B) is
    *  high. Default [0.30, 0.24, 0.18] — packed-dirt brown. */
   pathTint?: [number, number, number]
+  /** Strength of low-freq domain warping applied to the colour-noise
+   *  UVs. 0 disables (stock noise); 0.5 = subtle organic veining;
+   *  1.5+ = strong, painterly. Default 0.5. */
+  warpStrength?: number
+  /** World-space wavelength (m) of the macro biome variation that
+   *  shifts saturation + altitude bands across large regions. Higher
+   *  = larger biome patches. Default 120. */
+  macroScale?: number
+  /** World-space wavelength (m) of the micro detail noise. Drives the
+   *  fine-grain brightness wobble that breaks the ramp banding. Default 8. */
+  microScale?: number
+  /** Vertical jitter (m) added to the altitude band per fragment so
+   *  contour lines aren't perfectly level — gives natural feathering
+   *  along the sand→grass / grass→rock transitions. Default 4. */
+  altJitter?: number
+  /** Width of the scree (intermediate-slope) band that introduces a
+   *  gravel/rubble layer between the flat ramp and the cliff ramp.
+   *  0 = hard cut, 0.4 = wide gravelly transition. Default 0.25. */
+  screeBand?: number
+  /** Output saturation multiplier in the linear-RGB → final pass.
+   *  1 = neutral; >1 = punchier biome reads; <1 = washed/stylised.
+   *  Default 1.05. */
+  saturation?: number
+  /** Blend factor between top-down (XZ-only) sampling of the noise
+   *  and triplanar (XY+YZ+XZ) sampling. 0 = stock (cliffs stretch);
+   *  1 = fully triplanar (cliffs read varied). Default 0.6. */
+  triplanar?: number
 }
 
 export type PlayerStart = {

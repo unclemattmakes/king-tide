@@ -347,6 +347,13 @@ function readOptionalTerrainShader(raw: unknown): TerrainShaderConfig | null {
     'slopeEnd',
     'variation',
     'wetBand',
+    'warpStrength',
+    'macroScale',
+    'microScale',
+    'altJitter',
+    'screeBand',
+    'saturation',
+    'triplanar',
   ] as const) {
     if (key in raw) {
       const v = raw[key]
