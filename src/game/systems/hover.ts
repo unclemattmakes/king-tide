@@ -19,6 +19,31 @@ import { getCurrentBoostMultiplier } from '@/game/systems/pickup'
 const MAX_HOVER_PROBE = 6
 const GRAVITY = 25 // must match PhysicsWorld gravity magnitude
 
+// Slope-momentum tuning — exported for tests / debug overlays. Asymmetric
+// gain: a hard 1.0× push down a wave face, a gentle 0.5× drag up one.
+export const SLOPE_DOWN_GAIN = 1.0
+export const SLOPE_UP_BRAKE = 0.5
+
+/**
+ * Marble-on-incline acceleration along the bike's horizontal forward axis.
+ *
+ * Driven by `surfacePitchTarget` — the *terrain-tracking* pitch (positive =
+ * nose-down on a downslope, zero on flat ground, negative on an upslope).
+ * Crucially this is the surface signal, not the chassis's current pitch:
+ * the chassis pitch also folds in the player's Q/E input, and feeding that
+ * in would let the rider farm free downhill thrust by tipping the nose on
+ * flat ground.
+ */
+export function slopeMomentumAccel(
+  surfacePitchTarget: number,
+  gravity: number = GRAVITY,
+  downGain: number = SLOPE_DOWN_GAIN,
+  upBrake: number = SLOPE_UP_BRAKE,
+): number {
+  const gain = surfacePitchTarget > 0 ? downGain : upBrake
+  return Math.sin(surfacePitchTarget) * gravity * gain
+}
+
 /**
  * Surface probe: looks below an XZ point for the closest "ride surface".
  * Either a hard physical collider (raycast) or the wave field water surface,
@@ -563,13 +588,20 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     rb.applyImpulse({ x: fwd.x * aThrust * m * dt, y: 0, z: fwd.z * aThrust * m * dt }, true)
 
     // Slope momentum — going down a wave is faster than climbing one.
-    // The chassis tilts to track the surface (multi-probe alignment above),
-    // so the bike's forward axis acquires a vertical component (`fwd.y`) on
-    // sloped terrain. Projecting gravity along the horizontal forward axis
-    // gives the marble-on-incline behaviour: nose-down (`fwd.y < 0`) →
-    // accelerate downhill; nose-up (`fwd.y > 0`) → decelerate. The hover
-    // spring cancels gravity vertically, so without this the chassis would
-    // pitch but coast at the same horizontal speed regardless of wave face.
+    // The chassis tilts to track the surface (multi-probe alignment above);
+    // we project gravity along the horizontal forward axis to get the
+    // marble-on-incline behaviour: down-slope → accelerate; up-slope →
+    // decelerate. The hover spring cancels gravity vertically, so without
+    // this the chassis would pitch but coast at the same horizontal speed
+    // regardless of wave face.
+    //
+    // Driven by `surfacePitchTarget` (the terrain-tracking pitch), NOT by
+    // the chassis's current `fwd.y`. The chassis pitch also folds in the
+    // player's Q/E input bias, so using `fwd.y` here would let the rider
+    // pitch the nose down on flat ground and harvest free downhill thrust.
+    // `surfacePitchTarget` is 0 when airborne and `followNow * -atan(slope)`
+    // when grounded — exactly the contour signal the gravity projection
+    // wants.
     //
     // Asymmetric coupling — motocross feel: a strong downhill push (1.0×
     // gravity) makes hitting a downslope read as the slingshot it is; the
@@ -578,12 +610,9 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // (enough to easily exceed topSpeed with momentum), while climbing the
     // same slope costs only -3.4 m/s² of drag, which the bike's 19 m/s²
     // thrust eats through comfortably.
-    const SLOPE_DOWN_GAIN = 1.0
-    const SLOPE_UP_BRAKE = 0.5
-    const slopeGain = fwd.y < 0 ? SLOPE_DOWN_GAIN : SLOPE_UP_BRAKE
     const fwdHorizLen = Math.hypot(fwd.x, fwd.z)
     if (fwdHorizLen > 0.01) {
-      const aSlope = -fwd.y * GRAVITY * slopeGain
+      const aSlope = slopeMomentumAccel(surfacePitchTarget)
       rb.applyImpulse(
         {
           x: (fwd.x / fwdHorizLen) * aSlope * m * dt,
