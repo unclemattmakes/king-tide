@@ -2184,6 +2184,103 @@ class HOVERBIKE_OT_cursor_snap_to_spline(Operator):
         return {"FINISHED"}
 
 
+class HOVERBIKE_OT_snap_starts_to_spline(Operator):
+    """Reposition ``start_00`` and ``start_01`` on the racing line at
+    the configured parameter ``t``, lined up perpendicular to the
+    spline tangent with the configured grid spacing between them.
+
+    Replaces the per-track Python boilerplate every headless track
+    seeder used to re-implement to seed a start line. Picks the
+    parameter from ``Spline t`` and the lateral spacing from
+    ``Start spacing (m)`` (both in the Spline tools panel).
+
+    Honors the runtime yaw convention used by the existing seed
+    templates (``yaw = atan2(tx, ty)``) — the empty's visual
+    orientation in Blender will not point along the racing tangent
+    because of the Blender↔three.js axis-frame mismatch, but the
+    exported JSON yaw is correct.
+
+    Same water-aware surface rule as ``snap_spline_to_terrain``: the
+    start's Z lands at ``max(terrain_z, water_z) + hover``. Tracks
+    that race through a canyon below water (alpine-sprint,
+    canyon-run) spawn cleanly on the river surface rather than below
+    it. Preview gizmo collections are excluded during the raycast so
+    the cast can't catch a water-preview mesh."""
+
+    bl_idname = "hoverbike.snap_starts_to_spline"
+    bl_label = "Snap Starts to Spline"
+    bl_description = (
+        "Re-derive start_00 / start_01 positions from ai_spline_main at "
+        "parameter t, perpendicular to the racing tangent"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scene = context.scene
+        curve = _spline_source_for_placement(scene)
+        if curve is None:
+            self.report({"ERROR"}, "No source curve found (need `ai_spline_main` or `road_curve_main`).")
+            return {"CANCELLED"}
+        t = float(scene.hoverbike_placement_t)
+        s = _sample_curve_at_t(curve, t)
+        if s is None:
+            self.report({"ERROR"}, f"Couldn't sample {curve.name!r} at t={t}.")
+            return {"CANCELLED"}
+
+        spacing = float(getattr(scene, "hoverbike_start_grid_spacing", 4.0) or 4.0)
+        z_hover = float(scene.hoverbike_snap_hover_height)
+
+        # Find the drivable Z beneath the spline sample. Hide preview
+        # collections so the cast can't catch a water-preview mesh, then
+        # clamp the result to max(terrain, water) — same rule as
+        # snap_spline_to_terrain, so a start in an underwater canyon
+        # spawns on the river surface instead of below it.
+        vol = bpy.data.objects.get("water_volume_main")
+        water_z = float(vol.matrix_world.translation.z) if vol is not None else float("-inf")
+        origin = mathutils.Vector((s["x"], s["y"], 10000.0))
+        down = mathutils.Vector((0.0, 0.0, -1.0))
+        with _PreviewCollectionsHidden(bpy.context.view_layer):
+            bpy.context.view_layer.update()
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            hit, loc, *_ = scene.ray_cast(depsgraph, origin, down)
+        terrain_z = float(loc.z) if hit else s["z"]
+        surface_z = max(terrain_z, water_z)
+        if surface_z == float("-inf"):
+            surface_z = s["z"]
+        clamped_to_water = water_z > terrain_z and hit
+        target_z = surface_z + z_hover
+
+        tx, ty = s["tx"], s["ty"]
+        rx, ry = ty, -tx
+        # Runtime yaw convention (see template-island docstring). This
+        # value, written into start.rotation_euler.z, round-trips through
+        # `_yaw_from_z_euler` → JSON → runtime, where the bike spawns
+        # facing along (tx, ty).
+        yaw = math.atan2(tx, ty)
+
+        snapped = 0
+        for i, off in enumerate([-spacing * 0.5, +spacing * 0.5]):
+            name = f"start_{i:02d}"
+            obj = bpy.data.objects.get(name)
+            if obj is None:
+                continue
+            obj.location = (s["x"] + rx * off, s["y"] + ry * off, target_z)
+            obj.rotation_euler = (0.0, 0.0, yaw)
+            obj["start_t"] = float(t)
+            snapped += 1
+
+        if snapped == 0:
+            self.report({"ERROR"}, "No `start_00` / `start_01` empties found in the scene.")
+            return {"CANCELLED"}
+        water_note = " (clamped to water surface)" if clamped_to_water else ""
+        self.report(
+            {"INFO"},
+            f"Snapped {snapped} starts to {curve.name} @ t={t:.3f}"
+            f"{water_note} ({spacing:.1f}m apart, hover {z_hover:.1f}m).",
+        )
+        return {"FINISHED"}
+
+
 class HOVERBIKE_OT_add_ramp_at_spline_t(Operator):
     """Combine *Cursor → Spline* with *Add Ramp*. Snaps the cursor to
     the configured parameter t on the racing line, then drops a ramp
@@ -4501,6 +4598,9 @@ class HOVERBIKE_PT_panel(Panel):
         row = sp_box.row(align=True)
         row.prop(context.scene, "hoverbike_placement_t", text="t")
         row.operator("hoverbike.cursor_snap_to_spline", text="Cursor →", icon="PIVOT_CURSOR")
+        row = sp_box.row(align=True)
+        row.prop(context.scene, "hoverbike_start_grid_spacing", text="Start gap")
+        row.operator("hoverbike.snap_starts_to_spline", text="Snap Starts", icon="OUTLINER_OB_ARROWS")
         sp_box.operator("hoverbike.add_ramp_at_spline_t", icon="ADD")
         row = sp_box.row(align=True)
         row.prop(context.scene, "hoverbike_auto_ramp_kappa", text="|κ|")
@@ -4733,6 +4833,7 @@ _classes = (
     HOVERBIKE_OT_hide_ghost_lap,
     HOVERBIKE_OT_snap_spline_to_terrain,
     HOVERBIKE_OT_cursor_snap_to_spline,
+    HOVERBIKE_OT_snap_starts_to_spline,
     HOVERBIKE_OT_add_ramp_at_spline_t,
     HOVERBIKE_OT_auto_place_ramps,
     HOVERBIKE_OT_add_road_starter_curve,
@@ -5018,6 +5119,14 @@ def register() -> None:
         description="Minimum arc-length distance between consecutive auto-placed ramps.",
         default=40.0, min=1.0, max=500.0, precision=1,
     )
+    # Lateral spacing between start_00 and start_01 (used by the
+    # Snap Starts to Spline operator). Matches the typical 4 m grid
+    # offset every existing seed template uses.
+    bpy.types.Scene.hoverbike_start_grid_spacing = FloatProperty(
+        name="Start spacing (m)",
+        description="Lateral distance between start_00 and start_01 when snapped to the racing line.",
+        default=4.0, min=0.5, max=20.0, precision=1,
+    )
 
     # Per-track lap count — round-trips through track JSON.
     bpy.types.Scene.hoverbike_laps_to_finish = IntProperty(
@@ -5084,6 +5193,7 @@ def unregister() -> None:
         "hoverbike_ramp_segments", "hoverbike_ramp_curved",
         "hoverbike_placement_t", "hoverbike_placement_curve_name",
         "hoverbike_auto_ramp_kappa", "hoverbike_auto_ramp_min_spacing",
+        "hoverbike_start_grid_spacing",
         "hoverbike_laps_to_finish",
     ):
         if hasattr(bpy.types.Scene, prop):

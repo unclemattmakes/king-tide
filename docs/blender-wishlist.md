@@ -782,3 +782,86 @@ material assignment + face winding tweak.**
 7. **(4)** Terrain detail / template variants — biggest aesthetic
    upgrade for new tracks.
 8. **(9) + (10)** — material polish, hand-tuning territory.
+
+## Post-biome-build assessment (2026-05-13)
+
+Notes from shipping the desert-dunes / mesa-canyon / alpine-valley
+templates and one playable track on each. The first three are
+shipped; the fourth was a known asymmetry in an existing template
+worth flagging so the next biome author doesn't repeat the diagnosis.
+
+### 1. `ShaderNodeTexNoise` with `normalize=False` is heavily skewed below 0.5 ✅ Shipped 2026-05-13
+
+The dunes template's first build had a symmetric `[0,1] → [-1,+1]`
+remap on every noise layer (`MULTIPLY_ADD` with multiplier 2 + offset
+-1). Result: a ~-19 m downward bias on the supposed-mean-zero dune
+displacement, dropping the entire racing-line ring below the
+waterline so every spline snap clamped to water. Fix was switching to
+`normalize=True`, which clamps the noise to `[0, 1]` and restores the
+symmetric remap's intended zero-mean output.
+
+The island template's `HV_TemplateIsland` graph uses `normalize=False`
+deliberately + an asymmetric `[0,1] → [-1.4, +0.6]` remap — the
+docstring there explicitly wants "rare extremes" carving dramatic
+silt trenches. Both patterns are correct in their own contexts.
+
+**Rule of thumb for new template authors:**
+- Want symmetric, zero-mean noise (FBM dunes, hill displacement,
+  bedrock ripple)? Set `normalize=True` and use `[0,1] → [-1,+1]`.
+- Want rare downward extremes for dramatic-erosion silhouettes? Set
+  `normalize=False` and bias the negative half (e.g. `[0,1] → [-1.4, +0.6]`).
+- Never `normalize=False` + symmetric remap — you'll get the
+  silent-downward-bias trap.
+
+Three new templates (dunes, mesa, alpine) all follow the first
+pattern. The island template still uses the second. The fix here is
+purely a doc; no code changes wanted on the island template (its
+artistic intent is correct).
+
+### 2. Mesa / ridge sub-groups need to know the baseline to lerp to ✅ Shipped 2026-05-13
+
+The first mesa template attempt had each per-mesa sub-group return
+`0` for vertices outside the cliff band, with the main group then
+applying `MAX(mesa_max, canyon_floor)`. Broke at the cliff foot:
+`MAX(0, -8) = 0`, so vertices outside any cliff stuck at z=0 instead
+of dropping to the -8 m canyon floor. Min z across the whole map
+came out to exactly 0.0 — diagnostic gold.
+
+Fix: pass `Valley Floor` (or `Canyon Floor`) as a scalar into the
+sub-group and lerp from baseline → mesa-top inside the smoothstep
+band. Outside the cliff returns exactly the baseline, so the parent's
+MAX cascade cleanly picks up the floor for vertices not under any
+mesa. Applied to both the mesa profile and the alpine ridge profile.
+
+The island peak profile's per-peak output is "height above
+seafloor" not "absolute altitude" — its baseline is implicitly 0,
+and the main graph's combine treats the cone contribution as
+additive to the global heightfield. That's *correct for the island
+biome* (peaks always rise above whatever's underneath), but the
+contract is non-obvious. Worth a one-line comment in
+`HV_PeakProfile`'s docstring next time someone copy-pastes from it
+for a new biome.
+
+### 3. No first-class headless track-build entrypoint ✅ Shipped 2026-05-13
+
+For each new biome I needed a per-track Python script that loads the
+template, reshapes the spline, applies the modifier, builds the road,
+snaps the spline, lints, exports. The original three were ~200 lines
+each with ~80% common logic. Extracted the shared logic into
+`tools/blender/track_build_lib.py`; each `seed_track_<id>.py` is now
+~50 lines of config + one function call.
+
+Future biome authors should write a new track script by copying
+`seed_track_dune_rally.py` (shortest of the three), updating the
+constants, and re-running. The library exposes `build_track_from_spec()`
+which takes a small `TrackSpec` dataclass.
+
+### 4. `snap_starts_to_spline` operator ✅ Shipped 2026-05-13
+
+Every per-track script re-implemented the same "place start_00 and
+start_01 perpendicular to the spline tangent at parameter t along
+ai_spline_main" logic. Now an addon operator (Spline tools section
+of the Hoverbike panel) does it from the viewport: pick `Spline t`
+on the panel, click *Snap Starts to Spline*. Reuses the existing
+`_sample_curve_at_t` helper. Available headlessly as
+`bpy.ops.hoverbike.snap_starts_to_spline()`.
