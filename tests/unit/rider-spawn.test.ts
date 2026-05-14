@@ -9,12 +9,12 @@ import { query } from 'bitecs'
 import { describe, expect, it } from 'vitest'
 import { createSimWorld } from '@/engine/sim/ecs/world'
 import { createPhysicsWorld } from '@/engine/sim/physics/rapier'
-import { RBHandleStore, TransformStore } from '@/game/components'
+import { ControlIntentStore, RBHandleStore, TransformStore } from '@/game/components'
 import { RIDER_BONE_NAMES, RiderBoneTag, RiderStore } from '@/game/components/rider'
 import { createBike } from '@/game/entities/bike'
 import { createRider } from '@/game/entities/rider'
 import { riderCrashSystem } from '@/game/systems/rider-crash'
-import { riderPoseSystem } from '@/game/systems/rider-pose'
+import { resetRiderForBike, riderPoseSystem } from '@/game/systems/rider-pose'
 import { syncFromPhysics } from '@/game/systems/sync-from-physics'
 
 async function makeWorlds() {
@@ -43,14 +43,15 @@ function spawnBikeAndRider(
 }
 
 describe('createRider', () => {
-  it('spawns a rider with 10 bones + 1 Rider component', async () => {
+  it('spawns a rider with 11 bones + 1 Rider component', async () => {
     const { sim, phys } = await makeWorlds()
     const { riderEid } = spawnBikeAndRider(sim, phys)
 
     const rider = RiderStore.must(riderEid)
     expect(rider.state).toBe('attached')
-    // While attached, no joints exist yet — only specs.
-    expect(rider.joints).toHaveLength(9)
+    // 10 anatomical joints (spine, neck, 2 shoulders, 2 elbows, 2 hips,
+    // 2 knees). While attached no Rapier joint exists — only specs.
+    expect(rider.joints).toHaveLength(10)
     for (const j of rider.joints) {
       expect(j.jointHandle).toBeNull()
     }
@@ -59,7 +60,7 @@ describe('createRider', () => {
     }
 
     const boneEids = query(sim, [RiderBoneTag])
-    expect(boneEids.length).toBe(10)
+    expect(boneEids.length).toBe(11)
   })
 
   it('bones spawn near the bike position, not at world origin', async () => {
@@ -161,5 +162,97 @@ describe('createRider', () => {
     const { riderEid } = spawnBikeAndRider(sim, phys)
     const rider = RiderStore.must(riderEid)
     expect(rider.bones.pelvis).toBeGreaterThan(0)
+  })
+
+  it('head bone is part of the anatomy + neck joint is present', async () => {
+    const { sim, phys } = await makeWorlds()
+    const { riderEid } = spawnBikeAndRider(sim, phys)
+    const rider = RiderStore.must(riderEid)
+    expect(rider.bones.head).toBeGreaterThan(0)
+    const neck = rider.joints.find((j) => j.parentName === 'chest' && j.childName === 'head')
+    expect(neck).toBeDefined()
+  })
+
+  it('reactive pose-response state is initialised to zero', async () => {
+    const { sim, phys } = await makeWorlds()
+    const { riderEid } = spawnBikeAndRider(sim, phys)
+    const rider = RiderStore.must(riderEid)
+    expect(rider.poseResponse.bouncePitch).toBe(0)
+    expect(rider.poseResponse.bouncePitchVel).toBe(0)
+    expect(rider.poseResponse.flowRoll).toBe(0)
+    expect(rider.poseResponse.headYaw).toBe(0)
+    expect(rider.poseResponse.headPitch).toBe(0)
+  })
+
+  it('headYaw responds to ControlIntent.steer', async () => {
+    const { sim, phys } = await makeWorlds()
+    const { bikeEid, riderEid } = spawnBikeAndRider(sim, phys)
+    const rider = RiderStore.must(riderEid)
+    // Set full-right steer on the bike's intent.
+    ControlIntentStore.set(bikeEid, {
+      throttle: 0,
+      steer: 1,
+      brake: 0,
+      pitch: 0,
+      fire: false,
+      boost: false,
+    })
+    // Run several pose ticks; headYaw should monotonically approach the
+    // positive cap.
+    let last = 0
+    for (let i = 0; i < 30; i++) {
+      riderPoseSystem(sim, phys, phys.fixedDt)
+      phys.step()
+      syncFromPhysics(sim, phys)
+      expect(rider.poseResponse.headYaw).toBeGreaterThanOrEqual(last - 1e-6)
+      last = rider.poseResponse.headYaw
+    }
+    // After 30 ticks (0.5s) the lerp should have settled close to the
+    // target — well above zero.
+    expect(rider.poseResponse.headYaw).toBeGreaterThan(0.2)
+  })
+
+  it('resetRider re-attaches a launched rider', async () => {
+    const { sim, phys } = await makeWorlds()
+    const { bikeEid, riderEid } = spawnBikeAndRider(sim, phys)
+    const rider = RiderStore.must(riderEid)
+
+    // Force-launch using the same Δv mechanism as the rider-crash test.
+    const bikeRb = phys.world.getRigidBody(RBHandleStore.must(bikeEid).handle)
+    if (!bikeRb) throw new Error('bike RB missing')
+    riderCrashSystem(sim, phys, phys.fixedDt) // baseline
+    bikeRb.setLinvel({ x: 0, y: 0, z: 25 }, true)
+    phys.step()
+    syncFromPhysics(sim, phys)
+    riderCrashSystem(sim, phys, phys.fixedDt)
+    bikeRb.setLinvel({ x: 0, y: 0, z: -2 }, true)
+    phys.step()
+    syncFromPhysics(sim, phys)
+    riderCrashSystem(sim, phys, phys.fixedDt)
+    expect(rider.state).toBe('launched')
+
+    // Reset.
+    const ok = resetRiderForBike(sim, phys, bikeEid)
+    expect(ok).toBe(true)
+    expect(rider.state).toBe('attached')
+    expect(rider.motorScale).toBe(1)
+    for (const j of rider.joints) {
+      expect(j.jointHandle).toBeNull()
+    }
+    // All pose-response state zeroed out.
+    expect(rider.poseResponse.bouncePitch).toBe(0)
+    expect(rider.poseResponse.headYaw).toBe(0)
+  })
+
+  it('resetRider on an already-attached rider is a no-op for state', async () => {
+    const { sim, phys } = await makeWorlds()
+    const { bikeEid, riderEid } = spawnBikeAndRider(sim, phys)
+    const rider = RiderStore.must(riderEid)
+    rider.poseResponse.bouncePitch = 0.4
+    rider.poseResponse.headYaw = -0.3
+    resetRiderForBike(sim, phys, bikeEid)
+    expect(rider.state).toBe('attached')
+    expect(rider.poseResponse.bouncePitch).toBe(0)
+    expect(rider.poseResponse.headYaw).toBe(0)
   })
 })

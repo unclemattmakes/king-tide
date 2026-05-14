@@ -27,6 +27,7 @@ export const RiderBoneTag = { name: 'RiderBoneTag' as const }
 export type RiderBoneName =
   | 'pelvis'
   | 'chest'
+  | 'head'
   | 'upper_arm_L'
   | 'lower_arm_L'
   | 'upper_arm_R'
@@ -39,6 +40,7 @@ export type RiderBoneName =
 export const RIDER_BONE_NAMES: readonly RiderBoneName[] = [
   'pelvis',
   'chest',
+  'head',
   'upper_arm_L',
   'lower_arm_L',
   'upper_arm_R',
@@ -102,6 +104,32 @@ export type RiderBoneDim = {
 
 export type RiderState = 'attached' | 'launched'
 
+/** Reactive pose-response state — smoothed signals derived from bike state
+ *  and player input that the pose system uses to modulate the rest pose
+ *  each tick. Gives the rider life beyond a static mannequin pose.
+ *
+ *  All quantities are in radians (rotation offsets) plus their spring
+ *  velocities where needed. Smoothing constants live next to where the
+ *  state is consumed (rider-pose.ts). */
+export type RiderPoseResponse = {
+  /** Bike linvel from the previous tick — used to derive vertical and
+   *  horizontal acceleration each step. */
+  prevVel: Vec3
+  /** Torso pitch offset (radians) from landings / launches. Critically-
+   *  damped spring with velocity. Positive = torso pitches forward. */
+  bouncePitch: number
+  bouncePitchVel: number
+  /** Torso roll offset (radians) — counter-leans into a turn. First-order
+   *  low-pass toward target derived from bike angular velocity around Y. */
+  flowRoll: number
+  /** Head yaw offset (radians) — head leads the steer input. First-order
+   *  low-pass toward target derived from ControlIntent.steer. */
+  headYaw: number
+  /** Head pitch offset (radians) — small forward bias when accelerating
+   *  hard, small backward bias when braking. Low-pass. */
+  headPitch: number
+}
+
 export type RiderData = {
   /** Owning bike entity. */
   bikeEid: number
@@ -134,6 +162,9 @@ export type RiderData = {
   /** Seconds since last state change. Used to drive transitions like the
    *  motor-scale ramp after launch. */
   stateAge: number
+  /** Smoothed pose-response signals — bounce/flow/headYaw. Per-tick
+   *  state owned by riderPoseSystem; reset by resetRider() on respawn. */
+  poseResponse: RiderPoseResponse
 }
 
 export const Rider = { name: 'Rider' as const }

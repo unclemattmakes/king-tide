@@ -13,9 +13,11 @@
  * mutates when the finish screen shows.
  */
 
+import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { RBHandleStore } from '@/game/components'
 import { RacerStore } from '@/game/components/race'
+import { resetRiderForBike } from '@/game/systems/rider-pose'
 import type { Track } from '@/game/tracks/types'
 
 export interface ControlsHandle {
@@ -32,6 +34,7 @@ export interface ControlsHandle {
 }
 
 export interface ControlsOpts {
+  sim: SimWorld
   phys: PhysicsWorld
   track: Track
   trackId: string
@@ -53,6 +56,7 @@ export interface ControlsOpts {
 
 export function installControls(opts: ControlsOpts): ControlsHandle {
   const {
+    sim,
     phys,
     track,
     trackId,
@@ -172,6 +176,10 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     rb.setRotation({ x: 0, y: Math.sin(halfYaw), z: 0, w: Math.cos(halfYaw) }, true)
     rb.setLinvel({ x: 0, y: 0, z: 0 }, true)
     rb.setAngvel({ x: 0, y: 0, z: 0 }, true)
+    // Re-attach the rider — if it was launched (post-crash), this swaps
+    // the bones back to kinematic, removes the ragdoll joints + colliders,
+    // and lands them at the bike's seat for the next pose tick.
+    resetRiderForBike(sim, phys, playerEid)
   }
 
   // Keys:
