@@ -159,9 +159,7 @@ function launchRider(
   //    the rider's right axis at the moment of launch. Compute right
   //    = bikeRot * (1,0,0).
   const pelvisRb =
-    rider.joints[0] !== undefined
-      ? phys.world.getRigidBody(rider.joints[0].parentRbHandle)
-      : null
+    rider.joints[0] !== undefined ? phys.world.getRigidBody(rider.joints[0].parentRbHandle) : null
   if (pelvisRb) {
     const rx = 1 - 2 * (bikeRot.y * bikeRot.y + bikeRot.z * bikeRot.z)
     const ry = 2 * (bikeRot.x * bikeRot.y + bikeRot.w * bikeRot.z)

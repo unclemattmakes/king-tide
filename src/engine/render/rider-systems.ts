@@ -12,13 +12,7 @@ import { query } from 'bitecs'
 import type * as THREE from 'three'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import { Transform, TransformStore } from '@/game/components'
-import {
-  Rider,
-  RiderBone,
-  RiderBoneStore,
-  RiderBoneTag,
-  RiderStore,
-} from '@/game/components/rider'
+import { Rider, RiderBone, RiderBoneStore, RiderBoneTag, RiderStore } from '@/game/components/rider'
 import { createRiderBoneMesh } from './rider-mesh'
 
 const RIDER_COLORS = [

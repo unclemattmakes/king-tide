@@ -23,7 +23,10 @@ async function makeWorlds() {
   return { sim, phys }
 }
 
-function spawnBikeAndRider(sim: ReturnType<typeof createSimWorld>, phys: Awaited<ReturnType<typeof createPhysicsWorld>>) {
+function spawnBikeAndRider(
+  sim: ReturnType<typeof createSimWorld>,
+  phys: Awaited<ReturnType<typeof createPhysicsWorld>>,
+) {
   const bikeEid = createBike(sim, phys, {
     position: { x: 0, y: 5, z: 0 },
     yaw: 0,
@@ -120,7 +123,8 @@ describe('createRider', () => {
     // Now slam the bike: set its velocity to 25 m/s forward, then to -2 m/s
     // (a 27 m/s Δv — well over the 12 m/s threshold). Take two ticks so
     // the system records prev=25, then sees current=-2.
-    const bikeRb = phys.world.getRigidBody(RBHandleStore.must(bikeEid).handle)!
+    const bikeRb = phys.world.getRigidBody(RBHandleStore.must(bikeEid).handle)
+    if (!bikeRb) throw new Error('bike RB missing')
     bikeRb.setLinvel({ x: 0, y: 0, z: 25 }, true)
     phys.step()
     syncFromPhysics(sim, phys)
