@@ -49,6 +49,7 @@ import {
   dot,
   float,
   fract,
+  max,
   mix,
   normalize,
   normalWorld,
@@ -179,51 +180,129 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   const variation = config.variation ?? 0.3
   const wetBand = config.wetBand ?? 2.0
   const pathTint = config.pathTint ?? [0.3, 0.24, 0.18]
+  // SOTA-pass extras (M-coloration). Each is a no-op at its default so
+  // existing tracks keep their stock look without re-export.
+  const warpStrength = config.warpStrength ?? 0.5
+  const macroScale = config.macroScale ?? 120.0
+  const microScale = config.microScale ?? 8.0
+  const altJitter = config.altJitter ?? 4.0
+  const screeBand = config.screeBand ?? 0.25
+  const saturation = config.saturation ?? 1.05
+  const triplanar = config.triplanar ?? 0.6
 
   const mat = new MeshStandardNodeMaterial({ metalness: 0 })
   mat.name = 'mat_terrain_runtime'
 
   const worldNorm = normalize(normalWorld)
 
-  // Slope mask: 0 on horizontal faces (worldNormal.y == 1), 1 on
-  // verticals. Smoothstep cos 30°..cos 55° so gentle slopes still read
-  // as grass / sand rather than rock.
-  const slope = smoothstep(float(slopeStart), float(slopeEnd), worldNorm.y)
+  // ── Slope split ───────────────────────────────────────────────────────
+  // Three-way split: flat (sand/grass), scree (gravel transition), cliff
+  // (rock). Cosine angles run 1.0 (flat) → 0.0 (vertical). Splitting on
+  // two thresholds gives a band where the colour reads as broken rubble,
+  // breaking the visual snap from grass to wall that the original
+  // single-smoothstep had at steep cliffs.
+  const screeHalf = Math.max(screeBand * 0.5, 0.001)
+  const slopeMid = (slopeStart + slopeEnd) * 0.5
+  const screeUpper = slopeMid + screeHalf * (slopeStart - slopeEnd)
+  const screeLower = slopeMid - screeHalf * (slopeStart - slopeEnd)
+  // 0 on flat ground; rises to 1 once the surface tilts past `slopeStart`.
+  const flatToScree = smoothstep(float(slopeStart), float(screeUpper), worldNorm.y)
+  // 0 on slopes shallower than the scree band; rises to 1 once the
+  // surface is steep enough to read as bare rock.
+  const screeToCliff = smoothstep(float(screeLower), float(slopeEnd), worldNorm.y)
+  // Final slope mask used by roughness + colour blend. Equivalent to
+  // the original `smoothstep(slopeStart, slopeEnd, n.y)` when
+  // `screeBand == 0`, which keeps backward compat as a clean limit.
+  const slope = clamp(
+    flatToScree.mul(float(0.5)).add(screeToCliff.mul(float(0.5))),
+    float(0),
+    float(1),
+  )
 
-  // Altitude -> ramp parameter. Heights outside the configured range
-  // clamp; deepest abyssal blue / brightest volcanic top sit at the
-  // ramps' ends.
+  // ── Domain-warped detail UVs ──────────────────────────────────────────
+  // A low-frequency warp noise perturbs the input UVs of the colour
+  // noise so the visible noise pattern doesn't show its underlying
+  // grid. This is the single biggest "looks pre-baked" → "looks
+  // sculpted" upgrade in the chain.
+  const microFreq = 1.0 / Math.max(microScale, 0.5)
+  const macroFreq = 1.0 / Math.max(macroScale, 1.0)
+  const warpNoiseX = valueNoise2D(positionWorld.xz.mul(macroFreq * 0.5))
+  const warpNoiseY = valueNoise2D(positionWorld.xz.mul(macroFreq * 0.5).add(vec2(13.7, 47.3)))
+  const warp = vec2(warpNoiseX.sub(float(0.5)), warpNoiseY.sub(float(0.5))).mul(
+    float(warpStrength * macroScale * 0.5),
+  )
+  const microUV = positionWorld.xz.add(warp).mul(microFreq)
+  const macroUV = positionWorld.xz.mul(macroFreq)
+
+  // Triplanar micro-noise: blend in YZ + XY samples scaled by the
+  // matching world-normal axis so cliff faces (worldNorm.y ≈ 0) read
+  // their detail along the vertical axes rather than smearing the XZ
+  // pattern. Done with `min(triplanar, slope * 1.0 + something)` so
+  // triplanar only kicks in where the surface actually leaves
+  // horizontal — flat ground stays cheap (one tap).
+  const microXZ = valueNoiseOctave2D(microUV)
+  const triBlend = clamp(
+    float(triplanar).mul(slope.mul(float(1.2)).add(float(0.1))),
+    float(0),
+    float(1),
+  )
+  const microYZ = valueNoiseOctave2D(positionWorld.yz.mul(microFreq).add(warp.mul(0.7)))
+  const microXY = valueNoiseOctave2D(positionWorld.xy.mul(microFreq).add(warp.mul(0.5)))
+  const triNoise = mix(microXZ, mix(microYZ, microXY, abs(worldNorm.x)), triBlend)
+
+  // Macro biome variation — large-scale tint shift used to bias
+  // saturation + altitude band so adjacent regions read as subtly
+  // different biomes rather than one repeated palette.
+  const macroN = valueNoise2D(macroUV)
+  const macroBias = macroN.sub(float(0.5))
+
+  // ── Altitude → ramp parameter (with stochastic jitter) ───────────────
+  // World-Y mapped into [0, 1] over the configured altitude band, plus
+  // a noise-driven jitter so the contour transitions aren't perfectly
+  // level. At default jitter (4 m) the sand→grass break feathers over
+  // a few metres; at 0 the bands snap cleanly (legacy look).
   const altSpan = Math.max(altMax - altMin, 1)
-  const altT = clamp(positionWorld.y.sub(altMin).div(altSpan), float(0), float(1))
+  const jitterN = valueNoise2D(positionWorld.xz.mul(microFreq * 0.5).add(warp.mul(0.3)))
+  const jittered = positionWorld.y.add(jitterN.sub(float(0.5)).mul(float(altJitter * 2.0)))
+  const altT = clamp(jittered.sub(float(altMin)).div(float(altSpan)), float(0), float(1))
 
   const flatCol = texture(flat, vec2(altT, float(0.5))).rgb
   const cliffCol = texture(cliff, vec2(altT, float(0.5))).rgb
-  const blended = mix(flatCol, cliffCol, slope)
+  // Scree colour = mid-grey lerp between the two ramps, biased a touch
+  // toward warm gravel. Shows up in the `screeBand` between flat &
+  // cliff and only there.
+  const screeCol = mix(flatCol, cliffCol, float(0.6)).mul(vec3(1.05, 1.0, 0.9))
+  // Three-way blend driven by the two slope-band masks. Flat ground →
+  // flatCol; scree band → screeCol; cliff → cliffCol.
+  const flatToScreeCol = mix(flatCol, screeCol, flatToScree)
+  const blended = mix(flatToScreeCol, cliffCol, screeToCliff)
 
-  // Two-octave value noise sampled on the world XZ plane. Breaking ramp
-  // banding via 2D rather than 3D keeps the TSL node count manageable
-  // and looks plenty natural on terrain (the dominant variation axis is
-  // horizontal). ~16 m base feature size + half-amplitude second octave.
-  const varN = valueNoiseOctave2D(positionWorld.xz.mul(0.06))
-  const variedBaseCol = blended.mul(float(1.0 - variation * 0.5).add(varN.mul(variation)))
+  // ── Variation: brightness + saturation perturbed independently ───────
+  // Brightness pulse from the (possibly triplanar) micro noise, and
+  // saturation pulse from the macro noise. Doing the two on different
+  // axes reads as natural biome variation rather than just "noisy".
+  const brightnessFac = float(1.0 - variation * 0.5).add(triNoise.mul(float(variation)))
+  const variedBaseCol = blended.mul(brightnessFac)
+  // Saturation: lift around macro biome highs, push down where the
+  // macro noise is low. Bounded ±0.15 around the configured base so
+  // the user's `saturation` setting stays the dominant control.
+  const satMul = float(saturation).add(macroBias.mul(float(0.15)))
+  const desat = dot(variedBaseCol, vec3(0.299, 0.587, 0.114))
+  const saturated = mix(vec3(desat, desat, desat), variedBaseCol, max(satMul, float(0)))
 
-  // Wet band: triangular |y|-mask around the waterline pulls saturation
-  // down and tints slightly cool to read as damp sand / wave-washed
-  // rock. Full at y=0, zero beyond |y|≥wetBand m.
+  // ── Wet band ─────────────────────────────────────────────────────────
+  // Triangular |y|-mask around the waterline pulls saturation down and
+  // tints cool to read as damp sand / wave-washed rock. Full at y=0,
+  // zero beyond |y|≥wetBand m.
   const wet = smoothstep(float(wetBand), float(0.0), abs(positionWorld.y))
-  const withWet = mix(variedBaseCol, variedBaseCol.mul(vec3(0.78, 0.78, 0.85)), wet)
+  const withWet = mix(saturated, saturated.mul(vec3(0.72, 0.76, 0.86)), wet)
 
+  // ── Baked vertex attributes (AO + path wear) ─────────────────────────
   // Vertex-baked AO + racing-line wear from the addon's "Bake AO + Path
   // Wear" operator. The GN graph stamps these into COLOR_0.G and
   // COLOR_0.B respectively (R is sway-unused, A is the biome flag).
   // GLB authoring without the bake leaves both at their attribute
   // defaults (1 / 0) so this collapses to a no-op for unbaked terrain.
-  // TSL's ``attribute('color')`` resolves to whatever shape the
-  // geometry's color attribute has — 3- or 4-component depending on
-  // how Blender exported COLOR_0. Both shapes expose ``.g`` and ``.b``
-  // accessors so the AO + path-worn reads work uniformly.
-  // Typed as vec4 for swizzle access; runtime TSL auto-detects the actual
-  // component count from the geometry's COLOR_0 attribute either way.
   const vc = attribute('color') as Node<'vec4'>
   // AO multiplies into the colour with a 0.55 floor so deep cavities
   // darken visibly but never go to black. ``vc.g`` ∈ [0, 1].
@@ -235,9 +314,13 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   const path = clamp(vc.b, float(0), float(1))
   const withPath = mix(withAO, vec3(pathTint[0], pathTint[1], pathTint[2]), path.mul(0.8))
 
-  mat.colorNode = withPath
+  // Clamp final colour so any combined gain (saturation lift × macro
+  // bias × brightness pulse) never blows past linear-1 and wrecks
+  // tonemapping downstream.
+  mat.colorNode = clamp(withPath, vec3(0, 0, 0), vec3(1.6, 1.6, 1.6))
   // Slope-driven roughness lift — rocks rougher than sand / grass so
-  // lighting doesn't go uniformly matte across the island.
+  // lighting doesn't go uniformly matte across the island. Scree sits
+  // between the two so gravel doesn't read as wet asphalt.
   mat.roughnessNode = mix(float(0.78), float(0.95), slope)
 
   return mat

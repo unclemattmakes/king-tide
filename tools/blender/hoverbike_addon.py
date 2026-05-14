@@ -429,6 +429,19 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
                 float(scn.hoverbike_shader_path_tint_b),
             ],
         }
+        # State-of-the-art coloration extras. Optional in the runtime
+        # (terrain-shader.ts falls back to defaults), so we only emit
+        # them when the new properties exist on the scene — older
+        # .blends opened in this addon get fresh defaults the moment
+        # they're saved, but never emit garbage values.
+        if hasattr(scn, "hoverbike_shader_warp_strength"):
+            shader_block["warpStrength"] = float(scn.hoverbike_shader_warp_strength)
+            shader_block["macroScale"] = float(scn.hoverbike_shader_macro_scale)
+            shader_block["microScale"] = float(scn.hoverbike_shader_micro_scale)
+            shader_block["altJitter"] = float(scn.hoverbike_shader_alt_jitter)
+            shader_block["screeBand"] = float(scn.hoverbike_shader_scree_band)
+            shader_block["saturation"] = float(scn.hoverbike_shader_saturation)
+            shader_block["triplanar"] = float(scn.hoverbike_shader_triplanar)
 
     laps = int(getattr(scn, "hoverbike_laps_to_finish", 3) or 3)
     body: dict[str, Any] = {
@@ -535,6 +548,13 @@ def reload_track_from_json(json_path: str) -> dict:
             ("slopeEnd", "hoverbike_shader_slope_end"),
             ("variation", "hoverbike_shader_variation"),
             ("wetBand", "hoverbike_shader_wet_band"),
+            ("warpStrength", "hoverbike_shader_warp_strength"),
+            ("macroScale", "hoverbike_shader_macro_scale"),
+            ("microScale", "hoverbike_shader_micro_scale"),
+            ("altJitter", "hoverbike_shader_alt_jitter"),
+            ("screeBand", "hoverbike_shader_scree_band"),
+            ("saturation", "hoverbike_shader_saturation"),
+            ("triplanar", "hoverbike_shader_triplanar"),
         ):
             v = ts.get(key)
             if isinstance(v, (int, float)) and hasattr(scene, prop):
@@ -2847,6 +2867,593 @@ class HOVERBIKE_OT_auto_place_ramps(Operator):
             placed += 1
 
         self.report({"INFO"}, f"Placed {placed} auto-ramps at curvature peaks (|κ| > {scene.hoverbike_auto_ramp_kappa:.3f}).")
+        return {"FINISHED"}
+
+
+# ── Placement helper ───────────────────────────────────────────────────────
+#
+# A persistent, curve-constrained empty that lives in the scene and acts as
+# the "place this here" reference for ramps, boost pads, props, decorations
+# — anything that needs to land on or beside the racing line.
+#
+# Pose comes from the same `_sample_curve_at_t` family the cursor-snap and
+# auto-ramp operators use, so the helper, the cursor-snap, and the ramp
+# placer all agree on what `t = 0.27` means on a given curve.
+#
+# Two driving knobs:
+#   - `hoverbike_helper_t`      ∈ [0, 1]  — parameter along the curve.
+#   - `hoverbike_helper_offset` ∈ [-200, 200] m — lateral offset to the
+#                                                left (-) or right (+)
+#                                                of the curve, perpendicular
+#                                                to the tangent in XY.
+#
+# Re-pose runs through the existing debounce timer on prop changes, so
+# scrubbing either slider live-updates the helper without per-frame churn.
+# The helper also seats to whatever the bike would land on at (x, y),
+# matching `cursor_snap_to_spline`.
+#
+# The helper is just a regular empty so any operator that reads world
+# transforms (Add Ramp, Add Boost Pad, the GLB exporter — anything) can
+# pick it up by name without reaching into a constraint stack. Operators
+# `cursor_to_helper`, `add_ramp_at_helper`, and `add_boost_pad_at_helper`
+# wrap the common one-click flows.
+
+PLACEMENT_HELPER_NAME = "placement_helper"
+
+
+def _ensure_placement_helper(scene) -> bpy.types.Object:
+    """Return the singleton placement-helper empty, creating it if missing.
+    The empty's pose is whatever ``_repose_placement_helper`` last wrote;
+    the operator below re-poses on demand and the prop-update callback
+    re-poses on every slider scrub."""
+    obj = bpy.data.objects.get(PLACEMENT_HELPER_NAME)
+    if obj is not None:
+        return obj
+    obj = bpy.data.objects.new(PLACEMENT_HELPER_NAME, None)
+    obj.empty_display_type = "ARROWS"
+    obj.empty_display_size = 4.0
+    obj["kind"] = "placement_helper"
+    obj.hide_render = True
+    scene.collection.objects.link(obj)
+    return obj
+
+
+def _repose_placement_helper(scene) -> dict | None:
+    """Recompute the helper's world transform from the configured curve,
+    parameter t, and lateral offset. Returns the sample dict on success
+    or None if there's no curve / sample is degenerate.
+
+    Z lands on max(terrain, water) + hover so the helper sits at the
+    same surface a cursor-snap would. Yaw aligns +Y with the tangent
+    (Blender ramp/asset forward convention)."""
+    obj = bpy.data.objects.get(PLACEMENT_HELPER_NAME)
+    if obj is None:
+        return None
+    curve = _spline_source_for_placement(scene)
+    if curve is None:
+        return None
+    t = float(getattr(scene, "hoverbike_helper_t", 0.0))
+    s = _sample_curve_at_t(curve, t)
+    if s is None:
+        return None
+    # Perpendicular to (tx, ty) in XY, right-hand. Positive offset = right
+    # of the tangent direction (matches the snap-starts grid offset sign).
+    tx, ty = s["tx"], s["ty"]
+    rx, ry = ty, -tx
+    off = float(getattr(scene, "hoverbike_helper_offset", 0.0))
+    x = s["x"] + rx * off
+    y = s["y"] + ry * off
+    # Surface seat — same rule as snap_starts_to_spline.
+    vol = bpy.data.objects.get("water_volume_main")
+    water_z = float(vol.matrix_world.translation.z) if vol is not None else float("-inf")
+    hover = float(getattr(scene, "hoverbike_snap_hover_height", 0.0))
+    origin = mathutils.Vector((x, y, 10000.0))
+    down = mathutils.Vector((0.0, 0.0, -1.0))
+    with _PreviewCollectionsHidden(bpy.context.view_layer):
+        bpy.context.view_layer.update()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        hit, loc, *_ = scene.ray_cast(depsgraph, origin, down)
+    terrain_z = float(loc.z) if hit else s["z"]
+    surface_z = max(terrain_z, water_z)
+    if surface_z == float("-inf"):
+        surface_z = s["z"]
+    z = surface_z + hover
+    obj.location = (x, y, z)
+    obj.rotation_euler = (0.0, 0.0, _yaw_from_tangent_xy(tx, ty))
+    obj["helper_t"] = float(t)
+    obj["helper_offset"] = float(off)
+    return {"x": x, "y": y, "z": z, "tx": tx, "ty": ty}
+
+
+def _on_helper_prop_changed(self, context):
+    """FloatProperty update callback — re-poses the helper whenever the
+    user scrubs t or offset. No-ops if the helper hasn't been spawned."""
+    if bpy.data.objects.get(PLACEMENT_HELPER_NAME) is not None:
+        _schedule_rebuild("helper")
+
+
+class HOVERBIKE_OT_add_placement_helper(Operator):
+    """Spawn (or reveal) the singleton ``placement_helper`` empty on the
+    racing line at the configured ``t`` / ``offset``. The helper is a
+    persistent reference object — drag it indirectly by scrubbing the
+    sliders, or read its world transform from any other operator that
+    wants a placement anchor."""
+
+    bl_idname = "hoverbike.add_placement_helper"
+    bl_label = "Add Placement Helper"
+    bl_description = "Spawn the curve-constrained placement helper at t / offset"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scene = context.scene
+        curve = _spline_source_for_placement(scene)
+        if curve is None:
+            self.report({"ERROR"}, "No source curve found (need `ai_spline_main` or `road_curve_main`).")
+            return {"CANCELLED"}
+        obj = _ensure_placement_helper(scene)
+        s = _repose_placement_helper(scene)
+        if s is None:
+            self.report({"ERROR"}, f"Couldn't sample {curve.name!r}.")
+            return {"CANCELLED"}
+        # Make the helper the active selection so the next G/R/S keystroke
+        # lands on it (rare — the sliders are the canonical control).
+        for o in context.selected_objects:
+            o.select_set(False)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+        self.report(
+            {"INFO"},
+            f"{PLACEMENT_HELPER_NAME} → {curve.name} @ t={float(scene.hoverbike_helper_t):.3f}, "
+            f"offset={float(scene.hoverbike_helper_offset):+.1f} m.",
+        )
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_remove_placement_helper(Operator):
+    """Delete the singleton ``placement_helper`` empty. Equivalent to
+    selecting it in the outliner and pressing X — provided as a button so
+    the helper can be removed without leaving the panel."""
+
+    bl_idname = "hoverbike.remove_placement_helper"
+    bl_label = "Remove Helper"
+    bl_description = "Delete the placement_helper empty"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        obj = bpy.data.objects.get(PLACEMENT_HELPER_NAME)
+        if obj is None:
+            self.report({"INFO"}, "No placement helper to remove.")
+            return {"CANCELLED"}
+        bpy.data.objects.remove(obj, do_unlink=True)
+        self.report({"INFO"}, "Removed placement_helper.")
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_cursor_to_helper(Operator):
+    """Snap the 3D cursor to the placement helper's pose. One-click way
+    to jump the cursor to a known anchor before invoking *Add Ramp*,
+    *Add Boost Pad*, or any other cursor-driven add operator."""
+
+    bl_idname = "hoverbike.cursor_to_helper"
+    bl_label = "Cursor → Helper"
+    bl_description = "Move the 3D cursor to the placement helper's transform"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        obj = bpy.data.objects.get(PLACEMENT_HELPER_NAME)
+        if obj is None:
+            self.report({"ERROR"}, "No placement_helper. Click *Add Placement Helper* first.")
+            return {"CANCELLED"}
+        loc = obj.matrix_world.translation
+        context.scene.cursor.location = (float(loc.x), float(loc.y), float(loc.z))
+        context.scene.cursor.rotation_euler = (
+            float(obj.rotation_euler.x),
+            float(obj.rotation_euler.y),
+            float(obj.rotation_euler.z),
+        )
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_add_ramp_at_helper(Operator):
+    """Drop a wedge ramp at the placement helper's pose. Snaps the
+    cursor first so undo collapses both into a single step."""
+
+    bl_idname = "hoverbike.add_ramp_at_helper"
+    bl_label = "Add Ramp at Helper"
+    bl_description = "Snap cursor to the placement helper, then drop a tangent-aligned ramp"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        snap = bpy.ops.hoverbike.cursor_to_helper()
+        if snap != {"FINISHED"}:
+            return snap
+        return bpy.ops.hoverbike.add_ramp()
+
+
+class HOVERBIKE_OT_add_boost_pad_at_helper(Operator):
+    """Drop a boost pad at the placement helper's pose. Snaps the
+    cursor first so the pad inherits the helper's yaw."""
+
+    bl_idname = "hoverbike.add_boost_pad_at_helper"
+    bl_label = "Add Boost at Helper"
+    bl_description = "Snap cursor to the placement helper, then drop a tangent-aligned boost pad"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        snap = bpy.ops.hoverbike.cursor_to_helper()
+        if snap != {"FINISHED"}:
+            return snap
+        return bpy.ops.hoverbike.add_boost_pad()
+
+
+# ── Downtown generator ─────────────────────────────────────────────────────
+#
+# Drops a placeholder dense-urban city block at the 3D cursor: a
+# rectangular grid of mid-rise towers separated by streets and a flat
+# sidewalk plinth, all parented to a `downtown_NN` empty for one-click
+# move/delete.
+#
+# Geometry is intentionally placeholder — boxy buildings of varied heights
+# with simple top-floor setbacks, two grey/tan/blue tints alternating per
+# building, and asphalt streets. Good enough to read as a city from a
+# hoverbike at speed; refine later by swapping the per-building mesh for
+# a richer GN graph or imported asset.
+#
+# Each building mesh carries `kind="track"` so the runtime trimesh
+# collider attaches at GLB-load time (you can fly through them otherwise).
+# The street plinth is also kind="track" so the bike can rake across it.
+#
+# Reproducibility: the grid layout, building heights, footprints, and
+# tints all come from a seeded RNG keyed off `seed`. Two downtowns with
+# the same seed + dimensions are identical.
+
+DOWNTOWN_OBJECT_PREFIX = "downtown_"
+DOWNTOWN_BUILDING_MAT_PREFIX = "mat_track_downtown_"
+DOWNTOWN_STREET_MAT_NAME = "mat_track_downtown_street"
+
+
+def _next_downtown_object_name() -> str:
+    i = 0
+    while True:
+        name = f"{DOWNTOWN_OBJECT_PREFIX}{i:02d}"
+        if name not in bpy.data.objects:
+            return name
+        i += 1
+
+
+def _ensure_downtown_building_material(variant: int) -> bpy.types.Material:
+    """Return one of N flat tints used to alternate building colours so a
+    block doesn't read as a single grey mass. Variants cycle deterministic
+    per-building from the layout RNG."""
+    palette = [
+        (0.62, 0.60, 0.57),  # warm concrete
+        (0.45, 0.48, 0.52),  # cool steel
+        (0.38, 0.34, 0.32),  # dark glass / brown brick
+        (0.72, 0.68, 0.58),  # tan stone
+        (0.30, 0.36, 0.42),  # navy spandrel glass
+        (0.55, 0.52, 0.48),  # mid grey
+    ]
+    idx = int(variant) % len(palette)
+    name = f"{DOWNTOWN_BUILDING_MAT_PREFIX}{idx:02d}"
+    mat = bpy.data.materials.get(name)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is not None:
+        r, g, b = palette[idx]
+        bsdf.inputs["Base Color"].default_value = (r, g, b, 1.0)
+        bsdf.inputs["Roughness"].default_value = 0.6
+        spec = bsdf.inputs.get("Specular IOR Level") or bsdf.inputs.get("Specular")
+        if spec is not None:
+            spec.default_value = 0.4
+    return mat
+
+
+def _ensure_downtown_street_material() -> bpy.types.Material:
+    """Asphalt + sidewalk plinth material — flat dark grey with a small
+    value-noise tint so the streets don't read as a single colour. Same
+    family as the road tool's asphalt but lighter for sidewalk reads."""
+    mat = bpy.data.materials.get(DOWNTOWN_STREET_MAT_NAME)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(DOWNTOWN_STREET_MAT_NAME)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    bsdf = nt.nodes.get("Principled BSDF")
+    if bsdf is not None:
+        bsdf.inputs["Base Color"].default_value = (0.18, 0.18, 0.19, 1.0)
+        bsdf.inputs["Roughness"].default_value = 0.85
+        spec = bsdf.inputs.get("Specular IOR Level") or bsdf.inputs.get("Specular")
+        if spec is not None:
+            spec.default_value = 0.2
+    return mat
+
+
+def _build_downtown_building_mesh(
+    name: str, *, footprint: tuple[float, float], height: float, has_setback: bool
+) -> bpy.types.Mesh:
+    """Build a single placeholder building. A box of ``footprint`` X×Y by
+    ``height`` Z, optionally with an inset top-floor setback that gives
+    the silhouette a stepped look at speed. Origin sits on the building's
+    base centre (z=0 = ground)."""
+    me = bpy.data.meshes.new(name)
+    fx, fy = footprint
+    hx, hy = fx * 0.5, fy * 0.5
+
+    verts: list[tuple[float, float, float]] = []
+    faces: list[tuple[int, ...]] = []
+
+    if has_setback and height > 8.0:
+        body_h = height * 0.78
+        top_h = height - body_h
+        sx, sy = hx * 0.78, hy * 0.78
+        # Bottom box (8 verts).
+        verts.extend([
+            (-hx, -hy, 0.0), (hx, -hy, 0.0), (hx, hy, 0.0), (-hx, hy, 0.0),
+            (-hx, -hy, body_h), (hx, -hy, body_h), (hx, hy, body_h), (-hx, hy, body_h),
+        ])
+        # Setback box (8 verts) — sits on top of the body box.
+        verts.extend([
+            (-sx, -sy, body_h), (sx, -sy, body_h), (sx, sy, body_h), (-sx, sy, body_h),
+            (-sx, -sy, height), (sx, -sy, height), (sx, sy, height), (-sx, sy, height),
+        ])
+        # Bottom box faces (skip the top — the setback covers most of it,
+        # and we add an annular cap below).
+        faces.extend([
+            (0, 1, 2, 3),                # bottom
+            (0, 1, 5, 4), (1, 2, 6, 5),  # sides
+            (2, 3, 7, 6), (3, 0, 4, 7),
+        ])
+        # Setback box faces.
+        faces.extend([
+            (8, 9, 13, 12), (9, 10, 14, 13),  # sides
+            (10, 11, 15, 14), (11, 8, 12, 15),
+            (12, 13, 14, 15),                  # roof
+        ])
+        # Annular roof of the body box around the setback (4 quads).
+        faces.extend([
+            (0 + 4, 1 + 4, 9, 8),
+            (1 + 4, 2 + 4, 10, 9),
+            (2 + 4, 3 + 4, 11, 10),
+            (3 + 4, 0 + 4, 8, 11),
+        ])
+    else:
+        verts.extend([
+            (-hx, -hy, 0.0), (hx, -hy, 0.0), (hx, hy, 0.0), (-hx, hy, 0.0),
+            (-hx, -hy, height), (hx, -hy, height), (hx, hy, height), (-hx, hy, height),
+        ])
+        faces.extend([
+            (0, 1, 2, 3),                  # bottom
+            (4, 7, 6, 5),                  # roof (reversed for upward normal)
+            (0, 1, 5, 4), (1, 2, 6, 5),
+            (2, 3, 7, 6), (3, 0, 4, 7),
+        ])
+
+    me.from_pydata(verts, [], faces)
+    me.update(calc_edges=True)
+    me.shade_flat()
+    return me
+
+
+def _build_downtown_plinth_mesh(name: str, *, size_x: float, size_y: float) -> bpy.types.Mesh:
+    """Single quad plinth that becomes the streets + sidewalks. Centred
+    at origin with ``size_x`` × ``size_y`` extent. Lifted +0.05 m at
+    construction so it sits visibly above terrain rather than z-fighting."""
+    me = bpy.data.meshes.new(name)
+    hx, hy = size_x * 0.5, size_y * 0.5
+    z = 0.05
+    me.from_pydata(
+        [(-hx, -hy, z), (hx, -hy, z), (hx, hy, z), (-hx, hy, z)],
+        [],
+        [(0, 1, 2, 3)],
+    )
+    me.update(calc_edges=True)
+    me.shade_flat()
+    return me
+
+
+def _hash_cell(seed: int, gx: int, gy: int) -> float:
+    """Cheap deterministic [0,1) per (seed, gx, gy). Avoids importing
+    Python ``random`` so we don't disturb the user's RNG state."""
+    h = (seed * 73856093) ^ (gx * 19349663) ^ (gy * 83492791)
+    h = (h ^ (h >> 13)) & 0xFFFFFFFF
+    h = (h * 1274126177) & 0xFFFFFFFF
+    return ((h >> 8) & 0xFFFFFF) / float(1 << 24)
+
+
+def _generate_downtown(
+    scene,
+    *,
+    location: tuple[float, float, float],
+    rotation_z: float,
+    blocks_x: int,
+    blocks_y: int,
+    block_size: float,
+    street_width: float,
+    height_min: float,
+    height_max: float,
+    seed: int,
+) -> tuple[bpy.types.Object, int]:
+    """Spawn a parented downtown block. Returns (parent_empty,
+    n_buildings_built)."""
+    name = _next_downtown_object_name()
+    parent = bpy.data.objects.new(name, None)
+    parent.empty_display_type = "CUBE"
+    parent.empty_display_size = max(2.0, block_size * 0.4)
+    parent["kind"] = "downtown"
+    parent["seed"] = int(seed)
+    parent["blocks_x"] = int(blocks_x)
+    parent["blocks_y"] = int(blocks_y)
+    parent["block_size"] = float(block_size)
+    parent["street_width"] = float(street_width)
+    parent.location = location
+    parent.rotation_euler = (0.0, 0.0, float(rotation_z))
+    scene.collection.objects.link(parent)
+
+    # Total footprint in metres, centred on the parent.
+    pitch = block_size + street_width
+    span_x = blocks_x * pitch - street_width
+    span_y = blocks_y * pitch - street_width
+
+    # Single plinth covering the whole downtown — streets + sidewalks
+    # read as one continuous flat surface beneath the buildings, which
+    # is plenty for a placeholder.
+    plinth_mesh = _build_downtown_plinth_mesh(
+        f"{name}_plinth_data", size_x=span_x, size_y=span_y
+    )
+    plinth_obj = bpy.data.objects.new(f"{name}_plinth", plinth_mesh)
+    plinth_obj.parent = parent
+    plinth_obj.matrix_parent_inverse.identity()
+    plinth_obj["kind"] = "track"
+    plinth_obj.data.materials.append(_ensure_downtown_street_material())
+    scene.collection.objects.link(plinth_obj)
+
+    # Per-block buildings. Each block can carry 1 or 4 buildings (split
+    # into a 2×2 micro-grid when its hash favours density). A small
+    # fraction of blocks are empty plazas / parks so the silhouette
+    # isn't a uniform forest of towers.
+    n_buildings = 0
+    half_pitch = pitch * 0.5
+    for gx in range(blocks_x):
+        for gy in range(blocks_y):
+            # Block centre in parent-local XY.
+            cx = -span_x * 0.5 + gx * pitch + block_size * 0.5
+            cy = -span_y * 0.5 + gy * pitch + block_size * 0.5
+            r0 = _hash_cell(seed, gx, gy)
+            # 12% empty plaza so the silhouette breathes.
+            if r0 < 0.12:
+                continue
+            # 35% chance to subdivide into a 2×2 of smaller buildings.
+            sub = r0 < 0.47
+            if sub:
+                quarter = block_size * 0.5
+                half_q = quarter * 0.5
+                for dx, dy, idx in (
+                    (-half_q, -half_q, 0), (half_q, -half_q, 1),
+                    (half_q, half_q, 2), (-half_q, half_q, 3),
+                ):
+                    rh = _hash_cell(seed * 7 + idx, gx, gy)
+                    rv = _hash_cell(seed * 13 + idx, gx, gy)
+                    h = height_min + rh * (height_max - height_min) * 0.7
+                    fp = (
+                        quarter * (0.78 + 0.18 * rv),
+                        quarter * (0.78 + 0.18 * (1.0 - rv)),
+                    )
+                    bname = f"{name}_b{gx:02d}_{gy:02d}_{idx}"
+                    me = _build_downtown_building_mesh(
+                        f"{bname}_data",
+                        footprint=fp,
+                        height=h,
+                        has_setback=rh > 0.6,
+                    )
+                    obj = bpy.data.objects.new(bname, me)
+                    obj.parent = parent
+                    obj.matrix_parent_inverse.identity()
+                    obj.location = (cx + dx, cy + dy, 0.0)
+                    obj["kind"] = "track"
+                    obj.data.materials.append(
+                        _ensure_downtown_building_material(int(rh * 60) + idx)
+                    )
+                    scene.collection.objects.link(obj)
+                    n_buildings += 1
+            else:
+                rh = _hash_cell(seed * 17, gx, gy)
+                rv = _hash_cell(seed * 23, gx, gy)
+                h = height_min + rh * (height_max - height_min)
+                fp = (
+                    block_size * (0.82 + 0.14 * rv),
+                    block_size * (0.82 + 0.14 * (1.0 - rv)),
+                )
+                bname = f"{name}_b{gx:02d}_{gy:02d}"
+                me = _build_downtown_building_mesh(
+                    f"{bname}_data",
+                    footprint=fp,
+                    height=h,
+                    has_setback=rh > 0.45,
+                )
+                obj = bpy.data.objects.new(bname, me)
+                obj.parent = parent
+                obj.matrix_parent_inverse.identity()
+                obj.location = (cx, cy, 0.0)
+                obj["kind"] = "track"
+                obj.data.materials.append(
+                    _ensure_downtown_building_material(int(rh * 60))
+                )
+                scene.collection.objects.link(obj)
+                n_buildings += 1
+
+    return parent, n_buildings
+
+
+class HOVERBIKE_OT_add_downtown(Operator):
+    """Spawn a procedural downtown city-block at the 3D cursor.
+
+    Builds a parent ``downtown_NN`` empty plus a flat plinth + a grid of
+    placeholder building boxes (mixed heights, occasional top-floor
+    setbacks, a handful of empty plazas to break the silhouette). All
+    children carry ``kind="track"`` so the runtime collider attaches
+    at GLB-load time — the bike can rake across the streets and slap
+    into the towers.
+
+    Pulls all dimensions from the panel:
+
+      Blocks X/Y      — grid extent in city blocks.
+      Block size (m)  — edge length of each block (bigger = bigger towers).
+      Street (m)      — gap between adjacent blocks.
+      Min/Max h (m)   — random height range per building.
+      Seed            — integer that drives layout randomness.
+
+    Re-poses to (and rotates by) the 3D cursor so a Cursor → Spline (or
+    Cursor → Helper) before invocation drops the city centred on the
+    racing line."""
+
+    bl_idname = "hoverbike.add_downtown"
+    bl_label = "Add Downtown"
+    bl_description = "Spawn a placeholder city-block grid at the 3D cursor"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scene = context.scene
+        bx = int(getattr(scene, "hoverbike_downtown_blocks_x", 6))
+        by = int(getattr(scene, "hoverbike_downtown_blocks_y", 6))
+        block_size = float(getattr(scene, "hoverbike_downtown_block_size", 30.0))
+        street = float(getattr(scene, "hoverbike_downtown_street_width", 8.0))
+        h_min = float(getattr(scene, "hoverbike_downtown_height_min", 18.0))
+        h_max = float(getattr(scene, "hoverbike_downtown_height_max", 80.0))
+        seed = int(getattr(scene, "hoverbike_downtown_seed", 1))
+        if bx <= 0 or by <= 0 or block_size <= 0 or h_max <= h_min:
+            self.report({"ERROR"}, "Invalid downtown dimensions — fix grid / size / height range first.")
+            return {"CANCELLED"}
+
+        cursor = scene.cursor
+        parent, n = _generate_downtown(
+            scene,
+            location=tuple(cursor.location),
+            rotation_z=float(cursor.rotation_euler.z),
+            blocks_x=bx,
+            blocks_y=by,
+            block_size=block_size,
+            street_width=street,
+            height_min=h_min,
+            height_max=h_max,
+            seed=seed,
+        )
+
+        # Select the parent so the next G/R/S keystroke moves the whole
+        # downtown at once.
+        for o in context.selected_objects:
+            o.select_set(False)
+        parent.select_set(True)
+        context.view_layer.objects.active = parent
+
+        span_x = bx * (block_size + street) - street
+        span_y = by * (block_size + street) - street
+        self.report(
+            {"INFO"},
+            f"Added {parent.name}: {bx}×{by} blocks, {n} buildings, footprint ~{span_x:.0f}×{span_y:.0f} m.",
+        )
         return {"FINISHED"}
 
 
@@ -5351,7 +5958,7 @@ class HOVERBIKE_OT_copy_bike_url(Operator):
 # moving a curve's control points updates the Curve, not the Object)
 # schedules the listed preview kinds.
 _WATCHED_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("ai_spline_main",   ("gates", "turns")),
+    ("ai_spline_main",   ("gates", "turns", "helper")),
     ("start_00",         ("racer",)),
     ("water_volume_main", ("water",)),
 )
@@ -5428,6 +6035,12 @@ def _run_pending_rebuilds():
     if "boosts" in pending:
         try:
             _refresh_boost_pad_gizmos(scene)
+        except (RuntimeError, AttributeError):
+            pass
+
+    if "helper" in pending and bpy.data.objects.get(PLACEMENT_HELPER_NAME) is not None:
+        try:
+            _repose_placement_helper(scene)
         except (RuntimeError, AttributeError):
             pass
 
@@ -5719,6 +6332,64 @@ class HOVERBIKE_PT_track_road(_HoverbikeTrackSubPanelBase, Panel):
             layout.label(text="Edit road_curve_main, then Build", icon="INFO")
 
 
+class HOVERBIKE_PT_track_placement(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: persistent placement helper — a curve-constrained empty
+    that the author parks at any (t, lateral offset) and uses as a
+    placement anchor for ramps, boost pads, props, etc. Sliders re-pose
+    live; one-click *Add Ramp at Helper* / *Add Boost at Helper* drop
+    items at the helper's pose without needing to snap the cursor first.
+    """
+    bl_label = "Placement helper"
+    bl_idname = "HOVERBIKE_PT_track_placement"
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        helper = bpy.data.objects.get(PLACEMENT_HELPER_NAME)
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_helper_t", text="t")
+        row.prop(scene, "hoverbike_helper_offset", text="Offset")
+        row = layout.row(align=True)
+        if helper is None:
+            row.operator("hoverbike.add_placement_helper", icon="EMPTY_ARROWS")
+        else:
+            row.operator("hoverbike.add_placement_helper", text="Re-pose Helper", icon="FILE_REFRESH")
+            row.operator("hoverbike.remove_placement_helper", text="", icon="X")
+            layout.label(text=f"@ {helper.location.x:+.1f}, {helper.location.y:+.1f}, {helper.location.z:+.1f}",
+                         icon="OBJECT_DATAMODE")
+            layout.separator()
+            layout.label(text="One-click drop:")
+            layout.operator("hoverbike.cursor_to_helper", icon="PIVOT_CURSOR")
+            row = layout.row(align=True)
+            row.operator("hoverbike.add_ramp_at_helper", icon="ADD")
+            row.operator("hoverbike.add_boost_pad_at_helper", icon="FORCE_FORCE")
+
+
+class HOVERBIKE_PT_track_downtown(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: placeholder downtown city-block generator. Drops a
+    parented grid of mid-rise tower meshes (kind="track") at the 3D
+    cursor. Default-closed since most tracks won't use it."""
+    bl_label = "Downtown"
+    bl_idname = "HOVERBIKE_PT_track_downtown"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_downtown_blocks_x", text="X")
+        row.prop(scene, "hoverbike_downtown_blocks_y", text="Y")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_downtown_block_size", text="Block")
+        row.prop(scene, "hoverbike_downtown_street_width", text="Street")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_downtown_height_min", text="Min h")
+        row.prop(scene, "hoverbike_downtown_height_max", text="Max h")
+        layout.prop(scene, "hoverbike_downtown_seed", text="Seed")
+        layout.operator("hoverbike.add_downtown", icon="MESH_CUBE")
+        layout.label(text="Spawns at the 3D cursor.", icon="INFO")
+
+
 class HOVERBIKE_PT_track_ramps(_HoverbikeTrackSubPanelBase, Panel):
     """Sub-panel: simple wedge ramp. Three sliders set the next ramp's
     dimensions; clicking *Add Ramp* drops it at the 3D cursor.
@@ -5909,6 +6580,18 @@ class HOVERBIKE_PT_track_shader(_HoverbikeTrackSubPanelBase, Panel):
         row.prop(scene, "hoverbike_shader_path_tint_r", text="R")
         row.prop(scene, "hoverbike_shader_path_tint_g", text="G")
         row.prop(scene, "hoverbike_shader_path_tint_b", text="B")
+        layout.separator()
+        layout.label(text="Detail / variation:")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_shader_macro_scale", text="Macro (m)")
+        row.prop(scene, "hoverbike_shader_micro_scale", text="Micro (m)")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_shader_warp_strength", text="Warp")
+        row.prop(scene, "hoverbike_shader_alt_jitter", text="Alt jitter")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_shader_scree_band", text="Scree")
+        row.prop(scene, "hoverbike_shader_triplanar", text="Triplanar")
+        layout.prop(scene, "hoverbike_shader_saturation", text="Saturation")
 
 
 class HOVERBIKE_PT_track_stats(_HoverbikeTrackSubPanelBase, Panel):
@@ -5970,6 +6653,12 @@ _classes = (
     HOVERBIKE_OT_snap_starts_to_spline,
     HOVERBIKE_OT_add_ramp_at_spline_t,
     HOVERBIKE_OT_auto_place_ramps,
+    HOVERBIKE_OT_add_placement_helper,
+    HOVERBIKE_OT_remove_placement_helper,
+    HOVERBIKE_OT_cursor_to_helper,
+    HOVERBIKE_OT_add_ramp_at_helper,
+    HOVERBIKE_OT_add_boost_pad_at_helper,
+    HOVERBIKE_OT_add_downtown,
     HOVERBIKE_OT_add_road_starter_curve,
     HOVERBIKE_OT_build_road,
     HOVERBIKE_OT_add_ramp,
@@ -5992,8 +6681,10 @@ _classes = (
     HOVERBIKE_OT_copy_bike_url,
     HOVERBIKE_PT_panel,
     HOVERBIKE_PT_track_spline,
+    HOVERBIKE_PT_track_placement,
     HOVERBIKE_PT_track_road,
     HOVERBIKE_PT_track_ramps,
+    HOVERBIKE_PT_track_downtown,
     HOVERBIKE_PT_track_terrain,
     HOVERBIKE_PT_track_water,
     HOVERBIKE_PT_track_gameplay,
@@ -6324,6 +7015,99 @@ def register() -> None:
         default=3, min=1, max=99,
     )
 
+    # Placement helper — curve-constrained anchor empty for one-click
+    # placement of ramps, boosts, props, anything else that needs to
+    # land on the racing line at a known parameter + lateral offset.
+    bpy.types.Scene.hoverbike_helper_t = FloatProperty(
+        name="Helper t",
+        description="Parameter [0,1] along the source curve where the placement helper sits.",
+        default=0.0, min=0.0, max=1.0, precision=3,
+        update=_on_helper_prop_changed,
+    )
+    bpy.types.Scene.hoverbike_helper_offset = FloatProperty(
+        name="Helper offset (m)",
+        description="Lateral offset from the curve centre. Positive = right of the racing tangent, negative = left.",
+        default=0.0, min=-200.0, max=200.0, precision=2,
+        update=_on_helper_prop_changed,
+    )
+
+    # Downtown generator — placeholder dense-urban city block. All
+    # parameters drive the next *Add Downtown* invocation; existing
+    # downtowns are unaffected (delete + re-add to retune).
+    bpy.types.Scene.hoverbike_downtown_blocks_x = IntProperty(
+        name="Blocks X",
+        description="Number of city blocks along the parent's local +X.",
+        default=6, min=1, max=40,
+    )
+    bpy.types.Scene.hoverbike_downtown_blocks_y = IntProperty(
+        name="Blocks Y",
+        description="Number of city blocks along the parent's local +Y.",
+        default=6, min=1, max=40,
+    )
+    bpy.types.Scene.hoverbike_downtown_block_size = FloatProperty(
+        name="Block size (m)",
+        description="Edge length of one city block (the building footprint envelope per cell).",
+        default=30.0, min=4.0, max=200.0, precision=1,
+    )
+    bpy.types.Scene.hoverbike_downtown_street_width = FloatProperty(
+        name="Street (m)",
+        description="Gap between adjacent blocks. Plinth + asphalt fills these.",
+        default=8.0, min=1.0, max=40.0, precision=1,
+    )
+    bpy.types.Scene.hoverbike_downtown_height_min = FloatProperty(
+        name="Min h (m)",
+        description="Lower bound on per-building height. ~10 m = three storeys.",
+        default=18.0, min=2.0, max=500.0, precision=1,
+    )
+    bpy.types.Scene.hoverbike_downtown_height_max = FloatProperty(
+        name="Max h (m)",
+        description="Upper bound on per-building height. ~80 m = ~25-storey mid-rise.",
+        default=80.0, min=4.0, max=2000.0, precision=1,
+    )
+    bpy.types.Scene.hoverbike_downtown_seed = IntProperty(
+        name="Seed",
+        description="Layout seed. Same seed + dimensions produces identical city blocks.",
+        default=1, min=0, max=10000,
+    )
+
+    # Extra terrain-shader knobs (state-of-the-art coloration pass).
+    # See terrain-shader.ts for the matching uniforms.
+    bpy.types.Scene.hoverbike_shader_warp_strength = FloatProperty(
+        name="Domain warp",
+        description="Strength of the low-freq noise that warps the colour-noise UVs. 0 = stock, 0.5 = subtle, 1.5 = strong organic veining.",
+        default=0.5, min=0.0, max=4.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_shader_macro_scale = FloatProperty(
+        name="Macro scale",
+        description="World-space scale (m) of the macro biome variation. 50 m ≈ smooth rolling tints; 200 m ≈ continent-scale bands.",
+        default=120.0, min=10.0, max=1000.0, precision=1,
+    )
+    bpy.types.Scene.hoverbike_shader_micro_scale = FloatProperty(
+        name="Micro scale",
+        description="World-space scale (m) of the micro detail variation. 4 m ≈ pebbly, 16 m ≈ shrubs.",
+        default=8.0, min=0.5, max=40.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_shader_alt_jitter = FloatProperty(
+        name="Alt jitter (m)",
+        description="Vertical jitter added to the altitude band per fragment so contour lines aren't perfectly level. 0 = banded, 6 = naturally feathered.",
+        default=4.0, min=0.0, max=30.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_shader_scree_band = FloatProperty(
+        name="Scree band",
+        description="Width of the scree (intermediate slope) band between flat and cliff ramps. 0 = hard cut to cliff, 0.4 = wide gravel scree transition.",
+        default=0.25, min=0.0, max=1.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_shader_saturation = FloatProperty(
+        name="Saturation",
+        description="Output saturation multiplier. 1 = neutral, 1.2 = punchier biome reads, 0.7 = washed-out / stylised.",
+        default=1.05, min=0.0, max=2.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_shader_triplanar = FloatProperty(
+        name="Triplanar",
+        description="Blend factor between top-down (XZ-only) sampling and triplanar XYZ sampling for cliffs. 0 = stock, 1 = fully triplanar (no stretching on vertical faces).",
+        default=0.6, min=0.0, max=1.0, precision=2,
+    )
+
     # Persistent depsgraph hook so previews follow source edits across
     # file reloads. Idempotent — guard against re-registering if the
     # addon is reloaded.
@@ -6386,6 +7170,15 @@ def unregister() -> None:
         "hoverbike_auto_ramp_kappa", "hoverbike_auto_ramp_min_spacing",
         "hoverbike_start_grid_spacing",
         "hoverbike_laps_to_finish",
+        "hoverbike_helper_t", "hoverbike_helper_offset",
+        "hoverbike_downtown_blocks_x", "hoverbike_downtown_blocks_y",
+        "hoverbike_downtown_block_size", "hoverbike_downtown_street_width",
+        "hoverbike_downtown_height_min", "hoverbike_downtown_height_max",
+        "hoverbike_downtown_seed",
+        "hoverbike_shader_warp_strength", "hoverbike_shader_macro_scale",
+        "hoverbike_shader_micro_scale", "hoverbike_shader_alt_jitter",
+        "hoverbike_shader_scree_band", "hoverbike_shader_saturation",
+        "hoverbike_shader_triplanar",
     ):
         if hasattr(bpy.types.Scene, prop):
             try:
