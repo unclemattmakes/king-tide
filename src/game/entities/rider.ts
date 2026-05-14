@@ -139,14 +139,22 @@ function buildAnatomy(): AnatomyEdge[] {
   // the rider's gaze stays parallel to the ground at speed. Total head
   // pitch = chest 22° + neck -22° = level head, "looking ahead".
   const neckPitch = pitch(-22)
-  // Hips: legs swing forward to reach the footpegs. Slightly less aggressive
-  // than the first cut so the rider's thighs aren't pancaked into the bike
-  // — 65° puts the knee bend on top of the tank rather than past it.
-  const hipPitch = pitch(65)
-  // Knees: lower leg bends back so the shin runs near-vertical to the peg.
-  // Pairs with the hip angle above; at -95° the calf points straight down
-  // from the bent knee.
-  const kneePitch = pitch(-95)
+  // Hips: legs swing forward to reach the footpegs.
+  //
+  // Sign convention (matters because it bit the earlier cut): in this
+  // anatomy the upper_leg attaches to the pelvis via its +Y END (top of
+  // the capsule). Pitching the bone's +Y end forward by +angle rotates
+  // the rest of the bone (the -Y end = knee) BACKWARD. To swing the knee
+  // forward — what motocross sitting actually looks like — we need a
+  // NEGATIVE pitch. -80° puts the thigh close to horizontal with the
+  // knee well forward of the hip.
+  const hipPitch = pitch(-80)
+  // Knees: with the upper leg rotated -80° around its X axis, upper-leg
+  // local +Y now points along world (-Y, +Z) ≈ forward-and-slightly-up.
+  // We want the lower leg to hang STRAIGHT DOWN from the knee in world
+  // (-Y). That means lower_leg world rot ≈ identity, so kneePitch must
+  // cancel the upper-leg's rotation: pitch(-80°)⁻¹ = pitch(+80°).
+  const kneePitch = pitch(80)
   // Shoulders: arms reach forward + slightly outward. Slightly less than
   // the first cut so the forearms aren't pinned to the rider's thighs.
   // upper_arm rest = pointing down (+Y down in world). Pitch the arm
@@ -460,7 +468,7 @@ export function createRider(sim: SimWorld, phys: PhysicsWorld, opts: CreateRider
       prevVel: { x: 0, y: 0, z: 0 },
       bouncePitch: 0,
       bouncePitchVel: 0,
-      flowRoll: 0,
+      flowYaw: 0,
       headYaw: 0,
       headPitch: 0,
     },

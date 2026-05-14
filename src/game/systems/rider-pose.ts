@@ -1,31 +1,34 @@
 /**
- * Rider pose system — drives the attached rider's bones to their target
- * stance by directly positioning each bone every fixed step, modulated by
- * reactive offsets derived from bike state and player input.
+ * Rider pose system — kinematic chain walker with reactive offsets and
+ * hand IK to the bike's handlebars.
  *
- * While the rest pose stays static (chest pitched 22°, etc.), the chest +
- * head get per-tick deltas on top:
+ * Pipeline per fixed step:
+ *   1. Pelvis world pose = bike_pose ⊗ (SEAT_LOCAL, identity).
+ *   2. Walk the joint list in parent-before-child order. Each child's
+ *      world pose is derived from its parent: anchor matching on the
+ *      joint position, target relative rotation modulated by per-bone
+ *      reactive offsets.
+ *   3. Run 2-bone IK for each arm so the hand lands on the bike's
+ *      handlebar anchor regardless of the chest's current yaw. The
+ *      shoulder moves with the chest, the hand stays planted, and the
+ *      elbow bends to compensate.
+ *   4. setNextKinematicTranslation / setNextKinematicRotation on every
+ *      bone's rigid body.
  *
- *   - **Bounce** — vertical acceleration drives a critically-damped spring
- *     on the chest's pitch. Hard landings → torso flexes forward briefly,
- *     then settles. Hard takeoffs (boost pads, ramps) → torso flexes back.
- *   - **Flow** — bike yaw rate drives a low-pass roll offset on the chest.
- *     The torso leans INTO the turn (counter-roll of the bike's lateral
- *     lean would be wrong — riders carve with the bike, not against it).
- *   - **Head yaw** — ControlIntent.steer drives a low-pass yaw offset on
- *     the head. Head leads the bike into a turn.
- *   - **Head pitch** — ControlIntent.throttle - brake biases the head
- *     forward or back. Bracing into accel, pulling back on heavy braking.
+ * The chain walker is the load-bearing fix for the "torso looks like it
+ * lags in translation" symptom from the calibration scene. With each
+ * bone's world transform derived from its parent (not stored against the
+ * bike directly), any reactive rotation on the chest carries the head,
+ * arms, and IK targets along with it — the visual chain stays connected.
  *
- * Bones are KinematicPositionBased while attached, so the constraint
- * solver never touches them. Each tick we compute, for each bone:
+ * Reactive offsets:
+ *   - Chest pitch (bounce) — vertical accel drives a critically-damped
+ *     spring. Hard landings flex the torso forward, then settle.
+ *   - Chest yaw (flow) — bike yaw rate drives a low-pass yaw offset.
+ *     The whole upper body pivots from the hips toward the turn.
+ *   - Head yaw / pitch — ControlIntent.steer + (throttle - brake).
  *
- *   world_pose = bike_pose ⊗ (bike_local_rest_pose · reactive_offset)
- *
- * and call setNextKinematicTranslation / setNextKinematicRotation on the
- * bone's rigid body.
- *
- * Launched riders are skipped — their bones are dynamic at that point and
+ * Launched riders are skipped: their bones are dynamic at that point and
  * are owned by Rapier's iterative solver.
  *
  * Tuning constants are exported as `RIDER_POSE_TUNING` so the calibration
@@ -39,12 +42,13 @@ import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import { ControlIntentStore, RBHandleStore } from '@/game/components'
 import {
-  RIDER_BONE_NAMES,
   Rider,
-  type RiderBoneRest,
+  type RiderBoneName,
   type RiderPoseResponse,
   RiderStore,
 } from '@/game/components/rider'
+
+const IDENT_QUAT: Quat = { x: 0, y: 0, z: 0, w: 1 }
 
 function quatMul(a: Quat, b: Quat): Quat {
   return {
@@ -55,9 +59,8 @@ function quatMul(a: Quat, b: Quat): Quat {
   }
 }
 
-/** Rotate a vector by a unit quaternion. Inlined here for hot-path use —
- *  this runs for every bone of every rider every fixed step. */
-function rotByQuat(q: Quat, vx: number, vy: number, vz: number) {
+/** Rotate a vector by a unit quaternion. Inlined here for hot-path use. */
+function rotByQuat(q: Quat, vx: number, vy: number, vz: number): Vec3 {
   const tx = 2 * (q.y * vz - q.z * vy)
   const ty = 2 * (q.z * vx - q.x * vz)
   const tz = 2 * (q.x * vy - q.y * vx)
@@ -75,99 +78,127 @@ function quatAxisAngle(ax: number, ay: number, az: number, angle: number): Quat 
   return { x: ax * s, y: ay * s, z: az * s, w: Math.cos(h) }
 }
 
+/** Build a quaternion that maps the unit `from` vector onto the unit `to`
+ *  vector by the shortest rotation. Used by the arm IK to compute world
+ *  bone orientations from "down the bone" target directions. */
+function quatFromTo(from: Vec3, to: Vec3): Quat {
+  const d = from.x * to.x + from.y * to.y + from.z * to.z
+  if (d > 0.999999) return { x: 0, y: 0, z: 0, w: 1 }
+  if (d < -0.999999) {
+    // 180° rotation around any axis perpendicular to `from`.
+    let ax = -from.y
+    let ay = from.x
+    let az = 0
+    if (Math.hypot(ax, ay) < 1e-6) {
+      ax = 0
+      ay = -from.z
+      az = from.y
+    }
+    const len = Math.hypot(ax, ay, az)
+    return { x: ax / len, y: ay / len, z: az / len, w: 0 }
+  }
+  const cx = from.y * to.z - from.z * to.y
+  const cy = from.z * to.x - from.x * to.z
+  const cz = from.x * to.y - from.y * to.x
+  const w = 1 + d
+  const len = Math.hypot(cx, cy, cz, w)
+  return { x: cx / len, y: cy / len, z: cz / len, w: w / len }
+}
+
+function vsub(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
+}
+function vscale(v: Vec3, s: number): Vec3 {
+  return { x: v.x * s, y: v.y * s, z: v.z * s }
+}
+function vlen(v: Vec3): number {
+  return Math.hypot(v.x, v.y, v.z)
+}
+function vnorm(v: Vec3): Vec3 {
+  const L = vlen(v)
+  if (L < 1e-6) return { x: 0, y: 1, z: 0 }
+  return { x: v.x / L, y: v.y / L, z: v.z / L }
+}
+
 /** Rider pose-response tuning. Exposed as a mutable object so the
  *  calibration scene can rebind values live from devtools without a
  *  page reload — `window.__hover.riderTuning = { ... }` style. */
 export const RIDER_POSE_TUNING = {
-  /** Bounce: critically-damped spring driven by vertical acceleration.
-   *  Stiffness (k) and damping (c) for the torso-pitch spring. The
-   *  forcing term is `-accelY * bounceForceGain` — negative because a
-   *  positive accelY (bike pushed up) makes the torso lag behind (pitch
-   *  forward), which reads as the rider "settling" into the bike.
-   *  Tuned for visibility — small Δvy (a normal hover wobble) is meant
-   *  to produce a perceptible torso flex, not a millimetric jitter. */
+  /** Bounce: critically-damped spring driven by vertical acceleration. */
   bounceSpringK: 22,
   bounceSpringDamping: 7,
   bounceForceGain: 0.04,
-  /** Clamp the chest's bounce-pitch offset (radians). At ±0.5 rad (~28°)
-   *  the torso visibly flexes but never folds in half. */
+  /** Clamp on chest pitch offset (rad). */
   bounceMaxPitch: 0.5,
 
-  /** Flow: low-pass on a target roll derived from bike yaw rate.
-   *  Lerp coefficient per tick at 60Hz; ~0.08 = ~200ms time constant. */
+  /** Flow: low-pass on a target yaw derived from bike yaw rate. */
   flowSmoothing: 0.08,
-  /** Conversion factor from bike yaw rate (rad/s) to torso roll target
-   *  (rad). At yawRate = 1 rad/s (a 360° turn in ~6s), the torso leans
-   *  ~0.6 rad (~34°) into the turn. */
-  flowRollPerYawRate: 0.6,
-  /** Clamp on the chest roll offset (rad). */
-  flowMaxRoll: 0.7,
+  /** Conversion factor from bike yaw rate (rad/s) to torso yaw target
+   *  (rad). At yawRate = 1 rad/s, the torso pivots ~0.6 rad (~34°) into
+   *  the turn. Tuned alongside hand IK — the elbows absorb most of the
+   *  visible flex, so we can push this fairly hard without the rider
+   *  looking like a noodle. */
+  flowYawPerYawRate: 0.6,
+  /** Clamp on chest yaw offset (rad). */
+  flowMaxYaw: 0.8,
 
   /** Head yaw: low-pass on ControlIntent.steer. */
   headYawSmoothing: 0.12,
-  /** Maximum head yaw (rad) at full steer input. */
   headYawMax: 0.7,
 
   /** Head pitch: low-pass on ControlIntent.throttle - brake. */
   headPitchSmoothing: 0.06,
-  /** Maximum head pitch (rad) at full throttle (forward) or full brake
-   *  (backward). */
   headPitchMax: 0.18,
+
+  /** Handlebar anchors in bike-local space — the IK targets for the
+   *  rider's two hands. Each at the same forward + up offset, mirrored
+   *  in X for L/R. Tunable so the calibration scene can sweep these
+   *  and see them in-context. */
+  handlebarLocal: {
+    L: { x: 0.18, y: 0.6, z: 0.42 } as Vec3,
+    R: { x: -0.18, y: 0.6, z: 0.42 } as Vec3,
+  },
+  /** Strength of hand IK — 1 = hard-locked to handlebar, 0 = arms follow
+   *  rest pose only (no IK). Future: ramp to 0 during stun / launch
+   *  transitions so the arms flop instead of snapping. */
+  handIKStrength: 1,
 }
 
-/** Reset pose-response state to its rest-at-equilibrium values. Called
- *  by resetRider() when the player respawns; also implicitly correct
- *  for the initial spawn. */
 function zeroPoseResponse(r: RiderPoseResponse): void {
   r.prevVel.x = 0
   r.prevVel.y = 0
   r.prevVel.z = 0
   r.bouncePitch = 0
   r.bouncePitchVel = 0
-  r.flowRoll = 0
+  r.flowYaw = 0
   r.headYaw = 0
   r.headPitch = 0
 }
 
-/** Compute the per-bone reactive offset on top of its rest rotation.
- *  Most bones are pose-static (limbs follow rest pose verbatim); the
- *  chest and head get bounce/flow/yaw injected. Returned quaternion is
- *  the offset to right-multiply into rest.bikeLocalRot. */
-function reactiveOffsetFor(name: string, resp: RiderPoseResponse): Quat | null {
+/** Per-bone reactive rotation offset that the chain walker right-multiplies
+ *  onto the joint's `targetRelRot`. Only chest + head get one. */
+function reactiveOffsetFor(name: RiderBoneName, resp: RiderPoseResponse): Quat {
   if (name === 'chest') {
-    // Chest: pitch (bounce) around bone local X, roll (flow) around bone
-    // local Z. Composed as roll·pitch so they apply independently of
-    // order (small-angle regime).
+    // Bounce around chest's local X (pitch), flow around chest's local Y (yaw).
     const pitchQ = quatAxisAngle(1, 0, 0, resp.bouncePitch)
-    const rollQ = quatAxisAngle(0, 0, 1, resp.flowRoll)
-    return quatMul(pitchQ, rollQ)
+    const yawQ = quatAxisAngle(0, 1, 0, resp.flowYaw)
+    return quatMul(yawQ, pitchQ)
   }
   if (name === 'head') {
-    // Head: yaw around bone local Y (the rider's vertical), pitch
-    // around local X. Small forward bias on accel reads as the helmet
-    // ducking into the wind.
     const yawQ = quatAxisAngle(0, 1, 0, resp.headYaw)
     const pitchQ = quatAxisAngle(1, 0, 0, resp.headPitch)
     return quatMul(yawQ, pitchQ)
   }
-  return null
+  return IDENT_QUAT
 }
 
 function clamp(v: number, lo: number, hi: number): number {
-  if (v < lo) return lo
-  if (v > hi) return hi
-  return v
+  return v < lo ? lo : v > hi ? hi : v
 }
-
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t
 }
 
-/**
- * Update the rider's pose-response signals from this tick's bike state.
- * Reads bike linvel / angvel and the bike's ControlIntent; writes to the
- * rider's `poseResponse`. Pure arithmetic — no physics calls.
- */
 function tickPoseResponse(
   resp: RiderPoseResponse,
   bikeLinvel: Vec3,
@@ -175,14 +206,9 @@ function tickPoseResponse(
   intent: Intent | undefined,
   dt: number,
 ): void {
-  // --- Bounce ---
-  // Vertical acceleration approximated by finite difference. Cap dt to
-  // avoid spikes when the game pauses or hits a slow frame.
+  // Bounce: critically-damped spring driven by vertical accel.
   const safeDt = Math.max(dt, 1e-4)
   const accelY = (bikeLinvel.y - resp.prevVel.y) / safeDt
-  // Critically-damped spring on bouncePitch driven by accelY:
-  //   ẍ = -k·x - c·ẋ + f
-  // Symplectic Euler step.
   const force = -accelY * RIDER_POSE_TUNING.bounceForceGain
   const accel =
     -RIDER_POSE_TUNING.bounceSpringK * resp.bouncePitch -
@@ -190,10 +216,6 @@ function tickPoseResponse(
     force
   resp.bouncePitchVel += accel * dt
   resp.bouncePitch += resp.bouncePitchVel * dt
-  // Clamp displacement to keep the spring physical-looking even under
-  // extreme inputs (e.g. a debug velocity injection in the calibration
-  // scene). Also clip the velocity when we hit the wall so we don't get
-  // a bounce-back glitch.
   if (resp.bouncePitch > RIDER_POSE_TUNING.bounceMaxPitch) {
     resp.bouncePitch = RIDER_POSE_TUNING.bounceMaxPitch
     if (resp.bouncePitchVel > 0) resp.bouncePitchVel = 0
@@ -202,18 +224,16 @@ function tickPoseResponse(
     if (resp.bouncePitchVel < 0) resp.bouncePitchVel = 0
   }
 
-  // --- Flow ---
-  // Bike yaw rate (rad/s around world Y) → torso roll into the turn.
+  // Flow yaw: low-pass toward bike yaw rate scaled.
   const yawRate = bikeAngvel.y
   const flowTarget = clamp(
-    yawRate * RIDER_POSE_TUNING.flowRollPerYawRate,
-    -RIDER_POSE_TUNING.flowMaxRoll,
-    RIDER_POSE_TUNING.flowMaxRoll,
+    yawRate * RIDER_POSE_TUNING.flowYawPerYawRate,
+    -RIDER_POSE_TUNING.flowMaxYaw,
+    RIDER_POSE_TUNING.flowMaxYaw,
   )
-  resp.flowRoll = lerp(resp.flowRoll, flowTarget, RIDER_POSE_TUNING.flowSmoothing)
+  resp.flowYaw = lerp(resp.flowYaw, flowTarget, RIDER_POSE_TUNING.flowSmoothing)
 
-  // --- Head yaw ---
-  // Driven by raw steer input. -1 = full left, +1 = full right.
+  // Head yaw: driven by raw steer input.
   const steer = intent?.steer ?? 0
   const headYawTarget = clamp(
     steer * RIDER_POSE_TUNING.headYawMax,
@@ -222,8 +242,7 @@ function tickPoseResponse(
   )
   resp.headYaw = lerp(resp.headYaw, headYawTarget, RIDER_POSE_TUNING.headYawSmoothing)
 
-  // --- Head pitch ---
-  // Throttle pulls head forward (into the wind); brake pulls it back.
+  // Head pitch: throttle - brake.
   const throttle = intent?.throttle ?? 0
   const brake = intent?.brake ?? 0
   const pitchTarget = clamp(
@@ -233,10 +252,114 @@ function tickPoseResponse(
   )
   resp.headPitch = lerp(resp.headPitch, pitchTarget, RIDER_POSE_TUNING.headPitchSmoothing)
 
-  // Stash this tick's velocity for next-tick acceleration finite-diff.
   resp.prevVel.x = bikeLinvel.x
   resp.prevVel.y = bikeLinvel.y
   resp.prevVel.z = bikeLinvel.z
+}
+
+/** World-space rigid pose used by the chain walker. */
+type WorldPose = { pos: Vec3; rot: Quat }
+
+/** Run 2-bone IK and overwrite upper / lower arm world poses to land the
+ *  hand at `handTargetWorld`. Both arms share the same algorithm with
+ *  L/R differing only in which handlebar they aim at.
+ *
+ *  - `upperArmHalfHeight` / `lowerArmHalfHeight` are the bone capsule's
+ *    cylindrical half-heights (Rapier convention). The bone's full length
+ *    end-to-end is `2 * halfHeight + 2 * radius`, but for joint-anchor
+ *    purposes we treat the bone-length axis as `2 * halfHeight` because
+ *    that matches the `parentLocal`/`childLocal` anchors authored in
+ *    `buildAnatomy()` (top of arm at +halfHeight, bottom at -halfHeight). */
+function solveArmIK(
+  shoulderWorld: Vec3,
+  handTargetWorld: Vec3,
+  upperArmHalfHeight: number,
+  lowerArmHalfHeight: number,
+  polePerpHint: Vec3,
+): { upperArm: WorldPose; lowerArm: WorldPose } {
+  const L1 = 2 * upperArmHalfHeight
+  const L2 = 2 * lowerArmHalfHeight
+
+  // Distance shoulder → hand, clamped to a reachable range.
+  const sToH = vsub(handTargetWorld, shoulderWorld)
+  const D = vlen(sToH)
+  // Clamp to (|L1-L2|, L1+L2). Tiny epsilons so acos never sees ±1.
+  const minD = Math.abs(L1 - L2) + 0.001
+  const maxD = L1 + L2 - 0.001
+  const clampedD = clamp(D, minD, maxD)
+
+  // Direction shoulder → hand (unit).
+  const sToHDir = D > 1e-6 ? vscale(sToH, 1 / D) : ({ x: 0, y: -1, z: 0 } as Vec3)
+
+  // Shoulder offset angle off the shoulder→hand line, toward the elbow.
+  const cosShoulder = (L1 * L1 + clampedD * clampedD - L2 * L2) / (2 * L1 * clampedD)
+  const shoulderAngle = Math.acos(clamp(cosShoulder, -1, 1))
+
+  // Pole-vector direction perpendicular to sToHDir. We project the hint
+  // onto the plane perpendicular to sToHDir, then normalize. If the hint
+  // is parallel to sToHDir we fall back to a fixed down-and-back vector.
+  const hintDotDir =
+    polePerpHint.x * sToHDir.x + polePerpHint.y * sToHDir.y + polePerpHint.z * sToHDir.z
+  let perpRaw: Vec3 = {
+    x: polePerpHint.x - sToHDir.x * hintDotDir,
+    y: polePerpHint.y - sToHDir.y * hintDotDir,
+    z: polePerpHint.z - sToHDir.z * hintDotDir,
+  }
+  if (vlen(perpRaw) < 1e-4) {
+    // Fallback: any perpendicular to sToHDir.
+    perpRaw = Math.abs(sToHDir.y) < 0.99 ? { x: 0, y: -1, z: 0 } : { x: 0, y: 0, z: -1 }
+    const fbDot = perpRaw.x * sToHDir.x + perpRaw.y * sToHDir.y + perpRaw.z * sToHDir.z
+    perpRaw = {
+      x: perpRaw.x - sToHDir.x * fbDot,
+      y: perpRaw.y - sToHDir.y * fbDot,
+      z: perpRaw.z - sToHDir.z * fbDot,
+    }
+  }
+  const perp = vnorm(perpRaw)
+
+  // Elbow world position.
+  const cosA = Math.cos(shoulderAngle)
+  const sinA = Math.sin(shoulderAngle)
+  const elbowWorld: Vec3 = {
+    x: shoulderWorld.x + L1 * (cosA * sToHDir.x + sinA * perp.x),
+    y: shoulderWorld.y + L1 * (cosA * sToHDir.y + sinA * perp.y),
+    z: shoulderWorld.z + L1 * (cosA * sToHDir.z + sinA * perp.z),
+  }
+  // Hand world position — actual point we reach (clamped via clampedD if
+  // the target was out of range, so the IK still produces a stable pose
+  // when the hand can't quite get there).
+  const handReached: Vec3 =
+    D > 1e-6
+      ? {
+          x: shoulderWorld.x + sToHDir.x * clampedD,
+          y: shoulderWorld.y + sToHDir.y * clampedD,
+          z: shoulderWorld.z + sToHDir.z * clampedD,
+        }
+      : handTargetWorld
+
+  // Upper arm: +Y in arm-local must point from shoulder toward elbow.
+  const upperArmDir = vnorm(vsub(elbowWorld, shoulderWorld))
+  const upperArmRot = quatFromTo({ x: 0, y: 1, z: 0 }, upperArmDir)
+  // Bone center sits halfway along its +Y axis from the shoulder anchor.
+  const upperArmPos: Vec3 = {
+    x: shoulderWorld.x + upperArmDir.x * upperArmHalfHeight,
+    y: shoulderWorld.y + upperArmDir.y * upperArmHalfHeight,
+    z: shoulderWorld.z + upperArmDir.z * upperArmHalfHeight,
+  }
+
+  // Lower arm: +Y points from elbow toward hand.
+  const lowerArmDir = vnorm(vsub(handReached, elbowWorld))
+  const lowerArmRot = quatFromTo({ x: 0, y: 1, z: 0 }, lowerArmDir)
+  const lowerArmPos: Vec3 = {
+    x: elbowWorld.x + lowerArmDir.x * lowerArmHalfHeight,
+    y: elbowWorld.y + lowerArmDir.y * lowerArmHalfHeight,
+    z: elbowWorld.z + lowerArmDir.z * lowerArmHalfHeight,
+  }
+
+  return {
+    upperArm: { pos: upperArmPos, rot: upperArmRot },
+    lowerArm: { pos: lowerArmPos, rot: lowerArmRot },
+  }
 }
 
 export function riderPoseSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): void {
@@ -249,7 +372,7 @@ export function riderPoseSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): 
 
     const bikeRb = phys.world.getRigidBody(rider.bikeRbHandle)
     if (!bikeRb) continue
-    const bikePos = bikeRb.translation()
+    const bikePos = bikeRb.translation() as Vec3
     const bikeRot = bikeRb.rotation() as Quat
     const bikeLinvel = bikeRb.linvel()
     const bikeAngvel = bikeRb.angvel()
@@ -257,34 +380,139 @@ export function riderPoseSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): 
 
     tickPoseResponse(rider.poseResponse, bikeLinvel, bikeAngvel, intent, dt)
 
-    for (const name of RIDER_BONE_NAMES) {
+    // Walk the kinematic chain. Pelvis is the root, anchored to the seat.
+    const poses = new Map<RiderBoneName, WorldPose>()
+    const pelvisRest = rider.restPose.pelvis
+    const pelvisOffset = rotByQuat(
+      bikeRot,
+      pelvisRest.bikeLocalPos.x,
+      pelvisRest.bikeLocalPos.y,
+      pelvisRest.bikeLocalPos.z,
+    )
+    poses.set('pelvis', {
+      pos: {
+        x: bikePos.x + pelvisOffset.x,
+        y: bikePos.y + pelvisOffset.y,
+        z: bikePos.z + pelvisOffset.z,
+      },
+      rot: quatMul(bikeRot, pelvisRest.bikeLocalRot),
+    })
+
+    // Joints are authored parent-before-child in buildAnatomy(), so a
+    // single forward pass resolves the whole tree.
+    for (const j of rider.joints) {
+      const parent = poses.get(j.parentName)
+      if (!parent) continue
+      const offset = reactiveOffsetFor(j.childName, rider.poseResponse)
+      const childRot = quatMul(parent.rot, quatMul(j.targetRelRot, offset))
+      const parentAnchorWorld = rotByQuat(
+        parent.rot,
+        j.parentLocal.x,
+        j.parentLocal.y,
+        j.parentLocal.z,
+      )
+      const childAnchorLocal = rotByQuat(childRot, j.childLocal.x, j.childLocal.y, j.childLocal.z)
+      const childPos: Vec3 = {
+        x: parent.pos.x + parentAnchorWorld.x - childAnchorLocal.x,
+        y: parent.pos.y + parentAnchorWorld.y - childAnchorLocal.y,
+        z: parent.pos.z + parentAnchorWorld.z - childAnchorLocal.z,
+      }
+      poses.set(j.childName, { pos: childPos, rot: childRot })
+    }
+
+    // Hand IK: anchor each arm's hand to the bike's handlebar.
+    if (RIDER_POSE_TUNING.handIKStrength > 0) {
+      applyHandIK(rider, poses, bikePos, bikeRot, 'L')
+      applyHandIK(rider, poses, bikePos, bikeRot, 'R')
+    }
+
+    // Write out world poses to Rapier.
+    for (const [name, pose] of poses) {
       const boneEid = rider.bones[name]
-      const rest: RiderBoneRest = rider.restPose[name]
       const handle = RBHandleStore.get(boneEid)
       if (!handle) continue
       const rb = phys.world.getRigidBody(handle.handle)
       if (!rb) continue
-
-      // Position in bike-local space — reactive offsets are rotation-only,
-      // so the bone's center position stays at its rest location.
-      const worldOffset = rotByQuat(
-        bikeRot,
-        rest.bikeLocalPos.x,
-        rest.bikeLocalPos.y,
-        rest.bikeLocalPos.z,
-      )
-      rb.setNextKinematicTranslation({
-        x: bikePos.x + worldOffset.x,
-        y: bikePos.y + worldOffset.y,
-        z: bikePos.z + worldOffset.z,
-      })
-
-      // Rotation: bike_rot · rest_rot · reactive_offset.
-      const offset = reactiveOffsetFor(name, rider.poseResponse)
-      const localRot = offset === null ? rest.bikeLocalRot : quatMul(rest.bikeLocalRot, offset)
-      rb.setNextKinematicRotation(quatMul(bikeRot, localRot))
+      rb.setNextKinematicTranslation(pose.pos)
+      rb.setNextKinematicRotation(pose.rot)
     }
   }
+}
+
+function applyHandIK(
+  rider: ReturnType<typeof RiderStore.must>,
+  poses: Map<RiderBoneName, WorldPose>,
+  bikePos: Vec3,
+  bikeRot: Quat,
+  side: 'L' | 'R',
+): void {
+  const chest = poses.get('chest')
+  if (!chest) return
+  const upperName: RiderBoneName = side === 'L' ? 'upper_arm_L' : 'upper_arm_R'
+  const lowerName: RiderBoneName = side === 'L' ? 'lower_arm_L' : 'lower_arm_R'
+
+  // Shoulder world position: the chest-side anchor of the shoulder joint.
+  const shoulderJoint = rider.joints.find(
+    (j) => j.parentName === 'chest' && j.childName === upperName,
+  )
+  if (!shoulderJoint) return
+  const shoulderOffset = rotByQuat(
+    chest.rot,
+    shoulderJoint.parentLocal.x,
+    shoulderJoint.parentLocal.y,
+    shoulderJoint.parentLocal.z,
+  )
+  const shoulderWorld: Vec3 = {
+    x: chest.pos.x + shoulderOffset.x,
+    y: chest.pos.y + shoulderOffset.y,
+    z: chest.pos.z + shoulderOffset.z,
+  }
+
+  // Handlebar world target.
+  const handleLocal = RIDER_POSE_TUNING.handlebarLocal[side]
+  const handleOffset = rotByQuat(bikeRot, handleLocal.x, handleLocal.y, handleLocal.z)
+  const handleWorld: Vec3 = {
+    x: bikePos.x + handleOffset.x,
+    y: bikePos.y + handleOffset.y,
+    z: bikePos.z + handleOffset.z,
+  }
+
+  // Bone half-heights from boneDims.
+  const upperDim = rider.boneDims.find((d) => nameByHandle(rider, d.rbHandle) === upperName)
+  const lowerDim = rider.boneDims.find((d) => nameByHandle(rider, d.rbHandle) === lowerName)
+  if (!upperDim || !lowerDim) return
+
+  // Pole hint: the elbow should bend so it points roughly DOWN and slightly
+  // BACK from the rider's shoulder. In bike-local that's (-Y, -Z); in world
+  // we rotate by bike rotation. The IK projects this onto the plane
+  // perpendicular to shoulder→handle to pick the elbow side.
+  const poleLocal: Vec3 = { x: 0, y: -1, z: -0.4 }
+  const poleHint = rotByQuat(bikeRot, poleLocal.x, poleLocal.y, poleLocal.z)
+
+  const ik = solveArmIK(
+    shoulderWorld,
+    handleWorld,
+    upperDim.halfHeight,
+    lowerDim.halfHeight,
+    poleHint,
+  )
+  poses.set(upperName, ik.upperArm)
+  poses.set(lowerName, ik.lowerArm)
+}
+
+/** Resolve a bone's name from its RB handle by walking boneDims order vs
+ *  the rider.bones map. Cheap (10-12 entries) and only called during the
+ *  IK pass. */
+function nameByHandle(
+  rider: ReturnType<typeof RiderStore.must>,
+  rbHandle: number,
+): RiderBoneName | null {
+  for (const name of Object.keys(rider.bones) as RiderBoneName[]) {
+    const eid = rider.bones[name]
+    const h = RBHandleStore.get(eid)
+    if (h && h.handle === rbHandle) return name
+  }
+  return null
 }
 
 /**
@@ -299,8 +527,6 @@ export function riderPoseSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): 
  */
 export function resetRider(phys: PhysicsWorld, rider: ReturnType<typeof RiderStore.must>): void {
   if (rider.state === 'launched') {
-    // Remove the ragdoll joints. Walk in reverse so any deferred handles
-    // in Rapier's joint set don't shift under us.
     for (let i = rider.joints.length - 1; i >= 0; i--) {
       const j = rider.joints[i]
       if (!j || j.jointHandle === null) continue
@@ -312,24 +538,16 @@ export function resetRider(phys: PhysicsWorld, rider: ReturnType<typeof RiderSto
       }
       j.jointHandle = null
     }
-    // Swap every bone back to kinematic + drop the collider we attached on
-    // launch. Without removing the collider, the rider would still slam
-    // into terrain even though the bones now teleport-track the bike.
     const Kinematic = phys.rapier.RigidBodyType.KinematicPositionBased
     for (const dim of rider.boneDims) {
       const rb = phys.world.getRigidBody(dim.rbHandle)
       if (!rb) continue
-      // Remove all colliders attached at launch (numColliders > 0 only
-      // after launchRider added one each). `rb.collider(0)` returns the
-      // Collider directly — no extra handle lookup needed.
       while (rb.numColliders() > 0) {
         const c = rb.collider(0)
         if (!c) break
         phys.world.removeCollider(c, true)
       }
       rb.setBodyType(Kinematic, true)
-      // Zero any lingering velocities so the kinematic body doesn't carry
-      // momentum into its first frame back.
       rb.setLinvel({ x: 0, y: 0, z: 0 }, true)
       rb.setAngvel({ x: 0, y: 0, z: 0 }, true)
     }
@@ -337,15 +555,9 @@ export function resetRider(phys: PhysicsWorld, rider: ReturnType<typeof RiderSto
     rider.motorScale = 1
     rider.stateAge = 0
   }
-  // Always zero the reactive state on a reset, even if already attached —
-  // the bike's velocity was just slammed to zero, so the rider shouldn't
-  // be mid-bounce from whatever happened before the reset.
   zeroPoseResponse(rider.poseResponse)
 }
 
-/** Convenience: find the rider entity that owns a given bike eid and
- *  reset it. Returns true if a rider was found and reset, false otherwise.
- *  Called from the keyboard respawn handler. */
 export function resetRiderForBike(sim: SimWorld, phys: PhysicsWorld, bikeEid: number): boolean {
   const eids = query(sim, [Rider])
   for (const eid of eids) {

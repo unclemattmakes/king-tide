@@ -119,9 +119,11 @@ export type RiderPoseResponse = {
    *  damped spring with velocity. Positive = torso pitches forward. */
   bouncePitch: number
   bouncePitchVel: number
-  /** Torso roll offset (radians) — counter-leans into a turn. First-order
-   *  low-pass toward target derived from bike angular velocity around Y. */
-  flowRoll: number
+  /** Torso yaw offset (radians) — chest pivots from the hips toward the
+   *  direction of travel. First-order low-pass toward target derived from
+   *  bike yaw rate. Hand IK keeps the grips locked, so as the chest yaws
+   *  the elbows bend to absorb the rotation — "loose but in control." */
+  flowYaw: number
   /** Head yaw offset (radians) — head leads the steer input. First-order
    *  low-pass toward target derived from ControlIntent.steer. */
   headYaw: number
