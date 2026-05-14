@@ -26,6 +26,10 @@ export const RiderBoneTag = { name: 'RiderBoneTag' as const }
 /** Canonical bone names. Order matters for `bones[]` arrays in RiderData. */
 export type RiderBoneName =
   | 'pelvis'
+  /** Lower spine — between pelvis and upper chest. Splitting the spine
+   *  into two segments makes the bounce-pitch flex visibly travel up the
+   *  torso instead of collapsing into a single hinge. */
+  | 'abdomen'
   | 'chest'
   | 'head'
   | 'upper_arm_L'
@@ -39,6 +43,7 @@ export type RiderBoneName =
 
 export const RIDER_BONE_NAMES: readonly RiderBoneName[] = [
   'pelvis',
+  'abdomen',
   'chest',
   'head',
   'upper_arm_L',
@@ -51,6 +56,22 @@ export const RIDER_BONE_NAMES: readonly RiderBoneName[] = [
   'lower_leg_R',
 ] as const
 
+/** Canonical anatomical-joint kinds. Each kind reads its target rotation
+ *  from `RIDER_POSE_TUNING.restAngles[kind]` so the calibration scene can
+ *  rebind values live without re-spawning the rider. */
+export type RiderJointKind =
+  | 'spine_lower'
+  | 'spine_upper'
+  | 'neck'
+  | 'shoulder_L'
+  | 'shoulder_R'
+  | 'elbow_L'
+  | 'elbow_R'
+  | 'hip_L'
+  | 'hip_R'
+  | 'knee_L'
+  | 'knee_R'
+
 /** Spec for a single anatomical joint between two rider bones. Joints
  *  are not instantiated while the rider is attached (the bones are
  *  kinematic and follow the bike pose directly — no constraint solver
@@ -60,6 +81,9 @@ export type RiderJoint = {
   /** Bone names — for debugging + targeted poses. */
   parentName: RiderBoneName
   childName: RiderBoneName
+  /** Anatomical-joint kind. Drives which entry in `RIDER_POSE_TUNING`
+   *  determines this joint's rest rotation each tick. */
+  kind: RiderJointKind
   /** Bone entity ids. */
   parentEid: number
   childEid: number
@@ -73,10 +97,11 @@ export type RiderJoint = {
   /** Rapier joint handle — null while attached (no joint exists), set
    *  after launch when the ragdoll constraints are created. */
   jointHandle: number | null
-  /** Target relative rotation of child in parent's frame, i.e.
-   *  child_world_rot = parent_world_rot * targetRelRot in the rest pose.
-   *  Used both for computing the kinematic rest pose each tick and as
-   *  the seed pose for the on-launch dynamic configuration. */
+  /** Seed target relative rotation captured at spawn. Used as the
+   *  on-launch fallback (when the rider becomes a ragdoll the joint is
+   *  created at this rest orientation). The live attached-mode pose
+   *  reads angles from `RIDER_POSE_TUNING.restAngles[kind]` so the
+   *  calibration scene can mutate them without re-spawning. */
   targetRelRot: Quat
 }
 

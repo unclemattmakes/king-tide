@@ -43,15 +43,16 @@ function spawnBikeAndRider(
 }
 
 describe('createRider', () => {
-  it('spawns a rider with 11 bones + 1 Rider component', async () => {
+  it('spawns a rider with 12 bones + 1 Rider component', async () => {
     const { sim, phys } = await makeWorlds()
     const { riderEid } = spawnBikeAndRider(sim, phys)
 
     const rider = RiderStore.must(riderEid)
     expect(rider.state).toBe('attached')
-    // 10 anatomical joints (spine, neck, 2 shoulders, 2 elbows, 2 hips,
-    // 2 knees). While attached no Rapier joint exists — only specs.
-    expect(rider.joints).toHaveLength(10)
+    // 11 anatomical joints — spine is now TWO segments (spine_lower +
+    // spine_upper) plus neck, 2 shoulders, 2 elbows, 2 hips, 2 knees.
+    // While attached no Rapier joint exists — only specs.
+    expect(rider.joints).toHaveLength(11)
     for (const j of rider.joints) {
       expect(j.jointHandle).toBeNull()
     }
@@ -60,7 +61,7 @@ describe('createRider', () => {
     }
 
     const boneEids = query(sim, [RiderBoneTag])
-    expect(boneEids.length).toBe(11)
+    expect(boneEids.length).toBe(12)
   })
 
   it('bones spawn near the bike position, not at world origin', async () => {

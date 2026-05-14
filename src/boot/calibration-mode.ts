@@ -220,6 +220,287 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
   `
   document.body.appendChild(hudEl)
 
+  // ---- Pose-tuning slider panel -------------------------------------
+  // Right-side panel of sliders bound directly to RIDER_POSE_TUNING.
+  // Changing a slider mutates the live tuning object — the pose system
+  // reads it each tick, no respawn required.
+  const tunerEl = document.createElement('div')
+  tunerEl.id = 'calibration-tuner'
+  tunerEl.style.cssText = `
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 100;
+    background: rgba(0, 0, 0, 0.78);
+    color: #eee;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 11px;
+    padding: 10px 14px;
+    border-radius: 6px;
+    width: 260px;
+    line-height: 1.4;
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+  `
+  document.body.appendChild(tunerEl)
+
+  type SliderSpec = {
+    label: string
+    min: number
+    max: number
+    step: number
+    get(): number
+    set(v: number): void
+  }
+
+  function buildTuner() {
+    const ra = RIDER_POSE_TUNING.restAngles
+    const hl = RIDER_POSE_TUNING.handlebarLocal
+    const sliders: { section: string; specs: SliderSpec[] }[] = [
+      {
+        section: 'REST POSE (deg)',
+        specs: [
+          {
+            label: 'spine lower',
+            min: -30,
+            max: 60,
+            step: 1,
+            get: () => ra.spine_lower,
+            set: (v) => {
+              ra.spine_lower = v
+            },
+          },
+          {
+            label: 'spine upper',
+            min: -30,
+            max: 60,
+            step: 1,
+            get: () => ra.spine_upper,
+            set: (v) => {
+              ra.spine_upper = v
+            },
+          },
+          {
+            label: 'neck',
+            min: -60,
+            max: 30,
+            step: 1,
+            get: () => ra.neck,
+            set: (v) => {
+              ra.neck = v
+            },
+          },
+          {
+            label: 'shoulder pitch',
+            min: 0,
+            max: 120,
+            step: 1,
+            get: () => ra.shoulder_pitch,
+            set: (v) => {
+              ra.shoulder_pitch = v
+            },
+          },
+          {
+            label: 'shoulder roll',
+            min: -30,
+            max: 45,
+            step: 1,
+            get: () => ra.shoulder_roll,
+            set: (v) => {
+              ra.shoulder_roll = v
+            },
+          },
+          {
+            label: 'elbow',
+            min: -120,
+            max: 30,
+            step: 1,
+            get: () => ra.elbow,
+            set: (v) => {
+              ra.elbow = v
+            },
+          },
+          {
+            label: 'hip',
+            min: -120,
+            max: 30,
+            step: 1,
+            get: () => ra.hip,
+            set: (v) => {
+              ra.hip = v
+            },
+          },
+          {
+            label: 'knee',
+            min: -30,
+            max: 120,
+            step: 1,
+            get: () => ra.knee,
+            set: (v) => {
+              ra.knee = v
+            },
+          },
+        ],
+      },
+      {
+        section: 'HANDLEBAR (bike-local m)',
+        specs: [
+          {
+            label: 'left X',
+            min: -0.5,
+            max: 0.5,
+            step: 0.01,
+            get: () => hl.L.x,
+            set: (v) => {
+              hl.L.x = v
+              hl.R.x = -v
+            },
+          },
+          {
+            label: 'Y (height)',
+            min: 0,
+            max: 1.2,
+            step: 0.01,
+            get: () => hl.L.y,
+            set: (v) => {
+              hl.L.y = v
+              hl.R.y = v
+            },
+          },
+          {
+            label: 'Z (forward)',
+            min: -0.5,
+            max: 1.0,
+            step: 0.01,
+            get: () => hl.L.z,
+            set: (v) => {
+              hl.L.z = v
+              hl.R.z = v
+            },
+          },
+        ],
+      },
+      {
+        section: 'RESPONSE GAINS',
+        specs: [
+          {
+            label: 'flow yaw/yaw_rate',
+            min: 0,
+            max: 1.5,
+            step: 0.02,
+            get: () => RIDER_POSE_TUNING.flowYawPerYawRate,
+            set: (v) => {
+              RIDER_POSE_TUNING.flowYawPerYawRate = v
+            },
+          },
+          {
+            label: 'flow max yaw',
+            min: 0,
+            max: 1.5,
+            step: 0.02,
+            get: () => RIDER_POSE_TUNING.flowMaxYaw,
+            set: (v) => {
+              RIDER_POSE_TUNING.flowMaxYaw = v
+            },
+          },
+          {
+            label: 'bounce force gain',
+            min: 0,
+            max: 0.2,
+            step: 0.002,
+            get: () => RIDER_POSE_TUNING.bounceForceGain,
+            set: (v) => {
+              RIDER_POSE_TUNING.bounceForceGain = v
+            },
+          },
+          {
+            label: 'bounce spring k',
+            min: 5,
+            max: 80,
+            step: 1,
+            get: () => RIDER_POSE_TUNING.bounceSpringK,
+            set: (v) => {
+              RIDER_POSE_TUNING.bounceSpringK = v
+            },
+          },
+          {
+            label: 'head yaw max',
+            min: 0,
+            max: 1.5,
+            step: 0.02,
+            get: () => RIDER_POSE_TUNING.headYawMax,
+            set: (v) => {
+              RIDER_POSE_TUNING.headYawMax = v
+            },
+          },
+        ],
+      },
+    ]
+
+    tunerEl.innerHTML = ''
+    const header = document.createElement('div')
+    header.style.cssText = 'font-weight:600;color:#7cf;font-size:12px;margin-bottom:8px'
+    header.textContent = 'POSE CALIBRATION'
+    tunerEl.appendChild(header)
+
+    for (const group of sliders) {
+      const h = document.createElement('div')
+      h.style.cssText = 'color:#aaa;font-weight:600;margin-top:8px;margin-bottom:4px'
+      h.textContent = group.section
+      tunerEl.appendChild(h)
+      for (const s of group.specs) {
+        const row = document.createElement('div')
+        row.style.cssText = 'display:flex;align-items:center;gap:6px;margin:2px 0'
+        const label = document.createElement('span')
+        label.style.cssText = 'width:100px;color:#bbb;font-size:10px'
+        label.textContent = s.label
+        const input = document.createElement('input')
+        input.type = 'range'
+        input.min = String(s.min)
+        input.max = String(s.max)
+        input.step = String(s.step)
+        input.value = String(s.get())
+        input.style.cssText = 'flex:1;cursor:pointer'
+        const val = document.createElement('span')
+        val.style.cssText =
+          'width:46px;text-align:right;color:#7cf;font-size:10px;font-variant-numeric:tabular-nums'
+        const fmt = (v: number) =>
+          s.step >= 1 ? v.toFixed(0) : s.step >= 0.01 ? v.toFixed(2) : v.toFixed(3)
+        val.textContent = fmt(s.get())
+        input.addEventListener('input', () => {
+          const v = Number(input.value)
+          s.set(v)
+          val.textContent = fmt(v)
+        })
+        row.appendChild(label)
+        row.appendChild(input)
+        row.appendChild(val)
+        tunerEl.appendChild(row)
+      }
+    }
+
+    // Reset-to-defaults button.
+    const resetBtn = document.createElement('button')
+    resetBtn.textContent = 'reset tuning to defaults'
+    resetBtn.style.cssText =
+      'margin-top:10px;width:100%;background:#2c4060;color:#cfe;border:1px solid #4080a0;padding:5px;cursor:pointer;font-family:inherit;font-size:10px;border-radius:3px'
+    resetBtn.addEventListener('click', () => {
+      Object.assign(RIDER_POSE_TUNING.restAngles, DEFAULT_REST_ANGLES)
+      Object.assign(RIDER_POSE_TUNING.handlebarLocal.L, DEFAULT_HANDLEBAR.L)
+      Object.assign(RIDER_POSE_TUNING.handlebarLocal.R, DEFAULT_HANDLEBAR.R)
+      buildTuner()
+    })
+    tunerEl.appendChild(resetBtn)
+  }
+
+  // Snapshot defaults at boot so the reset button has a target.
+  const DEFAULT_REST_ANGLES = { ...RIDER_POSE_TUNING.restAngles }
+  const DEFAULT_HANDLEBAR = {
+    L: { ...RIDER_POSE_TUNING.handlebarLocal.L },
+    R: { ...RIDER_POSE_TUNING.handlebarLocal.R },
+  }
+  buildTuner()
+
   // ---- Keyboard input -----------------------------------------------
   const keyDown = new Set<string>()
   function onKeyDown(e: KeyboardEvent) {
@@ -473,6 +754,7 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       hudEl.remove()
+      tunerEl.remove()
       try {
         disposeRenderer()
       } catch (err) {
