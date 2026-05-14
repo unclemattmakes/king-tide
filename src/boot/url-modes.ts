@@ -30,6 +30,7 @@ const GAME_SIGNALS = [
   'edit',
   'replay',
   'determinism',
+  'calibrate',
 ] as const
 
 /** Lazily create the fixed-position container that hosts the attract-mode
@@ -81,6 +82,16 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     const bikeId = viewerParam === '1' || viewerParam === '' ? null : viewerParam
     await bootBikeViewer(appEl, { bikeId })
     hideLoadingScreen()
+    return 'handled'
+  }
+
+  // Rider-pose calibration scene: `?calibrate=1`. One bike + one rider,
+  // orbit camera, turbulence generator. Used to dial in rest-pose joint
+  // angles and reactive-pose tuning constants.
+  if (earlyParams.get('calibrate') !== null) {
+    setLoadingMessage('Loading calibration scene…')
+    const { bootCalibrationMode } = await import('./calibration-mode')
+    await bootCalibrationMode(appEl)
     return 'handled'
   }
 

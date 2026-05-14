@@ -565,6 +565,7 @@ async function boot() {
   // `src/boot/controls.ts` — returns a small handle the game loop polls
   // for pause state + mutates when the finish screen shows.
   const controls = installControls({
+    sim,
     phys,
     track,
     trackId,

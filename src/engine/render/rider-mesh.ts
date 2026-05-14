@@ -1,10 +1,13 @@
 /**
- * Procedural box mesh for a single rider bone.
+ * Procedural mesh for a single rider bone.
  *
  * Physics is a capsule with axis along local Y, halfHeight + radius. We
  * render it as a thin capsule mesh oriented the same way, so visual ↔
  * physics shape match without a separate visual rig. Colour per-rider is
  * passed in by the render system so each rider reads as distinct.
+ *
+ * The `head` bone is the one exception: its physics is a stubby capsule
+ * but we draw it as a SphereGeometry for the correct helmet silhouette.
  *
  * (Phase 1: placeholder. Phase 2 swaps these out for a skinned humanoid
  *  GLB loaded from `public/assets/riders/<id>.glb`.)
@@ -29,14 +32,8 @@ function getMaterial(color: number): THREE.MeshStandardMaterial {
 }
 
 /**
- * Build a capsule mesh for one bone. Capsule axis = local +Y (matches
- * Rapier's default capsule orientation), so the mesh can be placed at the
- * bone's RB transform with no extra rotation.
- *
- * The "head" bone gets a distinct sphere on top so it reads as a head; we
- * approximate this by making the chest's mesh taller and adding a sphere
- * child for the head visually. For the procedural cut we just render each
- * bone as its own capsule — head approximation lives on the chest.
+ * Build a mesh for one bone. Default = capsule with axis on local +Y;
+ * head = sphere sized to its capsule radius so it reads as a helmet.
  */
 export function createRiderBoneMesh(
   name: RiderBoneName,
@@ -44,25 +41,24 @@ export function createRiderBoneMesh(
   radius: number,
   color: number,
 ): THREE.Object3D {
-  // Three.js CapsuleGeometry length is the cylindrical part length
-  // (between the hemispheres) — same convention as Rapier's halfHeight
-  // doubled. So length = halfHeight * 2.
-  const length = halfHeight * 2
-  const segments = 8
-  const geom = new THREE.CapsuleGeometry(radius, length, 4, segments)
-  const mesh = new THREE.Mesh(geom, getMaterial(color))
+  let mesh: THREE.Mesh
+  if (name === 'head') {
+    // Sphere scaled slightly larger than the capsule radius — the
+    // halfHeight on the physics capsule is small (0.05) so the body's
+    // collider is effectively a thin capsule; the visual silhouette is
+    // dominated by the sphere we draw here.
+    mesh = new THREE.Mesh(new THREE.SphereGeometry(radius * 1.05, 18, 14), getMaterial(color))
+  } else {
+    // Three.js CapsuleGeometry length is the cylindrical part length
+    // (between the hemispheres) — same convention as Rapier's halfHeight
+    // doubled. So length = halfHeight * 2.
+    const length = halfHeight * 2
+    const segments = 8
+    const geom = new THREE.CapsuleGeometry(radius, length, 4, segments)
+    mesh = new THREE.Mesh(geom, getMaterial(color))
+  }
   mesh.castShadow = true
   mesh.receiveShadow = true
   mesh.name = `rider_bone_${name}`
-
-  if (name === 'chest') {
-    // Visual head on top of chest. Sized roughly to a real head.
-    const head = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.85, 16, 12), getMaterial(color))
-    head.position.set(0, halfHeight + radius * 0.9, 0)
-    head.castShadow = true
-    head.receiveShadow = true
-    head.name = 'rider_head'
-    mesh.add(head)
-  }
   return mesh
 }

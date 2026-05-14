@@ -59,7 +59,14 @@ type BoneDim = {
 
 const BONES: Record<RiderBoneName, BoneDim> = {
   pelvis: { halfHeight: 0.18, radius: 0.18, mass: 8 },
-  chest: { halfHeight: 0.35, radius: 0.22, mass: 18 },
+  // Chest is now strictly torso — head is its own bone, no more cosmetic
+  // sphere parented to the chest mesh.
+  chest: { halfHeight: 0.3, radius: 0.22, mass: 16 },
+  // Head — short capsule (effectively a sphere because halfHeight is
+  // small). Render side draws this with SphereGeometry for the right
+  // silhouette; physics treats it as a capsule for consistency with the
+  // rest of the bone family.
+  head: { halfHeight: 0.05, radius: 0.16, mass: 5 },
   upper_arm_L: { halfHeight: 0.18, radius: 0.07, mass: 2.5 },
   lower_arm_L: { halfHeight: 0.18, radius: 0.06, mass: 1.8 },
   upper_arm_R: { halfHeight: 0.18, radius: 0.07, mass: 2.5 },
@@ -128,18 +135,27 @@ function buildAnatomy(): AnatomyEdge[] {
   // upper limbs: capsule along Y, hanging from joint.
   // Spine: chest pitches forward 22°. (Motocross "attack" lean.)
   const spinePitch = pitch(22)
-  // Hips: legs swing forward to reach the footpegs. ~70° forward pitch.
-  const hipPitch = pitch(78)
-  // Knees: lower leg bends back ~80° relative to upper leg (so it points
-  // mostly down again from the bent knee).
-  const kneePitch = pitch(-80)
-  // Shoulders: arms reach forward + slightly outward.
-  // upper_arm rest = pointing down (+Y down in world). To reach the bars,
-  // pitch the arm forward ~80°, then roll outward ~12° for the L/R split.
-  const shoulderPitchL = quatMul(pitch(85), roll(15))
-  const shoulderPitchR = quatMul(pitch(85), roll(-15))
-  // Elbows: bent ~70° so forearm + hand reach forward to grips.
-  const elbowPitch = pitch(-70)
+  // Neck: head pitches back slightly relative to forward-leaning chest so
+  // the rider's gaze stays parallel to the ground at speed. Total head
+  // pitch = chest 22° + neck -22° = level head, "looking ahead".
+  const neckPitch = pitch(-22)
+  // Hips: legs swing forward to reach the footpegs. Slightly less aggressive
+  // than the first cut so the rider's thighs aren't pancaked into the bike
+  // — 65° puts the knee bend on top of the tank rather than past it.
+  const hipPitch = pitch(65)
+  // Knees: lower leg bends back so the shin runs near-vertical to the peg.
+  // Pairs with the hip angle above; at -95° the calf points straight down
+  // from the bent knee.
+  const kneePitch = pitch(-95)
+  // Shoulders: arms reach forward + slightly outward. Slightly less than
+  // the first cut so the forearms aren't pinned to the rider's thighs.
+  // upper_arm rest = pointing down (+Y down in world). Pitch the arm
+  // forward ~75°, then roll outward ~18° for the L/R split.
+  const shoulderPitchL = quatMul(pitch(75), roll(18))
+  const shoulderPitchR = quatMul(pitch(75), roll(-18))
+  // Elbows: bent ~55° so the forearm meets the bars without locking out.
+  // Less aggressive than the first cut.
+  const elbowPitch = pitch(-55)
 
   // Gains are intentionally on the low side; the rider PD controller is
   // discrete (one torque impulse per fixed step) and overshooting in the
@@ -153,16 +169,32 @@ function buildAnatomy(): AnatomyEdge[] {
       // pelvis local: top of pelvis (+Y a bit). Pelvis is squat, so top ~0.18.
       parentLocal: { x: 0, y: 0.18, z: 0 },
       // chest local: bottom of chest capsule (-Y by half-length).
-      childLocal: { x: 0, y: -0.35, z: 0 },
+      childLocal: { x: 0, y: -0.3, z: 0 },
       targetRelRot: spinePitch,
       kp: 80,
       kd: 16,
+    },
+    // NECK
+    {
+      parent: 'chest',
+      child: 'head',
+      // chest local: top of chest capsule.
+      parentLocal: { x: 0, y: 0.3, z: 0 },
+      // head local: bottom of head capsule (head is short — halfHeight=0.05,
+      // radius=0.16, so total height ≈ 0.42m; anchor at -halfHeight-radius
+      // would clip the chest, so anchor right at the chest seam = -halfHeight).
+      childLocal: { x: 0, y: -0.16, z: 0 },
+      targetRelRot: neckPitch,
+      kp: 30,
+      kd: 6,
     },
     // SHOULDERS
     {
       parent: 'chest',
       child: 'upper_arm_L',
-      parentLocal: { x: 0.22, y: 0.3, z: 0 },
+      // Chest is now 0.3 halfHeight (was 0.35) — shoulder anchor is the
+      // top edge of the chest capsule, offset outward by the radius.
+      parentLocal: { x: 0.22, y: 0.25, z: 0 },
       childLocal: { x: 0, y: 0.18, z: 0 },
       targetRelRot: shoulderPitchL,
       kp: 40,
@@ -171,7 +203,7 @@ function buildAnatomy(): AnatomyEdge[] {
     {
       parent: 'chest',
       child: 'upper_arm_R',
-      parentLocal: { x: -0.22, y: 0.3, z: 0 },
+      parentLocal: { x: -0.22, y: 0.25, z: 0 },
       childLocal: { x: 0, y: 0.18, z: 0 },
       targetRelRot: shoulderPitchR,
       kp: 40,
@@ -424,6 +456,14 @@ export function createRider(sim: SimWorld, phys: PhysicsWorld, opts: CreateRider
     boneDims,
     motorScale: 1,
     stateAge: 0,
+    poseResponse: {
+      prevVel: { x: 0, y: 0, z: 0 },
+      bouncePitch: 0,
+      bouncePitchVel: 0,
+      flowRoll: 0,
+      headYaw: 0,
+      headPitch: 0,
+    },
   }
   RiderStore.set(riderEid, data)
   return riderEid
