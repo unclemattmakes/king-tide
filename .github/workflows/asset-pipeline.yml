@@ -20,11 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Cache Blender install
         id: blender-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /opt/blender
           key: blender-5.1.0-linux
@@ -39,11 +39,11 @@ jobs:
       - name: Add Blender to PATH
         run: echo "/opt/blender" >> "$GITHUB_PATH"
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: pnpm
@@ -59,7 +59,7 @@ jobs:
           HOVERBIKE_NO_ASSET_WATCH: '1'
 
       - name: Upload manifest as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: asset-manifest
           path: public/assets/manifest.json
