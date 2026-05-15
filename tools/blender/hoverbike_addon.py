@@ -3109,7 +3109,8 @@ class HOVERBIKE_OT_add_boost_pad_at_helper(Operator):
 
 DOWNTOWN_OBJECT_PREFIX = "downtown_"
 DOWNTOWN_BUILDING_MAT_PREFIX = "mat_track_downtown_"
-DOWNTOWN_STREET_MAT_NAME = "mat_track_downtown_street"
+DOWNTOWN_SIDEWALK_MAT_NAME = "mat_track_downtown_sidewalk"
+DOWNTOWN_ROAD_MAT_NAME = "mat_track_downtown_road"
 
 
 def _next_downtown_object_name() -> str:
@@ -3151,36 +3152,71 @@ def _ensure_downtown_building_material(variant: int) -> bpy.types.Material:
     return mat
 
 
-def _ensure_downtown_street_material() -> bpy.types.Material:
-    """Asphalt + sidewalk plinth material — flat dark grey with a small
-    value-noise tint so the streets don't read as a single colour. Same
-    family as the road tool's asphalt but lighter for sidewalk reads."""
-    mat = bpy.data.materials.get(DOWNTOWN_STREET_MAT_NAME)
+def _ensure_downtown_sidewalk_material() -> bpy.types.Material:
+    """Sidewalk / lot plinth surface — light warm concrete. This is the
+    "ground around the buildings" colour, the lighter half of the
+    sidewalk/road contrast that makes the street grid read at speed.
+    Material-slot 0 on every plinth."""
+    mat = bpy.data.materials.get(DOWNTOWN_SIDEWALK_MAT_NAME)
     if mat is not None:
         return mat
-    mat = bpy.data.materials.new(DOWNTOWN_STREET_MAT_NAME)
+    mat = bpy.data.materials.new(DOWNTOWN_SIDEWALK_MAT_NAME)
     mat.use_nodes = True
-    nt = mat.node_tree
-    bsdf = nt.nodes.get("Principled BSDF")
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
     if bsdf is not None:
-        bsdf.inputs["Base Color"].default_value = (0.18, 0.18, 0.19, 1.0)
-        bsdf.inputs["Roughness"].default_value = 0.85
+        bsdf.inputs["Base Color"].default_value = (0.52, 0.50, 0.46, 1.0)
+        bsdf.inputs["Roughness"].default_value = 0.82
         spec = bsdf.inputs.get("Specular IOR Level") or bsdf.inputs.get("Specular")
         if spec is not None:
             spec.default_value = 0.2
     return mat
 
 
+def _ensure_downtown_road_material() -> bpy.types.Material:
+    """Asphalt road surface — dark grey, slightly bluer than the
+    sidewalk so the contrast doesn't read as "dirty concrete" but as
+    "different surface". Material-slot 1 on every plinth; assigned to
+    faces that fall in the inter-block street strips, so the road
+    network reads as a darker grid against the lighter sidewalk
+    fabric without a second mesh / z-fight."""
+    mat = bpy.data.materials.get(DOWNTOWN_ROAD_MAT_NAME)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(DOWNTOWN_ROAD_MAT_NAME)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is not None:
+        bsdf.inputs["Base Color"].default_value = (0.10, 0.10, 0.12, 1.0)
+        bsdf.inputs["Roughness"].default_value = 0.88
+        spec = bsdf.inputs.get("Specular IOR Level") or bsdf.inputs.get("Specular")
+        if spec is not None:
+            spec.default_value = 0.22
+    return mat
+
+
 def _build_downtown_building_mesh(
-    name: str, *, footprint: tuple[float, float], height: float, has_setback: bool
+    name: str,
+    *,
+    footprint: tuple[float, float],
+    height: float,
+    has_setback: bool,
+    extra_depth: float = 0.0,
 ) -> bpy.types.Mesh:
     """Build a single placeholder building. A box of ``footprint`` X×Y by
     ``height`` Z, optionally with an inset top-floor setback that gives
-    the silhouette a stepped look at speed. Origin sits on the building's
-    base centre (z=0 = ground)."""
+    the silhouette a stepped look at speed.
+
+    ``extra_depth`` (m) sinks the bottom face below the building's local
+    z=0 — used by the terrain-conform pass to bury the downhill side
+    into the slope so a building on a hill looks like it's stepping
+    into the grade instead of floating on stilts. The exposed silhouette
+    above z=0 is unchanged.
+
+    Origin sits on the building's base centre at z=0 = "uphill ground"."""
     me = bpy.data.meshes.new(name)
     fx, fy = footprint
     hx, hy = fx * 0.5, fy * 0.5
+    bz = -float(max(extra_depth, 0.0))
 
     verts: list[tuple[float, float, float]] = []
     faces: list[tuple[int, ...]] = []
@@ -3189,9 +3225,9 @@ def _build_downtown_building_mesh(
         body_h = height * 0.78
         top_h = height - body_h
         sx, sy = hx * 0.78, hy * 0.78
-        # Bottom box (8 verts).
+        # Bottom box (8 verts) — bottom face at bz, top of body at body_h.
         verts.extend([
-            (-hx, -hy, 0.0), (hx, -hy, 0.0), (hx, hy, 0.0), (-hx, hy, 0.0),
+            (-hx, -hy, bz), (hx, -hy, bz), (hx, hy, bz), (-hx, hy, bz),
             (-hx, -hy, body_h), (hx, -hy, body_h), (hx, hy, body_h), (-hx, hy, body_h),
         ])
         # Setback box (8 verts) — sits on top of the body box.
@@ -3221,7 +3257,7 @@ def _build_downtown_building_mesh(
         ])
     else:
         verts.extend([
-            (-hx, -hy, 0.0), (hx, -hy, 0.0), (hx, hy, 0.0), (-hx, hy, 0.0),
+            (-hx, -hy, bz), (hx, -hy, bz), (hx, hy, bz), (-hx, hy, bz),
             (-hx, -hy, height), (hx, -hy, height), (hx, hy, height), (-hx, hy, height),
         ])
         faces.extend([
@@ -3237,21 +3273,161 @@ def _build_downtown_building_mesh(
     return me
 
 
-def _build_downtown_plinth_mesh(name: str, *, size_x: float, size_y: float) -> bpy.types.Mesh:
-    """Single quad plinth that becomes the streets + sidewalks. Centred
-    at origin with ``size_x`` × ``size_y`` extent. Lifted +0.05 m at
-    construction so it sits visibly above terrain rather than z-fighting."""
+def _block_aligned_axis_positions(
+    blocks: int,
+    block_size: float,
+    street_width: float,
+    *,
+    cells_per_block: int = 4,
+    cells_per_street: int = 2,
+) -> tuple[list[float], list[bool]]:
+    """Return ``(positions, cell_is_street)`` for a per-axis vertex layout
+    that pins subdivisions to block/street boundaries.
+
+    Length of ``positions`` is ``blocks * cells_per_block +
+    (blocks - 1) * cells_per_street + 1``. Length of ``cell_is_street``
+    is one less than that (a flag per cell between two positions). Each
+    cell is unambiguously inside either a block zone (False) or a
+    street zone (True), so face-level material assignment falls out
+    naturally without straddling-cell artefacts."""
+    pitch = block_size + street_width
+    span = blocks * pitch - street_width
+    positions: list[float] = [-span * 0.5]
+    cell_is_street: list[bool] = []
+    cur = -span * 0.5
+    for b in range(blocks):
+        for c in range(1, cells_per_block + 1):
+            positions.append(cur + c * block_size / cells_per_block)
+            cell_is_street.append(False)
+        cur += block_size
+        if b < blocks - 1:
+            for c in range(1, cells_per_street + 1):
+                positions.append(cur + c * street_width / cells_per_street)
+                cell_is_street.append(True)
+            cur += street_width
+    return positions, cell_is_street
+
+
+# Material slot indices on every plinth mesh — same on all downtowns so
+# downstream tools can swap the materials by slot index without having
+# to look up which downtown they're editing.
+DOWNTOWN_PLINTH_SIDEWALK_SLOT = 0
+DOWNTOWN_PLINTH_ROAD_SLOT = 1
+
+
+def _build_downtown_plinth_mesh(
+    name: str,
+    *,
+    blocks_x: int,
+    blocks_y: int,
+    block_size: float,
+    street_width: float,
+    vertex_z: list[float] | None = None,
+) -> tuple[bpy.types.Mesh, list[tuple[float, float]]]:
+    """Plinth: streets + sidewalks as a single mesh with two material
+    slots. Returns ``(mesh, vert_positions_xy)`` so the caller can
+    raycast each vertex to the terrain (then re-call this with the
+    resulting ``vertex_z``).
+
+    Vertex layout is *block-aligned* — subdivisions land exactly on
+    every block/street boundary so each face is unambiguously a
+    sidewalk cell or a road cell, and we can assign per-face
+    ``material_index`` without straddling artefacts.
+
+    Material slot 0 → sidewalk material, slot 1 → road material. The
+    caller appends both materials in that order before linking the
+    mesh into the scene.
+
+    Lifted +0.05 m at construction so the plinth sits visibly above
+    terrain rather than z-fighting on flat ground."""
     me = bpy.data.meshes.new(name)
-    hx, hy = size_x * 0.5, size_y * 0.5
-    z = 0.05
-    me.from_pydata(
-        [(-hx, -hy, z), (hx, -hy, z), (hx, hy, z), (-hx, hy, z)],
-        [],
-        [(0, 1, 2, 3)],
-    )
+    x_pos, x_is_street = _block_aligned_axis_positions(blocks_x, block_size, street_width)
+    y_pos, y_is_street = _block_aligned_axis_positions(blocks_y, block_size, street_width)
+    nx = len(x_pos)
+    ny = len(y_pos)
+    base_lift = 0.05
+
+    verts: list[tuple[float, float, float]] = []
+    vert_positions_xy: list[tuple[float, float]] = []
+    for j in range(ny):
+        for i in range(nx):
+            idx = j * nx + i
+            if vertex_z is not None and idx < len(vertex_z):
+                z = float(vertex_z[idx]) + base_lift
+            else:
+                z = base_lift
+            verts.append((x_pos[i], y_pos[j], z))
+            vert_positions_xy.append((x_pos[i], y_pos[j]))
+
+    faces: list[tuple[int, ...]] = []
+    mat_idx: list[int] = []
+    for j in range(ny - 1):
+        for i in range(nx - 1):
+            a = j * nx + i
+            b = a + 1
+            c = a + nx + 1
+            d = a + nx
+            faces.append((a, b, c, d))
+            is_road = x_is_street[i] or y_is_street[j]
+            mat_idx.append(
+                DOWNTOWN_PLINTH_ROAD_SLOT if is_road else DOWNTOWN_PLINTH_SIDEWALK_SLOT
+            )
+
+    me.from_pydata(verts, [], faces)
     me.update(calc_edges=True)
     me.shade_flat()
-    return me
+    for fi, slot in enumerate(mat_idx):
+        me.polygons[fi].material_index = slot
+    return me, vert_positions_xy
+
+
+def _terrain_raycast_batch(
+    scene,
+    points_xy: list[tuple[float, float]],
+) -> list[tuple[float, bool]]:
+    """Cast straight down at every (x_world, y_world) and return
+    ``[(z_world, hit)]``. Casts against *only* the largest visible
+    ``kind="track"`` mesh (the terrain), not against the whole scene
+    — so existing downtown buildings, water previews, gates, racer
+    previews, and the like never catch the cast.
+
+    Why a per-mesh cast rather than ``scene.ray_cast``: even with
+    every other mesh hide_viewport-toggled, ``scene.ray_cast`` was
+    still picking up sibling-downtown plinths in multi-city scenes.
+    Casting against a single named mesh sidesteps that whole class
+    of "what's in the depsgraph right now" question and is plenty
+    fast — a single BVH walk per point on a ~37 k vert plane.
+
+    Returns ``(0.0, False)`` for any point that doesn't hit the
+    terrain — typically points outside the terrain tile, or scenes
+    with no terrain mesh present yet."""
+    target = _largest_terrain_mesh()
+    if target is None:
+        return [(0.0, False)] * len(points_xy)
+    # Force BVH freshness by casting against the *evaluated* mesh from
+    # the depsgraph, not the source object. Without this, a freshly
+    # built / edited terrain mesh hands ``obj.ray_cast`` a stale BVH
+    # that misses every cast or returns the pre-edit z plane —
+    # symptom: a downtown built in the same script run that builds the
+    # terrain ends up with plinth verts at unrelated z values.
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    eval_obj = target.evaluated_get(depsgraph)
+    mw = eval_obj.matrix_world
+    mw_inv = mw.inverted_safe()
+    # Local-space cast direction. Terrain matrix is normally identity
+    # but we transform anyway in case the user's tilted the terrain.
+    down_local = mw_inv.to_3x3() @ mathutils.Vector((0.0, 0.0, -1.0))
+    results: list[tuple[float, bool]] = []
+    for x, y in points_xy:
+        origin_world = mathutils.Vector((float(x), float(y), 10000.0))
+        origin_local = mw_inv @ origin_world
+        hit, loc_local, *_ = eval_obj.ray_cast(origin_local, down_local)
+        if hit:
+            results.append((float((mw @ loc_local).z), True))
+        else:
+            results.append((0.0, False))
+    return results
 
 
 def _hash_cell(seed: int, gx: int, gy: int) -> float:
@@ -3275,9 +3451,25 @@ def _generate_downtown(
     height_min: float,
     height_max: float,
     seed: int,
+    conform_to_terrain: bool = True,
 ) -> tuple[bpy.types.Object, int]:
     """Spawn a parented downtown block. Returns (parent_empty,
-    n_buildings_built)."""
+    n_buildings_built).
+
+    With ``conform_to_terrain=True`` (default), each building's base is
+    raycast onto whatever terrain mesh the scene contains and its
+    bottom face is sunk to the lowest of its four footprint corners —
+    so a building on a slope reads as stepping into the hill instead of
+    floating on stilts. The plinth is also subdivided + per-vertex
+    conformed so the streets follow the grade between buildings. With
+    ``False`` (legacy), everything sits at z=0 and the plinth is a
+    single quad.
+
+    The parent's location.z still places the entire downtown vertically
+    — terrain conformance is applied as an offset on top of that. So
+    parking the empty above sea level + conforming gives you a city
+    sitting on rolling hills; setting parent.z = 0 in a flat scene
+    collapses to the legacy look."""
     name = _next_downtown_object_name()
     parent = bpy.data.objects.new(name, None)
     parent.empty_display_type = "CUBE"
@@ -3288,6 +3480,7 @@ def _generate_downtown(
     parent["blocks_y"] = int(blocks_y)
     parent["block_size"] = float(block_size)
     parent["street_width"] = float(street_width)
+    parent["conform_to_terrain"] = bool(conform_to_terrain)
     parent.location = location
     parent.rotation_euler = (0.0, 0.0, float(rotation_z))
     scene.collection.objects.link(parent)
@@ -3297,39 +3490,24 @@ def _generate_downtown(
     span_x = blocks_x * pitch - street_width
     span_y = blocks_y * pitch - street_width
 
-    # Single plinth covering the whole downtown — streets + sidewalks
-    # read as one continuous flat surface beneath the buildings, which
-    # is plenty for a placeholder.
-    plinth_mesh = _build_downtown_plinth_mesh(
-        f"{name}_plinth_data", size_x=span_x, size_y=span_y
-    )
-    plinth_obj = bpy.data.objects.new(f"{name}_plinth", plinth_mesh)
-    plinth_obj.parent = parent
-    plinth_obj.matrix_parent_inverse.identity()
-    plinth_obj["kind"] = "track"
-    plinth_obj.data.materials.append(_ensure_downtown_street_material())
-    scene.collection.objects.link(plinth_obj)
-
-    # Per-block buildings. Each block can carry 1 or 4 buildings (split
-    # into a 2×2 micro-grid when its hash favours density). A small
-    # fraction of blocks are empty plazas / parks so the silhouette
-    # isn't a uniform forest of towers.
-    n_buildings = 0
-    half_pitch = pitch * 0.5
+    # Pre-compute every (gx, gy) cell's layout decision so the same RNG
+    # rolls drive both the building geometry below AND the (x, y) point
+    # set we batch-raycast for the conform pass. Keeps geometry +
+    # raycasts in lock-step without re-rolling hashes.
+    cell_specs: list[dict] = []
     for gx in range(blocks_x):
         for gy in range(blocks_y):
-            # Block centre in parent-local XY.
             cx = -span_x * 0.5 + gx * pitch + block_size * 0.5
             cy = -span_y * 0.5 + gy * pitch + block_size * 0.5
             r0 = _hash_cell(seed, gx, gy)
-            # 12% empty plaza so the silhouette breathes.
             if r0 < 0.12:
+                # Empty plaza — record so we can skip building emission.
+                cell_specs.append({"gx": gx, "gy": gy, "skip": True})
                 continue
-            # 35% chance to subdivide into a 2×2 of smaller buildings.
-            sub = r0 < 0.47
-            if sub:
+            if r0 < 0.47:
                 quarter = block_size * 0.5
                 half_q = quarter * 0.5
+                quads = []
                 for dx, dy, idx in (
                     (-half_q, -half_q, 0), (half_q, -half_q, 1),
                     (half_q, half_q, 2), (-half_q, half_q, 3),
@@ -3341,23 +3519,9 @@ def _generate_downtown(
                         quarter * (0.78 + 0.18 * rv),
                         quarter * (0.78 + 0.18 * (1.0 - rv)),
                     )
-                    bname = f"{name}_b{gx:02d}_{gy:02d}_{idx}"
-                    me = _build_downtown_building_mesh(
-                        f"{bname}_data",
-                        footprint=fp,
-                        height=h,
-                        has_setback=rh > 0.6,
-                    )
-                    obj = bpy.data.objects.new(bname, me)
-                    obj.parent = parent
-                    obj.matrix_parent_inverse.identity()
-                    obj.location = (cx + dx, cy + dy, 0.0)
-                    obj["kind"] = "track"
-                    obj.data.materials.append(
-                        _ensure_downtown_building_material(int(rh * 60) + idx)
-                    )
-                    scene.collection.objects.link(obj)
-                    n_buildings += 1
+                    quads.append({"local_xy": (cx + dx, cy + dy), "footprint": fp,
+                                  "height": h, "rh": rh, "idx": idx})
+                cell_specs.append({"gx": gx, "gy": gy, "skip": False, "sub": True, "quads": quads})
             else:
                 rh = _hash_cell(seed * 17, gx, gy)
                 rv = _hash_cell(seed * 23, gx, gy)
@@ -3366,23 +3530,180 @@ def _generate_downtown(
                     block_size * (0.82 + 0.14 * rv),
                     block_size * (0.82 + 0.14 * (1.0 - rv)),
                 )
-                bname = f"{name}_b{gx:02d}_{gy:02d}"
+                cell_specs.append({"gx": gx, "gy": gy, "skip": False, "sub": False,
+                                   "local_xy": (cx, cy), "footprint": fp,
+                                   "height": h, "rh": rh})
+
+    # Helper to convert a parent-local (x, y) into world (x, y). We
+    # compute the 2D rotate+translate manually from parent.location +
+    # parent.rotation_euler.z rather than using ``parent.matrix_world``
+    # because the latter is identity-at-read until a view_layer.update()
+    # has fired — and we're called inside the same script step that
+    # just set parent.location, so the matrix is stale. Manual math is
+    # faster and bulletproof against that timing trap.
+    p_x = float(parent.location.x)
+    p_y = float(parent.location.y)
+    p_yaw = float(parent.rotation_euler.z)
+    cos_y = math.cos(p_yaw)
+    sin_y = math.sin(p_yaw)
+
+    def _local_xy_to_world(lx: float, ly: float) -> tuple[float, float]:
+        return (p_x + lx * cos_y - ly * sin_y,
+                p_y + lx * sin_y + ly * cos_y)
+
+    # Pre-compute the block-aligned plinth axis positions so we can
+    # raycast them in the same batch as building corners. With the
+    # same axis layout used by ``_build_downtown_plinth_mesh`` below,
+    # the per-vertex Z values from the batch slot back into the mesh
+    # build in one shot.
+    plinth_x_pos, _ = _block_aligned_axis_positions(blocks_x, block_size, street_width)
+    plinth_y_pos, _ = _block_aligned_axis_positions(blocks_y, block_size, street_width)
+
+    # Build the (x, y) world-space point list we need to raycast: every
+    # plinth grid vertex + four corners of every building footprint.
+    # We track index ranges so we can demux the results back into
+    # plinth-vert and per-building lookups.
+    raycast_points: list[tuple[float, float]] = []
+    plinth_idx_range: tuple[int, int] = (0, 0)
+    if conform_to_terrain:
+        for ly in plinth_y_pos:
+            for lx in plinth_x_pos:
+                raycast_points.append(_local_xy_to_world(lx, ly))
+        plinth_idx_range = (0, len(raycast_points))
+
+    # Track each building's slot in the raycast results so we can read
+    # back its 4 corner Zs after the batch.
+    building_corner_slots: list[tuple[int, int]] = []  # (start_idx, count=4)
+    if conform_to_terrain:
+        for cell in cell_specs:
+            if cell["skip"]:
+                building_corner_slots.append((-1, 0))
+                continue
+            if cell["sub"]:
+                slots: list[int] = []
+                for q in cell["quads"]:
+                    slots.append(len(raycast_points))
+                    cx, cy = q["local_xy"]
+                    fx, fy = q["footprint"]
+                    hx, hy = fx * 0.5, fy * 0.5
+                    for ox, oy in ((-hx, -hy), (hx, -hy), (hx, hy), (-hx, hy)):
+                        raycast_points.append(_local_xy_to_world(cx + ox, cy + oy))
+                cell["_slots"] = slots
+            else:
+                cell["_slot"] = len(raycast_points)
+                cx, cy = cell["local_xy"]
+                fx, fy = cell["footprint"]
+                hx, hy = fx * 0.5, fy * 0.5
+                for ox, oy in ((-hx, -hy), (hx, -hy), (hx, hy), (-hx, hy)):
+                    raycast_points.append(_local_xy_to_world(cx + ox, cy + oy))
+
+    # One batched raycast for the whole downtown.
+    casts = _terrain_raycast_batch(scene, raycast_points) if raycast_points else []
+
+    # Plinth: subdivided + per-vertex Z-conformed when conforming, single
+    # quad otherwise (the legacy flat behaviour).
+    plinth_vertex_z: list[float] | None = None
+    if conform_to_terrain:
+        parent_z = float(parent.location.z)
+        plinth_vertex_z = []
+        for k in range(plinth_idx_range[0], plinth_idx_range[1]):
+            world_z, hit = casts[k]
+            # Convert world Z back to parent-local Z. Parent has only
+            # translation + Z-rotation so Z-axis transform is just a
+            # subtract of parent.location.z.
+            plinth_vertex_z.append((world_z if hit else 0.0) - parent_z)
+
+    plinth_mesh, _ = _build_downtown_plinth_mesh(
+        f"{name}_plinth_data",
+        blocks_x=blocks_x,
+        blocks_y=blocks_y,
+        block_size=block_size,
+        street_width=street_width,
+        vertex_z=plinth_vertex_z,
+    )
+    plinth_obj = bpy.data.objects.new(f"{name}_plinth", plinth_mesh)
+    plinth_obj.parent = parent
+    plinth_obj.matrix_parent_inverse.identity()
+    plinth_obj["kind"] = "track"
+    # Slot 0 = sidewalk, slot 1 = road — matches the material_index
+    # assignment in _build_downtown_plinth_mesh.
+    plinth_obj.data.materials.append(_ensure_downtown_sidewalk_material())
+    plinth_obj.data.materials.append(_ensure_downtown_road_material())
+    scene.collection.objects.link(plinth_obj)
+
+    def _seat_for_corners(slot: int) -> tuple[float, float]:
+        """Return ``(local_base_z, extra_depth)`` for the 4 corners
+        starting at ``slot``. Base sits at the highest corner so the
+        building's exposed silhouette starts at the uphill grade;
+        extra_depth sinks the bottom face below the lowest corner so
+        the downhill side is buried in the slope."""
+        if slot < 0:
+            return 0.0, 0.0
+        zs = [casts[slot + i][0] for i in range(4) if casts[slot + i][1]]
+        if not zs:
+            return -float(parent.location.z), 0.0  # land at world Z=0
+        lowest = min(zs)
+        highest = max(zs)
+        local_base = highest - float(parent.location.z)
+        extra = highest - lowest + 0.5  # 0.5m safety into terrain
+        return local_base, max(extra, 0.0)
+
+    # Per-block buildings. Same loop structure as before, but each
+    # building's location.z + mesh extra_depth come from the raycast
+    # results when conforming.
+    n_buildings = 0
+    for cell in cell_specs:
+        if cell["skip"]:
+            continue
+        gx, gy = cell["gx"], cell["gy"]
+        if cell["sub"]:
+            slots = cell.get("_slots", [-1] * 4)
+            for q, slot in zip(cell["quads"], slots):
+                local_base = 0.0
+                extra = 0.0
+                if conform_to_terrain:
+                    local_base, extra = _seat_for_corners(slot)
+                bname = f"{name}_b{gx:02d}_{gy:02d}_{q['idx']}"
                 me = _build_downtown_building_mesh(
                     f"{bname}_data",
-                    footprint=fp,
-                    height=h,
-                    has_setback=rh > 0.45,
+                    footprint=q["footprint"],
+                    height=q["height"],
+                    has_setback=q["rh"] > 0.6,
+                    extra_depth=extra,
                 )
                 obj = bpy.data.objects.new(bname, me)
                 obj.parent = parent
                 obj.matrix_parent_inverse.identity()
-                obj.location = (cx, cy, 0.0)
+                obj.location = (q["local_xy"][0], q["local_xy"][1], local_base)
                 obj["kind"] = "track"
                 obj.data.materials.append(
-                    _ensure_downtown_building_material(int(rh * 60))
+                    _ensure_downtown_building_material(int(q["rh"] * 60) + q["idx"])
                 )
                 scene.collection.objects.link(obj)
                 n_buildings += 1
+        else:
+            local_base = 0.0
+            extra = 0.0
+            if conform_to_terrain:
+                local_base, extra = _seat_for_corners(cell.get("_slot", -1))
+            bname = f"{name}_b{gx:02d}_{gy:02d}"
+            me = _build_downtown_building_mesh(
+                f"{bname}_data",
+                footprint=cell["footprint"],
+                height=cell["height"],
+                has_setback=cell["rh"] > 0.45,
+                extra_depth=extra,
+            )
+            obj = bpy.data.objects.new(bname, me)
+            obj.parent = parent
+            obj.matrix_parent_inverse.identity()
+            obj.location = (cell["local_xy"][0], cell["local_xy"][1], local_base)
+            obj["kind"] = "track"
+            obj.data.materials.append(
+                _ensure_downtown_building_material(int(cell["rh"] * 60))
+            )
+            scene.collection.objects.link(obj)
+            n_buildings += 1
 
     return parent, n_buildings
 
@@ -3423,6 +3744,7 @@ class HOVERBIKE_OT_add_downtown(Operator):
         h_min = float(getattr(scene, "hoverbike_downtown_height_min", 18.0))
         h_max = float(getattr(scene, "hoverbike_downtown_height_max", 80.0))
         seed = int(getattr(scene, "hoverbike_downtown_seed", 1))
+        conform = bool(getattr(scene, "hoverbike_downtown_conform", True))
         if bx <= 0 or by <= 0 or block_size <= 0 or h_max <= h_min:
             self.report({"ERROR"}, "Invalid downtown dimensions — fix grid / size / height range first.")
             return {"CANCELLED"}
@@ -3439,6 +3761,7 @@ class HOVERBIKE_OT_add_downtown(Operator):
             height_min=h_min,
             height_max=h_max,
             seed=seed,
+            conform_to_terrain=conform,
         )
 
         # Select the parent so the next G/R/S keystroke moves the whole
@@ -6386,6 +6709,7 @@ class HOVERBIKE_PT_track_downtown(_HoverbikeTrackSubPanelBase, Panel):
         row.prop(scene, "hoverbike_downtown_height_min", text="Min h")
         row.prop(scene, "hoverbike_downtown_height_max", text="Max h")
         layout.prop(scene, "hoverbike_downtown_seed", text="Seed")
+        layout.prop(scene, "hoverbike_downtown_conform", text="Conform to terrain")
         layout.operator("hoverbike.add_downtown", icon="MESH_CUBE")
         layout.label(text="Spawns at the 3D cursor.", icon="INFO")
 
@@ -7069,6 +7393,11 @@ def register() -> None:
         description="Layout seed. Same seed + dimensions produces identical city blocks.",
         default=1, min=0, max=10000,
     )
+    bpy.types.Scene.hoverbike_downtown_conform = BoolProperty(
+        name="Conform to terrain",
+        description="Raycast each building onto the terrain mesh; sink the bottom face below the lowest footprint corner so a building on a slope steps into the hill instead of floating on stilts. Plinth subdivides + per-vertex follows the grade. Off = legacy flat behaviour.",
+        default=True,
+    )
 
     # Extra terrain-shader knobs (state-of-the-art coloration pass).
     # See terrain-shader.ts for the matching uniforms.
@@ -7174,7 +7503,7 @@ def unregister() -> None:
         "hoverbike_downtown_blocks_x", "hoverbike_downtown_blocks_y",
         "hoverbike_downtown_block_size", "hoverbike_downtown_street_width",
         "hoverbike_downtown_height_min", "hoverbike_downtown_height_max",
-        "hoverbike_downtown_seed",
+        "hoverbike_downtown_seed", "hoverbike_downtown_conform",
         "hoverbike_shader_warp_strength", "hoverbike_shader_macro_scale",
         "hoverbike_shader_micro_scale", "hoverbike_shader_alt_jitter",
         "hoverbike_shader_scree_band", "hoverbike_shader_saturation",
