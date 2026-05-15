@@ -4827,6 +4827,8 @@ TUNNEL_CURVE_NAME = "tunnel_curve_main"
 TUNNEL_PARENT_PREFIX = "tunnel_"
 TUNNEL_CUTTERS_COLLECTION = "_hoverbike_tunnel_cutters"
 TUNNEL_BOOLEAN_MOD_NAME = "HV_Tunnel_Cut"
+TUNNEL_SOLIDIFY_MOD_NAME = "HV_Tunnel_Solidify"
+TUNNEL_SOLIDIFY_THICKNESS = 200.0  # m — terrain extruded down by this much
 TUNNEL_MATERIAL_NAME = "mat_track_tunnel"
 
 
@@ -5079,13 +5081,41 @@ def _next_tunnel_index() -> int:
 
 
 def _ensure_terrain_tunnel_boolean(terrain: bpy.types.Object, cutters: bpy.types.Collection) -> None:
-    """Make sure ``terrain`` has a single Boolean DIFFERENCE modifier
-    operating against the cutters collection. Idempotent — subsequent
-    calls reuse the existing modifier.
+    """Make sure ``terrain`` has a Solidify+Boolean modifier pair so
+    cutters can carve a real tube through it.
 
-    The modifier is named ``HV_Tunnel_Cut`` so authors can spot + tune
-    it (Exact vs Fast solver, self-intersection, etc.) in the
-    Properties panel without breaking the addon's bookkeeping."""
+    Why Solidify first: terrain meshes are 2-D sheets (a heightfield
+    plane). Boolean DIFFERENCE on a sheet by a 3-D cylinder only
+    intersects the sheet where the cylinder *crosses* it — i.e. at
+    the mouth rim — not through the volume between the surface and
+    the tunnel axis. The visible result is a small ring at each mouth
+    with no actual tube through the mountain.
+
+    With a Solidify pre-pass (offset=-1, thickness=200 m, downward
+    extrusion only), the terrain becomes a thick crust 200 m deep.
+    The Boolean then carves the cylinder volume out of that crust,
+    producing the expected cylindrical tube through the hill that
+    you can see / fly through.
+
+    Both modifiers are named (``HV_Tunnel_Solidify``,
+    ``HV_Tunnel_Cut``) so authors can spot + tune them in the
+    Properties panel without breaking the addon's bookkeeping. The
+    modifier order matters: Solidify must come *before* Boolean so
+    the boolean operates on the thickened mesh."""
+    sol = terrain.modifiers.get(TUNNEL_SOLIDIFY_MOD_NAME)
+    if sol is None:
+        sol = terrain.modifiers.new(name=TUNNEL_SOLIDIFY_MOD_NAME, type="SOLIDIFY")
+    sol.thickness = TUNNEL_SOLIDIFY_THICKNESS
+    # offset=-1 extrudes only on the *negative-normal* side. With the
+    # heightfield's normals pointing up (the standard Blender plane
+    # orientation), this means downward — the crust extends from the
+    # surface down by `thickness`. The original surface stays put;
+    # nothing visible changes from above.
+    sol.offset = -1.0
+    # Disable rim filling so the open edges of the original sheet
+    # don't seal closed (would otherwise create a giant box).
+    sol.use_rim = False
+
     mod = terrain.modifiers.get(TUNNEL_BOOLEAN_MOD_NAME)
     if mod is None:
         mod = terrain.modifiers.new(name=TUNNEL_BOOLEAN_MOD_NAME, type="BOOLEAN")
@@ -5096,6 +5126,29 @@ def _ensure_terrain_tunnel_boolean(terrain: bpy.types.Object, cutters: bpy.types
     # is meaningfully faster but sometimes misses overlapping faces at
     # the tunnel mouth. EXACT it is.
     mod.solver = "EXACT"
+
+    # Belt-and-braces: ensure modifier order is Solidify → Boolean.
+    # If the user reordered them in the Properties panel, fix it.
+    names = [m.name for m in terrain.modifiers]
+    sol_idx = names.index(TUNNEL_SOLIDIFY_MOD_NAME)
+    cut_idx = names.index(TUNNEL_BOOLEAN_MOD_NAME)
+    if sol_idx > cut_idx:
+        # Move the Boolean down past Solidify by re-creating it last.
+        # bpy.ops.object.modifier_move_to_index needs the object to be
+        # active; the no-ops bail-out path above means we only hit this
+        # branch on the rare reorder case, so the active-object dance
+        # is acceptable.
+        prev_active = bpy.context.view_layer.objects.active
+        bpy.context.view_layer.objects.active = terrain
+        try:
+            bpy.ops.object.modifier_move_to_index(
+                modifier=TUNNEL_BOOLEAN_MOD_NAME,
+                index=len(terrain.modifiers) - 1,
+            )
+        except RuntimeError:
+            pass
+        finally:
+            bpy.context.view_layer.objects.active = prev_active
 
 
 def _add_tunnel_starter_curve(scene) -> bpy.types.Object:
