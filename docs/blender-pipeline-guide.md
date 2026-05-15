@@ -248,6 +248,32 @@ authoring tools, top to bottom.
   terrain edit, snap the spline back onto the new surface and the
   gates follow. Preview collections (`_hoverbike_*_preview`) are
   hidden during the cast so gizmos can't catch the ray.
+- **Cursor → Spline** moves the 3D cursor to a parameter `t` ∈ [0,1]
+  along the racing line, with rotation aligned to the tangent.
+- **Snap Starts to Spline** repositions `start_00` / `start_01` on
+  the racing line at parameter `t`, lined up perpendicular to the
+  tangent at the configured *Start gap*.
+- **Auto-place Ramps** drops tangent-aligned ramps at every
+  curvature peak above `|κ|`. Same detector that powers the turn-
+  indicator preview, so ramps land at the same hand-of-god corners
+  the chevrons mark.
+
+### Placement helper
+
+A persistent, curve-constrained empty (`placement_helper`) that the
+author parks at any (`t`, lateral offset) and uses as a placement
+anchor for ramps, boost pads, props, anything else that needs to
+land on or beside the racing line. Sliders re-pose live; the helper
+also follows curve edits via the existing debounce timer.
+
+- *t* (0..1) — parameter along the source curve.
+- *Offset (m)* (-200..+200) — lateral offset perpendicular to the
+  tangent in XY. Positive = right of the tangent, matches the
+  start-grid convention.
+- **Add Placement Helper** spawns the singleton (or re-poses it).
+- **Cursor → Helper** snaps the 3D cursor to the helper's transform.
+- **Add Ramp at Helper** / **Add Boost at Helper** drop the matching
+  asset at the helper's pose without needing a manual cursor snap.
 
 ### Road tool
 
@@ -296,6 +322,54 @@ panel to bake the modifier into the source mesh before deforming.
 This is one-way — you lose parametric tunability of the procedural
 template once it's applied, so save the .blend first.
 
+### Tunnels
+
+Drill a tunnel through any terrain mesh. A tunnel is three things in
+lockstep:
+
+- `tunnel_curve_main` — user-edited Bezier through the hill.
+- `tunnel_NN_cutter` — closed manifold cylinder swept along the
+  curve, hidden inside the dedicated `_hoverbike_tunnel_cutters`
+  collection.
+- `tunnel_NN_interior` — inward-facing concrete liner along the
+  same curve, `kind="track"` so the runtime trimesh collider catches
+  the bike.
+
+The terrain carries a single Boolean DIFFERENCE modifier
+(`HV_Tunnel_Cut`) whose operand is the cutters *collection*, so a
+second tunnel just drops another cutter in and the existing modifier
+picks it up. `export_apply=True` on the glTF exporter bakes the cut
+into the GLB so the runtime sees actually-carved geometry — the game
+side needs no special tunnel handling, just the standard collider
+attach.
+
+Workflow:
+1. **Add Tunnel Starter Curve** drops `tunnel_curve_main` near the
+   scene origin. Tab into edit mode, drag handles into / out of a
+   hillside. For a clean mouth, place endpoint anchors slightly
+   *below* the terrain surface and middle anchors well below the
+   peak — the cylinder cap should land buried in air past the
+   hillside (use *End extend* to push it further out).
+2. Set dimensions:
+   - *Radius* (8 m) — interior radius. 16 m diameter is comfortably
+     arcade-sized.
+   - *Wall* (1 m) — extra radius on the cutter beyond the interior,
+     i.e. the apparent thickness of the concrete liner at the mouth.
+   - *Samples* (32) — arc-length subdivisions of the curve.
+   - *Sides* (14) — radial segments per ring.
+   - *End extend* (4 m) — distance the cutter pushes past the curve
+     endpoints along the tangent. Ensures the cap clears the
+     hillside surface.
+3. **Build Tunnel** samples the curve, emits the cutter +
+   interior shell, and ensures the terrain's Boolean modifier
+   targets the cutters collection. Re-builds pick the next free
+   `tunnel_NN` slot — to author multiple tunnels, manually rename
+   `tunnel_curve_main` between builds.
+
+`tracks-src/template-tunnel-island.blend` is the reference scene —
+three mountains with a tunnel through each, AI-completable racing
+line that threads all three.
+
 ### Ramp tool
 
 Drop a parametric stunt-ramp wedge at the 3D cursor, tagged
@@ -307,6 +381,38 @@ To align the ramp to the road's tangent at placement, set the 3D
 cursor's rotation around Z before clicking **Add Ramp** (or move /
 rotate after placement with G / R). Each ramp gets a fresh
 `ramp_NN` name so repeated drops don't stomp prior ones.
+
+### Downtown
+
+Drops a procedural city block at the 3D cursor — a parented
+`downtown_NN` empty + a flat plinth + a grid of placeholder
+building boxes. Buildings carry `kind="track"` so the runtime
+trimesh-collider attaches; the bike can rake through streets and
+slap into towers.
+
+Each building's four footprint corners are raycast onto the largest
+visible `kind="track"` mesh. The base seats at the **highest**
+corner; the mesh extends a downhill skirt below z=0 to bury the low
+side in the slope. Result: SF-style "buildings step into the hill"
+look, no floating stilts.
+
+The plinth is a block-aligned subdivision grid with two material
+slots — `mat_track_downtown_sidewalk` (light concrete, slot 0)
+under building lots, `mat_track_downtown_road` (dark asphalt, slot
+1) on the inter-block strips. Per-face material indices, single
+mesh, no z-fight.
+
+Knobs:
+- *X / Y* (6 / 6) — block grid extent.
+- *Block / Street* (30 / 8 m) — block edge length + inter-block gap.
+- *Min h / Max h* (18 / 80 m) — per-building height range.
+- *Seed* — deterministic layout.
+- *Conform to terrain* (default on) — turn off for legacy flat
+  behaviour (single-quad plinth, all buildings at z=0).
+
+`tracks-src/template-downtown.blend` is the reference scene —
+Miami-flat valley, Nob-Hill-style 56 m grade, Telegraph-Ridge
+78 m grade with 31 m building skirts.
 
 ### Heightmap import
 

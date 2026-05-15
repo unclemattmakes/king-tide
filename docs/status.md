@@ -31,6 +31,56 @@ This doc captures the build's current state, controls, known issues, and next st
 - Spec → GLB asset pipeline (M9.27, flipped to per-variant in M9.39): `specs/{bikes,props,tracks}/*.json` + `tools/blender/build_*.py` produce `public/assets/<cat>/*.glb` and `public/assets/manifest.json` via `pnpm gen:all`. Bike-loader instantiates the player + AI bike GLBs at boot; prop-loader pre-fetches asset-prop GLBs referenced by track JSON. **Bikes:** one `bikes-src/<id>.blend` per variant — open it in Blender, edit the variant directly (no shared kit, no propagation), click *Hoverbike → Export Bike to Game*, the GLB updates and the runtime picks it up on next reload. The same addon serves tracks via *Export Track to Game* and switches mode based on the .blend's parent dir. Headless `pnpm gen:bikes` opens each .blend, overlays spec.appearance recolour + spec.physics extras, exports. **Tracks:** spec-driven `build_track.py` round-trips through `tracks-src/<id>.blend` and emits both the GLB and a starter gameplay JSON. **Bike viewer** (`?viewer=<bikeId>` or the addon's *Copy Viewer URL*) opens a turntable with OrbitControls, sockets/colliders surfaced as gizmos.
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
 
+### Authoring — tunnels, downtown, placement helper, terrain coloration (2026-05-15)
+- **Tunnel tool.** Bezier curve through a hill → *Build Tunnel* emits a
+  cylindrical cutter (hidden in `_hoverbike_tunnel_cutters`) plus an
+  inward-facing concrete-liner shell (`tunnel_NN_interior`,
+  `kind=track`). Terrain carries a single Boolean DIFFERENCE
+  modifier (`HV_Tunnel_Cut`) targeting the cutters *collection*, so
+  additional tunnels just drop another cutter in. `export_apply=True`
+  on the glTF exporter bakes the cut into the GLB — game side gets
+  carved-terrain geometry with zero new code. Reference scene:
+  `tracks-src/template-tunnel-island.blend` (mountainous island, three
+  tunnels, AI-completable circuit). Verified end-to-end: in-game AI
+  racer completes a full lap through all three tunnels.
+- **Downtown generator.** Parented `downtown_NN` city-block grid
+  (placeholder boxy mid-rise + plinth, deterministic seed). Each
+  building's footprint corners are raycast onto the largest visible
+  `kind=track` mesh; base seats at the highest corner with a
+  downhill-skirt extension that buries the low side in the slope —
+  SF "buildings step into the hill" look, no floating stilts. Plinth
+  is a block-aligned subdivision grid with two material slots
+  (sidewalk concrete + asphalt road), per-face indexed so streets
+  read as a darker grid against lighter sidewalks (single mesh, no
+  z-fight). Reference scene: `tracks-src/template-downtown.blend`
+  (Miami-flat valley + Nob-Hill 56 m grade + Telegraph-Ridge 78 m
+  grade, with up to 31 m building skirts on the steep side).
+- **Placement helper.** Singleton curve-constrained empty driven by
+  *t* + lateral offset sliders. Live re-poses on slider scrub *and*
+  on curve edits via the existing debounce timer. One-click
+  *Cursor → Helper* / *Add Ramp at Helper* / *Add Boost at Helper*
+  drops items at the helper's pose without having to snap the
+  cursor manually first.
+- **SOTA terrain coloration pass.** Runtime `mat_terrain_runtime`
+  shader gets domain-warped noise UVs, triplanar cliff sampling,
+  three-way slope split (flat → scree → cliff), stochastic altitude
+  jitter (kills perfectly level contour lines), and HSV-style
+  saturation tied to a low-freq macro biome noise. Seven new
+  `TerrainShaderConfig` fields plumbed end-to-end (Blender panel →
+  JSON → runtime), all no-op at default so existing tracks keep
+  their stock look until re-exported.
+- **Two latent bugs fixed during verification.** (1) Runtime terrain-
+  shader detection in `applyTerrainShaderToScene` was matching on
+  `kind === 'track'`, which over-broadly grabbed every collidable
+  mesh (downtown buildings, ramps, tunnel interiors, road slabs) and
+  replaced their authored materials with the slope/altitude ramp.
+  Narrowed to "name starts with `terrain` OR a material is
+  `mat_terrain_main`". (2) `derive_track_json` hardcoded the
+  exported checkpoint quaternion as identity, so every template-
+  authored gate faced three.js +Z (= south) and the AI couldn't
+  cross any east/west-running gate. Now reads `rotation_euler.z` and
+  emits the corresponding Y-axis quaternion.
+
 ### Authoring — Blender road / ramp / track tools (2026-05-13)
 - **Road tool.** Bezier curve → drivable road slab tagged `kind=track`
   with `mat_track_road` asphalt + optional F1-style red/white curbs
@@ -879,6 +929,7 @@ Open follow-ups:
 | M9.39 | Bike pipeline flip — one `bikes-src/<id>.blend` per variant (no shared kit, no propagation), Blender addon's *Export Bike to Game* writes GLB + starter spec JSON, addon panel auto-detects bike vs track mode by parent dir, headless `pnpm gen:bikes` opens each .blend and applies spec recolour overlays | ✅ |
 | M9.40 | Feel pass — lean limit bumped to ~20° with two-stage speed curve (lays over to ~30° at top speed), slope-projected gravity along bike forward (wave-down accelerates / wave-up decelerates), mobile virtual joystick Y inverted to match gamepad/flight-stick convention | ✅ |
 | M9.41 | Lean crank — `ROLL_LEAN_LIMIT` doubled to 40°, so the high-speed boost reaches ~60° at top speed (was ~30°). Bike now visibly lays over through the apex. | ✅ |
+| M9.42 | Authoring-tools cluster — placement helper (curve-constrained empty + one-click drops), downtown generator (block-aligned plinth with sidewalk/road two-material grid + per-building terrain-conform skirts), tunnel tool (Bezier curve → boolean cutter + interior shell, terrain modifier baked at export). SOTA terrain coloration pass (domain-warped noise, triplanar cliffs, scree band, stochastic altitude jitter). Two reference templates: `template-downtown.blend`, `template-tunnel-island.blend`. Latent fixes: terrain shader detection narrowed (was clobbering every kind=track mesh), `derive_track_json` now writes real checkpoint quaternions from `rotation_euler.z` (was hardcoded identity). | ✅ |
 | M10.1 | PRNG determinism — seeded mulberry32, two SimWorld with same seed produce same sequence | ✅ |
 | M10.2 | Determinism harness — `?determinism=1` gates the RAF loop; Playwright probe runs `simulateStep` direct and snapshots Rapier state for cross-load comparison | ✅ |
 | M10.4 | InputFrame wire format (10-byte LE record: tick u32, peerId u8, flags u8, throttle/steer/pitch i8/127, brake u8/255). First PartyKit relay room (`party/relay.ts`): peer-slot assignment, JSON control messages, binary frame broadcast. Opt-in via `?room=<id>` | ✅ |

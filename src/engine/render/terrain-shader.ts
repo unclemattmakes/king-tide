@@ -353,10 +353,21 @@ function hash2(p: Node<'vec2'>) {
 
 /**
  * Walk a loaded glTF scene and swap any mesh authored as terrain over to
- * the runtime terrain material. Detection: Blender custom prop
- * ``kind = "track"`` on the object (lands in ``mesh.userData.kind``) or
- * a glTF material named ``mat_terrain_main`` (the name the GN seed
- * stamps). Other meshes — gates, decoration, foliage — are left alone.
+ * the runtime terrain material. Detection runs in this order:
+ *
+ *   1. The mesh's name starts with ``terrain`` (covers ``terrain``,
+ *      ``terrain.001`` from Blender's auto-dedupe, ``terrain_main``,
+ *      etc.) — the canonical case for procedurally-seeded templates.
+ *   2. Any of the mesh's materials is named ``mat_terrain_main`` — the
+ *      legacy detection used by the GN seed pipeline.
+ *
+ * The match is intentionally *narrower* than just ``kind === 'track'``:
+ * downtown buildings, ramps, tunnel interiors, and the road slab also
+ * carry ``kind = "track"`` so they pick up trimesh colliders, and
+ * applying the slope/altitude shader to those would replace their
+ * authored materials with the abyssal-blue-to-volcanic terrain ramp.
+ * Anything that should look like terrain at runtime needs to either
+ * be named ``terrain*`` or use the ``mat_terrain_main`` material.
  *
  * Returns the number of materials replaced, for caller logging.
  */
@@ -369,10 +380,10 @@ export function applyTerrainShaderToScene(
     if (!(obj instanceof THREE.Mesh)) return
     const mat = obj.material as THREE.Material | THREE.Material[] | undefined
     if (!mat) return
-    const kind = obj.userData?.kind
     const isTerrainName = (m: THREE.Material) => m.name === 'mat_terrain_main'
+    const nameIsTerrain = typeof obj.name === 'string' && obj.name.startsWith('terrain')
     const isTerrain =
-      kind === 'track' || (Array.isArray(mat) ? mat.some(isTerrainName) : isTerrainName(mat))
+      nameIsTerrain || (Array.isArray(mat) ? mat.some(isTerrainName) : isTerrainName(mat))
     if (!isTerrain) return
     const next = buildTerrainMaterial(config)
     // Dispose the original glTF material to free its baseColor texture etc.
