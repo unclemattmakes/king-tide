@@ -169,6 +169,12 @@
       "specPath": "public/tracks/oval-loop.json"
     },
     {
+      "id": "template-tunnel-island",
+      "displayName": "Template Tunnel Island",
+      "url": "/assets/tracks/template-tunnel-island.glb",
+      "specPath": "public/tracks/template-tunnel-island.json"
+    },
+    {
       "id": "test-ring",
       "displayName": "Test Ring",
       "url": "/assets/tracks/test-ring.glb",
