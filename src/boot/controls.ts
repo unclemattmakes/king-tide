@@ -13,6 +13,7 @@
  * mutates when the finish screen shows.
  */
 
+import { installMenuGamepad, type MenuGamepad } from '@/engine/input/menu-gamepad'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { RBHandleStore } from '@/game/components'
@@ -81,6 +82,21 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
 
   const pauseMenuEl = document.getElementById('pause-menu')
   const pauseSubtitleEl = document.getElementById('pause-subtitle')
+  // Gamepad navigation for the pause menu — installed lazily on first
+  // open so we don't waste a rAF poller during the race itself. The
+  // poller's `isActive` gate parks it while the menu is closed.
+  // Start-button handling lives in the global watcher below so the
+  // toggle works from both states (closed → open, open → close).
+  let pauseGamepad: MenuGamepad | null = null
+  function ensurePauseGamepad(): MenuGamepad {
+    if (pauseGamepad) return pauseGamepad
+    pauseGamepad = installMenuGamepad({
+      container: () => pauseMenuEl,
+      isActive: () => pausedForMenu,
+      onBack: () => closePauseMenu(),
+    })
+    return pauseGamepad
+  }
   function openPauseMenu(): void {
     if (pausedForMenu) return
     if (raceHud.isLocked()) return // can't pause during countdown
@@ -96,6 +112,7 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     ;(document.getElementById('pause-resume') as HTMLButtonElement | null)?.focus({
       preventScroll: true,
     })
+    ensurePauseGamepad().focusFirst()
   }
   function closePauseMenu(): void {
     if (!pausedForMenu) return
@@ -240,6 +257,32 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
       e.preventDefault()
     }
   })
+
+  // Gamepad Start (button 9) mirrors keyboard Esc — toggles pause from
+  // anywhere in the race. We watch it globally rather than going through
+  // the pause-menu's gamepad nav so the binding works equally from open
+  // and closed states without a double-toggle race.
+  let prevStart = false
+  function watchGamepadStart(): void {
+    requestAnimationFrame(watchGamepadStart)
+    const pad = navigator.getGamepads?.()?.[0]
+    if (!pad) {
+      prevStart = false
+      return
+    }
+    const start = pad.buttons[9]?.pressed ?? false
+    if (start && !prevStart) {
+      if (finishShown) {
+        exitToMenu()
+      } else if (pausedForMenu) {
+        closePauseMenu()
+      } else {
+        openPauseMenu()
+      }
+    }
+    prevStart = start
+  }
+  requestAnimationFrame(watchGamepadStart)
 
   return {
     isPausedForMenu: () => pausedForMenu,

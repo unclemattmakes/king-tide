@@ -34,12 +34,12 @@ test.describe('cold-boot menu', () => {
     await page.locator('#title-start').click()
     await page.locator('.bc-mode-card[data-mode="sp"]').click()
     // Click the first track card (Lagoon Loop) — it's the procedural
-    // default and always present.
+    // default and always present. Clicking a card auto-advances to the
+    // bike screen; there's no separate confirm button.
     await page.locator('#sp-track-cards .bc-card').first().click()
-    await page.locator('#sp-track-next').click()
     // Pick the first bike (Cruiser comes first in BIKE_VARIANTS).
+    // Clicking a bike auto-commits the race URL.
     await page.locator('#sp-bike-cards .bc-card').first().click()
-    await page.locator('#sp-bike-go').click()
     await page.waitForLoadState('domcontentloaded')
     const url = page.url()
     expect(url).toContain('race=1')
