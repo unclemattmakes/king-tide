@@ -78,7 +78,8 @@ class HOVERBIKE_PT_panel(Panel):
         # of finding out at export time that the route is twice the
         # length they thought. Heavier stats (terrain extents, water
         # coverage) stay in the collapsible Track stats sub-panel.
-        from .track_meta import _spline_arc_length
+        from .track_meta import _spline_arc_length, _spline_obstacle_clearance
+        from ._legacy import _largest_terrain_mesh
 
         sp = bpy.data.objects.get("ai_spline_main")
         if sp is not None and sp.type == "CURVE":
@@ -97,6 +98,18 @@ class HOVERBIKE_PT_panel(Panel):
                     icon="DRIVER_DISTANCE",
                 )
                 stat_box.label(text=f"{n_gates} gates @ {gate_spacing:.0f} m spacing")
+                # Live obstacle-clearance count — same bbox math the
+                # lint runs, but surfaced passively so authors see
+                # building / pylon clips appear and disappear as they
+                # drag the spline. Bbox math only (no raycasts), so
+                # it's cheap enough to run on every panel redraw.
+                clip_hits = _spline_obstacle_clearance(sp, _largest_terrain_mesh())
+                if clip_hits:
+                    distinct = len({h[1] for h in clip_hits})
+                    stat_box.label(
+                        text=f"{len(clip_hits)} spline clip(s) into {distinct} obstacle(s)",
+                        icon="ERROR",
+                    )
                 # Comfort-band nudge — racing-feel sweet spot is roughly
                 # 30-180 s. Outside that the lap is either too punchy to
                 # read or long enough to drag.
