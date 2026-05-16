@@ -108,11 +108,17 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     applyStoredWaterTuning(waterMesh)
 
     const trackId = opts.trackId ?? 'lagoon'
-    const track = await loadTrackForBoot({ trackId, scene, phys, editMode: false })
+    const { track, terrainHeightmap } = await loadTrackForBoot({
+      trackId,
+      scene,
+      phys,
+      editMode: false,
+    })
     if (disposed) {
       disposeRenderer()
       return handle
     }
+    if (terrainHeightmap) waterMesh.setTerrainHeightmap(terrainHeightmap)
 
     const sky = createSkySystem({
       scene,

@@ -35,6 +35,7 @@ import {
   vec3,
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
+import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
 import {
   WAKE_BASE_WIDTH,
   WAKE_DISP_AMP,
@@ -94,6 +95,14 @@ export type WaterMesh = {
    * fixed teal-grey haze. RGB values are linear, in [0, 1].
    */
   setHorizonColor(r: number, g: number, b: number): void
+  /** Install the track's terrain heightmap. The shader uses it to attenuate
+   *  wave displacement in shallow water (so crests stop clipping through
+   *  the seabed and shoreline geometry) and to drive depth-driven surf
+   *  foam at the waterline. Call once per track load after the GLB /
+   *  procedural terrain is in place. The water shader's behaviour is
+   *  unchanged for tracks where no heightmap is installed (e.g. editor
+   *  mode) — wave amplitude stays at full strength everywhere. */
+  setTerrainHeightmap(heightmap: import('./terrain-heightmap').TerrainHeightmap): void
   /** Live-tunable knobs for the water debug menu. All setters apply
    *  immediately — no material rebuild, no reload. */
   debug: {
@@ -430,6 +439,47 @@ export function createWaterMesh(
   const meshOriginX = uniform(0)
   const meshOriginZ = uniform(0)
 
+  // Terrain heightmap (top-down max-Y) sampled by the vertex shader to
+  // attenuate wave displacement in shallow water and by the fragment shader
+  // to drive depth-driven surf foam at the waterline. A fixed-size
+  // placeholder filled with `DEEP_SENTINEL` is allocated at construction
+  // so the shader compiles + binds safely on every platform;
+  // `setTerrainHeightmap` copies the track's baked data into this same
+  // texture in-place (so the GPU-side texture binding never changes,
+  // avoiding driver re-allocation pitfalls). While disabled,
+  // `terrainEnabledUniform = 0` makes the shader treat the whole sea as
+  // bottomless — full waves, no surf foam.
+  const TERRAIN_HEIGHTMAP_RES = TERRAIN_HEIGHTMAP_RESOLUTION
+  const DEEP_HALF = THREE.DataUtils.toHalfFloat(-10000)
+  const heightmapData = new Uint16Array(TERRAIN_HEIGHTMAP_RES * TERRAIN_HEIGHTMAP_RES)
+  heightmapData.fill(DEEP_HALF)
+  const terrainHeightTex = new THREE.DataTexture(
+    heightmapData,
+    TERRAIN_HEIGHTMAP_RES,
+    TERRAIN_HEIGHTMAP_RES,
+    THREE.RedFormat,
+    THREE.HalfFloatType,
+  )
+  terrainHeightTex.name = 'water:terrainHeightmap'
+  terrainHeightTex.minFilter = THREE.LinearFilter
+  terrainHeightTex.magFilter = THREE.LinearFilter
+  terrainHeightTex.wrapS = THREE.ClampToEdgeWrapping
+  terrainHeightTex.wrapT = THREE.ClampToEdgeWrapping
+  terrainHeightTex.generateMipmaps = false
+  terrainHeightTex.needsUpdate = true
+  const terrainMinUniform = uniform(new THREE.Vector2(0, 0))
+  const terrainMaxUniform = uniform(new THREE.Vector2(1, 1))
+  const terrainEnabledUniform = uniform(0)
+  // Absolute water surface Y in world space. Mirrors `mesh.position.y`,
+  // which `main.ts` sets from `track.water.height`. Used to compute
+  // `waterDepth = waterY − terrainY` for shoaling + surf.
+  const waterYUniform = uniform(0)
+  // Wave amplitude reaches full strength by this many meters of depth and
+  // smoothly fades to zero at the waterline (depth = 0). 3 m is the user-
+  // selected "balanced" setting — reliably eliminates clipping while
+  // keeping waves visible in mid-shallows.
+  const SHOAL_FADE_DEPTH = 3.0
+
   // Bike slot uniform array. Each vec4 = (px, pz, vx, vz). Inactive slots
   // are parked at INACTIVE_FAR so their Gaussian + wake fall off to zero.
   // Velocity is stored UNWEIGHTED — `weights[i]` is the separate fade
@@ -719,9 +769,62 @@ export function createWaterMesh(
   // vertexHeight = vec3(y, dy/dx, dy/dz)
   // vertexDisp   = vec3(dx, dz, qSum)
   // vertexBike   = vec3(deltaY, ddelta/dx, ddelta/dz)
-  const totalHeight = vertexHeight.x.add(vertexBike.x)
-  const totalDydx = vertexHeight.y.add(vertexBike.y)
-  const totalDydz = vertexHeight.z.add(vertexBike.z)
+
+  // Terrain-driven shoaling. Sample the baked top-down terrain heightmap
+  // at this vertex's world XZ, compute vertical water depth, and fade the
+  // wave displacement smoothly to zero as depth → 0. This is the geometric
+  // fix for wave crests poking up through shoreline / seabed geometry:
+  // wherever the water plane sits above terrain, depth is positive and
+  // waves swing freely; wherever terrain rises into or above the water,
+  // depth pinches toward zero and the waves flatten out. Real shoaling
+  // physics actually steepens waves before breaking — that's modeled in
+  // the fragment surf foam below instead, where it shows up as visible
+  // breakers without risking geometry clipping.
+  //
+  // While `terrainEnabledUniform = 0` (no heightmap installed yet, e.g.
+  // editor mode) we force `effectiveTerrainY` to the deep sentinel so the
+  // shoal factor reads 1 and the original full-amplitude behaviour stays
+  // intact. Out-of-AABB sampling falls back the same way: water past the
+  // baked terrain area (open-horizon backdrop) reads as deep ocean.
+  const tMin = terrainMinUniform
+  const tMax = terrainMaxUniform
+  const terrainU = worldX.sub(tMin.x).div(tMax.x.sub(tMin.x))
+  const terrainV = worldZ.sub(tMin.y).div(tMax.y.sub(tMin.y))
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+  const terrainSample = texture(terrainHeightTex, vec2(terrainU, terrainV)) as any
+  const sampledTerrainY = terrainSample.r
+  const inU = float(1)
+    .sub(smoothstep(float(0.998), float(1.002), terrainU))
+    .mul(smoothstep(float(-0.002), float(0.002), terrainU))
+  const inV = float(1)
+    .sub(smoothstep(float(0.998), float(1.002), terrainV))
+    .mul(smoothstep(float(-0.002), float(0.002), terrainV))
+  const inBounds = inU.mul(inV).mul(terrainEnabledUniform)
+  const effectiveTerrainY = mix(float(-10000), sampledTerrainY, inBounds)
+  const vertexWaterDepth = waterYUniform.sub(effectiveTerrainY)
+  // Smooth fade from "no waves" at depth ≤ 0 to "full waves" at the chosen
+  // shoaling depth. Squared falloff on the inner side so the tail of
+  // attenuation reads as a gentle calming rather than an abrupt edge.
+  const shoalRaw = clamp(vertexWaterDepth.div(float(SHOAL_FADE_DEPTH)), float(0), float(1))
+  const shoalFactor = shoalRaw.mul(shoalRaw)
+
+  // Apply the shoaling attenuation to BOTH the ambient swell/chop and the
+  // horizontal Gerstner displacement. Wake (bikeSurfaceContrib) is left at
+  // full strength: the bike is always in deep-enough water to ride, and
+  // the wake is what gives the racing surface its sense of motion. Slopes
+  // get the same multiplier so the surface normal stays consistent with
+  // the attenuated height — without this, calm shallows would still
+  // shimmer with crest-strength sun glints.
+  const attenAmbient = vertexHeight.x.mul(shoalFactor)
+  const attenDydx = vertexHeight.y.mul(shoalFactor)
+  const attenDydz = vertexHeight.z.mul(shoalFactor)
+  const attenDispX = vertexDisp.x.mul(shoalFactor)
+  const attenDispZ = vertexDisp.y.mul(shoalFactor)
+  const attenQSum = vertexDisp.z.mul(shoalFactor)
+
+  const totalHeight = attenAmbient.add(vertexBike.x)
+  const totalDydx = attenDydx.add(vertexBike.y)
+  const totalDydz = attenDydz.add(vertexBike.z)
 
   // Foam accumulator (stateless, no render targets needed).
   //
@@ -778,27 +881,41 @@ export function createWaterMesh(
     }
     return maxFoam
   })
-  const vertexFoamAccum = isClassic ? float(0) : foamAccumulator(worldX, worldZ, tNode)
+  // Foam accumulator is attenuated by the same shoaling factor so the
+  // existing slope/fold-driven foam doesn't keep firing on flat shallows
+  // where wave geometry has been damped to zero.
+  const vertexFoamAccum = isClassic
+    ? float(0)
+    : foamAccumulator(worldX, worldZ, tNode).mul(shoalFactor)
 
   // positionNode is in mesh-local space; the mesh translation
   // (mesh.position.x/z = camera XZ) carries the vertex out to world.
   // Adding the Gerstner horizontal displacement to positionLocal.x/z applies
   // the pinching in mesh-local space — equivalent to world-space because
-  // the mesh transform is a pure translation.
+  // the mesh transform is a pure translation. Horizontal disp is shoaling-
+  // attenuated alongside the vertical, so shallow water also stops
+  // pinching laterally toward terrain.
   const positionNode = vec3(
-    positionLocal.x.add(vertexDisp.x),
+    positionLocal.x.add(attenDispX),
     totalHeight,
-    positionLocal.z.add(vertexDisp.y),
+    positionLocal.z.add(attenDispZ),
   )
 
   // Forward height + gradient + qSum + accumulated foam to fragment via
   // varyings. The framework marks these as vertex-stage and inserts the
-  // interpolated reads.
+  // interpolated reads. Extra varyings carry the depth + shoaling factor
+  // so the fragment surf foam can pulse with incoming wave crests.
   const heightFrag = varying(totalHeight)
   const dydx = varying(totalDydx)
   const dydz = varying(totalDydz)
-  const qSumFrag = varying(vertexDisp.z)
+  const qSumFrag = varying(attenQSum)
   const foamAccumFrag = varying(vertexFoamAccum)
+  const waterDepthFrag = varying(vertexWaterDepth)
+  // Pre-attenuation wave height — the height the swells/chops WOULD have
+  // had at this position if shoaling didn't shrink them. The fragment surf
+  // pulse reads this so breakers fire with the natural cadence of incoming
+  // crests even where geometry has gone flat.
+  const ambientHeightFrag = varying(vertexHeight.x)
 
   // Sub-Gerstner detail-normal cascades. Two world-XZ-aligned samples of the
   // procedural wave-detail texture at different tile sizes + scroll speeds,
@@ -1360,13 +1477,69 @@ export function createWaterMesh(
         return behindGate.mul(max(bandFoam, peakFoam)).mul(intensityModulator)
       })()
 
+  // Shoreline surf — pulsing breakers driven by true vertical water
+  // depth + incoming wave crests. Complements `intersectionFoam` above
+  // (which is screen-space depth, great visual cue at grazing angles) by
+  // adding geometrically-correct surf that fires per-pixel on the
+  // terrain-shoaled cells. The pulse is what makes the coastline feel
+  // alive: each ambient swell crest gets brighter as it sweeps into
+  // shallow water (real-world shoaling: waves slow + steepen + break),
+  // so the surf line breathes with the wave field instead of sitting as
+  // a static foam ring. Off in classic mode and when no heightmap is
+  // installed (waterDepthFrag stays ≈ +10000 → shoreBand ≈ 0).
+  const shorelineSurf = isClassic
+    ? float(0)
+    : (() => {
+        // Strong only in the last ~3 m of depth — same envelope as the
+        // vertex shoaling so foam and damped geometry align.
+        const SURF_BAND_DEPTH = 3.0
+        const shoreBand = float(1).sub(
+          smoothstep(float(0), float(SURF_BAND_DEPTH), waterDepthFrag),
+        )
+        // Crest signal: the un-attenuated ambient wave height. Positive
+        // values are wave faces marching toward shore — exactly what we
+        // want to "break" into surf. Using the pre-attenuation height
+        // means the pulse cadence stays locked to the natural wave
+        // period even where the geometry is being damped, so the surf
+        // visibly follows incoming crests rather than going static.
+        const crestSignal = clamp(ambientHeightFrag, float(0), float(1.5))
+        // Ramp from "no foam" at crest=0 to "full breaker" by ~0.6 m of
+        // crest height. Pow-1.6 biases the response: small crests
+        // produce faint surf; once a real crest arrives, the foam
+        // saturates fast — the characteristic "wave broke" punctuation.
+        const crestBreaker = pow(
+          smoothstep(float(0.05), float(0.6), crestSignal),
+          float(1.6),
+        )
+        // Persistent waterline lip — always-on faint band at the
+        // shoreline edge (≤ 0.5 m depth) so the visible boundary never
+        // disappears between crests, even on calm seas.
+        const waterlineBase = float(1)
+          .sub(smoothstep(float(0), float(0.5), waterDepthFrag))
+          .mul(float(0.35))
+        // Reuse the shared foam turbulence noise so this surf line breaks
+        // into the same lapping shapes as the wave / bike foam layers
+        // instead of reading as a clean band.
+        const turbulence = mix(float(0.7), float(1.15), foamNoiseSmooth)
+        // The pulsing breaker contribution: scoped to the shore band,
+        // pulsed by crest, lightly turbulated.
+        const breaker = shoreBand.mul(crestBreaker).mul(turbulence).mul(float(1.25))
+        return max(breaker, waterlineBase.mul(shoreBand))
+      })()
+
   // Intersection foam is full-opaque white where it fires (we want the
   // shoreline edge to read clearly against the water), so we max-combine
   // it with the (waveFoam + bikeFoam) sum rather than adding — additive
   // would create unnaturally over-bright zones at gate posts where the
   // ramp hits water. Final clamp raised from 0.95 to 1.0 so the bright
-  // peak at the water-line can reach pure white.
-  const foamMask = clamp(max(waveFoam.add(bikeFoam), intersectionFoam), float(0), float(1))
+  // peak at the water-line can reach pure white. The new `shorelineSurf`
+  // (depth-driven pulsing breakers) folds in via max so its bright
+  // crest-strike pulses can paint over the static intersection band.
+  const foamMask = clamp(
+    max(max(waveFoam.add(bikeFoam), intersectionFoam), shorelineSurf),
+    float(0),
+    float(1),
+  )
   // Slightly warmer / brighter than v2's (0.92, 0.96, 1.0). Real surf
   // foam reads near-white-with-a-warm-tilt under sunlight; the previous
   // cool tint was getting tugged blue by the deep-water albedo it sat on
@@ -1727,6 +1900,11 @@ export function createWaterMesh(
 
   function tick(impacts?: readonly BikeImpact[], originXZ?: { x: number; z: number }): void {
     tNode.value = field.time
+    // Sync the world water-surface Y from the mesh so the shoaling /
+    // surf shader reads the right "what's the sea level" value even
+    // when callers mutate `mesh.position.y` directly (e.g. tracks with
+    // a non-zero `water.height`). Cheap scalar copy per frame.
+    waterYUniform.value = mesh.position.y
     if (originXZ) {
       // Snap to integer-meter grid so the mesh doesn't crawl under high-
       // frequency camera jitter — keeps wave phase visually stable when
@@ -1761,12 +1939,47 @@ export function createWaterMesh(
     horizonHazeUniform.value.set(r, g, b)
   }
 
+  function setTerrainHeightmap(heightmap: import('./terrain-heightmap').TerrainHeightmap): void {
+    // Copy the baked heightmap data into the pre-allocated GPU texture
+    // so the binding the shader compiled against stays stable. Locked
+    // to TERRAIN_HEIGHTMAP_RES on both ends — `buildTerrainHeightmap`
+    // emits at the same resolution constant.
+    const src = heightmap.texture.image.data as Uint16Array
+    if (
+      heightmap.resolution !== TERRAIN_HEIGHTMAP_RES ||
+      src.length !== heightmapData.length
+    ) {
+      // Should never trip — both sides import the same constant — but
+      // log loudly if it does so the desync is visible rather than
+      // silently producing garbled depth.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[water] terrain heightmap resolution mismatch: got ${heightmap.resolution}, expected ${TERRAIN_HEIGHTMAP_RES}; ignoring`,
+      )
+      return
+    }
+    heightmapData.set(src)
+    terrainHeightTex.needsUpdate = true
+    terrainMinUniform.value.copy(heightmap.worldMin)
+    terrainMaxUniform.value.copy(heightmap.worldMax)
+    terrainEnabledUniform.value = 1
+  }
+
   function dispose() {
     geom.dispose()
     mat.dispose()
+    terrainHeightTex.dispose()
   }
 
-  return { mesh, tick, setSunDirection, setHorizonColor, debug, dispose }
+  return {
+    mesh,
+    tick,
+    setSunDirection,
+    setHorizonColor,
+    setTerrainHeightmap,
+    debug,
+    dispose,
+  }
 }
 
 /**
