@@ -47,9 +47,12 @@ bl_info = {
 # modules are added below, the same code is removed from ``_legacy``,
 # and the smoke test catches any drift in the total registered class
 # count.
-from . import _legacy
+from . import _legacy, water
 
-_MODULES = (_legacy,)
+# Order: domain modules first, _legacy catch-all last. As more modules
+# carve out of _legacy the tuple grows; _legacy eventually empties and
+# the last carve-out PR drops it from this tuple and deletes the file.
+_MODULES = (water, _legacy)
 
 
 def register() -> None:
