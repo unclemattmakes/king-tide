@@ -663,7 +663,7 @@ def _on_gate_prop_changed(self, context):
     spacing / half-width / height in the panel. Defers to the central
     debounce timer in `_legacy` so the rebuild coalesces with depsgraph
     notifications from spline edits."""
-    from ._legacy import _schedule_rebuild
+    from .handlers import _schedule_rebuild
 
     _schedule_rebuild("gates")
 

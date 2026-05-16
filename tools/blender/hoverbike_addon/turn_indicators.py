@@ -290,7 +290,7 @@ def rebuild_turn_indicators(scene, *, kappa_threshold: float, min_spacing_m: flo
 
 
 def _on_turn_prop_changed(self, context):
-    from ._legacy import _schedule_rebuild
+    from .handlers import _schedule_rebuild
 
     _schedule_rebuild("turns")
 
