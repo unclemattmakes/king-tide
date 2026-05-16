@@ -54,6 +54,7 @@ from . import (
     downtown,
     export,
     ghost_lap,
+    handlers,
     placement_helper,
     previews,
     ramp,
@@ -87,6 +88,7 @@ _MODULES = (
     previews,
     export,
     track_meta,
+    handlers,
     _legacy,
 )
 

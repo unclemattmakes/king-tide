@@ -193,7 +193,7 @@ def _get_water_height(self) -> float:
 
 
 def _set_water_height(self, value: float) -> None:
-    from ._legacy import _schedule_rebuild  # lazy import — debounce lives in _legacy
+    from .handlers import _schedule_rebuild  # lazy import — debounce lives in handlers
 
     obj = bpy.data.objects.get(WATER_VOLUME_NAME)
     if obj is None:
@@ -206,7 +206,7 @@ def _set_water_height(self, value: float) -> None:
 
 
 def _on_water_prop_changed(self, context):
-    from ._legacy import _schedule_rebuild
+    from .handlers import _schedule_rebuild
 
     _schedule_rebuild("water")
 

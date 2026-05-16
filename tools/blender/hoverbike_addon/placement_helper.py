@@ -109,7 +109,7 @@ def _on_helper_prop_changed(self, context):
     """FloatProperty update callback — re-poses the helper whenever
     the user scrubs t or offset. No-ops if the helper hasn't been
     spawned."""
-    from ._legacy import _schedule_rebuild
+    from .handlers import _schedule_rebuild
 
     if bpy.data.objects.get(PLACEMENT_HELPER_NAME) is not None:
         _schedule_rebuild("helper")
