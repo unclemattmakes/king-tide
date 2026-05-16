@@ -51,6 +51,24 @@ Setup (optional — code-only work doesn't need it):
 If Claude can't reach Blender, the usual cause is Blender not running, or the
 addon's TCP server having been stopped from its preferences panel.
 
+## Hoverbike addon — installation
+
+The Hoverbike addon (`tools/blender/hoverbike_addon.py`) lives in the repo but
+Blender loads it from a user scripts dir. To keep them in sync, run once:
+
+```
+pnpm install:blender-addon
+```
+
+It symlinks the repo file into `<blender-user-scripts>/addons/hoverbike_addon.py`
+so every code change is picked up by Blender's next "Reload Scripts"
+(`F3 → Reload Scripts`) without a manual copy. Falls back to a copy on Windows
+without Developer Mode; the script prints how to enable it.
+
+If panels or operators disappear from the N-panel after pulling, the installed
+addon has drifted — re-run `pnpm install:blender-addon` (or check that the
+symlink wasn't broken by a deleted worktree).
+
 ## Blender automation roadmap
 
 Open items for Blender-side automation live in

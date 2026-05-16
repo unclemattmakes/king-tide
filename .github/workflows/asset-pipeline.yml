@@ -51,6 +51,16 @@ jobs:
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install Hoverbike addon into Blender user scripts dir
+        run: pnpm install:blender-addon
+        env:
+          BLENDER_EXE: /opt/blender/blender
+
+      - name: Addon registration smoke test
+        run: pnpm test:blender
+        env:
+          BLENDER_EXE: /opt/blender/blender
+
       - name: Validate specs + build all GLBs
         run: pnpm gen:all
         env:
