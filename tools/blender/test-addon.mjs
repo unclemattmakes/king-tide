@@ -22,7 +22,19 @@ import { fileURLToPath } from 'node:url'
 
 const __filename = fileURLToPath(import.meta.url)
 const SCRIPT_DIR = path.dirname(__filename)
-const TEST_SCRIPT = path.join(SCRIPT_DIR, 'test_addon_registration.py')
+const TEST_SCRIPTS = [
+  // Registration smoke — every HOVERBIKE_OT/PT class declared in source
+  // is registered with Blender. Catches the "class skipped in register()"
+  // foot-gun.
+  path.join(SCRIPT_DIR, 'test_addon_registration.py'),
+  // Lazy-import resolution — every `from .X import Y` inside the addon
+  // resolves to an attribute that actually exists. Catches the "carve-out
+  // moved a helper and forgot to re-export it" failure mode that bit the
+  // 2026-05 Seattle map authoring session (5 phantom helpers across 5
+  // modules; registration test passed, every operator blew up on first
+  // click).
+  path.join(SCRIPT_DIR, 'test_addon_imports.py'),
+]
 
 function log(msg) {
   console.log(`[test-addon] ${msg}`)
@@ -60,23 +72,28 @@ function resolveBlender() {
 }
 
 function main() {
-  if (!existsSync(TEST_SCRIPT)) die(`test script not found: ${TEST_SCRIPT}`, 2)
+  for (const script of TEST_SCRIPTS) {
+    if (!existsSync(script)) die(`test script not found: ${script}`, 2)
+  }
   const blender = resolveBlender()
   log(`blender: ${blender}`)
-  log(`test   : ${TEST_SCRIPT}`)
 
   // No --factory-startup: that would skip user addons, including
-  // ours. The test relies on Blender loading the installed hoverbike
-  // addon (see `pnpm install:blender-addon`) and exercising its
-  // register() path.
-  const child = spawnSync(blender, ['--background', '--python', TEST_SCRIPT], {
-    stdio: 'inherit',
-  })
-  if (child.error) die(`failed to spawn blender: ${child.error.message}`, 2)
-  // Blender swallows the Python exit code by default; the test script
-  // exits the Python process with sys.exit(N) which propagates via
-  // Blender's exit code.
-  process.exit(child.status ?? 0)
+  // ours. Each test relies on Blender loading the installed hoverbike
+  // addon (see `pnpm install:blender-addon`) and exercising it.
+  for (const script of TEST_SCRIPTS) {
+    log(`test   : ${script}`)
+    const child = spawnSync(blender, ['--background', '--python', script], {
+      stdio: 'inherit',
+    })
+    if (child.error) die(`failed to spawn blender: ${child.error.message}`, 2)
+    if ((child.status ?? 0) !== 0) {
+      // Surface a clear summary even when stdio: 'inherit' already
+      // streamed Blender's output; useful when CI logs are huge.
+      die(`${path.basename(script)} exited ${child.status}`, child.status ?? 1)
+    }
+  }
+  process.exit(0)
 }
 
 main()

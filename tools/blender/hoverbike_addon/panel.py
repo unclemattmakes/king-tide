@@ -230,6 +230,35 @@ class HOVERBIKE_PT_track_road(_HoverbikeTrackSubPanelBase, Panel):
         row.prop(scene, "hoverbike_road_curb_width", text="Curb w")
         row.prop(scene, "hoverbike_road_curb_height", text="Curb h")
         layout.prop(scene, "hoverbike_road_curb_stripe_length", text="Stripe (m)")
+        layout.separator()
+        # Per-point conform — toggle whether a road segment grabs its Z from
+        # the terrain (default) or floats at the bezier point's authored Z
+        # (bridges, ramps over water). Stored in `weight_softbody` so it
+        # survives copy/paste and is editable in Blender's N → Curve panel.
+        layout.label(text="Per-point conform:")
+        row = layout.row(align=True)
+        row.operator("hoverbike.mark_selected_floating", text="Float", icon="ORIENTATION_VIEW")
+        row.operator("hoverbike.mark_selected_conforming", text="Conform", icon="OUTLINER_OB_FORCE_FIELD")
+        # Live readout of the active curve's float/conform mix
+        active = context.active_object
+        curve_for_readout = active if (active and active.type == "CURVE") else bpy.data.objects.get(ROAD_CURVE_NAME)
+        if curve_for_readout is not None and curve_for_readout.data.splines:
+            sp = curve_for_readout.data.splines[0]
+            if sp.type == "BEZIER":
+                pts = list(sp.bezier_points)
+            else:
+                pts = list(sp.points)
+            n_total = len(pts)
+            # weight_softbody stores float weight (1 = floating);
+            # default 0 means conforming, so a point counts as floating
+            # only when its weight is meaningfully above zero.
+            n_float = sum(1 for p in pts if p.weight_softbody > 0.5)
+            if n_total:
+                layout.label(
+                    text=f"{curve_for_readout.name}: {n_float}/{n_total} floating",
+                    icon="INFO",
+                )
+        layout.separator()
         layout.operator("hoverbike.build_road", icon="MESH_PLANE")
         if bpy.data.objects.get(ROAD_CURVE_NAME):
             layout.label(text="Edit road_curve_main, then Build", icon="INFO")
@@ -450,8 +479,24 @@ class HOVERBIKE_PT_track_gameplay(_HoverbikeTrackSubPanelBase, Panel):
         row = layout.row(align=True)
         row.operator("hoverbike.rebuild_gate_preview", icon="FILE_REFRESH")
         row.operator("hoverbike.hide_gate_preview", icon="HIDE_ON")
-        if bpy.data.collections.get(GATE_PREVIEW_COLLECTION):
-            layout.label(text="Live: follows spline edits", icon="LINKED")
+        # Gate authoring model: the spline is the source of truth. The
+        # export step re-samples `ai_spline_main` at this spacing on every
+        # Export Track to Game, so nothing in the .blend "freezes" gate
+        # positions — they always reflect the latest spline shape. The
+        # preview is the canonical visualisation. Authors who need a
+        # hand-placed gate (e.g. just past a jump where arc length puts
+        # it in the wrong spot) drop a `cp_NN` empty and that takes over
+        # for the whole array.
+        n_cp = sum(1 for obj in bpy.data.objects if re.match(r"^cp_\d+$", obj.name))
+        if n_cp > 0:
+            layout.label(
+                text=f"Override: {n_cp} cp_NN empties win over the spline",
+                icon="ANCHOR_TOP",
+            )
+        elif bpy.data.collections.get(GATE_PREVIEW_COLLECTION):
+            layout.label(text="Spline-driven, live preview", icon="LINKED")
+        else:
+            layout.label(text="Spline-driven; click Rebuild to preview", icon="INFO")
         layout.separator()
 
         layout.label(text="Boost pads:", icon="FORCE_FORCE")
