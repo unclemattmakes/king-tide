@@ -1,5 +1,6 @@
 import type { TrackManifestEntry } from '@/game/assets/manifest'
 import { type BikeVariantId, DEFAULT_BIKE_VARIANT } from '@/game/bikes/variants'
+import { installMenuGamepad } from '../input/menu-gamepad'
 import {
   type BikeCard,
   bestLapFor,
@@ -75,6 +76,9 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
   let currentMode: 'sp' | 'mp' | null = null
   let currentStep: Step = 'title'
   const screens: Partial<Record<Step, HTMLElement>> = {}
+  // `commitSpRace` lives inside the Promise executor (it needs `resolve`),
+  // but `renderBikeCards` runs in the outer scope — bridge them via a ref.
+  let commitSpRaceRef: (() => void) | null = null
 
   function updateClock(): void {
     if (!clockEl) return
@@ -143,9 +147,12 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         <div class="tag">${escapeHtml(t.tagline)}</div>
         <div class="record">${best ? `BEST LAP &middot; ${best}` : 'NO RECORD'}</div>
       `
+      // Clicking a card commits the pick and advances — no separate
+      // confirm button. Tapping the same selection again is a no-op
+      // from the user's perspective (we just re-advance).
       card.addEventListener('click', () => {
         picks.trackId = t.id
-        renderTrackCards(host)
+        showStep('sp-bike')
       })
       host.appendChild(card)
     }
@@ -176,9 +183,11 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         <div class="stats">${bars}</div>
         ${best ? `<div class="record">BEST LAP &middot; ${best}</div>` : ''}
       `
+      // Clicking a bike commits the loadout and launches the race
+      // immediately — no separate "lights out" confirm button.
       card.addEventListener('click', () => {
         picks.bikeId = b.id
-        renderBikeCards(host, showTrackBest)
+        commitSpRaceRef?.()
       })
       host.appendChild(card)
     }
@@ -207,12 +216,30 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     }
     renderCrumbs()
     updateChyron(step)
+    // Hand focus to the new screen so keyboard/gamepad have a clear
+    // anchor. focusFirst prefers `.selected` then `.primary` then the
+    // first focusable, which lines up nicely with what a user expects
+    // when they land on each screen.
+    gamepadNav.focusFirst()
   }
+
+  function gamepadBack(): void {
+    if (currentStep === 'mode') showStep('title')
+    else if (currentStep === 'sp-track') showStep('mode')
+    else if (currentStep === 'sp-bike') showStep('sp-track')
+    else if (currentStep === 'mp-entry') showStep('mode')
+  }
+
+  const gamepadNav = installMenuGamepad({
+    container: () => screens[currentStep] ?? null,
+    onBack: gamepadBack,
+  })
 
   return new Promise<MenuFlowResult>((resolve) => {
     function teardown(): void {
       window.clearInterval(clockInterval)
       window.removeEventListener('keydown', onKey)
+      gamepadNav.dispose()
       root!.classList.remove('show')
       document.body.classList.remove('menu-active')
     }
@@ -228,6 +255,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       url.searchParams.set('bike', picks.bikeId)
       finish(url.toString())
     }
+    commitSpRaceRef = commitSpRace
 
     function buildTitle(): HTMLElement {
       const el = document.createElement('section')
@@ -318,13 +346,11 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         <div class="bc-cards cols-3" id="sp-track-cards"></div>
         <div class="bc-actions">
           <div class="left"><button class="bc-link" id="sp-track-back" type="button">&larr; MODE</button></div>
-          <div class="right"><button class="bc-btn primary" id="sp-track-next" type="button">CONFIRM TRACK &rarr;</button></div>
         </div>
       `
       const host = el.querySelector<HTMLElement>('#sp-track-cards')!
       renderTrackCards(host)
       el.querySelector('#sp-track-back')?.addEventListener('click', () => showStep('mode'))
-      el.querySelector('#sp-track-next')?.addEventListener('click', () => showStep('sp-bike'))
       return el
     }
 
@@ -346,13 +372,11 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         <div class="bc-cards cols-3" id="sp-bike-cards"></div>
         <div class="bc-actions">
           <div class="left"><button class="bc-link" id="sp-bike-back" type="button">&larr; TRACK</button></div>
-          <div class="right"><button class="bc-btn primary" id="sp-bike-go" type="button">LIGHTS OUT &rarr;</button></div>
         </div>
       `
       const host = el.querySelector<HTMLElement>('#sp-bike-cards')!
       renderBikeCards(host, true)
       el.querySelector('#sp-bike-back')?.addEventListener('click', () => showStep('sp-track'))
-      el.querySelector('#sp-bike-go')?.addEventListener('click', commitSpRace)
       return el
     }
 
