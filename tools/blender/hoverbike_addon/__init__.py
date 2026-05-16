@@ -51,6 +51,7 @@ from . import (
     _legacy,
     bake,
     boost_pad,
+    downtown,
     ghost_lap,
     placement_helper,
     ramp,
@@ -75,6 +76,7 @@ _MODULES = (
     spline,
     placement_helper,
     terrain,
+    downtown,
     _legacy,
 )
 
