@@ -55,6 +55,7 @@ from . import (
     export,
     ghost_lap,
     handlers,
+    new_map,
     panel,
     placement_helper,
     previews,
@@ -91,6 +92,7 @@ _MODULES = (
     previews,
     export,
     track_meta,
+    new_map,
     handlers,
     _legacy,
     # panel registers last so every operator + scene prop it references
