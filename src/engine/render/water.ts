@@ -395,9 +395,11 @@ export function createWaterMesh(
   const ROUGH_SPARKLE_DEFAULT = 0.04
   // Strength of the sub-Gerstner detail-normal cascades (see comment block
   // above the texture builder). 0 = bypass detail entirely (analytic-Gerstner
-  // only); 1.0 = the default cascade contribution that fills in the wave
-  // chop SoT achieves with FFT. `?detail=0` parks this at 0 for A/B.
-  const DETAIL_STRENGTH_DEFAULT = 1.0
+  // only); 1.0 = baseline cascade contribution; 1.4 = the punchier default
+  // that lands closer to SoT after side-by-side comparison — the bare 1.0
+  // version read as "soft stipple", at 1.4 the chop reads as actual surface
+  // wave detail. `?detail=0` parks this at 0 for A/B.
+  const DETAIL_STRENGTH_DEFAULT = 1.4
   const reflStrengthUniform = uniform(REFLECTION_STRENGTH_DEFAULT)
   const sunGlowUniform = uniform(SUN_GLOW_DEFAULT)
   const roughBaseUniform = uniform(ROUGH_BASE_DEFAULT)
@@ -756,8 +758,13 @@ export function createWaterMesh(
       const d = gerstnerDisp(xN, zN, tShifted)
       // h.y, h.z are dy/dx, dy/dz at this time sample.
       const slope = sqrt(h.y.mul(h.y).add(h.z.mul(h.z)))
-      const slopeFoam = smoothstep(float(0.4), float(0.9), slope)
-      const foldFoam = smoothstep(float(0.12), float(0.35), d.z)
+      // Foam triggers tuned aggressively toward SoT — the previous thresholds
+      // only fired on the sharpest crests, leaving 90 % of wave faces foam-
+      // free. The whitecaps streaking down wave fronts are the single most
+      // identifiable feature of SoT-style water, so this is a deliberate
+      // overshoot of "physically motivated" to land on "visually right".
+      const slopeFoam = smoothstep(float(0.22), float(0.6), slope)
+      const foldFoam = smoothstep(float(0.07), float(0.22), d.z)
       const localFoam = max(slopeFoam, foldFoam)
       const decay = float(Math.exp(-dt * DECAY_RATE))
       maxFoam.assign(max(maxFoam, localFoam.mul(decay)))
@@ -924,13 +931,19 @@ export function createWaterMesh(
   // Classic mode (`?water=classic`) keeps the original blue→cyan mix with
   // pure height-driven blending for A/B comparison.
   const heightNorm = smoothstep(float(-0.9), float(0.9), heightFrag)
-  const heightFactor = isClassic ? heightNorm : smoothstep(float(-0.7), float(0.8), heightFrag)
-  // v2 deep was (0.02, 0.12, 0.22) — readable as "dark blue water" but a
-  // bit muddy and unsaturated. Pushed toward a punchier deep teal that
-  // reads as a real ocean color when stacked with the new aerial
-  // perspective + shallow-tint layers below.
-  const deepColor = isClassic ? vec3(0.04, 0.18, 0.4) : vec3(0.012, 0.1, 0.18)
-  const scatterColor = isClassic ? vec3(0.16, 0.55, 0.78) : vec3(0.22, 0.7, 0.65)
+  // Scatter ramps from -0.5 to 0.5 m of wave height (was -0.7 to 0.8) so
+  // mid-height wave faces — not just the sharpest peaks — carry visible
+  // scatter color. Pushes the wave silhouettes from "soft blanket" toward
+  // SoT's "punchy deep-trough-to-bright-crest gradient" character.
+  const heightFactor = isClassic ? heightNorm : smoothstep(float(-0.5), float(0.5), heightFrag)
+  // Deep + scatter pushed toward more saturated SoT tones. The original v2
+  // teal worked under midday sun but read as washed-out cream/beige under
+  // the day-night cycle's sunset palette (warm horizon haze + warm sun-tint
+  // emissive desaturated the surface). Punchier deep navy + brighter cyan-
+  // green scatter survives the warm-sky desaturation and keeps the water
+  // reading as ocean rather than fabric. Classic preset unchanged for A/B.
+  const deepColor = isClassic ? vec3(0.04, 0.18, 0.4) : vec3(0.01, 0.09, 0.2)
+  const scatterColor = isClassic ? vec3(0.16, 0.55, 0.78) : vec3(0.18, 0.78, 0.78)
 
   // Shallow-water tint. When the view ray is short between water surface
   // and terrain (e.g. lagoon shoreline, sandy floor), short Beer-Lambert
@@ -1421,12 +1434,14 @@ export function createWaterMesh(
   mat.positionNode = positionNode
   mat.normalNode = normalNode
   mat.colorNode = albedo
-  // Foam needs a small constant emissive lift. Real foam scatters sky
-  // light independently of the direct sun, so it stays readably bright
-  // even when the surface is in shadow (cliff side, behind a bike) —
-  // without this, foam in shadowed shoreline reads as grey, which was
-  // half of the "looks very transparent" feeling.
-  const foamEmissive = foamColor.mul(foamMask).mul(float(0.18))
+  // Foam needs a constant emissive lift. Real foam scatters sky light
+  // independently of the direct sun, so it stays readably bright even
+  // when the surface is in shadow (cliff side, behind a bike) — without
+  // this, foam in shadowed shoreline reads as grey. Bumped from 0.18 →
+  // 0.28 in the SoT-leaning pass so whitecaps read as the punchy bright
+  // streaks they're supposed to be under warm-sky lighting, where the
+  // lower lift was getting absorbed by the desaturated horizon haze.
+  const foamEmissive = foamColor.mul(foamMask).mul(float(0.28))
   mat.emissiveNode = fresnelEmissive.add(sunGlow).add(foamEmissive)
   // View-angle-dependent base opacity. Beer-Lambert: the optical path
   // length through water along the view ray scales as ~1/ndotv, so
