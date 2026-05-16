@@ -571,10 +571,24 @@ class HOVERBIKE_PT_track_gameplay(_HoverbikeTrackSubPanelBase, Panel):
                 text=f"Override: {n_cp} cp_NN empties win over the spline",
                 icon="ANCHOR_TOP",
             )
+            layout.operator(
+                "hoverbike.demote_gates_to_spline",
+                text="Demote to Spline (wipe cp_NN)",
+                icon="X",
+            )
         elif bpy.data.collections.get(GATE_PREVIEW_COLLECTION):
             layout.label(text="Spline-driven, live preview", icon="LINKED")
         else:
             layout.label(text="Spline-driven; click Rebuild to preview", icon="INFO")
+        # Pin-to-empty button — works whether you're spline-driven or
+        # already overriding; in spline-driven mode it forks into
+        # editable empties so you can tweak one corner, in override
+        # mode it re-stamps from the current spline.
+        layout.operator(
+            "hoverbike.materialize_gates_to_cp_empties",
+            text=("Re-stamp from Spline" if n_cp > 0 else "Materialise to cp_NN (for hand-edit)"),
+            icon="OUTLINER_OB_EMPTY",
+        )
         layout.separator()
 
         layout.label(text="Boost pads:", icon="FORCE_FORCE")
