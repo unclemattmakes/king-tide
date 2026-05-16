@@ -339,6 +339,117 @@ class HOVERBIKE_OT_auto_place_ramps(Operator):
 
 
 # ────────────────────────────────────────────────────────────────────
+# Materialise / demote gates — bridges the spline-driven and
+# Blender-wins gate-placement modes
+# ────────────────────────────────────────────────────────────────────
+
+
+class HOVERBIKE_OT_materialize_gates_to_cp_empties(Operator):
+    """Sample ``ai_spline_main`` at the current gate spacing and create
+    a ``cp_NN`` empty at each gate position, with rotation matching
+    the racing-line tangent. Once these empties exist, the export
+    flips into "Blender wins" mode and uses their positions verbatim
+    — so the author can drag any single gate off the spline (for a
+    tight corner that needs to land at a specific apex, say) without
+    losing the spline-driven default placement for every other gate.
+
+    Re-running the operator wipes every existing ``cp_NN`` empty and
+    re-stamps from the current spline; useful when the route has
+    been re-shaped and the author wants the gates to follow."""
+
+    bl_idname = "hoverbike.materialize_gates_to_cp_empties"
+    bl_label = "Materialise Gates to cp_NN Empties"
+    bl_description = (
+        "Stamp the spline-sampled gate positions as editable cp_NN empties so "
+        "individual gates can be hand-tuned. Wipes any prior cp_NN before stamping"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        from ._legacy import _sample_curve_to_polyline
+        from .previews import _resample_by_arc_length, DEFAULT_GATE_SPACING_M
+
+        sp = bpy.data.objects.get("ai_spline_main")
+        if sp is None or sp.type != "CURVE":
+            self.report({"ERROR"}, "No ai_spline_main in the scene.")
+            return {"CANCELLED"}
+
+        scene = context.scene
+        spacing = float(getattr(scene, "hoverbike_gate_spacing", DEFAULT_GATE_SPACING_M))
+        half_w = float(getattr(scene, "hoverbike_gate_half_width", 14.0))
+        height = float(getattr(scene, "hoverbike_gate_height", 8.0))
+
+        points = _sample_curve_to_polyline(sp)
+        placements = _resample_by_arc_length(points, spacing, vertical_axis=2)
+        if not placements:
+            self.report({"ERROR"}, "Spline produced 0 gate placements — check curve has ≥ 2 points.")
+            return {"CANCELLED"}
+
+        # Wipe prior cp_NN before stamping so a shrinking gate count doesn't
+        # leave stale empties past the new tail.
+        wiped = 0
+        for o in list(bpy.data.objects):
+            if o.type == "EMPTY" and o.name.startswith("cp_") and o.name[3:].isdigit():
+                bpy.data.objects.remove(o, do_unlink=True)
+                wiped += 1
+
+        col = scene.collection
+        for i, p in enumerate(placements):
+            x, y, z = p["position"]
+            tx, ty, _ = p["tangent"]
+            yaw = math.atan2(ty, tx) - math.pi / 2.0
+            e = bpy.data.objects.new(f"cp_{i:02d}", None)
+            e.empty_display_type = "SINGLE_ARROW"
+            e.empty_display_size = 4.0
+            e.location = (x, y, z)
+            e.rotation_euler = (0, 0, yaw)
+            e["kind"] = "checkpoint"
+            e["index"] = i
+            e["half_width"] = half_w
+            e["height"] = height
+            col.objects.link(e)
+
+        self.report(
+            {"INFO"},
+            f"Materialised {len(placements)} gate empties (wiped {wiped} prior). "
+            f"Drag any cp_NN to override its spline-sampled position; "
+            f"Demote Gates to Spline returns to auto-derivation.",
+        )
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_demote_gates_to_spline(Operator):
+    """Delete every ``cp_NN`` empty in the scene, returning the track
+    to spline-driven gate placement. The export will sample
+    ``ai_spline_main`` at the current spacing on the next run.
+
+    Inverse of ``materialize_gates_to_cp_empties``. Useful when the
+    author tried hand-placement, didn't like the result, and wants
+    to fall back to the spline default without manually deleting
+    every empty."""
+
+    bl_idname = "hoverbike.demote_gates_to_spline"
+    bl_label = "Demote Gates to Spline"
+    bl_description = (
+        "Delete every cp_NN empty in the scene so gate placement falls back "
+        "to spline auto-derivation on next export"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        wiped = 0
+        for o in list(bpy.data.objects):
+            if o.type == "EMPTY" and o.name.startswith("cp_") and o.name[3:].isdigit():
+                bpy.data.objects.remove(o, do_unlink=True)
+                wiped += 1
+        if wiped == 0:
+            self.report({"INFO"}, "No cp_NN empties to remove — already spline-driven.")
+        else:
+            self.report({"INFO"}, f"Removed {wiped} cp_NN empties. Gates will derive from the spline.")
+        return {"FINISHED"}
+
+
+# ────────────────────────────────────────────────────────────────────
 # Auto-shift spline off obstacles
 # ────────────────────────────────────────────────────────────────────
 
@@ -453,6 +564,8 @@ _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_add_ramp_at_spline_t,
     HOVERBIKE_OT_auto_place_ramps,
     HOVERBIKE_OT_shift_spline_off_obstacles,
+    HOVERBIKE_OT_materialize_gates_to_cp_empties,
+    HOVERBIKE_OT_demote_gates_to_spline,
 )
 
 
