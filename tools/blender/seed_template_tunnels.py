@@ -215,11 +215,16 @@ def _build_profile_curve(name: str, radius: float, *, flat_bottom: bool) -> bpy.
     spline = curve_data.splines.new(type="BEZIER")
     spline.bezier_points.add(3)  # implicit first point + 3 = 4 total
     floor_y = radius * 0.6 if flat_bottom else radius
+    # Order matters: must traverse the profile CCW in the XY plane
+    # (+X → +Y → -X → -Y) so the swept tube has outward normals and
+    # the cutter's Fill Caps face outward. Reversing to CW (e.g. by
+    # negating Y in place) flips the cutter inside-out and the
+    # Boolean Difference silently produces no carve.
     coords = [
-        ( radius,  0.0),       # right (3 o'clock)
-        ( 0.0,    -radius),    # ceiling (-Y profile → world +Z)
-        (-radius,  0.0),       # left (9 o'clock)
-        ( 0.0,     floor_y),   # floor (+Y profile → world -Z) — flattened
+        ( radius,  0.0),       # +X (3 o'clock)
+        ( 0.0,     floor_y),   # +Y = floor in world (-Z), flattened
+        (-radius,  0.0),       # -X (9 o'clock)
+        ( 0.0,    -radius),    # -Y = ceiling in world (+Z), full radius
     ]
     for bp, (x, y) in zip(spline.bezier_points, coords):
         bp.co = (x, y, 0.0)
