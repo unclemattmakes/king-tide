@@ -57,6 +57,7 @@ from . import (
     ramp,
     spline,
     terrain,
+    tunnel,
     turn_indicators,
     water,
 )
@@ -77,6 +78,7 @@ _MODULES = (
     placement_helper,
     terrain,
     downtown,
+    tunnel,
     _legacy,
 )
 
