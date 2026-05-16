@@ -15,7 +15,11 @@ specs/<category>/<id>.json  →  tools/blender/build_<category>.py  →  public/
 
 For **bikes**, you author each variant directly in `bikes-src/<id>.blend` and click *Hoverbike → Export Bike to Game* in the in-Blender addon (or run `pnpm gen:bikes` headless). The slim spec carries display name, physics, and optional colour overrides. For **props** and **tracks**, you edit a JSON spec and the headless builder assembles a GLB from kit parts. The runtime auto-loads everything from `public/assets/manifest.json` at boot.
 
-For the architectural rationale and full design, see [`docs/asset-pipeline-plan.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/asset-pipeline-plan.md). For a quick-reference on Blender naming + extras, see [`docs/blender-conventions.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-conventions.md).
+::: tip Authoring a track from a blank Blender scene?
+The [Blender](/blender/overview) section has a full pipeline reference — addon panels, every operator, the headless builders, scene conventions — plus a guided [blank-scene-to-playable-map tutorial](/blender/your-first-track).
+:::
+
+For the architectural rationale and full design, see [`docs/asset-pipeline-plan.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/asset-pipeline-plan.md). For the in-repo Blender quick-reference, see [`docs/blender-conventions.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-conventions.md).
 
 ## TL;DR
 
