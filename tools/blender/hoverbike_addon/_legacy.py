@@ -1,38 +1,21 @@
-"""Hoverbike — in-Blender "Export to Game" addon.
+"""Shared addon infrastructure — repo discovery, validation, JSON sync,
+bike spec derivation, preview-collection bookkeeping, and a handful
+of cross-cutting helpers (`_largest_terrain_mesh`,
+`_sample_curve_to_polyline`, `_spline_iter_points`, `_find_layer_collection`).
 
-Single-file addon. Install once via:
+Originally the whole addon lived in a single file at
+``tools/blender/hoverbike_addon.py``; the refactor split user-facing
+operators, panels, scene properties, and per-domain helpers into the
+sibling modules of this package. Everything that's still here is
+pipeline infrastructure shared across sibling modules (and, for
+validation / JSON derivation, with the CLI exporters in
+``tools/build_track.py``). A follow-up refactor can split this file
+further (``_io.py``, ``_validation.py``, ``_export_json.py``,
+``_shared.py``); for now the helpers stay co-located and siblings
+lazy-import them by name.
 
-    Edit → Preferences → Add-ons → Install…
-    pick: tools/blender/hoverbike_addon.py
-    enable the checkbox next to "Hoverbike: Export to Game"
-
-The 3D viewport sidebar (press N) shows a "Hoverbike" tab whose UI
-adapts to which kind of asset you're editing — detected from the
-``.blend``'s parent directory:
-
-  ``tracks-src/<id>.blend`` → track mode
-  ``bikes-src/<id>.blend``  → bike mode
-
-In track mode the button is **Export Track to Game**: validates the
-scene, writes the GLB into ``public/assets/tracks/``, and on first
-export materialises a starter ``public/tracks/<id>.json`` from the
-.blend's checkpoints / spline / pickups / start. Subsequent exports
-preserve the JSON so in-app editor saves aren't blown away;
-Shift-click rewrites it.
-
-In bike mode the button is **Export Bike to Game**: validates the
-scene, writes the GLB into ``public/assets/bikes/``, and on first
-export materialises a starter ``specs/bikes/<id>.json`` derived from
-``bike_root``'s extras + the bike's authored materials. Subsequent
-exports preserve the spec; Shift-click rewrites it.
-
-Both modes share repo-root discovery (walk up to the first dir
-containing ``package.json`` + ``public/``) and asset-id derivation
-(.blend basename, overridable via the scene custom property
-``hoverbike_track_id`` or ``hoverbike_bike_id``).
-
-The addon does NOT require a running Vite dev server — it writes
-files straight into the cloned repo.
+``register()`` / ``unregister()`` are no-ops — every addon class and
+scene property is now owned by a per-domain module.
 """
 
 from __future__ import annotations
@@ -46,16 +29,6 @@ from typing import Any
 
 import bpy
 import mathutils
-
-bl_info = {
-    "name": "Hoverbike: Export to Game",
-    "author": "Hoverbike",
-    "version": (2, 0, 0),
-    "blender": (3, 6, 0),
-    "location": "View3D > Sidebar > Hoverbike",
-    "description": "One-click export of bikes and tracks from Blender to the running hoverbike game.",
-    "category": "Import-Export",
-}
 
 
 # ── Repo discovery ──────────────────────────────────────────────────────────
