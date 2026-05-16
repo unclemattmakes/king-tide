@@ -62,21 +62,17 @@ def repose_placement_helper(scene) -> dict | None:
     Public because the package-level debounce timer in
     ``_legacy._run_pending_rebuilds`` calls back into it when
     ``hoverbike_helper_t`` / ``hoverbike_helper_offset`` change."""
-    from ._legacy import (
-        _PreviewCollectionsHidden,
-        _sample_curve_at_t,
-        _spline_source_for_placement,
-        _yaw_from_tangent_xy,
-    )
+    from ._legacy import _PreviewCollectionsHidden
+    from .spline import sample_curve_at_t, spline_source_for_placement, yaw_from_tangent_xy
 
     obj = bpy.data.objects.get(PLACEMENT_HELPER_NAME)
     if obj is None:
         return None
-    curve = _spline_source_for_placement(scene)
+    curve = spline_source_for_placement(scene)
     if curve is None:
         return None
     t = float(getattr(scene, "hoverbike_helper_t", 0.0))
-    s = _sample_curve_at_t(curve, t)
+    s = sample_curve_at_t(curve, t)
     if s is None:
         return None
     # Perpendicular to (tx, ty) in XY, right-hand. Positive offset =
@@ -103,7 +99,7 @@ def repose_placement_helper(scene) -> dict | None:
         surface_z = s["z"]
     z = surface_z + hover
     obj.location = (x, y, z)
-    obj.rotation_euler = (0.0, 0.0, _yaw_from_tangent_xy(tx, ty))
+    obj.rotation_euler = (0.0, 0.0, yaw_from_tangent_xy(tx, ty))
     obj["helper_t"] = float(t)
     obj["helper_offset"] = float(off)
     return {"x": x, "y": y, "z": z, "tx": tx, "ty": ty}
@@ -137,10 +133,10 @@ class HOVERBIKE_OT_add_placement_helper(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-        from ._legacy import _spline_source_for_placement
+        from .spline import spline_source_for_placement
 
         scene = context.scene
-        curve = _spline_source_for_placement(scene)
+        curve = spline_source_for_placement(scene)
         if curve is None:
             self.report(
                 {"ERROR"},
