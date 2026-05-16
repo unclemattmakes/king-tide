@@ -906,10 +906,7 @@ export function createWaterMesh(
     rsBx.mul(float(bCos)).add(rsBy.mul(float(bSin))),
     rsBx.mul(float(-bSin)).add(rsBy.mul(float(bCos))),
   ).mul(float(DETAIL_B_SCALE).div(float(DETAIL_B_TILE)))
-  const detailSlope = detailSlopeA
-    .add(detailSlopeB)
-    .mul(detailStrengthUniform)
-    .mul(detailGrazeFade)
+  const detailSlope = detailSlopeA.add(detailSlopeB).mul(detailStrengthUniform).mul(detailGrazeFade)
 
   // Camera-to-fragment distance. Used by the analytic-slope flatten below,
   // the hash-noise distance fades (foam / shoreline / sparkle), the planar-

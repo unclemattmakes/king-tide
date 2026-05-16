@@ -165,7 +165,10 @@ export function cloneLoadedBike(
   // shadow casters + receivers so bikes drop a shadow on terrain
   // and self-shade against each other on the grid.
   root.traverse((obj) => {
-    if (obj.userData?.kind === ExportedKind.COLLIDER || obj.userData?.kind === ExportedKind.SOCKET) {
+    if (
+      obj.userData?.kind === ExportedKind.COLLIDER ||
+      obj.userData?.kind === ExportedKind.SOCKET
+    ) {
       obj.visible = false
       return
     }
