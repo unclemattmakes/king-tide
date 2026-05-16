@@ -1,13 +1,18 @@
 # Authoring tracks
 
-Tracks are the most complex of the three asset categories — they pair gameplay data (gates, AI spline, pickups, start pose) with optional environment geometry (cliffs, mesas, hand-modeled props). There are two intended workflows:
+Tracks are the most complex of the three asset categories — they pair gameplay data (gates, AI spline, pickups, start pose) with optional environment geometry (cliffs, mesas, hand-modeled props). There are three intended workflows:
 
 | Workflow | Source of truth | Best for |
 |---|---|---|
+| **Blender-driven** | `tracks-src/<id>.blend` (via the in-Blender addon) | Hand-modelled terrain, roads, tunnels, ramps, downtown grids — anything with real geometry. → See [Blender → Your first track](/blender/your-first-track). |
 | **Spec-driven** | `specs/tracks/<id>.json` | Calibration-style declarative tracks with axis-aligned slabs and analytic AI splines. |
-| **Editor-driven** | `public/tracks/<id>.json` (live-edited via `?edit=1`) | Everything else — anything where you want to drag gates / spline anchors visually. |
+| **Editor-driven** | `public/tracks/<id>.json` (live-edited via `?edit=1`) | Tuning gate / pickup / boost placement visually, often layered on top of a Blender-authored environment. |
 
-Mixing the two is fine: you can author a base spec, build the GLB, then live-edit the gameplay JSON in the editor. Once tuned in the editor, the spec is no longer the source of truth for gate / spline placement.
+Mixing them is the common case: you author terrain + roads + tunnels in Blender, click **Export Track to Game**, then jump into the in-app editor to drag individual gates and pickups into place. The .blend owns geometry + the racing line; the editor owns hand-placed gameplay objects.
+
+::: tip Authoring in Blender?
+The [Blender section](/blender/overview) covers the full pipeline — addon panels, every operator, scene conventions — plus a [blank-scene-to-playable-map tutorial](/blender/your-first-track). The rest of this page covers the spec-driven and editor-driven flows.
+:::
 
 ## Spec-driven authoring
 
