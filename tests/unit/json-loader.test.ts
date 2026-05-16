@@ -102,8 +102,8 @@ describe('buildTrackFromJson', () => {
 
   it('reads optional environmentGlb + water but tolerates absence', () => {
     const raw = baseTrack()
-    delete raw['environmentGlb']
-    delete raw['water']
+    delete raw.environmentGlb
+    delete raw.water
     const track = buildTrackFromJson(raw)
     expect(track.environmentGlb).toBeUndefined()
     expect(track.water).toBeUndefined()

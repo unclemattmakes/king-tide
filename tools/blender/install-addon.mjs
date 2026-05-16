@@ -26,7 +26,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import {
-  copyFileSync,
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -41,7 +41,10 @@ import { fileURLToPath } from 'node:url'
 
 const __filename = fileURLToPath(import.meta.url)
 const SCRIPT_DIR = path.dirname(__filename)
-const SOURCE = path.join(SCRIPT_DIR, 'hoverbike_addon.py')
+// The addon is a package directory now (was a single .py file before
+// the package refactor). Symlink/copy the whole tree.
+const SOURCE = path.join(SCRIPT_DIR, 'hoverbike_addon')
+const ADDON_NAME = 'hoverbike_addon'
 
 const args = new Set(process.argv.slice(2))
 const FORCE_COPY = args.has('--copy')
@@ -138,6 +141,13 @@ function isSymlinkTo(linkPath, expectedTarget) {
   }
 }
 
+/** Remove a path that's either a file, a directory, or a symlink.
+ * Handles both leaves of the install target (the modern package dir
+ * AND the legacy single-file install). */
+function removeAny(p) {
+  rmSync(p, { recursive: true, force: true })
+}
+
 function backupExisting(target) {
   if (!existsSync(target)) return null
   const ls = lstatSync(target)
@@ -146,14 +156,14 @@ function backupExisting(target) {
     if (DRY_RUN) {
       log(`would remove existing symlink at ${target}`)
     } else {
-      rmSync(target)
+      removeAny(target)
     }
     return null
   }
   const backup = `${target}.bak`
   if (existsSync(backup)) {
     log(`backup already exists at ${backup} — leaving it alone, removing current install`)
-    if (!DRY_RUN) rmSync(target)
+    if (!DRY_RUN) removeAny(target)
     return backup
   }
   if (DRY_RUN) {
@@ -165,24 +175,63 @@ function backupExisting(target) {
   return backup
 }
 
+/** Remove the pre-package single-file install if it's still hanging
+ * around from before the package refactor. Backs it up first. */
+function cleanupLegacyFileInstall(dir) {
+  const legacyTarget = path.join(dir, `${ADDON_NAME}.py`)
+  // lstatSync (not existsSync) so we also detect a dangling symlink
+  // — common after the package refactor, since the old install
+  // pointed at hoverbike_addon.py which is now hoverbike_addon/_legacy.py.
+  let ls
+  try {
+    ls = lstatSync(legacyTarget)
+  } catch {
+    return
+  }
+  log(`detected legacy single-file install at ${legacyTarget}`)
+  if (ls.isSymbolicLink()) {
+    if (DRY_RUN) {
+      log('would remove the legacy symlink')
+    } else {
+      removeAny(legacyTarget)
+      log('removed legacy symlink')
+    }
+    return
+  }
+  const backup = `${legacyTarget}.bak`
+  if (existsSync(backup)) {
+    log(`legacy backup already at ${backup} — removing the orphaned file`)
+    if (!DRY_RUN) removeAny(legacyTarget)
+    return
+  }
+  if (DRY_RUN) {
+    log(`would back up legacy file → ${backup}`)
+  } else {
+    renameSync(legacyTarget, backup)
+    log(`backed up legacy file → ${backup}`)
+  }
+}
+
 function main() {
   if (!existsSync(SOURCE)) die(`source addon not found at ${SOURCE}`, 2)
 
   const blender = resolveBlender()
   const version = detectBlenderVersion(blender)
   const dir = userAddonsDir(version)
-  const target = path.join(dir, 'hoverbike_addon.py')
+  const target = path.join(dir, ADDON_NAME)
 
   log(`source : ${SOURCE}`)
   log(`blender: ${blender} (${version})`)
   log(`target : ${target}`)
 
   if (isSymlinkTo(target, SOURCE)) {
+    cleanupLegacyFileInstall(dir)
     log('already symlinked to this source — nothing to do')
     return
   }
 
   if (DRY_RUN) {
+    cleanupLegacyFileInstall(dir)
     backupExisting(target)
     log(`would ${FORCE_COPY ? 'copy' : 'symlink'} source → target`)
     return
@@ -193,10 +242,11 @@ function main() {
     log(`created addons dir: ${dir}`)
   }
 
+  cleanupLegacyFileInstall(dir)
   backupExisting(target)
 
   if (FORCE_COPY) {
-    copyFileSync(SOURCE, target)
+    cpSync(SOURCE, target, { recursive: true })
     log('copied (--copy requested)')
     printPostInstall(target)
     return
@@ -204,13 +254,14 @@ function main() {
 
   // Try symlink first; fall back to copy on EPERM (Windows w/o Developer Mode).
   try {
-    // 'file' type matters on Windows; harmless elsewhere.
-    symlinkSync(SOURCE, target, 'file')
+    // 'dir' type matters on Windows — directory symlinks use a different
+    // ReparsePoint kind than file symlinks. Harmless elsewhere.
+    symlinkSync(SOURCE, target, 'dir')
     log('symlinked ✓ — edits in the repo are picked up by Blender on next reload')
   } catch (err) {
     if (err && (err.code === 'EPERM' || err.code === 'EACCES')) {
       log(`symlink failed (${err.code}) — falling back to copy`)
-      copyFileSync(SOURCE, target)
+      cpSync(SOURCE, target, { recursive: true })
       log('copied ✓')
       if (platform() === 'win32') {
         log('')

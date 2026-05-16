@@ -44,7 +44,7 @@ for (let i = 0; i < (json.nodes?.length ?? 0); i++) {
   const extras = n.extras ?? {}
   const extraKeys = Object.keys(extras)
   const tag = extraKeys.length
-    ? ' { ' + extraKeys.map((k) => `${k}=${JSON.stringify(extras[k])}`).join(', ') + ' }'
+    ? ` { ${extraKeys.map((k) => `${k}=${JSON.stringify(extras[k])}`).join(', ')} }`
     : ''
   console.log(`  [${i}] ${n.name ?? '(unnamed)'}${tag}`)
 }

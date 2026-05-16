@@ -122,8 +122,7 @@ export async function bootBikeViewer(parent: HTMLElement, opts: ViewerOpts): Pro
     'border-radius:6px',
     'z-index:10',
   ].join(';')
-  helpHud.innerHTML =
-    'orbit: drag · pan: shift+drag · zoom: scroll · backend: <b>' + backend + '</b>'
+  helpHud.innerHTML = `orbit: drag · pan: shift+drag · zoom: scroll · backend: <b>${backend}</b>`
   parent.appendChild(helpHud)
 
   // Initial load.
@@ -284,8 +283,8 @@ function renderHud(refs: Refs, onSwitch: (bikeId: string) => void): void {
     btn.textContent = b.displayName
     btn.style.cssText = [
       'padding:4px 8px',
-      'border:1px solid ' + (b.id === current.id ? '#5cf2ff' : '#2a3340'),
-      'background:' + (b.id === current.id ? '#16242c' : '#1a2028'),
+      `border:1px solid ${b.id === current.id ? '#5cf2ff' : '#2a3340'}`,
+      `background:${b.id === current.id ? '#16242c' : '#1a2028'}`,
       'color:#dde6ee',
       'border-radius:4px',
       'cursor:pointer',
