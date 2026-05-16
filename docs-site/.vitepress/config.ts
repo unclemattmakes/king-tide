@@ -13,6 +13,7 @@ export default defineConfig({
       { text: 'Build', link: '/build/setup' },
       { text: 'Gameplay', link: '/gameplay/bikes' },
       { text: 'Modding', link: '/modding/overview' },
+      { text: 'Blender', link: '/blender/overview' },
       { text: 'Contributing', link: '/contributing/' },
       { text: 'Reference', link: '/reference/conventions' },
       {
@@ -50,6 +51,17 @@ export default defineConfig({
             { text: 'Authoring bikes', link: '/modding/bikes' },
             { text: 'Authoring props', link: '/modding/props' },
             { text: 'Authoring tracks', link: '/modding/tracks' },
+          ],
+        },
+      ],
+      '/blender/': [
+        {
+          text: 'Blender',
+          items: [
+            { text: 'Overview', link: '/blender/overview' },
+            { text: 'Your first track', link: '/blender/your-first-track' },
+            { text: 'Addon reference', link: '/blender/addon-reference' },
+            { text: 'Scene conventions', link: '/blender/scene-conventions' },
           ],
         },
       ],
