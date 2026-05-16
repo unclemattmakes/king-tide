@@ -52,6 +52,7 @@ from . import (
     bake,
     boost_pad,
     downtown,
+    export,
     ghost_lap,
     placement_helper,
     previews,
@@ -83,6 +84,7 @@ _MODULES = (
     tunnel,
     road,
     previews,
+    export,
     _legacy,
 )
 
