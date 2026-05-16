@@ -139,6 +139,52 @@ _OBSTACLE_NAME_EXCLUDES = (
 _OBSTACLE_MIN_HEIGHT_M = 5.0
 
 
+def _collect_obstacle_bboxes(
+    terrain_obj: bpy.types.Object | None,
+    *,
+    padding: float = 0.0,
+) -> list[tuple[bpy.types.Object, float, float, float, float]]:
+    """Return ``[(obj, xmin, xmax, ymin, ymax), …]`` for every visible
+    ``kind="track"`` mesh that looks like a real obstacle — i.e. not
+    the terrain, not road infrastructure, and at least
+    ``_OBSTACLE_MIN_HEIGHT_M`` tall. Bbox is in world space, optionally
+    padded by ``padding`` metres on each side so callers can include
+    a clearance band (positive padding = stricter, treats nearby
+    points as already-clipping).
+
+    Single source of truth shared by ``_spline_obstacle_clearance``
+    (lint) and ``HOVERBIKE_OT_shift_spline_off_obstacles`` (authoring
+    fix). Keeping the heuristic in one place stops the two callers
+    from disagreeing about what counts as an obstacle."""
+    obstacles: list[tuple[bpy.types.Object, float, float, float, float]] = []
+    for obj in bpy.data.objects:
+        if obj.type != "MESH":
+            continue
+        if obj.get("kind") != "track":
+            continue
+        if obj == terrain_obj:
+            continue
+        if obj.hide_get() or obj.hide_viewport:
+            continue
+        name_lc = obj.name.lower()
+        if any(p in name_lc for p in _OBSTACLE_NAME_EXCLUDES):
+            continue
+        bb = obj.bound_box
+        mw = obj.matrix_world
+        xs, ys, zs = [], [], []
+        for corner in bb:
+            wc = mw @ mathutils.Vector(corner)
+            xs.append(wc.x); ys.append(wc.y); zs.append(wc.z)
+        if (max(zs) - min(zs)) < _OBSTACLE_MIN_HEIGHT_M:
+            continue
+        obstacles.append(
+            (obj,
+             min(xs) - padding, max(xs) + padding,
+             min(ys) - padding, max(ys) + padding)
+        )
+    return obstacles
+
+
 def _spline_obstacle_clearance(
     sp_obj: bpy.types.Object,
     terrain_obj: bpy.types.Object | None,
@@ -176,30 +222,7 @@ def _spline_obstacle_clearance(
     the building's wall."""
     if sp_obj is None or sp_obj.type != "CURVE":
         return []
-    obstacles: list[tuple[bpy.types.Object, tuple[float, float, float, float]]] = []
-    for obj in bpy.data.objects:
-        if obj.type != "MESH":
-            continue
-        if obj.get("kind") != "track":
-            continue
-        if obj == terrain_obj:
-            continue
-        if obj.hide_get() or obj.hide_viewport:
-            continue
-        name_lc = obj.name.lower()
-        if any(p in name_lc for p in _OBSTACLE_NAME_EXCLUDES):
-            continue
-        bb = obj.bound_box
-        mw = obj.matrix_world
-        xs, ys, zs = [], [], []
-        for corner in bb:
-            wc = mw @ mathutils.Vector(corner)
-            xs.append(wc.x); ys.append(wc.y); zs.append(wc.z)
-        if (max(zs) - min(zs)) < _OBSTACLE_MIN_HEIGHT_M:
-            continue
-        obstacles.append(
-            (obj, (min(xs) - radius, max(xs) + radius, min(ys) - radius, max(ys) + radius))
-        )
+    obstacles = _collect_obstacle_bboxes(terrain_obj, padding=radius)
     if not obstacles:
         return []
     hits: list[tuple[str, str]] = []
@@ -213,7 +236,7 @@ def _spline_obstacle_clearance(
             else:
                 local = mathutils.Vector((pt.co[0], pt.co[1], pt.co[2]))
             w = mw @ local
-            for obj, (xmin, xmax, ymin, ymax) in obstacles:
+            for obj, xmin, xmax, ymin, ymax in obstacles:
                 if xmin <= w.x <= xmax and ymin <= w.y <= ymax:
                     hits.append((f"pt_{sample_idx}", obj.name))
                     break

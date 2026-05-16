@@ -339,6 +339,111 @@ class HOVERBIKE_OT_auto_place_ramps(Operator):
 
 
 # ────────────────────────────────────────────────────────────────────
+# Auto-shift spline off obstacles
+# ────────────────────────────────────────────────────────────────────
+
+
+class HOVERBIKE_OT_shift_spline_off_obstacles(Operator):
+    """Push every ``ai_spline_main`` control point that clips into a
+    tall kind=track mesh out of that mesh's XY footprint plus a
+    configurable clearance margin. Direction of push is perpendicular
+    to the nearest bbox edge — left if the point is closer to the
+    obstacle's left wall, right if closer to the right, etc. — so a
+    point grazing a building's east face gets nudged east rather than
+    straight through the building.
+
+    Pairs with the lint check (and the live obstacle-clip count in
+    the parent panel) that flagged the conflict. Runs in a single
+    pass; if two obstacles overlap their clearance bands the first
+    push may land the point inside the second one, in which case the
+    operator can be re-run. The report tells the author how many
+    points were touched and the total horizontal distance moved so
+    they can tell whether the route is now meaningfully different.
+
+    Z is left alone — only XY is shifted. Authors who lift a spline
+    off the seabed should use *Snap Spline to Terrain* afterwards."""
+
+    bl_idname = "hoverbike.shift_spline_off_obstacles"
+    bl_label = "Shift Off Obstacles"
+    bl_description = (
+        "Nudge spline control points out of tall kind=track meshes they clip "
+        "into. Push direction = nearest bbox edge"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    margin: FloatProperty(  # type: ignore[valid-type]
+        name="Clearance margin (m)",
+        description=(
+            "Extra distance past the obstacle's edge to push points, on top "
+            "of the lint's bbox padding. 4-6 m typically clears the bike's body."
+        ),
+        default=4.0, min=0.0, max=20.0, precision=1,
+    )
+
+    def execute(self, context):
+        from ._legacy import _largest_terrain_mesh, _spline_iter_points
+        from .track_meta import _collect_obstacle_bboxes
+
+        sp = bpy.data.objects.get("ai_spline_main")
+        if sp is None or sp.type != "CURVE":
+            self.report({"ERROR"}, "No ai_spline_main in the scene.")
+            return {"CANCELLED"}
+
+        terrain = _largest_terrain_mesh()
+        # Same padding the lint uses (so the operator clears what lint
+        # warns about); margin then adds the requested extra clearance.
+        obstacles = _collect_obstacle_bboxes(terrain, padding=4.0)
+        if not obstacles:
+            self.report({"INFO"}, "No obstacles in scene — nothing to shift.")
+            return {"FINISHED"}
+
+        shifted = 0
+        total_distance = 0.0
+        obstacles_hit: set[str] = set()
+        for _spline, _pt, world_co, setter in _spline_iter_points(sp):
+            x, y = world_co.x, world_co.y
+            new_x, new_y = x, y
+            for obj, xmin, xmax, ymin, ymax in obstacles:
+                if not (xmin <= new_x <= xmax and ymin <= new_y <= ymax):
+                    continue
+                # Distance to exit each of the 4 sides from the current
+                # (already-shifted) point. Push in the cheapest direction.
+                exit_left  = new_x - xmin
+                exit_right = xmax - new_x
+                exit_down  = new_y - ymin
+                exit_up    = ymax - new_y
+                shortest = min(exit_left, exit_right, exit_down, exit_up)
+                push = shortest + self.margin
+                if shortest == exit_left:
+                    new_x -= push
+                elif shortest == exit_right:
+                    new_x += push
+                elif shortest == exit_down:
+                    new_y -= push
+                else:
+                    new_y += push
+                obstacles_hit.add(obj.name)
+            if (new_x, new_y) != (x, y):
+                shifted += 1
+                total_distance += math.hypot(new_x - x, new_y - y)
+                setter(mathutils.Vector((new_x, new_y, world_co.z)))
+
+        # Force a depsgraph refresh so the gate / clip-count previews
+        # see the new spline immediately.
+        sp.data.update_tag()
+
+        if shifted == 0:
+            self.report({"INFO"}, "No spline points were clipping. Nothing to shift.")
+        else:
+            self.report(
+                {"INFO"},
+                f"Shifted {shifted} point(s) {total_distance:.1f} m total "
+                f"away from: {', '.join(sorted(obstacles_hit))}.",
+            )
+        return {"FINISHED"}
+
+
+# ────────────────────────────────────────────────────────────────────
 # Registration
 # ────────────────────────────────────────────────────────────────────
 
@@ -347,6 +452,7 @@ _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_snap_starts_to_spline,
     HOVERBIKE_OT_add_ramp_at_spline_t,
     HOVERBIKE_OT_auto_place_ramps,
+    HOVERBIKE_OT_shift_spline_off_obstacles,
 )
 
 

@@ -450,17 +450,19 @@ def _snap_spline_to_terrain(curve_obj: bpy.types.Object, *, hover_m: float) -> d
     sit above the actual ground. Returns counts of hits / misses /
     water-snaps for the operator report.
 
-    Preview collections are excluded during the raycast so the gate /
-    racer / water gizmos never catch the ray. `road_main` (if present)
-    is temporarily hidden during the cast too so the spline lands on
-    terrain rather than on the road slab it lives above. The
-    depsgraph has to be re-fetched *inside* the `with` block:
-    capturing it before the exclusion takes effect leaves the cast
-    still hitting gizmos."""
-    from ._legacy import _PreviewCollectionsHidden, _spline_iter_points
-    from .road import ROAD_OBJECT_NAME
+    Cast lands on the *terrain mesh only* (largest kind=track mesh),
+    not the scene at large. Previously this used ``scene.ray_cast``
+    which would land on the first visible mesh — that meant downtown
+    buildings, ramps, or the road slab caught the ray and the spline
+    snapped onto their roofs instead of the ground. The terrain-only
+    cast also makes the old "temporarily hide road_main during the
+    cast" workaround unnecessary.
 
-    scene = bpy.context.scene
+    Preview collections are still excluded for paranoia, but the
+    real isolation now comes from picking the terrain mesh as the
+    cast target."""
+    from ._legacy import _PreviewCollectionsHidden, _spline_iter_points, _largest_terrain_mesh
+
     hits = 0
     misses = 0
     water_snaps = 0
@@ -469,7 +471,7 @@ def _snap_spline_to_terrain(curve_obj: bpy.types.Object, *, hover_m: float) -> d
         if world_co.z > high_z:
             high_z = world_co.z
     origin_z = high_z + 1000.0
-    down = mathutils.Vector((0.0, 0.0, -1.0))
+    down_world = mathutils.Vector((0.0, 0.0, -1.0))
 
     # Water surface y comes from `water_volume_main`'s Z (the empty's
     # position is the source of truth — see derive_track_json /
@@ -478,38 +480,34 @@ def _snap_spline_to_terrain(curve_obj: bpy.types.Object, *, hover_m: float) -> d
     vol = bpy.data.objects.get("water_volume_main")
     water_z = float(vol.matrix_world.translation.z) if vol is not None else float("-inf")
 
-    road_obj = bpy.data.objects.get(ROAD_OBJECT_NAME)
-    prior_road_hidden = road_obj.hide_viewport if road_obj is not None else None
+    terrain = _largest_terrain_mesh()
+    if terrain is None:
+        return {"hits": 0, "misses": 0, "water_snaps": 0, "no_terrain": True}
+    terrain_mw = terrain.matrix_world
+    terrain_mw_inv = terrain_mw.inverted_safe()
+    down_local = terrain_mw_inv.to_3x3() @ down_world
 
-    try:
-        if road_obj is not None:
-            road_obj.hide_viewport = True
-        with _PreviewCollectionsHidden(bpy.context.view_layer):
-            bpy.context.view_layer.update()
-            depsgraph = bpy.context.evaluated_depsgraph_get()
-            for _spline, _pt, world_co, setter in _spline_iter_points(curve_obj):
-                origin = mathutils.Vector((world_co.x, world_co.y, origin_z))
-                result, location, _normal, _index, _obj, _matrix = scene.ray_cast(
-                    depsgraph, origin, down
-                )
-                terrain_z = float(location.z) if result else float("-inf")
-                # Clamp to the water surface where terrain is below it.
-                # `target_surface` is the drivable Y at this xy.
-                target_surface = max(terrain_z, water_z)
-                if target_surface == float("-inf"):
-                    # No terrain hit AND no water — leave the point alone.
-                    misses += 1
-                    continue
-                new_co = mathutils.Vector(
-                    (world_co.x, world_co.y, target_surface + hover_m)
-                )
-                setter(new_co)
-                hits += 1
-                if water_z > terrain_z:
-                    water_snaps += 1
-    finally:
-        if road_obj is not None and prior_road_hidden is not None:
-            road_obj.hide_viewport = prior_road_hidden
+    with _PreviewCollectionsHidden(bpy.context.view_layer):
+        bpy.context.view_layer.update()
+        for _spline, _pt, world_co, setter in _spline_iter_points(curve_obj):
+            origin_world = mathutils.Vector((world_co.x, world_co.y, origin_z))
+            origin_local = terrain_mw_inv @ origin_world
+            result, loc_local, _normal, _index = terrain.ray_cast(
+                origin_local, down_local, distance=origin_z * 2.0
+            )
+            terrain_z = float((terrain_mw @ loc_local).z) if result else float("-inf")
+            target_surface = max(terrain_z, water_z)
+            if target_surface == float("-inf"):
+                # No terrain hit AND no water — leave the point alone.
+                misses += 1
+                continue
+            new_co = mathutils.Vector(
+                (world_co.x, world_co.y, target_surface + hover_m)
+            )
+            setter(new_co)
+            hits += 1
+            if water_z > terrain_z:
+                water_snaps += 1
 
     # Force a depsgraph refresh so the spline polyline samples the new
     # control points immediately (the gate/turn previews will follow via
