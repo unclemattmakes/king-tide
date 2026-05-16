@@ -13,6 +13,7 @@
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { ExportedKind } from '../engine/asset-kinds'
 import { createRenderer } from '../engine/render/renderer'
 import { type LoadedBike, loadBike } from '../game/assets/bike-loader'
 import { type AssetManifest, type BikeManifestEntry, loadManifest } from '../game/assets/manifest'
@@ -171,10 +172,10 @@ function mountBike(scene: THREE.Scene, axesGroup: THREE.Group, loaded: LoadedBik
   const socketMat = new THREE.MeshBasicMaterial({ color: 0x66ff99 })
   const colliderEdgeMat = new THREE.LineBasicMaterial({ color: 0xffaa33 })
   node.traverse((obj) => {
-    if (obj.userData?.kind === 'socket') {
+    if (obj.userData?.kind === ExportedKind.SOCKET) {
       const dot = new THREE.Mesh(socketGeo, socketMat)
       obj.add(dot)
-    } else if (obj.userData?.kind === 'collider') {
+    } else if (obj.userData?.kind === ExportedKind.COLLIDER) {
       // Wireframe of the half-extents box if shape=box.
       const he = obj.userData?.half_extents
       if (Array.isArray(he) && he.length === 3) {

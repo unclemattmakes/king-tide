@@ -41,7 +41,6 @@ import { fileURLToPath } from 'node:url'
 
 const __filename = fileURLToPath(import.meta.url)
 const SCRIPT_DIR = path.dirname(__filename)
-const REPO_ROOT = path.resolve(SCRIPT_DIR, '..', '..')
 const SOURCE = path.join(SCRIPT_DIR, 'hoverbike_addon.py')
 
 const args = new Set(process.argv.slice(2))
@@ -108,7 +107,15 @@ function userAddonsDir(version) {
     return path.join(appdata, 'Blender Foundation', 'Blender', version, 'scripts', 'addons')
   }
   if (platform() === 'darwin') {
-    return path.join(home, 'Library', 'Application Support', 'Blender', version, 'scripts', 'addons')
+    return path.join(
+      home,
+      'Library',
+      'Application Support',
+      'Blender',
+      version,
+      'scripts',
+      'addons',
+    )
   }
   // linux / *bsd
   const xdg = process.env.XDG_CONFIG_HOME ?? path.join(home, '.config')
@@ -220,6 +227,8 @@ function main() {
 }
 
 function printPostInstall(target) {
+  log('')
+  log(`installed at: ${target}`)
   log('')
   log('Next steps in Blender (one-time, if not already enabled):')
   log('  Edit → Preferences → Add-ons → enable "Hoverbike: Export to Game"')

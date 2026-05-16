@@ -1,6 +1,8 @@
 import type * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 
+import { ExportedKind } from '../../engine/asset-kinds'
+
 /**
  * Render-side prop GLB loader.
  *
@@ -63,9 +65,9 @@ async function doLoad(url: string): Promise<LoadedProp> {
 
   scene.traverse((obj) => {
     const kind = obj.userData?.kind
-    if (kind === 'prop') {
+    if (kind === ExportedKind.PROP) {
       root = obj
-    } else if (kind === 'collider') {
+    } else if (kind === ExportedKind.COLLIDER) {
       const shape = obj.userData?.shape
       if (shape !== 'box' && shape !== 'capsule' && shape !== 'cylinder' && shape !== 'sphere') {
         return
@@ -91,7 +93,7 @@ async function doLoad(url: string): Promise<LoadedProp> {
   })
 
   if (!root) {
-    throw new Error(`prop GLB ${url} is missing a node with extras.kind="prop"`)
+    throw new Error(`prop GLB ${url} is missing a node with extras.kind="${ExportedKind.PROP}"`)
   }
   const e = (root as THREE.Object3D).userData
   return {
@@ -108,7 +110,7 @@ export function cloneLoadedProp(loaded: LoadedProp): THREE.Object3D {
   const root = loaded.root.clone(true)
   // Hide collider/socket gizmos in the visual scene.
   root.traverse((obj) => {
-    if (obj.userData?.kind === 'collider') obj.visible = false
+    if (obj.userData?.kind === ExportedKind.COLLIDER) obj.visible = false
   })
   return root
 }

@@ -51,6 +51,27 @@ Setup (optional — code-only work doesn't need it):
 If Claude can't reach Blender, the usual cause is Blender not running, or the
 addon's TCP server having been stopped from its preferences panel.
 
+## Asset `kind` registry
+
+Object-extras `kind` values that flow Blender → glTF → runtime live in two
+mirrored files:
+
+- `tools/blender/hoverbike_kinds.py` — Python-side constants. Use
+  `ExportedKind.TRACK` etc. when tagging objects, not string literals.
+- `src/engine/asset-kinds.ts` — TypeScript-side constants. Use
+  `ExportedKind.TRACK` when reading `obj.userData.kind`.
+
+The unit test `tests/unit/asset-kinds.test.ts` parses both files and fails
+if they drift — adding a value to one side without the other is caught at
+CI time.
+
+Python-only kinds (authoring helpers that never ship in the GLB) live in
+`AuthoringKind` in the same Python file with no TS counterpart.
+
+Use the constants at all new sites. There's still a long tail of literal
+string sites in `hoverbike_addon.py` and `seed_*.py` waiting for a follow-up
+migration pass — feel free to fix them opportunistically.
+
 ## Hoverbike addon — installation
 
 The Hoverbike addon (`tools/blender/hoverbike_addon.py`) lives in the repo but

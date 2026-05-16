@@ -1,3 +1,4 @@
+import { ExportedKind } from '@/engine/asset-kinds'
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import type { Checkpoint, Track } from './types'
 
@@ -107,15 +108,15 @@ export function buildTrackFromGltf(gltf: GltfRoot, opts: LoadTrackOptions): Trac
     else byKind.set(kind, [node])
   }
 
-  const starts = byKind.get('start') ?? []
-  if (starts.length === 0) throw new Error('glb: missing kind=start')
+  const starts = byKind.get(ExportedKind.START) ?? []
+  if (starts.length === 0) throw new Error(`glb: missing kind=${ExportedKind.START}`)
   starts.sort((a, b) => (a.extras?.index ?? 0) - (b.extras?.index ?? 0))
   const start0 = starts[0]!
   const startPos = readTranslation(start0)
   const startYaw = readYaw(start0)
 
-  const cps = byKind.get('checkpoint') ?? []
-  if (cps.length === 0) throw new Error('glb: missing kind=checkpoint')
+  const cps = byKind.get(ExportedKind.CHECKPOINT) ?? []
+  if (cps.length === 0) throw new Error(`glb: missing kind=${ExportedKind.CHECKPOINT}`)
   cps.sort((a, b) => (a.extras?.index ?? 0) - (b.extras?.index ?? 0))
   const checkpoints: Checkpoint[] = cps.map((node, i) => {
     const idx = node.extras?.index
@@ -140,19 +141,19 @@ export function buildTrackFromGltf(gltf: GltfRoot, opts: LoadTrackOptions): Trac
     }
   })
 
-  const pickups = byKind.get('pickup_spawn') ?? []
+  const pickups = byKind.get(ExportedKind.PICKUP_SPAWN) ?? []
   const pickupSpawns: Vec3[] = pickups.map(readTranslation)
 
-  const splineNodes = byKind.get('ai_spline') ?? []
+  const splineNodes = byKind.get(ExportedKind.AI_SPLINE) ?? []
   const aiSplines = splineNodes.map((node) => {
     const branch = node.extras?.branch
     const points = node.extras?.points
     if (typeof branch !== 'string') {
-      throw new Error(`glb: ai_spline ${node.name ?? '?'} missing extras.branch`)
+      throw new Error(`glb: ${ExportedKind.AI_SPLINE} ${node.name ?? '?'} missing extras.branch`)
     }
     if (!Array.isArray(points) || points.length < 6 || points.length % 3 !== 0) {
       throw new Error(
-        `glb: ai_spline ${node.name ?? '?'} extras.points must be a flat [x,y,z,...] with >=2 points (got ${points?.length ?? 0} floats)`,
+        `glb: ${ExportedKind.AI_SPLINE} ${node.name ?? '?'} extras.points must be a flat [x,y,z,...] with >=2 points (got ${points?.length ?? 0} floats)`,
       )
     }
     const samples: Vec3[] = []
@@ -166,7 +167,7 @@ export function buildTrackFromGltf(gltf: GltfRoot, opts: LoadTrackOptions): Trac
     return { id: branch, points: samples }
   })
   if (!aiSplines.some((s) => s.id === 'main')) {
-    throw new Error('glb: missing ai_spline branch=main')
+    throw new Error(`glb: missing ${ExportedKind.AI_SPLINE} branch=main`)
   }
 
   return {
