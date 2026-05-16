@@ -10,6 +10,9 @@ hero:
       text: Build & run
       link: /build/setup
     - theme: alt
+      text: Your first track
+      link: /blender/your-first-track
+    - theme: alt
       text: Modding pipeline
       link: /modding/overview
     - theme: alt
@@ -29,6 +32,10 @@ features:
     details: Author bikes, props, and tracks from JSON specs. Headless Blender builds the GLBs; the runtime auto-loads them.
     link: /modding/overview
     linkText: Pipeline overview
+  - title: Blender
+    details: In-Blender addon, panel-by-panel reference, scene conventions, and a blank-scene-to-playable-map tutorial.
+    link: /blender/overview
+    linkText: Blender pipeline
   - title: Contributing
     details: Architecture rules, testing strategy, and the PR workflow for hacking on the engine itself.
     link: /contributing/
@@ -44,6 +51,7 @@ features:
 This is the **dev + modder-facing** documentation. If you're trying to:
 
 - **Run the game locally** or wire up a controller → start in [Build & Run](/build/setup).
+- **Build your first track in Blender** → [Your first track](/blender/your-first-track) — blank scene to playable map.
 - **Make a new bike, prop, or track** → [Modding](/modding/overview).
 - **Hack on the engine itself** → [Contributing](/contributing/).
 - **Look up a number** (top speed, hover height, pickup behavior) → [Gameplay](/gameplay/bikes).
