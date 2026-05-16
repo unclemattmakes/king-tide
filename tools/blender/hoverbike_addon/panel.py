@@ -110,6 +110,11 @@ class HOVERBIKE_PT_panel(Panel):
                         text=f"{len(clip_hits)} spline clip(s) into {distinct} obstacle(s)",
                         icon="ERROR",
                     )
+                    stat_box.operator(
+                        "hoverbike.shift_spline_off_obstacles",
+                        text="Shift Off Obstacles",
+                        icon="MOD_PUSH",
+                    )
                 # Comfort-band nudge — racing-feel sweet spot is roughly
                 # 30-180 s. Outside that the lap is either too punchy to
                 # read or long enough to drag.
