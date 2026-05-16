@@ -55,6 +55,7 @@ from . import (
     export,
     ghost_lap,
     handlers,
+    panel,
     placement_helper,
     previews,
     ramp,
@@ -90,6 +91,9 @@ _MODULES = (
     track_meta,
     handlers,
     _legacy,
+    # panel registers last so every operator + scene prop it references
+    # already exists in bpy.types when its draw() methods run.
+    panel,
 )
 
 
