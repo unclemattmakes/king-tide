@@ -23,6 +23,7 @@ import { createIslandMesh } from '@/engine/render/arena-mesh'
 import { createCliffsideMesh } from '@/engine/render/cliffside-mesh'
 import { attachTrackColliders, loadGlbTrackVisuals } from '@/engine/render/glb-track'
 import { createRampMesh } from '@/engine/render/ramp-mesh'
+import { buildTerrainHeightmap, type TerrainHeightmap } from '@/engine/render/terrain-heightmap'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { createLagoonIsland, createSafetyFloor } from '@/game/entities/arena'
 import { createCliffsideTerrain } from '@/game/entities/cliffside-terrain'
@@ -34,32 +35,56 @@ import { createLagoonLoop } from '@/game/tracks/lagoon-loop'
 import type { Track } from '@/game/tracks/types'
 import { emptyDraftTrack } from './utils'
 
+export type LoadedTrack = {
+  track: Track
+  /** Top-down max-Y heightmap of all static terrain in the track, used by
+   *  the water shader to attenuate wave displacement in shallows and drive
+   *  surf foam. Null in edit mode and for the empty-draft fallback (no
+   *  terrain to sample). */
+  terrainHeightmap: TerrainHeightmap | null
+}
+
 export async function loadTrackForBoot(opts: {
   trackId: string
   scene: THREE.Scene
   phys: PhysicsWorld
   editMode: boolean
-}): Promise<Track> {
+}): Promise<LoadedTrack> {
   const { trackId, scene, phys, editMode } = opts
 
   // Universal: backstop floor for any track.
   createSafetyFloor(phys)
+
+  // Collects every render-side terrain root added below so we can bake a
+  // single combined heightmap at the end. Each entry is a THREE.Object3D
+  // whose world-baked geometry the heightmap walks.
+  const terrainRoots: THREE.Object3D[] = []
 
   // Per-track terrain (physics + visuals). Procedural tracks build their
   // own terrain in code; .glb-backed tracks load mesh + collider geometry
   // straight from the asset.
   if (trackId === 'cliffside') {
     createCliffsideTerrain(phys)
-    scene.add(createCliffsideMesh())
+    const m = createCliffsideMesh()
+    scene.add(m)
+    terrainRoots.push(m)
   } else if (trackId === 'lagoon') {
     createLagoonIsland(phys)
-    scene.add(createIslandMesh())
+    const island = createIslandMesh()
+    scene.add(island)
+    terrainRoots.push(island)
     createRamp(phys)
-    scene.add(createRampMesh())
+    const ramp = createRampMesh()
+    scene.add(ramp)
+    terrainRoots.push(ramp)
   }
 
-  if (trackId === 'cliffside') return createCliffside()
-  if (trackId === 'lagoon') return createLagoonLoop()
+  if (trackId === 'cliffside') {
+    return { track: createCliffside(), terrainHeightmap: buildTerrainHeightmap(terrainRoots) }
+  }
+  if (trackId === 'lagoon') {
+    return { track: createLagoonLoop(), terrainHeightmap: buildTerrainHeightmap(terrainRoots) }
+  }
 
   // Try a JSON-authored track first (gameplay data from the in-app
   // editor or hand-edited spec). On 404, fall back to a hand-authored
@@ -82,8 +107,9 @@ export async function loadTrackForBoot(opts: {
       })
       scene.add(env.scene)
       attachTrackColliders(env.scene, phys)
+      terrainRoots.push(env.scene)
     }
-    return track
+    return { track, terrainHeightmap: buildTerrainHeightmap(terrainRoots) }
   }
   if (!jsonRes.ok && jsonRes.status !== 404) {
     throw new Error(`track: fetch ${jsonUrl} failed: ${jsonRes.status} ${jsonRes.statusText}`)
@@ -112,11 +138,12 @@ export async function loadTrackForBoot(opts: {
       const env = await loadGlbTrackVisuals(glbUrl)
       scene.add(env.scene)
       attachTrackColliders(env.scene, phys)
+      terrainRoots.push(env.scene)
     }
-    return track
+    return { track, terrainHeightmap: buildTerrainHeightmap(terrainRoots) }
   }
   if (editMode) {
-    return emptyDraftTrack(trackId)
+    return { track: emptyDraftTrack(trackId), terrainHeightmap: null }
   }
   throw new Error(`track: no JSON at ${jsonUrl} and no GLB at ${glbUrl}`)
 }

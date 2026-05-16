@@ -92,7 +92,13 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
   applyStoredWaterTuning(waterMesh)
 
   const trackId = 'lagoon'
-  const track = await loadTrackForBoot({ trackId, scene, phys, editMode: false })
+  const { track, terrainHeightmap } = await loadTrackForBoot({
+    trackId,
+    scene,
+    phys,
+    editMode: false,
+  })
+  if (terrainHeightmap) waterMesh.setTerrainHeightmap(terrainHeightmap)
 
   const sky = createSkySystem({
     scene,
