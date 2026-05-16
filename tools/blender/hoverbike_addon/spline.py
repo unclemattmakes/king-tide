@@ -273,7 +273,8 @@ class HOVERBIKE_OT_auto_place_ramps(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-        from ._legacy import _create_gn_ramp, _sample_curve_to_polyline
+        from ._legacy import _sample_curve_to_polyline
+        from .ramp import create_gn_ramp
         from .turn_indicators import _signed_curvature_peaks
 
         scene = context.scene
@@ -310,7 +311,7 @@ class HOVERBIKE_OT_auto_place_ramps(Operator):
             self.report({"ERROR"}, "Invalid ramp dimensions — fix length/width/height first.")
             return {"CANCELLED"}
 
-        # _create_gn_ramp picks `ramp_NN`. Auto-placed ramps used to
+        # create_gn_ramp picks `ramp_NN`. Auto-placed ramps used to
         # carry the `ramp_auto_NN` prefix so re-runs could wipe just
         # those; with the unified GN-ramp pipeline they share the
         # `ramp_NN` namespace. Re-runs leave prior placements alone —
@@ -321,7 +322,7 @@ class HOVERBIKE_OT_auto_place_ramps(Operator):
             tx, ty, _ = p["tangent"]
             yaw = yaw_from_tangent_xy(tx, ty)
             z = _cursor_road_z_at(scene, x, y, float(p["position"][2])) + 0.01
-            _create_gn_ramp(
+            create_gn_ramp(
                 scene,
                 location=(x, y, z),
                 rotation_z=yaw,
