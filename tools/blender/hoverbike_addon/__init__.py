@@ -54,6 +54,7 @@ from . import (
     downtown,
     ghost_lap,
     placement_helper,
+    previews,
     ramp,
     road,
     spline,
@@ -81,6 +82,7 @@ _MODULES = (
     downtown,
     tunnel,
     road,
+    previews,
     _legacy,
 )
 
