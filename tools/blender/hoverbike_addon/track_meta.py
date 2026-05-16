@@ -129,6 +129,98 @@ class HOVERBIKE_OT_refresh_track_stats(Operator):
 # launch the runtime first.
 
 
+_OBSTACLE_NAME_EXCLUDES = (
+    "road_",          # road tool output (road_main, road_main_mesh)
+    "ramp_",          # ramp tool output (ramps are meant to be ridden)
+    "tunnel_",        # tunnel interiors (spline runs through them)
+    "_bridge",        # hand-built bridges (e.g. i90_bridge in Seattle)
+    "bridge_",
+)
+_OBSTACLE_MIN_HEIGHT_M = 5.0
+
+
+def _spline_obstacle_clearance(
+    sp_obj: bpy.types.Object,
+    terrain_obj: bpy.types.Object | None,
+    *,
+    radius: float = 4.0,
+) -> list[tuple[str, str]]:
+    """Catch spline points that clip into buildings, walls, or other
+    tall non-terrain kind=track meshes. Returns
+    ``[(spline_pt_name, hit_name), …]`` so the lint can mention
+    specific objects in the warning.
+
+    Why this exists: every drivable mesh carries ``kind="track"``, so
+    the older "spline above non-kind=track" check waved past downtown
+    blocks, locks walls, lock gates, etc. — the road tool would then
+    raycast onto a building roof and the road would climb 80 m onto a
+    tower. After the May-2026 raycast fix the road tool casts onto
+    the terrain mesh only, but a *spline point inside a building*
+    still spawns the bike inside a wall. Linting it surfaces the
+    conflict pre-export.
+
+    Filters obstacles two ways to keep false positives down:
+
+      * **Name exclusions** drop road infrastructure (road slabs,
+        ramps, tunnel interiors, bridges) — the spline is *supposed*
+        to coincide with these, so flagging them is noise.
+      * **Height threshold** (``>= _OBSTACLE_MIN_HEIGHT_M``) drops
+        decorative low-profile meshes (curbs, pad bases) and leaves
+        buildings / pylons / walls in scope.
+
+    Uses XY bounding-box overlap (cheap, no raycasts) padded by
+    ``radius`` so a spline that grazes a building by 2 m still triggers
+    the warning. Vertical extent is part of the *filter* (skip short
+    things) but not the *test* — a spline at z=2 over a building whose
+    top is z=80 still counts because the bike's chassis would clip
+    the building's wall."""
+    if sp_obj is None or sp_obj.type != "CURVE":
+        return []
+    obstacles: list[tuple[bpy.types.Object, tuple[float, float, float, float]]] = []
+    for obj in bpy.data.objects:
+        if obj.type != "MESH":
+            continue
+        if obj.get("kind") != "track":
+            continue
+        if obj == terrain_obj:
+            continue
+        if obj.hide_get() or obj.hide_viewport:
+            continue
+        name_lc = obj.name.lower()
+        if any(p in name_lc for p in _OBSTACLE_NAME_EXCLUDES):
+            continue
+        bb = obj.bound_box
+        mw = obj.matrix_world
+        xs, ys, zs = [], [], []
+        for corner in bb:
+            wc = mw @ mathutils.Vector(corner)
+            xs.append(wc.x); ys.append(wc.y); zs.append(wc.z)
+        if (max(zs) - min(zs)) < _OBSTACLE_MIN_HEIGHT_M:
+            continue
+        obstacles.append(
+            (obj, (min(xs) - radius, max(xs) + radius, min(ys) - radius, max(ys) + radius))
+        )
+    if not obstacles:
+        return []
+    hits: list[tuple[str, str]] = []
+    mw = sp_obj.matrix_world
+    sample_idx = 0
+    for spline in sp_obj.data.splines:
+        pts = spline.bezier_points if spline.type == "BEZIER" else spline.points
+        for pt in pts:
+            if spline.type == "BEZIER":
+                local = pt.co
+            else:
+                local = mathutils.Vector((pt.co[0], pt.co[1], pt.co[2]))
+            w = mw @ local
+            for obj, (xmin, xmax, ymin, ymax) in obstacles:
+                if xmin <= w.x <= xmax and ymin <= w.y <= ymax:
+                    hits.append((f"pt_{sample_idx}", obj.name))
+                    break
+            sample_idx += 1
+    return hits
+
+
 def _lint_track(scene) -> tuple[list[str], list[str]]:
     """Return (errors, warnings) for the current track scene. ERRORS
     are blockers (won't drive); WARNINGS are smells (might race oddly).
@@ -209,6 +301,29 @@ def _lint_track(scene) -> tuple[list[str], list[str]]:
                 warnings.append(
                     f"{wrong_kind_count} spline point(s) sit above a non-`kind=track` mesh; "
                     f"the runtime won't collide with decoration."
+                )
+
+            # Obstacle clearance: spline points whose XY position falls
+            # inside (or within a small margin of) a non-terrain
+            # collidable mesh's footprint. Surfaces the "AI racing line
+            # threads through a building" failure the older lint
+            # silently missed because everything collidable is
+            # kind=track. Limited to 8 reported pairs so a dense
+            # downtown doesn't dump 200 lines into the info bar.
+            clearance_hits = _spline_obstacle_clearance(sp, terrain)
+            if clearance_hits:
+                by_obj: dict[str, int] = {}
+                for _pt, obj_name in clearance_hits:
+                    by_obj[obj_name] = by_obj.get(obj_name, 0) + 1
+                worst = sorted(by_obj.items(), key=lambda kv: -kv[1])[:8]
+                summary = ", ".join(f"{name}×{count}" for name, count in worst)
+                more = (
+                    f" (+{len(by_obj) - len(worst)} more)" if len(by_obj) > len(worst) else ""
+                )
+                warnings.append(
+                    f"{len(clearance_hits)} spline point(s) clip into kind=track props/buildings: "
+                    f"{summary}{more}. The bike will spawn inside geometry; shift the spline or "
+                    f"the obstacle."
                 )
 
         if start_00 is None:
