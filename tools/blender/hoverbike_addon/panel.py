@@ -69,6 +69,42 @@ class HOVERBIKE_PT_panel(Panel):
             box.label(text="Repo not found", icon="ERROR")
             box.label(text="Save .blend inside a hoverbike/ clone.")
 
+        # Live lap snapshot — arc-length of `ai_spline_main`, projected
+        # lap time at the racer top speed, and gate count derived from
+        # the same spacing the exporter will use. All three update on
+        # every panel redraw (which Blender already triggers on spline
+        # edits via the depsgraph callback in handlers.py), so authors
+        # see the lap re-shape live as they drag bezier handles instead
+        # of finding out at export time that the route is twice the
+        # length they thought. Heavier stats (terrain extents, water
+        # coverage) stay in the collapsible Track stats sub-panel.
+        from .track_meta import _spline_arc_length
+
+        sp = bpy.data.objects.get("ai_spline_main")
+        if sp is not None and sp.type == "CURVE":
+            arc_m = _spline_arc_length(sp)
+            if arc_m > 0:
+                # Race pace is closer to 25 m/s through corners than the
+                # racer's 28-32 top speed, so use 25 as the "feel" baseline.
+                lap_s = arc_m / 25.0
+                gate_spacing = float(
+                    getattr(context.scene, "hoverbike_gate_spacing", 60.0) or 60.0
+                )
+                n_gates = max(1, round(arc_m / gate_spacing))
+                stat_box = layout.box()
+                stat_box.label(
+                    text=f"Lap: {arc_m:,.0f} m  ~{lap_s:.0f}s @25m/s",
+                    icon="DRIVER_DISTANCE",
+                )
+                stat_box.label(text=f"{n_gates} gates @ {gate_spacing:.0f} m spacing")
+                # Comfort-band nudge — racing-feel sweet spot is roughly
+                # 30-180 s. Outside that the lap is either too punchy to
+                # read or long enough to drag.
+                if lap_s < 30:
+                    stat_box.label(text="Very short lap — under 30 s", icon="ERROR")
+                elif lap_s > 180:
+                    stat_box.label(text="Long lap — over 3 min", icon="ERROR")
+
         row = layout.row()
         row.scale_y = 1.6
         row.operator("hoverbike.export_track", icon="EXPORT")
