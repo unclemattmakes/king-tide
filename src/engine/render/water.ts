@@ -758,16 +758,20 @@ export function createWaterMesh(
       const d = gerstnerDisp(xN, zN, tShifted)
       // h.y, h.z are dy/dx, dy/dz at this time sample.
       const slope = sqrt(h.y.mul(h.y).add(h.z.mul(h.z)))
-      // Foam triggers ride a deliberately WIDE smoothstep so foam ramps
-      // smoothly from "barely there" to "fully white" instead of switching
-      // on across a narrow slope band. The narrow band (0.22..0.6) was
-      // producing the jittery foam streaks visible in the SoT-comparison
-      // screenshot: adjacent vertices straddling the band rendered as
-      // bright-vs-dark lines on the same wave face. Wider band = gentle
-      // gradient across the face, which is what SoT's wave fronts actually
-      // look like up close.
-      const slopeFoam = smoothstep(float(0.18), float(1.0), slope)
-      const foldFoam = smoothstep(float(0.05), float(0.35), d.z)
+      // Foam triggers use a power curve (slope^2 stretched) instead of
+      // smoothstep. The smoothstep had a hard zero plateau below the
+      // lower threshold, so adjacent vertices straddling the threshold
+      // produced visible foam/no-foam edges on wave faces. Power curve
+      // is smooth everywhere — even tiny slopes produce a wisp of foam
+      // that fades continuously to zero — so per-vertex transitions
+      // never snap on or off. The temporal max() of this curve over
+      // four past time samples still gives lingering foam trails behind
+      // passing crests.
+      const slopeFoam = pow(clamp(slope.mul(float(1.4)), float(0), float(1)), float(2.0))
+      const foldFoam = pow(
+        clamp(max(float(0), d.z).mul(float(3.0)), float(0), float(1)),
+        float(2.0),
+      )
       const localFoam = max(slopeFoam, foldFoam)
       const decay = float(Math.exp(-dt * DECAY_RATE))
       maxFoam.assign(max(maxFoam, localFoam.mul(decay)))
@@ -835,18 +839,50 @@ export function createWaterMesh(
   const aSin = Math.sin(A_ANGLE)
   const bCos = Math.cos(B_ANGLE)
   const bSin = Math.sin(B_ANGLE)
-  // Rotate world XZ into each cascade's local frame, then divide by tile
-  // size and offset by scroll. The scroll directions stay in tile-local
-  // space, so cascade A's scroll runs along its own rotated +X and
-  // cascade B's runs along its own rotated -X — adds further temporal
+
+  // Domain warping. Sample the detail texture itself at a very low
+  // frequency (35 m tile) to produce a slow, non-periodic noise field,
+  // then use that to displace the world-XZ coords BEFORE they're rotated
+  // into each cascade's local frame. Both cascades now read at positions
+  // that drift on a 35 m scale, so even at the same world coordinate the
+  // cascade pattern won't align with itself repeatedly. This is the
+  // standard FFT-cascades-lite trick for hiding strict tile periodicity
+  // without piling on additional cascades, and at the cost of just one
+  // extra texture sample (which the mip filter resolves to a high mip
+  // for free — slow noise reads from a low-resolution mip).
+  const warpUv = positionWorld.xz.div(float(35))
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
+  const warpSample = texture(detailTex, warpUv) as any
+  const warpX = warpSample.r.sub(float(0.5)).mul(float(2.5))
+  const warpZ = warpSample.g.sub(float(0.5)).mul(float(2.5))
+  const warpedX = positionWorld.x.add(warpX)
+  const warpedZ = positionWorld.z.add(warpZ)
+
+  // Grazing-angle fade for the detail cascades. At near-horizon viewing,
+  // the texture's intrinsic pattern reads as visible diagonal striations
+  // on wave faces (the "stair-stepping" artifact in side-view screenshots
+  // — a side effect of viewing a fine-grained slope perturbation across a
+  // long oblique path through pixel-space). Fade detail toward zero at
+  // grazing so the horizon line is carried purely by the big-shape
+  // analytic-Gerstner silhouette + the foam mask. `viewDir.y` is a clean
+  // proxy that doesn't depend on the surface normal (no feedback loop
+  // with detailSlope, which feeds INTO the normal).
+  const viewDirEarly = normalize(cameraPosition.sub(positionWorld))
+  const verticalView = max(float(0), viewDirEarly.y)
+  const detailGrazeFade = smoothstep(float(0.1), float(0.5), verticalView)
+
+  // Rotate WARPED world XZ into each cascade's local frame, then divide
+  // by tile size and offset by scroll. The scroll directions stay in
+  // tile-local space, so cascade A's scroll runs along its own rotated +X
+  // and cascade B's runs along its own rotated -X — adds further temporal
   // variety on top of the off-axis spatial layout.
-  const wxA0 = positionWorld.x.mul(float(aCos)).sub(positionWorld.z.mul(float(aSin)))
-  const wzA0 = positionWorld.x.mul(float(aSin)).add(positionWorld.z.mul(float(aCos)))
+  const wxA0 = warpedX.mul(float(aCos)).sub(warpedZ.mul(float(aSin)))
+  const wzA0 = warpedX.mul(float(aSin)).add(warpedZ.mul(float(aCos)))
   const detailUvA = vec2(wxA0, wzA0)
     .div(float(DETAIL_A_TILE))
     .add(vec2(tNode.mul(float(0.04)), tNode.mul(float(-0.027))))
-  const wxB0 = positionWorld.x.mul(float(bCos)).sub(positionWorld.z.mul(float(bSin)))
-  const wzB0 = positionWorld.x.mul(float(bSin)).add(positionWorld.z.mul(float(bCos)))
+  const wxB0 = warpedX.mul(float(bCos)).sub(warpedZ.mul(float(bSin)))
+  const wzB0 = warpedX.mul(float(bSin)).add(warpedZ.mul(float(bCos)))
   const detailUvB = vec2(wxB0, wzB0)
     .div(float(DETAIL_B_TILE))
     .add(vec2(tNode.mul(float(-0.11)), tNode.mul(float(0.08))))
@@ -870,7 +906,10 @@ export function createWaterMesh(
     rsBx.mul(float(bCos)).add(rsBy.mul(float(bSin))),
     rsBx.mul(float(-bSin)).add(rsBy.mul(float(bCos))),
   ).mul(float(DETAIL_B_SCALE).div(float(DETAIL_B_TILE)))
-  const detailSlope = detailSlopeA.add(detailSlopeB).mul(detailStrengthUniform)
+  const detailSlope = detailSlopeA
+    .add(detailSlopeB)
+    .mul(detailStrengthUniform)
+    .mul(detailGrazeFade)
 
   // Camera-to-fragment distance. Used by the analytic-slope flatten below,
   // the hash-noise distance fades (foam / shoreline / sparkle), the planar-
@@ -1087,26 +1126,42 @@ export function createWaterMesh(
 
   // Wave-driven foam.
   //
-  // v2 mode: pre-baked at the vertex stage by the foam accumulator (see
-  // comment block above the Fn definition) — sampled at 4 time steps in
-  // the recent past, decayed exponentially, max-reduced. Foam lingers
-  // ~1s behind passing crests, which is what gives ocean foam its trail
-  // character. We DON'T apply a height gate to the accumulator output:
-  // foam should persist on what's now a trough if it WAS a crest a
-  // moment ago.
+  // v2 mode: two stacked layers via max():
+  //   1. The vertex-stage accumulator (`foamAccumFrag`) — sampled at 4 past
+  //      time steps, decayed exponentially, max-reduced. Gives foam a
+  //      ~1 s lingering trail behind each passing crest. Sampled per-vertex
+  //      and varying-interpolated, so adjacent vertices with very different
+  //      slopes can produce visibly different foam values that bilinear
+  //      interpolation reveals as "stair-stepping" bands on wave faces.
+  //   2. A per-pixel current-time foam term (`pixelFoam`) computed from
+  //      the per-pixel interpolated slope (which IS smooth across the
+  //      triangle, since slopes are themselves varyings of smooth Gerstner
+  //      math + the mip-filtered detail cascades). This layer fills in
+  //      the smooth spatial gradient that the vertex sampling can't
+  //      resolve, killing the stair-step artifact at wave-face peaks.
+  //
+  // max() lets each layer win where it's stronger — pixelFoam dominates
+  // at active crests (smooth peaks, no banding), the accumulator
+  // dominates in the trail behind passing crests (where slope is now
+  // low but used to be high). Power curve (~slope^2 stretched) replaces
+  // the hard-zero smoothstep so very small slopes still produce a
+  // wisp of foam rather than snapping off — eliminates the
+  // foam/no-foam threshold edge entirely.
   //
   // Classic mode: original physically-motivated foam (slope OR Jacobian
   // onset, height-gated) — no time accumulation, but still fixes the
   // pre-M9.29 height-driven trigger. The qSum branch evaluates to 0 when
   // steepness=0 so only slopeFoam contributes here.
   const slopeMag = sqrt(dydx.mul(dydx).add(dydz.mul(dydz)))
+  const pixelSlope = sqrt(effDydx.mul(effDydx).add(effDydz.mul(effDydz)))
+  const pixelFoam = pow(clamp(pixelSlope.mul(float(1.4)), float(0), float(1)), float(2.0))
   const waveFoam = isClassic
     ? (() => {
         const slopeFoam = smoothstep(float(0.4), float(0.9), slopeMag)
         const heightGate = smoothstep(float(-0.4), float(0.3), heightFrag)
         return slopeFoam.mul(heightGate)
       })()
-    : foamAccumFrag
+    : max(foamAccumFrag.mul(float(0.7)), pixelFoam)
 
   // Shared turbulent foam noise — world XZ + time scroll. Used to break
   // up the otherwise-too-clean foam edges of shoreline, wake, and bow
