@@ -60,6 +60,7 @@ from . import (
     road,
     spline,
     terrain,
+    track_meta,
     tunnel,
     turn_indicators,
     water,
@@ -85,6 +86,7 @@ _MODULES = (
     road,
     previews,
     export,
+    track_meta,
     _legacy,
 )
 
