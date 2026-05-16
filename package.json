@@ -21,6 +21,8 @@
     "gen:tracks": "node tools/blender/run.mjs build_track specs/tracks",
     "gen:all": "node tools/blender/run.mjs build_all",
     "gen:manifest": "node tools/blender/run.mjs manifest",
+    "install:blender-addon": "node tools/blender/install-addon.mjs",
+    "test:blender": "node tools/blender/test-addon.mjs",
     "docs:dev": "vitepress dev docs-site",
     "docs:build": "vitepress build docs-site",
     "docs:preview": "vitepress preview docs-site"
