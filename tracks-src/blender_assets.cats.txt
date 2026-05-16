@@ -13,3 +13,11 @@ VERSION 1
 11111111-1111-4111-8111-000000000012:Hoverbike/Track Props/Buoys:Hoverbike-Track Props-Buoys
 11111111-1111-4111-8111-000000000013:Hoverbike/Track Props/Gates:Hoverbike-Track Props-Gates
 11111111-1111-4111-8111-000000000014:Hoverbike/Track Props/Indicators:Hoverbike-Track Props-Indicators
+22222222-2222-4222-8222-000000000001:Hoverbike/Landmarks:Hoverbike-Landmarks
+22222222-2222-4222-8222-000000000010:Hoverbike/Landmarks/Spires:Hoverbike-Landmarks-Spires
+22222222-2222-4222-8222-000000000011:Hoverbike/Landmarks/Towers:Hoverbike-Landmarks-Towers
+22222222-2222-4222-8222-000000000012:Hoverbike/Landmarks/Stadiums:Hoverbike-Landmarks-Stadiums
+22222222-2222-4222-8222-000000000013:Hoverbike/Landmarks/Wheels:Hoverbike-Landmarks-Wheels
+22222222-2222-4222-8222-000000000014:Hoverbike/Landmarks/Industrial:Hoverbike-Landmarks-Industrial
+22222222-2222-4222-8222-000000000015:Hoverbike/Landmarks/Signage:Hoverbike-Landmarks-Signage
+22222222-2222-4222-8222-000000000016:Hoverbike/Landmarks/Backdrops:Hoverbike-Landmarks-Backdrops
