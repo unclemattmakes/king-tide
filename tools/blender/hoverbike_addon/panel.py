@@ -131,6 +131,15 @@ class HOVERBIKE_PT_panel(Panel):
         col = layout.column(align=True)
         col.scale_y = 0.85
         col.label(text="Tools below; collapse any section.", icon="INFO")
+        # Small "start another map" affordance at the bottom — out of
+        # the way of the active-track UI but discoverable for authors
+        # who finish a map and want to jump to a fresh template without
+        # the file-browser dance.
+        col.operator(
+            "hoverbike.new_map_from_template",
+            text="New Map from Template…",
+            icon="FILE_NEW",
+        )
 
     def _draw_bike(self, context, layout, blend: str, repo: str | None) -> None:
         from ._legacy import derive_asset_id
@@ -177,6 +186,21 @@ class HOVERBIKE_PT_panel(Panel):
         else:
             box.label(text="Repo not found", icon="ERROR")
             box.label(text="Save .blend inside a hoverbike/ clone.")
+        # New Map shortcut — only useful when we can resolve a repo
+        # root, since the operator targets tracks-src/<id>.blend. Surfaces
+        # the existing template-*.blend collection without making authors
+        # find them in the file browser by hand.
+        if repo:
+            layout.separator()
+            box = layout.box()
+            box.label(text="Start from a template:", icon="FILE_NEW")
+            row = box.row()
+            row.scale_y = 1.4
+            row.operator(
+                "hoverbike.new_map_from_template",
+                text="New Map from Template…",
+                icon="DUPLICATE",
+            )
 
 
 # ────────────────────────────────────────────────────────────────────
