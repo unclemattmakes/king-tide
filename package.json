@@ -23,6 +23,7 @@
     "gen:manifest": "node tools/blender/run.mjs manifest",
     "install:blender-addon": "node tools/blender/install-addon.mjs",
     "test:blender": "node tools/blender/test-addon.mjs",
+    "seed:landmarks-library": "node tools/blender/seed.mjs seed_landmarks_library.py",
     "docs:dev": "vitepress dev docs-site",
     "docs:build": "vitepress build docs-site",
     "docs:preview": "vitepress preview docs-site"
