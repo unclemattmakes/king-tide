@@ -11,6 +11,7 @@ import {
   Fn,
   float,
   fract,
+  fwidth,
   If,
   max,
   min,
@@ -121,6 +122,10 @@ export type WaterMesh = {
     /** Material roughness inside sparkle patches (lower = brighter
      *  pin-point glints). */
     setRoughSparkle(s: number): void
+    /** Strength of the sub-Gerstner detail-normal cascades. 0 = bypass
+     *  detail (analytic-Gerstner only); 1 = the default cascade
+     *  contribution that stands in for SoT-style FFT chop. */
+    setDetailStrength(s: number): void
     /** Render the wave geometry as wireframe. Useful for tuning wave /
      *  wake amplitudes against the actual displacement. */
     setWireframe(on: boolean): void
@@ -139,6 +144,7 @@ export type WaterDebugDefaults = {
   sunGlow: number
   roughBase: number
   roughSparkle: number
+  detailStrength: number
   wireframe: boolean
 }
 
@@ -168,6 +174,143 @@ const WAKE_DISP_CULL_R = 40.0
 const WAKE_DISP_CULL_R_SQ = WAKE_DISP_CULL_R * WAKE_DISP_CULL_R
 
 const INACTIVE_FAR = 1e6
+
+// ---------------------------------------------------------------------------
+// Procedural sub-Gerstner detail normal map.
+//
+// SoT and Atlas (GDC 2019) reach sub-meter wave detail via FFT cascades. We
+// stand in for that with a single tileable wave-like normal map sampled at
+// two world-XZ scales + scroll directions in the fragment. The slopes from
+// these two cascades add to the analytic Gerstner gradient before the normal
+// is built, so the surface picks up the fine "wave chop" that Gerstner can't
+// reach without an explosive vertex count — and hardware mipmap filtering
+// kills the per-pixel speckle that an FFT in WebGPU would still need a
+// custom AA pass to solve.
+//
+// The texture encodes pre-computed surface slopes (dh/du, dh/dv) into the RG
+// channels with the standard [-1,1] → [0,1] convention. At sample time the
+// shader decodes (px*2-1, py*2-1), scales by `detailStrength / tileScale`,
+// and adds to the heightfield's (dydx, dydz) gradient. The actual height of
+// the detail isn't reconstructed — only slopes matter for shading.
+//
+// Tileability: each component sine uses integer (kx, kz) on the N×N grid, so
+// the heightfield (and thus its slopes) repeats seamlessly across tile
+// boundaries. The texture is set up with REPEAT wrapping + anisotropy so
+// grazing-angle samples don't smear.
+// ---------------------------------------------------------------------------
+
+let sharedWaveDetailNormal: THREE.DataTexture | null = null
+
+function buildWaveDetailNormalTexture(): THREE.DataTexture {
+  const N = 256
+  const data = new Uint8Array(N * N * 4)
+
+  // Integer (kx, kz) pairs — each is one tileable directional sine on the
+  // unit tile. The set roughly approximates a Phillips spectrum (more energy
+  // mid-frequency, less at the highest cells) so the detail reads as wave
+  // chop rather than noise.
+  const RAW_DIRS: [number, number][] = [
+    [3, 1],
+    [2, 3],
+    [4, -1],
+    [1, 4],
+    [-1, 3],
+    [-3, 2],
+    [6, 2],
+    [5, -3],
+    [-2, 5],
+    [3, 5],
+    [-4, 4],
+    [7, 1],
+    [8, 4],
+    [-5, 6],
+    [6, -5],
+    [9, 3],
+    [4, 8],
+    [-7, -5],
+    [11, 4],
+    [-8, 7],
+    [10, -6],
+    [13, 5],
+  ]
+  type Comp = { kx: number; kz: number; amp: number; phase: number }
+  const FREQS: Comp[] = RAW_DIRS.map(([kx, kz]) => {
+    const k = Math.hypot(kx, kz)
+    return {
+      kx,
+      kz,
+      amp: 1 / k ** 1.3,
+      // Deterministic per-component phase via a cheap hash.
+      phase: ((Math.sin(kx * 12.9898 + kz * 78.233) * 43758.5453) % 1) * (2 * Math.PI),
+    }
+  })
+
+  // Heights on unit tile.
+  const heights = new Float32Array(N * N)
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const u = x / N
+      const v = y / N
+      let h = 0
+      for (const f of FREQS) {
+        h += f.amp * Math.sin(2 * Math.PI * (f.kx * u + f.kz * v) + f.phase)
+      }
+      heights[y * N + x] = h
+    }
+  }
+
+  // Toroidal central-difference slopes (so the tile is seamless under REPEAT).
+  // `dh/du` is the slope per unit of u ∈ [0,1]; runtime divides by tileScale
+  // to convert that into world-space dh/dx.
+  const slopes = new Float32Array(N * N * 2)
+  let smax = 0
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const left = heights[y * N + ((x - 1 + N) % N)]!
+      const right = heights[y * N + ((x + 1) % N)]!
+      const up = heights[((y - 1 + N) % N) * N + x]!
+      const down = heights[((y + 1) % N) * N + x]!
+      // (right - left) / 2 is ∂h/∂(u·N); multiply by N to get ∂h/∂u.
+      const dhdu = (right - left) * 0.5 * N
+      const dhdv = (down - up) * 0.5 * N
+      slopes[(y * N + x) * 2 + 0] = dhdu
+      slopes[(y * N + x) * 2 + 1] = dhdv
+      const am = Math.max(Math.abs(dhdu), Math.abs(dhdv))
+      if (am > smax) smax = am
+    }
+  }
+
+  // Pack with a normalization that leaves headroom in the [-1, +1] range.
+  // 0.5/smax puts the peak slope at ±0.5 of the encoded range; runtime scales
+  // back up via `detailStrength` so the visible amplitude is tunable.
+  const inorm = smax > 0 ? 0.5 / smax : 0
+  for (let i = 0; i < N * N; i++) {
+    const ndx = slopes[i * 2 + 0]! * inorm
+    const ndz = slopes[i * 2 + 1]! * inorm
+    data[i * 4 + 0] = Math.max(0, Math.min(255, Math.round((ndx * 0.5 + 0.5) * 255)))
+    data[i * 4 + 1] = Math.max(0, Math.min(255, Math.round((ndz * 0.5 + 0.5) * 255)))
+    data[i * 4 + 2] = 128
+    data[i * 4 + 3] = 255
+  }
+
+  const tex = new THREE.DataTexture(data, N, N, THREE.RGBAFormat, THREE.UnsignedByteType)
+  tex.name = 'water:detailNormal'
+  tex.wrapS = THREE.RepeatWrapping
+  tex.wrapT = THREE.RepeatWrapping
+  tex.magFilter = THREE.LinearFilter
+  tex.minFilter = THREE.LinearMipmapLinearFilter
+  tex.generateMipmaps = true
+  // Without anisotropy the texture smears noticeably as the camera tilts
+  // toward grazing — 4× is the standard SoT-style sweet spot and is cheap.
+  tex.anisotropy = 4
+  tex.needsUpdate = true
+  return tex
+}
+
+function getWaveDetailNormalTexture(): THREE.DataTexture {
+  if (!sharedWaveDetailNormal) sharedWaveDetailNormal = buildWaveDetailNormalTexture()
+  return sharedWaveDetailNormal
+}
 
 /**
  * GPU-shader water built on Three.js's TSL node pipeline.
@@ -250,10 +393,17 @@ export function createWaterMesh(
   const SUN_GLOW_DEFAULT = 0.6
   const ROUGH_BASE_DEFAULT = 0.18
   const ROUGH_SPARKLE_DEFAULT = 0.04
+  // Strength of the sub-Gerstner detail-normal cascades (see comment block
+  // above the texture builder). 0 = bypass detail entirely (analytic-Gerstner
+  // only); 1.0 = the default cascade contribution that fills in the wave
+  // chop SoT achieves with FFT. `?detail=0` parks this at 0 for A/B.
+  const DETAIL_STRENGTH_DEFAULT = 1.0
   const reflStrengthUniform = uniform(REFLECTION_STRENGTH_DEFAULT)
   const sunGlowUniform = uniform(SUN_GLOW_DEFAULT)
   const roughBaseUniform = uniform(ROUGH_BASE_DEFAULT)
   const roughSparkleUniform = uniform(ROUGH_SPARKLE_DEFAULT)
+  const detailFlag = !isClassic && params?.get('detail') !== '0'
+  const detailStrengthUniform = uniform(detailFlag ? DETAIL_STRENGTH_DEFAULT : 0)
   // Per-group amplitude scales — one for swells (waves 0–1), one for chops
   // (waves 2–5). Both default to 1.0 (no scale). The shader multiplies the
   // baked per-wave constants by these uniforms; the CPU buoyancy mirrors
@@ -636,35 +786,92 @@ export function createWaterMesh(
   const qSumFrag = varying(vertexDisp.z)
   const foamAccumFrag = varying(vertexFoamAccum)
 
+  // Sub-Gerstner detail-normal cascades. Two world-XZ-aligned samples of the
+  // procedural wave-detail texture at different tile sizes + scroll speeds,
+  // their decoded slopes summed into the heightfield gradient before the
+  // normal is built. This is the "FFT-lite" layer: it fills in the chop
+  // below the 5.5 m wavelength floor of the Gerstner set, with hardware
+  // mipmap filtering providing distance anti-aliasing for free.
+  //
+  // Cascade A — 6 m tile, slow scroll along the swell direction. Reads as
+  // medium chop riding on the back of each Gerstner wave.
+  // Cascade B — 1.5 m tile, faster scroll on a near-perpendicular axis. The
+  // sub-meter ripple texture that catches sun glints and breaks up the
+  // mirror-surface look at close range.
+  //
+  // Strengths are tuned so the combined slope contribution rarely exceeds
+  // ~0.35 (well below the analytic Gerstner peaks of ~1.0), so the detail
+  // reads as surface texture without erasing the silhouette of the big waves.
+  const detailTex = getWaveDetailNormalTexture()
+  const DETAIL_A_TILE = 6.0
+  const DETAIL_B_TILE = 1.5
+  // Slope scales chosen so the peak decoded-and-rescaled slope contribution
+  // sits at ~0.25 (cascade A) / ~0.2 (cascade B) world-space dy/dx — well
+  // under the analytic Gerstner peaks (~1.0) so the silhouette of the big
+  // waves stays intact, but high enough that the detail reads as actual
+  // chop instead of vanishing. Bake normalization pegs decoded values at
+  // ±0.5, so eg. cascade A peak = 0.5 · (DETAIL_A_SCALE / DETAIL_A_TILE).
+  const DETAIL_A_SCALE = 3.0
+  const DETAIL_B_SCALE = 0.9
+  const detailUvA = positionWorld.xz
+    .div(float(DETAIL_A_TILE))
+    .add(vec2(tNode.mul(float(0.04)), tNode.mul(float(-0.027))))
+  const detailUvB = positionWorld.xz
+    .div(float(DETAIL_B_TILE))
+    .add(vec2(tNode.mul(float(-0.11)), tNode.mul(float(0.08))))
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
+  const detailSampleA = texture(detailTex, detailUvA) as any
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
+  const detailSampleB = texture(detailTex, detailUvB) as any
+  const detailSlopeA = vec2(
+    detailSampleA.r.mul(float(2)).sub(float(1)),
+    detailSampleA.g.mul(float(2)).sub(float(1)),
+  ).mul(float(DETAIL_A_SCALE).div(float(DETAIL_A_TILE)))
+  const detailSlopeB = vec2(
+    detailSampleB.r.mul(float(2)).sub(float(1)),
+    detailSampleB.g.mul(float(2)).sub(float(1)),
+  ).mul(float(DETAIL_B_SCALE).div(float(DETAIL_B_TILE)))
+  const detailSlope = detailSlopeA.add(detailSlopeB).mul(detailStrengthUniform)
+
+  // Camera-to-fragment distance. Used by the analytic-slope flatten below,
+  // the hash-noise distance fades (foam / shoreline / sparkle), the planar-
+  // reflection distortion taper, and the aerial-perspective haze mix.
+  // Computed once and reused everywhere.
+  const camDist = cameraPosition.sub(positionWorld).length()
+
+  // Flatten the analytic Gerstner slopes toward zero with distance. The
+  // Gerstner gradients are high-frequency relative to camera-space
+  // wavelength past ~25 m at 1080p — without flattening, the PBR specular
+  // lobe picks up pixel-sized glints that flicker frame-to-frame. The
+  // detail-normal cascades DON'T need this lerp: hardware mipmap filtering
+  // already collapses their slopes toward zero at distance. So we flatten
+  // analytic slopes only, then add detail on top — the close-in band keeps
+  // both layers, the horizon band keeps just the (filtered) detail.
+  const analyticFlatten = smoothstep(float(25), float(140), camDist)
+  const analyticDydxFlat = mix(dydx, float(0), analyticFlatten)
+  const analyticDydzFlat = mix(dydz, float(0), analyticFlatten)
+  const qSumFlat = mix(qSumFrag, float(0), analyticFlatten)
+
+  // Combined heightfield gradient (analytic-flattened + detail). Used by
+  // the normal, by the reflection distortion, and by the slope-driven foam
+  // below.
+  const effDydx = analyticDydxFlat.add(detailSlope.x)
+  const effDydz = analyticDydzFlat.add(detailSlope.y)
+
   // GPU Gems eq.13 normal: (-Σdy/dx, 1 - Σ Q·k·A·sin, -Σdy/dz).
   // The wake's gradients are folded into dydx/dydz; the wake has no
-  // horizontal-displacement term so it doesn't contribute to qSum.
-  const rawNormal = normalize(vec3(dydx.negate(), float(1).sub(qSumFrag), dydz.negate()))
+  // horizontal-displacement term so it doesn't contribute to qSum. The
+  // analytic-slope flatten + detail mip-LOD give us all the distance AA
+  // we need at the slope level — the Toksvig-style roughness boost on
+  // `roughnessNode` (below) mops up any residual per-pixel normal
+  // variance the lighting model would otherwise alias on. So rawNormal
+  // IS the per-pixel normal — no extra flatten pass needed.
+  const rawNormal = normalize(vec3(effDydx.negate(), float(1).sub(qSumFlat), effDydz.negate()))
+  const normalNode = rawNormal
 
   // View vector + ndotv computed once and reused by both the scatter blend
   // (base color) and the fresnel sky-tint emissive below.
   const viewDir = normalize(cameraPosition.sub(positionWorld))
-
-  // Camera-to-fragment distance. Used in four places:
-  //  - to fade high-frequency hash noise toward its mean at long range
-  //    (kills pixel-speckle aliasing on the foam and shoreline patches),
-  //  - to flatten the wave normal toward (0, 1, 0) on the horizon
-  //    (kills specular sparkle aliasing where wave gradients run sub-pixel),
-  //  - to distance-attenuate the planar-reflection distortion (the existing
-  //    use, now sharing this single length() instead of recomputing),
-  //  - to soften the wave-driven foam threshold at distance so the
-  //    crest-foam edge doesn't shimmer on receding waves.
-  const camDist = cameraPosition.sub(positionWorld).length()
-
-  // Lerp the per-pixel wave normal toward the flat surface normal as the
-  // fragment recedes. The Gerstner gradient is high-frequency relative to
-  // the camera-space wavelength at the horizon, so the PBR specular lobe
-  // catches single-pixel glints that flicker frame-to-frame. Past ~120 m
-  // the normal is essentially flat and only the wave color modulation
-  // carries the surface shape. Reflection distortion still uses the raw
-  // dydx/dydz (already faded by camDist there).
-  const normalFlatten = smoothstep(float(40), float(180), camDist)
-  const normalNode = normalize(mix(rawNormal, vec3(0, 1, 0), normalFlatten))
   const ndotv = max(dot(normalNode, viewDir), float(0))
 
   // Scene-depth sample. The texture is populated via
@@ -874,10 +1081,12 @@ export function createWaterMesh(
   )
   // Distance-fade the hash toward its mean (0.5). The 2.86 m wavelength of
   // the hash aliases badly once one screen pixel covers >1 noise cell, which
-  // happens between ~30 and ~80 m at typical FOV / 1080p. Past the fade
+  // happens between ~20 and ~70 m at typical FOV / 1080p. Past the fade
   // window the noise collapses to a constant — distant shoreline + wake
-  // foam reads as a smooth bright band instead of pixel-speckle.
-  const foamNoiseAntialias = float(1).sub(smoothstep(float(30), float(80), camDist))
+  // foam reads as a smooth bright band instead of pixel-speckle. Window
+  // pulled in from (30, 80) since the detail-normal upgrade made it more
+  // obvious that hash sites still flickered in the 20–30 m band.
+  const foamNoiseAntialias = float(1).sub(smoothstep(float(20), float(70), camDist))
   const foamNoiseRaw = mix(float(0.5), foamNoiseRawHF, foamNoiseAntialias)
   const foamNoiseSmooth = smoothstep(float(0.2), float(0.85), foamNoiseRaw)
   // Multiplier in [0.5, 1.0] — never erases foam, just breaks up its
@@ -1117,7 +1326,10 @@ export function createWaterMesh(
     // water" rather than "glass"; bump if the reflection feels too
     // perfect, drop if it smears.
     const distortAmt = float(0.02).add(float(0.6).div(camDist.add(float(2.0))))
-    const distortion = vec2(dydx, dydz).mul(distortAmt)
+    // Use the combined (analytic + detail) slopes so the reflection ripples
+    // with the fine wave chop the detail-normal cascades add. Without this,
+    // close-range reflections look glassy under the visibly-bumpy surface.
+    const distortion = vec2(effDydx, effDydz).mul(distortAmt)
     // biome-ignore lint/suspicious/noExplicitAny: TSL ReflectorNode TS surface lacks .uvNode/.rgb/.target getters
     const m = mirror as any
     m.uvNode = m.uvNode.add(distortion)
@@ -1174,10 +1386,17 @@ export function createWaterMesh(
   // distance-faded it reads as noise rather than glint on the close-in
   // band. The roughness modulation alone gives the wandering-glint
   // character without sampling a hash per fragment.
+  //
+  // Distance-fade the broad hash toward its mean (0.5) past ~35 m so the
+  // sparkle patches stop firing/clearing at sub-pixel rates on the horizon
+  // — past the fade window only the base roughness (and the Toksvig AA
+  // boost below) decide the specular tightness.
   const broadSeed = positionWorld.xz.mul(0.18).add(vec2(tNode.mul(-0.11), tNode.mul(0.08)))
-  const broadNoise = fract(
+  const broadNoiseHash = fract(
     sin(broadSeed.x.mul(12.9898).add(broadSeed.y.mul(78.233))).mul(43758.5453),
   )
+  const broadNoiseAA = float(1).sub(smoothstep(float(35), float(110), camDist))
+  const broadNoise = mix(float(0.5), broadNoiseHash, broadNoiseAA)
   const sparkleHeightGate = smoothstep(float(0.45), float(0.85), heightNorm)
   const broadMask = smoothstep(float(0.55), float(0.85), broadNoise).mul(sparkleHeightGate)
 
@@ -1228,8 +1447,24 @@ export function createWaterMesh(
   // to ~0.04, tightening the specular lobe and producing crisp highlights.
   // Classic mode keeps the constant 0.18 so the A/B comparison is clean.
   // Both base + sparkle ends are uniforms so the debug menu can scrub them.
+  //
+  // Toksvig-style specular AA on top: fwidth(normalNode) reports how much
+  // the normal swings per screen pixel. Where that's large — typically wave
+  // crests projected at a glancing angle, where the wave's own slope flips
+  // across a single pixel — the PBR specular lobe is wider than the normal
+  // it's reflecting around, and the highlight aliases to single-pixel pin
+  // pricks. Push roughness up proportionally so the lobe stays wider than
+  // the screen-space normal variance, and the highlight smears into a
+  // stable line of glints instead of flickering noise.
+  //
+  // 0.18 max boost is enough to fully shut down the worst-case sparkle while
+  // leaving sub-pixel-stable areas untouched. Works for both v2 and classic
+  // (classic still benefits — it just keeps its constant base + boost).
   if (!isClassic) {
-    mat.roughnessNode = mix(roughBaseUniform, roughSparkleUniform, broadMask)
+    const normalScreenDelta = fwidth(normalNode).length()
+    const aaBoost = smoothstep(float(0.05), float(0.5), normalScreenDelta).mul(float(0.18))
+    const sparkleRough = mix(roughBaseUniform, roughSparkleUniform, broadMask)
+    mat.roughnessNode = clamp(sparkleRough.add(aaBoost), float(0), float(1))
   }
 
   // Debug knob surface (water-debug-menu.ts talks to this). All setters
@@ -1245,6 +1480,7 @@ export function createWaterMesh(
     sunGlow: SUN_GLOW_DEFAULT,
     roughBase: ROUGH_BASE_DEFAULT,
     roughSparkle: ROUGH_SPARKLE_DEFAULT,
+    detailStrength: detailFlag ? DETAIL_STRENGTH_DEFAULT : 0,
     wireframe: wireFlag,
   }
   const clamp01 = (n: number, lo: number, hi: number) =>
@@ -1286,6 +1522,9 @@ export function createWaterMesh(
     setRoughSparkle(s) {
       roughSparkleUniform.value = clamp01(s, 0, 1)
     },
+    setDetailStrength(s) {
+      detailStrengthUniform.value = clamp01(s, 0, 2)
+    },
     setWireframe(on) {
       mat.wireframe = !!on
     },
@@ -1311,6 +1550,13 @@ export function createWaterMesh(
     ;(window as any).__waterSteepness = (s: number) => {
       debug.setSteepness(s)
       return steepnessUniform.value
+    }
+    // Sub-Gerstner detail-normal strength. 0 = bypass detail (analytic-only),
+    // 1 = default cascade contribution, 2 = punchy / overdriven for tuning.
+    // biome-ignore lint/suspicious/noExplicitAny: dev-only debug hook
+    ;(window as any).__waterDetail = (s: number) => {
+      debug.setDetailStrength(s)
+      return detailStrengthUniform.value
     }
   }
 

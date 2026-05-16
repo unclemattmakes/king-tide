@@ -19,6 +19,7 @@ export type WaterDebugSettings = {
   sunGlow: number
   roughBase: number
   roughSparkle: number
+  detailStrength: number
   wireframe: boolean
 }
 
@@ -32,6 +33,7 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     sunGlow: d.sunGlow,
     roughBase: d.roughBase,
     roughSparkle: d.roughSparkle,
+    detailStrength: d.detailStrength,
     wireframe: d.wireframe,
   }
 }
@@ -81,6 +83,7 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setSunGlow(s.sunGlow)
   water.debug.setRoughBase(s.roughBase)
   water.debug.setRoughSparkle(s.roughSparkle)
+  water.debug.setDetailStrength(s.detailStrength)
   water.debug.setWireframe(s.wireframe)
 }
 
