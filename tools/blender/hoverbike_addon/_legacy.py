@@ -46,8 +46,6 @@ from typing import Any
 
 import bpy
 import mathutils
-from bpy.props import BoolProperty, FloatProperty, IntProperty, StringProperty
-from bpy.types import Operator, Panel
 
 bl_info = {
     "name": "Hoverbike: Export to Game",
@@ -1005,148 +1003,17 @@ from . import panel as _panel_mod  # noqa: E402
 
 
 def register() -> None:
-    # (gate + snap-hover scene properties moved to previews.py)
-    # (water + turn-indicator scene properties moved to their modules)
-
-    # Runtime terrain-shader tuning. These mirror constants in
-    # ``src/engine/render/terrain-shader.ts``; ``hoverbike.export_track``
-    # writes them into ``public/tracks/<id>.json`` so the runtime can
-    # rebuild the material with the author's chosen values without
-    # touching the .ts.
-    bpy.types.Scene.hoverbike_shader_slope_start = FloatProperty(
-        name="Slope start (cos θ)",
-        description="Cosine of the slope angle below which terrain reads as the flat (sand/grass) ramp. 0.85 ≈ 30°.",
-        default=0.85, min=0.0, max=1.0, precision=3,
-    )
-    bpy.types.Scene.hoverbike_shader_slope_end = FloatProperty(
-        name="Slope end (cos θ)",
-        description="Cosine of the slope angle above which terrain reads as full cliff/rock. 0.55 ≈ 55°.",
-        default=0.55, min=0.0, max=1.0, precision=3,
-    )
-    bpy.types.Scene.hoverbike_shader_variation = FloatProperty(
-        name="Variation strength",
-        description="±brightness perturbation from the per-vertex value-noise. 0 = flat ramps, 0.3 = soft, 0.6 = strong.",
-        default=0.30, min=0.0, max=1.0, precision=2,
-    )
-    bpy.types.Scene.hoverbike_shader_wet_band = FloatProperty(
-        name="Wet band (m)",
-        description="Half-height of the |y|-mask that darkens the terrain colour around the waterline.",
-        default=2.0, min=0.0, max=20.0, precision=2,
-    )
-    bpy.types.Scene.hoverbike_shader_alt_min = FloatProperty(
-        name="Altitude band min (m)",
-        description="World-Y mapped to ramp position 0 (deepest abyssal blue / dark rock).",
-        default=-50.0, min=-500.0, max=0.0, precision=1,
-    )
-    bpy.types.Scene.hoverbike_shader_alt_max = FloatProperty(
-        name="Altitude band max (m)",
-        description="World-Y mapped to ramp position 1 (volcanic top / brightest alpine).",
-        default=120.0, min=0.0, max=500.0, precision=1,
-    )
-    bpy.types.Scene.hoverbike_shader_path_tint_r = FloatProperty(
-        name="Path tint R", default=0.30, min=0.0, max=2.0, precision=2,
-    )
-    bpy.types.Scene.hoverbike_shader_path_tint_g = FloatProperty(
-        name="Path tint G", default=0.24, min=0.0, max=2.0, precision=2,
-    )
-    bpy.types.Scene.hoverbike_shader_path_tint_b = FloatProperty(
-        name="Path tint B", default=0.18, min=0.0, max=2.0, precision=2,
-    )
-
-    # (hoverbike_snap_hover_height moved to previews.py)
-
-    # (heightmap + sculpt scene properties moved to terrain.py)
-
-    # (road scene properties moved to road.py)
-
-    # (tunnel scene properties moved to tunnel.py)
-
-    # (ramp scene properties moved to ramp.py)
-
-    # (ghost-lap scene properties moved to ghost_lap.py)
-
-    # (spline-placement + start-grid scene properties moved to spline.py)
-
-    # Per-track lap count — round-trips through track JSON.
-    bpy.types.Scene.hoverbike_laps_to_finish = IntProperty(
-        name="Laps to finish",
-        description="Number of laps required to finish the race. Round-trips through public/tracks/<id>.json.",
-        default=3, min=1, max=99,
-    )
-
-    # (placement-helper scene properties moved to placement_helper.py)
-
-    # (downtown scene properties moved to downtown.py)
-
-    # Extra terrain-shader knobs (state-of-the-art coloration pass).
-    # See terrain-shader.ts for the matching uniforms.
-    bpy.types.Scene.hoverbike_shader_warp_strength = FloatProperty(
-        name="Domain warp",
-        description="Strength of the low-freq noise that warps the colour-noise UVs. 0 = stock, 0.5 = subtle, 1.5 = strong organic veining.",
-        default=0.5, min=0.0, max=4.0, precision=2,
-    )
-    bpy.types.Scene.hoverbike_shader_macro_scale = FloatProperty(
-        name="Macro scale",
-        description="World-space scale (m) of the macro biome variation. 50 m ≈ smooth rolling tints; 200 m ≈ continent-scale bands.",
-        default=120.0, min=10.0, max=1000.0, precision=1,
-    )
-    bpy.types.Scene.hoverbike_shader_micro_scale = FloatProperty(
-        name="Micro scale",
-        description="World-space scale (m) of the micro detail variation. 4 m ≈ pebbly, 16 m ≈ shrubs.",
-        default=8.0, min=0.5, max=40.0, precision=2,
-    )
-    bpy.types.Scene.hoverbike_shader_alt_jitter = FloatProperty(
-        name="Alt jitter (m)",
-        description="Vertical jitter added to the altitude band per fragment so contour lines aren't perfectly level. 0 = banded, 6 = naturally feathered.",
-        default=4.0, min=0.0, max=30.0, precision=2,
-    )
-    bpy.types.Scene.hoverbike_shader_scree_band = FloatProperty(
-        name="Scree band",
-        description="Width of the scree (intermediate slope) band between flat and cliff ramps. 0 = hard cut to cliff, 0.4 = wide gravel scree transition.",
-        default=0.25, min=0.0, max=1.0, precision=2,
-    )
-    bpy.types.Scene.hoverbike_shader_saturation = FloatProperty(
-        name="Saturation",
-        description="Output saturation multiplier. 1 = neutral, 1.2 = punchier biome reads, 0.7 = washed-out / stylised.",
-        default=1.05, min=0.0, max=2.0, precision=2,
-    )
-    bpy.types.Scene.hoverbike_shader_triplanar = FloatProperty(
-        name="Triplanar",
-        description="Blend factor between top-down (XZ-only) sampling and triplanar XYZ sampling for cliffs. 0 = stock, 1 = fully triplanar (no stretching on vertical faces).",
-        default=0.6, min=0.0, max=1.0, precision=2,
-    )
-
-    # (depsgraph + load_post handlers registered by handlers.py)
+    # All scene properties are now registered by their per-domain
+    # modules (previews, water, turn_indicators, terrain, road, tunnel,
+    # ramp, ghost_lap, spline, placement_helper, downtown,
+    # terrain_shader). _legacy is shrinking into pure infrastructure
+    # (validation, JSON sync, repo discovery, shared helpers) and no
+    # longer owns user-facing knobs.
+    pass
 
 
 def unregister() -> None:
-    for prop in (
-        # (gate + snap-hover scene properties handled by previews.py)
-        # (water + turn-indicator scene properties handled by their modules)
-        "hoverbike_shader_slope_start", "hoverbike_shader_slope_end",
-        "hoverbike_shader_variation", "hoverbike_shader_wet_band",
-        "hoverbike_shader_alt_min", "hoverbike_shader_alt_max",
-        "hoverbike_shader_path_tint_r", "hoverbike_shader_path_tint_g",
-        "hoverbike_shader_path_tint_b",
-        # (heightmap + sculpt scene properties handled by terrain.py)
-        # (ghost-lap scene properties handled by ghost_lap.py's unregister)
-        # (road scene properties handled by road.py)
-        # (tunnel scene properties handled by tunnel.py)
-        # (ramp scene properties handled by ramp.py)
-        # (spline-placement + start-grid scene properties handled by spline.py)
-        "hoverbike_laps_to_finish",
-        # (placement-helper scene properties handled by placement_helper.py)
-        # (downtown scene properties handled by downtown.py)
-        "hoverbike_shader_warp_strength", "hoverbike_shader_macro_scale",
-        "hoverbike_shader_micro_scale", "hoverbike_shader_alt_jitter",
-        "hoverbike_shader_scree_band", "hoverbike_shader_saturation",
-        "hoverbike_shader_triplanar",
-    ):
-        if hasattr(bpy.types.Scene, prop):
-            try:
-                delattr(bpy.types.Scene, prop)
-            except Exception:
-                pass
+    pass
 
 
 if __name__ == "__main__":
