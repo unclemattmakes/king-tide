@@ -34,9 +34,23 @@ Two collections + two singleton mesh objects + a shared GN group:
 
 Terrain modifier stack (top → bottom):
 
-  1. ``HV_Island``        — existing GN heightfield (untouched).
-  2. ``HV_TunnelCut``     — Boolean Difference vs ``tunnels_cutter``,
-                            solver=EXACT, ``self_intersection=True``.
+  1. ``HV_Island``     — existing GN heightfield (untouched).
+  2. ``HV_TunnelCut``  — Boolean Difference vs ``tunnels_cutter``,
+                         solver=EXACT. Cuts a ring at each mouth where
+                         the cutter pierces the heightfield. We don't
+                         carve a 3-D volume through the rock — the
+                         heightfield is a sheet, the visible tunnel
+                         interior is the ``tunnels_interior`` swept
+                         tube that lives behind/inside the mouth.
+
+Why no Solidify: an earlier pass added a 200 m Solidify pre-pass to
+turn the sheet into a crust so the boolean could carve a volume. That
+worked geometrically but the downward-extruded shell kept poking up
+through other cliffs at oblique camera angles and made the whole
+terrain look fractured. The bike never goes below the heightfield, so
+the carved-volume was decorative anyway — what matters is the mouth
+rim cut, and a plain Boolean Difference against a closed cutter tube
+delivers that cleanly.
 
 ### Adding a tunnel
 
@@ -56,6 +70,11 @@ is a circle of radius 4 m, flattened on the bottom to make a tunnel
 floor). The cutter profile ``tunnel_profile_out`` is the same shape
 inflated by ``CUTTER_INFLATE`` metres — keep its silhouette larger than
 the inner profile so the boolean cut clears the visible walls.
+
+The profile's +Y direction maps to **world -Z** (downward) when swept,
+not the other way around. So the bottom-of-tunnel control point lives
+at *positive* Y in the profile's edit-mode view, and dragging it
+"further down" in the user's sense means dragging it in +Y.
 
 ### Performance note
 
@@ -109,18 +128,22 @@ INTERIOR_RADIUS_M     = 4.0
 CUTTER_INFLATE_M      = 0.4
 
 # Starter curve: a 4-point bezier ducking through the central peak
-# (peak_00). Peak_00's cone footprint is radius 240 m around origin
-# with apex 140 m tall. We pick mouth XYs inside that radius (~200 m
-# out) where the cone height is ~33 m, leaving ~28 m of rock above
-# the cutter for a solid mouth even after the noise stack thins the
-# slope. Interior dips to z=80 — well below the 140 m apex so the
-# tunnel has headroom even if a peak gets retuned shorter.
+# (peak_00, apex at ≈ (-20, 15, 140), base ≈ 240 m radius around the
+# origin). Mouth points were tuned by sampling the actual heightfield
+# (the noise stack thins the cone faster than the bare-cone math
+# predicts — d=200 m gave only ≈10 m of surface elevation, so a
+# cutter at z=5 (top z=9.4) sat fully buried and produced no mouth
+# opening). The points below land both mouths well outside the cone
+# base where the seafloor is near sea level, so the cutter (r=4.4)
+# clearly pokes above the surface and the boolean carves a real
+# mouth. Mid-tunnel z=90 leaves 30+ m of rock above the ceiling for
+# a solid roof under peak_00's apex.
 STARTER_CURVE_NAME    = "tunnel_00_curve"
 STARTER_CURVE_POINTS: list[tuple[float, float, float]] = [
-    (-180.0, -100.0,   5.0),
-    ( -30.0,  -10.0,  80.0),
-    (  60.0,   60.0,  80.0),
-    ( 180.0,  130.0,   5.0),
+    (-230.0, -138.0,   8.0),  # mouth — outside cone base, cutter clears surface
+    ( -50.0,  -25.0,  90.0),  # dives under peak_00 from the SW
+    (  30.0,   40.0,  90.0),  # exits peak_00 toward the NE
+    ( 205.0,  145.0,   8.0),  # mouth — outside cone base, cutter clears surface
 ]
 
 
@@ -176,25 +199,29 @@ def _build_profile_curve(name: str, radius: float, *, flat_bottom: bool) -> bpy.
     swept tunnel has a horizontal floor — bikes can ride flat instead
     of slipping down a curved bowl.
 
-    The shape is sized so the lowest point of the silhouette sits at
-    z = -radius * 0.6 (when flat) so the floor lands roughly 60 % of
-    the radius below the spine. Authors who want a perfect circle can
-    Tab in and drag the bottom point down to ``-radius``."""
+    Orientation note: Curve to Mesh sweeps the profile with its +Y axis
+    pointing downward in world space (along the spine's natural frame,
+    not world +Z). Empirically: dragging a profile point further in -Y
+    raised the tube's ceiling, not its floor. So we author the profile
+    with +Y = "floor / world down" and -Y = "ceiling / world up", which
+    matches what a user dragging the bottom point downward in the Tab-
+    edit view expects.
+
+    The flattened-floor point lands at +Y = radius * 0.6 (world Z = -0.6
+    * radius below the spine). Authors who want a perfect circle can
+    Tab in and drag the floor point down to +Y = +radius."""
     curve_data = bpy.data.curves.new(name, type="CURVE")
     curve_data.dimensions = "2D"  # 2-D so Curve to Mesh treats it as a profile
     spline = curve_data.splines.new(type="BEZIER")
     spline.bezier_points.add(3)  # implicit first point + 3 = 4 total
-    bottom_y = -radius * 0.6 if flat_bottom else -radius
+    floor_y = radius * 0.6 if flat_bottom else radius
     coords = [
-        ( radius, 0.0),         # right (3 o'clock)
-        ( 0.0,    radius),      # top  (12 o'clock)
-        (-radius, 0.0),         # left (9 o'clock)
-        ( 0.0,    bottom_y),    # bottom (6 o'clock) — flattened
+        ( radius,  0.0),       # right (3 o'clock)
+        ( 0.0,    -radius),    # ceiling (-Y profile → world +Z)
+        (-radius,  0.0),       # left (9 o'clock)
+        ( 0.0,     floor_y),   # floor (+Y profile → world -Z) — flattened
     ]
     for bp, (x, y) in zip(spline.bezier_points, coords):
-        # Profile lives in the XY plane of the curve's local space; we
-        # rely on Curve to Mesh's standard convention that the profile
-        # is treated as a cross-section perpendicular to the spine.
         bp.co = (x, y, 0.0)
         bp.handle_left_type = "AUTO"
         bp.handle_right_type = "AUTO"
@@ -297,11 +324,15 @@ def _build_sweep_group() -> bpy.types.NodeTree:
     n_realize = add("GeometryNodeRealizeInstances", -800, 200)
     g.links.new(n_coll.outputs["Instances"], n_realize.inputs["Geometry"])
 
-    # Profile object → Object Info → curve geometry. Transform RELATIVE
-    # so the profile's location/rotation doesn't drag the sweep around;
-    # only the profile's *shape* matters.
+    # Profile object → Object Info → curve geometry. Transform ORIGINAL
+    # so we get the profile's geometry in its own local space — the
+    # profile object can be parked anywhere in the scene without
+    # dragging the sweep around. (We park the profiles off-screen below
+    # the seafloor; with RELATIVE the swept tube ends up at
+    # curve_position + profile_world_position, which translated the
+    # entire tunnel by ~470 m on the first attempt.)
     n_prof = add("GeometryNodeObjectInfo", -800, -200,
-                 transform_space="RELATIVE")
+                 transform_space="ORIGINAL")
     g.links.new(gi.outputs["Profile"], n_prof.inputs["Object"])
 
     # Curve to Mesh: sweep profile along every spline of the realized
@@ -403,16 +434,23 @@ def _build_tunnel_meshes(
 
 def _attach_terrain_boolean(terrain: bpy.types.Object, cutter: bpy.types.Object) -> None:
     """Stack a Boolean Difference modifier on the terrain under the
-    existing HV_Island geometry-nodes modifier. ``solver=EXACT`` so the
-    boolean works on the heightfield-evaluated mesh even though the
-    base plane isn't manifold; ``self_intersection=True`` because the
-    cone slopes can produce self-intersecting evaluated meshes near
-    the apex when the noise stack is dense."""
+    existing HV_Island geometry-nodes modifier.
+
+    The heightfield is a 2-D sheet, so this only cuts a ring at each
+    mouth where the cutter pierces the surface. That's all the bike
+    actually needs — the visible tunnel interior is ``tunnels_interior``,
+    not a carved subterranean volume. An earlier pass tried to make the
+    boolean carve a 3-D tube via a Solidify pre-pass; it worked
+    geometrically but the 200-m downward crust kept popping up through
+    other cliffs and made the terrain look fractured. Dropped.
+
+    ``solver=EXACT`` so the rim cut is clean on the HV_Island-generated
+    heightfield. We leave ``use_self`` OFF — on a 148k-vert terrain it
+    asks the solver for ~58 GB and crashes the seed's auto-eval."""
     mod = terrain.modifiers.new(BOOLEAN_MOD_NAME, "BOOLEAN")
     mod.operation = "DIFFERENCE"
     mod.object = cutter
     mod.solver = "EXACT"
-    mod.use_self = True
     # By default the boolean modifier evaluates in the viewport — that's
     # great for inspecting the cut, miserable for editing the curves.
     # The seed leaves it ON so the .blend opens with a visible result;
