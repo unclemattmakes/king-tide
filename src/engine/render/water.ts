@@ -758,13 +758,16 @@ export function createWaterMesh(
       const d = gerstnerDisp(xN, zN, tShifted)
       // h.y, h.z are dy/dx, dy/dz at this time sample.
       const slope = sqrt(h.y.mul(h.y).add(h.z.mul(h.z)))
-      // Foam triggers tuned aggressively toward SoT — the previous thresholds
-      // only fired on the sharpest crests, leaving 90 % of wave faces foam-
-      // free. The whitecaps streaking down wave fronts are the single most
-      // identifiable feature of SoT-style water, so this is a deliberate
-      // overshoot of "physically motivated" to land on "visually right".
-      const slopeFoam = smoothstep(float(0.22), float(0.6), slope)
-      const foldFoam = smoothstep(float(0.07), float(0.22), d.z)
+      // Foam triggers ride a deliberately WIDE smoothstep so foam ramps
+      // smoothly from "barely there" to "fully white" instead of switching
+      // on across a narrow slope band. The narrow band (0.22..0.6) was
+      // producing the jittery foam streaks visible in the SoT-comparison
+      // screenshot: adjacent vertices straddling the band rendered as
+      // bright-vs-dark lines on the same wave face. Wider band = gentle
+      // gradient across the face, which is what SoT's wave fronts actually
+      // look like up close.
+      const slopeFoam = smoothstep(float(0.18), float(1.0), slope)
+      const foldFoam = smoothstep(float(0.05), float(0.35), d.z)
       const localFoam = max(slopeFoam, foldFoam)
       const decay = float(Math.exp(-dt * DECAY_RATE))
       maxFoam.assign(max(maxFoam, localFoam.mul(decay)))
@@ -810,33 +813,62 @@ export function createWaterMesh(
   // ~0.35 (well below the analytic Gerstner peaks of ~1.0), so the detail
   // reads as surface texture without erasing the silhouette of the big waves.
   const detailTex = getWaveDetailNormalTexture()
-  const DETAIL_A_TILE = 6.0
-  const DETAIL_B_TILE = 1.5
-  // Slope scales chosen so the peak decoded-and-rescaled slope contribution
-  // sits at ~0.25 (cascade A) / ~0.2 (cascade B) world-space dy/dx — well
-  // under the analytic Gerstner peaks (~1.0) so the silhouette of the big
-  // waves stays intact, but high enough that the detail reads as actual
-  // chop instead of vanishing. Bake normalization pegs decoded values at
-  // ±0.5, so eg. cascade A peak = 0.5 · (DETAIL_A_SCALE / DETAIL_A_TILE).
-  const DETAIL_A_SCALE = 3.0
-  const DETAIL_B_SCALE = 0.9
-  const detailUvA = positionWorld.xz
+  // Tiles enlarged from (6 m, 1.5 m) → (11 m, 2 m) and the UV axes rotated
+  // by non-perpendicular angles (+23° / -37°) so the texture's natural
+  // pattern doesn't read as obvious world-grid-aligned strips. Two layers
+  // of mitigation against the "tiling repetition" complaint: larger tiles
+  // mean fewer full repeats visible in a single viewport, and the off-axis
+  // rotation breaks the cross-hatch beat that two axis-aligned cascades at
+  // different scales would otherwise produce.
+  //
+  // Slope scales bumped proportionally so the peak world-space slope
+  // contribution stays in the same range (~0.21 cascade A, ~0.30 cascade B)
+  // despite the larger tile size. Bake normalization pegs decoded values
+  // at ±0.5, so peak ≈ 0.5 · (SCALE / TILE).
+  const DETAIL_A_TILE = 11.0
+  const DETAIL_B_TILE = 2.0
+  const DETAIL_A_SCALE = 4.5
+  const DETAIL_B_SCALE = 1.2
+  const A_ANGLE = 0.4
+  const B_ANGLE = -0.65
+  const aCos = Math.cos(A_ANGLE)
+  const aSin = Math.sin(A_ANGLE)
+  const bCos = Math.cos(B_ANGLE)
+  const bSin = Math.sin(B_ANGLE)
+  // Rotate world XZ into each cascade's local frame, then divide by tile
+  // size and offset by scroll. The scroll directions stay in tile-local
+  // space, so cascade A's scroll runs along its own rotated +X and
+  // cascade B's runs along its own rotated -X — adds further temporal
+  // variety on top of the off-axis spatial layout.
+  const wxA0 = positionWorld.x.mul(float(aCos)).sub(positionWorld.z.mul(float(aSin)))
+  const wzA0 = positionWorld.x.mul(float(aSin)).add(positionWorld.z.mul(float(aCos)))
+  const detailUvA = vec2(wxA0, wzA0)
     .div(float(DETAIL_A_TILE))
     .add(vec2(tNode.mul(float(0.04)), tNode.mul(float(-0.027))))
-  const detailUvB = positionWorld.xz
+  const wxB0 = positionWorld.x.mul(float(bCos)).sub(positionWorld.z.mul(float(bSin)))
+  const wzB0 = positionWorld.x.mul(float(bSin)).add(positionWorld.z.mul(float(bCos)))
+  const detailUvB = vec2(wxB0, wzB0)
     .div(float(DETAIL_B_TILE))
     .add(vec2(tNode.mul(float(-0.11)), tNode.mul(float(0.08))))
   // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
   const detailSampleA = texture(detailTex, detailUvA) as any
   // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
   const detailSampleB = texture(detailTex, detailUvB) as any
+  // Decoded slopes are in TILE-LOCAL frame (because the UV was rotated).
+  // Rotate them back into world XZ via the inverse rotation matrix
+  // (transpose of the forward rotation) so they add correctly to the
+  // analytic Gerstner slopes which live in world space.
+  const rsAx = detailSampleA.r.mul(float(2)).sub(float(1))
+  const rsAy = detailSampleA.g.mul(float(2)).sub(float(1))
   const detailSlopeA = vec2(
-    detailSampleA.r.mul(float(2)).sub(float(1)),
-    detailSampleA.g.mul(float(2)).sub(float(1)),
+    rsAx.mul(float(aCos)).add(rsAy.mul(float(aSin))),
+    rsAx.mul(float(-aSin)).add(rsAy.mul(float(aCos))),
   ).mul(float(DETAIL_A_SCALE).div(float(DETAIL_A_TILE)))
+  const rsBx = detailSampleB.r.mul(float(2)).sub(float(1))
+  const rsBy = detailSampleB.g.mul(float(2)).sub(float(1))
   const detailSlopeB = vec2(
-    detailSampleB.r.mul(float(2)).sub(float(1)),
-    detailSampleB.g.mul(float(2)).sub(float(1)),
+    rsBx.mul(float(bCos)).add(rsBy.mul(float(bSin))),
+    rsBx.mul(float(-bSin)).add(rsBy.mul(float(bCos))),
   ).mul(float(DETAIL_B_SCALE).div(float(DETAIL_B_TILE)))
   const detailSlope = detailSlopeA.add(detailSlopeB).mul(detailStrengthUniform)
 
@@ -1457,7 +1489,18 @@ export function createWaterMesh(
   // Then foam stamps full opacity on top so the surf zone still reads
   // as solid scattered air regardless of view angle.
   const baseAlpha = mix(float(0.55), float(0.96), float(1).sub(ndotv))
-  mat.opacityNode = mix(baseAlpha, float(0.98), foamMask)
+  // Depth-gate opacity. `closeness` is the view-ray path through water to
+  // the next opaque surface; small in shallows (seabed within ~6 m of the
+  // water-line), large in deep water (or at grazing angles where there's
+  // a lot of water between the surface and any seabed). Both deep-water
+  // and grazing samples should be effectively opaque — without this, you
+  // can see wave fronts THROUGH the wave in front of them, which was the
+  // single biggest "this doesn't look like a real ocean" tell after
+  // comparing to SoT. Shallows retain the view-angle-driven base alpha
+  // so the seabed colour still reads through directly-overhead samples.
+  const depthOpacity = smoothstep(float(0), float(6), closeness)
+  const depthGatedAlpha = mix(baseAlpha, float(0.98), depthOpacity)
+  mat.opacityNode = mix(depthGatedAlpha, float(0.98), foamMask)
   // Noise-modulated roughness. In sparkle patches roughness drops from 0.18
   // to ~0.04, tightening the specular lobe and producing crisp highlights.
   // Classic mode keeps the constant 0.18 so the A/B comparison is clean.
