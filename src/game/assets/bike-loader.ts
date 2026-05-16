@@ -1,6 +1,8 @@
 import type * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 
+import { ExportedKind } from '../../engine/asset-kinds'
+
 /**
  * Render-side bike GLB loader.
  *
@@ -82,11 +84,11 @@ async function doLoad(url: string): Promise<LoadedBike> {
 
   scene.traverse((obj) => {
     const kind = obj.userData?.kind
-    if (kind === 'bike') {
+    if (kind === ExportedKind.BIKE) {
       root = obj
-    } else if (kind === 'socket' && typeof obj.userData?.slot === 'string') {
+    } else if (kind === ExportedKind.SOCKET && typeof obj.userData?.slot === 'string') {
       socketNames[obj.userData.slot] = obj.name
-    } else if (kind === 'collider') {
+    } else if (kind === ExportedKind.COLLIDER) {
       const shape = obj.userData?.shape
       if (shape !== 'box' && shape !== 'capsule' && shape !== 'cylinder' && shape !== 'sphere') {
         return
@@ -112,7 +114,7 @@ async function doLoad(url: string): Promise<LoadedBike> {
   })
 
   if (!root) {
-    throw new Error(`bike GLB ${url} is missing a node with extras.kind="bike"`)
+    throw new Error(`bike GLB ${url} is missing a node with extras.kind="${ExportedKind.BIKE}"`)
   }
 
   const e = (root as THREE.Object3D).userData as Partial<LoadedBikeExtras>
@@ -163,7 +165,7 @@ export function cloneLoadedBike(
   // shadow casters + receivers so bikes drop a shadow on terrain
   // and self-shade against each other on the grid.
   root.traverse((obj) => {
-    if (obj.userData?.kind === 'collider' || obj.userData?.kind === 'socket') {
+    if (obj.userData?.kind === ExportedKind.COLLIDER || obj.userData?.kind === ExportedKind.SOCKET) {
       obj.visible = false
       return
     }
