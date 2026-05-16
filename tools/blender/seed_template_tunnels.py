@@ -413,6 +413,11 @@ def _build_tunnel_meshes(
     imod[ids["Profile"]]   = inner_profile
     imod[ids["Fill Caps"]] = False
     imod[ids["Material"]]  = interior_mat
+    # Hide in the outliner by default — the heightfield can't occlude
+    # the swept tube from outside (it's a 2-D sheet), so leaving the
+    # interior visible in Object Mode obscures the surrounding terrain
+    # while authoring. The runtime + the export pipeline still see it
+    # (kind=track is what they key off, not viewport visibility).
 
     # Cutter — manifold solid used by the terrain's Boolean Difference.
     # Hidden from render and export; viewport visibility stays on so the
@@ -515,6 +520,9 @@ def seed() -> None:
     _attach_terrain_boolean(terrain, cutter)
 
     bpy.context.view_layer.update()
+
+    # hide_set needs a populated view layer, so call after the update.
+    interior.hide_set(True)
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=OUTPUT_PATH)
