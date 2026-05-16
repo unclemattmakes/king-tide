@@ -102,7 +102,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         crumbsEl.appendChild(sep)
       }
       const c = document.createElement('span')
-      c.className = 'bc-crumb' + (s.id === currentStep ? ' is-current' : '')
+      c.className = `bc-crumb${s.id === currentStep ? ' is-current' : ''}`
       c.textContent = s.label
       crumbsEl.appendChild(c)
     })
@@ -138,7 +138,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     for (const t of tracks) {
       const card = document.createElement('button')
       card.type = 'button'
-      card.className = 'bc-card' + (t.id === picks.trackId ? ' selected' : '')
+      card.className = `bc-card${t.id === picks.trackId ? ' selected' : ''}`
       card.style.setProperty('--accent', t.accent)
       const best = bestLapFor(t.id, picks.bikeId)
       card.innerHTML = `
@@ -163,7 +163,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     for (const b of bikeCards) {
       const card = document.createElement('button')
       card.type = 'button'
-      card.className = 'bc-card' + (b.id === picks.bikeId ? ' selected' : '')
+      card.className = `bc-card${b.id === picks.bikeId ? ' selected' : ''}`
       card.style.setProperty('--accent', b.accent)
       const best = showTrackBest ? bestLapFor(picks.trackId, b.id) : null
       const bars = b.bars
@@ -240,7 +240,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       window.clearInterval(clockInterval)
       window.removeEventListener('keydown', onKey)
       gamepadNav.dispose()
-      root!.classList.remove('show')
+      root?.classList.remove('show')
       document.body.classList.remove('menu-active')
     }
     function finish(href: string): void {
@@ -449,7 +449,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     screens['sp-track'] = buildSpTrack()
     screens['sp-bike'] = buildSpBike()
     screens['mp-entry'] = buildMpEntry()
-    for (const s of Object.values(screens)) stage!.appendChild(s!)
+    for (const s of Object.values(screens)) stage?.appendChild(s!)
 
     showStep(opts.reason === 'exit-from-race' ? 'mode' : 'title')
 

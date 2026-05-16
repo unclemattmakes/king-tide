@@ -5,25 +5,28 @@ Run from a Node wrapper (``pnpm test:blender``) which feeds this script
 to a background Blender. The test:
 
   1. Enables the addon (fails the run if enable itself raises).
-  2. Reads the addon module's ``_classes`` tuple — the addon's own
-     declaration of what *should* register.
-  3. For every ``HOVERBIKE_OT_*`` / ``HOVERBIKE_PT_*`` class in
-     ``_classes``, verifies the class is actually present in
+  2. Walks every ``.py`` file inside the addon (or just the file if
+     the addon is still a single .py) and finds every class declared
+     with the ``HOVERBIKE_OT_…`` / ``HOVERBIKE_PT_…`` prefix.
+  3. Asserts each declared class is actually present in
      ``bpy.types.Operator.__subclasses__()`` or
      ``bpy.types.Panel.__subclasses__()``. Catches the silent
      mid-registration failure that bit us in the addon-drift incident
      (registration succeeded for everything before a broken class and
      stopped after it, with no exception bubbled to the caller).
-  4. Cross-checks the module's source for ``class HOVERBIKE_OT_…`` /
-     ``class HOVERBIKE_PT_…`` declarations not present in ``_classes``.
-     Catches "added a class, forgot to add it to the registration
-     tuple", a foot-gun the manual-tuple registration design invites.
+
+This shape works through the in-progress monolith → package refactor:
+during the migration each module owns its own ``register()`` /
+``unregister()``, so there's no single ``_classes`` tuple to read.
+Walking source declarations is the durable contract — anything you
+``class HOVERBIKE_OT_foo`` must end up registered, period.
 
 Exits 0 on success, 1 on any failure (with a per-class report).
 """
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from typing import Iterable
@@ -32,6 +35,7 @@ import bpy
 
 ADDON_MODULE = "hoverbike_addon"
 EXPECTED_PREFIXES = ("HOVERBIKE_OT_", "HOVERBIKE_PT_")
+CLASS_DECL_PATTERN = re.compile(r"^class\s+(HOVERBIKE_(?:OT|PT)_\w+)\s*\(", re.MULTILINE)
 
 
 def _fail(msg: str) -> None:
@@ -56,29 +60,45 @@ def _registered_class_names() -> set[str]:
     return names
 
 
-def _module_declared_classes(module) -> tuple[set[str], set[str]]:
-    """(_classes_tuple_names, source_file_class_names)
+def _addon_source_files(module) -> list[str]:
+    """Every .py file that contributes to the addon. Handles both
+    layouts:
 
-    The first set is what the addon promises to register; the second is
-    every class defined in the source file. Their symmetric difference
-    is the foot-gun zone."""
-    classes_tuple = getattr(module, "_classes", None)
-    if classes_tuple is None:
-        _fail(f"{ADDON_MODULE} has no top-level `_classes` tuple — registration design changed?")
-        sys.exit(1)
-    tuple_names = {c.__name__ for c in classes_tuple}
+      * single-file addon (legacy): ``hoverbike_addon.py``
+      * package addon: ``hoverbike_addon/__init__.py`` + siblings
 
-    source_names: set[str] = set()
-    try:
-        with open(module.__file__, encoding="utf-8") as f:
-            for line in f:
-                m = re.match(r"^class\s+(HOVERBIKE_(?:OT|PT)_\w+)\s*\(", line)
-                if m:
-                    source_names.add(m.group(1))
-    except OSError as e:
-        _fail(f"could not read source at {module.__file__}: {e}")
-        sys.exit(1)
-    return tuple_names, source_names
+    For a package we walk recursively under the package root so a
+    future ``hoverbike_addon/road/operators.py`` would still be scanned.
+    """
+    files: list[str] = []
+    if hasattr(module, "__path__"):
+        # Package — walk the directory.
+        for pkg_dir in module.__path__:
+            for root, _, names in os.walk(pkg_dir):
+                for name in names:
+                    if name.endswith(".py"):
+                        files.append(os.path.join(root, name))
+    else:
+        files.append(module.__file__)
+    return files
+
+
+def _scan_declared_classes(module) -> set[str]:
+    """All HOVERBIKE_OT/PT classes declared anywhere in the addon's
+    source tree. Raw lexical scan — doesn't care about indentation /
+    conditional definition; if it looks like a class declaration, we
+    expect it to register."""
+    declared: set[str] = set()
+    for path in _addon_source_files(module):
+        try:
+            with open(path, encoding="utf-8") as f:
+                src = f.read()
+        except OSError as e:
+            _fail(f"could not read {path}: {e}")
+            sys.exit(1)
+        for match in CLASS_DECL_PATTERN.finditer(src):
+            declared.add(match.group(1))
+    return declared
 
 
 def _filter(names: Iterable[str]) -> set[str]:
@@ -96,39 +116,33 @@ def main() -> int:
         _fail(f"addon_enable({ADDON_MODULE!r}) raised: {e}")
         return 1
 
-    import sys as _sys
-    module = _sys.modules.get(ADDON_MODULE)
+    module = sys.modules.get(ADDON_MODULE)
     if module is None:
         _fail(f"addon enabled but module not in sys.modules — something is very wrong")
         return 1
 
-    tuple_names, source_names = _module_declared_classes(module)
+    declared = _scan_declared_classes(module)
     registered = _filter(_registered_class_names())
-    expected = _filter(tuple_names)
-    in_source = _filter(source_names)
 
     failures: list[str] = []
 
-    # Check 1: every class in _classes should actually be registered.
-    missing_from_registration = expected - registered
-    for name in sorted(missing_from_registration):
-        failures.append(f"class {name} is in `_classes` but failed to register")
+    # Every declared HOVERBIKE_OT/PT class must actually be registered.
+    # Catches:
+    #   * Class defined but not added to any module's register() — the
+    #     manual-tuple foot-gun.
+    #   * register() raised partway through and Blender swallowed it —
+    #     the silent failure mode that bit us in the addon-drift
+    #     incident (everything after the broken class quietly missed).
+    missing = declared - registered
+    for name in sorted(missing):
+        failures.append(f"class {name} declared in source but not registered with Blender")
 
-    # Check 2: every HOVERBIKE_OT/PT class in the source should be in _classes.
-    # If you defined a class but didn't add it to `_classes`, Blender will
-    # quietly never register it and your UI will silently miss buttons.
-    missing_from_tuple = in_source - expected
-    for name in sorted(missing_from_tuple):
-        failures.append(
-            f"class {name} is defined in {ADDON_MODULE}.py but not listed in `_classes` "
-            f"(it'll never be registered)"
-        )
-
-    # Pass-through summary.
-    print(f"[addon-smoke] addon module: {module.__file__}")
-    print(f"[addon-smoke] classes declared in _classes:  {len(expected)} (OT/PT only)")
-    print(f"[addon-smoke] classes defined in source file: {len(in_source)} (OT/PT only)")
-    print(f"[addon-smoke] classes registered with Blender: {len(registered)} (OT/PT only)")
+    # Pass-through summary so a passing run still tells you the count.
+    layout = "package" if hasattr(module, "__path__") else "single-file"
+    location = getattr(module, "__path__", [module.__file__])[0]
+    print(f"[addon-smoke] addon module: {ADDON_MODULE} ({layout}) at {location}")
+    print(f"[addon-smoke] HOVERBIKE_OT/PT classes declared in source: {len(declared)}")
+    print(f"[addon-smoke] HOVERBIKE_OT/PT classes registered with Blender: {len(registered)}")
 
     if failures:
         for f in failures:
@@ -136,7 +150,7 @@ def main() -> int:
         print(f"[addon-smoke] FAILED ({len(failures)} issue(s))", file=sys.stderr)
         return 1
 
-    _ok(f"all {len(expected)} HOVERBIKE_OT/PT classes register cleanly")
+    _ok(f"all {len(declared)} HOVERBIKE_OT/PT classes register cleanly")
     return 0
 
 

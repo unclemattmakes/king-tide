@@ -22,8 +22,8 @@ write to Three.js objects, never the other way around.
   Hoverbike addon. See the bike section in
   [docs/asset-pipeline-guide.md](docs/asset-pipeline-guide.md).
 - **Blender scripts** live in `tools/blender/`. The Hoverbike addon
-  (`tools/blender/hoverbike_addon.py`) is the user-facing entry point;
-  `build_*.py` files regenerate `.blend`s from JSON specs.
+  (`tools/blender/hoverbike_addon/`, a package) is the user-facing
+  entry point; `build_*.py` files regenerate `.blend`s from JSON specs.
 
 ## Blender connector — optional
 
@@ -69,22 +69,26 @@ Python-only kinds (authoring helpers that never ship in the GLB) live in
 `AuthoringKind` in the same Python file with no TS counterpart.
 
 Use the constants at all new sites. There's still a long tail of literal
-string sites in `hoverbike_addon.py` and `seed_*.py` waiting for a follow-up
-migration pass — feel free to fix them opportunistically.
+string sites in `hoverbike_addon/_legacy.py` and `seed_*.py` waiting for a
+follow-up migration pass — feel free to fix them opportunistically.
 
 ## Hoverbike addon — installation
 
-The Hoverbike addon (`tools/blender/hoverbike_addon.py`) lives in the repo but
-Blender loads it from a user scripts dir. To keep them in sync, run once:
+The Hoverbike addon is a package directory (`tools/blender/hoverbike_addon/`)
+that Blender loads from a user scripts dir. To keep the repo and the install
+in sync, run once:
 
 ```
 pnpm install:blender-addon
 ```
 
-It symlinks the repo file into `<blender-user-scripts>/addons/hoverbike_addon.py`
-so every code change is picked up by Blender's next "Reload Scripts"
-(`F3 → Reload Scripts`) without a manual copy. Falls back to a copy on Windows
-without Developer Mode; the script prints how to enable it.
+It symlinks the package directory into
+`<blender-user-scripts>/addons/hoverbike_addon/` so every code change is
+picked up by Blender's next "Reload Scripts" (`F3 → Reload Scripts`) without
+a manual copy. Falls back to a recursive copy on Windows without Developer
+Mode; the script prints how to enable it. Also handles the pre-package
+single-file install — backs up any leftover `hoverbike_addon.py` from the
+old layout to `.bak`.
 
 If panels or operators disappear from the N-panel after pulling, the installed
 addon has drifted — re-run `pnpm install:blender-addon` (or check that the

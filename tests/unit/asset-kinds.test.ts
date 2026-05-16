@@ -14,13 +14,18 @@ const PYTHON_REGISTRY = resolve(__dirname, '../../tools/blender/hoverbike_kinds.
 
 function parsePythonExportedKind(): Set<string> {
   const src = readFileSync(PYTHON_REGISTRY, 'utf-8')
-  // Capture the body of `class ExportedKind:` up to the next class
-  // declaration (or end of file).
-  const blockMatch = src.match(/class\s+ExportedKind[^:]*:([\s\S]*?)(?=^class\s|\Z)/m)
-  if (!blockMatch) {
+  // Slice the body of `class ExportedKind:` up to the next class
+  // declaration (or EOF). Done with explicit string ops because the
+  // regex equivalent needs `\Z` (end-of-input), which JS regex
+  // doesn't have; biome flagged it as a useless escape.
+  const start = src.search(/^class\s+ExportedKind[^:]*:/m)
+  if (start < 0) {
     throw new Error(`could not locate class ExportedKind in ${PYTHON_REGISTRY}`)
   }
-  const block = blockMatch[1]!
+  const afterHeader = src.indexOf('\n', start) + 1
+  const nextClassRel = src.slice(afterHeader).search(/^class\s/m)
+  const end = nextClassRel < 0 ? src.length : afterHeader + nextClassRel
+  const block = src.slice(afterHeader, end)
   // Match `NAME = "value"` (or single quotes). Skip names starting
   // with `_` to mirror the convenience-tuple filter in
   // hoverbike_kinds.py (private / dunder helpers don't count as
