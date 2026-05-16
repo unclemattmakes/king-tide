@@ -169,6 +169,12 @@
       "specPath": "public/tracks/oval-loop.json"
     },
     {
+      "id": "seattle-sprint",
+      "displayName": "Seattle Sprint",
+      "url": "/assets/tracks/seattle-sprint.glb",
+      "specPath": "public/tracks/seattle-sprint.json"
+    },
+    {
       "id": "template-tunnel-island",
       "displayName": "Template Tunnel Island",
       "url": "/assets/tracks/template-tunnel-island.glb",
