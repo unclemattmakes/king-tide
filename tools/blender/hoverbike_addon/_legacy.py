@@ -292,34 +292,84 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
 
     cps = sorted(by_kind.get("checkpoint", []), key=lambda o: o.name)
     checkpoints: list[dict[str, Any]] = []
-    for i, cp in enumerate(cps):
-        loc = cp.matrix_world.translation
-        # Build a runtime quaternion from the gate's Blender Z-euler so
-        # the gate's "forward" axis (cp.rotation · +Z in the runtime
-        # frame) matches the racing-line tangent the author set up.
-        # Without this, every template-authored checkpoint defaulted to
-        # facing three.js +Z (= Blender -Y, south) and the AI couldn't
-        # cross any gate whose tangent had a non-south component —
-        # i.e., every east/west-running stretch.
-        yaw = _yaw_from_z_euler(cp)
-        half = 0.5 * yaw
-        checkpoints.append(
-            {
-                "index": i,
-                "position": _b2t(loc.x, loc.y, loc.z),
-                # Blender +X / +Y / +Z → three.js +X / +Z / -Y; a rotation
-                # around Blender +Z (the yaw axis) becomes a rotation around
-                # three.js +Y of the same magnitude.
-                "rotation": {
-                    "x": 0.0,
-                    "y": float(math.sin(half)),
-                    "z": 0.0,
-                    "w": float(math.cos(half)),
-                },
-                "halfWidth": float(cp.get("half_width", 6.0)),
-                "height": float(cp.get("height", 4.0)),
-            }
+    if cps:
+        # "Blender wins" mode — the author dropped cp_NN empties by hand.
+        # Their positions and rotations override anything we could derive
+        # from the spline. Useful when an author wants a specific gate
+        # placement (e.g. just past a jump where arc length doesn't land
+        # the gate where they want).
+        for i, cp in enumerate(cps):
+            loc = cp.matrix_world.translation
+            # Build a runtime quaternion from the gate's Blender Z-euler so
+            # the gate's "forward" axis (cp.rotation · +Z in the runtime
+            # frame) matches the racing-line tangent the author set up.
+            # Without this, every template-authored checkpoint defaulted to
+            # facing three.js +Z (= Blender -Y, south) and the AI couldn't
+            # cross any gate whose tangent had a non-south component —
+            # i.e., every east/west-running stretch.
+            yaw = _yaw_from_z_euler(cp)
+            half = 0.5 * yaw
+            checkpoints.append(
+                {
+                    "index": i,
+                    "position": _b2t(loc.x, loc.y, loc.z),
+                    # Blender +X / +Y / +Z → three.js +X / +Z / -Y; a rotation
+                    # around Blender +Z (the yaw axis) becomes a rotation around
+                    # three.js +Y of the same magnitude.
+                    "rotation": {
+                        "x": 0.0,
+                        "y": float(math.sin(half)),
+                        "z": 0.0,
+                        "w": float(math.cos(half)),
+                    },
+                    "halfWidth": float(cp.get("half_width", 6.0)),
+                    "height": float(cp.get("height", 4.0)),
+                }
+            )
+    else:
+        # "Spline wins" mode (the default since 2026-05-16) — no cp_NN
+        # empties means the gates ARE the spline. Sample `ai_spline_main`
+        # at `hoverbike_gate_spacing`-metre intervals and emit the
+        # checkpoint array on the fly. Authors get a single source of
+        # truth: edit the spline, gate placement follows automatically.
+        # The live N-panel preview ("Rebuild Gate Preview") uses the
+        # same sampler, so what the author sees in Blender is what the
+        # runtime gets.
+        main_spline = next(
+            (o for o in by_kind.get("ai_spline", []) if o.name == "ai_spline_main"),
+            None,
         )
+        if main_spline is not None and main_spline.type == "CURVE":
+            from .previews import _resample_by_arc_length, DEFAULT_GATE_SPACING_M
+
+            scn = bpy.context.scene
+            spacing = float(getattr(scn, "hoverbike_gate_spacing", DEFAULT_GATE_SPACING_M))
+            half_w = float(getattr(scn, "hoverbike_gate_half_width", 14.0))
+            height = float(getattr(scn, "hoverbike_gate_height", 8.0))
+            points = _sample_curve_to_polyline(main_spline)
+            placements = _resample_by_arc_length(points, spacing, vertical_axis=2)
+            for i, p in enumerate(placements):
+                px, py, pz = p["position"]
+                tx, ty, _ = p["tangent"]
+                # Empty's +Y aligns with tangent; yaw = angle from +Y to
+                # tangent measured around +Z. atan2(ty, tx) gives angle
+                # from +X; subtract π/2 to rebase to +Y.
+                yaw = math.atan2(ty, tx) - math.pi / 2.0
+                half = 0.5 * yaw
+                checkpoints.append(
+                    {
+                        "index": i,
+                        "position": _b2t(px, py, pz),
+                        "rotation": {
+                            "x": 0.0,
+                            "y": float(math.sin(half)),
+                            "z": 0.0,
+                            "w": float(math.cos(half)),
+                        },
+                        "halfWidth": half_w,
+                        "height": height,
+                    }
+                )
 
     starts = sorted(by_kind.get("start", []), key=lambda o: o.name)
     if starts:
@@ -844,6 +894,185 @@ class _PreviewCollectionsHidden:
             lc.exclude = prior
         self._prior.clear()
         return False
+
+
+# ── Curve sampling + layer-collection lookup ──────────────────────────────
+#
+# Every gizmo, lint, road-builder, tunnel-builder, ghost-lap, snap-to-spline
+# operator pulls these out of `_legacy` — they pre-date the carve-out and
+# every sibling module imports them lazily by name.
+
+
+def _sample_curve_to_polyline(curve_obj: bpy.types.Object) -> list[tuple[float, float, float]]:
+    """World-space polyline samples of a curve object, using its
+    ``resolution_u`` setting. Mirrors what ``tools/export_track.py`` does
+    when baking AI splines, so authoring-time previews see exactly the
+    polyline the exporter will write."""
+    mesh = curve_obj.to_mesh()
+    try:
+        mw = curve_obj.matrix_world
+        return [tuple(mw @ v.co) for v in mesh.vertices]
+    finally:
+        curve_obj.to_mesh_clear()
+
+
+def _spline_iter_points(curve_obj: bpy.types.Object):
+    """Yield ``(spline, point, world_co, setter)`` for every control point
+    on a curve, regardless of whether the spline is BEZIER or NURBS/POLY.
+    The setter takes a world-space ``Vector`` and writes the matrix-
+    inverse local position back into the point — so callers can move
+    points without juggling matrix math. For Bezier points the setter
+    shifts the handles along with the control point so the local shape
+    is preserved."""
+    mw = curve_obj.matrix_world
+    mw_inv = mw.inverted_safe()
+    for spline in curve_obj.data.splines:
+        if spline.type == "BEZIER":
+            for bp in spline.bezier_points:
+                def make_setter(point=bp):
+                    def setter(world_co):
+                        old_local = point.co.copy()
+                        new_local = mw_inv @ world_co
+                        delta = new_local - old_local
+                        point.co = new_local
+                        point.handle_left = point.handle_left + delta
+                        point.handle_right = point.handle_right + delta
+                    return setter
+                yield spline, bp, mw @ bp.co, make_setter()
+        else:
+            # NURBS / POLY: spline.points carries 4D coords (x, y, z, w).
+            for sp_pt in spline.points:
+                def make_setter(point=sp_pt):
+                    def setter(world_co):
+                        local = mw_inv @ world_co
+                        point.co = (local.x, local.y, local.z, point.co[3])
+                    return setter
+                local_co = mathutils.Vector((sp_pt.co[0], sp_pt.co[1], sp_pt.co[2]))
+                yield spline, sp_pt, mw @ local_co, make_setter()
+
+
+def _find_layer_collection(layer_coll, name: str):
+    """Recursively walk ``layer_coll`` looking for a child LayerCollection
+    whose underlying Collection has ``name``. Returns the LayerCollection
+    or None. Used to toggle ``exclude`` on preview / gizmo collections
+    without needing to track the view-layer hierarchy by hand."""
+    if layer_coll.collection.name == name:
+        return layer_coll
+    for c in layer_coll.children:
+        hit = _find_layer_collection(c, name)
+        if hit is not None:
+            return hit
+    return None
+
+
+# ── Terrain mesh discovery + modifier helpers ─────────────────────────────
+#
+# Used by every tool that conforms or carves the terrain (road, tunnel,
+# downtown, terrain sculpt, track stats). Lives here because every sibling
+# module needs the same "find the terrain" rule, and we don't want N
+# slightly-different implementations to drift.
+
+
+def _largest_terrain_mesh() -> bpy.types.Object | None:
+    """Return the visible ``kind="track"`` mesh with the biggest bbox
+    diagonal. Tools that conform / carve / inspect terrain (road, tunnel,
+    downtown, sculpt, lint) need a deterministic "the terrain" pick when
+    the scene has multiple kind=track meshes (road slabs, ramps, tunnel
+    interiors, downtown blocks all share the tag). The largest one is
+    almost always the ground plane; ties broken by name for determinism.
+    Returns None if no kind=track mesh exists or all are hidden."""
+    best = None
+    best_size = -1.0
+    for obj in bpy.data.objects:
+        if obj.type != "MESH":
+            continue
+        if obj.get("kind") != "track":
+            continue
+        if obj.hide_get() or obj.hide_viewport:
+            continue
+        bb = obj.bound_box
+        dx = bb[6][0] - bb[0][0]
+        dy = bb[6][1] - bb[0][1]
+        dz = bb[6][2] - bb[0][2]
+        size = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if size > best_size or (size == best_size and best is not None and obj.name < best.name):
+            best = obj
+            best_size = size
+    return best
+
+
+def _terrain_active_modifiers(obj: bpy.types.Object) -> list[str]:
+    """Return names of every viewport-enabled modifier on ``obj``. The
+    road / sculpt / tunnel tools write to source-mesh verts; any active
+    modifier (Geometry Nodes, Subsurf, Displace) overrides those writes
+    on next evaluation — *or worse*, adds its own displacement on top so
+    the terrain spikes wildly where the tool wrote a non-zero Z."""
+    if not obj.modifiers:
+        return []
+    return [m.name for m in obj.modifiers if m.show_viewport]
+
+
+def _apply_all_viewport_modifiers(obj: bpy.types.Object) -> list[str]:
+    """Apply every viewport-enabled modifier on ``obj`` in stack order,
+    using the user's selection context. Returns the list of applied
+    modifier names so callers can include it in their status report.
+
+    The modifier operator needs the object to be active and selected,
+    so we snapshot selection state and restore it on exit."""
+    applied: list[str] = []
+    view_layer = bpy.context.view_layer
+    prev_active = view_layer.objects.active
+    prev_selection = [o for o in view_layer.objects if o.select_get()]
+    try:
+        for o in prev_selection:
+            o.select_set(False)
+        view_layer.objects.active = obj
+        obj.select_set(True)
+        # `modifier_apply` removes the modifier from the stack, so iterate
+        # over a snapshot of names rather than the live list.
+        names_to_apply = [m.name for m in obj.modifiers if m.show_viewport]
+        for name in names_to_apply:
+            try:
+                bpy.ops.object.modifier_apply(modifier=name)
+                applied.append(name)
+            except RuntimeError:
+                # Some modifiers can't be applied (e.g. Armature without
+                # pose data) — skip silently; the caller's status line
+                # surfaces the partial list either way.
+                pass
+    finally:
+        obj.select_set(False)
+        for o in prev_selection:
+            if o.name in view_layer.objects:
+                o.select_set(True)
+        view_layer.objects.active = prev_active
+    return applied
+
+
+# ── Re-exports for helpers that live in domain modules ────────────────────
+#
+# Two helpers — ``_spline_arc_length`` (track stats) and
+# ``_resolve_road_curve`` (road builder) — have their canonical homes in
+# the carved-out domain modules, but other sibling modules (ghost_lap,
+# spline) import them by name from ``_legacy``. Rather than duplicate or
+# scatter `from .other_module import ...` lines across callers, we expose
+# the helpers here via lazy attribute access — the domain modules are
+# imported on first access, which dodges the load-order cycle that would
+# happen with a top-level import.
+
+def _spline_arc_length(spline_obj):
+    """Re-export of :func:`track_meta._spline_arc_length`. Lazy import to
+    avoid the load-order cycle that would happen if ``_legacy`` pulled in
+    ``track_meta`` at module load."""
+    from . import track_meta
+    return track_meta._spline_arc_length(spline_obj)
+
+
+def _resolve_road_curve():
+    """Re-export of :func:`road._resolve_road_curve`. Lazy for the same
+    cycle-avoidance reason as ``_spline_arc_length`` above."""
+    from . import road
+    return road._resolve_road_curve()
 
 
 # ── Gate + racer preview (moved) ──────────────────────────────────────────

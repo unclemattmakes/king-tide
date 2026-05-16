@@ -31,6 +31,28 @@ from bpy.types import Operator
 
 
 # ────────────────────────────────────────────────────────────────────
+# Shared helpers
+# ────────────────────────────────────────────────────────────────────
+
+
+def _ensure_active_object(context) -> bpy.types.Object | None:
+    """Blender 5.1's glTF exporter touches ``context.active_object``
+    unconditionally — if nothing is active it raises a confusing
+    ``Context has no attribute 'active_object'`` mid-export. Pick any
+    visible mesh as a fallback and return whatever was active before
+    so the caller can restore. The active object isn't used by the
+    exporter for anything when ``use_selection=False``."""
+    prev = context.view_layer.objects.active
+    if prev is not None:
+        return prev
+    for obj in context.view_layer.objects:
+        if obj.type == "MESH" and not obj.hide_get():
+            context.view_layer.objects.active = obj
+            return prev
+    return prev
+
+
+# ────────────────────────────────────────────────────────────────────
 # Playtest / URL helpers
 # ────────────────────────────────────────────────────────────────────
 
@@ -189,6 +211,7 @@ class HOVERBIKE_OT_export_track(Operator):
             return {"CANCELLED"}
 
         os.makedirs(os.path.dirname(glb_path), exist_ok=True)
+        _ensure_active_object(context)
         try:
             with _PreviewCollectionsHidden(context.view_layer):
                 bpy.ops.export_scene.gltf(
@@ -351,6 +374,7 @@ class HOVERBIKE_OT_export_bike(Operator):
             return {"CANCELLED"}
 
         os.makedirs(os.path.dirname(glb_path), exist_ok=True)
+        _ensure_active_object(context)
         try:
             with _PreviewCollectionsHidden(context.view_layer):
                 bpy.ops.export_scene.gltf(

@@ -204,6 +204,61 @@ def _curve_control_tilts(curve_obj: bpy.types.Object) -> list[float]:
     return [float(pt.tilt) for pt in spline.points]
 
 
+def _terrain_water_floor(scene) -> float | None:
+    """Lowest Z the road's terrain-cast result is allowed to land on.
+    Reads ``water_volume_main``'s Z (the still-water level) plus its
+    ``wave_height`` custom prop (the runtime Gerstner amplitude), with
+    a small clearance multiplier so the road sits above the highest
+    wave crest rather than at exactly the trough-to-peak average.
+
+    Returns ``None`` if there is no water volume in the scene — older
+    inland tracks (Cliffside, alpine-sprint) shouldn't pick up a floor
+    they don't need."""
+    water = scene.objects.get("water_volume_main") if hasattr(scene, "objects") else bpy.data.objects.get("water_volume_main")
+    if water is None:
+        return None
+    base = float(water.matrix_world.translation.z)
+    wave_h = float(water.get("wave_height", 0.0))
+    # 1.3× the authored wave height gives a comfortable margin over the
+    # tallest realistic crest without lifting straight stretches of road
+    # so far above water that the bridge looks stilted. Tunable; revisit
+    # if a future ramped-up wave preset clips the road.
+    clearance = max(0.4, wave_h * 1.3)
+    return base + clearance
+
+
+def _curve_control_conform(curve_obj: bpy.types.Object) -> list[float]:
+    """Return per-control-point conform weight in [0, 1] for the curve's
+    first spline. Stored *inverted* in Blender's ``weight_softbody``
+    field — chosen because (a) it's already exposed on every Bezier /
+    NURBS point and survives copy / paste, (b) it's not used for
+    anything else by the addon, (c) Blender's factory default for
+    ``weight_softbody`` on a fresh BezierSplinePoint is 0, so storing
+    the *float weight* there (not the conform weight) means existing
+    curves authored before this feature shipped automatically read as
+    fully conforming — no migration pass needed.
+
+    Mapping: ``conform = 1.0 - weight_softbody``.
+
+      * ``weight_softbody == 0`` (Blender's default) → ``conform = 1``
+        → the road conforms to the terrain at this point: Z comes from
+        a downward raycast and the terrain is lifted to meet it.
+      * ``weight_softbody == 1`` → ``conform = 0`` → the point is
+        floating: road Z = authored bezier height, terrain untouched.
+      * In-between values blend smoothly so a bridge can lift off the
+        shore, span open water, and land cleanly on the far side.
+
+    Empty list when the spline has no points."""
+    if not curve_obj.data.splines:
+        return []
+    spline = curve_obj.data.splines[0]
+    if spline.type == "BEZIER":
+        pts = spline.bezier_points
+    else:
+        pts = spline.points
+    return [1.0 - float(min(1.0, max(0.0, pt.weight_softbody))) for pt in pts]
+
+
 def _radius_at_t(radii: list[float], t: float, cyclic: bool) -> float:
     """Linearly interpolate a control-point radius array at parameter
     t in [0, 1]. Cyclic splines wrap around; open splines clamp at
@@ -223,6 +278,29 @@ def _radius_at_t(radii: list[float], t: float, cyclic: bool) -> float:
         i1 = min(i0 + 1, n - 1)
     frac = f - int(f)
     return radii[i0] * (1.0 - frac) + radii[i1] * frac
+
+
+def _conform_at_t(weights: list[float], t: float, cyclic: bool) -> float:
+    """Linearly interpolate a control-point conform-weight array at
+    parameter t in [0, 1]. Same wrap rules as ``_radius_at_t`` so the
+    conform / radius / tilt fields on a control point all land at the
+    same sample. Returns 1.0 (full conform — backwards compatible with
+    pre-existing curves) when no weights are set."""
+    n = len(weights)
+    if n == 0:
+        return 1.0
+    if n == 1:
+        return weights[0]
+    if cyclic:
+        f = (t * n) % n
+        i0 = int(f) % n
+        i1 = (i0 + 1) % n
+    else:
+        f = t * (n - 1)
+        i0 = min(int(f), n - 1)
+        i1 = min(i0 + 1, n - 1)
+    frac = f - int(f)
+    return weights[i0] * (1.0 - frac) + weights[i1] * frac
 
 
 def _tilt_at_t(tilts: list[float], t: float, cyclic: bool) -> float:
@@ -370,6 +448,7 @@ def _sample_road_path(
 
     radii, cyclic = _curve_control_radii(curve_obj)
     tilts = _curve_control_tilts(curve_obj)
+    conforms = _curve_control_conform(curve_obj)
     samples: list[dict] = []
     denom = max(1, n_samples - 1)
     j = 0
@@ -383,42 +462,84 @@ def _sample_road_path(
         b = raw[j + 1] if (j + 1 < len(raw)) else raw[j]
         x = a[0] + (b[0] - a[0]) * frac
         y = a[1] + (b[1] - a[1]) * frac
+        # Authored Z, linearly interpolated from the polyline. Used as
+        # the road's altitude wherever the conform weight is < 1 — a
+        # floating bridge takes its Z from the bezier point's authored
+        # height instead of a raycast.
+        authored_z = a[2] + (b[2] - a[2]) * frac
         dx = b[0] - a[0]
         dy = b[1] - a[1]
         tl = math.hypot(dx, dy) or 1.0
         t_norm = i / denom
         r = _radius_at_t(radii, t_norm, cyclic)
         tilt = _tilt_at_t(tilts, t_norm, cyclic)
+        conform = _conform_at_t(conforms, t_norm, cyclic)
         samples.append({
-            "x": x, "y": y, "z": 0.0,
+            "x": x, "y": y, "z": authored_z, "_authored_z": authored_z,
             "tx": dx / tl, "ty": dy / tl,
-            "r": r, "t": t_norm, "tilt": tilt,
+            "r": r, "t": t_norm, "tilt": tilt, "conform": conform,
         })
 
-    # Raycast each sample's (x, y) downward onto the scene. The depsgraph
-    # has to be re-fetched *after* the preview collections are hidden,
-    # otherwise it still references them and the cast lands on gate /
-    # racer / water gizmos instead of the real terrain underneath.
-    scene = bpy.context.scene
+    # Raycast each sample's (x, y) downward onto the *terrain mesh
+    # specifically* (not the scene). Casting against the scene hit any
+    # visible kind=track mesh — downtown buildings, ramps, tunnel
+    # interiors — so a road curve passing near a city block could find
+    # its altitude was a building roof 80 m up. Casting against the
+    # terrain object directly skips everything else and gives the
+    # author "the ground" no matter what's standing on it.
+    #
+    # The water surface provides an altitude floor. When the cast
+    # misses the terrain (off the edge, or through a tunnel hole) OR
+    # hits below the water surface (a sample over Puget Sound / Lake
+    # Washington / etc. where the seabed is at -8 m), we fall back to
+    # ``water_base + wave_peak`` so the road sits above the highest
+    # wave crest rather than diving into the seabed.
+    #
+    # The sample's final Z is a blend of authored (bezier point) Z and
+    # the terrain-or-water-floor Z, weighted by the per-sample conform
+    # weight. Fully-floating samples (weight = 0) skip the cast and
+    # the floor entirely — the authored Z is final.
+    water_floor = _terrain_water_floor(bpy.context.scene)
     down = mathutils.Vector((0.0, 0.0, -1.0))
     ray_origin_z = 10000.0
     misses = 0
+    floored = 0
     with _PreviewCollectionsHidden(bpy.context.view_layer):
         bpy.context.view_layer.update()
-        depsgraph = bpy.context.evaluated_depsgraph_get()
+        if terrain_obj is not None:
+            terrain_mw_inv = terrain_obj.matrix_world.inverted_safe()
+            terrain_mw = terrain_obj.matrix_world
         for s in samples:
-            origin = mathutils.Vector((s["x"], s["y"], ray_origin_z))
-            result, location, _normal, _index, hit_obj, _matrix = scene.ray_cast(
-                depsgraph, origin, down
-            )
-            if result:
-                s["z"] = float(location.z)
-                if terrain_obj is not None and hit_obj != terrain_obj:
-                    # Hit a prop or another track mesh; still useful but
-                    # we count it for the report.
-                    pass
-            else:
-                misses += 1
+            conform = float(s["conform"])
+            if conform <= 0.001:
+                # Fully floating — authored Z wins, skip the cast.
+                continue
+            terrain_z: float | None = None
+            if terrain_obj is not None:
+                origin_local = terrain_mw_inv @ mathutils.Vector(
+                    (s["x"], s["y"], ray_origin_z)
+                )
+                direction_local = terrain_mw_inv.to_3x3() @ down
+                result, location_local, _normal, _index = terrain_obj.ray_cast(
+                    origin_local, direction_local, distance=ray_origin_z * 2.0
+                )
+                if result:
+                    terrain_z = float((terrain_mw @ location_local).z)
+            if terrain_z is None:
+                # Cast missed the terrain — must be over water (or off-map).
+                if water_floor is not None:
+                    terrain_z = water_floor
+                    floored += 1
+                else:
+                    misses += 1
+                    continue
+            elif water_floor is not None and terrain_z < water_floor:
+                # Terrain dips below the water floor here (seabed under
+                # Puget Sound, Lake Washington trough, locks canal); the
+                # road rides on the water, not the seabed.
+                terrain_z = water_floor
+                floored += 1
+            s["z"] = s["_authored_z"] * (1.0 - conform) + terrain_z * conform
 
     # Smooth the height profile (1-2-1 binomial, in place).
     for _ in range(max(0, int(smooth_passes))):
@@ -681,6 +802,7 @@ def _conform_terrain_to_road(
 
     flattened = 0
     blended = 0
+    floating = 0
     for v in me.vertices:
         world = mw @ v.co
         _, idx, _ = kd.find((world.x, world.y, 0.0))
@@ -688,17 +810,29 @@ def _conform_terrain_to_road(
         d = math.hypot(world.x - s["x"], world.y - s["y"])
         if d >= outer:
             continue
+        # Per-sample conform weight scales the deformation — a floating
+        # bridge section (weight 0) leaves the terrain untouched, so the
+        # seabed under a bridge over water stays at its natural depth
+        # and water reads as water instead of an isthmus.
+        conform_w = float(s.get("conform", 1.0))
         target_z = s["z"]
         if d <= inner:
-            blend = 1.0
-            flattened += 1
+            base_blend = 1.0
         else:
             t = (outer - d) / (outer - inner)
-            blend = t * t * (3.0 - 2.0 * t)  # smoothstep
+            base_blend = t * t * (3.0 - 2.0 * t)  # smoothstep
+        blend = base_blend * conform_w
+        if blend <= 0.001:
+            floating += 1
+            continue
+        if d <= inner:
+            flattened += 1
+        else:
             blended += 1
         new_world_z = world.z * (1.0 - blend) + target_z * blend
         # Cap: never let the terrain rise above the drivable surface.
-        # The cap rises with (1 - blend) so it disappears at d=outer.
+        # The cap rises with (1 - blend) so it disappears at the
+        # outer edge of the band (or wherever conform decays to 0).
         surface_z = target_z + surface_lift - clearance
         max_allowed = surface_z + (world.z - surface_z) * (1.0 - blend)
         if new_world_z > max_allowed:
@@ -707,52 +841,18 @@ def _conform_terrain_to_road(
 
     me.update()
     me.calc_loop_triangles()
-    return {"flattened": flattened, "blended": blended}
+    return {"flattened": flattened, "blended": blended, "floating": floating}
 
 
-def _terrain_active_modifiers(obj: bpy.types.Object) -> list[str]:
-    """Return names of every viewport-enabled modifier on `obj`. The
-    road tool conforms by writing to source-mesh verts; any active
-    modifier (Geometry Nodes, Subsurf, Displace) overrides them on
-    next evaluation — *or worse*, adds its own displacement on top so
-    the terrain spikes wildly where the road wrote a non-zero Z."""
-    return [m.name for m in obj.modifiers if m.show_viewport] if obj.modifiers else []
-
-
-def _apply_all_viewport_modifiers(obj: bpy.types.Object) -> list[str]:
-    """Apply every viewport-enabled modifier on `obj` in stack order,
-    using the user's selection context. Returns the list of applied
-    modifier names so callers can include it in their status report.
-
-    The modifier operator needs the object to be active and selected,
-    so we snapshot selection state and restore it on exit."""
-    applied: list[str] = []
-    view_layer = bpy.context.view_layer
-    prev_active = view_layer.objects.active
-    prev_selection = [o for o in view_layer.objects if o.select_get()]
-    try:
-        for o in prev_selection:
-            o.select_set(False)
-        view_layer.objects.active = obj
-        obj.select_set(True)
-        # `modifier_apply` removes the modifier from the stack, so we
-        # iterate over a snapshot of names rather than the live list.
-        names_to_apply = [m.name for m in obj.modifiers if m.show_viewport]
-        for name in names_to_apply:
-            try:
-                bpy.ops.object.modifier_apply(modifier=name)
-                applied.append(name)
-            except RuntimeError:
-                # Some modifiers can't be applied (e.g., Armature
-                # without pose data); skip but report.
-                pass
-    finally:
-        obj.select_set(False)
-        for o in prev_selection:
-            if o.name in view_layer.objects:
-                o.select_set(True)
-        view_layer.objects.active = prev_active
-    return applied
+# Terrain-mesh / modifier helpers live in ``_legacy`` so every domain
+# module (road, tunnel, terrain sculpt, downtown, lint) picks the same
+# terrain and handles modifier stacks the same way. Re-imported here as
+# private names for backwards compatibility with the module-local call
+# sites below.
+from ._legacy import (  # noqa: E402
+    _terrain_active_modifiers,
+    _apply_all_viewport_modifiers,
+)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -937,12 +1037,114 @@ class HOVERBIKE_OT_build_road(Operator):
         scene.collection.objects.link(obj)
 
         applied_msg = f" (applied {', '.join(applied_mods)})" if applied_mods else ""
+        float_count = sum(1 for s in samples if float(s.get("conform", 1.0)) < 0.5)
+        float_msg = f", {float_count} floating samples" if float_count > 0 else ""
         self.report(
             {"INFO"},
-            f"Road built: {len(samples)} samples, width {width:.1f}m. "
+            f"Road built: {len(samples)} samples, width {width:.1f}m{float_msg}. "
             f"Terrain: {deform_summary['flattened']} verts flattened, "
-            f"{deform_summary['blended']} blended{applied_msg}.",
+            f"{deform_summary['blended']} blended, "
+            f"{deform_summary['floating']} skipped (floating){applied_msg}.",
         )
+        return {"FINISHED"}
+
+
+# ────────────────────────────────────────────────────────────────────
+# Per-point conform mode — float / conform toggles for the road curve
+# ────────────────────────────────────────────────────────────────────
+
+
+def _set_selected_float_weight(curve_obj: bpy.types.Object, float_weight: float) -> int:
+    """Write ``weight_softbody`` (= 1 - conform) on every selected
+    control point of the active curve. Returns the count of points
+    modified. Works in edit mode (uses ``select_control_point`` flags)
+    and falls back to all points when the curve is not in edit mode.
+
+    ``float_weight`` semantics:
+      * 1.0 → fully floating (road takes authored Z, terrain untouched).
+      * 0.0 → fully conforming (default; road raycasts onto terrain)."""
+    count = 0
+    in_edit = bool(curve_obj.mode == "EDIT")
+    for spline in curve_obj.data.splines:
+        if spline.type == "BEZIER":
+            for bp in spline.bezier_points:
+                if in_edit and not bp.select_control_point:
+                    continue
+                bp.weight_softbody = float_weight
+                count += 1
+        else:
+            for pt in spline.points:
+                if in_edit and not pt.select:
+                    continue
+                pt.weight_softbody = float_weight
+                count += 1
+    return count
+
+
+def _resolve_active_road_curve(context) -> bpy.types.Object | None:
+    """Pick the curve the conform-toggle operators should act on. Order:
+    (1) the active object if it's a curve, (2) ``road_curve_main``, (3)
+    ``ai_spline_main``. Mirrors the road builder's resolution so the
+    toggles act on whichever curve will actually drive the build."""
+    obj = context.active_object
+    if obj is not None and obj.type == "CURVE":
+        return obj
+    for name in (ROAD_CURVE_NAME, "ai_spline_main"):
+        candidate = bpy.data.objects.get(name)
+        if candidate is not None and candidate.type == "CURVE":
+            return candidate
+    return None
+
+
+class HOVERBIKE_OT_mark_selected_floating(Operator):
+    """Mark the active curve's selected control points as floating —
+    the road tool will take their Z verbatim from the bezier point's
+    authored height and leave the terrain underneath untouched. Use
+    this to author bridges, ramps over water, or any road segment
+    that should not push the seabed up to road level."""
+
+    bl_idname = "hoverbike.mark_selected_floating"
+    bl_label = "Mark Selected Floating"
+    bl_description = (
+        "Set float weight (weight_softbody) to 1 on selected control points; "
+        "the road's Z at these points will come from the authored bezier height "
+        "and the terrain underneath stays put (use for bridges, ramps over water)"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        curve_obj = _resolve_active_road_curve(context)
+        if curve_obj is None:
+            self.report({"ERROR"}, "No curve to edit. Select a curve (or create road_curve_main).")
+            return {"CANCELLED"}
+        n = _set_selected_float_weight(curve_obj, 1.0)
+        self.report({"INFO"}, f"Marked {n} point(s) floating on {curve_obj.name}.")
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_mark_selected_conforming(Operator):
+    """Mark the active curve's selected control points as conforming —
+    the road tool will raycast each point onto the terrain and lift
+    the terrain to meet the road. This is the default; use this
+    operator to restore conform after experimentally marking a point
+    floating."""
+
+    bl_idname = "hoverbike.mark_selected_conforming"
+    bl_label = "Mark Selected Conforming"
+    bl_description = (
+        "Set float weight (weight_softbody) to 0 on selected control points; "
+        "the road's Z at these points will be raycast onto the terrain and the "
+        "terrain will be lifted to meet it (the default for new curves)"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        curve_obj = _resolve_active_road_curve(context)
+        if curve_obj is None:
+            self.report({"ERROR"}, "No curve to edit. Select a curve (or create road_curve_main).")
+            return {"CANCELLED"}
+        n = _set_selected_float_weight(curve_obj, 0.0)
+        self.report({"INFO"}, f"Marked {n} point(s) conforming on {curve_obj.name}.")
         return {"FINISHED"}
 
 
@@ -953,6 +1155,8 @@ class HOVERBIKE_OT_build_road(Operator):
 _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_add_road_starter_curve,
     HOVERBIKE_OT_build_road,
+    HOVERBIKE_OT_mark_selected_floating,
+    HOVERBIKE_OT_mark_selected_conforming,
 )
 
 _SCENE_PROP_NAMES: tuple[str, ...] = (
