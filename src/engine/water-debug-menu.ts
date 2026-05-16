@@ -111,6 +111,15 @@ const SLIDERS: SliderDef[] = [
     format: (n) => n.toFixed(2),
     hint: 'Roughness inside sparkle patches — lower = brighter glints',
   },
+  {
+    key: 'detailStrength',
+    label: 'Detail (sub-Gerstner)',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: 'FFT-lite detail normal cascades. 0 = bypass · 1 = default chop · 2 = punchy',
+  },
 ]
 
 export type WaterDebugMenu = {
@@ -199,6 +208,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'roughSparkle':
           water.debug.setRoughSparkle(v)
+          break
+        case 'detailStrength':
+          water.debug.setDetailStrength(v)
           break
       }
     })
