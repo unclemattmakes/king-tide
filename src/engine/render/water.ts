@@ -533,26 +533,28 @@ export function createWaterMesh(
   // it). CPU buoyancy stays on cascade 0 only — the chop + long-
   // swell cascades are visuals-only (bounded contribution to total
   // height, ~10–30 cm RMS each, well under the buoyancy gap budget).
-  // `?fftbake=fft` switches the wind-sea (cascade 0) displacement
-  // factory from the direct-DFT path to the A9 real-FFT path. Both
-  // produce the same handle shape, so the downstream vertex shader
-  // is indifferent. Default = `ddft` (direct DFT). Chop + long-
-  // swell cascades stay on direct DFT for the first cut — once
-  // visual parity is confirmed on the main cascade we can flip
-  // them all over.
+  // `?fftbake=fft` switches ALL THREE displacement cascades
+  // (wind-sea + chop + long-swell) from the direct-DFT path to
+  // the A9 real-FFT path. Both produce the same handle shape, so
+  // the downstream vertex shader is indifferent. Default =
+  // `ddft` (direct DFT).
   //
-  // FFT factory requires log₂N even (N ∈ {4, 16, 64, 256, ...}).
-  // `defaultSpectrumParams().N` is 32, which is odd-log₂. We bump
-  // to 64 on the FFT branch so the constraint is satisfied; the
-  // CPU buoyancy sampler stays on the original N=32 top-K so
-  // buoyancy doesn't change between the two paths (visual parity
-  // is what we're testing).
+  // The FFT primitive supports any power-of-two N ≥ 4 (the
+  // dispatch is parity-agnostic — handles both log₂N parities).
+  // We bump cascade 0 to N=128 on the FFT branch — that's the
+  // real win: ~½-meter wave detail straight from the spectrum,
+  // no separate normal-map cascade needed. The direct-DFT path
+  // can't afford N=128 (its cost is O(N⁴) = 268M ops vs the
+  // FFT's O(N²·logN) = 115k mode-ops). The CPU buoyancy sampler
+  // stays on the original N=32 top-K of cascade 0 so buoyancy
+  // doesn't change between the two paths — they read the same
+  // h0 array (deterministically built from `spectrumParams`).
   const fftBakeMode = params?.get('fftbake') === 'fft' ? 'fft' : 'ddft'
   const displacementFactory =
     fftBakeMode === 'fft' ? createGpuOceanFftDisplacement : createGpuOceanDisplacement
   const displacementPhillipsParams =
     fftBakeMode === 'fft' && field.kind === 'spectrum'
-      ? { ...field.spectrumParams, N: 64 }
+      ? { ...field.spectrumParams, N: 128 }
       : field.kind === 'spectrum'
         ? field.spectrumParams
         : null
@@ -560,11 +562,18 @@ export function createWaterMesh(
     useGpuDisplacement && displacementPhillipsParams !== null
       ? displacementFactory({ phillipsParams: displacementPhillipsParams })
       : null
+  // The chop + long-swell cascades share the same `displacementFactory`
+  // (direct DFT or FFT path) as the wind-sea cascade above. Both bump N
+  // to 64 on the FFT branch — same log₂N-even constraint, same CPU-vs-GPU
+  // independence (CPU buoyancy reads cascade 0 only).
+  const chopN = fftBakeMode === 'fft' ? 64 : (field.kind === 'spectrum' ? field.spectrumParams.N : 32)
+  const swellN = fftBakeMode === 'fft' ? 64 : (field.kind === 'spectrum' ? field.spectrumParams.N : 32)
   const gpuChopHandle =
     useGpuDisplacement && field.kind === 'spectrum'
-      ? createGpuOceanDisplacement({
+      ? displacementFactory({
           phillipsParams: {
             ...field.spectrumParams,
+            N: chopN,
             tileSize: 22,
             windSpeed: 6,
             // Rotate the chop wind direction 90° from the main
@@ -594,9 +603,10 @@ export function createWaterMesh(
       : null
   const gpuSwellHandle =
     useGpuDisplacement && field.kind === 'spectrum'
-      ? createGpuOceanDisplacement({
+      ? displacementFactory({
           phillipsParams: {
             ...field.spectrumParams,
+            N: swellN,
             tileSize: 250,
             windSpeed: 16,
             // Rotate long swell wind 30° from main cascade — real

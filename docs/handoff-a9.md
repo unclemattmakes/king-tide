@@ -1,5 +1,77 @@
 # Hand-off — finish A9 (real radix-2 FFT in TSL)
 
+## 2026-05-17 update — A9 complete (modulo final visual A/B)
+
+Everything in the original handoff is done.
+
+### Bug — fixed
+The amplitude discrepancy was the candidate (c) stage-uniform race. The
+fix: butterfly kernels now bake their stage as a compile-time constant.
+`stageUniform` is gone — `4·log₂N` precompiled butterfly kernels per
+FFT2D handle (one per axis × ping-pong direction × stage). The dispatch
+loop indexes into the right precompiled kernel instead of writing a
+shared uniform between dispatches. Confirmed visually: `?fftbake=fft`
+matches `?fftbake=ddft` on lagoon.
+
+### Then, in order:
+
+1. **All three cascades flipped to FFT.** `displacementFactory` in
+   `water.ts` now drives wind-sea + chop + long-swell when
+   `?fftbake=fft`.
+
+2. **log₂N parity restriction relaxed.** `dispatch()` in
+   `fft-tsl.ts` is parity-agnostic — tracks data location through
+   the alternating ping/pong instead of assuming a final destination.
+   Two bit-rev-col variants (from ping and from pong) plus the
+   parity-aware col-butterfly start. N=8, N=128 covered by oracle
+   tests in `fft-tsl-port.test.ts`.
+
+3. **N=128 wired for cascade 0.** `water.ts` bumps cascade 0 to N=128
+   on the FFT branch (chop + swell stay at N=64). That's the headline
+   visual win — sub-meter wave detail directly from the spectrum,
+   without a separate normal-map cascade.
+
+4. **Batched FFT landed.** `createFft2d({ batched: true })` processes
+   two complex spectra per texel (R/G + B/A) in the same kernel body.
+   `createGpuOceanFftDisplacement` now allocates 4 batched FFTs
+   (height+Dx, Dz+dydx, dydz+dxx, dxz+dzz) instead of 8 unbatched —
+   halves the per-cascade dispatch count.
+
+### Dispatch budget (N=128 cascade 0, N=64 chop + swell, batched)
+
+| Cascade | N   | FFTs | per-FFT dispatches | total |
+|---------|-----|------|--------------------|-------|
+| 0 wind  | 128 | 4    | 1 + 7 + 1 + 7 + 1 = 17 | 68  |
+| 1 chop  | 64  | 4    | 1 + 6 + 1 + 6 + 1 = 15 | 60  |
+| 2 swell | 64  | 4    | 15                | 60   |
+| **+ spectrum-build + unpack per cascade (×2 = 6)** | | | |  6 |
+| **TOTAL displacement dispatches/frame** |  |  |  | **194** |
+
+Down from ~382 in the unbatched 8-FFT version, ~120 dispatches saved
+per frame. At ~10 μs each ≈ 1.2 ms back to the frame budget.
+
+### What's left
+
+- **Visual A/B with N=128 + batched.** The math is proven in the JS
+  oracle (`gpuPortFft2dBatched` matches `gpuPortFft2d` bit-for-bit
+  since it's the same algorithm), but verify on the real GPU. Open
+  two tabs:
+  - `?race=1&track=lagoon&bike=racer&water=fft&waves=fft&fftbake=ddft`
+  - `?race=1&track=lagoon&bike=racer&water=fft&waves=fft&fftbake=fft`
+  Wave shapes should look identical; the FFT side will show CRISPER
+  small waves (N=128 vs the direct DFT's N=32).
+- **Verify on other tracks + times of day.** A7's visual tune was
+  lagoon-at-sunset only.
+- **Perf check.** Headroom should be comfortable; if a frame-time
+  spike appears under heavy load, the next optimization would be
+  packing the spectrum-build output across fewer textures (saves a
+  few writes per texel) or combining unpack into the last col-butterfly
+  scale kernel (saves one dispatch).
+- **A6 cleanup (retire `?water=v2`).** Out of scope for A9, but
+  unblocked now that the FFT path is the better default.
+
+## (Original handoff below for context)
+
 ## What you're picking up
 
 PR [hoverbike#101](https://github.com/occ-matt/hoverbike/pull/101) on
