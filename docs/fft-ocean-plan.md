@@ -24,12 +24,15 @@ To pick up:
 4. **Validation gates not yet exercised** are flagged inline: search the
    table for "Validation". Each ⬜ row's "Notes" column describes the
    intended deliverable + main risks.
-5. The most natural next step is **A3** (Jacobian-based foam) — the A2
-   GPU displacement kernel already computes + writes the Jacobian into
-   the displacement texture's alpha channel, so A3 is mostly a fragment-
-   shader rewrite of the foam path to sample that channel. A2 also
-   unblocks **A5** (debug menu rewrite) since the choppiness λ on the
-   displacement kernel now wants a live slider.
+5. The most natural next step is **A5** (debug menu rewrite + tuning).
+   The math infrastructure is complete: A2 has the full-spectrum
+   displacement texture, A3 the Jacobian foam path. What's left is
+   the visual A/B tune — retire the swell/chop sliders, add wind /
+   cutoff / choppiness / sea-state-intensity sliders, and find the
+   spectrum params that make `?water=fft&waves=fft` clearly read as
+   better than the v2 Gerstner default. The FFT path currently shows
+   visible horizontal banding from the N=32 grid; bumping N or adding
+   a second cascade may be part of A5.
 6. **Open questions** (later in this doc) are decisions deferred to the
    tuning pass — none block forward progress, all benefit from at least
    one round of in-browser eyeballing first.
@@ -58,7 +61,7 @@ URL flags to A/B-test in dev:
 | A1a — Top-K mode selection + analytic samplers (additive) | ✅ done | `spectrum-modes.ts` — `selectTopKModes`, `sampleSpectrumHeightFromModes`, `sampleSpectrumSurfaceFromModes`. 8 unit tests including FD-gradient + variance-capture checks. **No consumer wiring yet — purely additive scaffolding.** |
 | A1b — Discriminated WaveFieldState + spectrum factory (opt-in `?waves=fft`) | ✅ done | `WaveFieldState = GerstnerWaveField \| SpectrumWaveField`. `createSpectrumWaveField` builds top-K Phillips modes; `sampleHeight`/`sampleSurface` branch on `field.kind`. GPU shader path converts spectrum → Gerstner-shape via `spectrum-to-gerstner.ts` (parity-tested) so the existing unrolled shader iteration works unchanged. Default stays on Gerstner — `?waves=fft` activates. Debug menu swell/chop scales no-op in spectrum mode (Phase A5 replaces with wind knobs). **Validation next: in-browser A/B against Gerstner default.** |
 | A2 — GPU full-spectrum IFFT (height + dx + dz + slope) | ✅ done | `createGpuOceanDisplacement` in `ocean-fft/gpu-bake.ts` runs a per-frame direct-IDFT compute kernel over the full Phillips spectrum (built from `field.spectrumParams` — same array the CPU buoyancy sampler reads). Writes two RGBA32F storage textures: `displacementTexture` = (height, λ·Dx, λ·Dz, Jacobian) and `slopeTexture` = (∂h/∂x, ∂h/∂z, _, _). Vertex shader in `water.ts` branches on `useGpuDisplacement` (`?water=fft` + WebGPU + spectrum field): trades the analytic Gerstner sum for one sample of each texture, gets the full N² spectrum back at the cost of two `textureSample` calls per vertex. Choppiness λ defaults to 0.5 (mid-Tessendorf). Wake / shoaling / scene-depth / bike-contrib paths untouched — all read worldX/worldZ + read the height/slope triple downstream, indifferent to the source. CPU buoyancy stays on top-K analytic. **Calibration retuned:** earlier in the A2 work the visual A/B turned up a pre-existing spectrum-amplitude mistake — `defaultSpectrumParams.amplitude = 1.5` produced 50–100 m wave heights on the full grid and was visibly broken on the A1b path too. Recalibrated to `amplitude = 1.6e-6` (Tessendorf-realistic for the (tileSize=90, windSpeed=9.5) tune) so both A1b (top-K) and A2 (full grid) render in arcade range. `renderScale` opt on the displacement kernel kept as a tuning knob (defaults to `1.0`). |
-| A3 — Jacobian-based foam | ⬜ todo | Replace slope/fold heuristic with `det(I+λ∇D)<0`. The Jacobian is already computed + written into `displacementTexture.a` by `createGpuOceanDisplacement` — A3 is "sample alpha, threshold to foam, blend through `foamAccumulator`-style temporal trail." |
+| A3 — Jacobian-based foam | ✅ done | `water.ts` captures `displacementTexture.a` at the vertex texture-sample site, forwards via `jacobianFrag` varying, and the fragment foam mixer adds `foldFoamFft = smoothstep(0.6, -0.2, jacobianFrag)` as a max term alongside `pixelFoam` and `foamAccumFrag`. Gated on `useGpuDisplacement` so the analytic path pays nothing for the unused varying. At the current spectrum calibration (amplitude=1.6e-6, λ=0.5) the partials stay small and J stays near 1, so the Jacobian foam contributes little visually — the plumbing is in place for when A5's sea-state slider lets the user dial choppiness up to a regime where actual J<0 happens. Slope-based `pixelFoam` still carries whitecap foam on non-breaking waves; the Jacobian foam is additive (max), not replacing. **Validation next: in-browser A/B with `?water=fft&waves=fft` at the default and at amplitude×100 to see the Jacobian foam fire on near-breaking crests.** |
 | A4a — Spectrum-field determinism tests (CPU side) | ✅ done | `wave-field-determinism.test.ts` — 6 tests: cross-build identity, advance-step parity, seed forking, replay rebuild-restore cycle, stateless-sampler check, Gerstner regression. Replay + multiplayer determinism guaranteed on the new path. |
 | A4b — CPU sampler matches GPU IFFT at probe points | ✅ done | New 7th test in `wave-field-determinism.test.ts`: "top-K analytic sum converges to the full grid when topK = N²" — locks down sign convention + factor-of-2 conjugate handling that the GPU kernel relies on, and asserts the default top-K captures a meaningful variance fraction. Tests pass at 257/257. |
 | A5 — Tuning + debug menu rewrite | ⬜ todo | Wind speed / direction / fetch / cutoff sliders. Retire swell/chop knobs. Add a choppiness λ slider that feeds `gpuDisplacementHandle.choppiness` (uniform on the kernel — currently constructor-only). Sea-state intensity slider can drive `gpuDisplacementHandle.renderScale` for per-track overrides. |
