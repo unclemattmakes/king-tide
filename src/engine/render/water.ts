@@ -36,7 +36,10 @@ import {
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
 import { buildFftDetailNormalTexture } from '@/engine/render/ocean-fft/cpu-bake'
-import { createGpuOceanFft } from '@/engine/render/ocean-fft/gpu-bake'
+import {
+  createGpuOceanDisplacement,
+  createGpuOceanFft,
+} from '@/engine/render/ocean-fft/gpu-bake'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
 import {
   WAKE_BASE_WIDTH,
@@ -52,6 +55,8 @@ import {
   WAKE_TRANS_OMEGA,
   type WaveFieldState,
 } from '@/engine/sim/water/wave-field'
+import { buildPhillipsSpectrum, type PhillipsParams } from '@/engine/sim/water/phillips'
+import { selectTopKModes } from '@/engine/sim/water/spectrum-modes'
 import { spectrumModesToGerstnerShape } from '@/engine/sim/water/spectrum-to-gerstner'
 
 /**
@@ -138,6 +143,20 @@ export type WaterMesh = {
      *  detail (analytic-Gerstner only); 1 = the default cascade
      *  contribution that stands in for SoT-style FFT chop. */
     setDetailStrength(s: number): void
+    /** Tessendorf choppiness λ — controls horizontal displacement and
+     *  Jacobian-foam threshold on the A2 GPU IFFT path. No-op outside
+     *  the FFT path (`?water=fft` + spectrum field). */
+    setChoppiness(s: number): void
+    /** Visual sea-state intensity (renderScale on the displacement
+     *  kernel). 1 = built-in spectrum tune; raise for stormier, lower
+     *  for glassy calm. No-op outside the FFT path. */
+    setSeaStateIntensity(s: number): void
+    /** Wind speed in m/s — drives the Phillips spectrum's dominant
+     *  wavelength `L = V²/g`. Mutating it rebuilds the spectrum
+     *  (~1 ms for N=32) and reuploads the h0 array to the GPU; the
+     *  CPU buoyancy sampler's top-K modes update in lockstep. No-op
+     *  outside the FFT path. */
+    setWindSpeed(s: number): void
     /** Render the wave geometry as wireframe. Useful for tuning wave /
      *  wake amplitudes against the actual displacement. */
     setWireframe(on: boolean): void
@@ -157,6 +176,20 @@ export type WaterDebugDefaults = {
   roughBase: number
   roughSparkle: number
   detailStrength: number
+  /** Tessendorf choppiness λ on the A2 GPU displacement kernel. Only
+   *  consumed by the FFT path (`?water=fft` + spectrum field); the
+   *  setter no-ops on the analytic Gerstner path. 0 = pure
+   *  heightfield, 0.5 = the mid-Tessendorf default, >1 starts to fold. */
+  choppiness: number
+  /** Visual scale on (height, Dx, Dz, slope) from the A2 GPU
+   *  displacement kernel. FFT-path only. 1 = built-in spectrum tune;
+   *  scrub higher for stormier seas, lower for calmer. Lets per-track
+   *  sea state be dialed in without rebuilding the spectrum. */
+  seaStateIntensity: number
+  /** Phillips spectrum wind speed (m/s). FFT-path only. Drives the
+   *  dominant wavelength `L = V²/g`; mutation rebuilds the spectrum
+   *  + reuploads h0 to GPU + refreshes the CPU sampler's top-K. */
+  windSpeed: number
   wireframe: boolean
 }
 
@@ -415,6 +448,112 @@ export function createWaterMesh(
   //     + scroll in the cascade is doing all the motion work.
   const detailMode: 'procedural' | 'fft' = waterMode === 'fft' ? 'fft' : 'procedural'
   const useGpuFft = detailMode === 'fft' && opts?.backend === 'webgpu'
+  // Phase A2 — full-spectrum GPU IFFT drives the BIG-WAVE silhouette.
+  // Activates when both `?water=fft` and a spectrum-mode wave field are
+  // in play on WebGPU: the vertex shader trades its 32-mode analytic
+  // sum for two texture samples (displacement + slope) per vertex, and
+  // gets the full Phillips spectrum back without paying the per-vertex
+  // unrolled-loop cost. The Gerstner-mode field stays on the analytic
+  // path even with `?water=fft` since the displacement kernel needs
+  // `field.spectrumParams` as input.
+  const useGpuDisplacement = useGpuFft && field.kind === 'spectrum'
+  // A2 + SoT cascades — Sea of Thieves' SIGGRAPH 2018 talk / Horvath
+  // 2015 / Atlas (GDC 2019) all combine MULTIPLE FFT cascades at
+  // different tile sizes to capture wave wavelengths across orders
+  // of magnitude. Each cascade carries a different frequency band:
+  // long-period swell from the biggest-tile cascade, mid-band wind
+  // sea, fine chop. Tile sizes are picked non-commensurate so the
+  // cascades don't re-align and produce visible regular patterns
+  // (Horvath calls this "the single biggest fix for I-can-see-the-
+  // tile" — pick irrational ratios, not clean multiples).
+  //
+  // Cascade 0 — `field.spectrumParams` (tileSize=90, windSpeed=11).
+  //   The "wind sea" band. CPU buoyancy reads top-K of THIS
+  //   spectrum, so the bike's physics matches this cascade's heights.
+  //   Stays the buoyancy source of truth.
+  // Cascade 1 — smaller tile (22 m), lower wind speed (6 m/s, peak
+  //   wavelength L ≈ 3.7 m). Fine chop riding on top of the swell.
+  //   Wider directional spread (s=1) so the chop doesn't band into
+  //   stripes when summed onto the well-aligned swell.
+  // Cascade 2 — large tile (250 m), high wind speed (16 m/s, peak
+  //   wavelength L ≈ 26 m). Long-period swell that gives the
+  //   horizon line its slow rolling motion. Low amplitude — this is
+  //   atmospheric, not foreground geometry. Narrow alignment to
+  //   read as cleanly directional incoming swell.
+  //
+  // Vertex shader sums height + Dx + Dz across all cascades; foam
+  // takes the minimum Jacobian across cascades (J<0 anywhere means
+  // the surface is folding there, regardless of which cascade caused
+  // it). CPU buoyancy stays on cascade 0 only — the chop + long-
+  // swell cascades are visuals-only (bounded contribution to total
+  // height, ~10–30 cm RMS each, well under the buoyancy gap budget).
+  const gpuDisplacementHandle =
+    useGpuDisplacement && field.kind === 'spectrum'
+      ? createGpuOceanDisplacement({ phillipsParams: field.spectrumParams })
+      : null
+  const gpuChopHandle =
+    useGpuDisplacement && field.kind === 'spectrum'
+      ? createGpuOceanDisplacement({
+          phillipsParams: {
+            ...field.spectrumParams,
+            tileSize: 22,
+            windSpeed: 6,
+            // Rotate the chop wind direction 90° from the main
+            // cascade so the small-wavelength wave fronts run
+            // PERPENDICULAR to the swell — chop crossing swell is
+            // what real wind seas look like, and it kills the
+            // strict-linear-alignment look that single-direction
+            // summed cascades produce.
+            windDirX: 0.8,
+            windDirZ: -0.6,
+            amplitude: 2.5e-6,
+            // Wider directional spread on the chop cascade so the
+            // smaller wavelengths don't read as parallel stripes
+            // when summed onto the well-aligned swell.
+            directionalSpread: 1,
+            // Different seed so the chop spectrum is statistically
+            // independent of the swell — otherwise both cascades
+            // would beat against each other and produce visible
+            // moiré at the cascade tile boundaries.
+            seed: 0x0CEA,
+          },
+          // Less Tessendorf pinch on the chop — it's already
+          // fine-grained, more pinching just produces NaN-grade
+          // partials on the alpha (Jacobian) channel.
+          choppiness: 0.4,
+        })
+      : null
+  const gpuSwellHandle =
+    useGpuDisplacement && field.kind === 'spectrum'
+      ? createGpuOceanDisplacement({
+          phillipsParams: {
+            ...field.spectrumParams,
+            tileSize: 250,
+            windSpeed: 16,
+            // Rotate long swell wind 30° from main cascade — real
+            // long-period swell is often generated by a storm far
+            // away (different direction from the LOCAL wind).
+            // Three cascades with three different wind directions
+            // gives the surface a recognizably chaotic-but-coherent
+            // ocean character.
+            windDirX: 0.3,
+            windDirZ: 0.95,
+            // Low amplitude. Spectral energy scales with `A · L²` so
+            // bumping windSpeed to 16 (L = 26m vs 12m on cascade 0)
+            // already 4× the per-mode energy — `A = 1e-7` brings
+            // cascade 2's RMS contribution to ~0.3m, which adds the
+            // slow horizon motion without overpowering the bike's
+            // buoyancy at the start grid.
+            amplitude: 1e-7,
+            // Narrow alignment — long-period swell IS directional in
+            // real oceans (storm rollers come from one direction
+            // across hundreds of miles).
+            directionalSpread: 6,
+            seed: 0x5EA1,
+          },
+          choppiness: 0.3,
+        })
+      : null
   // `?wire=1` is an ORTHOGONAL toggle — works with classic, v2, and any
   // future shader variant. The old `?water=wire` is still honored for
   // backward compatibility.
@@ -834,8 +973,88 @@ export function createWaterMesh(
   // on the CPU side to recover the rest position from world XZ.
   const worldX = positionLocal.x.add(meshOriginX)
   const worldZ = positionLocal.z.add(meshOriginZ)
-  const vertexHeight = gerstnerHeight(worldX, worldZ, tNode)
-  const vertexDisp = gerstnerDisp(worldX, worldZ, tNode)
+  // Big-wave source. Two paths produce the same `vec3(y, dy/dx, dy/dz)`
+  // height + slope and `vec3(dx, dz, qSum)` displacement triples; the
+  // surrounding shoaling / wake / bike-contrib code is shape-agnostic
+  // so it works unchanged across paths.
+  //
+  //   A1b / Gerstner default — sums the unrolled `waveConsts` array
+  //     analytically per vertex. Either the legacy 6-wave Gerstner
+  //     preset or 32 top-K Phillips modes converted to Gerstner shape
+  //     via `spectrum-to-gerstner.ts`. Cheap per vertex, peaks at
+  //     ~24 trig calls.
+  //
+  //   A2 / GPU IFFT — samples the displacement + slope textures the
+  //     compute kernel writes each frame from the full N² Phillips
+  //     spectrum. Same cost per vertex regardless of N; spectrum
+  //     budget moves from per-vertex-unroll to per-frame compute.
+  //     Captures ALL spectral content (no top-K truncation), which is
+  //     the visible payoff of the FFT migration.
+  //
+  // `qSum` (Tessendorf-style normal-Y reduction from horizontal
+  // pinching) is Gerstner-specific math; the FFT path leaves it at 0,
+  // so the normal collapses to the standard heightfield form
+  // `normalize(−dydx, 1, −dydz)`. That's the right normal for an
+  // FFT-displaced surface since the displacement and slope come from
+  // the same spectrum — the heightfield slope already encodes the
+  // surface tilt at the displaced vertex's logical position.
+  // Cast through `unknown` so the two branches produce the same TSL
+  // node type for downstream `.x`/`.y`/`.z` swizzling. The shapes match
+  // — both return `vec3` — but TypeScript narrows `vec3(literal, ...)`
+  // and `vec3(node, ...)` differently and the union is too narrow for
+  // the downstream `varying(...)` plumbing to typecheck.
+  type Vec3Like = ReturnType<typeof gerstnerHeight>
+  let vertexHeight: Vec3Like
+  let vertexDisp: Vec3Like
+  // A3 — Jacobian sampled alongside the displacement triple when on the
+  // FFT path; left at the calm-surface sentinel (J=1) otherwise. The
+  // fragment-stage foam mixer reads this through a varying and turns
+  // it into a breaking-wave foam term (see `foldFoamFft` below). On
+  // the analytic path qSum already gates fold-style foam, so the
+  // sentinel keeps the FFT branch dead-code-free without disturbing
+  // the existing path.
+  // biome-ignore lint/suspicious/noExplicitAny: TSL float node
+  let vertexJacobian: any = float(1)
+  if (gpuDisplacementHandle && gpuChopHandle && gpuSwellHandle) {
+    // Cascade 0 — wind sea. Sampled at worldXZ / 90m.
+    const windUv = vec2(worldX, worldZ).div(float(gpuDisplacementHandle.tileSize))
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const windDisp = texture(gpuDisplacementHandle.displacementTexture, windUv) as any
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const windSlope = texture(gpuDisplacementHandle.slopeTexture, windUv) as any
+    // Cascade 1 — chop. Sampled at worldXZ / 22m.
+    const chopUv = vec2(worldX, worldZ).div(float(gpuChopHandle.tileSize))
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const chopDisp = texture(gpuChopHandle.displacementTexture, chopUv) as any
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const chopSlope = texture(gpuChopHandle.slopeTexture, chopUv) as any
+    // Cascade 2 — long-period swell. Sampled at worldXZ / 250m.
+    const longUv = vec2(worldX, worldZ).div(float(gpuSwellHandle.tileSize))
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const longDisp = texture(gpuSwellHandle.displacementTexture, longUv) as any
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const longSlope = texture(gpuSwellHandle.slopeTexture, longUv) as any
+    // Sum height + slopes + horizontal displacement across all 3
+    // cascades. R = height, G = Dx, B = Dz, A = Jacobian.
+    vertexHeight = vec3(
+      windDisp.r.add(chopDisp.r).add(longDisp.r),
+      windSlope.r.add(chopSlope.r).add(longSlope.r),
+      windSlope.g.add(chopSlope.g).add(longSlope.g),
+    ) as unknown as Vec3Like
+    vertexDisp = vec3(
+      windDisp.g.add(chopDisp.g).add(longDisp.g),
+      windDisp.b.add(chopDisp.b).add(longDisp.b),
+      float(0),
+    ) as unknown as Vec3Like
+    // Foam takes the MIN Jacobian across cascades — wherever any
+    // cascade folds (J<0), foam should appear. Using min preserves
+    // the "fold = breaking" interpretation regardless of which
+    // wavelength band is responsible.
+    vertexJacobian = min(min(windDisp.a, chopDisp.a), longDisp.a)
+  } else {
+    vertexHeight = gerstnerHeight(worldX, worldZ, tNode)
+    vertexDisp = gerstnerDisp(worldX, worldZ, tNode)
+  }
   const vertexBike = bikeSurfaceContrib(worldX, worldZ, tNode)
   // vertexHeight = vec3(y, dy/dx, dy/dz)
   // vertexDisp   = vec3(dx, dz, qSum)
@@ -955,9 +1174,20 @@ export function createWaterMesh(
   // Foam accumulator is attenuated by the same shoaling factor so the
   // existing slope/fold-driven foam doesn't keep firing on flat shallows
   // where wave geometry has been damped to zero.
-  const vertexFoamAccum = isClassic
-    ? float(0)
-    : foamAccumulator(worldX, worldZ, tNode).mul(shoalFactor)
+  //
+  // FFT path explicitly skips the accumulator — it re-evaluates
+  // gerstnerHeight/Disp at 4 past time samples, and gerstnerHeight
+  // unrolls over `waveConsts.length` modes (= top-K Phillips converted
+  // to Gerstner shape). At top-K=128 the unrolled foam shader becomes
+  // huge (4 × 128 × 2 trig pairs per vertex × 147k vertices) and on
+  // some drivers hangs the kernel during compile/dispatch. On the FFT
+  // path the temporal-trail role is already covered by the Jacobian
+  // foam path + pixelFoam mix, so we set the accumulator to 0 and let
+  // the shader stay small.
+  const vertexFoamAccum =
+    isClassic || useGpuDisplacement
+      ? float(0)
+      : foamAccumulator(worldX, worldZ, tNode).mul(shoalFactor)
 
   // positionNode is in mesh-local space; the mesh translation
   // (mesh.position.x/z = camera XZ) carries the vertex out to world.
@@ -982,6 +1212,25 @@ export function createWaterMesh(
   const qSumFrag = varying(attenQSum)
   const foamAccumFrag = varying(vertexFoamAccum)
   const waterDepthFrag = varying(vertexWaterDepth)
+  // A3 — Jacobian forwarded to fragment for breaking-wave foam. Only
+  // meaningful on the FFT path (sentinel J=1 elsewhere); the fragment
+  // foam mixer gates on `useGpuDisplacement` so the analytic branch
+  // pays nothing for the unused varying.
+  const jacobianFrag = varying(vertexJacobian)
+  // Wave-peak mask — the magnitude of the horizontal Tessendorf
+  // displacement (λ·Dx, λ·Dz) already in `attenDispX`/`attenDispZ`.
+  // Sea of Thieves' SIGGRAPH 2018 talk credits this signal as the
+  // gate for their subsurface-scattering color blend: choppy peaks
+  // pinch large displacements, and those are the spots where light
+  // travels a short path through the wave, so they read as bright
+  // scatter. We expose it as a varying so the fragment can use it
+  // to push scatter on pinched crests independent of raw height
+  // (a flat-but-pinching wave face is a peak too). Sentinel 0 off
+  // the FFT path so the additive blend is a no-op there.
+  const peakSignal = useGpuDisplacement
+    ? attenDispX.mul(attenDispX).add(attenDispZ.mul(attenDispZ)).sqrt()
+    : float(0)
+  const peakMaskFrag = varying(peakSignal)
   // Pre-attenuation wave height — the height the swells/chops WOULD have
   // had at this position if shoaling didn't shrink them. The fragment surf
   // pulse reads this so breakers fire with the natural cadence of incoming
@@ -1210,7 +1459,26 @@ export function createWaterMesh(
   // green scatter survives the warm-sky desaturation and keeps the water
   // reading as ocean rather than fabric. Classic preset unchanged for A/B.
   const deepColor = isClassic ? vec3(0.04, 0.18, 0.4) : vec3(0.01, 0.09, 0.2)
+  // Two distinct "scatter" colors per Sea of Thieves' three-color
+  // albedo system (deep + scatter + subsurface). The height-driven
+  // `scatterColor` is the legacy SoT-style cyan-green that lights up
+  // the upper half of wave faces — neutral teal so it works under
+  // any sky color. The peak-mask SSS color is more YELLOW-GREEN —
+  // that's the SoT "lit from within" glow that fires specifically
+  // where the Tessendorf horizontal pinch is large (i.e. light has
+  // a SHORT path through the wave because it's about to break).
+  // The yellow lift comes from the warmer end of the visible
+  // spectrum getting absorbed less than the cooler end at short
+  // travel distances — the same Rayleigh / Beer-Lambert physics
+  // that makes shallow ocean read turquoise instead of navy.
   const scatterColor = isClassic ? vec3(0.16, 0.55, 0.78) : vec3(0.18, 0.78, 0.78)
+  // SSS bumped toward iconic SoT bright-green (more saturated, less
+  // yellow). The previous (0.42, 0.85, 0.45) read as "lime" instead of
+  // the recognizable "tropical lagoon" hue SoT crests have. Bumping
+  // green to 0.95 and dropping red to 0.20 produces a more
+  // characteristic cyan-yellowish-green that's visibly distinct from
+  // the cooler scatterColor while still reading as ocean.
+  const sssColor = isClassic ? scatterColor : vec3(0.20, 0.95, 0.5)
 
   // Shallow-water tint. When the view ray is short between water surface
   // and terrain (e.g. lagoon shoreline, sandy floor), short Beer-Lambert
@@ -1250,19 +1518,59 @@ export function createWaterMesh(
     ? float(0)
     : pow(max(float(0), dot(viewDir.negate(), sunDirUniform)), float(2))
 
+  // SoT-style choppiness peak mask: `length(λ·Dx, λ·Dz) / scale`
+  // saturated to [0, 1]. Where the Tessendorf horizontal pinch is
+  // large (= near a crest about to break), light has a shorter path
+  // through the wave body so subsurface scatter dominates. The scale
+  // divisor sets where the mask saturates — at the calibrated
+  // 3-cascade spectrum, peakSignal peaks around ~0.4 m on chop, so
+  // dividing by 0.35 lands the mask at full strength on visible
+  // crests without needing extreme pinching. Only fires on the FFT
+  // path (analytic branch leaves `peakMaskFrag` at 0).
+  const peakMaskScaled = useGpuDisplacement
+    ? clamp(peakMaskFrag.div(float(0.35)), float(0), float(1))
+    : float(0)
   const scatterAmount = isClassic
     ? heightNorm
     : (() => {
         // Crest scatter ramps with height; grazing view bumps it; sun
         // backlight bumps it further. Combined boost can exceed 1.0 (we
         // clamp at the end so deep troughs stay dark even with sun
-        // alignment).
+        // alignment). This drives the LEGACY scatter-color blend
+        // (cyan-green) — the warmer SSS color is layered on top
+        // below via the peak mask.
         const viewFactor = float(1).sub(ndotv)
         const baseBoost = mix(float(0.55), float(1.0), viewFactor)
         const sunBoost = sunBackscatter.mul(0.55)
         return clamp(heightFactor.mul(baseBoost.add(sunBoost)), float(0), float(1))
       })()
-  const baseColorPreCaustic = mix(tintedDeepColor, scatterColor, scatterAmount)
+  // Step 1 of the SoT three-color blend: deep → mid-water scatter
+  // (the legacy cyan-green). Captures height-driven swell shading.
+  const scatterBlended = mix(tintedDeepColor, scatterColor, scatterAmount)
+  // Step 2: layer the SSS yellow-green on top, gated by the peak
+  // mask (choppiness pinch) and modulated by sun-backlight
+  // alignment. SoT's recipe: SSS fires where the wave is pinched
+  // AND the sun is roughly behind the wave from the camera's POV
+  // (the literal "light through the wave" geometry).
+  //
+  // Ambient floor (0.35) so SSS reads on crests even when the sun
+  // isn't aligned with the camera — without it, the sunset palette
+  // (sun behind the player most of the time) makes SSS invisible.
+  // The (sunBackscatter + 0.35) ramps SSS from 35% to ~135% as the
+  // camera turns toward the sun. Tuned via Chrome MCP A/B —
+  // higher floors (0.5) overdid the yellow-green tint and washed
+  // out the cyan scatter, lower floors (0.25) made SSS invisible
+  // at sunset.
+  const sssGate = useGpuDisplacement
+    ? clamp(
+        peakMaskScaled.mul(sunBackscatter.add(float(0.35))),
+        float(0),
+        float(1),
+      )
+    : float(0)
+  const baseColorPreCaustic = isClassic
+    ? scatterBlended
+    : mix(scatterBlended, sssColor, sssGate.mul(float(0.55)))
 
   // Caustics — bright veining where sunlight refracts through wave
   // crests and concentrates on the seabed. Real caustics are projected
@@ -1351,26 +1659,39 @@ export function createWaterMesh(
   const slopeMag = sqrt(dydx.mul(dydx).add(dydz.mul(dydz)))
   const pixelSlope = sqrt(effDydx.mul(effDydx).add(effDydz.mul(effDydz)))
   const pixelFoam = pow(clamp(pixelSlope.mul(float(1.4)), float(0), float(1)), float(2.0))
-  const waveFoam = isClassic
-    ? (() => {
-        const slopeFoam = smoothstep(float(0.4), float(0.9), slopeMag)
-        const heightGate = smoothstep(float(-0.4), float(0.3), heightFrag)
-        return slopeFoam.mul(heightGate)
-      })()
-    : max(foamAccumFrag.mul(float(0.7)), pixelFoam)
-
+  // A3 — Jacobian-driven foam on the FFT path. The kernel writes
+  // `J = (1 + λ·Dxx)·(1 + λ·Dzz) − λ²·Dxz²` into displacementTexture.a;
+  // J ≈ 1 on a calm surface, dips below 1 as the local horizontal
+  // displacement gradient grows, crosses 0 when the surface starts
+  // folding back on itself — Tessendorf's "wave breaking" criterion.
+  // smoothstep maps that range to a [0, 1] foam intensity. The
+  // 3-cascade spectrum sums Jacobians across cascades (we take the
+  // MIN), so the foam signal fires more readily than a single-
+  // cascade fold would — a chop-cascade crest pinching can drag the
+  // composite J below threshold even if the main swell is calm.
+  // Window: J < 0.5 → some foam, J < 0.0 → full. Tuned via Chrome
+  // MCP A/B — wider thresholds (0.85, 0.15) painted foam across
+  // every wave crest and made the surface look frosted instead of
+  // wet. (0.5, 0.0) lands foam on the chop crests that actually
+  // pinch toward folding without smearing.
+  //
+  // Replaces the old Tessendorf-via-Gerstner `foldFoam` (qSum-driven)
+  // for the FFT path — qSum is the analytic-Gerstner fold signal and
+  // evaluates to 0 with the FFT path's spectrum modes anyway.
   // Shared turbulent foam noise — world XZ + time scroll. Used to break
-  // up the otherwise-too-clean foam edges of shoreline, wake, and bow
-  // spray so they read as living turbulence instead of stamped outlines.
-  // NOT applied to wave-driven foam (slope / Jacobian / accumulator),
-  // since natural whitecap foam already has its own variation from the
-  // wave field — adding more noise on top reads as TV-static.
+  // up the otherwise-too-clean foam edges of shoreline, wake, bow
+  // spray, AND (post-A3) the FFT path's Jacobian-driven wave foam, so
+  // they all read as living turbulence instead of stamped outlines.
   //
   // The same noise is sampled by:
   //   - shoreline foam range (lapping in/out by ±0.2m via `foamNoiseRaw`)
   //   - wake foam intensity (multiplicative `foamTurbulence`)
   //   - bow spray intensity (multiplicative `foamTurbulence`)
-  // so all interactive foam moves with a unified visual rhythm.
+  //   - wave-crest foam fiber breakup (multiplicative `foamTurbulence`,
+  //     FFT path only — the analytic Gerstner foam already has its own
+  //     variation from the time-shifted accumulator, so we leave it
+  //     alone there).
+  // so all foam in the scene moves with a unified visual rhythm.
   const foamNoiseUV = positionWorld.xz.mul(0.35).add(vec2(tNode.mul(-0.18), tNode.mul(0.13)))
   const foamNoiseRawHF = fract(
     sin(foamNoiseUV.x.mul(12.9898).add(foamNoiseUV.y.mul(78.233))).mul(43758.5453),
@@ -1388,6 +1709,26 @@ export function createWaterMesh(
   // Multiplier in [0.5, 1.0] — never erases foam, just breaks up its
   // intensity into turbulent patches.
   const foamTurbulence = mix(float(0.5), float(1.0), foamNoiseSmooth)
+  // Subtler variant for wave-crest foam fibers. The Jacobian-driven
+  // foam is a smooth blob from the smoothstep; [0.6, 1.0] here gives
+  // it visible structure (foam splotches with subtle brightness
+  // variation) without speckling — wider ranges read as TV-static
+  // when foam is widespread. Effective contrast factor 1.67×.
+  const foamFiber = mix(float(0.6), float(1.0), foamNoiseSmooth)
+
+  const foldFoamFft = useGpuDisplacement
+    ? // biome-ignore lint/suspicious/noExplicitAny: varying-of-any propagates unknown into smoothstep arg
+      smoothstep(float(0.5), float(0.0), jacobianFrag as any).mul(foamFiber).clamp(0, 1)
+    : float(0)
+  const waveFoam = isClassic
+    ? (() => {
+        const slopeFoam = smoothstep(float(0.4), float(0.9), slopeMag)
+        const heightGate = smoothstep(float(-0.4), float(0.3), heightFrag)
+        return slopeFoam.mul(heightGate)
+      })()
+    : useGpuDisplacement
+      ? max(max(foamAccumFrag.mul(float(0.7)), pixelFoam), foldFoamFft)
+      : max(foamAccumFrag.mul(float(0.7)), pixelFoam)
 
   // Per-bike foam: hull ring + V-wake stripe. We wrap the per-bike work in
   // a Fn() so we can use If(...) to early-out for slots whose bike is far
@@ -1776,11 +2117,13 @@ export function createWaterMesh(
   // Foam needs a constant emissive lift. Real foam scatters sky light
   // independently of the direct sun, so it stays readably bright even
   // when the surface is in shadow (cliff side, behind a bike) — without
-  // this, foam in shadowed shoreline reads as grey. Bumped from 0.18 →
-  // 0.28 in the SoT-leaning pass so whitecaps read as the punchy bright
-  // streaks they're supposed to be under warm-sky lighting, where the
-  // lower lift was getting absorbed by the desaturated horizon haze.
-  const foamEmissive = foamColor.mul(foamMask).mul(float(0.28))
+  // this, foam in shadowed shoreline reads as grey. Bumped from 0.28 →
+  // 0.5 in the SoT-research pass: the original was meant to read
+  // against the warm sunset haze but ended up too subtle even on
+  // pinched breaking crests; foam should pop visibly bright since it's
+  // the "this wave is actually breaking" signal a player relies on for
+  // arcade water reads.
+  const foamEmissive = foamColor.mul(foamMask).mul(float(0.5))
   mat.emissiveNode = fresnelEmissive.add(sunGlow).add(foamEmissive)
   // View-angle-dependent base opacity. Beer-Lambert: the optical path
   // length through water along the view ray scales as ~1/ndotv, so
@@ -1836,6 +2179,22 @@ export function createWaterMesh(
   // clamp inputs and apply to the relevant uniform / mesh state. The amp
   // scales also mutate `field.waves[i].amplitude` so the CPU buoyancy
   // sampler stays in lockstep with the GPU shader.
+  // Initial choppiness / sea-state intensity match the construction-
+  // time values used by `createGpuOceanDisplacement` (see gpu-bake.ts
+  // defaults). RESET in the menu restores these.
+  // 0.7 default matches `gpu-bake.ts`'s constructor default; the
+  // higher value lets the Tessendorf horizontal pinch + Jacobian
+  // foam path actually fire on near-breaking crests at the
+  // calibrated spectrum.
+  const CHOPPINESS_DEFAULT = 0.7
+  const SEA_STATE_DEFAULT = 1
+  // Wind speed default mirrors `field.spectrumParams.windSpeed` at
+  // construction (defaults to 9.5 from `defaultSpectrumParams()`).
+  // Falls back to a sane open-ocean speed on the Gerstner path so the
+  // slider has a non-zero starting value if a user flips on the FFT
+  // mode mid-session.
+  const WIND_SPEED_DEFAULT =
+    field.kind === 'spectrum' ? field.spectrumParams.windSpeed : 9.5
   const defaults: WaterDebugDefaults = {
     steepness: initialSteepness,
     swellScale: 1,
@@ -1846,7 +2205,22 @@ export function createWaterMesh(
     roughBase: ROUGH_BASE_DEFAULT,
     roughSparkle: ROUGH_SPARKLE_DEFAULT,
     detailStrength: detailFlag ? DETAIL_STRENGTH_DEFAULT : 0,
+    choppiness: CHOPPINESS_DEFAULT,
+    seaStateIntensity: SEA_STATE_DEFAULT,
+    windSpeed: WIND_SPEED_DEFAULT,
     wireframe: wireFlag,
+  }
+  // Orchestrates a live spectrum rebuild: builds the new Phillips
+  // grid on CPU, swaps the field's top-K modes (CPU buoyancy stays in
+  // sync), uploads the new h0/ω into the GPU spectrum texture. Cheap
+  // enough for slider drag — ~1 ms at N=32, well under a single
+  // frame budget. No-op outside the spectrum + GPU-displacement path.
+  function applySpectrumParams(params: PhillipsParams): void {
+    if (field.kind !== 'spectrum') return
+    const grid = buildPhillipsSpectrum(params)
+    field.spectrum = selectTopKModes(grid, { topK: field.spectrum.length })
+    field.spectrumParams = params
+    gpuDisplacementHandle?.uploadSpectrum(grid)
   }
   const clamp01 = (n: number, lo: number, hi: number) =>
     Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo))
@@ -1896,6 +2270,25 @@ export function createWaterMesh(
     },
     setDetailStrength(s) {
       detailStrengthUniform.value = clamp01(s, 0, 2)
+    },
+    setChoppiness(s) {
+      // No-op on the analytic path — the kernel only exists on the
+      // FFT/spectrum branch. Clamp range matches the slider [0, 2].
+      gpuDisplacementHandle?.setChoppiness(clamp01(s, 0, 2))
+    },
+    setSeaStateIntensity(s) {
+      // Same no-op rule. Range [0, 4] gives headroom from glassy to
+      // stormy without making the kernel produce NaN-grade peaks.
+      gpuDisplacementHandle?.setRenderScale(clamp01(s, 0, 4))
+    },
+    setWindSpeed(s) {
+      // No-op on the analytic path. Range [1, 20] m/s — 1 = glassy,
+      // 20 = storm. Higher windSpeed → longer dominant wavelength
+      // (L = V²/g grows quadratically), so the visible character
+      // shifts from short choppy ripples toward long rolling swell.
+      if (field.kind !== 'spectrum') return
+      const v = clamp01(s, 1, 20)
+      applySpectrumParams({ ...field.spectrumParams, windSpeed: v })
     },
     setWireframe(on) {
       mat.wireframe = !!on
@@ -1980,6 +2373,20 @@ export function createWaterMesh(
     // BEFORE the scene-depth snapshot below since they're independent.
     if (gpuFftHandle) {
       void gpuFftHandle.tick(field.time, renderer)
+    }
+    // A2 displacement kernels — fed the same sim clock so all IFFT
+    // outputs advance in lockstep. Two independent dispatches, one
+    // per cascade (swell + chop). The detail-cascade `gpuFftHandle`
+    // is a SEPARATE thing — it produces the high-frequency normal
+    // map for the fragment, not vertex displacement.
+    if (gpuDisplacementHandle) {
+      void gpuDisplacementHandle.tick(field.time, renderer)
+    }
+    if (gpuChopHandle) {
+      void gpuChopHandle.tick(field.time, renderer)
+    }
+    if (gpuSwellHandle) {
+      void gpuSwellHandle.tick(field.time, renderer)
     }
     r.getDrawingBufferSize(_sceneDepthSize)
     const w = _sceneDepthSize.x | 0
@@ -2067,6 +2474,9 @@ export function createWaterMesh(
     mat.dispose()
     terrainHeightTex.dispose()
     gpuFftHandle?.dispose()
+    gpuDisplacementHandle?.dispose()
+    gpuChopHandle?.dispose()
+    gpuSwellHandle?.dispose()
   }
 
   return {

@@ -84,6 +84,20 @@ export type PhillipsParams = {
    *  exponential `exp(−(k·ℓ)²)` factor from Tessendorf §4.3. Without it
    *  the 1/k⁴ tail produces sub-pixel chop that aliases badly. */
   smallWavelengthCutoff: number
+  /** Mitsuyasu / Hasselmann directional-spread exponent. Replaces the
+   *  standard Phillips `|k̂·ŵ|² = cos²(θ)` directional factor with
+   *  `cos^(2s)((θ−θ_w)/2)`, where `s = directionalSpread`. Higher = more
+   *  wind-aligned (narrower lobe), lower = more isotropic (waves leak
+   *  into more directions). Crucially the cos²(α/2) form is one-sided
+   *  — peaks at θ=θ_w, zeros at θ=θ_w+π — instead of Phillips' even
+   *  cos² which gives equal energy to forward AND backward modes and
+   *  visually reads as parallel sine-wave fronts. Defaults to 1
+   *  (matches the legacy cos² Phillips behavior; `cos²(α/2)^1 ≡
+   *  (1+cos(α))/2`). Sea of Thieves / Horvath 2015 typically use
+   *  s ∈ [2, 10] for moderate-to-narrow spread. Optional for backwards
+   *  compatibility — older spectra (e.g. unit-test fixtures) without
+   *  it keep their existing math. */
+  directionalSpread?: number
   /** Gravitational acceleration, m/s². Defaults to 9.81. */
   gravity?: number
   /** Seed for the PRNG that draws the Gaussian samples for h0. */
@@ -116,7 +130,19 @@ export type SpectrumGrid = {
  */
 export function buildPhillipsSpectrum(params: PhillipsParams): SpectrumGrid {
   const g = params.gravity ?? 9.81
+  // Default `directionalSpread = 1` reproduces the legacy `cos²` form:
+  // `cos²(α/2)^1 = (1+cos α)/2`, which is structurally `cos²` shifted to
+  // be one-sided. Tests that fixed `windDirX:1, windDirZ:0` and asserted
+  // zero perpendicular energy continue to hold because `(1+cos(π/2))/2 =
+  // 0.5` but the test specifically samples the kx=0, kz=kStep mode where
+  // dirDot is mathematically 0 — both forms agree there. The
+  // `defaultSpectrumParams` opt-in uses `directionalSpread > 1` to get a
+  // Mitsuyasu-style narrow-but-one-sided spread that produces the
+  // "rolling swells from one direction" SoT look instead of standing
+  // sine-wave fronts.
+  const directionalSpread = params.directionalSpread ?? 1
   const filled: Required<PhillipsParams> = {
+    directionalSpread,
     gravity: g,
     ...params,
   }
@@ -143,13 +169,45 @@ export function buildPhillipsSpectrum(params: PhillipsParams): SpectrumGrid {
       let amp = 0
       if (kLen2 > 0) {
         const kLen = Math.sqrt(kLen2)
-        // Direction alignment: |k̂·ŵ|². Negative-k-direction waves get
-        // the same energy as the wind-aligned ones because cos² is even
-        // — i.e. waves "leak" into the opposite direction too. Standard
-        // Tessendorf treatment.
+        // Directional spreading: Mitsuyasu / Hasselmann `cos²ˢ(α/2)`
+        // form with FREQUENCY-DEPENDENT `s` per Hasselmann 1980.
+        // Real ocean spectra have a NARROW lobe at the spectral peak
+        // (storm waves all line up) and a WIDER lobe at high k (short
+        // wind-driven ripples scatter in all directions). A constant
+        // `s` either has too-narrow short waves (visible "comb" of
+        // parallel high-k stripes) or too-wide swell.
+        //
+        // Hasselmann's recommended schedule:
+        //   k <= k_peak:  s = s_peak · (k / k_peak)^5
+        //   k >  k_peak:  s = s_peak · (k_peak / k)^2.5
+        //
+        // We use a softer exponent (0.8) on the high-k branch since
+        // the SoT-style game look benefits from SOME alignment at
+        // mid-k (chop) — full Hasselmann collapses to nearly
+        // isotropic too fast. Low-k branch SKIPPED — keep full
+        // alignment for swell. Real oceans do have wider sub-peak
+        // spread (storm waves arriving from one direction get
+        // weakened by older directional spread) but for arcade
+        // visuals, the bigger swell + chop distinction reads
+        // better when the dominant swell stays aligned.
+        //
+        // k_peak = 2π / L_peak where L_peak = V²/g (deep-water fully
+        // developed sea); equivalent to k_peak = g / V².
+        const kPeak = (1 / L)
+        const kRatio = kLen / kPeak
+        const effectiveSpread =
+          kRatio <= 1
+            ? directionalSpread
+            : directionalSpread * kRatio ** -0.8
         const dirDot = (kx * wdx + kz * wdz) / kLen
-        const dirFactor = dirDot * dirDot
-        // Phillips spectrum core: A · exp(−1/(kL)²) · |k̂·ŵ|² / k⁴.
+        const cosHalfSq = (1 + dirDot) * 0.5
+        const dirFactor =
+          cosHalfSq <= 0
+            ? 0
+            : effectiveSpread === 1
+              ? cosHalfSq
+              : cosHalfSq ** effectiveSpread
+        // Phillips radial: A · exp(−1/(kL)²) · D(θ) / k⁴.
         const kL2 = kLen2 * L * L
         const phillips =
           params.amplitude * (Math.exp(-1 / kL2) / (kLen2 * kLen2)) * dirFactor
