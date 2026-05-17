@@ -635,35 +635,66 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       )
     }
 
-    // Steer → roll torque. Replaces the prior kinematic lean. Pure
-    // input-driven (no PD reading orientation, so no M9.x roll bug);
-    // the multi-point hover spring's flat-ground roll restoration acts
-    // as the opposing force, so steady-state lean settles where steer
-    // torque balances hover restoration. Faded in with speed — no
-    // parking-lot lean.
+    // Roll PD controller — GROUND ONLY. The bike is corralled toward
+    // `targetRoll = surfaceRoll + steer × leanLimit × speed-scale`, the
+    // same target the prior kinematic block used. P pulls roll toward
+    // target, D damps the rate. Unlike the kinematic snap, this is a
+    // *physical* spring — the bike can be pushed off-target by jumps,
+    // collisions, ramps; it just gets pulled back. Critical for keeping
+    // racers from spinning out of control after a fishtail or a wave
+    // strike (free roll without a restoring force runs away inside a
+    // few hundred ms).
     //
-    // Sign: matches the previous kinematic `targetRoll = +steer * ...`
-    // convention (steer +1 → positive YXZ roll, "banks into the turn"
-    // per the playtested empirical convention).
-    const ROLL_TORQUE_ACCEL = 10 // rad/s² at full steer at full lean speed
-    const rollFade = Math.min(speed / 6, 1)
-    if (rollFade > 0 && Math.abs(intent.steer) > 0.05) {
-      const fwdR = quatRotate(q, { x: 0, y: 0, z: 1 })
-      const aRoll = intent.steer * ROLL_TORQUE_ACCEL * rollFade
-      rb.applyTorqueImpulse(
-        {
-          x: fwdR.x * aRoll * m * dt,
-          y: fwdR.y * aRoll * m * dt,
-          z: fwdR.z * aRoll * m * dt,
-        },
-        true,
-      )
-    }
+    // The M9.x roll PD bug was caused by reading `bikeRight.y` as a
+    // proxy for roll, which mis-fires under yaw-while-pitched. Here we
+    // pull a true YXZ Euler roll out of the quaternion, so the signal
+    // is clean across any yaw/pitch combination.
+    //
+    // In AIR: skipped. Pitch, roll, yaw are all free physics — backflips,
+    // barrel rolls, whatever the player commits to with their inputs.
+    const ROLL_LEAN_LIMIT = (40 * Math.PI) / 180 // 40° at "normal" speed
+    const LEAN_SPEED_FULL = 6 // m/s — base lean curve hits 1.0 here
+    const LEAN_SPEED_HIGH = 24 // m/s — high-speed boost saturates here
+    const LEAN_HIGH_SPEED_BOOST = 0.5 // up to 50% more lean at top speed → ~60°
+    const LEAN_BASE = 0.4 // stationary lean = 40% of base limit (~16°)
+    const speedFracR = Math.min(speed / LEAN_SPEED_FULL, 1)
+    const baseLeanScale = LEAN_BASE + (1 - LEAN_BASE) * speedFracR
+    const highSpeedFrac = Math.min(
+      Math.max(speed - LEAN_SPEED_FULL, 0) / (LEAN_SPEED_HIGH - LEAN_SPEED_FULL),
+      1,
+    )
+    const leanScale = baseLeanScale + highSpeedFrac * LEAN_HIGH_SPEED_BOOST
+    // Surface roll component — multi-probe height differential across the
+    // bike's width. Mirrors the prior kinematic `surfaceRollTarget` so the
+    // bike banks into a wave normal when riding diagonally across chop.
+    const surfaceRollTarget = Math.atan2(yStarboard - yPort, 2 * probeHalfWidth)
+    const targetRoll = surfaceRollTarget + intent.steer * ROLL_LEAN_LIMIT * leanScale
+    // Extract true YXZ roll from current rotation.
+    const r10R = 2 * (q.x * q.y + q.z * q.w)
+    const r11R = 1 - 2 * (q.x * q.x + q.z * q.z)
+    const currentRoll = Math.atan2(r10R, r11R)
+    const fwdR = quatRotate(q, { x: 0, y: 0, z: 1 })
+    // Roll angular velocity = angvel · bikeFwd.
+    const angvR = rb.angvel()
+    const rollVel = angvR.x * fwdR.x + angvR.y * fwdR.y + angvR.z * fwdR.z
+    // PD gains tuned for a ~0.3s settle, slightly underdamped (lively).
+    const ROLL_P = 40
+    const ROLL_D = 8
+    const aRollPD = (targetRoll - currentRoll) * ROLL_P - rollVel * ROLL_D
+    rb.applyTorqueImpulse(
+      {
+        x: fwdR.x * aRollPD * m * dt,
+        y: fwdR.y * aRollPD * m * dt,
+        z: fwdR.z * aRollPD * m * dt,
+      },
+      true,
+    )
 
-    // (Attitude is fully physics-driven. Multi-point hover handles surface
-    // alignment and flat-ground roll/pitch restoration; pitch torque
-    // commits a held attitude that persists in air; roll torque leans
-    // into corners; yaw torque + fishtail bias does the steering.)
+    // (Pitch on the ground stays pure physics: player input torque +
+    // multi-point hover handles surface alignment + flat-ground restoration.
+    // Roll is corralled by the PD above to keep racers from spinning out.
+    // Yaw torque + fishtail bias does the steering. Attitude in air is
+    // fully free physics.)
 
     // Lateral drag — water has *more* lateral resistance (skis don't slide sideways easily).
     const dragMul = probe.isWater ? 1.4 : 1.0
