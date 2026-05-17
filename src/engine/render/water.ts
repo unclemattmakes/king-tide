@@ -1113,6 +1113,20 @@ export function createWaterMesh(
   // foam mixer gates on `useGpuDisplacement` so the analytic branch
   // pays nothing for the unused varying.
   const jacobianFrag = varying(vertexJacobian)
+  // Wave-peak mask — the magnitude of the horizontal Tessendorf
+  // displacement (λ·Dx, λ·Dz) already in `attenDispX`/`attenDispZ`.
+  // Sea of Thieves' SIGGRAPH 2018 talk credits this signal as the
+  // gate for their subsurface-scattering color blend: choppy peaks
+  // pinch large displacements, and those are the spots where light
+  // travels a short path through the wave, so they read as bright
+  // scatter. We expose it as a varying so the fragment can use it
+  // to push scatter on pinched crests independent of raw height
+  // (a flat-but-pinching wave face is a peak too). Sentinel 0 off
+  // the FFT path so the additive blend is a no-op there.
+  const peakSignal = useGpuDisplacement
+    ? attenDispX.mul(attenDispX).add(attenDispZ.mul(attenDispZ)).sqrt()
+    : float(0)
+  const peakMaskFrag = varying(peakSignal)
   // Pre-attenuation wave height — the height the swells/chops WOULD have
   // had at this position if shoaling didn't shrink them. The fragment surf
   // pulse reads this so breakers fire with the natural cadence of incoming
@@ -1381,17 +1395,37 @@ export function createWaterMesh(
     ? float(0)
     : pow(max(float(0), dot(viewDir.negate(), sunDirUniform)), float(2))
 
+  // SoT-style choppiness peak mask: `length(λ·Dx, λ·Dz) / scale`
+  // saturated to [0, 1]. Where the Tessendorf horizontal pinch is
+  // large (= near a crest about to break), light has a shorter path
+  // through the wave body so subsurface scatter dominates. The scale
+  // divisor sets where the mask saturates — at the calibrated
+  // spectrum, peakSignal peaks around ~0.5 m, so dividing by 0.6
+  // lands the mask in [0, ~1] across normal wave action. Only fires
+  // on the FFT path (analytic branch leaves `peakMaskFrag` at 0).
+  const peakMaskScaled = useGpuDisplacement
+    ? clamp(peakMaskFrag.div(float(0.6)), float(0), float(1))
+    : float(0)
   const scatterAmount = isClassic
     ? heightNorm
     : (() => {
         // Crest scatter ramps with height; grazing view bumps it; sun
         // backlight bumps it further. Combined boost can exceed 1.0 (we
         // clamp at the end so deep troughs stay dark even with sun
-        // alignment).
+        // alignment). On the FFT path the peak mask drawn from the
+        // choppiness offsets is added on top, which is the SoT
+        // crest-glow gate: pinching crests scatter even when their
+        // raw heightfield height is modest.
         const viewFactor = float(1).sub(ndotv)
         const baseBoost = mix(float(0.55), float(1.0), viewFactor)
         const sunBoost = sunBackscatter.mul(0.55)
-        return clamp(heightFactor.mul(baseBoost.add(sunBoost)), float(0), float(1))
+        const heightScatter = heightFactor.mul(baseBoost.add(sunBoost))
+        // 0.7 weight on peakMask keeps it from blowing out the deep
+        // troughs (which are NOT pinched and should stay dark
+        // navy). Mixed via max so each signal can win where it's
+        // strongest — peak mask on choppy crests, height on tall
+        // smooth swells.
+        return clamp(max(heightScatter, peakMaskScaled.mul(float(0.7))), float(0), float(1))
       })()
   const baseColorPreCaustic = mix(tintedDeepColor, scatterColor, scatterAmount)
 
