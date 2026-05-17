@@ -353,17 +353,41 @@ class HOVERBIKE_PT_track_tunnels(_HoverbikeTrackSubPanelBase, Panel):
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
-        from .tunnel import TUNNEL_CURVE_NAME, TUNNEL_PARENT_PREFIX
+        from ._legacy import _largest_terrain_mesh
+        from .tunnel import (
+            TUNNEL_CURVE_NAME,
+            TUNNEL_PARENT_PREFIX,
+            _is_in_tunnel_edit_mode,
+        )
 
         layout = self.layout
         scene = context.scene
 
-        # If the scene has the template-tunnels GN rig, point the user
-        # at the right workflow and hide the operator chrome — clicking
-        # Build Tunnel there would stamp a competing curve-bevel system
-        # on top of the live GN sweep.
+        # Top-of-panel edit-mode toggle: removing the terrain's tunnel
+        # Booleans cuts curve-edit cost from ~2 s to ~1 ms by breaking
+        # the depsgraph edge between cutter mesh and terrain.
+        terrain = _largest_terrain_mesh()
+        in_edit_mode = _is_in_tunnel_edit_mode(terrain)
+        edit_row = layout.row(align=True)
+        if in_edit_mode:
+            edit_row.alert = True
+            edit_row.operator(
+                "hoverbike.toggle_tunnel_edit_mode",
+                text="Re-attach Cuts (preview)",
+                icon="MOD_BOOLEAN",
+            )
+            layout.label(text="Edit mode — curve edits are fast,", icon="INFO")
+            layout.label(text="terrain boolean is off until you toggle.")
+        else:
+            edit_row.operator(
+                "hoverbike.toggle_tunnel_edit_mode",
+                text="Edit Curves (fast)",
+                icon="OUTLINER_DATA_CURVE",
+            )
+
         gn_cutter = bpy.data.objects.get("tunnels_cutter")
         if gn_cutter is not None and any(m.type == "NODES" for m in gn_cutter.modifiers):
+            layout.separator()
             layout.label(text="GN rig detected — add curves to", icon="INFO")
             layout.label(text="'Tunnel Curves' (Shift-D a curve).")
             n_curves = 0
@@ -374,6 +398,7 @@ class HOVERBIKE_PT_track_tunnels(_HoverbikeTrackSubPanelBase, Panel):
                 layout.label(text=f"{n_curves} tunnel curve(s) in scene", icon="MOD_BOOLEAN")
             return
 
+        layout.separator()
         layout.operator("hoverbike.add_tunnel_starter_curve", icon="CURVE_BEZCURVE")
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_tunnel_radius", text="Radius")

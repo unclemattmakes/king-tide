@@ -31,6 +31,8 @@ place rather than stacking duplicates. Different curve → new tunnel.
 
 from __future__ import annotations
 
+import json
+
 import bpy
 from bpy.props import FloatProperty, IntProperty
 from bpy.types import Operator
@@ -45,10 +47,16 @@ TUNNEL_PARENT_PREFIX = "tunnel_"
 TUNNEL_CUTTERS_COLLECTION = "_hoverbike_tunnel_cutters"
 TUNNEL_BOOLEAN_MOD_PREFIX = "HV_Tunnel_Cut_"
 TUNNEL_SOLIDIFY_LEGACY_NAME = "HV_Tunnel_Solidify"  # purged on rebuild
+TUNNEL_GN_BOOLEAN_NAME = "HV_TunnelCut"  # singleton from template-tunnels
 TUNNEL_MATERIAL_NAME = "mat_track_tunnel"
 
 # Custom-prop key on a tunnel curve that points at its cutter object.
 TUNNEL_CUTTER_PROP = "tunnel_cutter_name"
+
+# Custom-prop key on the terrain mesh that holds the JSON-serialised
+# specs of every Boolean modifier the Edit-mode toggle has stripped.
+# Presence of this key == "we're currently in Edit Mode".
+TUNNEL_STASHED_CUTS_PROP = "_hoverbike_stashed_tunnel_cuts"
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -261,6 +269,90 @@ def _attach_terrain_boolean(
     mod.show_viewport = True
 
 
+def _is_tunnel_boolean(mod: bpy.types.Modifier) -> bool:
+    """True if this modifier is one of ours — either the GN-rig
+    singleton or a per-cutter Boolean stamped by Build Tunnel."""
+    if mod.type != "BOOLEAN":
+        return False
+    return mod.name == TUNNEL_GN_BOOLEAN_NAME or mod.name.startswith(TUNNEL_BOOLEAN_MOD_PREFIX)
+
+
+def _stash_tunnel_cuts(terrain: bpy.types.Object) -> int:
+    """Strip every tunnel Boolean modifier off the terrain and record
+    its spec as JSON on the terrain so ``_restore_tunnel_cuts`` can
+    rebuild it later. Editing curves is interactive (~1 ms / edit)
+    while the stash exists because there's no longer a depsgraph
+    edge from the cutter meshes back to the terrain.
+
+    Returns the number of modifiers stashed."""
+    specs: list[dict] = []
+    for m in list(terrain.modifiers):
+        if not _is_tunnel_boolean(m):
+            continue
+        specs.append({
+            "name": m.name,
+            "operation": m.operation,
+            "solver": m.solver,
+            "use_self": bool(m.use_self),
+            "operand_type": getattr(m, "operand_type", "OBJECT"),
+            "object": m.object.name if m.object else None,
+            "collection": m.collection.name if getattr(m, "collection", None) else None,
+        })
+        terrain.modifiers.remove(m)
+    terrain[TUNNEL_STASHED_CUTS_PROP] = json.dumps(specs)
+    return len(specs)
+
+
+def _restore_tunnel_cuts(terrain: bpy.types.Object) -> int:
+    """Re-attach every tunnel Boolean modifier from the stash on the
+    terrain. Skips specs whose operand has gone missing rather than
+    failing the whole restore — a stale stash from a deleted tunnel
+    shouldn't strand the user."""
+    raw = terrain.get(TUNNEL_STASHED_CUTS_PROP)
+    if not raw:
+        return 0
+    try:
+        specs = json.loads(raw)
+    except (TypeError, ValueError):
+        del terrain[TUNNEL_STASHED_CUTS_PROP]
+        return 0
+    n = 0
+    for spec in specs:
+        name = spec["name"]
+        # If somehow a modifier with the same name was added back
+        # outside this toggle (e.g. another Build Tunnel call while in
+        # edit mode), don't double-stack.
+        if terrain.modifiers.get(name) is not None:
+            continue
+        m = terrain.modifiers.new(name, "BOOLEAN")
+        m.operation = spec.get("operation", "DIFFERENCE")
+        m.solver = spec.get("solver", "EXACT")
+        m.use_self = bool(spec.get("use_self", False))
+        m.operand_type = spec.get("operand_type", "OBJECT")
+        if m.operand_type == "OBJECT":
+            obj_name = spec.get("object")
+            obj = bpy.data.objects.get(obj_name) if obj_name else None
+            if obj is None:
+                # Operand gone — back the modifier out and continue.
+                terrain.modifiers.remove(m)
+                continue
+            m.object = obj
+        else:
+            col_name = spec.get("collection")
+            col = bpy.data.collections.get(col_name) if col_name else None
+            if col is None:
+                terrain.modifiers.remove(m)
+                continue
+            m.collection = col
+        n += 1
+    del terrain[TUNNEL_STASHED_CUTS_PROP]
+    return n
+
+
+def _is_in_tunnel_edit_mode(terrain: bpy.types.Object | None) -> bool:
+    return terrain is not None and TUNNEL_STASHED_CUTS_PROP in terrain.keys()
+
+
 def _add_tunnel_starter_curve(scene) -> bpy.types.Object:
     """Create a 4-point Bezier curve named ``tunnel_curve_main``."""
     existing = bpy.data.objects.get(TUNNEL_CURVE_NAME)
@@ -286,6 +378,63 @@ def _add_tunnel_starter_curve(scene) -> bpy.types.Object:
 # ────────────────────────────────────────────────────────────────────
 # Operators
 # ────────────────────────────────────────────────────────────────────
+
+
+class HOVERBIKE_OT_toggle_tunnel_edit_mode(Operator):
+    """Toggle Tunnel Edit Mode: strip every tunnel Boolean from the
+    terrain (or re-attach them).
+
+    Why: editing a tunnel curve dirties its containing collection
+    → dirties the cutter mesh → dirties the terrain. Blender's
+    modifier stack has no per-modifier output cache, so the terrain
+    re-evaluates ``HV_Island`` (~1 s) *and* ``HV_TunnelCut`` (~1 s)
+    on every single bezier-point drag. ``show_viewport=False`` doesn't
+    fix this — the dep edge still exists. Removing the modifier breaks
+    the edge cleanly. Edits drop from ~2 s to ~1 ms.
+
+    Reversible: the modifier specs are JSON-stashed on the terrain
+    and re-instated on the next toggle, preserving operation, solver,
+    use_self, and operand pointer."""
+
+    bl_idname = "hoverbike.toggle_tunnel_edit_mode"
+    bl_label = "Toggle Tunnel Edit Mode"
+    bl_description = (
+        "Strip the tunnel Boolean modifiers off the terrain so curve edits are "
+        "interactive again; toggle again to re-attach them and see the mouth cuts"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        from ._legacy import _largest_terrain_mesh
+
+        terrain = _largest_terrain_mesh()
+        if terrain is None:
+            self.report({"ERROR"}, "No terrain mesh found (largest visible kind='track' mesh).")
+            return {"CANCELLED"}
+
+        if _is_in_tunnel_edit_mode(terrain):
+            n = _restore_tunnel_cuts(terrain)
+            self.report(
+                {"INFO"},
+                f"Re-attached {n} tunnel cut(s) — terrain will re-evaluate on the next curve edit.",
+            )
+        else:
+            n = _stash_tunnel_cuts(terrain)
+            if n == 0:
+                # Nothing was stashed — drop the flag again so we don't
+                # leave the terrain in a half-state.
+                if TUNNEL_STASHED_CUTS_PROP in terrain.keys():
+                    del terrain[TUNNEL_STASHED_CUTS_PROP]
+                self.report(
+                    {"INFO"},
+                    "No tunnel Boolean modifiers on the terrain — already interactive.",
+                )
+                return {"CANCELLED"}
+            self.report(
+                {"INFO"},
+                f"Stashed {n} tunnel cut(s). Curve edits should be instant — toggle again to preview.",
+            )
+        return {"FINISHED"}
 
 
 class HOVERBIKE_OT_add_tunnel_starter_curve(Operator):
@@ -445,6 +594,7 @@ class HOVERBIKE_OT_build_tunnel(Operator):
 # ────────────────────────────────────────────────────────────────────
 
 _CLASSES: tuple[type, ...] = (
+    HOVERBIKE_OT_toggle_tunnel_edit_mode,
     HOVERBIKE_OT_add_tunnel_starter_curve,
     HOVERBIKE_OT_build_tunnel,
 )
