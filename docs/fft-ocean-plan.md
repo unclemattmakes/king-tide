@@ -12,9 +12,10 @@ shipping water.
 | Phase | State | Notes |
 | --- | --- | --- |
 | 0 — Plan + branch | ✅ done | This document. |
-| C1 — TSL compute pipeline scaffold | ⬜ todo | One-shot bake at boot, render to a slope texture, no animation yet. |
-| C2 — Replace detail-normal cascade with FFT bake | ⬜ todo | Swap `getWaveDetailNormalTexture()` output for the FFT bake. Validates the look. |
-| C3 — Animated detail (continuous IFFT each frame) | ⬜ todo | If the static bake reads as static, animate. Optional if C2 looks alive enough via warp + scroll. |
+| C1a — Phillips spectrum module (pure JS) | ⬜ todo | `phillips.ts` + seeded PRNG + unit tests. |
+| C1b — Reference 2D IFFT (pure JS) | ⬜ todo | `fft2d-cpu.ts` + round-trip unit tests. Bakes the spectrum to a slope texture at boot. |
+| C2 — Wire CPU-baked spectrum into water.ts via `?water=fft` | ⬜ todo | Replaces `getWaveDetailNormalTexture()` output. A/B against current procedural cascade. |
+| C3 — Port to TSL GPU compute (animated IFFT each frame) | ⬜ todo | Same algorithm, runs on GPU. CPU bake stays as the WebGL2 fallback. |
 | A1 — Phillips spectrum + seeded PRNG (shared CPU/GPU) | ⬜ todo | Replace `waves[]` with `spectrum[]` on the sim side. CPU sampler sums top-N modes. |
 | A2 — GPU full-spectrum IFFT (height + dx + dz + slope) | ⬜ todo | Vertex shader samples textures instead of summing analytics. |
 | A3 — Jacobian-based foam | ⬜ todo | Replace slope/fold heuristic with `det(I+λ∇D)<0`. |
