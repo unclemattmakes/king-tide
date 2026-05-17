@@ -46,10 +46,16 @@ flag so they don't end up in a future review:
 - **`sky.ts` PMREM env-map bake is NOT per-frame.** The 4-second rebake
   was removed when the sun was frozen; bake now runs once in
   `applyStaticState`. Verified at `src/engine/render/sky.ts:504-520`.
-- **`foliage-sway.ts` `updateWind`/`updateSwayTime` are never called.**
-  Grep across `src/` shows zero call sites. Whole sway pipeline is dead
-  weight today — either wire it up or remove the per-material patch cost
-  at material init.
+- **`foliage-sway.ts` `updateWind`/`updateSwayTime` are never called —
+  but it's intentional scaffolding, not dead code.** Grep across `src/`
+  shows zero call sites, but the module is referenced from
+  `vertex-attribute-spec.md`, `blender-wishlist.md`, `status.md`, and
+  `blender-pipeline-guide.md` as the future hook point for foliage
+  authored in Blender (item 6 in the wishlist). The `onBeforeCompile`
+  patch carries no runtime cost when no material calls
+  `applyFoliageSway()`, which today is none of them — so the "perf
+  win" of removing it is zero. Leaving in place; if the Blender path
+  lands, this is where the wiring goes.
 
 ---
 
@@ -364,15 +370,19 @@ here; frame-time win is secondary.
 
 ### Batch E — Dead-code + cleanup
 
-13. Either wire up `foliage-sway.ts`'s `updateWind`/`updateSwayTime`
-    in the game loop (driven from sky time + a track-config wind
-    direction) or remove the patch path entirely. Currently the
-    `onBeforeCompile` runs on every patched material with no caller
-    pushing the uniforms.
+13. ~~Wire or delete `foliage-sway.ts`.~~ **Withdrawn after closer
+    reading.** The module is intentional scaffolding for Blender-
+    authored foliage (see `docs/vertex-attribute-spec.md`,
+    `docs/blender-wishlist.md` item 6, and `docs/status.md`). Until a
+    material calls `applyFoliageSway()`, the `onBeforeCompile` patch
+    has zero runtime cost — nothing to win by deleting, and the
+    delete would have to be undone when the Blender foliage path
+    lands. Updated `§Method note` above accordingly.
 14. Update stale `gpu-bake-fft.ts:34-38` "WIP / amplitude bug" comment —
     `git log --oneline` shows commit `35440ee feat(water): A9 complete
-    — fix FFT amplitude bug` landed since. The doc-block lies to the
-    next reader.
+    — fix FFT amplitude bug` landed since. The doc-block lied to the
+    next reader. Replaced with a status line that points at the
+    Batch C resolution-tier knob.
 
 ### Batch F — Boot-time hitches (one-shot)
 
@@ -400,7 +410,7 @@ here; frame-time win is secondary.
 | 10 | C | Radix-8 FFT butterfly fusion | fft-tsl.ts | High | ~0.5 ms/frame |
 | 11 | D | Shadow filter + map size | renderer.ts:60, scene.ts:52 | Low | 1–3 ms/frame (low-end) |
 | 12 | D | `?aa=off` toggle | renderer.ts:42 | Trivial | 1–2 ms/frame (low-end) |
-| 13 | E | Wire or delete foliage sway | foliage-sway.ts | Low | Bundle / clarity |
+| 13 | E | ~~Wire or delete foliage sway~~ — withdrawn | foliage-sway.ts | — | n/a |
 | 14 | E | Update stale FFT comment | gpu-bake-fft.ts:34 | Trivial | Doc |
 | 15 | F | Pre-warm terrain shader | terrain-shader.ts | Low | 5–20 ms one-shot |
 | 16 | F | Pre-warm bike clones | render-systems.ts:74 | Low | 10 ms one-shot |

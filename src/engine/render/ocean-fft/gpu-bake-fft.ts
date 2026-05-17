@@ -31,32 +31,16 @@ import {
  * direct-DFT path); same handle shape, so swapping is a one-line
  * change in `water.ts`.
  *
- * **STATUS — WIP, visual-parity bug open**: the pipeline runs
- * cleanly (no console errors, no GPU validation warnings, kernel
- * builds succeed) but at the time of this commit the output
- * waveform amplitude is visibly smaller than the direct-DFT path
- * at the same Phillips parameters. Expected output is identical
- * waves; observed output reads as lower-amplitude waves of
- * roughly the same character. The math walked through below
- * looks correct; the bug is likely either (a) a missing factor
- * somewhere in the spectrum-build modulation, (b) a sign/index
- * mistake in the bit-reverse or butterfly kernels of the
- * underlying `createFft2d` primitive, or (c) a Phillips-spectrum
- * scaling difference between N=32 (direct DFT default) and N=64
- * (FFT-path minimum, log₂N-even constraint) that wasn't
- * compensated for.
- *
- * Wire and verify by:
- *
- *   1. `?fftbake=ddft` (default) vs `?fftbake=fft` on the same
- *      camera position — waves should look IDENTICAL when the bug
- *      is fixed.
- *   2. Reduce N from 64 → 4 in the FFT path and compare against
- *      direct DFT at N=4 (need to relax the log₂N-even constraint
- *      first for direct comparison at N=8, 32).
- *   3. Read-back the FFT output texture via WebGPU buffer copy
- *      and compare to the CPU reference in
- *      `src/engine/sim/water/fft2d-cpu.ts` element-by-element.
+ * **STATUS — A9 complete, shipping behind `?fftbake=fft`.** The
+ * amplitude-parity bug that gated this path in earlier drafts (output
+ * waves visibly smaller than the direct-DFT path at matching Phillips
+ * parameters) was fixed in commit `35440ee feat(water): A9 complete
+ * — fix FFT amplitude bug, N=128, batched`. Waves now match the
+ * direct-DFT reference at the same parameters; the FFT path is the
+ * production target whenever WebGPU is available + spectrum field is
+ * active. Default cascade resolution was lowered in
+ * `docs/perf-audit-2026-05.md` Batch C (`?fft=lo` default, N=64 main +
+ * N=32 chop/swell; `?fft=hi` reverts to N=128/64).
  *
  * Architecture:
  *
@@ -147,13 +131,7 @@ export function createGpuOceanFftDisplacement(
       packed[idx * 4 + 3] = 0
     }
   }
-  const spectrumTex = new THREE.DataTexture(
-    packed,
-    N,
-    N,
-    THREE.RGBAFormat,
-    THREE.FloatType,
-  )
+  const spectrumTex = new THREE.DataTexture(packed, N, N, THREE.RGBAFormat, THREE.FloatType)
   spectrumTex.name = 'water:ocean-fft-displacement:spectrum'
   spectrumTex.magFilter = THREE.NearestFilter
   spectrumTex.minFilter = THREE.NearestFilter
@@ -435,9 +413,7 @@ export function createGpuOceanFftDisplacement(
   function uploadSpectrum(grid: SpectrumGrid): void {
     if (grid.N !== N) {
       // eslint-disable-next-line no-console
-      console.warn(
-        `[gpu-bake-fft] uploadSpectrum N mismatch: handle=${N} grid=${grid.N}; ignoring`,
-      )
+      console.warn(`[gpu-bake-fft] uploadSpectrum N mismatch: handle=${N} grid=${grid.N}; ignoring`)
       return
     }
     const data = spectrumTex.image.data as Float32Array
