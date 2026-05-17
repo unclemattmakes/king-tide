@@ -581,7 +581,73 @@ is `null` since it requires cascade handles).
   cost (linear in texel count) but the kernel is already
   sub-millisecond.
 
-### A9 — Real radix-2 FFT in TSL
+### A9 — Real radix-2 FFT in TSL (foundation landed; integration in progress)
+
+**Status**: TSL FFT primitive (`createFft2d` in
+`src/engine/render/ocean-fft/fft-tsl.ts`) is built and compiles
+cleanly. Full integration into `createGpuOceanDisplacement` is
+the next chunk of work.
+
+**What landed in the foundation commit**:
+
+- `createFft2d({ N })` factory returning `{ inputTexture,
+  outputTexture, dispatch }`.
+- Internal architecture: 2 ping-pong storage textures + 1 input
+  + 1 output (RGBA32F, R+G = complex). 6 TSL compute kernels:
+  bit-reverse for row, bit-reverse for col, butterfly ping→pong
+  for row, butterfly pong→ping for row, the same two for col,
+  and a final 1/N² scale-and-copy. Each kernel is precompiled
+  once at construction; `dispatch()` just submits.
+- Stage uniform parameterizes the butterfly's block size
+  `m = 2^stage`. The dispatch loop walks log₂N stages per axis,
+  alternating ping/pong via two pre-bound kernel variants
+  (TSL bakes texture refs at kernel build, so we can't swap
+  bindings — we swap which kernel is invoked instead).
+- Sign convention: IFFT (synthesis) with twiddle base angle
+  `+2π/m`, matching the existing direct-DFT sign convention and
+  the CPU reference in `fft2d-cpu.ts`.
+- v1 restriction: log₂N must be even (N ∈ {4, 16, 64, 256, ...})
+  so the alternation parity lands data back in the ping texture
+  for the column pass start. Most production targets fit (64 or
+  256). N=128 is supported by extending the dispatch sequence
+  to handle odd-parity row passes — a 20-line change when
+  needed.
+
+**Integration plan** (next commit):
+
+- New factory `createGpuOceanFftDisplacement` parallel to the
+  existing `createGpuOceanDisplacement`, with the same handle
+  shape (`displacementTexture`, `slopeTexture`, `tick`, etc.).
+- 1 spectrum-build kernel: takes h0 (centered) + ω·t →
+  ifftshifts to natural order + writes 8 modulated spectra
+  (height, Dx, Dz, dydx, dydz, Dxx, Dxz, Dzz) into 4 RGBA32F
+  textures (2 complex pairs per texel via R+G and B+A swizzle).
+- 4 batched FFT dispatches (the FFT primitive will need a small
+  extension to batch 2 complex pairs per texel — currently it
+  only processes R+G; the B+A path is a trivial duplication of
+  the butterfly math).
+- 1 unpack kernel: reads the 4 IFFT outputs, takes 2× the real
+  parts (for the conjugate-pair factor matching the existing
+  direct DFT's `factor of 2`), computes the Jacobian, and
+  writes `displacementTexture` + `slopeTexture` in the same
+  layout the vertex shader already expects.
+- URL flag `?fftbake=fft` to A/B compare the FFT path against
+  the direct DFT (default = `?fftbake=ddft`). Switching should
+  produce IDENTICAL waves; visual divergence flags a bug in
+  either path.
+
+**Why not all-in-one this session**:
+
+The FFT primitive itself is ~500 LOC of TSL with subtle math
+(bit-reversal indexing, butterfly twiddles, ping-pong dispatch
+parity). The integration is another ~400 LOC (spectrum-build
+kernel modulating 8 spectra, batched FFT extension, unpack
+kernel). Doing both in one push without GPU-side unit tests
+would be hard to verify; the v1 plan lands the primitive
+cleanly and saves the integration for a focused follow-up
+where visual A/B is the verifier.
+
+**Original motivation**:
 
 Replaces the O(N⁴) direct DFT in `gpu-bake.ts`. Current direct
 DFT is fine at N=32 (1M ops/frame/cascade × 3 cascades = 3M
