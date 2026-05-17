@@ -38,12 +38,12 @@ import { MeshStandardNodeMaterial } from 'three/webgpu'
 import { buildFftDetailNormalTexture } from '@/engine/render/ocean-fft/cpu-bake'
 import { createFft2d, type Fft2dHandle } from '@/engine/render/ocean-fft/fft-tsl'
 import { createFoamFeedback } from '@/engine/render/ocean-fft/foam-feedback'
-import {
-  createGpuOceanDisplacement,
-  createGpuOceanFft,
-} from '@/engine/render/ocean-fft/gpu-bake'
+import { createGpuOceanDisplacement, createGpuOceanFft } from '@/engine/render/ocean-fft/gpu-bake'
 import { createGpuOceanFftDisplacement } from '@/engine/render/ocean-fft/gpu-bake-fft'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
+import { buildPhillipsSpectrum, type PhillipsParams } from '@/engine/sim/water/phillips'
+import { selectTopKModes } from '@/engine/sim/water/spectrum-modes'
+import { spectrumModesToGerstnerShape } from '@/engine/sim/water/spectrum-to-gerstner'
 import {
   WAKE_BASE_WIDTH,
   WAKE_DISP_AMP,
@@ -58,9 +58,6 @@ import {
   WAKE_TRANS_OMEGA,
   type WaveFieldState,
 } from '@/engine/sim/water/wave-field'
-import { buildPhillipsSpectrum, type PhillipsParams } from '@/engine/sim/water/phillips'
-import { selectTopKModes } from '@/engine/sim/water/spectrum-modes'
-import { spectrumModesToGerstnerShape } from '@/engine/sim/water/spectrum-to-gerstner'
 
 /**
  * Per-frame data describing how a bike pushes/marks the water.
@@ -550,11 +547,23 @@ export function createWaterMesh(
   // doesn't change between the two paths — they read the same
   // h0 array (deterministically built from `spectrumParams`).
   const fftBakeMode = params?.get('fftbake') === 'fft' ? 'fft' : 'ddft'
+  // Resolution tier for the FFT-path cascades. `hi` reverts to the
+  // original shipping values (N=128 main + N=64 chop/swell → 68+52+52
+  // = 172 compute dispatches/frame at 60 Hz). `lo` (default) halves the
+  // main cascade and drops chop/swell to N=32, cutting dispatch count
+  // to ~124/frame (~30 % reduction) and halving per-dispatch GPU work
+  // on each cascade. The detail drop is visible at close camera angles
+  // and on long open-water vistas but hard to spot during a race; the
+  // 0.6–0.8 ms/frame submission overhead noted in `gpu-bake-fft.ts`
+  // shrinks proportionally. Override per-session with `?fft=hi`.
+  const fftRes = params?.get('fft') === 'hi' ? 'hi' : 'lo'
+  const fftMainN = fftRes === 'hi' ? 128 : 64
+  const fftSecondaryN = fftRes === 'hi' ? 64 : 32
   const displacementFactory =
     fftBakeMode === 'fft' ? createGpuOceanFftDisplacement : createGpuOceanDisplacement
   const displacementPhillipsParams =
     fftBakeMode === 'fft' && field.kind === 'spectrum'
-      ? { ...field.spectrumParams, N: 128 }
+      ? { ...field.spectrumParams, N: fftMainN }
       : field.kind === 'spectrum'
         ? field.spectrumParams
         : null
@@ -563,11 +572,13 @@ export function createWaterMesh(
       ? displacementFactory({ phillipsParams: displacementPhillipsParams })
       : null
   // The chop + long-swell cascades share the same `displacementFactory`
-  // (direct DFT or FFT path) as the wind-sea cascade above. Both bump N
-  // to 64 on the FFT branch — same log₂N-even constraint, same CPU-vs-GPU
-  // independence (CPU buoyancy reads cascade 0 only).
-  const chopN = fftBakeMode === 'fft' ? 64 : (field.kind === 'spectrum' ? field.spectrumParams.N : 32)
-  const swellN = fftBakeMode === 'fft' ? 64 : (field.kind === 'spectrum' ? field.spectrumParams.N : 32)
+  // (direct DFT or FFT path) as the wind-sea cascade above. On the FFT
+  // branch they follow the `?fft` tier knob (default lo = N=32, hi =
+  // N=64). On the DDFT branch they stay at the sim's spectrum N (32).
+  const chopN =
+    fftBakeMode === 'fft' ? fftSecondaryN : field.kind === 'spectrum' ? field.spectrumParams.N : 32
+  const swellN =
+    fftBakeMode === 'fft' ? fftSecondaryN : field.kind === 'spectrum' ? field.spectrumParams.N : 32
   const gpuChopHandle =
     useGpuDisplacement && field.kind === 'spectrum'
       ? displacementFactory({
@@ -593,7 +604,7 @@ export function createWaterMesh(
             // independent of the swell — otherwise both cascades
             // would beat against each other and produce visible
             // moiré at the cascade tile boundaries.
-            seed: 0x0CEA,
+            seed: 0x0cea,
           },
           // Less Tessendorf pinch on the chop — it's already
           // fine-grained, more pinching just produces NaN-grade
@@ -628,7 +639,7 @@ export function createWaterMesh(
             // real oceans (storm rollers come from one direction
             // across hundreds of miles).
             directionalSpread: 6,
-            seed: 0x5EA1,
+            seed: 0x5ea1,
           },
           choppiness: 0.3,
         })
@@ -655,9 +666,7 @@ export function createWaterMesh(
   // without strobing across the buffer.
   const FOAM_DRIFT_FRACTION_OF_WIND = 0.3
   const initialFoamDriftSpeed =
-    field.kind === 'spectrum'
-      ? field.spectrumParams.windSpeed * FOAM_DRIFT_FRACTION_OF_WIND
-      : 3
+    field.kind === 'spectrum' ? field.spectrumParams.windSpeed * FOAM_DRIFT_FRACTION_OF_WIND : 3
   const initialFoamDriftX =
     field.kind === 'spectrum'
       ? field.spectrumParams.windDirX * initialFoamDriftSpeed
@@ -1608,7 +1617,7 @@ export function createWaterMesh(
   // green to 0.95 and dropping red to 0.20 produces a more
   // characteristic cyan-yellowish-green that's visibly distinct from
   // the cooler scatterColor while still reading as ocean.
-  const sssColor = isClassic ? scatterColor : vec3(0.20, 0.95, 0.5)
+  const sssColor = isClassic ? scatterColor : vec3(0.2, 0.95, 0.5)
 
   // Shallow-water tint. When the view ray is short between water surface
   // and terrain (e.g. lagoon shoreline, sandy floor), short Beer-Lambert
@@ -1692,11 +1701,7 @@ export function createWaterMesh(
   // out the cyan scatter, lower floors (0.25) made SSS invisible
   // at sunset.
   const sssGate = useGpuDisplacement
-    ? clamp(
-        peakMaskScaled.mul(sunBackscatter.add(float(0.35))),
-        float(0),
-        float(1),
-      )
+    ? clamp(peakMaskScaled.mul(sunBackscatter.add(float(0.35))), float(0), float(1))
     : float(0)
   const baseColorPreCaustic = isClassic
     ? scatterBlended
@@ -1871,7 +1876,9 @@ export function createWaterMesh(
       })()
     : useGpuDisplacement
       ? // biome-ignore lint/suspicious/noExplicitAny: varying-of-any propagates unknown into smoothstep arg
-        smoothstep(float(0.5), float(0.0), jacobianFrag as any).mul(foamFiber).clamp(0, 1)
+        smoothstep(float(0.5), float(0.0), jacobianFrag as any)
+          .mul(foamFiber)
+          .clamp(0, 1)
       : float(0)
   const waveFoam = isClassic
     ? (() => {
@@ -2069,9 +2076,7 @@ export function createWaterMesh(
         // Strong only in the last ~3 m of depth — same envelope as the
         // vertex shoaling so foam and damped geometry align.
         const SURF_BAND_DEPTH = 3.0
-        const shoreBand = float(1).sub(
-          smoothstep(float(0), float(SURF_BAND_DEPTH), waterDepthFrag),
-        )
+        const shoreBand = float(1).sub(smoothstep(float(0), float(SURF_BAND_DEPTH), waterDepthFrag))
         // Crest signal: the un-attenuated ambient wave height. Positive
         // values are wave faces marching toward shore — exactly what we
         // want to "break" into surf. Using the pre-attenuation height
@@ -2083,10 +2088,7 @@ export function createWaterMesh(
         // crest height. Pow-1.6 biases the response: small crests
         // produce faint surf; once a real crest arrives, the foam
         // saturates fast — the characteristic "wave broke" punctuation.
-        const crestBreaker = pow(
-          smoothstep(float(0.05), float(0.6), crestSignal),
-          float(1.6),
-        )
+        const crestBreaker = pow(smoothstep(float(0.05), float(0.6), crestSignal), float(1.6))
         // Persistent waterline lip — always-on faint band at the
         // shoreline edge (≤ 0.5 m depth) so the visible boundary never
         // disappears between crests, even on calm seas.
@@ -2346,8 +2348,7 @@ export function createWaterMesh(
   // Falls back to a sane open-ocean speed on the Gerstner path so the
   // slider has a non-zero starting value if a user flips on the FFT
   // mode mid-session.
-  const WIND_SPEED_DEFAULT =
-    field.kind === 'spectrum' ? field.spectrumParams.windSpeed : 9.5
+  const WIND_SPEED_DEFAULT = field.kind === 'spectrum' ? field.spectrumParams.windSpeed : 9.5
   // Wind direction default: derive from spectrumParams as
   // `atan2(dirZ, dirX)` in degrees. The default
   // `(dirX, dirZ) = (0.6, 0.8)` from `defaultSpectrumParams` lands
@@ -2357,8 +2358,7 @@ export function createWaterMesh(
   // mid-session doesn't introduce a discontinuity.
   const WIND_DIRECTION_DEFAULT =
     field.kind === 'spectrum'
-      ? (Math.atan2(field.spectrumParams.windDirZ, field.spectrumParams.windDirX) * 180) /
-        Math.PI
+      ? (Math.atan2(field.spectrumParams.windDirZ, field.spectrumParams.windDirX) * 180) / Math.PI
       : (Math.atan2(0.8, 0.6) * 180) / Math.PI
   // Phillips small-wavelength cutoff (m). `defaultSpectrumParams`
   // ships 1.2 m — sub-1.2-meter modes are pruned. The slider lets
@@ -2404,10 +2404,7 @@ export function createWaterMesh(
     gpuDisplacementHandle?.uploadSpectrum(grid)
     if (foamFeedbackHandle) {
       const driftSpeed = params.windSpeed * FOAM_DRIFT_FRACTION_OF_WIND
-      foamFeedbackHandle.setDrift(
-        params.windDirX * driftSpeed,
-        params.windDirZ * driftSpeed,
-      )
+      foamFeedbackHandle.setDrift(params.windDirX * driftSpeed, params.windDirZ * driftSpeed)
     }
   }
   const clamp01 = (n: number, lo: number, hi: number) =>
@@ -2694,10 +2691,7 @@ export function createWaterMesh(
     // to TERRAIN_HEIGHTMAP_RES on both ends — `buildTerrainHeightmap`
     // emits at the same resolution constant.
     const src = heightmap.texture.image.data as Uint16Array
-    if (
-      heightmap.resolution !== TERRAIN_HEIGHTMAP_RES ||
-      src.length !== heightmapData.length
-    ) {
+    if (heightmap.resolution !== TERRAIN_HEIGHTMAP_RES || src.length !== heightmapData.length) {
       // Should never trip — both sides import the same constant — but
       // log loudly if it does so the desync is visible rather than
       // silently producing garbled depth.
