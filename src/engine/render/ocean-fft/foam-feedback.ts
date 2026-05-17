@@ -51,11 +51,18 @@ import type { GpuOceanDisplacementHandle } from '@/engine/render/ocean-fft/gpu-b
  * REPEAT wrap that's invisible past the cascade-tile distance where
  * the cascades themselves already cycle.
  *
- * Wave-phase advection (foam should drift with the wave's group
- * velocity, not stay put) is NOT implemented — for v0 we let the
- * multi-cascade Jacobian fan-out + the foam buffer's spatial blur
- * carry the spreading. The decay-driven temporal trail covers the
- * "foam lingers after the breaker passes" feel.
+ * Wave-phase advection: foam DRIFTS with the surface wind/wave
+ * field, not stays put. Implemented by reading the previous foam
+ * from a shifted texel coord: `prev = bilinear(foam, texel - drift
+ * · dt)`, where drift is a world-space velocity in m/s expressed as
+ * texels in the kernel. The read-from-shifted-coord pattern is
+ * race-free within a single dispatch because WGSL guarantees that
+ * other invocations' writes in the same dispatch are NOT visible to
+ * reads — so even when one texel reads its neighbor's "old" value
+ * and that neighbor writes its "new" value in the same frame, we
+ * still get the old (pre-write) value. Drift speed defaults to ~30 %
+ * of cascade-0 wind speed in the wind direction, matching the
+ * typical surface-drift coefficient. Tunable live via `setDrift`.
  */
 
 export type FoamFeedbackOpts = {
@@ -97,6 +104,12 @@ export type FoamFeedbackOpts = {
    *  surface. */
   jacobianHigh?: number
   jacobianLow?: number
+  /** Initial foam advection velocity, world m/s. `x` and `z`
+   *  components. Default `(0, 0)` (no drift); the caller should
+   *  derive this from cascade 0's wind direction and call
+   *  `setDrift` post-construction. */
+  driftX?: number
+  driftZ?: number
 }
 
 export type FoamFeedbackHandle = {
@@ -107,14 +120,23 @@ export type FoamFeedbackHandle = {
   /** World-space extent of one full tile (m). Same as the
    *  `tileSize` option. */
   tileSize: number
-  /** Dispatch the foam-update kernel for this frame. Call AFTER the
-   *  cascade displacement kernels have ticked so the Jacobian
-   *  textures are up-to-date for the current frame's wave state. */
-  tick(renderer: THREE.WebGLRenderer): Promise<void>
+  /** Dispatch the foam-update kernel for this frame. `dt` is the
+   *  seconds elapsed since the last tick — used by the advection
+   *  step to convert world m/s drift to per-frame texel offsets.
+   *  Call AFTER the cascade displacement kernels have ticked so
+   *  the Jacobian textures are up-to-date for the current frame's
+   *  wave state. */
+  tick(dt: number, renderer: THREE.WebGLRenderer): Promise<void>
   /** Live setter for the per-frame decay. Range [0, 1] — 0 = no
    *  persistence, 1 = foam never fades. The debug menu wires its
    *  foam-persistence slider here. */
   setDecay(v: number): void
+  /** Live setter for the foam advection velocity (world m/s).
+   *  Foam trails drift with this vector, simulating wind-driven
+   *  surface drift. The debug menu wires its foam-drift slider
+   *  here (which scales cascade-0 wind direction × the slider
+   *  speed). */
+  setDrift(vx: number, vz: number): void
   dispose(): void
 }
 
@@ -163,6 +185,18 @@ export function createFoamFeedback(opts: FoamFeedbackOpts): FoamFeedbackHandle {
   const decayUniform = uniform(decayInit)
   const jHighUniform = uniform(jHi)
   const jLowUniform = uniform(jLo)
+  // Drift uniforms — world m/s for advection. The kernel divides
+  // by (tileSize / N) at use time to convert m/s to texels/second,
+  // then multiplies by dtUniform for the per-frame texel offset.
+  const driftXUniform = uniform(opts.driftX ?? 0)
+  const driftZUniform = uniform(opts.driftZ ?? 0)
+  // `dt` (seconds) is set each tick from the renderer's last-frame
+  // delta. Zero at construction so the first dispatch reads from
+  // the current texel until the renderer starts driving it.
+  const dtUniform = uniform(0)
+  // Per-axis world meters per texel — precomputed so the kernel
+  // doesn't redo the divide every invocation.
+  const metersPerTexel = tileSize / N
 
   // Kernel: one thread per output texel. Reads previous-frame foam
   // from `foamTexture` itself (read_write storage), samples cascade
@@ -259,12 +293,53 @@ export function createFoamFeedback(opts: FoamFeedbackOpts): FoamFeedbackHandle {
     // contribute.
     const instantFoam = smoothstep(jHighUniform, jLowUniform, jac).clamp(0, 1)
 
-    // Self-read: previous frame's foam at this exact texel.
+    // Self-read with ADVECTION: previous frame's foam at the texel
+    // the surface drift came FROM. Reading at `(px, py) - drift·dt`
+    // gives us the foam that USED to be upstream of us; storing it
+    // here means the trail effectively translates downwind each
+    // frame.
+    //
+    // Race-free: WGSL guarantees that other invocations' writes in
+    // the same dispatch are NOT visible to reads. So even when we
+    // read texel (px-1, py) and that texel's invocation writes its
+    // own new value, we still see the OLD pre-dispatch value —
+    // exactly what we want.
+    //
+    // Bilinear sample manually (4 textureLoad taps + 2D lerp) since
+    // advection produces sub-texel shifts that nearest-neighbor
+    // would round away to zero motion.
+    const driftTexelsX = driftXUniform.mul(dtUniform).div(float(metersPerTexel))
+    const driftTexelsY = driftZUniform.mul(dtUniform).div(float(metersPerTexel))
+    const srcXf = float(px).sub(driftTexelsX)
+    const srcYf = float(py).sub(driftTexelsY)
+    const srcX0 = srcXf.floor()
+    const srcY0 = srcYf.floor()
+    const srcFu = srcXf.sub(srcX0)
+    const srcFv = srcYf.sub(srcY0)
+    // Wrap to [0, N-1] via mod, accounting for negative-coord cases.
+    const srcX0w = srcX0.add(float(N)).mod(float(N))
+    const srcY0w = srcY0.add(float(N)).mod(float(N))
+    const srcX1w = srcX0.add(float(N + 1)).mod(float(N))
+    const srcY1w = srcY0.add(float(N + 1)).mod(float(N))
+    const sx0i = uint(srcX0w)
+    const sy0i = uint(srcY0w)
+    const sx1i = uint(srcX1w)
+    const sy1i = uint(srcY1w)
     // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
-    const prevSample = textureLoad(foamTexture, uvec2(px, py), 0) as any
-    const prev = prevSample.r
+    const p00 = textureLoad(foamTexture, uvec2(sx0i, sy0i), 0) as any
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const p10 = textureLoad(foamTexture, uvec2(sx1i, sy0i), 0) as any
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const p01 = textureLoad(foamTexture, uvec2(sx0i, sy1i), 0) as any
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const p11 = textureLoad(foamTexture, uvec2(sx1i, sy1i), 0) as any
+    const pLo = mix(p00.r, p10.r, srcFu)
+    const pHi = mix(p01.r, p11.r, srcFu)
+    const prev = mix(pLo, pHi, srcFv)
+
     // Feedback: max(decayed prev, new instant). Stateful temporal
-    // trail — foam persists as the wave moves on.
+    // trail — foam persists as the wave moves on, drifting in the
+    // wind direction.
     const next = max(prev.mul(decayUniform), instantFoam).clamp(0, 1)
 
     textureStore(foamTexture, uvec2(px, py), vec4(next, float(0), float(0), float(0))).toReadWrite()
@@ -273,7 +348,11 @@ export function createFoamFeedback(opts: FoamFeedbackOpts): FoamFeedbackHandle {
   // biome-ignore lint/suspicious/noExplicitAny: TSL Fn invocation typing
   const computeNode = (kernel as any)().compute(N * N)
 
-  function tick(renderer: THREE.WebGLRenderer): Promise<void> {
+  function tick(dt: number, renderer: THREE.WebGLRenderer): Promise<void> {
+    // Clamp dt to a sane upper bound so a hitched frame doesn't
+    // teleport the entire foam buffer downwind in one step. 0.1 s
+    // = 10 fps floor; advection still proceeds but capped.
+    dtUniform.value = Math.max(0, Math.min(0.1, dt))
     // biome-ignore lint/suspicious/noExplicitAny: WebGPURenderer cast
     const r = renderer as any
     if (typeof r.computeAsync === 'function') {
@@ -286,6 +365,14 @@ export function createFoamFeedback(opts: FoamFeedbackOpts): FoamFeedbackHandle {
     decayUniform.value = Math.max(0, Math.min(1, v))
   }
 
+  function setDrift(vx: number, vz: number): void {
+    // Clamp to a reasonable surface-drift envelope (m/s). 10 m/s
+    // is already faster than any realistic wind-driven surface
+    // current; bigger values just produce strobing trails.
+    driftXUniform.value = Math.max(-10, Math.min(10, vx))
+    driftZUniform.value = Math.max(-10, Math.min(10, vz))
+  }
+
   function dispose(): void {
     foamTexture.dispose()
   }
@@ -295,6 +382,7 @@ export function createFoamFeedback(opts: FoamFeedbackOpts): FoamFeedbackHandle {
     tileSize,
     tick,
     setDecay,
+    setDrift,
     dispose,
   }
 }

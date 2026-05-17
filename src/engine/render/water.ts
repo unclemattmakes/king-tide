@@ -158,6 +158,14 @@ export type WaterMesh = {
      *  CPU buoyancy sampler's top-K modes update in lockstep. No-op
      *  outside the FFT path. */
     setWindSpeed(s: number): void
+    /** A8 foam-feedback persistence (0..1, intuitive). 0 = foam
+     *  fades almost instantly (per-frame decay 0.7 = ~9 ms
+     *  half-life), 1 = foam barely fades (decay 0.99 = ~7 s
+     *  half-life). The slider maps linearly to `decay = lerp(0.7,
+     *  0.99, value)` then forwards to `foamFeedbackHandle.setDecay`.
+     *  No-op when the foam-feedback handle is absent (non-FFT or
+     *  `?foamfb=0`). */
+    setFoamPersistence(s: number): void
     /** Wind direction as an angle in degrees, CCW from world +X
      *  (the same convention `Math.atan2(dirZ, dirX)` returns).
      *  Internally converted to (cos, sin) before being plumbed
@@ -221,6 +229,11 @@ export type WaterDebugDefaults = {
    *  wavelength below this are pruned from the spectrum tail. Lower =
    *  finer chop (more aliasing risk); higher = smoother surface. */
   windCutoff: number
+  /** A8 foam-feedback persistence (0..1, intuitive). 0 = fast fade,
+   *  1 = long trails. Maps to per-frame decay via `lerp(0.7, 0.99,
+   *  value)`. FFT path only; no-op when the foam-feedback handle is
+   *  absent. */
+  foamPersistence: number
   wireframe: boolean
 }
 
@@ -600,10 +613,28 @@ export function createWaterMesh(
   // Useful for A/B-comparing the persistence feature against the
   // pre-A8 look on the same camera position.
   const foamFeedbackEnabled = params?.get('foamfb') !== '0'
+  // Drift speed (m/s) along cascade 0's wind direction. ~30 % of
+  // wind speed is the textbook surface-drift coefficient. At the
+  // default windSpeed=11 m/s that's ~3 m/s — enough drift over a
+  // 700 ms foam lifetime (=2 m total drift) to be clearly visible
+  // without strobing across the buffer.
+  const FOAM_DRIFT_FRACTION_OF_WIND = 0.3
+  const initialFoamDriftSpeed =
+    field.kind === 'spectrum'
+      ? field.spectrumParams.windSpeed * FOAM_DRIFT_FRACTION_OF_WIND
+      : 3
+  const initialFoamDriftX =
+    field.kind === 'spectrum'
+      ? field.spectrumParams.windDirX * initialFoamDriftSpeed
+      : initialFoamDriftSpeed
+  const initialFoamDriftZ =
+    field.kind === 'spectrum' ? field.spectrumParams.windDirZ * initialFoamDriftSpeed : 0
   const foamFeedbackHandle =
     foamFeedbackEnabled && gpuDisplacementHandle && gpuChopHandle && gpuSwellHandle
       ? createFoamFeedback({
           cascades: [gpuDisplacementHandle, gpuChopHandle, gpuSwellHandle],
+          driftX: initialFoamDriftX,
+          driftZ: initialFoamDriftZ,
         })
       : null
   // `?wire=1` is an ORTHOGONAL toggle — works with classic, v2, and any
@@ -2287,6 +2318,11 @@ export function createWaterMesh(
   // the user trade chop detail for surface smoothness on the fly.
   const WIND_CUTOFF_DEFAULT =
     field.kind === 'spectrum' ? field.spectrumParams.smallWavelengthCutoff : 1.2
+  // A8 foam-feedback persistence (0..1). Construction-time decay is
+  // 0.93 (hardcoded in foam-feedback.ts DEFAULTS); inverse-lerp on
+  // the [0.7, 0.99] mapping puts that at (0.93-0.7)/(0.99-0.7) ≈
+  // 0.79. RESET in the menu restores this.
+  const FOAM_PERSISTENCE_DEFAULT = 0.79
   const defaults: WaterDebugDefaults = {
     steepness: initialSteepness,
     swellScale: 1,
@@ -2302,6 +2338,7 @@ export function createWaterMesh(
     windSpeed: WIND_SPEED_DEFAULT,
     windDirection: WIND_DIRECTION_DEFAULT,
     windCutoff: WIND_CUTOFF_DEFAULT,
+    foamPersistence: FOAM_PERSISTENCE_DEFAULT,
     wireframe: wireFlag,
   }
   // Orchestrates a live spectrum rebuild: builds the new Phillips
@@ -2309,12 +2346,22 @@ export function createWaterMesh(
   // sync), uploads the new h0/ω into the GPU spectrum texture. Cheap
   // enough for slider drag — ~1 ms at N=32, well under a single
   // frame budget. No-op outside the spectrum + GPU-displacement path.
+  // Also re-syncs the A8 foam-feedback advection drift so foam
+  // continues to flow in cascade 0's current wind direction after a
+  // wind-direction or wind-speed slider drag.
   function applySpectrumParams(params: PhillipsParams): void {
     if (field.kind !== 'spectrum') return
     const grid = buildPhillipsSpectrum(params)
     field.spectrum = selectTopKModes(grid, { topK: field.spectrum.length })
     field.spectrumParams = params
     gpuDisplacementHandle?.uploadSpectrum(grid)
+    if (foamFeedbackHandle) {
+      const driftSpeed = params.windSpeed * FOAM_DRIFT_FRACTION_OF_WIND
+      foamFeedbackHandle.setDrift(
+        params.windDirX * driftSpeed,
+        params.windDirZ * driftSpeed,
+      )
+    }
   }
   const clamp01 = (n: number, lo: number, hi: number) =>
     Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo))
@@ -2409,6 +2456,14 @@ export function createWaterMesh(
       const v = clamp01(m, 0.1, 5)
       applySpectrumParams({ ...field.spectrumParams, smallWavelengthCutoff: v })
     },
+    setFoamPersistence(s) {
+      // 0..1 slider → decay in [0.7, 0.99]. Fast fade at 0,
+      // long trails at 1. No-op when the foam-feedback handle
+      // is absent (analytic path, classic path, or ?foamfb=0).
+      const v = clamp01(s, 0, 1)
+      const decay = 0.7 + (0.99 - 0.7) * v
+      foamFeedbackHandle?.setDecay(decay)
+    },
     setWireframe(on) {
       mat.wireframe = !!on
     },
@@ -2482,6 +2537,11 @@ export function createWaterMesh(
   // early in the frame and the comparison reads the scene as "all at the
   // far plane" — no foam ever fires.
   const _sceneDepthSize = new THREE.Vector2()
+  // Track sim time between frames so the foam-feedback advection
+  // can convert its world-m/s drift uniform into a per-frame texel
+  // offset. NaN sentinel → first frame uses dt=0 (no advection
+  // step before there's a baseline time).
+  let foamLastFieldTime = Number.NaN
   mesh.onBeforeRender = (renderer) => {
     // biome-ignore lint/suspicious/noExplicitAny: WebGPURenderer cast
     const r = renderer as any
@@ -2513,7 +2573,11 @@ export function createWaterMesh(
     // implicitly barriered between dispatches in the same queue, so
     // the foam kernel sees the freshly-written cascade alphas.
     if (foamFeedbackHandle) {
-      void foamFeedbackHandle.tick(renderer)
+      const dt = Number.isFinite(foamLastFieldTime)
+        ? Math.max(0, field.time - foamLastFieldTime)
+        : 0
+      foamLastFieldTime = field.time
+      void foamFeedbackHandle.tick(dt, renderer)
     }
     r.getDrawingBufferSize(_sceneDepthSize)
     const w = _sceneDepthSize.x | 0
