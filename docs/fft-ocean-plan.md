@@ -24,15 +24,17 @@ To pick up:
 4. **Validation gates not yet exercised** are flagged inline: search the
    table for "Validation". Each ⬜ row's "Notes" column describes the
    intended deliverable + main risks.
-5. The most natural next step is **A5** (debug menu rewrite + tuning).
-   The math infrastructure is complete: A2 has the full-spectrum
-   displacement texture, A3 the Jacobian foam path. What's left is
-   the visual A/B tune — retire the swell/chop sliders, add wind /
-   cutoff / choppiness / sea-state-intensity sliders, and find the
-   spectrum params that make `?water=fft&waves=fft` clearly read as
-   better than the v2 Gerstner default. The FFT path currently shows
-   visible horizontal banding from the N=32 grid; bumping N or adding
-   a second cascade may be part of A5.
+5. The most natural next step is **finishing A5** (debug menu). The
+   choppiness λ and sea-state intensity sliders landed and live-tune
+   the displacement kernel via uniform writes. Wind speed / direction /
+   cutoff sliders are still open — they need a live spectrum rebuild
+   on slider drag-end (CPU `buildPhillipsSpectrum` + GPU `spectrumTex`
+   data upload + `selectTopKModes` for the CPU sampler). After that
+   the natural follow-on is the visual tune itself: find the spectrum
+   params that make `?water=fft&waves=fft` read as clearly better
+   than the v2 Gerstner default. The FFT path currently shows visible
+   horizontal banding from the N=32 grid; bumping N or adding a
+   second cascade may also be part of that tune.
 6. **Open questions** (later in this doc) are decisions deferred to the
    tuning pass — none block forward progress, all benefit from at least
    one round of in-browser eyeballing first.
@@ -64,7 +66,7 @@ URL flags to A/B-test in dev:
 | A3 — Jacobian-based foam | ✅ done | `water.ts` captures `displacementTexture.a` at the vertex texture-sample site, forwards via `jacobianFrag` varying, and the fragment foam mixer adds `foldFoamFft = smoothstep(0.6, -0.2, jacobianFrag)` as a max term alongside `pixelFoam` and `foamAccumFrag`. Gated on `useGpuDisplacement` so the analytic path pays nothing for the unused varying. At the current spectrum calibration (amplitude=1.6e-6, λ=0.5) the partials stay small and J stays near 1, so the Jacobian foam contributes little visually — the plumbing is in place for when A5's sea-state slider lets the user dial choppiness up to a regime where actual J<0 happens. Slope-based `pixelFoam` still carries whitecap foam on non-breaking waves; the Jacobian foam is additive (max), not replacing. **Validation next: in-browser A/B with `?water=fft&waves=fft` at the default and at amplitude×100 to see the Jacobian foam fire on near-breaking crests.** |
 | A4a — Spectrum-field determinism tests (CPU side) | ✅ done | `wave-field-determinism.test.ts` — 6 tests: cross-build identity, advance-step parity, seed forking, replay rebuild-restore cycle, stateless-sampler check, Gerstner regression. Replay + multiplayer determinism guaranteed on the new path. |
 | A4b — CPU sampler matches GPU IFFT at probe points | ✅ done | New 7th test in `wave-field-determinism.test.ts`: "top-K analytic sum converges to the full grid when topK = N²" — locks down sign convention + factor-of-2 conjugate handling that the GPU kernel relies on, and asserts the default top-K captures a meaningful variance fraction. Tests pass at 257/257. |
-| A5 — Tuning + debug menu rewrite | ⬜ todo | Wind speed / direction / fetch / cutoff sliders. Retire swell/chop knobs. Add a choppiness λ slider that feeds `gpuDisplacementHandle.choppiness` (uniform on the kernel — currently constructor-only). Sea-state intensity slider can drive `gpuDisplacementHandle.renderScale` for per-track overrides. |
+| A5 — Tuning + debug menu rewrite | 🟡 partial | **Landed:** Choppiness (λ) and Sea state (renderScale) sliders, both live-mutating the GPU displacement kernel's uniforms via `gpuDisplacementHandle.setChoppiness` / `setRenderScale`. Persisted to `hoverbike.waterDebug.v2` localStorage (old `v1` key auto-merges onto defaults). Visual A/B confirmed both knobs visibly affect the FFT-path surface in real time. **Still open:** wind speed / direction / fetch / cutoff sliders — these require a live spectrum rebuild (CPU `buildPhillipsSpectrum` + GPU `spectrumTex.image.data.set` + `selectTopKModes` for the CPU sampler) on each slider drag-end. Achievable but heavier plumbing than the constant-uniform knobs A5-partial shipped with. Swell/chop sliders are retained (they still work on the analytic Gerstner path; no-op on spectrum). |
 
 URL flags: `?water=v2` (current Gerstner — default until A5 ships), `?water=fft`
 (new path, opt-in during dev), `?water=classic` (legacy heightfield, untouched).

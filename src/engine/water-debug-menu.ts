@@ -120,6 +120,28 @@ const SLIDERS: SliderDef[] = [
     format: (n) => `${n.toFixed(2)}×`,
     hint: 'FFT-lite detail normal cascades. 0 = bypass · 1 = default chop · 2 = punchy',
   },
+  // FFT-path sliders. No-ops outside `?water=fft` + spectrum field so
+  // there's no harm leaving them in the menu always — they just hold
+  // value silently on the analytic path. A future "show only relevant
+  // knobs" pass can hide them based on detected mode.
+  {
+    key: 'choppiness',
+    label: 'Choppiness (λ)',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    format: (n) => n.toFixed(2),
+    hint: 'Tessendorf horizontal pinch. 0 = pure heightfield · 0.5 = default · 1+ = breaking waves',
+  },
+  {
+    key: 'seaStateIntensity',
+    label: 'Sea state',
+    min: 0,
+    max: 4,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: 'Visual amplitude of the FFT spectrum. 1 = default · scrub up for stormy, down for glassy',
+  },
 ]
 
 export type WaterDebugMenu = {
@@ -211,6 +233,12 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'detailStrength':
           water.debug.setDetailStrength(v)
+          break
+        case 'choppiness':
+          water.debug.setChoppiness(v)
+          break
+        case 'seaStateIntensity':
+          water.debug.setSeaStateIntensity(v)
           break
       }
     })

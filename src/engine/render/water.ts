@@ -141,6 +141,14 @@ export type WaterMesh = {
      *  detail (analytic-Gerstner only); 1 = the default cascade
      *  contribution that stands in for SoT-style FFT chop. */
     setDetailStrength(s: number): void
+    /** Tessendorf choppiness λ — controls horizontal displacement and
+     *  Jacobian-foam threshold on the A2 GPU IFFT path. No-op outside
+     *  the FFT path (`?water=fft` + spectrum field). */
+    setChoppiness(s: number): void
+    /** Visual sea-state intensity (renderScale on the displacement
+     *  kernel). 1 = built-in spectrum tune; raise for stormier, lower
+     *  for glassy calm. No-op outside the FFT path. */
+    setSeaStateIntensity(s: number): void
     /** Render the wave geometry as wireframe. Useful for tuning wave /
      *  wake amplitudes against the actual displacement. */
     setWireframe(on: boolean): void
@@ -160,6 +168,16 @@ export type WaterDebugDefaults = {
   roughBase: number
   roughSparkle: number
   detailStrength: number
+  /** Tessendorf choppiness λ on the A2 GPU displacement kernel. Only
+   *  consumed by the FFT path (`?water=fft` + spectrum field); the
+   *  setter no-ops on the analytic Gerstner path. 0 = pure
+   *  heightfield, 0.5 = the mid-Tessendorf default, >1 starts to fold. */
+  choppiness: number
+  /** Visual scale on (height, Dx, Dz, slope) from the A2 GPU
+   *  displacement kernel. FFT-path only. 1 = built-in spectrum tune;
+   *  scrub higher for stormier seas, lower for calmer. Lets per-track
+   *  sea state be dialed in without rebuilding the spectrum. */
+  seaStateIntensity: number
   wireframe: boolean
 }
 
@@ -1950,6 +1968,11 @@ export function createWaterMesh(
   // clamp inputs and apply to the relevant uniform / mesh state. The amp
   // scales also mutate `field.waves[i].amplitude` so the CPU buoyancy
   // sampler stays in lockstep with the GPU shader.
+  // Initial choppiness / sea-state intensity match the construction-
+  // time values used by `createGpuOceanDisplacement` (see gpu-bake.ts
+  // defaults). RESET in the menu restores these.
+  const CHOPPINESS_DEFAULT = 0.5
+  const SEA_STATE_DEFAULT = 1
   const defaults: WaterDebugDefaults = {
     steepness: initialSteepness,
     swellScale: 1,
@@ -1960,6 +1983,8 @@ export function createWaterMesh(
     roughBase: ROUGH_BASE_DEFAULT,
     roughSparkle: ROUGH_SPARKLE_DEFAULT,
     detailStrength: detailFlag ? DETAIL_STRENGTH_DEFAULT : 0,
+    choppiness: CHOPPINESS_DEFAULT,
+    seaStateIntensity: SEA_STATE_DEFAULT,
     wireframe: wireFlag,
   }
   const clamp01 = (n: number, lo: number, hi: number) =>
@@ -2010,6 +2035,16 @@ export function createWaterMesh(
     },
     setDetailStrength(s) {
       detailStrengthUniform.value = clamp01(s, 0, 2)
+    },
+    setChoppiness(s) {
+      // No-op on the analytic path — the kernel only exists on the
+      // FFT/spectrum branch. Clamp range matches the slider [0, 2].
+      gpuDisplacementHandle?.setChoppiness(clamp01(s, 0, 2))
+    },
+    setSeaStateIntensity(s) {
+      // Same no-op rule. Range [0, 4] gives headroom from glassy to
+      // stormy without making the kernel produce NaN-grade peaks.
+      gpuDisplacementHandle?.setRenderScale(clamp01(s, 0, 4))
     },
     setWireframe(on) {
       mat.wireframe = !!on

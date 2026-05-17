@@ -419,13 +419,18 @@ export type GpuOceanDisplacementHandle = {
    *  texture repeat. Pre-multiplied so callers can compute the
    *  sampling UV as `worldXZ / tileSize`. */
   tileSize: number
-  /** Current choppiness scale (echoes the constructor opt). Stored
-   *  so a future debug-menu slider can mutate it via the uniform
-   *  without rebuilding the kernel. */
-  choppiness: number
-  /** Visual-only render scale on (height, Dx, Dz, slope). See the
-   *  opt's doc for why this exists. */
-  renderScale: number
+  /** Live setter for Tessendorf's choppiness λ. Mutates the
+   *  in-kernel uniform; the next dispatch picks it up. Range [0, 2]
+   *  in practice — 0 is pure heightfield, 1 is Tessendorf default,
+   *  >1.5 starts producing visible folding. Wired into the water
+   *  debug menu's choppiness slider. */
+  setChoppiness(v: number): void
+  /** Live setter for the visual render scale (height + Dx/Dz +
+   *  slopes). Mutates the in-kernel uniform; next dispatch applies
+   *  it. Wired into the water debug menu's sea-state intensity
+   *  slider so per-track sea state can be dialed in without
+   *  rebuilding the spectrum. */
+  setRenderScale(v: number): void
   /** Drive the spectrum forward to `time` seconds and dispatch the
    *  compute kernel. Same fire-and-forget semantics as
    *  `GpuOceanFftHandle.tick`. */
@@ -694,12 +699,19 @@ export function createGpuOceanDisplacement(
     slopeTexture.dispose()
   }
 
+  function setChoppiness(v: number): void {
+    choppinessUniform.value = v
+  }
+  function setRenderScale(v: number): void {
+    renderScaleUniform.value = v
+  }
+
   return {
     displacementTexture,
     slopeTexture,
     tileSize,
-    choppiness,
-    renderScale,
+    setChoppiness,
+    setRenderScale,
     tick,
     dispose,
   }
