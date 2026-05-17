@@ -1472,7 +1472,13 @@ export function createWaterMesh(
   // travel distances — the same Rayleigh / Beer-Lambert physics
   // that makes shallow ocean read turquoise instead of navy.
   const scatterColor = isClassic ? vec3(0.16, 0.55, 0.78) : vec3(0.18, 0.78, 0.78)
-  const sssColor = isClassic ? scatterColor : vec3(0.42, 0.85, 0.45)
+  // SSS bumped toward iconic SoT bright-green (more saturated, less
+  // yellow). The previous (0.42, 0.85, 0.45) read as "lime" instead of
+  // the recognizable "tropical lagoon" hue SoT crests have. Bumping
+  // green to 0.95 and dropping red to 0.20 produces a more
+  // characteristic cyan-yellowish-green that's visibly distinct from
+  // the cooler scatterColor while still reading as ocean.
+  const sssColor = isClassic ? scatterColor : vec3(0.20, 0.95, 0.5)
 
   // Shallow-water tint. When the view ray is short between water surface
   // and terrain (e.g. lagoon shoreline, sandy floor), short Beer-Lambert
@@ -2111,11 +2117,13 @@ export function createWaterMesh(
   // Foam needs a constant emissive lift. Real foam scatters sky light
   // independently of the direct sun, so it stays readably bright even
   // when the surface is in shadow (cliff side, behind a bike) — without
-  // this, foam in shadowed shoreline reads as grey. Bumped from 0.18 →
-  // 0.28 in the SoT-leaning pass so whitecaps read as the punchy bright
-  // streaks they're supposed to be under warm-sky lighting, where the
-  // lower lift was getting absorbed by the desaturated horizon haze.
-  const foamEmissive = foamColor.mul(foamMask).mul(float(0.28))
+  // this, foam in shadowed shoreline reads as grey. Bumped from 0.28 →
+  // 0.5 in the SoT-research pass: the original was meant to read
+  // against the warm sunset haze but ended up too subtle even on
+  // pinched breaking crests; foam should pop visibly bright since it's
+  // the "this wave is actually breaking" signal a player relies on for
+  // arcade water reads.
+  const foamEmissive = foamColor.mul(foamMask).mul(float(0.5))
   mat.emissiveNode = fresnelEmissive.add(sunGlow).add(foamEmissive)
   // View-angle-dependent base opacity. Beer-Lambert: the optical path
   // length through water along the view ray scales as ~1/ndotv, so
