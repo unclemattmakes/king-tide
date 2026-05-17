@@ -390,7 +390,19 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         ]
         for (const p of points) {
           const worldY = t.y + p.oy
-          const heightError = stats.hoverHeight - (worldY - p.surfY)
+          const localDist = worldY - p.surfY
+          // Per-corner "locally grounded" gate. The bow probe, with its
+          // speed-anticipation reach, projects past a ramp lip before the
+          // bike does — past the lip it samples the much lower ground
+          // beyond, and a naive heightError would fire a huge DOWNWARD
+          // spring force at the bow right at takeoff (the "sticky nose"
+          // nose-dive). Skip a corner once its local surface is further
+          // than the grounded threshold below it; that corner is
+          // effectively airborne even though another corner is still on
+          // the ramp. Net result: stern still pushes up (pitching the
+          // nose UP into the launch), bow contributes nothing.
+          if (localDist > stats.hoverHeight * 1.6) continue
+          const heightError = stats.hoverHeight - localDist
           // v_y at this offset = linvel.y + (ω × offset).y = linvel.y + ω.z*ox − ω.x*oz
           const vAtPointY = linvel.y + angv.z * p.ox - angv.x * p.oz
           const dampVy = Math.max(vAtPointY, 0)
