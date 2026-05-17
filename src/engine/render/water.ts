@@ -55,6 +55,8 @@ import {
   WAKE_TRANS_OMEGA,
   type WaveFieldState,
 } from '@/engine/sim/water/wave-field'
+import { buildPhillipsSpectrum, type PhillipsParams } from '@/engine/sim/water/phillips'
+import { selectTopKModes } from '@/engine/sim/water/spectrum-modes'
 import { spectrumModesToGerstnerShape } from '@/engine/sim/water/spectrum-to-gerstner'
 
 /**
@@ -149,6 +151,12 @@ export type WaterMesh = {
      *  kernel). 1 = built-in spectrum tune; raise for stormier, lower
      *  for glassy calm. No-op outside the FFT path. */
     setSeaStateIntensity(s: number): void
+    /** Wind speed in m/s — drives the Phillips spectrum's dominant
+     *  wavelength `L = V²/g`. Mutating it rebuilds the spectrum
+     *  (~1 ms for N=32) and reuploads the h0 array to the GPU; the
+     *  CPU buoyancy sampler's top-K modes update in lockstep. No-op
+     *  outside the FFT path. */
+    setWindSpeed(s: number): void
     /** Render the wave geometry as wireframe. Useful for tuning wave /
      *  wake amplitudes against the actual displacement. */
     setWireframe(on: boolean): void
@@ -178,6 +186,10 @@ export type WaterDebugDefaults = {
    *  scrub higher for stormier seas, lower for calmer. Lets per-track
    *  sea state be dialed in without rebuilding the spectrum. */
   seaStateIntensity: number
+  /** Phillips spectrum wind speed (m/s). FFT-path only. Drives the
+   *  dominant wavelength `L = V²/g`; mutation rebuilds the spectrum
+   *  + reuploads h0 to GPU + refreshes the CPU sampler's top-K. */
+  windSpeed: number
   wireframe: boolean
 }
 
@@ -1973,6 +1985,13 @@ export function createWaterMesh(
   // defaults). RESET in the menu restores these.
   const CHOPPINESS_DEFAULT = 0.5
   const SEA_STATE_DEFAULT = 1
+  // Wind speed default mirrors `field.spectrumParams.windSpeed` at
+  // construction (defaults to 9.5 from `defaultSpectrumParams()`).
+  // Falls back to a sane open-ocean speed on the Gerstner path so the
+  // slider has a non-zero starting value if a user flips on the FFT
+  // mode mid-session.
+  const WIND_SPEED_DEFAULT =
+    field.kind === 'spectrum' ? field.spectrumParams.windSpeed : 9.5
   const defaults: WaterDebugDefaults = {
     steepness: initialSteepness,
     swellScale: 1,
@@ -1985,7 +2004,20 @@ export function createWaterMesh(
     detailStrength: detailFlag ? DETAIL_STRENGTH_DEFAULT : 0,
     choppiness: CHOPPINESS_DEFAULT,
     seaStateIntensity: SEA_STATE_DEFAULT,
+    windSpeed: WIND_SPEED_DEFAULT,
     wireframe: wireFlag,
+  }
+  // Orchestrates a live spectrum rebuild: builds the new Phillips
+  // grid on CPU, swaps the field's top-K modes (CPU buoyancy stays in
+  // sync), uploads the new h0/ω into the GPU spectrum texture. Cheap
+  // enough for slider drag — ~1 ms at N=32, well under a single
+  // frame budget. No-op outside the spectrum + GPU-displacement path.
+  function applySpectrumParams(params: PhillipsParams): void {
+    if (field.kind !== 'spectrum') return
+    const grid = buildPhillipsSpectrum(params)
+    field.spectrum = selectTopKModes(grid, { topK: field.spectrum.length })
+    field.spectrumParams = params
+    gpuDisplacementHandle?.uploadSpectrum(grid)
   }
   const clamp01 = (n: number, lo: number, hi: number) =>
     Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo))
@@ -2045,6 +2077,15 @@ export function createWaterMesh(
       // Same no-op rule. Range [0, 4] gives headroom from glassy to
       // stormy without making the kernel produce NaN-grade peaks.
       gpuDisplacementHandle?.setRenderScale(clamp01(s, 0, 4))
+    },
+    setWindSpeed(s) {
+      // No-op on the analytic path. Range [1, 20] m/s — 1 = glassy,
+      // 20 = storm. Higher windSpeed → longer dominant wavelength
+      // (L = V²/g grows quadratically), so the visible character
+      // shifts from short choppy ripples toward long rolling swell.
+      if (field.kind !== 'spectrum') return
+      const v = clamp01(s, 1, 20)
+      applySpectrumParams({ ...field.spectrumParams, windSpeed: v })
     },
     setWireframe(on) {
       mat.wireframe = !!on

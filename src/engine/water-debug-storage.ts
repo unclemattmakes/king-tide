@@ -8,11 +8,11 @@
 
 import type { WaterDebugDefaults, WaterMesh } from './render/water'
 
-// v2 bump: adds `choppiness` + `seaStateIntensity` for the A5 FFT
-// sliders. Old v1 entries are silently merged onto defaults by the
-// per-key tolerant loader below, so a tuning session from before A5
-// just gets the new sliders at their defaults.
-export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v2'
+// v3 bump: adds `windSpeed` alongside the v2 `choppiness` +
+// `seaStateIntensity` keys. Old v1/v2 entries are silently merged
+// onto defaults by the per-key tolerant loader below, so a tuning
+// session from before A5 just gets the new sliders at their defaults.
+export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v3'
 
 export type WaterDebugSettings = {
   steepness: number
@@ -26,6 +26,7 @@ export type WaterDebugSettings = {
   detailStrength: number
   choppiness: number
   seaStateIntensity: number
+  windSpeed: number
   wireframe: boolean
 }
 
@@ -42,6 +43,7 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     detailStrength: d.detailStrength,
     choppiness: d.choppiness,
     seaStateIntensity: d.seaStateIntensity,
+    windSpeed: d.windSpeed,
     wireframe: d.wireframe,
   }
 }
@@ -94,6 +96,7 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setDetailStrength(s.detailStrength)
   water.debug.setChoppiness(s.choppiness)
   water.debug.setSeaStateIntensity(s.seaStateIntensity)
+  water.debug.setWindSpeed(s.windSpeed)
   water.debug.setWireframe(s.wireframe)
 }
 

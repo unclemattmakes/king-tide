@@ -15,7 +15,11 @@ import {
 } from 'three/tsl'
 import { StorageTexture } from 'three/webgpu'
 import { buildFftDetailNormalTexture } from '@/engine/render/ocean-fft/cpu-bake'
-import { buildPhillipsSpectrum, type PhillipsParams } from '@/engine/sim/water/phillips'
+import {
+  buildPhillipsSpectrum,
+  type PhillipsParams,
+  type SpectrumGrid,
+} from '@/engine/sim/water/phillips'
 
 /**
  * GPU-driven Phillips ocean: animated detail-cascade slope texture
@@ -431,6 +435,15 @@ export type GpuOceanDisplacementHandle = {
    *  slider so per-track sea state can be dialed in without
    *  rebuilding the spectrum. */
   setRenderScale(v: number): void
+  /** Hot-swap the spectrum the kernel reads. Copies a freshly-built
+   *  `SpectrumGrid` into the static `spectrumTex` data buffer and
+   *  marks it dirty so Three.js re-uploads on the next render. The
+   *  CALLER must build the grid (`buildPhillipsSpectrum`) and is
+   *  responsible for keeping the CPU buoyancy sampler's top-K modes
+   *  in sync from the same params — see `water.ts`'s
+   *  `applySpectrumParams` for the orchestrated path. Grid `N` must
+   *  match the handle's N. */
+  uploadSpectrum(grid: SpectrumGrid): void
   /** Drive the spectrum forward to `time` seconds and dispatch the
    *  compute kernel. Same fire-and-forget semantics as
    *  `GpuOceanFftHandle.tick`. */
@@ -705,6 +718,31 @@ export function createGpuOceanDisplacement(
   function setRenderScale(v: number): void {
     renderScaleUniform.value = v
   }
+  function uploadSpectrum(grid: SpectrumGrid): void {
+    if (grid.N !== N) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[gpu-bake] uploadSpectrum N mismatch: handle=${N} grid=${grid.N}; ignoring`,
+      )
+      return
+    }
+    // The data array we allocated at construction is the one Three.js
+    // uploads to the GPU when `needsUpdate = true`. Repack in place
+    // (same RGBA32F layout the kernel reads) so we don't churn the
+    // texture binding — the kernel keeps pointing at the same
+    // DataTexture, we just refresh its contents.
+    const data = spectrumTex.image.data as Float32Array
+    for (let zi = 0; zi < N; zi++) {
+      for (let xi = 0; xi < N; xi++) {
+        const idx = zi * N + xi
+        data[idx * 4 + 0] = grid.h0[idx * 2]!
+        data[idx * 4 + 1] = grid.h0[idx * 2 + 1]!
+        data[idx * 4 + 2] = grid.omega[idx]!
+        data[idx * 4 + 3] = 0
+      }
+    }
+    spectrumTex.needsUpdate = true
+  }
 
   return {
     displacementTexture,
@@ -712,6 +750,7 @@ export function createGpuOceanDisplacement(
     tileSize,
     setChoppiness,
     setRenderScale,
+    uploadSpectrum,
     tick,
     dispose,
   }

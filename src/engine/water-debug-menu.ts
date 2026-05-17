@@ -142,6 +142,15 @@ const SLIDERS: SliderDef[] = [
     format: (n) => `${n.toFixed(2)}×`,
     hint: 'Visual amplitude of the FFT spectrum. 1 = default · scrub up for stormy, down for glassy',
   },
+  {
+    key: 'windSpeed',
+    label: 'Wind speed',
+    min: 1,
+    max: 20,
+    step: 0.5,
+    format: (n) => `${n.toFixed(1)} m/s`,
+    hint: 'Phillips spectrum L = V²/g. Higher = longer rolling swells; lower = short choppy ripples',
+  },
 ]
 
 export type WaterDebugMenu = {
@@ -239,6 +248,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'seaStateIntensity':
           water.debug.setSeaStateIntensity(v)
+          break
+        case 'windSpeed':
+          water.debug.setWindSpeed(v)
           break
       }
     })
