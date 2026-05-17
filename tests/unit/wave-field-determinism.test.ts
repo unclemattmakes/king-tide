@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildPhillipsSpectrum,
+  sampleSpectrumHeight,
+} from '@/engine/sim/water/phillips'
+import {
   advanceWaveField,
   createSpectrumWaveField,
   createWaveField,
@@ -113,6 +117,75 @@ describe('spectrum wave field — determinism', () => {
     for (const [x, z] of TEST_POINTS) {
       expect(sampleHeight(a, x, z)).toBe(sampleHeight(b, x, z))
     }
+  })
+
+  it('top-K analytic sum converges to the full grid when topK = N² (A2 buoyancy-vs-render probe)', () => {
+    // Phase A2 cutover: the GPU vertex shader samples a full-grid
+    // Phillips IFFT (one inverse DFT per output texel — see
+    // `gpu-bake.ts`'s `createGpuOceanDisplacement`), while the CPU
+    // buoyancy sampler keeps reading the top-K analytic sum out of
+    // `field.spectrum`. Both sides build their h0 array from the SAME
+    // PhillipsParams via the same `buildPhillipsSpectrum` call, so
+    // the only thing separating them is the truncation residual from
+    // keeping only the K most energetic modes on the CPU.
+    //
+    // This probe locks down two things:
+    //
+    //   1. When the CPU keeps ALL non-zero modes (topK ≥ N²), the
+    //      analytic sum must equal the full-grid analytic sum to FP
+    //      noise. That nails down the sign convention + factor-of-2
+    //      conjugate-pair handling that the GPU kernel relies on.
+    //
+    //   2. At the default truncation (topK = 32), the captured
+    //      fraction of height variance is bounded below by a sane
+    //      floor. Any future regression that drops a load-bearing
+    //      mode (e.g. zeroing the wrong amplitude, or sorting in the
+    //      wrong order) will tank this fraction visibly.
+    //
+    // We use a small-amplitude variant of `defaultSpectrumParams` for
+    // the magnitude check so the probe values are physically
+    // reasonable (default params have an aggressive Phillips A; the
+    // visual A/B tune-up lives further down the plan in A5).
+    const params = { ...defaultSpectrumParams(), amplitude: 0.01 }
+    const fullGrid = buildPhillipsSpectrum(params)
+    const fullKField = createSpectrumWaveField(params, {
+      topK: params.N * params.N,
+    })
+    const topKField = createSpectrumWaveField(params)
+
+    let fullMatchMaxDelta = 0
+    let totalSquared = 0
+    let topKResidualSquared = 0
+    let samples = 0
+    for (const t of [0, 1.5, 3.7, 8.2]) {
+      fullKField.time = t
+      topKField.time = t
+      for (const [x, z] of TEST_POINTS) {
+        const full = sampleSpectrumHeight(fullGrid, x, z, t)
+        // (1) Convergence at topK = N². Two paths over the same
+        //     numbers should round to FP noise.
+        const fullKMode = sampleHeight(fullKField, x, z) - fullKField.baseY
+        fullMatchMaxDelta = Math.max(fullMatchMaxDelta, Math.abs(fullKMode - full))
+        // (2) Variance capture by the default top-K.
+        const top = sampleHeight(topKField, x, z) - topKField.baseY
+        const residual = top - full
+        totalSquared += full * full
+        topKResidualSquared += residual * residual
+        samples += 1
+      }
+    }
+    // FP-noise floor on the convergence test. At default params the
+    // raw amplitudes are sub-meter; 1e-4 m is well into round-off
+    // territory for Float64 sums of order ~1.
+    expect(fullMatchMaxDelta).toBeLessThan(1e-4)
+    // The default top-K (= 32 of 1024 modes) should still capture a
+    // healthy fraction of the variance for a Phillips spectrum
+    // (1/k⁴ tail concentrates energy at low k). 30% floor is loose
+    // enough to survive future tweaks to the default param tune
+    // while tight enough to flag a regression that drops core modes.
+    const captured = 1 - topKResidualSquared / totalSquared
+    expect(captured).toBeGreaterThan(0.3)
+    expect(samples).toBeGreaterThan(0)
   })
 
   it('sample is a pure function of (params, time, x, z) — no hidden state', () => {
