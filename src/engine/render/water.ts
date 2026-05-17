@@ -559,6 +559,21 @@ export function createWaterMesh(
   const fftRes = params?.get('fft') === 'hi' ? 'hi' : 'lo'
   const fftMainN = fftRes === 'hi' ? 128 : 64
   const fftSecondaryN = fftRes === 'hi' ? 64 : 32
+  // Frame-skip cadence for the FFT cascade + foam-feedback dispatches.
+  // `?fftskip=N` runs the cascades once every N frames (default 2 — wave
+  // surface updates at ~30 Hz inside a 60 Hz rAF loop). The displacement
+  // textures are held between updates; the vertex/fragment shader keeps
+  // sampling them so the surface is visually "frozen" for one frame
+  // between updates, which is imperceptible at racing speed but halves
+  // the per-frame compute dispatch count + GPU kernel work. Each
+  // cascade's `tick(time, ...)` re-evaluates `h0·e^{iωt}` to the
+  // current time when it runs, so the spectrum doesn't go stale across
+  // skipped frames — it just samples a coarser temporal grid.
+  // Sim-side buoyancy reads `field` directly (not the GPU textures), so
+  // multiplayer sync + replays + bike feel are unaffected.
+  // Override per-session with `?fftskip=1` for every-frame updates.
+  const fftSkipParam = Number(params?.get('fftskip') ?? '2')
+  const fftSkip = Number.isFinite(fftSkipParam) && fftSkipParam >= 1 ? Math.floor(fftSkipParam) : 2
   const displacementFactory =
     fftBakeMode === 'fft' ? createGpuOceanFftDisplacement : createGpuOceanDisplacement
   const displacementPhillipsParams =
@@ -2586,15 +2601,24 @@ export function createWaterMesh(
   // offset. NaN sentinel → first frame uses dt=0 (no advection
   // step before there's a baseline time).
   let foamLastFieldTime = Number.NaN
+  // FFT-cascade dispatch counter. `frameIdx % fftSkip === 0` gates the
+  // expensive cascade ticks (and the foam-feedback step that reads
+  // their Jacobians) to run every Nth frame. Surface holds its previous
+  // displacement texture in between; vertex/fragment shaders keep
+  // sampling, so the user sees a 30Hz wave update inside a 60Hz draw
+  // loop — no perceptible change at racing speed.
+  let fftFrameIdx = 0
   mesh.onBeforeRender = (renderer) => {
     // biome-ignore lint/suspicious/noExplicitAny: WebGPURenderer cast
     const r = renderer as any
+    const fftThisFrame = fftFrameIdx % fftSkip === 0
+    fftFrameIdx++
     // GPU ocean FFT (when ?water=fft + WebGPU backend). Dispatches the
     // compute kernel that re-bakes the slope texture for the current
     // sim time. Fire-and-forget — WebGPU's barrier guarantees the
     // subsequent water draw reads the freshly-written texels. Runs
     // BEFORE the scene-depth snapshot below since they're independent.
-    if (gpuFftHandle) {
+    if (gpuFftHandle && fftThisFrame) {
       void gpuFftHandle.tick(field.time, renderer)
     }
     // A2 displacement kernels — fed the same sim clock so all IFFT
@@ -2602,21 +2626,25 @@ export function createWaterMesh(
     // per cascade (swell + chop). The detail-cascade `gpuFftHandle`
     // is a SEPARATE thing — it produces the high-frequency normal
     // map for the fragment, not vertex displacement.
-    if (gpuDisplacementHandle) {
+    if (gpuDisplacementHandle && fftThisFrame) {
       void gpuDisplacementHandle.tick(field.time, renderer)
     }
-    if (gpuChopHandle) {
+    if (gpuChopHandle && fftThisFrame) {
       void gpuChopHandle.tick(field.time, renderer)
     }
-    if (gpuSwellHandle) {
+    if (gpuSwellHandle && fftThisFrame) {
       void gpuSwellHandle.tick(field.time, renderer)
     }
     // A8 — Advance the foam-feedback buffer. Must come AFTER the
     // cascade kernels above so the Jacobian textures it reads are
     // current for this frame. WebGPU compute-to-compute reads are
     // implicitly barriered between dispatches in the same queue, so
-    // the foam kernel sees the freshly-written cascade alphas.
-    if (foamFeedbackHandle) {
+    // the foam kernel sees the freshly-written cascade alphas. Gated
+    // on the same skip cadence as the cascades — the foam buffer's
+    // decay+max step is dt-driven (we accumulate the elapsed sim time
+    // between runs and feed the longer dt when we do run), so the
+    // temporal-decay profile is preserved across skipped frames.
+    if (foamFeedbackHandle && fftThisFrame) {
       const dt = Number.isFinite(foamLastFieldTime)
         ? Math.max(0, field.time - foamLastFieldTime)
         : 0
