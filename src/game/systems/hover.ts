@@ -282,12 +282,13 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const prevHover = HoverStateStore.get(eid)
     const prevGrounded = prevHover?.isGrounded ?? false
 
-    // Bad-landing crash. On the airborne→grounded transition, if the
-    // chassis is wildly off the surface contour while moving forward,
-    // kill horizontal velocity — the rider-crash Δv detector picks up
-    // the dump next tick and ragdolls. Gated by speed so slow tumbles
-    // just bounce.
-    if (!prevGrounded && isGrounded) {
+    // Bad-landing crash. On the airborne→grounded transition over LAND,
+    // if the chassis is wildly off the surface contour while moving
+    // forward, kill horizontal velocity — the rider-crash Δv detector
+    // picks up the dump next tick and ragdolls. Gated by speed so slow
+    // tumbles just bounce. Water is exempt: nose-diving into water is
+    // supposed to plough under, not ragdoll the rider.
+    if (!prevGrounded && isGrounded && !probe.isWater) {
       const qLand = rb.rotation()
       const r12Land = 2 * (qLand.y * qLand.z - qLand.x * qLand.w)
       const pitchLand = Math.asin(Math.max(-1, Math.min(1, -r12Land)))
