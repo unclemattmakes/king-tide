@@ -457,20 +457,56 @@ export function createWaterMesh(
   // path even with `?water=fft` since the displacement kernel needs
   // `field.spectrumParams` as input.
   const useGpuDisplacement = useGpuFft && field.kind === 'spectrum'
-  // A2 — full-spectrum displacement handle. Reads `field.spectrumParams`
-  // (same params the CPU top-K sampler consumes) so both sides build
-  // identical h0 arrays and the buoyancy-vs-render delta is bounded by
-  // the top-K truncation residual. The handle owns two RGBA32F storage
-  // textures (`displacementTexture` for (height, Dx, Dz, Jacobian);
-  // `slopeTexture` for (∂h/∂x, ∂h/∂z)) that the vertex shader samples
-  // further down. Choppiness λ defaults to 0.5 inside the factory — a
-  // middle ground between flat heightfield (matches buoyancy exactly)
-  // and full Tessendorf chop (visible pinching, larger physics gap).
-  // Created up here so vertex-stage code can branch on it; the
-  // per-frame `tick()` lives in `mesh.onBeforeRender` further down.
+  // A2 + SoT cascades — Sea of Thieves' SIGGRAPH 2018 talk / Horvath
+  // 2015 / Atlas (GDC 2019) all combine MULTIPLE FFT cascades at
+  // different tile sizes to capture wave wavelengths across orders
+  // of magnitude. Each cascade carries a different frequency band:
+  // long rolling swell from the big-tile cascade, mid-band chop
+  // riding on top of swells from the smaller-tile cascade. Tile
+  // sizes are picked non-commensurate so the cascades don't re-align
+  // and produce visible regular patterns.
+  //
+  // Cascade 0 — `field.spectrumParams` (tileSize=90, windSpeed=11).
+  //   Carries the big swell. CPU buoyancy reads top-K of THIS
+  //   spectrum, so the bike's physics matches this cascade's heights.
+  // Cascade 1 — smaller tile (22 m), lower wind speed (6 m/s, peak
+  //   wavelength L = V²/g ≈ 3.7 m). Carries fine chop that rides on
+  //   top of the swell. Wider directional spread (s=1) so the chop
+  //   doesn't band into stripes like the swell does. Lower amplitude
+  //   so it adds texture without overwhelming the silhouette.
+  //
+  // Vertex shader sums height + Dx + Dz across both cascades; foam
+  // takes the minimum Jacobian across cascades (J<0 anywhere means
+  // the surface is folding there, regardless of which cascade caused
+  // it). CPU buoyancy stays on cascade 0 only — the chop cascade is
+  // visuals-only (bounded contribution to total height).
   const gpuDisplacementHandle =
     useGpuDisplacement && field.kind === 'spectrum'
       ? createGpuOceanDisplacement({ phillipsParams: field.spectrumParams })
+      : null
+  const gpuChopHandle =
+    useGpuDisplacement && field.kind === 'spectrum'
+      ? createGpuOceanDisplacement({
+          phillipsParams: {
+            ...field.spectrumParams,
+            tileSize: 22,
+            windSpeed: 6,
+            amplitude: 2.5e-6,
+            // Wider directional spread on the chop cascade so the
+            // smaller wavelengths don't read as parallel stripes
+            // when summed onto the well-aligned swell.
+            directionalSpread: 1,
+            // Different seed so the chop spectrum is statistically
+            // independent of the swell — otherwise both cascades
+            // would beat against each other and produce visible
+            // moiré at the cascade tile boundaries.
+            seed: 0x0CEA,
+          },
+          // Less Tessendorf pinch on the chop — it's already
+          // fine-grained, more pinching just produces NaN-grade
+          // partials on the alpha (Jacobian) channel.
+          choppiness: 0.4,
+        })
       : null
   // `?wire=1` is an ORTHOGONAL toggle — works with classic, v2, and any
   // future shader variant. The old `?water=wire` is still honored for
@@ -933,20 +969,37 @@ export function createWaterMesh(
   // the existing path.
   // biome-ignore lint/suspicious/noExplicitAny: TSL float node
   let vertexJacobian: any = float(1)
-  if (gpuDisplacementHandle) {
-    const dispUv = vec2(worldX, worldZ).div(float(gpuDisplacementHandle.tileSize))
-    // REPEAT wrap on both storage textures handles the .fract() for
-    // us — sampling at large world coords just tiles the spectrum
-    // across the visible mesh. Tile size matches `field.spectrumParams.tileSize`
-    // (90 m by default) so a full repeat is rare in the visible area.
+  if (gpuDisplacementHandle && gpuChopHandle) {
+    // Cascade 0 — big swell. Sampled at worldXZ / 90m.
+    const swellUv = vec2(worldX, worldZ).div(float(gpuDisplacementHandle.tileSize))
     // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
-    const dispSample = texture(gpuDisplacementHandle.displacementTexture, dispUv) as any
+    const swellDisp = texture(gpuDisplacementHandle.displacementTexture, swellUv) as any
     // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
-    const slopeSample = texture(gpuDisplacementHandle.slopeTexture, dispUv) as any
+    const swellSlope = texture(gpuDisplacementHandle.slopeTexture, swellUv) as any
+    // Cascade 1 — chop. Sampled at worldXZ / 22m (different,
+    // non-commensurate tile size so cascades don't beat).
+    const chopUv = vec2(worldX, worldZ).div(float(gpuChopHandle.tileSize))
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const chopDisp = texture(gpuChopHandle.displacementTexture, chopUv) as any
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const chopSlope = texture(gpuChopHandle.slopeTexture, chopUv) as any
+    // Sum height + slopes + horizontal displacement across cascades.
     // R = height, G = Dx, B = Dz, A = Jacobian.
-    vertexHeight = vec3(dispSample.r, slopeSample.r, slopeSample.g) as unknown as Vec3Like
-    vertexDisp = vec3(dispSample.g, dispSample.b, float(0)) as unknown as Vec3Like
-    vertexJacobian = dispSample.a
+    vertexHeight = vec3(
+      swellDisp.r.add(chopDisp.r),
+      swellSlope.r.add(chopSlope.r),
+      swellSlope.g.add(chopSlope.g),
+    ) as unknown as Vec3Like
+    vertexDisp = vec3(
+      swellDisp.g.add(chopDisp.g),
+      swellDisp.b.add(chopDisp.b),
+      float(0),
+    ) as unknown as Vec3Like
+    // Foam takes the MIN Jacobian across cascades — wherever either
+    // cascade folds (J<0), foam should appear. Using min preserves
+    // the "fold = breaking" interpretation regardless of which
+    // wavelength band is responsible.
+    vertexJacobian = min(swellDisp.a, chopDisp.a)
   } else {
     vertexHeight = gerstnerHeight(worldX, worldZ, tNode)
     vertexDisp = gerstnerDisp(worldX, worldZ, tNode)
@@ -2220,13 +2273,16 @@ export function createWaterMesh(
     if (gpuFftHandle) {
       void gpuFftHandle.tick(field.time, renderer)
     }
-    // A2 displacement kernel — fed the same sim clock so its IFFT
-    // output advances in lockstep with the CPU buoyancy sampler.
-    // Independent dispatch from the detail-cascade kernel since the
-    // two run on different spectra (this one matches `field.spectrum`
-    // exactly; the detail kernel uses its own short-wavelength tune).
+    // A2 displacement kernels — fed the same sim clock so all IFFT
+    // outputs advance in lockstep. Two independent dispatches, one
+    // per cascade (swell + chop). The detail-cascade `gpuFftHandle`
+    // is a SEPARATE thing — it produces the high-frequency normal
+    // map for the fragment, not vertex displacement.
     if (gpuDisplacementHandle) {
       void gpuDisplacementHandle.tick(field.time, renderer)
+    }
+    if (gpuChopHandle) {
+      void gpuChopHandle.tick(field.time, renderer)
     }
     r.getDrawingBufferSize(_sceneDepthSize)
     const w = _sceneDepthSize.x | 0
@@ -2315,6 +2371,7 @@ export function createWaterMesh(
     terrainHeightTex.dispose()
     gpuFftHandle?.dispose()
     gpuDisplacementHandle?.dispose()
+    gpuChopHandle?.dispose()
   }
 
   return {
