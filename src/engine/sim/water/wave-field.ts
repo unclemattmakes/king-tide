@@ -242,6 +242,11 @@ export function defaultSpectrumParams(): PhillipsParams {
     windDirX: 0.6,
     windDirZ: 0.8,
     amplitude: 1e-6,
+    // Mitsuyasu cos²ˢ(α/2) directional spread exponent. SoT/Horvath
+    // use s ∈ [2, 10]; s=4 gives a reasonably wind-aligned but not
+    // sine-wave-stripy lobe (perpendicular energy ≈ 6% of aligned,
+    // backward ≈ 0). Higher = tighter alignment, lower = more chaotic.
+    directionalSpread: 4,
     smallWavelengthCutoff: 1.2,
     seed: 0x515a,
   }
