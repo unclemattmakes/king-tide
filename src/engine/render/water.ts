@@ -158,6 +158,27 @@ export type WaterMesh = {
      *  CPU buoyancy sampler's top-K modes update in lockstep. No-op
      *  outside the FFT path. */
     setWindSpeed(s: number): void
+    /** Wind direction as an angle in degrees, CCW from world +X
+     *  (the same convention `Math.atan2(dirZ, dirX)` returns).
+     *  Internally converted to (cos, sin) before being plumbed
+     *  through `applySpectrumParams` → `buildPhillipsSpectrum`. The
+     *  Mitsuyasu directional spread is computed in terms of the
+     *  angle between each mode and the wind, so the spectrum reads
+     *  through the new direction in lockstep with the wind-speed
+     *  rebuild. Only affects the primary wind-sea cascade — the
+     *  chop + long-swell cascades have their own hard-coded wind
+     *  directions to preserve the cross-cascade angle separation
+     *  the A7 tune relies on. No-op outside the FFT path. */
+    setWindDirection(deg: number): void
+    /** Phillips small-wavelength cutoff in meters. Modes with
+     *  wavelength below this are zeroed by the spectrum builder —
+     *  raising this prunes high-frequency chop (smoother surface,
+     *  faster compute since more h0 entries are zero); lowering it
+     *  pulls in finer chop at the cost of more aliasing-prone modes
+     *  in the spectrum tail. Tuned per visual taste. Same orchestrated
+     *  rebuild path as the wind-speed/direction setters. No-op
+     *  outside the FFT path. */
+    setWindCutoff(m: number): void
     /** Render the wave geometry as wireframe. Useful for tuning wave /
      *  wake amplitudes against the actual displacement. */
     setWireframe(on: boolean): void
@@ -191,6 +212,15 @@ export type WaterDebugDefaults = {
    *  dominant wavelength `L = V²/g`; mutation rebuilds the spectrum
    *  + reuploads h0 to GPU + refreshes the CPU sampler's top-K. */
   windSpeed: number
+  /** Wind direction (deg CCW from world +X). FFT-path only. Rebuilds
+   *  the wind-sea cascade's spectrum on change; the chop + long-swell
+   *  cascades keep their hard-coded directions so cascade angle
+   *  separation is preserved. */
+  windDirection: number
+  /** Phillips small-wavelength cutoff (m). FFT-path only. Modes with
+   *  wavelength below this are pruned from the spectrum tail. Lower =
+   *  finer chop (more aliasing risk); higher = smoother surface. */
+  windCutoff: number
   wireframe: boolean
 }
 
@@ -2240,6 +2270,23 @@ export function createWaterMesh(
   // mode mid-session.
   const WIND_SPEED_DEFAULT =
     field.kind === 'spectrum' ? field.spectrumParams.windSpeed : 9.5
+  // Wind direction default: derive from spectrumParams as
+  // `atan2(dirZ, dirX)` in degrees. The default
+  // `(dirX, dirZ) = (0.6, 0.8)` from `defaultSpectrumParams` lands
+  // at ~53° (NNE-style wind), so the spectrum reads as wind blowing
+  // from upper-left. Off-FFT path: surface a sensible default that's
+  // visually consistent with the spectrum tune so flipping mode
+  // mid-session doesn't introduce a discontinuity.
+  const WIND_DIRECTION_DEFAULT =
+    field.kind === 'spectrum'
+      ? (Math.atan2(field.spectrumParams.windDirZ, field.spectrumParams.windDirX) * 180) /
+        Math.PI
+      : (Math.atan2(0.8, 0.6) * 180) / Math.PI
+  // Phillips small-wavelength cutoff (m). `defaultSpectrumParams`
+  // ships 1.2 m — sub-1.2-meter modes are pruned. The slider lets
+  // the user trade chop detail for surface smoothness on the fly.
+  const WIND_CUTOFF_DEFAULT =
+    field.kind === 'spectrum' ? field.spectrumParams.smallWavelengthCutoff : 1.2
   const defaults: WaterDebugDefaults = {
     steepness: initialSteepness,
     swellScale: 1,
@@ -2253,6 +2300,8 @@ export function createWaterMesh(
     choppiness: CHOPPINESS_DEFAULT,
     seaStateIntensity: SEA_STATE_DEFAULT,
     windSpeed: WIND_SPEED_DEFAULT,
+    windDirection: WIND_DIRECTION_DEFAULT,
+    windCutoff: WIND_CUTOFF_DEFAULT,
     wireframe: wireFlag,
   }
   // Orchestrates a live spectrum rebuild: builds the new Phillips
@@ -2334,6 +2383,31 @@ export function createWaterMesh(
       if (field.kind !== 'spectrum') return
       const v = clamp01(s, 1, 20)
       applySpectrumParams({ ...field.spectrumParams, windSpeed: v })
+    },
+    setWindDirection(deg) {
+      // Convert deg → (dirX, dirZ) unit vector, then rebuild the
+      // spectrum. Range [-180, 180] degrees CCW from world +X.
+      // Mitsuyasu spread reads through the new direction in lockstep.
+      // No-op on the analytic / Gerstner path — its direction comes
+      // from per-wave hard-coded directions, not from a spectrum.
+      if (field.kind !== 'spectrum') return
+      const clamped = clamp01(deg, -180, 180)
+      const rad = (clamped * Math.PI) / 180
+      applySpectrumParams({
+        ...field.spectrumParams,
+        windDirX: Math.cos(rad),
+        windDirZ: Math.sin(rad),
+      })
+    },
+    setWindCutoff(m) {
+      // Phillips smallWavelengthCutoff (m). Range [0.1, 5.0].
+      // Lower = finer chop modes survive (more high-k content),
+      // higher = aggressive pruning (smoother surface, fewer
+      // contributing modes). The same `applySpectrumParams`
+      // orchestration handles the CPU top-K + GPU h0 upload.
+      if (field.kind !== 'spectrum') return
+      const v = clamp01(m, 0.1, 5)
+      applySpectrumParams({ ...field.spectrumParams, smallWavelengthCutoff: v })
     },
     setWireframe(on) {
       mat.wireframe = !!on
