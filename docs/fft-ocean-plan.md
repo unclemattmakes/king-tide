@@ -11,37 +11,42 @@ shipping water.
 recognizably SoT-flavored ocean: 3 FFT cascades (swell + chop + long
 swell) with cross wind directions, Mitsuyasu directional spread,
 Hasselmann frequency-dependent spread, choppiness peak-mask SSS,
-fibrous Jacobian foam. Phase A2 + A3 done, A5 mostly done, and a
-new **Phase A7 — SoT visual polish** push landed beyond the
-original plan. The A7 section below has the technique-by-technique
-walkthrough; commit history `git log --oneline origin/main..HEAD`
-reads as a phase-by-phase history of the session.
+fibrous Jacobian foam, **and persistent foam trails behind passing
+crests (Phase A8)**. Phase A2 + A3 + A7 + A8 all done, A5 mostly
+done. The A7 section below has the technique-by-technique
+walkthrough for the SoT visual polish; the A8 section covers the
+foam-feedback buffer. Commit history `git log --oneline
+origin/main..HEAD` reads as a phase-by-phase history of the work.
 
 To pick up:
-1. `git pull` — `claude/fft-ocean-waves` head has everything.
+1. `git pull` — branch head has everything.
 2. `pnpm install && pnpm dev` — local dev server.
 3. **Eyeball it first.** Open
    `http://localhost:5192/?race=1&track=lagoon&bike=racer&water=fft&waves=fft`
    in one tab and `?water=v2` in another, cmd/ctrl-click between
-   them. The FFT path should read clearly as ocean now, not as
-   "sand" or "venetian blinds" — those were earlier failure modes
-   captured in commit history if you're curious what was wrong
-   before.
+   them. The FFT path should read clearly as ocean now — clean
+   cyan-green water with persistent foam trails behind breaking
+   crests — not "sand" or "venetian blinds" (those were earlier
+   failure modes; the commit history captures the fixes if you're
+   curious).
+   - **A/B the foam-feedback feature**: same URL with `&foamfb=0`
+     turns off A8 and falls back to the stateless `smoothstep(0.5,
+     0.0, J)` foam from A3. Toggle and watch the trails appear
+     under high cascades.
 4. Read the **Current status** table — `✅ done` rows say what
    landed and where; `🟡 partial` rows say what's still open;
    `⬜ todo` are blank slates. Each row names the file(s).
 5. The **highest-leverage remaining work** (in rough rank order):
-   - **Foam feedback buffer** (the "single biggest amateur-vs-pro
-     gap" per the research summary). Needs ping-pong storage
-     textures + decay kernel; ~45–60 min focused work. Design
-     notes inline in commit `05e1417`'s body and in the
-     "Deferred work" section below.
    - **Real radix-2 FFT** in TSL. Replaces the O(N⁴) direct DFT
-     in `gpu-bake.ts`. Required if N≥128 is wanted. Roughly the
-     same effort as the foam buffer.
+     in `gpu-bake.ts`. Required if N≥128 per cascade is wanted.
+     Roughly the same effort as A8 was.
    - **Wind direction + cutoff sliders** in the water-debug menu.
      Same orchestration pattern as the already-landed wind-speed
      slider (`applySpectrumParams` in `water.ts`). ~30 min.
+   - **Per-track sea-state schema**: tracks currently use
+     `defaultSpectrumParams()` everywhere; adding optional
+     `water.wind { speed, dirX, dirZ }` per track would let lagoon
+     read calmer than big-bay etc. ~45 min.
 6. **Open questions** (later in this doc) are decisions deferred
    to a future tuning pass — none block forward progress.
 
@@ -75,10 +80,13 @@ URL flags to A/B-test in dev:
 | A5 — Tuning + debug menu rewrite | 🟡 partial | **Sliders landed:** Choppiness (λ), Sea state (renderScale), and Wind speed sliders. Choppiness + Sea state live-mutate the GPU kernel's uniforms via `gpuDisplacementHandle.setChoppiness` / `setRenderScale`. Wind speed kicks off a live spectrum rebuild via `applySpectrumParams` in `water.ts` — `buildPhillipsSpectrum` (CPU) + `selectTopKModes` + `gpuDisplacementHandle.uploadSpectrum(grid)`. Persisted to `hoverbike.waterDebug.v3` localStorage. **Visual tune landed:** initial calibration pass (windSpeed=11, amplitude=1e-6, windDir=(0.6,0.8), choppiness=0.7) — superseded by the A7 cascade tune (see below). **Stability fix:** the `waves=fft` analytic path freezes if `topK` is bumped past ~64 — `gerstnerHeight` / `gerstnerDisp` unroll over `waveConsts.length` and `foamAccumulator` re-invokes them at 4 past time samples, making the shader exceed driver-compile budgets. Kept `topK = 32`. The FFT-path's `foamAccumulator` is now also short-circuited (Jacobian + slope foam carry the work), which makes future topK bumps safer. **Still open:** wind DIRECTION + small-wavelength cutoff sliders — same orchestration pattern as wind speed (`applySpectrumParams` in `water.ts:1991-ish`). Swell/chop sliders are retained (they still drive the Gerstner amplitudes; no-op on spectrum). |
 | A6 — Retire `?water=v2` after burn-in | ⬜ todo | Unchanged from the original plan. Burn-in `?water=fft&waves=fft` as the dev default for ~2 weeks; flip default and remove Gerstner code once nothing's hitting `?water=v2`. A6 only makes sense after the A7 polish has been tested across all tracks at all times of day. |
 | A7 — SoT visual quality polish (cascades + spread + SSS + foam) | ✅ done | New phase added after A2/A3 because the basic FFT path read as "single dominant sine wave" (Phillips' even `cos²` directional factor) rather than ocean. Research summary: SoT SIGGRAPH 2018 + Horvath 2015. Eight commits, all visually A/B-verified via Chrome MCP on the lagoon track at sunset. See **Phase A7** section below for the technique-by-technique walkthrough. Headline changes: **(1)** Phillips `cos²` directional factor replaced with Mitsuyasu `cos²ˢ(α/2)` one-sided lobe — fixed the "standing sine waves" look at root. **(2)** Three FFT cascades (wind sea, chop, long swell) with non-commensurate tile sizes (90 / 22 / 250 m) and CROSS wind directions — multi-scale wave fronts crossing each other = chaotic-natural ocean. **(3)** Hasselmann frequency-dependent `s` schedule — high-k modes get wider spread, kills the residual "comb" pattern from constant-`s` chop. **(4)** Choppiness peak-mask SSS color blend — bright SoT-green crests glow against deep navy troughs via the Tessendorf `|λ·Dx,Dz|` magnitude gate, exactly the recipe SoT documents. **(5)** Foam fiber noise breakup + brighter emissive. Now reads as ocean. |
+| A8 — Foam feedback buffer (persistent trails) | ✅ done | `ocean-fft/foam-feedback.ts` — A TSL compute kernel maintains a world-space R32F storage texture (256×256 over a 200 m tile, REPEAT-wrapped) using a `max(prev·decay, instantFoam)` update per texel. `instantFoam` is `smoothstep(jHigh, jLow, min(J_cascade_i))` with bilinear sampling across each cascade's `.a` channel; defaults `(jHigh, jLow) = (-0.2, -0.8)` and `decay = 0.93` (~700 ms half-life). Why those values: with the legacy `(0.5, 0.0)` near-breaking trigger, the per-frame max-feedback converges to ≈1 wherever the cascade Jacobian dips below 0.5 — saturating the buffer into a milky surface. Tightening the trigger to only "actually folding" texels (J ≤ -0.2 .. -0.8) keeps foam concentrated at real wave breaks, and the decay makes those breaks LEAVE TRAILS for ~700 ms instead of vanishing the moment the crest moves on. Single read-write storage texture (per-texel self-update is race-free — each compute thread only touches its own texel; r32float is the WebGPU-guaranteed read_write format). Bilinear sampling of cascade `.a` is done manually with 4 textureLoad taps + 2D lerp since `texture()` would need implicit derivatives unavailable in compute. The kernel ticks AFTER all three cascade displacement kernels each frame so it reads fresh Jacobians. Wired into the FFT path's `foldFoamFft` in `water.ts`; on the non-FFT or non-WebGPU paths the legacy stateless smoothstep stays in place (handle is `null`). **URL escape hatch**: `?foamfb=0` disables the feedback handle for A/B comparison against the pre-A8 stateless look. **Validation done**: Chrome MCP A/B on the lagoon track at sunset palette confirms (a) clean cyan-green water with persistent foam trails behind passing crests when enabled, (b) faster-fading stateless foam when `?foamfb=0`, (c) the non-FFT `?water=v2` path is unaffected, (d) 257/257 unit tests still pass, (e) typecheck clean. **Open follow-ups**: visual tune on remaining tracks (dune-rally, oval, the desert+water mix in big-bay). The A8 trigger thresholds may need per-track adjustment if some tracks have markedly different sea state. Wave advection — foam should drift with the wave's group velocity rather than stay anchored — is NOT implemented; the multi-cascade Jacobian fan-out + the buffer's spatial blur carry the spreading for v0. |
 
 URL flags: see the table at the top. `?water=v2` is the current shipping
 default; flip to `?water=fft&waves=fft` to see the full SoT-style FFT path.
-A6 will retire `?water=v2` after burn-in.
+A6 will retire `?water=v2` after burn-in. **A8 escape hatch**: append
+`&foamfb=0` to the URL to disable the persistent foam feedback for A/B
+comparison against the pre-A8 stateless `foldFoamFft`.
 
 ## Context the plan assumes
 
@@ -474,67 +482,99 @@ cascades dispatching per frame.
   3-cascade spectrum. May need amplitude retune if buoyancy
   reads as too soft / too aggressive.
 
-### A8 — Foam feedback buffer (NEXT MAJOR STEP)
+### A8 — Foam feedback buffer (persistent trails)
 
-Per the SoT research summary, this is THE single biggest gap
+Per the SoT research summary, this was THE single biggest gap
 between amateur and pro FFT ocean implementations. Foam in real
 ocean PERSISTS — it's generated when a wave breaks and lingers
-on the surface for ~1 second, slowly fading and getting blown
-around by wind. Our current foam is stateless: it fires when
-J<0 NOW and vanishes when the wave moves on.
+on the surface for ~1 second, slowly fading. Pre-A8 our foam
+was stateless: it fired when J<0 NOW and vanished when the wave
+moved on, so trailing crest foam was missing entirely. This phase
+fills that gap.
 
-**Implementation sketch** (researched but not coded; ~60 min focused work):
+**Shape of what landed**
 
-1. New module: `src/engine/render/ocean-fft/foam-feedback.ts`.
-2. Two `StorageTexture` instances (ping-pong) — say 256×256
-   R32F covering a 200×200m world area centred at the camera
-   (or at world origin with REPEAT wrap for v0).
-3. Two TSL compute kernels, one reads texture A writes B, the
-   other reads B writes A. Each frame, dispatch alternately.
-4. Kernel body (per texel):
-   - Compute world position from texel coord.
-   - Sample all 3 cascades' displacement textures (`.a` =
-     Jacobian) at that world position.
-   - Take `min` for the combined Jacobian; `smoothstep(0.5, 0.0)`
-     for the instant foam contribution.
-   - Read previous foam from the OTHER ping-pong texture.
-   - `newFoam = max(prevFoam · decay, instantFoam)` where decay
-     is e.g. 0.94 per frame (≈ 1s half-life at 60fps).
-   - Write to output texture.
-5. Water fragment shader: sample the most-recently-written
-   ping-pong texture at `worldXZ / 200`, use it as the wave foam
-   instead of `foldFoamFft`.
+New module `src/engine/render/ocean-fft/foam-feedback.ts` exports
+`createFoamFeedback({ cascades })` returning a handle with a
+`foamTexture`, a `tileSize`, and `tick(renderer)`/`setDecay`/
+`dispose` methods. Internally:
 
-**Open subproblems**:
-- Shader binding: TSL bakes texture refs at material build, can't
-  trivially swap which ping-pong texture the shader reads each
-  frame. Options:
-  - (a) Try `storageTexture(tex).toReadWrite()` on a SINGLE
-    texture in the kernel. Per-texel access is non-conflicting
-    so should be safe. Cleanest if it works.
-  - (b) Use `WebGPURenderer.copyTextureToTexture` to copy the
-    "current" ping-pong to a STABLE texture the shader is bound
-    to. One extra GPU copy per frame.
-  - (c) Bind both textures in the shader with a uniform
-    `currentSlot: 0|1`. TSL doesn't trivially support conditional
-    texture sampling, so this needs a `select`-based merge.
-- Camera anchoring: foam buffer should be world-anchored, not
-  camera-anchored, so foam stays in WORLD positions as the
-  camera moves. Easiest v0: world-origin anchor + REPEAT wrap +
-  buffer covers a tile that's larger than the camera-following
-  water mesh's effective range. Visible tiling possible but
-  acceptable for arcade.
-- Wave advection: foam advects with the wave's phase velocity,
-  not stays-put. For v0 skip and let the multi-cascade Jacobian
-  fan-out handle the spatial spread; v1 add an advection offset
-  in the kernel.
+- **Single read-write R32F storage texture** at 256×256 covering a
+  200 m world tile, REPEAT-wrapped. Chose r32float specifically
+  because that's the float format WebGPU guarantees `read_write`
+  storage access on — per-texel self-update is race-free since
+  each compute thread only touches its own texel. No ping-pong
+  needed.
+- **TSL compute kernel** dispatched after the three cascade
+  displacement kernels each frame. Per output texel:
+  - Compute world position from texel coord (texel center at
+    `((px+0.5)/N · tileSize, (py+0.5)/N · tileSize)`, REPEAT wrap
+    handles `worldXZ > tileSize`).
+  - Manually-bilinear sample each cascade's displacement-texture
+    `.a` channel (4 textureLoad taps + 2D lerp). Has to be done
+    by hand because TSL `texture()` would need implicit
+    derivatives unavailable in compute, and raw nearest sampling
+    by-itself caught per-cascade-texel J extremes that saturated
+    the buffer.
+  - Take `min` for the combined Jacobian across cascades.
+  - `instantFoam = smoothstep(jHigh, jLow, J).clamp(0, 1)` with
+    `(jHigh, jLow) = (-0.2, -0.8)` — only fires on
+    actually-folding cascade texels. Tighter than the legacy
+    `(0.5, 0.0)` near-breaking trigger for a structural reason:
+    in a max-feedback rule, instantFoam in regions of constant
+    trigger converges directly to the per-frame contribution, so
+    a 0.2 instantaneous trigger across the whole surface →
+    milky-water saturation. Tightening makes foam concentrated
+    at actual breaks.
+  - `prev = textureLoad(foamTex, texel)` — self-read from the
+    same texture.
+  - `newFoam = max(prev · decay, instantFoam).clamp(0, 1)` with
+    `decay = 0.93` (≈700 ms half-life at 60 fps).
+  - `textureStore(foamTex, texel, newFoam).toReadWrite()`.
+- **Fragment shader** in `water.ts` samples
+  `texture(foamTexture, worldXZ / tileSize) * foamFiber` to
+  produce `foldFoamFft`. Falls back to the legacy stateless
+  `smoothstep(0.5, 0.0, jacobianFrag)` when the foam-feedback
+  handle is null (non-WebGPU / non-spectrum / `?foamfb=0`).
+- **URL escape hatch**: `?foamfb=0` disables the handle so the
+  rest of the FFT path falls back to the stateless A3 foam.
+  Useful for A/B comparison.
 
-**Why deferred this session**: The full implementation needs
-careful coordination (texture bindings, dispatch timing, kernel
-build), and exploring two design approaches in-session ate budget
-that turned into smaller wins instead (the 5 SoT techniques A7
-shipped). The handoff sketch above should let a fresh ~60 min
-focused push land it.
+**Visual A/B (Chrome MCP)**
+
+On lagoon at sunset palette, with the feedback enabled:
+- Clean cyan-green water in troughs and on calm patches.
+- Foam concentrated at actual wave-crest breaks.
+- **Trails** visible behind passing crests — exactly the SoT-
+  style "wave broke here, foam lingers ~1 s" look.
+
+With `?foamfb=0` for comparison:
+- Foam still appears at breaking crests but vanishes immediately
+  as crests move on. No trails.
+
+The non-FFT `?water=v2` path is untouched (foam-feedback handle
+is `null` since it requires cascade handles).
+
+**Open follow-ups**
+
+- **Per-track sea-state**: A8 thresholds were tuned on lagoon
+  alone. Tracks with markedly different cascade choppiness (e.g.
+  big-bay's open water if its terrain decoration changes the
+  visible-foam framing) may need their own
+  `(jHigh, jLow, decay)` triple. Recommend exposing these as
+  uniforms on the handle (`setJacobianThresholds`,
+  `setDecay`) once the schema for per-track water params lands.
+- **Wave advection**: foam should drift with the wave's group
+  velocity rather than stay anchored. NOT implemented for v0;
+  the multi-cascade Jacobian fan-out + the buffer's spatial blur
+  carry the spreading. Implementing it would mean adding an
+  advection offset to the texel's read coord (`prev = sample
+  foamTex at texel - groupVel · dt`).
+- **Larger foam tile**: 200 m may be too small for tracks where
+  the camera traverses long distances — visible REPEAT tiling
+  could become an issue. Bumping to 400 m or 500 m quadruples
+  cost (linear in texel count) but the kernel is already
+  sub-millisecond.
 
 ### A9 — Real radix-2 FFT in TSL
 
@@ -577,10 +617,12 @@ Render-side (Three.js):
 - `src/engine/render/ocean-fft/cpu-bake.ts` — one-shot Phillips→IFFT→slope-texture bake at boot. Drop-in replacement for the procedural `buildWaveDetailNormalTexture`. Used as the WebGL2 fallback when `?water=fft` is active.
 - `src/engine/render/ocean-fft/gpu-bake.ts` — two TSL compute-pipeline factories:
   - `createGpuOceanFft` — detail-cascade slope kernel. N=64, short-wavelength Phillips tune (tileSize=12m). Output RGBA8 storage texture sampled by the detail-cascade UVs in the fragment shader. (C3)
-  - `createGpuOceanDisplacement` — full-spectrum vertex-displacement kernel. Each instance reads its own PhillipsParams + choppiness + renderScale and produces two RGBA32F storage textures: `displacementTexture` = (height, λ·Dx, λ·Dz, Jacobian) and `slopeTexture` = (∂h/∂x, ∂h/∂z, 0, 0). Three instances are created per scene by water.ts (A7 cascades).
+  - `createGpuOceanDisplacement` — full-spectrum vertex-displacement kernel. Each instance reads its own PhillipsParams + choppiness + renderScale and produces two RGBA32F storage textures: `displacementTexture` = (height, λ·Dx, λ·Dz, Jacobian) and `slopeTexture` = (∂h/∂x, ∂h/∂z, 0, 0). Three instances are created per scene by water.ts (A7 cascades). The handle now exposes `N` alongside `tileSize` so downstream consumers like the A8 foam-feedback kernel can do their own bilinear sampling without threading the value through their own opts.
+- `src/engine/render/ocean-fft/foam-feedback.ts` (A8) — `createFoamFeedback({ cascades })` builds a single read_write R32F storage texture and a TSL compute kernel. Per frame, the kernel updates each foam texel via `max(prev·decay, smoothstep(jHigh, jLow, min(J_cascade_i)))` with manually-bilinear sampling of each cascade's `.a` Jacobian. The output texture is world-anchored (NOT camera-anchored), REPEAT-wrapped at 200 m, and sampled by the fragment shader as the persistent `foldFoamFft` source. Wired only when all three cascades are present + on WebGPU; falls back to legacy stateless smoothstep otherwise. `?foamfb=0` URL flag forces the fallback for A/B comparison.
 - `src/engine/render/water.ts` — main shader + cascade orchestration:
   - **Detail-texture provider**: procedural / CPU-bake / GPU-compute, branched on `?water=fft` + backend.
   - **Big-wave displacement source**: 3-cascade FFT sum (A7) when `?water=fft` + spectrum field + WebGPU, else analytic Gerstner. The three displacement handles are `gpuDisplacementHandle` (wind sea, spectrumParams), `gpuChopHandle` (chop, tileSize=22), `gpuSwellHandle` (long swell, tileSize=250). Vertex shader sums height/slope/Dx/Dz across them and takes `min(J)` for foam.
+  - **Foam feedback handle** (A8): `foamFeedbackHandle` constructed alongside the cascades. The fragment shader's `foldFoamFft` samples its `foamTexture` at `positionWorld.xz / tileSize` when present, falling back to the legacy stateless smoothstep otherwise. Ticked after all three cascade kernels each frame so it reads fresh Jacobians.
   - **`useGpuDisplacement`** flag controls the vertex-stage texture-sum path.
   - **Three-color albedo blend** (A7): deep → scatter → SSS with peak-mask gate. SSS layer fires on choppiness magnitude × sun-backlight.
   - **`applySpectrumParams`** orchestrator for live wind-speed scrubbing — rebuilds CPU `field.spectrum` (top-K) + GPU `gpuDisplacementHandle.uploadSpectrum(grid)` in lockstep. Currently only wired to wind-speed slider; wind-direction + cutoff are the obvious next slider expansions.
@@ -589,6 +631,7 @@ Render-side (Three.js):
 URL-flag plumbing:
 - `?water=v2/fft/classic/wire` parsed in `water.ts` near the top of `createWaterMesh`.
 - `?waves=fft` parsed in `main.ts` (line ~121), drives factory choice.
+- `?foamfb=0` parsed in `water.ts` next to the foam-feedback construction site — disables the A8 persistent-foam handle.
 
 Tests (32 files total, 257 tests passing as of A7):
 - `tests/unit/phillips.test.ts` — 12 tests on the spectrum + PRNG + Box-Muller.
@@ -600,11 +643,10 @@ Tests (32 files total, 257 tests passing as of A7):
 - `tests/unit/wave-field-determinism.test.ts` — 7 tests pinning down replay + multiplayer determinism on the spectrum path; the 7th is the A4b probe (top-K analytic converges to full-grid at topK=N², variance-capture floor at default topK).
 - Existing `tests/unit/wave-field.test.ts` (Gerstner path) still passes unchanged.
 
-Files still imagined but not built (A8/A9 territory):
-- `src/engine/render/ocean-fft/foam-feedback.ts` — A8 foam feedback buffer. Ping-pong storage textures + decay kernel; gives persistent foam trails behind breaking crests. Design sketch in the A8 section above.
+Files still imagined but not built (A9 territory):
 - A real radix-2 FFT in TSL (replaces the O(N⁴) direct DFT in `gpu-bake.ts`). A9. Required if N≥128 per cascade is wanted. Reference CPU radix-2 already exists in `src/engine/sim/water/fft2d-cpu.ts`.
-- `src/engine/water-debug-menu.ts` wind-direction + cutoff sliders. Wind-speed already has the `applySpectrumParams` orchestration; the missing sliders reuse the same path with different param keys.
-- Per-track `water.wind { speed, dirX, dirZ, fetch }` schema. Currently all tracks use `defaultSpectrumParams()`. Adding per-track override would let lagoon read calmer than dune-rally or wherever.
+- `src/engine/water-debug-menu.ts` wind-direction + cutoff sliders. Wind-speed already has the `applySpectrumParams` orchestration; the missing sliders reuse the same path with different param keys. A foam-persistence (decay) slider on the same menu is the obvious A8 extension once a per-track sea-state schema lands.
+- Per-track `water.wind { speed, dirX, dirZ, fetch }` schema. Currently all tracks use `defaultSpectrumParams()`. Adding per-track override would let lagoon read calmer than dune-rally or wherever, and would also be the natural home for per-track A8 foam thresholds.
 
 ## Open questions to revisit later
 

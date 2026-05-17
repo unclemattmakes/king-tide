@@ -36,6 +36,7 @@ import {
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
 import { buildFftDetailNormalTexture } from '@/engine/render/ocean-fft/cpu-bake'
+import { createFoamFeedback } from '@/engine/render/ocean-fft/foam-feedback'
 import {
   createGpuOceanDisplacement,
   createGpuOceanFft,
@@ -552,6 +553,27 @@ export function createWaterMesh(
             seed: 0x5EA1,
           },
           choppiness: 0.3,
+        })
+      : null
+  // A8 — Persistent foam feedback buffer. Reads each cascade's
+  // Jacobian via the displacement-texture .a channel, takes the min,
+  // smoothsteps it into instant-foam intensity, and keeps a temporally
+  // decaying max in a world-space R32F storage texture. The fragment
+  // shader samples this instead of computing foldFoam stateless — foam
+  // now persists for ~1 second after a wave breaks. Single read_write
+  // storage texture (per-texel self-update is race-free since each
+  // thread only touches its own texel). Gated on the same condition
+  // as the cascades — analytic / classic paths leave foam stateless
+  // since they don't have a per-pixel Jacobian source.
+  // `?foamfb=0` disables the feedback handle so the FFT path falls
+  // back to the legacy stateless `smoothstep(0.5, 0.0, J)` foldFoam.
+  // Useful for A/B-comparing the persistence feature against the
+  // pre-A8 look on the same camera position.
+  const foamFeedbackEnabled = params?.get('foamfb') !== '0'
+  const foamFeedbackHandle =
+    foamFeedbackEnabled && gpuDisplacementHandle && gpuChopHandle && gpuSwellHandle
+      ? createFoamFeedback({
+          cascades: [gpuDisplacementHandle, gpuChopHandle, gpuSwellHandle],
         })
       : null
   // `?wire=1` is an ORTHOGONAL toggle — works with classic, v2, and any
@@ -1716,10 +1738,33 @@ export function createWaterMesh(
   // when foam is widespread. Effective contrast factor 1.67×.
   const foamFiber = mix(float(0.6), float(1.0), foamNoiseSmooth)
 
-  const foldFoamFft = useGpuDisplacement
-    ? // biome-ignore lint/suspicious/noExplicitAny: varying-of-any propagates unknown into smoothstep arg
-      smoothstep(float(0.5), float(0.0), jacobianFrag as any).mul(foamFiber).clamp(0, 1)
-    : float(0)
+  // A8 — Persistent foam feedback. When the foam-feedback handle is
+  // available (FFT path on WebGPU with all three cascades wired), the
+  // compute kernel maintains a world-space R32F foam buffer with a
+  // temporal-decay max(prev·decay, smoothstep(0.5, 0.0, J)). Sampling
+  // that buffer at worldXZ/foamTile gives us foam that LINGERS for
+  // ~1s after a wave breaks instead of vanishing the moment the crest
+  // moves on. Still multiplied by foamFiber so the smooth feedback
+  // blob inherits the same fibrous-noise breakup the stateless
+  // version had.
+  //
+  // Fall back to the legacy stateless foldFoam when the feedback
+  // buffer isn't available (analytic Gerstner path → no per-pixel
+  // Jacobian source, classic path → no FFT at all).
+  const foldFoamFft = foamFeedbackHandle
+    ? (() => {
+        const foamUV = vec2(
+          positionWorld.x.div(float(foamFeedbackHandle.tileSize)),
+          positionWorld.z.div(float(foamFeedbackHandle.tileSize)),
+        )
+        // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+        const sampled = texture(foamFeedbackHandle.foamTexture, foamUV) as any
+        return sampled.r.mul(foamFiber).clamp(0, 1)
+      })()
+    : useGpuDisplacement
+      ? // biome-ignore lint/suspicious/noExplicitAny: varying-of-any propagates unknown into smoothstep arg
+        smoothstep(float(0.5), float(0.0), jacobianFrag as any).mul(foamFiber).clamp(0, 1)
+      : float(0)
   const waveFoam = isClassic
     ? (() => {
         const slopeFoam = smoothstep(float(0.4), float(0.9), slopeMag)
@@ -2388,6 +2433,14 @@ export function createWaterMesh(
     if (gpuSwellHandle) {
       void gpuSwellHandle.tick(field.time, renderer)
     }
+    // A8 — Advance the foam-feedback buffer. Must come AFTER the
+    // cascade kernels above so the Jacobian textures it reads are
+    // current for this frame. WebGPU compute-to-compute reads are
+    // implicitly barriered between dispatches in the same queue, so
+    // the foam kernel sees the freshly-written cascade alphas.
+    if (foamFeedbackHandle) {
+      void foamFeedbackHandle.tick(renderer)
+    }
     r.getDrawingBufferSize(_sceneDepthSize)
     const w = _sceneDepthSize.x | 0
     const h = _sceneDepthSize.y | 0
@@ -2477,6 +2530,7 @@ export function createWaterMesh(
     gpuDisplacementHandle?.dispose()
     gpuChopHandle?.dispose()
     gpuSwellHandle?.dispose()
+    foamFeedbackHandle?.dispose()
   }
 
   return {

@@ -423,6 +423,11 @@ export type GpuOceanDisplacementHandle = {
    *  texture repeat. Pre-multiplied so callers can compute the
    *  sampling UV as `worldXZ / tileSize`. */
   tileSize: number
+  /** Grid resolution per axis. Equal to `phillipsParams.N`. Exposed so
+   *  downstream consumers (e.g. the A8 foam-feedback kernel) can read
+   *  the cascade's Jacobian via `textureLoad` at integer coords without
+   *  having to thread `N` through their own opts. */
+  N: number
   /** Live setter for Tessendorf's choppiness λ. Mutates the
    *  in-kernel uniform; the next dispatch picks it up. Range [0, 2]
    *  in practice — 0 is pure heightfield, 1 is Tessendorf default,
@@ -748,6 +753,7 @@ export function createGpuOceanDisplacement(
     displacementTexture,
     slopeTexture,
     tileSize,
+    N,
     setChoppiness,
     setRenderScale,
     uploadSpectrum,
