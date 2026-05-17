@@ -15,7 +15,11 @@ import {
 } from 'three/tsl'
 import { StorageTexture } from 'three/webgpu'
 import { buildFftDetailNormalTexture } from '@/engine/render/ocean-fft/cpu-bake'
-import { buildPhillipsSpectrum, type PhillipsParams } from '@/engine/sim/water/phillips'
+import {
+  buildPhillipsSpectrum,
+  type PhillipsParams,
+  type SpectrumGrid,
+} from '@/engine/sim/water/phillips'
 
 /**
  * GPU-driven Phillips ocean: animated detail-cascade slope texture
@@ -312,4 +316,442 @@ function computeSlopeUpperBound(spectrum: {
   // Floor at a tiny value so the inverse doesn't divide by zero on a
   // pathologically-empty spectrum (e.g. windSpeed = 0 in tests).
   return Math.max(sum, 1e-6)
+}
+
+// ---------------------------------------------------------------------------
+// Phase A2 — Full-spectrum GPU IFFT for vertex displacement
+// ---------------------------------------------------------------------------
+//
+// The Phase A1 GPU path drives the BIG-WAVE silhouette by uploading 32
+// top-K spectrum modes (converted to Gerstner shape) into the shader as
+// a uniform array and summing them analytically per vertex. That works
+// but leaves real spectral content on the table: the full Phillips
+// grid has ~1000 non-zero modes at N=32, and dropping all but the top
+// 32 misses ~5% of the height variance.
+//
+// `createGpuOceanDisplacement` upgrades that to a per-frame inverse-DFT
+// over the FULL spectrum, baked into two RGBA32F storage textures that
+// the water vertex shader samples once per vertex:
+//
+//   displacementTexture (RGBA32F, REPEAT):
+//     R = height (m, world-space)
+//     G = Dx     (m, Tessendorf-style horizontal displacement)
+//     B = Dz     (m)
+//     A = J      (Jacobian, dimensionless — A3 foam consumes this)
+//
+//   slopeTexture (RGBA32F, REPEAT):
+//     R = ∂h/∂x  (m / m, dimensionless surface slope)
+//     G = ∂h/∂z
+//     B = 0      (reserved)
+//     A = 0      (reserved)
+//
+// The vertex shader trades the analytic 32-wave sum for one sample of
+// each texture and gets the FULL spectrum back at the cost of two
+// `textureSample` calls per vertex. The CPU buoyancy path stays on the
+// top-K analytic sum (`sampleSpectrumHeightFromModes`) — agreement
+// between the two is bounded by the truncation residual (~5% RMS),
+// validated by the buoyancy-vs-render probe in
+// `wave-field-determinism.test.ts`.
+//
+// Why two textures vs one fat RGBA: the natural quartet is height + Dx
+// + Dz + Jacobian (per `docs/fft-ocean-plan.md`'s A2 row), but the
+// vertex shader also needs ∂h/∂x and ∂h/∂z to build the surface
+// normal. A second RG32F-shaped output keeps those alongside without
+// pushing the Jacobian out of its planned slot.
+//
+// Sign convention matches `sampleSpectrumHeightFromModes` (CPU
+// sampler) exactly:
+//
+//   φ = kx·x + kz·z + ω·t
+//   height = Σ 2·Re[h0·e^{iφ}] = Σ 2·(h0r·cos(φ) − h0i·sin(φ))
+//
+// The Tessendorf horizontal displacement (eq. 29):
+//
+//   D(x, t) = Σ_k −i·k̂(k) · h0(k) · e^{iφ}
+//
+// Taking the real part, with k̂x = kx/|k|:
+//
+//   Dx = Σ 2·k̂x·(h0r·sin(φ) + h0i·cos(φ))
+//
+// (The −i·k̂ factor rotates the per-mode contribution by π/2 in the
+// complex plane, so the height's `cos`/`sin` swap roles for Dx.)
+//
+// Jacobian partials — derive from differentiating Dx, Dz wrt x, z:
+//
+//   ∂Dx/∂x = Σ 2·(kx²/|k|)·(h0r·cos − h0i·sin)
+//   ∂Dz/∂z = Σ 2·(kz²/|k|)·(h0r·cos − h0i·sin)
+//   ∂Dx/∂z = Σ 2·(kx·kz/|k|)·(h0r·cos − h0i·sin)   ( = ∂Dz/∂x by symmetry )
+//
+// All three reduce to "(coefficient) · realPart_per_mode", so they
+// share trig with the height accumulator.
+//
+//   J = (1 + λ·∂Dx/∂x)·(1 + λ·∂Dz/∂z) − λ²·(∂Dx/∂z)²
+//
+// where λ is the choppiness scale (Tessendorf's λ). J < 0 marks
+// surface folding ≡ wave breaking ≡ foam (A3 consumes this).
+
+export type GpuOceanDisplacementOpts = {
+  /** Phillips spectrum parameters. Pass `field.spectrumParams` so the
+   *  GPU IFFT and the CPU top-K analytic sampler read the SAME h0
+   *  array — that's what bounds the buoyancy-vs-render delta. */
+  phillipsParams: PhillipsParams
+  /** Tessendorf choppiness λ. 0 = pure heightfield (no horizontal
+   *  displacement). 1.0 = full Tessendorf choppy waves. 0.5 is a
+   *  middle ground that adds visible pinching without making the
+   *  buoyancy-vs-render gap grow too large. */
+  choppiness?: number
+  /** Visual scale applied to height, Dx, Dz, and the height slopes
+   *  at kernel-write time. Jacobian is unaffected (it's a
+   *  dimensionless partial-derivative product). Defaults to 1.0
+   *  since `defaultSpectrumParams.amplitude` is calibrated for
+   *  RMS ~0.5 m at the full-grid sum. Exposed as a tuning knob for
+   *  the A5 debug menu (sea-state intensity slider) and for
+   *  per-track overrides that want a different visible amplitude
+   *  without touching the underlying spectrum. */
+  renderScale?: number
+}
+
+export type GpuOceanDisplacementHandle = {
+  /** RGBA32F storage texture: (height, Dx, Dz, Jacobian). Sampled by
+   *  the water vertex shader at `worldXZ / tileSize` (REPEAT
+   *  wrap). */
+  displacementTexture: THREE.Texture
+  /** RGBA32F storage texture: (∂h/∂x, ∂h/∂z, _, _). Drives the
+   *  surface normal that the fragment lighting reads. */
+  slopeTexture: THREE.Texture
+  /** Tile size in meters — the world-space extent of one full
+   *  texture repeat. Pre-multiplied so callers can compute the
+   *  sampling UV as `worldXZ / tileSize`. */
+  tileSize: number
+  /** Live setter for Tessendorf's choppiness λ. Mutates the
+   *  in-kernel uniform; the next dispatch picks it up. Range [0, 2]
+   *  in practice — 0 is pure heightfield, 1 is Tessendorf default,
+   *  >1.5 starts producing visible folding. Wired into the water
+   *  debug menu's choppiness slider. */
+  setChoppiness(v: number): void
+  /** Live setter for the visual render scale (height + Dx/Dz +
+   *  slopes). Mutates the in-kernel uniform; next dispatch applies
+   *  it. Wired into the water debug menu's sea-state intensity
+   *  slider so per-track sea state can be dialed in without
+   *  rebuilding the spectrum. */
+  setRenderScale(v: number): void
+  /** Hot-swap the spectrum the kernel reads. Copies a freshly-built
+   *  `SpectrumGrid` into the static `spectrumTex` data buffer and
+   *  marks it dirty so Three.js re-uploads on the next render. The
+   *  CALLER must build the grid (`buildPhillipsSpectrum`) and is
+   *  responsible for keeping the CPU buoyancy sampler's top-K modes
+   *  in sync from the same params — see `water.ts`'s
+   *  `applySpectrumParams` for the orchestrated path. Grid `N` must
+   *  match the handle's N. */
+  uploadSpectrum(grid: SpectrumGrid): void
+  /** Drive the spectrum forward to `time` seconds and dispatch the
+   *  compute kernel. Same fire-and-forget semantics as
+   *  `GpuOceanFftHandle.tick`. */
+  tick(time: number, renderer: THREE.WebGLRenderer): Promise<void>
+  dispose(): void
+}
+
+/**
+ * Build the A2 GPU displacement pipeline. Allocates the spectrum +
+ * output textures, assembles the TSL compute kernel, and returns a
+ * handle the water material can sample from.
+ *
+ * Cost at the default N=32 (matching `defaultSpectrumParams`):
+ *   - 32² output texels × 32² inner modes = 1.0M mode-evaluations per
+ *     frame. Roughly 3× the analytic-vertex-sum cost of the existing
+ *     A1b path; still <0.2 ms on any real GPU.
+ *
+ * If `phillipsParams.N` is bumped to 64 the cost scales to N⁴ = 16.8M
+ * — same envelope as the detail-cascade kernel, so still well under
+ * 1 ms.
+ */
+export function createGpuOceanDisplacement(
+  opts: GpuOceanDisplacementOpts,
+): GpuOceanDisplacementHandle {
+  const phillipsParams = opts.phillipsParams
+  const N = phillipsParams.N
+  const tileSize = phillipsParams.tileSize
+  const choppiness = opts.choppiness ?? 0.7
+  const renderScale = opts.renderScale ?? 1
+
+  // 1) Phillips spectrum on CPU — same call as `createSpectrumWaveField`
+  //    uses. Both consumers read the same params so they get the same
+  //    h0 array (mulberry32 PRNG seeded identically).
+  const spectrum = buildPhillipsSpectrum(phillipsParams)
+
+  // 2) Pack h0 + ω into the spectrum DataTexture (RGBA32F). Same
+  //    layout as the detail-cascade kernel uses.
+  const packed = new Float32Array(N * N * 4)
+  for (let zi = 0; zi < N; zi++) {
+    for (let xi = 0; xi < N; xi++) {
+      const idx = zi * N + xi
+      packed[idx * 4 + 0] = spectrum.h0[idx * 2]!
+      packed[idx * 4 + 1] = spectrum.h0[idx * 2 + 1]!
+      packed[idx * 4 + 2] = spectrum.omega[idx]!
+      packed[idx * 4 + 3] = 0
+    }
+  }
+  const spectrumTex = new THREE.DataTexture(
+    packed,
+    N,
+    N,
+    THREE.RGBAFormat,
+    THREE.FloatType,
+  )
+  spectrumTex.name = 'water:ocean-displacement:spectrum'
+  spectrumTex.magFilter = THREE.NearestFilter
+  spectrumTex.minFilter = THREE.NearestFilter
+  spectrumTex.wrapS = THREE.ClampToEdgeWrapping
+  spectrumTex.wrapT = THREE.ClampToEdgeWrapping
+  spectrumTex.generateMipmaps = false
+  spectrumTex.needsUpdate = true
+
+  // 3) Output textures: RGBA32F storage. REPEAT wrapping is what makes
+  //    `texture(displacementTex, worldXZ / tileSize)` tile seamlessly
+  //    across the visible mesh. LinearFilter requires the WebGPU
+  //    `float32-filterable` feature; on browsers without it the
+  //    texture binding will fall back to UnfilterableFloat / nearest,
+  //    which produces visible blocks at high mesh resolution but does
+  //    NOT crash. We can move to manual bilinear in the shader if
+  //    needed once a no-feature-flag browser shows up in telemetry.
+  const displacementTexture = new StorageTexture(N, N)
+  displacementTexture.name = 'water:ocean-displacement:rgba'
+  displacementTexture.format = THREE.RGBAFormat
+  displacementTexture.type = THREE.FloatType
+  displacementTexture.magFilter = THREE.LinearFilter
+  displacementTexture.minFilter = THREE.LinearFilter
+  displacementTexture.wrapS = THREE.RepeatWrapping
+  displacementTexture.wrapT = THREE.RepeatWrapping
+  displacementTexture.generateMipmaps = false
+
+  const slopeTexture = new StorageTexture(N, N)
+  slopeTexture.name = 'water:ocean-displacement:slope'
+  slopeTexture.format = THREE.RGBAFormat
+  slopeTexture.type = THREE.FloatType
+  slopeTexture.magFilter = THREE.LinearFilter
+  slopeTexture.minFilter = THREE.LinearFilter
+  slopeTexture.wrapS = THREE.RepeatWrapping
+  slopeTexture.wrapT = THREE.RepeatWrapping
+  slopeTexture.generateMipmaps = false
+
+  // 4) Uniforms.
+  const timeUniform = uniform(0)
+  const choppinessUniform = uniform(choppiness)
+  const renderScaleUniform = uniform(renderScale)
+  // Physical-units conversion factor for slopes / partials: the
+  // accumulators use UV-space wavenumbers (cycles per tile, integer),
+  // so we multiply through by (2π / tileSize) at the end to get rad/m.
+  // The slope formula picks up an extra 2 from the conjugate-pair
+  // symmetry, so the constant out front is (4π / tileSize).
+  const physicalScaleUniform = uniform((4 * Math.PI) / tileSize)
+
+  const halfN = N / 2
+  const twoPi = float(2 * Math.PI)
+
+  // 5) Compute kernel. Same per-thread / per-texel structure as the
+  //    detail kernel; each iteration accumulates more quantities into
+  //    parallel vars.
+  const kernel = Fn(
+    ({
+      specTex,
+      dispTex,
+      slpTex,
+    }: {
+      specTex: THREE.DataTexture
+      dispTex: StorageTexture
+      slpTex: StorageTexture
+    }) => {
+      const px = instanceIndex.mod(N)
+      const py = instanceIndex.div(N)
+      const u = float(px).div(N)
+      const v = float(py).div(N)
+
+      // 7 accumulators: height, Dx, Dz (displacement triple),
+      // dydx, dydz (height slopes for normal), and Dxx, Dxz, Dzz for
+      // the Jacobian (with Dxz = Dzx). Naming maps to the per-mode
+      // derivations above the function definition.
+      const height = float(0).toVar()
+      const dx = float(0).toVar()
+      const dz = float(0).toVar()
+      const dydx = float(0).toVar()
+      const dydz = float(0).toVar()
+      const dxxRaw = float(0).toVar()
+      const dxzRaw = float(0).toVar()
+      const dzzRaw = float(0).toVar()
+
+      Loop(N, ({ i: zi }) => {
+        Loop(N, ({ i: xi }) => {
+          // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+          const sample = textureLoad(specTex, uvec2(uint(xi), uint(zi)), 0) as any
+          const h0r = sample.r
+          const h0i = sample.g
+          const omega = sample.b
+
+          const kxic = float(xi).sub(float(halfN))
+          const kzic = float(zi).sub(float(halfN))
+          // |k_int| in UV-cycle units. The 1e-6 floor protects the
+          // DC bin (kxic = kzic = 0) where h0 should be zero anyway
+          // — Phillips factor zeroes it — but a safety margin keeps
+          // the division well-defined.
+          const kMag2 = kxic.mul(kxic).add(kzic.mul(kzic))
+          const kMag = kMag2.sqrt().max(float(1e-6))
+          const invKMag = float(1).div(kMag)
+          const khatX = kxic.mul(invKMag)
+          const khatZ = kzic.mul(invKMag)
+
+          const phase = twoPi
+            .mul(kxic.mul(u).add(kzic.mul(v)))
+            .add(omega.mul(timeUniform))
+          const c = cos(phase)
+          const s = sin(phase)
+
+          // Per-mode complex amplitude components:
+          //   realPart = h0r·cos(φ) − h0i·sin(φ)
+          //   imagPart = h0r·sin(φ) + h0i·cos(φ)
+          const realPart = h0r.mul(c).sub(h0i.mul(s))
+          const imagPart = h0r.mul(s).add(h0i.mul(c))
+
+          // Height — factor of 2 for the conjugate-pair symmetry of a
+          // real heightfield. Matches `sampleSpectrumHeightFromModes`
+          // bit-for-bit (the CPU sampler bakes the same factor of 2
+          // into `aRe`/`aIm`).
+          const twoReal = realPart.mul(float(2))
+          const twoImag = imagPart.mul(float(2))
+          height.addAssign(twoReal)
+
+          // Tessendorf horizontal displacement.
+          //   Dx = Σ 2·k̂x·imagPart   (k̂ in UV-space cycles is
+          //                          unitless — same as physical k̂)
+          dx.addAssign(khatX.mul(twoImag))
+          dz.addAssign(khatZ.mul(twoImag))
+
+          // Height slopes — for the surface normal. UV-space slopes;
+          // the (4π / tileSize) prefactor at the end converts to
+          // physical units. dh/du = −2π·kxic·(h0r·sin + h0i·cos);
+          // pull out the −2 here and the 2π/tileSize outside.
+          dydx.addAssign(kxic.mul(imagPart).negate())
+          dydz.addAssign(kzic.mul(imagPart).negate())
+
+          // Jacobian partials. ∂Dx/∂x = Σ 2·(kx²/|k|)·realPart, etc.
+          // Same trick: accumulate the (kxic²/|kMagInt|)·realPart
+          // sums in UV-cycle units, multiply by (4π/tileSize) at
+          // the end. ∂Dx/∂z = ∂Dz/∂x by symmetry so we keep one.
+          const kxxOverK = kxic.mul(khatX) // = kxic² / |k_int|
+          const kzzOverK = kzic.mul(khatZ)
+          const kxzOverK = kxic.mul(khatZ) // = kxic·kzic / |k_int|
+          dxxRaw.addAssign(kxxOverK.mul(realPart))
+          dzzRaw.addAssign(kzzOverK.mul(realPart))
+          dxzRaw.addAssign(kxzOverK.mul(realPart))
+        })
+      })
+
+      // Convert UV-cycle slopes / partials into physical units. The
+      // (4π / tileSize) carries the (2π / tileSize) wavenumber
+      // conversion and the factor of 2 from the conjugate-pair sum.
+      const slopeDx = dydx.mul(physicalScaleUniform)
+      const slopeDz = dydz.mul(physicalScaleUniform)
+      const dxx = dxxRaw.mul(physicalScaleUniform)
+      const dzz = dzzRaw.mul(physicalScaleUniform)
+      const dxz = dxzRaw.mul(physicalScaleUniform)
+
+      // Jacobian: (1 + λ·Dxx)·(1 + λ·Dzz) − λ²·Dxz²
+      //   < 0  ⇒ surface folds ⇒ foam (A3 reads this).
+      //   > 0, near 1 ⇒ calm surface.
+      const lambda = choppinessUniform
+      const jacobian = float(1)
+        .add(lambda.mul(dxx))
+        .mul(float(1).add(lambda.mul(dzz)))
+        .sub(lambda.mul(lambda).mul(dxz).mul(dxz))
+
+      // Apply choppiness to the horizontal displacement at write
+      // time so the vertex shader reads the FINAL displacement
+      // without needing to know λ. Matches the convention used by
+      // the Jacobian: both treat λ·D as the effective displacement.
+      // `renderScaleUniform` is the visual divisor applied here
+      // (and to height + slopes); the Jacobian is left at raw
+      // (dimensionless) scale since it's a pure folding signal.
+      const dxScaled = dx.mul(lambda).mul(renderScaleUniform)
+      const dzScaled = dz.mul(lambda).mul(renderScaleUniform)
+      const heightScaled = height.mul(renderScaleUniform)
+      const slopeDxScaled = slopeDx.mul(renderScaleUniform)
+      const slopeDzScaled = slopeDz.mul(renderScaleUniform)
+
+      textureStore(
+        dispTex,
+        uvec2(px, py),
+        vec4(heightScaled, dxScaled, dzScaled, jacobian),
+      ).toWriteOnly()
+      textureStore(
+        slpTex,
+        uvec2(px, py),
+        vec4(slopeDxScaled, slopeDzScaled, float(0), float(0)),
+      ).toWriteOnly()
+    },
+  )
+
+  const computeNode = kernel({
+    specTex: spectrumTex,
+    dispTex: displacementTexture,
+    slpTex: slopeTexture,
+    // biome-ignore lint/suspicious/noExplicitAny: TSL Fn invocation typing
+  } as any).compute(N * N)
+
+  function tick(time: number, renderer: THREE.WebGLRenderer): Promise<void> {
+    timeUniform.value = time
+    // biome-ignore lint/suspicious/noExplicitAny: WebGPURenderer cast
+    const r = renderer as any
+    if (typeof r.computeAsync === 'function') {
+      return r.computeAsync(computeNode) as Promise<void>
+    }
+    return Promise.resolve()
+  }
+
+  function dispose() {
+    spectrumTex.dispose()
+    displacementTexture.dispose()
+    slopeTexture.dispose()
+  }
+
+  function setChoppiness(v: number): void {
+    choppinessUniform.value = v
+  }
+  function setRenderScale(v: number): void {
+    renderScaleUniform.value = v
+  }
+  function uploadSpectrum(grid: SpectrumGrid): void {
+    if (grid.N !== N) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[gpu-bake] uploadSpectrum N mismatch: handle=${N} grid=${grid.N}; ignoring`,
+      )
+      return
+    }
+    // The data array we allocated at construction is the one Three.js
+    // uploads to the GPU when `needsUpdate = true`. Repack in place
+    // (same RGBA32F layout the kernel reads) so we don't churn the
+    // texture binding — the kernel keeps pointing at the same
+    // DataTexture, we just refresh its contents.
+    const data = spectrumTex.image.data as Float32Array
+    for (let zi = 0; zi < N; zi++) {
+      for (let xi = 0; xi < N; xi++) {
+        const idx = zi * N + xi
+        data[idx * 4 + 0] = grid.h0[idx * 2]!
+        data[idx * 4 + 1] = grid.h0[idx * 2 + 1]!
+        data[idx * 4 + 2] = grid.omega[idx]!
+        data[idx * 4 + 3] = 0
+      }
+    }
+    spectrumTex.needsUpdate = true
+  }
+
+  return {
+    displacementTexture,
+    slopeTexture,
+    tileSize,
+    setChoppiness,
+    setRenderScale,
+    uploadSpectrum,
+    tick,
+    dispose,
+  }
 }
