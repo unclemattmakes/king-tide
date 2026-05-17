@@ -46,10 +46,13 @@ export function createScene(): {
   sun.position.set(50, 70, 70) // sky system animates this; starting pose matches the original
   // Shadow map: orthographic frustum sized to follow the player (sky system
   // re-positions sun + target each frame). ±90 m covers the visible play
-  // area at any reasonable elevation; 2048² gives ~9 cm/texel — crisp
-  // enough for bike + prop shadows without tanking GPU cost.
+  // area at any reasonable elevation; 1024² gives ~18 cm/texel — crisp
+  // enough for bike + prop shadows. Was 2048² (~9 cm/texel) but the
+  // depth-pass cost scaled quadratically with map size and the visible
+  // difference at racing speed was negligible. PCFSoftShadowMap (set in
+  // renderer.ts) hides aliasing on the larger texels.
   sun.castShadow = true
-  sun.shadow.mapSize.set(2048, 2048)
+  sun.shadow.mapSize.set(1024, 1024)
   sun.shadow.camera.near = 1
   sun.shadow.camera.far = 500
   sun.shadow.camera.left = -90
