@@ -461,25 +461,32 @@ export function createWaterMesh(
   // 2015 / Atlas (GDC 2019) all combine MULTIPLE FFT cascades at
   // different tile sizes to capture wave wavelengths across orders
   // of magnitude. Each cascade carries a different frequency band:
-  // long rolling swell from the big-tile cascade, mid-band chop
-  // riding on top of swells from the smaller-tile cascade. Tile
-  // sizes are picked non-commensurate so the cascades don't re-align
-  // and produce visible regular patterns.
+  // long-period swell from the biggest-tile cascade, mid-band wind
+  // sea, fine chop. Tile sizes are picked non-commensurate so the
+  // cascades don't re-align and produce visible regular patterns
+  // (Horvath calls this "the single biggest fix for I-can-see-the-
+  // tile" — pick irrational ratios, not clean multiples).
   //
   // Cascade 0 — `field.spectrumParams` (tileSize=90, windSpeed=11).
-  //   Carries the big swell. CPU buoyancy reads top-K of THIS
+  //   The "wind sea" band. CPU buoyancy reads top-K of THIS
   //   spectrum, so the bike's physics matches this cascade's heights.
+  //   Stays the buoyancy source of truth.
   // Cascade 1 — smaller tile (22 m), lower wind speed (6 m/s, peak
-  //   wavelength L = V²/g ≈ 3.7 m). Carries fine chop that rides on
-  //   top of the swell. Wider directional spread (s=1) so the chop
-  //   doesn't band into stripes like the swell does. Lower amplitude
-  //   so it adds texture without overwhelming the silhouette.
+  //   wavelength L ≈ 3.7 m). Fine chop riding on top of the swell.
+  //   Wider directional spread (s=1) so the chop doesn't band into
+  //   stripes when summed onto the well-aligned swell.
+  // Cascade 2 — large tile (250 m), high wind speed (16 m/s, peak
+  //   wavelength L ≈ 26 m). Long-period swell that gives the
+  //   horizon line its slow rolling motion. Low amplitude — this is
+  //   atmospheric, not foreground geometry. Narrow alignment to
+  //   read as cleanly directional incoming swell.
   //
-  // Vertex shader sums height + Dx + Dz across both cascades; foam
+  // Vertex shader sums height + Dx + Dz across all cascades; foam
   // takes the minimum Jacobian across cascades (J<0 anywhere means
   // the surface is folding there, regardless of which cascade caused
-  // it). CPU buoyancy stays on cascade 0 only — the chop cascade is
-  // visuals-only (bounded contribution to total height).
+  // it). CPU buoyancy stays on cascade 0 only — the chop + long-
+  // swell cascades are visuals-only (bounded contribution to total
+  // height, ~10–30 cm RMS each, well under the buoyancy gap budget).
   const gpuDisplacementHandle =
     useGpuDisplacement && field.kind === 'spectrum'
       ? createGpuOceanDisplacement({ phillipsParams: field.spectrumParams })
@@ -506,6 +513,29 @@ export function createWaterMesh(
           // fine-grained, more pinching just produces NaN-grade
           // partials on the alpha (Jacobian) channel.
           choppiness: 0.4,
+        })
+      : null
+  const gpuSwellHandle =
+    useGpuDisplacement && field.kind === 'spectrum'
+      ? createGpuOceanDisplacement({
+          phillipsParams: {
+            ...field.spectrumParams,
+            tileSize: 250,
+            windSpeed: 16,
+            // Low amplitude. Spectral energy scales with `A · L²` so
+            // bumping windSpeed to 16 (L = 26m vs 12m on cascade 0)
+            // already 4× the per-mode energy — `A = 1e-7` brings
+            // cascade 2's RMS contribution to ~0.3m, which adds the
+            // slow horizon motion without overpowering the bike's
+            // buoyancy at the start grid.
+            amplitude: 1e-7,
+            // Narrow alignment — long-period swell IS directional in
+            // real oceans (storm rollers come from one direction
+            // across hundreds of miles).
+            directionalSpread: 6,
+            seed: 0x5EA1,
+          },
+          choppiness: 0.3,
         })
       : null
   // `?wire=1` is an ORTHOGONAL toggle — works with classic, v2, and any
@@ -969,37 +999,42 @@ export function createWaterMesh(
   // the existing path.
   // biome-ignore lint/suspicious/noExplicitAny: TSL float node
   let vertexJacobian: any = float(1)
-  if (gpuDisplacementHandle && gpuChopHandle) {
-    // Cascade 0 — big swell. Sampled at worldXZ / 90m.
-    const swellUv = vec2(worldX, worldZ).div(float(gpuDisplacementHandle.tileSize))
+  if (gpuDisplacementHandle && gpuChopHandle && gpuSwellHandle) {
+    // Cascade 0 — wind sea. Sampled at worldXZ / 90m.
+    const windUv = vec2(worldX, worldZ).div(float(gpuDisplacementHandle.tileSize))
     // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
-    const swellDisp = texture(gpuDisplacementHandle.displacementTexture, swellUv) as any
+    const windDisp = texture(gpuDisplacementHandle.displacementTexture, windUv) as any
     // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
-    const swellSlope = texture(gpuDisplacementHandle.slopeTexture, swellUv) as any
-    // Cascade 1 — chop. Sampled at worldXZ / 22m (different,
-    // non-commensurate tile size so cascades don't beat).
+    const windSlope = texture(gpuDisplacementHandle.slopeTexture, windUv) as any
+    // Cascade 1 — chop. Sampled at worldXZ / 22m.
     const chopUv = vec2(worldX, worldZ).div(float(gpuChopHandle.tileSize))
     // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
     const chopDisp = texture(gpuChopHandle.displacementTexture, chopUv) as any
     // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
     const chopSlope = texture(gpuChopHandle.slopeTexture, chopUv) as any
-    // Sum height + slopes + horizontal displacement across cascades.
-    // R = height, G = Dx, B = Dz, A = Jacobian.
+    // Cascade 2 — long-period swell. Sampled at worldXZ / 250m.
+    const longUv = vec2(worldX, worldZ).div(float(gpuSwellHandle.tileSize))
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const longDisp = texture(gpuSwellHandle.displacementTexture, longUv) as any
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const longSlope = texture(gpuSwellHandle.slopeTexture, longUv) as any
+    // Sum height + slopes + horizontal displacement across all 3
+    // cascades. R = height, G = Dx, B = Dz, A = Jacobian.
     vertexHeight = vec3(
-      swellDisp.r.add(chopDisp.r),
-      swellSlope.r.add(chopSlope.r),
-      swellSlope.g.add(chopSlope.g),
+      windDisp.r.add(chopDisp.r).add(longDisp.r),
+      windSlope.r.add(chopSlope.r).add(longSlope.r),
+      windSlope.g.add(chopSlope.g).add(longSlope.g),
     ) as unknown as Vec3Like
     vertexDisp = vec3(
-      swellDisp.g.add(chopDisp.g),
-      swellDisp.b.add(chopDisp.b),
+      windDisp.g.add(chopDisp.g).add(longDisp.g),
+      windDisp.b.add(chopDisp.b).add(longDisp.b),
       float(0),
     ) as unknown as Vec3Like
-    // Foam takes the MIN Jacobian across cascades — wherever either
+    // Foam takes the MIN Jacobian across cascades — wherever any
     // cascade folds (J<0), foam should appear. Using min preserves
     // the "fold = breaking" interpretation regardless of which
     // wavelength band is responsible.
-    vertexJacobian = min(swellDisp.a, chopDisp.a)
+    vertexJacobian = min(min(windDisp.a, chopDisp.a), longDisp.a)
   } else {
     vertexHeight = gerstnerHeight(worldX, worldZ, tNode)
     vertexDisp = gerstnerDisp(worldX, worldZ, tNode)
@@ -1408,7 +1443,20 @@ export function createWaterMesh(
   // green scatter survives the warm-sky desaturation and keeps the water
   // reading as ocean rather than fabric. Classic preset unchanged for A/B.
   const deepColor = isClassic ? vec3(0.04, 0.18, 0.4) : vec3(0.01, 0.09, 0.2)
+  // Two distinct "scatter" colors per Sea of Thieves' three-color
+  // albedo system (deep + scatter + subsurface). The height-driven
+  // `scatterColor` is the legacy SoT-style cyan-green that lights up
+  // the upper half of wave faces — neutral teal so it works under
+  // any sky color. The peak-mask SSS color is more YELLOW-GREEN —
+  // that's the SoT "lit from within" glow that fires specifically
+  // where the Tessendorf horizontal pinch is large (i.e. light has
+  // a SHORT path through the wave because it's about to break).
+  // The yellow lift comes from the warmer end of the visible
+  // spectrum getting absorbed less than the cooler end at short
+  // travel distances — the same Rayleigh / Beer-Lambert physics
+  // that makes shallow ocean read turquoise instead of navy.
   const scatterColor = isClassic ? vec3(0.16, 0.55, 0.78) : vec3(0.18, 0.78, 0.78)
+  const sssColor = isClassic ? scatterColor : vec3(0.42, 0.85, 0.45)
 
   // Shallow-water tint. When the view ray is short between water surface
   // and terrain (e.g. lagoon shoreline, sandy floor), short Beer-Lambert
@@ -1465,22 +1513,34 @@ export function createWaterMesh(
         // Crest scatter ramps with height; grazing view bumps it; sun
         // backlight bumps it further. Combined boost can exceed 1.0 (we
         // clamp at the end so deep troughs stay dark even with sun
-        // alignment). On the FFT path the peak mask drawn from the
-        // choppiness offsets is added on top, which is the SoT
-        // crest-glow gate: pinching crests scatter even when their
-        // raw heightfield height is modest.
+        // alignment). This drives the LEGACY scatter-color blend
+        // (cyan-green) — the warmer SSS color is layered on top
+        // below via the peak mask.
         const viewFactor = float(1).sub(ndotv)
         const baseBoost = mix(float(0.55), float(1.0), viewFactor)
         const sunBoost = sunBackscatter.mul(0.55)
-        const heightScatter = heightFactor.mul(baseBoost.add(sunBoost))
-        // 0.7 weight on peakMask keeps it from blowing out the deep
-        // troughs (which are NOT pinched and should stay dark
-        // navy). Mixed via max so each signal can win where it's
-        // strongest — peak mask on choppy crests, height on tall
-        // smooth swells.
-        return clamp(max(heightScatter, peakMaskScaled.mul(float(0.7))), float(0), float(1))
+        return clamp(heightFactor.mul(baseBoost.add(sunBoost)), float(0), float(1))
       })()
-  const baseColorPreCaustic = mix(tintedDeepColor, scatterColor, scatterAmount)
+  // Step 1 of the SoT three-color blend: deep → mid-water scatter
+  // (the legacy cyan-green). Captures height-driven swell shading.
+  const scatterBlended = mix(tintedDeepColor, scatterColor, scatterAmount)
+  // Step 2: layer the SSS yellow-green on top, gated by the peak
+  // mask (choppiness pinch) AND by sun-backlight alignment. The
+  // (peak × viewLight) gate matches SoT's recipe: SSS fires where
+  // the wave is pinched AND the sun is roughly behind it from
+  // the camera's POV — exactly the conditions for "light through
+  // the wave" coloring. The `+0.25` floor keeps SSS visible even
+  // when not perfectly sun-aligned (ambient SSS contribution).
+  const sssGate = useGpuDisplacement
+    ? clamp(
+        peakMaskScaled.mul(sunBackscatter.add(float(0.25))),
+        float(0),
+        float(1),
+      )
+    : float(0)
+  const baseColorPreCaustic = isClassic
+    ? scatterBlended
+    : mix(scatterBlended, sssColor, sssGate.mul(float(0.65)))
 
   // Caustics — bright veining where sunlight refracts through wave
   // crests and concentrates on the seabed. Real caustics are projected
@@ -2284,6 +2344,9 @@ export function createWaterMesh(
     if (gpuChopHandle) {
       void gpuChopHandle.tick(field.time, renderer)
     }
+    if (gpuSwellHandle) {
+      void gpuSwellHandle.tick(field.time, renderer)
+    }
     r.getDrawingBufferSize(_sceneDepthSize)
     const w = _sceneDepthSize.x | 0
     const h = _sceneDepthSize.y | 0
@@ -2372,6 +2435,7 @@ export function createWaterMesh(
     gpuFftHandle?.dispose()
     gpuDisplacementHandle?.dispose()
     gpuChopHandle?.dispose()
+    gpuSwellHandle?.dispose()
   }
 
   return {
