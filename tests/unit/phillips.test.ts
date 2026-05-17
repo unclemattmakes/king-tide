@@ -97,17 +97,28 @@ describe('buildPhillipsSpectrum', () => {
   it('puts most energy in wind-aligned modes', () => {
     const s = buildPhillipsSpectrum(preset({ windDirX: 1, windDirZ: 0 }))
     const N = s.N
-    // Aligned: kx = ±1·kStep, kz = 0. Perpendicular: kx = 0, kz = ±1·kStep.
+    // Aligned: kx = ±1·kStep, kz = 0. Backward: kx = -1·kStep, kz = 0.
+    // Perpendicular: kx = 0, kz = ±1·kStep.
     const alignedIdx = (N / 2) * N + (N / 2 + 1)
+    const backwardIdx = (N / 2) * N + (N / 2 - 1)
     const perpIdx = (N / 2 + 1) * N + N / 2
     const aE =
       s.h0[alignedIdx * 2]! ** 2 + s.h0[alignedIdx * 2 + 1]! ** 2
+    const bE =
+      s.h0[backwardIdx * 2]! ** 2 + s.h0[backwardIdx * 2 + 1]! ** 2
     const pE = s.h0[perpIdx * 2]! ** 2 + s.h0[perpIdx * 2 + 1]! ** 2
-    // |k̂·ŵ|² is 1 along the wind, 0 perpendicular — so the perpendicular
-    // mode is multiplied by 0 in the Phillips factor. h0 there is exactly
-    // zero amplitude × Gaussian, i.e. 0.
-    expect(pE).toBe(0)
+    // Directional spread is Mitsuyasu cos²ˢ(α/2): one-sided, zero
+    // backward, peaks forward. At default `directionalSpread = 1` the
+    // expected ratios at the per-axis modes are:
+    //   aligned:  cos²(0/2)·... = 1
+    //   perp:     cos²(π/4)·... = 0.5
+    //   backward: cos²(π/2)·... = 0
+    // Multiplied by random Gaussian draws so we don't assert tight
+    // ratios — only the structural inequalities.
     expect(aE).toBeGreaterThan(0)
+    expect(pE).toBeGreaterThan(0)
+    expect(pE).toBeLessThan(aE)
+    expect(bE).toBe(0)
   })
 
   it('precomputes deep-water dispersion ω = √(g·|k|)', () => {
@@ -164,6 +175,7 @@ describe('sampleSpectrumHeight', () => {
         windDirZ: 0,
         amplitude: 0,
         smallWavelengthCutoff: 0,
+        directionalSpread: 1,
         gravity: 9.81,
         seed: 0,
       },
