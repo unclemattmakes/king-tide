@@ -190,6 +190,9 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
   mapMinZ -= padZ
   mapMaxZ += padZ
 
+  // Reused scratch to avoid allocating `{ cx, cy }` per call inside the
+  // per-frame minimap loop.
+  const worldToCanvasOut = { cx: 0, cy: 0 }
   function worldToCanvas(x: number, z: number): { cx: number; cy: number } {
     const w = minimap.width
     const h = minimap.height
@@ -198,7 +201,72 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     // canvas. Flipping Z to put "north up" inverts handedness and makes the
     // race read counter-clockwise even though it runs clockwise in-world.
     const tz = (z - mapMinZ) / (mapMaxZ - mapMinZ)
-    return { cx: tx * w, cy: tz * h }
+    worldToCanvasOut.cx = tx * w
+    worldToCanvasOut.cy = tz * h
+    return worldToCanvasOut
+  }
+
+  // ---- Static minimap layer (background + spline + start gate) -------------
+  // Baked once at HUD construction. The spline never moves and neither does
+  // the start gate, so redrawing them every rAF (~1–3 ms of canvas-2D stroke
+  // work on integrated GPUs) is wasted. Per-frame we blit this cache and
+  // draw only the dynamic overlay (next-CP highlight + bike dots).
+  const staticLayer = document.createElement('canvas')
+  staticLayer.width = minimap.width
+  staticLayer.height = minimap.height
+  bakeStaticMinimapLayer()
+
+  function bakeStaticMinimapLayer(): void {
+    const ctx = staticLayer.getContext('2d')
+    if (!ctx) return
+    const w = staticLayer.width
+    const h = staticLayer.height
+
+    ctx.clearRect(0, 0, w, h)
+    ctx.fillStyle = 'rgba(8, 14, 24, 0.78)'
+    ctx.fillRect(0, 0, w, h)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)'
+    ctx.lineWidth = 1
+    ctx.strokeRect(0.5, 0.5, w - 1, h - 1)
+
+    if (splinePoints.length > 1) {
+      ctx.strokeStyle = 'rgba(180, 220, 255, 0.55)'
+      ctx.lineWidth = 6
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.beginPath()
+      const first = worldToCanvas(splinePoints[0]!.x, splinePoints[0]!.z)
+      ctx.moveTo(first.cx, first.cy)
+      // Cache the first point — worldToCanvas reuses its return object so
+      // we can't keep a reference to the result across calls.
+      const firstCx = first.cx
+      const firstCy = first.cy
+      for (let i = 1; i < splinePoints.length; i++) {
+        const p = splinePoints[i]!
+        const c = worldToCanvas(p.x, p.z)
+        ctx.lineTo(c.cx, c.cy)
+      }
+      ctx.lineTo(firstCx, firstCy)
+      ctx.stroke()
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)'
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+    }
+
+    const cp0 = opts.track.checkpoints[0]
+    if (cp0) {
+      const c = worldToCanvas(cp0.position.x, cp0.position.z)
+      const size = 6
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(c.cx - size, c.cy - size, size * 2, size * 2)
+      ctx.fillStyle = '#000000'
+      ctx.fillRect(c.cx - size, c.cy - size, size, size)
+      ctx.fillRect(c.cx, c.cy, size, size)
+      ctx.strokeStyle = 'rgba(0,0,0,0.7)'
+      ctx.lineWidth = 1
+      ctx.strokeRect(c.cx - size, c.cy - size, size * 2, size * 2)
+    }
   }
 
   function tickCountdown(): void {
@@ -267,26 +335,67 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     }
   }
 
+  // ---- HUD text dirty-flag state -------------------------------------------
+  // Every text field is skipped when the input value hasn't changed since the
+  // last tick. Race / lap time advance most frames so they update most frames,
+  // but lap label / position / lap-extra change only on lap crossings — those
+  // saved DOM writes are the main win. Using NaN as the sentinel guarantees
+  // the first tick always writes.
+  let lastRaceTime = Number.NaN
+  let lastLapTimeNum = Number.NaN
+  let lastLapKey = -1 // lap * 1000 + lapsToFinish
+  let lastPositionKey = -1 // playerPosition * 1000 + totalRacers
+  let lastExtraLast: number | null | undefined
+  let lastExtraBest: number | null | undefined
+  let lastFinished: boolean | undefined
+
   function tick(input: RaceHudInput): void {
     tickCountdown()
 
     // ---- Timer card -------------------------------------------------------
-    timeValue.textContent = formatTime(input.raceTime)
-    lapTimeValue.textContent = formatTime(input.currentLapTime)
-    lapLabel.textContent = `${Math.min(input.lap, input.lapsToFinish)}/${input.lapsToFinish}`
-    positionEl.textContent =
-      input.totalRacers > 0 ? `P${input.playerPosition}/${input.totalRacers}` : ''
-    {
-      const parts: string[] = []
-      if (input.lastLapTime !== null) parts.push(`Last ${formatTime(input.lastLapTime)}`)
-      if (input.bestLapTime !== null) parts.push(`Best ${formatTime(input.bestLapTime)}`)
-      lapTimeExtra.textContent = parts.join(' · ')
+    if (input.raceTime !== lastRaceTime) {
+      timeValue.textContent = formatTime(input.raceTime)
+      lastRaceTime = input.raceTime
+    }
+    if (input.currentLapTime !== lastLapTimeNum) {
+      lapTimeValue.textContent = formatTime(input.currentLapTime)
+      lastLapTimeNum = input.currentLapTime
+    }
+    const lapKey = Math.min(input.lap, input.lapsToFinish) * 1000 + input.lapsToFinish
+    if (lapKey !== lastLapKey) {
+      lapLabel.textContent = `${Math.min(input.lap, input.lapsToFinish)}/${input.lapsToFinish}`
+      lastLapKey = lapKey
+    }
+    const posKey = input.totalRacers > 0 ? input.playerPosition * 1000 + input.totalRacers : 0
+    if (posKey !== lastPositionKey) {
+      positionEl.textContent =
+        input.totalRacers > 0 ? `P${input.playerPosition}/${input.totalRacers}` : ''
+      lastPositionKey = posKey
+    }
+    if (input.lastLapTime !== lastExtraLast || input.bestLapTime !== lastExtraBest) {
+      // Only allocate the parts array + join when the values actually
+      // changed (lap crossings + best-PB updates).
+      const last = input.lastLapTime !== null ? `Last ${formatTime(input.lastLapTime)}` : null
+      const best = input.bestLapTime !== null ? `Best ${formatTime(input.bestLapTime)}` : null
+      lapTimeExtra.textContent =
+        last !== null && best !== null
+          ? `${last} · ${best}`
+          : last !== null
+            ? last
+            : best !== null
+              ? best
+              : ''
+      lastExtraLast = input.lastLapTime
+      lastExtraBest = input.bestLapTime
     }
 
-    if (input.finished) {
-      timerCard.classList.add('finished')
-    } else {
-      timerCard.classList.remove('finished')
+    if (input.finished !== lastFinished) {
+      if (input.finished) {
+        timerCard.classList.add('finished')
+      } else {
+        timerCard.classList.remove('finished')
+      }
+      lastFinished = input.finished
     }
 
     // ---- Gap toast --------------------------------------------------------
@@ -307,53 +416,10 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     const w = minimap.width
     const h = minimap.height
 
+    // Static layer (background + spline + start gate) is baked once at
+    // construction; one blit replaces a fresh polyline stroke per frame.
     ctx.clearRect(0, 0, w, h)
-
-    // Background
-    ctx.fillStyle = 'rgba(8, 14, 24, 0.78)'
-    ctx.fillRect(0, 0, w, h)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)'
-    ctx.lineWidth = 1
-    ctx.strokeRect(0.5, 0.5, w - 1, h - 1)
-
-    // Track line (the main AI spline) drawn as a thick translucent ribbon.
-    if (splinePoints.length > 1) {
-      ctx.strokeStyle = 'rgba(180, 220, 255, 0.55)'
-      ctx.lineWidth = 6
-      ctx.lineCap = 'round'
-      ctx.lineJoin = 'round'
-      ctx.beginPath()
-      const first = worldToCanvas(splinePoints[0]!.x, splinePoints[0]!.z)
-      ctx.moveTo(first.cx, first.cy)
-      for (let i = 1; i < splinePoints.length; i++) {
-        const p = splinePoints[i]!
-        const c = worldToCanvas(p.x, p.z)
-        ctx.lineTo(c.cx, c.cy)
-      }
-      // Close the loop
-      ctx.lineTo(first.cx, first.cy)
-      ctx.stroke()
-
-      // Inner stripe for contrast
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)'
-      ctx.lineWidth = 1.5
-      ctx.stroke()
-    }
-
-    // Start/finish gate marker (cp 0) — checkered swatch.
-    const cp0 = opts.track.checkpoints[0]
-    if (cp0) {
-      const c = worldToCanvas(cp0.position.x, cp0.position.z)
-      const size = 6
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(c.cx - size, c.cy - size, size * 2, size * 2)
-      ctx.fillStyle = '#000000'
-      ctx.fillRect(c.cx - size, c.cy - size, size, size)
-      ctx.fillRect(c.cx, c.cy, size, size)
-      ctx.strokeStyle = 'rgba(0,0,0,0.7)'
-      ctx.lineWidth = 1
-      ctx.strokeRect(c.cx - size, c.cy - size, size * 2, size * 2)
-    }
+    ctx.drawImage(staticLayer, 0, 0)
 
     // Next-checkpoint highlight for the player.
     const nextCp = opts.track.checkpoints[input.playerNextCheckpoint]
@@ -366,24 +432,34 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
       ctx.stroke()
     }
 
-    // Bikes — opponents first, then leader, then player so player draws on top.
-    const sorted = [...input.bikes].sort((a, b) => {
-      const ap = a.isPlayer ? 2 : a.isLeader ? 1 : 0
-      const bp = b.isPlayer ? 2 : b.isLeader ? 1 : 0
-      return ap - bp
-    })
-    for (const dot of sorted) {
-      const c = worldToCanvas(dot.x, dot.z)
-      const r = dot.isPlayer ? 4.5 : dot.isLeader ? 4 : 3.2
-      ctx.fillStyle = dot.isPlayer ? '#ffcc66' : dot.isLeader ? '#ff5577' : (dot.color ?? '#88aaff')
-      ctx.beginPath()
-      ctx.arc(c.cx, c.cy, r, 0, Math.PI * 2)
-      ctx.fill()
-      if (dot.isPlayer) {
-        ctx.strokeStyle = '#000'
-        ctx.lineWidth = 1.4
-        ctx.stroke()
-      }
+    // Bikes — drawn in three passes so the player ends up on top of the
+    // leader, and the leader on top of regular opponents, without paying
+    // the per-frame allocation + sort cost of a spread-and-sort.
+    for (const dot of input.bikes) {
+      if (dot.isPlayer || dot.isLeader) continue
+      drawMinimapDot(ctx, dot)
+    }
+    for (const dot of input.bikes) {
+      if (dot.isPlayer || !dot.isLeader) continue
+      drawMinimapDot(ctx, dot)
+    }
+    for (const dot of input.bikes) {
+      if (!dot.isPlayer) continue
+      drawMinimapDot(ctx, dot)
+    }
+  }
+
+  function drawMinimapDot(ctx: CanvasRenderingContext2D, dot: MinimapDot): void {
+    const c = worldToCanvas(dot.x, dot.z)
+    const r = dot.isPlayer ? 4.5 : dot.isLeader ? 4 : 3.2
+    ctx.fillStyle = dot.isPlayer ? '#ffcc66' : dot.isLeader ? '#ff5577' : (dot.color ?? '#88aaff')
+    ctx.beginPath()
+    ctx.arc(c.cx, c.cy, r, 0, Math.PI * 2)
+    ctx.fill()
+    if (dot.isPlayer) {
+      ctx.strokeStyle = '#000'
+      ctx.lineWidth = 1.4
+      ctx.stroke()
     }
   }
 
