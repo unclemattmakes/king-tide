@@ -471,7 +471,7 @@ export function createGpuOceanDisplacement(
   const phillipsParams = opts.phillipsParams
   const N = phillipsParams.N
   const tileSize = phillipsParams.tileSize
-  const choppiness = opts.choppiness ?? 0.5
+  const choppiness = opts.choppiness ?? 0.7
   const renderScale = opts.renderScale ?? 1
 
   // 1) Phillips spectrum on CPU — same call as `createSpectrumWaveField`
