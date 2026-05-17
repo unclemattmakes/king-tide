@@ -123,15 +123,18 @@ async function boot() {
   const sim = createSimWorld()
   const chase = createChaseCamera(camera)
 
-  // Wave field selection. `?waves=fft` opts into the Phase A1b
-  // Phillips-spectrum field: CPU buoyancy sums the top-K modes
-  // analytically and the GPU shader's wave iteration walks the
-  // same modes via `spectrumModesToGerstnerShape`. Default stays on
-  // the hand-tuned 6-wave Gerstner setup.
+  // Wave field selection. Default is the Phillips-spectrum field that
+  // pairs with the FFT renderer; CPU buoyancy sums the top-K modes
+  // analytically and the GPU shader walks the same modes via
+  // `spectrumModesToGerstnerShape`. `?waves=gerstner` falls back to
+  // the hand-tuned 6-wave analytic setup (the previous default).
+  // The legacy `?waves=fft` value is kept as an explicit alias for
+  // the new spectrum default so old bookmarks still work.
+  const wavesParam = new URLSearchParams(window.location.search).get('waves')
   const waveField =
-    new URLSearchParams(window.location.search).get('waves') === 'fft'
-      ? createSpectrumWaveField(defaultSpectrumParams())
-      : createWaveField(defaultWaves())
+    wavesParam === 'gerstner'
+      ? createWaveField(defaultWaves())
+      : createSpectrumWaveField(defaultSpectrumParams())
   // Camera-locked water: the mesh follows the camera XZ so its dense
   // vertex region always covers the visible patch. Size shrinks from the
   // legacy 800 m world plane to 240 m centered on the camera (= 120 m

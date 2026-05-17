@@ -469,26 +469,25 @@ export function createWaterMesh(
   const subs = opts?.subdivisions ?? 384
 
   // ---- Debug toggles ----------------------------------------------------
-  // `?water=classic` falls back to vertical-only Gerstner + the original
-  // single-color albedo gradient (no horizontal pinching, no scatter blend).
-  // Useful for A/B-ing the SoT-style upgrade in playtest.
+  // `?water=v2` falls back to the v2 SoT-style analytic Gerstner path with
+  // the procedural 22-sine detail-normal map (the previous default).
+  // `?water=classic` falls back further to vertical-only Gerstner + the
+  // original single-color albedo gradient (no horizontal pinching, no
+  // scatter blend). Useful for A/B-ing the FFT-ocean upgrade in playtest.
   // `?water=wire` (handled later) renders wireframe — see end of function.
   // `?steep=<n>` overrides the initial steepness scale (0..1.5 recommended).
+  // Default is now `'fft'`: GPU Phillips-spectrum IFFT cascades drive both
+  // the big-wave silhouette (via spectrum displacement) and the high-
+  // frequency detail normals. Pair with `?waves=gerstner` to keep CPU
+  // buoyancy on the old 6-wave analytic field.
   const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
-  const waterMode = params?.get('water') ?? 'v2'
+  const waterMode = params?.get('water') ?? 'fft'
   const isClassic = waterMode === 'classic'
-  // FFT detail-texture opt-in. When set, the sub-Gerstner detail cascade
-  // samples a Phillips-spectrum IFFT bake instead of the procedural
-  // 22-sine texture. First step of the FFT-ocean migration in
-  // `docs/fft-ocean-plan.md` — buoyancy + big-wave silhouette stay on the
-  // existing Gerstner sum, only the high-frequency detail layer swaps.
-  //
-  // Two variants live behind the same flag:
-  //   - WebGPU backend → GPU compute kernel re-bakes the slope texture
-  //     every frame, so the surface actually animates (Phase C3).
-  //   - WebGL2 fallback → static CPU bake from Phase C2; same visual
-  //     character as the GPU path at t=0 but no animation, so the warp
-  //     + scroll in the cascade is doing all the motion work.
+  // FFT detail-texture path. The sub-Gerstner detail cascade samples a
+  // Phillips-spectrum IFFT bake instead of the procedural 22-sine
+  // texture; on WebGPU the bake is re-baked every frame so the detail
+  // actually animates, on WebGL2 the static CPU bake from Phase C2
+  // stands in (warp + scroll do the motion work).
   const detailMode: 'procedural' | 'fft' = waterMode === 'fft' ? 'fft' : 'procedural'
   const useGpuFft = detailMode === 'fft' && opts?.backend === 'webgpu'
   // Phase A2 — full-spectrum GPU IFFT drives the BIG-WAVE silhouette.
@@ -546,7 +545,14 @@ export function createWaterMesh(
   // stays on the original N=32 top-K of cascade 0 so buoyancy
   // doesn't change between the two paths — they read the same
   // h0 array (deterministically built from `spectrumParams`).
-  const fftBakeMode = params?.get('fftbake') === 'fft' ? 'fft' : 'ddft'
+  // FFT bake path: real radix-2 IFFT (default) vs direct DFT (legacy).
+  // The FFT path's amplitude-parity bug landed in commit 35440ee; it's
+  // now the production target. `?fftbake=ddft` falls back to the
+  // direct-DFT path for A/B comparisons or if the FFT path regresses
+  // under a future renderer change. Mirrors the spectrum-build kernel
+  // → 4 batched IFFTs → unpack kernel pipeline described in
+  // gpu-bake-fft.ts.
+  const fftBakeMode = params?.get('fftbake') === 'ddft' ? 'ddft' : 'fft'
   // Resolution tier for the FFT-path cascades. `hi` reverts to the
   // original shipping values (N=128 main + N=64 chop/swell → 68+52+52
   // = 172 compute dispatches/frame at 60 Hz). `lo` (default) halves the
