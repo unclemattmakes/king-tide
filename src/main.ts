@@ -650,6 +650,36 @@ async function boot() {
   if (backendEl) backendEl.textContent = `backend: ${backend}`
   if (finishSub) finishSub.textContent = track.name
 
+  // Phase 7b — shader / pipeline pre-warm. WebGPU pipeline compilation
+  // on first sight of a material is 5–20 ms each; on WebGL2 the GLSL
+  // compile can be much worse on first program. Doing it here, under
+  // the loading screen, replaces a visible mid-race hitch with a small
+  // bump on the boot bar. We tick every render system once so per-eid
+  // meshes (bikes, pickups, combat overlays) exist before
+  // `compileAsync` walks the scene — the static-scene compiles
+  // (terrain, water, sky, props, shadow pass) would happen either
+  // way but the per-entity ones wouldn't.
+  try {
+    setLoadingMessage('Warming up shaders…')
+    bikeRender()
+    riderRender()
+    pickupRender(0)
+    combatRender(0)
+    fxTick(0)
+    const r = renderer as unknown as {
+      compileAsync?: (scene: unknown, camera: unknown) => Promise<void>
+    }
+    if (typeof r.compileAsync === 'function') {
+      await r.compileAsync(scene, camera)
+    }
+  } catch (err) {
+    // Pre-warm is best-effort. A failure here just means the first
+    // race frame pays its own compile cost — same as before this
+    // landed — not a boot blocker.
+    // eslint-disable-next-line no-console
+    console.warn('[main] shader pre-warm failed; first frame may hitch:', err)
+  }
+
   // Phase 8 — game loop. Replay playback gets a separate frame that
   // interpolates recorded poses; the live race uses the fixed-step sim +
   // render pipeline in `startGameLoop`.
