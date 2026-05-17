@@ -42,6 +42,7 @@ import {
   createGpuOceanDisplacement,
   createGpuOceanFft,
 } from '@/engine/render/ocean-fft/gpu-bake'
+import { createGpuOceanFftDisplacement } from '@/engine/render/ocean-fft/gpu-bake-fft'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
 import {
   WAKE_BASE_WIDTH,
@@ -532,9 +533,32 @@ export function createWaterMesh(
   // it). CPU buoyancy stays on cascade 0 only — the chop + long-
   // swell cascades are visuals-only (bounded contribution to total
   // height, ~10–30 cm RMS each, well under the buoyancy gap budget).
+  // `?fftbake=fft` switches the wind-sea (cascade 0) displacement
+  // factory from the direct-DFT path to the A9 real-FFT path. Both
+  // produce the same handle shape, so the downstream vertex shader
+  // is indifferent. Default = `ddft` (direct DFT). Chop + long-
+  // swell cascades stay on direct DFT for the first cut — once
+  // visual parity is confirmed on the main cascade we can flip
+  // them all over.
+  //
+  // FFT factory requires log₂N even (N ∈ {4, 16, 64, 256, ...}).
+  // `defaultSpectrumParams().N` is 32, which is odd-log₂. We bump
+  // to 64 on the FFT branch so the constraint is satisfied; the
+  // CPU buoyancy sampler stays on the original N=32 top-K so
+  // buoyancy doesn't change between the two paths (visual parity
+  // is what we're testing).
+  const fftBakeMode = params?.get('fftbake') === 'fft' ? 'fft' : 'ddft'
+  const displacementFactory =
+    fftBakeMode === 'fft' ? createGpuOceanFftDisplacement : createGpuOceanDisplacement
+  const displacementPhillipsParams =
+    fftBakeMode === 'fft' && field.kind === 'spectrum'
+      ? { ...field.spectrumParams, N: 64 }
+      : field.kind === 'spectrum'
+        ? field.spectrumParams
+        : null
   const gpuDisplacementHandle =
-    useGpuDisplacement && field.kind === 'spectrum'
-      ? createGpuOceanDisplacement({ phillipsParams: field.spectrumParams })
+    useGpuDisplacement && displacementPhillipsParams !== null
+      ? displacementFactory({ phillipsParams: displacementPhillipsParams })
       : null
   const gpuChopHandle =
     useGpuDisplacement && field.kind === 'spectrum'

@@ -581,12 +581,29 @@ is `null` since it requires cascade handles).
   cost (linear in texel count) but the kernel is already
   sub-millisecond.
 
-### A9 — Real radix-2 FFT in TSL (foundation landed; integration in progress)
+### A9 — Real radix-2 FFT in TSL (foundation + integration sketched; visual-parity bug open)
 
-**Status**: TSL FFT primitive (`createFft2d` in
-`src/engine/render/ocean-fft/fft-tsl.ts`) is built and compiles
-cleanly. Full integration into `createGpuOceanDisplacement` is
-the next chunk of work.
+**Status**: Three commits land the A9 work in stages:
+
+1. `feat(water): A9 foundation — TSL radix-2 2D IFFT primitive` —
+   the standalone `createFft2d({ N })` primitive in
+   `src/engine/render/ocean-fft/fft-tsl.ts`.
+2. `feat(water): A9 smoke test — ?fftverify=1 dispatches FFT
+   primitive` — instantiates the primitive under a debug flag
+   and dispatches it per-frame without integration, proving the
+   kernel-build + dispatch path is valid (verified in browser:
+   60 fps, no console errors, no WebGPU validation warnings).
+3. `wip(water): A9 integration — createGpuOceanFftDisplacement,
+   ?fftbake=fft` — the displacement-factory wrapper that runs
+   the spectrum-build + 8 FFTs + unpack pipeline as a drop-in
+   replacement for the direct-DFT path. **The wrapper compiles
+   cleanly and runs without errors, but visual A/B against direct
+   DFT shows lower-amplitude waves on the FFT path — bug is open
+   for the next session.** Header comment in
+   `src/engine/render/ocean-fft/gpu-bake-fft.ts` lays out the
+   debug plan (CPU-reference comparison via texture read-back,
+   N-by-N reduction). All 257 unit tests still pass; typecheck
+   clean throughout.
 
 **What landed in the foundation commit**:
 
