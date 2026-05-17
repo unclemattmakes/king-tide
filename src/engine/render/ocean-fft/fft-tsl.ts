@@ -179,20 +179,31 @@ export function createFft2d(opts: Fft2dOpts): Fft2dHandle {
     stageUniform,
   }).compute(N * N)
 
-  // Scaling kernel: multiplies the final ping-pong contents by
-  // 1/N² and writes to `outputTexture`. Two variants because
-  // the final stage's destination depends on log₂N parity.
+  // Final pass: copy the last stage's output to `outputTexture`.
+  // Two variants because the final stage's destination depends on
+  // log₂N parity.
+  //
+  // NO normalization (scale = 1). The "standard" IFFT convention
+  // divides by N² here (matching the CPU `fft2d` with
+  // direction=-1) so the inverse-of-forward round-trips
+  // unit-amplitude. But this codebase's direct-DFT convention
+  // (Tessendorf-style) computes `Σ_k h0(k)·e^{iφ}` WITHOUT
+  // dividing by N² — see `createGpuOceanDisplacement` in
+  // `gpu-bake.ts`. To match that convention exactly so the FFT
+  // path can drop in as a replacement, we skip the 1/N² scaling
+  // here. Consumers that DO want IFFT_std semantics can multiply
+  // by 1/N² downstream.
   const scaleFromPing = buildScaleKernel({
     src: pingTexture,
     dst: outputTexture,
     N,
-    scale: 1 / (N * N),
+    scale: 1,
   }).compute(N * N)
   const scaleFromPong = buildScaleKernel({
     src: pongTexture,
     dst: outputTexture,
     N,
-    scale: 1 / (N * N),
+    scale: 1,
   }).compute(N * N)
 
   // Precompute dispatch sequence parity. Bit-rev row writes to
