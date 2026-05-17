@@ -16,7 +16,8 @@ shipping water.
 | C1b — Reference 2D IFFT (pure JS) | ✅ done | `fft2d-cpu.ts` + 7 round-trip tests + cross-validation parity test. |
 | C2 — Wire CPU-baked spectrum into water.ts via `?water=fft` | ✅ done | `ocean-fft/cpu-bake.ts` builds a drop-in detail texture from the Phillips spectrum. Branched in `getWaveDetailNormalTexture(mode)`. |
 | C3 — Port to TSL GPU compute (animated IFFT each frame) | ✅ done | `ocean-fft/gpu-bake.ts` — direct inverse DFT in a single TSL compute kernel at N=64. Dispatched from `mesh.onBeforeRender`. Active on `?water=fft` + WebGPU backend. WebGL2 fallback uses the C2 static bake. **Validation next: in-browser A/B (animation visible vs C2 static).** |
-| A1 — Phillips spectrum + seeded PRNG (shared CPU/GPU) | ⬜ todo | Replace `waves[]` with `spectrum[]` on the sim side. CPU sampler sums top-N modes. |
+| A1a — Top-K mode selection + analytic samplers (additive) | ✅ done | `spectrum-modes.ts` — `selectTopKModes`, `sampleSpectrumHeightFromModes`, `sampleSpectrumSurfaceFromModes`. 8 unit tests including FD-gradient + variance-capture checks. **No consumer wiring yet — purely additive scaffolding.** |
+| A1b — Atomic swap: WaveFieldState gets `spectrum` field, drop `waves` | ⬜ todo | Touches wave-field.ts, water.ts (GPU shader iteration), water-debug-menu.ts, wave-field.test.ts. Risky: default visual character changes. **Validation gate: A/B in browser, confirm replay determinism survives.** |
 | A2 — GPU full-spectrum IFFT (height + dx + dz + slope) | ⬜ todo | Vertex shader samples textures instead of summing analytics. |
 | A3 — Jacobian-based foam | ⬜ todo | Replace slope/fold heuristic with `det(I+λ∇D)<0`. |
 | A4 — Determinism + multiplayer parity tests | ⬜ todo | Confirm CPU sampler matches GPU IFFT at probe points. |
