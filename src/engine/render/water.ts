@@ -36,6 +36,7 @@ import {
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
 import { buildFftDetailNormalTexture } from '@/engine/render/ocean-fft/cpu-bake'
+import { createGpuOceanFft } from '@/engine/render/ocean-fft/gpu-bake'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
 import {
   WAKE_BASE_WIDTH,
@@ -369,7 +370,16 @@ function getWaveDetailNormalTexture(mode: 'procedural' | 'fft'): THREE.DataTextu
  */
 export function createWaterMesh(
   field: WaveFieldState,
-  opts?: { size?: number; subdivisions?: number },
+  opts?: {
+    size?: number
+    subdivisions?: number
+    /** Renderer backend. Required to know whether to use the GPU FFT
+     *  compute path (WebGPU only) or fall back to the static CPU bake
+     *  when `?water=fft` is active. Detected by `createRenderer` and
+     *  passed through from boot. Omit to default to WebGL2 (skip GPU
+     *  compute). */
+    backend?: 'webgpu' | 'webgl2'
+  },
 ): WaterMesh {
   const size = opts?.size ?? 240
   // 384 subs × 240 m ≈ 0.625 m vertex spacing. The mesh follows the
@@ -395,7 +405,15 @@ export function createWaterMesh(
   // 22-sine texture. First step of the FFT-ocean migration in
   // `docs/fft-ocean-plan.md` — buoyancy + big-wave silhouette stay on the
   // existing Gerstner sum, only the high-frequency detail layer swaps.
+  //
+  // Two variants live behind the same flag:
+  //   - WebGPU backend → GPU compute kernel re-bakes the slope texture
+  //     every frame, so the surface actually animates (Phase C3).
+  //   - WebGL2 fallback → static CPU bake from Phase C2; same visual
+  //     character as the GPU path at t=0 but no animation, so the warp
+  //     + scroll in the cascade is doing all the motion work.
   const detailMode: 'procedural' | 'fft' = waterMode === 'fft' ? 'fft' : 'procedural'
+  const useGpuFft = detailMode === 'fft' && opts?.backend === 'webgpu'
   // `?wire=1` is an ORTHOGONAL toggle — works with classic, v2, and any
   // future shader variant. The old `?water=wire` is still honored for
   // backward compatibility.
@@ -958,7 +976,18 @@ export function createWaterMesh(
   // Strengths are tuned so the combined slope contribution rarely exceeds
   // ~0.35 (well below the analytic Gerstner peaks of ~1.0), so the detail
   // reads as surface texture without erasing the silhouette of the big waves.
-  const detailTex = getWaveDetailNormalTexture(detailMode)
+  // Detail-cascade texture provider. Three paths, mutually exclusive:
+  //   1. procedural    — legacy 22-sine analytic bake (default).
+  //   2. fft + WebGL2  — static Phillips IFFT bake (C2 fallback).
+  //   3. fft + WebGPU  — live Phillips IFFT compute (C3 default).
+  // (3) writes its slopes into the StorageTexture each frame from the
+  // `mesh.onBeforeRender` hook further down; the shader code reading
+  // `detailTex` is identical across all three since the encoding +
+  // wrap-mode + format match.
+  const gpuFftHandle = useGpuFft ? createGpuOceanFft() : null
+  const detailTex: THREE.Texture = gpuFftHandle
+    ? gpuFftHandle.outputTexture
+    : getWaveDetailNormalTexture(detailMode)
   // Tiles enlarged from (6 m, 1.5 m) → (11 m, 2 m) and the UV axes rotated
   // by non-perpendicular angles (+23° / -37°) so the texture's natural
   // pattern doesn't read as obvious world-grid-aligned strips. Two layers
@@ -1909,6 +1938,14 @@ export function createWaterMesh(
   mesh.onBeforeRender = (renderer) => {
     // biome-ignore lint/suspicious/noExplicitAny: WebGPURenderer cast
     const r = renderer as any
+    // GPU ocean FFT (when ?water=fft + WebGPU backend). Dispatches the
+    // compute kernel that re-bakes the slope texture for the current
+    // sim time. Fire-and-forget — WebGPU's barrier guarantees the
+    // subsequent water draw reads the freshly-written texels. Runs
+    // BEFORE the scene-depth snapshot below since they're independent.
+    if (gpuFftHandle) {
+      void gpuFftHandle.tick(field.time, renderer)
+    }
     r.getDrawingBufferSize(_sceneDepthSize)
     const w = _sceneDepthSize.x | 0
     const h = _sceneDepthSize.y | 0
@@ -1994,6 +2031,7 @@ export function createWaterMesh(
     geom.dispose()
     mat.dispose()
     terrainHeightTex.dispose()
+    gpuFftHandle?.dispose()
   }
 
   return {

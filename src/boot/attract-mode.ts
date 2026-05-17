@@ -87,7 +87,12 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
   let directorCutPending = false
 
   try {
-    const { renderer, canvas, dispose: disposeRenderer } = await createRenderer(opts.parent)
+    const {
+      renderer,
+      backend,
+      canvas,
+      dispose: disposeRenderer,
+    } = await createRenderer(opts.parent)
     // Attract canvas sits behind the menu — z-index 0; the menu is z-index 40+.
     canvas.style.position = 'absolute'
     canvas.style.inset = '0'
@@ -103,7 +108,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     }
 
     const waveField = createWaveField(defaultWaves())
-    const waterMesh = createWaterMesh(waveField)
+    const waterMesh = createWaterMesh(waveField, { backend })
     scene.add(waterMesh.mesh)
     applyStoredWaterTuning(waterMesh)
 

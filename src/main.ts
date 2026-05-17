@@ -126,7 +126,7 @@ async function boot() {
   // shader default (384), giving ≈ 0.625 m vertex spacing — the 4 m wake
   // wavelength resolves at ~6.4 verts per crest, so ridges read as real
   // geometry instead of single-vertex shimmer.
-  const waterMesh = createWaterMesh(waveField)
+  const waterMesh = createWaterMesh(waveField, { backend })
   scene.add(waterMesh.mesh)
 
   // Phase 3 — URL params + persisted prefs.
