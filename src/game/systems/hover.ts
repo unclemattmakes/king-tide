@@ -1,3 +1,4 @@
+import type RAPIER from '@dimforge/rapier3d-compat'
 import { query } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
@@ -18,6 +19,25 @@ import { getCurrentBoostMultiplier } from '@/game/systems/pickup'
 
 const MAX_HOVER_PROBE = 6
 const GRAVITY = 25 // must match PhysicsWorld gravity magnitude
+
+// Reused per-probe Ray. Each bike fires 5 probes per fixed tick (1 center +
+// 4 footprint); at 5 bikes × 60 Hz that's ~1500 allocations/sec if we new
+// the Ray every call. Lazy-init on first use because the Ray constructor is
+// only valid after Rapier WASM has loaded — `phys.rapier` carries it in.
+// `castRay` reads origin/dir synchronously and doesn't retain a reference,
+// so reuse across sequential calls in the same tick is safe.
+let scratchRay: RAPIER.Ray | null = null
+function rayDown(phys: PhysicsWorld, x: number, y: number, z: number): RAPIER.Ray {
+  if (!scratchRay) {
+    scratchRay = new phys.rapier.Ray({ x, y, z }, { x: 0, y: -1, z: 0 })
+    return scratchRay
+  }
+  scratchRay.origin.x = x
+  scratchRay.origin.y = y
+  scratchRay.origin.z = z
+  // dir stays (0, -1, 0) — every probe in this file casts straight down.
+  return scratchRay
+}
 
 // Slope-momentum tuning — exported for tests / debug overlays. Asymmetric
 // gain: a hard 1.0× push down a wave face, a gentle 0.5× drag up one.
@@ -70,7 +90,7 @@ function probeSurface(
   fromZ: number,
   ignore: ReturnType<PhysicsWorld['world']['getRigidBody']>,
 ): SurfaceProbe {
-  const ray = new phys.rapier.Ray({ x: fromX, y: fromY, z: fromZ }, { x: 0, y: -1, z: 0 })
+  const ray = rayDown(phys, fromX, fromY, fromZ)
   const hit = phys.world.castRay(
     ray,
     MAX_HOVER_PROBE,
@@ -119,7 +139,7 @@ function probeSurfaceY(
   lift = 0,
 ): number {
   const originY = fromY + lift
-  const ray = new phys.rapier.Ray({ x, y: originY, z }, { x: 0, y: -1, z: 0 })
+  const ray = rayDown(phys, x, originY, z)
   const hit = phys.world.castRay(
     ray,
     MAX_HOVER_PROBE + lift,
@@ -464,8 +484,7 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
             aUp = GRAVITY + aBuoy - dampVy * stats.hoverDamp
           } else {
             const heightError = stats.hoverHeight - localDist
-            const springMul =
-              probe.isWater && p.longitudinal ? WATER_LONGITUDINAL_SPRING_MUL : 1.0
+            const springMul = probe.isWater && p.longitudinal ? WATER_LONGITUDINAL_SPRING_MUL : 1.0
             aUp = GRAVITY + heightError * stats.hoverSpring * springMul - dampVy * stats.hoverDamp
           }
           rb.applyImpulseAtPoint(

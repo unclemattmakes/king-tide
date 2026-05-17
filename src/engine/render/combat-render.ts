@@ -31,6 +31,10 @@ export function createCombatRenderSystem(scene: THREE.Scene, sim: SimWorld) {
   const missileMeshes = new Map<number, THREE.Object3D>()
   const shieldMeshes = new Map<number, THREE.Object3D>()
   const explosionMeshes = new Map<number, THREE.Object3D>()
+  // Reused per-frame scratch for the missile lookAt target. Was a fresh
+  // `new THREE.Vector3(...)` per missile per frame — at 5 missiles in
+  // flight that's 300 allocations/sec.
+  const missileLookTarget = new THREE.Vector3()
 
   return function tick(_dt: number): void {
     syncEntityMeshes({
@@ -63,12 +67,12 @@ export function createCombatRenderSystem(scene: THREE.Scene, sim: SimWorld) {
         // anti-velocity direction with up = world up).
         const speed = Math.hypot(m.velocity.x, m.velocity.y, m.velocity.z)
         if (speed > 0.001) {
-          const lookTarget = new THREE.Vector3(
+          missileLookTarget.set(
             m.position.x + m.velocity.x,
             m.position.y + m.velocity.y,
             m.position.z + m.velocity.z,
           )
-          mesh.lookAt(lookTarget)
+          mesh.lookAt(missileLookTarget)
         }
       },
     })

@@ -30,6 +30,14 @@ export type ReplayRecorder = {
    * `sampleRateHz` — calls in between are discarded.
    */
   sample(elapsedSeconds: number, flatTransforms: ArrayLike<number>): void
+  /**
+   * True if `sample(elapsedSeconds, ...)` would actually capture a frame.
+   * Lets the caller short-circuit any per-frame work needed to assemble the
+   * transform buffer (e.g. WASM-bound rigid-body reads) on frames the
+   * recorder will discard. Pure read — does not advance the rate-limit
+   * cursor.
+   */
+  shouldSample(elapsedSeconds: number): boolean
   /** Record a one-off event (lap / finish / checkpoint). */
   recordEvent(ev: ReplayEvent): void
   /** Build a ReplayFile from the captured data. */
@@ -66,6 +74,10 @@ export function createReplayRecorder(opts: CreateReplayRecorderOpts): ReplayReco
   return {
     bikes: opts.bikes,
     enabled: true,
+    shouldSample(elapsedSeconds) {
+      if (!this.enabled) return false
+      return elapsedSeconds >= nextSampleAt
+    },
     sample(elapsedSeconds, flatTransforms) {
       if (!this.enabled) return
       if (elapsedSeconds < nextSampleAt) return
