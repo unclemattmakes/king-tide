@@ -301,6 +301,26 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       }
     }
 
+    // Continuous bad-attitude crash on land. Multi-point hover's
+    // alignment torque is `r × F` from per-corner lift forces, and at
+    // extreme pitch (nose down past 75° or so) the corner-to-CoM
+    // displacement becomes parallel to the upward force vector — the
+    // cross product collapses to zero, no restoring torque at all.
+    // Without this check the bike would sit happily at vertical nose-
+    // down on flat ground, hovered up by the bow's pure-linear lift
+    // with nothing to right it. Crash instead: kill horizontal velocity,
+    // rider-crash picks up the Δv next tick. Water is exempt — diving
+    // into water is supposed to work.
+    if (isGrounded && !probe.isWater) {
+      const qBad = rb.rotation()
+      const r12Bad = 2 * (qBad.y * qBad.z - qBad.x * qBad.w)
+      const pitchBad = Math.asin(Math.max(-1, Math.min(1, -r12Bad)))
+      const BAD_GROUND_PITCH = (75 * Math.PI) / 180
+      if (Math.abs(pitchBad) > BAD_GROUND_PITCH) {
+        rb.setLinvel({ x: 0, y: linvel.y, z: 0 }, true)
+      }
+    }
+
     const q = rb.rotation()
 
     // Multi-point hover spring. Fires only while grounded. Instead of a
@@ -503,7 +523,7 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // which rotates fwd toward +y (nose up).
     if (Math.abs(intent.pitch) > 0.05) {
       const rightP = quatRotate(q, { x: 1, y: 0, z: 0 })
-      const PITCH_TORQUE_ACCEL = 8 // rad/s² at full input
+      const PITCH_TORQUE_ACCEL = 6 // rad/s² at full input
       const aPitch = -intent.pitch * PITCH_TORQUE_ACCEL
       rb.applyTorqueImpulse(
         {
