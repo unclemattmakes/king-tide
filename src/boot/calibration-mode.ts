@@ -78,7 +78,7 @@ export type CalibrationHandle = {
 export async function bootCalibrationMode(appEl: HTMLElement): Promise<CalibrationHandle> {
   setLoadingMessage('Loading calibration scene…')
 
-  const { renderer, canvas, dispose: disposeRenderer } = await createRenderer(appEl)
+  const { renderer, backend, canvas, dispose: disposeRenderer } = await createRenderer(appEl)
   canvas.style.position = 'absolute'
   canvas.style.inset = '0'
 
@@ -87,7 +87,7 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
   const sim = createSimWorld()
 
   const waveField = createWaveField(defaultWaves())
-  const waterMesh = createWaterMesh(waveField)
+  const waterMesh = createWaterMesh(waveField, { backend })
   scene.add(waterMesh.mesh)
   applyStoredWaterTuning(waterMesh)
 

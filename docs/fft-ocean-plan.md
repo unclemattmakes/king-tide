@@ -14,8 +14,8 @@ shipping water.
 | 0 — Plan + branch | ✅ done | This document. |
 | C1a — Phillips spectrum module (pure JS) | ✅ done | `phillips.ts` + seeded PRNG + 12 unit tests. |
 | C1b — Reference 2D IFFT (pure JS) | ✅ done | `fft2d-cpu.ts` + 7 round-trip tests + cross-validation parity test. |
-| C2 — Wire CPU-baked spectrum into water.ts via `?water=fft` | ✅ done | `ocean-fft/cpu-bake.ts` builds a drop-in detail texture from the Phillips spectrum. Branched in `getWaveDetailNormalTexture(mode)`. **Validation next: visual A/B against procedural cascade in browser.** |
-| C3 — Port to TSL GPU compute (animated IFFT each frame) | ⬜ todo | Same algorithm, runs on GPU. CPU bake stays as the WebGL2 fallback. |
+| C2 — Wire CPU-baked spectrum into water.ts via `?water=fft` | ✅ done | `ocean-fft/cpu-bake.ts` builds a drop-in detail texture from the Phillips spectrum. Branched in `getWaveDetailNormalTexture(mode)`. |
+| C3 — Port to TSL GPU compute (animated IFFT each frame) | ✅ done | `ocean-fft/gpu-bake.ts` — direct inverse DFT in a single TSL compute kernel at N=64. Dispatched from `mesh.onBeforeRender`. Active on `?water=fft` + WebGPU backend. WebGL2 fallback uses the C2 static bake. **Validation next: in-browser A/B (animation visible vs C2 static).** |
 | A1 — Phillips spectrum + seeded PRNG (shared CPU/GPU) | ⬜ todo | Replace `waves[]` with `spectrum[]` on the sim side. CPU sampler sums top-N modes. |
 | A2 — GPU full-spectrum IFFT (height + dx + dz + slope) | ⬜ todo | Vertex shader samples textures instead of summing analytics. |
 | A3 — Jacobian-based foam | ⬜ todo | Replace slope/fold heuristic with `det(I+λ∇D)<0`. |
