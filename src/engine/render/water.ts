@@ -36,7 +36,10 @@ import {
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
 import { buildFftDetailNormalTexture } from '@/engine/render/ocean-fft/cpu-bake'
-import { createGpuOceanFft } from '@/engine/render/ocean-fft/gpu-bake'
+import {
+  createGpuOceanDisplacement,
+  createGpuOceanFft,
+} from '@/engine/render/ocean-fft/gpu-bake'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
 import {
   WAKE_BASE_WIDTH,
@@ -415,6 +418,30 @@ export function createWaterMesh(
   //     + scroll in the cascade is doing all the motion work.
   const detailMode: 'procedural' | 'fft' = waterMode === 'fft' ? 'fft' : 'procedural'
   const useGpuFft = detailMode === 'fft' && opts?.backend === 'webgpu'
+  // Phase A2 — full-spectrum GPU IFFT drives the BIG-WAVE silhouette.
+  // Activates when both `?water=fft` and a spectrum-mode wave field are
+  // in play on WebGPU: the vertex shader trades its 32-mode analytic
+  // sum for two texture samples (displacement + slope) per vertex, and
+  // gets the full Phillips spectrum back without paying the per-vertex
+  // unrolled-loop cost. The Gerstner-mode field stays on the analytic
+  // path even with `?water=fft` since the displacement kernel needs
+  // `field.spectrumParams` as input.
+  const useGpuDisplacement = useGpuFft && field.kind === 'spectrum'
+  // A2 — full-spectrum displacement handle. Reads `field.spectrumParams`
+  // (same params the CPU top-K sampler consumes) so both sides build
+  // identical h0 arrays and the buoyancy-vs-render delta is bounded by
+  // the top-K truncation residual. The handle owns two RGBA32F storage
+  // textures (`displacementTexture` for (height, Dx, Dz, Jacobian);
+  // `slopeTexture` for (∂h/∂x, ∂h/∂z)) that the vertex shader samples
+  // further down. Choppiness λ defaults to 0.5 inside the factory — a
+  // middle ground between flat heightfield (matches buoyancy exactly)
+  // and full Tessendorf chop (visible pinching, larger physics gap).
+  // Created up here so vertex-stage code can branch on it; the
+  // per-frame `tick()` lives in `mesh.onBeforeRender` further down.
+  const gpuDisplacementHandle =
+    useGpuDisplacement && field.kind === 'spectrum'
+      ? createGpuOceanDisplacement({ phillipsParams: field.spectrumParams })
+      : null
   // `?wire=1` is an ORTHOGONAL toggle — works with classic, v2, and any
   // future shader variant. The old `?water=wire` is still honored for
   // backward compatibility.
@@ -834,8 +861,58 @@ export function createWaterMesh(
   // on the CPU side to recover the rest position from world XZ.
   const worldX = positionLocal.x.add(meshOriginX)
   const worldZ = positionLocal.z.add(meshOriginZ)
-  const vertexHeight = gerstnerHeight(worldX, worldZ, tNode)
-  const vertexDisp = gerstnerDisp(worldX, worldZ, tNode)
+  // Big-wave source. Two paths produce the same `vec3(y, dy/dx, dy/dz)`
+  // height + slope and `vec3(dx, dz, qSum)` displacement triples; the
+  // surrounding shoaling / wake / bike-contrib code is shape-agnostic
+  // so it works unchanged across paths.
+  //
+  //   A1b / Gerstner default — sums the unrolled `waveConsts` array
+  //     analytically per vertex. Either the legacy 6-wave Gerstner
+  //     preset or 32 top-K Phillips modes converted to Gerstner shape
+  //     via `spectrum-to-gerstner.ts`. Cheap per vertex, peaks at
+  //     ~24 trig calls.
+  //
+  //   A2 / GPU IFFT — samples the displacement + slope textures the
+  //     compute kernel writes each frame from the full N² Phillips
+  //     spectrum. Same cost per vertex regardless of N; spectrum
+  //     budget moves from per-vertex-unroll to per-frame compute.
+  //     Captures ALL spectral content (no top-K truncation), which is
+  //     the visible payoff of the FFT migration.
+  //
+  // `qSum` (Tessendorf-style normal-Y reduction from horizontal
+  // pinching) is Gerstner-specific math; the FFT path leaves it at 0,
+  // so the normal collapses to the standard heightfield form
+  // `normalize(−dydx, 1, −dydz)`. That's the right normal for an
+  // FFT-displaced surface since the displacement and slope come from
+  // the same spectrum — the heightfield slope already encodes the
+  // surface tilt at the displaced vertex's logical position.
+  // Cast through `unknown` so the two branches produce the same TSL
+  // node type for downstream `.x`/`.y`/`.z` swizzling. The shapes match
+  // — both return `vec3` — but TypeScript narrows `vec3(literal, ...)`
+  // and `vec3(node, ...)` differently and the union is too narrow for
+  // the downstream `varying(...)` plumbing to typecheck.
+  type Vec3Like = ReturnType<typeof gerstnerHeight>
+  let vertexHeight: Vec3Like
+  let vertexDisp: Vec3Like
+  if (gpuDisplacementHandle) {
+    const dispUv = vec2(worldX, worldZ).div(float(gpuDisplacementHandle.tileSize))
+    // REPEAT wrap on both storage textures handles the .fract() for
+    // us — sampling at large world coords just tiles the spectrum
+    // across the visible mesh. Tile size matches `field.spectrumParams.tileSize`
+    // (90 m by default) so a full repeat is rare in the visible area.
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const dispSample = texture(gpuDisplacementHandle.displacementTexture, dispUv) as any
+    // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+    const slopeSample = texture(gpuDisplacementHandle.slopeTexture, dispUv) as any
+    // R = height, G = Dx, B = Dz, A = Jacobian. Jacobian feeds A3 foam
+    // — the alpha is computed but unused in A2; A3 will wire it into
+    // the foam path.
+    vertexHeight = vec3(dispSample.r, slopeSample.r, slopeSample.g) as unknown as Vec3Like
+    vertexDisp = vec3(dispSample.g, dispSample.b, float(0)) as unknown as Vec3Like
+  } else {
+    vertexHeight = gerstnerHeight(worldX, worldZ, tNode)
+    vertexDisp = gerstnerDisp(worldX, worldZ, tNode)
+  }
   const vertexBike = bikeSurfaceContrib(worldX, worldZ, tNode)
   // vertexHeight = vec3(y, dy/dx, dy/dz)
   // vertexDisp   = vec3(dx, dz, qSum)
@@ -1981,6 +2058,14 @@ export function createWaterMesh(
     if (gpuFftHandle) {
       void gpuFftHandle.tick(field.time, renderer)
     }
+    // A2 displacement kernel — fed the same sim clock so its IFFT
+    // output advances in lockstep with the CPU buoyancy sampler.
+    // Independent dispatch from the detail-cascade kernel since the
+    // two run on different spectra (this one matches `field.spectrum`
+    // exactly; the detail kernel uses its own short-wavelength tune).
+    if (gpuDisplacementHandle) {
+      void gpuDisplacementHandle.tick(field.time, renderer)
+    }
     r.getDrawingBufferSize(_sceneDepthSize)
     const w = _sceneDepthSize.x | 0
     const h = _sceneDepthSize.y | 0
@@ -2067,6 +2152,7 @@ export function createWaterMesh(
     mat.dispose()
     terrainHeightTex.dispose()
     gpuFftHandle?.dispose()
+    gpuDisplacementHandle?.dispose()
   }
 
   return {
