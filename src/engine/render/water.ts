@@ -574,6 +574,19 @@ export function createWaterMesh(
   // Override per-session with `?fftskip=1` for every-frame updates.
   const fftSkipParam = Number(params?.get('fftskip') ?? '2')
   const fftSkip = Number.isFinite(fftSkipParam) && fftSkipParam >= 1 ? Math.floor(fftSkipParam) : 2
+
+  // Scene-depth copy is forbidden when the framebuffer is multisampled —
+  // `copyFramebufferToTexture` would try to copy a 4-sample depth attachment
+  // into our 1-sample `sceneDepthTexture` and WebGPU invalidates the entire
+  // command buffer at submit time, blanking the frame. MSAA is on by default
+  // on WebGPU (renderer.ts antialias=true), so we skip the copy in that case
+  // and accept the visual cost: shoreline foam from scene-depth comparison
+  // is suppressed (the shader keeps a sane default), but the rest of the
+  // surface renders normally. Players who want the shoreline foam back can
+  // pass `?aa=off` to drop MSAA — the copy then succeeds.
+  // WebGL2 + WebGPU-with-`?aa=off` both keep the copy.
+  const aaOn = params?.get('aa') !== 'off'
+  const disableSceneDepthCopy = opts?.backend === 'webgpu' && aaOn
   const displacementFactory =
     fftBakeMode === 'fft' ? createGpuOceanFftDisplacement : createGpuOceanDisplacement
   const displacementPhillipsParams =
@@ -2658,6 +2671,7 @@ export function createWaterMesh(
     if (fft2dHandle) {
       void fft2dHandle.dispatch(renderer)
     }
+    if (disableSceneDepthCopy) return
     r.getDrawingBufferSize(_sceneDepthSize)
     const w = _sceneDepthSize.x | 0
     const h = _sceneDepthSize.y | 0
