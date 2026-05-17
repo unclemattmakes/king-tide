@@ -894,6 +894,15 @@ export function createWaterMesh(
   type Vec3Like = ReturnType<typeof gerstnerHeight>
   let vertexHeight: Vec3Like
   let vertexDisp: Vec3Like
+  // A3 — Jacobian sampled alongside the displacement triple when on the
+  // FFT path; left at the calm-surface sentinel (J=1) otherwise. The
+  // fragment-stage foam mixer reads this through a varying and turns
+  // it into a breaking-wave foam term (see `foldFoamFft` below). On
+  // the analytic path qSum already gates fold-style foam, so the
+  // sentinel keeps the FFT branch dead-code-free without disturbing
+  // the existing path.
+  // biome-ignore lint/suspicious/noExplicitAny: TSL float node
+  let vertexJacobian: any = float(1)
   if (gpuDisplacementHandle) {
     const dispUv = vec2(worldX, worldZ).div(float(gpuDisplacementHandle.tileSize))
     // REPEAT wrap on both storage textures handles the .fract() for
@@ -904,11 +913,10 @@ export function createWaterMesh(
     const dispSample = texture(gpuDisplacementHandle.displacementTexture, dispUv) as any
     // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
     const slopeSample = texture(gpuDisplacementHandle.slopeTexture, dispUv) as any
-    // R = height, G = Dx, B = Dz, A = Jacobian. Jacobian feeds A3 foam
-    // — the alpha is computed but unused in A2; A3 will wire it into
-    // the foam path.
+    // R = height, G = Dx, B = Dz, A = Jacobian.
     vertexHeight = vec3(dispSample.r, slopeSample.r, slopeSample.g) as unknown as Vec3Like
     vertexDisp = vec3(dispSample.g, dispSample.b, float(0)) as unknown as Vec3Like
+    vertexJacobian = dispSample.a
   } else {
     vertexHeight = gerstnerHeight(worldX, worldZ, tNode)
     vertexDisp = gerstnerDisp(worldX, worldZ, tNode)
@@ -1059,6 +1067,11 @@ export function createWaterMesh(
   const qSumFrag = varying(attenQSum)
   const foamAccumFrag = varying(vertexFoamAccum)
   const waterDepthFrag = varying(vertexWaterDepth)
+  // A3 — Jacobian forwarded to fragment for breaking-wave foam. Only
+  // meaningful on the FFT path (sentinel J=1 elsewhere); the fragment
+  // foam mixer gates on `useGpuDisplacement` so the analytic branch
+  // pays nothing for the unused varying.
+  const jacobianFrag = varying(vertexJacobian)
   // Pre-attenuation wave height — the height the swells/chops WOULD have
   // had at this position if shoaling didn't shrink them. The fragment surf
   // pulse reads this so breakers fire with the natural cadence of incoming
@@ -1428,13 +1441,37 @@ export function createWaterMesh(
   const slopeMag = sqrt(dydx.mul(dydx).add(dydz.mul(dydz)))
   const pixelSlope = sqrt(effDydx.mul(effDydx).add(effDydz.mul(effDydz)))
   const pixelFoam = pow(clamp(pixelSlope.mul(float(1.4)), float(0), float(1)), float(2.0))
+  // A3 — Jacobian-driven foam on the FFT path. The kernel writes
+  // `J = (1 + λ·Dxx)·(1 + λ·Dzz) − λ²·Dxz²` into displacementTexture.a;
+  // J ≈ 1 on a calm surface, dips below 1 as the local horizontal
+  // displacement gradient grows, crosses 0 when the surface starts
+  // folding back on itself — Tessendorf's "wave breaking" criterion.
+  // smoothstep maps that range to a [0, 1] foam intensity:
+  //   J ≥ 0.6  → no Jacobian foam (let the slope-based pixelFoam carry).
+  //   J ≤ -0.2 → full foam (breaking).
+  // The window is intentionally wide so it picks up SHARP CHOPPING as
+  // well as outright breaking — at the current spectrum calibration
+  // (amplitude=1.6e-6, λ=0.5) the partials stay small and full-on
+  // breaking is rare; partial dipping at steep crests is what fires.
+  // A5 should tighten the window once the sea-state slider lets the
+  // user dial choppiness up to a regime where actual J<0 happens.
+  //
+  // Replaces the old Tessendorf-via-Gerstner `foldFoam` (qSum-driven)
+  // for the FFT path — qSum is the analytic-Gerstner fold signal and
+  // evaluates to 0 with the FFT path's spectrum modes anyway.
+  const foldFoamFft = useGpuDisplacement
+    ? // biome-ignore lint/suspicious/noExplicitAny: varying-of-any propagates unknown into smoothstep arg
+      smoothstep(float(0.6), float(-0.2), jacobianFrag as any)
+    : float(0)
   const waveFoam = isClassic
     ? (() => {
         const slopeFoam = smoothstep(float(0.4), float(0.9), slopeMag)
         const heightGate = smoothstep(float(-0.4), float(0.3), heightFrag)
         return slopeFoam.mul(heightGate)
       })()
-    : max(foamAccumFrag.mul(float(0.7)), pixelFoam)
+    : useGpuDisplacement
+      ? max(max(foamAccumFrag.mul(float(0.7)), pixelFoam), foldFoamFft)
+      : max(foamAccumFrag.mul(float(0.7)), pixelFoam)
 
   // Shared turbulent foam noise — world XZ + time scroll. Used to break
   // up the otherwise-too-clean foam edges of shoreline, wake, and bow
