@@ -21,9 +21,6 @@ summit craters, continental shelves descending to a deep-water floor,
 cone-masked erosion noise, plus a global low-amplitude background
 noise field modulated by altitude.
 
-Reef rings (disabled by default — ``Reef Height = 0``) are still
-available in the graph for authors who want a visible fringing reef.
-
 ### Per-peak controls
 
 Each peak uses **two empties**:
@@ -45,10 +42,7 @@ matches the way real volcanic morphology decouples *footprint* from
 | Knob | Default | Purpose |
 |---|---|---|
 | Shelf Depth | -25 m | Deep-water floor depth |
-| Shelf Radius | 200 m | How far offshore the shelf descends from each peak's coastline |
-| Reef Inset | 20 m | Distance from coast to centre of reef ring |
-| Reef Height | 0 m | Reef pulse amplitude (default off) |
-| Reef Width | 25 m | Reef pulse Gaussian σ |
+| Shore Width | 40 m | Radial smoothstep distance from the cone foot to the deep-water shelf. Tight beach drop-off = 10–20 m; broad continental shelf = 200+ m. (Previously "Shelf Radius".) |
 | Cone Erosion | 12 m | Per-cone noise amplitude (slope gulleys / outcrops). Masked by cone height — zero off the cone. |
 | Erosion Scale | 0.035 | Noise frequency for cone erosion (smaller = larger features) |
 | Ring Break | 20 m | World-space noise added to each peak's radial distance, jittering the cone foot and shelf rim so they're not perfect circles. 0 = clean circle, 30+ = wildly irregular outline. |
@@ -282,10 +276,7 @@ def build_peak_profile_group() -> bpy.types.NodeTree:
     _new_socket(g, "Base",          "INPUT",  "NodeSocketObject")
     _new_socket(g, "Top",           "INPUT",  "NodeSocketObject")
     _new_socket(g, "Shelf Depth",   "INPUT",  "NodeSocketFloat", -25.0)
-    _new_socket(g, "Shelf Radius",  "INPUT",  "NodeSocketFloat", 200.0)
-    _new_socket(g, "Reef Inset",    "INPUT",  "NodeSocketFloat",  20.0)
-    _new_socket(g, "Reef Height",   "INPUT",  "NodeSocketFloat",   0.0)
-    _new_socket(g, "Reef Width",    "INPUT",  "NodeSocketFloat",  25.0)
+    _new_socket(g, "Shore Width",   "INPUT",  "NodeSocketFloat",  40.0)
     _new_socket(g, "Cone Erosion",  "INPUT",  "NodeSocketFloat",  12.0)
     _new_socket(g, "Erosion Scale", "INPUT",  "NodeSocketFloat",   0.035)
     _new_socket(g, "Noise Seed",    "INPUT",  "NodeSocketFloat",   0.0)
@@ -494,10 +485,12 @@ def build_peak_profile_group() -> bpy.types.NodeTree:
     g.links.new(n_erosion.outputs[0], n_cone_eroded.inputs[1])
 
     # SHELF (uses naive d, not sheared — keeps underwater plateau centred on
-    # the base regardless of apex offset).
+    # the base regardless of apex offset). Shore Width controls the radial
+    # smoothstep distance from base_radius (z=0) to base_radius + Shore Width
+    # (z=Shelf Depth) — i.e. how wide the visible beach drop-off is.
     n_shelf_outer = _add_node(g, "ShaderNodeMath", -200, -550, operation="ADD")
     g.links.new(n_base_scl.outputs["X"], n_shelf_outer.inputs[0])
-    g.links.new(gi.outputs["Shelf Radius"], n_shelf_outer.inputs[1])
+    g.links.new(gi.outputs["Shore Width"], n_shelf_outer.inputs[1])
     n_mr_shelf = _add_node(g, "ShaderNodeMapRange", 0, -550, interpolation_type="SMOOTHSTEP", clamp=True)
     g.links.new(n_d_naive.outputs[0],      n_mr_shelf.inputs["Value"])
     g.links.new(n_base_scl.outputs["X"],   n_mr_shelf.inputs["From Min"])
@@ -505,29 +498,10 @@ def build_peak_profile_group() -> bpy.types.NodeTree:
     g.links.new(n_zero.outputs[0],         n_mr_shelf.inputs["To Min"])
     g.links.new(gi.outputs["Shelf Depth"], n_mr_shelf.inputs["To Max"])
 
-    # REEF (default Reef Height=0 keeps it invisible; available if dialed up).
-    n_reef_center = _add_node(g, "ShaderNodeMath", -200, -750, operation="ADD")
-    g.links.new(n_base_scl.outputs["X"], n_reef_center.inputs[0])
-    g.links.new(gi.outputs["Reef Inset"], n_reef_center.inputs[1])
-    n_reef_delta = _add_node(g, "ShaderNodeMath", 0, -750, operation="SUBTRACT")
-    g.links.new(n_d_naive.outputs[0], n_reef_delta.inputs[0])
-    g.links.new(n_reef_center.outputs[0], n_reef_delta.inputs[1])
-    n_reef_abs = _add_node(g, "ShaderNodeMath", 200, -750, operation="ABSOLUTE")
-    g.links.new(n_reef_delta.outputs[0], n_reef_abs.inputs[0])
-    n_mr_reef = _add_node(g, "ShaderNodeMapRange", 400, -750, interpolation_type="SMOOTHSTEP", clamp=True)
-    g.links.new(n_reef_abs.outputs[0],      n_mr_reef.inputs["Value"])
-    g.links.new(n_zero.outputs[0],          n_mr_reef.inputs["From Min"])
-    g.links.new(gi.outputs["Reef Width"],   n_mr_reef.inputs["From Max"])
-    g.links.new(gi.outputs["Reef Height"],  n_mr_reef.inputs["To Min"])
-    g.links.new(n_zero.outputs[0],          n_mr_reef.inputs["To Max"])
-
-    # profile = cone_eroded + shelf + reef
+    # profile = cone_eroded + shelf
     n_h1 = _add_node(g, "ShaderNodeMath", 1200, -400, operation="ADD")
     g.links.new(n_cone_eroded.outputs[0], n_h1.inputs[0])
     g.links.new(n_mr_shelf.outputs["Result"], n_h1.inputs[1])
-    n_profile = _add_node(g, "ShaderNodeMath", 1400, -500, operation="ADD")
-    g.links.new(n_h1.outputs[0], n_profile.inputs[0])
-    g.links.new(n_mr_reef.outputs["Result"], n_profile.inputs[1])
 
     # Active mask & sentinel mix
     n_active = _add_node(g, "ShaderNodeMath", 1200, -700, operation="GREATER_THAN")
@@ -537,7 +511,7 @@ def build_peak_profile_group() -> bpy.types.NodeTree:
     n_mix.data_type = "FLOAT"; n_mix.clamp_factor = False
     g.links.new(n_active.outputs[0],   n_mix.inputs[0])
     g.links.new(gi.outputs["Sentinel"], n_mix.inputs["A"])
-    g.links.new(n_profile.outputs[0],  n_mix.inputs["B"])
+    g.links.new(n_h1.outputs[0],       n_mix.inputs["B"])
     g.links.new(n_mix.outputs[0], go.inputs["Height"])
 
     return g
@@ -557,10 +531,7 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
         _new_socket(g, f"Base {i}", "INPUT", "NodeSocketObject")
         _new_socket(g, f"Top {i}",  "INPUT", "NodeSocketObject")
     _new_socket(g, "Shelf Depth",     "INPUT", "NodeSocketFloat", -25.0, -200.0, 0.0)
-    _new_socket(g, "Shelf Radius",    "INPUT", "NodeSocketFloat", 200.0, 0.0, 1000.0)
-    _new_socket(g, "Reef Inset",      "INPUT", "NodeSocketFloat",  20.0, 0.0, 200.0)
-    _new_socket(g, "Reef Height",     "INPUT", "NodeSocketFloat",   0.0, 0.0, 50.0)
-    _new_socket(g, "Reef Width",      "INPUT", "NodeSocketFloat",  25.0, 1.0, 200.0)
+    _new_socket(g, "Shore Width",     "INPUT", "NodeSocketFloat",  40.0, 0.0, 500.0)
     _new_socket(g, "Cone Erosion",    "INPUT", "NodeSocketFloat",  12.0, 0.0, 50.0)
     _new_socket(g, "Erosion Scale",   "INPUT", "NodeSocketFloat",   0.035, 0.0001, 1.0)
     _new_socket(g, "Ring Break",      "INPUT", "NodeSocketFloat",  20.0, 0.0, 200.0)
@@ -608,10 +579,7 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
         g.links.new(p_in.outputs[f"Base {i}"],     inst.inputs["Base"])
         g.links.new(p_in.outputs[f"Top {i}"],      inst.inputs["Top"])
         g.links.new(p_in.outputs["Shelf Depth"],   inst.inputs["Shelf Depth"])
-        g.links.new(p_in.outputs["Shelf Radius"],  inst.inputs["Shelf Radius"])
-        g.links.new(p_in.outputs["Reef Inset"],    inst.inputs["Reef Inset"])
-        g.links.new(p_in.outputs["Reef Height"],   inst.inputs["Reef Height"])
-        g.links.new(p_in.outputs["Reef Width"],    inst.inputs["Reef Width"])
+        g.links.new(p_in.outputs["Shore Width"],   inst.inputs["Shore Width"])
         g.links.new(p_in.outputs["Cone Erosion"],  inst.inputs["Cone Erosion"])
         g.links.new(p_in.outputs["Erosion Scale"], inst.inputs["Erosion Scale"])
         g.links.new(p_in.outputs["Noise Seed"],    inst.inputs["Noise Seed"])
