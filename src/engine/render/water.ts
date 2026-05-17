@@ -36,6 +36,7 @@ import {
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
 import { buildFftDetailNormalTexture } from '@/engine/render/ocean-fft/cpu-bake'
+import { createFft2d, type Fft2dHandle } from '@/engine/render/ocean-fft/fft-tsl'
 import { createFoamFeedback } from '@/engine/render/ocean-fft/foam-feedback'
 import {
   createGpuOceanDisplacement,
@@ -637,6 +638,18 @@ export function createWaterMesh(
           driftZ: initialFoamDriftZ,
         })
       : null
+  // A9 foundation smoke test: `?fftverify=1` instantiates the
+  // standalone TSL radix-2 FFT pipeline (without integrating it
+  // into the displacement path) and dispatches it once per frame.
+  // The output texture isn't sampled anywhere yet — this is purely
+  // a "does the compute pipeline build + dispatch without
+  // crashing the renderer" check, useful for catching kernel-build
+  // errors before the full A9 integration lands. A successful run
+  // produces no visible difference; a failed kernel build is
+  // visible in the browser console.
+  const fftVerifyEnabled = params?.get('fftverify') === '1'
+  const fft2dHandle: Fft2dHandle | null =
+    fftVerifyEnabled && opts?.backend === 'webgpu' ? createFft2d({ N: 64 }) : null
   // `?wire=1` is an ORTHOGONAL toggle — works with classic, v2, and any
   // future shader variant. The old `?water=wire` is still honored for
   // backward compatibility.
@@ -2579,6 +2592,13 @@ export function createWaterMesh(
       foamLastFieldTime = field.time
       void foamFeedbackHandle.tick(dt, renderer)
     }
+    // A9 smoke test: dispatch the standalone FFT pipeline if
+    // enabled. Output is unused; this just exercises the
+    // kernel-build + dispatch path so we catch any errors in the
+    // browser console before full integration lands.
+    if (fft2dHandle) {
+      void fft2dHandle.dispatch(renderer)
+    }
     r.getDrawingBufferSize(_sceneDepthSize)
     const w = _sceneDepthSize.x | 0
     const h = _sceneDepthSize.y | 0
@@ -2669,6 +2689,7 @@ export function createWaterMesh(
     gpuChopHandle?.dispose()
     gpuSwellHandle?.dispose()
     foamFeedbackHandle?.dispose()
+    fft2dHandle?.dispose()
   }
 
   return {
