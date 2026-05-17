@@ -170,19 +170,43 @@ export function buildPhillipsSpectrum(params: PhillipsParams): SpectrumGrid {
       if (kLen2 > 0) {
         const kLen = Math.sqrt(kLen2)
         // Directional spreading: Mitsuyasu / Hasselmann `cos²ˢ(α/2)`
-        // form, where α is the angle between mode direction and wind.
-        // Derivation: `cos²(α/2) = (1 + cos α)/2 = (1 + k̂·ŵ)/2`. Raised
-        // to power `s`, the lobe stays one-sided (zero at θ_w+π) so the
-        // spectrum doesn't double-count waves running against the wind —
-        // the structural fix for "FFT ocean reads as standing sine
-        // waves" since the legacy Phillips `|k̂·ŵ|²` is even and treats
-        // ±k symmetrically. At s=1 the form collapses to `(1+cos α)/2`
-        // which has the same `cos² → 0 at perpendicular` shape Phillips
-        // had, only one-sided. Higher s narrows the lobe further.
+        // form with FREQUENCY-DEPENDENT `s` per Hasselmann 1980.
+        // Real ocean spectra have a NARROW lobe at the spectral peak
+        // (storm waves all line up) and a WIDER lobe at high k (short
+        // wind-driven ripples scatter in all directions). A constant
+        // `s` either has too-narrow short waves (visible "comb" of
+        // parallel high-k stripes) or too-wide swell.
+        //
+        // Hasselmann's recommended schedule:
+        //   k <= k_peak:  s = s_peak · (k / k_peak)^5
+        //   k >  k_peak:  s = s_peak · (k_peak / k)^2.5
+        //
+        // We use a softer exponent (0.8) on the high-k branch since
+        // the SoT-style game look benefits from SOME alignment at
+        // mid-k (chop) — full Hasselmann collapses to nearly
+        // isotropic too fast. Low-k branch SKIPPED — keep full
+        // alignment for swell. Real oceans do have wider sub-peak
+        // spread (storm waves arriving from one direction get
+        // weakened by older directional spread) but for arcade
+        // visuals, the bigger swell + chop distinction reads
+        // better when the dominant swell stays aligned.
+        //
+        // k_peak = 2π / L_peak where L_peak = V²/g (deep-water fully
+        // developed sea); equivalent to k_peak = g / V².
+        const kPeak = (1 / L)
+        const kRatio = kLen / kPeak
+        const effectiveSpread =
+          kRatio <= 1
+            ? directionalSpread
+            : directionalSpread * kRatio ** -0.8
         const dirDot = (kx * wdx + kz * wdz) / kLen
         const cosHalfSq = (1 + dirDot) * 0.5
         const dirFactor =
-          cosHalfSq <= 0 ? 0 : directionalSpread === 1 ? cosHalfSq : cosHalfSq ** directionalSpread
+          cosHalfSq <= 0
+            ? 0
+            : effectiveSpread === 1
+              ? cosHalfSq
+              : cosHalfSq ** effectiveSpread
         // Phillips radial: A · exp(−1/(kL)²) · D(θ) / k⁴.
         const kL2 = kLen2 * L * L
         const phillips =
