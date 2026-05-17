@@ -37,7 +37,12 @@ import { createReplayRecorder, type ReplayRecorder } from './engine/replay/recor
 import { getBestLap, recordLapTime } from './engine/save-state'
 import { createSimWorld } from './engine/sim/ecs/world'
 import { createPhysicsWorld } from './engine/sim/physics/rapier'
-import { createWaveField, defaultWaves } from './engine/sim/water/wave-field'
+import {
+  createSpectrumWaveField,
+  createWaveField,
+  defaultSpectrumParams,
+  defaultWaves,
+} from './engine/sim/water/wave-field'
 import { applyStoredWaterTuning } from './engine/water-debug-storage'
 import { loadBike } from './game/assets/bike-loader'
 import { loadManifest } from './game/assets/manifest'
@@ -118,7 +123,15 @@ async function boot() {
   const sim = createSimWorld()
   const chase = createChaseCamera(camera)
 
-  const waveField = createWaveField(defaultWaves())
+  // Wave field selection. `?waves=fft` opts into the Phase A1b
+  // Phillips-spectrum field: CPU buoyancy sums the top-K modes
+  // analytically and the GPU shader's wave iteration walks the
+  // same modes via `spectrumModesToGerstnerShape`. Default stays on
+  // the hand-tuned 6-wave Gerstner setup.
+  const waveField =
+    new URLSearchParams(window.location.search).get('waves') === 'fft'
+      ? createSpectrumWaveField(defaultSpectrumParams())
+      : createWaveField(defaultWaves())
   // Camera-locked water: the mesh follows the camera XZ so its dense
   // vertex region always covers the visible patch. Size shrinks from the
   // legacy 800 m world plane to 240 m centered on the camera (= 120 m
