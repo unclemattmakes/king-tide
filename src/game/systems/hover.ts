@@ -481,17 +481,18 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // (bow over crest fires, stern in deep trough hits the locally-airborne
     // gate and contributes nothing) pumps pitch angvel faster than Rapier's
     // default 2.5 angular damping can bleed it — the bike would otherwise
-    // pitch toward vertical inside a few seconds. Adds viscous resistance
-    // to pitch-axis rotation while grounded over water. Player pitch input
-    // still gets through, just heavier — appropriate for the "boat slamming
-    // through swell" feel. Skipped on land (ramp launches need responsive
-    // pitch) and skipped in air (free physics for flips).
+    // pitch toward vertical inside a few seconds. Adds modest viscous
+    // resistance to pitch-axis rotation while grounded over water. Kept
+    // low (2 vs Rapier's default 2.5) because per-corner buoyancy already
+    // caps the wave-forcing on submerged corners — pushing damping higher
+    // here makes the player's pitch input feel sticky on water and then
+    // suddenly loose when the bike pops above the surface.
     if (isGrounded && probe.isWater) {
       const rightWater = quatRotate(rb.rotation(), { x: 1, y: 0, z: 0 })
       const angvWater = rb.angvel()
       const pitchVelWater =
         angvWater.x * rightWater.x + angvWater.y * rightWater.y + angvWater.z * rightWater.z
-      const PITCH_WATER_DAMP = 6 // rad/s² per rad/s of pitch velocity
+      const PITCH_WATER_DAMP = 2 // rad/s² per rad/s of pitch velocity
       const aPitchDamp = -pitchVelWater * PITCH_WATER_DAMP
       rb.applyTorqueImpulse(
         {
