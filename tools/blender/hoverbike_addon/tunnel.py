@@ -1,38 +1,37 @@
-"""Tunnel tool — AI-spline-driven boolean carve.
+"""Tunnel tool — curve-bevel cylinder + boolean cut.
 
-.. deprecated::
-   The canonical tunnel rig is the hand-curve-driven seed in
+.. note::
+   The canonical tunnel rig for new tracks is the GN-driven seed in
    ``tracks-src/template-tunnels.blend`` (see
-   ``tools/blender/seed_template_tunnels.py``). This Python OT
-   approach is retained for the existing ``template-tunnel-island``
-   scene and will be deleted in a follow-up once that scene is
-   migrated or retired.
+   ``tools/blender/seed_template_tunnels.py``). When you're working in
+   that .blend, just duplicate ``tunnel_00_curve`` into the
+   ``Tunnel Curves`` collection — the interior + cutter sweeps update
+   live and the terrain boolean picks up new curves automatically. The
+   Build Tunnel operator here is for scenes that *don't* already have
+   the GN rig: it bakes a single tunnel from a single curve using the
+   Blender-native curve-bevel-to-cylinder flow.
 
-A tunnel is three things in lockstep:
+What Build Tunnel does (per click, on the active or named tunnel curve):
 
-  * ``tunnel_curve_main``     — user-edited Bezier through the hill.
-  * ``tunnel_main_cutter``    — closed manifold cylinder swept along
-                                the curve. Hidden from viewport +
-                                export, lives in a dedicated
-                                ``_hoverbike_tunnel_cutters``
-                                collection.
-  * ``tunnel_main_interior``  — inward-facing cylindrical shell along
-                                the same curve. ``kind="track"`` so
-                                the runtime trimesh collider attaches.
+  1. Set the curve's own bevel: ``Round`` profile, depth=radius,
+     ``use_fill_caps=True``, tagged ``kind="track"`` so it ships as
+     the visible interior. The curve stays live — Tab in, drag points,
+     the cylinder follows.
+  2. Make a *copy* of the curve datablock with bevel depth pumped out
+     by the wall thickness, convert it to mesh → closed manifold
+     cutter. Hidden, stashed in ``_hoverbike_tunnel_cutters``.
+  3. Add a Boolean DIFFERENCE modifier on the terrain mesh against
+     the cutter (EXACT solver). Cuts the mouth ring where the cutter
+     pierces the heightfield. No Solidify — the heightfield is a
+     sheet, the visible interior is the curve's own bevel.
 
-The terrain mesh carries a single Boolean DIFFERENCE modifier whose
-operand is the cutters *collection* (not a single object), so a
-second tunnel just drops another cutter into the collection and the
-modifier picks it up. A Solidify pre-pass extrudes the heightfield
-into a 200 m crust so the boolean has volume to carve through.
+Re-clicking Build Tunnel on the same curve rebuilds *its* cutter in
+place rather than stacking duplicates. Different curve → new tunnel.
 """
 
 from __future__ import annotations
 
-import math
-
 import bpy
-import mathutils
 from bpy.props import FloatProperty, IntProperty
 from bpy.types import Operator
 
@@ -44,10 +43,12 @@ from bpy.types import Operator
 TUNNEL_CURVE_NAME = "tunnel_curve_main"
 TUNNEL_PARENT_PREFIX = "tunnel_"
 TUNNEL_CUTTERS_COLLECTION = "_hoverbike_tunnel_cutters"
-TUNNEL_BOOLEAN_MOD_NAME = "HV_Tunnel_Cut"
-TUNNEL_SOLIDIFY_MOD_NAME = "HV_Tunnel_Solidify"
-TUNNEL_SOLIDIFY_THICKNESS = 200.0  # m — terrain extruded down by this much
+TUNNEL_BOOLEAN_MOD_PREFIX = "HV_Tunnel_Cut_"
+TUNNEL_SOLIDIFY_LEGACY_NAME = "HV_Tunnel_Solidify"  # purged on rebuild
 TUNNEL_MATERIAL_NAME = "mat_track_tunnel"
+
+# Custom-prop key on a tunnel curve that points at its cutter object.
+TUNNEL_CUTTER_PROP = "tunnel_cutter_name"
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -77,8 +78,8 @@ def _ensure_tunnel_material() -> bpy.types.Material:
 
 def _ensure_tunnel_cutters_collection(scene) -> bpy.types.Collection:
     """Get-or-create the hidden collection that holds every tunnel
-    cutter. Hidden in the viewport + render so the closed cylinder
-    doesn't show, but the collection still exists in the depsgraph so
+    cutter mesh. Hidden in the viewport + render so the closed
+    cylinder doesn't show, but it still exists in the depsgraph so
     the terrain's Boolean modifier evaluates against it."""
     from ._legacy import _find_layer_collection
 
@@ -94,222 +95,170 @@ def _ensure_tunnel_cutters_collection(scene) -> bpy.types.Collection:
     return col
 
 
-def _sample_tunnel_curve(curve_obj: bpy.types.Object, n_samples: int) -> list[dict]:
-    """Arc-length sampling of the tunnel curve. Returns
-    ``[{x, y, z, tx, ty, tz}, ...]`` in world coordinates. Unlike the
-    road sampler, we keep the curve's authored Z (the whole point of
-    a tunnel is to dive *below* terrain) — no terrain raycast."""
-    from ._legacy import _sample_curve_to_polyline
-
-    raw = _sample_curve_to_polyline(curve_obj)
-    if len(raw) < 2:
-        return []
-    cum = [0.0]
-    for i in range(len(raw) - 1):
-        a, b = raw[i], raw[i + 1]
-        cum.append(cum[-1] + math.sqrt(
-            (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2 + (b[2] - a[2]) ** 2
-        ))
-    total = cum[-1]
-    if total <= 0:
-        return []
-    samples: list[dict] = []
-    denom = max(1, n_samples - 1)
-    j = 0
-    for i in range(n_samples):
-        target = (i / denom) * total
-        while j < len(cum) - 1 and cum[j + 1] < target:
-            j += 1
-        seg_len = (cum[j + 1] - cum[j]) if (j + 1 < len(cum)) else 1.0
-        frac = (target - cum[j]) / seg_len if seg_len > 0 else 0.0
-        a = raw[j]
-        b = raw[j + 1] if (j + 1 < len(raw)) else raw[j]
-        x = a[0] + (b[0] - a[0]) * frac
-        y = a[1] + (b[1] - a[1]) * frac
-        z = a[2] + (b[2] - a[2]) * frac
-        dx = b[0] - a[0]
-        dy = b[1] - a[1]
-        dz = b[2] - a[2]
-        tl = math.sqrt(dx * dx + dy * dy + dz * dz) or 1.0
-        samples.append({
-            "x": x, "y": y, "z": z,
-            "tx": dx / tl, "ty": dy / tl, "tz": dz / tl,
-        })
-    return samples
-
-
-def _tunnel_ring_basis(
-    tx: float, ty: float, tz: float
-) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
-    """Pick a (right, up) basis perpendicular to a tangent so each
-    ring around the tunnel sits flat against the tube direction."""
-    t = mathutils.Vector((tx, ty, tz)).normalized()
-    world_up = mathutils.Vector((0.0, 0.0, 1.0))
-    if abs(t.dot(world_up)) > 0.95:
-        world_up = mathutils.Vector((1.0, 0.0, 0.0))
-    right = t.cross(world_up).normalized()
-    up = right.cross(t).normalized()
-    return (right.x, right.y, right.z), (up.x, up.y, up.z)
-
-
-def _build_tunnel_interior_mesh(
-    name: str, samples: list[dict], *, radius: float, segments: int
-) -> bpy.types.Mesh:
-    """Inward-facing cylindrical shell along the sampled curve. No end
-    caps — the tunnel is open at entrance + exit so the player can
-    drive in/out."""
-    me = bpy.data.meshes.new(name)
-    if len(samples) < 2 or segments < 3:
-        me.from_pydata([], [], [])
-        return me
-    verts: list[tuple[float, float, float]] = []
-    for s in samples:
-        right, up = _tunnel_ring_basis(s["tx"], s["ty"], s["tz"])
-        rx, ry, rz = right
-        ux, uy, uz = up
-        cx, cy, cz = s["x"], s["y"], s["z"]
-        for i in range(segments):
-            theta = 2.0 * math.pi * i / segments
-            cs = math.cos(theta)
-            sn = math.sin(theta)
-            ox = rx * cs * radius + ux * sn * radius
-            oy = ry * cs * radius + uy * sn * radius
-            oz = rz * cs * radius + uz * sn * radius
-            verts.append((cx + ox, cy + oy, cz + oz))
-    faces: list[tuple[int, ...]] = []
-    for j in range(len(samples) - 1):
-        for i in range(segments):
-            i_next = (i + 1) % segments
-            a = j * segments + i
-            b = j * segments + i_next
-            c = (j + 1) * segments + i_next
-            d = (j + 1) * segments + i
-            # Reverse winding so normals point inward toward the
-            # tunnel axis.
-            faces.append((a, d, c, b))
-    me.from_pydata(verts, [], faces)
-    me.update(calc_edges=True)
-    me.shade_smooth()
-    return me
-
-
-def _build_tunnel_cutter_mesh(
-    name: str,
-    samples: list[dict],
+def _apply_curve_bevel(
+    curve_obj: bpy.types.Object,
     *,
     radius: float,
     segments: int,
-    end_extend: float,
-) -> bpy.types.Mesh:
-    """Closed manifold cylinder swept along the samples. Used as the
-    Boolean DIFFERENCE operand on the terrain. Extended past sampled
-    endpoints by ``end_extend`` so the cut clears the terrain surface
-    at the tunnel mouth."""
-    me = bpy.data.meshes.new(name)
-    if len(samples) < 2 or segments < 3:
-        me.from_pydata([], [], [])
-        return me
+    fill_caps: bool,
+) -> None:
+    """Configure a curve datablock so it renders as a cylinder along
+    its splines. ``bevel_resolution`` is rounded from a target side
+    count (4 segments per ring at resolution 1, 8 at 2, ...).
+    ``use_fill_caps`` closes the ends — required for the cutter copy
+    (boolean needs a manifold operand), disabled for the visible
+    interior so the player can ride through."""
+    cd = curve_obj.data
+    cd.bevel_mode = "ROUND"
+    cd.bevel_depth = float(radius)
+    # bevel_resolution → 4*(res+1) radial sides. Map "segments" → res.
+    cd.bevel_resolution = max(0, (int(segments) - 4) // 4)
+    cd.use_fill_caps = bool(fill_caps)
+    # Keep authored resolution_u alone (defaults to 12 from new-curve
+    # creators) so the user can crank it for smoothness without us
+    # overriding it on every rebuild.
 
-    extended: list[dict] = []
-    s0 = samples[0]
-    extended.append({
-        **s0,
-        "x": s0["x"] - s0["tx"] * end_extend,
-        "y": s0["y"] - s0["ty"] * end_extend,
-        "z": s0["z"] - s0["tz"] * end_extend,
-    })
-    extended.extend(samples)
-    sN = samples[-1]
-    extended.append({
-        **sN,
-        "x": sN["x"] + sN["tx"] * end_extend,
-        "y": sN["y"] + sN["ty"] * end_extend,
-        "z": sN["z"] + sN["tz"] * end_extend,
-    })
 
-    verts: list[tuple[float, float, float]] = []
-    for s in extended:
-        right, up = _tunnel_ring_basis(s["tx"], s["ty"], s["tz"])
-        rx, ry, rz = right
-        ux, uy, uz = up
-        cx, cy, cz = s["x"], s["y"], s["z"]
-        for i in range(segments):
-            theta = 2.0 * math.pi * i / segments
-            cs = math.cos(theta)
-            sn = math.sin(theta)
-            ox = rx * cs * radius + ux * sn * radius
-            oy = ry * cs * radius + uy * sn * radius
-            oz = rz * cs * radius + uz * sn * radius
-            verts.append((cx + ox, cy + oy, cz + oz))
-
-    faces: list[tuple[int, ...]] = []
-    for j in range(len(extended) - 1):
-        for i in range(segments):
-            i_next = (i + 1) % segments
-            a = j * segments + i
-            b = j * segments + i_next
-            c = (j + 1) * segments + i_next
-            d = (j + 1) * segments + i
-            faces.append((a, b, c, d))
-    front_cap = tuple(range(segments - 1, -1, -1))
-    faces.append(front_cap)
-    back_start = (len(extended) - 1) * segments
-    back_cap = tuple(range(back_start, back_start + segments))
-    faces.append(back_cap)
-
-    me.from_pydata(verts, [], faces)
-    me.update(calc_edges=True)
-    return me
+def _strip_solidify_legacy(terrain: bpy.types.Object) -> None:
+    """Earlier versions stacked a 200 m Solidify modifier on the
+    terrain so the boolean could carve a volume. It worked
+    geometrically but the downward crust poked through other cliffs
+    at oblique angles and made the terrain look fractured. The
+    template-tunnels rig dropped it and so do we — remove any leftover
+    instance so old .blends silently heal on first rebuild."""
+    mod = terrain.modifiers.get(TUNNEL_SOLIDIFY_LEGACY_NAME)
+    if mod is not None:
+        terrain.modifiers.remove(mod)
 
 
 def _next_tunnel_index() -> int:
-    """First free index NN such that ``tunnel_NN_*`` isn't used yet."""
+    """First free index NN such that ``tunnel_NN_cutter`` isn't used."""
     i = 0
     while True:
-        name = f"{TUNNEL_PARENT_PREFIX}{i:02d}_interior"
+        name = f"{TUNNEL_PARENT_PREFIX}{i:02d}_cutter"
         if name not in bpy.data.objects:
             return i
         i += 1
 
 
-def _ensure_terrain_tunnel_boolean(
-    terrain: bpy.types.Object, cutters: bpy.types.Collection
+def _resolve_tunnel_curve(context) -> bpy.types.Object | None:
+    """Use the active object if it's a curve; otherwise fall back to
+    the legacy ``tunnel_curve_main`` singleton. Returns ``None`` if
+    neither yields a curve."""
+    act = context.view_layer.objects.active
+    if act is not None and act.type == "CURVE":
+        return act
+    return bpy.data.objects.get(TUNNEL_CURVE_NAME)
+
+
+def _build_cutter_from_curve(
+    curve_obj: bpy.types.Object,
+    *,
+    radius: float,
+    segments: int,
+    end_extend: float,
+    cutter_name: str,
+) -> bpy.types.Object:
+    """Duplicate the curve's datablock, pump up its bevel by the
+    wall thickness, optionally extend its endpoints along their
+    tangents to clear the terrain at the mouth, then convert the
+    duplicate to a mesh.
+
+    The result is a closed manifold cylinder following the curve's
+    centreline. Owned by the cutters collection, hidden, returned to
+    the caller for boolean wiring."""
+    src_data: bpy.types.Curve = curve_obj.data
+    dup_data = src_data.copy()
+    dup_data.name = f"{cutter_name}_curve"
+    dup_data.bevel_mode = "ROUND"
+    dup_data.bevel_depth = float(radius)
+    dup_data.bevel_resolution = max(0, (int(segments) - 4) // 4)
+    dup_data.use_fill_caps = True
+
+    if end_extend > 0.0:
+        for spline in dup_data.splines:
+            if spline.type != "BEZIER" or len(spline.bezier_points) < 2:
+                continue
+            bps = spline.bezier_points
+            a, b = bps[0].co, bps[1].co
+            dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
+            n = (dx * dx + dy * dy + dz * dz) ** 0.5
+            if n > 1e-6:
+                k = end_extend / n
+                bps[0].co = (a.x + dx * k, a.y + dy * k, a.z + dz * k)
+                bps[0].handle_left = (
+                    bps[0].handle_left.x + dx * k,
+                    bps[0].handle_left.y + dy * k,
+                    bps[0].handle_left.z + dz * k,
+                )
+                bps[0].handle_right = (
+                    bps[0].handle_right.x + dx * k,
+                    bps[0].handle_right.y + dy * k,
+                    bps[0].handle_right.z + dz * k,
+                )
+            p, q = bps[-1].co, bps[-2].co
+            dx, dy, dz = p.x - q.x, p.y - q.y, p.z - q.z
+            n = (dx * dx + dy * dy + dz * dz) ** 0.5
+            if n > 1e-6:
+                k = end_extend / n
+                bps[-1].co = (p.x + dx * k, p.y + dy * k, p.z + dz * k)
+                bps[-1].handle_left = (
+                    bps[-1].handle_left.x + dx * k,
+                    bps[-1].handle_left.y + dy * k,
+                    bps[-1].handle_left.z + dz * k,
+                )
+                bps[-1].handle_right = (
+                    bps[-1].handle_right.x + dx * k,
+                    bps[-1].handle_right.y + dy * k,
+                    bps[-1].handle_right.z + dz * k,
+                )
+
+    dup_obj = bpy.data.objects.new(cutter_name, dup_data)
+    dup_obj.matrix_world = curve_obj.matrix_world.copy()
+
+    # Convert the duplicate to mesh. Done via the low-level path so we
+    # don't have to stage selection/active state for bpy.ops. Link
+    # then update the view layer so the depsgraph picks up the new
+    # object — without that, evaluated_get returns an unevaluated
+    # clone and new_from_object emits an empty mesh.
+    scene_coll = bpy.context.scene.collection
+    scene_coll.objects.link(dup_obj)
+    try:
+        bpy.context.view_layer.update()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        eval_obj = dup_obj.evaluated_get(depsgraph)
+        new_mesh = bpy.data.meshes.new_from_object(
+            eval_obj, preserve_all_data_layers=False, depsgraph=depsgraph
+        )
+        new_mesh.name = f"{cutter_name}_mesh"
+        dup_obj.data = new_mesh
+        bpy.data.curves.remove(dup_data)
+    finally:
+        scene_coll.objects.unlink(dup_obj)
+
+    return dup_obj
+
+
+def _attach_terrain_boolean(
+    terrain: bpy.types.Object,
+    cutter: bpy.types.Object,
+    *,
+    mod_name: str,
 ) -> None:
-    """Stack Solidify+Boolean on the terrain so cutters can carve a
-    real tube through it. Solidify (offset=-1, thickness=200,
-    use_rim=False) extrudes the sheet downward into a thick crust so
-    the boolean has volume to carve."""
-    sol = terrain.modifiers.get(TUNNEL_SOLIDIFY_MOD_NAME)
-    if sol is None:
-        sol = terrain.modifiers.new(name=TUNNEL_SOLIDIFY_MOD_NAME, type="SOLIDIFY")
-    sol.thickness = TUNNEL_SOLIDIFY_THICKNESS
-    sol.offset = -1.0
-    sol.use_rim = False
-
-    mod = terrain.modifiers.get(TUNNEL_BOOLEAN_MOD_NAME)
+    """Stack a Boolean DIFFERENCE modifier on the terrain pointing at
+    ``cutter``. One modifier per tunnel — keeps each carve independent
+    so deleting a tunnel just removes its modifier. EXACT solver, no
+    self-intersection check (use_self=False — the 148k-vert terrain
+    asks the solver for ~58 GB if it's on)."""
+    mod = terrain.modifiers.get(mod_name)
     if mod is None:
-        mod = terrain.modifiers.new(name=TUNNEL_BOOLEAN_MOD_NAME, type="BOOLEAN")
+        mod = terrain.modifiers.new(name=mod_name, type="BOOLEAN")
     mod.operation = "DIFFERENCE"
-    mod.operand_type = "COLLECTION"
-    mod.collection = cutters
+    mod.operand_type = "OBJECT"
+    mod.object = cutter
     mod.solver = "EXACT"
-
-    # Belt-and-braces: ensure modifier order is Solidify → Boolean.
-    names = [m.name for m in terrain.modifiers]
-    sol_idx = names.index(TUNNEL_SOLIDIFY_MOD_NAME)
-    cut_idx = names.index(TUNNEL_BOOLEAN_MOD_NAME)
-    if sol_idx > cut_idx:
-        prev_active = bpy.context.view_layer.objects.active
-        bpy.context.view_layer.objects.active = terrain
-        try:
-            bpy.ops.object.modifier_move_to_index(
-                modifier=TUNNEL_BOOLEAN_MOD_NAME,
-                index=len(terrain.modifiers) - 1,
-            )
-        except RuntimeError:
-            pass
-        finally:
-            bpy.context.view_layer.objects.active = prev_active
+    mod.use_self = False
+    mod.show_viewport = True
 
 
 def _add_tunnel_starter_curve(scene) -> bpy.types.Object:
@@ -319,6 +268,7 @@ def _add_tunnel_starter_curve(scene) -> bpy.types.Object:
         return existing
     curve_data = bpy.data.curves.new(TUNNEL_CURVE_NAME, type="CURVE")
     curve_data.dimensions = "3D"
+    curve_data.resolution_u = 24
     spline = curve_data.splines.new(type="BEZIER")
     spline.bezier_points.add(3)
     coords = [(-60, 0, 10), (-20, 0, 12), (20, 0, 12), (60, 0, 10)]
@@ -327,7 +277,6 @@ def _add_tunnel_starter_curve(scene) -> bpy.types.Object:
         bp.handle_left_type = "AUTO"
         bp.handle_right_type = "AUTO"
     spline.use_cyclic_u = False
-    curve_data.resolution_u = 24
     obj = bpy.data.objects.new(TUNNEL_CURVE_NAME, curve_data)
     obj["kind"] = "tunnel_curve"
     scene.collection.objects.link(obj)
@@ -359,25 +308,107 @@ class HOVERBIKE_OT_add_tunnel_starter_curve(Operator):
         return {"FINISHED"}
 
 
+def build_tunnel_from_curve(
+    scene,
+    curve: bpy.types.Object,
+    terrain: bpy.types.Object,
+    *,
+    radius: float,
+    wall_thickness: float,
+    segments: int,
+    end_extend: float,
+) -> bpy.types.Object:
+    """Bake a tunnel from a single curve. Public entry point used by
+    the Build Tunnel operator *and* by ``seed_template_tunnel_island``
+    so both go through the same path.
+
+    Returns the cutter mesh object."""
+    _apply_curve_bevel(curve, radius=radius, segments=segments, fill_caps=False)
+    curve["kind"] = "track"
+    if not curve.data.materials:
+        curve.data.materials.append(_ensure_tunnel_material())
+
+    prev_cutter_name = curve.get(TUNNEL_CUTTER_PROP)
+    prev_cutter = bpy.data.objects.get(prev_cutter_name) if prev_cutter_name else None
+    if prev_cutter is not None:
+        cutter_name = prev_cutter.name
+        mod_name = f"{TUNNEL_BOOLEAN_MOD_PREFIX}{cutter_name}"
+        old_mod = terrain.modifiers.get(mod_name)
+        if old_mod is not None:
+            old_mod.object = None
+        mesh_data = prev_cutter.data if prev_cutter.type == "MESH" else None
+        bpy.data.objects.remove(prev_cutter, do_unlink=True)
+        if mesh_data is not None and mesh_data.users == 0:
+            bpy.data.meshes.remove(mesh_data)
+    else:
+        idx = _next_tunnel_index()
+        cutter_name = f"{TUNNEL_PARENT_PREFIX}{idx:02d}_cutter"
+        mod_name = f"{TUNNEL_BOOLEAN_MOD_PREFIX}{cutter_name}"
+
+    cutter_obj = _build_cutter_from_curve(
+        curve,
+        radius=radius + wall_thickness,
+        segments=segments,
+        end_extend=end_extend,
+        cutter_name=cutter_name,
+    )
+    cutter_obj["kind"] = "tunnel_cutter"
+    cutter_obj["tunnel_curve"] = curve.name
+    cutter_obj.display_type = "WIRE"
+    cutters_col = _ensure_tunnel_cutters_collection(scene)
+    cutters_col.objects.link(cutter_obj)
+    cutter_obj.hide_render = True
+    cutter_obj.hide_set(True)
+
+    curve[TUNNEL_CUTTER_PROP] = cutter_obj.name
+
+    _strip_solidify_legacy(terrain)
+    _attach_terrain_boolean(terrain, cutter_obj, mod_name=mod_name)
+    return cutter_obj
+
+
 class HOVERBIKE_OT_build_tunnel(Operator):
-    """Sweep a cutter cylinder + an interior shell along the active
-    tunnel curve, and ensure the terrain mesh's Boolean DIFFERENCE
-    modifier targets the cutters collection."""
+    """Bake a tunnel from the active (or named) tunnel curve.
+
+    Sets the curve's own bevel to a closed cylinder for the visible
+    interior, then duplicates the curve, pumps the bevel out by the
+    wall thickness, converts the duplicate to a manifold mesh, stashes
+    it as the cutter, and adds a Boolean DIFFERENCE modifier on the
+    terrain so the mouth ring is cut where the cutter pierces the
+    surface.
+
+    Re-clicking on the same curve rebuilds its cutter in place. To
+    add a *new* tunnel, select a different curve first."""
 
     bl_idname = "hoverbike.build_tunnel"
     bl_label = "Build Tunnel"
-    bl_description = "Carve a tunnel through the terrain along tunnel_curve_main"
+    bl_description = "Carve a tunnel through the terrain along the active tunnel curve"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
         from ._legacy import _largest_terrain_mesh
 
         scene = context.scene
-        curve = bpy.data.objects.get(TUNNEL_CURVE_NAME)
+
+        # template-tunnels.blend has its own live GN rig: a
+        # ``tunnels_cutter`` mesh whose GN modifier sweeps every curve
+        # in the ``Tunnel Curves`` collection. Don't fight it — clicking
+        # Build Tunnel there should redirect the user, not stamp a
+        # competing curve-bevel system on top.
+        gn_cutter = bpy.data.objects.get("tunnels_cutter")
+        if gn_cutter is not None and any(m.type == "NODES" for m in gn_cutter.modifiers):
+            self.report(
+                {"INFO"},
+                "This scene uses the GN tunnel rig — duplicate a curve in 'Tunnel Curves' "
+                "(Shift-D) to add a new tunnel. The sweep + terrain boolean update live.",
+            )
+            return {"CANCELLED"}
+
+        curve = _resolve_tunnel_curve(context)
         if curve is None or curve.type != "CURVE":
             self.report(
                 {"ERROR"},
-                f"No {TUNNEL_CURVE_NAME} in scene. Click *Add Tunnel Starter Curve* first.",
+                "Select a Bezier curve, or click *Add Tunnel Starter Curve* first.",
             )
             return {"CANCELLED"}
         terrain = _largest_terrain_mesh()
@@ -387,54 +418,24 @@ class HOVERBIKE_OT_build_tunnel(Operator):
 
         radius = float(getattr(scene, "hoverbike_tunnel_radius", 8.0))
         wall_thickness = float(getattr(scene, "hoverbike_tunnel_wall_thickness", 1.0))
-        n_samples = int(getattr(scene, "hoverbike_tunnel_samples", 32))
         segments = int(getattr(scene, "hoverbike_tunnel_segments", 14))
         end_extend = float(getattr(scene, "hoverbike_tunnel_end_extend", 4.0))
-        if radius <= 0 or n_samples < 2 or segments < 3:
-            self.report({"ERROR"}, "Invalid tunnel parameters — fix radius / samples / segments.")
+        if radius <= 0 or segments < 3:
+            self.report({"ERROR"}, "Invalid tunnel parameters — fix radius / segments.")
             return {"CANCELLED"}
 
-        samples = _sample_tunnel_curve(curve, n_samples)
-        if not samples:
-            self.report({"ERROR"}, f"Couldn't sample {curve.name!r} (need at least 2 control points).")
-            return {"CANCELLED"}
-
-        idx = _next_tunnel_index()
-        cutter_mesh = _build_tunnel_cutter_mesh(
-            f"{TUNNEL_PARENT_PREFIX}{idx:02d}_cutter_mesh",
-            samples,
-            radius=radius + wall_thickness,
+        cutter = build_tunnel_from_curve(
+            scene, curve, terrain,
+            radius=radius,
+            wall_thickness=wall_thickness,
             segments=segments,
             end_extend=end_extend,
         )
-        cutter_obj = bpy.data.objects.new(f"{TUNNEL_PARENT_PREFIX}{idx:02d}_cutter", cutter_mesh)
-        cutter_obj["kind"] = "tunnel_cutter"
-        cutter_obj.display_type = "WIRE"
-        cutters_col = _ensure_tunnel_cutters_collection(scene)
-        cutters_col.objects.link(cutter_obj)
-        cutter_obj.hide_render = True
-        cutter_obj.hide_set(True)
-
-        interior_mesh = _build_tunnel_interior_mesh(
-            f"{TUNNEL_PARENT_PREFIX}{idx:02d}_interior_mesh",
-            samples,
-            radius=radius,
-            segments=segments,
-        )
-        interior_obj = bpy.data.objects.new(
-            f"{TUNNEL_PARENT_PREFIX}{idx:02d}_interior", interior_mesh
-        )
-        interior_obj["kind"] = "track"
-        interior_obj["tunnel_curve"] = curve.name
-        interior_obj.data.materials.append(_ensure_tunnel_material())
-        scene.collection.objects.link(interior_obj)
-
-        _ensure_terrain_tunnel_boolean(terrain, cutters_col)
 
         self.report(
             {"INFO"},
-            f"Built {interior_obj.name}: {len(samples)} samples, radius {radius:.1f}m. "
-            f"Terrain boolean cut via {cutters_col.name}.",
+            f"Built {cutter.name} from {curve.name}: r={radius:.1f}m, wall={wall_thickness:.2f}m. "
+            f"Edit the curve and re-click Build Tunnel to update.",
         )
         return {"FINISHED"}
 
@@ -473,22 +474,26 @@ def register() -> None:
     bpy.types.Scene.hoverbike_tunnel_samples = IntProperty(
         name="Tunnel samples",
         description=(
-            "Number of arc-length samples along the tunnel curve. "
-            "Higher = smoother tube, denser cutter, slower boolean."
+            "Legacy — no longer used. Curve smoothness is governed by the curve's own "
+            "resolution_u (in Object Data → Shape)."
         ),
         default=32, min=4, max=256,
     )
     bpy.types.Scene.hoverbike_tunnel_segments = IntProperty(
         name="Tunnel segments",
-        description="Number of radial sides per cross-section ring. 12-16 reads as a smooth tube; 6 reads as a hex pipe.",
+        description=(
+            "Number of radial sides per cross-section ring. 12–16 reads as a smooth tube; "
+            "6 reads as a hex pipe. Rounded internally to the nearest multiple of 4."
+        ),
         default=14, min=3, max=64,
     )
     bpy.types.Scene.hoverbike_tunnel_end_extend = FloatProperty(
         name="Tunnel end extend (m)",
         description=(
-            "Distance the cutter pushes past the curve's endpoints along the tangent. "
-            "Ensures the boolean cut clears the terrain surface at the tunnel mouth even when "
-            "the user's endpoints land right on the hillside."
+            "Distance the cutter's endpoints are pushed past the curve's endpoints along the "
+            "tangent. Ensures the boolean cut clears the terrain surface at the mouth even when "
+            "the user's endpoints land right on the hillside. Applied only to the cutter copy — "
+            "the visible interior keeps the curve's authored endpoints."
         ),
         default=4.0, min=0.0, max=50.0, precision=2,
     )

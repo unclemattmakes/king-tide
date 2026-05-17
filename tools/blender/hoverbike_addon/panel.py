@@ -357,21 +357,35 @@ class HOVERBIKE_PT_track_tunnels(_HoverbikeTrackSubPanelBase, Panel):
 
         layout = self.layout
         scene = context.scene
+
+        # If the scene has the template-tunnels GN rig, point the user
+        # at the right workflow and hide the operator chrome — clicking
+        # Build Tunnel there would stamp a competing curve-bevel system
+        # on top of the live GN sweep.
+        gn_cutter = bpy.data.objects.get("tunnels_cutter")
+        if gn_cutter is not None and any(m.type == "NODES" for m in gn_cutter.modifiers):
+            layout.label(text="GN rig detected — add curves to", icon="INFO")
+            layout.label(text="'Tunnel Curves' (Shift-D a curve).")
+            n_curves = 0
+            curves_col = bpy.data.collections.get("Tunnel Curves")
+            if curves_col is not None:
+                n_curves = sum(1 for o in curves_col.objects if o.type == "CURVE")
+            if n_curves > 0:
+                layout.label(text=f"{n_curves} tunnel curve(s) in scene", icon="MOD_BOOLEAN")
+            return
+
         layout.operator("hoverbike.add_tunnel_starter_curve", icon="CURVE_BEZCURVE")
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_tunnel_radius", text="Radius")
         row.prop(scene, "hoverbike_tunnel_wall_thickness", text="Wall")
-        row = layout.row(align=True)
-        row.prop(scene, "hoverbike_tunnel_samples", text="Samples")
-        row.prop(scene, "hoverbike_tunnel_segments", text="Sides")
+        layout.prop(scene, "hoverbike_tunnel_segments", text="Sides")
         layout.prop(scene, "hoverbike_tunnel_end_extend", text="End extend (m)")
         layout.operator("hoverbike.build_tunnel", icon="MESH_CYLINDER")
         if bpy.data.objects.get(TUNNEL_CURVE_NAME):
-            layout.label(text="Edit tunnel_curve_main, then Build", icon="INFO")
-        # Count existing tunnels for quick visual feedback.
+            layout.label(text="Edit the curve, then Build", icon="INFO")
         n_tunnels = sum(
             1 for o in bpy.data.objects
-            if o.name.startswith(TUNNEL_PARENT_PREFIX) and o.name.endswith("_interior")
+            if o.name.startswith(TUNNEL_PARENT_PREFIX) and o.name.endswith("_cutter")
         )
         if n_tunnels > 0:
             layout.label(text=f"{n_tunnels} tunnel(s) built", icon="MOD_BOOLEAN")
@@ -436,6 +450,24 @@ class HOVERBIKE_PT_track_downtown(_HoverbikeTrackSubPanelBase, Panel):
         layout.prop(scene, "hoverbike_downtown_conform", text="Conform to terrain")
         layout.operator("hoverbike.add_downtown", icon="MESH_CUBE")
         layout.label(text="Spawns at the 3D cursor.", icon="INFO")
+
+        # Edit-in-place row: when a downtown_NN (or any child) is
+        # selected, the user can pull its current params into these
+        # sliders, tweak, and rebuild without losing the placement.
+        active = context.view_layer.objects.active
+        active_dt: bpy.types.Object | None = None
+        cur = active
+        while cur is not None:
+            if cur.get("kind") == "downtown":
+                active_dt = cur
+                break
+            cur = cur.parent
+        if active_dt is not None:
+            layout.separator()
+            layout.label(text=f"Edit: {active_dt.name}", icon="MOD_BUILD")
+            row = layout.row(align=True)
+            row.operator("hoverbike.pick_downtown_settings", text="Pick Settings", icon="EYEDROPPER")
+            row.operator("hoverbike.rebuild_downtown", text="Rebuild", icon="FILE_REFRESH")
 
 
 class HOVERBIKE_PT_track_ramps(_HoverbikeTrackSubPanelBase, Panel):
