@@ -7,46 +7,52 @@ shipping water.
 
 ## Resuming this work
 
-This branch was developed in a remote container with no browser-automation
-MCP attached, so visual A/B validation has been deferred to the local
-operator. Latest checkpoint: phase **A2** (full-spectrum GPU IFFT for
-vertex displacement). Pull the branch and you have everything Phase C +
-A1 + A2 + A4a produced.
+`?water=fft&waves=fft` on the lagoon track at sunset now reads as
+recognizably SoT-flavored ocean: 3 FFT cascades (swell + chop + long
+swell) with cross wind directions, Mitsuyasu directional spread,
+Hasselmann frequency-dependent spread, choppiness peak-mask SSS,
+fibrous Jacobian foam. Phase A2 + A3 done, A5 mostly done, and a
+new **Phase A7 — SoT visual polish** push landed beyond the
+original plan. The A7 section below has the technique-by-technique
+walkthrough; commit history `git log --oneline origin/main..HEAD`
+reads as a phase-by-phase history of the session.
 
 To pick up:
-1. `git checkout claude/fft-ocean-waves && git pull` — get to the head.
-2. `pnpm install && pnpm dev` — local dev server. The water shader path
-   responds to URL flags (see below) so A/B is `cmd/ctrl+click` between
-   tabs.
-3. Read the **Current status** table below — done columns describe what
-   exists in the code, todo columns describe what's pending. Each ✅ row
-   names the file(s) that landed.
-4. **Validation gates not yet exercised** are flagged inline: search the
-   table for "Validation". Each ⬜ row's "Notes" column describes the
-   intended deliverable + main risks.
-5. The most natural next step is **finishing A5** (debug menu). The
-   choppiness λ and sea-state intensity sliders landed and live-tune
-   the displacement kernel via uniform writes. Wind speed / direction /
-   cutoff sliders are still open — they need a live spectrum rebuild
-   on slider drag-end (CPU `buildPhillipsSpectrum` + GPU `spectrumTex`
-   data upload + `selectTopKModes` for the CPU sampler). After that
-   the natural follow-on is the visual tune itself: find the spectrum
-   params that make `?water=fft&waves=fft` read as clearly better
-   than the v2 Gerstner default. The FFT path currently shows visible
-   horizontal banding from the N=32 grid; bumping N or adding a
-   second cascade may also be part of that tune.
-6. **Open questions** (later in this doc) are decisions deferred to the
-   tuning pass — none block forward progress, all benefit from at least
-   one round of in-browser eyeballing first.
+1. `git pull` — `claude/fft-ocean-waves` head has everything.
+2. `pnpm install && pnpm dev` — local dev server.
+3. **Eyeball it first.** Open
+   `http://localhost:5192/?race=1&track=lagoon&bike=racer&water=fft&waves=fft`
+   in one tab and `?water=v2` in another, cmd/ctrl-click between
+   them. The FFT path should read clearly as ocean now, not as
+   "sand" or "venetian blinds" — those were earlier failure modes
+   captured in commit history if you're curious what was wrong
+   before.
+4. Read the **Current status** table — `✅ done` rows say what
+   landed and where; `🟡 partial` rows say what's still open;
+   `⬜ todo` are blank slates. Each row names the file(s).
+5. The **highest-leverage remaining work** (in rough rank order):
+   - **Foam feedback buffer** (the "single biggest amateur-vs-pro
+     gap" per the research summary). Needs ping-pong storage
+     textures + decay kernel; ~45–60 min focused work. Design
+     notes inline in commit `05e1417`'s body and in the
+     "Deferred work" section below.
+   - **Real radix-2 FFT** in TSL. Replaces the O(N⁴) direct DFT
+     in `gpu-bake.ts`. Required if N≥128 is wanted. Roughly the
+     same effort as the foam buffer.
+   - **Wind direction + cutoff sliders** in the water-debug menu.
+     Same orchestration pattern as the already-landed wind-speed
+     slider (`applySpectrumParams` in `water.ts`). ~30 min.
+6. **Open questions** (later in this doc) are decisions deferred
+   to a future tuning pass — none block forward progress.
 
 URL flags to A/B-test in dev:
 
 | URL | What it activates |
 | --- | --- |
-| `?water=v2` (or no flag) | Default: 6-wave Gerstner + procedural detail cascade. |
-| `?water=fft` | C2/C3: detail cascade is a Phillips-spectrum IFFT bake. WebGPU runs the live GPU compute kernel; WebGL2 falls back to a static CPU bake. |
-| `?waves=fft` | A1b: big-wave field is a top-32 Phillips spectrum sum (instead of 6-wave Gerstner). CPU buoyancy and GPU shader both read the same modes, kept locked by `spectrumModesToGerstnerShape`. |
-| `?water=fft&waves=fft` | Both layers on Phillips, GPU vertex displacement reads the full-spectrum IFFT texture (A2 path). No top-K truncation; the full N² Phillips grid contributes to the visible silhouette. Buoyancy still uses the top-K analytic sum so the disagreement is bounded by the truncation residual. |
+| `?water=v2` (or no flag) | Default: 6-wave Gerstner + procedural detail cascade. The shipping look. |
+| `?water=fft` | Detail cascade is a Phillips-spectrum IFFT bake (C2/C3). WebGPU runs the live GPU compute kernel; WebGL2 falls back to a static CPU bake. Big-wave silhouette unchanged unless `?waves=fft` is also set. |
+| `?waves=fft` | A1b: big-wave field is a top-K Phillips spectrum sum on the analytic path. CPU buoyancy and GPU shader both read the same modes, kept locked by `spectrumModesToGerstnerShape`. |
+| `?water=fft&waves=fft` | **The full SoT-style path** (A2 + A3 + A7). Three FFT cascades (wind sea + chop + long swell) drive vertex displacement; Jacobian alpha drives foam; choppiness peak-mask drives SSS color. Mitsuyasu cos²ˢ(α/2) directional spread + Hasselmann frequency-dependent `s` schedule. CPU buoyancy stays on top-K analytic of cascade 0 only (~5% gap from full-grid). **This is what to look at for the current state of the migration.** |
 | `?water=classic` | Pre-existing legacy heightfield. Untouched by this migration. |
 
 ## Current status
@@ -66,10 +72,13 @@ URL flags to A/B-test in dev:
 | A3 — Jacobian-based foam | ✅ done | `water.ts` captures `displacementTexture.a` at the vertex texture-sample site, forwards via `jacobianFrag` varying, and the fragment foam mixer adds `foldFoamFft = smoothstep(0.6, -0.2, jacobianFrag)` as a max term alongside `pixelFoam` and `foamAccumFrag`. Gated on `useGpuDisplacement` so the analytic path pays nothing for the unused varying. At the current spectrum calibration (amplitude=1.6e-6, λ=0.5) the partials stay small and J stays near 1, so the Jacobian foam contributes little visually — the plumbing is in place for when A5's sea-state slider lets the user dial choppiness up to a regime where actual J<0 happens. Slope-based `pixelFoam` still carries whitecap foam on non-breaking waves; the Jacobian foam is additive (max), not replacing. **Validation next: in-browser A/B with `?water=fft&waves=fft` at the default and at amplitude×100 to see the Jacobian foam fire on near-breaking crests.** |
 | A4a — Spectrum-field determinism tests (CPU side) | ✅ done | `wave-field-determinism.test.ts` — 6 tests: cross-build identity, advance-step parity, seed forking, replay rebuild-restore cycle, stateless-sampler check, Gerstner regression. Replay + multiplayer determinism guaranteed on the new path. |
 | A4b — CPU sampler matches GPU IFFT at probe points | ✅ done | New 7th test in `wave-field-determinism.test.ts`: "top-K analytic sum converges to the full grid when topK = N²" — locks down sign convention + factor-of-2 conjugate handling that the GPU kernel relies on, and asserts the default top-K captures a meaningful variance fraction. Tests pass at 257/257. |
-| A5 — Tuning + debug menu rewrite | 🟡 partial | **Sliders landed:** Choppiness (λ), Sea state (renderScale), and Wind speed sliders. Choppiness + Sea state live-mutate the GPU kernel's uniforms via `gpuDisplacementHandle.setChoppiness` / `setRenderScale`. Wind speed kicks off a live spectrum rebuild via `applySpectrumParams` in `water.ts` — `buildPhillipsSpectrum` (CPU) + `selectTopKModes` + `gpuDisplacementHandle.uploadSpectrum(grid)`. Persisted to `hoverbike.waterDebug.v3` localStorage. **Visual tune landed:** `defaultSpectrumParams` retuned for an actual ocean look on the lagoon track at sunset: `windSpeed = 11` (up from 9.5 — longer rolling wavelengths), `amplitude = 1e-6` (down from 1.6e-6 — peaks stay below the start-grid line so the bike doesn't submerge), `windDir = (0.6, 0.8)` (rotated 45° off the previous near-axis-aligned tune so the Phillips directional cosine doesn't produce venetian-blind banding aligned with race straightaways). Default choppiness on the displacement kernel bumped 0.5 → 0.7 so the Jacobian foam path fires on near-breaking crests. **Stability fix:** the `waves=fft` analytic path freezes if `topK` is bumped past ~64 — `gerstnerHeight` / `gerstnerDisp` unroll over `waveConsts.length` and `foamAccumulator` re-invokes them at 4 past time samples, making the shader exceed driver-compile budgets. Kept `topK = 32`. The FFT-path's `foamAccumulator` is now also short-circuited (Jacobian + slope foam carry the work), which makes future topK bumps safer. **Still open:** wind DIRECTION + small-wavelength cutoff sliders — same orchestration pattern as wind speed. Swell/chop sliders are retained (they still drive the Gerstner amplitudes; no-op on spectrum). |
+| A5 — Tuning + debug menu rewrite | 🟡 partial | **Sliders landed:** Choppiness (λ), Sea state (renderScale), and Wind speed sliders. Choppiness + Sea state live-mutate the GPU kernel's uniforms via `gpuDisplacementHandle.setChoppiness` / `setRenderScale`. Wind speed kicks off a live spectrum rebuild via `applySpectrumParams` in `water.ts` — `buildPhillipsSpectrum` (CPU) + `selectTopKModes` + `gpuDisplacementHandle.uploadSpectrum(grid)`. Persisted to `hoverbike.waterDebug.v3` localStorage. **Visual tune landed:** initial calibration pass (windSpeed=11, amplitude=1e-6, windDir=(0.6,0.8), choppiness=0.7) — superseded by the A7 cascade tune (see below). **Stability fix:** the `waves=fft` analytic path freezes if `topK` is bumped past ~64 — `gerstnerHeight` / `gerstnerDisp` unroll over `waveConsts.length` and `foamAccumulator` re-invokes them at 4 past time samples, making the shader exceed driver-compile budgets. Kept `topK = 32`. The FFT-path's `foamAccumulator` is now also short-circuited (Jacobian + slope foam carry the work), which makes future topK bumps safer. **Still open:** wind DIRECTION + small-wavelength cutoff sliders — same orchestration pattern as wind speed (`applySpectrumParams` in `water.ts:1991-ish`). Swell/chop sliders are retained (they still drive the Gerstner amplitudes; no-op on spectrum). |
+| A6 — Retire `?water=v2` after burn-in | ⬜ todo | Unchanged from the original plan. Burn-in `?water=fft&waves=fft` as the dev default for ~2 weeks; flip default and remove Gerstner code once nothing's hitting `?water=v2`. A6 only makes sense after the A7 polish has been tested across all tracks at all times of day. |
+| A7 — SoT visual quality polish (cascades + spread + SSS + foam) | ✅ done | New phase added after A2/A3 because the basic FFT path read as "single dominant sine wave" (Phillips' even `cos²` directional factor) rather than ocean. Research summary: SoT SIGGRAPH 2018 + Horvath 2015. Eight commits, all visually A/B-verified via Chrome MCP on the lagoon track at sunset. See **Phase A7** section below for the technique-by-technique walkthrough. Headline changes: **(1)** Phillips `cos²` directional factor replaced with Mitsuyasu `cos²ˢ(α/2)` one-sided lobe — fixed the "standing sine waves" look at root. **(2)** Three FFT cascades (wind sea, chop, long swell) with non-commensurate tile sizes (90 / 22 / 250 m) and CROSS wind directions — multi-scale wave fronts crossing each other = chaotic-natural ocean. **(3)** Hasselmann frequency-dependent `s` schedule — high-k modes get wider spread, kills the residual "comb" pattern from constant-`s` chop. **(4)** Choppiness peak-mask SSS color blend — bright SoT-green crests glow against deep navy troughs via the Tessendorf `|λ·Dx,Dz|` magnitude gate, exactly the recipe SoT documents. **(5)** Foam fiber noise breakup + brighter emissive. Now reads as ocean. |
 
-URL flags: `?water=v2` (current Gerstner — default until A5 ships), `?water=fft`
-(new path, opt-in during dev), `?water=classic` (legacy heightfield, untouched).
+URL flags: see the table at the top. `?water=v2` is the current shipping
+default; flip to `?water=fft&waves=fft` to see the full SoT-style FFT path.
+A6 will retire `?water=v2` after burn-in.
 
 ## Context the plan assumes
 
@@ -320,6 +329,241 @@ After ~2 weeks of `?water=fft` on dev builds without regressions, flip the
 default. Keep `?water=v2` reachable for one more release as an A/B escape
 hatch; remove the Gerstner code once nothing's hitting that flag.
 
+### A7 — SoT visual quality polish
+
+Phase added after a Chrome MCP visual A/B compared
+`?water=fft&waves=fft` to `?water=v2` and found the FFT path read as
+"sand-colored sine waves in one direction" rather than ocean. Did
+research on Sea of Thieves' published FFT-ocean techniques
+(SIGGRAPH 2018 + Horvath 2015 + GDC 2019 Atlas/WaveWorks 2.0) and
+landed eight commits implementing the highest-leverage canonical
+techniques. Together they take the FFT path from broken-looking to
+recognizably SoT-flavored.
+
+**1. Mitsuyasu / Hasselmann directional spread** (`phillips.ts`)
+
+The biggest visible improvement. Phillips' `|k̂·ŵ|² = cos²(α)` is
+even — it gives waves running AGAINST the wind the same energy as
+waves running WITH it, and at constant exponent 2 the lobe is too
+narrow at high k. Replaced with `cos²ˢ(α/2) = ((1+k̂·ŵ)/2)^s`,
+which is one-sided (zero at θ_w+π) and tunable.
+
+New optional `PhillipsParams.directionalSpread` (default 1
+preserves the legacy fixture-style tests). `defaultSpectrumParams`
+sets it to **4** (Horvath-recommended range for visible
+directional swell while not pure-isotropic).
+
+**2. Hasselmann frequency-dependent `s` schedule** (`phillips.ts`)
+
+Even with `s=4` at all k, high-k waves at N=64 produced a visible
+"comb" of parallel narrow stripes (= more modes = more aligned
+energy at fine scales). The Hasselmann schedule varies `s` with k:
+
+```
+k ≤ k_peak:  s = directionalSpread          (narrow swell)
+k >  k_peak:  s = directionalSpread · (k_peak/k)^0.8   (widening chop)
+```
+
+`k_peak = g/V²` (deep-water fully-developed sea). Exponent 0.8
+(vs canonical 2.5) keeps mid-k somewhat aligned for the SoT-style
+"wind-driven sea" character — pure Hasselmann collapses to
+isotropic too fast for arcade visuals. Sub-peak branch left at
+constant `s` so the swell silhouette stays narrow.
+
+**3. Three-cascade FFT with cross wind directions** (`water.ts`)
+
+Per the Horvath 2015 / SoT cascade architecture, the visible
+ocean is a sum of FFT cascades at different tile sizes covering
+different wavelength bands. Three independent
+`createGpuOceanDisplacement` handles:
+
+| Cascade | tileSize | windSpeed | amplitude | windDir | spread | choppiness | role |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 wind sea | 90 m | 11 m/s | 1e-6 | (0.6, 0.8) | 4 | 0.7 | CPU buoyancy source; main silhouette |
+| 1 chop | 22 m | 6 m/s | 2.5e-6 | (0.8, -0.6) | 1 | 0.4 | Fine ripple riding on swell, perpendicular to swell |
+| 2 long swell | 250 m | 16 m/s | 1e-7 | (0.3, 0.95) | 6 | 0.3 | Slow horizon-rolling silhouette |
+
+Tile sizes (90, 22, 250) are non-commensurate (irrational ratios)
+so the cascades never re-align at the same world points — the
+Horvath fix for "I can see the tile." Different seeds
+(0x515a / 0x0CEA / 0x5EA1) so spectra are statistically
+independent. Different wind directions per cascade so the
+visible wave fronts CROSS each other (real ocean = local wind +
+distant storm swell + local chop, all from different directions).
+
+Vertex shader sums height + slope + Dx/Dz across all 3 cascades
+and takes `min(J_swell, J_chop, J_long)` for the foam signal.
+CPU buoyancy stays on cascade 0 only — cascade 1+2 are
+visuals-only (bounded contribution to total height).
+
+**4. SoT three-color albedo with peak-mask SSS** (`water.ts`)
+
+Direct quote from SoT SIGGRAPH 2018: "the wave peak mask is
+generated from the FFT choppiness vertex offsets — where the
+choppiness offset is greater, this corresponds to wave peaks,
+which show more sub-surface due to shorter distance traveled by
+light through the water."
+
+Implemented the recipe verbatim:
+- `peakMaskFrag = varying(length(λ·Dx, λ·Dz))` — forwarded from
+  vertex stage where we already have the displacement vec.
+- Saturate `peakMask / 0.35` to map normal pinch magnitude to
+  `[0, 1]`.
+- Two-step albedo:
+  1. `mix(deepColor, scatterColor, heightScatter)` — legacy
+     cyan-green height-driven blend.
+  2. `mix(step1, sssColor, peakMask · (sunBackscatter+0.35))`
+     — the SoT yellow-green SSS layered on top, gated by the
+     pinch mask × ambient-floored sun backlight.
+
+Three colors instead of two:
+- `deepColor = (0.01, 0.09, 0.20)` navy
+- `scatterColor = (0.18, 0.78, 0.78)` cyan-green
+- `sssColor = (0.20, 0.95, 0.50)` iconic SoT bright-green
+
+**5. Jacobian foam fiber breakup** (`water.ts`)
+
+Jacobian-driven foam from `smoothstep(0.5, 0.0, J)` produced
+smooth airbrushed-white blobs. SoT blends artist-authored foam
+textures on top to break the look up. Cheaper alternative landed
+here: reuse the existing turbulent foam noise (~3m wavelength,
+already computed for wake foam) as a multiplicative `[0.6, 1.0]`
+disruption on the wave foam mask. Result: visible fibrous foam
+texture without speckle.
+
+Also bumped `foamEmissive` lift from 0.28 → 0.5 so foam pops
+visibly against the warm sunset haze.
+
+**6. FFT-path foam-accumulator short-circuit** (`water.ts`)
+
+Defensive change: the legacy `foamAccumulator` re-invokes
+`gerstnerHeight`/`gerstnerDisp` at 4 past time samples,
+unrolling over `waveConsts.length` (= top-K Phillips modes
+converted to Gerstner shape). With `topK = 32` this is 128
+unrolled trig pairs per vertex per past sample = 512 per vertex.
+At top-K bumped to 128 to tighten CPU-vs-GPU buoyancy parity,
+the shader exceeds driver compile budgets and TDRs.
+
+The FFT path doesn't need the accumulator anyway — the Jacobian
+foam path + pixelFoam mix cover the role. Short-circuited on
+`useGpuDisplacement`. Makes future topK bumps safe.
+
+**Commits (most recent first)**:
+
+- `b09d452` feat(water): Hasselmann frequency-dependent directional spread
+- `7c23ead` polish(water): brighter foam emissive + iconic SoT green SSS
+- `05e1417` feat(water): foam fiber noise breaks up Jacobian-foam smoothness
+- `d714341` polish(water): cross-direction cascades + tuned foam + SSS balance
+- `62e857c` feat(water): third cascade + distinct SoT subsurface color
+- `66d0145` feat(water): two-cascade FFT (swell + chop) per Sea of Thieves
+- `d89809e` feat(water): SoT-style choppiness peak-mask drives scatter color
+- `b812ffb` feat(water): Mitsuyasu directional spread replaces Phillips cos²
+
+**Validation done**: Chrome MCP visual A/B vs `?water=v2` on lagoon
+at sunset palette after each commit. 257/257 unit tests pass.
+Typecheck clean throughout. FPS 80–100 held with all three
+cascades dispatching per frame.
+
+**Validation still pending**:
+- Visual A/B at midday palette (sun overhead, blue sky) — sunset
+  is the harshest lighting palette but day/dawn/dusk should also
+  read OK.
+- Visual check on the other tracks (big-bay, oval, dune-rally) —
+  only lagoon was used for tuning.
+- Buoyancy feel pass — bike-on-water physics with the new
+  3-cascade spectrum. May need amplitude retune if buoyancy
+  reads as too soft / too aggressive.
+
+### A8 — Foam feedback buffer (NEXT MAJOR STEP)
+
+Per the SoT research summary, this is THE single biggest gap
+between amateur and pro FFT ocean implementations. Foam in real
+ocean PERSISTS — it's generated when a wave breaks and lingers
+on the surface for ~1 second, slowly fading and getting blown
+around by wind. Our current foam is stateless: it fires when
+J<0 NOW and vanishes when the wave moves on.
+
+**Implementation sketch** (researched but not coded; ~60 min focused work):
+
+1. New module: `src/engine/render/ocean-fft/foam-feedback.ts`.
+2. Two `StorageTexture` instances (ping-pong) — say 256×256
+   R32F covering a 200×200m world area centred at the camera
+   (or at world origin with REPEAT wrap for v0).
+3. Two TSL compute kernels, one reads texture A writes B, the
+   other reads B writes A. Each frame, dispatch alternately.
+4. Kernel body (per texel):
+   - Compute world position from texel coord.
+   - Sample all 3 cascades' displacement textures (`.a` =
+     Jacobian) at that world position.
+   - Take `min` for the combined Jacobian; `smoothstep(0.5, 0.0)`
+     for the instant foam contribution.
+   - Read previous foam from the OTHER ping-pong texture.
+   - `newFoam = max(prevFoam · decay, instantFoam)` where decay
+     is e.g. 0.94 per frame (≈ 1s half-life at 60fps).
+   - Write to output texture.
+5. Water fragment shader: sample the most-recently-written
+   ping-pong texture at `worldXZ / 200`, use it as the wave foam
+   instead of `foldFoamFft`.
+
+**Open subproblems**:
+- Shader binding: TSL bakes texture refs at material build, can't
+  trivially swap which ping-pong texture the shader reads each
+  frame. Options:
+  - (a) Try `storageTexture(tex).toReadWrite()` on a SINGLE
+    texture in the kernel. Per-texel access is non-conflicting
+    so should be safe. Cleanest if it works.
+  - (b) Use `WebGPURenderer.copyTextureToTexture` to copy the
+    "current" ping-pong to a STABLE texture the shader is bound
+    to. One extra GPU copy per frame.
+  - (c) Bind both textures in the shader with a uniform
+    `currentSlot: 0|1`. TSL doesn't trivially support conditional
+    texture sampling, so this needs a `select`-based merge.
+- Camera anchoring: foam buffer should be world-anchored, not
+  camera-anchored, so foam stays in WORLD positions as the
+  camera moves. Easiest v0: world-origin anchor + REPEAT wrap +
+  buffer covers a tile that's larger than the camera-following
+  water mesh's effective range. Visible tiling possible but
+  acceptable for arcade.
+- Wave advection: foam advects with the wave's phase velocity,
+  not stays-put. For v0 skip and let the multi-cascade Jacobian
+  fan-out handle the spatial spread; v1 add an advection offset
+  in the kernel.
+
+**Why deferred this session**: The full implementation needs
+careful coordination (texture bindings, dispatch timing, kernel
+build), and exploring two design approaches in-session ate budget
+that turned into smaller wins instead (the 5 SoT techniques A7
+shipped). The handoff sketch above should let a fresh ~60 min
+focused push land it.
+
+### A9 — Real radix-2 FFT in TSL
+
+Replaces the O(N⁴) direct DFT in `gpu-bake.ts`. Current direct
+DFT is fine at N=32 (1M ops/frame/cascade × 3 cascades = 3M
+ops, well under 1 ms). N=64 was tried and reverted (caused
+visible comb pattern from too-aligned high-k modes — A7's
+Hasselmann freq-dep spread later addressed the math but the
+direct DFT cost at N=64 is still 16× higher and starts to
+matter on low-end GPUs).
+
+If the team wants N≥128 per cascade (= sub-meter detail without
+relying on the normal-map detail cascade), the direct DFT is no
+longer viable — real FFT is O(N²·logN) for the 2D pass and
+becomes the standard solution at that scale. SoT, Encino,
+WaveWorks all use N=256 or 512 per cascade with real FFT.
+
+**Implementation sketch** (~60 min):
+- Radix-2 Cooley-Tukey, two passes (rows then columns).
+- Each pass: log₂N butterfly stages.
+- Ping-pong between two storage textures across stages.
+- Bit-reversal permutation at start (or end).
+- Standard reference: jbouny/fft-ocean implements this in WebGL2
+  RTT; gasgiant/FFT-Ocean / rtryan98 ocean-rendering writeups
+  for WebGPU compute versions.
+
+Reference `src/engine/sim/water/fft2d-cpu.ts` already has a
+CPU radix-2 implementation that can serve as the oracle.
+
 ## Code map — what's actually wired up
 
 Sim-side (pure-math, no Three.js):
@@ -331,16 +575,22 @@ Sim-side (pure-math, no Three.js):
 
 Render-side (Three.js):
 - `src/engine/render/ocean-fft/cpu-bake.ts` — one-shot Phillips→IFFT→slope-texture bake at boot. Drop-in replacement for the procedural `buildWaveDetailNormalTexture`. Used as the WebGL2 fallback when `?water=fft` is active.
-- `src/engine/render/ocean-fft/gpu-bake.ts` — two TSL compute pipelines:
+- `src/engine/render/ocean-fft/gpu-bake.ts` — two TSL compute-pipeline factories:
   - `createGpuOceanFft` — detail-cascade slope kernel. N=64, short-wavelength Phillips tune (tileSize=12m). Output RGBA8 storage texture sampled by the detail-cascade UVs in the fragment shader. (C3)
-  - `createGpuOceanDisplacement` — full-spectrum vertex-displacement kernel. Reads `field.spectrumParams` (matches CPU top-K sampler). Outputs two RGBA32F storage textures: `displacementTexture` = (height, λ·Dx, λ·Dz, Jacobian) and `slopeTexture` = (∂h/∂x, ∂h/∂z, 0, 0). Active on WebGPU + spectrum field + `?water=fft`. (A2)
-- `src/engine/render/water.ts` — branches: detail-texture provider (procedural / CPU-bake / GPU-compute) and big-wave displacement source (analytic Gerstner sum vs GPU displacement texture). `useGpuDisplacement` flag controls the vertex-stage texture sample. Wake, shoaling, scene-depth foam, planar reflection, sparkle — all untouched and equally happy on either path; they consume the `(y, dy/dx, dy/dz)` triple regardless of source.
+  - `createGpuOceanDisplacement` — full-spectrum vertex-displacement kernel. Each instance reads its own PhillipsParams + choppiness + renderScale and produces two RGBA32F storage textures: `displacementTexture` = (height, λ·Dx, λ·Dz, Jacobian) and `slopeTexture` = (∂h/∂x, ∂h/∂z, 0, 0). Three instances are created per scene by water.ts (A7 cascades).
+- `src/engine/render/water.ts` — main shader + cascade orchestration:
+  - **Detail-texture provider**: procedural / CPU-bake / GPU-compute, branched on `?water=fft` + backend.
+  - **Big-wave displacement source**: 3-cascade FFT sum (A7) when `?water=fft` + spectrum field + WebGPU, else analytic Gerstner. The three displacement handles are `gpuDisplacementHandle` (wind sea, spectrumParams), `gpuChopHandle` (chop, tileSize=22), `gpuSwellHandle` (long swell, tileSize=250). Vertex shader sums height/slope/Dx/Dz across them and takes `min(J)` for foam.
+  - **`useGpuDisplacement`** flag controls the vertex-stage texture-sum path.
+  - **Three-color albedo blend** (A7): deep → scatter → SSS with peak-mask gate. SSS layer fires on choppiness magnitude × sun-backlight.
+  - **`applySpectrumParams`** orchestrator for live wind-speed scrubbing — rebuilds CPU `field.spectrum` (top-K) + GPU `gpuDisplacementHandle.uploadSpectrum(grid)` in lockstep. Currently only wired to wind-speed slider; wind-direction + cutoff are the obvious next slider expansions.
+  - Wake, shoaling, scene-depth foam, planar reflection, sparkle — all untouched and equally happy on either FFT or Gerstner path; they consume the `(y, dy/dx, dy/dz)` triple regardless of source.
 
 URL-flag plumbing:
 - `?water=v2/fft/classic/wire` parsed in `water.ts` near the top of `createWaterMesh`.
 - `?waves=fft` parsed in `main.ts` (line ~121), drives factory choice.
 
-Tests (32 files total, 257 tests passing as of A2):
+Tests (32 files total, 257 tests passing as of A7):
 - `tests/unit/phillips.test.ts` — 12 tests on the spectrum + PRNG + Box-Muller.
 - `tests/unit/fft2d-cpu.test.ts` — 7 tests on the 2D FFT (round-trip, delta-function, naive-DFT cross-check, fftshift).
 - `tests/unit/ocean-fft-parity.test.ts` — analytic sampler ≡ IFFT at every grid point at t=0 and t>0. Load-bearing for the Phase A2 cutover.
@@ -350,32 +600,48 @@ Tests (32 files total, 257 tests passing as of A2):
 - `tests/unit/wave-field-determinism.test.ts` — 7 tests pinning down replay + multiplayer determinism on the spectrum path; the 7th is the A4b probe (top-K analytic converges to full-grid at topK=N², variance-capture floor at default topK).
 - Existing `tests/unit/wave-field.test.ts` (Gerstner path) still passes unchanged.
 
-Files still imagined but not built (A3/A5 territory):
-- A real radix-2 FFT in TSL (replaces the O(N⁴) direct DFT in `gpu-bake.ts` if N≥128 is needed). Currently both kernels are O(N⁴); at the default N=32 (displacement) and N=64 (detail), this is well under 1 ms each. If a cascade count > 1 lands in A5, revisit then.
-- `src/engine/water-debug-menu.ts` rewrite — currently the swell/chop sliders are no-ops in spectrum mode. A5 replaces them with wind / cutoff / choppiness-λ knobs. Choppiness wants a live slider since the A2 kernel exposes `choppinessUniform` as the natural binding point.
+Files still imagined but not built (A8/A9 territory):
+- `src/engine/render/ocean-fft/foam-feedback.ts` — A8 foam feedback buffer. Ping-pong storage textures + decay kernel; gives persistent foam trails behind breaking crests. Design sketch in the A8 section above.
+- A real radix-2 FFT in TSL (replaces the O(N⁴) direct DFT in `gpu-bake.ts`). A9. Required if N≥128 per cascade is wanted. Reference CPU radix-2 already exists in `src/engine/sim/water/fft2d-cpu.ts`.
+- `src/engine/water-debug-menu.ts` wind-direction + cutoff sliders. Wind-speed already has the `applySpectrumParams` orchestration; the missing sliders reuse the same path with different param keys.
+- Per-track `water.wind { speed, dirX, dirZ, fetch }` schema. Currently all tracks use `defaultSpectrumParams()`. Adding per-track override would let lagoon read calmer than dune-rally or wherever.
 
-## Open questions to revisit before A5
+## Open questions to revisit later
 
-- **Choppiness `λ`**: Gerstner's per-wave Q ranges 0.35-1.0 in the current
-  setup. Tessendorf's λ is a global scalar. We may want it animated by per-
-  region wind for visual variety (calm bay vs. open sea).
-- **Cascade count**: single cascade or three? Three is the textbook answer
-  but ~3× the compute cost. A2 lands with TWO independent kernels (the
-  detail-cascade `createGpuOceanFft` at N=64, tileSize=12m, and the
-  vertex-displacement `createGpuOceanDisplacement` at the field's
-  spectrum params — N=32, tileSize=90m at defaults). That's effectively
-  a two-cascade setup already; A5 may decide to merge them or add a
-  mid-frequency third.
-- **Track-data schema**: tracks currently store `water.height`. Add optional
-  `water.wind { speed, dirX, dirZ }` for per-track sea state, or keep wind
-  as a global default for now? Lean toward per-track for variety.
-- **Mobile / WebGL2 fallback**: if the WebGL2 fallback (no compute) catches
-  many real users, we keep `?water=v2` reachable indefinitely. Confirm with
-  telemetry before retiring it in A6.
+- **Choppiness `λ`** per-cascade vs global. A7 currently sets λ per cascade
+  (wind sea 0.7, chop 0.4, long swell 0.3). Works visually. A future
+  per-track sea state might want a global multiplier that scales all
+  three.
+- **Cascade count**: answered by A7 — three cascades land cleanly and
+  perf-fine on the test rig. SoT uses 3–4. A fourth (high-frequency
+  ripple band) could let us drop the legacy detail-cascade procedural
+  noise entirely, but the current "3 displacement cascades + 1
+  detail-normal cascade" stack is already 4 effective cascades.
+- **Track-data schema**: tracks currently store `water.height` only. Add
+  optional `water.wind { speed, dirX, dirZ }` for per-track sea state, or
+  keep wind as a global default? The A5 wind-speed slider hints at
+  per-session adjustment; per-track would let lagoon read calmer than
+  open-ocean tracks.
+- **Mobile / WebGL2 fallback**: WebGL2 backend has NO FFT compute path
+  at all (the kernel needs WebGPU compute shaders). On WebGL2, the
+  FFT path falls back to analytic Gerstner + the static C2 CPU-bake
+  detail texture. Acceptable for now since most modern browsers have
+  WebGPU; telemetry-driven decision before A6 retires `?water=v2`.
+- **Track variety**: A7 visual tune was done on the lagoon track at
+  sunset palette. Should re-verify on big-bay (open-ocean horizon),
+  oval-loop (closed circuit), and at midday / dawn / dusk palettes.
+  No code changes expected — just visual sanity checks.
 
 ## Reference implementations
 
-- Tessendorf 2001 — [Simulating Ocean Water](https://people.computing.clemson.edu/~jtessen/reports/papers_files/coursenotes2004.pdf)
-- [jbouny/fft-ocean](https://github.com/jbouny/fft-ocean) — WebGL2 RTT-based, the closest open-source reference for this stack
+- Tessendorf 2001 — [Simulating Ocean Water](https://people.computing.clemson.edu/~jtessen/reports/papers_files/coursenotes2004.pdf) — foundational paper for the FFT-ocean approach.
+- Ang et al. SIGGRAPH 2018 — [The Technical Art of Sea of Thieves](https://history.siggraph.org/wp-content/uploads/2022/09/2018-Talks-Ang_The-Technical-Art-of-Sea-of-Thieves.pdf) — canonical for the SoT-style techniques A7 implements (peak-mask SSS, three-color albedo, artist-textured foam).
+- Horvath 2015 — [Empirical Directional Wave Spectra for Computer Graphics](https://dl.acm.org/doi/10.1145/2791261.2791267) — Mitsuyasu / Hasselmann directional spread, TMA spectrum, multi-cascade architecture. Single most cited modern source.
+- [Ocean Rendering Part 1 — Robert Ryan, 2025](https://rtryan98.github.io/2025/10/04/ocean-rendering-part-1.html) — modern practitioner walkthrough; 4-cascade TMA+Donelan-Banner setup.
+- [GodotOceanWaves — 2Retr0](https://github.com/2Retr0/GodotOceanWaves) — open-source TMA+Hasselmann reference. Limits cascades to 4.
+- [EncinoWaves — Christopher Horvath](https://github.com/blackencino/EncinoWaves) — reference implementation of Horvath's paper.
+- [GDC 2019 — Wakes, Explosions and Lighting](https://gdcvault.com/play/1025819/Advanced-Graphics-Techniques-Tutorial-Wakes) — Atlas / WaveWorks 2.0 cascade architecture + GPU foam.
+- [Karis 2013 — area specular](https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf) — cited by SoT for the sun-highlight envelope on water. We don't implement this yet; would tighten the specular at low sun elevation.
+- [jbouny/fft-ocean](https://github.com/jbouny/fft-ocean) — WebGL2 RTT-based; the closest open-source reference for the radix-2 FFT pipeline (A9 deferred work).
 - [tessarakkt/godot4-oceanfft](https://github.com/tessarakkt/godot4-oceanfft) — best reference for the dual-side CPU buoyancy + GPU IFFT pattern
 - [Barth Cave — Ocean Simulation with FFT and WebGPU](https://barthpaleologue.github.io/Blog/posts/ocean-simulation-webgpu/)
