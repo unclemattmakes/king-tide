@@ -181,10 +181,22 @@
       "specPath": "public/tracks/template-tunnel-island.json"
     },
     {
+      "id": "template-tunnels",
+      "displayName": "Template Tunnels",
+      "url": "/assets/tracks/template-tunnels.glb",
+      "specPath": "public/tracks/template-tunnels.json"
+    },
+    {
       "id": "test-ring",
       "displayName": "Test Ring",
       "url": "/assets/tracks/test-ring.glb",
       "specPath": "specs/tracks/test-ring.json"
+    },
+    {
+      "id": "test-track",
+      "displayName": "Test Track",
+      "url": "/assets/tracks/test-track.glb",
+      "specPath": "public/tracks/test-track.json"
     }
   ],
   "generatedAt": "2026-05-10T06:41:33.421Z"
