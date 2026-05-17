@@ -409,6 +409,11 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         // to make it feel like a boat slamming through, raise toward 1
         // to bring back the strict wave-conforming feel.
         const WATER_LONGITUDINAL_SPRING_MUL = 0.4
+        // Per-corner buoyancy constants for submerged corners on water.
+        // Matches the center-submerged underwater branch so the transition
+        // (corner-by-corner submersion → full center submersion) is smooth.
+        const BUOYANCY_PER_M = 14
+        const BUOYANCY_CAP = 20
         for (const p of points) {
           const worldY = t.y + p.oy
           const localDist = worldY - p.surfY
@@ -422,14 +427,26 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
           // effectively airborne even though another corner is still on
           // the ramp.
           if (localDist > stats.hoverHeight * 1.6) continue
-          const heightError = stats.hoverHeight - localDist
-          const springMul =
-            probe.isWater && p.longitudinal ? WATER_LONGITUDINAL_SPRING_MUL : 1.0
           // v_y at this offset = linvel.y + (ω × offset).y = linvel.y + ω.z*ox − ω.x*oz
           const vAtPointY = linvel.y + angv.z * p.ox - angv.x * p.oz
           const dampVy = Math.max(vAtPointY, 0)
-          const aUp =
-            GRAVITY + heightError * stats.hoverSpring * springMul - dampVy * stats.hoverDamp
+          let aUp: number
+          if (probe.isWater && localDist < 0) {
+            // Submerged on water. Use capped buoyancy instead of the
+            // stiff hover spring so a nose-dive with enough inertia
+            // actually goes under — the spring's unbounded heightError
+            // (1.2 − negative = arbitrarily large) would otherwise
+            // shove a submerged corner back up violently and prevent
+            // any dive at all.
+            const submersion = -localDist
+            const aBuoy = Math.min(submersion * BUOYANCY_PER_M, BUOYANCY_CAP)
+            aUp = GRAVITY + aBuoy - dampVy * stats.hoverDamp
+          } else {
+            const heightError = stats.hoverHeight - localDist
+            const springMul =
+              probe.isWater && p.longitudinal ? WATER_LONGITUDINAL_SPRING_MUL : 1.0
+            aUp = GRAVITY + heightError * stats.hoverSpring * springMul - dampVy * stats.hoverDamp
+          }
           rb.applyImpulseAtPoint(
             { x: 0, y: aUp * POINT_MASS_FRAC * m * dt, z: 0 },
             { x: t.x + p.ox, y: worldY, z: t.z + p.oz },
