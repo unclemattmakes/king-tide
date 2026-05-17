@@ -790,6 +790,20 @@ def _conform_terrain_to_road(
     Float makes that segment a true bridge with terrain unchanged
     beneath.
 
+    **Banking-aware target**: each sample carries a per-segment
+    ``bank`` (signed radians around the tangent, populated by
+    ``_compute_per_sample_bank`` at build time and recovered from
+    the road mesh's tilted cross-section at re-conform time). For a
+    terrain vert at signed lateral offset ``L`` from the segment
+    centerline, the conform target is
+    ``seg_centerline_z - L * seg_bank`` — terrain follows the
+    road's banked cross-section instead of pulling everything to
+    the centerline altitude. Without this, banked corners showed
+    the high-side curb hovering over a void and the low-side curb
+    getting terrain poking through it. ``L`` is clipped to
+    ``±inner`` so the bank effect stops at the road's footprint
+    edge and doesn't extrapolate into the blend band.
+
     **Fill shelf on the downhill side** (``fill_shelf_width`` > 0): for
     terrain vertices whose natural Z is below the road, the "fully
     flattened" zone extends past the curbs by an extra ``fill_shelf_width``
@@ -926,10 +940,39 @@ def _conform_terrain_to_road(
             cx = sa["x"] + t_seg * dx
             cy = sa["y"] + t_seg * dy
             perp_d = math.hypot(world.x - cx, world.y - cy)
-            seg_z = sa["z"] + t_seg * (sb["z"] - sa["z"])
+            seg_z_centerline = sa["z"] + t_seg * (sb["z"] - sa["z"])
             sa_c = float(sa.get("conform", 1.0))
             sb_c = float(sb.get("conform", 1.0))
             seg_conform = sa_c + t_seg * (sb_c - sa_c)
+
+            # Banked target: tilt the conform target around the road
+            # tangent so terrain follows the road's banked cross-
+            # section. Without this, terrain pulls to centerline Z
+            # and the road's high-side curb hovers over a void while
+            # the low-side curb gets terrain poking up through it.
+            #
+            # Signed lateral offset of the terrain vert from the
+            # segment centerline. nx,ny is the LEFT perpendicular —
+            # same convention as ``_build_road_strip_mesh`` so the
+            # bank sign matches what the road mesh used. Bank is
+            # interpolated per-segment so the tilt transitions
+            # smoothly between samples.
+            seg_len = math.sqrt(seg_len_sq)
+            nx = -dy / seg_len
+            ny = dx / seg_len
+            lat_signed = (world.x - cx) * nx + (world.y - cy) * ny
+            sa_b = float(sa.get("bank", 0.0))
+            sb_b = float(sb.get("bank", 0.0))
+            seg_bank = sa_b + t_seg * (sb_b - sa_b)
+            # Clip lateral to the inner band so banking only applies
+            # inside the road's actual footprint — past inner the
+            # smoothstep blend toward natural terrain handles the
+            # transition, and we don't want a 12 m blend band
+            # extrapolating bank to wildly tilt the surrounding
+            # terrain.
+            lat_clipped = max(-inner, min(inner, lat_signed))
+            bank_lift = -lat_clipped * seg_bank
+            seg_z = seg_z_centerline + bank_lift
 
             # Effective inner/outer for THIS segment: downhill side
             # uses the wider fill shelf so terrain pulls up beyond
@@ -1315,6 +1358,16 @@ def _extract_samples_from_road_mesh(
         cy = (v_lin.y + v_rin.y) * 0.5
         z_top = (v_lin.z + v_rin.z) * 0.5  # = target_z + lift
         target_z = z_top - lift
+        # Recover bank (signed radians around the tangent) from the
+        # tilted cross-section's Z asymmetry: the road mesh tilts the
+        # inner verts so v_L sits at z_road + hw*bank and v_R at
+        # z_road - hw*bank. Solving: bank = (v_L.z - v_R.z) / (2*hw).
+        # The terrain conform reads this back so it can drop terrain
+        # toward the road's banked top surface — without it the
+        # high-side curb edge would hover over a void and the
+        # low-side would have terrain poking up through the slab.
+        hw_xy = math.hypot(v_rin.x - v_lin.x, v_rin.y - v_lin.y) * 0.5
+        bank = ((v_lin.z - v_rin.z) / (2.0 * hw_xy)) if hw_xy > 1e-6 else 0.0
         samples.append({
             "x": cx, "y": cy, "z": target_z,
             "_authored_z": target_z,
@@ -1322,6 +1375,7 @@ def _extract_samples_from_road_mesh(
                              # is "lock terrain to existing road" so
                              # bridge-floating semantics don't apply
                              # (rebuild the road if you need them).
+            "bank": float(bank),
         })
     # Tangents from neighbouring samples — needed by callers that
     # check them, even though _conform_terrain_to_road itself only
