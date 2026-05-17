@@ -107,7 +107,7 @@ function fft1d(buf: Float32Array, N: number, direction: 1 | -1): void {
   }
   if (direction === -1) {
     const inv = 1 / N
-    for (let i = 0; i < 2 * N; i++) buf[i] *= inv
+    for (let i = 0; i < 2 * N; i++) buf[i] = buf[i]! * inv
   }
 }
 
