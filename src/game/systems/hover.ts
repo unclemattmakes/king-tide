@@ -360,34 +360,55 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         // roll/pitch their restoring force: lean the bike right →
         // starboard point's world-y drops → bigger heightError on
         // starboard → bigger upward force → torque rolls bike back level.
+        //
+        // `longitudinal` tags the bow/stern probes vs port/starboard.
+        // On water, the longitudinal spring is softened so the bike
+        // pushes THROUGH chop instead of pitching to match every wave
+        // crest. Lateral (roll-axis) spring keeps full stiffness — the
+        // bike still banks into long swells.
         const fwd3D = quatRotate(q, { x: 0, y: 0, z: 1 })
         const right3D = quatRotate(q, { x: 1, y: 0, z: 0 })
-        const points: { ox: number; oy: number; oz: number; surfY: number }[] = [
+        const points: {
+          ox: number
+          oy: number
+          oz: number
+          surfY: number
+          longitudinal: boolean
+        }[] = [
           {
             ox: probeFwdX * probeHalfLength,
             oy: fwd3D.y * probeHalfLength,
             oz: probeFwdZ * probeHalfLength,
             surfY: yBow,
+            longitudinal: true,
           },
           {
             ox: -probeFwdX * probeHalfLength,
             oy: -fwd3D.y * probeHalfLength,
             oz: -probeFwdZ * probeHalfLength,
             surfY: yStern,
+            longitudinal: true,
           },
           {
             ox: probeRightX * probeHalfWidth,
             oy: right3D.y * probeHalfWidth,
             oz: probeRightZ * probeHalfWidth,
             surfY: yStarboard,
+            longitudinal: false,
           },
           {
             ox: -probeRightX * probeHalfWidth,
             oy: -right3D.y * probeHalfWidth,
             oz: -probeRightZ * probeHalfWidth,
             surfY: yPort,
+            longitudinal: false,
           },
         ]
+        // Tuned by playtest: 0.4× reads as "the bow plows through chop
+        // without losing all wave-following on long swells." Drop further
+        // to make it feel like a boat slamming through, raise toward 1
+        // to bring back the strict wave-conforming feel.
+        const WATER_LONGITUDINAL_SPRING_MUL = 0.4
         for (const p of points) {
           const worldY = t.y + p.oy
           const localDist = worldY - p.surfY
@@ -399,14 +420,16 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
           // nose-dive). Skip a corner once its local surface is further
           // than the grounded threshold below it; that corner is
           // effectively airborne even though another corner is still on
-          // the ramp. Net result: stern still pushes up (pitching the
-          // nose UP into the launch), bow contributes nothing.
+          // the ramp.
           if (localDist > stats.hoverHeight * 1.6) continue
           const heightError = stats.hoverHeight - localDist
+          const springMul =
+            probe.isWater && p.longitudinal ? WATER_LONGITUDINAL_SPRING_MUL : 1.0
           // v_y at this offset = linvel.y + (ω × offset).y = linvel.y + ω.z*ox − ω.x*oz
           const vAtPointY = linvel.y + angv.z * p.ox - angv.x * p.oz
           const dampVy = Math.max(vAtPointY, 0)
-          const aUp = GRAVITY + heightError * stats.hoverSpring - dampVy * stats.hoverDamp
+          const aUp =
+            GRAVITY + heightError * stats.hoverSpring * springMul - dampVy * stats.hoverDamp
           rb.applyImpulseAtPoint(
             { x: 0, y: aUp * POINT_MASS_FRAC * m * dt, z: 0 },
             { x: t.x + p.ox, y: worldY, z: t.z + p.oz },
