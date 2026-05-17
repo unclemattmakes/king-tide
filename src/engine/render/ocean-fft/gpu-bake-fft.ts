@@ -63,29 +63,39 @@ import {
  *   1. Spectrum-build compute kernel (1 dispatch): reads h0 from
  *      the Phillips DataTexture, applies the time-evolution
  *      `exp(i·ω·t)`, and writes 8 quantity-specific modulated
- *      spectra into 8 separate FFT-input storage textures. The
- *      ifftshift to natural-order layout happens here (read h0 at
- *      centered index `(px + N/2) mod N` while iterating natural
- *      output texels `px`).
+ *      spectra. With `batched: true` on the underlying FFT2D,
+ *      the 8 quantities are PACKED into 4 input textures (R/G =
+ *      first quantity's complex, B/A = second). The ifftshift to
+ *      natural-order layout happens here (read h0 at centered
+ *      index `(px + N/2) mod N` while iterating natural output
+ *      texels `px`).
  *
- *   2. 8 independent 2D IFFTs (via `createFft2d`): one per output
- *      quantity. Each is N²·log₂N work — for N=64 that's ~25k
- *      mode-ops per IFFT × 8 = 200k ops per cascade, vs the
- *      direct DFT's N⁴ = 16.8M ops. At N=128 the win is even
- *      more pronounced (200x speedup on the spectral work).
- *      Dispatch overhead is the new bottleneck: 15 dispatches per
- *      IFFT × 8 = 120 dispatches per cascade per frame; at ~10 μs
- *      each that's ~1.2 ms of submission cost.
+ *   2. 4 independent batched 2D IFFTs (via `createFft2d`): each
+ *      runs IFFT on the R/G pair AND the B/A pair in the same
+ *      kernel body, halving the dispatch count. Each is N²·log₂N
+ *      work — for N=128 that's ~115k mode-ops per IFFT × 4 =
+ *      460k ops per cascade, vs the direct DFT's N⁴ = 268M ops
+ *      (580× speedup on the spectral work). Dispatch overhead is
+ *      the new bottleneck: 17 dispatches per IFFT (N=128) × 4 =
+ *      68 dispatches per cascade per frame; at ~10 μs each that's
+ *      ~0.7 ms of submission cost.
  *
- *   3. Unpack compute kernel (1 dispatch): reads 8 IFFT output
- *      textures, takes the real part (the imaginary parts are
- *      zero up to FP rounding because the inputs sum to a real
- *      signal in spatial domain), applies the conjugate-pair ×2
- *      factor where appropriate, computes the Jacobian, and
- *      writes `displacementTexture` (height, λ·Dx, λ·Dz, J) and
+ *   3. Unpack compute kernel (1 dispatch): reads the 4 batched
+ *      IFFT output textures, takes the real part of each
+ *      complex pair (the imaginary parts are zero up to FP
+ *      rounding because the inputs sum to a real signal in
+ *      spatial domain), applies the conjugate-pair ×2 factor
+ *      where appropriate, computes the Jacobian, and writes
+ *      `displacementTexture` (height, λ·Dx, λ·Dz, J) and
  *      `slopeTexture` (∂h/∂x, ∂h/∂z, _, _) — same layout the
  *      direct-DFT path produces, so the vertex shader is
  *      indifferent to which path filled them.
+ *
+ *      The 8-to-4 pairing:
+ *        FFT 0:  R/G = height,  B/A = Dx
+ *        FFT 1:  R/G = Dz,      B/A = dydx
+ *        FFT 2:  R/G = dydz,    B/A = dxx
+ *        FFT 3:  R/G = dxz,     B/A = dzz
  *
  * Math:
  *
@@ -105,13 +115,6 @@ import {
  *   spectrum. The 4π/tileSize prefactor on the slopes/partials
  *   carries (2π/tileSize) for the wavenumber→rad/m conversion
  *   plus the conjugate-pair ×2.
- *
- * v1 limitations:
- *   - N must satisfy log₂N even (4, 16, 64, 256, ...), inherited
- *     from `createFft2d`'s parity restriction.
- *   - Eight unbatched single-channel FFTs. A future batched-FFT
- *     extension to `createFft2d` (process R+G AND B+A pairs per
- *     texel) would halve the dispatch count to 60/cascade.
  */
 export function createGpuOceanFftDisplacement(
   opts: GpuOceanDisplacementOpts,
@@ -124,12 +127,6 @@ export function createGpuOceanFftDisplacement(
 
   if (!Number.isInteger(Math.log2(N)) || N < 4) {
     throw new Error(`createGpuOceanFftDisplacement: N=${N} must be a power of two ≥ 4`)
-  }
-  if ((Math.log2(N) | 0) % 2 !== 0) {
-    throw new Error(
-      `createGpuOceanFftDisplacement: log₂N=${Math.log2(N)} is odd; v1 supports ` +
-        `log₂N even (N ∈ {4, 16, 64, 256, ...})`,
-    )
   }
 
   // 1) Phillips spectrum on CPU. Same call as the direct-DFT
@@ -186,27 +183,22 @@ export function createGpuOceanFftDisplacement(
   slopeTexture.wrapT = THREE.RepeatWrapping
   slopeTexture.generateMipmaps = false
 
-  // 4) Eight FFT2D handles — one per output quantity. Each is
-  //    log₂N stages × 2 axes + bit-reverses + scale = 15 dispatch
-  //    nodes precompiled at construction.
-  const heightFft = createFft2d({ N })
-  const dxFft = createFft2d({ N })
-  const dzFft = createFft2d({ N })
-  const dydxFft = createFft2d({ N })
-  const dydzFft = createFft2d({ N })
-  const dxxFft = createFft2d({ N })
-  const dxzFft = createFft2d({ N })
-  const dzzFft = createFft2d({ N })
-  const fftHandles: Fft2dHandle[] = [
-    heightFft,
-    dxFft,
-    dzFft,
-    dydxFft,
-    dydzFft,
-    dxxFft,
-    dxzFft,
-    dzzFft,
-  ]
+  // 4) Four batched FFT2D handles — each runs an IFFT on the
+  //    R/G complex pair AND the B/A complex pair in the same
+  //    kernel body. The 8 output quantities are packed into 4
+  //    pairs (see the header comment for the pairing).
+  //
+  //    Each FFT is log₂N × 2 axes × 2 ping/pong directions =
+  //    4·log₂N butterfly kernels + 3 bit-reverse + 2 scale.
+  //    For N=128 (log₂N=7) that's 28 + 5 = 33 compiled kernels
+  //    per handle, and 17 dispatches per IFFT invocation (1
+  //    bitrev row + 7 row butterflies + 1 bitrev col + 7 col
+  //    butterflies + 1 scale).
+  const heightDxFft = createFft2d({ N, batched: true })
+  const dzDydxFft = createFft2d({ N, batched: true })
+  const dydzDxxFft = createFft2d({ N, batched: true })
+  const dxzDzzFft = createFft2d({ N, batched: true })
+  const fftHandles: Fft2dHandle[] = [heightDxFft, dzDydxFft, dydzDxxFft, dxzDzzFft]
 
   // 5) Uniforms.
   const timeUniform = uniform(0)
@@ -216,14 +208,16 @@ export function createGpuOceanFftDisplacement(
 
   const halfN = N / 2
 
-  // 6) Spectrum-build kernel — 1 dispatch writes 8 FFT inputs.
+  // 6) Spectrum-build kernel — 1 dispatch writes 4 batched FFT
+  //    input textures (each carries 2 quantity spectra packed
+  //    into R/G + B/A channels).
   //
   // Per output texel (px, py), read h0 at centered index `(px+N/2)
   // mod N` (ifftshift), apply time-evolution, and write 8
-  // quantity-specific modulated spectra. The kernel implicitly
-  // does the ifftshift by reading from the shifted h0 index; the
-  // signed wavenumber `kxic` used in the modulation matches the
-  // direct-DFT's centered convention.
+  // quantity-specific modulated spectra packed 2-per-texture.
+  // The kernel implicitly does the ifftshift by reading from the
+  // shifted h0 index; the signed wavenumber `kxic` used in the
+  // modulation matches the direct-DFT's centered convention.
   const spectrumBuildKernel = Fn(() => {
     const px = instanceIndex.mod(N)
     const py = instanceIndex.div(N)
@@ -269,93 +263,86 @@ export function createGpuOceanFftDisplacement(
     const invKMag = float(1).div(kMag)
     const khatX = kxic.mul(invKMag)
     const khatZ = kzic.mul(invKMag)
-
-    // Spectrum modulations (each writes a complex (re, im) pair):
-    // F_height = H  →  (Hr, Hi)
-    textureStore(
-      heightFft.inputTexture,
-      uvec2(px, py),
-      vec4(Hr, Hi, float(0), float(0)),
-    ).toWriteOnly()
-
-    // F_Dx = −i·k̂x·H = k̂x·Hi − i·k̂x·Hr  →  (k̂x·Hi, −k̂x·Hr)
-    textureStore(
-      dxFft.inputTexture,
-      uvec2(px, py),
-      vec4(khatX.mul(Hi), khatX.mul(Hr).negate(), float(0), float(0)),
-    ).toWriteOnly()
-
-    // F_Dz similarly
-    textureStore(
-      dzFft.inputTexture,
-      uvec2(px, py),
-      vec4(khatZ.mul(Hi), khatZ.mul(Hr).negate(), float(0), float(0)),
-    ).toWriteOnly()
-
-    // F_dydx = i·kxic·H = −kxic·Hi + i·kxic·Hr  →  (−kxic·Hi, kxic·Hr)
-    textureStore(
-      dydxFft.inputTexture,
-      uvec2(px, py),
-      vec4(kxic.mul(Hi).negate(), kxic.mul(Hr), float(0), float(0)),
-    ).toWriteOnly()
-
-    // F_dydz similarly
-    textureStore(
-      dydzFft.inputTexture,
-      uvec2(px, py),
-      vec4(kzic.mul(Hi).negate(), kzic.mul(Hr), float(0), float(0)),
-    ).toWriteOnly()
-
-    // F_dxx = (kxic²/|k|) · H = kxxOverK · H  →  (kxxOverK·Hr, kxxOverK·Hi)
     const kxxOverK = kxic.mul(khatX) // = kxic² / |k|
     const kzzOverK = kzic.mul(khatZ)
     const kxzOverK = kxic.mul(khatZ)
+
+    // Per-quantity complex spectra (each a (re, im) pair):
+    //   F_height = H                                       → (Hr, Hi)
+    //   F_Dx     = −i·k̂x·H = k̂x·Hi − i·k̂x·Hr             → (k̂x·Hi, −k̂x·Hr)
+    //   F_Dz     similarly                                 → (k̂z·Hi, −k̂z·Hr)
+    //   F_dydx   = i·kxic·H = −kxic·Hi + i·kxic·Hr        → (−kxic·Hi, kxic·Hr)
+    //   F_dydz   similarly                                 → (−kzic·Hi, kzic·Hr)
+    //   F_dxx    = (kxic²/|k|)·H                          → ((kxic²/|k|)·Hr, (kxic²/|k|)·Hi)
+    //   F_dxz    = (kxic·kzic/|k|)·H                      → ((kxic·kzic/|k|)·Hr, (kxic·kzic/|k|)·Hi)
+    //   F_dzz    = (kzic²/|k|)·H                          → ((kzic²/|k|)·Hr, (kzic²/|k|)·Hi)
+    //
+    // Packed 2-per-texel (R/G = first quantity, B/A = second):
+    //   FFT 0:  R/G = height,  B/A = Dx
+    //   FFT 1:  R/G = Dz,      B/A = dydx
+    //   FFT 2:  R/G = dydz,    B/A = dxx
+    //   FFT 3:  R/G = dxz,     B/A = dzz
     textureStore(
-      dxxFft.inputTexture,
+      heightDxFft.inputTexture,
       uvec2(px, py),
-      vec4(kxxOverK.mul(Hr), kxxOverK.mul(Hi), float(0), float(0)),
+      vec4(Hr, Hi, khatX.mul(Hi), khatX.mul(Hr).negate()),
     ).toWriteOnly()
     textureStore(
-      dxzFft.inputTexture,
+      dzDydxFft.inputTexture,
       uvec2(px, py),
-      vec4(kxzOverK.mul(Hr), kxzOverK.mul(Hi), float(0), float(0)),
+      vec4(khatZ.mul(Hi), khatZ.mul(Hr).negate(), kxic.mul(Hi).negate(), kxic.mul(Hr)),
     ).toWriteOnly()
     textureStore(
-      dzzFft.inputTexture,
+      dydzDxxFft.inputTexture,
       uvec2(px, py),
-      vec4(kzzOverK.mul(Hr), kzzOverK.mul(Hi), float(0), float(0)),
+      vec4(kzic.mul(Hi).negate(), kzic.mul(Hr), kxxOverK.mul(Hr), kxxOverK.mul(Hi)),
+    ).toWriteOnly()
+    textureStore(
+      dxzDzzFft.inputTexture,
+      uvec2(px, py),
+      vec4(kxzOverK.mul(Hr), kxzOverK.mul(Hi), kzzOverK.mul(Hr), kzzOverK.mul(Hi)),
     ).toWriteOnly()
   })
 
   // biome-ignore lint/suspicious/noExplicitAny: TSL Fn().compute typing
   const spectrumBuildNode = (spectrumBuildKernel as any)().compute(N * N)
 
-  // 7) Unpack kernel — 1 dispatch reads 8 FFT outputs, writes
+  // 7) Unpack kernel — 1 dispatch reads 4 batched FFT outputs
+  //    (each carrying two quantities' IFFTs in R/G + B/A), writes
   //    displacement + slope textures in the direct-DFT layout.
   const unpackKernel = Fn(() => {
     const px = instanceIndex.mod(N)
     const py = instanceIndex.div(N)
 
-    // Read real parts of all 8 IFFT outputs. (.g imag parts are
-    // ≈0 because the inputs encode a real signal up to FP error.)
-    // Cast through `any` so TSL's narrow `.r → vec3` typing
-    // doesn't poison the downstream scalar math.
+    // Each batched FFT output's R is the real part of the R/G
+    // IFFT, and B is the real part of the B/A IFFT. The imaginary
+    // parts (.g, .a) are ≈0 because the inputs encode a real
+    // signal up to FP error, so we ignore them.
     // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle
-    const heightOut: any = (textureLoad(heightFft.outputTexture, uvec2(px, py), 0) as any).r
+    const out0: any = textureLoad(heightDxFft.outputTexture, uvec2(px, py), 0) as any
     // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle
-    const dxOut: any = (textureLoad(dxFft.outputTexture, uvec2(px, py), 0) as any).r
+    const out1: any = textureLoad(dzDydxFft.outputTexture, uvec2(px, py), 0) as any
     // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle
-    const dzOut: any = (textureLoad(dzFft.outputTexture, uvec2(px, py), 0) as any).r
+    const out2: any = textureLoad(dydzDxxFft.outputTexture, uvec2(px, py), 0) as any
     // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle
-    const dydxRaw: any = (textureLoad(dydxFft.outputTexture, uvec2(px, py), 0) as any).r
-    // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle
-    const dydzRaw: any = (textureLoad(dydzFft.outputTexture, uvec2(px, py), 0) as any).r
-    // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle
-    const dxxRaw: any = (textureLoad(dxxFft.outputTexture, uvec2(px, py), 0) as any).r
-    // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle
-    const dxzRaw: any = (textureLoad(dxzFft.outputTexture, uvec2(px, py), 0) as any).r
-    // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle
-    const dzzRaw: any = (textureLoad(dzzFft.outputTexture, uvec2(px, py), 0) as any).r
+    const out3: any = textureLoad(dxzDzzFft.outputTexture, uvec2(px, py), 0) as any
+    // Real parts (the imag parts are zero up to FP rounding).
+    // biome-ignore lint/suspicious/noExplicitAny: TSL scalar
+    const heightOut: any = out0.r
+    // biome-ignore lint/suspicious/noExplicitAny: TSL scalar
+    const dxOut: any = out0.b
+    // biome-ignore lint/suspicious/noExplicitAny: TSL scalar
+    const dzOut: any = out1.r
+    // biome-ignore lint/suspicious/noExplicitAny: TSL scalar
+    const dydxRaw: any = out1.b
+    // biome-ignore lint/suspicious/noExplicitAny: TSL scalar
+    const dydzRaw: any = out2.r
+    // biome-ignore lint/suspicious/noExplicitAny: TSL scalar
+    const dxxRaw: any = out2.b
+    // biome-ignore lint/suspicious/noExplicitAny: TSL scalar
+    const dxzRaw: any = out3.r
+    // biome-ignore lint/suspicious/noExplicitAny: TSL scalar
+    const dzzRaw: any = out3.b
 
     // Conjugate-pair ×2 factor (height, Dx, Dz).
     // biome-ignore lint/suspicious/noExplicitAny: TSL scalar
@@ -420,9 +407,11 @@ export function createGpuOceanFftDisplacement(
     const r = renderer as any
     if (typeof r.computeAsync !== 'function') return Promise.resolve()
 
-    // 1) Build the 8 modulated spectra from h0 + time.
+    // 1) Build the 8 modulated spectra from h0 + time, packed
+    //    into 4 batched FFT input textures.
     r.computeAsync(spectrumBuildNode)
-    // 2) Run all 8 IFFTs.
+    // 2) Run all 4 batched IFFTs (each does 2 quantities in
+    //    parallel via R/G + B/A channels).
     for (const fft of fftHandles) {
       fft.dispatch(renderer)
     }
