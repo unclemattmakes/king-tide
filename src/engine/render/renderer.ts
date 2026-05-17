@@ -37,9 +37,17 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
     }
   }
 
+  // `?aa=off` disables MSAA — on WebGPU that's a multisampled colour
+  // attachment, costing 2–4× bandwidth on the main pass. Default stays
+  // on (current shipping behaviour); the toggle is for low-end hardware
+  // and FFT-foam debug shots where the multisample buffer adds nothing
+  // visible at racing speed but eats budget on integrated GPUs.
+  const aaParam = new URLSearchParams(window.location.search).get('aa')
+  const antialias = aaParam !== 'off'
+
   const r = new WebGPURenderer({
     canvas,
-    antialias: true,
+    antialias,
     forceWebGL: !hasWebGpu,
   })
   await r.init()
