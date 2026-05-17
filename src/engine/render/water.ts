@@ -52,6 +52,7 @@ import {
   WAKE_TRANS_OMEGA,
   type WaveFieldState,
 } from '@/engine/sim/water/wave-field'
+import { spectrumModesToGerstnerShape } from '@/engine/sim/water/spectrum-to-gerstner'
 
 /**
  * Per-frame data describing how a bike pushes/marks the water.
@@ -467,7 +468,16 @@ export function createWaterMesh(
   const SWELL_INDICES = new Set([0, 1])
   const swellScaleUniform = uniform(1)
   const chopScaleUniform = uniform(1)
-  const baseAmplitudes = field.waves.map((w) => w.amplitude)
+  // Per-wave baseline amplitudes — captured here so swell/chop scale
+  // sliders can restore the original balance. In spectrum mode the
+  // sliders no-op (the Gerstner notion of "swell vs chop" doesn't map
+  // cleanly to a continuous spectrum); we still grab the converted
+  // amplitudes so the array exists for downstream code, but
+  // `setSwellScale`/`setChopScale` are short-circuited below.
+  const baseAmplitudes =
+    field.kind === 'spectrum'
+      ? spectrumModesToGerstnerShape(field.spectrum).map((m) => m.amp)
+      : field.waves.map((w) => w.amplitude)
   // Time scale for the main loop. Stored here rather than as a uniform
   // because dt is consumed by `advanceWaveField` on the CPU side; the
   // shader reads `field.time` regardless of how fast it advances.
@@ -554,18 +564,36 @@ export function createWaterMesh(
   // Per-wave Q defaults — index-aligned to defaultWaves(): two long swells,
   // four chop scales. Swells stay gentle; chops get sharp ridges.
   const Q_BASE_DEFAULTS = [0.35, 0.35, 0.85, 0.95, 1.0, 1.0]
-  const waveConsts: WaveConst[] = field.waves.map((w, i) => {
-    const k = (2 * Math.PI) / w.wavelength
-    return {
-      k,
-      omega: w.speed * k,
-      dirX: w.dirX,
-      dirZ: w.dirZ,
-      amp: w.amplitude,
-      phase: w.phase,
-      qBase: Q_BASE_DEFAULTS[i] ?? 0.7,
-    }
-  })
+  // Two paths into the same `waveConsts` shape: Gerstner mode reads
+  // hand-tuned (wavelength, speed, dir, amp, phase) directly; spectrum
+  // mode converts top-K Phillips modes to the same shape via the math
+  // in `spectrum-to-gerstner.ts`. Spectrum modes get `qBase = 0` (pure
+  // heightfield, no horizontal pinching) — Tessendorf-style choppy
+  // displacement is a Phase A2 follow-up. The shader code that
+  // consumes `waveConsts` is identical regardless of source.
+  const waveConsts: WaveConst[] =
+    field.kind === 'spectrum'
+      ? spectrumModesToGerstnerShape(field.spectrum).map((m) => ({
+          k: m.k,
+          omega: m.omega,
+          dirX: m.dirX,
+          dirZ: m.dirZ,
+          amp: m.amp,
+          phase: m.phase,
+          qBase: 0,
+        }))
+      : field.waves.map((w, i) => {
+          const k = (2 * Math.PI) / w.wavelength
+          return {
+            k,
+            omega: w.speed * k,
+            dirX: w.dirX,
+            dirZ: w.dirZ,
+            amp: w.amplitude,
+            phase: w.phase,
+            qBase: Q_BASE_DEFAULTS[i] ?? 0.7,
+          }
+        })
 
   // Gerstner — heightfield part: returns vec3(y, dy/dx, dy/dz). These are the
   // same values you'd get from a vertical-only sum of sines, used both for the
@@ -1825,6 +1853,12 @@ export function createWaterMesh(
   function applySwellScale(s: number): void {
     const v = clamp01(s, 0, 3)
     swellScaleUniform.value = v
+    // Spectrum mode: the swell/chop split doesn't exist (continuous
+    // spectrum), so the uniform still tracks the slider value for
+    // visual continuity in the debug UI but the per-wave amplitude
+    // mutation is skipped. Phase A5 replaces these knobs with wind
+    // speed / cutoff which DO drive the spectrum meaningfully.
+    if (field.kind !== 'gerstner') return
     for (let i = 0; i < field.waves.length; i++) {
       if (SWELL_INDICES.has(i)) field.waves[i]!.amplitude = baseAmplitudes[i]! * v
     }
@@ -1832,6 +1866,7 @@ export function createWaterMesh(
   function applyChopScale(s: number): void {
     const v = clamp01(s, 0, 3)
     chopScaleUniform.value = v
+    if (field.kind !== 'gerstner') return
     for (let i = 0; i < field.waves.length; i++) {
       if (!SWELL_INDICES.has(i)) field.waves[i]!.amplitude = baseAmplitudes[i]! * v
     }

@@ -1,3 +1,11 @@
+import { buildPhillipsSpectrum, type PhillipsParams } from './phillips'
+import {
+  sampleSpectrumHeightFromModes,
+  sampleSpectrumSurfaceFromModes,
+  selectTopKModes,
+  type SpectrumMode,
+} from './spectrum-modes'
+
 /**
  * Sum-of-sines Gerstner wave field. Pure math — no Three.js, runs in sim layer.
  *
@@ -60,15 +68,44 @@ export type WaveSample = {
   vy: number
 }
 
-export type WaveFieldState = {
+/**
+ * The wave field can be in one of two modes:
+ *
+ *   - 'gerstner' — the legacy 6-wave analytic sum. Default, hand-tuned,
+ *     matches the visual character the game has shipped with.
+ *   - 'spectrum' — a top-K Phillips spectrum sampled deterministically
+ *     from a seeded PRNG. Activated by `?waves=fft` at boot; richer
+ *     statistical content, but visual character is different and the
+ *     debug menu's swell/chop scales become no-ops (Phase A5 will
+ *     replace them with wind-speed / cutoff knobs).
+ *
+ * Both modes share the wake list, time scalar, and base sea level —
+ * the wake system is an additive analytic layer independent of the
+ * underlying spectrum, and shipping it unchanged keeps "bike jumps own
+ * wake" intact across the migration.
+ */
+export type WaveFieldState = GerstnerWaveField | SpectrumWaveField
+
+export type GerstnerWaveField = {
+  kind: 'gerstner'
   waves: Wave[]
-  /** Live wake sources — refreshed each fixed step before hoverSystem reads
-   * the surface for buoyancy. Empty by default. */
   wakes: WakeSource[]
   time: number
-  /** Mean sea level (m). Wave amplitudes oscillate around this Y. Set
-   *  from `track.water.height` at boot; defaults to 0 for tracks that
-   *  don't specify a custom level. */
+  baseY: number
+}
+
+export type SpectrumWaveField = {
+  kind: 'spectrum'
+  /** Top-K most-energetic Phillips modes. CPU buoyancy sums these
+   *  analytically; GPU shader converts them to Gerstner-shape via
+   *  `spectrumModesToGerstnerShape` at build time. Both paths produce
+   *  the identical heightfield — see `spectrum-to-gerstner.ts`. */
+  spectrum: SpectrumMode[]
+  /** Echo of the build params. Lets consumers introspect / hash the
+   *  field for replay validation. */
+  spectrumParams: PhillipsParams
+  wakes: WakeSource[]
+  time: number
   baseY: number
 }
 
@@ -120,7 +157,51 @@ export const WAKE_TRANS_OMEGA = 1.0
 export const WAKE_TRANS_AMP = 0.3
 
 export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveFieldState {
-  return { waves, wakes: [], time: 0, baseY: opts?.baseY ?? 0 }
+  return { kind: 'gerstner', waves, wakes: [], time: 0, baseY: opts?.baseY ?? 0 }
+}
+
+/**
+ * Build a wave field driven by a top-K Phillips spectrum. The CPU
+ * buoyancy path samples the spectrum analytically; the GPU shader
+ * converts the same modes to Gerstner-shape so its unrolled wave
+ * iteration stays bit-identical. Behind the `?waves=fft` boot flag
+ * during Phase A; the default stays on the legacy 6-wave Gerstner.
+ */
+export function createSpectrumWaveField(
+  spectrumParams: PhillipsParams,
+  opts?: { baseY?: number; topK?: number },
+): SpectrumWaveField {
+  const grid = buildPhillipsSpectrum(spectrumParams)
+  const spectrum = selectTopKModes(grid, { topK: opts?.topK ?? 32 })
+  return {
+    kind: 'spectrum',
+    spectrum,
+    spectrumParams,
+    wakes: [],
+    time: 0,
+    baseY: opts?.baseY ?? 0,
+  }
+}
+
+/**
+ * Default spectrum parameters tuned to land in roughly the same
+ * "open-ocean swell + chop" character as `defaultWaves()`. Wind speed
+ * sets the dominant wavelength (L = V²/g), tileSize bounds the longest
+ * wave the grid can resolve, and the small-wavelength cutoff fights
+ * sub-meter aliasing on the 1/k⁴ tail. The seed is fixed so two
+ * sessions with no track-specific override get the same sea state.
+ */
+export function defaultSpectrumParams(): PhillipsParams {
+  return {
+    N: 32,
+    tileSize: 90,
+    windSpeed: 9.5,
+    windDirX: 0.92,
+    windDirZ: 0.39,
+    amplitude: 1.5,
+    smallWavelengthCutoff: 1.2,
+    seed: 0x515a,
+  }
 }
 
 export function advanceWaveField(field: WaveFieldState, dt: number): void {
@@ -235,11 +316,15 @@ function smoothstep(a: number, b: number, x: number): number {
 export function sampleHeight(field: WaveFieldState, x: number, z: number): number {
   let y = field.baseY
   const t = field.time
-  for (const w of field.waves) {
-    const k = (2 * Math.PI) / w.wavelength
-    const omega = w.speed * k
-    const phase = k * (w.dirX * x + w.dirZ * z) - omega * t + w.phase
-    y += w.amplitude * Math.sin(phase)
+  if (field.kind === 'spectrum') {
+    y += sampleSpectrumHeightFromModes(field.spectrum, x, z, t)
+  } else {
+    for (const w of field.waves) {
+      const k = (2 * Math.PI) / w.wavelength
+      const omega = w.speed * k
+      const phase = k * (w.dirX * x + w.dirZ * z) - omega * t + w.phase
+      y += w.amplitude * Math.sin(phase)
+    }
   }
   for (const src of field.wakes) {
     y += sampleWakeFromSource(src, x, z, t).y
@@ -254,16 +339,24 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
   let dydz = 0
   let vy = 0
   const t = field.time
-  for (const w of field.waves) {
-    const k = (2 * Math.PI) / w.wavelength
-    const omega = w.speed * k
-    const phase = k * (w.dirX * x + w.dirZ * z) - omega * t + w.phase
-    const s = Math.sin(phase)
-    const c = Math.cos(phase)
-    y += w.amplitude * s
-    dydx += w.amplitude * c * (k * w.dirX)
-    dydz += w.amplitude * c * (k * w.dirZ)
-    vy += w.amplitude * c * -omega
+  if (field.kind === 'spectrum') {
+    const surf = sampleSpectrumSurfaceFromModes(field.spectrum, x, z, t)
+    y += surf.y
+    dydx += surf.dydx
+    dydz += surf.dydz
+    vy += surf.vy
+  } else {
+    for (const w of field.waves) {
+      const k = (2 * Math.PI) / w.wavelength
+      const omega = w.speed * k
+      const phase = k * (w.dirX * x + w.dirZ * z) - omega * t + w.phase
+      const s = Math.sin(phase)
+      const c = Math.cos(phase)
+      y += w.amplitude * s
+      dydx += w.amplitude * c * (k * w.dirX)
+      dydz += w.amplitude * c * (k * w.dirZ)
+      vy += w.amplitude * c * -omega
+    }
   }
   for (const src of field.wakes) {
     const wk = sampleWakeFromSource(src, x, z, t)
