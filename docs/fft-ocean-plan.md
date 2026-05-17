@@ -5,6 +5,42 @@ Tessendorf-style FFT ocean. Staged so each phase ships independently and the
 project can be paused or rolled back at any milestone without regressing the
 shipping water.
 
+## Resuming this work
+
+This branch was developed in a remote container with no browser-automation
+MCP attached, so visual A/B validation has been deferred to the local
+operator. Latest checkpoint pushed: `25eef78` (phase A4a). Pull the branch
+and you have everything Phase C + A1 + A4 produced.
+
+To pick up:
+1. `git checkout claude/fft-ocean-waves && git pull` — get to the head.
+2. `pnpm install && pnpm dev` — local dev server. The water shader path
+   responds to URL flags (see below) so A/B is `cmd/ctrl+click` between
+   tabs.
+3. Read the **Current status** table below — done columns describe what
+   exists in the code, todo columns describe what's pending. Each ✅ row
+   names the file(s) that landed.
+4. **Validation gates not yet exercised** are flagged inline: search the
+   table for "Validation". Each ⬜ row's "Notes" column describes the
+   intended deliverable + main risks.
+5. The most natural next step is **A2** (GPU full-spectrum IFFT for vertex
+   displacement) — see its "Notes" cell below for the recommended
+   approach. A2 unblocks A3 (Jacobian foam) since it produces the
+   horizontal-displacement maps that the Jacobian formula needs.
+6. **Open questions** (later in this doc) are decisions deferred to the
+   tuning pass — none block forward progress, all benefit from at least
+   one round of in-browser eyeballing first.
+
+URL flags to A/B-test in dev:
+
+| URL | What it activates |
+| --- | --- |
+| `?water=v2` (or no flag) | Default: 6-wave Gerstner + procedural detail cascade. |
+| `?water=fft` | C2/C3: detail cascade is a Phillips-spectrum IFFT bake. WebGPU runs the live GPU compute kernel; WebGL2 falls back to a static CPU bake. |
+| `?waves=fft` | A1b: big-wave field is a top-32 Phillips spectrum sum (instead of 6-wave Gerstner). CPU buoyancy and GPU shader both read the same modes, kept locked by `spectrumModesToGerstnerShape`. |
+| `?water=fft&waves=fft` | Both layers on Phillips. The current "full FFT" preview — though the GPU still iterates analytics, not a true IFFT. A2 swaps the analytic-sum vertex shader for an IFFT-texture sample, which is where the *visual* payoff lives. |
+| `?water=classic` | Pre-existing legacy heightfield. Untouched by this migration. |
+
 ## Current status
 
 **Branch**: `claude/fft-ocean-waves`
@@ -18,7 +54,7 @@ shipping water.
 | C3 — Port to TSL GPU compute (animated IFFT each frame) | ✅ done | `ocean-fft/gpu-bake.ts` — direct inverse DFT in a single TSL compute kernel at N=64. Dispatched from `mesh.onBeforeRender`. Active on `?water=fft` + WebGPU backend. WebGL2 fallback uses the C2 static bake. **Validation next: in-browser A/B (animation visible vs C2 static).** |
 | A1a — Top-K mode selection + analytic samplers (additive) | ✅ done | `spectrum-modes.ts` — `selectTopKModes`, `sampleSpectrumHeightFromModes`, `sampleSpectrumSurfaceFromModes`. 8 unit tests including FD-gradient + variance-capture checks. **No consumer wiring yet — purely additive scaffolding.** |
 | A1b — Discriminated WaveFieldState + spectrum factory (opt-in `?waves=fft`) | ✅ done | `WaveFieldState = GerstnerWaveField \| SpectrumWaveField`. `createSpectrumWaveField` builds top-K Phillips modes; `sampleHeight`/`sampleSurface` branch on `field.kind`. GPU shader path converts spectrum → Gerstner-shape via `spectrum-to-gerstner.ts` (parity-tested) so the existing unrolled shader iteration works unchanged. Default stays on Gerstner — `?waves=fft` activates. Debug menu swell/chop scales no-op in spectrum mode (Phase A5 replaces with wind knobs). **Validation next: in-browser A/B against Gerstner default.** |
-| A2 — GPU full-spectrum IFFT (height + dx + dz + slope) | ⬜ todo | Vertex shader samples textures instead of summing analytics. |
+| A2 — GPU full-spectrum IFFT (height + dx + dz + slope) | ⬜ todo | Extend `ocean-fft/gpu-bake.ts` to output RGBA32F: R = height, G = Dx, B = Dz, A = Jacobian. Vertex shader in `water.ts` swaps the 32-mode analytic sum for `texture(fftOutput, worldXZ.div(tileSize).fract())` reads. CPU buoyancy stays on the top-K analytic sum (A1a/A1b path) — agreement is approximate (top-K captures ~95% of variance) but bounded. **Risks**: (a) shader rewrite has to keep the wake / shoaling / scene-depth paths intact; (b) tile-boundary seam handling; (c) WebGL2 fallback still on analytic Gerstner path. **Validation**: visual A/B + buoyancy-vs-render delta probe added to `wave-field-determinism.test.ts`. |
 | A3 — Jacobian-based foam | ⬜ todo | Replace slope/fold heuristic with `det(I+λ∇D)<0`. |
 | A4a — Spectrum-field determinism tests (CPU side) | ✅ done | `wave-field-determinism.test.ts` — 6 tests: cross-build identity, advance-step parity, seed forking, replay rebuild-restore cycle, stateless-sampler check, Gerstner regression. Replay + multiplayer determinism guaranteed on the new path. |
 | A4b — CPU sampler matches GPU IFFT at probe points | ⬜ todo | Pending A2 (GPU full-spectrum IFFT). The conversion-parity test already locks down the analytic-shader path. |
@@ -254,31 +290,38 @@ After ~2 weeks of `?water=fft` on dev builds without regressions, flip the
 default. Keep `?water=v2` reachable for one more release as an A/B escape
 hatch; remove the Gerstner code once nothing's hitting that flag.
 
-## Concrete file inventory
+## Code map — what's actually wired up
 
-New files (all created during the migration):
-- `src/engine/sim/water/phillips.ts` — Phillips spectrum + Gaussian sampling, pure math
-- `src/engine/sim/water/spectrum-modes.ts` — top-N mode selection, deterministic sort
-- `src/engine/render/ocean-fft/spectrum.ts` — JS-side spectrum upload
-- `src/engine/render/ocean-fft/butterfly.ts` — bit-reversal + twiddle precompute
-- `src/engine/render/ocean-fft/compute.ts` — TSL compute kernels
-- `src/engine/render/ocean-fft/runtime.ts` — public surface for water.ts
-- `tests/unit/ocean-fft-spectrum.test.ts`
-- `tests/unit/ocean-fft-parity.test.ts`
+Sim-side (pure-math, no Three.js):
+- `src/engine/sim/water/phillips.ts` — Phillips spectrum on an N×N grid, mulberry32 PRNG, Box-Muller, `sampleSpectrumHeight` (analytic full-grid sum).
+- `src/engine/sim/water/fft2d-cpu.ts` — radix-2 Cooley-Tukey FFT in 1D + 2D + `fftshift`/`ifftshift`. Reference oracle for any future GPU IFFT and powers the C2 boot-time bake.
+- `src/engine/sim/water/spectrum-modes.ts` — top-K mode selection (`selectTopKModes`) + analytic samplers (`sampleSpectrumHeightFromModes`, `sampleSpectrumSurfaceFromModes`).
+- `src/engine/sim/water/spectrum-to-gerstner.ts` — the bridge: converts top-K spectrum modes into Gerstner-shape so the existing GPU shader's unrolled iteration walks them without modification. Sign-convention derivation in the module head.
+- `src/engine/sim/water/wave-field.ts` — discriminated `WaveFieldState = GerstnerWaveField | SpectrumWaveField`. Factories: `createWaveField(waves)` (Gerstner), `createSpectrumWaveField(params, opts)` (spectrum), `defaultSpectrumParams()`. Samplers branch on `field.kind`.
 
-Modified files:
-- `src/engine/render/water.ts` — vertex displacement source swaps from
-  Gerstner to FFT-texture samples; foam composition swaps slope^2 for
-  Jacobian. URL flag plumbing for `?water=fft`. Wake / shoaling / scene-depth
-  paths unchanged.
-- `src/engine/sim/water/wave-field.ts` — `Wave[]` → `SpectrumMode[]`,
-  sampleHeight/sampleSurface become spectrum sums.
-- `src/main.ts` + `src/boot/attract-mode.ts` + `src/boot/calibration-mode.ts`
-  — `createWaveField()` call gets seed + wind args sourced from the track's
-  `water` config.
-- `src/engine/water-debug-menu.ts` — knob set updated.
-- `tests/unit/wave-field.test.ts` — assertions adapt from sine-wave-specific
-  to spectrum-specific.
+Render-side (Three.js):
+- `src/engine/render/ocean-fft/cpu-bake.ts` — one-shot Phillips→IFFT→slope-texture bake at boot. Drop-in replacement for the procedural `buildWaveDetailNormalTexture`. Used as the WebGL2 fallback when `?water=fft` is active.
+- `src/engine/render/ocean-fft/gpu-bake.ts` — TSL compute pipeline: animated Phillips→inverse-DFT→slope-texture each frame. Active on WebGPU when `?water=fft` is set. N=64 direct inverse DFT (one dispatch, one Loop over N² modes). Output RGBA8 storage texture sampled by the water material.
+- `src/engine/render/water.ts` — branches: detail-texture provider (procedural / CPU-bake / GPU-compute) and wave-iteration source (Gerstner vs spectrum-converted). Wake, shoaling, scene-depth foam, planar reflection, sparkle — all untouched and equally happy on either path.
+
+URL-flag plumbing:
+- `?water=v2/fft/classic/wire` parsed in `water.ts` near the top of `createWaterMesh`.
+- `?waves=fft` parsed in `main.ts` (line ~121), drives factory choice.
+
+Tests (32 files total, 256 tests passing as of A4a):
+- `tests/unit/phillips.test.ts` — 12 tests on the spectrum + PRNG + Box-Muller.
+- `tests/unit/fft2d-cpu.test.ts` — 7 tests on the 2D FFT (round-trip, delta-function, naive-DFT cross-check, fftshift).
+- `tests/unit/ocean-fft-parity.test.ts` — analytic sampler ≡ IFFT at every grid point at t=0 and t>0. Load-bearing for the Phase A2 cutover.
+- `tests/unit/spectrum-modes.test.ts` — 8 tests on mode selection + analytic sum + variance-capture floor.
+- `tests/unit/spectrum-to-gerstner.test.ts` — 4 tests confirming the conversion is mathematically exact across a 9×9×5 probe cube.
+- `tests/unit/wave-field-spectrum.test.ts` — 8 tests on the public sim surface with `kind: 'spectrum'`.
+- `tests/unit/wave-field-determinism.test.ts` — 6 tests pinning down replay + multiplayer determinism on the spectrum path.
+- Existing `tests/unit/wave-field.test.ts` (Gerstner path) still passes unchanged.
+
+Files still imagined but not built (A2/A3/A5 territory):
+- `src/engine/render/ocean-fft/runtime.ts` — public surface bundling height/Dx/Dz/Jacobian texture outputs for the vertex shader to consume. A2.
+- A real radix-2 FFT in TSL (replaces the O(N⁴) direct DFT in `gpu-bake.ts` if N>=128 is needed). Probably worth doing during A2.
+- `src/engine/water-debug-menu.ts` rewrite — currently the swell/chop sliders are no-ops in spectrum mode. A5 replaces them with wind / cutoff knobs.
 
 ## Open questions to revisit before A5
 
