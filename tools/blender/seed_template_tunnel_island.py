@@ -380,64 +380,36 @@ def _make_tunnel_curve(name: str, anchors: list[tuple[float, float, float]]) -> 
 
 
 def add_tunnels(addon) -> int:
-    """Build each tunnel by:
-        1. Spawn the Bezier curve (`tunnel_X_curve`).
-        2. Sample it via `addon._sample_tunnel_curve`.
-        3. Build cutter + interior shell from the samples.
-        4. Park the cutter in `_hoverbike_tunnel_cutters` so the
-           terrain's Boolean modifier picks it up.
-    After all tunnels are built, ensure the single Boolean modifier
-    on the terrain targets the cutters collection.
+    """Build each tunnel by spawning the Bezier curve and calling
+    ``addon.tunnel.build_tunnel_from_curve`` — the same path the
+    addon's Build Tunnel operator uses, so author-loop and seed share
+    a single source of truth for tunnel geometry.
 
     Returns the count of tunnels successfully built."""
     if addon is None:
         return 0
+    from hoverbike_addon import tunnel as tunnel_mod
+
     scene = bpy.context.scene
-    cutters_col = addon._ensure_tunnel_cutters_collection(scene)
     terrain = bpy.data.objects.get("terrain")
+    if terrain is None:
+        print("[seed-tunnel-island] no 'terrain' object — skipping tunnels")
+        return 0
     built = 0
-    for i, (curve_name, anchors) in enumerate(TUNNELS):
+    for curve_name, anchors in TUNNELS:
         curve = _make_tunnel_curve(curve_name, anchors)
-        samples = addon._sample_tunnel_curve(curve, TUNNEL_SAMPLES)
-        if not samples:
-            print(f"[seed-tunnel-island] tunnel {curve_name}: 0 samples, skipping")
-            continue
-        slot_name = f"tunnel_{i:02d}"
-        cutter_mesh = addon._build_tunnel_cutter_mesh(
-            f"{slot_name}_cutter_mesh",
-            samples,
-            radius=TUNNEL_RADIUS + TUNNEL_WALL_THICKNESS,
+        tunnel_mod.build_tunnel_from_curve(
+            scene, curve, terrain,
+            radius=TUNNEL_RADIUS,
+            wall_thickness=TUNNEL_WALL_THICKNESS,
             segments=TUNNEL_SEGMENTS,
             end_extend=TUNNEL_END_EXTEND,
         )
-        cutter_obj = bpy.data.objects.new(f"{slot_name}_cutter", cutter_mesh)
-        cutter_obj["kind"] = "tunnel_cutter"
-        cutter_obj["tunnel_curve"] = curve_name
-        cutter_obj.display_type = "WIRE"
-        cutters_col.objects.link(cutter_obj)
-        cutter_obj.hide_render = True
-        cutter_obj.hide_set(True)
-
-        interior_mesh = addon._build_tunnel_interior_mesh(
-            f"{slot_name}_interior_mesh",
-            samples,
-            radius=TUNNEL_RADIUS,
-            segments=TUNNEL_SEGMENTS,
-        )
-        interior_obj = bpy.data.objects.new(f"{slot_name}_interior", interior_mesh)
-        interior_obj["kind"] = "track"
-        interior_obj["tunnel_curve"] = curve_name
-        interior_obj.data.materials.append(addon._ensure_tunnel_material())
-        scene.collection.objects.link(interior_obj)
         built += 1
         print(
-            f"[seed-tunnel-island] {slot_name}: curve={curve_name}, "
-            f"{len(samples)} samples, radius {TUNNEL_RADIUS:.1f} m"
+            f"[seed-tunnel-island] tunnel from {curve_name}: "
+            f"r={TUNNEL_RADIUS:.1f} m, wall={TUNNEL_WALL_THICKNESS:.2f} m"
         )
-
-    if terrain is not None and built > 0:
-        addon._ensure_terrain_tunnel_boolean(terrain, cutters_col)
-        print(f"[seed-tunnel-island] terrain boolean: → {cutters_col.name}")
     return built
 
 

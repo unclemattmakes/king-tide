@@ -341,12 +341,25 @@ def _generate_downtown(
     height_max: float,
     seed: int,
     conform_to_terrain: bool = True,
+    existing_parent: bpy.types.Object | None = None,
 ) -> tuple[bpy.types.Object, int]:
     """Spawn a parented downtown block. Returns (parent_empty,
-    n_buildings_built)."""
-    name = _next_downtown_object_name()
-    parent = bpy.data.objects.new(name, None)
-    parent.empty_display_type = "CUBE"
+    n_buildings_built).
+
+    Pass ``existing_parent`` to rebuild in place at that empty's
+    current transform — useful for Rebuild Downtown after the user
+    tweaks the panel sliders. The caller is responsible for purging
+    the old children first."""
+    if existing_parent is None:
+        name = _next_downtown_object_name()
+        parent = bpy.data.objects.new(name, None)
+        parent.empty_display_type = "CUBE"
+        parent.location = location
+        parent.rotation_euler = (0.0, 0.0, float(rotation_z))
+        scene.collection.objects.link(parent)
+    else:
+        parent = existing_parent
+        name = parent.name
     parent.empty_display_size = max(2.0, block_size * 0.4)
     parent["kind"] = "downtown"
     parent["seed"] = int(seed)
@@ -354,10 +367,9 @@ def _generate_downtown(
     parent["blocks_y"] = int(blocks_y)
     parent["block_size"] = float(block_size)
     parent["street_width"] = float(street_width)
+    parent["height_min"] = float(height_min)
+    parent["height_max"] = float(height_max)
     parent["conform_to_terrain"] = bool(conform_to_terrain)
-    parent.location = location
-    parent.rotation_euler = (0.0, 0.0, float(rotation_z))
-    scene.collection.objects.link(parent)
 
     pitch = block_size + street_width
     span_x = blocks_x * pitch - street_width
@@ -632,11 +644,155 @@ class HOVERBIKE_OT_add_downtown(Operator):
         return {"FINISHED"}
 
 
+def _find_downtown_parent(context) -> bpy.types.Object | None:
+    """Walk up parents from the active object until we find a
+    ``kind="downtown"`` empty. Returns the empty, or ``None`` if the
+    user has nothing downtown-adjacent selected."""
+    obj = context.view_layer.objects.active
+    while obj is not None:
+        if obj.get("kind") == "downtown":
+            return obj
+        obj = obj.parent
+    return None
+
+
+def _purge_downtown_children(parent: bpy.types.Object) -> None:
+    """Delete every child of ``parent`` (plinths + buildings) plus any
+    orphaned meshes they leave behind. Leaves the parent empty intact
+    so its transform + custom props can be reused."""
+    children = list(parent.children_recursive)
+    meshes: list[bpy.types.Mesh] = []
+    for ch in children:
+        if ch.type == "MESH" and ch.data is not None:
+            meshes.append(ch.data)
+        bpy.data.objects.remove(ch, do_unlink=True)
+    for me in meshes:
+        if me.users == 0:
+            bpy.data.meshes.remove(me)
+
+
+class HOVERBIKE_OT_pick_downtown_settings(Operator):
+    """Load the active downtown's stored parameters into the panel
+    sliders so the user can edit from current values rather than from
+    defaults. Reads from custom properties stamped on the parent
+    ``downtown_NN`` empty (``seed``, ``blocks_x``, ``blocks_y``,
+    ``block_size``, ``street_width``, ``height_min``, ``height_max``,
+    ``conform_to_terrain``).
+
+    Works from any descendant — selecting a building, plinth, or the
+    empty itself all resolve to the same downtown."""
+
+    bl_idname = "hoverbike.pick_downtown_settings"
+    bl_label = "Pick Downtown Settings"
+    bl_description = (
+        "Load the active downtown's stored params (blocks/spacing/heights/seed) "
+        "into the panel sliders so they can be edited before clicking Rebuild"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        parent = _find_downtown_parent(context)
+        if parent is None:
+            self.report({"ERROR"}, "Select a downtown block first (parent empty or any child).")
+            return {"CANCELLED"}
+        scene = context.scene
+        for src_key, dst_attr, caster in (
+            ("blocks_x",           "hoverbike_downtown_blocks_x",      int),
+            ("blocks_y",           "hoverbike_downtown_blocks_y",      int),
+            ("block_size",         "hoverbike_downtown_block_size",    float),
+            ("street_width",       "hoverbike_downtown_street_width",  float),
+            ("height_min",         "hoverbike_downtown_height_min",    float),
+            ("height_max",         "hoverbike_downtown_height_max",    float),
+            ("seed",               "hoverbike_downtown_seed",          int),
+            ("conform_to_terrain", "hoverbike_downtown_conform",       bool),
+        ):
+            if src_key in parent.keys():
+                try:
+                    setattr(scene, dst_attr, caster(parent[src_key]))
+                except (TypeError, ValueError):
+                    pass
+        self.report({"INFO"}, f"Loaded settings from {parent.name}.")
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_rebuild_downtown(Operator):
+    """Regenerate the active downtown using the panel's current
+    spacing / block-size / height / seed values, preserving the
+    parent empty's location + rotation. Deletes the existing
+    children, builds fresh ones, stamps new params back onto the
+    parent.
+
+    Works from any descendant — select a building, a plinth, or the
+    empty itself. Combine with *Pick Settings* to grab the current
+    values, tweak a slider, then Rebuild."""
+
+    bl_idname = "hoverbike.rebuild_downtown"
+    bl_label = "Rebuild Downtown"
+    bl_description = (
+        "Regenerate the selected downtown's buildings + plinth using the "
+        "current panel sliders, keeping the parent empty's position + rotation"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        parent = _find_downtown_parent(context)
+        if parent is None:
+            self.report({"ERROR"}, "Select a downtown block first (parent empty or any child).")
+            return {"CANCELLED"}
+
+        scene = context.scene
+        bx = int(getattr(scene, "hoverbike_downtown_blocks_x", 6))
+        by = int(getattr(scene, "hoverbike_downtown_blocks_y", 6))
+        block_size = float(getattr(scene, "hoverbike_downtown_block_size", 30.0))
+        street = float(getattr(scene, "hoverbike_downtown_street_width", 8.0))
+        h_min = float(getattr(scene, "hoverbike_downtown_height_min", 18.0))
+        h_max = float(getattr(scene, "hoverbike_downtown_height_max", 80.0))
+        seed = int(getattr(scene, "hoverbike_downtown_seed", 1))
+        conform = bool(getattr(scene, "hoverbike_downtown_conform", True))
+        if bx <= 0 or by <= 0 or block_size <= 0 or h_max <= h_min:
+            self.report(
+                {"ERROR"},
+                "Invalid downtown dimensions — fix grid / size / height range first.",
+            )
+            return {"CANCELLED"}
+
+        _purge_downtown_children(parent)
+        _, n = _generate_downtown(
+            scene,
+            location=tuple(parent.location),
+            rotation_z=float(parent.rotation_euler.z),
+            blocks_x=bx,
+            blocks_y=by,
+            block_size=block_size,
+            street_width=street,
+            height_min=h_min,
+            height_max=h_max,
+            seed=seed,
+            conform_to_terrain=conform,
+            existing_parent=parent,
+        )
+
+        for o in context.selected_objects:
+            o.select_set(False)
+        parent.select_set(True)
+        context.view_layer.objects.active = parent
+
+        self.report(
+            {"INFO"},
+            f"Rebuilt {parent.name}: {bx}×{by} blocks, {n} buildings.",
+        )
+        return {"FINISHED"}
+
+
 # ────────────────────────────────────────────────────────────────────
 # Registration
 # ────────────────────────────────────────────────────────────────────
 
-_CLASSES: tuple[type, ...] = (HOVERBIKE_OT_add_downtown,)
+_CLASSES: tuple[type, ...] = (
+    HOVERBIKE_OT_add_downtown,
+    HOVERBIKE_OT_pick_downtown_settings,
+    HOVERBIKE_OT_rebuild_downtown,
+)
 
 
 def register() -> None:
