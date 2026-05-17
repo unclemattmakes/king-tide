@@ -396,6 +396,21 @@ export type GpuOceanDisplacementOpts = {
    *  middle ground that adds visible pinching without making the
    *  buoyancy-vs-render gap grow too large. */
   choppiness?: number
+  /** Visual scale applied to height, Dx, and Dz at kernel-write
+   *  time. Jacobian is unaffected (it's a dimensionless partial-
+   *  derivative product). This exists because the existing
+   *  `defaultSpectrumParams.amplitude = 1.5` produces wave heights
+   *  in the 50–100 m range when summed across the full N² Phillips
+   *  grid — a calibration that was tuned for the top-K analytic
+   *  path's far smaller subset, never visually validated against
+   *  the full grid. Until A5 retunes `defaultSpectrumParams`, the
+   *  GPU displacement kernel scales its output down here so the
+   *  rendered surface lands in arcade range (~0.5 m RMS). Default
+   *  empirically dialled in vs the Gerstner baseline; A5 will
+   *  replace this with a wind/cutoff-driven tune that doesn't
+   *  need the visual divisor. Set to 1.0 to see the raw
+   *  full-spectrum output (useful for math validation). */
+  renderScale?: number
 }
 
 export type GpuOceanDisplacementHandle = {
@@ -414,6 +429,9 @@ export type GpuOceanDisplacementHandle = {
    *  so a future debug-menu slider can mutate it via the uniform
    *  without rebuilding the kernel. */
   choppiness: number
+  /** Visual-only render scale on (height, Dx, Dz, slope). See the
+   *  opt's doc for why this exists. */
+  renderScale: number
   /** Drive the spectrum forward to `time` seconds and dispatch the
    *  compute kernel. Same fire-and-forget semantics as
    *  `GpuOceanFftHandle.tick`. */
@@ -442,6 +460,12 @@ export function createGpuOceanDisplacement(
   const N = phillipsParams.N
   const tileSize = phillipsParams.tileSize
   const choppiness = opts.choppiness ?? 0.5
+  // See the `renderScale` doc above for why this divisor exists.
+  // 0.005 brings `defaultSpectrumParams.amplitude = 1.5` down to the
+  // arcade range. Visual-only — CPU buoyancy is untouched, so this is
+  // explicitly creating a visuals/physics divergence for A5 to clean
+  // up at the spectrum-param tune.
+  const renderScale = opts.renderScale ?? 0.005
 
   // 1) Phillips spectrum on CPU — same call as `createSpectrumWaveField`
   //    uses. Both consumers read the same params so they get the same
@@ -506,6 +530,7 @@ export function createGpuOceanDisplacement(
   // 4) Uniforms.
   const timeUniform = uniform(0)
   const choppinessUniform = uniform(choppiness)
+  const renderScaleUniform = uniform(renderScale)
   // Physical-units conversion factor for slopes / partials: the
   // accumulators use UV-space wavenumbers (cycles per tile, integer),
   // so we multiply through by (2π / tileSize) at the end to get rad/m.
@@ -635,18 +660,24 @@ export function createGpuOceanDisplacement(
       // time so the vertex shader reads the FINAL displacement
       // without needing to know λ. Matches the convention used by
       // the Jacobian: both treat λ·D as the effective displacement.
-      const dxScaled = dx.mul(lambda)
-      const dzScaled = dz.mul(lambda)
+      // `renderScaleUniform` is the visual divisor applied here
+      // (and to height + slopes); the Jacobian is left at raw
+      // (dimensionless) scale since it's a pure folding signal.
+      const dxScaled = dx.mul(lambda).mul(renderScaleUniform)
+      const dzScaled = dz.mul(lambda).mul(renderScaleUniform)
+      const heightScaled = height.mul(renderScaleUniform)
+      const slopeDxScaled = slopeDx.mul(renderScaleUniform)
+      const slopeDzScaled = slopeDz.mul(renderScaleUniform)
 
       textureStore(
         dispTex,
         uvec2(px, py),
-        vec4(height, dxScaled, dzScaled, jacobian),
+        vec4(heightScaled, dxScaled, dzScaled, jacobian),
       ).toWriteOnly()
       textureStore(
         slpTex,
         uvec2(px, py),
-        vec4(slopeDx, slopeDz, float(0), float(0)),
+        vec4(slopeDxScaled, slopeDzScaled, float(0), float(0)),
       ).toWriteOnly()
     },
   )
@@ -679,6 +710,7 @@ export function createGpuOceanDisplacement(
     slopeTexture,
     tileSize,
     choppiness,
+    renderScale,
     tick,
     dispose,
   }
