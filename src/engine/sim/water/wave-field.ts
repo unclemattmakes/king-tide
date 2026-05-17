@@ -190,6 +190,16 @@ export function createSpectrumWaveField(
  * wave the grid can resolve, and the small-wavelength cutoff fights
  * sub-meter aliasing on the 1/k⁴ tail. The seed is fixed so two
  * sessions with no track-specific override get the same sea state.
+ *
+ * Amplitude calibration: the Phillips constant `A` is dimensioned so
+ * the spectrum's per-mode energy is `A · exp(...) · |k̂·ŵ|² / k⁴`.
+ * Summed across the full N² grid for our (windSpeed=9.5, tileSize=90)
+ * setup, the RMS wave height is roughly `√A · 400` m. Picking
+ * A ≈ 1.6e-6 lands the RMS in the ~0.5 m arcade range that matches
+ * the Gerstner default's visual character. A2 visual A/B (see
+ * `docs/fft-ocean-plan.md`) is what tuned this — earlier checkpoints
+ * shipped with A = 1.5 (a calibration mistake that produced
+ * tens-of-meters wave heights once the full-grid IFFT landed).
  */
 export function defaultSpectrumParams(): PhillipsParams {
   return {
@@ -198,7 +208,7 @@ export function defaultSpectrumParams(): PhillipsParams {
     windSpeed: 9.5,
     windDirX: 0.92,
     windDirZ: 0.39,
-    amplitude: 1.5,
+    amplitude: 1.6e-6,
     smallWavelengthCutoff: 1.2,
     seed: 0x515a,
   }

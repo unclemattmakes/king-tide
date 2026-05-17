@@ -396,20 +396,14 @@ export type GpuOceanDisplacementOpts = {
    *  middle ground that adds visible pinching without making the
    *  buoyancy-vs-render gap grow too large. */
   choppiness?: number
-  /** Visual scale applied to height, Dx, and Dz at kernel-write
-   *  time. Jacobian is unaffected (it's a dimensionless partial-
-   *  derivative product). This exists because the existing
-   *  `defaultSpectrumParams.amplitude = 1.5` produces wave heights
-   *  in the 50–100 m range when summed across the full N² Phillips
-   *  grid — a calibration that was tuned for the top-K analytic
-   *  path's far smaller subset, never visually validated against
-   *  the full grid. Until A5 retunes `defaultSpectrumParams`, the
-   *  GPU displacement kernel scales its output down here so the
-   *  rendered surface lands in arcade range (~0.5 m RMS). Default
-   *  empirically dialled in vs the Gerstner baseline; A5 will
-   *  replace this with a wind/cutoff-driven tune that doesn't
-   *  need the visual divisor. Set to 1.0 to see the raw
-   *  full-spectrum output (useful for math validation). */
+  /** Visual scale applied to height, Dx, Dz, and the height slopes
+   *  at kernel-write time. Jacobian is unaffected (it's a
+   *  dimensionless partial-derivative product). Defaults to 1.0
+   *  since `defaultSpectrumParams.amplitude` is calibrated for
+   *  RMS ~0.5 m at the full-grid sum. Exposed as a tuning knob for
+   *  the A5 debug menu (sea-state intensity slider) and for
+   *  per-track overrides that want a different visible amplitude
+   *  without touching the underlying spectrum. */
   renderScale?: number
 }
 
@@ -460,12 +454,7 @@ export function createGpuOceanDisplacement(
   const N = phillipsParams.N
   const tileSize = phillipsParams.tileSize
   const choppiness = opts.choppiness ?? 0.5
-  // See the `renderScale` doc above for why this divisor exists.
-  // 0.005 brings `defaultSpectrumParams.amplitude = 1.5` down to the
-  // arcade range. Visual-only — CPU buoyancy is untouched, so this is
-  // explicitly creating a visuals/physics divergence for A5 to clean
-  // up at the spectrum-param tune.
-  const renderScale = opts.renderScale ?? 0.005
+  const renderScale = opts.renderScale ?? 1
 
   // 1) Phillips spectrum on CPU — same call as `createSpectrumWaveField`
   //    uses. Both consumers read the same params so they get the same
