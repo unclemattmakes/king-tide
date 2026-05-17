@@ -755,7 +755,8 @@ def _conform_terrain_to_road(
     blend_radius: float,
     lift: float,
     curb_width: float = 0.0,
-    clearance: float = 0.05,
+    clearance: float = 0.20,
+    fill_shelf_width: float = 3.0,
 ) -> dict:
     """Push each terrain vertex within `(width/2 + curb_width + blend_radius)`
     of the road centerline toward the road's local Z. Inside the road
@@ -766,18 +767,47 @@ def _conform_terrain_to_road(
     road, so terrain can't pop through them. The outer band smoothsteps
     back to natural terrain.
 
-    A `clearance` cap (default 5 cm) clamps the result so a steep
+    A `clearance` cap (default 0.20 m) clamps the result so a steep
     hillside can never poke up *through* the drivable surface — the
     earlier "terrain jumped" symptom on the template island was a
     coarse-grid vertex inside the blend band ending up above the road
     surface and slicing through the strip mesh. The cap follows the
     same smoothstep so the visual transition stays seamless.
 
-    Returns a summary `{flattened, blended}` count for the report."""
+    **Always-push-down rule for overlapping roads**: when multiple
+    road samples have a terrain vertex inside their footprint (the
+    ``inner`` band = half-width + curb-width), we pick the
+    *lowest-Z* one as the conform target. That guarantees terrain
+    always sits *below* every overlapping road's drivable surface —
+    no terrain poking through curb edges where the curve doubles
+    back, no terrain piling up where the road's smoothed Z dips
+    momentarily. Trade-off: in doubled-back sections the upper road
+    visibly bridges over the lower road (its slab underside is
+    exposed); in road-dip sections the curb-edge terrain follows
+    the dip exactly, producing a slight trench along the curb. The
+    "Float" per-control-point flag is the recommended cleanup for
+    overpass authoring — marking the upper segment's control points
+    Float makes that segment a true bridge with terrain unchanged
+    beneath.
+
+    **Fill shelf on the downhill side** (``fill_shelf_width`` > 0): for
+    terrain vertices whose natural Z is below the road, the "fully
+    flattened" zone extends past the curbs by an extra ``fill_shelf_width``
+    metres before the smoothstep blend kicks in. On a hillside this
+    produces an asymmetric road embankment — wider fill on the downhill
+    side that keeps the road's slab underside hidden, normal cut width
+    on the uphill side. Without this, on steep traverses the smoothstep
+    blend lets terrain fall away within the conform band, leaving the
+    slab visibly hanging over a void on the downhill flank. Set to 0 to
+    restore the legacy symmetric behaviour.
+
+    Returns a summary ``{flattened, blended, floating}`` count for the
+    report — useful for the operator to surface how much terrain was
+    actually moved."""
     from mathutils.kdtree import KDTree
 
     if not samples:
-        return {"flattened": 0, "blended": 0}
+        return {"flattened": 0, "blended": 0, "floating": 0}
 
     half_w = width / 2.0
     # The "fully flattened" zone now spans the road *plus* the curbs so
@@ -791,6 +821,17 @@ def _conform_terrain_to_road(
     # their bases meet flush with the terrain at the road edge.
     surface_lift = lift
 
+    # Downhill fill shelf: wider flat zone on the side where the road's
+    # slab would otherwise hang over a void. The blend band keeps the
+    # same width — it shifts outward — so the smoothstep visual edge
+    # transitions at a comparable rate, just further from the curb.
+    fill_shelf = max(0.0, fill_shelf_width)
+    fill_inner = inner + fill_shelf
+    fill_outer = fill_inner + max(0.0, blend_radius)
+    # KDTree search radius must cover the widest possible "in band"
+    # distance — that's the fill shelf's outer edge.
+    search_radius = max(outer, fill_outer)
+
     kd = KDTree(len(samples))
     for i, s in enumerate(samples):
         kd.insert((s["x"], s["y"], 0.0), i)
@@ -800,41 +841,162 @@ def _conform_terrain_to_road(
     mw = terrain_obj.matrix_world
     mw_inv = mw.inverted_safe()
 
+    # Z-bias for the candidate score. Higher = pickier about matching
+    # the terrain's altitude (better separates layered roads), but at
+    # ~1.0 you start to break the "carve through hill" case where the
+    # terrain is much higher than the road. 0.5 is the sweet spot in
+    # practice — XY proximity still dominates for single-segment
+    # roads, but a 6 m vertical gap is enough to swing the choice for
+    # doubled-back roads at the same XY.
+    z_bias = 0.5
+
+    n_samples = len(samples)
+    # Decide whether the sample sequence wraps around (cyclic curve).
+    # The road sampler emits points in arc order; if the endpoints sit
+    # within ~1.5 segment-widths of each other in XY, treat it as
+    # cyclic so the segment between the last and first samples is
+    # available for terrain projection.
+    cyclic_close = False
+    if n_samples >= 3:
+        first = samples[0]
+        last = samples[-1]
+        avg_seg = (
+            math.hypot(samples[1]["x"] - first["x"], samples[1]["y"] - first["y"])
+            + math.hypot(last["x"] - samples[-2]["x"], last["y"] - samples[-2]["y"])
+        ) * 0.5
+        endpoint_gap = math.hypot(last["x"] - first["x"], last["y"] - first["y"])
+        cyclic_close = endpoint_gap < avg_seg * 1.5
+
+    def _next_idx(i: int) -> int:
+        """Index of the next sample along the curve, or -1 if no
+        segment starts at this sample (open curve, last point)."""
+        if i < n_samples - 1:
+            return i + 1
+        return 0 if cyclic_close else -1
+
     flattened = 0
     blended = 0
     floating = 0
     for v in me.vertices:
         world = mw @ v.co
-        _, idx, _ = kd.find((world.x, world.y, 0.0))
-        s = samples[idx]
-        d = math.hypot(world.x - s["x"], world.y - s["y"])
-        if d >= outer:
+        candidates = kd.find_range((world.x, world.y, 0.0), search_radius)
+        if not candidates:
             continue
-        # Per-sample conform weight scales the deformation — a floating
-        # bridge section (weight 0) leaves the terrain untouched, so the
-        # seabed under a bridge over water stays at its natural depth
-        # and water reads as water instead of an isthmus.
-        conform_w = float(s.get("conform", 1.0))
-        target_z = s["z"]
-        if d <= inner:
+
+        # Build candidate SEGMENTS — each nearby sample contributes the
+        # segment to its next neighbour AND (if it's not the start of
+        # the curve) the segment from its previous neighbour. This
+        # eliminates the stairstepping artefact of point-based conform:
+        # adjacent terrain verts can land on different samples and
+        # snap to different Z values, producing visible mesh steps.
+        # Segment-based conform interpolates Z along the segment so
+        # terrain follows the road's slope continuously.
+        candidate_segs: set[int] = set()
+        for _co, sidx, _xy_d in candidates:
+            if _next_idx(sidx) >= 0:
+                candidate_segs.add(sidx)
+            prev_idx = sidx - 1 if sidx > 0 else (n_samples - 1 if cyclic_close else -1)
+            if prev_idx >= 0 and _next_idx(prev_idx) >= 0:
+                candidate_segs.add(prev_idx)
+
+        # Per-segment: perpendicular projection onto segment line +
+        # interpolated Z + interpolated conform weight at the closest
+        # point. Always-push-down rule still applies — when multiple
+        # segments cover this XY inside their inner band, the
+        # lowest-Z one wins.
+        best_in_inner_z = float("inf")
+        best_in_inner = None
+        best_blend_score = float("inf")
+        best_blend = None
+        for seg_start in candidate_segs:
+            seg_end = _next_idx(seg_start)
+            if seg_end < 0:
+                continue
+            sa = samples[seg_start]
+            sb = samples[seg_end]
+            dx = sb["x"] - sa["x"]
+            dy = sb["y"] - sa["y"]
+            seg_len_sq = dx * dx + dy * dy
+            if seg_len_sq < 1e-9:
+                continue
+            t_seg = (
+                (world.x - sa["x"]) * dx + (world.y - sa["y"]) * dy
+            ) / seg_len_sq
+            t_seg = max(0.0, min(1.0, t_seg))
+            cx = sa["x"] + t_seg * dx
+            cy = sa["y"] + t_seg * dy
+            perp_d = math.hypot(world.x - cx, world.y - cy)
+            seg_z = sa["z"] + t_seg * (sb["z"] - sa["z"])
+            sa_c = float(sa.get("conform", 1.0))
+            sb_c = float(sb.get("conform", 1.0))
+            seg_conform = sa_c + t_seg * (sb_c - sa_c)
+
+            # Effective inner/outer for THIS segment: downhill side
+            # uses the wider fill shelf so terrain pulls up beyond
+            # the narrow cut band, hiding the road's slab underside.
+            if world.z < seg_z and fill_shelf > 0.0:
+                ef_inner_s = fill_inner
+                ef_outer_s = fill_outer
+            else:
+                ef_inner_s = inner
+                ef_outer_s = outer
+
+            if perp_d >= ef_outer_s:
+                continue
+
+            info = {
+                "d": perp_d, "z": seg_z, "conform": seg_conform,
+                "ef_inner": ef_inner_s, "ef_outer": ef_outer_s,
+            }
+            if perp_d <= ef_inner_s:
+                if seg_z < best_in_inner_z - 0.1 or (
+                    abs(seg_z - best_in_inner_z) < 0.1
+                    and (best_in_inner is None or perp_d < best_in_inner["d"])
+                ):
+                    best_in_inner_z = seg_z
+                    best_in_inner = info
+            else:
+                score = perp_d + z_bias * abs(world.z - seg_z)
+                if score < best_blend_score:
+                    best_blend_score = score
+                    best_blend = info
+
+        chosen = best_in_inner if best_in_inner is not None else best_blend
+        if chosen is None:
+            continue
+
+        d = chosen["d"]
+        target_z = chosen["z"]
+        conform_w = chosen["conform"]
+        ef_inner = chosen["ef_inner"]
+        ef_outer = chosen["ef_outer"]
+
+        if d <= ef_inner:
             base_blend = 1.0
         else:
-            t = (outer - d) / (outer - inner)
-            base_blend = t * t * (3.0 - 2.0 * t)  # smoothstep
+            t_band = (ef_outer - d) / (ef_outer - ef_inner)
+            base_blend = t_band * t_band * (3.0 - 2.0 * t_band)  # smoothstep
         blend = base_blend * conform_w
         if blend <= 0.001:
             floating += 1
             continue
-        if d <= inner:
+        if d <= ef_inner:
             flattened += 1
         else:
             blended += 1
         new_world_z = world.z * (1.0 - blend) + target_z * blend
         # Cap: never let the terrain rise above the drivable surface.
-        # The cap rises with (1 - blend) so it disappears at the
-        # outer edge of the band (or wherever conform decays to 0).
+        # Interpolates from a strict cap at inner (surface_z = road top
+        # minus clearance) to road_top itself at outer — guarantees
+        # terrain stays at or below the road's actual top surface
+        # everywhere in the band. The old formula blended toward
+        # ``world.z`` which let highly-uphill terrain pop above road
+        # top in the blend band, and each subsequent Re-conform would
+        # then sample that popped-up terrain as the new road altitude,
+        # producing a runaway drift that buried the road.
         surface_z = target_z + surface_lift - clearance
-        max_allowed = surface_z + (world.z - surface_z) * (1.0 - blend)
+        road_top_z = target_z + surface_lift
+        max_allowed = surface_z + (road_top_z - surface_z) * (1.0 - blend)
         if new_world_z > max_allowed:
             new_world_z = max_allowed
         v.co = mw_inv @ mathutils.Vector((world.x, world.y, new_world_z))
@@ -1002,6 +1164,8 @@ class HOVERBIKE_OT_build_road(Operator):
         # surface and the terrain rises/falls to meet it. The conform
         # treats the curb band as part of the road footprint so curbs
         # don't fight the surrounding terrain.
+        clearance = float(scene.hoverbike_road_conform_clearance)
+        fill_shelf = float(scene.hoverbike_road_fill_shelf_width)
         deform_summary = _conform_terrain_to_road(
             terrain,
             samples,
@@ -1009,6 +1173,8 @@ class HOVERBIKE_OT_build_road(Operator):
             blend_radius=blend_radius,
             lift=lift,
             curb_width=curb_width,
+            clearance=clearance,
+            fill_shelf_width=fill_shelf,
         )
 
         # Build the road strip mesh (the prior `road_main`, if any, was
@@ -1096,6 +1262,184 @@ def _resolve_active_road_curve(context) -> bpy.types.Object | None:
     return None
 
 
+def _extract_samples_from_road_mesh(
+    road_obj: bpy.types.Object, *, lift: float, curb_width: float, thickness: float
+) -> list[dict]:
+    """Recover ``{x, y, z, tx, ty, conform}`` samples from an existing
+    road mesh — used by Re-conform Terrain to snap terrain to the road
+    that's already built, NOT to re-sample the curve onto the (possibly
+    drifted) current terrain.
+
+    Why this matters: ``_sample_road_path`` raycasts the curve XY onto
+    whatever terrain looks like *now*. If terrain has been sculpted up
+    around the road, or the previous conform's cap let terrain pop
+    slightly above the road in the blend band, the next raycast hits
+    that raised terrain — and ``target_z`` climbs with every Re-conform
+    until the road is fully buried. Reading the road mesh directly
+    pins ``target_z`` to the road's actual altitude, so Re-conform
+    converges to a stable state instead of drifting upward.
+
+    Reconstructs cross-section layout from the road's actual material
+    slot count: curbs add 2 cols (L_outer + R_outer), thickness adds
+    2 more (bottom row). ``z_road_top = (v_L_inner + v_R_inner) / 2``;
+    subtract ``lift`` to recover ``target_z``."""
+    me = road_obj.data
+    n_verts = len(me.vertices)
+    # Figure out how many cols per sample. Materials are appended in
+    # this order: asphalt, [curb white, curb red], [underside]. We use
+    # the operator's settings rather than parsing the mesh because
+    # they're the source of truth at re-conform time.
+    has_curbs = curb_width > 0
+    has_thick = thickness > 0
+    cols_per_sample = 2 + (2 if has_curbs else 0) + (2 if has_thick else 0)
+    if cols_per_sample == 0 or n_verts % cols_per_sample != 0:
+        return []
+    n_samples = n_verts // cols_per_sample
+    if n_samples < 2:
+        return []
+    # Inner-road column indices for centerline reconstruction. With
+    # curbs, columns are [L_outer_top, L_inner, R_inner, R_outer_top, L_bot, R_bot].
+    # Without curbs, columns are [L_outer_top, R_outer_top, L_bot, R_bot].
+    if has_curbs:
+        l_inner_col, r_inner_col = 1, 2
+    else:
+        l_inner_col, r_inner_col = 0, 1
+
+    mw = road_obj.matrix_world
+    samples: list[dict] = []
+    for i in range(n_samples):
+        a = i * cols_per_sample
+        v_lin = mw @ me.vertices[a + l_inner_col].co
+        v_rin = mw @ me.vertices[a + r_inner_col].co
+        cx = (v_lin.x + v_rin.x) * 0.5
+        cy = (v_lin.y + v_rin.y) * 0.5
+        z_top = (v_lin.z + v_rin.z) * 0.5  # = target_z + lift
+        target_z = z_top - lift
+        samples.append({
+            "x": cx, "y": cy, "z": target_z,
+            "_authored_z": target_z,
+            "conform": 1.0,  # treat as fully conforming — Re-conform
+                             # is "lock terrain to existing road" so
+                             # bridge-floating semantics don't apply
+                             # (rebuild the road if you need them).
+        })
+    # Tangents from neighbouring samples — needed by callers that
+    # check them, even though _conform_terrain_to_road itself only
+    # uses {x, y, z, conform}.
+    n = len(samples)
+    for i, s in enumerate(samples):
+        j = (i + 1) % n if i == n - 1 else i + 1
+        dx = samples[j]["x"] - s["x"]
+        dy = samples[j]["y"] - s["y"]
+        tl = math.hypot(dx, dy) or 1.0
+        s["tx"] = dx / tl
+        s["ty"] = dy / tl
+    return samples
+
+
+class HOVERBIKE_OT_reconform_terrain_to_road(Operator):
+    """Re-run only the terrain-conform pass against the current road
+    *mesh* — not the curve. Useful after:
+
+      * Sculpting terrain manually around an existing road — the
+        sculpt would otherwise poke up through the road slab; this
+        operator re-flattens the conform band.
+      * Updating the conform clearance / blend radius / width / fill
+        shelf scene props — the old build's terrain reflects the old
+        settings; this re-applies them without rebuilding the road
+        mesh.
+      * Pulling a fix to the conform algorithm — re-conforms the
+        existing terrain to the road without changing the road shape.
+
+    Reads the centerline Z directly from the road mesh's inner-road
+    columns instead of re-sampling the curve onto the current terrain.
+    That makes the operator a stable "snap terrain to existing road"
+    — no drift, even if Re-conform is run repeatedly or after terrain
+    sculpting has raised the surface above the road.
+
+    Requires an existing ``road_main`` and a ``kind=track`` terrain
+    mesh. To change the road's shape, use Build Road (which re-samples
+    the curve onto terrain); Re-conform is the "road wins, terrain
+    follows" counterpart."""
+
+    bl_idname = "hoverbike.reconform_terrain_to_road"
+    bl_label = "Re-conform Terrain"
+    bl_description = (
+        "Snap terrain to the existing road mesh's altitude. Use after sculpting "
+        "terrain or tweaking conform clearance / fill shelf. Stable across "
+        "repeated runs — does NOT re-sample the curve (use Build Road for that)"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        from ._legacy import _largest_terrain_mesh
+
+        road_obj = bpy.data.objects.get(ROAD_OBJECT_NAME)
+        if road_obj is None or road_obj.type != "MESH":
+            self.report(
+                {"ERROR"},
+                f"No `{ROAD_OBJECT_NAME}` mesh in scene — run Build Road first.",
+            )
+            return {"CANCELLED"}
+
+        terrain = context.active_object
+        if terrain is None or terrain.type != "MESH" or terrain.get("kind") != "track":
+            terrain = _largest_terrain_mesh()
+        if terrain is None:
+            self.report({"ERROR"}, "No kind=track terrain mesh found.")
+            return {"CANCELLED"}
+
+        active_mods = _terrain_active_modifiers(terrain)
+        if active_mods:
+            self.report(
+                {"ERROR"},
+                f"{terrain.name} has active modifiers ({', '.join(active_mods)}) — "
+                "apply them first (Object → Apply → Visual Geometry to Mesh) or "
+                "use Build Road with 'Apply modifiers first' toggled on.",
+            )
+            return {"CANCELLED"}
+
+        scene = context.scene
+        width = float(scene.hoverbike_road_width)
+        lift = float(scene.hoverbike_road_lift)
+        blend_radius = float(scene.hoverbike_road_blend_radius)
+        curb_width = float(scene.hoverbike_road_curb_width)
+        thickness = float(scene.hoverbike_road_thickness)
+        clearance = float(scene.hoverbike_road_conform_clearance)
+        fill_shelf = float(scene.hoverbike_road_fill_shelf_width)
+
+        samples = _extract_samples_from_road_mesh(
+            road_obj, lift=lift, curb_width=curb_width, thickness=thickness,
+        )
+        if len(samples) < 2:
+            self.report(
+                {"ERROR"},
+                f"Couldn't reconstruct samples from {ROAD_OBJECT_NAME} — vertex count "
+                "doesn't match the current width / curb / thickness settings. Rebuild "
+                "the road and try again.",
+            )
+            return {"CANCELLED"}
+
+        deform_summary = _conform_terrain_to_road(
+            terrain,
+            samples,
+            width=width,
+            blend_radius=blend_radius,
+            lift=lift,
+            curb_width=curb_width,
+            clearance=clearance,
+            fill_shelf_width=fill_shelf,
+        )
+        self.report(
+            {"INFO"},
+            f"Re-conformed terrain to {len(samples)} mesh samples: "
+            f"{deform_summary['flattened']} verts flattened, "
+            f"{deform_summary['blended']} blended, "
+            f"{deform_summary['floating']} skipped.",
+        )
+        return {"FINISHED"}
+
+
 class HOVERBIKE_OT_mark_selected_floating(Operator):
     """Mark the active curve's selected control points as floating —
     the road tool will take their Z verbatim from the bezier point's
@@ -1155,6 +1499,7 @@ class HOVERBIKE_OT_mark_selected_conforming(Operator):
 _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_add_road_starter_curve,
     HOVERBIKE_OT_build_road,
+    HOVERBIKE_OT_reconform_terrain_to_road,
     HOVERBIKE_OT_mark_selected_floating,
     HOVERBIKE_OT_mark_selected_conforming,
 )
@@ -1171,6 +1516,8 @@ _SCENE_PROP_NAMES: tuple[str, ...] = (
     "hoverbike_road_thickness",
     "hoverbike_road_bank_strength",
     "hoverbike_road_bank_max_deg",
+    "hoverbike_road_conform_clearance",
+    "hoverbike_road_fill_shelf_width",
 )
 
 
@@ -1238,6 +1585,43 @@ def register() -> None:
         name="Bank max (deg)",
         description="Hard cap on the road's bank angle in degrees. 25° is a typical road race banking; 45° is NASCAR-superspeedway extreme.",
         default=25.0, min=0.0, max=80.0, precision=1,
+    )
+    # Conform clearance — how far below the road surface the terrain
+    # is forced to sit inside the fully-flattened band. 0.20 m is a
+    # comfortable default: the road's underside slab (thickness =
+    # 0.6 m by default) buries another ~0.4 m below that, so no
+    # terrain pokes through the road quad even with a coarse 384²
+    # grid sampling. Raise to 0.5 m for very hilly tracks where the
+    # blend's smoothstep would otherwise leave a noticeable terrain
+    # ridge along the curbs.
+    bpy.types.Scene.hoverbike_road_conform_clearance = FloatProperty(
+        name="Conform clearance (m)",
+        description=(
+            "Minimum vertical gap between the conformed terrain and the road "
+            "surface inside the flattened band. Larger values hide sampling "
+            "artefacts on coarse-grid terrain but make the road's terrain "
+            "groove visually deeper. 0.05 is the legacy tight default; 0.20 "
+            "is the new recommended floor"
+        ),
+        default=0.20, min=0.0, max=2.0, precision=2,
+    )
+    # Downhill fill shelf — extra width on the fill side of a hillside
+    # traverse so the road's slab underside is hidden by raised terrain
+    # rather than hanging over a void. Asymmetric: only applies where
+    # terrain is naturally below the road. Default 3.0 m gives a clean
+    # embankment look on moderate slopes (up to ~10° before the
+    # blend-band smoothstep starts to expose the slab). Crank higher on
+    # very hilly tracks; set 0 to restore the legacy symmetric conform.
+    bpy.types.Scene.hoverbike_road_fill_shelf_width = FloatProperty(
+        name="Fill shelf width (m)",
+        description=(
+            "Extra width of the fully-conformed band on the downhill side of "
+            "the road, before the smoothstep blend kicks in. Hides the road's "
+            "slab underside on hillside traverses. 0 = legacy symmetric "
+            "conform; 3 m = typical mountain-road embankment; 8 m+ = wide "
+            "shelf for steep cliff roads"
+        ),
+        default=3.0, min=0.0, max=40.0, precision=1,
     )
 
 

@@ -49,6 +49,7 @@ bl_info = {
 # count.
 from . import (
     _legacy,
+    auto_tag,
     bake,
     boost_pad,
     downtown,
@@ -94,6 +95,10 @@ _MODULES = (
     track_meta,
     new_map,
     handlers,
+    # auto_tag runs alongside handlers — both attach depsgraph hooks;
+    # order between them doesn't matter, but keeping them adjacent
+    # makes the "depsgraph plumbing" section easy to find.
+    auto_tag,
     _legacy,
     # panel registers last so every operator + scene prop it references
     # already exists in bpy.types when its draw() methods run.

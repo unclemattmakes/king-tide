@@ -69,6 +69,48 @@ class HOVERBIKE_PT_panel(Panel):
             box.label(text="Repo not found", icon="ERROR")
             box.label(text="Save .blend inside a hoverbike/ clone.")
 
+        # First-time scaffolding — surface missing essentials prominently
+        # so authoring a from-scratch .blend doesn't dead-end on the two
+        # lint errors that block every export (no ai_spline_main / no
+        # start_00). The box collapses itself once both pieces exist, so
+        # mature tracks don't see this clutter. Cheap to check on every
+        # redraw — just two dict lookups in bpy.data.objects.
+        have_sp = bpy.data.objects.get("ai_spline_main") is not None
+        have_s0 = bpy.data.objects.get("start_00") is not None
+        have_s1 = bpy.data.objects.get("start_01") is not None
+        if not (have_sp and have_s0 and have_s1):
+            sbox = layout.box()
+            sbox.alert = True
+            sbox.label(text="Missing track essentials:", icon="ERROR")
+            if not have_sp:
+                sbox.label(text="  • no ai_spline_main (racing line)")
+            if not have_s0 or not have_s1:
+                missing_starts = [
+                    n for n, ok in (("start_00", have_s0), ("start_01", have_s1))
+                    if not ok
+                ]
+                sbox.label(text=f"  • no {' / '.join(missing_starts)} (spawn)")
+            row = sbox.row()
+            row.scale_y = 1.4
+            row.operator(
+                "hoverbike.scaffold_track_essentials",
+                text="Scaffold Missing Essentials",
+                icon="ADD",
+            )
+            srow = sbox.row(align=True)
+            if not have_sp:
+                srow.operator(
+                    "hoverbike.add_ai_spline",
+                    text="Add Spline",
+                    icon="CURVE_NCURVE",
+                )
+            if not have_s0 or not have_s1:
+                srow.operator(
+                    "hoverbike.add_starts",
+                    text="Add Starts",
+                    icon="EMPTY_ARROWS",
+                )
+
         # Live lap snapshot — arc-length of `ai_spline_main`, projected
         # lap time at the racer top speed, and gate count derived from
         # the same spacing the exporter will use. All three update on
@@ -258,6 +300,32 @@ class HOVERBIKE_PT_track_spline(_HoverbikeTrackSubPanelBase, Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
+
+        # First-time scaffolding row — always visible in this sub-panel
+        # so authors who go looking under "Spline tools" find the
+        # create-from-nothing affordances next to the snap-to-spline
+        # ones. Each operator no-ops when its target already exists,
+        # so re-clicks on mature tracks are harmless.
+        have_sp = bpy.data.objects.get("ai_spline_main") is not None
+        have_s0 = bpy.data.objects.get("start_00") is not None
+        have_s1 = bpy.data.objects.get("start_01") is not None
+        scaffold_row = layout.row(align=True)
+        if not have_sp:
+            scaffold_row.operator(
+                "hoverbike.add_ai_spline",
+                text="Add ai_spline_main",
+                icon="CURVE_NCURVE",
+            )
+        if not (have_s0 and have_s1):
+            scaffold_row.operator(
+                "hoverbike.add_starts",
+                text="Add start_00 / 01",
+                icon="EMPTY_ARROWS",
+            )
+        if have_sp and have_s0 and have_s1:
+            scaffold_row.label(text="Essentials present", icon="CHECKMARK")
+        layout.separator()
+
         layout.prop(scene, "hoverbike_snap_hover_height", text="Hover (m)")
         layout.operator("hoverbike.snap_spline_to_terrain", icon="SNAP_FACE")
         row = layout.row(align=True)
@@ -337,7 +405,21 @@ class HOVERBIKE_PT_track_road(_HoverbikeTrackSubPanelBase, Panel):
                     icon="INFO",
                 )
         layout.separator()
-        layout.operator("hoverbike.build_road", icon="MESH_PLANE")
+        # Conform clearance + fill shelf — exposed here next to width /
+        # blend so authors tuning the terrain interaction see all the
+        # relevant knobs together. Fill shelf hides the road slab's
+        # underside on downhill traverses (wider flat embankment).
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_road_conform_clearance", text="Clearance")
+        row.prop(scene, "hoverbike_road_fill_shelf_width", text="Fill shelf")
+        row = layout.row(align=True)
+        row.scale_y = 1.2
+        row.operator("hoverbike.build_road", icon="MESH_PLANE")
+        row.operator(
+            "hoverbike.reconform_terrain_to_road",
+            text="Re-conform",
+            icon="MOD_SHRINKWRAP",
+        )
         if bpy.data.objects.get(ROAD_CURVE_NAME):
             layout.label(text="Edit road_curve_main, then Build", icon="INFO")
 
@@ -773,6 +855,11 @@ class HOVERBIKE_PT_track_stats(_HoverbikeTrackSubPanelBase, Panel):
         else:
             layout.label(text="Terrain y / water: refresh below", icon="QUESTION")
         layout.operator("hoverbike.refresh_track_stats", icon="FILE_REFRESH")
+        layout.separator()
+        # Manual re-tag — depsgraph auto-tags on rename, but bulk
+        # operations (Outliner find-and-replace, pasted-in objects)
+        # can land without a depsgraph fire; this button forces a sweep.
+        layout.operator("hoverbike.retag_scene", icon="OUTLINER_DATA_FONT")
 
 
 # ────────────────────────────────────────────────────────────────────
