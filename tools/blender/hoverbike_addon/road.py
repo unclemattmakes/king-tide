@@ -741,8 +741,21 @@ def _build_road_strip_mesh(
 
     me.from_pydata(verts, [], faces)
     me.update()
+    # Smooth-shade the road's TOP surface (asphalt + curbs) so the
+    # banked cross-section reads as a continuous ribbon instead of a
+    # sequence of 13 m flat plates. Slab sides / bottom / end caps
+    # stay flat-shaded so the slab silhouette stays crisp against the
+    # terrain. The edge between a smooth-shaded curb-top and a
+    # flat-shaded slab side automatically becomes a hard crease
+    # because Blender resolves normal continuity per-face — no
+    # auto-smooth modifier needed (which was removed in Blender 4.1+).
+    #
+    # Material-index mapping (must match `face_mats` emission above):
+    #   0 = asphalt, 1 = curb white, 2 = curb red → smooth
+    #   3 = underside (slab sides, bottom, end caps) → flat
+    TOP_SURFACE_MATS = {0, 1, 2}
     for i, poly in enumerate(me.polygons):
-        poly.use_smooth = False
+        poly.use_smooth = face_mats[i] in TOP_SURFACE_MATS
         poly.material_index = face_mats[i]
     return me
 
@@ -1187,6 +1200,7 @@ class HOVERBIKE_OT_build_road(Operator):
         thickness = float(scene.hoverbike_road_thickness)
         bank_strength = float(scene.hoverbike_road_bank_strength)
         bank_max_rad = math.radians(float(scene.hoverbike_road_bank_max_deg))
+        bank_smooth_passes = int(scene.hoverbike_road_bank_smooth_passes)
 
         # Stamp the bank angle on each sample. Mutates `samples` in
         # place to add an `s["bank"]` field that `_build_road_strip_mesh`
@@ -1200,6 +1214,7 @@ class HOVERBIKE_OT_build_road(Operator):
             bank_strength=bank_strength,
             bank_max_rad=bank_max_rad,
             cyclic=curve_cyclic,
+            smoothing_passes=bank_smooth_passes,
         )
 
         # Deform terrain first, then build the road strip — that way the
@@ -1570,6 +1585,7 @@ _SCENE_PROP_NAMES: tuple[str, ...] = (
     "hoverbike_road_thickness",
     "hoverbike_road_bank_strength",
     "hoverbike_road_bank_max_deg",
+    "hoverbike_road_bank_smooth_passes",
     "hoverbike_road_conform_clearance",
     "hoverbike_road_fill_shelf_width",
 )
@@ -1639,6 +1655,22 @@ def register() -> None:
         name="Bank max (deg)",
         description="Hard cap on the road's bank angle in degrees. 25° is a typical road race banking; 45° is NASCAR-superspeedway extreme.",
         default=25.0, min=0.0, max=80.0, precision=1,
+    )
+    # Bank smoothing — 1-2-1 binomial passes over the per-sample bank
+    # values after they're derived from curvature. Higher = banking
+    # eases in/out of corners over a longer arc; lower = banking snaps
+    # at corner entry. Default 6 was hardcoded historically; with the
+    # banking-aware terrain conform, neighbouring banks need to be
+    # close (smooth) to avoid mesh-vertex Z jitter where adjacent
+    # cross-sections tilt by very different amounts.
+    bpy.types.Scene.hoverbike_road_bank_smooth_passes = IntProperty(
+        name="Bank smoothing passes",
+        description=(
+            "Binomial smoothing passes over the per-sample bank values. "
+            "Higher = banking transitions are softer; lower = bank snaps "
+            "harder at corner entry/exit"
+        ),
+        default=6, min=0, max=64,
     )
     # Conform clearance — how far below the road surface the terrain
     # is forced to sit inside the fully-flattened band. 0.20 m is a

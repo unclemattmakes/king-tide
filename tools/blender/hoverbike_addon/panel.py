@@ -369,6 +369,8 @@ class HOVERBIKE_PT_track_road(_HoverbikeTrackSubPanelBase, Panel):
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_road_bank_strength", text="Bank")
         row.prop(scene, "hoverbike_road_bank_max_deg", text="Max°")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_road_bank_smooth_passes", text="Bank smoothing")
         layout.label(text="(per-point: edit Tilt in N→Curve)", icon="INFO")
         layout.separator()
         layout.label(text="F1 curbs:")
