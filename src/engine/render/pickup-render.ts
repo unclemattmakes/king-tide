@@ -21,12 +21,14 @@ type PickupBox = {
  */
 export function createPickupRenderSystem(scene: THREE.Scene, sim: SimWorld) {
   const boxes = new Map<number, PickupBox>()
+  // Reused per-frame scratch for the live-eids reconciliation set.
+  const live = new Set<number>()
   let timeAccum = 0
 
   return function tick(dt: number): void {
     timeAccum += dt
     const eids = query(sim, [PickupSpawnTag, PickupSpawnState])
-    const live = new Set<number>()
+    live.clear()
     for (const eid of eids) {
       live.add(eid)
       const s = PickupSpawnStateStore.must(eid)

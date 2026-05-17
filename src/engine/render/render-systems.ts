@@ -54,11 +54,13 @@ export function createBikeRenderSystem(
   registry?: BikeRenderRegistry,
 ) {
   const meshes = new Map<number, THREE.Object3D>()
+  // Reused per-frame scratch for the live-eids reconciliation set.
+  const live = new Set<number>()
   let aiColorCursor = 0
 
   return function tick(): void {
     const eids = query(sim, [BikeTag, Transform])
-    const live = new Set<number>()
+    live.clear()
     for (const eid of eids) {
       live.add(eid)
       let mesh = meshes.get(eid)

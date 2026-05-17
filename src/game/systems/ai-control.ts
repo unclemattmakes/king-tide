@@ -38,15 +38,35 @@ const CURVATURE_LOOKAHEAD_MIN = 18
 const BRAKE_TRIGGER_MARGIN = 1.5
 /** Index window for the cached closest-point search around lastClosestIndex. */
 const CLOSEST_SEARCH_WINDOW = 8
+
+// Per-track spline-by-id index. The system used to call
+// `track.aiSplines.find(s => s.id === ai.splineId)` once per AI per tick;
+// `.find()` is O(N) over a tiny array but defeats the V8 inline cache for
+// the loop body and is wasteful when splineId is immutable per AI.
+// WeakMap keys on Track so the cache GC's with the track and doesn't go
+// stale when the active track changes between races.
+type SplineIndex = Map<string, Track['aiSplines'][number]>
+const SPLINE_INDEX = new WeakMap<Track, SplineIndex>()
+function splineIndexFor(track: Track): SplineIndex {
+  let idx = SPLINE_INDEX.get(track)
+  if (!idx) {
+    idx = new Map()
+    for (const s of track.aiSplines) idx.set(s.id, s)
+    SPLINE_INDEX.set(track, idx)
+  }
+  return idx
+}
+
 export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track): void {
   const eids = query(sim, [AITag, AIController, RBHandle, ControlIntent])
+  const splines = splineIndexFor(track)
   for (const eid of eids) {
     const ai = AIControllerStore.must(eid)
     const { handle } = RBHandleStore.must(eid)
     const rb = phys.world.getRigidBody(handle)
     if (!rb) continue
 
-    const spline = track.aiSplines.find((s) => s.id === ai.splineId)
+    const spline = splines.get(ai.splineId)
     if (!spline || spline.points.length < 2) continue
 
     const t = rb.translation()

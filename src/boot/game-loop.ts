@@ -328,39 +328,43 @@ export function startGameLoop(opts: GameLoopOpts): void {
       physAccum -= phys.fixedDt
     }
 
-    // Replay capture. The recorder rate-limits internally (default 30Hz)
-    // so calling every render frame is safe — we just feed it the current
-    // elapsed time + flat transforms and it decides whether to push a
-    // frame. Capture stops once the finish UI shows so the recording ends
-    // cleanly at the moment of crossing the line.
+    // Replay capture. The recorder rate-limits internally (default 30Hz),
+    // so we gate on `shouldSample` first to skip the per-bike WASM-bound
+    // rigid-body reads on frames the recorder would discard. At a 30Hz
+    // rate inside a 60Hz rAF loop that halves the per-bike `getRigidBody`
+    // + `translation` + `rotation` calls (~600 WASM-bound calls/sec at
+    // 5 bikes). Capture stops once the finish UI shows so the recording
+    // ends cleanly at the moment of crossing the line.
     if (recorder && !finishShown) {
       const elapsed = (now - recorderStart) / 1000
-      for (let i = 0; i < replaySlots.length; i++) {
-        const eid = replaySlots[i] as number
-        const handle = RBHandleStore.get(eid)
-        const rb = handle ? phys.world.getRigidBody(handle.handle) : null
-        const o = i * 7
-        if (!rb) {
-          replayFlat[o] = 0
-          replayFlat[o + 1] = 0
-          replayFlat[o + 2] = 0
-          replayFlat[o + 3] = 0
-          replayFlat[o + 4] = 0
-          replayFlat[o + 5] = 0
-          replayFlat[o + 6] = 1
-          continue
+      if (recorder.shouldSample(elapsed)) {
+        for (let i = 0; i < replaySlots.length; i++) {
+          const eid = replaySlots[i] as number
+          const handle = RBHandleStore.get(eid)
+          const rb = handle ? phys.world.getRigidBody(handle.handle) : null
+          const o = i * 7
+          if (!rb) {
+            replayFlat[o] = 0
+            replayFlat[o + 1] = 0
+            replayFlat[o + 2] = 0
+            replayFlat[o + 3] = 0
+            replayFlat[o + 4] = 0
+            replayFlat[o + 5] = 0
+            replayFlat[o + 6] = 1
+            continue
+          }
+          const t = rb.translation()
+          const q = rb.rotation()
+          replayFlat[o] = t.x
+          replayFlat[o + 1] = t.y
+          replayFlat[o + 2] = t.z
+          replayFlat[o + 3] = q.x
+          replayFlat[o + 4] = q.y
+          replayFlat[o + 5] = q.z
+          replayFlat[o + 6] = q.w
         }
-        const t = rb.translation()
-        const q = rb.rotation()
-        replayFlat[o] = t.x
-        replayFlat[o + 1] = t.y
-        replayFlat[o + 2] = t.z
-        replayFlat[o + 3] = q.x
-        replayFlat[o + 4] = q.y
-        replayFlat[o + 5] = q.z
-        replayFlat[o + 6] = q.w
+        recorder.sample(elapsed, replayFlat)
       }
-      recorder.sample(elapsed, replayFlat)
     }
 
     const rbHandle = RBHandleStore.get(playerEid)

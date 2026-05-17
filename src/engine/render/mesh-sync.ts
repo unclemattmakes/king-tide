@@ -18,6 +18,12 @@ import * as THREE from 'three'
  * to skip bikes whose ShieldEffect timer is exhausted before allocating
  * a mesh for them.
  */
+// Per-meshes-map scratch Set, reused across calls. Each `meshes` Map gets
+// its own Set so concurrent callers (combat-render runs four lifecycle
+// blocks in one frame, each with its own map) don't share state. WeakMap
+// keying so the scratch is GC'd alongside its owning map.
+const SCRATCH_LIVE = new WeakMap<Map<number, THREE.Object3D>, Set<number>>()
+
 export function syncEntityMeshes(opts: {
   scene: THREE.Scene
   meshes: Map<number, THREE.Object3D>
@@ -27,7 +33,13 @@ export function syncEntityMeshes(opts: {
   filter?: (eid: number) => boolean
 }): void {
   const { scene, meshes, eids, factory, update, filter } = opts
-  const live = new Set<number>()
+  let live = SCRATCH_LIVE.get(meshes)
+  if (!live) {
+    live = new Set<number>()
+    SCRATCH_LIVE.set(meshes, live)
+  } else {
+    live.clear()
+  }
   for (const eid of eids) {
     if (filter && !filter(eid)) continue
     live.add(eid)
