@@ -151,6 +151,24 @@ const SLIDERS: SliderDef[] = [
     format: (n) => `${n.toFixed(1)} m/s`,
     hint: 'Phillips spectrum L = V²/g. Higher = longer rolling swells; lower = short choppy ripples',
   },
+  {
+    key: 'windDirection',
+    label: 'Wind direction',
+    min: -180,
+    max: 180,
+    step: 1,
+    format: (n) => `${n.toFixed(0)}°`,
+    hint: 'Wind-sea cascade direction (degrees CCW from world +X). Chop + swell cascades keep their hard-coded directions for cascade angle separation',
+  },
+  {
+    key: 'windCutoff',
+    label: 'Wind cutoff',
+    min: 0.1,
+    max: 5,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)} m`,
+    hint: 'Phillips small-wavelength cutoff. Modes shorter than this are pruned. Lower = finer chop · higher = smoother surface',
+  },
 ]
 
 export type WaterDebugMenu = {
@@ -251,6 +269,12 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'windSpeed':
           water.debug.setWindSpeed(v)
+          break
+        case 'windDirection':
+          water.debug.setWindDirection(v)
+          break
+        case 'windCutoff':
+          water.debug.setWindCutoff(v)
           break
       }
     })

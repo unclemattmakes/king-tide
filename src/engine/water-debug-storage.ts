@@ -8,11 +8,12 @@
 
 import type { WaterDebugDefaults, WaterMesh } from './render/water'
 
-// v3 bump: adds `windSpeed` alongside the v2 `choppiness` +
-// `seaStateIntensity` keys. Old v1/v2 entries are silently merged
-// onto defaults by the per-key tolerant loader below, so a tuning
-// session from before A5 just gets the new sliders at their defaults.
-export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v3'
+// v4 bump: adds `windDirection` + `windCutoff` alongside the v3
+// `windSpeed` key. Old v1–v3 entries are silently merged onto defaults
+// by the per-key tolerant loader below, so a tuning session from before
+// the wind-direction/cutoff sliders landed just gets those at their
+// defaults.
+export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v4'
 
 export type WaterDebugSettings = {
   steepness: number
@@ -27,6 +28,8 @@ export type WaterDebugSettings = {
   choppiness: number
   seaStateIntensity: number
   windSpeed: number
+  windDirection: number
+  windCutoff: number
   wireframe: boolean
 }
 
@@ -44,6 +47,8 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     choppiness: d.choppiness,
     seaStateIntensity: d.seaStateIntensity,
     windSpeed: d.windSpeed,
+    windDirection: d.windDirection,
+    windCutoff: d.windCutoff,
     wireframe: d.wireframe,
   }
 }
@@ -97,6 +102,8 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setChoppiness(s.choppiness)
   water.debug.setSeaStateIntensity(s.seaStateIntensity)
   water.debug.setWindSpeed(s.windSpeed)
+  water.debug.setWindDirection(s.windDirection)
+  water.debug.setWindCutoff(s.windCutoff)
   water.debug.setWireframe(s.wireframe)
 }
 
