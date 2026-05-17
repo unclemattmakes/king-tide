@@ -20,7 +20,8 @@ shipping water.
 | A1b — Discriminated WaveFieldState + spectrum factory (opt-in `?waves=fft`) | ✅ done | `WaveFieldState = GerstnerWaveField \| SpectrumWaveField`. `createSpectrumWaveField` builds top-K Phillips modes; `sampleHeight`/`sampleSurface` branch on `field.kind`. GPU shader path converts spectrum → Gerstner-shape via `spectrum-to-gerstner.ts` (parity-tested) so the existing unrolled shader iteration works unchanged. Default stays on Gerstner — `?waves=fft` activates. Debug menu swell/chop scales no-op in spectrum mode (Phase A5 replaces with wind knobs). **Validation next: in-browser A/B against Gerstner default.** |
 | A2 — GPU full-spectrum IFFT (height + dx + dz + slope) | ⬜ todo | Vertex shader samples textures instead of summing analytics. |
 | A3 — Jacobian-based foam | ⬜ todo | Replace slope/fold heuristic with `det(I+λ∇D)<0`. |
-| A4 — Determinism + multiplayer parity tests | ⬜ todo | Confirm CPU sampler matches GPU IFFT at probe points. |
+| A4a — Spectrum-field determinism tests (CPU side) | ✅ done | `wave-field-determinism.test.ts` — 6 tests: cross-build identity, advance-step parity, seed forking, replay rebuild-restore cycle, stateless-sampler check, Gerstner regression. Replay + multiplayer determinism guaranteed on the new path. |
+| A4b — CPU sampler matches GPU IFFT at probe points | ⬜ todo | Pending A2 (GPU full-spectrum IFFT). The conversion-parity test already locks down the analytic-shader path. |
 | A5 — Tuning + debug menu rewrite | ⬜ todo | Wind speed / direction / fetch / cutoff sliders. Retire swell/chop knobs. |
 
 URL flags: `?water=v2` (current Gerstner — default until A5 ships), `?water=fft`
