@@ -1672,32 +1672,20 @@ export function createWaterMesh(
   // Replaces the old Tessendorf-via-Gerstner `foldFoam` (qSum-driven)
   // for the FFT path — qSum is the analytic-Gerstner fold signal and
   // evaluates to 0 with the FFT path's spectrum modes anyway.
-  const foldFoamFft = useGpuDisplacement
-    ? // biome-ignore lint/suspicious/noExplicitAny: varying-of-any propagates unknown into smoothstep arg
-      smoothstep(float(0.5), float(0.0), jacobianFrag as any)
-    : float(0)
-  const waveFoam = isClassic
-    ? (() => {
-        const slopeFoam = smoothstep(float(0.4), float(0.9), slopeMag)
-        const heightGate = smoothstep(float(-0.4), float(0.3), heightFrag)
-        return slopeFoam.mul(heightGate)
-      })()
-    : useGpuDisplacement
-      ? max(max(foamAccumFrag.mul(float(0.7)), pixelFoam), foldFoamFft)
-      : max(foamAccumFrag.mul(float(0.7)), pixelFoam)
-
   // Shared turbulent foam noise — world XZ + time scroll. Used to break
-  // up the otherwise-too-clean foam edges of shoreline, wake, and bow
-  // spray so they read as living turbulence instead of stamped outlines.
-  // NOT applied to wave-driven foam (slope / Jacobian / accumulator),
-  // since natural whitecap foam already has its own variation from the
-  // wave field — adding more noise on top reads as TV-static.
+  // up the otherwise-too-clean foam edges of shoreline, wake, bow
+  // spray, AND (post-A3) the FFT path's Jacobian-driven wave foam, so
+  // they all read as living turbulence instead of stamped outlines.
   //
   // The same noise is sampled by:
   //   - shoreline foam range (lapping in/out by ±0.2m via `foamNoiseRaw`)
   //   - wake foam intensity (multiplicative `foamTurbulence`)
   //   - bow spray intensity (multiplicative `foamTurbulence`)
-  // so all interactive foam moves with a unified visual rhythm.
+  //   - wave-crest foam fiber breakup (multiplicative `foamTurbulence`,
+  //     FFT path only — the analytic Gerstner foam already has its own
+  //     variation from the time-shifted accumulator, so we leave it
+  //     alone there).
+  // so all foam in the scene moves with a unified visual rhythm.
   const foamNoiseUV = positionWorld.xz.mul(0.35).add(vec2(tNode.mul(-0.18), tNode.mul(0.13)))
   const foamNoiseRawHF = fract(
     sin(foamNoiseUV.x.mul(12.9898).add(foamNoiseUV.y.mul(78.233))).mul(43758.5453),
@@ -1715,6 +1703,26 @@ export function createWaterMesh(
   // Multiplier in [0.5, 1.0] — never erases foam, just breaks up its
   // intensity into turbulent patches.
   const foamTurbulence = mix(float(0.5), float(1.0), foamNoiseSmooth)
+  // Subtler variant for wave-crest foam fibers. The Jacobian-driven
+  // foam is a smooth blob from the smoothstep; [0.6, 1.0] here gives
+  // it visible structure (foam splotches with subtle brightness
+  // variation) without speckling — wider ranges read as TV-static
+  // when foam is widespread. Effective contrast factor 1.67×.
+  const foamFiber = mix(float(0.6), float(1.0), foamNoiseSmooth)
+
+  const foldFoamFft = useGpuDisplacement
+    ? // biome-ignore lint/suspicious/noExplicitAny: varying-of-any propagates unknown into smoothstep arg
+      smoothstep(float(0.5), float(0.0), jacobianFrag as any).mul(foamFiber).clamp(0, 1)
+    : float(0)
+  const waveFoam = isClassic
+    ? (() => {
+        const slopeFoam = smoothstep(float(0.4), float(0.9), slopeMag)
+        const heightGate = smoothstep(float(-0.4), float(0.3), heightFrag)
+        return slopeFoam.mul(heightGate)
+      })()
+    : useGpuDisplacement
+      ? max(max(foamAccumFrag.mul(float(0.7)), pixelFoam), foldFoamFft)
+      : max(foamAccumFrag.mul(float(0.7)), pixelFoam)
 
   // Per-bike foam: hull ring + V-wake stripe. We wrap the per-bike work in
   // a Fn() so we can use If(...) to early-out for slots whose bike is far
