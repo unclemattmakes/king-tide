@@ -68,7 +68,7 @@ describe('Phillips spectrum: IFFT vs analytic sampler', () => {
     // is laid out in "continuous-Fourier" form (sum-over-k of complex
     // exponentials, no 1/N pre-scaling). So we need to multiply by N²
     // back to recover the analytic sum.
-    for (let i = 0; i < hTilde.length; i++) hTilde[i] *= N * N
+    for (let i = 0; i < hTilde.length; i++) hTilde[i] = hTilde[i]! * N * N
 
     // The result's real part is the heightfield. Sample at every grid
     // point with the analytic sum and confirm match.
@@ -130,7 +130,7 @@ describe('Phillips spectrum: IFFT vs analytic sampler', () => {
 
     ifftshift(hTilde, N)
     fft2d(hTilde, N, -1)
-    for (let i = 0; i < hTilde.length; i++) hTilde[i] *= N * N
+    for (let i = 0; i < hTilde.length; i++) hTilde[i] = hTilde[i]! * N * N
 
     const cell = tileSize / N
     for (let zi = 0; zi < N; zi++) {

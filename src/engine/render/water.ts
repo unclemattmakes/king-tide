@@ -35,6 +35,7 @@ import {
   vec3,
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
+import { buildFftDetailNormalTexture } from '@/engine/render/ocean-fft/cpu-bake'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
 import {
   WAKE_BASE_WIDTH,
@@ -208,7 +209,17 @@ const INACTIVE_FAR = 1e6
 // grazing-angle samples don't smear.
 // ---------------------------------------------------------------------------
 
-let sharedWaveDetailNormal: THREE.DataTexture | null = null
+/**
+ * Two caches — one per detail-texture provider. `procedural` is the legacy
+ * 22-component analytic sum that ships today; `fft` is the Phillips-spectrum
+ * IFFT bake from `ocean-fft/cpu-bake.ts`. Both are RGBA8 / REPEAT / mipmapped
+ * so the shader code consuming them is identical regardless of mode. The
+ * FFT bake is the first step of the larger FFT-ocean migration (see
+ * `docs/fft-ocean-plan.md`); future phases swap GPU compute in behind the
+ * same flag.
+ */
+let sharedWaveDetailNormalProcedural: THREE.DataTexture | null = null
+let sharedWaveDetailNormalFft: THREE.DataTexture | null = null
 
 function buildWaveDetailNormalTexture(): THREE.DataTexture {
   const N = 256
@@ -316,9 +327,17 @@ function buildWaveDetailNormalTexture(): THREE.DataTexture {
   return tex
 }
 
-function getWaveDetailNormalTexture(): THREE.DataTexture {
-  if (!sharedWaveDetailNormal) sharedWaveDetailNormal = buildWaveDetailNormalTexture()
-  return sharedWaveDetailNormal
+function getWaveDetailNormalTexture(mode: 'procedural' | 'fft'): THREE.DataTexture {
+  if (mode === 'fft') {
+    if (!sharedWaveDetailNormalFft) {
+      sharedWaveDetailNormalFft = buildFftDetailNormalTexture()
+    }
+    return sharedWaveDetailNormalFft
+  }
+  if (!sharedWaveDetailNormalProcedural) {
+    sharedWaveDetailNormalProcedural = buildWaveDetailNormalTexture()
+  }
+  return sharedWaveDetailNormalProcedural
 }
 
 /**
@@ -371,6 +390,12 @@ export function createWaterMesh(
   const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
   const waterMode = params?.get('water') ?? 'v2'
   const isClassic = waterMode === 'classic'
+  // FFT detail-texture opt-in. When set, the sub-Gerstner detail cascade
+  // samples a Phillips-spectrum IFFT bake instead of the procedural
+  // 22-sine texture. First step of the FFT-ocean migration in
+  // `docs/fft-ocean-plan.md` — buoyancy + big-wave silhouette stay on the
+  // existing Gerstner sum, only the high-frequency detail layer swaps.
+  const detailMode: 'procedural' | 'fft' = waterMode === 'fft' ? 'fft' : 'procedural'
   // `?wire=1` is an ORTHOGONAL toggle — works with classic, v2, and any
   // future shader variant. The old `?water=wire` is still honored for
   // backward compatibility.
@@ -933,7 +958,7 @@ export function createWaterMesh(
   // Strengths are tuned so the combined slope contribution rarely exceeds
   // ~0.35 (well below the analytic Gerstner peaks of ~1.0), so the detail
   // reads as surface texture without erasing the silhouette of the big waves.
-  const detailTex = getWaveDetailNormalTexture()
+  const detailTex = getWaveDetailNormalTexture(detailMode)
   // Tiles enlarged from (6 m, 1.5 m) → (11 m, 2 m) and the UV axes rotated
   // by non-perpendicular angles (+23° / -37°) so the texture's natural
   // pattern doesn't read as obvious world-grid-aligned strips. Two layers
