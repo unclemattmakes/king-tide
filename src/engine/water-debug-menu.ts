@@ -169,6 +169,15 @@ const SLIDERS: SliderDef[] = [
     format: (n) => `${n.toFixed(2)} m`,
     hint: 'Phillips small-wavelength cutoff. Modes shorter than this are pruned. Lower = finer chop · higher = smoother surface',
   },
+  {
+    key: 'foamPersistence',
+    label: 'Foam persistence',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    format: (n) => n.toFixed(2),
+    hint: 'A8 foam-feedback decay (0 = fast fade, 1 = long trails). Maps to per-frame decay in [0.7, 0.99]',
+  },
 ]
 
 export type WaterDebugMenu = {
@@ -275,6 +284,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'windCutoff':
           water.debug.setWindCutoff(v)
+          break
+        case 'foamPersistence':
+          water.debug.setFoamPersistence(v)
           break
       }
     })

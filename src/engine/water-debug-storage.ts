@@ -8,12 +8,10 @@
 
 import type { WaterDebugDefaults, WaterMesh } from './render/water'
 
-// v4 bump: adds `windDirection` + `windCutoff` alongside the v3
-// `windSpeed` key. Old v1–v3 entries are silently merged onto defaults
-// by the per-key tolerant loader below, so a tuning session from before
-// the wind-direction/cutoff sliders landed just gets those at their
-// defaults.
-export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v4'
+// v5 bump: adds `foamPersistence` alongside the v4 wind-direction +
+// wind-cutoff keys. Old v1–v4 entries are silently merged onto
+// defaults by the per-key tolerant loader below.
+export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v5'
 
 export type WaterDebugSettings = {
   steepness: number
@@ -30,6 +28,7 @@ export type WaterDebugSettings = {
   windSpeed: number
   windDirection: number
   windCutoff: number
+  foamPersistence: number
   wireframe: boolean
 }
 
@@ -49,6 +48,7 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     windSpeed: d.windSpeed,
     windDirection: d.windDirection,
     windCutoff: d.windCutoff,
+    foamPersistence: d.foamPersistence,
     wireframe: d.wireframe,
   }
 }
@@ -104,6 +104,7 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setWindSpeed(s.windSpeed)
   water.debug.setWindDirection(s.windDirection)
   water.debug.setWindCutoff(s.windCutoff)
+  water.debug.setFoamPersistence(s.foamPersistence)
   water.debug.setWireframe(s.wireframe)
 }
 
