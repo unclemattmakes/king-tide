@@ -1070,9 +1070,20 @@ export function createWaterMesh(
   // Foam accumulator is attenuated by the same shoaling factor so the
   // existing slope/fold-driven foam doesn't keep firing on flat shallows
   // where wave geometry has been damped to zero.
-  const vertexFoamAccum = isClassic
-    ? float(0)
-    : foamAccumulator(worldX, worldZ, tNode).mul(shoalFactor)
+  //
+  // FFT path explicitly skips the accumulator — it re-evaluates
+  // gerstnerHeight/Disp at 4 past time samples, and gerstnerHeight
+  // unrolls over `waveConsts.length` modes (= top-K Phillips converted
+  // to Gerstner shape). At top-K=128 the unrolled foam shader becomes
+  // huge (4 × 128 × 2 trig pairs per vertex × 147k vertices) and on
+  // some drivers hangs the kernel during compile/dispatch. On the FFT
+  // path the temporal-trail role is already covered by the Jacobian
+  // foam path + pixelFoam mix, so we set the accumulator to 0 and let
+  // the shader stay small.
+  const vertexFoamAccum =
+    isClassic || useGpuDisplacement
+      ? float(0)
+      : foamAccumulator(worldX, worldZ, tNode).mul(shoalFactor)
 
   // positionNode is in mesh-local space; the mesh translation
   // (mesh.position.x/z = camera XZ) carries the vertex out to world.
@@ -1983,7 +1994,11 @@ export function createWaterMesh(
   // Initial choppiness / sea-state intensity match the construction-
   // time values used by `createGpuOceanDisplacement` (see gpu-bake.ts
   // defaults). RESET in the menu restores these.
-  const CHOPPINESS_DEFAULT = 0.5
+  // 0.7 default matches `gpu-bake.ts`'s constructor default; the
+  // higher value lets the Tessendorf horizontal pinch + Jacobian
+  // foam path actually fire on near-breaking crests at the
+  // calibrated spectrum.
+  const CHOPPINESS_DEFAULT = 0.7
   const SEA_STATE_DEFAULT = 1
   // Wind speed default mirrors `field.spectrumParams.windSpeed` at
   // construction (defaults to 9.5 from `defaultSpectrumParams()`).

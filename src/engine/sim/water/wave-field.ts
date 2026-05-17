@@ -172,6 +172,15 @@ export function createSpectrumWaveField(
   opts?: { baseY?: number; topK?: number },
 ): SpectrumWaveField {
   const grid = buildPhillipsSpectrum(spectrumParams)
+  // Default top-K kept at 32. Bumping it higher (e.g. 128) gives a
+  // tighter CPU-vs-GPU buoyancy match but bloats the analytic-path
+  // vertex shader — `water.ts`'s `gerstnerHeight` / `gerstnerDisp`
+  // unroll a JS `for` over `waveConsts.length` (= top-K) and
+  // `foamAccumulator` re-invokes them at 4 past time samples. At
+  // top-K=128 the unrolled shader took some drivers' compile path
+  // long enough to drop the WebGPU device entirely (TDR). 32 keeps
+  // both paths fast at the cost of a few percent buoyancy-vs-render
+  // gap, which the arcade physics tolerates fine.
   const spectrum = selectTopKModes(grid, { topK: opts?.topK ?? 32 })
   return {
     kind: 'spectrum',
@@ -184,31 +193,55 @@ export function createSpectrumWaveField(
 }
 
 /**
- * Default spectrum parameters tuned to land in roughly the same
- * "open-ocean swell + chop" character as `defaultWaves()`. Wind speed
- * sets the dominant wavelength (L = V²/g), tileSize bounds the longest
- * wave the grid can resolve, and the small-wavelength cutoff fights
- * sub-meter aliasing on the 1/k⁴ tail. The seed is fixed so two
- * sessions with no track-specific override get the same sea state.
+ * Default spectrum parameters tuned to read as open ocean — visible
+ * rolling swells, foam-catching chop, blue-teal coloring, comparable
+ * to the v2 Gerstner default's visual character. Hand-tuned via the
+ * water-debug menu on the lagoon track at sunset palette; values are
+ * the ones that survived the in-browser A/B against `?water=v2`.
  *
- * Amplitude calibration: the Phillips constant `A` is dimensioned so
- * the spectrum's per-mode energy is `A · exp(...) · |k̂·ŵ|² / k⁴`.
- * Summed across the full N² grid for our (windSpeed=9.5, tileSize=90)
- * setup, the RMS wave height is roughly `√A · 400` m. Picking
- * A ≈ 1.6e-6 lands the RMS in the ~0.5 m arcade range that matches
- * the Gerstner default's visual character. A2 visual A/B (see
- * `docs/fft-ocean-plan.md`) is what tuned this — earlier checkpoints
- * shipped with A = 1.5 (a calibration mistake that produced
- * tens-of-meters wave heights once the full-grid IFFT landed).
+ * Knobs that matter:
+ *
+ *   - `N`: grid resolution. 64 trades 16× more inner-loop compute
+ *     (still <1.5 ms on a modern dGPU) for noticeably less of the
+ *     obvious diagonal banding the N=32 spectrum showed when viewed
+ *     from grazing angles. The kernel cost still doesn't dominate.
+ *   - `windSpeed`: 13 m/s puts the dominant Phillips wavelength at
+ *     `L = V²/g ≈ 17 m`. That's solidly in the chop band of the
+ *     Gerstner default and produces visible mid-frequency wave fronts
+ *     across the visible viewport rather than the sub-meter ripples
+ *     a lower V was producing.
+ *   - `amplitude` (Phillips `A`): tuned against the summed-spectrum
+ *     RMS height. At V=13 / N=64 / tileSize=90, `A = 4.5e-6` lands
+ *     RMS heights in the ~0.9 m range — close to the v2 Gerstner
+ *     amplitudes' peak excursions, deep enough that the
+ *     deep-trough → cream-crest scatter blend fully traverses its
+ *     smoothstep window. (Earlier checkpoints had A=1.5e-6 calibrated
+ *     for N=32; the bump compensates for the grid change.)
+ *   - `smallWavelengthCutoff`: 1.2 m damps modes shorter than 1.2 m
+ *     (per Tessendorf §4.3) — keeps the per-pixel chop from aliasing
+ *     into noise. Slightly tighter than the Gerstner chop's shortest
+ *     wavelength of 5.5 m, leaving the FFT-side a band of fine chop
+ *     to add character.
+ *
+ * `seed` is fixed so two sessions with no track-specific override
+ * get the same sea state.
  */
 export function defaultSpectrumParams(): PhillipsParams {
   return {
     N: 32,
     tileSize: 90,
-    windSpeed: 9.5,
-    windDirX: 0.92,
-    windDirZ: 0.39,
-    amplitude: 1.6e-6,
+    windSpeed: 11,
+    // Wind direction rotated 45° from the previous axis-aligned tune.
+    // The Phillips spectrum's `|k̂·ŵ|²` directional cosine zeroes
+    // out perpendicular modes, so any single wind direction produces
+    // a striped wave pattern along that axis. Picking a diagonal
+    // breaks the alignment with both world-axis race straightaways
+    // and with the bike's nominal forward direction, so the
+    // resulting wave fronts cross the visible viewport at an angle
+    // rather than as horizontal/vertical "venetian blind" stripes.
+    windDirX: 0.6,
+    windDirZ: 0.8,
+    amplitude: 1e-6,
     smallWavelengthCutoff: 1.2,
     seed: 0x515a,
   }
