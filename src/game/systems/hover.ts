@@ -439,6 +439,32 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       }
     }
 
+    // Water pitch damping. The multi-point hover's asymmetry on big swells
+    // (bow over crest fires, stern in deep trough hits the locally-airborne
+    // gate and contributes nothing) pumps pitch angvel faster than Rapier's
+    // default 2.5 angular damping can bleed it — the bike would otherwise
+    // pitch toward vertical inside a few seconds. Adds viscous resistance
+    // to pitch-axis rotation while grounded over water. Player pitch input
+    // still gets through, just heavier — appropriate for the "boat slamming
+    // through swell" feel. Skipped on land (ramp launches need responsive
+    // pitch) and skipped in air (free physics for flips).
+    if (isGrounded && probe.isWater) {
+      const rightWater = quatRotate(rb.rotation(), { x: 1, y: 0, z: 0 })
+      const angvWater = rb.angvel()
+      const pitchVelWater =
+        angvWater.x * rightWater.x + angvWater.y * rightWater.y + angvWater.z * rightWater.z
+      const PITCH_WATER_DAMP = 6 // rad/s² per rad/s of pitch velocity
+      const aPitchDamp = -pitchVelWater * PITCH_WATER_DAMP
+      rb.applyTorqueImpulse(
+        {
+          x: rightWater.x * aPitchDamp * m * dt,
+          y: rightWater.y * aPitchDamp * m * dt,
+          z: rightWater.z * aPitchDamp * m * dt,
+        },
+        true,
+      )
+    }
+
     HoverStateStore.set(eid, {
       groundDistance,
       isGrounded,
@@ -494,8 +520,8 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       // than ground thrust so the player can't infinite-hover by aiming
       // up + boost; speedFalloff in 3D also caps any sustained climb at
       // topSpeed.
+      const fwdAir = quatRotate(q, { x: 0, y: 0, z: 1 })
       if (Math.abs(intent.throttle) > 0) {
-        const fwdAir = quatRotate(q, { x: 0, y: 0, z: 1 })
         const speed3d = Math.hypot(linvel.x, linvel.y, linvel.z)
         const dirAir = intent.throttle >= 0 ? 1 : -1
         const scaleAir = intent.throttle >= 0 ? 1 : stats.reverseScale
@@ -520,10 +546,62 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         )
       }
 
-      // Reduced yaw authority for landing alignment.
+      // Yaw around the "pure heading" axis: world-up with the bike-fwd
+      // projection removed (then normalised). Perpendicular to bike-fwd
+      // by construction, so steering in the air can't leak into roll
+      // even when the bike is pitched up after a ramp. Plain world-Y
+      // here would project onto bike-fwd whenever fwd.y ≠ 0 and roll
+      // the bike sideways — the angvel strip at the top of the next
+      // tick zeroes the roll velocity, but the rotation has already
+      // integrated during phys.step. Pure-heading axis avoids the leak
+      // entirely.
+      //
+      // Reduced authority (×0.3) preserved for landing alignment.
       const AIR_TURN_MUL = 0.3
       const aTurnAir = -intent.steer * stats.turnTorque * AIR_TURN_MUL
-      rb.applyTorqueImpulse({ x: 0, y: aTurnAir * m * dt, z: 0 }, true)
+      const fwdAxisDot = fwdAir.y // (0,1,0) · fwdAir
+      const yawAxXAir = -fwdAxisDot * fwdAir.x
+      const yawAxYAir = 1 - fwdAxisDot * fwdAir.y
+      const yawAxZAir = -fwdAxisDot * fwdAir.z
+      const yawAxLenAir = Math.hypot(yawAxXAir, yawAxYAir, yawAxZAir)
+      if (yawAxLenAir > 0.01) {
+        const invLen = 1 / yawAxLenAir
+        rb.applyTorqueImpulse(
+          {
+            x: yawAxXAir * invLen * aTurnAir * m * dt,
+            y: yawAxYAir * invLen * aTurnAir * m * dt,
+            z: yawAxZAir * invLen * aTurnAir * m * dt,
+          },
+          true,
+        )
+      }
+
+      // Air roll leveler — gentle PD toward zero roll. The roll ANGLE at
+      // takeoff (e.g. a fully laid-over corner) is preserved by the air
+      // branch's "free physics" approach, which left the bike stuck on
+      // its side mid-jump. Low gain so steer-driven aerial banking still
+      // works as a transient, but neutral is the attractor over ~2s.
+      // Skipped past 60° of pitch so backflips/dives aren't fought.
+      const r10A = 2 * (q.x * q.y + q.z * q.w)
+      const r11A = 1 - 2 * (q.x * q.x + q.z * q.z)
+      const r12A = 2 * (q.y * q.z - q.x * q.w)
+      const pitchA = Math.asin(Math.max(-1, Math.min(1, -r12A)))
+      if (Math.abs(pitchA) < Math.PI / 3) {
+        const currentRollA = Math.atan2(r10A, r11A)
+        const angvA = rb.angvel()
+        const rollVelA = angvA.x * fwdAir.x + angvA.y * fwdAir.y + angvA.z * fwdAir.z
+        const AIR_ROLL_P = 3
+        const AIR_ROLL_D = 2
+        const aRollAir = -currentRollA * AIR_ROLL_P - rollVelA * AIR_ROLL_D
+        rb.applyTorqueImpulse(
+          {
+            x: fwdAir.x * aRollAir * m * dt,
+            y: fwdAir.y * aRollAir * m * dt,
+            z: fwdAir.z * aRollAir * m * dt,
+          },
+          true,
+        )
+      }
 
       continue
     }
@@ -634,18 +712,32 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       )
     }
 
-    // Yaw torque around WORLD Y. M9.3 tried bike-local up to avoid the
-    // direct projection onto the body's roll axis, but that produced a
-    // worse second-order bug: rotating around the tilted local-up axis
-    // spins the bike's right vector OUT of the world horizontal plane,
-    // so the roll PD (which reads bikeRight.y) registered yaw-induced
-    // tilt as roll and pumped real angular velocity into the roll axis.
-    // World-Y yaw keeps bikeRight.y at zero across any pitch, so the
-    // roll PD only ever sees actual roll. The first-order projection
-    // onto the roll axis is small and the strong roll PD eats it.
+    // Yaw torque around the "pure heading" axis: world-up with the
+    // bike-fwd projection removed (then normalised). Perpendicular to
+    // bike-fwd by construction, so steering can't leak into roll
+    // regardless of pitch. M9.3 tried bike-local up and produced a
+    // worse bug because the roll PD of the day read bikeRight.y; the
+    // current roll PD reads true YXZ Euler roll, so the pure-heading
+    // axis is safe and strictly better (no leak for either ground or
+    // air to chase).
     const turnMul = probe.isWater ? 1.1 : 1.0
     const aTurn = -intent.steer * stats.turnTorque * turnMul
-    rb.applyTorqueImpulse({ x: 0, y: aTurn * m * dt, z: 0 }, true)
+    const fwdDotUp = fwd.y
+    const yawAxXG = -fwdDotUp * fwd.x
+    const yawAxYG = 1 - fwdDotUp * fwd.y
+    const yawAxZG = -fwdDotUp * fwd.z
+    const yawAxLenG = Math.hypot(yawAxXG, yawAxYG, yawAxZG)
+    if (yawAxLenG > 0.01) {
+      const invLenG = 1 / yawAxLenG
+      rb.applyTorqueImpulse(
+        {
+          x: yawAxXG * invLenG * aTurn * m * dt,
+          y: yawAxYG * invLenG * aTurn * m * dt,
+          z: yawAxZG * invLenG * aTurn * m * dt,
+        },
+        true,
+      )
+    }
 
     // Fishtail bias — shifts the perceived yaw pivot forward of CoM so the
     // front "bites" and the rear sweeps out, Jet-Moto-style. Implementation:
