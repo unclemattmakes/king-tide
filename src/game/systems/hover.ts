@@ -277,11 +277,21 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       surfaceRollTarget = followNow * Math.atan2(yStarboard - yPort, 2 * PROBE_HALF_WIDTH)
     }
 
-    // Kinematic attitude shape. Decompose the bike's orientation into YXZ
-    // intrinsic Euler (yaw → pitch → roll) and re-impose BOTH pitch and
-    // roll each tick so the bike sits exactly at:
+    // Kinematic attitude shape — GROUNDED ONLY.
+    //
+    // When grounded: decompose the bike's orientation into YXZ intrinsic
+    // Euler (yaw → pitch → roll) and re-impose BOTH pitch and roll each
+    // tick so the bike sits exactly at:
     //   pitch = surfacePitchTarget + player pitch input
     //   roll  = surfaceRollTarget  + steer-driven lean
+    //
+    // When airborne: the kinematic block is SKIPPED. Pitch is left to
+    // physics — player input applies torque (see air-control block below),
+    // angular damping bleeds spin off naturally when input is released,
+    // but the pitch ANGLE persists at whatever the physics leaves it.
+    // That's the Trials-style feel: pitch up long enough → full backflip;
+    // nose down → committed dive; release → bike holds its attitude
+    // instead of springing back to neutral.
     //
     // Pitch was previously a soft PD with surfacePitchTarget biasing the
     // target. That worked but produced a subtle yaw drift: when surface
@@ -290,13 +300,13 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // and slowly yawed the bike off course (caught by the m5-pickup test).
     // Going fully kinematic for both pitch and roll removes the PD →
     // physics → pitch coupling entirely. Yaw remains the only physics-
-    // driven attitude axis.
+    // driven attitude axis while grounded.
     //
     // Why kinematic instead of a soft PD: any roll PD that reads
     // bikeRight.y false-positives on yaw-while-pitched and pumps real
     // roll velocity into the body (M9.x bug). Pitch had its own version
     // of the same problem under surface alignment.
-    const PITCH_LIMIT = Math.PI / 6 // 30° max player-driven pitch
+    const PITCH_LIMIT = Math.PI / 6 // 30° max player-driven pitch (grounded)
     // Steer-driven lean. Two-stage curve: a base ramp from idle to
     // LEAN_SPEED_FULL where the bike reaches its "normal" lean (1.0×
     // ROLL_LEAN_LIMIT), then a slower second ramp up to LEAN_SPEED_HIGH
@@ -345,7 +355,30 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const prevHover = HoverStateStore.get(eid)
     const prevGrounded = prevHover?.isGrounded ?? false
     let inputPitchNow = prevHover?.inputPitch ?? 0
-    {
+
+    // Bad-landing crash. On the airborne→grounded transition, sample the
+    // chassis pitch BEFORE the kinematic snap-to-surface (the same tick's
+    // kinematic block would otherwise mask the misalignment). If the bike
+    // planted itself >60° off the surface contour while moving, kill its
+    // horizontal velocity — the rider-crash Δv detector picks the resulting
+    // dump up on its next sample and ragdolls the rider.
+    //
+    // Gated by horizontal speed so low-speed orientation experiments
+    // (hovering, rotating in place) don't crash you for fun.
+    if (!prevGrounded && isGrounded) {
+      const qLand = rb.rotation()
+      const r12Land = 2 * (qLand.y * qLand.z - qLand.x * qLand.w)
+      const pitchLand = Math.asin(Math.max(-1, Math.min(1, -r12Land)))
+      const pitchOffSurface = Math.abs(pitchLand - surfacePitchTarget)
+      const horizSpeedLand = Math.hypot(linvel.x, linvel.z)
+      const BAD_LAND_PITCH = Math.PI / 3 // 60° off the surface contour
+      const BAD_LAND_MIN_SPEED = 8 // m/s — slow tumbles just snap, no crash
+      if (pitchOffSurface > BAD_LAND_PITCH && horizSpeedLand > BAD_LAND_MIN_SPEED) {
+        rb.setLinvel({ x: 0, y: linvel.y, z: 0 }, true)
+      }
+    }
+
+    if (isGrounded) {
       const speedNow = Math.hypot(linvel.x, linvel.z)
       const speedFrac = Math.min(speedNow / LEAN_SPEED_FULL, 1)
       const baseLeanScale = LEAN_BASE + (1 - LEAN_BASE) * speedFrac
@@ -419,6 +452,34 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
             x: angvNow.x - rollVel * fwdNow.x - pitchVel * rightNow.x,
             y: angvNow.y - rollVel * fwdNow.y - pitchVel * rightNow.y,
             z: angvNow.z - rollVel * fwdNow.z - pitchVel * rightNow.z,
+          },
+          true,
+        )
+      }
+    } else {
+      // Airborne. No kinematic attitude — pitch is physics-driven (player
+      // input becomes torque, see air-control block below). Roll-axis
+      // angvel is still stripped so a world-Y yaw torque on a tilted bike
+      // doesn't pump tumbling into the roll axis. Pitch-axis angvel is
+      // PRESERVED — that's how a held-pitch input integrates into a flip
+      // and how a released stick retains its spin until angular damping
+      // bleeds it off.
+      //
+      // Force inputPitch to 0 while airborne so the grounded smoother
+      // doesn't snap the chassis on landing — once the bike re-grounds,
+      // the kinematic surface tracking takes over from whatever angle
+      // physics left the chassis at.
+      inputPitchNow = 0
+      const qNow = rb.rotation()
+      const fwdNow = quatRotate(qNow, { x: 0, y: 0, z: 1 })
+      const angvNow = rb.angvel()
+      const rollVel = angvNow.x * fwdNow.x + angvNow.y * fwdNow.y + angvNow.z * fwdNow.z
+      if (Math.abs(rollVel) > 1e-5) {
+        rb.setAngvel(
+          {
+            x: angvNow.x - rollVel * fwdNow.x,
+            y: angvNow.y - rollVel * fwdNow.y,
+            z: angvNow.z - rollVel * fwdNow.z,
           },
           true,
         )
@@ -552,6 +613,30 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       const aTurnAir = -intent.steer * stats.turnTorque * AIR_TURN_MUL
       rb.applyTorqueImpulse({ x: 0, y: aTurnAir * m * dt, z: 0 }, true)
 
+      // Player pitch torque — applied around the bike's right axis. No
+      // smoothing: the stick commands an angular *force* and pitch ANGLE
+      // integrates from there, so holding pitch up long enough goes from
+      // a nose-up tip to a backflip; holding down dives. On release, only
+      // Rapier's angular damping bleeds the angvel — the orientation
+      // itself persists. That's the Trials feel the rider asked for.
+      //
+      // Sign: intent.pitch=+1 (E, "nose up") → torque around -rightAxis,
+      // which rotates fwd toward +y (nose up). Mirrors the kinematic
+      // convention's negation.
+      if (Math.abs(intent.pitch) > 0.05) {
+        const rightAir = quatRotate(q, { x: 1, y: 0, z: 0 })
+        const PITCH_TORQUE_ACCEL = 8 // rad/s² at full input
+        const aPitch = -intent.pitch * PITCH_TORQUE_ACCEL
+        rb.applyTorqueImpulse(
+          {
+            x: rightAir.x * aPitch * m * dt,
+            y: rightAir.y * aPitch * m * dt,
+            z: rightAir.z * aPitch * m * dt,
+          },
+          true,
+        )
+      }
+
       continue
     }
 
@@ -670,8 +755,32 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const aTurn = -intent.steer * stats.turnTorque * turnMul
     rb.applyTorqueImpulse({ x: 0, y: aTurn * m * dt, z: 0 }, true)
 
-    // (Pitch + roll attitude is set kinematically at the top of the loop.
-    // Yaw is the only physics-driven attitude axis.)
+    // Fishtail bias — shifts the perceived yaw pivot forward of CoM so the
+    // front "bites" and the rear sweeps out, Jet-Moto-style. Implementation:
+    // add a lateral CoM acceleration timed with the yaw torque, magnitude
+    // `α × pivotOffset`. Geometrically this makes the point YAW_PIVOT_FWD
+    // metres ahead of CoM the instantaneous rotation centre instead of CoM
+    // itself; the rear swings outward by `2 × YAW_PIVOT_FWD × ω`. Faded in
+    // with speed so parking-lot wiggles don't slide the bike sideways —
+    // fishtail is a high-speed feel.
+    const YAW_PIVOT_FWD = 0.7 // metres forward of CoM
+    const fishtailFade = Math.min(speed / 8, 1)
+    if (fishtailFade > 0) {
+      const rightYaw = quatRotate(q, { x: 1, y: 0, z: 0 })
+      const aLatFish = -aTurn * YAW_PIVOT_FWD * fishtailFade
+      rb.applyImpulse(
+        {
+          x: rightYaw.x * aLatFish * m * dt,
+          y: 0,
+          z: rightYaw.z * aLatFish * m * dt,
+        },
+        true,
+      )
+    }
+
+    // (Roll attitude is set kinematically at the top of the loop while
+    // grounded. Pitch is kinematic on the ground and physics-driven in
+    // the air. Yaw is always physics-driven.)
 
     // Lateral drag — water has *more* lateral resistance (skis don't slide sideways easily).
     const dragMul = probe.isWater ? 1.4 : 1.0
