@@ -14,6 +14,21 @@ replace that ritual:
   * ``HOVERBIKE_OT_auto_place_ramps``       → reuses the curvature-peak
     detector from turn_indicators.py to spread ramps across the spline
     at the corners that need them most.
+
+Scaffolding for from-scratch maps — the lint flags missing
+``ai_spline_main`` / ``start_00`` as errors, and authors who didn't
+start from a ``template-*.blend`` hit those every time. These
+operators promote a one-click fix to the panel:
+
+  * ``HOVERBIKE_OT_add_ai_spline``          → if the active object is a
+    CURVE, promote it (rename + tag + cyclic). Otherwise drop a default
+    cyclic NURBS loop around the 3D cursor (or fit to the terrain bbox
+    if a kind=track terrain mesh exists).
+  * ``HOVERBIKE_OT_add_starts``             → create ``start_00`` /
+    ``start_01`` empties. If ``ai_spline_main`` exists, immediately
+    snaps them to the racing line; otherwise places them at the cursor.
+  * ``HOVERBIKE_OT_scaffold_track_essentials`` → one-shot wrapper that
+    runs both so the lint passes in a single click on a fresh .blend.
 """
 
 from __future__ import annotations
@@ -22,7 +37,7 @@ import math
 
 import bpy
 import mathutils
-from bpy.props import FloatProperty, StringProperty
+from bpy.props import BoolProperty, FloatProperty, IntProperty, StringProperty
 from bpy.types import Operator
 
 
@@ -555,6 +570,288 @@ class HOVERBIKE_OT_shift_spline_off_obstacles(Operator):
 
 
 # ────────────────────────────────────────────────────────────────────
+# Scaffolding — first-time authoring of ai_spline_main + start_00/01
+# ────────────────────────────────────────────────────────────────────
+
+
+def _terrain_bbox_xy() -> tuple[float, float, float, float] | None:
+    """World-space (xmin, xmax, ymin, ymax) of the largest kind=track
+    terrain mesh, or None if no terrain is present. Used by the AI-
+    spline scaffolder to size a default loop that actually fits the
+    map instead of hovering off the map edge."""
+    from ._legacy import _largest_terrain_mesh
+
+    terrain = _largest_terrain_mesh()
+    if terrain is None:
+        return None
+    mw = terrain.matrix_world
+    xs, ys = [], []
+    for corner in terrain.bound_box:
+        wc = mw @ mathutils.Vector(corner)
+        xs.append(wc.x)
+        ys.append(wc.y)
+    return (min(xs), max(xs), min(ys), max(ys))
+
+
+class HOVERBIKE_OT_add_ai_spline(Operator):
+    """Create the racing-line curve required by the exporter.
+
+    Two modes, picked automatically:
+
+      * **Promote** — if the active object is a CURVE (and isn't already
+        ``ai_spline_main``), rename it + its curve data to
+        ``ai_spline_main``, tag ``kind=ai_spline`` / ``branch=main``,
+        and force every spline inside it cyclic. Lets authors draw any
+        Bezier / NURBS curve in Blender's normal UI and promote it
+        into the racing-line slot with no boilerplate.
+      * **Create** — drop a fresh ``N``-point cyclic NURBS loop. If a
+        ``kind=track`` terrain mesh is in the scene the loop fits ~70 %
+        of its XY bbox so the racing line sits inside the playable
+        area; otherwise the loop is an oval of ``radius`` metres
+        around the 3D cursor.
+
+    No-ops (with an INFO report) if ``ai_spline_main`` already exists —
+    the operator never overwrites authored work."""
+
+    bl_idname = "hoverbike.add_ai_spline"
+    bl_label = "Add AI Spline"
+    bl_description = (
+        "Create ai_spline_main (the racing line). Promotes the active CURVE if "
+        "one is selected; otherwise drops a cyclic NURBS loop around the 3D cursor"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    n_points: IntProperty(  # type: ignore[valid-type]
+        name="Loop points",
+        description="Number of NURBS control points in the default loop",
+        default=8, min=3, max=64,
+    )
+    radius: FloatProperty(  # type: ignore[valid-type]
+        name="Loop radius (m)",
+        description="Half-extent of the default loop when no terrain is present",
+        default=200.0, min=5.0, max=4000.0, precision=1,
+    )
+    fit_to_terrain: BoolProperty(  # type: ignore[valid-type]
+        name="Fit to terrain",
+        description=(
+            "If a kind=track terrain mesh exists, size the loop to ~70%% of "
+            "its XY bbox instead of using the radius slider"
+        ),
+        default=True,
+    )
+
+    def execute(self, context):
+        if bpy.data.objects.get("ai_spline_main") is not None:
+            self.report(
+                {"INFO"},
+                "ai_spline_main already exists — edit it in place instead of re-creating.",
+            )
+            return {"CANCELLED"}
+
+        # Promote path: any selected CURVE other than the spline itself
+        # gets renamed + tagged + made cyclic.
+        active = context.active_object
+        if active is not None and active.type == "CURVE" and active.name != "ai_spline_main":
+            old_name = active.name
+            active.name = "ai_spline_main"
+            try:
+                active.data.name = "ai_spline_main"
+            except Exception:
+                pass
+            active["kind"] = "ai_spline"
+            active["branch"] = "main"
+            for sp in active.data.splines:
+                sp.use_cyclic_u = True
+                if sp.type == "NURBS":
+                    sp.use_endpoint_u = True
+            self.report(
+                {"INFO"},
+                f"Promoted {old_name!r} → ai_spline_main "
+                f"(tagged kind=ai_spline / branch=main, forced cyclic).",
+            )
+            return {"FINISHED"}
+
+        # Create path — drop a default loop. Centre + size from terrain
+        # bbox if available, else cursor + radius slider.
+        cx, cy, cz = context.scene.cursor.location
+        rx = ry = float(self.radius)
+        sized_from = "radius slider"
+        if self.fit_to_terrain:
+            bbox = _terrain_bbox_xy()
+            if bbox is not None:
+                xmin, xmax, ymin, ymax = bbox
+                cx = 0.5 * (xmin + xmax)
+                cy = 0.5 * (ymin + ymax)
+                rx = 0.35 * (xmax - xmin)
+                ry = 0.35 * (ymax - ymin)
+                sized_from = "terrain bbox"
+
+        # n cyclic anchors evenly distributed on the ellipse. The first
+        # anchor lands at angle 0 (i.e. (+rx, 0) offset from centre) so
+        # start_00 — which the user typically snaps with t=0 right
+        # after — spawns at a predictable +X side of the track.
+        anchors: list[tuple[float, float, float]] = []
+        for i in range(int(self.n_points)):
+            theta = (i / float(self.n_points)) * math.tau
+            anchors.append((cx + rx * math.cos(theta), cy + ry * math.sin(theta), cz))
+
+        curve = bpy.data.curves.new("ai_spline_main", type="CURVE")
+        curve.dimensions = "3D"
+        spl = curve.splines.new(type="NURBS")
+        spl.points.add(len(anchors) - 1)
+        for i, (x, y, z) in enumerate(anchors):
+            spl.points[i].co = (x, y, z, 1.0)
+        spl.use_endpoint_u = True
+        spl.use_cyclic_u = True
+        obj = bpy.data.objects.new("ai_spline_main", curve)
+        obj["kind"] = "ai_spline"
+        obj["branch"] = "main"
+        context.scene.collection.objects.link(obj)
+
+        # Select + make active so the author can immediately enter edit
+        # mode to reshape — that's almost always the next step.
+        for o in context.scene.objects:
+            o.select_set(False)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+
+        self.report(
+            {"INFO"},
+            f"Created ai_spline_main: {self.n_points}-pt NURBS loop "
+            f"({sized_from}, {2 * rx:.0f}×{2 * ry:.0f} m). "
+            f"Tab into edit mode to reshape.",
+        )
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_add_starts(Operator):
+    """Create the ``start_00`` / ``start_01`` empties required by the
+    exporter. If ``ai_spline_main`` exists the new empties are then
+    handed straight to ``snap_starts_to_spline`` so they land on the
+    racing line with the right yaw + grid spacing; otherwise they sit
+    at the 3D cursor with the cursor's Z-rotation as yaw, ready to be
+    re-snapped once the spline is authored.
+
+    Skips empties that already exist (so re-running on a partial setup
+    fills in only the missing index). Always sets ``kind=start`` +
+    ``index`` + ``start_t=0`` so the export pipeline classifies them
+    correctly."""
+
+    bl_idname = "hoverbike.add_starts"
+    bl_label = "Add Player Starts"
+    bl_description = (
+        "Spawn start_00 + start_01 empties (kind=start). Snaps to ai_spline_main "
+        "when present; otherwise places them at the 3D cursor"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scene = context.scene
+        cursor_yaw = float(scene.cursor.rotation_euler.z)
+        created: list[str] = []
+        existed: list[str] = []
+        for i in range(2):
+            name = f"start_{i:02d}"
+            if bpy.data.objects.get(name) is not None:
+                existed.append(name)
+                continue
+            obj = bpy.data.objects.new(name, None)
+            obj.empty_display_type = "ARROWS"
+            obj.empty_display_size = 6.0
+            # Lateral offset so the two empties don't z-fight when no
+            # spline exists; snap_starts_to_spline will reposition both
+            # immediately after if the spline is present.
+            off = (-2.0 if i == 0 else +2.0)
+            obj.location = (
+                float(scene.cursor.location.x) + off,
+                float(scene.cursor.location.y),
+                float(scene.cursor.location.z),
+            )
+            obj.rotation_euler = (0.0, 0.0, cursor_yaw)
+            obj["kind"] = "start"
+            obj["index"] = i
+            obj["start_t"] = 0.0
+            scene.collection.objects.link(obj)
+            created.append(name)
+
+        if not created:
+            self.report({"INFO"}, "start_00 + start_01 already exist.")
+            return {"CANCELLED"}
+
+        sp = bpy.data.objects.get("ai_spline_main")
+        snapped = False
+        if sp is not None and sp.type == "CURVE":
+            try:
+                snap_result = bpy.ops.hoverbike.snap_starts_to_spline()
+                snapped = snap_result == {"FINISHED"}
+            except Exception:
+                snapped = False
+
+        if snapped:
+            self.report(
+                {"INFO"},
+                f"Created {', '.join(created)} and snapped to ai_spline_main.",
+            )
+        elif sp is None:
+            self.report(
+                {"INFO"},
+                f"Created {', '.join(created)} at the 3D cursor. "
+                f"Re-run after adding ai_spline_main to snap to the racing line.",
+            )
+        else:
+            self.report(
+                {"INFO"},
+                f"Created {', '.join(created)} at the 3D cursor (snap-to-spline failed).",
+            )
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_scaffold_track_essentials(Operator):
+    """One-click: create everything the lint requires (``ai_spline_main``
+    + ``start_00`` + ``start_01``) so a from-scratch .blend goes from
+    "two lint errors" to "ready to refine" in a single click.
+
+    Just chains ``add_ai_spline`` and ``add_starts`` — both are no-ops
+    when their target already exists, so this operator is safe to run
+    on partial scenes too."""
+
+    bl_idname = "hoverbike.scaffold_track_essentials"
+    bl_label = "Scaffold Track Essentials"
+    bl_description = (
+        "Create ai_spline_main + start_00 + start_01 in one click so the lint "
+        "passes. Safe to re-run; skips anything that already exists"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        # Note both calls return CANCELLED when their target already
+        # exists, which is fine — we want the overall scaffold operator
+        # to succeed as long as the scene ends up with both pieces.
+        bpy.ops.hoverbike.add_ai_spline()
+        bpy.ops.hoverbike.add_starts()
+
+        have_sp = bpy.data.objects.get("ai_spline_main") is not None
+        have_s0 = bpy.data.objects.get("start_00") is not None
+        have_s1 = bpy.data.objects.get("start_01") is not None
+        if have_sp and have_s0 and have_s1:
+            self.report(
+                {"INFO"},
+                "Scaffolded ai_spline_main + start_00 + start_01. "
+                "Run Lint Track to confirm.",
+            )
+            return {"FINISHED"}
+        missing = [
+            n for n, ok in (
+                ("ai_spline_main", have_sp),
+                ("start_00", have_s0),
+                ("start_01", have_s1),
+            ) if not ok
+        ]
+        self.report({"ERROR"}, f"Scaffold incomplete — still missing: {', '.join(missing)}")
+        return {"CANCELLED"}
+
+
+# ────────────────────────────────────────────────────────────────────
 # Registration
 # ────────────────────────────────────────────────────────────────────
 
@@ -566,6 +863,9 @@ _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_shift_spline_off_obstacles,
     HOVERBIKE_OT_materialize_gates_to_cp_empties,
     HOVERBIKE_OT_demote_gates_to_spline,
+    HOVERBIKE_OT_add_ai_spline,
+    HOVERBIKE_OT_add_starts,
+    HOVERBIKE_OT_scaffold_track_essentials,
 )
 
 
