@@ -177,6 +177,13 @@ async function boot() {
   // is alive; only the sim is frozen.
   const determinismMode = params.get('determinism') === '1'
 
+  // Cup mode — `?cup=<cupId>` signals the race is part of a championship.
+  // The finish-screen branching in game-loop reads this back along with
+  // the sessionStorage-backed cup-progress state. Null in single-race
+  // mode; in multiplayer too (cup-mode + multiplayer is a future-work
+  // bridge, not v1).
+  const cupId = !roomId ? params.get('cup') : null
+
   // Time Trial mode (`?tt=1`). Solo race against the clock + a
   // translucent ghost of the player's previous best lap on this
   // (track, bike) combo. Sim layer skips AI bike spawn; ghost is a
@@ -686,6 +693,7 @@ async function boot() {
     playerEid,
     playerVariantId: playerVariant.id,
     roomId,
+    cupId,
     raceHud,
     audio,
     physicsDebug,
@@ -846,6 +854,7 @@ async function boot() {
     playerVariant,
     multiplayer,
     roomId,
+    cupId,
     recorder,
     recorderStart,
     lapState,

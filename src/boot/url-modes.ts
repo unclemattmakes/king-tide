@@ -26,6 +26,7 @@ const GAME_SIGNALS = [
   'autostart',
   'track',
   'bike',
+  'cup',
   'room',
   'edit',
   'replay',
