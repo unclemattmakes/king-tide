@@ -809,6 +809,23 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
       explosionsBurst.add(eid)
       const e = ExplosionStateStore.get(eid)
       if (!e) continue
+      // Bonus burst — if the loaded track happens to have a
+      // ``kind=emitter`` empty named ``emitter_explosion``, fire it
+      // off too so authors can attach a track-specific atlas-sprite
+      // burst (lava chunks for Kilauea, glass shards for Cape Town
+      // aquarium) without touching code. The lookup goes through the
+      // ``__particles`` global the boot wires up; a no-op when no
+      // such emitter exists or particles are disabled.
+      const particleHook = (window as unknown as {
+        __particles?: { triggerBurst?: (name: string, count: number) => void }
+      }).__particles
+      if (particleHook?.triggerBurst) {
+        try {
+          particleHook.triggerBurst('emitter_explosion', 24)
+        } catch {
+          // ignore — never let a hook failure tank the render frame
+        }
+      }
       // Burst ~30 particles in a sphere, mostly upward + outward.
       const burstCount = 30
       for (let k = 0; k < burstCount; k++) {

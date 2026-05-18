@@ -1,16 +1,21 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import { pointAtT, sampleCatmullRom, sampleScalarToMatch, tangentAtT } from './catmull-rom'
-import type {
-  AISpline,
-  AntiGravZone,
-  BoostPad,
-  Checkpoint,
-  Prop,
-  PropType,
-  SkyConfig,
-  TerrainShaderConfig,
-  Track,
-  WaterConfig,
+import {
+  SKY_COLOR_GRADES,
+  type AISpline,
+  type AntiGravZone,
+  type AudioConfig,
+  type BoostPad,
+  type Checkpoint,
+  type HorizonConfig,
+  type Prop,
+  type PropType,
+  type SkyColorGrade,
+  type SkyConfig,
+  type TerrainShaderConfig,
+  type Track,
+  type WaterConfig,
+  type WaveZone,
 } from './types'
 
 const PROP_TYPES: readonly PropType[] = ['box', 'sphere', 'cylinder', 'pipe', 'halfpipe', 'asset']
@@ -42,12 +47,15 @@ export type TrackJson = {
   pickupSpawns: Vec3[]
   boostPads?: BoostPad[]
   antiGravZones?: AntiGravZone[]
+  waveZones?: WaveZone[]
   props?: Prop[]
   environmentGlb?: string
   water?: WaterConfig
   sky?: SkyConfig
+  horizon?: HorizonConfig
   gateSpacing?: number
   terrainShader?: TerrainShaderConfig
+  audio?: AudioConfig
 }
 
 export async function loadTrackFromJson(url: string): Promise<Track> {
@@ -140,6 +148,12 @@ export function buildTrackFromJson(input: unknown): Track {
   }
   const antiGravZones: AntiGravZone[] = antiGravRaw.map((z, i) => readAntiGravZone(z, i))
 
+  const waveZonesRaw = (input as { waveZones?: unknown }).waveZones ?? []
+  if (!Array.isArray(waveZonesRaw)) {
+    throw new Error('track-json: waveZones must be an array if present')
+  }
+  const waveZones: WaveZone[] = waveZonesRaw.map((z, i) => readWaveZone(z, i))
+
   const propsRaw = (input as { props?: unknown }).props ?? []
   if (!Array.isArray(propsRaw)) {
     throw new Error('track-json: props must be an array if present')
@@ -148,9 +162,11 @@ export function buildTrackFromJson(input: unknown): Track {
 
   const water = readOptionalWater((input as { water?: unknown }).water)
   const sky = readOptionalSky((input as { sky?: unknown }).sky)
+  const horizon = readOptionalHorizon((input as { horizon?: unknown }).horizon)
   const terrainShader = readOptionalTerrainShader(
     (input as { terrainShader?: unknown }).terrainShader,
   )
+  const audio = readOptionalAudio((input as { audio?: unknown }).audio)
   const environmentGlb = (input as { environmentGlb?: unknown }).environmentGlb
   if (environmentGlb !== undefined && typeof environmentGlb !== 'string') {
     throw new Error('track-json: environmentGlb must be a string if present')
@@ -176,14 +192,17 @@ export function buildTrackFromJson(input: unknown): Track {
     pickupSpawns,
     boostPads,
     antiGravZones,
+    waveZones,
     props,
     surfaces: [],
   }
   if (environmentGlb) track.environmentGlb = environmentGlb
   if (water) track.water = water
   if (sky) track.sky = sky
+  if (horizon) track.horizon = horizon
   if (gateSpacing !== undefined) track.gateSpacing = gateSpacing
   if (terrainShader) track.terrainShader = terrainShader
+  if (audio) track.audio = audio
   return track
 }
 
@@ -247,6 +266,22 @@ export function trackToJson(track: Track): TrackJson {
       halfHeight: z.halfHeight,
       halfDepth: z.halfDepth,
     })),
+    waveZones: track.waveZones.map((z) => {
+      const out: WaveZone = {
+        position: { ...z.position },
+        rotation: { ...z.rotation },
+        halfWidth: z.halfWidth,
+        halfHeight: z.halfHeight,
+        halfDepth: z.halfDepth,
+        heightMult: z.heightMult,
+        freqMult: z.freqMult,
+        blendRadiusM: z.blendRadiusM,
+      }
+      if (z.directionDeg !== undefined) out.directionDeg = z.directionDeg
+      if (z.surgePeriodS !== undefined) out.surgePeriodS = z.surgePeriodS
+      if (z.surgeAmplitude !== undefined) out.surgeAmplitude = z.surgeAmplitude
+      return out
+    }),
     props: track.props.map((p) => {
       const out: Prop = {
         type: p.type,
@@ -262,7 +297,19 @@ export function trackToJson(track: Track): TrackJson {
   if (track.environmentGlb) out.environmentGlb = track.environmentGlb
   if (track.water) out.water = { ...track.water }
   if (track.sky) out.sky = { ...track.sky }
+  if (track.horizon) out.horizon = { ...track.horizon }
   if (track.gateSpacing !== undefined) out.gateSpacing = track.gateSpacing
+  if (track.terrainShader) out.terrainShader = { ...track.terrainShader }
+  if (track.audio) {
+    const audio: AudioConfig = {}
+    if (track.audio.music !== undefined) audio.music = track.audio.music
+    if (track.audio.ambient !== undefined) audio.ambient = [...track.audio.ambient]
+    if (track.audio.ambientGains !== undefined) audio.ambientGains = [...track.audio.ambientGains]
+    if (track.audio.music3dEffects !== undefined) {
+      audio.music3dEffects = { ...track.audio.music3dEffects }
+    }
+    out.audio = audio
+  }
   return out
 }
 
@@ -383,6 +430,71 @@ function readBoostPad(raw: unknown, i: number): BoostPad {
   return { position, rotation, halfWidth, halfDepth, strength }
 }
 
+function readWaveZone(raw: unknown, i: number): WaveZone {
+  if (!isObject(raw)) throw new Error(`track-json: waveZones[${i}] must be an object`)
+  const position = readVec3(raw.position, `waveZones[${i}].position`)
+  const rotation = readQuat(raw.rotation, `waveZones[${i}].rotation`)
+  const halfWidth = requireNumber(raw, 'halfWidth')
+  const halfHeight = requireNumber(raw, 'halfHeight')
+  const halfDepth = requireNumber(raw, 'halfDepth')
+  const heightMult = requireNumber(raw, 'heightMult')
+  const freqMult = requireNumber(raw, 'freqMult')
+  const blendRadiusM = requireNumber(raw, 'blendRadiusM')
+  if (halfWidth <= 0 || halfHeight <= 0 || halfDepth <= 0) {
+    throw new Error(`track-json: waveZones[${i}] halfWidth/halfHeight/halfDepth must be positive`)
+  }
+  if (heightMult <= 0) {
+    throw new Error(`track-json: waveZones[${i}].heightMult must be positive (got ${heightMult})`)
+  }
+  if (freqMult <= 0) {
+    throw new Error(`track-json: waveZones[${i}].freqMult must be positive (got ${freqMult})`)
+  }
+  if (blendRadiusM <= 0) {
+    throw new Error(
+      `track-json: waveZones[${i}].blendRadiusM must be positive (got ${blendRadiusM})`,
+    )
+  }
+  const out: WaveZone = {
+    position,
+    rotation,
+    halfWidth,
+    halfHeight,
+    halfDepth,
+    heightMult,
+    freqMult,
+    blendRadiusM,
+  }
+  const dirRaw = (raw as { directionDeg?: unknown }).directionDeg
+  if (dirRaw !== undefined) {
+    if (typeof dirRaw !== 'number' || !Number.isFinite(dirRaw)) {
+      throw new Error(
+        `track-json: waveZones[${i}].directionDeg must be a finite number if present`,
+      )
+    }
+    out.directionDeg = dirRaw
+  }
+  // Surge fields come as a pair — set both or neither. A partial pair
+  // is almost always an authoring mistake (e.g. dropped half of a
+  // tsunami spec); fail loud rather than silently surge with 0.
+  const periodRaw = (raw as { surgePeriodS?: unknown }).surgePeriodS
+  const ampRaw = (raw as { surgeAmplitude?: unknown }).surgeAmplitude
+  if (periodRaw !== undefined || ampRaw !== undefined) {
+    if (typeof periodRaw !== 'number' || !(periodRaw > 0)) {
+      throw new Error(
+        `track-json: waveZones[${i}].surgePeriodS must be a positive number when present`,
+      )
+    }
+    if (typeof ampRaw !== 'number' || !Number.isFinite(ampRaw)) {
+      throw new Error(
+        `track-json: waveZones[${i}].surgeAmplitude must be a finite number when surgePeriodS is set`,
+      )
+    }
+    out.surgePeriodS = periodRaw
+    out.surgeAmplitude = ampRaw
+  }
+  return out
+}
+
 function readAntiGravZone(raw: unknown, i: number): AntiGravZone {
   if (!isObject(raw)) throw new Error(`track-json: antiGravZones[${i}] must be an object`)
   const position = readVec3(raw.position, `antiGravZones[${i}].position`)
@@ -471,6 +583,33 @@ function readOptionalTerrainShader(raw: unknown): TerrainShaderConfig | null {
   return out
 }
 
+function readOptionalHorizon(raw: unknown): HorizonConfig | null {
+  if (raw === undefined || raw === null) return null
+  if (!isObject(raw)) throw new Error('track-json: horizon must be an object if present')
+  const out: HorizonConfig = {}
+  for (const key of ['radius', 'peakHeight', 'seed', 'silhouetteDark'] as const) {
+    if (key in raw) {
+      const v = raw[key]
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new Error(`track-json: horizon.${key} must be a finite number if present`)
+      }
+      out[key] = v
+    }
+  }
+  if (out.radius !== undefined && !(out.radius > 0)) {
+    throw new Error(`track-json: horizon.radius must be > 0 (got ${out.radius})`)
+  }
+  if (out.peakHeight !== undefined && !(out.peakHeight > 0)) {
+    throw new Error(`track-json: horizon.peakHeight must be > 0 (got ${out.peakHeight})`)
+  }
+  if (out.silhouetteDark !== undefined && (out.silhouetteDark < 0 || out.silhouetteDark > 2)) {
+    throw new Error(
+      `track-json: horizon.silhouetteDark must be in [0, 2] (got ${out.silhouetteDark})`,
+    )
+  }
+  return out
+}
+
 function readOptionalSky(raw: unknown): SkyConfig | null {
   if (raw === undefined || raw === null) return null
   if (!isObject(raw)) throw new Error('track-json: sky must be an object if present')
@@ -482,7 +621,7 @@ function readOptionalSky(raw: unknown): SkyConfig | null {
     }
     out.tint = v
   }
-  for (const key of ['cloudiness', 'sunIntensity', 'fogNear', 'fogFar'] as const) {
+  for (const key of ['cloudiness', 'sunIntensity', 'fogNear', 'fogFar', 'timeOfDay'] as const) {
     if (key in raw) {
       const v = raw[key]
       if (typeof v !== 'number' || !Number.isFinite(v)) {
@@ -499,6 +638,109 @@ function readOptionalSky(raw: unknown): SkyConfig | null {
   }
   if (out.fogNear !== undefined && out.fogFar !== undefined && out.fogNear >= out.fogFar) {
     throw new Error(`track-json: sky.fogNear (${out.fogNear}) must be < sky.fogFar (${out.fogFar})`)
+  }
+  if ('colorGrade' in raw) {
+    const v = raw.colorGrade
+    if (typeof v !== 'string' || !SKY_COLOR_GRADES.includes(v as SkyColorGrade)) {
+      throw new Error(
+        `track-json: sky.colorGrade must be one of ${SKY_COLOR_GRADES.join(', ')} (got ${String(v)})`,
+      )
+    }
+    out.colorGrade = v as SkyColorGrade
+  }
+  if ('bloom' in raw) {
+    const v = raw.bloom
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      throw new Error('track-json: sky.bloom must be a finite number if present')
+    }
+    if (v < 0 || v > 2) {
+      throw new Error(`track-json: sky.bloom must be in [0, 2] (got ${v})`)
+    }
+    out.bloom = v
+  }
+  if ('seaStateBeaufort' in raw) {
+    const v = raw.seaStateBeaufort
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      throw new Error('track-json: sky.seaStateBeaufort must be a finite number if present')
+    }
+    if (v < 0 || v > 12) {
+      throw new Error(`track-json: sky.seaStateBeaufort must be in [0, 12] (got ${v})`)
+    }
+    out.seaStateBeaufort = v
+  }
+  return out
+}
+
+function readOptionalAudio(raw: unknown): AudioConfig | null {
+  if (raw === undefined || raw === null) return null
+  if (!isObject(raw)) throw new Error('track-json: audio must be an object if present')
+  const out: AudioConfig = {}
+  if ('music' in raw) {
+    const v = raw.music
+    if (typeof v !== 'string' || v.length === 0) {
+      throw new Error('track-json: audio.music must be a non-empty string if present')
+    }
+    out.music = v
+  }
+  let ambient: string[] | undefined
+  if ('ambient' in raw) {
+    const v = raw.ambient
+    if (!Array.isArray(v)) {
+      throw new Error('track-json: audio.ambient must be an array of strings if present')
+    }
+    ambient = v.map((s, i) => {
+      if (typeof s !== 'string' || s.length === 0) {
+        throw new Error(`track-json: audio.ambient[${i}] must be a non-empty string`)
+      }
+      return s
+    })
+    out.ambient = ambient
+  }
+  if ('ambientGains' in raw) {
+    const v = raw.ambientGains
+    if (!Array.isArray(v)) {
+      throw new Error('track-json: audio.ambientGains must be an array of numbers if present')
+    }
+    const gains = v.map((g, i) => {
+      if (typeof g !== 'number' || !Number.isFinite(g)) {
+        throw new Error(`track-json: audio.ambientGains[${i}] must be a finite number`)
+      }
+      if (g < 0) {
+        throw new Error(
+          `track-json: audio.ambientGains[${i}] must be non-negative (got ${g})`,
+        )
+      }
+      return g
+    })
+    if (ambient === undefined) {
+      throw new Error('track-json: audio.ambientGains requires a matching audio.ambient array')
+    }
+    if (gains.length !== ambient.length) {
+      throw new Error(
+        `track-json: audio.ambientGains length (${gains.length}) must match audio.ambient length (${ambient.length})`,
+      )
+    }
+    out.ambientGains = gains
+  }
+  if ('music3dEffects' in raw) {
+    const fx = raw.music3dEffects
+    if (!isObject(fx)) {
+      throw new Error('track-json: audio.music3dEffects must be an object if present')
+    }
+    const effects: { duckOnPump?: number } = {}
+    if ('duckOnPump' in fx) {
+      const v = fx.duckOnPump
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new Error('track-json: audio.music3dEffects.duckOnPump must be a finite number')
+      }
+      if (v < 0) {
+        throw new Error(
+          `track-json: audio.music3dEffects.duckOnPump must be non-negative (got ${v})`,
+        )
+      }
+      effects.duckOnPump = v
+    }
+    if (Object.keys(effects).length > 0) out.music3dEffects = effects
   }
   return out
 }

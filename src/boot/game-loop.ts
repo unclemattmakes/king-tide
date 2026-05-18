@@ -158,6 +158,9 @@ export interface GameLoopOpts {
   pickupRender: (dt: number) => void
   combatRender: (dt: number) => void
   fxTick: (dt: number) => void
+  /** Unified track-emitter particle system. No-op when the track ships
+   *  no `kind=emitter` empties (procedural tracks, edit mode, etc.). */
+  particleTick: (dt: number) => void
   /** Track + per-bike state. */
   track: Track
   trackId: string
@@ -232,6 +235,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     pickupRender,
     combatRender,
     fxTick,
+    particleTick,
     track,
     trackId,
     manifest,
@@ -694,6 +698,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     pickupRender(dt)
     combatRender(dt)
     fxTick(dt)
+    particleTick(dt)
     physicsDebug.tick()
 
     // Race HUD — countdown banner, race/lap timers, gap toast, minimap.

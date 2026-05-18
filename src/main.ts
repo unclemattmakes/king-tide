@@ -10,7 +10,7 @@ import { loadTrackForBoot } from './boot/track-loader'
 import { runEarlyModeDispatch } from './boot/url-modes'
 import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug'
 import { createAudioEngine } from './engine/audio/audio'
-import { setAudioEngine } from './engine/audio/audio-service'
+import { applyTrackAudio, setAudioEngine } from './engine/audio/audio-service'
 import { loadDevSettings } from './engine/dev-settings'
 import { emptyIntent, type Intent, installInput } from './engine/input'
 import { installCameraLookInput } from './engine/input/camera-look'
@@ -24,6 +24,11 @@ import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
 import { createFxSystem } from './engine/render/fx'
 import { createHorizonRing } from './engine/render/horizon-ring'
+import {
+  createParticleSystem,
+  loadParticleAtlas,
+  type ParticleSystem,
+} from './engine/render/particle-system'
 import { createPhysicsDebugRenderer } from './engine/render/physics-debug'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
@@ -33,7 +38,7 @@ import { createRenderer } from './engine/render/renderer'
 import { applyPixelRatio, setRenderer } from './engine/render/renderer-service'
 import { createRiderRenderSystem } from './engine/render/rider-systems'
 import { createScene } from './engine/render/scene'
-import { createSkySystem } from './engine/render/sky'
+import { beaufortToAmplitudeScale, createSkySystem } from './engine/render/sky'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { createWaterMesh } from './engine/render/water'
 import { createWaveLineShimmer } from './engine/render/wave-line-shimmer'
@@ -49,6 +54,7 @@ import {
   createWaveField,
   defaultSpectrumParams,
   defaultWaves,
+  setWaveZones,
 } from './engine/sim/water/wave-field'
 import { applyDeckProfile, detectSteamDeck } from './engine/steam-deck'
 import { applyStoredWaterTuning } from './engine/water-debug-storage'
@@ -297,7 +303,12 @@ async function boot() {
   // procedural tracks, JSON tracks, GLB tracks, and the empty-draft
   // fallback for editor on a fresh id.
   setLoadingMessage(`Loading track${trackId ? ` · ${trackId}` : '…'}`)
-  const { track, terrainHeightmap } = await loadTrackForBoot({ trackId, scene, phys, editMode })
+  const { track, terrainHeightmap, horizonGeometry, environmentGlbRoot } = await loadTrackForBoot({
+    trackId,
+    scene,
+    phys,
+    editMode,
+  })
 
   // Track-driven sea level: shift both the water mesh and the buoyancy
   // sampler so the surface reads as a custom Y for tracks that want
@@ -306,6 +317,33 @@ async function boot() {
   const waterHeight = track.water?.height ?? 0
   waveField.baseY = waterHeight
   waterMesh.mesh.position.y = waterHeight
+  // Per-track sea-state: Beaufort number drives a global amplitude
+  // scalar on the wave field's base spectrum. Beaufort 4 ≈ 1.0× so the
+  // historical (pre-knob) look is the default; calm tracks dial down
+  // (South Beach lagoon ≈ 2), heavier seas dial up (Hatteras Atlantic
+  // ≈ 6-7, hurricane finale ≈ 9+). Wave-zones layer on top via
+  // `heightMult`, so authoring a tsunami zone in a Beaufort 2 sea works
+  // as expected — the zone multiplies the (already-scaled-down) base.
+  const beaufort = track.sky?.seaStateBeaufort
+  if (beaufort !== undefined) {
+    const scale = beaufortToAmplitudeScale(beaufort)
+    if (waveField.kind === 'gerstner') {
+      for (const w of waveField.waves) w.amplitude *= scale
+    }
+    // Spectrum-mode tracks: scale every mode's complex amplitude.
+    else {
+      for (const mode of waveField.spectrum) {
+        mode.aRe *= scale
+        mode.aIm *= scale
+      }
+    }
+  }
+  // Per-track wave-zone overrides — push the track's `waveZones` into
+  // the wave field so `sampleHeight`/`sampleSurface` apply the per-zone
+  // amplitude / frequency / surge / direction multipliers around set
+  // pieces (The Maw's central swell, Aqualand's tsunami timer, etc.).
+  // Empty list = pure global Gerstner, identical to pre-wave-zone behaviour.
+  setWaveZones(waveField, track.waveZones)
   // Terrain heightmap: when present, the water shader attenuates wave
   // displacement in shallow water (so crests stop clipping through
   // seabed/shoreline geometry) and drives depth-driven surf foam at the
@@ -345,16 +383,34 @@ async function boot() {
     }
   }
 
-  // Distant horizon silhouette ring. Procedural shape seeded off the
-  // track id so different tracks get different silhouettes from the same
-  // shader. Camera-locked XZ so it wraps the player; fades into the sky
-  // via Three.js fog (now sky-tinted by sky.ts so the ring blends into
-  // whatever palette is active).
-  const horizonRingSeed = hashStringSeed(trackId)
+  // Distant horizon silhouette ring. Three precedence tiers:
+  //   1. GLB-authored mesh — when the track's environment.glb shipped a
+  //      `kind=horizon` mesh, the loader extracted it and we feed it
+  //      directly into the shader so authors keep full control over
+  //      the silhouette (e.g. Skytree for Shibuya, Table Mountain for
+  //      Cape Town). The track JSON's `horizon` block still contributes
+  //      `silhouetteDark` / optional `peakHeight` normalisation.
+  //   2. Procedural with per-track overrides — track JSON's `horizon`
+  //      block carries `radius` / `peakHeight` / `seed` /
+  //      `silhouetteDark`. Authors who don't need a bespoke mesh can
+  //      shape the procedural fallback from the Blender addon panel.
+  //   3. Default procedural — seed hashed from track id so every track
+  //      gets a distinct silhouette without authoring. Matches the
+  //      historical look.
+  // Camera-locked XZ in either case; fades into sky-tinted fog.
   const horizonRing = createHorizonRing({
     scene,
     shared: sky.shared,
-    config: { seed: horizonRingSeed },
+    config: {
+      ...(horizonGeometry
+        ? { geometry: horizonGeometry }
+        : { seed: track.horizon?.seed ?? hashStringSeed(trackId) }),
+      ...(track.horizon?.radius !== undefined ? { radius: track.horizon.radius } : {}),
+      ...(track.horizon?.peakHeight !== undefined ? { peakHeight: track.horizon.peakHeight } : {}),
+      ...(track.horizon?.silhouetteDark !== undefined
+        ? { silhouetteDark: track.horizon.silhouetteDark }
+        : {}),
+    },
   })
 
   // Edit mode: the editor owns the canvas, sim/physics are skipped, no AI
@@ -598,6 +654,42 @@ async function boot() {
   const pickupRender = createPickupRenderSystem(scene, sim)
   const combatRender = createCombatRenderSystem(scene, sim)
   const fxTick = createFxSystem(scene, sim, phys)
+
+  // Unified track-emitter particle system — every `kind=emitter` empty
+  // in the loaded environment GLB feeds this. Tracks without emitters
+  // (procedural + edit mode) get a no-op tick. The atlas is fetched
+  // best-effort; if it 404s the system silently disables itself so a
+  // missing asset never blocks boot. See
+  // ``src/engine/render/particle-system.ts``.
+  let particleSystem: ParticleSystem | null = null
+  let particleTick: (dt: number) => void = () => {}
+  if (!editMode && environmentGlbRoot) {
+    try {
+      const atlasTex = await loadParticleAtlas('/assets/fx/particle-atlas.png')
+      particleSystem = createParticleSystem({ scene, atlasTexture: atlasTex })
+      const registered = particleSystem.registerEmittersFromScene(environmentGlbRoot)
+      if (registered.length > 0) {
+        // eslint-disable-next-line no-console
+        console.info(`[boot] registered ${registered.length} particle emitter(s)`)
+      }
+      particleTick = (dt: number) => particleSystem?.tick(dt)
+    } catch (err) {
+      // Atlas missing or load failed — particle emitters stay dormant.
+      // eslint-disable-next-line no-console
+      console.warn('[boot] particle atlas unavailable; emitters disabled:', err)
+    }
+  }
+  // Expose to gameplay so explosion / wave-pump events can fire a
+  // ``triggerBurst`` on a named emitter without plumbing the system
+  // through every consumer. Mirrors the ``__fx`` debug hook in fx/index.ts.
+  if (typeof window !== 'undefined') {
+    ;(window as unknown as { __particles?: unknown }).__particles = {
+      system: () => particleSystem,
+      stats: () => particleSystem?.stats(),
+      triggerBurst: (name: string, count: number) => particleSystem?.triggerBurst(name, count),
+    }
+  }
+
   const dirArrow = createDirectionArrow()
   scene.add(dirArrow.mesh)
 
@@ -632,6 +724,13 @@ async function boot() {
   // `resume()` — every method early-returns without a context.
   const audio = createAudioEngine()
   setAudioEngine(audio)
+  // Per-track audio palette — licensed music + ambient layers. The
+  // engine buffers the config when the AudioContext doesn't exist
+  // yet (boot path before first user gesture) and applies it lazily
+  // on resume(). Audio files are forward-looking; missing files
+  // (404) warn and fall back to the procedural pad bed without
+  // crashing.
+  applyTrackAudio(track.audio)
   const unlockAudio = () => {
     audio.resume()
     // Step 8 — opportunistic fullscreen-on-first-gesture. The Steam Deck
@@ -860,6 +959,7 @@ async function boot() {
       pickupRender,
       combatRender,
       fxTick,
+      particleTick,
       physicsDebug,
       state,
       hud: { fpsEl, backendEl, audioEl, inputEl, raceEl },
@@ -897,6 +997,7 @@ async function boot() {
     pickupRender,
     combatRender,
     fxTick,
+    particleTick,
     track,
     trackId,
     manifest,

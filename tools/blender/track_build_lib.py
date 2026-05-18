@@ -88,12 +88,33 @@ class TrackSpec:
 # ────────────────────────────────────────────────────────────────────
 
 def _load_addon():
-    """Import the on-disk hoverbike_addon.py by path and register it."""
-    addon_file = os.path.join(SCRIPT_DIR, "hoverbike_addon.py")
-    spec = importlib.util.spec_from_file_location("hoverbike_addon_disk", addon_file)
+    """Import the in-repo Hoverbike addon by path and register it.
+
+    Post-2026-05 the addon is a package (``hoverbike_addon/`` with
+    sibling submodules), not a single ``hoverbike_addon.py``. We load
+    the package's ``__init__.py`` via ``spec_from_file_location`` and
+    pass ``submodule_search_locations`` so the ``from . import water,
+    ...`` lines inside ``__init__.py`` resolve relative to the loaded
+    package. Registering as ``hoverbike_addon_disk`` keeps it distinct
+    from any user-scripts-dir install Blender may have auto-loaded.
+
+    Pre-loaded with the back-compat shim that re-exports legacy
+    ``addon._foo`` helpers from the new submodules (see ``__init__.py``
+    bottom), so seed scripts that pre-date the carve-out keep working
+    without touching every call site.
+    """
+    pkg_dir = os.path.join(SCRIPT_DIR, "hoverbike_addon")
+    init_file = os.path.join(pkg_dir, "__init__.py")
+    spec = importlib.util.spec_from_file_location(
+        "hoverbike_addon_disk",
+        init_file,
+        submodule_search_locations=[pkg_dir],
+    )
     addon = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(addon)
+    # Register in sys.modules BEFORE exec_module so the package's own
+    # ``from . import ...`` lines find their parent under the same name.
     sys.modules["hoverbike_addon_disk"] = addon
+    spec.loader.exec_module(addon)
     addon.register()
     return addon
 

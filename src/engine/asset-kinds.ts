@@ -58,6 +58,37 @@ export const ExportedKind = {
    *  flips to the zone's local +Y while inside. Complements per-anchor
    *  banking on AI splines for off-route stretches without a curve. */
   ANTIGRAV_ZONE: 'antigrav_zone',
+
+  /** Distant-horizon silhouette mesh — a ring of background terrain
+   *  the runtime camera-locks to the player so the world has a
+   *  tangible far-field shape instead of an empty fog gradient. One
+   *  per track. Authors drop a starter ring via the Blender addon's
+   *  *Add Horizon Ring*, then tab into edit mode and reshape into
+   *  recognizable skyline silhouettes (Skytree for Shibuya, Table
+   *  Mountain for Cape Town). The runtime extracts the mesh from
+   *  the GLB on load and feeds its geometry into `createHorizonRing`
+   *  instead of the procedural fallback. Skipped by the trimesh-
+   *  collider attach step — the ring is 1.4 km away and render-only. */
+  HORIZON: 'horizon',
+
+  /** Particle-emitter empty — spawn point + orientation for the
+   *  shared particle system. Each `emitter_NN` carries a fixed extras
+   *  block (`atlas_cell`, `emit_rate`, `lifetime_s`,
+   *  `velocity_cone_deg`, `speed_min`/`speed_max`,
+   *  `size_start`/`size_end`, `color_start`/`color_end`, `gravity`,
+   *  `max_particles`) that the runtime reads at GLB load and
+   *  registers with `createParticleSystem`. The empty's transform is
+   *  the spawn pose; particles emit along the local +Y direction
+   *  within `velocity_cone_deg` half-cone. Skipped by the trimesh-
+   *  collider attach step — emitters are render-only. */
+  EMITTER: 'emitter',
+
+  /** Wave-mastery volume zone — oriented box. Multiplies the global
+   *  Gerstner wave amplitude / frequency inside the box, with an
+   *  optional periodic surge term and an optional swell-direction
+   *  override. Soft-blends across `blendRadius` so the boundary isn't
+   *  visible. Authored as `wave_zone_NN` empties in Blender. */
+  WAVE_ZONE: 'wave_zone',
 } as const
 
 export type ExportedKindValue = (typeof ExportedKind)[keyof typeof ExportedKind]

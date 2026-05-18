@@ -15,6 +15,7 @@
  * No state of its own — just a holder.
  */
 
+import type { AudioConfig } from '@/game/tracks/types'
 import type { AudioBus, AudioEngine } from './audio'
 
 let instance: AudioEngine | null = null
@@ -36,4 +37,12 @@ export function applyAudioBusVolume(bus: AudioBus, volume: number): void {
 
 export function applyAudioMusicEnabled(enabled: boolean): void {
   instance?.setMusicEnabled(enabled)
+}
+
+/** Convenience: push a per-track audio palette into the live engine.
+ *  No-op when no engine is registered (headless tests). Called from
+ *  `main.ts` after the track JSON is parsed; safe to call repeatedly
+ *  on track-change (the engine handles stop+release of prior layers). */
+export function applyTrackAudio(config: AudioConfig | undefined): void {
+  instance?.setTrackAudio(config)
 }

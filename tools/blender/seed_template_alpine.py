@@ -837,16 +837,29 @@ def organize_collections() -> None:
 
 
 def _load_addon_module():
+    """Load the in-repo Hoverbike addon package by file path so the seed
+    sees the working-tree version even when the installed-addons copy
+    lags. Post-2026-05 the addon is a package (``hoverbike_addon/`` with
+    submodules); ``submodule_search_locations`` makes the package's
+    internal ``from . import water, ...`` lines resolve under the disk
+    alias."""
     import importlib.util
-    addon_file = os.path.join(SCRIPT_DIR, "hoverbike_addon.py")
-    if not os.path.exists(addon_file):
-        print(f"[seed-template-alpine] WARNING: {addon_file} not found; skipping previews")
+    import sys
+    pkg_dir = os.path.join(SCRIPT_DIR, "hoverbike_addon")
+    init_file = os.path.join(pkg_dir, "__init__.py")
+    if not os.path.exists(init_file):
+        print(f"[seed-template-alpine] WARNING: {init_file} not found; skipping previews")
         return None
-    spec = importlib.util.spec_from_file_location("hoverbike_addon_disk", addon_file)
+    spec = importlib.util.spec_from_file_location(
+        "hoverbike_addon_disk",
+        init_file,
+        submodule_search_locations=[pkg_dir],
+    )
     if spec is None or spec.loader is None:
-        print(f"[seed-template-alpine] WARNING: could not load spec for {addon_file}; skipping previews")
+        print(f"[seed-template-alpine] WARNING: could not load spec for {init_file}; skipping previews")
         return None
     addon = importlib.util.module_from_spec(spec)
+    sys.modules["hoverbike_addon_disk"] = addon
     spec.loader.exec_module(addon)
     return addon
 

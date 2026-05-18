@@ -9,6 +9,7 @@ on:
     paths:
       - 'specs/**'
       - 'tools/blender/**'
+      - 'tracks-src/**'
 
 # Avoid double-runs when a PR is force-pushed.
 concurrency:
@@ -67,6 +68,15 @@ jobs:
           BLENDER_EXE: /opt/blender/blender
           # Skip the watch plugin when the dev server isn't running anyway.
           HOVERBIKE_NO_ASSET_WATCH: '1'
+
+      - name: Headless track lint (tracks-src/*.blend)
+        # Opens every authored .blend under tracks-src/ headless and runs
+        # the addon's lint pass against it. Catches missing spline /
+        # missing start / underwater racing line / wave-zone-with-zero-
+        # extents bugs at PR review instead of at playtest.
+        run: pnpm gen:tracks:validate
+        env:
+          BLENDER_EXE: /opt/blender/blender
 
       - name: Upload manifest as artifact
         uses: actions/upload-artifact@v7

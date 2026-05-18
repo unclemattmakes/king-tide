@@ -13,25 +13,56 @@ silhouette readable at race-pace viewing distance.
 
 ### What the seed produces
 
-Eight **collections**, each marked as a Blender Asset under the
-``Hoverbike/Landmarks/<sub-category>`` catalogue:
+Originally eight Seattle-flavoured archetypes; Phase B of
+``docs/v1-asset-pipeline-plan.md`` extends the set with seven more
+archetypes that cover ten of the eleven v1 ship-track hero set-pieces.
+Each ships as one or more collections marked as a Blender Asset under
+the ``Hoverbike/Landmarks/<sub-category>`` catalogue:
 
-| Collection                       | Sub-category | Inspiration                | Default scale |
-|----------------------------------|--------------|----------------------------|---------------|
-| ``landmark_tower_spire``         | Spires       | Space Needle               | 184 m tall    |
-| ``landmark_tower_stepped``       | Towers       | Columbia Center            | 180 m tall    |
-| ``landmark_tower_pyramid_cap``   | Towers       | Smith Tower                | 90 m tall     |
-| ``landmark_stadium_arched``      | Stadiums     | Lumen Field / T-Mobile     | ~50 m × 110 m |
-| ``landmark_wheel_ferris``        | Wheels       | Great Wheel / London Eye   | 50 m diameter |
-| ``landmark_industrial_cluster``  | Industrial   | Gas Works Park             | ~45 m × 25 m  |
-| ``landmark_sign_arch``           | Signage      | Pike Place arch + clock    | 8 m × 8 m     |
-| ``landmark_mountain_cone``       | Backdrops    | Mt Rainier (snow-capped)   | ~840 m × 420 m|
+| Collection                              | Sub-category | Inspiration                          | Default scale |
+|-----------------------------------------|--------------|--------------------------------------|---------------|
+| ``landmark_tower_spire``                | Spires       | Space Needle                         | 184 m tall    |
+| ``landmark_tower_stepped``              | Towers       | Columbia Center                      | 180 m tall    |
+| ``landmark_tower_pyramid_cap``          | Towers       | Smith Tower                          | 90 m tall     |
+| ``landmark_stadium_arched``             | Stadiums     | Lumen Field / T-Mobile               | ~50 m × 110 m |
+| ``landmark_wheel_ferris``               | Wheels       | Great Wheel / London Eye             | 50 m diameter |
+| ``landmark_industrial_cluster``         | Industrial   | Gas Works Park                       | ~45 m × 25 m  |
+| ``landmark_sign_arch``                  | Signage      | Pike Place arch + clock              | 8 m × 8 m     |
+| ``landmark_mountain_cone``              | Backdrops    | Mt Rainier (snow-capped)             | ~840 m × 420 m|
+| ``landmark_tower_cylinder_spiral``      | Towers       | Hatteras lighthouse / Campanile      | 60 m tall     |
+| ``landmark_arch_ruin``                  | Ruins        | The Maw, Rialto, Liberty torch arm   | 60 m span     |
+| ``landmark_drowned_facade_art_deco``    | Facades      | South Beach Art Deco hotels          | 30 m × 12 m   |
+| ``landmark_drowned_facade_tokyo``       | Facades      | Shibuya skyscraper tops              | 24 m × 80 m   |
+| ``landmark_drowned_facade_venice``      | Facades      | Doge's Palace / Venice palazzi       | 40 m × 18 m   |
+| ``landmark_drowned_facade_nyc``         | Facades      | Manhattan rooftops                   | 30 m × 90 m   |
+| ``landmark_glass_tank_broken``          | Tanks        | Two Oceans Aquarium / Shibuya glass  | 20 m × 14 m × 10 m |
+| ``landmark_mechanical_rig``             | Mechanical   | Marina Bay gantry crane / Liberty torch | 40 m tall  |
+| ``landmark_carved_face_block``          | Reliefs      | Bayon smiling faces                  | 6 m cube      |
+| ``landmark_lava_river_strip``           | Lava         | Kilauea lava waterfall channel       | 60 m × 4 m    |
+
+### Phase B archetypes — design notes
+
+- **drowned_facade ships as four collections, not one with a style
+  enum.** Each style has its own palette, signage pattern, and window
+  grid; authors get distinct preview thumbnails in the Asset Browser
+  and drag the right style without thinking about a custom property.
+  Same shared shader family (``mat_facade_*``) keeps the colour-swap
+  story intact.
+- **mechanical_rig** carries swing-period metadata on its parented
+  swing-arm child (``swing_period_s``, ``swing_amplitude_deg``,
+  ``swing_axis``) as custom properties. The runtime won't animate it
+  automatically yet — that's a follow-up — but the metadata ships so
+  future animation code can read it without re-authoring.
+- **lava_river_strip** writes ``COLOR_0.R`` = emissive multiplier
+  (per the vertex-attribute spec, R is "sway" for foliage but free for
+  non-foliage). The runtime lava shader (when written) is expected to
+  read R as a hot-channel mask along the river centreline.
 
 ### v1 trade-off — baked geometry, no GN modifiers
 
 Unlike the prop library, these ship as **baked bmesh** rather than
 Geometry Nodes-modified single-vertex bases. The decision is
-explicit: eight full GN graphs would have eaten an entire authoring
+explicit: a dozen+ full GN graphs would have eaten an entire authoring
 session, and the realistic 90% use case is "drag, scale to taste,
 move on." Authors who need a 250 m skyscraper instead of 180 m just
 scale the Z by 1.4×; per-knob parameterisation can land in a future
@@ -63,8 +94,17 @@ from mathutils import Matrix, Vector
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+from tools.blender.vertex_attrs import (  # noqa: E402
+    DEFAULT_TERRAIN,
+    set_color_attr,
+    set_constant,
+)
 
 OUTPUT_PATH = os.path.join(REPO_ROOT, "tracks-src", "landmarks-library.blend")
+SHOWCASE_OUTPUT_PATH = os.path.join(REPO_ROOT, "tracks-src", "landmarks-showcase.blend")
 CATALOG_PATH = os.path.join(REPO_ROOT, "tracks-src", "blender_assets.cats.txt")
 CATALOG_ROOT = "Hoverbike/Landmarks"
 
@@ -81,19 +121,40 @@ CATALOG_UUIDS = {
     "Hoverbike/Landmarks/Industrial":     "22222222-2222-4222-8222-000000000014",
     "Hoverbike/Landmarks/Signage":        "22222222-2222-4222-8222-000000000015",
     "Hoverbike/Landmarks/Backdrops":      "22222222-2222-4222-8222-000000000016",
+    # Phase B sub-catalogues — keep numeric IDs contiguous so a future
+    # grep can see the family at a glance.
+    "Hoverbike/Landmarks/Ruins":          "22222222-2222-4222-8222-000000000017",
+    "Hoverbike/Landmarks/Facades":        "22222222-2222-4222-8222-000000000018",
+    "Hoverbike/Landmarks/Tanks":          "22222222-2222-4222-8222-000000000019",
+    "Hoverbike/Landmarks/Mechanical":     "22222222-2222-4222-8222-00000000001a",
+    "Hoverbike/Landmarks/Reliefs":        "22222222-2222-4222-8222-00000000001b",
+    "Hoverbike/Landmarks/Lava":           "22222222-2222-4222-8222-00000000001c",
 }
 
 # Layout for the saved .blend's viewport — spread landmarks in a row
 # so an author opening the library file can see them all at once.
 LAYOUT = {
-    "landmark_tower_spire":        (    0.0, 0.0, 0.0),
-    "landmark_tower_stepped":      (   60.0, 0.0, 0.0),
-    "landmark_tower_pyramid_cap":  (  120.0, 0.0, 0.0),
-    "landmark_stadium_arched":     (  220.0, 0.0, 0.0),
-    "landmark_wheel_ferris":       (  340.0, 0.0, 0.0),
-    "landmark_industrial_cluster": (  410.0, 0.0, 0.0),
-    "landmark_sign_arch":          (  480.0, 0.0, 0.0),
-    "landmark_mountain_cone":      ( 1000.0, 0.0, 0.0),
+    # Row 0 — original Seattle archetypes.
+    "landmark_tower_spire":               (    0.0,   0.0, 0.0),
+    "landmark_tower_stepped":             (   60.0,   0.0, 0.0),
+    "landmark_tower_pyramid_cap":         (  120.0,   0.0, 0.0),
+    "landmark_stadium_arched":            (  220.0,   0.0, 0.0),
+    "landmark_wheel_ferris":              (  340.0,   0.0, 0.0),
+    "landmark_industrial_cluster":        (  410.0,   0.0, 0.0),
+    "landmark_sign_arch":                 (  480.0,   0.0, 0.0),
+    "landmark_mountain_cone":             ( 1000.0,   0.0, 0.0),
+    # Row 1 — Phase B archetypes, 200 m south so a tilted overview
+    # camera sees them in a second band.
+    "landmark_tower_cylinder_spiral":     (    0.0, 200.0, 0.0),
+    "landmark_arch_ruin":                 (   80.0, 200.0, 0.0),
+    "landmark_drowned_facade_art_deco":   (  170.0, 200.0, 0.0),
+    "landmark_drowned_facade_tokyo":      (  230.0, 200.0, 0.0),
+    "landmark_drowned_facade_venice":     (  300.0, 200.0, 0.0),
+    "landmark_drowned_facade_nyc":        (  370.0, 200.0, 0.0),
+    "landmark_glass_tank_broken":         (  450.0, 200.0, 0.0),
+    "landmark_mechanical_rig":            (  520.0, 200.0, 0.0),
+    "landmark_carved_face_block":         (  600.0, 200.0, 0.0),
+    "landmark_lava_river_strip":          (  670.0, 200.0, 0.0),
 }
 
 
@@ -447,6 +508,598 @@ def build_mountain_cone_mesh(name: str) -> bpy.types.Mesh:
 
 
 # ────────────────────────────────────────────────────────────────────
+# Phase B builders — v1 hero-set-piece archetypes
+# ────────────────────────────────────────────────────────────────────
+
+def build_tower_cylinder_spiral_mesh(name: str, *,
+                                     height: float = 60.0,
+                                     r_base: float = 4.5,
+                                     r_cap: float = 3.8,
+                                     stripe_pattern: str = "spiral",
+                                     aperture: bool = True) -> bpy.types.Mesh:
+    """Cylindrical-shaft tower with stripe-tagged faces and an optional
+    open lamp room / belfry at the top.
+
+    Drives Hatteras lighthouse (spiral), Doge's Campanile (checker /
+    plain brick with belfry aperture), Angkor central spire (criss-cross
+    stone), and the Cocoon Tower face (criss-cross). Stripe pattern is
+    encoded by face material index so the runtime can pick from a
+    palette per instance via material overrides — no per-instance
+    re-meshing.
+
+    Args:
+        height:   shaft height (m).
+        r_base:   base radius (m). r_cap < r_base gives a subtle taper.
+        r_cap:    radius at the lamp-room level.
+        stripe_pattern: 'spiral' (Hatteras), 'checker' (Campanile),
+            'criss_cross' (Cocoon / Angkor), or 'plain' (untagged).
+        aperture: if True, the top adds a wider observation gallery
+            ring (lamp room) plus a smaller cap. If False, the shaft
+            terminates in a flat disc — useful for chimney-style towers.
+
+    Material slots when stripe is set:
+        0 = base/concrete shaft (mat_landmark_concrete)
+        1 = stripe / accent (mat_landmark_stripe)
+        2 = aperture frame (mat_landmark_steel)
+    Authors free to remap slot 2 to a coloured glass per instance.
+    """
+    bm = bmesh.new()
+    segs = 24
+    rings = 16
+
+    # Build the shaft as a stack of rings so we can tag faces by ring/seg.
+    ring_verts: list[list[bmesh.types.BMVert]] = []
+    for ri in range(rings + 1):
+        t = ri / rings
+        z = t * height
+        r = r_base * (1.0 - t) + r_cap * t
+        ring = []
+        for si in range(segs):
+            ang = (si / segs) * math.tau
+            ring.append(bm.verts.new((math.cos(ang) * r, math.sin(ang) * r, z)))
+        ring_verts.append(ring)
+    bm.verts.ensure_lookup_table()
+
+    def _stripe_mat_idx(ri: int, si: int) -> int:
+        if stripe_pattern == "spiral":
+            # Six bands diagonally — phase shift segment by ring/3.
+            return 1 if ((si + ri // 3) % 6) < 3 else 0
+        if stripe_pattern == "checker":
+            return 1 if ((ri // 2 + si // 2) % 2) == 0 else 0
+        if stripe_pattern == "criss_cross":
+            # A grid: every 2nd ring AND every 4th seg alternates.
+            return 1 if ((ri % 4 == 0) ^ (si % 4 == 0)) else 0
+        return 0
+
+    for ri in range(rings):
+        cur = ring_verts[ri]
+        nxt = ring_verts[ri + 1]
+        for si in range(segs):
+            sn = (si + 1) % segs
+            f = bm.faces.new([cur[si], cur[sn], nxt[sn], nxt[si]])
+            f.material_index = _stripe_mat_idx(ri, si)
+
+    # Cap the base with a disc (closed, helps with shadowing).
+    bm.faces.new(ring_verts[0][::-1])
+
+    if aperture:
+        # Lamp-room / belfry: wider overhang ring above the shaft,
+        # a tall thin-walled ring tagged as the aperture frame, capped
+        # by a smaller dome-like cone.
+        gallery_r = r_cap * 1.35
+        gallery_h = 1.6
+        # Pre-record face counts so we can tag the new geometry.
+        pre = len(bm.faces)
+        _append_cone(bm, segments=segs, r_base=gallery_r, r_top=gallery_r,
+                     depth=gallery_h, tz=height + gallery_h / 2,
+                     material_index=2)
+        # Lamp-room cylinder (the aperture window band).
+        _append_cone(bm, segments=segs, r_base=r_cap * 1.05, r_top=r_cap * 1.05,
+                     depth=3.0, tz=height + gallery_h + 1.5,
+                     material_index=2)
+        # Cap (dome approximated as a low cone).
+        _append_cone(bm, segments=segs, r_base=r_cap * 1.15, r_top=0.2,
+                     depth=3.5, tz=height + gallery_h + 4.5,
+                     material_index=2)
+        _ = pre  # silence linters; bounding marker only.
+    else:
+        # Flat cap.
+        bm.faces.new(ring_verts[-1])
+
+    me = _finalise(bm, name, smooth=False)
+    return me
+
+
+def build_arch_ruin_mesh(name: str, *,
+                         span: float = 60.0,
+                         rise: float = 22.0,
+                         thickness: float = 4.5,
+                         decay: float = 0.35,
+                         segments: int = 18,
+                         seed: int = 7) -> bpy.types.Mesh:
+    """Half-circle arch with chipped, decayed edges.
+
+    Drives the three Maw arches (scale span 30-80 m), Rialto Bridge
+    arch (span ~30 m, low rise), the Two Oceans Aquarium roof remnant,
+    Hatteras lamp room remnant, and Liberty's broken torch arm (used
+    at smaller scale, span ~8 m). The arch sits in the XZ plane with
+    the opening facing +Y; rotate around Z when placing.
+
+    Args:
+        span:       horizontal extent foot-to-foot (m).
+        rise:       interior height of the arch crown (m).
+        thickness:  depth of the arch along Y (m).
+        decay:      0..1 — vertex jitter amplitude as a fraction of
+                    ``thickness``. Higher = more ruined / chipped.
+        segments:   subdivision of the curve. Even number recommended.
+        seed:       per-instance noise seed; same value re-runs are
+                    deterministic across re-seeds.
+    """
+    bm = bmesh.new()
+    # Sweep a 4-vert cross-section along a half-circle from foot to
+    # foot. The two outer faces (along arch length) are the visible
+    # top + back; the inner face is what races pass *under*.
+    rng = _det_rng(seed)
+    half = span * 0.5
+
+    cross_rings: list[list[bmesh.types.BMVert]] = []
+    for i in range(segments + 1):
+        t = i / segments
+        # Half-circle param: theta = π·t, 0 = +X foot, π = -X foot.
+        theta = math.pi * t
+        # Arch centreline: x = half·cos(θ), z = rise·sin(θ).
+        cx = half * math.cos(theta)
+        cz = rise * math.sin(theta)
+        # Outward radial direction (away from arch interior).
+        rx = math.cos(theta)
+        rz = math.sin(theta)
+        half_thick = thickness * 0.5
+        # 4 verts: ordered around the cross-section, CCW looking down +X.
+        #   0: outer-front (+r, -y)
+        #   1: outer-back  (+r, +y)
+        #   2: inner-back  (-r, +y)
+        #   3: inner-front (-r, -y)
+        verts4 = []
+        for (sr, sy) in ((1, -1), (1, 1), (-1, 1), (-1, -1)):
+            jitter_r = (rng() - 0.5) * decay * thickness * 0.6
+            jitter_y = (rng() - 0.5) * decay * thickness * 0.3
+            x = cx + rx * (sr * half_thick + jitter_r)
+            z = cz + rz * (sr * half_thick + jitter_r)
+            y = sy * half_thick + jitter_y
+            verts4.append(bm.verts.new((x, y, z)))
+        cross_rings.append(verts4)
+
+    # Bridge adjacent cross-rings into 4 quad strips (top/back/bottom/
+    # front). This is a sweep, no triangulation needed.
+    for i in range(segments):
+        a = cross_rings[i]
+        b = cross_rings[i + 1]
+        # outer face (between 0 and 1 of each ring)
+        bm.faces.new([a[0], a[1], b[1], b[0]])
+        # back face (between 1 and 2)
+        bm.faces.new([a[1], a[2], b[2], b[1]])
+        # inner face (between 2 and 3)
+        bm.faces.new([a[2], a[3], b[3], b[2]])
+        # front face (between 3 and 0)
+        bm.faces.new([a[3], a[0], b[0], b[3]])
+
+    # Cap the two arch feet so the arch doesn't look hollow at the base.
+    bm.faces.new(cross_rings[0])
+    bm.faces.new(cross_rings[-1][::-1])
+
+    me = _finalise(bm, name, smooth=False)
+    return me
+
+
+def build_drowned_facade_mesh(name: str, *,
+                              style: str,
+                              width: float,
+                              height: float,
+                              depth: float = 3.0,
+                              window_cols: int = 6,
+                              window_rows: int = 4) -> bpy.types.Mesh:
+    """Slab-with-windows facade for half-sunken buildings.
+
+    Four styles, picked at call time:
+        ``art_deco`` — short, wide, three-band horizontal stripe.
+            South Beach hotel frontages. Window rows pulled into a
+            mid-band; setback step at top.
+        ``tokyo``   — tall, narrow, dense window grid. Shibuya
+            skyscraper face. Top-band signage shelf for neon.
+        ``venice``  — mid-rise, ornate top arches, narrow paired windows.
+            Doge's Palace / palazzi.
+        ``nyc``     — manhattan rooftop. Wide, mid-rise, water-tower
+            cluster on the roof (procedural cylinders).
+
+    The window grid is *recessed* — windows are inset boxes carved into
+    the facade slab. We approximate the inset with a depth offset on
+    each window vertex rather than a Boolean (cheaper, no risk of
+    bad topology).
+    """
+    bm = bmesh.new()
+
+    # Main slab — a box, width x depth x height, base at z=0.
+    _append_box(bm, sx=width, sy=depth, sz=height, tz=height / 2)
+
+    # Style-specific signage band.
+    if style == "art_deco":
+        # Horizontal accent band ~1/3 up the height (slot 1 = accent).
+        band_h = height * 0.18
+        band_z = height * 0.55
+        _append_box(bm, sx=width + 0.4, sy=depth + 0.2, sz=band_h,
+                    tz=band_z, material_index=1)
+        # Setback step on top.
+        _append_box(bm, sx=width * 0.7, sy=depth * 0.85, sz=1.4,
+                    tz=height + 0.7, material_index=0)
+    elif style == "tokyo":
+        # Top-band signage shelf (slot 1 = emissive accent).
+        _append_box(bm, sx=width + 0.6, sy=depth + 0.4, sz=2.0,
+                    tz=height + 1.0, material_index=1)
+        # Vertical signage strip on one face (kanji slot).
+        _append_box(bm, sx=0.5, sy=depth * 0.4, sz=height * 0.6,
+                    tx=width * 0.45, ty=depth * 0.5,
+                    tz=height * 0.5, material_index=1)
+    elif style == "venice":
+        # Crown arcade — a row of small repeating arches at the top.
+        arcade_z = height + 0.5
+        spacing = width / max(1, (window_cols + 1))
+        for i in range(window_cols):
+            cx = -width / 2 + spacing * (i + 1)
+            _append_box(bm, sx=spacing * 0.6, sy=depth * 0.7, sz=1.2,
+                        tx=cx, tz=arcade_z, material_index=1)
+        # Cornice band at top of slab.
+        _append_box(bm, sx=width + 0.5, sy=depth + 0.3, sz=0.6,
+                    tz=height - 0.3, material_index=1)
+    elif style == "nyc":
+        # Rooftop water-tower cluster — 2 small cylinders on stilts.
+        for dx in (-width * 0.25, width * 0.2):
+            # Stilt platform.
+            _append_box(bm, sx=4.0, sy=4.0, sz=0.4,
+                        tx=dx, tz=height + 0.2, material_index=0)
+            # Tank.
+            _append_cone(bm, segments=12, r_base=1.6, r_top=1.6,
+                         depth=3.0, tx=dx, tz=height + 2.0,
+                         material_index=1)
+            # Conical roof.
+            _append_cone(bm, segments=12, r_base=1.8, r_top=0.05,
+                         depth=1.0, tx=dx, tz=height + 4.0,
+                         material_index=1)
+    else:
+        raise ValueError(f"build_drowned_facade_mesh: unknown style {style!r}")
+
+    # Window grid — small flush boxes on the +Y face (front), tagged
+    # slot 2 = window glass. Inset by a tiny offset so they read
+    # without z-fighting.
+    win_w = (width / window_cols) * 0.55
+    win_h = (height / window_rows) * 0.55
+    win_thick = 0.15
+    margin_x = width / window_cols / 2
+    margin_z = height / window_rows / 2
+    for ri in range(window_rows):
+        for ci in range(window_cols):
+            cx = -width / 2 + margin_x + (width / window_cols) * ci
+            cz = margin_z + (height / window_rows) * ri
+            _append_box(bm,
+                        sx=win_w, sy=win_thick, sz=win_h,
+                        tx=cx, ty=depth / 2 + 0.05, tz=cz,
+                        material_index=2)
+    # Mirror windows on the -Y face for two-sided facades.
+    for ri in range(window_rows):
+        for ci in range(window_cols):
+            cx = -width / 2 + margin_x + (width / window_cols) * ci
+            cz = margin_z + (height / window_rows) * ri
+            _append_box(bm,
+                        sx=win_w, sy=win_thick, sz=win_h,
+                        tx=cx, ty=-depth / 2 - 0.05, tz=cz,
+                        material_index=2)
+    return _finalise(bm, name)
+
+
+def build_glass_tank_broken_mesh(name: str, *,
+                                 sx: float = 20.0,
+                                 sy: float = 14.0,
+                                 sz: float = 10.0,
+                                 shatter_seed: int = 11) -> bpy.types.Mesh:
+    """Rectangular glass volume with one side shattered open.
+
+    Drives the Two Oceans Aquarium predator tank (race-through hole on
+    the +Y face) and the Shibuya Crossing window-down view (smaller
+    scale instance). The shattered face is the +Y face — authors
+    rotate around Z when placing so the race line passes through it.
+
+    Material slots:
+        0 = mat_landmark_glass (intact panels)
+        1 = mat_landmark_steel (frame edges)
+        2 = mat_landmark_glass_shard (broken shards, emissive-edged)
+    Authors can drop a contents prop (shark, taxis, hachiko) inside
+    the collection after dragging it in — there's no slot in the seed.
+    """
+    bm = bmesh.new()
+    rng = _det_rng(shatter_seed)
+
+    hx, hy, hz = sx / 2, sy / 2, sz / 2
+
+    # Frame: thin boxes around all 12 edges of the rectangular volume.
+    frame_thick = 0.4
+    edges = [
+        # bottom rectangle
+        (sx, frame_thick, frame_thick, 0, -hy, -hz),
+        (sx, frame_thick, frame_thick, 0,  hy, -hz),
+        (frame_thick, sy, frame_thick, -hx, 0, -hz),
+        (frame_thick, sy, frame_thick,  hx, 0, -hz),
+        # top rectangle
+        (sx, frame_thick, frame_thick, 0, -hy, hz),
+        (sx, frame_thick, frame_thick, 0,  hy, hz),
+        (frame_thick, sy, frame_thick, -hx, 0, hz),
+        (frame_thick, sy, frame_thick,  hx, 0, hz),
+        # vertical posts
+        (frame_thick, frame_thick, sz, -hx, -hy, 0),
+        (frame_thick, frame_thick, sz,  hx, -hy, 0),
+        (frame_thick, frame_thick, sz, -hx,  hy, 0),
+        (frame_thick, frame_thick, sz,  hx,  hy, 0),
+    ]
+    for ex, ey, ez, tx, ty, tz in edges:
+        _append_box(bm, sx=ex, sy=ey, sz=ez, tx=tx, ty=ty, tz=tz,
+                    material_index=1)
+
+    # Glass panels — five intact panels (slot 0); the +Y face is omitted
+    # and replaced with shards.
+    panel_thick = 0.1
+    panels = [
+        # -Y back wall
+        (sx, panel_thick, sz, 0, -hy, 0),
+        # -X side
+        (panel_thick, sy, sz, -hx, 0, 0),
+        # +X side
+        (panel_thick, sy, sz,  hx, 0, 0),
+        # bottom
+        (sx, sy, panel_thick, 0, 0, -hz),
+        # top
+        (sx, sy, panel_thick, 0, 0,  hz),
+    ]
+    for ex, ey, ez, tx, ty, tz in panels:
+        _append_box(bm, sx=ex, sy=ey, sz=ez, tx=tx, ty=ty, tz=tz,
+                    material_index=0)
+
+    # Shattered +Y face — emit ~12 angled triangular shards at the
+    # frame perimeter pointing inward. The race line passes through
+    # the middle.
+    shard_count = 12
+    for _i in range(shard_count):
+        # Pick an edge: top / bottom / left / right.
+        side = int(rng() * 4) % 4
+        if side == 0:  # top edge
+            cx = (rng() - 0.5) * sx
+            cz = hz
+            base_dir = (0.0, 0.0, -1.0)
+        elif side == 1:  # bottom edge
+            cx = (rng() - 0.5) * sx
+            cz = -hz
+            base_dir = (0.0, 0.0, 1.0)
+        elif side == 2:  # left edge
+            cx = -hx
+            cz = (rng() - 0.5) * sz
+            base_dir = (1.0, 0.0, 0.0)
+        else:  # right edge
+            cx = hx
+            cz = (rng() - 0.5) * sz
+            base_dir = (-1.0, 0.0, 0.0)
+        shard_len = 0.5 + rng() * 2.5
+        # Triangle base at the frame, tip pointing inward into the
+        # tank — a thin tetrahedron-like fragment.
+        p_base_l = bm.verts.new((cx - 0.3, hy + 0.02, cz))
+        p_base_r = bm.verts.new((cx + 0.3, hy + 0.02, cz))
+        tip = bm.verts.new((cx + base_dir[0] * shard_len,
+                            hy + 0.02 + rng() * 0.4,
+                            cz + base_dir[2] * shard_len))
+        f = bm.faces.new([p_base_l, p_base_r, tip])
+        f.material_index = 2
+
+    return _finalise(bm, name)
+
+
+def build_mechanical_rig_mesh(name: str) -> tuple[bpy.types.Mesh, bpy.types.Mesh]:
+    """Two meshes: the stationary base mount and the swing arm.
+
+    Drives Marina Bay gantry cranes (tall A-frame base, long horizontal
+    arm), Liberty torch flame fixture (short base, vertical flicker
+    mount), and Doge's bell (compact frame, short arm). Default scale
+    is the crane.
+
+    Returns:
+        (base_mesh, arm_mesh). The arm is authored as its own data-
+        block so the seed's collection builder can put it on a child
+        object with rotation transforms ready for runtime animation.
+    """
+    # ── Base — A-frame tower + horizontal cap girder ─────────────────
+    base_bm = bmesh.new()
+    # Two vertical legs.
+    for sx in (-3.5, 3.5):
+        _append_box(base_bm, sx=1.0, sy=1.0, sz=40.0, tx=sx, tz=20.0,
+                    material_index=0)
+    # Cross-bracing X (boxes rotated).
+    for tz, sgn in ((10.0, 1), (25.0, -1)):
+        brace_bm = bmesh.new()
+        bmesh.ops.create_cube(brace_bm, size=1.0)
+        bmesh.ops.scale(brace_bm, vec=(8.0, 0.4, 0.4), verts=brace_bm.verts)
+        bmesh.ops.rotate(brace_bm,
+                         matrix=Matrix.Rotation(math.radians(20 * sgn), 4, "Y"),
+                         verts=brace_bm.verts)
+        bmesh.ops.translate(brace_bm, vec=(0, 0, tz), verts=brace_bm.verts)
+        tmp = bpy.data.meshes.new("_tmp_brace")
+        brace_bm.to_mesh(tmp); brace_bm.free()
+        base_bm.from_mesh(tmp); bpy.data.meshes.remove(tmp)
+    # Cap girder (the pivot platform).
+    _append_box(base_bm, sx=9.0, sy=2.0, sz=1.4, tz=40.7,
+                material_index=0)
+    # Pivot housing (where the arm attaches).
+    _append_cone(base_bm, segments=12, r_base=1.4, r_top=1.4, depth=1.0,
+                 tz=41.7, axis="Y", material_index=1)
+    base_mesh = _finalise(base_bm, f"{name}_base", smooth=False)
+
+    # ── Arm — long horizontal girder + counterweight ─────────────────
+    # Pivots around the arm's local origin (0,0,0); runtime is expected
+    # to set that as the rotation point.
+    arm_bm = bmesh.new()
+    # Main horizontal arm extending +X from the pivot.
+    _append_box(arm_bm, sx=24.0, sy=1.0, sz=1.0, tx=10.0, tz=0.0,
+                material_index=0)
+    # Counterweight extending -X.
+    _append_box(arm_bm, sx=4.0, sy=1.6, sz=1.6, tx=-5.0, tz=0.0,
+                material_index=1)
+    # Hoist cable hanging from the tip.
+    _append_box(arm_bm, sx=0.15, sy=0.15, sz=8.0, tx=21.5, tz=-4.5,
+                material_index=1)
+    # Hook block at the cable's end.
+    _append_box(arm_bm, sx=0.9, sy=0.9, sz=0.9, tx=21.5, tz=-9.0,
+                material_index=1)
+    arm_mesh = _finalise(arm_bm, f"{name}_arm", smooth=False)
+
+    return base_mesh, arm_mesh
+
+
+def build_carved_face_block_mesh(name: str, *,
+                                 size: float = 6.0,
+                                 expression_seed: int = 3,
+                                 weathering: float = 0.25) -> bpy.types.Mesh:
+    """Cube block with a low-relief carved face on the +Y face.
+
+    Drives the Bayon smiling-faces × 16 — Angkor's iconic temple
+    relief. Use 16 instances around the central spire at variant
+    seeds so the faces feel hand-carved, not stamped. Reusable at
+    other scales for generic temple reliefs.
+
+    The face is an inset rectangle on the +Y face, with three
+    raised features:
+        - Forehead bar (raised band across the top third).
+        - Eye blocks (two raised quads, mid-height).
+        - Mouth bar (raised band along the lower third — the smile).
+
+    ``weathering`` jitters the vert positions so re-runs of the seed
+    produce slightly different reliefs per seed value.
+    """
+    bm = bmesh.new()
+    rng = _det_rng(expression_seed)
+    h = size / 2
+
+    # Base block.
+    _append_box(bm, sx=size, sy=size, sz=size, tz=h, material_index=0)
+
+    # Relief features inset on the +Y face. Relief depth small enough
+    # that the silhouette is still cube-shaped at race-pace distance.
+    relief_depth = size * 0.06
+
+    def raised_panel(cx_off: float, cz_off: float, w: float, hgt: float):
+        # A raised rectangular boss on the +Y face.
+        _append_box(bm,
+                    sx=w * (1 + (rng() - 0.5) * weathering),
+                    sy=relief_depth,
+                    sz=hgt * (1 + (rng() - 0.5) * weathering),
+                    tx=cx_off,
+                    ty=h + relief_depth / 2,
+                    tz=h + cz_off,
+                    material_index=1)
+
+    # Forehead band.
+    raised_panel(0.0, size * 0.30, size * 0.85, size * 0.10)
+    # Eyes — two small blocks symmetric around the centre.
+    eye_w = size * 0.18
+    eye_h = size * 0.10
+    eye_z = size * 0.08
+    raised_panel(-size * 0.22, eye_z, eye_w, eye_h)
+    raised_panel( size * 0.22, eye_z, eye_w, eye_h)
+    # Smiling mouth — curved band approximated by 3 abutting panels.
+    smile_w = size * 0.20
+    smile_y = -size * 0.18
+    raised_panel(-size * 0.22, smile_y - size * 0.02, smile_w, size * 0.06)
+    raised_panel(  0.0,         smile_y - size * 0.04, smile_w, size * 0.06)
+    raised_panel( size * 0.22, smile_y - size * 0.02, smile_w, size * 0.06)
+    # Nose ridge — slim vertical raised box between the eyes.
+    raised_panel(0.0, size * 0.0, size * 0.05, size * 0.18)
+
+    return _finalise(bm, name, smooth=False)
+
+
+def build_lava_river_strip_mesh(name: str, *,
+                                length: float = 60.0,
+                                width: float = 4.0,
+                                segments: int = 24) -> bpy.types.Mesh:
+    """Flat curved strip suitable for an animated lava river / waterfall.
+
+    Drives the Kilauea lava waterfall — placed on a sloped piece of
+    terrain, the strip becomes the molten flow. Authors are expected
+    to drop the strip onto a Bezier path with a Curve modifier post-
+    seed; the seed ships a straight strip oriented along +X with the
+    flow direction in +X local.
+
+    Vertex-attribute override per the spec:
+        COLOR_0.R = emissive multiplier along the channel.
+                    Centre line (V = 0) is hottest (1.0); edges fall
+                    off to 0.2 so the lava shader can pull a hot core
+                    + cooler crust.
+        COLOR_0.G = AO (always 1.0; this is a surface, not under
+                    geometry).
+        COLOR_0.B = flow-phase offset (V coord along length 0..1) —
+                    runtime can sample this to scroll a noise pattern
+                    down the river without sampling UVs.
+        COLOR_0.A = 1.0 (free; reserved for per-instance hot-zone
+                    masking by future authoring).
+    See ``docs/vertex-attribute-spec.md`` for the foliage-channel
+    contract; lava is a non-foliage opt-in.
+    """
+    bm = bmesh.new()
+    # Build a 2-row × segments strip in the XY plane (Z = 0).
+    rows: list[list[bmesh.types.BMVert]] = []
+    for ri in (-1, 1):
+        row = []
+        for si in range(segments + 1):
+            t = si / segments
+            x = t * length
+            y = ri * (width / 2)
+            row.append(bm.verts.new((x, y, 0.0)))
+        rows.append(row)
+    for si in range(segments):
+        a = rows[0][si]
+        b = rows[0][si + 1]
+        c = rows[1][si + 1]
+        d = rows[1][si]
+        bm.faces.new([a, b, c, d])
+
+    me = _finalise(bm, name, smooth=False)
+
+    # Author COLOR_0 with the hot-core mask per the spec override.
+    def value_for(i, co):
+        # Distance from centreline (Y = 0) as a normalised fraction.
+        t_y = min(1.0, abs(co[1]) / (width / 2))
+        # Hot at centre, cooler at edges. Quadratic falloff reads better
+        # than linear when the lava shader pushes through a glow pass.
+        emissive = 1.0 - 0.8 * t_y * t_y
+        # Phase along length, wrapped.
+        t_x = max(0.0, min(1.0, co[0] / length))
+        return (emissive, 1.0, t_x, 1.0)
+
+    set_color_attr(me, value_for)
+    return me
+
+
+# ────────────────────────────────────────────────────────────────────
+# Deterministic RNG — small LCG so re-running the seed produces
+# identical jitter for the same seed value, without pulling random's
+# global state into Blender's session state.
+# ────────────────────────────────────────────────────────────────────
+
+def _det_rng(seed: int):
+    state = [seed & 0xFFFFFFFF or 1]
+
+    def _next() -> float:
+        # Numerical Recipes LCG constants.
+        state[0] = (state[0] * 1664525 + 1013904223) & 0xFFFFFFFF
+        return state[0] / 0xFFFFFFFF
+
+    return _next
+
+
+# ────────────────────────────────────────────────────────────────────
 # Collection / asset plumbing
 # ────────────────────────────────────────────────────────────────────
 
@@ -488,6 +1141,55 @@ def _mark_asset(coll: bpy.types.Collection, *, catalog_path: str,
         ad.tags.new(name=t)
 
 
+def _make_mechanical_rig_collection(name: str,
+                                    base_mesh: bpy.types.Mesh,
+                                    arm_mesh: bpy.types.Mesh,
+                                    materials: list[bpy.types.Material], *,
+                                    position: tuple[float, float, float],
+                                    swing_period_s: float,
+                                    swing_amplitude_deg: float,
+                                    swing_axis: str) -> bpy.types.Collection:
+    """Specialised collection layout for mechanical_rig — base mesh
+    sits at the collection origin; arm mesh is a child object parented
+    to the base at the pivot height, carrying swing-period extras for
+    future runtime animation.
+
+    The arm's local origin is its pivot; rotating the arm object
+    around its local Z (or whatever ``swing_axis`` is) animates the
+    crane swing without changing geometry. Today the runtime ignores
+    these extras — they're metadata for the next animation pass.
+    """
+    coll = bpy.data.collections.new(name)
+    _layer_link(coll)
+
+    base = bpy.data.objects.new(f"{name}_base", base_mesh)
+    base.location = position
+    base["kind"] = "track"
+    base["landmark_id"] = name.removeprefix("landmark_")
+    for mat in materials:
+        if mat.name not in base_mesh.materials:
+            base_mesh.materials.append(mat)
+    coll.objects.link(base)
+
+    arm = bpy.data.objects.new(f"{name}_arm", arm_mesh)
+    arm.parent = base
+    # Position the arm at the cap-girder pivot. This must match the
+    # base mesh's pivot housing height (41.7 m) so authors can rotate
+    # the arm in-place and see it swing across the deck.
+    arm.location = (0.0, 0.0, 41.7)
+    arm["kind"] = "track"
+    arm["landmark_id"] = f"{name.removeprefix('landmark_')}_arm"
+    arm["swing_period_s"] = swing_period_s
+    arm["swing_amplitude_deg"] = swing_amplitude_deg
+    arm["swing_axis"] = swing_axis  # "X" | "Y" | "Z" in arm-local space
+    for mat in materials:
+        if mat.name not in arm_mesh.materials:
+            arm_mesh.materials.append(mat)
+    coll.objects.link(arm)
+
+    return coll
+
+
 def reset_scene() -> None:
     bpy.ops.wm.read_homefile(use_empty=True)
 
@@ -498,6 +1200,8 @@ def reset_scene() -> None:
 
 def build_landmarks() -> dict[str, dict]:
     # Materials — shared across multiple archetypes where the colour story is the same.
+    # One shader family per palette per the v1 pipeline plan's
+    # "one shader per family" rule.
     mat_concrete    = make_material("mat_landmark_concrete",  "#bcbab5", roughness=0.7)
     mat_steel       = make_material("mat_landmark_steel",     "#7b7d80", roughness=0.4)
     mat_glass       = make_material("mat_landmark_glass",     "#2d4a55", roughness=0.25)
@@ -506,6 +1210,35 @@ def build_landmarks() -> dict[str, dict]:
     mat_snow        = make_material("mat_landmark_snow",      "#f1f3f5", roughness=0.85)
     mat_sign_red    = make_material("mat_landmark_sign_red",  "#a01818", roughness=0.55,
                                     emission_hex="#ff5050", emission_strength=1.0)
+    # Phase B shared materials.
+    # Stripe pairs for tower_cylinder_spiral. Authors override per-instance
+    # for Hatteras (black + white), Doge's (terracotta + cream),
+    # Angkor (sandstone + dark stone), Cocoon (white + grey).
+    mat_stripe      = make_material("mat_landmark_stripe",    "#22231f", roughness=0.6)
+    # Oxidised copper / rusted iron for arch ruins, mechanical rigs.
+    mat_oxidised    = make_material("mat_landmark_oxidised",  "#4f7a6b", roughness=0.55)
+    # Facade family — one base, three accent colour stories.
+    mat_facade_deco       = make_material("mat_facade_art_deco",  "#f5e0d8", roughness=0.55)
+    mat_facade_deco_band  = make_material("mat_facade_art_deco_band","#5acfd6", roughness=0.4)
+    mat_facade_tokyo      = make_material("mat_facade_tokyo",     "#2a2e36", roughness=0.45)
+    mat_facade_tokyo_neon = make_material("mat_facade_tokyo_neon","#ff337b", roughness=0.4,
+                                          emission_hex="#ff5aa0", emission_strength=2.8)
+    mat_facade_venice     = make_material("mat_facade_venice",    "#d6c4a8", roughness=0.6)
+    mat_facade_venice_trim= make_material("mat_facade_venice_trim","#7d5a3e", roughness=0.55)
+    mat_facade_nyc        = make_material("mat_facade_nyc",       "#8f7864", roughness=0.65)
+    mat_facade_nyc_trim   = make_material("mat_facade_nyc_trim",  "#3a2c20", roughness=0.7)
+    mat_facade_window     = make_material("mat_facade_window",    "#1c2a30", roughness=0.2,
+                                          emission_hex="#ffc77a", emission_strength=0.6)
+    # Glass tank — emissive shard family + intact glass.
+    mat_glass_shard       = make_material("mat_landmark_glass_shard","#9ed7d5", roughness=0.2,
+                                          emission_hex="#cdf2f0", emission_strength=0.4)
+    # Stone for carved-face block.
+    mat_stone             = make_material("mat_landmark_stone",   "#a39377", roughness=0.75)
+    mat_stone_dark        = make_material("mat_landmark_stone_dark","#5a4b39", roughness=0.78)
+    # Lava — emissive hot core. The runtime shader will sample COLOR_0.R
+    # for the hot mask; the base colour is the cooler crust.
+    mat_lava              = make_material("mat_landmark_lava",    "#0f0a08", roughness=0.4,
+                                          emission_hex="#ff5a14", emission_strength=6.0)
 
     summary: dict[str, dict] = {}
 
@@ -574,6 +1307,79 @@ def build_landmarks() -> dict[str, dict]:
             description="Massive snow-capped cone for the horizon. ~840 m diameter, 420 m tall. Place at distance (>1 km from the track) for a Mt Rainier / Mt Fuji / generic mountain silhouette. Non-collidable in practice — too big to race against.",
             tags=["mountain", "backdrop", "decoration"],
         ),
+        # ── Phase B archetypes ─────────────────────────────────────
+        dict(
+            name="landmark_tower_cylinder_spiral",
+            mesh_builder=build_tower_cylinder_spiral_mesh,
+            materials=[mat_white, mat_stripe, mat_steel],
+            catalog="Hoverbike/Landmarks/Towers",
+            description="Cylindrical tower with diagonal stripe pattern + open lamp room. 60 m tall. Drives Hatteras lighthouse (default), Doge's Campanile (re-tint stripes to terracotta), Angkor central spire (criss-cross stone), Cocoon Tower face (criss-cross). Stripe pattern is face-tagged; the runtime material swap retunes per-instance.",
+            tags=["tower", "cylinder", "lighthouse", "campanile", "landmark"],
+        ),
+        dict(
+            name="landmark_arch_ruin",
+            mesh_builder=build_arch_ruin_mesh,
+            materials=[mat_concrete, mat_oxidised],
+            catalog="Hoverbike/Landmarks/Ruins",
+            description="Half-circle arch with chipped, decayed edges. 60 m span × 22 m rise × 4.5 m thick. Drives the three Maw arches (scale span to taste), Rialto Bridge arch, Two Oceans Aquarium roof remnant, Liberty's broken torch arm (smaller scale). Decay is bmesh-jitter, not a modifier — re-running the seed produces identical jitter per seed.",
+            tags=["arch", "ruin", "wave_zone_companion", "landmark"],
+        ),
+        dict(
+            name="landmark_drowned_facade_art_deco",
+            mesh_builder=lambda n: build_drowned_facade_mesh(n, style="art_deco", width=30.0, height=12.0, window_cols=8, window_rows=3),
+            materials=[mat_facade_deco, mat_facade_deco_band, mat_facade_window],
+            catalog="Hoverbike/Landmarks/Facades",
+            description="South Beach Art Deco hotel frontage. 30 m × 12 m with horizontal accent band + setback step. Pastel cream + turquoise band. Stamp three of these per South Beach hotel cluster.",
+            tags=["facade", "art_deco", "south_beach", "landmark"],
+        ),
+        dict(
+            name="landmark_drowned_facade_tokyo",
+            mesh_builder=lambda n: build_drowned_facade_mesh(n, style="tokyo", width=24.0, height=80.0, window_cols=5, window_rows=20),
+            materials=[mat_facade_tokyo, mat_facade_tokyo_neon, mat_facade_window],
+            catalog="Hoverbike/Landmarks/Facades",
+            description="Shibuya skyscraper face. 24 m × 80 m, dense window grid, emissive top-band signage shelf + vertical neon strip. Use as the Cocoon Tower neighbour / generic Shibuya tower top.",
+            tags=["facade", "tokyo", "shibuya", "neon", "emissive", "landmark"],
+        ),
+        dict(
+            name="landmark_drowned_facade_venice",
+            mesh_builder=lambda n: build_drowned_facade_mesh(n, style="venice", width=40.0, height=18.0, window_cols=7, window_rows=2),
+            materials=[mat_facade_venice, mat_facade_venice_trim, mat_facade_window],
+            catalog="Hoverbike/Landmarks/Facades",
+            description="Venice palazzo frontage. 40 m × 18 m with crown arcade + cornice. Sandstone palette. Stamp around Doge's Drift for the Piazza San Marco palazzi belt.",
+            tags=["facade", "venice", "palazzo", "landmark"],
+        ),
+        dict(
+            name="landmark_drowned_facade_nyc",
+            mesh_builder=lambda n: build_drowned_facade_mesh(n, style="nyc", width=30.0, height=90.0, window_cols=6, window_rows=22),
+            materials=[mat_facade_nyc, mat_facade_nyc_trim, mat_facade_window],
+            catalog="Hoverbike/Landmarks/Facades",
+            description="Manhattan rooftop. 30 m × 90 m brownstone-ish slab with two procedural water-tower clusters on the roof. Stamp across the Liberty Drowned approach for the receding mid-town skyline.",
+            tags=["facade", "nyc", "manhattan", "rooftop", "landmark"],
+        ),
+        dict(
+            name="landmark_glass_tank_broken",
+            mesh_builder=build_glass_tank_broken_mesh,
+            materials=[mat_glass, mat_steel, mat_glass_shard],
+            catalog="Hoverbike/Landmarks/Tanks",
+            description="Rectangular glass volume with shattered +Y face. 20 m × 14 m × 10 m. Drives Two Oceans Aquarium predator tank (rotate so the race line enters via the shattered face) and the Shibuya Crossing window-down view (scale smaller). Drop a contents prop (shark, taxis, hachiko) inside the collection post-drag.",
+            tags=["glass", "tank", "aquarium", "shatter", "landmark"],
+        ),
+        dict(
+            name="landmark_carved_face_block",
+            mesh_builder=build_carved_face_block_mesh,
+            materials=[mat_stone, mat_stone_dark],
+            catalog="Hoverbike/Landmarks/Reliefs",
+            description="6 m cube block with a smiling-face relief on the +Y face. Drives the Angkor Bayon faces × 16 — instance around the central spire with varied rotations + per-instance scale jitter. Re-seed with different expression_seed values for variation.",
+            tags=["relief", "carving", "angkor", "bayon", "landmark"],
+        ),
+        dict(
+            name="landmark_lava_river_strip",
+            mesh_builder=build_lava_river_strip_mesh,
+            materials=[mat_lava],
+            catalog="Hoverbike/Landmarks/Lava",
+            description="Flat 60 m × 4 m emissive strip for Kilauea's lava waterfall. COLOR_0 carries hot-core mask in R + flow phase in B (override per docs/vertex-attribute-spec.md). Authors are expected to add a Curve modifier post-drag to bend the strip along the lava channel.",
+            tags=["lava", "kilauea", "emissive", "landmark"],
+        ),
     ]
 
     for a in archetypes:
@@ -583,6 +1389,31 @@ def build_landmarks() -> dict[str, dict]:
         _mark_asset(coll, catalog_path=a["catalog"],
                     description=a["description"], tags=a["tags"])
         summary[a["name"]] = {"verts": len(mesh.vertices), "faces": len(mesh.polygons)}
+
+    # ── mechanical_rig — two meshes, one collection, parented arm ──
+    rig_pos = LAYOUT["landmark_mechanical_rig"]
+    base_mesh, arm_mesh = build_mechanical_rig_mesh("landmark_mechanical_rig")
+    rig_coll = _make_mechanical_rig_collection(
+        "landmark_mechanical_rig",
+        base_mesh, arm_mesh,
+        [mat_steel, mat_oxidised],
+        position=rig_pos,
+        # Default = Marina Bay gantry — 12 s back-and-forth swing across
+        # the racing lane (the Gauntlet timer). Re-tune per instance
+        # post-drag for Doge's bell (faster, smaller amplitude) and
+        # Liberty's torch flame (very fast, small flicker amplitude).
+        swing_period_s=12.0,
+        swing_amplitude_deg=40.0,
+        swing_axis="Z",
+    )
+    _mark_asset(rig_coll,
+                catalog_path="Hoverbike/Landmarks/Mechanical",
+                description="A-frame base + swinging arm + counterweight + hoist cable. 40 m tall. Drives Marina Bay gantry cranes (default — 12 s swing across deck), Doge's Campanile bell (re-scale small, re-tune swing_period_s short), Liberty torch flame fixture (re-rig as vertical flicker). Arm carries swing_period_s/amplitude_deg/axis extras for future runtime animation — today the runtime ignores them; metadata is in place for the next animation pass.",
+                tags=["mechanical", "crane", "swing", "animated", "landmark"])
+    summary["landmark_mechanical_rig"] = {
+        "verts": len(base_mesh.vertices) + len(arm_mesh.vertices),
+        "faces": len(base_mesh.polygons) + len(arm_mesh.polygons),
+    }
 
     return summary
 

@@ -141,6 +141,31 @@ _RULES: tuple[_AutoTagRule, ...] = (
         },
         visual=_empty_visual("ARROWS", 4.0),
     ),
+    # Anti-grav ribbon authoring curve. The Build Anti-Grav Surface
+    # operator sweeps the curve into a kind=track mesh and stamps the
+    # zone empties at the endpoints — this rule just makes sure a
+    # rename / paste of an antigrav_curve_NN bezier gets the right
+    # AuthoringKind so the export pipeline strips it.
+    _AutoTagRule(
+        name_re=re.compile(r"^antigrav_curve_(\d+)$"),
+        object_type="CURVE",
+        kind="antigrav_curve",
+        extras=lambda m: {},
+    ),
+    _AutoTagRule(
+        name_re=re.compile(r"^wave_zone_(\d+)$"),
+        object_type="EMPTY",
+        kind="wave_zone",
+        extras=lambda m: {
+            "half_width": 30.0,
+            "half_height": 20.0,
+            "half_depth": 30.0,
+            "height_mult": 1.5,
+            "freq_mult": 1.0,
+            "blend_radius_m": 20.0,
+        },
+        visual=_empty_visual("CUBE", 6.0),
+    ),
     _AutoTagRule(
         name_re=re.compile(r"^pickup_(?:\d+|main)$"),
         object_type="EMPTY",
@@ -165,6 +190,53 @@ _RULES: tuple[_AutoTagRule, ...] = (
         object_type="MESH",
         kind="track",
         extras=lambda m: {},
+    ),
+    # Per-track horizon silhouette mesh — exists when the author drops a
+    # starter ring via *Add Horizon Ring* and (typically) reshapes it.
+    # Auto-tag picks up renames or copy-paste from another .blend so the
+    # mesh round-trips through the GLB loader's `kind=horizon` extraction.
+    _AutoTagRule(
+        name_re=re.compile(r"^horizon_ring$"),
+        object_type="MESH",
+        kind="horizon",
+        extras=lambda m: {},
+    ),
+    # Hero camera used by the headless track-thumbnail render. The
+    # camera_hero Camera object is read by the addon's *Render Track
+    # Hero* operator + the standalone CLI script and never reaches the
+    # GLB (the export pass strips cameras). Tagging it lets the
+    # thumbnail tooling pick it out by kind instead of name in case the
+    # author later renames or duplicates it.
+    _AutoTagRule(
+        name_re=re.compile(r"^camera_hero$"),
+        object_type="CAMERA",
+        kind="camera_hero",
+        extras=lambda m: {},
+    ),
+    # Particle-emitter empty. Defaults match
+    # ``hoverbike_addon/emitter.py`` exactly — the rule re-stamps them
+    # so a renamed / pasted empty behaves identically to one created
+    # via *Add Emitter*. Visual hint matches the operator (SPHERE,
+    # size 1.2) so the empties are easy to pick out.
+    _AutoTagRule(
+        name_re=re.compile(r"^emitter_(\d+)$"),
+        object_type="EMPTY",
+        kind="emitter",
+        extras=lambda m: {
+            "atlas_cell": 0,
+            "emit_rate": 30.0,
+            "lifetime_s": 1.5,
+            "velocity_cone_deg": 25.0,
+            "speed_min": 0.8,
+            "speed_max": 2.5,
+            "size_start": 0.4,
+            "size_end": 1.2,
+            "color_start": [1.0, 1.0, 1.0, 1.0],
+            "color_end": [1.0, 1.0, 1.0, 0.0],
+            "gravity": 0.0,
+            "max_particles": 256,
+        },
+        visual=_empty_visual("SPHERE", 1.2),
     ),
 )
 
@@ -264,7 +336,8 @@ class HOVERBIKE_OT_retag_scene(Operator):
     bl_description = (
         "Apply canonical kind + default props to every object whose name matches "
         "a known pattern (start_NN, cp_NN, ai_spline_main, water_volume_main, "
-        "boost_NN, pickup_NN, terrain) and doesn't already carry a kind"
+        "boost_NN, antigrav_NN, wave_zone_NN, pickup_NN, terrain) and doesn't "
+        "already carry a kind"
     )
     bl_options = {"REGISTER", "UNDO"}
 

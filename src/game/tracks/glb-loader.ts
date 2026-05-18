@@ -1,6 +1,6 @@
 import { ExportedKind } from '@/engine/asset-kinds'
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
-import type { Checkpoint, Track } from './types'
+import type { Checkpoint, Track, WaveZone } from './types'
 
 /**
  * .glb track loader. Reads the JSON chunk of a glTF Binary file, walks the
@@ -170,6 +170,13 @@ export function buildTrackFromGltf(gltf: GltfRoot, opts: LoadTrackOptions): Trac
     throw new Error(`glb: missing ${ExportedKind.AI_SPLINE} branch=main`)
   }
 
+  // Wave zones — each `wave_zone_NN` empty in the .blend lands as a node
+  // with extras.kind = 'wave_zone' carrying half-extents + per-zone
+  // wave-field multipliers. Skipped silently when the track ships none
+  // (the global Gerstner field handles all surface motion in that case).
+  const waveZoneNodes = byKind.get(ExportedKind.WAVE_ZONE) ?? []
+  const waveZones: WaveZone[] = waveZoneNodes.map((node) => readWaveZoneFromGlb(node))
+
   return {
     id: opts.id,
     name: opts.name,
@@ -179,10 +186,76 @@ export function buildTrackFromGltf(gltf: GltfRoot, opts: LoadTrackOptions): Trac
     surfaces: [],
     boostPads: [],
     antiGravZones: [],
+    waveZones,
     props: [],
     pickupSpawns,
     aiSplines,
   }
+}
+
+function readWaveZoneFromGlb(node: GltfNode): WaveZone {
+  const extras = node.extras ?? {}
+  const halfWidth = numberExtra(extras, 'half_width')
+  const halfHeight = numberExtra(extras, 'half_height')
+  const halfDepth = numberExtra(extras, 'half_depth')
+  const heightMult = numberExtra(extras, 'height_mult', 1.5)
+  const freqMult = numberExtra(extras, 'freq_mult', 1.0)
+  const blendRadiusM = numberExtra(extras, 'blend_radius_m', 20)
+  if (!(halfWidth > 0) || !(halfHeight > 0) || !(halfDepth > 0)) {
+    throw new Error(
+      `glb: ${ExportedKind.WAVE_ZONE} ${node.name ?? '?'} half-extents must be positive`,
+    )
+  }
+  if (!(heightMult > 0)) {
+    throw new Error(
+      `glb: ${ExportedKind.WAVE_ZONE} ${node.name ?? '?'} height_mult must be positive`,
+    )
+  }
+  if (!(freqMult > 0)) {
+    throw new Error(
+      `glb: ${ExportedKind.WAVE_ZONE} ${node.name ?? '?'} freq_mult must be positive`,
+    )
+  }
+  if (!(blendRadiusM > 0)) {
+    throw new Error(
+      `glb: ${ExportedKind.WAVE_ZONE} ${node.name ?? '?'} blend_radius_m must be positive`,
+    )
+  }
+  const zone: WaveZone = {
+    position: readTranslation(node),
+    rotation: readRotation(node),
+    halfWidth,
+    halfHeight,
+    halfDepth,
+    heightMult,
+    freqMult,
+    blendRadiusM,
+  }
+  // direction_deg + surge_* are optional — only attach when authored.
+  const dirRaw = extras.direction_deg
+  if (typeof dirRaw === 'number' && Number.isFinite(dirRaw)) {
+    zone.directionDeg = dirRaw
+  }
+  const surgePRaw = extras.surge_period_s
+  const surgeARaw = extras.surge_amplitude
+  if (
+    typeof surgePRaw === 'number' &&
+    typeof surgeARaw === 'number' &&
+    Number.isFinite(surgePRaw) &&
+    Number.isFinite(surgeARaw) &&
+    surgePRaw > 0
+  ) {
+    zone.surgePeriodS = surgePRaw
+    zone.surgeAmplitude = surgeARaw
+  }
+  return zone
+}
+
+function numberExtra(extras: GltfPrimitiveExtras, key: string, fallback?: number): number {
+  const v = extras[key]
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (fallback !== undefined) return fallback
+  return NaN
 }
 
 function readTranslation(node: GltfNode): Vec3 {
