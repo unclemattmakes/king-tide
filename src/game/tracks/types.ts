@@ -151,6 +151,25 @@ export type AISpline = {
    *  edits these (not the dense samples). Drag an anchor to reshape
    *  the curve. The dense `points` array is regenerated on save. */
   anchors?: Vec3[]
+  /** Optional per-anchor banking (rotation around the spline tangent in
+   *  radians). 0 = world-up, ±π/2 = wall, ±π = upside-down ceiling.
+   *  Loader interpolates to the dense `bankings` array. Anti-grav resolver
+   *  uses this + the tangent to derive a smoothly-varying "up" vector
+   *  along the curve — banked corners, wall sections, helixes, and loops
+   *  fall out of the same authoring affordance. */
+  anchorBankings?: number[]
+  /** Loader-derived dense banking samples, one per `points[i]`. Linear
+   *  interp of `anchorBankings` per segment. Absent on splines that
+   *  don't participate in anti-grav. */
+  bankings?: number[]
+  /** Opt-in flag: when true (or when any `anchorBankings` entry is
+   *  non-zero), the anti-grav system samples this spline per-tick to
+   *  compute a curve-following gravity vector for bikes near it. */
+  antiGrav?: boolean
+  /** Distance (m) from the spline at which curve-following gravity
+   *  fades back to world. Inside this radius the bike feels the curve's
+   *  "down"; beyond it gravity returns to world-down. Default 8m. */
+  antiGravFalloff?: number
 }
 
 export type BoostPad = {

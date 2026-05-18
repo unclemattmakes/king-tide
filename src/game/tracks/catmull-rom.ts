@@ -171,3 +171,139 @@ export function tangentAtT(sampled: Vec3[], t: number): Vec3 {
   const len = Math.hypot(dx, dz) || 1
   return { x: dx / len, y: 0, z: dz / len }
 }
+
+/**
+ * Full 3D tangent at parameter t — discrete derivative including Y.
+ * Used by the anti-grav resolver, which needs to construct a "road up"
+ * orthogonal to the tangent on banked or vertical sections (the XZ-only
+ * `tangentAtT` discards the Y delta that matters when the spline rises
+ * or falls).
+ */
+export function tangent3dAtT(sampled: Vec3[], t: number): Vec3 {
+  if (sampled.length < 2) return { x: 0, y: 0, z: 1 }
+  const wrapped = ((t % 1) + 1) % 1
+  const f = wrapped * sampled.length
+  const i0 = Math.floor(f) % sampled.length
+  const i1 = (i0 + 1) % sampled.length
+  const a = sampled[i0]!
+  const b = sampled[i1]!
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const dz = b.z - a.z
+  const len = Math.hypot(dx, dy, dz) || 1
+  return { x: dx / len, y: dy / len, z: dz / len }
+}
+
+/**
+ * Linear-interp a per-anchor scalar (e.g. banking angle) to match the
+ * dense sample density produced by `sampleCatmullRom`. The output has
+ * exactly `divisionsPerSegment * segCount` entries — one per dense
+ * point — so callers can index it the same way they index `points`.
+ *
+ * Why linear and not cubic-smooth: banking is authored as a *physical*
+ * orientation by the level designer (this stretch is upright, this is
+ * sideways, this is upside-down). Catmull-Rom overshoot would let the
+ * track briefly bank PAST 90° on its way to a 90° anchor, which reads
+ * as a glitch. Linear interpolation matches author intent exactly.
+ */
+/**
+ * Compute the "road up" at parameter t — perpendicular to the tangent,
+ * rotated around the tangent by the local banking angle.
+ *
+ * Construction:
+ *   1. T = tangent (full 3D, unit)
+ *   2. N0 = component of world-up perpendicular to T (the "natural" road
+ *      normal — for a flat or gently-sloped road this is essentially +Y).
+ *      Degenerate when T ≈ ±worldUp (a perfectly vertical spline). We
+ *      pick a fallback axis in that case so callers always get a unit
+ *      vector, but a wall-climbing spline should rotate from flat into
+ *      vertical via banking, not via tangent-direction alone, to avoid
+ *      hitting this corner.
+ *   3. Rotate N0 around T by `banking` radians (right-hand rule: positive
+ *      banking with T along +Z and N0 along +Y rotates the up toward −X).
+ *
+ * Pure / Three-free. Sim-layer callers feed in `tangent3dAtT(points, t)`
+ * and `bankings[i]` (or interp).
+ */
+export function curveUpAtT(
+  tangent: Vec3,
+  banking: number,
+  worldUpFallback: Vec3 = { x: 0, y: 1, z: 0 },
+): Vec3 {
+  // N0 = worldUp - T * (T · worldUp), normalized.
+  const dot = tangent.x * worldUpFallback.x + tangent.y * worldUpFallback.y + tangent.z * worldUpFallback.z
+  let n0x = worldUpFallback.x - tangent.x * dot
+  let n0y = worldUpFallback.y - tangent.y * dot
+  let n0z = worldUpFallback.z - tangent.z * dot
+  const n0Len = Math.hypot(n0x, n0y, n0z)
+  if (n0Len < 1e-4) {
+    // Tangent ≈ worldUp. Pick an arbitrary perpendicular: rotate +X by
+    // the projection onto T. This is a rare degenerate; better to pick
+    // SOMETHING unit than to return NaN.
+    n0x = 1
+    n0y = 0
+    n0z = 0
+    const d2 = tangent.x * 1 + tangent.y * 0 + tangent.z * 0
+    n0x = 1 - tangent.x * d2
+    n0y = -tangent.y * d2
+    n0z = -tangent.z * d2
+    const l2 = Math.hypot(n0x, n0y, n0z) || 1
+    n0x /= l2
+    n0y /= l2
+    n0z /= l2
+  } else {
+    n0x /= n0Len
+    n0y /= n0Len
+    n0z /= n0Len
+  }
+  if (banking === 0) return { x: n0x, y: n0y, z: n0z }
+  // Rodrigues' rotation formula for rotating n0 around unit axis T by
+  // angle `banking`:
+  //   v_rot = v*cos + (T×v)*sin + T*(T·v)*(1 − cos)
+  // T·N0 = 0 by construction, so the last term vanishes.
+  const cos = Math.cos(banking)
+  const sin = Math.sin(banking)
+  const cx = tangent.y * n0z - tangent.z * n0y
+  const cy = tangent.z * n0x - tangent.x * n0z
+  const cz = tangent.x * n0y - tangent.y * n0x
+  return {
+    x: n0x * cos + cx * sin,
+    y: n0y * cos + cy * sin,
+    z: n0z * cos + cz * sin,
+  }
+}
+
+export function sampleScalarToMatch(
+  anchors: number[],
+  opts: CatmullRomOptions = {},
+): number[] {
+  const div = opts.divisionsPerSegment ?? 12
+  const closed = opts.closed ?? true
+  const n = anchors.length
+  if (n === 0) return []
+  if (n === 1) return [anchors[0]!]
+  if (n === 2) {
+    const out: number[] = []
+    const segs = closed ? 2 : 1
+    for (let s = 0; s < segs; s++) {
+      const a = anchors[s]!
+      const b = anchors[(s + 1) % 2]!
+      for (let i = 0; i < div; i++) {
+        const t = i / div
+        out.push(a + (b - a) * t)
+      }
+    }
+    return out
+  }
+  const out: number[] = []
+  const segCount = closed ? n : n - 1
+  for (let i = 0; i < segCount; i++) {
+    const a = anchors[i]!
+    const b = anchors[closed ? (i + 1) % n : Math.min(i + 1, n - 1)]!
+    for (let s = 0; s < div; s++) {
+      const t = s / div
+      out.push(a + (b - a) * t)
+    }
+  }
+  return out
+}

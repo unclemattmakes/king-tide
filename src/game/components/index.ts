@@ -95,27 +95,32 @@ export type HoverStateData = {
 export const HoverStateStore = createStore<HoverStateData>('HoverState')
 
 /**
- * Per-bike anti-gravity override. Written by `antiGravSystem` every tick to
- * record which way is "up" for this bike — either world up (the zero state)
- * or a zone's local +Y when the bike is inside an anti-grav volume.
+ * Per-bike anti-gravity override. Written by `antiGravSystem` every tick
+ * to record which way is "up" for this bike when an anti-grav source is
+ * within reach — either a flagged AI spline (curve sampling, with
+ * distance falloff) or a containing volume zone.
  *
- * The hover system reads this to retarget its gravity vector and lift
- * direction. The smoothed up vector lerps over ~0.3s on zone enter/exit so
- * the transition isn't jarring.
- *
- * `active` is true only while smoothing is in progress or the bike sits in
- * a zone — used to know whether to disable Rapier's per-body gravity. The
- * up vector is normalized.
+ * The hover system reads `up*` to retarget its probes / lift / yaw axis,
+ * and reads `weight` to scale the gravity blend. The smoothed up vector
+ * lerps over a short half-life to absorb instantaneous jumps when a new
+ * source takes over.
  */
 export const AntiGravOverride = { name: 'AntiGravOverride' as const }
 export type AntiGravOverrideData = {
-  /** True while the bike is in a zone OR mid-transition back to world-up. */
+  /** True while the bike is influenced by any anti-grav source (curve
+   *  sample with non-zero weight OR contained in a zone OR mid-transition
+   *  back to world-up). */
   active: boolean
+  /** Blend weight ∈ [0,1]. 0 = fully world gravity, 1 = fully curve/zone
+   *  gravity. Used by the hover system to set per-body Rapier gravity
+   *  scale and to size the manual gravity impulse so the bike's effective
+   *  gravity transitions smoothly across enter / exit / drift boundaries. */
+  weight: number
   /** Current "up" unit vector (smoothed). Defaults to (0,1,0). */
   upX: number
   upY: number
   upZ: number
-  /** Target up vector — the zone's up while inside one, else (0,1,0). */
+  /** Target up vector — set every tick from the active source. */
   targetUpX: number
   targetUpY: number
   targetUpZ: number
