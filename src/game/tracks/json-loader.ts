@@ -1,5 +1,5 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
-import { pointAtT, sampleCatmullRom, tangentAtT } from './catmull-rom'
+import { pointAtT, sampleCatmullRom, sampleScalarToMatch, tangentAtT } from './catmull-rom'
 import type {
   AISpline,
   AntiGravZone,
@@ -214,7 +214,7 @@ export function trackToJson(track: Track): TrackJson {
       // resample on next load. We drop the dense `points` to keep the
       // file small and avoid drift between the two representations.
       if (s.anchors && s.anchors.length >= 2) {
-        return {
+        const out: AISpline = {
           id: s.id,
           // The points field is required by the on-disk type; keep an
           // empty array so the JSON validates (loader prefers anchors
@@ -222,8 +222,15 @@ export function trackToJson(track: Track): TrackJson {
           points: [],
           anchors: s.anchors.map((p) => ({ ...p })),
         }
+        if (s.anchorBankings) out.anchorBankings = [...s.anchorBankings]
+        if (s.antiGrav) out.antiGrav = true
+        if (s.antiGravFalloff !== undefined) out.antiGravFalloff = s.antiGravFalloff
+        return out
       }
-      return { id: s.id, points: s.points.map((p) => ({ ...p })) }
+      const out: AISpline = { id: s.id, points: s.points.map((p) => ({ ...p })) }
+      if (s.antiGrav) out.antiGrav = true
+      if (s.antiGravFalloff !== undefined) out.antiGravFalloff = s.antiGravFalloff
+      return out
     }),
     pickupSpawns: track.pickupSpawns.map((p) => ({ ...p })),
     boostPads: track.boostPads.map((p) => ({
@@ -290,21 +297,77 @@ function readSpline(raw: unknown, i: number): AISpline {
   //     consumes.
   //   - `points` (legacy): the dense polyline directly.
   const anchorsRaw = (raw as { anchors?: unknown }).anchors
+  let anchors: Vec3[] | undefined
+  let points: Vec3[]
   if (Array.isArray(anchorsRaw)) {
     if (anchorsRaw.length < 2) {
       throw new Error(`track-json: aiSplines[${i}].anchors must have at least 2 entries`)
     }
-    const anchors: Vec3[] = anchorsRaw.map((p, j) => readVec3(p, `aiSplines[${i}].anchors[${j}]`))
-    const points = sampleCatmullRom(anchors, { divisionsPerSegment: 12, closed: true })
-    return { id, points, anchors }
+    anchors = anchorsRaw.map((p, j) => readVec3(p, `aiSplines[${i}].anchors[${j}]`))
+    points = sampleCatmullRom(anchors, { divisionsPerSegment: 12, closed: true })
+  } else {
+    const pts = (raw as { points?: unknown }).points
+    if (!Array.isArray(pts) || pts.length < 2) {
+      throw new Error(`track-json: aiSplines[${i}] needs either anchors[≥2] or points[≥2]`)
+    }
+    points = pts.map((p, j) => readVec3(p, `aiSplines[${i}].points[${j}]`))
   }
 
-  const pts = (raw as { points?: unknown }).points
-  if (!Array.isArray(pts) || pts.length < 2) {
-    throw new Error(`track-json: aiSplines[${i}] needs either anchors[≥2] or points[≥2]`)
+  const out: AISpline = { id, points }
+  if (anchors) out.anchors = anchors
+
+  const antiGravRaw = (raw as { antiGrav?: unknown }).antiGrav
+  if (antiGravRaw !== undefined) {
+    if (typeof antiGravRaw !== 'boolean') {
+      throw new Error(`track-json: aiSplines[${i}].antiGrav must be a boolean if present`)
+    }
+    out.antiGrav = antiGravRaw
   }
-  const points: Vec3[] = pts.map((p, j) => readVec3(p, `aiSplines[${i}].points[${j}]`))
-  return { id, points }
+
+  const falloffRaw = (raw as { antiGravFalloff?: unknown }).antiGravFalloff
+  if (falloffRaw !== undefined) {
+    if (typeof falloffRaw !== 'number' || !(falloffRaw > 0)) {
+      throw new Error(`track-json: aiSplines[${i}].antiGravFalloff must be a positive number`)
+    }
+    out.antiGravFalloff = falloffRaw
+  }
+
+  // Per-anchor banking → dense bankings array matching `points` length.
+  // Only attached when the spline opts into anti-grav (or carries non-zero
+  // banking), so tracks that never use anti-grav don't pay the storage.
+  const bankingsRaw = (raw as { anchorBankings?: unknown }).anchorBankings
+  if (bankingsRaw !== undefined) {
+    if (!Array.isArray(bankingsRaw)) {
+      throw new Error(`track-json: aiSplines[${i}].anchorBankings must be an array`)
+    }
+    if (!anchors) {
+      throw new Error(`track-json: aiSplines[${i}].anchorBankings requires anchors[]`)
+    }
+    if (bankingsRaw.length !== anchors.length) {
+      throw new Error(
+        `track-json: aiSplines[${i}].anchorBankings length (${bankingsRaw.length}) must match anchors length (${anchors.length})`,
+      )
+    }
+    const anchorBankings: number[] = bankingsRaw.map((b, j) => {
+      if (typeof b !== 'number' || !Number.isFinite(b)) {
+        throw new Error(`track-json: aiSplines[${i}].anchorBankings[${j}] must be a finite number`)
+      }
+      return b
+    })
+    const hasAny = anchorBankings.some((b) => b !== 0)
+    if (hasAny || out.antiGrav) {
+      out.anchorBankings = anchorBankings
+      out.bankings = sampleScalarToMatch(anchorBankings, {
+        divisionsPerSegment: 12,
+        closed: true,
+      })
+      // Implicit opt-in: any non-zero banking activates the resolver for
+      // this spline without requiring an explicit antiGrav: true.
+      if (!out.antiGrav && hasAny) out.antiGrav = true
+    }
+  }
+
+  return out
 }
 
 function readBoostPad(raw: unknown, i: number): BoostPad {

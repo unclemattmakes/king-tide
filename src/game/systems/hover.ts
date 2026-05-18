@@ -237,26 +237,49 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const m = stats.mass
 
     // Anti-grav override — written by `antiGravSystem` earlier this tick.
-    // When `agActive` is true the bike is in (or smoothing out of) an
-    // anti-grav zone: Rapier world gravity is disabled for this body and
-    // we apply gravity along `−upX,−upY,−upZ` ourselves at the end of the
-    // loop. Probes cast along that same direction and the hover spring
-    // lifts along +up, so the entire surface-following stack is just
-    // re-expressed in the zone's local frame.
+    // When `agActive` is true the bike is influenced by an anti-grav
+    // source (curve sample with non-zero weight OR contained in a zone):
+    // Rapier world gravity is disabled for this body and we apply gravity
+    // along `−up · G` ourselves at the end of the loop. Probes cast along
+    // that same direction and the hover spring lifts along +up.
     //
-    // When NOT in a zone, `(upX,upY,upZ) = (0,1,0)` and the whole machine
-    // reduces to world-down behaviour — `surfaceProj` is then just world-Y,
-    // probe rays cast (0,−1,0), and spring lift is along +Y as it always was.
+    // The "up" we use is the WEIGHTED BLEND of the source up vector with
+    // world up: at weight=1 it's purely the source's up (full wall ride);
+    // at weight=0.3 (bike drifting out of the falloff) it tilts back
+    // toward world up smoothly. Stored upX/Y/Z is the source's smoothed
+    // up; we blend per-tick rather than in the resolver so the gradient
+    // tracks distance changes between the bike and the curve in real time.
+    //
+    // When NOT active, `(upX,upY,upZ) = (0,1,0)`, agActive=false, and the
+    // whole machine below reduces to world-down behaviour.
     let agActive = false
     let upX = 0
     let upY = 1
     let upZ = 0
+    let agWeight = 0
     const agOverride = AntiGravOverrideStore.get(eid)
     if (agOverride && agOverride.active) {
       agActive = true
-      upX = agOverride.upX
-      upY = agOverride.upY
-      upZ = agOverride.upZ
+      agWeight = agOverride.weight
+      // Effective up = blend(worldUp, sourceUp, weight). Normalize so the
+      // probe / spring math stays unit-length-correct. Degenerate only
+      // when source up ≈ −worldUp at exactly weight=0.5 (a half-blend
+      // between right-side-up and upside-down) — authoring should keep
+      // banking changes incremental enough that the bike never sits
+      // exactly there for long. Fallback to source up if degenerate.
+      const blendX = (1 - agWeight) * 0 + agWeight * agOverride.upX
+      const blendY = (1 - agWeight) * 1 + agWeight * agOverride.upY
+      const blendZ = (1 - agWeight) * 0 + agWeight * agOverride.upZ
+      const bLen = Math.hypot(blendX, blendY, blendZ)
+      if (bLen > 1e-3) {
+        upX = blendX / bLen
+        upY = blendY / bLen
+        upZ = blendZ / bLen
+      } else {
+        upX = agOverride.upX
+        upY = agOverride.upY
+        upZ = agOverride.upZ
+      }
     }
     const dnX = -upX
     const dnY = -upY

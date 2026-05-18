@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
+import { curveUpAtT } from '../../src/game/tracks/catmull-rom'
 import {
   findContainingZone,
   isInsideAntiGravZone,
+  sampleCurveGravity,
   zoneUpVector,
 } from '../../src/game/systems/anti-grav'
-import type { AntiGravZone } from '../../src/game/tracks/types'
+import type { Vec3 } from '../../src/engine/sim/physics/vec'
+import type { AISpline, AntiGravZone } from '../../src/game/tracks/types'
 
 function axisAlignedZone(
   pos: { x: number; y: number; z: number },
@@ -95,5 +98,110 @@ describe('findContainingZone', () => {
 
   it('returns null on an empty zone list', () => {
     expect(findContainingZone({ x: 0, y: 0, z: 0 }, [])).toBeNull()
+  })
+})
+
+describe('curveUpAtT', () => {
+  it('returns world +Y for a horizontal tangent with zero banking', () => {
+    const up = curveUpAtT({ x: 0, y: 0, z: 1 }, 0)
+    expect(up.x).toBeCloseTo(0)
+    expect(up.y).toBeCloseTo(1)
+    expect(up.z).toBeCloseTo(0)
+  })
+
+  it('rotates +Y to −X under banking +π/2 with tangent along +Z', () => {
+    // Right-hand rule: thumb +Z, fingers curl +X → +Y, so +Y rotates
+    // toward −X under positive banking.
+    const up = curveUpAtT({ x: 0, y: 0, z: 1 }, Math.PI / 2)
+    expect(up.x).toBeCloseTo(-1)
+    expect(up.y).toBeCloseTo(0, 5)
+    expect(up.z).toBeCloseTo(0)
+  })
+
+  it('rotates +Y to +X under banking −π/2 with tangent along +Z', () => {
+    const up = curveUpAtT({ x: 0, y: 0, z: 1 }, -Math.PI / 2)
+    expect(up.x).toBeCloseTo(1)
+    expect(up.y).toBeCloseTo(0, 5)
+    expect(up.z).toBeCloseTo(0)
+  })
+
+  it('flips to −Y under banking π (upside-down ceiling)', () => {
+    const up = curveUpAtT({ x: 0, y: 0, z: 1 }, Math.PI)
+    expect(up.x).toBeCloseTo(0, 5)
+    expect(up.y).toBeCloseTo(-1)
+    expect(up.z).toBeCloseTo(0, 5)
+  })
+
+  it('keeps up perpendicular to a non-axis-aligned tangent', () => {
+    // Tangent 45° in XZ plane, zero banking → up should still be +Y.
+    const t = { x: Math.SQRT1_2, y: 0, z: Math.SQRT1_2 }
+    const up = curveUpAtT(t, 0)
+    const dot = up.x * t.x + up.y * t.y + up.z * t.z
+    expect(dot).toBeCloseTo(0, 5)
+  })
+})
+
+describe('sampleCurveGravity', () => {
+  function makeFlaggedSpline(points: Vec3[], bankings: number[], falloff = 8): AISpline {
+    return {
+      id: 'test',
+      points,
+      bankings,
+      antiGrav: true,
+      antiGravFalloff: falloff,
+    }
+  }
+
+  it('returns null when spline has no antiGrav flag', () => {
+    const s: AISpline = {
+      id: 'test',
+      points: [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 10 }],
+    }
+    expect(sampleCurveGravity({ x: 0, y: 0, z: 5 }, s)).toBeNull()
+  })
+
+  it('returns null when bike is past falloff distance', () => {
+    const s = makeFlaggedSpline(
+      [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 10 }],
+      [0, 0],
+      4,
+    )
+    // Bike at x=100 is way past 4m falloff.
+    expect(sampleCurveGravity({ x: 100, y: 0, z: 5 }, s)).toBeNull()
+  })
+
+  it('reports weight ≈ 1 on the spline and weight ≈ 0.5 at half-falloff', () => {
+    // Densely-sampled straight line at x=0 so the nearest-point distance
+    // is the bike's lateral offset, not aliasing from sparse samples.
+    const pts: Vec3[] = []
+    const bks: number[] = []
+    for (let i = 0; i <= 40; i++) {
+      pts.push({ x: 0, y: 0, z: i * 0.5 })
+      bks.push(0)
+    }
+    const s = makeFlaggedSpline(pts, bks, 8)
+    const onCurve = sampleCurveGravity({ x: 0, y: 0, z: 5 }, s)
+    expect(onCurve).not.toBeNull()
+    expect(onCurve!.weight).toBeCloseTo(1, 1)
+    const halfway = sampleCurveGravity({ x: 4, y: 0, z: 5 }, s)
+    expect(halfway).not.toBeNull()
+    expect(halfway!.weight).toBeCloseTo(0.5, 1)
+  })
+
+  it('reports a wall-rotated up when banking = π/2 on a +Z spline', () => {
+    const s = makeFlaggedSpline(
+      [
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 0, z: 5 },
+        { x: 0, y: 0, z: 10 },
+        { x: 0, y: 0, z: 15 },
+      ],
+      [Math.PI / 2, Math.PI / 2, Math.PI / 2, Math.PI / 2],
+    )
+    const r = sampleCurveGravity({ x: 0, y: 0, z: 7 }, s)
+    expect(r).not.toBeNull()
+    expect(r!.upX).toBeCloseTo(-1)
+    expect(Math.abs(r!.upY)).toBeLessThan(0.05)
+    expect(Math.abs(r!.upZ)).toBeLessThan(0.05)
   })
 })
