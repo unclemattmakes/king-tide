@@ -19,6 +19,7 @@
 import { query } from 'bitecs'
 import * as THREE from 'three'
 import type { PlayerSnapshot, RaceSnapshot } from '@/debug'
+import { installPerfDebugApi } from '@/debug'
 import type { AudioEngine } from '@/engine/audio/audio'
 import {
   type CupProgress,
@@ -37,6 +38,7 @@ import {
   encodeInputFrameInto,
   INPUT_FRAME_WIRE_BYTES,
 } from '@/engine/net/input-frame'
+import { createPerfRecorder, type PerfStats } from '@/engine/perf-recorder'
 import {
   ANTI_GRAV_CAMERA_SCALAR,
   markTutorialCompleted,
@@ -48,6 +50,7 @@ import { showCupResultsOverlay } from '@/engine/render/cup-results-screen'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
 import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finish-banner'
+import { createPerfHud, type RenderInfoLite } from '@/engine/render/perf-hud'
 import type { RaceHud } from '@/engine/render/race-hud'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
@@ -332,6 +335,51 @@ export function startGameLoop(opts: GameLoopOpts): void {
   let framesThisSecond = 0
   let fpsAccumStart = last
 
+  // Step 8 — Perf overlay + rolling-window recorder. The recorder samples
+  // every render frame (allocation-free); the HUD reads cached stats at
+  // the same 500 ms cadence as the FPS pill so we don't pay the percentile
+  // sort 60x/sec. Initial visibility flips on for `?perf=1`; the global
+  // backquote keybind toggles thereafter. Both default to off in normal
+  // gameplay so the panel never gets in the way unless explicitly asked
+  // for. The `renderer.info` shape is the live, mutating object — we
+  // capture the reference once.
+  const perfRecorder = createPerfRecorder()
+  const perfHud = createPerfHud()
+  const rendererInfo = (renderer as unknown as { info: RenderInfoLite }).info
+  const initialPerfOn =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('perf')
+  perfHud.setVisible(initialPerfOn)
+  // Cached snapshot from the last visible refresh — survives the on-off
+  // toggle so the panel doesn't flash zeros on the first frame after
+  // unhide. The HUD only paints when visible, so we just re-paint with
+  // the cached row text from the previous fresh sample when the user
+  // peeks the panel back open.
+  let lastPerfStats: PerfStats = perfRecorder.stats()
+  const onPerfKeyDown = (e: KeyboardEvent): void => {
+    if (e.code !== 'Backquote') return
+    // Don't fire while typing into a text field — backquote is a useful
+    // glyph in the in-app editor's free-form inputs.
+    const target = e.target as Element | null
+    const tag = target?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    perfHud.setVisible(!perfHud.isVisible())
+    e.preventDefault()
+  }
+  window.addEventListener('keydown', onPerfKeyDown)
+  // Surface the recorder + HUD on the dev-only __hover.perf accessor so
+  // CI traces, the e2e harness and Claude debug sessions can read the
+  // window's stats and dump CSVs to disk.
+  installPerfDebugApi({
+    stats: () => perfRecorder.stats(),
+    csv: () => perfRecorder.toCsv(),
+    resetWindow: () => perfRecorder.reset(),
+    isHudOn: () => perfHud.isVisible(),
+    toggleHud: () => {
+      perfHud.setVisible(!perfHud.isVisible())
+      return perfHud.isVisible()
+    },
+  })
+
   // M10.4 — wire-encoded input round-trip. simTick is the monotonic count
   // of fixed-step sim ticks driven by simulateStep; it lines up across
   // peers in lockstep multiplayer because both sides advance one tick per
@@ -359,6 +407,12 @@ export function startGameLoop(opts: GameLoopOpts): void {
   function frame(now: number): void {
     const dt = Math.min((now - last) / 1000, 1 / 15)
     last = now
+
+    // Step 8 — feed the rolling-window recorder. Allocation-free hot path
+    // (writes a single Float32Array slot + advances the head index). The
+    // expensive parts (sort, percentiles, render-info read) only run when
+    // the HUD is visible AND the 500ms cadence ticks below.
+    perfRecorder.sample(now)
 
     state.intent = state.intentOverride ?? readPlayerIntent(dt)
 
@@ -719,6 +773,14 @@ export function startGameLoop(opts: GameLoopOpts): void {
       framesThisSecond = 0
       fpsAccumStart = now
       if (hud.fpsEl) hud.fpsEl.textContent = `fps: ${state.fps.toFixed(0)}`
+      // Step 8 — refresh the perf overlay on the same cadence as the FPS
+      // pill. We only pay the percentile-sort + renderer.info read when
+      // the overlay is actually showing; the cached stats outlive the
+      // tick so the row text doesn't churn between visible refreshes.
+      if (perfHud.isVisible()) {
+        lastPerfStats = perfRecorder.stats()
+        perfHud.tick(lastPerfStats, rendererInfo)
+      }
       if (hud.audioEl)
         hud.audioEl.textContent = `audio: ${audio.isMuted() ? 'muted (M)' : 'on (M)'}`
       if (hud.inputEl) {
