@@ -168,58 +168,31 @@ detection signal fires. False positives (1280×800 windows on a
 desktop) are survivable — players can always flip rows in Settings →
 Video to override.
 
-## Build script
+## Build pipeline
 
-`pnpm build:deck` runs `tools/build-deck.mjs`, which:
+The Deck build is part of the broader desktop pipeline. See
+[`docs/desktop-builds.md`](./desktop-builds.md) for:
 
-1. Runs `pnpm build` (Vite → `dist/`).
-2. Probes for a working `cargo tauri` toolchain; prints install
-   instructions and exits 127 if it's missing (we don't auto-install
-   Rust).
-3. Runs `cargo tauri build --target x86_64-unknown-linux-gnu` inside
-   `src-tauri/`.
-4. AppImage lands in `src-tauri/target/release/bundle/appimage/`.
+- Toolchain prerequisites (Rust, Tauri CLI, system libs).
+- The `pnpm build:deck` / `pnpm build:windows` commands and what
+  they produce.
+- The `.github/workflows/build-desktop.yml` matrix (Linux AppImage +
+  Windows NSIS in parallel) — manual dispatch + `v*` tag trigger.
+- Steam Partner depot layout (Linux + Windows on the same App ID;
+  Deck is told to prefer the Linux depot via the Verified flag).
+- Sideload instructions for AppImage / .exe.
 
-The script forwards extra args, so once Steamworks is wired:
+This doc keeps its focus on the **Deck-specific runtime concerns**
+(battery, framerate cap, Gaming Mode, sleep/resume); for everything
+build-process, go to desktop-builds.md.
 
-```sh
-pnpm build:deck -- --features steam
-```
+## Sideload + Gaming Mode testing
 
-CI: `.github/workflows/build-deck.yml` runs the same flow on a Linux
-runner; triggered manually (`workflow_dispatch`) or on a `v*` tag
-push. Tag builds attach the AppImage to the GitHub Release.
+See [`docs/desktop-builds.md` → Local sideload](./desktop-builds.md#local-sideload-testing-without-steam)
+for the `scp` + `chmod +x` flow and the "Add a Non-Steam Game"
+trick for Gaming Mode coverage.
 
-Distribution:
-
-1. **Steam Partner backend**: upload via `steamcmd app_build` (separate
-   `release-steam.yml` workflow lands once we have an App ID + a
-   secret for the deployer).
-2. **Direct sideload** (testing): ship the `.AppImage` to the Deck via
-   `scp` or USB, `chmod +x`, run from Desktop Mode, then add as a
-   Non-Steam game for Gaming Mode coverage.
-
-## Testing on a real Deck
-
-### Sideload via Desktop Mode
-
-```bash
-scp src-tauri/target/release/bundle/appimage/hoverbike_*.AppImage \
-    deck@<deck-ip>:/home/deck/Apps/hoverbike.AppImage
-ssh deck@<deck-ip> 'chmod +x /home/deck/Apps/hoverbike.AppImage'
-```
-
-Then on the Deck in Desktop Mode: run the AppImage to smoke-test the
-windowed path.
-
-### Add as a Non-Steam game for Gaming Mode
-
-In Desktop Mode → Steam → Games → "Add a Non-Steam Game to My
-Library", browse to the AppImage, click *Add Selected Programs*. The
-shortcut shows up in the library; launch from Gaming Mode to exercise
-the controller-only flow.
-
-### Steam Input default config
+## Steam Input default config
 
 Ship a default Steam Input config to the Workshop so first-launch Deck
 players get sensible bindings without manual setup. The config maps:

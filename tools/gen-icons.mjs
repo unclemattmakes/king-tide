@@ -1,17 +1,29 @@
 #!/usr/bin/env node
 /**
- * Generate placeholder Tauri app icons. Writes minimal solid-color PNGs
- * (and matching .ico / .icns) so `cargo tauri build` can proceed during
- * pre-art development. Replace with real art via `cargo tauri icon`
- * once the v1 brand assets land.
+ * Generate placeholder Tauri app icons across desktop platforms.
+ * Writes minimal solid-color PNGs (and a real Windows .ico container)
+ * so `cargo tauri build` succeeds end-to-end during pre-art development.
+ * Replace with real art via `cargo tauri icon` once the v1 brand
+ * assets land.
  *
  * Color: hoverbike teal #00B4B4 over an opaque background — keeps the
  * placeholder distinct from any future palette experiments so it's
  * obvious in screenshots / debug output that the icons aren't final.
  *
- * No deps — we write the PNG bytes directly. Each icon is a solid color
- * filling the requested size. PNG format: IHDR + IDAT (deflated raw RGB)
- * + IEND. Tiny. ~200 bytes per icon.
+ * Outputs:
+ *   32x32.png        — Linux taskbar
+ *   128x128.png      — Linux high-DPI
+ *   128x128@2x.png   — Linux retina
+ *   icon.png         — generic 512² master (Linux fallback)
+ *   icon.ico         — Windows app + installer icon (PNG-embedded ICO)
+ *
+ * No deps — PNG/ICO bytes written directly. PNG = IHDR + IDAT + IEND.
+ * ICO = ICONDIR + one ICONDIRENTRY pointing at an embedded PNG (modern
+ * Windows ICO format; Vista+ accepts PNG inside the container).
+ *
+ * macOS .icns is deliberately omitted — we don't ship macOS yet, and
+ * .icns has a quirkier format that's better handled by `cargo tauri
+ * icon` when the time comes.
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -84,11 +96,7 @@ function makePng(size) {
   ])
 }
 
-// PNG-only set. The Linux AppImage + deb targets only need PNGs, so
-// we skip the .ico/.icns ceremony. When we add Windows or macOS
-// targets, run `cargo tauri icon path/to/master.png` to generate the
-// real container formats — those need proper headers, not renamed
-// PNG bytes.
+// Linux PNGs + a 512² master used as the Windows ICO source.
 const targets = [
   { name: '32x32.png', size: 32 },
   { name: '128x128.png', size: 128 },
@@ -96,11 +104,40 @@ const targets = [
   { name: 'icon.png', size: 512 },
 ]
 
+const pngs = new Map()
 for (const t of targets) {
   const png = makePng(t.size)
+  pngs.set(t.name, png)
   const dest = path.join(ICONS_DIR, t.name)
   writeFileSync(dest, png)
   console.log(`wrote ${dest} (${png.length} B, ${t.size}px)`)
 }
+
+// Windows .ico — a single 256×256 PNG embedded in an ICO container.
+// Modern Windows (Vista+) parses ICO files where each entry is a PNG
+// rather than a BMP. Tauri's bundler reads this for both the .exe icon
+// and the NSIS installer.
+//
+// Layout: ICONDIR header (6 B) + one ICONDIRENTRY (16 B) + PNG bytes.
+const winPng = pngs.get('128x128@2x.png') // 256x256 master
+const icoDir = Buffer.alloc(6)
+icoDir.writeUInt16LE(0, 0) // reserved
+icoDir.writeUInt16LE(1, 2) // type = 1 (icon)
+icoDir.writeUInt16LE(1, 4) // count = 1
+
+const icoEntry = Buffer.alloc(16)
+icoEntry.writeUInt8(0, 0) // width: 0 means 256
+icoEntry.writeUInt8(0, 1) // height: 0 means 256
+icoEntry.writeUInt8(0, 2) // numColors = 0 (truecolor)
+icoEntry.writeUInt8(0, 3) // reserved
+icoEntry.writeUInt16LE(1, 4) // planes (irrelevant for PNG, set to 1)
+icoEntry.writeUInt16LE(32, 6) // bitcount (32 = RGBA)
+icoEntry.writeUInt32LE(winPng.length, 8) // bytes in resource
+icoEntry.writeUInt32LE(6 + 16, 12) // offset = header + entry size
+
+const ico = Buffer.concat([icoDir, icoEntry, winPng])
+const icoDest = path.join(ICONS_DIR, 'icon.ico')
+writeFileSync(icoDest, ico)
+console.log(`wrote ${icoDest} (${ico.length} B, 256×256 PNG-in-ICO)`)
 
 console.log('\ndone — placeholders ready. Swap with real art via `cargo tauri icon` when v1 art lands.')
