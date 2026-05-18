@@ -120,65 +120,20 @@ const SLIDERS: SliderDef[] = [
     format: (n) => `${n.toFixed(2)}×`,
     hint: 'FFT-lite detail normal cascades. 0 = bypass · 1 = default chop · 2 = punchy',
   },
-  // FFT-path sliders. No-ops outside `?water=fft` + spectrum field so
-  // there's no harm leaving them in the menu always — they just hold
-  // value silently on the analytic path. A future "show only relevant
-  // knobs" pass can hide them based on detected mode.
   {
-    key: 'choppiness',
-    label: 'Choppiness (λ)',
+    key: 'pinchDirection',
+    label: 'Pinch direction',
     min: 0,
-    max: 2,
-    step: 0.05,
-    format: (n) => n.toFixed(2),
-    hint: 'Tessendorf horizontal pinch. 0 = pure heightfield · 0.5 = default · 1+ = breaking waves',
-  },
-  {
-    key: 'seaStateIntensity',
-    label: 'Sea state',
-    min: 0,
-    max: 4,
-    step: 0.05,
-    format: (n) => `${n.toFixed(2)}×`,
-    hint: 'Visual amplitude of the FFT spectrum. 1 = default · scrub up for stormy, down for glassy',
-  },
-  {
-    key: 'windSpeed',
-    label: 'Wind speed',
-    min: 1,
-    max: 20,
-    step: 0.5,
-    format: (n) => `${n.toFixed(1)} m/s`,
-    hint: 'Phillips spectrum L = V²/g. Higher = longer rolling swells; lower = short choppy ripples',
-  },
-  {
-    key: 'windDirection',
-    label: 'Wind direction',
-    min: -180,
-    max: 180,
+    max: 90,
     step: 1,
     format: (n) => `${n.toFixed(0)}°`,
-    hint: 'Wind-sea cascade direction (degrees CCW from world +X). Chop + swell cascades keep their hard-coded directions for cascade angle separation',
+    hint: 'Rotation of the Gerstner horizontal-displacement vector relative to wave direction. 0° = along wave (standard, sharpens crests in direction of travel) · 90° = across wave (sharpens along the crest-line axis)',
   },
-  {
-    key: 'windCutoff',
-    label: 'Wind cutoff',
-    min: 0.1,
-    max: 5,
-    step: 0.05,
-    format: (n) => `${n.toFixed(2)} m`,
-    hint: 'Phillips small-wavelength cutoff. Modes shorter than this are pruned. Lower = finer chop · higher = smoother surface',
-  },
-  {
-    key: 'foamPersistence',
-    label: 'Foam persistence',
-    min: 0,
-    max: 1,
-    step: 0.01,
-    format: (n) => n.toFixed(2),
-    hint: 'A8 foam-feedback decay (0 = fast fade, 1 = long trails). Maps to per-frame decay in [0.7, 0.99]',
-  },
-  // SoT-inspired sliders. FFT path only; no-ops on classic.
+  // SoT-inspired fragment shading sliders. FFT-path sliders
+  // (choppiness, sea state, wind speed/direction/cutoff, foam
+  // persistence) live in code under `?waves=spectrum` and are
+  // re-evaluated only when that path is in use — no menu UI for
+  // them on the default analytic Gerstner path.
   {
     key: 'bodyAbsorption',
     label: 'Body absorption',
@@ -307,23 +262,8 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
         case 'detailStrength':
           water.debug.setDetailStrength(v)
           break
-        case 'choppiness':
-          water.debug.setChoppiness(v)
-          break
-        case 'seaStateIntensity':
-          water.debug.setSeaStateIntensity(v)
-          break
-        case 'windSpeed':
-          water.debug.setWindSpeed(v)
-          break
-        case 'windDirection':
-          water.debug.setWindDirection(v)
-          break
-        case 'windCutoff':
-          water.debug.setWindCutoff(v)
-          break
-        case 'foamPersistence':
-          water.debug.setFoamPersistence(v)
+        case 'pinchDirection':
+          water.debug.setPinchDirection(v)
           break
         case 'bodyAbsorption':
           water.debug.setBodyAbsorption(v)
