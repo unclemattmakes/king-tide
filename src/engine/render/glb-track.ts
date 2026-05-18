@@ -129,8 +129,20 @@ export function attachTrackColliders(group: THREE.Object3D, phys: PhysicsWorld):
 
     const rbDesc = phys.rapier.RigidBodyDesc.fixed()
     const rb = phys.world.createRigidBody(rbDesc)
+    // Friction is low (0.08) because a hoverbike is supposed to ride ABOVE
+    // the trimesh, not on it. Lateral grip is provided by `lateralDrag` in
+    // the sim, not by Rapier contact friction. The only times the capsule
+    // actually touches the trimesh are incidental — clipping a ramp's
+    // leading edge on a steep slope-change, scraping a wall, etc. With
+    // grippy friction (the old 0.6) those incidents convert ~half the
+    // bike's forward momentum into vertical bounce via friction's
+    // tangent-component coupling, which makes the bike crawl to a near-
+    // stop on any steep slope transition (measured on the 25° ramp in
+    // slope-test: 23 m/s → 9 m/s in 150 ms). Low friction lets the
+    // capsule slide along the contact tangent so forward speed survives
+    // even if hover briefly fails to lift the chassis above the surface.
     const colDesc = phys.rapier.ColliderDesc.trimesh(worldVerts, indices)
-      .setFriction(0.6)
+      .setFriction(0.08)
       .setRestitution(0.05)
     phys.world.createCollider(colDesc, rb)
     attached += 1

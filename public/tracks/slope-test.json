@@ -1,0 +1,62 @@
+{
+  "id": "slope-test",
+  "name": "Slope Test",
+  "lapsToFinish": 1,
+  "environmentGlb": "/assets/tracks/slope-test.glb",
+  "water": {
+    "height": -20.0,
+    "waveHeight": 0.0,
+    "waveFreq": 0.0
+  },
+  "start": {
+    "position": {
+      "x": 0.0,
+      "y": 0.5,
+      "z": 46.0
+    },
+    "yaw": 3.141592653589793
+  },
+  "checkpoints": [
+    {
+      "index": 0,
+      "position": {
+        "x": 0.0,
+        "y": 1.5,
+        "z": 49.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0,
+        "w": 1.0
+      },
+      "halfWidth": 39.0,
+      "height": 4.0
+    }
+  ],
+  "aiSplines": [
+    {
+      "id": "main",
+      "points": [],
+      "anchors": [
+        {
+          "x": 0.0,
+          "y": 0.5,
+          "z": 46.0
+        },
+        {
+          "x": 0.0,
+          "y": 0.5,
+          "z": -0.0
+        },
+        {
+          "x": 0.0,
+          "y": 4.54962792832753,
+          "z": -12.5
+        }
+      ]
+    }
+  ],
+  "pickupSpawns": [],
+  "boostPads": []
+}

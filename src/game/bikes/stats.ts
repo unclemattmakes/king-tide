@@ -11,8 +11,8 @@ import type { BikeStatsData } from '@/game/components'
 export function defaultBikeStats(): BikeStatsData {
   return {
     hoverHeight: 1.2,
-    hoverSpring: 28, // (m/s^2) per meter of height error
-    hoverDamp: 7.5, // (m/s^2) per m/s of vertical velocity — punchier damp reads as planted, not bobbly
+    hoverSpring: 34, // (m/s^2) per meter of height error — firmer push so the bike lifts cleanly over rising terrain (SF-grade climbs) instead of dragging its belly
+    hoverDamp: 8.5, // (m/s^2) per m/s of vertical velocity — bumped in step with spring to keep ζ≈0.73 (lively, not bobbly)
     accel: 19, // (m/s^2) forward thrust at full throttle, scaled by speedFalloff
     topSpeed: 28, // dialed down: easier to keep on the line and collisions less violent
     turnTorque: 4.0, // (rad/s^2) at full steer — gentle enough that the AI's PD doesn't oscillate
