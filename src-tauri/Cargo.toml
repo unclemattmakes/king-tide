@@ -1,0 +1,47 @@
+[package]
+name = "hoverbike"
+version = "0.0.0"
+description = "Hoverbike — post-flood arcade hover-bike racing"
+authors = ["occ-matt"]
+edition = "2021"
+license = "MIT"
+
+# Default `src/main.rs` is the binary entry point (named `hoverbike`).
+# No [lib] block — desktop builds only at this stage. Mobile (iOS /
+# Android) would need a `src/lib.rs` exposing a `run()` function; cross
+# that bridge when the Steam Deck Linux build is solid.
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Steamworks SDK bindings. The crate is optional + gated behind the
+# `steam` feature so contributors without the SDK installed locally
+# can still build the bare wrapper for desktop testing.
+#
+# To enable Steamworks for a real Steam release build:
+#   1. Download the Steamworks SDK and set STEAM_SDK_LOCATION env var.
+#   2. Build with `cargo tauri build --features steam`.
+#
+# Without the feature, `steam::*` calls are no-op stubs (see steam.rs).
+steamworks = { version = "0.11", optional = true }
+
+[features]
+# Default to "no Steamworks" so the AppImage builds without the SDK.
+# A real Steam release flips this on via the build script.
+default = []
+steam = ["steamworks"]
+
+[profile.release]
+# Tauri-recommended profile. LTO + size-optimized panic handler keep
+# the AppImage small (~10 MB) for the Steam Deck download budget.
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
