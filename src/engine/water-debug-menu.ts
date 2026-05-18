@@ -39,6 +39,15 @@ type SliderDef = {
 const SLIDERS: SliderDef[] = [
   // Wave shape — the load-bearing knobs for "tuning the waves".
   {
+    key: 'waveBearing',
+    label: 'Wave bearing',
+    min: -180,
+    max: 180,
+    step: 1,
+    format: (n) => `${n.toFixed(0)}°`,
+    hint: 'Global wave-train direction (CCW from world +X). Rotates ALL waves together so the swell can be aimed (e.g. toward an island). Render + CPU buoyancy track together — bike float math stays in sync',
+  },
+  {
     key: 'steepness',
     label: 'Steepness (Q)',
     min: 0,
@@ -264,6 +273,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'pinchDirection':
           water.debug.setPinchDirection(v)
+          break
+        case 'waveBearing':
+          water.debug.setWaveBearing(v)
           break
         case 'bodyAbsorption':
           water.debug.setBodyAbsorption(v)

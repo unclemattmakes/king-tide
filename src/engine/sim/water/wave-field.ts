@@ -92,6 +92,12 @@ export type GerstnerWaveField = {
   wakes: WakeSource[]
   time: number
   baseY: number
+  /** Global wave-field bearing in radians (CCW). Rotates ALL per-wave
+   *  travel directions by the same angle at sample time. Lets the
+   *  user re-aim the swell train (e.g. "waves should be coming
+   *  toward the island") without rebuilding the wave list. Default 0
+   *  = directions as authored in `defaultWaves()`. */
+  waveBearing: number
 }
 
 export type SpectrumWaveField = {
@@ -107,6 +113,9 @@ export type SpectrumWaveField = {
   wakes: WakeSource[]
   time: number
   baseY: number
+  /** Global wave-field bearing in radians (CCW). Applied as a 2D
+   *  rotation on the sample (x, z) before spectrum evaluation. */
+  waveBearing: number
 }
 
 // ---- Wake parameters -----------------------------------------------------
@@ -157,7 +166,14 @@ export const WAKE_TRANS_OMEGA = 1.0
 export const WAKE_TRANS_AMP = 0.3
 
 export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveFieldState {
-  return { kind: 'gerstner', waves, wakes: [], time: 0, baseY: opts?.baseY ?? 0 }
+  return {
+    kind: 'gerstner',
+    waves,
+    wakes: [],
+    time: 0,
+    baseY: opts?.baseY ?? 0,
+    waveBearing: 0,
+  }
 }
 
 /**
@@ -189,6 +205,7 @@ export function createSpectrumWaveField(
     wakes: [],
     time: 0,
     baseY: opts?.baseY ?? 0,
+    waveBearing: 0,
   }
 }
 
@@ -378,13 +395,20 @@ function smoothstep(a: number, b: number, x: number): number {
 export function sampleHeight(field: WaveFieldState, x: number, z: number): number {
   let y = field.baseY
   const t = field.time
+  const cosB = Math.cos(field.waveBearing)
+  const sinB = Math.sin(field.waveBearing)
+  // Rotate sample coords by -bearing — equivalent to rotating each
+  // per-wave direction by +bearing. Lets one global angle re-aim the
+  // whole wave train without mutating per-wave dirX/dirZ.
+  const xRot = x * cosB + z * sinB
+  const zRot = -x * sinB + z * cosB
   if (field.kind === 'spectrum') {
-    y += sampleSpectrumHeightFromModes(field.spectrum, x, z, t)
+    y += sampleSpectrumHeightFromModes(field.spectrum, xRot, zRot, t)
   } else {
     for (const w of field.waves) {
       const k = (2 * Math.PI) / w.wavelength
       const omega = w.speed * k
-      const phase = k * (w.dirX * x + w.dirZ * z) - omega * t + w.phase
+      const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
       y += w.amplitude * Math.sin(phase)
     }
   }
@@ -397,29 +421,39 @@ export function sampleHeight(field: WaveFieldState, x: number, z: number): numbe
 /** Full sample including normal and ∂y/∂t. */
 export function sampleSurface(field: WaveFieldState, x: number, z: number): WaveSample {
   let y = field.baseY
-  let dydx = 0
-  let dydz = 0
+  // Slopes are accumulated in the ROTATED frame (using xRot/zRot
+  // below), then rotated back to world frame via the inverse of the
+  // input rotation so the returned dy/dx, dy/dz remain in world XZ.
+  let rotDydx = 0
+  let rotDydz = 0
   let vy = 0
   const t = field.time
+  const cosB = Math.cos(field.waveBearing)
+  const sinB = Math.sin(field.waveBearing)
+  const xRot = x * cosB + z * sinB
+  const zRot = -x * sinB + z * cosB
   if (field.kind === 'spectrum') {
-    const surf = sampleSpectrumSurfaceFromModes(field.spectrum, x, z, t)
+    const surf = sampleSpectrumSurfaceFromModes(field.spectrum, xRot, zRot, t)
     y += surf.y
-    dydx += surf.dydx
-    dydz += surf.dydz
+    rotDydx += surf.dydx
+    rotDydz += surf.dydz
     vy += surf.vy
   } else {
     for (const w of field.waves) {
       const k = (2 * Math.PI) / w.wavelength
       const omega = w.speed * k
-      const phase = k * (w.dirX * x + w.dirZ * z) - omega * t + w.phase
+      const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
       const s = Math.sin(phase)
       const c = Math.cos(phase)
       y += w.amplitude * s
-      dydx += w.amplitude * c * (k * w.dirX)
-      dydz += w.amplitude * c * (k * w.dirZ)
+      rotDydx += w.amplitude * c * (k * w.dirX)
+      rotDydz += w.amplitude * c * (k * w.dirZ)
       vy += w.amplitude * c * -omega
     }
   }
+  // Convert rotated-frame slopes back to world frame.
+  let dydx = rotDydx * cosB - rotDydz * sinB
+  let dydz = rotDydx * sinB + rotDydz * cosB
   for (const src of field.wakes) {
     const wk = sampleWakeFromSource(src, x, z, t)
     y += wk.y

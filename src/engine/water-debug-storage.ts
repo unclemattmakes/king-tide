@@ -8,11 +8,10 @@
 
 import type { WaterDebugDefaults, WaterMesh } from './render/water'
 
-// v7 bump: adds `pinchDirection` for rotating the Gerstner
-// horizontal-displacement vector from along-wave (0°) to
-// across-wave (90°). Old v1–v6 entries are silently merged onto
-// defaults by the per-key tolerant loader below.
-export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v7'
+// v8 bump: adds `waveBearing` for rotating the whole wave field so
+// the user can re-aim the swell train. Old v1–v7 entries are
+// silently merged onto defaults by the per-key tolerant loader below.
+export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v8'
 
 export type WaterDebugSettings = {
   steepness: number
@@ -35,6 +34,7 @@ export type WaterDebugSettings = {
   sunStreakStrength: number
   streakElongation: number
   pinchDirection: number
+  waveBearing: number
   wireframe: boolean
 }
 
@@ -60,6 +60,7 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     sunStreakStrength: d.sunStreakStrength,
     streakElongation: d.streakElongation,
     pinchDirection: d.pinchDirection,
+    waveBearing: d.waveBearing,
     wireframe: d.wireframe,
   }
 }
@@ -121,6 +122,7 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setSunStreakStrength(s.sunStreakStrength)
   water.debug.setStreakElongation(s.streakElongation)
   water.debug.setPinchDirection(s.pinchDirection)
+  water.debug.setWaveBearing(s.waveBearing)
   water.debug.setWireframe(s.wireframe)
 }
 
