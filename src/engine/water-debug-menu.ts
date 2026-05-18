@@ -178,6 +178,43 @@ const SLIDERS: SliderDef[] = [
     format: (n) => n.toFixed(2),
     hint: 'A8 foam-feedback decay (0 = fast fade, 1 = long trails). Maps to per-frame decay in [0.7, 0.99]',
   },
+  // SoT-inspired sliders. FFT path only; no-ops on classic.
+  {
+    key: 'bodyAbsorption',
+    label: 'Body absorption',
+    min: 0,
+    max: 3,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: 'Beer-Lambert depth absorption rate. 0 = no absorption (seabed shows through). 1 = baseline. 3 = fast (shallow water already reads deep)',
+  },
+  {
+    key: 'sunDiscStrength',
+    label: 'Sun disc',
+    min: 0,
+    max: 3,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: 'Karis closest-point-on-sphere sun reflection disc. 0 = no disc, ~1.4 = baseline. Tinted by horizon-haze color so disc warmth tracks time of day',
+  },
+  {
+    key: 'sunStreakStrength',
+    label: 'Sun streak',
+    min: 0,
+    max: 3,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: 'Anisotropic wave-front streak emissive. 0 = pure disc, ~0.8 = baseline. Higher values brighten the SoT low-sun streak across choppy water',
+  },
+  {
+    key: 'streakElongation',
+    label: 'Streak length',
+    min: 0.1,
+    max: 1.5,
+    step: 0.02,
+    format: (n) => n.toFixed(2),
+    hint: 'σ_along of the 2D anisotropic Gaussian. Lower → more disc-like; higher → longer streak along the wave-front tangent. 0.4 = baseline',
+  },
 ]
 
 export type WaterDebugMenu = {
@@ -287,6 +324,18 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'foamPersistence':
           water.debug.setFoamPersistence(v)
+          break
+        case 'bodyAbsorption':
+          water.debug.setBodyAbsorption(v)
+          break
+        case 'sunDiscStrength':
+          water.debug.setSunDiscStrength(v)
+          break
+        case 'sunStreakStrength':
+          water.debug.setSunStreakStrength(v)
+          break
+        case 'streakElongation':
+          water.debug.setStreakElongation(v)
           break
       }
     })

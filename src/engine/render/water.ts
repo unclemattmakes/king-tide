@@ -186,6 +186,26 @@ export type WaterMesh = {
      *  rebuild path as the wind-speed/direction setters. No-op
      *  outside the FFT path. */
     setWindCutoff(m: number): void
+    /** Beer-Lambert body absorption rate. Scales the per-channel σ
+     *  triplet that converts view-ray path-length into transmission.
+     *  1.0 = the calibrated default (cyan body reads out to ~10 m of
+     *  path). 0 = no absorption (whole body reads as seabedColor,
+     *  even in open ocean). 3 = very fast absorption (shallow water
+     *  darkens to near-deepColor within 2 m). FFT path only — no-op
+     *  on classic. */
+    setBodyAbsorption(s: number): void
+    /** Karis sun-disc emissive strength. 0 = no disc, 1 = baseline,
+     *  3 = blown-out. Driven by the same horizon-haze tint as the
+     *  fresnel emissive, so disc color follows time-of-day. */
+    setSunDiscStrength(s: number): void
+    /** Anisotropic sun-streak emissive strength. 0 = pure Karis
+     *  disc; higher values elongate the highlight along the wave-
+     *  front tangent for the SoT "low-sun streak across choppy
+     *  water" look. */
+    setSunStreakStrength(s: number): void
+    /** Streak elongation (σ_along of the 2D Gaussian). Higher =
+     *  longer streak; lower = more disc-like. Default 0.4. */
+    setStreakElongation(s: number): void
     /** Render the wave geometry as wireframe. Useful for tuning wave /
      *  wake amplitudes against the actual displacement. */
     setWireframe(on: boolean): void
@@ -233,6 +253,14 @@ export type WaterDebugDefaults = {
    *  value)`. FFT path only; no-op when the foam-feedback handle is
    *  absent. */
   foamPersistence: number
+  /** Beer-Lambert body absorption rate. 1 = calibrated default. */
+  bodyAbsorption: number
+  /** Karis sun-disc emissive strength. 1.4 = baseline. */
+  sunDiscStrength: number
+  /** Anisotropic sun-streak emissive strength. 0.8 = baseline. */
+  sunStreakStrength: number
+  /** Streak elongation σ_along. 0.4 = baseline. */
+  streakElongation: number
   wireframe: boolean
 }
 
@@ -1742,10 +1770,14 @@ export function createWaterMesh(
   // with seabed-tinted shallows.
   // σ tuned for stylized clarity: real open-ocean σ_R ≈ 0.7/m would
   // absorb to navy by 5 m. We use 0.35 so cyan body reads out to
-  // ~10 m of path (the surf-photo visual target).
-  const sigmaR = float(0.35)
-  const sigmaG = float(0.06)
-  const sigmaB = float(0.015)
+  // ~10 m of path (the surf-photo visual target). Wrapped in a
+  // scale uniform so the debug menu can scrub absorption rate live
+  // — higher rate = darker deep ocean / shorter visible-light reach.
+  const BODY_ABSORPTION_DEFAULT = 1
+  const bodyAbsorptionUniform = uniform(BODY_ABSORPTION_DEFAULT)
+  const sigmaR = float(0.35).mul(bodyAbsorptionUniform)
+  const sigmaG = float(0.06).mul(bodyAbsorptionUniform)
+  const sigmaB = float(0.015).mul(bodyAbsorptionUniform)
   const transR = exp(sigmaR.mul(closeness).negate())
   const transG = exp(sigmaG.mul(closeness).negate())
   const transB = exp(sigmaB.mul(closeness).negate())
@@ -1944,9 +1976,13 @@ export function createWaterMesh(
   const sunDiscHalo = smoothstep(float(0.978), float(0.998), sunAlign).mul(float(0.45))
   const sunDiscIntensity = max(sunDiscCore, sunDiscHalo)
   const sunDiscColor = horizonHazeUniform
+  // Sun-disc strength uniform so the debug menu can scrub the
+  // bright low-sun reflection without rebuilding the material.
+  const SUN_DISC_STRENGTH_DEFAULT = 1.4
+  const sunDiscStrengthUniform = uniform(SUN_DISC_STRENGTH_DEFAULT)
   const sunDisc = isClassic
     ? vec3(0, 0, 0)
-    : sunDiscColor.mul(sunDiscIntensity).mul(float(1.4))
+    : sunDiscColor.mul(sunDiscIntensity).mul(sunDiscStrengthUniform)
 
   // Anisotropic specular streak along wave fronts. SoT's low-sun
   // reflection isn't a clean Karis disc — it elongates into a
@@ -1979,7 +2015,14 @@ export function createWaterMesh(
   // streak elongate, tight across (0.06) keeps it visually thin.
   const along = dot(deltaH, waveFrontN)
   const across = dot(deltaH, slopeDirN)
-  const sigmaAlong = float(0.4)
+  // Streak elongation = sigmaAlong (wider sigma => longer streak
+  // along the wave-front tangent). Live-tunable via the debug menu.
+  // sigmaAcross stays fixed at 0.06 — it's the "how thin is the
+  // streak" knob that needs to stay tight for the look to read as
+  // a streak vs a circular smear.
+  const STREAK_ELONGATION_DEFAULT = 0.4
+  const streakElongationUniform = uniform(STREAK_ELONGATION_DEFAULT)
+  const sigmaAlong = streakElongationUniform
   const sigmaAcross = float(0.06)
   const streakArg = along
     .mul(along)
@@ -1992,9 +2035,15 @@ export function createWaterMesh(
   const slopeGate = smoothstep(float(0.05), float(0.2), slopeMagXZ)
   const sunHGate = max(float(0), dot(reflH.normalize(), sunH.normalize()))
   const streakIntensity = exp(streakArg.negate()).mul(slopeGate).mul(sunHGate)
+  // Sun-streak strength uniform so the debug menu can scrub the
+  // anisotropic wave-front reflection streak independently of the
+  // disc above. 0 = no streak (just the Karis disc); higher values
+  // brighten the elongated highlight.
+  const SUN_STREAK_STRENGTH_DEFAULT = 0.8
+  const sunStreakStrengthUniform = uniform(SUN_STREAK_STRENGTH_DEFAULT)
   const sunStreak = isClassic
     ? vec3(0, 0, 0)
-    : sunDiscColor.mul(streakIntensity).mul(float(0.8))
+    : sunDiscColor.mul(streakIntensity).mul(sunStreakStrengthUniform)
 
   // Wave-driven foam.
   //
@@ -2639,6 +2688,10 @@ export function createWaterMesh(
     windDirection: WIND_DIRECTION_DEFAULT,
     windCutoff: WIND_CUTOFF_DEFAULT,
     foamPersistence: FOAM_PERSISTENCE_DEFAULT,
+    bodyAbsorption: BODY_ABSORPTION_DEFAULT,
+    sunDiscStrength: SUN_DISC_STRENGTH_DEFAULT,
+    sunStreakStrength: SUN_STREAK_STRENGTH_DEFAULT,
+    streakElongation: STREAK_ELONGATION_DEFAULT,
     wireframe: wireFlag,
   }
   // Orchestrates a live spectrum rebuild: builds the new Phillips
@@ -2760,6 +2813,26 @@ export function createWaterMesh(
       const v = clamp01(s, 0, 1)
       const decay = 0.7 + (0.99 - 0.7) * v
       foamFeedbackHandle?.setDecay(decay)
+    },
+    setBodyAbsorption(s) {
+      // 0..3 — scales the per-channel Beer-Lambert sigmas. 1 =
+      // calibrated default; lower → less absorption (water bodies
+      // read brighter, seabed shows through deeper); higher →
+      // more absorption (shallow water already reads deep).
+      bodyAbsorptionUniform.value = clamp01(s, 0, 3)
+    },
+    setSunDiscStrength(s) {
+      // 0..3 — scales the Karis sun-disc emissive.
+      sunDiscStrengthUniform.value = clamp01(s, 0, 3)
+    },
+    setSunStreakStrength(s) {
+      // 0..3 — scales the anisotropic wave-front streak emissive.
+      sunStreakStrengthUniform.value = clamp01(s, 0, 3)
+    },
+    setStreakElongation(s) {
+      // 0.1..1.5 — σ_along of the 2D Gaussian. Lower clamps
+      // toward 0.1 (disc-like); higher elongates the streak.
+      streakElongationUniform.value = clamp01(s, 0.1, 1.5)
     },
     setWireframe(on) {
       mat.wireframe = !!on

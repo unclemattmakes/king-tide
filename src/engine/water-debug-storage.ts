@@ -8,10 +8,12 @@
 
 import type { WaterDebugDefaults, WaterMesh } from './render/water'
 
-// v5 bump: adds `foamPersistence` alongside the v4 wind-direction +
-// wind-cutoff keys. Old v1–v4 entries are silently merged onto
-// defaults by the per-key tolerant loader below.
-export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v5'
+// v6 bump: adds `bodyAbsorption`, `sunDiscStrength`,
+// `sunStreakStrength`, `streakElongation` for the SoT-inspired
+// Beer-Lambert + Karis disc + anisotropic streak techniques.
+// Old v1–v5 entries are silently merged onto defaults by the
+// per-key tolerant loader below.
+export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v6'
 
 export type WaterDebugSettings = {
   steepness: number
@@ -29,6 +31,10 @@ export type WaterDebugSettings = {
   windDirection: number
   windCutoff: number
   foamPersistence: number
+  bodyAbsorption: number
+  sunDiscStrength: number
+  sunStreakStrength: number
+  streakElongation: number
   wireframe: boolean
 }
 
@@ -49,6 +55,10 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     windDirection: d.windDirection,
     windCutoff: d.windCutoff,
     foamPersistence: d.foamPersistence,
+    bodyAbsorption: d.bodyAbsorption,
+    sunDiscStrength: d.sunDiscStrength,
+    sunStreakStrength: d.sunStreakStrength,
+    streakElongation: d.streakElongation,
     wireframe: d.wireframe,
   }
 }
@@ -105,6 +115,10 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setWindDirection(s.windDirection)
   water.debug.setWindCutoff(s.windCutoff)
   water.debug.setFoamPersistence(s.foamPersistence)
+  water.debug.setBodyAbsorption(s.bodyAbsorption)
+  water.debug.setSunDiscStrength(s.sunDiscStrength)
+  water.debug.setSunStreakStrength(s.sunStreakStrength)
+  water.debug.setStreakElongation(s.streakElongation)
   water.debug.setWireframe(s.wireframe)
 }
 
