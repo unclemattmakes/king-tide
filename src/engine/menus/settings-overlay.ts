@@ -33,7 +33,9 @@ import {
   setLeaderboardSubmit,
   setRubberBandAssist,
   setTutorialSubtitles,
+  setWaveLineIntensity,
   setWavePumpIntensity,
+  type WaveLineIntensity,
   type WavePumpIntensity,
 } from '@/engine/player-settings'
 import { buildReplayTutorialHref } from '@/engine/tutorial/tutorial-launch'
@@ -73,6 +75,17 @@ const ANTI_GRAV_CAMERA_LABEL: Record<AntiGravCameraIntensity, string> = {
 const ANTI_GRAV_CAMERA_VALUE: Record<string, AntiGravCameraIntensity> = {
   Full: 'full',
   Reduced: 'reduced',
+  Off: 'off',
+}
+
+const WAVE_LINE_LABEL: Record<WaveLineIntensity, string> = {
+  full: 'Full',
+  subtle: 'Subtle',
+  off: 'Off',
+}
+const WAVE_LINE_VALUE: Record<string, WaveLineIntensity> = {
+  Full: 'full',
+  Subtle: 'subtle',
   Off: 'off',
 }
 
@@ -327,6 +340,17 @@ const TAB_SPECS: TabSpec[] = [
         },
         enabled: true,
         gate: 'Controls the in-race signal that fires on a successful pump.',
+      },
+      {
+        id: 'gp-wave-line',
+        label: 'Wave-line guidance',
+        control: {
+          kind: 'select',
+          options: ['Full', 'Subtle', 'Off'],
+          defaultValue: WAVE_LINE_LABEL[playerSettings.waveLineIntensity],
+        },
+        enabled: true,
+        gate: 'Glowing markers on the water highlight pumpable wave crests ahead.',
       },
       {
         id: 'gp-anti-grav',
@@ -613,6 +637,12 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
         sel.addEventListener('change', () => {
           const v = ANTI_GRAV_CAMERA_VALUE[sel.value]
           if (v) setAntiGravCameraIntensity(v)
+        })
+      }
+      if (spec.enabled && spec.id === 'gp-wave-line') {
+        sel.addEventListener('change', () => {
+          const v = WAVE_LINE_VALUE[sel.value]
+          if (v) setWaveLineIntensity(v)
         })
       }
       return sel

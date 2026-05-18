@@ -57,6 +57,8 @@ import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
 import { createTutorialHud } from '@/engine/render/tutorial-hud'
 import { type BikeImpact, updateUnderwaterFog } from '@/engine/render/water'
+import { createWaveLineHud } from '@/engine/render/wave-line-hud'
+import type { WaveLineShimmer } from '@/engine/render/wave-line-shimmer'
 import { createWavePumpHud } from '@/engine/render/wave-pump-hud'
 import { sliceBestLap } from '@/engine/replay/best-lap-slice'
 import { serializeReplay } from '@/engine/replay/format'
@@ -147,6 +149,9 @@ export interface GameLoopOpts {
   raceHud: RaceHud
   raceTick: RaceTick
   dirArrow: DirectionArrow
+  /** Forward-looking shimmer markers over pumpable crests. Render-only;
+   *  reads `waveField` each frame, never writes sim state. */
+  waveLineShimmer: WaveLineShimmer
   physicsDebug: { tick: () => void }
   bikeRender: () => void
   riderRender: () => void
@@ -220,6 +225,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     raceHud,
     raceTick,
     dirArrow,
+    waveLineShimmer,
     physicsDebug,
     bikeRender,
     riderRender,
@@ -268,6 +274,11 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // camera's anti-grav follow weight piggybacks on the same per-frame
   // read so the two surfaces stay in lockstep.
   const antiGravHud = createAntiGravHud()
+
+  // Wave-line shimmer DOM pip — pairs with the 3D shimmer markers
+  // owned by `waveLineShimmer`. The 3D layer is the primary signal;
+  // the DOM badge is the "system on / locked" affordance.
+  const waveLineHud = createWaveLineHud()
 
   // Tutorial framework — spun up only when the caller passed
   // `tutorialMode: true`. The HUD + director sit in the per-frame
@@ -692,6 +703,16 @@ export function startGameLoop(opts: GameLoopOpts): void {
     } else {
       dirArrow.tick(camera, tmpPos, null, dt)
     }
+
+    // Wave-line shimmer + HUD pip. Hidden while the player has
+    // finished (no longer driving the bike) or paused; otherwise
+    // updated every frame from the live player pose + wave field.
+    if (!racerNow?.finished && !control.isPausedForMenu()) {
+      waveLineShimmer.tick(waveField, tmpPos, tmpQuat, dt)
+    } else {
+      waveLineShimmer.tick(waveField, tmpPos, tmpQuat, 0)
+    }
+    waveLineHud.tick(waveLineShimmer.currentMaxScore())
 
     renderer.render(scene, camera)
 

@@ -35,6 +35,7 @@ import { createScene } from './engine/render/scene'
 import { createSkySystem } from './engine/render/sky'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { createWaterMesh } from './engine/render/water'
+import { createWaveLineShimmer } from './engine/render/wave-line-shimmer'
 import { sliceBestLap } from './engine/replay/best-lap-slice'
 import { parseReplay, type ReplayBike, type ReplayFile } from './engine/replay/format'
 import { getGhost, getGhostBestLap, setGhost } from './engine/replay/ghost-state'
@@ -579,6 +580,12 @@ async function boot() {
   const dirArrow = createDirectionArrow()
   scene.add(dirArrow.mesh)
 
+  // Wave-line shimmer — forward-looking glow markers over pumpable
+  // crests in the fan ahead of the player. Render-only, reads the
+  // shared waveField each frame; never touches sim state.
+  const waveLineShimmer = createWaveLineShimmer()
+  scene.add(waveLineShimmer.mesh)
+
   // Collision wireframe overlay — pulls `world.debugRender()` each frame
   // when enabled. Toggle: F2 key, `?debug=collision` URL param, or
   // `window.__hover.toggleCollisionDebug()`. Cheap when off (early-return
@@ -840,6 +847,7 @@ async function boot() {
     raceHud,
     raceTick,
     dirArrow,
+    waveLineShimmer,
     physicsDebug,
     bikeRender,
     riderRender,

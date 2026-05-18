@@ -57,6 +57,17 @@ export type AIDifficulty = 'casual' | 'standard' | 'hard'
  */
 export type AntiGravCameraIntensity = 'full' | 'reduced' | 'off'
 
+/** Wave-line shimmer guidance. Renders glowing markers on the water
+ *  surface ahead of the player wherever the swell is rising — the
+ *  forward signal for "where the next pumpable crest is", paired with
+ *  the after-the-fact wave-pump signal.
+ *
+ *  - `full`:    full glow + ring shimmer + status pip
+ *  - `subtle`:  thinner markers, slower pulse, status pip only on strong locks
+ *  - `off`:     no markers, no status pip
+ */
+export type WaveLineIntensity = 'full' | 'subtle' | 'off'
+
 export type PlayerSettings = {
   wavePumpIntensity: WavePumpIntensity
   aiDifficulty: AIDifficulty
@@ -65,6 +76,8 @@ export type PlayerSettings = {
    *  catches up after falling behind. */
   rubberBandAssist: boolean
   antiGravCameraIntensity: AntiGravCameraIntensity
+  /** Wave-line shimmer guidance intensity — see `WaveLineIntensity`. */
+  waveLineIntensity: WaveLineIntensity
   /** Subtitles for the tutorial framework's prompt callouts.
    *  Affects only the tutorial HUD widget — race callouts and pump
    *  feedback are unaffected. */
@@ -120,6 +133,7 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   aiDifficulty: 'standard',
   rubberBandAssist: true,
   antiGravCameraIntensity: 'full',
+  waveLineIntensity: 'full',
   tutorialSubtitles: true,
   tutorialCompleted: false,
   audioMasterVolume: 0.8,
@@ -150,6 +164,7 @@ export const playerSettings: PlayerSettings = {
 const VALID_WAVE_PUMP_INTENSITY: WavePumpIntensity[] = ['full', 'subtle', 'off']
 const VALID_AI_DIFFICULTY: AIDifficulty[] = ['casual', 'standard', 'hard']
 const VALID_ANTI_GRAV_CAMERA: AntiGravCameraIntensity[] = ['full', 'reduced', 'off']
+const VALID_WAVE_LINE_INTENSITY: WaveLineIntensity[] = ['full', 'subtle', 'off']
 
 /** Roll-follow scalar each intensity step contributes — multiplied by
  *  the live AntiGravOverride weight to get the per-frame camera follow
@@ -195,6 +210,12 @@ export function loadPlayerSettings(): void {
     (VALID_ANTI_GRAV_CAMERA as string[]).includes(p.antiGravCameraIntensity)
   ) {
     playerSettings.antiGravCameraIntensity = p.antiGravCameraIntensity as AntiGravCameraIntensity
+  }
+  if (
+    typeof p.waveLineIntensity === 'string' &&
+    (VALID_WAVE_LINE_INTENSITY as string[]).includes(p.waveLineIntensity)
+  ) {
+    playerSettings.waveLineIntensity = p.waveLineIntensity as WaveLineIntensity
   }
   if (typeof p.tutorialSubtitles === 'boolean') {
     playerSettings.tutorialSubtitles = p.tutorialSubtitles
@@ -264,6 +285,11 @@ export function setRubberBandAssist(on: boolean): void {
 
 export function setAntiGravCameraIntensity(v: AntiGravCameraIntensity): void {
   playerSettings.antiGravCameraIntensity = v
+  savePlayerSettings()
+}
+
+export function setWaveLineIntensity(v: WaveLineIntensity): void {
+  playerSettings.waveLineIntensity = v
   savePlayerSettings()
 }
 
