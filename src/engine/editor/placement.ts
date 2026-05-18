@@ -66,6 +66,19 @@ export function placeAt(opts: PlaceAtOptions): EntitySel {
     })
     return { kind: 'pad', index: draft.boostPads.length - 1 }
   }
+  if (tool === 'antiGrav') {
+    // Center the zone box ~4m above the ground so the bike (which hovers
+    // around 1.6m) sits comfortably inside it, with the box's local floor
+    // a bit below the road. Authors rotate/scale from there.
+    draft.antiGravZones.push({
+      position: { x: hit.x, y: 4, z: hit.z },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+      halfWidth: 8,
+      halfHeight: 5,
+      halfDepth: 12,
+    })
+    return { kind: 'antiGrav', index: draft.antiGravZones.length - 1 }
+  }
   if (PROP_PLACE_TOOLS.includes(tool)) {
     const propType = tool as PropType
     const size = defaultPropSize(propType)
@@ -129,6 +142,10 @@ export function deleteSelected(draft: Track, sel: EntitySel): boolean {
   }
   if (sel.kind === 'pad') {
     draft.boostPads.splice(sel.index, 1)
+    return true
+  }
+  if (sel.kind === 'antiGrav') {
+    draft.antiGravZones.splice(sel.index, 1)
     return true
   }
   if (sel.kind === 'prop') {

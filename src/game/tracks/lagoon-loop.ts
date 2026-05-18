@@ -98,6 +98,7 @@ export function createLagoonLoop(): Track {
     checkpoints,
     surfaces: [],
     boostPads: [],
+    antiGravZones: [],
     props: [],
     pickupSpawns: [
       { x: 50, y: 1.8, z: 25 }, // right straight, between cp 0 and cp 1

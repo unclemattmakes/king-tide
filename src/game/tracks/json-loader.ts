@@ -2,6 +2,7 @@ import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import { pointAtT, sampleCatmullRom, tangentAtT } from './catmull-rom'
 import type {
   AISpline,
+  AntiGravZone,
   BoostPad,
   Checkpoint,
   Prop,
@@ -40,6 +41,7 @@ export type TrackJson = {
   aiSplines: AISpline[]
   pickupSpawns: Vec3[]
   boostPads?: BoostPad[]
+  antiGravZones?: AntiGravZone[]
   props?: Prop[]
   environmentGlb?: string
   water?: WaterConfig
@@ -132,6 +134,12 @@ export function buildTrackFromJson(input: unknown): Track {
   }
   const boostPads: BoostPad[] = boostPadsRaw.map((p, i) => readBoostPad(p, i))
 
+  const antiGravRaw = (input as { antiGravZones?: unknown }).antiGravZones ?? []
+  if (!Array.isArray(antiGravRaw)) {
+    throw new Error('track-json: antiGravZones must be an array if present')
+  }
+  const antiGravZones: AntiGravZone[] = antiGravRaw.map((z, i) => readAntiGravZone(z, i))
+
   const propsRaw = (input as { props?: unknown }).props ?? []
   if (!Array.isArray(propsRaw)) {
     throw new Error('track-json: props must be an array if present')
@@ -167,6 +175,7 @@ export function buildTrackFromJson(input: unknown): Track {
     aiSplines,
     pickupSpawns,
     boostPads,
+    antiGravZones,
     props,
     surfaces: [],
   }
@@ -223,6 +232,13 @@ export function trackToJson(track: Track): TrackJson {
       halfWidth: p.halfWidth,
       halfDepth: p.halfDepth,
       strength: p.strength,
+    })),
+    antiGravZones: track.antiGravZones.map((z) => ({
+      position: { ...z.position },
+      rotation: { ...z.rotation },
+      halfWidth: z.halfWidth,
+      halfHeight: z.halfHeight,
+      halfDepth: z.halfDepth,
     })),
     props: track.props.map((p) => {
       const out: Prop = {
@@ -302,6 +318,21 @@ function readBoostPad(raw: unknown, i: number): BoostPad {
     throw new Error(`track-json: boostPads[${i}] halfWidth/halfDepth must be positive`)
   }
   return { position, rotation, halfWidth, halfDepth, strength }
+}
+
+function readAntiGravZone(raw: unknown, i: number): AntiGravZone {
+  if (!isObject(raw)) throw new Error(`track-json: antiGravZones[${i}] must be an object`)
+  const position = readVec3(raw.position, `antiGravZones[${i}].position`)
+  const rotation = readQuat(raw.rotation, `antiGravZones[${i}].rotation`)
+  const halfWidth = requireNumber(raw, 'halfWidth')
+  const halfHeight = requireNumber(raw, 'halfHeight')
+  const halfDepth = requireNumber(raw, 'halfDepth')
+  if (halfWidth <= 0 || halfHeight <= 0 || halfDepth <= 0) {
+    throw new Error(
+      `track-json: antiGravZones[${i}] halfWidth/halfHeight/halfDepth must be positive`,
+    )
+  }
+  return { position, rotation, halfWidth, halfHeight, halfDepth }
 }
 
 function readProp(raw: unknown, i: number): Prop {

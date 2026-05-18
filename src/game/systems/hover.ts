@@ -5,6 +5,7 @@ import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { quatRotate, vecHorizontalLength } from '@/engine/sim/physics/vec'
 import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import {
+  AntiGravOverrideStore,
   BikeStats,
   BikeStatsStore,
   BikeTag,
@@ -26,16 +27,30 @@ const GRAVITY = 25 // must match PhysicsWorld gravity magnitude
 // only valid after Rapier WASM has loaded — `phys.rapier` carries it in.
 // `castRay` reads origin/dir synchronously and doesn't retain a reference,
 // so reuse across sequential calls in the same tick is safe.
+//
+// The direction is mutable so anti-grav can cast along the zone's local
+// −Y instead of world down. World-down (0,−1,0) is still the dominant
+// case: callers in non-anti-grav land pass that directly.
 let scratchRay: RAPIER.Ray | null = null
-function rayDown(phys: PhysicsWorld, x: number, y: number, z: number): RAPIER.Ray {
+function rayAlong(
+  phys: PhysicsWorld,
+  x: number,
+  y: number,
+  z: number,
+  dx: number,
+  dy: number,
+  dz: number,
+): RAPIER.Ray {
   if (!scratchRay) {
-    scratchRay = new phys.rapier.Ray({ x, y, z }, { x: 0, y: -1, z: 0 })
+    scratchRay = new phys.rapier.Ray({ x, y, z }, { x: dx, y: dy, z: dz })
     return scratchRay
   }
   scratchRay.origin.x = x
   scratchRay.origin.y = y
   scratchRay.origin.z = z
-  // dir stays (0, -1, 0) — every probe in this file casts straight down.
+  scratchRay.dir.x = dx
+  scratchRay.dir.y = dy
+  scratchRay.dir.z = dz
   return scratchRay
 }
 
@@ -77,20 +92,36 @@ export function slopeMomentumAccel(
  * care about isWater/hasSurface gating.
  */
 type SurfaceProbe = {
-  surfaceY: number
+  /** Surface hit point projected onto the up axis (i.e. `hitPoint · up`).
+   *  When `up = (0,1,0)` this is the hit's world-Y, matching the historic
+   *  semantics. Inside an anti-grav zone, `up` becomes the zone's local +Y
+   *  and this is the projected distance along that axis. */
+  surfaceProj: number
   isWater: boolean
   hasSurface: boolean
 }
 
+/**
+ * Center probe. Casts from (fromX,fromY,fromZ) along (dx,dy,dz) and also
+ * samples the wave field for water. Returns the higher surface (projected
+ * on up) as the ride surface. Water sampling is XZ-only — only call with
+ * a non-null `field` when up ≈ world-Y (anti-grav callers pass null).
+ */
 function probeSurface(
   phys: PhysicsWorld,
   field: WaveFieldState | null,
   fromX: number,
   fromY: number,
   fromZ: number,
+  dx: number,
+  dy: number,
+  dz: number,
+  upX: number,
+  upY: number,
+  upZ: number,
   ignore: ReturnType<PhysicsWorld['world']['getRigidBody']>,
 ): SurfaceProbe {
-  const ray = rayDown(phys, fromX, fromY, fromZ)
+  const ray = rayAlong(phys, fromX, fromY, fromZ, dx, dy, dz)
   const hit = phys.world.castRay(
     ray,
     MAX_HOVER_PROBE,
@@ -100,46 +131,64 @@ function probeSurface(
     undefined,
     ignore ?? undefined,
   )
-  const groundY = hit ? fromY - hit.timeOfImpact : Number.NEGATIVE_INFINITY
+  let groundProj = Number.NEGATIVE_INFINITY
+  if (hit) {
+    // Hit point = origin + dir × timeOfImpact. Project onto up.
+    const hx = fromX + dx * hit.timeOfImpact
+    const hy = fromY + dy * hit.timeOfImpact
+    const hz = fromZ + dz * hit.timeOfImpact
+    groundProj = hx * upX + hy * upY + hz * upZ
+  }
   const waterY = field ? sampleHeight(field, fromX, fromZ) : Number.NEGATIVE_INFINITY
 
   // Higher surface wins — that's what the bike rides on.
-  if (groundY === Number.NEGATIVE_INFINITY && waterY === Number.NEGATIVE_INFINITY) {
-    return { surfaceY: 0, isWater: false, hasSurface: false }
+  if (groundProj === Number.NEGATIVE_INFINITY && waterY === Number.NEGATIVE_INFINITY) {
+    return { surfaceProj: 0, isWater: false, hasSurface: false }
   }
-  if (groundY > waterY) {
-    return { surfaceY: groundY, isWater: false, hasSurface: true }
+  if (groundProj > waterY) {
+    return { surfaceProj: groundProj, isWater: false, hasSurface: true }
   }
   // Water can be sampled anywhere, so water is "always reachable" — but only
   // counts as a ride surface if the bike is within probe range of it.
+  // (When `field` is non-null we're in world-up land, so fromY is the bike's
+  // proj on up and waterY is the surface proj.)
   const reachable = fromY - waterY < MAX_HOVER_PROBE
-  return { surfaceY: waterY, isWater: true, hasSurface: reachable }
+  return { surfaceProj: waterY, isWater: true, hasSurface: reachable }
 }
 
 /**
- * Footprint probe: just the height at (x, z), max of ground raycast and
- * wave field. Returns NEGATIVE_INFINITY if neither is found (caller falls
- * back to the center probe — see surface alignment block).
+ * Footprint probe: returns the surface projection on up at the probe's XYZ.
+ * Returns NEGATIVE_INFINITY if neither ground nor water is found (caller
+ * falls back to the center probe — see surface alignment block).
  *
- * `lift` raises the ray origin above the bike center so the cast can see
- * terrain rising ABOVE the bike — critical for ramp anticipation. A bow
- * probe at t.y casting down will MISS an upcoming ramp face that climbs
- * higher than the bike's current Y. Lifting the origin lets the same
- * ray hit that face from above instead of passing through the air over it.
- * Cast distance grows to compensate so the same set of terrain below
- * remains reachable.
+ * `lift` raises the ray origin `lift` metres along +up so the cast can see
+ * surface rising ABOVE the probe — critical for ramp / wall anticipation.
+ * A bow probe at the bike's level casting along the bike's "down" will
+ * MISS an upcoming ramp face. Lifting along up lets the same ray hit that
+ * face from above. Cast distance grows to compensate so the same set of
+ * surface beyond remains reachable.
  */
 function probeSurfaceY(
   phys: PhysicsWorld,
   field: WaveFieldState | null,
-  x: number,
+  fromX: number,
   fromY: number,
-  z: number,
+  fromZ: number,
+  dx: number,
+  dy: number,
+  dz: number,
+  upX: number,
+  upY: number,
+  upZ: number,
   ignore: ReturnType<PhysicsWorld['world']['getRigidBody']>,
   lift = 0,
 ): number {
-  const originY = fromY + lift
-  const ray = rayDown(phys, x, originY, z)
+  // Lift the origin along +up by `lift` metres (and project that origin's
+  // up-coordinate accordingly below).
+  const ox = fromX + upX * lift
+  const oy = fromY + upY * lift
+  const oz = fromZ + upZ * lift
+  const ray = rayAlong(phys, ox, oy, oz, dx, dy, dz)
   const hit = phys.world.castRay(
     ray,
     MAX_HOVER_PROBE + lift,
@@ -149,12 +198,18 @@ function probeSurfaceY(
     undefined,
     ignore ?? undefined,
   )
-  const groundY = hit ? originY - hit.timeOfImpact : Number.NEGATIVE_INFINITY
-  const waterY = field ? sampleHeight(field, x, z) : Number.NEGATIVE_INFINITY
-  if (groundY === Number.NEGATIVE_INFINITY && waterY === Number.NEGATIVE_INFINITY) {
+  let groundProj = Number.NEGATIVE_INFINITY
+  if (hit) {
+    const hx = ox + dx * hit.timeOfImpact
+    const hy = oy + dy * hit.timeOfImpact
+    const hz = oz + dz * hit.timeOfImpact
+    groundProj = hx * upX + hy * upY + hz * upZ
+  }
+  const waterY = field ? sampleHeight(field, fromX, fromZ) : Number.NEGATIVE_INFINITY
+  if (groundProj === Number.NEGATIVE_INFINITY && waterY === Number.NEGATIVE_INFINITY) {
     return Number.NEGATIVE_INFINITY
   }
-  return Math.max(groundY, waterY)
+  return Math.max(groundProj, waterY)
 }
 
 /**
@@ -181,8 +236,46 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const dt = phys.fixedDt
     const m = stats.mass
 
-    const probe = probeSurface(phys, field, t.x, t.y, t.z, rb)
-    const groundDistance = probe.hasSurface ? t.y - probe.surfaceY : MAX_HOVER_PROBE
+    // Anti-grav override — written by `antiGravSystem` earlier this tick.
+    // When `agActive` is true the bike is in (or smoothing out of) an
+    // anti-grav zone: Rapier world gravity is disabled for this body and
+    // we apply gravity along `−upX,−upY,−upZ` ourselves at the end of the
+    // loop. Probes cast along that same direction and the hover spring
+    // lifts along +up, so the entire surface-following stack is just
+    // re-expressed in the zone's local frame.
+    //
+    // When NOT in a zone, `(upX,upY,upZ) = (0,1,0)` and the whole machine
+    // reduces to world-down behaviour — `surfaceProj` is then just world-Y,
+    // probe rays cast (0,−1,0), and spring lift is along +Y as it always was.
+    let agActive = false
+    let upX = 0
+    let upY = 1
+    let upZ = 0
+    const agOverride = AntiGravOverrideStore.get(eid)
+    if (agOverride && agOverride.active) {
+      agActive = true
+      upX = agOverride.upX
+      upY = agOverride.upY
+      upZ = agOverride.upZ
+    }
+    const dnX = -upX
+    const dnY = -upY
+    const dnZ = -upZ
+    // Wave field is a horizontal phenomenon — disable inside anti-grav so a
+    // zone over open water doesn't read phantom water under the bike.
+    const probeField = agActive ? null : field
+    // Bike-center projection on the up axis. Replaces every prior use of
+    // `t.y` in distance-along-up calculations.
+    const bikeProj = t.x * upX + t.y * upY + t.z * upZ
+
+    // Cache the bike's rotation up-front — the probe-geometry block and the
+    // ground-control block both need it (was lazily read mid-function before
+    // the up-plane refactor pulled the spring's quat needs into the probe
+    // block).
+    const q = rb.rotation()
+
+    const probe = probeSurface(phys, probeField, t.x, t.y, t.z, dnX, dnY, dnZ, upX, upY, upZ, rb)
+    const groundDistance = probe.hasSurface ? bikeProj - probe.surfaceProj : MAX_HOVER_PROBE
     const isGrounded = probe.hasSurface && groundDistance < stats.hoverHeight * 1.6
 
     // Surface alignment: figure out how the chassis should sit relative to
@@ -228,59 +321,139 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // dy/dx ratio along the bike's forward direction (negative ⇒ downslope
     // ahead). Captured at outer scope so the landing-redirect block below
     // can read it without re-sampling.
+    // `surfaceForwardSlope` is the bow→stern surface-projection differential
+    // divided by 2·halfLength along the bike's forward direction — the
+    // standard "rise / run" slope along the bike's heading. Captured at
+    // outer scope so the landing-redirect block below can read it without
+    // re-sampling. Same semantics regardless of up vector: it's the slope
+    // of the surface along the bike's forward, projected onto the up axis.
     let surfaceForwardSlope = 0
-    let yBow = Number.NEGATIVE_INFINITY
-    let yStern = Number.NEGATIVE_INFINITY
-    let yStarboard = Number.NEGATIVE_INFINITY
-    let yPort = Number.NEGATIVE_INFINITY
+    let bowProj = Number.NEGATIVE_INFINITY
+    let sternProj = Number.NEGATIVE_INFINITY
+    let starboardProj = Number.NEGATIVE_INFINITY
+    let portProj = Number.NEGATIVE_INFINITY
     let probeHalfLength = 0.8
     let probeHalfWidth = 0.4
-    let probeFwdX = 0
-    let probeFwdZ = 1
-    let probeRightX = 1
-    let probeRightZ = 0
+    // Sample-position fwd/right: bike-fwd projected onto the up-plane (so a
+    // pitched bike still samples surface "ahead along the road", not "ahead
+    // and above" which would miss the ramp it's approaching). When up = Y
+    // and the bike is yawed only, this reduces to (sin yaw, 0, cos yaw) —
+    // the historic XZ-only probe direction.
+    let sampleFwdX = 0
+    let sampleFwdY = 0
+    let sampleFwdZ = 1
+    let sampleRightX = 1
+    let sampleRightY = 0
+    let sampleRightZ = 0
+    // Force-position fwd/right: full 3D bike-fwd/right (NOT projected). The
+    // spring applies impulses at the bow's *actual* world position, which
+    // for a pitched bike has a Y component. That y-offset is what gives
+    // flat-ground attitude restoration — a nose-up bike's bow is higher,
+    // so its heightError reads larger → spring pushes bow down → levels.
+    let forceFwdX = 0
+    let forceFwdY = 0
+    let forceFwdZ = 1
+    let forceRightX = 1
+    let forceRightY = 0
+    let forceRightZ = 0
     if (isGrounded) {
-      const q0_ = rb.rotation()
-      const r02_ = 2 * (q0_.x * q0_.z + q0_.y * q0_.w)
-      const r22_ = 1 - 2 * (q0_.x * q0_.x + q0_.y * q0_.y)
-      const yaw_ = Math.atan2(r02_, r22_)
-      const cy_ = Math.cos(yaw_)
-      const sy_ = Math.sin(yaw_)
-
       // Probe footprint matches the bike's visual scale (~1.6m × 0.8m) at
-      // rest, then extends fore/aft with horizontal speed. The point of
-      // the speed scaling is *anticipation*: at 25 m/s the bow probe is
-      // ~2m out in front of the chassis, so the bike starts pitching to
-      // match the slope it's about to hit, not the flat ground it's
-      // currently on. Width stays small — no need to anticipate sideways
-      // terrain, the bike doesn't strafe.
-      const speedHoriz = Math.hypot(linvel.x, linvel.z)
-      probeHalfLength = 0.8 + Math.min(speedHoriz * 0.05, 1.4)
+      // rest, then extends fore/aft with bike speed (anticipation: at 25 m/s
+      // the bow probe is ~2m out in front, so the bike pitches to match the
+      // slope it's about to hit). Speed is measured in the up-plane so the
+      // anticipation works on tilted anti-grav roads too.
+      const linvelUp = linvel.x * upX + linvel.y * upY + linvel.z * upZ
+      const planeVx = linvel.x - upX * linvelUp
+      const planeVy = linvel.y - upY * linvelUp
+      const planeVz = linvel.z - upZ * linvelUp
+      const speedPlane = Math.hypot(planeVx, planeVy, planeVz)
+      probeHalfLength = 0.8 + Math.min(speedPlane * 0.05, 1.4)
       probeHalfWidth = 0.4
-      // Bike-fwd in world XZ: (sin(yaw), cos(yaw)).
-      // Bike-right in world XZ: (cos(yaw), -sin(yaw)).
-      probeFwdX = sy_
-      probeFwdZ = cy_
-      probeRightX = cy_
-      probeRightZ = -sy_
-      // Each probe casts from PROBE_LIFT *above* the bike center so a
-      // rising surface in front of the bike (a ramp face, a hill) is
-      // correctly intersected from above.
-      const PROBE_LIFT = 3
-      // probeSurfaceY returns max(ground, water) per location; falls back to
-      // the center probe's surfaceY if neither hit (bike overhanging an edge
-      // with nothing below — read the missing side as flat with the center
-      // rather than NaN).
-      const fallbackY = probe.surfaceY
-      const sampleAt = (px: number, pz: number): number => {
-        const y = probeSurfaceY(phys, field, px, t.y, pz, rb, PROBE_LIFT)
-        return y === Number.NEGATIVE_INFINITY ? fallbackY : y
+
+      // Full 3D bike-fwd / bike-right (used for the spring's force position).
+      const fwd3D = quatRotate(q, { x: 0, y: 0, z: 1 })
+      const right3D = quatRotate(q, { x: 1, y: 0, z: 0 })
+      forceFwdX = fwd3D.x
+      forceFwdY = fwd3D.y
+      forceFwdZ = fwd3D.z
+      forceRightX = right3D.x
+      forceRightY = right3D.y
+      forceRightZ = right3D.z
+
+      // Project bike-fwd onto the up-plane, then normalize → the "horizontal"
+      // forward in zone-local frame. Used to position the probe samples.
+      // Fall back to forceFwd when degenerate (bike-fwd colinear with up —
+      // i.e. nose pointing straight along the up axis, vanishingly rare).
+      const fwdDotUp = fwd3D.x * upX + fwd3D.y * upY + fwd3D.z * upZ
+      let pfX = fwd3D.x - upX * fwdDotUp
+      let pfY = fwd3D.y - upY * fwdDotUp
+      let pfZ = fwd3D.z - upZ * fwdDotUp
+      const pfLen = Math.hypot(pfX, pfY, pfZ)
+      if (pfLen > 0.01) {
+        pfX /= pfLen
+        pfY /= pfLen
+        pfZ /= pfLen
+      } else {
+        pfX = fwd3D.x
+        pfY = fwd3D.y
+        pfZ = fwd3D.z
       }
-      yBow = sampleAt(t.x + probeFwdX * probeHalfLength, t.z + probeFwdZ * probeHalfLength)
-      yStern = sampleAt(t.x - probeFwdX * probeHalfLength, t.z - probeFwdZ * probeHalfLength)
-      yStarboard = sampleAt(t.x + probeRightX * probeHalfWidth, t.z + probeRightZ * probeHalfWidth)
-      yPort = sampleAt(t.x - probeRightX * probeHalfWidth, t.z - probeRightZ * probeHalfWidth)
-      surfaceForwardSlope = (yBow - yStern) / (2 * probeHalfLength)
+      sampleFwdX = pfX
+      sampleFwdY = pfY
+      sampleFwdZ = pfZ
+      // Right = up × fwdInUpPlane (unit, since both are unit and orthogonal).
+      sampleRightX = upY * pfZ - upZ * pfY
+      sampleRightY = upZ * pfX - upX * pfZ
+      sampleRightZ = upX * pfY - upY * pfX
+
+      // Each probe casts from PROBE_LIFT *along +up* of the bike center so a
+      // rising surface in front of the bike (a ramp face, a wall on
+      // approach) is correctly intersected from above.
+      const PROBE_LIFT = 3
+      // probeSurfaceY returns max(ground, water) per location (projected on
+      // up); falls back to the center probe's surface projection if neither
+      // hit (bike overhanging an edge with nothing below — read the missing
+      // side as flat with the center rather than NaN).
+      const fallbackProj = probe.surfaceProj
+      const sampleAt = (px: number, py: number, pz: number): number => {
+        const v = probeSurfaceY(
+          phys,
+          probeField,
+          px,
+          py,
+          pz,
+          dnX,
+          dnY,
+          dnZ,
+          upX,
+          upY,
+          upZ,
+          rb,
+          PROBE_LIFT,
+        )
+        return v === Number.NEGATIVE_INFINITY ? fallbackProj : v
+      }
+      bowProj = sampleAt(
+        t.x + sampleFwdX * probeHalfLength,
+        t.y + sampleFwdY * probeHalfLength,
+        t.z + sampleFwdZ * probeHalfLength,
+      )
+      sternProj = sampleAt(
+        t.x - sampleFwdX * probeHalfLength,
+        t.y - sampleFwdY * probeHalfLength,
+        t.z - sampleFwdZ * probeHalfLength,
+      )
+      starboardProj = sampleAt(
+        t.x + sampleRightX * probeHalfWidth,
+        t.y + sampleRightY * probeHalfWidth,
+        t.z + sampleRightZ * probeHalfWidth,
+      )
+      portProj = sampleAt(
+        t.x - sampleRightX * probeHalfWidth,
+        t.y - sampleRightY * probeHalfWidth,
+        t.z - sampleRightZ * probeHalfWidth,
+      )
+      surfaceForwardSlope = (bowProj - sternProj) / (2 * probeHalfLength)
     }
 
     // Attitude is FULLY PHYSICS-DRIVEN in this build — no kinematic
@@ -307,8 +480,10 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // forward, kill horizontal velocity — the rider-crash Δv detector
     // picks up the dump next tick and ragdolls. Gated by speed so slow
     // tumbles just bounce. Water is exempt: nose-diving into water is
-    // supposed to plough under, not ragdoll the rider.
-    if (!prevGrounded && isGrounded && !probe.isWater) {
+    // supposed to plough under, not ragdoll the rider. Anti-grav is also
+    // exempt — the world-Y pitch this measures isn't meaningful when the
+    // bike has just aligned to a tilted road plane.
+    if (!prevGrounded && isGrounded && !probe.isWater && !agActive) {
       const qLand = rb.rotation()
       const r12Land = 2 * (qLand.y * qLand.z - qLand.x * qLand.w)
       const pitchLand = Math.asin(Math.max(-1, Math.min(1, -r12Land)))
@@ -330,9 +505,8 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // Without this check the bike would sit happily at vertical nose-
     // down on flat ground, hovered up by the bow's pure-linear lift
     // with nothing to right it. Crash instead: kill horizontal velocity,
-    // rider-crash picks up the Δv next tick. Water is exempt — diving
-    // into water is supposed to work.
-    if (isGrounded && !probe.isWater) {
+    // rider-crash picks up the Δv next tick. Water + anti-grav exempt.
+    if (isGrounded && !probe.isWater && !agActive) {
       const qBad = rb.rotation()
       const r12Bad = 2 * (qBad.y * qBad.z - qBad.x * qBad.w)
       const pitchBad = Math.asin(Math.max(-1, Math.min(1, -r12Bad)))
@@ -341,8 +515,6 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         rb.setLinvel({ x: 0, y: linvel.y, z: 0 }, true)
       }
     }
-
-    const q = rb.rotation()
 
     // Multi-point hover spring. Fires only while grounded. Instead of a
     // single force at CoM, apply 1/4-mass vertical impulses at each of
@@ -394,54 +566,50 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       } else {
         const angv = rb.angvel()
         const POINT_MASS_FRAC = 0.25
-        // Full 3D probe offsets. XZ uses the yaw-only projection (which
-        // is also where the surface was sampled), Y uses the bike's true
-        // forward/right vectors so a pitched-up bike's bow is genuinely
-        // higher in world. That y-difference is what gives flat-ground
-        // roll/pitch their restoring force: lean the bike right →
-        // starboard point's world-y drops → bigger heightError on
-        // starboard → bigger upward force → torque rolls bike back level.
+        // Full 3D probe offsets at each corner. The force is applied at
+        // (t + forceFwd|forceRight) — the bike's actual bow/stern/port/
+        // starboard world position, including pitch contribution. That's
+        // what gives flat-ground attitude restoration: a nose-up bike's
+        // bow is higher than the surface beneath it, so heightError reads
+        // negative there → spring pushes bow DOWN → levels the chassis.
         //
         // `longitudinal` tags the bow/stern probes vs port/starboard.
         // On water, the longitudinal spring is softened so the bike
         // pushes THROUGH chop instead of pitching to match every wave
-        // crest. Lateral (roll-axis) spring keeps full stiffness — the
-        // bike still banks into long swells.
-        const fwd3D = quatRotate(q, { x: 0, y: 0, z: 1 })
-        const right3D = quatRotate(q, { x: 1, y: 0, z: 0 })
+        // crest. Lateral (roll-axis) spring keeps full stiffness.
         const points: {
           ox: number
           oy: number
           oz: number
-          surfY: number
+          surfProj: number
           longitudinal: boolean
         }[] = [
           {
-            ox: probeFwdX * probeHalfLength,
-            oy: fwd3D.y * probeHalfLength,
-            oz: probeFwdZ * probeHalfLength,
-            surfY: yBow,
+            ox: forceFwdX * probeHalfLength,
+            oy: forceFwdY * probeHalfLength,
+            oz: forceFwdZ * probeHalfLength,
+            surfProj: bowProj,
             longitudinal: true,
           },
           {
-            ox: -probeFwdX * probeHalfLength,
-            oy: -fwd3D.y * probeHalfLength,
-            oz: -probeFwdZ * probeHalfLength,
-            surfY: yStern,
+            ox: -forceFwdX * probeHalfLength,
+            oy: -forceFwdY * probeHalfLength,
+            oz: -forceFwdZ * probeHalfLength,
+            surfProj: sternProj,
             longitudinal: true,
           },
           {
-            ox: probeRightX * probeHalfWidth,
-            oy: right3D.y * probeHalfWidth,
-            oz: probeRightZ * probeHalfWidth,
-            surfY: yStarboard,
+            ox: forceRightX * probeHalfWidth,
+            oy: forceRightY * probeHalfWidth,
+            oz: forceRightZ * probeHalfWidth,
+            surfProj: starboardProj,
             longitudinal: false,
           },
           {
-            ox: -probeRightX * probeHalfWidth,
-            oy: -right3D.y * probeHalfWidth,
-            oz: -probeRightZ * probeHalfWidth,
-            surfY: yPort,
+            ox: -forceRightX * probeHalfWidth,
+            oy: -forceRightY * probeHalfWidth,
+            oz: -forceRightZ * probeHalfWidth,
+            surfProj: portProj,
             longitudinal: false,
           },
         ]
@@ -451,45 +619,55 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         // to bring back the strict wave-conforming feel.
         const WATER_LONGITUDINAL_SPRING_MUL = 0.4
         // Per-corner buoyancy constants for submerged corners on water.
-        // Matches the center-submerged underwater branch so the transition
-        // (corner-by-corner submersion → full center submersion) is smooth.
         const BUOYANCY_PER_M = 14
         const BUOYANCY_CAP = 20
         for (const p of points) {
-          const worldY = t.y + p.oy
-          const localDist = worldY - p.surfY
+          // Probe point's projection on up = (t + offset) · up.
+          const probeProj = (t.x + p.ox) * upX + (t.y + p.oy) * upY + (t.z + p.oz) * upZ
+          const localDist = probeProj - p.surfProj
           // Per-corner "locally grounded" gate. The bow probe, with its
           // speed-anticipation reach, projects past a ramp lip before the
-          // bike does — past the lip it samples the much lower ground
+          // bike does — past the lip it samples the much lower surface
           // beyond, and a naive heightError would fire a huge DOWNWARD
           // spring force at the bow right at takeoff (the "sticky nose"
           // nose-dive). Skip a corner once its local surface is further
-          // than the grounded threshold below it; that corner is
-          // effectively airborne even though another corner is still on
-          // the ramp.
+          // than the grounded threshold below it.
           if (localDist > stats.hoverHeight * 1.6) continue
-          // v_y at this offset = linvel.y + (ω × offset).y = linvel.y + ω.z*ox − ω.x*oz
-          const vAtPointY = linvel.y + angv.z * p.ox - angv.x * p.oz
-          const dampVy = Math.max(vAtPointY, 0)
+          // v at this offset, projected on up:
+          //   v_at_point = linvel + (angv × offset)
+          //   v_at_point · up = linvel·up + (angv × offset)·up
+          const crossX = angv.y * p.oz - angv.z * p.oy
+          const crossY = angv.z * p.ox - angv.x * p.oz
+          const crossZ = angv.x * p.oy - angv.y * p.ox
+          const vAtPointUp =
+            linvel.x * upX +
+            linvel.y * upY +
+            linvel.z * upZ +
+            crossX * upX +
+            crossY * upY +
+            crossZ * upZ
+          // Damp only the AWAY-from-surface component (positive = lifting
+          // off). Matches the historic `Math.max(vAtPointY, 0)`.
+          const dampV = Math.max(vAtPointUp, 0)
           let aUp: number
           if (probe.isWater && localDist < 0) {
-            // Submerged on water. Use capped buoyancy instead of the
-            // stiff hover spring so a nose-dive with enough inertia
-            // actually goes under — the spring's unbounded heightError
-            // (1.2 − negative = arbitrarily large) would otherwise
-            // shove a submerged corner back up violently and prevent
-            // any dive at all.
+            // Submerged on water — capped buoyancy instead of the stiff
+            // spring so a nose-dive actually goes under. Anti-grav can't
+            // reach here (probe.isWater is false when probeField is null).
             const submersion = -localDist
             const aBuoy = Math.min(submersion * BUOYANCY_PER_M, BUOYANCY_CAP)
-            aUp = GRAVITY + aBuoy - dampVy * stats.hoverDamp
+            aUp = GRAVITY + aBuoy - dampV * stats.hoverDamp
           } else {
             const heightError = stats.hoverHeight - localDist
             const springMul = probe.isWater && p.longitudinal ? WATER_LONGITUDINAL_SPRING_MUL : 1.0
-            aUp = GRAVITY + heightError * stats.hoverSpring * springMul - dampVy * stats.hoverDamp
+            aUp = GRAVITY + heightError * stats.hoverSpring * springMul - dampV * stats.hoverDamp
           }
+          // Lift along +up at the probe point's world position. Replaces
+          // the old `{x:0, y:F, z:0}` world-down lift.
+          const impMag = aUp * POINT_MASS_FRAC * m * dt
           rb.applyImpulseAtPoint(
-            { x: 0, y: aUp * POINT_MASS_FRAC * m * dt, z: 0 },
-            { x: t.x + p.ox, y: worldY, z: t.z + p.oz },
+            { x: upX * impMag, y: upY * impMag, z: upZ * impMag },
+            { x: t.x + p.ox, y: t.y + p.oy, z: t.z + p.oz },
             true,
           )
         }
@@ -561,9 +739,15 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       // Hang-time: counter ~60% of gravity so the bike floats through
       // arcs JetMoto-style instead of dropping like a brick. Effective
       // gravity in air ≈ 10 m/s² vs 25 on the ground — close to
-      // real-world Earth pull, well below arcade ground gravity.
+      // real-world Earth pull, well below arcade ground gravity. In
+      // anti-grav, lift is along the zone's up (matching the manual
+      // gravity applied at end-of-loop, which is along −up).
       const AIR_LIFT_FRAC = 0.6
-      rb.applyImpulse({ x: 0, y: GRAVITY * AIR_LIFT_FRAC * m * dt, z: 0 }, true)
+      const airLiftMag = GRAVITY * AIR_LIFT_FRAC * m * dt
+      rb.applyImpulse(
+        { x: upX * airLiftMag, y: upY * airLiftMag, z: upZ * airLiftMag },
+        true,
+      )
 
       // Pitch-vectored thrust: airborne thrust pushes along the bike's
       // true forward direction. The bike's visual nose orientation
@@ -604,7 +788,7 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         )
       }
 
-      // Yaw around the "pure heading" axis: world-up with the bike-fwd
+      // Yaw around the "pure heading" axis: up with the bike-fwd
       // projection removed (then normalised). Perpendicular to bike-fwd
       // by construction, so steering in the air can't leak into roll
       // even when the bike is pitched up after a ramp. Plain world-Y
@@ -612,15 +796,16 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       // the bike sideways — the angvel strip at the top of the next
       // tick zeroes the roll velocity, but the rotation has already
       // integrated during phys.step. Pure-heading axis avoids the leak
-      // entirely.
+      // entirely. In anti-grav we use the zone's up so yaw rotates around
+      // the road normal, not world-Y.
       //
       // Reduced authority (×0.3) preserved for landing alignment.
       const AIR_TURN_MUL = 0.3
       const aTurnAir = -intent.steer * stats.turnTorque * AIR_TURN_MUL
-      const fwdAxisDot = fwdAir.y // (0,1,0) · fwdAir
-      const yawAxXAir = -fwdAxisDot * fwdAir.x
-      const yawAxYAir = 1 - fwdAxisDot * fwdAir.y
-      const yawAxZAir = -fwdAxisDot * fwdAir.z
+      const fwdAxisDot = fwdAir.x * upX + fwdAir.y * upY + fwdAir.z * upZ
+      const yawAxXAir = upX - fwdAxisDot * fwdAir.x
+      const yawAxYAir = upY - fwdAxisDot * fwdAir.y
+      const yawAxZAir = upZ - fwdAxisDot * fwdAir.z
       const yawAxLenAir = Math.hypot(yawAxXAir, yawAxYAir, yawAxZAir)
       if (yawAxLenAir > 0.01) {
         const invLen = 1 / yawAxLenAir
@@ -666,24 +851,53 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
 
     const fwd = quatRotate(q, { x: 0, y: 0, z: 1 })
 
-    const speed = vecHorizontalLength({ x: linvel.x, y: 0, z: linvel.z })
+    // Bike-fwd projected into the up-plane — the "horizontal" forward in
+    // the bike's local frame. When up = Y this is just (fwd.x, 0, fwd.z),
+    // matching the historic XZ horizontal forward used for thrust / brake
+    // / drag. In anti-grav this stays in the road plane so thrust pushes
+    // the bike along the road surface, not into / off it.
+    const fwdDotUpG = fwd.x * upX + fwd.y * upY + fwd.z * upZ
+    let planeFwdX = fwd.x - upX * fwdDotUpG
+    let planeFwdY = fwd.y - upY * fwdDotUpG
+    let planeFwdZ = fwd.z - upZ * fwdDotUpG
+    const planeFwdLen = Math.hypot(planeFwdX, planeFwdY, planeFwdZ)
+    if (planeFwdLen > 0.01) {
+      planeFwdX /= planeFwdLen
+      planeFwdY /= planeFwdLen
+      planeFwdZ /= planeFwdLen
+    }
+    // Up-plane "right" — used by lateral drag + fishtail.
+    const planeRightX = upY * planeFwdZ - upZ * planeFwdY
+    const planeRightY = upZ * planeFwdX - upX * planeFwdZ
+    const planeRightZ = upX * planeFwdY - upY * planeFwdX
 
-    // Brake — opposes current horizontal velocity. Lets the AI (and the
+    // Velocity projected onto the up-plane (the "horizontal" velocity in
+    // the bike's local frame). Used to compute the effective ground speed
+    // for thrust / brake / drag / slope-momentum.
+    const linvelUpG = linvel.x * upX + linvel.y * upY + linvel.z * upZ
+    const vPlaneX = linvel.x - upX * linvelUpG
+    const vPlaneY = linvel.y - upY * linvelUpG
+    const vPlaneZ = linvel.z - upZ * linvelUpG
+    const speed = Math.hypot(vPlaneX, vPlaneY, vPlaneZ)
+
+    // Brake — opposes current up-plane velocity. Lets the AI (and the
     // player) actually slow down before a corner instead of relying solely
     // on letting off the throttle.
     if (intent.brake > 0 && speed > 0.5) {
       const brakeAccel = intent.brake * 18 // m/s^2 at full brake
       rb.applyImpulse(
         {
-          x: -(linvel.x / speed) * brakeAccel * m * dt,
-          y: 0,
-          z: -(linvel.z / speed) * brakeAccel * m * dt,
+          x: -(vPlaneX / speed) * brakeAccel * m * dt,
+          y: -(vPlaneY / speed) * brakeAccel * m * dt,
+          z: -(vPlaneZ / speed) * brakeAccel * m * dt,
         },
         true,
       )
     }
 
     // Forward thrust (water adds extra drag — slightly less responsive).
+    // Applied along the up-plane forward so the bike accelerates along
+    // the road plane, not world-horizontal.
     const throttle = intent.throttle
     const direction = throttle >= 0 ? 1 : -1
     const scale = throttle >= 0 ? 1 : stats.reverseScale
@@ -694,7 +908,14 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const surfaceMul = probe.isWater ? 0.85 : 1.0
     const aThrust =
       Math.abs(throttle) * stats.accel * scale * speedFalloff * boost * direction * surfaceMul
-    rb.applyImpulse({ x: fwd.x * aThrust * m * dt, y: 0, z: fwd.z * aThrust * m * dt }, true)
+    rb.applyImpulse(
+      {
+        x: planeFwdX * aThrust * m * dt,
+        y: planeFwdY * aThrust * m * dt,
+        z: planeFwdZ * aThrust * m * dt,
+      },
+      true,
+    )
 
     // Slope momentum — going down a wave is faster than climbing one.
     // The chassis tilts to track the surface (multi-probe alignment above);
@@ -719,18 +940,19 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // (enough to easily exceed topSpeed with momentum), while climbing the
     // same slope costs only -3.4 m/s² of drag, which the bike's 19 m/s²
     // thrust eats through comfortably.
-    const fwdHorizLen = Math.hypot(fwd.x, fwd.z)
-    if (fwdHorizLen > 0.01) {
+    if (planeFwdLen > 0.01) {
       // Slope momentum reads the *surface* contour, not chassis pitch —
       // so the rider can't farm free downhill thrust by pitching the
       // nose forward. `-atan(surfaceForwardSlope)` matches the previous
       // `surfacePitchTarget` sign (negative on upslope, positive on down).
+      // Applied along the up-plane forward so the marble-on-incline force
+      // is in the road plane (not world horizontal).
       const aSlope = slopeMomentumAccel(-Math.atan(surfaceForwardSlope))
       rb.applyImpulse(
         {
-          x: (fwd.x / fwdHorizLen) * aSlope * m * dt,
-          y: 0,
-          z: (fwd.z / fwdHorizLen) * aSlope * m * dt,
+          x: planeFwdX * aSlope * m * dt,
+          y: planeFwdY * aSlope * m * dt,
+          z: planeFwdZ * aSlope * m * dt,
         },
         true,
       )
@@ -753,7 +975,7 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // Plus an alignment factor that scales redirect strength with how
     // steep the down-slope actually is, so a 6° dip is a hint and a 30°
     // drop is a payoff.
-    if (!prevGrounded && linvel.y < -2 && surfaceForwardSlope < -0.1 && fwdHorizLen > 0.01) {
+    if (!prevGrounded && linvel.y < -2 && surfaceForwardSlope < -0.1 && planeFwdLen > 0.01) {
       const descend = -linvel.y // positive m/s
       const slopeAngle = Math.atan(-surfaceForwardSlope) // positive radians
       const REDIRECT_MAX = 0.7 // fraction of descent converted at full alignment
@@ -762,28 +984,25 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       const dvForward = descend * redirectFrac
       rb.applyImpulse(
         {
-          x: (fwd.x / fwdHorizLen) * dvForward * m,
-          y: 0,
-          z: (fwd.z / fwdHorizLen) * dvForward * m,
+          x: planeFwdX * dvForward * m,
+          y: planeFwdY * dvForward * m,
+          z: planeFwdZ * dvForward * m,
         },
         true,
       )
     }
 
-    // Yaw torque around the "pure heading" axis: world-up with the
-    // bike-fwd projection removed (then normalised). Perpendicular to
-    // bike-fwd by construction, so steering can't leak into roll
-    // regardless of pitch. M9.3 tried bike-local up and produced a
-    // worse bug because the roll PD of the day read bikeRight.y; the
-    // current roll PD reads true YXZ Euler roll, so the pure-heading
-    // axis is safe and strictly better (no leak for either ground or
-    // air to chase).
+    // Yaw torque around the "pure heading" axis: up with the bike-fwd
+    // projection removed (then normalised). Perpendicular to bike-fwd by
+    // construction, so steering can't leak into roll regardless of pitch.
+    // In anti-grav we substitute the zone's up so yaw rotates around the
+    // road normal — turning on a wall pivots around the wall's outward
+    // normal, exactly as MK8 anti-grav looks.
     const turnMul = probe.isWater ? 1.1 : 1.0
     const aTurn = -intent.steer * stats.turnTorque * turnMul
-    const fwdDotUp = fwd.y
-    const yawAxXG = -fwdDotUp * fwd.x
-    const yawAxYG = 1 - fwdDotUp * fwd.y
-    const yawAxZG = -fwdDotUp * fwd.z
+    const yawAxXG = upX - fwdDotUpG * fwd.x
+    const yawAxYG = upY - fwdDotUpG * fwd.y
+    const yawAxZG = upZ - fwdDotUpG * fwd.z
     const yawAxLenG = Math.hypot(yawAxXG, yawAxYG, yawAxZG)
     if (yawAxLenG > 0.01) {
       const invLenG = 1 / yawAxLenG
@@ -808,13 +1027,15 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const YAW_PIVOT_FWD = 0.7 // metres forward of CoM
     const fishtailFade = Math.min(speed / 8, 1)
     if (fishtailFade > 0) {
-      const rightYaw = quatRotate(q, { x: 1, y: 0, z: 0 })
+      // Lateral push along the up-plane right axis so the rear sweeps out
+      // *across* the road surface, not across world XZ. Reduces to the
+      // historic behaviour when up = Y.
       const aLatFish = -aTurn * YAW_PIVOT_FWD * fishtailFade
       rb.applyImpulse(
         {
-          x: rightYaw.x * aLatFish * m * dt,
-          y: 0,
-          z: rightYaw.z * aLatFish * m * dt,
+          x: planeRightX * aLatFish * m * dt,
+          y: planeRightY * aLatFish * m * dt,
+          z: planeRightZ * aLatFish * m * dt,
         },
         true,
       )
@@ -837,6 +1058,16 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     //
     // In AIR: skipped. Pitch, roll, yaw are all free physics — backflips,
     // barrel rolls, whatever the player commits to with their inputs.
+    //
+    // In ANTI-GRAV: skipped. The roll target + currentRoll below are both
+    // computed in world-Y frame; in anti-grav they fight the zone-up
+    // alignment. The multi-point spring's port/starboard differential plus
+    // the AG alignment torque (end of loop) handle roll there. Steer-lean
+    // is sacrificed in anti-grav for the MVP — can revisit by retargeting
+    // the PD around the up axis if it ends up feeling stiff in practice.
+    if (agActive) {
+      // No roll PD in anti-grav — drop through to lateral drag.
+    } else {
     const ROLL_LEAN_LIMIT = (40 * Math.PI) / 180 // 40° at "normal" speed
     const LEAN_SPEED_FULL = 6 // m/s — base lean curve hits 1.0 here
     const LEAN_SPEED_HIGH = 24 // m/s — high-speed boost saturates here
@@ -852,7 +1083,7 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // Surface roll component — multi-probe height differential across the
     // bike's width. Mirrors the prior kinematic `surfaceRollTarget` so the
     // bike banks into a wave normal when riding diagonally across chop.
-    const surfaceRollTarget = Math.atan2(yStarboard - yPort, 2 * probeHalfWidth)
+    const surfaceRollTarget = Math.atan2(starboardProj - portProj, 2 * probeHalfWidth)
     const targetRoll = surfaceRollTarget + intent.steer * ROLL_LEAN_LIMIT * leanScale
     // Extract true YXZ roll from current rotation.
     const r10R = 2 * (q.x * q.y + q.z * q.w)
@@ -874,6 +1105,7 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       },
       true,
     )
+    }
 
     // (Pitch on the ground stays pure physics: player input torque +
     // multi-point hover handles surface alignment + flat-ground restoration.
@@ -881,11 +1113,68 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // Yaw torque + fishtail bias does the steering. Attitude in air is
     // fully free physics.)
 
-    // Lateral drag — water has *more* lateral resistance (skis don't slide sideways easily).
+    // Lateral drag — water has *more* lateral resistance (skis don't slide
+    // sideways easily). In anti-grav we measure "lateral" along the
+    // up-plane right axis so the drag opposes sideways drift *across the
+    // road*, not across world XZ. Reduces to the historic behaviour when
+    // up = Y.
     const dragMul = probe.isWater ? 1.4 : 1.0
-    const right = quatRotate(q, { x: 1, y: 0, z: 0 })
-    const lateralVel = linvel.x * right.x + linvel.z * right.z
+    const lateralVel =
+      linvel.x * planeRightX + linvel.y * planeRightY + linvel.z * planeRightZ
     const aDrag = -lateralVel * stats.lateralDrag * dragMul
-    rb.applyImpulse({ x: right.x * aDrag * m * dt, y: 0, z: right.z * aDrag * m * dt }, true)
+    rb.applyImpulse(
+      {
+        x: planeRightX * aDrag * m * dt,
+        y: planeRightY * aDrag * m * dt,
+        z: planeRightZ * aDrag * m * dt,
+      },
+      true,
+    )
+
+    // ── Anti-grav corrections ────────────────────────────────────────────
+    //
+    // While `agActive`, this bike's Rapier per-body gravity scale is 0
+    // (set by `antiGravSystem`). Replace that with a manual gravity along
+    // −up so the bike falls toward the zone's road plane. All other forces
+    // (probe rays, spring lift, yaw, drag, thrust) are already retargeted
+    // onto the up axis above, so on a vertical wall the spring lifts away
+    // from the wall while gravity pulls into it — the bike sticks.
+    //
+    // The spring's port/starboard differential (now in up-plane coords)
+    // produces the bulk of the alignment torque automatically. The extra
+    // PD here is just a transition aid — it speeds up rotation toward the
+    // new up during zone enter/exit (when bike +Y is far from zone up).
+    // Low gain so it doesn't overshoot the spring's equilibrium.
+    if (agActive) {
+      rb.applyImpulse(
+        {
+          x: -upX * GRAVITY * m * dt,
+          y: -upY * GRAVITY * m * dt,
+          z: -upZ * GRAVITY * m * dt,
+        },
+        true,
+      )
+
+      // PD alignment: bring the bike's local +Y onto up.
+      // cross(bikeUp, up) is the rotation-axis × sin(angle) — the
+      // standard restoring torque direction for "align A to B". Damped by
+      // angular velocity. Reduced gain (20 vs 60) now that the spring
+      // also aligns; this just smooths the transition.
+      const bUp = quatRotate(rb.rotation(), { x: 0, y: 1, z: 0 })
+      const cx = bUp.y * upZ - bUp.z * upY
+      const cy = bUp.z * upX - bUp.x * upZ
+      const cz = bUp.x * upY - bUp.y * upX
+      const AG_ALIGN_P = 20
+      const AG_ALIGN_D = 5
+      const angvA = rb.angvel()
+      rb.applyTorqueImpulse(
+        {
+          x: (cx * AG_ALIGN_P - angvA.x * AG_ALIGN_D) * m * dt,
+          y: (cy * AG_ALIGN_P - angvA.y * AG_ALIGN_D) * m * dt,
+          z: (cz * AG_ALIGN_P - angvA.z * AG_ALIGN_D) * m * dt,
+        },
+        true,
+      )
+    }
   }
 }

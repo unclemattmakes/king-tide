@@ -21,6 +21,7 @@ export type PlaceTool =
   | 'gate'
   | 'pickup'
   | 'pad'
+  | 'antiGrav'
   | 'spline'
   | 'box'
   | 'sphere'
@@ -33,6 +34,7 @@ export type EntitySel =
   | { kind: 'gate'; index: number }
   | { kind: 'pickup'; index: number }
   | { kind: 'pad'; index: number }
+  | { kind: 'antiGrav'; index: number }
   | { kind: 'spline'; splineIndex: number; pointIndex: number }
   | { kind: 'prop'; index: number }
   | { kind: 'start' }
@@ -56,6 +58,7 @@ export const PROP_LABELS: Record<string, string> = {
 export function entityKey(s: NonNullable<EntitySel>): string {
   if (s.kind === 'spline') return `spline:${s.splineIndex}:${s.pointIndex}`
   if (s.kind === 'start') return 'start'
+  if (s.kind === 'antiGrav') return `antigrav:${s.index}`
   return `${s.kind}:${s.index}`
 }
 
@@ -66,6 +69,7 @@ export function parseEntityKey(k: string): EntitySel {
   if (k.startsWith('gate:')) return { kind: 'gate', index: Number(k.slice(5)) }
   if (k.startsWith('pickup:')) return { kind: 'pickup', index: Number(k.slice(7)) }
   if (k.startsWith('pad:')) return { kind: 'pad', index: Number(k.slice(4)) }
+  if (k.startsWith('antigrav:')) return { kind: 'antiGrav', index: Number(k.slice(9)) }
   if (k.startsWith('prop:')) return { kind: 'prop', index: Number(k.slice(5)) }
   if (k.startsWith('spline:')) {
     const [, si, pi] = k.split(':')
@@ -191,6 +195,7 @@ export function createEditorPanel(opts: {
            ${placeBtn('gate', '+ Gate')}
            ${placeBtn('pickup', '+ Pickup')}
            ${placeBtn('pad', '+ Boost')}
+           ${placeBtn('antiGrav', '+ Anti-Grav')}
            ${placeBtn('spline', '+ Spline pt')}
          </div>
          <div style="color:#9bb;margin-top:4px">Shapes</div>
@@ -328,6 +333,16 @@ export function createEditorPanel(opts: {
         })),
       ),
     )
+    sections.push(
+      outlinerSection(
+        'Anti-Grav Zones',
+        draft.antiGravZones.map((z, i) => ({
+          k: `antigrav:${i}`,
+          label: `antigrav_${i}  (${z.position.x.toFixed(0)}, ${z.position.z.toFixed(0)})`,
+          sel: { kind: 'antiGrav', index: i } as EntitySel,
+        })),
+      ),
+    )
     const main = draft.aiSplines.find((s) => s.id === 'main')
     if (main) {
       const arr = main.anchors ?? main.points
@@ -414,6 +429,16 @@ export function createEditorPanel(opts: {
         `<div><b>pad_${sel.index}</b></div>`,
         `<div>pos: ${fmtVec(pad.position)}</div>`,
         `<div>halfWidth: ${pad.halfWidth.toFixed(2)} · halfDepth: ${pad.halfDepth.toFixed(2)} · strength: ${pad.strength.toFixed(2)}</div>`,
+      ].join('')
+    }
+    if (sel.kind === 'antiGrav') {
+      const z = draft.antiGravZones[sel.index]
+      if (!z) return '(missing)'
+      return [
+        `<div><b>antigrav_${sel.index}</b></div>`,
+        `<div>pos: ${fmtVec(z.position)}</div>`,
+        `<div>halfW: ${z.halfWidth.toFixed(2)} · halfH: ${z.halfHeight.toFixed(2)} · halfD: ${z.halfDepth.toFixed(2)}</div>`,
+        `<div style="color:#7c9">rotate so local +Y matches the road surface normal</div>`,
       ].join('')
     }
     const sp = draft.aiSplines[sel.splineIndex]

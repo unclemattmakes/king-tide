@@ -93,3 +93,31 @@ export type HoverStateData = {
   inputPitch: number
 }
 export const HoverStateStore = createStore<HoverStateData>('HoverState')
+
+/**
+ * Per-bike anti-gravity override. Written by `antiGravSystem` every tick to
+ * record which way is "up" for this bike — either world up (the zero state)
+ * or a zone's local +Y when the bike is inside an anti-grav volume.
+ *
+ * The hover system reads this to retarget its gravity vector and lift
+ * direction. The smoothed up vector lerps over ~0.3s on zone enter/exit so
+ * the transition isn't jarring.
+ *
+ * `active` is true only while smoothing is in progress or the bike sits in
+ * a zone — used to know whether to disable Rapier's per-body gravity. The
+ * up vector is normalized.
+ */
+export const AntiGravOverride = { name: 'AntiGravOverride' as const }
+export type AntiGravOverrideData = {
+  /** True while the bike is in a zone OR mid-transition back to world-up. */
+  active: boolean
+  /** Current "up" unit vector (smoothed). Defaults to (0,1,0). */
+  upX: number
+  upY: number
+  upZ: number
+  /** Target up vector — the zone's up while inside one, else (0,1,0). */
+  targetUpX: number
+  targetUpY: number
+  targetUpZ: number
+}
+export const AntiGravOverrideStore = createStore<AntiGravOverrideData>('AntiGravOverride')

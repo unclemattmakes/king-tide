@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { BoostPad, Checkpoint, Track } from '@/game/tracks/types'
+import type { AntiGravZone, BoostPad, Checkpoint, Track } from '@/game/tracks/types'
 
 export type TrackVisuals = {
   group: THREE.Object3D
@@ -35,6 +35,10 @@ export function createTrackVisuals(track: Track): TrackVisuals {
 
   for (const pad of track.boostPads) {
     group.add(createBoostPadMesh(pad))
+  }
+
+  for (const zone of track.antiGravZones) {
+    group.add(createAntiGravZoneMesh(zone))
   }
 
   function setCheckpointState(index: number, state: CheckpointVisualState) {
@@ -185,6 +189,43 @@ function createBoostPadMesh(pad: BoostPad): THREE.Object3D {
     c.position.set(0, 0.02, offsetZ)
     root.add(c)
   }
+  return root
+}
+
+/**
+ * Anti-gravity zone visual — translucent purple box wireframe so drivers
+ * can see the section boundary at race time. The actual gravity flip is
+ * applied by `antiGravSystem` whenever the bike's center is inside. Kept
+ * subtle (low fill opacity) so it doesn't drown out the road geometry.
+ */
+function createAntiGravZoneMesh(zone: AntiGravZone): THREE.Object3D {
+  const root = new THREE.Group()
+  root.name = 'anti_grav_zone'
+  root.position.set(zone.position.x, zone.position.y, zone.position.z)
+  root.quaternion.set(zone.rotation.x, zone.rotation.y, zone.rotation.z, zone.rotation.w)
+
+  const w = zone.halfWidth * 2
+  const h = zone.halfHeight * 2
+  const d = zone.halfDepth * 2
+
+  const fillGeom = new THREE.BoxGeometry(w, h, d)
+  const fillMat = new THREE.MeshBasicMaterial({
+    color: 0xa066ff,
+    transparent: true,
+    opacity: 0.08,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  })
+  root.add(new THREE.Mesh(fillGeom, fillMat))
+
+  const wireMat = new THREE.LineBasicMaterial({
+    color: 0xc8a0ff,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false,
+  })
+  root.add(new THREE.LineSegments(new THREE.WireframeGeometry(fillGeom), wireMat))
+
   return root
 }
 

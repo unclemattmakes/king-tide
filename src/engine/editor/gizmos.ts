@@ -26,11 +26,12 @@ import { yawFromQuaternion } from './editor-helpers'
 import type { EntitySel, GizmoMode } from './editor-ui'
 
 /** Entity kinds — derived from a helper's `userData.entityKey` prefix. */
-export type EntityKind = 'gate' | 'pad' | 'pickup' | 'prop' | 'start' | 'spline'
+export type EntityKind = 'gate' | 'pad' | 'antiGrav' | 'pickup' | 'prop' | 'start' | 'spline'
 
 export function entityKindFromKey(k: string): EntityKind {
   if (k.startsWith('gate')) return 'gate'
   if (k.startsWith('pad')) return 'pad'
+  if (k.startsWith('antigrav')) return 'antiGrav'
   if (k.startsWith('pickup')) return 'pickup'
   if (k.startsWith('prop')) return 'prop'
   if (k === 'start') return 'start'
@@ -55,9 +56,10 @@ export function configureGizmoAxes(tc: TransformControls, kind: EntityKind, mode
     return
   }
   if (mode === 'rotate') {
-    // Start / gates / pads rotate around Y only (yaw). Props rotate
-    // around all three axes so the user can lay a pipe sideways, etc.
-    if (kind === 'prop') {
+    // Start / gates / pads rotate around Y only (yaw). Props and anti-grav
+    // zones rotate around all three axes — anti-grav needs full rotation so
+    // the author can roll/pitch the zone to match a banked road surface.
+    if (kind === 'prop' || kind === 'antiGrav') {
       tc.showX = true
       tc.showY = true
       tc.showZ = true
@@ -70,7 +72,7 @@ export function configureGizmoAxes(tc: TransformControls, kind: EntityKind, mode
   }
   if (mode === 'scale') {
     // Gates: scale X (halfWidth), Y (height). Pads: scale X (halfWidth), Z (halfDepth).
-    // Props: scale on all three axes — interpretation per type.
+    // Props / anti-grav: scale on all three axes — interpretation per type.
     if (kind === 'gate') {
       tc.showX = true
       tc.showY = true
@@ -173,6 +175,18 @@ export function writeHelperPoseToDraft(
     pad.rotation.w = h.quaternion.w
     return { splineMoved: false }
   }
+  if (s.kind === 'antiGrav') {
+    const z = draft.antiGravZones[s.index]
+    if (!z) return { splineMoved: false }
+    z.position.x = h.position.x
+    z.position.y = h.position.y
+    z.position.z = h.position.z
+    z.rotation.x = h.quaternion.x
+    z.rotation.y = h.quaternion.y
+    z.rotation.z = h.quaternion.z
+    z.rotation.w = h.quaternion.w
+    return { splineMoved: false }
+  }
   if (s.kind === 'spline') {
     // Edits the editable array (anchors when present, points for legacy).
     const sp = draft.aiSplines[s.splineIndex]
@@ -226,6 +240,13 @@ export function bakeScaleToDraft(draft: Track, h: THREE.Object3D, s: NonNullable
     if (pad) {
       pad.halfWidth = clampPositive(pad.halfWidth * sx, 0.5, 50)
       pad.halfDepth = clampPositive(pad.halfDepth * sz, 0.5, 100)
+    }
+  } else if (s.kind === 'antiGrav') {
+    const z = draft.antiGravZones[s.index]
+    if (z) {
+      z.halfWidth = clampPositive(z.halfWidth * sx, 0.5, 200)
+      z.halfHeight = clampPositive(z.halfHeight * sy, 0.5, 100)
+      z.halfDepth = clampPositive(z.halfDepth * sz, 0.5, 400)
     }
   } else if (s.kind === 'prop') {
     const p = draft.props[s.index]

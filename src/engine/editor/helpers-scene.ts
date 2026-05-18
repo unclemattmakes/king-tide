@@ -19,6 +19,7 @@ import type { Track } from '@/game/tracks/types'
 import {
   disposeObj,
   makeAnchorHelper,
+  makeAntiGravHelper,
   makeGateHelper,
   makePadHelper,
   makePickupHelper,
@@ -122,6 +123,16 @@ export function createHelpersScene(opts: {
     for (let i = 0; i < draft.boostPads.length; i++) {
       const k = `pad:${i}`
       const h = makePadHelper(draft.boostPads[i]!, isSel(sel, { kind: 'pad', index: i }))
+      h.userData.entityKey = k
+      helpers.set(k, h)
+      helpersGroup.add(h)
+    }
+    for (let i = 0; i < draft.antiGravZones.length; i++) {
+      const k = `antigrav:${i}`
+      const h = makeAntiGravHelper(
+        draft.antiGravZones[i]!,
+        isSel(sel, { kind: 'antiGrav', index: i }),
+      )
       h.userData.entityKey = k
       helpers.set(k, h)
       helpersGroup.add(h)
