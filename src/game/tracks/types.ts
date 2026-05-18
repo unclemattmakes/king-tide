@@ -26,6 +26,11 @@ export type Track = {
   aiSplines: AISpline[]
   /** Boost pads — speed-up volumes the bike triggers by driving over. */
   boostPads: BoostPad[]
+  /** Anti-gravity zones — MK8-style sections where gravity points along the
+   *  zone's local −Y (so the road surface acts as "down" instead of world
+   *  down). Author rotates the zone box so its local floor lies flat on the
+   *  road surface; the bike re-orients to that plane while inside. */
+  antiGravZones: AntiGravZone[]
   /** Target gate spacing in metres, used by the editor's "Auto-place gates
    *  from spline" action and Blender's gate-preview overlay. The actual
    *  count is rounded to fit the closed-loop arc length cleanly; see
@@ -159,6 +164,30 @@ export type BoostPad = {
   halfDepth: number
   /** Multiplier applied to top speed while bike is on pad. 1.0 = no boost. */
   strength: number
+}
+
+/**
+ * MK8-style anti-grav volume. While a bike's center is inside the oriented
+ * box, gravity is replaced with `−rotation·(+Y) · GRAVITY` — i.e. the box's
+ * local up axis defines "up" for the bike. The bike also receives a gentle
+ * PD-aligned torque so its own +Y rotates onto the zone's up.
+ *
+ * Authoring: rotate the zone so its local floor lies flat on the road
+ * surface. On a flat road, no rotation is needed; on a banked corner, yaw
+ * to follow the road and roll/pitch so the box's local +Y matches the road
+ * normal.
+ */
+export type AntiGravZone = {
+  position: Vec3
+  rotation: Quat
+  /** Half-extent along the box's local X axis (m). */
+  halfWidth: number
+  /** Half-extent along the box's local Y axis (m). Defines how much vertical
+   *  clearance the bike can have above/below the road plane and still count
+   *  as "in the zone". */
+  halfHeight: number
+  /** Half-extent along the box's local Z axis (m). */
+  halfDepth: number
 }
 
 /**

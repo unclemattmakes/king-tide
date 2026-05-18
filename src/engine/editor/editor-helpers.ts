@@ -12,7 +12,7 @@
 import * as THREE from 'three'
 import { buildPropGeometry } from '@/engine/render/props-geometry'
 import type { Vec3 } from '@/engine/sim/physics/vec'
-import type { BoostPad, Checkpoint, Prop, PropType } from '@/game/tracks/types'
+import type { AntiGravZone, BoostPad, Checkpoint, Prop, PropType } from '@/game/tracks/types'
 
 export function makeGateHelper(cp: Checkpoint, selected: boolean): THREE.Group {
   const g = new THREE.Group()
@@ -109,6 +109,62 @@ export function makePadHelper(pad: BoostPad, selected: boolean): THREE.Group {
 
   g.userData.setSelected = (v: boolean) => {
     mat.color.setHex(v ? selColor : baseColor)
+  }
+  return g
+}
+
+/**
+ * Anti-grav zone helper. Translucent purple box with an up-arrow showing
+ * the zone's local +Y (the "up" direction gravity points away from while
+ * a bike is inside). The box matches the zone's full extents so the gizmo
+ * scale handles map intuitively to the half-extent fields.
+ */
+export function makeAntiGravHelper(zone: AntiGravZone, selected: boolean): THREE.Group {
+  const g = new THREE.Group()
+  g.position.set(zone.position.x, zone.position.y, zone.position.z)
+  g.quaternion.set(zone.rotation.x, zone.rotation.y, zone.rotation.z, zone.rotation.w)
+
+  const baseColor = 0xa066ff
+  const selColor = 0xddaaff
+  const w = zone.halfWidth * 2
+  const h = zone.halfHeight * 2
+  const d = zone.halfDepth * 2
+
+  const boxMat = new THREE.MeshBasicMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.18,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  })
+  const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), boxMat)
+  g.add(box)
+
+  const wireMat = new THREE.LineBasicMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.85,
+  })
+  const wire = new THREE.LineSegments(new THREE.WireframeGeometry(new THREE.BoxGeometry(w, h, d)), wireMat)
+  g.add(wire)
+
+  // Up-arrow along local +Y, anchored at the floor.
+  const arrowMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.95,
+  })
+  const arrowLen = Math.min(zone.halfHeight * 1.4, 4)
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, arrowLen, 8), arrowMat)
+  shaft.position.y = -zone.halfHeight + arrowLen / 2
+  g.add(shaft)
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.9, 12), arrowMat)
+  head.position.y = -zone.halfHeight + arrowLen + 0.45
+  g.add(head)
+
+  g.userData.setSelected = (v: boolean) => {
+    boxMat.color.setHex(v ? selColor : baseColor)
+    wireMat.color.setHex(v ? selColor : baseColor)
   }
   return g
 }

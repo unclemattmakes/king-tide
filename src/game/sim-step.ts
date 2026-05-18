@@ -5,6 +5,7 @@ import { advanceWaveField, type WaveFieldState } from '@/engine/sim/water/wave-f
 import type { Track } from '@/game/tracks/types'
 import { aiCombatSystem } from './systems/ai-combat'
 import { aiControlSystem } from './systems/ai-control'
+import { antiGravSystem } from './systems/anti-grav'
 import { boostPadSystem } from './systems/boost-pad'
 import {
   explosionTickSystem,
@@ -82,6 +83,9 @@ export function simulateStep(
   if (runAI) aiCombatSystem(sim, phys)
   stunOverrideSystem(sim)
 
+  // Anti-grav resolution runs immediately before hover so the hover system
+  // sees this tick's fresh up-vector override + gravity-scale state.
+  antiGravSystem(sim, phys, track, phys.fixedDt)
   hoverSystem(sim, phys, waveField)
   // Rider pose runs just before the physics step — applies PD torque
   // impulses to drive the active ragdoll toward its target stance. Must
