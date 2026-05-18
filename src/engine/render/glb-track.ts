@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { ExportedKind } from '@/engine/asset-kinds'
 import { applyTerrainShaderToScene } from '@/engine/render/terrain-shader'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import type { GltfRoot } from '@/game/tracks/glb-loader'
@@ -21,6 +22,13 @@ export type LoadedGlbTrack = {
   scene: THREE.Group
   /** Parsed glTF JSON, suitable for buildTrackFromGltf(). */
   parsedJson: GltfRoot
+  /** If the GLB shipped a `kind=horizon` mesh, its geometry — already
+   *  detached from the main scene so the regular render path doesn't
+   *  draw it as a piece of nearby terrain. Pass this into
+   *  `createHorizonRing` (via `HorizonRingConfig.geometry`) so the
+   *  shipped silhouette gets the camera-locked sun-aware shader.
+   *  Absent when no horizon mesh was authored. */
+  horizonGeometry?: THREE.BufferGeometry
 }
 
 export async function loadGlbTrackVisuals(
@@ -31,14 +39,60 @@ export async function loadGlbTrackVisuals(
   const gltf = await loader.loadAsync(url)
   const parsedJson = (gltf.parser as unknown as { json: GltfRoot }).json
   const scene = gltf.scene as unknown as THREE.Group
+
+  // Pull any `kind=horizon` meshes out of the scene graph before the
+  // shadow / shader passes run. They live 1.4 km away and are driven
+  // by `createHorizonRing` — leaving them in the regular scene would
+  // (a) shadow-cast nothing useful, (b) pick up the terrain shader
+  // (wrong material), (c) register as a collider via `attachTrackColliders`,
+  // and (d) double-render under the procedural ring. Detach all four
+  // problems in one pass.
+  let horizonGeometry: THREE.BufferGeometry | undefined
+  const horizonNodes: THREE.Mesh[] = []
+  scene.traverse((obj) => {
+    if (obj instanceof THREE.Mesh && obj.userData?.kind === ExportedKind.HORIZON) {
+      horizonNodes.push(obj)
+    }
+  })
+  for (const node of horizonNodes) {
+    // Bake world transform into vertex positions so the geometry lands
+    // at scene origin regardless of the author's transform on the
+    // `horizon_ring` object — `createHorizonRing` re-positions the
+    // mesh per-frame to follow the player, so any stored translation
+    // would multiply on top.
+    node.updateMatrixWorld(true)
+    const baked = node.geometry.clone() as THREE.BufferGeometry
+    baked.applyMatrix4(node.matrixWorld)
+    // First horizon mesh wins; warn loudly on extras so authors don't
+    // silently lose one (the kind is meant to be singular per track).
+    if (!horizonGeometry) {
+      horizonGeometry = baked
+    } else {
+      console.warn(
+        `[glb-track] ${url}: multiple kind="horizon" meshes — using the first, ignoring the rest`,
+      )
+    }
+    node.parent?.remove(node)
+  }
+
   // Track environment is the dominant shadow receiver in any race —
   // and chunky meshes (mesa edges, hangar walls, ramps) should also
   // throw shadow themselves. Flag every mesh; we don't try to be
   // clever about decoration vs collision since the visual cost is
   // tied to the bike+sun shadow camera, not the per-mesh count.
+  // Emitter "empties" sometimes round-trip as small placeholder meshes
+  // through the glTF exporter — hide them from render so authors don't
+  // see a stray cube at every emit point; the particle system still
+  // finds them via the kind=emitter tag.
   scene.traverse((obj) => {
     const mesh = obj as THREE.Mesh
     if (mesh.isMesh) {
+      if (obj.userData?.kind === ExportedKind.EMITTER) {
+        mesh.visible = false
+        mesh.castShadow = false
+        mesh.receiveShadow = false
+        return
+      }
       mesh.castShadow = true
       mesh.receiveShadow = true
     }
@@ -52,7 +106,11 @@ export async function loadGlbTrackVisuals(
   // ``public/tracks/<id>.json`` — when present, the addon authored
   // these values in its "Terrain shader (runtime)" panel.
   applyTerrainShaderToScene(scene, opts?.terrainShader ?? {})
-  return { scene, parsedJson }
+  return {
+    scene,
+    parsedJson,
+    ...(horizonGeometry ? { horizonGeometry } : {}),
+  }
 }
 
 /**
@@ -71,6 +129,18 @@ export function attachTrackColliders(group: THREE.Object3D, phys: PhysicsWorld):
   group.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh)) return
     if (obj.userData?.kind === 'decoration') return
+    // Belt-and-suspenders: `loadGlbTrackVisuals` strips horizon meshes
+    // out of the scene before we get here, but check anyway in case
+    // `attachTrackColliders` is called directly with an un-stripped
+    // group. Horizon rings live 1.4 km away and never collide.
+    if (obj.userData?.kind === ExportedKind.HORIZON) return
+    // Particle emitters are empties in Blender that occasionally get
+    // converted to placeholder meshes by the exporter (cube primitive
+    // as a viewport gizmo). Either way the particle system reads them
+    // for spawn poses, not as collidable geometry — skip the trimesh
+    // attach. Mesh stays in the scene graph so the particle-system
+    // traversal finds the kind=emitter tag.
+    if (obj.userData?.kind === ExportedKind.EMITTER) return
     // EXT_mesh_gpu_instancing produces THREE.InstancedMesh — scattered
     // props from Blender's GN scatter pipeline land here. The mesh's
     // matrixWorld is the prototype's transform, not the per-instance

@@ -370,6 +370,61 @@ Workflow:
 three mountains with a tunnel through each, AI-completable racing
 line that threads all three.
 
+### Anti-grav surfaces
+
+Curve-driven anti-grav segments — corkscrew climbs, wall-rides,
+caldera loops, Möbius torch arms, ceiling runs. Same authoring shape
+as the Tunnel tool: shape a Bezier, hit Build, the surface mesh +
+entry/exit zone empties materialise together.
+
+Three cross-section profiles cover every v1 anti-grav case:
+
+- **Tube** — closed cylinder along the curve. Corkscrews climbing a
+  pillar, caldera loops, anything fully enclosed. Mirrors the tunnel
+  tool's cylinder sweep — 8 m default radius matches the tunnel
+  default so anti-grav tubes feel sibling-scale.
+- **Ribbon** — flat strip (width × thickness). Wall-rides, the
+  Liberty torch underside, half-pipe lips. The strip is geometry-only;
+  authors rotate the curve to stand the ribbon up (wall) or hang it
+  upside-down (ceiling).
+- **Banked strip** — slab whose per-sample tilt comes from the curve's
+  per-control-point `tilt` field (the same tilt the road tool reads
+  for banking). Set tilt = ±π/2 for a wall, ±π for a ceiling, anything
+  in between for a banked corner. Same Edit-Mode N-panel → Item →
+  Tilt slider as the road tool, plus the Anti-Grav preset operators
+  on the Gameplay sub-panel (Flat / Bank L / Wall R / Ceiling).
+
+Workflow:
+
+1. **Add Anti-Grav Curve** drops a 4-point `antigrav_curve_NN` Bezier
+   at the 3D cursor (Z-up, AuthoringKind — never exported). Tab into
+   edit mode to drag handles into the path you want.
+2. Pick the **Profile** in the panel. For Tube, set *Radius* + *Sides*;
+   for Ribbon / Banked strip, set *Width* + *Thick(ness)*. *Samples*
+   controls arc-length density (48 reads smooth on single-loop curves;
+   bump for long corkscrews).
+3. **Build Anti-Grav Surface** sweeps the cross-section along the
+   curve using a parallel-transport (rotation-minimising) frame so the
+   cross-section doesn't flip mid-corkscrew. Output:
+   - `antigrav_NN_surface` — swept mesh, `kind=track` so the runtime
+     trimesh collider attaches. `anti_grav=true` extras flag it.
+   - `antigrav_NN_zone_entry` + `antigrav_NN_zone_exit` — oriented
+     box empties at the two curve endpoints, `kind=antigrav_zone`,
+     local +Y pointing along the curve tangent so the bike enters
+     the volume on approach. The existing anti-grav zone system in
+     `antigrav.py` (and the runtime controller) handles the actual
+     gravity flip when a bike crosses the zone.
+4. Re-clicking Build on the same curve rebuilds the surface + zones
+   in place — to add a second segment, click Add Anti-Grav Curve
+   first. Each curve owns its outputs via `antigrav_surface_name` /
+   `antigrav_zone_entry_name` / `antigrav_zone_exit_name` custom
+   props on the curve, so a delete + re-build wipes the right ones.
+
+`tracks-src/template-antigrav-showcase.blend` is the reference
+scene — one tube corkscrew climbing a pillar, one ribbon wall-ride,
+one banked-strip loop. Open it for a working example of all three
+profiles together.
+
 ### Ramp tool
 
 Drop a parametric stunt-ramp wedge at the 3D cursor, tagged
@@ -445,6 +500,311 @@ has been baked. Workflow:
    and *Weight* control the bite; XY positions stay locked so the
    heightfield stays a heightfield.
 
+### Vertex bakes (AO + path-worn)
+
+The seeded `HV_*` Geometry-Nodes graphs sample two FLOAT attributes —
+`baked_ao` and `baked_path` — and stamp them into `COLOR_0.G` (AO
+multiplier) and `COLOR_0.B` (racing-line wear) on the evaluated
+mesh. The runtime terrain shader reads both: AO darkens cavities;
+path-worn mixes the diffuse toward the per-track `pathTint`, drawing
+a visible groove along the AI spline. See
+[vertex-attribute-spec.md](./vertex-attribute-spec.md) for the locked
+channel contract.
+
+Both are stamped by the *Vertex bakes* section of the Terrain sub-
+panel:
+
+1. **Bake AO + Path Wear** — Cycles vertex-colour bake for AO
+   (~10-20 s on a 150 k-vert terrain) plus the path-wear pass below.
+   Run once after the terrain shape settles.
+2. **Bake Path-Worn** — just the racing-line mask. Pure-Python KDTree
+   (~1 s on a 150 k-vert terrain); cheap to re-run while iterating
+   on the three knobs:
+   - *Inner (m)* — distance from the spline at which wear saturates
+     at 1.0. Default 0 — full wear on the line itself.
+   - *Outer (m)* — distance beyond which wear is 0. Smoothstep
+     falloff in between. Default 8 m.
+   - *Intensity* — final-value multiplier in [0, 1]. 0 disables the
+     stamp (useful for tracks whose biome shouldn't show a worn line —
+     tunnel interiors, anti-grav stretches); 1 stamps the full mask.
+
+The export operator auto-bakes path-worn before writing the GLB, so
+authors who never touched these knobs still ship with a baked
+racing line at the scene defaults. The bake is idempotent: same
+inputs always produce the same stamps. Distance is computed in
+world XZ against the AI spline polyline, so the wear band tracks
+the bike's racing footprint even on hills where the spline floats
+above the terrain.
+
+### Horizon
+
+A per-track distant-horizon silhouette mesh — the cylinder of "distant
+mountains" the runtime camera-locks to the player so the far field
+has a tangible shape instead of an empty fog gradient.
+
+**Default behaviour.** Tracks without an authored horizon mesh get a
+procedural seeded ring (`createHorizonRing` in
+[horizon-ring.ts](../src/engine/render/horizon-ring.ts)) — five-octave
+layered-sine cylinder, 192 segments, seed hashed from the track id so
+every track is distinct without authoring. Knobs (`radius`,
+`peakHeight`, `seed`, `silhouetteDark`) round-trip through
+`public/tracks/<id>.json`'s `horizon` block; tune them from the
+addon's Horizon sub-panel when you don't need a hand-shaped silhouette.
+
+**Authoring a bespoke silhouette.** Click **Add Horizon Ring** in the
+Horizon sub-panel. The addon drops a `horizon_ring` mesh at the world
+origin using the same layered-sine starter the runtime uses (so your
+viewport reads as the in-game default until you start pushing verts).
+Tab into edit mode, turn on Proportional Editing (`O`), and pull verts
+into your track's recognisable skyline — Skytree behind Shibuya,
+Table Mountain behind Cape Town, the Manhattan grid behind Liberty.
+The runtime extracts the mesh from the exported GLB and feeds its
+positions into the camera-locked ring shader; the silhouette
+re-projects the player's view but the shape is yours.
+
+Workflow:
+
+1. **Add Horizon Ring** — drops `horizon_ring` (tagged `kind=horizon`,
+   192 × 2 verts) at origin. Knobs above the button choose starter
+   shape (Segments / Radius / Peak / Seed) before you commit.
+2. **Edit Horizon Ring** — selects the mesh and enters edit mode.
+   The runtime ignores everything below `y ≈ peak` of the bottom
+   edge; the visible silhouette is what's above the water-line.
+3. **Reset Horizon Ring** — destructive re-seed of the starter. Lose
+   your edits, get a fresh procedural layout. Use when you want to
+   pick a different seed.
+4. **Delete Horizon Ring** — removes the mesh; the track falls back
+   to the procedural fallback on the next export.
+
+The mesh exports as part of the normal track GLB; the runtime GLB
+loader's first pass extracts every `kind=horizon` node out of the
+scene graph before terrain shading or collider attach, so the ring
+costs the same single draw call regardless of whether it's procedural
+or authored.
+
+**Precedence on load.** The runtime picks the silhouette source in
+this order:
+
+1. `kind=horizon` mesh in `environmentGlb` (Blender-authored)
+2. `horizon` block in `public/tracks/<id>.json` (procedural with
+   per-track overrides)
+3. Default procedural with seed hashed from the track id
+
+The track JSON's `silhouetteDark` always applies, and `peakHeight`
+contributes as a `heightT` normalisation reference when an authored
+mesh ships — useful if your authored peaks reach further than the
+default 300 m and you want the shader's haze gradient to span the
+full silhouette.
+
+### Sky preset
+
+A per-track sky / atmosphere block in `public/tracks/<id>.json` that
+the runtime applies once at boot. All fields are optional — absent
+fields fall back to the defaults baked into `sky.ts`.
+
+Knobs live in the addon's **Sky preset** sub-panel (between Horizon
+and Waves, default-closed):
+
+| Knob | Meaning | Runtime impact |
+|---|---|---|
+| `tint` | Hex colour multiplied onto the dome palette. White = no tint. | Live — biases palette warm/cool without rewriting ramps. |
+| `cloudiness` | 0..1 cloud-layer density. | Live — drives the FBM cloud mask threshold. |
+| `sunIntensity` | Multiplier on the directional sun + sun-disc. | Live — scales `DirectionalLight.intensity` and shader sun disc. |
+| `fogNear` / `fogFar` | Exponential fog distances (m). | Live — the horizon ring sits ~75 % through this range. |
+| `timeOfDay` | 0..360 s along the (frozen) day-night cycle. | Live — picks elevation + azimuth at construction; held for the race. |
+| `colorGrade` | LUT preset name from the bundled set. | Live — per-preset (tint × saturation × contrast) tweak on the dome. |
+| `bloom` | 0..2 intensity multiplier on the renderer bloom pass. | **Round-trip only** — no bloom pass is wired into the WebGPU renderer yet. The value ships through authoring + JSON and the runtime logs it; goes live when the post pipeline lands. |
+| `seaStateBeaufort` | 0..12 Beaufort wind scale. | Live — scales every base wave amplitude at boot via `beaufortToAmplitudeScale` (Beaufort 4 ≈ 1.0×, glass-calm 0 ≈ 0.15×, hurricane 12 ≈ 2.5×). Wave-zones layer on top via `heightMult`. |
+
+**Bundled `colorGrade` presets** (each is a (tint × saturation ×
+contrast) triple in `SKY_GRADE_TABLE` in
+[sky.ts](../src/engine/render/sky.ts)):
+
+| Preset | Look |
+|---|---|
+| `neutral` | No grade — identity. |
+| `miami_pastel` | Soft warm-pink lift, lower saturation; South Beach sunset. |
+| `tokyo_neon` | Cool magenta-cyan lean, punchy saturation; Shibuya night. |
+| `big_sur_golden` | Golden-hour warmth; California / The Maw mid-day. |
+| `venice_warm` | Adriatic warm-stone amber; Doge's Drift. |
+| `nyc_sunset` | Strong warm tint, high contrast; Liberty finale. |
+| `cape_town_blue` | Atlantic cool blue, desaturated haze. |
+| `kilauea_volcanic` | Ash + lava red lift, high contrast. |
+
+The preset list is mirrored in two places:
+`SKY_COLOR_GRADES` in [types.ts](../src/game/tracks/types.ts) (with
+its lookup table in [sky.ts](../src/engine/render/sky.ts)) on the
+runtime side, and `SKY_COLOR_GRADES` in
+`tools/blender/hoverbike_addon/sky_preset.py` on the addon side.
+Adding a preset means editing both — there's no auto-sync yet.
+
+**Round-trip.** The sky block is fully Blender-owned: any value the
+.blend dialled in wins over what's in the JSON on next export. The
+`load_post` handler in `handlers.py` pulls the JSON back into the
+scene props on `.blend` open, so opening a track always reflects the
+most recently saved values.
+
+### Audio palette
+
+Per-track audio is the one bucket that **lives only in the JSON** —
+music is licensed/commissioned (not procedural) and ambient beds are
+layered loops from a shared SFX bank, so there's no Blender side to
+this block. Hand-edit `public/tracks/<id>.json` (or write through the
+in-app editor when the audio sub-panel ships).
+
+Block shape:
+
+```jsonc
+{
+  "audio": {
+    "music": "south-beach-vaporwave.opus",
+    "ambient": ["gulls.opus", "surf-light.opus", "neon-hum.opus"],
+    "ambientGains": [0.4, 0.6, 0.2],
+    "music3dEffects": { "duckOnPump": 0.35 }
+  }
+}
+```
+
+Paths target `public/audio/music/` and `public/audio/ambient/`. The
+runtime loads each file lazily on track boot; **missing files (404)
+warn and fall back gracefully** — the procedural pad bed shipped at
+horizon time stays as the music fallback whenever `audio.music` is
+absent or unreachable, so a track can ship its full schema before the
+licensed assets land. `ambientGains[i]` defaults to 1.0 when omitted;
+`music3dEffects.duckOnPump` is a multiplier on the engine's base
+0.35 pump-duck depth (1.0 = unchanged).
+
+### Track hero render
+
+Every ship-quality track ships with two pieces of UI art:
+
+- A **1280×720 hero image** for the loading screen, written to
+  `public/assets/tracks/<id>-hero.jpg`.
+- A **320×180 tile thumbnail** for the track-select grid, written to
+  `public/assets/tracks/<id>-thumb.jpg`.
+
+Both are produced from a single author-controlled camera in the
+.blend — no Photoshop, no Playwright screenshots, no per-track
+scripts. The render is reproducible, fast (sub-second EEVEE renders
+typical on a modern GPU), and auto-fires on every track export so the
+UI art never drifts from the latest .blend.
+
+**Author the shot.** Park the 3D cursor where you want the hero
+camera to sit, then click **Add Camera Hero** in the *Track hero
+render* sub-panel. The addon drops a Camera object named
+`camera_hero` at the cursor (`AuthoringKind.CAMERA_HERO`) with a 50 mm
+lens, aimed at a sensible default target (`start_00`, the AI-spline
+mid-point, or the world origin if neither exists). Translate / rotate
+the camera to frame the track's set-piece exactly how you want the
+loading-screen tile to read — this is the one shot the player sees of
+this track between menu and grid, so make it postcard-worthy.
+
+**Trigger the render.** Click **Render Hero** in the same sub-panel
+to render the full 1280×720 hero + the 320×180 tile in one shot, or
+**Tile only** to refresh just the smaller image after a framing tweak.
+The render engine is forced to EEVEE for speed (Cycles is overkill
+for a loading-screen tile and would slow the export hook down by a
+factor of 20-50×). The JPGs land in `public/assets/tracks/` and
+the track's `manifest.json` entry gains a `heroUrl` field (and a
+`thumbUrl` field if the tile was rendered too) pointing at the
+public URL.
+
+**Automatic on export.** *Export Track to Game* fires the hero render
+automatically after the GLB write succeeds. If `camera_hero` is
+missing, the export warns ("no camera_hero — track exported without a
+hero image") and continues — the hero render is non-fatal so a
+mid-authoring .blend without a hero still exports successfully. To
+disable the auto-render, delete the `camera_hero` object.
+
+**Batch / CI render.** The standalone script
+[`tools/blender/render_track_thumbnail.py`](../tools/blender/render_track_thumbnail.py)
+runs the same render headlessly without going through the addon UI —
+useful for CI batch builds that need to refresh every track's hero in
+one pass:
+
+```bash
+"$BLENDER_EXE" --background tracks-src/<id>.blend \
+    --python tools/blender/render_track_thumbnail.py
+```
+
+Exits non-zero if the .blend lacks a `camera_hero` or the repo root
+can't be resolved, so a CI loop over the `tracks-src/*.blend` glob
+can gate on `$?` and fail the build if a track is missing its hero
+camera.
+
+**Runtime story.** The runtime never sees the camera — the GLB
+exporter is invoked with `export_cameras=False`, so `camera_hero`
+(and any other Camera object) is stripped before the GLB lands in
+`public/assets/tracks/`. The chase cam is procedural; the hero
+camera is an authoring-only `AuthoringKind` whose only job is to
+frame the loading-screen JPG.
+
+### Particle emitters
+
+A unified emitter abstraction drives every authored track VFX —
+wave-pump flash, lava steam, neon glare, gull flocks, palm sway,
+torch flame, oxidation shimmer, jungle motes, container rust, tsunami
+spray, anything else. The runtime (`createParticleSystem` in
+[particle-system.ts](../src/engine/render/particle-system.ts)) reads
+`kind=emitter` empties from the loaded GLB and spawns particles from
+their pose using a shared 1024×1024 atlas split into a 4×4 grid of
+16 cells.
+
+**Author a new emitter.** In the addon's *Emitters* sub-panel, click
+**Add Emitter**. The new `emitter_NN` empty drops at the 3D cursor
+with default extras and the SPHERE display type. Position with G,
+aim with R — the empty's **local +Y axis** is the emission direction.
+
+**Tweak in custom properties** (N-panel → Object → Custom Properties):
+
+| Extra | Default | Meaning |
+|---|---|---|
+| `atlas_cell` | 0 | 0..15 — picks a 256×256 sprite from the shared atlas |
+| `emit_rate` | 30 | particles spawned per second |
+| `lifetime_s` | 1.5 | seconds before a particle is recycled |
+| `velocity_cone_deg` | 25 | half-angle of the emission cone around local +Y |
+| `speed_min` / `speed_max` | 0.8 / 2.5 | uniform-random initial speed (m/s) |
+| `size_start` / `size_end` | 0.4 / 1.2 | world-space sprite size, lerped over age |
+| `color_start` / `color_end` | white→white(alpha 0) | RGBA, lerped over age |
+| `gravity` | 0 | Y-axis acceleration (m/s²). 0 = drift, negative = fall, positive = rise |
+| `max_particles` | 256 | per-emitter cap contributed to the cell pool |
+
+**Atlas cell legend** (mirrored in
+[`build_sprite_atlas.py`](../tools/blender/build_sprite_atlas.py) and
+the addon panel):
+
+| Cell | Sprite | Typical use |
+|---|---|---|
+| 0 | soft round spark | wave-pump flash, generic shine |
+| 1 | smoke puff | lava steam, container fire, exhaust haze |
+| 2 | ember | torch flame, hot debris |
+| 3 | foam droplet | water spray, tsunami crests |
+| 4 | dust mote | jungle motes, ash drift, sun-haze |
+| 5 | gull silhouette | gull flocks |
+| 6 | leaf | palm sway debris, jungle floor swirl |
+| 7 | neon glare | Shibuya neon, lighthouse beam |
+| 8 | ash | Kilauea ashfall |
+| 9 | water spray | breaking wave plumes |
+| 10 | glow halo | bell ripple, oxidation shimmer |
+| 11 | motion streak | speed lines |
+| 12-15 | spare | aliased to 0/1/2/3; safe to override later |
+
+**Regenerate the atlas** with `pnpm gen:fx-atlas` (calls
+`python tools/blender/build_sprite_atlas.py`). Pillow is the only
+dependency. Output: `public/assets/fx/particle-atlas.png`.
+
+**Cost.** One `SpriteNodeMaterial` + `InstancedMesh` per *cell* (not
+per emitter), so two `dust_mote` emitters on the same track share a
+draw call. The system caps at 16 cells × `max_particles` particles,
+typically well under 2000 alive at peak.
+
+**Runtime trigger hook.** Gameplay code can fire one-off bursts via
+`window.__particles.triggerBurst('emitter_name', count)`. The
+`fx/index.ts` explosion path already does this — name an emitter
+`emitter_explosion` in the track and every detonation triggers a
+24-particle burst from that pose (lava chunks for Kilauea, glass for
+Cape Town aquarium, etc).
+
 ### Water (sea level + preview)
 
 `water_volume_main`'s Z position is the in-game sea level. Two ways
@@ -476,6 +836,46 @@ Boost pads round-trip through `boostPads[]` in the JSON. The JSON
 merge respects opt-in: if the .blend has any `boost_NN` empties,
 Blender owns the list; otherwise the in-app editor's placements
 stay through re-exports.
+
+### Wave zones
+
+Drop a `wave_zone_NN` empty at the 3D cursor with **Add Wave Zone**
+(under the *Wave zones* sub-panel). The empty's local +X axis is the
+dominant swell direction; rotate around Z to aim it, and scale the
+extents via the custom properties.
+
+Each zone scales the global Gerstner wave field inside its oriented
+bounding box. Custom properties (defaults in parentheses):
+
+- `half_width` (30 m) — half-extent along local +X (the swell axis)
+- `half_height` (20 m) — half-extent along local +Z (vertical; mostly
+  cosmetic — surface samples ignore the vertical extent)
+- `half_depth` (30 m) — half-extent along local +Y
+- `height_mult` (1.5) — multiplier on global wave amplitude
+- `freq_mult` (1.0) — multiplier on per-wave frequency (shorter
+  wavelengths → choppier; longer → rolling swell)
+- `blend_radius_m` (20 m) — soft-edge falloff outside the OBB face
+  so the boundary isn't visible
+
+Optional extras — add these directly in the Properties panel when you
+need them:
+
+- `direction_deg` — override the dominant swell bearing, degrees in
+  world XZ. 0° = +X swell train, 90° = +Z. Leave unset to inherit
+  the global wave bearing.
+- `surge_period_s` + `surge_amplitude` — additive periodic surge,
+  `surge_amplitude · max(0, sin(2π·t / surge_period_s))`. Useful for
+  the Aqualand-style tsunami timer: set period to 12 s and amplitude
+  to 4 m for a slow, rising wave wall. Both fields must be set
+  together — half a surge spec is rejected by the JSON validator.
+
+Multi-zone overlap uses a soft-max on the multipliers (loudest zone
+wins) plus additive accumulation on surges — see `sampleZoneFactors`
+in `src/engine/sim/water/wave-field.ts`.
+
+Wave zones round-trip through `waveZones[]` in the JSON. Like boost
+pads, the merge is opt-in: if the .blend has any `wave_zone_NN`
+empties, Blender owns the list.
 
 ### Gate / racer / water previews
 
@@ -537,6 +937,10 @@ scheduler, so scrub interactions are also live.
 | Pickup spawn | `pickup_*` | empty | `{ kind: "pickup_spawn" }` |
 | Player start | `start_NN` (zero-padded, NN = grid position) | empty | `{ kind: "start", index }` |
 | Boost pad | `boost_NN` (zero-padded) | empty | `{ kind: "boost_pad", half_width, half_depth, strength }` |
+| Anti-grav zone | `antigrav_NN` (zero-padded) | empty | `{ kind: "antigrav_zone", half_width, half_height, half_depth }` |
+| Wave zone | `wave_zone_NN` (zero-padded) | empty (cube) | `{ kind: "wave_zone", half_width, half_height, half_depth, height_mult, freq_mult, blend_radius_m, [direction_deg, surge_period_s, surge_amplitude] }` |
+| Horizon ring | `horizon_ring` (singular) | mesh | `{ kind: "horizon" }` |
+| Particle emitter | `emitter_NN` | empty | `{ kind: "emitter", atlas_cell, emit_rate, lifetime_s, velocity_cone_deg, speed_min, speed_max, size_start, size_end, color_start, color_end, gravity, max_particles }` |
 
 ## Coordinate system
 
@@ -618,6 +1022,38 @@ authoring convention and future passes may key off it.
 **Bikes fall straight through the loaded mesh.** This is the trimesh
 broadphase issue — see [Known limitations](#known-limitations). The
 safety floor and water surface will catch them.
+
+## CI lint
+
+The same lint that the *Lint Track* button runs in-editor also runs
+headless in CI. PRs that touch `tracks-src/`, `tools/blender/`, or
+`specs/` trigger the `asset-pipeline` workflow, which loops over every
+`tracks-src/*.blend` (skipping the asset libraries — `props-library`,
+`landmarks-library`, `calibration`) and fails the build on any ERROR.
+
+Run it locally with:
+
+```bash
+pnpm gen:tracks:validate
+```
+
+It calls `tools/blender/run-lint.mjs`, which spawns one background
+Blender per track and pipes `tools/blender/lint_track.py` against it.
+Output is one `[lint:<trackId>] ERROR|WARNING: <message>` line per
+finding. Exit code 1 if any track has at least one ERROR.
+
+Checks the CI lint covers beyond the in-editor pass:
+
+- `start_01` presence (in-editor lint only checks `start_00`).
+- `cp_NN` index contiguity by *name* (not just by `index` extra).
+- Every `kind=track` mesh has positive evaluated area.
+- Every `wave_zone_NN` empty has positive half-extents on all three
+  axes and a positive `height_mult`.
+- At least one `pickup_*` exists (warning, not error — tutorial tracks
+  may legitimately omit pickups).
+
+If a CI lint failure looks spurious, repro locally with
+`pnpm gen:tracks:validate` — same script, same exit code.
 
 ## See also
 

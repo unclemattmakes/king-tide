@@ -93,6 +93,41 @@ class ExportedKind:
     # where there isn't a curve to sample.
     ANTIGRAV_ZONE = "antigrav_zone"
 
+    # Distant horizon silhouette mesh — a ring of background terrain
+    # the runtime camera-locks to the player so the world has a
+    # tangible far-field shape instead of an empty fog gradient. One
+    # per track. Authors drop a starter ring via the addon's
+    # ``Add Horizon Ring`` operator, then tab into edit mode to push /
+    # pull verts into recognizable skyline silhouettes (Skytree for
+    # Shibuya, Table Mountain for Cape Town, etc.). The runtime
+    # extracts the mesh from the GLB on load and feeds its geometry
+    # into ``createHorizonRing`` instead of the procedural fallback.
+    # Skipped by the trimesh-collider attach step — the ring is
+    # 1.4 km away and render-only by design.
+    HORIZON = "horizon"
+
+    # Particle-emitter empty — a spawn point + orientation for the
+    # shared particle system. Each ``emitter_NN`` carries a fixed
+    # extras block (``atlas_cell``, ``emit_rate``, ``lifetime_s``,
+    # ``velocity_cone_deg``, ``speed_min``/``speed_max``,
+    # ``size_start``/``size_end``, ``color_start``/``color_end``,
+    # ``gravity``, ``max_particles``) that the runtime reads at GLB
+    # load and registers with ``createParticleSystem``. The empty's
+    # transform is the spawn pose; particles emit along local +Y
+    # within ``velocity_cone_deg`` half-cone. Skipped by the trimesh-
+    # collider attach step — emitters are render-only.
+    EMITTER = "emitter"
+
+    # Wave-mastery volume zone — an oriented box ``wave_zone_NN`` empty
+    # carries (position, rotation, half_width, half_height, half_depth)
+    # plus per-zone multipliers on the global Gerstner wave field. The
+    # box's local +X is the dominant swell direction. Lets authors give
+    # The Maw a tall central swell, Aqualand a periodic tsunami surge,
+    # and Hatteras heavier chop on one half-loop without rebuilding the
+    # global wave field per track. Soft-blended across ``blend_radius``
+    # so amplitude doesn't pop at the OBB face.
+    WAVE_ZONE = "wave_zone"
+
 
 class AuthoringKind:
     """Object extras kinds used only inside Blender — never shipped."""
@@ -105,6 +140,13 @@ class AuthoringKind:
     # The bezier curve a tunnel is built from. Same story — the swept
     # interior ships as kind=track, the curve does not.
     TUNNEL_CURVE = "tunnel_curve"
+
+    # The bezier curve an anti-grav ribbon is built from. The Build
+    # Anti-Grav Surface operator reads the curve, sweeps the chosen
+    # cross-section profile into a ``kind=track`` mesh, and drops
+    # ``antigrav_zone`` empties at each endpoint to flip gravity inside
+    # the volume. The curve itself never ships.
+    ANTIGRAV_CURVE = "antigrav_curve"
 
     # The closed-cap swept mesh used as the operand of the terrain's
     # Boolean DIFFERENCE modifier. Never exported; hidden from render.
@@ -124,6 +166,17 @@ class AuthoringKind:
     # specific authoring landmarks the seeds drop for convenience.
     OASIS_CENTER = "oasis_center"
     MESA = "mesa"
+
+    # Hero camera used by the headless track-thumbnail render — a
+    # Camera object named ``camera_hero`` framed on the track's set-
+    # piece. Read by ``tools/blender/render_track_thumbnail.py`` and by
+    # the addon's *Render Track Hero* operator, which writes a 1280×720
+    # JPG to ``public/assets/tracks/<id>-hero.jpg`` for the loading
+    # screen + a 320×180 thumbnail tile. The runtime never sees this
+    # camera: the glTF exporter is invoked with
+    # ``export_cameras=False`` so cameras never reach the GLB, and the
+    # runtime always uses its own chase cam.
+    CAMERA_HERO = "camera_hero"
 
 
 # Convenience tuples for tests / consumers that want to iterate.

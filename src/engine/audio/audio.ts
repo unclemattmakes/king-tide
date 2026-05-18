@@ -38,6 +38,7 @@
  */
 
 import { playerSettings } from '@/engine/player-settings'
+import type { AudioConfig } from '@/game/tracks/types'
 
 export type PickupSoundType = 'boost' | 'shield' | 'missile' | 'mine'
 export type AudioBus = 'master' | 'music' | 'sfx' | 'ambient'
@@ -80,6 +81,13 @@ export interface AudioEngine {
    *  work-breakdown) is the chord shape itself: stacked perfect 5th +
    *  octave rather than a single ping. */
   wavePump(strength: number): void
+  /** Apply a per-track audio palette. Called once at boot after
+   *  the AudioEngine + Track are both available; replaces any
+   *  previously-set track audio (stop+release of prior music/ambient
+   *  layers). Pass `undefined` to clear back to the procedural pad
+   *  bed + ambient water rumble only. Audio files load lazily;
+   *  missing files (404) warn and fall back gracefully. */
+  setTrackAudio(config: AudioConfig | undefined): void
 }
 
 /** Per-bus headroom — the bus's slider value is multiplied by this
@@ -115,6 +123,17 @@ export function createAudioEngine(): AudioEngine {
   let engineGain: GainNode | null = null
   let windFilter: BiquadFilterNode | null = null
   let windGain: GainNode | null = null
+
+  // Per-track audio palette state. Held so the boot wiring can swap
+  // tracks at runtime (track-change, return-to-menu, replays) without
+  // leaking nodes. `pendingTrackAudio` is set when setTrackAudio runs
+  // before the AudioContext exists — we apply it once the user
+  // gesture unlocks the engine.
+  let trackMusic: { source: AudioBufferSourceNode; gain: GainNode } | null = null
+  let trackAmbient: { source: AudioBufferSourceNode; gain: GainNode }[] = []
+  let trackAudioConfig: AudioConfig | undefined = undefined
+  let pendingTrackAudio: { config: AudioConfig | undefined } | null = null
+  const decodedAudioCache = new Map<string, AudioBuffer | null>()
 
   function busLevel(bus: AudioBus): number {
     const v =
@@ -222,6 +241,16 @@ export function createAudioEngine(): AudioEngine {
     musicBedGain.connect(musicBus)
     musicBedNodes = buildMusicBed(ctx, musicBedGain)
 
+    // If setTrackAudio was called before the context existed (the
+    // boot path: track loads while the user hasn't pressed a key
+    // yet), apply the buffered config now.
+    if (pendingTrackAudio) {
+      const { config } = pendingTrackAudio
+      pendingTrackAudio = null
+      // Fire-and-forget — load failures don't block the rest of boot.
+      void applyTrackAudioToContext(ctx, config)
+    }
+
     return ctx
   }
 
@@ -234,6 +263,139 @@ export function createAudioEngine(): AudioEngine {
     musicBus.gain.setValueAtTime(musicBus.gain.value, now)
     musicBus.gain.linearRampToValueAtTime(ducked, now + 0.04)
     musicBus.gain.linearRampToValueAtTime(base, now + 0.04 + Math.max(0.05, recoverSeconds))
+  }
+
+  /** Resolve the per-track pump-duck multiplier. Defaults to 1.0
+   *  (i.e. the engine's base 0.35 duck amount is unchanged) when no
+   *  track-level override is set. */
+  function trackDuckMultiplier(): number {
+    const m = trackAudioConfig?.music3dEffects?.duckOnPump
+    return typeof m === 'number' && Number.isFinite(m) && m >= 0 ? m : 1
+  }
+
+  async function loadAudioBuffer(c: AudioContext, url: string): Promise<AudioBuffer | null> {
+    if (decodedAudioCache.has(url)) return decodedAudioCache.get(url) ?? null
+    try {
+      const res = await fetch(url)
+      if (!res.ok) {
+        // 404 etc. — expected while licensed audio is still pending.
+        // Warn once and cache the miss so we don't refetch on
+        // track-change.
+        console.warn(`[audio] fetch ${url} returned ${res.status}; falling back`)
+        decodedAudioCache.set(url, null)
+        return null
+      }
+      const bytes = await res.arrayBuffer()
+      const buf = await c.decodeAudioData(bytes.slice(0))
+      decodedAudioCache.set(url, buf)
+      return buf
+    } catch (e) {
+      console.warn(`[audio] failed to load ${url}: ${(e as Error).message}`)
+      decodedAudioCache.set(url, null)
+      return null
+    }
+  }
+
+  function stopTrackAudio(): void {
+    if (trackMusic) {
+      try {
+        trackMusic.source.stop()
+      } catch {
+        // Already stopped — safe.
+      }
+      try {
+        trackMusic.source.disconnect()
+        trackMusic.gain.disconnect()
+      } catch {
+        // Disconnected — safe.
+      }
+      trackMusic = null
+    }
+    for (const layer of trackAmbient) {
+      try {
+        layer.source.stop()
+      } catch {
+        // Already stopped — safe.
+      }
+      try {
+        layer.source.disconnect()
+        layer.gain.disconnect()
+      } catch {
+        // Disconnected — safe.
+      }
+    }
+    trackAmbient = []
+  }
+
+  async function applyTrackAudioToContext(
+    c: AudioContext,
+    config: AudioConfig | undefined,
+  ): Promise<void> {
+    stopTrackAudio()
+    trackAudioConfig = config
+    if (!config) {
+      // Cleared — restore the procedural pad bed audibility.
+      if (musicBedGain) musicBedGain.gain.value = musicEnabled ? 1 : 0
+      return
+    }
+    // Music: when present + reachable, mute the procedural bed and
+    // play the licensed track on the music bus. When the file misses
+    // (404), keep the procedural bed at its current level — that's
+    // the documented fallback contract.
+    if (config.music && musicBus) {
+      const url = `/audio/music/${config.music}`
+      const buf = await loadAudioBuffer(c, url)
+      if (buf) {
+        const source = c.createBufferSource()
+        source.buffer = buf
+        source.loop = true
+        const gain = c.createGain()
+        gain.gain.value = 1
+        source.connect(gain)
+        gain.connect(musicBus)
+        try {
+          source.start()
+        } catch {
+          // start() throws if called twice — defensive only.
+        }
+        trackMusic = { source, gain }
+        // Procedural bed gets silenced while licensed music plays;
+        // it stays routed so setMusicEnabled(false) still works.
+        if (musicBedGain) musicBedGain.gain.value = 0
+      } else if (musicBedGain) {
+        musicBedGain.gain.value = musicEnabled ? 1 : 0
+      }
+    } else if (musicBedGain) {
+      musicBedGain.gain.value = musicEnabled ? 1 : 0
+    }
+    // Ambient layers — load + play each in parallel.
+    if (config.ambient && config.ambient.length > 0 && ambientBus) {
+      const ambBus = ambientBus
+      await Promise.all(
+        config.ambient.map(async (name, i) => {
+          const url = `/audio/ambient/${name}`
+          const buf = await loadAudioBuffer(c, url)
+          if (!buf) return
+          const source = c.createBufferSource()
+          source.buffer = buf
+          source.loop = true
+          const layerGain = config.ambientGains?.[i]
+          const g = c.createGain()
+          g.gain.value =
+            typeof layerGain === 'number' && Number.isFinite(layerGain) && layerGain >= 0
+              ? layerGain
+              : 1
+          source.connect(g)
+          g.connect(ambBus)
+          try {
+            source.start()
+          } catch {
+            // start() throws if called twice — defensive only.
+          }
+          trackAmbient.push({ source, gain: g })
+        }),
+      )
+    }
   }
 
   return {
@@ -435,7 +597,24 @@ export function createAudioEngine(): AudioEngine {
       noise.start(now)
       noise.stop(now + 0.3)
       // Sidechain duck — strength scales how hard we dip the music.
-      duckMusicInternal(0.35 + 0.3 * s, 0.45)
+      // The per-track `music3dEffects.duckOnPump` multiplier lets
+      // tracks with heavier music tune the depth without the engine
+      // shifting its default for everyone.
+      const duckMul = trackDuckMultiplier()
+      duckMusicInternal((0.35 + 0.3 * s) * duckMul, 0.45)
+    },
+
+    setTrackAudio(config) {
+      if (!ctx) {
+        // Boot path: track loads before any user gesture. Buffer the
+        // config and apply it when ensureContext runs.
+        pendingTrackAudio = { config }
+        trackAudioConfig = config
+        return
+      }
+      // Fire-and-forget — load failures (404 etc.) don't block the
+      // caller and surface as console.warn at most.
+      void applyTrackAudioToContext(ctx, config)
     },
   }
 }

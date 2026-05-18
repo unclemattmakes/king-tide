@@ -287,17 +287,28 @@ def reset_scene() -> None:
 # ────────────────────────────────────────────────────────────────────
 
 def _load_addon_module():
-    """Load `hoverbike_addon.py` as a module without registering it. We
-    need its `_generate_downtown` helper to build the city blocks and
-    its `_rebuild_*_preview` helpers for the gizmo overlays."""
-    addon_file = os.path.join(SCRIPT_DIR, "hoverbike_addon.py")
-    if not os.path.exists(addon_file):
-        print(f"[seed-template-downtown] WARNING: {addon_file} not found")
+    """Load the in-repo Hoverbike addon package without registering it.
+    Need its ``_generate_downtown`` helper to build city blocks and the
+    ``_rebuild_*_preview`` helpers for the gizmo overlays — both still
+    reachable post-2026-05 package-refactor via the back-compat shim
+    in ``hoverbike_addon/__init__.py``. ``submodule_search_locations``
+    is required so the package's ``from . import ...`` lines resolve
+    under the disk alias."""
+    import sys
+    pkg_dir = os.path.join(SCRIPT_DIR, "hoverbike_addon")
+    init_file = os.path.join(pkg_dir, "__init__.py")
+    if not os.path.exists(init_file):
+        print(f"[seed-template-downtown] WARNING: {init_file} not found")
         return None
-    spec = importlib.util.spec_from_file_location("hoverbike_addon_disk", addon_file)
+    spec = importlib.util.spec_from_file_location(
+        "hoverbike_addon_disk",
+        init_file,
+        submodule_search_locations=[pkg_dir],
+    )
     if spec is None or spec.loader is None:
         return None
     addon = importlib.util.module_from_spec(spec)
+    sys.modules["hoverbike_addon_disk"] = addon
     spec.loader.exec_module(addon)
     return addon
 

@@ -275,14 +275,26 @@ def reset_scene() -> None:
 
 
 def _load_addon_module():
-    addon_file = os.path.join(SCRIPT_DIR, "hoverbike_addon.py")
-    if not os.path.exists(addon_file):
-        print(f"[seed-tunnel-island] WARNING: {addon_file} not found")
+    """Load the in-repo Hoverbike addon package by file path, register
+    it so the export operator's scene-property reads have something to
+    read. Post-2026-05 the addon is a package (``hoverbike_addon/`` with
+    submodules); ``submodule_search_locations`` makes the package's
+    ``from . import water, ...`` lines resolve under the disk alias."""
+    import sys
+    pkg_dir = os.path.join(SCRIPT_DIR, "hoverbike_addon")
+    init_file = os.path.join(pkg_dir, "__init__.py")
+    if not os.path.exists(init_file):
+        print(f"[seed-tunnel-island] WARNING: {init_file} not found")
         return None
-    spec = importlib.util.spec_from_file_location("hoverbike_addon_disk", addon_file)
+    spec = importlib.util.spec_from_file_location(
+        "hoverbike_addon_disk",
+        init_file,
+        submodule_search_locations=[pkg_dir],
+    )
     if spec is None or spec.loader is None:
         return None
     addon = importlib.util.module_from_spec(spec)
+    sys.modules["hoverbike_addon_disk"] = addon
     spec.loader.exec_module(addon)
     # Register so the export operator's scene-property reads (terrain
     # shader, gate spacing, etc.) have something to read. Safe — the

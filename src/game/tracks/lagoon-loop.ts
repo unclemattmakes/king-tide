@@ -99,6 +99,7 @@ export function createLagoonLoop(): Track {
     surfaces: [],
     boostPads: [],
     antiGravZones: [],
+    waveZones: [],
     props: [],
     pickupSpawns: [
       { x: 50, y: 1.8, z: 25 }, // right straight, between cp 0 and cp 1

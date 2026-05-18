@@ -178,6 +178,177 @@ describe('buildTrackFromJson', () => {
     expect(built.sky).toEqual({ cloudiness: 0.2 })
   })
 
+  it('round-trips an optional audio palette block', () => {
+    const raw = baseTrack()
+    raw.audio = {
+      music: 'south-beach-vaporwave.opus',
+      ambient: ['gulls.opus', 'surf-light.opus', 'neon-hum.opus'],
+      ambientGains: [0.4, 0.6, 0.2],
+      music3dEffects: { duckOnPump: 0.35 },
+    }
+    const built = buildTrackFromJson(raw)
+    expect(built.audio).toEqual({
+      music: 'south-beach-vaporwave.opus',
+      ambient: ['gulls.opus', 'surf-light.opus', 'neon-hum.opus'],
+      ambientGains: [0.4, 0.6, 0.2],
+      music3dEffects: { duckOnPump: 0.35 },
+    })
+    const back = trackToJson(built)
+    const rebuilt = buildTrackFromJson(back)
+    expect(rebuilt.audio).toEqual(built.audio)
+  })
+
+  it('treats audio as fully optional (omitted on tracks that do not need it)', () => {
+    const raw = baseTrack()
+    expect('audio' in raw).toBe(false)
+    const built = buildTrackFromJson(raw)
+    expect(built.audio).toBeUndefined()
+  })
+
+  it('accepts an audio block with only ambient layers (no music)', () => {
+    const raw = baseTrack()
+    raw.audio = { ambient: ['surf.opus'] }
+    const built = buildTrackFromJson(raw)
+    expect(built.audio?.music).toBeUndefined()
+    expect(built.audio?.ambient).toEqual(['surf.opus'])
+  })
+
+  it('rejects empty audio.music string', () => {
+    const raw = baseTrack()
+    raw.audio = { music: '' }
+    expect(() => buildTrackFromJson(raw)).toThrow(
+      /audio\.music must be a non-empty string/,
+    )
+  })
+
+  it('rejects audio.ambientGains without a matching audio.ambient', () => {
+    const raw = baseTrack()
+    raw.audio = { ambientGains: [0.5, 0.5] }
+    expect(() => buildTrackFromJson(raw)).toThrow(
+      /audio\.ambientGains requires a matching audio\.ambient/,
+    )
+  })
+
+  it('rejects audio.ambient / ambientGains length mismatch', () => {
+    const raw = baseTrack()
+    raw.audio = {
+      ambient: ['a.opus', 'b.opus'],
+      ambientGains: [0.5],
+    }
+    expect(() => buildTrackFromJson(raw)).toThrow(
+      /audio\.ambientGains length \(1\) must match audio\.ambient length \(2\)/,
+    )
+  })
+
+  it('rejects negative audio.ambientGains entries', () => {
+    const raw = baseTrack()
+    raw.audio = {
+      ambient: ['a.opus'],
+      ambientGains: [-0.1],
+    }
+    expect(() => buildTrackFromJson(raw)).toThrow(
+      /audio\.ambientGains\[0\] must be non-negative/,
+    )
+  })
+
+  it('rejects non-string audio.ambient entries', () => {
+    const raw = baseTrack()
+    raw.audio = { ambient: ['ok.opus', 42] as unknown[] }
+    expect(() => buildTrackFromJson(raw)).toThrow(
+      /audio\.ambient\[1\] must be a non-empty string/,
+    )
+  })
+
+  it('rejects negative audio.music3dEffects.duckOnPump', () => {
+    const raw = baseTrack()
+    raw.audio = { music3dEffects: { duckOnPump: -0.5 } }
+    expect(() => buildTrackFromJson(raw)).toThrow(
+      /duckOnPump must be non-negative/,
+    )
+  })
+
+  it('round-trips colorGrade, bloom, and seaStateBeaufort', () => {
+    const raw = baseTrack()
+    raw.sky = {
+      colorGrade: 'tokyo_neon',
+      bloom: 0.8,
+      seaStateBeaufort: 7,
+      timeOfDay: 180,
+    }
+    const built = buildTrackFromJson(raw)
+    expect(built.sky).toEqual({
+      colorGrade: 'tokyo_neon',
+      bloom: 0.8,
+      seaStateBeaufort: 7,
+      timeOfDay: 180,
+    })
+    const back = trackToJson(built)
+    const rebuilt = buildTrackFromJson(back)
+    expect(rebuilt.sky).toEqual(built.sky)
+  })
+
+  it('accepts every bundled colorGrade preset', () => {
+    for (const grade of [
+      'neutral',
+      'miami_pastel',
+      'tokyo_neon',
+      'big_sur_golden',
+      'venice_warm',
+      'nyc_sunset',
+      'cape_town_blue',
+      'kilauea_volcanic',
+    ]) {
+      const raw = baseTrack()
+      raw.sky = { colorGrade: grade }
+      const built = buildTrackFromJson(raw)
+      expect(built.sky?.colorGrade).toBe(grade)
+    }
+  })
+
+  it('rejects unknown sky.colorGrade strings', () => {
+    const raw = baseTrack()
+    raw.sky = { colorGrade: 'bogus_preset' }
+    expect(() => buildTrackFromJson(raw)).toThrow(/sky\.colorGrade must be one of/)
+  })
+
+  it('rejects non-string sky.colorGrade values', () => {
+    const raw = baseTrack()
+    raw.sky = { colorGrade: 42 }
+    expect(() => buildTrackFromJson(raw)).toThrow(/sky\.colorGrade must be one of/)
+  })
+
+  it('rejects sky.bloom outside [0, 2]', () => {
+    const raw = baseTrack()
+    raw.sky = { bloom: 2.5 }
+    expect(() => buildTrackFromJson(raw)).toThrow(/sky\.bloom must be in \[0, 2\]/)
+    raw.sky = { bloom: -0.1 }
+    expect(() => buildTrackFromJson(raw)).toThrow(/sky\.bloom must be in \[0, 2\]/)
+  })
+
+  it('rejects non-finite sky.bloom', () => {
+    const raw = baseTrack()
+    raw.sky = { bloom: 'bright' }
+    expect(() => buildTrackFromJson(raw)).toThrow(/sky\.bloom must be a finite number/)
+  })
+
+  it('rejects sky.seaStateBeaufort outside [0, 12]', () => {
+    const raw = baseTrack()
+    raw.sky = { seaStateBeaufort: 13 }
+    expect(() => buildTrackFromJson(raw)).toThrow(/sky\.seaStateBeaufort must be in \[0, 12\]/)
+    raw.sky = { seaStateBeaufort: -1 }
+    expect(() => buildTrackFromJson(raw)).toThrow(/sky\.seaStateBeaufort must be in \[0, 12\]/)
+  })
+
+  it('accepts integer + fractional sky.seaStateBeaufort values', () => {
+    const raw = baseTrack()
+    raw.sky = { seaStateBeaufort: 0 }
+    expect(buildTrackFromJson(raw).sky?.seaStateBeaufort).toBe(0)
+    raw.sky = { seaStateBeaufort: 12 }
+    expect(buildTrackFromJson(raw).sky?.seaStateBeaufort).toBe(12)
+    raw.sky = { seaStateBeaufort: 4.5 }
+    expect(buildTrackFromJson(raw).sky?.seaStateBeaufort).toBe(4.5)
+  })
+
   it('reads boost pad fields', () => {
     const raw = baseTrack()
     raw.boostPads = [

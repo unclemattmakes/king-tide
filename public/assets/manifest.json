@@ -151,6 +151,22 @@
       "specPath": "public/tracks/canyon-run.json"
     },
     {
+      "id": "cape-town-drift",
+      "displayName": "Cape Town Drift",
+      "url": "/assets/tracks/cape-town-drift.glb",
+      "specPath": "public/tracks/cape-town-drift.json",
+      "heroUrl": "/assets/tracks/cape-town-drift-hero.jpg",
+      "thumbUrl": "/assets/tracks/cape-town-drift-thumb.jpg"
+    },
+    {
+      "id": "doges-drift",
+      "displayName": "Doges Drift",
+      "url": "/assets/tracks/doges-drift.glb",
+      "specPath": "public/tracks/doges-drift.json",
+      "heroUrl": "/assets/tracks/doges-drift-hero.jpg",
+      "thumbUrl": "/assets/tracks/doges-drift-thumb.jpg"
+    },
+    {
       "id": "dune-rally",
       "displayName": "Dune Rally",
       "url": "/assets/tracks/dune-rally.glb",
@@ -163,16 +179,70 @@
       "specPath": "public/tracks/figure-eight.json"
     },
     {
+      "id": "hatteras-light",
+      "displayName": "Hatteras Light",
+      "url": "/assets/tracks/hatteras-light.glb",
+      "specPath": "public/tracks/hatteras-light.json",
+      "heroUrl": "/assets/tracks/hatteras-light-hero.jpg",
+      "thumbUrl": "/assets/tracks/hatteras-light-thumb.jpg"
+    },
+    {
+      "id": "kilauea-crown",
+      "displayName": "Kilauea Crown",
+      "url": "/assets/tracks/kilauea-crown.glb",
+      "specPath": "public/tracks/kilauea-crown.json",
+      "heroUrl": "/assets/tracks/kilauea-crown-hero.jpg",
+      "thumbUrl": "/assets/tracks/kilauea-crown-thumb.jpg"
+    },
+    {
+      "id": "marina-bay-7",
+      "displayName": "Marina Bay 7",
+      "url": "/assets/tracks/marina-bay-7.glb",
+      "specPath": "public/tracks/marina-bay-7.json",
+      "heroUrl": "/assets/tracks/marina-bay-7-hero.jpg",
+      "thumbUrl": "/assets/tracks/marina-bay-7-thumb.jpg"
+    },
+    {
       "id": "oval-loop",
       "displayName": "Oval Loop",
       "url": "/assets/tracks/oval-loop.glb",
       "specPath": "public/tracks/oval-loop.json"
     },
     {
+      "id": "sandbar",
+      "displayName": "Sandbar",
+      "url": "/assets/tracks/sandbar.glb",
+      "specPath": "public/tracks/sandbar.json",
+      "heroUrl": "/assets/tracks/sandbar-hero.jpg",
+      "thumbUrl": "/assets/tracks/sandbar-thumb.jpg"
+    },
+    {
+      "id": "seattle",
+      "displayName": "Seattle",
+      "url": "/assets/tracks/seattle.glb",
+      "specPath": "public/tracks/seattle.json"
+    },
+    {
       "id": "seattle-sprint",
       "displayName": "Seattle Sprint",
       "url": "/assets/tracks/seattle-sprint.glb",
       "specPath": "public/tracks/seattle-sprint.json"
+    },
+    {
+      "id": "shibuya-submerged",
+      "displayName": "Shibuya Submerged",
+      "url": "/assets/tracks/shibuya-submerged.glb",
+      "specPath": "public/tracks/shibuya-submerged.json",
+      "heroUrl": "/assets/tracks/shibuya-submerged-hero.jpg",
+      "thumbUrl": "/assets/tracks/shibuya-submerged-thumb.jpg"
+    },
+    {
+      "id": "south-beach-sunken",
+      "displayName": "South Beach Sunken",
+      "url": "/assets/tracks/south-beach-sunken.glb",
+      "specPath": "public/tracks/south-beach-sunken.json",
+      "heroUrl": "/assets/tracks/south-beach-sunken-hero.jpg",
+      "thumbUrl": "/assets/tracks/south-beach-sunken-thumb.jpg"
     },
     {
       "id": "template-tunnel-island",
@@ -197,6 +267,14 @@
       "displayName": "Test Track",
       "url": "/assets/tracks/test-track.glb",
       "specPath": "public/tracks/test-track.json"
+    },
+    {
+      "id": "the-maw",
+      "displayName": "The Maw",
+      "url": "/assets/tracks/the-maw.glb",
+      "specPath": "public/tracks/the-maw.json",
+      "heroUrl": "/assets/tracks/the-maw-hero.jpg",
+      "thumbUrl": "/assets/tracks/the-maw-thumb.jpg"
     }
   ],
   "generatedAt": "2026-05-10T06:41:33.421Z"

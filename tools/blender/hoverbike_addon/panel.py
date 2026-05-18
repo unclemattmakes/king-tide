@@ -19,6 +19,12 @@ import re
 import bpy
 from bpy.types import Panel
 
+# HOVERBIKE_PT_track_emitters lives in emitter.py (panel draw uses
+# module-local helpers there) but registers via this module so its
+# parent panel HOVERBIKE_PT_panel is in bpy.types first — panel runs
+# last in addon._MODULES.
+from .emitter import HOVERBIKE_PT_track_emitters
+
 
 # ────────────────────────────────────────────────────────────────────
 # Top-level sidebar panel
@@ -579,6 +585,73 @@ class HOVERBIKE_PT_track_downtown(_HoverbikeTrackSubPanelBase, Panel):
             row.operator("hoverbike.rebuild_downtown", text="Rebuild", icon="FILE_REFRESH")
 
 
+class HOVERBIKE_PT_track_antigrav_ribbon(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: curve-driven anti-grav surface authoring. Pick a
+    profile (tube / ribbon / banked-strip), drop a Bezier curve through
+    the intended path, hit *Build Anti-Grav Surface* — the operator
+    sweeps the cross-section, drops the entry / exit zone empties at
+    the curve endpoints, and tags the surface ``kind=track``. Same
+    authoring shape as the tunnel + road tools so the muscle memory
+    transfers; default-closed since most tracks won't use it."""
+    bl_label = "Anti-grav surfaces"
+    bl_idname = "HOVERBIKE_PT_track_antigrav_ribbon"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        from .antigrav_ribbon import (
+            ANTIGRAV_CURVE_PREFIX,
+            ANTIGRAV_SURFACE_SUFFIX,
+            PROFILE_TUBE,
+        )
+
+        layout = self.layout
+        scene = context.scene
+
+        layout.label(text="Cross-section profile:", icon="MOD_ARRAY")
+        layout.prop(scene, "hoverbike_antigrav_profile", text="")
+        profile = str(scene.hoverbike_antigrav_profile)
+
+        if profile == PROFILE_TUBE:
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_antigrav_radius", text="Radius")
+            row.prop(scene, "hoverbike_antigrav_segments", text="Sides")
+        else:
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_antigrav_width", text="Width")
+            row.prop(scene, "hoverbike_antigrav_thickness", text="Thick")
+        layout.prop(scene, "hoverbike_antigrav_samples", text="Samples")
+        layout.separator()
+
+        # Curve-count summary so authors see at-a-glance how many
+        # anti-grav segments the track has and which one is active.
+        n_curves = sum(
+            1 for obj in bpy.data.objects
+            if obj.type == "CURVE" and obj.name.startswith(ANTIGRAV_CURVE_PREFIX)
+        )
+        n_surfaces = sum(
+            1 for obj in bpy.data.objects
+            if obj.type == "MESH" and obj.name.endswith(ANTIGRAV_SURFACE_SUFFIX)
+        )
+        if n_curves > 0:
+            layout.label(text=f"{n_curves} curve(s), {n_surfaces} built", icon="CURVE_BEZCURVE")
+
+        row = layout.row(align=True)
+        row.operator("hoverbike.add_antigrav_curve", icon="CURVE_BEZCURVE")
+        row.operator("hoverbike.build_antigrav_surface", icon="MOD_PARTICLES")
+
+        active = context.active_object
+        if active is not None and active.type == "CURVE" and active.name.startswith(ANTIGRAV_CURVE_PREFIX):
+            layout.label(text=f"Active: {active.name}", icon="OBJECT_DATAMODE")
+            layout.label(text="Edit the curve, then Build", icon="INFO")
+            if profile == "BANKED_STRIP":
+                layout.label(
+                    text="Set per-point Tilt in N→Item to bank/wall/ceiling",
+                    icon="DRIVER_ROTATIONAL_DIFFERENCE",
+                )
+        else:
+            layout.label(text="Select an antigrav_curve_NN to build", icon="INFO")
+
+
 class HOVERBIKE_PT_track_ramps(_HoverbikeTrackSubPanelBase, Panel):
     """Sub-panel: simple wedge ramp. Three sliders set the next ramp's
     dimensions; clicking *Add Ramp* drops it at the 3D cursor.
@@ -649,6 +722,19 @@ class HOVERBIKE_PT_track_terrain(_HoverbikeTrackSubPanelBase, Panel):
         layout.label(text="Vertex bakes:", icon="MATERIAL")
         layout.label(text="Fills baked_ao + baked_path", icon="NODE_TEXTURE")
         layout.operator("hoverbike.bake_terrain_attrs", icon="MOD_NOISE")
+        # Path-worn standalone — separate knobs + faster bake (no
+        # Cycles round-trip) so authors can iterate on falloff width /
+        # intensity without paying the AO cost on every click. The
+        # auto-bake-on-export hook reads the same three scene props,
+        # so the values dialled in here ship with the GLB even if the
+        # author never clicks the button.
+        layout.separator()
+        layout.label(text="Path-worn falloff:")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_path_wear_inner", text="Inner")
+        row.prop(scene, "hoverbike_path_wear_outer", text="Outer")
+        layout.prop(scene, "hoverbike_path_wear_intensity", text="Intensity")
+        layout.operator("hoverbike.bake_path_worn", icon="MOD_CURVE")
 
 
 class HOVERBIKE_PT_track_water(_HoverbikeTrackSubPanelBase, Panel):
@@ -676,6 +762,135 @@ class HOVERBIKE_PT_track_water(_HoverbikeTrackSubPanelBase, Panel):
         row = layout.row(align=True)
         row.operator("hoverbike.rebuild_water_preview", icon="FILE_REFRESH")
         row.operator("hoverbike.hide_water_preview", icon="HIDE_ON")
+
+
+class HOVERBIKE_PT_track_horizon(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: per-track distant-horizon silhouette. Drops a
+    procedural starter ring authors can hand-edit into recognisable
+    skylines (Skytree, Table Mountain, the Manhattan grid). When the
+    GLB ships a ``horizon_ring`` mesh, the runtime uses it directly;
+    otherwise the procedural fallback (seeded off the track id) runs.
+
+    Lives next to Water in the panel order because both shape the
+    far-field atmosphere — author up here, water sits below."""
+
+    bl_label = "Horizon"
+    bl_idname = "HOVERBIKE_PT_track_horizon"
+
+    def draw(self, context):
+        from .horizon import HORIZON_MESH_NAME
+
+        layout = self.layout
+        scene = context.scene
+        ring = bpy.data.objects.get(HORIZON_MESH_NAME)
+
+        if ring is None:
+            layout.label(text="No horizon_ring (runtime uses procedural)", icon="WORLD")
+            layout.label(text="Starter shape:", icon="MESH_CIRCLE")
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_horizon_radius", text="Radius")
+            row.prop(scene, "hoverbike_horizon_peak", text="Peak")
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_horizon_segments", text="Segments")
+            row.prop(scene, "hoverbike_horizon_seed", text="Seed")
+            layout.operator("hoverbike.add_horizon_ring", icon="ADD")
+        else:
+            v = len(ring.data.vertices)
+            f = len(ring.data.polygons)
+            layout.label(text=f"horizon_ring: {v} verts, {f} faces", icon="WORLD")
+            row = layout.row(align=True)
+            row.operator("hoverbike.edit_horizon_ring", icon="EDITMODE_HLT")
+            row.operator("hoverbike.delete_horizon_ring", icon="X")
+            layout.separator()
+            layout.label(text="Re-roll starter (loses edits):", icon="FILE_REFRESH")
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_horizon_seed", text="Seed")
+            row.prop(scene, "hoverbike_horizon_peak", text="Peak")
+            layout.operator("hoverbike.reset_horizon_ring", icon="LOOP_BACK")
+
+
+class HOVERBIKE_PT_track_sky(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: per-track sky / atmosphere preset. Authors tint /
+    cloudiness / sun intensity / fog distances / time-of-day, plus the
+    sky-grade LUT preset, the renderer bloom intensity (currently
+    round-trips only — no bloom pass is wired yet), and the Beaufort
+    sea-state that scales the wave field at boot.
+
+    Lives between Horizon and Waves because all three shape the
+    far-field atmosphere. Default-closed since these are usually set
+    once per track and the author is unlikely to be tweaking them
+    while editing geometry.
+    """
+
+    bl_label = "Sky preset"
+    bl_idname = "HOVERBIKE_PT_track_sky"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+
+        # Palette + sun
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_sky_tint", text="Tint")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_sky_cloudiness", text="Cloudiness")
+        row.prop(scene, "hoverbike_sky_sun_intensity", text="Sun")
+        # Time of day picks where on the 360 s cycle the (frozen) sun
+        # sits — the most-tweaked knob since it owns the whole mood.
+        layout.prop(scene, "hoverbike_sky_time_of_day", text="Time of day (s)")
+
+        layout.separator()
+        layout.label(text="Fog distances:")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_sky_fog_near", text="Near")
+        row.prop(scene, "hoverbike_sky_fog_far", text="Far")
+        # Visible-only nudge — fog ordering is enforced at JSON validate
+        # time. Surfacing it here avoids the round-trip surprise.
+        if (
+            getattr(scene, "hoverbike_sky_fog_near", 0.0)
+            >= getattr(scene, "hoverbike_sky_fog_far", 0.0)
+        ):
+            layout.label(text="Near must be < Far", icon="ERROR")
+
+        layout.separator()
+        layout.label(text="Color grade (LUT preset):")
+        layout.prop(scene, "hoverbike_sky_color_grade", text="")
+        # Bloom + sea state — round-trip-only / wave-field one-shot.
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_sky_bloom", text="Bloom")
+        row.prop(scene, "hoverbike_sky_sea_state", text="Sea (Bft)")
+        bloom_val = float(getattr(scene, "hoverbike_sky_bloom", 0.0) or 0.0)
+        if bloom_val > 0:
+            layout.label(text="Bloom: no pass yet, value still ships", icon="INFO")
+
+
+class HOVERBIKE_PT_track_waves(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: wave-mastery zones. Each ``wave_zone_NN`` empty in the
+    scene multiplies the global Gerstner wave amplitude / frequency
+    inside its oriented bounding box, with optional periodic surge for
+    tsunami timers and an optional dominant-swell direction override.
+    The runtime evaluates zones via ``sampleZoneFactors`` in
+    ``wave-field.ts``."""
+    bl_label = "Wave zones"
+    bl_idname = "HOVERBIKE_PT_track_waves"
+
+    def draw(self, context):
+        layout = self.layout
+        layout.operator("hoverbike.add_wave_zone", icon="ADD")
+        n_zones = sum(
+            1 for obj in bpy.data.objects if re.match(r"^wave_zone_(\d+)$", obj.name)
+        )
+        if n_zones > 0:
+            layout.label(text=f"{n_zones} zone(s) — drag, R to aim swell")
+            layout.operator("hoverbike.refresh_wave_zones", icon="FILE_REFRESH")
+            layout.label(text="Custom Properties tunes each zone:", icon="INFO")
+            layout.label(text="  height_mult, freq_mult, blend_radius_m")
+            layout.label(text="  + optional surge_period_s/_amplitude")
+            layout.label(text="  + optional direction_deg")
+        else:
+            layout.label(text="No zones — global Gerstner only", icon="INFO")
+        layout.label(text="Local +X = dominant swell direction", icon="ORIENTATION_LOCAL")
 
 
 class HOVERBIKE_PT_track_gameplay(_HoverbikeTrackSubPanelBase, Panel):
@@ -855,6 +1070,88 @@ class HOVERBIKE_PT_track_shader(_HoverbikeTrackSubPanelBase, Panel):
         layout.prop(scene, "hoverbike_shader_saturation", text="Saturation")
 
 
+class HOVERBIKE_PT_track_thumbnail(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: track-hero / loading-screen render. Lives next to
+    Stats because both are pre-export sanity checks rather than core
+    authoring loops. Shows whether a ``camera_hero`` is present, an
+    Add Camera button when it isn't, a Render Hero button when it is,
+    and a last-rendered timestamp once a render has fired in the
+    current session. Default-closed since the render auto-fires on
+    track export — most authors only open this section when iterating
+    on framing."""
+
+    bl_label = "Track hero render"
+    bl_idname = "HOVERBIKE_PT_track_thumbnail"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        from .thumbnail import (
+            CAMERA_HERO_NAME,
+            HERO_HEIGHT,
+            HERO_WIDTH,
+            TILE_HEIGHT,
+            TILE_WIDTH,
+            find_camera_hero,
+        )
+
+        layout = self.layout
+        cam = find_camera_hero()
+
+        if cam is None:
+            layout.label(text="No camera_hero in scene", icon="OUTLINER_OB_CAMERA")
+            layout.label(text="Loading-screen render is skipped on export.")
+            layout.operator(
+                "hoverbike.add_camera_hero",
+                text="Add Camera Hero",
+                icon="ADD",
+            )
+            return
+
+        layout.label(
+            text=f"{cam.name} ({cam.data.lens:.0f} mm)",
+            icon="OUTLINER_OB_CAMERA",
+        )
+        layout.label(
+            text=f"Hero {HERO_WIDTH}×{HERO_HEIGHT} + Tile {TILE_WIDTH}×{TILE_HEIGHT}",
+            icon="IMAGE",
+        )
+        if cam.name != CAMERA_HERO_NAME:
+            layout.label(
+                text=f"(renamed from {CAMERA_HERO_NAME})",
+                icon="INFO",
+            )
+        row = layout.row(align=True)
+        row.scale_y = 1.3
+        row.operator(
+            "hoverbike.render_track_hero",
+            text="Render Hero",
+            icon="RENDER_STILL",
+        )
+        row.operator(
+            "hoverbike.render_track_thumbnail",
+            text="Tile only",
+            icon="IMAGE",
+        )
+
+        last = context.scene.get("_hoverbike_track_hero_rendered_at")
+        if isinstance(last, (int, float)) and last > 0:
+            import time
+
+            age_s = max(0.0, time.time() - float(last))
+            if age_s < 60:
+                age_label = f"{age_s:.0f}s ago"
+            elif age_s < 3600:
+                age_label = f"{age_s / 60:.0f}m ago"
+            else:
+                age_label = f"{age_s / 3600:.1f}h ago"
+            layout.label(text=f"Last render: {age_label}", icon="TIME")
+        else:
+            layout.label(
+                text="Auto-fires on track export",
+                icon="INFO",
+            )
+
+
 class HOVERBIKE_PT_track_stats(_HoverbikeTrackSubPanelBase, Panel):
     """Sub-panel: read-only counts + spline-length / lap-time estimate +
     terrain min/max + water coverage. Helpful for sanity-checking before
@@ -912,13 +1209,19 @@ _CLASSES: tuple[type, ...] = (
     HOVERBIKE_PT_track_placement,
     HOVERBIKE_PT_track_road,
     HOVERBIKE_PT_track_tunnels,
+    HOVERBIKE_PT_track_antigrav_ribbon,
     HOVERBIKE_PT_track_ramps,
     HOVERBIKE_PT_track_downtown,
     HOVERBIKE_PT_track_terrain,
     HOVERBIKE_PT_track_water,
+    HOVERBIKE_PT_track_horizon,
+    HOVERBIKE_PT_track_sky,
+    HOVERBIKE_PT_track_waves,
+    HOVERBIKE_PT_track_emitters,
     HOVERBIKE_PT_track_gameplay,
     HOVERBIKE_PT_track_ghost,
     HOVERBIKE_PT_track_shader,
+    HOVERBIKE_PT_track_thumbnail,
     HOVERBIKE_PT_track_stats,
 )
 
