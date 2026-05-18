@@ -17,6 +17,7 @@
  */
 
 import { installMenuGamepad, type MenuGamepad } from '@/engine/input/menu-gamepad'
+import { installRebindModal } from '@/engine/menus/rebind-modal'
 import {
   type AIDifficulty,
   type AntiGravCameraIntensity,
@@ -25,6 +26,9 @@ import {
   setAntiGravCameraIntensity,
   setAudioBusVolume,
   setAudioMusicEnabled,
+  setGamepadDeadzone,
+  setGamepadSensitivity,
+  setInvertCameraY,
   setRubberBandAssist,
   setTutorialSubtitles,
   setWavePumpIntensity,
@@ -229,42 +233,54 @@ const TAB_SPECS: TabSpec[] = [
   {
     id: 'controls',
     label: 'CONTROLS',
-    description: 'Rebinding + sensitivity. Live-tuning lives in Dev Settings for now.',
+    description: 'Rebind keys + tune stick feel. Persists across sessions.',
     rows: [
       {
         id: 'controls-rebind',
         label: 'Rebind keyboard',
         control: { kind: 'button', label: 'OPEN…' },
-        enabled: false,
-        gate: 'Rebinding UI lands with the polish/QA pass (M17)',
+        enabled: true,
+        gate: 'Swap-on-rebind keeps every action reachable.',
       },
       {
         id: 'controls-rebind-pad',
         label: 'Rebind gamepad',
         control: { kind: 'button', label: 'OPEN…' },
-        enabled: false,
-        gate: 'Gamepad rebinding ships alongside keyboard rebinding',
+        enabled: true,
+        gate: 'Fire + boost only — sticks + triggers stay on the standard mapping.',
       },
       {
         id: 'controls-sensitivity',
         label: 'Gamepad sensitivity',
-        control: { kind: 'slider', min: 0.5, max: 3.0, step: 0.05, defaultValue: 1.0 },
-        enabled: false,
-        gate: 'Use Dev Settings → Stick yaw range for now',
+        control: {
+          kind: 'slider',
+          min: 0.5,
+          max: 3.0,
+          step: 0.05,
+          defaultValue: playerSettings.gamepadSensitivity,
+        },
+        enabled: true,
+        gate: 'Output multiplier — clamped at full deflection, so >1 just saturates earlier.',
       },
       {
         id: 'controls-deadzone',
         label: 'Deadzone',
-        control: { kind: 'slider', min: 0, max: 0.5, step: 0.01, defaultValue: 0.12 },
-        enabled: false,
-        gate: 'Use Dev Settings → Stick deadzone for now',
+        control: {
+          kind: 'slider',
+          min: 0,
+          max: 0.5,
+          step: 0.01,
+          defaultValue: playerSettings.gamepadDeadzone,
+        },
+        enabled: true,
+        gate: 'Left-stick magnitude below which steer / pitch read as zero.',
       },
       {
         id: 'controls-invert-y',
         label: 'Invert camera Y',
-        control: { kind: 'toggle', defaultValue: false },
-        enabled: false,
-        gate: 'Mirrors the Dev Settings toggle once the surfaces merge',
+        control: { kind: 'toggle', defaultValue: playerSettings.invertCameraY },
+        enabled: true,
+        gate: 'When on, push the stick / mouse up to look DOWN (flight-stick).',
       },
     ],
   },
@@ -486,6 +502,12 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       if (spec.enabled && spec.id === 'audio-ambient') {
         range.addEventListener('input', () => setAudioBusVolume('ambient', Number(range.value)))
       }
+      if (spec.enabled && spec.id === 'controls-sensitivity') {
+        range.addEventListener('input', () => setGamepadSensitivity(Number(range.value)))
+      }
+      if (spec.enabled && spec.id === 'controls-deadzone') {
+        range.addEventListener('input', () => setGamepadDeadzone(Number(range.value)))
+      }
       return range
     }
     if (c.kind === 'toggle') {
@@ -506,6 +528,11 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       if (spec.enabled && spec.id === 'audio-music-on') {
         cb.addEventListener('change', () => {
           setAudioMusicEnabled(cb.checked)
+        })
+      }
+      if (spec.enabled && spec.id === 'controls-invert-y') {
+        cb.addEventListener('change', () => {
+          setInvertCameraY(cb.checked)
         })
       }
       return cb
@@ -553,6 +580,16 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
         // intentional: routes through the same boot flow as the
         // menu's track-pick path.
         window.location.assign(buildReplayTutorialHref())
+      })
+    }
+    if (spec.enabled && spec.id === 'controls-rebind') {
+      btn.addEventListener('click', () => {
+        installRebindModal().open('keyboard')
+      })
+    }
+    if (spec.enabled && spec.id === 'controls-rebind-pad') {
+      btn.addEventListener('click', () => {
+        installRebindModal().open('gamepad')
       })
     }
     return btn
