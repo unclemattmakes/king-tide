@@ -41,11 +41,16 @@ const AI_SLOTS = AI_GRID_SLOTS.map((s) => ({ dx: s.dx, dz: s.dz, off: s.lineOffs
 export type SpawnBikesResult = {
   /** Always set. In replay mode this is the recording's slot-0 bike. */
   playerEid: number
-  /** AI opponent eids. Empty in replay mode. */
+  /** AI opponent eids. Empty in replay mode or when `aiCount` is 0
+   *  (Time Trial). */
   aiEids: number[]
   /** All bikes from the replay recording (slot 0 = player). Empty in
    *  live mode. The replay player writes per-frame poses into these. */
   replayBikeEids: number[]
+  /** Optional Time Trial ghost — render-only, no physics. The ghost
+   *  runner drives its Transform from a saved single-lap replay each
+   *  frame. Null when no ghost was requested. */
+  ghostEid: number | null
 }
 
 export function spawnBikes(opts: {
@@ -57,12 +62,20 @@ export function spawnBikes(opts: {
   playerVariant: BikeVariant
   /** Non-null = playback. The roster comes straight from the recording. */
   activeReplay: ReplayFile | null
+  /** Number of AI opponents to spawn (0..NUM_AI). Time Trial passes 0. */
+  aiCount?: number
+  /** When set, spawn a render-only ghost bike using this variant. The
+   *  caller (main.ts) is responsible for installing a `GhostRunner`
+   *  against the returned `ghostEid`. */
+  ghostVariant?: BikeVariant | null
 }): SpawnBikesResult {
-  const { sim, phys, track, playerVariant, activeReplay } = opts
+  const { sim, phys, track, playerVariant, activeReplay, ghostVariant } = opts
+  const aiCount = Math.max(0, Math.min(NUM_AI, opts.aiCount ?? NUM_AI))
   const startPos = track.start.position
   const aiEids: number[] = []
   const replayBikeEids: number[] = []
   let playerEid: number
+  let ghostEid: number | null = null
 
   const startYaw = track.start.yaw
   const halfYaw = startYaw / 2
@@ -122,7 +135,7 @@ export function spawnBikes(opts: {
     })
     spawnRider(playerEid, startPos)
 
-    const grid = AI_SLOTS.slice(0, NUM_AI)
+    const grid = AI_SLOTS.slice(0, aiCount)
     // Snapshot the difficulty at spawn time — changing the setting
     // mid-race won't retune already-spawned AIs (matches kart-game
     // precedent + avoids a sudden personality flip mid-lap).
@@ -138,7 +151,24 @@ export function spawnBikes(opts: {
       spawnRider(aiEid, aiPos)
       aiEids.push(aiEid)
     }
+
+    if (ghostVariant) {
+      // The ghost spawns at the start gate. The ghost runner will
+      // overwrite its Transform on the first tick — the start pose
+      // here just ensures it exists somewhere reasonable if the runner
+      // hasn't been installed yet.
+      ghostEid = createBike(sim, phys, {
+        position: startPos,
+        yaw: track.start.yaw,
+        ghost: true,
+        stats: {
+          ...ghostVariant.stats,
+          bodyColor: ghostVariant.bodyColor,
+          variantId: ghostVariant.id,
+        },
+      })
+    }
   }
 
-  return { playerEid, aiEids, replayBikeEids }
+  return { playerEid, aiEids, replayBikeEids, ghostEid }
 }

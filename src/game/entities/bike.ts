@@ -11,6 +11,7 @@ import {
   BikeTag,
   ControlIntent,
   ControlIntentStore,
+  GhostTag,
   HoverState,
   HoverStateStore,
   PeerControlled,
@@ -22,9 +23,9 @@ import {
   TransformStore,
 } from '@/game/components'
 import {
-  type AIDifficulty,
   AIController,
   AIControllerStore,
+  type AIDifficulty,
   AITag,
   defaultAIController,
 } from '@/game/components/ai'
@@ -50,6 +51,10 @@ export type CreateBikeOpts = {
   /** Optional sim-side stat override — used by bike variants. Defaults
    *  to defaultBikeStats() if omitted. */
   stats?: BikeStatsData
+  /** Render-only ghost bike (Time Trial). Skips RigidBody + collider +
+   *  all sim/race/AI/peer components. The ghost-runner system writes
+   *  its Transform each render frame from a replay player. */
+  ghost?: boolean
 }
 
 export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOpts): number {
@@ -64,6 +69,28 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
     z: 0,
     w: Math.cos(halfYaw),
   }
+
+  if (opts.ghost) {
+    // Render-only entity. Sim/AI/race/pickup systems all gate on tags
+    // we deliberately skip below; the bike-render system reads
+    // GhostTag and swaps in a transparent material.
+    addComponent(sim, eid, BikeTag)
+    addComponent(sim, eid, GhostTag)
+    addComponent(sim, eid, Transform)
+    TransformStore.set(eid, {
+      x: opts.position.x,
+      y: opts.position.y,
+      z: opts.position.z,
+      qx: startQuat.x,
+      qy: startQuat.y,
+      qz: startQuat.z,
+      qw: startQuat.w,
+    })
+    addComponent(sim, eid, BikeStats)
+    BikeStatsStore.set(eid, stats)
+    return eid
+  }
+
   const rbDesc = phys.rapier.RigidBodyDesc.dynamic()
     .setTranslation(opts.position.x, opts.position.y, opts.position.z)
     .setRotation(startQuat)

@@ -85,7 +85,8 @@ const STEPS_TUTORIAL: { id: Step; label: string }[] = [
 const STEPS_TT: { id: Step; label: string }[] = [
   { id: 'title', label: 'START' },
   { id: 'mode', label: 'MODE' },
-  { id: 'leaderboard', label: 'TIME TRIAL' },
+  { id: 'sp-cup-tracks', label: 'TRACK' },
+  { id: 'sp-bike', label: 'BIKE' },
 ]
 
 const STEPS_MP: { id: Step; label: string }[] = [
@@ -142,9 +143,8 @@ const MODE_TILES: ModeTile[] = [
     id: 'time-trial',
     badge: 'CLOCK',
     headline: 'TIME<br />TRIAL',
-    desc: 'Solo against the clock with a downloadable best-lap ghost. Ships with the leaderboard backend in M16.',
-    enabled: false,
-    gate: 'Ships in M16 alongside the leaderboard backend',
+    desc: 'Solo against the clock with a saved best-lap ghost. Set a new PB and your ghost overwrites itself for next time.',
+    enabled: true,
   },
   {
     id: 'cup',
@@ -275,10 +275,12 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         break
       case 'sp-cup-tracks':
         setChyron(
-          'TRACK',
-          pickedCup?.id === 'dev'
-            ? 'Playtest tracks. Procedural built-ins + every GLB the manifest knows about.'
-            : 'Cup line-up — tap a card to lock in your venue.',
+          currentMode === 'time-trial' ? 'TIME TRIAL' : 'TRACK',
+          currentMode === 'time-trial'
+            ? 'Solo against the clock. Your best lap saves as a translucent ghost — race it next time.'
+            : pickedCup?.id === 'dev'
+              ? 'Playtest tracks. Procedural built-ins + every GLB the manifest knows about.'
+              : 'Cup line-up — tap a card to lock in your venue.',
         )
         break
       case 'sp-bike':
@@ -546,9 +548,13 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     if (currentStep === 'mode') showStep('title')
     else if (currentStep === 'sp-track') showStep('mode')
     else if (currentStep === 'sp-cup') showStep('mode')
-    else if (currentStep === 'sp-cup-tracks') showStep('sp-cup')
+    else if (currentStep === 'sp-cup-tracks')
+      // TT mode skipped the cup-select step on the way in; backing out
+      // returns to the mode picker rather than a cup screen the user
+      // never saw.
+      showStep(currentMode === 'time-trial' ? 'mode' : 'sp-cup')
     else if (currentStep === 'sp-bike')
-      showStep(currentMode === 'cup' ? 'sp-cup-tracks' : 'sp-track')
+      showStep(currentMode === 'cup' || currentMode === 'time-trial' ? 'sp-cup-tracks' : 'sp-track')
     else if (currentStep === 'pre-race') showStep('sp-bike')
     else if (currentStep === 'mp-entry') showStep('mode')
     else if (currentStep === 'tutorial-intro') showStep('mode')
@@ -578,6 +584,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       url.searchParams.set('race', '1')
       url.searchParams.set('track', picks.trackId)
       url.searchParams.set('bike', picks.bikeId)
+      if (currentMode === 'time-trial') url.searchParams.set('tt', '1')
       finish(url.toString())
     }
     commitSpRaceRef = commitSpRace
@@ -675,7 +682,12 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
               showStep('tutorial-intro')
               break
             case 'time-trial':
-              showStep('leaderboard')
+              // TT reuses the cup-tracks renderer with Dev Cup as
+              // the source, so devs can run TT against today's
+              // playable maps. When v1 ship tracks land they'll
+              // appear here via their normal status='ship' flow.
+              pickedCup = dev ? DEV_CUP : (V1_CUPS[0] ?? null)
+              showStep('sp-cup-tracks')
               break
           }
         })
@@ -883,7 +895,9 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       const host = el.querySelector<HTMLElement>('#sp-bike-cards')
       if (host) renderBikeCards(host, true)
       el.querySelector('#sp-bike-back')?.addEventListener('click', () =>
-        showStep(currentMode === 'cup' ? 'sp-cup-tracks' : 'sp-track'),
+        showStep(
+          currentMode === 'cup' || currentMode === 'time-trial' ? 'sp-cup-tracks' : 'sp-track',
+        ),
       )
       return el
     }
