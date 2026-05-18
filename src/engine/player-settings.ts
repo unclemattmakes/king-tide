@@ -62,6 +62,18 @@ export type PlayerSettings = {
    *  tutorial cleanly. Cheap onboarding flag the menu/settings reads to
    *  show "REPLAY TUTORIAL" instead of "RUN TUTORIAL". */
   tutorialCompleted: boolean
+  /** Audio mixer — four buses each storing a 0..1 slider value. Read
+   *  per-frame by the AudioEngine via `busLevel(bus)`, which applies
+   *  per-bus headroom on top so slider=1.0 maps to a comfortable
+   *  ceiling instead of pinning to 0dB. */
+  audioMasterVolume: number
+  audioMusicVolume: number
+  audioSfxVolume: number
+  audioAmbientVolume: number
+  /** Procedural music bed enable. When off the music bus stays
+   *  routed but the bed nodes are muted via `musicBedGain` — keeps
+   *  the licensed-music swap point a one-liner. */
+  audioMusicEnabled: boolean
 }
 
 export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
@@ -71,6 +83,11 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   antiGravCameraIntensity: 'full',
   tutorialSubtitles: true,
   tutorialCompleted: false,
+  audioMasterVolume: 0.8,
+  audioMusicVolume: 0.55,
+  audioSfxVolume: 0.85,
+  audioAmbientVolume: 0.7,
+  audioMusicEnabled: true,
 })
 
 /** Live, mutable copy. Consumers read this object every frame — no
@@ -134,6 +151,18 @@ export function loadPlayerSettings(): void {
   if (typeof p.tutorialCompleted === 'boolean') {
     playerSettings.tutorialCompleted = p.tutorialCompleted
   }
+  const loadVol = (key: keyof PlayerSettings, val: unknown) => {
+    if (typeof val !== 'number' || !Number.isFinite(val)) return
+    const clamped = Math.max(0, Math.min(1, val))
+    ;(playerSettings as Record<string, unknown>)[key as string] = clamped
+  }
+  loadVol('audioMasterVolume', p.audioMasterVolume)
+  loadVol('audioMusicVolume', p.audioMusicVolume)
+  loadVol('audioSfxVolume', p.audioSfxVolume)
+  loadVol('audioAmbientVolume', p.audioAmbientVolume)
+  if (typeof p.audioMusicEnabled === 'boolean') {
+    playerSettings.audioMusicEnabled = p.audioMusicEnabled
+  }
 }
 
 export function savePlayerSettings(): void {
@@ -172,4 +201,36 @@ export function setTutorialSubtitles(on: boolean): void {
 export function markTutorialCompleted(): void {
   playerSettings.tutorialCompleted = true
   savePlayerSettings()
+}
+
+export type AudioBusKey = 'master' | 'music' | 'sfx' | 'ambient'
+
+const AUDIO_BUS_FIELD: Readonly<Record<AudioBusKey, keyof PlayerSettings>> = Object.freeze({
+  master: 'audioMasterVolume',
+  music: 'audioMusicVolume',
+  sfx: 'audioSfxVolume',
+  ambient: 'audioAmbientVolume',
+})
+
+/** Settings overlay slider writer — clamps, persists, and re-applies
+ *  to the live AudioEngine in one call so a slider drag both takes
+ *  effect immediately AND survives a reload. */
+export function setAudioBusVolume(bus: AudioBusKey, volume: number): void {
+  const v = Math.max(0, Math.min(1, volume))
+  const field = AUDIO_BUS_FIELD[bus]
+  ;(playerSettings as unknown as Record<string, number>)[field as string] = v
+  savePlayerSettings()
+  // Lazy import so player-settings stays a small module the early-boot
+  // path can import without dragging the audio module in too.
+  import('./audio/audio-service').then(({ applyAudioBusVolume }) => {
+    applyAudioBusVolume(bus, v)
+  })
+}
+
+export function setAudioMusicEnabled(on: boolean): void {
+  playerSettings.audioMusicEnabled = on
+  savePlayerSettings()
+  import('./audio/audio-service').then(({ applyAudioMusicEnabled }) => {
+    applyAudioMusicEnabled(on)
+  })
 }

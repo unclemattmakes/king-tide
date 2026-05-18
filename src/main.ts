@@ -10,6 +10,7 @@ import { loadTrackForBoot } from './boot/track-loader'
 import { runEarlyModeDispatch } from './boot/url-modes'
 import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug'
 import { createAudioEngine } from './engine/audio/audio'
+import { setAudioEngine } from './engine/audio/audio-service'
 import { loadDevSettings } from './engine/dev-settings'
 import { emptyIntent, type Intent, installInput } from './engine/input'
 import { installCameraLookInput } from './engine/input/camera-look'
@@ -554,6 +555,7 @@ async function boot() {
   // autoplay until then). The engine itself is safe to call before
   // `resume()` — every method early-returns without a context.
   const audio = createAudioEngine()
+  setAudioEngine(audio)
   const unlockAudio = () => {
     audio.resume()
     window.removeEventListener('keydown', unlockAudio)

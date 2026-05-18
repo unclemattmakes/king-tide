@@ -4,6 +4,27 @@
  * filtered noise so the build stays bundler-friendly and we can iterate
  * tunings in code.
  *
+ * **Bus layout**
+ *
+ *   sources → music | sfx | ambient → master → destination
+ *
+ * The four-bus split mirrors the player-facing Settings → Audio sliders
+ * (master / music / SFX / ambient + mute). Per-bus gains are signed
+ * 0..1 and stored on `playerSettings.audio*Volume`, persisted via the
+ * usual `savePlayerSettings()` path. Routing each one-shot through its
+ * proper bus is the difference between "sliders that do nothing" and
+ * "sliders that actually shape the mix".
+ *
+ * **Music + ducking**
+ *
+ * A subtle procedural music bed runs on the music bus from first
+ * unlock. It exists primarily as a hook for the real licensed/
+ * commissioned music drop in M11–12 — the per-frame interface is
+ * stable (`setMusicEnabled`, `duckMusic`) so swapping in a real loop
+ * is a one-line change in `ensureContext`. The `duckMusic` helper
+ * briefly dips the music bus on big SFX (wave-pump chime, explosion)
+ * so the cue cuts through.
+ *
  * Continuous layers (engine + wind + water ambient) are looping nodes
  * built once on first unlock; one-shots (pickup chimes, weapon SFX,
  * explosions) are short-lived nodes that schedule their own envelopes
@@ -16,7 +37,10 @@
  * crashing.
  */
 
+import { playerSettings } from '@/engine/player-settings'
+
 export type PickupSoundType = 'boost' | 'shield' | 'missile' | 'mine'
+export type AudioBus = 'master' | 'music' | 'sfx' | 'ambient'
 
 export interface AudioEngine {
   /** Resume the AudioContext, creating it on first call. Call from a
@@ -24,6 +48,18 @@ export interface AudioEngine {
   resume(): Promise<void>
   setMuted(muted: boolean): void
   isMuted(): boolean
+  /** Set a per-bus linear volume ∈ [0,1]. The bus stays at this value
+   *  until set again; called by the Settings overlay slider. Tracks
+   *  `playerSettings.audio<Bus>Volume` for persistence. */
+  setBusVolume(bus: AudioBus, volume: number): void
+  /** Enable / disable the procedural music bed. When disabled the
+   *  music bus is silenced but kept routed so a future licensed loop
+   *  can be slotted in without rewiring. */
+  setMusicEnabled(enabled: boolean): void
+  /** Ducks the music bus down by `amount` ∈ [0,1] for `recoverSeconds`,
+   *  then ramps back to the current bus level. Used by wave-pump +
+   *  explosion to let the cue cut through. */
+  duckMusic(amount: number, recoverSeconds: number): void
   /** Continuous: drives engine pitch + wind volume from the player bike
    *  speed. Call once per render frame. */
   tickEngine(speed: number): void
@@ -46,13 +82,31 @@ export interface AudioEngine {
   wavePump(strength: number): void
 }
 
-const MASTER_VOLUME = 0.6
+/** Per-bus headroom — the bus's slider value is multiplied by this
+ *  scalar before being applied to the GainNode. Keeps a sane mix
+ *  ceiling at slider=1.0 instead of pinning to 0dB and clipping. */
+const BUS_HEADROOM: Readonly<Record<AudioBus, number>> = Object.freeze({
+  master: 0.6,
+  music: 0.45,
+  sfx: 1.0,
+  ambient: 0.6,
+})
+
 const TOP_SPEED_FOR_AUDIO = 28 // matches BikeStats.topSpeed roughly
 
 export function createAudioEngine(): AudioEngine {
   let ctx: AudioContext | null = null
   let masterGain: GainNode | null = null
+  let musicBus: GainNode | null = null
+  let sfxBus: GainNode | null = null
+  let ambientBus: GainNode | null = null
   let muted = false
+  let musicEnabled = true
+
+  // Music bed nodes — held so setMusicEnabled can stop/restart them and
+  // so a future licensed-music swap can disconnect just these.
+  let musicBedNodes: { osc: OscillatorNode; lfo: OscillatorNode }[] = []
+  let musicBedGain: GainNode | null = null
 
   // Continuous layers, set up once on first unlock.
   let engineOsc: OscillatorNode | null = null
@@ -61,6 +115,18 @@ export function createAudioEngine(): AudioEngine {
   let engineGain: GainNode | null = null
   let windFilter: BiquadFilterNode | null = null
   let windGain: GainNode | null = null
+
+  function busLevel(bus: AudioBus): number {
+    const v =
+      bus === 'master'
+        ? playerSettings.audioMasterVolume
+        : bus === 'music'
+          ? playerSettings.audioMusicVolume
+          : bus === 'sfx'
+            ? playerSettings.audioSfxVolume
+            : playerSettings.audioAmbientVolume
+    return Math.max(0, Math.min(1, v)) * BUS_HEADROOM[bus]
+  }
 
   function ensureContext(): AudioContext | null {
     if (ctx) return ctx
@@ -74,11 +140,25 @@ export function createAudioEngine(): AudioEngine {
       return null
     }
 
+    // Bus layout — sources go to one of music/sfx/ambient, which all
+    // feed master, which feeds destination. Each bus is read from
+    // `playerSettings.audio<Bus>Volume` × `BUS_HEADROOM[bus]` so the
+    // Settings sliders shape the mix without needing a re-wire.
     masterGain = ctx.createGain()
-    masterGain.gain.value = muted ? 0 : MASTER_VOLUME
+    masterGain.gain.value = muted ? 0 : busLevel('master')
     masterGain.connect(ctx.destination)
+    musicBus = ctx.createGain()
+    musicBus.gain.value = busLevel('music')
+    musicBus.connect(masterGain)
+    sfxBus = ctx.createGain()
+    sfxBus.gain.value = busLevel('sfx')
+    sfxBus.connect(masterGain)
+    ambientBus = ctx.createGain()
+    ambientBus.gain.value = busLevel('ambient')
+    ambientBus.connect(masterGain)
 
-    // Engine: sawtooth for the body, sub-octave sine for low end.
+    // Engine + wind ride the SFX bus (they're bike-driven cues, not
+    // ambient environmental beds).
     engineOsc = ctx.createOscillator()
     engineOsc.type = 'sawtooth'
     engineOsc.frequency.value = 60
@@ -94,12 +174,12 @@ export function createAudioEngine(): AudioEngine {
     engineOsc.connect(engineFilter)
     engineSubOsc.connect(engineFilter)
     engineFilter.connect(engineGain)
-    engineGain.connect(masterGain)
+    engineGain.connect(sfxBus)
     engineOsc.start()
     engineSubOsc.start()
 
     // Wind: looping white-noise buffer through a bandpass — opens up
-    // with speed.
+    // with speed. Also SFX (bike-coupled).
     const noiseBuffer = makeNoiseBuffer(ctx, 2)
     const windNoise = ctx.createBufferSource()
     windNoise.buffer = noiseBuffer
@@ -112,10 +192,11 @@ export function createAudioEngine(): AudioEngine {
     windGain.gain.value = 0
     windNoise.connect(windFilter)
     windFilter.connect(windGain)
-    windGain.connect(masterGain)
+    windGain.connect(sfxBus)
     windNoise.start()
 
-    // Ambient water: filtered low rumble, fixed quiet level.
+    // Ambient water: filtered low rumble, fixed quiet level. Rides
+    // the ambient bus.
     const ambNoise = ctx.createBufferSource()
     ambNoise.buffer = noiseBuffer
     ambNoise.loop = true
@@ -124,13 +205,35 @@ export function createAudioEngine(): AudioEngine {
     ambFilter.frequency.value = 380
     ambFilter.Q.value = 0.5
     const ambientGain = ctx.createGain()
-    ambientGain.gain.value = 0.05
+    ambientGain.gain.value = 0.08
     ambNoise.connect(ambFilter)
     ambFilter.connect(ambientGain)
-    ambientGain.connect(masterGain)
+    ambientGain.connect(ambientBus)
     ambNoise.start()
 
+    // Procedural music bed — simple slow sine pad with a sub osc + a
+    // tremolo LFO. Intentionally bland; this is the hook for the real
+    // music drop (M11–12). `setMusicEnabled(false)` mutes it via
+    // musicBedGain; the bed nodes keep running so re-enable is free.
+    // Honor the persisted enable flag on first unlock.
+    musicEnabled = playerSettings.audioMusicEnabled
+    musicBedGain = ctx.createGain()
+    musicBedGain.gain.value = musicEnabled ? 1 : 0
+    musicBedGain.connect(musicBus)
+    musicBedNodes = buildMusicBed(ctx, musicBedGain)
+
     return ctx
+  }
+
+  function duckMusicInternal(amount: number, recoverSeconds: number): void {
+    if (!ctx || !musicBus) return
+    const now = ctx.currentTime
+    const base = busLevel('music')
+    const ducked = base * Math.max(0, 1 - Math.max(0, Math.min(1, amount)))
+    musicBus.gain.cancelScheduledValues(now)
+    musicBus.gain.setValueAtTime(musicBus.gain.value, now)
+    musicBus.gain.linearRampToValueAtTime(ducked, now + 0.04)
+    musicBus.gain.linearRampToValueAtTime(base, now + 0.04 + Math.max(0.05, recoverSeconds))
   }
 
   return {
@@ -150,12 +253,41 @@ export function createAudioEngine(): AudioEngine {
     setMuted(m: boolean) {
       muted = m
       if (masterGain && ctx) {
-        masterGain.gain.setTargetAtTime(m ? 0 : MASTER_VOLUME, ctx.currentTime, 0.05)
+        masterGain.gain.setTargetAtTime(m ? 0 : busLevel('master'), ctx.currentTime, 0.05)
       }
     },
 
     isMuted() {
       return muted
+    },
+
+    setBusVolume(bus, volume) {
+      const v = Math.max(0, Math.min(1, volume))
+      // Persistence is owned by the caller (Settings overlay calls
+      // `setAudioBusVolume` from player-settings.ts, which both writes
+      // the field and calls this method). We just apply.
+      if (!ctx) return
+      const target = bus === 'master' && muted ? 0 : v * BUS_HEADROOM[bus]
+      const node =
+        bus === 'master'
+          ? masterGain
+          : bus === 'music'
+            ? musicBus
+            : bus === 'sfx'
+              ? sfxBus
+              : ambientBus
+      if (node) node.gain.setTargetAtTime(target, ctx.currentTime, 0.05)
+    },
+
+    setMusicEnabled(enabled) {
+      musicEnabled = enabled
+      if (ctx && musicBedGain) {
+        musicBedGain.gain.setTargetAtTime(enabled ? 1 : 0, ctx.currentTime, 0.1)
+      }
+    },
+
+    duckMusic(amount, recoverSeconds) {
+      duckMusicInternal(amount, recoverSeconds)
     },
 
     tickEngine(speed: number) {
@@ -176,7 +308,8 @@ export function createAudioEngine(): AudioEngine {
 
     pickupCollect() {
       const c = ctx
-      if (!c || !masterGain) return
+      const dest = sfxBus
+      if (!c || !dest) return
       const now = c.currentTime
       // A4 → C#5 → E5 ascending arpeggio with quick triangle envelopes.
       const notes = [440, 554.37, 659.25]
@@ -190,7 +323,7 @@ export function createAudioEngine(): AudioEngine {
         g.gain.linearRampToValueAtTime(0.18, start + 0.01)
         g.gain.exponentialRampToValueAtTime(0.001, start + 0.18)
         osc.connect(g)
-        g.connect(masterGain)
+        g.connect(dest)
         osc.start(start)
         osc.stop(start + 0.2)
       }
@@ -198,27 +331,29 @@ export function createAudioEngine(): AudioEngine {
 
     pickupFire(type: PickupSoundType) {
       const c = ctx
-      if (!c || !masterGain) return
+      const dest = sfxBus
+      if (!c || !dest) return
       const now = c.currentTime
       switch (type) {
         case 'boost':
-          firePickupBoost(c, masterGain, now)
+          firePickupBoost(c, dest, now)
           break
         case 'shield':
-          firePickupShield(c, masterGain, now)
+          firePickupShield(c, dest, now)
           break
         case 'missile':
-          firePickupMissile(c, masterGain, now)
+          firePickupMissile(c, dest, now)
           break
         case 'mine':
-          firePickupMine(c, masterGain, now)
+          firePickupMine(c, dest, now)
           break
       }
     },
 
     explosion() {
       const c = ctx
-      if (!c || !masterGain) return
+      const dest = sfxBus
+      if (!c || !dest) return
       const now = c.currentTime
       const noise = c.createBufferSource()
       noise.buffer = makeNoiseBuffer(c, 0.5)
@@ -232,35 +367,41 @@ export function createAudioEngine(): AudioEngine {
       g.gain.exponentialRampToValueAtTime(0.001, now + 0.45)
       noise.connect(filt)
       filt.connect(g)
-      g.connect(masterGain)
+      g.connect(dest)
       noise.start(now)
       noise.stop(now + 0.5)
+      // Duck music to let the boom through. Big amount, slow recover —
+      // explosions are infrequent + big-deal events.
+      duckMusicInternal(0.7, 0.6)
     },
 
     gateCleared() {
       const c = ctx
-      if (!c || !masterGain) return
+      const dest = sfxBus
+      if (!c || !dest) return
       // Quick two-note "ding-DING" hop, distinct from the pickup
       // arpeggio so the player can tell at a glance which event fired.
       // G5 → C6 with sharp triangle envelopes.
-      gatePulse(c, masterGain, c.currentTime, 783.99, 0.05, 0.12)
-      gatePulse(c, masterGain, c.currentTime + 0.07, 1046.5, 0.05, 0.16)
+      gatePulse(c, dest, c.currentTime, 783.99, 0.05, 0.12)
+      gatePulse(c, dest, c.currentTime + 0.07, 1046.5, 0.05, 0.16)
     },
 
     lapCompleted() {
       const c = ctx
-      if (!c || !masterGain) return
+      const dest = sfxBus
+      if (!c || !dest) return
       // Triumphant up-arpeggio: C5 → E5 → G5 → C6, slightly louder
       // and longer than a normal gate ding.
       const notes = [523.25, 659.25, 783.99, 1046.5]
       for (let i = 0; i < notes.length; i++) {
-        gatePulse(c, masterGain, c.currentTime + i * 0.08, notes[i]!, 0.06, 0.2)
+        gatePulse(c, dest, c.currentTime + i * 0.08, notes[i]!, 0.06, 0.2)
       }
     },
 
     wavePump(strength) {
       const c = ctx
-      if (!c || !masterGain) return
+      const dest = sfxBus
+      if (!c || !dest) return
       const s = Math.max(0, Math.min(1, strength))
       const now = c.currentTime
       // Bright stacked chord — root + perfect 5th + octave at A4 anchor.
@@ -272,9 +413,9 @@ export function createAudioEngine(): AudioEngine {
       const fifth = 659.25 // E5 (perfect 5th)
       const oct = 880 // A5
       const baseGain = 0.18 + 0.14 * s
-      gatePulse(c, masterGain, now, root, 0.012, 0.32, baseGain)
-      gatePulse(c, masterGain, now, fifth, 0.012, 0.32, baseGain * 0.85)
-      gatePulse(c, masterGain, now, oct, 0.012, 0.28, baseGain * (0.4 + 0.6 * s))
+      gatePulse(c, dest, now, root, 0.012, 0.32, baseGain)
+      gatePulse(c, dest, now, fifth, 0.012, 0.32, baseGain * 0.85)
+      gatePulse(c, dest, now, oct, 0.012, 0.28, baseGain * (0.4 + 0.6 * s))
       // Whoosh layer — short noise burst with a band-pass sweep up,
       // sells the surfboard-launch feel under the chime.
       const noise = c.createBufferSource()
@@ -290,11 +431,46 @@ export function createAudioEngine(): AudioEngine {
       g.gain.exponentialRampToValueAtTime(0.001, now + 0.28)
       noise.connect(filt)
       filt.connect(g)
-      g.connect(masterGain)
+      g.connect(dest)
       noise.start(now)
       noise.stop(now + 0.3)
+      // Sidechain duck — strength scales how hard we dip the music.
+      duckMusicInternal(0.35 + 0.3 * s, 0.45)
     },
   }
+}
+
+/** Build the procedural music bed. Subtle slow pad over a sub osc with
+ *  a tremolo LFO modulating gain — pleasant background texture that
+ *  doesn't fight gameplay cues. Replace this whole function when the
+ *  real music drop arrives. */
+function buildMusicBed(
+  c: AudioContext,
+  dest: GainNode,
+): { osc: OscillatorNode; lfo: OscillatorNode }[] {
+  const out: { osc: OscillatorNode; lfo: OscillatorNode }[] = []
+  // A2, E3, A3 — sparse drone, three voices.
+  const freqs = [110, 164.81, 220]
+  for (const freq of freqs) {
+    const osc = c.createOscillator()
+    osc.type = 'sine'
+    osc.frequency.value = freq
+    const voiceGain = c.createGain()
+    voiceGain.gain.value = 0.04
+    const lfo = c.createOscillator()
+    lfo.type = 'sine'
+    lfo.frequency.value = 0.25
+    const lfoGain = c.createGain()
+    lfoGain.gain.value = 0.015
+    lfo.connect(lfoGain)
+    lfoGain.connect(voiceGain.gain)
+    osc.connect(voiceGain)
+    voiceGain.connect(dest)
+    osc.start()
+    lfo.start()
+    out.push({ osc, lfo })
+  }
+  return out
 }
 
 function gatePulse(
