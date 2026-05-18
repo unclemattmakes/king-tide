@@ -49,6 +49,7 @@ bl_info = {
 # count.
 from . import (
     _legacy,
+    antigrav,
     auto_tag,
     bake,
     boost_pad,
@@ -79,6 +80,7 @@ from . import (
 _MODULES = (
     water,
     boost_pad,
+    antigrav,
     ghost_lap,
     turn_indicators,
     bake,
