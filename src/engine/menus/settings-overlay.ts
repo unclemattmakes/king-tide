@@ -19,6 +19,12 @@
 import { installMenuGamepad, type MenuGamepad } from '@/engine/input/menu-gamepad'
 import { installRebindModal } from '@/engine/menus/rebind-modal'
 import {
+  getMpStatus,
+  type MpConnectionState,
+  type MpStatus,
+  onMpStatusChange,
+} from '@/engine/net/mp-status'
+import {
   type AIDifficulty,
   type AntiGravCameraIntensity,
   playerSettings,
@@ -40,7 +46,7 @@ import {
 } from '@/engine/player-settings'
 import { buildReplayTutorialHref } from '@/engine/tutorial/tutorial-launch'
 
-type Tab = 'audio' | 'video' | 'controls' | 'gameplay'
+type Tab = 'audio' | 'video' | 'controls' | 'gameplay' | 'network'
 
 /** Label↔intensity maps for the wave-pump select. Kept here so the
  *  row spec (which uses string options) and the runtime wiring agree
@@ -95,6 +101,10 @@ type Control =
   | { kind: 'select'; options: string[]; defaultValue: string }
   | { kind: 'button'; label: string }
   | { kind: 'text'; defaultValue: string; placeholder: string; maxLength: number }
+  /** Live read-only display. The Network tab uses these for region +
+   *  latency rows that re-render on `mp-status` notifications instead of
+   *  on user input. */
+  | { kind: 'readout'; defaultValue: string }
 
 type RowSpec = {
   id: string
@@ -408,6 +418,48 @@ const TAB_SPECS: TabSpec[] = [
       },
     ],
   },
+  {
+    id: 'network',
+    label: 'NETWORK',
+    description: 'Multiplayer connection status. Read-only; values update live.',
+    rows: [
+      {
+        id: 'net-region',
+        label: 'Region',
+        control: { kind: 'readout', defaultValue: '—' },
+        enabled: true,
+        gate: 'PartyKit auto-routes to the nearest Cloudflare edge. No manual region picker.',
+      },
+      {
+        id: 'net-endpoint',
+        label: 'Endpoint',
+        control: { kind: 'readout', defaultValue: '—' },
+        enabled: true,
+        gate: 'PartyKit host this build talks to. Override per session with ?host=<h>.',
+      },
+      {
+        id: 'net-status',
+        label: 'Connection',
+        control: { kind: 'readout', defaultValue: 'OFFLINE' },
+        enabled: true,
+        gate: 'Live socket state — connecting · connected · reconnecting · closed.',
+      },
+      {
+        id: 'net-room',
+        label: 'Room',
+        control: { kind: 'readout', defaultValue: '—' },
+        enabled: true,
+        gate: 'Active `?room=<id>` and your assigned peer slot (P0..P7).',
+      },
+      {
+        id: 'net-latency',
+        label: 'Latency',
+        control: { kind: 'readout', defaultValue: '—' },
+        enabled: true,
+        gate: 'Smoothed round-trip to the relay (1 Hz ping). Stale-resets after 6 s of silence.',
+      },
+    ],
+  },
 ]
 
 export interface SettingsOverlayHandle {
@@ -449,6 +501,9 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
   let activeTab: Tab = 'audio'
   let gamepad: MenuGamepad | null = null
   let previousFocus: HTMLElement | null = null
+  /** Live un-subscribe for the mp-status pub/sub. Set when the Network
+   *  tab paints; cleared in `close()` or on a tab switch. */
+  let mpStatusUnsub: (() => void) | null = null
 
   function renderTabs(): void {
     tabsHost.innerHTML = ''
@@ -471,6 +526,12 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
   function renderPane(): void {
     const tab = TAB_SPECS.find((t) => t.id === activeTab)
     if (!tab) return
+    // Tab switch — drop any prior live subscription so we don't keep
+    // pumping updates into stale DOM. Re-subscribed below for Network.
+    if (mpStatusUnsub) {
+      mpStatusUnsub()
+      mpStatusUnsub = null
+    }
     paneHost.innerHTML = `
       <h2 id="sm-title">${escapeHtml(tab.label)}</h2>
       <div class="sm-sub">${escapeHtml(tab.description)}</div>
@@ -494,6 +555,32 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       reset.disabled = true
       reset.title = 'Resets land once individual rows wire to persisted state.'
     }
+    if (tab.id === 'network') {
+      paintNetworkReadouts(getMpStatus())
+      mpStatusUnsub = onMpStatusChange(paintNetworkReadouts)
+    }
+  }
+
+  /** Update the Network tab's read-only rows from the current
+   *  `MpStatus`. Called on first paint + on every `mp-status` change
+   *  while the tab is open. Idempotent. */
+  function paintNetworkReadouts(s: MpStatus): void {
+    if (activeTab !== 'network') return
+    const region = formatRegion(s)
+    const endpoint = s.host ?? '—'
+    const status = formatConnectionState(s.state)
+    const room = formatRoomReadout(s)
+    const latency = formatLatency(s.latencyMs)
+    setReadoutText('net-region', region)
+    setReadoutText('net-endpoint', endpoint)
+    setReadoutText('net-status', status)
+    setReadoutText('net-room', room)
+    setReadoutText('net-latency', latency)
+  }
+
+  function setReadoutText(rowId: string, value: string): void {
+    const el = paneHost.querySelector<HTMLElement>(`.sm-row[data-row="${rowId}"] .sm-readout`)
+    if (el) el.textContent = value
   }
 
   function buildRow(spec: RowSpec): HTMLElement {
@@ -521,6 +608,7 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
 
   function buildControlEl(spec: RowSpec): HTMLElement {
     const c = spec.control
+    if (c.kind === 'readout') return buildReadoutEl(spec)
     if (c.kind === 'slider') {
       const range = document.createElement('input')
       range.type = 'range'
@@ -675,6 +763,13 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
     return btn
   }
 
+  function buildReadoutEl(spec: RowSpec): HTMLElement {
+    const el = document.createElement('span')
+    el.className = 'sm-readout'
+    el.textContent = spec.control.kind === 'readout' ? spec.control.defaultValue : '—'
+    return el
+  }
+
   function open(): void {
     if (rootEl.classList.contains('show')) return
     previousFocus = document.activeElement as HTMLElement | null
@@ -699,6 +794,10 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
     window.removeEventListener('keydown', onKey)
     gamepad?.dispose()
     gamepad = null
+    if (mpStatusUnsub) {
+      mpStatusUnsub()
+      mpStatusUnsub = null
+    }
     previousFocus?.focus?.()
     previousFocus = null
   }
@@ -720,6 +819,44 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
     },
   }
   return installed
+}
+
+function formatRegion(s: MpStatus): string {
+  if (!s.host) return '—'
+  // PartyKit runs on Cloudflare workers — the actual edge isn't exposed
+  // over the protocol. Surfacing the host endpoint family + "Auto" is
+  // honest about that without inventing a region the server doesn't
+  // really pick. Localhost reads as DEV so a misconfigured prod build
+  // can't masquerade as a live one.
+  if (s.host === 'localhost:1999' || s.host.startsWith('127.')) return 'DEV (LOCAL)'
+  return 'AUTO · CLOUDFLARE EDGE'
+}
+
+function formatConnectionState(state: MpConnectionState): string {
+  switch (state) {
+    case 'idle':
+      return 'OFFLINE'
+    case 'connecting':
+      return 'CONNECTING…'
+    case 'reconnecting':
+      return 'RECONNECTING…'
+    case 'connected':
+      return 'CONNECTED'
+    case 'closed':
+      return 'CLOSED'
+  }
+}
+
+function formatRoomReadout(s: MpStatus): string {
+  if (!s.roomId) return '—'
+  if (s.peerId < 0) return s.roomId
+  const hostMark = s.isHost ? ' · HOST' : ''
+  return `${s.roomId} · P${s.peerId}${hostMark}`
+}
+
+export function formatLatency(latencyMs: number): string {
+  if (!Number.isFinite(latencyMs) || latencyMs < 0) return '—'
+  return `${Math.round(latencyMs)} MS`
 }
 
 function escapeHtml(s: string): string {

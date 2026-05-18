@@ -60,6 +60,7 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
   return new Promise<MpLobbyResult>((resolve) => {
     function finish(href: string): void {
       window.removeEventListener('keydown', onKey)
+      window.clearInterval(latencyRefresh)
       lobby.hide()
       net.close()
       resolve({ href })
@@ -102,12 +103,19 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
         trackOptions,
         pickBanner,
         roomId: opts.roomId,
+        latencyMs: net.latencyMs,
       }
     }
 
     function refresh(): void {
       lobby.render(buildView())
     }
+
+    // Latency is updated by the room's 1 Hz ping loop independent of
+    // any lobby event — refresh on the same cadence so the readout
+    // moves even when nobody else is doing anything. Cheap; the render
+    // path is innerHTML on a handful of slots.
+    const latencyRefresh = window.setInterval(refresh, 1000)
 
     function shipReady(): void {
       net.sendReady(local.ready, {
