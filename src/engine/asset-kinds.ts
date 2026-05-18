@@ -53,6 +53,11 @@ export const ExportedKind = {
 
   /** Prop root empty — every prop GLB carries exactly one. */
   PROP: 'prop',
+
+  /** Anti-gravity volume zone — oriented box. The bike's gravity
+   *  flips to the zone's local +Y while inside. Complements per-anchor
+   *  banking on AI splines for off-route stretches without a curve. */
+  ANTIGRAV_ZONE: 'antigrav_zone',
 } as const
 
 export type ExportedKindValue = (typeof ExportedKind)[keyof typeof ExportedKind]

@@ -131,6 +131,17 @@ _RULES: tuple[_AutoTagRule, ...] = (
         visual=_empty_visual("ARROWS", 4.0),
     ),
     _AutoTagRule(
+        name_re=re.compile(r"^antigrav_(\d+)$"),
+        object_type="EMPTY",
+        kind="antigrav_zone",
+        extras=lambda m: {
+            "half_width": 8.0,
+            "half_height": 5.0,
+            "half_depth": 12.0,
+        },
+        visual=_empty_visual("ARROWS", 4.0),
+    ),
+    _AutoTagRule(
         name_re=re.compile(r"^pickup_(?:\d+|main)$"),
         object_type="EMPTY",
         kind="pickup_spawn",

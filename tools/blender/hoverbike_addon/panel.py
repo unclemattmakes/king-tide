@@ -743,6 +743,44 @@ class HOVERBIKE_PT_track_gameplay(_HoverbikeTrackSubPanelBase, Panel):
             layout.label(text="Custom Properties tunes each pad", icon="INFO")
         layout.separator()
 
+        # Anti-grav: spline banking (per-anchor tilt) drives the main
+        # route; antigrav_NN empties cover off-route stretches. Both
+        # round-trip through derive_track_json.
+        layout.label(text="Anti-grav:", icon="ORIENTATION_GIMBAL")
+        sp = bpy.data.objects.get("ai_spline_main")
+        if sp is not None:
+            flag = bool(sp.get("anti_grav", False))
+            row = layout.row(align=True)
+            row.label(
+                text=f"ai_spline_main: {'ON' if flag else 'off'}",
+                icon="CHECKBOX_HLT" if flag else "CHECKBOX_DEHLT",
+            )
+            row.operator("hoverbike.toggle_spline_antigrav", text="Toggle")
+        if context.mode == "EDIT_CURVE":
+            layout.label(text="Selected anchor tilt:", icon="DRIVER_ROTATIONAL_DIFFERENCE")
+            row = layout.row(align=True)
+            row.operator("hoverbike.set_spline_tilt_flat", text="Flat")
+            row.operator("hoverbike.set_spline_tilt_bank_l", text="L 45°")
+            row.operator("hoverbike.set_spline_tilt_bank_r", text="R 45°")
+            row = layout.row(align=True)
+            row.operator("hoverbike.set_spline_tilt_wall_l", text="Wall L")
+            row.operator("hoverbike.set_spline_tilt_wall_r", text="Wall R")
+            row.operator("hoverbike.set_spline_tilt_ceiling", text="Ceiling")
+            layout.label(text="Or set Tilt in N-panel → Item", icon="INFO")
+        else:
+            layout.label(
+                text="Tab into Edit Mode on the spline to set tilt",
+                icon="INFO",
+            )
+        layout.operator("hoverbike.add_antigrav_zone", icon="ADD", text="+ Anti-Grav Zone")
+        n_zones = sum(
+            1 for obj in bpy.data.objects if re.match(r"^antigrav_(\d+)$", obj.name)
+        )
+        if n_zones > 0:
+            layout.label(text=f"{n_zones} zone(s) — drag, R to align +Y to road normal")
+            layout.operator("hoverbike.refresh_antigrav_zones", icon="FILE_REFRESH")
+        layout.separator()
+
         layout.label(text="Racer preview:", icon="AUTO")
         row = layout.row(align=True)
         row.operator("hoverbike.rebuild_racer_preview", icon="FILE_REFRESH")

@@ -99,6 +99,7 @@ NAME_PATTERNS = [
     (re.compile(r"^pickup(_.*)?$"), "pickup_spawn"),
     (re.compile(r"^start_(\d+)$"), "start"),
     (re.compile(r"^boost_(\d+)$"), "boost_pad"),
+    (re.compile(r"^antigrav_(\d+)$"), "antigrav_zone"),
 ]
 
 
@@ -381,27 +382,99 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         start_pos = {"x": 0.0, "y": 0.5, "z": 0.0}
         start_yaw = 0.0
 
+    # Spline anchors. Two paths:
+    #   - Legacy / no-banking: downsample the NURBS / Bezier tessellation
+    #     into ~12 anchors. Existing track behaviour, unchanged for
+    #     tracks that don't use anti-grav.
+    #   - Anti-grav enabled: emit one anchor per control point, with the
+    #     parallel `anchorBankings` array carrying the per-point tilt
+    #     (radians around the tangent). Opt-in is implicit when any
+    #     control-point tilt is non-zero, or explicit via the spline
+    #     object's `anti_grav=True` custom property.
     anchors: list[dict[str, float]] = []
+    anchor_bankings: list[float] | None = None
+    spline_antigrav: bool = False
+    spline_antigrav_falloff: float | None = None
     main = next(
         (o for o in by_kind.get("ai_spline", []) if o.name == "ai_spline_main"), None
     )
     if main is not None and main.type == "CURVE":
-        mesh = main.to_mesh()
-        try:
-            mw = main.matrix_world
-            dense = [mw @ v.co for v in mesh.vertices]
-        finally:
-            main.to_mesh_clear()
-        if len(dense) >= 2:
-            target = min(12, len(dense))
-            step = max(1, len(dense) // target)
-            sampled = [dense[i] for i in range(0, len(dense), step)][:target]
-            anchors = [_b2t(p.x, p.y, p.z) for p in sampled]
+        mw = main.matrix_world
+        explicit_flag = bool(main.get("anti_grav", False))
+        # Probe for non-zero tilt to decide the export shape. Treats tiny
+        # numerical noise as zero (1e-6 is below any meaningful banking).
+        has_tilt = False
+        first_spline = main.data.splines[0] if main.data.splines else None
+        if first_spline is not None:
+            if first_spline.type == "NURBS":
+                has_tilt = any(abs(p.tilt) > 1e-6 for p in first_spline.points)
+            elif first_spline.type == "BEZIER":
+                has_tilt = any(abs(p.tilt) > 1e-6 for p in first_spline.bezier_points)
+
+        if (explicit_flag or has_tilt) and first_spline is not None:
+            # Anti-grav path: one anchor + one banking per control point.
+            spline_antigrav = True
+            falloff_raw = main.get("anti_grav_falloff", None)
+            if isinstance(falloff_raw, (int, float)) and falloff_raw > 0:
+                spline_antigrav_falloff = float(falloff_raw)
+            anchor_bankings = []
+            import mathutils  # local import; this file already uses bpy heavy
+            if first_spline.type == "NURBS":
+                for p in first_spline.points:
+                    wp = mw @ mathutils.Vector((p.co.x, p.co.y, p.co.z))
+                    anchors.append(_b2t(wp.x, wp.y, wp.z))
+                    anchor_bankings.append(float(p.tilt))
+            elif first_spline.type == "BEZIER":
+                for p in first_spline.bezier_points:
+                    wp = mw @ p.co
+                    anchors.append(_b2t(wp.x, wp.y, wp.z))
+                    anchor_bankings.append(float(p.tilt))
+        else:
+            # Legacy path — preserved bit-for-bit for non-anti-grav tracks.
+            mesh = main.to_mesh()
+            try:
+                dense = [mw @ v.co for v in mesh.vertices]
+            finally:
+                main.to_mesh_clear()
+            if len(dense) >= 2:
+                target = min(12, len(dense))
+                step = max(1, len(dense) // target)
+                sampled = [dense[i] for i in range(0, len(dense), step)][:target]
+                anchors = [_b2t(p.x, p.y, p.z) for p in sampled]
 
     pickups: list[dict[str, float]] = []
     for p in by_kind.get("pickup_spawn", []):
         loc = p.matrix_world.translation
         pickups.append(_b2t(loc.x, loc.y, loc.z))
+
+    # Anti-grav volume zones. Each `antigrav_NN` empty's world transform
+    # gives position + rotation; custom props carry half-extents. The
+    # b2t coord transform maps Blender (x,y,z) → three.js (x,z,-y) for
+    # positions; the matching rotation transform for a quaternion
+    # (qx,qy,qz,qw) → (qx,qz,-qy,qw). The half-extents map similarly
+    # because the runtime tests against the box's LOCAL axes — local
+    # +X stays +X, local +Y (Blender forward) becomes runtime +Z (so
+    # blender's half_depth is the runtime halfDepth), and local +Z
+    # (Blender up) becomes runtime +Y (so blender's half_height stays
+    # halfHeight). half_width stays halfWidth.
+    antigrav_zones: list[dict[str, Any]] = []
+    for z in by_kind.get("antigrav_zone", []):
+        loc = z.matrix_world.translation
+        rq = z.matrix_world.to_quaternion()
+        antigrav_zones.append(
+            {
+                "position": _b2t(loc.x, loc.y, loc.z),
+                "rotation": {
+                    "x": float(rq.x),
+                    "y": float(rq.z),
+                    "z": float(-rq.y),
+                    "w": float(rq.w),
+                },
+                "halfWidth": float(z.get("half_width", 8.0)),
+                "halfHeight": float(z.get("half_height", 5.0)),
+                "halfDepth": float(z.get("half_depth", 12.0)),
+            }
+        )
 
     # Boost pads. Empty's +Y axis (Blender forward) maps to three.js +Z
     # (the runtime "boost direction" axis); rotation_euler.z is the yaw
@@ -481,6 +554,17 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
             shader_block["triplanar"] = float(scn.hoverbike_shader_triplanar)
 
     laps = int(getattr(scn, "hoverbike_laps_to_finish", 3) or 3)
+    main_spline_obj: dict[str, Any] = {
+        "id": "main",
+        "points": [],
+        "anchors": anchors,
+    }
+    if spline_antigrav:
+        main_spline_obj["antiGrav"] = True
+        if anchor_bankings is not None:
+            main_spline_obj["anchorBankings"] = anchor_bankings
+        if spline_antigrav_falloff is not None:
+            main_spline_obj["antiGravFalloff"] = spline_antigrav_falloff
     body: dict[str, Any] = {
         "id": track_id,
         "name": track_id,
@@ -489,9 +573,10 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         "water": water_block,
         "start": {"position": start_pos, "yaw": start_yaw},
         "checkpoints": checkpoints,
-        "aiSplines": [{"id": "main", "points": [], "anchors": anchors}],
+        "aiSplines": [main_spline_obj],
         "pickupSpawns": pickups,
         "boostPads": boost_pads,
+        "antiGravZones": antigrav_zones,
     }
     # gateSpacing round-trips through the JSON so the in-app editor's
     # "Auto-place gates from spline" and Blender's gate preview see the
@@ -673,12 +758,21 @@ def _merge_export_json(derived: dict, existing: dict | None) -> dict:
         re.match(r"^boost_\d+$", o.name) and is_object_visible(o)
         for o in bpy.data.objects
     )
+    # Same opt-in for anti-grav zones: Blender owns the antiGravZones
+    # list only when at least one antigrav_NN empty exists. Otherwise
+    # editor-authored zones survive the Blender re-export.
+    has_antigrav_empties = any(
+        re.match(r"^antigrav_\d+$", o.name) and is_object_visible(o)
+        for o in bpy.data.objects
+    )
     if has_cp_empties and "checkpoints" in derived:
         merged["checkpoints"] = derived["checkpoints"]
     if has_pickup_empties and "pickupSpawns" in derived:
         merged["pickupSpawns"] = derived["pickupSpawns"]
     if has_boost_empties and "boostPads" in derived:
         merged["boostPads"] = derived["boostPads"]
+    if has_antigrav_empties and "antiGravZones" in derived:
+        merged["antiGravZones"] = derived["antiGravZones"]
     # `lapsToFinish` defaults to 3 in `derive_track_json`; keep an
     # existing JSON value if the editor set something else.
     if "lapsToFinish" not in merged and "lapsToFinish" in derived:

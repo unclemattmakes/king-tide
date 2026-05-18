@@ -85,6 +85,14 @@ class ExportedKind:
     # Prop root empty — every prop GLB carries exactly one.
     PROP = "prop"
 
+    # Anti-gravity volume zone — an oriented box ``antigrav_NN`` empty
+    # carries (position, rotation, half_width, half_height, half_depth)
+    # custom props. Inside the box, gravity flips to the zone's local
+    # +Y. Authoring complements the spline-tilt mechanism (which handles
+    # the main route); zones cover off-route prop roads / ad-hoc spots
+    # where there isn't a curve to sample.
+    ANTIGRAV_ZONE = "antigrav_zone"
+
 
 class AuthoringKind:
     """Object extras kinds used only inside Blender — never shipped."""
