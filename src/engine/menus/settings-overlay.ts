@@ -23,6 +23,8 @@ import {
   playerSettings,
   setAIDifficulty,
   setAntiGravCameraIntensity,
+  setAudioBusVolume,
+  setAudioMusicEnabled,
   setRubberBandAssist,
   setTutorialSubtitles,
   setWavePumpIntensity,
@@ -105,30 +107,61 @@ const TAB_SPECS: TabSpec[] = [
       {
         id: 'audio-master',
         label: 'Master',
-        control: { kind: 'slider', min: 0, max: 1, step: 0.05, defaultValue: 0.6 },
-        enabled: false,
-        gate: 'Per-bus mixer ships with the music integration (M14)',
+        control: {
+          kind: 'slider',
+          min: 0,
+          max: 1,
+          step: 0.05,
+          defaultValue: playerSettings.audioMasterVolume,
+        },
+        enabled: true,
+        gate: 'Scales every bus uniformly. Mute toggle below cuts to 0.',
       },
       {
         id: 'audio-music',
         label: 'Music',
-        control: { kind: 'slider', min: 0, max: 1, step: 0.05, defaultValue: 0.7 },
-        enabled: false,
-        gate: 'Music bus arrives with the track-specific music pieces',
+        control: {
+          kind: 'slider',
+          min: 0,
+          max: 1,
+          step: 0.05,
+          defaultValue: playerSettings.audioMusicVolume,
+        },
+        enabled: true,
+        gate: 'Procedural bed today; ducks on wave-pump + explosion.',
       },
       {
         id: 'audio-sfx',
         label: 'SFX',
-        control: { kind: 'slider', min: 0, max: 1, step: 0.05, defaultValue: 0.85 },
-        enabled: false,
-        gate: 'SFX bus arrives with the audio integration milestone',
+        control: {
+          kind: 'slider',
+          min: 0,
+          max: 1,
+          step: 0.05,
+          defaultValue: playerSettings.audioSfxVolume,
+        },
+        enabled: true,
+        gate: 'Engine, wind, pickups, weapons, wave-pump chime, gate dings.',
       },
       {
         id: 'audio-ambient',
         label: 'Ambient',
-        control: { kind: 'slider', min: 0, max: 1, step: 0.05, defaultValue: 0.55 },
-        enabled: false,
-        gate: 'Per-track ambient beds ship alongside their tracks',
+        control: {
+          kind: 'slider',
+          min: 0,
+          max: 1,
+          step: 0.05,
+          defaultValue: playerSettings.audioAmbientVolume,
+        },
+        enabled: true,
+        gate: 'Environmental beds — currently the looping water rumble.',
+      },
+      {
+        id: 'audio-music-on',
+        label: 'Music bed enabled',
+        control: { kind: 'toggle', defaultValue: playerSettings.audioMusicEnabled },
+        enabled: true,
+        gate: 'Disable to silence the music bed entirely (keeps the bus routed).',
       },
       {
         id: 'audio-mute',
@@ -441,6 +474,18 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       range.step = String(c.step)
       range.value = String(c.defaultValue)
       range.disabled = !spec.enabled
+      if (spec.enabled && spec.id === 'audio-master') {
+        range.addEventListener('input', () => setAudioBusVolume('master', Number(range.value)))
+      }
+      if (spec.enabled && spec.id === 'audio-music') {
+        range.addEventListener('input', () => setAudioBusVolume('music', Number(range.value)))
+      }
+      if (spec.enabled && spec.id === 'audio-sfx') {
+        range.addEventListener('input', () => setAudioBusVolume('sfx', Number(range.value)))
+      }
+      if (spec.enabled && spec.id === 'audio-ambient') {
+        range.addEventListener('input', () => setAudioBusVolume('ambient', Number(range.value)))
+      }
       return range
     }
     if (c.kind === 'toggle') {
@@ -456,6 +501,11 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       if (spec.enabled && spec.id === 'gp-subtitles') {
         cb.addEventListener('change', () => {
           setTutorialSubtitles(cb.checked)
+        })
+      }
+      if (spec.enabled && spec.id === 'audio-music-on') {
+        cb.addEventListener('change', () => {
+          setAudioMusicEnabled(cb.checked)
         })
       }
       return cb
