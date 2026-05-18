@@ -94,6 +94,7 @@ export function createCliffside(): Track {
     surfaces: [],
     boostPads: [],
     antiGravZones: [],
+    waveZones: [],
     props: [],
     pickupSpawns: [
       { x: 50, y: 1.8, z: -25 }, // right straight south, before the climb

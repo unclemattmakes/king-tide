@@ -1,3 +1,4 @@
+import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import { buildPhillipsSpectrum, type PhillipsParams } from './phillips'
 import {
   sampleSpectrumHeightFromModes,
@@ -98,6 +99,10 @@ export type GerstnerWaveField = {
    *  toward the island") without rebuilding the wave list. Default 0
    *  = directions as authored in `defaultWaves()`. */
   waveBearing: number
+  /** Per-track wave-zone overrides. Empty by default; set via
+   *  `setWaveZones` after the track loads. See `sampleZoneFactors`
+   *  for the OBB-distance blend math. */
+  zones: WaveZoneRuntime[]
 }
 
 export type SpectrumWaveField = {
@@ -116,6 +121,46 @@ export type SpectrumWaveField = {
   /** Global wave-field bearing in radians (CCW). Applied as a 2D
    *  rotation on the sample (x, z) before spectrum evaluation. */
   waveBearing: number
+  /** Per-track wave-zone overrides — see `GerstnerWaveField.zones`.
+   *  Spectrum-mode zone application currently uses the same height
+   *  multiplier on the sampled height but does not retune individual
+   *  Phillips modes; the Phillips spectrum's continuous shape makes
+   *  per-zone frequency scaling more invasive. Authoring on
+   *  spectrum-mode tracks should rely on `heightMult` + `surge*`. */
+  zones: WaveZoneRuntime[]
+}
+
+/**
+ * Runtime representation of a wave zone. Same fields as the
+ * `Track.WaveZone` type in `game/tracks/types.ts`; redefined locally
+ * (rather than imported) so the sim layer doesn't pull on the track
+ * type module — wave-field is the lowest-level water primitive and
+ * has to stay light.
+ *
+ * Pre-computed `cosBearing` / `sinBearing` cache the world→local 2D
+ * rotation derived from `rotation`. Saves a quaternion-vs-vector
+ * normalisation per zone per sample; `sampleHeight` is called per
+ * bike per fixed step plus per render-side preview vertex per frame,
+ * so the per-call cost matters.
+ */
+export type WaveZoneRuntime = {
+  position: Vec3
+  rotation: Quat
+  halfWidth: number
+  halfHeight: number
+  halfDepth: number
+  heightMult: number
+  freqMult: number
+  directionDeg?: number
+  surgePeriodS?: number
+  surgeAmplitude?: number
+  blendRadiusM: number
+  /** Precomputed cos/sin of the zone's world-XZ yaw extracted from
+   *  `rotation`. Mirrors the same yaw the Blender author dialed in
+   *  when rotating the zone empty around Z (= world-Y after the
+   *  Blender Z-up → glTF Y-up swap). */
+  _cosYaw: number
+  _sinYaw: number
 }
 
 // ---- Wake parameters -----------------------------------------------------
@@ -173,6 +218,7 @@ export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveF
     time: 0,
     baseY: opts?.baseY ?? 0,
     waveBearing: 0,
+    zones: [],
   }
 }
 
@@ -206,6 +252,7 @@ export function createSpectrumWaveField(
     time: 0,
     baseY: opts?.baseY ?? 0,
     waveBearing: 0,
+    zones: [],
   }
 }
 
@@ -285,6 +332,186 @@ export function defaultSpectrumParams(): PhillipsParams {
 
 export function advanceWaveField(field: WaveFieldState, dt: number): void {
   field.time += dt
+}
+
+/**
+ * Input shape accepted by `setWaveZones`. Mirrors `Track.WaveZone`
+ * (same fields, plus the `Quat`-vs-yaw flexibility) — `setWaveZones`
+ * extracts the world-Y yaw, caches its cos/sin, and stores the result.
+ *
+ * Reusing the `WaveZone` track type as input would force the wave-field
+ * module to import from `game/tracks/types`; the sim layer should stay
+ * leaf-side, so we accept the structural-equivalent shape directly.
+ */
+export type WaveZoneInput = Omit<WaveZoneRuntime, '_cosYaw' | '_sinYaw'>
+
+/**
+ * Replace the field's zone list. Each input zone's quaternion is
+ * decomposed to its world-Y yaw (the only rotation axis that matters
+ * for an XZ-plane OBB test) and cached. Pass `[]` to clear.
+ *
+ * Idempotent — call it whenever a new track loads or the editor
+ * mutates the zone list.
+ */
+export function setWaveZones(field: WaveFieldState, zones: readonly WaveZoneInput[]): void {
+  field.zones = zones.map((z) => {
+    const yaw = yawFromQuat(z.rotation)
+    return {
+      ...z,
+      _cosYaw: Math.cos(yaw),
+      _sinYaw: Math.sin(yaw),
+    }
+  })
+}
+
+/**
+ * World-Y yaw of a quaternion, same convention as `readYaw` in
+ * `glb-loader.ts` — atan2 of the YXZ Euler decomposition. Pulling
+ * just the Y-yaw is sufficient because wave-zone OBBs sit flat on
+ * the water plane; any pitch/roll the author dialed in on the
+ * Blender empty is treated as cosmetic for surface sampling.
+ */
+function yawFromQuat(q: Quat): number {
+  const r02 = 2 * (q.x * q.z + q.y * q.w)
+  const r22 = 1 - 2 * (q.x * q.x + q.y * q.y)
+  return Math.atan2(r02, r22)
+}
+
+/**
+ * Per-zone weight at sample (x, z). 1 inside the OBB, smoothsteps to
+ * 0 across `blendRadiusM` outside the OBB face. Distance is measured
+ * to the box's 2D XZ projection — the vertical Y extent is treated as
+ * "always inside" for surface samples (callers that need a 3-D test
+ * — e.g. future pump-charge multipliers for an in-air bike — can use
+ * `pointInWaveZone3D` separately).
+ */
+function zoneWeight(zone: WaveZoneRuntime, x: number, z: number): number {
+  // World → zone local: subtract centre, rotate by -yaw.
+  const dx = x - zone.position.x
+  const dz = z - zone.position.z
+  const lx = dx * zone._cosYaw + dz * zone._sinYaw
+  const lz = -dx * zone._sinYaw + dz * zone._cosYaw
+  // Signed distance from the box's 2D face (negative inside, positive
+  // outside; 0 on the surface). The OBB's XZ extents are halfWidth
+  // (local-X) and halfDepth (local-Z); halfHeight gates Y separately
+  // (see `pointInWaveZone3D`).
+  const qx = Math.abs(lx) - zone.halfWidth
+  const qz = Math.abs(lz) - zone.halfDepth
+  // Outside distance: standard SDF-to-AABB Euclidean distance, plus
+  // a negative term for the interior so points well inside still
+  // produce a weight of 1 (the smoothstep saturates).
+  const outX = Math.max(qx, 0)
+  const outZ = Math.max(qz, 0)
+  const outsideDist = Math.hypot(outX, outZ)
+  if (outsideDist >= zone.blendRadiusM) return 0
+  // Inside the box, outsideDist === 0 → weight 1. On the face,
+  // weight 0.5 (cubic smoothstep midpoint at t=0.5 = 0.5). At
+  // blendRadiusM outside, weight 0.
+  const t = 1 - outsideDist / zone.blendRadiusM
+  return t * t * (3 - 2 * t)
+}
+
+export type WaveZoneFactors = {
+  /** Effective wave-amplitude multiplier at this sample. 1 = neutral. */
+  heightMult: number
+  /** Effective wave-frequency multiplier. 1 = neutral. Gerstner mode
+   *  applies this by dividing each wave's wavelength; spectrum mode
+   *  currently ignores it (see `SpectrumWaveField.zones`). */
+  freqMult: number
+  /** Effective bearing override. `undefined` = inherit global. */
+  bearingRad: number | undefined
+  /** Accumulated periodic surge contribution at the current field
+   *  time. Added on top of the multiplied Gerstner sum. */
+  surgeY: number
+}
+
+/**
+ * Blend the field's zone list down to a single per-sample factor set
+ * at (x, z, t). The blend rule is a soft-max: each zone's weight
+ * `w ∈ [0,1]` (from `zoneWeight`) drives a `mix(neutral, zoneValue,
+ * w)`, then we take the strongest-weighted value across all zones.
+ *
+ * Why soft-max instead of summing weights:
+ *   - Sum-of-weights blows past 1 in overlapping zones, producing
+ *     surprise amplitude spikes. Soft-max keeps the result bounded
+ *     by the loudest zone, which matches author intent ("inside The
+ *     Maw's central arch zone I expect the central-arch swell").
+ *   - When two same-strength zones overlap, the larger heightMult
+ *     dominates — the racer reads the louder of the two.
+ *
+ * Surges from multiple zones DO sum (they're additive, not
+ * multiplicative). Overlap is rare by construction (zones gate
+ * different track sections) and additive surges read as
+ * intuitive — "two tsunamis meeting" → bigger wave.
+ *
+ * Returns the neutral factor set (mults = 1, no bearing override,
+ * no surge) when no zone has a positive weight at (x, z). Caller
+ * can then skip the zone code path entirely.
+ */
+export function sampleZoneFactors(
+  zones: readonly WaveZoneRuntime[],
+  x: number,
+  z: number,
+  t: number,
+): WaveZoneFactors {
+  if (zones.length === 0) {
+    return { heightMult: 1, freqMult: 1, bearingRad: undefined, surgeY: 0 }
+  }
+  let bestWeight = 0
+  let bestHeightMult = 1
+  let bestFreqMult = 1
+  let bestBearing: number | undefined
+  let surgeY = 0
+  for (const zone of zones) {
+    const w = zoneWeight(zone, x, z)
+    if (w <= 0) continue
+    // Soft-max: the strongest-weighted zone wins on mults / bearing.
+    if (w > bestWeight) {
+      bestWeight = w
+      bestHeightMult = 1 + (zone.heightMult - 1) * w
+      bestFreqMult = 1 + (zone.freqMult - 1) * w
+      if (zone.directionDeg !== undefined) {
+        bestBearing = (zone.directionDeg * Math.PI) / 180
+      }
+    }
+    // Surges accumulate so overlapping tsunami sources sum, not pick.
+    if (zone.surgePeriodS !== undefined && zone.surgeAmplitude !== undefined) {
+      const phase = (2 * Math.PI * t) / zone.surgePeriodS
+      const surge = zone.surgeAmplitude * Math.max(0, Math.sin(phase))
+      surgeY += surge * w
+    }
+  }
+  return {
+    heightMult: bestHeightMult,
+    freqMult: bestFreqMult,
+    bearingRad: bestBearing,
+    surgeY,
+  }
+}
+
+/**
+ * Convenience predicate: is the 3-D point inside the zone's OBB? Uses
+ * the same yaw-only rotation as `zoneWeight` but additionally gates
+ * Y by `halfHeight`. Reserved for future "bike inside the zone"
+ * gameplay hooks (pump charge multipliers, AI swell warnings, etc.).
+ * Not called by the surface samplers — those treat Y as "always in".
+ */
+export function pointInWaveZone3D(
+  zone: WaveZoneRuntime,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  const dx = x - zone.position.x
+  const dy = y - zone.position.y
+  const dz = z - zone.position.z
+  const lx = dx * zone._cosYaw + dz * zone._sinYaw
+  const lz = -dx * zone._sinYaw + dz * zone._cosYaw
+  return (
+    Math.abs(lx) <= zone.halfWidth &&
+    Math.abs(dy) <= zone.halfHeight &&
+    Math.abs(lz) <= zone.halfDepth
+  )
 }
 
 /**
@@ -395,23 +622,35 @@ function smoothstep(a: number, b: number, x: number): number {
 export function sampleHeight(field: WaveFieldState, x: number, z: number): number {
   let y = field.baseY
   const t = field.time
-  const cosB = Math.cos(field.waveBearing)
-  const sinB = Math.sin(field.waveBearing)
+  // Per-zone factors are blended once per sample. When no zones are
+  // active the call returns the neutral (1, 1, no-bearing, 0) tuple,
+  // so the multiplications below are no-ops and we avoid a branch
+  // explosion across the two wave-field kinds.
+  const zoneFx = sampleZoneFactors(field.zones, x, z, t)
+  const effectiveBearing = zoneFx.bearingRad ?? field.waveBearing
+  const cosB = Math.cos(effectiveBearing)
+  const sinB = Math.sin(effectiveBearing)
   // Rotate sample coords by -bearing — equivalent to rotating each
   // per-wave direction by +bearing. Lets one global angle re-aim the
   // whole wave train without mutating per-wave dirX/dirZ.
   const xRot = x * cosB + z * sinB
   const zRot = -x * sinB + z * cosB
   if (field.kind === 'spectrum') {
-    y += sampleSpectrumHeightFromModes(field.spectrum, xRot, zRot, t)
+    // Spectrum mode: per-wave freqMult is invasive (it would re-shape
+    // the Phillips modes), so we only apply heightMult + surge here.
+    y += zoneFx.heightMult * sampleSpectrumHeightFromModes(field.spectrum, xRot, zRot, t)
   } else {
     for (const w of field.waves) {
-      const k = (2 * Math.PI) / w.wavelength
+      // freqMult shortens the wavelength inside the zone — chop bands
+      // become choppier, swells get tighter. heightMult scales the
+      // amplitude.
+      const k = ((2 * Math.PI) / w.wavelength) * zoneFx.freqMult
       const omega = w.speed * k
       const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
-      y += w.amplitude * Math.sin(phase)
+      y += zoneFx.heightMult * w.amplitude * Math.sin(phase)
     }
   }
+  y += zoneFx.surgeY
   for (const src of field.wakes) {
     y += sampleWakeFromSource(src, x, z, t).y
   }
@@ -428,29 +667,40 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
   let rotDydz = 0
   let vy = 0
   const t = field.time
-  const cosB = Math.cos(field.waveBearing)
-  const sinB = Math.sin(field.waveBearing)
+  const zoneFx = sampleZoneFactors(field.zones, x, z, t)
+  const effectiveBearing = zoneFx.bearingRad ?? field.waveBearing
+  const cosB = Math.cos(effectiveBearing)
+  const sinB = Math.sin(effectiveBearing)
   const xRot = x * cosB + z * sinB
   const zRot = -x * sinB + z * cosB
   if (field.kind === 'spectrum') {
     const surf = sampleSpectrumSurfaceFromModes(field.spectrum, xRot, zRot, t)
-    y += surf.y
-    rotDydx += surf.dydx
-    rotDydz += surf.dydz
-    vy += surf.vy
+    y += zoneFx.heightMult * surf.y
+    // Slopes track the height; scale them by the same factor so the
+    // bike's surface-normal-based steering still aligns with the
+    // visible water.
+    rotDydx += zoneFx.heightMult * surf.dydx
+    rotDydz += zoneFx.heightMult * surf.dydz
+    vy += zoneFx.heightMult * surf.vy
   } else {
     for (const w of field.waves) {
-      const k = (2 * Math.PI) / w.wavelength
+      const k = ((2 * Math.PI) / w.wavelength) * zoneFx.freqMult
       const omega = w.speed * k
       const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
       const s = Math.sin(phase)
       const c = Math.cos(phase)
-      y += w.amplitude * s
-      rotDydx += w.amplitude * c * (k * w.dirX)
-      rotDydz += w.amplitude * c * (k * w.dirZ)
-      vy += w.amplitude * c * -omega
+      const a = zoneFx.heightMult * w.amplitude
+      y += a * s
+      rotDydx += a * c * (k * w.dirX)
+      rotDydz += a * c * (k * w.dirZ)
+      vy += a * c * -omega
     }
   }
+  // Surge adds height only — its ∂/∂x and ∂/∂z are zero (uniform
+  // inside the zone's weight envelope), so we don't bias slopes /
+  // normals here. The bike's buoyancy reads `y` directly, which is
+  // what authors want from a "the whole zone lifts" surge.
+  y += zoneFx.surgeY
   // Convert rotated-frame slopes back to world frame.
   let dydx = rotDydx * cosB - rotDydz * sinB
   let dydz = rotDydx * sinB + rotDydz * cosB

@@ -50,13 +50,16 @@ bl_info = {
 from . import (
     _legacy,
     antigrav,
+    antigrav_ribbon,
     auto_tag,
     bake,
     boost_pad,
     downtown,
+    emitter,
     export,
     ghost_lap,
     handlers,
+    horizon,
     new_map,
     panel,
     placement_helper,
@@ -70,6 +73,7 @@ from . import (
     tunnel,
     turn_indicators,
     water,
+    wave_zone,
 )
 
 # Order: domain modules first, _legacy catch-all last. As more modules
@@ -79,8 +83,12 @@ from . import (
 # lazily imports the spline-sampling helpers.
 _MODULES = (
     water,
+    wave_zone,
+    horizon,
+    emitter,
     boost_pad,
     antigrav,
+    antigrav_ribbon,
     ghost_lap,
     turn_indicators,
     bake,

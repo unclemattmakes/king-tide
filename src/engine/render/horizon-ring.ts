@@ -43,17 +43,34 @@ export type HorizonRingConfig = {
   /** Ring radius in metres. Default 1400 — close enough that the
    *  silhouette survives the scene fog (~53 % density at this distance
    *  with the default 500-2200 m fog band) and large enough that bike
-   *  traverse parallax is negligible. */
+   *  traverse parallax is negligible. Ignored when `geometry` is
+   *  supplied — the author-mesh's own XZ extents define the radius. */
   radius?: number
-  /** Maximum peak height above y=0, in metres. Default 300. */
+  /** Maximum peak height above y=0, in metres. Default 300. With
+   *  `geometry`, this is used to normalise the shader's `heightT`
+   *  attribute against the author-mesh's height; pick the same value
+   *  you used when authoring (or leave as default and the runtime
+   *  measures bounds). */
   peakHeight?: number
-  /** PRNG seed driving the heightfield's phase offsets. Per-track variety. */
+  /** PRNG seed driving the procedural heightfield's phase offsets.
+   *  Ignored when `geometry` is supplied. */
   seed?: number
   /** Multiplier on the sampled horizon colour. < 1 darkens to silhouette,
    *  > 1 lifts toward a lighter haze. Default 0.45 — combined with the
    *  fog density at the default ring distance, peaks read as ~26 %
-   *  darker than the sky directly behind them. */
+   *  darker than the sky directly behind them. Applies to both
+   *  procedural and author-mesh rings. */
   silhouetteDark?: number
+  /** Optional author-supplied geometry — when present, the ring uses
+   *  this buffer instead of generating a procedural one. The geometry
+   *  is expected to be a roughly-cylindrical mesh centred at the origin:
+   *  vertex Y carries the silhouette height, vertex (X, Z) carries the
+   *  ring radius and direction. The runtime computes the shader-side
+   *  `heightT` (normalised height) and `outward` (XZ direction)
+   *  attributes from the positions at load time, so Blender authors
+   *  don't have to stamp them. Pulled out of `kind=horizon` meshes
+   *  in the track's `environmentGlb` by the GLB loader. */
+  geometry?: THREE.BufferGeometry
 }
 
 export type HorizonRing = {
@@ -96,24 +113,21 @@ function heightAt(theta: number, seed: number): number {
   return Math.max(0, Math.min(1.2, v))
 }
 
-export function createHorizonRing(deps: HorizonRingDeps): HorizonRing {
-  const { scene, shared, config } = deps
-  const radius = config?.radius ?? DEFAULT_RADIUS
-  const peak = config?.peakHeight ?? DEFAULT_PEAK
-  const seed = config?.seed ?? 1337
-  const silhouetteDark = config?.silhouetteDark ?? 0.45
-
-  // ── Geometry ──────────────────────────────────────────────────────────
-  // 2 verts per angle (top, bottom). 6 indices per quad segment. Wraps
-  // seamlessly because vertex 0 and vertex SEGMENTS coincide (we emit one
-  // extra angle column so UV-like attributes don't pinch at theta=0).
+/**
+ * Build the legacy procedural horizon: 192 angle columns × 2 verts each,
+ * top column shaped by the layered-sine heightfield, bottom column at
+ * y=RING_BASE_Y. Same data the v1 ring shipped with — every track without
+ * an authored mesh gets this, seeded off its track id hash.
+ */
+function buildProceduralHorizonGeometry(args: {
+  radius: number
+  peak: number
+  seed: number
+}): THREE.BufferGeometry {
+  const { radius, peak, seed } = args
   const cols = RING_SEGMENTS + 1
   const positions = new Float32Array(cols * 2 * 3)
-  // Vertex "height factor" — 1 at the top edge, 0 at the bottom. Drives
-  // the silhouette gradient in the fragment shader.
   const heightT = new Float32Array(cols * 2)
-  // Per-vertex outward direction (cos θ, 0, sin θ) → lets the shader bias
-  // colour by sun direction without recomputing world XZ.
   const outward = new Float32Array(cols * 2 * 3)
 
   for (let i = 0; i < cols; i++) {
@@ -139,11 +153,6 @@ export function createHorizonRing(deps: HorizonRingDeps): HorizonRing {
     outward[botIdx * 3 + 2] = sinT
   }
 
-  // Two triangles per segment, wound so the visible (inward-facing) side
-  // of the ring is the one rendered when DoubleSide is on. We use
-  // DoubleSide anyway because the silhouette is read from inside the ring
-  // only and back-face culling would risk a black edge if the geometry
-  // ever drifted relative to the camera.
   const indices = new Uint32Array(RING_SEGMENTS * 6)
   for (let i = 0; i < RING_SEGMENTS; i++) {
     const a = i * 2
@@ -164,6 +173,98 @@ export function createHorizonRing(deps: HorizonRingDeps): HorizonRing {
   geom.setAttribute('outward', new THREE.BufferAttribute(outward, 3))
   geom.setIndex(new THREE.BufferAttribute(indices, 1))
   geom.computeBoundingSphere()
+  return geom
+}
+
+/**
+ * Take an author-supplied horizon mesh from Blender (pulled out of a
+ * `kind=horizon` node in the track GLB) and stamp the shader-side
+ * `heightT` (normalised silhouette height) and `outward` (XZ-only
+ * direction from origin, unit-length-ish) attributes that the
+ * fragment shader needs.
+ *
+ * We don't require the author to compute them in Blender — push-pulling
+ * verts in edit mode would just invalidate any stamped attribute every
+ * time. Deriving them from the live positions on load is cheap and
+ * keeps the authoring contract minimal: "just edit the verts."
+ *
+ * `peakHeight` (when supplied) defines the normalisation reference; the
+ * tallest authored peak sits at `heightT = peakHeight`. Absent, the
+ * runtime measures the mesh's own bbox and uses that — works for
+ * arbitrary scales without authoring a magic number.
+ */
+function prepareAuthoredHorizonGeometry(
+  source: THREE.BufferGeometry,
+  peakHeight: number | undefined,
+): THREE.BufferGeometry {
+  const posAttr = source.getAttribute('position') as THREE.BufferAttribute | undefined
+  if (!posAttr) {
+    throw new Error('horizon-ring: authored geometry missing position attribute')
+  }
+
+  // Clone so we don't mutate the GLTFLoader's cache (re-loads of the
+  // same track would otherwise see stale heightT / outward attrs).
+  const geom = source.clone()
+
+  const count = posAttr.count
+  // Measure ymin / ymax so we can normalise heightT consistently across
+  // the author-mesh's actual extents. Authors who want to override this
+  // (e.g. a low-poly mesh whose max Y is conservative) pass `peakHeight`.
+  let yMin = Infinity
+  let yMax = -Infinity
+  for (let i = 0; i < count; i++) {
+    const y = posAttr.getY(i)
+    if (y < yMin) yMin = y
+    if (y > yMax) yMax = y
+  }
+  // If `peakHeight` is supplied, use it as the upper reference; otherwise
+  // use the measured span. Either way `yMin` anchors the base so a mesh
+  // with a non-zero floor maps to heightT=0 correctly.
+  const yRange = Math.max(1e-3, (peakHeight ?? Math.max(yMax - yMin, yMax)) - 0)
+  const yBase = peakHeight !== undefined ? 0 : yMin
+
+  const heightT = new Float32Array(count)
+  const outward = new Float32Array(count * 3)
+  for (let i = 0; i < count; i++) {
+    const x = posAttr.getX(i)
+    const y = posAttr.getY(i)
+    const z = posAttr.getZ(i)
+    heightT[i] = Math.max(0, Math.min(1, (y - yBase) / yRange))
+    const r = Math.hypot(x, z)
+    if (r > 1e-3) {
+      outward[i * 3 + 0] = x / r
+      outward[i * 3 + 1] = 0
+      outward[i * 3 + 2] = z / r
+    } else {
+      // Vertex at the central axis — shouldn't happen for a ring mesh,
+      // but the sun-side tint shader only multiplies by a positive dot
+      // so a zero outward is safe (no sun warmth).
+      outward[i * 3 + 0] = 0
+      outward[i * 3 + 1] = 0
+      outward[i * 3 + 2] = 0
+    }
+  }
+
+  geom.setAttribute('heightT', new THREE.BufferAttribute(heightT, 1))
+  geom.setAttribute('outward', new THREE.BufferAttribute(outward, 3))
+  if (!geom.boundingSphere) geom.computeBoundingSphere()
+  return geom
+}
+
+export function createHorizonRing(deps: HorizonRingDeps): HorizonRing {
+  const { scene, shared, config } = deps
+  const silhouetteDark = config?.silhouetteDark ?? 0.45
+
+  // ── Geometry ──────────────────────────────────────────────────────────
+  // Two paths: author-supplied buffer (Blender-edited horizon mesh) or
+  // procedural fallback (per-track seeded layered-sine cylinder).
+  const geom = config?.geometry
+    ? prepareAuthoredHorizonGeometry(config.geometry, config?.peakHeight)
+    : buildProceduralHorizonGeometry({
+        radius: config?.radius ?? DEFAULT_RADIUS,
+        peak: config?.peakHeight ?? DEFAULT_PEAK,
+        seed: config?.seed ?? 1337,
+      })
 
   // ── Shader ────────────────────────────────────────────────────────────
   // Vertical gradient: peaks are the darkest part of the silhouette (the

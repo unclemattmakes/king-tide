@@ -100,6 +100,7 @@ NAME_PATTERNS = [
     (re.compile(r"^start_(\d+)$"), "start"),
     (re.compile(r"^boost_(\d+)$"), "boost_pad"),
     (re.compile(r"^antigrav_(\d+)$"), "antigrav_zone"),
+    (re.compile(r"^wave_zone_(\d+)$"), "wave_zone"),
 ]
 
 
@@ -476,6 +477,41 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
             }
         )
 
+    # Wave zones. Each `wave_zone_NN` empty's world transform gives
+    # position + rotation; custom props carry the per-zone wave-field
+    # multipliers + optional surge / direction-override extras. Coord
+    # transform is the same as anti-grav zones — see comment above.
+    # The runtime's WaveZone uses its local +X for the dominant swell
+    # direction (matches the Blender empty's local +X).
+    wave_zones: list[dict[str, Any]] = []
+    for z in by_kind.get("wave_zone", []):
+        loc = z.matrix_world.translation
+        rq = z.matrix_world.to_quaternion()
+        zone_obj: dict[str, Any] = {
+            "position": _b2t(loc.x, loc.y, loc.z),
+            "rotation": {
+                "x": float(rq.x),
+                "y": float(rq.z),
+                "z": float(-rq.y),
+                "w": float(rq.w),
+            },
+            "halfWidth": float(z.get("half_width", 30.0)),
+            "halfHeight": float(z.get("half_height", 20.0)),
+            "halfDepth": float(z.get("half_depth", 30.0)),
+            "heightMult": float(z.get("height_mult", 1.5)),
+            "freqMult": float(z.get("freq_mult", 1.0)),
+            "blendRadiusM": float(z.get("blend_radius_m", 20.0)),
+        }
+        # Optional extras — only emitted when the empty carries them,
+        # so default-shaped zones stay round-trippable as a minimal
+        # JSON object.
+        if "direction_deg" in z.keys():
+            zone_obj["directionDeg"] = float(z["direction_deg"])
+        if "surge_period_s" in z.keys() and "surge_amplitude" in z.keys():
+            zone_obj["surgePeriodS"] = float(z["surge_period_s"])
+            zone_obj["surgeAmplitude"] = float(z["surge_amplitude"])
+        wave_zones.append(zone_obj)
+
     # Boost pads. Empty's +Y axis (Blender forward) maps to three.js +Z
     # (the runtime "boost direction" axis); rotation_euler.z is the yaw
     # in the horizontal plane. Right-handed rotation around Blender +Z by
@@ -577,6 +613,7 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         "pickupSpawns": pickups,
         "boostPads": boost_pads,
         "antiGravZones": antigrav_zones,
+        "waveZones": wave_zones,
     }
     # gateSpacing round-trips through the JSON so the in-app editor's
     # "Auto-place gates from spline" and Blender's gate preview see the
@@ -765,6 +802,12 @@ def _merge_export_json(derived: dict, existing: dict | None) -> dict:
         re.match(r"^antigrav_\d+$", o.name) and is_object_visible(o)
         for o in bpy.data.objects
     )
+    # Same opt-in for wave zones: Blender owns the waveZones list only
+    # when at least one wave_zone_NN empty exists in the scene.
+    has_wave_zone_empties = any(
+        re.match(r"^wave_zone_\d+$", o.name) and is_object_visible(o)
+        for o in bpy.data.objects
+    )
     if has_cp_empties and "checkpoints" in derived:
         merged["checkpoints"] = derived["checkpoints"]
     if has_pickup_empties and "pickupSpawns" in derived:
@@ -773,6 +816,8 @@ def _merge_export_json(derived: dict, existing: dict | None) -> dict:
         merged["boostPads"] = derived["boostPads"]
     if has_antigrav_empties and "antiGravZones" in derived:
         merged["antiGravZones"] = derived["antiGravZones"]
+    if has_wave_zone_empties and "waveZones" in derived:
+        merged["waveZones"] = derived["waveZones"]
     # `lapsToFinish` defaults to 3 in `derive_track_json`; keep an
     # existing JSON value if the editor set something else.
     if "lapsToFinish" not in merged and "lapsToFinish" in derived:
