@@ -60,7 +60,7 @@ export const DEFAULT_DEV_SETTINGS: Readonly<DevSettings> = Object.freeze({
   keyboardThrottleRate: 10,
   keyboardPitchRate: 8,
 
-  steerReleaseTightness: 0,
+  steerReleaseTightness: 0.6,
 })
 
 /**
