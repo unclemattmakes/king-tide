@@ -64,6 +64,27 @@ function rayAlong(
 export const SLOPE_DOWN_GAIN = 1.0
 export const SLOPE_UP_BRAKE = 0.15
 
+// Slope-aware hover-height boost. On a climb (or descent) the bike rides
+// proportionally higher than the nominal `hoverHeight`, so the chassis
+// stays well clear of the rising trimesh. Without it the velocity-
+// redirect kept the capsule from clipping the slope, but the visual gap
+// shrank to <0.5m — players read that as "dragging" because the chassis
+// sits low and close to the road. Lifting an extra `|tan slope|` metres
+// scales naturally; flat ground stays at nominal hoverHeight (lobby /
+// HUD feel unchanged). 0.5 reads as "the bike floats over the hill" in
+// playtest without over-tuning launch behaviour on lumpy terrain.
+export const SLOPE_HOVER_BOOST = 0.4
+
+// Fraction of slope-tangent velocity the hover damp is allowed to ignore.
+// At 1.0, damp fires zero when the bike is climbing at exactly the
+// slope-tangent rate — but then any spring spike (lumpy terrain mid-
+// climb) goes unchecked and the bike launches. At 0.0, damp fires full
+// (legacy behaviour: ~70 m/s² downward force on a 25° hill at 18 m/s,
+// which overwhelms the spring and pins the chassis below hoverHeight).
+// 0.7 lets the bike climb without dragging while still anchoring the
+// chassis enough to suppress bump-driven launches.
+export const SLOPE_DAMP_RELIEF = 0.5
+
 // Upper clamp on the per-corner heightError fed into the hover spring.
 // When the bow probe looks ahead at a steep climb, localDist goes deeply
 // negative ("surface is high above my probe point"), and `heightError =
@@ -687,9 +708,27 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
             crossX * upX +
             crossY * upY +
             crossZ * upZ
-          // Damp only the AWAY-from-surface component (positive = lifting
-          // off). Matches the historic `Math.max(vAtPointY, 0)`.
-          const dampV = Math.max(vAtPointUp, 0)
+          // Damp only the EXCESS upward velocity beyond what a steady
+          // climb of this slope requires. On flat ground tangentUpVel=0
+          // and we get the legacy `Math.max(vAtPointUp, 0)` behaviour
+          // (damps any lift-off). On a climb at v m/s along a tan(θ)
+          // slope, vy must be v·tan(θ) just to stay on the surface;
+          // treating that as "lifting off" makes the damp force
+          // (~70 m/s² on a 25° hill at 18 m/s) overwhelm the spring's
+          // lift and pins gd well below hoverHeight — the bike's
+          // chassis ends up dragging on the trimesh.
+          //
+          // `sampleFwd*` is the bike's horizontal forward direction
+          // (already computed for the surface probes); dotting linvel
+          // into it gives the bike's signed horizontal forward speed,
+          // and multiplying by `surfaceForwardSlope` (= tan θ) gives
+          // the per-second up-rate needed to track the surface.
+          const horizFwdSpeed =
+            linvel.x * sampleFwdX + linvel.y * sampleFwdY + linvel.z * sampleFwdZ
+          const tangentUpVel = probe.isWater
+            ? 0
+            : horizFwdSpeed * surfaceForwardSlope * SLOPE_DAMP_RELIEF
+          const dampV = Math.max(vAtPointUp - tangentUpVel, 0)
           let aUp: number
           if (probe.isWater && localDist < 0) {
             // Submerged on water — capped buoyancy instead of the stiff
@@ -711,8 +750,18 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
             // local-grounded gate above already culls corners with
             // localDist > hoverHeight*1.6, so the spring never needs to
             // push DOWN by more than ~0.7m of error.
-            const rawHeightError = stats.hoverHeight - localDist
-            const heightError = Math.min(rawHeightError, MAX_BOW_LIFT_ERROR)
+            // Slope-aware ride height: when grounded over a sloped
+            // surface (water exempt — wave dynamics handle their own
+            // contour-following), target a higher hover so the chassis
+            // stays well above the rising trimesh. Without it the
+            // velocity-redirect prevented penetration but the visual
+            // gap was tiny and read as "dragging".
+            const slopeBoost = probe.isWater
+              ? 0
+              : Math.abs(surfaceForwardSlope) * SLOPE_HOVER_BOOST
+            const effHover = stats.hoverHeight + slopeBoost
+            const rawHeightError = effHover - localDist
+            const heightError = Math.min(rawHeightError, MAX_BOW_LIFT_ERROR + slopeBoost)
             const springMul = probe.isWater && p.longitudinal ? WATER_LONGITUDINAL_SPRING_MUL : 1.0
             aUp = GRAVITY + heightError * stats.hoverSpring * springMul - dampV * stats.hoverDamp
           }
