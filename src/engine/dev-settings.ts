@@ -37,6 +37,13 @@ export type DevSettings = {
   keyboardSteerRate: number
   keyboardThrottleRate: number
   keyboardPitchRate: number
+
+  /** How quickly steer collapses back to zero after the stick / key is
+   *  released, on a 0..1 scale where 0 keeps the original heavy decay
+   *  (~0.4s time constant — bike keeps turning for a beat) and 1 snaps
+   *  to neutral the next frame. Read by `input-apply.ts`; player-only
+   *  (AI never goes through that smoothing path). */
+  steerReleaseTightness: number
 }
 
 export const DEFAULT_DEV_SETTINGS: Readonly<DevSettings> = Object.freeze({
@@ -52,6 +59,8 @@ export const DEFAULT_DEV_SETTINGS: Readonly<DevSettings> = Object.freeze({
   keyboardSteerRate: 9,
   keyboardThrottleRate: 10,
   keyboardPitchRate: 8,
+
+  steerReleaseTightness: 0,
 })
 
 /**
@@ -87,6 +96,7 @@ export function loadDevSettings(): void {
     'keyboardSteerRate',
     'keyboardThrottleRate',
     'keyboardPitchRate',
+    'steerReleaseTightness',
   ]
   for (const k of keys) {
     if (isFiniteNumber(p[k])) (devSettings as Record<string, unknown>)[k] = p[k]

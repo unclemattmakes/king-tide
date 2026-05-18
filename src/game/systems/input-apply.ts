@@ -1,4 +1,5 @@
 import { query } from 'bitecs'
+import { devSettings } from '@/engine/dev-settings'
 import type { Intent } from '@/engine/input/intent'
 import { emptyIntent } from '@/engine/input/intent'
 import type { SimWorld } from '@/engine/sim/ecs/world'
@@ -30,7 +31,13 @@ const PLAYER_STEER_SCALE = 0.7
  * function so its intent stays sharp.
  */
 const STEER_RATE_ACTIVE = 7
+/** Default (loosest) release rate — preserves the historical heavy-decay
+ *  feel when `devSettings.steerReleaseTightness === 0`. */
 const STEER_RATE_RELEASE = 2.5
+/** Release rate the slider reaches just before tightness=1. Past this we
+ *  hard-snap (see `applyPeerInputs`) so the player gets a true zero-decay
+ *  endpoint instead of an asymptote. ~60 ≈ one-frame collapse at 60Hz. */
+const STEER_RATE_RELEASE_MAX = 60
 const THROTTLE_RATE_ACTIVE = 9
 const THROTTLE_RATE_RELEASE = 3
 
@@ -92,12 +99,21 @@ export function applyPeerInputs(
 
     const steerActive = Math.abs(intent.steer) > 0.02
     const throttleActive = Math.abs(intent.throttle) > 0.02
-    state.steer = approach(
-      state.steer,
-      targetSteer,
-      dt,
-      steerActive ? STEER_RATE_ACTIVE : STEER_RATE_RELEASE,
-    )
+    if (steerActive) {
+      state.steer = approach(state.steer, targetSteer, dt, STEER_RATE_ACTIVE)
+    } else {
+      // Map tightness 0..1 → release rate. At t≈1 short-circuit to a hard
+      // snap so the slider has a true "no decay" endpoint instead of
+      // bottoming out at 60/s. Clamped so out-of-range persisted values
+      // can't break the math.
+      const t = Math.max(0, Math.min(1, devSettings.steerReleaseTightness))
+      if (t >= 0.999) {
+        state.steer = 0
+      } else {
+        const rate = STEER_RATE_RELEASE + t * (STEER_RATE_RELEASE_MAX - STEER_RATE_RELEASE)
+        state.steer = approach(state.steer, 0, dt, rate)
+      }
+    }
     state.throttle = approach(
       state.throttle,
       targetThrottle,
