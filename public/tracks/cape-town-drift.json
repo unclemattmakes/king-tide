@@ -1,0 +1,49 @@
+{
+  "id": "cape-town-drift",
+  "name": "Cape Town Drift",
+  "lapsToFinish": 3,
+  "gateSpacing": 60,
+  "sky": {
+    "tint": "#c8e0f0",
+    "cloudiness": 0.3,
+    "sunIntensity": 1.05,
+    "fogNear": 500,
+    "fogFar": 1800,
+    "timeOfDay": 240,
+    "colorGrade": "cape_town_blue",
+    "bloom": 0.4,
+    "seaStateBeaufort": 3
+  },
+  "horizon": {
+    "peakHeight": 800,
+    "silhouetteDark": 0.6
+  },
+  "audio": {
+    "music": "cape-town-afrobeats.opus",
+    "ambient": ["gulls.opus", "surf-light.opus", "container-creak.opus"],
+    "ambientGains": [0.3, 0.5, 0.4],
+    "music3dEffects": { "duckOnPump": 0.4 }
+  },
+  "waveZones": [
+    {
+      "position": { "x": 0, "y": 0, "z": 0 },
+      "rotation": { "x": 0, "y": 0, "z": 0, "w": 1 },
+      "halfWidth": 280,
+      "halfHeight": 30,
+      "halfDepth": 220,
+      "heightMult": 0.6,
+      "freqMult": 0.95,
+      "blendRadiusM": 35
+    },
+    {
+      "position": { "x": -380, "y": 0, "z": 100 },
+      "rotation": { "x": 0, "y": 0.5735764, "z": 0, "w": 0.8191520 },
+      "halfWidth": 180,
+      "halfHeight": 30,
+      "halfDepth": 200,
+      "heightMult": 1.3,
+      "freqMult": 1.05,
+      "blendRadiusM": 40
+    }
+  ]
+}
