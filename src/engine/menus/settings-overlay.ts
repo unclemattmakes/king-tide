@@ -18,7 +18,10 @@
 
 import { installMenuGamepad, type MenuGamepad } from '@/engine/input/menu-gamepad'
 import {
+  type AIDifficulty,
   playerSettings,
+  setAIDifficulty,
+  setRubberBandAssist,
   setWavePumpIntensity,
   type WavePumpIntensity,
 } from '@/engine/player-settings'
@@ -37,6 +40,17 @@ const WAVE_PUMP_VALUE: Record<string, WavePumpIntensity> = {
   Full: 'full',
   Subtle: 'subtle',
   Off: 'off',
+}
+
+const DIFFICULTY_LABEL: Record<AIDifficulty, string> = {
+  casual: 'Casual',
+  standard: 'Standard',
+  hard: 'Hard',
+}
+const DIFFICULTY_VALUE: Record<string, AIDifficulty> = {
+  Casual: 'casual',
+  Standard: 'standard',
+  Hard: 'hard',
 }
 
 type Control =
@@ -217,17 +231,17 @@ const TAB_SPECS: TabSpec[] = [
         control: {
           kind: 'select',
           options: ['Casual', 'Standard', 'Hard'],
-          defaultValue: 'Standard',
+          defaultValue: DIFFICULTY_LABEL[playerSettings.aiDifficulty],
         },
-        enabled: false,
-        gate: 'AI difficulty slider lands in Foundation Systems (M11–12)',
+        enabled: true,
+        gate: 'Bakes per-AI top speed + cornering at the start of each race.',
       },
       {
         id: 'gp-rubberband',
         label: 'Rubber-band assist',
-        control: { kind: 'toggle', defaultValue: true },
-        enabled: false,
-        gate: 'Paired with the difficulty slider',
+        control: { kind: 'toggle', defaultValue: playerSettings.rubberBandAssist },
+        enabled: true,
+        gate: 'When off, AI no longer catches up after falling behind.',
       },
       {
         id: 'gp-fov',
@@ -416,6 +430,11 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       cb.type = 'checkbox'
       cb.checked = c.defaultValue
       cb.disabled = !spec.enabled
+      if (spec.enabled && spec.id === 'gp-rubberband') {
+        cb.addEventListener('change', () => {
+          setRubberBandAssist(cb.checked)
+        })
+      }
       return cb
     }
     if (c.kind === 'select') {
@@ -432,6 +451,12 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
         sel.addEventListener('change', () => {
           const v = WAVE_PUMP_VALUE[sel.value]
           if (v) setWavePumpIntensity(v)
+        })
+      }
+      if (spec.enabled && spec.id === 'gp-difficulty') {
+        sel.addEventListener('change', () => {
+          const v = DIFFICULTY_VALUE[sel.value]
+          if (v) setAIDifficulty(v)
         })
       }
       return sel

@@ -21,7 +21,13 @@ import {
   Transform,
   TransformStore,
 } from '@/game/components'
-import { AIController, AIControllerStore, AITag, defaultAIController } from '@/game/components/ai'
+import {
+  type AIDifficulty,
+  AIController,
+  AIControllerStore,
+  AITag,
+  defaultAIController,
+} from '@/game/components/ai'
 import { PickupSlot, PickupSlotStore } from '@/game/components/pickup'
 import { Racer, RacerStore } from '@/game/components/race'
 
@@ -37,8 +43,10 @@ export type CreateBikeOpts = {
   peerId?: number
   /** If true, attach a Racer component for race tracking. */
   asRacer?: boolean
-  /** If set, attaches AI components and follows the named spline. */
-  ai?: { splineId: string; lineOffset?: number }
+  /** If set, attaches AI components and follows the named spline.
+   *  `difficulty` (default 'standard') controls per-AI tuning baked in
+   *  at spawn — see `src/game/ai/difficulty.ts`. */
+  ai?: { splineId: string; lineOffset?: number; difficulty?: AIDifficulty }
   /** Optional sim-side stat override — used by bike variants. Defaults
    *  to defaultBikeStats() if omitted. */
   stats?: BikeStatsData
@@ -119,10 +127,11 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
   if (opts.ai) {
     addComponent(sim, eid, AITag)
     addComponent(sim, eid, AIController)
-    AIControllerStore.set(
-      eid,
-      defaultAIController(opts.ai.splineId, { lineOffset: opts.ai.lineOffset ?? 0 }),
-    )
+    const ctrlOpts: { lineOffset: number; difficulty?: AIDifficulty } = {
+      lineOffset: opts.ai.lineOffset ?? 0,
+    }
+    if (opts.ai.difficulty !== undefined) ctrlOpts.difficulty = opts.ai.difficulty
+    AIControllerStore.set(eid, defaultAIController(opts.ai.splineId, ctrlOpts))
   }
   if (opts.asRacer) {
     addComponent(sim, eid, Racer)

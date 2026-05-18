@@ -15,7 +15,7 @@ import { emptyIntent, type Intent, installInput } from './engine/input'
 import { installCameraLookInput } from './engine/input/camera-look'
 import { bindLazyMenuButton } from './engine/lazy-menu'
 import { isHostFor } from './engine/net/host-election'
-import { loadPlayerSettings } from './engine/player-settings'
+import { loadPlayerSettings, playerSettings } from './engine/player-settings'
 import { createAntiGravDebugRenderer } from './engine/render/anti-grav-debug'
 import { createChaseCamera } from './engine/render/camera'
 import { applyCloudShadowsToScene, buildCloudShadowMultiplier } from './engine/render/cloud-shadows'
@@ -583,8 +583,12 @@ async function boot() {
         addComponent(sim, playerEid, AIController)
       }
       // Always reset AI state on toggle — fresh closest-point search, no carry
-      // over from previous auto-play sessions on the same page.
-      AIControllerStore.set(playerEid, defaultAIController('main'))
+      // over from previous auto-play sessions on the same page. Player-driven
+      // auto-play uses the same difficulty bake-in as the real opponents.
+      AIControllerStore.set(
+        playerEid,
+        defaultAIController('main', { difficulty: playerSettings.aiDifficulty }),
+      )
     } else if (hasComponent(sim, playerEid, AITag)) {
       removeComponent(sim, playerEid, AITag)
     }

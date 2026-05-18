@@ -27,11 +27,6 @@ import type { Track } from '@/game/tracks/types'
  * - Throttle scales down with target speed (curvature-driven), not just
  *   with current angle to target.
  */
-/** Max lateral acceleration the AI will plan for, m/s^2. Lower = more
- *  conservative cornering. ~9 m/s² gives ~21 m/s through a 50m-radius arc. */
-const AI_MAX_LATERAL_ACCEL = 11
-/** How far ahead (in seconds) we scan the spline for upcoming curvature. */
-const CURVATURE_LOOKAHEAD_SECONDS = 1.6
 /** Minimum scan distance even at low speed (m), so we still see the next corner. */
 const CURVATURE_LOOKAHEAD_MIN = 18
 /** Margin: brake when current speed exceeds target speed by this much (m/s). */
@@ -140,14 +135,16 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
 
     // 6. Curvature look-ahead. Walk ~1.5s ahead along the spline summing arc
     // length and total absolute bend; the implied radius gives a target
-    // speed via v = sqrt(latAccel * r).
-    const scanDist = Math.max(CURVATURE_LOOKAHEAD_MIN, speedHoriz * CURVATURE_LOOKAHEAD_SECONDS)
+    // speed via v = sqrt(latAccel * r). Lookahead horizon + lateral-accel
+    // ceiling are per-AI (difficulty-driven) — Hard sees corners sooner
+    // and plans for higher lateral G.
+    const scanDist = Math.max(CURVATURE_LOOKAHEAD_MIN, speedHoriz * ai.curvatureLookaheadSec)
     const { totalBend, scannedDist } = curvatureAheadLooped(spline.points, bestIdx, scanDist)
     // Implied corner radius: bend (rad) over arclength (m) → curvature (1/m).
     // Cap min radius at 8m so missing data doesn't produce a near-stop target.
     const curvature = scannedDist > 0 ? totalBend / scannedDist : 0
     const impliedRadius = curvature > 1e-4 ? Math.max(8, 1 / curvature) : 1e6
-    const cornerSpeedCap = Math.sqrt(AI_MAX_LATERAL_ACCEL * impliedRadius)
+    const cornerSpeedCap = Math.sqrt(ai.maxLateralAccel * impliedRadius)
     const baseTopSpeed = ai.topSpeedFactor * 30 // ~bike topSpeed; a soft target, not a hard cap
     const targetSpeed = Math.min(baseTopSpeed, cornerSpeedCap)
 
