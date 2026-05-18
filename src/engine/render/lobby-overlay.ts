@@ -49,6 +49,10 @@ export type LobbyView = {
   pickBanner?: { winnerLabel: string; subtitle: string } | null | undefined
   /** Room code shown in the side panel + the copy hint. */
   roomId: string
+  /** Smoothed RTT in milliseconds, or -1 if no recent pong has landed.
+   *  Rendered next to the room id so the player has a per-tick read on
+   *  their connection health before they commit to a race. */
+  latencyMs?: number
 }
 
 export type LobbyOverlay = {
@@ -102,6 +106,7 @@ export function installLobbyOverlay(opts: LobbyOverlayOpts): LobbyOverlay {
           <div class="meta">
             <div class="sub">ROOM</div>
             <div style="font-family: var(--bc-font-display); font-size: 24px; color: var(--bc-yellow);" id="lobby-room-id"></div>
+            <div class="sub" style="margin-top: 4px;">PING <span id="lobby-ping" style="color: var(--bc-cyan); font-family: var(--bc-font-mono); letter-spacing: 0.14em;">—</span></div>
           </div>
         </div>
 
@@ -184,6 +189,7 @@ export function installLobbyOverlay(opts: LobbyOverlayOpts): LobbyOverlay {
   const slotsEl = overlay.querySelector<HTMLElement>('#lobby-slots')!
   const roomIdEl = overlay.querySelector<HTMLElement>('#lobby-room-id')!
   const roomInfoEl = overlay.querySelector<HTMLElement>('#lobby-room-info')!
+  const pingEl = overlay.querySelector<HTMLElement>('#lobby-ping')!
   const readyBtn = overlay.querySelector<HTMLButtonElement>('#lobby-ready')!
   const bikeValEl = overlay.querySelector<HTMLElement>('#pick-bike-val')!
   const trackValEl = overlay.querySelector<HTMLElement>('#pick-track-val')!
@@ -256,6 +262,9 @@ export function installLobbyOverlay(opts: LobbyOverlayOpts): LobbyOverlay {
     if (!shown) return
     lastView = view
     roomIdEl.textContent = view.roomId
+    // Latency is a live readout — always paint, regardless of
+    // connecting/connected. Stale or pre-measured shows "—".
+    pingEl.textContent = formatPing(view.latencyMs)
 
     if (view.connecting) {
       subEl.textContent = 'CONNECTING TO THE BROADCAST…'
@@ -334,6 +343,11 @@ export function pickRandomTrack(
   if (votes.length === 0) return fallback
   const idx = Math.floor(rng() * votes.length)
   return votes[idx] ?? fallback
+}
+
+function formatPing(latencyMs: number | undefined): string {
+  if (latencyMs === undefined || !Number.isFinite(latencyMs) || latencyMs < 0) return '—'
+  return `${Math.round(latencyMs)} MS`
 }
 
 function escapeHtml(s: string): string {

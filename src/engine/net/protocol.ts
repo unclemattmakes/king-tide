@@ -100,6 +100,24 @@ export type StartRaceMessage = {
   trackId?: string | undefined
 }
 
+/** Client → server ping. The server echoes the same `t` back as a
+ *  `PongMessage` without touching it; the client computes RTT as
+ *  `now - t`. Stateless on the server — pings don't bump presence and
+ *  aren't billed against the room's broadcast budget. */
+export type PingMessage = {
+  type: 'ping'
+  /** Client-side `performance.now()` at send. Opaque to the server. */
+  t: number
+}
+
+/** Server → originating peer pong. Carries the original `t` so the
+ *  client can compute RTT without needing to remember its outstanding
+ *  pings. */
+export type PongMessage = {
+  type: 'pong'
+  t: number
+}
+
 export type ServerControlMessage =
   | HelloMessage
   | PeerJoinedMessage
@@ -107,6 +125,7 @@ export type ServerControlMessage =
   | RoomFullMessage
   | ReadyMessage
   | StartRaceMessage
+  | PongMessage
 
 /** Messages sent from a client to the server.
  *  - `ready`: lobby ready toggle (with current picks). Server re-broadcasts
@@ -115,7 +134,8 @@ export type ServerControlMessage =
  *    arming the countdown. Server sets `raceStarted` and broadcasts a
  *    `StartRaceMessage` (with the chosen `trackId`) to everyone else
  *    so they arm too. Late joiners are told via the `raceStarted` flag
- *    in their `HelloMessage`. */
+ *    in their `HelloMessage`.
+ *  - `ping`: RTT probe. Server echoes `t` back in a `PongMessage`. */
 export type ClientControlMessage =
   | {
       type: 'ready'
@@ -124,3 +144,4 @@ export type ClientControlMessage =
       selectedTrackId?: string | undefined
     }
   | { type: 'start-race'; trackId?: string | undefined }
+  | PingMessage

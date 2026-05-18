@@ -25,6 +25,7 @@
 import { addComponent, hasComponent, removeComponent, removeEntity } from 'bitecs'
 import { isHostFor } from '@/engine/net/host-election'
 import type { InputFrame } from '@/engine/net/input-frame'
+import { onMpStatusChange } from '@/engine/net/mp-status'
 import { createNetRoom, type NetRoom } from '@/engine/net/room'
 import {
   type BikeSnapshotRecord,
@@ -162,14 +163,19 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
     if (!roomEl) return
     if (!net?.ready) {
       roomEl.style.display = roomId ? '' : 'none'
-      roomEl.textContent = roomId ? `room: ${roomId} (connecting…)` : 'room: --'
+      // partysocket auto-reconnects; the chip distinguishes the two
+      // states so a transient blip doesn't read as "still booting".
+      const label = net?.everConnected ? 'reconnecting…' : 'connecting…'
+      roomEl.textContent = roomId ? `room: ${roomId} (${label})` : 'room: --'
       return
     }
     const remote = net.remotePeers
     const peers = remote.length === 0 ? 'alone' : `+ P${remote.join(', P')}`
     const hostMark = isHostFor(net.peerId, remote) ? ' [host]' : ''
+    const ping = net.latencyMs
+    const pingLabel = Number.isFinite(ping) && ping >= 0 ? ` | ${Math.round(ping)}ms` : ''
     roomEl.style.display = ''
-    roomEl.textContent = `room: ${roomId} | you: P${net.peerId}${hostMark} | ${peers}`
+    roomEl.textContent = `room: ${roomId} | you: P${net.peerId}${hostMark} | ${peers}${pingLabel}`
   }
 
   // M10.11 — host role toggles between dynamic + AI-tagged (host) and
@@ -241,6 +247,10 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
   // auto-starts and the race HUD is built without `deferStart`.
   if (roomId) {
     renderRoomChip()
+    // Live HUD chip refresh on every mp-status change — that fires on
+    // each pong (latency tick) and on every join/leave/host-flip, so
+    // the room pill stays current without a per-frame poll.
+    onMpStatusChange(renderRoomChip)
     net = createNetRoom({
       host: netHost,
       roomId,

@@ -29,6 +29,7 @@ import {
   MAX_PEERS_PER_ROOM,
   type PeerJoinedMessage,
   type PeerLeftMessage,
+  type PongMessage,
   type ReadyMessage,
   type RoomFullMessage,
   type StartRaceMessage,
@@ -43,6 +44,7 @@ function parseClientControl(text: string): ClientControlMessage | null {
     if (!obj || typeof obj !== 'object' || typeof obj.type !== 'string') return null
     if (obj.type === 'ready' && typeof obj.ready === 'boolean') return obj as ClientControlMessage
     if (obj.type === 'start-race') return obj as ClientControlMessage
+    if (obj.type === 'ping' && typeof obj.t === 'number') return obj as ClientControlMessage
   } catch {
     // fall through
   }
@@ -61,13 +63,15 @@ export default class RelayServer implements Party.Server {
   private raceTrackId: string | undefined = undefined
   /** Per-slot last-known lobby state (ready + picks). Replayed in
    *  `hello` so a fresh join paints the lobby in one frame. Cleared on
-   *  peer disconnect and room empty. */
+   *  peer disconnect and room empty. Fields are `string | undefined`
+   *  (not just optional) so the `??` merge in `onMessage` can write an
+   *  unknown pick back explicitly under `exactOptionalPropertyTypes`. */
   private peerPicks: Record<
     number,
     {
-      selectedBikeId?: string
-      selectedTrackId?: string
-      ready?: boolean
+      selectedBikeId?: string | undefined
+      selectedTrackId?: string | undefined
+      ready?: boolean | undefined
     }
   > = {}
 
@@ -148,6 +152,12 @@ export default class RelayServer implements Party.Server {
       }
       const out: StartRaceMessage = { type: 'start-race', trackId: this.raceTrackId }
       this.room.broadcast(JSON.stringify(out), [sender.id])
+    } else if (ctl.type === 'ping') {
+      // Stateless RTT echo. Server doesn't touch `t` — the round-trip
+      // timing is computed entirely client-side from the value the
+      // sender stamped on the way out.
+      const pong: PongMessage = { type: 'pong', t: ctl.t }
+      sender.send(JSON.stringify(pong))
     }
   }
 

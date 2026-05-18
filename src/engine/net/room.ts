@@ -18,12 +18,15 @@
 import PartySocket from 'partysocket'
 
 import type { Intent } from '../input/intent'
+import { isHostFor } from './host-election'
 import {
   decodeInputFrameFrom,
   encodeInputFrame,
   INPUT_FRAME_WIRE_BYTES,
   type InputFrame,
 } from './input-frame'
+import { createLatencyTracker } from './latency'
+import { setMpStatus } from './mp-status'
 import type { ClientControlMessage, ServerControlMessage } from './protocol'
 import {
   decodeTransformSnapshotFrom,
@@ -120,6 +123,14 @@ export type NetRoom = {
   /** Live per-slot picks (bike + track). Mirrors `latestPeerReady`'s
    *  lifecycle. Self-entries are written locally on `sendReady`. */
   readonly latestPeerPicks: ReadonlyMap<number, PeerPicks>
+  /** Smoothed RTT in milliseconds, or -1 if no recent pong has landed.
+   *  Updated on every pong (~1 Hz once `ready()`); stale-resets to -1
+   *  if pongs stop arriving (see `LATENCY_STALE_MS`). */
+  readonly latencyMs: number
+  /** True once the socket has reached an OPEN state at least once.
+   *  Used by the room HUD chip to distinguish a first-time connect from
+   *  a reconnect attempt (partysocket retries on its own after a drop). */
+  readonly everConnected: boolean
   close(): void
 }
 
@@ -150,8 +161,33 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
 
   let myPeerId = -1
   let socketOpen = false
+  let everConnected = false
   let snapshotsReceived = 0
   const remotePeers = new Set<number>()
+  const latency = createLatencyTracker()
+  // 1 Hz ping cadence — fast enough that the readout updates within a
+  // second when conditions change, slow enough that it's not a real
+  // factor in the relay's per-room billing. The first ping fires
+  // immediately once we have a slot so the readout populates without
+  // an awkward "—" delay.
+  const PING_INTERVAL_MS = 1000
+  let pingTimer: ReturnType<typeof setInterval> | null = null
+
+  /** Publish the current connection state to the mp-status pub/sub so
+   *  the Settings → Network tab + lobby + HUD chip all refresh. Computes
+   *  derived fields (`isHost`, `latencyMs`) from local state so callers
+   *  can't accidentally publish a stale tuple. */
+  function publishStatus(state: 'connecting' | 'reconnecting' | 'connected' | 'closed'): void {
+    setMpStatus({
+      state,
+      roomId: cfg.roomId,
+      host: cfg.host,
+      peerId: myPeerId,
+      remoteCount: remotePeers.size,
+      latencyMs: latency.current(Date.now()),
+      isHost: myPeerId >= 0 && isHostFor(myPeerId, [...remotePeers]),
+    })
+  }
   // M10.12 lobby — peer slot → ready boolean. Includes self once
   // sendReady is called. New peers are added with `false` on
   // peer-joined / hello; cleared on peer-left + on disconnect.
@@ -170,6 +206,26 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
   })
   socket.binaryType = 'arraybuffer'
 
+  function sendPing(): void {
+    if (!socketOpen || myPeerId < 0) return
+    const msg: ClientControlMessage = { type: 'ping', t: performance.now() }
+    socket.send(JSON.stringify(msg))
+  }
+  function startPingLoop(): void {
+    if (pingTimer !== null) return
+    sendPing()
+    pingTimer = setInterval(sendPing, PING_INTERVAL_MS)
+  }
+  function stopPingLoop(): void {
+    if (pingTimer === null) return
+    clearInterval(pingTimer)
+    pingTimer = null
+  }
+
+  // Initial publish — we're connecting (or, if partysocket reconnects on
+  // its own later, we'll switch to 'reconnecting').
+  publishStatus('connecting')
+
   socket.addEventListener('open', () => {
     socketOpen = true
   })
@@ -181,6 +237,11 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
     latestPeerReady.clear()
     latestPeerPicks.clear()
     snapshotsReceived = 0
+    latency.reset()
+    stopPingLoop()
+    // partysocket auto-reconnects unless we explicitly called close();
+    // distinguish "first-time connecting" from "re-establishing".
+    publishStatus(everConnected ? 'reconnecting' : 'connecting')
   })
 
   socket.addEventListener('message', (event: MessageEvent) => {
@@ -216,12 +277,16 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
               if (typeof v.ready === 'boolean') latestPeerReady.set(slot, v.ready)
             }
           }
+          everConnected = true
+          startPingLoop()
+          publishStatus('connected')
           cfg.onConnected?.(msg.peerId, [...remotePeers], msg.raceStarted)
           if (msg.raceStarted) cfg.onStartRace?.(msg.raceTrackId)
           break
         case 'peer-joined':
           remotePeers.add(msg.peerId)
           latestPeerReady.set(msg.peerId, false)
+          publishStatus('connected')
           cfg.onPeerJoined?.(msg.peerId)
           break
         case 'peer-left':
@@ -232,8 +297,15 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
           latestPeerIntents.delete(msg.peerId)
           latestPeerReady.delete(msg.peerId)
           latestPeerPicks.delete(msg.peerId)
+          publishStatus('connected')
           cfg.onPeerLeft?.(msg.peerId)
           break
+        case 'pong': {
+          const rtt = performance.now() - msg.t
+          latency.record(rtt, Date.now())
+          publishStatus('connected')
+          break
+        }
         case 'ready':
           // Defensive: drop self-echoes (server shouldn't send these,
           // but the local sendReady path already updates our own slot
@@ -367,8 +439,18 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
     get snapshotsReceived() {
       return snapshotsReceived
     },
+    get latencyMs() {
+      return latency.current(Date.now())
+    },
+    get everConnected() {
+      return everConnected
+    },
     close() {
+      stopPingLoop()
       socket.close()
+      latency.reset()
+      everConnected = false
+      publishStatus('closed')
     },
   }
 }
