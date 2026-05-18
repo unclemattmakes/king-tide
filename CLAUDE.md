@@ -13,6 +13,25 @@ the canonical entry point.
 The sim layer cannot import Three.js. Render systems read from the ECS world and
 write to Three.js objects, never the other way around.
 
+## Design direction (v1)
+
+The v1 plan is set in a near-future post-warming world where coastal cities are
+drowned and arcade hoverbike racing is the post-collapse spectator sport.
+Signature mechanic is **wave mastery** (Wave Race lineage). Eleven ship-quality
+tracks across four cups, every track a recognizable real-world place seen
+post-flood. Planning trio:
+
+- [docs/product-plan.md](docs/product-plan.md) — locked vision and pillars.
+- [docs/design-targets.md](docs/design-targets.md) — numeric targets, P0/P1/P2
+  priorities, anti-targets from the Pacer / MK World failure modes.
+- [docs/track-themes.md](docs/track-themes.md) — 11 ship tracks + tutorial,
+  full content bible with set-pieces, palettes, lore tags.
+- [docs/v1-work-breakdown.md](docs/v1-work-breakdown.md) — execution plan:
+  Step 0 scaffolding (full menu flow stubbed with disabled buttons),
+  per-domain task inventory, and the **definition-of-done convention** —
+  a system isn't done until it works *and* has a settings-menu entry *and*
+  its UI gate is cleared.
+
 ## Authoring pipelines
 
 - **Tracks** — split between Blender (environment geometry) and the in-app editor
