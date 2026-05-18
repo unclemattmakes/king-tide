@@ -29,13 +29,8 @@ import {
   recordCupRaceFinish,
   totalCupPoints,
 } from '@/engine/cup-progress'
-import { formatLap } from '@/engine/garage'
 import { type Intent, inputSourceLabel, readPlayerIntent } from '@/engine/input'
 import { tickCameraLook } from '@/engine/input/camera-look'
-import {
-  type SubmitResult,
-  submitEntry as submitLeaderboardEntry,
-} from '@/engine/leaderboard-state'
 import { buildTrackList, nextTrackId } from '@/engine/menus/catalog'
 import {
   decodeInputFrameFrom,
@@ -52,6 +47,7 @@ import type { ChaseCamera } from '@/engine/render/camera'
 import { showCupResultsOverlay } from '@/engine/render/cup-results-screen'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
+import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finish-banner'
 import type { RaceHud } from '@/engine/render/race-hud'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
@@ -872,7 +868,7 @@ function showFinishScreen(opts: FinishOpts): void {
   const watchBtn = document.getElementById('finish-watch-replay') as HTMLButtonElement | null
   const saveBtn = document.getElementById('finish-save-replay') as HTMLButtonElement | null
   let newGhostSaved = false
-  let leaderboardResult: SubmitResult | null = null
+  let ttBestLapForBoard: number | null = null
   if (recorder) {
     const replay = recorder.finalize({
       finishPosition: meStandingPosition,
@@ -883,29 +879,16 @@ function showFinishScreen(opts: FinishOpts): void {
     // Time Trial — slice the player's best lap from the recording and
     // persist it as the new ghost iff it beats the stored ghost's
     // best lap (or there's no stored ghost yet). Single-lap looping
-    // ghost matches Wave Race / F-Zero TT convention.
+    // ghost matches Wave Race / F-Zero TT convention. The leaderboard
+    // banner renderer below picks this up via `ttBestLapForBoard` and
+    // drives the local-cache write + remote submit lifecycle.
     if (timeTrialMode) {
       const slice = sliceBestLap(replay, 0)
       if (slice) {
         const existing = getGhostBestLap({ trackId, bikeId: playerVariant.id })
         if (existing === null || slice.bestLap < existing) {
           newGhostSaved = setGhost({ trackId, bikeId: playerVariant.id }, slice.replay)
-          // Local leaderboard submission piggybacks on the PB ghost
-          // save. Gated on the player's "Submit times" toggle so the
-          // off state is a true silence (no entry written). Handle
-          // falls back to 'YOU' inside the writer when the player
-          // hasn't set one — the rank still shows up on finish, and
-          // the player can rename in Settings later (existing slot
-          // by handle, so a rename creates a new row rather than
-          // moving the old one).
-          if (newGhostSaved && playerSettings.leaderboardSubmit) {
-            leaderboardResult = submitLeaderboardEntry({
-              trackId,
-              handle: playerSettings.leaderboardHandle,
-              bikeId: playerVariant.id,
-              bestLap: slice.bestLap,
-            })
-          }
+          if (newGhostSaved) ttBestLapForBoard = slice.bestLap
         }
       }
     }
@@ -938,29 +921,23 @@ function showFinishScreen(opts: FinishOpts): void {
     }
   }
 
-  // Best-lap / ghost banner. Rendered after the ghost slicer so we can
-  // surface "GHOST SAVED" alongside "NEW BEST" when the player set a
-  // fresh PB in TT mode.
+  // Best-lap / ghost banner + leaderboard submission. The banner owns
+  // its own lifecycle: it renders the race / PB / GHOST SAVED pills,
+  // and on a TT PB drives the local-cache write + remote submit (with
+  // optional inline handle prompt when no handle is set yet).
   if (hud.finishBest) {
-    const parts: string[] = []
-    if (bestLapThisRace !== null) {
-      parts.push(`${formatLap(bestLapThisRace)} (race)`)
-    }
-    if (bestLapAllTime !== null) {
-      parts.push(`<span class="best">${formatLap(bestLapAllTime)} (PB)</span>`)
-    }
-    if (timeTrialMode && newGhostSaved) {
-      parts.push('<span class="best">★ GHOST SAVED</span>')
-    }
-    if (timeTrialMode && leaderboardResult?.improved && leaderboardResult.rank !== null) {
-      // Handle is pre-normalized to [A-Z0-9_-] by `normalizeHandle`, so
-      // it's safe to inline without further escaping.
-      const handleLabel = (playerSettings.leaderboardHandle || 'YOU').toUpperCase()
-      parts.push(
-        `<span class="best">#${leaderboardResult.rank} ON BOARD &middot; ${handleLabel}</span>`,
-      )
-    }
-    hud.finishBest.innerHTML = parts.length ? parts.join(' · ') : '—'
+    renderLeaderboardFinishBanner({
+      host: hud.finishBest,
+      trackId,
+      bikeId: playerVariant.id,
+      bestLapThisRace,
+      bestLapAllTime,
+      // Banner uses ttBestLapForBoard (the slice's bestLap — what we
+      // just persisted to the ghost) when present; bestLapThisRace is
+      // identical in practice but keep them threaded distinct so the
+      // banner has a clean signal for "this PB is worth submitting".
+      ttPbBestLap: timeTrialMode && newGhostSaved ? ttBestLapForBoard : null,
+    })
   }
   // Cup mode — append a compact RACE N/M · XX PTS line to the finish
   // stat block so the player sees their championship progress without

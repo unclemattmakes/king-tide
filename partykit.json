@@ -2,5 +2,8 @@
   "$schema": "https://www.partykit.io/schema.json",
   "name": "hoverbike",
   "main": "party/relay.ts",
+  "parties": {
+    "leaderboard": "party/leaderboard.ts"
+  },
   "compatibilityDate": "2024-09-25"
 }

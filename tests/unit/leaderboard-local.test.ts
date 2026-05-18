@@ -6,7 +6,7 @@ import {
   getEntryCounts,
   normalizeHandle,
   submitEntry,
-} from '../../src/engine/leaderboard-state'
+} from '../../src/engine/leaderboard/local'
 
 function installMemoryStorage(): void {
   const store = new Map<string, string>()
@@ -45,7 +45,7 @@ describe('normalizeHandle', () => {
   })
 })
 
-describe('leaderboard-state', () => {
+describe('leaderboard/local', () => {
   beforeEach(() => installMemoryStorage())
   afterEach(() => vi.unstubAllGlobals())
 
