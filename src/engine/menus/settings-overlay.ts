@@ -19,8 +19,10 @@
 import { installMenuGamepad, type MenuGamepad } from '@/engine/input/menu-gamepad'
 import {
   type AIDifficulty,
+  type AntiGravCameraIntensity,
   playerSettings,
   setAIDifficulty,
+  setAntiGravCameraIntensity,
   setRubberBandAssist,
   setWavePumpIntensity,
   type WavePumpIntensity,
@@ -51,6 +53,17 @@ const DIFFICULTY_VALUE: Record<string, AIDifficulty> = {
   Casual: 'casual',
   Standard: 'standard',
   Hard: 'hard',
+}
+
+const ANTI_GRAV_CAMERA_LABEL: Record<AntiGravCameraIntensity, string> = {
+  full: 'Full',
+  reduced: 'Reduced',
+  off: 'Off',
+}
+const ANTI_GRAV_CAMERA_VALUE: Record<string, AntiGravCameraIntensity> = {
+  Full: 'full',
+  Reduced: 'reduced',
+  Off: 'off',
 }
 
 type Control =
@@ -267,10 +280,10 @@ const TAB_SPECS: TabSpec[] = [
         control: {
           kind: 'select',
           options: ['Full', 'Reduced', 'Off'],
-          defaultValue: 'Full',
+          defaultValue: ANTI_GRAV_CAMERA_LABEL[playerSettings.antiGravCameraIntensity],
         },
-        enabled: false,
-        gate: 'Lights up with the anti-grav system',
+        enabled: true,
+        gate: 'Scales how much the chase camera rolls with the bike on banked walls + loops.',
       },
       {
         id: 'gp-hud-minimap',
@@ -457,6 +470,12 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
         sel.addEventListener('change', () => {
           const v = DIFFICULTY_VALUE[sel.value]
           if (v) setAIDifficulty(v)
+        })
+      }
+      if (spec.enabled && spec.id === 'gp-anti-grav') {
+        sel.addEventListener('change', () => {
+          const v = ANTI_GRAV_CAMERA_VALUE[sel.value]
+          if (v) setAntiGravCameraIntensity(v)
         })
       }
       return sel

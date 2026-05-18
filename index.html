@@ -31,6 +31,7 @@
         --bc-yellow: #ffd54a;
         --bc-red: #ff3a5e;
         --bc-green: #38e07f;
+        --bc-magenta: #ff46c8;
         --bc-line: rgba(255, 255, 255, 0.08);
         --bc-line-strong: rgba(255, 255, 255, 0.18);
 
@@ -1529,7 +1530,58 @@
       /* Anti-grav entry indicator — left side under the timer. */
       #hud-anti-grav {
         top: 116px; left: 14px;
-        min-width: 180px; min-height: 56px;
+        min-width: 200px; min-height: 56px;
+      }
+      /* Anti-grav widget — magenta-glow shell that fades in while the
+         player bike is in an anti-grav source, fades out on exit.
+         `--ag-weight` is set per frame from AntiGravOverride.weight so
+         the glow / ring scale read the engagement strength. */
+      #hud-anti-grav .ag-shell {
+        display: flex; align-items: center; gap: 10px;
+        padding: 8px 14px 7px;
+        background: linear-gradient(180deg, rgba(20,8,28,0.85), rgba(8,4,18,0.85));
+        border: 1px solid rgba(255, 70, 200, calc(0.35 + 0.45 * var(--ag-weight, 0.5)));
+        border-left: 3px solid var(--bc-magenta, #ff46c8);
+        box-shadow:
+          0 0 calc(14px + 24px * var(--ag-weight, 0.5)) rgba(255, 70, 200, calc(0.18 + 0.42 * var(--ag-weight, 0.5))),
+          0 6px 22px rgba(0,0,0,0.5);
+        opacity: 0;
+        transform: translateX(-6px);
+        transition:
+          opacity 220ms var(--ease-out),
+          transform 220ms var(--ease-out);
+      }
+      #hud-anti-grav .ag-shell.ag-active {
+        opacity: 1;
+        transform: translateX(0);
+      }
+      #hud-anti-grav .ag-ring {
+        width: 16px; height: 16px;
+        border-radius: 999px;
+        border: 2px solid var(--bc-magenta, #ff46c8);
+        box-shadow: 0 0 calc(8px + 14px * var(--ag-weight, 0.5)) var(--bc-magenta, #ff46c8);
+        position: relative;
+        animation: ag-ring-pulse 1.8s var(--ease-out) infinite;
+      }
+      #hud-anti-grav .ag-ring::after {
+        content: '';
+        position: absolute; inset: 3px;
+        border-radius: 999px;
+        background: var(--bc-magenta, #ff46c8);
+        opacity: calc(0.3 + 0.5 * var(--ag-weight, 0.5));
+      }
+      #hud-anti-grav .ag-label {
+        font-family: var(--bc-font-display);
+        font-size: 13px; letter-spacing: 0.24em;
+        color: var(--bc-ink);
+      }
+      #hud-anti-grav .ag-label b {
+        color: var(--bc-magenta, #ff46c8);
+        font-weight: 400;
+      }
+      @keyframes ag-ring-pulse {
+        0%, 100% { transform: scale(1); }
+        50%      { transform: scale(1.18); }
       }
       /* Wave-line shimmer overlay anchor — full-canvas; actual paint
          lives inside the WebGPU layer once the system lands. */
