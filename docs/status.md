@@ -1,13 +1,18 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-17 (v1 cathedral + wave-pump signal — see *v1 cathedral + wave-pump signal (2026-05-17)* below. M11 Step 0 from [docs/v1-work-breakdown.md](./v1-work-breakdown.md) shipped: full menu flow now exists with mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial), 12-tile track-select for the v1 ship tracks (all disabled with post-flood landmark blurbs + per-track gate labels), 4 disabled real cups + a dev-only **Dev Cup** for playtest tracks (lagoon, cliffside, every GLB) so the real race cups stay clean, 5-slot bike-select (3 active + 2 "Coming soon"), and a full Settings overlay (Audio / Video / Controls / Gameplay tabs) with every v1 tunable row stubbed + gated. Reserved HUD slots for wave-pump, anti-grav, wave-line, cup-points, 8-bike positions. Single `.bc-disabled` + `.bc-gate` convention locked once and reused everywhere. The first Foundation Systems milestone also landed: a wave-pump signal that fires on a clean crest launch (on-water-grounded → airborne with vy ≥ 1.5 m/s, forward speed ≥ 45% of top, throttle ≥ 0.4, 500 ms cooldown), strength-scaled chyron-style HUD widget + stacked-5th audio chord, persisted "Wave-pump prompt" setting (Full/Subtle/Off). 295/295 unit tests passing including 11 new for the pump detector. Old: M10.12 multiplayer lobby — `?room=<id>` now opens a lobby overlay that lists every connected peer with their ready/not-ready state, plus a "CLICK WHEN READY" button (Enter also toggles). The race countdown is held (`raceHud.deferStart: true`) until **all connected peers** (minimum 1, so solo works) have ready'd up. When the local view first sees all-ready it calls `raceHud.armCountdown()` AND broadcasts `start-race` to the relay; the relay sets a sticky `raceStarted` bit and forwards to peers. Late joiners receive `raceStarted: true` in their `HelloMessage` and skip the lobby immediately. Reset on empty room. Verified end-to-end via Chrome MCP for solo / two-peer / late-joiner scenarios. M10.11 multiplayer state sync — see [docs/m10-11-state-sync.md](./m10-11-state-sync.md). Host-elected AI authority + 20 Hz transform snapshots: lowest-slot peer runs `aiControlSystem` and broadcasts the 4 AI bike poses; every peer also broadcasts its OWN player-bike pose. Receivers' AI bikes and remote-peer bikes are kinematic-position rigid bodies whose pose is set from inbound snapshots, replacing the old input-replay path (which silently diverged because each tab had its own physics + AI sim with no state sync — the M10.4–M10.9 work was input-only). Wire format: byte-0 tag distinguishes `InputFrame` (0x01, 11 bytes) from `TransformSnapshot` (0x02, 8 + 24×N bytes). Host AI bikes carry `AITag`, non-host AI bikes don't (re-derived via `applyHostRole` on every peer-set change). Local human's bike stays `Dynamic + PeerControlled`. Bandwidth at 8 peers: ~12 KB/s ingress per peer. Race state stays per-tab; M10.15 will make it host-authoritative if disagreements show up in play. `#hud-room` chip now also shows `[host]` when this peer is the AI host. Determinism harness unchanged (default `runAI: true`). 169/169 unit tests passing including new `host-election`, `transform-snapshot`, `apply-snapshot` suites. M10.10.1 — local player bike's `PeerControlled.peerId` now patched to relay-assigned slot in `onConnected` (was hardcoded `0`, made every tab claim slot 0 and the host's frames drove everyone). M10.10 deployed PartyKit endpoint — client defaults to `hoverbike.occ-matt.partykit.dev` in prod builds, `localhost:1999` in dev; `?host=` overrides. Local dev: `pnpm party:dev` (PartyKit on :1999) + `pnpm dev` (Vite on :5191). M9.41 lean crank — `ROLL_LEAN_LIMIT` doubled from 20° to 40°.). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-18 (Foundation Systems 5/5 — see *Foundation Systems complete (2026-05-18)* below, [PR #113](https://github.com/occ-matt/hoverbike/pull/113)). Four systems landed in one session on top of Step 0 + wave-pump: **AI difficulty / rubber-band toggle** (per-AI tuning bundle for Casual/Standard/Hard baked at spawn, rubber-band gated by a live toggle), **anti-grav HUD + camera intensity** (magenta-glow indicator on `#hud-anti-grav`; chase camera's new `setAntiGravFollow(weight)` blends yaw-only ↔ full bike-frame follow with a Full/Reduced/Off intensity scalar), **tutorial framework** (track-agnostic director + 6-beat default script + top-centered yellow HUD chyron, URL gate `?tutorial=1`, "Replay tutorial" button + subtitles toggle in Settings, persisted `tutorialCompleted` latch), **audio mixer + procedural music bed** (four-bus rewrite `music | sfx | ambient → master → destination`, three-voice sine drone bed with tremolo LFO, sidechain `duckMusic` auto-fires on wave-pump + explosion, all four sliders + music-enabled toggle wired through a new `audio-service` singleton). All 5 Foundation Systems rows in [docs/v1-work-breakdown.md](./v1-work-breakdown.md) now check ✅. 335/335 unit tests passing (26 new — 6 anti-grav-camera, 13 tutorial, 7 audio-mixer). Old: 2026-05-17 (v1 cathedral + wave-pump signal — see *v1 cathedral + wave-pump signal (2026-05-17)* below. M11 Step 0 from [docs/v1-work-breakdown.md](./v1-work-breakdown.md) shipped: full menu flow now exists with mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial), 12-tile track-select for the v1 ship tracks (all disabled with post-flood landmark blurbs + per-track gate labels), 4 disabled real cups + a dev-only **Dev Cup** for playtest tracks (lagoon, cliffside, every GLB) so the real race cups stay clean, 5-slot bike-select (3 active + 2 "Coming soon"), and a full Settings overlay (Audio / Video / Controls / Gameplay tabs) with every v1 tunable row stubbed + gated. Reserved HUD slots for wave-pump, anti-grav, wave-line, cup-points, 8-bike positions. Single `.bc-disabled` + `.bc-gate` convention locked once and reused everywhere. The first Foundation Systems milestone also landed: a wave-pump signal that fires on a clean crest launch (on-water-grounded → airborne with vy ≥ 1.5 m/s, forward speed ≥ 45% of top, throttle ≥ 0.4, 500 ms cooldown), strength-scaled chyron-style HUD widget + stacked-5th audio chord, persisted "Wave-pump prompt" setting (Full/Subtle/Off). 295/295 unit tests passing including 11 new for the pump detector. Old: M10.12 multiplayer lobby — `?room=<id>` now opens a lobby overlay that lists every connected peer with their ready/not-ready state, plus a "CLICK WHEN READY" button (Enter also toggles). The race countdown is held (`raceHud.deferStart: true`) until **all connected peers** (minimum 1, so solo works) have ready'd up. When the local view first sees all-ready it calls `raceHud.armCountdown()` AND broadcasts `start-race` to the relay; the relay sets a sticky `raceStarted` bit and forwards to peers. Late joiners receive `raceStarted: true` in their `HelloMessage` and skip the lobby immediately. Reset on empty room. Verified end-to-end via Chrome MCP for solo / two-peer / late-joiner scenarios. M10.11 multiplayer state sync — see [docs/m10-11-state-sync.md](./m10-11-state-sync.md). Host-elected AI authority + 20 Hz transform snapshots: lowest-slot peer runs `aiControlSystem` and broadcasts the 4 AI bike poses; every peer also broadcasts its OWN player-bike pose. Receivers' AI bikes and remote-peer bikes are kinematic-position rigid bodies whose pose is set from inbound snapshots, replacing the old input-replay path (which silently diverged because each tab had its own physics + AI sim with no state sync — the M10.4–M10.9 work was input-only). Wire format: byte-0 tag distinguishes `InputFrame` (0x01, 11 bytes) from `TransformSnapshot` (0x02, 8 + 24×N bytes). Host AI bikes carry `AITag`, non-host AI bikes don't (re-derived via `applyHostRole` on every peer-set change). Local human's bike stays `Dynamic + PeerControlled`. Bandwidth at 8 peers: ~12 KB/s ingress per peer. Race state stays per-tab; M10.15 will make it host-authoritative if disagreements show up in play. `#hud-room` chip now also shows `[host]` when this peer is the AI host. Determinism harness unchanged (default `runAI: true`). 169/169 unit tests passing including new `host-election`, `transform-snapshot`, `apply-snapshot` suites. M10.10.1 — local player bike's `PeerControlled.peerId` now patched to relay-assigned slot in `onConnected` (was hardcoded `0`, made every tab claim slot 0 and the host's frames drove everyone). M10.10 deployed PartyKit endpoint — client defaults to `hoverbike.occ-matt.partykit.dev` in prod builds, `localhost:1999` in dev; `?host=` overrides. Local dev: `pnpm party:dev` (PartyKit on :1999) + `pnpm dev` (Vite on :5191). M9.41 lean crank — `ROLL_LEAN_LIMIT` doubled from 20° to 40°.). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
 ## What works today
 
-- **v1 menu cathedral.** Cold boot routes through title → 5-tile mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial) → track or cup or lobby → 5-slot bike-select → race. Race mode shows all 12 v1 ship tracks as disabled tiles with post-flood landmark blurbs + per-track gate labels; Cup mode shows the four ship cups (all disabled) plus a dev-only **Dev Cup** that hosts every playtest track (lagoon, cliffside, every GLB) — keeps the real race lineup uncluttered. Full Settings overlay (Audio / Video / Controls / Gameplay) with the entire v1 tunable inventory present and gated; the **Wave-pump prompt** row is the first to go live. Reserved hidden HUD slots for wave-pump, anti-grav, wave-line, cup-points, 8-bike positions. Single `.bc-disabled` + `.bc-gate` convention reused everywhere. See [docs/v1-work-breakdown.md](./v1-work-breakdown.md).
+- **v1 menu cathedral.** Cold boot routes through title → 5-tile mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial) → track or cup or lobby → 5-slot bike-select → race. Race mode shows all 12 v1 ship tracks as disabled tiles with post-flood landmark blurbs + per-track gate labels; Cup mode shows the four ship cups (all disabled) plus a dev-only **Dev Cup** that hosts every playtest track (lagoon, cliffside, every GLB) — keeps the real race lineup uncluttered. Full Settings overlay (Audio / Video / Controls / Gameplay) with the entire v1 tunable inventory present and gated; the **Wave-pump prompt**, **AI difficulty**, **Rubber-band assist**, **Anti-grav camera intensity**, **Subtitles for tutorial**, **Replay tutorial**, **Master**, **Music**, **SFX**, **Ambient**, and **Music bed enabled** rows are live. The **Tutorial** mode tile is also enabled. Reserved hidden HUD slots for wave-pump, anti-grav, tutorial, wave-line, cup-points, 8-bike positions. Single `.bc-disabled` + `.bc-gate` convention reused everywhere. See [docs/v1-work-breakdown.md](./v1-work-breakdown.md).
+- **Foundation Systems milestone (5/5).** Step 1 of the v1 work-breakdown is done. Five systems each landed with sim behavior + settings entry + HUD/menu surface per the definition-of-done convention: wave-pump signal, AI difficulty, anti-grav HUD + camera, tutorial framework, audio mixer + music bed. Details below.
 - **Wave-pump signal.** Render-side detector watches the player bike each frame; fires on a clean crest launch (on-water-grounded → airborne with vy ≥ 1.5 m/s, forward speed ≥ 45% of top speed, throttle ≥ 0.4, 500 ms cooldown). Strength-scaled HUD widget pops a chyron-style "PUMP +" flash with a cyan→yellow strength bar; audio engine plays a stacked perfect-5th chord (A4 + E5 + A5) under a band-passed whoosh sweep — distinct from `gateCleared`'s two-note ding so the player can tell pumps from checkpoints by ear. Settings → Gameplay → "Wave-pump prompt" toggles Full / Subtle / Off; persisted to localStorage. Sim-side pump physics tuning is still pending (M11–M12 proper); the detector's event contract holds — only the trigger heuristic gets upgraded.
+- **AI difficulty + rubber-band toggle.** Three tiers (Casual / Standard / Hard) baked into each AI controller at spawn time via a tuning bundle (`src/game/ai/difficulty.ts`) — top-speed factor, lateral-accel ceiling, curvature lookahead, rubber-band bounds. Rubber-band system (`src/game/systems/rubber-band.ts`) reads the live `playerSettings.rubberBandAssist` toggle each tick so flipping mid-race settles AI back to its baseline rather than snapping. Settings → Gameplay → AI difficulty (select) + Rubber-band assist (toggle) wired and persisted.
+- **Anti-grav surface — HUD + camera.** The anti-grav physics + Blender authoring shipped earlier; this is the player-facing layer. Magenta-glow HUD indicator binds to `#hud-anti-grav` and fades in with `AntiGravOverride.weight` crossing the same 0.05 threshold the resolver uses for its active flag. Chase camera's new `setAntiGravFollow(weight)` blends between yaw-only (default, motion-sickness-safe) and full bike-frame follow (rolls + pitches with the bike — loops actually invert the view), lerping on the same 0.15s tau as the gravity blend so the camera frame neither leads nor lags. Settings → Gameplay → "Anti-grav camera intensity" (Full / Reduced / Off) scales the camera follow weight — HUD intentionally stays on at "off" (the affordance signal is gameplay-critical; only the roll is the motion-sickness knob). `chase.snap()` catches up follow weight so respawns don't slide into the follow.
+- **Tutorial framework (track-agnostic).** Director (`src/engine/tutorial/`) drives a script of beats — each beat pairs a player-facing prompt (mechanic name + one-line hint) with a `clearWhen` predicate evaluated against per-frame sample (player speed, throttle, pump events, orbit touch, anti-grav engagement). Default 6-beat script (THROTTLE → CRUISE → LOOK AROUND → WAVE PUMP → ANTI-GRAV → READY) clears on generic signals so it runs on any track without Sandbar dependencies. Top-centered yellow HUD chyron on `#hud-tutorial` flashes green on clears, settles to green "GOOD RIDE — GO RACE" on completion with a ~2.5s fade. URL param `?tutorial=1` activates it; both the menu's Tutorial mode tile and Settings → "Replay tutorial" button route through `buildReplayTutorialHref`. Subtitles toggle (Settings → Gameplay) hides the hint line; the title chyron + clear flash stay. First clean completion latches `tutorialCompleted=true` so the buttons re-label to "REPLAY". Strictly deterministic given the same per-frame sample sequence — replay-safety preserved.
+- **Audio mixer + procedural music bed.** Four-bus rewrite of `AudioEngine`: `sources → music | sfx | ambient → master → destination`. Each bus is a GainNode driven by `playerSettings.audio<Bus>Volume × BUS_HEADROOM[bus]` (master 0.6, music 0.45, sfx 1.0, ambient 0.6 — slider=1.0 maps to a comfortable ceiling). Existing one-shots route to SFX (pickups, weapons, explosion, gate/lap dings, wave-pump chime, engine + wind), water rumble to Ambient. Music bus gets a new procedural pad bed — three-voice sine drone (A2/E3/A3) with tremolo LFO; intentionally bland, stand-in for the licensed/commissioned drop later in M11–12. New `duckMusic(amount, recoverSeconds)` sidechain helper auto-fires on wave-pump (0.35 + 0.3 × strength dip) and explosion (0.7 dip) so cues cut through. Settings → Audio → all four sliders + a "Music bed enabled" toggle wired through a new `audio-service` singleton (`src/engine/audio/audio-service.ts`) so the overlay can reach the live engine without prop-drilling from `main.ts`.
 - Tracks on the level-select carousel: **Lagoon Loop** (default; jump ramp on the right straight), **Cliffside** (mesa with cliff drop, doubles as the Blender-export reference layout), **Calibration** (smoke-test fixture), **Test Ring** (collision tunneling regression), and two new procedural-island showcases — **Oval Loop** and **Figure Eight** — authored end-to-end in Blender using the addon's road / ramp / spline tools on a fresh HV_Island terrain. The two new tracks are the canonical proof that the Blender authoring stack (road slab + F1 curbs + ramp + snap + JSON sync + manifest upsert) can produce shippable courses without leaving Blender.
 - Three bike archetypes — **Cruiser** (heavy / fast top speed), **Racer** (default balanced), **Stunt** (light / agile) — selectable via the garage menu or `?bike=`
 - Garage menu (HUD button top-right) for picking bike + track + viewing / clearing best lap records
@@ -104,6 +109,130 @@ replay obligation. When the proper sim-side pump physics tuning lands
 in M11–M12, only the trigger heuristic changes; the
 `wavePumpHud.pump(strength)` + `audio.wavePump(strength)` contract
 stays.
+
+### Foundation Systems complete (2026-05-18)
+
+[PR #113](https://github.com/occ-matt/hoverbike/pull/113). Four
+foundation systems landed on top of Step 0 + wave-pump, closing the
+**Step 1 — Foundation systems** row in
+[docs/v1-work-breakdown.md](./v1-work-breakdown.md) at 5/5. Each
+system follows the same definition-of-done: sim/behavior + settings
+entry + HUD/menu surface, all three checkboxes flipped at once.
+
+**AI difficulty + rubber-band toggle.** Three-tier per-AI tuning
+bundle baked into the controller at spawn time:
+- [src/game/ai/difficulty.ts](../src/game/ai/difficulty.ts) — Casual /
+  Standard / Hard each set top-speed factor, lateral-accel ceiling,
+  curvature lookahead, and rubber-band catch-up bounds. Bundle is
+  resolved from `playerSettings.aiDifficulty` at AI spawn so a change
+  takes effect on the next race.
+- [src/game/systems/rubber-band.ts](../src/game/systems/rubber-band.ts)
+  gates on `playerSettings.rubberBandAssist` each tick — flipping the
+  toggle mid-race settles AI back to its baseline instead of
+  snapping. When off, the system is a no-op.
+- Settings → Gameplay → AI difficulty (select) and Rubber-band
+  assist (toggle) wired + persisted.
+
+**Anti-grav surface — HUD + camera intensity.**
+- [src/engine/render/anti-grav-hud.ts](../src/engine/render/anti-grav-hud.ts)
+  — binds to the reserved `#hud-anti-grav` slot. Magenta-glow shell +
+  pulsing ring + "ANTI-GRAV ON" chyron, `--ag-weight` CSS var drives
+  border-glow / ring brightness. Crosses the same 0.05 active
+  threshold `antiGravSystem` uses so HUD and gravity-scale flip in
+  lockstep.
+- [src/engine/render/camera.ts](../src/engine/render/camera.ts) grew
+  `setAntiGravFollow(weight)` — weight=0 keeps the yaw-only steady-
+  state frame, weight=1 rotates offset + look-ahead by the full bike
+  quaternion so banked walls + 360° loops roll the view. Lerps on
+  the same `FOLLOW_SMOOTH_TAU = 0.15s` as the AntiGravOverride
+  up-vector smoothing → no lead/lag. `snap()` catches up the follow
+  weight so respawn mid-anti-grav doesn't slide into the follow over
+  ~150ms.
+- Settings → Gameplay → "Anti-grav camera intensity" (Full / Reduced
+  / Off) scales `AntiGravOverride.weight × scalar` upstream. HUD is
+  intentionally always-on (the affordance signal is gameplay-
+  critical); only the camera follow opts out at "off" — the motion-
+  sickness knob.
+
+**Tutorial framework (track-agnostic).** New
+[src/engine/tutorial/](../src/engine/tutorial/) directory:
+- `tutorial-script.ts` — types for a `TutorialScript` of
+  `TutorialBeat`s. Each beat pairs a player-facing prompt (mechanic
+  name + one-line hint) with a `clearWhen` predicate evaluated
+  against a read-only per-frame `TutorialContext` (player speed,
+  throttle, pump events, orbit touch, anti-grav engagement), plus an
+  optional `clearAfterSeconds` timeout for passive beats.
+- `DEFAULT_TUTORIAL_SCRIPT` — 6 beats: THROTTLE → CRUISE → LOOK
+  AROUND → WAVE PUMP → ANTI-GRAV → READY. Clears on generic
+  signals so it runs on any track without Sandbar dependencies.
+- `tutorial-director.ts` — pure-logic advancer. Holds the active
+  beat index, accumulates per-beat counters, evaluates clearWhen +
+  timeouts, fires `onBeatArmed` / `onBeatCleared` / `onCompleted`
+  lifecycle callbacks. Strictly deterministic given the same sample
+  sequence so replay-safety isn't sacrificed.
+- `tutorial-launch.ts` — shared URL builder used by the Settings
+  "Replay tutorial" button and the menu mode-tile.
+- [src/engine/render/tutorial-hud.ts](../src/engine/render/tutorial-hud.ts)
+  — top-centered yellow chyron on `#hud-tutorial`. Flashes green on
+  beat clear, settles to green "GOOD RIDE — GO RACE" on completion
+  with a ~2.5s fade. Subtitles toggle hides the hint line; the title
+  chyron + clear flash stay (chyron is gameplay-critical, hint is
+  the read-along layer).
+- URL param `?tutorial=1` activates the director in `startGameLoop`;
+  the menu's Tutorial mode tile flipped to enabled, and Settings →
+  Gameplay → "Replay tutorial" button + "Subtitles for tutorial"
+  toggle wired + persisted. First clean completion latches
+  `tutorialCompleted=true` so the buttons re-label to "REPLAY".
+
+**Audio mixer + procedural music bed.**
+- [src/engine/audio/audio.ts](../src/engine/audio/audio.ts) rewritten
+  to four buses: `sources → music | sfx | ambient → master →
+  destination`. Each bus a GainNode driven by
+  `playerSettings.audio<Bus>Volume × BUS_HEADROOM[bus]`. Per-bus
+  headroom keeps slider=1.0 at a comfortable ceiling instead of 0dB
+  clipping.
+- Existing one-shots routed to SFX (pickups, weapons, explosion,
+  gate/lap dings, wave-pump chime + whoosh, engine + wind). Looping
+  water rumble routed to Ambient. Music bus gets the new procedural
+  pad bed — three-voice sine drone (A2 / E3 / A3) with a slow
+  tremolo LFO. Intentionally bland; stand-in for the licensed/
+  commissioned drop later in M11–12. `setMusicEnabled(false)` dials
+  it to 0 without unwiring so the swap-in is a one-liner.
+- New `duckMusic(amount, recoverSeconds)` sidechain helper auto-
+  fires on wave-pump (0.35 + 0.3 × strength dip, 0.45s recover) and
+  explosion (0.7 dip, 0.6s recover). Standard sidechain shape: 40ms
+  attack, linear recover.
+- [src/engine/audio/audio-service.ts](../src/engine/audio/audio-service.ts)
+  — singleton registry so Settings overlay can reach the live engine
+  without prop-drilling from `main.ts`.
+  `applyAudioBusVolume` / `applyAudioMusicEnabled` helpers no-op
+  when no engine is registered (the main-menu can open Settings
+  before audio context is up).
+- Settings → Audio rows for all four sliders + a "Music bed
+  enabled" toggle wired and persisted via
+  `setAudioBusVolume(bus, volume)` + `setAudioMusicEnabled(on)`,
+  which clamp, persist, AND re-apply to the live engine in one
+  call.
+
+**Tests.** 335/335 unit tests passing — 26 new across the session:
+- 6 in [tests/unit/anti-grav-camera.test.ts](../tests/unit/anti-grav-camera.test.ts)
+  cover the camera scalar table, localStorage round-trip, and chase-
+  camera follow blends at weight=0 / 0.5 / 1 + the snap() catch-up.
+- 9 in [tests/unit/tutorial-director.test.ts](../tests/unit/tutorial-director.test.ts)
+  cover lifecycle, predicate clears, timeout fallback, completion
+  semantics, per-beat counters resetting at arm, orbit/pump signals,
+  manual skip, ctx time accuracy.
+- 4 in [tests/unit/tutorial-launch.test.ts](../tests/unit/tutorial-launch.test.ts)
+  cover the URL round-trip, lagoon fallback, bike-omitted edge case,
+  and clean-tutorial-route param dropping.
+- 7 in [tests/unit/audio-mixer.test.ts](../tests/unit/audio-mixer.test.ts)
+  cover per-bus field writes, [0,1] clamping, localStorage round-
+  trip, NaN/Infinity rejection, and the audio-service registry +
+  null-engine fallback.
+
+The Web Audio path itself is smoke-tested in the browser — jsdom
+doesn't ship Web Audio so the AudioEngine creation stays out of the
+unit-test layer.
 
 ### Authoring — tunnels, downtown, placement helper, terrain coloration (2026-05-15)
 - **Tunnel tool.** Bezier curve through a hill → *Build Tunnel* emits a
