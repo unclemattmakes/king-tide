@@ -124,18 +124,24 @@ async function boot() {
   const sim = createSimWorld()
   const chase = createChaseCamera(camera)
 
-  // Wave field selection. Default is the Phillips-spectrum field that
-  // pairs with the FFT renderer; CPU buoyancy sums the top-K modes
-  // analytically and the GPU shader walks the same modes via
-  // `spectrumModesToGerstnerShape`. `?waves=gerstner` falls back to
-  // the hand-tuned 6-wave analytic setup (the previous default).
-  // The legacy `?waves=fft` value is kept as an explicit alias for
-  // the new spectrum default so old bookmarks still work.
+  // Wave field selection. Default is the hand-tuned 6-wave analytic
+  // Gerstner setup — same closed-form formula on CPU buoyancy and
+  // GPU vertex shader, so bike float math tracks the rendered
+  // surface to within float precision. The Phillips-spectrum field
+  // (FFT path) is kept behind `?waves=spectrum` (or the legacy
+  // `?waves=fft` alias) for A/B; it gives more wavelength variety
+  // but pays a ~1–2 ms GPU FFT dispatch cost AND has a render-vs-
+  // buoyancy gap (GPU walks all 32 modes via
+  // `spectrumModesToGerstnerShape`, CPU walks top-K). Reverted to
+  // gerstner default after the SoT-style shading pass — the
+  // visible-quality win came almost entirely from fragment-side
+  // techniques (Beer-Lambert, sun disc, anisotropic streak, bubble
+  // foam, height whitecaps) which work identically on both paths.
   const wavesParam = new URLSearchParams(window.location.search).get('waves')
-  const waveField =
-    wavesParam === 'gerstner'
-      ? createWaveField(defaultWaves())
-      : createSpectrumWaveField(defaultSpectrumParams())
+  const useSpectrum = wavesParam === 'spectrum' || wavesParam === 'fft'
+  const waveField = useSpectrum
+    ? createSpectrumWaveField(defaultSpectrumParams())
+    : createWaveField(defaultWaves())
   // Camera-locked water: the mesh follows the camera XZ so its dense
   // vertex region always covers the visible patch. Size shrinks from the
   // legacy 800 m world plane to 240 m centered on the camera (= 120 m
