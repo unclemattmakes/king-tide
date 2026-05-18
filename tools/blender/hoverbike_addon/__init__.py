@@ -169,6 +169,7 @@ from .previews import (  # noqa: E402,F401
     _rebuild_gate_preview,
     _rebuild_racer_preview,
 )
+from .track_meta import _lint_track  # noqa: E402,F401
 from .turn_indicators import rebuild_turn_indicators as _rebuild_turn_indicators  # noqa: E402
 from .water import rebuild_water_preview as _rebuild_water_preview  # noqa: E402
 
