@@ -6,11 +6,10 @@ authors = ["occ-matt"]
 edition = "2021"
 license = "MIT"
 
-# Tauri's app entry point is the `tauri` runtime; we link the static web
-# bundle from `../dist` (Vite output) at build time. See tauri.conf.json.
-[lib]
-name = "hoverbike_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Default `src/main.rs` is the binary entry point (named `hoverbike`).
+# No [lib] block — desktop builds only at this stage. Mobile (iOS /
+# Android) would need a `src/lib.rs` exposing a `run()` function; cross
+# that bridge when the Steam Deck Linux build is solid.
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

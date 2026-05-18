@@ -30,7 +30,8 @@
     "docs:preview": "vitepress preview docs-site",
     "tauri": "cd src-tauri && cargo tauri",
     "tauri:dev": "cd src-tauri && cargo tauri dev",
-    "build:deck": "node tools/build-deck.mjs"
+    "build:deck": "node tools/build-deck.mjs",
+    "gen:deck-icons": "node tools/gen-deck-icons.mjs"
   },
   "engines": {
     "node": ">=20"

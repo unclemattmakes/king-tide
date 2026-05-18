@@ -75,6 +75,7 @@ pub fn start_callback_pump(_handle: SteamHandle) {
 }
 
 #[cfg(not(feature = "steam"))]
+#[allow(dead_code)]
 pub fn start_callback_pump(_handle: SteamHandle) {}
 
 #[derive(Debug, Deserialize)]
