@@ -1836,6 +1836,108 @@
       body.menu-active #race-minimap,
       body.menu-active #hud-scaffold,
       body.menu-active #finish { display: none; }
+
+      /* ───────────── Cup-results overlay ─────────────
+         Shown over the finish screen after the last race in a cup.
+         Mirrors the finish overlay's broadcast vibe but lays out a
+         per-race points table + champion banner. */
+      #cup-results {
+        position: fixed; inset: 0; z-index: 65;
+        display: none; align-items: center; justify-content: center;
+        user-select: none;
+        background:
+          radial-gradient(ellipse at 50% 35%, rgba(5, 10, 20, 0.55) 0%, rgba(5, 10, 20, 0.96) 100%);
+        backdrop-filter: blur(6px);
+        font-family: var(--bc-font-sans);
+        animation: bc-fade var(--t-base) var(--ease-out);
+      }
+      #cup-results.show { display: flex; }
+      #cup-results .card {
+        position: relative;
+        text-align: left; color: var(--bc-ink);
+        background: linear-gradient(180deg, rgba(10, 20, 36, 0.94), rgba(5, 10, 20, 0.94));
+        border: 1px solid var(--bc-line);
+        border-left: 4px solid var(--bc-yellow);
+        padding: 32px 44px 26px;
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
+        min-width: 560px;
+        max-width: 720px;
+        animation: bc-rise var(--t-slow) var(--ease-out);
+      }
+      #cup-results .ribbon {
+        position: absolute; top: -10px; left: 32px;
+        font-family: var(--bc-font-display);
+        font-size: 11px; letter-spacing: 0.32em;
+        padding: 5px 14px;
+        background: var(--bc-yellow); color: var(--bc-navy);
+      }
+      #cup-results .title {
+        font-family: var(--bc-font-display);
+        font-size: 48px; letter-spacing: 0.06em; line-height: 1.05;
+        margin-bottom: 6px;
+      }
+      #cup-results .sub {
+        font-family: var(--bc-font-mono);
+        font-size: 12px; letter-spacing: 0.2em; opacity: 0.7;
+        margin-bottom: 22px; text-transform: uppercase;
+      }
+      #cup-results .standings {
+        display: grid; gap: 6px;
+        font-family: var(--bc-font-mono);
+        font-size: 13px;
+        letter-spacing: 0.03em;
+        margin-bottom: 18px;
+      }
+      #cup-results .standings .row {
+        display: grid; grid-template-columns: 32px 1fr 90px 70px;
+        padding: 8px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        align-items: baseline;
+      }
+      #cup-results .standings .row.head {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        font-size: 10px; letter-spacing: 0.18em; opacity: 0.55;
+        text-transform: uppercase;
+      }
+      #cup-results .standings .row .pos { color: var(--bc-cyan); }
+      #cup-results .standings .row .pts { text-align: right; color: var(--bc-yellow); font-weight: 600; }
+      #cup-results .standings .row .pts-this { text-align: right; opacity: 0.65; }
+      #cup-results .champion {
+        margin-top: 12px; padding: 16px 18px;
+        background: rgba(255, 215, 64, 0.08);
+        border: 1px solid rgba(255, 215, 64, 0.32);
+        font-family: var(--bc-font-display);
+        letter-spacing: 0.12em;
+      }
+      #cup-results .champion .lbl {
+        font-size: 11px; opacity: 0.7; letter-spacing: 0.28em; margin-bottom: 6px;
+      }
+      #cup-results .champion .who {
+        font-size: 22px; color: var(--bc-yellow);
+      }
+      #cup-results .actions {
+        margin-top: 24px; display: flex; gap: 10px;
+        flex-wrap: wrap;
+        animation: bc-rise-soft 480ms var(--ease-out) 460ms backwards;
+      }
+      #cup-results button.action {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--bc-line);
+        color: var(--bc-ink);
+        font-family: var(--bc-font-display);
+        font-size: 14px; letter-spacing: 0.18em;
+        padding: 11px 22px;
+        cursor: pointer;
+      }
+      #cup-results button.action.primary {
+        background: var(--bc-cyan); color: var(--bc-navy);
+        border-color: var(--bc-cyan);
+      }
+      #cup-results button.action:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+      #cup-results button.action.primary:hover { filter: brightness(1.12); }
+      body.menu-active #cup-results { display: none; }
     </style>
   </head>
   <body>
@@ -1877,6 +1979,25 @@
           <button class="action danger" id="finish-exit" type="button">EXIT TO MENU</button>
         </div>
         <div class="hint">[ENTER] next race · [R] retry · [ESC] menu</div>
+      </div>
+    </div>
+    <!-- Cup-results overlay — populated by `cup-results-screen.ts`,
+         shown over the finish screen after the last race in a
+         championship. Mostly a points table + champion banner; the
+         BACK TO MENU button clears cup-progress and navigates home. -->
+    <div id="cup-results">
+      <div class="card">
+        <div class="ribbon" id="cup-results-ribbon">CHAMPIONSHIP</div>
+        <div class="title" id="cup-results-title">CUP COMPLETE</div>
+        <div class="sub" id="cup-results-sub">DEV PLACEHOLDER CUP &middot; 3 RACES</div>
+        <div class="standings" id="cup-results-standings"></div>
+        <div class="champion" id="cup-results-champion">
+          <div class="lbl">CHAMPION</div>
+          <div class="who" id="cup-results-champion-who">—</div>
+        </div>
+        <div class="actions">
+          <button class="action primary" id="cup-results-menu" type="button">BACK TO MENU</button>
+        </div>
       </div>
     </div>
     <!-- HUD scaffolding slots — reserved DOM for systems that don't exist

@@ -1,3 +1,4 @@
+import { startCup } from '@/engine/cup-progress'
 import { playerSettings } from '@/engine/player-settings'
 import type { TrackManifestEntry } from '@/game/assets/manifest'
 import { type BikeVariantId, DEFAULT_BIKE_VARIANT } from '@/game/bikes/variants'
@@ -14,6 +15,7 @@ import {
   buildDevCupTracks,
   type CupEntry,
   DEV_CUP,
+  DEV_PLACEHOLDER_CUP,
   type DevTrackEntry,
   isDevBuild,
   V1_CUPS,
@@ -200,6 +202,10 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
   // `commitSpRace` lives inside the Promise executor (it needs `resolve`),
   // but `renderBikeCards` runs in the outer scope — bridge them via a ref.
   let commitSpRaceRef: (() => void) | null = null
+  // Cup-mode commit lives alongside — the bike-select grid forwards to
+  // it when `currentMode === 'cup'` so the lineup commit also passes
+  // through the same render code.
+  let commitSpCupRef: (() => void) | null = null
   // Build the Dev Cup list once — it only changes when the manifest does,
   // and that's a page-load gate, not a render-time concern.
   const devCupTracks = buildDevCupTracks(opts.manifestTracks)
@@ -278,7 +284,9 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           'TRACK',
           pickedCup?.id === 'dev'
             ? 'Playtest tracks. Procedural built-ins + every GLB the manifest knows about.'
-            : 'Cup line-up — tap a card to lock in your venue.',
+            : (pickedCup?.races.length ?? 0) > 0
+              ? 'Championship lineup. START CUP to lock in the whole bill.'
+              : 'Cup line-up — tap a card to lock in your venue.',
         )
         break
       case 'sp-bike':
@@ -348,15 +356,17 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     return V1_CUPS.find((c) => c.id === id)?.name ?? id
   }
 
-  /** Cup-select host. Renders the four ship cups plus the Dev Cup
+  /** Cup-select host. Renders the four ship cups plus the Dev cups
    *  (dev builds only). Real cups stay disabled in Step 0; the Dev
-   *  Cup is the playtest entrypoint. */
+   *  Cup is the browse entrypoint; the Dev Placeholder Cup is the
+   *  championship wiring proof. */
   function renderCupCards(host: HTMLElement): void {
     host.innerHTML = ''
     for (const c of V1_CUPS) {
       host.appendChild(buildCupCard(c))
     }
     if (dev) {
+      host.appendChild(buildCupCard(DEV_PLACEHOLDER_CUP))
       host.appendChild(buildCupCard(DEV_CUP))
     }
   }
@@ -369,11 +379,22 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     card.className = `bc-card${disabled ? ' bc-disabled' : ''}`
     card.style.setProperty('--accent', c.accent)
     if (disabled) card.dataset.gate = c.gateLabel
+    const isDevCup = c.id === 'dev' || c.id === 'dev-placeholder'
     const trackCount =
-      c.id === 'dev' ? devCupTracks.length : V1_TRACKS.filter((t) => t.cup === c.id).length
+      c.id === 'dev'
+        ? devCupTracks.length
+        : c.races.length > 0
+          ? c.races.length
+          : V1_TRACKS.filter((t) => t.cup === c.id).length
+    const labelText =
+      c.id === 'dev'
+        ? 'DEV ONLY · BROWSE'
+        : c.id === 'dev-placeholder'
+          ? 'DEV ONLY · CHAMPIONSHIP'
+          : 'CUP'
     card.innerHTML = `
-      ${c.id === 'dev' ? '<span class="bc-dev-badge">DEV</span>' : ''}
-      <div class="label">${c.id === 'dev' ? 'DEV ONLY' : 'CUP'}</div>
+      ${isDevCup ? '<span class="bc-dev-badge">DEV</span>' : ''}
+      <div class="label">${labelText}</div>
       <div class="name">${escapeHtml(c.name).toUpperCase()}</div>
       <div class="tag">${escapeHtml(c.tagline)}</div>
       <div class="record">${trackCount} TRACK${trackCount === 1 ? '' : 'S'}</div>
@@ -382,14 +403,25 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     if (!disabled) {
       card.addEventListener('click', () => {
         pickedCup = c
+        // For championship-shaped cups (real cups + placeholder), pre-
+        // seed the bike-select's `RACING AT` readout with the first
+        // race so the player sees what they're committing to.
+        if (c.races.length > 0) {
+          picks.trackId = c.races[0] ?? picks.trackId
+        }
         showStep('sp-cup-tracks')
       })
     }
     return card
   }
 
-  /** Render the chosen cup's tracks. Dev Cup pulls from the manifest
-   *  loader pipeline; real cups list their disabled v1 tiles. */
+  /** Render the chosen cup's tracks. Behaviour splits by cup shape:
+   *
+   *  - Browse cups (Dev Cup, `races: []`): tile-per-track grid; click
+   *    a tile to lock in a single one-off race against it.
+   *  - Championship cups (placeholder cup + ship cups when they
+   *    unlock): inert preview tiles showing the lineup in order, plus
+   *    a single START CUP CTA at the bottom that commits the cup. */
   function renderCupTrackCards(host: HTMLElement): void {
     host.innerHTML = ''
     if (!pickedCup) return
@@ -408,10 +440,34 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       }
       return
     }
-    const cupId = pickedCup.id
-    for (const t of V1_TRACKS.filter((v) => v.cup === cupId)) {
-      host.appendChild(buildV1TrackCard(t))
+    // Championship preview path. Render each race in lineup order as
+    // an inert preview tile so the player can scan the full bill
+    // before committing.
+    for (let i = 0; i < pickedCup.races.length; i++) {
+      const id = pickedCup.races[i] ?? ''
+      host.appendChild(buildChampionshipPreviewTile(i + 1, id))
     }
+  }
+
+  /** One stop in the cup-lineup preview. Inert by design — the cup
+   *  commits as a single unit via the START CUP CTA below the grid,
+   *  not by clicking individual races. */
+  function buildChampionshipPreviewTile(raceNumber: number, trackId: string): HTMLElement {
+    const card = document.createElement('div')
+    card.className = 'bc-card'
+    card.style.setProperty('--accent', pickedCup?.accent ?? '#88aabb')
+    const v1 = V1_TRACKS.find((t) => t.id === trackId)
+    const devEntry = devCupTracks.find((t) => t.id === trackId)
+    const name = v1?.name ?? devEntry?.name ?? trackId
+    const tagline = v1?.location ?? devEntry?.tagline ?? 'Track tile pending its catalogue entry.'
+    const setPiece = v1?.setPiece ?? ''
+    card.innerHTML = `
+      <div class="label">RACE ${raceNumber}</div>
+      <div class="name">${escapeHtml(name).toUpperCase()}</div>
+      <div class="tag">${escapeHtml(tagline)}</div>
+      ${setPiece ? `<div class="tag" style="opacity: 0.75; margin-top: -4px;">${escapeHtml(setPiece)}</div>` : ''}
+    `
+    return card
   }
 
   function buildDevTrackCard(t: DevTrackEntry): HTMLElement {
@@ -466,10 +522,17 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         ${best ? `<div class="record">BEST LAP &middot; ${best}</div>` : ''}
       `
       // Clicking a bike commits the loadout and launches the race
-      // immediately — no separate "lights out" confirm button.
+      // immediately — no separate "lights out" confirm button. In
+      // cup mode the same click commits the whole championship via
+      // `commitSpCup`, which seeds cup-progress + stamps `?cup=` on
+      // the race URL.
       card.addEventListener('click', () => {
         picks.bikeId = b.id
-        commitSpRaceRef?.()
+        if (currentMode === 'cup' && (pickedCup?.races.length ?? 0) > 0) {
+          commitSpCupRef?.()
+        } else {
+          commitSpRaceRef?.()
+        }
       })
       host.appendChild(card)
     }
@@ -513,8 +576,20 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     } else if (step === 'sp-cup-tracks') {
       const host = screens['sp-cup-tracks']?.querySelector<HTMLElement>('#sp-cup-track-cards')
       const cupReadout = screens['sp-cup-tracks']?.querySelector<HTMLElement>('#sp-cup-readout')
+      const startBtn = screens['sp-cup-tracks']?.querySelector<HTMLButtonElement>('#sp-cup-start')
+      const subEl = screens['sp-cup-tracks']?.querySelector<HTMLElement>('#sp-cup-tracks-sub')
       if (host) renderCupTrackCards(host)
       if (cupReadout) cupReadout.textContent = (pickedCup?.name ?? '').toUpperCase()
+      // Championship-shaped cups (placeholder + future ship cups) get a
+      // single START CUP CTA; the browse Dev Cup keeps its
+      // tile-as-launcher behaviour and hides the CTA.
+      const isChampionship = (pickedCup?.races.length ?? 0) > 0
+      if (startBtn) startBtn.style.display = isChampionship ? 'inline-block' : 'none'
+      if (subEl) {
+        subEl.textContent = isChampionship
+          ? `${pickedCup?.races.length ?? 0}-RACE CHAMPIONSHIP · LOCK IN A BIKE NEXT`
+          : 'PICK A VENUE FROM THE CUP YOU SELECTED'
+      }
     }
   }
 
@@ -581,6 +656,36 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       finish(url.toString())
     }
     commitSpRaceRef = commitSpRace
+
+    /** Lock in the chosen cup and launch its first race. Seeds the
+     *  cup-progress store with the full race lineup so the post-race
+     *  NEXT button can read it back across the page reload. The URL
+     *  carries `?cup=<cupId>` alongside the usual race params; the
+     *  game-loop branches its finish-screen handling on that param. */
+    function commitSpCup(): void {
+      if (!pickedCup || pickedCup.races.length === 0) {
+        // Defensive — cup-mode commits go through the START CUP
+        // button, which is only rendered for championship-shaped cups.
+        // Fall back to the single-race path so we don't dead-end the
+        // player if state got tangled.
+        commitSpRace()
+        return
+      }
+      startCup({
+        cupId: pickedCup.id,
+        bikeId: picks.bikeId,
+        races: pickedCup.races,
+      })
+      const firstTrack = pickedCup.races[0] ?? picks.trackId
+      const url = new URL(window.location.href)
+      url.search = ''
+      url.searchParams.set('race', '1')
+      url.searchParams.set('cup', pickedCup.id)
+      url.searchParams.set('track', firstTrack)
+      url.searchParams.set('bike', picks.bikeId)
+      finish(url.toString())
+    }
+    commitSpCupRef = commitSpCup
 
     function buildTitle(): HTMLElement {
       const el = document.createElement('section')
@@ -744,7 +849,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     }
 
     /** Track list for the chosen cup. Same shell as race-mode's track
-     *  select; data differs per `pickedCup`. */
+     *  select; data + footer-CTA differ per `pickedCup`. */
     function buildSpCupTracks(): HTMLElement {
       const el = document.createElement('section')
       el.className = 'bc-screen'
@@ -753,7 +858,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           <div class="num">03</div>
           <div>
             <div class="title">CUP LINE-UP</div>
-            <div class="sub">PICK A VENUE FROM THE CUP YOU SELECTED</div>
+            <div class="sub" id="sp-cup-tracks-sub">PICK A VENUE FROM THE CUP YOU SELECTED</div>
           </div>
           <div class="meta">
             <div class="sub">CUP</div>
@@ -763,11 +868,13 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         <div class="bc-cards cols-3" id="sp-cup-track-cards"></div>
         <div class="bc-actions">
           <div class="left"><button class="bc-link" id="sp-cup-tracks-back" type="button">&larr; CUP</button></div>
+          <div class="right"><button class="bc-btn primary" id="sp-cup-start" type="button" style="display:none;">START CUP &rarr;</button></div>
         </div>
       `
       const host = el.querySelector<HTMLElement>('#sp-cup-track-cards')
       if (host) renderCupTrackCards(host)
       el.querySelector('#sp-cup-tracks-back')?.addEventListener('click', () => showStep('sp-cup'))
+      el.querySelector('#sp-cup-start')?.addEventListener('click', () => showStep('sp-bike'))
       return el
     }
 
@@ -977,7 +1084,11 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           showStep('sp-bike')
           e.preventDefault()
         } else if (currentStep === 'sp-bike') {
-          commitSpRace()
+          if (currentMode === 'cup' && (pickedCup?.races.length ?? 0) > 0) {
+            commitSpCup()
+          } else {
+            commitSpRace()
+          }
           e.preventDefault()
         }
       } else if (e.code === 'Escape') {

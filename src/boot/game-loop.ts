@@ -20,6 +20,15 @@ import { query } from 'bitecs'
 import * as THREE from 'three'
 import type { PlayerSnapshot, RaceSnapshot } from '@/debug'
 import type { AudioEngine } from '@/engine/audio/audio'
+import {
+  type CupProgress,
+  clearCupProgress,
+  getCupProgressFor,
+  nextCupTrackId,
+  pointsForPosition,
+  recordCupRaceFinish,
+  totalCupPoints,
+} from '@/engine/cup-progress'
 import { formatLap } from '@/engine/garage'
 import { type Intent, inputSourceLabel, readPlayerIntent } from '@/engine/input'
 import { tickCameraLook } from '@/engine/input/camera-look'
@@ -35,15 +44,14 @@ import {
   playerSettings,
 } from '@/engine/player-settings'
 import { createAntiGravHud } from '@/engine/render/anti-grav-hud'
-import { createTutorialHud } from '@/engine/render/tutorial-hud'
-import { createTutorialDirector } from '@/engine/tutorial/tutorial-director'
-import { DEFAULT_TUTORIAL_SCRIPT } from '@/engine/tutorial/tutorial-script'
 import type { ChaseCamera } from '@/engine/render/camera'
+import { showCupResultsOverlay } from '@/engine/render/cup-results-screen'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
 import type { RaceHud } from '@/engine/render/race-hud'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
+import { createTutorialHud } from '@/engine/render/tutorial-hud'
 import { type BikeImpact, updateUnderwaterFog } from '@/engine/render/water'
 import { createWavePumpHud } from '@/engine/render/wave-pump-hud'
 import { serializeReplay } from '@/engine/replay/format'
@@ -52,6 +60,8 @@ import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { vecHorizontalLength } from '@/engine/sim/physics/vec'
 import type { WaveFieldState } from '@/engine/sim/water/wave-field'
+import { createTutorialDirector } from '@/engine/tutorial/tutorial-director'
+import { DEFAULT_TUTORIAL_SCRIPT } from '@/engine/tutorial/tutorial-script'
 import { createWavePumpObserver } from '@/engine/wave-pump-observer'
 import type { AssetManifest } from '@/game/assets/manifest'
 import type { BikeVariant } from '@/game/bikes/variants'
@@ -146,6 +156,10 @@ export interface GameLoopOpts {
   /** Multiplayer wiring. */
   multiplayer: MultiplayerHandle
   roomId: string | null
+  /** Cup id from `?cup=<id>` — non-null when the race is part of a
+   *  championship. The live cup-progress state lives in sessionStorage
+   *  (`cup-progress.ts`); this id is just the lookup key. */
+  cupId: string | null
   /** Replay recorder — null in replay playback mode. */
   recorder: ReplayRecorder | null
   recorderStart: number
@@ -205,6 +219,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     playerVariant,
     multiplayer,
     roomId,
+    cupId,
     recorder,
     recorderStart,
     lapState,
@@ -684,6 +699,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
             manifest,
             playerVariant,
             roomId,
+            cupId,
             recorder,
             bestLapThisRace: lapState.bestLapThisRace,
             bestLapAllTime: lapState.bestLapAllTime,
@@ -708,6 +724,7 @@ interface FinishOpts {
   manifest: AssetManifest
   playerVariant: BikeVariant
   roomId: string | null
+  cupId: string | null
   recorder: ReplayRecorder | null
   bestLapThisRace: number | null
   bestLapAllTime: number | null
@@ -724,10 +741,29 @@ function showFinishScreen(opts: FinishOpts): void {
     manifest,
     playerVariant,
     roomId,
+    cupId,
     recorder,
     bestLapThisRace,
     bestLapAllTime,
   } = opts
+
+  // Cup-mode book-keeping. Pull the live cup-progress (if any), record
+  // this race's finish position into it, and re-read so the post-finish
+  // NEXT/EXIT routing knows whether more races remain.
+  const cup = cupId !== null ? getCupProgressFor(cupId) : null
+  let cupAfter = cup
+  if (cup && cupId !== null) {
+    cupAfter =
+      recordCupRaceFinish({
+        cupId,
+        trackId,
+        position: meStandingPosition,
+        totalRacers: standings.length,
+        raceTime: rs.raceTime,
+      }) ?? cup
+  }
+  const isLastCupRace = cupAfter !== null && nextCupTrackId(cupAfter) === null
+  const isCupMode = cupAfter !== null
   hud.finishEl?.classList.add('show')
   const finishRibbon = document.getElementById('finish-ribbon')
   if (hud.finishPos && meStandingPosition !== null) {
@@ -749,6 +785,14 @@ function showFinishScreen(opts: FinishOpts): void {
       parts.push(`<span class="best">${formatLap(bestLapAllTime)} (PB)</span>`)
     }
     hud.finishBest.innerHTML = parts.length ? parts.join(' · ') : '—'
+  }
+  // Cup mode — append a compact RACE N/M · XX PTS line to the finish
+  // stat block so the player sees their championship progress without
+  // having to wait for the cup-results overlay at the end.
+  if (isCupMode && cupAfter) {
+    appendCupStatRow(cupAfter)
+  } else {
+    removeCupStatRow()
   }
   // Stash a last-race summary for the menu's title-screen recap card.
   // Stored in sessionStorage so it survives the navigation to `?back=1`
@@ -815,25 +859,73 @@ function showFinishScreen(opts: FinishOpts): void {
     }
   }
 
-  // Action buttons: NEXT (default), RETRY, EXIT.
+  // Action buttons: NEXT (default), RETRY, EXIT. Cup mode rewrites
+  // NEXT to advance through the championship; the last race in a cup
+  // pops the cup-results overlay instead of navigating.
   const nextBtn = document.getElementById('finish-next') as HTMLButtonElement | null
   const retryBtn = document.getElementById('finish-retry') as HTMLButtonElement | null
   const exitBtn = document.getElementById('finish-exit') as HTMLButtonElement | null
   if (nextBtn) {
-    nextBtn.onclick = () => {
-      const tracksList = buildTrackList(manifest.tracks)
-      const nextId = nextTrackId(tracksList, trackId)
-      window.location.assign(buildRaceUrl({ roomId, trackId: nextId, bikeId: playerVariant.id }))
+    if (isCupMode && cupAfter !== null && !isLastCupRace) {
+      // Mid-cup — advance to the next track in the lineup. Carry the
+      // `?cup=<id>` param across so the next race also knows it's
+      // part of the championship.
+      const nextId = nextCupTrackId(cupAfter)
+      const completed = Object.keys(cupAfter.results).length
+      const total = cupAfter.races.length
+      nextBtn.textContent = `NEXT RACE (${completed}/${total})`
+      nextBtn.onclick = () => {
+        if (!nextId) return
+        window.location.assign(
+          buildRaceUrl({ roomId, trackId: nextId, bikeId: playerVariant.id, cupId }),
+        )
+      }
+    } else if (isCupMode && cupAfter !== null && isLastCupRace) {
+      // Last race — open the cup-results overlay over the finish
+      // screen, then leave it to its BACK TO MENU button to clear
+      // cup-progress and navigate.
+      nextBtn.textContent = 'CUP RESULTS →'
+      nextBtn.onclick = () => {
+        showCupResultsOverlay({
+          progress: cupAfter,
+          onBackToMenu: () => {
+            clearCupProgress()
+            const url = new URL(window.location.href)
+            url.search = ''
+            url.searchParams.set('back', '1')
+            window.location.assign(url.toString())
+          },
+        })
+      }
+    } else {
+      // Single-race mode — original behaviour: rotate to the next
+      // catalogue track.
+      nextBtn.textContent = 'NEXT RACE'
+      nextBtn.onclick = () => {
+        const tracksList = buildTrackList(manifest.tracks)
+        const nextId = nextTrackId(tracksList, trackId)
+        window.location.assign(buildRaceUrl({ roomId, trackId: nextId, bikeId: playerVariant.id }))
+      }
     }
     nextBtn.focus({ preventScroll: true })
   }
   if (retryBtn) {
     retryBtn.onclick = () => {
-      window.location.assign(buildRaceUrl({ roomId, trackId, bikeId: playerVariant.id }))
+      // RETRY in cup mode restarts the current race without dropping
+      // cup-progress — the points table preserves the finish that's
+      // already been recorded; a better second attempt will overwrite
+      // it (see recordCupRaceFinish's by-trackId match).
+      window.location.assign(
+        buildRaceUrl({ roomId, trackId, bikeId: playerVariant.id, cupId: cupId ?? null }),
+      )
     }
   }
   if (exitBtn) {
     exitBtn.onclick = () => {
+      // Exit always abandons any in-progress cup. The sessionStorage
+      // key is cleared so the title screen doesn't surface a stale
+      // "resume cup" affordance later.
+      clearCupProgress()
       const url = new URL(window.location.href)
       url.search = ''
       url.searchParams.set('back', '1')
@@ -842,12 +934,45 @@ function showFinishScreen(opts: FinishOpts): void {
   }
 }
 
-function buildRaceUrl(args: { roomId: string | null; trackId: string; bikeId: string }): string {
+/** Inject (or replace) a compact "RACE N/M · XX PTS" row into the
+ *  finish overlay's stat block so the player sees their cup standing
+ *  alongside POSITION / RACE TIME / BEST LAP. The row is removed in
+ *  single-race mode by the sibling `removeCupStatRow`. */
+function appendCupStatRow(progress: CupProgress): void {
+  const stat = document.querySelector<HTMLElement>('#finish .stat')
+  if (!stat) return
+  let row = stat.querySelector<HTMLElement>('.row[data-cup-row="1"]')
+  if (!row) {
+    row = document.createElement('div')
+    row.className = 'row'
+    row.dataset.cupRow = '1'
+    stat.appendChild(row)
+  }
+  const completedRaces = Object.keys(progress.results).length
+  const totalRaces = progress.races.length
+  const total = totalCupPoints(progress)
+  const last = progress.results[progress.races[completedRaces - 1] ?? '']
+  const lastPoints = pointsForPosition(last?.position ?? null)
+  row.innerHTML = `<span class="lbl">CUP STANDING</span><b>RACE ${completedRaces}/${totalRaces} · ${lastPoints} PTS THIS RACE · ${total} TOTAL</b>`
+}
+
+function removeCupStatRow(): void {
+  const row = document.querySelector<HTMLElement>('#finish .stat .row[data-cup-row="1"]')
+  row?.remove()
+}
+
+function buildRaceUrl(args: {
+  roomId: string | null
+  trackId: string
+  bikeId: string
+  cupId?: string | null
+}): string {
   const url = new URL(window.location.href)
   url.search = ''
   if (args.roomId) url.searchParams.set('room', args.roomId)
   url.searchParams.set('race', '1')
   url.searchParams.set('track', args.trackId)
   url.searchParams.set('bike', args.bikeId)
+  if (args.cupId) url.searchParams.set('cup', args.cupId)
   return url.toString()
 }
