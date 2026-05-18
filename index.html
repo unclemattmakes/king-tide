@@ -1373,6 +1373,262 @@
         color: var(--bc-ink-faint);
       }
 
+      /* ───────────── Disabled-state convention (Step 0) ─────────────
+         Single grayed look reused by every gated card across the app.
+         Cards/tiles opt in by adding `.bc-disabled` and a `data-gate`
+         attribute carrying the hover blurb. Hover surfaces the gate
+         text without inventing a per-screen "not ready yet" affordance.
+         Placed after the base card styles so it wins by source order. */
+      .bc-disabled {
+        opacity: 0.42;
+        cursor: not-allowed;
+        filter: grayscale(0.55);
+        position: relative;
+      }
+      .bc-disabled:hover, .bc-disabled:focus-visible {
+        transform: none;
+        background: rgba(10, 20, 36, 0.55);
+        border-color: var(--bc-line);
+      }
+      .bc-disabled::before {
+        background: var(--bc-line-strong);
+        box-shadow: none;
+      }
+      .bc-disabled .bc-gate {
+        display: block;
+        margin-top: 10px;
+        padding: 5px 8px;
+        font-family: var(--bc-font-mono);
+        font-size: 10px; letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--bc-yellow);
+        background: rgba(255, 213, 74, 0.06);
+        border-left: 2px solid rgba(255, 213, 74, 0.6);
+      }
+      .bc-disabled .bc-gate::before {
+        content: '◊ ';
+        opacity: 0.7;
+      }
+
+      /* Compact "Coming soon" chip used on the bike-select grid. */
+      .bc-soon {
+        align-self: flex-start;
+        font-family: var(--bc-font-display);
+        font-size: 11px; letter-spacing: 0.24em;
+        padding: 3px 9px;
+        background: rgba(255, 213, 74, 0.14);
+        color: var(--bc-yellow);
+        border: 1px solid rgba(255, 213, 74, 0.4);
+        margin-bottom: 8px;
+      }
+
+      /* Dev-only badge for the Dev Cup tile + Dev-track section. Loud
+         on purpose so devs don't accidentally read the playtest list
+         as the real ship cup. */
+      .bc-dev-badge {
+        align-self: flex-start;
+        font-family: var(--bc-font-display);
+        font-size: 11px; letter-spacing: 0.26em;
+        padding: 3px 9px;
+        background: #a78bff;
+        color: var(--bc-navy);
+        margin-bottom: 6px;
+      }
+
+      /* ───────────── HUD scaffolding slots (Step 0) ─────────────
+         Reserved DOM for systems that don't exist yet. Each slot is
+         `hidden` until its owning system flips it on; the system's
+         definition-of-done includes "this widget renders in-race".
+         Keeping the slots in markup means no system has to invent its
+         own positioning later — they all share the same vocabulary. */
+      #hud-scaffold {
+        position: fixed; inset: 0; z-index: 18;
+        pointer-events: none; user-select: none;
+      }
+      body.menu-active #hud-scaffold { display: none; }
+      .hud-slot { position: absolute; pointer-events: none; }
+      .hud-slot[hidden] { display: none; }
+      /* Wave-pump indicator — center-bottom flash zone. */
+      #hud-wave-pump {
+        bottom: 22%; left: 50%; transform: translateX(-50%);
+        min-width: 220px; min-height: 12px;
+      }
+      /* Anti-grav entry indicator — left side under the timer. */
+      #hud-anti-grav {
+        top: 116px; left: 14px;
+        min-width: 180px; min-height: 56px;
+      }
+      /* Wave-line shimmer overlay anchor — full-canvas; actual paint
+         lives inside the WebGPU layer once the system lands. */
+      #hud-wave-line { inset: 0; }
+      /* Cup-points banner — under race-timer when racing in a cup. */
+      #hud-cup-points {
+        top: 76px; left: 50%; transform: translateX(-50%);
+        min-width: 320px; min-height: 36px;
+      }
+      /* 8-bike position list — right side, paired with the minimap. */
+      #hud-positions {
+        top: 14px; right: 14px;
+        min-width: 180px; min-height: 240px;
+      }
+
+      /* ───────────── Settings overlay (Step 0 skeleton) ─────────────
+         Full category set present from day one — Audio / Video /
+         Controls / Gameplay. Most individual controls render disabled
+         until their owning system lands, per the work-breakdown
+         definition-of-done convention.
+
+         Reused for both pause-menu → SETTINGS and the main-menu route.
+         Shares the broadcast palette with the rest of the chrome. */
+      #settings-menu {
+        position: fixed; inset: 0; z-index: 66;
+        display: none; align-items: stretch; justify-content: center;
+        background: radial-gradient(ellipse at 50% 35%, rgba(5,10,20,0.6) 0%, rgba(5,10,20,0.92) 100%);
+        backdrop-filter: blur(6px);
+        color: var(--bc-ink);
+        font-family: var(--bc-font-sans);
+        animation: bc-fade var(--t-base) var(--ease-out);
+      }
+      #settings-menu.show { display: flex; }
+      #settings-menu .sm-shell {
+        margin: auto;
+        width: min(840px, 96vw);
+        max-height: 92vh;
+        display: grid;
+        grid-template-columns: 200px 1fr;
+        background: linear-gradient(180deg, rgba(10, 20, 36, 0.95), rgba(5, 10, 20, 0.95));
+        border: 1px solid var(--bc-line);
+        border-left: 4px solid var(--bc-cyan);
+        animation: bc-rise var(--t-slow) var(--ease-out);
+        overflow: hidden;
+      }
+      #settings-menu .sm-tabs {
+        display: flex; flex-direction: column;
+        background: rgba(0, 0, 0, 0.25);
+        border-right: 1px solid var(--bc-line);
+        padding: 28px 0 16px;
+      }
+      #settings-menu .sm-tab {
+        background: none; border: 0;
+        text-align: left;
+        font-family: var(--bc-font-display);
+        font-size: 15px; letter-spacing: 0.22em;
+        color: var(--bc-ink-dim);
+        padding: 12px 24px;
+        cursor: pointer;
+        position: relative;
+        border-left: 3px solid transparent;
+        transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+      }
+      #settings-menu .sm-tab:hover { color: var(--bc-ink); background: rgba(255,255,255,0.04); }
+      #settings-menu .sm-tab.active {
+        color: var(--bc-cyan);
+        border-left-color: var(--bc-cyan);
+        background: rgba(77, 214, 255, 0.08);
+      }
+      #settings-menu .sm-tab .count {
+        font-family: var(--bc-font-mono);
+        font-size: 9px; letter-spacing: 0.16em;
+        color: var(--bc-ink-faint);
+        margin-left: 6px;
+      }
+      #settings-menu .sm-pane {
+        padding: 28px 32px 24px;
+        overflow: auto;
+      }
+      #settings-menu .sm-pane h2 {
+        margin: 0 0 6px;
+        font-family: var(--bc-font-display);
+        font-size: 22px; letter-spacing: 0.18em;
+        color: var(--bc-ink);
+      }
+      #settings-menu .sm-pane .sm-sub {
+        font: 11px var(--bc-font-mono);
+        letter-spacing: 0.18em;
+        color: var(--bc-ink-faint);
+        margin-bottom: 18px;
+      }
+      #settings-menu .sm-row {
+        display: grid; grid-template-columns: 200px 1fr;
+        gap: 14px; align-items: center;
+        padding: 10px 0;
+        border-top: 1px solid var(--bc-line);
+        font-size: 13px;
+      }
+      #settings-menu .sm-row:first-of-type { border-top: 0; }
+      #settings-menu .sm-row .sm-lbl {
+        font-family: var(--bc-font-display);
+        font-size: 12px; letter-spacing: 0.18em;
+        color: var(--bc-ink-dim);
+      }
+      #settings-menu .sm-row.disabled .sm-lbl { color: var(--bc-ink-faint); }
+      #settings-menu .sm-ctrl { display: flex; align-items: center; gap: 10px; }
+      /* Bump specificity to (1,3,1) so these rules don't read as
+         descending-specificity against the earlier `#water-debug
+         .row.toggle input[…]` (1,3,1) rules. */
+      #settings-menu .sm-row .sm-ctrl input[type="range"] {
+        flex: 1 1 auto; accent-color: var(--bc-cyan);
+      }
+      #settings-menu .sm-row .sm-ctrl input[type="checkbox"] {
+        accent-color: var(--bc-cyan);
+        transform: scale(1.2);
+      }
+      #settings-menu .sm-ctrl select, #settings-menu .sm-ctrl button.sm-btn {
+        background: rgba(5,10,20,0.55);
+        border: 1px solid var(--bc-line);
+        color: var(--bc-ink);
+        font: 12px var(--bc-font-mono);
+        letter-spacing: 0.12em;
+        padding: 7px 12px;
+        cursor: pointer;
+      }
+      #settings-menu .sm-ctrl input:disabled, #settings-menu .sm-ctrl select:disabled,
+      #settings-menu .sm-ctrl button.sm-btn:disabled {
+        opacity: 0.45; cursor: not-allowed;
+      }
+      #settings-menu .sm-ctrl .sm-gate {
+        font: 10px var(--bc-font-mono);
+        letter-spacing: 0.14em;
+        color: var(--bc-yellow);
+        opacity: 0.8;
+      }
+      #settings-menu .sm-actions {
+        margin-top: 22px; padding-top: 14px;
+        border-top: 1px solid var(--bc-line);
+        display: flex; gap: 10px; justify-content: flex-end;
+      }
+      #settings-menu .sm-actions button {
+        background: rgba(77, 214, 255, 0.14); color: var(--bc-cyan);
+        border: 1px solid rgba(77, 214, 255, 0.45);
+        font: 600 12px var(--bc-font-mono);
+        letter-spacing: 0.14em;
+        padding: 8px 16px; cursor: pointer;
+      }
+      #settings-menu .sm-actions button.secondary {
+        background: rgba(255,255,255,0.05);
+        color: var(--bc-ink-dim); border-color: var(--bc-line);
+      }
+      @media (max-width: 720px) {
+        #settings-menu .sm-shell {
+          grid-template-columns: 1fr;
+          max-height: 100vh; height: 100vh;
+        }
+        #settings-menu .sm-tabs {
+          flex-direction: row;
+          overflow-x: auto; padding: 8px;
+          border-right: 0; border-bottom: 1px solid var(--bc-line);
+        }
+        #settings-menu .sm-tab {
+          padding: 10px 14px; border-left: 0;
+          border-bottom: 3px solid transparent;
+          flex: 0 0 auto;
+        }
+        #settings-menu .sm-tab.active {
+          border-bottom-color: var(--bc-cyan); border-left: 0;
+        }
+        #settings-menu .sm-row { grid-template-columns: 1fr; gap: 6px; }
+      }
+
       /* While any full-screen broadcast surface is up, hide in-race HUD
          + dev chrome so the screen stays a clean broadcast frame. Placed at
          end of the cascade so the (1,1,1) specificity hide always wins over
@@ -1385,6 +1641,7 @@
       body.menu-active #race-timer,
       body.menu-active #race-gap,
       body.menu-active #race-minimap,
+      body.menu-active #hud-scaffold,
       body.menu-active #finish { display: none; }
     </style>
   </head>
@@ -1428,6 +1685,18 @@
         </div>
         <div class="hint">[ENTER] next race · [R] retry · [ESC] menu</div>
       </div>
+    </div>
+    <!-- HUD scaffolding slots — reserved DOM for systems that don't exist
+         yet. Each slot stays `hidden` until its owning system flips it on
+         (Step 0 definition-of-done: a slot becomes visible once and only
+         once its system passes its acceptance criteria). Hidden in
+         menu-active state so the chrome stays clean. -->
+    <div id="hud-scaffold" aria-hidden="true">
+      <div id="hud-wave-pump" class="hud-slot" data-system="wave-pump" hidden></div>
+      <div id="hud-anti-grav" class="hud-slot" data-system="anti-grav" hidden></div>
+      <div id="hud-wave-line" class="hud-slot" data-system="wave-line" hidden></div>
+      <div id="hud-cup-points" class="hud-slot" data-system="cup-points" hidden></div>
+      <div id="hud-positions" class="hud-slot" data-system="positions" hidden></div>
     </div>
     <button type="button" id="garage-toggle" style="display:none;">GARAGE<span id="garage-best"></span></button>
     <button type="button" id="devsettings-toggle" title="Tune controller + camera sensitivity">DEV SETTINGS</button>
@@ -1507,6 +1776,20 @@
           <button type="button" class="action secondary" id="ds-reset">RESET</button>
           <button type="button" class="action" id="ds-close">DONE</button>
         </div>
+      </div>
+    </div>
+    <!-- Real Settings menu (Step 0 skeleton). All four categories
+         present from day one; individual controls flip from disabled →
+         active as their systems land (see docs/v1-work-breakdown.md
+         "definition of done"). The tabs + rows are populated by
+         src/engine/menus/settings-overlay.ts on first open. -->
+    <div id="settings-menu" aria-hidden="true">
+      <div class="sm-shell" role="dialog" aria-modal="true" aria-labelledby="sm-title">
+        <nav class="sm-tabs" id="sm-tabs"></nav>
+        <section class="sm-pane" id="sm-pane">
+          <h2 id="sm-title">SETTINGS</h2>
+          <div class="sm-sub">Skeleton populated on open.</div>
+        </section>
       </div>
     </div>
     <!-- Cold-boot menu — title → mode → track → bike (SP) or room entry → lobby (MP). -->
