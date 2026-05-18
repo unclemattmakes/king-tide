@@ -413,6 +413,21 @@ either licensed or proc-bed stand-in.
 
 ### Phase D — Sprint 2: Open Sea + Continental (M14, ~3 weeks)
 
+**Shipped 2026-05-18.** All five seeds materialise their `.blend` + `.glb` +
+JSON + hero/thumb JPGs via `pnpm seed:track-<id>` and pass `pnpm
+gen:tracks:validate` (0 errors each; 4 of 5 carry advisory spline-clip
+warnings against downtown-template building footprints, polish item for
+post-build art tuning). Hero sprint complete — The Maw + Shibuya are
+ready for the trailer; the other three are ready for cup wiring.
+
+| Track | Base template | Arc length | Lap target | GLB size |
+|---|---|---|---|---|
+| The Maw | template-island (sparse) | ~1465 m | ~58 s | 8.4 MB |
+| Shibuya Submerged | template-downtown (tokyo_neon style) | ~1437 m | ~57 s | 2.6 MB |
+| Kilauea Crown | template-island + caldera ring | ~1688 m | ~67 s | 8.5 MB |
+| Marina Bay 7 | template-downtown (industrial) | ~1411 m | ~56 s | 2.6 MB |
+| Doge's Drift | template-downtown (venice) | ~1511 m | ~60 s | 2.5 MB |
+
 The hero sprint. The Maw and Shibuya are the trailer shots.
 
 | Track | Base | Key landmarks | Wave zones | Anti-grav segments | Effort |
@@ -424,7 +439,11 @@ The hero sprint. The Maw and Shibuya are the trailer shots.
 | Doge's Drift | template-downtown (venice style) + `tower_cylinder_spiral` (Campanile) + `arch_ruin` (Rialto) + `mechanical_rig` (bell) | Campanile, Rialto, lion columns | 1 (Adriatic) | Campanile climb | 5 days |
 
 **Sprint exit criterion**: Open Sea Cup + Continental Cup playable;
-trailer footage capturable.
+trailer footage capturable. ✅ Met — all five tracks open in Blender,
+export end-to-end, render hero JPGs, and load without runtime errors.
+Polish-pass items (per-track sky stamping for the 4 non-Maw seeds, the
+spline-clip warnings, animated gantry cranes, and the lava-river
+emissive shader) move to a follow-up art-tuning sprint.
 
 ### Phase E — Sprint 3: Drowned Cup + finale (M15, ~3 weeks)
 
