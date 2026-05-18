@@ -167,6 +167,17 @@ class AuthoringKind:
     OASIS_CENTER = "oasis_center"
     MESA = "mesa"
 
+    # Hero camera used by the headless track-thumbnail render — a
+    # Camera object named ``camera_hero`` framed on the track's set-
+    # piece. Read by ``tools/blender/render_track_thumbnail.py`` and by
+    # the addon's *Render Track Hero* operator, which writes a 1280×720
+    # JPG to ``public/assets/tracks/<id>-hero.jpg`` for the loading
+    # screen + a 320×180 thumbnail tile. The runtime never sees this
+    # camera: the glTF exporter is invoked with
+    # ``export_cameras=False`` so cameras never reach the GLB, and the
+    # runtime always uses its own chase cam.
+    CAMERA_HERO = "camera_hero"
+
 
 # Convenience tuples for tests / consumers that want to iterate.
 EXPORTED_KIND_VALUES: tuple[str, ...] = tuple(

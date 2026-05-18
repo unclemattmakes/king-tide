@@ -596,6 +596,149 @@ mesh ships — useful if your authored peaks reach further than the
 default 300 m and you want the shader's haze gradient to span the
 full silhouette.
 
+### Sky preset
+
+A per-track sky / atmosphere block in `public/tracks/<id>.json` that
+the runtime applies once at boot. All fields are optional — absent
+fields fall back to the defaults baked into `sky.ts`.
+
+Knobs live in the addon's **Sky preset** sub-panel (between Horizon
+and Waves, default-closed):
+
+| Knob | Meaning | Runtime impact |
+|---|---|---|
+| `tint` | Hex colour multiplied onto the dome palette. White = no tint. | Live — biases palette warm/cool without rewriting ramps. |
+| `cloudiness` | 0..1 cloud-layer density. | Live — drives the FBM cloud mask threshold. |
+| `sunIntensity` | Multiplier on the directional sun + sun-disc. | Live — scales `DirectionalLight.intensity` and shader sun disc. |
+| `fogNear` / `fogFar` | Exponential fog distances (m). | Live — the horizon ring sits ~75 % through this range. |
+| `timeOfDay` | 0..360 s along the (frozen) day-night cycle. | Live — picks elevation + azimuth at construction; held for the race. |
+| `colorGrade` | LUT preset name from the bundled set. | Live — per-preset (tint × saturation × contrast) tweak on the dome. |
+| `bloom` | 0..2 intensity multiplier on the renderer bloom pass. | **Round-trip only** — no bloom pass is wired into the WebGPU renderer yet. The value ships through authoring + JSON and the runtime logs it; goes live when the post pipeline lands. |
+| `seaStateBeaufort` | 0..12 Beaufort wind scale. | Live — scales every base wave amplitude at boot via `beaufortToAmplitudeScale` (Beaufort 4 ≈ 1.0×, glass-calm 0 ≈ 0.15×, hurricane 12 ≈ 2.5×). Wave-zones layer on top via `heightMult`. |
+
+**Bundled `colorGrade` presets** (each is a (tint × saturation ×
+contrast) triple in `SKY_GRADE_TABLE` in
+[sky.ts](../src/engine/render/sky.ts)):
+
+| Preset | Look |
+|---|---|
+| `neutral` | No grade — identity. |
+| `miami_pastel` | Soft warm-pink lift, lower saturation; South Beach sunset. |
+| `tokyo_neon` | Cool magenta-cyan lean, punchy saturation; Shibuya night. |
+| `big_sur_golden` | Golden-hour warmth; California / The Maw mid-day. |
+| `venice_warm` | Adriatic warm-stone amber; Doge's Drift. |
+| `nyc_sunset` | Strong warm tint, high contrast; Liberty finale. |
+| `cape_town_blue` | Atlantic cool blue, desaturated haze. |
+| `kilauea_volcanic` | Ash + lava red lift, high contrast. |
+
+The preset list is mirrored in two places:
+`SKY_COLOR_GRADES` in [types.ts](../src/game/tracks/types.ts) (with
+its lookup table in [sky.ts](../src/engine/render/sky.ts)) on the
+runtime side, and `SKY_COLOR_GRADES` in
+`tools/blender/hoverbike_addon/sky_preset.py` on the addon side.
+Adding a preset means editing both — there's no auto-sync yet.
+
+**Round-trip.** The sky block is fully Blender-owned: any value the
+.blend dialled in wins over what's in the JSON on next export. The
+`load_post` handler in `handlers.py` pulls the JSON back into the
+scene props on `.blend` open, so opening a track always reflects the
+most recently saved values.
+
+### Audio palette
+
+Per-track audio is the one bucket that **lives only in the JSON** —
+music is licensed/commissioned (not procedural) and ambient beds are
+layered loops from a shared SFX bank, so there's no Blender side to
+this block. Hand-edit `public/tracks/<id>.json` (or write through the
+in-app editor when the audio sub-panel ships).
+
+Block shape:
+
+```jsonc
+{
+  "audio": {
+    "music": "south-beach-vaporwave.opus",
+    "ambient": ["gulls.opus", "surf-light.opus", "neon-hum.opus"],
+    "ambientGains": [0.4, 0.6, 0.2],
+    "music3dEffects": { "duckOnPump": 0.35 }
+  }
+}
+```
+
+Paths target `public/audio/music/` and `public/audio/ambient/`. The
+runtime loads each file lazily on track boot; **missing files (404)
+warn and fall back gracefully** — the procedural pad bed shipped at
+horizon time stays as the music fallback whenever `audio.music` is
+absent or unreachable, so a track can ship its full schema before the
+licensed assets land. `ambientGains[i]` defaults to 1.0 when omitted;
+`music3dEffects.duckOnPump` is a multiplier on the engine's base
+0.35 pump-duck depth (1.0 = unchanged).
+
+### Track hero render
+
+Every ship-quality track ships with two pieces of UI art:
+
+- A **1280×720 hero image** for the loading screen, written to
+  `public/assets/tracks/<id>-hero.jpg`.
+- A **320×180 tile thumbnail** for the track-select grid, written to
+  `public/assets/tracks/<id>-thumb.jpg`.
+
+Both are produced from a single author-controlled camera in the
+.blend — no Photoshop, no Playwright screenshots, no per-track
+scripts. The render is reproducible, fast (sub-second EEVEE renders
+typical on a modern GPU), and auto-fires on every track export so the
+UI art never drifts from the latest .blend.
+
+**Author the shot.** Park the 3D cursor where you want the hero
+camera to sit, then click **Add Camera Hero** in the *Track hero
+render* sub-panel. The addon drops a Camera object named
+`camera_hero` at the cursor (`AuthoringKind.CAMERA_HERO`) with a 50 mm
+lens, aimed at a sensible default target (`start_00`, the AI-spline
+mid-point, or the world origin if neither exists). Translate / rotate
+the camera to frame the track's set-piece exactly how you want the
+loading-screen tile to read — this is the one shot the player sees of
+this track between menu and grid, so make it postcard-worthy.
+
+**Trigger the render.** Click **Render Hero** in the same sub-panel
+to render the full 1280×720 hero + the 320×180 tile in one shot, or
+**Tile only** to refresh just the smaller image after a framing tweak.
+The render engine is forced to EEVEE for speed (Cycles is overkill
+for a loading-screen tile and would slow the export hook down by a
+factor of 20-50×). The JPGs land in `public/assets/tracks/` and
+the track's `manifest.json` entry gains a `heroUrl` field (and a
+`thumbUrl` field if the tile was rendered too) pointing at the
+public URL.
+
+**Automatic on export.** *Export Track to Game* fires the hero render
+automatically after the GLB write succeeds. If `camera_hero` is
+missing, the export warns ("no camera_hero — track exported without a
+hero image") and continues — the hero render is non-fatal so a
+mid-authoring .blend without a hero still exports successfully. To
+disable the auto-render, delete the `camera_hero` object.
+
+**Batch / CI render.** The standalone script
+[`tools/blender/render_track_thumbnail.py`](../tools/blender/render_track_thumbnail.py)
+runs the same render headlessly without going through the addon UI —
+useful for CI batch builds that need to refresh every track's hero in
+one pass:
+
+```bash
+"$BLENDER_EXE" --background tracks-src/<id>.blend \
+    --python tools/blender/render_track_thumbnail.py
+```
+
+Exits non-zero if the .blend lacks a `camera_hero` or the repo root
+can't be resolved, so a CI loop over the `tracks-src/*.blend` glob
+can gate on `$?` and fail the build if a track is missing its hero
+camera.
+
+**Runtime story.** The runtime never sees the camera — the GLB
+exporter is invoked with `export_cameras=False`, so `camera_hero`
+(and any other Camera object) is stripped before the GLB lands in
+`public/assets/tracks/`. The chase cam is procedural; the hero
+camera is an authoring-only `AuthoringKind` whose only job is to
+frame the loading-screen JPG.
+
 ### Particle emitters
 
 A unified emitter abstraction drives every authored track VFX —
@@ -879,6 +1022,38 @@ authoring convention and future passes may key off it.
 **Bikes fall straight through the loaded mesh.** This is the trimesh
 broadphase issue — see [Known limitations](#known-limitations). The
 safety floor and water surface will catch them.
+
+## CI lint
+
+The same lint that the *Lint Track* button runs in-editor also runs
+headless in CI. PRs that touch `tracks-src/`, `tools/blender/`, or
+`specs/` trigger the `asset-pipeline` workflow, which loops over every
+`tracks-src/*.blend` (skipping the asset libraries — `props-library`,
+`landmarks-library`, `calibration`) and fails the build on any ERROR.
+
+Run it locally with:
+
+```bash
+pnpm gen:tracks:validate
+```
+
+It calls `tools/blender/run-lint.mjs`, which spawns one background
+Blender per track and pipes `tools/blender/lint_track.py` against it.
+Output is one `[lint:<trackId>] ERROR|WARNING: <message>` line per
+finding. Exit code 1 if any track has at least one ERROR.
+
+Checks the CI lint covers beyond the in-editor pass:
+
+- `start_01` presence (in-editor lint only checks `start_00`).
+- `cp_NN` index contiguity by *name* (not just by `index` extra).
+- Every `kind=track` mesh has positive evaluated area.
+- Every `wave_zone_NN` empty has positive half-extents on all three
+  axes and a positive `height_mult`.
+- At least one `pickup_*` exists (warning, not error — tutorial tracks
+  may legitimately omit pickups).
+
+If a CI lint failure looks spurious, repro locally with
+`pnpm gen:tracks:validate` — same script, same exit code.
 
 ## See also
 
