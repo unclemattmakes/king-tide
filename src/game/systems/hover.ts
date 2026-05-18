@@ -54,10 +54,28 @@ function rayAlong(
   return scratchRay
 }
 
-// Slope-momentum tuning — exported for tests / debug overlays. Asymmetric
-// gain: a hard 1.0× push down a wave face, a gentle 0.5× drag up one.
+// Slope-momentum tuning — exported for tests / debug overlays. Strongly
+// asymmetric gain: a hard 1.0× push DOWN a wave face for the motocross
+// slingshot, but only a feather-light 0.15× drag going UP. The hoverbike is
+// supposed to glide up steep terrain (SF / Seattle grades, ramp faces) the
+// way a real hover platform would — the engine fights gravity, it doesn't
+// drag the chassis. Keep the asymmetry > 1 so the down/up ratio guard in
+// slope-momentum.test still holds and the downhill payoff stays distinct.
 export const SLOPE_DOWN_GAIN = 1.0
-export const SLOPE_UP_BRAKE = 0.5
+export const SLOPE_UP_BRAKE = 0.15
+
+// Upper clamp on the per-corner heightError fed into the hover spring.
+// When the bow probe looks ahead at a steep climb, localDist goes deeply
+// negative ("surface is high above my probe point"), and `heightError =
+// hoverHeight - localDist` grows unboundedly positive. At raw values
+// (say +5m) the spring would fire at >200 m/s² of upward force on a
+// single corner — an 8 G bow-kick that whip-pitches the chassis sky-
+// ward on slope approaches. Clamping to one hoverHeight worth of
+// authority caps that to ~40 m/s² (~1.6 G's per corner), which still
+// pre-pitches the chassis to climb but never launches the bike. The
+// slope-momentum path (which uses bow/stern projection differential)
+// is unaffected, so the climb signal still reaches the engine.
+export const MAX_BOW_LIFT_ERROR = 1.2 // metres, ~= one hoverHeight
 
 /**
  * Marble-on-incline acceleration along the bike's horizontal forward axis.
@@ -681,7 +699,20 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
             const aBuoy = Math.min(submersion * BUOYANCY_PER_M, BUOYANCY_CAP)
             aUp = GRAVITY + aBuoy - dampV * stats.hoverDamp
           } else {
-            const heightError = stats.hoverHeight - localDist
+            // heightError is unbounded on the positive side: a bow probe
+            // looking ahead at a steep slope can read +5m or more, which
+            // makes the spring fire at ~6-8 G's of corner lift and whip-
+            // pitches the chassis into the sky on slope approaches. Clamp
+            // it to one hoverHeight worth of authority. Past the cap we
+            // still register "surface is above me" via the slope-momentum
+            // path (which uses bow/stern projection differential, NOT this
+            // height-error), so the bike still pitches up to climb — it
+            // just doesn't get launched. Lower clamp stays loose; the
+            // local-grounded gate above already culls corners with
+            // localDist > hoverHeight*1.6, so the spring never needs to
+            // push DOWN by more than ~0.7m of error.
+            const rawHeightError = stats.hoverHeight - localDist
+            const heightError = Math.min(rawHeightError, MAX_BOW_LIFT_ERROR)
             const springMul = probe.isWater && p.longitudinal ? WATER_LONGITUDINAL_SPRING_MUL : 1.0
             aUp = GRAVITY + heightError * stats.hoverSpring * springMul - dampV * stats.hoverDamp
           }
@@ -958,11 +989,12 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     //
     // Asymmetric coupling — motocross feel: a strong downhill push (1.0×
     // gravity) makes hitting a downslope read as the slingshot it is; the
-    // uphill brake stays gentle (0.5×) so a long climb doesn't grind the
-    // bike to a crawl. On a 16° downramp that's +6.9 m/s² of forward push
-    // (enough to easily exceed topSpeed with momentum), while climbing the
-    // same slope costs only -3.4 m/s² of drag, which the bike's 19 m/s²
-    // thrust eats through comfortably.
+    // uphill brake is just a whisper (0.15×) so the bike glides up SF-grade
+    // streets and ramp faces instead of grinding to a crawl. On a 16°
+    // downramp that's +6.9 m/s² of forward push (enough to easily exceed
+    // topSpeed with momentum), while climbing the same slope costs only
+    // -1.03 m/s² of drag — a featherweight tax the 19 m/s² thrust eats
+    // through without slowing the bike below ~26 m/s at equilibrium.
     if (planeFwdLen > 0.01) {
       // Slope momentum reads the *surface* contour, not chassis pitch —
       // so the rider can't farm free downhill thrust by pitching the
@@ -979,6 +1011,85 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         },
         true,
       )
+
+      // Climb assist — arcade compensator for the gravity-along-slope
+      // tax. Without help, a marble (or a physically honest hoverbike)
+      // climbing a θ slope must produce m·g·tan(θ) of net forward thrust
+      // just to maintain speed; on a 25° hill that's 11.7 m/s², which
+      // saturates the bike's 19 m/s² accel curve at a steady-state
+      // speed of only ~12 m/s. JetMoto / Wave-Race-style feel wants
+      // climbs to read closer to flat-ground speed. Compensate
+      // CLIMB_ASSIST_FRAC of the gravity tax as extra forward thrust;
+      // the player still feels the climb (slower than flat, faster than
+      // a marble), and the rest of the speed-falloff curve still
+      // governs top-speed at any grade.
+      //
+      // Fires only on positive slopes (uphills). Downhill keeps its
+      // full motocross slingshot via SLOPE_DOWN_GAIN, unchanged.
+      // Skipped on water — wave-pump already handles wave-crest dynamics
+      // and stacking climb-assist on top double-counts the rider's pump.
+      if (surfaceForwardSlope > 0.05 && !probe.isWater) {
+        const CLIMB_ASSIST_FRAC = 0.7
+        const aClimb = surfaceForwardSlope * GRAVITY * CLIMB_ASSIST_FRAC
+        rb.applyImpulse(
+          {
+            x: planeFwdX * aClimb * m * dt,
+            y: planeFwdY * aClimb * m * dt,
+            z: planeFwdZ * aClimb * m * dt,
+          },
+          true,
+        )
+      }
+
+      // Slope velocity-redirect — the marble-on-slope effect that the
+      // hover spring CAN'T deliver on a fast steep climb. When the bike
+      // enters a 25° ramp at 23 m/s, the surface beneath rises at
+      // 10.7 m/s vertical, but the spring can only generate ~24 m/s² of
+      // net lift; the chassis falls behind, the capsule clips the ramp
+      // trimesh, and the contact resolver reflects velocity off the
+      // slope normal — costing ~50% of forward speed in 150 ms (measured
+      // on the slope-test track). Below the hover band on a positive
+      // surfaceForwardSlope, nudge the bike's velocity toward the slope
+      // tangent so the chassis "rides" the slope instead of plowing
+      // into it. Applied as an IMPULSE (not setLinvel) so the brake /
+      // thrust / slope-brake forces applied earlier this tick aren't
+      // overwritten.
+      //
+      // Anti-grav exempt — the up axis varies, slope semantics differ.
+      // Water exempt — Wave-Race chop already has its own redirect path
+      // (landing-momentum block below + spring softening on water).
+      if (
+        !agActive &&
+        !probe.isWater &&
+        surfaceForwardSlope > 0.05 &&
+        groundDistance < stats.hoverHeight * 0.85 &&
+        planeFwdLen > 0.01
+      ) {
+        // Fresh-read linvel — earlier `linvel` is the tick-start snapshot.
+        const cur = rb.linvel()
+        const speedH = Math.hypot(cur.x, cur.z)
+        if (speedH > 4) {
+          const slopeAngle = Math.atan(surfaceForwardSlope)
+          const cs = Math.cos(slopeAngle)
+          const sn = Math.sin(slopeAngle)
+          const speed3d = Math.hypot(cur.x, cur.y, cur.z)
+          // Target: velocity along bike-fwd tilted up by slopeAngle,
+          // preserving total speed.
+          const tangentVx = planeFwdX * cs * speed3d
+          const tangentVy = sn * speed3d
+          const tangentVz = planeFwdZ * cs * speed3d
+          // Soft pull toward the tangent. RATE=10/s means a ~half-life
+          // of ~70 ms — quick enough to clear a slope transition before
+          // the capsule clips the trimesh, slow enough not to fight
+          // intentional player inputs (Q/E pitch).
+          const REDIRECT_RATE = 10
+          const blend = Math.min(1, REDIRECT_RATE * dt)
+          const dvx = (tangentVx - cur.x) * blend
+          const dvy = (tangentVy - cur.y) * blend
+          const dvz = (tangentVz - cur.z) * blend
+          rb.applyImpulse({ x: dvx * m, y: dvy * m, z: dvz * m }, true)
+        }
+      }
     }
 
     // Landing momentum redirect — the motocross "hit the lip right" reward.
