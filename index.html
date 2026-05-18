@@ -925,6 +925,140 @@
       }
       .bc-form .row-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 
+      /* Leaderboards screen — two-pane track list + top-N table. */
+      .bc-leaderboard {
+        display: grid;
+        grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+        gap: 18px;
+        align-items: start;
+      }
+      @media (max-width: 820px) { .bc-leaderboard { grid-template-columns: 1fr; } }
+
+      .bc-lb-tracks {
+        display: flex; flex-direction: column; gap: 6px;
+        max-height: 540px; overflow-y: auto;
+        padding-right: 4px;
+      }
+      .bc-lb-track {
+        position: relative;
+        display: grid;
+        grid-template-columns: 4px 1fr auto;
+        gap: 12px;
+        align-items: center;
+        padding: 12px 14px;
+        background: rgba(10, 20, 36, 0.55);
+        border: 1px solid var(--bc-line);
+        color: var(--bc-ink);
+        text-align: left;
+        cursor: pointer;
+        font-family: var(--bc-font-sans);
+        transition: background var(--t-fast), border-color var(--t-fast);
+      }
+      .bc-lb-track:hover, .bc-lb-track:focus-visible {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: var(--bc-line-strong);
+        outline: none;
+      }
+      .bc-lb-track.selected {
+        background: var(--bc-cyan-soft);
+        border-color: var(--bc-cyan);
+      }
+      .bc-lb-track-accent {
+        align-self: stretch;
+        background: var(--accent, var(--bc-cyan));
+      }
+      .bc-lb-track-name {
+        font-family: var(--bc-font-display);
+        font-size: 14px;
+        letter-spacing: 0.16em;
+      }
+      .bc-lb-track-meta {
+        font: 11px var(--bc-font-mono);
+        color: var(--bc-ink-dim);
+        letter-spacing: 0.04em;
+        margin-top: 2px;
+      }
+      .bc-lb-track-count {
+        font-family: var(--bc-font-mono);
+        font-size: 13px;
+        color: var(--bc-ink-faint);
+        padding: 4px 8px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .bc-lb-track.selected .bc-lb-track-count { color: var(--bc-cyan); }
+
+      .bc-lb-board {
+        padding: 18px 20px;
+        background: rgba(10, 20, 36, 0.55);
+        border: 1px solid var(--bc-line);
+        backdrop-filter: blur(3px);
+      }
+      .bc-lb-board-head {
+        display: flex; flex-direction: column; gap: 4px;
+        margin-bottom: 16px;
+      }
+      .bc-lb-board-title {
+        font-family: var(--bc-font-display);
+        font-size: 22px;
+        letter-spacing: 0.16em;
+      }
+      .bc-lb-board-sub {
+        font: 11px var(--bc-font-mono);
+        color: var(--bc-ink-faint);
+        letter-spacing: 0.08em;
+      }
+      .bc-lb-table {
+        display: flex; flex-direction: column;
+        font-family: var(--bc-font-mono);
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+      }
+      .bc-lb-row {
+        display: grid;
+        grid-template-columns: 36px 1fr 110px 90px;
+        padding: 8px 6px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        align-items: center;
+      }
+      .bc-lb-row.head {
+        font-family: var(--bc-font-display);
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        color: var(--bc-ink-faint);
+        border-bottom-color: var(--bc-line);
+        padding: 6px 6px;
+      }
+      .bc-lb-row .rk { color: var(--bc-ink-faint); }
+      .bc-lb-row .hd { color: var(--bc-ink); }
+      .bc-lb-row .tm { color: var(--bc-cyan); text-align: right; padding-right: 14px; }
+      .bc-lb-row .bk { color: var(--bc-ink-dim); font-size: 11px; letter-spacing: 0.06em; }
+      .bc-lb-row.you {
+        background: rgba(77, 214, 255, 0.08);
+        border-left: 3px solid var(--bc-cyan);
+        padding-left: 3px;
+      }
+      .bc-lb-row.you .hd { color: var(--bc-cyan); }
+      .bc-lb-empty {
+        padding: 22px 8px;
+        font: 12px var(--bc-font-mono);
+        color: var(--bc-ink-faint);
+        letter-spacing: 0.05em;
+      }
+
+      /* Settings overlay text input (leaderboard handle). */
+      input.sm-text {
+        background: rgba(10, 20, 36, 0.55);
+        border: 1px solid var(--bc-line);
+        color: var(--bc-ink);
+        font-family: var(--bc-font-mono);
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        padding: 6px 10px;
+        min-width: 140px;
+      }
+      input.sm-text:focus { outline: none; border-color: var(--bc-cyan); }
+      input.sm-text:disabled { opacity: 0.4; }
+
       /* Lobby. */
       .bc-lobby {
         display: grid;

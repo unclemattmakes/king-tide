@@ -29,6 +29,8 @@ import {
   setGamepadDeadzone,
   setGamepadSensitivity,
   setInvertCameraY,
+  setLeaderboardHandle,
+  setLeaderboardSubmit,
   setRubberBandAssist,
   setTutorialSubtitles,
   setWavePumpIntensity,
@@ -79,6 +81,7 @@ type Control =
   | { kind: 'toggle'; defaultValue: boolean }
   | { kind: 'select'; options: string[]; defaultValue: string }
   | { kind: 'button'; label: string }
+  | { kind: 'text'; defaultValue: string; placeholder: string; maxLength: number }
 
 type RowSpec = {
   id: string
@@ -363,9 +366,21 @@ const TAB_SPECS: TabSpec[] = [
       {
         id: 'gp-leaderboard-submit',
         label: 'Submit times to leaderboard',
-        control: { kind: 'toggle', defaultValue: true },
-        enabled: false,
-        gate: 'Lights up once the leaderboard backend lands',
+        control: { kind: 'toggle', defaultValue: playerSettings.leaderboardSubmit },
+        enabled: true,
+        gate: 'On — a TT personal best writes an entry to the local board. Off — ghosts still save but the board is bypassed.',
+      },
+      {
+        id: 'gp-leaderboard-handle',
+        label: 'Leaderboard handle',
+        control: {
+          kind: 'text',
+          defaultValue: playerSettings.leaderboardHandle,
+          placeholder: 'YOU',
+          maxLength: 12,
+        },
+        enabled: true,
+        gate: 'Up to 12 chars · letters / digits / - _ · empty falls back to "YOU".',
       },
     ],
   },
@@ -535,7 +550,42 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
           setInvertCameraY(cb.checked)
         })
       }
+      if (spec.enabled && spec.id === 'gp-leaderboard-submit') {
+        cb.addEventListener('change', () => {
+          setLeaderboardSubmit(cb.checked)
+        })
+      }
       return cb
+    }
+    if (c.kind === 'text') {
+      const input = document.createElement('input')
+      input.type = 'text'
+      input.className = 'sm-text'
+      input.value = c.defaultValue
+      input.placeholder = c.placeholder
+      input.maxLength = c.maxLength
+      input.autocomplete = 'off'
+      input.autocapitalize = 'characters'
+      input.spellcheck = false
+      input.disabled = !spec.enabled
+      if (spec.enabled && spec.id === 'gp-leaderboard-handle') {
+        const commit = () => {
+          setLeaderboardHandle(input.value)
+          // Reflect the normalized value back so the player sees what
+          // got stored (lowercase / forbidden chars stripped).
+          input.value = playerSettings.leaderboardHandle
+        }
+        input.addEventListener('change', commit)
+        input.addEventListener('blur', commit)
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            commit()
+            input.blur()
+            e.preventDefault()
+          }
+        })
+      }
+      return input
     }
     if (c.kind === 'select') {
       const sel = document.createElement('select')
