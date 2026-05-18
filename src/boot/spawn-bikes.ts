@@ -13,6 +13,7 @@
  * so downstream wiring (race system, recorder, debug API) doesn't shift.
  */
 
+import { playerSettings } from '@/engine/player-settings'
 import type { ReplayFile } from '@/engine/replay/format'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
@@ -122,13 +123,17 @@ export function spawnBikes(opts: {
     spawnRider(playerEid, startPos)
 
     const grid = AI_SLOTS.slice(0, NUM_AI)
+    // Snapshot the difficulty at spawn time — changing the setting
+    // mid-race won't retune already-spawned AIs (matches kart-game
+    // precedent + avoids a sudden personality flip mid-lap).
+    const difficulty = playerSettings.aiDifficulty
     for (const slot of grid) {
       const aiPos = { x: startPos.x + slot.dx, y: startPos.y, z: startPos.z + slot.dz }
       const aiEid = createBike(sim, phys, {
         position: aiPos,
         yaw: track.start.yaw,
         asRacer: true,
-        ai: { splineId: 'main', lineOffset: slot.off },
+        ai: { splineId: 'main', lineOffset: slot.off, difficulty },
       })
       spawnRider(aiEid, aiPos)
       aiEids.push(aiEid)

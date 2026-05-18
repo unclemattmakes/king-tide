@@ -32,6 +32,7 @@ import {
   snapshotByteLength,
   type TransformSnapshot,
 } from '@/engine/net/transform-snapshot'
+import { playerSettings } from '@/engine/player-settings'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { resolveBikeVariant } from '@/game/bikes/variants'
@@ -197,7 +198,11 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
           // Re-derive controller state — the host changed, so any stale
           // closest-point cache from a previous AI-host stint is invalid.
           // splineId 'main' is the only one in use today (see spawn-bikes.ts).
-          AIControllerStore.set(eid, defaultAIController('main'))
+          // Picks up the local host's chosen difficulty for the simulated AI.
+          AIControllerStore.set(
+            eid,
+            defaultAIController('main', { difficulty: playerSettings.aiDifficulty }),
+          )
         }
       } else {
         rb.setBodyType(phys.rapier.RigidBodyType.KinematicPositionBased, true)

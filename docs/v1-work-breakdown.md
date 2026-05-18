@@ -27,7 +27,7 @@ Applied concretely (✅ = shipped, ⬜ = pending):
 |---|---|---|---|
 | Audio | ⬜ playback works | ⬜ master / music / SFX / ambient sliders | ⬜ settings → audio category enabled |
 | Anti-grav | ⬜ controller flips, geometry rideable | ⬜ gameplay → anti-grav camera intensity | ⬜ HUD indicator shown on entry |
-| AI | ⬜ 3 difficulties + rubber-band | ⬜ gameplay → difficulty + rubber-band toggle | ⬜ both controls active |
+| AI | ✅ 3 difficulties baked per-AI + rubber-band gated by toggle | ✅ gameplay → AI difficulty (Casual/Standard/Hard) + rubber-band assist toggle | ✅ both controls active |
 | Wave-pump signal | ✅ triggers on successful pump *(heuristic — upgrades when pump physics ship)* | ✅ gameplay → wave-pump prompt intensity (full/subtle/off) | ✅ HUD widget visible |
 | Tutorial | ⬜ runs end-to-end | ⬜ gameplay → replay tutorial | ⬜ menu button active |
 | Multiplayer | ⬜ room codes route | ⬜ settings → network region / latency display | ⬜ MP menu button active |
@@ -107,7 +107,7 @@ shape. Subsequent milestones light it up.
 | Step | Milestones | Outcome | Status |
 |---|---|---|---|
 | **0. Scaffolding** | M11 (pre-foundation) | Full menu flow stubbed; settings categories present; HUD slots reserved; disabled-state convention locked. | ✅ landed |
-| **1. Foundation systems** | M11–M12 | Anti-grav, wave-pump signal, tutorial framework, AI difficulty, music integration. Each lights up its settings entry and HUD widget. | 🟡 1/5 — wave-pump signal landed |
+| **1. Foundation systems** | M11–M12 | Anti-grav, wave-pump signal, tutorial framework, AI difficulty, music integration. Each lights up its settings entry and HUD widget. | 🟡 2/5 — wave-pump signal + AI difficulty + rubber-band landed |
 | **2. Track production sprint 1** | M13 | Sandbar (tutorial), South Beach, Hatteras, The Maw, Cape Town. Reef Cup + the hero track. Track-select tiles activate one by one. | ⬜ |
 | **3. Track production sprint 2** | M14 | Shibuya, Kilauea, Marina Bay, Doge's. Open Sea + Continental cups. | ⬜ |
 | **4. Track production sprint 3** | M15 | Aqualand, Angkor, Liberty. Drowned Cup; finale. | ⬜ |
@@ -126,6 +126,7 @@ milestone schedule; the steps above slot into it.
 |---|---|---|---|
 | 2026-05-17 | Step 0 — Scaffolding | [#110](https://github.com/occ-matt/hoverbike/pull/110) | Full menu cathedral (mode/cup/track/bike/settings/HUD) shipped with disabled-state convention locked. Test maps moved into a dev-only Dev Cup so the four real race cups stay clean. |
 | 2026-05-17 | Step 1 — Wave-pump signal | [#111](https://github.com/occ-matt/hoverbike/pull/111) | Heuristic crest-launch detector → HUD widget + audio chord. Gameplay → Wave-pump prompt (Full/Subtle/Off) wired and persisted. Trigger upgrades when pump physics tuning lands; event contract is stable. |
+| 2026-05-18 | Step 1 — AI difficulty + rubber-band toggle | _pending PR_ | Three-tier per-AI tuning bundle (top-speed factor / lateral-accel ceiling / curvature lookahead / rubber-band bounds) baked into the controller at spawn time. Rubber-band system gates on the live toggle so flipping it mid-race settles AI back to its baseline rather than snapping. Gameplay → AI difficulty + Rubber-band assist rows lit. |
 
 ---
 

@@ -26,12 +26,27 @@ const STORAGE_KEY = 'hoverbike.playerSettings.v1'
  */
 export type WavePumpIntensity = 'full' | 'subtle' | 'off'
 
+/** AI difficulty — three tiers, plus a rubber-band assist toggle (see
+ *  `rubberBandAssist`). The tuning bundles live in
+ *  `src/game/ai/difficulty.ts` and are baked into each AI's controller
+ *  at spawn time, so a difficulty change takes effect on the next race.
+ *  The rubber-band toggle gates the per-tick assist in
+ *  `rubber-band.ts`, so it can be flipped mid-race. */
+export type AIDifficulty = 'casual' | 'standard' | 'hard'
+
 export type PlayerSettings = {
   wavePumpIntensity: WavePumpIntensity
+  aiDifficulty: AIDifficulty
+  /** Rubber-band assist toggle. When false, `rubberBandSystem` is a
+   *  no-op (modulo settling AI back to baseline) — AI no longer
+   *  catches up after falling behind. */
+  rubberBandAssist: boolean
 }
 
 export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   wavePumpIntensity: 'full',
+  aiDifficulty: 'standard',
+  rubberBandAssist: true,
 })
 
 /** Live, mutable copy. Consumers read this object every frame — no
@@ -41,6 +56,7 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
 export const playerSettings: PlayerSettings = { ...DEFAULT_PLAYER_SETTINGS }
 
 const VALID_WAVE_PUMP_INTENSITY: WavePumpIntensity[] = ['full', 'subtle', 'off']
+const VALID_AI_DIFFICULTY: AIDifficulty[] = ['casual', 'standard', 'hard']
 
 /** Restore persisted values into `playerSettings`. Tolerant of missing
  *  fields and of schema drift — anything missing or invalid keeps the
@@ -62,6 +78,15 @@ export function loadPlayerSettings(): void {
   ) {
     playerSettings.wavePumpIntensity = p.wavePumpIntensity as WavePumpIntensity
   }
+  if (
+    typeof p.aiDifficulty === 'string' &&
+    (VALID_AI_DIFFICULTY as string[]).includes(p.aiDifficulty)
+  ) {
+    playerSettings.aiDifficulty = p.aiDifficulty as AIDifficulty
+  }
+  if (typeof p.rubberBandAssist === 'boolean') {
+    playerSettings.rubberBandAssist = p.rubberBandAssist
+  }
 }
 
 export function savePlayerSettings(): void {
@@ -74,5 +99,15 @@ export function savePlayerSettings(): void {
 
 export function setWavePumpIntensity(v: WavePumpIntensity): void {
   playerSettings.wavePumpIntensity = v
+  savePlayerSettings()
+}
+
+export function setAIDifficulty(v: AIDifficulty): void {
+  playerSettings.aiDifficulty = v
+  savePlayerSettings()
+}
+
+export function setRubberBandAssist(on: boolean): void {
+  playerSettings.rubberBandAssist = on
   savePlayerSettings()
 }
