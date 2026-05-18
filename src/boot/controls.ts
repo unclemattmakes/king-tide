@@ -165,11 +165,14 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
   ;(document.getElementById('pause-settings') as HTMLButtonElement | null)?.addEventListener(
     'click',
     () => {
-      // Hide pause menu while settings are open so the user lands on
-      // a single overlay. The existing dev-settings toggle handles the
-      // lazy-import + open; we just click it.
-      closePauseMenu()
-      ;(document.getElementById('devsettings-toggle') as HTMLButtonElement | null)?.click()
+      // Pause-menu → Settings opens the v1 Settings overlay
+      // (Audio / Video / Controls / Gameplay). Lazy-imported so its
+      // DOM cost stays out of the race-mode bundle. Pause stays open
+      // underneath; the overlay sits above and reads the focus stack
+      // back on close.
+      void import('@/engine/menus/settings-overlay').then(({ installSettingsOverlay }) => {
+        installSettingsOverlay().open()
+      })
     },
   )
   // Multiplayer can't restart a race solo — disable that button when

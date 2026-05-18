@@ -8,6 +8,17 @@ import {
   buildTrackList,
   type TrackEntry,
 } from './catalog'
+import { installSettingsOverlay } from './settings-overlay'
+import {
+  buildDevCupTracks,
+  type CupEntry,
+  DEV_CUP,
+  type DevTrackEntry,
+  isDevBuild,
+  V1_CUPS,
+  V1_TRACKS,
+  type V1TrackEntry,
+} from './tracks-catalog'
 
 /**
  * Cold-boot menu flow — sports-broadcast styled multi-screen router.
@@ -37,19 +48,125 @@ export type MenuFlowOpts = {
   reason?: 'cold' | 'exit-from-race'
 }
 
-type Step = 'title' | 'mode' | 'sp-track' | 'sp-bike' | 'mp-entry'
+type Step =
+  | 'title'
+  | 'mode'
+  | 'sp-track'
+  | 'sp-cup'
+  | 'sp-cup-tracks'
+  | 'sp-bike'
+  | 'pre-race'
+  | 'mp-entry'
+  | 'tutorial-intro'
+  | 'leaderboard'
 
-const STEPS_SP: { id: Step; label: string }[] = [
+const STEPS_SP_RACE: { id: Step; label: string }[] = [
   { id: 'title', label: 'START' },
   { id: 'mode', label: 'MODE' },
   { id: 'sp-track', label: 'TRACK' },
   { id: 'sp-bike', label: 'BIKE' },
 ]
 
+const STEPS_SP_CUP: { id: Step; label: string }[] = [
+  { id: 'title', label: 'START' },
+  { id: 'mode', label: 'MODE' },
+  { id: 'sp-cup', label: 'CUP' },
+  { id: 'sp-cup-tracks', label: 'TRACK' },
+  { id: 'sp-bike', label: 'BIKE' },
+]
+
+const STEPS_TUTORIAL: { id: Step; label: string }[] = [
+  { id: 'title', label: 'START' },
+  { id: 'mode', label: 'MODE' },
+  { id: 'tutorial-intro', label: 'TUTORIAL' },
+]
+
+const STEPS_TT: { id: Step; label: string }[] = [
+  { id: 'title', label: 'START' },
+  { id: 'mode', label: 'MODE' },
+  { id: 'leaderboard', label: 'TIME TRIAL' },
+]
+
 const STEPS_MP: { id: Step; label: string }[] = [
   { id: 'title', label: 'START' },
   { id: 'mode', label: 'MODE' },
   { id: 'mp-entry', label: 'ROOM' },
+]
+
+/** Mode-tile descriptors for the mode-select screen. Most modes are
+ *  disabled in Step 0 with a gate label hinting at when they ship; the
+ *  enabled set today is Race + Cup (the latter is the routing path to
+ *  the Dev Cup) + Multiplayer (works end-to-end via the existing room
+ *  protocol). */
+type ModeId = 'race' | 'time-trial' | 'cup' | 'multiplayer' | 'tutorial'
+type ModeTile = {
+  id: ModeId
+  badge: string
+  headline: string
+  desc: string
+  enabled: boolean
+  gate?: string
+}
+/** Two Coming-Soon bike slots padding the picker out to the v1 target
+ *  of five. Names are intentionally vague — the actual archetypes will
+ *  be designed alongside their tuning. The shape of the picker is
+ *  what's locked here, not the identity of the two extra bikes. */
+type ComingSoonBike = { id: string; name: string; tagline: string; accent: string; gate: string }
+const BIKE_COMING_SOON_SLOTS: ComingSoonBike[] = [
+  {
+    id: 'tbd-heavy',
+    name: 'Heavyweight TBD',
+    tagline: 'Punishing wave-pump timing + biggest launch.',
+    accent: '#5a78a8',
+    gate: 'Variant #4 lands alongside the wave-pump tuning pass.',
+  },
+  {
+    id: 'tbd-light',
+    name: 'Lightweight TBD',
+    tagline: 'Forgiving wave-pump + further air on small swells.',
+    accent: '#d2b6ff',
+    gate: 'Variant #5 lands alongside the wave-pump tuning pass.',
+  },
+]
+
+const MODE_TILES: ModeTile[] = [
+  {
+    id: 'race',
+    badge: 'SOLO',
+    headline: 'RACE',
+    desc: 'Pick a track, pick a bike, run a quick race against AI. Twelve ship tracks across four cups light up over the next three sprints.',
+    enabled: true,
+  },
+  {
+    id: 'time-trial',
+    badge: 'CLOCK',
+    headline: 'TIME<br />TRIAL',
+    desc: 'Solo against the clock with a downloadable best-lap ghost. Ships with the leaderboard backend in M16.',
+    enabled: false,
+    gate: 'Ships in M16 alongside the leaderboard backend',
+  },
+  {
+    id: 'cup',
+    badge: 'CIRCUIT',
+    headline: 'CUP',
+    desc: 'Four-cup championship: Reef → Open Sea → Continental → Drowned. Each cup unlocks when its tracks ship. Dev Cup holds today’s playtest maps.',
+    enabled: true,
+  },
+  {
+    id: 'multiplayer',
+    badge: 'ONLINE',
+    headline: 'MULTI<br />PLAYER',
+    desc: 'Up to eight riders per lobby. Create a room or join by code; everyone votes a track when the lobby fills.',
+    enabled: true,
+  },
+  {
+    id: 'tutorial',
+    badge: 'LEARN',
+    headline: 'TUTORIAL',
+    desc: 'Six scripted beats on the Sandbar — throttle, swell pump, drift, pickup, ramp, anti-grav. Skippable for returning players.',
+    enabled: false,
+    gate: 'Ships with the Sandbar track + tutorial framework — sprint 1 (M13)',
+  },
 ]
 
 export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
@@ -73,12 +190,20 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     bikeId: (opts.initialBikeId ?? DEFAULT_BIKE_VARIANT) as BikeVariantId,
   }
 
-  let currentMode: 'sp' | 'mp' | null = null
+  let currentMode: ModeId | null = null
   let currentStep: Step = 'title'
+  /** Cup-mode pick. Holds the selected cup so the cup-tracks step
+   *  knows which list to render. The dev cup always wins the
+   *  enabled-at-step-0 race against the four ship cups. */
+  let pickedCup: CupEntry | null = null
   const screens: Partial<Record<Step, HTMLElement>> = {}
   // `commitSpRace` lives inside the Promise executor (it needs `resolve`),
   // but `renderBikeCards` runs in the outer scope — bridge them via a ref.
   let commitSpRaceRef: (() => void) | null = null
+  // Build the Dev Cup list once — it only changes when the manifest does,
+  // and that's a page-load gate, not a render-time concern.
+  const devCupTracks = buildDevCupTracks(opts.manifestTracks)
+  const dev = isDevBuild()
 
   function updateClock(): void {
     if (!clockEl) return
@@ -92,7 +217,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
 
   function renderCrumbs(): void {
     if (!crumbsEl) return
-    const steps = currentMode === 'mp' ? STEPS_MP : STEPS_SP
+    const steps = stepsForMode()
     crumbsEl.innerHTML = ''
     steps.forEach((s, i) => {
       if (i > 0) {
@@ -113,51 +238,208 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     if (chyText) chyText.textContent = text
   }
 
+  function stepsForMode(): { id: Step; label: string }[] {
+    switch (currentMode) {
+      case 'multiplayer':
+        return STEPS_MP
+      case 'cup':
+        return STEPS_SP_CUP
+      case 'tutorial':
+        return STEPS_TUTORIAL
+      case 'time-trial':
+        return STEPS_TT
+      default:
+        return STEPS_SP_RACE
+    }
+  }
+
   function updateChyron(step: Step): void {
     switch (step) {
       case 'title':
         setChyron('PRE-SHOW', 'Press start when you’re ready to roll.')
         break
       case 'mode':
-        setChyron('FORMAT', 'Solo qualifier or full lobby? Pick your weapon.')
+        setChyron('FORMAT', 'Pick a format. Disabled tiles light up as their systems land.')
         break
       case 'sp-track':
-        setChyron('COURSE', 'Tap a card to lock in your venue.')
+        setChyron(
+          'COURSE',
+          'All twelve ship tracks are in production — tiles light up sprint by sprint.',
+        )
+        break
+      case 'sp-cup':
+        setChyron(
+          'CIRCUIT',
+          'Real cups gate on their tracks shipping. Dev Cup is the playtest path.',
+        )
+        break
+      case 'sp-cup-tracks':
+        setChyron(
+          'TRACK',
+          pickedCup?.id === 'dev'
+            ? 'Playtest tracks. Procedural built-ins + every GLB the manifest knows about.'
+            : 'Cup line-up — tap a card to lock in your venue.',
+        )
         break
       case 'sp-bike':
         setChyron('LOADOUT', 'Bars compare top speed, accel, agility, weight, wave-follow.')
         break
+      case 'pre-race':
+        setChyron('OPTIONS', 'Override laps + AI count, or hit GO for the defaults.')
+        break
       case 'mp-entry':
         setChyron('LOBBY', 'Host a new room or punch in a friend’s code.')
+        break
+      case 'tutorial-intro':
+        setChyron('TUTORIAL', 'Tutorial framework ships in sprint 1.')
+        break
+      case 'leaderboard':
+        setChyron('LEADERBOARD', 'Time Trial + leaderboard backend ship in M16.')
         break
     }
   }
 
-  function renderTrackCards(host: HTMLElement): void {
+  /** Race-mode track-select host. Renders all 12 ship tracks; tiles
+   *  for `status === 'ship'` are live, the rest are gated with the
+   *  per-track `gateLabel`. The list never contains test tracks — those
+   *  live in the Dev Cup so the real race lineup stays uncluttered. */
+  function renderV1TrackCards(host: HTMLElement): void {
     host.innerHTML = ''
-    for (const t of tracks) {
-      const card = document.createElement('button')
-      card.type = 'button'
-      card.className = `bc-card${t.id === picks.trackId ? ' selected' : ''}`
-      card.style.setProperty('--accent', t.accent)
-      const best = bestLapFor(t.id, picks.bikeId)
-      card.innerHTML = `
-        <div class="label">TRACK</div>
-        <div class="name">${escapeHtml(t.name).toUpperCase()}</div>
-        <div class="tag">${escapeHtml(t.tagline)}</div>
-        <div class="record">${best ? `BEST LAP &middot; ${best}` : 'NO RECORD'}</div>
-      `
-      // Clicking a card commits the pick and advances — no separate
-      // confirm button. Tapping the same selection again is a no-op
-      // from the user's perspective (we just re-advance).
+    for (const t of V1_TRACKS) {
+      host.appendChild(buildV1TrackCard(t))
+    }
+  }
+
+  function buildV1TrackCard(t: V1TrackEntry): HTMLElement {
+    const card = document.createElement('button')
+    card.type = 'button'
+    const disabled = t.status !== 'ship'
+    card.disabled = disabled
+    card.className = `bc-card${disabled ? ' bc-disabled' : ''}${
+      !disabled && t.id === picks.trackId ? ' selected' : ''
+    }`
+    card.style.setProperty('--accent', t.accent)
+    if (disabled) card.dataset.gate = t.gateLabel
+    const best = disabled ? null : bestLapFor(t.id, picks.bikeId)
+    card.innerHTML = `
+      <div class="label">${escapeHtml(cupNameFor(t.cup)).toUpperCase()}</div>
+      <div class="name">${escapeHtml(t.name).toUpperCase()}</div>
+      <div class="tag">${escapeHtml(t.location)}</div>
+      <div class="tag" style="opacity: 0.75; margin-top: -4px;">${escapeHtml(t.setPiece)}</div>
+      <div class="record">${
+        disabled
+          ? `LAP TARGET &middot; ${t.lapTarget}s &middot; ${t.laps} LAPS`
+          : best
+            ? `BEST LAP &middot; ${best}`
+            : 'NO RECORD'
+      }</div>
+      ${disabled ? `<div class="bc-gate">${escapeHtml(t.gateLabel)}</div>` : ''}
+    `
+    if (!disabled) {
       card.addEventListener('click', () => {
         picks.trackId = t.id
         showStep('sp-bike')
       })
-      host.appendChild(card)
+    }
+    return card
+  }
+
+  function cupNameFor(id: V1TrackEntry['cup']): string {
+    return V1_CUPS.find((c) => c.id === id)?.name ?? id
+  }
+
+  /** Cup-select host. Renders the four ship cups plus the Dev Cup
+   *  (dev builds only). Real cups stay disabled in Step 0; the Dev
+   *  Cup is the playtest entrypoint. */
+  function renderCupCards(host: HTMLElement): void {
+    host.innerHTML = ''
+    for (const c of V1_CUPS) {
+      host.appendChild(buildCupCard(c))
+    }
+    if (dev) {
+      host.appendChild(buildCupCard(DEV_CUP))
     }
   }
 
+  function buildCupCard(c: CupEntry): HTMLElement {
+    const card = document.createElement('button')
+    card.type = 'button'
+    const disabled = c.status !== 'ship'
+    card.disabled = disabled
+    card.className = `bc-card${disabled ? ' bc-disabled' : ''}`
+    card.style.setProperty('--accent', c.accent)
+    if (disabled) card.dataset.gate = c.gateLabel
+    const trackCount =
+      c.id === 'dev' ? devCupTracks.length : V1_TRACKS.filter((t) => t.cup === c.id).length
+    card.innerHTML = `
+      ${c.id === 'dev' ? '<span class="bc-dev-badge">DEV</span>' : ''}
+      <div class="label">${c.id === 'dev' ? 'DEV ONLY' : 'CUP'}</div>
+      <div class="name">${escapeHtml(c.name).toUpperCase()}</div>
+      <div class="tag">${escapeHtml(c.tagline)}</div>
+      <div class="record">${trackCount} TRACK${trackCount === 1 ? '' : 'S'}</div>
+      ${disabled ? `<div class="bc-gate">${escapeHtml(c.gateLabel)}</div>` : ''}
+    `
+    if (!disabled) {
+      card.addEventListener('click', () => {
+        pickedCup = c
+        showStep('sp-cup-tracks')
+      })
+    }
+    return card
+  }
+
+  /** Render the chosen cup's tracks. Dev Cup pulls from the manifest
+   *  loader pipeline; real cups list their disabled v1 tiles. */
+  function renderCupTrackCards(host: HTMLElement): void {
+    host.innerHTML = ''
+    if (!pickedCup) return
+    if (pickedCup.id === 'dev') {
+      for (const t of devCupTracks) {
+        host.appendChild(buildDevTrackCard(t))
+      }
+      if (devCupTracks.length === 0) {
+        const empty = document.createElement('div')
+        empty.className = 'bc-card bc-disabled'
+        empty.innerHTML =
+          '<div class="label">EMPTY</div>' +
+          '<div class="name">NO PLAYTEST TRACKS</div>' +
+          '<div class="tag">Run <code>pnpm gen:all</code> to build the manifest.</div>'
+        host.appendChild(empty)
+      }
+      return
+    }
+    const cupId = pickedCup.id
+    for (const t of V1_TRACKS.filter((v) => v.cup === cupId)) {
+      host.appendChild(buildV1TrackCard(t))
+    }
+  }
+
+  function buildDevTrackCard(t: DevTrackEntry): HTMLElement {
+    const card = document.createElement('button')
+    card.type = 'button'
+    card.className = `bc-card${t.id === picks.trackId ? ' selected' : ''}`
+    card.style.setProperty('--accent', t.accent)
+    const best = bestLapFor(t.id, picks.bikeId)
+    const sourceChip = t.source === 'procedural' ? 'PROCEDURAL' : 'GLB'
+    card.innerHTML = `
+      <span class="bc-dev-badge">${sourceChip}</span>
+      <div class="label">TEST TRACK</div>
+      <div class="name">${escapeHtml(t.name).toUpperCase()}</div>
+      <div class="tag">${escapeHtml(t.tagline)}</div>
+      <div class="record">${best ? `BEST LAP &middot; ${best}` : 'NO RECORD'}</div>
+    `
+    card.addEventListener('click', () => {
+      picks.trackId = t.id
+      showStep('sp-bike')
+    })
+    return card
+  }
+
+  /** Five-slot bike-select grid per the v1 work-breakdown — three
+   *  active variants today (cruiser / racer / stunt) plus two "Coming
+   *  soon" placeholders. The placeholders inherit the disabled-state
+   *  convention so the bike picker reads as part of the same cathedral
+   *  as every other screen. */
   function renderBikeCards(host: HTMLElement, showTrackBest: boolean): void {
     host.innerHTML = ''
     for (const b of bikeCards) {
@@ -191,6 +473,26 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       })
       host.appendChild(card)
     }
+    for (const slot of BIKE_COMING_SOON_SLOTS) {
+      host.appendChild(buildComingSoonBikeCard(slot))
+    }
+  }
+
+  function buildComingSoonBikeCard(slot: ComingSoonBike): HTMLElement {
+    const card = document.createElement('button')
+    card.type = 'button'
+    card.disabled = true
+    card.className = 'bc-card bc-disabled'
+    card.style.setProperty('--accent', slot.accent)
+    card.dataset.gate = slot.gate
+    card.innerHTML = `
+      <span class="bc-soon">COMING SOON</span>
+      <div class="label">BIKE</div>
+      <div class="name">${escapeHtml(slot.name)}</div>
+      <div class="tag">${escapeHtml(slot.tagline)}</div>
+      <div class="bc-gate">${escapeHtml(slot.gate)}</div>
+    `
+    return card
   }
 
   function refreshStep(step: Step): void {
@@ -199,13 +501,30 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       const readout = screens['sp-bike']?.querySelector<HTMLElement>('#bike-track-readout')
       if (host) renderBikeCards(host, true)
       if (readout) {
-        const cur = tracks.find((t) => t.id === picks.trackId)
-        readout.textContent = (cur?.name ?? picks.trackId).toUpperCase()
+        const display = displayTrackName(picks.trackId)
+        readout.textContent = display.toUpperCase()
       }
     } else if (step === 'sp-track') {
       const host = screens['sp-track']?.querySelector<HTMLElement>('#sp-track-cards')
-      if (host) renderTrackCards(host)
+      if (host) renderV1TrackCards(host)
+    } else if (step === 'sp-cup') {
+      const host = screens['sp-cup']?.querySelector<HTMLElement>('#sp-cup-cards')
+      if (host) renderCupCards(host)
+    } else if (step === 'sp-cup-tracks') {
+      const host = screens['sp-cup-tracks']?.querySelector<HTMLElement>('#sp-cup-track-cards')
+      const cupReadout = screens['sp-cup-tracks']?.querySelector<HTMLElement>('#sp-cup-readout')
+      if (host) renderCupTrackCards(host)
+      if (cupReadout) cupReadout.textContent = (pickedCup?.name ?? '').toUpperCase()
     }
+  }
+
+  function displayTrackName(id: string): string {
+    const v1 = V1_TRACKS.find((t) => t.id === id)
+    if (v1) return v1.name
+    const dev = devCupTracks.find((t) => t.id === id)
+    if (dev) return dev.name
+    const generic = tracks.find((t) => t.id === id)
+    return generic?.name ?? id
   }
 
   function showStep(step: Step): void {
@@ -226,8 +545,14 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
   function gamepadBack(): void {
     if (currentStep === 'mode') showStep('title')
     else if (currentStep === 'sp-track') showStep('mode')
-    else if (currentStep === 'sp-bike') showStep('sp-track')
+    else if (currentStep === 'sp-cup') showStep('mode')
+    else if (currentStep === 'sp-cup-tracks') showStep('sp-cup')
+    else if (currentStep === 'sp-bike')
+      showStep(currentMode === 'cup' ? 'sp-cup-tracks' : 'sp-track')
+    else if (currentStep === 'pre-race') showStep('sp-bike')
     else if (currentStep === 'mp-entry') showStep('mode')
+    else if (currentStep === 'tutorial-intro') showStep('mode')
+    else if (currentStep === 'leaderboard') showStep('mode')
   }
 
   const gamepadNav = installMenuGamepad({
@@ -290,57 +615,90 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     function buildMode(): HTMLElement {
       const el = document.createElement('section')
       el.className = 'bc-screen'
+      const tilesHtml = MODE_TILES.map((m) => {
+        const disabled = !m.enabled
+        const cls = `bc-mode-card${disabled ? ' bc-disabled' : ''}`
+        const gateBlock =
+          disabled && m.gate ? `<div class="bc-gate">${escapeHtml(m.gate)}</div>` : ''
+        // `data-mode` lets the global click handler route by id, and
+        // `disabled` keeps gamepad focus from landing on inert tiles
+        // (menu-gamepad filters those out).
+        return `
+          <button class="${cls}" data-mode="${m.id}" type="button"${disabled ? ' disabled' : ''}${
+            disabled ? ` data-gate="${escapeHtml(m.gate ?? '')}"` : ''
+          }>
+            <span class="badge">${escapeHtml(m.badge)}</span>
+            <div class="hd">${m.headline}</div>
+            <div class="desc">${escapeHtml(m.desc)}</div>
+            ${gateBlock}
+            <div class="stripe"></div>
+          </button>`
+      }).join('')
       el.innerHTML = `
         <div class="bc-section-head">
           <div class="num">01</div>
           <div>
             <div class="title">PICK YOUR FORMAT</div>
-            <div class="sub">SINGLE-PLAYER &middot; UP TO 8 ONLINE</div>
+            <div class="sub">FIVE MODES &middot; DISABLED TILES LIGHT UP AS SYSTEMS LAND</div>
           </div>
           <div class="meta">
             <div class="sub">CHANNEL</div>
             <div style="font-family: var(--bc-font-display); font-size: 28px;">HBN 1</div>
           </div>
         </div>
-        <div class="bc-cards cols-2">
-          <button class="bc-mode-card" data-mode="sp" type="button">
-            <span class="badge">SOLO</span>
-            <div class="hd">SINGLE<br />PLAYER</div>
-            <div class="desc">Quick race against four AI riders. Countdown, four laps, personal-best ledger, replay download afterwards.</div>
-            <div class="stripe"></div>
-          </button>
-          <button class="bc-mode-card" data-mode="mp" type="button">
-            <span class="badge">ONLINE</span>
-            <div class="hd">MULTI<br />PLAYER</div>
-            <div class="desc">Up to eight riders per lobby. Each player picks a bike and votes a track; the room rolls the dice when everyone’s ready.</div>
-            <div class="stripe"></div>
-          </button>
-        </div>
+        <div class="bc-cards cols-auto" id="mode-cards">${tilesHtml}</div>
         <div class="bc-actions">
-          <div class="left"><button class="bc-link" id="mode-back" type="button">&larr; BACK</button></div>
+          <div class="left">
+            <button class="bc-link" id="mode-back" type="button">&larr; BACK</button>
+          </div>
+          <div class="right">
+            <button class="bc-link" id="mode-settings" type="button">SETTINGS &middot;&middot;&middot;</button>
+          </div>
         </div>
       `
       el.querySelectorAll<HTMLButtonElement>('.bc-mode-card').forEach((card) => {
+        if (card.disabled) return
         card.addEventListener('click', () => {
-          const mode = card.dataset.mode as 'sp' | 'mp'
+          const mode = card.dataset.mode as ModeId
           currentMode = mode
-          if (mode === 'sp') showStep('sp-track')
-          else showStep('mp-entry')
+          switch (mode) {
+            case 'race':
+              showStep('sp-track')
+              break
+            case 'cup':
+              showStep('sp-cup')
+              break
+            case 'multiplayer':
+              showStep('mp-entry')
+              break
+            case 'tutorial':
+              showStep('tutorial-intro')
+              break
+            case 'time-trial':
+              showStep('leaderboard')
+              break
+          }
         })
       })
       el.querySelector('#mode-back')?.addEventListener('click', () => showStep('title'))
+      el.querySelector('#mode-settings')?.addEventListener('click', () => {
+        installSettingsOverlay().open()
+      })
       return el
     }
 
     function buildSpTrack(): HTMLElement {
       const el = document.createElement('section')
       el.className = 'bc-screen'
+      const devHint = dev
+        ? 'Cup &rarr; Dev Cup holds today’s playtest tracks.'
+        : 'Ship tracks roll out sprint by sprint.'
       el.innerHTML = `
         <div class="bc-section-head">
           <div class="num">02</div>
           <div>
             <div class="title">SELECT TRACK</div>
-            <div class="sub">TONIGHT’S COURSES &middot; ${tracks.length} ON THE CARD</div>
+            <div class="sub">TWELVE SHIP TRACKS &middot; FOUR CUPS &middot; ${devHint.toUpperCase()}</div>
           </div>
         </div>
         <div class="bc-cards cols-3" id="sp-track-cards"></div>
@@ -348,9 +706,122 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           <div class="left"><button class="bc-link" id="sp-track-back" type="button">&larr; MODE</button></div>
         </div>
       `
-      const host = el.querySelector<HTMLElement>('#sp-track-cards')!
-      renderTrackCards(host)
+      const host = el.querySelector<HTMLElement>('#sp-track-cards')
+      if (host) renderV1TrackCards(host)
       el.querySelector('#sp-track-back')?.addEventListener('click', () => showStep('mode'))
+      return el
+    }
+
+    /** Cup-select screen — 4 ship cups + Dev Cup (dev builds only). */
+    function buildSpCup(): HTMLElement {
+      const el = document.createElement('section')
+      el.className = 'bc-screen'
+      el.innerHTML = `
+        <div class="bc-section-head">
+          <div class="num">02</div>
+          <div>
+            <div class="title">SELECT CUP</div>
+            <div class="sub">FOUR-CUP CHAMPIONSHIP &middot; REAL CUPS UNLOCK WHEN THEIR TRACKS SHIP</div>
+          </div>
+          ${
+            dev
+              ? `<div class="meta">
+                <div class="sub">DEV BUILD</div>
+                <div style="font-family: var(--bc-font-display); font-size: 18px; color: #a78bff;">DEV CUP ENABLED</div>
+              </div>`
+              : ''
+          }
+        </div>
+        <div class="bc-cards cols-3" id="sp-cup-cards"></div>
+        <div class="bc-actions">
+          <div class="left"><button class="bc-link" id="sp-cup-back" type="button">&larr; MODE</button></div>
+        </div>
+      `
+      const host = el.querySelector<HTMLElement>('#sp-cup-cards')
+      if (host) renderCupCards(host)
+      el.querySelector('#sp-cup-back')?.addEventListener('click', () => showStep('mode'))
+      return el
+    }
+
+    /** Track list for the chosen cup. Same shell as race-mode's track
+     *  select; data differs per `pickedCup`. */
+    function buildSpCupTracks(): HTMLElement {
+      const el = document.createElement('section')
+      el.className = 'bc-screen'
+      el.innerHTML = `
+        <div class="bc-section-head">
+          <div class="num">03</div>
+          <div>
+            <div class="title">CUP LINE-UP</div>
+            <div class="sub">PICK A VENUE FROM THE CUP YOU SELECTED</div>
+          </div>
+          <div class="meta">
+            <div class="sub">CUP</div>
+            <div id="sp-cup-readout" style="font-family: var(--bc-font-display); font-size: 22px;"></div>
+          </div>
+        </div>
+        <div class="bc-cards cols-3" id="sp-cup-track-cards"></div>
+        <div class="bc-actions">
+          <div class="left"><button class="bc-link" id="sp-cup-tracks-back" type="button">&larr; CUP</button></div>
+        </div>
+      `
+      const host = el.querySelector<HTMLElement>('#sp-cup-track-cards')
+      if (host) renderCupTrackCards(host)
+      el.querySelector('#sp-cup-tracks-back')?.addEventListener('click', () => showStep('sp-cup'))
+      return el
+    }
+
+    /** Tutorial-intro stub. Disabled today; serves as the gate
+     *  surface so the menu shape is complete from day one. */
+    function buildTutorialIntro(): HTMLElement {
+      const el = document.createElement('section')
+      el.className = 'bc-screen'
+      el.innerHTML = `
+        <div class="bc-section-head">
+          <div class="num">02</div>
+          <div>
+            <div class="title">TUTORIAL</div>
+            <div class="sub">SANDBAR &middot; SCRIPTED ONE-LAP TRAINING</div>
+          </div>
+        </div>
+        <div class="bc-card bc-disabled" data-gate="Ships with the Sandbar track in sprint 1 (M13)" style="--accent:#9bdcf2;">
+          <div class="label">TRAINING COVE</div>
+          <div class="name">SANDBAR</div>
+          <div class="tag">Six scripted beats — throttle, swell pump, drift around a buoy, pickup, ramp, anti-grav arch. Auto-skip toggle for returning players.</div>
+          <div class="record">~60s &middot; 1 LAP &middot; 80% WATER &middot; INTRO DIFFICULTY</div>
+          <div class="bc-gate">Ships with the Sandbar track + tutorial framework — sprint 1 (M13)</div>
+        </div>
+        <div class="bc-actions">
+          <div class="left"><button class="bc-link" id="tut-back" type="button">&larr; MODE</button></div>
+        </div>
+      `
+      el.querySelector('#tut-back')?.addEventListener('click', () => showStep('mode'))
+      return el
+    }
+
+    /** Leaderboard / Time Trial stub. Empty state until M16. */
+    function buildLeaderboard(): HTMLElement {
+      const el = document.createElement('section')
+      el.className = 'bc-screen'
+      el.innerHTML = `
+        <div class="bc-section-head">
+          <div class="num">02</div>
+          <div>
+            <div class="title">TIME TRIAL</div>
+            <div class="sub">SOLO VS. CLOCK &middot; GHOST PLAYBACK &middot; ONLINE LEADERBOARD</div>
+          </div>
+        </div>
+        <div class="bc-card bc-disabled" data-gate="Ships in M16 with the leaderboard backend">
+          <div class="label">LEADERBOARDS</div>
+          <div class="name">EMPTY</div>
+          <div class="tag">Once Time Trial ships, this view lists the top times per track with a personal-best banner and a downloadable ghost.</div>
+          <div class="bc-gate">Ships in M16 alongside the leaderboard backend</div>
+        </div>
+        <div class="bc-actions">
+          <div class="left"><button class="bc-link" id="lb-back" type="button">&larr; MODE</button></div>
+        </div>
+      `
+      el.querySelector('#lb-back')?.addEventListener('click', () => showStep('mode'))
       return el
     }
 
@@ -362,7 +833,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           <div class="num">03</div>
           <div>
             <div class="title">SELECT BIKE</div>
-            <div class="sub">THREE LOADOUTS &middot; PICK YOUR PROFILE</div>
+            <div class="sub">THREE LOADOUTS LIVE &middot; TWO MORE COMING WITH WAVE-PUMP TUNING</div>
           </div>
           <div class="meta">
             <div class="sub">RACING AT</div>
@@ -371,12 +842,15 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         </div>
         <div class="bc-cards cols-3" id="sp-bike-cards"></div>
         <div class="bc-actions">
-          <div class="left"><button class="bc-link" id="sp-bike-back" type="button">&larr; TRACK</button></div>
+          <div class="left"><button class="bc-link" id="sp-bike-back" type="button">&larr; BACK</button></div>
+          <div class="right"><button class="bc-link" id="sp-bike-options" type="button" disabled data-gate="Pre-race overrides ship with the AI / cup wiring (M16)">RACE OPTIONS &middot;&middot;&middot;</button></div>
         </div>
       `
-      const host = el.querySelector<HTMLElement>('#sp-bike-cards')!
-      renderBikeCards(host, true)
-      el.querySelector('#sp-bike-back')?.addEventListener('click', () => showStep('sp-track'))
+      const host = el.querySelector<HTMLElement>('#sp-bike-cards')
+      if (host) renderBikeCards(host, true)
+      el.querySelector('#sp-bike-back')?.addEventListener('click', () =>
+        showStep(currentMode === 'cup' ? 'sp-cup-tracks' : 'sp-track'),
+      )
       return el
     }
 
@@ -447,8 +921,12 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     screens.title = buildTitle()
     screens.mode = buildMode()
     screens['sp-track'] = buildSpTrack()
+    screens['sp-cup'] = buildSpCup()
+    screens['sp-cup-tracks'] = buildSpCupTracks()
     screens['sp-bike'] = buildSpBike()
     screens['mp-entry'] = buildMpEntry()
+    screens['tutorial-intro'] = buildTutorialIntro()
+    screens.leaderboard = buildLeaderboard()
     for (const s of Object.values(screens)) stage?.appendChild(s!)
 
     showStep(opts.reason === 'exit-from-race' ? 'mode' : 'title')
@@ -461,7 +939,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         if (currentStep === 'title') {
           showStep('mode')
           e.preventDefault()
-        } else if (currentStep === 'sp-track') {
+        } else if (currentStep === 'sp-track' || currentStep === 'sp-cup-tracks') {
           showStep('sp-bike')
           e.preventDefault()
         } else if (currentStep === 'sp-bike') {
@@ -469,10 +947,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           e.preventDefault()
         }
       } else if (e.code === 'Escape') {
-        if (currentStep === 'mode') showStep('title')
-        else if (currentStep === 'sp-track') showStep('mode')
-        else if (currentStep === 'sp-bike') showStep('sp-track')
-        else if (currentStep === 'mp-entry') showStep('mode')
+        gamepadBack()
         e.preventDefault()
       }
     }
