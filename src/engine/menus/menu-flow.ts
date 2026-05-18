@@ -1,4 +1,6 @@
 import { startCup } from '@/engine/cup-progress'
+import { formatLap } from '@/engine/garage'
+import { clearLeaderboards, getEntries, getEntryCounts } from '@/engine/leaderboard-state'
 import { playerSettings } from '@/engine/player-settings'
 import type { TrackManifestEntry } from '@/game/assets/manifest'
 import { type BikeVariantId, DEFAULT_BIKE_VARIANT } from '@/game/bikes/variants'
@@ -770,6 +772,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
             <button class="bc-link" id="mode-back" type="button">&larr; BACK</button>
           </div>
           <div class="right">
+            <button class="bc-link" id="mode-leaderboards" type="button">LEADERBOARDS &middot;&middot;&middot;</button>
             <button class="bc-link" id="mode-settings" type="button">SETTINGS &middot;&middot;&middot;</button>
           </div>
         </div>
@@ -806,6 +809,16 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       el.querySelector('#mode-back')?.addEventListener('click', () => showStep('title'))
       el.querySelector('#mode-settings')?.addEventListener('click', () => {
         installSettingsOverlay().open()
+      })
+      el.querySelector('#mode-leaderboards')?.addEventListener('click', () => {
+        // Re-mount on each open so freshly-set TT times appear without
+        // a full menu reload. Cheap — the screen is read-only over
+        // localStorage data.
+        const fresh = buildLeaderboard()
+        const existing = screens.leaderboard
+        existing?.parentElement?.replaceChild(fresh, existing)
+        screens.leaderboard = fresh
+        showStep('leaderboard')
       })
       return el
     }
@@ -958,29 +971,164 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       return el
     }
 
-    /** Leaderboard / Time Trial stub. Empty state until M16. */
+    /** Leaderboards screen — Time Trial top-N per track, sourced from
+     *  the local `leaderboard-state` store. Two-pane: a vertical track
+     *  list on the left, the selected track's top-10 table on the
+     *  right. Player rows are highlighted by handle match against
+     *  `playerSettings.leaderboardHandle` ('YOU' fallback for
+     *  unhandled players). */
     function buildLeaderboard(): HTMLElement {
       const el = document.createElement('section')
       el.className = 'bc-screen'
+      const tracks = buildLeaderboardTrackList(opts.manifestTracks, dev)
+      const counts = getEntryCounts()
+      // Prefer a track with entries when picking the initial selection
+      // — otherwise the right pane reads as empty even when other
+      // tracks have times.
+      const initialId = tracks.find((t) => (counts[t.id] ?? 0) > 0)?.id ?? tracks[0]?.id ?? 'lagoon'
+      let selectedId = initialId
       el.innerHTML = `
         <div class="bc-section-head">
           <div class="num">02</div>
           <div>
-            <div class="title">TIME TRIAL</div>
-            <div class="sub">SOLO VS. CLOCK &middot; GHOST PLAYBACK &middot; ONLINE LEADERBOARD</div>
+            <div class="title">LEADERBOARDS</div>
+            <div class="sub">TIME TRIAL TOP TIMES &middot; LOCAL BOARD &middot; SYNCS GLOBAL ONCE THE BACKEND LANDS (M16)</div>
+          </div>
+          <div class="meta">
+            <div class="sub">HANDLE</div>
+            <div id="lb-handle" style="font-family: var(--bc-font-display); font-size: 22px;"></div>
           </div>
         </div>
-        <div class="bc-card bc-disabled" data-gate="Ships in M16 with the leaderboard backend">
-          <div class="label">LEADERBOARDS</div>
-          <div class="name">EMPTY</div>
-          <div class="tag">Once Time Trial ships, this view lists the top times per track with a personal-best banner and a downloadable ghost.</div>
-          <div class="bc-gate">Ships in M16 alongside the leaderboard backend</div>
+        <div class="bc-leaderboard">
+          <div class="bc-lb-tracks" id="lb-tracks"></div>
+          <div class="bc-lb-board" id="lb-board"></div>
         </div>
         <div class="bc-actions">
           <div class="left"><button class="bc-link" id="lb-back" type="button">&larr; MODE</button></div>
+          <div class="right">
+            <button class="bc-link" id="lb-settings" type="button">CHANGE HANDLE &middot;&middot;&middot;</button>
+            <button class="bc-link" id="lb-clear" type="button">CLEAR LOCAL TIMES</button>
+          </div>
         </div>
       `
+      const tracksHost = el.querySelector<HTMLElement>('#lb-tracks')
+      const boardHost = el.querySelector<HTMLElement>('#lb-board')
+      const handleEl = el.querySelector<HTMLElement>('#lb-handle')
+      const renderHandle = (): void => {
+        if (handleEl) handleEl.textContent = playerSettings.leaderboardHandle || 'YOU (default)'
+      }
+      const renderTracks = (): void => {
+        if (!tracksHost) return
+        tracksHost.innerHTML = ''
+        const liveCounts = getEntryCounts()
+        for (const t of tracks) {
+          const row = document.createElement('button')
+          row.type = 'button'
+          row.className = `bc-lb-track${t.id === selectedId ? ' selected' : ''}`
+          row.dataset.trackId = t.id
+          const count = liveCounts[t.id] ?? 0
+          const top = count > 0 ? (getEntries(t.id, 1)[0] ?? null) : null
+          const topLine = top
+            ? `#1 &middot; ${escapeHtml(formatLap(top.bestLap))} &middot; ${escapeHtml(top.handle)}`
+            : 'NO ENTRIES'
+          row.innerHTML = `
+            <span class="bc-lb-track-accent" style="--accent:${t.accent}"></span>
+            <div class="bc-lb-track-body">
+              <div class="bc-lb-track-name">${escapeHtml(t.name).toUpperCase()}</div>
+              <div class="bc-lb-track-meta">${topLine}</div>
+            </div>
+            <div class="bc-lb-track-count">${count}</div>
+          `
+          row.addEventListener('click', () => {
+            selectedId = t.id
+            renderTracks()
+            renderBoard()
+          })
+          tracksHost.appendChild(row)
+        }
+        if (tracks.length === 0) {
+          const empty = document.createElement('div')
+          empty.className = 'bc-lb-empty'
+          empty.textContent = 'No tracks available. Run pnpm gen:all to build the manifest.'
+          tracksHost.appendChild(empty)
+        }
+      }
+      const renderBoard = (): void => {
+        if (!boardHost) return
+        const selectedTrack = tracks.find((t) => t.id === selectedId)
+        const entries = getEntries(selectedId, 10)
+        const ownHandle = (playerSettings.leaderboardHandle || 'YOU').toUpperCase()
+        boardHost.innerHTML = ''
+        const head = document.createElement('div')
+        head.className = 'bc-lb-board-head'
+        head.innerHTML = `
+          <div class="bc-lb-board-title">${escapeHtml((selectedTrack?.name ?? selectedId).toUpperCase())}</div>
+          <div class="bc-lb-board-sub">${
+            entries.length > 0
+              ? `${entries.length} ENTR${entries.length === 1 ? 'Y' : 'IES'} &middot; FASTEST LAP WINS`
+              : 'NO ENTRIES YET &middot; RACE IN TIME TRIAL TO SET THE FIRST'
+          }</div>
+        `
+        boardHost.appendChild(head)
+        if (entries.length === 0) {
+          const empty = document.createElement('div')
+          empty.className = 'bc-lb-empty'
+          empty.innerHTML =
+            'No times yet. Pick this track in <b>Time Trial</b> and set a personal best — your handle lands here automatically.'
+          boardHost.appendChild(empty)
+          return
+        }
+        const table = document.createElement('div')
+        table.className = 'bc-lb-table'
+        table.innerHTML = `
+          <div class="bc-lb-row head">
+            <div class="rk">#</div><div class="hd">HANDLE</div><div class="tm">BEST LAP</div><div class="bk">BIKE</div>
+          </div>
+        `
+        entries.forEach((entry, i) => {
+          const row = document.createElement('div')
+          row.className = `bc-lb-row${entry.handle === ownHandle ? ' you' : ''}`
+          row.innerHTML = `
+            <div class="rk">${i + 1}</div>
+            <div class="hd">${escapeHtml(entry.handle)}</div>
+            <div class="tm">${escapeHtml(formatLap(entry.bestLap))}</div>
+            <div class="bk">${escapeHtml(entry.bikeId.toUpperCase())}</div>
+          `
+          table.appendChild(row)
+        })
+        boardHost.appendChild(table)
+      }
+      renderHandle()
+      renderTracks()
+      renderBoard()
       el.querySelector('#lb-back')?.addEventListener('click', () => showStep('mode'))
+      el.querySelector('#lb-settings')?.addEventListener('click', () => {
+        installSettingsOverlay().open()
+        // Re-render once the overlay closes so a handle change reflects
+        // immediately. Settings overlay doesn't expose an `onClose` —
+        // poll once via the visibility change instead.
+        const root = document.getElementById('settings-menu')
+        if (!root) return
+        const obs = new MutationObserver(() => {
+          if (!root.classList.contains('show')) {
+            renderHandle()
+            renderTracks()
+            renderBoard()
+            obs.disconnect()
+          }
+        })
+        obs.observe(root, { attributes: true, attributeFilter: ['class'] })
+      })
+      el.querySelector('#lb-clear')?.addEventListener('click', () => {
+        if (
+          typeof window !== 'undefined' &&
+          !window.confirm('Wipe all local leaderboard entries? This cannot be undone.')
+        )
+          return
+        clearLeaderboards()
+        renderTracks()
+        renderBoard()
+      })
       return el
     }
 
@@ -1151,6 +1299,46 @@ function buildRoomUrl(roomId: string): string {
   url.search = ''
   url.searchParams.set('room', roomId)
   return url.toString()
+}
+
+/** Tracks shown in the Leaderboards screen. Combines:
+ *
+ *  - All v1 ship tracks (so the player can scan the full slate even
+ *    before each track ships — empty boards read as "race when this
+ *    lands"). Each row carries the v1 accent so the visual identity
+ *    matches the track-select tile.
+ *  - Procedural + manifest tracks (lagoon, cliffside, every GLB) so
+ *    times set on today's playable maps actually have a home. Dev-only
+ *    tracks only appear on dev builds, matching the cup-select gating.
+ */
+type LeaderboardTrackEntry = { id: string; name: string; accent: string }
+function buildLeaderboardTrackList(
+  manifest: TrackManifestEntry[] | undefined,
+  showDev: boolean,
+): LeaderboardTrackEntry[] {
+  const seen = new Set<string>()
+  const out: LeaderboardTrackEntry[] = []
+  for (const t of V1_TRACKS) {
+    seen.add(t.id)
+    out.push({ id: t.id, name: t.name, accent: t.accent })
+  }
+  if (showDev) {
+    const dev = buildDevCupTracks(manifest)
+    for (const t of dev) {
+      if (seen.has(t.id)) continue
+      seen.add(t.id)
+      out.push({ id: t.id, name: t.name, accent: t.accent })
+    }
+  } else {
+    // Even on production builds the procedural tracks ship today —
+    // the player can set times on them, so they belong on the board.
+    for (const t of buildTrackList(manifest)) {
+      if (seen.has(t.id)) continue
+      seen.add(t.id)
+      out.push({ id: t.id, name: t.name, accent: t.accent })
+    }
+  }
+  return out
 }
 
 function escapeHtml(s: string): string {
