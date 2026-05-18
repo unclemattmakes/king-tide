@@ -1,3 +1,4 @@
+import { playerSettings } from '@/engine/player-settings'
 import type { TrackManifestEntry } from '@/game/assets/manifest'
 import { type BikeVariantId, DEFAULT_BIKE_VARIANT } from '@/game/bikes/variants'
 import { installMenuGamepad } from '../input/menu-gamepad'
@@ -163,9 +164,8 @@ const MODE_TILES: ModeTile[] = [
     id: 'tutorial',
     badge: 'LEARN',
     headline: 'TUTORIAL',
-    desc: 'Six scripted beats on the Sandbar — throttle, swell pump, drift, pickup, ramp, anti-grav. Skippable for returning players.',
-    enabled: false,
-    gate: 'Ships with the Sandbar track + tutorial framework — sprint 1 (M13)',
+    desc: 'Six scripted beats — throttle, cruise, look around, wave pump, anti-grav, finish. Skippable for returning players via Settings → Subtitles.',
+    enabled: true,
   },
 ]
 
@@ -771,31 +771,65 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       return el
     }
 
-    /** Tutorial-intro stub. Disabled today; serves as the gate
-     *  surface so the menu shape is complete from day one. */
+    /** Tutorial-intro screen. Two cards:
+     *
+     *  - **START** — kicks off the framework on the current track pick
+     *    via `?race=1&tutorial=1`. Always enabled.
+     *  - **SANDBAR** — scripted-scenario placeholder, still gated on
+     *    the Sandbar track shipping (M13). */
     function buildTutorialIntro(): HTMLElement {
       const el = document.createElement('section')
       el.className = 'bc-screen'
+      const completed = playerSettings.tutorialCompleted
+      const ctaLabel = completed ? 'REPLAY TUTORIAL' : 'START TUTORIAL'
       el.innerHTML = `
         <div class="bc-section-head">
           <div class="num">02</div>
           <div>
             <div class="title">TUTORIAL</div>
-            <div class="sub">SANDBAR &middot; SCRIPTED ONE-LAP TRAINING</div>
+            <div class="sub">SCRIPTED PROMPTS &middot; ANY TRACK &middot; SKIPPABLE</div>
           </div>
         </div>
-        <div class="bc-card bc-disabled" data-gate="Ships with the Sandbar track in sprint 1 (M13)" style="--accent:#9bdcf2;">
-          <div class="label">TRAINING COVE</div>
-          <div class="name">SANDBAR</div>
-          <div class="tag">Six scripted beats — throttle, swell pump, drift around a buoy, pickup, ramp, anti-grav arch. Auto-skip toggle for returning players.</div>
-          <div class="record">~60s &middot; 1 LAP &middot; 80% WATER &middot; INTRO DIFFICULTY</div>
-          <div class="bc-gate">Ships with the Sandbar track + tutorial framework — sprint 1 (M13)</div>
+        <div class="bc-cards cols-2">
+          <div class="bc-card" id="tut-start" role="button" tabindex="0" style="--accent:#ffd54a; cursor: pointer;">
+            <div class="label">FRAMEWORK</div>
+            <div class="name">FIRST RUN</div>
+            <div class="tag">Six beats — throttle, cruise, look around, wave pump, anti-grav, finish. Runs on any track. Subtitles toggle in Settings.</div>
+            <div class="record">~90s &middot; INTRO DIFFICULTY</div>
+            <div class="record" style="color: var(--bc-yellow); margin-top: 6px;">${escapeHtml(ctaLabel)} &rarr;</div>
+          </div>
+          <div class="bc-card bc-disabled" data-gate="Ships with the Sandbar track in sprint 1 (M13)" style="--accent:#9bdcf2;">
+            <div class="label">TRAINING COVE</div>
+            <div class="name">SANDBAR</div>
+            <div class="tag">Track-specific scripted scenarios — drift around a buoy, pickup gate, ramp run, anti-grav arch.</div>
+            <div class="record">~60s &middot; 1 LAP &middot; SANDBAR-ONLY</div>
+            <div class="bc-gate">Ships with the Sandbar track — sprint 1 (M13)</div>
+          </div>
         </div>
         <div class="bc-actions">
           <div class="left"><button class="bc-link" id="tut-back" type="button">&larr; MODE</button></div>
         </div>
       `
       el.querySelector('#tut-back')?.addEventListener('click', () => showStep('mode'))
+      const launchTutorial = (): void => {
+        // Reuse the singleplayer commit path so picks → URL handling
+        // stays in one place; just stamp the tutorial flag on top.
+        const url = new URL(window.location.href)
+        url.search = ''
+        url.searchParams.set('race', '1')
+        url.searchParams.set('track', picks.trackId)
+        url.searchParams.set('bike', picks.bikeId)
+        url.searchParams.set('tutorial', '1')
+        finish(url.toString())
+      }
+      const startCard = el.querySelector<HTMLElement>('#tut-start')
+      startCard?.addEventListener('click', launchTutorial)
+      startCard?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          launchTutorial()
+        }
+      })
       return el
     }
 

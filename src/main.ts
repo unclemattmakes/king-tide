@@ -827,6 +827,7 @@ async function boot() {
     onFinish: () => {
       controls.setFinishShown(true)
     },
+    tutorialMode: params.get('tutorial') === '1',
   })
 }
 

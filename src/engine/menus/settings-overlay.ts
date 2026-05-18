@@ -24,9 +24,11 @@ import {
   setAIDifficulty,
   setAntiGravCameraIntensity,
   setRubberBandAssist,
+  setTutorialSubtitles,
   setWavePumpIntensity,
   type WavePumpIntensity,
 } from '@/engine/player-settings'
+import { buildReplayTutorialHref } from '@/engine/tutorial/tutorial-launch'
 
 type Tab = 'audio' | 'video' | 'controls' | 'gameplay'
 
@@ -295,16 +297,19 @@ const TAB_SPECS: TabSpec[] = [
       {
         id: 'gp-subtitles',
         label: 'Subtitles for tutorial',
-        control: { kind: 'toggle', defaultValue: true },
-        enabled: false,
-        gate: 'Ships with the tutorial framework',
+        control: { kind: 'toggle', defaultValue: playerSettings.tutorialSubtitles },
+        enabled: true,
+        gate: 'Tutorial HUD shows the title chyron either way — this toggles the hint line.',
       },
       {
         id: 'gp-replay-tutorial',
         label: 'Replay tutorial',
-        control: { kind: 'button', label: 'RUN AGAIN…' },
-        enabled: false,
-        gate: 'Available once Sandbar ships',
+        control: {
+          kind: 'button',
+          label: playerSettings.tutorialCompleted ? 'REPLAY…' : 'RUN…',
+        },
+        enabled: true,
+        gate: 'Loads the current track with the tutorial framework armed.',
       },
       {
         id: 'gp-leaderboard-submit',
@@ -448,6 +453,11 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
           setRubberBandAssist(cb.checked)
         })
       }
+      if (spec.enabled && spec.id === 'gp-subtitles') {
+        cb.addEventListener('change', () => {
+          setTutorialSubtitles(cb.checked)
+        })
+      }
       return cb
     }
     if (c.kind === 'select') {
@@ -485,6 +495,16 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
     btn.className = 'sm-btn'
     btn.textContent = c.label
     btn.disabled = !spec.enabled
+    if (spec.enabled && spec.id === 'gp-replay-tutorial') {
+      btn.addEventListener('click', () => {
+        // Build a tutorial-mode URL preserving the player's current
+        // track/bike picks (best-effort — falls back to manifest first
+        // track if no race is in progress). The page reload is
+        // intentional: routes through the same boot flow as the
+        // menu's track-pick path.
+        window.location.assign(buildReplayTutorialHref())
+      })
+    }
     return btn
   }
 
