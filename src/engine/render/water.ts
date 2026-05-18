@@ -1755,40 +1755,47 @@ export function createWaterMesh(
   // cyan-green. σ values are tuned for stylized clarity (real
   // open-ocean σ_R is closer to 0.7/m and would absorb to navy by
   // 5 m; we keep some color reach so the surf-photo cyan body reads
-  // out to ~10 m, which is the visual target).
+  // out to ~10 m of path, which is the visual target).
   //
-  // Path length `closeness` is the existing scene-depth → water-depth
-  // distance along the view ray (so grazing samples accumulate more
-  // absorption than vertical samples — Beer-Lambert's natural
-  // grazing-darkens behaviour).
+  // Path length uses the FLAT vertical water depth (`waterDepthFrag`)
+  // with a 1/ndotv grazing correction, NOT the view-ray closeness.
+  // The view-ray version varied per-vertex with wave displacement
+  // (crest vs trough), producing visible "contour-stripe" bands
+  // along constant-height isolines of the wave surface — the user-
+  // flagged wave-stripe artifact. Vertical depth is independent of
+  // wave displacement, so the body color reads as smooth gradient
+  // across each wave face instead of contour lines.
   //
   // "Sandy seabed" assumed bright cyan-white for the transmitted
   // term. Where there's no real seabed (open ocean past the
-  // heightmap, or scene-depth-copy disabled on WebGPU+MSAA),
-  // closeness reads 0 — depthValidGate ramps the absorption back to
-  // pure-deep so we don't accidentally paint the whole open ocean
-  // with seabed-tinted shallows.
-  // σ tuned for stylized clarity: real open-ocean σ_R ≈ 0.7/m would
-  // absorb to navy by 5 m. We use 0.35 so cyan body reads out to
-  // ~10 m of path (the surf-photo visual target). Wrapped in a
-  // scale uniform so the debug menu can scrub absorption rate live
-  // — higher rate = darker deep ocean / shorter visible-light reach.
+  // heightmap), waterDepthFrag is the DEEP_SENTINEL (very large
+  // positive number) → transmission → 0 → body collapses to
+  // deepColor, which is what we want for open ocean.
   const BODY_ABSORPTION_DEFAULT = 1
   const bodyAbsorptionUniform = uniform(BODY_ABSORPTION_DEFAULT)
   const sigmaR = float(0.35).mul(bodyAbsorptionUniform)
   const sigmaG = float(0.06).mul(bodyAbsorptionUniform)
   const sigmaB = float(0.015).mul(bodyAbsorptionUniform)
-  const transR = exp(sigmaR.mul(closeness).negate())
-  const transG = exp(sigmaG.mul(closeness).negate())
-  const transB = exp(sigmaB.mul(closeness).negate())
+  // Approximate the view-ray path length through water as
+  // (vertical depth) / cos(view angle from vertical), clamped so
+  // grazing samples don't blow up to infinity. cos(view from
+  // vertical) is the y-component of the view direction, which we
+  // approximate from ndotv on the FLAT plane — using the normal
+  // would re-introduce wave-displacement banding here too.
+  const verticalViewForOpticalPath = max(viewDir.y, float(0.15))
+  const opticalPath = max(waterDepthFrag, float(0)).div(verticalViewForOpticalPath)
+  const transR = exp(sigmaR.mul(opticalPath).negate())
+  const transG = exp(sigmaG.mul(opticalPath).negate())
+  const transB = exp(sigmaB.mul(opticalPath).negate())
   const seabedColor = vec3(0.85, 0.92, 0.85)
-  // "Do we have real depth data" gate. closeness < 0.25 m → either a
-  // pixel sitting right at the water-line OR the scene-depth texture
-  // is uninitialised (WebGPU+MSAA disables the depth copy — see
-  // `disableSceneDepthCopy` above). Smooth over the first half-meter
-  // and resolve to "treat as deep" for the no-data case so open
-  // ocean doesn't get painted with seabed transmission.
-  const depthValidGate = smoothstep(float(0.25), float(0.75), closeness)
+  // "Do we have real depth data" gate. Without a terrain heightmap
+  // installed, `vertexWaterDepth` returns the deep sentinel
+  // (`waterY − -10000` = ~10004) — so a tiny depth reading means
+  // either a pixel sitting right at the water-line OR no heightmap
+  // is bound. Smooth over the first half-meter and resolve to "treat
+  // as deep" for the no-data case so open ocean doesn't accidentally
+  // get seabed transmission.
+  const depthValidGate = smoothstep(float(0.25), float(0.75), waterDepthFrag)
   // Beer-Lambert: body = deepColor·(1−T) + seabedColor·T per channel.
   // Multiplying by depthValidGate folds in the validity check —
   // gate=0 collapses to deepColor regardless of T.
@@ -2604,7 +2611,9 @@ export function createWaterMesh(
   // for the long-path absorption look, but always within the
   // shallow-water envelope; foam stamps full opacity on top.
   const seabedSeeThrough = mix(float(0.55), float(0.96), float(1).sub(ndotv))
-  const shallowSeabedRange = float(1).sub(smoothstep(float(2), float(6), closeness))
+  // Use flat vertical water depth (same as Beer-Lambert) so the
+  // shallow-seabed transparency doesn't band along wave isolines.
+  const shallowSeabedRange = float(1).sub(smoothstep(float(2), float(6), waterDepthFrag))
   const shallowTransparency = depthValidGate.mul(shallowSeabedRange)
   const depthGatedAlpha = mix(float(0.98), seabedSeeThrough, shallowTransparency)
   mat.opacityNode = mix(depthGatedAlpha, float(0.98), foamMask)
