@@ -13,6 +13,13 @@ Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics a
 - [Blender conventions](docs/blender-conventions.md) — quick-reference for the legacy all-in-glb path
 - [Dev + modder docs site](docs-site/) — VitePress site (`pnpm docs:dev`) covering build, gameplay, asset pipeline, and reference
 - [Contributing](CONTRIBUTING.md) — workflow, conventions, testing expectations
+- [Cross-browser support](docs/cross-browser.md) — tier matrix + how to run `E2E_BROWSERS=all pnpm e2e`
+- [Steam Deck build path](docs/steam-deck.md) — Tauri 2 wrapper, profile defaults, on-device testing
+
+## Build targets
+
+- **Web** — Chrome / Edge (tier 1), Firefox (tier 1), Safari iOS 18.2+ / macOS Sonoma+ (tier 2). See [`docs/cross-browser.md`](docs/cross-browser.md).
+- **Steam Deck** — Tauri 2 wrapper around the web build, planned. See [`docs/steam-deck.md`](docs/steam-deck.md) for the layout, profile, and testing notes.
 
 ## What's playable
 

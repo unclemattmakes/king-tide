@@ -8,6 +8,14 @@ import { expect, test } from '@playwright/test'
 // still real (bike rides waves, doesn't sink) — we just need more wall
 // time for the sim to advance enough to observe them.
 test.describe('M2 water', () => {
+  // WebKit on Linux uses software WebGL (WebKitGTK has no real GPU passthrough
+  // in Playwright); the Gerstner water shader's per-fragment foam loop is
+  // unreliable at single-digit fps. Run on macOS WebKit for real coverage.
+  test.skip(
+    ({ browserName }) => browserName === 'webkit' && process.platform === 'linux',
+    'WebKit-Linux uses software WebGL; this GPU-heavy suite is unreliable. Run on macOS for WebKit coverage.',
+  )
+
   test('bike drives off the island onto water and rides waves', async ({ page }) => {
     test.setTimeout(90_000)
     const errors: string[] = []
