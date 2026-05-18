@@ -386,6 +386,18 @@ Sprint 3 (Phase E).
 
 ### Phase C — Sprint 1: Reef Cup + tutorial (M13, ~2 weeks)
 
+**Shipped 2026-05-18.** All four seeds materialise their `.blend` +
+`.glb` + JSON + hero/thumb JPGs via `pnpm seed:track-<id>`. Headless
+build numbers below; each track is now opening-in-Blender-ready for
+art tuning.
+
+| Track | Base template | Arc length | Lap target | GLB size |
+|---|---|---|---|---|
+| Sandbar (tutorial) | template-island | ~1530 m | ~61 s | 8.4 MB |
+| South Beach Sunken | template-island | ~1191 m | ~48 s | 8.5 MB |
+| Hatteras Light | template-island | ~1263 m | ~50 s | 8.5 MB |
+| Cape Town Drift | template-island | ~1200 m | ~48 s | 8.6 MB |
+
 Lowest-difficulty tracks first; uses the most mature templates.
 
 | Track | Base template | Key landmarks | Wave zones | VFX emitters | Estimated effort |

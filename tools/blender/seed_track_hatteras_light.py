@@ -460,9 +460,11 @@ BOOST_PAD_POSITIONS = (
 
 def _add_pickups_and_boosts(scene) -> None:
     """Drop pickup_NN empties + boost_NN empties at the configured
-    positions. The addon's export pass walks these (``kind=pickup`` /
+    positions. The addon's export pass walks these (``kind=pickup_spawn`` /
     ``kind=boost_pad``) into the JSON ``pickupSpawns`` / ``boostPads``
-    arrays."""
+    arrays. Kind values + extras must match the addon's validator in
+    ``track_meta.py::validate_track_scene`` — boost pads need
+    ``strength`` per the kind registry contract."""
     import bpy
     for i, pos in enumerate(PICKUP_POSITIONS):
         name = f"pickup_{i:02d}"
@@ -472,7 +474,7 @@ def _add_pickups_and_boosts(scene) -> None:
             scene.collection.objects.link(obj)
         obj.empty_display_type = "SPHERE"
         obj.empty_display_size = 2.0
-        obj["kind"] = "pickup"
+        obj["kind"] = "pickup_spawn"
         obj.location = pos
     for i, pos in enumerate(BOOST_PAD_POSITIONS):
         name = f"boost_{i:02d}"
@@ -485,6 +487,7 @@ def _add_pickups_and_boosts(scene) -> None:
         obj["kind"] = "boost_pad"
         obj["half_width"] = 4.0
         obj["half_depth"] = 4.0
+        obj["strength"] = 1.5
         obj.location = pos
         # Aim boost along the spline tangent at this point — for now
         # leave at world-Z up; an author tunes per-pad direction in the
