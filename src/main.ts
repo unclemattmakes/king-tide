@@ -21,6 +21,7 @@ import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
 import { createFxSystem } from './engine/render/fx'
 import { createHorizonRing } from './engine/render/horizon-ring'
+import { createAntiGravDebugRenderer } from './engine/render/anti-grav-debug'
 import { createPhysicsDebugRenderer } from './engine/render/physics-debug'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
@@ -531,6 +532,16 @@ async function boot() {
     physicsDebug.setEnabled(true)
   }
 
+  // Anti-grav visualization — coloured spline polylines + "up" arrows at
+  // arc-length intervals, plus volume-zone wireframes. Toggle: F3, or
+  // `?debug=anti-grav` boot-time, or `window.__hover.toggleAntiGravDebug()`.
+  // Static geometry (built once); cheap when off (group.visible = false).
+  const antiGravDebug = createAntiGravDebugRenderer(track)
+  scene.add(antiGravDebug.group)
+  if (params.get('debug') === 'anti-grav') {
+    antiGravDebug.setEnabled(true)
+  }
+
   // Audio: lazy-init AudioContext on first user gesture (browsers block
   // autoplay until then). The engine itself is safe to call before
   // `resume()` — every method early-returns without a context.
@@ -584,6 +595,31 @@ async function boot() {
   }
   updateCollisionPill()
 
+  // Reuses the collision-pill style — single HUD pill that shows whichever
+  // debug overlay is on. Built lazily so tracks without anti-grav don't
+  // create the element.
+  let antiGravPill: HTMLElement | null = null
+  function updateAntiGravPill(): void {
+    if (antiGravDebug.isEnabled()) {
+      if (!antiGravPill) {
+        antiGravPill = document.createElement('span')
+        antiGravPill.id = 'hud-anti-grav'
+        antiGravPill.style.cssText =
+          'display:inline-block;margin-left:6px;padding:2px 6px;border-radius:3px;background:rgba(160,100,255,0.85);color:#fff;font:11px ui-monospace,Menlo,Consolas,monospace'
+        if (collisionPill?.parentElement) {
+          collisionPill.parentElement.appendChild(antiGravPill)
+        } else {
+          document.body.appendChild(antiGravPill)
+        }
+      }
+      antiGravPill.textContent = 'anti-grav debug: ON (F3)'
+      antiGravPill.style.display = 'inline-block'
+    } else if (antiGravPill) {
+      antiGravPill.style.display = 'none'
+    }
+  }
+  updateAntiGravPill()
+
   // Pause menu, finish-screen actions, and keyboard bindings. See
   // `src/boot/controls.ts` — returns a small handle the game loop polls
   // for pause state + mutates when the finish screen shows.
@@ -598,8 +634,10 @@ async function boot() {
     raceHud,
     audio,
     physicsDebug,
+    antiGravDebug,
     onSetAutoPlay: applyAutoPlayTag,
     onCollisionDebugChanged: updateCollisionPill,
+    onAntiGravDebugChanged: updateAntiGravPill,
   })
 
   installDebugApi(state, {
@@ -618,6 +656,12 @@ async function boot() {
       return on
     },
     isCollisionDebugOn: () => physicsDebug.isEnabled(),
+    toggleAntiGravDebug: () => {
+      const on = antiGravDebug.toggle()
+      updateAntiGravPill()
+      return on
+    },
+    isAntiGravDebugOn: () => antiGravDebug.isEnabled(),
     skipCountdown: () => raceHud.skipCountdown(),
     determinismMode: () => determinismMode,
     waveField: () => waveField,

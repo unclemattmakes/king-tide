@@ -73,6 +73,10 @@ export type HoverDebug = {
   toggleCollisionDebug(): boolean
   /** Current collision-debug overlay state. */
   isCollisionDebugOn(): boolean
+  /** Toggle the anti-grav spline + arrow visualization. Returns new state. */
+  toggleAntiGravDebug(): boolean
+  /** Current anti-grav debug overlay state. */
+  isAntiGravDebugOn(): boolean
   /** M10.2 determinism harness. Present only when ?determinism=1 was set
    *  at boot. The sim's RAF-driven step is gated off in that mode; the
    *  harness drives `simulateStep` here. */
@@ -154,6 +158,8 @@ export type DebugAccessors = {
   isAutoPlay(): boolean
   toggleCollisionDebug(): boolean
   isCollisionDebugOn(): boolean
+  toggleAntiGravDebug(): boolean
+  isAntiGravDebugOn(): boolean
   /** Fast-forward the start countdown — used implicitly when an intent
    *  override is set so e2e tests don't have to wait through 3-2-1. */
   skipCountdown(): void
@@ -244,6 +250,8 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     isAutoPlay: () => accessors.isAutoPlay(),
     toggleCollisionDebug: () => accessors.toggleCollisionDebug(),
     isCollisionDebugOn: () => accessors.isCollisionDebugOn(),
+    toggleAntiGravDebug: () => accessors.toggleAntiGravDebug(),
+    isAntiGravDebugOn: () => accessors.isAntiGravDebugOn(),
     bikes: () => {
       if (!state.ready) return []
       const sim = accessors.sim()

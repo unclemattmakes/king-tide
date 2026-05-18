@@ -45,6 +45,7 @@ export interface ControlsOpts {
   raceHud: { isLocked(): boolean }
   audio: { isMuted(): boolean; setMuted(v: boolean): void }
   physicsDebug: { toggle(): boolean; isEnabled(): boolean }
+  antiGravDebug: { toggle(): boolean; isEnabled(): boolean }
   /** Called when the user toggles auto-play. Implementation lives in
    *  main.ts because it needs to add/remove `AITag` against the player
    *  entity — keeping it there avoids leaking AI-component imports
@@ -53,6 +54,8 @@ export interface ControlsOpts {
   /** Called when the user toggles collision debug — updates the HUD
    *  pill. */
   onCollisionDebugChanged(): void
+  /** Called when the user toggles anti-grav debug — updates the HUD pill. */
+  onAntiGravDebugChanged(): void
 }
 
 export function installControls(opts: ControlsOpts): ControlsHandle {
@@ -67,8 +70,10 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     raceHud,
     audio,
     physicsDebug,
+    antiGravDebug,
     onSetAutoPlay,
     onCollisionDebugChanged,
+    onAntiGravDebugChanged,
   } = opts
 
   let autoPlay = false
@@ -249,6 +254,10 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     } else if (e.code === 'F2') {
       physicsDebug.toggle()
       onCollisionDebugChanged()
+      e.preventDefault()
+    } else if (e.code === 'F3') {
+      antiGravDebug.toggle()
+      onAntiGravDebugChanged()
       e.preventDefault()
     } else if (e.code === 'KeyM') {
       audio.setMuted(!audio.isMuted())
