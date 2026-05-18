@@ -53,6 +53,7 @@ export function createUndoStack(draft: Track, rebuild: () => void): UndoStack {
     draft.pickupSpawns = restored.pickupSpawns
     draft.boostPads = restored.boostPads
     draft.antiGravZones = Array.isArray(restored.antiGravZones) ? restored.antiGravZones : []
+    draft.waveZones = Array.isArray(restored.waveZones) ? restored.waveZones : []
     draft.props = Array.isArray(restored.props) ? restored.props : []
     if (restored.water) draft.water = restored.water
     if (restored.environmentGlb) draft.environmentGlb = restored.environmentGlb

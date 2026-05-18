@@ -77,6 +77,7 @@ export function emptyDraftTrack(id: string): Track {
     pickupSpawns: [],
     boostPads: [],
     antiGravZones: [],
+    waveZones: [],
     props: [],
     surfaces: [],
   }

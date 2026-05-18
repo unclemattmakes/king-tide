@@ -49,6 +49,8 @@ export interface ReplayModeOpts {
   pickupRender: (dt: number) => void
   combatRender: (dt: number) => void
   fxTick: (dt: number) => void
+  /** Unified track-emitter particle system — same shape as the live loop. */
+  particleTick: (dt: number) => void
   physicsDebug: { tick: () => void }
   /** Shared boot state — flipped to `ready` once the first replay frame
    *  is queued; `frame` / `fps` accumulated each render frame for the
@@ -86,6 +88,7 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     pickupRender,
     combatRender,
     fxTick,
+    particleTick,
     physicsDebug,
     state,
     hud,
@@ -302,6 +305,7 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     pickupRender(dt)
     combatRender(dt)
     fxTick(dt)
+    particleTick(dt)
     physicsDebug.tick()
 
     spectatorHud.refresh()

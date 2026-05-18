@@ -31,6 +31,12 @@ export type Track = {
    *  down). Author rotates the zone box so its local floor lies flat on the
    *  road surface; the bike re-orients to that plane while inside. */
   antiGravZones: AntiGravZone[]
+  /** Wave-mastery volume zones — oriented boxes that scale the global
+   *  Gerstner wave amplitude / frequency inside the box, with an optional
+   *  periodic surge (Aqualand tsunami) and swell-direction override. Soft
+   *  edges via `blendRadiusM` so the boundary isn't visible. Required
+   *  field; defaults to empty for tracks with uniform global seas. */
+  waveZones: WaveZone[]
   /** Target gate spacing in metres, used by the editor's "Auto-place gates
    *  from spline" action and Blender's gate-preview overlay. The actual
    *  count is rounded to fit the closed-loop arc length cleanly; see
@@ -48,6 +54,14 @@ export type Track = {
   water?: WaterConfig
   /** Optional sky / atmosphere tuning. If absent, the runtime defaults are used. */
   sky?: SkyConfig
+  /** Optional distant-horizon overrides. If absent, the runtime falls
+   *  back to a procedural silhouette seeded off the track id hash —
+   *  matches the historical look. Authors can either tune the procedural
+   *  knobs here (radius, peakHeight, seed, silhouetteDark) or author a
+   *  bespoke mesh in Blender — when a `kind=horizon` mesh ships inside
+   *  `environmentGlb`, the runtime uses its geometry directly and these
+   *  knobs only contribute `silhouetteDark`. */
+  horizon?: HorizonConfig
   /** Optional terrain-shader knobs. Authored in the Blender addon panel and
    *  written into the JSON on export. The runtime applies these as uniforms
    *  when it builds the terrain material — see
@@ -210,6 +224,57 @@ export type AntiGravZone = {
 }
 
 /**
+ * Per-track wave-field modifier. While a sample point's XZ projection is
+ * inside the zone's oriented bounding box (vertical extent is generous and
+ * mostly informational — y is rarely a useful gate for surface samples), the
+ * global Gerstner amplitudes scale by `heightMult` and per-wave frequencies
+ * scale by `freqMult`. An optional periodic surge term is added on top to
+ * drive the Aqualand-style tsunami timer. Soft edges across `blendRadiusM`
+ * keep the OBB face invisible; multi-zone overlaps use a soft-max so the
+ * larger amplifier wins without a step at the seam.
+ *
+ * Authoring lives in Blender as `wave_zone_NN` empties; runtime evaluation
+ * is in `wave-field.ts::sampleZoneFactors`.
+ */
+export type WaveZone = {
+  position: Vec3
+  rotation: Quat
+  /** Half-extent along the box's local X axis (m). Also the axis the
+   *  dominant swell aligns to when `directionDeg` is unset. */
+  halfWidth: number
+  /** Half-extent along the box's local Y axis (m). Vertical clearance —
+   *  most surface sample callers ignore Y entirely, but kept for
+   *  future bike-in-zone semantics (e.g. pump charge multipliers). */
+  halfHeight: number
+  /** Half-extent along the box's local Z axis (m). */
+  halfDepth: number
+  /** Multiplier on global wave amplitude inside the zone. 1 = neutral,
+   *  >1 = heavier waves, <1 = calmer. Required positive. */
+  heightMult: number
+  /** Multiplier on per-wave frequency (1/wavelength) inside the zone.
+   *  1 = neutral, >1 = shorter wavelengths (choppier), <1 = longer
+   *  (rolling swells). Required positive. */
+  freqMult: number
+  /** Optional dominant swell-direction override in degrees, world-XZ.
+   *  0° = +X swell train, 90° = +Z. When set, replaces the global
+   *  `waveBearing` for samples inside this zone (with the same blend
+   *  envelope as the multipliers). Leave undefined to inherit the
+   *  global bearing. */
+  directionDeg?: number
+  /** Optional surge period in seconds. Combined with `surgeAmplitude`
+   *  to add `surgeAmplitude * max(0, sin(2π·t / surgePeriodS))` to the
+   *  zone's sampled height. Both must be set together. */
+  surgePeriodS?: number
+  /** Optional surge amplitude (m). See `surgePeriodS`. */
+  surgeAmplitude?: number
+  /** Soft-edge falloff distance, metres. The zone's blend weight
+   *  smoothsteps from 0 (outside this distance from the box surface)
+   *  to 1 (inside the box). Keeps amplitude continuous across the OBB
+   *  face. Required positive. */
+  blendRadiusM: number
+}
+
+/**
  * Editor-authored static prop. The `type` discriminator decides how `size`
  * is interpreted and what mesh + collider the runtime builds.
  *
@@ -274,4 +339,35 @@ export type SkyConfig = {
   fogNear?: number
   fogFar?: number
   timeOfDay?: number
+}
+
+/**
+ * Per-track distant-horizon overrides. All fields optional; absent fields
+ * fall back to the defaults baked into
+ * [horizon-ring.ts](../../engine/render/horizon-ring.ts) (radius 1400,
+ * peakHeight 300, seed hashed from the track id, silhouetteDark 0.45).
+ *
+ *   radius          — ring radius in metres. Far enough that bike
+ *                     traverse parallax is negligible, close enough to
+ *                     survive the scene fog. Default 1400.
+ *   peakHeight      — max silhouette peak above y=0, in metres. Drives
+ *                     how big "distant mountains" feel. Default 300.
+ *   seed            — PRNG seed for the procedural fallback's layered-
+ *                     sine shape. Ignored when the GLB ships a
+ *                     `kind=horizon` mesh. If absent, the runtime hashes
+ *                     the track id so every track is procedurally
+ *                     distinct without authoring.
+ *   silhouetteDark  — 0..1 multiplier on the horizon colour applied at
+ *                     peak tops. < 1 = darker silhouette; > 1 lifts
+ *                     toward a haze read. Default 0.45.
+ *
+ * Authoring lives in two places: knobs in the Blender addon's Horizon
+ * sub-panel write here; a bespoke mesh authored via *Add Horizon Ring*
+ * lives in the GLB with `kind=horizon` and wins when present.
+ */
+export type HorizonConfig = {
+  radius?: number
+  peakHeight?: number
+  seed?: number
+  silhouetteDark?: number
 }

@@ -21,6 +21,7 @@
     "gen:tracks": "node tools/blender/run.mjs build_track specs/tracks",
     "gen:all": "node tools/blender/run.mjs build_all",
     "gen:manifest": "node tools/blender/run.mjs manifest",
+    "gen:fx-atlas": "python tools/blender/build_sprite_atlas.py",
     "install:blender-addon": "node tools/blender/install-addon.mjs",
     "test:blender": "node tools/blender/test-addon.mjs",
     "seed:landmarks-library": "node tools/blender/seed.mjs seed_landmarks_library.py",

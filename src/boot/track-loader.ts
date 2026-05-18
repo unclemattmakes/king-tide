@@ -42,6 +42,16 @@ export type LoadedTrack = {
    *  surf foam. Null in edit mode and for the empty-draft fallback (no
    *  terrain to sample). */
   terrainHeightmap: TerrainHeightmap | null
+  /** Author-supplied horizon mesh geometry pulled out of the track's GLB
+   *  (any mesh tagged `kind=horizon`). Forwarded to `createHorizonRing`
+   *  so the bespoke silhouette replaces the procedural fallback. Absent
+   *  when the GLB shipped no horizon mesh (or the track has no GLB). */
+  horizonGeometry?: THREE.BufferGeometry
+  /** Loaded environment-GLB scene root, when present. Boot scans this
+   *  for `kind=emitter` nodes and hands them to the particle system.
+   *  Absent for procedural tracks (lagoon, cliffside) and for the
+   *  empty-draft editor fallback. */
+  environmentGlbRoot?: THREE.Object3D
 }
 
 export async function loadTrackForBoot(opts: {
@@ -101,6 +111,8 @@ export async function loadTrackForBoot(opts: {
   const jsonExists = jsonRes.ok && jsonContentType.includes('json')
   if (jsonExists) {
     const track = buildTrackFromJson(JSON.parse(await jsonRes.text()))
+    let horizonGeometry: THREE.BufferGeometry | undefined
+    let environmentGlbRoot: THREE.Object3D | undefined
     if (track.environmentGlb && !editMode) {
       const env = await loadGlbTrackVisuals(track.environmentGlb, {
         ...(track.terrainShader ? { terrainShader: track.terrainShader } : {}),
@@ -108,8 +120,15 @@ export async function loadTrackForBoot(opts: {
       scene.add(env.scene)
       attachTrackColliders(env.scene, phys)
       terrainRoots.push(env.scene)
+      horizonGeometry = env.horizonGeometry
+      environmentGlbRoot = env.scene
     }
-    return { track, terrainHeightmap: buildTerrainHeightmap(terrainRoots) }
+    return {
+      track,
+      terrainHeightmap: buildTerrainHeightmap(terrainRoots),
+      ...(horizonGeometry ? { horizonGeometry } : {}),
+      ...(environmentGlbRoot ? { environmentGlbRoot } : {}),
+    }
   }
   if (!jsonRes.ok && jsonRes.status !== 404) {
     throw new Error(`track: fetch ${jsonUrl} failed: ${jsonRes.status} ${jsonRes.statusText}`)
@@ -134,13 +153,22 @@ export async function loadTrackForBoot(opts: {
       name: trackId,
       lapsToFinish: 3,
     })
+    let horizonGeometry: THREE.BufferGeometry | undefined
+    let environmentGlbRoot: THREE.Object3D | undefined
     if (!editMode) {
       const env = await loadGlbTrackVisuals(glbUrl)
       scene.add(env.scene)
       attachTrackColliders(env.scene, phys)
       terrainRoots.push(env.scene)
+      horizonGeometry = env.horizonGeometry
+      environmentGlbRoot = env.scene
     }
-    return { track, terrainHeightmap: buildTerrainHeightmap(terrainRoots) }
+    return {
+      track,
+      terrainHeightmap: buildTerrainHeightmap(terrainRoots),
+      ...(horizonGeometry ? { horizonGeometry } : {}),
+      ...(environmentGlbRoot ? { environmentGlbRoot } : {}),
+    }
   }
   if (editMode) {
     return { track: emptyDraftTrack(trackId), terrainHeightmap: null }

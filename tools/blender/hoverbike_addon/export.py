@@ -210,6 +210,18 @@ class HOVERBIKE_OT_export_track(Operator):
                 self.report({"ERROR"}, f"validation: {e}")
             return {"CANCELLED"}
 
+        # Auto-bake path-worn into ``baked_path`` so authors who never
+        # touched the bake button still ship with a worn racing line.
+        # The GN graph reads ``baked_path`` into ``COLOR_0.B`` during
+        # export-time eval, so this has to happen *before* the GLB
+        # write. Non-fatal — missing terrain / spline downgrades to a
+        # WARNING and the export continues with whatever was last baked.
+        from .bake import auto_bake_path_wear_for_export
+
+        ok, msg = auto_bake_path_wear_for_export(context.scene)
+        if not ok:
+            self.report({"WARNING"}, msg)
+
         os.makedirs(os.path.dirname(glb_path), exist_ok=True)
         _ensure_active_object(context)
         try:
