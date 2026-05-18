@@ -29,6 +29,7 @@ import {
   encodeInputFrameInto,
   INPUT_FRAME_WIRE_BYTES,
 } from '@/engine/net/input-frame'
+import { playerSettings } from '@/engine/player-settings'
 import type { ChaseCamera } from '@/engine/render/camera'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
@@ -36,15 +37,22 @@ import type { RaceHud } from '@/engine/render/race-hud'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
 import { type BikeImpact, updateUnderwaterFog } from '@/engine/render/water'
+import { createWavePumpHud } from '@/engine/render/wave-pump-hud'
 import { serializeReplay } from '@/engine/replay/format'
 import type { ReplayRecorder } from '@/engine/replay/recorder'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { vecHorizontalLength } from '@/engine/sim/physics/vec'
 import type { WaveFieldState } from '@/engine/sim/water/wave-field'
+import { createWavePumpObserver } from '@/engine/wave-pump-observer'
 import type { AssetManifest } from '@/game/assets/manifest'
 import type { BikeVariant } from '@/game/bikes/variants'
-import { HoverStateStore, RBHandleStore } from '@/game/components'
+import {
+  BikeStatsStore,
+  ControlIntentStore,
+  HoverStateStore,
+  RBHandleStore,
+} from '@/game/components'
 import { ExplosionTag, MineTag, MissileTag } from '@/game/components/combat'
 import type { PickupType } from '@/game/components/pickup'
 import { RacerStore } from '@/game/components/race'
@@ -200,6 +208,13 @@ export function startGameLoop(opts: GameLoopOpts): void {
   let prevMineCount = 0
   let prevMissileCount = 0
   let prevExplosionCount = 0
+
+  // Wave-pump signal — detects clean crest launches on the player bike
+  // each render frame and fires the HUD widget + audio cue. Lives on
+  // the render side (not in simulateStep) because pump events are
+  // pure feedback — no determinism dependency, no replay obligations.
+  const wavePumpObserver = createWavePumpObserver()
+  const wavePumpHud = createWavePumpHud()
 
   const tmpPos = new THREE.Vector3()
   const tmpQuat = new THREE.Quaternion()
@@ -394,6 +409,33 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // Audio dispatch — runs once per render frame, after physics.
     // Continuous engine + wind layers are driven by the player's speed.
     audio.tickEngine(state.playerSnapshot?.speed ?? 0)
+
+    // Wave-pump signal — observer reads the player's hover + velocity
+    // + throttle state and fires on a clean crest launch. Skipped while
+    // auto-play is on (we're driving for the rider, not pumping). The
+    // observer enforces its own cooldown so the per-frame call is
+    // cheap (~one struct comparison + a few number checks).
+    if (!control.isAutoPlay() && state.playerSnapshot) {
+      const hoverState = HoverStateStore.get(playerEid)
+      const intent = ControlIntentStore.get(playerEid)
+      const stats = BikeStatsStore.get(playerEid)
+      if (hoverState && intent && stats) {
+        const pump = wavePumpObserver.detect(now, {
+          surfaceIsWater: hoverState.surfaceIsWater,
+          isGrounded: hoverState.isGrounded,
+          vy: state.playerSnapshot.velocity.y,
+          forwardSpeed: state.playerSnapshot.speed,
+          topSpeed: stats.topSpeed,
+          throttle: Math.max(0, intent.throttle),
+        })
+        if (pump) {
+          wavePumpHud.pump(pump.strength)
+          if (playerSettings.wavePumpIntensity !== 'off') {
+            audio.wavePump(pump.strength)
+          }
+        }
+      }
+    }
 
     // Player slot transitions: collected (null → X), or fired with a
     // non-spawning effect (boost / shield). Mine and missile fires also

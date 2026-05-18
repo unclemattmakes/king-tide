@@ -15,13 +15,14 @@ import { emptyIntent, type Intent, installInput } from './engine/input'
 import { installCameraLookInput } from './engine/input/camera-look'
 import { bindLazyMenuButton } from './engine/lazy-menu'
 import { isHostFor } from './engine/net/host-election'
+import { loadPlayerSettings } from './engine/player-settings'
+import { createAntiGravDebugRenderer } from './engine/render/anti-grav-debug'
 import { createChaseCamera } from './engine/render/camera'
 import { applyCloudShadowsToScene, buildCloudShadowMultiplier } from './engine/render/cloud-shadows'
 import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
 import { createFxSystem } from './engine/render/fx'
 import { createHorizonRing } from './engine/render/horizon-ring'
-import { createAntiGravDebugRenderer } from './engine/render/anti-grav-debug'
 import { createPhysicsDebugRenderer } from './engine/render/physics-debug'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
@@ -114,6 +115,7 @@ async function boot() {
   const finishBest = document.getElementById('finish-best')
 
   loadDevSettings()
+  loadPlayerSettings()
   installInput()
   installCameraLookInput()
 

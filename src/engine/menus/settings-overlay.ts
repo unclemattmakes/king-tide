@@ -17,8 +17,27 @@
  */
 
 import { installMenuGamepad, type MenuGamepad } from '@/engine/input/menu-gamepad'
+import {
+  playerSettings,
+  setWavePumpIntensity,
+  type WavePumpIntensity,
+} from '@/engine/player-settings'
 
 type Tab = 'audio' | 'video' | 'controls' | 'gameplay'
+
+/** Label↔intensity maps for the wave-pump select. Kept here so the
+ *  row spec (which uses string options) and the runtime wiring agree
+ *  on the conversion in a single place. */
+const WAVE_PUMP_LABEL: Record<WavePumpIntensity, string> = {
+  full: 'Full',
+  subtle: 'Subtle',
+  off: 'Off',
+}
+const WAVE_PUMP_VALUE: Record<string, WavePumpIntensity> = {
+  Full: 'full',
+  Subtle: 'subtle',
+  Off: 'off',
+}
 
 type Control =
   | { kind: 'slider'; min: number; max: number; step: number; defaultValue: number }
@@ -223,10 +242,10 @@ const TAB_SPECS: TabSpec[] = [
         control: {
           kind: 'select',
           options: ['Full', 'Subtle', 'Off'],
-          defaultValue: 'Full',
+          defaultValue: WAVE_PUMP_LABEL[playerSettings.wavePumpIntensity],
         },
-        enabled: false,
-        gate: 'Lights up once the wave-pump signal system ships',
+        enabled: true,
+        gate: 'Controls the in-race signal that fires on a successful pump.',
       },
       {
         id: 'gp-anti-grav',
@@ -409,6 +428,12 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
         sel.appendChild(o)
       }
       sel.disabled = !spec.enabled
+      if (spec.enabled && spec.id === 'gp-wave-pump') {
+        sel.addEventListener('change', () => {
+          const v = WAVE_PUMP_VALUE[sel.value]
+          if (v) setWavePumpIntensity(v)
+        })
+      }
       return sel
     }
     const btn = document.createElement('button')
