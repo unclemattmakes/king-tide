@@ -48,6 +48,7 @@ import { createAntiGravHud } from '@/engine/render/anti-grav-hud'
 import type { ChaseCamera } from '@/engine/render/camera'
 import { showCupResultsOverlay } from '@/engine/render/cup-results-screen'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
+import { shouldRenderFrame } from '@/engine/render/frame-cap'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
 import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finish-banner'
 import { createPerfHud, type RenderInfoLite } from '@/engine/render/perf-hud'
@@ -334,6 +335,12 @@ export function startGameLoop(opts: GameLoopOpts): void {
   let physAccum = 0
   let framesThisSecond = 0
   let fpsAccumStart = last
+  // Step 8 — wall-clock anchor for the framerate cap. The gate compares
+  // `now - lastRenderedAt` against `1000/cap` so a rAF tick that fires
+  // mid-interval just bails out of the render half (sim still steps,
+  // determinism preserved). `0` here means "fire the very next eligible
+  // frame" — the cap kicks in only after the first render lands.
+  let lastRenderedAt = 0
 
   // Step 8 — Perf overlay + rolling-window recorder. The recorder samples
   // every render frame (allocation-free); the HUD reads cached stats at
@@ -764,10 +771,19 @@ export function startGameLoop(opts: GameLoopOpts): void {
     }
     waveLineHud.tick(waveLineShimmer.currentMaxScore())
 
-    renderer.render(scene, camera)
-
-    state.frame += 1
-    framesThisSecond += 1
+    // Step 8 — frame-rate cap. When `playerSettings.framerateCap > 0`
+    // we skip the GPU render + frame counter on rAF ticks that arrive
+    // sooner than the cap allows. The fixed-step sim accumulator above
+    // already ran; only the render half drops. This keeps determinism
+    // independent of the cap and is the Steam Deck path's hot knob
+    // (60 fps cap = ~½ the GPU power of uncapped on a 90 Hz panel).
+    const renderThisFrame = shouldRenderFrame(now, lastRenderedAt, playerSettings.framerateCap)
+    if (renderThisFrame) {
+      renderer.render(scene, camera)
+      lastRenderedAt = now
+      state.frame += 1
+      framesThisSecond += 1
+    }
     if (now - fpsAccumStart >= 500) {
       state.fps = (framesThisSecond * 1000) / (now - fpsAccumStart)
       framesThisSecond = 0

@@ -89,9 +89,22 @@ let activeProfile: DeckProfile | null = null
  * we don't auto-run because the detection has false-positive paths
  * (any 1280×800 desktop browser will trip the viewport heuristic).
  *
- * The profile is read by the renderer (framerate cap), input subsystem
- * (gamepad-first), and main.ts (fullscreen on first gesture). We just
- * stash it on a module-level singleton; consumers ask via getDeckProfile.
+ * Mutates `playerSettings` so the persisted profile sticks across
+ * sessions (and so the Settings → Video rows reflect the active values
+ * on first paint). User overrides via the Settings overlay are
+ * preserved — we only write profile values when the player hasn't
+ * already chosen something stricter. Specifically:
+ *
+ *   - `framerateCap`: respect any non-zero existing value (a player
+ *     who set 30 fps for battery doesn't get bumped to 60 just because
+ *     detection re-ran on a reload).
+ *   - `fullscreenPreferred`: profile force-flips ON because Gaming
+ *     Mode is broken without it. A Desktop-Mode user who flipped it
+ *     OFF will see it return after a detection retrigger; that's a
+ *     known edge case documented in `docs/steam-deck.md`.
+ *
+ * `preferGamepadInput` has no player-settings counterpart yet — it's
+ * a future hook for the rebind menu's button-glyph swap.
  */
 export function applyDeckProfile(): DeckProfile {
   const profile: DeckProfile = {
@@ -100,6 +113,23 @@ export function applyDeckProfile(): DeckProfile {
     requestFullscreenOnGesture: true,
   }
   activeProfile = profile
+
+  // Push profile values into playerSettings via the setters so the
+  // persisted blob reflects the Deck baseline and the Settings overlay
+  // paints them correctly on next open. Lazy import to keep this module
+  // dependency-light for the unit-test path that exercises detection
+  // without spinning up the full settings store.
+  void import('./player-settings').then(
+    ({ playerSettings, setFramerateCap, setFullscreenPreferred }) => {
+      if (playerSettings.framerateCap === 0) {
+        setFramerateCap(profile.framerateCap)
+      }
+      if (!playerSettings.fullscreenPreferred) {
+        setFullscreenPreferred(true)
+      }
+    },
+  )
+
   // eslint-disable-next-line no-console
   console.info('[steam-deck] applied deck profile', profile)
   return profile

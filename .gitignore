@@ -31,3 +31,8 @@ tools/blender/lib/*.blend@
 # python bytecode (Blender headless scripts)
 __pycache__/
 *.pyc
+
+# Tauri build artefacts (Steam Deck wrapper)
+src-tauri/target/
+src-tauri/gen/
+src-tauri/steam_appid.txt

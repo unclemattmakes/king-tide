@@ -128,4 +128,39 @@ describe('applyDeckProfile', () => {
     applyDeckProfile()
     expect(getDeckProfile()).not.toBeNull()
   })
+
+  it('mutates playerSettings.framerateCap when it was left at default', async () => {
+    const { playerSettings, setFramerateCap, setFullscreenPreferred } = await import(
+      '../../src/engine/player-settings'
+    )
+    // Reset to defaults so the test is order-independent — other suites
+    // may have flipped these via setters earlier in the run.
+    setFramerateCap(0)
+    setFullscreenPreferred(false)
+    expect(playerSettings.framerateCap).toBe(0)
+    expect(playerSettings.fullscreenPreferred).toBe(false)
+
+    applyDeckProfile()
+    // applyDeckProfile fires its setter writes through `void import()…`,
+    // which lands on the next microtask. Flush the queue so the
+    // assertions see the post-import state.
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(playerSettings.framerateCap).toBe(60)
+    expect(playerSettings.fullscreenPreferred).toBe(true)
+  })
+
+  it('does not bump framerateCap when player already chose a stricter cap', async () => {
+    const { playerSettings, setFramerateCap } = await import('../../src/engine/player-settings')
+    setFramerateCap(30) // player picked battery-save mode
+    expect(playerSettings.framerateCap).toBe(30)
+
+    applyDeckProfile()
+    await new Promise((r) => setTimeout(r, 0))
+
+    // 30 is preserved — Deck profile only writes when the cap was 0
+    // (Unlimited / default). A player who explicitly picked 30 fps for
+    // battery doesn't get bumped to 60 because detection retriggered.
+    expect(playerSettings.framerateCap).toBe(30)
+  })
 })

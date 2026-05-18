@@ -34,6 +34,8 @@ import {
   setAudioBusVolume,
   setAudioMusicEnabled,
   setColorblindMode,
+  setFramerateCap,
+  setFullscreenPreferred,
   setGamepadDeadzone,
   setGamepadSensitivity,
   setHighContrast,
@@ -42,6 +44,7 @@ import {
   setLeaderboardHandle,
   setLeaderboardSubmit,
   setMotionSicknessReduction,
+  setPixelRatio,
   setReducedFlash,
   setReducedMotion,
   setRubberBandAssist,
@@ -53,6 +56,11 @@ import {
   type WaveLineIntensity,
   type WavePumpIntensity,
 } from '@/engine/player-settings'
+import {
+  FRAMERATE_CAP_LABELS,
+  framerateCapFromLabel,
+  framerateCapToLabel,
+} from '@/engine/render/frame-cap'
 import { buildReplayTutorialHref } from '@/engine/tutorial/tutorial-launch'
 
 type Tab = 'audio' | 'video' | 'controls' | 'gameplay' | 'accessibility' | 'network'
@@ -252,11 +260,31 @@ const TAB_SPECS: TabSpec[] = [
         label: 'Framerate cap',
         control: {
           kind: 'select',
-          options: ['Unlimited', '60', '90', '120', '144'],
-          defaultValue: 'Unlimited',
+          options: [...FRAMERATE_CAP_LABELS],
+          defaultValue: framerateCapToLabel(playerSettings.framerateCap),
         },
-        enabled: false,
-        gate: 'Manual cap ships with the perf pass (M17)',
+        enabled: true,
+        gate: 'Gates the render half of the rAF loop (sim still steps at 60 Hz). 60 fps is the Steam Deck default.',
+      },
+      {
+        id: 'video-pixel-ratio',
+        label: 'Render scale',
+        control: {
+          kind: 'slider',
+          min: 0.5,
+          max: 1.0,
+          step: 0.05,
+          defaultValue: playerSettings.pixelRatio,
+        },
+        enabled: true,
+        gate: 'Fraction of native pixels rendered. 0.75 ≈ 56% pixel count for a free GPU win.',
+      },
+      {
+        id: 'video-fullscreen',
+        label: 'Fullscreen on launch',
+        control: { kind: 'toggle', defaultValue: playerSettings.fullscreenPreferred },
+        enabled: true,
+        gate: 'Requests fullscreen on first user gesture. Auto-on under the Steam Deck profile.',
       },
       {
         id: 'video-quality',
@@ -734,6 +762,9 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       if (spec.enabled && spec.id === 'a11y-screen-shake') {
         range.addEventListener('input', () => setScreenShakeIntensity(Number(range.value)))
       }
+      if (spec.enabled && spec.id === 'video-pixel-ratio') {
+        range.addEventListener('input', () => setPixelRatio(Number(range.value)))
+      }
       return range
     }
     if (c.kind === 'toggle') {
@@ -794,6 +825,11 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       if (spec.enabled && spec.id === 'a11y-subtitles-always') {
         cb.addEventListener('change', () => {
           setSubtitlesAlwaysOn(cb.checked)
+        })
+      }
+      if (spec.enabled && spec.id === 'video-fullscreen') {
+        cb.addEventListener('change', () => {
+          setFullscreenPreferred(cb.checked)
         })
       }
       return cb
@@ -866,6 +902,11 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
         sel.addEventListener('change', () => {
           const v = COLORBLIND_VALUE[sel.value]
           if (v) setColorblindMode(v)
+        })
+      }
+      if (spec.enabled && spec.id === 'video-framecap') {
+        sel.addEventListener('change', () => {
+          setFramerateCap(framerateCapFromLabel(sel.value))
         })
       }
       return sel
