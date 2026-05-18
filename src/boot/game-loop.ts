@@ -32,6 +32,10 @@ import {
 import { formatLap } from '@/engine/garage'
 import { type Intent, inputSourceLabel, readPlayerIntent } from '@/engine/input'
 import { tickCameraLook } from '@/engine/input/camera-look'
+import {
+  type SubmitResult,
+  submitEntry as submitLeaderboardEntry,
+} from '@/engine/leaderboard-state'
 import { buildTrackList, nextTrackId } from '@/engine/menus/catalog'
 import {
   decodeInputFrameFrom,
@@ -847,6 +851,7 @@ function showFinishScreen(opts: FinishOpts): void {
   const watchBtn = document.getElementById('finish-watch-replay') as HTMLButtonElement | null
   const saveBtn = document.getElementById('finish-save-replay') as HTMLButtonElement | null
   let newGhostSaved = false
+  let leaderboardResult: SubmitResult | null = null
   if (recorder) {
     const replay = recorder.finalize({
       finishPosition: meStandingPosition,
@@ -864,6 +869,22 @@ function showFinishScreen(opts: FinishOpts): void {
         const existing = getGhostBestLap({ trackId, bikeId: playerVariant.id })
         if (existing === null || slice.bestLap < existing) {
           newGhostSaved = setGhost({ trackId, bikeId: playerVariant.id }, slice.replay)
+          // Local leaderboard submission piggybacks on the PB ghost
+          // save. Gated on the player's "Submit times" toggle so the
+          // off state is a true silence (no entry written). Handle
+          // falls back to 'YOU' inside the writer when the player
+          // hasn't set one — the rank still shows up on finish, and
+          // the player can rename in Settings later (existing slot
+          // by handle, so a rename creates a new row rather than
+          // moving the old one).
+          if (newGhostSaved && playerSettings.leaderboardSubmit) {
+            leaderboardResult = submitLeaderboardEntry({
+              trackId,
+              handle: playerSettings.leaderboardHandle,
+              bikeId: playerVariant.id,
+              bestLap: slice.bestLap,
+            })
+          }
         }
       }
     }
@@ -909,6 +930,14 @@ function showFinishScreen(opts: FinishOpts): void {
     }
     if (timeTrialMode && newGhostSaved) {
       parts.push('<span class="best">★ GHOST SAVED</span>')
+    }
+    if (timeTrialMode && leaderboardResult?.improved && leaderboardResult.rank !== null) {
+      // Handle is pre-normalized to [A-Z0-9_-] by `normalizeHandle`, so
+      // it's safe to inline without further escaping.
+      const handleLabel = (playerSettings.leaderboardHandle || 'YOU').toUpperCase()
+      parts.push(
+        `<span class="best">#${leaderboardResult.rank} ON BOARD &middot; ${handleLabel}</span>`,
+      )
     }
     hud.finishBest.innerHTML = parts.length ? parts.join(' · ') : '—'
   }
