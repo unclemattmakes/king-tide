@@ -28,7 +28,6 @@ type NumericKey =
   | 'cameraStickYawRange'
   | 'cameraStickPitchRange'
   | 'cameraStickDeadzone'
-  | 'gamepadDeadzone'
   | 'stickCurve'
   | 'keyboardSteerRate'
   | 'keyboardThrottleRate'
@@ -67,7 +66,6 @@ const SLIDERS: SliderSpec[] = [
     valId: 'ds-stick-dz-v',
     format: (n) => n.toFixed(2),
   },
-  { key: 'gamepadDeadzone', inputId: 'ds-gp-dz', valId: 'ds-gp-dz-v', format: (n) => n.toFixed(2) },
   {
     key: 'stickCurve',
     inputId: 'ds-stick-curve',
@@ -109,8 +107,7 @@ export function installDevSettingsMenu(): DevSettingsMenu {
   const toggle = document.getElementById('devsettings-toggle')
   const closeBtn = document.getElementById('ds-close')
   const resetBtn = document.getElementById('ds-reset')
-  const invertY = document.getElementById('ds-invert-y') as HTMLInputElement | null
-  if (!overlay || !toggle || !closeBtn || !resetBtn || !invertY) {
+  if (!overlay || !toggle || !closeBtn || !resetBtn) {
     return { open() {}, close() {}, isOpen: () => false }
   }
 
@@ -135,18 +132,12 @@ export function installDevSettingsMenu(): DevSettingsMenu {
     input.addEventListener('change', () => saveDevSettings())
   }
 
-  invertY.addEventListener('change', () => {
-    devSettings.cameraInvertY = invertY.checked
-    saveDevSettings()
-  })
-
   function syncUI() {
     for (const b of bound) {
       const v = devSettings[b.spec.key]
       b.input.value = String(v)
       b.valEl.textContent = b.spec.format(v)
     }
-    if (invertY) invertY.checked = devSettings.cameraInvertY
   }
 
   function open() {

@@ -15,6 +15,17 @@
  * mis-coerced.
  */
 
+import {
+  cloneGamepadBindings,
+  cloneKeyboardBindings,
+  defaultGamepadBindings,
+  defaultKeyboardBindings,
+  type GamepadBindings,
+  type KeyboardBindings,
+  parseGamepadBindings,
+  parseKeyboardBindings,
+} from './input/bindings'
+
 const STORAGE_KEY = 'hoverbike.playerSettings.v1'
 
 /** Wave-pump prompt intensity — see the work-breakdown for the
@@ -74,6 +85,22 @@ export type PlayerSettings = {
    *  routed but the bed nodes are muted via `musicBedGain` — keeps
    *  the licensed-music swap point a one-liner. */
   audioMusicEnabled: boolean
+  /** Player-rebindable keyboard mapping. See `input/bindings.ts` for
+   *  the action set + swap-on-rebind semantics. */
+  keyboardBindings: KeyboardBindings
+  /** Player-rebindable gamepad buttons (fire / boost only — sticks +
+   *  triggers stay on the W3C standard mapping). */
+  gamepadBindings: GamepadBindings
+  /** Left-stick magnitude below which steer / pitch read as zero. */
+  gamepadDeadzone: number
+  /** Output multiplier applied to the deadzone-shaped stick magnitude,
+   *  clamped to [-1, 1]. 1.0 = current shaped curve; >1 saturates
+   *  earlier (twitchier); <1 caps below full deflection (softer). */
+  gamepadSensitivity: number
+  /** When true, dragging the mouse / pushing the right stick up tilts
+   *  the camera **down** (flight-stick convention). Default false keeps
+   *  the existing "push up = look up" feel. */
+  invertCameraY: boolean
 }
 
 export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
@@ -88,13 +115,23 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   audioSfxVolume: 0.85,
   audioAmbientVolume: 0.7,
   audioMusicEnabled: true,
+  keyboardBindings: defaultKeyboardBindings(),
+  gamepadBindings: defaultGamepadBindings(),
+  gamepadDeadzone: 0.12,
+  gamepadSensitivity: 1.0,
+  invertCameraY: false,
 })
 
 /** Live, mutable copy. Consumers read this object every frame — no
  *  observer needed because reads are O(1) and the surface area is
  *  small. Writes go through the setter helpers so persistence stays
- *  honest. */
-export const playerSettings: PlayerSettings = { ...DEFAULT_PLAYER_SETTINGS }
+ *  honest. Nested objects (bindings) are cloned so a setter mutating
+ *  the live copy doesn't trample the frozen defaults. */
+export const playerSettings: PlayerSettings = {
+  ...DEFAULT_PLAYER_SETTINGS,
+  keyboardBindings: cloneKeyboardBindings(DEFAULT_PLAYER_SETTINGS.keyboardBindings),
+  gamepadBindings: cloneGamepadBindings(DEFAULT_PLAYER_SETTINGS.gamepadBindings),
+}
 
 const VALID_WAVE_PUMP_INTENSITY: WavePumpIntensity[] = ['full', 'subtle', 'off']
 const VALID_AI_DIFFICULTY: AIDifficulty[] = ['casual', 'standard', 'hard']
@@ -162,6 +199,17 @@ export function loadPlayerSettings(): void {
   loadVol('audioAmbientVolume', p.audioAmbientVolume)
   if (typeof p.audioMusicEnabled === 'boolean') {
     playerSettings.audioMusicEnabled = p.audioMusicEnabled
+  }
+  playerSettings.keyboardBindings = parseKeyboardBindings(p.keyboardBindings)
+  playerSettings.gamepadBindings = parseGamepadBindings(p.gamepadBindings)
+  if (typeof p.gamepadDeadzone === 'number' && Number.isFinite(p.gamepadDeadzone)) {
+    playerSettings.gamepadDeadzone = Math.max(0, Math.min(0.5, p.gamepadDeadzone))
+  }
+  if (typeof p.gamepadSensitivity === 'number' && Number.isFinite(p.gamepadSensitivity)) {
+    playerSettings.gamepadSensitivity = Math.max(0.5, Math.min(3.0, p.gamepadSensitivity))
+  }
+  if (typeof p.invertCameraY === 'boolean') {
+    playerSettings.invertCameraY = p.invertCameraY
   }
 }
 
@@ -233,4 +281,43 @@ export function setAudioMusicEnabled(on: boolean): void {
   import('./audio/audio-service').then(({ applyAudioMusicEnabled }) => {
     applyAudioMusicEnabled(on)
   })
+}
+
+/** Replace the live keyboard binding table — caller is responsible for
+ *  building the new table via `assignKeyboardPrimary` (which preserves
+ *  swap semantics + uniqueness). Persists immediately so the next reload
+ *  sees the new mapping. */
+export function setKeyboardBindings(next: KeyboardBindings): void {
+  playerSettings.keyboardBindings = cloneKeyboardBindings(next)
+  savePlayerSettings()
+}
+
+export function setGamepadBindings(next: GamepadBindings): void {
+  playerSettings.gamepadBindings = cloneGamepadBindings(next)
+  savePlayerSettings()
+}
+
+export function resetKeyboardBindings(): void {
+  playerSettings.keyboardBindings = defaultKeyboardBindings()
+  savePlayerSettings()
+}
+
+export function resetGamepadBindings(): void {
+  playerSettings.gamepadBindings = defaultGamepadBindings()
+  savePlayerSettings()
+}
+
+export function setGamepadDeadzone(v: number): void {
+  playerSettings.gamepadDeadzone = Math.max(0, Math.min(0.5, v))
+  savePlayerSettings()
+}
+
+export function setGamepadSensitivity(v: number): void {
+  playerSettings.gamepadSensitivity = Math.max(0.5, Math.min(3.0, v))
+  savePlayerSettings()
+}
+
+export function setInvertCameraY(on: boolean): void {
+  playerSettings.invertCameraY = on
+  savePlayerSettings()
 }

@@ -20,12 +20,10 @@ export type DevSettings = {
   cameraStickPitchRange: number
   /** Right-stick magnitude below which the camera ignores input. */
   cameraStickDeadzone: number
-  /** When true, dragging mouse up / pushing stick up tilts camera up. */
-  cameraInvertY: boolean
 
-  // Gamepad driving
-  /** Left-stick magnitude below which steer/pitch read as zero. */
-  gamepadDeadzone: number
+  // Gamepad driving — left-stick deadzone + camera invert moved to
+  // `playerSettings` (Controls tab) because they're player-facing tuning
+  // knobs, not dev-only feel toggles.
   /** Power applied to the rescaled-past-deadzone stick magnitude. 1.0 is
    *  linear; 2.0+ is heavily soft-centered. Default ~1.6 reads as modern
    *  racing/flight feel — fine corrections in the center, full authority
@@ -51,9 +49,7 @@ export const DEFAULT_DEV_SETTINGS: Readonly<DevSettings> = Object.freeze({
   cameraStickYawRange: Math.PI * 0.9,
   cameraStickPitchRange: Math.PI / 4,
   cameraStickDeadzone: 0.18,
-  cameraInvertY: true,
 
-  gamepadDeadzone: 0.12,
   stickCurve: 1.6,
 
   keyboardSteerRate: 9,
@@ -91,7 +87,6 @@ export function loadDevSettings(): void {
     'cameraStickYawRange',
     'cameraStickPitchRange',
     'cameraStickDeadzone',
-    'gamepadDeadzone',
     'stickCurve',
     'keyboardSteerRate',
     'keyboardThrottleRate',
@@ -101,7 +96,6 @@ export function loadDevSettings(): void {
   for (const k of keys) {
     if (isFiniteNumber(p[k])) (devSettings as Record<string, unknown>)[k] = p[k]
   }
-  if (typeof p.cameraInvertY === 'boolean') devSettings.cameraInvertY = p.cameraInvertY
 }
 
 export function saveDevSettings(): void {

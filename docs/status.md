@@ -1,14 +1,15 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-18 (Cup wiring via Dev Placeholder Cup — see *Cup wiring via Dev Placeholder Cup (2026-05-18)* below). Second entry in Step 6 (Modes) — a new dev-only **Dev Placeholder Cup** strings `lagoon → cliffside → big-bay` into a real 3-race championship so the cup mode wiring is exercised before any of the four ship cups have tracks. `?cup=<id>` on the race URL toggles cup mode; finish overlay rewrites NEXT to `NEXT RACE (n/m)` mid-cup and `CUP RESULTS →` on the last race, with a `CUP STANDING · n/m · X PTS · Y TOTAL` row in the stat block and a new `#cup-results` overlay (per-race points table + champion banner) at the end. MK8 / F1 style point curve (15/12/10/9/8/7/6/5/4/3/2/1). Cup state in sessionStorage so a tab close starts fresh; RETRY mid-cup preserves progress, EXIT clears it. Ship cups pre-wired via `shipCupRaces(id)` so they activate the moment their tracks flip to `status: 'ship'`. Old: 2026-05-18 (Time Trial mode + ghost recording — see *Time Trial mode + ghost recording (2026-05-18)* below). First entry in Step 6 (Modes) lit up: `?race=1&track=…&bike=…&tt=1` runs solo against the clock with a translucent best-lap ghost that overwrites itself on every PB. Ghost is a render-only ECS entity (no rigid body, no race/AI/peer tags) driven by a new `GhostRunner` system that ticks a single-lap `ReplayPlayer` off the player's *current lap time* — so the ghost is a real pacing target rather than a wall-clock playback. Best-lap slicer reads the recorder's `lap` events (finally wired in `main.ts`) and emits a re-based one-bike ReplayFile; `ghost-state.ts` persists to localStorage keyed by (trackId, bikeId). Finish overlay reads as **TIME TRIAL**, shows a "★ GHOST SAVED" pill on every PB, RETRY is the default focus, NEXT is hidden. 354/354 unit tests passing (19 new — 7 ghost-state, 6 best-lap-slice, 6 ghost-runner). Old: 2026-05-18 (Foundation Systems 5/5 — see *Foundation Systems complete (2026-05-18)* below, [PR #113](https://github.com/occ-matt/hoverbike/pull/113)). Four systems landed in one session on top of Step 0 + wave-pump: **AI difficulty / rubber-band toggle** (per-AI tuning bundle for Casual/Standard/Hard baked at spawn, rubber-band gated by a live toggle), **anti-grav HUD + camera intensity** (magenta-glow indicator on `#hud-anti-grav`; chase camera's new `setAntiGravFollow(weight)` blends yaw-only ↔ full bike-frame follow with a Full/Reduced/Off intensity scalar), **tutorial framework** (track-agnostic director + 6-beat default script + top-centered yellow HUD chyron, URL gate `?tutorial=1`, "Replay tutorial" button + subtitles toggle in Settings, persisted `tutorialCompleted` latch), **audio mixer + procedural music bed** (four-bus rewrite `music | sfx | ambient → master → destination`, three-voice sine drone bed with tremolo LFO, sidechain `duckMusic` auto-fires on wave-pump + explosion, all four sliders + music-enabled toggle wired through a new `audio-service` singleton). All 5 Foundation Systems rows in [docs/v1-work-breakdown.md](./v1-work-breakdown.md) now check ✅. 335/335 unit tests passing (26 new — 6 anti-grav-camera, 13 tutorial, 7 audio-mixer). Old: 2026-05-17 (v1 cathedral + wave-pump signal — see *v1 cathedral + wave-pump signal (2026-05-17)* below. M11 Step 0 from [docs/v1-work-breakdown.md](./v1-work-breakdown.md) shipped: full menu flow now exists with mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial), 12-tile track-select for the v1 ship tracks (all disabled with post-flood landmark blurbs + per-track gate labels), 4 disabled real cups + a dev-only **Dev Cup** for playtest tracks (lagoon, cliffside, every GLB) so the real race cups stay clean, 5-slot bike-select (3 active + 2 "Coming soon"), and a full Settings overlay (Audio / Video / Controls / Gameplay tabs) with every v1 tunable row stubbed + gated. Reserved HUD slots for wave-pump, anti-grav, wave-line, cup-points, 8-bike positions. Single `.bc-disabled` + `.bc-gate` convention locked once and reused everywhere. The first Foundation Systems milestone also landed: a wave-pump signal that fires on a clean crest launch (on-water-grounded → airborne with vy ≥ 1.5 m/s, forward speed ≥ 45% of top, throttle ≥ 0.4, 500 ms cooldown), strength-scaled chyron-style HUD widget + stacked-5th audio chord, persisted "Wave-pump prompt" setting (Full/Subtle/Off). 295/295 unit tests passing including 11 new for the pump detector. Old: M10.12 multiplayer lobby — `?room=<id>` now opens a lobby overlay that lists every connected peer with their ready/not-ready state, plus a "CLICK WHEN READY" button (Enter also toggles). The race countdown is held (`raceHud.deferStart: true`) until **all connected peers** (minimum 1, so solo works) have ready'd up. When the local view first sees all-ready it calls `raceHud.armCountdown()` AND broadcasts `start-race` to the relay; the relay sets a sticky `raceStarted` bit and forwards to peers. Late joiners receive `raceStarted: true` in their `HelloMessage` and skip the lobby immediately. Reset on empty room. Verified end-to-end via Chrome MCP for solo / two-peer / late-joiner scenarios. M10.11 multiplayer state sync — see [docs/m10-11-state-sync.md](./m10-11-state-sync.md). Host-elected AI authority + 20 Hz transform snapshots: lowest-slot peer runs `aiControlSystem` and broadcasts the 4 AI bike poses; every peer also broadcasts its OWN player-bike pose. Receivers' AI bikes and remote-peer bikes are kinematic-position rigid bodies whose pose is set from inbound snapshots, replacing the old input-replay path (which silently diverged because each tab had its own physics + AI sim with no state sync — the M10.4–M10.9 work was input-only). Wire format: byte-0 tag distinguishes `InputFrame` (0x01, 11 bytes) from `TransformSnapshot` (0x02, 8 + 24×N bytes). Host AI bikes carry `AITag`, non-host AI bikes don't (re-derived via `applyHostRole` on every peer-set change). Local human's bike stays `Dynamic + PeerControlled`. Bandwidth at 8 peers: ~12 KB/s ingress per peer. Race state stays per-tab; M10.15 will make it host-authoritative if disagreements show up in play. `#hud-room` chip now also shows `[host]` when this peer is the AI host. Determinism harness unchanged (default `runAI: true`). 169/169 unit tests passing including new `host-election`, `transform-snapshot`, `apply-snapshot` suites. M10.10.1 — local player bike's `PeerControlled.peerId` now patched to relay-assigned slot in `onConnected` (was hardcoded `0`, made every tab claim slot 0 and the host's frames drove everyone). M10.10 deployed PartyKit endpoint — client defaults to `hoverbike.occ-matt.partykit.dev` in prod builds, `localhost:1999` in dev; `?host=` overrides. Local dev: `pnpm party:dev` (PartyKit on :1999) + `pnpm dev` (Vite on :5191). M9.41 lean crank — `ROLL_LEAN_LIMIT` doubled from 20° to 40°.). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-18 (Controls tab — keyboard / gamepad rebind + sensitivity + deadzone + invert-Y — see *Controls tab — rebind + stick tunables (2026-05-18)* below). Closes the **Input / controls** row in the v1 work-breakdown convention table. New `src/engine/input/bindings.ts` owns the action set + swap-on-rebind semantics (binding a key to another action swaps the previous holder onto your old binding so no action goes unreachable); `playerSettings` grows 5 fields (`keyboardBindings`, `gamepadBindings`, `gamepadSensitivity`, `gamepadDeadzone`, `invertCameraY`) and the migrated knobs are dropped from `devSettings` + the dev menu so there's one source of truth. New `#rebind-menu` overlay (rebind-modal.ts) drives the capture flow — click a chip, press a key (or button, LT/RT ignored), commit. Settings → Controls has all five rows live. 399/399 unit tests passing (29 new). Old: 2026-05-18 (Cup wiring via Dev Placeholder Cup — see *Cup wiring via Dev Placeholder Cup (2026-05-18)* below). Second entry in Step 6 (Modes) — a new dev-only **Dev Placeholder Cup** strings `lagoon → cliffside → big-bay` into a real 3-race championship so the cup mode wiring is exercised before any of the four ship cups have tracks. `?cup=<id>` on the race URL toggles cup mode; finish overlay rewrites NEXT to `NEXT RACE (n/m)` mid-cup and `CUP RESULTS →` on the last race, with a `CUP STANDING · n/m · X PTS · Y TOTAL` row in the stat block and a new `#cup-results` overlay (per-race points table + champion banner) at the end. MK8 / F1 style point curve (15/12/10/9/8/7/6/5/4/3/2/1). Cup state in sessionStorage so a tab close starts fresh; RETRY mid-cup preserves progress, EXIT clears it. Ship cups pre-wired via `shipCupRaces(id)` so they activate the moment their tracks flip to `status: 'ship'`. Old: 2026-05-18 (Time Trial mode + ghost recording — see *Time Trial mode + ghost recording (2026-05-18)* below). First entry in Step 6 (Modes) lit up: `?race=1&track=…&bike=…&tt=1` runs solo against the clock with a translucent best-lap ghost that overwrites itself on every PB. Ghost is a render-only ECS entity (no rigid body, no race/AI/peer tags) driven by a new `GhostRunner` system that ticks a single-lap `ReplayPlayer` off the player's *current lap time* — so the ghost is a real pacing target rather than a wall-clock playback. Best-lap slicer reads the recorder's `lap` events (finally wired in `main.ts`) and emits a re-based one-bike ReplayFile; `ghost-state.ts` persists to localStorage keyed by (trackId, bikeId). Finish overlay reads as **TIME TRIAL**, shows a "★ GHOST SAVED" pill on every PB, RETRY is the default focus, NEXT is hidden. 354/354 unit tests passing (19 new — 7 ghost-state, 6 best-lap-slice, 6 ghost-runner). Old: 2026-05-18 (Foundation Systems 5/5 — see *Foundation Systems complete (2026-05-18)* below, [PR #113](https://github.com/occ-matt/hoverbike/pull/113)). Four systems landed in one session on top of Step 0 + wave-pump: **AI difficulty / rubber-band toggle** (per-AI tuning bundle for Casual/Standard/Hard baked at spawn, rubber-band gated by a live toggle), **anti-grav HUD + camera intensity** (magenta-glow indicator on `#hud-anti-grav`; chase camera's new `setAntiGravFollow(weight)` blends yaw-only ↔ full bike-frame follow with a Full/Reduced/Off intensity scalar), **tutorial framework** (track-agnostic director + 6-beat default script + top-centered yellow HUD chyron, URL gate `?tutorial=1`, "Replay tutorial" button + subtitles toggle in Settings, persisted `tutorialCompleted` latch), **audio mixer + procedural music bed** (four-bus rewrite `music | sfx | ambient → master → destination`, three-voice sine drone bed with tremolo LFO, sidechain `duckMusic` auto-fires on wave-pump + explosion, all four sliders + music-enabled toggle wired through a new `audio-service` singleton). All 5 Foundation Systems rows in [docs/v1-work-breakdown.md](./v1-work-breakdown.md) now check ✅. 335/335 unit tests passing (26 new — 6 anti-grav-camera, 13 tutorial, 7 audio-mixer). Old: 2026-05-17 (v1 cathedral + wave-pump signal — see *v1 cathedral + wave-pump signal (2026-05-17)* below. M11 Step 0 from [docs/v1-work-breakdown.md](./v1-work-breakdown.md) shipped: full menu flow now exists with mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial), 12-tile track-select for the v1 ship tracks (all disabled with post-flood landmark blurbs + per-track gate labels), 4 disabled real cups + a dev-only **Dev Cup** for playtest tracks (lagoon, cliffside, every GLB) so the real race cups stay clean, 5-slot bike-select (3 active + 2 "Coming soon"), and a full Settings overlay (Audio / Video / Controls / Gameplay tabs) with every v1 tunable row stubbed + gated. Reserved HUD slots for wave-pump, anti-grav, wave-line, cup-points, 8-bike positions. Single `.bc-disabled` + `.bc-gate` convention locked once and reused everywhere. The first Foundation Systems milestone also landed: a wave-pump signal that fires on a clean crest launch (on-water-grounded → airborne with vy ≥ 1.5 m/s, forward speed ≥ 45% of top, throttle ≥ 0.4, 500 ms cooldown), strength-scaled chyron-style HUD widget + stacked-5th audio chord, persisted "Wave-pump prompt" setting (Full/Subtle/Off). 295/295 unit tests passing including 11 new for the pump detector. Old: M10.12 multiplayer lobby — `?room=<id>` now opens a lobby overlay that lists every connected peer with their ready/not-ready state, plus a "CLICK WHEN READY" button (Enter also toggles). The race countdown is held (`raceHud.deferStart: true`) until **all connected peers** (minimum 1, so solo works) have ready'd up. When the local view first sees all-ready it calls `raceHud.armCountdown()` AND broadcasts `start-race` to the relay; the relay sets a sticky `raceStarted` bit and forwards to peers. Late joiners receive `raceStarted: true` in their `HelloMessage` and skip the lobby immediately. Reset on empty room. Verified end-to-end via Chrome MCP for solo / two-peer / late-joiner scenarios. M10.11 multiplayer state sync — see [docs/m10-11-state-sync.md](./m10-11-state-sync.md). Host-elected AI authority + 20 Hz transform snapshots: lowest-slot peer runs `aiControlSystem` and broadcasts the 4 AI bike poses; every peer also broadcasts its OWN player-bike pose. Receivers' AI bikes and remote-peer bikes are kinematic-position rigid bodies whose pose is set from inbound snapshots, replacing the old input-replay path (which silently diverged because each tab had its own physics + AI sim with no state sync — the M10.4–M10.9 work was input-only). Wire format: byte-0 tag distinguishes `InputFrame` (0x01, 11 bytes) from `TransformSnapshot` (0x02, 8 + 24×N bytes). Host AI bikes carry `AITag`, non-host AI bikes don't (re-derived via `applyHostRole` on every peer-set change). Local human's bike stays `Dynamic + PeerControlled`. Bandwidth at 8 peers: ~12 KB/s ingress per peer. Race state stays per-tab; M10.15 will make it host-authoritative if disagreements show up in play. `#hud-room` chip now also shows `[host]` when this peer is the AI host. Determinism harness unchanged (default `runAI: true`). 169/169 unit tests passing including new `host-election`, `transform-snapshot`, `apply-snapshot` suites. M10.10.1 — local player bike's `PeerControlled.peerId` now patched to relay-assigned slot in `onConnected` (was hardcoded `0`, made every tab claim slot 0 and the host's frames drove everyone). M10.10 deployed PartyKit endpoint — client defaults to `hoverbike.occ-matt.partykit.dev` in prod builds, `localhost:1999` in dev; `?host=` overrides. Local dev: `pnpm party:dev` (PartyKit on :1999) + `pnpm dev` (Vite on :5191). M9.41 lean crank — `ROLL_LEAN_LIMIT` doubled from 20° to 40°.). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
 ## What works today
 
+- **Controls tab — keyboard rebind, gamepad fire/boost rebind, sensitivity, deadzone, invert Y.** Settings → Controls has all five rows live and persisted. Rebind modal (`src/engine/menus/rebind-modal.ts` + `#rebind-menu` in `index.html`) opens per-mode, walks the 8 keyboard actions or 2 gamepad actions, and uses swap-on-assignment semantics from `src/engine/input/bindings.ts`: when key K is reassigned to action A, the previous holder of K receives A's old primary so every action stays reachable. Secondary slots (Arrows + RShift defaults) get cleared on collision so no key lives in two slots. Gamepad capture polls via `pollGamepadButtonPress` on rAF and intentionally skips LT/RT — the analog triggers drive throttle / brake and shouldn't capture as button presses. `playerSettings` now owns `keyboardBindings`, `gamepadBindings`, `gamepadSensitivity`, `gamepadDeadzone`, `invertCameraY`; the migrated `gamepadDeadzone` + `cameraInvertY` are removed from `devSettings` (and from the dev menu + `index.html` DOM) so the Controls tab is the single source of truth. `keyboard.ts` reads action state through the live table; `gamepad.ts` reads the player-facing deadzone and clamps `sensitivity × shaped` to [-1, 1] so >1 saturates earlier; `camera-look.ts` reads `invertCameraY` directly (default false matches the previous "push up = look up" feel). See [src/engine/input/bindings.ts](../src/engine/input/bindings.ts), [src/engine/menus/rebind-modal.ts](../src/engine/menus/rebind-modal.ts).
 - **Cup mode wiring (placeholder).** Cup tile → cup-select → cup-tracks → bike-select → race; `?race=1&track=<first>&bike=<id>&cup=<cupId>` signals championship mode to the game loop. On dev builds two cup tiles light up: **Dev Cup** (browse-only — click a tile for a one-off race, unchanged from Step 0) and **Dev Placeholder Cup** (the new championship: lagoon → cliffside → big-bay, START CUP CTA in the lineup preview). Finish overlay rewrites NEXT to `NEXT RACE (n/m)` mid-cup and `CUP RESULTS →` on the last race; new `#cup-results` overlay shows a per-race points table + champion banner with `YOU · X/MAX PTS`. MK8-style points (15/12/10/9/8/7/6/5/4/3/2/1) live in `src/engine/cup-progress.ts` along with the sessionStorage-backed state (cup id, bike loadout, race lineup, per-race results). RETRY mid-cup preserves progress (results swap by trackId, pointer never un-skips); EXIT (finish-screen + pause-menu) clears it. The four ship cups carry `races: shipCupRaces(id)` so they activate the moment their tracks flip to `status: 'ship'` — no extra cup wiring required. See [src/engine/cup-progress.ts](../src/engine/cup-progress.ts), [src/engine/render/cup-results-screen.ts](../src/engine/render/cup-results-screen.ts).
 - **Time Trial mode + ghost recording.** Mode tile lit (Race / **Time Trial** / Cup / MP / Tutorial). Picks track → bike → race; URL is `?race=1&track=…&bike=…&tt=1`. AI bike count clamps to 0, recorder runs solo + records `lap` events to its event stream, finish overlay slices the player's fastest lap and persists it to `hoverbike.ghosts.v1::<trackId>::<bikeId>` when it beats the existing ghost. On the next TT run with the same (track, bike) a translucent cyan ghost spawns at the start gate — its Transform is driven each frame by a `ReplayPlayer` running off the player's *current lap time* (not wall-clock), so the ghost is a real pacing reference. Crossing the start/finish line seeks the ghost back to t=0; if the ghost finishes its lap first it freezes at end-pose until the player catches up. See [src/engine/replay/best-lap-slice.ts](../src/engine/replay/best-lap-slice.ts), [src/engine/replay/ghost-state.ts](../src/engine/replay/ghost-state.ts), [src/game/systems/ghost-runner.ts](../src/game/systems/ghost-runner.ts).
-- **v1 menu cathedral.** Cold boot routes through title → 5-tile mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial) → track or cup or lobby → 5-slot bike-select → race. Race mode shows all 12 v1 ship tracks as disabled tiles with post-flood landmark blurbs + per-track gate labels; Cup mode shows the four ship cups (all disabled) plus a dev-only **Dev Cup** that hosts every playtest track (lagoon, cliffside, every GLB) — keeps the real race lineup uncluttered. Full Settings overlay (Audio / Video / Controls / Gameplay) with the entire v1 tunable inventory present and gated; the **Wave-pump prompt**, **AI difficulty**, **Rubber-band assist**, **Anti-grav camera intensity**, **Subtitles for tutorial**, **Replay tutorial**, **Master**, **Music**, **SFX**, **Ambient**, and **Music bed enabled** rows are live. The **Tutorial** mode tile is also enabled. Reserved hidden HUD slots for wave-pump, anti-grav, tutorial, wave-line, cup-points, 8-bike positions. Single `.bc-disabled` + `.bc-gate` convention reused everywhere. See [docs/v1-work-breakdown.md](./v1-work-breakdown.md).
+- **v1 menu cathedral.** Cold boot routes through title → 5-tile mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial) → track or cup or lobby → 5-slot bike-select → race. Race mode shows all 12 v1 ship tracks as disabled tiles with post-flood landmark blurbs + per-track gate labels; Cup mode shows the four ship cups (all disabled) plus a dev-only **Dev Cup** that hosts every playtest track (lagoon, cliffside, every GLB) — keeps the real race lineup uncluttered. Full Settings overlay (Audio / Video / Controls / Gameplay) with the entire v1 tunable inventory present and gated; the **Wave-pump prompt**, **AI difficulty**, **Rubber-band assist**, **Anti-grav camera intensity**, **Subtitles for tutorial**, **Replay tutorial**, **Master**, **Music**, **SFX**, **Ambient**, **Music bed enabled**, **Rebind keyboard**, **Rebind gamepad**, **Gamepad sensitivity**, **Deadzone**, and **Invert camera Y** rows are live. The **Tutorial** mode tile is also enabled. Reserved hidden HUD slots for wave-pump, anti-grav, tutorial, wave-line, cup-points, 8-bike positions. Single `.bc-disabled` + `.bc-gate` convention reused everywhere. See [docs/v1-work-breakdown.md](./v1-work-breakdown.md).
 - **Foundation Systems milestone (5/5).** Step 1 of the v1 work-breakdown is done. Five systems each landed with sim behavior + settings entry + HUD/menu surface per the definition-of-done convention: wave-pump signal, AI difficulty, anti-grav HUD + camera, tutorial framework, audio mixer + music bed. Details below.
 - **Wave-pump signal.** Render-side detector watches the player bike each frame; fires on a clean crest launch (on-water-grounded → airborne with vy ≥ 1.5 m/s, forward speed ≥ 45% of top speed, throttle ≥ 0.4, 500 ms cooldown). Strength-scaled HUD widget pops a chyron-style "PUMP +" flash with a cyan→yellow strength bar; audio engine plays a stacked perfect-5th chord (A4 + E5 + A5) under a band-passed whoosh sweep — distinct from `gateCleared`'s two-note ding so the player can tell pumps from checkpoints by ear. Settings → Gameplay → "Wave-pump prompt" toggles Full / Subtle / Off; persisted to localStorage. Sim-side pump physics tuning is still pending (M11–M12 proper); the detector's event contract holds — only the trigger heuristic gets upgraded.
 - **AI difficulty + rubber-band toggle.** Three tiers (Casual / Standard / Hard) baked into each AI controller at spawn time via a tuning bundle (`src/game/ai/difficulty.ts`) — top-speed factor, lateral-accel ceiling, curvature lookahead, rubber-band bounds. Rubber-band system (`src/game/systems/rubber-band.ts`) reads the live `playerSettings.rubberBandAssist` toggle each tick so flipping mid-race settles AI back to its baseline rather than snapping. Settings → Gameplay → AI difficulty (select) + Rubber-band assist (toggle) wired and persisted.
@@ -39,6 +40,121 @@ This doc captures the build's current state, controls, known issues, and next st
 - **Multiplayer state sync (M10.4–M10.11)** — opt-in via `?room=<id>` URL param. Local dev needs `pnpm party:dev` (PartyKit relay on :1999) alongside `pnpm dev` (Vite on :5191). The stateless relay (`party/relay.ts`) assigns peer slots 0..7 and broadcasts two binary message types distinguished by a 1-byte tag at offset 0: `InputFrame` (0x01, 11 B, 60 Hz) carries each peer's controls; `TransformSnapshot` (0x02, 8 + 24×N B, 20 Hz) carries owner-authoritative bike poses. The lowest-slot peer is the AI host: it alone runs `aiControlSystem` and broadcasts the 4 AI bike poses. Every peer also broadcasts its own player bike. Receivers' AI bikes and remote-peer bikes are kinematic-position rigid bodies whose pose is set from inbound snapshots, replacing the input-replay path which couldn't converge (each tab simulated AI independently). Local human's bike stays Dynamic + PeerControlled and is driven by its own input. Host changeover (e.g. peer 0 leaves) re-tags AI bikes via `applyHostRole` between fixed steps; new host re-derives `AIController` closest-point cache via `defaultAIController('main')`. `#hud-room` chip shows `[host]` when this peer owns AI. `__hover.net` probe surfaces `peerId()`, `remotePeers()`, `isHost()`, `recentRemoteFrames()`, `latestPeerIntents()`, `snapshotsReceived()`; `__hover.bikes()` now includes per-bike `bodyType`, `hasAI`, `peerControlled` for cross-tab diagnostics. **Not yet implemented**: render-side smoothing of the 20 Hz snaps (M10.12), owner-authoritative combat (M10.13), snapshot interpolation/extrapolation (M10.14), host-authoritative race state (M10.15), variant negotiation per peer, anti-cheat.
 - Spec → GLB asset pipeline (M9.27, flipped to per-variant in M9.39): `specs/{bikes,props,tracks}/*.json` + `tools/blender/build_*.py` produce `public/assets/<cat>/*.glb` and `public/assets/manifest.json` via `pnpm gen:all`. Bike-loader instantiates the player + AI bike GLBs at boot; prop-loader pre-fetches asset-prop GLBs referenced by track JSON. **Bikes:** one `bikes-src/<id>.blend` per variant — open it in Blender, edit the variant directly (no shared kit, no propagation), click *Hoverbike → Export Bike to Game*, the GLB updates and the runtime picks it up on next reload. The same addon serves tracks via *Export Track to Game* and switches mode based on the .blend's parent dir. Headless `pnpm gen:bikes` opens each .blend, overlays spec.appearance recolour + spec.physics extras, exports. **Tracks:** spec-driven `build_track.py` round-trips through `tracks-src/<id>.blend` and emits both the GLB and a starter gameplay JSON. **Bike viewer** (`?viewer=<bikeId>` or the addon's *Copy Viewer URL*) opens a turntable with OrbitControls, sockets/colliders surfaced as gizmos.
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
+
+### Controls tab — rebind + stick tunables (2026-05-18)
+
+Closes the **Input / controls** row in the v1 work-breakdown convention
+table (functional + settings entry + UI gate cleared, all three checks).
+The Step 0 scaffolding shipped a Controls tab with five disabled rows;
+this pass makes every one of them live.
+
+New / changed modules:
+
+- [src/engine/input/bindings.ts](../src/engine/input/bindings.ts)
+  — single source of truth for the action set, default tables, and the
+  swap-on-rebind semantics. Eight keyboard actions
+  (`throttleForward / throttleBack / steerLeft / steerRight / pitchUp /
+  pitchDown / fire / boost`) each carry a `{primary, secondary}` pair;
+  defaults are the existing WASD + arrows + Q-dives/E-lifts + Space +
+  Shift mapping. Two gamepad actions (`fire`, `boost`) carry a single
+  button index — defaults RB / LB. `assignKeyboardPrimary(bindings,
+  action, code)` swaps so the previous holder of `code` receives our
+  old primary (so a careless rebind never strands an action); a
+  same-action secondary collision is cleared. `assignGamepadBinding`
+  is the same for the gamepad table. `parseKeyboardBindings` /
+  `parseGamepadBindings` are tolerant — malformed entries drop back to
+  defaults, missing actions stay default, persisted shapes from older
+  builds are ignored cleanly.
+- [src/engine/player-settings.ts](../src/engine/player-settings.ts)
+  grows five fields: `keyboardBindings`, `gamepadBindings`,
+  `gamepadSensitivity` (0.5–3.0, default 1.0), `gamepadDeadzone`
+  (0–0.5, default 0.12), `invertCameraY` (boolean, default false).
+  Setters + a per-table `reset…Bindings()`. The default record is
+  frozen; the live `playerSettings` deep-clones the nested binding
+  maps at module init so the rebind modal can mutate them in place
+  without trampling the frozen defaults.
+- [src/engine/dev-settings.ts](../src/engine/dev-settings.ts) +
+  [src/engine/dev-settings-menu.ts](../src/engine/dev-settings-menu.ts)
+  + [index.html](../index.html) lose the `gamepadDeadzone` slider and
+  the `cameraInvertY` toggle — they moved to the Controls tab. The
+  dev menu keeps low-level feel knobs only (camera mouse / stick range,
+  stick curve, keyboard smoothing, steer-release tightness).
+- [src/engine/input/keyboard.ts](../src/engine/input/keyboard.ts) now
+  looks up action state through the live binding table:
+  `throttle = throttleForward - throttleBack` etc. Brake fires
+  whenever the `throttleBack` action is held (rebindable along with
+  the rest). Smoothing rates remain on `devSettings`.
+- [src/engine/input/gamepad.ts](../src/engine/input/gamepad.ts) reads
+  `playerSettings.gamepadDeadzone` for the left-stick shape and
+  multiplies the shaped magnitude by
+  `playerSettings.gamepadSensitivity`, clamping the result to [-1, 1]
+  so >1 saturates earlier rather than overshooting full deflection.
+  Triggers (LT/RT) and stick axes stay on the W3C standard mapping;
+  only the action buttons (fire / boost) are rebindable. Exposes
+  `pollGamepadButtonPress()` for the rebind capture flow — returns
+  the first non-trigger button that's currently pressed.
+- [src/engine/input/camera-look.ts](../src/engine/input/camera-look.ts)
+  reads `playerSettings.invertCameraY` directly (default false →
+  ySign = -1 → matches the previous "push up / drag up = camera up"
+  feel). Flipping the toggle gives flight-stick convention.
+- [src/engine/menus/rebind-modal.ts](../src/engine/menus/rebind-modal.ts)
+  + new `#rebind-menu` overlay in [index.html](../index.html) drive
+  the capture flow. Mode-aware (`open('keyboard')` /
+  `open('gamepad')`): each row shows the action label + a clickable
+  primary chip; keyboard rows also surface a read-only secondary hint
+  chip when a default secondary is present. Clicking a chip enters
+  capture: keyboard captures the next `keydown` (Esc cancels);
+  gamepad polls `pollGamepadButtonPress` on rAF and commits the first
+  newly-pressed non-trigger button — `previousPressed` tracking
+  guards against double-capture if a button was already down when the
+  player clicked into capture. Bindings persist via
+  `setKeyboardBindings` / `setGamepadBindings`. RESET-to-defaults +
+  DONE buttons. Esc closes the modal; while capturing, Esc cancels
+  capture instead. The modal sits at `z-index: 70` over the settings
+  overlay (`z-index: 66`) and registers its keydown handler in
+  capture phase so Esc doesn't fall through to settings.
+- [src/engine/menus/settings-overlay.ts](../src/engine/menus/settings-overlay.ts)
+  flips the five Controls rows to `enabled: true` and wires them:
+  rebind buttons open the modal, sensitivity / deadzone sliders call
+  `setGamepadSensitivity` / `setGamepadDeadzone` on `input`, and the
+  invert-Y toggle calls `setInvertCameraY` on `change`. The row
+  defaults read from live `playerSettings` so a reopen after a tweak
+  shows the persisted value.
+
+Why migrate the dev-settings knobs:
+
+- Two surfaces editing the same value (Dev Settings → Stick deadzone
+  + Settings → Controls → Deadzone) drift in playtest. Making
+  `playerSettings.gamepadDeadzone` canonical and removing the
+  duplicate keeps the menu inventory honest.
+- The dev-settings menu still owns the *finer* feel knobs (stick
+  curve, smoothing rates, camera ranges) — those don't belong in a
+  player-facing surface.
+
+What's deliberately NOT in this pass:
+
+- **No rebind for analog axes / triggers.** Stick X = steer, stick Y
+  = pitch, LT = brake, RT = throttle stay fixed on the W3C standard
+  mapping. Players overwhelmingly tune those via sensitivity +
+  deadzone, which the Controls tab does cover.
+- **Gamepad navigation inside the rebind modal is mouse / keyboard
+  only.** Opening the modal via mouse click then capturing a gamepad
+  button still works (that's the point — the gamepad is what's
+  being captured). Navigating the modal *with* a gamepad to pick a
+  different row is a polish item.
+- **Touch input doesn't read sensitivity.** Touch sticks have their
+  own hardcoded deadzone + curve (status doc M9.40 notes); the
+  Controls slider's gate label says "Gamepad sensitivity" for that
+  reason.
+
+Tests ([tests/unit/input-bindings.test.ts](../tests/unit/input-bindings.test.ts)):
+29 new specs covering default tables (incl. the Q-dives/E-lifts
+convention pin), `assignKeyboardPrimary` swap semantics (across
+actions, within action, no-op for same code, secondary collision
+clear, no input-mutation), `assignGamepadBinding` swap semantics,
+lookup helpers, the tolerant parse functions (garbage / partial /
+malformed payloads), label formatters, and `playerSettings`
+round-trips through localStorage. 399/399 unit tests passing.
 
 ### Cup wiring via Dev Placeholder Cup (2026-05-18)
 
@@ -540,16 +656,19 @@ unit-test layer.
 ## Controls
 
 ### Keyboard
+Default bindings (all eight driving actions are rebindable via
+Settings → Controls → Rebind keyboard):
+
 | Key | Action |
 |---|---|
 | W / ↑ | Throttle forward |
 | S / ↓ | Brake / reverse |
 | A / ← | Steer left |
 | D / → | Steer right |
-| Q | Pitch up (lean back, jump off a wave) |
-| E | Pitch down (lean forward, dive into a wave) |
+| E | Pitch up (nose up — lift / jump off a wave) |
+| Q | Pitch down (nose down — dive into a wave) |
 | Space | Fire pickup |
-| Shift | Boost |
+| Shift (L/R) | Boost |
 | Backspace | Respawn at start (snaps to spawn pose, zero velocity) |
 | T or F1 | Toggle auto-play (AI drives player bike) |
 | M | Toggle audio mute |
@@ -558,15 +677,21 @@ unit-test layer.
 All keyboard axes are smoothed (~0.13s ramp) so taps give small inputs and holds give full deflection.
 
 ### Gamepad (Xbox / PS layout)
+Stick + trigger axes are fixed on the W3C standard mapping (tune feel
+via Settings → Controls → sensitivity / deadzone). Fire + boost are
+rebindable via Settings → Controls → Rebind gamepad.
+
 | Input | Action |
 |---|---|
 | Left stick X | Steer |
 | Left stick Y | Pitch (push forward = dive, pull back = jump) |
-| Right trigger | Throttle |
-| Left trigger | Brake / reverse |
-| Right stick | Camera orbit (Y inverted) |
-| A / X (button 0) | Fire |
-| B / Circle (button 1) | Boost |
+| Right trigger (RT / R2) | Throttle |
+| Left trigger (LT / L2) | Brake (held with no throttle = reverse) |
+| Right stick | Camera orbit (Y invert in Settings → Controls) |
+| RB / R1 (button 5) | Fire — default |
+| LB / L1 (button 4) | Boost — default |
+| A / Cross (button 0) | Throttle (digital alt to RT) |
+| B / Circle (button 1) | Emergency brake |
 
 ### Mouse
 | Action | Effect |
