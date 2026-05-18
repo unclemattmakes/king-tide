@@ -1,3 +1,7 @@
+import {
+  currentHudPalette,
+  onAccessibilityChange,
+} from '@/engine/accessibility/accessibility-service'
 import type { Vec3 } from '@/engine/sim/physics/vec'
 import type { Track } from '@/game/tracks/types'
 
@@ -211,16 +215,31 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
   // the start gate, so redrawing them every rAF (~1–3 ms of canvas-2D stroke
   // work on integrated GPUs) is wasted. Per-frame we blit this cache and
   // draw only the dynamic overlay (next-CP highlight + bike dots).
+  //
+  // Re-baked on `onAccessibilityChange` because the spline color reads
+  // from the live palette (currently a thin alpha over the `info` hue);
+  // a mid-session colorblind-mode flip must repaint the cached layer.
   const staticLayer = document.createElement('canvas')
   staticLayer.width = minimap.width
   staticLayer.height = minimap.height
   bakeStaticMinimapLayer()
+  // Subscribe once at construction so a palette flip mid-session
+  // repaints the cached minimap layer. The HUD doesn't expose a
+  // dispose path today, so the closure leaks across HUD recreations
+  // (one new subscriber per race — bounded by session length). When
+  // the HUD grows a `dispose()`, the returned unsub fn can be called
+  // from it; held in `_a11yUnsub` to make the intent legible.
+  const _a11yUnsub: () => void = onAccessibilityChange(() => {
+    bakeStaticMinimapLayer()
+  })
+  void _a11yUnsub
 
   function bakeStaticMinimapLayer(): void {
     const ctx = staticLayer.getContext('2d')
     if (!ctx) return
     const w = staticLayer.width
     const h = staticLayer.height
+    const palette = currentHudPalette()
 
     ctx.clearRect(0, 0, w, h)
     ctx.fillStyle = 'rgba(8, 14, 24, 0.78)'
@@ -230,7 +249,10 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     ctx.strokeRect(0.5, 0.5, w - 1, h - 1)
 
     if (splinePoints.length > 1) {
-      ctx.strokeStyle = 'rgba(180, 220, 255, 0.55)'
+      // Spline is rendered as the racing line; the `info` palette slot
+      // is what HUDs use for "neutral lane hint" — feed that through so
+      // the line shifts under colorblind modes that need an info-hue swap.
+      ctx.strokeStyle = applyAlpha(palette.info, 0.55)
       ctx.lineWidth = 6
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
@@ -415,6 +437,7 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     const ctx = minimapCtx
     const w = minimap.width
     const h = minimap.height
+    const palette = currentHudPalette()
 
     // Static layer (background + spline + start gate) is baked once at
     // construction; one blit replaces a fresh polyline stroke per frame.
@@ -425,7 +448,7 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     const nextCp = opts.track.checkpoints[input.playerNextCheckpoint]
     if (nextCp && !input.finished) {
       const c = worldToCanvas(nextCp.position.x, nextCp.position.z)
-      ctx.strokeStyle = '#ff9933'
+      ctx.strokeStyle = palette.warning
       ctx.lineWidth = 2
       ctx.beginPath()
       ctx.arc(c.cx, c.cy, 8, 0, Math.PI * 2)
@@ -452,7 +475,12 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
   function drawMinimapDot(ctx: CanvasRenderingContext2D, dot: MinimapDot): void {
     const c = worldToCanvas(dot.x, dot.z)
     const r = dot.isPlayer ? 4.5 : dot.isLeader ? 4 : 3.2
-    ctx.fillStyle = dot.isPlayer ? '#ffcc66' : dot.isLeader ? '#ff5577' : (dot.color ?? '#88aaff')
+    const palette = currentHudPalette()
+    ctx.fillStyle = dot.isPlayer
+      ? palette.player
+      : dot.isLeader
+        ? palette.leader
+        : (dot.color ?? palette.opponent)
     ctx.beginPath()
     ctx.arc(c.cx, c.cy, r, 0, Math.PI * 2)
     ctx.fill()
@@ -550,4 +578,18 @@ function formatTime(sec: number): string {
   const m = Math.floor(sec / 60)
   const s = sec - m * 60
   return `${m}:${s.toFixed(2).padStart(5, '0')}`
+}
+
+/** Apply an alpha channel to a `#rrggbb` palette color so canvas
+ *  strokes can keep their existing translucent look across colorblind
+ *  palette swaps. Falls through to the input unchanged for non-hex
+ *  inputs (rgba(), named colors) so callers can't crash the HUD by
+ *  feeding an unexpected swatch. */
+function applyAlpha(hex: string, alpha: number): string {
+  if (!hex.startsWith('#') || (hex.length !== 7 && hex.length !== 4)) return hex
+  const v = hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex
+  const r = parseInt(v.slice(1, 3), 16)
+  const g = parseInt(v.slice(3, 5), 16)
+  const b = parseInt(v.slice(5, 7), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
