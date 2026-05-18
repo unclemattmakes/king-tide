@@ -2291,14 +2291,33 @@ export function createWaterMesh(
         return slopeFoam.mul(heightGate)
       })()
     : useGpuDisplacement
-      ? // FFT path: drop foamAccumFrag entirely. It's computed from
-        // Gerstner waves that no longer match the visible FFT surface,
-        // so its "lingering trail behind a passing crest" was painting
-        // ghost foam where no FFT crest actually was. Foam on the FFT
-        // branch is fully driven by the Jacobian feedback buffer (the
-        // real breaking-wave signal) plus a softened pixelFoam for
-        // near-breaking gradient highlights.
-        max(pixelFoam, foldFoamFft)
+      ? // FFT path: foam is the max of three sources:
+        //   1. `pixelFoam` — softened slope foam for near-breaking
+        //      gradient highlights (rarely fires alone).
+        //   2. `foldFoamFft` — Jacobian-driven breaking-crest foam
+        //      from the persistent feedback buffer. Only fires when
+        //      the surface is folding (J < 0), which at our spectrum
+        //      amplitude happens infrequently.
+        //   3. `whitecapFoam` — the SoT "foam at wave peaks" recipe
+        //      (height × slope gate). Independent of Jacobian, so
+        //      this is what actually paints visible whitecaps on
+        //      tall crests at our amplitude. Without it the surface
+        //      reads as deep-ocean swells with NO crest foam, which
+        //      breaks the "stormy sea" feel — real ocean caps with
+        //      ~0.5m heights are already whitecapping.
+        //
+        //   heightWhitecap fires on heights ≥ ~1m (smoothstep
+        //   1.0..2.0). slopeWhitecap requires meaningful chop
+        //   (smoothstep 0.3..0.7) so a flat-but-tall crest doesn't
+        //   foam. The product gives crisp whitecaps on the tallest
+        //   choppy peaks. `foamFiber` modulates with the same noise
+        //   the rest of the foam pipeline uses for consistency.
+        (() => {
+          const heightWhitecap = smoothstep(float(1.0), float(2.0), heightFrag)
+          const slopeWhitecap = smoothstep(float(0.3), float(0.7), pixelSlope)
+          const whitecapFoam = heightWhitecap.mul(slopeWhitecap).mul(foamFiber)
+          return max(max(pixelFoam, foldFoamFft), whitecapFoam)
+        })()
       : max(foamAccumFrag.mul(float(0.7)), pixelFoam)
 
   // Per-bike foam: hull ring + V-wake stripe. We wrap the per-bike work in
