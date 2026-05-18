@@ -1453,6 +1453,79 @@
         bottom: 22%; left: 50%; transform: translateX(-50%);
         min-width: 220px; min-height: 12px;
       }
+      /* Pump widget content. Two visual modes drop out of the same
+         shell — `wp-full` plays the chyron-style chord flash, `wp-subtle`
+         shows a single soft dot. `--wp-strength` is set per fire and
+         drives glow + scale. */
+      #hud-wave-pump .wp-shell {
+        display: flex; align-items: center; gap: 10px;
+        opacity: 0;
+        transition: opacity 220ms var(--ease-out);
+        --wp-strength: 0.5;
+      }
+      #hud-wave-pump .wp-shell.wp-active { opacity: 1; }
+      #hud-wave-pump .wp-dot {
+        width: 10px; height: 10px;
+        background: var(--bc-cyan);
+        box-shadow: 0 0 calc(10px + 14px * var(--wp-strength)) var(--bc-cyan);
+      }
+      #hud-wave-pump .wp-flash {
+        display: flex; flex-direction: column; gap: 4px;
+        padding: 8px 14px 7px;
+        background: linear-gradient(180deg, rgba(10,20,36,0.85), rgba(5,10,20,0.85));
+        border: 1px solid rgba(77, 214, 255, calc(0.35 + 0.45 * var(--wp-strength)));
+        border-left: 3px solid var(--bc-cyan);
+        box-shadow:
+          0 0 calc(18px + 22px * var(--wp-strength)) rgba(77, 214, 255, calc(0.18 + 0.42 * var(--wp-strength))),
+          0 6px 22px rgba(0,0,0,0.45);
+      }
+      #hud-wave-pump .wp-label {
+        font-family: var(--bc-font-display);
+        font-size: 14px; letter-spacing: 0.24em;
+        color: var(--bc-ink);
+      }
+      #hud-wave-pump .wp-label b {
+        color: var(--bc-yellow);
+        font-weight: 400;
+      }
+      #hud-wave-pump .wp-bar {
+        height: 3px; width: 220px;
+        background: rgba(255,255,255,0.08);
+        overflow: hidden;
+      }
+      #hud-wave-pump .wp-bar > i {
+        display: block; height: 100%;
+        width: 0;
+        background: linear-gradient(90deg, var(--bc-cyan), var(--bc-yellow));
+        box-shadow: 0 0 12px var(--bc-cyan);
+      }
+      /* Full mode — chord flash with the bar reveal. */
+      #hud-wave-pump .wp-shell.wp-full .wp-flash {
+        animation: wp-pop 420ms var(--ease-out);
+      }
+      #hud-wave-pump .wp-shell.wp-full .wp-dot { display: none; }
+      #hud-wave-pump .wp-shell.wp-full .wp-bar > i {
+        animation: wp-bar-fill 360ms var(--ease-out);
+      }
+      /* Subtle mode — just the dot pulsing, flash hidden. */
+      #hud-wave-pump .wp-shell.wp-subtle .wp-flash { display: none; }
+      #hud-wave-pump .wp-shell.wp-subtle .wp-dot {
+        animation: wp-dot-pulse 600ms var(--ease-out);
+      }
+      @keyframes wp-pop {
+        0% { transform: scale(0.85); opacity: 0; }
+        45% { transform: scale(1.06); opacity: 1; }
+        100% { transform: scale(1); opacity: 1; }
+      }
+      @keyframes wp-bar-fill {
+        from { width: 0; }
+        to   { width: var(--wp-bar-width, 100%); }
+      }
+      @keyframes wp-dot-pulse {
+        0% { transform: scale(0.6); opacity: 0; }
+        40% { transform: scale(1.5); opacity: 1; }
+        100% { transform: scale(1); opacity: 1; }
+      }
       /* Anti-grav entry indicator — left side under the timer. */
       #hud-anti-grav {
         top: 116px; left: 14px;

@@ -37,6 +37,13 @@ export interface AudioEngine {
   gateCleared(): void
   /** The player just completed a lap. */
   lapCompleted(): void
+  /** The player just completed a wave pump. `strength` is 0..1 — the
+   *  audio engine scales the cue's gain + adds an upper-octave layer
+   *  on strong pumps so a clean crest launch reads louder + brighter
+   *  than a marginal one. The positive-feedback layer (per the v1
+   *  work-breakdown) is the chord shape itself: stacked perfect 5th +
+   *  octave rather than a single ping. */
+  wavePump(strength: number): void
 }
 
 const MASTER_VOLUME = 0.6
@@ -250,6 +257,43 @@ export function createAudioEngine(): AudioEngine {
         gatePulse(c, masterGain, c.currentTime + i * 0.08, notes[i]!, 0.06, 0.2)
       }
     },
+
+    wavePump(strength) {
+      const c = ctx
+      if (!c || !masterGain) return
+      const s = Math.max(0, Math.min(1, strength))
+      const now = c.currentTime
+      // Bright stacked chord — root + perfect 5th + octave at A4 anchor.
+      // Strength scales the gain envelope and the octave layer's volume
+      // so weak pumps read as a single chime, strong ones as a full
+      // chord with a sparkly top. Distinct from gateCleared's two-note
+      // ding so the player can tell pumps from checkpoints by ear.
+      const root = 440 // A4
+      const fifth = 659.25 // E5 (perfect 5th)
+      const oct = 880 // A5
+      const baseGain = 0.18 + 0.14 * s
+      gatePulse(c, masterGain, now, root, 0.012, 0.32, baseGain)
+      gatePulse(c, masterGain, now, fifth, 0.012, 0.32, baseGain * 0.85)
+      gatePulse(c, masterGain, now, oct, 0.012, 0.28, baseGain * (0.4 + 0.6 * s))
+      // Whoosh layer — short noise burst with a band-pass sweep up,
+      // sells the surfboard-launch feel under the chime.
+      const noise = c.createBufferSource()
+      noise.buffer = makeNoiseBuffer(c, 0.3)
+      const filt = c.createBiquadFilter()
+      filt.type = 'bandpass'
+      filt.frequency.setValueAtTime(420, now)
+      filt.frequency.exponentialRampToValueAtTime(1800, now + 0.22)
+      filt.Q.value = 1.1
+      const g = c.createGain()
+      g.gain.setValueAtTime(0, now)
+      g.gain.linearRampToValueAtTime(0.06 + 0.1 * s, now + 0.02)
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.28)
+      noise.connect(filt)
+      filt.connect(g)
+      g.connect(masterGain)
+      noise.start(now)
+      noise.stop(now + 0.3)
+    },
   }
 }
 
@@ -260,13 +304,14 @@ function gatePulse(
   freq: number,
   attack: number,
   release: number,
+  peak = 0.22,
 ): void {
   const osc = c.createOscillator()
   osc.type = 'triangle'
   osc.frequency.value = freq
   const g = c.createGain()
   g.gain.setValueAtTime(0, start)
-  g.gain.linearRampToValueAtTime(0.22, start + attack)
+  g.gain.linearRampToValueAtTime(peak, start + attack)
   g.gain.exponentialRampToValueAtTime(0.001, start + attack + release)
   osc.connect(g)
   g.connect(dest)
