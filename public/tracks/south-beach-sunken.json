@@ -1,0 +1,147 @@
+{
+  "id": "south-beach-sunken",
+  "name": "South Beach Sunken",
+  "lapsToFinish": 3,
+  "gateSpacing": 60,
+  "environmentGlb": "/assets/tracks/south-beach-sunken.glb",
+  "water": {
+    "height": 0.0,
+    "waveHeight": 0.5,
+    "waveFreq": 0.4
+  },
+  "sky": {
+    "tint": "#ffd4e0",
+    "cloudiness": 0.15,
+    "sunIntensity": 1.15,
+    "fogNear": 400,
+    "fogFar": 1500,
+    "timeOfDay": 270,
+    "colorGrade": "miami_pastel",
+    "bloom": 0.8,
+    "seaStateBeaufort": 3
+  },
+  "audio": {
+    "music": "south-beach-vaporwave.opus",
+    "ambient": ["gulls.opus", "surf-light.opus", "neon-hum.opus"],
+    "ambientGains": [0.4, 0.6, 0.2],
+    "music3dEffects": {
+      "duckOnPump": 0.4
+    }
+  },
+  "start": {
+    "position": { "x": -180.0, "y": 3.5, "z": 100.0 },
+    "yaw": 1.7453292519943295
+  },
+  "checkpoints": [
+    {
+      "index": 0,
+      "position": { "x": 60.0, "y": -2.0, "z": 120.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+      "halfWidth": 14.0,
+      "height": 6.0
+    },
+    {
+      "index": 1,
+      "position": { "x": 180.0, "y": -2.0, "z": 100.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+      "halfWidth": 14.0,
+      "height": 6.0
+    },
+    {
+      "index": 2,
+      "position": { "x": 130.0, "y": -2.0, "z": 110.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+      "halfWidth": 14.0,
+      "height": 6.0
+    },
+    {
+      "index": 3,
+      "position": { "x": -100.0, "y": -2.0, "z": -120.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+      "halfWidth": 14.0,
+      "height": 6.0
+    },
+    {
+      "index": 4,
+      "position": { "x": -235.0, "y": -2.0, "z": 0.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+      "halfWidth": 14.0,
+      "height": 6.0
+    }
+  ],
+  "aiSplines": [
+    {
+      "id": "main",
+      "anchors": [
+        { "x": -180.0, "y": -2.0, "z": 100.0 },
+        { "x": -60.0, "y": -2.0, "z": 120.0 },
+        { "x": 60.0, "y": -2.0, "z": 120.0 },
+        { "x": 180.0, "y": -2.0, "z": 100.0 },
+        { "x": 230.0, "y": -2.0, "z": 0.0 },
+        { "x": 180.0, "y": -2.0, "z": -100.0 },
+        { "x": 60.0, "y": -2.0, "z": -120.0 },
+        { "x": -100.0, "y": -2.0, "z": -120.0 },
+        { "x": -200.0, "y": -2.0, "z": -100.0 },
+        { "x": -235.0, "y": -2.0, "z": 0.0 }
+      ]
+    }
+  ],
+  "pickupSpawns": [
+    { "x": -120.0, "y": 2.5, "z": 110.0 },
+    { "x": 0.0, "y": 2.5, "z": 120.0 },
+    { "x": 220.0, "y": 2.5, "z": 50.0 },
+    { "x": 140.0, "y": 2.5, "z": -110.0 },
+    { "x": -50.0, "y": 2.5, "z": -125.0 },
+    { "x": -225.0, "y": 2.5, "z": 50.0 }
+  ],
+  "boostPads": [
+    {
+      "position": { "x": -10.0, "y": 0.1, "z": 120.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+      "halfWidth": 3.5,
+      "halfDepth": 7.0,
+      "strength": 1.4
+    },
+    {
+      "position": { "x": 10.0, "y": 0.1, "z": -120.0 },
+      "rotation": { "x": 0.0, "y": 1.0, "z": 0.0, "w": 0.0 },
+      "halfWidth": 3.5,
+      "halfDepth": 7.0,
+      "strength": 1.4
+    }
+  ],
+  "antiGravZones": [],
+  "waveZones": [
+    {
+      "position": { "x": 0.0, "y": 0.0, "z": 110.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+      "halfWidth": 270.0,
+      "halfHeight": 8.0,
+      "halfDepth": 80.0,
+      "heightMult": 0.7,
+      "freqMult": 1.0,
+      "blendRadiusM": 25.0
+    },
+    {
+      "position": { "x": -20.0, "y": 0.0, "z": -110.0 },
+      "rotation": { "x": 0.0, "y": 0.7071067811865475, "z": 0.0, "w": 0.7071067811865475 },
+      "halfWidth": 230.0,
+      "halfHeight": 8.0,
+      "halfDepth": 80.0,
+      "heightMult": 1.4,
+      "freqMult": 1.1,
+      "blendRadiusM": 25.0
+    },
+    {
+      "position": { "x": 90.0, "y": 0.0, "z": 110.0 },
+      "rotation": { "x": 0.0, "y": 0.5735764363510462, "z": 0.0, "w": 0.8191520442889918 },
+      "halfWidth": 55.0,
+      "halfHeight": 8.0,
+      "halfDepth": 35.0,
+      "heightMult": 1.2,
+      "freqMult": 1.0,
+      "blendRadiusM": 12.0
+    }
+  ],
+  "props": []
+}
