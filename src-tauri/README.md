@@ -61,15 +61,23 @@ inside them are TODO stubs. See `src/steam.rs`.
 
 ## Icons
 
-Replace the placeholders in `icons/` with the real art when v1 lands.
-Tauri expects:
+The repo ships **solid-teal placeholder PNGs** (4 sizes — 32 / 128 /
+256 / 512 px) so `cargo tauri build` succeeds end-to-end before the
+v1 art lands. Generate via:
 
-- `32x32.png`, `128x128.png`, `128x128@2x.png` (Linux)
-- `icon.icns` (macOS)
-- `icon.ico` (Windows)
+```sh
+pnpm gen:deck-icons          # writes src-tauri/icons/*.png
+```
 
-`cargo tauri icon path/to/source.png` generates all sizes from a 1024²
-master.
+When the real art arrives, drop a 1024² master and run:
+
+```sh
+cd src-tauri && cargo tauri icon path/to/master.png
+```
+
+That generates all four PNG sizes for Linux, plus the `icon.icns`
+(macOS) and `icon.ico` (Windows) container formats when those targets
+get added to `tauri.conf.json`. Today only Linux is in `targets`.
 
 ## CI
 
