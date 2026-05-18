@@ -1,4 +1,6 @@
 import { devSettings } from '../dev-settings'
+import { playerSettings } from '../player-settings'
+import type { KeyboardAction, KeyboardBindings } from './bindings'
 import { emptyIntent, type Intent } from './intent'
 
 const keys = new Set<string>()
@@ -19,6 +21,14 @@ export function isKeyDown(code: string): boolean {
   return keys.has(code)
 }
 
+/** Action lookup against the live binding table. Either the primary
+ *  slot or (if present) the secondary slot held → true. */
+function isActionDown(action: KeyboardAction, bindings: KeyboardBindings): boolean {
+  const b = bindings[action]
+  if (keys.has(b.primary)) return true
+  return b.secondary !== null && keys.has(b.secondary)
+}
+
 // Smoothed analog values — lerped each tick toward the binary key state.
 // Stops keyboard from feeling twitchy: pressing D for 50ms gives a small steer,
 // holding D ramps to full deflection over ~0.15s.
@@ -35,28 +45,37 @@ function lerpToward(current: number, target: number, dt: number, rate: number): 
 }
 
 /**
- * WASD / arrows for movement, Q/E for pitch (Wave-Race-style lean forward/back).
- *   W or ↑   = throttle forward
- *   S or ↓   = brake / reverse
- *   A or ←   = steer left
- *   D or →   = steer right
- *   Q        = pitch up   (lean back, jump off a wave)
- *   E        = pitch down (lean forward, dive into a wave)
- *   Space    = fire pickup
- *   Shift    = boost
+ * Each axis is a sum of two action signals (e.g. steer = steerRight −
+ * steerLeft) so a key bound to opposite actions cancels cleanly. Default
+ * bindings (`DEFAULT_KEYBOARD_BINDINGS`) reproduce the original WASD +
+ * arrows + Q/E + Space + Shift mapping; the Controls tab's rebind modal
+ * rewrites the table in place via `setKeyboardBindings`.
+ *
+ *   throttleForward + throttleBack → throttle, brake
+ *   steerLeft + steerRight         → steer
+ *   pitchUp + pitchDown            → pitch
+ *   fire                           → fire
+ *   boost                          → boost
  */
 export function keyboardIntent(dt: number): Intent {
-  let steerTarget = 0
-  if (keys.has('KeyA') || keys.has('ArrowLeft')) steerTarget -= 1
-  if (keys.has('KeyD') || keys.has('ArrowRight')) steerTarget += 1
+  const bindings = playerSettings.keyboardBindings
 
-  let throttleTarget = 0
-  if (keys.has('KeyW') || keys.has('ArrowUp')) throttleTarget = 1
-  if (keys.has('KeyS') || keys.has('ArrowDown')) throttleTarget = throttleTarget === 1 ? 0 : -1
+  const left = isActionDown('steerLeft', bindings) ? 1 : 0
+  const right = isActionDown('steerRight', bindings) ? 1 : 0
+  const steerTarget = right - left
 
-  let pitchTarget = 0
-  if (keys.has('KeyQ')) pitchTarget -= 1
-  if (keys.has('KeyE')) pitchTarget += 1
+  const fwd = isActionDown('throttleForward', bindings) ? 1 : 0
+  const back = isActionDown('throttleBack', bindings)
+  // Match the original feel — `back` simultaneously requests reverse AND
+  // brake. When the player is also holding forward, the forward request
+  // wins (throttleTarget = 0) so the bike coasts to a stop rather than
+  // fighting itself.
+  let throttleTarget = fwd
+  if (back) throttleTarget = throttleTarget === 1 ? 0 : -1
+
+  const up = isActionDown('pitchUp', bindings) ? 1 : 0
+  const down = isActionDown('pitchDown', bindings) ? 1 : 0
+  const pitchTarget = down - up
 
   smoothSteer = lerpToward(smoothSteer, steerTarget, dt, devSettings.keyboardSteerRate)
   smoothThrottle = lerpToward(smoothThrottle, throttleTarget, dt, devSettings.keyboardThrottleRate)
@@ -65,9 +84,9 @@ export function keyboardIntent(dt: number): Intent {
   const intent: Intent = emptyIntent()
   intent.throttle = smoothThrottle
   intent.steer = smoothSteer
-  intent.brake = keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0
-  intent.fire = keys.has('Space')
-  intent.boost = keys.has('ShiftLeft') || keys.has('ShiftRight')
+  intent.brake = back ? 1 : 0
+  intent.fire = isActionDown('fire', bindings)
+  intent.boost = isActionDown('boost', bindings)
   intent.pitch = smoothPitch
   return intent
 }

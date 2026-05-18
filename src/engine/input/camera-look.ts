@@ -8,11 +8,12 @@
  * - When neither input is active, target decays back to (0, 0) so the
  *   camera returns to the default chase position automatically.
  *
- * Sensitivity, deadzone, range, and Y-invert are read from `devSettings`
- * each tick so the dev settings menu can tune feel live.
+ * Sensitivity / range / deadzone are read from `devSettings`; Y-invert
+ * is the player-facing knob (Controls tab → "Invert camera Y").
  */
 
 import { devSettings } from '../dev-settings'
+import { playerSettings } from '../player-settings'
 
 const RETURN_RATE = 3 // exponential decay coefficient when no input
 
@@ -50,7 +51,7 @@ export function installCameraLookInput(): void {
     yaw += (e.clientX - lastMouseX) * sens
     // Invert vertical (default): dragging mouse UP raises the camera. Dev
     // settings menu can flip this — when not inverted, dragging up looks down.
-    const ySign = devSettings.cameraInvertY ? -1 : 1
+    const ySign = playerSettings.invertCameraY ? 1 : -1
     pitch += (e.clientY - lastMouseY) * sens * ySign
     lastMouseX = e.clientX
     lastMouseY = e.clientY
@@ -71,7 +72,7 @@ export function tickCameraLook(dt: number): CameraLookState {
   if (stickActive) {
     yaw = stickX * devSettings.cameraStickYawRange
     // Invert vertical (default): pushing stick UP raises the camera.
-    const ySign = devSettings.cameraInvertY ? -1 : 1
+    const ySign = playerSettings.invertCameraY ? 1 : -1
     pitch = stickY * devSettings.cameraStickPitchRange * ySign
   } else if (!mouseDragging) {
     // Decay back to zero.
