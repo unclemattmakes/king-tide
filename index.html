@@ -1956,6 +1956,131 @@
         #settings-menu .sm-row { grid-template-columns: 1fr; gap: 6px; }
       }
 
+      /* Rebind modal — opened from Settings → Controls → "Rebind keyboard"
+         / "Rebind gamepad". Sits above #settings-menu (z-index 66) so the
+         capture overlay always wins focus. */
+      #rebind-menu {
+        position: fixed; inset: 0; z-index: 70;
+        display: none; align-items: center; justify-content: center;
+        background: rgba(5, 10, 20, 0.78);
+        backdrop-filter: blur(8px);
+        font-family: var(--bc-font-sans);
+        animation: bc-fade var(--t-base) var(--ease-out);
+      }
+      #rebind-menu.show { display: flex; }
+      #rebind-menu .card {
+        position: relative;
+        text-align: left; color: var(--bc-ink);
+        background: linear-gradient(180deg, rgba(10, 20, 36, 0.96), rgba(5, 10, 20, 0.96));
+        border: 1px solid var(--bc-line);
+        border-left: 4px solid var(--bc-cyan);
+        padding: 32px 36px 24px;
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
+        min-width: 480px;
+        max-width: 640px;
+        max-height: 88vh;
+        overflow: auto;
+        animation: bc-rise var(--t-slow) var(--ease-out);
+      }
+      #rebind-menu .ribbon {
+        position: absolute; top: -10px; left: 24px;
+        font-family: var(--bc-font-display);
+        font-size: 11px; letter-spacing: 0.32em;
+        padding: 5px 14px;
+        background: var(--bc-cyan); color: var(--bc-navy);
+      }
+      #rebind-menu .title {
+        margin: 4px 0 6px;
+        font-family: var(--bc-font-display);
+        font-size: 22px; letter-spacing: 0.18em;
+      }
+      #rebind-menu .sub {
+        font: 11px var(--bc-font-mono);
+        letter-spacing: 0.18em;
+        color: var(--bc-ink-faint);
+        margin-bottom: 16px;
+        text-transform: uppercase;
+      }
+      #rebind-menu .rb-list {
+        display: flex; flex-direction: column;
+        margin-bottom: 16px;
+      }
+      #rebind-menu .rb-row {
+        display: grid; grid-template-columns: 200px 1fr;
+        gap: 14px; align-items: center;
+        padding: 10px 0;
+        border-top: 1px solid var(--bc-line);
+        font-size: 13px;
+      }
+      #rebind-menu .rb-row:first-child { border-top: 0; }
+      #rebind-menu .rb-lbl {
+        font-family: var(--bc-font-display);
+        font-size: 12px; letter-spacing: 0.16em;
+        color: var(--bc-ink-dim);
+        text-transform: uppercase;
+      }
+      #rebind-menu .rb-ctrl { display: flex; align-items: center; gap: 10px; }
+      #rebind-menu .rb-chip {
+        background: rgba(5, 10, 20, 0.55);
+        border: 1px solid var(--bc-line);
+        color: var(--bc-ink);
+        font-family: var(--bc-font-mono);
+        font-size: 12px; letter-spacing: 0.1em;
+        padding: 7px 14px;
+        cursor: pointer;
+        min-width: 96px;
+        text-align: center;
+      }
+      #rebind-menu .rb-chip:hover { background: rgba(77, 214, 255, 0.10); border-color: rgba(77, 214, 255, 0.45); }
+      #rebind-menu .rb-chip.listening {
+        background: rgba(255, 215, 64, 0.18);
+        border-color: rgba(255, 215, 64, 0.6);
+        color: var(--bc-yellow);
+        animation: bc-fade 600ms var(--ease-out) infinite alternate;
+      }
+      #rebind-menu .rb-chip.secondary {
+        cursor: default;
+        background: transparent;
+        border: 0;
+        padding: 0 4px;
+        font-size: 10px; letter-spacing: 0.14em;
+        color: var(--bc-ink-faint);
+        text-transform: uppercase;
+      }
+      #rebind-menu .hint {
+        font: 11px var(--bc-font-mono);
+        letter-spacing: 0.14em;
+        color: var(--bc-yellow);
+        min-height: 16px;
+        margin-bottom: 12px;
+        opacity: 0; transition: opacity var(--t-fast);
+      }
+      #rebind-menu .hint.show { opacity: 1; }
+      #rebind-menu .actions {
+        display: flex; gap: 10px; justify-content: flex-end;
+        border-top: 1px solid var(--bc-line);
+        padding-top: 14px;
+      }
+      #rebind-menu .actions .action {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--bc-line);
+        color: var(--bc-ink);
+        font-family: var(--bc-font-display);
+        font-size: 12px; letter-spacing: 0.18em;
+        padding: 9px 18px;
+        cursor: pointer;
+      }
+      #rebind-menu .actions .action.primary {
+        background: rgba(77, 214, 255, 0.14); color: var(--bc-cyan);
+        border-color: rgba(77, 214, 255, 0.45);
+      }
+      #rebind-menu .actions .action:hover { background: rgba(255, 255, 255, 0.10); }
+      #rebind-menu .actions .action.primary:hover { filter: brightness(1.12); }
+      @media (max-width: 720px) {
+        #rebind-menu .card { min-width: auto; width: 96vw; padding: 24px 18px; }
+        #rebind-menu .rb-row { grid-template-columns: 1fr; gap: 4px; }
+      }
+
       /* While any full-screen broadcast surface is up, hide in-race HUD
          + dev chrome so the screen stays a clean broadcast frame. Placed at
          end of the cascade so the (1,1,1) specificity hide always wins over
@@ -2187,17 +2312,11 @@
           <input id="ds-stick-dz" type="range" min="0" max="0.5" step="0.01" />
           <span class="val" id="ds-stick-dz-v"></span>
         </div>
-        <div class="row toggle">
-          <label for="ds-invert-y">Invert Y axis</label>
-          <input id="ds-invert-y" type="checkbox" />
-        </div>
+        <!-- Camera "Invert Y" + left-stick deadzone moved to
+             Settings → Controls (player-facing). Dev settings keeps the
+             low-level feel knobs only. -->
 
         <h2>GAMEPAD DRIVING</h2>
-        <div class="row">
-          <label for="ds-gp-dz">Stick deadzone</label>
-          <input id="ds-gp-dz" type="range" min="0" max="0.4" step="0.01" />
-          <span class="val" id="ds-gp-dz-v"></span>
-        </div>
         <div class="row">
           <label for="ds-stick-curve">Stick curve</label>
           <input id="ds-stick-curve" type="range" min="1" max="3" step="0.05" />
@@ -2246,6 +2365,21 @@
           <h2 id="sm-title">SETTINGS</h2>
           <div class="sm-sub">Skeleton populated on open.</div>
         </section>
+      </div>
+    </div>
+    <!-- Rebind modal — opened from Settings → Controls → Rebind keyboard /
+         Rebind gamepad. Rows populated by src/engine/menus/rebind-modal.ts. -->
+    <div id="rebind-menu" aria-hidden="true">
+      <div class="card" role="dialog" aria-modal="true" aria-labelledby="rb-title">
+        <div class="ribbon">REBIND</div>
+        <h2 class="title" id="rb-title">REBIND KEYBOARD</h2>
+        <div class="sub" id="rb-sub">Click a key chip to assign a new binding.</div>
+        <div class="rb-list" id="rb-list"></div>
+        <div class="hint" id="rb-hint" aria-live="polite"></div>
+        <div class="actions">
+          <button type="button" class="action" id="rb-reset">RESET TO DEFAULTS</button>
+          <button type="button" class="action primary" id="rb-done">DONE</button>
+        </div>
       </div>
     </div>
     <!-- Cold-boot menu — title → mode → track → bike (SP) or room entry → lobby (MP). -->
