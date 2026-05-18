@@ -21,18 +21,18 @@ it can be marked complete, and means every milestone produces visible payoff
 for the player (a button lights up, a slider becomes meaningful, a HUD
 widget appears).
 
-Applied concretely:
+Applied concretely (✅ = shipped, ⬜ = pending):
 
 | System | Functional | Settings entry | UI gate cleared |
 |---|---|---|---|
-| Audio | playback works | master / music / SFX / ambient sliders | settings → audio category enabled |
-| Anti-grav | controller flips, geometry rideable | gameplay → anti-grav camera intensity | HUD indicator shown on entry |
-| AI | 3 difficulties + rubber-band | gameplay → difficulty + rubber-band toggle | both controls active |
-| Wave-pump signal | triggers on successful pump | gameplay → wave-pump prompt intensity (full/subtle/off) | HUD widget visible |
-| Tutorial | runs end-to-end | gameplay → replay tutorial | menu button active |
-| Multiplayer | room codes route | settings → network region / latency display | MP menu button active |
-| Leaderboard | submission works | settings → submit times toggle | leaderboard view populates |
-| Input / controls | rebinding works | controls → rebind + deadzone + sensitivity | input config flow active |
+| Audio | ⬜ playback works | ⬜ master / music / SFX / ambient sliders | ⬜ settings → audio category enabled |
+| Anti-grav | ⬜ controller flips, geometry rideable | ⬜ gameplay → anti-grav camera intensity | ⬜ HUD indicator shown on entry |
+| AI | ⬜ 3 difficulties + rubber-band | ⬜ gameplay → difficulty + rubber-band toggle | ⬜ both controls active |
+| Wave-pump signal | ✅ triggers on successful pump *(heuristic — upgrades when pump physics ship)* | ✅ gameplay → wave-pump prompt intensity (full/subtle/off) | ✅ HUD widget visible |
+| Tutorial | ⬜ runs end-to-end | ⬜ gameplay → replay tutorial | ⬜ menu button active |
+| Multiplayer | ⬜ room codes route | ⬜ settings → network region / latency display | ⬜ MP menu button active |
+| Leaderboard | ⬜ submission works | ⬜ settings → submit times toggle | ⬜ leaderboard view populates |
+| Input / controls | ⬜ rebinding works | ⬜ controls → rebind + deadzone + sensitivity | ⬜ input config flow active |
 
 ---
 
@@ -104,21 +104,28 @@ shape. Subsequent milestones light it up.
 
 ## Phased plan
 
-| Step | Milestones | Outcome |
-|---|---|---|
-| **0. Scaffolding** | M11 (pre-foundation) | Full menu flow stubbed; settings categories present; HUD slots reserved; disabled-state convention locked. |
-| **1. Foundation systems** | M11–M12 | Anti-grav, wave-pump signal, tutorial framework, AI difficulty, music integration. Each lights up its settings entry and HUD widget. |
-| **2. Track production sprint 1** | M13 | Sandbar (tutorial), South Beach, Hatteras, The Maw, Cape Town. Reef Cup + the hero track. Track-select tiles activate one by one. |
-| **3. Track production sprint 2** | M14 | Shibuya, Kilauea, Marina Bay, Doge's. Open Sea + Continental cups. |
-| **4. Track production sprint 3** | M15 | Aqualand, Angkor, Liberty. Drowned Cup; finale. |
-| **5. Audio integration** | M14–M16 (parallel with tracks) | License/commission music per region as tracks land. |
-| **6. Modes** | M16 | Time Trial + Cup wiring + leaderboard backend. Mode buttons activate. |
-| **7. MP completion** | M10.x → M17 | Room-code finalization, lobby UI, 8-bike stability. |
-| **8. Polish / QA** | M17–M18 | Perf, accessibility, cross-browser. |
-| **9. Pre-launch** | M18 | Trailer, landing, marketing copy, deployment. |
+| Step | Milestones | Outcome | Status |
+|---|---|---|---|
+| **0. Scaffolding** | M11 (pre-foundation) | Full menu flow stubbed; settings categories present; HUD slots reserved; disabled-state convention locked. | ✅ landed |
+| **1. Foundation systems** | M11–M12 | Anti-grav, wave-pump signal, tutorial framework, AI difficulty, music integration. Each lights up its settings entry and HUD widget. | 🟡 1/5 — wave-pump signal landed |
+| **2. Track production sprint 1** | M13 | Sandbar (tutorial), South Beach, Hatteras, The Maw, Cape Town. Reef Cup + the hero track. Track-select tiles activate one by one. | ⬜ |
+| **3. Track production sprint 2** | M14 | Shibuya, Kilauea, Marina Bay, Doge's. Open Sea + Continental cups. | ⬜ |
+| **4. Track production sprint 3** | M15 | Aqualand, Angkor, Liberty. Drowned Cup; finale. | ⬜ |
+| **5. Audio integration** | M14–M16 (parallel with tracks) | License/commission music per region as tracks land. | ⬜ |
+| **6. Modes** | M16 | Time Trial + Cup wiring + leaderboard backend. Mode buttons activate. | ⬜ |
+| **7. MP completion** | M10.x → M17 | Room-code finalization, lobby UI, 8-bike stability. | 🟡 in flight (M10.12 lobby + state sync shipped) |
+| **8. Polish / QA** | M17–M18 | Perf, accessibility, cross-browser. | ⬜ |
+| **9. Pre-launch** | M18 | Trailer, landing, marketing copy, deployment. | ⬜ |
 
 See [implementation-plan.md](./implementation-plan.md) for the canonical
 milestone schedule; the steps above slot into it.
+
+## Shipping log
+
+| Date | Step | PR | Notes |
+|---|---|---|---|
+| 2026-05-17 | Step 0 — Scaffolding | [#110](https://github.com/occ-matt/hoverbike/pull/110) | Full menu cathedral (mode/cup/track/bike/settings/HUD) shipped with disabled-state convention locked. Test maps moved into a dev-only Dev Cup so the four real race cups stay clean. |
+| 2026-05-17 | Step 1 — Wave-pump signal | [#111](https://github.com/occ-matt/hoverbike/pull/111) | Heuristic crest-launch detector → HUD widget + audio chord. Gameplay → Wave-pump prompt (Full/Subtle/Off) wired and persisted. Trigger upgrades when pump physics tuning lands; event contract is stable. |
 
 ---
 

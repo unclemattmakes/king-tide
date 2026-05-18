@@ -1,11 +1,13 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-11 (M10.12 multiplayer lobby — `?room=<id>` now opens a lobby overlay that lists every connected peer with their ready/not-ready state, plus a "CLICK WHEN READY" button (Enter also toggles). The race countdown is held (`raceHud.deferStart: true`) until **all connected peers** (minimum 1, so solo works) have ready'd up. When the local view first sees all-ready it calls `raceHud.armCountdown()` AND broadcasts `start-race` to the relay; the relay sets a sticky `raceStarted` bit and forwards to peers. Late joiners receive `raceStarted: true` in their `HelloMessage` and skip the lobby immediately. Reset on empty room. Verified end-to-end via Chrome MCP for solo / two-peer / late-joiner scenarios. M10.11 multiplayer state sync — see [docs/m10-11-state-sync.md](./m10-11-state-sync.md). Host-elected AI authority + 20 Hz transform snapshots: lowest-slot peer runs `aiControlSystem` and broadcasts the 4 AI bike poses; every peer also broadcasts its OWN player-bike pose. Receivers' AI bikes and remote-peer bikes are kinematic-position rigid bodies whose pose is set from inbound snapshots, replacing the old input-replay path (which silently diverged because each tab had its own physics + AI sim with no state sync — the M10.4–M10.9 work was input-only). Wire format: byte-0 tag distinguishes `InputFrame` (0x01, 11 bytes) from `TransformSnapshot` (0x02, 8 + 24×N bytes). Host AI bikes carry `AITag`, non-host AI bikes don't (re-derived via `applyHostRole` on every peer-set change). Local human's bike stays `Dynamic + PeerControlled`. Bandwidth at 8 peers: ~12 KB/s ingress per peer. Race state stays per-tab; M10.15 will make it host-authoritative if disagreements show up in play. `#hud-room` chip now also shows `[host]` when this peer is the AI host. Determinism harness unchanged (default `runAI: true`). 169/169 unit tests passing including new `host-election`, `transform-snapshot`, `apply-snapshot` suites. M10.10.1 — local player bike's `PeerControlled.peerId` now patched to relay-assigned slot in `onConnected` (was hardcoded `0`, made every tab claim slot 0 and the host's frames drove everyone). M10.10 deployed PartyKit endpoint — client defaults to `hoverbike.occ-matt.partykit.dev` in prod builds, `localhost:1999` in dev; `?host=` overrides. Local dev: `pnpm party:dev` (PartyKit on :1999) + `pnpm dev` (Vite on :5191). M9.41 lean crank — `ROLL_LEAN_LIMIT` doubled from 20° to 40°.). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-17 (v1 cathedral + wave-pump signal — see *v1 cathedral + wave-pump signal (2026-05-17)* below. M11 Step 0 from [docs/v1-work-breakdown.md](./v1-work-breakdown.md) shipped: full menu flow now exists with mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial), 12-tile track-select for the v1 ship tracks (all disabled with post-flood landmark blurbs + per-track gate labels), 4 disabled real cups + a dev-only **Dev Cup** for playtest tracks (lagoon, cliffside, every GLB) so the real race cups stay clean, 5-slot bike-select (3 active + 2 "Coming soon"), and a full Settings overlay (Audio / Video / Controls / Gameplay tabs) with every v1 tunable row stubbed + gated. Reserved HUD slots for wave-pump, anti-grav, wave-line, cup-points, 8-bike positions. Single `.bc-disabled` + `.bc-gate` convention locked once and reused everywhere. The first Foundation Systems milestone also landed: a wave-pump signal that fires on a clean crest launch (on-water-grounded → airborne with vy ≥ 1.5 m/s, forward speed ≥ 45% of top, throttle ≥ 0.4, 500 ms cooldown), strength-scaled chyron-style HUD widget + stacked-5th audio chord, persisted "Wave-pump prompt" setting (Full/Subtle/Off). 295/295 unit tests passing including 11 new for the pump detector. Old: M10.12 multiplayer lobby — `?room=<id>` now opens a lobby overlay that lists every connected peer with their ready/not-ready state, plus a "CLICK WHEN READY" button (Enter also toggles). The race countdown is held (`raceHud.deferStart: true`) until **all connected peers** (minimum 1, so solo works) have ready'd up. When the local view first sees all-ready it calls `raceHud.armCountdown()` AND broadcasts `start-race` to the relay; the relay sets a sticky `raceStarted` bit and forwards to peers. Late joiners receive `raceStarted: true` in their `HelloMessage` and skip the lobby immediately. Reset on empty room. Verified end-to-end via Chrome MCP for solo / two-peer / late-joiner scenarios. M10.11 multiplayer state sync — see [docs/m10-11-state-sync.md](./m10-11-state-sync.md). Host-elected AI authority + 20 Hz transform snapshots: lowest-slot peer runs `aiControlSystem` and broadcasts the 4 AI bike poses; every peer also broadcasts its OWN player-bike pose. Receivers' AI bikes and remote-peer bikes are kinematic-position rigid bodies whose pose is set from inbound snapshots, replacing the old input-replay path (which silently diverged because each tab had its own physics + AI sim with no state sync — the M10.4–M10.9 work was input-only). Wire format: byte-0 tag distinguishes `InputFrame` (0x01, 11 bytes) from `TransformSnapshot` (0x02, 8 + 24×N bytes). Host AI bikes carry `AITag`, non-host AI bikes don't (re-derived via `applyHostRole` on every peer-set change). Local human's bike stays `Dynamic + PeerControlled`. Bandwidth at 8 peers: ~12 KB/s ingress per peer. Race state stays per-tab; M10.15 will make it host-authoritative if disagreements show up in play. `#hud-room` chip now also shows `[host]` when this peer is the AI host. Determinism harness unchanged (default `runAI: true`). 169/169 unit tests passing including new `host-election`, `transform-snapshot`, `apply-snapshot` suites. M10.10.1 — local player bike's `PeerControlled.peerId` now patched to relay-assigned slot in `onConnected` (was hardcoded `0`, made every tab claim slot 0 and the host's frames drove everyone). M10.10 deployed PartyKit endpoint — client defaults to `hoverbike.occ-matt.partykit.dev` in prod builds, `localhost:1999` in dev; `?host=` overrides. Local dev: `pnpm party:dev` (PartyKit on :1999) + `pnpm dev` (Vite on :5191). M9.41 lean crank — `ROLL_LEAN_LIMIT` doubled from 20° to 40°.). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
 ## What works today
 
+- **v1 menu cathedral.** Cold boot routes through title → 5-tile mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial) → track or cup or lobby → 5-slot bike-select → race. Race mode shows all 12 v1 ship tracks as disabled tiles with post-flood landmark blurbs + per-track gate labels; Cup mode shows the four ship cups (all disabled) plus a dev-only **Dev Cup** that hosts every playtest track (lagoon, cliffside, every GLB) — keeps the real race lineup uncluttered. Full Settings overlay (Audio / Video / Controls / Gameplay) with the entire v1 tunable inventory present and gated; the **Wave-pump prompt** row is the first to go live. Reserved hidden HUD slots for wave-pump, anti-grav, wave-line, cup-points, 8-bike positions. Single `.bc-disabled` + `.bc-gate` convention reused everywhere. See [docs/v1-work-breakdown.md](./v1-work-breakdown.md).
+- **Wave-pump signal.** Render-side detector watches the player bike each frame; fires on a clean crest launch (on-water-grounded → airborne with vy ≥ 1.5 m/s, forward speed ≥ 45% of top speed, throttle ≥ 0.4, 500 ms cooldown). Strength-scaled HUD widget pops a chyron-style "PUMP +" flash with a cyan→yellow strength bar; audio engine plays a stacked perfect-5th chord (A4 + E5 + A5) under a band-passed whoosh sweep — distinct from `gateCleared`'s two-note ding so the player can tell pumps from checkpoints by ear. Settings → Gameplay → "Wave-pump prompt" toggles Full / Subtle / Off; persisted to localStorage. Sim-side pump physics tuning is still pending (M11–M12 proper); the detector's event contract holds — only the trigger heuristic gets upgraded.
 - Tracks on the level-select carousel: **Lagoon Loop** (default; jump ramp on the right straight), **Cliffside** (mesa with cliff drop, doubles as the Blender-export reference layout), **Calibration** (smoke-test fixture), **Test Ring** (collision tunneling regression), and two new procedural-island showcases — **Oval Loop** and **Figure Eight** — authored end-to-end in Blender using the addon's road / ramp / spline tools on a fresh HV_Island terrain. The two new tracks are the canonical proof that the Blender authoring stack (road slab + F1 curbs + ramp + snap + JSON sync + manifest upsert) can produce shippable courses without leaving Blender.
 - Three bike archetypes — **Cruiser** (heavy / fast top speed), **Racer** (default balanced), **Stunt** (light / agile) — selectable via the garage menu or `?bike=`
 - Garage menu (HUD button top-right) for picking bike + track + viewing / clearing best lap records
@@ -30,6 +32,78 @@ This doc captures the build's current state, controls, known issues, and next st
 - **Multiplayer state sync (M10.4–M10.11)** — opt-in via `?room=<id>` URL param. Local dev needs `pnpm party:dev` (PartyKit relay on :1999) alongside `pnpm dev` (Vite on :5191). The stateless relay (`party/relay.ts`) assigns peer slots 0..7 and broadcasts two binary message types distinguished by a 1-byte tag at offset 0: `InputFrame` (0x01, 11 B, 60 Hz) carries each peer's controls; `TransformSnapshot` (0x02, 8 + 24×N B, 20 Hz) carries owner-authoritative bike poses. The lowest-slot peer is the AI host: it alone runs `aiControlSystem` and broadcasts the 4 AI bike poses. Every peer also broadcasts its own player bike. Receivers' AI bikes and remote-peer bikes are kinematic-position rigid bodies whose pose is set from inbound snapshots, replacing the input-replay path which couldn't converge (each tab simulated AI independently). Local human's bike stays Dynamic + PeerControlled and is driven by its own input. Host changeover (e.g. peer 0 leaves) re-tags AI bikes via `applyHostRole` between fixed steps; new host re-derives `AIController` closest-point cache via `defaultAIController('main')`. `#hud-room` chip shows `[host]` when this peer owns AI. `__hover.net` probe surfaces `peerId()`, `remotePeers()`, `isHost()`, `recentRemoteFrames()`, `latestPeerIntents()`, `snapshotsReceived()`; `__hover.bikes()` now includes per-bike `bodyType`, `hasAI`, `peerControlled` for cross-tab diagnostics. **Not yet implemented**: render-side smoothing of the 20 Hz snaps (M10.12), owner-authoritative combat (M10.13), snapshot interpolation/extrapolation (M10.14), host-authoritative race state (M10.15), variant negotiation per peer, anti-cheat.
 - Spec → GLB asset pipeline (M9.27, flipped to per-variant in M9.39): `specs/{bikes,props,tracks}/*.json` + `tools/blender/build_*.py` produce `public/assets/<cat>/*.glb` and `public/assets/manifest.json` via `pnpm gen:all`. Bike-loader instantiates the player + AI bike GLBs at boot; prop-loader pre-fetches asset-prop GLBs referenced by track JSON. **Bikes:** one `bikes-src/<id>.blend` per variant — open it in Blender, edit the variant directly (no shared kit, no propagation), click *Hoverbike → Export Bike to Game*, the GLB updates and the runtime picks it up on next reload. The same addon serves tracks via *Export Track to Game* and switches mode based on the .blend's parent dir. Headless `pnpm gen:bikes` opens each .blend, overlays spec.appearance recolour + spec.physics extras, exports. **Tracks:** spec-driven `build_track.py` round-trips through `tracks-src/<id>.blend` and emits both the GLB and a starter gameplay JSON. **Bike viewer** (`?viewer=<bikeId>` or the addon's *Copy Viewer URL*) opens a turntable with OrbitControls, sockets/colliders surfaced as gizmos.
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
+
+### v1 cathedral + wave-pump signal (2026-05-17)
+
+First two checkpoints of [docs/v1-work-breakdown.md](./v1-work-breakdown.md):
+**Step 0 — Scaffolding** ([#110](https://github.com/occ-matt/hoverbike/pull/110))
+and **Step 1 — Wave-pump signal**
+([#111](https://github.com/occ-matt/hoverbike/pull/111)).
+
+**Menu cathedral.** Cold-boot flow is now the full v1 shape with most
+surfaces disabled. New files:
+- [src/engine/menus/tracks-catalog.ts](../src/engine/menus/tracks-catalog.ts)
+  — pure data for the 12 v1 tracks (post-flood landmarks, set-pieces,
+  cup assignment, lap targets, gate labels), the 4 ship cups, and the
+  Dev Cup.
+- [src/engine/menus/settings-overlay.ts](../src/engine/menus/settings-overlay.ts)
+  — lazy-imported overlay with Audio / Video / Controls / Gameplay tabs;
+  every v1 tunable row present, each disabled row carrying a gate label
+  pointing at the milestone that lights it up.
+- [src/engine/menus/menu-flow.ts](../src/engine/menus/menu-flow.ts)
+  extended with 5-mode select (Race / Time Trial / Cup / Multiplayer /
+  Tutorial — Race + Cup + Multiplayer enabled, the other two gated),
+  cup-select screen, cup-track list, tutorial-intro stub, leaderboard
+  stub. Bike-select now renders 3 active + 2 "Coming soon" slots.
+
+The disabled-state convention is a single `.bc-disabled` class with a
+`.bc-gate` block — locked once, reused everywhere. Gamepad nav skips
+disabled tiles automatically. HUD scaffolding slots
+(`#hud-wave-pump`, `#hud-anti-grav`, `#hud-wave-line`,
+`#hud-cup-points`, `#hud-positions`) are reserved hidden DOM that each
+owning system flips visible when its definition-of-done lands.
+
+**Dev Cup is the playtest path.** The four real race cups (Reef / Open
+Sea / Continental / Drowned) all render disabled in Step 0 — none of
+their tracks have shipped. The Dev Cup tile renders only in
+`import.meta.env.DEV` builds, and lists the procedural Lagoon Loop +
+Cliffside plus every GLB the asset manifest knows about (14 playable
+tracks today). Today's devs reach a race via Cup → Dev Cup → track →
+bike; the four real cups stay clean as their tracks land sprint by
+sprint.
+
+**Wave-pump signal.** First Foundation Systems milestone — lights up
+its HUD slot, its settings row, and its sim trigger all at once. New
+files:
+- [src/engine/wave-pump-observer.ts](../src/engine/wave-pump-observer.ts)
+  — render-side detector. Heuristic: bike was on-water-grounded last
+  tick, this tick is airborne with vy ≥ 1.5 m/s, forward speed ≥ 45%
+  of top speed, throttle ≥ 0.4. 500 ms cooldown so chained wavelet hops
+  don't double-fire. Strength score (0..1) blends vy excess with speed
+  fraction; HUD + audio scale to it.
+- [src/engine/render/wave-pump-hud.ts](../src/engine/render/wave-pump-hud.ts)
+  — binds to `#hud-wave-pump`. `full` mode renders the chyron-style
+  flash with the cyan→yellow strength bar; `subtle` mode renders a
+  small cyan pulse dot; `off` renders nothing. CSS `--wp-strength` var
+  drives glow + bar fill.
+- [src/engine/player-settings.ts](../src/engine/player-settings.ts) —
+  separate from input-feel `dev-settings`, persisted to localStorage
+  under `hoverbike.playerSettings.v1`. Loaded on boot in `main.ts`.
+- [src/engine/audio/audio.ts](../src/engine/audio/audio.ts) gained a
+  `wavePump(strength)` method — stacked perfect-5th chord (A4 + E5 +
+  A5) over a band-passed whoosh sweep. Distinct from `gateCleared`'s
+  two-note ding so pumps + checkpoints are audibly different.
+- 11 deterministic detector tests in
+  [tests/unit/wave-pump-observer.test.ts](../tests/unit/wave-pump-observer.test.ts)
+  cover the happy path + every gate (vy floor, speed floor, throttle
+  floor, surface-is-water requirement, cooldown, reset).
+
+The detector lives on the render side (not in `simulateStep`) because
+pump events are pure UI/audio feedback — no determinism dependency, no
+replay obligation. When the proper sim-side pump physics tuning lands
+in M11–M12, only the trigger heuristic changes; the
+`wavePumpHud.pump(strength)` + `audio.wavePump(strength)` contract
+stays.
 
 ### Authoring — tunnels, downtown, placement helper, terrain coloration (2026-05-15)
 - **Tunnel tool.** Bezier curve through a hill → *Build Tunnel* emits a
