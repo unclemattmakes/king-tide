@@ -1,4 +1,4 @@
-import { defineConfig, devices } from '@playwright/test'
+import { defineConfig, devices, type PlaywrightTestProject } from '@playwright/test'
 
 // Run headed by default so Chromium uses the real GPU. The headless WebGL2
 // software fallback (SwiftShader) tanks any non-trivial shader work to
@@ -7,6 +7,42 @@ import { defineConfig, devices } from '@playwright/test'
 // — fine for local dev. Set `E2E_HEADLESS=1` to opt back in (e.g. CI on a
 // machine without a display server).
 const headless = process.env.E2E_HEADLESS === '1'
+
+// Cross-browser projects are opt-in via `E2E_BROWSERS`:
+//   unset / 'chromium'  → Chromium only (default, fastest)
+//   'all'               → Chromium + Firefox + WebKit
+//   'chromium,firefox'  → comma-separated subset
+//
+// Cross-browser runs are slow (3× the suite + browser cold-starts) and the
+// WebKit GPU story on Linux is software-only — see docs/cross-browser.md.
+function parseBrowsers(): Set<string> {
+  const raw = (process.env.E2E_BROWSERS ?? 'chromium').toLowerCase().trim()
+  if (raw === 'all') return new Set(['chromium', 'firefox', 'webkit'])
+  return new Set(
+    raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  )
+}
+
+const enabled = parseBrowsers()
+
+// Chromium gets the real GPU pass via the `--use-gl=egl` flag on Linux when
+// headed. Firefox supports WebGL2 fine but ignores Chromium-specific launch
+// args; we let Playwright's `devices['Desktop Firefox']` defaults apply.
+// WebKit on Linux can ONLY run a software WebGL pipeline (no real GPU access
+// through WebKitGTK in Playwright), so GPU-heavy specs (m2-water, m9-cliffside,
+// m9-audio) carry a `test.skip(browserName === 'webkit' && platform === 'linux')`
+// guard. Run those suites on macOS WebKit for real coverage.
+const allProjects: Array<{ key: string; project: PlaywrightTestProject }> = [
+  { key: 'chromium', project: { name: 'chromium', use: { ...devices['Desktop Chrome'] } } },
+  { key: 'firefox', project: { name: 'firefox', use: { ...devices['Desktop Firefox'] } } },
+  { key: 'webkit', project: { name: 'webkit', use: { ...devices['Desktop Safari'] } } },
+]
+const projects: PlaywrightTestProject[] = allProjects
+  .filter(({ key }) => enabled.has(key))
+  .map(({ project }) => project)
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -25,7 +61,7 @@ export default defineConfig({
     trace: 'on-first-retry',
     headless,
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects,
   webServer: {
     command: `pnpm dev --port ${process.env.E2E_PORT ?? 5391} --strictPort`,
     url: `http://localhost:${process.env.E2E_PORT ?? 5391}`,

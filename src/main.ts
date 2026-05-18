@@ -35,6 +35,7 @@ import { createPropsMesh } from './engine/render/props-mesh'
 import { createRaceHud } from './engine/render/race-hud'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
+import { applyPixelRatio, setRenderer } from './engine/render/renderer-service'
 import { createRiderRenderSystem } from './engine/render/rider-systems'
 import { createScene } from './engine/render/scene'
 import { beaufortToAmplitudeScale, createSkySystem } from './engine/render/sky'
@@ -55,6 +56,7 @@ import {
   defaultWaves,
   setWaveZones,
 } from './engine/sim/water/wave-field'
+import { applyDeckProfile, detectSteamDeck } from './engine/steam-deck'
 import { applyStoredWaterTuning } from './engine/water-debug-storage'
 import { loadBike } from './game/assets/bike-loader'
 import { loadManifest } from './game/assets/manifest'
@@ -130,8 +132,27 @@ async function boot() {
   installInput()
   installCameraLookInput()
 
+  // Phase 1b — Steam Deck detection. We probe early so the profile's
+  // framerate / fullscreen defaults can land in `playerSettings` before
+  // the game loop reads them. Detection is best-effort + false-positive-
+  // prone (any 1280×800 window trips the viewport signal); the profile's
+  // setter logic in `steam-deck.ts → applyDeckProfile()` is responsible
+  // for respecting any user override the player already saved.
+  const deck = detectSteamDeck()
+  if (deck.isLikelyDeck) {
+    applyDeckProfile()
+    // eslint-disable-next-line no-console
+    console.info(`[boot] Steam Deck detected via [${deck.signals.join(', ')}]`)
+  }
+
   // Phase 2 — core subsystems.
   const { renderer, backend } = await createRenderer(appEl)
+  setRenderer(renderer)
+  // Apply the persisted pixel-ratio now that the renderer is alive.
+  // `createRenderer` already calls `setPixelRatio(min(devicePixelRatio, 2))`,
+  // so this is a no-op when the player kept the default; if they dropped
+  // it for perf, the lower value takes effect on the first frame.
+  applyPixelRatio(playerSettings.pixelRatio)
   const { scene, camera, sun, hemi } = createScene()
   const phys = await createPhysicsWorld()
   const sim = createSimWorld()
@@ -712,11 +733,33 @@ async function boot() {
   applyTrackAudio(track.audio)
   const unlockAudio = () => {
     audio.resume()
+    // Step 8 — opportunistic fullscreen-on-first-gesture. The Steam Deck
+    // profile flips `fullscreenPreferred` on so Gaming Mode launches
+    // don't strand the player in a windowed view. We piggyback on the
+    // existing audio-unlock listener because both need a real user
+    // gesture by browser policy. Failures (already fullscreen, blocked
+    // by sandboxing) are swallowed — the player can always F11.
+    if (playerSettings.fullscreenPreferred && !document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {
+        /* user dismissed or browser blocked — non-fatal */
+      })
+    }
     window.removeEventListener('keydown', unlockAudio)
     window.removeEventListener('pointerdown', unlockAudio)
   }
   window.addEventListener('keydown', unlockAudio, { once: false })
   window.addEventListener('pointerdown', unlockAudio, { once: false })
+  // Step 8 — AudioContext resume after sleep. The Steam Deck aggressively
+  // suspends to save battery; Chromium leaves the AudioContext in the
+  // 'suspended' state after a long sleep. `audio.resume()` is a no-op if
+  // the context is already running, so unconditional re-resume on
+  // visibility-restore is safe. Mobile browsers benefit too (lock-screen
+  // returns).
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      audio.resume()
+    }
+  })
 
   const state = {
     ready: false,

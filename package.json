@@ -39,7 +39,12 @@
     "leaderboard:moderate": "node tools/leaderboard-moderate.mjs",
     "docs:dev": "vitepress dev docs-site",
     "docs:build": "vitepress build docs-site",
-    "docs:preview": "vitepress preview docs-site"
+    "docs:preview": "vitepress preview docs-site",
+    "tauri": "cd src-tauri && cargo tauri",
+    "tauri:dev": "cd src-tauri && cargo tauri dev",
+    "build:deck": "node tools/build-deck.mjs",
+    "build:windows": "node tools/build-windows.mjs",
+    "gen:icons": "node tools/gen-icons.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -57,6 +62,7 @@
     "@types/node": "^25.7.0",
     "@types/three": "^0.184.1",
     "ajv": "^8.17.1",
+    "jsdom": "^29.1.1",
     "partykit": "^0.0.115",
     "typescript": "^6.0.3",
     "vite": "^8.0.12",

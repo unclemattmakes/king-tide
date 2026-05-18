@@ -1490,6 +1490,58 @@
         .bc-card:hover, .bc-mode-card:hover { transform: none; }
       }
 
+      /* ───────── Accessibility data-attrs ─────────
+         Driven by accessibility-service.applyAccessibilityToDom().
+         These rules scale text, force opaque backgrounds, and (when
+         reducedFlash) dampen pulse animations across HUDs. Colorblind
+         palettes apply at the JS layer via accessibility-service. */
+      body[data-large-text="1"] #hud-fps,
+      body[data-large-text="1"] #hud-input,
+      body[data-large-text="1"] #hud-race,
+      body[data-large-text="1"] #hud-audio,
+      body[data-large-text="1"] #hud-room,
+      body[data-large-text="1"] .wp-shell,
+      body[data-large-text="1"] .wl-shell,
+      body[data-large-text="1"] .ag-shell,
+      body[data-large-text="1"] .tut-shell {
+        font-size: 125%;
+      }
+      /* biome-ignore-start lint/complexity/noImportantStyles: required to defeat per-feature HUD shell rules of higher specificity. */
+      body[data-high-contrast="1"] .wp-shell,
+      body[data-high-contrast="1"] .wl-shell,
+      body[data-high-contrast="1"] .ag-shell,
+      body[data-high-contrast="1"] .tut-shell {
+        background: #000 !important;
+        color: #fff !important;
+        border: 1px solid #fff !important;
+      }
+      body[data-reduced-flash="1"] .wp-shell,
+      body[data-reduced-flash="1"] .ag-shell,
+      body[data-reduced-flash="1"] .tut-shell {
+        animation: none !important;
+      }
+      /* biome-ignore-end lint/complexity/noImportantStyles: required to defeat per-feature HUD shell rules of higher specificity. */
+      /* Colorblind palette CSS hooks for the CSS-driven HUD shells.
+         Render systems handle canvas color via the JS palette; these
+         rules cover the CSS-only HUD chyrons so the swap is consistent
+         across both surfaces. */
+      /* biome-ignore-start lint/complexity/noImportantStyles: HUD shells set their own --accent inline; we have to win the cascade. */
+      body[data-cb="deuteranopia"] .wp-shell,
+      body[data-cb="protanopia"] .wp-shell {
+        --wp-accent: #ff8800 !important; /* swap magenta accent → high-luma orange */
+      }
+      body[data-cb="tritanopia"] .wp-shell {
+        --wp-accent: #33cccc !important; /* swap yellow accent → cyan along the resolvable axis */
+      }
+      body[data-cb="deuteranopia"] .wl-shell,
+      body[data-cb="protanopia"] .wl-shell {
+        --wl-accent: #ffd166 !important; /* lift to a high-luma yellow */
+      }
+      body[data-cb="tritanopia"] .wl-shell {
+        --wl-accent: #ff5566 !important; /* red replaces yellow on the resolvable axis */
+      }
+      /* biome-ignore-end lint/complexity/noImportantStyles: HUD shells set their own --accent inline; we have to win the cascade. */
+
       /* Respect reduced-motion across every animation we added. */
       @media (prefers-reduced-motion: reduce) {
         /* biome-ignore-start lint/complexity/noImportantStyles: required to defeat per-element animation/transition rules of higher specificity. */
@@ -1500,6 +1552,20 @@
         }
         /* biome-ignore-end lint/complexity/noImportantStyles: required to defeat per-element animation/transition rules of higher specificity. */
       }
+      /* Accessibility — `body[data-reduced-motion-override="on"]` mirrors
+         the OS-level @media rule above so users can force-on the dampening
+         from inside the game regardless of OS preference. Placed AFTER the
+         @media block so the higher-specificity selectors do not trip
+         noDescendingSpecificity against the unqualified `*` rule. */
+      /* biome-ignore-start lint/complexity/noImportantStyles: required to defeat per-element animation/transition rules of higher specificity. */
+      body[data-reduced-motion-override="on"] *,
+      body[data-reduced-motion-override="on"] *::before,
+      body[data-reduced-motion-override="on"] *::after {
+        animation-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 1ms !important;
+      }
+      /* biome-ignore-end lint/complexity/noImportantStyles: required to defeat per-element animation/transition rules of higher specificity. */
 
       /* ───────────── Cascade-order overrides ─────────────
          Rules collected at the bottom of the stylesheet so each one comes

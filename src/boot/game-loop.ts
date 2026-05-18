@@ -19,6 +19,7 @@
 import { query } from 'bitecs'
 import * as THREE from 'three'
 import type { PlayerSnapshot, RaceSnapshot } from '@/debug'
+import { installPerfDebugApi } from '@/debug'
 import type { AudioEngine } from '@/engine/audio/audio'
 import {
   type CupProgress,
@@ -37,6 +38,7 @@ import {
   encodeInputFrameInto,
   INPUT_FRAME_WIRE_BYTES,
 } from '@/engine/net/input-frame'
+import { createPerfRecorder, type PerfStats } from '@/engine/perf-recorder'
 import {
   ANTI_GRAV_CAMERA_SCALAR,
   markTutorialCompleted,
@@ -46,8 +48,10 @@ import { createAntiGravHud } from '@/engine/render/anti-grav-hud'
 import type { ChaseCamera } from '@/engine/render/camera'
 import { showCupResultsOverlay } from '@/engine/render/cup-results-screen'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
+import { shouldRenderFrame } from '@/engine/render/frame-cap'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
 import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finish-banner'
+import { createPerfHud, type RenderInfoLite } from '@/engine/render/perf-hud'
 import type { RaceHud } from '@/engine/render/race-hud'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
@@ -335,6 +339,57 @@ export function startGameLoop(opts: GameLoopOpts): void {
   let physAccum = 0
   let framesThisSecond = 0
   let fpsAccumStart = last
+  // Step 8 — wall-clock anchor for the framerate cap. The gate compares
+  // `now - lastRenderedAt` against `1000/cap` so a rAF tick that fires
+  // mid-interval just bails out of the render half (sim still steps,
+  // determinism preserved). `0` here means "fire the very next eligible
+  // frame" — the cap kicks in only after the first render lands.
+  let lastRenderedAt = 0
+
+  // Step 8 — Perf overlay + rolling-window recorder. The recorder samples
+  // every render frame (allocation-free); the HUD reads cached stats at
+  // the same 500 ms cadence as the FPS pill so we don't pay the percentile
+  // sort 60x/sec. Initial visibility flips on for `?perf=1`; the global
+  // backquote keybind toggles thereafter. Both default to off in normal
+  // gameplay so the panel never gets in the way unless explicitly asked
+  // for. The `renderer.info` shape is the live, mutating object — we
+  // capture the reference once.
+  const perfRecorder = createPerfRecorder()
+  const perfHud = createPerfHud()
+  const rendererInfo = (renderer as unknown as { info: RenderInfoLite }).info
+  const initialPerfOn =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('perf')
+  perfHud.setVisible(initialPerfOn)
+  // Cached snapshot from the last visible refresh — survives the on-off
+  // toggle so the panel doesn't flash zeros on the first frame after
+  // unhide. The HUD only paints when visible, so we just re-paint with
+  // the cached row text from the previous fresh sample when the user
+  // peeks the panel back open.
+  let lastPerfStats: PerfStats = perfRecorder.stats()
+  const onPerfKeyDown = (e: KeyboardEvent): void => {
+    if (e.code !== 'Backquote') return
+    // Don't fire while typing into a text field — backquote is a useful
+    // glyph in the in-app editor's free-form inputs.
+    const target = e.target as Element | null
+    const tag = target?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    perfHud.setVisible(!perfHud.isVisible())
+    e.preventDefault()
+  }
+  window.addEventListener('keydown', onPerfKeyDown)
+  // Surface the recorder + HUD on the dev-only __hover.perf accessor so
+  // CI traces, the e2e harness and Claude debug sessions can read the
+  // window's stats and dump CSVs to disk.
+  installPerfDebugApi({
+    stats: () => perfRecorder.stats(),
+    csv: () => perfRecorder.toCsv(),
+    resetWindow: () => perfRecorder.reset(),
+    isHudOn: () => perfHud.isVisible(),
+    toggleHud: () => {
+      perfHud.setVisible(!perfHud.isVisible())
+      return perfHud.isVisible()
+    },
+  })
 
   // M10.4 — wire-encoded input round-trip. simTick is the monotonic count
   // of fixed-step sim ticks driven by simulateStep; it lines up across
@@ -363,6 +418,12 @@ export function startGameLoop(opts: GameLoopOpts): void {
   function frame(now: number): void {
     const dt = Math.min((now - last) / 1000, 1 / 15)
     last = now
+
+    // Step 8 — feed the rolling-window recorder. Allocation-free hot path
+    // (writes a single Float32Array slot + advances the head index). The
+    // expensive parts (sort, percentiles, render-info read) only run when
+    // the HUD is visible AND the 500ms cadence ticks below.
+    perfRecorder.sample(now)
 
     state.intent = state.intentOverride ?? readPlayerIntent(dt)
 
@@ -715,15 +776,32 @@ export function startGameLoop(opts: GameLoopOpts): void {
     }
     waveLineHud.tick(waveLineShimmer.currentMaxScore())
 
-    renderer.render(scene, camera)
-
-    state.frame += 1
-    framesThisSecond += 1
+    // Step 8 — frame-rate cap. When `playerSettings.framerateCap > 0`
+    // we skip the GPU render + frame counter on rAF ticks that arrive
+    // sooner than the cap allows. The fixed-step sim accumulator above
+    // already ran; only the render half drops. This keeps determinism
+    // independent of the cap and is the Steam Deck path's hot knob
+    // (60 fps cap = ~½ the GPU power of uncapped on a 90 Hz panel).
+    const renderThisFrame = shouldRenderFrame(now, lastRenderedAt, playerSettings.framerateCap)
+    if (renderThisFrame) {
+      renderer.render(scene, camera)
+      lastRenderedAt = now
+      state.frame += 1
+      framesThisSecond += 1
+    }
     if (now - fpsAccumStart >= 500) {
       state.fps = (framesThisSecond * 1000) / (now - fpsAccumStart)
       framesThisSecond = 0
       fpsAccumStart = now
       if (hud.fpsEl) hud.fpsEl.textContent = `fps: ${state.fps.toFixed(0)}`
+      // Step 8 — refresh the perf overlay on the same cadence as the FPS
+      // pill. We only pay the percentile-sort + renderer.info read when
+      // the overlay is actually showing; the cached stats outlive the
+      // tick so the row text doesn't churn between visible refreshes.
+      if (perfHud.isVisible()) {
+        lastPerfStats = perfRecorder.stats()
+        perfHud.tick(lastPerfStats, rendererInfo)
+      }
       if (hud.audioEl)
         hud.audioEl.textContent = `audio: ${audio.isMuted() ? 'muted (M)' : 'on (M)'}`
       if (hud.inputEl) {
