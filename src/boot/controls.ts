@@ -13,6 +13,7 @@
  * mutates when the finish screen shows.
  */
 
+import { clearCupProgress } from '@/engine/cup-progress'
 import { installMenuGamepad, type MenuGamepad } from '@/engine/input/menu-gamepad'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
@@ -42,6 +43,10 @@ export interface ControlsOpts {
   playerEid: number
   playerVariantId: string
   roomId: string | null
+  /** Cup id from `?cup=<id>` — propagated onto the retry URL so a
+   *  pause-menu RESTART mid-cup re-enters the race still flagged as
+   *  part of the championship. Null in single-race mode. */
+  cupId: string | null
   raceHud: { isLocked(): boolean }
   audio: { isMuted(): boolean; setMuted(v: boolean): void }
   physicsDebug: { toggle(): boolean; isEnabled(): boolean }
@@ -67,6 +72,7 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     playerEid,
     playerVariantId,
     roomId,
+    cupId,
     raceHud,
     audio,
     physicsDebug,
@@ -134,15 +140,24 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     const url = new URL(window.location.href)
     url.search = ''
     if (roomId) url.searchParams.set('room', roomId)
+    if (cupId) url.searchParams.set('cup', cupId)
     url.searchParams.set('race', '1')
     url.searchParams.set('track', args.trackId)
     url.searchParams.set('bike', args.bikeId)
     return url.toString()
   }
   function retryRace(): void {
+    // Retry preserves any in-progress cup — the cup-progress
+    // sessionStorage state survives the reload and the
+    // recordCupRaceFinish helper overwrites this race's slot when the
+    // retry finishes.
     window.location.assign(buildRaceUrl({ trackId, bikeId: playerVariantId }))
   }
   function exitToMenu(): void {
+    // Pause-menu EXIT always abandons any in-progress cup — the
+    // sessionStorage key is dropped so the menu doesn't later surface
+    // stale cup state. (RESUME / RESTART do NOT clear it.)
+    clearCupProgress()
     const url = new URL(window.location.href)
     url.search = ''
     url.searchParams.set('back', '1')
