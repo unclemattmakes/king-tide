@@ -34,16 +34,28 @@
     "category": "Game",
     "shortDescription": "Post-flood arcade hover-bike racing",
     "longDescription": "Wave-mastery arcade racing on a drowned Earth. Eleven recognisable real-world coasts seen post-flood, played in canonical bikes.",
-    "targets": ["appimage", "deb"],
+    "targets": ["appimage", "deb", "nsis", "msi"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.png"
+      "icons/icon.png",
+      "icons/icon.ico"
     ],
     "linux": {
       "appimage": {
         "bundleMediaFramework": false
+      }
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "installMode": "currentUser"
       }
     }
   }

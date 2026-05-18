@@ -1,0 +1,123 @@
+name: build-desktop
+
+# Build the desktop wrappers — Linux AppImage (Steam Deck path) and
+# Windows NSIS installer (Windows desktop path). Manual dispatch +
+# tag-triggered. The Rust + Tauri toolchain install is slow (~5 min on
+# each runner) so this is not part of the standard CI loop.
+#
+# Outputs land as workflow artifacts on every run. On `v*` tag pushes
+# both installers attach to the GitHub Release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      steam_feature:
+        description: "Build with the `steam` cargo feature (Linux only; needs STEAM_SDK)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: build-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux AppImage
+            os: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            artifact_name: hoverbike-linux-appimage
+            bundle_glob: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+          - label: Windows NSIS
+            os: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            artifact_name: hoverbike-windows-installer
+            bundle_glob: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Linux system libs (webkit2gtk + gtk3)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache cargo + tauri target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: cargo-${{ runner.os }}-${{ matrix.rust_target }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2.0" --locked
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate placeholder icons
+        run: pnpm gen:icons
+
+      - name: Build web bundle
+        run: pnpm build
+
+      - name: Build desktop bundle
+        working-directory: src-tauri
+        shell: bash
+        run: |
+          # The `steam` cargo feature is Linux-only today (the steamworks
+          # crate's Windows path needs an SDK we don't have in CI yet).
+          if [ "${{ runner.os }}" = "Linux" ] && [ "${{ inputs.steam_feature }}" = "true" ]; then
+            cargo tauri build --target ${{ matrix.rust_target }} --features steam
+          else
+            cargo tauri build --target ${{ matrix.rust_target }}
+          fi
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.bundle_glob }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attach to Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.bundle_glob }}
+          fail_on_unmatched_files: true

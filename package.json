@@ -31,7 +31,8 @@
     "tauri": "cd src-tauri && cargo tauri",
     "tauri:dev": "cd src-tauri && cargo tauri dev",
     "build:deck": "node tools/build-deck.mjs",
-    "gen:deck-icons": "node tools/gen-deck-icons.mjs"
+    "build:windows": "node tools/build-windows.mjs",
+    "gen:icons": "node tools/gen-icons.mjs"
   },
   "engines": {
     "node": ">=20"
