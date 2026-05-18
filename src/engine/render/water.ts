@@ -629,11 +629,25 @@ export function createWaterMesh(
             // summed cascades produce.
             windDirX: 0.8,
             windDirZ: -0.6,
-            amplitude: 2.5e-6,
-            // Wider directional spread on the chop cascade so the
-            // smaller wavelengths don't read as parallel stripes
-            // when summed onto the well-aligned swell.
-            directionalSpread: 1,
+            // Chop amplitude pulled down from 2.5e-6 → 8e-7. The
+            // previous value was 2.5× the main wind-sea cascade,
+            // which produced pinching crests everywhere — the
+            // Jacobian-foam threshold fired on basically every
+            // chop ridge and painted the surface white. 8e-7 keeps
+            // chop reading as visible surface chop (it's still
+            // higher than the long-swell at 1e-7) without
+            // saturating the fold signal.
+            amplitude: 8e-7,
+            // Near-isotropic chop. Previous value `1` still produced
+            // visible parallel-stripe terracing on the wave faces
+            // because all chop wavelengths shared roughly the same
+            // direction. Real wind sea has chop in MANY directions;
+            // pulling the Mitsuyasu exponent down to 0.3 lets ~70%
+            // of the spectral energy spread across the full ±90°
+            // around wind, which gives the chop wave fronts visible
+            // angular variety and the surface stops reading as
+            // banded.
+            directionalSpread: 0.3,
             // Different seed so the chop spectrum is statistically
             // independent of the swell — otherwise both cascades
             // would beat against each other and produce visible
@@ -668,11 +682,22 @@ export function createWaterMesh(
             // cascade 2's RMS contribution to ~0.3m, which adds the
             // slow horizon motion without overpowering the bike's
             // buoyancy at the start grid.
-            amplitude: 1e-7,
-            // Narrow alignment — long-period swell IS directional in
-            // real oceans (storm rollers come from one direction
-            // across hundreds of miles).
-            directionalSpread: 6,
+            // Long-swell amplitude pulled UP from 1e-7 → 3e-7. The
+            // big-wave silhouette gives the ocean its sense of scale
+            // — a 0.3m RMS long swell was invisible against the
+            // smaller-wavelength chop. At 3e-7 + 26m peak wavelength
+            // + 16m/s wind the cascade contributes a rolling ~0.5m
+            // peak that's clearly visible without overwhelming the
+            // surface (5e-7 made the swell read as parallel rollers
+            // because its narrow directional spread piled energy
+            // along one axis).
+            amplitude: 3e-7,
+            // Moderate alignment — real long-period swell IS
+            // directional (storm rollers come from one direction),
+            // but s=6 was producing visible parallel banding. s=3
+            // keeps the swell visibly oriented while letting some
+            // off-axis modes break the strict-parallel look.
+            directionalSpread: 3,
             seed: 0x5ea1,
           },
           choppiness: 0.3,
@@ -754,17 +779,33 @@ export function createWaterMesh(
   // Each is a uniform so the menu can scrub it live without rebuilding the
   // material. Defaults match the values the v2 shader was authored against;
   // RESET in the menu restores them via `waterMesh.debug.defaults`.
-  const REFLECTION_STRENGTH_DEFAULT = 0.85
+  // Reflection cap pulled down from 0.85 → 0.55 so the deep turquoise
+  // water body actually reads through the surface — at 0.85 fresnel at
+  // race-camera-low view angles painted nearly the whole surface with
+  // reflected horizon, hiding the wave color. 0.55 lets the body color
+  // dominate troughs and reflection take over only at the truly grazing
+  // edges where Schlick fresnel already saturates.
+  const REFLECTION_STRENGTH_DEFAULT = 0.55
   const SUN_GLOW_DEFAULT = 0.6
-  const ROUGH_BASE_DEFAULT = 0.18
-  const ROUGH_SPARKLE_DEFAULT = 0.04
-  // Strength of the sub-Gerstner detail-normal cascades (see comment block
-  // above the texture builder). 0 = bypass detail entirely (analytic-Gerstner
-  // only); 1.0 = baseline cascade contribution; 1.4 = the punchier default
-  // that lands closer to SoT after side-by-side comparison — the bare 1.0
-  // version read as "soft stipple", at 1.4 the chop reads as actual surface
-  // wave detail. `?detail=0` parks this at 0 for A/B.
-  const DETAIL_STRENGTH_DEFAULT = 1.4
+  // Roughness base bumped back up — the previous 0.12 lit every chop
+  // wavelet with a tight specular dot which the close-in band rendered
+  // as a "sparkle storm" across the surface. 0.22 fuzzes the lobe so
+  // close-in highlights blur into broader glints; sparkle patches
+  // still tighten roughness toward `ROUGH_SPARKLE_DEFAULT` for the
+  // wandering bright-glint character.
+  const ROUGH_BASE_DEFAULT = 0.22
+  const ROUGH_SPARKLE_DEFAULT = 0.06
+  // Sub-Gerstner detail-normal strength. Pulled down from 1.4 → 0.5.
+  // The previous value piled slopes onto every surface fragment and
+  // pushed pixelFoam → 1 everywhere there was any chop, blowing the
+  // surface out to white. The reference target wants clean glassy
+  // wave faces (turquoise body visible through the surface) with
+  // detail only providing texture, not silhouette. 0.5 keeps the
+  // mip-filtered close-in chop reading as surface texture but doesn't
+  // hijack the big-wave silhouette. `?detail=0` parks this at 0 for
+  // A/B; `?detail=hi` (handled below) re-enables the punchier 1.4
+  // for tracks that want the busier surface.
+  const DETAIL_STRENGTH_DEFAULT = 0.5
   const reflStrengthUniform = uniform(REFLECTION_STRENGTH_DEFAULT)
   const sunGlowUniform = uniform(SUN_GLOW_DEFAULT)
   const roughBaseUniform = uniform(ROUGH_BASE_DEFAULT)
@@ -1619,19 +1660,29 @@ export function createWaterMesh(
   //
   // Classic mode (`?water=classic`) keeps the original blue→cyan mix with
   // pure height-driven blending for A/B comparison.
-  const heightNorm = smoothstep(float(-0.9), float(0.9), heightFrag)
-  // Scatter ramps from -0.5 to 0.5 m of wave height (was -0.7 to 0.8) so
-  // mid-height wave faces — not just the sharpest peaks — carry visible
-  // scatter color. Pushes the wave silhouettes from "soft blanket" toward
-  // SoT's "punchy deep-trough-to-bright-crest gradient" character.
-  const heightFactor = isClassic ? heightNorm : smoothstep(float(-0.5), float(0.5), heightFrag)
-  // Deep + scatter pushed toward more saturated SoT tones. The original v2
-  // teal worked under midday sun but read as washed-out cream/beige under
-  // the day-night cycle's sunset palette (warm horizon haze + warm sun-tint
-  // emissive desaturated the surface). Punchier deep navy + brighter cyan-
-  // green scatter survives the warm-sky desaturation and keeps the water
-  // reading as ocean rather than fabric. Classic preset unchanged for A/B.
-  const deepColor = isClassic ? vec3(0.04, 0.18, 0.4) : vec3(0.01, 0.09, 0.2)
+  // Color-ramp ranges widened to (-2, 2) — at the bumped amplitude the
+  // visible wave heightFrag often saturated the previous tight (-0.5,
+  // 0.5) window across most of a single wave face, which produced
+  // visible HEIGHT ISOLINES (banded color stripes along the surface
+  // that traced contours of constant height). Stretching the input
+  // range lets the smoothstep transition over the full natural wave
+  // amplitude so the deep→scatter gradient reads as smooth shading
+  // instead of contour lines.
+  const heightNorm = smoothstep(float(-2.0), float(2.0), heightFrag)
+  const heightFactor = isClassic
+    ? heightNorm
+    : smoothstep(float(-1.5), float(1.5), heightFrag)
+  // Deep ocean body color. Pushed from a nearly-black navy
+  // (0.01, 0.09, 0.20) to a visibly turquoise-cyan so the body of
+  // the water reads as ocean instead of a void. Reference: clear
+  // tropical seawater transmits 470–500 nm (cyan) up to ~10 m
+  // before absorption dominates, which is what gives reef water
+  // its glowing aqua body. We're a deep open-water scene so we
+  // keep red low (long-wavelength absorption is fast), but the
+  // green+blue channels are raised so the surface paints a visible
+  // turquoise even where the fresnel reflection would otherwise
+  // dominate. Classic preset unchanged for A/B.
+  const deepColor = isClassic ? vec3(0.04, 0.18, 0.4) : vec3(0.02, 0.22, 0.32)
   // Two distinct "scatter" colors per Sea of Thieves' three-color
   // albedo system (deep + scatter + subsurface). The height-driven
   // `scatterColor` is the legacy SoT-style cyan-green that lights up
@@ -1644,14 +1695,19 @@ export function createWaterMesh(
   // spectrum getting absorbed less than the cooler end at short
   // travel distances — the same Rayleigh / Beer-Lambert physics
   // that makes shallow ocean read turquoise instead of navy.
-  const scatterColor = isClassic ? vec3(0.16, 0.55, 0.78) : vec3(0.18, 0.78, 0.78)
-  // SSS bumped toward iconic SoT bright-green (more saturated, less
-  // yellow). The previous (0.42, 0.85, 0.45) read as "lime" instead of
-  // the recognizable "tropical lagoon" hue SoT crests have. Bumping
-  // green to 0.95 and dropping red to 0.20 produces a more
-  // characteristic cyan-yellowish-green that's visibly distinct from
-  // the cooler scatterColor while still reading as ocean.
-  const sssColor = isClassic ? scatterColor : vec3(0.2, 0.95, 0.5)
+  // Mid-water scatter brightened toward saturated tropical turquoise.
+  // Previous (0.18, 0.78, 0.78) was a flat teal that read as fabric
+  // when sun-lit. The reference target's "tube glow" comes from light
+  // travelling through the wave body and emerging cyan — we want
+  // crests to PUNCH this color toward the camera, so a higher
+  // green+blue (and a touch of red) gives a brighter perceived
+  // brightness without losing the ocean hue.
+  const scatterColor = isClassic ? vec3(0.16, 0.55, 0.78) : vec3(0.22, 0.85, 0.92)
+  // SSS — the SoT three-color recipe's "lit from within" glow on
+  // pinched crests. Push toward bright tropical-tube turquoise rather
+  // than yellow-green: a Pipeline surf-photo lip is white-cyan, not
+  // chartreuse. Previous (0.20, 0.95, 0.50) read distractingly green.
+  const sssColor = isClassic ? scatterColor : vec3(0.35, 0.95, 0.85)
 
   // Shallow-water tint. When the view ray is short between water surface
   // and terrain (e.g. lagoon shoreline, sandy floor), short Beer-Lambert
@@ -1664,7 +1720,12 @@ export function createWaterMesh(
   // exaggeration — looking straight down through 2 m of water reads
   // shallow, looking the same vertical 2 m through a grazing ray reads
   // as 10+ m of path and stays full deep.
-  const shallowTintColor = vec3(0.16, 0.5, 0.5)
+  // Saturated tropical-shallow turquoise. Drives the "shelf glow"
+  // when a short view-ray finds seabed/shoreline below the surface,
+  // which is the most readable reef/lagoon cue. Brightened from
+  // (0.16, 0.50, 0.50) → (0.30, 0.78, 0.82) so it visibly tints the
+  // wave bodies instead of just nudging them.
+  const shallowTintColor = vec3(0.3, 0.78, 0.82)
   const shallowFactor = isClassic
     ? float(0)
     : float(1).sub(smoothstep(float(0), float(8), closeness))
@@ -1827,7 +1888,15 @@ export function createWaterMesh(
   // steepness=0 so only slopeFoam contributes here.
   const slopeMag = sqrt(dydx.mul(dydx).add(dydz.mul(dydz)))
   const pixelSlope = sqrt(effDydx.mul(effDydx).add(effDydz.mul(effDydz)))
-  const pixelFoam = pow(clamp(pixelSlope.mul(float(1.4)), float(0), float(1)), float(2.0))
+  // Slope-foam trigger softened. The previous 1.4× scale + pow(.,2) on
+  // the FFT path was firing pixelFoam ≈ 1 across any chop-y surface
+  // because cascade slopes routinely reach 0.4–0.6 and (0.6·1.4)²=0.71
+  // — that's a white wash, not foam. The reference target wants foam
+  // ONLY on near-breaking crests, so we shrink the scale to 0.5× and
+  // bump the curve to pow(.,3) so values stay near 0 until the slope
+  // really spikes. The Jacobian-based foldFoamFft below remains the
+  // primary breaking-wave signal.
+  const pixelFoam = pow(clamp(pixelSlope.mul(float(0.5)), float(0), float(1)), float(3.0))
   // A3 — Jacobian-driven foam on the FFT path. The kernel writes
   // `J = (1 + λ·Dxx)·(1 + λ·Dzz) − λ²·Dxz²` into displacementTexture.a;
   // J ≈ 1 on a calm surface, dips below 1 as the local horizontal
@@ -1921,7 +1990,14 @@ export function createWaterMesh(
         return slopeFoam.mul(heightGate)
       })()
     : useGpuDisplacement
-      ? max(max(foamAccumFrag.mul(float(0.7)), pixelFoam), foldFoamFft)
+      ? // FFT path: drop foamAccumFrag entirely. It's computed from
+        // Gerstner waves that no longer match the visible FFT surface,
+        // so its "lingering trail behind a passing crest" was painting
+        // ghost foam where no FFT crest actually was. Foam on the FFT
+        // branch is fully driven by the Jacobian feedback buffer (the
+        // real breaking-wave signal) plus a softened pixelFoam for
+        // near-breaking gradient highlights.
+        max(pixelFoam, foldFoamFft)
       : max(foamAccumFrag.mul(float(0.7)), pixelFoam)
 
   // Per-bike foam: hull ring + V-wake stripe. We wrap the per-bike work in
@@ -2279,8 +2355,15 @@ export function createWaterMesh(
   )
   const broadNoiseAA = float(1).sub(smoothstep(float(35), float(110), camDist))
   const broadNoise = mix(float(0.5), broadNoiseHash, broadNoiseAA)
-  const sparkleHeightGate = smoothstep(float(0.45), float(0.85), heightNorm)
-  const broadMask = smoothstep(float(0.55), float(0.85), broadNoise).mul(sparkleHeightGate)
+  // Sparkle gate tightened — was (0.45, 0.85) which fired sparkle on
+  // most upper-half wave faces and produced a "speckle storm" once the
+  // larger-amplitude long swell came online. (0.70, 0.95) restricts
+  // sparkle to the actual crest peaks, which is where catching glints
+  // make narrative sense anyway. The hash threshold is also raised
+  // (0.65) so only the rarer "bright" patches paint sparkle, not every
+  // mid-tone hash cell.
+  const sparkleHeightGate = smoothstep(float(0.7), float(0.95), heightNorm)
+  const broadMask = smoothstep(float(0.65), float(0.9), broadNoise).mul(sparkleHeightGate)
 
   const mat = new MeshStandardNodeMaterial({
     transparent: true,

@@ -241,12 +241,26 @@ export function defaultSpectrumParams(): PhillipsParams {
     // rather than as horizontal/vertical "venetian blind" stripes.
     windDirX: 0.6,
     windDirZ: 0.8,
-    amplitude: 1e-6,
+    // Phillips amplitude pulled up from 1e-6 → 4e-6 so the wireframe
+    // view actually shows real wave silhouette — at 1e-6 the surface
+    // was nearly flat (RMS ~0.3 m on a 240 m mesh = sub-pixel relief
+    // at the bike camera height). 4e-6 lands RMS in the 0.8–1.2 m
+    // band, which gives the swells visible 3-D shape without the
+    // Tessendorf horizontal pinch dragging Jacobian foam back into
+    // "white blanket" territory (we softened the foam pipeline in a
+    // prior change so this bigger amplitude is safe). CPU buoyancy
+    // also reads from this spectrum, so bike physics inherits the
+    // larger heave automatically — the analytic Gerstner gap budget
+    // tolerates it.
+    amplitude: 4e-6,
     // Mitsuyasu cos²ˢ(α/2) directional spread exponent. SoT/Horvath
-    // use s ∈ [2, 10]; s=4 gives a reasonably wind-aligned but not
-    // sine-wave-stripy lobe (perpendicular energy ≈ 6% of aligned,
-    // backward ≈ 0). Higher = tighter alignment, lower = more chaotic.
-    directionalSpread: 4,
+    // use s ∈ [2, 10]; pulled down to s=2 (slightly wider than the
+    // tight default) so the main wind-sea cascade contributes some
+    // off-axis energy and doesn't read as parallel sine-wave stripes
+    // on the close-in race-camera band. Combined with the chop
+    // cascade's near-isotropic spread the surface reads as chaotic
+    // ocean rather than banded ripple-pond.
+    directionalSpread: 2,
     smallWavelengthCutoff: 1.2,
     seed: 0x515a,
   }
