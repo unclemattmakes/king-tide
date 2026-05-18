@@ -10,7 +10,7 @@ import { loadTrackForBoot } from './boot/track-loader'
 import { runEarlyModeDispatch } from './boot/url-modes'
 import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug'
 import { createAudioEngine } from './engine/audio/audio'
-import { setAudioEngine } from './engine/audio/audio-service'
+import { applyTrackAudio, setAudioEngine } from './engine/audio/audio-service'
 import { loadDevSettings } from './engine/dev-settings'
 import { emptyIntent, type Intent, installInput } from './engine/input'
 import { installCameraLookInput } from './engine/input/camera-look'
@@ -37,7 +37,7 @@ import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
 import { createRiderRenderSystem } from './engine/render/rider-systems'
 import { createScene } from './engine/render/scene'
-import { createSkySystem } from './engine/render/sky'
+import { beaufortToAmplitudeScale, createSkySystem } from './engine/render/sky'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { createWaterMesh } from './engine/render/water'
 import { createWaveLineShimmer } from './engine/render/wave-line-shimmer'
@@ -296,6 +296,27 @@ async function boot() {
   const waterHeight = track.water?.height ?? 0
   waveField.baseY = waterHeight
   waterMesh.mesh.position.y = waterHeight
+  // Per-track sea-state: Beaufort number drives a global amplitude
+  // scalar on the wave field's base spectrum. Beaufort 4 ≈ 1.0× so the
+  // historical (pre-knob) look is the default; calm tracks dial down
+  // (South Beach lagoon ≈ 2), heavier seas dial up (Hatteras Atlantic
+  // ≈ 6-7, hurricane finale ≈ 9+). Wave-zones layer on top via
+  // `heightMult`, so authoring a tsunami zone in a Beaufort 2 sea works
+  // as expected — the zone multiplies the (already-scaled-down) base.
+  const beaufort = track.sky?.seaStateBeaufort
+  if (beaufort !== undefined) {
+    const scale = beaufortToAmplitudeScale(beaufort)
+    if (waveField.kind === 'gerstner') {
+      for (const w of waveField.waves) w.amplitude *= scale
+    }
+    // Spectrum-mode tracks: scale every mode's complex amplitude.
+    else {
+      for (const mode of waveField.spectrum) {
+        mode.aRe *= scale
+        mode.aIm *= scale
+      }
+    }
+  }
   // Per-track wave-zone overrides — push the track's `waveZones` into
   // the wave field so `sampleHeight`/`sampleSurface` apply the per-zone
   // amplitude / frequency / surge / direction multipliers around set
@@ -682,6 +703,13 @@ async function boot() {
   // `resume()` — every method early-returns without a context.
   const audio = createAudioEngine()
   setAudioEngine(audio)
+  // Per-track audio palette — licensed music + ambient layers. The
+  // engine buffers the config when the AudioContext doesn't exist
+  // yet (boot path before first user gesture) and applies it lazily
+  // on resume(). Audio files are forward-looking; missing files
+  // (404) warn and fall back to the procedural pad bed without
+  // crashing.
+  applyTrackAudio(track.audio)
   const unlockAudio = () => {
     audio.resume()
     window.removeEventListener('keydown', unlockAudio)

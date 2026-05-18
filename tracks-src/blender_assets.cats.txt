@@ -21,3 +21,9 @@ VERSION 1
 22222222-2222-4222-8222-000000000014:Hoverbike/Landmarks/Industrial:Hoverbike-Landmarks-Industrial
 22222222-2222-4222-8222-000000000015:Hoverbike/Landmarks/Signage:Hoverbike-Landmarks-Signage
 22222222-2222-4222-8222-000000000016:Hoverbike/Landmarks/Backdrops:Hoverbike-Landmarks-Backdrops
+22222222-2222-4222-8222-000000000017:Hoverbike/Landmarks/Ruins:Hoverbike-Landmarks-Ruins
+22222222-2222-4222-8222-000000000018:Hoverbike/Landmarks/Facades:Hoverbike-Landmarks-Facades
+22222222-2222-4222-8222-000000000019:Hoverbike/Landmarks/Tanks:Hoverbike-Landmarks-Tanks
+22222222-2222-4222-8222-00000000001a:Hoverbike/Landmarks/Mechanical:Hoverbike-Landmarks-Mechanical
+22222222-2222-4222-8222-00000000001b:Hoverbike/Landmarks/Reliefs:Hoverbike-Landmarks-Reliefs
+22222222-2222-4222-8222-00000000001c:Hoverbike/Landmarks/Lava:Hoverbike-Landmarks-Lava

@@ -623,6 +623,20 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         body["gateSpacing"] = float(scn.hoverbike_gate_spacing)
     if shader_block is not None:
         body["terrainShader"] = shader_block
+
+    # Per-track sky / atmosphere preset. The sky_preset module owns the
+    # full set (tint, cloudiness, sun, fog, time-of-day, color grade,
+    # bloom, Beaufort sea state); we lazy-import it so this file stays
+    # decoupled from the addon's per-module register order.
+    try:
+        from .sky_preset import derive_sky_block
+
+        sky_block = derive_sky_block()
+        if sky_block:
+            body["sky"] = sky_block
+    except ImportError:
+        pass
+
     return body
 
 
@@ -651,6 +665,7 @@ BLENDER_OWNED_JSON_KEYS = (
     "environmentGlb",
     "water",
     "terrainShader",
+    "sky",
     "aiSplines",
     "gateSpacing",
     "lapsToFinish",
@@ -757,6 +772,18 @@ def reload_track_from_json(json_path: str) -> dict:
         if isinstance(yaw, (int, float)):
             s0.rotation_euler = (0.0, 0.0, float(yaw))
         summary["start"] = True
+
+    # Sky preset block. The sky_preset module owns the per-field
+    # mapping (tint hex → color picker, Beaufort int → IntProperty,
+    # etc.); lazy-import so this file isn't load-order-coupled to the
+    # newer module.
+    try:
+        from .sky_preset import reload_sky_from_json
+
+        if reload_sky_from_json(data):
+            summary["sky"] = True
+    except ImportError:
+        pass
 
     return summary
 
@@ -872,12 +899,23 @@ def _upsert_manifest_track(repo_root: str, track_id: str, glb_url: str, json_pat
     data.setdefault("riders", [])
     tracks = data.setdefault("tracks", [])
     spec_path_rel = os.path.relpath(json_path, repo_root).replace("\\", "/")
-    new_entry = {
+    new_entry: dict[str, Any] = {
         "id": track_id,
         "displayName": _id_to_display_name(track_id),
         "url": glb_url,
         "specPath": spec_path_rel,
     }
+    # Track-hero JPG written by the thumbnail render pass. Stamp the
+    # public URL only when the file actually exists — tracks that haven't
+    # been thumbnail-rendered yet leave the field unset so the runtime can
+    # fall back to a procedural / placeholder tile. Same logic for the
+    # 320×180 tile thumbnail (one cell of the track-select grid).
+    hero_abs = os.path.join(repo_root, "public", "assets", "tracks", f"{track_id}-hero.jpg")
+    if os.path.isfile(hero_abs):
+        new_entry["heroUrl"] = f"/assets/tracks/{track_id}-hero.jpg"
+    thumb_abs = os.path.join(repo_root, "public", "assets", "tracks", f"{track_id}-thumb.jpg")
+    if os.path.isfile(thumb_abs):
+        new_entry["thumbUrl"] = f"/assets/tracks/{track_id}-thumb.jpg"
     # Preserve a hand-edited displayName if the entry already has one
     # (the auto-derived `_id_to_display_name` is just a fallback).
     for entry in tracks:

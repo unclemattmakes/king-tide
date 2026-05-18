@@ -201,6 +201,18 @@ _RULES: tuple[_AutoTagRule, ...] = (
         kind="horizon",
         extras=lambda m: {},
     ),
+    # Hero camera used by the headless track-thumbnail render. The
+    # camera_hero Camera object is read by the addon's *Render Track
+    # Hero* operator + the standalone CLI script and never reaches the
+    # GLB (the export pass strips cameras). Tagging it lets the
+    # thumbnail tooling pick it out by kind instead of name in case the
+    # author later renames or duplicates it.
+    _AutoTagRule(
+        name_re=re.compile(r"^camera_hero$"),
+        object_type="CAMERA",
+        kind="camera_hero",
+        extras=lambda m: {},
+    ),
     # Particle-emitter empty. Defaults match
     # ``hoverbike_addon/emitter.py`` exactly — the rule re-stamps them
     # so a renamed / pasted empty behaves identically to one created

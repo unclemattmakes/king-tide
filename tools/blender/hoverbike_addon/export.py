@@ -267,6 +267,33 @@ class HOVERBIKE_OT_export_track(Operator):
             json.dump(body, f, indent=2)
             f.write("\n")
 
+        # Auto-render the track hero + tile thumbnail if the author has
+        # parked a ``camera_hero`` in the scene. Non-fatal: a missing
+        # camera, render failure, or non-EEVEE state issue downgrades to
+        # a WARNING and the export still completes. The hero render fires
+        # BEFORE the manifest upsert so the resulting JPGs exist on disk
+        # by the time ``_upsert_manifest_track`` decides whether to stamp
+        # a ``heroUrl`` field.
+        from .thumbnail import find_camera_hero, render_track_hero
+
+        if find_camera_hero() is not None:
+            try:
+                hero, tile, ths, tts = render_track_hero(render_tile=True)
+                rel_hero = os.path.relpath(hero, repo).replace("\\", "/")
+                msg = f"Rendered hero {rel_hero} in {ths:.2f}s"
+                if tile:
+                    rel_tile = os.path.relpath(tile, repo).replace("\\", "/")
+                    msg += f" + tile {rel_tile} in {tts:.2f}s"
+                self.report({"INFO"}, msg)
+                print(f"[hoverbike-addon] {msg}")
+            except Exception as e:  # noqa: BLE001 — render failures vary by GPU / state
+                self.report({"WARNING"}, f"track-hero render skipped: {e}")
+        else:
+            self.report(
+                {"WARNING"},
+                "no camera_hero — track exported without a hero image (Add Camera Hero to fix)",
+            )
+
         # Make sure the in-game level picker sees this track. The menu
         # reads `public/assets/manifest.json`; tracks authored
         # interactively in Blender (vs. via `pnpm gen:tracks`) need

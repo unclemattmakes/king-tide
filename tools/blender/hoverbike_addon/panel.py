@@ -809,6 +809,62 @@ class HOVERBIKE_PT_track_horizon(_HoverbikeTrackSubPanelBase, Panel):
             layout.operator("hoverbike.reset_horizon_ring", icon="LOOP_BACK")
 
 
+class HOVERBIKE_PT_track_sky(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: per-track sky / atmosphere preset. Authors tint /
+    cloudiness / sun intensity / fog distances / time-of-day, plus the
+    sky-grade LUT preset, the renderer bloom intensity (currently
+    round-trips only — no bloom pass is wired yet), and the Beaufort
+    sea-state that scales the wave field at boot.
+
+    Lives between Horizon and Waves because all three shape the
+    far-field atmosphere. Default-closed since these are usually set
+    once per track and the author is unlikely to be tweaking them
+    while editing geometry.
+    """
+
+    bl_label = "Sky preset"
+    bl_idname = "HOVERBIKE_PT_track_sky"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+
+        # Palette + sun
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_sky_tint", text="Tint")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_sky_cloudiness", text="Cloudiness")
+        row.prop(scene, "hoverbike_sky_sun_intensity", text="Sun")
+        # Time of day picks where on the 360 s cycle the (frozen) sun
+        # sits — the most-tweaked knob since it owns the whole mood.
+        layout.prop(scene, "hoverbike_sky_time_of_day", text="Time of day (s)")
+
+        layout.separator()
+        layout.label(text="Fog distances:")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_sky_fog_near", text="Near")
+        row.prop(scene, "hoverbike_sky_fog_far", text="Far")
+        # Visible-only nudge — fog ordering is enforced at JSON validate
+        # time. Surfacing it here avoids the round-trip surprise.
+        if (
+            getattr(scene, "hoverbike_sky_fog_near", 0.0)
+            >= getattr(scene, "hoverbike_sky_fog_far", 0.0)
+        ):
+            layout.label(text="Near must be < Far", icon="ERROR")
+
+        layout.separator()
+        layout.label(text="Color grade (LUT preset):")
+        layout.prop(scene, "hoverbike_sky_color_grade", text="")
+        # Bloom + sea state — round-trip-only / wave-field one-shot.
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_sky_bloom", text="Bloom")
+        row.prop(scene, "hoverbike_sky_sea_state", text="Sea (Bft)")
+        bloom_val = float(getattr(scene, "hoverbike_sky_bloom", 0.0) or 0.0)
+        if bloom_val > 0:
+            layout.label(text="Bloom: no pass yet, value still ships", icon="INFO")
+
+
 class HOVERBIKE_PT_track_waves(_HoverbikeTrackSubPanelBase, Panel):
     """Sub-panel: wave-mastery zones. Each ``wave_zone_NN`` empty in the
     scene multiplies the global Gerstner wave amplitude / frequency
@@ -1014,6 +1070,88 @@ class HOVERBIKE_PT_track_shader(_HoverbikeTrackSubPanelBase, Panel):
         layout.prop(scene, "hoverbike_shader_saturation", text="Saturation")
 
 
+class HOVERBIKE_PT_track_thumbnail(_HoverbikeTrackSubPanelBase, Panel):
+    """Sub-panel: track-hero / loading-screen render. Lives next to
+    Stats because both are pre-export sanity checks rather than core
+    authoring loops. Shows whether a ``camera_hero`` is present, an
+    Add Camera button when it isn't, a Render Hero button when it is,
+    and a last-rendered timestamp once a render has fired in the
+    current session. Default-closed since the render auto-fires on
+    track export — most authors only open this section when iterating
+    on framing."""
+
+    bl_label = "Track hero render"
+    bl_idname = "HOVERBIKE_PT_track_thumbnail"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        from .thumbnail import (
+            CAMERA_HERO_NAME,
+            HERO_HEIGHT,
+            HERO_WIDTH,
+            TILE_HEIGHT,
+            TILE_WIDTH,
+            find_camera_hero,
+        )
+
+        layout = self.layout
+        cam = find_camera_hero()
+
+        if cam is None:
+            layout.label(text="No camera_hero in scene", icon="OUTLINER_OB_CAMERA")
+            layout.label(text="Loading-screen render is skipped on export.")
+            layout.operator(
+                "hoverbike.add_camera_hero",
+                text="Add Camera Hero",
+                icon="ADD",
+            )
+            return
+
+        layout.label(
+            text=f"{cam.name} ({cam.data.lens:.0f} mm)",
+            icon="OUTLINER_OB_CAMERA",
+        )
+        layout.label(
+            text=f"Hero {HERO_WIDTH}×{HERO_HEIGHT} + Tile {TILE_WIDTH}×{TILE_HEIGHT}",
+            icon="IMAGE",
+        )
+        if cam.name != CAMERA_HERO_NAME:
+            layout.label(
+                text=f"(renamed from {CAMERA_HERO_NAME})",
+                icon="INFO",
+            )
+        row = layout.row(align=True)
+        row.scale_y = 1.3
+        row.operator(
+            "hoverbike.render_track_hero",
+            text="Render Hero",
+            icon="RENDER_STILL",
+        )
+        row.operator(
+            "hoverbike.render_track_thumbnail",
+            text="Tile only",
+            icon="IMAGE",
+        )
+
+        last = context.scene.get("_hoverbike_track_hero_rendered_at")
+        if isinstance(last, (int, float)) and last > 0:
+            import time
+
+            age_s = max(0.0, time.time() - float(last))
+            if age_s < 60:
+                age_label = f"{age_s:.0f}s ago"
+            elif age_s < 3600:
+                age_label = f"{age_s / 60:.0f}m ago"
+            else:
+                age_label = f"{age_s / 3600:.1f}h ago"
+            layout.label(text=f"Last render: {age_label}", icon="TIME")
+        else:
+            layout.label(
+                text="Auto-fires on track export",
+                icon="INFO",
+            )
+
+
 class HOVERBIKE_PT_track_stats(_HoverbikeTrackSubPanelBase, Panel):
     """Sub-panel: read-only counts + spline-length / lap-time estimate +
     terrain min/max + water coverage. Helpful for sanity-checking before
@@ -1077,11 +1215,13 @@ _CLASSES: tuple[type, ...] = (
     HOVERBIKE_PT_track_terrain,
     HOVERBIKE_PT_track_water,
     HOVERBIKE_PT_track_horizon,
+    HOVERBIKE_PT_track_sky,
     HOVERBIKE_PT_track_waves,
     HOVERBIKE_PT_track_emitters,
     HOVERBIKE_PT_track_gameplay,
     HOVERBIKE_PT_track_ghost,
     HOVERBIKE_PT_track_shader,
+    HOVERBIKE_PT_track_thumbnail,
     HOVERBIKE_PT_track_stats,
 )
 

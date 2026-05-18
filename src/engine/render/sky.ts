@@ -20,7 +20,7 @@ import {
   vec3,
 } from 'three/tsl'
 import { MeshBasicNodeMaterial, PMREMGenerator, type Renderer } from 'three/webgpu'
-import type { SkyConfig } from '@/game/tracks/types'
+import type { SkyColorGrade, SkyConfig } from '@/game/tracks/types'
 
 /**
  * Sky / atmosphere system.
@@ -65,6 +65,121 @@ const DEFAULT_SKY: Required<SkyConfig> = {
   // 0 lands at azimuth 45°, elevation 22.5° — a clean mid-morning sun,
   // matching the historical first-tick look before we froze the cycle.
   timeOfDay: 0,
+  // 'neutral' is a no-op grade (identity mix on the dome shader).
+  colorGrade: 'neutral',
+  // 0 = off until the renderer's bloom pass exists.
+  bloom: 0,
+  // Beaufort 4 (gentle to moderate breeze) is the historical default look
+  // the wave list was authored against — leaving the field at 4 makes
+  // boot a no-op on tracks that haven't dialled the knob.
+  seaStateBeaufort: 4,
+}
+
+/**
+ * Per-grade `(tintMul, saturation, contrast)` triple applied as a final
+ * post step on the dome shader's composed colour. Kept as a tight CPU
+ * table so the runtime cost is one vec3 + two scalars of uniform writes
+ * per scene (not a texture sample per fragment).
+ *
+ * `tintMul` multiplies the composed colour (warming or cooling the
+ * whole dome); `saturation` re-mixes around luminance (0 = greyscale,
+ * 1 = neutral, >1 = punchier); `contrast` scales (colour - 0.5) so
+ * mid-greys widen toward the endpoints. Numbers are art-targets keyed
+ * off `docs/track-themes.md` palette notes.
+ */
+type SkyGradeTone = {
+  tintMul: THREE.Color
+  saturation: number
+  contrast: number
+}
+
+const SKY_GRADE_TABLE: Record<SkyColorGrade, SkyGradeTone> = {
+  neutral: {
+    tintMul: new THREE.Color(1, 1, 1),
+    saturation: 1.0,
+    contrast: 1.0,
+  },
+  miami_pastel: {
+    // Soft warm-pink lift; lower saturation + lower contrast = sunset haze.
+    tintMul: new THREE.Color(1.05, 0.96, 0.98),
+    saturation: 0.85,
+    contrast: 0.92,
+  },
+  tokyo_neon: {
+    // Cool magenta-cyan lean; punch up saturation + contrast for hot night.
+    tintMul: new THREE.Color(0.96, 0.94, 1.08),
+    saturation: 1.25,
+    contrast: 1.12,
+  },
+  big_sur_golden: {
+    // Golden-hour warmth; mid saturation, slight contrast lift.
+    tintMul: new THREE.Color(1.08, 1.0, 0.9),
+    saturation: 1.05,
+    contrast: 1.05,
+  },
+  venice_warm: {
+    // Adriatic warm-stone palette; soft amber, neutral contrast.
+    tintMul: new THREE.Color(1.05, 1.0, 0.94),
+    saturation: 0.95,
+    contrast: 1.0,
+  },
+  nyc_sunset: {
+    // Liberty's finale — strong warm tint, more contrast for silhouettes.
+    tintMul: new THREE.Color(1.12, 0.95, 0.88),
+    saturation: 1.1,
+    contrast: 1.1,
+  },
+  cape_town_blue: {
+    // Atlantic cool blue; slightly desaturated to read like haze.
+    tintMul: new THREE.Color(0.92, 0.98, 1.06),
+    saturation: 0.9,
+    contrast: 1.0,
+  },
+  kilauea_volcanic: {
+    // Deep ash + lava red lift; punchy saturation, high contrast.
+    tintMul: new THREE.Color(1.08, 0.92, 0.86),
+    saturation: 1.15,
+    contrast: 1.15,
+  },
+}
+
+/**
+ * Beaufort wind scale → wave-amplitude multiplier. The wave list in
+ * `defaultWaves()` was authored at roughly Beaufort 4 (moderate breeze,
+ * 1-2 m seas), so `4 → 1.0×`. Endpoints are art-targeted at
+ * `0 → 0.15×` (glass-calm) and `12 → 2.5×` (hurricane), with a smooth
+ * piecewise-linear ramp through the in-between scale steps.
+ *
+ * Used at boot to scale every `Wave.amplitude` in the default wave list
+ * before construction; runtime wave-zones still layer on top via
+ * `heightMult`. Exported so tests and the editor can preview the
+ * mapping without re-implementing it.
+ */
+export function beaufortToAmplitudeScale(beaufort: number): number {
+  const b = Math.max(0, Math.min(12, beaufort))
+  // Anchor points: (beaufort, multiplier). Piecewise linear interp.
+  const table: ReadonlyArray<readonly [number, number]> = [
+    [0, 0.15],
+    [1, 0.3],
+    [2, 0.5],
+    [3, 0.75],
+    [4, 1.0],
+    [5, 1.25],
+    [6, 1.5],
+    [7, 1.75],
+    [8, 2.0],
+    [10, 2.25],
+    [12, 2.5],
+  ]
+  for (let i = 0; i < table.length - 1; i++) {
+    const [lo, vLo] = table[i]!
+    const [hi, vHi] = table[i + 1]!
+    if (b >= lo && b <= hi) {
+      const t = (b - lo) / (hi - lo)
+      return vLo + (vHi - vLo) * t
+    }
+  }
+  return table[table.length - 1]![1]
 }
 
 /**
@@ -219,6 +334,16 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   // Resolve per-track config with defaults.
   const cfg: Required<SkyConfig> = { ...DEFAULT_SKY, ...config }
   const tintColor = new THREE.Color(cfg.tint)
+  const grade = SKY_GRADE_TABLE[cfg.colorGrade] ?? SKY_GRADE_TABLE.neutral
+  // bloom is round-tripped + logged but not yet applied — the WebGPU
+  // renderer has no post-process pass wired up. When that lands, this
+  // value should drive the bloom node's strength uniform.
+  if (cfg.bloom > 0) {
+    // eslint-disable-next-line no-console
+    console.info(
+      `[sky] bloom=${cfg.bloom} requested but no bloom pass is wired yet; ignoring`,
+    )
+  }
 
   // ── Shader uniforms (mutated each tick from CPU palette eval) ───────────
   const uZenith = uniform(vec3(0, 0, 0))
@@ -230,6 +355,12 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   const uCloudiness = uniform(cfg.cloudiness)
   const uSunIntensity = uniform(cfg.sunIntensity)
   const uStarOpacity = uniform(0)
+  // Per-grade tone uniforms — kept on the shader so future runtime
+  // grade swaps (e.g. cup-final cinematic) are a uniform write rather
+  // than a material rebuild.
+  const uGradeTint = uniform(vec3(grade.tintMul.r, grade.tintMul.g, grade.tintMul.b))
+  const uGradeSaturation = uniform(grade.saturation)
+  const uGradeContrast = uniform(grade.contrast)
 
   // ── TSL helpers ────────────────────────────────────────────────────────
   // 2D hash, value noise, 3-octave FBM. All cheap; FBM is sampled twice
@@ -325,7 +456,17 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
     .mul(disc.mul(float(8.0)).mul(uSunIntensity))
     .mul(sunAboveHorizon)
     .mul(float(1).sub(cloudCover.mul(0.85)))
-  const finalColor = withClouds.add(sunDisc).add(stars).mul(uTint)
+  // Pre-grade composite (matches the historical look when the grade is
+  // the 'neutral' preset).
+  const composed = withClouds.add(sunDisc).add(stars).mul(uTint)
+  // ── Color grade ────────────────────────────────────────────────────────
+  // Cheap shader-uniform tweak. tint multiplies; saturation re-mixes
+  // around perceived luminance (Rec.709 weights); contrast scales around
+  // 0.5. 'neutral' preset is the identity (tint=1,1,1, sat=1, ctr=1).
+  const tinted = composed.mul(uGradeTint)
+  const luma = tinted.x.mul(0.2126).add(tinted.y.mul(0.7152)).add(tinted.z.mul(0.0722))
+  const saturated = mix(vec3(luma, luma, luma), tinted, uGradeSaturation)
+  const finalColor = saturated.sub(vec3(0.5, 0.5, 0.5)).mul(uGradeContrast).add(vec3(0.5, 0.5, 0.5))
 
   // ── Material + mesh ────────────────────────────────────────────────────
   const material = new MeshBasicNodeMaterial({

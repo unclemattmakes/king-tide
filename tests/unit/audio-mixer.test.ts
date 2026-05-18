@@ -127,6 +127,7 @@ describe('audio-service', () => {
       gateCleared: () => {},
       lapCompleted: () => {},
       wavePump: () => {},
+      setTrackAudio: () => {},
     }
     setAudioEngine(stub)
     expect(getAudioEngine()).toBe(stub)
@@ -149,6 +150,7 @@ describe('audio-service', () => {
       gateCleared: () => {},
       lapCompleted: () => {},
       wavePump: () => {},
+      setTrackAudio: () => {},
     }
     setAudioEngine(stub)
     applyAudioBusVolume('master', 0.5)
