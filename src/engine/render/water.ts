@@ -604,19 +604,23 @@ export function createWaterMesh(
   const subs = opts?.subdivisions ?? 384
 
   // ---- Debug toggles ----------------------------------------------------
-  // `?water=v2` falls back to the v2 SoT-style analytic Gerstner path with
-  // the procedural 22-sine detail-normal map (the previous default).
-  // `?water=classic` falls back further to vertical-only Gerstner + the
-  // original single-color albedo gradient (no horizontal pinching, no
-  // scatter blend). Useful for A/B-ing the FFT-ocean upgrade in playtest.
-  // `?water=wire` (handled later) renders wireframe — see end of function.
-  // `?steep=<n>` overrides the initial steepness scale (0..1.5 recommended).
-  // Default is now `'fft'`: GPU Phillips-spectrum IFFT cascades drive both
-  // the big-wave silhouette (via spectrum displacement) and the high-
-  // frequency detail normals. Pair with `?waves=gerstner` to keep CPU
-  // buoyancy on the old 6-wave analytic field.
+  // Default is `'v2'`: analytic-Gerstner displacement + procedural
+  // 22-sine detail-normal map. All the SoT-style fragment shading
+  // (Beer-Lambert depth, Karis sun disc, anisotropic streak, bubble
+  // foam, height whitecaps, three-color blend) runs identically on
+  // this path and was the source of the visual-quality win — no
+  // GPU FFT cost.
+  //
+  // `?water=fft` re-enables the FFT detail-normal cascade AND, when
+  // paired with `?waves=spectrum`, the GPU Phillips IFFT displacement.
+  // Costs ~1–2 ms of compute dispatch per frame.
+  // `?water=classic` falls back further to vertical-only Gerstner +
+  // single-color albedo (no scatter blend, no SoT shading) — only
+  // useful for A/B against the legacy look.
+  // `?water=wire` (handled later) renders wireframe — see end of
+  // function. `?steep=<n>` overrides the initial steepness scale.
   const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
-  const waterMode = params?.get('water') ?? 'fft'
+  const waterMode = params?.get('water') ?? 'v2'
   const isClassic = waterMode === 'classic'
   // FFT detail-texture path. The sub-Gerstner detail cascade samples a
   // Phillips-spectrum IFFT bake instead of the procedural 22-sine
@@ -1582,11 +1586,15 @@ export function createWaterMesh(
   // travels a short path through the wave, so they read as bright
   // scatter. We expose it as a varying so the fragment can use it
   // to push scatter on pinched crests independent of raw height
-  // (a flat-but-pinching wave face is a peak too). Sentinel 0 off
-  // the FFT path so the additive blend is a no-op there.
-  const peakSignal = useGpuDisplacement
-    ? attenDispX.mul(attenDispX).add(attenDispZ.mul(attenDispZ)).sqrt()
-    : float(0)
+  // (a flat-but-pinching wave face is a peak too).
+  //
+  // Works on BOTH paths: on FFT, attenDispX/Z come from the cascade
+  // displacement texture's G/B channels; on analytic Gerstner,
+  // they're the closed-form Tessendorf horizontal pinch (qSum·Dx,
+  // qSum·Dz) summed across the 6 waves — same physical quantity,
+  // same units, same magnitude range. So the peak-mask + SSS path
+  // fires identically on either wave generator.
+  const peakSignal = attenDispX.mul(attenDispX).add(attenDispZ.mul(attenDispZ)).sqrt()
   const peakMaskFrag = varying(peakSignal)
   // Pre-attenuation wave height — the height the swells/chops WOULD have
   // had at this position if shoaling didn't shrink them. The fragment surf
@@ -1955,14 +1963,12 @@ export function createWaterMesh(
   // saturated to [0, 1]. Where the Tessendorf horizontal pinch is
   // large (= near a crest about to break), light has a shorter path
   // through the wave body so subsurface scatter dominates. The scale
-  // divisor sets where the mask saturates — at the calibrated
-  // 3-cascade spectrum, peakSignal peaks around ~0.4 m on chop, so
-  // dividing by 0.35 lands the mask at full strength on visible
-  // crests without needing extreme pinching. Only fires on the FFT
-  // path (analytic branch leaves `peakMaskFrag` at 0).
-  const peakMaskScaled = useGpuDisplacement
-    ? clamp(peakMaskFrag.div(float(0.35)), float(0), float(1))
-    : float(0)
+  // divisor sets where the mask saturates — peakSignal peaks
+  // around ~0.4 m on choppy crests at our amplitudes, so dividing
+  // by 0.35 lands the mask at full strength on visible peaks
+  // without needing extreme pinching. Fires on both FFT (cascade
+  // displacement) and analytic Gerstner (Tessendorf pinch) paths.
+  const peakMaskScaled = clamp(peakMaskFrag.div(float(0.35)), float(0), float(1))
   const scatterAmount = isClassic
     ? heightNorm
     : (() => {
@@ -1994,9 +2000,9 @@ export function createWaterMesh(
   // higher floors (0.5) overdid the yellow-green tint and washed
   // out the cyan scatter, lower floors (0.25) made SSS invisible
   // at sunset.
-  const sssGate = useGpuDisplacement
-    ? clamp(peakMaskScaled.mul(sunBackscatter.add(float(0.35))), float(0), float(1))
-    : float(0)
+  const sssGate = isClassic
+    ? float(0)
+    : clamp(peakMaskScaled.mul(sunBackscatter.add(float(0.35))), float(0), float(1))
   // SSS mix uncapped (was 0.55) so on perfect peaks with sun
   // backlighting, the subsurface color fully dominates — that's the
   // "tube glow" effect from the SoT recipe ("we blend between a deep
@@ -2284,6 +2290,14 @@ export function createWaterMesh(
           .mul(foamFiber)
           .clamp(0, 1)
       : float(0)
+  // Height-driven whitecap foam — SoT's "foam at wave peaks" recipe.
+  // Fires on tall AND choppy crests, independent of wave-source path.
+  // heightWhitecap requires meaningful elevation; slopeWhitecap
+  // requires chop pinching so a flat-but-tall swell stays glassy.
+  // `foamFiber` modulates with the shared foam noise.
+  const heightWhitecap = smoothstep(float(1.0), float(2.0), heightFrag)
+  const slopeWhitecap = smoothstep(float(0.3), float(0.7), pixelSlope)
+  const whitecapFoam = heightWhitecap.mul(slopeWhitecap).mul(foamFiber)
   const waveFoam = isClassic
     ? (() => {
         const slopeFoam = smoothstep(float(0.4), float(0.9), slopeMag)
@@ -2291,34 +2305,18 @@ export function createWaterMesh(
         return slopeFoam.mul(heightGate)
       })()
     : useGpuDisplacement
-      ? // FFT path: foam is the max of three sources:
-        //   1. `pixelFoam` — softened slope foam for near-breaking
-        //      gradient highlights (rarely fires alone).
-        //   2. `foldFoamFft` — Jacobian-driven breaking-crest foam
-        //      from the persistent feedback buffer. Only fires when
-        //      the surface is folding (J < 0), which at our spectrum
-        //      amplitude happens infrequently.
-        //   3. `whitecapFoam` — the SoT "foam at wave peaks" recipe
-        //      (height × slope gate). Independent of Jacobian, so
-        //      this is what actually paints visible whitecaps on
-        //      tall crests at our amplitude. Without it the surface
-        //      reads as deep-ocean swells with NO crest foam, which
-        //      breaks the "stormy sea" feel — real ocean caps with
-        //      ~0.5m heights are already whitecapping.
-        //
-        //   heightWhitecap fires on heights ≥ ~1m (smoothstep
-        //   1.0..2.0). slopeWhitecap requires meaningful chop
-        //   (smoothstep 0.3..0.7) so a flat-but-tall crest doesn't
-        //   foam. The product gives crisp whitecaps on the tallest
-        //   choppy peaks. `foamFiber` modulates with the same noise
-        //   the rest of the foam pipeline uses for consistency.
-        (() => {
-          const heightWhitecap = smoothstep(float(1.0), float(2.0), heightFrag)
-          const slopeWhitecap = smoothstep(float(0.3), float(0.7), pixelSlope)
-          const whitecapFoam = heightWhitecap.mul(slopeWhitecap).mul(foamFiber)
-          return max(max(pixelFoam, foldFoamFft), whitecapFoam)
-        })()
-      : max(foamAccumFrag.mul(float(0.7)), pixelFoam)
+      ? // FFT path: pixelFoam (gradient highlight) | foldFoamFft
+        // (Jacobian breaking) | whitecapFoam (height × slope).
+        max(max(pixelFoam, foldFoamFft), whitecapFoam)
+      : // Analytic Gerstner: history-accumulated foam (the
+        // time-shifted Gerstner sampler builds a lingering trail
+        // behind each passing crest, since the analytic formula is
+        // bit-identical between past and present), softened
+        // pixelFoam, AND whitecapFoam. Whitecap is the new piece
+        // — the analytic path previously had NO crest-foam source
+        // independent of slope, so tall calm swells came up
+        // featureless.
+        max(max(foamAccumFrag.mul(float(0.7)), pixelFoam), whitecapFoam)
 
   // Per-bike foam: hull ring + V-wake stripe. We wrap the per-bike work in
   // a Fn() so we can use If(...) to early-out for slots whose bike is far
