@@ -1,0 +1,79 @@
+{
+  "id": "anti-grav-test",
+  "name": "Anti-Grav Test",
+  "lapsToFinish": 1,
+  "start": {
+    "position": { "x": 0, "y": 3, "z": -5 },
+    "yaw": 0
+  },
+  "checkpoints": [
+    {
+      "index": 0,
+      "position": { "x": 0, "y": 2, "z": 10 },
+      "rotation": { "x": 0, "y": 0, "z": 0, "w": 1 },
+      "halfWidth": 12,
+      "height": 6
+    },
+    {
+      "index": 1,
+      "position": { "x": 0, "y": 2, "z": 310 },
+      "rotation": { "x": 0, "y": 0, "z": 0, "w": 1 },
+      "halfWidth": 12,
+      "height": 6
+    }
+  ],
+  "aiSplines": [
+    {
+      "id": "main",
+      "points": [],
+      "anchors": [
+        { "x": 0, "y": 2, "z": -5 },
+        { "x": 0, "y": 2, "z": 60 },
+        { "x": 5, "y": 6, "z": 110 },
+        { "x": 11, "y": 14, "z": 140 },
+        { "x": 11, "y": 14, "z": 160 },
+        { "x": 11, "y": 14, "z": 180 },
+        { "x": 5, "y": 6, "z": 210 },
+        { "x": 0, "y": 2, "z": 260 },
+        { "x": 0, "y": 2, "z": 320 },
+        { "x": 50, "y": 2, "z": 340 },
+        { "x": 60, "y": 2, "z": 150 },
+        { "x": 50, "y": 2, "z": -30 }
+      ]
+    }
+  ],
+  "pickupSpawns": [],
+  "boostPads": [],
+  "antiGravZones": [
+    {
+      "position": { "x": 0, "y": 14, "z": 160 },
+      "rotation": { "x": 0, "y": 0, "z": 0.7071067811865475, "w": 0.7071067811865476 },
+      "halfWidth": 16,
+      "halfHeight": 16,
+      "halfDepth": 42
+    }
+  ],
+  "props": [
+    {
+      "type": "box",
+      "position": { "x": 0, "y": 1.5, "z": 60 },
+      "rotation": { "x": 0, "y": 0, "z": 0, "w": 1 },
+      "size": { "x": 10, "y": 0.5, "z": 60 },
+      "color": "#7c8c95"
+    },
+    {
+      "type": "pipe",
+      "position": { "x": 0, "y": 14, "z": 160 },
+      "rotation": { "x": 0, "y": 0, "z": 0, "w": 1 },
+      "size": { "x": 14, "y": 40, "z": 1.5 },
+      "color": "#6a7e98"
+    },
+    {
+      "type": "box",
+      "position": { "x": 0, "y": 1.5, "z": 260 },
+      "rotation": { "x": 0, "y": 0, "z": 0, "w": 1 },
+      "size": { "x": 10, "y": 0.5, "z": 60 },
+      "color": "#7c8c95"
+    }
+  ]
+}
