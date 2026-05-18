@@ -19,7 +19,7 @@ import type { TrackManifestEntry } from '@/game/assets/manifest'
  * lineup stays clean as it lights up sprint by sprint.
  */
 
-export type CupId = 'reef' | 'open-sea' | 'continental' | 'drowned' | 'dev'
+export type CupId = 'reef' | 'open-sea' | 'continental' | 'drowned' | 'dev' | 'dev-placeholder'
 
 export type V1TrackEntry = {
   /** Canonical track id passed to ?track=. Hyphenated kebab-case to
@@ -30,7 +30,7 @@ export type V1TrackEntry = {
   location: string
   /** Named hero set-piece per track-themes.md. */
   setPiece: string
-  cup: Exclude<CupId, 'dev'>
+  cup: Exclude<CupId, 'dev' | 'dev-placeholder'>
   /** Tile accent stripe + selected outline (hex, with #). */
   accent: string
   /** Casual-band lap target in seconds — surfaced on the tile as a hint. */
@@ -200,6 +200,20 @@ export type CupEntry = {
   accent: string
   status: 'ship' | 'pending'
   gateLabel: string
+  /** Ordered list of track ids the cup races through in championship
+   *  mode. Empty for the legacy `Dev Cup`, which is a browse-only
+   *  sandbox (its track list is built per-render from the manifest).
+   *  Ship cups are pre-wired to their filtered v1 tracks here so the
+   *  championship lineup is locked the moment all four tracks flip to
+   *  `status: 'ship'` — no extra wiring required at that point. */
+  races: string[]
+}
+
+/** Ship-cup race lineup built from the v1 catalogue. The order matches
+ *  the v1-work-breakdown sprint plan — Reef Cup leads with the
+ *  tutorial-adjacent tracks, Drowned Cup closes on the Liberty finale. */
+function shipCupRaces(id: Exclude<CupId, 'dev' | 'dev-placeholder'>): string[] {
+  return V1_TRACKS.filter((t) => t.cup === id).map((t) => t.id)
 }
 
 /** The four v1 race cups, in the order they unlock. */
@@ -211,6 +225,7 @@ export const V1_CUPS: CupEntry[] = [
     accent: '#4dd6ff',
     status: 'pending',
     gateLabel: 'Available when all four Reef tracks ship — sprint 1 (M13)',
+    races: shipCupRaces('reef'),
   },
   {
     id: 'open-sea',
@@ -219,6 +234,7 @@ export const V1_CUPS: CupEntry[] = [
     accent: '#ffd54a',
     status: 'pending',
     gateLabel: 'Available when both Open Sea tracks ship — sprint 2 (M14)',
+    races: shipCupRaces('open-sea'),
   },
   {
     id: 'continental',
@@ -227,6 +243,7 @@ export const V1_CUPS: CupEntry[] = [
     accent: '#ff7a3a',
     status: 'pending',
     gateLabel: 'Available when all Continental tracks ship — sprint 2 (M14)',
+    races: shipCupRaces('continental'),
   },
   {
     id: 'drowned',
@@ -235,12 +252,15 @@ export const V1_CUPS: CupEntry[] = [
     accent: '#ff3a5e',
     status: 'pending',
     gateLabel: 'Available when all Drowned tracks ship — sprint 3 (M15)',
+    races: shipCupRaces('drowned'),
   },
 ]
 
 /** Dev Cup — the fenced-off bin for test maps so the four ship-cups
  *  stay clean of playtest pollution. Visible only on dev builds (gated
- *  by `isDevBuild()` below). */
+ *  by `isDevBuild()` below). Browse-only — click a tile to jump into a
+ *  one-off race against that track. The actual championship-wiring
+ *  proof lives in `DEV_PLACEHOLDER_CUP` below. */
 export const DEV_CUP: CupEntry = {
   id: 'dev',
   name: 'Dev Cup',
@@ -248,6 +268,29 @@ export const DEV_CUP: CupEntry = {
   accent: '#a78bff',
   status: 'ship',
   gateLabel: '',
+  races: [],
+}
+
+/** Dev Placeholder Cup — the live wiring proof for championship mode.
+ *  Three dev tracks strung into a 3-race cup so the post-race NEXT
+ *  flow, the points table, and the cup-results overlay can be
+ *  exercised before any of the four real cups have shipped tracks.
+ *
+ *  Lineup is `lagoon` (procedural oval) → `cliffside` (procedural
+ *  mesa loop) → `big-bay` (GLB-backed open bay). The two procedurals
+ *  are baked into the code; the GLB pulls from the asset manifest so
+ *  the chain also exercises the GLB-loader path. A dev rebuilding
+ *  the asset bundle without `big-bay.glb` would need to swap the
+ *  third entry to whatever they have — the placeholder cup is a
+ *  dev-environment fixture, not a robust product surface. */
+export const DEV_PLACEHOLDER_CUP: CupEntry = {
+  id: 'dev-placeholder',
+  name: 'Dev Placeholder Cup',
+  tagline: 'Wiring proof. 3 dev tracks, full championship flow.',
+  accent: '#ff8aa1',
+  status: 'ship',
+  gateLabel: '',
+  races: ['lagoon', 'cliffside', 'big-bay'],
 }
 
 export type DevTrackEntry = {

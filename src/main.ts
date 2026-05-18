@@ -174,6 +174,13 @@ async function boot() {
   // is alive; only the sim is frozen.
   const determinismMode = params.get('determinism') === '1'
 
+  // Cup mode — `?cup=<cupId>` signals the race is part of a championship.
+  // The finish-screen branching in game-loop reads this back along with
+  // the sessionStorage-backed cup-progress state. Null in single-race
+  // mode; in multiplayer too (cup-mode + multiplayer is a future-work
+  // bridge, not v1).
+  const cupId = !roomId ? params.get('cup') : null
+
   // Replay playback mode. `?replay=session` reads a JSON replay payload
   // from sessionStorage (stashed there by the garage's Load Replay flow,
   // which then triggers a navigation to ?replay=session). When active, the
@@ -645,6 +652,7 @@ async function boot() {
     playerEid,
     playerVariantId: playerVariant.id,
     roomId,
+    cupId,
     raceHud,
     audio,
     physicsDebug,
@@ -805,6 +813,7 @@ async function boot() {
     playerVariant,
     multiplayer,
     roomId,
+    cupId,
     recorder,
     recorderStart,
     lapState,
