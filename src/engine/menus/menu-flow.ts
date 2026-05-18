@@ -1,6 +1,14 @@
 import { startCup } from '@/engine/cup-progress'
 import { formatLap } from '@/engine/garage'
-import { clearLeaderboards, getEntries, getEntryCounts } from '@/engine/leaderboard-state'
+import { getEndpoint, isRemoteEnabled } from '@/engine/leaderboard/endpoint'
+import {
+  clearLeaderboards,
+  getEntries,
+  getEntryCounts,
+  type LeaderboardEntry,
+  setCachedEntries,
+} from '@/engine/leaderboard/local'
+import { fetchBoard } from '@/engine/leaderboard/remote'
 import { playerSettings } from '@/engine/player-settings'
 import type { TrackManifestEntry } from '@/game/assets/manifest'
 import { type BikeVariantId, DEFAULT_BIKE_VARIANT } from '@/game/bikes/variants'
@@ -971,10 +979,12 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       return el
     }
 
-    /** Leaderboards screen — Time Trial top-N per track, sourced from
-     *  the local `leaderboard-state` store. Two-pane: a vertical track
-     *  list on the left, the selected track's top-10 table on the
-     *  right. Player rows are highlighted by handle match against
+    /** Leaderboards screen — Time Trial top-N per track. Default view
+     *  is GLOBAL (the remote board from the leaderboard Party); on
+     *  fetch failure the badge flips to LOCAL ONLY and the cached
+     *  store is shown instead. Two-pane: a vertical track list on the
+     *  left, the selected track's top-10 table on the right. Player
+     *  rows are highlighted by handle match against
      *  `playerSettings.leaderboardHandle` ('YOU' fallback for
      *  unhandled players). */
     function buildLeaderboard(): HTMLElement {
@@ -987,12 +997,21 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       // tracks have times.
       const initialId = tracks.find((t) => (counts[t.id] ?? 0) > 0)?.id ?? tracks[0]?.id ?? 'lagoon'
       let selectedId = initialId
+      // Per-track view source — flips to 'local' on fetch failure so
+      // the badge tells the player whether they're looking at the
+      // global board or the offline cache.
+      const viewSource: Record<string, 'global' | 'local' | 'loading'> = {}
+      // Fetched entries by trackId — used by `renderBoard` to display
+      // the global view when available, falling back to the local
+      // cache when missing.
+      const remoteEntries: Record<string, LeaderboardEntry[]> = {}
+      const remoteOn = isRemoteEnabled()
       el.innerHTML = `
         <div class="bc-section-head">
           <div class="num">02</div>
           <div>
             <div class="title">LEADERBOARDS</div>
-            <div class="sub">TIME TRIAL TOP TIMES &middot; LOCAL BOARD &middot; SYNCS GLOBAL ONCE THE BACKEND LANDS (M16)</div>
+            <div class="sub">TIME TRIAL TOP TIMES &middot; ANONYMOUS HANDLES &middot; <span id="lb-source-badge">${remoteOn ? 'GLOBAL BOARD' : 'LOCAL CACHE ONLY'}</span></div>
           </div>
           <div class="meta">
             <div class="sub">HANDLE</div>
@@ -1043,6 +1062,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
             selectedId = t.id
             renderTracks()
             renderBoard()
+            void refreshRemote(t.id)
           })
           tracksHost.appendChild(row)
         }
@@ -1053,10 +1073,20 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           tracksHost.appendChild(empty)
         }
       }
+      const sourceLabel = (id: string): string => {
+        const s = viewSource[id]
+        if (s === 'global') return 'GLOBAL BOARD'
+        if (s === 'loading') return 'LOADING…'
+        return remoteOn ? 'LOCAL ONLY · NETWORK UNAVAILABLE' : 'LOCAL CACHE ONLY'
+      }
       const renderBoard = (): void => {
         if (!boardHost) return
         const selectedTrack = tracks.find((t) => t.id === selectedId)
-        const entries = getEntries(selectedId, 10)
+        const useRemote =
+          viewSource[selectedId] === 'global' && remoteEntries[selectedId] !== undefined
+        const entries = useRemote
+          ? (remoteEntries[selectedId] ?? []).slice(0, 10)
+          : getEntries(selectedId, 10)
         const ownHandle = (playerSettings.leaderboardHandle || 'YOU').toUpperCase()
         boardHost.innerHTML = ''
         const head = document.createElement('div')
@@ -1065,8 +1095,8 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           <div class="bc-lb-board-title">${escapeHtml((selectedTrack?.name ?? selectedId).toUpperCase())}</div>
           <div class="bc-lb-board-sub">${
             entries.length > 0
-              ? `${entries.length} ENTR${entries.length === 1 ? 'Y' : 'IES'} &middot; FASTEST LAP WINS`
-              : 'NO ENTRIES YET &middot; RACE IN TIME TRIAL TO SET THE FIRST'
+              ? `${entries.length} ENTR${entries.length === 1 ? 'Y' : 'IES'} &middot; FASTEST LAP WINS &middot; <span class="bc-lb-source">${sourceLabel(selectedId)}</span>`
+              : `NO ENTRIES YET &middot; <span class="bc-lb-source">${sourceLabel(selectedId)}</span>`
           }</div>
         `
         boardHost.appendChild(head)
@@ -1098,9 +1128,35 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         })
         boardHost.appendChild(table)
       }
+      /** Fire the GET /board fetch for the selected track. Idempotent
+       *  per track id — if we already have a fresh global view, skip.
+       *  Updates `remoteEntries` + `viewSource` and re-renders on
+       *  completion (or failure → falls back to LOCAL). */
+      const refreshRemote = async (id: string): Promise<void> => {
+        if (!remoteOn) return
+        if (viewSource[id] === 'global') return
+        viewSource[id] = 'loading'
+        if (id === selectedId) renderBoard()
+        const res = await fetchBoard(id, getEndpoint())
+        if (res.ok) {
+          remoteEntries[id] = res.board.entries
+          viewSource[id] = 'global'
+          // Mirror the global view into the local cache so the next
+          // cold boot already has the right snapshot to paint with.
+          setCachedEntries(id, res.board.entries)
+        } else {
+          viewSource[id] = 'local'
+        }
+        if (id === selectedId) {
+          renderBoard()
+          renderTracks()
+        }
+      }
       renderHandle()
       renderTracks()
       renderBoard()
+      // Kick the initial global fetch in the background.
+      void refreshRemote(selectedId)
       el.querySelector('#lb-back')?.addEventListener('click', () => showStep('mode'))
       el.querySelector('#lb-settings')?.addEventListener('click', () => {
         installSettingsOverlay().open()

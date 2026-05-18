@@ -260,6 +260,79 @@
       #finish .stat .row:nth-child(2) { animation-delay: 300ms; }
       #finish .stat .row:nth-child(3) { animation-delay: 380ms; }
       #finish .stat .row .best { color: var(--bc-yellow); }
+      /* Inline leaderboard banner on the finish overlay. The handle
+         prompt + rank pill share the same row so they read as part of
+         the "GHOST SAVED" stream rather than as a separate modal. */
+      .finish-lb-slot {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .finish-lb-prompt {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .finish-lb-prompt .lbl {
+        font-family: var(--bc-font-display);
+        font-size: 11px; letter-spacing: 0.18em;
+        color: var(--bc-cyan);
+      }
+      .finish-lb-prompt input[type="text"] {
+        background: rgba(10, 20, 36, 0.7);
+        border: 1px solid var(--bc-cyan);
+        color: var(--bc-ink);
+        font-family: var(--bc-font-mono);
+        font-size: 14px;
+        letter-spacing: 0.08em;
+        padding: 4px 8px;
+        width: 110px;
+        text-transform: uppercase;
+      }
+      .finish-lb-prompt input[type="text"]:focus { outline: none; box-shadow: 0 0 8px var(--bc-cyan-soft); }
+      .finish-lb-prompt button {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--bc-line);
+        color: var(--bc-ink);
+        font-family: var(--bc-font-display);
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        padding: 5px 10px;
+        cursor: pointer;
+      }
+      .finish-lb-prompt button:hover {
+        background: rgba(255, 255, 255, 0.10);
+        border-color: var(--bc-line-strong);
+      }
+      .finish-lb-prompt button#finish-lb-save {
+        background: var(--bc-cyan); color: var(--bc-navy);
+        border-color: var(--bc-cyan);
+      }
+      .finish-lb-prompt button.finish-lb-skip {
+        color: var(--bc-ink-faint);
+      }
+      .finish-lb-error {
+        font-family: var(--bc-font-mono);
+        font-size: 11px;
+        color: var(--bc-red);
+        letter-spacing: 0.04em;
+      }
+      .finish-lb-badge {
+        font-family: var(--bc-font-display);
+        font-size: 10px;
+        letter-spacing: 0.16em;
+        padding: 2px 6px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--bc-line);
+        color: var(--bc-ink-faint);
+      }
+      .finish-lb-warn {
+        font-family: var(--bc-font-display);
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        color: var(--bc-red);
+      }
       #finish .actions {
         margin-top: 24px; display: flex; gap: 10px;
         flex-wrap: wrap;
@@ -1006,6 +1079,15 @@
         font: 11px var(--bc-font-mono);
         color: var(--bc-ink-faint);
         letter-spacing: 0.08em;
+      }
+      .bc-lb-source {
+        font-family: var(--bc-font-display);
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        padding: 1px 6px;
+        margin-left: 4px;
+        color: var(--bc-cyan);
+        background: var(--bc-cyan-soft);
       }
       .bc-lb-table {
         display: flex; flex-direction: column;
