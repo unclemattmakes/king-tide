@@ -35,7 +35,9 @@ import { createScene } from './engine/render/scene'
 import { createSkySystem } from './engine/render/sky'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { createWaterMesh } from './engine/render/water'
+import { sliceBestLap } from './engine/replay/best-lap-slice'
 import { parseReplay, type ReplayBike, type ReplayFile } from './engine/replay/format'
+import { getGhost, getGhostBestLap, setGhost } from './engine/replay/ghost-state'
 import { createReplayRecorder, type ReplayRecorder } from './engine/replay/recorder'
 import { getBestLap, recordLapTime } from './engine/save-state'
 import { createSimWorld } from './engine/sim/ecs/world'
@@ -55,6 +57,7 @@ import { AIController, AIControllerStore, AITag, defaultAIController } from './g
 import { RacerStore } from './game/components/race'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
 import { createPropColliders } from './game/entities/props'
+import { createGhostRunner, type GhostRunner } from './game/systems/ghost-runner'
 import { createRaceSystem } from './game/systems/race'
 
 /**
@@ -180,6 +183,14 @@ async function boot() {
   // mode; in multiplayer too (cup-mode + multiplayer is a future-work
   // bridge, not v1).
   const cupId = !roomId ? params.get('cup') : null
+
+  // Time Trial mode (`?tt=1`). Solo race against the clock + a
+  // translucent ghost of the player's previous best lap on this
+  // (track, bike) combo. Sim layer skips AI bike spawn; ghost is a
+  // render-only entity driven by a `ReplayPlayer` each render frame.
+  // The recorder still runs so we can slice the new best lap on
+  // finish.
+  const timeTrialMode = params.get('tt') === '1'
 
   // Replay playback mode. `?replay=session` reads a JSON replay payload
   // from sessionStorage (stashed there by the garage's Load Replay flow,
@@ -392,17 +403,33 @@ async function boot() {
     loadBike('/assets/bikes/racer.glb'),
   ])
 
+  // Time Trial — load the saved ghost for (track, bike) before spawn
+  // so spawnBikes can attach a ghost entity. Ghost is null on first
+  // run, or when the player switches bikes (per-variant feel + line).
+  const ghostReplay = timeTrialMode ? getGhost({ trackId, bikeId: playerVariant.id }) : null
+
   // Phase 5 — entity spawn. See `src/boot/spawn-bikes.ts`. Order is
   // deterministic (player slot 0 then AI 1..N, or replay-recording
   // order) so the recorder / player downstream see consistent slot
   // numbering.
-  const { playerEid, aiEids, replayBikeEids } = spawnBikes({
+  const spawnArgs: Parameters<typeof spawnBikes>[0] = {
     sim,
     phys,
     track,
     playerVariant,
     activeReplay,
-  })
+    ghostVariant: ghostReplay ? playerVariant : null,
+  }
+  if (timeTrialMode) spawnArgs.aiCount = 0
+  const { playerEid, aiEids, replayBikeEids, ghostEid } = spawnBikes(spawnArgs)
+
+  // Time Trial — install the ghost runner once both the ghost entity
+  // and the saved replay are in hand. Null in race mode, or in TT
+  // first-runs where no ghost has been saved yet.
+  let ghostRunner: GhostRunner | null = null
+  if (ghostEid !== null && ghostReplay) {
+    ghostRunner = createGhostRunner({ ghostEid, ghostReplay })
+  }
 
   // Phase 7 — multiplayer wiring (no-op in single-player). Owns the
   // remote-peer bike spawn/despawn, host-role flips, snapshot
@@ -431,6 +458,42 @@ async function boot() {
       else audio.gateCleared()
     },
   })
+
+  // Replay recorder. Always-on during a normal race so the finish screen
+  // can offer a "Save Replay" download AND so Time Trial can slice the
+  // best lap on finish. Captures bike transforms at 30Hz — a 90s race
+  // × N bikes × 7 floats per sample fits comfortably in sessionStorage
+  // / a download blob. In replay-playback mode the recorder is null
+  // (we play, we don't re-record). Hoisted above raceTick so the lap-
+  // event callback can call `recorder.recordEvent()`.
+  let recorder: ReplayRecorder | null = null
+  let recorderStart = 0
+  if (!activeReplay) {
+    const recorderBikes: ReplayBike[] = []
+    recorderBikes.push({
+      slot: 0,
+      isPlayer: true,
+      variantId: playerVariant.id,
+      displayName: playerVariant.name,
+      bodyColor: playerVariant.bodyColor,
+    })
+    for (let i = 0; i < aiEids.length; i++) {
+      const racerVariant = resolveBikeVariant('racer')
+      recorderBikes.push({
+        slot: i + 1,
+        isPlayer: false,
+        variantId: racerVariant.id,
+        displayName: `${racerVariant.name} ${i + 1}`,
+        bodyColor: racerVariant.bodyColor,
+      })
+    }
+    recorder = createReplayRecorder({
+      trackId,
+      trackName: track.name,
+      bikes: recorderBikes,
+    })
+    recorderStart = performance.now()
+  }
 
   const raceTick = createRaceSystem(track, {
     onCheckpoint: (eid, justCrossed) => {
@@ -478,6 +541,19 @@ async function boot() {
         if (recordLapTime({ trackId, bikeId: playerVariant.id }, lapTime)) {
           lapState.bestLapAllTime = lapTime
         }
+        // Record the lap boundary into the replay event stream so the
+        // best-lap slicer (Time Trial ghost persistence) can find this
+        // lap's window. `t` is recorder-relative (matches frame
+        // timestamps); `lapTime` is the duration of the closed lap.
+        if (recorder) {
+          recorder.recordEvent({
+            t: (performance.now() - recorderStart) / 1000,
+            kind: 'lap',
+            slot: 0,
+            lap: r.lap - 1,
+            lapTime,
+          })
+        }
       } else {
         audio.gateCleared()
       }
@@ -490,41 +566,6 @@ async function boot() {
       }
     },
   })
-
-  // Replay recorder. Always-on during a normal race so the finish screen
-  // can offer a "Save Replay" download. Captures bike transforms at 30Hz —
-  // a 90s race × 5 bikes × 7 floats per sample fits comfortably in
-  // sessionStorage / a download blob (~250 KB). In replay-playback mode the
-  // recorder is null (we play, we don't re-record).
-  let recorder: ReplayRecorder | null = null
-  let recorderStart = 0
-  if (!activeReplay) {
-    const recorderBikes: ReplayBike[] = []
-    recorderBikes.push({
-      slot: 0,
-      isPlayer: true,
-      variantId: playerVariant.id,
-      displayName: playerVariant.name,
-      bodyColor: playerVariant.bodyColor,
-    })
-    for (let i = 0; i < aiEids.length; i++) {
-      // AI bikes always use the racer baseline today (see spawn block above).
-      const racerVariant = resolveBikeVariant('racer')
-      recorderBikes.push({
-        slot: i + 1,
-        isPlayer: false,
-        variantId: racerVariant.id,
-        displayName: `${racerVariant.name} ${i + 1}`,
-        bodyColor: racerVariant.bodyColor,
-      })
-    }
-    recorder = createReplayRecorder({
-      trackId,
-      trackName: track.name,
-      bikes: recorderBikes,
-    })
-    recorderStart = performance.now()
-  }
 
   // Phase 6 — render systems.
   const bikeRender = createBikeRenderSystem(scene, sim, {
@@ -839,6 +880,8 @@ async function boot() {
       controls.setFinishShown(true)
     },
     tutorialMode: params.get('tutorial') === '1',
+    timeTrialMode,
+    ghostRunner,
   })
 }
 

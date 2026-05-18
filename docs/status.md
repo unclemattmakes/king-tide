@@ -1,11 +1,13 @@
 # Hoverbike — Project Status
 
-> Last updated: 2026-05-18 (Foundation Systems 5/5 — see *Foundation Systems complete (2026-05-18)* below, [PR #113](https://github.com/occ-matt/hoverbike/pull/113)). Four systems landed in one session on top of Step 0 + wave-pump: **AI difficulty / rubber-band toggle** (per-AI tuning bundle for Casual/Standard/Hard baked at spawn, rubber-band gated by a live toggle), **anti-grav HUD + camera intensity** (magenta-glow indicator on `#hud-anti-grav`; chase camera's new `setAntiGravFollow(weight)` blends yaw-only ↔ full bike-frame follow with a Full/Reduced/Off intensity scalar), **tutorial framework** (track-agnostic director + 6-beat default script + top-centered yellow HUD chyron, URL gate `?tutorial=1`, "Replay tutorial" button + subtitles toggle in Settings, persisted `tutorialCompleted` latch), **audio mixer + procedural music bed** (four-bus rewrite `music | sfx | ambient → master → destination`, three-voice sine drone bed with tremolo LFO, sidechain `duckMusic` auto-fires on wave-pump + explosion, all four sliders + music-enabled toggle wired through a new `audio-service` singleton). All 5 Foundation Systems rows in [docs/v1-work-breakdown.md](./v1-work-breakdown.md) now check ✅. 335/335 unit tests passing (26 new — 6 anti-grav-camera, 13 tutorial, 7 audio-mixer). Old: 2026-05-17 (v1 cathedral + wave-pump signal — see *v1 cathedral + wave-pump signal (2026-05-17)* below. M11 Step 0 from [docs/v1-work-breakdown.md](./v1-work-breakdown.md) shipped: full menu flow now exists with mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial), 12-tile track-select for the v1 ship tracks (all disabled with post-flood landmark blurbs + per-track gate labels), 4 disabled real cups + a dev-only **Dev Cup** for playtest tracks (lagoon, cliffside, every GLB) so the real race cups stay clean, 5-slot bike-select (3 active + 2 "Coming soon"), and a full Settings overlay (Audio / Video / Controls / Gameplay tabs) with every v1 tunable row stubbed + gated. Reserved HUD slots for wave-pump, anti-grav, wave-line, cup-points, 8-bike positions. Single `.bc-disabled` + `.bc-gate` convention locked once and reused everywhere. The first Foundation Systems milestone also landed: a wave-pump signal that fires on a clean crest launch (on-water-grounded → airborne with vy ≥ 1.5 m/s, forward speed ≥ 45% of top, throttle ≥ 0.4, 500 ms cooldown), strength-scaled chyron-style HUD widget + stacked-5th audio chord, persisted "Wave-pump prompt" setting (Full/Subtle/Off). 295/295 unit tests passing including 11 new for the pump detector. Old: M10.12 multiplayer lobby — `?room=<id>` now opens a lobby overlay that lists every connected peer with their ready/not-ready state, plus a "CLICK WHEN READY" button (Enter also toggles). The race countdown is held (`raceHud.deferStart: true`) until **all connected peers** (minimum 1, so solo works) have ready'd up. When the local view first sees all-ready it calls `raceHud.armCountdown()` AND broadcasts `start-race` to the relay; the relay sets a sticky `raceStarted` bit and forwards to peers. Late joiners receive `raceStarted: true` in their `HelloMessage` and skip the lobby immediately. Reset on empty room. Verified end-to-end via Chrome MCP for solo / two-peer / late-joiner scenarios. M10.11 multiplayer state sync — see [docs/m10-11-state-sync.md](./m10-11-state-sync.md). Host-elected AI authority + 20 Hz transform snapshots: lowest-slot peer runs `aiControlSystem` and broadcasts the 4 AI bike poses; every peer also broadcasts its OWN player-bike pose. Receivers' AI bikes and remote-peer bikes are kinematic-position rigid bodies whose pose is set from inbound snapshots, replacing the old input-replay path (which silently diverged because each tab had its own physics + AI sim with no state sync — the M10.4–M10.9 work was input-only). Wire format: byte-0 tag distinguishes `InputFrame` (0x01, 11 bytes) from `TransformSnapshot` (0x02, 8 + 24×N bytes). Host AI bikes carry `AITag`, non-host AI bikes don't (re-derived via `applyHostRole` on every peer-set change). Local human's bike stays `Dynamic + PeerControlled`. Bandwidth at 8 peers: ~12 KB/s ingress per peer. Race state stays per-tab; M10.15 will make it host-authoritative if disagreements show up in play. `#hud-room` chip now also shows `[host]` when this peer is the AI host. Determinism harness unchanged (default `runAI: true`). 169/169 unit tests passing including new `host-election`, `transform-snapshot`, `apply-snapshot` suites. M10.10.1 — local player bike's `PeerControlled.peerId` now patched to relay-assigned slot in `onConnected` (was hardcoded `0`, made every tab claim slot 0 and the host's frames drove everyone). M10.10 deployed PartyKit endpoint — client defaults to `hoverbike.occ-matt.partykit.dev` in prod builds, `localhost:1999` in dev; `?host=` overrides. Local dev: `pnpm party:dev` (PartyKit on :1999) + `pnpm dev` (Vite on :5191). M9.41 lean crank — `ROLL_LEAN_LIMIT` doubled from 20° to 40°.). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
+> Last updated: 2026-05-18 (Cup wiring via Dev Placeholder Cup — see *Cup wiring via Dev Placeholder Cup (2026-05-18)* below). Second entry in Step 6 (Modes) — a new dev-only **Dev Placeholder Cup** strings `lagoon → cliffside → big-bay` into a real 3-race championship so the cup mode wiring is exercised before any of the four ship cups have tracks. `?cup=<id>` on the race URL toggles cup mode; finish overlay rewrites NEXT to `NEXT RACE (n/m)` mid-cup and `CUP RESULTS →` on the last race, with a `CUP STANDING · n/m · X PTS · Y TOTAL` row in the stat block and a new `#cup-results` overlay (per-race points table + champion banner) at the end. MK8 / F1 style point curve (15/12/10/9/8/7/6/5/4/3/2/1). Cup state in sessionStorage so a tab close starts fresh; RETRY mid-cup preserves progress, EXIT clears it. Ship cups pre-wired via `shipCupRaces(id)` so they activate the moment their tracks flip to `status: 'ship'`. Old: 2026-05-18 (Time Trial mode + ghost recording — see *Time Trial mode + ghost recording (2026-05-18)* below). First entry in Step 6 (Modes) lit up: `?race=1&track=…&bike=…&tt=1` runs solo against the clock with a translucent best-lap ghost that overwrites itself on every PB. Ghost is a render-only ECS entity (no rigid body, no race/AI/peer tags) driven by a new `GhostRunner` system that ticks a single-lap `ReplayPlayer` off the player's *current lap time* — so the ghost is a real pacing target rather than a wall-clock playback. Best-lap slicer reads the recorder's `lap` events (finally wired in `main.ts`) and emits a re-based one-bike ReplayFile; `ghost-state.ts` persists to localStorage keyed by (trackId, bikeId). Finish overlay reads as **TIME TRIAL**, shows a "★ GHOST SAVED" pill on every PB, RETRY is the default focus, NEXT is hidden. 354/354 unit tests passing (19 new — 7 ghost-state, 6 best-lap-slice, 6 ghost-runner). Old: 2026-05-18 (Foundation Systems 5/5 — see *Foundation Systems complete (2026-05-18)* below, [PR #113](https://github.com/occ-matt/hoverbike/pull/113)). Four systems landed in one session on top of Step 0 + wave-pump: **AI difficulty / rubber-band toggle** (per-AI tuning bundle for Casual/Standard/Hard baked at spawn, rubber-band gated by a live toggle), **anti-grav HUD + camera intensity** (magenta-glow indicator on `#hud-anti-grav`; chase camera's new `setAntiGravFollow(weight)` blends yaw-only ↔ full bike-frame follow with a Full/Reduced/Off intensity scalar), **tutorial framework** (track-agnostic director + 6-beat default script + top-centered yellow HUD chyron, URL gate `?tutorial=1`, "Replay tutorial" button + subtitles toggle in Settings, persisted `tutorialCompleted` latch), **audio mixer + procedural music bed** (four-bus rewrite `music | sfx | ambient → master → destination`, three-voice sine drone bed with tremolo LFO, sidechain `duckMusic` auto-fires on wave-pump + explosion, all four sliders + music-enabled toggle wired through a new `audio-service` singleton). All 5 Foundation Systems rows in [docs/v1-work-breakdown.md](./v1-work-breakdown.md) now check ✅. 335/335 unit tests passing (26 new — 6 anti-grav-camera, 13 tutorial, 7 audio-mixer). Old: 2026-05-17 (v1 cathedral + wave-pump signal — see *v1 cathedral + wave-pump signal (2026-05-17)* below. M11 Step 0 from [docs/v1-work-breakdown.md](./v1-work-breakdown.md) shipped: full menu flow now exists with mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial), 12-tile track-select for the v1 ship tracks (all disabled with post-flood landmark blurbs + per-track gate labels), 4 disabled real cups + a dev-only **Dev Cup** for playtest tracks (lagoon, cliffside, every GLB) so the real race cups stay clean, 5-slot bike-select (3 active + 2 "Coming soon"), and a full Settings overlay (Audio / Video / Controls / Gameplay tabs) with every v1 tunable row stubbed + gated. Reserved HUD slots for wave-pump, anti-grav, wave-line, cup-points, 8-bike positions. Single `.bc-disabled` + `.bc-gate` convention locked once and reused everywhere. The first Foundation Systems milestone also landed: a wave-pump signal that fires on a clean crest launch (on-water-grounded → airborne with vy ≥ 1.5 m/s, forward speed ≥ 45% of top, throttle ≥ 0.4, 500 ms cooldown), strength-scaled chyron-style HUD widget + stacked-5th audio chord, persisted "Wave-pump prompt" setting (Full/Subtle/Off). 295/295 unit tests passing including 11 new for the pump detector. Old: M10.12 multiplayer lobby — `?room=<id>` now opens a lobby overlay that lists every connected peer with their ready/not-ready state, plus a "CLICK WHEN READY" button (Enter also toggles). The race countdown is held (`raceHud.deferStart: true`) until **all connected peers** (minimum 1, so solo works) have ready'd up. When the local view first sees all-ready it calls `raceHud.armCountdown()` AND broadcasts `start-race` to the relay; the relay sets a sticky `raceStarted` bit and forwards to peers. Late joiners receive `raceStarted: true` in their `HelloMessage` and skip the lobby immediately. Reset on empty room. Verified end-to-end via Chrome MCP for solo / two-peer / late-joiner scenarios. M10.11 multiplayer state sync — see [docs/m10-11-state-sync.md](./m10-11-state-sync.md). Host-elected AI authority + 20 Hz transform snapshots: lowest-slot peer runs `aiControlSystem` and broadcasts the 4 AI bike poses; every peer also broadcasts its OWN player-bike pose. Receivers' AI bikes and remote-peer bikes are kinematic-position rigid bodies whose pose is set from inbound snapshots, replacing the old input-replay path (which silently diverged because each tab had its own physics + AI sim with no state sync — the M10.4–M10.9 work was input-only). Wire format: byte-0 tag distinguishes `InputFrame` (0x01, 11 bytes) from `TransformSnapshot` (0x02, 8 + 24×N bytes). Host AI bikes carry `AITag`, non-host AI bikes don't (re-derived via `applyHostRole` on every peer-set change). Local human's bike stays `Dynamic + PeerControlled`. Bandwidth at 8 peers: ~12 KB/s ingress per peer. Race state stays per-tab; M10.15 will make it host-authoritative if disagreements show up in play. `#hud-room` chip now also shows `[host]` when this peer is the AI host. Determinism harness unchanged (default `runAI: true`). 169/169 unit tests passing including new `host-election`, `transform-snapshot`, `apply-snapshot` suites. M10.10.1 — local player bike's `PeerControlled.peerId` now patched to relay-assigned slot in `onConnected` (was hardcoded `0`, made every tab claim slot 0 and the host's frames drove everyone). M10.10 deployed PartyKit endpoint — client defaults to `hoverbike.occ-matt.partykit.dev` in prod builds, `localhost:1999` in dev; `?host=` overrides. Local dev: `pnpm party:dev` (PartyKit on :1999) + `pnpm dev` (Vite on :5191). M9.41 lean crank — `ROLL_LEAN_LIMIT` doubled from 20° to 40°.). Live build: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app — every push to `main` auto-deploys.
 
 This doc captures the build's current state, controls, known issues, and next steps. It complements [product-plan.md](./product-plan.md) (vision + MVP scope) and [implementation-plan.md](./implementation-plan.md) (architecture + milestone breakdown).
 
 ## What works today
 
+- **Cup mode wiring (placeholder).** Cup tile → cup-select → cup-tracks → bike-select → race; `?race=1&track=<first>&bike=<id>&cup=<cupId>` signals championship mode to the game loop. On dev builds two cup tiles light up: **Dev Cup** (browse-only — click a tile for a one-off race, unchanged from Step 0) and **Dev Placeholder Cup** (the new championship: lagoon → cliffside → big-bay, START CUP CTA in the lineup preview). Finish overlay rewrites NEXT to `NEXT RACE (n/m)` mid-cup and `CUP RESULTS →` on the last race; new `#cup-results` overlay shows a per-race points table + champion banner with `YOU · X/MAX PTS`. MK8-style points (15/12/10/9/8/7/6/5/4/3/2/1) live in `src/engine/cup-progress.ts` along with the sessionStorage-backed state (cup id, bike loadout, race lineup, per-race results). RETRY mid-cup preserves progress (results swap by trackId, pointer never un-skips); EXIT (finish-screen + pause-menu) clears it. The four ship cups carry `races: shipCupRaces(id)` so they activate the moment their tracks flip to `status: 'ship'` — no extra cup wiring required. See [src/engine/cup-progress.ts](../src/engine/cup-progress.ts), [src/engine/render/cup-results-screen.ts](../src/engine/render/cup-results-screen.ts).
+- **Time Trial mode + ghost recording.** Mode tile lit (Race / **Time Trial** / Cup / MP / Tutorial). Picks track → bike → race; URL is `?race=1&track=…&bike=…&tt=1`. AI bike count clamps to 0, recorder runs solo + records `lap` events to its event stream, finish overlay slices the player's fastest lap and persists it to `hoverbike.ghosts.v1::<trackId>::<bikeId>` when it beats the existing ghost. On the next TT run with the same (track, bike) a translucent cyan ghost spawns at the start gate — its Transform is driven each frame by a `ReplayPlayer` running off the player's *current lap time* (not wall-clock), so the ghost is a real pacing reference. Crossing the start/finish line seeks the ghost back to t=0; if the ghost finishes its lap first it freezes at end-pose until the player catches up. See [src/engine/replay/best-lap-slice.ts](../src/engine/replay/best-lap-slice.ts), [src/engine/replay/ghost-state.ts](../src/engine/replay/ghost-state.ts), [src/game/systems/ghost-runner.ts](../src/game/systems/ghost-runner.ts).
 - **v1 menu cathedral.** Cold boot routes through title → 5-tile mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial) → track or cup or lobby → 5-slot bike-select → race. Race mode shows all 12 v1 ship tracks as disabled tiles with post-flood landmark blurbs + per-track gate labels; Cup mode shows the four ship cups (all disabled) plus a dev-only **Dev Cup** that hosts every playtest track (lagoon, cliffside, every GLB) — keeps the real race lineup uncluttered. Full Settings overlay (Audio / Video / Controls / Gameplay) with the entire v1 tunable inventory present and gated; the **Wave-pump prompt**, **AI difficulty**, **Rubber-band assist**, **Anti-grav camera intensity**, **Subtitles for tutorial**, **Replay tutorial**, **Master**, **Music**, **SFX**, **Ambient**, and **Music bed enabled** rows are live. The **Tutorial** mode tile is also enabled. Reserved hidden HUD slots for wave-pump, anti-grav, tutorial, wave-line, cup-points, 8-bike positions. Single `.bc-disabled` + `.bc-gate` convention reused everywhere. See [docs/v1-work-breakdown.md](./v1-work-breakdown.md).
 - **Foundation Systems milestone (5/5).** Step 1 of the v1 work-breakdown is done. Five systems each landed with sim behavior + settings entry + HUD/menu surface per the definition-of-done convention: wave-pump signal, AI difficulty, anti-grav HUD + camera, tutorial framework, audio mixer + music bed. Details below.
 - **Wave-pump signal.** Render-side detector watches the player bike each frame; fires on a clean crest launch (on-water-grounded → airborne with vy ≥ 1.5 m/s, forward speed ≥ 45% of top speed, throttle ≥ 0.4, 500 ms cooldown). Strength-scaled HUD widget pops a chyron-style "PUMP +" flash with a cyan→yellow strength bar; audio engine plays a stacked perfect-5th chord (A4 + E5 + A5) under a band-passed whoosh sweep — distinct from `gateCleared`'s two-note ding so the player can tell pumps from checkpoints by ear. Settings → Gameplay → "Wave-pump prompt" toggles Full / Subtle / Off; persisted to localStorage. Sim-side pump physics tuning is still pending (M11–M12 proper); the detector's event contract holds — only the trigger heuristic gets upgraded.
@@ -37,6 +39,168 @@ This doc captures the build's current state, controls, known issues, and next st
 - **Multiplayer state sync (M10.4–M10.11)** — opt-in via `?room=<id>` URL param. Local dev needs `pnpm party:dev` (PartyKit relay on :1999) alongside `pnpm dev` (Vite on :5191). The stateless relay (`party/relay.ts`) assigns peer slots 0..7 and broadcasts two binary message types distinguished by a 1-byte tag at offset 0: `InputFrame` (0x01, 11 B, 60 Hz) carries each peer's controls; `TransformSnapshot` (0x02, 8 + 24×N B, 20 Hz) carries owner-authoritative bike poses. The lowest-slot peer is the AI host: it alone runs `aiControlSystem` and broadcasts the 4 AI bike poses. Every peer also broadcasts its own player bike. Receivers' AI bikes and remote-peer bikes are kinematic-position rigid bodies whose pose is set from inbound snapshots, replacing the input-replay path which couldn't converge (each tab simulated AI independently). Local human's bike stays Dynamic + PeerControlled and is driven by its own input. Host changeover (e.g. peer 0 leaves) re-tags AI bikes via `applyHostRole` between fixed steps; new host re-derives `AIController` closest-point cache via `defaultAIController('main')`. `#hud-room` chip shows `[host]` when this peer owns AI. `__hover.net` probe surfaces `peerId()`, `remotePeers()`, `isHost()`, `recentRemoteFrames()`, `latestPeerIntents()`, `snapshotsReceived()`; `__hover.bikes()` now includes per-bike `bodyType`, `hasAI`, `peerControlled` for cross-tab diagnostics. **Not yet implemented**: render-side smoothing of the 20 Hz snaps (M10.12), owner-authoritative combat (M10.13), snapshot interpolation/extrapolation (M10.14), host-authoritative race state (M10.15), variant negotiation per peer, anti-cheat.
 - Spec → GLB asset pipeline (M9.27, flipped to per-variant in M9.39): `specs/{bikes,props,tracks}/*.json` + `tools/blender/build_*.py` produce `public/assets/<cat>/*.glb` and `public/assets/manifest.json` via `pnpm gen:all`. Bike-loader instantiates the player + AI bike GLBs at boot; prop-loader pre-fetches asset-prop GLBs referenced by track JSON. **Bikes:** one `bikes-src/<id>.blend` per variant — open it in Blender, edit the variant directly (no shared kit, no propagation), click *Hoverbike → Export Bike to Game*, the GLB updates and the runtime picks it up on next reload. The same addon serves tracks via *Export Track to Game* and switches mode based on the .blend's parent dir. Headless `pnpm gen:bikes` opens each .blend, overlays spec.appearance recolour + spec.physics extras, exports. **Tracks:** spec-driven `build_track.py` round-trips through `tracks-src/<id>.blend` and emits both the GLB and a starter gameplay JSON. **Bike viewer** (`?viewer=<bikeId>` or the addon's *Copy Viewer URL*) opens a turntable with OrbitControls, sockets/colliders surfaced as gizmos.
 - Vercel push-to-deploy, Cloudflare CDN ready (not yet attached to a domain)
+
+### Cup wiring via Dev Placeholder Cup (2026-05-18)
+
+Second entry in **Step 6 — Modes** from
+[docs/v1-work-breakdown.md](./v1-work-breakdown.md). The cup mode tile
+was lit in Step 0 but routed to a one-off track picker; this pass
+makes it a real championship by stringing 3 dev tracks into a 3-race
+cup so all the wiring (per-race finish recording, points table,
+post-race NEXT routing, end-of-cup summary) is exercised before any
+of the four ship cups have their tracks.
+
+New / changed modules:
+
+- [src/engine/cup-progress.ts](../src/engine/cup-progress.ts)
+  — sessionStorage-backed state for the in-flight cup: `cupId`,
+  `bikeId`, `races: string[]`, `currentRaceIndex`, per-race results
+  keyed by trackId, `startedAt` timestamp. MK8 / F1 point curve
+  (`CUP_POINTS`, `pointsForPosition`) — 15/12/10/9/8/7/6/5/4/3/2/1.
+  Retry-safe: `recordCupRaceFinish` matches by trackId so re-racing a
+  slot overwrites it, and the pointer never un-skips (a retry of a
+  past race doesn't lose your progress on later ones).
+- [src/engine/menus/tracks-catalog.ts](../src/engine/menus/tracks-catalog.ts)
+  — `CupEntry` gains `races: string[]`. The four ship cups are
+  pre-wired via `shipCupRaces(id)` (filtered `V1_TRACKS` in catalogue
+  order), so the moment any cup's tracks flip to `status: 'ship'`
+  their championship runs without further wiring. New
+  `DEV_PLACEHOLDER_CUP` (dev builds only) carries
+  `['lagoon', 'cliffside', 'big-bay']` — two procedurals guaranteed
+  to load plus one GLB so the cup chain exercises both loader paths.
+- [src/engine/menus/menu-flow.ts](../src/engine/menus/menu-flow.ts)
+  — cup-tracks screen splits behaviour by cup shape: browse Dev Cup
+  keeps its tile-as-launcher behaviour, championship-shaped cups
+  (placeholder + future ship cups) render inert preview tiles plus a
+  single **START CUP** CTA. New `commitSpCup()` seeds cup-progress
+  and stamps `?cup=<id>` on the race URL. TT mode (which also lands
+  on this screen) is kept on the browse path via a `currentMode`
+  guard so the championship CTA only appears for cup mode.
+- [src/engine/render/cup-results-screen.ts](../src/engine/render/cup-results-screen.ts)
+  + new `#cup-results` overlay in [index.html](../index.html) —
+  championship summary shown over the finish screen after the last
+  race. Per-race points table (race # / venue / finish / points)
+  with a TOTAL row and a CHAMPION banner reading `YOU · X/MAX PTS`
+  so the player sees their proximity to a clean sweep. ESC or Enter
+  closes the overlay and routes through the same EXIT-clears-cup
+  path as the finish screen.
+- [src/boot/game-loop.ts](../src/boot/game-loop.ts) — `showFinishScreen`
+  branches on the URL `?cup=` param. Mid-cup, NEXT becomes
+  `NEXT RACE (n/m)` and carries the cup id forward; on the final race
+  it becomes `CUP RESULTS →` and pops the overlay. A compact
+  `CUP STANDING · n/m · X PTS THIS RACE · Y TOTAL` row is appended
+  to the stat block on every cup race. RETRY in cup mode preserves
+  progress (sessionStorage survives the reload, finish overwrites
+  the slot). EXIT (finish + pause-menu) always clears cup-progress
+  so the title screen doesn't surface stale state.
+- [src/boot/controls.ts](../src/boot/controls.ts) — pause-menu
+  RESTART threads `?cup=` through the retry URL so a mid-cup pause +
+  restart stays in cup mode.
+
+Why a placeholder rather than waiting for ship tracks:
+
+- The wiring (points formula, post-race NEXT routing, finish-overlay
+  branching, cup-results overlay, URL contract) is independent of
+  which 3-4 tracks make up a cup. Building it against a placeholder
+  means the ship cups light up automatically once their tracks are
+  ready, with zero cup-mode work needed at sprint-1 / sprint-2 /
+  sprint-3 boundaries.
+- The placeholder also catches the awkward edge cases (retry-doesn't-
+  un-skip, EXIT clears state, ESC out of cup-results) under playtest
+  conditions instead of during the late-sprint crunch.
+
+What's deliberately NOT in this pass:
+
+- **No new settings row.** Cup mode reuses the existing AI difficulty
+  + rubber-band assist toggles. The `where applicable` clause of the
+  definition-of-done convention covers this; ship cups can revisit
+  if a real per-cup tunable emerges.
+- **Multiplayer cup mode is suppressed.** `?cup=` is ignored when
+  `?room=` is set. Cup + multiplayer is a future-work bridge, not v1.
+- **No "Resume cup" affordance on the title screen.** EXIT mid-cup
+  drops state. Simple semantics; can revisit if playtest reveals a
+  resume use-case.
+
+Tests ([tests/unit/cup-progress.test.ts](../tests/unit/cup-progress.test.ts)):
+6 new specs — point curve correctness, sessionStorage round-trip,
+mismatched-cup-id rejection, retry-overwrites-without-un-skipping,
+isCupComplete gate, totalCupPoints sum. 370/370 unit tests passing.
+
+### Time Trial mode + ghost recording (2026-05-18)
+
+First entry in **Step 6 — Modes** from
+[docs/v1-work-breakdown.md](./v1-work-breakdown.md). Sits on top of the
+existing replay infrastructure (pose recorder, SLERP playback,
+`recordLapTime` storage) and wires four new modules together:
+
+- [src/engine/replay/best-lap-slice.ts](../src/engine/replay/best-lap-slice.ts)
+  — `sliceBestLap(replay)` walks the recorder's `lap` events,
+  finds the player's fastest lap, slices the frame window in
+  `[tLapStart, tLapEnd]`, and emits a single-bike, single-lap
+  ReplayFile with timestamps rebased to t=0. `recordEvent` finally
+  has a caller — `main.ts`'s `onCheckpoint` handler now stamps a
+  `{kind:'lap', t, slot:0, lap, lapTime}` event on every closed lap.
+- [src/engine/replay/ghost-state.ts](../src/engine/replay/ghost-state.ts)
+  — localStorage persistence under `hoverbike.ghosts.v1` keyed by
+  `${trackId}::${bikeId}`. `getGhost`, `setGhost`, `getGhostBestLap`,
+  `clearGhosts`. Corrupt payloads are silently dropped on read.
+- [src/game/systems/ghost-runner.ts](../src/game/systems/ghost-runner.ts)
+  — drives the ghost entity's Transform each render frame off the
+  *player's current lap time* (not wall clock), so the ghost stays a
+  meaningful pacing reference: if the player's lap is 18 s and the
+  ghost's recorded lap is 20 s, the ghost is roughly 10% behind on
+  the racing line at all times. Detects lap reset (player's lapTime
+  drops toward 0) and seeks the ghost back to t=0. Held at start
+  pose pre-countdown via the `arm` flag.
+- [src/game/components/index.ts](../src/game/components/index.ts) +
+  [src/game/entities/bike.ts](../src/game/entities/bike.ts) —
+  new `GhostTag` component; `createBike({ ghost: true })` mints a
+  render-only entity with `BikeTag + Transform + BikeStats + GhostTag`
+  and skips RigidBody / collider / rider / Racer / AI / Peer /
+  PickupSlot wiring. Sim systems gate on those tags so the ghost
+  participates in nothing.
+
+Render-side, [src/engine/render/render-systems.ts](../src/engine/render/render-systems.ts)
+detects `GhostTag` on first sight of a bike entity, clones the
+variant mesh with cyan livery + exhaust tints, and walks the cloned
+tree applying a translucent material (opacity 0.35, no depth write,
+no shadow cast/receive, emissive cyan glow). The variant comes from
+the player's chosen bike — so the ghost reads as "you (last run)"
+not "some opponent."
+
+Menu flow ([src/engine/menus/menu-flow.ts](../src/engine/menus/menu-flow.ts)):
+the Time Trial tile flipped to enabled with the desc "Solo against
+the clock with a saved best-lap ghost." TT mode reuses the
+`sp-cup-tracks` step with Dev Cup auto-selected (devs play TT
+against today's playable maps; ship-status v1 tracks light up here
+naturally once they land). Commit emits `?race=1&track=…&bike=…&tt=1`.
+
+Finish overlay ([src/boot/game-loop.ts](../src/boot/game-loop.ts)):
+- title reads `TIME TRIAL`, ribbon `CLOCK`, position row blanks
+  (TT is solo so "1st against no one" would be a lie),
+- recorder finalizes as usual; `sliceBestLap(replay)` runs and
+  `setGhost` persists when the new best lap beats the stored ghost's
+  best lap (or there's none),
+- best-lap row gets a `★ GHOST SAVED` pill on every PB,
+- RETRY is the default focus (and carries `tt=1` forward); NEXT is
+  hidden — the TT loop is "grind the same track."
+
+Tests ([tests/unit/](../tests/unit/)): 354/354 passing (19 new):
+- `ghost-state.test.ts` — set/get round-trip, overwrite, per-(track,
+  bike) isolation, corrupt-payload recovery, clearGhosts.
+- `best-lap-slice.test.ts` — fastest-of-three extraction, multi-bike
+  slot stripping, negative-tStart rejection, frame-count guard,
+  cross-slot event filtering.
+- `ghost-runner.test.ts` — start-pose plant, lap-time-driven Transform
+  writes, lap reset on player crossing, pre-countdown hold, reset(),
+  end-pose freeze when ghost finishes first.
+
+Browser smoke-tested via Claude Preview: TT tile enabled, mode →
+track → bike flow lands on `?race=1&track=lagoon&bike=racer&tt=1`,
+sim spins up with 1 dynamic bike (no AI). Ghost spawn path verified
+at the unit level (the ghost entity has no RigidBody so the existing
+`__hover.bikes()` debug probe — which iterates `BikeTag + RBHandle`
+— filters it out).
 
 ### v1 cathedral + wave-pump signal (2026-05-17)
 
