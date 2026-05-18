@@ -27,17 +27,26 @@ import {
 import {
   type AIDifficulty,
   type AntiGravCameraIntensity,
+  type ColorblindMode,
   playerSettings,
   setAIDifficulty,
   setAntiGravCameraIntensity,
   setAudioBusVolume,
   setAudioMusicEnabled,
+  setColorblindMode,
   setGamepadDeadzone,
   setGamepadSensitivity,
+  setHighContrast,
   setInvertCameraY,
+  setLargeText,
   setLeaderboardHandle,
   setLeaderboardSubmit,
+  setMotionSicknessReduction,
+  setReducedFlash,
+  setReducedMotion,
   setRubberBandAssist,
+  setScreenShakeIntensity,
+  setSubtitlesAlwaysOn,
   setTutorialSubtitles,
   setWaveLineIntensity,
   setWavePumpIntensity,
@@ -46,7 +55,7 @@ import {
 } from '@/engine/player-settings'
 import { buildReplayTutorialHref } from '@/engine/tutorial/tutorial-launch'
 
-type Tab = 'audio' | 'video' | 'controls' | 'gameplay' | 'network'
+type Tab = 'audio' | 'video' | 'controls' | 'gameplay' | 'accessibility' | 'network'
 
 /** Label↔intensity maps for the wave-pump select. Kept here so the
  *  row spec (which uses string options) and the runtime wiring agree
@@ -93,6 +102,19 @@ const WAVE_LINE_VALUE: Record<string, WaveLineIntensity> = {
   Full: 'full',
   Subtle: 'subtle',
   Off: 'off',
+}
+
+const COLORBLIND_LABEL: Record<ColorblindMode, string> = {
+  off: 'Off',
+  deuteranopia: 'Deuteranopia',
+  protanopia: 'Protanopia',
+  tritanopia: 'Tritanopia',
+}
+const COLORBLIND_VALUE: Record<string, ColorblindMode> = {
+  Off: 'off',
+  Deuteranopia: 'deuteranopia',
+  Protanopia: 'protanopia',
+  Tritanopia: 'tritanopia',
 }
 
 type Control =
@@ -419,6 +441,80 @@ const TAB_SPECS: TabSpec[] = [
     ],
   },
   {
+    id: 'accessibility',
+    label: 'ACCESSIBILITY',
+    description:
+      'Color, motion, and HUD options that make the game playable for more bodies. Lights up as systems land.',
+    rows: [
+      {
+        id: 'a11y-colorblind',
+        label: 'Colorblind mode',
+        control: {
+          kind: 'select',
+          options: ['Off', 'Deuteranopia', 'Protanopia', 'Tritanopia'],
+          defaultValue: COLORBLIND_LABEL[playerSettings.colorblindMode],
+        },
+        enabled: true,
+        gate: 'Swaps the HUD palette to a safe-for-mode color set. Affects minimap dots + HUD accents.',
+      },
+      {
+        id: 'a11y-reduced-flash',
+        label: 'Reduced flash',
+        control: { kind: 'toggle', defaultValue: playerSettings.reducedFlash },
+        enabled: true,
+        gate: 'Dampens wave-pump bar pulse, lap-flash, countdown pop.',
+      },
+      {
+        id: 'a11y-large-text',
+        label: 'Larger text',
+        control: { kind: 'toggle', defaultValue: playerSettings.largeText },
+        enabled: true,
+        gate: 'Scales HUD font sizes 1.25×.',
+      },
+      {
+        id: 'a11y-high-contrast',
+        label: 'High contrast',
+        control: { kind: 'toggle', defaultValue: playerSettings.highContrast },
+        enabled: true,
+        gate: 'Solid HUD backgrounds + white text for max legibility.',
+      },
+      {
+        id: 'a11y-reduced-motion',
+        label: 'Reduced motion (override)',
+        control: { kind: 'toggle', defaultValue: playerSettings.reducedMotion },
+        enabled: true,
+        gate: 'Forces UI animation off regardless of OS setting.',
+      },
+      {
+        id: 'a11y-motion-sickness',
+        label: 'Motion-sickness reduction',
+        control: { kind: 'toggle', defaultValue: playerSettings.motionSicknessReduction },
+        enabled: true,
+        gate: 'Dampens chase-cam roll + anti-grav inversion intensity.',
+      },
+      {
+        id: 'a11y-screen-shake',
+        label: 'Screen-shake intensity',
+        control: {
+          kind: 'slider',
+          min: 0,
+          max: 1,
+          step: 0.05,
+          defaultValue: playerSettings.screenShakeIntensity,
+        },
+        enabled: true,
+        gate: 'Scales any camera/HUD shake. 0 = none.',
+      },
+      {
+        id: 'a11y-subtitles-always',
+        label: 'Subtitles always on',
+        control: { kind: 'toggle', defaultValue: playerSettings.subtitlesAlwaysOn },
+        enabled: true,
+        gate: 'Keeps the tutorial subtitle line visible during captioned cues.',
+      },
+    ],
+  },
+  {
     id: 'network',
     label: 'NETWORK',
     description: 'Multiplayer connection status. Read-only; values update live.',
@@ -635,6 +731,9 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       if (spec.enabled && spec.id === 'controls-deadzone') {
         range.addEventListener('input', () => setGamepadDeadzone(Number(range.value)))
       }
+      if (spec.enabled && spec.id === 'a11y-screen-shake') {
+        range.addEventListener('input', () => setScreenShakeIntensity(Number(range.value)))
+      }
       return range
     }
     if (c.kind === 'toggle') {
@@ -665,6 +764,36 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       if (spec.enabled && spec.id === 'gp-leaderboard-submit') {
         cb.addEventListener('change', () => {
           setLeaderboardSubmit(cb.checked)
+        })
+      }
+      if (spec.enabled && spec.id === 'a11y-reduced-flash') {
+        cb.addEventListener('change', () => {
+          setReducedFlash(cb.checked)
+        })
+      }
+      if (spec.enabled && spec.id === 'a11y-large-text') {
+        cb.addEventListener('change', () => {
+          setLargeText(cb.checked)
+        })
+      }
+      if (spec.enabled && spec.id === 'a11y-high-contrast') {
+        cb.addEventListener('change', () => {
+          setHighContrast(cb.checked)
+        })
+      }
+      if (spec.enabled && spec.id === 'a11y-reduced-motion') {
+        cb.addEventListener('change', () => {
+          setReducedMotion(cb.checked)
+        })
+      }
+      if (spec.enabled && spec.id === 'a11y-motion-sickness') {
+        cb.addEventListener('change', () => {
+          setMotionSicknessReduction(cb.checked)
+        })
+      }
+      if (spec.enabled && spec.id === 'a11y-subtitles-always') {
+        cb.addEventListener('change', () => {
+          setSubtitlesAlwaysOn(cb.checked)
         })
       }
       return cb
@@ -731,6 +860,12 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
         sel.addEventListener('change', () => {
           const v = WAVE_LINE_VALUE[sel.value]
           if (v) setWaveLineIntensity(v)
+        })
+      }
+      if (spec.enabled && spec.id === 'a11y-colorblind') {
+        sel.addEventListener('change', () => {
+          const v = COLORBLIND_VALUE[sel.value]
+          if (v) setColorblindMode(v)
         })
       }
       return sel

@@ -15,6 +15,7 @@
  * mis-coerced.
  */
 
+import type { ColorblindMode } from './accessibility/palettes'
 import {
   cloneGamepadBindings,
   cloneKeyboardBindings,
@@ -26,7 +27,14 @@ import {
   parseKeyboardBindings,
 } from './input/bindings'
 
-const STORAGE_KEY = 'hoverbike.playerSettings.v1'
+// Bumped to v2 with the M-Step-8 accessibility fields. The load path
+// remains tolerant — old v1 blobs would simply be ignored at the key
+// level (different key), letting defaults win. If users hand-rolled v1
+// state, they get a one-time reset to defaults which is fine for a
+// pre-release build.
+const STORAGE_KEY = 'hoverbike.playerSettings.v2'
+
+export type { ColorblindMode }
 
 /** Wave-pump prompt intensity — see the work-breakdown for the
  *  definition-of-done convention.
@@ -126,6 +134,40 @@ export type PlayerSettings = {
    *  Settings → Leaderboard handle row prompts the player to pick a
    *  real one. */
   leaderboardHandle: string
+  /** Accessibility — colorblind-aware HUD palette swap. The 'off'
+   *  default preserves the current ship colors; the three named modes
+   *  switch into hand-picked safe palettes from
+   *  `accessibility/palettes.ts`. Affects the minimap dot colors today;
+   *  CSS rules in `index.html` also pick up via `body[data-cb=…]`. */
+  colorblindMode: ColorblindMode
+  /** Accessibility — dampens HUD flash effects (wave-pump pulse,
+   *  countdown pop, anti-grav glow). CSS rule in `index.html` kills
+   *  the relevant `animation` properties via `body[data-reduced-flash=1]`. */
+  reducedFlash: boolean
+  /** Accessibility — scales HUD font sizes by 1.25× via a CSS rule
+   *  driven by `body[data-large-text=1]`. */
+  largeText: boolean
+  /** Accessibility — forces opaque HUD shells + white text via a CSS
+   *  rule driven by `body[data-high-contrast=1]`. Trades aesthetic for
+   *  maximum legibility against any background. */
+  highContrast: boolean
+  /** Accessibility — forces the prefers-reduced-motion rules ON
+   *  regardless of the OS setting. Useful for users on systems that
+   *  don't expose the preference, or who want it for the game only. */
+  reducedMotion: boolean
+  /** Accessibility — dampens chase-cam roll + anti-grav inversion. A
+   *  separate-but-related knob to `antiGravCameraIntensity`; render
+   *  systems multiply their roll output by 0.5 when this is on. */
+  motionSicknessReduction: boolean
+  /** Accessibility — scalar in `[0..1]` multiplied into any screen
+   *  shake amount (HUD shake, camera kick). `1.0` keeps the current
+   *  feel; `0` disables shake entirely. */
+  screenShakeIntensity: number
+  /** Accessibility — keep the tutorial subtitle line visible during
+   *  any captioned cue, not just during the tutorial flow. Layered
+   *  on top of `tutorialSubtitles`, which controls *only* the
+   *  tutorial-mode hint chyron. */
+  subtitlesAlwaysOn: boolean
 }
 
 export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
@@ -148,6 +190,17 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   invertCameraY: false,
   leaderboardSubmit: true,
   leaderboardHandle: '',
+  // Accessibility defaults all preserve the current ship behavior so
+  // shipping this PR is a pure add — no user sees a behavior change
+  // until they opt in via the new tab.
+  colorblindMode: 'off',
+  reducedFlash: false,
+  largeText: false,
+  highContrast: false,
+  reducedMotion: false,
+  motionSicknessReduction: false,
+  screenShakeIntensity: 1.0,
+  subtitlesAlwaysOn: false,
 })
 
 /** Live, mutable copy. Consumers read this object every frame — no
@@ -165,6 +218,7 @@ const VALID_WAVE_PUMP_INTENSITY: WavePumpIntensity[] = ['full', 'subtle', 'off']
 const VALID_AI_DIFFICULTY: AIDifficulty[] = ['casual', 'standard', 'hard']
 const VALID_ANTI_GRAV_CAMERA: AntiGravCameraIntensity[] = ['full', 'reduced', 'off']
 const VALID_WAVE_LINE_INTENSITY: WaveLineIntensity[] = ['full', 'subtle', 'off']
+const VALID_COLORBLIND_MODE: ColorblindMode[] = ['off', 'deuteranopia', 'protanopia', 'tritanopia']
 
 /** Roll-follow scalar each intensity step contributes — multiplied by
  *  the live AntiGravOverride weight to get the per-frame camera follow
@@ -258,6 +312,40 @@ export function loadPlayerSettings(): void {
       .slice(0, 12)
     playerSettings.leaderboardHandle = cleaned
   }
+  if (
+    typeof p.colorblindMode === 'string' &&
+    (VALID_COLORBLIND_MODE as string[]).includes(p.colorblindMode)
+  ) {
+    playerSettings.colorblindMode = p.colorblindMode as ColorblindMode
+  }
+  if (typeof p.reducedFlash === 'boolean') {
+    playerSettings.reducedFlash = p.reducedFlash
+  }
+  if (typeof p.largeText === 'boolean') {
+    playerSettings.largeText = p.largeText
+  }
+  if (typeof p.highContrast === 'boolean') {
+    playerSettings.highContrast = p.highContrast
+  }
+  if (typeof p.reducedMotion === 'boolean') {
+    playerSettings.reducedMotion = p.reducedMotion
+  }
+  if (typeof p.motionSicknessReduction === 'boolean') {
+    playerSettings.motionSicknessReduction = p.motionSicknessReduction
+  }
+  if (typeof p.screenShakeIntensity === 'number' && Number.isFinite(p.screenShakeIntensity)) {
+    playerSettings.screenShakeIntensity = Math.max(0, Math.min(1, p.screenShakeIntensity))
+  }
+  if (typeof p.subtitlesAlwaysOn === 'boolean') {
+    playerSettings.subtitlesAlwaysOn = p.subtitlesAlwaysOn
+  }
+  // Apply accessibility settings to the DOM as early as we can after
+  // load. Lazy-imported so `player-settings.ts` stays a tiny
+  // pre-render-init module — the accessibility service pulls in palette
+  // data we don't want hot-loaded for tests that never paint a HUD.
+  void import('./accessibility/accessibility-service').then(({ applyAccessibilityToDom }) => {
+    applyAccessibilityToDom()
+  })
 }
 
 export function savePlayerSettings(): void {
@@ -389,5 +477,69 @@ export function setLeaderboardHandle(raw: string): void {
     .replace(/[^A-Z0-9_-]/g, '')
     .slice(0, 12)
   playerSettings.leaderboardHandle = cleaned
+  savePlayerSettings()
+}
+
+// ─── Accessibility setters ───────────────────────────────────────────
+//
+// Each setter follows the same three-step pattern: mutate the live
+// struct, re-apply the data-attrs to the DOM, notify the pub/sub so
+// canvas-painting HUDs can repaint, then persist. The lazy import keeps
+// `player-settings.ts` cheap to import from boot paths that don't paint.
+
+function applyAndNotifyAccessibility(): void {
+  void import('./accessibility/accessibility-service').then(
+    ({ applyAccessibilityToDom, notifyAccessibilityChange }) => {
+      applyAccessibilityToDom()
+      notifyAccessibilityChange()
+    },
+  )
+}
+
+export function setColorblindMode(mode: ColorblindMode): void {
+  playerSettings.colorblindMode = mode
+  applyAndNotifyAccessibility()
+  savePlayerSettings()
+}
+
+export function setReducedFlash(on: boolean): void {
+  playerSettings.reducedFlash = on
+  applyAndNotifyAccessibility()
+  savePlayerSettings()
+}
+
+export function setLargeText(on: boolean): void {
+  playerSettings.largeText = on
+  applyAndNotifyAccessibility()
+  savePlayerSettings()
+}
+
+export function setHighContrast(on: boolean): void {
+  playerSettings.highContrast = on
+  applyAndNotifyAccessibility()
+  savePlayerSettings()
+}
+
+export function setReducedMotion(on: boolean): void {
+  playerSettings.reducedMotion = on
+  applyAndNotifyAccessibility()
+  savePlayerSettings()
+}
+
+export function setMotionSicknessReduction(on: boolean): void {
+  playerSettings.motionSicknessReduction = on
+  applyAndNotifyAccessibility()
+  savePlayerSettings()
+}
+
+export function setScreenShakeIntensity(v: number): void {
+  playerSettings.screenShakeIntensity = Math.max(0, Math.min(1, v))
+  applyAndNotifyAccessibility()
+  savePlayerSettings()
+}
+
+export function setSubtitlesAlwaysOn(on: boolean): void {
+  playerSettings.subtitlesAlwaysOn = on
+  applyAndNotifyAccessibility()
   savePlayerSettings()
 }

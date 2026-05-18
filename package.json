@@ -45,6 +45,7 @@
     "@types/node": "^25.7.0",
     "@types/three": "^0.184.1",
     "ajv": "^8.17.1",
+    "jsdom": "^29.1.1",
     "partykit": "^0.0.115",
     "typescript": "^6.0.3",
     "vite": "^8.0.12",
