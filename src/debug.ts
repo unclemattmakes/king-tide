@@ -1,5 +1,6 @@
 import { addComponent, hasComponent, query } from 'bitecs'
 import { emptyIntent, type Intent, snapshotGamepads } from './engine/input'
+import type { PerfStats } from './engine/perf-recorder'
 import type { RenderBackend } from './engine/render/renderer'
 import type { SimWorld } from './engine/sim/ecs/world'
 import type { PhysicsWorld } from './engine/sim/physics/rapier'
@@ -85,6 +86,28 @@ export type HoverDebug = {
    *  boot. Use for verifying the wire-format round-trip across peers in a
    *  two-tab dev session. Read-only. */
   net?: NetDebugProbe
+  /** Step 8 perf-recorder + HUD bridge. Attached only in dev / test mode,
+   *  installed once `startGameLoop` has constructed the recorder + HUD.
+   *  Lets the e2e harness and Claude debug sessions read the rolling
+   *  frame-time window without poking at the HUD DOM directly. */
+  perf?: PerfDebugApi
+}
+
+export type PerfDebugApi = {
+  /** Current rolling-window stats (≤10s @ 60 fps). Computed on demand. */
+  stats(): PerfStats
+  /** CSV string of every sample currently in the ring. Header included. */
+  csv(): string
+  /** Save the CSV to disk via the same Blob + anchor click pattern used
+   *  by `downloadReplay`. Defaults to a timestamped filename. */
+  downloadCsv(filename?: string): void
+  /** Wipe the ring back to empty — useful in e2e tests when you want a
+   *  clean window after a settle-in period. */
+  resetWindow(): void
+  /** Toggle the perf overlay's visibility. Returns the new state. */
+  toggleHud(): boolean
+  /** Current overlay visibility. */
+  isHudOn(): boolean
 }
 
 export type NetDebugProbe = {
@@ -355,4 +378,53 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     window.__hover = api
   }
   return api
+}
+
+/**
+ * Step 8 — late-bind the perf API onto `window.__hover.perf`.
+ *
+ * `installDebugApi` runs in main.ts BEFORE the rAF loop is constructed,
+ * but the perf-recorder + HUD live inside `startGameLoop`. So the loop
+ * calls this helper once it's built them to graft the surface area onto
+ * the live debug bridge. Gated to dev / test mode + the determinism
+ * harness (same gate as `__hover` itself) — production bundles get
+ * nothing attached. The `downloadCsv` wrapper is built here because the
+ * Blob+anchor pattern is DOM-specific and we want the game-loop code
+ * to stay focused on plumbing.
+ */
+export type PerfDebugInstall = {
+  stats: () => PerfStats
+  csv: () => string
+  resetWindow: () => void
+  toggleHud: () => boolean
+  isHudOn: () => boolean
+}
+
+export function installPerfDebugApi(install: PerfDebugInstall): void {
+  // Determinism mode publishes a curated __hover in prod, but the perf
+  // recorder isn't part of that contract — gate on dev/test only.
+  if (!import.meta.env.DEV && import.meta.env.MODE !== 'test') return
+  const hover = window.__hover
+  if (!hover) return
+  hover.perf = {
+    stats: install.stats,
+    csv: install.csv,
+    resetWindow: install.resetWindow,
+    toggleHud: install.toggleHud,
+    isHudOn: install.isHudOn,
+    downloadCsv: (filename?: string) => {
+      const text = install.csv()
+      const blob = new Blob([text], { type: 'text/csv' })
+      const url = URL.createObjectURL(blob)
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const name = filename ?? `hoverbike-perf-${stamp}.csv`
+      const a = document.createElement('a')
+      a.href = url
+      a.download = name
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    },
+  }
 }
