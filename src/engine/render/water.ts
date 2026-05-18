@@ -446,6 +446,113 @@ function getWaveDetailNormalTexture(mode: 'procedural' | 'fft'): THREE.DataTextu
   return sharedWaveDetailNormalProcedural
 }
 
+// ---------------------------------------------------------------------------
+// Procedural foam-bubble texture.
+//
+// The SoT SIGGRAPH 2018 paper credits its foam look to "blending the foam
+// mask with artist-authored textures." We don't have authored foam art,
+// so this builder bakes a tileable two-octave Worley-noise field that
+// reads as overlapping bubble clusters. Sampled per-pixel by the foam
+// composition; multiplies into `foamMask` so every foam source (wake,
+// bow spray, shoreline surf, breaking-wave fold-foam) inherits the same
+// bubble structure for free, breaking up the previous smooth-blob foam
+// edges into a scrubby cluster look.
+//
+// Two octaves at different cell densities (16² big bubbles + 32² fine
+// bubbles), composited via summed quadratic-falloff distance fields per
+// cell. Toroidal cell-index wrap keeps the texture tileable under
+// REPEAT sampling. Output is a grayscale R8 packed into RGBA8 (the
+// shader reads the .r channel only).
+// ---------------------------------------------------------------------------
+
+let sharedFoamBubbleTexture: THREE.DataTexture | null = null
+
+function buildFoamBubbleTexture(): THREE.DataTexture {
+  const N = 512
+  const data = new Uint8Array(N * N * 4)
+
+  // Deterministic per-cell hash → jittered cell-center offset in [0,1]².
+  function hash2(cx: number, cy: number, salt: number): [number, number] {
+    const s1 = Math.sin(cx * 12.9898 + cy * 78.233 + salt * 53.123) * 43758.5453
+    const s2 = Math.sin(cx * 39.346 + cy * 11.135 + salt * 17.421) * 91234.7891
+    return [s1 - Math.floor(s1), s2 - Math.floor(s2)]
+  }
+
+  type Octave = { cells: number; weight: number; salt: number; bubbleRadius: number }
+  const octaves: Octave[] = [
+    // Big bubbles — 16 cells × 16 cells across the 512-pixel tile so each
+    // bubble is ~32 px ≈ 1/16 of tile. Reads as the "main bubble cluster"
+    // pattern under typical sampling.
+    { cells: 16, weight: 0.7, salt: 0, bubbleRadius: 0.55 },
+    // Fine bubbles — 32 cells, ~16-px bubbles. Adds the small-bubble
+    // grain that catches light when sampled close to the camera.
+    { cells: 32, weight: 0.4, salt: 1, bubbleRadius: 0.50 },
+  ]
+
+  for (let py = 0; py < N; py++) {
+    for (let px = 0; px < N; px++) {
+      let totalIntensity = 0
+
+      for (const oct of octaves) {
+        const cellSize = N / oct.cells
+        const cx = Math.floor(px / cellSize)
+        const cy = Math.floor(py / cellSize)
+
+        let minDistNorm = Number.POSITIVE_INFINITY
+        // 3×3 neighbor cells (with toroidal wrap) so the bubble field is
+        // seamless across the tile edge.
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const ncx = ((cx + dx) % oct.cells + oct.cells) % oct.cells
+            const ncy = ((cy + dy) % oct.cells + oct.cells) % oct.cells
+            const [hx, hy] = hash2(ncx, ncy, oct.salt)
+            const centerPx = (cx + dx + hx) * cellSize
+            const centerPy = (cy + dy + hy) * cellSize
+            const ddx = px - centerPx
+            const ddy = py - centerPy
+            const distNorm = Math.hypot(ddx, ddy) / cellSize
+            if (distNorm < minDistNorm) minDistNorm = distNorm
+          }
+        }
+
+        // Bubble: bright at center, falls off to zero by bubbleRadius.
+        // Quadratic falloff (`x²`) gives a soft inner highlight + crisp
+        // edge that reads like the bright dome of an air bubble rather
+        // than a uniform spot.
+        const f = Math.max(0, 1 - minDistNorm / oct.bubbleRadius)
+        totalIntensity += oct.weight * f * f
+      }
+
+      // Slight gamma lift so the texture's perceptual range hits [0,1].
+      const v = Math.min(1, totalIntensity ** 0.85)
+      const byte = Math.round(v * 255)
+      const idx = (py * N + px) * 4
+      data[idx + 0] = byte
+      data[idx + 1] = byte
+      data[idx + 2] = byte
+      data[idx + 3] = 255
+    }
+  }
+
+  const tex = new THREE.DataTexture(data, N, N, THREE.RGBAFormat, THREE.UnsignedByteType)
+  tex.name = 'water:foamBubbles'
+  tex.wrapS = THREE.RepeatWrapping
+  tex.wrapT = THREE.RepeatWrapping
+  tex.magFilter = THREE.LinearFilter
+  tex.minFilter = THREE.LinearMipmapLinearFilter
+  tex.generateMipmaps = true
+  tex.anisotropy = 4
+  tex.needsUpdate = true
+  return tex
+}
+
+function getFoamBubbleTexture(): THREE.DataTexture {
+  if (!sharedFoamBubbleTexture) {
+    sharedFoamBubbleTexture = buildFoamBubbleTexture()
+  }
+  return sharedFoamBubbleTexture
+}
+
 /**
  * GPU-shader water built on Three.js's TSL node pipeline.
  *
@@ -2417,11 +2524,30 @@ export function createWaterMesh(
   // peak at the water-line can reach pure white. The new `shorelineSurf`
   // (depth-driven pulsing breakers) folds in via max so its bright
   // crest-strike pulses can paint over the static intersection band.
-  const foamMask = clamp(
+  const foamMaskRaw = clamp(
     max(max(waveFoam.add(bikeFoam), intersectionFoam), shorelineSurf),
     float(0),
     float(1),
   )
+  // Foam bubble texture — the SoT "authored bubble" layer. Sampled at
+  // world XZ so bubbles read as a property of the surface (they don't
+  // move with the camera) but with a slow wind-aligned scroll so the
+  // foam visually drifts with the air-foam buffer's advection. 4 m tile
+  // → bubbles read ~25-50 cm in race-camera space. The R channel holds
+  // the Worley-cluster pattern; G/B/A are unused.
+  //
+  // The bubble pattern modulates `foamMask` so every foam source —
+  // wake, bow spray, shoreline surf, breaking-wave fold-foam — inherits
+  // bubble structure. mix(0.35, 1.0, bubble) keeps strong-foam zones
+  // bright while breaking dim-foam edges into discrete bubble blobs.
+  const foamBubbleTex = getFoamBubbleTexture()
+  const foamBubbleUV = positionWorld.xz
+    .div(float(4.0))
+    .add(vec2(tNode.mul(float(0.012)), tNode.mul(float(-0.008))))
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+  const foamBubbleSample = texture(foamBubbleTex, foamBubbleUV) as any
+  const foamBubblePattern = foamBubbleSample.r
+  const foamMask = foamMaskRaw.mul(mix(float(0.35), float(1.0), foamBubblePattern))
   // Slightly warmer / brighter than v2's (0.92, 0.96, 1.0). Real surf
   // foam reads near-white-with-a-warm-tilt under sunlight; the previous
   // cool tint was getting tugged blue by the deep-water albedo it sat on
