@@ -101,6 +101,18 @@ export type PlayerSettings = {
    *  the camera **down** (flight-stick convention). Default false keeps
    *  the existing "push up = look up" feel. */
   invertCameraY: boolean
+  /** Time Trial → local leaderboard submission. When on, a TT PB
+   *  writes an entry to the per-track top-N board (see
+   *  `leaderboard-state.ts`). When off, ghosts still save but no
+   *  leaderboard entry is created. Defaults on — the surface is the
+   *  Gameplay → "Submit times to leaderboard" toggle. */
+  leaderboardSubmit: boolean
+  /** Free-form alphanumeric handle (uppercased, ≤12 chars) used when a
+   *  TT PB submits to the local leaderboard. Empty means "no handle
+   *  set yet"; the writer falls back to `'YOU'` for the entry but the
+   *  Settings → Leaderboard handle row prompts the player to pick a
+   *  real one. */
+  leaderboardHandle: string
 }
 
 export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
@@ -120,6 +132,8 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   gamepadDeadzone: 0.12,
   gamepadSensitivity: 1.0,
   invertCameraY: false,
+  leaderboardSubmit: true,
+  leaderboardHandle: '',
 })
 
 /** Live, mutable copy. Consumers read this object every frame — no
@@ -210,6 +224,18 @@ export function loadPlayerSettings(): void {
   }
   if (typeof p.invertCameraY === 'boolean') {
     playerSettings.invertCameraY = p.invertCameraY
+  }
+  if (typeof p.leaderboardSubmit === 'boolean') {
+    playerSettings.leaderboardSubmit = p.leaderboardSubmit
+  }
+  if (typeof p.leaderboardHandle === 'string') {
+    // Re-normalize at load so a hand-edited blob can't smuggle in
+    // forbidden characters or oversize strings.
+    const cleaned = p.leaderboardHandle
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, '')
+      .slice(0, 12)
+    playerSettings.leaderboardHandle = cleaned
   }
 }
 
@@ -319,5 +345,23 @@ export function setGamepadSensitivity(v: number): void {
 
 export function setInvertCameraY(on: boolean): void {
   playerSettings.invertCameraY = on
+  savePlayerSettings()
+}
+
+export function setLeaderboardSubmit(on: boolean): void {
+  playerSettings.leaderboardSubmit = on
+  savePlayerSettings()
+}
+
+/** Persist a normalized handle. Empty (or only-invalid) input clears
+ *  the handle back to "" so the submitter falls through to its 'YOU'
+ *  fallback — matches the settings input's behaviour when the player
+ *  blanks the row. */
+export function setLeaderboardHandle(raw: string): void {
+  const cleaned = raw
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '')
+    .slice(0, 12)
+  playerSettings.leaderboardHandle = cleaned
   savePlayerSettings()
 }
