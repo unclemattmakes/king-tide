@@ -215,6 +215,13 @@ export type WaterMesh = {
      *  ridges elongated in the wave-travel direction instead of
      *  short across-axis pinches. */
     setPinchDirection(deg: number): void
+    /** Wave-field bearing in degrees, -180..180. Rotates the WHOLE
+     *  swell train globally so the user can re-aim the wave
+     *  direction (e.g. "waves should be coming toward shore").
+     *  Render + CPU buoyancy stay locked — the bearing rotates both
+     *  the GPU sample coords and the CPU sampleSurface/sampleHeight
+     *  via the shared `field.waveBearing` scalar. */
+    setWaveBearing(deg: number): void
     /** Render the wave geometry as wireframe. Useful for tuning wave /
      *  wake amplitudes against the actual displacement. */
     setWireframe(on: boolean): void
@@ -272,6 +279,8 @@ export type WaterDebugDefaults = {
   streakElongation: number
   /** Gerstner pinch direction in degrees, 0..90. */
   pinchDirection: number
+  /** Wave-field bearing in degrees, -180..180. */
+  waveBearing: number
   wireframe: boolean
 }
 
@@ -944,6 +953,22 @@ export function createWaterMesh(
   const pinchCosUniform = uniform(Math.cos((PINCH_DIRECTION_DEFAULT * Math.PI) / 180))
   const pinchSinUniform = uniform(Math.sin((PINCH_DIRECTION_DEFAULT * Math.PI) / 180))
 
+  // Wave bearing (degrees, -180..180). Rotates the WHOLE wave field's
+  // travel direction in world XZ so the user can re-aim the swell
+  // train (e.g. "waves should be coming toward the island"). Applied
+  // as a 2D rotation on the sample (x, z) before the phase calc —
+  // mathematically equivalent to rotating every wave's (dirX, dirZ)
+  // by +bearing without mutating the per-wave consts. Slopes that
+  // come out of the phase calc are in the ROTATED frame and rotated
+  // back to world XZ via the inverse rotation before being used by
+  // the normal / shading pipeline (see `worldDydx`, `worldDydz`
+  // below). CPU buoyancy mirrors this in `wave-field.ts::sampleSurface`
+  // so render and physics stay locked.
+  const WAVE_BEARING_DEFAULT = 0
+  const waveBearingDegUniform = uniform(WAVE_BEARING_DEFAULT)
+  const waveBearingCosUniform = uniform(Math.cos((WAVE_BEARING_DEFAULT * Math.PI) / 180))
+  const waveBearingSinUniform = uniform(Math.sin((WAVE_BEARING_DEFAULT * Math.PI) / 180))
+
   // ---- Tunable scalars (water debug menu) -------------------------------
   // Each is a uniform so the menu can scrub it live without rebuilding the
   // material. Defaults match the values the v2 shader was authored against;
@@ -1127,23 +1152,36 @@ export function createWaterMesh(
     const xN = x as ReturnType<typeof float>
     const zN = z as ReturnType<typeof float>
     const tN = t as ReturnType<typeof float>
+    // Apply the global wave-bearing rotation to the sample coords —
+    // equivalent to rotating every wave's (dirX, dirZ) by +bearing.
+    // Slopes accumulate in the rotated frame and get rotated back to
+    // world frame after the per-wave loop (chain rule).
+    const xRot = xN.mul(waveBearingCosUniform).add(zN.mul(waveBearingSinUniform))
+    const zRot = xN.mul(waveBearingSinUniform.negate()).add(zN.mul(waveBearingCosUniform))
     const y = float(0).toVar()
-    const dydx = float(0).toVar()
-    const dydz = float(0).toVar()
+    const rotDydx = float(0).toVar()
+    const rotDydz = float(0).toVar()
     for (let i = 0; i < waveConsts.length; i++) {
       const w = waveConsts[i]!
       const ampScale = SWELL_INDICES.has(i) ? swellScaleUniform : chopScaleUniform
       const phase = float(w.k * w.dirX)
-        .mul(xN)
-        .add(float(w.k * w.dirZ).mul(zN))
+        .mul(xRot)
+        .add(float(w.k * w.dirZ).mul(zRot))
         .sub(tN.mul(w.omega))
         .add(float(w.phase))
       const s = sin(phase)
       const c = cos(phase)
       y.addAssign(s.mul(w.amp).mul(ampScale))
-      dydx.addAssign(c.mul(w.amp * w.k * w.dirX).mul(ampScale))
-      dydz.addAssign(c.mul(w.amp * w.k * w.dirZ).mul(ampScale))
+      rotDydx.addAssign(c.mul(w.amp * w.k * w.dirX).mul(ampScale))
+      rotDydz.addAssign(c.mul(w.amp * w.k * w.dirZ).mul(ampScale))
     }
+    // Rotate the rotated-frame slopes back to world XZ.
+    const dydx = rotDydx
+      .mul(waveBearingCosUniform)
+      .sub(rotDydz.mul(waveBearingSinUniform))
+    const dydz = rotDydx
+      .mul(waveBearingSinUniform)
+      .add(rotDydz.mul(waveBearingCosUniform))
     return vec3(y, dydx, dydz)
   })
 
@@ -1159,15 +1197,21 @@ export function createWaterMesh(
     const xN = x as ReturnType<typeof float>
     const zN = z as ReturnType<typeof float>
     const tN = t as ReturnType<typeof float>
-    const dx = float(0).toVar()
-    const dz = float(0).toVar()
+    // Bearing-rotated sample coords (same convention as gerstnerHeight).
+    const xRot = xN.mul(waveBearingCosUniform).add(zN.mul(waveBearingSinUniform))
+    const zRot = xN.mul(waveBearingSinUniform.negate()).add(zN.mul(waveBearingCosUniform))
+    // dx, dz accumulate in the rotated frame; we rotate back to world
+    // XZ at the end so the horizontal displacement applied to the
+    // vertex position uses world coordinates.
+    const dxRot = float(0).toVar()
+    const dzRot = float(0).toVar()
     const qSum = float(0).toVar()
     for (let i = 0; i < waveConsts.length; i++) {
       const w = waveConsts[i]!
       const ampScale = SWELL_INDICES.has(i) ? swellScaleUniform : chopScaleUniform
       const phase = float(w.k * w.dirX)
-        .mul(xN)
-        .add(float(w.k * w.dirZ).mul(zN))
+        .mul(xRot)
+        .add(float(w.k * w.dirZ).mul(zRot))
         .sub(tN.mul(w.omega))
         .add(float(w.phase))
       const s = sin(phase)
@@ -1194,14 +1238,14 @@ export function createWaterMesh(
       const rotDirZ = float(w.dirX)
         .mul(pinchSinUniform)
         .add(float(w.dirZ).mul(pinchCosUniform))
-      dx.addAssign(
+      dxRot.addAssign(
         qScaled
           .mul(rotDirX)
           .mul(float(w.amp))
           .mul(c)
           .mul(ampScale),
       )
-      dz.addAssign(
+      dzRot.addAssign(
         qScaled
           .mul(rotDirZ)
           .mul(float(w.amp))
@@ -1216,6 +1260,15 @@ export function createWaterMesh(
           .mul(ampScale),
       )
     }
+    // Rotate the rotated-frame horizontal displacement back to
+    // world XZ so the vertex shader can add it to positionLocal.xz
+    // in world coords.
+    const dx = dxRot
+      .mul(waveBearingCosUniform)
+      .sub(dzRot.mul(waveBearingSinUniform))
+    const dz = dxRot
+      .mul(waveBearingSinUniform)
+      .add(dzRot.mul(waveBearingCosUniform))
     return vec3(dx, dz, qSum)
   })
 
@@ -2888,6 +2941,7 @@ export function createWaterMesh(
     sunStreakStrength: SUN_STREAK_STRENGTH_DEFAULT,
     streakElongation: STREAK_ELONGATION_DEFAULT,
     pinchDirection: PINCH_DIRECTION_DEFAULT,
+    waveBearing: WAVE_BEARING_DEFAULT,
     wireframe: wireFlag,
   }
   // Orchestrates a live spectrum rebuild: builds the new Phillips
@@ -3040,6 +3094,20 @@ export function createWaterMesh(
       const rad = (v * Math.PI) / 180
       pinchCosUniform.value = Math.cos(rad)
       pinchSinUniform.value = Math.sin(rad)
+    },
+    setWaveBearing(deg) {
+      // -180..180° — rotate the whole wave field. Updates the
+      // CPU-side field.waveBearing (so sampleSurface/sampleHeight
+      // see it for buoyancy) AND the GPU uniforms (so the vertex
+      // shader sees it for the visible mesh). The two paths
+      // recompute their rotations from the same scalar, so they
+      // stay locked.
+      const v = clamp01(deg, -180, 180)
+      waveBearingDegUniform.value = v
+      const rad = (v * Math.PI) / 180
+      waveBearingCosUniform.value = Math.cos(rad)
+      waveBearingSinUniform.value = Math.sin(rad)
+      field.waveBearing = rad
     },
     setWireframe(on) {
       mat.wireframe = !!on
