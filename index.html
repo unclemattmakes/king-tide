@@ -1583,6 +1583,74 @@
         0%, 100% { transform: scale(1); }
         50%      { transform: scale(1.18); }
       }
+      /* Tutorial framework — large top-centered prompt with mechanic
+         name + one-line hint. Slides in when a new beat arms, flashes
+         on clear, fades out at script end. The "subtitles" setting
+         hides the hint text but keeps the title chyron + clear flash
+         (the chyron is gameplay-critical, the hint is the read-along
+         layer). */
+      #hud-tutorial {
+        top: 86px; left: 50%; transform: translateX(-50%);
+        min-width: 380px; max-width: 80vw;
+      }
+      #hud-tutorial .tut-shell {
+        display: flex; flex-direction: column; gap: 4px;
+        padding: 10px 22px 12px;
+        background: linear-gradient(180deg, rgba(8,18,32,0.92), rgba(4,10,20,0.92));
+        border: 1px solid rgba(255, 213, 74, 0.4);
+        border-left: 3px solid var(--bc-yellow);
+        box-shadow:
+          0 0 22px rgba(255,213,74,0.18),
+          0 8px 24px rgba(0,0,0,0.5);
+        text-align: center;
+        opacity: 0;
+        transform: translate(-50%, -8px) translateX(50%);
+        transition:
+          opacity 240ms var(--ease-out),
+          transform 240ms var(--ease-out);
+      }
+      #hud-tutorial .tut-shell.tut-active {
+        opacity: 1;
+        transform: translate(-50%, 0) translateX(50%);
+      }
+      #hud-tutorial .tut-meta {
+        font-family: var(--bc-font-display);
+        font-size: 11px; letter-spacing: 0.32em;
+        color: var(--bc-ink-faint);
+      }
+      #hud-tutorial .tut-title {
+        font-family: var(--bc-font-display);
+        font-size: 30px; letter-spacing: 0.18em;
+        color: var(--bc-yellow);
+        line-height: 1.1;
+      }
+      #hud-tutorial .tut-hint {
+        font-family: var(--bc-font-sans);
+        font-size: 14px;
+        color: var(--bc-ink);
+        opacity: 0.92;
+      }
+      #hud-tutorial .tut-hint[hidden] { display: none; }
+      /* Clear flash — overlays the shell with a green chord briefly. */
+      #hud-tutorial .tut-shell.tut-cleared {
+        border-color: rgba(56, 224, 127, 0.7);
+        border-left-color: var(--bc-green);
+        box-shadow:
+          0 0 26px rgba(56,224,127,0.4),
+          0 8px 24px rgba(0,0,0,0.5);
+      }
+      #hud-tutorial .tut-shell.tut-cleared .tut-title {
+        color: var(--bc-green);
+        animation: tut-pop 360ms var(--ease-out);
+      }
+      #hud-tutorial .tut-finish .tut-title {
+        color: var(--bc-green);
+      }
+      @keyframes tut-pop {
+        0%   { transform: scale(0.92); }
+        40%  { transform: scale(1.08); }
+        100% { transform: scale(1); }
+      }
       /* Wave-line shimmer overlay anchor — full-canvas; actual paint
          lives inside the WebGPU layer once the system lands. */
       #hud-wave-line { inset: 0; }
@@ -1819,6 +1887,7 @@
     <div id="hud-scaffold" aria-hidden="true">
       <div id="hud-wave-pump" class="hud-slot" data-system="wave-pump" hidden></div>
       <div id="hud-anti-grav" class="hud-slot" data-system="anti-grav" hidden></div>
+      <div id="hud-tutorial" class="hud-slot" data-system="tutorial" hidden></div>
       <div id="hud-wave-line" class="hud-slot" data-system="wave-line" hidden></div>
       <div id="hud-cup-points" class="hud-slot" data-system="cup-points" hidden></div>
       <div id="hud-positions" class="hud-slot" data-system="positions" hidden></div>

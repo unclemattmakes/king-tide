@@ -54,6 +54,14 @@ export type PlayerSettings = {
    *  catches up after falling behind. */
   rubberBandAssist: boolean
   antiGravCameraIntensity: AntiGravCameraIntensity
+  /** Subtitles for the tutorial framework's prompt callouts.
+   *  Affects only the tutorial HUD widget — race callouts and pump
+   *  feedback are unaffected. */
+  tutorialSubtitles: boolean
+  /** Latch — flips to true the first time the player completes the
+   *  tutorial cleanly. Cheap onboarding flag the menu/settings reads to
+   *  show "REPLAY TUTORIAL" instead of "RUN TUTORIAL". */
+  tutorialCompleted: boolean
 }
 
 export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
@@ -61,6 +69,8 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   aiDifficulty: 'standard',
   rubberBandAssist: true,
   antiGravCameraIntensity: 'full',
+  tutorialSubtitles: true,
+  tutorialCompleted: false,
 })
 
 /** Live, mutable copy. Consumers read this object every frame — no
@@ -118,6 +128,12 @@ export function loadPlayerSettings(): void {
   ) {
     playerSettings.antiGravCameraIntensity = p.antiGravCameraIntensity as AntiGravCameraIntensity
   }
+  if (typeof p.tutorialSubtitles === 'boolean') {
+    playerSettings.tutorialSubtitles = p.tutorialSubtitles
+  }
+  if (typeof p.tutorialCompleted === 'boolean') {
+    playerSettings.tutorialCompleted = p.tutorialCompleted
+  }
 }
 
 export function savePlayerSettings(): void {
@@ -145,5 +161,15 @@ export function setRubberBandAssist(on: boolean): void {
 
 export function setAntiGravCameraIntensity(v: AntiGravCameraIntensity): void {
   playerSettings.antiGravCameraIntensity = v
+  savePlayerSettings()
+}
+
+export function setTutorialSubtitles(on: boolean): void {
+  playerSettings.tutorialSubtitles = on
+  savePlayerSettings()
+}
+
+export function markTutorialCompleted(): void {
+  playerSettings.tutorialCompleted = true
   savePlayerSettings()
 }

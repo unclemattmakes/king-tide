@@ -29,8 +29,15 @@ import {
   encodeInputFrameInto,
   INPUT_FRAME_WIRE_BYTES,
 } from '@/engine/net/input-frame'
-import { ANTI_GRAV_CAMERA_SCALAR, playerSettings } from '@/engine/player-settings'
+import {
+  ANTI_GRAV_CAMERA_SCALAR,
+  markTutorialCompleted,
+  playerSettings,
+} from '@/engine/player-settings'
 import { createAntiGravHud } from '@/engine/render/anti-grav-hud'
+import { createTutorialHud } from '@/engine/render/tutorial-hud'
+import { createTutorialDirector } from '@/engine/tutorial/tutorial-director'
+import { DEFAULT_TUTORIAL_SCRIPT } from '@/engine/tutorial/tutorial-script'
 import type { ChaseCamera } from '@/engine/render/camera'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
@@ -155,6 +162,11 @@ export interface GameLoopOpts {
   hud: GameLoopHud
   /** Called when the player crosses the finish line. */
   onFinish: () => void
+  /** Tutorial mode flag — when true, the loop spins up the tutorial
+   *  director + HUD widget alongside the live race. The framework is
+   *  track-agnostic (the default script clears on generic
+   *  throttle/look/pump/anti-grav signals) so any track works. */
+  tutorialMode?: boolean
 }
 
 /**
@@ -199,6 +211,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     control,
     hud,
     onFinish,
+    tutorialMode,
   } = opts
 
   let finishShown = false
@@ -223,6 +236,32 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // camera's anti-grav follow weight piggybacks on the same per-frame
   // read so the two surfaces stay in lockstep.
   const antiGravHud = createAntiGravHud()
+
+  // Tutorial framework — spun up only when the caller passed
+  // `tutorialMode: true`. The HUD + director sit in the per-frame
+  // block below; we also notify the director from the wave-pump fire
+  // path so beat 4 ("WAVE PUMP") clears on a real pump event.
+  const tutorialHud = tutorialMode ? createTutorialHud() : null
+  const tutorialDirector = tutorialMode
+    ? createTutorialDirector(DEFAULT_TUTORIAL_SCRIPT, {
+        onBeatArmed: (beat) => {
+          const idx = tutorialDirector?.currentBeatIndex() ?? 0
+          const total = DEFAULT_TUTORIAL_SCRIPT.beats.length
+          tutorialHud?.setBeat({
+            title: beat.title,
+            ...(beat.hint ? { hint: beat.hint } : {}),
+            progressLabel: `BEAT ${idx + 1}/${total}`,
+          })
+        },
+        onBeatCleared: (beat) => {
+          tutorialHud?.flashCleared(beat.clearMessage ?? 'OK')
+        },
+        onCompleted: () => {
+          tutorialHud?.finish(DEFAULT_TUTORIAL_SCRIPT.finishMessage)
+          markTutorialCompleted()
+        },
+      })
+    : null
 
   const tmpPos = new THREE.Vector3()
   const tmpQuat = new THREE.Quaternion()
@@ -390,6 +429,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
       }
     }
 
+    let lastLookMagnitude = 0
     const rbHandle = RBHandleStore.get(playerEid)
     const hover = HoverStateStore.get(playerEid)
     if (rbHandle && hover) {
@@ -401,6 +441,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
         tmpPos.set(t.x, t.y, t.z)
         tmpQuat.set(q.x, q.y, q.z, q.w)
         const look = tickCameraLook(dt)
+        lastLookMagnitude = Math.abs(look.yaw) + Math.abs(look.pitch)
         chase.setOrbit(look.yaw, look.pitch)
         chase.tick(tmpPos, tmpQuat, dt)
         state.playerSnapshot = {
@@ -424,12 +465,30 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // surfaces. The HUD widget ignores the intensity scalar (motion-
     // sickness players still need the affordance signal); only the
     // camera follow opts out at intensity=off.
+    let inAntiGravForTutorial = false
     {
       const override = AntiGravOverrideStore.get(playerEid)
       const w = override?.active ? override.weight : 0
+      inAntiGravForTutorial = override?.active === true && w > 0.05
       antiGravHud.setWeight(w)
       const scalar = ANTI_GRAV_CAMERA_SCALAR[playerSettings.antiGravCameraIntensity]
       chase.setAntiGravFollow(w * scalar)
+    }
+
+    // Tutorial director — advance the script. The "LOOK AROUND" beat
+    // clears once either the mouse drag or the gamepad right-stick
+    // moves the camera-look state away from neutral; we treat any
+    // non-trivial yaw/pitch magnitude as a "touch". Held while paused
+    // (the director pauses with the loop) so the beat timer doesn't
+    // tick away behind the pause menu.
+    if (tutorialDirector && tutorialHud && !control.isPausedForMenu()) {
+      const intent = ControlIntentStore.get(playerEid)
+      if (lastLookMagnitude > 0.05) tutorialDirector.notifyOrbitTouch()
+      tutorialDirector.tick(dt, {
+        playerSpeed: state.playerSnapshot?.speed ?? 0,
+        throttle: Math.max(0, intent?.throttle ?? 0),
+        inAntiGrav: inAntiGravForTutorial,
+      })
     }
 
     // Wave-pump signal — observer reads the player's hover + velocity
@@ -455,6 +514,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
           if (playerSettings.wavePumpIntensity !== 'off') {
             audio.wavePump(pump.strength)
           }
+          tutorialDirector?.notifyPumpEvent()
         }
       }
     }

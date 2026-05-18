@@ -31,6 +31,7 @@ const GAME_SIGNALS = [
   'replay',
   'determinism',
   'calibrate',
+  'tutorial',
 ] as const
 
 /** Lazily create the fixed-position container that hosts the attract-mode
