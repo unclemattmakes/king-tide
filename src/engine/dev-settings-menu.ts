@@ -33,6 +33,7 @@ type NumericKey =
   | 'keyboardSteerRate'
   | 'keyboardThrottleRate'
   | 'keyboardPitchRate'
+  | 'steerReleaseTightness'
 
 type SliderSpec = {
   key: NumericKey
@@ -90,6 +91,16 @@ const SLIDERS: SliderSpec[] = [
     inputId: 'ds-kb-pitch',
     valId: 'ds-kb-pitch-v',
     format: (n) => n.toFixed(1),
+  },
+  {
+    key: 'steerReleaseTightness',
+    inputId: 'ds-steer-tight',
+    valId: 'ds-steer-tight-v',
+    format: (n) => {
+      if (n <= 0.001) return 'Loose'
+      if (n >= 0.999) return 'Snap'
+      return `${Math.round(n * 100)}%`
+    },
   },
 ]
 
