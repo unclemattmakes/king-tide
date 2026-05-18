@@ -168,6 +168,26 @@ export type PlayerSettings = {
    *  on top of `tutorialSubtitles`, which controls *only* the
    *  tutorial-mode hint chyron. */
   subtitlesAlwaysOn: boolean
+  /** Video — frame-rate cap in fps. `0` = Unlimited (rAF gate off, the
+   *  browser paces to vsync). Non-zero values gate the
+   *  `renderer.render()` + perf-HUD work behind a wall-clock deadline;
+   *  fixed-step sim is unaffected so determinism is preserved.
+   *
+   *  The Steam Deck profile (`applyDeckProfile()` in
+   *  `src/engine/steam-deck.ts`) writes `60` here so Gaming-Mode boots
+   *  fit the LCD panel + the ≤12 W battery target without the player
+   *  touching Settings. */
+  framerateCap: number
+  /** Video — render-pixel ratio. Scales the off-screen framebuffer
+   *  relative to the canvas CSS size. `1.0` = native, `0.75` ≈ 56% of
+   *  pixels, `0.5` ≈ 25%. The renderer caps the actual ratio at
+   *  `min(devicePixelRatio, 2)` so this value is a *requested ceiling*
+   *  rather than a guarantee on hi-DPI screens. */
+  pixelRatio: number
+  /** Video — when true the boot path requests fullscreen on the first
+   *  user gesture. Default off; the Steam Deck profile flips it on so
+   *  Gaming Mode launches don't strand the player in a windowed view. */
+  fullscreenPreferred: boolean
 }
 
 export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
@@ -201,6 +221,12 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   motionSicknessReduction: false,
   screenShakeIntensity: 1.0,
   subtitlesAlwaysOn: false,
+  // Video / platform defaults preserve current shipping behaviour. The
+  // Steam Deck profile mutates these via the dedicated setters so a
+  // detection flip lights up the persisted UI rows.
+  framerateCap: 0,
+  pixelRatio: 1.0,
+  fullscreenPreferred: false,
 })
 
 /** Live, mutable copy. Consumers read this object every frame — no
@@ -338,6 +364,18 @@ export function loadPlayerSettings(): void {
   }
   if (typeof p.subtitlesAlwaysOn === 'boolean') {
     playerSettings.subtitlesAlwaysOn = p.subtitlesAlwaysOn
+  }
+  if (typeof p.framerateCap === 'number' && Number.isFinite(p.framerateCap)) {
+    // Clamp to a sane envelope. 0 means Unlimited. Anything outside
+    // [30, 240] is almost certainly a malformed save.
+    const v = p.framerateCap
+    playerSettings.framerateCap = v <= 0 ? 0 : Math.max(30, Math.min(240, v))
+  }
+  if (typeof p.pixelRatio === 'number' && Number.isFinite(p.pixelRatio)) {
+    playerSettings.pixelRatio = Math.max(0.5, Math.min(2.0, p.pixelRatio))
+  }
+  if (typeof p.fullscreenPreferred === 'boolean') {
+    playerSettings.fullscreenPreferred = p.fullscreenPreferred
   }
   // Apply accessibility settings to the DOM as early as we can after
   // load. Lazy-imported so `player-settings.ts` stays a tiny
@@ -541,5 +579,34 @@ export function setScreenShakeIntensity(v: number): void {
 export function setSubtitlesAlwaysOn(on: boolean): void {
   playerSettings.subtitlesAlwaysOn = on
   applyAndNotifyAccessibility()
+  savePlayerSettings()
+}
+
+export function setFramerateCap(cap: number): void {
+  // 0 means Unlimited. Anything else clamps to [30, 240] to keep the
+  // rAF gate sane — values lower than 30 are essentially "don't render"
+  // and higher than 240 over-promise on any current panel.
+  if (!Number.isFinite(cap) || cap <= 0) {
+    playerSettings.framerateCap = 0
+  } else {
+    playerSettings.framerateCap = Math.max(30, Math.min(240, cap))
+  }
+  savePlayerSettings()
+}
+
+export function setPixelRatio(v: number): void {
+  if (!Number.isFinite(v)) return
+  playerSettings.pixelRatio = Math.max(0.5, Math.min(2.0, v))
+  savePlayerSettings()
+  // Apply to the live renderer if it's been registered. Lazy-imported
+  // for the same reason as the audio bus setter — keeps this module
+  // cheap for tests that never touch the renderer.
+  void import('./render/renderer-service').then(({ applyPixelRatio }) => {
+    applyPixelRatio(playerSettings.pixelRatio)
+  })
+}
+
+export function setFullscreenPreferred(on: boolean): void {
+  playerSettings.fullscreenPreferred = on
   savePlayerSettings()
 }

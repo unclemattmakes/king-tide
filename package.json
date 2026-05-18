@@ -27,7 +27,10 @@
     "leaderboard:moderate": "node tools/leaderboard-moderate.mjs",
     "docs:dev": "vitepress dev docs-site",
     "docs:build": "vitepress build docs-site",
-    "docs:preview": "vitepress preview docs-site"
+    "docs:preview": "vitepress preview docs-site",
+    "tauri": "cd src-tauri && cargo tauri",
+    "tauri:dev": "cd src-tauri && cargo tauri dev",
+    "build:deck": "node tools/build-deck.mjs"
   },
   "engines": {
     "node": ">=20"

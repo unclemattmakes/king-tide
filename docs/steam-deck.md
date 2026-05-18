@@ -1,8 +1,10 @@
 # Steam Deck — build path + tuning
 
-Documented path for shipping Hoverbike to the Steam Deck. This is a
-**planned-path** doc: the wrapper isn't built yet, but the technical
-choices are locked in so the v1 art pass can target known constraints.
+Live path for shipping Hoverbike to the Steam Deck. The Tauri 2 wrapper
+scaffold is in `src-tauri/`; the runtime profile (framerate cap,
+fullscreen-on-launch, pixel ratio, AudioContext resume-after-sleep)
+auto-activates when the boot path detects a Deck. The Steamworks SDK
+hookup is feature-gated and stubbed until we have an App ID.
 
 Pairs with [`docs/cross-browser.md`](./cross-browser.md) (the web side)
 and the M-series milestones in
@@ -151,35 +153,51 @@ to 60 fps on a desktop is a survivable mistake; users can override).
 
 `applyDeckProfile()` latches:
 
-- `framerateCap = 60`
-- `preferGamepadInput = true`
-- `requestFullscreenOnGesture = true`
+- `framerateCap = 60` (writes through `playerSettings.framerateCap` so
+  the Settings → Video row shows it on next open; only when the player
+  hadn't already chosen a stricter cap)
+- `preferGamepadInput = true` (no player-settings counterpart yet —
+  future hook for the rebind menu's glyph swap)
+- `requestFullscreenOnGesture = true` (writes
+  `playerSettings.fullscreenPreferred`; main.ts requests fullscreen on
+  the first audio-unlock gesture)
 
-The actual wiring (calling `applyDeckProfile()` from main.ts on boot)
-is intentionally not part of this PR — wiring lives with the
-follow-up that adds the Settings-menu entries for the profile knobs.
+`main.ts` calls `detectSteamDeck()` early in boot (after
+`loadPlayerSettings()`) and invokes `applyDeckProfile()` whenever any
+detection signal fires. False positives (1280×800 windows on a
+desktop) are survivable — players can always flip rows in Settings →
+Video to override.
 
-## Build script (planned, not implemented)
+## Build script
 
-Future `pnpm build:deck` will run:
+`pnpm build:deck` runs `tools/build-deck.mjs`, which:
 
-```bash
-pnpm build                                           # existing Vite build → dist/
-cd src-tauri
-cargo tauri build --target x86_64-unknown-linux-gnu  # AppImage
-# Output: src-tauri/target/release/bundle/appimage/hoverbike_*.AppImage
+1. Runs `pnpm build` (Vite → `dist/`).
+2. Probes for a working `cargo tauri` toolchain; prints install
+   instructions and exits 127 if it's missing (we don't auto-install
+   Rust).
+3. Runs `cargo tauri build --target x86_64-unknown-linux-gnu` inside
+   `src-tauri/`.
+4. AppImage lands in `src-tauri/target/release/bundle/appimage/`.
+
+The script forwards extra args, so once Steamworks is wired:
+
+```sh
+pnpm build:deck -- --features steam
 ```
+
+CI: `.github/workflows/build-deck.yml` runs the same flow on a Linux
+runner; triggered manually (`workflow_dispatch`) or on a `v*` tag
+push. Tag builds attach the AppImage to the GitHub Release.
 
 Distribution:
 
-1. **Steam Partner backend**: upload via `steamcmd app_build`.
+1. **Steam Partner backend**: upload via `steamcmd app_build` (separate
+   `release-steam.yml` workflow lands once we have an App ID + a
+   secret for the deployer).
 2. **Direct sideload** (testing): ship the `.AppImage` to the Deck via
    `scp` or USB, `chmod +x`, run from Desktop Mode, then add as a
    Non-Steam game for Gaming Mode coverage.
-
-**This PR documents the path; the script + Tauri scaffolding lands in
-a follow-up** (parallel agent is shipping the Accessibility surface;
-this slice is documentation + cross-browser e2e).
 
 ## Testing on a real Deck
 
@@ -220,12 +238,33 @@ Upload via Big Picture: gear icon → Steam Input → Export → Publish New
 Personal Config → "Set as official". This is a Steamworks operation,
 done once after first Steam release.
 
+## What's wired today
+
+- **Tauri 2 scaffold** (`src-tauri/`) — `Cargo.toml`, `tauri.conf.json`,
+  `src/main.rs`, `src/steam.rs` (feature-gated Steamworks stubs),
+  `build.rs`, capabilities, `.gitignore`. Steamworks is OFF by default;
+  build with `--features steam` once an SDK is on disk.
+- **`pnpm build:deck`** — orchestrator at `tools/build-deck.mjs`.
+- **CI workflow** — `.github/workflows/build-deck.yml`, manual + tag-
+  triggered, attaches AppImage to GitHub Releases.
+- **Boot wiring** — `main.ts` calls `detectSteamDeck()` +
+  `applyDeckProfile()`; `playerSettings.framerateCap`,
+  `pixelRatio`, `fullscreenPreferred` rows live in Settings → Video.
+- **Frame cap** — `src/engine/render/frame-cap.ts` + game-loop gate.
+- **AudioContext resume-after-sleep** — `main.ts` listens for
+  `visibilitychange` and re-calls `audio.resume()` on `visible`.
+- **Deck button glyph pack** — `src/engine/input/deck-glyphs.ts`
+  (data only; wiring into the rebind menu is the next follow-up).
+
 ## Open follow-ups
 
-- Tauri scaffolding (`src-tauri/`, `Cargo.toml`, `tauri.conf.json`).
-- `pnpm build:deck` script + GitHub Actions build matrix.
-- Steamworks integration (`steam.rs`): achievements, cloud save for
-  best-lap records, Rich Presence.
-- Deck button glyph pack for the rebind menu.
-- On-device profiling pass once v1 art lands — confirm the 12 W target.
-- AudioContext resume-after-sleep regression test.
+- Steamworks SDK integration in `steam.rs` (achievements, cloud save
+  for best-lap records, Rich Presence). The Tauri commands are wired;
+  the SDK calls inside them are TODO stubs.
+- Rebind menu glyph swap — read `glyphSourceForGamepadId(pad.id)` and
+  call `glyphFor(idx, source)` instead of the current standard labels.
+- On-device profiling pass once v1 art lands — confirm the ≤ 12 W
+  battery target with the framerate cap engaged.
+- `release-steam.yml` workflow for `steamcmd app_build` uploads.
+- Steam Input default config — publish via Big Picture once we have a
+  Steam App ID.
