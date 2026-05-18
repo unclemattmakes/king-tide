@@ -206,6 +206,15 @@ export type WaterMesh = {
     /** Streak elongation (σ_along of the 2D Gaussian). Higher =
      *  longer streak; lower = more disc-like. Default 0.4. */
     setStreakElongation(s: number): void
+    /** Pinch direction in degrees, 0..90. Rotates the Gerstner
+     *  horizontal-displacement vector relative to the per-wave
+     *  travel direction. 0° = standard Gerstner (particles bulge
+     *  along the wave direction, sharpening crest LINES in the
+     *  direction of travel). 90° = particles bulge ALONG the
+     *  crest-line axis (perpendicular to wave travel), producing
+     *  ridges elongated in the wave-travel direction instead of
+     *  short across-axis pinches. */
+    setPinchDirection(deg: number): void
     /** Render the wave geometry as wireframe. Useful for tuning wave /
      *  wake amplitudes against the actual displacement. */
     setWireframe(on: boolean): void
@@ -261,6 +270,8 @@ export type WaterDebugDefaults = {
   sunStreakStrength: number
   /** Streak elongation σ_along. 0.4 = baseline. */
   streakElongation: number
+  /** Gerstner pinch direction in degrees, 0..90. */
+  pinchDirection: number
   wireframe: boolean
 }
 
@@ -922,6 +933,17 @@ export function createWaterMesh(
     : Math.max(0, Math.min(1.5, Number(params?.get('steep') ?? '0.7')))
   const steepnessUniform = uniform(initialSteepness)
 
+  // Pinch direction (degrees, 0..90). Rotates the Gerstner horizontal-
+  // displacement vector relative to wave direction. 0° = standard
+  // (along wave, sharpens crest LINES in direction of travel); 90° =
+  // perpendicular (along crest-line axis, elongates ridges in the
+  // direction the wave is moving). Stored as pre-computed cos/sin
+  // pair so the rotation lives on the GPU side as two multiplies.
+  const PINCH_DIRECTION_DEFAULT = 0
+  const pinchDirectionUniform = uniform(PINCH_DIRECTION_DEFAULT)
+  const pinchCosUniform = uniform(Math.cos((PINCH_DIRECTION_DEFAULT * Math.PI) / 180))
+  const pinchSinUniform = uniform(Math.sin((PINCH_DIRECTION_DEFAULT * Math.PI) / 180))
+
   // ---- Tunable scalars (water debug menu) -------------------------------
   // Each is a uniform so the menu can scrub it live without rebuilding the
   // material. Defaults match the values the v2 shader was authored against;
@@ -1153,15 +1175,36 @@ export function createWaterMesh(
       const qScaled = steepnessUniform.mul(float(w.qBase))
       // Horizontal displacement: P.x += Q·A·D.x · cos(phase),
       //                          P.z += Q·A·D.z · cos(phase)
+      //
+      // The displacement DIRECTION is rotated by `pinchDirection`
+      // (a uniform-driven 2D rotation) from the wave direction
+      // (dirX, dirZ). At 0° the displacement runs along the wave,
+      // particles bulge forward, and crest LINES sharpen in the
+      // direction of travel — standard Gerstner. At 90° the
+      // displacement runs along the crest-line axis (the
+      // perpendicular: (-dirZ, dirX)), so particles bulge along
+      // the crest and the wave reads as elongated ridges running
+      // in the direction of travel instead of short across-axis
+      // bumps. CPU buoyancy samples a heightfield (no horizontal
+      // displacement read) so this is render-only — the bike sits
+      // at the same y(x,z) regardless of pinch direction.
+      const rotDirX = float(w.dirX)
+        .mul(pinchCosUniform)
+        .sub(float(w.dirZ).mul(pinchSinUniform))
+      const rotDirZ = float(w.dirX)
+        .mul(pinchSinUniform)
+        .add(float(w.dirZ).mul(pinchCosUniform))
       dx.addAssign(
         qScaled
-          .mul(float(w.amp * w.dirX))
+          .mul(rotDirX)
+          .mul(float(w.amp))
           .mul(c)
           .mul(ampScale),
       )
       dz.addAssign(
         qScaled
-          .mul(float(w.amp * w.dirZ))
+          .mul(rotDirZ)
+          .mul(float(w.amp))
           .mul(c)
           .mul(ampScale),
       )
@@ -2844,6 +2887,7 @@ export function createWaterMesh(
     sunDiscStrength: SUN_DISC_STRENGTH_DEFAULT,
     sunStreakStrength: SUN_STREAK_STRENGTH_DEFAULT,
     streakElongation: STREAK_ELONGATION_DEFAULT,
+    pinchDirection: PINCH_DIRECTION_DEFAULT,
     wireframe: wireFlag,
   }
   // Orchestrates a live spectrum rebuild: builds the new Phillips
@@ -2985,6 +3029,17 @@ export function createWaterMesh(
       // 0.1..1.5 — σ_along of the 2D Gaussian. Lower clamps
       // toward 0.1 (disc-like); higher elongates the streak.
       streakElongationUniform.value = clamp01(s, 0.1, 1.5)
+    },
+    setPinchDirection(deg) {
+      // 0..90° — rotation of the Gerstner horizontal-displacement
+      // vector from along-wave to across-wave. Pre-compute the
+      // cos/sin once on slider drag so the GPU evaluates two
+      // multiplies per wave rather than a trig pair per vertex.
+      const v = clamp01(deg, 0, 90)
+      pinchDirectionUniform.value = v
+      const rad = (v * Math.PI) / 180
+      pinchCosUniform.value = Math.cos(rad)
+      pinchSinUniform.value = Math.sin(rad)
     },
     setWireframe(on) {
       mat.wireframe = !!on

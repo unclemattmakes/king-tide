@@ -8,12 +8,11 @@
 
 import type { WaterDebugDefaults, WaterMesh } from './render/water'
 
-// v6 bump: adds `bodyAbsorption`, `sunDiscStrength`,
-// `sunStreakStrength`, `streakElongation` for the SoT-inspired
-// Beer-Lambert + Karis disc + anisotropic streak techniques.
-// Old v1–v5 entries are silently merged onto defaults by the
-// per-key tolerant loader below.
-export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v6'
+// v7 bump: adds `pinchDirection` for rotating the Gerstner
+// horizontal-displacement vector from along-wave (0°) to
+// across-wave (90°). Old v1–v6 entries are silently merged onto
+// defaults by the per-key tolerant loader below.
+export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v7'
 
 export type WaterDebugSettings = {
   steepness: number
@@ -35,6 +34,7 @@ export type WaterDebugSettings = {
   sunDiscStrength: number
   sunStreakStrength: number
   streakElongation: number
+  pinchDirection: number
   wireframe: boolean
 }
 
@@ -59,6 +59,7 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     sunDiscStrength: d.sunDiscStrength,
     sunStreakStrength: d.sunStreakStrength,
     streakElongation: d.streakElongation,
+    pinchDirection: d.pinchDirection,
     wireframe: d.wireframe,
   }
 }
@@ -119,6 +120,7 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setSunDiscStrength(s.sunDiscStrength)
   water.debug.setSunStreakStrength(s.sunStreakStrength)
   water.debug.setStreakElongation(s.streakElongation)
+  water.debug.setPinchDirection(s.pinchDirection)
   water.debug.setWireframe(s.wireframe)
 }
 
