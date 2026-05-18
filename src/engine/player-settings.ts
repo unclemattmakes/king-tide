@@ -34,6 +34,18 @@ export type WavePumpIntensity = 'full' | 'subtle' | 'off'
  *  `rubber-band.ts`, so it can be flipped mid-race. */
 export type AIDifficulty = 'casual' | 'standard' | 'hard'
 
+/** Anti-grav camera intensity. The chase camera blends between its
+ *  default yaw-only frame (no follow) and a full bike-frame follow
+ *  during anti-grav sections; intensity scales how much it leans into
+ *  the follow. Lower settings reduce the apparent roll → motion
+ *  sickness mitigation knob.
+ *
+ *  - `full`:    100% roll-follow scalar (full inversion on loops)
+ *  - `reduced`: ~40% — hints at the roll without inverting
+ *  - `off`:     no roll-follow; camera stays yaw-only even on loops
+ */
+export type AntiGravCameraIntensity = 'full' | 'reduced' | 'off'
+
 export type PlayerSettings = {
   wavePumpIntensity: WavePumpIntensity
   aiDifficulty: AIDifficulty
@@ -41,12 +53,14 @@ export type PlayerSettings = {
    *  no-op (modulo settling AI back to baseline) — AI no longer
    *  catches up after falling behind. */
   rubberBandAssist: boolean
+  antiGravCameraIntensity: AntiGravCameraIntensity
 }
 
 export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   wavePumpIntensity: 'full',
   aiDifficulty: 'standard',
   rubberBandAssist: true,
+  antiGravCameraIntensity: 'full',
 })
 
 /** Live, mutable copy. Consumers read this object every frame — no
@@ -57,6 +71,17 @@ export const playerSettings: PlayerSettings = { ...DEFAULT_PLAYER_SETTINGS }
 
 const VALID_WAVE_PUMP_INTENSITY: WavePumpIntensity[] = ['full', 'subtle', 'off']
 const VALID_AI_DIFFICULTY: AIDifficulty[] = ['casual', 'standard', 'hard']
+const VALID_ANTI_GRAV_CAMERA: AntiGravCameraIntensity[] = ['full', 'reduced', 'off']
+
+/** Roll-follow scalar each intensity step contributes — multiplied by
+ *  the live AntiGravOverride weight to get the per-frame camera follow
+ *  weight passed to `ChaseCamera.setAntiGravFollow`. */
+export const ANTI_GRAV_CAMERA_SCALAR: Readonly<Record<AntiGravCameraIntensity, number>> =
+  Object.freeze({
+    full: 1.0,
+    reduced: 0.4,
+    off: 0,
+  })
 
 /** Restore persisted values into `playerSettings`. Tolerant of missing
  *  fields and of schema drift — anything missing or invalid keeps the
@@ -87,6 +112,12 @@ export function loadPlayerSettings(): void {
   if (typeof p.rubberBandAssist === 'boolean') {
     playerSettings.rubberBandAssist = p.rubberBandAssist
   }
+  if (
+    typeof p.antiGravCameraIntensity === 'string' &&
+    (VALID_ANTI_GRAV_CAMERA as string[]).includes(p.antiGravCameraIntensity)
+  ) {
+    playerSettings.antiGravCameraIntensity = p.antiGravCameraIntensity as AntiGravCameraIntensity
+  }
 }
 
 export function savePlayerSettings(): void {
@@ -109,5 +140,10 @@ export function setAIDifficulty(v: AIDifficulty): void {
 
 export function setRubberBandAssist(on: boolean): void {
   playerSettings.rubberBandAssist = on
+  savePlayerSettings()
+}
+
+export function setAntiGravCameraIntensity(v: AntiGravCameraIntensity): void {
+  playerSettings.antiGravCameraIntensity = v
   savePlayerSettings()
 }

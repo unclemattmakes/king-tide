@@ -29,7 +29,8 @@ import {
   encodeInputFrameInto,
   INPUT_FRAME_WIRE_BYTES,
 } from '@/engine/net/input-frame'
-import { playerSettings } from '@/engine/player-settings'
+import { ANTI_GRAV_CAMERA_SCALAR, playerSettings } from '@/engine/player-settings'
+import { createAntiGravHud } from '@/engine/render/anti-grav-hud'
 import type { ChaseCamera } from '@/engine/render/camera'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
@@ -48,6 +49,7 @@ import { createWavePumpObserver } from '@/engine/wave-pump-observer'
 import type { AssetManifest } from '@/game/assets/manifest'
 import type { BikeVariant } from '@/game/bikes/variants'
 import {
+  AntiGravOverrideStore,
   BikeStatsStore,
   ControlIntentStore,
   HoverStateStore,
@@ -215,6 +217,12 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // pure feedback — no determinism dependency, no replay obligations.
   const wavePumpObserver = createWavePumpObserver()
   const wavePumpHud = createWavePumpHud()
+
+  // Anti-grav HUD widget. Reads the player bike's AntiGravOverride
+  // each render frame and fades the indicator in/out. The chase
+  // camera's anti-grav follow weight piggybacks on the same per-frame
+  // read so the two surfaces stay in lockstep.
+  const antiGravHud = createAntiGravHud()
 
   const tmpPos = new THREE.Vector3()
   const tmpQuat = new THREE.Quaternion()
@@ -409,6 +417,20 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // Audio dispatch — runs once per render frame, after physics.
     // Continuous engine + wind layers are driven by the player's speed.
     audio.tickEngine(state.playerSnapshot?.speed ?? 0)
+
+    // Anti-grav HUD + camera follow. AntiGravOverride.weight is already
+    // smoothed by the resolver; we just multiply by the player's
+    // intensity scalar (full/reduced/off) and feed the result to both
+    // surfaces. The HUD widget ignores the intensity scalar (motion-
+    // sickness players still need the affordance signal); only the
+    // camera follow opts out at intensity=off.
+    {
+      const override = AntiGravOverrideStore.get(playerEid)
+      const w = override?.active ? override.weight : 0
+      antiGravHud.setWeight(w)
+      const scalar = ANTI_GRAV_CAMERA_SCALAR[playerSettings.antiGravCameraIntensity]
+      chase.setAntiGravFollow(w * scalar)
+    }
 
     // Wave-pump signal — observer reads the player's hover + velocity
     // + throttle state and fires on a clean crest launch. Skipped while
