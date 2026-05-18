@@ -7,6 +7,13 @@ import { createStore } from '@/engine/sim/ecs/store'
 // --- Tags (no data) ---
 export const PlayerTag = { name: 'PlayerTag' as const }
 export const BikeTag = { name: 'BikeTag' as const }
+// Ghost bike — render-only entity driven by a replay player each frame.
+// Has BikeTag + Transform + BikeStats (for variant lookup) but no
+// RigidBody, ControlIntent, HoverState, PickupSlot, AITag, Racer, or
+// PeerControlled. Sim systems gate on those so a ghost participates in
+// nothing. Render system reads GhostTag to swap in a transparent
+// material.
+export const GhostTag = { name: 'GhostTag' as const }
 
 // --- PeerControlled: a bike whose ControlIntent comes from a network peer
 // (or from the local input on slot 0). Distinct from PlayerTag so render /

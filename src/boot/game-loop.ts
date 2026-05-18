@@ -54,7 +54,9 @@ import type { TrackVisuals } from '@/engine/render/track-mesh'
 import { createTutorialHud } from '@/engine/render/tutorial-hud'
 import { type BikeImpact, updateUnderwaterFog } from '@/engine/render/water'
 import { createWavePumpHud } from '@/engine/render/wave-pump-hud'
+import { sliceBestLap } from '@/engine/replay/best-lap-slice'
 import { serializeReplay } from '@/engine/replay/format'
+import { getGhostBestLap, setGhost } from '@/engine/replay/ghost-state'
 import type { ReplayRecorder } from '@/engine/replay/recorder'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
@@ -77,6 +79,7 @@ import type { PickupType } from '@/game/components/pickup'
 import { RacerStore } from '@/game/components/race'
 import type { RaceTick } from '@/game/sim-step'
 import { simulateStep } from '@/game/sim-step'
+import type { GhostRunner } from '@/game/systems/ghost-runner'
 import { getHeldPickup } from '@/game/systems/pickup'
 import { tickRemoteInterp } from '@/game/systems/remote-interp'
 import { computeStandings } from '@/game/systems/standings'
@@ -163,6 +166,14 @@ export interface GameLoopOpts {
   /** Replay recorder — null in replay playback mode. */
   recorder: ReplayRecorder | null
   recorderStart: number
+  /** Time Trial mode flag. Routes the finish overlay through the
+   *  best-lap-slice / `setGhost` persistence path, and labels the
+   *  per-frame ghost runner. */
+  timeTrialMode?: boolean
+  /** Optional ghost runner — driven each render frame off the
+   *  player's current lap time. Null when no saved ghost exists for
+   *  (track, bike) or when not in TT mode. */
+  ghostRunner?: GhostRunner | null
   /** Lap timing state, mutated each lap. */
   lapState: {
     lapStartRaceTime: number
@@ -227,6 +238,8 @@ export function startGameLoop(opts: GameLoopOpts): void {
     hud,
     onFinish,
     tutorialMode,
+    timeTrialMode,
+    ghostRunner,
   } = opts
 
   let finishShown = false
@@ -576,6 +589,20 @@ export function startGameLoop(opts: GameLoopOpts): void {
       }
     }
 
+    // Time Trial ghost — drive its Transform from the saved best-lap
+    // replay player. Ticks the ghost relative to the player's current
+    // lap time so the ghost is a meaningful pacing reference; seeks
+    // back to t=0 when the player crosses the start/finish line. Held
+    // at start pose while the race is locked (pre-countdown).
+    if (ghostRunner) {
+      const racerForGhost = RacerStore.get(playerEid)
+      const lapTime =
+        racerForGhost && racerForGhost.checkpointsCrossed >= 1
+          ? racerForGhost.raceTime - lapState.lapStartRaceTime
+          : 0
+      ghostRunner.tick(dt, lapTime, !raceHud.isLocked())
+    }
+
     waterMesh.tick(gatherBikeImpacts(), { x: camera.position.x, z: camera.position.z })
     // Day-night cycle + fog/hemi palette + PMREM env-map bake. The sky
     // system owns the directional-sun follow (shadow-camera centred on the
@@ -703,6 +730,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
             recorder,
             bestLapThisRace: lapState.bestLapThisRace,
             bestLapAllTime: lapState.bestLapAllTime,
+            timeTrialMode: timeTrialMode === true,
           })
           onFinish()
         }
@@ -728,6 +756,7 @@ interface FinishOpts {
   recorder: ReplayRecorder | null
   bestLapThisRace: number | null
   bestLapAllTime: number | null
+  timeTrialMode: boolean
 }
 
 function showFinishScreen(opts: FinishOpts): void {
@@ -745,6 +774,7 @@ function showFinishScreen(opts: FinishOpts): void {
     recorder,
     bestLapThisRace,
     bestLapAllTime,
+    timeTrialMode,
   } = opts
 
   // Cup-mode book-keeping. Pull the live cup-progress (if any), record
@@ -766,33 +796,25 @@ function showFinishScreen(opts: FinishOpts): void {
   const isCupMode = cupAfter !== null
   hud.finishEl?.classList.add('show')
   const finishRibbon = document.getElementById('finish-ribbon')
-  if (hud.finishPos && meStandingPosition !== null) {
-    hud.finishPos.textContent = ordinal(meStandingPosition)
+  if (hud.finishPos) {
+    // TT mode is solo — position is meaningless. Hide the row's value
+    // when it's just "1st" against no one.
+    hud.finishPos.textContent = timeTrialMode
+      ? '—'
+      : meStandingPosition !== null
+        ? ordinal(meStandingPosition)
+        : '—'
   }
   if (hud.finishTime) hud.finishTime.textContent = formatTime(rs.raceTime)
   const wonRace = meStandingPosition === 1
-  if (hud.finishTitle) hud.finishTitle.textContent = wonRace ? 'CHAMPION' : 'FINAL'
-  if (finishRibbon) finishRibbon.textContent = wonRace ? 'WINNER' : 'FINAL'
+  if (hud.finishTitle) {
+    hud.finishTitle.textContent = timeTrialMode ? 'TIME TRIAL' : wonRace ? 'CHAMPION' : 'FINAL'
+  }
+  if (finishRibbon) {
+    finishRibbon.textContent = timeTrialMode ? 'CLOCK' : wonRace ? 'WINNER' : 'FINAL'
+  }
   if (hud.finishSub) {
     hud.finishSub.textContent = `${track.name.toUpperCase()} · ${playerVariant.name.toUpperCase()}`
-  }
-  if (hud.finishBest) {
-    const parts: string[] = []
-    if (bestLapThisRace !== null) {
-      parts.push(`${formatLap(bestLapThisRace)} (race)`)
-    }
-    if (bestLapAllTime !== null) {
-      parts.push(`<span class="best">${formatLap(bestLapAllTime)} (PB)</span>`)
-    }
-    hud.finishBest.innerHTML = parts.length ? parts.join(' · ') : '—'
-  }
-  // Cup mode — append a compact RACE N/M · XX PTS line to the finish
-  // stat block so the player sees their championship progress without
-  // having to wait for the cup-results overlay at the end.
-  if (isCupMode && cupAfter) {
-    appendCupStatRow(cupAfter)
-  } else {
-    removeCupStatRow()
   }
   // Stash a last-race summary for the menu's title-screen recap card.
   // Stored in sessionStorage so it survives the navigation to `?back=1`
@@ -824,12 +846,27 @@ function showFinishScreen(opts: FinishOpts): void {
   // anyway).
   const watchBtn = document.getElementById('finish-watch-replay') as HTMLButtonElement | null
   const saveBtn = document.getElementById('finish-save-replay') as HTMLButtonElement | null
+  let newGhostSaved = false
   if (recorder) {
     const replay = recorder.finalize({
       finishPosition: meStandingPosition,
       finishTime: rs.raceTime,
       bestLap: bestLapThisRace,
     })
+
+    // Time Trial — slice the player's best lap from the recording and
+    // persist it as the new ghost iff it beats the stored ghost's
+    // best lap (or there's no stored ghost yet). Single-lap looping
+    // ghost matches Wave Race / F-Zero TT convention.
+    if (timeTrialMode) {
+      const slice = sliceBestLap(replay, 0)
+      if (slice) {
+        const existing = getGhostBestLap({ trackId, bikeId: playerVariant.id })
+        if (existing === null || slice.bestLap < existing) {
+          newGhostSaved = setGhost({ trackId, bikeId: playerVariant.id }, slice.replay)
+        }
+      }
+    }
     if (watchBtn) {
       watchBtn.style.display = 'inline-block'
       watchBtn.disabled = false
@@ -859,66 +896,108 @@ function showFinishScreen(opts: FinishOpts): void {
     }
   }
 
+  // Best-lap / ghost banner. Rendered after the ghost slicer so we can
+  // surface "GHOST SAVED" alongside "NEW BEST" when the player set a
+  // fresh PB in TT mode.
+  if (hud.finishBest) {
+    const parts: string[] = []
+    if (bestLapThisRace !== null) {
+      parts.push(`${formatLap(bestLapThisRace)} (race)`)
+    }
+    if (bestLapAllTime !== null) {
+      parts.push(`<span class="best">${formatLap(bestLapAllTime)} (PB)</span>`)
+    }
+    if (timeTrialMode && newGhostSaved) {
+      parts.push('<span class="best">★ GHOST SAVED</span>')
+    }
+    hud.finishBest.innerHTML = parts.length ? parts.join(' · ') : '—'
+  }
+  // Cup mode — append a compact RACE N/M · XX PTS line to the finish
+  // stat block so the player sees their championship progress without
+  // having to wait for the cup-results overlay at the end.
+  if (isCupMode && cupAfter) {
+    appendCupStatRow(cupAfter)
+  } else {
+    removeCupStatRow()
+  }
+
   // Action buttons: NEXT (default), RETRY, EXIT. Cup mode rewrites
   // NEXT to advance through the championship; the last race in a cup
-  // pops the cup-results overlay instead of navigating.
+  // pops the cup-results overlay instead of navigating. TT mode hides
+  // NEXT entirely because the natural loop is "keep grinding the same
+  // track for a better lap" — RETRY becomes the default focus.
   const nextBtn = document.getElementById('finish-next') as HTMLButtonElement | null
   const retryBtn = document.getElementById('finish-retry') as HTMLButtonElement | null
   const exitBtn = document.getElementById('finish-exit') as HTMLButtonElement | null
   if (nextBtn) {
-    if (isCupMode && cupAfter !== null && !isLastCupRace) {
-      // Mid-cup — advance to the next track in the lineup. Carry the
-      // `?cup=<id>` param across so the next race also knows it's
-      // part of the championship.
-      const nextId = nextCupTrackId(cupAfter)
-      const completed = Object.keys(cupAfter.results).length
-      const total = cupAfter.races.length
-      nextBtn.textContent = `NEXT RACE (${completed}/${total})`
-      nextBtn.onclick = () => {
-        if (!nextId) return
-        window.location.assign(
-          buildRaceUrl({ roomId, trackId: nextId, bikeId: playerVariant.id, cupId }),
-        )
-      }
-    } else if (isCupMode && cupAfter !== null && isLastCupRace) {
-      // Last race — open the cup-results overlay over the finish
-      // screen, then leave it to its BACK TO MENU button to clear
-      // cup-progress and navigate.
-      nextBtn.textContent = 'CUP RESULTS →'
-      nextBtn.onclick = () => {
-        showCupResultsOverlay({
-          progress: cupAfter,
-          onBackToMenu: () => {
-            clearCupProgress()
-            const url = new URL(window.location.href)
-            url.search = ''
-            url.searchParams.set('back', '1')
-            window.location.assign(url.toString())
-          },
-        })
-      }
+    if (timeTrialMode) {
+      nextBtn.style.display = 'none'
     } else {
-      // Single-race mode — original behaviour: rotate to the next
-      // catalogue track.
-      nextBtn.textContent = 'NEXT RACE'
-      nextBtn.onclick = () => {
-        const tracksList = buildTrackList(manifest.tracks)
-        const nextId = nextTrackId(tracksList, trackId)
-        window.location.assign(buildRaceUrl({ roomId, trackId: nextId, bikeId: playerVariant.id }))
+      nextBtn.style.display = ''
+      if (isCupMode && cupAfter !== null && !isLastCupRace) {
+        // Mid-cup — advance to the next track in the lineup. Carry the
+        // `?cup=<id>` param across so the next race also knows it's
+        // part of the championship.
+        const nextId = nextCupTrackId(cupAfter)
+        const completed = Object.keys(cupAfter.results).length
+        const total = cupAfter.races.length
+        nextBtn.textContent = `NEXT RACE (${completed}/${total})`
+        nextBtn.onclick = () => {
+          if (!nextId) return
+          window.location.assign(
+            buildRaceUrl({ roomId, trackId: nextId, bikeId: playerVariant.id, cupId }),
+          )
+        }
+      } else if (isCupMode && cupAfter !== null && isLastCupRace) {
+        // Last race — open the cup-results overlay over the finish
+        // screen, then leave it to its BACK TO MENU button to clear
+        // cup-progress and navigate.
+        nextBtn.textContent = 'CUP RESULTS →'
+        nextBtn.onclick = () => {
+          showCupResultsOverlay({
+            progress: cupAfter,
+            onBackToMenu: () => {
+              clearCupProgress()
+              const url = new URL(window.location.href)
+              url.search = ''
+              url.searchParams.set('back', '1')
+              window.location.assign(url.toString())
+            },
+          })
+        }
+      } else {
+        // Single-race mode — original behaviour: rotate to the next
+        // catalogue track.
+        nextBtn.textContent = 'NEXT RACE'
+        nextBtn.onclick = () => {
+          const tracksList = buildTrackList(manifest.tracks)
+          const nextId = nextTrackId(tracksList, trackId)
+          window.location.assign(
+            buildRaceUrl({ roomId, trackId: nextId, bikeId: playerVariant.id }),
+          )
+        }
       }
+      nextBtn.focus({ preventScroll: true })
     }
-    nextBtn.focus({ preventScroll: true })
   }
   if (retryBtn) {
     retryBtn.onclick = () => {
       // RETRY in cup mode restarts the current race without dropping
       // cup-progress — the points table preserves the finish that's
       // already been recorded; a better second attempt will overwrite
-      // it (see recordCupRaceFinish's by-trackId match).
+      // it (see recordCupRaceFinish's by-trackId match). TT mode rides
+      // the same path with `tt=1` re-stamped on the URL.
       window.location.assign(
-        buildRaceUrl({ roomId, trackId, bikeId: playerVariant.id, cupId: cupId ?? null }),
+        buildRaceUrl({
+          roomId,
+          trackId,
+          bikeId: playerVariant.id,
+          cupId: cupId ?? null,
+          timeTrial: timeTrialMode,
+        }),
       )
     }
+    if (timeTrialMode) retryBtn.focus({ preventScroll: true })
   }
   if (exitBtn) {
     exitBtn.onclick = () => {
@@ -966,6 +1045,7 @@ function buildRaceUrl(args: {
   trackId: string
   bikeId: string
   cupId?: string | null
+  timeTrial?: boolean
 }): string {
   const url = new URL(window.location.href)
   url.search = ''
@@ -974,5 +1054,6 @@ function buildRaceUrl(args: {
   url.searchParams.set('track', args.trackId)
   url.searchParams.set('bike', args.bikeId)
   if (args.cupId) url.searchParams.set('cup', args.cupId)
+  if (args.timeTrial) url.searchParams.set('tt', '1')
   return url.toString()
 }

@@ -5,6 +5,7 @@ import { cloneLoadedBike, type LoadedBike } from '@/game/assets/bike-loader'
 import {
   BikeStatsStore,
   BikeTag,
+  GhostTag,
   PeerControlled,
   PeerControlledStore,
   PlayerTag,
@@ -15,6 +16,10 @@ import { createBikeMesh } from './bike-mesh'
 
 const PLAYER_FALLBACK_COLOR = 0xff7733
 const AI_BODY_COLORS = [0x33aaff, 0x44dd66, 0xcc55ff, 0xffcc33, 0xff5577]
+const GHOST_OPACITY = 0.35
+// Cyan-ish overlay tint so the ghost reads as "you (last run)" rather
+// than a regular opponent. Matches the wave-pump HUD palette family.
+const GHOST_TINT = 0x66ddff
 // Exhaust glow tints — formerly the long-ribbon trail colors. The thruster
 // cone material (`mat_bike_*_glow`) is retinted per-bike so each racer
 // stays color-identifiable now that the ribbon trails are gone.
@@ -66,13 +71,19 @@ export function createBikeRenderSystem(
       let mesh = meshes.get(eid)
       if (!mesh) {
         const isPlayer = hasComponent(sim, eid, PlayerTag)
+        const isGhost = hasComponent(sim, eid, GhostTag)
         const stats = BikeStatsStore.get(eid)
         const variantId = stats?.variantId
         const variantColor = stats?.bodyColor
 
         if (registry) {
           const loaded = (variantId && registry.byVariantId[variantId]) || registry.default
-          if (isPlayer) {
+          if (isGhost) {
+            mesh = cloneLoadedBike(loaded, {
+              tintLivery: GHOST_TINT,
+              tintExhaust: GHOST_TINT,
+            }).root
+          } else if (isPlayer) {
             mesh = cloneLoadedBike(loaded, { tintExhaust: PLAYER_EXHAUST_COLOR }).root
           } else {
             // M10.9 — remote-peer bikes (tagged PeerControlled) use a
@@ -91,12 +102,15 @@ export function createBikeRenderSystem(
             mesh = cloneLoadedBike(loaded, { tintLivery, tintExhaust }).root
           }
         } else {
-          const color = isPlayer
-            ? (variantColor ?? PLAYER_FALLBACK_COLOR)
-            : (AI_BODY_COLORS[aiColorCursor++ % AI_BODY_COLORS.length] ?? 0xaaaaaa)
+          const color = isGhost
+            ? GHOST_TINT
+            : isPlayer
+              ? (variantColor ?? PLAYER_FALLBACK_COLOR)
+              : (AI_BODY_COLORS[aiColorCursor++ % AI_BODY_COLORS.length] ?? 0xaaaaaa)
           mesh = createBikeMesh({ bodyColor: color })
         }
         mesh.scale.setScalar(BIKE_VISUAL_SCALE)
+        if (isGhost) applyGhostMaterial(mesh)
         scene.add(mesh)
         meshes.set(eid, mesh)
       }
@@ -111,4 +125,46 @@ export function createBikeRenderSystem(
       }
     }
   }
+}
+
+/**
+ * Walk the cloned bike mesh and switch every material to additive-ish
+ * translucency so the ghost reads as a hologram: see-through, cyan-
+ * tinted, no shadow casting/receiving. Shadow toggles also prevent
+ * the rendered ghost from punching a dark hole into the scene below
+ * itself when the player is racing close to the same line.
+ */
+function applyGhostMaterial(root: THREE.Object3D): void {
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh
+    if (!mesh.isMesh) return
+    mesh.castShadow = false
+    mesh.receiveShadow = false
+    const mat = mesh.material as
+      | THREE.Material
+      | THREE.Material[]
+      | THREE.MeshStandardMaterial
+      | undefined
+    if (!mat) return
+    if (Array.isArray(mat)) {
+      mesh.material = mat.map((m) => makeGhostMaterial(m))
+    } else {
+      mesh.material = makeGhostMaterial(mat as THREE.Material)
+    }
+  })
+}
+
+function makeGhostMaterial(source: THREE.Material): THREE.Material {
+  // Clone so the original (cached) material isn't mutated for other
+  // bikes that share the same source GLB.
+  const m = source.clone()
+  m.transparent = true
+  m.opacity = GHOST_OPACITY
+  m.depthWrite = false
+  const std = m as Partial<THREE.MeshStandardMaterial>
+  if (std.emissive) {
+    std.emissive.setHex(GHOST_TINT)
+    std.emissiveIntensity = 0.6
+  }
+  return m
 }
