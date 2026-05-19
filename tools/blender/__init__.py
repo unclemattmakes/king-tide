@@ -1,7 +1,7 @@
 """Shared Blender pipeline for hoverbike asset generation.
 
 See docs/asset-pipeline-guide.md for the author-facing walkthrough and
-docs/asset-pipeline-plan.md for the architectural design.
+docs/v1-asset-pipeline-plan.md for the v1 production plan.
 
 Each builder script (build_bike.py, build_prop.py, build_track.py) is a
 Blender headless entry point: it reads a JSON spec via the

@@ -3,9 +3,10 @@ import { expect, test } from '@playwright/test'
 /**
  * Asset-pipeline integration test. The Blender pipeline (M9.16) writes
  * `public/assets/tracks/calibration.glb` from the calibration .blend with
- * one of every metadata kind documented in docs/blender-conventions.md.
- * This spec hits `?track=calibration`, lets the runtime loader fetch and
- * parse it, and asserts every kind survives the round trip:
+ * one of every metadata kind (see `docs/blender-pipeline-guide.md` for
+ * the kind reference). This spec hits `?track=calibration`, lets the
+ * runtime loader fetch and parse it, and asserts every kind survives
+ * the round trip:
  *
  *   - start_00       → track.start.position / yaw       → bike spawns there
  *   - cp_00..cp_03   → track.checkpoints (contiguous)   → race totalCheckpoints = 4

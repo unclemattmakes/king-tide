@@ -1,11 +1,11 @@
 # Asset pipeline — author guide
 
 End-to-end walkthrough for editing a JSON spec and seeing the result
-in the running game. For the architectural rationale and full design,
-see [asset-pipeline-plan.md](./asset-pipeline-plan.md). For
-track-specific authoring (gates, splines, pickups), see the older
-[blender-pipeline-guide.md](./blender-pipeline-guide.md) — that flow
-remains canonical for tracks.
+in the running game. For track-specific authoring (gates, splines,
+pickups), see [blender-pipeline-guide.md](./blender-pipeline-guide.md)
+— that flow remains canonical for tracks. For the v1 production plan
+and per-track set-piece sequencing, see
+[v1-asset-pipeline-plan.md](./v1-asset-pipeline-plan.md).
 
 ## TL;DR
 
@@ -246,9 +246,8 @@ or Blender error.
 
 ## See also
 
-- [`asset-pipeline-plan.md`](./asset-pipeline-plan.md) — original brief.
-- [`blender-conventions.md`](./blender-conventions.md) — name + extras
-  reference card.
+- [`v1-asset-pipeline-plan.md`](./v1-asset-pipeline-plan.md) — v1
+  production plan + per-track set-piece sequencing.
 - [`blender-pipeline-guide.md`](./blender-pipeline-guide.md) — full
-  track-author walkthrough.
+  track-author walkthrough + object-kind reference.
 - [`tools/README.md`](../tools/README.md) — quick CLI reference.

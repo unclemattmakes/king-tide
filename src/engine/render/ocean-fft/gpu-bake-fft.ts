@@ -38,9 +38,8 @@ import {
  * — fix FFT amplitude bug, N=128, batched`. Waves now match the
  * direct-DFT reference at the same parameters; the FFT path is the
  * production target whenever WebGPU is available + spectrum field is
- * active. Default cascade resolution was lowered in
- * `docs/perf-audit-2026-05.md` Batch C (`?fft=lo` default, N=64 main +
- * N=32 chop/swell; `?fft=hi` reverts to N=128/64).
+ * active. Default cascade resolution is `?fft=lo` (N=64 main + N=32
+ * chop/swell); `?fft=hi` reverts to N=128/64.
  *
  * Architecture:
  *

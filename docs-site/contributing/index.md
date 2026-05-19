@@ -35,8 +35,9 @@ For security issues, see
 
 - Items in [`docs/blender-wishlist.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-wishlist.md) — open
   roadmap for Blender automation.
-- Items in [`docs/code-review-2026-05.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/code-review-2026-05.md) —
-  recent self-review punch list.
+- Unchecked rows in the convention table in
+  [`docs/v1-work-breakdown.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/v1-work-breakdown.md) —
+  the active v1 execution plan.
 - Issues labelled `good first issue` or `help wanted` on GitHub.
 
 Open a draft PR or a discussion early if you're not sure — easier to

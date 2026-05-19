@@ -26,7 +26,7 @@ Casual-to-mid-core, plays desktop with a gamepad, remembers PS1/N64 arcade racer
 
 ### In scope
 
-- ✅ 2 tracks (Lagoon Loop + Cliffside). Both procedural for now; the Blender → glTF pipeline is wired but not yet used end-to-end (Cliffside doubles as the procedural reference layout — see [blender-conventions.md](./blender-conventions.md))
+- ✅ 2 tracks (Lagoon Loop + Cliffside). Both procedural; the Blender → glTF pipeline is wired and Cliffside doubles as the reference layout. The v1 production lineup (11 ship tracks + tutorial) is now complete — see [`track-themes.md`](./track-themes.md) and [`v1-asset-pipeline-plan.md`](./v1-asset-pipeline-plan.md).
 - ✅ 3 hover bikes with distinct stat tradeoffs — Cruiser / Racer / Stunt
 - ✅ 4 rubber-banded AI opponents per race
 - ✅ Single 3-lap race mode with finish overlay + best-lap save

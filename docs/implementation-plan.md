@@ -52,8 +52,7 @@ hoverbike/
 │   ├── implementation-plan.md
 │   ├── status.md                  # live state of the codebase
 │   ├── track-editor-guide.md      # in-app editor (gameplay data)
-│   ├── blender-pipeline-guide.md  # Blender side (environment geometry)
-│   └── blender-conventions.md     # quick-reference for the legacy all-in-glb path
+│   └── blender-pipeline-guide.md  # Blender side (environment geometry)
 ├── public/
 │   ├── tracks/                    # JSON gameplay data (editor reads/writes here)
 │   └── assets/

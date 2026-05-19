@@ -205,4 +205,4 @@ export always uses viewport visibility.
 - [Addon reference](./addon-reference) — every panel + operator.
 - [Modding → Tracks](/modding/tracks) — the spec-driven + editor-driven workflows.
 - [Modding → Bikes](/modding/bikes) — bike-specific authoring.
-- In-repo docs: [`docs/blender-conventions.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-conventions.md) and [`docs/blender-pipeline-guide.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-pipeline-guide.md) — the source material these pages are distilled from.
+- In-repo docs: [`docs/blender-pipeline-guide.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-pipeline-guide.md) — the source material these pages are distilled from.
