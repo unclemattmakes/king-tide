@@ -28,6 +28,7 @@ import {
   type AIDifficulty,
   type AntiGravCameraIntensity,
   type ColorblindMode,
+  type EmissiveLandmarksIntensity,
   playerSettings,
   setAIDifficulty,
   setAnimatedLandmarks,
@@ -35,6 +36,7 @@ import {
   setAudioBusVolume,
   setAudioMusicEnabled,
   setColorblindMode,
+  setEmissiveLandmarks,
   setFramerateCap,
   setFullscreenPreferred,
   setGamepadDeadzone,
@@ -110,6 +112,17 @@ const WAVE_LINE_LABEL: Record<WaveLineIntensity, string> = {
 const WAVE_LINE_VALUE: Record<string, WaveLineIntensity> = {
   Full: 'full',
   Subtle: 'subtle',
+  Off: 'off',
+}
+
+const EMISSIVE_LANDMARKS_LABEL: Record<EmissiveLandmarksIntensity, string> = {
+  full: 'Full',
+  reduced: 'Reduced',
+  off: 'Off',
+}
+const EMISSIVE_LANDMARKS_VALUE: Record<string, EmissiveLandmarksIntensity> = {
+  Full: 'full',
+  Reduced: 'reduced',
   Off: 'off',
 }
 
@@ -293,6 +306,17 @@ const TAB_SPECS: TabSpec[] = [
         control: { kind: 'toggle', defaultValue: playerSettings.animatedLandmarks },
         enabled: true,
         gate: 'Swings Marina Bay 7 gantry cranes + Doge\'s Drift Campanile bell. Off pins them to authored rest poses.',
+      },
+      {
+        id: 'video-emissive-landmarks',
+        label: 'Emissive landmarks',
+        control: {
+          kind: 'select',
+          options: ['Full', 'Reduced', 'Off'],
+          defaultValue: EMISSIVE_LANDMARKS_LABEL[playerSettings.emissiveLandmarks],
+        },
+        enabled: true,
+        gate: "Hot-core glow for Kilauea's lava waterfall + future emissive landmarks. Reduced halves the glow for bloom-sensitive setups.",
       },
       {
         id: 'video-quality',
@@ -915,6 +939,12 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
         sel.addEventListener('change', () => {
           const v = COLORBLIND_VALUE[sel.value]
           if (v) setColorblindMode(v)
+        })
+      }
+      if (spec.enabled && spec.id === 'video-emissive-landmarks') {
+        sel.addEventListener('change', () => {
+          const v = EMISSIVE_LANDMARKS_VALUE[sel.value]
+          if (v) setEmissiveLandmarks(v)
         })
       }
       if (spec.enabled && spec.id === 'video-framecap') {

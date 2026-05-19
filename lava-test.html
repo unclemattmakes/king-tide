@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Lava material test</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; background: #111; color: #eee; font-family: monospace; }
+      canvas { display: block; }
+      #hud {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        padding: 6px 10px;
+        background: rgba(0, 0, 0, 0.6);
+        border: 1px solid #444;
+        z-index: 10;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+      #hud b { color: #ffe0a0; }
+      .btn { display: inline-block; padding: 2px 8px; margin-right: 4px; border: 1px solid #888; cursor: pointer; }
+      .btn.on { background: #a82e10; color: #ffe0a0; border-color: #ffe0a0; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <b>lava-test</b> · COLOR_0.r=0.2 on both rows (matches seed bug)
+      <div style="margin-top:4px">
+        <span class="btn" data-i="full">Full</span>
+        <span class="btn" data-i="reduced">Reduced</span>
+        <span class="btn" data-i="off">Off</span>
+      </div>
+    </div>
+    <script type="module">
+      import * as THREE from 'three'
+      import { WebGPURenderer } from 'three/webgpu'
+      import {
+        applyEmissiveLandmarksSetting,
+        buildLavaRiverMaterial,
+        updateLavaTime,
+      } from '/src/engine/render/lava-river-material.ts'
+
+      // ─── Renderer ────────────────────────────────────────────────────
+      const renderer = new WebGPURenderer({ antialias: true })
+      await renderer.init()
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+      renderer.setSize(window.innerWidth, window.innerHeight)
+      document.body.appendChild(renderer.domElement)
+      renderer.outputColorSpace = THREE.SRGBColorSpace
+      window.__renderer = renderer
+      window.__three = THREE
+
+      // ─── Scene ───────────────────────────────────────────────────────
+      const scene = new THREE.Scene()
+      scene.background = new THREE.Color(0x1a1208) // dark caldera ambience
+
+      // Soft hemisphere + a key directional so the matte lava reads as
+      // 3D, not flat. Emissive will dominate the read.
+      scene.add(new THREE.HemisphereLight(0x223344, 0x080604, 0.4))
+      const sun = new THREE.DirectionalLight(0xffeeaa, 0.7)
+      sun.position.set(40, 60, 30)
+      scene.add(sun)
+
+      // ─── Geometry — mirror the seed's 2-row strip exactly ──────────
+      // tools/blender/seed_landmarks_library.py builds 24 segments × 2 rows
+      // at y = ±2 (Blender width axis), z=0. After Blender→Three swap
+      // (Y up vs Z up), the width axis lands on local Z. We replicate
+      // here in Three's local frame so the geometry the material sees
+      // matches the shipped GLB: vertices at local Z = ±2, X ∈ [0, 60].
+      // COLOR_0.r = 0.2 on both rows (the contract says centreline=1 but
+      // the current seed has no centreline vertex — the runtime shader's
+      // positionLocal.z fallback restores the hot core).
+      const LENGTH = 60
+      const HALF_WIDTH = 2 // matches LAVA_STRIP_LOCAL_HALF_WIDTH
+      const SEGMENTS = 24
+      const geo = new THREE.BufferGeometry()
+      const positions = []
+      const colors = []
+      for (const zi of [-1, 1]) {
+        for (let si = 0; si <= SEGMENTS; si++) {
+          const t = si / SEGMENTS
+          const x = t * LENGTH
+          const z = zi * HALF_WIDTH
+          positions.push(x, 0, z)
+          // Same value_for the seed uses: emissive R = 1 - 0.8*ty² at edge → 0.2.
+          // G=AO=1, B=phase, A=1.
+          colors.push(0.2, 1.0, t, 1.0)
+        }
+      }
+      const indices = []
+      const cols = SEGMENTS + 1
+      for (let si = 0; si < SEGMENTS; si++) {
+        const a = si, b = si + 1, c = cols + si + 1, d = cols + si
+        indices.push(a, b, c, a, c, d)
+      }
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4))
+      geo.setIndex(indices)
+      geo.computeVertexNormals()
+
+      // ─── The material under test ────────────────────────────────────
+      const lavaMat = buildLavaRiverMaterial()
+      // Render both sides — the strip is a flat 0-thickness sheet so
+      // BackFace culling otherwise hides it from the orbit camera's
+      // lower-hemisphere arc.
+      lavaMat.side = THREE.DoubleSide
+      const lavaMesh = new THREE.Mesh(geo, lavaMat)
+      lavaMesh.userData = { landmark_id: 'lava_river_strip' }
+      // Park the strip so its centre sits at the origin to keep the
+      // orbit camera math simple.
+      lavaMesh.position.set(-LENGTH / 2, 0.5, 0)
+      scene.add(lavaMesh)
+      window.__lava = lavaMesh
+
+      // Reference cube so we can tell the rest of the scene IS rendering.
+      const cube = new THREE.Mesh(
+        new THREE.BoxGeometry(2, 2, 2),
+        new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.5 }),
+      )
+      cube.position.set(10, 1, 6)
+      scene.add(cube)
+
+      // Solid-grey ground plane so we have a contrast point against the
+      // glow. Same scale as the strip.
+      const groundGeo = new THREE.PlaneGeometry(80, 30)
+      const ground = new THREE.Mesh(
+        groundGeo,
+        new THREE.MeshStandardMaterial({ color: 0x33271c, roughness: 1 }),
+      )
+      ground.rotation.x = -Math.PI / 2
+      ground.position.y = -0.1
+      scene.add(ground)
+
+      // ─── Camera ─────────────────────────────────────────────────────
+      const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500)
+      // Closer, lower — frames the strip as the dominant element while
+      // keeping the reference cube in view for a "rest of scene IS
+      // rendering" baseline.
+      camera.position.set(2, 4, 12)
+      camera.lookAt(0, 0, 0)
+      window.__camera = camera
+
+      // ─── HUD wiring ─────────────────────────────────────────────────
+      const initial = new URLSearchParams(location.search).get('mode') ?? 'full'
+      const setMode = (m) => {
+        applyEmissiveLandmarksSetting(m)
+        for (const b of document.querySelectorAll('.btn')) {
+          b.classList.toggle('on', b.dataset.i === m)
+        }
+        window.__lavaTestMode = m
+      }
+      setMode(initial)
+      for (const b of document.querySelectorAll('.btn')) {
+        b.addEventListener('click', () => setMode(b.dataset.i))
+      }
+
+      // ─── Render loop ────────────────────────────────────────────────
+      const start = performance.now()
+      function tick() {
+        const t = (performance.now() - start) / 1000
+        updateLavaTime(t)
+        // Slow orbit so a screenshot has a meaningful angle every second.
+        // Skip when ?static=1 so a single deterministic frame is captured.
+        const isStatic = new URLSearchParams(location.search).get('static') === '1'
+        if (!isStatic) {
+          const ang = t * 0.2
+          camera.position.set(Math.sin(ang) * 12, 4 + Math.sin(t * 0.4) * 1.5, Math.cos(ang) * 12)
+          camera.lookAt(0, 0, 0)
+        }
+        renderer.render(scene, camera)
+        requestAnimationFrame(tick)
+      }
+      tick()
+
+      window.addEventListener('resize', () => {
+        renderer.setSize(window.innerWidth, window.innerHeight)
+        camera.aspect = window.innerWidth / window.innerHeight
+        camera.updateProjectionMatrix()
+      })
+    </script>
+  </body>
+</html>

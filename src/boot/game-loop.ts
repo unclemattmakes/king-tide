@@ -50,6 +50,7 @@ import { showCupResultsOverlay } from '@/engine/render/cup-results-screen'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
 import { shouldRenderFrame } from '@/engine/render/frame-cap'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
+import { updateLavaTime } from '@/engine/render/lava-river-material'
 import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finish-banner'
 import { createPerfHud, type RenderInfoLite } from '@/engine/render/perf-hud'
 import type { RaceHud } from '@/engine/render/race-hud'
@@ -695,6 +696,12 @@ export function startGameLoop(opts: GameLoopOpts): void {
       x: state.playerSnapshot?.position.x ?? 0,
       z: state.playerSnapshot?.position.z ?? 0,
     })
+    // Lava-river material's flow-shimmer animation clock. Render-only;
+    // uses the deterministic wave-field clock so replays match. No-op
+    // for tracks that don't ship a lava strip — the uniform is shared
+    // module-scope across the process, and `updateLavaTime` is one
+    // assignment regardless of how many lava materials exist.
+    updateLavaTime(waveField.time)
     // Keep the distant horizon silhouette wrapped around the chase camera
     // so the player never appears to outrun it. Tracks the camera (not the
     // bike) so look-back / spectator pans don't shift the horizon.
