@@ -54,12 +54,17 @@ const HOP_VELOCITY_BIG = 11.0
  *  without earning the trick payoff. */
 const HOP_VELOCITY_SMALL = 4.5
 /** vyPeak floor (m/s) above which a hop counts as a credible trick.
- *  Matches `DEFAULT_DETECTOR_TUNING.minVyPeak` on the observer side. */
-const HOP_CREDIBILITY_VY = 2.5
+ *  Matches `DEFAULT_DETECTOR_TUNING.minVyPeak` on the observer side
+ *  — both must agree, or the sim awards the big hop while the
+ *  observer rejects the boost (or vice versa). 5 m/s requires either
+ *  a real wave crest climb or a ramp launch. */
+const HOP_CREDIBILITY_VY = 5.0
 /** Sim-tick lifetime of the vy-peak before it goes stale. At a fixed
- *  60 Hz step, 48 ticks ≈ 800 ms — matches the observer's
- *  `peakStaleMs`, so the two trackers expire in lockstep. */
-const VY_PEAK_STALE_TICKS = 48
+ *  60 Hz step, 18 ticks ≈ 300 ms — matches the observer's
+ *  `peakStaleMs`. Short window forces the press to land *while*
+ *  the bike is still climbing, not a beat after the crest has
+ *  already passed. */
+const VY_PEAK_STALE_TICKS = 18
 /** Seconds between consecutive hops on the same bike. Long enough that
  *  the bike has time to leave + return to the ground at HOP_VELOCITY_BIG,
  *  short enough that a deliberate hop-on-landing chain still flows. */

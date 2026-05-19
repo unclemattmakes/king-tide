@@ -86,21 +86,25 @@ export type DetectorTuning = {
 }
 
 export const DEFAULT_DETECTOR_TUNING: Readonly<DetectorTuning> = Object.freeze({
-  // Raised from 0.7 → 2.5 after the M11 pump revamp: at 0.7 every
-  // hover-spring oscillation on calm water cleared the floor, so
-  // pressing trick anywhere produced a credible reward. 2.5 m/s
-  // requires the bike to actually climb a real wave crest or
-  // launch off a ramp lip.
-  minVyPeak: 2.5,
+  // Raised to 5.0 m/s — 2.5 was still tripping on wave chop during
+  // top-speed runs across The Maw, so almost every hop registered as
+  // a trick. 5.0 m/s requires either a real wave crest climb or a
+  // ramp launch — the kind of vertical velocity you only see when
+  // the surface is genuinely lifting the bike.
+  minVyPeak: 5.0,
   minSpeedFrac: 0.35,
   minThrottle: 0.3,
   cooldownMs: 500,
-  // Bumped from 3.5 → 6.0 alongside `minVyPeak` so the strength score
-  // has room to scale between "moderate wave" and "Versace Steps
-  // seaplane ramp" — a tiny credible crest reads as a 0.2-floor
-  // trick, a real ramp launches saturates to 1.0.
-  vyCeiling: 6.0,
-  peakStaleMs: 800,
+  // Bumped alongside `minVyPeak` so the strength score has room to
+  // scale between "ridable swell" (5–6 m/s) and "seaplane ramp"
+  // (~9 m/s). Saturation reserved for the biggest launches.
+  vyCeiling: 9.0,
+  // Tightened from 800 → 300 ms. The press has to land WHILE the
+  // bike is still on the rising face of the crest, not a beat after
+  // it's already started falling — turns the trick into a deliberate
+  // apex-timing input instead of "you crested half a second ago,
+  // here's your reward".
+  peakStaleMs: 300,
 })
 
 export type WavePumpObserver = {
