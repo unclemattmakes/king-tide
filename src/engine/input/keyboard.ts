@@ -75,7 +75,11 @@ export function keyboardIntent(dt: number): Intent {
 
   const up = isActionDown('pitchUp', bindings) ? 1 : 0
   const down = isActionDown('pitchDown', bindings) ? 1 : 0
-  const pitchTarget = down - up
+  // intent.pitch convention (intent.ts + hover.ts): positive = nose UP.
+  // So pitchUp (E) → +1, pitchDown (Q) → -1. The mirrored `down - up`
+  // shipped briefly in 8562ffe and inverted keyboard pitch relative to
+  // gamepad / touch — wheelie input read as a dive.
+  const pitchTarget = up - down
 
   smoothSteer = lerpToward(smoothSteer, steerTarget, dt, devSettings.keyboardSteerRate)
   smoothThrottle = lerpToward(smoothThrottle, throttleTarget, dt, devSettings.keyboardThrottleRate)

@@ -825,7 +825,11 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // which rotates fwd toward +y (nose up).
     if (Math.abs(intent.pitch) > 0.05) {
       const rightP = quatRotate(q, { x: 1, y: 0, z: 0 })
-      const PITCH_TORQUE_ACCEL = 6 // rad/s² at full input
+      // Ground gets stronger authority so a held wheelie reads against
+      // the multi-point hover spring's restoring torque (bow above hover
+      // height → spring pushes bow down → fights nose-up tilt). Air stays
+      // at the lower value so backflip / dive pacing isn't disrupted.
+      const PITCH_TORQUE_ACCEL = isGrounded ? 14 : 6 // rad/s² at full input
       const aPitch = -intent.pitch * PITCH_TORQUE_ACCEL
       rb.applyTorqueImpulse(
         {
