@@ -41,6 +41,11 @@ export type ConsoleErrorCollector = {
   /** Add an allowlist regex. Lines matching ANY regex are ignored by
    *  `assertNone`. Returns the collector for chaining. */
   allow(pattern: RegExp): ConsoleErrorCollector
+  /** Wipe collected records (allowlist stays). Call after the boot /
+   *  settle-in window if you want `assertNone` to grade only the post-
+   *  reset interval — e.g. a perf-budget spec that doesn't care about
+   *  cold-load shader compile warnings. */
+  reset(): void
   /** Throws via expect() if any non-allowlisted error has been recorded.
    *  Call this at the end of the spec (or any checkpoint mid-spec). */
   assertNone(): void
@@ -82,6 +87,9 @@ export const test = base.extend<{ consoleErrors: ConsoleErrorCollector }>({
       allow(pattern: RegExp) {
         allowlist.push(pattern)
         return collector
+      },
+      reset() {
+        records.length = 0
       },
       assertNone() {
         const offending = records.filter((r) => !allowlist.some((re) => re.test(formatRecord(r))))

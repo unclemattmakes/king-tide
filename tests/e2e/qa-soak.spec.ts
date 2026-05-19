@@ -19,6 +19,7 @@
  * lands.
  */
 import { SOAK_TRACKS } from '../../tools/qa/matrix.mjs'
+import { waitForPerfReady } from './helpers/boot'
 import { expect, test } from './helpers/console-errors'
 
 const DEFAULT_DURATION_SEC = 60
@@ -40,9 +41,12 @@ test.describe('QA stability soak', () => {
       consoleErrors.allow(/^\[vite\]/)
 
       await page.goto(`/?autostart=1&track=${cell.id}&bike=${cell.bike}`)
-      await page.waitForFunction(() => window.__hover?.ready === true, { timeout: 20_000 })
-      await page.waitForFunction(() => window.__hover?.perf != null, { timeout: 20_000 })
+      await waitForPerfReady(page)
 
+      // Reset both the Playwright-side collector (drives `assertNone()`)
+      // and the in-page trap (drives the bug-bundle dump on failure) so
+      // we grade only the soak window, not the cold-boot settle-in.
+      consoleErrors.reset()
       await page.evaluate(() => {
         window.__hover!.qa?.consoleClear()
         window.__hover!.perf!.resetWindow()

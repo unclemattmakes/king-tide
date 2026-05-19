@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { skipWebKitLinux } from './helpers/platform-skips'
 
 /**
  * Cliffside is the second track. Same stadium gate layout as Lagoon Loop,
@@ -16,13 +17,7 @@ import { expect, test } from '@playwright/test'
  * Lagoon Loop e2e tests are unaffected.
  */
 test.describe('M9 Cliffside', () => {
-  // WebKit on Linux uses software WebGL (WebKitGTK has no real GPU passthrough
-  // in Playwright); the heavy mesa geometry + water makes this suite unreliable.
-  // Run on macOS WebKit for real coverage.
-  test.skip(
-    ({ browserName }) => browserName === 'webkit' && process.platform === 'linux',
-    'WebKit-Linux uses software WebGL; this GPU-heavy suite is unreliable. Run on macOS for WebKit coverage.',
-  )
+  skipWebKitLinux(test)
 
   test('right-straight climb reaches the mesa', async ({ page }) => {
     await page.goto('/?track=cliffside')

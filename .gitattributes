@@ -1,0 +1,44 @@
+# Normalize all text files to LF in the repo and on checkout.
+#
+# Without this, contributors on Windows (where `core.autocrlf=true` is
+# the default git install setting) get CRLF in their working tree and
+# Biome's formatter reports every file as a diff. The check is platform-
+# correct but practically unrunnable. Pinning LF here makes `pnpm lint`
+# pass identically across Linux / macOS / Windows.
+#
+# `text=auto` lets git detect text vs binary; `eol=lf` forces LF on
+# checkout for everything classified as text.
+* text=auto eol=lf
+
+# Binary asset types — never normalize, never diff as text. These would
+# corrupt if git tried to translate line endings.
+*.glb       binary
+*.gltf      binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.webp      binary
+*.gif       binary
+*.ico       binary
+*.icns      binary
+*.blend     binary
+*.blend1    binary
+*.ogg       binary
+*.mp3       binary
+*.wav       binary
+*.woff      binary
+*.woff2     binary
+*.ttf       binary
+*.otf       binary
+*.pdf       binary
+*.zip       binary
+*.tar       binary
+*.gz        binary
+*.exe       binary
+*.dll       binary
+*.dylib     binary
+*.so        binary
+
+# Shell scripts must stay LF even if a future contributor's git is
+# weird. Belt + suspenders given `* text=auto eol=lf` above.
+*.sh        text eol=lf

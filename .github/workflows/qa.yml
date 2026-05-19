@@ -28,7 +28,10 @@ jobs:
     name: QA report (non-blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Keep going so a flaky perf cell doesn't abort the artifact upload.
+    # Non-blocking while v1 calibrates. `continue-on-error` alone is
+    # enough — we don't double-mask with `|| true` on the step itself,
+    # because the orchestrator's real exit code is the most diagnostic
+    # signal an artifact can carry.
     continue-on-error: true
 
     steps:
@@ -49,10 +52,10 @@ jobs:
         run: pnpm e2e:install
 
       - name: Run pnpm qa
-        # The orchestrator returns the worst-case exit code; we mask it
-        # here while QA is non-blocking. Drop the `|| true` once the
-        # matrix is calibrated and we want PRs to gate on it.
-        run: pnpm qa --skip-track-lint || true
+        # The orchestrator skips Blender-side track-lint by default —
+        # `--track-lint` opts in when BLENDER_EXE is on PATH (CI doesn't
+        # have Blender, so we don't pass it here).
+        run: pnpm qa
 
       - name: Append report to job summary
         if: always()
@@ -70,6 +73,18 @@ jobs:
           name: qa-report
           path: qa-report/
           retention-days: 14
+
+      - name: Upload Playwright HTML report
+        # Separate artifact so a triager investigating a matrix cell
+        # failure can open trace.zip in the Playwright trace viewer
+        # without re-running the suite locally.
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+          if-no-files-found: ignore
 
   qa-soak:
     name: QA soak (nightly, main only)
@@ -93,7 +108,7 @@ jobs:
         run: pnpm e2e:install
 
       - name: Run pnpm qa --soak
-        run: pnpm qa --soak --skip-track-lint || true
+        run: pnpm qa --soak
 
       - name: Append soak report to job summary
         if: always()

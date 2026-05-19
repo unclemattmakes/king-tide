@@ -4,10 +4,11 @@
  * want to consume an older qa-report.json) can build the same view
  * without re-running the gates.
  *
- * The report is opinionated: one summary table, one per-step section
- * each with a status pill and a pointer at the log file. Failures get
- * a tail of the log inline so a triager doesn't have to chase the
- * artifact path.
+ * The report is opinionated: one summary table, one preflight summary,
+ * one perf-numbers table extracted from the matrix log, then per-step
+ * sections each with a status pill and a pointer at the log file.
+ * Failures get a tail of the log inline so a triager doesn't have to
+ * chase the artifact path.
  */
 
 import { existsSync, readFileSync } from 'node:fs'
@@ -22,8 +23,15 @@ const FAILURE_TAIL_LINES = 40
  *   runFinishedAt: string,
  *   runDurationMs: number,
  *   repoRoot: string,
+ *   preflight?: PreflightCheck[],
  *   steps: QaStep[],
  * }} QaReport
+ * @typedef {{
+ *   name: string,
+ *   ok: boolean,
+ *   message: string,
+ *   fix?: string,
+ * }} PreflightCheck
  * @typedef {{
  *   id: string,
  *   label: string,
@@ -36,6 +44,16 @@ const FAILURE_TAIL_LINES = 40
  *   logPath: string,
  *   gate: boolean,
  * }} QaStep
+ * @typedef {{
+ *   track: string,
+ *   bike: string,
+ *   fps: number,
+ *   p50Ms: number,
+ *   p95Ms: number,
+ *   p99Ms: number,
+ *   hitchCount: number,
+ *   count: number,
+ * }} MatrixPerfRow
  */
 
 const STATUS_GLYPH = Object.freeze({
@@ -61,6 +79,21 @@ export function renderMarkdown(report) {
   )
   lines.push('')
 
+  // Preflight summary — only render when the orchestrator captured it
+  // (older qa-report.json blobs won't carry the field).
+  if (report.preflight?.length) {
+    lines.push('## Preflight')
+    lines.push('')
+    lines.push('| Check | Status | Notes |')
+    lines.push('|---|---|---|')
+    for (const c of report.preflight) {
+      const glyph = c.ok ? '✅' : '⚠️'
+      const notes = c.ok ? c.message : `${c.message}${c.fix ? ` — fix: \`${c.fix}\`` : ''}`
+      lines.push(`| ${c.name} | ${glyph} | ${notes} |`)
+    }
+    lines.push('')
+  }
+
   // Summary table — one line per step.
   lines.push('## Summary')
   lines.push('')
@@ -76,6 +109,36 @@ export function renderMarkdown(report) {
     `**Totals:** ${totals.pass} pass · ${totals.fail} fail · ${totals.skip} skip · ${report.steps.length} total.`,
   )
   lines.push('')
+
+  // Matrix perf table — extract the structured `qa-matrix:*:perf` lines
+  // from the matrix step's log so the richest signal the QA pass produces
+  // (actual fps / p95 / hitch counts per cell) lives in the report and
+  // not buried in a log artifact.
+  const matrixStep = report.steps.find((s) => s.id === 'matrix')
+  if (matrixStep) {
+    const perfRows = parseMatrixPerfRows(matrixStep.logPath)
+    if (perfRows.length > 0) {
+      lines.push('## Matrix perf')
+      lines.push('')
+      lines.push('| Track | Bike | FPS | p50 ms | p95 ms | p99 ms | Hitches | Samples |')
+      lines.push('|---|---|---:|---:|---:|---:|---:|---:|')
+      for (const r of perfRows) {
+        lines.push(
+          `| ${r.track} | ${r.bike} | ${r.fps.toFixed(1)} | ${r.p50Ms.toFixed(1)} | ${r.p95Ms.toFixed(1)} | ${r.p99Ms.toFixed(1)} | ${r.hitchCount} | ${r.count} |`,
+        )
+      }
+      lines.push('')
+      const sortedByFps = [...perfRows].sort((a, b) => a.fps - b.fps)
+      const worst = sortedByFps[0]
+      const best = sortedByFps[sortedByFps.length - 1]
+      if (worst && best) {
+        lines.push(
+          `**Range:** worst ${worst.track} × ${worst.bike} (${worst.fps.toFixed(1)} fps, p95 ${worst.p95Ms.toFixed(1)} ms) → best ${best.track} × ${best.bike} (${best.fps.toFixed(1)} fps, p95 ${best.p95Ms.toFixed(1)} ms).`,
+        )
+        lines.push('')
+      }
+    }
+  }
 
   // Per-step section, with a log tail for failures.
   lines.push('## Per-step detail')
@@ -125,14 +188,73 @@ export function summariseTotals(steps) {
   return t
 }
 
-function relPath(absPath, root) {
+/**
+ * Render an absolute path as a repo-relative path. Handles both POSIX
+ * forward slashes and Windows backslashes — the orchestrator emits
+ * native paths from `path.join`, so on Windows the log paths come back
+ * with backslashes and the previous implementation's slash-only prefix
+ * match left them as absolute paths in the report. Normalises both
+ * sides before comparing.
+ */
+export function relPath(absPath, root) {
   if (!absPath) return ''
-  // `root` may or may not carry a trailing slash depending on how the
-  // caller resolved it. Normalise both sides so the slice doesn't eat
-  // a leading character of the relative tail.
-  const normRoot = root.endsWith('/') ? root : `${root}/`
-  if (absPath.startsWith(normRoot)) return absPath.slice(normRoot.length)
-  return absPath
+  const norm = (p) => p.replace(/\\/g, '/')
+  const a = norm(absPath)
+  const r = norm(root)
+  const rWithSlash = r.endsWith('/') ? r : `${r}/`
+  if (a.startsWith(rWithSlash)) return a.slice(rWithSlash.length)
+  return a
+}
+
+/**
+ * Extract structured perf rows the matrix spec emits as
+ *   `qa-matrix:<track>:<bike>:perf {"fps":..., "p95Ms":..., ...}`
+ *
+ * Returns `[]` if the log is missing or the lines aren't present (an
+ * unrelated failure happened before any cell could log its perf blob).
+ *
+ * @param {string} logPath
+ * @returns {MatrixPerfRow[]}
+ */
+export function parseMatrixPerfRows(logPath) {
+  if (!existsSync(logPath)) return []
+  let raw
+  try {
+    raw = readFileSync(logPath, 'utf8')
+  } catch {
+    return []
+  }
+  /** @type {MatrixPerfRow[]} */
+  const rows = []
+  // `qa-matrix:<track>:<bike>:perf {"fps":...,"p50Ms":...,...}`. The JSON
+  // can technically wrap a newline if the recorder ever grew to multiline
+  // output, but today it's always single-line so this is fine.
+  const re = /qa-matrix:([\w-]+):([\w-]+):perf\s+(\{.*\})/g
+  let m
+  while ((m = re.exec(raw)) !== null) {
+    const [, track, bike, jsonText] = m
+    try {
+      const parsed = JSON.parse(jsonText)
+      rows.push({
+        track,
+        bike,
+        fps: numberOr(parsed.fps, 0),
+        p50Ms: numberOr(parsed.p50Ms, 0),
+        p95Ms: numberOr(parsed.p95Ms, 0),
+        p99Ms: numberOr(parsed.p99Ms, 0),
+        hitchCount: numberOr(parsed.hitchCount, 0),
+        count: numberOr(parsed.count, 0),
+      })
+    } catch {
+      // Skip malformed lines silently — a partial parse is still worth
+      // surfacing rows we did get.
+    }
+  }
+  return rows
+}
+
+function numberOr(v, fallback) {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback
 }
 
 function formatDuration(ms) {

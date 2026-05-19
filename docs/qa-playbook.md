@@ -14,20 +14,27 @@ counted.
 
 ## TL;DR
 
-| Gate | Runner | Threshold | Today |
-|---|---|---|---|
-| Typecheck | `pnpm typecheck` | 0 errors | ✅ |
-| Lint | `pnpm lint` | 0 errors | ✅ |
-| Unit tests | `pnpm test` | 100% pass | ✅ 624/624 |
-| Track lint | `pnpm gen:tracks:validate` | 0 errors (advisory warnings ok) | ✅ |
-| E2E smoke | `pnpm e2e` | 100% pass on Chromium | ✅ |
-| QA matrix | `QA_MATRIX=1 pnpm e2e tests/e2e/qa-track-matrix.spec.ts` | every enabled cell boots + autoplays 5 s + holds fps ≥ 30 / p95 ≤ 50 ms | ⏳ calibrating |
-| QA soak | `QA_SOAK=1 pnpm e2e tests/e2e/qa-soak.spec.ts` | 60 s autoplay clean (no console errors, hitch fraction < 5%, heap end/mid ratio < 1.5) | ⏳ calibrating |
-| Cross-browser smoke | `E2E_BROWSERS=all pnpm e2e tests/e2e/cross-browser-smoke.spec.ts` | menu cathedral renders on Chromium / Firefox / WebKit | ✅ |
+| Gate | Runner | Threshold |
+|---|---|---|
+| Typecheck | `pnpm typecheck` | 0 errors |
+| Lint | `pnpm lint` | 0 errors |
+| Unit tests | `pnpm test` | 100% pass |
+| Track lint (opt-in) | `pnpm gen:tracks:validate` | 0 errors (advisory warnings ok) |
+| E2E smoke | `pnpm e2e` | 100% pass on Chromium |
+| QA matrix | `QA_MATRIX=1 pnpm e2e tests/e2e/qa-track-matrix.spec.ts` | every enabled cell boots + autoplays 5 s + holds fps ≥ floor / p95 ≤ ceiling (see `tools/qa/matrix.mjs`) |
+| QA soak | `QA_SOAK=1 pnpm e2e tests/e2e/qa-soak.spec.ts` | 60 s autoplay clean (no console errors, hitch fraction < 5%, heap end/mid ratio < 1.5) |
+| QA boot loop | `QA_BOOT_LOOP=1 pnpm e2e tests/e2e/qa-boot-loop.spec.ts` | 5 cold boots without console errors and heap growth < 2× |
+| Cross-browser smoke | `E2E_BROWSERS=all pnpm e2e tests/e2e/cross-browser-smoke.spec.ts` | menu cathedral renders on Chromium / Firefox / WebKit |
 
-`pnpm qa` runs the full sweep (everything except cross-browser, which
-is opt-in) and emits a Markdown + JSON report under `qa-report/`. Add
-`--soak` to include the stability soak.
+Current pass-state per gate is whatever the latest CI run on `main`
+says — don't trust a hand-maintained ✅ here, check
+[GitHub Actions](https://github.com/occ-matt/hoverbike/actions) (or
+`gh run list --workflow=ci.yml --branch=main` from a shell).
+
+`pnpm qa` runs the orchestrator end-to-end (typecheck + lint + unit +
+matrix) and emits a Markdown + JSON report under `qa-report/`. Add
+`--soak` to include the stability soak. Track lint is opt-in via
+`--track-lint` (off by default since CI runners don't ship Blender).
 
 ## Shippability — what "PASS" means
 
@@ -53,18 +60,33 @@ cells get their own per-track budget and start gating PRs.
 
 ## Running QA
 
+### First-time setup
+
+```bash
+pnpm install              # installs deps
+pnpm e2e:install          # downloads the Playwright Chromium binary
+pnpm qa --doctor          # verifies the above + checks dev port 5391 is free
+```
+
+`pnpm qa --doctor` is a preflight-only run — no gates execute, just
+the dep / Playwright / port checks. Use it when picking up the repo
+on a new machine, or after a long pause.
+
 ### Local — one-shot
 
 ```bash
-pnpm qa                # typecheck + lint + unit + track lint + matrix
+pnpm qa                # typecheck + lint + unit + matrix
 pnpm qa --soak         # … + soak run
+pnpm qa --track-lint   # … + Blender-side gen:tracks:validate (needs BLENDER_EXE)
 pnpm qa --skip-typecheck --skip-lint   # if you've already iterated those
 ```
 
 The report lands at:
 
-- `qa-report/qa-report.md` — human-readable summary + per-step log tails
-- `qa-report/qa-report.json` — same shape as the artifact CI uploads
+- `qa-report/qa-report.md` — human-readable summary + preflight table
+  + per-cell perf table + per-step log tails
+- `qa-report/qa-report.json` — same shape as the artifact CI uploads,
+  `schemaVersion: 1`
 - `qa-report/<step>.log` — raw stdout/stderr per step
 
 ### Local — targeted
@@ -72,27 +94,34 @@ The report lands at:
 ```bash
 pnpm qa:smoke          # just the parameterised track × bike matrix
 pnpm qa:soak           # just the 60s stability soak
+pnpm test:coverage     # vitest with V8 coverage → coverage/index.html
 ```
 
-These don't generate a report — they're for re-running a single gate
-after a fix.
+`pnpm qa:smoke` and `pnpm qa:soak` don't generate a report — they're
+for re-running a single gate after a fix.
 
 ### CI
 
-The `.github/workflows/qa.yml` job runs `pnpm qa` (without soak) on
-every push + PR, uploads the report as a build artifact, and writes
-the Markdown summary into the job's GitHub Step Summary so it's
-visible from the Actions tab without unzipping artifacts. Failures
-**do not** block the PR today — the existing `ci.yml` is the
-gating workflow.
+`.github/workflows/qa.yml` runs `pnpm qa` on every push + PR, uploads
+two artifacts (`qa-report/` and `playwright-report/` — the latter lets
+a triager open a trace.zip in the Playwright trace viewer without
+re-running locally), and writes the Markdown summary into the job's
+GitHub Step Summary so it's visible from the Actions tab without
+unzipping. Failures **do not** block the PR today — the existing
+`ci.yml` is the gating workflow. The `qa.yml` job carries
+`continue-on-error: true`; we no longer double-mask with `|| true`.
 
-The same job ships a `qa-soak` step that runs `pnpm qa:soak`
+The same workflow ships a `qa-soak` step that runs `pnpm qa --soak`
 nightly on `main` only.
 
 ## Matrix details
 
 `tools/qa/matrix.mjs` is the single source of truth for which
-(track × bike) cells the QA matrix exercises. Two principles:
+(track × bike) cells the QA matrix exercises **and** the global
+fps/p95 floor (`GLOBAL_PERF_BUDGET`). `tests/e2e/perf-budget.spec.ts`
+imports the same constant, so a budget tweak lives in one place.
+
+Two principles:
 
 1. **Procedural tracks are the floor.** `lagoon` and `cliffside` are
    tested against every bike. If they regress, the QA pass fails
@@ -114,6 +143,11 @@ Per-track perf budgets are optional. The global default (`fps >= 30`,
 `p95 <= 50ms`) is used unless `perfBudget` is set on the cell.
 Wave-heavy tracks (The Maw, Aqualand) will likely get their own
 ceiling once art tuning lands; until then, the global default applies.
+
+The matrix log emits structured `qa-matrix:<track>:<bike>:perf {...}`
+JSON lines per cell. The orchestrator parses these and renders a perf
+table in `qa-report.md` so triagers see actual fps / p95 / hitch
+counts without grepping the log.
 
 ## Bug repro bundle
 
@@ -159,20 +193,21 @@ qa-report/
 ├── typecheck.log    # raw stdout/stderr per step
 ├── lint.log
 ├── unit.log
-├── track-lint.log
 ├── matrix.log
 └── soak.log         # only if --soak was passed
 ```
 
-The Markdown report has three sections:
+The Markdown report has these sections:
 
 1. **Shippability** — single line, "✅ no gated failures." or "❌ one
    or more gated steps failed".
-2. **Summary** — one row per step with status / duration / gate / log
-   path.
-3. **Per-step detail** — for failed steps, inlines the last 40 log
-   lines under a `<details>` block so the report itself contains the
-   triage starting point.
+2. **Preflight** — dep / browser / port check status.
+3. **Summary** — one row per step with status / duration / gate /
+   log path (paths are repo-relative on both POSIX and Windows).
+4. **Matrix perf** — per-cell fps / p50 / p95 / p99 / hitch / sample
+   counts, parsed out of the matrix log.
+5. **Per-step detail** — for failed steps, inlines the last 40 log
+   lines under a `<details>` block.
 
 ## Test conventions
 
@@ -194,6 +229,36 @@ test('my spec', async ({ page, consoleErrors }) => {
 Allow specific known-noisy lines with `consoleErrors.allow(/regex/)`.
 Every allowlist entry is a TODO — surface them in code review.
 
+Reset the collector after the boot / settle-in window with
+`consoleErrors.reset()` if you want the assertion to grade only the
+post-reset interval (the matrix spec does this so cold-load shader
+compile warnings don't flunk a cell).
+
+### Boot probes
+
+Three readiness helpers live in `tests/e2e/helpers/boot.ts`:
+
+- `waitForReady(page)` — debug API mounted (`__hover.ready === true`)
+- `waitForPerfReady(page)` — adds `__hover.perf != null`
+- `waitFullyBooted(page)` — adds bike spawned + grounded
+
+Use the strictest one your spec actually depends on. A spec that
+asserts on physics state should always call `waitFullyBooted` so a
+boot-sequence regression has a single place to surface.
+
+### Platform skips
+
+WebKit on Linux gets software WebGL only — any GPU-bound spec uses:
+
+```ts
+import { skipWebKitLinux } from './helpers/platform-skips'
+
+test.describe('M9 cliffside', () => {
+  skipWebKitLinux(test)
+  // …
+})
+```
+
 ### Determinism remains its own thing
 
 The determinism harness (`__hover.determinism.run()`) and the
@@ -201,6 +266,11 @@ m10-determinism spec are deliberately separate from the QA matrix.
 QA is about "does it boot and stay up"; determinism is about "does it
 boot up the *same* every time". The two gates protect different
 properties.
+
+The determinism spec doesn't use the `consoleErrors` fixture — it
+spins up its own browser contexts per probe so it can run two cold
+boots in parallel. The inline `page.on()` capture there is
+intentional, not a migration oversight.
 
 ### Visual regression — not done yet
 
@@ -256,6 +326,9 @@ Any failure here gets a `qa-manual` label on the issue.
 - Replay-driven regression — pin a known-good replay per track, drive
   the determinism harness through it, assert final snapshot matches.
 - Lighthouse / a11y audit harness (axe-core against the menu DOM).
+- Coverage signal — `pnpm test:coverage` produces HTML now; CI doesn't
+  yet enforce a floor. Add a soft target (e.g. 70% lines on `src/game/`)
+  once we've eyeballed where the natural baseline sits.
 
 These are tracked as comments on the Polish/QA row in
 `v1-work-breakdown.md`.

@@ -25,6 +25,13 @@ const SCRIPTED_INTENT = {
 const TICKS = 600 // 10 seconds at the 60Hz fixed step.
 
 async function probe(browser: Browser): Promise<{ start: string; end: string }> {
+  // Deliberately bypasses the `consoleErrors` fixture in
+  // tests/e2e/helpers/console-errors.ts — that fixture binds to the
+  // page Playwright injects via the test bindings, but this probe
+  // spins up its own browser context per call so it can run two cold
+  // boots in parallel. The minimal inline capture here is intentional;
+  // don't migrate to the fixture without first refactoring `probe` to
+  // accept a Page argument.
   const ctx = await browser.newContext()
   const page = await ctx.newPage()
   const errors: string[] = []

@@ -1,4 +1,6 @@
-import { expect, test } from '@playwright/test'
+import { waitFullyBooted } from './helpers/boot'
+import { expect, test } from './helpers/console-errors'
+import { skipWebKitLinux } from './helpers/platform-skips'
 
 // The GPU water shader added in M9.25 has a per-fragment foam loop that
 // hammers SwiftShader (the WebGL2 software fallback used by headless
@@ -8,26 +10,12 @@ import { expect, test } from '@playwright/test'
 // still real (bike rides waves, doesn't sink) — we just need more wall
 // time for the sim to advance enough to observe them.
 test.describe('M2 water', () => {
-  // WebKit on Linux uses software WebGL (WebKitGTK has no real GPU passthrough
-  // in Playwright); the Gerstner water shader's per-fragment foam loop is
-  // unreliable at single-digit fps. Run on macOS WebKit for real coverage.
-  test.skip(
-    ({ browserName }) => browserName === 'webkit' && process.platform === 'linux',
-    'WebKit-Linux uses software WebGL; this GPU-heavy suite is unreliable. Run on macOS for WebKit coverage.',
-  )
+  skipWebKitLinux(test)
 
-  test('bike drives off the island onto water and rides waves', async ({ page }) => {
+  test('bike drives off the island onto water and rides waves', async ({ page, consoleErrors }) => {
     test.setTimeout(90_000)
-    const errors: string[] = []
-    page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`)
-    })
-
     await page.goto('/?autostart=1')
-    await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
-      timeout: 15000,
-    })
+    await waitFullyBooted(page, { timeout: 15_000 })
 
     // Drive forward at full throttle for 4 seconds — long enough to leave the
     // island (radius 24m) and ride water for a beat.
@@ -73,15 +61,13 @@ test.describe('M2 water', () => {
     // Wave-driven oscillation should be at least 0.4m peak-to-peak.
     expect(yRange).toBeGreaterThan(0.4)
 
-    expect(errors, errors.join('\n')).toEqual([])
+    consoleErrors.assertNone()
   })
 
   test('bike floats on water from rest (does not sink)', async ({ page }) => {
     test.setTimeout(90_000)
     await page.goto('/?autostart=1')
-    await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
-      timeout: 15000,
-    })
+    await waitFullyBooted(page, { timeout: 15_000 })
 
     // Coast off the island (no throttle), let physics settle.
     await page.evaluate(() =>
