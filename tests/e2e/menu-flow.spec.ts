@@ -44,10 +44,12 @@ async function clickModeCard(page: Page, mode: string): Promise<void> {
 }
 
 test.describe('cold-boot menu', () => {
-  test('bare URL shows the title screen with PRESS START', async ({ page }) => {
+  test('bare URL shows the cold-boot title screen', async ({ page }) => {
     await page.goto('/')
-    const title = page.locator('#title-start')
-    await expect(title).toBeVisible()
+    // Apple-sport refresh dropped the explicit PRESS START button —
+    // the entire `.bc-title` section is the affordance now; any key
+    // or click on it advances. Assert on the wordmark instead.
+    await expect(page.locator('.bc-title .word')).toBeVisible()
     // Body gets the menu-active class so HUD chrome stays hidden.
     const bodyClass = await page.evaluate(() => document.body.classList.contains('menu-active'))
     expect(bodyClass).toBe(true)
@@ -64,7 +66,7 @@ test.describe('cold-boot menu', () => {
 
   test('Race path commits a race URL with track + bike + race=1', async ({ page }) => {
     await page.goto('/')
-    await softClick(page.locator('#title-start'))
+    await page.keyboard.press('Enter')
     await clickModeCard(page, 'race')
     // Click the first track card. With every v1 track now status:'ship',
     // the first card on `sp-track` is Sandbar. Clicking auto-advances to
@@ -85,7 +87,7 @@ test.describe('cold-boot menu', () => {
 
   test('Time Trial path commits a race URL with tt=1', async ({ page }) => {
     await page.goto('/')
-    await softClick(page.locator('#title-start'))
+    await page.keyboard.press('Enter')
     await clickModeCard(page, 'time-trial')
     // TT reuses `sp-cup-tracks` as a venue picker — every shipped v1
     // track is listed as a clickable tile (no cup wrapper). The grid
@@ -111,7 +113,7 @@ test.describe('cold-boot menu', () => {
 
   test('Cup path commits a championship URL with cup= + first race track', async ({ page }) => {
     await page.goto('/')
-    await softClick(page.locator('#title-start'))
+    await page.keyboard.press('Enter')
     await clickModeCard(page, 'cup')
     // First cup card is Reef Cup — `V1_CUPS[0]`. Dev placeholder + Dev
     // Cup get appended after the ship cups, so `.first()` is stable.
@@ -134,7 +136,7 @@ test.describe('cold-boot menu', () => {
 
   test('MP entry "CREATE LOBBY" navigates to a room code URL', async ({ page }) => {
     await page.goto('/')
-    await softClick(page.locator('#title-start'))
+    await page.keyboard.press('Enter')
     await clickModeCard(page, 'multiplayer')
     // CREATE LOBBY button is the first card on the MP entry screen.
     await softClick(page.locator('.bc-mode-card[data-action="create"]'))
