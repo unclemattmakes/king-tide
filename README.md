@@ -10,7 +10,6 @@ Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics a
 - [Architecture decisions](docs/adr/README.md) — ECS, sim/render split, WebGPU, Rapier
 - [In-app track editor](docs/track-editor-guide.md) — authoring gameplay data
 - [Blender pipeline](docs/blender-pipeline-guide.md) — authoring environment geometry
-- [Blender conventions](docs/blender-conventions.md) — quick-reference for the legacy all-in-glb path
 - [Dev + modder docs site](docs-site/) — VitePress site (`pnpm docs:dev`) covering build, gameplay, asset pipeline, and reference
 - [Contributing](CONTRIBUTING.md) — workflow, conventions, testing expectations
 - [Cross-browser support](docs/cross-browser.md) — tier matrix + how to run `E2E_BROWSERS=all pnpm e2e`
@@ -26,15 +25,19 @@ Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics a
 
 ## What's playable
 
-- **Two tracks** — Lagoon Loop (default) and Cliffside (`?track=cliffside`, with the JetMoto-style cliff drop)
+- **v1 menu cathedral** — title → mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial) → track / cup / lobby → bike-select → race. Full Settings overlay across Audio / Video / Controls / Gameplay / Accessibility / Network tabs.
+- **12 ship tracks** — full v1 lineup: tutorial Sandbar plus the Reef, Open Sea, Continental, and Drowned Cups (Lagoon Loop, Cliffside, South Beach Sunken, Hatteras Light, Cape Town Drift, The Maw, Shibuya Submerged, Kilauea Crown, Marina Bay 7, Doge's Drift, Aqualand, Angkor Drowned, Liberty Drowned). See [`docs/track-themes.md`](docs/track-themes.md) for the content bible.
 - **Three bike variants** — Cruiser / Racer / Stunt with distinct stat tradeoffs (`?bike=cruiser|racer|stunt`)
 - **Four pickups** — boost, shield, mine, homing missile (random pool)
-- **4 AI opponents** — spline-following with rubber-band, fire their own pickups
-- **3-lap races** with checkpoint enforcement and lap-completion fanfare
+- **4 AI opponents** with Casual / Standard / Hard difficulty + rubber-band toggle (spline-following, fire their own pickups)
+- **3-lap races + Cup mode** — championship across the four ship cups with MK8-style points + cup-results screen
+- **Time Trial mode** with self-overwriting best-lap ghost per (track, bike)
+- **Wave-mastery loop** — wave-pump signal (post-launch reward) + wave-line shimmer (forward-looking guidance) bracket the player's pump decision
+- **Multiplayer** — `?room=<id>` lobby, host-elected AI sync, 20 Hz transform snapshots, live RTT readout
 - **Best-lap save state** per (track, bike) in localStorage
-- **Garage menu** for picking bike + track + viewing records (HUD button top-right)
-- **Procedural audio** — engine pitch tied to speed, water ambient, pickup chime, weapon SFX, gate / lap cues, mute toggle (M)
-- **In-app track editor** — `?edit=1` opens a TransformControls-based editor over a JSON snapshot of the lagoon stadium; gates / pickups / boost pads / spline points are placeable + drag-manipulable; Save writes back to disk via a dev-only Vite middleware
+- **Tutorial framework** — track-agnostic 6-beat director (`?tutorial=1`)
+- **Procedural audio** — four-bus mixer (master / music / sfx / ambient) + sidechain duck on pump/explosion
+- **In-app track editor** — `?edit=1` opens a TransformControls editor over the JSON track snapshot; gates / pickups / boost pads / spline points placeable + drag-manipulable; Save writes back via a dev-only Vite middleware
 
 ## Develop
 

@@ -12,8 +12,7 @@ The connector documented in the top-level
 [CLAUDE.md](../CLAUDE.md#blender-connector--optional) is one way to drive
 Blender from a Claude session, but every item here can also be built
 with the headless `pnpm gen:*` pipeline. The existing pipeline is in
-[blender-pipeline-guide.md](./blender-pipeline-guide.md) and
-[blender-conventions.md](./blender-conventions.md).
+[blender-pipeline-guide.md](./blender-pipeline-guide.md).
 
 
 ## Shipped so far
@@ -347,10 +346,10 @@ path-worn channel.
 
 ## Item 2 — Tighter Blender ↔ in-app editor link for gate placement ✅ Shipped 2026-05-11
 
-Today the hybrid pipeline retired `cp_NN` empties from the `.blend`
-(see [blender-conventions.md](./blender-conventions.md): "*Most of the object
-kinds below … are now redundant — the editor owns those*"). So Blender shows
-zero gates right now. Matt wants gates *visible* in Blender, computed from the
+Today the hybrid pipeline retired `cp_NN` empties from the `.blend` — most
+of the legacy in-glb object kinds are redundant now that the in-app editor
+owns gameplay placement (gates, pickups, splines). So Blender shows zero
+gates right now. Matt wants gates *visible* in Blender, computed from the
 AI spline + a spacing parameter, so he can sanity-check track flow without
 exporting and loading in the game.
 

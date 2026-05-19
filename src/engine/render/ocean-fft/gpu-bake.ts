@@ -354,10 +354,9 @@ function computeSlopeUpperBound(spectrum: {
 // `wave-field-determinism.test.ts`.
 //
 // Why two textures vs one fat RGBA: the natural quartet is height + Dx
-// + Dz + Jacobian (per `docs/fft-ocean-plan.md`'s A2 row), but the
-// vertex shader also needs ∂h/∂x and ∂h/∂z to build the surface
-// normal. A second RG32F-shaped output keeps those alongside without
-// pushing the Jacobian out of its planned slot.
+// + Dz + Jacobian, but the vertex shader also needs ∂h/∂x and ∂h/∂z
+// to build the surface normal. A second RG32F-shaped output keeps
+// those alongside without pushing the Jacobian out of its slot.
 //
 // Sign convention matches `sampleSpectrumHeightFromModes` (CPU
 // sampler) exactly:

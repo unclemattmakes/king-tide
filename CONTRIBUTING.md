@@ -33,8 +33,9 @@ commands. Prerequisites:
 - The roadmap of Blender automation lives in
   [`docs/blender-wishlist.md`](docs/blender-wishlist.md) — pick an item
   and open a draft PR / issue to claim it.
-- Recent self-review punch list:
-  [`docs/code-review-2026-05.md`](docs/code-review-2026-05.md).
+- The active v1 execution plan is in
+  [`docs/v1-work-breakdown.md`](docs/v1-work-breakdown.md); unchecked
+  rows in the convention table are fair game.
 
 If in doubt, open a draft PR or a discussion issue early — it's much
 easier to course-correct before you've written a thousand lines.

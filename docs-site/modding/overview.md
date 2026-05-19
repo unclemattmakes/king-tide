@@ -19,7 +19,7 @@ For **bikes**, you author each variant directly in `bikes-src/<id>.blend` and cl
 The [Blender](/blender/overview) section has a full pipeline reference — addon panels, every operator, the headless builders, scene conventions — plus a guided [blank-scene-to-playable-map tutorial](/blender/your-first-track).
 :::
 
-For the architectural rationale and full design, see [`docs/asset-pipeline-plan.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/asset-pipeline-plan.md). For the in-repo Blender quick-reference, see [`docs/blender-conventions.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-conventions.md).
+For the v1 production sequencing, see [`docs/v1-asset-pipeline-plan.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/v1-asset-pipeline-plan.md). For the full Blender walkthrough and object-kind reference, see [`docs/blender-pipeline-guide.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-pipeline-guide.md).
 
 ## TL;DR
 

@@ -144,9 +144,9 @@ back to `(0, 1, 0, 0)` defaults.
 
 - [docs/blender-wishlist.md § Item 6](./blender-wishlist.md) — the
   wishlist item this spec answers.
-- [docs/blender-conventions.md](./blender-conventions.md) — material
-  naming convention (`mat_*` prefixes) that determines which shader a
-  mesh gets.
+- [docs/blender-pipeline-guide.md](./blender-pipeline-guide.md) — full
+  track-author walkthrough; covers material naming (`mat_*` prefixes)
+  that determines which shader a mesh gets.
 - [`src/engine/render/foliage-sway.ts`](../src/engine/render/foliage-sway.ts) —
   runtime sway hook.
 - [`tools/blender/vertex_attrs.py`](../tools/blender/vertex_attrs.py) —

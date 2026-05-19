@@ -7,10 +7,10 @@ GLBs. Bikes, props, and tracks share the framework in
 scripts.
 
 > **End-to-end walkthrough:**
-> [`docs/asset-pipeline-guide.md`](../docs/asset-pipeline-guide.md) —
-> for the original design rationale see
-> [`docs/asset-pipeline-plan.md`](../docs/asset-pipeline-plan.md). The
-> track-specific authoring guide remains
+> [`docs/asset-pipeline-guide.md`](../docs/asset-pipeline-guide.md).
+> For v1 production sequencing see
+> [`docs/v1-asset-pipeline-plan.md`](../docs/v1-asset-pipeline-plan.md).
+> The track-specific authoring guide is
 > [`docs/blender-pipeline-guide.md`](../docs/blender-pipeline-guide.md).
 
 ## One-time setup
@@ -130,7 +130,5 @@ The bike and prop builders run their own kind/socket validators in
 
 ## Conventions
 
-See [`docs/blender-conventions.md`](../docs/blender-conventions.md)
-for the at-a-glance reference card, or
-[`docs/blender-pipeline-guide.md`](../docs/blender-pipeline-guide.md)
-for the full track-author guide.
+See [`docs/blender-pipeline-guide.md`](../docs/blender-pipeline-guide.md)
+for the full track-author guide and the object-kind reference card.

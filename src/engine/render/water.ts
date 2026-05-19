@@ -340,9 +340,10 @@ const INACTIVE_FAR = 1e6
  * 22-component analytic sum that ships today; `fft` is the Phillips-spectrum
  * IFFT bake from `ocean-fft/cpu-bake.ts`. Both are RGBA8 / REPEAT / mipmapped
  * so the shader code consuming them is identical regardless of mode. The
- * FFT bake is the first step of the larger FFT-ocean migration (see
- * `docs/fft-ocean-plan.md`); future phases swap GPU compute in behind the
- * same flag.
+ * GPU-compute path lives in `ocean-fft/gpu-bake.ts` (`createGpuOceanFft`)
+ * and `ocean-fft/gpu-bake-fft.ts` (`createGpuOceanFftDisplacement` — the
+ * real radix-2 FFT shipped in A9), selected via `?fftbake=fft` (default)
+ * vs `?fftbake=ddft` (debug fallback).
  */
 let sharedWaveDetailNormalProcedural: THREE.DataTexture | null = null
 let sharedWaveDetailNormalFft: THREE.DataTexture | null = null

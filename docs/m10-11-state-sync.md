@@ -1,6 +1,12 @@
 # M10.11 — Multiplayer state sync (host-elected AI + transform snapshots)
 
-Status: design, ready for implementation.
+> **Status: shipped.** Retained as the design rationale for the live
+> system. The runtime references it from `party/relay.ts`,
+> `src/engine/net/host-election.ts`, `src/game/systems/apply-snapshot.ts`,
+> `src/boot/multiplayer.ts`, and `SECURITY.md` (§9 — the accepted
+> stateless-relay DoS posture). For the live state of multiplayer (RTT
+> telemetry, lobby, reconnect labelling) see [`status.md`](./status.md).
+
 Prereq: M10.10.1 (commit 5f2191b — local bike's `PeerControlled.peerId` patched in `onConnected`).
 
 ## 1. Problem & goal

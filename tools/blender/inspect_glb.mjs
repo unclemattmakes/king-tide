@@ -5,8 +5,8 @@
  * Usage: node tools/blender/inspect_glb.mjs <path/to/file.glb> [--node <name>]
  *
  * Useful for verifying that the headless builders produced the right
- * extras-keyed contract (kind, slot, shape, etc.) — see T6 in
- * docs/asset-pipeline-plan.md.
+ * extras-keyed contract (kind, slot, shape, etc.) — see
+ * docs/asset-pipeline-guide.md and docs/v1-asset-pipeline-plan.md.
  */
 import { readFileSync } from 'node:fs'
 import { argv, exit } from 'node:process'
