@@ -298,6 +298,16 @@ export type SkySystem = {
   tick(time: number, dt: number, focus: { x: number; z: number }): void
   /** Read the current normalised sun direction (origin → sun). */
   getSunDirection(): THREE.Vector3
+  /** Live-set cloudiness ∈ [0,1]. Drives both the dome shader's cloud
+   *  cover and the terrain cloud-shadow multiplier (both read the same
+   *  shared uniform). Used by the per-lap weather system to ramp the
+   *  cloud field during a race ("storm rolling in"). */
+  setCloudiness(c: number): void
+  /** Live-set sun-disc + directional-light intensity scalar.
+   *  Multiplies the palette's baseline at the active elevation; pass
+   *  values < 1 for "the storm covered the sun", > 1 for "the clouds
+   *  parted". */
+  setSunIntensity(s: number): void
   /** Shared TSL uniforms (read-only consumers: horizon ring, cloud shadows). */
   shared: SkyShared
   /** Drop GPU resources. */
@@ -695,6 +705,18 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
     return sunDirOut
   }
 
+  function setCloudiness(c: number): void {
+    uCloudiness.value = Math.max(0, Math.min(1, c))
+  }
+
+  function setSunIntensity(s: number): void {
+    const clamped = Math.max(0, s)
+    uSunIntensity.value = clamped
+    if (sun.visible) {
+      sun.intensity = baseSunIntensity * scratch.sunMul * clamped
+    }
+  }
+
   function dispose(): void {
     scene.remove(mesh)
     geom.dispose()
@@ -719,5 +741,5 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
     cloudiness: uCloudiness as unknown as Node<'float'>,
   }
 
-  return { mesh, tick, getSunDirection, shared, dispose }
+  return { mesh, tick, getSunDirection, setCloudiness, setSunIntensity, shared, dispose }
 }

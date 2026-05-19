@@ -20,6 +20,12 @@ export type TerrainHeightmap = {
   worldMin: THREE.Vector2
   worldMax: THREE.Vector2
   resolution: number
+  /** CPU-side copy of the rasterised max-Y grid. Same layout as the
+   *  Float32 accumulator before the half-float pack — `raw[v*res + u]`
+   *  holds the highest terrain Y inside cell (u, v), or
+   *  `DEEP_SENTINEL` for cells with no terrain coverage. Used for
+   *  CPU diagnostics like the water-coverage check at boot. */
+  raw?: Float32Array
 }
 
 const DEEP_SENTINEL = -10000
@@ -207,5 +213,54 @@ export function buildTerrainHeightmap(
     worldMin: new THREE.Vector2(minX, minZ),
     worldMax: new THREE.Vector2(maxX, maxZ),
     resolution,
+    raw: grid,
   }
+}
+
+/**
+ * Sample the heightmap at a world XZ coordinate. Returns the highest
+ * terrain Y at that XZ, or `null` when the point is outside the
+ * heightmap's covered region (open ocean), or when the cell holds the
+ * deep-sentinel (no triangle rasterised here).
+ *
+ * Linear-filtered via the four surrounding cells, matching the GPU
+ * shader's `LinearFilter` sampling so the CPU diagnostic reads the
+ * same height the runtime water shader does for shoaling.
+ */
+export function sampleTerrainHeightAtXZ(
+  hm: TerrainHeightmap,
+  x: number,
+  z: number,
+): number | null {
+  if (!hm.raw) return null
+  const sizeX = hm.worldMax.x - hm.worldMin.x
+  const sizeZ = hm.worldMax.y - hm.worldMin.y
+  if (sizeX <= 0 || sizeZ <= 0) return null
+  const u = ((x - hm.worldMin.x) / sizeX) * hm.resolution - 0.5
+  const v = ((z - hm.worldMin.y) / sizeZ) * hm.resolution - 0.5
+  if (u < 0 || v < 0 || u >= hm.resolution || v >= hm.resolution) return null
+  const u0 = Math.floor(u)
+  const v0 = Math.floor(v)
+  const u1 = Math.min(u0 + 1, hm.resolution - 1)
+  const v1 = Math.min(v0 + 1, hm.resolution - 1)
+  const fu = u - u0
+  const fv = v - v0
+  const idx = (uu: number, vv: number) => vv * hm.resolution + uu
+  const h00 = hm.raw[idx(u0, v0)]!
+  const h10 = hm.raw[idx(u1, v0)]!
+  const h01 = hm.raw[idx(u0, v1)]!
+  const h11 = hm.raw[idx(u1, v1)]!
+  // Treat any neighbouring deep-sentinel as "no terrain" — don't blend
+  // into the −10000 floor or the result is dragged catastrophically low.
+  if (
+    h00 === DEEP_SENTINEL ||
+    h10 === DEEP_SENTINEL ||
+    h01 === DEEP_SENTINEL ||
+    h11 === DEEP_SENTINEL
+  ) {
+    return null
+  }
+  const top = h00 + (h10 - h00) * fu
+  const bot = h01 + (h11 - h01) * fu
+  return top + (bot - top) * fv
 }

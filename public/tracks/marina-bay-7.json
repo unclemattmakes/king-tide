@@ -2,14 +2,14 @@
   "id": "marina-bay-7",
   "name": "marina-bay-7",
   "lapsToFinish": 3,
-  "gateSpacing": 60.0,
+  "gateSpacing": 60,
   "sky": {
     "tint": "#ffb866",
-    "cloudiness": 0.5,
-    "sunIntensity": 0.75,
-    "fogNear": 180.0,
-    "fogFar": 900.0,
-    "timeOfDay": 320.0,
+    "cloudiness": 0.62,
+    "sunIntensity": 0.92,
+    "fogNear": 180,
+    "fogFar": 900,
+    "timeOfDay": 320,
     "colorGrade": "nyc_sunset",
     "bloom": 0.550000011920929,
     "seaStateBeaufort": 2
@@ -32,48 +32,48 @@
   "waveZones": [
     {
       "position": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": -0.0
+        "x": 0,
+        "y": 0,
+        "z": 0
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": -0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 320.0,
-      "halfHeight": 30.0,
-      "halfDepth": 300.0,
+      "halfWidth": 320,
+      "halfHeight": 30,
+      "halfDepth": 300,
       "heightMult": 0.7,
       "freqMult": 1.2,
-      "blendRadiusM": 30.0
+      "blendRadiusM": 30
     }
   ],
   "environmentGlb": "/assets/tracks/marina-bay-7.glb",
   "water": {
-    "height": 0.0,
+    "height": 0,
     "waveHeight": 0.4,
     "waveFreq": 0.6
   },
   "terrainShader": {
-    "altMin": -50.0,
-    "altMax": 120.0,
+    "altMin": -50,
+    "altMax": 120,
     "slopeStart": 0.8500000238418579,
     "slopeEnd": 0.550000011920929,
     "variation": 0.30000001192092896,
-    "wetBand": 2.0,
+    "wetBand": 3.5,
     "pathTint": [
-      0.30000001192092896,
-      0.23999999463558197,
-      0.18000000715255737
+      0.36,
+      0.2,
+      0.14
     ],
     "warpStrength": 0.5,
-    "macroScale": 120.0,
-    "microScale": 8.0,
-    "altJitter": 4.0,
+    "macroScale": 120,
+    "microScale": 8,
+    "altJitter": 4,
     "screeBand": 0.25,
-    "saturation": 1.0499999523162842,
+    "saturation": 0.95,
     "triplanar": 0.6000000238418579
   },
   "aiSplines": [
@@ -82,9 +82,9 @@
       "points": [],
       "anchors": [
         {
-          "x": -180.0,
+          "x": -180,
           "y": 3.5,
-          "z": 190.0
+          "z": 190
         },
         {
           "x": 145.41668701171875,
@@ -99,7 +99,7 @@
         {
           "x": 230.00003051757812,
           "y": 3.500000476837158,
-          "z": -0.0
+          "z": 0
         },
         {
           "x": 220.83335876464844,
@@ -117,7 +117,7 @@
           "z": -219.03765869140625
         },
         {
-          "x": 0.0,
+          "x": 0,
           "y": 3.500000476837158,
           "z": -236.9840087890625
         },
@@ -127,7 +127,7 @@
           "z": -216.5376739501953
         },
         {
-          "x": -170.0,
+          "x": -170,
           "y": 3.500000476837158,
           "z": -160.00001525878906
         },
@@ -161,29 +161,29 @@
         "z": 188.7954864501953
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     },
     {
       "index": 1,
       "position": {
-        "x": 230.0,
+        "x": 230,
         "y": 1.5522433519363403,
         "z": 5.1226301193237305
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     },
     {
       "index": 2,
@@ -193,13 +193,13 @@
         "z": -228.2452850341797
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     },
     {
       "index": 3,
@@ -209,95 +209,95 @@
         "z": -189.5510711669922
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     }
   ],
   "boostPads": [
     {
       "position": {
-        "x": 0.0,
+        "x": 0,
         "y": 25.53485870361328,
-        "z": 100.0
+        "z": 100
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 3.0,
-      "halfDepth": 6.0,
+      "halfWidth": 3,
+      "halfDepth": 6,
       "strength": 1.6
     },
     {
       "position": {
-        "x": -30.0,
+        "x": -30,
         "y": 48.07733917236328,
-        "z": -60.0
+        "z": -60
       },
       "rotation": {
-        "x": 0.0,
+        "x": 0,
         "y": 0.999999999999999,
-        "z": 0.0,
-        "w": -4.371139000186241e-08
+        "z": 0,
+        "w": -4.371139000186241e-8
       },
-      "halfWidth": 3.0,
-      "halfDepth": 6.0,
+      "halfWidth": 3,
+      "halfDepth": 6,
       "strength": 1.6
     },
     {
       "position": {
-        "x": -90.0,
+        "x": -90,
         "y": 22.283775329589844,
-        "z": -0.0
+        "z": 0
       },
       "rotation": {
-        "x": 0.0,
+        "x": 0,
         "y": -0.7071067966408575,
-        "z": 0.0,
+        "z": 0,
         "w": 0.7071067657322372
       },
-      "halfWidth": 3.0,
-      "halfDepth": 6.0,
+      "halfWidth": 3,
+      "halfDepth": 6,
       "strength": 1.6
     }
   ],
   "pickupSpawns": [
     {
-      "x": -80.0,
-      "y": 3.0,
-      "z": 200.0
+      "x": -80,
+      "y": 3,
+      "z": 200
     },
     {
-      "x": 100.0,
-      "y": 3.0,
-      "z": 210.0
+      "x": 100,
+      "y": 3,
+      "z": 210
     },
     {
-      "x": 230.0,
-      "y": 5.0,
-      "z": 75.0
+      "x": 230,
+      "y": 5,
+      "z": 75
     },
     {
-      "x": 230.0,
-      "y": 5.0,
-      "z": -75.0
+      "x": 230,
+      "y": 5,
+      "z": -75
     },
     {
-      "x": -220.0,
-      "y": 3.0,
-      "z": 30.0
+      "x": -220,
+      "y": 3,
+      "z": 30
     },
     {
-      "x": -210.0,
-      "y": 3.0,
-      "z": 150.0
+      "x": -210,
+      "y": 3,
+      "z": 150
     }
   ]
 }

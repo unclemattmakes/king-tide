@@ -3,22 +3,22 @@
   "name": "hatteras-light",
   "lapsToFinish": 3,
   "environmentGlb": "/assets/tracks/hatteras-light.glb",
-  "gateSpacing": 65.0,
+  "gateSpacing": 65,
   "water": {
-    "height": 0.0,
-    "waveHeight": 1.0,
+    "height": 0,
+    "waveHeight": 1,
     "waveFreq": 0.4
   },
   "sky": {
     "tint": "#ffffff",
-    "cloudiness": 0.44999998807907104,
-    "sunIntensity": 1.0,
-    "fogNear": 500.0,
-    "fogFar": 2200.0,
-    "timeOfDay": 0.0,
+    "cloudiness": 0.82,
+    "sunIntensity": 0.82,
+    "fogNear": 500,
+    "fogFar": 2200,
+    "timeOfDay": 0,
     "colorGrade": "neutral",
-    "bloom": 0.0,
-    "seaStateBeaufort": 4
+    "bloom": 0,
+    "seaStateBeaufort": 5
   },
   "audio": {
     "music": "hatteras-ambient-surf.opus",
@@ -49,65 +49,65 @@
       "index": 0,
       "position": {
         "x": 172.97833251953125,
-        "y": 5.0,
+        "y": 5,
         "z": 56.73890686035156
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     },
     {
       "index": 1,
       "position": {
         "x": 67.6082763671875,
-        "y": 5.0,
+        "y": 5,
         "z": -162.04608154296875
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     },
     {
       "index": 2,
       "position": {
         "x": -166.66758728027344,
-        "y": 5.0,
+        "y": 5,
         "z": -73.32968139648438
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     },
     {
       "index": 3,
       "position": {
         "x": -26.189434051513672,
-        "y": 5.0,
+        "y": 5,
         "z": 17.87446403503418
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     }
   ],
   "aiSplines": [
@@ -116,9 +116,9 @@
       "points": [],
       "anchors": [
         {
-          "x": 0.0,
+          "x": 0,
           "y": 32.68414306640625,
-          "z": 170.0
+          "z": 170
         },
         {
           "x": 133.07293701171875,
@@ -146,7 +146,7 @@
           "z": -156.82870483398438
         },
         {
-          "x": 0.0,
+          "x": 0,
           "y": 51.37738037109375,
           "z": -166.6666717529297
         },
@@ -180,165 +180,185 @@
   ],
   "pickupSpawns": [
     {
-      "x": 90.0,
-      "y": -2.0,
-      "z": 150.0
+      "x": 90,
+      "y": -2,
+      "z": 150
     },
     {
-      "x": 175.0,
-      "y": -2.0,
-      "z": 50.0
+      "x": 175,
+      "y": -2,
+      "z": 50
     },
     {
-      "x": 175.0,
-      "y": -2.0,
-      "z": -50.0
+      "x": 175,
+      "y": -2,
+      "z": -50
     },
     {
-      "x": 90.0,
-      "y": -2.0,
-      "z": -150.0
+      "x": 90,
+      "y": -2,
+      "z": -150
     },
     {
-      "x": -90.0,
-      "y": -2.0,
-      "z": -150.0
+      "x": -90,
+      "y": -2,
+      "z": -150
     },
     {
-      "x": -25.0,
-      "y": 18.0,
-      "z": 15.0
+      "x": -25,
+      "y": 18,
+      "z": 15
     }
   ],
   "boostPads": [
     {
       "position": {
-        "x": 130.0,
-        "y": -2.0,
-        "z": 75.0
+        "x": 130,
+        "y": -2,
+        "z": 75
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 4.0,
-      "halfDepth": 4.0,
+      "halfWidth": 4,
+      "halfDepth": 4,
       "strength": 1.5
     },
     {
       "position": {
-        "x": -160.0,
-        "y": 0.0,
-        "z": 50.0
+        "x": -160,
+        "y": 0,
+        "z": 50
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 4.0,
-      "halfDepth": 4.0,
+      "halfWidth": 4,
+      "halfDepth": 4,
       "strength": 1.5
     }
   ],
   "antiGravZones": [
     {
       "position": {
-        "x": -7.0,
-        "y": 20.0,
-        "z": -10.0
+        "x": -7,
+        "y": 20,
+        "z": -10
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 18.0,
-      "halfHeight": 20.0,
-      "halfDepth": 18.0
+      "halfWidth": 18,
+      "halfHeight": 20,
+      "halfDepth": 18
     }
   ],
   "waveZones": [
     {
       "position": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": -0.0
+        "x": 0,
+        "y": 0,
+        "z": 0
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": -0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 280.0,
-      "halfHeight": 30.0,
-      "halfDepth": 260.0,
+      "halfWidth": 280,
+      "halfHeight": 30,
+      "halfDepth": 260,
       "heightMult": 1.4,
-      "freqMult": 1.0,
-      "blendRadiusM": 40.0
+      "freqMult": 1,
+      "blendRadiusM": 40
     },
     {
       "position": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": -0.0
+        "x": 0,
+        "y": 0,
+        "z": 0
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": -0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 35.0,
-      "halfHeight": 20.0,
-      "halfDepth": 35.0,
+      "halfWidth": 35,
+      "halfHeight": 20,
+      "halfDepth": 35,
       "heightMult": 0.8,
       "freqMult": 1.1,
-      "blendRadiusM": 18.0
+      "blendRadiusM": 18
     },
     {
       "position": {
-        "x": 140.0,
-        "y": 90.0,
-        "z": -0.0
+        "x": 140,
+        "y": 90,
+        "z": 0
       },
       "rotation": {
-        "x": -0.0,
+        "x": 0,
         "y": -0.9238795638084412,
-        "z": 0.0,
+        "z": 0,
         "w": 0.3826833963394165
       },
-      "halfWidth": 130.0,
-      "halfHeight": 30.0,
-      "halfDepth": 90.0,
+      "halfWidth": 130,
+      "halfHeight": 30,
+      "halfDepth": 90,
       "heightMult": 1.7,
       "freqMult": 0.8,
-      "blendRadiusM": 30.0
+      "blendRadiusM": 30
     }
   ],
   "terrainShader": {
-    "altMin": -50.0,
-    "altMax": 120.0,
+    "altMin": -50,
+    "altMax": 120,
     "slopeStart": 0.8500000238418579,
     "slopeEnd": 0.550000011920929,
     "variation": 0.30000001192092896,
-    "wetBand": 2.0,
+    "wetBand": 4,
     "pathTint": [
-      0.30000001192092896,
-      0.23999999463558197,
-      0.18000000715255737
+      0.32,
+      0.3,
+      0.28
     ],
     "warpStrength": 0.5,
-    "macroScale": 120.0,
-    "microScale": 8.0,
-    "altJitter": 4.0,
+    "macroScale": 120,
+    "microScale": 8,
+    "altJitter": 4,
     "screeBand": 0.25,
-    "saturation": 1.0499999523162842,
+    "saturation": 0.85,
     "triplanar": 0.6000000238418579
-  }
+  },
+  "lapWeather": [
+    {
+      "cloudiness": 0.55,
+      "beaufort": 4,
+      "sunIntensity": 0.95,
+      "transitionSeconds": 0
+    },
+    {
+      "cloudiness": 0.78,
+      "beaufort": 6,
+      "sunIntensity": 0.78,
+      "transitionSeconds": 10
+    },
+    {
+      "cloudiness": 0.96,
+      "beaufort": 9,
+      "sunIntensity": 0.45,
+      "transitionSeconds": 12
+    }
+  ]
 }
