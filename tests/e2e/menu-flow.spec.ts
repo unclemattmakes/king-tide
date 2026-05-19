@@ -23,13 +23,16 @@ import { expect, type Locator, type Page, test } from '@playwright/test'
  *    from settling. We use `click({ force: true })` paired with an
  *    explicit `toBeVisible()` so a regression where the card never
  *    renders still trips loudly.
- *  - Per-test timeout doubled to 60s. Cold-boot under SwiftShader
+ *  - Per-test timeout bumped to 120s. Cold-boot under SwiftShader
  *    spends ~15-20s on first paint + bike-thumb decode before the menu
- *    is interactive; the 30s default starves the later clicks.
+ *    is interactive, and each subsequent screen transition pays another
+ *    ~10s for scroll-into-view + layout under software rendering. The
+ *    30s default starves the longer five-click flows (Cup is the
+ *    worst); 120s covers them with margin.
  */
 test.use({ contextOptions: { reducedMotion: 'reduce' } })
 
-test.describe.configure({ timeout: 60_000 })
+test.describe.configure({ timeout: 120_000 })
 
 async function softClick(loc: Locator): Promise<void> {
   await expect(loc).toBeVisible()
