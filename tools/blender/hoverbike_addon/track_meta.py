@@ -135,6 +135,17 @@ _OBSTACLE_NAME_EXCLUDES = (
     "tunnel_",        # tunnel interiors (spline runs through them)
     "_bridge",        # hand-built bridges (e.g. i90_bridge in Seattle)
     "bridge_",
+    "antigrav_",      # anti-grav ribbon swept surfaces — the spline is
+                      # explicitly meant to pass through them (Kilauea
+                      # caldera loop, Shibuya wall-ride, Doge's
+                      # Campanile climb). Same family as road / ramp /
+                      # tunnel — collidable surface authored to be ridden.
+    "_rim",           # ring-shaped colliders (caldera rim, stadium
+                      # bowl rims). The bbox check would treat the
+                      # ring's hollow interior as "inside the obstacle",
+                      # but the racing line is by design *inside* the
+                      # ring. Authors who need a non-ring collider
+                      # named with `_rim` can skip the suffix.
 )
 _OBSTACLE_MIN_HEIGHT_M = 5.0
 
@@ -167,6 +178,15 @@ def _collect_obstacle_bboxes(
         if obj.hide_get() or obj.hide_viewport:
             continue
         name_lc = obj.name.lower()
+        # Defence-in-depth against `_largest_terrain_mesh` picking a
+        # bigger-bbox kind=track mesh (e.g. a long road slab) over the
+        # actual ground. On tracks where the road or the city sprawl
+        # outsizes the terrain plane, the real terrain wouldn't be the
+        # "largest" and would otherwise get flagged as an obstacle that
+        # every spline point sits inside. Match by name as a backstop —
+        # template seeds name ground meshes `terrain*`, which is stable.
+        if name_lc.startswith("terrain"):
+            continue
         if any(p in name_lc for p in _OBSTACLE_NAME_EXCLUDES):
             continue
         bb = obj.bound_box
