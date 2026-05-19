@@ -56,9 +56,9 @@ const HOP_VELOCITY_SMALL = 4.5
 /** vyPeak floor (m/s) above which a hop counts as a credible trick.
  *  Matches `DEFAULT_DETECTOR_TUNING.minVyPeak` on the observer side
  *  — both must agree, or the sim awards the big hop while the
- *  observer rejects the boost (or vice versa). 5 m/s requires either
- *  a real wave crest climb or a ramp launch. */
-const HOP_CREDIBILITY_VY = 5.0
+ *  observer rejects the boost (or vice versa). 3.5 m/s catches a
+ *  ridable wave climb without tripping on flat-ground chop. */
+const HOP_CREDIBILITY_VY = 3.5
 /** Sim-tick lifetime of the vy-peak before it goes stale. At a fixed
  *  60 Hz step, 18 ticks ≈ 300 ms — matches the observer's
  *  `peakStaleMs`. Short window forces the press to land *while*

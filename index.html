@@ -1860,6 +1860,51 @@
         55%  { transform: scale(1.04); opacity: 1; }
         100% { transform: scale(1.0); opacity: 1; }
       }
+      /* Trick-ready prompt — appears at the bottom-center when the
+         player is in a credible apex window. Teaches the trickable-
+         vs-non-trickable distinction by sight so the player doesn't
+         have to guess which jumps will pay off. */
+      #hud-trick-prompt {
+        bottom: 30%; left: 50%; transform: translateX(-50%);
+        opacity: 0;
+        transition: opacity 220ms var(--ease-out);
+      }
+      #hud-trick-prompt[data-ready="1"] { opacity: 1; }
+      #hud-trick-prompt .tp-shell {
+        display: flex; align-items: center; gap: 10px;
+        padding: 6px 14px 5px;
+        background: linear-gradient(180deg, rgba(10,20,36,0.78), rgba(5,10,20,0.78));
+        border: 1px solid rgba(77, 214, 255, 0.65);
+        border-left: 3px solid var(--bc-cyan);
+        box-shadow: 0 0 16px rgba(77, 214, 255, 0.45), 0 4px 14px rgba(0,0,0,0.4);
+        font-family: var(--bc-font-display);
+        color: var(--bc-ink);
+      }
+      #hud-trick-prompt[data-ready="1"] .tp-shell {
+        animation: tp-pulse 700ms ease-in-out infinite alternate;
+      }
+      @keyframes tp-pulse {
+        0%   { box-shadow: 0 0 14px rgba(77, 214, 255, 0.35), 0 4px 12px rgba(0,0,0,0.4); }
+        100% { box-shadow: 0 0 28px rgba(77, 214, 255, 0.85), 0 4px 18px rgba(0,0,0,0.4); }
+      }
+      #hud-trick-prompt .tp-arrow {
+        color: var(--bc-yellow);
+        font-size: 12px;
+        animation: tp-arrow-bob 700ms ease-in-out infinite alternate;
+      }
+      @keyframes tp-arrow-bob {
+        0%   { transform: translateY(2px); }
+        100% { transform: translateY(-2px); }
+      }
+      #hud-trick-prompt .tp-label {
+        font-size: 13px; letter-spacing: 0.28em;
+      }
+      #hud-trick-prompt .tp-keys {
+        font-size: 11px; letter-spacing: 0.18em;
+        color: var(--bc-yellow);
+        padding: 2px 6px;
+        border: 1px solid rgba(255, 220, 110, 0.6);
+      }
       /* Boost meter — Burnout-3-style vertical-fill bar pinned to the
          bottom-right of the HUD. Charges via successful tricks (see
          `wave-pump-observer` + the trick-event handler in `game-loop`),
@@ -2630,6 +2675,7 @@
          menu-active state so the chrome stays clean. -->
     <div id="hud-scaffold" aria-hidden="true">
       <div id="hud-wave-pump" class="hud-slot" data-system="wave-pump" hidden></div>
+      <div id="hud-trick-prompt" class="hud-slot" data-system="trick-prompt" hidden></div>
       <div id="hud-boost-meter" class="hud-slot" data-system="boost-meter" hidden></div>
       <div id="hud-anti-grav" class="hud-slot" data-system="anti-grav" hidden></div>
       <div id="hud-tutorial" class="hud-slot" data-system="tutorial" hidden></div>

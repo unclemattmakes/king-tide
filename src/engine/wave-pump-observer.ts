@@ -94,24 +94,23 @@ export type DetectorTuning = {
 }
 
 export const DEFAULT_DETECTOR_TUNING: Readonly<DetectorTuning> = Object.freeze({
-  // Raised to 5.0 m/s — 2.5 was still tripping on wave chop during
-  // top-speed runs across The Maw, so almost every hop registered as
-  // a trick. 5.0 m/s requires either a real wave crest climb or a
-  // ramp launch — the kind of vertical velocity you only see when
-  // the surface is genuinely lifting the bike.
-  minVyPeak: 5.0,
+  // 3.5 m/s — a deliberate ridable wave climb (not just chop). The
+  // hop-lockout prevents self-arming from the bike's own impulses,
+  // so the threshold can sit closer to "modest wave" territory than
+  // the earlier 5.0 anchor required, giving the player more honest
+  // trickable opportunities without flat-ground noise.
+  minVyPeak: 3.5,
   minSpeedFrac: 0.35,
   minThrottle: 0.3,
   cooldownMs: 500,
-  // Bumped alongside `minVyPeak` so the strength score has room to
-  // scale between "ridable swell" (5–6 m/s) and "seaplane ramp"
-  // (~9 m/s). Saturation reserved for the biggest launches.
-  vyCeiling: 9.0,
-  // Tightened from 800 → 300 ms. The press has to land WHILE the
-  // bike is still on the rising face of the crest, not a beat after
-  // it's already started falling — turns the trick into a deliberate
-  // apex-timing input instead of "you crested half a second ago,
-  // here's your reward".
+  // Strength saturates at ~ramp territory (8 m/s) — between the
+  // threshold (3.5) and the ceiling, strength scales 0.2 → 1.0
+  // proportionally to how much vertical velocity the bike has built.
+  vyCeiling: 8.0,
+  // 300 ms apex window. The press has to land WHILE the bike is
+  // still on the rising face of the crest, not a beat after it's
+  // already started falling — turns the trick into a deliberate
+  // apex-timing input rather than a delayed reward.
   peakStaleMs: 300,
 })
 

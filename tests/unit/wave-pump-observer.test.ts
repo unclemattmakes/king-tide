@@ -18,10 +18,10 @@ function climbSample(over: Partial<WavePumpSample> = {}): WavePumpSample {
   return {
     surfaceIsWater: true,
     isGrounded: true,
-    // Default vy=7.0 sits comfortably above the credibility floor
-    // (5.0) so a generic "rising tick" represents a real wave climb
+    // Default vy=5.0 sits comfortably above the credibility floor
+    // (3.5) so a generic "rising tick" represents a real wave climb
     // rather than borderline chop.
-    vy: 7.0,
+    vy: 5.0,
     forwardSpeed: 22,
     topSpeed: 28,
     throttle: 0.9,
@@ -52,7 +52,7 @@ describe('createWavePumpObserver (trick-driven, fire-on-press)', () => {
     const obs = createWavePumpObserver()
     expect(obs.detect(0, climbSample())).toBeNull()
     // Press trickRight while still climbing → fires this same tick.
-    const ev = obs.detect(50, climbSample({ vy: 7.0, trickRight: true }))
+    const ev = obs.detect(50, climbSample({ vy: 5.0, trickRight: true }))
     expect(ev).not.toBeNull()
     expect(ev?.strength).toBeGreaterThan(0)
     expect(ev?.strength).toBeLessThanOrEqual(1)
@@ -91,14 +91,14 @@ describe('createWavePumpObserver (trick-driven, fire-on-press)', () => {
   it('captures direction from the pressed button (left)', () => {
     const obs = createWavePumpObserver()
     obs.detect(0, climbSample())
-    const ev = obs.detect(50, climbSample({ vy: 7.0, trickLeft: true }))
+    const ev = obs.detect(50, climbSample({ vy: 5.0, trickLeft: true }))
     expect(ev?.direction).toBe('left')
   })
 
   it('left wins a same-tick double-press', () => {
     const obs = createWavePumpObserver()
     obs.detect(0, climbSample())
-    const ev = obs.detect(50, climbSample({ vy: 7.0, trickLeft: true, trickRight: true }))
+    const ev = obs.detect(50, climbSample({ vy: 5.0, trickLeft: true, trickRight: true }))
     expect(ev?.direction).toBe('left')
   })
 
@@ -109,8 +109,8 @@ describe('createWavePumpObserver (trick-driven, fire-on-press)', () => {
     // button already held → no edge.
     obs.detect(0, climbSample({ trickRight: true }))
     // Subsequent ticks: button still held, no fresh edge.
-    expect(obs.detect(50, climbSample({ vy: 7.0, trickRight: true }))).toBeNull()
-    expect(obs.detect(100, climbSample({ vy: 7.0, trickRight: true }))).toBeNull()
+    expect(obs.detect(50, climbSample({ vy: 5.0, trickRight: true }))).toBeNull()
+    expect(obs.detect(100, climbSample({ vy: 5.0, trickRight: true }))).toBeNull()
   })
 
   it('does not fire without a trick press, even on a clean crest', () => {
@@ -118,38 +118,38 @@ describe('createWavePumpObserver (trick-driven, fire-on-press)', () => {
     // with no input gives no reward — no input, no boost.
     const obs = createWavePumpObserver()
     obs.detect(0, climbSample())
-    expect(obs.detect(50, climbSample({ vy: 7.0 }))).toBeNull()
-    expect(obs.detect(100, climbSample({ vy: 7.0 }))).toBeNull()
+    expect(obs.detect(50, climbSample({ vy: 5.0 }))).toBeNull()
+    expect(obs.detect(100, climbSample({ vy: 5.0 }))).toBeNull()
   })
 
   it('respects the cooldown between back-to-back tricks', () => {
     const obs = createWavePumpObserver()
     obs.detect(0, climbSample())
-    const first = obs.detect(50, climbSample({ vy: 7.0, trickRight: true }))
+    const first = obs.detect(50, climbSample({ vy: 5.0, trickRight: true }))
     expect(first).not.toBeNull()
 
     // Second press well inside the cooldown — release between presses
     // (rising-edge gate) and re-press; should be suppressed by cooldown.
-    obs.detect(100, climbSample({ vy: 7.0, trickRight: false }))
-    expect(obs.detect(200, climbSample({ vy: 7.0, trickRight: true }))).toBeNull()
+    obs.detect(100, climbSample({ vy: 5.0, trickRight: false }))
+    expect(obs.detect(200, climbSample({ vy: 5.0, trickRight: true }))).toBeNull()
   })
 
   it('allows another trick once the cooldown has elapsed', () => {
     const obs = createWavePumpObserver()
     obs.detect(0, climbSample())
-    expect(obs.detect(50, climbSample({ vy: 7.0, trickRight: true }))).not.toBeNull()
+    expect(obs.detect(50, climbSample({ vy: 5.0, trickRight: true }))).not.toBeNull()
 
     // Release, rebuild the climb (firing drained the peak), wait past
     // the cooldown, then press again.
     obs.detect(100, climbSample({ vy: 0, trickRight: false }))
-    obs.detect(550, climbSample({ vy: 7.0 }))
-    expect(obs.detect(700, climbSample({ vy: 7.0, trickRight: true }))).not.toBeNull()
+    obs.detect(550, climbSample({ vy: 5.0 }))
+    expect(obs.detect(700, climbSample({ vy: 5.0, trickRight: true }))).not.toBeNull()
   })
 
   it('drains the climb peak after firing — same climb cannot pay off twice', () => {
     const obs = createWavePumpObserver()
     obs.detect(0, climbSample())
-    expect(obs.detect(50, climbSample({ vy: 7.0, trickRight: true }))).not.toBeNull()
+    expect(obs.detect(50, climbSample({ vy: 5.0, trickRight: true }))).not.toBeNull()
     // Wait past the cooldown; bike still on the descending tail of the
     // same crest (vy now flat) and presses again — peak was drained on
     // the first fire, so no second boost.
@@ -159,15 +159,15 @@ describe('createWavePumpObserver (trick-driven, fire-on-press)', () => {
 
   it('saturates strength to 1 at high vy peak + max speed', () => {
     const obs = createWavePumpObserver()
-    obs.detect(0, climbSample({ vy: 9 }))
-    const ev = obs.detect(50, climbSample({ vy: 9, forwardSpeed: 28, trickRight: true }))
+    obs.detect(0, climbSample({ vy: 8 }))
+    const ev = obs.detect(50, climbSample({ vy: 8, forwardSpeed: 28, trickRight: true }))
     expect(ev).not.toBeNull()
     expect(ev?.strength).toBeCloseTo(1, 2)
   })
 
   it('reset() clears the peak + cooldown', () => {
     const obs = createWavePumpObserver()
-    obs.detect(0, climbSample({ vy: 7.0, trickRight: true }))
+    obs.detect(0, climbSample({ vy: 5.0, trickRight: true }))
     obs.reset()
     const d = obs.debug()
     expect(d.vyPeakInWindow).toBe(0)
@@ -200,11 +200,11 @@ describe('createWavePumpObserver (trick-driven, fire-on-press)', () => {
     const obs = createWavePumpObserver()
     // Build up a credible peak from a real wave climb.
     obs.detect(0, climbSample({ vy: 5.0 }))
-    obs.detect(20, climbSample({ vy: 7.0 }))
+    obs.detect(20, climbSample({ vy: 5.0 }))
     // Press fires — sim sets lockout in the same tick; observer's
     // sample reflects that. Credibility still passes because the
     // pre-existing peak (7.0) survives the lockout drain.
-    const ev = obs.detect(40, climbSample({ vy: 7.0, hopLockedOut: true, trickRight: true }))
+    const ev = obs.detect(40, climbSample({ vy: 5.0, hopLockedOut: true, trickRight: true }))
     expect(ev).not.toBeNull()
     expect(ev?.strength).toBeGreaterThan(0)
   })

@@ -58,6 +58,7 @@ import { createPumpFx } from '@/engine/render/pump-fx'
 import type { RaceHud } from '@/engine/render/race-hud'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
+import { createTrickPromptHud } from '@/engine/render/trick-prompt-hud'
 import { createTutorialHud } from '@/engine/render/tutorial-hud'
 import { type BikeImpact, updateUnderwaterFog } from '@/engine/render/water'
 import { createWaveLineHud } from '@/engine/render/wave-line-hud'
@@ -73,7 +74,10 @@ import { vecHorizontalLength } from '@/engine/sim/physics/vec'
 import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import { createTutorialDirector } from '@/engine/tutorial/tutorial-director'
 import { DEFAULT_TUTORIAL_SCRIPT } from '@/engine/tutorial/tutorial-script'
-import { createWavePumpObserver } from '@/engine/wave-pump-observer'
+import {
+  createWavePumpObserver,
+  DEFAULT_DETECTOR_TUNING,
+} from '@/engine/wave-pump-observer'
 import type { AssetManifest } from '@/game/assets/manifest'
 import type { BikeVariant } from '@/game/bikes/variants'
 import {
@@ -387,6 +391,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
   const wavePumpHud = createWavePumpHud()
   const pumpFx = createPumpFx(camera)
   const boostMeterHud = createBoostMeterHud()
+  const trickPromptHud = createTrickPromptHud()
 
   // Anti-grav HUD widget. Reads the player bike's AntiGravOverride
   // each render frame and fades the indicator in/out. The chase
@@ -813,7 +818,29 @@ export function startGameLoop(opts: GameLoopOpts): void {
           state.lastPumpStrength = pump.strength
           state.lastPumpAt = now
         }
+
+        // Trick-ready prompt — teach the player which jumps are
+        // trickable by sight. The prompt lights up whenever ALL of
+        // the observer's credibility gates currently pass *except*
+        // the press itself: recent vy peak, speed, throttle. Then
+        // the player just has to learn "see the prompt, press the
+        // button". The prompt suppresses itself when a trick has
+        // just fired (the wave-pump chyron already telegraphs the
+        // reward).
+        const dbg = wavePumpObserver.debug()
+        const speedFrac =
+          stats.topSpeed > 0
+            ? Math.max(0, Math.min(1, state.playerSnapshot.speed / stats.topSpeed))
+            : 0
+        const inApex = dbg.vyPeakInWindow >= DEFAULT_DETECTOR_TUNING.minVyPeak
+        const speedOK = speedFrac >= DEFAULT_DETECTOR_TUNING.minSpeedFrac
+        const throttleOK = Math.max(0, intent.throttle) >= DEFAULT_DETECTOR_TUNING.minThrottle
+        const cooldownReady = now - dbg.lastFireAt >= DEFAULT_DETECTOR_TUNING.cooldownMs
+        trickPromptHud.setReady(inApex && speedOK && throttleOK && cooldownReady)
       }
+    } else {
+      // Auto-play OR no player snapshot — keep the prompt hidden.
+      trickPromptHud.setReady(false)
     }
 
     // Boost-meter FX — the meter system flips `active` on a fresh
