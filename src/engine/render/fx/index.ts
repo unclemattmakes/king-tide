@@ -4,6 +4,7 @@ import { attribute, texture as tslTexture } from 'three/tsl'
 import { SpriteNodeMaterial } from 'three/webgpu'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
+import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import {
   BikeTag,
   ControlIntent,
@@ -134,6 +135,24 @@ const EXPLOSION_CAPACITY = 240
 // Missile trail: continuous emission along missile path. ~30/s × 0.6 s
 // life × up to 4 missiles in flight = ~72 peak; 200 covers boost cases.
 const MISSILE_CAPACITY = 200
+
+// Plunge bubbles — thick cloud that boils around a bike/rider when they
+// punch through the water surface, choking off at the apex of the dive
+// (the moment downward velocity reverses and the bike starts rising).
+// Rate is high enough that a 0.6–1.0 s descent reads as a roiling cloud,
+// not a thin stream. Lifetime ~0.7–1.3 s + plenty of drag so bubbles
+// hang and dissipate instead of jetting away from the bike.
+const BUBBLE_PLUNGE_BURST = 40 // particles fired once at the moment of crossing
+const BUBBLE_DESCEND_RATE = 90 // particles/sec while the bike sinks
+const BUBBLE_CAPACITY = 420
+// Vertical extent of the per-frame emission column around the bike's
+// origin — covers the chassis (≈ 0.5 m) and the rider above it (≈ 1.5 m).
+const BUBBLE_BODY_BOTTOM = -0.4
+const BUBBLE_BODY_TOP = 1.6
+// Surface-crossing hysteresis (m). Slightly larger than the fog band so
+// the bubble plunge-burst doesn't fire spuriously on a wave crest that
+// just brushes the bike's hull during a normal foam-wake run.
+const BUBBLE_SUBMERGE_DEPTH = 0.25
 
 function makeRadialTexture(rgb: [number, number, number]): THREE.Texture {
   const size = 64
@@ -361,13 +380,21 @@ function advance(pool: Pool, dt: number): void {
   pool.sizeInstAttr.needsUpdate = true
 }
 
-export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsWorld) {
+export function createFxSystem(
+  scene: THREE.Scene,
+  sim: SimWorld,
+  phys: PhysicsWorld,
+  waveField?: WaveFieldState,
+) {
   const foamTex = makeRadialTexture([235, 245, 255])
   const sparkTex = makeRadialTexture([255, 200, 120])
   const exhaustTex = makeRadialTexture([255, 130, 60])
   const dustTex = makeRadialTexture([195, 180, 155])
   const explosionTex = makeRadialTexture([255, 165, 50])
   const missileTrailTex = makeRadialTexture([220, 220, 230])
+  // Bubbles read brighter than foam — a pale cyan-tinted white that
+  // stands out against the saturated teal underwater fog.
+  const bubbleTex = makeRadialTexture([220, 240, 250])
 
   const foam = createPool({
     capacity: FOAM_CAPACITY,
@@ -422,6 +449,19 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
     gravity: 0.6, // smoke rises
     drag: 2.4,
   })
+  const bubbles = createPool({
+    capacity: BUBBLE_CAPACITY,
+    // Chunky — these are "cloud" bubbles, not pinpricks. Sized so a
+    // boil of 30+ reads as a solid plume from chase-cam distance.
+    defaultSize: 0.7,
+    texture: bubbleTex,
+    blending: THREE.NormalBlending,
+    // Strong upward buoyancy mimics a sudden plunge's air pocket, but
+    // heavy drag damps it so bubbles cluster around the bike for half
+    // a second before drifting toward the surface and fading out.
+    gravity: 4.5,
+    drag: 2.8,
+  })
 
   scene.add(foam.mesh)
   scene.add(sparks.mesh)
@@ -429,6 +469,7 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
   scene.add(dust.mesh)
   scene.add(explosion.mesh)
   scene.add(missileTrail.mesh)
+  scene.add(bubbles.mesh)
 
   // Reusable scratch math.
   const sternWorld = new THREE.Vector3()
@@ -454,6 +495,17 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
   // lazily on first sight of each bike.
   const lastGrounded = new Map<number, boolean>()
 
+  // Per-bike plunge state. The dive lifecycle is:
+  //   above-water → (cross surface, vy < 0) plunge burst, start descent
+  //   descending  → continuous bubble cloud while still sinking
+  //   apex (vy ≥ 0) → emission stops; below surface but no more bubbles
+  //   resurface   → state resets, ready for the next plunge
+  // Stored separately from `lastGrounded` because "submerged" is a
+  // wave-field-derived check independent of the hover-spring grounded
+  // state (the bike can be submerged while still rotor-pushing upward).
+  type DiveState = { wasSubmerged: boolean; descending: boolean; emitAccum: number }
+  const dive = new Map<number, DiveState>()
+
   // Combat FX bookkeeping. We burst once per explosion entity at
   // detonation, then leave it alone — the engine's explosion system
   // handles its own visual decay. Missile trail emits per-frame from
@@ -474,6 +526,8 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
       emitAccum,
       explosion,
       missileTrail,
+      bubbles,
+      dive,
       stats: () => ({
         foamAlive: foam.capacity - foam.freeCount,
         sparkAlive: sparks.capacity - sparks.freeCount,
@@ -481,6 +535,7 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
         dustAlive: dust.capacity - dust.freeCount,
         explosionAlive: explosion.capacity - explosion.freeCount,
         missileTrailAlive: missileTrail.capacity - missileTrail.freeCount,
+        bubbleAlive: bubbles.capacity - bubbles.freeCount,
       }),
     }
   }
@@ -617,6 +672,113 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
       } else {
         acc.foam = 0
       }
+
+      // Plunge bubbles — fire a thick cloud burst the moment the bike
+      // punches through the water surface heading down, then keep
+      // boiling bubbles around the chassis/rider until the bike reaches
+      // the apex of its dive (vy crosses back to non-negative). Tracked
+      // against the wave-displaced surface at the bike's XZ so a wave
+      // crest sliding overhead doesn't constantly retrigger the burst.
+      const surfaceY = waveField ? sampleHeight(waveField, transform.x, transform.z) : 0
+      const submergedDepth = surfaceY - transform.y // +ve = under the surface
+      const isSubmerged = submergedDepth > BUBBLE_SUBMERGE_DEPTH
+      let ds = dive.get(eid)
+      if (!ds) {
+        ds = { wasSubmerged: false, descending: false, emitAccum: 0 }
+        dive.set(eid, ds)
+      }
+      if (!ds.wasSubmerged && isSubmerged && v.y < 0) {
+        // PLUNGE BURST — a one-shot ring + vertical scatter of bubbles
+        // around the bike body, scaled by entry speed. Origin is the
+        // surface point at the bike's XZ so the cloud reads as the
+        // moment of impact, not as a delayed body emission.
+        const plungeSpeed = Math.min(20, Math.abs(v.y))
+        const burst = BUBBLE_PLUNGE_BURST + Math.floor(plungeSpeed * 2)
+        for (let k = 0; k < burst; k++) {
+          const ang = Math.random() * Math.PI * 2
+          const cx = Math.cos(ang)
+          const cz = Math.sin(ang)
+          // Spread bubbles across a chunky disc around the impact column
+          // and a small vertical jitter down into the just-displaced water.
+          const radius = 0.25 + Math.random() * 0.7
+          const sy = surfaceY - Math.random() * 0.4
+          // Mostly outward + upward — the air pocket erupts away from
+          // the body. A small fraction (~25%) gets a downward push so
+          // some bubbles trail with the descending bike instead of all
+          // racing for the surface immediately.
+          const outSpeed = 1.0 + plungeSpeed * 0.25 + Math.random() * 1.5
+          const vyDir = Math.random() < 0.25 ? -0.5 - Math.random() : 0.6 + Math.random() * 1.4
+          emit(
+            bubbles,
+            transform.x + cx * radius,
+            sy,
+            transform.z + cz * radius,
+            cx * outSpeed,
+            vyDir,
+            cz * outSpeed,
+            0.8,
+            0.7,
+            1.3,
+            bubbles.defaultSize * (0.8 + Math.random() * 0.9),
+            1,
+          )
+        }
+        ds.descending = true
+      }
+      // Apex check — bike reached its lowest point and is now rising.
+      // From here on, no more bubbles even if still submerged. The cloud
+      // already in flight will naturally finish its life.
+      if (ds.descending && v.y >= 0) {
+        ds.descending = false
+        ds.emitAccum = 0
+      }
+      if (ds.descending && isSubmerged) {
+        ds.emitAccum += BUBBLE_DESCEND_RATE * dt
+        const n = Math.floor(ds.emitAccum)
+        if (n > 0) {
+          ds.emitAccum -= n
+          for (let k = 0; k < n; k++) {
+            // Emit in a slim cylinder around the bike body so the cloud
+            // wraps both chassis and rider. Y picks anywhere in the body
+            // envelope and X/Z stays inside a 0.5 m radius disc.
+            const ang = Math.random() * Math.PI * 2
+            const r = 0.15 + Math.random() * 0.4
+            const px = transform.x + Math.cos(ang) * r
+            const pz = transform.z + Math.sin(ang) * r
+            const py =
+              transform.y +
+              BUBBLE_BODY_BOTTOM +
+              Math.random() * (BUBBLE_BODY_TOP - BUBBLE_BODY_BOTTOM)
+            // Initial velocity is gentle — buoyancy + drag from the
+            // pool config does most of the work. A tiny outward kick
+            // keeps the cloud from collapsing onto the spawn line.
+            const outSpeed = 0.4 + Math.random() * 0.8
+            emit(
+              bubbles,
+              px,
+              py,
+              pz,
+              Math.cos(ang) * outSpeed,
+              0.4 + Math.random() * 0.8,
+              Math.sin(ang) * outSpeed,
+              0.5,
+              0.4,
+              1.0,
+              bubbles.defaultSize * (0.55 + Math.random() * 0.8),
+              1,
+            )
+          }
+        }
+      } else {
+        ds.emitAccum = 0
+      }
+      // Reset the dive arc when the bike comes back above the surface,
+      // so the next plunge can fire fresh.
+      if (ds.wasSubmerged && !isSubmerged) {
+        ds.descending = false
+        ds.emitAccum = 0
+      }
+      ds.wasSubmerged = isSubmerged
 
       // Sparks — only when the bike is genuinely scraping the ground.
       // We gate on `groundDistance < SPARK_GROUND_DIST_MAX` (well below
@@ -816,9 +978,11 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
       // aquarium) without touching code. The lookup goes through the
       // ``__particles`` global the boot wires up; a no-op when no
       // such emitter exists or particles are disabled.
-      const particleHook = (window as unknown as {
-        __particles?: { triggerBurst?: (name: string, count: number) => void }
-      }).__particles
+      const particleHook = (
+        window as unknown as {
+          __particles?: { triggerBurst?: (name: string, count: number) => void }
+        }
+      ).__particles
       if (particleHook?.triggerBurst) {
         try {
           particleHook.triggerBurst('emitter_explosion', 24)
@@ -863,5 +1027,6 @@ export function createFxSystem(scene: THREE.Scene, sim: SimWorld, phys: PhysicsW
     advance(dust, dt)
     advance(explosion, dt)
     advance(missileTrail, dt)
+    advance(bubbles, dt)
   }
 }

@@ -506,7 +506,7 @@ function buildFoamBubbleTexture(): THREE.DataTexture {
     { cells: 16, weight: 0.7, salt: 0, bubbleRadius: 0.55 },
     // Fine bubbles — 32 cells, ~16-px bubbles. Adds the small-bubble
     // grain that catches light when sampled close to the camera.
-    { cells: 32, weight: 0.4, salt: 1, bubbleRadius: 0.50 },
+    { cells: 32, weight: 0.4, salt: 1, bubbleRadius: 0.5 },
   ]
 
   for (let py = 0; py < N; py++) {
@@ -523,8 +523,8 @@ function buildFoamBubbleTexture(): THREE.DataTexture {
         // seamless across the tile edge.
         for (let dy = -1; dy <= 1; dy++) {
           for (let dx = -1; dx <= 1; dx++) {
-            const ncx = ((cx + dx) % oct.cells + oct.cells) % oct.cells
-            const ncy = ((cy + dy) % oct.cells + oct.cells) % oct.cells
+            const ncx = (((cx + dx) % oct.cells) + oct.cells) % oct.cells
+            const ncy = (((cy + dy) % oct.cells) + oct.cells) % oct.cells
             const [hx, hy] = hash2(ncx, ncy, oct.salt)
             const centerPx = (cx + dx + hx) * cellSize
             const centerPy = (cy + dy + hy) * cellSize
@@ -1176,12 +1176,8 @@ export function createWaterMesh(
       rotDydz.addAssign(c.mul(w.amp * w.k * w.dirZ).mul(ampScale))
     }
     // Rotate the rotated-frame slopes back to world XZ.
-    const dydx = rotDydx
-      .mul(waveBearingCosUniform)
-      .sub(rotDydz.mul(waveBearingSinUniform))
-    const dydz = rotDydx
-      .mul(waveBearingSinUniform)
-      .add(rotDydz.mul(waveBearingCosUniform))
+    const dydx = rotDydx.mul(waveBearingCosUniform).sub(rotDydz.mul(waveBearingSinUniform))
+    const dydz = rotDydx.mul(waveBearingSinUniform).add(rotDydz.mul(waveBearingCosUniform))
     return vec3(y, dydx, dydz)
   })
 
@@ -1232,26 +1228,10 @@ export function createWaterMesh(
       // bumps. CPU buoyancy samples a heightfield (no horizontal
       // displacement read) so this is render-only — the bike sits
       // at the same y(x,z) regardless of pinch direction.
-      const rotDirX = float(w.dirX)
-        .mul(pinchCosUniform)
-        .sub(float(w.dirZ).mul(pinchSinUniform))
-      const rotDirZ = float(w.dirX)
-        .mul(pinchSinUniform)
-        .add(float(w.dirZ).mul(pinchCosUniform))
-      dxRot.addAssign(
-        qScaled
-          .mul(rotDirX)
-          .mul(float(w.amp))
-          .mul(c)
-          .mul(ampScale),
-      )
-      dzRot.addAssign(
-        qScaled
-          .mul(rotDirZ)
-          .mul(float(w.amp))
-          .mul(c)
-          .mul(ampScale),
-      )
+      const rotDirX = float(w.dirX).mul(pinchCosUniform).sub(float(w.dirZ).mul(pinchSinUniform))
+      const rotDirZ = float(w.dirX).mul(pinchSinUniform).add(float(w.dirZ).mul(pinchCosUniform))
+      dxRot.addAssign(qScaled.mul(rotDirX).mul(float(w.amp)).mul(c).mul(ampScale))
+      dzRot.addAssign(qScaled.mul(rotDirZ).mul(float(w.amp)).mul(c).mul(ampScale))
       // Normal y-component reduction: Σ Q · k · A · sin(phase)
       qSum.addAssign(
         qScaled
@@ -1263,12 +1243,8 @@ export function createWaterMesh(
     // Rotate the rotated-frame horizontal displacement back to
     // world XZ so the vertex shader can add it to positionLocal.xz
     // in world coords.
-    const dx = dxRot
-      .mul(waveBearingCosUniform)
-      .sub(dzRot.mul(waveBearingSinUniform))
-    const dz = dxRot
-      .mul(waveBearingSinUniform)
-      .add(dzRot.mul(waveBearingCosUniform))
+    const dx = dxRot.mul(waveBearingCosUniform).sub(dzRot.mul(waveBearingSinUniform))
+    const dz = dxRot.mul(waveBearingSinUniform).add(dzRot.mul(waveBearingCosUniform))
     return vec3(dx, dz, qSum)
   })
 
@@ -1916,9 +1892,7 @@ export function createWaterMesh(
   // amplitude so the deep→scatter gradient reads as smooth shading
   // instead of contour lines.
   const heightNorm = smoothstep(float(-2.0), float(2.0), heightFrag)
-  const heightFactor = isClassic
-    ? heightNorm
-    : smoothstep(float(-1.5), float(1.5), heightFrag)
+  const heightFactor = isClassic ? heightNorm : smoothstep(float(-1.5), float(1.5), heightFrag)
   // Deep ocean body color. Pushed from a nearly-black navy
   // (0.01, 0.09, 0.20) to a visibly turquoise-cyan so the body of
   // the water reads as ocean instead of a void. Reference: clear
@@ -2108,9 +2082,7 @@ export function createWaterMesh(
   // mix gives crests the lit-from-within cyan punch without
   // washing the rest of the surface (sssGate already restricts to
   // pinched crests × sun alignment).
-  const baseColorPreCaustic = isClassic
-    ? scatterBlended
-    : mix(scatterBlended, sssColor, sssGate)
+  const baseColorPreCaustic = isClassic ? scatterBlended : mix(scatterBlended, sssColor, sssGate)
 
   // Caustics — bright veining where sunlight refracts through wave
   // crests and concentrates on the seabed. Real caustics are projected
@@ -2814,6 +2786,13 @@ export function createWaterMesh(
     // from sparkle patches).
     roughness: 0.18,
     envMapIntensity: 0.9,
+    // DoubleSide so the underside of the surface renders when the camera
+    // dips below water. With the analytical normal pointing up regardless
+    // of which face is drawn, ndotv is clamped to 0 from below — that's
+    // intentional: it pegs Fresnel to 1 so the underside reads as a fully
+    // reflective sky-tinted ceiling, the same effect Snell's-window views
+    // produce in real underwater photography.
+    side: THREE.DoubleSide,
   })
   mat.name = 'water'
   mat.positionNode = positionNode
@@ -2829,11 +2808,7 @@ export function createWaterMesh(
   // the "this wave is actually breaking" signal a player relies on for
   // arcade water reads.
   const foamEmissive = foamColor.mul(foamMask).mul(float(0.5))
-  mat.emissiveNode = fresnelEmissive
-    .add(sunGlow)
-    .add(sunDisc)
-    .add(sunStreak)
-    .add(foamEmissive)
+  mat.emissiveNode = fresnelEmissive.add(sunGlow).add(sunDisc).add(sunStreak).add(foamEmissive)
   // View-angle-dependent shallow-seabed transparency. Only applies in
   // shallow water where the seabed is genuinely close along the view
   // ray — `closeness` between 0.25 m and 6 m AND scene depth must be
@@ -3348,40 +3323,67 @@ export function createWaterMesh(
 
 /**
  * Underwater-fog override. Call once per frame AFTER the sky system has
- * updated `scene.fog` for the day-night palette. When the camera is
- * clearly below the resting water surface, this overwrites the fog with
- * a dense water-tinted version — distant terrain disappears into the
- * abyss, nearby geometry gets a teal cast. Above water it restores the
- * sky module's near/far so the per-tick color update reads as air again.
+ * updated `scene.fog` for the day-night palette. Smoothly blends the
+ * sky-driven air fog into a dense water-tinted version as the camera
+ * crosses the actual water surface at its XZ — `waterY` should be the
+ * wave-displaced surface height there (use `sampleHeight(waveField, …)`),
+ * NOT the mean sea level, so the fog doesn't flip on/off behind wave
+ * crests when the camera is bobbing through them.
+ *
+ * The previous implementation used hard hysteresis against a fixed
+ * `cameraY < -0.5` threshold, which fired the fog before the camera was
+ * visibly submerged (whenever the local wave trough sat below the camera)
+ * and snapped off in a single frame on the way back up. Replacing that
+ * with a thin smoothed band around the true surface gives a transition
+ * that lines up with what the player actually sees.
  *
  * Subnautica-style: the dense water fog is what sells "you are underwater"
- * more than any single visual on its own. Bonus: the fog respects the
- * existing receiveShadow / lighting flow, so it just works for terrain,
- * bikes, and props without per-material plumbing.
- *
- * Hysteresis: enter underwater at `cameraY < -0.5`, exit at `cameraY > 0`,
- * so camera bob through the wave crest line doesn't flicker between modes.
+ * more than any single visual on its own. It piggybacks on every receive-
+ * shadow / lit surface in the scene, so terrain, bikes, and props all dim
+ * into the depths without per-material plumbing.
  */
+
+/** Half-width of the surface blend band, in metres. The camera transitions
+ *  through the full air→water blend over `2 * SURFACE_BAND_HALF` of vertical
+ *  travel relative to the local wave-displaced surface. */
+const SURFACE_BAND_HALF = 0.35
+const UNDERWATER_FOG_COLOR = new THREE.Color(0.04, 0.2, 0.3)
+const UNDERWATER_FOG_NEAR = 0
+const UNDERWATER_FOG_FAR = 28
+
+/** Sky writes `fog.near` / `fog.far` once at init and doesn't touch them
+ *  per-tick, so we have to remember the air values ourselves — without
+ *  this, the fog stays clamped to the underwater range after the player
+ *  resurfaces. Re-captured whenever the camera is clearly above water so
+ *  a palette / track change still propagates. Color is left to the sky
+ *  module, which writes it every tick. */
 const airFogRanges = new WeakMap<THREE.Fog, { near: number; far: number }>()
 
-export function updateUnderwaterFog(scene: THREE.Scene, cameraY: number): void {
+export function updateUnderwaterFog(scene: THREE.Scene, cameraY: number, waterY = 0): void {
   const fog = scene.fog
   if (!(fog instanceof THREE.Fog)) return
-  if (cameraY < -0.5) {
-    if (!airFogRanges.has(fog)) {
-      airFogRanges.set(fog, { near: fog.near, far: fog.far })
-    }
-    // Saturated underwater teal — slightly brighter than the deep-water
-    // albedo so the fog reads as "fluid medium" rather than "black void".
-    fog.color.setRGB(0.04, 0.2, 0.3)
-    fog.near = 0
-    fog.far = 28
-  } else if (cameraY > 0) {
-    const air = airFogRanges.get(fog)
-    if (air) {
-      fog.near = air.near
-      fog.far = air.far
-      airFogRanges.delete(fog)
-    }
+  // `depth` is positive when the camera is below the local surface.
+  const depth = waterY - cameraY
+  // Clearly above water — refresh the air-fog snapshot and leave the
+  // sky-driven values alone.
+  if (depth <= -SURFACE_BAND_HALF) {
+    airFogRanges.set(fog, { near: fog.near, far: fog.far })
+    return
   }
+  // First frame in the surface band: seed the snapshot from whatever the
+  // sky module just wrote. Without this the underwater values would never
+  // have an "above water" endpoint to blend from on the first dip.
+  let air = airFogRanges.get(fog)
+  if (!air) {
+    air = { near: fog.near, far: fog.far }
+    airFogRanges.set(fog, air)
+  }
+  // Linear ramp 0..1 across the surface band; saturated at 1 below it.
+  // Smoothstep on top so the edges of the band feather instead of
+  // visibly kinking.
+  const lin = depth >= SURFACE_BAND_HALF ? 1 : (depth + SURFACE_BAND_HALF) / (2 * SURFACE_BAND_HALF)
+  const t = lin * lin * (3 - 2 * lin)
+  fog.color.lerp(UNDERWATER_FOG_COLOR, t)
+  fog.near = air.near + (UNDERWATER_FOG_NEAR - air.near) * t
+  fog.far = air.far + (UNDERWATER_FOG_FAR - air.far) * t
 }

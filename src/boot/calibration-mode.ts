@@ -37,7 +37,7 @@ import { createTrackVisuals } from '@/engine/render/track-mesh'
 import { createWaterMesh, updateUnderwaterFog } from '@/engine/render/water'
 import { createSimWorld } from '@/engine/sim/ecs/world'
 import { createPhysicsWorld } from '@/engine/sim/physics/rapier'
-import { createWaveField, defaultWaves } from '@/engine/sim/water/wave-field'
+import { createWaveField, defaultWaves, sampleHeight } from '@/engine/sim/water/wave-field'
 import { applyStoredWaterTuning } from '@/engine/water-debug-storage'
 import { loadBike } from '@/game/assets/bike-loader'
 import { type LoadedProp, loadProp } from '@/game/assets/prop-loader'
@@ -185,7 +185,7 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
   const riderRender = createRiderRenderSystem(scene, sim)
   const pickupRender = createPickupRenderSystem(scene, sim)
   const combatRender = createCombatRenderSystem(scene, sim)
-  const fxTick = createFxSystem(scene, sim, phys)
+  const fxTick = createFxSystem(scene, sim, phys, waveField)
 
   // Simple orbit camera locked on the bike. Auto-rotates so the user
   // sees every side of the rider over a few seconds.
@@ -872,7 +872,11 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
 
     waterMesh.tick([], { x: camera.position.x, z: camera.position.z })
     sky.tick(waveField.time, dt, { x: camera.position.x, z: camera.position.z })
-    updateUnderwaterFog(scene, camera.position.y)
+    updateUnderwaterFog(
+      scene,
+      camera.position.y,
+      sampleHeight(waveField, camera.position.x, camera.position.z),
+    )
     bikeRender()
     riderRender()
     pickupRender(dt)

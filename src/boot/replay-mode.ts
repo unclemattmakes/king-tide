@@ -27,7 +27,7 @@ import type { ReplayFile } from '@/engine/replay/format'
 import { createReplayPlayer, makePoseBuffer } from '@/engine/replay/player'
 import { createSpectatorCamera } from '@/engine/replay/spectator-camera'
 import { installSpectatorHud } from '@/engine/replay/spectator-hud'
-import { advanceWaveField, type WaveFieldState } from '@/engine/sim/water/wave-field'
+import { advanceWaveField, sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import { TransformStore } from '@/game/components'
 
 export interface ReplayModeOpts {
@@ -299,7 +299,11 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     // Horizon silhouette follows the spectator camera so wide pans don't
     // expose the ring's centre offset from the player.
     horizonRing.tick({ x: camera.position.x, z: camera.position.z })
-    updateUnderwaterFog(scene, camera.position.y)
+    updateUnderwaterFog(
+      scene,
+      camera.position.y,
+      sampleHeight(waveField, camera.position.x, camera.position.z),
+    )
     bikeRender()
     riderRender()
     pickupRender(dt)

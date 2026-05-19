@@ -67,7 +67,7 @@ import type { ReplayRecorder } from '@/engine/replay/recorder'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { vecHorizontalLength } from '@/engine/sim/physics/vec'
-import type { WaveFieldState } from '@/engine/sim/water/wave-field'
+import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import { createTutorialDirector } from '@/engine/tutorial/tutorial-director'
 import { DEFAULT_TUTORIAL_SCRIPT } from '@/engine/tutorial/tutorial-script'
 import { createWavePumpObserver } from '@/engine/wave-pump-observer'
@@ -692,7 +692,11 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // so the player never appears to outrun it. Tracks the camera (not the
     // bike) so look-back / spectator pans don't shift the horizon.
     horizonRing.tick({ x: camera.position.x, z: camera.position.z })
-    updateUnderwaterFog(scene, camera.position.y)
+    updateUnderwaterFog(
+      scene,
+      camera.position.y,
+      sampleHeight(waveField, camera.position.x, camera.position.z),
+    )
     bikeRender()
     riderRender()
     pickupRender(dt)

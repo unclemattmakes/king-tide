@@ -13,7 +13,7 @@ import { installTrackEditor } from '@/engine/editor/track-editor'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
 import type { SkySystem } from '@/engine/render/sky'
 import { updateUnderwaterFog } from '@/engine/render/water'
-import type { WaveFieldState } from '@/engine/sim/water/wave-field'
+import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import type { PropManifestEntry } from '@/game/assets/manifest'
 import type { Track } from '@/game/tracks/types'
 import { hideLoadingScreen } from './loading-screen'
@@ -72,7 +72,11 @@ export function startEditMode(opts: EditModeWiringOpts): void {
     // Horizon silhouette follows the editor's free-fly camera so the
     // distant landform always wraps the author's viewpoint.
     horizonRing.tick({ x: camera.position.x, z: camera.position.z })
-    updateUnderwaterFog(scene, camera.position.y)
+    updateUnderwaterFog(
+      scene,
+      camera.position.y,
+      sampleHeight(waveField, camera.position.x, camera.position.z),
+    )
     waterMesh.tick()
     editor.tick()
     requestAnimationFrame(editFrame)
