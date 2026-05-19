@@ -123,6 +123,24 @@ export async function loadGlbTrackVisuals(
  * The track group should already be added to the scene (or its world
  * matrix manually updated) before calling.
  */
+/**
+ * Climb a node's parent chain looking for an ancestor (inclusive) that
+ * carries the ``landmark_id = "mechanical_rig_arm"`` tag the
+ * seed_landmarks_library stamps on every swing-arm subtree root. The
+ * arm subtree's colliders ship as kinematic-position bodies through
+ * the landmark-animation system, not as static trimeshes here.
+ */
+export function isUnderMechanicalRigArm(node: THREE.Object3D): boolean {
+  let cur: THREE.Object3D | null = node
+  while (cur) {
+    if ((cur.userData as { landmark_id?: unknown })?.landmark_id === 'mechanical_rig_arm') {
+      return true
+    }
+    cur = cur.parent
+  }
+  return false
+}
+
 export function attachTrackColliders(group: THREE.Object3D, phys: PhysicsWorld): number {
   group.updateMatrixWorld(true)
   let attached = 0
@@ -151,6 +169,16 @@ export function attachTrackColliders(group: THREE.Object3D, phys: PhysicsWorld):
     // a future `kind = "collidable_scatter"` extra can opt in by
     // iterating instanceMatrix here.
     if (obj instanceof THREE.InstancedMesh) return
+    // Mechanical-rig arm subtrees — their colliders are owned by the
+    // landmark-animation system as kinematic-position rigid bodies so
+    // the bike interacts with the swinging arm at runtime, not the
+    // rest-pose silhouette baked here. We skip the entire arm subtree
+    // (the arm node itself + its mesh-primitive descendants) by
+    // climbing the parent chain for the canonical
+    // ``landmark_id = "mechanical_rig_arm"`` tag the seed library
+    // stamps on the arm root. See
+    // ``src/engine/render/landmark-animation.ts``.
+    if (isUnderMechanicalRigArm(obj)) return
 
     const geom = obj.geometry as THREE.BufferGeometry
     const posAttr = geom.attributes.position
