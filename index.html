@@ -1437,24 +1437,40 @@
         #pause-menu .sub { font-size: 12px; margin-bottom: 16px; letter-spacing: 0.20em; }
         #pause-menu button.pm { font-size: 14px; padding: 14px 16px; letter-spacing: 0.16em; }
 
+        /* Minimap moves to top-right on mobile. Bottom-right is occupied
+           by the virtual face-button column (BOOST/FIRE/BRAKE/THRUST),
+           which would otherwise sit on top of the minimap. */
         #race-minimap {
-          width: 110px; height: 110px;
-          right: 10px;
-          bottom: max(10px, env(safe-area-inset-bottom, 0px));
+          width: 88px; height: 88px;
+          right: max(10px, env(safe-area-inset-right, 0px));
+          top: max(10px, env(safe-area-inset-top, 0px));
+          bottom: auto; left: auto;
         }
+        /* Tight centered timer between the top-left MENU button and the
+           top-right minimap. min-width: 0 lets it shrink past the desktop
+           200px floor on narrow phones. */
         #race-timer {
-          min-width: 150px;
-          padding: 8px 12px 6px;
+          min-width: 0;
+          padding: 6px 10px 4px;
           top: max(10px, env(safe-area-inset-top, 0px));
         }
-        #race-timer .race-timer-value { font-size: 18px; }
-        #race-timer .race-timer-current { font-size: 15px; }
+        #race-timer .race-timer-row { gap: 8px; }
+        #race-timer .race-timer-label { font-size: 9px; letter-spacing: 0.18em; }
+        #race-timer .race-timer-value { font-size: 16px; }
+        #race-timer .race-timer-current { font-size: 14px; }
+        #race-timer .race-timer-meta { font-size: 9px; letter-spacing: 0.10em; padding-top: 4px; margin-top: 4px; }
         #race-banner .race-banner-text {
           font-size: clamp(70px, 18vw, 110px);
           padding: 8px 16px; letter-spacing: 0.04em;
         }
-        #race-gap { font-size: 22px; top: 92px; padding: 6px 12px; }
-        #hud { font-size: 10px; top: 8px; left: 8px; }
+        /* Gap toast sits well below the timer card. */
+        #race-gap {
+          font-size: 20px; padding: 5px 12px;
+          top: calc(max(10px, env(safe-area-inset-top, 0px)) + 86px);
+        }
+        /* Dev HUD (fps / input source) moved to the right edge to clear
+           the on-screen MENU button at top-left. */
+        #hud { font-size: 10px; top: 8px; left: auto; right: 8px; text-align: right; }
 
         #garage-toggle, #devsettings-toggle, #water-debug-toggle { display: none; }
 
@@ -1488,6 +1504,11 @@
         #pause-menu button.pm { min-height: 44px; }
         .bc-card { min-height: 44px; }
         .bc-card:hover, .bc-mode-card:hover { transform: none; }
+        /* The "[ESC] resume / [R] restart / [Q] exit" hint is keyboard-only
+           guidance — useless on a phone with no physical keys, so hide it. */
+        #pause-menu .hint-kbd { display: none; }
+        /* Cold-boot menu chyron also offers keyboard hints; hide on touch. */
+        .bc-chyron .keys { display: none; }
       }
 
       /* ───────── Accessibility data-attrs ─────────
@@ -2298,7 +2319,10 @@
       /* While any full-screen broadcast surface is up, hide in-race HUD
          + dev chrome so the screen stays a clean broadcast frame. Placed at
          end of the cascade so the (1,1,1) specificity hide always wins over
-         each element's own display rule without needing !important. */
+         each element's own display rule without needing !important.
+         `paused-for-menu` mirrors `menu-active` for the in-race pause card —
+         on mobile the centered timer / top-right minimap would otherwise
+         poke through the dim pause backdrop. */
       body.menu-active #hud,
       body.menu-active #garage-toggle,
       body.menu-active #devsettings-toggle,
@@ -2308,7 +2332,11 @@
       body.menu-active #race-gap,
       body.menu-active #race-minimap,
       body.menu-active #hud-scaffold,
-      body.menu-active #finish { display: none; }
+      body.menu-active #finish,
+      body.paused-for-menu #race-timer,
+      body.paused-for-menu #race-gap,
+      body.paused-for-menu #race-minimap,
+      body.paused-for-menu #hud-scaffold { display: none; }
 
       /* ───────────── Cup-results overlay ─────────────
          Shown over the finish screen after the last race in a cup.
@@ -2619,7 +2647,7 @@
         </div>
       </footer>
     </div>
-    <!-- In-race pause menu (Esc). -->
+    <!-- In-race pause menu (Esc / gamepad Start / on-screen MENU button). -->
     <div id="pause-menu">
       <div class="card">
         <div class="ribbon">PAUSED</div>
@@ -2631,7 +2659,7 @@
           <button class="pm" id="pause-restart" type="button">RESTART RACE</button>
           <button class="pm danger" id="pause-exit" type="button">EXIT TO MENU</button>
         </div>
-        <div class="hint">[ESC] resume &middot; [R] restart &middot; [Q] exit</div>
+        <div class="hint hint-kbd">[ESC] resume &middot; [R] restart &middot; [Q] exit</div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

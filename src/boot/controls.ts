@@ -15,6 +15,7 @@
 
 import { clearCupProgress } from '@/engine/cup-progress'
 import { installMenuGamepad, type MenuGamepad } from '@/engine/input/menu-gamepad'
+import { TOUCH_MENU_EVENT } from '@/engine/input/touch'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { RBHandleStore } from '@/game/components'
@@ -114,6 +115,9 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     if (finishShown) return
     pausedForMenu = true
     pauseMenuEl?.classList.add('show')
+    // CSS hook: hides the in-race touch overlay so the joystick / face
+    // buttons don't sit on top of the pause card on mobile.
+    document.body.classList.add('paused-for-menu')
     if (pauseSubtitleEl) {
       const racer = RacerStore.get(playerEid)
       const lap = racer ? Math.min(racer.lap, track.lapsToFinish) : 1
@@ -129,6 +133,7 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     if (!pausedForMenu) return
     pausedForMenu = false
     pauseMenuEl?.classList.remove('show')
+    document.body.classList.remove('paused-for-menu')
   }
 
   // Finish-screen / pause-menu actions. NEXT advances to the next track
@@ -283,6 +288,18 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
       respawnPlayer()
       e.preventDefault()
     }
+  })
+
+  // Touch MENU button (mobile-only on-screen pause affordance) mirrors
+  // keyboard Esc / gamepad Start. The touch overlay dispatches a
+  // CustomEvent so this module doesn't have to reach into its DOM.
+  window.addEventListener(TOUCH_MENU_EVENT, () => {
+    if (finishShown) {
+      exitToMenu()
+      return
+    }
+    if (pausedForMenu) closePauseMenu()
+    else openPauseMenu()
   })
 
   // Gamepad Start (button 9) mirrors keyboard Esc — toggles pause from
