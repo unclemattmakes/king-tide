@@ -15,10 +15,9 @@ test.describe('cross-browser boot smoke', () => {
   test('title screen renders with correct document title', async ({ page }, testInfo) => {
     await page.goto('/')
 
-    // Pulled from menu-flow.spec.ts — `#title-start` is the stable
-    // entry-point selector for the title screen mode-select tile.
-    const title = page.locator('#title-start')
-    await expect(title).toBeVisible({ timeout: 10_000 })
+    // Apple-sport refresh dropped the explicit PRESS START button —
+    // the `.bc-title .word` wordmark is the new stable entry-point.
+    await expect(page.locator('.bc-title .word')).toBeVisible({ timeout: 10_000 })
 
     // Document title is set in index.html.
     const docTitle = await page.title()

@@ -19,7 +19,7 @@ test.describe.configure({ timeout: 60_000 })
 test.describe('menu @ 1280×800 (Steam Deck)', () => {
   test('title screen fits in the viewport without vertical scroll', async ({ page }) => {
     await page.goto('/')
-    await expect(page.locator('#title-start')).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('.bc-title .word')).toBeVisible({ timeout: 10_000 })
 
     // documentElement.scrollHeight ≤ clientHeight means the page doesn't
     // need to scroll. Tolerate a 2px rounding fudge.
@@ -34,11 +34,10 @@ test.describe('menu @ 1280×800 (Steam Deck)', () => {
 
   test('mode-select screen fits at Deck resolution', async ({ page }) => {
     await page.goto('/')
-    // `force: true` skips the stability dance — the infinite `bc-live`
-    // / `bc-blink` chyron animations otherwise keep Playwright's stable
-    // check from settling under SwiftShader. See `menu-flow.spec.ts`
-    // header for the full rationale.
-    await page.locator('#title-start').click({ force: true })
+    // Apple-sport refresh dropped the explicit PRESS START button —
+    // any key on the title screen advances. Use the keyboard so the
+    // test doesn't depend on element stability under animation.
+    await page.keyboard.press('Enter')
     // First mode card visible = mode-select screen has rendered.
     await expect(page.locator('.bc-mode-card[data-mode="race"]')).toBeVisible({ timeout: 10_000 })
 

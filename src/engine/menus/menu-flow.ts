@@ -216,6 +216,27 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
   updateClock()
   const clockInterval = window.setInterval(updateClock, 30_000)
 
+  // Idle-fade for the bottom chyron's input legend (`.keys`) — Apple-
+  // sport restraint: the legend reads as helpful for the first beat
+  // after you arrive on a screen, then quietly fades when you've
+  // settled in. Any pointer / key activity brings it back. The
+  // `.bc-chyron.idle .keys { opacity: 0 }` rule does the work; we just
+  // toggle the class.
+  const chyronEl = document.querySelector<HTMLElement>('.bc-chyron')
+  let idleTimer = 0
+  function markActive(): void {
+    if (!chyronEl) return
+    chyronEl.classList.remove('idle')
+    if (idleTimer) window.clearTimeout(idleTimer)
+    idleTimer = window.setTimeout(() => chyronEl.classList.add('idle'), 3500)
+  }
+  if (chyronEl) {
+    markActive()
+    window.addEventListener('keydown', markActive)
+    window.addEventListener('pointermove', markActive)
+    window.addEventListener('pointerdown', markActive)
+  }
+
   function renderCrumbs(): void {
     if (!crumbsEl) return
     const steps = stepsForMode()
@@ -255,28 +276,33 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
   }
 
   function updateChyron(step: Step): void {
+    // Apple-sport restraint: drop the per-screen orange eyebrow chip
+    // (PRE-SHOW / FORMAT / COURSE / LOADOUT / OPTIONS …). The text line
+    // alone carries the meaning; the tag was 8 different framings for
+    // the same UI slot. Pass empty `tag` so the `.tag:empty { display:
+    // none; }` rule collapses the column.
     switch (step) {
       case 'title':
-        setChyron('PRE-SHOW', 'Press start when you’re ready to roll.')
+        setChyron('', '')
         break
       case 'mode':
-        setChyron('FORMAT', 'Pick a format. Disabled tiles light up as their systems land.')
+        setChyron('', 'Pick a format. Disabled tiles light up as their systems land.')
         break
       case 'sp-track':
         setChyron(
-          'COURSE',
+          '',
           'All twelve ship tracks are in production — tiles light up sprint by sprint.',
         )
         break
       case 'sp-cup':
         setChyron(
-          'CIRCUIT',
+          '',
           'Real cups gate on their tracks shipping. Dev Cup is the playtest path.',
         )
         break
       case 'sp-cup-tracks':
         setChyron(
-          currentMode === 'time-trial' ? 'TIME TRIAL' : 'TRACK',
+          '',
           currentMode === 'time-trial'
             ? 'Solo against the clock. Your best lap saves as a translucent ghost — race it next time.'
             : pickedCup?.id === 'dev'
@@ -287,19 +313,19 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         )
         break
       case 'sp-bike':
-        setChyron('LOADOUT', 'Bars compare top speed, accel, agility, weight, wave-follow.')
+        setChyron('', 'Compare top speed, accel, agility, weight and wave-follow.')
         break
       case 'pre-race':
-        setChyron('OPTIONS', 'Override laps + AI count, or hit GO for the defaults.')
+        setChyron('', 'Override laps + AI count, or hit GO for the defaults.')
         break
       case 'mp-entry':
-        setChyron('LOBBY', 'Host a new room or punch in a friend’s code.')
+        setChyron('', 'Host a new room or punch in a friend’s code.')
         break
       case 'tutorial-intro':
-        setChyron('TUTORIAL', 'Tutorial framework ships in sprint 1.')
+        setChyron('', 'Tutorial framework ships in sprint 1.')
         break
       case 'leaderboard':
-        setChyron('LEADERBOARD', 'Time Trial + leaderboard backend ship in M16.')
+        setChyron('', 'Time Trial + leaderboard backend ship in M16.')
         break
     }
   }
@@ -671,6 +697,10 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     function teardown(): void {
       window.clearInterval(clockInterval)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keydown', markActive)
+      window.removeEventListener('pointermove', markActive)
+      window.removeEventListener('pointerdown', markActive)
+      if (idleTimer) window.clearTimeout(idleTimer)
       gamepadNav.dispose()
       root?.classList.remove('show')
       document.body.classList.remove('menu-active')
@@ -723,8 +753,14 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     function buildTitle(): HTMLElement {
       const el = document.createElement('section')
       el.className = 'bc-screen bc-title'
-      const headline = opts.reason === 'exit-from-race' ? 'BACK TO THE BOOTH' : 'TONIGHT’S CARD'
+      // Tagline is now contextual — quiet on cold-boot (the wordmark
+      // alone is the title), a soft anchor when bouncing back from a
+      // race so the player understands where they are.
       const recap = readLastRaceRecap()
+      const taglineHtml =
+        opts.reason === 'exit-from-race'
+          ? `<div class="tagline">Back to the booth</div>`
+          : ''
       // Stash the most recently-watched track/bike back into the picks
       // so the next race defaults to whatever the player just exited.
       if (recap) {
@@ -734,19 +770,17 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         }
       }
       const recapHtml = recap ? renderRecapHtml(recap) : ''
+      // No PRESS START button — the whole title surface is the affordance.
+      // Click anywhere on the title, or hit a meaningful key, to advance.
       el.innerHTML = `
-        <span class="word">HOVER</span>
-        <span class="word alt">BIKE</span>
-        <div class="tagline">${escapeHtml(headline)}</div>
+        <span class="word">HOVERBIKE</span>
+        ${taglineHtml}
         ${recapHtml}
         <div class="cta">
-          <button class="bc-btn primary" id="title-start" type="button">PRESS START</button>
-          <div class="cta-blink">[ ENTER / CLICK TO BEGIN ]</div>
+          <div class="cta-blink">Press any key to begin</div>
         </div>
       `
-      el.querySelector<HTMLButtonElement>('#title-start')?.addEventListener('click', () =>
-        showStep('mode'),
-      )
+      el.addEventListener('click', () => showStep('mode'))
       return el
     }
 
@@ -1314,6 +1348,18 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       // Don't hijack typing into the room-code input.
       const target = e.target as HTMLElement | null
       if (target && target.tagName === 'INPUT') return
+      // Title screen is ambient — any meaningful key advances. Skip
+      // modifier-only events (Shift/Ctrl/Alt/Meta on their own) and
+      // Escape (which goes to gamepadBack below).
+      if (
+        currentStep === 'title' &&
+        e.code !== 'Escape' &&
+        !['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight'].includes(e.code)
+      ) {
+        showStep('mode')
+        e.preventDefault()
+        return
+      }
       if (e.code === 'Enter' || e.code === 'NumpadEnter') {
         if (currentStep === 'title') {
           showStep('mode')
