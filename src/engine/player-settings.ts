@@ -188,6 +188,12 @@ export type PlayerSettings = {
    *  user gesture. Default off; the Steam Deck profile flips it on so
    *  Gaming Mode launches don't strand the player in a windowed view. */
   fullscreenPreferred: boolean
+  /** Video — when true the runtime drives ``landmark_mechanical_rig``
+   *  arm subtrees with a per-instance sin pendulum. Off pins every arm
+   *  to its authored rest pose; flipping it on resumes from the live
+   *  ``elapsedSeconds`` (no jump). Render-only; arm trimesh colliders
+   *  are static in either state. */
+  animatedLandmarks: boolean
 }
 
 export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
@@ -227,6 +233,7 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   framerateCap: 0,
   pixelRatio: 1.0,
   fullscreenPreferred: false,
+  animatedLandmarks: true,
 })
 
 /** Live, mutable copy. Consumers read this object every frame — no
@@ -376,6 +383,9 @@ export function loadPlayerSettings(): void {
   }
   if (typeof p.fullscreenPreferred === 'boolean') {
     playerSettings.fullscreenPreferred = p.fullscreenPreferred
+  }
+  if (typeof p.animatedLandmarks === 'boolean') {
+    playerSettings.animatedLandmarks = p.animatedLandmarks
   }
   // Apply accessibility settings to the DOM as early as we can after
   // load. Lazy-imported so `player-settings.ts` stays a tiny
@@ -608,5 +618,10 @@ export function setPixelRatio(v: number): void {
 
 export function setFullscreenPreferred(on: boolean): void {
   playerSettings.fullscreenPreferred = on
+  savePlayerSettings()
+}
+
+export function setAnimatedLandmarks(on: boolean): void {
+  playerSettings.animatedLandmarks = on
   savePlayerSettings()
 }

@@ -161,6 +161,12 @@ export interface GameLoopOpts {
   /** Unified track-emitter particle system. No-op when the track ships
    *  no `kind=emitter` empties (procedural tracks, edit mode, etc.). */
   particleTick: (dt: number) => void
+  /** Landmark animation — drives ``landmark_mechanical_rig`` arm
+   *  rotations from ``elapsedSeconds`` since boot. No-op when the
+   *  track ships no mechanical rigs. Reads
+   *  ``playerSettings.animatedLandmarks`` internally; toggling it off
+   *  pins arms to rest. */
+  landmarkTick: (elapsedSeconds: number) => void
   /** Track + per-bike state. */
   track: Track
   trackId: string
@@ -236,6 +242,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     combatRender,
     fxTick,
     particleTick,
+    landmarkTick,
     track,
     trackId,
     manifest,
@@ -699,6 +706,12 @@ export function startGameLoop(opts: GameLoopOpts): void {
     combatRender(dt)
     fxTick(dt)
     particleTick(dt)
+    // Landmark pendulum animation — render-only, driven off wall-clock
+    // seconds since boot so menu pauses don't freeze the visual rhythm.
+    // `now` is the rAF timestamp; the system reads
+    // `playerSettings.animatedLandmarks` internally and pins arms to
+    // rest when off.
+    landmarkTick(now / 1000)
     physicsDebug.tick()
 
     // Race HUD — countdown banner, race/lap timers, gap toast, minimap.

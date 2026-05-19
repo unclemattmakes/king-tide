@@ -30,6 +30,7 @@ import {
   type ColorblindMode,
   playerSettings,
   setAIDifficulty,
+  setAnimatedLandmarks,
   setAntiGravCameraIntensity,
   setAudioBusVolume,
   setAudioMusicEnabled,
@@ -285,6 +286,13 @@ const TAB_SPECS: TabSpec[] = [
         control: { kind: 'toggle', defaultValue: playerSettings.fullscreenPreferred },
         enabled: true,
         gate: 'Requests fullscreen on first user gesture. Auto-on under the Steam Deck profile.',
+      },
+      {
+        id: 'video-animated-landmarks',
+        label: 'Animated landmarks',
+        control: { kind: 'toggle', defaultValue: playerSettings.animatedLandmarks },
+        enabled: true,
+        gate: 'Swings Marina Bay 7 gantry cranes + Doge\'s Drift Campanile bell. Off pins them to authored rest poses.',
       },
       {
         id: 'video-quality',
@@ -830,6 +838,11 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       if (spec.enabled && spec.id === 'video-fullscreen') {
         cb.addEventListener('change', () => {
           setFullscreenPreferred(cb.checked)
+        })
+      }
+      if (spec.enabled && spec.id === 'video-animated-landmarks') {
+        cb.addEventListener('change', () => {
+          setAnimatedLandmarks(cb.checked)
         })
       }
       return cb
