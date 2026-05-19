@@ -103,6 +103,14 @@ export interface BootState {
   intentOverride: Intent | null
   playerSnapshot: PlayerSnapshot | null
   raceSnapshot: RaceSnapshot | null
+  /** Total wave-pump events fired this race. Exposed to the QA bundle
+   *  + dev console so tuning passes can verify "is pumping firing at
+   *  the right cadence". */
+  pumpEventCount?: number
+  /** Strength of the most recent pump event (0..1). */
+  lastPumpStrength?: number
+  /** performance.now() timestamp of the most recent pump event. */
+  lastPumpAt?: number
 }
 
 export interface GameLoopHud {
@@ -211,6 +219,62 @@ export interface GameLoopOpts {
    *  track-agnostic (the default script clears on generic
    *  throttle/look/pump/anti-grav signals) so any track works. */
   tutorialMode?: boolean
+}
+
+/**
+ * Apply the wave-pump physics reward — a forward impulse along the
+ * bike's heading proportional to `strength`. Capped at a small fraction
+ * of `topSpeed` so chained pumps preserve speed through a swell train
+ * without runaway acceleration past the bike's normal envelope. With
+ * the impulse magnitude tuned at `PUMP_IMPULSE_DV * mass`, a strong
+ * crest (strength ≈ 1) adds ~PUMP_IMPULSE_DV m/s to the horizontal
+ * velocity; weak crests (strength ≈ 0.2) add a fifth of that.
+ *
+ * The bike's velocity-cap sits at `topSpeed * PUMP_SPEED_CAP_FRAC` —
+ * a touch above the natural topSpeed gate (which sits at 1.0) so the
+ * pump can briefly push the bike into the "earned overspeed" band that
+ * drag pulls it back from over the next second or two. The
+ * `speedFalloff` term in `hover.ts` already kills accel past topSpeed,
+ * so the overspeed band fades naturally once pumps stop firing.
+ *
+ * Skipped when the rigid body or its mass isn't available — defensive
+ * for the edge between bike spawn and the next physics step.
+ */
+const PUMP_IMPULSE_DV = 4.0
+const PUMP_SPEED_CAP_FRAC = 1.18
+function applyPumpImpulse(
+  phys: PhysicsWorld,
+  playerEid: number,
+  stats: { topSpeed: number; mass: number },
+  strength: number,
+): void {
+  const handle = RBHandleStore.get(playerEid)
+  if (!handle) return
+  const rb = phys.world.getRigidBody(handle.handle)
+  if (!rb) return
+  const m = rb.mass()
+  if (!Number.isFinite(m) || m <= 0) return
+  // Forward direction in world XZ from the bike's quaternion. Three.js
+  // would handle this with a Quaternion helper, but we're in the sim
+  // layer here — do it inline.
+  const q = rb.rotation()
+  const fwdX = 2 * (q.x * q.z + q.y * q.w)
+  const fwdZ = 1 - 2 * (q.x * q.x + q.y * q.y)
+  const fwdLen = Math.hypot(fwdX, fwdZ)
+  if (fwdLen < 1e-4) return
+  const ux = fwdX / fwdLen
+  const uz = fwdZ / fwdLen
+  // How much horizontal-speed headroom remains under the pump cap.
+  // 0 → fully saturated, skip the impulse so chained pumps don't pile
+  // up well past the cap.
+  const v = rb.linvel()
+  const speed = Math.hypot(v.x, v.z)
+  const cap = stats.topSpeed * PUMP_SPEED_CAP_FRAC
+  if (speed >= cap) return
+  const wanted = strength * PUMP_IMPULSE_DV
+  const allowed = Math.min(wanted, Math.max(0, cap - speed))
+  if (allowed <= 0) return
+  rb.applyImpulse({ x: ux * allowed * m, y: 0, z: uz * allowed * m }, true)
 }
 
 /**
@@ -604,10 +668,12 @@ export function startGameLoop(opts: GameLoopOpts): void {
     }
 
     // Wave-pump signal — observer reads the player's hover + velocity
-    // + throttle state and fires on a clean crest launch. Skipped while
-    // auto-play is on (we're driving for the rider, not pumping). The
-    // observer enforces its own cooldown so the per-frame call is
-    // cheap (~one struct comparison + a few number checks).
+    // + throttle state and fires on a clean crest pass. Skipped while
+    // auto-play is on (the auto-pilot doesn't get the player reward).
+    // When the observer fires we (a) flash HUD / play audio, and
+    // (b) apply a small forward impulse to the player's rigid body so
+    // a well-timed crest actually pays off in speed. Capped at
+    // `topSpeed * PUMP_SPEED_CAP_FRAC` so chained pumps don't blow up.
     if (!control.isAutoPlay() && state.playerSnapshot) {
       const hoverState = HoverStateStore.get(playerEid)
       const intent = ControlIntentStore.get(playerEid)
@@ -627,6 +693,10 @@ export function startGameLoop(opts: GameLoopOpts): void {
             audio.wavePump(pump.strength)
           }
           tutorialDirector?.notifyPumpEvent()
+          applyPumpImpulse(phys, playerEid, stats, pump.strength)
+          state.pumpEventCount = (state.pumpEventCount ?? 0) + 1
+          state.lastPumpStrength = pump.strength
+          state.lastPumpAt = now
         }
       }
     }
