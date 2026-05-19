@@ -77,6 +77,11 @@ export type HoverDebug = {
    *  and the performance.now() timestamp of the last event. Lets QA
    *  + dev console verify "is pumping firing at the right cadence". */
   wavePumps(): { count: number; lastStrength: number; lastAt: number }
+  /** Boost-meter peek — current 0..1 charge and whether the meter is
+   *  actively draining. Mirrors `BoostMeterStore` on the player bike
+   *  so the dev console can verify "I pressed boost; is it engaged?"
+   *  without an ECS dive. */
+  boostMeter(): { charge: number; active: boolean }
   /** Enumerate every bike's transform + intent — for AI debugging. */
   bikes(): BikeDebugSnapshot[]
   /** Toggle auto-play: when on, AI controls the player bike. Returns new state. */
@@ -262,6 +267,7 @@ export type DebugState = {
   lastPumpAt?: number
   boostMeterCharge?: number
   boostMeterActive?: boolean
+  boostBtnDown?: boolean
 }
 
 export function installDebugApi(state: DebugState, accessors: DebugAccessors): HoverDebug {
@@ -311,6 +317,10 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
       count: state.pumpEventCount ?? 0,
       lastStrength: state.lastPumpStrength ?? 0,
       lastAt: state.lastPumpAt ?? 0,
+    }),
+    boostMeter: () => ({
+      charge: state.boostMeterCharge ?? 0,
+      active: state.boostMeterActive ?? false,
     }),
     combatEntityCounts: () => {
       if (!state.ready) return { mines: 0, missiles: 0 }
