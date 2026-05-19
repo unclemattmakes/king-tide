@@ -8,10 +8,12 @@
 
 import type { WaterDebugDefaults, WaterMesh } from './render/water'
 
-// v8 bump: adds `waveBearing` for rotating the whole wave field so
-// the user can re-aim the swell train. Old v1–v7 entries are
-// silently merged onto defaults by the per-key tolerant loader below.
-export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v8'
+// v9 bump: drops the spectrum/FFT-only knobs (choppiness,
+// seaStateIntensity, windSpeed, windDirection, windCutoff,
+// foamPersistence) along with the FFT path itself. Old v1–v8 entries
+// are silently merged onto defaults by the per-key tolerant loader
+// below — unknown keys are ignored.
+export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v9'
 
 export type WaterDebugSettings = {
   steepness: number
@@ -23,12 +25,6 @@ export type WaterDebugSettings = {
   roughBase: number
   roughSparkle: number
   detailStrength: number
-  choppiness: number
-  seaStateIntensity: number
-  windSpeed: number
-  windDirection: number
-  windCutoff: number
-  foamPersistence: number
   bodyAbsorption: number
   sunDiscStrength: number
   sunStreakStrength: number
@@ -49,12 +45,6 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     roughBase: d.roughBase,
     roughSparkle: d.roughSparkle,
     detailStrength: d.detailStrength,
-    choppiness: d.choppiness,
-    seaStateIntensity: d.seaStateIntensity,
-    windSpeed: d.windSpeed,
-    windDirection: d.windDirection,
-    windCutoff: d.windCutoff,
-    foamPersistence: d.foamPersistence,
     bodyAbsorption: d.bodyAbsorption,
     sunDiscStrength: d.sunDiscStrength,
     sunStreakStrength: d.sunStreakStrength,
@@ -111,12 +101,6 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setRoughBase(s.roughBase)
   water.debug.setRoughSparkle(s.roughSparkle)
   water.debug.setDetailStrength(s.detailStrength)
-  water.debug.setChoppiness(s.choppiness)
-  water.debug.setSeaStateIntensity(s.seaStateIntensity)
-  water.debug.setWindSpeed(s.windSpeed)
-  water.debug.setWindDirection(s.windDirection)
-  water.debug.setWindCutoff(s.windCutoff)
-  water.debug.setFoamPersistence(s.foamPersistence)
   water.debug.setBodyAbsorption(s.bodyAbsorption)
   water.debug.setSunDiscStrength(s.sunDiscStrength)
   water.debug.setSunStreakStrength(s.sunStreakStrength)

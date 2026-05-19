@@ -1,11 +1,4 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
-import { buildPhillipsSpectrum, type PhillipsParams } from './phillips'
-import {
-  sampleSpectrumHeightFromModes,
-  sampleSpectrumSurfaceFromModes,
-  selectTopKModes,
-  type SpectrumMode,
-} from './spectrum-modes'
 
 /**
  * Sum-of-sines Gerstner wave field. Pure math — no Three.js, runs in sim layer.
@@ -70,25 +63,11 @@ export type WaveSample = {
 }
 
 /**
- * The wave field can be in one of two modes:
- *
- *   - 'gerstner' — the legacy 6-wave analytic sum. Default, hand-tuned,
- *     matches the visual character the game has shipped with.
- *   - 'spectrum' — a top-K Phillips spectrum sampled deterministically
- *     from a seeded PRNG. Activated by `?waves=fft` at boot; richer
- *     statistical content, but visual character is different and the
- *     debug menu's swell/chop scales become no-ops (Phase A5 will
- *     replace them with wind-speed / cutoff knobs).
- *
- * Both modes share the wake list, time scalar, and base sea level —
- * the wake system is an additive analytic layer independent of the
- * underlying spectrum, and shipping it unchanged keeps "bike jumps own
- * wake" intact across the migration.
+ * Hand-tuned 6-wave analytic Gerstner sum. CPU buoyancy and the GPU
+ * vertex shader evaluate the same closed-form formula so bike float
+ * math tracks the rendered surface to within float precision.
  */
-export type WaveFieldState = GerstnerWaveField | SpectrumWaveField
-
-export type GerstnerWaveField = {
-  kind: 'gerstner'
+export type WaveFieldState = {
   waves: Wave[]
   wakes: WakeSource[]
   time: number
@@ -102,31 +81,6 @@ export type GerstnerWaveField = {
   /** Per-track wave-zone overrides. Empty by default; set via
    *  `setWaveZones` after the track loads. See `sampleZoneFactors`
    *  for the OBB-distance blend math. */
-  zones: WaveZoneRuntime[]
-}
-
-export type SpectrumWaveField = {
-  kind: 'spectrum'
-  /** Top-K most-energetic Phillips modes. CPU buoyancy sums these
-   *  analytically; GPU shader converts them to Gerstner-shape via
-   *  `spectrumModesToGerstnerShape` at build time. Both paths produce
-   *  the identical heightfield — see `spectrum-to-gerstner.ts`. */
-  spectrum: SpectrumMode[]
-  /** Echo of the build params. Lets consumers introspect / hash the
-   *  field for replay validation. */
-  spectrumParams: PhillipsParams
-  wakes: WakeSource[]
-  time: number
-  baseY: number
-  /** Global wave-field bearing in radians (CCW). Applied as a 2D
-   *  rotation on the sample (x, z) before spectrum evaluation. */
-  waveBearing: number
-  /** Per-track wave-zone overrides — see `GerstnerWaveField.zones`.
-   *  Spectrum-mode zone application currently uses the same height
-   *  multiplier on the sampled height but does not retune individual
-   *  Phillips modes; the Phillips spectrum's continuous shape makes
-   *  per-zone frequency scaling more invasive. Authoring on
-   *  spectrum-mode tracks should rely on `heightMult` + `surge*`. */
   zones: WaveZoneRuntime[]
 }
 
@@ -212,121 +166,12 @@ export const WAKE_TRANS_AMP = 0.3
 
 export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveFieldState {
   return {
-    kind: 'gerstner',
     waves,
     wakes: [],
     time: 0,
     baseY: opts?.baseY ?? 0,
     waveBearing: 0,
     zones: [],
-  }
-}
-
-/**
- * Build a wave field driven by a top-K Phillips spectrum. The CPU
- * buoyancy path samples the spectrum analytically; the GPU shader
- * converts the same modes to Gerstner-shape so its unrolled wave
- * iteration stays bit-identical. Behind the `?waves=fft` boot flag
- * during Phase A; the default stays on the legacy 6-wave Gerstner.
- */
-export function createSpectrumWaveField(
-  spectrumParams: PhillipsParams,
-  opts?: { baseY?: number; topK?: number },
-): SpectrumWaveField {
-  const grid = buildPhillipsSpectrum(spectrumParams)
-  // Default top-K kept at 32. Bumping it higher (e.g. 128) gives a
-  // tighter CPU-vs-GPU buoyancy match but bloats the analytic-path
-  // vertex shader — `water.ts`'s `gerstnerHeight` / `gerstnerDisp`
-  // unroll a JS `for` over `waveConsts.length` (= top-K) and
-  // `foamAccumulator` re-invokes them at 4 past time samples. At
-  // top-K=128 the unrolled shader took some drivers' compile path
-  // long enough to drop the WebGPU device entirely (TDR). 32 keeps
-  // both paths fast at the cost of a few percent buoyancy-vs-render
-  // gap, which the arcade physics tolerates fine.
-  const spectrum = selectTopKModes(grid, { topK: opts?.topK ?? 32 })
-  return {
-    kind: 'spectrum',
-    spectrum,
-    spectrumParams,
-    wakes: [],
-    time: 0,
-    baseY: opts?.baseY ?? 0,
-    waveBearing: 0,
-    zones: [],
-  }
-}
-
-/**
- * Default spectrum parameters tuned to read as open ocean — visible
- * rolling swells, foam-catching chop, blue-teal coloring, comparable
- * to the v2 Gerstner default's visual character. Hand-tuned via the
- * water-debug menu on the lagoon track at sunset palette; values are
- * the ones that survived the in-browser A/B against `?water=v2`.
- *
- * Knobs that matter:
- *
- *   - `N`: grid resolution. 64 trades 16× more inner-loop compute
- *     (still <1.5 ms on a modern dGPU) for noticeably less of the
- *     obvious diagonal banding the N=32 spectrum showed when viewed
- *     from grazing angles. The kernel cost still doesn't dominate.
- *   - `windSpeed`: 13 m/s puts the dominant Phillips wavelength at
- *     `L = V²/g ≈ 17 m`. That's solidly in the chop band of the
- *     Gerstner default and produces visible mid-frequency wave fronts
- *     across the visible viewport rather than the sub-meter ripples
- *     a lower V was producing.
- *   - `amplitude` (Phillips `A`): tuned against the summed-spectrum
- *     RMS height. At V=13 / N=64 / tileSize=90, `A = 4.5e-6` lands
- *     RMS heights in the ~0.9 m range — close to the v2 Gerstner
- *     amplitudes' peak excursions, deep enough that the
- *     deep-trough → cream-crest scatter blend fully traverses its
- *     smoothstep window. (Earlier checkpoints had A=1.5e-6 calibrated
- *     for N=32; the bump compensates for the grid change.)
- *   - `smallWavelengthCutoff`: 1.2 m damps modes shorter than 1.2 m
- *     (per Tessendorf §4.3) — keeps the per-pixel chop from aliasing
- *     into noise. Slightly tighter than the Gerstner chop's shortest
- *     wavelength of 5.5 m, leaving the FFT-side a band of fine chop
- *     to add character.
- *
- * `seed` is fixed so two sessions with no track-specific override
- * get the same sea state.
- */
-export function defaultSpectrumParams(): PhillipsParams {
-  return {
-    N: 32,
-    tileSize: 90,
-    windSpeed: 11,
-    // Wind direction rotated 45° from the previous axis-aligned tune.
-    // The Phillips spectrum's `|k̂·ŵ|²` directional cosine zeroes
-    // out perpendicular modes, so any single wind direction produces
-    // a striped wave pattern along that axis. Picking a diagonal
-    // breaks the alignment with both world-axis race straightaways
-    // and with the bike's nominal forward direction, so the
-    // resulting wave fronts cross the visible viewport at an angle
-    // rather than as horizontal/vertical "venetian blind" stripes.
-    windDirX: 0.6,
-    windDirZ: 0.8,
-    // Phillips amplitude pulled up from 1e-6 → 4e-6 so the wireframe
-    // view actually shows real wave silhouette — at 1e-6 the surface
-    // was nearly flat (RMS ~0.3 m on a 240 m mesh = sub-pixel relief
-    // at the bike camera height). 4e-6 lands RMS in the 0.8–1.2 m
-    // band, which gives the swells visible 3-D shape without the
-    // Tessendorf horizontal pinch dragging Jacobian foam back into
-    // "white blanket" territory (we softened the foam pipeline in a
-    // prior change so this bigger amplitude is safe). CPU buoyancy
-    // also reads from this spectrum, so bike physics inherits the
-    // larger heave automatically — the analytic Gerstner gap budget
-    // tolerates it.
-    amplitude: 4e-6,
-    // Mitsuyasu cos²ˢ(α/2) directional spread exponent. SoT/Horvath
-    // use s ∈ [2, 10]; pulled down to s=2 (slightly wider than the
-    // tight default) so the main wind-sea cascade contributes some
-    // off-axis energy and doesn't read as parallel sine-wave stripes
-    // on the close-in race-camera band. Combined with the chop
-    // cascade's near-isotropic spread the surface reads as chaotic
-    // ocean rather than banded ripple-pond.
-    directionalSpread: 2,
-    smallWavelengthCutoff: 1.2,
-    seed: 0x515a,
   }
 }
 
@@ -414,9 +259,8 @@ function zoneWeight(zone: WaveZoneRuntime, x: number, z: number): number {
 export type WaveZoneFactors = {
   /** Effective wave-amplitude multiplier at this sample. 1 = neutral. */
   heightMult: number
-  /** Effective wave-frequency multiplier. 1 = neutral. Gerstner mode
-   *  applies this by dividing each wave's wavelength; spectrum mode
-   *  currently ignores it (see `SpectrumWaveField.zones`). */
+  /** Effective wave-frequency multiplier. 1 = neutral. Applied by
+   *  dividing each wave's wavelength inside the zone. */
   freqMult: number
   /** Effective bearing override. `undefined` = inherit global. */
   bearingRad: number | undefined
@@ -496,12 +340,7 @@ export function sampleZoneFactors(
  * gameplay hooks (pump charge multipliers, AI swell warnings, etc.).
  * Not called by the surface samplers — those treat Y as "always in".
  */
-export function pointInWaveZone3D(
-  zone: WaveZoneRuntime,
-  x: number,
-  y: number,
-  z: number,
-): boolean {
+export function pointInWaveZone3D(zone: WaveZoneRuntime, x: number, y: number, z: number): boolean {
   const dx = x - zone.position.x
   const dy = y - zone.position.y
   const dz = z - zone.position.z
@@ -635,20 +474,14 @@ export function sampleHeight(field: WaveFieldState, x: number, z: number): numbe
   // whole wave train without mutating per-wave dirX/dirZ.
   const xRot = x * cosB + z * sinB
   const zRot = -x * sinB + z * cosB
-  if (field.kind === 'spectrum') {
-    // Spectrum mode: per-wave freqMult is invasive (it would re-shape
-    // the Phillips modes), so we only apply heightMult + surge here.
-    y += zoneFx.heightMult * sampleSpectrumHeightFromModes(field.spectrum, xRot, zRot, t)
-  } else {
-    for (const w of field.waves) {
-      // freqMult shortens the wavelength inside the zone — chop bands
-      // become choppier, swells get tighter. heightMult scales the
-      // amplitude.
-      const k = ((2 * Math.PI) / w.wavelength) * zoneFx.freqMult
-      const omega = w.speed * k
-      const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
-      y += zoneFx.heightMult * w.amplitude * Math.sin(phase)
-    }
+  for (const w of field.waves) {
+    // freqMult shortens the wavelength inside the zone — chop bands
+    // become choppier, swells get tighter. heightMult scales the
+    // amplitude.
+    const k = ((2 * Math.PI) / w.wavelength) * zoneFx.freqMult
+    const omega = w.speed * k
+    const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
+    y += zoneFx.heightMult * w.amplitude * Math.sin(phase)
   }
   y += zoneFx.surgeY
   for (const src of field.wakes) {
@@ -673,28 +506,17 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
   const sinB = Math.sin(effectiveBearing)
   const xRot = x * cosB + z * sinB
   const zRot = -x * sinB + z * cosB
-  if (field.kind === 'spectrum') {
-    const surf = sampleSpectrumSurfaceFromModes(field.spectrum, xRot, zRot, t)
-    y += zoneFx.heightMult * surf.y
-    // Slopes track the height; scale them by the same factor so the
-    // bike's surface-normal-based steering still aligns with the
-    // visible water.
-    rotDydx += zoneFx.heightMult * surf.dydx
-    rotDydz += zoneFx.heightMult * surf.dydz
-    vy += zoneFx.heightMult * surf.vy
-  } else {
-    for (const w of field.waves) {
-      const k = ((2 * Math.PI) / w.wavelength) * zoneFx.freqMult
-      const omega = w.speed * k
-      const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
-      const s = Math.sin(phase)
-      const c = Math.cos(phase)
-      const a = zoneFx.heightMult * w.amplitude
-      y += a * s
-      rotDydx += a * c * (k * w.dirX)
-      rotDydz += a * c * (k * w.dirZ)
-      vy += a * c * -omega
-    }
+  for (const w of field.waves) {
+    const k = ((2 * Math.PI) / w.wavelength) * zoneFx.freqMult
+    const omega = w.speed * k
+    const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
+    const s = Math.sin(phase)
+    const c = Math.cos(phase)
+    const a = zoneFx.heightMult * w.amplitude
+    y += a * s
+    rotDydx += a * c * (k * w.dirX)
+    rotDydz += a * c * (k * w.dirZ)
+    vy += a * c * -omega
   }
   // Surge adds height only — its ∂/∂x and ∂/∂z are zero (uniform
   // inside the zone's weight envelope), so we don't bias slopes /
@@ -720,11 +542,25 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
 }
 
 /**
- * Default wave preset — a swell-plus-chop mix tuned to feel Wave-Race-y at
- * arcade speeds. Two long-period swells beat against each other so big
- * "sets" come in periodically (constructive interference around every ~30
- * seconds); the four chop bands fill in surface texture across multiple
- * scales (22 m down to 5.5 m).
+ * Default wave preset — a coherent swell train tuned for Wave-Race-style
+ * riding. The previous preset summed six directions spanning 190° (literally
+ * the physics definition of "confused seas"), which produced unpredictable
+ * jostling under the bike. This one runs every wave within a ±25° fan of
+ * the bearing axis so crests march in roughly one direction, the way real
+ * open-coast swell does:
+ *
+ *   - Two long swells (50 m + 85 m) carry the silhouette. Their periods
+ *     (5.8 s / 7.6 s) beat constructively about every 24 s for the
+ *     "occasional big set" rhythm.
+ *   - Four chop bands (16 / 10 / 6 / 4 m) layered on top fan ±25° around
+ *     the bearing for surface texture without re-introducing the
+ *     omnidirectional jostle.
+ *
+ * Amplitude budget: peak ~1.4 m, RMS ~0.55 m — about 65% of the previous
+ * tune so the bike can ride the faces rather than slap through chop. The
+ * per-track `seaStateBeaufort` multiplier (see `beaufortToAmplitudeScale`)
+ * still scales the whole stack, so calm pond tracks (Beaufort 1–2) sit at
+ * ~0.3 m peak and storm tracks (Beaufort 5+) push back over 2 m.
  *
  * Each wave is unrolled into the vertex shader as a sin+cos pair, so the
  * count is a direct multiplier on per-vertex cost. Tests run headed (real
@@ -732,24 +568,22 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
  * software fallback would prefer.
  */
 export function defaultWaves(): Wave[] {
+  // Phase speeds are roughly the deep-water dispersion `c = √(g·L / 2π)`
+  // (≈ 9 m/s at 50 m, ≈ 11.5 m/s at 85 m, down to ~2.5 m/s for 4 m chop).
+  // Sticking close to the physical relation keeps the crest visibly
+  // travelling at a pace the player's eye reads as "real water."
   return [
-    // Big swells — long wavelengths, low frequencies. These are what make
-    // "the bigger waves show up periodically": their slightly different
-    // periods (≈6.0 s and ≈7.7 s) beat against each other so peaks align
-    // every ~25–30 s. Swell amplitudes unchanged from M9.26 — they drive
-    // the periodic-set rhythm and bumping them risks the buoyancy field
-    // throwing the bike around at race speeds.
-    { dirX: 0.92, dirZ: 0.39, amplitude: 0.55, wavelength: 60, speed: 10.0, phase: 0.4 },
-    { dirX: 0.6, dirZ: 0.8, amplitude: 0.4, wavelength: 85, speed: 11.0, phase: 2.2 },
-    // Wind chop across four scales for varied surface texture. Amplitudes
-    // bumped ~30% from the original [0.5, 0.34, 0.22, 0.12] in M9.34 so the
-    // short-wavelength pinching from horizontal-displacement Gerstner reads
-    // more dramatically — chop ridges visibly sharpen on the v2 shader,
-    // and physical chop bumps the bike's hull probes by a noticeable
-    // amount without overpowering the multi-probe averaging.
-    { dirX: 1, dirZ: 0, amplitude: 0.65, wavelength: 22, speed: 4.0, phase: 0 },
-    { dirX: 0.707, dirZ: 0.707, amplitude: 0.44, wavelength: 14, speed: 3.6, phase: 1.1 },
-    { dirX: 0.3, dirZ: -0.954, amplitude: 0.29, wavelength: 9, speed: 3.0, phase: 2.3 },
-    { dirX: -0.5, dirZ: 0.866, amplitude: 0.16, wavelength: 5.5, speed: 2.4, phase: 3.7 },
+    // Primary swell — the dominant set rolling toward the bike.
+    { dirX: 1.0, dirZ: 0.0, amplitude: 0.5, wavelength: 50, speed: 8.6, phase: 0.4 },
+    // Secondary swell — same direction, slightly different period so the
+    // two swells beat into bigger "sets" every ~24 s.
+    { dirX: 0.985, dirZ: 0.174, amplitude: 0.35, wavelength: 85, speed: 11.2, phase: 2.2 },
+    // Mid-band chop riding the swell face, dead-on with the bearing.
+    { dirX: 1.0, dirZ: 0.0, amplitude: 0.22, wavelength: 16, speed: 5.0, phase: 0.0 },
+    // Cross-chop fanned ±25° around the bearing for surface variety
+    // without re-introducing the omni-directional jostle.
+    { dirX: 0.906, dirZ: 0.423, amplitude: 0.16, wavelength: 10, speed: 4.0, phase: 1.1 },
+    { dirX: 0.94, dirZ: -0.342, amplitude: 0.1, wavelength: 6, speed: 3.1, phase: 2.3 },
+    { dirX: 0.985, dirZ: 0.174, amplitude: 0.06, wavelength: 4, speed: 2.5, phase: 3.7 },
   ]
 }
