@@ -133,6 +133,22 @@
       "specPath": "public/tracks/alpine-sprint.json"
     },
     {
+      "id": "angkor-drowned",
+      "displayName": "Angkor Drowned",
+      "url": "/assets/tracks/angkor-drowned.glb",
+      "specPath": "public/tracks/angkor-drowned.json",
+      "heroUrl": "/assets/tracks/angkor-drowned-hero.jpg",
+      "thumbUrl": "/assets/tracks/angkor-drowned-thumb.jpg"
+    },
+    {
+      "id": "aqualand",
+      "displayName": "Aqualand",
+      "url": "/assets/tracks/aqualand.glb",
+      "specPath": "public/tracks/aqualand.json",
+      "heroUrl": "/assets/tracks/aqualand-hero.jpg",
+      "thumbUrl": "/assets/tracks/aqualand-thumb.jpg"
+    },
+    {
       "id": "big-bay",
       "displayName": "Big Bay",
       "url": "/assets/tracks/big-bay.glb",
@@ -193,6 +209,14 @@
       "specPath": "public/tracks/kilauea-crown.json",
       "heroUrl": "/assets/tracks/kilauea-crown-hero.jpg",
       "thumbUrl": "/assets/tracks/kilauea-crown-thumb.jpg"
+    },
+    {
+      "id": "liberty-drowned",
+      "displayName": "Liberty Drowned",
+      "url": "/assets/tracks/liberty-drowned.glb",
+      "specPath": "public/tracks/liberty-drowned.json",
+      "heroUrl": "/assets/tracks/liberty-drowned-hero.jpg",
+      "thumbUrl": "/assets/tracks/liberty-drowned-thumb.jpg"
     },
     {
       "id": "marina-bay-7",

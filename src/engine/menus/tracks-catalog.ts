@@ -163,8 +163,8 @@ export const V1_TRACKS: V1TrackEntry[] = [
     accent: '#6bd1a4',
     lapTarget: 22,
     laps: 5,
-    gateLabel: 'Drowned Cup chaos slot — sprint 3 (M15)',
-    status: 'pending',
+    gateLabel: '',
+    status: 'ship',
   },
   {
     id: 'angkor-drowned',
@@ -175,8 +175,8 @@ export const V1_TRACKS: V1TrackEntry[] = [
     accent: '#7ba364',
     lapTarget: 62,
     laps: 3,
-    gateLabel: 'Drowned Cup — sprint 3 (M15)',
-    status: 'pending',
+    gateLabel: '',
+    status: 'ship',
   },
   {
     id: 'liberty-drowned',
@@ -187,8 +187,8 @@ export const V1_TRACKS: V1TrackEntry[] = [
     accent: '#5eb89a',
     lapTarget: 70,
     laps: 3,
-    gateLabel: 'Drowned Cup finale — sprint 3 (M15)',
-    status: 'pending',
+    gateLabel: '',
+    status: 'ship',
   },
 ]
 
