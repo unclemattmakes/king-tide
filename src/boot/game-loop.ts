@@ -123,6 +123,11 @@ export interface BootState {
   /** Live boost-meter active flag. Used by the render side to detect
    *  the activate/deactivate transitions for FX hooks. */
   boostMeterActive?: boolean
+  /** Previous render-frame `intent.boost` for rising-edge detection
+   *  on the boost button (independent of the sim's rising-edge
+   *  detection in boostMeterSystem, which we can't easily observe
+   *  from the render side). */
+  boostBtnDown?: boolean
 }
 
 export interface GameLoopHud {
@@ -819,10 +824,19 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // the sustained-shake mode runs continuously over the chase cam.
     // Deactivation just turns the shake off; the FOV / speedline
     // animations finish their own one-shot lifetimes.
+    //
+    // Rejection flash: if the player presses boost (rising edge) but
+    // the meter didn't engage (insufficient charge), pulse the HUD
+    // red so they get a clear "tried, can't yet" cue instead of
+    // silent unresponsiveness.
     if (!control.isAutoPlay()) {
       const meter = BoostMeterStore.get(playerEid)
       const stats = BikeStatsStore.get(playerEid)
+      const playerIntent = ControlIntentStore.get(playerEid)
       const prevActive = state.boostMeterActive ?? false
+      const prevBoostDown = state.boostBtnDown ?? false
+      const boostDown = playerIntent?.boost === true
+      const boostEdge = boostDown && !prevBoostDown
       const nowActive = meter?.active === true
       if (meter && stats) {
         if (nowActive && !prevActive) {
@@ -833,12 +847,18 @@ export function startGameLoop(opts: GameLoopOpts): void {
           applyPumpImpulse(phys, playerEid, stats, 1, 'boost')
           triggerPumpBurst(playerEid, 1, true)
           pumpFx.fire(1, true)
+        } else if (boostEdge && !nowActive) {
+          // Player pressed boost but the meter didn't engage —
+          // either no charge at all or below the activation
+          // threshold. Flash the HUD red so the rejection reads.
+          boostMeterHud.flashRejected()
         }
         pumpFx.setSustainedShake(nowActive)
         boostMeterHud.update(meter.charge, nowActive)
         state.boostMeterActive = nowActive
         state.boostMeterCharge = meter.charge
       }
+      state.boostBtnDown = boostDown
     }
 
     // Player slot transitions: collected (null → X), or fired with a

@@ -21,17 +21,23 @@ export interface BoostMeterHud {
   /** Push the latest meter state. Cheap — bails when the slot is
    *  missing. */
   update(charge: number, active: boolean): void
+  /** Fire the "no-charge" rejection flash. Called by the render loop
+   *  when the player presses boost but the meter is below threshold,
+   *  so the player gets a clear "I tried, it didn't engage" cue. */
+  flashRejected(): void
   /** Hide the widget. The reserved slot stays in the DOM. */
   dispose(): void
 }
 
 /** ms the charge-flash class lingers — matches the CSS animation. */
 const CHARGE_FLASH_MS = 250
+/** ms the rejection flash lingers — matches the CSS animation. */
+const REJECT_FLASH_MS = 300
 
 export function createBoostMeterHud(): BoostMeterHud {
   const slot = document.getElementById('hud-boost-meter')
   if (!slot) {
-    return { update() {}, dispose() {} }
+    return { update() {}, flashRejected() {}, dispose() {} }
   }
 
   slot.innerHTML = `
@@ -41,20 +47,18 @@ export function createBoostMeterHud(): BoostMeterHud {
     </div>
   `
 
+  // Reveal the meter immediately at race start so the player can see
+  // their boost state from the first frame — knowing the meter is
+  // empty is the only way they learn that tricks fill it.
+  slot.removeAttribute('hidden')
+
   let prevCharge = 0
   let chargeFlashTimer: number | null = null
-  let visible = false
+  let rejectFlashTimer: number | null = null
 
   return {
     update(charge, active) {
       const clamped = Math.max(0, Math.min(1, charge))
-      // First non-zero charge of the race → unhide. Once shown, keep
-      // it visible for the rest of the race so the player always has
-      // an at-a-glance read on their boost state.
-      if (clamped > 0 && !visible) {
-        slot.removeAttribute('hidden')
-        visible = true
-      }
       slot.style.setProperty('--bm-charge', clamped.toFixed(3))
       slot.style.setProperty('--bm-active', active ? '1' : '0')
       if (active) {
@@ -76,14 +80,29 @@ export function createBoostMeterHud(): BoostMeterHud {
       }
       prevCharge = clamped
     },
+    flashRejected() {
+      slot.removeAttribute('data-rejected')
+      void slot.offsetWidth
+      slot.setAttribute('data-rejected', '1')
+      if (rejectFlashTimer !== null) window.clearTimeout(rejectFlashTimer)
+      rejectFlashTimer = window.setTimeout(() => {
+        slot.removeAttribute('data-rejected')
+        rejectFlashTimer = null
+      }, REJECT_FLASH_MS)
+    },
     dispose() {
       if (chargeFlashTimer !== null) {
         window.clearTimeout(chargeFlashTimer)
         chargeFlashTimer = null
       }
+      if (rejectFlashTimer !== null) {
+        window.clearTimeout(rejectFlashTimer)
+        rejectFlashTimer = null
+      }
       slot.setAttribute('hidden', '')
       slot.removeAttribute('data-active')
       slot.removeAttribute('data-charged')
+      slot.removeAttribute('data-rejected')
     },
   }
 }

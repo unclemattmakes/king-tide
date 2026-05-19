@@ -1931,6 +1931,27 @@
         0%   { filter: brightness(1.6); }
         100% { filter: brightness(1.0); }
       }
+      /* Rejection flash — fires when the player presses boost but
+         the meter is below the activation threshold. Red pulse on
+         the shell so the player gets a clear "tried, didn't engage"
+         cue instead of silent rejection. */
+      #hud-boost-meter[data-rejected="1"] .bm-shell {
+        animation: bm-reject-flash 300ms ease-out;
+      }
+      @keyframes bm-reject-flash {
+        0%, 100% {
+          border-color: rgba(77, 214, 255, 0.45);
+          box-shadow:
+            0 0 calc(8px + 22px * var(--bm-charge)) rgba(77, 214, 255, calc(0.18 + 0.4 * var(--bm-charge))),
+            inset 0 0 8px rgba(0,0,0,0.6);
+        }
+        30% {
+          border-color: rgba(255, 80, 90, 0.95);
+          box-shadow:
+            0 0 24px rgba(255, 80, 90, 0.85),
+            inset 0 0 14px rgba(255, 80, 90, 0.45);
+        }
+      }
       /* Anti-grav entry indicator — left side under the timer. */
       #hud-anti-grav {
         top: 116px; left: 14px;
