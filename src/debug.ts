@@ -1,6 +1,15 @@
 import { addComponent, hasComponent, query } from 'bitecs'
 import { emptyIntent, type Intent, snapshotGamepads } from './engine/input'
 import type { PerfStats } from './engine/perf-recorder'
+import { playerSettings } from './engine/player-settings'
+import {
+  type BundleSources,
+  buildBugBundle,
+  copyBundle as copyBundleHelper,
+  downloadBundle as downloadBundleHelper,
+  type QaBundle,
+} from './engine/qa/bug-bundle'
+import { type ConsoleRecord, consoleTrap as getConsoleTrap } from './engine/qa/console-trap'
 import type { RenderBackend } from './engine/render/renderer'
 import type { SimWorld } from './engine/sim/ecs/world'
 import type { PhysicsWorld } from './engine/sim/physics/rapier'
@@ -91,6 +100,34 @@ export type HoverDebug = {
    *  Lets the e2e harness and Claude debug sessions read the rolling
    *  frame-time window without poking at the HUD DOM directly. */
   perf?: PerfDebugApi
+  /** Step 8 QA bridge — console-error trap + bug-repro bundle. Attached
+   *  in dev / test mode in `installDebugApi`. Production bundles ship
+   *  with no `qa` surface; the trap itself stays silent. */
+  qa?: QaDebugApi
+}
+
+export type QaDebugApi = {
+  /** Snapshot of every console message currently in the trap ring (oldest
+   *  first). Includes `console.error` / `console.warn`, uncaught
+   *  exceptions, and unhandled promise rejections. */
+  consoleRecords(): ConsoleRecord[]
+  /** Count of records observed since boot. Use with `consoleRecordsSince`
+   *  to assert "no new errors during this window". */
+  consoleTotalCount(): number
+  /** Records emitted since the caller observed `prevCount`. */
+  consoleRecordsSince(prevCount: number): ConsoleRecord[]
+  /** True iff any error-class record is currently in the ring (warnings
+   *  don't count). The default assertion for e2e specs. */
+  consoleHasErrors(): boolean
+  /** Wipe the console-trap ring (for spec setup). */
+  consoleClear(): void
+  /** Build a fresh bug-repro bundle. Pure — doesn't mutate trap or any
+   *  other state. Returned object is JSON-serialisable. */
+  bundle(): QaBundle
+  /** Trigger a browser download of the current bundle. */
+  downloadBundle(filename?: string): void
+  /** Best-effort clipboard copy; resolves false if the browser refused. */
+  copyBundle(): Promise<boolean>
 }
 
 export type PerfDebugApi = {
@@ -366,6 +403,57 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
   const netProbe = accessors.netProbe?.() ?? null
   if (netProbe) {
     api.net = netProbe
+  }
+
+  // QA surface — console trap + bug bundle. Gated on dev/test like the
+  // rest of __hover; production never sees the trap nor the bundle. The
+  // bundle's `sources` closes over the live accessors so each call
+  // re-samples — the bundle is a snapshot, not a cache.
+  if (import.meta.env.DEV || import.meta.env.MODE === 'test') {
+    const trap = getConsoleTrap()
+    const sources: BundleSources = {
+      consoleTrap: trap,
+      player: () => {
+        const p = state.playerSnapshot
+        if (!p) return null
+        return {
+          eid: p.eid,
+          position: { ...p.position },
+          velocity: { ...p.velocity },
+          speed: p.speed,
+          isGrounded: p.isGrounded,
+        }
+      },
+      race: () => {
+        const r = state.raceSnapshot
+        if (!r) return null
+        return { ...r }
+      },
+      renderer: () => state.backend,
+      settings: () => playerSettings,
+      perfStats: () => (state.ready && api.perf ? api.perf.stats() : null),
+      network: () =>
+        netProbe
+          ? {
+              ready: netProbe.ready(),
+              peerId: netProbe.peerId(),
+              remotePeers: netProbe.remotePeers(),
+              isHost: netProbe.isHost(),
+              snapshotsReceived: netProbe.snapshotsReceived(),
+            }
+          : null,
+    }
+    api.qa = {
+      consoleRecords: () => trap?.records() ?? [],
+      consoleTotalCount: () => trap?.totalCount() ?? 0,
+      consoleRecordsSince: (prev) => trap?.recordsSince(prev) ?? [],
+      consoleHasErrors: () => trap?.hasErrors() ?? false,
+      consoleClear: () => trap?.clear(),
+      bundle: () => buildBugBundle(sources),
+      downloadBundle: (filename?: string) =>
+        downloadBundleHelper(buildBugBundle(sources), filename),
+      copyBundle: () => copyBundleHelper(buildBugBundle(sources)),
+    }
   }
 
   // Normally __hover is dev/test only — exposing setIntentOverride etc.

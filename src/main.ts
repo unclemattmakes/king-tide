@@ -37,6 +37,7 @@ import { createRaceHud } from './engine/render/race-hud'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
 import { applyPixelRatio, setRenderer } from './engine/render/renderer-service'
+import { installConsoleTrap } from './engine/qa/console-trap'
 import { createRiderRenderSystem } from './engine/render/rider-systems'
 import { createScene } from './engine/render/scene'
 import { beaufortToAmplitudeScale, createSkySystem } from './engine/render/sky'
@@ -105,6 +106,11 @@ import { createRaceSystem } from './game/systems/race'
  * live in `src/boot/utils.ts`.
  */
 async function boot() {
+  // Install the QA console trap before anything else — viewer / edit /
+  // menu shells all benefit from having errors captured into the ring.
+  // Idempotent so HMR re-runs don't accumulate proxy layers.
+  installConsoleTrap()
+
   const appEl = document.getElementById('app')
   if (!appEl) throw new Error('#app not found')
 

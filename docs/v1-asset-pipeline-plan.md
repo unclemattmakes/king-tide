@@ -441,20 +441,52 @@ The hero sprint. The Maw and Shibuya are the trailer shots.
 **Sprint exit criterion**: Open Sea Cup + Continental Cup playable;
 trailer footage capturable. ✅ Met — all five tracks open in Blender,
 export end-to-end, render hero JPGs, and load without runtime errors.
-Polish-pass items (per-track sky stamping for the 4 non-Maw seeds, the
-spline-clip warnings, animated gantry cranes, and the lava-river
-emissive shader) move to a follow-up art-tuning sprint.
+
+**Polish pass shipped same day** (post-merge follow-up): per-track sky
+preset stamping landed on Shibuya / Marina Bay 7 / Doge's Drift
+(matching The Maw + Kilauea), so every Sprint 2 track now exports
+with its bespoke `colorGrade` (`tokyo_neon` / `nyc_sunset` /
+`venice_warm` / `big_sur_golden` / `kilauea_volcanic`). Lint cleanups:
+the obstacle collector now backstops `_largest_terrain_mesh` with a
+`terrain*` name match (caught the Marina case where a long road slab
+out-sized the actual ground plane), and `_OBSTACLE_NAME_EXCLUDES`
+gained `antigrav_` + `_rim` so ridable swept surfaces and ring-shaped
+colliders (Kilauea's caldera rim) no longer false-positive. Shibuya,
+Marina, Doge's seeds now call `hoverbike.shift_spline_off_obstacles`
+in their augment pass to auto-nudge any downtown-plinth-clipping
+anchors. End state: **all five tracks lint clean (0 errors, 0
+warnings)**. Animated gantry-crane runtime + lava emissive shader
+remain follow-ups.
 
 ### Phase E — Sprint 3: Drowned Cup + finale (M15, ~3 weeks)
 
+**Shipped 2026-05-18.** All three seeds materialise their `.blend` + `.glb`
++ JSON + hero/thumb JPGs via `pnpm seed:track-<id>` and pass
+`pnpm gen:tracks:validate` (0 errors / 0 warnings each — cleanest sprint
+yet, ahead of Sprint 2's advisory spline-clip warnings on downtown
+templates). v1 lineup is now complete — all 11 ship tracks + tutorial
+end-to-end.
+
+| Track | Base | Arc length | Lap target | GLB size |
+|---|---|---|---|---|
+| Aqualand | bespoke (inline bmesh on template-island) | ~637 m | ~22 s × 5 laps | 8.4 MB |
+| Angkor Drowned | template-alpine + jungle dressing | ~1541 m | ~62 s | 8.5 MB |
+| Liberty Drowned | template-downtown (nyc) + bespoke Liberty | ~1835 m | ~73 s | 2.7 MB |
+
 | Track | Base | Key landmarks | Wave zones | Anti-grav segments | Effort |
 |---|---|---|---|---|---|
-| Aqualand | bespoke (pool/slide geometry — likely one-off `.blend`) | wave-pool basin, slides | **2 with `surge_period_s=30`** — Tsunami timer | optional half-pipe wall | 4 days |
-| Angkor Drowned | template-alpine (jungle dress) + `tower_cylinder_spiral` (central spire) + `carved_face_block` × 16 | Bayon, Ta Prohm roots, Angkor spire | 1 (jungle interior) | central spire climb | 5 days |
-| Liberty Drowned | template-downtown (nyc style) + bespoke Liberty + `arch_ruin` (torch arm) | Liberty herself, broken torch, Manhattan rooftops, sagging Brooklyn Bridge | 3 (harbour swell, sheltered + open) | torch arm Möbius + crown interior | 7 days |
+| Aqualand | bespoke (inline bmesh — pool basin, lazy-river curbs, half-pipe slide, lifeguard towers, concourse) on template-island | wave-pool basin, slides, lifeguard towers | **2 incl. The Tsunami** (`surgePeriodS=30`, `surgeAmplitude=4.0` over the lowest concourse) + lazy-river calm | none (half-pipe stays rideable decoration per brief's "optional" call) | shipped |
+| Angkor Drowned | template-alpine + library-linked `tower_cylinder_spiral` (×0.7 scale spire) + `carved_face_block` × 16 + inline jungle hills/courtyard walls/strangler-fig roots | Bayon (16 smiling faces along opening straight, alternating sides), Angkor spire (~42 m), Ta Prohm courtyards | 1 (jungle-interior calm) | spire climb — `PROFILE_TUBE` helix, 8 CPs, 1.25 turns from z=2 → z=45, r=13 m | shipped |
+| Liberty Drowned | template-downtown (nyc) + inline-bmesh Liberty silhouette (low-poly 121 v / 156 f — pedestal + body cone + head icosphere + broken torch arm + tablet) + library-linked `drowned_facade_nyc` × 3-5 + `arch_ruin` (sagging Brooklyn Bridge) + 7 inline Manhattan rooftop cuboids | Liberty herself (~70 m total, copper-green oxidation + NYC granite pedestal), broken torch arm forward-collapsed onto pedestal, harbour rooftop scatter | 3 (open Atlantic with `directionDeg=270` westerly swell, sheltered cove, mid-harbour) | torch-arm Möbius `PROFILE_BANKED_STRIP` with linear tilt 0→π + crown interior `PROFILE_TUBE` closed loop r=5 m at z=+52 — both ship; spline-shift wired for downtown-template plinth clearance | shipped |
 
-**Sprint exit criterion**: v1 lineup playable; Liberty herself reads
-on the trailer.
+**Sprint exit criterion**: ✅ Met — v1 lineup playable; Liberty herself's
+silhouette reads on the trailer (head + body + broken torch arm + tablet
+all visible at race-pace from the harbour approach `camera_hero`).
+Polish-pass items deferred to follow-up: Liberty crown rays (skipped per
+brief allowance — silhouette already readable without them), high-poly
+Liberty sculpt pass, jungle-mote emitter materialised but unverified at
+runtime, runtime smoke plume + waterpark-PA samples awaiting licensed
+audio drop.
 
 ### Phase F — Bikes + UI art (parallel, ~1 week)
 
