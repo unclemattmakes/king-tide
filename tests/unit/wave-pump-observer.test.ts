@@ -174,19 +174,39 @@ describe('createWavePumpObserver (trick-driven, fire-on-press)', () => {
     expect(d.lastFireAt).toBe(Number.NEGATIVE_INFINITY)
   })
 
-  it('ignores vy peaks while the bike is in a hop lockout', () => {
+  it('ignores new vy peaks while the bike is in a hop lockout', () => {
     // Flat-ground regression: after a hop, the bike's own lift would
     // register as a "credible climb" peak. With the lockout flag set,
     // those updates are dropped so the next press correctly reads
-    // peak=0 → not credible.
+    // peak=0 (no surface-driven climb) → not credible.
     const obs = createWavePumpObserver()
     obs.detect(0, restSample({ hopLockedOut: true, vy: 4.5 }))
     obs.detect(50, restSample({ hopLockedOut: true, vy: 3.0 }))
+    // Peak should still be 0 — vy spikes during lockout don't count.
     expect(obs.debug().vyPeakInWindow).toBe(0)
-    // Press during lockout while peak=0 → not credible.
     expect(
       obs.detect(100, restSample({ hopLockedOut: true, vy: 2.0, trickRight: true })),
     ).toBeNull()
+  })
+
+  it('preserves the pre-lockout peak so the press that *set* the lockout still fires', () => {
+    // The very tick a credible trick fires, the sim sets
+    // hopLockoutActive=true, then the render-side observer runs in
+    // the same render frame with hopLockedOut=true in the sample. If
+    // the observer drained the peak on lockout it would nullify the
+    // boost on the press that earned it. The peak must persist
+    // through that single tick — stale-window handles eventual
+    // expiry during the airborne arc.
+    const obs = createWavePumpObserver()
+    // Build up a credible peak from a real wave climb.
+    obs.detect(0, climbSample({ vy: 5.0 }))
+    obs.detect(20, climbSample({ vy: 7.0 }))
+    // Press fires — sim sets lockout in the same tick; observer's
+    // sample reflects that. Credibility still passes because the
+    // pre-existing peak (7.0) survives the lockout drain.
+    const ev = obs.detect(40, climbSample({ vy: 7.0, hopLockedOut: true, trickRight: true }))
+    expect(ev).not.toBeNull()
+    expect(ev?.strength).toBeGreaterThan(0)
   })
 
   it('resumes tracking once the hop lockout clears', () => {
