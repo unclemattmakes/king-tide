@@ -83,8 +83,12 @@
       }
 
       /* ───────────── HUD (race-mode top-left dev info) ─────────────
-         Kept readable, but unobtrusive — only painted in non-menu mode. */
-      #hud {
+         Kept readable, but unobtrusive — only painted in non-menu mode.
+         Hidden in non-dev builds; `body.dev-build` gates it on (set at
+         boot from `import.meta.env.DEV` or `?dev=1`). */
+      #hud { display: none; }
+      body.dev-build #hud {
+        display: block;
         position: fixed; top: 10px; left: 10px; z-index: 20;
         pointer-events: none; user-select: none;
         font: 11px/1.4 var(--bc-font-mono); letter-spacing: 0.04em;
@@ -432,8 +436,13 @@
         background: rgba(255, 255, 255, 0.03);
         border-color: var(--bc-line); transform: none;
       }
-      /* ───────────── Dev/debug chrome ───────────── */
-      #garage-toggle, #devsettings-toggle, #water-debug-toggle {
+      /* ───────────── Dev/debug chrome ─────────────
+         Hidden in non-dev builds; `body.dev-build` (set at boot from
+         `import.meta.env.DEV` or `?dev=1`) flips them back on. */
+      #garage-toggle, #devsettings-toggle, #water-debug-toggle { display: none; }
+      body.dev-build #devsettings-toggle,
+      body.dev-build #water-debug-toggle {
+        display: inline-block;
         position: fixed; right: 10px; z-index: 22;
         background: rgba(5, 10, 20, 0.6);
         border: 1px solid var(--bc-line);
@@ -443,9 +452,19 @@
         border-radius: 2px;
         transition: background var(--t-fast) var(--ease-out), border-color var(--t-fast);
       }
-      #garage-toggle { top: 10px; color: var(--bc-yellow); }
-      #devsettings-toggle { top: 42px; color: var(--bc-cyan); }
-      #water-debug-toggle { top: 74px; color: #6ad9c5; }
+      body.dev-build #garage-toggle {
+        position: fixed; right: 10px; z-index: 22;
+        background: rgba(5, 10, 20, 0.6);
+        border: 1px solid var(--bc-line);
+        font: 600 11px var(--bc-font-mono); letter-spacing: 0.16em;
+        padding: 6px 12px; cursor: pointer; user-select: none;
+        text-transform: uppercase;
+        border-radius: 2px;
+        transition: background var(--t-fast) var(--ease-out), border-color var(--t-fast);
+      }
+      body.dev-build #garage-toggle { top: 10px; color: var(--bc-yellow); }
+      body.dev-build #devsettings-toggle { top: 42px; color: var(--bc-cyan); }
+      body.dev-build #water-debug-toggle { top: 74px; color: #6ad9c5; }
       #garage-toggle:hover, #devsettings-toggle:hover, #water-debug-toggle:hover {
         background: rgba(15, 25, 45, 0.85); border-color: var(--bc-line-strong);
       }
@@ -676,13 +695,19 @@
         font-size: 22px; letter-spacing: 0.22em; font-weight: 400;
         color: var(--bc-ink);
       }
+      /* LIVE badge — honest: only when the attract canvas is actually
+         rendering a live feed behind the menu chrome. Cold-boot title
+         (before attract is up) and prod builds with no attract scene
+         simply hide it. */
       .bc-brand .live {
+        display: none;
         font-family: var(--bc-font-display);
         font-size: 11px; letter-spacing: 0.28em;
         background: var(--bc-red); color: #fff;
         padding: 2px 8px;
         animation: bc-live 1.8s ease-in-out infinite;
       }
+      body.attract-live .bc-brand .live { display: inline-block; }
       @keyframes bc-live {
         0%, 100% { opacity: 1; box-shadow: 0 0 12px rgba(255, 58, 94, 0.5); }
         50% { opacity: 0.72; box-shadow: 0 0 2px rgba(255, 58, 94, 0.2); }

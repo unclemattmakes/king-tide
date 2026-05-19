@@ -668,8 +668,7 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       btn.type = 'button'
       btn.className = `sm-tab${t.id === activeTab ? ' active' : ''}`
       btn.dataset.tab = t.id
-      const enabledCount = t.rows.filter((r) => r.enabled).length
-      btn.innerHTML = `${t.label}<span class="count">${enabledCount}/${t.rows.length}</span>`
+      btn.textContent = t.label
       btn.addEventListener('click', () => {
         activeTab = t.id
         renderTabs()
