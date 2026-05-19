@@ -102,6 +102,31 @@ import { createRaceSystem } from './game/systems/race'
  * Pure helpers (downloadReplay, emptyDraftTrack, ordinal, formatTime)
  * live in `src/boot/utils.ts`.
  */
+/**
+ * Gate the dev-only chrome (top-left HUD chips, DEV SETTINGS / WATER
+ * toggles, debug overlays) behind a body class. The class is set when:
+ *   - Vite is in dev mode (`import.meta.env.DEV` — i.e. `pnpm dev`,
+ *     Playwright runs, hot reloads), so the chips show locally and in
+ *     e2e, OR
+ *   - The URL carries `?dev=1`, so deployed builds can be opened with
+ *     dev chrome for live debugging without a rebuild.
+ *
+ * Runs at module load so the menu surface (which paints before
+ * `boot()`'s await chain resolves) sees the class.
+ */
+function applyDevBuildClass(): void {
+  try {
+    const isDev =
+      Boolean(import.meta.env?.DEV) ||
+      new URLSearchParams(window.location.search).has('dev')
+    document.body.classList.toggle('dev-build', isDev)
+  } catch {
+    // Defensive — if URLSearchParams or body somehow isn't available,
+    // err toward no dev chrome (the safer prod default).
+  }
+}
+applyDevBuildClass()
+
 async function boot() {
   // Install the QA console trap before anything else — viewer / edit /
   // menu shells all benefit from having errors captured into the ring.

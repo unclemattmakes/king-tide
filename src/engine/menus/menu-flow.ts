@@ -211,7 +211,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     const now = new Date()
     const h = now.getHours().toString().padStart(2, '0')
     const m = now.getMinutes().toString().padStart(2, '0')
-    clockEl.textContent = `${h}:${m} BROADCAST`
+    clockEl.textContent = `${h}:${m}`
   }
   updateClock()
   const clockInterval = window.setInterval(updateClock, 30_000)
@@ -1210,7 +1210,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           <div class="num">03</div>
           <div>
             <div class="title">SELECT BIKE</div>
-            <div class="sub">THREE LOADOUTS LIVE &middot; TWO MORE COMING WITH WAVE-PUMP TUNING</div>
+            <div class="sub">Five archetypes &middot; pick the one that fits your line</div>
           </div>
           <div class="meta">
             <div class="sub">RACING AT</div>
