@@ -73,6 +73,10 @@ export type HoverDebug = {
   combat(): CombatDebugSnapshot
   /** Count of live mine + missile entities (sim-side, regardless of render). */
   combatEntityCounts(): { mines: number; missiles: number }
+  /** Wave-pump counters — total events this race, last strength fired,
+   *  and the performance.now() timestamp of the last event. Lets QA
+   *  + dev console verify "is pumping firing at the right cadence". */
+  wavePumps(): { count: number; lastStrength: number; lastAt: number }
   /** Enumerate every bike's transform + intent — for AI debugging. */
   bikes(): BikeDebugSnapshot[]
   /** Toggle auto-play: when on, AI controls the player bike. Returns new state. */
@@ -253,6 +257,9 @@ export type DebugState = {
   intentOverride: Intent | null
   playerSnapshot: PlayerSnapshot | null
   raceSnapshot: RaceSnapshot | null
+  pumpEventCount?: number
+  lastPumpStrength?: number
+  lastPumpAt?: number
 }
 
 export function installDebugApi(state: DebugState, accessors: DebugAccessors): HoverDebug {
@@ -298,6 +305,11 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
         stunRemaining: StunStore.get(eid)?.remaining ?? 0,
       }
     },
+    wavePumps: () => ({
+      count: state.pumpEventCount ?? 0,
+      lastStrength: state.lastPumpStrength ?? 0,
+      lastAt: state.lastPumpAt ?? 0,
+    }),
     combatEntityCounts: () => {
       if (!state.ready) return { mines: 0, missiles: 0 }
       const sim = accessors.sim()

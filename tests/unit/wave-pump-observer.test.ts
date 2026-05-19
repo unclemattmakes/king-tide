@@ -5,13 +5,21 @@ import {
   type WavePumpSample,
 } from '../../src/engine/wave-pump-observer'
 
-/** Sensible default sample — "riding a wave with throttle held, not
- *  yet airborne". Tests override the fields relevant to each scenario. */
+/**
+ * The crest-pass trigger walks the bike through a vy curve:
+ *
+ *   rise → peak → fall
+ *
+ * `rideSample` produces an "actively lifting on the rising face" tick.
+ * `crestSample` produces the moment the peak passes — vy crossed back
+ * down to ≤ 0. The observer fires on `crestSample` if the prior ticks
+ * built up enough peak vy and the rider has throttle + speed.
+ */
 function rideSample(over: Partial<WavePumpSample> = {}): WavePumpSample {
   return {
     surfaceIsWater: true,
     isGrounded: true,
-    vy: 0,
+    vy: 2.0,
     forwardSpeed: 22,
     topSpeed: 28,
     throttle: 0.9,
@@ -19,12 +27,11 @@ function rideSample(over: Partial<WavePumpSample> = {}): WavePumpSample {
   }
 }
 
-/** Default sample for the airborne tick that follows. */
-function airSample(over: Partial<WavePumpSample> = {}): WavePumpSample {
+function crestSample(over: Partial<WavePumpSample> = {}): WavePumpSample {
   return {
     surfaceIsWater: true,
-    isGrounded: false,
-    vy: 4,
+    isGrounded: true,
+    vy: -0.1,
     forwardSpeed: 22,
     topSpeed: 28,
     throttle: 0.9,
@@ -33,96 +40,97 @@ function airSample(over: Partial<WavePumpSample> = {}): WavePumpSample {
 }
 
 describe('createWavePumpObserver', () => {
-  it('fires on a clean crest launch (water+grounded → airborne with vy)', () => {
+  it('fires when a rising crest peaks and falls back through zero', () => {
     const obs = createWavePumpObserver()
     expect(obs.detect(0, rideSample())).toBeNull()
-    const ev = obs.detect(50, airSample())
+    const ev = obs.detect(50, crestSample())
     expect(ev).not.toBeNull()
     expect(ev?.strength).toBeGreaterThan(0)
     expect(ev?.strength).toBeLessThanOrEqual(1)
     expect(ev?.t).toBe(50)
   })
 
-  it('does not fire on the first airborne sample when never on water', () => {
+  it('does not fire on a downgoing tick without a prior rising tick', () => {
     const obs = createWavePumpObserver()
-    // First call sees an airborne sample with no prior "on water" tick.
-    expect(obs.detect(0, airSample())).toBeNull()
+    expect(obs.detect(0, crestSample())).toBeNull()
   })
 
-  it('does not fire when vy is below the floor', () => {
+  it('does not fire when the lift never cleared the peak floor', () => {
     const obs = createWavePumpObserver()
-    obs.detect(0, rideSample())
-    expect(obs.detect(50, airSample({ vy: 1.0 }))).toBeNull()
+    obs.detect(0, rideSample({ vy: 0.4 }))
+    expect(obs.detect(50, crestSample())).toBeNull()
   })
 
   it('does not fire when forward speed is too low', () => {
     const obs = createWavePumpObserver()
     obs.detect(0, rideSample({ forwardSpeed: 4 }))
-    // At topSpeed 28 the floor is 0.45 → ~12.6 m/s; 8 m/s is below it.
-    expect(obs.detect(50, airSample({ forwardSpeed: 8 }))).toBeNull()
+    expect(obs.detect(50, crestSample({ forwardSpeed: 4 }))).toBeNull()
   })
 
   it('does not fire when the player is coasting (throttle below floor)', () => {
     const obs = createWavePumpObserver()
     obs.detect(0, rideSample({ throttle: 0.1 }))
-    expect(obs.detect(50, airSample({ throttle: 0.1 }))).toBeNull()
+    expect(obs.detect(50, crestSample({ throttle: 0.1 }))).toBeNull()
   })
 
   it('does not fire when leaving a hard surface (surfaceIsWater === false)', () => {
     const obs = createWavePumpObserver()
     obs.detect(0, rideSample({ surfaceIsWater: false }))
-    // Even though the bike transitions to airborne with all the speed
-    // and vy a water pump would need, the previous surface was land.
-    expect(obs.detect(50, airSample({ surfaceIsWater: false }))).toBeNull()
+    expect(obs.detect(50, crestSample({ surfaceIsWater: false }))).toBeNull()
   })
 
-  it('respects the cooldown — back-to-back launches do not double-fire', () => {
+  it('does not fire while the bike is airborne (not grounded)', () => {
     const obs = createWavePumpObserver()
     obs.detect(0, rideSample())
-    const first = obs.detect(50, airSample())
-    expect(first).not.toBeNull()
+    expect(obs.detect(50, crestSample({ isGrounded: false }))).toBeNull()
+  })
 
-    // Touch back down + relaunch well inside the cooldown window.
-    obs.detect(120, rideSample())
-    const second = obs.detect(170, airSample())
+  it('respects the cooldown — back-to-back crests do not double-fire', () => {
+    const obs = createWavePumpObserver()
+    obs.detect(0, rideSample())
+    const first = obs.detect(50, crestSample())
+    expect(first).not.toBeNull()
+    // A second crest well inside the cooldown.
+    obs.detect(100, rideSample())
+    const second = obs.detect(150, crestSample())
     expect(second).toBeNull()
   })
 
   it('allows a second pump once the cooldown has elapsed', () => {
     const obs = createWavePumpObserver()
     obs.detect(0, rideSample())
-    expect(obs.detect(50, airSample())).not.toBeNull()
+    expect(obs.detect(50, crestSample())).not.toBeNull()
 
     obs.detect(700, rideSample())
-    expect(obs.detect(750, airSample())).not.toBeNull()
+    expect(obs.detect(750, crestSample())).not.toBeNull()
   })
 
-  it('saturates strength to 1 at high vy + max speed', () => {
+  it('saturates strength to 1 at high vy peak + max speed', () => {
     const obs = createWavePumpObserver()
-    obs.detect(0, rideSample())
-    const ev = obs.detect(50, airSample({ vy: 12, forwardSpeed: 28 }))
+    obs.detect(0, rideSample({ vy: 6 }))
+    const ev = obs.detect(50, crestSample({ forwardSpeed: 28 }))
     expect(ev).not.toBeNull()
     expect(ev?.strength).toBeCloseTo(1, 2)
   })
 
-  it('reset() clears the on-water memory and the cooldown', () => {
+  it('reset() clears the peak tracker and the cooldown', () => {
     const obs = createWavePumpObserver()
     obs.detect(0, rideSample())
-    obs.detect(50, airSample())
+    obs.detect(50, crestSample())
     obs.reset()
-    expect(obs.debug().wasOnWater).toBe(false)
-    // After reset the next airborne tick alone should not fire (we need
-    // a prior on-water tick to record the launch transition).
-    expect(obs.detect(60, airSample())).toBeNull()
+    expect(obs.debug().vyPeakInWindow).toBe(0)
+    expect(obs.debug().vyPrev).toBe(0)
+    // After reset, a fresh crest tick with no prior rise should not fire.
+    expect(obs.detect(60, crestSample())).toBeNull()
   })
 
   it('tunables override the defaults', () => {
     const obs = createWavePumpObserver({
       ...DEFAULT_DETECTOR_TUNING,
-      minVy: 3.5,
+      minVyPeak: 4,
     })
-    obs.detect(0, rideSample())
-    // vy=2 cleared the default 1.5 floor but not the custom 3.5 one.
-    expect(obs.detect(50, airSample({ vy: 2 }))).toBeNull()
+    obs.detect(0, rideSample({ vy: 2 }))
+    // Peak of 2 cleared the default 0.7 floor but not the custom 4.
+    expect(obs.detect(50, crestSample())).toBeNull()
   })
 })
