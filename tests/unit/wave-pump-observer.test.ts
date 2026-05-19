@@ -27,6 +27,7 @@ function climbSample(over: Partial<WavePumpSample> = {}): WavePumpSample {
     throttle: 0.9,
     trickLeft: false,
     trickRight: false,
+    hopLockedOut: false,
     ...over,
   }
 }
@@ -41,6 +42,7 @@ function restSample(over: Partial<WavePumpSample> = {}): WavePumpSample {
     throttle: 0.9,
     trickLeft: false,
     trickRight: false,
+    hopLockedOut: false,
     ...over,
   }
 }
@@ -170,6 +172,30 @@ describe('createWavePumpObserver (trick-driven, fire-on-press)', () => {
     const d = obs.debug()
     expect(d.vyPeakInWindow).toBe(0)
     expect(d.lastFireAt).toBe(Number.NEGATIVE_INFINITY)
+  })
+
+  it('ignores vy peaks while the bike is in a hop lockout', () => {
+    // Flat-ground regression: after a hop, the bike's own lift would
+    // register as a "credible climb" peak. With the lockout flag set,
+    // those updates are dropped so the next press correctly reads
+    // peak=0 → not credible.
+    const obs = createWavePumpObserver()
+    obs.detect(0, restSample({ hopLockedOut: true, vy: 4.5 }))
+    obs.detect(50, restSample({ hopLockedOut: true, vy: 3.0 }))
+    expect(obs.debug().vyPeakInWindow).toBe(0)
+    // Press during lockout while peak=0 → not credible.
+    expect(
+      obs.detect(100, restSample({ hopLockedOut: true, vy: 2.0, trickRight: true })),
+    ).toBeNull()
+  })
+
+  it('resumes tracking once the hop lockout clears', () => {
+    const obs = createWavePumpObserver()
+    obs.detect(0, restSample({ hopLockedOut: true, vy: 4.5 }))
+    // Lockout clears (bike landed); a fresh wave climb registers.
+    obs.detect(50, climbSample({ hopLockedOut: false }))
+    const ev = obs.detect(100, climbSample({ hopLockedOut: false, trickRight: true }))
+    expect(ev).not.toBeNull()
   })
 
   it('tunables override the defaults', () => {

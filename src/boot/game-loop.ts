@@ -728,6 +728,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
       const intent = ControlIntentStore.get(playerEid)
       const stats = BikeStatsStore.get(playerEid)
       if (hoverState && intent && stats) {
+        const trickStateNow = TrickStateStore.get(playerEid)
         const pump = wavePumpObserver.detect(now, {
           surfaceIsWater: hoverState.surfaceIsWater,
           isGrounded: hoverState.isGrounded,
@@ -737,6 +738,11 @@ export function startGameLoop(opts: GameLoopOpts): void {
           throttle: Math.max(0, intent.throttle),
           trickLeft: intent.trickLeft,
           trickRight: intent.trickRight,
+          // Mirror the sim's hop lockout so the observer's vy-peak
+          // tracker doesn't register the bike's own hop impulse as a
+          // surface climb. Without this, a flat-ground hop's 4.5 m/s
+          // lift would arm the next press as a "credible" trick.
+          hopLockedOut: trickStateNow?.hopLockoutActive === true,
         })
         if (pump) {
           wavePumpHud.pump(pump.strength, true)

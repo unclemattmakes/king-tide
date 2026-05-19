@@ -65,6 +65,11 @@ const HOP_CREDIBILITY_VY = 5.0
  *  the bike is still climbing, not a beat after the crest has
  *  already passed. */
 const VY_PEAK_STALE_TICKS = 18
+/** Maximum sim ticks the hop lockout stays active before timing
+ *  out. 180 ticks ≈ 3 s — covers the big hop's full airborne arc
+ *  (~2.2 s) plus margin in case the airborne→grounded transition
+ *  never fires (kinematic edge cases, anti-grav weirdness, etc.). */
+const HOP_LOCKOUT_MAX_TICKS = 180
 /** Seconds between consecutive hops on the same bike. Long enough that
  *  the bike has time to leave + return to the ground at HOP_VELOCITY_BIG,
  *  short enough that a deliberate hop-on-landing chain still flows. */
@@ -94,6 +99,24 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
       }
     }
 
+    // Hop lockout — set when a hop fires, cleared when the bike
+    // completes the airborne arc and lands again. While active, the
+    // vy-peak tracker ignores updates because the bike's vertical
+    // velocity is being driven by the hop's own impulse, not by the
+    // surface. Without this gate the hop's lift poisons the peak,
+    // arming the next press as a credible "trick" off thin air.
+    if (trick.hopLockoutActive) {
+      trick.hopLockoutSafetyTicks -= 1
+      if (!trick.hopLockoutAirborneSeen && !hover.isGrounded) {
+        trick.hopLockoutAirborneSeen = true
+      }
+      const landedAfterAirborne = trick.hopLockoutAirborneSeen && hover.isGrounded
+      if (landedAfterAirborne || trick.hopLockoutSafetyTicks <= 0) {
+        trick.hopLockoutActive = false
+        trick.hopLockoutAirborneSeen = false
+      }
+    }
+
     // vy-peak tracker. Pull live vy from the rigid body so the peak
     // reflects this tick's physics, not last tick's snapshot. Stale-
     // reset after VY_PEAK_STALE_TICKS so an old climb can't arm a
@@ -101,14 +124,22 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
     const handle = RBHandleStore.must(eid).handle
     const rb = phys.world.getRigidBody(handle)
     const vy = rb ? rb.linvel().y : 0
-    if (vy > trick.vyPeak) {
-      trick.vyPeak = vy
-      trick.vyPeakTicksAgo = 0
-    } else {
-      trick.vyPeakTicksAgo += 1
-      if (trick.vyPeakTicksAgo > VY_PEAK_STALE_TICKS) {
-        trick.vyPeak = 0
+    if (!trick.hopLockoutActive) {
+      if (vy > trick.vyPeak) {
+        trick.vyPeak = vy
+        trick.vyPeakTicksAgo = 0
+      } else {
+        trick.vyPeakTicksAgo += 1
+        if (trick.vyPeakTicksAgo > VY_PEAK_STALE_TICKS) {
+          trick.vyPeak = 0
+        }
       }
+    } else {
+      // During lockout, drain the peak immediately so a stale value
+      // from before the hop can't survive into the post-landing
+      // tracking window.
+      trick.vyPeak = 0
+      trick.vyPeakTicksAgo = 0
     }
 
     // Rising-edge detection. `prev*Down` is the previous tick's input
@@ -135,6 +166,12 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
         }
       }
       trick.cooldownSec = HOP_COOLDOWN_SEC
+      // Engage the hop lockout so neither this system's nor the
+      // observer's vy-peak tracker registers the hop's own lift as a
+      // "credible climb" for the next press.
+      trick.hopLockoutActive = true
+      trick.hopLockoutAirborneSeen = false
+      trick.hopLockoutSafetyTicks = HOP_LOCKOUT_MAX_TICKS
       // Spin axis + direction + boost reward are gated on credibility
       // downstream — see the game-loop trick-event handler.
     }

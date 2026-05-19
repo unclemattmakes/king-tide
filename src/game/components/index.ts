@@ -144,6 +144,21 @@ export type TrickStateData = {
    *  once it goes stale so an old climb can't keep arming the big
    *  hop a second later. */
   vyPeakTicksAgo: number
+  /** When true, vy-peak updates are suppressed because the bike's
+   *  vertical velocity is being driven by its own hop impulse rather
+   *  than a surface climb. Set the moment a hop fires; cleared when
+   *  the bike completes the airborne arc and lands again (or a
+   *  safety timeout expires). Mirrored to the observer via the
+   *  WavePumpSample so both peak trackers stay in lockstep. */
+  hopLockoutActive: boolean
+  /** Tracks whether the bike has been airborne since the last hop —
+   *  used to detect the "airborne → grounded" landing transition
+   *  that ends the lockout. */
+  hopLockoutAirborneSeen: boolean
+  /** Safety timeout (sim ticks). If the airborne→grounded transition
+   *  never fires (weird kinematic state, anti-grav weirdness, etc.)
+   *  the lockout ends after this many ticks regardless. */
+  hopLockoutSafetyTicks: number
 }
 export const TrickStateStore = createStore<TrickStateData>('TrickState')
 

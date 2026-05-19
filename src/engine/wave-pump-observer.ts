@@ -61,6 +61,14 @@ export type WavePumpSample = {
    *  edges internally — held-down does not re-arm. */
   trickLeft: boolean
   trickRight: boolean
+  /** True when the bike is in the airborne arc of a previous hop —
+   *  the sim sets this on `TrickState.hopLockoutActive`. While locked,
+   *  the observer's vy-peak tracker ignores updates because the
+   *  bike's lift comes from its own impulse, not a surface climb.
+   *  Without this gate every hop's velocity registers as a credible
+   *  "peak" for the next press, turning flat-road bunny-hops into
+   *  free tricks. */
+  hopLockedOut: boolean
 }
 
 export type DetectorTuning = {
@@ -138,16 +146,25 @@ export function createWavePumpObserver(
     detect(now, s) {
       // Track the highest vy seen during this lift phase. Reset the
       // peak once it goes stale so an old crest can't pay off a much-
-      // later flat-ground press.
-      if (s.vy > 0) {
-        if (s.vy > vyPeakInWindow) {
-          vyPeakInWindow = s.vy
-          vyPeakAt = now
-        }
-      }
-      if (now - vyPeakAt > tuning.peakStaleMs) {
+      // later flat-ground press. While the bike is in a post-hop
+      // lockout, all updates are ignored AND any existing peak is
+      // drained — the lift comes from the hop's own impulse, not a
+      // surface climb, and counting it would let every hop self-arm
+      // a credible trick for the next press.
+      if (s.hopLockedOut) {
         vyPeakInWindow = 0
         vyPeakAt = Number.NEGATIVE_INFINITY
+      } else {
+        if (s.vy > 0) {
+          if (s.vy > vyPeakInWindow) {
+            vyPeakInWindow = s.vy
+            vyPeakAt = now
+          }
+        }
+        if (now - vyPeakAt > tuning.peakStaleMs) {
+          vyPeakInWindow = 0
+          vyPeakAt = Number.NEGATIVE_INFINITY
+        }
       }
 
       // Trick-button rising edges. Held-down does NOT re-fire —
