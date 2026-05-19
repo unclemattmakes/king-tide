@@ -700,10 +700,13 @@ async function boot() {
   // Landmark animation — walk the loaded environment GLB for every
   // ``landmark_mechanical_rig`` arm subtree and drive a per-instance
   // sin pendulum each frame (gantry cranes, Doge's bell, future
-  // mechanical-rig landmarks). Render-only — never writes sim state.
-  // Tracks without mechanical rigs get a no-op tick. See
-  // ``src/engine/render/landmark-animation.ts``.
-  const landmarkAnim = createLandmarkAnimation()
+  // mechanical-rig landmarks). Visual mesh is render-only; the
+  // kinematic-position rigid body carrying the arm's trimesh collider
+  // is updated through the same ``setNextKinematic*`` path the MP
+  // remote-bike system uses, so the bike physically collides with
+  // the swinging gauntlet. Tracks without mechanical rigs get a
+  // no-op tick. See ``src/engine/render/landmark-animation.ts``.
+  const landmarkAnim = createLandmarkAnimation({ phys })
   let landmarkTick: (elapsedSeconds: number) => void = () => {}
   if (!editMode && environmentGlbRoot) {
     const armCount = landmarkAnim.registerFromScene(environmentGlbRoot)
