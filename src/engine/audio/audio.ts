@@ -79,8 +79,10 @@ export interface AudioEngine {
    *  on strong pumps so a clean crest launch reads louder + brighter
    *  than a marginal one. The positive-feedback layer (per the v1
    *  work-breakdown) is the chord shape itself: stacked perfect 5th +
-   *  octave rather than a single ping. */
-  wavePump(strength: number): void
+   *  octave rather than a single ping. `perfect` upgrades the cue
+   *  with a brighter top-octave + a higher noise sweep so the
+   *  trick tier reads at a glance. */
+  wavePump(strength: number, perfect?: boolean): void
   /** Apply a per-track audio palette. Called once at boot after
    *  the AudioEngine + Track are both available; replaces any
    *  previously-set track audio (stop+release of prior music/ambient
@@ -560,7 +562,7 @@ export function createAudioEngine(): AudioEngine {
       }
     },
 
-    wavePump(strength) {
+    wavePump(strength, perfect = false) {
       const c = ctx
       const dest = sfxBus
       if (!c || !dest) return
@@ -574,22 +576,34 @@ export function createAudioEngine(): AudioEngine {
       const root = 440 // A4
       const fifth = 659.25 // E5 (perfect 5th)
       const oct = 880 // A5
-      const baseGain = 0.18 + 0.14 * s
+      // Perfect tricks ride hotter and add a top-octave sparkle so the
+      // tier reads as "you nailed it" rather than just louder.
+      const gainMul = perfect ? 1.35 : 1.0
+      const baseGain = (0.18 + 0.14 * s) * gainMul
       gatePulse(c, dest, now, root, 0.012, 0.32, baseGain)
       gatePulse(c, dest, now, fifth, 0.012, 0.32, baseGain * 0.85)
       gatePulse(c, dest, now, oct, 0.012, 0.28, baseGain * (0.4 + 0.6 * s))
+      if (perfect) {
+        // Top-octave sparkle (A6) + major third (C#6) — adds a brassy
+        // win-jingle layer on top of the stacked chord. Slightly
+        // delayed so it reads as a flourish rather than smearing into
+        // the root pulse.
+        gatePulse(c, dest, now + 0.04, 1108.73, 0.01, 0.22, baseGain * 0.55)
+        gatePulse(c, dest, now + 0.06, 1760, 0.01, 0.26, baseGain * 0.7)
+      }
       // Whoosh layer — short noise burst with a band-pass sweep up,
-      // sells the surfboard-launch feel under the chime.
+      // sells the surfboard-launch feel under the chime. Perfect
+      // tricks sweep wider + brighter for the afterburner read.
       const noise = c.createBufferSource()
       noise.buffer = makeNoiseBuffer(c, 0.3)
       const filt = c.createBiquadFilter()
       filt.type = 'bandpass'
-      filt.frequency.setValueAtTime(420, now)
-      filt.frequency.exponentialRampToValueAtTime(1800, now + 0.22)
-      filt.Q.value = 1.1
+      filt.frequency.setValueAtTime(perfect ? 520 : 420, now)
+      filt.frequency.exponentialRampToValueAtTime(perfect ? 3200 : 1800, now + 0.22)
+      filt.Q.value = perfect ? 0.9 : 1.1
       const g = c.createGain()
       g.gain.setValueAtTime(0, now)
-      g.gain.linearRampToValueAtTime(0.06 + 0.1 * s, now + 0.02)
+      g.gain.linearRampToValueAtTime((0.06 + 0.1 * s) * gainMul, now + 0.02)
       g.gain.exponentialRampToValueAtTime(0.001, now + 0.28)
       noise.connect(filt)
       filt.connect(g)
@@ -601,7 +615,7 @@ export function createAudioEngine(): AudioEngine {
       // tracks with heavier music tune the depth without the engine
       // shifting its default for everyone.
       const duckMul = trackDuckMultiplier()
-      duckMusicInternal((0.35 + 0.3 * s) * duckMul, 0.45)
+      duckMusicInternal((0.35 + 0.3 * s) * duckMul * (perfect ? 1.25 : 1.0), 0.45)
     },
 
     setTrackAudio(config) {

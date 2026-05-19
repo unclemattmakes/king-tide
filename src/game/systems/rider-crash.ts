@@ -25,9 +25,10 @@
  *  Sim-only — no Three.js imports, deterministic given (sim, phys).
  */
 
-import { query } from 'bitecs'
+import { hasComponent, query } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
+import { BoostMeter, BoostMeterStore, TrickState, TrickStateStore } from '@/game/components'
 import { Rider, RiderStore } from '@/game/components/rider'
 
 /** Δv magnitude (m/s) within a single fixed step that qualifies as a crash.
@@ -74,7 +75,25 @@ export function riderCrashSystem(sim: SimWorld, phys: PhysicsWorld, dt: number):
     const v = bikeRb.linvel()
     const prev = prevVel.get(rider.bikeEid)
 
-    if (prev) {
+    // Suppress crash detection while the bike is mid-trick OR while
+    // the boost meter is active. Both fire one-shot forward impulses
+    // (trick lands ~7 m/s, boost activation ~14 m/s) on top of a
+    // potentially-rising vertical velocity — combined Δv trips the
+    // crash heuristic and ejects the rider, which is exactly the
+    // opposite of "you nailed the trick". The trick gate covers the
+    // ~0.6 s spin lifetime; the boost gate covers the entire meter
+    // drain (up to ~2 s) so the rider stays put through the whole
+    // burst.
+    const trick = hasComponent(sim, rider.bikeEid, TrickState)
+      ? (TrickStateStore.get(rider.bikeEid) ?? null)
+      : null
+    const midTrick = trick !== null && trick.spinPhase > 0
+    const meter = hasComponent(sim, rider.bikeEid, BoostMeter)
+      ? (BoostMeterStore.get(rider.bikeEid) ?? null)
+      : null
+    const boosting = meter?.active === true
+
+    if (prev && !midTrick && !boosting) {
       const dvx = v.x - prev.x
       const dvy = v.y - prev.y
       const dvz = v.z - prev.z

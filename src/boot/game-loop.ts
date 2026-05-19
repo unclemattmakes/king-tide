@@ -45,6 +45,7 @@ import {
   playerSettings,
 } from '@/engine/player-settings'
 import { createAntiGravHud } from '@/engine/render/anti-grav-hud'
+import { createBoostMeterHud } from '@/engine/render/boost-meter-hud'
 import type { ChaseCamera } from '@/engine/render/camera'
 import { showCupResultsOverlay } from '@/engine/render/cup-results-screen'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
@@ -53,6 +54,7 @@ import type { HorizonRing } from '@/engine/render/horizon-ring'
 import { updateLavaTime } from '@/engine/render/lava-river-material'
 import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finish-banner'
 import { createPerfHud, type RenderInfoLite } from '@/engine/render/perf-hud'
+import { createPumpFx } from '@/engine/render/pump-fx'
 import type { RaceHud } from '@/engine/render/race-hud'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
@@ -77,15 +79,18 @@ import type { BikeVariant } from '@/game/bikes/variants'
 import {
   AntiGravOverrideStore,
   BikeStatsStore,
+  BoostMeterStore,
   ControlIntentStore,
   HoverStateStore,
   RBHandleStore,
+  TrickStateStore,
 } from '@/game/components'
 import { ExplosionTag, MineTag, MissileTag } from '@/game/components/combat'
 import type { PickupType } from '@/game/components/pickup'
 import { RacerStore } from '@/game/components/race'
 import type { RaceTick } from '@/game/sim-step'
 import { simulateStep } from '@/game/sim-step'
+import { chargeBoostMeter } from '@/game/systems/boost-meter'
 import type { GhostRunner } from '@/game/systems/ghost-runner'
 import { getHeldPickup } from '@/game/systems/pickup'
 import { tickRemoteInterp } from '@/game/systems/remote-interp'
@@ -111,6 +116,13 @@ export interface BootState {
   lastPumpStrength?: number
   /** performance.now() timestamp of the most recent pump event. */
   lastPumpAt?: number
+  /** Live boost-meter charge (0..1) on the player bike. Mirrored here
+   *  each render frame so the HUD reads from one place instead of
+   *  re-querying the ECS store on every paint. */
+  boostMeterCharge?: number
+  /** Live boost-meter active flag. Used by the render side to detect
+   *  the activate/deactivate transitions for FX hooks. */
+  boostMeterActive?: boolean
 }
 
 export interface GameLoopHud {
@@ -174,6 +186,11 @@ export interface GameLoopOpts {
   pickupRender: (dt: number) => void
   combatRender: (dt: number) => void
   fxTick: (dt: number) => void
+  /** Pump-trick exhaust burst — called on the pump event tick to fire
+   *  a one-shot blast of exhaust particles from the bike's rear. The
+   *  per-frame `fxTick` continues to drive the steady-state exhaust;
+   *  this is just an event-triggered overlay. */
+  triggerPumpBurst: (eid: number, strength: number, perfect: boolean) => void
   /** Unified track-emitter particle system. No-op when the track ships
    *  no `kind=emitter` empties (procedural tracks, edit mode, etc.). */
   particleTick: (dt: number) => void
@@ -229,31 +246,39 @@ export interface GameLoopOpts {
 }
 
 /**
- * Apply the wave-pump physics reward — a forward impulse along the
- * bike's heading proportional to `strength`. Capped at a small fraction
- * of `topSpeed` so chained pumps preserve speed through a swell train
- * without runaway acceleration past the bike's normal envelope. With
- * the impulse magnitude tuned at `PUMP_IMPULSE_DV * mass`, a strong
- * crest (strength ≈ 1) adds ~PUMP_IMPULSE_DV m/s to the horizontal
- * velocity; weak crests (strength ≈ 0.2) add a fifth of that.
+ * Apply a forward impulse along the bike's heading proportional to
+ * `strength`. Capped at a fraction of `topSpeed` so chained kicks
+ * preserve speed through a swell train without runaway acceleration.
+ *
+ * Three tiers, gated by the `tier` argument:
+ *
+ *   - `'trick'`   — credible trick lands. Half-strength impulse; the
+ *                   bigger speed payoff comes from the boost meter
+ *                   the trick fills.
+ *   - `'boost'`   — boost-meter activation kick. Full-strength impulse,
+ *                   matching the old trick magnitude. Pairs with the
+ *                   sustained accel multiplier the meter system
+ *                   applies via hover.ts.
  *
  * The bike's velocity-cap sits at `topSpeed * PUMP_SPEED_CAP_FRAC` —
- * a touch above the natural topSpeed gate (which sits at 1.0) so the
- * pump can briefly push the bike into the "earned overspeed" band that
- * drag pulls it back from over the next second or two. The
- * `speedFalloff` term in `hover.ts` already kills accel past topSpeed,
- * so the overspeed band fades naturally once pumps stop firing.
+ * meaningfully above the natural topSpeed gate (which sits at 1.0) so
+ * the kick pushes the bike into an "earned overspeed" band that drag
+ * pulls back from over the next 1–2 s. The `speedFalloff` term in
+ * `hover.ts` already kills accel past topSpeed, so the overspeed band
+ * fades naturally once kicks stop firing.
  *
  * Skipped when the rigid body or its mass isn't available — defensive
  * for the edge between bike spawn and the next physics step.
  */
-const PUMP_IMPULSE_DV = 4.0
-const PUMP_SPEED_CAP_FRAC = 1.18
+const PUMP_IMPULSE_DV_TRICK = 7.25
+const PUMP_IMPULSE_DV_BOOST = 14.5
+const PUMP_SPEED_CAP_FRAC = 1.3
 function applyPumpImpulse(
   phys: PhysicsWorld,
   playerEid: number,
   stats: { topSpeed: number; mass: number },
   strength: number,
+  tier: 'trick' | 'boost',
 ): void {
   const handle = RBHandleStore.get(playerEid)
   if (!handle) return
@@ -278,7 +303,8 @@ function applyPumpImpulse(
   const speed = Math.hypot(v.x, v.z)
   const cap = stats.topSpeed * PUMP_SPEED_CAP_FRAC
   if (speed >= cap) return
-  const wanted = strength * PUMP_IMPULSE_DV
+  const baseDv = tier === 'boost' ? PUMP_IMPULSE_DV_BOOST : PUMP_IMPULSE_DV_TRICK
+  const wanted = strength * baseDv
   const allowed = Math.min(wanted, Math.max(0, cap - speed))
   if (allowed <= 0) return
   rb.applyImpulse({ x: ux * allowed * m, y: 0, z: uz * allowed * m }, true)
@@ -314,6 +340,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     pickupRender,
     combatRender,
     fxTick,
+    triggerPumpBurst,
     particleTick,
     landmarkTick,
     track,
@@ -346,12 +373,15 @@ export function startGameLoop(opts: GameLoopOpts): void {
   let prevMissileCount = 0
   let prevExplosionCount = 0
 
-  // Wave-pump signal — detects clean crest launches on the player bike
-  // each render frame and fires the HUD widget + audio cue. Lives on
-  // the render side (not in simulateStep) because pump events are
+  // Pump-trick signal — detects clean crest launches on the player
+  // bike each render frame (wave crest, ramp lip, terrain bump) and
+  // fires the HUD chyron + audio cue + over-the-top FX overlay. Lives
+  // on the render side (not in simulateStep) because pump events are
   // pure feedback — no determinism dependency, no replay obligations.
   const wavePumpObserver = createWavePumpObserver()
   const wavePumpHud = createWavePumpHud()
+  const pumpFx = createPumpFx(camera)
+  const boostMeterHud = createBoostMeterHud()
 
   // Anti-grav HUD widget. Reads the player bike's AntiGravOverride
   // each render frame and fades the indicator in/out. The chase
@@ -628,6 +658,10 @@ export function startGameLoop(opts: GameLoopOpts): void {
         lastLookMagnitude = Math.abs(look.yaw) + Math.abs(look.pitch)
         chase.setOrbit(look.yaw, look.pitch)
         chase.tick(tmpPos, tmpQuat, dt)
+        // Pump FX overlays — FOV punch + screen shake. Must run after
+        // `chase.tick` so the shake offset doesn't get baked into the
+        // chase camera's interpolated position before it's read.
+        pumpFx.tick(dt)
         state.playerSnapshot = {
           eid: playerEid,
           position: { x: t.x, y: t.y, z: t.z },
@@ -675,13 +709,20 @@ export function startGameLoop(opts: GameLoopOpts): void {
       })
     }
 
-    // Wave-pump signal — observer reads the player's hover + velocity
-    // + throttle state and fires on a clean crest pass. Skipped while
-    // auto-play is on (the auto-pilot doesn't get the player reward).
-    // When the observer fires we (a) flash HUD / play audio, and
-    // (b) apply a small forward impulse to the player's rigid body so
-    // a well-timed crest actually pays off in speed. Capped at
-    // `topSpeed * PUMP_SPEED_CAP_FRAC` so chained pumps don't blow up.
+    // Trick-boost signal — observer reads the player's hover + velocity
+    // + throttle + trick-button state and fires when a credible trick
+    // press lands (player hopped off a sufficient ramp/wave under
+    // throttle). Skipped while auto-play is on (the auto-pilot doesn't
+    // get the player reward). When the observer fires we:
+    //   (a) flash HUD / play audio,
+    //   (b) trigger the over-the-top FX (FOV punch + speedlines +
+    //       camera shake + exhaust burst),
+    //   (c) apply a half-strength forward impulse — the real speed
+    //       payoff comes from the boost meter the trick fills,
+    //   (d) charge the boost meter (~3 tricks = full meter), and
+    //   (e) start the visual Y-axis spin on TrickState.
+    // Flatground hops (where the observer rejects credibility) get
+    // the lift impulse from trickHopSystem but none of the above.
     if (!control.isAutoPlay() && state.playerSnapshot) {
       const hoverState = HoverStateStore.get(playerEid)
       const intent = ControlIntentStore.get(playerEid)
@@ -694,18 +735,103 @@ export function startGameLoop(opts: GameLoopOpts): void {
           forwardSpeed: state.playerSnapshot.speed,
           topSpeed: stats.topSpeed,
           throttle: Math.max(0, intent.throttle),
+          trickLeft: intent.trickLeft,
+          trickRight: intent.trickRight,
         })
         if (pump) {
-          wavePumpHud.pump(pump.strength)
+          wavePumpHud.pump(pump.strength, true)
           if (playerSettings.wavePumpIntensity !== 'off') {
-            audio.wavePump(pump.strength)
+            audio.wavePump(pump.strength, true)
           }
           tutorialDirector?.notifyPumpEvent()
-          applyPumpImpulse(phys, playerEid, stats, pump.strength)
+          applyPumpImpulse(phys, playerEid, stats, pump.strength, 'trick')
+          triggerPumpBurst(playerEid, pump.strength, true)
+          pumpFx.fire(pump.strength, true)
+          // Visual spin — direction picked from the player's input
+          // state at press time:
+          //   - L1 + R1 both held → barrel roll (Z-axis)
+          //   - Stick forward / back (pitch ≠ 0) → front / back flip (X-axis)
+          //   - Otherwise → yaw (Y-axis), direction from whichever
+          //     trick button fired (L1 = left yaw, R1 = right yaw).
+          //
+          // Steer input is intentionally ignored as a trick modifier:
+          // the player turns the stick to drive, so any "trick +
+          // steer" combo was incidental and produced unwanted barrel
+          // rolls during normal racing. Left/right intent for tricks
+          // is fully expressed by the button choice.
+          //
+          // `intent.pitch` (left-stick Y on gamepad, E/Q on keyboard)
+          // is the directional signal for flip — not `intent.throttle`,
+          // which is held continuously while driving and would make
+          // every trick a back-flip the moment RT is down.
+          //
+          // Only one axis component is ever non-zero per trick —
+          // render normalises and rotates around it.
+          const trickState = TrickStateStore.get(playerEid)
+          if (trickState) {
+            const DIRECTION_THRESHOLD = 0.3
+            const pitchMag = Math.abs(intent.pitch)
+            const bothButtons = intent.trickLeft && intent.trickRight
+            let ax = 0
+            let ay = 0
+            let az = 0
+            if (bothButtons) {
+              // Barrel roll — default to "left" (top of bike rolls
+              // left from chase view).
+              az = +1
+            } else if (pitchMag >= DIRECTION_THRESHOLD) {
+              // Flip on X-axis. Sign convention: +X-axis rotation
+              // with positive angle moves +Y (top of bike) toward
+              // +Z (forward) = front flip. So stick-forward
+              // (pitch < 0 = nose-down intent) → +1 = front flip;
+              // stick-back (pitch > 0) → -1 = back flip.
+              ax = intent.pitch < 0 ? +1 : -1
+            } else {
+              // Default: yaw based on which trick button fired.
+              ay = pump.direction === 'left' ? +1 : -1
+            }
+            trickState.spinPhase = 1
+            trickState.spinAxisX = ax
+            trickState.spinAxisY = ay
+            trickState.spinAxisZ = az
+            trickState.spinDurationSec = 0.6
+          }
+          // Fill the boost meter — three credible tricks ⇒ a full bar.
+          chargeBoostMeter(playerEid, 0.33)
           state.pumpEventCount = (state.pumpEventCount ?? 0) + 1
           state.lastPumpStrength = pump.strength
           state.lastPumpAt = now
         }
+      }
+    }
+
+    // Boost-meter FX — the meter system flips `active` on a fresh
+    // press while charged; we mirror that transition on the render
+    // side: on activation, fire the same FX vocabulary as a credible
+    // trick (FOV punch + speedlines + audio + exhaust burst) plus a
+    // full-strength forward impulse for the "kick" feel. While active,
+    // the sustained-shake mode runs continuously over the chase cam.
+    // Deactivation just turns the shake off; the FOV / speedline
+    // animations finish their own one-shot lifetimes.
+    if (!control.isAutoPlay()) {
+      const meter = BoostMeterStore.get(playerEid)
+      const stats = BikeStatsStore.get(playerEid)
+      const prevActive = state.boostMeterActive ?? false
+      const nowActive = meter?.active === true
+      if (meter && stats) {
+        if (nowActive && !prevActive) {
+          wavePumpHud.pump(1, true)
+          if (playerSettings.wavePumpIntensity !== 'off') {
+            audio.wavePump(1, true)
+          }
+          applyPumpImpulse(phys, playerEid, stats, 1, 'boost')
+          triggerPumpBurst(playerEid, 1, true)
+          pumpFx.fire(1, true)
+        }
+        pumpFx.setSustainedShake(nowActive)
+        boostMeterHud.update(meter.charge, nowActive)
+        state.boostMeterActive = nowActive
+        state.boostMeterCharge = meter.charge
       }
     }
 

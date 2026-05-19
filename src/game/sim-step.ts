@@ -15,7 +15,9 @@ import {
   stunOverrideSystem,
   stunTickSystem,
 } from './systems/combat'
+import { boostMeterSystem } from './systems/boost-meter'
 import { hoverSystem } from './systems/hover'
+import { trickHopSystem } from './systems/trick-hop'
 import { applyPeerInputs, EMPTY_PEER_INPUTS } from './systems/input-apply'
 import { boostTickSystem, pickupSystem, pickupUseSystem } from './systems/pickup'
 import { riderCrashSystem } from './systems/rider-crash'
@@ -87,6 +89,16 @@ export function simulateStep(
   // sees this tick's fresh up-vector override + gravity-scale state.
   antiGravSystem(sim, phys, track, phys.fixedDt)
   hoverSystem(sim, phys, waveField)
+  // Trick-hop runs immediately after hoverSystem so the fresh
+  // `HoverState.isGrounded` from this tick gates the rising-edge press.
+  // Applying the vertical impulse here (before `phys.step()` below)
+  // means the bike's lift integrates this tick rather than next.
+  trickHopSystem(sim, phys)
+  // Boost meter — manages activate/drain/release. Must run before
+  // hover reads `BoostMeter.active`, hence before any next-frame
+  // hover pass; placement here also lets the same-tick rising-edge
+  // press take effect on this tick's hover thrust.
+  boostMeterSystem(sim, phys)
   // Rider pose runs just before the physics step — applies PD torque
   // impulses to drive the active ragdoll toward its target stance. Must
   // run after hoverSystem (which writes bike pose) so the pelvis-to-bike

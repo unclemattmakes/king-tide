@@ -20,6 +20,8 @@ const SCRIPTED_INTENT = {
   fire: false,
   boost: false,
   pitch: 0,
+  trickLeft: false,
+  trickRight: false,
 }
 
 const TICKS = 600 // 10 seconds at the 60Hz fixed step.

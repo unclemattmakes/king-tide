@@ -125,16 +125,16 @@ describe('findKeyboardSlot', () => {
 
 describe('assignGamepadBinding', () => {
   it('swaps with the previous action when reassigning', () => {
-    // Defaults: fire=5 (RB), boost=4 (LB). Bind fire to button 4 — boost
-    // should pick up fire's old button (5).
-    const next = assignGamepadBinding(defaultGamepadBindings(), 'fire', 4)
-    expect(next.fire).toBe(4)
-    expect(next.boost).toBe(5)
+    // Defaults: fire=2 (X), boost=3 (Y). Bind fire to button 3 — boost
+    // should pick up fire's old button (2).
+    const next = assignGamepadBinding(defaultGamepadBindings(), 'fire', 3)
+    expect(next.fire).toBe(3)
+    expect(next.boost).toBe(2)
   })
 
   it('is a no-op when assigning the same index', () => {
     const before = defaultGamepadBindings()
-    const after = assignGamepadBinding(before, 'fire', 5)
+    const after = assignGamepadBinding(before, 'fire', 2)
     expect(after).toEqual(before)
   })
 
@@ -148,9 +148,11 @@ describe('assignGamepadBinding', () => {
 describe('findGamepadAction', () => {
   it('returns the action bound to a given button index', () => {
     const b = defaultGamepadBindings()
-    expect(findGamepadAction(5, b)).toBe('fire')
-    expect(findGamepadAction(4, b)).toBe('boost')
-    expect(findGamepadAction(0, b)).toBeNull()
+    expect(findGamepadAction(2, b)).toBe('fire')
+    expect(findGamepadAction(3, b)).toBe('boost')
+    expect(findGamepadAction(4, b)).toBe('trickLeft')
+    expect(findGamepadAction(5, b)).toBe('trickRight')
+    expect(findGamepadAction(1, b)).toBeNull()
   })
 })
 
@@ -267,7 +269,7 @@ describe('playerSettings — bindings round-trip', () => {
 
   it('persists gamepad bindings across a load cycle', () => {
     if (typeof window === 'undefined' || !window.localStorage) return
-    setGamepadBindings({ fire: 3, boost: 1 })
+    setGamepadBindings({ fire: 3, boost: 1, trickLeft: 4, trickRight: 5 })
     playerSettings.gamepadBindings = defaultGamepadBindings()
     loadPlayerSettings()
     expect(playerSettings.gamepadBindings.fire).toBe(3)

@@ -22,8 +22,10 @@ import { playerSettings } from '@/engine/player-settings'
 
 export interface WavePumpHud {
   /** Fire the visual cue. `strength` is the same 0..1 the audio engine
-   *  receives; the widget scales its flash + bar fill accordingly. */
-  pump(strength: number): void
+   *  receives; the widget scales its flash + bar fill accordingly.
+   *  `perfect` upgrades the label to "TRICK!" and swaps in the brighter
+   *  perfect-tier class — see the `.wp-perfect` styles in index.html. */
+  pump(strength: number, perfect?: boolean): void
   /** Hide the widget — e.g. when leaving the race. The reserved
    *  `#hud-wave-pump` slot stays in the DOM either way. */
   dispose(): void
@@ -47,6 +49,8 @@ export function createWavePumpHud(): WavePumpHud {
 
   // Inject the widget shell once. Subsequent pumps re-set the strength
   // var + re-key the animation by toggling a class off then back on.
+  // The label slot is mutated per-fire ("PUMP +" → "TRICK!") so the
+  // perfect tier reads at a glance.
   slot.innerHTML = `
     <div class="wp-shell" data-mode="off" aria-hidden="true">
       <span class="wp-dot"></span>
@@ -60,7 +64,8 @@ export function createWavePumpHud(): WavePumpHud {
   const bar = slot.querySelector<HTMLElement>('.wp-bar i')
   const dot = slot.querySelector<HTMLElement>('.wp-dot')
   const flash = slot.querySelector<HTMLElement>('.wp-flash')
-  if (!shell || !bar || !dot || !flash) {
+  const label = slot.querySelector<HTMLElement>('.wp-label')
+  if (!shell || !bar || !dot || !flash || !label) {
     return { pump() {}, dispose() {} }
   }
 
@@ -70,14 +75,14 @@ export function createWavePumpHud(): WavePumpHud {
   function hideAfterFlash(): void {
     if (hideTimer !== null) window.clearTimeout(hideTimer)
     hideTimer = window.setTimeout(() => {
-      shell?.classList.remove('wp-active', 'wp-subtle', 'wp-full')
+      shell?.classList.remove('wp-active', 'wp-subtle', 'wp-full', 'wp-perfect')
       slot?.setAttribute('hidden', '')
       hideTimer = null
     }, FLASH_LIFE_MS)
   }
 
   return {
-    pump(strength) {
+    pump(strength, perfect = false) {
       if (!armed) return
       const mode = playerSettings.wavePumpIntensity
       if (mode === 'off') return
@@ -90,14 +95,23 @@ export function createWavePumpHud(): WavePumpHud {
 
       // Strip + re-add the active class so the CSS animation restarts
       // even when two pumps land inside the same fade window.
-      shell.classList.remove('wp-active', 'wp-subtle', 'wp-full')
+      shell.classList.remove('wp-active', 'wp-subtle', 'wp-full', 'wp-perfect')
       // Force reflow so the next class-add reliably re-triggers the
       // keyframe animation (Chrome/Firefox/Safari all need this when
       // toggling animation classes on the same frame).
       void shell.offsetWidth
       bar.style.width = `${Math.round(s * 100)}%`
       shell.style.setProperty('--wp-strength', s.toFixed(3))
+      // Perfect tricks get the bigger "TRICK!" label and a different
+      // accent palette (yellow → magenta in the CSS below). Normal
+      // pumps keep the existing "PUMP +" chyron read.
+      if (perfect) {
+        label.textContent = 'TRICK !'
+      } else {
+        label.innerHTML = 'PUMP <b>+</b>'
+      }
       shell.classList.add('wp-active', mode === 'subtle' ? 'wp-subtle' : 'wp-full')
+      if (perfect) shell.classList.add('wp-perfect')
 
       hideAfterFlash()
     },
@@ -108,7 +122,7 @@ export function createWavePumpHud(): WavePumpHud {
         hideTimer = null
       }
       slot.setAttribute('hidden', '')
-      shell.classList.remove('wp-active', 'wp-subtle', 'wp-full')
+      shell.classList.remove('wp-active', 'wp-subtle', 'wp-full', 'wp-perfect')
     },
   }
 }

@@ -1,45 +1,52 @@
 /**
- * Wave-pump event detector.
+ * Trick-boost event detector.
  *
- * Watches the player bike each render frame and fires a `pump` event
- * on the moment a rising wave-crest just passed under the chassis —
- * the "ride the wave" beat of the Wave-Race-style loop.
+ * Replaces the original auto-fire crest detector. The new model is
+ * MK8-style: the player presses a trick button (L1 / R1 on gamepad,
+ * Z / C on keyboard) and the observer decides whether that press
+ * deserves an immediate boost.
  *
- * The trigger is a **vy peak**: the bike was lifting (vy > MIN_VY_PEAK)
- * a moment ago, and right now vy has crossed back to ≤ 0 (the swell
- * crested and is starting to fall away). At race speed under throttle
- * on water, that's exactly the instant a pump pays off.
+ * Gating, same as the old observer's reward rules:
  *
- * This replaces the original "transitioned from on-water to airborne"
- * trigger — which never fired with the v4 tame-swell preset because
- * the bike clings to the surface and rarely launches. Crest detection
- * still rewards the same player action (rode the swell at speed) but
- * fires continuously through a swell train, not just on the occasional
- * jump.
+ *   - **vy peak** — the bike must have been climbing (vy > minVyPeak)
+ *     in the recent past. Pressing while riding up a swell or cresting
+ *     a ramp pays off; flat-ground presses fire the hop but no boost.
+ *   - **speed + throttle** — the player has to be moving and on the
+ *     gas. Catches the "deliberate" cases and rejects coasting/parked
+ *     bikes.
+ *   - **trick-button rising edge** — only fresh presses count. Holding
+ *     L1 doesn't auto-arm every crest.
  *
- * Lives in the render-side loop, not the sim, because the rendered
- * surface (and therefore the precise vy curve under the chassis) can
- * drift from the sim's deterministic wave field. The game loop reads
- * this event to:
- *   - flash the wave-pump HUD widget
- *   - kick the audio engine
- *   - notify the tutorial director
- *   - apply a small forward impulse to the player's rigid body via
- *     the sim — see `pumpImpulse` in `game-loop.ts`
+ * Boost fires **on the press**, not on landing — the older landing-
+ * gated model felt laggy because the speed payoff arrived after the
+ * spin had already played out. Fire-on-press tightens the feedback
+ * loop: press the button at the apex → immediate FOV punch + forward
+ * impulse while the bike is still mid-trick, exactly like MK8.
+ *
+ * Lives on the render side, not the sim. Pump events are pure feedback
+ * — no determinism dependency, no replay obligation — so they don't
+ * belong in `simulateStep`. The game loop reads the trick observer
+ * each render frame and forwards the boost event to FX + audio +
+ * physics-impulse.
  */
 
 export type PumpEvent = {
   /** Event firing time, performance.now() — used for HUD widget timing. */
   t: number
   /** 0..1 strength score. Blends the peak upward velocity reached
-   *  before the crest with the forward-speed fraction. HUD scales
-   *  flash intensity off this; audio picks chord layer; physics
+   *  before the trick was armed with the forward-speed fraction. HUD
+   *  scales flash intensity off this; audio picks chord layer; physics
    *  scales the forward kick. */
   strength: number
+  /** Which side the player pressed for the trick — drives the visual
+   *  spin direction in the bike render and the HUD's left/right
+   *  indicator. */
+  direction: 'left' | 'right'
 }
 
 export type WavePumpSample = {
-  /** Bike-on-water-and-grounded for this tick, per HoverState. */
+  /** Bike-on-water-and-grounded for this tick, per HoverState. Routed
+   *  to audio palette choices downstream; no longer gates firing. */
   surfaceIsWater: boolean
   isGrounded: boolean
   /** World-Y velocity component (positive = upward). */
@@ -50,135 +57,148 @@ export type WavePumpSample = {
   topSpeed: number
   /** This-frame throttle, 0..1. */
   throttle: number
+  /** Held state of the two trick buttons. The observer detects rising
+   *  edges internally — held-down does not re-arm. */
+  trickLeft: boolean
+  trickRight: boolean
 }
 
 export type DetectorTuning = {
-  /** Peak upward velocity (m/s) the bike must reach during the lift
-   *  phase for a crest-pass to count as a real pump. Below this it
-   *  was just surface chop, not a pumpable swell. */
+  /** Peak upward velocity (m/s) the bike must have reached recently for
+   *  a trick to count as a crest hop. Below this it was just chop / a
+   *  flat hop, no boost. */
   minVyPeak: number
-  /** Minimum forward speed as a fraction of bike top speed. Filters
-   *  out lazy crest-floats while keeping the bar low enough that mid-
-   *  game wave-reading still rewards the player. */
+  /** Minimum forward speed as a fraction of bike top speed. Catches
+   *  "deliberate" tricks; rejects coasting / parked bikes. */
   minSpeedFrac: number
-  /** Minimum throttle this tick. The signal is "you rode the wave
-   *  *intentionally*", which means hands on the gas. */
+  /** Minimum throttle this tick. */
   minThrottle: number
-  /** Per-bike cooldown (ms). 500 ms is long enough that successive
-   *  wavelets on the same set don't double-fire, short enough that a
-   *  deliberate pump every other wave on a moderate swell still reads. */
+  /** Per-bike cooldown (ms) between boost events. Long enough that
+   *  back-to-back trick spam doesn't double-fire; short enough that
+   *  chaining tricks across a swell train still reads. */
   cooldownMs: number
   /** vy peak at which strength saturates to 1.0. */
   vyCeiling: number
+  /** How long (ms) a "recent climb" peak stays valid for arming. After
+   *  this window the peak resets — protects against landing a boost
+   *  from a crest the player rode 3 seconds ago. */
+  peakStaleMs: number
 }
 
 export const DEFAULT_DETECTOR_TUNING: Readonly<DetectorTuning> = Object.freeze({
-  minVyPeak: 0.7,
+  // Raised from 0.7 → 2.5 after the M11 pump revamp: at 0.7 every
+  // hover-spring oscillation on calm water cleared the floor, so
+  // pressing trick anywhere produced a credible reward. 2.5 m/s
+  // requires the bike to actually climb a real wave crest or
+  // launch off a ramp lip.
+  minVyPeak: 2.5,
   minSpeedFrac: 0.35,
   minThrottle: 0.3,
   cooldownMs: 500,
-  vyCeiling: 3.5,
+  // Bumped from 3.5 → 6.0 alongside `minVyPeak` so the strength score
+  // has room to scale between "moderate wave" and "Versace Steps
+  // seaplane ramp" — a tiny credible crest reads as a 0.2-floor
+  // trick, a real ramp launches saturates to 1.0.
+  vyCeiling: 6.0,
+  peakStaleMs: 800,
 })
 
 export type WavePumpObserver = {
-  /** Feed this frame's sample. Returns a `PumpEvent` on the tick the
-   *  bike just crossed a rising wave-crest under throttle; otherwise null. */
+  /** Feed this frame's sample. Returns a `PumpEvent` on the tick a
+   *  good-timing trick press is detected; otherwise null. */
   detect(now: number, sample: WavePumpSample): PumpEvent | null
   /** Reset between races / respawns. */
   reset(): void
   /** Read-only view of internal state — exposed for tests. */
-  debug(): { vyPeakInWindow: number; lastFireAt: number; vyPrev: number }
+  debug(): {
+    vyPeakInWindow: number
+    vyPeakAt: number
+    lastFireAt: number
+  }
 }
 
 export function createWavePumpObserver(
   tuning: DetectorTuning = DEFAULT_DETECTOR_TUNING,
 ): WavePumpObserver {
-  // Peak vy seen during the current lift phase. Resets to 0 every time
-  // vy crosses below the rising threshold so a fresh swell can start
-  // tracking. Without this we'd miss the strength of fast-rising crests
-  // that briefly clear `minVyPeak` then drop.
+  // Peak vy seen during the current lift phase. Holds for `peakStaleMs`
+  // so the player can press the button at the very top of the climb
+  // OR a beat after the crest passes and still be inside the window.
   let vyPeakInWindow = 0
-  let vyPrev = 0
+  let vyPeakAt = Number.NEGATIVE_INFINITY
+  // Edge-detect bookkeeping for the trick buttons.
+  let prevLeftDown = false
+  let prevRightDown = false
   let lastFireAt = Number.NEGATIVE_INFINITY
 
   return {
     detect(now, s) {
-      const wasRising = vyPrev > 0
-      const crossedDown = wasRising && s.vy <= 0
-      // Track the peak vy reached while the bike is lifting. Reset
-      // whenever we're no longer in a rising phase so the next swell
-      // starts clean.
+      // Track the highest vy seen during this lift phase. Reset the
+      // peak once it goes stale so an old crest can't pay off a much-
+      // later flat-ground press.
       if (s.vy > 0) {
-        if (s.vy > vyPeakInWindow) vyPeakInWindow = s.vy
-      } else if (!crossedDown) {
-        // We were already past the crest — keep the peak around for
-        // the eventual `crossedDown` tick (typically same frame, but
-        // jitter can push it a frame later). Reset once it's been
-        // consumed below.
+        if (s.vy > vyPeakInWindow) {
+          vyPeakInWindow = s.vy
+          vyPeakAt = now
+        }
+      }
+      if (now - vyPeakAt > tuning.peakStaleMs) {
+        vyPeakInWindow = 0
+        vyPeakAt = Number.NEGATIVE_INFINITY
       }
 
-      const localPeak = vyPeakInWindow
-      vyPrev = s.vy
+      // Trick-button rising edges. Held-down does NOT re-fire —
+      // released-and-re-pressed is the only way to register intent.
+      const leftEdge = s.trickLeft && !prevLeftDown
+      const rightEdge = s.trickRight && !prevRightDown
+      prevLeftDown = s.trickLeft
+      prevRightDown = s.trickRight
 
-      if (!crossedDown) return null
+      if (!leftEdge && !rightEdge) return null
 
-      // Must have been on water, grounded, and under throttle at the
-      // crest moment. The crest-pass is the visible reward beat; if
-      // any of these miss the player didn't earn it.
-      if (!s.surfaceIsWater || !s.isGrounded) {
-        vyPeakInWindow = 0
-        return null
-      }
-      if (s.throttle < tuning.minThrottle) {
-        vyPeakInWindow = 0
-        return null
-      }
-      if (s.topSpeed <= 0) {
-        vyPeakInWindow = 0
-        return null
-      }
-      const speedFrac = Math.max(0, Math.min(1, s.forwardSpeed / s.topSpeed))
-      if (speedFrac < tuning.minSpeedFrac) {
-        vyPeakInWindow = 0
-        return null
-      }
-      if (localPeak < tuning.minVyPeak) {
-        vyPeakInWindow = 0
-        return null
-      }
-
-      // Reset the peak tracker so the next swell starts clean —
-      // even if the cooldown gates this firing, the *next* pump
-      // should be timed off a fresh lift.
-      vyPeakInWindow = 0
-
-      // Cooldown gate — keeps a rapid chain of small chop crests
-      // from spamming the HUD/audio.
+      // Cooldown — keep a rapid chain of credible presses from stacking
+      // boosts inside the same half-second window.
       if (now - lastFireAt < tuning.cooldownMs) return null
 
-      // Strength blends "how high did the peak go" with "how fast
-      // were you going". Both clamped to [0,1] before multiplication,
-      // then floored at 0.2 so even minimum-credible crests still
-      // produce a perceptible flash.
+      const speedFrac = s.topSpeed > 0 ? Math.max(0, Math.min(1, s.forwardSpeed / s.topSpeed)) : 0
+      const inApex = vyPeakInWindow >= tuning.minVyPeak
+      const credible =
+        inApex && speedFrac >= tuning.minSpeedFrac && s.throttle >= tuning.minThrottle
+      if (!credible) return null
+
+      // Strength blends "how high did the peak go" with "how fast are
+      // you going". Floor at 0.2 so even a minimum-credible trick
+      // still produces a perceptible flash + kick.
       const vyT = Math.max(
         0,
         Math.min(
           1,
-          (localPeak - tuning.minVyPeak) / Math.max(0.0001, tuning.vyCeiling - tuning.minVyPeak),
+          (vyPeakInWindow - tuning.minVyPeak) /
+            Math.max(0.0001, tuning.vyCeiling - tuning.minVyPeak),
         ),
       )
       const strength = Math.max(0.2, Math.min(1, vyT * speedFrac + 0.2))
+      // Left wins a same-tick double-press, matching the sim-side
+      // trick-hop system's tie-break so the visual spin direction and
+      // the boost event agree.
+      const direction: 'left' | 'right' = leftEdge ? 'left' : 'right'
 
       lastFireAt = now
-      return { t: now, strength }
+      // Drain the peak so a single climb only pays off once — the next
+      // boost needs a fresh climb to arm.
+      vyPeakInWindow = 0
+      vyPeakAt = Number.NEGATIVE_INFINITY
+
+      return { t: now, strength, direction }
     },
     reset() {
       vyPeakInWindow = 0
-      vyPrev = 0
+      vyPeakAt = Number.NEGATIVE_INFINITY
+      prevLeftDown = false
+      prevRightDown = false
       lastFireAt = Number.NEGATIVE_INFINITY
     },
     debug() {
-      return { vyPeakInWindow, lastFireAt, vyPrev }
+      return { vyPeakInWindow, vyPeakAt, lastFireAt }
     },
   }
 }

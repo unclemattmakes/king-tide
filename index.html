@@ -1830,6 +1830,107 @@
         40% { transform: scale(1.5); opacity: 1; }
         100% { transform: scale(1); opacity: 1; }
       }
+      /* Perfect-trick tier — beefier flash with a magenta-gold accent
+         that reads distinct from the cyan normal-pump palette. The
+         label is also swapped from "PUMP +" to "TRICK !" by the JS
+         widget, so the player gets two channels (color + text) to
+         tell the tiers apart. */
+      #hud-wave-pump .wp-shell.wp-full.wp-perfect .wp-flash {
+        background: linear-gradient(180deg, rgba(40,10,30,0.92), rgba(20,5,12,0.92));
+        border: 1px solid rgba(255, 90, 180, calc(0.55 + 0.4 * var(--wp-strength)));
+        border-left: 3px solid var(--bc-yellow);
+        box-shadow:
+          0 0 calc(30px + 36px * var(--wp-strength)) rgba(255, 200, 80, calc(0.35 + 0.55 * var(--wp-strength))),
+          0 0 calc(50px + 60px * var(--wp-strength)) rgba(255, 90, 180, calc(0.25 + 0.45 * var(--wp-strength))),
+          0 6px 22px rgba(0,0,0,0.45);
+        animation: wp-pop-perfect 540ms var(--ease-out);
+      }
+      #hud-wave-pump .wp-shell.wp-perfect .wp-label {
+        color: var(--bc-yellow);
+        font-size: 18px;
+        letter-spacing: 0.32em;
+      }
+      #hud-wave-pump .wp-shell.wp-perfect .wp-bar > i {
+        background: linear-gradient(90deg, var(--bc-yellow), #ff5ab4);
+        box-shadow: 0 0 16px var(--bc-yellow);
+      }
+      @keyframes wp-pop-perfect {
+        0%   { transform: scale(0.7); opacity: 0; }
+        25%  { transform: scale(1.18); opacity: 1; }
+        55%  { transform: scale(1.04); opacity: 1; }
+        100% { transform: scale(1.0); opacity: 1; }
+      }
+      /* Boost meter — Burnout-3-style vertical-fill bar pinned to the
+         bottom-right of the HUD. Charges via successful tricks (see
+         `wave-pump-observer` + the trick-event handler in `game-loop`),
+         drains while the meter is active. `--bm-charge` (0..1) is set
+         per render frame from BoostMeterStore.charge so the fill height
+         tracks live. */
+      #hud-boost-meter {
+        left: 24px; bottom: 64px;
+        width: 28px; height: 200px;
+        --bm-charge: 0;
+        --bm-active: 0;
+      }
+      /* The "READY" tick lives on the right edge of the bar (it's a
+         left-side mounted bar). */
+      #hud-boost-meter .bm-tick { left: 100%; }
+      #hud-boost-meter .bm-shell {
+        position: absolute; inset: 0;
+        background: linear-gradient(180deg, rgba(8,14,22,0.85), rgba(4,8,14,0.92));
+        border: 1px solid rgba(77, 214, 255, 0.45);
+        box-shadow:
+          0 0 calc(8px + 22px * var(--bm-charge)) rgba(77, 214, 255, calc(0.18 + 0.4 * var(--bm-charge))),
+          inset 0 0 8px rgba(0,0,0,0.6);
+        overflow: hidden;
+      }
+      #hud-boost-meter .bm-fill {
+        position: absolute; left: 0; right: 0; bottom: 0;
+        height: calc(100% * var(--bm-charge));
+        background: linear-gradient(180deg, var(--bc-yellow), var(--bc-cyan));
+        box-shadow:
+          0 0 12px rgba(77, 214, 255, 0.85),
+          inset 0 -2px 6px rgba(255, 255, 255, 0.35);
+        transition: height 80ms linear;
+      }
+      /* "READY" tick — appears above the fill when charge crosses
+         the activation threshold (0.1) so the player gets a clear
+         visual cue. The little notch on the right edge serves as the
+         "you can fire now" indicator. */
+      #hud-boost-meter .bm-tick {
+        position: absolute; left: 100%; bottom: 10%;
+        width: 8px; height: 2px;
+        background: var(--bc-yellow);
+        box-shadow: 0 0 6px var(--bc-yellow);
+        opacity: calc(min(1, var(--bm-charge) * 10));
+      }
+      /* When the player is actively boosting, the whole frame pulses
+         + the fill brightens. `--bm-active` is 1 while
+         BoostMeterStore.active is true, 0 otherwise — driven by JS. */
+      #hud-boost-meter[data-active="1"] .bm-shell {
+        border-color: var(--bc-yellow);
+        box-shadow:
+          0 0 calc(20px + 28px * var(--bm-charge)) rgba(255, 200, 80, 0.85),
+          inset 0 0 14px rgba(255, 200, 80, 0.4);
+        animation: bm-active-pulse 220ms ease-out infinite alternate;
+      }
+      #hud-boost-meter[data-active="1"] .bm-fill {
+        background: linear-gradient(180deg, #fff2a0, var(--bc-yellow));
+      }
+      @keyframes bm-active-pulse {
+        0%   { filter: brightness(1.0); }
+        100% { filter: brightness(1.35); }
+      }
+      /* Charge-flash — quick brightness pulse when a new trick adds
+         charge. JS toggles `data-charged="1"` for ~250ms after a
+         credible trick lands. */
+      #hud-boost-meter[data-charged="1"] .bm-fill {
+        animation: bm-charge-flash 250ms ease-out;
+      }
+      @keyframes bm-charge-flash {
+        0%   { filter: brightness(1.6); }
+        100% { filter: brightness(1.0); }
+      }
       /* Anti-grav entry indicator — left side under the timer. */
       #hud-anti-grav {
         top: 116px; left: 14px;
@@ -2508,6 +2609,7 @@
          menu-active state so the chrome stays clean. -->
     <div id="hud-scaffold" aria-hidden="true">
       <div id="hud-wave-pump" class="hud-slot" data-system="wave-pump" hidden></div>
+      <div id="hud-boost-meter" class="hud-slot" data-system="boost-meter" hidden></div>
       <div id="hud-anti-grav" class="hud-slot" data-system="anti-grav" hidden></div>
       <div id="hud-tutorial" class="hud-slot" data-system="tutorial" hidden></div>
       <div id="hud-wave-line" class="hud-slot" data-system="wave-line" hidden></div>

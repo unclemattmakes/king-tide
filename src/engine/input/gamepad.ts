@@ -54,10 +54,12 @@ export function snapshotGamepads(): GamepadSnapshot[] {
  *   B / Circle   (button 1) → emergency brake (hard stop, no reverse)
  *   LT / L2      (button 6) → analog brake; if held with no throttle, reverses
  *   RT / R2      (button 7) → throttle
- *   `fire`  action button   → fire pickup (default RB / R1)
- *   `boost` action button   → boost (default LB / L1)
+ *   `trickLeft`  action     → hop + CCW visual rotation (default LB / L1)
+ *   `trickRight` action     → hop + CW visual rotation (default RB / R1)
+ *   `fire`  action button   → fire pickup (default X / Square)
+ *   `boost` action button   → boost (default Y / Triangle)
  *
- * The action buttons (fire / boost) read through `playerSettings.gamepadBindings`
+ * The action buttons read through `playerSettings.gamepadBindings`
  * so the Controls tab rebind modal can move them.
  */
 export function gamepadIntent(): Intent {
@@ -89,6 +91,8 @@ export function gamepadIntent(): Intent {
   const bindings = playerSettings.gamepadBindings
   intent.fire = pad.buttons[bindings.fire]?.pressed ?? false
   intent.boost = pad.buttons[bindings.boost]?.pressed ?? false
+  intent.trickLeft = pad.buttons[bindings.trickLeft]?.pressed ?? false
+  intent.trickRight = pad.buttons[bindings.trickRight]?.pressed ?? false
   return intent
 }
 

@@ -263,6 +263,12 @@ export function aiControlSystem(
       fire: false,
       boost: false,
       pitch: pumpPitch,
+      // AI doesn't trick (no boost from observer) in v1. Future:
+      // schedule trickLeft/Right edges around AI pump-hint apex passes
+      // so AIs can earn tricks too. For now the field stays false and
+      // the AI rides without the boost reward.
+      trickLeft: false,
+      trickRight: false,
     })
   }
 }

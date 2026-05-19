@@ -185,7 +185,7 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
   const riderRender = createRiderRenderSystem(scene, sim)
   const pickupRender = createPickupRenderSystem(scene, sim)
   const combatRender = createCombatRenderSystem(scene, sim)
-  const fxTick = createFxSystem(scene, sim, phys, waveField)
+  const fxTick = createFxSystem(scene, sim, phys, waveField).tick
 
   // Simple orbit camera locked on the bike. Auto-rotates so the user
   // sees every side of the rider over a few seconds.
@@ -715,6 +715,8 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
       pitch: 0,
       fire: false,
       boost: false,
+      trickLeft: false,
+      trickRight: false,
     }
     // Smooth the steer slightly so the head-yaw lerp shows nicely.
     const cur = intent

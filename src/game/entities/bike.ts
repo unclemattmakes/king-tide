@@ -9,6 +9,8 @@ import {
   type BikeStatsData,
   BikeStatsStore,
   BikeTag,
+  BoostMeter,
+  BoostMeterStore,
   ControlIntent,
   ControlIntentStore,
   GhostTag,
@@ -21,6 +23,8 @@ import {
   RBHandleStore,
   Transform,
   TransformStore,
+  TrickState,
+  TrickStateStore,
 } from '@/game/components'
 import {
   AIController,
@@ -141,6 +145,25 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
     isGrounded: false,
     surfaceIsWater: false,
     inputPitch: 0,
+  })
+  addComponent(sim, eid, TrickState)
+  TrickStateStore.set(eid, {
+    cooldownSec: 0,
+    spinPhase: 0,
+    spinAxisX: 0,
+    spinAxisY: 0,
+    spinAxisZ: 0,
+    spinDurationSec: 0,
+    prevLeftDown: false,
+    prevRightDown: false,
+    vyPeak: 0,
+    vyPeakTicksAgo: 0,
+  })
+  addComponent(sim, eid, BoostMeter)
+  BoostMeterStore.set(eid, {
+    charge: 0,
+    active: false,
+    prevBoostDown: false,
   })
   // Every bike has a pickup slot.
   addComponent(sim, eid, PickupSlot)

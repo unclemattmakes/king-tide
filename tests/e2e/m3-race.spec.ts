@@ -33,6 +33,8 @@ test.describe('M3 race', () => {
         fire: false,
         boost: false,
         pitch: 0,
+        trickLeft: false,
+        trickRight: false,
       }),
     )
 
@@ -63,6 +65,8 @@ test.describe('M3 race', () => {
         fire: false,
         boost: false,
         pitch: 0,
+        trickLeft: false,
+        trickRight: false,
       }),
     )
 

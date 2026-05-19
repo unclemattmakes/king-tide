@@ -260,6 +260,8 @@ export type DebugState = {
   pumpEventCount?: number
   lastPumpStrength?: number
   lastPumpAt?: number
+  boostMeterCharge?: number
+  boostMeterActive?: boolean
 }
 
 export function installDebugApi(state: DebugState, accessors: DebugAccessors): HoverDebug {
@@ -346,6 +348,8 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
           fire: false,
           boost: false,
           pitch: 0,
+          trickLeft: false,
+          trickRight: false,
         }
         const rapierBT = phys.rapier.RigidBodyType
         const bodyTypeRaw = rb.bodyType()
