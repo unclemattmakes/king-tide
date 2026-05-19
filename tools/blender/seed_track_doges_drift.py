@@ -689,6 +689,55 @@ def _drop_camera_hero(scene: bpy.types.Scene) -> bpy.types.Object:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Sky preset — Venetian golden-hour. The brief calls for ochre +
+# terracotta + Adriatic teal + gold Byzantine accents + warm-orange
+# glassblower furnaces. `venice_warm` is the bundled colorGrade made
+# for this exact palette.
+# ─────────────────────────────────────────────────────────────────────
+
+SKY_PRESET = {
+    "tint":          "#ffd28a",       # warm ochre — sunlight on stone
+    "cloudiness":    0.3,             # bright Adriatic
+    "sun_intensity": 1.0,
+    "fog_near":      280.0,
+    "fog_far":       1500.0,
+    "time_of_day":   30.0,            # late morning / early afternoon
+    "color_grade":   "venice_warm",   # the canonical Venice preset
+    "bloom":         0.65,            # gilt + glass + water spray
+    "sea_state":     3,               # Adriatic — gentle but present swell
+}
+
+
+def _apply_sky_preset(scene: bpy.types.Scene) -> None:
+    """Push Doge's Drift's venice_warm sky preset into scene props so
+    ``derive_sky_block`` emits the right JSON. Mirrors the Maw /
+    Kilauea / Sandbar pattern."""
+    try:
+        from hoverbike_addon.sky_preset import set_sky_tint_from_hex
+    except ImportError:
+        try:
+            from hoverbike_addon_disk.sky_preset import set_sky_tint_from_hex
+        except ImportError:
+            print("  WARN: sky_preset module not reachable headless — "
+                  "JSON stub's sky block will survive instead of being "
+                  "overwritten by scene defaults.")
+            return
+
+    if hasattr(scene, "hoverbike_sky_color_grade"):
+        scene.hoverbike_sky_color_grade = SKY_PRESET["color_grade"]
+        scene.hoverbike_sky_cloudiness = SKY_PRESET["cloudiness"]
+        scene.hoverbike_sky_sun_intensity = SKY_PRESET["sun_intensity"]
+        scene.hoverbike_sky_fog_near = SKY_PRESET["fog_near"]
+        scene.hoverbike_sky_fog_far = SKY_PRESET["fog_far"]
+        scene.hoverbike_sky_time_of_day = SKY_PRESET["time_of_day"]
+        scene.hoverbike_sky_bloom = SKY_PRESET["bloom"]
+        scene.hoverbike_sky_sea_state = SKY_PRESET["sea_state"]
+        set_sky_tint_from_hex(SKY_PRESET["tint"])
+        print(f"  sky preset: venice_warm (Beaufort-{SKY_PRESET['sea_state']}, "
+              f"{SKY_PRESET['color_grade']}, bloom={SKY_PRESET['bloom']})")
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Augmentation orchestrator — runs after build_track_from_spec()
 # ─────────────────────────────────────────────────────────────────────
 
@@ -726,11 +775,25 @@ def augment_scene() -> None:
     print(f"{tag} adding camera_hero")
     _drop_camera_hero(scene)
 
+    _apply_sky_preset(scene)
+
     print(
         f"{tag} augment summary: campanile + rialto + 3 palazzi + bell + "
         f"climb({CORKSCREW_CONTROL_POINTS} cps, z={CORKSCREW_Z_MIN_M}→{CORKSCREW_Z_MAX_M}m) + "
         f"{waves} wave zones + {pickups} pickups + {boosts} boost pads + camera_hero"
     )
+
+    # Nudge spline control points off any downtown plinth the racing
+    # line passes through. Library-linked landmarks (Rialto, Campanile,
+    # palazzi) are collection-instance EMPTY objects that the obstacle
+    # collector skips by type — only template-baked MESH plinths from
+    # template-downtown reach the shift. The Rialto's "thread under"
+    # semantics are preserved without needing a name exclusion.
+    # Two passes catch overlapping-bbox secondaries.
+    print(f"{tag} shifting spline off Venetian obstacles")
+    bpy.ops.hoverbike.shift_spline_off_obstacles(margin=4.0)
+    bpy.ops.hoverbike.shift_spline_off_obstacles(margin=4.0)
+    bpy.ops.hoverbike.snap_spline_to_terrain()
 
     output_blend = os.path.join(REPO_ROOT, "tracks-src", f"{SPEC.track_id}.blend")
     bpy.ops.wm.save_as_mainfile(filepath=output_blend)

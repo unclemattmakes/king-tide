@@ -441,9 +441,22 @@ The hero sprint. The Maw and Shibuya are the trailer shots.
 **Sprint exit criterion**: Open Sea Cup + Continental Cup playable;
 trailer footage capturable. ✅ Met — all five tracks open in Blender,
 export end-to-end, render hero JPGs, and load without runtime errors.
-Polish-pass items (per-track sky stamping for the 4 non-Maw seeds, the
-spline-clip warnings, animated gantry cranes, and the lava-river
-emissive shader) move to a follow-up art-tuning sprint.
+
+**Polish pass shipped same day** (post-merge follow-up): per-track sky
+preset stamping landed on Shibuya / Marina Bay 7 / Doge's Drift
+(matching The Maw + Kilauea), so every Sprint 2 track now exports
+with its bespoke `colorGrade` (`tokyo_neon` / `nyc_sunset` /
+`venice_warm` / `big_sur_golden` / `kilauea_volcanic`). Lint cleanups:
+the obstacle collector now backstops `_largest_terrain_mesh` with a
+`terrain*` name match (caught the Marina case where a long road slab
+out-sized the actual ground plane), and `_OBSTACLE_NAME_EXCLUDES`
+gained `antigrav_` + `_rim` so ridable swept surfaces and ring-shaped
+colliders (Kilauea's caldera rim) no longer false-positive. Shibuya,
+Marina, Doge's seeds now call `hoverbike.shift_spline_off_obstacles`
+in their augment pass to auto-nudge any downtown-plinth-clipping
+anchors. End state: **all five tracks lint clean (0 errors, 0
+warnings)**. Animated gantry-crane runtime + lava emissive shader
+remain follow-ups.
 
 ### Phase E — Sprint 3: Drowned Cup + finale (M15, ~3 weeks)
 
