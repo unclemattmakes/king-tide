@@ -74,10 +74,7 @@ import { vecHorizontalLength } from '@/engine/sim/physics/vec'
 import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import { createTutorialDirector } from '@/engine/tutorial/tutorial-director'
 import { DEFAULT_TUTORIAL_SCRIPT } from '@/engine/tutorial/tutorial-script'
-import {
-  createWavePumpObserver,
-  DEFAULT_DETECTOR_TUNING,
-} from '@/engine/wave-pump-observer'
+import { createWavePumpObserver, DEFAULT_DETECTOR_TUNING } from '@/engine/wave-pump-observer'
 import type { AssetManifest } from '@/game/assets/manifest'
 import type { BikeVariant } from '@/game/bikes/variants'
 import {
@@ -132,6 +129,11 @@ export interface BootState {
    *  detection in boostMeterSystem, which we can't easily observe
    *  from the render side). */
   boostBtnDown?: boolean
+  /** Last-seen `TrickState.driftReleaseSerial` for the player bike.
+   *  The sim bumps this counter once per mini-turbo release; the
+   *  render side fires FX when it changes. Initialized lazily on
+   *  the first frame the field is read. */
+  lastDriftReleaseSerial?: number
 }
 
 export interface GameLoopHud {
@@ -886,6 +888,38 @@ export function startGameLoop(opts: GameLoopOpts): void {
         state.boostMeterCharge = meter.charge
       }
       state.boostBtnDown = boostDown
+
+      // Drift mini-turbo release FX. The sim bumps `driftReleaseSerial`
+      // on each release and writes the tier (1 or 2) to `driftReleaseTier`
+      // for one tick. We diff the serial against last frame's value so
+      // multiple sim ticks per render frame still fire FX exactly once,
+      // and a render frame that misses the single-tick `driftReleaseTier`
+      // window can still infer the tier from the value the next sim
+      // tick writes (the serial bump only happens on a fresh release).
+      const trickStateRender = TrickStateStore.get(playerEid)
+      if (trickStateRender && stats) {
+        const lastSerial = state.lastDriftReleaseSerial ?? trickStateRender.driftReleaseSerial
+        if (trickStateRender.driftReleaseSerial !== lastSerial) {
+          const tier = trickStateRender.driftReleaseTier
+          // tier 1 → modest flash + audio; tier 2 → full strength.
+          // Strength scaling matches the wave-pump observer's saturated
+          // band so a tier-2 release reads at the same intensity as a
+          // top-tier trick land.
+          const strength = tier === 2 ? 1 : 0.7
+          wavePumpHud.pump(strength, true)
+          if (playerSettings.wavePumpIntensity !== 'off') {
+            audio.wavePump(strength, true)
+          }
+          triggerPumpBurst(playerEid, strength, true)
+          pumpFx.fire(strength, true)
+          // Top up the boost meter so chaining a drift-turbo into a
+          // pumped boost reads as continuous momentum. Tier 1 fills
+          // the same as one credible trick (~0.33); tier 2 fills
+          // a half-bar (matches "two drift releases ≈ one full bar").
+          chargeBoostMeter(playerEid, tier === 2 ? 0.5 : 0.33)
+        }
+        state.lastDriftReleaseSerial = trickStateRender.driftReleaseSerial
+      }
     }
 
     // Player slot transitions: collected (null → X), or fired with a
