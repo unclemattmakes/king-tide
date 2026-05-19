@@ -659,7 +659,7 @@ async function boot() {
   const riderRender = createRiderRenderSystem(scene, sim)
   const pickupRender = createPickupRenderSystem(scene, sim)
   const combatRender = createCombatRenderSystem(scene, sim)
-  const fxTick = createFxSystem(scene, sim, phys)
+  const fxTick = createFxSystem(scene, sim, phys, waveField)
 
   // Unified track-emitter particle system — every `kind=emitter` empty
   // in the loaded environment GLB feeds this. Tracks without emitters
