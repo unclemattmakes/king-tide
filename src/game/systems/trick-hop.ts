@@ -118,28 +118,24 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
     }
 
     // vy-peak tracker. Pull live vy from the rigid body so the peak
-    // reflects this tick's physics, not last tick's snapshot. Stale-
-    // reset after VY_PEAK_STALE_TICKS so an old climb can't arm a
-    // big hop a second later on flat ground.
+    // reflects this tick's physics, not last tick's snapshot. While
+    // the bike is in a post-hop lockout, NEW peak updates are
+    // skipped (the lift is hop-driven, not surface-driven) but the
+    // pre-existing peak is preserved so the credibility check on
+    // *this* press tick — which sets the lockout — can still see
+    // the surface-driven climb. The stale-tick window expires the
+    // peak naturally during the airborne arc.
     const handle = RBHandleStore.must(eid).handle
     const rb = phys.world.getRigidBody(handle)
     const vy = rb ? rb.linvel().y : 0
-    if (!trick.hopLockoutActive) {
-      if (vy > trick.vyPeak) {
-        trick.vyPeak = vy
-        trick.vyPeakTicksAgo = 0
-      } else {
-        trick.vyPeakTicksAgo += 1
-        if (trick.vyPeakTicksAgo > VY_PEAK_STALE_TICKS) {
-          trick.vyPeak = 0
-        }
-      }
-    } else {
-      // During lockout, drain the peak immediately so a stale value
-      // from before the hop can't survive into the post-landing
-      // tracking window.
-      trick.vyPeak = 0
+    if (!trick.hopLockoutActive && vy > trick.vyPeak) {
+      trick.vyPeak = vy
       trick.vyPeakTicksAgo = 0
+    } else {
+      trick.vyPeakTicksAgo += 1
+      if (trick.vyPeakTicksAgo > VY_PEAK_STALE_TICKS) {
+        trick.vyPeak = 0
+      }
     }
 
     // Rising-edge detection. `prev*Down` is the previous tick's input

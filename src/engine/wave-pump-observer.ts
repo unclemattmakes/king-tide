@@ -144,27 +144,25 @@ export function createWavePumpObserver(
 
   return {
     detect(now, s) {
-      // Track the highest vy seen during this lift phase. Reset the
-      // peak once it goes stale so an old crest can't pay off a much-
-      // later flat-ground press. While the bike is in a post-hop
-      // lockout, all updates are ignored AND any existing peak is
-      // drained — the lift comes from the hop's own impulse, not a
-      // surface climb, and counting it would let every hop self-arm
-      // a credible trick for the next press.
-      if (s.hopLockedOut) {
-        vyPeakInWindow = 0
-        vyPeakAt = Number.NEGATIVE_INFINITY
-      } else {
+      // Track the highest vy seen during this lift phase. While the
+      // bike is in a post-hop lockout, NEW peak updates are skipped
+      // (the lift is hop-driven, not surface-driven, and counting it
+      // would self-arm the next press), but the pre-existing peak is
+      // preserved so the credibility check for the *current* press —
+      // which fires on the same tick the sim sets the lockout — can
+      // still see the surface-driven climb. The peakStaleMs window
+      // expires the peak naturally during the airborne arc.
+      if (!s.hopLockedOut) {
         if (s.vy > 0) {
           if (s.vy > vyPeakInWindow) {
             vyPeakInWindow = s.vy
             vyPeakAt = now
           }
         }
-        if (now - vyPeakAt > tuning.peakStaleMs) {
-          vyPeakInWindow = 0
-          vyPeakAt = Number.NEGATIVE_INFINITY
-        }
+      }
+      if (now - vyPeakAt > tuning.peakStaleMs) {
+        vyPeakInWindow = 0
+        vyPeakAt = Number.NEGATIVE_INFINITY
       }
 
       // Trick-button rising edges. Held-down does NOT re-fire —
