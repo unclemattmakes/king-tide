@@ -1,4 +1,6 @@
-import { expect, test } from '@playwright/test'
+import { waitFullyBooted } from './helpers/boot'
+import { expect, test } from './helpers/console-errors'
+import { skipWebKitLinux } from './helpers/platform-skips'
 
 /**
  * Audio is procedurally synthesised in src/engine/audio/audio.ts and
@@ -13,22 +15,11 @@ test.describe('M9 audio', () => {
   // WebKit gates AudioContext behind a stricter user-gesture model than
   // Chromium, and the test harness's synthetic gesture often leaves the
   // context suspended. Skip on WebKit-Linux; real coverage on macOS WebKit.
-  test.skip(
-    ({ browserName }) => browserName === 'webkit' && process.platform === 'linux',
-    'WebKit AudioContext stays suspended under the test harness gesture model. Run on macOS for WebKit coverage.',
-  )
+  skipWebKitLinux(test)
 
-  test('audio HUD + M-key mute toggle, no errors at boot', async ({ page }) => {
-    const errors: string[] = []
-    page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`)
-    })
-
+  test('audio HUD + M-key mute toggle, no errors at boot', async ({ page, consoleErrors }) => {
     await page.goto('/?autostart=1')
-    await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
-      timeout: 10000,
-    })
+    await waitFullyBooted(page, { timeout: 10_000 })
 
     // Drive a beat so the engine-tick code path actually runs (otherwise
     // it would be valid for it to be a hot-reload no-op). Nothing to assert
@@ -68,6 +59,6 @@ test.describe('M9 audio', () => {
       { timeout: 1500 },
     )
 
-    expect(errors, errors.join('\n')).toEqual([])
+    consoleErrors.assertNone()
   })
 })

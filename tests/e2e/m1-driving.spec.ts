@@ -1,24 +1,14 @@
-import { expect, test } from '@playwright/test'
+import { waitFullyBooted } from './helpers/boot'
+import { expect, test } from './helpers/console-errors'
 
 test.describe('M1 driving', () => {
-  test('bike spawns, hovers, and accelerates forward under throttle', async ({ page }) => {
-    const errors: string[] = []
-    page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`)
-    })
-
+  test('bike spawns, hovers, and accelerates forward under throttle', async ({
+    page,
+    consoleErrors,
+  }) => {
     await page.goto('/?autostart=1')
-    await page.waitForFunction(() => window.__hover?.ready === true, { timeout: 10000 })
-
     // Wait for the bike to spawn and reach hover height (~1.2m).
-    await page.waitForFunction(
-      () => {
-        const p = window.__hover?.player()
-        return p !== null && p !== undefined && p.isGrounded
-      },
-      { timeout: 5000 },
-    )
+    await waitFullyBooted(page, { timeout: 10_000 })
 
     const initial = await page.evaluate(() => window.__hover!.player()!)
     // Bike spawns on the right straight, over water; hovers ~1.2m above the
@@ -59,13 +49,13 @@ test.describe('M1 driving', () => {
 
     // Release throttle, bike should decelerate.
     await page.evaluate(() => window.__hover!.setIntentOverride(null))
+
+    consoleErrors.assertNone()
   })
 
   test('steering produces yaw', async ({ page }) => {
     await page.goto('/?autostart=1')
-    await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
-      timeout: 10000,
-    })
+    await waitFullyBooted(page, { timeout: 10_000 })
 
     // Throttle + full left steer for 1s.
     await page.evaluate(() =>

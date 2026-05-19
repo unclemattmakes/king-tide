@@ -21,6 +21,7 @@
  * without translating units.
  */
 import { enabledCells, GLOBAL_PERF_BUDGET } from '../../tools/qa/matrix.mjs'
+import { waitForPerfReady } from './helpers/boot'
 import { expect, test } from './helpers/console-errors'
 
 test.describe('QA track × bike matrix', () => {
@@ -42,16 +43,18 @@ test.describe('QA track × bike matrix', () => {
 
       await page.goto(`/?autostart=1&track=${cell.id}&bike=${cell.bike}`)
 
-      // Boot gate — debug API mounts at phase 8 of main.ts.
-      await page.waitForFunction(() => window.__hover?.ready === true, { timeout: 20_000 })
-      await page.waitForFunction(() => window.__hover?.perf != null, { timeout: 20_000 })
+      await waitForPerfReady(page)
 
       const backend = await page.evaluate(() => window.__hover!.backend())
       expect(['webgpu', 'webgl2']).toContain(backend)
 
       // Reset console + perf windows so any settle-in noise (cold-load
       // shader compiles, audio context resume, etc.) doesn't bleed
-      // into the metrics this cell is graded against.
+      // into the metrics this cell is graded against. The fixture's
+      // `reset()` clears the Playwright-side collector that drives
+      // `assertNone()` below; the in-page `consoleClear()` keeps the
+      // bug-bundle ring aligned for any failure dumps.
+      consoleErrors.reset()
       await page.evaluate(() => {
         window.__hover!.qa?.consoleClear()
         window.__hover!.perf!.resetWindow()

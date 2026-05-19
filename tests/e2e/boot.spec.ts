@@ -1,19 +1,15 @@
-import { expect, test } from '@playwright/test'
+import { waitForReady } from './helpers/boot'
+import { expect, test } from './helpers/console-errors'
 
 test.describe('M0 boot', () => {
   test('debug API mounts, renderer picks a backend, fps ticks, no console errors', async ({
     page,
+    consoleErrors,
   }) => {
-    const errors: string[] = []
-    page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`)
-    })
-
     await page.goto('/?autostart=1')
 
     // Debug API present and ready
-    await page.waitForFunction(() => window.__hover?.ready === true, { timeout: 8000 })
+    await waitForReady(page, { timeout: 8000 })
 
     const backend = await page.evaluate(() => window.__hover!.backend())
     expect(['webgpu', 'webgl2']).toContain(backend)
@@ -29,12 +25,12 @@ test.describe('M0 boot', () => {
     await expect(page.locator('#hud-backend')).toContainText(/backend: (webgpu|webgl2)/)
     await expect(page.locator('#hud-fps')).toContainText(/fps: \d+/)
 
-    expect(errors, errors.join('\n')).toEqual([])
+    consoleErrors.assertNone()
   })
 
   test('intent override flows through to state', async ({ page }) => {
     await page.goto('/?autostart=1')
-    await page.waitForFunction(() => window.__hover?.ready === true, { timeout: 8000 })
+    await waitForReady(page, { timeout: 8000 })
 
     await page.evaluate(() =>
       window.__hover!.setIntentOverride({
