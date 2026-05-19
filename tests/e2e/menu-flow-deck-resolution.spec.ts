@@ -9,7 +9,10 @@ import { expect, test } from '@playwright/test'
  *
  * See docs/steam-deck.md for the full Deck profile + wrapper plan.
  */
-test.use({ viewport: { width: 1280, height: 800 } })
+test.use({
+  viewport: { width: 1280, height: 800 },
+  contextOptions: { reducedMotion: 'reduce' },
+})
 
 test.describe('menu @ 1280×800 (Steam Deck)', () => {
   test('title screen fits in the viewport without vertical scroll', async ({ page }) => {
@@ -31,7 +34,7 @@ test.describe('menu @ 1280×800 (Steam Deck)', () => {
     await page.goto('/')
     await page.locator('#title-start').click()
     // First mode card visible = mode-select screen has rendered.
-    await expect(page.locator('.bc-mode-card[data-mode="sp"]')).toBeVisible({ timeout: 5_000 })
+    await expect(page.locator('.bc-mode-card[data-mode="race"]')).toBeVisible({ timeout: 5_000 })
 
     const { scrollHeight, clientHeight } = await page.evaluate(() => ({
       scrollHeight: document.documentElement.scrollHeight,
