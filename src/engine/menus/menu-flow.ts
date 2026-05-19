@@ -436,6 +436,22 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
    *    a single START CUP CTA at the bottom that commits the cup. */
   function renderCupTrackCards(host: HTMLElement): void {
     host.innerHTML = ''
+    if (currentMode === 'time-trial') {
+      // TT picks a single venue from the full ship roster. Every
+      // status:'ship' v1 track is fair game; on dev builds we also
+      // surface the dev tracks below so playtesters can run TT against
+      // procedurals + freshly-baked GLBs without leaving the menu.
+      for (const t of V1_TRACKS) {
+        if (t.status !== 'ship') continue
+        host.appendChild(buildV1TrackCard(t))
+      }
+      if (dev) {
+        for (const t of devCupTracks) {
+          host.appendChild(buildDevTrackCard(t))
+        }
+      }
+      return
+    }
     if (!pickedCup) return
     if (pickedCup.id === 'dev') {
       for (const t of devCupTracks) {
@@ -588,15 +604,24 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     } else if (step === 'sp-cup-tracks') {
       const host = screens['sp-cup-tracks']?.querySelector<HTMLElement>('#sp-cup-track-cards')
       const cupReadout = screens['sp-cup-tracks']?.querySelector<HTMLElement>('#sp-cup-readout')
+      const cupReadoutLabel =
+        screens['sp-cup-tracks']?.querySelector<HTMLElement>('#sp-cup-readout-label')
       const startBtn = screens['sp-cup-tracks']?.querySelector<HTMLButtonElement>('#sp-cup-start')
       const subEl = screens['sp-cup-tracks']?.querySelector<HTMLElement>('#sp-cup-tracks-sub')
+      const backBtn = screens['sp-cup-tracks']?.querySelector<HTMLElement>('#sp-cup-tracks-back')
       if (host) renderCupTrackCards(host)
-      if (cupReadout) cupReadout.textContent = (pickedCup?.name ?? '').toUpperCase()
+      if (cupReadout) {
+        cupReadout.textContent =
+          currentMode === 'time-trial' ? 'TIME TRIAL' : (pickedCup?.name ?? '').toUpperCase()
+      }
+      if (cupReadoutLabel)
+        cupReadoutLabel.textContent = currentMode === 'time-trial' ? 'MODE' : 'CUP'
+      if (backBtn) backBtn.innerHTML = currentMode === 'time-trial' ? '&larr; BACK' : '&larr; CUP'
       // Championship-shaped cups (placeholder + future ship cups) get a
       // single START CUP CTA; browse Dev Cup keeps its tile-as-launcher
-      // behaviour and hides the CTA. TT mode also reuses this screen
-      // (with `pickedCup = DEV_CUP`); the START CUP CTA stays hidden
-      // there because TT is a single-track flow.
+      // behaviour and hides the CTA. TT reuses this screen as a venue
+      // picker (no cup bound); the START CUP CTA stays hidden there
+      // because TT is a single-track flow.
       const isChampionship = currentMode === 'cup' && (pickedCup?.races.length ?? 0) > 0
       if (startBtn) startBtn.style.display = isChampionship ? 'inline-block' : 'none'
       if (subEl) {
@@ -804,11 +829,11 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
               showStep('tutorial-intro')
               break
             case 'time-trial':
-              // TT reuses the cup-tracks renderer with Dev Cup as
-              // the source, so devs can run TT against today's
-              // playable maps. When v1 ship tracks land they'll
-              // appear here via their normal status='ship' flow.
-              pickedCup = dev ? DEV_CUP : (V1_CUPS[0] ?? null)
+              // TT reuses the cup-tracks screen as the venue picker,
+              // but it isn't bound to any cup — `renderCupTrackCards`
+              // branches on `currentMode === 'time-trial'` and lists
+              // every shipped v1 track (plus dev tracks on dev builds).
+              pickedCup = null
               showStep('sp-cup-tracks')
               break
           }
@@ -900,7 +925,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
             <div class="sub" id="sp-cup-tracks-sub">PICK A VENUE FROM THE CUP YOU SELECTED</div>
           </div>
           <div class="meta">
-            <div class="sub">CUP</div>
+            <div class="sub" id="sp-cup-readout-label">CUP</div>
             <div id="sp-cup-readout" style="font-family: var(--bc-font-display); font-size: 22px;"></div>
           </div>
         </div>
@@ -912,7 +937,11 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       `
       const host = el.querySelector<HTMLElement>('#sp-cup-track-cards')
       if (host) renderCupTrackCards(host)
-      el.querySelector('#sp-cup-tracks-back')?.addEventListener('click', () => showStep('sp-cup'))
+      // TT skipped the cup-select screen on the way in; back drops to
+      // the mode picker instead of a cup-select the player never saw.
+      el.querySelector('#sp-cup-tracks-back')?.addEventListener('click', () =>
+        showStep(currentMode === 'time-trial' ? 'mode' : 'sp-cup'),
+      )
       el.querySelector('#sp-cup-start')?.addEventListener('click', () => showStep('sp-bike'))
       return el
     }
