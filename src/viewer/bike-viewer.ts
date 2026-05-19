@@ -15,8 +15,9 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { ExportedKind } from '../engine/asset-kinds'
 import { createRenderer } from '../engine/render/renderer'
-import { type LoadedBike, loadBike } from '../game/assets/bike-loader'
+import { cloneLoadedBike, type LoadedBike, loadBike } from '../game/assets/bike-loader'
 import { type AssetManifest, type BikeManifestEntry, loadManifest } from '../game/assets/manifest'
+import { resolveBikeVariant } from '../game/bikes/variants'
 
 type ViewerOpts = {
   /** Bike id from the manifest, or null to use the first manifest entry. */
@@ -34,6 +35,11 @@ type Refs = {
 }
 
 export async function bootBikeViewer(parent: HTMLElement, opts: ViewerOpts): Promise<void> {
+  // `?thumb=1` strips the reference grid + HUD chrome and tightens the
+  // camera onto the chassis so the bike-thumbnail Playwright spec gets
+  // a clean tile. Authors invoke this via `pnpm gen:bike-thumbs`; nobody
+  // hand-types `?viewer=<id>&thumb=1` in normal use.
+  const thumbMode = new URLSearchParams(window.location.search).get('thumb') === '1'
   const manifest = await loadManifest()
   // Empty-check + a local that the compiler tracks as defined (the
   // length check alone doesn't narrow ``manifest.bikes[0]`` under
@@ -62,8 +68,16 @@ export async function bootBikeViewer(parent: HTMLElement, opts: ViewerOpts): Pro
   scene.background = new THREE.Color(0x1a1d22)
 
   const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 200)
-  camera.position.set(2.5, 1.4, 2.5)
-  camera.lookAt(0, 0.3, 0)
+  // Thumb-mode tightens the camera so the chassis fills ~70% of the
+  // 480×270 tile. Default mode keeps the wider studio view authors use
+  // for socket/collider eyeballing.
+  if (thumbMode) {
+    camera.position.set(1.9, 1.05, 1.9)
+    camera.lookAt(0, 0.55, 0)
+  } else {
+    camera.position.set(2.5, 1.4, 2.5)
+    camera.lookAt(0, 0.3, 0)
+  }
 
   // Soft studio lighting — neutral so livery colors read correctly.
   scene.add(new THREE.HemisphereLight(0xc0d0e0, 0x202028, 0.9))
@@ -76,12 +90,15 @@ export async function bootBikeViewer(parent: HTMLElement, opts: ViewerOpts): Pro
 
   // Reference grid + axes. Grid lives at y = 0 (chassis bottom), axes
   // at origin. Helps eyeball "is this the right pose?" / "is the
-  // chassis where the spec says it should be?".
-  const grid = new THREE.GridHelper(10, 20, 0x4488cc, 0x223344)
-  grid.position.y = 0
-  scene.add(grid)
-  const axes = new THREE.AxesHelper(0.6)
-  scene.add(axes)
+  // chassis where the spec says it should be?". Suppressed in thumb
+  // mode so the captured tile is just the bike on the background.
+  if (!thumbMode) {
+    const grid = new THREE.GridHelper(10, 20, 0x4488cc, 0x223344)
+    grid.position.y = 0
+    scene.add(grid)
+    const axes = new THREE.AxesHelper(0.6)
+    scene.add(axes)
+  }
 
   // Container for the bike + the per-bike axes (shown at bike root).
   const axesGroup = new THREE.Group()
@@ -94,6 +111,41 @@ export async function bootBikeViewer(parent: HTMLElement, opts: ViewerOpts): Pro
   orbit.maxDistance = 20
 
   // ── HUD ──────────────────────────────────────────────────────────────────
+  // Thumb mode skips the HUD entirely so the captured tile is just the
+  // chassis. The HUD's per-bike summary (mass, top speed, livery hex)
+  // would dominate a 480×270 tile and isn't part of the bike-select
+  // card surface anyway.
+  if (thumbMode) {
+    // Initial load — thumb mode still needs the bike mounted + the
+    // render loop ticking so the spec's screenshot waits on the same
+    // bikeViewerReady signal as authors get in normal use.
+    const loaded = await loadBike(current.url)
+    // Tint the GLB's livery to the variant's bodyColor so 5th-bike
+    // variants that share a base GLB (e.g. Sparrow → racer.glb until
+    // a dedicated Blender source lands) read with the right colour.
+    // Matches the runtime player-tint we added to render-systems.ts.
+    const variant = resolveBikeVariant(current.id)
+    const cloned = cloneLoadedBike(loaded, { tintLivery: variant.bodyColor })
+    scene.add(cloned.root)
+    // Hide author-facing helpers — the sockets + collider proxies a
+    // normal viewer surfaces would clutter the tile.
+    cloned.root.traverse((obj) => {
+      if (obj.userData?.kind === ExportedKind.SOCKET) obj.visible = false
+      if (obj.userData?.kind === ExportedKind.COLLIDER) obj.visible = false
+    })
+    let renderedFrames = 0
+    const tick = () => {
+      orbit.update()
+      renderer.render(scene, camera)
+      renderedFrames++
+      if (renderedFrames === 2) {
+        document.body.dataset.bikeViewerReady = '1'
+      }
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+    return
+  }
   const hud = document.createElement('div')
   hud.style.cssText = [
     'position:fixed',
@@ -134,9 +186,19 @@ export async function bootBikeViewer(parent: HTMLElement, opts: ViewerOpts): Pro
   renderHud(refs, (id) => switchBike(refs, id))
 
   // ── Render loop ──────────────────────────────────────────────────────────
+  // Mark the viewer ready on the second rendered frame so the bike
+  // thumbnail Playwright spec (and any other harness) can wait on a
+  // single deterministic signal rather than polling for a canvas pixel.
+  // First frame can land before lights+materials finalise; two frames
+  // is enough that the second screenshot is always representative.
+  let renderedFrames = 0
   const tick = () => {
     orbit.update()
     renderer.render(scene, camera)
+    renderedFrames++
+    if (renderedFrames === 2) {
+      document.body.dataset.bikeViewerReady = '1'
+    }
     requestAnimationFrame(tick)
   }
   requestAnimationFrame(tick)

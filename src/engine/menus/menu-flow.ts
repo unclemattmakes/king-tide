@@ -121,27 +121,12 @@ type ModeTile = {
   enabled: boolean
   gate?: string
 }
-/** Two Coming-Soon bike slots padding the picker out to the v1 target
- *  of five. Names are intentionally vague — the actual archetypes will
- *  be designed alongside their tuning. The shape of the picker is
- *  what's locked here, not the identity of the two extra bikes. */
+/** Coming-Soon bike slots — empty now that Phase F of
+ *  `docs/v1-asset-pipeline-plan.md` filled the heavy + light archetypes
+ *  (Scout + Sparrow). Kept as a typed list so a future "5 → 8" expansion
+ *  has the same scaffolding to plug into. */
 type ComingSoonBike = { id: string; name: string; tagline: string; accent: string; gate: string }
-const BIKE_COMING_SOON_SLOTS: ComingSoonBike[] = [
-  {
-    id: 'tbd-heavy',
-    name: 'Heavyweight TBD',
-    tagline: 'Punishing wave-pump timing + biggest launch.',
-    accent: '#5a78a8',
-    gate: 'Variant #4 lands alongside the wave-pump tuning pass.',
-  },
-  {
-    id: 'tbd-light',
-    name: 'Lightweight TBD',
-    tagline: 'Forgiving wave-pump + further air on small swells.',
-    accent: '#d2b6ff',
-    gate: 'Variant #5 lands alongside the wave-pump tuning pass.',
-  },
-]
+const BIKE_COMING_SOON_SLOTS: ComingSoonBike[] = []
 
 const MODE_TILES: ModeTile[] = [
   {

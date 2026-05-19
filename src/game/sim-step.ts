@@ -79,7 +79,7 @@ export function simulateStep(
     applyPeerInputs(sim, inputs.peerInputs, phys.fixedDt)
   }
   const runAI = inputs.runAI ?? true
-  if (!inputs.locked && runAI) aiControlSystem(sim, phys, track)
+  if (!inputs.locked && runAI) aiControlSystem(sim, phys, track, waveField)
   if (runAI) aiCombatSystem(sim, phys)
   stunOverrideSystem(sim)
 

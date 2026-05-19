@@ -1,20 +1,39 @@
-> **Last updated: 2026-05-19** — runtime emissive lava-river shader for the
-> Kilauea Crown waterfall (`landmark_lava_river_strip`); WebGPU/TSL-safe
-> `MeshStandardNodeMaterial` reads `COLOR_0.r` as the hot-core mask, mixes
-> `#ffe0a0` ↔ `#a82e10`, scales by a Settings → Video → "Emissive landmarks"
-> Full / Reduced / Off gate, with a sin-of-time scroll on `COLOR_0.b` for
-> flow shimmer. See [`src/engine/render/lava-river-material.ts`](../src/engine/render/lava-river-material.ts)
-> and the focused-scene regression at [`lava-test.html`](../lava-test.html).
+> **Last updated: 2026-05-19** — Phase A gap 7 + Phase F of
+> [`docs/v1-asset-pipeline-plan.md`](./v1-asset-pipeline-plan.md) land.
+> New [`src/game/ai/pump-hints.ts`](../src/game/ai/pump-hints.ts) walks
+> each AI spline against the track's `wave_zone_NN` empties and flags
+> indices inside any zone whose `heightMult > 1.2` (the threshold gap 7
+> calls out). The AI controller reads the hint set + samples local
+> surface vy each tick: when the AI's cursor sits on a hint AND the
+> swell is rising hard enough, it fires a 100 ms nose-up pump burst
+> (the same `intent.pitch` input the player taps with E), then locks
+> out for 500 ms — matching the player wave-pump observer's cooldown.
+> Per-difficulty tuning (`pumpVyThreshold` + `pumpPitchStrength` in
+> `DIFFICULTY_TUNING`): Casual disables pumps via `Infinity`,
+> Standard fires at vy ≥ 1.5, Hard fires at vy ≥ 0.6 with a stronger
+> pitch flick. **Phase F** — bike lineup grows 3 → 5 with Scout
+> (heavyweight, soft hover spring + lowest surfaceFollow → punishing
+> pump timing + biggest launch) and Sparrow (lightweight, stiffest
+> spring + highest surfaceFollow → forgiving pump). Player bike now
+> tints its livery to the variant's `bodyColor` at clone time so
+> 5th-bike variants reading from a shared base GLB (Sparrow → Racer
+> until a dedicated `.blend` lands) render visibly distinct. New
+> `pnpm gen:bike-thumbs` captures 480×270 thumbnails for every
+> variant via a `?viewer=<id>&thumb=1` Playwright route; the two
+> "Coming Soon" bike slots are gone from the picker. 693/693 unit
+> tests passing (20 new — 11 pump-hints, 2 difficulty pump fields,
+> 7 bike-variants).
 >
 > Recent landed work (one-liners — `git log` carries the full story):
-> swinging-landmark kinematic colliders (Marina Bay 7 + Doge's bell), Phase
-> E Sprint 3 (Drowned Cup — Aqualand, Angkor Drowned, Liberty Drowned; v1
-> lineup complete), Phase D Sprint 2 polish, Steam Deck profile wiring +
-> Tauri 2 scaffold, Polish-QA kickoff (Perf HUD + Accessibility tab +
-> cross-browser Playwright projects), Phase D Sprint 2 (Open Sea + Continental
-> Cups), v1 asset-pipeline foundation + Reef Cup, Multiplayer convention row
-> closed, wave-line shimmer, Controls rebind tab, Cup wiring, Time Trial
-> mode, Foundation Systems 5/5, v1 menu cathedral + wave-pump.
+> runtime lava-river shader, swinging-landmark kinematic colliders,
+> Phase E Sprint 3 (Drowned Cup — Aqualand, Angkor Drowned, Liberty
+> Drowned; v1 lineup complete), Phase D Sprint 2 polish, Steam Deck
+> profile wiring + Tauri 2 scaffold, Polish-QA kickoff (Perf HUD +
+> Accessibility tab + cross-browser Playwright projects), Phase D
+> Sprint 2 (Open Sea + Continental Cups), v1 asset-pipeline foundation
+> + Reef Cup, Multiplayer convention row closed, wave-line shimmer,
+> Controls rebind tab, Cup wiring, Time Trial mode, Foundation Systems
+> 5/5, v1 menu cathedral + wave-pump.
 >
 > Live build: <https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app> —
 > every push to `main` auto-deploys.
@@ -23,6 +42,8 @@ This doc captures the build's current state, controls, known issues, and next st
 
 ## What works today
 
+- **Bike lineup grows to five — Scout + Sparrow ship (Phase F of [docs/v1-asset-pipeline-plan.md](./v1-asset-pipeline-plan.md)).** `BIKE_VARIANTS` in [src/game/bikes/variants.ts](../src/game/bikes/variants.ts) now exposes the v1 target of five archetypes: Cruiser / Racer / Stunt + the new **Scout** (heavyweight) and **Sparrow** (lightweight). Scout is heaviest (mass 220) with the softest hover spring (22 vs default 34) and lowest surfaceFollow (0.4) — the soft spring is what makes its wave-pump timing "punishing" per the design-targets: the chassis reacts late to the crest, so an early E flick is wasted and a late one launches off air; once airborne, the inertia carries through chop. Sparrow is lightest (mass 80) with the stiffest spring (38) + highest surfaceFollow (1.05) — the bike springs off any crest with a wide pump-input tolerance window, the "forgiving + further launch" pole of the lineup. Bike-select picker drops both "Coming Soon" placeholder slots. Player bike render now passes `tintLivery: variantColor` to `cloneLoadedBike` ([src/engine/render/render-systems.ts](../src/engine/render/render-systems.ts)) so variants sharing a base GLB (Sparrow → racer.glb until a dedicated Blender source lands) read with the right colour. New `pnpm gen:bike-thumbs` ([tools/gen-bike-thumbs.mjs](../tools/gen-bike-thumbs.mjs)) drives a `BIKE_THUMBS=1`-gated Playwright spec ([tests/e2e/gen-bike-thumbnails.spec.ts](../tests/e2e/gen-bike-thumbnails.spec.ts)) that hits `?viewer=<id>&thumb=1` (suppressed HUD + grid + tighter camera in a new `thumbMode` branch of [src/viewer/bike-viewer.ts](../src/viewer/bike-viewer.ts)) and captures 480×270 JPGs per variant into `public/assets/bikes/<id>-thumb.jpg`. The viewer's render loop now flips `document.body.dataset.bikeViewerReady = '1'` on the second rendered frame so the spec has a deterministic capture gate. 7 new bike-variant tests cover the 5-archetype roster + Scout/Sparrow tuning intent.
+- **AI pumps where the wave zones tell them to (Phase A gap 7 of [docs/v1-asset-pipeline-plan.md](./v1-asset-pipeline-plan.md)).** Closes the last open Phase A gap. New pure module [src/game/ai/pump-hints.ts](../src/game/ai/pump-hints.ts) walks each AI spline against the track's `wave_zone_NN` list and flags indices inside any zone whose `heightMult > 1.2` (the default threshold gap 7 spells out — "derive automatically from spline proximity to `wave_zone_NN` empties with `height_mult > 1.2`"). The flag set is built lazily via a `WeakMap<Track, …>` cache, mirroring the existing `SPLINE_INDEX` cache in [src/game/systems/ai-control.ts](../src/game/systems/ai-control.ts) so it GC's alongside the spline cache. The AI controller now also takes the wave field as a parameter; per tick, if the AI's current spline cursor is on a hint AND the smoothed surface vy under the bike clears the difficulty's threshold AND speed ≥ 45% of top-speed (matching the player wave-pump observer's `minSpeedFrac`), it sets `intent.pitch = pumpPitchStrength` for 100 ms — the same nose-up input a player taps with E — then locks out for 500 ms (matching the player observer's `cooldownMs`). Per-difficulty tuning lives in [src/game/ai/difficulty.ts](../src/game/ai/difficulty.ts): Casual disables pumps entirely (`pumpVyThreshold = Infinity` → branch short-circuits, no per-tick cost), Standard fires at vy ≥ 1.5 with a 0.5 pitch (mirrors the player observer's `minVy`), Hard fires at vy ≥ 0.6 with a stronger 0.8 pitch. 11 new pump-hint unit tests cover empty zones, OBB inside/outside, blend-radius soft edge, low-heightMult ignore, multi-zone union, and yawed OBB orientation; 2 new difficulty-tuning tests pin the per-tier pump values inside the player observer's vy band.
 - **Drowned Cup tracks build + export end-to-end — v1 lineup complete** (Phase E Sprint 3 of [docs/v1-asset-pipeline-plan.md](./v1-asset-pipeline-plan.md)). `pnpm seed:track-aqualand`, `pnpm seed:track-angkor-drowned`, `pnpm seed:track-liberty-drowned` each materialise a `tracks-src/<id>.blend` + `public/assets/tracks/<id>.glb` (2.7–8.5 MB) + `public/tracks/<id>.json` + hero/thumb JPGs. Sprint 3 was author-by-three-parallel-agents-in-worktrees, integrated sequentially. **Aqualand** is the special-case bespoke track — no biome template, the pool basin + lazy-river curbs + half-pipe slide + lifeguard towers + main concourse are inline `bmesh` primitives layered on top of `template-island` (the brief's "doubly drowned" waterpark), and the hero gameplay surface is the **Tsunami wave zone** (`surgePeriodS=30`, `surgeAmplitude=4.0` — periodic flood every 30 s over the lowest concourse, the wave-mastery pillar's most explicit appearance in v1). **Angkor Drowned** layers a library-linked `tower_cylinder_spiral` + 16 `carved_face_block` instances + jungle dressing onto template-alpine, with a `PROFILE_TUBE` helix anti-grav climb around the central spire. **Liberty Drowned** is the v1 finale — template-downtown (nyc) with a hand-blocked low-poly Liberty silhouette (pedestal + body cone + head + broken torch arm + tablet, ~121 v / 156 f, ~70 m total) inline via `bmesh`, library-linked `drowned_facade_nyc` Manhattan rooftops + a stretched `arch_ruin` reading as sagging Brooklyn Bridge, and **both anti-grav segments shipped**: the torch-arm Möbius via `PROFILE_BANKED_STRIP` with `bp.tilt` rising 0 → π for the half-twist, and the crown interior via a closed cyclic `PROFILE_TUBE` loop at head altitude. All 3 lint clean (0 errors / 0 warnings — cleanest sprint yet). Tracks-catalog tiles for the three flipped to `status: 'ship'` so the Drowned Cup unlocks via the existing `shipCupRaces('drowned')` plumbing. Trailer shots: **Liberty's silhouette** under `nyc_sunset` sky framed by the new `camera_hero` is v1's last shot.
 - **Open Sea + Continental Cup tracks build + export end-to-end** (Phase D Sprint 2 of [docs/v1-asset-pipeline-plan.md](./v1-asset-pipeline-plan.md)). `pnpm seed:track-the-maw`, `pnpm seed:track-shibuya-submerged`, `pnpm seed:track-kilauea-crown`, `pnpm seed:track-marina-bay-7`, `pnpm seed:track-doges-drift` each materialise a `tracks-src/<id>.blend` + `public/assets/tracks/<id>.glb` (2.5–8.5 MB) + `public/tracks/<id>.json` + hero/thumb JPGs. Sprint 2 was author-by-five-parallel-agents-in-worktrees, integrated sequentially because the local Blender install is single-tenant. Each seed mirrors the Reef Cup pattern: load template → reshape spline → build road → augment with library-linked landmarks + wave zones + (optional) anti-grav curve + pickups + boost pads + camera_hero → re-export GLB/JSON. All 5 pass `pnpm gen:tracks:validate` lint (0 errors); 4 carry advisory spline-clip warnings against downtown-template building footprints (polish item for the art-tuning pass). Hero set-pieces materialised: **The Maw**'s 3 arches over open Pacific with the directional-swell wave zone at the centre; **Shibuya**'s Cocoon Tower wall-ride; **Kilauea**'s banked caldera-rim anti-grav ribbon + library-linked lava waterfall; **Marina Bay 7**'s 5-crane gauntlet with out-of-phase swing periods + beached supertanker deck shortcut; **Doge's**' Campanile climb + Rialto under-thread + swinging bell.
 - **Reef Cup tracks build + export end-to-end** (Phase C Sprint 1 of [docs/v1-asset-pipeline-plan.md](./v1-asset-pipeline-plan.md)). `pnpm seed:track-sandbar`, `pnpm seed:track-south-beach-sunken`, `pnpm seed:track-hatteras-light`, `pnpm seed:track-cape-town-drift` each materialise a `tracks-src/<id>.blend` + `public/assets/tracks/<id>.glb` (~8.5 MB) + `public/tracks/<id>.json` + 1280×720 hero JPG + 320×180 thumb JPG. The seeds start from `template-island.blend`, reshape the AI spline, build the road + curbs, snap to terrain, lint, then run a per-track augment pass that drops landmark instances (linked from `tracks-src/landmarks-library.blend`), wave-zone empties, anti-grav curve sweep (Hatteras corkscrew), camera_hero, pickup spawns, and boost pads — finally re-exporting the GLB + manifest. Tracks are open-in-Blender-ready for art tuning; runtime track-select tiles activate once each is flipped to `status: 'ship'` in the catalog.

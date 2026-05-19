@@ -84,7 +84,17 @@ export function createBikeRenderSystem(
               tintExhaust: GHOST_TINT,
             }).root
           } else if (isPlayer) {
-            mesh = cloneLoadedBike(loaded, { tintExhaust: PLAYER_EXHAUST_COLOR }).root
+            // Player livery follows the variant's bodyColor so the
+            // 5-bike picker reads visibly distinct in race. Phase F
+            // of the asset-pipeline plan introduced Scout (orange) +
+            // Sparrow (yellow) — without this tint, Sparrow would
+            // render as the baked Racer orange since its GLB ships
+            // as a Racer copy until a dedicated Blender source lands.
+            const tintLivery = variantColor
+            mesh = cloneLoadedBike(loaded, {
+              tintExhaust: PLAYER_EXHAUST_COLOR,
+              ...(tintLivery !== undefined ? { tintLivery } : {}),
+            }).root
           } else {
             // M10.9 — remote-peer bikes (tagged PeerControlled) use a
             // deterministic peerId-based color slot so a peer who

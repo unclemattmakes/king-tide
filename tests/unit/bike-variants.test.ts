@@ -7,8 +7,14 @@ import {
 } from '../../src/game/bikes/variants'
 
 describe('bike variants', () => {
-  it('exposes exactly three archetypes', () => {
-    expect(Object.keys(BIKE_VARIANTS).sort()).toEqual(['cruiser', 'racer', 'stunt'])
+  it('exposes the v1 five-archetype lineup (Phase F of v1-asset-pipeline-plan.md)', () => {
+    expect(Object.keys(BIKE_VARIANTS).sort()).toEqual([
+      'cruiser',
+      'racer',
+      'scout',
+      'sparrow',
+      'stunt',
+    ])
   })
 
   it('every variant carries a full stats block (no undefined leaks)', () => {
@@ -47,10 +53,41 @@ describe('bike variants', () => {
     )
   })
 
-  it('resolveBikeVariant picks the named variant', () => {
+  it('scout (heavyweight) is heaviest with the softest hover spring — punishing pump timing', () => {
+    // Heaviest in the lineup so launch carries through chop.
+    const masses = Object.values(BIKE_VARIANTS).map((v) => v.stats.mass)
+    expect(BIKE_VARIANTS.scout.stats.mass).toBe(Math.max(...masses))
+    // Softer hover spring than the default — late reaction to crests
+    // is what makes the timing "punishing" per the design-targets.
+    expect(BIKE_VARIANTS.scout.stats.hoverSpring).toBeLessThan(
+      BIKE_VARIANTS.racer.stats.hoverSpring,
+    )
+    // Plows through chop — low surfaceFollow.
+    expect(BIKE_VARIANTS.scout.stats.surfaceFollow).toBeLessThan(
+      BIKE_VARIANTS.cruiser.stats.surfaceFollow,
+    )
+  })
+
+  it('sparrow (lightweight) is lightest with the stiffest hover spring — forgiving pump', () => {
+    // Lightest in the lineup so even small swells launch it cleanly.
+    const masses = Object.values(BIKE_VARIANTS).map((v) => v.stats.mass)
+    expect(BIKE_VARIANTS.sparrow.stats.mass).toBe(Math.min(...masses))
+    // Stiff hover spring + high surfaceFollow = forgiving pump per
+    // the v1-work-breakdown's "light = forgiving + further launch".
+    expect(BIKE_VARIANTS.sparrow.stats.hoverSpring).toBeGreaterThan(
+      BIKE_VARIANTS.racer.stats.hoverSpring,
+    )
+    expect(BIKE_VARIANTS.sparrow.stats.surfaceFollow).toBeGreaterThan(
+      BIKE_VARIANTS.stunt.stats.surfaceFollow,
+    )
+  })
+
+  it('resolveBikeVariant picks the named variant — all five archetypes round-trip', () => {
     expect(resolveBikeVariant('cruiser').id).toBe('cruiser')
     expect(resolveBikeVariant('stunt').id).toBe('stunt')
     expect(resolveBikeVariant('racer').id).toBe('racer')
+    expect(resolveBikeVariant('scout').id).toBe('scout')
+    expect(resolveBikeVariant('sparrow').id).toBe('sparrow')
   })
 
   it('resolveBikeVariant falls back to default for unknown / null / empty inputs', () => {

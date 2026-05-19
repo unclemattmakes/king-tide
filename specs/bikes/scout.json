@@ -4,7 +4,7 @@
   "displayName": "Scout",
   "physics": {
     "massKg": 220,
-    "topSpeedMps": 65,
+    "topSpeedMps": 32,
     "hoverHeight": 0.8
   },
   "appearance": {

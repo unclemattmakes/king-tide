@@ -44,6 +44,22 @@ export type AIControllerData = {
    * Positive = right of travel direction.
    */
   lineOffset: number
+  /** Surface vy threshold for AI pumps inside a hint zone, baked from
+   *  difficulty tuning at spawn (see `difficulty.ts`). `Infinity` =
+   *  disabled. The per-tick vy check in `aiControlSystem` short-circuits
+   *  on this so disabling pumps costs ~one branch. */
+  pumpVyThreshold: number
+  /** `intent.pitch` magnitude held while a pump is firing. */
+  pumpPitchStrength: number
+  /** Sim-seconds remaining before this AI can fire its next pump.
+   *  Decremented by `phys.fixedDt` each tick. The 500 ms cooldown
+   *  mirrors the player wave-pump observer's `cooldownMs` — back-to-
+   *  back wavelet hops shouldn't chain pumps. */
+  pumpCooldownS: number
+  /** Sim-seconds remaining in the current pump's hold window. Hover.ts
+   *  needs sustained `intent.pitch` to integrate a meaningful nose-up
+   *  torque; a single-tick spike would barely move the chassis. */
+  pumpHoldS: number
 }
 export const AIControllerStore = createStore<AIControllerData>('AIController')
 
@@ -63,6 +79,10 @@ export function defaultAIController(
     rubberBandBoostCap: tuning.rubberBandBoostCap,
     rubberBandPenaltyFloor: tuning.rubberBandPenaltyFloor,
     lineOffset: opts?.lineOffset ?? 0,
+    pumpVyThreshold: tuning.pumpVyThreshold,
+    pumpPitchStrength: tuning.pumpPitchStrength,
+    pumpCooldownS: 0,
+    pumpHoldS: 0,
   }
 }
 

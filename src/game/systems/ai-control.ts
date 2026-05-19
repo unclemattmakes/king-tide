@@ -2,6 +2,8 @@ import { query } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { quatRotate } from '@/engine/sim/physics/vec'
+import { sampleSurface, type WaveFieldState } from '@/engine/sim/water/wave-field'
+import { buildPumpHints, hasAnyHints } from '@/game/ai/pump-hints'
 import { ControlIntent, ControlIntentStore, RBHandle, RBHandleStore } from '@/game/components'
 import { AIController, AIControllerStore, AITag } from '@/game/components/ai'
 import {
@@ -52,9 +54,52 @@ function splineIndexFor(track: Track): SplineIndex {
   return idx
 }
 
-export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track): void {
+// Per-track AI pump-hint cache: one boolean array per AI spline marking
+// indices that lie inside a heavy wave zone. Built lazily on first
+// access. Keyed on `Track` so it GC's alongside the spline cache when
+// the active track changes — and so re-loading the same track id is a
+// hit, not a re-walk.
+type PumpHintCache = { hintsBySplineId: Map<string, boolean[]>; anyHints: boolean }
+const PUMP_HINTS = new WeakMap<Track, PumpHintCache>()
+function pumpHintsFor(track: Track): PumpHintCache {
+  let cache = PUMP_HINTS.get(track)
+  if (!cache) {
+    cache = { hintsBySplineId: new Map(), anyHints: false }
+    for (const s of track.aiSplines) {
+      const hints = buildPumpHints({ spline: s, zones: track.waveZones })
+      cache.hintsBySplineId.set(s.id, hints)
+      if (!cache.anyHints && hasAnyHints(hints)) cache.anyHints = true
+    }
+    PUMP_HINTS.set(track, cache)
+  }
+  return cache
+}
+
+/** Sim-seconds the AI holds `intent.pitch` once a pump fires. Long
+ *  enough that hover.ts's pitch torque (PITCH_TORQUE_ACCEL · m · dt
+ *  per tick) integrates into a clear nose-up rotation across the burst
+ *  window; short enough that the AI is back on its racing line within
+ *  ~5 ticks. Pairs with `PUMP_COOLDOWN_S` below. */
+const PUMP_HOLD_S = 0.1
+/** Sim-seconds between pump fires. Matches the player wave-pump
+ *  observer's `cooldownMs` (500 ms) so a heavy-swell hint zone doesn't
+ *  chain pumps faster than the player ever could. */
+const PUMP_COOLDOWN_S = 0.5
+/** Speed-fraction gate for both arming a pump and sustaining it. Same
+ *  floor as the player observer's `minSpeedFrac` — a stopped or
+ *  cornering-hard AI isn't "intentionally riding the swell". */
+const PUMP_MIN_SPEED_FRAC = 0.45
+
+export function aiControlSystem(
+  sim: SimWorld,
+  phys: PhysicsWorld,
+  track: Track,
+  waveField: WaveFieldState,
+): void {
   const eids = query(sim, [AITag, AIController, RBHandle, ControlIntent])
   const splines = splineIndexFor(track)
+  const dt = phys.fixedDt
+  const pumpCache = pumpHintsFor(track)
   for (const eid of eids) {
     const ai = AIControllerStore.must(eid)
     const { handle } = RBHandleStore.must(eid)
@@ -164,14 +209,60 @@ export function aiControlSystem(sim: SimWorld, phys: PhysicsWorld, track: Track)
         ? Math.min(0.9, (overshoot - BRAKE_TRIGGER_MARGIN) * 0.18)
         : 0
 
-    AIControllerStore.set(eid, { ...ai, lastClosestIndex: bestIdx })
+    // Wave-pump action (Phase A gap 7). The intent.pitch is the same
+    // input the player taps with E to launch off a crest. AI semantics:
+    //
+    //   1. Holding from a prior tick — keep `intent.pitch` lit until the
+    //      burst window expires; decrement both timers.
+    //   2. Cooldown ticking down — no new pump until it hits zero.
+    //   3. Armed + on a hint index + speed high enough + surface rising
+    //      hard enough — fire a fresh pump: hold for PUMP_HOLD_S, then
+    //      lock out for PUMP_COOLDOWN_S.
+    //
+    // Casual AI's `pumpVyThreshold = Infinity` collapses branch 3 to
+    // false in the inequality check, so the difficulty acts on per-tick
+    // cost without branching on the difficulty itself here.
+    let pumpPitch = 0
+    let nextPumpHoldS = Math.max(0, ai.pumpHoldS - dt)
+    let nextPumpCooldownS = Math.max(0, ai.pumpCooldownS - dt)
+    const pumpHints = pumpCache.hintsBySplineId.get(ai.splineId)
+    if (ai.pumpHoldS > 0) {
+      // Sustaining a pump that fired on a prior tick.
+      pumpPitch = ai.pumpPitchStrength
+    } else if (
+      pumpCache.anyHints &&
+      nextPumpCooldownS <= 0 &&
+      ai.pumpVyThreshold !== Number.POSITIVE_INFINITY &&
+      pumpHints?.[bestIdx] === true
+    ) {
+      // Pump-eligible — sample the live surface vy under the bike.
+      // sampleSurface is the same call buoyancy uses in hover.ts, so the
+      // AI's reading is identical to what the player feels.
+      const aiSpeedFrac =
+        ai.baselineTopSpeedFactor > 0 ? speedHoriz / (ai.baselineTopSpeedFactor * 30) : 0
+      if (aiSpeedFrac >= PUMP_MIN_SPEED_FRAC) {
+        const { vy } = sampleSurface(waveField, t.x, t.z)
+        if (vy >= ai.pumpVyThreshold) {
+          pumpPitch = ai.pumpPitchStrength
+          nextPumpHoldS = PUMP_HOLD_S
+          nextPumpCooldownS = PUMP_COOLDOWN_S
+        }
+      }
+    }
+
+    AIControllerStore.set(eid, {
+      ...ai,
+      lastClosestIndex: bestIdx,
+      pumpHoldS: nextPumpHoldS,
+      pumpCooldownS: nextPumpCooldownS,
+    })
     ControlIntentStore.set(eid, {
       throttle,
       steer,
       brake,
       fire: false,
       boost: false,
-      pitch: 0,
+      pitch: pumpPitch,
     })
   }
 }

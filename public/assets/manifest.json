@@ -59,7 +59,7 @@
       "specPath": "specs/bikes/scout.json",
       "physics": {
         "massKg": 220,
-        "topSpeedMps": 65,
+        "topSpeedMps": 32,
         "hoverHeight": 0.8
       },
       "appearance": {
@@ -67,6 +67,23 @@
         "metalColor": "#222428",
         "glowColor": "#5cf2ff",
         "glowIntensity": 1.4
+      }
+    },
+    {
+      "id": "sparrow",
+      "displayName": "Sparrow",
+      "url": "/assets/bikes/sparrow.glb",
+      "specPath": "specs/bikes/sparrow.json",
+      "physics": {
+        "massKg": 80,
+        "topSpeedMps": 26,
+        "hoverHeight": 1.2
+      },
+      "appearance": {
+        "liveryColor": "#ddbb44",
+        "metalColor": "#1c1f1e",
+        "glowColor": "#fff088",
+        "glowIntensity": 1.5
       }
     },
     {
