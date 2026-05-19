@@ -108,6 +108,12 @@ const STYLE = `
 #touch-ui { position: fixed; inset: 0; pointer-events: none; z-index: 100;
   touch-action: none; -webkit-user-select: none; user-select: none;
   -webkit-tap-highlight-color: transparent; }
+/* When a full-screen overlay (cold-boot menu, pause, finish, cup results,
+   settings) is up, suppress the in-race touch UI so the joystick / buttons
+   don't sit on top of menu cards. */
+body.menu-active #touch-ui,
+body.paused-for-menu #touch-ui,
+body.touch-ui-hidden #touch-ui { display: none; }
 #touch-ui .stick {
   position: absolute; bottom: max(28px, env(safe-area-inset-bottom));
   left: max(28px, env(safe-area-inset-left));
@@ -143,6 +149,30 @@ const STYLE = `
 #touch-ui .btn.brake { background: rgba(255,180,40,0.30); border-color: rgba(255,220,120,0.7); }
 #touch-ui .btn.thrust { background: rgba(120,220,120,0.34); border-color: rgba(180,255,180,0.75); }
 #touch-ui .btn.active { background: rgba(255,255,255,0.45); }
+/* MENU button — anchored top-left, well clear of the centered race timer
+   and bottom-corner stick / button column. Players tap it to open the
+   pause overlay (same as keyboard Esc / gamepad Start). */
+#touch-ui .menu-btn {
+  position: absolute; top: max(10px, env(safe-area-inset-top));
+  left: max(10px, env(safe-area-inset-left));
+  min-width: 56px; height: 40px; padding: 0 12px;
+  border-radius: 22px;
+  background: rgba(5, 10, 20, 0.72);
+  border: 1px solid rgba(255,255,255,0.28);
+  color: #f4f8ff;
+  font: bold 12px ui-monospace, monospace; letter-spacing: 1.5px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  pointer-events: auto; touch-action: manipulation; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#touch-ui .menu-btn .glyph {
+  display: inline-flex; flex-direction: column; gap: 3px;
+}
+#touch-ui .menu-btn .glyph span {
+  display: block; width: 14px; height: 2px;
+  background: currentColor; border-radius: 1px;
+}
+#touch-ui .menu-btn.active { background: rgba(77,214,255,0.22); border-color: rgba(77,214,255,0.7); }
 `
 
 function updateStickFromPoint(clientX: number, clientY: number) {
@@ -239,6 +269,56 @@ function makeButton(cls: string, label: string, key: ButtonKey): HTMLDivElement 
   return b
 }
 
+/**
+ * Custom event dispatched on `window` when the player taps the on-screen
+ * MENU button. Whoever owns the pause-menu state (`installControls`) wires
+ * the listener — kept decoupled so this module doesn't import controls/sim.
+ */
+export const TOUCH_MENU_EVENT = 'hb:touch-menu'
+
+function makeMenuButton(): HTMLDivElement {
+  const b = document.createElement('div')
+  b.className = 'menu-btn'
+  b.setAttribute('role', 'button')
+  b.setAttribute('aria-label', 'Open pause menu')
+  const glyph = document.createElement('span')
+  glyph.className = 'glyph'
+  glyph.innerHTML = '<span></span><span></span><span></span>'
+  const label = document.createElement('span')
+  label.textContent = 'MENU'
+  b.appendChild(glyph)
+  b.appendChild(label)
+  let pressed = false
+  const press = (e: Event) => {
+    e.preventDefault()
+    pressed = true
+    b.classList.add('active')
+  }
+  const release = (e: Event) => {
+    if (!pressed) return
+    pressed = false
+    b.classList.remove('active')
+    // Only fire on a clean release over the button. `touchend` always
+    // counts (the OS already handles cancel separately); for mouse we
+    // gate on the original element so a drag-off doesn't accidentally
+    // open the menu.
+    if (e.type === 'touchend' || e.type === 'mouseup') {
+      window.dispatchEvent(new CustomEvent(TOUCH_MENU_EVENT))
+    }
+  }
+  const cancel = () => {
+    pressed = false
+    b.classList.remove('active')
+  }
+  b.addEventListener('touchstart', press, { passive: false })
+  b.addEventListener('touchend', release)
+  b.addEventListener('touchcancel', cancel)
+  b.addEventListener('mousedown', press)
+  b.addEventListener('mouseup', release)
+  b.addEventListener('mouseleave', cancel)
+  return b
+}
+
 export function installTouch(): void {
   if (installed) return
   if (typeof window === 'undefined' || typeof document === 'undefined') return
@@ -266,6 +346,8 @@ export function installTouch(): void {
   buttons.appendChild(makeButton('brake', 'BRAKE', 'brake'))
   buttons.appendChild(makeButton('thrust', 'THRUST', 'thrust'))
   ui.appendChild(buttons)
+
+  ui.appendChild(makeMenuButton())
 
   document.body.appendChild(ui)
   installStickHandlers(stickEl)
