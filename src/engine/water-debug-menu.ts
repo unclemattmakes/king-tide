@@ -138,11 +138,7 @@ const SLIDERS: SliderDef[] = [
     format: (n) => `${n.toFixed(0)}°`,
     hint: 'Rotation of the Gerstner horizontal-displacement vector relative to wave direction. 0° = along wave (standard, sharpens crests in direction of travel) · 90° = across wave (sharpens along the crest-line axis)',
   },
-  // SoT-inspired fragment shading sliders. FFT-path sliders
-  // (choppiness, sea state, wind speed/direction/cutoff, foam
-  // persistence) live in code under `?waves=spectrum` and are
-  // re-evaluated only when that path is in use — no menu UI for
-  // them on the default analytic Gerstner path.
+  // SoT-inspired fragment shading sliders.
   {
     key: 'bodyAbsorption',
     label: 'Body absorption',

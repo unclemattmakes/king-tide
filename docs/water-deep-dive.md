@@ -12,7 +12,7 @@ Lighting: directional sun light animated on a 360s loop (M9.34 — elevation 30.
 
 Sim: vertical-only Gerstner (unchanged — the simpler formulation with no inverse solve required), multi-probe buoyancy (4 sample points around the bike's footprint, pitch/roll from differential heights), unchanged underwater dive + buoyancy + asymmetric drag.
 
-Debug knobs: `?water=classic` (full upgrade off — original colors, vertical-only Gerstner, original roughness, original foam, no sun-glow, no foam history), `?wire=1` (orthogonal wireframe), `?steep=N` (0..1.5), `__waterSteepness(n)` console hook.
+Debug knobs: `?wire=1` (wireframe), `?steep=N` (0..1.5 steepness override), `?reflect=0` (disable planar reflection for perf tests), `?aa=off` (drop MSAA so the WebGPU scene-depth copy can run and shoreline foam fires from screen-space depth), `__waterSteepness(n)` and `__waterDetail(n)` console hooks. The full FFT path and the `?water=classic` A/B fallback were removed when we settled on analytic Gerstner + SoT-style fragment shading as the only path.
 
 ## Why these particular changes
 
@@ -64,7 +64,7 @@ The reference is Sea of Thieves. Rare's published pipeline (SIGGRAPH 2018 *The T
 | Shoreline lapping range | `foamNoiseRaw - 0.5 ·  0.8` offset | ±0.4m | breathes the foam edge in/out for the surf-lapping effect |
 | Sun cycle period | `SUN_CYCLE_SECONDS` in `main.ts` | 360s | smaller = more visible mid-race drift; larger = cinematic |
 | Sun elevation range | `50 ± 20` degrees in main.ts | 30..70° | low = warmer/longer "sunset" feel; high = brighter overhead |
-| Chop amplitudes | `defaultWaves()` chop entries | 0.65 / 0.44 / 0.29 / 0.16 | scale up for stormier, down for calmer racing surface |
+| Chop amplitudes | `defaultWaves()` chop entries | 0.22 / 0.16 / 0.10 / 0.06 | scale up for stormier, down for calmer racing surface. Tightened in May-2026 along with the swell directions to give the bike a coherent swell train to ride instead of confused seas |
 | Wake scallop wavelength | `WAKE_TRANS_K` | 0.7 rad/m (~9m) | smaller K = longer scallops, larger K = tighter ripple. Watch the unit-test sample point (sin(K·10) > 0 at t=0 keeps tests passing) |
 | Wake scallop drift speed | `WAKE_TRANS_OMEGA` | 1.0 rad/s (~6.3s period) | how fast the scallop pattern scrolls backward in the bike's frame |
 | Wake scallop strength | `WAKE_TRANS_AMP` | 0.3 | wake amplitude varies between (1−amp)× and (1+amp)× along each scallop period; >0.3 risks unit-test threshold |
@@ -73,6 +73,6 @@ The reference is Sea of Thieves. Rare's published pipeline (SIGGRAPH 2018 *The T
 | Reflection distortion | `0.02 + 0.6 / (camDist + 2)` | gentle close, mirror-flat at horizon | base 0.02 sets minimum distortion; the inverse-distance term makes near samples distort while horizon stays mirror-clear |
 | Detail-cascade tile sizes | `DETAIL_A_TILE`, `DETAIL_B_TILE` in `water.ts` | 6 m / 1.5 m | world-XZ wavelength of each cascade. Tighten (smaller) for sharper micro-chop; widen for larger, gentler ripples |
 | Detail-cascade slope scales | `DETAIL_A_SCALE`, `DETAIL_B_SCALE` in `water.ts` | 3.0 / 0.9 | multiplied by the decoded (±0.5) packed slope and divided by tile size to produce world-space dy/dx. Peak contribution ≈ `0.5 · SCALE / TILE`; combined across both cascades should stay well under the analytic Gerstner peaks (~1.0) to keep big-wave silhouettes intact |
-| Detail-cascade strength | `detailStrengthUniform` (debug menu slider, URL `?detail=0`, console `__waterDetail(n)`) | 1.0 | global multiplier on both cascades. 0 = bypass detail entirely (analytic-Gerstner only, for A/B); 1 = default chop; 2 = punchy / overdriven for tuning. Affects only visuals, not buoyancy — the CPU sampler doesn't know about detail normals |
+| Detail-cascade strength | `detailStrengthUniform` (debug menu slider, console `__waterDetail(n)`) | 0.5 | global multiplier on both cascades. 0 = bypass detail entirely (analytic-Gerstner only, for A/B); 1 = punchy chop; 2 = overdriven for tuning. Affects only visuals, not buoyancy — the CPU sampler doesn't know about detail normals |
 | Analytic-slope flatten window | `smoothstep(25, 140, camDist)` in `water.ts` | (25, 140) m | distance-fades the analytic Gerstner slopes toward zero to suppress sub-pixel specular glints. Detail cascades are NOT included — their mip filtering already handles LOD. Pull narrower (e.g. 20, 110) if horizon water still aliases on a particular monitor |
 | Toksvig roughness boost | `smoothstep(0.05, 0.5, length(fwidth(normalNode))).mul(0.18)` in `water.ts` | up to +0.18 | screen-space normal-variance specular AA. Raises roughness where the per-pixel normal swings fast, widening the lobe to defeat single-pixel highlight flicker. Higher cap = more aggressive AA at the cost of crispness; lower = sharper highlights with more risk of sparkle aliasing on grazing wave crests |

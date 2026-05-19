@@ -17,6 +17,7 @@ import { installCameraLookInput } from './engine/input/camera-look'
 import { bindLazyMenuButton } from './engine/lazy-menu'
 import { isHostFor } from './engine/net/host-election'
 import { loadPlayerSettings, playerSettings } from './engine/player-settings'
+import { installConsoleTrap } from './engine/qa/console-trap'
 import { createAntiGravDebugRenderer } from './engine/render/anti-grav-debug'
 import { createChaseCamera } from './engine/render/camera'
 import { applyCloudShadowsToScene, buildCloudShadowMultiplier } from './engine/render/cloud-shadows'
@@ -37,7 +38,6 @@ import { createRaceHud } from './engine/render/race-hud'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
 import { applyPixelRatio, setRenderer } from './engine/render/renderer-service'
-import { installConsoleTrap } from './engine/qa/console-trap'
 import { createRiderRenderSystem } from './engine/render/rider-systems'
 import { createScene } from './engine/render/scene'
 import { beaufortToAmplitudeScale, createSkySystem } from './engine/render/sky'
@@ -51,13 +51,7 @@ import { createReplayRecorder, type ReplayRecorder } from './engine/replay/recor
 import { getBestLap, recordLapTime } from './engine/save-state'
 import { createSimWorld } from './engine/sim/ecs/world'
 import { createPhysicsWorld } from './engine/sim/physics/rapier'
-import {
-  createSpectrumWaveField,
-  createWaveField,
-  defaultSpectrumParams,
-  defaultWaves,
-  setWaveZones,
-} from './engine/sim/water/wave-field'
+import { createWaveField, defaultWaves, setWaveZones } from './engine/sim/water/wave-field'
 import { applyDeckProfile, detectSteamDeck } from './engine/steam-deck'
 import { applyStoredWaterTuning } from './engine/water-debug-storage'
 import { loadBike } from './game/assets/bike-loader'
@@ -165,24 +159,11 @@ async function boot() {
   const sim = createSimWorld()
   const chase = createChaseCamera(camera)
 
-  // Wave field selection. Default is the hand-tuned 6-wave analytic
-  // Gerstner setup — same closed-form formula on CPU buoyancy and
-  // GPU vertex shader, so bike float math tracks the rendered
-  // surface to within float precision. The Phillips-spectrum field
-  // (FFT path) is kept behind `?waves=spectrum` (or the legacy
-  // `?waves=fft` alias) for A/B; it gives more wavelength variety
-  // but pays a ~1–2 ms GPU FFT dispatch cost AND has a render-vs-
-  // buoyancy gap (GPU walks all 32 modes via
-  // `spectrumModesToGerstnerShape`, CPU walks top-K). Reverted to
-  // gerstner default after the SoT-style shading pass — the
-  // visible-quality win came almost entirely from fragment-side
-  // techniques (Beer-Lambert, sun disc, anisotropic streak, bubble
-  // foam, height whitecaps) which work identically on both paths.
-  const wavesParam = new URLSearchParams(window.location.search).get('waves')
-  const useSpectrum = wavesParam === 'spectrum' || wavesParam === 'fft'
-  const waveField = useSpectrum
-    ? createSpectrumWaveField(defaultSpectrumParams())
-    : createWaveField(defaultWaves())
+  // Wave field — hand-tuned 6-wave analytic Gerstner sum. CPU buoyancy
+  // and the GPU vertex shader evaluate the same closed-form formula, so
+  // bike float math tracks the rendered surface to within float
+  // precision.
+  const waveField = createWaveField(defaultWaves())
   // Camera-locked water: the mesh follows the camera XZ so its dense
   // vertex region always covers the visible patch. Size shrinks from the
   // legacy 800 m world plane to 240 m centered on the camera (= 120 m
@@ -334,16 +315,7 @@ async function boot() {
   const beaufort = track.sky?.seaStateBeaufort
   if (beaufort !== undefined) {
     const scale = beaufortToAmplitudeScale(beaufort)
-    if (waveField.kind === 'gerstner') {
-      for (const w of waveField.waves) w.amplitude *= scale
-    }
-    // Spectrum-mode tracks: scale every mode's complex amplitude.
-    else {
-      for (const mode of waveField.spectrum) {
-        mode.aRe *= scale
-        mode.aIm *= scale
-      }
-    }
+    for (const w of waveField.waves) w.amplitude *= scale
   }
   // Per-track wave-zone overrides — push the track's `waveZones` into
   // the wave field so `sampleHeight`/`sampleSurface` apply the per-zone
