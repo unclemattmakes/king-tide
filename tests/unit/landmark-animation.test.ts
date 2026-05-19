@@ -4,6 +4,7 @@ import {
   computeArmAngleRad,
   createLandmarkAnimation,
   findInstanceSwingExtras,
+  type LandmarkAnimationOptions,
   mergeSwingConfig,
   phaseFromWorldPos,
   readSwingExtras,
@@ -501,5 +502,240 @@ describe('createLandmarkAnimation — scene traversal + tick', () => {
     root2.add(makeDogesBell().inst)
     anim.registerFromScene(root2)
     expect(anim.arms()).toHaveLength(1)
+  })
+})
+
+// ────────────────────────────────────────────────────────────────────
+// Kinematic-collider integration: stub the PhysicsWorld with mock
+// objects that record calls so we can assert (a) the right number of
+// kinematic bodies get built, (b) each tick pushes a fresh
+// setNextKinematic* pair, (c) toggle-off issues one final sync to rest
+// then stops calling, (d) reset releases bodies.
+//
+// We don't use a real Rapier instance here because spinning up the
+// WASM init adds 50 ms per test and the only thing this test cares
+// about is the call shape against the PhysicsWorld interface.
+// ────────────────────────────────────────────────────────────────────
+
+type FakeBody = {
+  id: number
+  translations: Array<{ x: number; y: number; z: number }>
+  rotations: Array<{ x: number; y: number; z: number; w: number }>
+}
+
+function makeFakePhys() {
+  const bodies: FakeBody[] = []
+  const removed: FakeBody[] = []
+  const colliders: Array<{ bodyId: number; vertCount: number; triCount: number }> = []
+  let nextId = 1
+
+  const fluentDesc = {
+    _translation: { x: 0, y: 0, z: 0 },
+    _rotation: { x: 0, y: 0, z: 0, w: 1 },
+    setTranslation(x: number, y: number, z: number) {
+      this._translation = { x, y, z }
+      return this
+    },
+    setRotation(q: { x: number; y: number; z: number; w: number }) {
+      this._rotation = { ...q }
+      return this
+    },
+  }
+
+  const colliderDesc = {
+    _verts: new Float32Array(),
+    _indices: new Uint32Array(),
+    setFriction(_: number) {
+      return this
+    },
+    setRestitution(_: number) {
+      return this
+    },
+  }
+
+  const rapier = {
+    RigidBodyDesc: {
+      kinematicPositionBased: () => {
+        // Fresh fluent state for each call.
+        const d = Object.assign({}, fluentDesc)
+        d.setTranslation = fluentDesc.setTranslation.bind(d)
+        d.setRotation = fluentDesc.setRotation.bind(d)
+        return d
+      },
+    },
+    ColliderDesc: {
+      trimesh: (verts: Float32Array, indices: Uint32Array) => {
+        const d = Object.assign({}, colliderDesc, { _verts: verts, _indices: indices })
+        d.setFriction = colliderDesc.setFriction.bind(d)
+        d.setRestitution = colliderDesc.setRestitution.bind(d)
+        return d
+      },
+    },
+  }
+
+  const world = {
+    createRigidBody: (_desc: unknown) => {
+      const body: FakeBody = { id: nextId++, translations: [], rotations: [] }
+      bodies.push(body)
+      // Return a body proxy that records setNextKinematic* calls so the
+      // tick path can be inspected. Each landmark arm gets one of these.
+      return {
+        _body: body,
+        setNextKinematicTranslation(t: { x: number; y: number; z: number }) {
+          body.translations.push({ ...t })
+        },
+        setNextKinematicRotation(r: { x: number; y: number; z: number; w: number }) {
+          body.rotations.push({ ...r })
+        },
+      }
+    },
+    createCollider: (
+      desc: { _verts: Float32Array; _indices: Uint32Array },
+      parent: { _body: FakeBody },
+    ) => {
+      colliders.push({
+        bodyId: parent._body.id,
+        vertCount: desc._verts.length / 3,
+        triCount: desc._indices.length / 3,
+      })
+    },
+    removeRigidBody: (rb: { _body: FakeBody }) => {
+      removed.push(rb._body)
+    },
+  }
+
+  return {
+    phys: { rapier, world } as unknown as NonNullable<LandmarkAnimationOptions['phys']>,
+    bodies,
+    removed,
+    colliders,
+  }
+}
+
+/** Build a Marina Bay crane scene with actual primitive Mesh
+ *  geometry on the arm so the kinematic-body path has something to
+ *  attach colliders to. */
+function makeCraneWithGeometry(
+  name: string,
+  pos: [number, number, number],
+  periodOverride: number,
+): { inst: THREE.Object3D; arm: THREE.Object3D; prim: THREE.Mesh } {
+  const { inst, arm } = makeMarinaBayCrane(name, pos, periodOverride)
+  const geo = new THREE.BoxGeometry(0.3, 16, 0.3) // long thin arm-like volume
+  const mat = new THREE.MeshBasicMaterial()
+  const prim = new THREE.Mesh(geo, mat)
+  prim.name = `${name}_arm_5` // mirrors Three's primitive auto-naming
+  arm.add(prim)
+  return { inst, arm, prim }
+}
+
+describe('createLandmarkAnimation — kinematic collider integration', () => {
+  it('builds no kinematic bodies when no phys is passed', () => {
+    const root = new THREE.Group()
+    const { inst } = makeCraneWithGeometry('crane', [0, 0, 0], 4.0)
+    root.add(inst)
+    const anim = createLandmarkAnimation()
+    anim.registerFromScene(root)
+    expect(anim.arms()).toHaveLength(1)
+    expect(anim.arms()[0]?.hasBody).toBe(false)
+  })
+
+  it('builds one kinematic body per arm + one trimesh collider per primitive when phys is passed', () => {
+    const root = new THREE.Group()
+    for (let i = 0; i < 5; i++) {
+      root.add(makeCraneWithGeometry(`crane_${i}`, [0, 0, i * 25], 3.0 + i * 0.2).inst)
+    }
+    const fake = makeFakePhys()
+    const anim = createLandmarkAnimation({ phys: fake.phys! })
+    anim.registerFromScene(root)
+    expect(anim.arms()).toHaveLength(5)
+    expect(fake.bodies).toHaveLength(5) // one body per arm
+    expect(fake.colliders).toHaveLength(5) // one trimesh per primitive child (each crane has 1)
+    // BoxGeometry has 24 verts (Three reuses vertex slots per face) and
+    // 12 triangles. We doubled the indices for two-sided trimesh — so
+    // 24 triangles in the collider.
+    expect(fake.colliders[0]?.triCount).toBe(24)
+    // Each collider attached to a different body.
+    const bodyIds = new Set(fake.colliders.map((c) => c.bodyId))
+    expect(bodyIds.size).toBe(5)
+  })
+
+  it('tick pushes setNextKinematic* on every enabled tick', () => {
+    const root = new THREE.Group()
+    const { inst } = makeCraneWithGeometry('crane', [0, 0, 0], 4.0)
+    root.add(inst)
+    const fake = makeFakePhys()
+    const anim = createLandmarkAnimation({ phys: fake.phys! })
+    anim.registerFromScene(root)
+    const body = fake.bodies[0]
+    if (!body) throw new Error('expected one body')
+    // Each tick records one translation + one rotation.
+    anim.tick(0, true)
+    expect(body.translations).toHaveLength(1)
+    expect(body.rotations).toHaveLength(1)
+    anim.tick(0.5, true)
+    anim.tick(1.0, true)
+    expect(body.translations).toHaveLength(3)
+    expect(body.rotations).toHaveLength(3)
+  })
+
+  it('disabled tick syncs to rest once, then stops issuing kinematic updates', () => {
+    const root = new THREE.Group()
+    const { inst, arm } = makeCraneWithGeometry('crane', [0, 0, 0], 4.0)
+    root.add(inst)
+    const fake = makeFakePhys()
+    const anim = createLandmarkAnimation({ phys: fake.phys! })
+    anim.registerFromScene(root)
+    const body = fake.bodies[0]
+    if (!body) throw new Error('expected one body')
+
+    // Two enabled ticks — body picks up two updates and ends at peak.
+    anim.tick(0, true)
+    anim.tick(1.0, true)
+    expect(body.translations).toHaveLength(2)
+    const peakArmZ = arm.rotation.z
+    expect(Math.abs(peakArmZ)).toBeGreaterThan(0.1)
+
+    // First disabled tick — issues ONE final sync to rest, then no
+    // more updates on subsequent disabled ticks.
+    anim.tick(1.5, false)
+    expect(body.translations).toHaveLength(3)
+    expect(arm.rotation.z).toBe(0)
+    anim.tick(2.0, false)
+    anim.tick(2.5, false)
+    expect(body.translations).toHaveLength(3) // unchanged
+  })
+
+  it('reset releases every kinematic body through phys.world.removeRigidBody', () => {
+    const root = new THREE.Group()
+    root.add(makeCraneWithGeometry('a', [0, 0, 0], 4.0).inst)
+    root.add(makeCraneWithGeometry('b', [25, 0, 0], 4.0).inst)
+    root.add(makeCraneWithGeometry('c', [50, 0, 0], 4.0).inst)
+    const fake = makeFakePhys()
+    const anim = createLandmarkAnimation({ phys: fake.phys! })
+    anim.registerFromScene(root)
+    expect(fake.bodies).toHaveLength(3)
+    expect(fake.removed).toHaveLength(0)
+    anim.reset()
+    expect(fake.removed).toHaveLength(3)
+    expect(anim.arms()).toHaveLength(0)
+  })
+
+  it('re-registering releases prior bodies before building new ones', () => {
+    const root1 = new THREE.Group()
+    root1.add(makeCraneWithGeometry('a', [0, 0, 0], 4.0).inst)
+    root1.add(makeCraneWithGeometry('b', [25, 0, 0], 4.0).inst)
+    const fake = makeFakePhys()
+    const anim = createLandmarkAnimation({ phys: fake.phys! })
+    anim.registerFromScene(root1)
+    expect(fake.bodies).toHaveLength(2)
+    expect(fake.removed).toHaveLength(0)
+
+    const root2 = new THREE.Group()
+    root2.add(makeCraneWithGeometry('c', [0, 0, 0], 4.0).inst)
+    anim.registerFromScene(root2)
+    // Prior two bodies released, one new body built.
+    expect(fake.removed).toHaveLength(2)
+    expect(fake.bodies).toHaveLength(3) // cumulative create count: 2 + 1
   })
 })

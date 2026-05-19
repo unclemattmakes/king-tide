@@ -27,20 +27,27 @@
  * derivation is purely a function of the world XYZ, so two distinct
  * spawn positions yield distinct phases reproducibly.
  *
- * Render-only — never writes sim state. The runtime drives the arm's
- * local rotation each frame from ``elapsedSeconds since boot``; replay
- * recording / multiplayer state sync don't see this rotation as a sim
- * variable, so determinism is preserved.
+ * Render-only for the visual mesh; the kinematic-position rigid body
+ * carrying the arm's trimesh collider is updated through the same
+ * ``setNextKinematicTranslation`` / ``setNextKinematicRotation`` path
+ * the multiplayer remote-bike system uses (see
+ * ``src/game/systems/apply-snapshot.ts``). Replay recording / MP state
+ * sync don't see the rotation as a sim variable — the arm's pose is a
+ * pure function of ``elapsedSeconds since boot``, so two peers tick to
+ * the same wave even without snapshots.
  *
- * Static-collider caveat: the arm trimesh collider was baked at GLB
- * load time against the rest pose. Animating the visual mesh does not
- * follow with a kinematic body update, so the bike can still pass
- * through a swinging arm geometrically. Track-themes intentionally
- * tunes the gauntlet timing as a visual rhythm puzzle, not a physical
- * hazard — moving to kinematic colliders is a follow-up.
+ * Collider integration: ``glb-track.attachTrackColliders`` skips any
+ * mesh whose ancestor chain carries ``landmark_id = "mechanical_rig_arm"``
+ * (see ``isUnderMechanicalRigArm``). This module then walks the arm
+ * subtree and attaches an arm-local-space trimesh collider per primitive
+ * mesh onto a single kinematic body. The body's pose tracks the visual
+ * arm each tick, so the bike physically interacts with the swinging
+ * gauntlet.
  */
 
+import type RAPIER from '@dimforge/rapier3d-compat'
 import * as THREE from 'three'
+import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 
 const TWO_PI = Math.PI * 2
 const DEG_TO_RAD = Math.PI / 180
@@ -80,6 +87,11 @@ type AnimatedArm = {
    *  ``rest + delta`` so toggling animation off can reset the arm
    *  back to ``rest`` cleanly. */
   restAngle: number
+  /** Kinematic-position rigid body whose trimesh collider follows the
+   *  arm's world pose each tick. ``null`` when the system was built
+   *  without a ``phys`` handle (tests / edit mode) — the visual swing
+   *  still runs in that case, the bike just doesn't collide. */
+  body: RAPIER.RigidBody | null
 }
 
 /**
@@ -231,6 +243,148 @@ function applyArmAngle(
   else arm.rotation.z = angle
 }
 
+/**
+ * Build a kinematic-position rigid body for an arm subtree and attach
+ * a trimesh collider per primitive mesh in arm-local space.
+ *
+ * The arm node itself is an Object3D (Three's GLTFLoader emits an empty
+ * group for the glTF node, with one Mesh child per primitive). We bake
+ * each primitive's local-relative-to-arm transform into its vertex
+ * positions so the colliders sit at the arm's local origin in
+ * collider-space; Rapier then re-applies the body's world pose every
+ * step. The result is a single kinematic body whose pose is the arm's
+ * world pose, with as many trimesh colliders as the arm has primitives
+ * (typically two — one per material slot on the swing-arm mesh).
+ *
+ * Returns ``null`` if the arm has no primitive descendants (defensive —
+ * the seed library always generates geometry, but a future authoring
+ * variant could ship an empty arm).
+ */
+function buildArmKinematicBody(arm: THREE.Object3D, phys: PhysicsWorld): RAPIER.RigidBody | null {
+  arm.updateMatrixWorld(true)
+  const armInverse = arm.matrixWorld.clone().invert()
+
+  // Capture the arm's current world pose as the body's starting pose.
+  // Decompose returns position / quaternion / scale; we ignore scale
+  // because Rapier kinematic bodies don't support non-uniform scaling
+  // and the seed library never scales mechanical_rig instances. If a
+  // future track scales the rig, the visual mesh will scale via Three
+  // but the collider will run at unit scale — flag in a follow-up.
+  const pos = new THREE.Vector3()
+  const quat = new THREE.Quaternion()
+  const scale = new THREE.Vector3()
+  arm.matrixWorld.decompose(pos, quat, scale)
+
+  // Build the body first so we have something to attach colliders to.
+  const rbDesc = phys.rapier.RigidBodyDesc.kinematicPositionBased()
+    .setTranslation(pos.x, pos.y, pos.z)
+    .setRotation({ x: quat.x, y: quat.y, z: quat.z, w: quat.w })
+  const rb = phys.world.createRigidBody(rbDesc)
+
+  let primitiveCount = 0
+  arm.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh)) return
+    obj.updateMatrixWorld(true)
+    // Transform from primitive-local to arm-local space. We need this
+    // because each primitive Mesh sits at its own local pose under the
+    // arm node (Three's glTF importer sometimes adds an identity
+    // matrix, sometimes a non-trivial one — bake whatever's there).
+    const meshToArm = new THREE.Matrix4().multiplyMatrices(armInverse, obj.matrixWorld)
+    const verts = bakeVertsToFrame(obj.geometry as THREE.BufferGeometry, meshToArm)
+    if (!verts) return
+    const indices = buildDoubleSidedIndices(obj.geometry as THREE.BufferGeometry, verts.count)
+
+    const colDesc = phys.rapier.ColliderDesc.trimesh(verts.array, indices)
+      .setFriction(0.08)
+      .setRestitution(0.05)
+    phys.world.createCollider(colDesc, rb)
+    primitiveCount += 1
+  })
+
+  if (primitiveCount === 0) {
+    // Defensive cleanup — release the body so we don't leak a dangling
+    // RigidBody handle when an arm somehow has no mesh primitives.
+    phys.world.removeRigidBody(rb)
+    return null
+  }
+  return rb
+}
+
+/** Bake `geometry.attributes.position` through `frame` (Matrix4) and
+ *  return the resulting flat Float32Array. Returns null when the
+ *  geometry has no position attribute — Three would have warned at
+ *  load, but check defensively. */
+function bakeVertsToFrame(
+  geometry: THREE.BufferGeometry,
+  frame: THREE.Matrix4,
+): { array: Float32Array; count: number } | null {
+  const posAttr = geometry.attributes.position
+  if (!posAttr) return null
+  const v = new THREE.Vector3()
+  const verts = new Float32Array(posAttr.count * 3)
+  for (let i = 0; i < posAttr.count; i++) {
+    v.fromBufferAttribute(posAttr, i).applyMatrix4(frame)
+    verts[i * 3] = v.x
+    verts[i * 3 + 1] = v.y
+    verts[i * 3 + 2] = v.z
+  }
+  return { array: verts, count: posAttr.count }
+}
+
+/** Double-side the index list so a Rapier trimesh raycast hits from
+ *  either face winding. Mirrors ``attachTrackColliders`` — see that
+ *  comment for the friction / one-sided-trimesh rationale. */
+function buildDoubleSidedIndices(geometry: THREE.BufferGeometry, vertCount: number): Uint32Array {
+  let baseIndices: ArrayLike<number>
+  let baseLen: number
+  const index = geometry.index
+  if (index) {
+    baseIndices = index.array
+    baseLen = index.array.length
+  } else {
+    const synth = new Uint32Array(vertCount)
+    for (let i = 0; i < vertCount; i++) synth[i] = i
+    baseIndices = synth
+    baseLen = synth.length
+  }
+  const indices = new Uint32Array(baseLen * 2)
+  for (let i = 0; i < baseLen; i += 3) {
+    const a = baseIndices[i] as number
+    const b = baseIndices[i + 1] as number
+    const c = baseIndices[i + 2] as number
+    indices[i] = a
+    indices[i + 1] = b
+    indices[i + 2] = c
+    indices[baseLen + i] = a
+    indices[baseLen + i + 1] = c
+    indices[baseLen + i + 2] = b
+  }
+  return indices
+}
+
+/** Push the arm's current world matrix to the kinematic body via
+ *  ``setNextKinematic*``. Called every tick — Rapier consumes the
+ *  next-pose target on the upcoming step, so over-calling is cheap
+ *  (the most recent target wins). */
+function syncBodyToArm(arm: THREE.Object3D, body: RAPIER.RigidBody): void {
+  arm.updateMatrixWorld(true)
+  const pos = new THREE.Vector3()
+  const quat = new THREE.Quaternion()
+  const scale = new THREE.Vector3()
+  arm.matrixWorld.decompose(pos, quat, scale)
+  body.setNextKinematicTranslation({ x: pos.x, y: pos.y, z: pos.z })
+  body.setNextKinematicRotation({ x: quat.x, y: quat.y, z: quat.z, w: quat.w })
+}
+
+export type LandmarkAnimationOptions = {
+  /** Physics world handle. When provided, ``registerFromScene`` builds
+   *  a kinematic-position rigid body per arm so the bike collides with
+   *  the swinging gauntlet at race-time. Omit it in tests / edit mode
+   *  where physics isn't initialised — the visual swing still runs,
+   *  the bike just doesn't physically interact with the arms. */
+  phys?: PhysicsWorld
+}
+
 export type LandmarkAnimationSystem = {
   /** Walk a loaded scene graph, register every ``landmark_mechanical_rig``
    *  arm node, and return the count. Safe to call multiple times — each
@@ -239,7 +393,9 @@ export type LandmarkAnimationSystem = {
   registerFromScene(root: THREE.Object3D): number
   /** Per-frame tick. ``enabled=false`` pins every arm to its rest pose
    *  without un-registering, so flipping the setting back on resumes
-   *  from the current ``elapsedSeconds`` (no jump). */
+   *  from the current ``elapsedSeconds`` (no jump). Also pushes the
+   *  arm's current world pose to its kinematic body via
+   *  ``setNextKinematic*`` so the collider tracks the visual swing. */
   tick(elapsedSeconds: number, enabled: boolean): void
   /** Test / debug hook — exposes the registry shape. */
   arms(): ReadonlyArray<{
@@ -247,8 +403,10 @@ export type LandmarkAnimationSystem = {
     config: SwingConfig
     phase: number
     restAngle: number
+    hasBody: boolean
   }>
-  /** Test hook — clear the registry without traversing a scene. */
+  /** Test hook — clear the registry without traversing a scene.
+   *  Releases any attached kinematic bodies through ``phys.world``. */
   reset(): void
 }
 
@@ -256,13 +414,18 @@ export type LandmarkAnimationSystem = {
  * Build a fresh animation system instance. The runtime owns one of
  * these per loaded track; ``main.ts`` registers it against the
  * environment GLB root and calls ``tick(elapsedSeconds, enabled)``
- * once per render frame.
+ * once per render frame. Pass ``opts.phys`` to wire kinematic
+ * colliders that follow the swinging arms.
  */
-export function createLandmarkAnimation(): LandmarkAnimationSystem {
+export function createLandmarkAnimation(
+  opts: LandmarkAnimationOptions = {},
+): LandmarkAnimationSystem {
   const animated: AnimatedArm[] = []
+  const phys = opts.phys ?? null
   let lastEnabled = true
 
   function registerFromScene(root: THREE.Object3D): number {
+    releaseBodies()
     animated.length = 0
     root.updateMatrixWorld(true)
     const worldPos = new THREE.Vector3()
@@ -308,9 +471,20 @@ export function createLandmarkAnimation(): LandmarkAnimationSystem {
       // .blend, say) is preserved as the swing centre.
       const restAngle =
         config.axis === 'X' ? arm.rotation.x : config.axis === 'Y' ? arm.rotation.y : arm.rotation.z
-      animated.push({ arm, config, phase, restAngle })
+      // Build the kinematic body BEFORE the arm gets its first swing
+      // delta applied — so the body's initial pose is the rest pose
+      // and the collider verts are baked in arm-local space.
+      const body = phys ? buildArmKinematicBody(arm, phys) : null
+      animated.push({ arm, config, phase, restAngle, body })
     })
     return animated.length
+  }
+
+  function releaseBodies(): void {
+    if (!phys) return
+    for (const e of animated) {
+      if (e.body) phys.world.removeRigidBody(e.body)
+    }
   }
 
   function tick(elapsedSeconds: number, enabled: boolean): void {
@@ -319,12 +493,15 @@ export function createLandmarkAnimation(): LandmarkAnimationSystem {
       return
     }
     if (!enabled) {
-      // First frame after a flip: snap every arm back to rest, then
-      // skip subsequent ticks until re-enabled. Avoids paying the
-      // O(N) loop every frame when animation is off.
+      // First frame after a flip: snap every arm back to rest AND
+      // sync the kinematic body to that rest pose, then skip
+      // subsequent ticks until re-enabled. Subsequent disabled ticks
+      // don't re-issue setNextKinematic — Rapier will keep the body
+      // at its last commanded pose, which is exactly what we want.
       if (lastEnabled) {
         for (const e of animated) {
           applyArmAngle(e.arm, e.config.axis, e.restAngle, 0)
+          if (e.body) syncBodyToArm(e.arm, e.body)
         }
       }
       lastEnabled = false
@@ -333,6 +510,7 @@ export function createLandmarkAnimation(): LandmarkAnimationSystem {
     for (const e of animated) {
       const delta = computeArmAngleRad(elapsedSeconds, e.config, e.phase)
       applyArmAngle(e.arm, e.config.axis, e.restAngle, delta)
+      if (e.body) syncBodyToArm(e.arm, e.body)
     }
     lastEnabled = true
   }
@@ -342,16 +520,19 @@ export function createLandmarkAnimation(): LandmarkAnimationSystem {
     config: SwingConfig
     phase: number
     restAngle: number
+    hasBody: boolean
   }> {
     return animated.map((e) => ({
       name: e.arm.name,
       config: e.config,
       phase: e.phase,
       restAngle: e.restAngle,
+      hasBody: e.body !== null,
     }))
   }
 
   function reset(): void {
+    releaseBodies()
     animated.length = 0
     lastEnabled = true
   }
