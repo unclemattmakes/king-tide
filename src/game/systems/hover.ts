@@ -823,13 +823,31 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     //
     // Sign: intent.pitch=+1 (E, "nose up") → torque around -rightAxis,
     // which rotates fwd toward +y (nose up).
+    //
+    // Magnitude: this coefficient is a *torque coefficient*, not the
+    // angular acceleration the older inline comments claimed — it
+    // multiplies `mass * dt` to form the torque impulse, so the
+    // effective angular acceleration is `coef * mass / I_pitch`. For the
+    // capsule (I_pitch ≈ m·0.34) that's roughly `coef × 2.94` rad/s² at
+    // full input. The split below treats ground and air as separate
+    // tuning surfaces:
+    //
+    //   - Ground (14): the multi-point hover spring fires a strong
+    //     restoring torque against a nose-up tilt (bow above hover
+    //     height → spring pushes bow down). Wheelie input has to win
+    //     that fight visibly — 14 reads as "stick held = chassis up
+    //     ~25–30°" before spring/torque equilibrate. (c490e7d.)
+    //   - Air (3): only Rapier's 2.5 angular damping bleeds the angvel,
+    //     so torque integrates straight into rotation. At the previous
+    //     value of 6, ω_eq ≈ 7 rad/s and a held stick rotated the
+    //     chassis past vertical inside the test's 1 s airborne window —
+    //     fwd.y inverted and pitch-vectored thrust averaged *down* for
+    //     E (lift), failing m9-air-control. 3 gives ω_eq ≈ 3.6 rad/s,
+    //     a full backflip / dive in ~1.75 s, and keeps fwd.y
+    //     monotonically signed across the 1 s sample window.
     if (Math.abs(intent.pitch) > 0.05) {
       const rightP = quatRotate(q, { x: 1, y: 0, z: 0 })
-      // Ground gets stronger authority so a held wheelie reads against
-      // the multi-point hover spring's restoring torque (bow above hover
-      // height → spring pushes bow down → fights nose-up tilt). Air stays
-      // at the lower value so backflip / dive pacing isn't disrupted.
-      const PITCH_TORQUE_ACCEL = isGrounded ? 14 : 6 // rad/s² at full input
+      const PITCH_TORQUE_ACCEL = isGrounded ? 14 : 3
       const aPitch = -intent.pitch * PITCH_TORQUE_ACCEL
       rb.applyTorqueImpulse(
         {
