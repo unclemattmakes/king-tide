@@ -24,6 +24,7 @@ import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
 import { createFxSystem } from './engine/render/fx'
 import { createHorizonRing } from './engine/render/horizon-ring'
+import { createLandmarkAnimation } from './engine/render/landmark-animation'
 import {
   createParticleSystem,
   loadParticleAtlas,
@@ -696,6 +697,37 @@ async function boot() {
     }
   }
 
+  // Landmark animation — walk the loaded environment GLB for every
+  // ``landmark_mechanical_rig`` arm subtree and drive a per-instance
+  // sin pendulum each frame (gantry cranes, Doge's bell, future
+  // mechanical-rig landmarks). Visual mesh is render-only; the
+  // kinematic-position rigid body carrying the arm's trimesh collider
+  // is updated through the same ``setNextKinematic*`` path the MP
+  // remote-bike system uses, so the bike physically collides with
+  // the swinging gauntlet. Tracks without mechanical rigs get a
+  // no-op tick. See ``src/engine/render/landmark-animation.ts``.
+  const landmarkAnim = createLandmarkAnimation({ phys })
+  let landmarkTick: (elapsedSeconds: number) => void = () => {}
+  if (!editMode && environmentGlbRoot) {
+    const armCount = landmarkAnim.registerFromScene(environmentGlbRoot)
+    if (armCount > 0) {
+      // eslint-disable-next-line no-console
+      console.info(`[boot] registered ${armCount} animated landmark arm(s)`)
+      landmarkTick = (elapsedSeconds: number) => {
+        landmarkAnim.tick(elapsedSeconds, playerSettings.animatedLandmarks)
+      }
+    }
+  }
+  // Debug accessor — same dev/test shape as `__particles`. The
+  // ``arms()`` view lets a debugger session inspect the resolved
+  // configs (period / amplitude / axis / phase / restAngle) without
+  // poking at module internals.
+  if (typeof window !== 'undefined') {
+    ;(window as unknown as { __landmarks?: unknown }).__landmarks = {
+      arms: () => landmarkAnim.arms(),
+    }
+  }
+
   const dirArrow = createDirectionArrow()
   scene.add(dirArrow.mesh)
 
@@ -966,6 +998,7 @@ async function boot() {
       combatRender,
       fxTick,
       particleTick,
+      landmarkTick,
       physicsDebug,
       state,
       hud: { fpsEl, backendEl, audioEl, inputEl, raceEl },
@@ -1004,6 +1037,7 @@ async function boot() {
     combatRender,
     fxTick,
     particleTick,
+    landmarkTick,
     track,
     trackId,
     manifest,

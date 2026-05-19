@@ -51,6 +51,11 @@ export interface ReplayModeOpts {
   fxTick: (dt: number) => void
   /** Unified track-emitter particle system — same shape as the live loop. */
   particleTick: (dt: number) => void
+  /** Landmark animation — drives ``landmark_mechanical_rig`` arm
+   *  rotations. Same shape as the live loop; passing it through here
+   *  keeps gantry cranes / bells swinging during replay playback so
+   *  the scene reads correctly. */
+  landmarkTick: (elapsedSeconds: number) => void
   physicsDebug: { tick: () => void }
   /** Shared boot state — flipped to `ready` once the first replay frame
    *  is queued; `frame` / `fps` accumulated each render frame for the
@@ -89,6 +94,7 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     combatRender,
     fxTick,
     particleTick,
+    landmarkTick,
     physicsDebug,
     state,
     hud,
@@ -310,6 +316,7 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     combatRender(dt)
     fxTick(dt)
     particleTick(dt)
+    landmarkTick(now / 1000)
     physicsDebug.tick()
 
     spectatorHud.refresh()
