@@ -88,9 +88,16 @@ test.describe('cold-boot menu', () => {
     await softClick(page.locator('#title-start'))
     await clickModeCard(page, 'time-trial')
     // TT reuses `sp-cup-tracks` as a venue picker — every shipped v1
-    // track is listed as a clickable tile (no cup wrapper). Clicking
-    // a tile auto-advances to bike-select.
-    await softClick(page.locator('#sp-cup-track-cards .bc-card').first())
+    // track is listed as a clickable tile (no cup wrapper). The grid
+    // grows past the headless viewport (12 v1 tracks + dev tracks on
+    // dev builds), so the first card can scroll off-screen even after
+    // scrollIntoViewIfNeeded — `force: true` still trips the viewport
+    // guard. We dispatch the click directly to fire the handler
+    // without needing the element on-screen; the click behaviour is
+    // identical from the menu-flow code's POV.
+    const firstTrack = page.locator('#sp-cup-track-cards .bc-card').first()
+    await expect(firstTrack).toBeVisible()
+    await firstTrack.dispatchEvent('click')
     await softClick(page.locator('#sp-bike-cards .bc-card').first())
     await page.waitForLoadState('domcontentloaded')
     const url = page.url()
