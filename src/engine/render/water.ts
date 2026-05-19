@@ -2241,14 +2241,22 @@ export function createWaterMesh(
   const clamp01 = (n: number, lo: number, hi: number) =>
     Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo))
   function applySwellScale(s: number): void {
-    const v = clamp01(s, 0, 3)
+    // Upper bound 8× matches the Water debug menu's slider ceiling so
+    // the player can push proper open-ocean rollers if they want. The
+    // shader's Gerstner sum has been validated past 5× without crest
+    // folding at the default steepness of 0.7; beyond ~6× expect some
+    // tip-over on the largest swells.
+    const v = clamp01(s, 0, 8)
     swellScaleUniform.value = v
     for (let i = 0; i < field.waves.length; i++) {
       if (SWELL_INDICES.has(i)) field.waves[i]!.amplitude = baseAmplitudes[i]! * v
     }
   }
   function applyChopScale(s: number): void {
-    const v = clamp01(s, 0, 3)
+    // Upper bound 6× — chop is shorter-wavelength so it folds earlier
+    // than swell; this still permits a stormy surface without
+    // sustained crest flips.
+    const v = clamp01(s, 0, 6)
     chopScaleUniform.value = v
     for (let i = 0; i < field.waves.length; i++) {
       if (!SWELL_INDICES.has(i)) field.waves[i]!.amplitude = baseAmplitudes[i]! * v
