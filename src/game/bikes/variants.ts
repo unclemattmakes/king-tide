@@ -2,8 +2,11 @@ import type { BikeStatsData } from '@/game/components'
 import { defaultBikeStats } from './stats'
 
 /**
- * Bike archetypes. Three flavors with explicit handling tradeoffs so
- * picking a bike feels like a real choice, not just a recolor.
+ * Bike archetypes. Five flavors with explicit handling tradeoffs so
+ * picking a bike feels like a real choice, not just a recolor. Closes
+ * Phase F of `docs/v1-asset-pipeline-plan.md` (the design-targets target
+ * of five variants — three middleweights bracketed by a heavy + a light
+ * so wave-pump feel reads across the band).
  *
  * - racer: the balanced default. Numbers come straight from
  *   defaultBikeStats(); preserves every existing test and tuning.
@@ -13,8 +16,17 @@ import { defaultBikeStats } from './stats'
  * - stunt: light, agile, lower top speed but strong accel + handling.
  *   Highest surfaceFollow — banks the wave geometry hard, fun on
  *   Cliffside's drops.
+ * - scout: heavyweight — punishing wave-pump timing, biggest launch.
+ *   Soft hover spring + low surfaceFollow means the bike feels late
+ *   off the crest; nail the timing and the inertia carries through
+ *   the chop. Per v1-work-breakdown.md: "heavy = punishing wave-pump
+ *   timing + biggest launch".
+ * - sparrow: lightweight — forgiving wave-pump timing, further air
+ *   on small swells. Stiff hover spring + high surfaceFollow means
+ *   even a sloppy crest read produces a clean launch. Per
+ *   v1-work-breakdown.md: "light = forgiving + further launch".
  */
-export type BikeVariantId = 'cruiser' | 'racer' | 'stunt'
+export type BikeVariantId = 'cruiser' | 'racer' | 'stunt' | 'scout' | 'sparrow'
 
 export type BikeVariant = {
   id: BikeVariantId
@@ -75,6 +87,54 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
       surfaceFollow: 1.0,
       hoverSpring: 32,
       hoverDamp: 6,
+    }),
+  },
+  // Heavyweight #4 — wears the punishing-pump role from
+  // v1-asset-pipeline-plan.md Phase F. Soft hover spring (22 vs 34
+  // default) is what makes the timing "punishing": the bike reacts
+  // late to the crest, so an early E flick is wasted and a late one
+  // launches off air. Once airborne, the heaviest mass in the lineup
+  // carries the most kinetic energy through the chop.
+  scout: {
+    id: 'scout',
+    name: 'Scout',
+    tagline: 'Heavyweight — punishing pump, biggest launch',
+    bodyColor: 0xff6633,
+    accentColor: 0x5cf2ff,
+    stats: withDefaults({
+      mass: 220,
+      accel: 14,
+      topSpeed: 32,
+      turnTorque: 2.5,
+      lateralDrag: 6,
+      surfaceFollow: 0.4,
+      hoverSpring: 22,
+      hoverDamp: 10,
+      hoverHeight: 0.8,
+    }),
+  },
+  // Lightweight #5 — the design-targets "forgiving + further air".
+  // Stiff hover spring (38) means the bike springs off a crest with a
+  // wide tolerance window for the pump input; high surfaceFollow
+  // (1.05) keeps the chassis tracking small wavelets so even sloppy
+  // wave-reading still produces meaningful lift. Modest top speed
+  // keeps it from out-running the Cruiser on long straights — the
+  // tradeoff for the pump latitude.
+  sparrow: {
+    id: 'sparrow',
+    name: 'Sparrow',
+    tagline: 'Lightweight — forgiving pump, further air on chop',
+    bodyColor: 0xddbb44,
+    accentColor: 0xfff088,
+    stats: withDefaults({
+      mass: 80,
+      accel: 22,
+      topSpeed: 26,
+      turnTorque: 5.5,
+      lateralDrag: 9,
+      surfaceFollow: 1.05,
+      hoverSpring: 38,
+      hoverDamp: 5.5,
     }),
   },
 }

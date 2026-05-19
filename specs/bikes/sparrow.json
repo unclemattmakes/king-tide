@@ -1,0 +1,16 @@
+{
+  "$schema": "../_schema/bike.json",
+  "id": "sparrow",
+  "displayName": "Sparrow",
+  "physics": {
+    "massKg": 80,
+    "topSpeedMps": 26,
+    "hoverHeight": 1.2
+  },
+  "appearance": {
+    "liveryColor": "#ddbb44",
+    "metalColor": "#1c1f1e",
+    "glowColor": "#fff088",
+    "glowIntensity": 1.5
+  }
+}

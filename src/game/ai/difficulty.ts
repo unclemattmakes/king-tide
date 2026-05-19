@@ -35,6 +35,17 @@ export type DifficultyTuning = Readonly<{
   curvatureLookaheadSec: number
   rubberBandBoostCap: number
   rubberBandPenaltyFloor: number
+  /** Surface vy (m/s) at which the AI will fire a pump while its spline
+   *  cursor sits inside a heavy wave zone (see `pump-hints.ts`). `Infinity`
+   *  disables pumping entirely — Casual coasts crests; Hard pumps the
+   *  smallest rising swells inside a hint zone. Matches the wave-pump
+   *  observer's `minVy` (1.5) and `vyCeiling` (7) range so the AI fires
+   *  in the same window where a player's pump would register. */
+  pumpVyThreshold: number
+  /** `intent.pitch` magnitude held during a pump burst. Player flicks E
+   *  briefly; the AI matches with a 0.5–0.8 nose-up tilt that hover.ts's
+   *  pitch-torque integrates into a clear launch over the burst window. */
+  pumpPitchStrength: number
 }>
 
 export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>> = Object.freeze({
@@ -44,6 +55,12 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     curvatureLookaheadSec: 1.4,
     rubberBandBoostCap: 1.1,
     rubberBandPenaltyFloor: 0.95,
+    // Casual reads as "newer driver who hasn't internalised wave-mastery
+    // yet" — they ride crests rather than pumping them. `Infinity`
+    // short-circuits the per-tick vy check in ai-control without
+    // branching on difficulty there.
+    pumpVyThreshold: Number.POSITIVE_INFINITY,
+    pumpPitchStrength: 0,
   }),
   standard: Object.freeze({
     baselineTopSpeedFactor: 0.95,
@@ -51,6 +68,8 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     curvatureLookaheadSec: 1.6,
     rubberBandBoostCap: 1.18,
     rubberBandPenaltyFloor: 0.92,
+    pumpVyThreshold: 1.5,
+    pumpPitchStrength: 0.5,
   }),
   hard: Object.freeze({
     baselineTopSpeedFactor: 1.04,
@@ -58,6 +77,8 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     curvatureLookaheadSec: 1.8,
     rubberBandBoostCap: 1.22,
     rubberBandPenaltyFloor: 0.9,
+    pumpVyThreshold: 0.6,
+    pumpPitchStrength: 0.8,
   }),
 })
 

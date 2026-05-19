@@ -237,18 +237,43 @@ Pays for every VFX line item in one shot.
 
 ### 7. Wave-pump zone hints for AI — **AI-feel rescue**
 
-**Problem.** Hard-difficulty AI is meant to pump waves like a human.
-Without zoned wave authoring (gap 1) and without per-track AI hint
-volumes, this is dead on arrival — the AI has no idea where the
-pumpable swells are.
+**Shipped 2026-05-19.** Closes the last open Phase A gap. Took the
+"simpler" derivation called out in the original Fix: a new pure
+module [src/game/ai/pump-hints.ts](../src/game/ai/pump-hints.ts)
+walks each AI spline against the track's `wave_zone_NN` list at
+track-load time (lazy `WeakMap<Track, …>` cache) and flags spline
+indices that lie inside any zone whose `heightMult > 1.2`. The
+flag set honours the zone's `blendRadiusM` soft edge so the AI
+arms its pump as it enters the smoothstep ring rather than waiting
+for the hard OBB face.
 
-**Fix.** Companion to gap 1. Authors place
-`ai_hint_pump = "<wave_zone_id>"` extras on AI spline control points,
-or simpler — derive automatically from spline proximity to
-`wave_zone_NN` empties with `height_mult > 1.2`. AI controller reads
-the hint and triggers a pump action at the right t.
+Per tick in [src/game/systems/ai-control.ts](../src/game/systems/ai-control.ts):
+when the AI's current spline cursor is on a hint AND the smoothed
+local surface vy (via `sampleSurface(waveField, …)`, the same call
+buoyancy uses) clears a difficulty-tuned threshold AND speed ≥ 45%
+of top-speed, the controller sets `intent.pitch =
+pumpPitchStrength` for 100 ms (same nose-up input the player taps
+with E), then locks out for 500 ms — matches the player wave-pump
+observer's `cooldownMs`. Per-difficulty tuning lives in
+[src/game/ai/difficulty.ts](../src/game/ai/difficulty.ts):
 
-**Effort.** Low. ~0.5 day after gap 1 lands.
+- **Casual:** `pumpVyThreshold = Infinity` → branch short-circuits,
+  the AI never pumps (collapses to "newer driver who hasn't
+  internalised wave-mastery yet"). Zero per-tick cost.
+- **Standard:** `pumpVyThreshold = 1.5`, `pumpPitchStrength = 0.5`
+  — mirrors the player observer's `minVy` so the AI fires in the
+  same vy band where a player's pump would register.
+- **Hard:** `pumpVyThreshold = 0.6`, `pumpPitchStrength = 0.8` —
+  fires off smaller crests with a sharper pitch flick, the
+  intended "Hard AI pumps where you do" feel.
+
+20 new unit tests across [tests/unit/pump-hints.test.ts](../tests/unit/pump-hints.test.ts)
+(11 cases — empty zones, OBB inside/outside, blend-radius soft
+edge, low-heightMult ignore, multi-zone union, yawed-OBB
+orientation, `hasAnyHints` fast-path) and additions to
+[tests/unit/bike-variants.test.ts](../tests/unit/bike-variants.test.ts)
++ implicit coverage in the existing AI-difficulty test file. **Phase
+A now fully shipped (10 of 10 gaps).**
 
 ### 8. Headless thumbnail / loading-screen render — **UI polish for free**
 
@@ -342,24 +367,25 @@ follows in parallel waves.
 
 ### Phase A — Pipeline foundation (1.5 weeks, before M13)
 
-Land the *cross-cutting* infrastructure so every track sprint
-benefits. Order by leverage.
+**Shipped 2026-05-19** (10 of 10 gaps; AI pump-hint binding closed
+the row). Land the *cross-cutting* infrastructure so every track
+sprint benefits. Order by leverage.
 
 | # | Item | Days | Unblocks |
 |---|---|---|---|
-| 1 | Wave-zone authoring (gap 1) + AI pump-hint binding (gap 7) | 2.5 | All 11 ship tracks + tutorial |
-| 2 | Anti-grav ribbon tool (gap 3) | 1.5 | 7 ship tracks |
-| 3 | Per-track sky/grade preset (gap 4) | 1 | All 12 |
-| 4 | Particle emitter kind + sprite atlas (gap 6) | 3 | All track VFX |
-| 5 | Path-worn bake (gap 5) | 0.5 | All terrain |
-| 6 | Audio palette schema (gap 10) | 0.5 | All 12 + audio sprint |
-| 7 | Thumbnail render script (gap 8) | 1 | UI screens |
-| 8 | CI track lint (gap 9) | 0.5 | All authoring |
+| 1 | Wave-zone authoring (gap 1) ✅ + AI pump-hint binding (gap 7) ✅ | 2.5 | All 11 ship tracks + tutorial |
+| 2 | Anti-grav ribbon tool (gap 3) ✅ | 1.5 | 7 ship tracks |
+| 3 | Per-track sky/grade preset (gap 4) ✅ | 1 | All 12 |
+| 4 | Particle emitter kind + sprite atlas (gap 6) ✅ | 3 | All track VFX |
+| 5 | Path-worn bake (gap 5) ✅ | 0.5 | All terrain |
+| 6 | Audio palette schema (gap 10) ✅ | 0.5 | All 12 + audio sprint |
+| 7 | Thumbnail render script (gap 8) ✅ | 1 | UI screens |
+| 8 | CI track lint (gap 9) ✅ | 0.5 | All authoring |
 
 **Definition of done for Phase A:** a brand-new track `.blend` can
 fully author its wave behaviour, anti-grav segments, sky/grade,
 emitters, and audio palette without leaving Blender, and the
-resulting GLB+JSON survives a CI lint pass.
+resulting GLB+JSON survives a CI lint pass. ✅ Met.
 
 ### Phase B — Hero-landmark library (1.5 weeks, parallel with A's tail)
 
@@ -490,15 +516,39 @@ audio drop.
 
 ### Phase F — Bikes + UI art (parallel, ~1 week)
 
-- **2 new bike variants**. The existing one-`.blend`-per-variant flow
-  scales fine. Author from `bikes-src/racer.blend` (closest baseline)
-  → adjust chassis silhouette + fairing sweep + thruster count → run
-  recolour overrides. ~2 days per variant.
-- **5 bike-select thumbnails**. Headless `?viewer=<id>` + playwright
-  screenshot at a locked turntable angle. ~0.5 day total.
-- **12 track-hero images**. Per-track `camera_hero` empty + headless
-  Cycles render at export. ~0.5 day for the script, ~10 min per track
-  to frame the camera.
+**Shipped 2026-05-19** (the 2 variants + thumbnail script). 12
+track-hero images already landed alongside Sprints 1–3 via the
+existing per-track `camera_hero` + headless render flow.
+
+- **2 new bike variants** ✅. `BIKE_VARIANTS` in
+  [src/game/bikes/variants.ts](../src/game/bikes/variants.ts) now
+  carries five archetypes — **Scout** (heavyweight, mass 220, soft
+  hover spring 22, lowest surfaceFollow 0.4 → "punishing pump
+  timing + biggest launch") and **Sparrow** (lightweight, mass 80,
+  stiffest spring 38, highest surfaceFollow 1.05 → "forgiving pump
+  + further air") bracket the existing Cruiser / Racer / Stunt
+  trio. Scout's GLB shipped earlier; Sparrow seeds from
+  `racer.glb` until a dedicated Blender source lands (the runtime
+  livery tint in [src/engine/render/render-systems.ts](../src/engine/render/render-systems.ts)
+  recolors at clone time so the visual still reads distinct).
+  Bike-select picker dropped both "Coming Soon" placeholders.
+- **5 bike-select thumbnails** ✅. New `pnpm gen:bike-thumbs`
+  ([tools/gen-bike-thumbs.mjs](../tools/gen-bike-thumbs.mjs))
+  drives a `BIKE_THUMBS=1`-gated Playwright spec
+  ([tests/e2e/gen-bike-thumbnails.spec.ts](../tests/e2e/gen-bike-thumbnails.spec.ts))
+  that hits `?viewer=<id>&thumb=1` and writes
+  `public/assets/bikes/<id>-thumb.jpg` (480×270, q85) for every
+  variant. A new `thumbMode` branch in
+  [src/viewer/bike-viewer.ts](../src/viewer/bike-viewer.ts)
+  suppresses the reference grid + HUD chrome, tightens the camera
+  (1.9, 1.05, 1.9 looking at 0, 0.55, 0 — chassis fills ~70% of the
+  tile), and sets `document.body.dataset.bikeViewerReady = '1'` on
+  the second rendered frame so the spec has a deterministic
+  capture gate.
+- **12 track-hero images** ✅ — landed alongside the per-sprint
+  track seeds via the addon's `render_track_hero` operator. See
+  `public/assets/tracks/<id>-hero.jpg` (1280×720) +
+  `<id>-thumb.jpg` (320×180) for each of the 12 v1 tracks.
 
 ### Phase G — Audio (parallel with all sprints)
 
