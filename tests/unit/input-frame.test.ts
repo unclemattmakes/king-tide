@@ -56,7 +56,7 @@ describe('InputFrame codec', () => {
     const frame: InputFrame = {
       tick: 12345,
       peerId: 3,
-      intent: { throttle: 1, steer: -1, brake: 1, fire: true, boost: true, pitch: -1 },
+      intent: { throttle: 1, steer: -1, brake: 1, fire: true, boost: true, pitch: -1, trickLeft: true, trickRight: true },
     }
     const decoded = decodeInputFrame(encodeInputFrame(frame))
     expect(decoded.tick).toBe(12345)
@@ -113,7 +113,7 @@ describe('InputFrame codec', () => {
     const frame: InputFrame = {
       tick: 0,
       peerId: 0,
-      intent: { throttle: 5, steer: -7, brake: 99, fire: false, boost: false, pitch: -3 },
+      intent: { throttle: 5, steer: -7, brake: 99, fire: false, boost: false, pitch: -3, trickLeft: false, trickRight: false },
     }
     const out = decodeInputFrame(encodeInputFrame(frame)).intent
     expect(out.throttle).toBe(1)

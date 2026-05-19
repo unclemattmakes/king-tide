@@ -35,6 +35,8 @@ export function readPlayerIntent(dt: number): Intent {
     fire: k.fire || g.fire || t.fire,
     boost: k.boost || g.boost || t.boost,
     pitch: pickAxis(k.pitch, g.pitch, t.pitch),
+    trickLeft: k.trickLeft || g.trickLeft || t.trickLeft,
+    trickRight: k.trickRight || g.trickRight || t.trickRight,
   }
 }
 

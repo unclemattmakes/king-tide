@@ -49,6 +49,8 @@ async function runScenario(
     fire: boolean
     boost: boolean
     pitch: number
+    trickLeft: boolean
+    trickRight: boolean
   },
   label: string,
 ): Promise<Scenario> {
@@ -69,6 +71,8 @@ async function runScenario(
         fire: false,
         boost: false,
         pitch: 0,
+        trickLeft: false,
+        trickRight: false,
       })
       // Wait until clearly off the ramp (y > 3, !grounded).
       let launchY = 0
@@ -180,17 +184,17 @@ test('air control: pitch-vectored thrust + hang-time work as designed', async ({
   for (let i = 0; i < TRIALS; i++) {
     const baseline = await runScenario(
       page,
-      { throttle: 0, steer: 0, brake: 0, fire: false, boost: false, pitch: 0 },
+      { throttle: 0, steer: 0, brake: 0, fire: false, boost: false, pitch: 0, trickLeft: false, trickRight: false },
       'baseline',
     )
     const dive = await runScenario(
       page,
-      { throttle: 1, steer: 0, brake: 0, fire: false, boost: false, pitch: -1 },
+      { throttle: 1, steer: 0, brake: 0, fire: false, boost: false, pitch: -1, trickLeft: false, trickRight: false },
       'dive_Q',
     )
     const lift = await runScenario(
       page,
-      { throttle: 1, steer: 0, brake: 0, fire: false, boost: false, pitch: +1 },
+      { throttle: 1, steer: 0, brake: 0, fire: false, boost: false, pitch: +1, trickLeft: false, trickRight: false },
       'lift_E',
     )
     baseAccs.push(airborneAccel(baseline))

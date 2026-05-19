@@ -9,6 +9,7 @@ import {
   BikeStats,
   BikeStatsStore,
   BikeTag,
+  BoostMeterStore,
   ControlIntent,
   ControlIntentStore,
   HoverState,
@@ -893,7 +894,12 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         const dirAir = intent.throttle >= 0 ? 1 : -1
         const scaleAir = intent.throttle >= 0 ? 1 : stats.reverseScale
         const speedFalloff3d = Math.max(0, 1 - speed3d / stats.topSpeed)
-        const boostAir = (intent.boost ? stats.boostMul : 1) * getCurrentBoostMultiplier(eid)
+        // Held-boost no longer reads `intent.boost` directly — the
+        // boost-meter system gates the multiplier through `active`,
+        // so the player only gets the bonus thrust while the meter
+        // is engaged and draining.
+        const meterActive = BoostMeterStore.get(eid)?.active === true
+        const boostAir = (meterActive ? stats.boostMul : 1) * getCurrentBoostMultiplier(eid)
         const AIR_THRUST_MUL = 0.85
         const aAir =
           Math.abs(intent.throttle) *
@@ -1027,7 +1033,10 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const direction = throttle >= 0 ? 1 : -1
     const scale = throttle >= 0 ? 1 : stats.reverseScale
     const speedFalloff = Math.max(0, 1 - speed / stats.topSpeed)
-    const heldBoost = intent.boost ? stats.boostMul : 1
+    // Held-boost is gated by the boost-meter `active` flag — see the
+    // air-thrust branch above for the same rule.
+    const meterActive = BoostMeterStore.get(eid)?.active === true
+    const heldBoost = meterActive ? stats.boostMul : 1
     const pickupBoost = getCurrentBoostMultiplier(eid)
     const boost = heldBoost * pickupBoost
     const surfaceMul = probe.isWater ? 0.85 : 1.0

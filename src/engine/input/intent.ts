@@ -11,8 +11,26 @@ export type Intent = {
    * the bike's nose, so positive pitch produces upward acceleration.
    */
   pitch: number
+  /**
+   * MK8-style hop-trick buttons. Held-state booleans; the rising edge fires
+   * a vertical hop impulse + visual Y-rotation overlay (left = CCW from
+   * above, right = CW). Holding does nothing — only fresh presses count.
+   * If a trick edge lands inside the crest-apex window, the observer
+   * grants the boost reward on landing.
+   */
+  trickLeft: boolean
+  trickRight: boolean
 }
 
 export function emptyIntent(): Intent {
-  return { throttle: 0, steer: 0, brake: 0, fire: false, boost: false, pitch: 0 }
+  return {
+    throttle: 0,
+    steer: 0,
+    brake: 0,
+    fire: false,
+    boost: false,
+    pitch: 0,
+    trickLeft: false,
+    trickRight: false,
+  }
 }

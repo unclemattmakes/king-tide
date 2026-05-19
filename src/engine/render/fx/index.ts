@@ -540,7 +540,56 @@ export function createFxSystem(
     }
   }
 
-  return function tick(dt: number): void {
+  // Per-bike scratch for triggerPumpBurst — re-uses the same backward
+  // vector + stern-offset math as the per-frame exhaust emission so
+  // the burst geometry matches the bike's authored rear.
+  const pumpBurstWorld = new THREE.Vector3()
+  const pumpBurstQuat = new THREE.Quaternion()
+  const pumpBurstPos = new THREE.Vector3()
+  const pumpBurstBack = new THREE.Vector3()
+
+  function triggerPumpBurst(eid: number, strength: number, perfect: boolean): void {
+    // Pull the bike's transform straight from ECS — bike body offsets
+    // match the per-frame exhaust path so the burst reads as a single
+    // huge thrust pulse out of the same nozzle.
+    const transform = TransformStore.get(eid)
+    if (!transform) return
+    if (!hasComponent(sim, eid, RBHandle)) return
+    const rbh = RBHandleStore.must(eid)
+    const rb = phys.world.getRigidBody(rbh.handle)
+    if (!rb) return
+    pumpBurstQuat.set(transform.qx, transform.qy, transform.qz, transform.qw)
+    pumpBurstPos.set(transform.x, transform.y, transform.z)
+    pumpBurstWorld.copy(EXHAUST_OFFSET).applyQuaternion(pumpBurstQuat).add(pumpBurstPos)
+    pumpBurstBack.set(0, 0, -1).applyQuaternion(pumpBurstQuat)
+    // Scale particle count + speed + size with strength + perfect tier.
+    // Perfect bursts roughly double the count and add a bigger sprite
+    // for the "afterburner kicked in" beat.
+    const s = Math.max(0.2, Math.min(1, strength))
+    const count = perfect ? 32 + Math.floor(s * 18) : 18 + Math.floor(s * 12)
+    const ejectSpeed = perfect ? 16 : 11
+    const sizeMul = perfect ? 1.7 : 1.25
+    const lifeMin = perfect ? 0.35 : 0.28
+    const lifeMax = perfect ? 0.85 : 0.65
+    emit(
+      exhaust,
+      pumpBurstWorld.x,
+      pumpBurstWorld.y,
+      pumpBurstWorld.z,
+      pumpBurstBack.x * ejectSpeed,
+      pumpBurstBack.y * ejectSpeed + 0.4,
+      pumpBurstBack.z * ejectSpeed,
+      // Wider cone than baseline exhaust — the burst should fan out
+      // dramatically rather than streaming in a tight cylinder.
+      perfect ? 3.5 : 2.2,
+      lifeMin,
+      lifeMax,
+      exhaust.defaultSize * sizeMul,
+      count,
+    )
+  }
+
+  function tick(dt: number): void {
     const eids = query(sim, [BikeTag, Transform, HoverState, ControlIntent])
 
     for (const eid of eids) {
@@ -1029,4 +1078,6 @@ export function createFxSystem(
     advance(missileTrail, dt)
     advance(bubbles, dt)
   }
+
+  return { tick, triggerPumpBurst }
 }

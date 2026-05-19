@@ -1,5 +1,5 @@
 import { hasComponent, query } from 'bitecs'
-import type * as THREE from 'three'
+import * as THREE from 'three'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import { cloneLoadedBike, type LoadedBike } from '@/game/assets/bike-loader'
 import {
@@ -11,6 +11,8 @@ import {
   PlayerTag,
   Transform,
   TransformStore,
+  TrickState,
+  TrickStateStore,
 } from '@/game/components'
 import { createBikeMesh } from './bike-mesh'
 
@@ -62,6 +64,11 @@ export function createBikeRenderSystem(
   // Reused per-frame scratch for the live-eids reconciliation set.
   const live = new Set<number>()
   let aiColorCursor = 0
+  // Reusable quaternion + axis scratch — applying the trick-spin
+  // every frame would otherwise alloc per bike per tick.
+  const baseQuat = new THREE.Quaternion()
+  const spinQuat = new THREE.Quaternion()
+  const spinAxis = new THREE.Vector3()
 
   return function tick(): void {
     const eids = query(sim, [BikeTag, Transform])
@@ -126,7 +133,38 @@ export function createBikeRenderSystem(
       }
       const t = TransformStore.must(eid)
       mesh.position.set(t.x, t.y, t.z)
-      mesh.quaternion.set(t.qx, t.qy, t.qz, t.qw)
+      baseQuat.set(t.qx, t.qy, t.qz, t.qw)
+      // Visual-only trick spin — multiply a signed-axis rotation
+      // (Y = yaw, X = flip, Z = roll) onto the bike's base
+      // quaternion. Phase 1 → 0 over the trick's lifetime, so
+      // `(1 − phase)` is the eased "progress through the spin";
+      // full 360° gives the bike one clean revolution around the
+      // chosen axis. The rigid body never sees this — heading +
+      // collision stay on the simulation's quaternion, so a trick
+      // mid-corner doesn't veer the bike off line.
+      const trick = hasComponent(sim, eid, TrickState) ? TrickStateStore.get(eid) : null
+      if (trick && trick.spinPhase > 0) {
+        const ax = trick.spinAxisX
+        const ay = trick.spinAxisY
+        const az = trick.spinAxisZ
+        const len2 = ax * ax + ay * ay + az * az
+        if (len2 > 1e-6) {
+          const progress = 1 - trick.spinPhase
+          // Quadratic ease-out so the spin starts crisp and decelerates
+          // toward the landing pose — easier to read than a linear spin
+          // at typical 0.6 s duration.
+          const eased = 1 - (1 - progress) * (1 - progress)
+          const angle = eased * Math.PI * 2
+          // Sign + magnitude come from the axis vector — only one
+          // component is non-zero per trick. Normalise just in case
+          // an external setter writes a non-unit vector.
+          const invLen = 1 / Math.sqrt(len2)
+          spinAxis.set(ax * invLen, ay * invLen, az * invLen)
+          spinQuat.setFromAxisAngle(spinAxis, angle)
+          baseQuat.multiply(spinQuat)
+        }
+      }
+      mesh.quaternion.copy(baseQuat)
     }
     for (const [eid, mesh] of meshes) {
       if (!live.has(eid)) {

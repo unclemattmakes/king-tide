@@ -16,6 +16,8 @@ test.describe('M5 combat', () => {
         fire: true,
         boost: false,
         pitch: 0,
+        trickLeft: false,
+        trickRight: false,
       }),
     )
 
@@ -46,6 +48,8 @@ test.describe('M5 combat', () => {
         fire: true,
         boost: false,
         pitch: 0,
+        trickLeft: false,
+        trickRight: false,
       }),
     )
 
@@ -72,6 +76,8 @@ test.describe('M5 combat', () => {
         fire: true,
         boost: false,
         pitch: 0,
+        trickLeft: false,
+        trickRight: false,
       }),
     )
 
@@ -97,6 +103,8 @@ test.describe('M5 combat', () => {
         fire: true,
         boost: false,
         pitch: 0,
+        trickLeft: false,
+        trickRight: false,
       }),
     )
     await page.waitForFunction(() => (window.__hover!.combat().shieldRemaining ?? 0) > 0, {
@@ -112,6 +120,8 @@ test.describe('M5 combat', () => {
         fire: false,
         boost: false,
         pitch: 0,
+        trickLeft: false,
+        trickRight: false,
       }),
     )
 
@@ -127,6 +137,8 @@ test.describe('M5 combat', () => {
         fire: true,
         boost: false,
         pitch: 0,
+        trickLeft: false,
+        trickRight: false,
       }),
     )
     await page.waitForFunction(() => window.__hover!.combatEntityCounts().missiles >= 1, {

@@ -32,6 +32,8 @@ test.describe('M9 audio', () => {
         fire: false,
         boost: false,
         pitch: 0,
+        trickLeft: false,
+        trickRight: false,
       }),
     )
     await page.waitForTimeout(800)

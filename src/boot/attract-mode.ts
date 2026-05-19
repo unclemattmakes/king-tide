@@ -229,7 +229,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     const riderRender = createRiderRenderSystem(scene, sim)
     const pickupRender = createPickupRenderSystem(scene, sim)
     const combatRender = createCombatRenderSystem(scene, sim)
-    const fxTick = createFxSystem(scene, sim, phys, waveField)
+    const fxTick = createFxSystem(scene, sim, phys, waveField).tick
 
     const director = createBroadcastDirector({ camera })
 

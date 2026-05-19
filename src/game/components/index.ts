@@ -102,6 +102,72 @@ export type HoverStateData = {
 export const HoverStateStore = createStore<HoverStateData>('HoverState')
 
 /**
+ * Per-bike MK8-style hop-trick state. Written by `trickHopSystem` on
+ * rising-edge of intent.trickLeft / intent.trickRight; render-side reads
+ * `spinPhase` + `spinDirection` to overlay a Y-axis visual rotation on
+ * the bike mesh while the trick plays out.
+ *
+ *  - `cooldownSec` is decremented each tick; new hops are gated on it
+ *    reaching 0. Prevents button-mash spam from chaining ghost-hops
+ *    every frame while the bike is still in the air from the last one.
+ *  - `spinPhase` lerps 1 → 0 over `spinDurationSec`; render multiplies
+ *    `spinDirection * (1 - spinPhase) * 2π` onto the bike's quaternion
+ *    for the in-air twist, then resets to 0 at end.
+ *  - `armedForBoost` is set when the hop fired during a valid apex
+ *    approach (vy rising / just-crested). Consumed on landing by the
+ *    trick observer, which emits the boost reward then.
+ *  - `wasGrounded` is the previous-tick grounded state for landing
+ *    detection. Replaces the per-fx-system lastGrounded map for the
+ *    boost path; the FX system keeps its own (for splash bursts).
+ *  - `prevLeftDown` / `prevRightDown` are the per-tick edge-detect
+ *    bookkeeping. Set by trickHopSystem from intent each tick.
+ */
+export const TrickState = { name: 'TrickState' as const }
+export type TrickStateData = {
+  cooldownSec: number
+  spinPhase: number
+  /** Rotation axis as a signed unit vector. Only one component is
+   *  ever non-zero per spin (Y = yaw, X = flip, Z = roll). The sign
+   *  encodes direction so render multiplies a single quaternion
+   *  without a separate magnitude field. */
+  spinAxisX: number
+  spinAxisY: number
+  spinAxisZ: number
+  spinDurationSec: number
+  prevLeftDown: boolean
+  prevRightDown: boolean
+  /** Recent vy peak (m/s) — mirrors the observer's tracker so the
+   *  sim can decide hop magnitude (big on credible apex, small on
+   *  flatground) without a cross-thread query. */
+  vyPeak: number
+  /** Sim-ticks since `vyPeak` was last refreshed. Resets the peak
+   *  once it goes stale so an old climb can't keep arming the big
+   *  hop a second later. */
+  vyPeakTicksAgo: number
+}
+export const TrickStateStore = createStore<TrickStateData>('TrickState')
+
+/**
+ * Per-bike Burnout-3-style boost meter. Filled by successful tricks
+ * (see `wave-pump-observer` + the trick-event handler in `game-loop`),
+ * consumed by holding the boost button. While `active`, the hover
+ * system applies `stats.boostMul` to forward thrust and the render
+ * side runs sustained camera shake plus the trick-FX activation
+ * one-shot. Drains at `BOOST_DRAIN_PER_SEC` per second; auto-ends
+ * when charge runs out or the button releases.
+ */
+export const BoostMeter = { name: 'BoostMeter' as const }
+export type BoostMeterData = {
+  charge: number
+  active: boolean
+  /** Previous-tick `intent.boost` for rising-edge detection. Held-
+   *  down does not auto-re-engage after a drain-empty — the player
+   *  has to release and re-press once the meter has charged enough. */
+  prevBoostDown: boolean
+}
+export const BoostMeterStore = createStore<BoostMeterData>('BoostMeter')
+
+/**
  * Per-bike anti-gravity override. Written by `antiGravSystem` every tick
  * to record which way is "up" for this bike when an anti-grav source is
  * within reach — either a flagged AI spline (curve sampling, with

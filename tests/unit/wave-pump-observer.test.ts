@@ -6,122 +6,170 @@ import {
 } from '../../src/engine/wave-pump-observer'
 
 /**
- * The crest-pass trigger walks the bike through a vy curve:
+ * Fire-on-press observer: a boost event fires the moment a trick-button
+ * rising edge arrives while the bike is in a valid apex window (recent
+ * vy peak + speed + throttle). No landing detection — the player gets
+ * the speed payoff while still mid-trick, matching MK8 feel.
  *
- *   rise → peak → fall
- *
- * `rideSample` produces an "actively lifting on the rising face" tick.
- * `crestSample` produces the moment the peak passes — vy crossed back
- * down to ≤ 0. The observer fires on `crestSample` if the prior ticks
- * built up enough peak vy and the rider has throttle + speed.
+ * `climbSample` is a rising tick (vy > 0). `restSample` is flat / no
+ * recent climb. Tests compose presses against these states.
  */
-function rideSample(over: Partial<WavePumpSample> = {}): WavePumpSample {
+function climbSample(over: Partial<WavePumpSample> = {}): WavePumpSample {
   return {
     surfaceIsWater: true,
     isGrounded: true,
-    vy: 2.0,
+    // Default vy=3.0 sits comfortably above the credibility floor
+    // (2.5) so a generic "rising tick" represents a real wave climb
+    // rather than borderline chop.
+    vy: 3.0,
     forwardSpeed: 22,
     topSpeed: 28,
     throttle: 0.9,
+    trickLeft: false,
+    trickRight: false,
     ...over,
   }
 }
 
-function crestSample(over: Partial<WavePumpSample> = {}): WavePumpSample {
+function restSample(over: Partial<WavePumpSample> = {}): WavePumpSample {
   return {
     surfaceIsWater: true,
     isGrounded: true,
-    vy: -0.1,
+    vy: 0,
     forwardSpeed: 22,
     topSpeed: 28,
     throttle: 0.9,
+    trickLeft: false,
+    trickRight: false,
     ...over,
   }
 }
 
-describe('createWavePumpObserver', () => {
-  it('fires when a rising crest peaks and falls back through zero', () => {
+describe('createWavePumpObserver (trick-driven, fire-on-press)', () => {
+  it('fires on the press tick during a credible climb', () => {
     const obs = createWavePumpObserver()
-    expect(obs.detect(0, rideSample())).toBeNull()
-    const ev = obs.detect(50, crestSample())
+    expect(obs.detect(0, climbSample())).toBeNull()
+    // Press trickRight while still climbing → fires this same tick.
+    const ev = obs.detect(50, climbSample({ vy: 3.0, trickRight: true }))
     expect(ev).not.toBeNull()
     expect(ev?.strength).toBeGreaterThan(0)
     expect(ev?.strength).toBeLessThanOrEqual(1)
+    expect(ev?.direction).toBe('right')
     expect(ev?.t).toBe(50)
   })
 
-  it('does not fire on a downgoing tick without a prior rising tick', () => {
+  it('does not fire on a flat-ground press', () => {
+    // Bike has been cruising on flat ground (vy 0). Press → no fire.
+    // (The sim's trick-hop system still applies a hop impulse; the
+    //  observer just doesn't grant the boost.)
     const obs = createWavePumpObserver()
-    expect(obs.detect(0, crestSample())).toBeNull()
+    obs.detect(0, restSample())
+    expect(obs.detect(50, restSample({ trickRight: true }))).toBeNull()
   })
 
-  it('does not fire when the lift never cleared the peak floor', () => {
+  it('does not fire when the climb peak is too small', () => {
     const obs = createWavePumpObserver()
-    obs.detect(0, rideSample({ vy: 0.4 }))
-    expect(obs.detect(50, crestSample())).toBeNull()
+    // Tiny chop — vy peaks at 0.4, well below the default 0.7 floor.
+    obs.detect(0, climbSample({ vy: 0.4 }))
+    expect(obs.detect(50, climbSample({ vy: 0.4, trickRight: true }))).toBeNull()
+  })
+
+  it('does not fire when the player is coasting', () => {
+    const obs = createWavePumpObserver()
+    obs.detect(0, climbSample({ throttle: 0.1 }))
+    expect(obs.detect(50, climbSample({ throttle: 0.1, trickRight: true }))).toBeNull()
   })
 
   it('does not fire when forward speed is too low', () => {
     const obs = createWavePumpObserver()
-    obs.detect(0, rideSample({ forwardSpeed: 4 }))
-    expect(obs.detect(50, crestSample({ forwardSpeed: 4 }))).toBeNull()
+    obs.detect(0, climbSample({ forwardSpeed: 4 }))
+    expect(obs.detect(50, climbSample({ forwardSpeed: 4, trickRight: true }))).toBeNull()
   })
 
-  it('does not fire when the player is coasting (throttle below floor)', () => {
+  it('captures direction from the pressed button (left)', () => {
     const obs = createWavePumpObserver()
-    obs.detect(0, rideSample({ throttle: 0.1 }))
-    expect(obs.detect(50, crestSample({ throttle: 0.1 }))).toBeNull()
+    obs.detect(0, climbSample())
+    const ev = obs.detect(50, climbSample({ vy: 3.0, trickLeft: true }))
+    expect(ev?.direction).toBe('left')
   })
 
-  it('does not fire when leaving a hard surface (surfaceIsWater === false)', () => {
+  it('left wins a same-tick double-press', () => {
     const obs = createWavePumpObserver()
-    obs.detect(0, rideSample({ surfaceIsWater: false }))
-    expect(obs.detect(50, crestSample({ surfaceIsWater: false }))).toBeNull()
+    obs.detect(0, climbSample())
+    const ev = obs.detect(50, climbSample({ vy: 3.0, trickLeft: true, trickRight: true }))
+    expect(ev?.direction).toBe('left')
   })
 
-  it('does not fire while the bike is airborne (not grounded)', () => {
+  it('held-down buttons do not re-fire — only fresh presses count', () => {
     const obs = createWavePumpObserver()
-    obs.detect(0, rideSample())
-    expect(obs.detect(50, crestSample({ isGrounded: false }))).toBeNull()
+    // Hold trickRight from t=0 onward. The first sample's rising edge
+    // would fire (if credible), but here the *first* tick has the
+    // button already held → no edge.
+    obs.detect(0, climbSample({ trickRight: true }))
+    // Subsequent ticks: button still held, no fresh edge.
+    expect(obs.detect(50, climbSample({ vy: 3.0, trickRight: true }))).toBeNull()
+    expect(obs.detect(100, climbSample({ vy: 3.0, trickRight: true }))).toBeNull()
   })
 
-  it('respects the cooldown — back-to-back crests do not double-fire', () => {
+  it('does not fire without a trick press, even on a clean crest', () => {
+    // Headline behaviour change vs. the old auto-pump. Riding a crest
+    // with no input gives no reward — no input, no boost.
     const obs = createWavePumpObserver()
-    obs.detect(0, rideSample())
-    const first = obs.detect(50, crestSample())
+    obs.detect(0, climbSample())
+    expect(obs.detect(50, climbSample({ vy: 3.0 }))).toBeNull()
+    expect(obs.detect(100, climbSample({ vy: 3.0 }))).toBeNull()
+  })
+
+  it('respects the cooldown between back-to-back tricks', () => {
+    const obs = createWavePumpObserver()
+    obs.detect(0, climbSample())
+    const first = obs.detect(50, climbSample({ vy: 3.0, trickRight: true }))
     expect(first).not.toBeNull()
-    // A second crest well inside the cooldown.
-    obs.detect(100, rideSample())
-    const second = obs.detect(150, crestSample())
-    expect(second).toBeNull()
+
+    // Second press well inside the cooldown — release between presses
+    // (rising-edge gate) and re-press; should be suppressed by cooldown.
+    obs.detect(100, climbSample({ vy: 3.0, trickRight: false }))
+    expect(obs.detect(200, climbSample({ vy: 3.0, trickRight: true }))).toBeNull()
   })
 
-  it('allows a second pump once the cooldown has elapsed', () => {
+  it('allows another trick once the cooldown has elapsed', () => {
     const obs = createWavePumpObserver()
-    obs.detect(0, rideSample())
-    expect(obs.detect(50, crestSample())).not.toBeNull()
+    obs.detect(0, climbSample())
+    expect(obs.detect(50, climbSample({ vy: 3.0, trickRight: true }))).not.toBeNull()
 
-    obs.detect(700, rideSample())
-    expect(obs.detect(750, crestSample())).not.toBeNull()
+    // Release, rebuild the climb (firing drained the peak), wait past
+    // the cooldown, then press again.
+    obs.detect(100, climbSample({ vy: 0, trickRight: false }))
+    obs.detect(550, climbSample({ vy: 3.0 }))
+    expect(obs.detect(700, climbSample({ vy: 3.0, trickRight: true }))).not.toBeNull()
+  })
+
+  it('drains the climb peak after firing — same climb cannot pay off twice', () => {
+    const obs = createWavePumpObserver()
+    obs.detect(0, climbSample())
+    expect(obs.detect(50, climbSample({ vy: 3.0, trickRight: true }))).not.toBeNull()
+    // Wait past the cooldown; bike still on the descending tail of the
+    // same crest (vy now flat) and presses again — peak was drained on
+    // the first fire, so no second boost.
+    obs.detect(600, climbSample({ vy: 0, trickRight: false }))
+    expect(obs.detect(700, climbSample({ vy: 0, trickRight: true }))).toBeNull()
   })
 
   it('saturates strength to 1 at high vy peak + max speed', () => {
     const obs = createWavePumpObserver()
-    obs.detect(0, rideSample({ vy: 6 }))
-    const ev = obs.detect(50, crestSample({ forwardSpeed: 28 }))
+    obs.detect(0, climbSample({ vy: 6 }))
+    const ev = obs.detect(50, climbSample({ vy: 6, forwardSpeed: 28, trickRight: true }))
     expect(ev).not.toBeNull()
     expect(ev?.strength).toBeCloseTo(1, 2)
   })
 
-  it('reset() clears the peak tracker and the cooldown', () => {
+  it('reset() clears the peak + cooldown', () => {
     const obs = createWavePumpObserver()
-    obs.detect(0, rideSample())
-    obs.detect(50, crestSample())
+    obs.detect(0, climbSample({ vy: 3.0, trickRight: true }))
     obs.reset()
-    expect(obs.debug().vyPeakInWindow).toBe(0)
-    expect(obs.debug().vyPrev).toBe(0)
-    // After reset, a fresh crest tick with no prior rise should not fire.
-    expect(obs.detect(60, crestSample())).toBeNull()
+    const d = obs.debug()
+    expect(d.vyPeakInWindow).toBe(0)
+    expect(d.lastFireAt).toBe(Number.NEGATIVE_INFINITY)
   })
 
   it('tunables override the defaults', () => {
@@ -129,8 +177,8 @@ describe('createWavePumpObserver', () => {
       ...DEFAULT_DETECTOR_TUNING,
       minVyPeak: 4,
     })
-    obs.detect(0, rideSample({ vy: 2 }))
     // Peak of 2 cleared the default 0.7 floor but not the custom 4.
-    expect(obs.detect(50, crestSample())).toBeNull()
+    obs.detect(0, climbSample({ vy: 2 }))
+    expect(obs.detect(50, climbSample({ vy: 2, trickRight: true }))).toBeNull()
   })
 })

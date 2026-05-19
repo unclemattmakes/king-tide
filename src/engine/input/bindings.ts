@@ -30,6 +30,8 @@ export type KeyboardAction =
   | 'pitchDown'
   | 'fire'
   | 'boost'
+  | 'trickLeft'
+  | 'trickRight'
 
 export const KEYBOARD_ACTIONS: readonly KeyboardAction[] = [
   'throttleForward',
@@ -38,6 +40,8 @@ export const KEYBOARD_ACTIONS: readonly KeyboardAction[] = [
   'steerRight',
   'pitchUp',
   'pitchDown',
+  'trickLeft',
+  'trickRight',
   'fire',
   'boost',
 ] as const
@@ -49,6 +53,8 @@ export const KEYBOARD_ACTION_LABEL: Readonly<Record<KeyboardAction, string>> = O
   steerRight: 'Steer right',
   pitchUp: 'Pitch up (nose up)',
   pitchDown: 'Pitch down (nose down)',
+  trickLeft: 'Trick / hop (left)',
+  trickRight: 'Trick / hop (right)',
   fire: 'Fire pickup',
   boost: 'Boost',
 })
@@ -73,6 +79,11 @@ export const DEFAULT_KEYBOARD_BINDINGS: Readonly<KeyboardBindings> = Object.free
   // sim-side intent.pitch convention where positive = nose up.
   pitchUp: { primary: 'KeyE', secondary: null },
   pitchDown: { primary: 'KeyQ', secondary: null },
+  // MK8-style hop-trick buttons. Z/C sit just below the WASD cluster so
+  // the trick-hand never has to leave the keys it's already on. On a
+  // gamepad these map to L1/R1.
+  trickLeft: { primary: 'KeyZ', secondary: null },
+  trickRight: { primary: 'KeyC', secondary: null },
   fire: { primary: 'Space', secondary: null },
   boost: { primary: 'ShiftLeft', secondary: 'ShiftRight' },
 })
@@ -80,12 +91,23 @@ export const DEFAULT_KEYBOARD_BINDINGS: Readonly<KeyboardBindings> = Object.free
 /** Gamepad buttons we let the player remap. Sticks stay on the W3C
  *  standard mapping (axes[0..3]); triggers (buttons 6/7) drive analog
  *  throttle / brake and stay fixed because non-button bindings can't be
- *  captured by "press a button" prompts cleanly. */
-export type GamepadAction = 'fire' | 'boost'
+ *  captured by "press a button" prompts cleanly.
+ *
+ *  MK8 layout: L1/R1 own the hop-trick (and eventually drift). Fire +
+ *  boost relocated to face buttons so the bumpers stay on the trick
+ *  channel where the wrist naturally rests during a drift hold. */
+export type GamepadAction = 'fire' | 'boost' | 'trickLeft' | 'trickRight'
 
-export const GAMEPAD_ACTIONS: readonly GamepadAction[] = ['fire', 'boost'] as const
+export const GAMEPAD_ACTIONS: readonly GamepadAction[] = [
+  'trickLeft',
+  'trickRight',
+  'fire',
+  'boost',
+] as const
 
 export const GAMEPAD_ACTION_LABEL: Readonly<Record<GamepadAction, string>> = Object.freeze({
+  trickLeft: 'Trick / hop (left)',
+  trickRight: 'Trick / hop (right)',
   fire: 'Fire pickup',
   boost: 'Boost',
 })
@@ -93,8 +115,13 @@ export const GAMEPAD_ACTION_LABEL: Readonly<Record<GamepadAction, string>> = Obj
 export type GamepadBindings = Record<GamepadAction, number>
 
 export const DEFAULT_GAMEPAD_BINDINGS: Readonly<GamepadBindings> = Object.freeze({
-  fire: 5, // RB / R1
-  boost: 4, // LB / L1
+  trickLeft: 4, // LB / L1
+  trickRight: 5, // RB / R1
+  // Fire + boost relocated off the bumpers so L1/R1 own the trick
+  // channel. Face buttons X / Y avoid A (which already drives
+  // throttle) and B (emergency brake).
+  fire: 2, // X / Square
+  boost: 3, // Y / Triangle
 })
 
 const GAMEPAD_BUTTON_LABEL: Readonly<Record<number, string>> = Object.freeze({
@@ -160,10 +187,7 @@ export function findKeyboardSlot(
   return null
 }
 
-export function findGamepadAction(
-  index: number,
-  bindings: GamepadBindings,
-): GamepadAction | null {
+export function findGamepadAction(index: number, bindings: GamepadBindings): GamepadAction | null {
   for (const action of GAMEPAD_ACTIONS) {
     if (bindings[action] === index) return action
   }

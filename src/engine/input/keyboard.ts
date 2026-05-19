@@ -92,5 +92,7 @@ export function keyboardIntent(dt: number): Intent {
   intent.fire = isActionDown('fire', bindings)
   intent.boost = isActionDown('boost', bindings)
   intent.pitch = smoothPitch
+  intent.trickLeft = isActionDown('trickLeft', bindings)
+  intent.trickRight = isActionDown('trickRight', bindings)
   return intent
 }
