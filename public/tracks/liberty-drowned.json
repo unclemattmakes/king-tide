@@ -3,14 +3,14 @@
   "name": "liberty-drowned",
   "lapsToFinish": 3,
   "environmentGlb": "/assets/tracks/liberty-drowned.glb",
-  "gateSpacing": 70.0,
+  "gateSpacing": 70,
   "sky": {
     "tint": "#ffae6a",
-    "cloudiness": 0.4,
+    "cloudiness": 0.55,
     "sunIntensity": 1.1,
-    "fogNear": 700.0,
-    "fogFar": 3000.0,
-    "timeOfDay": 70.0,
+    "fogNear": 700,
+    "fogFar": 3000,
+    "timeOfDay": 70,
     "colorGrade": "nyc_sunset",
     "bloom": 0.6,
     "seaStateBeaufort": 4
@@ -47,13 +47,13 @@
         "z": 369.4365539550781
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     },
     {
       "index": 1,
@@ -63,13 +63,13 @@
         "z": -78.29759979248047
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     },
     {
       "index": 2,
@@ -79,13 +79,13 @@
         "z": 34.31576919555664
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     },
     {
       "index": 3,
@@ -95,104 +95,104 @@
         "z": 124.25823974609375
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     }
   ],
   "pickupSpawns": [
     {
-      "x": 200.0,
-      "y": 1.0,
-      "z": 340.0
+      "x": 200,
+      "y": 1,
+      "z": 340
     },
     {
-      "x": 0.0,
-      "y": 1.0,
-      "z": 360.0
+      "x": 0,
+      "y": 1,
+      "z": 360
     },
     {
-      "x": -200.0,
-      "y": 1.0,
-      "z": 300.0
+      "x": -200,
+      "y": 1,
+      "z": 300
     },
     {
-      "x": -250.0,
-      "y": 1.0,
-      "z": 80.0
+      "x": -250,
+      "y": 1,
+      "z": 80
     },
     {
-      "x": 0.0,
-      "y": 2.0,
-      "z": -60.0
+      "x": 0,
+      "y": 2,
+      "z": -60
     },
     {
-      "x": 100.0,
-      "y": 28.0,
-      "z": 50.0
+      "x": 100,
+      "y": 28,
+      "z": 50
     },
     {
-      "x": 10.0,
-      "y": 54.0,
-      "z": 100.0
+      "x": 10,
+      "y": 54,
+      "z": 100
     },
     {
-      "x": -30.0,
-      "y": 54.0,
-      "z": 110.0
+      "x": -30,
+      "y": 54,
+      "z": 110
     }
   ],
   "boostPads": [
     {
       "position": {
-        "x": 0.0,
+        "x": 0,
         "y": 25.53485870361328,
-        "z": 100.0
+        "z": 100
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 3.0,
-      "halfDepth": 6.0,
+      "halfWidth": 3,
+      "halfDepth": 6,
       "strength": 1.6
     },
     {
       "position": {
-        "x": -30.0,
+        "x": -30,
         "y": 48.07733917236328,
-        "z": -60.0
+        "z": -60
       },
       "rotation": {
-        "x": 0.0,
+        "x": 0,
         "y": 0.999999999999999,
-        "z": 0.0,
-        "w": -4.371139000186241e-08
+        "z": 0,
+        "w": -4.371139000186241e-8
       },
-      "halfWidth": 3.0,
-      "halfDepth": 6.0,
+      "halfWidth": 3,
+      "halfDepth": 6,
       "strength": 1.6
     },
     {
       "position": {
-        "x": -90.0,
+        "x": -90,
         "y": 22.283775329589844,
-        "z": -0.0
+        "z": 0
       },
       "rotation": {
-        "x": 0.0,
+        "x": 0,
         "y": -0.7071067966408575,
-        "z": 0.0,
+        "z": 0,
         "w": 0.7071067657322372
       },
-      "halfWidth": 3.0,
-      "halfDepth": 6.0,
+      "halfWidth": 3,
+      "halfDepth": 6,
       "strength": 1.6
     }
   ],
@@ -200,87 +200,87 @@
   "waveZones": [
     {
       "position": {
-        "x": 100.0,
-        "y": 0.0,
-        "z": 380.0
+        "x": 100,
+        "y": 0,
+        "z": 380
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": -0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 80.0,
-      "halfHeight": 60.0,
-      "halfDepth": 60.0,
+      "halfWidth": 80,
+      "halfHeight": 60,
+      "halfDepth": 60,
       "heightMult": 1.4,
       "freqMult": 0.9,
-      "blendRadiusM": 30.0,
-      "directionDeg": 270.0
+      "blendRadiusM": 30,
+      "directionDeg": 270
     },
     {
       "position": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": 100.0
+        "x": 0,
+        "y": 0,
+        "z": 100
       },
       "rotation": {
-        "x": 0.0,
-        "y": 0.0,
-        "z": -0.0,
-        "w": 1.0
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
       },
-      "halfWidth": 50.0,
-      "halfHeight": 30.0,
-      "halfDepth": 50.0,
+      "halfWidth": 50,
+      "halfHeight": 30,
+      "halfDepth": 50,
       "heightMult": 0.6,
       "freqMult": 1.1,
-      "blendRadiusM": 20.0
+      "blendRadiusM": 20
     },
     {
       "position": {
-        "x": -50.0,
-        "y": 0.0,
-        "z": 200.0
+        "x": -50,
+        "y": 0,
+        "z": 200
       },
       "rotation": {
-        "x": 0.0,
+        "x": 0,
         "y": 0.258819043636322,
-        "z": -0.0,
+        "z": 0,
         "w": 0.9659258127212524
       },
-      "halfWidth": 140.0,
-      "halfHeight": 30.0,
-      "halfDepth": 100.0,
+      "halfWidth": 140,
+      "halfHeight": 30,
+      "halfDepth": 100,
       "heightMult": 1.1,
-      "freqMult": 1.0,
-      "blendRadiusM": 25.0
+      "freqMult": 1,
+      "blendRadiusM": 25
     }
   ],
   "props": [],
   "water": {
-    "height": 0.0,
+    "height": 0,
     "waveHeight": 0.4,
     "waveFreq": 0.6
   },
   "terrainShader": {
-    "altMin": -50.0,
-    "altMax": 120.0,
+    "altMin": -50,
+    "altMax": 120,
     "slopeStart": 0.8500000238418579,
     "slopeEnd": 0.550000011920929,
     "variation": 0.30000001192092896,
-    "wetBand": 2.0,
+    "wetBand": 3,
     "pathTint": [
-      0.30000001192092896,
-      0.23999999463558197,
-      0.18000000715255737
+      0.32,
+      0.45,
+      0.4
     ],
     "warpStrength": 0.5,
-    "macroScale": 120.0,
-    "microScale": 8.0,
-    "altJitter": 4.0,
+    "macroScale": 120,
+    "microScale": 8,
+    "altJitter": 4,
     "screeBand": 0.25,
-    "saturation": 1.0499999523162842,
+    "saturation": 1.1,
     "triplanar": 0.6000000238418579
   },
   "aiSplines": [
@@ -289,7 +289,7 @@
       "points": [],
       "anchors": [
         {
-          "x": 250.0,
+          "x": 250,
           "y": 3.5,
           "z": 381.0162353515625
         },

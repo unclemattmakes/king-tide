@@ -8,6 +8,7 @@ import {
   type BoostPad,
   type Checkpoint,
   type HorizonConfig,
+  type LapWeather,
   type Prop,
   type PropType,
   type SkyColorGrade,
@@ -56,6 +57,7 @@ export type TrackJson = {
   gateSpacing?: number
   terrainShader?: TerrainShaderConfig
   audio?: AudioConfig
+  lapWeather?: LapWeather[]
 }
 
 export async function loadTrackFromJson(url: string): Promise<Track> {
@@ -167,6 +169,7 @@ export function buildTrackFromJson(input: unknown): Track {
     (input as { terrainShader?: unknown }).terrainShader,
   )
   const audio = readOptionalAudio((input as { audio?: unknown }).audio)
+  const lapWeather = readOptionalLapWeather((input as { lapWeather?: unknown }).lapWeather)
   const environmentGlb = (input as { environmentGlb?: unknown }).environmentGlb
   if (environmentGlb !== undefined && typeof environmentGlb !== 'string') {
     throw new Error('track-json: environmentGlb must be a string if present')
@@ -203,6 +206,7 @@ export function buildTrackFromJson(input: unknown): Track {
   if (gateSpacing !== undefined) track.gateSpacing = gateSpacing
   if (terrainShader) track.terrainShader = terrainShader
   if (audio) track.audio = audio
+  if (lapWeather) track.lapWeather = lapWeather
   return track
 }
 
@@ -310,6 +314,7 @@ export function trackToJson(track: Track): TrackJson {
     }
     out.audio = audio
   }
+  if (track.lapWeather) out.lapWeather = track.lapWeather.map((w) => ({ ...w }))
   return out
 }
 
@@ -667,6 +672,53 @@ function readOptionalSky(raw: unknown): SkyConfig | null {
       throw new Error(`track-json: sky.seaStateBeaufort must be in [0, 12] (got ${v})`)
     }
     out.seaStateBeaufort = v
+  }
+  return out
+}
+
+function readOptionalLapWeather(raw: unknown): LapWeather[] | null {
+  if (raw === undefined || raw === null) return null
+  if (!Array.isArray(raw)) {
+    throw new Error('track-json: lapWeather must be an array if present')
+  }
+  const out: LapWeather[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const e = raw[i]
+    if (!isObject(e)) {
+      throw new Error(`track-json: lapWeather[${i}] must be an object`)
+    }
+    const entry: LapWeather = {}
+    if ('cloudiness' in e) {
+      const v = e.cloudiness
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1) {
+        throw new Error(`track-json: lapWeather[${i}].cloudiness must be a number in [0,1]`)
+      }
+      entry.cloudiness = v
+    }
+    if ('beaufort' in e) {
+      const v = e.beaufort
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 12) {
+        throw new Error(`track-json: lapWeather[${i}].beaufort must be a number in [0,12]`)
+      }
+      entry.beaufort = v
+    }
+    if ('sunIntensity' in e) {
+      const v = e.sunIntensity
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+        throw new Error(`track-json: lapWeather[${i}].sunIntensity must be a non-negative number`)
+      }
+      entry.sunIntensity = v
+    }
+    if ('transitionSeconds' in e) {
+      const v = e.transitionSeconds
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+        throw new Error(
+          `track-json: lapWeather[${i}].transitionSeconds must be a non-negative number`,
+        )
+      }
+      entry.transitionSeconds = v
+    }
+    out.push(entry)
   }
   return out
 }

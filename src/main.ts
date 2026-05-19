@@ -40,7 +40,10 @@ import { createRenderer } from './engine/render/renderer'
 import { applyPixelRatio, setRenderer } from './engine/render/renderer-service'
 import { createRiderRenderSystem } from './engine/render/rider-systems'
 import { createScene } from './engine/render/scene'
+import { createBridgeSupports } from './engine/render/bridge-supports'
+import { createLapWeatherSystem } from './engine/render/lap-weather'
 import { beaufortToAmplitudeScale, createSkySystem } from './engine/render/sky'
+import { logWaterCoverage, reportWaterCoverage } from './engine/render/water-coverage'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { createWaterMesh } from './engine/render/water'
 import { createWaveLineShimmer } from './engine/render/wave-line-shimmer'
@@ -330,6 +333,14 @@ async function boot() {
   // geometry; .glb tracks bake one from the loaded scene group. The
   // setter is a no-op for editor mode (terrainHeightmap === null).
   if (terrainHeightmap) waterMesh.setTerrainHeightmap(terrainHeightmap)
+  // Diagnose race-spline water coverage. Logs an info line when we
+  // clear the v1 40 % wave-mastery target, a warning when we don't.
+  // Skipped in edit mode (no heightmap, the track is mid-authoring)
+  // and for tracks that haven't loaded an environment yet.
+  if (!editMode) {
+    const report = reportWaterCoverage(track, terrainHeightmap ?? null)
+    if (report) logWaterCoverage(trackId, report)
+  }
 
   // Sky / atmosphere system. Owns the dome mesh, fog + hemi-light palette,
   // and the PMREM env-map. The sun position and env-map are picked once
@@ -345,6 +356,22 @@ async function boot() {
     hemi,
     water: waterMesh,
     config: track.sky,
+  })
+
+  // Per-lap weather progression. No-ops for tracks without `lapWeather`
+  // (most of them); for Hatteras + The Maw it ramps cloudiness + Beaufort
+  // wave scale + sun intensity between laps so "the storm rolls in"
+  // reads visually. `lap === 1` fires its first ramp via the
+  // race-system's lap-start hook below (lap 0 was applied at construction).
+  const lapWeather = createLapWeatherSystem({
+    schedule: track.lapWeather,
+    initial: {
+      cloudiness: track.sky?.cloudiness ?? 0.45,
+      beaufort: track.sky?.seaStateBeaufort ?? 4,
+      sunIntensity: track.sky?.sunIntensity ?? 1.0,
+    },
+    sky,
+    waveField,
   })
 
   // Cloud-shadow injection. With sky's shared uniforms in hand we build a
@@ -415,6 +442,22 @@ async function boot() {
 
   const trackVisuals = createTrackVisuals(track)
   scene.add(trackVisuals.group)
+
+  // Bridge supports — procedural stone pillars under elevated road
+  // sections where the spline sits well above the terrain. The pillars
+  // give a bridge identity to authored road shoulders that previously
+  // just ramped terrain up to the road slab. No-op for tracks whose
+  // road is on the ground (sandbar, low-elevation lagoons).
+  const bridgeSupports = createBridgeSupports({
+    track,
+    heightmap: terrainHeightmap ?? null,
+    waterY: track.water?.height ?? 0,
+  })
+  if (bridgeSupports) {
+    scene.add(bridgeSupports.group)
+    // eslint-disable-next-line no-console
+    console.info(`[bridge-supports] ${trackId}: ${bridgeSupports.count / 2} pillar pair(s)`)
+  }
 
   // Editor-authored props: render meshes + static colliders. Asset
   // props (those carrying `assetId`) need their GLBs pre-loaded so the
@@ -592,6 +635,10 @@ async function boot() {
         const lapTime = r.raceTime - lapState.lapStartRaceTime
         lapState.lastLapTime = lapTime
         lapState.lapStartRaceTime = r.raceTime
+        // Per-lap weather kicks. `r.lap` is the lap *just started*
+        // (incremented when cp 0 is crossed past the first time), so
+        // entry `lapWeather[r.lap]` is the target for the next lap.
+        lapWeather.onLapStart(r.lap)
         if (lapState.bestLapThisRace === null || lapTime < lapState.bestLapThisRace) {
           lapState.bestLapThisRace = lapTime
         }
@@ -996,6 +1043,7 @@ async function boot() {
     waveField,
     waterMesh,
     sky,
+    lapWeather,
     horizonRing,
     trackVisuals,
     raceHud,

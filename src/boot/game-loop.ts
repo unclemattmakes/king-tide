@@ -153,6 +153,13 @@ export interface GameLoopOpts {
     debug: { getTimeScale: () => number }
   }
   sky: SkySystem
+  /** Per-lap weather progression. Stepped each frame; `onLapStart` is
+   *  invoked from the race-system lap-start branch in main.ts (the lap
+   *  signal originates there). No-op for tracks without `lapWeather`. */
+  lapWeather: {
+    step(dt: number): void
+    onLapStart(lap: number): void
+  }
   horizonRing: HorizonRing
   trackVisuals: TrackVisuals
   raceHud: RaceHud
@@ -294,6 +301,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     waveField,
     waterMesh,
     sky,
+    lapWeather,
     horizonRing,
     trackVisuals: _trackVisuals,
     raceHud,
@@ -758,6 +766,11 @@ export function startGameLoop(opts: GameLoopOpts): void {
     }
 
     waterMesh.tick(gatherBikeImpacts(), { x: camera.position.x, z: camera.position.z })
+    // Per-lap weather progression — lerps cloudiness/sun/Beaufort
+    // toward the next-lap target over `transitionSeconds`. No-op
+    // when the track ships no `lapWeather` schedule, so the cost is
+    // a single early-out per frame for non-storm tracks.
+    lapWeather.step(dt)
     // Day-night cycle + fog/hemi palette + PMREM env-map bake. The sky
     // system owns the directional-sun follow (shadow-camera centred on the
     // bike) and the water shader's sun-direction uniform. Time is the

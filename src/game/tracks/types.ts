@@ -68,6 +68,14 @@ export type Track = {
    *  [terrain-shader.ts](../../engine/render/terrain-shader.ts). Absent
    *  → runtime defaults (matches the seeded Blender preview). */
   terrainShader?: TerrainShaderConfig
+  /** Optional per-lap weather snapshots. Indexed by lap number (0 =
+   *  starting weather, 1 = lap 1 target, ...). Each lap transition lerps
+   *  cloudiness / sun-intensity / Beaufort wave-amplitude scale toward
+   *  the next entry over `transitionSeconds`. Use for tracks where the
+   *  weather changes during the race — Hatteras' storm rolling in, The
+   *  Maw's swell building. Empty/absent → static weather matching the
+   *  track's `sky` config. See [lap-weather.ts](../../engine/render/lap-weather.ts). */
+  lapWeather?: LapWeather[]
   /** Optional per-track audio palette — licensed music slot + layered
    *  ambient bed. Editor-authored (or hand-edited in the JSON) because
    *  music is licensed/commissioned and not procedural. When absent,
@@ -317,6 +325,29 @@ export type WaterConfig = {
   waveHeight: number
   /** Wave frequency scalar passed to the wave field. */
   waveFreq: number
+}
+
+/**
+ * Per-lap weather snapshot. Position N in `Track.lapWeather` is the target
+ * state the runtime lerps toward when lap N starts. Entry 0 (if present)
+ * overrides the boot state; subsequent entries describe later laps.
+ *
+ *   cloudiness    — 0..1 sky cloud-cover (and shadow strength on terrain).
+ *                   Replaces `track.sky.cloudiness` for this lap onward.
+ *   beaufort      — 0..12 Beaufort wind scale. Sets the live wave
+ *                   amplitude relative to the per-track seed baseline
+ *                   (the boot-time Beaufort sets that baseline; per-lap
+ *                   beaufort scales it up or down). Higher = stormier.
+ *   sunIntensity  — multiplier on the directional sun. Drop toward
+ *                   0.3-0.5 for "the storm just rolled over the sun".
+ *   transitionSeconds — seconds to lerp the previous state to this
+ *                   entry's target. Default 5 s. Applied on lap entry.
+ */
+export type LapWeather = {
+  cloudiness?: number
+  beaufort?: number
+  sunIntensity?: number
+  transitionSeconds?: number
 }
 
 /**
