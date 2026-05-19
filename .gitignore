@@ -17,6 +17,10 @@ playwright-report/
 playwright/.cache/
 coverage/
 
+# QA orchestrator output (pnpm qa). Committed CI artifacts live on
+# the workflow upload; local runs stay out of git.
+qa-report/
+
 # editor
 .vscode/
 .idea/

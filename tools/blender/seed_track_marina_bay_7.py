@@ -664,6 +664,57 @@ def _add_camera_hero(scene: bpy.types.Scene) -> None:
 
 
 # ────────────────────────────────────────────────────────────────────
+# Sky preset — sodium-dusk industrial harbour. Without this push the
+# export emits template-island's neutral defaults; with it, the JSON
+# carries the warm-orange sodium-lamp tint the track-themes brief calls
+# for. `nyc_sunset` is the closest bundled `colorGrade` to the
+# track-themes "orange container stacks, sodium-lamp yellow" palette;
+# no `industrial_haze` preset exists yet.
+# ────────────────────────────────────────────────────────────────────
+
+SKY_PRESET = {
+    "tint":          "#ffb866",     # sodium-lamp warm orange
+    "cloudiness":    0.5,           # overcast harbour
+    "sun_intensity": 0.75,          # low — the sun is below the cranes
+    "fog_near":      180.0,         # harbour haze closes in fast
+    "fog_far":       900.0,
+    "time_of_day":   320.0,         # late dusk (320 / 360 → just past sunset)
+    "color_grade":   "nyc_sunset",  # closest bundled preset
+    "bloom":         0.55,
+    "sea_state":     2,             # sheltered harbour — small chop
+}
+
+
+def _apply_sky_preset(scene: bpy.types.Scene) -> None:
+    """Push Marina Bay 7's sodium-dusk sky preset into scene props so
+    ``derive_sky_block`` emits the right JSON. Mirrors the Maw / Kilauea
+    / Sandbar pattern."""
+    try:
+        from hoverbike_addon.sky_preset import set_sky_tint_from_hex
+    except ImportError:
+        try:
+            from hoverbike_addon_disk.sky_preset import set_sky_tint_from_hex
+        except ImportError:
+            print("  WARN: sky_preset module not reachable headless — "
+                  "JSON stub's sky block will survive instead of being "
+                  "overwritten by scene defaults.")
+            return
+
+    if hasattr(scene, "hoverbike_sky_color_grade"):
+        scene.hoverbike_sky_color_grade = SKY_PRESET["color_grade"]
+        scene.hoverbike_sky_cloudiness = SKY_PRESET["cloudiness"]
+        scene.hoverbike_sky_sun_intensity = SKY_PRESET["sun_intensity"]
+        scene.hoverbike_sky_fog_near = SKY_PRESET["fog_near"]
+        scene.hoverbike_sky_fog_far = SKY_PRESET["fog_far"]
+        scene.hoverbike_sky_time_of_day = SKY_PRESET["time_of_day"]
+        scene.hoverbike_sky_bloom = SKY_PRESET["bloom"]
+        scene.hoverbike_sky_sea_state = SKY_PRESET["sea_state"]
+        set_sky_tint_from_hex(SKY_PRESET["tint"])
+        print(f"  sky preset: sodium_dusk (Beaufort-{SKY_PRESET['sea_state']}, "
+              f"{SKY_PRESET['color_grade']}, bloom={SKY_PRESET['bloom']})")
+
+
+# ────────────────────────────────────────────────────────────────────
 # Top-level augmentation orchestrator
 # ────────────────────────────────────────────────────────────────────
 
@@ -682,8 +733,17 @@ def augment_scene() -> None:
     _build_wave_zone(scene)
     _build_pickups_and_boosts(scene)
     _add_camera_hero(scene)
+    _apply_sky_preset(scene)
     print(f"[marina-bay-7] augment: {n_cranes} cranes + tanker + 12 containers + "
           f"{n_facades} facades + 1 wave zone + 6 pickups + 2 boost pads + camera_hero")
+
+    # The spline brushes the beached tanker's deck-shortcut footprint;
+    # the auto-shift nudges that one anchor off without disturbing the
+    # gauntlet straight. Snapped back to terrain afterwards to recover
+    # any z drift from the XY push.
+    print("[marina-bay-7] shifting spline off industrial obstacles")
+    bpy.ops.hoverbike.shift_spline_off_obstacles(margin=4.0)
+    bpy.ops.hoverbike.snap_spline_to_terrain()
 
     # Save .blend with augmentation in place. build_track_from_spec
     # already saved + exported before we got here; this second save

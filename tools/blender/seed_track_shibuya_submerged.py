@@ -624,6 +624,56 @@ def _add_camera_hero(scene) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Sky preset — push tokyo_neon palette into scene props so the export
+# pass derives the right sky block. Without this push the export would
+# emit template-island's `neutral` defaults and Shibuya would lose its
+# hot-pink-and-electric-blue palette story.
+# ─────────────────────────────────────────────────────────────────────
+
+SKY_PRESET = {
+    "tint":          "#ff80c8",      # hot pink — wet asphalt + kanji neon reflection
+    "cloudiness":    0.55,           # overcast Tokyo night
+    "sun_intensity": 0.85,           # low sun (it's after dusk)
+    "fog_near":      200.0,          # urban night — closer fog cocoons the rooftops
+    "fog_far":       1100.0,
+    "time_of_day":   240.0,          # dusk transitioning to night (240s / 360s = 6 PM-ish)
+    "color_grade":   "tokyo_neon",   # the canonical Shibuya preset
+    "bloom":         1.0,            # neon needs the halation
+    "sea_state":     3,              # mild urban chop at the flooded crossing
+}
+
+
+def _apply_sky_preset(scene: bpy.types.Scene) -> None:
+    """Push Shibuya's tokyo_neon sky preset into scene props so
+    ``derive_sky_block`` emits the right JSON on export. Mirrors the
+    Maw / Kilauea / Sandbar pattern. Lazy-import keeps the seed
+    decoupled from the addon's per-module register order."""
+    try:
+        from hoverbike_addon.sky_preset import set_sky_tint_from_hex
+    except ImportError:
+        try:
+            from hoverbike_addon_disk.sky_preset import set_sky_tint_from_hex
+        except ImportError:
+            print("  WARN: sky_preset module not reachable headless — "
+                  "JSON stub's sky block will survive instead of being "
+                  "overwritten by scene defaults.")
+            return
+
+    if hasattr(scene, "hoverbike_sky_color_grade"):
+        scene.hoverbike_sky_color_grade = SKY_PRESET["color_grade"]
+        scene.hoverbike_sky_cloudiness = SKY_PRESET["cloudiness"]
+        scene.hoverbike_sky_sun_intensity = SKY_PRESET["sun_intensity"]
+        scene.hoverbike_sky_fog_near = SKY_PRESET["fog_near"]
+        scene.hoverbike_sky_fog_far = SKY_PRESET["fog_far"]
+        scene.hoverbike_sky_time_of_day = SKY_PRESET["time_of_day"]
+        scene.hoverbike_sky_bloom = SKY_PRESET["bloom"]
+        scene.hoverbike_sky_sea_state = SKY_PRESET["sea_state"]
+        set_sky_tint_from_hex(SKY_PRESET["tint"])
+        print(f"  sky preset: tokyo_neon (Beaufort-{SKY_PRESET['sea_state']}, "
+              f"{SKY_PRESET['color_grade']}, bloom={SKY_PRESET['bloom']})")
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Top-level augmentation orchestrator
 # ─────────────────────────────────────────────────────────────────────
 
@@ -652,10 +702,24 @@ def augment_scene() -> None:
     pickups = _add_pickups(scene)
     boosts = _add_boost_pads(scene)
     _add_camera_hero(scene)
+    _apply_sky_preset(scene)
     print(
         f"[shibuya-submerged] augment summary: "
         f"{waves} wave zones + {pickups} pickups + {boosts} boost pads"
     )
+
+    # Nudge any spline control point that clips into a downtown plinth /
+    # facade / tower base out of the obstacle's footprint. The downtown
+    # template's procedural building plinths are tall enough to register
+    # as obstacles, so the spline's anchors that pass through a building
+    # footprint need to be pushed perpendicular to the nearest bbox edge
+    # before export. Runs twice in case overlapping clearance bands
+    # leave a point inside a second obstacle after the first push.
+    print("[shibuya-submerged] shifting spline off downtown obstacles")
+    bpy.ops.hoverbike.shift_spline_off_obstacles(margin=4.0)
+    bpy.ops.hoverbike.shift_spline_off_obstacles(margin=4.0)
+    # Re-snap to terrain to recover any z drift caused by the XY push.
+    bpy.ops.hoverbike.snap_spline_to_terrain()
 
     # Save .blend with augmentation, then re-export so the GLB +
     # public/tracks/<id>.json pick up the new objects. Mirrors the
