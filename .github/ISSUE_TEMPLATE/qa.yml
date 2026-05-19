@@ -1,0 +1,98 @@
+name: QA report
+description: Findings from a QA pass — manual playtest, automated matrix failure, or in-session repro bundle.
+labels: [qa]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        File this when QA tooling surfaces a regression or you find an
+        issue during a manual sweep. See [docs/qa-playbook.md](https://github.com/occ-matt/hoverbike/blob/main/docs/qa-playbook.md)
+        for the convention.
+
+        **Tip:** in any dev / preview tab, run
+        `window.__hover.qa.downloadBundle()` to grab a JSON bundle with
+        everything triage needs (URL, viewport, perf stats, console
+        ring, settings). Drag the file into the "Bundle" field below.
+
+  - type: dropdown
+    id: source
+    attributes:
+      label: Where did this come from?
+      options:
+        - Manual playtest (followed the QA playbook checklist)
+        - QA matrix failure (`pnpm qa` reported it)
+        - Soak failure (overnight or `pnpm qa --soak`)
+        - In-session bundle (someone hit it during play)
+        - Cross-browser smoke
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: One paragraph — what broke, where, and how visible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: |
+        Step-by-step. Include URL params (`?track=cliffside&bike=stunt`,
+        `?edit=1`, `?room=foo`) and any QA env vars
+        (`QA_MATRIX=1`, `QA_SOAK=1`, `QA_SOAK_SECONDS=120`).
+      placeholder: |
+        1. `pnpm qa --soak`
+        2. soak step fails on Cliffside × stunt with heap end/mid ratio 1.8
+        3. console-trap shows 12 `[wave-field] vy NaN` warnings
+    validations:
+      required: true
+
+  - type: textarea
+    id: bundle
+    attributes:
+      label: QA bundle
+      description: |
+        Paste the contents of `hoverbike-bug-*.json` from
+        `window.__hover.qa.downloadBundle()`. The bundle's schema
+        is in `src/engine/qa/bug-bundle.ts`; the schemaVersion = 1.
+      render: json
+
+  - type: textarea
+    id: report
+    attributes:
+      label: qa-report.md (if any)
+      description: |
+        If this came from `pnpm qa`, paste the summary table from
+        `qa-report/qa-report.md` (the top "Shippability" + "Summary"
+        sections are enough — full per-step detail is in the
+        artifact).
+      render: markdown
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - ship-block — release stops here until it's fixed
+        - high — should be fixed before the next milestone
+        - medium — track it, fix as part of polish
+        - low / cosmetic
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit / build URL
+      description: Either a commit SHA or the Vercel preview URL.
+      placeholder: "abc1234 or https://hoverbike-...vercel.app"
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Triage notes
+      description: Anything else — suspected subsystem, related PRs, screenshots, hypotheses.

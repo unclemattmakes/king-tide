@@ -1,0 +1,111 @@
+name: qa
+
+# Hoverbike QA report — runs the orchestrator on push + PR, uploads
+# the qa-report/ artifact, writes the Markdown summary into the job's
+# GitHub Step Summary so reviewers don't have to download the artifact
+# to see results. Today this workflow is NON-BLOCKING — failures are
+# advisory while v1 art lands and per-track budgets calibrate. See
+# docs/qa-playbook.md for the full convention.
+#
+# The soak step runs nightly on `main` only, on its own schedule.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Nightly at 06:17 UTC. Picked off-peak vs CI windows so we don't
+    # collide with the asset-pipeline + build-desktop jobs.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qa:
+    name: QA report (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Keep going so a flaky perf cell doesn't abort the artifact upload.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm e2e:install
+
+      - name: Run pnpm qa
+        # The orchestrator returns the worst-case exit code; we mask it
+        # here while QA is non-blocking. Drop the `|| true` once the
+        # matrix is calibrated and we want PRs to gate on it.
+        run: pnpm qa --skip-track-lint || true
+
+      - name: Append report to job summary
+        if: always()
+        run: |
+          if [ -f qa-report/qa-report.md ]; then
+            cat qa-report/qa-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "QA report missing — see step logs." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload QA report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qa-report
+          path: qa-report/
+          retention-days: 14
+
+  qa-soak:
+    name: QA soak (nightly, main only)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: pnpm e2e:install
+
+      - name: Run pnpm qa --soak
+        run: pnpm qa --soak --skip-track-lint || true
+
+      - name: Append soak report to job summary
+        if: always()
+        run: |
+          if [ -f qa-report/qa-report.md ]; then
+            cat qa-report/qa-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload soak report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qa-soak-report
+          path: qa-report/
+          retention-days: 30
