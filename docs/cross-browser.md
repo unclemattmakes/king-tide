@@ -56,9 +56,8 @@ CI installs all three when `E2E_BROWSERS=all` is set.
 ### WebKit on Linux uses software WebGL
 
 WebKitGTK in Playwright has no real GPU passthrough — its WebGL pipeline
-runs through llvmpipe. The water shader and Cliffside mesa are too heavy
-for single-digit fps; specs that depend on physics-driven motion
-(`m2-water.spec.ts`, `m9-cliffside.spec.ts`) carry a
+runs through llvmpipe. The water shader is too heavy for single-digit fps;
+specs that depend on physics-driven motion (`m2-water.spec.ts`) carry a
 `test.skip(browserName === 'webkit' && platform === 'linux', …)` guard.
 
 `m9-audio.spec.ts` has the same guard for a different reason: WebKit's

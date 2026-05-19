@@ -32,9 +32,9 @@ const enabled = parseBrowsers()
 // headed. Firefox supports WebGL2 fine but ignores Chromium-specific launch
 // args; we let Playwright's `devices['Desktop Firefox']` defaults apply.
 // WebKit on Linux can ONLY run a software WebGL pipeline (no real GPU access
-// through WebKitGTK in Playwright), so GPU-heavy specs (m2-water, m9-cliffside,
-// m9-audio) carry a `test.skip(browserName === 'webkit' && platform === 'linux')`
-// guard. Run those suites on macOS WebKit for real coverage.
+// through WebKitGTK in Playwright), so GPU-heavy specs (m2-water, m9-audio)
+// carry a `test.skip(browserName === 'webkit' && platform === 'linux')` guard.
+// Run those suites on macOS WebKit for real coverage.
 const allProjects: Array<{ key: string; project: PlaywrightTestProject }> = [
   { key: 'chromium', project: { name: 'chromium', use: { ...devices['Desktop Chrome'] } } },
   { key: 'firefox', project: { name: 'firefox', use: { ...devices['Desktop Firefox'] } } },
