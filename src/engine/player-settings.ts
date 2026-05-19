@@ -76,6 +76,19 @@ export type AntiGravCameraIntensity = 'full' | 'reduced' | 'off'
  */
 export type WaveLineIntensity = 'full' | 'subtle' | 'off'
 
+/** Emissive-landmarks intensity. Currently drives the lava-river runtime
+ *  shader (Kilauea's hero waterfall + any future track that drops a
+ *  `landmark_lava_river_strip` instance). Off falls back to the GLB's
+ *  flat baked material so low-end GPUs or motion-sensitive players
+ *  aren't forced to render the glow pass. The same knob is the future
+ *  home for any other emissive-mask landmark material that lands.
+ *
+ *  - `full`:    full hot-core emissive boost
+ *  - `reduced`: ~50% — visible glow without bloom-saturating the framebuffer
+ *  - `off`:     no emissive contribution; lava reads as a flat band
+ */
+export type EmissiveLandmarksIntensity = 'full' | 'reduced' | 'off'
+
 export type PlayerSettings = {
   wavePumpIntensity: WavePumpIntensity
   aiDifficulty: AIDifficulty
@@ -86,6 +99,8 @@ export type PlayerSettings = {
   antiGravCameraIntensity: AntiGravCameraIntensity
   /** Wave-line shimmer guidance intensity — see `WaveLineIntensity`. */
   waveLineIntensity: WaveLineIntensity
+  /** Emissive-landmarks intensity — see `EmissiveLandmarksIntensity`. */
+  emissiveLandmarks: EmissiveLandmarksIntensity
   /** Subtitles for the tutorial framework's prompt callouts.
    *  Affects only the tutorial HUD widget — race callouts and pump
    *  feedback are unaffected. */
@@ -202,6 +217,7 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   rubberBandAssist: true,
   antiGravCameraIntensity: 'full',
   waveLineIntensity: 'full',
+  emissiveLandmarks: 'full',
   tutorialSubtitles: true,
   tutorialCompleted: false,
   audioMasterVolume: 0.8,
@@ -251,6 +267,7 @@ const VALID_WAVE_PUMP_INTENSITY: WavePumpIntensity[] = ['full', 'subtle', 'off']
 const VALID_AI_DIFFICULTY: AIDifficulty[] = ['casual', 'standard', 'hard']
 const VALID_ANTI_GRAV_CAMERA: AntiGravCameraIntensity[] = ['full', 'reduced', 'off']
 const VALID_WAVE_LINE_INTENSITY: WaveLineIntensity[] = ['full', 'subtle', 'off']
+const VALID_EMISSIVE_LANDMARKS: EmissiveLandmarksIntensity[] = ['full', 'reduced', 'off']
 const VALID_COLORBLIND_MODE: ColorblindMode[] = ['off', 'deuteranopia', 'protanopia', 'tritanopia']
 
 /** Roll-follow scalar each intensity step contributes — multiplied by
@@ -260,6 +277,17 @@ export const ANTI_GRAV_CAMERA_SCALAR: Readonly<Record<AntiGravCameraIntensity, n
   Object.freeze({
     full: 1.0,
     reduced: 0.4,
+    off: 0,
+  })
+
+/** Emissive intensity multiplier each landmark-emissive step contributes.
+ *  Multiplied into the lava material's hot-core ↔ band-edge gradient at
+ *  the `emissive` output, so `off` collapses the contribution to zero
+ *  (the band reads as flat albedo) and `full` is the trailer-shot glow. */
+export const EMISSIVE_LANDMARKS_SCALAR: Readonly<Record<EmissiveLandmarksIntensity, number>> =
+  Object.freeze({
+    full: 1.0,
+    reduced: 0.5,
     off: 0,
   })
 
@@ -303,6 +331,12 @@ export function loadPlayerSettings(): void {
     (VALID_WAVE_LINE_INTENSITY as string[]).includes(p.waveLineIntensity)
   ) {
     playerSettings.waveLineIntensity = p.waveLineIntensity as WaveLineIntensity
+  }
+  if (
+    typeof p.emissiveLandmarks === 'string' &&
+    (VALID_EMISSIVE_LANDMARKS as string[]).includes(p.emissiveLandmarks)
+  ) {
+    playerSettings.emissiveLandmarks = p.emissiveLandmarks as EmissiveLandmarksIntensity
   }
   if (typeof p.tutorialSubtitles === 'boolean') {
     playerSettings.tutorialSubtitles = p.tutorialSubtitles
@@ -427,6 +461,16 @@ export function setAntiGravCameraIntensity(v: AntiGravCameraIntensity): void {
 export function setWaveLineIntensity(v: WaveLineIntensity): void {
   playerSettings.waveLineIntensity = v
   savePlayerSettings()
+}
+
+export function setEmissiveLandmarks(v: EmissiveLandmarksIntensity): void {
+  playerSettings.emissiveLandmarks = v
+  savePlayerSettings()
+  // Lazy import so this module stays cheap for tests / early boot paths
+  // that never reach the render layer.
+  void import('./render/lava-river-material').then(({ applyEmissiveLandmarksSetting }) => {
+    applyEmissiveLandmarksSetting(v)
+  })
 }
 
 export function setTutorialSubtitles(on: boolean): void {

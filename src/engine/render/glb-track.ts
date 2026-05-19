@@ -1,8 +1,10 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { ExportedKind } from '@/engine/asset-kinds'
+import { applyLavaRiverMaterialToScene } from '@/engine/render/lava-river-material'
 import { applyTerrainShaderToScene } from '@/engine/render/terrain-shader'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
+import { playerSettings } from '@/engine/player-settings'
 import type { GltfRoot } from '@/game/tracks/glb-loader'
 import type { TerrainShaderConfig } from '@/game/tracks/types'
 
@@ -106,6 +108,16 @@ export async function loadGlbTrackVisuals(
   // ``public/tracks/<id>.json`` — when present, the addon authored
   // these values in its "Terrain shader (runtime)" panel.
   applyTerrainShaderToScene(scene, opts?.terrainShader ?? {})
+  // Hero-landmark emissive materials. Currently just the lava-river
+  // strip — Kilauea Crown's lava-waterfall set-piece needs a glowing
+  // hot-core read pulled out of the COLOR_0.R mask the seed baked into
+  // the geometry. Same one-pass model as the terrain swap: any mesh
+  // tagged ``landmark_id = "lava_river_strip"`` gets ``mat_lava_river``
+  // (with hot-core ↔ band-edge mix + scrolling flow shimmer), every
+  // other mesh keeps its GLB material. The shared intensity uniform
+  // reads the player's emissive-landmarks setting; subsequent setting
+  // changes mutate the same uniform without re-loading the track.
+  applyLavaRiverMaterialToScene(scene, playerSettings.emissiveLandmarks)
   return {
     scene,
     parsedJson,
