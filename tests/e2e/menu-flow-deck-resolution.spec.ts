@@ -14,6 +14,8 @@ test.use({
   contextOptions: { reducedMotion: 'reduce' },
 })
 
+test.describe.configure({ timeout: 60_000 })
+
 test.describe('menu @ 1280×800 (Steam Deck)', () => {
   test('title screen fits in the viewport without vertical scroll', async ({ page }) => {
     await page.goto('/')
@@ -32,9 +34,13 @@ test.describe('menu @ 1280×800 (Steam Deck)', () => {
 
   test('mode-select screen fits at Deck resolution', async ({ page }) => {
     await page.goto('/')
-    await page.locator('#title-start').click()
+    // `force: true` skips the stability dance — the infinite `bc-live`
+    // / `bc-blink` chyron animations otherwise keep Playwright's stable
+    // check from settling under SwiftShader. See `menu-flow.spec.ts`
+    // header for the full rationale.
+    await page.locator('#title-start').click({ force: true })
     // First mode card visible = mode-select screen has rendered.
-    await expect(page.locator('.bc-mode-card[data-mode="race"]')).toBeVisible({ timeout: 5_000 })
+    await expect(page.locator('.bc-mode-card[data-mode="race"]')).toBeVisible({ timeout: 10_000 })
 
     const { scrollHeight, clientHeight } = await page.evaluate(() => ({
       scrollHeight: document.documentElement.scrollHeight,
