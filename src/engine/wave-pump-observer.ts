@@ -1,222 +1,134 @@
 /**
- * Trick-boost event detector.
+ * Trick-event shim + shared tuning module.
  *
- * Replaces the original auto-fire crest detector. The new model is
- * MK8-style: the player presses a trick button (L1 / R1 on gamepad,
- * Z / C on keyboard) and the observer decides whether that press
- * deserves an immediate boost.
+ * Previously this module owned a render-side observer that
+ * independently reproduced the sim's vy-peak tracker and ran its own
+ * credibility check at press time. The airborne-gated trick model
+ * collapsed those decisions into the sim (`trickHopSystem`): the sim
+ * sets `TrickState.trickFiredThisTick` on the tick a credible trick
+ * fires, and this module's `createWavePumpObserver()` now does
+ * nothing more than translate that flag into a `PumpEvent` for the
+ * existing HUD / audio / FX wiring.
  *
- * Gating, same as the old observer's reward rules:
+ * Why it still exists:
  *
- *   - **vy peak** — the bike must have been climbing (vy > minVyPeak)
- *     in the recent past. Pressing while riding up a swell or cresting
- *     a ramp pays off; flat-ground presses fire the hop but no boost.
- *   - **speed + throttle** — the player has to be moving and on the
- *     gas. Catches the "deliberate" cases and rejects coasting/parked
- *     bikes.
- *   - **trick-button rising edge** — only fresh presses count. Holding
- *     L1 doesn't auto-arm every crest.
+ *   - The `PumpEvent` type is the shared lingua franca between sim
+ *     and render. FX, audio, and HUD all consume it.
+ *   - The tuning constants (`MIN_VY_PEAK`, `MIN_SPEED_FRAC`, etc.)
+ *     are imported by both the sim and the render's HUD-prompt logic
+ *     so they stay in lockstep.
+ *   - `strengthFromTakeoffVy()` is the wave-mastery reward curve and
+ *     belongs in shared code so the sim and any HUD readouts agree.
  *
- * Boost fires **on the press**, not on landing — the older landing-
- * gated model felt laggy because the speed payoff arrived after the
- * spin had already played out. Fire-on-press tightens the feedback
- * loop: press the button at the apex → immediate FOV punch + forward
- * impulse while the bike is still mid-trick, exactly like MK8.
- *
- * Lives on the render side, not the sim. Pump events are pure feedback
- * — no determinism dependency, no replay obligation — so they don't
- * belong in `simulateStep`. The game loop reads the trick observer
- * each render frame and forwards the boost event to FX + audio +
- * physics-impulse.
+ * The observer interface (`detect`, `reset`, `debug`) is preserved
+ * so the game-loop's existing call sites don't move. `detect()` now
+ * takes a minimal sample carrying just the sim's fire flag + the
+ * takeoff strength / direction.
  */
 
 export type PumpEvent = {
   /** Event firing time, performance.now() — used for HUD widget timing. */
   t: number
-  /** 0..1 strength score. Blends the peak upward velocity reached
-   *  before the trick was armed with the forward-speed fraction. HUD
-   *  scales flash intensity off this; audio picks chord layer; physics
-   *  scales the forward kick. */
+  /** 0..1 strength — drives HUD flash intensity, audio chord layer,
+   *  and the forward-impulse magnitude. Comes straight from the sim's
+   *  `trickFiredStrength`, which is `strengthFromTakeoffVy(vy)`. */
   strength: number
-  /** Which side the player pressed for the trick — drives the visual
-   *  spin direction in the bike render and the HUD's left/right
-   *  indicator. */
+  /** Which side the player committed to: 'left' for trickLeft / L1,
+   *  'right' for trickRight / R1. Captured at press time even for
+   *  buffered presses, so the spin direction reflects intent. */
   direction: 'left' | 'right'
 }
 
 export type WavePumpSample = {
-  /** Bike-on-water-and-grounded for this tick, per HoverState. Routed
-   *  to audio palette choices downstream; no longer gates firing. */
-  surfaceIsWater: boolean
-  isGrounded: boolean
-  /** World-Y velocity component (positive = upward). */
-  vy: number
-  /** Horizontal speed in m/s. */
-  forwardSpeed: number
-  /** Bike's configured top speed (m/s). */
-  topSpeed: number
-  /** This-frame throttle, 0..1. */
-  throttle: number
-  /** Held state of the two trick buttons. The observer detects rising
-   *  edges internally — held-down does not re-arm. */
-  trickLeft: boolean
-  trickRight: boolean
-  /** True when the bike is in the airborne arc of a previous hop —
-   *  the sim sets this on `TrickState.hopLockoutActive`. While locked,
-   *  the observer's vy-peak tracker ignores updates because the
-   *  bike's lift comes from its own impulse, not a surface climb.
-   *  Without this gate every hop's velocity registers as a credible
-   *  "peak" for the next press, turning flat-road bunny-hops into
-   *  free tricks. */
-  hopLockedOut: boolean
+  /** True on the single tick the sim's `trickHopSystem` fires a
+   *  credible trick. Read once, then cleared by the sim next tick. */
+  trickFiredThisTick: boolean
+  /** Sim-supplied strength (0..1) for this fire. */
+  trickFiredStrength: number
+  /** Sim-supplied direction: -1 left, +1 right. */
+  trickFiredDirection: number
 }
 
-export type DetectorTuning = {
-  /** Peak upward velocity (m/s) the bike must have reached recently for
-   *  a trick to count as a crest hop. Below this it was just chop / a
-   *  flat hop, no boost. */
-  minVyPeak: number
-  /** Minimum forward speed as a fraction of bike top speed. Catches
-   *  "deliberate" tricks; rejects coasting / parked bikes. */
-  minSpeedFrac: number
-  /** Minimum throttle this tick. */
-  minThrottle: number
-  /** Per-bike cooldown (ms) between boost events. Long enough that
-   *  back-to-back trick spam doesn't double-fire; short enough that
-   *  chaining tricks across a swell train still reads. */
-  cooldownMs: number
-  /** vy peak at which strength saturates to 1.0. */
-  vyCeiling: number
-  /** How long (ms) a "recent climb" peak stays valid for arming. After
-   *  this window the peak resets — protects against landing a boost
-   *  from a crest the player rode 3 seconds ago. */
-  peakStaleMs: number
-}
+// ── Shared tuning ────────────────────────────────────────────────────
+// These values are the single source of truth for the trick model.
+// `trickHopSystem` reads them for its eligibility gates; the HUD-
+// prompt logic in `game-loop` reads them to decide when to show the
+// "TRICK READY" cue. Changing a value here changes both behaviors.
 
-export const DEFAULT_DETECTOR_TUNING: Readonly<DetectorTuning> = Object.freeze({
-  // 3.5 m/s — a deliberate ridable wave climb (not just chop). The
-  // hop-lockout prevents self-arming from the bike's own impulses,
-  // so the threshold can sit closer to "modest wave" territory than
-  // the earlier 5.0 anchor required, giving the player more honest
-  // trickable opportunities without flat-ground noise.
-  minVyPeak: 3.5,
-  minSpeedFrac: 0.35,
-  minThrottle: 0.3,
-  cooldownMs: 500,
-  // Strength saturates at ~ramp territory (8 m/s) — between the
-  // threshold (3.5) and the ceiling, strength scales 0.2 → 1.0
-  // proportionally to how much vertical velocity the bike has built.
-  vyCeiling: 8.0,
-  // 300 ms apex window. The press has to land WHILE the bike is
-  // still on the rising face of the crest, not a beat after it's
-  // already started falling — turns the trick into a deliberate
-  // apex-timing input rather than a delayed reward.
-  peakStaleMs: 300,
-})
+/** Vertical velocity (m/s) the bike must reach at the moment of
+ *  takeoff for a trick window to open. Same threshold gates the
+ *  pre-press buffer (a recent `vyPeak ≥ MIN_VY_PEAK` indicates a
+ *  qualifying takeoff is plausible). 3.5 m/s catches a ridable wave
+ *  climb or ramp lip without arming on flat-ground chop. */
+export const MIN_VY_PEAK = 3.5
+
+/** Minimum forward speed (as a fraction of the bike's `topSpeed`) for
+ *  a takeoff to qualify. 35% rejects coasting / parked bikes — tricks
+ *  are a commitment move, not a stationary input. */
+export const MIN_SPEED_FRAC = 0.35
+
+/** Minimum throttle this tick for a takeoff to qualify. */
+export const MIN_THROTTLE = 0.3
+
+/** Vy ceiling for the strength curve. At this takeoff vy the reward
+ *  saturates to 1.0. Between `MIN_VY_PEAK` and this, strength scales
+ *  linearly from 0.4 → 1.0 — a stronger climb visibly pays better. */
+export const VY_STRENGTH_CEILING = 8.0
+
+/** Seconds the pre-input buffer holds a grounded press while waiting
+ *  for a qualifying takeoff. MK-style "early press" forgiveness:
+ *  commit on the upslope, the trick fires the moment you leave the
+ *  ground. Buffer expires to a small flatground hop if no takeoff
+ *  arrives in time. */
+export const PRE_PRESS_BUFFER_SEC = 0.2
+
+/**
+ * Wave-mastery reward curve. Maps takeoff vy (m/s) → boost strength
+ * (0..1). Bucketing:
+ *
+ *   - `vy < MIN_VY_PEAK`     → 0   (no boost; never called in
+ *                                   practice — qualifying takeoff
+ *                                   guarantees vy ≥ MIN_VY_PEAK.)
+ *   - `MIN_VY_PEAK`          → 0.4 (the "I made it count" floor)
+ *   - `MIN_VY_PEAK..ceiling` → 0.4 → 1.0 linear ramp
+ *   - `≥ VY_STRENGTH_CEILING` → 1.0 saturate
+ */
+export function strengthFromTakeoffVy(vy: number): number {
+  if (vy < MIN_VY_PEAK) return 0
+  const span = VY_STRENGTH_CEILING - MIN_VY_PEAK
+  const t = span > 0 ? Math.min(1, Math.max(0, (vy - MIN_VY_PEAK) / span)) : 1
+  return 0.4 + t * 0.6
+}
 
 export type WavePumpObserver = {
-  /** Feed this frame's sample. Returns a `PumpEvent` on the tick a
-   *  good-timing trick press is detected; otherwise null. */
+  /** Translate the sim's `trickFiredThisTick` flag into a `PumpEvent`.
+   *  Returns null on ticks where the sim did not fire a trick. */
   detect(now: number, sample: WavePumpSample): PumpEvent | null
-  /** Reset between races / respawns. */
+  /** No-op preserved for the existing race-respawn call sites. The
+   *  shim has no per-instance state to reset. */
   reset(): void
-  /** Read-only view of internal state — exposed for tests. */
-  debug(): {
-    vyPeakInWindow: number
-    vyPeakAt: number
-    lastFireAt: number
-  }
+  /** Read-only view — kept for symmetry with the old observer but
+   *  there's nothing interesting to report now that the sim owns
+   *  the state. */
+  debug(): { lastFireAt: number }
 }
 
-export function createWavePumpObserver(
-  tuning: DetectorTuning = DEFAULT_DETECTOR_TUNING,
-): WavePumpObserver {
-  // Peak vy seen during the current lift phase. Holds for `peakStaleMs`
-  // so the player can press the button at the very top of the climb
-  // OR a beat after the crest passes and still be inside the window.
-  let vyPeakInWindow = 0
-  let vyPeakAt = Number.NEGATIVE_INFINITY
-  // Edge-detect bookkeeping for the trick buttons.
-  let prevLeftDown = false
-  let prevRightDown = false
+export function createWavePumpObserver(): WavePumpObserver {
   let lastFireAt = Number.NEGATIVE_INFINITY
 
   return {
     detect(now, s) {
-      // Track the highest vy seen during this lift phase. While the
-      // bike is in a post-hop lockout, NEW peak updates are skipped
-      // (the lift is hop-driven, not surface-driven, and counting it
-      // would self-arm the next press), but the pre-existing peak is
-      // preserved so the credibility check for the *current* press —
-      // which fires on the same tick the sim sets the lockout — can
-      // still see the surface-driven climb. The peakStaleMs window
-      // expires the peak naturally during the airborne arc.
-      if (!s.hopLockedOut) {
-        if (s.vy > 0) {
-          if (s.vy > vyPeakInWindow) {
-            vyPeakInWindow = s.vy
-            vyPeakAt = now
-          }
-        }
-      }
-      if (now - vyPeakAt > tuning.peakStaleMs) {
-        vyPeakInWindow = 0
-        vyPeakAt = Number.NEGATIVE_INFINITY
-      }
-
-      // Trick-button rising edges. Held-down does NOT re-fire —
-      // released-and-re-pressed is the only way to register intent.
-      const leftEdge = s.trickLeft && !prevLeftDown
-      const rightEdge = s.trickRight && !prevRightDown
-      prevLeftDown = s.trickLeft
-      prevRightDown = s.trickRight
-
-      if (!leftEdge && !rightEdge) return null
-
-      // Cooldown — keep a rapid chain of credible presses from stacking
-      // boosts inside the same half-second window.
-      if (now - lastFireAt < tuning.cooldownMs) return null
-
-      const speedFrac = s.topSpeed > 0 ? Math.max(0, Math.min(1, s.forwardSpeed / s.topSpeed)) : 0
-      const inApex = vyPeakInWindow >= tuning.minVyPeak
-      const credible =
-        inApex && speedFrac >= tuning.minSpeedFrac && s.throttle >= tuning.minThrottle
-      if (!credible) return null
-
-      // Strength blends "how high did the peak go" with "how fast are
-      // you going". Floor at 0.2 so even a minimum-credible trick
-      // still produces a perceptible flash + kick.
-      const vyT = Math.max(
-        0,
-        Math.min(
-          1,
-          (vyPeakInWindow - tuning.minVyPeak) /
-            Math.max(0.0001, tuning.vyCeiling - tuning.minVyPeak),
-        ),
-      )
-      const strength = Math.max(0.2, Math.min(1, vyT * speedFrac + 0.2))
-      // Left wins a same-tick double-press, matching the sim-side
-      // trick-hop system's tie-break so the visual spin direction and
-      // the boost event agree.
-      const direction: 'left' | 'right' = leftEdge ? 'left' : 'right'
-
+      if (!s.trickFiredThisTick) return null
+      const direction: 'left' | 'right' = s.trickFiredDirection < 0 ? 'left' : 'right'
+      const strength = Math.max(0, Math.min(1, s.trickFiredStrength))
       lastFireAt = now
-      // Drain the peak so a single climb only pays off once — the next
-      // boost needs a fresh climb to arm.
-      vyPeakInWindow = 0
-      vyPeakAt = Number.NEGATIVE_INFINITY
-
       return { t: now, strength, direction }
     },
     reset() {
-      vyPeakInWindow = 0
-      vyPeakAt = Number.NEGATIVE_INFINITY
-      prevLeftDown = false
-      prevRightDown = false
       lastFireAt = Number.NEGATIVE_INFINITY
     },
     debug() {
-      return { vyPeakInWindow, vyPeakAt, lastFireAt }
+      return { lastFireAt }
     },
   }
 }

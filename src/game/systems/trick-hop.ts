@@ -2,6 +2,14 @@ import { query } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import {
+  MIN_SPEED_FRAC,
+  MIN_THROTTLE,
+  MIN_VY_PEAK,
+  PRE_PRESS_BUFFER_SEC,
+  strengthFromTakeoffVy,
+} from '@/engine/wave-pump-observer'
+import {
+  BikeStatsStore,
   BikeTag,
   ControlIntent,
   ControlIntentStore,
@@ -14,72 +22,71 @@ import {
 } from '@/game/components'
 
 /**
- * MK8-style hop physics with credibility-aware launch height.
+ * Airborne-gated trick system. MK-style: the trick window opens on
+ * the grounded→airborne transition of a *qualifying* takeoff and
+ * stays open until landing. Any rising-edge press inside the window
+ * fires the trick — no apex-timing dance, no separate credibility
+ * check at press time. The window is closed silently on landing if
+ * the player doesn't press.
+ *
+ * Qualifying takeoff = surface-driven (not from the bike's own small
+ * hop, i.e. not in `hopLockoutActive`) AND vy at takeoff ≥
+ * `MIN_VY_PEAK` AND speed ≥ `MIN_SPEED_FRAC` * topSpeed AND throttle
+ * ≥ `MIN_THROTTLE`. The takeoff-vy is captured for reward scaling so
+ * a stronger launch pays a bigger boost — the wave-mastery reward
+ * hierarchy survives the simplification.
+ *
+ * Pre-input buffer: if the player presses while still grounded but
+ * a qualifying takeoff is plausibly imminent (recent vyPeak crossed
+ * `MIN_VY_PEAK`, speed/throttle OK, no hop-lockout), the press is
+ * held for `PRE_PRESS_BUFFER_SEC` (200 ms). If the bike takes off
+ * inside that window, the buffered press fires the trick at takeoff.
+ * If not, the buffer expires to a small flatground hop so the input
+ * still registers as something rather than vanishing.
+ *
+ * Flatground press with no qualifying context = small hop only. No
+ * boost, no spin, no meter — just a polite lift so the bike can
+ * choose to leave the ground at the player's command.
  *
  * Per bike, per fixed tick:
  *
- *   1. Maintain a recent-vy-peak tracker (mirror of the observer's
- *      same tracker) so the sim can decide hop magnitude without
- *      crossing the sim/render boundary.
- *   2. Decrement the cooldown timer and the visual-spin lifetime.
- *      The spin axis + lifetime are *started* externally (by the
- *      credible-trick handler in game-loop); this system only decays.
- *   3. Tick the hop-lockout state machine. The lockout ends on the
- *      airborne→grounded transition (or the safety timeout).
- *   4. Detect rising edges on `intent.trickLeft` / `intent.trickRight`.
- *      Holding the button does nothing — only fresh presses count.
- *   5. On a rising edge while grounded + past cooldown:
- *        - Credible apex (vyPeak ≥ HOP_CREDIBILITY_VY)
- *          → big hop velocity. Visible launch, real airtime, the
- *            spin animation has room to play out.
- *        - Otherwise (flatground, weak chop)
- *          → small hop velocity. The bike clearly leaves the ground
- *            but doesn't soar; no spin, no boost — just lift.
+ *   1. Decay cooldown + spin lifetime.
+ *   2. Tick the pre-press buffer; expire it to a small hop if 200 ms
+ *      elapsed without a qualifying takeoff.
+ *   3. Tick the hop-lockout state machine (unchanged — ends on
+ *      airborne→grounded after a small hop).
+ *   4. Maintain the vy-peak tracker (still used as the "climb
+ *      context" signal that gates whether a press should buffer).
+ *   5. Detect grounded↔airborne transitions:
+ *      - takeoff (qualifying): open trick window, capture takeoff-vy,
+ *        consume any buffered press as a fire-at-takeoff trick.
+ *      - landing: close window, clear airborne-dedup.
+ *   6. Detect rising-edge press:
+ *      - In an open window (already airborne): fire immediately.
+ *      - On the ground with climb context: buffer.
+ *      - On flat ground: fire small hop.
  *
- * The credibility threshold matches the trick observer's `minVyPeak`
- * so the two stay in lockstep: every credible-trick boost event also
- * gets the big hop, every flatground press gets the small hop with
- * no boost.
- *
- * Visual-only spin: the spin path never torques the rigid body. The
- * render layer multiplies a quaternion (axis from `spinAxis*`,
- * angle from `1 − spinPhase`) onto the bike mesh so tricks read as
- * mid-air rotations without changing the bike's heading.
+ * The render-side `wave-pump-observer` is now a thin shim that reads
+ * the `trickFiredThisTick` flag and translates it to a `PumpEvent`
+ * for HUD/audio/FX — no independent credibility check, no duplicated
+ * vy-peak tracker.
  */
 
-/** Big vertical velocity (m/s) when the press lands on a credible
- *  apex — bike clears the surface by ~5 m above takeoff and the spin
- *  animation has the full ~1.3 s air time to play out. The credible-
- *  trick path stacks this with the forward boost-impulse + sustained
- *  meter accel, so the hop itself reads as a "you nailed it" launch
- *  rather than a meek lift. Boosted from the original 11 m/s once
- *  playtesters confirmed the smaller version felt indistinguishable
- *  from the flatground small hop on most ramps. */
-const HOP_VELOCITY_BIG = 16.0
-/** Small vertical velocity (m/s) for a flatground hop. Visibly leaves
- *  the ground but doesn't fly — telegraphs "yes the button works"
- *  without earning the trick payoff. */
+/** Vertical velocity (m/s) for a flatground courtesy lift. Visible
+ *  enough that the button isn't silent, small enough that it's clearly
+ *  not a trick. */
 const HOP_VELOCITY_SMALL = 4.5
-/** vyPeak floor (m/s) above which a hop counts as a credible trick.
- *  Matches `DEFAULT_DETECTOR_TUNING.minVyPeak` on the observer side
- *  — both must agree, or the sim awards the big hop while the
- *  observer rejects the boost (or vice versa). 3.5 m/s catches a
- *  ridable wave climb without tripping on flat-ground chop. */
-const HOP_CREDIBILITY_VY = 3.5
-/** Sim-tick lifetime of the vy-peak before it goes stale. At a fixed
- *  60 Hz step, 18 ticks ≈ 300 ms — matches the observer's
- *  `peakStaleMs`. Short window forces the press to land *while*
- *  the bike is still climbing, not a beat after the crest has
- *  already passed. */
+/** Sim-tick lifetime of the vy-peak (≈ 300 ms at 60 Hz). Matches the
+ *  buffer's pre-takeoff plausibility window — if the peak is stale,
+ *  the player isn't "about to launch" any more, so a press goes to
+ *  the small-hop path instead of buffering. */
 const VY_PEAK_STALE_TICKS = 18
 /** Maximum sim ticks the hop lockout stays active before timing
- *  out. 180 ticks ≈ 3 s — covers the big hop's full airborne arc
- *  (~2.2 s) plus margin in case the airborne→grounded transition
- *  never fires (kinematic edge cases, anti-grav weirdness, etc.). */
+ *  out. 180 ticks ≈ 3 s — covers the small hop's airborne arc plus
+ *  margin if the landing transition never fires. */
 const HOP_LOCKOUT_MAX_TICKS = 180
-/** Seconds between consecutive hops on the same bike. Long enough that
- *  the bike has time to leave + return to the ground at HOP_VELOCITY_BIG,
- *  short enough that a deliberate hop-on-landing chain still flows. */
+/** Seconds between consecutive small hops on the same bike. Stops
+ *  button-mash spam from chaining tiny lifts. */
 const HOP_COOLDOWN_SEC = 0.35
 
 export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
@@ -89,12 +96,14 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
     const intent = ControlIntentStore.must(eid)
     const hover = HoverStateStore.must(eid)
     const trick = TrickStateStore.must(eid)
+    const stats = BikeStatsStore.get(eid)
 
-    // Tick down the cooldown + the visual spin lifetime. The spin is
-    // started externally by the credible-trick event handler — here
-    // we just decay it. Visual phase drops linearly 1 → 0 over
-    // `spinDurationSec`; render reads `(1 - spinPhase)` to drive the
-    // twist.
+    // The one-shot fire flag is consumed by the render hook the same
+    // frame it's set; clear it at the top of the next sim tick so a
+    // skipped render frame can't double-fire.
+    trick.trickFiredThisTick = false
+
+    // Cooldown + spin lifetime decay.
     if (trick.cooldownSec > 0) trick.cooldownSec = Math.max(0, trick.cooldownSec - dt)
     if (trick.spinPhase > 0) {
       const stepFrac = trick.spinDurationSec > 0 ? dt / trick.spinDurationSec : 1
@@ -106,12 +115,20 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
       }
     }
 
-    // Hop lockout — set when a hop fires, cleared when the bike
-    // completes the airborne arc and lands again. While active, the
-    // vy-peak tracker ignores updates because the bike's vertical
-    // velocity is being driven by the hop's own impulse, not by the
-    // surface. Without this gate the hop's lift poisons the peak,
-    // arming the next press as a credible "trick" off thin air.
+    const handle = RBHandleStore.must(eid).handle
+    const rb = phys.world.getRigidBody(handle)
+    const lv = rb ? rb.linvel() : { x: 0, y: 0, z: 0 }
+    const vy = lv.y
+    const horizSpeed = Math.hypot(lv.x, lv.z)
+    const topSpeed = stats?.topSpeed ?? 0
+    const speedFrac = topSpeed > 0 ? horizSpeed / topSpeed : 0
+    const speedOK = speedFrac >= MIN_SPEED_FRAC
+    const throttleOK = Math.max(0, intent.throttle) >= MIN_THROTTLE
+
+    // Hop lockout — set when a small hop fires, cleared when the bike
+    // completes that airborne arc. While active, the airborne window
+    // is suppressed: the bike's own lift is not allowed to count as a
+    // qualifying surface takeoff.
     if (trick.hopLockoutActive) {
       trick.hopLockoutSafetyTicks -= 1
       if (!trick.hopLockoutAirborneSeen && !hover.isGrounded) {
@@ -124,17 +141,11 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
       }
     }
 
-    // vy-peak tracker. Pull live vy from the rigid body so the peak
-    // reflects this tick's physics, not last tick's snapshot. While
-    // the bike is in a post-hop lockout, NEW peak updates are
-    // skipped (the lift is hop-driven, not surface-driven) but the
-    // pre-existing peak is preserved so the credibility check on
-    // *this* press tick — which sets the lockout — can still see
-    // the surface-driven climb. The stale-tick window expires the
-    // peak naturally during the airborne arc.
-    const handle = RBHandleStore.must(eid).handle
-    const rb = phys.world.getRigidBody(handle)
-    const vy = rb ? rb.linvel().y : 0
+    // vy-peak tracker — still useful as the "climb context" signal that
+    // decides whether a grounded press should buffer (recent climb =
+    // takeoff plausible) or fall through to the small-hop path. Same
+    // hop-lockout suppression as before: a small hop's own lift must
+    // not arm the next press.
     if (!trick.hopLockoutActive && vy > trick.vyPeak) {
       trick.vyPeak = vy
       trick.vyPeakTicksAgo = 0
@@ -145,38 +156,120 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
       }
     }
 
-    // Rising-edge detection. `prev*Down` is the previous tick's input
-    // state — flipping `false → true` (and only that) registers as a
-    // press. Released-and-re-pressed counts; held-down does not.
+    // Transition detection. Both takeoff and landing read from the
+    // previous tick's grounded state stored on the component.
+    const justTookOff = trick.wasGroundedLastTick && !hover.isGrounded
+    const justLanded = !trick.wasGroundedLastTick && hover.isGrounded
+    trick.wasGroundedLastTick = hover.isGrounded
+
+    if (justTookOff) {
+      // Takeoff qualifies if it's surface-driven (no active hop-lockout)
+      // and the speed/throttle/vy gates pass. Hop-lockout would still be
+      // active for ~1 sim tick after the small hop's impulse fired, so
+      // checking it here cleanly rejects self-hop takeoffs.
+      const surfaceDriven = !trick.hopLockoutActive
+      const qualifying = surfaceDriven && vy >= MIN_VY_PEAK && speedOK && throttleOK
+      if (qualifying) {
+        trick.trickWindowOpen = true
+        trick.trickWindowTakeoffVy = vy
+        trick.trickFiredThisAirborne = false
+        // Consume a buffered press, if any. Direction was captured at
+        // press time so a buffered "I committed left" still spins
+        // left even if the stick moved before takeoff landed.
+        if (trick.bufferedPressTimerSec > 0 && trick.bufferedPressDir !== 0) {
+          fireTrick(trick, trick.bufferedPressDir, vy)
+          trick.bufferedPressTimerSec = 0
+          trick.bufferedPressDir = 0
+        }
+      }
+    }
+
+    if (justLanded) {
+      trick.trickWindowOpen = false
+      trick.trickWindowTakeoffVy = 0
+      trick.trickFiredThisAirborne = false
+    }
+
+    // Tick down + expire the pre-press buffer. Expiry without takeoff
+    // falls through to a small hop so the press still registers as
+    // *something* — better than vanishing inputs. Skipped if a trick
+    // already consumed the buffer this tick.
+    if (trick.bufferedPressTimerSec > 0) {
+      trick.bufferedPressTimerSec = Math.max(0, trick.bufferedPressTimerSec - dt)
+      if (trick.bufferedPressTimerSec === 0 && trick.bufferedPressDir !== 0) {
+        // Buffer expired without a qualifying takeoff. Fire the small
+        // hop now as the courtesy-lift fallback. Don't re-set cooldown
+        // beyond what the original press already set.
+        applySmallHop(rb)
+        trick.hopLockoutActive = true
+        trick.hopLockoutAirborneSeen = false
+        trick.hopLockoutSafetyTicks = HOP_LOCKOUT_MAX_TICKS
+        trick.bufferedPressDir = 0
+      }
+    }
+
+    // Rising-edge detection on the trick buttons. Held-down doesn't
+    // re-arm — released-and-re-pressed is the only valid input.
     const leftEdge = intent.trickLeft && !trick.prevLeftDown
     const rightEdge = intent.trickRight && !trick.prevRightDown
     trick.prevLeftDown = intent.trickLeft
     trick.prevRightDown = intent.trickRight
+    const pressDir = leftEdge ? -1 : rightEdge ? +1 : 0
+    if (pressDir === 0) continue
 
-    const canHop = (leftEdge || rightEdge) && hover.isGrounded && trick.cooldownSec <= 0
-    if (canHop) {
-      if (rb?.isDynamic()) {
-        const m = rb.mass()
-        if (Number.isFinite(m) && m > 0) {
-          // Vertical impulse along world up. Anti-grav sections live on
-          // their own gravity vector, but the bike's "up" relative to
-          // the player visual frame is still world-Y on every flagged
-          // ship track — sticking with world up keeps the hop readable
-          // in loops without retargeting through AntiGravOverride.
-          const credible = trick.vyPeak >= HOP_CREDIBILITY_VY
-          const hopV = credible ? HOP_VELOCITY_BIG : HOP_VELOCITY_SMALL
-          rb.applyImpulse({ x: 0, y: hopV * m, z: 0 }, true)
-        }
-      }
-      trick.cooldownSec = HOP_COOLDOWN_SEC
-      // Engage the hop lockout so neither this system's nor the
-      // observer's vy-peak tracker registers the hop's own lift as a
-      // "credible climb" for the next press.
-      trick.hopLockoutActive = true
-      trick.hopLockoutAirborneSeen = false
-      trick.hopLockoutSafetyTicks = HOP_LOCKOUT_MAX_TICKS
-      // Spin axis + direction + boost reward are gated on credibility
-      // downstream — see the game-loop trick-event handler.
+    if (trick.trickWindowOpen && !trick.trickFiredThisAirborne) {
+      // Press inside the open window — fire immediately. Strength uses
+      // the captured takeoff-vy, not press-time vy, so the reward is
+      // committed at takeoff regardless of when in the arc the player
+      // presses.
+      fireTrick(trick, pressDir, trick.trickWindowTakeoffVy)
+      continue
     }
+
+    if (!hover.isGrounded) {
+      // Airborne but either no qualifying window (self-hop, anti-grav
+      // weirdness) or we already fired this airtime — drop the press.
+      continue
+    }
+
+    // Grounded press. Decide whether to buffer or fire a small hop.
+    if (trick.cooldownSec > 0) continue
+    const climbContext = trick.vyPeak >= MIN_VY_PEAK
+    const noHopLockout = !trick.hopLockoutActive
+    if (climbContext && speedOK && throttleOK && noHopLockout) {
+      // Plausibly about to launch — hold the press. Don't reset the
+      // cooldown yet: if takeoff happens, the trick fires (no hop
+      // cooldown needed); if the buffer expires to a small hop, the
+      // expiry branch sets things up.
+      trick.bufferedPressTimerSec = PRE_PRESS_BUFFER_SEC
+      trick.bufferedPressDir = pressDir
+      continue
+    }
+
+    // Flatground press, no plausible takeoff — fire the small courtesy
+    // hop. No boost, no spin, no meter charge.
+    applySmallHop(rb)
+    trick.cooldownSec = HOP_COOLDOWN_SEC
+    trick.hopLockoutActive = true
+    trick.hopLockoutAirborneSeen = false
+    trick.hopLockoutSafetyTicks = HOP_LOCKOUT_MAX_TICKS
   }
+}
+
+function applySmallHop(rb: ReturnType<PhysicsWorld['world']['getRigidBody']>): void {
+  if (!rb?.isDynamic()) return
+  const m = rb.mass()
+  if (!Number.isFinite(m) || m <= 0) return
+  rb.applyImpulse({ x: 0, y: HOP_VELOCITY_SMALL * m, z: 0 }, true)
+}
+
+function fireTrick(
+  trick: ReturnType<typeof TrickStateStore.must>,
+  dir: number,
+  takeoffVy: number,
+): void {
+  trick.trickFiredThisTick = true
+  trick.trickFiredStrength = strengthFromTakeoffVy(takeoffVy)
+  trick.trickFiredDirection = dir
+  trick.trickFiredThisAirborne = true
 }

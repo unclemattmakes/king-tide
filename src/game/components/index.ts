@@ -151,25 +151,26 @@ export type HoverDebugData = {
 export const HoverDebugStore = createStore<HoverDebugData>('HoverDebug')
 
 /**
- * Per-bike MK8-style hop-trick state. Written by `trickHopSystem` on
- * rising-edge of intent.trickLeft / intent.trickRight; render-side reads
- * `spinPhase` + `spinDirection` to overlay a Y-axis visual rotation on
- * the bike mesh while the trick plays out.
+ * Per-bike airborne-gated trick state. Written by `trickHopSystem`
+ * each fixed tick; render-side reads `spinPhase` + `spinAxis*` to
+ * overlay the in-air rotation on the bike mesh, and reads
+ * `trickFiredThisTick` to drive HUD/audio/FX on the firing frame.
  *
- *  - `cooldownSec` is decremented each tick; new hops are gated on it
- *    reaching 0. Prevents button-mash spam from chaining ghost-hops
- *    every frame while the bike is still in the air from the last one.
- *  - `spinPhase` lerps 1 → 0 over `spinDurationSec`; render multiplies
- *    `spinDirection * (1 - spinPhase) * 2π` onto the bike's quaternion
- *    for the in-air twist, then resets to 0 at end.
- *  - `armedForBoost` is set when the hop fired during a valid apex
- *    approach (vy rising / just-crested). Consumed on landing by the
- *    trick observer, which emits the boost reward then.
- *  - `wasGrounded` is the previous-tick grounded state for landing
- *    detection. Replaces the per-fx-system lastGrounded map for the
- *    boost path; the FX system keeps its own (for splash bursts).
+ *  - `cooldownSec` gates back-to-back small flatground hops only.
+ *    Credible tricks dedup via `trickFiredThisAirborne` instead, so
+ *    one airborne arc fires at most one boost regardless of presses.
+ *  - `spinPhase` lerps 1 → 0 over `spinDurationSec`; render rotates
+ *    around `(spinAxisX, spinAxisY, spinAxisZ)` by `(1 - spinPhase) * 2π`.
  *  - `prevLeftDown` / `prevRightDown` are the per-tick edge-detect
- *    bookkeeping. Set by trickHopSystem from intent each tick.
+ *    bookkeeping for the trick buttons.
+ *  - `trickWindowOpen` / `trickWindowTakeoffVy` are the headline new
+ *    fields under the airborne-gated model: the window opens on a
+ *    qualifying grounded→airborne transition and stays open the
+ *    whole airtime. Press anytime in the window = trick.
+ *  - `bufferedPressTimerSec` / `bufferedPressDir` implement the
+ *    MK-style early-press forgiveness (200 ms grace before takeoff).
+ *  - `trickFiredThisTick` is the one-shot edge consumed by the render
+ *    hook the same frame it's set; cleared the next sim tick.
  */
 export const TrickState = { name: 'TrickState' as const }
 export type TrickStateData = {
@@ -195,10 +196,10 @@ export type TrickStateData = {
   vyPeakTicksAgo: number
   /** When true, vy-peak updates are suppressed because the bike's
    *  vertical velocity is being driven by its own hop impulse rather
-   *  than a surface climb. Set the moment a hop fires; cleared when
-   *  the bike completes the airborne arc and lands again (or a
-   *  safety timeout expires). Mirrored to the observer via the
-   *  WavePumpSample so both peak trackers stay in lockstep. */
+   *  than a surface climb. Set the moment a (small) hop fires; cleared
+   *  when the bike completes the airborne arc and lands again (or a
+   *  safety timeout expires). Also gates the airborne trick window so
+   *  a self-induced hop never opens a "free trick" off flat ground. */
   hopLockoutActive: boolean
   /** Tracks whether the bike has been airborne since the last hop —
    *  used to detect the "airborne → grounded" landing transition
@@ -208,6 +209,52 @@ export type TrickStateData = {
    *  never fires (weird kinematic state, anti-grav weirdness, etc.)
    *  the lockout ends after this many ticks regardless. */
   hopLockoutSafetyTicks: number
+
+  // ── Airborne trick window (MK-style "in the air = trickable") ─────
+  /** True for the duration of an airborne arc whose takeoff qualified
+   *  (surface-driven, ≥ minVyPeak, ≥ minSpeedFrac, ≥ minThrottle).
+   *  Opens on the qualifying grounded→airborne transition; closes
+   *  silently on the next airborne→grounded transition. */
+  trickWindowOpen: boolean
+  /** World-Y velocity (m/s) sampled at the moment the trick window
+   *  opened. Drives the boost-reward strength so a stronger takeoff
+   *  pays a bigger reward — preserves the wave-mastery reward
+   *  hierarchy under the simpler airborne-gated model. */
+  trickWindowTakeoffVy: number
+  /** Dedup flag — set when a trick fires inside the current window,
+   *  cleared on the airborne→grounded landing. Prevents long aerials
+   *  (anti-grav launches, big ramps) from banking multiple boosts off
+   *  the same takeoff. */
+  trickFiredThisAirborne: boolean
+  /** Previous tick's grounded state — used to detect takeoff/landing
+   *  transitions inside `trickHopSystem` without needing a shared
+   *  observer. */
+  wasGroundedLastTick: boolean
+
+  // ── Pre-input buffer (Layer 1 "early press" forgiveness) ──────────
+  /** Seconds remaining on a buffered press. A press while grounded
+   *  with a qualifying-climb context is held for up to
+   *  `PRE_PRESS_BUFFER_SEC`; if a qualifying takeoff lands inside
+   *  the window, the buffered press fires the trick at takeoff. */
+  bufferedPressTimerSec: number
+  /** Direction the player pressed when the buffer was armed: -1 left,
+   *  +1 right, 0 none. Captured at press time, not consumed time, so
+   *  the spin direction reflects the player's actual intent. */
+  bufferedPressDir: number
+
+  // ── One-shot trick-fire flag (sim → render in same frame) ─────────
+  /** Set by `trickHopSystem` on the tick a credible trick fires
+   *  (either an in-air press or a buffered-press-at-takeoff). Consumed
+   *  + cleared by the game-loop render hook the same frame; never
+   *  spans multiple ticks. */
+  trickFiredThisTick: boolean
+  /** Strength of the fired trick (0..1), derived from takeoff vy.
+   *  Only valid while `trickFiredThisTick` is true. */
+  trickFiredStrength: number
+  /** Direction of the fired trick: -1 left, +1 right. Used by the
+   *  render-side spin code as the fallback when neither pitch nor
+   *  steer is committed. */
+  trickFiredDirection: number
 }
 export const TrickStateStore = createStore<TrickStateData>('TrickState')
 
