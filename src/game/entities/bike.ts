@@ -161,6 +161,15 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
     hopLockoutActive: false,
     hopLockoutAirborneSeen: false,
     hopLockoutSafetyTicks: 0,
+    trickWindowOpen: false,
+    trickWindowTakeoffVy: 0,
+    trickFiredThisAirborne: false,
+    wasGroundedLastTick: true,
+    bufferedPressTimerSec: 0,
+    bufferedPressDir: 0,
+    trickFiredThisTick: false,
+    trickFiredStrength: 0,
+    trickFiredDirection: 0,
   })
   addComponent(sim, eid, BoostMeter)
   BoostMeterStore.set(eid, {

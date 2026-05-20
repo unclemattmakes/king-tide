@@ -12,11 +12,12 @@ export type Intent = {
    */
   pitch: number
   /**
-   * MK8-style hop-trick buttons. Held-state booleans; the rising edge fires
-   * a vertical hop impulse + visual Y-rotation overlay (left = CCW from
-   * above, right = CW). Holding does nothing — only fresh presses count.
-   * If a trick edge lands inside the crest-apex window, the observer
-   * grants the boost reward on landing.
+   * MK-style trick buttons. Held-state booleans; only rising edges count
+   * (held does nothing). A press inside an open airborne trick window
+   * (or in the 200 ms pre-press buffer leading up to a qualifying
+   * takeoff) fires the credible trick: boost + spin + meter charge.
+   * A press on flat ground with no qualifying context fires a small
+   * courtesy lift (no boost). See `src/game/systems/trick-hop.ts`.
    */
   trickLeft: boolean
   trickRight: boolean

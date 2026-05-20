@@ -73,7 +73,12 @@ import { vecHorizontalLength } from '@/engine/sim/physics/vec'
 import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import { createTutorialDirector } from '@/engine/tutorial/tutorial-director'
 import { DEFAULT_TUTORIAL_SCRIPT } from '@/engine/tutorial/tutorial-script'
-import { createWavePumpObserver, DEFAULT_DETECTOR_TUNING } from '@/engine/wave-pump-observer'
+import {
+  createWavePumpObserver,
+  MIN_SPEED_FRAC,
+  MIN_THROTTLE,
+  MIN_VY_PEAK,
+} from '@/engine/wave-pump-observer'
 import type { AssetManifest } from '@/game/assets/manifest'
 import type { BikeVariant } from '@/game/bikes/variants'
 import {
@@ -820,20 +825,21 @@ export function startGameLoop(opts: GameLoopOpts): void {
       })
     }
 
-    // Trick-boost signal — observer reads the player's hover + velocity
-    // + throttle + trick-button state and fires when a credible trick
-    // press lands (player hopped off a sufficient ramp/wave under
-    // throttle). Skipped while auto-play is on (the auto-pilot doesn't
-    // get the player reward). When the observer fires we:
+    // Trick-boost signal — under the airborne-gated model the sim has
+    // already decided whether this tick fires a credible trick (see
+    // `trickHopSystem`). The render-side wave-pump observer is now a
+    // thin shim that translates the sim's `trickFiredThisTick` flag
+    // into a `PumpEvent`. Skipped while auto-play is on (the auto-
+    // pilot doesn't get the player reward). When a pump event lands:
     //   (a) flash HUD / play audio,
     //   (b) trigger the over-the-top FX (FOV punch + speedlines +
     //       camera shake + exhaust burst),
-    //   (c) apply a half-strength forward impulse — the real speed
-    //       payoff comes from the boost meter the trick fills,
+    //   (c) apply a forward impulse,
     //   (d) charge the boost meter (~3 tricks = full meter), and
-    //   (e) start the visual Y-axis spin on TrickState.
-    // Flatground hops (where the observer rejects credibility) get
-    // the lift impulse from trickHopSystem but none of the above.
+    //   (e) start the visual spin on TrickState.
+    // Flatground small hops (where the sim never opened the window)
+    // never fire here — the lift impulse comes from trickHopSystem
+    // but none of the trick FX runs.
     if (!control.isAutoPlay() && state.playerSnapshot) {
       const hoverState = HoverStateStore.get(playerEid)
       const intent = ControlIntentStore.get(playerEid)
@@ -841,19 +847,9 @@ export function startGameLoop(opts: GameLoopOpts): void {
       if (hoverState && intent && stats) {
         const trickStateNow = TrickStateStore.get(playerEid)
         const pump = wavePumpObserver.detect(now, {
-          surfaceIsWater: hoverState.surfaceIsWater,
-          isGrounded: hoverState.isGrounded,
-          vy: state.playerSnapshot.velocity.y,
-          forwardSpeed: state.playerSnapshot.speed,
-          topSpeed: stats.topSpeed,
-          throttle: Math.max(0, intent.throttle),
-          trickLeft: intent.trickLeft,
-          trickRight: intent.trickRight,
-          // Mirror the sim's hop lockout so the observer's vy-peak
-          // tracker doesn't register the bike's own hop impulse as a
-          // surface climb. Without this, a flat-ground hop's 4.5 m/s
-          // lift would arm the next press as a "credible" trick.
-          hopLockedOut: trickStateNow?.hopLockoutActive === true,
+          trickFiredThisTick: trickStateNow?.trickFiredThisTick === true,
+          trickFiredStrength: trickStateNow?.trickFiredStrength ?? 0,
+          trickFiredDirection: trickStateNow?.trickFiredDirection ?? 0,
         })
         if (pump) {
           wavePumpHud.pump(pump.strength, true)
@@ -936,23 +932,33 @@ export function startGameLoop(opts: GameLoopOpts): void {
         }
 
         // Trick-ready prompt — teach the player which jumps are
-        // trickable by sight. The prompt lights up whenever ALL of
-        // the observer's credibility gates currently pass *except*
-        // the press itself: recent vy peak, speed, throttle. Then
-        // the player just has to learn "see the prompt, press the
-        // button". The prompt suppresses itself when a trick has
-        // just fired (the wave-pump chyron already telegraphs the
-        // reward).
-        const dbg = wavePumpObserver.debug()
+        // trickable by sight. Under the airborne-gated model the
+        // prompt lights up in two cases:
+        //   1. An airborne trick window is currently open — the bike
+        //      is in the qualifying arc of a real takeoff. Press
+        //      anytime before landing to fire.
+        //   2. The bike is climbing toward what looks like a
+        //      qualifying takeoff — recent `vyPeak ≥ MIN_VY_PEAK`,
+        //      speed/throttle gates pass, not in a hop-lockout. This
+        //      is the look-ahead case: the prompt fires on the
+        //      upslope so the player can commit early; the
+        //      pre-input buffer holds the press through to takeoff.
+        // The prompt suppresses itself for the rest of the airtime
+        // once a trick has fired (the wave-pump chyron already
+        // telegraphs the reward).
         const speedFrac =
           stats.topSpeed > 0
             ? Math.max(0, Math.min(1, state.playerSnapshot.speed / stats.topSpeed))
             : 0
-        const inApex = dbg.vyPeakInWindow >= DEFAULT_DETECTOR_TUNING.minVyPeak
-        const speedOK = speedFrac >= DEFAULT_DETECTOR_TUNING.minSpeedFrac
-        const throttleOK = Math.max(0, intent.throttle) >= DEFAULT_DETECTOR_TUNING.minThrottle
-        const cooldownReady = now - dbg.lastFireAt >= DEFAULT_DETECTOR_TUNING.cooldownMs
-        trickPromptHud.setReady(inApex && speedOK && throttleOK && cooldownReady)
+        const speedOK = speedFrac >= MIN_SPEED_FRAC
+        const throttleOK = Math.max(0, intent.throttle) >= MIN_THROTTLE
+        const windowOpen =
+          trickStateNow?.trickWindowOpen === true && trickStateNow?.trickFiredThisAirborne !== true
+        const climbContext =
+          (trickStateNow?.vyPeak ?? 0) >= MIN_VY_PEAK &&
+          trickStateNow?.hopLockoutActive !== true &&
+          hoverState.isGrounded
+        trickPromptHud.setReady(windowOpen || (climbContext && speedOK && throttleOK))
       }
     } else {
       // Auto-play OR no player snapshot — keep the prompt hidden.
