@@ -44,6 +44,27 @@ export interface RaceIntroOpts {
   /** Time scale for the intro. 1.0 = real-time; 0 fast-forwards (skip).
    *  Tests pass arbitrary values to drive the director deterministically. */
   timeScale?: number
+  /** Optional collision hooks. When supplied, the director nudges the
+   *  camera up so it never sits inside terrain (or below the waterline)
+   *  and the shot's frame-up survives uneven environments. The director
+   *  stays "interesting" — we always push UP rather than dolly back, so
+   *  the framing intent ("aerial overlook", "skim along the line",
+   *  "descend onto the grid") survives the correction.
+   *
+   *  - `raycastDown(x, z)` returns the world-y of the terrain directly
+   *    below the given xz, or `null` if the ray misses everything (open
+   *    water, off-map). Called from `tick()` per-frame; expected to be
+   *    cheap (single Three.js Raycaster against the environment GLB).
+   *  - `waterY` is the world-space water surface height; the camera is
+   *    forced at least `minClearance` metres above it so the broadcast
+   *    cam can't ever sink to deck level.
+   *  - `minClearance` defaults to 3.5 m. Hit terrain → lift to
+   *    `hitY + minClearance`. */
+  collision?: {
+    raycastDown: (x: number, z: number) => number | null
+    waterY: number
+    minClearance?: number
+  }
 }
 
 export interface RaceIntro {
@@ -67,6 +88,11 @@ export interface RaceIntro {
   /** Total seconds the director will play if not skipped (sum of
    *  shot durations). Exposed for HUD hints + tests. */
   totalDuration(): number
+  /** Seconds elapsed since the first `tick()`. Saturates at
+   *  `totalDuration()` once the final shot finishes. Used by the
+   *  broadcast-intro UI overlay to drive its stage transitions off the
+   *  same timeline the camera uses. */
+  elapsed(): number
 }
 
 /** Per-shot anchor pair — camera moves from `from` to `to`, looking
@@ -108,6 +134,7 @@ function smootherstep(s: number): number {
 export function createRaceIntro(opts: RaceIntroOpts): RaceIntro {
   const mode: RaceIntroMode = opts.mode ?? 'full'
   const timeScale = opts.timeScale ?? 1
+  const minClearance = opts.collision?.minClearance ?? 3.5
 
   // 'off' mode short-circuits to done so the caller's first `armCountdown`
   // check resolves immediately. Still returns a real object so the
@@ -117,6 +144,56 @@ export function createRaceIntro(opts: RaceIntroOpts): RaceIntro {
 
   let elapsed = 0
   let done = mode === 'off'
+
+  // Smoothed Y-correction. The raw downward raycast can step in chunks
+  // when the underlying terrain mesh is sparse (e.g. an aerial pan
+  // crossing a building roof onto open water); easing the lift toward
+  // the target prevents a per-frame pop. `correctionY` is added on top
+  // of the cinematic-derived Y, never subtracted, so a corrected camera
+  // can only ever rise above the authored shot.
+  let correctionY = 0
+  const tmpPos = new THREE.Vector3()
+  const tmpLook = new THREE.Vector3()
+
+  /** Apply terrain + waterline clearance to `pos` in-place. Pure UP-lift
+   *  so the cinematic framing intent (overhead, skim, descent) survives.
+   *  Smoothed via `correctionY` so the lift never snaps on a sparse-mesh
+   *  raycast step. Re-aims via `lookAt(target)` after the lift because
+   *  the camera's quaternion was computed against the pre-lift position. */
+  function applyClearance(pos: THREE.Vector3, look: THREE.Vector3, dt: number): void {
+    const col = opts.collision
+    if (!col) {
+      opts.camera.position.copy(pos)
+      opts.camera.lookAt(look)
+      return
+    }
+    // Target lift = max(terrain + minClearance, waterY + minClearance) − pos.y.
+    // Floor at 0 (the cinematic-authored y wins when the terrain is far
+    // below — we never duck the camera).
+    let floorY = col.waterY + minClearance
+    const hitY = col.raycastDown(pos.x, pos.z)
+    if (hitY !== null && hitY + minClearance > floorY) {
+      floorY = hitY + minClearance
+    }
+    const targetCorrection = Math.max(0, floorY - pos.y)
+    if (correctionY === 0 && targetCorrection > 1.5) {
+      // Cold-start safety: if the very first cinematic frame already
+      // wants a meaningful lift (camera spawned inside terrain), snap
+      // straight to the target so the player never sees a clipped first
+      // frame. Subsequent ticks ease as usual.
+      correctionY = targetCorrection
+    } else {
+      // Critically-damped-ish lerp. dt-scaled so playback under different
+      // frame rates lands on the same correction curve. 14·dt is fast
+      // enough that the lift catches the camera before it visibly clips,
+      // but slow enough to avoid pumping when the raycast wobbles between
+      // adjacent triangle heights.
+      const k = Math.min(1, dt * 14)
+      correctionY += (targetCorrection - correctionY) * k
+    }
+    opts.camera.position.set(pos.x, pos.y + correctionY, pos.z)
+    opts.camera.lookAt(look)
+  }
 
   return {
     tick(dt: number): void {
@@ -129,8 +206,9 @@ export function createRaceIntro(opts: RaceIntroOpts): RaceIntro {
         // next caller check.
         const last = shots[shots.length - 1]
         if (last) {
-          opts.camera.position.copy(last.to)
-          opts.camera.lookAt(last.lookTo)
+          tmpPos.copy(last.to)
+          tmpLook.copy(last.lookTo)
+          applyClearance(tmpPos, tmpLook, dt)
         }
         done = true
         return
@@ -141,12 +219,12 @@ export function createRaceIntro(opts: RaceIntroOpts): RaceIntro {
         if (elapsed < acc + shot.duration) {
           const localT = (elapsed - acc) / shot.duration
           const eased = smootherstep(localT)
-          opts.camera.position.lerpVectors(shot.from, shot.to, eased)
+          tmpPos.lerpVectors(shot.from, shot.to, eased)
           // Look-at point also eases between anchors — gives a smooth
           // tracking feel rather than a snap when one shot's lookTo
           // doesn't match the next shot's lookFrom.
-          const tmpLook = new THREE.Vector3().lerpVectors(shot.lookFrom, shot.lookTo, eased)
-          opts.camera.lookAt(tmpLook)
+          tmpLook.lerpVectors(shot.lookFrom, shot.lookTo, eased)
+          applyClearance(tmpPos, tmpLook, dt)
           return
         }
         acc += shot.duration
@@ -173,6 +251,12 @@ export function createRaceIntro(opts: RaceIntroOpts): RaceIntro {
     },
     totalDuration(): number {
       return totalDuration
+    },
+    elapsed(): number {
+      // Clamp so the UI's t = elapsed/total never exceeds 1 even when the
+      // game loop reads after a `skip()` (which primes `elapsed` past
+      // `totalDuration` so the next tick lands on the final shot).
+      return Math.min(elapsed, totalDuration)
     },
   }
 }

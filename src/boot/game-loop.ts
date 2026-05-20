@@ -57,6 +57,7 @@ import { createPerfHud, type RenderInfoLite } from '@/engine/render/perf-hud'
 import { createPumpFx } from '@/engine/render/pump-fx'
 import type { RaceHud } from '@/engine/render/race-hud'
 import type { RaceIntro } from '@/engine/render/race-intro'
+import type { RaceIntroUi } from '@/engine/render/race-intro-ui'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
 import { createTrickPromptHud } from '@/engine/render/trick-prompt-hud'
@@ -192,6 +193,13 @@ export interface GameLoopOpts {
    *  play, the caller passes a director built in `'off'` mode which
    *  reports done from the first tick. */
   raceIntro: RaceIntro
+  /** Optional broadcast overlay shown during the intro shots. Null when
+   *  the cinematic is `'off'` (multiplayer / `?skipintro=1` / opt-out).
+   *  The loop ticks it from `raceIntro.elapsed()` while the director is
+   *  active, hides it on the first frame the director reports done, and
+   *  flips to its `skipFade()` whenever the skip prompt's handlers
+   *  call `raceIntro.skip()`. */
+  raceIntroUi: RaceIntroUi | null
   raceTick: RaceTick
   dirArrow: DirectionArrow
   physicsDebug: { tick: () => void }
@@ -349,6 +357,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     trackVisuals: _trackVisuals,
     raceHud,
     raceIntro,
+    raceIntroUi,
     raceTick,
     dirArrow,
     physicsDebug,
@@ -595,11 +604,13 @@ export function startGameLoop(opts: GameLoopOpts): void {
       // Space / Enter / Escape / Mouse click skip the intro.
       if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
       raceIntro.skip()
+      raceIntroUi?.skipFade()
       e.preventDefault()
     }
     introSkipPointerHandler = () => {
       if (!raceIntro.isActive()) return
       raceIntro.skip()
+      raceIntroUi?.skipFade()
     }
     // Capture-phase keydown so the skip beats the pause-menu's
     // Escape handler (which is in bubble phase). The skip handler
@@ -739,6 +750,11 @@ export function startGameLoop(opts: GameLoopOpts): void {
     if (introActive) {
       ensureIntroSkipUi()
       raceIntro.tick(dt)
+      // Drive the broadcast overlay from the same elapsed clock the
+      // camera uses, so the stage transitions track the shot boundaries
+      // exactly. `tick` is allocation-free (just a class flip on the
+      // root); safe on the hot path.
+      raceIntroUi?.tick(raceIntro.elapsed())
     } else if (!introArmed) {
       // First frame after the director reports done: arm the
       // countdown so the 3/2/1/GO ticks (which drive the start-lights
@@ -749,6 +765,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
       // if the countdown is already running.
       raceHud.armCountdown()
       teardownIntroSkipUi()
+      raceIntroUi?.hide()
       introArmed = true
     }
 
