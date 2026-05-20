@@ -146,6 +146,14 @@ class HOVERBIKE_MT_add(Menu):
         layout.operator("hoverbike.add_starts", icon="EMPTY_ARROWS")
 
         layout.separator()
+        layout.label(text="Terrain templates")
+        layout.operator(
+            "hoverbike.add_island_terrain",
+            text="Island Terrain (procedural)",
+            icon="RNDCURVE",
+        )
+
+        layout.separator()
         layout.label(text="Curves (build → mesh)")
         layout.operator("hoverbike.add_road_starter_curve", icon="CURVE_BEZCURVE")
         layout.operator("hoverbike.add_tunnel_starter_curve", icon="CURVE_BEZCURVE")
@@ -400,6 +408,11 @@ class HOVERBIKE_MT_terrain(Menu):
         layout = self.layout
 
         layout.label(text="Build")
+        layout.operator(
+            "hoverbike.add_island_terrain",
+            text="Add Island Terrain (procedural)",
+            icon="RNDCURVE",
+        )
         layout.operator(
             "hoverbike.import_heightmap",
             text="Import Heightmap…",

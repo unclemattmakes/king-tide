@@ -144,6 +144,20 @@ def _wipe_gate_preview() -> None:
         bpy.data.collections.remove(coll)
 
 
+def _clear_gate_preview_objects() -> bpy.types.Collection | None:
+    """Empty the gate-preview collection's objects but preserve the
+    collection itself. The collection's Outliner state (expanded /
+    collapsed, color tag, etc.) lives on the Collection datablock; if
+    we delete and re-create the collection on every rebuild — which
+    fires every time the spline depsgraph trigger debounces — every
+    one of those bits resets, so the author's "collapse this so it's
+    not in my way" click can't stick. Returning the existing
+    collection (or None if it doesn't exist yet) lets the rebuild
+    re-link new gate objects into the same datablock the author
+    already configured."""
+    return bpy.data.collections.get(GATE_PREVIEW_COLLECTION)
+
+
 PROP_GATE_MESH_NAME = "prop_gate_mesh"
 # Author dims of prop_gate_mesh in tracks-src/props-library.blend: posts at
 # ±14m along X, crossbar at z=6m. The mesh sits in Blender Z-up so we
@@ -196,9 +210,16 @@ def _rebuild_gate_preview(scene, *, spacing: float, half_width: float, height: f
     points = _sample_curve_to_polyline(sp)
     placements = _resample_by_arc_length(points, spacing, vertical_axis=2)
 
-    _wipe_gate_preview()
-    coll = bpy.data.collections.new(GATE_PREVIEW_COLLECTION)
-    scene.collection.children.link(coll)
+    # Reuse the existing collection if one is already in the scene so
+    # the Outliner's expanded/collapsed state survives this rebuild.
+    # Only the per-gate objects are recycled. See _clear_gate_preview_objects.
+    coll = _clear_gate_preview_objects()
+    if coll is None:
+        coll = bpy.data.collections.new(GATE_PREVIEW_COLLECTION)
+        scene.collection.children.link(coll)
+    else:
+        for obj in list(coll.objects):
+            bpy.data.objects.remove(obj, do_unlink=True)
 
     # Prefer the real prop_gate mesh if the props library is available;
     # otherwise fall back to the wireframe gizmo so the preview still
@@ -473,12 +494,13 @@ def _snap_spline_to_terrain(curve_obj: bpy.types.Object, *, hover_m: float) -> d
     origin_z = high_z + 1000.0
     down_world = mathutils.Vector((0.0, 0.0, -1.0))
 
-    # Water surface y comes from `water_volume_main`'s Z (the empty's
-    # position is the source of truth — see derive_track_json /
-    # reload_track_from_json). Tracks without a water volume default
-    # to water_z = -inf so the max() check collapses to terrain only.
-    vol = bpy.data.objects.get("water_volume_main")
-    water_z = float(vol.matrix_world.translation.z) if vol is not None else float("-inf")
+    # Water surface Z is the canonical sea level (scene prop) — see
+    # water.current_water_height_m. Tracks with no water authored
+    # collapse the max() check to terrain only via -inf.
+    from .water import current_water_height_m
+
+    sea = current_water_height_m(bpy.context.scene)
+    water_z = sea if sea != 0.0 or bpy.data.objects.get("water_volume_main") is not None else float("-inf")
 
     terrain = _largest_terrain_mesh()
     if terrain is None:

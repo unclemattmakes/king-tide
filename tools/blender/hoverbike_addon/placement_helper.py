@@ -84,8 +84,10 @@ def repose_placement_helper(scene) -> dict | None:
     x = s["x"] + rx * off
     y = s["y"] + ry * off
     # Surface seat — same rule as snap_starts_to_spline.
-    vol = bpy.data.objects.get("water_volume_main")
-    water_z = float(vol.matrix_world.translation.z) if vol is not None else float("-inf")
+    from .water import current_water_height_m
+
+    sea = current_water_height_m(scene)
+    water_z = sea if sea != 0.0 or bpy.data.objects.get("water_volume_main") is not None else float("-inf")
     hover = float(getattr(scene, "hoverbike_snap_hover_height", 0.0))
     origin = mathutils.Vector((x, y, 10000.0))
     down = mathutils.Vector((0.0, 0.0, -1.0))

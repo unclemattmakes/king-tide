@@ -206,8 +206,10 @@ class HOVERBIKE_OT_snap_starts_to_spline(Operator):
         # then clamp the result to max(terrain, water) — same rule as
         # snap_spline_to_terrain, so a start in an underwater canyon
         # spawns on the river surface instead of below it.
-        vol = bpy.data.objects.get("water_volume_main")
-        water_z = float(vol.matrix_world.translation.z) if vol is not None else float("-inf")
+        from .water import current_water_height_m
+
+        sea = current_water_height_m(scene)
+        water_z = sea if sea != 0.0 or bpy.data.objects.get("water_volume_main") is not None else float("-inf")
         origin = mathutils.Vector((s["x"], s["y"], 10000.0))
         down = mathutils.Vector((0.0, 0.0, -1.0))
         with _PreviewCollectionsHidden(bpy.context.view_layer):

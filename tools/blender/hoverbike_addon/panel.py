@@ -127,6 +127,28 @@ class HOVERBIKE_PT_panel(Panel):
                     icon="EMPTY_ARROWS",
                 )
 
+        # Terrain hint — separate from the alert box above because
+        # terrain isn't *required* (a track could be all anti-grav
+        # ribbon over open water), but the overwhelming majority of
+        # tracks need one. Surface the procedural-island spawn one
+        # click away when there's no kind=track mesh in the scene.
+        from ._legacy import _largest_terrain_mesh as _lt_for_hint
+
+        if _lt_for_hint() is None:
+            tbox = layout.box()
+            tbox.label(text="No terrain mesh in scene", icon="INFO")
+            row = tbox.row()
+            row.scale_y = 1.2
+            row.operator(
+                "hoverbike.add_island_terrain",
+                text="Add Island Terrain (procedural)",
+                icon="RNDCURVE",
+            )
+            tbox.label(
+                text="Or: Hoverbike → Terrain → Import Heightmap…",
+                icon="INFO",
+            )
+
         # Live lap snapshot — arc-length of `ai_spline_main`, projected
         # lap time at the racer top speed, and gate count derived from
         # the same spacing the exporter will use. All three update on
@@ -403,11 +425,14 @@ def _is_terrain_active(obj: bpy.types.Object | None) -> bool:
 
 
 def _is_water_active(obj: bpy.types.Object | None) -> bool:
+    """Active selection is "water-ish" — either the legacy
+    ``water_volume_main`` empty (still useful for wave-param custom
+    props) or the preview surface mesh that visualises the sea level."""
     from .water import WATER_VOLUME_NAME
 
     if obj is None:
         return False
-    return obj.name == WATER_VOLUME_NAME
+    return obj.name == WATER_VOLUME_NAME or obj.name == "water_preview"
 
 
 def _is_horizon_active(obj: bpy.types.Object | None) -> bool:
@@ -971,10 +996,14 @@ class HOVERBIKE_PT_track_terrain(_SelectionDrivenPanel, Panel):
 
 
 class HOVERBIKE_PT_track_water(_SelectionDrivenPanel, Panel):
-    """Sub-panel: sea-level slider (proxies water_volume_main.z) + the
-    Gerstner-wave preview plane controls.
+    """Sub-panel: sea-level slider + Gerstner-wave preview plane
+    controls. Sea level is a scene-wide value; the preview mesh's
+    Z tracks it on each rebuild.
 
-    Visible when ``water_volume_main`` is the active object."""
+    Visible when the legacy ``water_volume_main`` empty *or* the
+    ``water_preview`` mesh is the active object. (Volume is no longer
+    required — it's optional for ``wave_height`` / ``wave_freq``
+    custom-prop authoring.)"""
     bl_label = "Water"
     bl_idname = "HOVERBIKE_PT_track_water"
     _active_pred = staticmethod(_is_water_active)
@@ -984,12 +1013,12 @@ class HOVERBIKE_PT_track_water(_SelectionDrivenPanel, Panel):
 
         layout = self.layout
         scene = context.scene
-        if bpy.data.objects.get(WATER_VOLUME_NAME) is None:
-            layout.label(text="No water_volume_main", icon="ERROR")
-            layout.operator("hoverbike.add_water_volume", icon="ADD")
-        else:
-            layout.prop(scene, "hoverbike_water_height", text="Sea level (m)")
+
+        # Sea level is always editable now — the slider writes the
+        # scene prop directly, regardless of whether a volume exists.
+        layout.prop(scene, "hoverbike_water_height", text="Sea level (m)")
         layout.separator()
+
         layout.label(text="Wave preview:", icon="HIDE_OFF")
         layout.prop(scene, "hoverbike_water_size", text="Size (m)")
         row = layout.row(align=True)
@@ -998,6 +1027,31 @@ class HOVERBIKE_PT_track_water(_SelectionDrivenPanel, Panel):
         row = layout.row(align=True)
         row.operator("hoverbike.rebuild_water_preview", icon="FILE_REFRESH")
         row.operator("hoverbike.hide_water_preview", icon="HIDE_ON")
+
+        # Legacy volume affordance — only useful for wave_height /
+        # wave_freq custom-prop authoring. The empty stops being
+        # load-bearing for sea level in 2026-05.
+        vol = bpy.data.objects.get(WATER_VOLUME_NAME)
+        layout.separator()
+        if vol is None:
+            row = layout.row()
+            row.scale_y = 0.85
+            row.label(
+                text="Optional: spawn water_volume_main for wave overrides",
+                icon="INFO",
+            )
+            layout.operator(
+                "hoverbike.add_water_volume",
+                text="Add Water Volume (for wave overrides)",
+                icon="ADD",
+            )
+        else:
+            layout.label(
+                text=f"wave_height={vol.get('wave_height', 1.0):.2f}, "
+                     f"wave_freq={vol.get('wave_freq', 0.5):.2f}",
+                icon="MOD_OCEAN",
+            )
+            layout.label(text="(edit on the empty's Custom Properties)", icon="INFO")
 
 
 class HOVERBIKE_PT_track_horizon(_SelectionDrivenPanel, Panel):

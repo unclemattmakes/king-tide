@@ -538,13 +538,16 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         )
 
     water = next(iter(by_kind.get("water", [])), None)
-    # Water surface y comes from the water_volume_main empty's Z position
-    # (Blender Z is the same up axis as three.js Y after the yup export),
-    # so authors drag the empty up/down in the viewport to change the
-    # sea level. Wave parameters live as custom props on the same empty.
-    water_height = (
-        float(water.matrix_world.translation.z) if water is not None else 0.0
-    )
+    # Sea level — canonical source is the scene prop hoverbike_water_height
+    # (driven by the N-panel slider, written by JSON-reload). The legacy
+    # water_volume_main empty's Z is no longer load-bearing; the helper
+    # below promotes its Z into the scene prop on first read so old
+    # .blends keep exporting the same height they did before the
+    # migration. Wave amplitude / frequency overrides still live on the
+    # volume's custom props (when authored), exporting to waveHeight /
+    # waveFreq below.
+    from .water import current_water_height_m
+    water_height = current_water_height_m(bpy.context.scene)
     water_block: dict[str, float] = {
         "height": water_height,
         "waveHeight": (
@@ -746,21 +749,26 @@ def reload_track_from_json(json_path: str) -> dict:
         summary["terrainShader"] = True
 
     water = data.get("water")
-    vol = bpy.data.objects.get("water_volume_main")
-    if isinstance(water, dict) and vol is not None:
-        # JSON height → Blender Z (both are world-up). The empty's
-        # transform is the source of truth in the .blend; custom props
-        # carry wave amp / freq.
+    if isinstance(water, dict):
+        # Sea level → the canonical scene prop. The N-panel slider
+        # reads/writes this; the preview mesh's height tracks it on
+        # the next rebuild via current_water_height_m. The legacy
+        # water_volume_main empty's Z is no longer load-bearing.
         h = water.get("height")
         if isinstance(h, (int, float)):
-            vol.location.z = float(h)
-        wh = water.get("waveHeight")
-        if isinstance(wh, (int, float)):
-            vol["wave_height"] = float(wh)
-        wf = water.get("waveFreq")
-        if isinstance(wf, (int, float)):
-            vol["wave_freq"] = float(wf)
-        summary["water"] = True
+            scene["hoverbike_water_height"] = float(h)
+            summary["water"] = True
+        # Wave amp / freq overrides still live on water_volume_main's
+        # custom props when one exists — keep round-tripping them.
+        vol = bpy.data.objects.get("water_volume_main")
+        if vol is not None:
+            wh = water.get("waveHeight")
+            if isinstance(wh, (int, float)):
+                vol["wave_height"] = float(wh)
+            wf = water.get("waveFreq")
+            if isinstance(wf, (int, float)):
+                vol["wave_freq"] = float(wf)
+            summary["water"] = True
 
     start = data.get("start")
     s0 = bpy.data.objects.get("start_00")

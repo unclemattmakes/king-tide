@@ -1,21 +1,29 @@
 """Water authoring + preview.
 
-Two things live here:
+Three things live here:
 
-  * ``water_volume_main`` — the empty whose ``location.z`` is the world
-    sea level. Carries ``kind="water"`` so the runtime / export pipeline
-    can find it. ``wave_height`` + ``wave_freq`` are exported into the
-    track JSON's ``water`` block.
+  * **Sea level** — the scene prop ``hoverbike_water_height`` is the
+    canonical source of truth. The N-panel slider writes it; the JSON
+    exporter reads it; the JSON-reload writes it back; every other
+    addon site that needs "the water height" goes through
+    :func:`current_water_height_m`. Old ``water_volume_main``-based
+    .blends migrate transparently on first read.
 
-  * Wave preview — a subdivided plane displaced by a Gerstner sum,
-    re-evaluated whenever the volume moves or the user scrubs the
-    wave-time slider. Lives in a ``_hoverbike_water_preview`` collection
-    that's hidden from render + never exported.
+  * **Wave preview** — a subdivided plane displaced by a Gerstner sum,
+    re-evaluated whenever sea level / time / size changes. Lives in
+    ``_hoverbike_water_preview`` (hidden from render, never exported).
+    The collection itself is reused across rebuilds so the Outliner's
+    expanded/collapsed state survives debounced changes.
+
+  * **Legacy water volume** — ``water_volume_main`` is still spawnable
+    via :class:`HOVERBIKE_OT_add_water_volume`, but is now optional:
+    its only purpose is to carry ``wave_height`` / ``wave_freq`` custom
+    props that override the runtime's default Gerstner amplitude /
+    frequency. The empty's transform is no longer consulted for sea
+    level.
 
 Per-module ``register()`` / ``unregister()`` so the package init just
-calls them. Operators are referenced from the panel by ``bl_idname``,
-so the (still-in-``_legacy.py``) ``HOVERBIKE_PT_track_water`` panel
-keeps working unchanged.
+calls them. Operators are referenced from the panel by ``bl_idname``.
 """
 
 from __future__ import annotations
@@ -118,32 +126,69 @@ def _build_water_plane_mesh(name: str, size: float, subdivisions: int, t: float)
     return me
 
 
+def current_water_height_m(scene) -> float:
+    """Canonical sea level in metres. The :scene prop:`hoverbike_water_height`
+    is now the source of truth; everything that needs "the height of
+    the water surface" should call into here rather than reading
+    ``water_volume_main.location.z`` directly.
+
+    One-time fallback: if the scene prop is at its default 0 *and* a
+    legacy ``water_volume_main`` carries a non-zero Z (a .blend saved
+    before the migration), promote the volume's Z into the scene prop
+    and return it. Subsequent calls see the scene-prop value and
+    skip the lookup, so the migration costs one dict read per .blend
+    open."""
+    raw = scene.get("hoverbike_water_height")
+    if isinstance(raw, (int, float)) and float(raw) != 0.0:
+        return float(raw)
+    vol = bpy.data.objects.get(WATER_VOLUME_NAME)
+    if vol is not None:
+        legacy_z = float(vol.location.z)
+        if legacy_z != 0.0:
+            scene["hoverbike_water_height"] = legacy_z
+            return legacy_z
+    return float(raw) if isinstance(raw, (int, float)) else 0.0
+
+
 def rebuild_water_preview(scene, *, size: float, subdivisions: int, time: float) -> dict:
-    """Create / replace the water-preview collection. Returns a summary
+    """Create / refresh the water-preview collection. Returns a summary
     for the operator's status report.
 
     Public (no leading underscore) because the package-level debounce
     timer in ``_legacy._run_pending_rebuilds`` calls back into it when
-    the user drags the volume in the viewport."""
+    the user drags the slider or the legacy volume.
+
+    The preview mesh's Z is set from :func:`current_water_height_m`
+    (i.e. the ``hoverbike_water_height`` scene prop) — the slider /
+    JSON-reload are the canonical control, not the volume's transform.
+    The collection itself is reused if already present so the
+    Outliner's expanded/collapsed state survives debounced rebuilds."""
     from ._legacy import _find_layer_collection  # imported lazily to avoid cycle at module load
 
-    vol = bpy.data.objects.get(WATER_VOLUME_NAME)
-    center = (0.0, 0.0, 0.0)
-    if vol is not None:
-        loc = vol.matrix_world.translation
-        center = (loc.x, loc.y, loc.z)
+    sea_level = current_water_height_m(scene)
+    center = (0.0, 0.0, sea_level)
 
-    _wipe_water_preview()
+    # Recycle the existing preview mesh + collection so collapse state
+    # in the Outliner doesn't reset every time the slider scrubs.
     me = _build_water_plane_mesh(
         WATER_PREVIEW_MESH, size=size, subdivisions=subdivisions, t=time
     )
-    coll = bpy.data.collections.new(WATER_PREVIEW_COLLECTION)
-    scene.collection.children.link(coll)
+    coll = bpy.data.collections.get(WATER_PREVIEW_COLLECTION)
+    if coll is None:
+        coll = bpy.data.collections.new(WATER_PREVIEW_COLLECTION)
+        scene.collection.children.link(coll)
 
-    obj = bpy.data.objects.new("water_preview", me)
-    obj.location = (center[0], center[1], center[2])
+    obj = bpy.data.objects.get("water_preview")
+    if obj is None:
+        obj = bpy.data.objects.new("water_preview", me)
+        coll.objects.link(obj)
+    else:
+        old_mesh = obj.data
+        obj.data = me
+        if isinstance(old_mesh, bpy.types.Mesh) and old_mesh.users == 0 and old_mesh.name != me.name:
+            bpy.data.meshes.remove(old_mesh)
+    obj.location = center
     obj.hide_render = True
-    coll.objects.link(obj)
 
     lc = _find_layer_collection(
         bpy.context.view_layer.layer_collection, WATER_PREVIEW_COLLECTION
@@ -152,7 +197,7 @@ def rebuild_water_preview(scene, *, size: float, subdivisions: int, time: float)
         lc.exclude = False
 
     return {
-        "centered_on": "water_volume_main" if vol is not None else "world origin",
+        "centered_on": "scene.hoverbike_water_height",
         "vert_count": (subdivisions + 1) ** 2,
         "face_count": subdivisions**2,
         "preview_at": center,
@@ -161,18 +206,27 @@ def rebuild_water_preview(scene, *, size: float, subdivisions: int, time: float)
 
 
 # ────────────────────────────────────────────────────────────────────
-# Water-volume authoring
+# Sea level (canonical) + legacy water volume
 # ────────────────────────────────────────────────────────────────────
 #
-# ``water_volume_main``'s Z position IS the in-game sea level — the
-# export already reads it into ``water.height`` and the JSON-reload
-# writes it back (see derive_track_json + reload_track_from_json). The
-# slider below proxies the empty's Z so authors can scrub the height
-# without hunting for the empty in the outliner.
+# Sea level lives on the scene as ``hoverbike_water_height`` — see
+# :func:`current_water_height_m` above. The slider in the N-panel
+# writes the scene prop directly; the preview mesh's Z is recomputed
+# from it on every rebuild. The exporter + JSON-reload both go
+# through ``current_water_height_m``.
+#
+# ``water_volume_main`` is still optional: when present it carries
+# the ``wave_height`` / ``wave_freq`` custom props the exporter uses
+# for the Gerstner amplitude / frequency overrides. Its transform is
+# no longer load-bearing for sea level — old .blends migrate
+# lazily via the helper. Authors who don't override wave parameters
+# don't need a volume in the scene at all.
 
 
 def _ensure_water_volume(scene) -> bpy.types.Object:
-    """Return the canonical water volume empty, creating it if missing."""
+    """Return the legacy water-volume empty, creating it if missing.
+    Used by :class:`HOVERBIKE_OT_add_water_volume` (still around for
+    authors who want to tune ``wave_height`` / ``wave_freq``)."""
     obj = bpy.data.objects.get(WATER_VOLUME_NAME)
     if obj is not None:
         return obj
@@ -187,24 +241,6 @@ def _ensure_water_volume(scene) -> bpy.types.Object:
     return obj
 
 
-def _get_water_height(self) -> float:
-    obj = bpy.data.objects.get(WATER_VOLUME_NAME)
-    return float(obj.location.z) if obj is not None else 0.0
-
-
-def _set_water_height(self, value: float) -> None:
-    from .handlers import _schedule_rebuild  # lazy import — debounce lives in handlers
-
-    obj = bpy.data.objects.get(WATER_VOLUME_NAME)
-    if obj is None:
-        # Lazily create — first scrub of the slider makes the volume
-        # appear, no separate "Add Water" button needed.
-        obj = _ensure_water_volume(bpy.context.scene)
-    obj.location.z = float(value)
-    # Trigger the same debounced rebuild a viewport drag would.
-    _schedule_rebuild("water")
-
-
 def _on_water_prop_changed(self, context):
     from .handlers import _schedule_rebuild
 
@@ -217,14 +253,15 @@ def _on_water_prop_changed(self, context):
 
 
 class HOVERBIKE_OT_rebuild_water_preview(Operator):
-    """Build a vertex-displaced water plane around ``water_volume_main``
-    using the same Gerstner wave parameters the runtime's
-    ``defaultWaves()`` uses. Pure preview — the plane lives in a
-    render-disabled collection and never reaches the .glb export."""
+    """Build a vertex-displaced water plane at the scene-wide sea
+    level (``hoverbike_water_height``) using the same Gerstner wave
+    parameters the runtime's ``defaultWaves()`` uses. Pure preview —
+    the plane lives in a render-disabled collection and never reaches
+    the .glb export."""
 
     bl_idname = "hoverbike.rebuild_water_preview"
     bl_label = "Rebuild Water Preview"
-    bl_description = "Build a wave-displaced water plane around water_volume_main"
+    bl_description = "Build a wave-displaced water plane at the current Sea level"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -244,14 +281,17 @@ class HOVERBIKE_OT_rebuild_water_preview(Operator):
 
 class HOVERBIKE_OT_add_water_volume(Operator):
     """Drop a ``water_volume_main`` empty at the world origin if the
-    scene doesn't already have one. Sets ``kind=water`` + sane wave
-    defaults so the new empty round-trips through derive_track_json on
-    the next export. Existing volumes are left alone."""
+    scene doesn't already have one. The empty's ``wave_height`` /
+    ``wave_freq`` custom props ship into the JSON's water block on
+    export — use this when you want to override the runtime's default
+    Gerstner amplitude / frequency. Sea level itself comes from the
+    scene-wide *Sea level* slider, NOT from the empty's transform."""
 
     bl_idname = "hoverbike.add_water_volume"
-    bl_label = "Add Water Volume"
+    bl_label = "Add Water Volume (legacy / wave overrides)"
     bl_description = (
-        "Create a `water_volume_main` empty at world origin (drag in viewport to set sea level)"
+        "Create a `water_volume_main` empty (optional — only useful if you want to "
+        "override `wave_height` / `wave_freq` per-track). Sea level lives on the slider."
     )
     bl_options = {"REGISTER", "UNDO"}
 
@@ -260,12 +300,12 @@ class HOVERBIKE_OT_add_water_volume(Operator):
         obj = _ensure_water_volume(context.scene)
         if existed:
             self.report(
-                {"INFO"}, f"{WATER_VOLUME_NAME} already exists at z={obj.location.z:.2f}."
+                {"INFO"}, f"{WATER_VOLUME_NAME} already exists."
             )
         else:
             self.report(
                 {"INFO"},
-                f"Created {WATER_VOLUME_NAME} at z=0; drag it up/down to set sea level.",
+                f"Created {WATER_VOLUME_NAME}. Edit wave_height / wave_freq on its Custom Properties.",
             )
         return {"FINISHED"}
 
@@ -312,21 +352,24 @@ def register() -> None:
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
 
-    # Sea level — proxies water_volume_main.location.z so authors can
-    # scrub it from the panel without finding the empty. The setter
-    # creates the empty if missing so the slider is always usable.
+    # Sea level — canonical scene-wide value. Used to be a proxy for
+    # water_volume_main.location.z; flipped in 2026-05 so the scene
+    # prop IS the source of truth and the preview mesh's height tracks
+    # it. Legacy .blends migrate via current_water_height_m's
+    # one-time fallback. The update callback fires a debounced
+    # water-preview rebuild so the surface tracks the slider.
     bpy.types.Scene.hoverbike_water_height = FloatProperty(
         name="Sea level (m)",
         description=(
-            "Z position of `water_volume_main` (= world sea level). Drag the empty in the "
-            "viewport or scrub here; both write to `water.height` in the JSON on export."
+            "World sea level. Drives the water-preview mesh's Z and ships out as "
+            "`water.height` in the JSON on export. Old `water_volume_main` empties are "
+            "no longer load-bearing — they're optional for `wave_height` / `wave_freq` overrides only."
         ),
         default=0.0,
         min=-500.0,
         max=500.0,
         precision=2,
-        get=_get_water_height,
-        set=_set_water_height,
+        update=_on_water_prop_changed,
     )
     bpy.types.Scene.hoverbike_water_size = FloatProperty(
         name="Water plane size (m)",

@@ -60,6 +60,7 @@ from . import (
     ghost_lap,
     handlers,
     horizon,
+    island_terrain,
     menu,
     new_map,
     panel,
@@ -101,6 +102,10 @@ _MODULES = (
     placement_helper,
     terrain,
     terrain_shader,
+    # island_terrain wraps the standalone seed_template_island.py
+    # script so its builders can be invoked from an in-scene operator.
+    # Registers after terrain since it's logically a terrain tool.
+    island_terrain,
     downtown,
     tunnel,
     road,

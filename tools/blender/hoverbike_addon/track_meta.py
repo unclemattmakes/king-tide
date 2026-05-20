@@ -282,10 +282,9 @@ def _lint_track(scene) -> tuple[list[str], list[str]]:
     terrain = _largest_terrain_mesh()
 
     down = mathutils.Vector((0.0, 0.0, -1.0))
-    water_h = 0.0
-    vol = bpy.data.objects.get("water_volume_main")
-    if vol is not None:
-        water_h = float(vol.matrix_world.translation.z)
+    from .water import current_water_height_m
+
+    water_h = current_water_height_m(scene)
 
     with _PreviewCollectionsHidden(bpy.context.view_layer):
         bpy.context.view_layer.update()
@@ -334,7 +333,7 @@ def _lint_track(scene) -> tuple[list[str], list[str]]:
                 warnings.append(
                     f"{underwater_count} spline point(s) sit below the water surface "
                     f"(z < {water_h - 0.5:.1f}). The racing line will dive underwater unless you "
-                    f"snap it back up or lift `water_volume_main`."
+                    f"snap it back up or lift the Sea level slider."
                 )
             if miss_count > 0:
                 errors.append(
