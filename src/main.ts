@@ -35,6 +35,8 @@ import { createPhysicsDebugRenderer } from './engine/render/physics-debug'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
 import { createRaceHud } from './engine/render/race-hud'
+import { createRaceIntro, type RaceIntro } from './engine/render/race-intro'
+import { createStartLights } from './engine/render/start-lights'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
 import { applyPixelRatio, setRenderer } from './engine/render/renderer-service'
@@ -117,8 +119,7 @@ import { createRaceSystem } from './game/systems/race'
 function applyDevBuildClass(): void {
   try {
     const isDev =
-      Boolean(import.meta.env?.DEV) ||
-      new URLSearchParams(window.location.search).has('dev')
+      Boolean(import.meta.env?.DEV) || new URLSearchParams(window.location.search).has('dev')
     document.body.classList.toggle('dev-build', isDev)
   } catch {
     // Defensive — if URLSearchParams or body somehow isn't available,
@@ -575,13 +576,59 @@ async function boot() {
   // callback takes over.
   trackVisuals.setCheckpointState(0, 'next')
 
+  // Pre-lap intro — cinematic camera shots + F1 start-lights.
+  //
+  // Mode resolution: `playerSettings.preLapIntro` controls the shot
+  // chain. The cinematic flies in single-player only — multiplayer
+  // pins the camera near the player bike during the lobby gate, so
+  // adding a fly-by on top would fight the lobby UX. Replay-playback
+  // gets no intro either (it boots into the saved race flow).
+  // `?skipintro=1` URL param forces it off (handy for QA + e2e).
+  const skipIntroParam = params.get('skipintro') === '1'
+  const isMultiplayer = roomId !== null
+  const introMode = isMultiplayer || skipIntroParam ? 'off' : playerSettings.preLapIntro
+  const useStartLights = !isMultiplayer && playerSettings.preLapIntro !== 'off'
+
+  // F1-style start-lights replace the 3/2/1 banner whenever the intro
+  // is on (single-player). Construct first so the race-hud's
+  // `onCountdownTick` callback below can drive it.
+  const startLights = useStartLights ? createStartLights() : null
+
   const raceHud = createRaceHud({
     track,
+    // Defer the countdown until the cinematic shots finish. Multi-
+    // player enters this code path AFTER the lobby has cleared (see
+    // `mp-lobby.ts`), so its countdown auto-starts here — same as
+    // existing behaviour — and the intro never plays.
+    deferStart: introMode !== 'off',
+    // Suppress the giant 3/2/1/GO text — the start-lights row is the
+    // canonical visual when the intro is on. Multiplayer keeps the
+    // banner (lobby gate already has its own UI; no intro shots fly).
+    hideCountdownBanner: useStartLights,
     onCountdownTick: (n) => {
       // Light audio cue: re-use the gate "ding" for each tick, lap fanfare for GO.
       if (n === 0) audio.lapCompleted()
       else audio.gateCleared()
+      // Drive the F1 lights from the same tick stream so the visual
+      // tracks the audio exactly (no double timing source).
+      startLights?.setCountdown(n)
     },
+  })
+
+  // Build the cinematic director. The shots are derived from the
+  // track + start pose, then ticked by the game loop. When done, the
+  // game loop calls `raceHud.armCountdown()` so the 3/2/1/GO ticks
+  // start playing through the start-lights overlay.
+  const raceIntro: RaceIntro = createRaceIntro({
+    camera,
+    track,
+    playerStart: {
+      x: track.start.position.x,
+      y: track.start.position.y,
+      z: track.start.position.z,
+      yaw: track.start.yaw,
+    },
+    mode: introMode,
   })
 
   // Replay recorder. Always-on during a normal race so the finish screen
@@ -957,7 +1004,19 @@ async function boot() {
       return on
     },
     isAntiGravDebugOn: () => antiGravDebug.isEnabled(),
-    skipCountdown: () => raceHud.skipCountdown(),
+    skipCountdown: () => {
+      // Scripted intent overrides (e2e / debug) skip past the
+      // cinematic intro as well as the 3/2/1 ticks so test paths
+      // aren't held up by the pre-race phase. Also hides the lights
+      // row so the e2e harness doesn't see the lamp DOM in
+      // mid-sequence state.
+      raceIntro.skip()
+      // Tick once so the director's done flag flips before the loop
+      // sees `isActive()`.
+      raceIntro.tick(0)
+      raceHud.skipCountdown()
+      startLights?.hide()
+    },
     determinismMode: () => determinismMode,
     waveField: () => waveField,
     raceTick: () => raceTick,
@@ -1073,6 +1132,7 @@ async function boot() {
     horizonRing,
     trackVisuals,
     raceHud,
+    raceIntro,
     raceTick,
     dirArrow,
     waveLineShimmer,
