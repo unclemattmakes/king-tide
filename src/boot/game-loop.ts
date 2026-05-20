@@ -904,9 +904,12 @@ export function startGameLoop(opts: GameLoopOpts): void {
           // tier 1 → modest flash + audio; tier 2 → full strength.
           // Strength scaling matches the wave-pump observer's saturated
           // band so a tier-2 release reads at the same intensity as a
-          // top-tier trick land.
+          // top-tier trick land. Chyron label calls out "DRIFT!" so
+          // the player attributes the boost to the drift, not a
+          // generic trick credit.
           const strength = tier === 2 ? 1 : 0.7
-          wavePumpHud.pump(strength, true)
+          const label = tier === 2 ? 'DRIFT !!' : 'DRIFT !'
+          wavePumpHud.pump(strength, true, label)
           if (playerSettings.wavePumpIntensity !== 'off') {
             audio.wavePump(strength, true)
           }
