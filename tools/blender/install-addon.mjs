@@ -129,9 +129,24 @@ function userAddonsDir(version) {
 // Install logic
 // ────────────────────────────────────────────────────────────────────
 
+/** True if `p` is *anything* on disk — file, dir, or symlink (even
+ * one whose target is missing). `existsSync` follows symlinks, so it
+ * reports a stale-target symlink as non-existent; that hid an
+ * existing entry from `backupExisting` and made re-installs after a
+ * deleted worktree fail with EEXIST. `lstatSync` doesn't follow, so
+ * a broken symlink still reads as present here. */
+function pathEntryExists(p) {
+  try {
+    lstatSync(p)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function isSymlinkTo(linkPath, expectedTarget) {
   try {
-    if (!existsSync(linkPath)) return false
+    if (!pathEntryExists(linkPath)) return false
     const ls = lstatSync(linkPath)
     if (!ls.isSymbolicLink()) return false
     const actualTarget = readlinkSync(linkPath)
@@ -149,7 +164,12 @@ function removeAny(p) {
 }
 
 function backupExisting(target) {
-  if (!existsSync(target)) return null
+  // Use lstat (via pathEntryExists) instead of existsSync so we still
+  // detect a symlink whose target was deleted — common after pruning
+  // a worktree that the link pointed into. Without this, the old
+  // dangling symlink survives and the fresh `symlinkSync` errors with
+  // EEXIST.
+  if (!pathEntryExists(target)) return null
   const ls = lstatSync(target)
   if (ls.isSymbolicLink()) {
     // existing symlink — just remove it; no backup needed
