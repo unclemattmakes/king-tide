@@ -350,6 +350,137 @@ property `kind = "pickup_spawn"`. The runtime rotates through
 pickup types at each spawn. Or hand-place pickups in the in-app
 editor instead.
 
+## Optional: wave zones
+
+For tracks where the water matters — surf swells along the start
+chute, a periodic tsunami sweeping the final straight, a glass-calm
+harbour at the apex — drop one or more `wave_zone_NN` empties.
+
+1. Hoverbike sidebar → **Wave zones** → **Add Wave Zone**. Drops
+   a `wave_zone_00` empty (cube display) at the 3D cursor with a
+   translucent cyan box gizmo so the volume reads in the viewport.
+2. **Local +X is the dominant swell direction.** Rotate around Z
+   (`R Z 45`) to aim the swell, then scale by editing the
+   `half_width` / `half_height` / `half_depth` custom properties.
+3. Tune `height_mult` and `freq_mult` in the Object Properties
+   panel — defaults of `1.5 / 1.0` give a visible swell bump over
+   the global field. Bigger / smaller for showier or calmer.
+4. (Optional) For a tsunami timer, add `surge_period_s` and
+   `surge_amplitude` together (e.g. `12.0 / 4.0` for a slow
+   12-second 4 m wave wall).
+
+The zone's effect rounds-trips through `waveZones[]` in the JSON
+on the next *Export Track to Game*. The Wave-zones merge is opt-in:
+if the `.blend` has any `wave_zone_NN` empties, Blender owns the
+list; otherwise the in-app editor's placements stay through
+re-exports.
+
+For full worked examples — Aqualand tsunami, Cape Town swell at a
+turn, Marina Bay harbour calm, Doge's Drift channelled chop — see
+the [Wave zones cookbook](./wave-zones).
+
+## Optional: anti-grav surfaces
+
+Curve-driven tubes, wall-rides, and loops. The tool sweeps a
+cross-section profile along a Bezier and auto-drops the entry /
+exit anti-grav zone empties that flip the bike's gravity at the
+boundaries.
+
+1. Hoverbike sidebar → **Anti-grav surfaces** → pick a **Profile**
+   (Tube / Ribbon / Banked strip). Tube uses *Radius* + *Sides*;
+   the other two use *Width* + *Thick*. *Samples* controls
+   arc-length density (48 is plenty for a single loop; bump for
+   long corkscrews).
+2. Click **Add Anti-Grav Curve** to drop a fresh
+   `antigrav_curve_NN` Bezier at the 3D cursor. Tab into edit
+   mode and shape the path.
+3. For a **Banked strip**, set per-control-point **Tilt** in
+   N-panel → Item → Tilt: 0 = flat, ±π/4 = banked corner,
+   ±π/2 = wall, ±π = ceiling. The **Anti-Grav presets** row in
+   the Gameplay sub-panel (in EDIT_CURVE mode) is one-click for
+   these values.
+4. Tab out, **Build Anti-Grav Surface**. The tool emits the
+   swept mesh + two oriented zone empties at the curve endpoints.
+
+`tracks-src/template-antigrav-showcase.blend` is the canonical
+reference — one tube corkscrew climbing a pillar, one ribbon
+wall-ride, one banked-strip loop. For full worked examples see the
+[Anti-grav surfaces cookbook](./antigrav-surfaces).
+
+## Optional: horizon ring
+
+The runtime gives every track a procedural distant-mountain
+silhouette by default. To replace it with something recognisable
+(Skytree behind Shibuya, Table Mountain behind Cape Town, the
+Manhattan grid behind Liberty):
+
+1. Hoverbike sidebar → **Horizon** → set Segments / Radius / Peak
+   / Seed on the starter, then **Add Horizon Ring**. Drops
+   `horizon_ring` (`kind=horizon`) at origin using the same
+   layered-sine starter the runtime uses.
+2. **Edit Horizon Ring** selects it and enters edit mode. Turn on
+   Proportional Editing (`O`) and pull verts into your track's
+   skyline.
+3. The mesh ships in the GLB as a single draw call; the runtime
+   replaces its procedural ring with your authored one
+   automatically. Need a different procedural starter? **Reset
+   Horizon Ring** re-seeds; **Delete Horizon Ring** drops back to
+   the fallback.
+
+## Optional: sky preset
+
+Per-track tint, sun, fog, time-of-day, colour grade, sea state.
+Hoverbike sidebar → **Sky preset** (default-closed between
+Horizon and Wave zones). Tune to taste — every field is optional
+and ships through the JSON's `sky` block on export. Reasonable
+starting points:
+
+| Look | Setting |
+|---|---|
+| Sunset glow | `tint = #ffd9a8`, `timeOfDay = 280`, `colorGrade = nyc_sunset` |
+| Glass-calm dawn | `cloudiness = 0.1`, `seaStateBeaufort = 1`, `timeOfDay = 60` |
+| Neon storm | `colorGrade = tokyo_neon`, `cloudiness = 0.8`, `seaStateBeaufort = 7` |
+| Volcanic dusk | `colorGrade = kilauea_volcanic`, `tint = #ff8866`, `cloudiness = 0.6` |
+
+The `seaStateBeaufort` knob scales every base wave amplitude at
+boot, so it pairs with wave-zone `height_mult` — set Beaufort 6
+for a stormy ambient field, then a `height_mult = 0.4` zone for
+the calm harbour in the middle.
+
+## Optional: particle emitters
+
+Drop `emitter_NN` empties for steam, foam, embers, neon glare,
+gulls — any localised VFX. The runtime spawns particles from each
+empty's pose using a shared 16-cell atlas.
+
+1. Hoverbike sidebar → **Emitters** → **Add Emitter**. Drops
+   `emitter_NN` (SPHERE display) at the 3D cursor. Local +Y is
+   the emission direction.
+2. Pick `atlas_cell` in Object Properties (0 = spark, 1 = smoke
+   puff, 2 = ember, 3 = foam, 4 = dust, 5 = gull, 7 = neon, etc).
+   The full legend is in [Addon reference → Emitters](./addon-reference#emitters).
+3. Tune `emit_rate`, `lifetime_s`, `velocity_cone_deg`,
+   `speed_*`, `size_*`, `color_*`, `gravity`, `max_particles`.
+
+Cost: one draw call per atlas cell, not per emitter — two
+`dust_mote` emitters on the same track share a call.
+
+## Optional: hero render
+
+Loading-screen art for the track-select grid.
+
+1. Park the 3D cursor where you want the camera to sit. Hoverbike
+   sidebar → **Track hero render** → **Add Camera Hero**. Drops
+   `camera_hero` aimed at a sensible default target (`start_00`,
+   the AI-spline mid-point, or world origin).
+2. Translate / rotate to frame the track's signature set-piece.
+3. **Render Hero** renders the full 1280×720 hero + 320×180 tile
+   in one shot. EEVEE, sub-second on a modern GPU. JPGs land in
+   `public/assets/tracks/<id>-hero.jpg` / `-thumb.jpg`.
+
+Subsequent *Export Track to Game* auto-fires the render — the UI
+art never drifts from the latest `.blend`.
+
 ## Iterate
 
 Once exported, the iteration loop is **edit → Export → reload

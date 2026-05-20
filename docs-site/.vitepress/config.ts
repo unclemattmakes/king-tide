@@ -64,6 +64,13 @@ export default defineConfig({
             { text: 'Scene conventions', link: '/blender/scene-conventions' },
           ],
         },
+        {
+          text: 'Cookbooks',
+          items: [
+            { text: 'Wave zones', link: '/blender/wave-zones' },
+            { text: 'Anti-grav surfaces', link: '/blender/antigrav-surfaces' },
+          ],
+        },
       ],
       '/reference/': [
         {
