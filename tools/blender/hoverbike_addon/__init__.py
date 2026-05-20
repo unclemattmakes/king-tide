@@ -60,6 +60,7 @@ from . import (
     ghost_lap,
     handlers,
     horizon,
+    menu,
     new_map,
     panel,
     placement_helper,
@@ -114,9 +115,15 @@ _MODULES = (
     # makes the "depsgraph plumbing" section easy to find.
     auto_tag,
     _legacy,
-    # panel registers last so every operator + scene prop it references
-    # already exists in bpy.types when its draw() methods run.
+    # panel registers near-last so every operator + scene prop it
+    # references already exists in bpy.types when its draw() methods
+    # run.
     panel,
+    # menu registers absolute-last — its submenu/pie classes call into
+    # operators registered by every module above, and its
+    # VIEW3D_MT_editor_menus append needs to land after Blender's stock
+    # menus are set up so our entry sits at the end of the bar.
+    menu,
 )
 
 
