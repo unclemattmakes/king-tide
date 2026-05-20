@@ -1,5 +1,20 @@
-> **Last updated: 2026-05-19** — Phase A gap 7 + Phase F of
-> [`docs/v1-asset-pipeline-plan.md`](./v1-asset-pipeline-plan.md) land.
+> **Last updated: 2026-05-19** — Blender addon UX rework lands
+> alongside Phase A gap 7 + Phase F of
+> [`docs/v1-asset-pipeline-plan.md`](./v1-asset-pipeline-plan.md). The
+> addon pass: new top-bar Hoverbike menu (View3D header, BlenderGIS-style)
+> holding every operator, N-panel sub-panels go selection-driven so the
+> sidebar only shows the tools that match the active object, Shift+W
+> opens a quick pie of the eight most-used actions, sea level decouples
+> from `water_volume_main` (the scene prop `hoverbike_water_height` is
+> the canonical source — legacy volumes migrate lazily; the empty stays
+> only for `wave_height` / `wave_freq` overrides), and a new
+> *Add Island Terrain* operator drops the procedural `HV_Island`
+> template into the current scene without requiring a fresh .blend.
+> Preview collections (gate, water, racer) reuse their datablock across
+> rebuilds so Outliner collapse-state sticks, and wave-zone gizmos now
+> render as wireframe. See *Authoring — addon UX rework + water
+> decoupling + island spawn (2026-05-19)* below for details.
+> 
 > New [`src/game/ai/pump-hints.ts`](../src/game/ai/pump-hints.ts) walks
 > each AI spline against the track's `wave_zone_NN` empties and flags
 > indices inside any zone whose `heightMult > 1.2` (the threshold gap 7
@@ -25,6 +40,8 @@
 > 7 bike-variants).
 >
 > Recent landed work (one-liners — `git log` carries the full story):
+> Blender addon UX rework (top-bar menu + selection-driven N-panel +
+> pie + island-terrain spawn + sea-level decoupled from water_volume),
 > runtime lava-river shader, swinging-landmark kinematic colliders,
 > Phase E Sprint 3 (Drowned Cup — Aqualand, Angkor Drowned, Liberty
 > Drowned; v1 lineup complete), Phase D Sprint 2 polish, Steam Deck
@@ -719,6 +736,50 @@ bundle baked into the controller at spawn time:
 The Web Audio path itself is smoke-tested in the browser — jsdom
 doesn't ship Web Audio so the AudioEngine creation stays out of the
 unit-test layer.
+
+### Authoring — addon UX rework + water decoupling + island spawn (2026-05-19)
+- **Top-bar Hoverbike menu.** New View3D-header dropdown (next to
+  View / Select / Add / Object — BlenderGIS-style) holding every
+  operator categorised under Add / Build-Refresh / Spline / Terrain
+  / Thumbnail / Utility. Always available regardless of selection,
+  so finding a tool no longer requires scrolling the N-panel. A
+  *Quick Pie* menu on Shift+W in the 3D view covers the eight
+  most-used actions for the in-viewport authoring loop.
+- **Selection-driven N-panel.** Twelve per-tool sub-panels (spline,
+  road, tunnels, anti-grav, ramps, downtown, terrain, water,
+  horizon, waves, gameplay, placement helper) now appear only when
+  their target object is the active selection. Scene-wide sub-panels
+  (Sky, Shader, Stats, Hero, Ghost, Emitters) stay always-on but
+  default-closed. The N-panel header shows an *Active: …* hint plus
+  pointers to the top-bar menu and pie shortcut, so the new model
+  is self-documenting.
+- **Sea level decoupled from `water_volume_main`.** The scene prop
+  `hoverbike_water_height` is now the canonical sea level — the
+  slider writes it directly, the export reads it, the JSON-reload
+  writes it back, and the wave-preview mesh's Z follows it.
+  `water_volume_main` becomes optional: only useful for
+  `wave_height` / `wave_freq` custom-prop overrides per track. Old
+  .blends migrate lazily — first read after open promotes a legacy
+  volume's Z into the scene prop, so existing tracks export the same
+  height as before.
+- **Add Island Terrain operator.** New entry under Hoverbike → Add
+  → *Terrain templates* (and Terrain submenu) that spawns a
+  1024×1024 m subdivided plane with the `HV_Island` Geometry-Nodes
+  modifier + four default peak control empties into the current
+  scene — same procedural setup `template-island.blend` ships with,
+  but layered onto existing work rather than requiring a fresh
+  template-copy. Loads `seed_template_island.py` lazily by file
+  path; idempotent on reuse (refuses on existing `terrain`; reuses
+  `HV_TemplateIsland` / `HV_PeakProfile` node groups; skips
+  already-spawned peak empties).
+- **Stable preview-collection state.** Gate, water, and racer
+  preview rebuilds now reuse the existing collection instead of
+  nuke-and-recreate, so the Outliner's collapse state survives
+  debounced spline / slider edits. Wave-zone child gizmos render
+  as wireframe instead of solid translucent — overlapping zones
+  read cleanly. The install-addon script also picks up
+  dangling-symlink repair so deleted-worktree recoveries no longer
+  EEXIST.
 
 ### Authoring — tunnels, downtown, placement helper, terrain coloration (2026-05-15)
 - **Tunnel tool.** Bezier curve through a hill → *Build Tunnel* emits a

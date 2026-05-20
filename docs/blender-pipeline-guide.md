@@ -133,7 +133,9 @@ You'll see:
 - A **flat plane** named `track_surface` at the origin — the drivable
   ground.
 - A **water volume empty** (cube wireframe) named `water_volume_main`
-  hovering above.
+  hovering above. Only useful for `wave_height` / `wave_freq` custom-prop
+  overrides — sea level itself comes from the scene-wide *Sea level (m)*
+  slider (`hoverbike_water_height`), not from this empty's Z.
 - **Four checkpoint empties** (`cp_00`..`cp_03`) along the +Y axis.
 - An **AI spline** (NURBS curve) named `ai_spline_main` running
   through the middle.
@@ -163,11 +165,12 @@ A real track typically needs:
   `mat_track_*` for primary track surfaces (authoring convention; the
   runtime doesn't key off it yet). See [Limitations](#known-limitations)
   for the broadphase caveat.
-- **A water volume.** Empty cube (Add → Empty → Cube). Name
-  `water_volume_main`, custom props `kind = "water"`, `wave_height =
-  1.0`, `wave_freq = 0.5`. The runtime applies the wave field over the
-  scene; bikes hover on water wherever there's no track surface above
-  them.
+- **A water sea level.** Set it on the *Sea level (m)* slider in the
+  Hoverbike → Water sub-panel (scene prop `hoverbike_water_height`).
+  Round-trips through `water.height` in the JSON. **Optional:** drop a
+  `water_volume_main` empty (Add → Empty → Cube) only if you want to
+  override `wave_height` / `wave_freq` custom-prop values per track
+  (the empty's transform is no longer load-bearing for sea level).
 - **Checkpoints.** One empty per gate, named `cp_00`..`cp_NN` (zero-padded,
   contiguous from 0). Place each at the gate centre, with the empty's
   forward axis (+Z in Blender, becomes +Z in three) pointing in the
@@ -196,9 +199,10 @@ complete name-pattern + extras matrix.
 
 ### 4. Export
 
-In Blender, press **N** to open the sidebar, switch to the **Hoverbike**
-tab, and click **Export to Game**. The addon prints to Blender's info
-bar:
+In Blender, click **Hoverbike → Export Track to Game** in the View3D
+header menu bar (next to View / Select / Add / Object), or press **N**
+to open the sidebar's *Hoverbike* tab and click **Export to Game** in
+the header. Either way prints to Blender's info bar:
 
 ```
 Exported → public/assets/tracks/my-track.glb (created public/tracks/my-track.json)
@@ -233,12 +237,30 @@ gameplay placement (gates, pickup spawns) without re-opening Blender,
 switch into edit mode: `?track=my-track&edit=1` (or click **Open…**
 in the editor panel).
 
-## Authoring tools (Hoverbike sidebar)
+## Authoring tools (Hoverbike menu + sidebar)
 
-Press **N** in the 3D viewport, switch to the **Hoverbike** tab. The
-panel re-renders based on whether the `.blend` lives in `tracks-src/`
-(track mode) or `bikes-src/` (bike mode). This section covers the track
-authoring tools, top to bottom.
+Two complementary surfaces:
+
+- **View3D header → Hoverbike menu.** Top-bar dropdown next to View /
+  Select / Add / Object. Holds every operator — Export, Add (terrain
+  templates, gameplay, environment), Build / Refresh, Spline, Terrain,
+  Thumbnail, Utility — plus a *Quick Pie* entry on **Shift+W**. Always
+  available regardless of selection; the right place to fish for any
+  operator.
+
+- **N-panel sidebar (Hoverbike tab).** Press **N**, switch to the
+  *Hoverbike* tab. The header is always visible (track id, Export, lap
+  stats, missing-essentials scaffold). The per-tool sub-panels below
+  are **selection-driven** — Road tool appears when `road_curve_main`
+  is active, Spline tools when `ai_spline_main` is active, Water when
+  the volume or preview is active, etc. A small "Active: …" hint at
+  the top of the panel calls out which kind the current selection
+  matches. Scene-wide sub-panels (Sky, Shader, Stats, Hero, Ghost
+  lap, Emitters) stay always-on but default-closed.
+
+The panel re-renders based on whether the `.blend` lives in
+`tracks-src/` (track mode) or `bikes-src/` (bike mode). This section
+covers the track authoring tools, top to bottom.
 
 ### Spline tools
 
@@ -469,14 +491,29 @@ Knobs:
 Miami-flat valley, Nob-Hill-style 56 m grade, Telegraph-Ridge
 78 m grade with 31 m building skirts.
 
-### Heightmap import
+### Spawn terrain in an existing scene
 
-Read a greyscale PNG/EXR and emit a subdivided plane whose verts are
-luminance-displaced. The output mesh `terrain_heightmap` is tagged
-`kind=track` and ships as collidable terrain at export. Configure
-*Size (m)*, *Subdiv*, *Δz (m)*, and *Base z* on the panel; the file
-picker remembers the last imported path. Re-import replaces the
-previous heightmap mesh idempotently.
+Two operators drop a fresh terrain mesh into the current scene without
+needing a fresh `.blend` template:
+
+- **Add Island Terrain (procedural).** Hoverbike → Add → *Island
+  Terrain* (or Terrain submenu). Spawns a 1024×1024 m subdivided plane
+  (~150 k verts) with the `HV_Island` Geometry-Nodes modifier and four
+  default peak control empties (one central volcano with crater, two
+  flanking, one submerged shoal) — the same procedural setup
+  [`tracks-src/template-island.blend`](../tracks-src/template-island.blend)
+  ships with, but layered into your existing scene. Refuses to overwrite
+  an existing `terrain` object; reuses any `HV_TemplateIsland` /
+  `HV_PeakProfile` node groups already in the .blend (no `.001`
+  duplicates). After it finishes, the new terrain is selected so the
+  Terrain N-panel opens automatically.
+
+- **Import Heightmap.** Read a greyscale PNG/EXR and emit a subdivided
+  plane whose verts are luminance-displaced. The output mesh
+  `terrain_heightmap` is tagged `kind=track` and ships as collidable
+  terrain at export. Configure *Size (m)*, *Subdiv*, *Δz (m)*, and
+  *Base z* on the panel; the file picker remembers the last imported
+  path. Re-import replaces the previous heightmap mesh idempotently.
 
 ### Terrain sculpt
 
@@ -807,16 +844,18 @@ Cape Town aquarium, etc).
 
 ### Water (sea level + preview)
 
-`water_volume_main`'s Z position is the in-game sea level. Two ways
-to set it:
+Sea level is a scene-wide value — the *Sea level (m)* slider in the
+Water sub-panel (scene prop `hoverbike_water_height`). Scrub the
+slider; the wave preview's mesh follows on the next debounced rebuild
+and the value rides out as `water.height` in the JSON. JSON-reload
+writes back to the same scene prop.
 
-- Drag the empty up/down in the viewport (live; the wave preview
-  follows via the depsgraph hook).
-- Scrub *Sea level (m)* in the Water box (creates the empty if it's
-  missing).
-
-Either path round-trips through `water.height` in the JSON on export
-(and re-loading the JSON on a fresh open writes back to the empty's Z).
+The legacy `water_volume_main` empty is **optional now** — it's only
+useful for overriding `wave_height` / `wave_freq` custom props per
+track. Its transform is no longer load-bearing for sea level.
+`.blends` saved before this change migrate lazily — the first
+read after open promotes a legacy volume's Z into the scene prop, so
+existing tracks export the same height they always did.
 
 ### Boost pads
 
@@ -842,7 +881,8 @@ stay through re-exports.
 Drop a `wave_zone_NN` empty at the 3D cursor with **Add Wave Zone**
 (under the *Wave zones* sub-panel). The empty's local +X axis is the
 dominant swell direction; rotate around Z to aim it, and scale the
-extents via the custom properties.
+extents via the custom properties. The child box gizmo renders as
+**wireframe** so overlapping zones / busy scenes stay readable.
 
 Each zone scales the global Gerstner wave field inside its oriented
 bounding box. Custom properties (defaults in parentheses):
@@ -889,8 +929,10 @@ They never reach the GLB export.
 - **Racer preview** drops a bike silhouette at `start_00` plus one per
   AI slot loaded from `specs/grid-offsets.json` — same file the
   runtime reads.
-- **Water preview** builds a wave-displaced plane around
-  `water_volume_main` using the same Gerstner waves the runtime uses.
+- **Water preview** builds a wave-displaced plane at the current
+  *Sea level* (`hoverbike_water_height`) using the same Gerstner
+  waves the runtime uses. The collection is reused across rebuilds
+  so its Outliner collapse state survives debounced changes.
 
 ### Ghost lap + chase cam
 
