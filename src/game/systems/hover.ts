@@ -1,5 +1,7 @@
 import type RAPIER from '@dimforge/rapier3d-compat'
 import { query } from 'bitecs'
+import { devSettings } from '@/engine/dev-settings'
+import { isHoverDebugEnabled } from '@/engine/sim/debug-flags'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { quatRotate, vecHorizontalLength } from '@/engine/sim/physics/vec'
@@ -12,8 +14,10 @@ import {
   BoostMeterStore,
   ControlIntent,
   ControlIntentStore,
+  HoverDebugStore,
   HoverState,
   HoverStateStore,
+  type HoverProbe,
   RBHandle,
   RBHandleStore,
 } from '@/game/components'
@@ -341,6 +345,33 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const groundDistance = probe.hasSurface ? bikeProj - probe.surfaceProj : MAX_HOVER_PROBE
     const isGrounded = probe.hasSurface && groundDistance < stats.hoverHeight * 1.6
 
+    // Per-bike debug capture — only allocates when the global flag is on.
+    // The renderer (`engine/render/hover-debug.ts`) reads this each frame
+    // to draw probe rays, hit markers, and spring force arrows. Skipped
+    // entirely otherwise so normal play pays nothing.
+    const debugOn = isHoverDebugEnabled()
+    const debugCorners: HoverProbe[] = debugOn
+      ? [
+          { ox: 0, oy: 0, oz: 0, hx: Number.NEGATIVE_INFINITY, hy: 0, hz: 0, active: false, aUp: 0 },
+          { ox: 0, oy: 0, oz: 0, hx: Number.NEGATIVE_INFINITY, hy: 0, hz: 0, active: false, aUp: 0 },
+          { ox: 0, oy: 0, oz: 0, hx: Number.NEGATIVE_INFINITY, hy: 0, hz: 0, active: false, aUp: 0 },
+          { ox: 0, oy: 0, oz: 0, hx: Number.NEGATIVE_INFINITY, hy: 0, hz: 0, active: false, aUp: 0 },
+        ]
+      : []
+    // Center probe hit point — projected back to world from the
+    // `surfaceProj` value (which is the hit's up-axis projection).
+    // When the surface is water the hit point isn't physically a ray
+    // hit; reconstruct it on the wave plane under the bike (xz column).
+    let centerHitX = 0
+    let centerHitY = 0
+    let centerHitZ = 0
+    if (debugOn && probe.hasSurface) {
+      const along = bikeProj - probe.surfaceProj
+      centerHitX = t.x + dnX * along
+      centerHitY = t.y + dnY * along
+      centerHitZ = t.z + dnZ * along
+    }
+
     // Surface alignment: figure out how the chassis should sit relative to
     // the surface it's riding. When airborne we don't know what surface the
     // bike is heading toward, so the targets stay 0 and the bike just holds
@@ -430,8 +461,16 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       const planeVy = linvel.y - upY * linvelUp
       const planeVz = linvel.z - upZ * linvelUp
       const speedPlane = Math.hypot(planeVx, planeVy, planeVz)
-      probeHalfLength = 0.8 + Math.min(speedPlane * 0.05, 1.4)
-      probeHalfWidth = 0.4
+      // Probe geometry is read live from devSettings so the F4 hover-
+      // debug overlay can preview tuning changes immediately. Defaults
+      // are 0.8 / 0.4 / 0.05 — historical values, baked into
+      // DEFAULT_DEV_SETTINGS. The anticipation cap (1.4 m) stays
+      // hardcoded; it's a guard against speed-driven overshoot, not a
+      // tuning knob.
+      probeHalfLength =
+        devSettings.hoverProbeHalfLength +
+        Math.min(speedPlane * devSettings.hoverProbeSpeedScale, 1.4)
+      probeHalfWidth = devSettings.hoverProbeHalfWidth
 
       // Full 3D bike-fwd / bike-right (used for the spring's force position).
       const fwd3D = quatRotate(q, { x: 0, y: 0, z: 1 })
@@ -471,14 +510,15 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
 
       // Each probe casts from PROBE_LIFT *along +up* of the bike center so a
       // rising surface in front of the bike (a ramp face, a wall on
-      // approach) is correctly intersected from above.
-      const PROBE_LIFT = 3
+      // approach) is correctly intersected from above. Live-tunable
+      // via devSettings.hoverProbeLift.
+      const PROBE_LIFT = devSettings.hoverProbeLift
       // probeSurfaceY returns max(ground, water) per location (projected on
       // up); falls back to the center probe's surface projection if neither
       // hit (bike overhanging an edge with nothing below — read the missing
       // side as flat with the center rather than NaN).
       const fallbackProj = probe.surfaceProj
-      const sampleAt = (px: number, py: number, pz: number): number => {
+      const sampleAt = (px: number, py: number, pz: number, dbgIdx: number): number => {
         const v = probeSurfaceY(
           phys,
           probeField,
@@ -494,27 +534,53 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
           rb,
           PROBE_LIFT,
         )
+        if (debugOn) {
+          const c = debugCorners[dbgIdx]!
+          // Lifted origin = (px,py,pz) + up * PROBE_LIFT — what the ray
+          // actually starts from. Stored so the renderer can draw the
+          // probe ray from its true origin.
+          c.ox = px + upX * PROBE_LIFT
+          c.oy = py + upY * PROBE_LIFT
+          c.oz = pz + upZ * PROBE_LIFT
+          if (v !== Number.NEGATIVE_INFINITY) {
+            // Walk back from the lifted origin along −up to where the
+            // surface projection sits. The probe's XZ position is fixed
+            // by the lifted origin column, so this reconstructs the hit
+            // point as (origin_xz, surfaceY_along_up).
+            const liftedProj = c.ox * upX + c.oy * upY + c.oz * upZ
+            const along = liftedProj - v
+            c.hx = c.ox + dnX * along
+            c.hy = c.oy + dnY * along
+            c.hz = c.oz + dnZ * along
+          } else {
+            c.hx = Number.NEGATIVE_INFINITY
+          }
+        }
         return v === Number.NEGATIVE_INFINITY ? fallbackProj : v
       }
       bowProj = sampleAt(
         t.x + sampleFwdX * probeHalfLength,
         t.y + sampleFwdY * probeHalfLength,
         t.z + sampleFwdZ * probeHalfLength,
+        0,
       )
       sternProj = sampleAt(
         t.x - sampleFwdX * probeHalfLength,
         t.y - sampleFwdY * probeHalfLength,
         t.z - sampleFwdZ * probeHalfLength,
+        1,
       )
       starboardProj = sampleAt(
         t.x + sampleRightX * probeHalfWidth,
         t.y + sampleRightY * probeHalfWidth,
         t.z + sampleRightZ * probeHalfWidth,
+        2,
       )
       portProj = sampleAt(
         t.x - sampleRightX * probeHalfWidth,
         t.y - sampleRightY * probeHalfWidth,
         t.z - sampleRightZ * probeHalfWidth,
+        3,
       )
       surfaceForwardSlope = (bowProj - sternProj) / (2 * probeHalfLength)
     }
@@ -684,7 +750,8 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         // Per-corner buoyancy constants for submerged corners on water.
         const BUOYANCY_PER_M = 14
         const BUOYANCY_CAP = 20
-        for (const p of points) {
+        for (let pi = 0; pi < points.length; pi++) {
+          const p = points[pi]!
           // Probe point's projection on up = (t + offset) · up.
           const probeProj = (t.x + p.ox) * upX + (t.y + p.oy) * upY + (t.z + p.oz) * upZ
           const localDist = probeProj - p.surfProj
@@ -766,6 +833,11 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
             const springMul = probe.isWater && p.longitudinal ? WATER_LONGITUDINAL_SPRING_MUL : 1.0
             aUp = GRAVITY + heightError * stats.hoverSpring * springMul - dampV * stats.hoverDamp
           }
+          if (debugOn) {
+            const dc = debugCorners[pi]!
+            dc.aUp = aUp
+            dc.active = true
+          }
           // Lift along +up at the probe point's world position. Replaces
           // the old `{x:0, y:F, z:0}` world-down lift.
           const impMag = aUp * POINT_MASS_FRAC * m * dt
@@ -813,6 +885,39 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       // (torque, not a stored bias). Kept at 0 for backwards compat.
       inputPitch: 0,
     })
+
+    if (debugOn) {
+      // Effective hover-height target — matches the slope-aware boost
+      // applied per-corner inside the spring loop so the renderer's
+      // target ring sits at the same height the spring is aiming for.
+      const slopeBoostDbg = probe.isWater
+        ? 0
+        : Math.abs(surfaceForwardSlope) * SLOPE_HOVER_BOOST
+      HoverDebugStore.set(eid, {
+        upX,
+        upY,
+        upZ,
+        dnX,
+        dnY,
+        dnZ,
+        cx: t.x,
+        cy: t.y,
+        cz: t.z,
+        centerHitX,
+        centerHitY,
+        centerHitZ,
+        hasSurface: probe.hasSurface,
+        isWater: probe.isWater,
+        groundDistance,
+        effHoverHeight: stats.hoverHeight + slopeBoostDbg,
+        isGrounded,
+        corners: debugCorners,
+        surfaceForwardSlope,
+        probeLift: devSettings.hoverProbeLift,
+      })
+    } else if (HoverDebugStore.has(eid)) {
+      HoverDebugStore.delete(eid)
+    }
 
     // Player pitch torque — applied around the bike's right axis in both
     // ground and air. The stick commands an angular *force*; pitch ANGLE

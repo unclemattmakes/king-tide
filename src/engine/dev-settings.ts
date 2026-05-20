@@ -42,6 +42,26 @@ export type DevSettings = {
    *  to neutral the next frame. Read by `input-apply.ts`; player-only
    *  (AI never goes through that smoothing path). */
   steerReleaseTightness: number
+
+  // Hover spring geometry — read live by `game/systems/hover.ts`. These
+  // shape the four-corner probe footprint that drives surface alignment
+  // + the multi-point spring's height-error reads. Pair with F4
+  // (`?debug=hover`) to see the change visually as you drag.
+  /** Bow/stern probe distance from the bike center along the up-plane
+   *  forward axis (metres). The actual probe extends by speed
+   *  anticipation (see `hoverProbeSpeedScale`). */
+  hoverProbeHalfLength: number
+  /** Port/starboard probe distance from the bike center along the
+   *  up-plane right axis (metres). */
+  hoverProbeHalfWidth: number
+  /** Origin lift along +up before each corner cast (metres). Lets the
+   *  ray see a rising ramp face / wall from above instead of slipping
+   *  under it. */
+  hoverProbeLift: number
+  /** Bow/stern probe speed anticipation, in metres added per m/s of
+   *  up-plane speed (capped at 1.4 m extension). 0.05 = at 25 m/s the
+   *  bow probe reaches ~2m out in front. */
+  hoverProbeSpeedScale: number
 }
 
 export const DEFAULT_DEV_SETTINGS: Readonly<DevSettings> = Object.freeze({
@@ -57,6 +77,11 @@ export const DEFAULT_DEV_SETTINGS: Readonly<DevSettings> = Object.freeze({
   keyboardPitchRate: 8,
 
   steerReleaseTightness: 0.6,
+
+  hoverProbeHalfLength: 0.8,
+  hoverProbeHalfWidth: 0.4,
+  hoverProbeLift: 3.0,
+  hoverProbeSpeedScale: 0.05,
 })
 
 /**
@@ -92,6 +117,10 @@ export function loadDevSettings(): void {
     'keyboardThrottleRate',
     'keyboardPitchRate',
     'steerReleaseTightness',
+    'hoverProbeHalfLength',
+    'hoverProbeHalfWidth',
+    'hoverProbeLift',
+    'hoverProbeSpeedScale',
   ]
   for (const k of keys) {
     if (isFiniteNumber(p[k])) (devSettings as Record<string, unknown>)[k] = p[k]
