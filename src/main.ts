@@ -1,4 +1,5 @@
 import { addComponent, hasComponent, removeComponent } from 'bitecs'
+import * as THREE from 'three'
 import { installControls } from './boot/controls'
 import { startEditMode } from './boot/edit-mode'
 import { startGameLoop } from './boot/game-loop'
@@ -37,6 +38,11 @@ import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
 import { createRaceHud } from './engine/render/race-hud'
 import { createRaceIntro, type RaceIntro } from './engine/render/race-intro'
+import {
+  createRaceIntroUi,
+  type RaceIntroUi,
+  type RaceIntroUiRacer,
+} from './engine/render/race-intro-ui'
 import { createStartLights } from './engine/render/start-lights'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
@@ -63,7 +69,9 @@ import { applyStoredWaterTuning } from './engine/water-debug-storage'
 import { loadBike } from './game/assets/bike-loader'
 import { loadManifest } from './game/assets/manifest'
 import { type LoadedProp, loadProp } from './game/assets/prop-loader'
-import { resolveBikeVariant } from './game/bikes/variants'
+import { aiCallSign } from './game/bikes/callsigns'
+import { BIKE_VARIANTS, type BikeVariantId, resolveBikeVariant } from './game/bikes/variants'
+import { deriveFallbackTheme, getTrackTheme } from './game/tracks/theme-catalog'
 import { AIController, AIControllerStore, AITag, defaultAIController } from './game/components/ai'
 import { RacerStore } from './game/components/race'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
@@ -623,6 +631,34 @@ async function boot() {
     },
   })
 
+  // Downward-raycast helper backed by Three.js' built-in Raycaster +
+  // the loaded environment GLB. Procedural tracks have no GLB root —
+  // the callback returns null in that case and the intro director
+  // falls back to the waterline clearance floor. Cached vectors keep
+  // the per-frame call allocation-free; the Raycaster itself does the
+  // BVH traversal on the GLB's meshes.
+  const introRayOrigin = new THREE.Vector3()
+  const introRayDown = new THREE.Vector3(0, -1, 0)
+  const introRaycaster = new THREE.Raycaster()
+  // Cast from well above the highest plausible camera altitude (the
+  // aerial shot tops out at ~140 m; 500 m gives generous headroom).
+  introRaycaster.far = 1500
+  function introRaycastDown(x: number, z: number): number | null {
+    if (!environmentGlbRoot) return null
+    introRayOrigin.set(x, 500, z)
+    introRaycaster.set(introRayOrigin, introRayDown)
+    const hits = introRaycaster.intersectObject(environmentGlbRoot, true)
+    for (const h of hits) {
+      // Skip non-collidable preview meshes (gate halos, prop placeholders
+      // tagged in userData.kind by the GLB loader). The terrain mesh
+      // either has no `kind` or `kind === 'track'` per the asset registry.
+      const kind = (h.object?.userData as { kind?: string } | undefined)?.kind
+      if (kind && kind !== 'track' && kind !== 'horizon') continue
+      return h.point.y
+    }
+    return null
+  }
+
   // Build the cinematic director. The shots are derived from the
   // track + start pose, then ticked by the game loop. When done, the
   // game loop calls `raceHud.armCountdown()` so the 3/2/1/GO ticks
@@ -637,7 +673,81 @@ async function boot() {
       yaw: track.start.yaw,
     },
     mode: introMode,
+    collision: {
+      raycastDown: introRaycastDown,
+      waterY: waterHeight,
+      // 3.5 m clearance — tall enough that the camera never punches
+      // through low rooftops or seabed, low enough that the descent
+      // shot's authored 26 m above the chase pose still reads.
+      minClearance: 3.5,
+    },
   })
+
+  // Tiny helper — convert a 0xRRGGBB number to the "#rrggbb" form the
+  // intro UI's `bodyColorHex` field expects. Used in two places (intro
+  // roster + recorder); kept local because there's no other caller and
+  // the spectator HUD has its own inline formulation.
+  function hexFromColor(c: number): string {
+    return `#${c.toString(16).padStart(6, '0')}`
+  }
+
+  // Per-slot variant palette for the AI grid. Rotates through the five
+  // bike variants for visual variety on the broadcast roster and replay
+  // playback. The sim-side bike spawn doesn't use these stats (AI bikes
+  // run on default stats by design — see spawn-bikes.ts), but the body
+  // colour + display name flow through the replay file and the intro UI.
+  const AI_VARIANT_ROTATION: readonly BikeVariantId[] = [
+    'cruiser',
+    'stunt',
+    'racer',
+    'scout',
+    'sparrow',
+    'cruiser',
+    'stunt',
+  ]
+  function variantForAiSlot(slot: number): BikeVariantId {
+    return AI_VARIANT_ROTATION[(slot - 1) % AI_VARIANT_ROTATION.length] ?? 'racer'
+  }
+
+  // Build the broadcast intro overlay. Suppressed when the cinematic is
+  // off (multiplayer, ?skipintro=1, or the user's setting). The UI
+  // shares its racer roster with the replay recorder below so names + colours
+  // round-trip into saved replays.
+  const introTheme = getTrackTheme(track.id) ?? deriveFallbackTheme(track.id, track.name, track.sky)
+  const introRoster: RaceIntroUiRacer[] = []
+  introRoster.push({
+    slot: 0,
+    name: playerVariant.name,
+    variantName: playerVariant.name,
+    bodyColorHex: hexFromColor(playerVariant.bodyColor),
+    isPlayer: true,
+  })
+  for (let i = 0; i < aiEids.length; i++) {
+    const variantId = variantForAiSlot(i + 1)
+    const variant = BIKE_VARIANTS[variantId]
+    introRoster.push({
+      slot: i + 1,
+      name: aiCallSign(track.id, i + 1),
+      variantName: variant.name,
+      bodyColorHex: hexFromColor(variant.bodyColor),
+      isPlayer: false,
+    })
+  }
+
+  let raceIntroUi: RaceIntroUi | null = null
+  if (introMode !== 'off') {
+    raceIntroUi = createRaceIntroUi({
+      // Prefer the theme catalog's curated display name over the JSON
+      // `track.name` (most JSONs ship with the slug-cased id, which
+      // reads as "THE-MAW" instead of "The Maw" in the title card).
+      trackName: introTheme.displayName ?? track.name,
+      theme: introTheme,
+      lapsToFinish: track.lapsToFinish,
+      racers: introRoster,
+      totalDurationSec: raceIntro.totalDuration(),
+      variant: introMode === 'short' ? 'short' : 'full',
+    })
+  }
 
   // Replay recorder. Always-on during a normal race so the finish screen
   // can offer a "Save Replay" download AND so Time Trial can slice the
@@ -658,13 +768,16 @@ async function boot() {
       bodyColor: playerVariant.bodyColor,
     })
     for (let i = 0; i < aiEids.length; i++) {
-      const racerVariant = resolveBikeVariant('racer')
+      // Match the intro roster's variant + call-sign pick so the replay
+      // shows the same broadcast as the live race.
+      const variantId = variantForAiSlot(i + 1)
+      const variant = BIKE_VARIANTS[variantId]
       recorderBikes.push({
         slot: i + 1,
         isPlayer: false,
-        variantId: racerVariant.id,
-        displayName: `${racerVariant.name} ${i + 1}`,
-        bodyColor: racerVariant.bodyColor,
+        variantId: variant.id,
+        displayName: aiCallSign(track.id, i + 1),
+        bodyColor: variant.bodyColor,
       })
     }
     recorder = createReplayRecorder({
@@ -1178,6 +1291,7 @@ async function boot() {
     trackVisuals,
     raceHud,
     raceIntro,
+    raceIntroUi,
     raceTick,
     dirArrow,
     physicsDebug,
