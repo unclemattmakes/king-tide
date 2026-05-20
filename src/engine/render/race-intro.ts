@@ -50,12 +50,16 @@ export interface RaceIntro {
   /** Advance the intro by `dt` seconds. Writes `camera.position` and
    *  re-aims the lens via `lookAt()`. No-op once `isActive()` is false. */
   tick(dt: number): void
-  /** True while shots are still playing. Flips to false on the same
-   *  tick the final shot finishes. */
+  /** True while the director owns the camera. Mirrors `!isDone()`.
+   *  Returns true even before the first `tick()` (so the game loop's
+   *  first-frame check routes the camera through the director instead
+   *  of handing it straight to the chase cam). Flips to false on the
+   *  tick that the final shot finishes — or on the first tick after
+   *  `skip()`. */
   isActive(): boolean
-  /** True once the intro has been started (first `tick` called) but
-   *  before it's done. The race-hud's countdown arming is gated on
-   *  this transitioning back to false. */
+  /** True once the final shot has finished playing (or the director was
+   *  constructed in `'off'` mode). The race-hud's countdown arming is
+   *  gated on this transitioning to true. */
   isDone(): boolean
   /** Skip ahead to the final shot's end pose. The next `tick()` will
    *  flip `isActive()` to false and `isDone()` to true. Idempotent. */
@@ -112,13 +116,11 @@ export function createRaceIntro(opts: RaceIntroOpts): RaceIntro {
   const totalDuration = shots.reduce((sum, s) => sum + s.duration, 0)
 
   let elapsed = 0
-  let started = false
   let done = mode === 'off'
 
   return {
     tick(dt: number): void {
       if (done) return
-      started = true
       elapsed += Math.max(0, dt) * timeScale
       if (elapsed >= totalDuration || shots.length === 0) {
         // Settle on the last shot's end pose so the chase-cam's first
@@ -151,7 +153,12 @@ export function createRaceIntro(opts: RaceIntroOpts): RaceIntro {
       }
     },
     isActive(): boolean {
-      return started && !done
+      // Active for the whole window between construction and done.
+      // The game loop relies on this being true on the very first
+      // frame — it gates whether to tick the director or hand the
+      // camera back to the chase cam, BEFORE calling tick() this
+      // frame. A "haven't ticked yet" sentinel would defeat that.
+      return !done
     },
     isDone(): boolean {
       return done

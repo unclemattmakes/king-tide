@@ -204,6 +204,22 @@ describe('createRaceIntro lifecycle', () => {
     expect(intro.totalDuration()).toBe(0)
   })
 
+  it("'full' mode reports active BEFORE the first tick (game-loop gate)", () => {
+    // Regression — an earlier version had a `started` flag that only
+    // flipped on the first tick(), which made `isActive()` return
+    // false on frame 1. The game loop then handed the camera back to
+    // the chase cam and armed the countdown immediately, so the
+    // cinematic never showed.
+    const intro = createRaceIntro({
+      camera: new THREE.PerspectiveCamera(),
+      track: makeTrack(),
+      playerStart: PLAYER_START,
+      mode: 'full',
+    })
+    expect(intro.isActive()).toBe(true)
+    expect(intro.isDone()).toBe(false)
+  })
+
   it("'short' mode plays + completes after totalDuration elapses", () => {
     const camera = new THREE.PerspectiveCamera()
     const intro = createRaceIntro({
@@ -212,15 +228,15 @@ describe('createRaceIntro lifecycle', () => {
       playerStart: PLAYER_START,
       mode: 'short',
     })
-    // Before first tick the director is "done=false" but isActive() is
-    // also false (the started flag hasn't flipped yet) — same shape the
-    // game loop relies on for the "arm countdown on the first done frame"
-    // logic.
-    expect(intro.isActive()).toBe(false)
+    // Before the first tick the director is active (not done yet) so
+    // the game loop's first-frame check picks it up and routes the
+    // camera through it instead of the chase cam — without this the
+    // intro never plays.
+    expect(intro.isActive()).toBe(true)
     expect(intro.isDone()).toBe(false)
     expect(intro.totalDuration()).toBeGreaterThan(0)
 
-    // First tick — director starts playing.
+    // First tick — director writes camera position.
     intro.tick(0.016)
     expect(intro.isActive()).toBe(true)
     expect(intro.isDone()).toBe(false)
