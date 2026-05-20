@@ -805,17 +805,23 @@ export function startGameLoop(opts: GameLoopOpts): void {
               // stick-back (pitch > 0) → -1 = back flip.
               ax = intent.pitch < 0 ? +1 : -1
             } else {
-              // Default: yaw based on which trick button fired.
-              // Sign convention: `quat.setFromAxisAngle(+Y, +angle)`
-              // takes bike-forward +Z → +X (right-hand rule,
-              // verified numerically). The chase cam looks at the
-              // bike from -Z, so world +X is screen-right; ay=+1
-              // makes the bike's nose sweep visibly to the player's
-              // RIGHT. We want the button label to match the
-              // observed direction, so R1 ("right") → ay=+1, L1
-              // ("left") → ay=-1. The earlier inverted assignment
-              // had both readings backward.
-              ay = pump.direction === 'left' ? -1 : +1
+              // Yaw direction follows the STEER stick — right steer
+              // (+1) spins clockwise (+Y rotation, bike nose sweeps
+              // to player's right), left steer spins CCW. Player
+              // intent: "I'm leaning into a right-side trick, the
+              // bike should spin right". Falls back to the button
+              // label only when the stick is in deadzone — a press
+              // with no steer commit defaults to that button's side.
+              //
+              // Numerical anchor: `quat.setFromAxisAngle(+Y, +angle)`
+              // takes bike-fwd +Z → +X (verified). Chase cam looks
+              // toward +Z with world +X as screen-right, so ay=+1
+              // sweeps the nose visibly right. CW = right = ay=+1.
+              if (Math.abs(intent.steer) >= DIRECTION_THRESHOLD) {
+                ay = intent.steer > 0 ? +1 : -1
+              } else {
+                ay = pump.direction === 'left' ? -1 : +1
+              }
             }
             trickState.spinPhase = 1
             trickState.spinAxisX = ax

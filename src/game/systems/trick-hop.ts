@@ -60,9 +60,14 @@ import { BoostEffect, BoostEffectStore } from '@/game/components/pickup'
  */
 
 /** Big vertical velocity (m/s) when the press lands on a credible
- *  apex — bike clears the surface by a couple of meters and the spin
- *  animation has the air time to play out. */
-const HOP_VELOCITY_BIG = 11.0
+ *  apex — bike clears the surface by ~5 m above takeoff and the spin
+ *  animation has the full ~1.3 s air time to play out. The credible-
+ *  trick path stacks this with the forward boost-impulse + sustained
+ *  meter accel, so the hop itself reads as a "you nailed it" launch
+ *  rather than a meek lift. Boosted from the original 11 m/s once
+ *  playtesters confirmed the smaller version felt indistinguishable
+ *  from the flatground small hop on most ramps. */
+const HOP_VELOCITY_BIG = 16.0
 /** Small vertical velocity (m/s) for a flatground hop. Visibly leaves
  *  the ground but doesn't fly — telegraphs "yes the button works"
  *  without earning the trick payoff. */
@@ -149,6 +154,13 @@ const DRIFT_OUTWARD_PUSH = 5.0
  *  this just deepens the commitment so a drift reads visibly heavier
  *  than a sharp turn. */
 const DRIFT_ROLL_TORQUE = 6.0
+/** Consecutive airborne sim ticks tolerated mid-drift before the
+ *  drift breaks. The roll lean + outward push can briefly lift the
+ *  chassis off the surface during a sharp corner (~1–3 ticks); a
+ *  trip-on-first-tick break would cancel almost every real drift.
+ *  20 ticks ≈ 333 ms — long enough to absorb chassis chatter but
+ *  short enough that a genuine ramp launch ends the drift cleanly. */
+const DRIFT_AIRBORNE_GRACE_TICKS = 20
 
 /**
  * Tier 0 = no release reward (drift broke before reaching the gauge).
@@ -287,8 +299,18 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
         Math.sign(intent.steer) === -trick.driftDirection &&
         Math.abs(intent.steer) >= DRIFT_OPPOSITE_STEER_BREAK
 
+      // Airborne tolerance — accumulate consecutive ticks off the
+      // surface, reset on grounded. Break only when the bike has
+      // been off the surface continuously for >= DRIFT_AIRBORNE_GRACE_TICKS
+      // (about a third of a second). A brief skip from the chassis
+      // bouncing under drift roll torque doesn't cancel the drift.
+      if (hover.isGrounded) {
+        trick.driftAirborneTicks = 0
+      } else {
+        trick.driftAirborneTicks += 1
+      }
       const releaseClean = !driftBtnHeld
-      const breakAirborne = !hover.isGrounded
+      const breakAirborne = trick.driftAirborneTicks > DRIFT_AIRBORNE_GRACE_TICKS
       const breakSlow = speedHDrift < DRIFT_MIN_SPEED
       const breakCancel = oppositeSteer
 
@@ -342,6 +364,7 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
         trick.driftDirection = 0
         trick.driftChargeSec = 0
         trick.driftArmedButton = 0
+        trick.driftAirborneTicks = 0
       } else {
         // Sustain. Apply drift forces directly to the rigid body, then
         // tick the gauge. The forces sit on top of hover.ts's normal

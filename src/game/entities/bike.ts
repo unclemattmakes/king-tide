@@ -167,6 +167,7 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
     driftChargeSec: 0,
     driftReleaseTier: 0,
     driftReleaseSerial: 0,
+    driftAirborneTicks: 0,
   })
   addComponent(sim, eid, BoostMeter)
   BoostMeterStore.set(eid, {

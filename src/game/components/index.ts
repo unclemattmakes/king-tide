@@ -203,6 +203,13 @@ export type TrickStateData = {
    *  or more sim ticks since its last poll, without false-firing on
    *  a stale `driftReleaseTier` value from the same release. */
   driftReleaseSerial: number
+  /** Consecutive sim ticks the drift has been airborne while
+   *  active. A short window of brief bounces (rolled lean causing
+   *  the chassis to skip, lateral push briefly lifting a corner) is
+   *  expected on a flat plate; only break the drift once the bike
+   *  has been off the surface for long enough that it's a real
+   *  ramp-off, not chassis chatter. Resets on every grounded tick. */
+  driftAirborneTicks: number
 }
 export const TrickStateStore = createStore<TrickStateData>('TrickState')
 

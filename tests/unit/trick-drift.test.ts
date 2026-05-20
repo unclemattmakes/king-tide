@@ -277,17 +277,38 @@ describe('post-hop drift state machine', () => {
     expect(TrickStateStore.must(bikeEid).driftReleaseSerial).toBe(1)
   })
 
-  it('going airborne mid-drift breaks without payoff', () => {
+  it('going airborne mid-drift breaks without payoff (after grace window)', () => {
     const ticks = Math.floor(1.5 / phys.fixedDt) // would be tier-1 if released cleanly
     hopThenDrift(sim, phys, bikeEid, 'right', ticks)
     expect(TrickStateStore.must(bikeEid).driftActive).toBe(true)
-    // Force airborne — drift should break with no payoff.
+    // Force airborne — drift survives the first ~20 ticks (the
+    // chassis-chatter grace window) and breaks after that. Step
+    // through 25 ticks airborne so we're confidently past the grace.
     setGrounded(bikeEid, false)
-    trickHopSystem(sim, phys)
+    for (let i = 0; i < 25; i++) {
+      trickHopSystem(sim, phys)
+    }
     const trick = TrickStateStore.must(bikeEid)
     expect(trick.driftActive).toBe(false)
     expect(trick.driftReleaseTier).toBe(0)
     expect(hasComponent(sim, bikeEid, BoostEffect)).toBe(false)
+  })
+
+  it('survives a brief airborne flicker mid-drift (chassis chatter)', () => {
+    // ~1.5s of drift charge accumulated, then a 3-tick airborne
+    // blip — drift should remain active (well inside the grace
+    // window). Common during sharp corners on a flat plate where
+    // the drift roll torque briefly lifts a corner.
+    const ticks = Math.floor(1.5 / phys.fixedDt)
+    hopThenDrift(sim, phys, bikeEid, 'right', ticks)
+    expect(TrickStateStore.must(bikeEid).driftActive).toBe(true)
+    setGrounded(bikeEid, false)
+    for (let i = 0; i < 3; i++) {
+      trickHopSystem(sim, phys)
+    }
+    setGrounded(bikeEid, true)
+    trickHopSystem(sim, phys)
+    expect(TrickStateStore.must(bikeEid).driftActive).toBe(true)
   })
 
   it('hard opposite-steer mid-drift breaks without payoff', () => {

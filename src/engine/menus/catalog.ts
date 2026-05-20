@@ -30,6 +30,12 @@ const PROCEDURAL_TRACKS: TrackEntry[] = [
     tagline: 'Mesa loop with a 15m cliff drop. The signature moment.',
     accent: '#c8b07a',
   },
+  {
+    id: 'drift-test',
+    name: 'Drift Test',
+    tagline: 'Flat oval — focused MK8 drift / mini-turbo verification.',
+    accent: '#ffcc55',
+  },
 ]
 
 export function buildTrackList(manifest?: TrackManifestEntry[]): TrackEntry[] {
