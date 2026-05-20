@@ -1,7 +1,6 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import { pointAtT, sampleCatmullRom, sampleScalarToMatch, tangentAtT } from './catmull-rom'
 import {
-  SKY_COLOR_GRADES,
   type AISpline,
   type AntiGravZone,
   type AudioConfig,
@@ -11,6 +10,7 @@ import {
   type LapWeather,
   type Prop,
   type PropType,
+  SKY_COLOR_GRADES,
   type SkyColorGrade,
   type SkyConfig,
   type TerrainShaderConfig,
@@ -42,7 +42,7 @@ export type TrackJson = {
   id: string
   name: string
   lapsToFinish: number
-  start: { position: Vec3; yaw: number }
+  start: { position: Vec3; yaw: number; splineT?: number }
   checkpoints: Checkpoint[]
   aiSplines: AISpline[]
   pickupSpawns: Vec3[]
@@ -88,9 +88,14 @@ export function buildTrackFromJson(input: unknown): Track {
 
   const startRaw = requireField(input, 'start')
   if (!isObject(startRaw)) throw new Error('track-json: start must be an object')
-  const start = {
+  const startSplineTRaw = (startRaw as { splineT?: unknown }).splineT
+  const startHasSplineT = typeof startSplineTRaw === 'number' && Number.isFinite(startSplineTRaw)
+  const start: Track['start'] = {
     position: readVec3(startRaw.position, 'start.position'),
     yaw: requireNumber(startRaw, 'yaw'),
+  }
+  if (startHasSplineT) {
+    start.splineT = (((startSplineTRaw as number) % 1) + 1) % 1
   }
 
   const checkpointsRaw = requireField(input, 'checkpoints')
@@ -117,7 +122,10 @@ export function buildTrackFromJson(input: unknown): Track {
 
   // Spline-bound gates derive position + rotation from the main spline at
   // their `splineT`. Done after both arrays have been parsed so we can
-  // reach into the resolved sample list.
+  // reach into the resolved sample list. The player start participates in
+  // the same binding when `start.splineT` is set — pose is derived from
+  // the curve, the JSON's position.y is preserved so authors can lift the
+  // start above the curve when needed.
   const main = aiSplines.find((s) => s.id === 'main')
   if (main) {
     for (const cp of checkpoints) {
@@ -129,6 +137,12 @@ export function buildTrackFromJson(input: unknown): Track {
         const halfA = yaw / 2
         cp.rotation = { x: 0, y: Math.sin(halfA), z: 0, w: Math.cos(halfA) }
       }
+    }
+    if (typeof start.splineT === 'number') {
+      const p = pointAtT(main.points, start.splineT)
+      const tan = tangentAtT(main.points, start.splineT)
+      start.position = { x: p.x, y: start.position.y, z: p.z }
+      start.yaw = Math.atan2(tan.x, tan.z)
     }
   }
 
@@ -220,7 +234,14 @@ export function trackToJson(track: Track): TrackJson {
     id: track.id,
     name: track.name,
     lapsToFinish: track.lapsToFinish,
-    start: { position: { ...track.start.position }, yaw: track.start.yaw },
+    start: (() => {
+      const out: TrackJson['start'] = {
+        position: { ...track.start.position },
+        yaw: track.start.yaw,
+      }
+      if (typeof track.start.splineT === 'number') out.splineT = track.start.splineT
+      return out
+    })(),
     checkpoints: track.checkpoints.map((cp) => {
       const out: Checkpoint = {
         index: cp.index,
@@ -472,9 +493,7 @@ function readWaveZone(raw: unknown, i: number): WaveZone {
   const dirRaw = (raw as { directionDeg?: unknown }).directionDeg
   if (dirRaw !== undefined) {
     if (typeof dirRaw !== 'number' || !Number.isFinite(dirRaw)) {
-      throw new Error(
-        `track-json: waveZones[${i}].directionDeg must be a finite number if present`,
-      )
+      throw new Error(`track-json: waveZones[${i}].directionDeg must be a finite number if present`)
     }
     out.directionDeg = dirRaw
   }
@@ -758,9 +777,7 @@ function readOptionalAudio(raw: unknown): AudioConfig | null {
         throw new Error(`track-json: audio.ambientGains[${i}] must be a finite number`)
       }
       if (g < 0) {
-        throw new Error(
-          `track-json: audio.ambientGains[${i}] must be non-negative (got ${g})`,
-        )
+        throw new Error(`track-json: audio.ambientGains[${i}] must be non-negative (got ${g})`)
       }
       return g
     })

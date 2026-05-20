@@ -37,8 +37,8 @@ export function editableSplinePoints(draft: Track): Vec3[] {
 
 /**
  * Resample the main spline (if anchored) and reposition any
- * splineT-bound gates to match. Called whenever an anchor moves or
- * a gate's splineT changes.
+ * splineT-bound gates (and the player start, if bound) to match. Called
+ * whenever an anchor moves or a bound entity's splineT changes.
  */
 export function recomputeSplineDerived(draft: Track): void {
   const main = draft.aiSplines.find((s) => s.id === 'main')
@@ -59,6 +59,13 @@ export function recomputeSplineDerived(draft: Track): void {
       const halfA = yaw / 2
       cp.rotation = { x: 0, y: Math.sin(halfA), z: 0, w: Math.cos(halfA) }
     }
+  }
+  if (typeof draft.start.splineT === 'number') {
+    const p = pointAtT(main.points, draft.start.splineT)
+    const tan = tangentAtT(main.points, draft.start.splineT)
+    draft.start.position.x = p.x
+    draft.start.position.z = p.z
+    draft.start.yaw = Math.atan2(tan.x, tan.z)
   }
 }
 

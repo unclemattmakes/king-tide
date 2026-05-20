@@ -22,21 +22,11 @@ import { RBHandleStore } from '@/game/components'
 import { createBike } from '@/game/entities/bike'
 import { createRider } from '@/game/entities/rider'
 import type { Track } from '@/game/tracks/types'
-import { AI_GRID_SLOTS } from './grid-offsets'
+import { AI_GRID_SLOTS, resolveGridSlotWorld } from './grid-offsets'
 
-/** Maximum number of AI opponents in a live race. The grid below has
- *  four slots; bumping this also requires extending `aiSlots`. */
-export const NUM_AI = 4
-
-/** Player-relative grid offsets for AI spawn positions. The straight
- *  is 28m wide (gate halfWidth × 2); AI bikes spread across ±6m and
- *  hold those lateral offsets via the spline `lineOffset` knob so they
- *  don't all converge on the same racing line.
- *
- *  Source of truth: `specs/grid-offsets.json`. The Blender addon's
- *  racer-at-start preview reads the same file, so the in-Blender
- *  preview matches the actual spawn layout. */
-const AI_SLOTS = AI_GRID_SLOTS.map((s) => ({ dx: s.dx, dz: s.dz, off: s.lineOffset }))
+/** Maximum number of AI opponents in a live race. The grid is 2x4 — the
+ *  player takes the pole position (slot 0), leaving seven AI slots. */
+export const NUM_AI = AI_GRID_SLOTS.length
 
 export type SpawnBikesResult = {
   /** Always set. In replay mode this is the recording's slot-0 bike. */
@@ -135,18 +125,18 @@ export function spawnBikes(opts: {
     })
     spawnRider(playerEid, startPos)
 
-    const grid = AI_SLOTS.slice(0, aiCount)
+    const grid = AI_GRID_SLOTS.slice(0, aiCount)
     // Snapshot the difficulty at spawn time — changing the setting
     // mid-race won't retune already-spawned AIs (matches kart-game
     // precedent + avoids a sudden personality flip mid-lap).
     const difficulty = playerSettings.aiDifficulty
     for (const slot of grid) {
-      const aiPos = { x: startPos.x + slot.dx, y: startPos.y, z: startPos.z + slot.dz }
+      const aiPos = resolveGridSlotWorld(startPos, startYaw, slot.dx, slot.dz)
       const aiEid = createBike(sim, phys, {
         position: aiPos,
         yaw: track.start.yaw,
         asRacer: true,
-        ai: { splineId: 'main', lineOffset: slot.off, difficulty },
+        ai: { splineId: 'main', lineOffset: slot.lineOffset, difficulty },
       })
       spawnRider(aiEid, aiPos)
       aiEids.push(aiEid)

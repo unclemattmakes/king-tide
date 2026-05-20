@@ -143,6 +143,13 @@ export type PlayerStart = {
   position: Vec3
   /** Yaw in radians (0 = facing +Z, π/2 = facing +X). */
   yaw: number
+  /** Optional bind to the main AI spline. If set, the loader derives
+   *  `position` (xz) and `yaw` from the spline at parameter t (0..1 along
+   *  the closed loop). The editor's translate gizmo then slides the start
+   *  along the spline rather than allowing free placement, and the visual
+   *  starting platform stays glued to the racing line as anchors move.
+   *  Editing the curve auto-updates the start's pose. */
+  splineT?: number
 }
 
 export type Checkpoint = {

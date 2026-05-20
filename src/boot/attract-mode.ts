@@ -25,7 +25,7 @@ import { createPropColliders } from '@/game/entities/props'
 import { createRider } from '@/game/entities/rider'
 import { simulateStep } from '@/game/sim-step'
 import type { Track } from '@/game/tracks/types'
-import { AI_GRID_SLOTS } from './grid-offsets'
+import { AI_GRID_SLOTS, resolveGridSlotWorld } from './grid-offsets'
 import { loadTrackForBoot } from './track-loader'
 
 /**
@@ -180,7 +180,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     // finish state). Spread them around the spline so the broadcast
     // camera always has something to cut between.
     const racerVariant = resolveBikeVariant('racer')
-    const grid = AI_GRID_SLOTS.slice(0, 5)
+    const grid = AI_GRID_SLOTS.slice(0, Math.min(5, AI_GRID_SLOTS.length))
     const aiEids: number[] = []
     const halfStartYaw = track.start.yaw / 2
     const startQuat = {
@@ -191,11 +191,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     }
     for (let i = 0; i < grid.length; i++) {
       const slot = grid[i]!
-      const pos = {
-        x: track.start.position.x + slot.dx,
-        y: track.start.position.y,
-        z: track.start.position.z + slot.dz,
-      }
+      const pos = resolveGridSlotWorld(track.start.position, track.start.yaw, slot.dx, slot.dz)
       const eid = createBike(sim, phys, {
         position: pos,
         yaw: track.start.yaw,

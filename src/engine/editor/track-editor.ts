@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import type { PropManifestEntry } from '@/game/assets/manifest'
+import { nearestT, pointAtT, tangentAtT } from '@/game/tracks/catmull-rom'
 import { DEFAULT_GATE_SPACING_M, resampleByArcLength } from '@/game/tracks/gate-placement'
 import type { Track } from '@/game/tracks/types'
 import {
@@ -144,6 +145,9 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   // Cleared whenever the user mouseups (next non-water interaction
   // pushes its own snapshot).
   let waterDragSnapshotted = false
+  // Same pattern for the start-on-spline t slider — one undo entry per
+  // drag rather than one per slider tick.
+  let startTDragSnapshotted = false
 
   // ── Undo stack ──────────────────────────────────────────────────────────
   const undo = createUndoStack(draft, () => {
@@ -279,6 +283,61 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       },
       onWaterHeightCommit: () => {
         waterDragSnapshotted = false
+      },
+      onStartBindToSpline: () => {
+        const main = draft.aiSplines.find((s) => s.id === 'main')
+        if (!main || main.points.length < 2) {
+          panelHandle.setStatus('Bind start: no main spline', '#f88')
+          return
+        }
+        undo.push()
+        const t = nearestT(
+          { x: draft.start.position.x, y: 0, z: draft.start.position.z },
+          main.points,
+        )
+        const p = pointAtT(main.points, t)
+        const tan = tangentAtT(main.points, t)
+        draft.start.splineT = t
+        draft.start.position = { x: p.x, y: draft.start.position.y, z: p.z }
+        draft.start.yaw = Math.atan2(tan.x, tan.z)
+        rebuildHelpers()
+        renderPanel()
+        panelHandle.setStatus(`Start bound to spline @ t=${t.toFixed(3)}`, '#7d8')
+      },
+      onStartUnbindFromSpline: () => {
+        if (typeof draft.start.splineT !== 'number') return
+        undo.push()
+        delete draft.start.splineT
+        rebuildHelpers()
+        renderPanel()
+        panelHandle.setStatus('Start unbound — free placement', '#7d8')
+      },
+      onStartSplineTChange: (t: number) => {
+        if (typeof draft.start.splineT !== 'number') return
+        const main = draft.aiSplines.find((s) => s.id === 'main')
+        if (!main || main.points.length < 2) return
+        const current = draft.start.splineT
+        if (Math.abs(current - t) < 1e-5) return
+        if (!startTDragSnapshotted) {
+          undo.push()
+          startTDragSnapshotted = true
+        }
+        draft.start.splineT = ((t % 1) + 1) % 1
+        const p = pointAtT(main.points, draft.start.splineT)
+        const tan = tangentAtT(main.points, draft.start.splineT)
+        draft.start.position.x = p.x
+        draft.start.position.z = p.z
+        draft.start.yaw = Math.atan2(tan.x, tan.z)
+        // Reposition just the start helper rather than a full rebuild —
+        // the rest of the scene doesn't change while we slide the slider.
+        helpersScene.refreshBoundGateHelpers()
+        renderPanelLight()
+      },
+      onStartSplineTCommit: () => {
+        startTDragSnapshotted = false
+        // Full panel render so the outliner row's xz/yaw caption catches up
+        // with the slid-to value (renderLight only refreshes the props block).
+        renderPanel()
       },
       onWaterHeightChange: (h: number) => {
         // The slider streams every tick — coalesce undo by snapshotting
