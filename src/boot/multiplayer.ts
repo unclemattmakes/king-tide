@@ -113,8 +113,12 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
     const variant = resolveBikeVariant(picks?.selectedBikeId)
     // Spread peers 4m apart across the start line, 15m behind the local
     // grid, so they don't visually overlap the AI bikes on spawn.
+    // Offsets live in the start's local frame so they rotate with
+    // track.start.yaw — the row behind the grid follows the gate facing.
     const dx = (peerId - 4) * 4
     const dz = -15
+    const cosY = Math.cos(track.start.yaw)
+    const sinY = Math.sin(track.start.yaw)
     // M10.11 — remote bikes do NOT get PeerControlled. Their pose is
     // driven by inbound TransformSnapshots via `applySnapshot`, not by
     // replaying inputs through the local sim. Skip `peerId:` here so
@@ -122,9 +126,9 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
     // `remoteEids` map below is the canonical peer → eid mapping.
     const eid = createBike(sim, phys, {
       position: {
-        x: track.start.position.x + dx,
+        x: track.start.position.x + dx * cosY + dz * sinY,
         y: track.start.position.y,
-        z: track.start.position.z + dz,
+        z: track.start.position.z + -dx * sinY + dz * cosY,
       },
       yaw: track.start.yaw,
       asRacer: true,

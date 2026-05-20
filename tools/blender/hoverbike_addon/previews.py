@@ -337,12 +337,16 @@ def _bike_silhouette_mesh(name: str, with_rider_hump: bool):
 def _load_grid_offsets(repo_root: str | None) -> list[dict]:
     """Read specs/grid-offsets.json from disk. Falls back to a hardcoded
     grid if the file is missing so the preview still works in scratch
-    .blends opened outside a repo clone."""
+    .blends opened outside a repo clone. Mirrors the runtime: seven AI
+    slots in a 2x4 grid, player implicit at the pole (local origin)."""
     fallback = [
-        {"dx": -6, "dz": -5,  "lineOffset": -6},
-        {"dx": -2, "dz": -10, "lineOffset": -2},
-        {"dx":  2, "dz": -10, "lineOffset":  2},
-        {"dx":  6, "dz": -5,  "lineOffset":  6},
+        {"dx": 4,  "dz": 0,  "lineOffset": 3},
+        {"dx": 8,  "dz": 0,  "lineOffset": 6},
+        {"dx": 12, "dz": 0,  "lineOffset": 8},
+        {"dx": 0,  "dz": -6, "lineOffset": 0},
+        {"dx": 4,  "dz": -6, "lineOffset": 3},
+        {"dx": 8,  "dz": -6, "lineOffset": 6},
+        {"dx": 12, "dz": -6, "lineOffset": 8},
     ]
     if not repo_root:
         return fallback
@@ -393,9 +397,10 @@ def _rebuild_racer_preview(scene) -> dict:
 
     start_loc = start.matrix_world.translation
     # Inherit start_00's rotation so the bike points the way the player
-    # will face on race-start. AI grid is laid out in world coords
-    # relative to that origin (matches spawn-bikes.ts exactly — no yaw
-    # rotation applied to slot offsets).
+    # will face on race-start. The AI grid is laid out in the start's
+    # *local* frame (matches spawn-bikes.ts after the 2x4 grid rework) —
+    # slot offsets rotate with the gate so the visualization stays
+    # accurate for any yaw, not just +Z-aligned starts.
     start_rot = start.matrix_world.to_quaternion()
 
     player = bpy.data.objects.new("racer_preview_player", me_player)
@@ -408,17 +413,27 @@ def _rebuild_racer_preview(scene) -> dict:
 
     ai_objs = []
     # `slot.dx` and `slot.dz` come from specs/grid-offsets.json in the
-    # runtime frame (three Y-up, +Z forward). Map to Blender (Z-up,
-    # +Y forward): three +X → Blender +X, three +Z → Blender −Y, three
-    # +Y → Blender +Z. The grid is purely horizontal so we leave the
-    # vertical Z alone — earlier versions added dz to Blender Z, stacking
-    # the AI bikes above/below the player instead of behind them.
+    # runtime frame (three Y-up, +Z forward, +X right). Map to Blender
+    # (Z-up, +Y forward): runtime +X → Blender +X, runtime +Z → Blender
+    # −Y, runtime +Y → Blender +Z. The grid is purely horizontal, so we
+    # leave the vertical Z alone — earlier versions added dz to Blender
+    # Z, stacking the AI bikes above/below the player instead of behind
+    # them. Each slot's local offset is then rotated by start_rot so the
+    # grid pivots with the gate's facing, matching the runtime.
+    from mathutils import Vector
+
     for i, slot in enumerate(slots):
         obj = bpy.data.objects.new(f"racer_preview_ai_{i:02d}", me_ai)
+        local_offset = Vector((
+            float(slot.get("dx", 0)),
+            -float(slot.get("dz", 0)),
+            0.0,
+        ))
+        world_offset = start_rot @ local_offset
         obj.location = (
-            start_loc.x + float(slot.get("dx", 0)),
-            start_loc.y - float(slot.get("dz", 0)),
-            start_loc.z,
+            start_loc.x + world_offset.x,
+            start_loc.y + world_offset.y,
+            start_loc.z + world_offset.z,
         )
         obj.rotation_mode = "QUATERNION"
         obj.rotation_quaternion = start_rot

@@ -104,8 +104,13 @@ export function selSupportsMode(draft: Track, sel: EntitySel, m: GizmoMode): boo
     const cp = draft.checkpoints[sel.index]
     if (cp && typeof cp.splineT === 'number' && m === 'rotate') return false
   }
-  // Start: translate + rotate (yaw); no scale.
-  if (sel.kind === 'start' && m === 'scale') return false
+  // Start: translate + rotate (yaw); no scale. Spline-bound starts get
+  // their yaw from the curve tangent — the rotate gizmo is disabled the
+  // same way it is for spline-bound gates.
+  if (sel.kind === 'start') {
+    if (m === 'scale') return false
+    if (m === 'rotate' && typeof draft.start.splineT === 'number') return false
+  }
   return true
 }
 
@@ -212,7 +217,28 @@ export function writeHelperPoseToDraft(
     return { splineMoved: false }
   }
   // start
-  // Start stores yaw as a number; derive it from the helper's Y rotation.
+  // Start stores yaw as a number; derive it from the helper's Y rotation
+  // (or, when bound to the main spline, from the curve tangent so the
+  // platform always faces along the racing line).
+  if (typeof draft.start.splineT === 'number') {
+    const main = draft.aiSplines.find((s2) => s2.id === 'main')
+    if (main && main.points.length >= 2) {
+      const t = nearestT({ x: h.position.x, y: 0, z: h.position.z }, main.points)
+      draft.start.splineT = t
+      const p = pointAtT(main.points, t)
+      const tan = tangentAtT(main.points, t)
+      draft.start.position.x = p.x
+      draft.start.position.y = h.position.y
+      draft.start.position.z = p.z
+      draft.start.yaw = Math.atan2(tan.x, tan.z)
+      // Snap the helper to the resolved pose mid-drag so the user sees
+      // the start sliding along the spline rather than free-floating.
+      const halfA = draft.start.yaw / 2
+      h.position.set(p.x, h.position.y, p.z)
+      h.quaternion.set(0, Math.sin(halfA), 0, Math.cos(halfA))
+      return { splineMoved: false }
+    }
+  }
   draft.start.position.x = h.position.x
   draft.start.position.y = h.position.y
   draft.start.position.z = h.position.z

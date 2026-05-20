@@ -44,8 +44,9 @@ export type HelpersScene = {
   refreshTints(sel: EntitySel): void
   /** Cheap curve-mesh refresh — used during spline-anchor drag. */
   refreshSplineCurveMesh(): void
-  /** Reposition any splineT-bound gate helpers to the draft's current
-   *  values. Used after the curve resamples during anchor drag. */
+  /** Reposition any splineT-bound gate helpers (and the player start if
+   *  it's curve-bound) to the draft's current values. Used after the
+   *  curve resamples during anchor drag. */
   refreshBoundGateHelpers(): void
   /** Returns true when the given target matches the current selection
    *  passed to the most recent `rebuild()`. Used by the helper factories'
@@ -198,6 +199,14 @@ export function createHelpersScene(opts: {
       if (!h) continue
       h.position.set(cp.position.x, cp.position.y, cp.position.z)
       h.quaternion.set(cp.rotation.x, cp.rotation.y, cp.rotation.z, cp.rotation.w)
+    }
+    if (typeof draft.start.splineT === 'number') {
+      const h = helpers.get('start')
+      if (h) {
+        h.position.set(draft.start.position.x, draft.start.position.y, draft.start.position.z)
+        const halfA = draft.start.yaw / 2
+        h.quaternion.set(0, Math.sin(halfA), 0, Math.cos(halfA))
+      }
     }
   }
 

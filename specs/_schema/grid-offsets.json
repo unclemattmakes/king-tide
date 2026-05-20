@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://hoverbike.local/specs/grid-offsets.json",
   "title": "AI starting-grid offsets",
-  "description": "Spawn offsets for AI bikes on the starting grid, relative to track.start.position. Single source of truth shared by the runtime (src/boot/spawn-bikes.ts) and the Blender addon's racer-at-start preview.",
+  "description": "Spawn offsets for AI bikes on the starting grid. dx/dz are in the start's local frame (+Z = bike forward, +X = bike right); the runtime rotates them by track.start.yaw before adding to track.start.position. Single source of truth shared by the runtime (src/boot/spawn-bikes.ts) and the Blender addon's racer-at-start preview.",
   "type": "object",
   "additionalProperties": true,
   "required": ["slots"],
@@ -17,10 +17,13 @@
         "additionalProperties": false,
         "required": ["dx", "dz", "lineOffset"],
         "properties": {
-          "dx": { "type": "number", "description": "Offset along world +X from the player start." },
+          "dx": {
+            "type": "number",
+            "description": "Lateral offset (+X = bike right) in the start's local frame; rotated by track.start.yaw at spawn time."
+          },
           "dz": {
             "type": "number",
-            "description": "Offset along world +Z from the player start (negative = behind)."
+            "description": "Longitudinal offset (+Z = bike forward, negative = behind) in the start's local frame; rotated by track.start.yaw at spawn time."
           },
           "lineOffset": {
             "type": "number",

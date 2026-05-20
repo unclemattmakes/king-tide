@@ -108,6 +108,20 @@ export type EditorPanelCallbacks = {
    *  session is over and the next change should push a fresh undo
    *  snapshot. */
   onWaterHeightCommit(): void
+  /** Bind the player start to the main AI spline at the curve point
+   *  nearest the start's current xz position. Sets `start.splineT` and
+   *  snaps the start's pose to the curve. No-op when there's no main
+   *  spline. */
+  onStartBindToSpline(): void
+  /** Clear `start.splineT` so the start returns to free placement.
+   *  Position and yaw stay where they are. */
+  onStartUnbindFromSpline(): void
+  /** Live-edit `start.splineT` from the panel slider. Streams every
+   *  tick; the receiver coalesces undo across one drag session. */
+  onStartSplineTChange(t: number): void
+  /** Fires on slider mouseup so the receiver can close out the current
+   *  undo coalescing window. */
+  onStartSplineTCommit(): void
   /** Whether the currently-selected entity supports a given gizmo mode.
    *  Used to disable / grey out mode buttons that wouldn't apply. */
   selSupportsMode(m: GizmoMode): boolean
@@ -288,7 +302,7 @@ export function createEditorPanel(opts: {
       outlinerSection('Start', [
         {
           k: 'start',
-          label: `start  (${draft.start.position.x.toFixed(0)}, ${draft.start.position.z.toFixed(0)})  yaw ${((draft.start.yaw * 180) / Math.PI).toFixed(0)}°`,
+          label: `start${typeof draft.start.splineT === 'number' ? ' ⚓' : ''}  (${draft.start.position.x.toFixed(0)}, ${draft.start.position.z.toFixed(0)})  yaw ${((draft.start.yaw * 180) / Math.PI).toFixed(0)}°`,
           sel: { kind: 'start' } as EntitySel,
         },
       ]),
@@ -386,12 +400,35 @@ export function createEditorPanel(opts: {
     const { sel } = getState()
     if (!sel) return '<span style="color:#566">No selection</span>'
     if (sel.kind === 'start') {
-      return [
+      const hasSpline = draft.aiSplines.some((s) => s.id === 'main')
+      const isBound = typeof draft.start.splineT === 'number'
+      const rows: string[] = [
         `<div><b>start</b></div>`,
         `<div>pos: ${fmtVec(draft.start.position)}</div>`,
         `<div>yaw: ${((draft.start.yaw * 180) / Math.PI).toFixed(1)}°</div>`,
-        `<div style="color:#7c9">controls position + facing for the player and the AI grid</div>`,
-      ].join('')
+        `<div style="color:#7c9">controls position + facing for the player pole and the 2×4 AI grid</div>`,
+      ]
+      if (isBound) {
+        const t = draft.start.splineT!
+        rows.push(
+          `<div style="color:#7c9">⚓ bound to main spline @ t=${t.toFixed(3)}</div>`,
+          `<label style="display:flex;align-items:center;gap:6px;margin-top:4px">
+             <span style="width:24px;color:#9bb">t</span>
+             <input id="ed-start-spline-t" type="range" min="0" max="1" step="0.001" value="${t}" style="flex:1" />
+             <span id="ed-start-spline-t-val" style="width:48px;text-align:right;color:#cdf">${t.toFixed(3)}</span>
+           </label>`,
+          `<button type="button" id="ed-start-unbind" style="background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit;margin-top:4px">Unbind from spline</button>`,
+        )
+      } else if (hasSpline) {
+        rows.push(
+          `<button type="button" id="ed-start-bind" style="background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit;margin-top:4px">Snap to spline</button>`,
+        )
+      } else {
+        rows.push(
+          `<div style="color:#778">no main spline — place spline anchors to enable curve binding</div>`,
+        )
+      }
+      return rows.join('')
     }
     if (sel.kind === 'prop') {
       const p = draft.props[sel.index]
@@ -491,6 +528,26 @@ export function createEditorPanel(opts: {
       })
       waterSlider.addEventListener('change', () => {
         callbacks.onWaterHeightCommit()
+      })
+    }
+    panel.querySelector('#ed-start-bind')?.addEventListener('click', () => {
+      callbacks.onStartBindToSpline()
+    })
+    panel.querySelector('#ed-start-unbind')?.addEventListener('click', () => {
+      callbacks.onStartUnbindFromSpline()
+    })
+    const startTSlider = panel.querySelector<HTMLInputElement>('#ed-start-spline-t')
+    if (startTSlider) {
+      const label = panel.querySelector<HTMLElement>('#ed-start-spline-t-val')
+      startTSlider.addEventListener('input', () => {
+        const v = parseFloat(startTSlider.value)
+        if (Number.isFinite(v)) {
+          if (label) label.textContent = v.toFixed(3)
+          callbacks.onStartSplineTChange(v)
+        }
+      })
+      startTSlider.addEventListener('change', () => {
+        callbacks.onStartSplineTCommit()
       })
     }
   }

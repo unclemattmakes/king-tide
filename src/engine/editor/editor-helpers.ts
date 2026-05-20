@@ -10,6 +10,7 @@
  */
 
 import * as THREE from 'three'
+import { AI_GRID_SLOTS } from '@/boot/grid-offsets'
 import { buildPropGeometry } from '@/engine/render/props-geometry'
 import type { Vec3 } from '@/engine/sim/physics/vec'
 import type { AntiGravZone, BoostPad, Checkpoint, Prop, PropType } from '@/game/tracks/types'
@@ -145,7 +146,10 @@ export function makeAntiGravHelper(zone: AntiGravZone, selected: boolean): THREE
     transparent: true,
     opacity: 0.85,
   })
-  const wire = new THREE.LineSegments(new THREE.WireframeGeometry(new THREE.BoxGeometry(w, h, d)), wireMat)
+  const wire = new THREE.LineSegments(
+    new THREE.WireframeGeometry(new THREE.BoxGeometry(w, h, d)),
+    wireMat,
+  )
   g.add(wire)
 
   // Up-arrow along local +Y, anchored at the floor.
@@ -231,12 +235,27 @@ export function makeSplineCurve(points: { x: number; y: number; z: number }[]): 
   return line
 }
 
+/** Bike footprint (m). Roughly matches a tucked rider on the racer
+ *  variant — width across handlebars, length nose-to-tail. Used by the
+ *  start-helper grid markers so each slot reads as one bike. */
+const START_BIKE_WIDTH = 2.0
+const START_BIKE_LENGTH = 3.2
+/** Lateral padding around the grid for the starting platform mesh. */
+const START_PLATFORM_PAD_X = 3
+const START_PLATFORM_PAD_Z = 3
+
 /**
- * Player-start helper. A pad on the ground with a forward-pointing arrow,
- * tinted bright green so it stands out from the orange gates.
+ * Player-start helper. Draws the full 2×4 starting grid: a translucent
+ * tarmac platform underneath, eight bike-sized rectangles at the actual
+ * spawn slots (pole position highlighted), a forward arrow, and a tall
+ * vertical post that's visible from far away. The whole rig is parented
+ * to a group rotated by `start.yaw` so the local slot offsets (sourced
+ * from `specs/grid-offsets.json`) lay out in the start's facing frame —
+ * rotate the start in the editor and the entire grid pivots with it,
+ * mirroring the runtime spawn behavior.
  */
 export function makeStartHelper(
-  start: { position: Vec3; yaw: number },
+  start: { position: Vec3; yaw: number; splineT?: number },
   selected: boolean,
 ): THREE.Group {
   const g = new THREE.Group()
@@ -244,45 +263,243 @@ export function makeStartHelper(
   const halfA = start.yaw / 2
   g.quaternion.set(0, Math.sin(halfA), 0, Math.cos(halfA))
 
-  const baseColor = 0x33ff88
-  const selColor = 0xaaffcc
-  const padMat = new THREE.MeshBasicMaterial({
-    color: selected ? selColor : baseColor,
+  // Resolve grid bounds from the JSON offsets so the platform always
+  // wraps every slot, even if the layout changes.
+  let minX = 0
+  let maxX = 0
+  let minZ = 0
+  let maxZ = 0
+  for (const slot of AI_GRID_SLOTS) {
+    if (slot.dx < minX) minX = slot.dx
+    if (slot.dx > maxX) maxX = slot.dx
+    if (slot.dz < minZ) minZ = slot.dz
+    if (slot.dz > maxZ) maxZ = slot.dz
+  }
+  const platformW = maxX - minX + START_BIKE_WIDTH + START_PLATFORM_PAD_X * 2
+  const platformD = maxZ - minZ + START_BIKE_LENGTH + START_PLATFORM_PAD_Z * 2
+  const platformCx = (minX + maxX) / 2
+  const platformCz = (minZ + maxZ) / 2
+
+  // ── Starting platform — translucent dark tarmac with a coloured edge. ──
+  const platformBaseColor = selected ? 0x55cc99 : 0x224a3a
+  const platformGeom = new THREE.PlaneGeometry(platformW, platformD)
+  platformGeom.rotateX(-Math.PI / 2)
+  const platformMat = new THREE.MeshBasicMaterial({
+    color: platformBaseColor,
     transparent: true,
     opacity: 0.55,
     side: THREE.DoubleSide,
+    depthWrite: false,
   })
-  const padGeom = new THREE.PlaneGeometry(6, 8)
-  padGeom.rotateX(-Math.PI / 2)
-  const pad = new THREE.Mesh(padGeom, padMat)
-  pad.position.set(0, 0.05, 0)
-  g.add(pad)
+  const platform = new THREE.Mesh(platformGeom, platformMat)
+  platform.position.set(platformCx, 0.04, platformCz)
+  g.add(platform)
 
+  // Platform outline so the rectangle reads on dark terrain.
+  const outlineColor = selected ? 0xaaffcc : 0x66ffaa
+  const outlineMat = new THREE.LineBasicMaterial({
+    color: outlineColor,
+    transparent: true,
+    opacity: 0.85,
+  })
+  const outlineGeom = new THREE.BufferGeometry()
+  const ox0 = platformCx - platformW / 2
+  const ox1 = platformCx + platformW / 2
+  const oz0 = platformCz - platformD / 2
+  const oz1 = platformCz + platformD / 2
+  const oy = 0.06
+  outlineGeom.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute(
+      [
+        ox0,
+        oy,
+        oz0,
+        ox1,
+        oy,
+        oz0,
+        ox1,
+        oy,
+        oz0,
+        ox1,
+        oy,
+        oz1,
+        ox1,
+        oy,
+        oz1,
+        ox0,
+        oy,
+        oz1,
+        ox0,
+        oy,
+        oz1,
+        ox0,
+        oy,
+        oz0,
+      ],
+      3,
+    ),
+  )
+  const outline = new THREE.LineSegments(outlineGeom, outlineMat)
+  g.add(outline)
+
+  // ── Start-line stripe — runs across the front row in local +X. ──
+  const stripeColor = selected ? 0xffffff : 0xddeedd
+  const stripeMat = new THREE.MeshBasicMaterial({
+    color: stripeColor,
+    transparent: true,
+    opacity: 0.85,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  })
+  const stripeGeom = new THREE.PlaneGeometry(platformW, 0.6)
+  stripeGeom.rotateX(-Math.PI / 2)
+  const stripe = new THREE.Mesh(stripeGeom, stripeMat)
+  // Place the stripe along the front of the front row (slightly ahead of
+  // the bikes so it reads as "the line you cross").
+  stripe.position.set(platformCx, 0.07, START_BIKE_LENGTH / 2 + 0.6)
+  g.add(stripe)
+
+  // ── Per-slot bike markers. Slot 0 (pole / player) is brighter. ──
+  const slotMaterials: THREE.MeshBasicMaterial[] = []
+  const slotOutlineMats: THREE.LineBasicMaterial[] = []
+  const allSlots: { dx: number; dz: number; isPole: boolean }[] = [
+    { dx: 0, dz: 0, isPole: true },
+    ...AI_GRID_SLOTS.map((s) => ({ dx: s.dx, dz: s.dz, isPole: false })),
+  ]
+  const poleBase = 0x66ffcc
+  const poleSel = 0xffff88
+  const aiBase = 0x2e8a66
+  const aiSel = 0x88ffbb
+  for (const slot of allSlots) {
+    const base = slot.isPole ? poleBase : aiBase
+    const sel = slot.isPole ? poleSel : aiSel
+    const fillMat = new THREE.MeshBasicMaterial({
+      color: selected ? sel : base,
+      transparent: true,
+      opacity: slot.isPole ? 0.75 : 0.55,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+    const fillGeom = new THREE.PlaneGeometry(START_BIKE_WIDTH, START_BIKE_LENGTH)
+    fillGeom.rotateX(-Math.PI / 2)
+    const fill = new THREE.Mesh(fillGeom, fillMat)
+    fill.position.set(slot.dx, 0.09, slot.dz)
+    g.add(fill)
+    slotMaterials.push(fillMat)
+
+    const halfW = START_BIKE_WIDTH / 2
+    const halfL = START_BIKE_LENGTH / 2
+    const wireMat = new THREE.LineBasicMaterial({
+      color: selected ? sel : base,
+      transparent: true,
+      opacity: 0.95,
+    })
+    const wireGeom = new THREE.BufferGeometry()
+    const wy = 0.1
+    wireGeom.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(
+        [
+          slot.dx - halfW,
+          wy,
+          slot.dz - halfL,
+          slot.dx + halfW,
+          wy,
+          slot.dz - halfL,
+          slot.dx + halfW,
+          wy,
+          slot.dz - halfL,
+          slot.dx + halfW,
+          wy,
+          slot.dz + halfL,
+          slot.dx + halfW,
+          wy,
+          slot.dz + halfL,
+          slot.dx - halfW,
+          wy,
+          slot.dz + halfL,
+          slot.dx - halfW,
+          wy,
+          slot.dz + halfL,
+          slot.dx - halfW,
+          wy,
+          slot.dz - halfL,
+        ],
+        3,
+      ),
+    )
+    const wire = new THREE.LineSegments(wireGeom, wireMat)
+    g.add(wire)
+    slotOutlineMats.push(wireMat)
+
+    // Tiny nose triangle inside each slot so the bike's facing reads.
+    const nose = new THREE.Mesh(
+      (() => {
+        const geom = new THREE.ConeGeometry(0.35, 0.7, 3)
+        geom.rotateX(Math.PI / 2)
+        return geom
+      })(),
+      new THREE.MeshBasicMaterial({
+        color: slot.isPole ? 0xffffff : 0xcfeedd,
+        transparent: true,
+        opacity: 0.9,
+      }),
+    )
+    nose.position.set(slot.dx, 0.12, slot.dz + halfL - 0.4)
+    g.add(nose)
+  }
+
+  // ── Forward arrow — points along the start's facing direction. ──
+  const arrowColor = selected ? 0xffff88 : 0xaaffcc
   const arrowMat = new THREE.MeshBasicMaterial({
-    color: selected ? selColor : baseColor,
+    color: arrowColor,
     transparent: true,
     opacity: 0.95,
   })
-  const arrowGeom = new THREE.ConeGeometry(1.0, 2.4, 4)
+  const arrowGeom = new THREE.ConeGeometry(1.2, 2.6, 4)
   arrowGeom.rotateX(Math.PI / 2)
   const arrow = new THREE.Mesh(arrowGeom, arrowMat)
-  arrow.position.set(0, 0.5, 2.6)
+  arrow.position.set(0, 0.6, START_BIKE_LENGTH / 2 + 2.4)
   g.add(arrow)
 
-  // Vertical post so the start is visible from far away.
+  // ── Vertical post — visible from far away so the start is easy to find. ──
+  const postBase = selected ? 0xffff88 : 0x66ffaa
   const postMat = new THREE.MeshBasicMaterial({
-    color: selected ? selColor : baseColor,
+    color: postBase,
     transparent: true,
-    opacity: 0.5,
+    opacity: 0.7,
   })
-  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 4, 8), postMat)
-  post.position.set(0, 2, -2)
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 5, 8), postMat)
+  // Anchor the post at the pole position so it always marks where the
+  // player will spawn, not the geometric centre of the grid.
+  post.position.set(0, 2.5, 0)
   g.add(post)
+  const flag = new THREE.Mesh(
+    new THREE.SphereGeometry(0.5, 8, 6),
+    new THREE.MeshBasicMaterial({
+      color: postBase,
+      transparent: true,
+      opacity: 0.85,
+    }),
+  )
+  flag.position.set(0, 5.2, 0)
+  g.add(flag)
 
   g.userData.setSelected = (v: boolean) => {
-    padMat.color.setHex(v ? selColor : baseColor)
-    arrowMat.color.setHex(v ? selColor : baseColor)
-    postMat.color.setHex(v ? selColor : baseColor)
+    platformMat.color.setHex(v ? 0x55cc99 : 0x224a3a)
+    outlineMat.color.setHex(v ? 0xaaffcc : 0x66ffaa)
+    stripeMat.color.setHex(v ? 0xffffff : 0xddeedd)
+    arrowMat.color.setHex(v ? 0xffff88 : 0xaaffcc)
+    postMat.color.setHex(v ? 0xffff88 : 0x66ffaa)
+    ;(flag.material as THREE.MeshBasicMaterial).color.setHex(v ? 0xffff88 : 0x66ffaa)
+    for (let i = 0; i < slotMaterials.length; i++) {
+      const isPole = i === 0
+      const base = isPole ? 0x66ffcc : 0x2e8a66
+      const sel = isPole ? 0xffff88 : 0x88ffbb
+      slotMaterials[i]!.color.setHex(v ? sel : base)
+      slotOutlineMats[i]!.color.setHex(v ? sel : base)
+    }
   }
   return g
 }
