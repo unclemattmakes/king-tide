@@ -17,13 +17,54 @@ with the headless `pnpm gen:*` pipeline. The existing pipeline is in
 
 ## Shipped so far
 
+- **Addon UX rework + water decoupling + island spawn (2026-05-19).**
+  Five threads of work on the addon's authoring loop:
+  - **Top-bar Hoverbike menu.** New View3D-header dropdown (next to
+    View / Select / Add / Object, BlenderGIS-style) holding every
+    operator categorised under Add / Build-Refresh / Spline / Terrain
+    / Thumbnail / Utility. Always available regardless of selection
+    — finding a tool no longer requires scrolling the N-panel. A
+    *Quick Pie* menu (Shift+W in 3D View) covers the eight most-used
+    actions for the in-viewport authoring loop.
+  - **Selection-driven N-panel.** Twelve per-tool sub-panels (spline,
+    road, tunnels, anti-grav, ramps, downtown, terrain, water,
+    horizon, waves, gameplay, placement-helper) now appear only
+    when their target object is the active selection. Scene-wide
+    panels (Sky, Shader, Stats, Hero, Ghost, Emitters) stay always-on
+    but default-closed. The N-panel header shows an *Active: …* hint
+    + pointers to the top-bar menu + pie shortcut.
+  - **Sea level decoupled from `water_volume_main`.** The scene prop
+    `hoverbike_water_height` is now the canonical sea level — the
+    slider writes it directly, the export reads it directly, the
+    JSON-reload writes it back. The legacy `water_volume_main` empty
+    becomes optional: only useful for `wave_height` / `wave_freq`
+    custom-prop overrides per track. Old .blends migrate lazily —
+    first read after open promotes a legacy volume's Z into the
+    scene prop, so existing tracks export the same height as before.
+  - **Add Island Terrain operator.** New entry under Hoverbike → Add
+    → *Terrain templates* (and Terrain submenu) that spawns a
+    1024×1024 m subdivided plane with the `HV_Island` Geometry-Nodes
+    modifier + 4 default peak controls into the current scene —
+    same procedural setup `template-island.blend` ships with, but
+    layered onto existing work rather than requiring a new .blend.
+    Loads the seed script lazily by file path; idempotent on reuse
+    (refuses on existing `terrain`; reuses node groups + peak empties).
+  - **Stable preview-collection state.** Gate, water, and racer
+    preview rebuilds now reuse the existing collection instead of
+    nuke-and-recreate, so the Outliner's collapse state survives
+    debounced spline / slider edits. Wave-zone child gizmos now
+    render as wireframe instead of solid translucent — overlapping
+    zones read cleanly. Install-addon script also picks up
+    dangling-symlink repair (deleted-worktree recovery without
+    EEXIST).
+
 - **Five authoring tools to round out the iteration loop (2026-05-13).**
   Five additions covering visible features authors couldn't easily
   reach from the addon:
   - **Sea level slider.** New *Sea level (m)* row in the Water box —
-    proxies `water_volume_main.location.z`, lazily creates the empty
-    on first scrub. Drag the empty in the viewport or scrub the
-    slider; both write to `water.height` on export.
+    initially a proxy for `water_volume_main.location.z`, since
+    2026-05-19 the canonical scene prop `hoverbike_water_height`
+    drives the export directly and the volume is optional.
   - **Boost pads.** New `boost_NN` empty pattern with custom props
     `half_width` / `half_depth` / `strength` (defaults match the
     in-app editor's placement.ts). *Add Boost Pad* drops one at the
@@ -626,7 +667,11 @@ or fix in the current authoring loop:
 6. **~~Heightmap import.~~** Shipped 2026-05-12. *Import Heightmap*
    button reads a greyscale PNG/EXR and emits a subdivided
    `kind=track` plane luminance-displaced by the image. Re-import
-   replaces any prior `terrain_heightmap` mesh.
+   replaces any prior `terrain_heightmap` mesh. 2026-05-19 follow-up:
+   *Add Island Terrain* operator drops the procedural-island template
+   (`HV_Island` GN modifier + 4 peak empties) into the current scene
+   without requiring an external image — same setup the
+   `template-island.blend` ships with, layered on top of existing work.
 7. **Spline curvature visualizer.** Item 3's turn-indicator chevrons
    are placed where |κ| > threshold but the threshold itself is opaque
    to the author. A small overlay that colours the AI spline by signed
