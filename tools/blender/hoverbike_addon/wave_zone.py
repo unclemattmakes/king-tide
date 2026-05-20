@@ -218,7 +218,12 @@ def refresh_wave_zone_gizmos(scene) -> int:
             gizmo.scale = (1.0, 1.0, 1.0)
         gizmo.hide_render = True
         gizmo.hide_select = True
-        gizmo.display_type = "SOLID"
+        # WIRE so the cyan box reads as an outlined volume rather than a
+        # translucent fill — keeps the scene readable when several wave
+        # zones overlap or sit on top of the terrain. The export still
+        # treats the empty's transform as the AABB; only the viewport
+        # shading changes here.
+        gizmo.display_type = "WIRE"
         refreshed += 1
     return refreshed
 

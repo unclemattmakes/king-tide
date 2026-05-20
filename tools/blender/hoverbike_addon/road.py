@@ -206,19 +206,23 @@ def _curve_control_tilts(curve_obj: bpy.types.Object) -> list[float]:
 
 def _terrain_water_floor(scene) -> float | None:
     """Lowest Z the road's terrain-cast result is allowed to land on.
-    Reads ``water_volume_main``'s Z (the still-water level) plus its
-    ``wave_height`` custom prop (the runtime Gerstner amplitude), with
+    Reads the canonical sea level (scene prop ``hoverbike_water_height``)
+    plus the ``wave_height`` custom prop on the legacy
+    ``water_volume_main`` empty (the runtime Gerstner amplitude), with
     a small clearance multiplier so the road sits above the highest
     wave crest rather than at exactly the trough-to-peak average.
 
-    Returns ``None`` if there is no water volume in the scene — older
-    inland tracks (Cliffside, alpine-sprint) shouldn't pick up a floor
-    they don't need."""
+    Returns ``None`` if there is no sea level *and* no water volume in
+    the scene — older inland tracks (Cliffside, alpine-sprint)
+    shouldn't pick up a floor they don't need. Tracks with only a
+    scene-prop sea level (no volume) still get a sensible floor."""
+    from .water import current_water_height_m
+
     water = scene.objects.get("water_volume_main") if hasattr(scene, "objects") else bpy.data.objects.get("water_volume_main")
-    if water is None:
+    base = current_water_height_m(scene)
+    if water is None and base == 0.0:
         return None
-    base = float(water.matrix_world.translation.z)
-    wave_h = float(water.get("wave_height", 0.0))
+    wave_h = float(water.get("wave_height", 0.0)) if water is not None else 0.0
     # 1.3× the authored wave height gives a comfortable margin over the
     # tallest realistic crest without lifting straight stretches of road
     # so far above water that the bridge looks stilted. Tunable; revisit
