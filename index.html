@@ -1766,14 +1766,12 @@
       body[data-large-text="1"] #hud-audio,
       body[data-large-text="1"] #hud-room,
       body[data-large-text="1"] .wp-shell,
-      body[data-large-text="1"] .wl-shell,
       body[data-large-text="1"] .ag-shell,
       body[data-large-text="1"] .tut-shell {
         font-size: 125%;
       }
       /* biome-ignore-start lint/complexity/noImportantStyles: required to defeat per-feature HUD shell rules of higher specificity. */
       body[data-high-contrast="1"] .wp-shell,
-      body[data-high-contrast="1"] .wl-shell,
       body[data-high-contrast="1"] .ag-shell,
       body[data-high-contrast="1"] .tut-shell {
         background: #000 !important;
@@ -1797,13 +1795,6 @@
       }
       body[data-cb="tritanopia"] .wp-shell {
         --wp-accent: #33cccc !important; /* swap yellow accent → cyan along the resolvable axis */
-      }
-      body[data-cb="deuteranopia"] .wl-shell,
-      body[data-cb="protanopia"] .wl-shell {
-        --wl-accent: #ffd166 !important; /* lift to a high-luma yellow */
-      }
-      body[data-cb="tritanopia"] .wl-shell {
-        --wl-accent: #ff5566 !important; /* red replaces yellow on the resolvable axis */
       }
       /* biome-ignore-end lint/complexity/noImportantStyles: HUD shells set their own --accent inline; we have to win the cascade. */
 
@@ -2365,64 +2356,6 @@
         40%  { transform: scale(1.08); }
         100% { transform: scale(1); }
       }
-      /* Wave-line shimmer pip — small status badge top-center under the
-         lap timer. The 3D shimmer paints in-world via the WebGL layer;
-         this DOM pip is the "system on" affordance + lock indicator. */
-      #hud-wave-line {
-        top: 64px; left: 50%; transform: translateX(-50%);
-        min-width: 132px; min-height: 22px;
-        pointer-events: none;
-      }
-      #hud-wave-line .wl-shell {
-        display: inline-flex; align-items: center; gap: 8px;
-        padding: 4px 10px 3px;
-        background: linear-gradient(180deg, rgba(8,18,32,0.7), rgba(4,10,20,0.7));
-        border: 1px solid rgba(77, 214, 255, calc(0.25 + 0.35 * var(--wl-strength, 0.2)));
-        border-left: 2px solid var(--bc-cyan);
-        box-shadow: 0 0 calc(6px + 12px * var(--wl-strength, 0.2))
-                    rgba(77, 214, 255, calc(0.1 + 0.3 * var(--wl-strength, 0.2)));
-        opacity: 0;
-        transform: translateY(-4px);
-        transition:
-          opacity 220ms var(--ease-out),
-          transform 220ms var(--ease-out),
-          border-color 220ms var(--ease-out);
-        --wl-strength: 0.2;
-      }
-      #hud-wave-line .wl-shell.wl-active {
-        opacity: 1;
-        transform: translateY(0);
-      }
-      #hud-wave-line .wl-dot {
-        width: 7px; height: 7px;
-        background: var(--bc-cyan);
-        box-shadow: 0 0 calc(4px + 10px * var(--wl-strength, 0.2)) var(--bc-cyan);
-        animation: wl-dot 1.4s var(--ease-out) infinite;
-      }
-      #hud-wave-line .wl-label {
-        font-family: var(--bc-font-display);
-        font-size: 11px; letter-spacing: 0.22em;
-        color: var(--bc-ink);
-      }
-      #hud-wave-line .wl-shell.wl-lock {
-        border-left-color: var(--bc-yellow);
-        border-color: rgba(255, 214, 64, calc(0.45 + 0.4 * var(--wl-strength, 0.5)));
-      }
-      #hud-wave-line .wl-shell.wl-lock .wl-label { color: var(--bc-yellow); }
-      #hud-wave-line .wl-shell.wl-lock .wl-dot {
-        background: var(--bc-yellow);
-        box-shadow: 0 0 calc(6px + 14px * var(--wl-strength, 0.5)) var(--bc-yellow);
-        animation-duration: 0.8s;
-      }
-      /* Subtle mode is dim by default — pip only shows on lock. */
-      #hud-wave-line .wl-shell[data-mode="subtle"]:not(.wl-lock) .wl-label {
-        color: rgba(220, 230, 245, 0.7);
-      }
-      @keyframes wl-dot {
-        0%   { transform: scale(0.85); opacity: 0.6; }
-        45%  { transform: scale(1.15); opacity: 1; }
-        100% { transform: scale(0.85); opacity: 0.6; }
-      }
       /* Cup-points banner — under race-timer when racing in a cup. */
       #hud-cup-points {
         top: 76px; left: 50%; transform: translateX(-50%);
@@ -2927,7 +2860,6 @@
       <div id="hud-boost-meter" class="hud-slot" data-system="boost-meter" hidden></div>
       <div id="hud-anti-grav" class="hud-slot" data-system="anti-grav" hidden></div>
       <div id="hud-tutorial" class="hud-slot" data-system="tutorial" hidden></div>
-      <div id="hud-wave-line" class="hud-slot" data-system="wave-line" hidden></div>
       <div id="hud-cup-points" class="hud-slot" data-system="cup-points" hidden></div>
       <div id="hud-positions" class="hud-slot" data-system="positions" hidden></div>
     </div>

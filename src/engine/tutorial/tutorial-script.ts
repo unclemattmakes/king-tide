@@ -111,7 +111,7 @@ export const DEFAULT_TUTORIAL_SCRIPT: TutorialScript = {
     {
       id: 'look-around',
       title: 'LOOK AROUND',
-      hint: 'Right stick / mouse-drag to peek at the wave-line.',
+      hint: 'Right stick / mouse-drag to peek at the swells ahead.',
       clearWhen: (ctx) => ctx.orbitTouchedThisBeat,
       clearAfterSeconds: 8,
       clearMessage: 'EYES UP',
