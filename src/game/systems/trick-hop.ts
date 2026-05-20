@@ -198,13 +198,6 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
     // velocity is being driven by the hop's own impulse, not by the
     // surface. Without this gate the hop's lift poisons the peak,
     // arming the next press as a credible "trick" off thin air.
-    //
-    // Landing transition also tries the drift handoff: if the same
-    // trick button is still held and the player has commit-level
-    // steering, the bike enters a drift here rather than on a
-    // separate state check below — landing is the only legitimate
-    // place to activate drift, and doing it inline avoids a "drift
-    // started one tick late" gap.
     if (trick.hopLockoutActive) {
       trick.hopLockoutSafetyTicks -= 1
       if (!trick.hopLockoutAirborneSeen && !hover.isGrounded) {
@@ -214,40 +207,56 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
       if (landedAfterAirborne || trick.hopLockoutSafetyTicks <= 0) {
         trick.hopLockoutActive = false
         trick.hopLockoutAirborneSeen = false
-        // Drift handoff — only on a true landing (safety-timeout
-        // exits skip it, since we don't actually know the bike's
-        // ground state in those cases). Gated on the same-button-
-        // still-held continuous press AND a committed steer at
-        // landing. Above-deadzone steering picks the lock direction;
-        // a feather-touch steer doesn't accidentally start a drift.
-        if (landedAfterAirborne && trick.driftArmedButton !== 0) {
-          const driftBtnHeld =
-            (trick.driftArmedButton < 0 && intent.trickLeft) ||
-            (trick.driftArmedButton > 0 && intent.trickRight)
-          // Speed check uses the rigid body's live linvel — the bike
-          // has to be moving in the up-plane fast enough for the
-          // drift visuals to read.
-          const handleArm = RBHandleStore.must(eid).handle
-          const rbArm = phys.world.getRigidBody(handleArm)
-          let speedH = 0
-          if (rbArm) {
-            const v = rbArm.linvel()
-            speedH = Math.hypot(v.x, v.z)
-          }
-          if (
-            driftBtnHeld &&
-            Math.abs(intent.steer) >= DRIFT_STEER_DEADZONE &&
-            speedH >= DRIFT_MIN_SPEED
-          ) {
-            trick.driftActive = true
-            trick.driftDirection = intent.steer >= 0 ? 1 : -1
-            trick.driftChargeSec = 0
-          } else {
-            // Window closed — clear the arming so a later button
-            // release doesn't try to fire a drift release event.
-            trick.driftArmedButton = 0
-          }
+      }
+    }
+
+    // Drift handoff — decoupled from the hop-lockout's airborne-seen
+    // gate. A small flatground hop (HOP_VELOCITY_SMALL = 4.5 m/s,
+    // peak ~0.4 m) often doesn't clear the hover spring's grounded
+    // threshold, so the bike never registers as airborne and the
+    // landing-detect path used to never fire. Real MK8 drifts on
+    // flatground too — you press, the bike hops a few cm, and the
+    // drift kicks in as soon as it's settled. So: every tick while
+    // `driftArmedButton != 0` and `!driftActive`, check the activation
+    // gates. The hop impulse fired earlier this same loop, so we
+    // require the bike to be grounded AND the press tick to have
+    // already passed (`hopLockoutSafetyTicks < HOP_LOCKOUT_MAX_TICKS`
+    // ensures we skip the press-tick itself).
+    if (trick.driftArmedButton !== 0 && !trick.driftActive) {
+      const driftBtnHeld =
+        (trick.driftArmedButton < 0 && intent.trickLeft) ||
+        (trick.driftArmedButton > 0 && intent.trickRight)
+      if (!driftBtnHeld) {
+        // Player released before the drift could engage — clear
+        // arming so a later re-press doesn't latch a stale drift.
+        trick.driftArmedButton = 0
+      } else if (
+        hover.isGrounded &&
+        trick.hopLockoutSafetyTicks < HOP_LOCKOUT_MAX_TICKS &&
+        Math.abs(intent.steer) >= DRIFT_STEER_DEADZONE
+      ) {
+        // Bike has settled with the button still held + committed
+        // steer. Speed gate uses the rigid body's live linvel —
+        // drift only engages above the floor speed so we don't
+        // commit a parking-lot wiggle into a powerslide.
+        const handleArm = RBHandleStore.must(eid).handle
+        const rbArm = phys.world.getRigidBody(handleArm)
+        let speedH = 0
+        if (rbArm) {
+          const v = rbArm.linvel()
+          speedH = Math.hypot(v.x, v.z)
         }
+        if (speedH >= DRIFT_MIN_SPEED) {
+          trick.driftActive = true
+          trick.driftDirection = intent.steer >= 0 ? 1 : -1
+          trick.driftChargeSec = 0
+        }
+        // Below the speed floor we leave the arm in place so the
+        // player can speed back up while still holding the button
+        // and the drift engages then. Steer below the deadzone is
+        // also a "wait" — the player might still be aligning the
+        // corner — so we also leave the arming alone in that case
+        // (handled by the outer `else if` guard above).
       }
     }
 

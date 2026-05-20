@@ -105,13 +105,19 @@ const EXHAUST_BOOST_RATE = 90 // additional rate while boost is active
 const EXHAUST_THROTTLE_MIN = 0.2 // dead-zone — no exhaust on micro inputs
 
 // Drift sparks — MK8-style charge-tier readout. Per-tick emission from
-// both rear corners of the bike while a drift is active; the color +
-// rate switches at tier transitions so the player can SEE the gauge
-// fill: nothing while sub-tier-1, blue stream after ~1 s, orange
-// stream after ~2.4 s. The transition itself is the "you just leveled
-// up" cue. Sparks shoot outward (away from the drift direction) and
-// down, matching the rear-sweep visual: rear is sliding outward,
-// throwing sparks off the corner.
+// both rear corners of the bike while a drift is active. Three visual
+// stages so the player can see the gauge fill in real time:
+//
+//   tier 0 (just engaged, charge < 1.0 s) — low-rate faint blue
+//     specks. Immediate "drift active" signal so the player isn't
+//     left wondering whether they actually entered the state.
+//   tier 1 (charge 1.0 – 2.4 s) — full blue stream.
+//   tier 2 (charge ≥ 2.4 s) — full orange stream, slightly bigger
+//     + faster sprites.
+//
+// Sparks shoot outward (away from the drift direction) and down,
+// matching the rear-sweep visual: rear is sliding outward, throwing
+// sparks off the corner.
 //
 // Two separate pools so each can carry its own colored texture under
 // additive blending. Sizes pick the dominant-color pixel; the texture
@@ -119,7 +125,11 @@ const EXHAUST_THROTTLE_MIN = 0.2 // dead-zone — no exhaust on micro inputs
 // reads as a warm core, not a hot-pink saturation crime.
 const DRIFT_SPARK_BLUE_RGB: [number, number, number] = [120, 200, 255]
 const DRIFT_SPARK_ORANGE_RGB: [number, number, number] = [255, 180, 70]
-const DRIFT_SPARK_RATE = 90 // particles/sec per corner while in the active tier
+/** Particles/sec per corner while in the matching tier. Tier 0 reuses
+ *  the blue pool at a quarter rate so the pre-charge cue reads as
+ *  "wisps building up" before the proper stream kicks in. */
+const DRIFT_SPARK_RATE_TIER0 = 22
+const DRIFT_SPARK_RATE = 90
 const DRIFT_SPARK_CAPACITY = 280 // ~3 bikes' worth simultaneously drifting
 /** Inset from the bike's center line where the per-corner sparks
  *  spawn. ±X = port/starboard, −Z = behind. Matches the visual rear
@@ -1041,16 +1051,25 @@ export function createFxSystem(
           // Continuous emission. Tier is recomputed from chargeSec
           // every frame through the same `driftTier` helper the sim
           // uses on release — guarantees the FX matches the eventual
-          // payoff without duplicated threshold constants.
-          const tier = trick.driftActive ? driftTier(trick.driftChargeSec) : 0
-          if (tier > 0) {
+          // payoff without duplicated threshold constants. Tier 0
+          // (drift active but charge < 1.0 s) emits a low-rate blue
+          // wisp so the player gets an immediate "drift engaged"
+          // cue before the full tier-1 stream unlocks.
+          if (trick.driftActive) {
+            const tier = driftTier(trick.driftChargeSec)
+            // Tier 2 → orange + bigger + faster.
+            // Tier 1 → blue + standard.
+            // Tier 0 → blue + smaller + slower + low rate.
             const pool = tier === 2 ? driftSparkOrange : driftSparkBlue
-            // Emit from BOTH rear corners every frame so the read is
-            // symmetric — MK8's "two sets of sparks coming off the
-            // rear" tell. Per-corner emission shares one accumulator
-            // and splits the budget so the total particle rate equals
-            // DRIFT_SPARK_RATE × 2 corners.
-            acc.driftSparks += DRIFT_SPARK_RATE * dt
+            const rate = tier === 0 ? DRIFT_SPARK_RATE_TIER0 : DRIFT_SPARK_RATE
+            const sizeMul =
+              tier === 2 ? 1.1 : tier === 1 ? 0.95 : 0.65
+            const ejectOut = tier === 2 ? 7 : tier === 1 ? 5 : 3
+            const ejectBack = tier === 2 ? 2.5 : tier === 1 ? 1.8 : 1.2
+            // Per-corner emission shares one accumulator and splits
+            // the budget so the total particle rate equals
+            // `rate × 2 corners`.
+            acc.driftSparks += rate * dt
             const nEach = Math.floor(acc.driftSparks)
             if (nEach > 0) {
               acc.driftSparks -= nEach
@@ -1065,11 +1084,6 @@ export function createFxSystem(
                   .set(side * DRIFT_SPARK_OFFSET_X, DRIFT_SPARK_OFFSET_Y, DRIFT_SPARK_OFFSET_Z)
                   .applyQuaternion(tmpQuat)
                   .add(tmpPos)
-                // Eject outward + slightly back so the sparks form
-                // a fan trailing behind the bike. Tier-2 sparks fly
-                // a bit faster.
-                const ejectOut = tier === 2 ? 7 : 5
-                const ejectBack = tier === 2 ? 2.5 : 1.8
                 emit(
                   pool,
                   sparkWorld.x,
@@ -1079,11 +1093,11 @@ export function createFxSystem(
                   -0.5,
                   right.z * side * ejectOut + back.z * ejectBack,
                   // Tighter cone reads as crisp sparks; the per-tier
-                  // texture color provides the visual differentiator.
+                  // texture color + size provide the differentiator.
                   1.0,
                   0.18,
                   0.4,
-                  pool.defaultSize * (0.7 + Math.random() * 0.6),
+                  pool.defaultSize * sizeMul * (0.7 + Math.random() * 0.6),
                   nEach,
                 )
               }

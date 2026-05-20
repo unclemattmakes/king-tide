@@ -331,6 +331,67 @@ describe('post-hop drift state machine', () => {
   })
 })
 
+describe('drift activates without an airborne phase (flat-ground hop)', () => {
+  it('activates on the first grounded tick after press when button + steer held', async () => {
+    // The bike never goes airborne — a small flatground hop's 4.5 m/s
+    // impulse doesn't always clear the hover spring's grounded
+    // threshold. Drift must still engage so MK8-style "press hop +
+    // hold for drift on flat road" works.
+    const w = await makeWorlds()
+    const intent = ControlIntentStore.must(w.bikeEid)
+    intent.throttle = 1
+    intent.steer = 0.8
+    intent.trickRight = true
+
+    // Tick 0: press while grounded → hop fires, drift armed, but
+    // safety-ticks gate blocks same-tick activation.
+    setGrounded(w.bikeEid, true)
+    trickHopSystem(w.sim, w.phys)
+    expect(TrickStateStore.must(w.bikeEid).driftArmedButton).toBe(1)
+    expect(TrickStateStore.must(w.bikeEid).driftActive).toBe(false)
+
+    // Tick 1: still grounded (small hop, never left), button still
+    // held → drift should activate.
+    const rb = w.phys.world.getRigidBody(RBHandleStore.must(w.bikeEid).handle)
+    if (!rb) throw new Error('bike rb missing')
+    rb.setLinvel({ x: 15, y: 0, z: 0 }, true)
+    trickHopSystem(w.sim, w.phys)
+    expect(TrickStateStore.must(w.bikeEid).driftActive).toBe(true)
+    expect(TrickStateStore.must(w.bikeEid).driftDirection).toBe(1)
+  })
+
+  it('keeps the arm pending while the player drives straight, activates when they steer in', async () => {
+    // The player can press hop and hold the button while approaching
+    // a corner without committing steer yet — drift activates the
+    // moment they start the turn, not at the hop press.
+    const w = await makeWorlds()
+    const intent = ControlIntentStore.must(w.bikeEid)
+    intent.throttle = 1
+    intent.steer = 0 // no commit yet
+    intent.trickRight = true
+
+    const rb = w.phys.world.getRigidBody(RBHandleStore.must(w.bikeEid).handle)
+    if (!rb) throw new Error('bike rb missing')
+
+    setGrounded(w.bikeEid, true)
+    trickHopSystem(w.sim, w.phys) // press tick
+    // Drive straight for a few ticks — drift stays armed but inactive.
+    for (let i = 0; i < 5; i++) {
+      rb.setLinvel({ x: 15, y: 0, z: 0 }, true)
+      trickHopSystem(w.sim, w.phys)
+    }
+    expect(TrickStateStore.must(w.bikeEid).driftArmedButton).toBe(1)
+    expect(TrickStateStore.must(w.bikeEid).driftActive).toBe(false)
+
+    // Now steer in — drift should engage next tick.
+    intent.steer = 0.9
+    rb.setLinvel({ x: 15, y: 0, z: 0 }, true)
+    trickHopSystem(w.sim, w.phys)
+    expect(TrickStateStore.must(w.bikeEid).driftActive).toBe(true)
+    expect(TrickStateStore.must(w.bikeEid).driftDirection).toBe(1)
+  })
+})
+
 describe('driftTier classification', () => {
   it('zero for sub-tier-1 charge', () => {
     expect(driftTier(0)).toBe(0)
