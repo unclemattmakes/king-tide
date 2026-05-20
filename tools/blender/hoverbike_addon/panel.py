@@ -6,6 +6,16 @@ dispatches between track / bike / unknown asset modes; track .blends
 get a collapsible sub-panel per domain (spline, road, tunnels, ramps,
 terrain, water, gameplay, ghost lap, shader, stats).
 
+Most per-domain sub-panels are **selection-driven**: they only appear
+when the active object is the one the panel acts on (the spline panel
+shows up when ``ai_spline_main`` is selected, the road panel when
+``road_curve_main`` or a road mesh is selected, and so on). The
+scene-wide knobs (Stats, Sky, Shader, Hero) stay always-visible at
+the bottom of the stack — there's no object to "select" to bring them
+up. The top-bar Hoverbike menu (``menu.py``) is the always-available
+discovery surface for adding new objects or running an operator when
+nothing relevant is selected.
+
 This module is pure UI: it consumes operators + scene props registered
 by the per-domain modules and arranges them into a usable interface.
 No business logic here.
@@ -194,14 +204,33 @@ class HOVERBIKE_PT_panel(Panel):
         )
         op_edit.edit = True
 
-        col = layout.column(align=True)
-        col.scale_y = 0.85
-        col.label(text="Tools below; collapse any section.", icon="INFO")
+        # Active-object hint — clues the author in that the sub-panels
+        # below are gated by selection. Reduces "where did the road
+        # tools go?" confusion after the move from always-on panels.
+        active = context.view_layer.objects.active
+        hint_box = layout.box()
+        hint_box.scale_y = 0.85
+        if active is not None:
+            kind = _active_kind_label(active)
+            if kind:
+                hint_box.label(
+                    text=f"Active: {active.name} — {kind}", icon="OBJECT_DATAMODE"
+                )
+            else:
+                hint_box.label(
+                    text=f"Active: {active.name} (no panel)",
+                    icon="OBJECT_DATAMODE",
+                )
+        else:
+            hint_box.label(text="Select an object to see its tools.", icon="INFO")
+        hint_box.label(text="Top-bar Hoverbike menu = all tools", icon="MENU_PANEL")
+        hint_box.label(text="Shift+W = quick pie menu", icon="MESH_CIRCLE")
+
         # Small "start another map" affordance at the bottom — out of
         # the way of the active-track UI but discoverable for authors
         # who finish a map and want to jump to a fresh template without
         # the file-browser dance.
-        col.operator(
+        layout.operator(
             "hoverbike.new_map_from_template",
             text="New Map from Template…",
             icon="FILE_NEW",
@@ -281,6 +310,169 @@ class HOVERBIKE_PT_panel(Panel):
 # matter of subclassing _HoverbikeTrackSubPanelBase + implementing draw.
 
 
+# ────────────────────────────────────────────────────────────────────
+# Selection helpers
+# ────────────────────────────────────────────────────────────────────
+#
+# The selection-driven sub-panels each ask one of the helpers below
+# whether the active object is "their" object. Centralising the
+# matching keeps the per-panel poll() bodies one-line and stops the
+# rules from drifting across files (e.g. "what counts as the road
+# curve" lives in one place).
+
+
+def _ancestor_with_kind(obj: bpy.types.Object | None, kind: str) -> bpy.types.Object | None:
+    """Climb the parent chain looking for an object tagged with the
+    given ``kind`` custom property. Used by sub-panels whose active
+    object is usually a child of the conceptual "thing" (e.g. selecting
+    a tower mesh inside ``downtown_03`` should activate the Downtown
+    panel)."""
+    cur = obj
+    while cur is not None:
+        if cur.get("kind") == kind:
+            return cur
+        cur = cur.parent
+    return None
+
+
+def _is_spline_active(obj: bpy.types.Object | None) -> bool:
+    if obj is None:
+        return False
+    if obj.name == "ai_spline_main":
+        return True
+    if obj.name.startswith("start_") or obj.name.startswith("cp_"):
+        # Start posers + hand-placed gate empties are "of the spline"
+        # — surfacing the spline tools when you click one keeps the
+        # snap-to-spline buttons one click away.
+        return True
+    return False
+
+
+def _is_road_active(obj: bpy.types.Object | None) -> bool:
+    from .road import ROAD_CURVE_NAME
+
+    if obj is None:
+        return False
+    if obj.name == ROAD_CURVE_NAME or obj.name.startswith("road_"):
+        return True
+    return False
+
+
+def _is_tunnel_active(obj: bpy.types.Object | None) -> bool:
+    from .tunnel import TUNNEL_CURVE_NAME, TUNNEL_PARENT_PREFIX
+
+    if obj is None:
+        return False
+    if obj.name == TUNNEL_CURVE_NAME or obj.name.startswith(TUNNEL_PARENT_PREFIX):
+        return True
+    return False
+
+
+def _is_antigrav_curve_active(obj: bpy.types.Object | None) -> bool:
+    from .antigrav_ribbon import ANTIGRAV_CURVE_PREFIX, ANTIGRAV_SURFACE_SUFFIX
+
+    if obj is None:
+        return False
+    if obj.name.startswith(ANTIGRAV_CURVE_PREFIX):
+        return True
+    if obj.name.endswith(ANTIGRAV_SURFACE_SUFFIX):
+        return True
+    return False
+
+
+def _is_placement_helper_active(obj: bpy.types.Object | None) -> bool:
+    from .placement_helper import PLACEMENT_HELPER_NAME
+
+    if obj is None:
+        return False
+    return obj.name == PLACEMENT_HELPER_NAME
+
+
+def _is_downtown_active(obj: bpy.types.Object | None) -> bool:
+    return _ancestor_with_kind(obj, "downtown") is not None
+
+
+def _is_terrain_active(obj: bpy.types.Object | None) -> bool:
+    """True when the active object is the (largest) terrain mesh."""
+    from ._legacy import _largest_terrain_mesh
+
+    if obj is None or obj.type != "MESH":
+        return False
+    terrain = _largest_terrain_mesh()
+    return terrain is not None and obj.name == terrain.name
+
+
+def _is_water_active(obj: bpy.types.Object | None) -> bool:
+    from .water import WATER_VOLUME_NAME
+
+    if obj is None:
+        return False
+    return obj.name == WATER_VOLUME_NAME
+
+
+def _is_horizon_active(obj: bpy.types.Object | None) -> bool:
+    from .horizon import HORIZON_MESH_NAME
+
+    if obj is None:
+        return False
+    return obj.name == HORIZON_MESH_NAME
+
+
+def _is_wave_zone_active(obj: bpy.types.Object | None) -> bool:
+    if obj is None:
+        return False
+    return bool(re.match(r"^wave_zone_(\d+)$", obj.name))
+
+
+def _is_ramp_active(obj: bpy.types.Object | None) -> bool:
+    """Ramps are an Empty parent named ``ramp`` (or its mesh child)."""
+    if obj is None:
+        return False
+    if obj.name.startswith("ramp") or (obj.parent is not None and obj.parent.name.startswith("ramp")):
+        return True
+    return False
+
+
+def _is_gameplay_active(obj: bpy.types.Object | None) -> bool:
+    """Show the Gameplay panel when ai_spline_main (gates/turn/racer
+    derive from it) or any per-item gameplay empty is selected."""
+    if obj is None:
+        return False
+    if obj.name == "ai_spline_main":
+        return True
+    if re.match(r"^(boost|antigrav|cp)_\d+$", obj.name):
+        return True
+    if obj.name in ("racer_preview", "racer_origin"):
+        return True
+    if obj.name.startswith("turn_arrow_"):
+        return True
+    return False
+
+
+_KIND_LABELS: tuple[tuple[str, callable], ...] = (
+    ("AI spline", _is_spline_active),
+    ("road curve", _is_road_active),
+    ("tunnel curve", _is_tunnel_active),
+    ("anti-grav curve", _is_antigrav_curve_active),
+    ("placement helper", _is_placement_helper_active),
+    ("downtown", _is_downtown_active),
+    ("terrain", _is_terrain_active),
+    ("water volume", _is_water_active),
+    ("horizon ring", _is_horizon_active),
+    ("wave zone", _is_wave_zone_active),
+    ("ramp", _is_ramp_active),
+    ("gameplay item", _is_gameplay_active),
+)
+
+
+def _active_kind_label(obj: bpy.types.Object | None) -> str | None:
+    """Returns the first matching kind name, for the header hint."""
+    for label, pred in _KIND_LABELS:
+        if pred(obj):
+            return label
+    return None
+
+
 class _HoverbikeTrackSubPanelBase:
     """Mixin: panel constants + poll() shared by every track sub-panel.
     Sub-panels live under the parent `HOVERBIKE_PT_panel` and only render
@@ -297,11 +489,31 @@ class _HoverbikeTrackSubPanelBase:
         return detect_mode(bpy.data.filepath) == "track"
 
 
-class HOVERBIKE_PT_track_spline(_HoverbikeTrackSubPanelBase, Panel):
+class _SelectionDrivenPanel(_HoverbikeTrackSubPanelBase):
+    """Mixin: gate panel visibility by the active object. Subclasses
+    override the class attribute ``_active_pred`` to a function that
+    takes the active object (may be None) and returns whether the panel
+    should appear. Keeps the per-panel boilerplate to one line."""
+
+    _active_pred: staticmethod = staticmethod(lambda obj: False)
+
+    @classmethod
+    def poll(cls, context):
+        if not super().poll(context):
+            return False
+        active = context.view_layer.objects.active
+        return bool(cls._active_pred(active))
+
+
+class HOVERBIKE_PT_track_spline(_SelectionDrivenPanel, Panel):
     """Sub-panel: AI-spline editing helpers + start placement + the
-    spline-aligned cursor / ramp-at-t / auto-ramp operators."""
+    spline-aligned cursor / ramp-at-t / auto-ramp operators.
+
+    Visible when ``ai_spline_main`` / a ``start_NN`` / a ``cp_NN`` is
+    the active object."""
     bl_label = "Spline tools"
     bl_idname = "HOVERBIKE_PT_track_spline"
+    _active_pred = staticmethod(_is_spline_active)
 
     def draw(self, context):
         layout = self.layout
@@ -349,11 +561,13 @@ class HOVERBIKE_PT_track_spline(_HoverbikeTrackSubPanelBase, Panel):
         layout.operator("hoverbike.auto_place_ramps", icon="MOD_PARTICLES")
 
 
-class HOVERBIKE_PT_track_road(_HoverbikeTrackSubPanelBase, Panel):
+class HOVERBIKE_PT_track_road(_SelectionDrivenPanel, Panel):
     """Sub-panel: road-curve authoring + width / banking / curb knobs +
-    Build Road. Long enough to deserve its own collapsible section."""
+    Build Road. Visible when ``road_curve_main`` or a road mesh is the
+    active object."""
     bl_label = "Road tool"
     bl_idname = "HOVERBIKE_PT_track_road"
+    _active_pred = staticmethod(_is_road_active)
 
     def draw(self, context):
         from .road import ROAD_CURVE_NAME
@@ -432,15 +646,17 @@ class HOVERBIKE_PT_track_road(_HoverbikeTrackSubPanelBase, Panel):
             layout.label(text="Edit road_curve_main, then Build", icon="INFO")
 
 
-class HOVERBIKE_PT_track_tunnels(_HoverbikeTrackSubPanelBase, Panel):
+class HOVERBIKE_PT_track_tunnels(_SelectionDrivenPanel, Panel):
     """Sub-panel: tunnel through the terrain. Bezier curve along the
     intended path → Build → terrain gets a Boolean DIFFERENCE modifier
     against a cylindrical cutter + an inward-facing interior shell is
-    spawned with ``kind="track"``. Default-closed since most tracks
-    won't use it."""
+    spawned with ``kind="track"``.
+
+    Visible when ``tunnel_curve_main`` or any ``tunnel_*`` object is
+    the active object."""
     bl_label = "Tunnels"
     bl_idname = "HOVERBIKE_PT_track_tunnels"
-    bl_options = {"DEFAULT_CLOSED"}
+    _active_pred = staticmethod(_is_tunnel_active)
 
     def draw(self, context):
         from ._legacy import _largest_terrain_mesh
@@ -506,15 +722,19 @@ class HOVERBIKE_PT_track_tunnels(_HoverbikeTrackSubPanelBase, Panel):
             layout.label(text=f"{n_tunnels} tunnel(s) built", icon="MOD_BOOLEAN")
 
 
-class HOVERBIKE_PT_track_placement(_HoverbikeTrackSubPanelBase, Panel):
+class HOVERBIKE_PT_track_placement(_SelectionDrivenPanel, Panel):
     """Sub-panel: persistent placement helper — a curve-constrained empty
     that the author parks at any (t, lateral offset) and uses as a
     placement anchor for ramps, boost pads, props, etc. Sliders re-pose
     live; one-click *Add Ramp at Helper* / *Add Boost at Helper* drop
     items at the helper's pose without needing to snap the cursor first.
-    """
+
+    Visible when the ``placement_helper`` empty is the active object.
+    Create one via the Hoverbike → Add menu (or Utility → Placement
+    Helper)."""
     bl_label = "Placement helper"
     bl_idname = "HOVERBIKE_PT_track_placement"
+    _active_pred = staticmethod(_is_placement_helper_active)
 
     def draw(self, context):
         from .placement_helper import PLACEMENT_HELPER_NAME
@@ -541,13 +761,16 @@ class HOVERBIKE_PT_track_placement(_HoverbikeTrackSubPanelBase, Panel):
             row.operator("hoverbike.add_boost_pad_at_helper", icon="FORCE_FORCE")
 
 
-class HOVERBIKE_PT_track_downtown(_HoverbikeTrackSubPanelBase, Panel):
+class HOVERBIKE_PT_track_downtown(_SelectionDrivenPanel, Panel):
     """Sub-panel: placeholder downtown city-block generator. Drops a
     parented grid of mid-rise tower meshes (kind="track") at the 3D
-    cursor. Default-closed since most tracks won't use it."""
+    cursor.
+
+    Visible when any descendant of a ``downtown_NN`` is the active
+    object. Use Hoverbike → Add → Downtown Block to drop a fresh one."""
     bl_label = "Downtown"
     bl_idname = "HOVERBIKE_PT_track_downtown"
-    bl_options = {"DEFAULT_CLOSED"}
+    _active_pred = staticmethod(_is_downtown_active)
 
     def draw(self, context):
         layout = self.layout
@@ -585,17 +808,19 @@ class HOVERBIKE_PT_track_downtown(_HoverbikeTrackSubPanelBase, Panel):
             row.operator("hoverbike.rebuild_downtown", text="Rebuild", icon="FILE_REFRESH")
 
 
-class HOVERBIKE_PT_track_antigrav_ribbon(_HoverbikeTrackSubPanelBase, Panel):
+class HOVERBIKE_PT_track_antigrav_ribbon(_SelectionDrivenPanel, Panel):
     """Sub-panel: curve-driven anti-grav surface authoring. Pick a
     profile (tube / ribbon / banked-strip), drop a Bezier curve through
     the intended path, hit *Build Anti-Grav Surface* — the operator
     sweeps the cross-section, drops the entry / exit zone empties at
-    the curve endpoints, and tags the surface ``kind=track``. Same
-    authoring shape as the tunnel + road tools so the muscle memory
-    transfers; default-closed since most tracks won't use it."""
+    the curve endpoints, and tags the surface ``kind=track``.
+
+    Visible when an ``antigrav_curve_NN`` or the resulting surface mesh
+    is the active object. Use Hoverbike → Add → Anti-Grav Curve to
+    spawn the first one."""
     bl_label = "Anti-grav surfaces"
     bl_idname = "HOVERBIKE_PT_track_antigrav_ribbon"
-    bl_options = {"DEFAULT_CLOSED"}
+    _active_pred = staticmethod(_is_antigrav_curve_active)
 
     def draw(self, context):
         from .antigrav_ribbon import (
@@ -652,16 +877,20 @@ class HOVERBIKE_PT_track_antigrav_ribbon(_HoverbikeTrackSubPanelBase, Panel):
             layout.label(text="Select an antigrav_curve_NN to build", icon="INFO")
 
 
-class HOVERBIKE_PT_track_ramps(_HoverbikeTrackSubPanelBase, Panel):
+class HOVERBIKE_PT_track_ramps(_SelectionDrivenPanel, Panel):
     """Sub-panel: simple wedge ramp. Three sliders set the next ramp's
     dimensions; clicking *Add Ramp* drops it at the 3D cursor.
 
     Each ramp is a parent empty (G/R/S to position/aim) plus a child
     mesh driven by the HV_Ramp Geometry-Nodes modifier. To resize a
     placed ramp, open its mesh's Modifiers tab and edit Length /
-    Width / Height directly — the mesh re-evaluates live."""
+    Width / Height directly — the mesh re-evaluates live.
+
+    Visible when a ramp empty or its mesh child is the active object.
+    Hoverbike → Add → Ramp is the spawn entry."""
     bl_label = "Ramps"
     bl_idname = "HOVERBIKE_PT_track_ramps"
+    _active_pred = staticmethod(_is_ramp_active)
 
     def draw(self, context):
         layout = self.layout
@@ -675,11 +904,15 @@ class HOVERBIKE_PT_track_ramps(_HoverbikeTrackSubPanelBase, Panel):
         layout.label(text="mesh's HV_Ramp modifier to resize.")
 
 
-class HOVERBIKE_PT_track_terrain(_HoverbikeTrackSubPanelBase, Panel):
+class HOVERBIKE_PT_track_terrain(_SelectionDrivenPanel, Panel):
     """Sub-panel: heightmap import, sculpt entry-points, AO/path-wear
-    bakers. Anything that touches the terrain mesh's geometry."""
+    bakers. Anything that touches the terrain mesh's geometry.
+
+    Visible when the (largest) terrain mesh is the active object.
+    Hoverbike → Terrain → Import Heightmap creates the first one."""
     bl_label = "Terrain"
     bl_idname = "HOVERBIKE_PT_track_terrain"
+    _active_pred = staticmethod(_is_terrain_active)
 
     def draw(self, context):
         layout = self.layout
@@ -737,11 +970,14 @@ class HOVERBIKE_PT_track_terrain(_HoverbikeTrackSubPanelBase, Panel):
         layout.operator("hoverbike.bake_path_worn", icon="MOD_CURVE")
 
 
-class HOVERBIKE_PT_track_water(_HoverbikeTrackSubPanelBase, Panel):
+class HOVERBIKE_PT_track_water(_SelectionDrivenPanel, Panel):
     """Sub-panel: sea-level slider (proxies water_volume_main.z) + the
-    Gerstner-wave preview plane controls."""
+    Gerstner-wave preview plane controls.
+
+    Visible when ``water_volume_main`` is the active object."""
     bl_label = "Water"
     bl_idname = "HOVERBIKE_PT_track_water"
+    _active_pred = staticmethod(_is_water_active)
 
     def draw(self, context):
         from .water import WATER_VOLUME_NAME
@@ -764,18 +1000,19 @@ class HOVERBIKE_PT_track_water(_HoverbikeTrackSubPanelBase, Panel):
         row.operator("hoverbike.hide_water_preview", icon="HIDE_ON")
 
 
-class HOVERBIKE_PT_track_horizon(_HoverbikeTrackSubPanelBase, Panel):
+class HOVERBIKE_PT_track_horizon(_SelectionDrivenPanel, Panel):
     """Sub-panel: per-track distant-horizon silhouette. Drops a
     procedural starter ring authors can hand-edit into recognisable
     skylines (Skytree, Table Mountain, the Manhattan grid). When the
     GLB ships a ``horizon_ring`` mesh, the runtime uses it directly;
     otherwise the procedural fallback (seeded off the track id) runs.
 
-    Lives next to Water in the panel order because both shape the
-    far-field atmosphere — author up here, water sits below."""
+    Visible when ``horizon_ring`` is the active object. Use Hoverbike
+    → Add → Horizon Ring to spawn the starter shape."""
 
     bl_label = "Horizon"
     bl_idname = "HOVERBIKE_PT_track_horizon"
+    _active_pred = staticmethod(_is_horizon_active)
 
     def draw(self, context):
         from .horizon import HORIZON_MESH_NAME
@@ -865,15 +1102,18 @@ class HOVERBIKE_PT_track_sky(_HoverbikeTrackSubPanelBase, Panel):
             layout.label(text="Bloom: no pass yet, value still ships", icon="INFO")
 
 
-class HOVERBIKE_PT_track_waves(_HoverbikeTrackSubPanelBase, Panel):
+class HOVERBIKE_PT_track_waves(_SelectionDrivenPanel, Panel):
     """Sub-panel: wave-mastery zones. Each ``wave_zone_NN`` empty in the
     scene multiplies the global Gerstner wave amplitude / frequency
     inside its oriented bounding box, with optional periodic surge for
     tsunami timers and an optional dominant-swell direction override.
     The runtime evaluates zones via ``sampleZoneFactors`` in
-    ``wave-field.ts``."""
+    ``wave-field.ts``.
+
+    Visible when a ``wave_zone_NN`` empty is the active object."""
     bl_label = "Wave zones"
     bl_idname = "HOVERBIKE_PT_track_waves"
+    _active_pred = staticmethod(_is_wave_zone_active)
 
     def draw(self, context):
         layout = self.layout
@@ -893,11 +1133,18 @@ class HOVERBIKE_PT_track_waves(_HoverbikeTrackSubPanelBase, Panel):
         layout.label(text="Local +X = dominant swell direction", icon="ORIENTATION_LOCAL")
 
 
-class HOVERBIKE_PT_track_gameplay(_HoverbikeTrackSubPanelBase, Panel):
+class HOVERBIKE_PT_track_gameplay(_SelectionDrivenPanel, Panel):
     """Sub-panel: gates + boost pads + racers + turn indicators. The
-    high-level "what does the player interact with" placement section."""
+    high-level "what does the player interact with" placement section.
+
+    Visible when any gameplay-related object is the active object —
+    ``ai_spline_main`` (gates / racer / turn indicators all derive from
+    the spline), a ``boost_NN``, ``antigrav_NN``, ``cp_NN``, racer
+    preview, or a ``turn_arrow_NN``. Use Hoverbike → Add for spawn
+    actions when nothing relevant is selected."""
     bl_label = "Gameplay"
     bl_idname = "HOVERBIKE_PT_track_gameplay"
+    _active_pred = staticmethod(_is_gameplay_active)
 
     def draw(self, context):
         from .previews import GATE_PREVIEW_COLLECTION
@@ -1205,8 +1452,11 @@ class HOVERBIKE_PT_track_stats(_HoverbikeTrackSubPanelBase, Panel):
 
 _CLASSES: tuple[type, ...] = (
     HOVERBIKE_PT_panel,
+    # ── Selection-driven sub-panels ───────────────────────────────
+    # Only visible when their target object is the active selection.
+    # When nothing relevant is selected, none of these appear — the
+    # always-on cluster below carries the rest of the sidebar.
     HOVERBIKE_PT_track_spline,
-    HOVERBIKE_PT_track_placement,
     HOVERBIKE_PT_track_road,
     HOVERBIKE_PT_track_tunnels,
     HOVERBIKE_PT_track_antigrav_ribbon,
@@ -1215,10 +1465,14 @@ _CLASSES: tuple[type, ...] = (
     HOVERBIKE_PT_track_terrain,
     HOVERBIKE_PT_track_water,
     HOVERBIKE_PT_track_horizon,
-    HOVERBIKE_PT_track_sky,
     HOVERBIKE_PT_track_waves,
-    HOVERBIKE_PT_track_emitters,
     HOVERBIKE_PT_track_gameplay,
+    HOVERBIKE_PT_track_placement,
+    # ── Always-on scene-wide cluster ───────────────────────────────
+    # These don't have a single "thing" to select for, so they sit
+    # below the selection-driven block. All open default-closed.
+    HOVERBIKE_PT_track_emitters,
+    HOVERBIKE_PT_track_sky,
     HOVERBIKE_PT_track_ghost,
     HOVERBIKE_PT_track_shader,
     HOVERBIKE_PT_track_thumbnail,
