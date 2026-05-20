@@ -47,6 +47,7 @@ import { createBridgeSupports } from './engine/render/bridge-supports'
 import { createLapWeatherSystem } from './engine/render/lap-weather'
 import { beaufortToAmplitudeScale, createSkySystem } from './engine/render/sky'
 import { logWaterCoverage, reportWaterCoverage } from './engine/render/water-coverage'
+import { loadGateProp } from './engine/render/gate-prop'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { createWaterMesh } from './engine/render/water'
 import { sliceBestLap } from './engine/replay/best-lap-slice'
@@ -466,7 +467,14 @@ async function boot() {
     return
   }
 
-  const trackVisuals = createTrackVisuals(track)
+  // Preload the canonical gate prop mesh from
+  // `public/assets/props/gate.glb` (built by `pnpm gen:prop-gate` from
+  // the same `prop_gate_mesh` the Blender addon shows in the
+  // gate-preview gizmo). `createTrackVisuals` clones it per
+  // checkpoint when present, falls back to procedural geometry when
+  // the asset isn't available.
+  const gatePropTemplate = await loadGateProp()
+  const trackVisuals = createTrackVisuals(track, { gatePropTemplate })
   scene.add(trackVisuals.group)
 
   // Bridge supports — procedural stone pillars under elevated road

@@ -155,20 +155,75 @@ def _update_matches_source(upd, source_name: str) -> bool:
 
 
 # ────────────────────────────────────────────────────────────────────
+# Library reload
+# ────────────────────────────────────────────────────────────────────
+
+# Libraries whose content can drift while a track .blend is open in
+# another window. The load_post handler force-refreshes these so the
+# "I edited props-library.blend in another Blender, opened my track,
+# the change isn't there" gotcha can't bite. Authors can add their own
+# names here if a new shared library lands.
+_RELOADABLE_LIBRARY_BASENAMES: tuple[str, ...] = (
+    "props-library.blend",
+    "landmarks-library.blend",
+)
+
+
+def reload_hoverbike_libraries() -> list[str]:
+    """Reload every linked library whose file basename matches a
+    Hoverbike-managed library. Returns the list of basenames actually
+    reloaded (empty list if none were linked).
+
+    Shared between the load_post handler (auto-reload on every track
+    .blend open) and the *Reload Props / Landmarks Library* operator
+    (manual button in the Utility menu)."""
+    reloaded: list[str] = []
+    for lib in list(bpy.data.libraries):
+        try:
+            basename = os.path.basename(bpy.path.abspath(lib.filepath))
+        except Exception:  # noqa: BLE001 — filepath can be missing
+            basename = os.path.basename(lib.filepath or "")
+        if basename not in _RELOADABLE_LIBRARY_BASENAMES:
+            continue
+        try:
+            lib.reload()
+            reloaded.append(basename)
+        except Exception as e:  # noqa: BLE001
+            print(f"[hoverbike] library reload failed for {basename}: {e}")
+    return reloaded
+
+
+# ────────────────────────────────────────────────────────────────────
 # Persistent handlers
 # ────────────────────────────────────────────────────────────────────
 
 
 @persistent
 def _hoverbike_load_post(*_args):
-    """Auto-sync the track .blend with its JSON when the file is
-    opened. Silently no-ops outside of `tracks-src/` so bike .blends and
-    arbitrary scenes are unaffected. Runs after the file's data is in
-    memory so `bpy.data.objects` is populated."""
+    """On every .blend open: refresh any Hoverbike libraries the file
+    links (so edits to props-library.blend or landmarks-library.blend
+    made in a separate Blender window show up immediately), then in
+    track mode pull scalar fields from the per-track JSON back into
+    the scene.
+
+    Runs after the file's data is in memory so `bpy.data.objects` and
+    `bpy.data.libraries` are populated."""
     from ._legacy import derive_asset_id, detect_mode, find_repo_root, reload_track_from_json
 
     blend = bpy.data.filepath
-    if not blend or detect_mode(blend) != "track":
+    if not blend:
+        return
+
+    # 1. Library reload — runs for any .blend that has linked the
+    #    relevant libraries (tracks today, conceivably bike .blends too
+    #    if they ever link the props library for emissive decals). Cheap
+    #    when nothing is linked.
+    reloaded = reload_hoverbike_libraries()
+    if reloaded:
+        print(f"[hoverbike] auto-reloaded {len(reloaded)} library file(s): {', '.join(reloaded)}")
+
+    # 2. JSON sync — track .blends only.
+    if detect_mode(blend) != "track":
         return
     repo = find_repo_root(blend)
     if not repo:

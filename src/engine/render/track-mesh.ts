@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { DEFAULT_GATE_SPACING_M, resampleByArcLength } from '@/game/tracks/gate-placement'
 import type { AntiGravZone, BoostPad, Checkpoint, Track } from '@/game/tracks/types'
+import { cloneGateProp } from './gate-prop'
 
 export type TrackVisuals = {
   group: THREE.Object3D
@@ -22,14 +23,27 @@ const COLORS = {
  */
 const ROUTE_MARKER_MIN_GAP_M = 18
 
-export function createTrackVisuals(track: Track): TrackVisuals {
+export type TrackVisualsOptions = {
+  /** Pre-loaded `prop_gate_mesh` from `public/assets/props/gate.glb`,
+   *  authored in Blender's `tracks-src/props-library.blend`. When
+   *  provided, every gate clones this mesh — placement matches what
+   *  the Blender N-panel gate-preview gizmo shows because both
+   *  surfaces share the same source mesh + the same JSON-driven
+   *  position/rotation. When `null` (or the asset failed to load),
+   *  gates fall back to the procedural Cylinder + Box geometry so
+   *  legacy / fresh-checkout builds still render. */
+  gatePropTemplate?: THREE.Object3D | null
+}
+
+export function createTrackVisuals(track: Track, options: TrackVisualsOptions = {}): TrackVisuals {
   const group = new THREE.Group()
   group.name = `track:${track.id}`
 
+  const gatePropTemplate = options.gatePropTemplate ?? null
   const gateMeshesByIndex = new Map<number, GateMesh>()
 
   for (const cp of track.checkpoints) {
-    const gate = createGateMesh(cp, cp.index === 0)
+    const gate = createGateMesh(cp, cp.index === 0, gatePropTemplate)
     gate.root.position.set(cp.position.x, cp.position.y, cp.position.z)
     gate.root.quaternion.set(cp.rotation.x, cp.rotation.y, cp.rotation.z, cp.rotation.w)
     group.add(gate.root)
@@ -210,36 +224,62 @@ type GateMesh = {
   dispose(): void
 }
 
-function createGateMesh(cp: Checkpoint, isFinishLine: boolean): GateMesh {
+function createGateMesh(
+  cp: Checkpoint,
+  isFinishLine: boolean,
+  gatePropTemplate: THREE.Object3D | null,
+): GateMesh {
   const root = new THREE.Group()
   root.name = `gate:${cp.index}`
 
   const recolorables: THREE.Mesh[] = []
+  // Geometries owned by this gate (procedural fallback only). The
+  // prop-template path shares geometries across instances via
+  // `clone(true)`; only materials are cloned per-gate.
+  const ownedGeoms: THREE.BufferGeometry[] = []
 
-  const pillarGeom = new THREE.CylinderGeometry(0.4, 0.4, cp.height, 12)
-  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x4d6b7a, emissive: 0x000000 })
+  if (gatePropTemplate) {
+    // Library-mesh path: clone `prop_gate_mesh` and scale to the
+    // checkpoint's authored dimensions. Same mesh the Blender N-panel
+    // gate-preview gizmo shows — placement parity is automatic
+    // because both sides read `cp.position` / `cp.rotation` /
+    // `cp.halfWidth` / `cp.height` from the same JSON.
+    const clone = cloneGateProp(gatePropTemplate, cp.halfWidth, cp.height)
+    root.add(clone.root)
+    for (const mesh of clone.recolorables) recolorables.push(mesh)
+  } else {
+    // Procedural fallback — runs when `public/assets/props/gate.glb`
+    // hasn't been generated yet (e.g. fresh checkout, CI before
+    // `pnpm gen:prop-gate`). Same primitives the runtime used pre-
+    // 2026-05-19; kept as a defense-in-depth path so the gate
+    // visual is never missing.
+    const pillarGeom = new THREE.CylinderGeometry(0.4, 0.4, cp.height, 12)
+    ownedGeoms.push(pillarGeom)
+    const pillarMat = new THREE.MeshStandardMaterial({ color: 0x4d6b7a, emissive: 0x000000 })
 
-  const left = new THREE.Mesh(pillarGeom, pillarMat.clone())
-  left.position.set(-cp.halfWidth, cp.height / 2, 0)
-  left.castShadow = true
-  left.receiveShadow = true
-  root.add(left)
-  recolorables.push(left)
+    const left = new THREE.Mesh(pillarGeom, pillarMat.clone())
+    left.position.set(-cp.halfWidth, cp.height / 2, 0)
+    left.castShadow = true
+    left.receiveShadow = true
+    root.add(left)
+    recolorables.push(left)
 
-  const right = new THREE.Mesh(pillarGeom, pillarMat.clone())
-  right.position.set(cp.halfWidth, cp.height / 2, 0)
-  right.castShadow = true
-  right.receiveShadow = true
-  root.add(right)
-  recolorables.push(right)
+    const right = new THREE.Mesh(pillarGeom, pillarMat.clone())
+    right.position.set(cp.halfWidth, cp.height / 2, 0)
+    right.castShadow = true
+    right.receiveShadow = true
+    root.add(right)
+    recolorables.push(right)
 
-  const barGeom = new THREE.BoxGeometry(cp.halfWidth * 2, 0.8, 0.4)
-  const bar = new THREE.Mesh(barGeom, pillarMat.clone())
-  bar.position.set(0, cp.height + 0.4, 0)
-  bar.castShadow = true
-  bar.receiveShadow = true
-  root.add(bar)
-  recolorables.push(bar)
+    const barGeom = new THREE.BoxGeometry(cp.halfWidth * 2, 0.8, 0.4)
+    ownedGeoms.push(barGeom)
+    const bar = new THREE.Mesh(barGeom, pillarMat.clone())
+    bar.position.set(0, cp.height + 0.4, 0)
+    bar.castShadow = true
+    bar.receiveShadow = true
+    root.add(bar)
+    recolorables.push(bar)
+  }
 
   // The start/finish gate gets a checkered banner under the cross-bar
   // and a checkered strip stamped on the ground between the pillars,
@@ -292,9 +332,19 @@ function createGateMesh(cp: Checkpoint, isFinishLine: boolean): GateMesh {
   // gate unmistakable — the beacon was visual noise.
 
   function dispose() {
-    pillarGeom.dispose()
-    barGeom.dispose()
-    for (const m of recolorables) (m.material as THREE.Material).dispose()
+    // Geometries are only owned by the procedural-fallback path; the
+    // library-mesh path shares geometries across all instances of the
+    // gate template, so disposing them here would yank them out from
+    // under sibling gates. Materials are cloned per-instance for both
+    // paths and need to be released.
+    for (const g of ownedGeoms) g.dispose()
+    for (const m of recolorables) {
+      if (Array.isArray(m.material)) {
+        for (const mat of m.material) mat.dispose()
+      } else if (m.material) {
+        ;(m.material as THREE.Material).dispose()
+      }
+    }
   }
 
   return { root, recolorables, dispose }

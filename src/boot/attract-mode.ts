@@ -10,6 +10,7 @@ import { createRenderer } from '@/engine/render/renderer'
 import { createRiderRenderSystem } from '@/engine/render/rider-systems'
 import { createScene } from '@/engine/render/scene'
 import { createSkySystem } from '@/engine/render/sky'
+import { loadGateProp } from '@/engine/render/gate-prop'
 import { createTrackVisuals } from '@/engine/render/track-mesh'
 import { createWaterMesh, updateUnderwaterFog } from '@/engine/render/water'
 import { createSimWorld } from '@/engine/sim/ecs/world'
@@ -135,7 +136,11 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
       config: track.sky,
     })
 
-    const trackVisuals = createTrackVisuals(track)
+    // Preload the gate prop mesh from the library so checkpoints
+    // render with the Blender-authored mesh. Falls back to procedural
+    // gates if the asset isn't present.
+    const gatePropTemplate = await loadGateProp()
+    const trackVisuals = createTrackVisuals(track, { gatePropTemplate })
     scene.add(trackVisuals.group)
 
     // Editor-authored props.
