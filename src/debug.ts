@@ -20,18 +20,10 @@ import {
   ControlIntentStore,
   PeerControlledStore,
   RBHandleStore,
-  TrickState,
-  TrickStateStore,
 } from './game/components'
 import { AITag } from './game/components/ai'
 import { MineTag, MissileTag, ShieldEffectStore, StunStore } from './game/components/combat'
-import {
-  BoostEffect,
-  BoostEffectStore,
-  PickupSlot,
-  PickupSlotStore,
-  type PickupType,
-} from './game/components/pickup'
+import { PickupSlot, PickupSlotStore, type PickupType } from './game/components/pickup'
 import { type RaceTick, simulateStep } from './game/sim-step'
 import { getHeldPickup } from './game/systems/pickup'
 import { computeStandings, type Standing } from './game/systems/standings'
@@ -95,25 +87,6 @@ export type HoverDebug = {
    *  so the dev console can verify "I pressed boost; is it engaged?"
    *  without an ECS dive. */
   boostMeter(): { charge: number; active: boolean }
-  /** Post-hop drift state snapshot on the player bike. Mirrors the
-   *  per-tick `TrickStateStore` fields the e2e drift spec asserts on:
-   *  active flag, locked direction (−1 = left, +1 = right), accumulated
-   *  charge (sec), tier of the most recent release (0 = none, 1 = blue,
-   *  2 = orange), and the monotonic release counter so a sequence of
-   *  drifts can be told apart. Returns zeros before boot completes. */
-  driftState(): {
-    active: boolean
-    direction: number
-    chargeSec: number
-    armedButton: number
-    lastReleaseTier: number
-    releaseSerial: number
-  }
-  /** Active `BoostEffect` on the player bike, or `null` when none is
-   *  attached or its `remaining` has decayed to 0. The drift-release
-   *  mini-turbo attaches one of these — the e2e spec asserts on it to
-   *  confirm the boost reward actually fired. */
-  playerBoostEffect(): { remaining: number; multiplier: number } | null
   /** Enumerate every bike's transform + intent — for AI debugging. */
   bikes(): BikeDebugSnapshot[]
   /** Toggle auto-play: when on, AI controls the player bike. Returns new state. */
@@ -128,6 +101,11 @@ export type HoverDebug = {
   toggleAntiGravDebug(): boolean
   /** Current anti-grav debug overlay state. */
   isAntiGravDebugOn(): boolean
+  /** Toggle the per-bike hover-spring visualizer (probe rays + force
+   *  arrows). Returns new state. */
+  toggleHoverDebug(): boolean
+  /** Current hover-debug overlay state. */
+  isHoverDebugOn(): boolean
   /** M10.2 determinism harness. Present only when ?determinism=1 was set
    *  at boot. The sim's RAF-driven step is gated off in that mode; the
    *  harness drives `simulateStep` here. */
@@ -261,6 +239,8 @@ export type DebugAccessors = {
   isCollisionDebugOn(): boolean
   toggleAntiGravDebug(): boolean
   isAntiGravDebugOn(): boolean
+  toggleHoverDebug(): boolean
+  isHoverDebugOn(): boolean
   /** Fast-forward the start countdown — used implicitly when an intent
    *  override is set so e2e tests don't have to wait through 3-2-1. */
   skipCountdown(): void
@@ -354,48 +334,6 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
       charge: state.boostMeterCharge ?? 0,
       active: state.boostMeterActive ?? false,
     }),
-    driftState: () => {
-      if (!state.ready) {
-        return {
-          active: false,
-          direction: 0,
-          chargeSec: 0,
-          armedButton: 0,
-          lastReleaseTier: 0,
-          releaseSerial: 0,
-        }
-      }
-      const sim = accessors.sim()
-      const eid = accessors.playerEid()
-      if (!hasComponent(sim, eid, TrickState)) {
-        return {
-          active: false,
-          direction: 0,
-          chargeSec: 0,
-          armedButton: 0,
-          lastReleaseTier: 0,
-          releaseSerial: 0,
-        }
-      }
-      const t = TrickStateStore.get(eid)
-      return {
-        active: t?.driftActive === true,
-        direction: t?.driftDirection ?? 0,
-        chargeSec: t?.driftChargeSec ?? 0,
-        armedButton: t?.driftArmedButton ?? 0,
-        lastReleaseTier: t?.driftReleaseTier ?? 0,
-        releaseSerial: t?.driftReleaseSerial ?? 0,
-      }
-    },
-    playerBoostEffect: () => {
-      if (!state.ready) return null
-      const sim = accessors.sim()
-      const eid = accessors.playerEid()
-      if (!hasComponent(sim, eid, BoostEffect)) return null
-      const b = BoostEffectStore.get(eid)
-      if (!b || b.remaining <= 0) return null
-      return { remaining: b.remaining, multiplier: b.multiplier }
-    },
     combatEntityCounts: () => {
       if (!state.ready) return { mines: 0, missiles: 0 }
       const sim = accessors.sim()
@@ -410,6 +348,8 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     isCollisionDebugOn: () => accessors.isCollisionDebugOn(),
     toggleAntiGravDebug: () => accessors.toggleAntiGravDebug(),
     isAntiGravDebugOn: () => accessors.isAntiGravDebugOn(),
+    toggleHoverDebug: () => accessors.toggleHoverDebug(),
+    isHoverDebugOn: () => accessors.isHoverDebugOn(),
     bikes: () => {
       if (!state.ready) return []
       const sim = accessors.sim()
