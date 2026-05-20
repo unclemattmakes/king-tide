@@ -506,6 +506,12 @@ class HOVERBIKE_MT_utility(Menu):
         layout.operator(
             "hoverbike.retag_scene", text="Re-tag Scene", icon="OUTLINER_DATA_FONT"
         )
+        layout.separator()
+        layout.operator(
+            "hoverbike.reload_props_library",
+            text="Reload Props / Landmarks Library",
+            icon="LIBRARY_DATA_DIRECT",
+        )
 
         layout.separator()
         layout.label(text="Placement helper")

@@ -649,6 +649,69 @@ class HOVERBIKE_OT_hide_racer_preview(Operator):
         return {"FINISHED"}
 
 
+class HOVERBIKE_OT_reload_props_library(Operator):
+    """Force Blender to re-read every prop / landmark library file from
+    disk and refresh in-scene previews so library edits show up.
+
+    When you edit ``tracks-src/props-library.blend`` (or
+    ``landmarks-library.blend``) in a separate Blender window and save,
+    Blender doesn't auto-detect the file change — track .blends keep
+    using the in-memory snapshot of the linked datablocks until they
+    reload. This operator walks ``bpy.data.libraries``, calls
+    :meth:`Library.reload` on each library whose path matches a known
+    Hoverbike library, then rebuilds the gate preview so the new mesh
+    is reflected in the viewport gizmos. Idempotent; safe to spam."""
+
+    bl_idname = "hoverbike.reload_props_library"
+    bl_label = "Reload Props Library"
+    bl_description = (
+        "Re-read props-library.blend / landmarks-library.blend from disk and "
+        "refresh the gate preview (call after editing the library in a "
+        "separate Blender window)"
+    )
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        # Delegate the actual library walk + reload to the shared
+        # helper so the load_post handler and this operator can't
+        # drift apart.
+        from .handlers import reload_hoverbike_libraries
+
+        reloaded = reload_hoverbike_libraries()
+
+        if not reloaded:
+            self.report(
+                {"INFO"},
+                "No Hoverbike libraries linked in this scene. "
+                "(The gate preview links props-library.blend on first rebuild.)",
+            )
+            return {"FINISHED"}
+
+        # Refresh the gate gizmos so the freshly-reloaded mesh data is
+        # what the viewport renders. The objects in
+        # _hoverbike_gate_preview keep referencing the same `prop_gate_mesh`
+        # datablock — reloading the library updates that datablock
+        # in-place, but rebuilding the preview is cheap insurance for
+        # cases where dimensions / scale need re-derivation too.
+        scene = context.scene
+        try:
+            _rebuild_gate_preview(
+                scene,
+                spacing=float(getattr(scene, "hoverbike_gate_spacing", 60.0)),
+                half_width=float(getattr(scene, "hoverbike_gate_half_width", 14.0)),
+                height=float(getattr(scene, "hoverbike_gate_height", 6.0)),
+            )
+        except RuntimeError:
+            # No spline yet — that's fine, just skip the rebuild.
+            pass
+
+        self.report(
+            {"INFO"},
+            f"Reloaded {len(reloaded)} library file(s): {', '.join(reloaded)}",
+        )
+        return {"FINISHED"}
+
+
 class HOVERBIKE_OT_snap_spline_to_terrain(Operator):
     """Drop every control point on ai_spline_main onto the nearest
     surface below it, then lift by the configured hover height. Pairs
@@ -712,6 +775,7 @@ _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_hide_gate_preview,
     HOVERBIKE_OT_rebuild_racer_preview,
     HOVERBIKE_OT_hide_racer_preview,
+    HOVERBIKE_OT_reload_props_library,
     HOVERBIKE_OT_snap_spline_to_terrain,
 )
 

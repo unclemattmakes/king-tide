@@ -33,6 +33,7 @@ import { createRenderer } from '@/engine/render/renderer'
 import { createRiderRenderSystem } from '@/engine/render/rider-systems'
 import { createScene } from '@/engine/render/scene'
 import { createSkySystem } from '@/engine/render/sky'
+import { loadGateProp } from '@/engine/render/gate-prop'
 import { createTrackVisuals } from '@/engine/render/track-mesh'
 import { createWaterMesh, updateUnderwaterFog } from '@/engine/render/water'
 import { createSimWorld } from '@/engine/sim/ecs/world'
@@ -109,7 +110,11 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
     water: waterMesh,
     config: track.sky,
   })
-  const trackVisuals = createTrackVisuals(track)
+  // Preload the gate prop mesh so checkpoints use the library mesh
+  // (matches what the Blender addon shows). Falls through to procedural
+  // gates when the GLB hasn't been generated yet.
+  const gatePropTemplate = await loadGateProp()
+  const trackVisuals = createTrackVisuals(track, { gatePropTemplate })
   scene.add(trackVisuals.group)
 
   // Editor-authored props on the start straight (visual scaffolding only).

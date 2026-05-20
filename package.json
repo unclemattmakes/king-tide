@@ -52,7 +52,8 @@
     "tauri:dev": "cd src-tauri && cargo tauri dev",
     "build:deck": "node tools/build-deck.mjs",
     "build:windows": "node tools/build-windows.mjs",
-    "gen:icons": "node tools/gen-icons.mjs"
+    "gen:icons": "node tools/gen-icons.mjs",
+    "gen:prop-gate": "node tools/blender/seed.mjs export_prop_gate.py"
   },
   "engines": {
     "node": ">=20"
