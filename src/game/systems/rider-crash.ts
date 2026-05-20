@@ -76,28 +76,22 @@ export function riderCrashSystem(sim: SimWorld, phys: PhysicsWorld, dt: number):
     const prev = prevVel.get(rider.bikeEid)
 
     // Suppress crash detection while the bike is mid-trick OR while
-    // the boost meter is active OR while the bike is in a post-hop
-    // drift (or just released one). All three fire one-shot forward
-    // impulses on top of potentially-rising vertical velocity:
-    // trick lands ~7 m/s, boost activation ~14 m/s, drift mini-turbo
-    // release up to ~8 m/s. Combined Δv otherwise trips the crash
-    // heuristic and ejects the rider — exactly the opposite of "you
-    // nailed it". The trick gate covers the spin lifetime; the boost
-    // gate covers the meter drain (up to ~2 s); the drift gate
-    // covers active drifts AND the single release tick (driftReleaseTier
-    // is non-zero only for the one tick the kick fires, before the
-    // sim clears it at the top of the next tick).
+    // the boost meter is active. Both fire one-shot forward impulses
+    // on top of potentially-rising vertical velocity (trick lands
+    // ~7 m/s, boost activation ~14 m/s); combined Δv otherwise trips
+    // the crash heuristic and ejects the rider — exactly the opposite
+    // of "you nailed it". The trick gate covers the spin lifetime;
+    // the boost gate covers the meter drain (up to ~2 s).
     const trick = hasComponent(sim, rider.bikeEid, TrickState)
       ? (TrickStateStore.get(rider.bikeEid) ?? null)
       : null
     const midTrick = trick !== null && trick.spinPhase > 0
-    const drifting = trick !== null && (trick.driftActive || trick.driftReleaseTier > 0)
     const meter = hasComponent(sim, rider.bikeEid, BoostMeter)
       ? (BoostMeterStore.get(rider.bikeEid) ?? null)
       : null
     const boosting = meter?.active === true
 
-    if (prev && !midTrick && !boosting && !drifting) {
+    if (prev && !midTrick && !boosting) {
       const dvx = v.x - prev.x
       const dvy = v.y - prev.y
       const dvz = v.z - prev.z

@@ -24,11 +24,8 @@ export interface WavePumpHud {
   /** Fire the visual cue. `strength` is the same 0..1 the audio engine
    *  receives; the widget scales its flash + bar fill accordingly.
    *  `perfect` upgrades the label to "TRICK!" and swaps in the brighter
-   *  perfect-tier class — see the `.wp-perfect` styles in index.html.
-   *  `label` optionally overrides the chyron text — drift releases pass
-   *  "DRIFT!" so the post-hop mini-turbo reads distinctly from a wave
-   *  trick. Falls back to the perfect/normal default when omitted. */
-  pump(strength: number, perfect?: boolean, label?: string): void
+   *  perfect-tier class — see the `.wp-perfect` styles in index.html. */
+  pump(strength: number, perfect?: boolean): void
   /** Hide the widget — e.g. when leaving the race. The reserved
    *  `#hud-wave-pump` slot stays in the DOM either way. */
   dispose(): void
@@ -85,7 +82,7 @@ export function createWavePumpHud(): WavePumpHud {
   }
 
   return {
-    pump(strength, perfect = false, overrideLabel) {
+    pump(strength, perfect = false) {
       if (!armed) return
       const mode = playerSettings.wavePumpIntensity
       if (mode === 'off') return
@@ -105,13 +102,9 @@ export function createWavePumpHud(): WavePumpHud {
       void shell.offsetWidth
       bar.style.width = `${Math.round(s * 100)}%`
       shell.style.setProperty('--wp-strength', s.toFixed(3))
-      // Label priority: explicit override wins, then perfect-tier
-      // "TRICK!", then the baseline "PUMP +" chyron. Drift releases
-      // pass "DRIFT!" so the post-hop mini-turbo reads as its own
-      // beat rather than a generic trick.
-      if (overrideLabel) {
-        label.textContent = overrideLabel
-      } else if (perfect) {
+      // Perfect-tier presses get the "TRICK!" chyron and brighter class;
+      // baseline pumps fall back to the "PUMP +" label.
+      if (perfect) {
         label.textContent = 'TRICK !'
       } else {
         label.innerHTML = 'PUMP <b>+</b>'

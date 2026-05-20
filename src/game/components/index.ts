@@ -121,15 +121,6 @@ export const HoverStateStore = createStore<HoverStateData>('HoverState')
  *    boost path; the FX system keeps its own (for splash bursts).
  *  - `prevLeftDown` / `prevRightDown` are the per-tick edge-detect
  *    bookkeeping. Set by trickHopSystem from intent each tick.
- *
- * MK8 post-hop drift extension. After a hop, if the same trick button
- * stays held through landing AND the player has committed steering
- * input, the bike enters a drift: the direction locks to the steer
- * sign, the rear sweeps outward, and a mini-turbo gauge fills with
- * drift time. Release the button (or break the drift) and the
- * accumulated charge converts to a sustained boost via `BoostEffect`
- * — same multiplier path the pickup boost uses, so all the downstream
- * gates (hover thrust, rider-crash suppression) follow for free.
  */
 export const TrickState = { name: 'TrickState' as const }
 export type TrickStateData = {
@@ -168,48 +159,6 @@ export type TrickStateData = {
    *  never fires (weird kinematic state, anti-grav weirdness, etc.)
    *  the lockout ends after this many ticks regardless. */
   hopLockoutSafetyTicks: number
-  /** Which trick button is still being held from the last hop press.
-   *  −1 = trickLeft, +1 = trickRight, 0 = none / both / released.
-   *  Set when a hop fires; cleared when the same button releases or
-   *  the drift handoff window closes. Drift activation gates on this
-   *  button remaining held continuously from press through landing
-   *  — releasing it (even briefly) cancels the drift opportunity, so
-   *  the player can't "double dip" by hopping then re-pressing to
-   *  drift. */
-  driftArmedButton: number
-  /** True while the bike is in an active post-hop drift. Set on the
-   *  airborne→grounded transition when `driftArmedButton` is still
-   *  held with commit-level steering; cleared on release or break. */
-  driftActive: boolean
-  /** Drift direction. −1 = left turn, +1 = right turn. Locked at
-   *  activation from `sign(intent.steer)`; subsequent steering input
-   *  modulates angle but doesn't flip the lock — the player has to
-   *  cancel out of the drift to switch sides. */
-  driftDirection: number
-  /** Seconds the current drift has been active. Drives mini-turbo
-   *  tier on release: ≥ DRIFT_TIER1_SEC awards a small boost,
-   *  ≥ DRIFT_TIER2_SEC awards a bigger one. Reset on drift end. */
-  driftChargeSec: number
-  /** One-shot signal for the render-side FX hook: 0 = no event, 1 =
-   *  tier-1 release this sim tick, 2 = tier-2 release. Set by
-   *  `trickHopSystem` on the release tick; consumed by `game-loop.ts`
-   *  on the next render frame (which compares `driftReleaseSerial`
-   *  to its last-seen value to detect the rising edge). Cleared by
-   *  the sim one tick after firing so a stale value can't re-trigger
-   *  FX on a render frame that runs zero sim steps. */
-  driftReleaseTier: number
-  /** Monotonic counter incremented every drift release (tier > 0).
-   *  Lets the render side detect a release that happened across one
-   *  or more sim ticks since its last poll, without false-firing on
-   *  a stale `driftReleaseTier` value from the same release. */
-  driftReleaseSerial: number
-  /** Consecutive sim ticks the drift has been airborne while
-   *  active. A short window of brief bounces (rolled lean causing
-   *  the chassis to skip, lateral push briefly lifting a corner) is
-   *  expected on a flat plate; only break the drift once the bike
-   *  has been off the surface for long enough that it's a real
-   *  ramp-off, not chassis chatter. Resets on every grounded tick. */
-  driftAirborneTicks: number
 }
 export const TrickStateStore = createStore<TrickStateData>('TrickState')
 

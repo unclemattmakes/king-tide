@@ -15,8 +15,6 @@ import {
   RBHandleStore,
   Transform,
   TransformStore,
-  TrickState,
-  TrickStateStore,
 } from '@/game/components'
 import {
   ExplosionState,
@@ -26,8 +24,6 @@ import {
   MissileStateStore,
   MissileTag,
 } from '@/game/components/combat'
-import { driftTier } from '@/game/systems/trick-hop'
-
 /**
  * Hand-rolled particle FX driven by TSL node materials.
  *
@@ -103,44 +99,6 @@ const DUST_GROUND_DIST_MAX = 1.6
 const EXHAUST_THROTTLE_RATE = 35 // particles/sec at full forward throttle
 const EXHAUST_BOOST_RATE = 90 // additional rate while boost is active
 const EXHAUST_THROTTLE_MIN = 0.2 // dead-zone — no exhaust on micro inputs
-
-// Drift sparks — MK8-style charge-tier readout. Per-tick emission from
-// both rear corners of the bike while a drift is active. Three visual
-// stages so the player can see the gauge fill in real time:
-//
-//   tier 0 (just engaged, charge < 1.0 s) — low-rate faint blue
-//     specks. Immediate "drift active" signal so the player isn't
-//     left wondering whether they actually entered the state.
-//   tier 1 (charge 1.0 – 2.4 s) — full blue stream.
-//   tier 2 (charge ≥ 2.4 s) — full orange stream, slightly bigger
-//     + faster sprites.
-//
-// Sparks shoot outward (away from the drift direction) and down,
-// matching the rear-sweep visual: rear is sliding outward, throwing
-// sparks off the corner.
-//
-// Two separate pools so each can carry its own colored texture under
-// additive blending. Sizes pick the dominant-color pixel; the texture
-// generator soft-fades to transparent at the edge so additive overlap
-// reads as a warm core, not a hot-pink saturation crime.
-const DRIFT_SPARK_BLUE_RGB: [number, number, number] = [120, 200, 255]
-const DRIFT_SPARK_ORANGE_RGB: [number, number, number] = [255, 180, 70]
-/** Particles/sec per corner while in the matching tier. Tier 0 reuses
- *  the blue pool at a quarter rate so the pre-charge cue reads as
- *  "wisps building up" before the proper stream kicks in. */
-const DRIFT_SPARK_RATE_TIER0 = 22
-const DRIFT_SPARK_RATE = 90
-const DRIFT_SPARK_CAPACITY = 280 // ~3 bikes' worth simultaneously drifting
-/** Inset from the bike's center line where the per-corner sparks
- *  spawn. ±X = port/starboard, −Z = behind. Matches the visual rear
- *  wheel/exhaust location on the bike GLB. */
-const DRIFT_SPARK_OFFSET_X = 0.4
-const DRIFT_SPARK_OFFSET_Y = -0.15
-const DRIFT_SPARK_OFFSET_Z = -1.1
-/** Release-burst particle count per tier — fired once on the release
- *  tick. Bigger burst on tier-2 to telegraph the better payoff. */
-const DRIFT_RELEASE_BURST_T1 = 26
-const DRIFT_RELEASE_BURST_T2 = 44
 
 // Missile trail — fired per frame from each in-flight missile. Reads
 // as a smoky exhaust streak in the missile's wake.
@@ -429,8 +387,6 @@ export function createFxSystem(
 ) {
   const foamTex = makeRadialTexture([235, 245, 255])
   const sparkTex = makeRadialTexture([255, 200, 120])
-  const driftSparkBlueTex = makeRadialTexture(DRIFT_SPARK_BLUE_RGB)
-  const driftSparkOrangeTex = makeRadialTexture(DRIFT_SPARK_ORANGE_RGB)
   const exhaustTex = makeRadialTexture([255, 130, 60])
   const dustTex = makeRadialTexture([195, 180, 155])
   const explosionTex = makeRadialTexture([255, 165, 50])
@@ -455,25 +411,6 @@ export function createFxSystem(
     blending: THREE.AdditiveBlending,
     gravity: -16,
     drag: 0.8,
-  })
-  // Drift sparks — same physics shape as scrape sparks (gravity-fed,
-  // short life) but bigger sprites + per-tier color. Two pools because
-  // an additive sprite can't change its base color mid-stream.
-  const driftSparkBlue = createPool({
-    capacity: DRIFT_SPARK_CAPACITY,
-    defaultSize: 0.35,
-    texture: driftSparkBlueTex,
-    blending: THREE.AdditiveBlending,
-    gravity: -16,
-    drag: 0.6,
-  })
-  const driftSparkOrange = createPool({
-    capacity: DRIFT_SPARK_CAPACITY,
-    defaultSize: 0.45,
-    texture: driftSparkOrangeTex,
-    blending: THREE.AdditiveBlending,
-    gravity: -16,
-    drag: 0.6,
   })
   const exhaust = createPool({
     capacity: EXHAUST_CAPACITY,
@@ -527,8 +464,6 @@ export function createFxSystem(
 
   scene.add(foam.mesh)
   scene.add(sparks.mesh)
-  scene.add(driftSparkBlue.mesh)
-  scene.add(driftSparkOrange.mesh)
   scene.add(exhaust.mesh)
   scene.add(dust.mesh)
   scene.add(explosion.mesh)
@@ -550,14 +485,8 @@ export function createFxSystem(
   // when it crosses a whole particle.
   const emitAccum = new Map<
     number,
-    { foam: number; sparks: number; exhaust: number; dust: number; driftSparks: number }
+    { foam: number; sparks: number; exhaust: number; dust: number }
   >()
-
-  // Per-bike last-seen `driftReleaseSerial`. The sim bumps the serial
-  // once per mini-turbo release; on the tick the FX system sees the
-  // change it fires a tier-colored burst. Initialised lazily so a bike
-  // mid-race when this map first sees it doesn't fire a phantom burst.
-  const lastDriftReleaseSerial = new Map<number, number>()
 
   // Per-bike transition memory for event-driven bursts. We need the
   // previous frame's grounded state to detect "just landed on water"
@@ -591,8 +520,6 @@ export function createFxSystem(
     ;(window as unknown as { __fx?: unknown }).__fx = {
       foam,
       sparks,
-      driftSparkBlue,
-      driftSparkOrange,
       exhaust,
       dust,
       emitAccum,
@@ -603,8 +530,6 @@ export function createFxSystem(
       stats: () => ({
         foamAlive: foam.capacity - foam.freeCount,
         sparkAlive: sparks.capacity - sparks.freeCount,
-        driftSparkBlueAlive: driftSparkBlue.capacity - driftSparkBlue.freeCount,
-        driftSparkOrangeAlive: driftSparkOrange.capacity - driftSparkOrange.freeCount,
         exhaustAlive: exhaust.capacity - exhaust.freeCount,
         dustAlive: dust.capacity - dust.freeCount,
         explosionAlive: explosion.capacity - explosion.freeCount,
@@ -682,7 +607,7 @@ export function createFxSystem(
 
       let acc = emitAccum.get(eid)
       if (!acc) {
-        acc = { foam: 0, sparks: 0, exhaust: 0, dust: 0, driftSparks: 0 }
+        acc = { foam: 0, sparks: 0, exhaust: 0, dust: 0 }
         emitAccum.set(eid, acc)
       }
 
@@ -1034,130 +959,6 @@ export function createFxSystem(
       } else {
         acc.exhaust = 0
       }
-
-      // Drift sparks + release burst — the visible read on the MK8
-      // mini-turbo gauge. Reads `TrickState` (sim-owned; render
-      // observes only) and emits:
-      //   - Continuous tier-colored sparks while `driftActive`
-      //     (nothing for sub-tier-1 charge so the player gets a
-      //     clear "tier unlocked" snap when blue kicks in).
-      //   - A one-shot burst on `driftReleaseSerial` change — the
-      //     bigger the tier, the bigger the burst.
-      // Pool color is fixed at material level so we pick the pool
-      // matching the current tier rather than tinting one pool.
-      if (hasComponent(sim, eid, TrickState)) {
-        const trick = TrickStateStore.get(eid)
-        if (trick) {
-          // Continuous emission. Tier is recomputed from chargeSec
-          // every frame through the same `driftTier` helper the sim
-          // uses on release — guarantees the FX matches the eventual
-          // payoff without duplicated threshold constants. Tier 0
-          // (drift active but charge < 1.0 s) emits a low-rate blue
-          // wisp so the player gets an immediate "drift engaged"
-          // cue before the full tier-1 stream unlocks.
-          if (trick.driftActive) {
-            const tier = driftTier(trick.driftChargeSec)
-            // Tier 2 → orange + bigger + faster.
-            // Tier 1 → blue + standard.
-            // Tier 0 → blue + smaller + slower + low rate.
-            const pool = tier === 2 ? driftSparkOrange : driftSparkBlue
-            const rate = tier === 0 ? DRIFT_SPARK_RATE_TIER0 : DRIFT_SPARK_RATE
-            const sizeMul =
-              tier === 2 ? 1.1 : tier === 1 ? 0.95 : 0.65
-            const ejectOut = tier === 2 ? 7 : tier === 1 ? 5 : 3
-            const ejectBack = tier === 2 ? 2.5 : tier === 1 ? 1.8 : 1.2
-            // Per-corner emission shares one accumulator and splits
-            // the budget so the total particle rate equals
-            // `rate × 2 corners`.
-            acc.driftSparks += rate * dt
-            const nEach = Math.floor(acc.driftSparks)
-            if (nEach > 0) {
-              acc.driftSparks -= nEach
-              // Sparks fly off each rear corner along bike-local ±X
-              // (outward) + bike-local −Z (backward). World vectors
-              // are computed once per frame, not per particle, to
-              // keep this loop hot-path-friendly.
-              right.set(1, 0, 0).applyQuaternion(tmpQuat)
-              back.set(0, 0, -1).applyQuaternion(tmpQuat)
-              for (let side = -1; side <= 1; side += 2) {
-                sparkWorld
-                  .set(side * DRIFT_SPARK_OFFSET_X, DRIFT_SPARK_OFFSET_Y, DRIFT_SPARK_OFFSET_Z)
-                  .applyQuaternion(tmpQuat)
-                  .add(tmpPos)
-                emit(
-                  pool,
-                  sparkWorld.x,
-                  sparkWorld.y,
-                  sparkWorld.z,
-                  right.x * side * ejectOut + back.x * ejectBack,
-                  -0.5,
-                  right.z * side * ejectOut + back.z * ejectBack,
-                  // Tighter cone reads as crisp sparks; the per-tier
-                  // texture color + size provide the differentiator.
-                  1.0,
-                  0.18,
-                  0.4,
-                  pool.defaultSize * sizeMul * (0.7 + Math.random() * 0.6),
-                  nEach,
-                )
-              }
-            }
-          } else {
-            acc.driftSparks = 0
-          }
-
-          // Release burst. The serial counter strictly increases on
-          // each release; the FX path triggers when it changes.
-          const lastSerial = lastDriftReleaseSerial.get(eid)
-          if (lastSerial === undefined) {
-            lastDriftReleaseSerial.set(eid, trick.driftReleaseSerial)
-          } else if (trick.driftReleaseSerial !== lastSerial) {
-            lastDriftReleaseSerial.set(eid, trick.driftReleaseSerial)
-            const releaseTier = trick.driftReleaseTier
-            if (releaseTier > 0) {
-              const burstPool = releaseTier === 2 ? driftSparkOrange : driftSparkBlue
-              const burstCount =
-                releaseTier === 2 ? DRIFT_RELEASE_BURST_T2 : DRIFT_RELEASE_BURST_T1
-              right.set(1, 0, 0).applyQuaternion(tmpQuat)
-              back.set(0, 0, -1).applyQuaternion(tmpQuat)
-              // Twin bursts — one per rear corner — same as the
-              // sustained stream, just at burst magnitude. Fans out
-              // behind the bike so the player's chase-cam catches the
-              // flash without it getting buried in exhaust.
-              for (let side = -1; side <= 1; side += 2) {
-                sparkWorld
-                  .set(
-                    side * DRIFT_SPARK_OFFSET_X,
-                    DRIFT_SPARK_OFFSET_Y,
-                    DRIFT_SPARK_OFFSET_Z,
-                  )
-                  .applyQuaternion(tmpQuat)
-                  .add(tmpPos)
-                const ejectOut = releaseTier === 2 ? 11 : 8
-                emit(
-                  burstPool,
-                  sparkWorld.x,
-                  sparkWorld.y,
-                  sparkWorld.z,
-                  right.x * side * ejectOut + back.x * 4,
-                  1.5,
-                  right.z * side * ejectOut + back.z * 4,
-                  // Wide cone — release should fan out dramatically.
-                  2.2,
-                  0.35,
-                  0.75,
-                  burstPool.defaultSize * 1.6,
-                  burstCount,
-                )
-              }
-            }
-          }
-        } else {
-          acc.driftSparks = 0
-        }
-      } else {
-        acc.driftSparks = 0
-      }
     }
 
     // Missile trail — query every in-flight missile, emit smoky puffs
@@ -1270,8 +1071,6 @@ export function createFxSystem(
 
     advance(foam, dt)
     advance(sparks, dt)
-    advance(driftSparkBlue, dt)
-    advance(driftSparkOrange, dt)
     advance(exhaust, dt)
     advance(dust, dt)
     advance(explosion, dt)
