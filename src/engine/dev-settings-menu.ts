@@ -33,6 +33,10 @@ type NumericKey =
   | 'keyboardThrottleRate'
   | 'keyboardPitchRate'
   | 'steerReleaseTightness'
+  | 'hoverProbeHalfLength'
+  | 'hoverProbeHalfWidth'
+  | 'hoverProbeLift'
+  | 'hoverProbeSpeedScale'
 
 type SliderSpec = {
   key: NumericKey
@@ -99,6 +103,30 @@ const SLIDERS: SliderSpec[] = [
       if (n >= 0.999) return 'Snap'
       return `${Math.round(n * 100)}%`
     },
+  },
+  {
+    key: 'hoverProbeHalfLength',
+    inputId: 'ds-hv-half-length',
+    valId: 'ds-hv-half-length-v',
+    format: (n) => `${n.toFixed(2)} m`,
+  },
+  {
+    key: 'hoverProbeHalfWidth',
+    inputId: 'ds-hv-half-width',
+    valId: 'ds-hv-half-width-v',
+    format: (n) => `${n.toFixed(2)} m`,
+  },
+  {
+    key: 'hoverProbeLift',
+    inputId: 'ds-hv-lift',
+    valId: 'ds-hv-lift-v',
+    format: (n) => `${n.toFixed(2)} m`,
+  },
+  {
+    key: 'hoverProbeSpeedScale',
+    inputId: 'ds-hv-speed-scale',
+    valId: 'ds-hv-speed-scale-v',
+    format: (n) => `${n.toFixed(3)} m/(m/s)`,
   },
 ]
 

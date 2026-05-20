@@ -102,6 +102,55 @@ export type HoverStateData = {
 export const HoverStateStore = createStore<HoverStateData>('HoverState')
 
 /**
+ * Per-bike hover-debug snapshot — written by `hoverSystem` only when the
+ * global debug flag is on (see `setHoverDebugEnabled` in
+ * `engine/sim/debug-flags.ts`). Skipped in normal play so the hot loop
+ * stays allocation-free.
+ *
+ * Each corner probe captures the ray origin, the hit point (hx = NEG_INF
+ * when no surface), whether the locally-grounded gate accepted the
+ * corner, and the up-axis spring acceleration applied at the point.
+ * Order is fixed: 0=bow, 1=stern, 2=starboard, 3=port.
+ */
+export type HoverProbe = {
+  ox: number
+  oy: number
+  oz: number
+  hx: number
+  hy: number
+  hz: number
+  active: boolean
+  aUp: number
+}
+export const HoverDebug = { name: 'HoverDebug' as const }
+export type HoverDebugData = {
+  upX: number
+  upY: number
+  upZ: number
+  dnX: number
+  dnY: number
+  dnZ: number
+  cx: number
+  cy: number
+  cz: number
+  centerHitX: number
+  centerHitY: number
+  centerHitZ: number
+  hasSurface: boolean
+  isWater: boolean
+  groundDistance: number
+  effHoverHeight: number
+  isGrounded: boolean
+  corners: HoverProbe[]
+  surfaceForwardSlope: number
+  /** Snapshot of the probe-lift distance used this tick (read live
+   *  from devSettings). The renderer needs this to place force arrows
+   *  at the bike's footprint when the user drags the slider. */
+  probeLift: number
+}
+export const HoverDebugStore = createStore<HoverDebugData>('HoverDebug')
+
+/**
  * Per-bike MK8-style hop-trick state. Written by `trickHopSystem` on
  * rising-edge of intent.trickLeft / intent.trickRight; render-side reads
  * `spinPhase` + `spinDirection` to overlay a Y-axis visual rotation on

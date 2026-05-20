@@ -19,6 +19,7 @@ import { isHostFor } from './engine/net/host-election'
 import { loadPlayerSettings, playerSettings } from './engine/player-settings'
 import { installConsoleTrap } from './engine/qa/console-trap'
 import { createAntiGravDebugRenderer } from './engine/render/anti-grav-debug'
+import { createHoverDebugRenderer } from './engine/render/hover-debug'
 import { createChaseCamera } from './engine/render/camera'
 import { applyCloudShadowsToScene, buildCloudShadowMultiplier } from './engine/render/cloud-shadows'
 import { createCombatRenderSystem } from './engine/render/combat-render'
@@ -849,6 +850,17 @@ async function boot() {
     antiGravDebug.setEnabled(true)
   }
 
+  // Per-bike hover-spring visualizer — probe rays, hit markers, spring
+  // force arrows, hover-height ring, isGrounded ring, effective-up
+  // arrow. Toggle: F4, `?debug=hover` URL param, or
+  // `window.__hover.toggleHoverDebug()`. Cheap when off (early-return in
+  // tick AND in hoverSystem) so it stays in the scene at all times.
+  const hoverDebug = createHoverDebugRenderer(phys)
+  scene.add(hoverDebug.mesh)
+  if (params.get('debug') === 'hover') {
+    hoverDebug.setEnabled(true)
+  }
+
   // Audio: lazy-init AudioContext on first user gesture (browsers block
   // autoplay until then). The engine itself is safe to call before
   // `resume()` — every method early-returns without a context.
@@ -961,6 +973,30 @@ async function boot() {
   }
   updateAntiGravPill()
 
+  // Hover-debug HUD pill — same lazy-build pattern. Green tint so the
+  // three debug pills are visually distinguishable at a glance.
+  let hoverDebugPill: HTMLElement | null = null
+  function updateHoverDebugPill(): void {
+    if (hoverDebug.isEnabled()) {
+      if (!hoverDebugPill) {
+        hoverDebugPill = document.createElement('span')
+        hoverDebugPill.id = 'hud-hover-debug'
+        hoverDebugPill.style.cssText =
+          'display:inline-block;margin-left:6px;padding:2px 6px;border-radius:3px;background:rgba(40,200,80,0.85);color:#fff;font:11px ui-monospace,Menlo,Consolas,monospace'
+        if (collisionPill?.parentElement) {
+          collisionPill.parentElement.appendChild(hoverDebugPill)
+        } else {
+          document.body.appendChild(hoverDebugPill)
+        }
+      }
+      hoverDebugPill.textContent = 'hover debug: ON (F4)'
+      hoverDebugPill.style.display = 'inline-block'
+    } else if (hoverDebugPill) {
+      hoverDebugPill.style.display = 'none'
+    }
+  }
+  updateHoverDebugPill()
+
   // Pause menu, finish-screen actions, and keyboard bindings. See
   // `src/boot/controls.ts` — returns a small handle the game loop polls
   // for pause state + mutates when the finish screen shows.
@@ -977,9 +1013,11 @@ async function boot() {
     audio,
     physicsDebug,
     antiGravDebug,
+    hoverDebug,
     onSetAutoPlay: applyAutoPlayTag,
     onCollisionDebugChanged: updateCollisionPill,
     onAntiGravDebugChanged: updateAntiGravPill,
+    onHoverDebugChanged: updateHoverDebugPill,
   })
 
   installDebugApi(state, {
@@ -1004,6 +1042,12 @@ async function boot() {
       return on
     },
     isAntiGravDebugOn: () => antiGravDebug.isEnabled(),
+    toggleHoverDebug: () => {
+      const on = hoverDebug.toggle()
+      updateHoverDebugPill()
+      return on
+    },
+    isHoverDebugOn: () => hoverDebug.isEnabled(),
     skipCountdown: () => {
       // Scripted intent overrides (e2e / debug) skip past the
       // cinematic intro as well as the 3/2/1 ticks so test paths
@@ -1137,6 +1181,7 @@ async function boot() {
     dirArrow,
     waveLineShimmer,
     physicsDebug,
+    hoverDebug,
     bikeRender,
     riderRender,
     pickupRender,

@@ -52,6 +52,7 @@ export interface ControlsOpts {
   audio: { isMuted(): boolean; setMuted(v: boolean): void }
   physicsDebug: { toggle(): boolean; isEnabled(): boolean }
   antiGravDebug: { toggle(): boolean; isEnabled(): boolean }
+  hoverDebug: { toggle(): boolean; isEnabled(): boolean }
   /** Called when the user toggles auto-play. Implementation lives in
    *  main.ts because it needs to add/remove `AITag` against the player
    *  entity — keeping it there avoids leaking AI-component imports
@@ -62,6 +63,8 @@ export interface ControlsOpts {
   onCollisionDebugChanged(): void
   /** Called when the user toggles anti-grav debug — updates the HUD pill. */
   onAntiGravDebugChanged(): void
+  /** Called when the user toggles hover debug — updates the HUD pill. */
+  onHoverDebugChanged(): void
 }
 
 export function installControls(opts: ControlsOpts): ControlsHandle {
@@ -78,9 +81,11 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     audio,
     physicsDebug,
     antiGravDebug,
+    hoverDebug,
     onSetAutoPlay,
     onCollisionDebugChanged,
     onAntiGravDebugChanged,
+    onHoverDebugChanged,
   } = opts
 
   let autoPlay = false
@@ -232,7 +237,8 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
   //   Enter/R — NEXT/RETRY on the finish screen; on pause menu, Enter
   //             resumes (the focused button's default action) and R
   //             restarts; Q exits to menu.
-  //   T/F1 — auto-play; F2 — collision debug; M — mute; Backspace — respawn.
+  //   T/F1 — auto-play; F2 collision / F3 anti-grav / F4 hover-spring debug;
+  //   M — mute; Backspace — respawn.
   window.addEventListener('keydown', (e) => {
     if (finishShown && (e.code === 'Enter' || e.code === 'NumpadEnter')) {
       ;(document.getElementById('finish-next') as HTMLButtonElement | null)?.click()
@@ -281,6 +287,10 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     } else if (e.code === 'F3') {
       antiGravDebug.toggle()
       onAntiGravDebugChanged()
+      e.preventDefault()
+    } else if (e.code === 'F4') {
+      hoverDebug.toggle()
+      onHoverDebugChanged()
       e.preventDefault()
     } else if (e.code === 'KeyM') {
       audio.setMuted(!audio.isMuted())
