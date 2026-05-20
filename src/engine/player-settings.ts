@@ -65,17 +65,6 @@ export type AIDifficulty = 'casual' | 'standard' | 'hard'
  */
 export type AntiGravCameraIntensity = 'full' | 'reduced' | 'off'
 
-/** Wave-line shimmer guidance. Renders glowing markers on the water
- *  surface ahead of the player wherever the swell is rising — the
- *  forward signal for "where the next pumpable crest is", paired with
- *  the after-the-fact wave-pump signal.
- *
- *  - `full`:    full glow + ring shimmer + status pip
- *  - `subtle`:  thinner markers, slower pulse, status pip only on strong locks
- *  - `off`:     no markers, no status pip
- */
-export type WaveLineIntensity = 'full' | 'subtle' | 'off'
-
 /** Emissive-landmarks intensity. Currently drives the lava-river runtime
  *  shader (Kilauea's hero waterfall + any future track that drops a
  *  `landmark_lava_river_strip` instance). Off falls back to the GLB's
@@ -108,8 +97,6 @@ export type PlayerSettings = {
    *  catches up after falling behind. */
   rubberBandAssist: boolean
   antiGravCameraIntensity: AntiGravCameraIntensity
-  /** Wave-line shimmer guidance intensity — see `WaveLineIntensity`. */
-  waveLineIntensity: WaveLineIntensity
   /** Emissive-landmarks intensity — see `EmissiveLandmarksIntensity`. */
   emissiveLandmarks: EmissiveLandmarksIntensity
   /** Subtitles for the tutorial framework's prompt callouts.
@@ -234,7 +221,6 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   aiDifficulty: 'standard',
   rubberBandAssist: true,
   antiGravCameraIntensity: 'full',
-  waveLineIntensity: 'full',
   emissiveLandmarks: 'full',
   tutorialSubtitles: true,
   tutorialCompleted: false,
@@ -285,7 +271,6 @@ export const playerSettings: PlayerSettings = {
 const VALID_WAVE_PUMP_INTENSITY: WavePumpIntensity[] = ['full', 'subtle', 'off']
 const VALID_AI_DIFFICULTY: AIDifficulty[] = ['casual', 'standard', 'hard']
 const VALID_ANTI_GRAV_CAMERA: AntiGravCameraIntensity[] = ['full', 'reduced', 'off']
-const VALID_WAVE_LINE_INTENSITY: WaveLineIntensity[] = ['full', 'subtle', 'off']
 const VALID_EMISSIVE_LANDMARKS: EmissiveLandmarksIntensity[] = ['full', 'reduced', 'off']
 const VALID_PRE_LAP_INTRO: PreLapIntroMode[] = ['full', 'short', 'off']
 const VALID_COLORBLIND_MODE: ColorblindMode[] = ['off', 'deuteranopia', 'protanopia', 'tritanopia']
@@ -345,12 +330,6 @@ export function loadPlayerSettings(): void {
     (VALID_ANTI_GRAV_CAMERA as string[]).includes(p.antiGravCameraIntensity)
   ) {
     playerSettings.antiGravCameraIntensity = p.antiGravCameraIntensity as AntiGravCameraIntensity
-  }
-  if (
-    typeof p.waveLineIntensity === 'string' &&
-    (VALID_WAVE_LINE_INTENSITY as string[]).includes(p.waveLineIntensity)
-  ) {
-    playerSettings.waveLineIntensity = p.waveLineIntensity as WaveLineIntensity
   }
   if (
     typeof p.emissiveLandmarks === 'string' &&
@@ -481,11 +460,6 @@ export function setRubberBandAssist(on: boolean): void {
 
 export function setAntiGravCameraIntensity(v: AntiGravCameraIntensity): void {
   playerSettings.antiGravCameraIntensity = v
-  savePlayerSettings()
-}
-
-export function setWaveLineIntensity(v: WaveLineIntensity): void {
-  playerSettings.waveLineIntensity = v
   savePlayerSettings()
 }
 
