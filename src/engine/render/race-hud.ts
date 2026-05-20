@@ -96,8 +96,13 @@ export interface RaceHudOptions {
    *  first tick. Stays gated (and `isLocked()` returns true) until the
    *  caller invokes `armCountdown()`. Used by multiplayer rooms; single-
    *  player leaves this off so the existing immediate-start behavior is
-   *  preserved. */
+   *  preserved. Also used by the pre-lap intro to hold the countdown
+   *  while the cinematic shots play. */
   deferStart?: boolean
+  /** When true, suppresses the giant 3/2/1/GO banner text. The
+   *  `onCountdownTick` callback still fires so an external overlay
+   *  (e.g. the F1 start-lights row) can drive the visual instead. */
+  hideCountdownBanner?: boolean
 }
 
 export function createRaceHud(opts: RaceHudOptions): RaceHud {
@@ -329,7 +334,13 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
 
     if (value !== lastTickValue) {
       lastTickValue = value
-      if (value === -1) {
+      if (opts.hideCountdownBanner) {
+        // External overlay (e.g. start-lights) owns the visual — keep
+        // the banner blank but still pump the callback so the overlay
+        // gets its 3/2/1/GO ticks.
+        banner.classList.remove('show', 'flash-go', 'pop')
+        bannerText.textContent = ''
+      } else if (value === -1) {
         banner.classList.remove('show', 'flash-go')
         bannerText.textContent = ''
       } else if (value === 0) {
@@ -346,8 +357,10 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     }
 
     // Re-trigger the css "pop" animation each phase change by toggling
-    // the `pop` class for one frame after a value change.
-    if (value !== -1) {
+    // the `pop` class for one frame after a value change. Skipped when
+    // the banner is suppressed — the start-lights overlay drives its
+    // own animations.
+    if (value !== -1 && !opts.hideCountdownBanner) {
       // The class is added when value changes; we strip it on next dt
       // so re-adding restarts the animation.
       banner.classList.remove('pop')

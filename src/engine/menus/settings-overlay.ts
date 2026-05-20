@@ -29,6 +29,7 @@ import {
   type AntiGravCameraIntensity,
   type ColorblindMode,
   type EmissiveLandmarksIntensity,
+  type PreLapIntroMode,
   playerSettings,
   setAIDifficulty,
   setAnimatedLandmarks,
@@ -48,6 +49,7 @@ import {
   setLeaderboardSubmit,
   setMotionSicknessReduction,
   setPixelRatio,
+  setPreLapIntro,
   setReducedFlash,
   setReducedMotion,
   setRubberBandAssist,
@@ -123,6 +125,17 @@ const EMISSIVE_LANDMARKS_LABEL: Record<EmissiveLandmarksIntensity, string> = {
 const EMISSIVE_LANDMARKS_VALUE: Record<string, EmissiveLandmarksIntensity> = {
   Full: 'full',
   Reduced: 'reduced',
+  Off: 'off',
+}
+
+const PRE_LAP_INTRO_LABEL: Record<PreLapIntroMode, string> = {
+  full: 'Full',
+  short: 'Short',
+  off: 'Off',
+}
+const PRE_LAP_INTRO_VALUE: Record<string, PreLapIntroMode> = {
+  Full: 'full',
+  Short: 'short',
   Off: 'off',
 }
 
@@ -305,7 +318,7 @@ const TAB_SPECS: TabSpec[] = [
         label: 'Animated landmarks',
         control: { kind: 'toggle', defaultValue: playerSettings.animatedLandmarks },
         enabled: true,
-        gate: 'Swings Marina Bay 7 gantry cranes + Doge\'s Drift Campanile bell. Off pins them to authored rest poses.',
+        gate: "Swings Marina Bay 7 gantry cranes + Doge's Drift Campanile bell. Off pins them to authored rest poses.",
       },
       {
         id: 'video-emissive-landmarks',
@@ -432,6 +445,17 @@ const TAB_SPECS: TabSpec[] = [
         },
         enabled: true,
         gate: 'Controls the in-race signal that fires on a successful pump.',
+      },
+      {
+        id: 'gp-pre-lap-intro',
+        label: 'Pre-lap intro',
+        control: {
+          kind: 'select',
+          options: ['Full', 'Short', 'Off'],
+          defaultValue: PRE_LAP_INTRO_LABEL[playerSettings.preLapIntro],
+        },
+        enabled: true,
+        gate: 'Cinematic establishing shots + F1 start-lights before the race begins. Single-player only.',
       },
       {
         id: 'gp-wave-line',
@@ -932,6 +956,12 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
         sel.addEventListener('change', () => {
           const v = WAVE_LINE_VALUE[sel.value]
           if (v) setWaveLineIntensity(v)
+        })
+      }
+      if (spec.enabled && spec.id === 'gp-pre-lap-intro') {
+        sel.addEventListener('change', () => {
+          const v = PRE_LAP_INTRO_VALUE[sel.value]
+          if (v) setPreLapIntro(v)
         })
       }
       if (spec.enabled && spec.id === 'a11y-colorblind') {

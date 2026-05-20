@@ -89,6 +89,17 @@ export type WaveLineIntensity = 'full' | 'subtle' | 'off'
  */
 export type EmissiveLandmarksIntensity = 'full' | 'reduced' | 'off'
 
+/** Pre-lap track introduction — cinematic camera shots + F1 start-lights
+ *  before the race countdown arms. See
+ *  [race-intro.ts](./render/race-intro.ts).
+ *
+ *  - `full`:    three shots — aerial pan, racing-line skim, descent (~8 s)
+ *  - `short`:   single descent shot (~2 s) before the lights sequence
+ *  - `off`:     skip the cinematic; start-lights still replace the 3/2/1
+ *               banner so the F1-style countdown is preserved
+ */
+export type PreLapIntroMode = 'full' | 'short' | 'off'
+
 export type PlayerSettings = {
   wavePumpIntensity: WavePumpIntensity
   aiDifficulty: AIDifficulty
@@ -209,6 +220,13 @@ export type PlayerSettings = {
    *  ``elapsedSeconds`` (no jump). Render-only; arm trimesh colliders
    *  are static in either state. */
   animatedLandmarks: boolean
+  /** Pre-lap track introduction mode — see `PreLapIntroMode`. The
+   *  cinematic establishing shots play single-player only; the F1-style
+   *  start-lights are used in every mode (the banner is suppressed
+   *  whenever `preLapIntro !== 'off'` is honoured). Multiplayer skips
+   *  the camera fly-by because the lobby gate already owns the pre-race
+   *  beat — flipping this off in MP only hides the lights. */
+  preLapIntro: PreLapIntroMode
 }
 
 export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
@@ -250,6 +268,7 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   pixelRatio: 1.0,
   fullscreenPreferred: false,
   animatedLandmarks: true,
+  preLapIntro: 'full',
 })
 
 /** Live, mutable copy. Consumers read this object every frame — no
@@ -268,6 +287,7 @@ const VALID_AI_DIFFICULTY: AIDifficulty[] = ['casual', 'standard', 'hard']
 const VALID_ANTI_GRAV_CAMERA: AntiGravCameraIntensity[] = ['full', 'reduced', 'off']
 const VALID_WAVE_LINE_INTENSITY: WaveLineIntensity[] = ['full', 'subtle', 'off']
 const VALID_EMISSIVE_LANDMARKS: EmissiveLandmarksIntensity[] = ['full', 'reduced', 'off']
+const VALID_PRE_LAP_INTRO: PreLapIntroMode[] = ['full', 'short', 'off']
 const VALID_COLORBLIND_MODE: ColorblindMode[] = ['off', 'deuteranopia', 'protanopia', 'tritanopia']
 
 /** Roll-follow scalar each intensity step contributes — multiplied by
@@ -421,6 +441,12 @@ export function loadPlayerSettings(): void {
   if (typeof p.animatedLandmarks === 'boolean') {
     playerSettings.animatedLandmarks = p.animatedLandmarks
   }
+  if (
+    typeof p.preLapIntro === 'string' &&
+    (VALID_PRE_LAP_INTRO as string[]).includes(p.preLapIntro)
+  ) {
+    playerSettings.preLapIntro = p.preLapIntro as PreLapIntroMode
+  }
   // Apply accessibility settings to the DOM as early as we can after
   // load. Lazy-imported so `player-settings.ts` stays a tiny
   // pre-render-init module — the accessibility service pulls in palette
@@ -471,6 +497,11 @@ export function setEmissiveLandmarks(v: EmissiveLandmarksIntensity): void {
   void import('./render/lava-river-material').then(({ applyEmissiveLandmarksSetting }) => {
     applyEmissiveLandmarksSetting(v)
   })
+}
+
+export function setPreLapIntro(v: PreLapIntroMode): void {
+  playerSettings.preLapIntro = v
+  savePlayerSettings()
 }
 
 export function setTutorialSubtitles(on: boolean): void {

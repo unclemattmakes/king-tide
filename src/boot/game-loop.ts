@@ -56,6 +56,7 @@ import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finis
 import { createPerfHud, type RenderInfoLite } from '@/engine/render/perf-hud'
 import { createPumpFx } from '@/engine/render/pump-fx'
 import type { RaceHud } from '@/engine/render/race-hud'
+import type { RaceIntro } from '@/engine/render/race-intro'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
 import { createTrickPromptHud } from '@/engine/render/trick-prompt-hud'
@@ -186,6 +187,13 @@ export interface GameLoopOpts {
   horizonRing: HorizonRing
   trackVisuals: TrackVisuals
   raceHud: RaceHud
+  /** Pre-lap cinematic-camera director. Plays a short shot sequence
+   *  before the race countdown arms; when its `isDone()` returns true,
+   *  the loop calls `raceHud.armCountdown()` to start the 3/2/1/GO
+   *  ticks. Always supplied — for tracks/modes where no intro should
+   *  play, the caller passes a director built in `'off'` mode which
+   *  reports done from the first tick. */
+  raceIntro: RaceIntro
   raceTick: RaceTick
   dirArrow: DirectionArrow
   /** Forward-looking shimmer markers over pumpable crests. Render-only;
@@ -342,6 +350,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     horizonRing,
     trackVisuals: _trackVisuals,
     raceHud,
+    raceIntro,
     raceTick,
     dirArrow,
     waveLineShimmer,
@@ -537,6 +546,77 @@ export function startGameLoop(opts: GameLoopOpts): void {
   const replaySlots: number[] = [playerEid, ...aiEids]
   const replayFlat = new Float64Array(replaySlots.length * 7)
 
+  // Pre-lap intro state.
+  //
+  // The intro director runs entirely on the render side; while it's
+  // active we skip the chase-camera pipeline and let the director
+  // write `camera.position` + `camera.lookAt` directly. The race-hud
+  // already gates the sim via `isLocked()` so no physics state
+  // advances during the cinematic — same gate the existing 3/2/1
+  // countdown uses.
+  //
+  // `introArmed` flips to true once the director reports done so the
+  // `armCountdown()` call only fires once. `introSkipHandle` is the
+  // skip-prompt DOM node + cleanup; lazily created on the first
+  // active frame and torn down when the intro ends.
+  let introArmed = raceIntro.isDone()
+  let introSkipPromptEl: HTMLElement | null = null
+  let introSkipKeyHandler: ((e: KeyboardEvent) => void) | null = null
+  let introSkipPointerHandler: ((e: Event) => void) | null = null
+
+  function teardownIntroSkipUi(): void {
+    if (introSkipKeyHandler) {
+      window.removeEventListener('keydown', introSkipKeyHandler, true)
+      introSkipKeyHandler = null
+    }
+    if (introSkipPointerHandler) {
+      window.removeEventListener('mousedown', introSkipPointerHandler)
+      window.removeEventListener('touchstart', introSkipPointerHandler)
+      introSkipPointerHandler = null
+    }
+    if (introSkipPromptEl) {
+      introSkipPromptEl.classList.remove('ris-active')
+    }
+  }
+
+  function ensureIntroSkipUi(): void {
+    if (introSkipKeyHandler) return
+    // Lazy-build the skip prompt — Settings → Gameplay → "Pre-lap
+    // intro: Off" players never see the DOM cost. The element id is
+    // referenced by the CSS rule in index.html.
+    let el = document.getElementById('race-intro-skip')
+    if (!el) {
+      el = document.createElement('div')
+      el.id = 'race-intro-skip'
+      el.textContent = 'PRESS ANY KEY · SPACE / ENTER TO SKIP'
+      document.body.appendChild(el)
+    }
+    introSkipPromptEl = el
+    el.classList.add('ris-active')
+
+    introSkipKeyHandler = (e: KeyboardEvent) => {
+      // Only act while the director is still playing — once it's done
+      // a stray Space press shouldn't accidentally do anything.
+      if (!raceIntro.isActive()) return
+      // Avoid eating modifier-chord presses (e.g. Cmd+Shift+R). Plain
+      // Space / Enter / Escape / Mouse click skip the intro.
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+      raceIntro.skip()
+      e.preventDefault()
+    }
+    introSkipPointerHandler = () => {
+      if (!raceIntro.isActive()) return
+      raceIntro.skip()
+    }
+    // Capture-phase keydown so the skip beats the pause-menu's
+    // Escape handler (which is in bubble phase). The skip handler
+    // exits early once the intro is done so once the race begins the
+    // pause-menu handler resumes its normal Escape duties.
+    window.addEventListener('keydown', introSkipKeyHandler, true)
+    window.addEventListener('mousedown', introSkipPointerHandler)
+    window.addEventListener('touchstart', introSkipPointerHandler, { passive: true })
+  }
+
   function frame(now: number): void {
     const dt = Math.min((now - last) / 1000, 1 / 15)
     last = now
@@ -655,6 +735,30 @@ export function startGameLoop(opts: GameLoopOpts): void {
       }
     }
 
+    // Pre-lap intro — drives the camera through the cinematic shot
+    // sequence before the race countdown arms. While the intro is
+    // active we skip the chase-camera pipeline entirely; the director
+    // writes `camera.position` + `camera.lookAt` directly. The sim is
+    // already gated via `raceHud.isLocked()` because the HUD was
+    // built with `deferStart: true`, so no physics state advances
+    // during these shots.
+    const introActive = raceIntro.isActive()
+    if (introActive) {
+      ensureIntroSkipUi()
+      raceIntro.tick(dt)
+    } else if (!introArmed) {
+      // First frame after the director reports done: arm the
+      // countdown so the 3/2/1/GO ticks (which drive the start-lights
+      // overlay) start playing. Tear down the skip prompt so it
+      // doesn't linger past the GO! moment. Multiplayer compositions
+      // also call `armCountdown` from the lobby clear path; both
+      // call sites are idempotent because `armCountdown` early-outs
+      // if the countdown is already running.
+      raceHud.armCountdown()
+      teardownIntroSkipUi()
+      introArmed = true
+    }
+
     let lastLookMagnitude = 0
     const rbHandle = RBHandleStore.get(playerEid)
     const hover = HoverStateStore.get(playerEid)
@@ -666,10 +770,17 @@ export function startGameLoop(opts: GameLoopOpts): void {
         const q = playerRb.rotation()
         tmpPos.set(t.x, t.y, t.z)
         tmpQuat.set(q.x, q.y, q.z, q.w)
-        const look = tickCameraLook(dt)
-        lastLookMagnitude = Math.abs(look.yaw) + Math.abs(look.pitch)
-        chase.setOrbit(look.yaw, look.pitch)
-        chase.tick(tmpPos, tmpQuat, dt)
+        if (!introActive) {
+          // Chase camera + camera-look only while the intro isn't
+          // owning the camera. Letting them run during the intro
+          // would lerp the chase pose against the director's pose
+          // every frame and produce a fight; suppressing them keeps
+          // the cinematic shots clean.
+          const look = tickCameraLook(dt)
+          lastLookMagnitude = Math.abs(look.yaw) + Math.abs(look.pitch)
+          chase.setOrbit(look.yaw, look.pitch)
+          chase.tick(tmpPos, tmpQuat, dt)
+        }
         // Pump FX overlays — FOV punch + screen shake. Must run after
         // `chase.tick` so the shake offset doesn't get baked into the
         // chase camera's interpolated position before it's read.
