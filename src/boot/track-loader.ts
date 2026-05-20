@@ -21,14 +21,17 @@
 import type * as THREE from 'three'
 import { createIslandMesh } from '@/engine/render/arena-mesh'
 import { createCliffsideMesh } from '@/engine/render/cliffside-mesh'
+import { createDriftTestArenaMesh } from '@/engine/render/drift-test-arena-mesh'
 import { attachTrackColliders, loadGlbTrackVisuals } from '@/engine/render/glb-track'
 import { createRampMesh } from '@/engine/render/ramp-mesh'
 import { buildTerrainHeightmap, type TerrainHeightmap } from '@/engine/render/terrain-heightmap'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { createLagoonIsland, createSafetyFloor } from '@/game/entities/arena'
 import { createCliffsideTerrain } from '@/game/entities/cliffside-terrain'
+import { createDriftTestPlate } from '@/game/entities/drift-test-arena'
 import { createRamp } from '@/game/entities/ramp'
 import { createCliffside } from '@/game/tracks/cliffside'
+import { createDriftTest } from '@/game/tracks/drift-test'
 import { loadTrackFromGlb } from '@/game/tracks/glb-loader'
 import { buildTrackFromJson } from '@/game/tracks/json-loader'
 import { createLagoonLoop } from '@/game/tracks/lagoon-loop'
@@ -87,6 +90,11 @@ export async function loadTrackForBoot(opts: {
     const ramp = createRampMesh()
     scene.add(ramp)
     terrainRoots.push(ramp)
+  } else if (trackId === 'drift-test') {
+    createDriftTestPlate(phys)
+    const plate = createDriftTestArenaMesh()
+    scene.add(plate)
+    terrainRoots.push(plate)
   }
 
   if (trackId === 'cliffside') {
@@ -94,6 +102,9 @@ export async function loadTrackForBoot(opts: {
   }
   if (trackId === 'lagoon') {
     return { track: createLagoonLoop(), terrainHeightmap: buildTerrainHeightmap(terrainRoots) }
+  }
+  if (trackId === 'drift-test') {
+    return { track: createDriftTest(), terrainHeightmap: buildTerrainHeightmap(terrainRoots) }
   }
 
   // Try a JSON-authored track first (gameplay data from the in-app
