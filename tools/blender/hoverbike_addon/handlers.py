@@ -36,7 +36,12 @@ from bpy.app.handlers import persistent
 # moving a curve's control points updates the Curve, not the Object)
 # schedules the listed preview kinds.
 _WATCHED_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("ai_spline_main",   ("gates", "turns", "helper")),
+    # ai_spline_main feeds the gameplay previews AND is the fallback
+    # road curve when there's no dedicated road_curve_main — edits
+    # here rebuild the road mesh too so authors who use a single
+    # curve for both racing line and road see the road follow live.
+    ("ai_spline_main",   ("gates", "turns", "helper", "road")),
+    ("road_curve_main",  ("road",)),
     ("start_00",         ("racer",)),
     ("water_volume_main", ("water",)),
 )
@@ -123,6 +128,19 @@ def _run_pending_rebuilds():
     if "boosts" in pending:
         try:
             _boost_pad_mod.refresh_boost_pad_gizmos(scene)
+        except (RuntimeError, AttributeError):
+            pass
+
+    # Road mesh auto-rebuild — only fires if the user has already run
+    # Build Road once (= a road_main exists). Skipping until the
+    # explicit first build preserves the "opt-in, then automatic"
+    # pattern the other previews use, and avoids spamming rebuilds
+    # for authors who only care about the curve, not the asphalt
+    # strip.
+    if "road" in pending and bpy.data.objects.get("road_main") is not None:
+        try:
+            from . import road as _road_mod
+            _road_mod.rebuild_road_main(scene)
         except (RuntimeError, AttributeError):
             pass
 
@@ -240,6 +258,31 @@ def _hoverbike_load_post(*_args):
         print(f"[hoverbike] auto-reload-from-JSON skipped: {e}")
 
 
+def _update_is_real_edit(upd) -> bool:
+    """Return True only when the depsgraph update represents an
+    actual GEOMETRY or TRANSFORM change, not just a re-evaluation or
+    a shading-graph touch.
+
+    Blender's ``depsgraph.updates`` lists every node that was
+    *evaluated* on the current tick, not only the ones that *changed*
+    — so a curve that's read by a downstream Geometry Nodes modifier
+    (Object Info on the proxy) shows up in the list even when the
+    curve itself wasn't edited.
+
+    Shading also gets excluded specifically: adding a material to the
+    rebuilt road mesh fires `is_updated_shading=True` on every object
+    in the scene, including the curve. Treating those as edits caused
+    the rebuild to self-trigger an infinite loop — symptom was
+    modifier-panel sliders flickering and being un-clickable because
+    the UI was redrawn every ~0.2 s (the debounce interval). Road
+    rebuilds care only about geometry / transform changes; shading
+    changes don't reshape the road."""
+    return bool(
+        getattr(upd, "is_updated_geometry", False)
+        or getattr(upd, "is_updated_transform", False)
+    )
+
+
 @persistent
 def _hoverbike_depsgraph_post(scene, depsgraph):
     """Run on every depsgraph evaluation; cheap unless something we
@@ -250,6 +293,8 @@ def _hoverbike_depsgraph_post(scene, depsgraph):
     except AttributeError:
         return
     for upd in updates:
+        if not _update_is_real_edit(upd):
+            continue
         for source_name, kinds in _WATCHED_SOURCES:
             if _update_matches_source(upd, source_name):
                 for k in kinds:
