@@ -370,6 +370,20 @@ def _is_spline_active(obj: bpy.types.Object | None) -> bool:
     return False
 
 
+def _is_start_active(obj: bpy.types.Object | None) -> bool:
+    """Start sub-panel surfaces when ``start_00`` / ``start_01`` (or
+    anything tagged ``kind=start``) is the active object. Mirrors the
+    web editor's "click the start helper → selection panel populates
+    with bind/t/unbind" flow."""
+    if obj is None:
+        return False
+    if obj.name in ("start_00", "start_01"):
+        return True
+    if obj.get("kind") == "start":
+        return True
+    return False
+
+
 def _is_road_active(obj: bpy.types.Object | None) -> bool:
     """Road tool sub-panel surfaces when the user is poking at any
     part of the road/conform setup — the curve, the road mesh, the
@@ -487,6 +501,7 @@ def _is_gameplay_active(obj: bpy.types.Object | None) -> bool:
 
 _KIND_LABELS: tuple[tuple[str, callable], ...] = (
     ("AI spline", _is_spline_active),
+    ("start gate", _is_start_active),
     ("road curve", _is_road_active),
     ("tunnel curve", _is_tunnel_active),
     ("anti-grav curve", _is_antigrav_curve_active),
@@ -597,6 +612,114 @@ class HOVERBIKE_PT_track_spline(_SelectionDrivenPanel, Panel):
         layout.operator("hoverbike.auto_place_ramps", icon="MOD_PARTICLES")
 
 
+class HOVERBIKE_PT_track_start(_SelectionDrivenPanel, Panel):
+    """Sub-panel: bind / unbind / slide the player-start pair along
+    ``ai_spline_main``. Ports the web editor's *Snap to spline* +
+    t-slider + *Unbind* flow into Blender. Surfaces whenever a start
+    empty is the active object so authors who click the start gate get
+    the same experience the in-app editor offers.
+
+    The 2x4 grid preview is rebuilt automatically by the existing
+    racer-preview handler whenever ``start_00`` moves — no extra
+    wiring needed here."""
+
+    bl_label = "Start gate"
+    bl_idname = "HOVERBIKE_PT_track_start"
+    _active_pred = staticmethod(_is_start_active)
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+
+        have_sp = bpy.data.objects.get("ai_spline_main") is not None
+        have_s0 = bpy.data.objects.get("start_00") is not None
+        have_s1 = bpy.data.objects.get("start_01") is not None
+
+        # Scaffolding row — surfaced here too so a user who selects a
+        # half-set-up start finds the *Add* button without bouncing to
+        # the Spline panel.
+        if not (have_s0 and have_s1):
+            layout.operator(
+                "hoverbike.add_starts",
+                text="Add start_00 / 01",
+                icon="EMPTY_ARROWS",
+            )
+
+        bound = bool(getattr(scene, "hoverbike_start_bound_to_spline", False))
+
+        layout.label(
+            text=(
+                "⚓ Bound to ai_spline_main" if bound
+                else "Free placement (drag empties to pose)"
+            ),
+            icon=("LOCKED" if bound else "UNLOCKED"),
+        )
+
+        if bound:
+            # Bound mode: the t slider is the primary control. Editing
+            # it fires the live re-snap via _on_start_t_changed → the
+            # handlers module's debounced timer. Spacing edits do the
+            # same.
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_start_t", text="t", slider=True)
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_start_grid_spacing", text="Spacing")
+            row.prop(scene, "hoverbike_snap_hover_height", text="Hover")
+            row = layout.row(align=True)
+            row.operator(
+                "hoverbike.unbind_start_from_spline",
+                text="Unbind from Spline",
+                icon="UNLINKED",
+            )
+            layout.label(text="Edit ai_spline_main → start follows", icon="INFO")
+        elif have_sp and have_s0:
+            # Not bound, but everything needed for a bind is in place.
+            row = layout.row(align=True)
+            row.scale_y = 1.2
+            row.operator(
+                "hoverbike.bind_start_to_spline",
+                text="Bind to Spline",
+                icon="LINKED",
+            )
+            # One-shot snap is also surfaced — same operator the Spline
+            # panel exposes, but here it uses hoverbike_placement_t (the
+            # shared prop) to avoid surprising authors who have a t
+            # they want to apply once without binding.
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_start_grid_spacing", text="Spacing")
+            row.operator(
+                "hoverbike.snap_starts_to_spline",
+                text="Snap (once)",
+                icon="EMPTY_ARROWS",
+            )
+        elif not have_sp:
+            layout.label(
+                text="Add ai_spline_main first to enable spline binding",
+                icon="INFO",
+            )
+            layout.operator(
+                "hoverbike.add_ai_spline",
+                text="Add ai_spline_main",
+                icon="CURVE_NCURVE",
+            )
+
+        # Racer preview: hint at the live 2x4 grid preview that
+        # follows the start. The actual operator lives in previews.py.
+        layout.separator()
+        layout.label(text="2x4 grid preview:", icon="GROUP")
+        row = layout.row(align=True)
+        row.operator(
+            "hoverbike.rebuild_racer_preview",
+            text="Show / Refresh Grid",
+            icon="FILE_REFRESH",
+        )
+        row.operator(
+            "hoverbike.hide_racer_preview",
+            text="Hide",
+            icon="HIDE_ON",
+        )
+
+
 class HOVERBIKE_PT_track_road(_SelectionDrivenPanel, Panel):
     """Sub-panel: road-curve authoring + width / banking / curb knobs +
     Build Road. Visible when ``road_curve_main`` or a road mesh is the
@@ -675,6 +798,12 @@ class HOVERBIKE_PT_track_road(_SelectionDrivenPanel, Panel):
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_road_conform_clearance", text="Clearance")
         row.prop(scene, "hoverbike_road_fill_shelf_width", text="Fill shelf")
+        # Water-level gate is on the GN modifier itself (Properties →
+        # Modifiers → HV_RoadConform). Default seeds from the scene's
+        # `hoverbike_water_height` so bridges over ocean don't lift
+        # the seafloor. Hint here so authors find it.
+        layout.label(text="Water gate: HV_RoadConform → Water Level",
+                     icon="MOD_FLUIDSIM")
         # Non-destructive iteration flow.
         # 1. Snap Curve — one-shot raycast that drops each curve CP
         #    onto the terrain surface (= seeds sane Z values).
@@ -696,7 +825,7 @@ class HOVERBIKE_PT_track_road(_SelectionDrivenPanel, Panel):
         row.operator(
             "hoverbike.attach_road_conform",
             text="Attach Conform",
-            icon="MOD_NODES",
+            icon="GEOMETRY_NODES",
         )
         row = layout.row(align=True)
         row.scale_y = 1.2
@@ -1561,6 +1690,7 @@ _CLASSES: tuple[type, ...] = (
     # When nothing relevant is selected, none of these appear — the
     # always-on cluster below carries the rest of the sidebar.
     HOVERBIKE_PT_track_spline,
+    HOVERBIKE_PT_track_start,
     HOVERBIKE_PT_track_road,
     HOVERBIKE_PT_track_tunnels,
     HOVERBIKE_PT_track_antigrav_ribbon,

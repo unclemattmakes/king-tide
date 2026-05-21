@@ -132,13 +132,22 @@ def current_water_height_m(scene) -> float:
     the water surface" should call into here rather than reading
     ``water_volume_main.location.z`` directly.
 
+    Reads via ``getattr`` rather than ``scene.get()`` because registered
+    ``FloatProperty`` values written by the UI slider live in the RNA
+    descriptor path, NOT the underlying ID-property dict that ``.get()``
+    reads from. The two only agree once the value has been explicitly
+    written through the dict path (which never happens for slider edits).
+    This caused snap_starts_to_spline + the HV_RoadConform default seed
+    to read sea level = 0 even when the slider clearly showed -3.5, so
+    bridges over open water dropped to the seafloor.
+
     One-time fallback: if the scene prop is at its default 0 *and* a
     legacy ``water_volume_main`` carries a non-zero Z (a .blend saved
     before the migration), promote the volume's Z into the scene prop
     and return it. Subsequent calls see the scene-prop value and
     skip the lookup, so the migration costs one dict read per .blend
     open."""
-    raw = scene.get("hoverbike_water_height")
+    raw = getattr(scene, "hoverbike_water_height", None)
     if isinstance(raw, (int, float)) and float(raw) != 0.0:
         return float(raw)
     vol = bpy.data.objects.get(WATER_VOLUME_NAME)
@@ -260,8 +269,12 @@ class HOVERBIKE_OT_rebuild_water_preview(Operator):
     the .glb export."""
 
     bl_idname = "hoverbike.rebuild_water_preview"
-    bl_label = "Rebuild Water Preview"
-    bl_description = "Build a wave-displaced water plane at the current Sea level"
+    bl_label = "Add Water Preview"
+    bl_description = (
+        "Add (or rebuild) a wave-displaced water plane at the current Sea "
+        "level. Idempotent — re-run to refresh after editing Sea level / "
+        "wave params"
+    )
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):

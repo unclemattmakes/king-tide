@@ -152,6 +152,27 @@ _RULES: tuple[_AutoTagRule, ...] = (
         kind="antigrav_curve",
         extras=lambda m: {},
     ),
+    # Road authoring curve. Mirrors the road tool's add_road_starter_curve
+    # operator (road.py): the swept road mesh ships as kind=track, the
+    # curve itself is stripped at export time. Auto-tag picks up renames
+    # or copy-paste from another .blend so the export pipeline + the
+    # road tool's _resolve_road_curve() find it by kind=road_curve
+    # (AuthoringKind.ROAD_CURVE).
+    _AutoTagRule(
+        name_re=re.compile(r"^road_curve_main$"),
+        object_type="CURVE",
+        kind="road_curve",
+        extras=lambda m: {},
+    ),
+    # Tunnel authoring curve. Same story as road_curve — the tunnel
+    # operator sweeps the curve into a kind=track mesh and strips the
+    # curve at export. Tagged kind=tunnel_curve (AuthoringKind.TUNNEL_CURVE).
+    _AutoTagRule(
+        name_re=re.compile(r"^tunnel_curve_main$"),
+        object_type="CURVE",
+        kind="tunnel_curve",
+        extras=lambda m: {},
+    ),
     _AutoTagRule(
         name_re=re.compile(r"^wave_zone_(\d+)$"),
         object_type="EMPTY",
@@ -246,23 +267,58 @@ _RULES: tuple[_AutoTagRule, ...] = (
 # ────────────────────────────────────────────────────────────────────
 
 
-def _maybe_auto_tag(obj: bpy.types.Object) -> bool:
-    """Apply the first matching rule to `obj` if its ``kind`` isn't
-    already set. Returns True if a tag was applied. Used by the
-    depsgraph handler, the load_post sweep, and the manual re-tag
-    operator. Cheap enough to call on every depsgraph update — at
-    most one regex match per rule plus a single dict lookup."""
+def _matching_rule(obj: bpy.types.Object) -> tuple[_AutoTagRule, "re.Match[str]"] | None:
+    """First rule whose name + type gate matches the object, or None.
+    Shared by tag + fill-missing paths so the lookup logic stays in one
+    place."""
     if obj is None:
-        return False
-    existing = obj.get("kind")
-    if existing not in (None, ""):
-        return False
+        return None
     for rule in _RULES:
         m = rule.name_re.match(obj.name)
         if m is None:
             continue
         if rule.object_type is not None and obj.type != rule.object_type:
             continue
+        return rule, m
+    return None
+
+
+def _missing_extras_for(obj: bpy.types.Object) -> dict[str, object]:
+    """Return the canonical extras (per the matching rule) that ``obj``
+    is missing. Compares by key membership, NOT by value — so a
+    ``start_t`` of ``0.0`` counts as "set", but the absence of the key
+    entirely counts as "missing". Returns an empty dict when there's
+    no matching rule or the rule's kind doesn't agree with the object's
+    existing tag (= author override, leave alone)."""
+    match = _matching_rule(obj)
+    if match is None:
+        return {}
+    rule, m = match
+    existing_kind = obj.get("kind")
+    # Author has explicitly chosen a different kind for this object —
+    # don't fill the rule's extras over their intent.
+    if existing_kind not in (None, "", rule.kind):
+        return {}
+    keys = set(obj.keys())
+    return {k: v for k, v in rule.extras(m).items() if k not in keys}
+
+
+def apply_canonical_tag(obj: bpy.types.Object, *, force: bool = False) -> bool:
+    """Public API for curve / empty / mesh add-operators to stamp the
+    canonical ``kind`` + extras for ``obj``'s name on the same rule
+    table the depsgraph auto-tagger uses. Guarantees parity between
+    operator-created objects and renamed-into-canonical-name objects
+    — no need to duplicate the kind / extras dict at the operator site.
+
+    ``force=True`` overwrites an existing ``kind`` (used by the
+    "promote selected curve into ai_spline_main" path in spline.py).
+    Without it, an object whose ``kind`` is already set to a value
+    other than the rule's kind is left alone (author override)."""
+    if force:
+        match = _matching_rule(obj)
+        if match is None:
+            return False
+        rule, m = match
         obj["kind"] = rule.kind
         for key, value in rule.extras(m).items():
             obj[key] = value
@@ -272,7 +328,55 @@ def _maybe_auto_tag(obj: bpy.types.Object) -> bool:
             except (AttributeError, RuntimeError):
                 pass
         return True
-    return False
+    return _maybe_auto_tag(obj, fill_missing=True)
+
+
+def _maybe_auto_tag(obj: bpy.types.Object, *, fill_missing: bool = False) -> bool:
+    """Apply the first matching rule to ``obj``. Returns True if any
+    change was made.
+
+    Default (``fill_missing=False``) is the conservative mode used by
+    the depsgraph handler: only tag objects that don't already have a
+    ``kind``. Skips otherwise — keeps the handler idempotent across
+    the noise of normal editing.
+
+    ``fill_missing=True`` is the manual re-tag mode: when a name
+    matches a known pattern, also fill in any missing extras keys on
+    objects that *already* carry the rule's kind. Doesn't overwrite
+    existing extras; doesn't change the kind if the author has set a
+    different one. Useful for objects authored before a rule's extras
+    expanded, or for empties duplicated from a partial template."""
+    if obj is None:
+        return False
+    match = _matching_rule(obj)
+    if match is None:
+        return False
+    rule, m = match
+    existing_kind = obj.get("kind")
+    fresh = existing_kind in (None, "")
+
+    if fresh:
+        obj["kind"] = rule.kind
+        for key, value in rule.extras(m).items():
+            obj[key] = value
+        if rule.visual is not None:
+            try:
+                rule.visual(obj)
+            except (AttributeError, RuntimeError):
+                pass
+        return True
+
+    # Already tagged. In fill-missing mode, top up any extras keys
+    # that aren't present yet — only when the existing kind agrees
+    # with the rule's kind (otherwise the author has overridden it).
+    if not fill_missing or existing_kind != rule.kind:
+        return False
+    missing = _missing_extras_for(obj)
+    if not missing:
+        return False
+    for key, value in missing.items():
+        obj[key] = value
+    return True
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -336,28 +440,51 @@ class HOVERBIKE_OT_retag_scene(Operator):
     bl_description = (
         "Apply canonical kind + default props to every object whose name matches "
         "a known pattern (start_NN, cp_NN, ai_spline_main, water_volume_main, "
-        "boost_NN, antigrav_NN, wave_zone_NN, pickup_NN, terrain) and doesn't "
-        "already carry a kind"
+        "boost_NN, antigrav_NN, wave_zone_NN, pickup_NN, terrain). Tags fresh "
+        "objects AND fills in any missing default extras on already-tagged "
+        "objects whose kind agrees with the rule"
     )
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-        tagged: list[str] = []
+        # Two-pass report — fresh tags and extras top-ups are both
+        # interesting but answer different questions ("did anything
+        # new get classified?" vs "did any pre-existing object get
+        # repaired?"). Compute the deltas before _maybe_auto_tag
+        # mutates the dict so we can see what was added.
+        tagged_fresh: list[str] = []
+        filled: list[tuple[str, list[str]]] = []
         for obj in bpy.data.objects:
             try:
-                if _maybe_auto_tag(obj):
-                    tagged.append(obj.name)
+                was_fresh = obj.get("kind") in (None, "")
+                missing_before = (
+                    list(_missing_extras_for(obj).keys()) if not was_fresh else []
+                )
+                if _maybe_auto_tag(obj, fill_missing=True):
+                    if was_fresh:
+                        tagged_fresh.append(obj.name)
+                    elif missing_before:
+                        filled.append((obj.name, missing_before))
             except (AttributeError, RuntimeError):
                 continue
-        if not tagged:
+
+        if not tagged_fresh and not filled:
             self.report(
                 {"INFO"},
-                "Nothing to tag — every name-matched object already has a kind set.",
+                "Nothing to do — every name-matched object is fully tagged.",
             )
             return {"FINISHED"}
-        preview = ", ".join(tagged[:6])
-        more = f" (+{len(tagged) - 6} more)" if len(tagged) > 6 else ""
-        self.report({"INFO"}, f"Tagged {len(tagged)} object(s): {preview}{more}.")
+
+        parts: list[str] = []
+        if tagged_fresh:
+            preview = ", ".join(tagged_fresh[:6])
+            more = f" (+{len(tagged_fresh) - 6})" if len(tagged_fresh) > 6 else ""
+            parts.append(f"tagged {len(tagged_fresh)}: {preview}{more}")
+        if filled:
+            preview = ", ".join(f"{n}({'+'.join(ks)})" for n, ks in filled[:4])
+            more = f" (+{len(filled) - 4})" if len(filled) > 4 else ""
+            parts.append(f"filled extras on {len(filled)}: {preview}{more}")
+        self.report({"INFO"}, "Re-tag: " + "; ".join(parts) + ".")
         return {"FINISHED"}
 
 

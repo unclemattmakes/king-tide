@@ -385,6 +385,27 @@ def _lint_track(scene) -> tuple[list[str], list[str]]:
     if terrain is None:
         warnings.append("No `kind=track` terrain mesh found. Tag your terrain mesh's `kind` to `track`.")
 
+    # Missing canonical extras: walk auto-tag's rules and surface any
+    # name-matched object that's missing default custom props (e.g. a
+    # `start_03` empty without `start_t`, an `emitter_NN` without
+    # `atlas_cell`). Re-tag Scene by Name will fill these in one click.
+    from .auto_tag import _missing_extras_for as _auto_tag_missing
+    missing_extras: list[tuple[str, list[str]]] = []
+    for obj in bpy.data.objects:
+        try:
+            keys = list(_auto_tag_missing(obj).keys())
+        except (AttributeError, RuntimeError):
+            continue
+        if keys:
+            missing_extras.append((obj.name, keys))
+    if missing_extras:
+        preview = ", ".join(f"{n}({'+'.join(ks)})" for n, ks in missing_extras[:6])
+        more = f" (+{len(missing_extras) - 6})" if len(missing_extras) > 6 else ""
+        warnings.append(
+            f"{len(missing_extras)} object(s) missing canonical extras: {preview}{more}. "
+            f"Click *Re-tag Scene by Name* to fill in defaults."
+        )
+
     return errors, warnings
 
 

@@ -155,8 +155,11 @@ def _add_road_starter_curve(scene) -> bpy.types.Object:
     spline.use_cyclic_u = False
     curve_data.resolution_u = 24
     obj = bpy.data.objects.new(ROAD_CURVE_NAME, curve_data)
-    obj["kind"] = "road_curve"
     scene.collection.objects.link(obj)
+    # Stamp kind + any future extras via the central rule table — keeps
+    # operator-created and rename-into-canonical-name objects identical.
+    from .auto_tag import apply_canonical_tag
+    apply_canonical_tag(obj)
     return obj
 
 
@@ -1281,6 +1284,11 @@ def rebuild_road_main(
                 "Blend Radius": float(scene.hoverbike_road_blend_radius),
                 "Lift": lift,
                 "Clearance": float(scene.hoverbike_road_conform_clearance),
+                # Seed water gate from the scene's water plane height
+                # so a bridged road over open ocean doesn't pull the
+                # seafloor up. Authors can retune in the modifier panel
+                # (Properties → Modifiers → HV_RoadConform → Water Level).
+                "Water Level": float(getattr(scene, "hoverbike_water_height", 0.0)),
             },
         )
 

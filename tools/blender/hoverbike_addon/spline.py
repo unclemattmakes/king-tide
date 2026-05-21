@@ -88,6 +88,49 @@ def sample_curve_at_t(curve_obj: bpy.types.Object, t: float) -> dict | None:
     return {"x": x, "y": y, "z": z, "tx": dx / tl, "ty": dy / tl}
 
 
+def nearest_t_on_curve(curve_obj: bpy.types.Object, x: float, y: float) -> float | None:
+    """Return the parameter t in [0, 1] of the closest point on
+    ``curve_obj``'s racing line (XY only) to world coordinates
+    (``x``, ``y``). Walks the polyline-sampled curve, projects (x, y)
+    onto each XY segment, and returns the arc-length fraction of the
+    closest projection. Mirrors the runtime's ``nearestT`` in
+    [src/engine/editor/placement.ts] so a Bind-to-Spline in Blender
+    picks the same t the in-app editor's Snap-to-spline would."""
+    from ._legacy import _sample_curve_to_polyline
+
+    raw = _sample_curve_to_polyline(curve_obj)
+    if len(raw) < 2:
+        return None
+    cum = [0.0]
+    for i in range(len(raw) - 1):
+        a, b = raw[i], raw[i + 1]
+        cum.append(cum[-1] + math.hypot(b[0] - a[0], b[1] - a[1]))
+    total = cum[-1]
+    if total <= 0:
+        return None
+
+    best_d2 = float("inf")
+    best_t = 0.0
+    for j in range(len(raw) - 1):
+        ax, ay = raw[j][0], raw[j][1]
+        bx, by = raw[j + 1][0], raw[j + 1][1]
+        dx, dy = bx - ax, by - ay
+        seg_len2 = dx * dx + dy * dy
+        if seg_len2 <= 0:
+            continue
+        # Project (x,y) onto AB, clamped to the segment.
+        u = ((x - ax) * dx + (y - ay) * dy) / seg_len2
+        u = max(0.0, min(1.0, u))
+        px, py = ax + dx * u, ay + dy * u
+        d2 = (x - px) ** 2 + (y - py) ** 2
+        if d2 < best_d2:
+            best_d2 = d2
+            seg_len = math.sqrt(seg_len2)
+            arc = cum[j] + u * seg_len
+            best_t = arc / total
+    return best_t
+
+
 def spline_source_for_placement(scene) -> bpy.types.Object | None:
     """Resolve the curve placement operators should sample. Mirrors
     the road tool's preference order so ``ai_spline_main`` is the
@@ -192,7 +235,16 @@ class HOVERBIKE_OT_snap_starts_to_spline(Operator):
         if curve is None:
             self.report({"ERROR"}, "No source curve found (need `ai_spline_main` or `road_curve_main`).")
             return {"CANCELLED"}
-        t = float(scene.hoverbike_placement_t)
+        # When the start is bound to the spline (= Bind to Spline was
+        # clicked), the start has its own t value that's authored via
+        # the start panel's slider — independent of the shared
+        # hoverbike_placement_t the ramp / helper tools use. Pre-bind
+        # one-shot Snap Starts (called from the Spline tools panel)
+        # still uses the shared t, matching the legacy behaviour.
+        if bool(getattr(scene, "hoverbike_start_bound_to_spline", False)):
+            t = float(scene.hoverbike_start_t)
+        else:
+            t = float(scene.hoverbike_placement_t)
         s = sample_curve_at_t(curve, t)
         if s is None:
             self.report({"ERROR"}, f"Couldn't sample {curve.name!r} at t={t}.")
@@ -208,8 +260,20 @@ class HOVERBIKE_OT_snap_starts_to_spline(Operator):
         # spawns on the river surface instead of below it.
         from .water import current_water_height_m
 
+        # Treat the scene as having water if ANY water object exists
+        # (water_volume_main / water_preview) or the sea-level prop is
+        # explicitly non-zero. The previous heuristic only honoured
+        # water_volume_main, which silently disabled the
+        # clamp-to-water-surface rule for newer scenes that only have a
+        # water_preview — bridges over open ocean snapped to the
+        # seafloor + hover instead of the water surface + hover.
         sea = current_water_height_m(scene)
-        water_z = sea if sea != 0.0 or bpy.data.objects.get("water_volume_main") is not None else float("-inf")
+        has_water = bool(
+            bpy.data.objects.get("water_volume_main")
+            or bpy.data.objects.get("water_preview")
+            or sea != 0.0
+        )
+        water_z = sea if has_water else float("-inf")
         origin = mathutils.Vector((s["x"], s["y"], 10000.0))
         down = mathutils.Vector((0.0, 0.0, -1.0))
         with _PreviewCollectionsHidden(bpy.context.view_layer):
@@ -251,6 +315,94 @@ class HOVERBIKE_OT_snap_starts_to_spline(Operator):
             f"Snapped {snapped} starts to {curve.name} @ t={t:.3f}"
             f"{water_note} ({spacing:.1f}m apart, hover {z_hover:.1f}m).",
         )
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_bind_start_to_spline(Operator):
+    """Bind ``start_00`` / ``start_01`` to ``ai_spline_main``: find the
+    curve parameter t closest to ``start_00``'s current XY, store it on
+    the scene as ``hoverbike_start_t``, set the bound flag, and run
+    Snap Starts so the pair lands on the racing line at that t with the
+    right spacing + yaw.
+
+    Mirrors the web editor's *Snap to spline* button (see
+    [editor-ui.ts:424]). After binding, sliding the *t* slider on the
+    Start panel re-snaps both empties live (debounced) and editing
+    ``ai_spline_main``'s control points repositions them too — same
+    "bound entity follows the curve" experience the in-app editor
+    offers."""
+
+    bl_idname = "hoverbike.bind_start_to_spline"
+    bl_label = "Bind Start to Spline"
+    bl_description = (
+        "Lock start_00/01 to ai_spline_main at the nearest curve point. "
+        "After binding, the t slider slides the start along the curve and "
+        "spline edits reposition the start automatically"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            bpy.data.objects.get("start_00") is not None
+            and spline_source_for_placement(context.scene) is not None
+        )
+
+    def execute(self, context):
+        scene = context.scene
+        curve = spline_source_for_placement(scene)
+        if curve is None:
+            self.report({"ERROR"}, "No source curve (need `ai_spline_main` or `road_curve_main`).")
+            return {"CANCELLED"}
+        start_00 = bpy.data.objects.get("start_00")
+        if start_00 is None:
+            self.report({"ERROR"}, "No `start_00` empty in the scene — click *Add Player Starts* first.")
+            return {"CANCELLED"}
+        loc = start_00.matrix_world.translation
+        t = nearest_t_on_curve(curve, float(loc.x), float(loc.y))
+        if t is None:
+            self.report({"ERROR"}, f"Couldn't find a nearest point on {curve.name!r}.")
+            return {"CANCELLED"}
+
+        # Write the bound state + t BEFORE calling snap so the operator
+        # picks up the new t (see HOVERBIKE_OT_snap_starts_to_spline:
+        # the bound branch reads hoverbike_start_t). Use the RNA
+        # setter (attribute access), NOT scene["..."] — registered
+        # BoolProperty values written via the ID-dict path don't
+        # always round-trip through getattr; same gotcha that bit
+        # `current_water_height_m` reading via scene.get().
+        scene.hoverbike_start_bound_to_spline = True
+        scene.hoverbike_start_t = float(t)
+
+        snap_result = bpy.ops.hoverbike.snap_starts_to_spline()
+        if snap_result == {"FINISHED"}:
+            self.report(
+                {"INFO"},
+                f"Bound start_00/01 to {curve.name} @ t={t:.3f}. "
+                "Drag the t slider to slide; edit the curve to follow.",
+            )
+            return {"FINISHED"}
+        return {"CANCELLED"}
+
+
+class HOVERBIKE_OT_unbind_start_from_spline(Operator):
+    """Release the start pair from ``ai_spline_main`` so the empties
+    can be free-placed by hand again. Doesn't move the starts — they
+    stay where they were when the bind was released. Mirrors the web
+    editor's *Unbind from spline* button."""
+
+    bl_idname = "hoverbike.unbind_start_from_spline"
+    bl_label = "Unbind Start from Spline"
+    bl_description = (
+        "Release start_00/01 from the racing line. Empties stay where they "
+        "are; subsequent spline / t edits no longer re-snap them"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scene = context.scene
+        scene.hoverbike_start_bound_to_spline = False
+        self.report({"INFO"}, "Start unbound — free-placement mode. Drag the empties or re-Bind.")
         return {"FINISHED"}
 
 
@@ -660,8 +812,12 @@ class HOVERBIKE_OT_add_ai_spline(Operator):
                 active.data.name = "ai_spline_main"
             except Exception:
                 pass
-            active["kind"] = "ai_spline"
-            active["branch"] = "main"
+            # Force canonical tag — this path explicitly overrides whatever
+            # kind the source curve had (e.g. a road_curve user is promoting
+            # to the racing line), so we want apply_canonical_tag's force
+            # mode to overwrite kind + apply all rule extras.
+            from .auto_tag import apply_canonical_tag
+            apply_canonical_tag(active, force=True)
             for sp in active.data.splines:
                 sp.use_cyclic_u = True
                 if sp.type == "NURBS":
@@ -706,9 +862,10 @@ class HOVERBIKE_OT_add_ai_spline(Operator):
         spl.use_endpoint_u = True
         spl.use_cyclic_u = True
         obj = bpy.data.objects.new("ai_spline_main", curve)
-        obj["kind"] = "ai_spline"
-        obj["branch"] = "main"
         context.scene.collection.objects.link(obj)
+        # Canonical tag via the auto_tag rule (kind=ai_spline, branch=main).
+        from .auto_tag import apply_canonical_tag
+        apply_canonical_tag(obj)
 
         # Select + make active so the author can immediately enter edit
         # mode to reshape — that's almost always the next step.
@@ -860,6 +1017,8 @@ class HOVERBIKE_OT_scaffold_track_essentials(Operator):
 _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_cursor_snap_to_spline,
     HOVERBIKE_OT_snap_starts_to_spline,
+    HOVERBIKE_OT_bind_start_to_spline,
+    HOVERBIKE_OT_unbind_start_from_spline,
     HOVERBIKE_OT_add_ramp_at_spline_t,
     HOVERBIKE_OT_auto_place_ramps,
     HOVERBIKE_OT_shift_spline_off_obstacles,
@@ -869,6 +1028,19 @@ _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_add_starts,
     HOVERBIKE_OT_scaffold_track_essentials,
 )
+
+
+def _on_start_t_changed(self, context):
+    """Live re-snap when the start is bound. Calling snap directly here
+    would fire mid-property-write (Blender re-enters update callbacks);
+    instead we ask the handler module to schedule its debounced rebuild
+    so the actual operator runs on the next timer tick."""
+    if bool(getattr(self, "hoverbike_start_bound_to_spline", False)):
+        try:
+            from . import handlers as _handlers
+            _handlers._schedule_rebuild("starts")
+        except Exception:
+            pass
 
 
 def register() -> None:
@@ -901,6 +1073,27 @@ def register() -> None:
         name="Start spacing (m)",
         description="Lateral distance between start_00 and start_01 when snapped to the racing line.",
         default=4.0, min=0.5, max=20.0, precision=1,
+        update=_on_start_t_changed,
+    )
+    bpy.types.Scene.hoverbike_start_t = FloatProperty(
+        name="Start t",
+        description=(
+            "Parameter in [0, 1] where the player-start pair sits along "
+            "ai_spline_main when bound. Independent of `hoverbike_placement_t` "
+            "(which is shared with ramps / helpers). Editing this slides the "
+            "bound start along the curve live."
+        ),
+        default=0.0, min=0.0, max=1.0, precision=3,
+        update=_on_start_t_changed,
+    )
+    bpy.types.Scene.hoverbike_start_bound_to_spline = BoolProperty(
+        name="Start bound to spline",
+        description=(
+            "When true, start_00/01 follow ai_spline_main: editing the t "
+            "slider or moving the spline reposes them. Set via Bind / Unbind "
+            "operators in the Start sub-panel."
+        ),
+        default=False,
     )
 
 
@@ -911,6 +1104,8 @@ def unregister() -> None:
         "hoverbike_auto_ramp_kappa",
         "hoverbike_auto_ramp_min_spacing",
         "hoverbike_start_grid_spacing",
+        "hoverbike_start_t",
+        "hoverbike_start_bound_to_spline",
     ):
         try:
             delattr(bpy.types.Scene, prop)
