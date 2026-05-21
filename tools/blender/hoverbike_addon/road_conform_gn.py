@@ -85,6 +85,8 @@ DEFAULT_CLEARANCE = 0.20     # terrain stays this far below road surface
 DEFAULT_STRENGTH = 1.0       # master multiplier (0 disables)
 DEFAULT_RESAMPLE = 512       # dense curve sample count for Proximity
 DEFAULT_BANK_STRENGTH = 1.0  # multiplier on per-CP curve tilt (0 = flat)
+DEFAULT_WATER_LEVEL = 0.0    # source verts below this Z don't get conformed
+DEFAULT_WATER_FEATHER = 0.5  # smoothstep width above water_level for soft coast
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -175,6 +177,16 @@ def build_road_conform_node_group() -> bpy.types.NodeTree:
                 DEFAULT_STRENGTH, 0.0, 1.0)
     _new_socket(g, "Bank Strength", "INPUT",  "NodeSocketFloat",
                 DEFAULT_BANK_STRENGTH, 0.0, 4.0)
+    # Water Level — source-terrain vertices whose Z is below this value
+    # are excluded from the conform. Default 0 matches the scene's
+    # `hoverbike_water_height` default; Build Road overrides on first
+    # creation. Keeps bridges over open water from "popping" the seafloor
+    # up to the road's altitude. Set Water Feather = 0 for a hard cliff
+    # edge at the waterline, raise it for a softer beach transition.
+    _new_socket(g, "Water Level",   "INPUT",  "NodeSocketFloat",
+                DEFAULT_WATER_LEVEL, -1000.0, 1000.0)
+    _new_socket(g, "Water Feather", "INPUT",  "NodeSocketFloat",
+                DEFAULT_WATER_FEATHER, 0.0, 50.0)
     _new_socket(g, "Resample Count", "INPUT", "NodeSocketInt",
                 DEFAULT_RESAMPLE, 16, 8192)
     _new_socket(g, "Geometry",      "OUTPUT", "NodeSocketGeometry")
@@ -368,6 +380,30 @@ def build_road_conform_node_group() -> bpy.types.NodeTree:
     g.links.new(n_blend.outputs["Result"], n_blend_scaled.inputs[0])
     g.links.new(p_in.outputs["Strength"], n_blend_scaled.inputs[1])
 
+    # ── Water gate: zero displacement under the waterline ───────────
+    # For each source-terrain vertex, smoothstep from full strength
+    # (vert.z >= water_level + feather) down to zero (vert.z <=
+    # water_level). The feather band keeps coastlines from showing a
+    # hard horizontal cut where the road's blend radius reaches into
+    # shoreline geometry; set Water Feather = 0 for a clean cliff.
+    # `n_pos_xyz` was created above at -700 and exposes the source
+    # vertex's Z — we route it through Map Range to produce the gate.
+    n_water_top = _add_node(g, "ShaderNodeMath", 500, 500, operation="ADD")
+    g.links.new(p_in.outputs["Water Level"], n_water_top.inputs[0])
+    g.links.new(p_in.outputs["Water Feather"], n_water_top.inputs[1])
+    n_water_gate = _add_node(g, "ShaderNodeMapRange", 700, 500,
+                             interpolation_type="SMOOTHSTEP", clamp=True)
+    g.links.new(n_pos_xyz.outputs["Z"], n_water_gate.inputs["Value"])
+    g.links.new(p_in.outputs["Water Level"], n_water_gate.inputs["From Min"])
+    g.links.new(n_water_top.outputs[0], n_water_gate.inputs["From Max"])
+    n_water_gate.inputs["To Min"].default_value = 0.0
+    n_water_gate.inputs["To Max"].default_value = 1.0
+
+    n_blend_gated = _add_node(g, "ShaderNodeMath", 900, 400,
+                              operation="MULTIPLY")
+    g.links.new(n_blend_scaled.outputs[0], n_blend_gated.inputs[0])
+    g.links.new(n_water_gate.outputs["Result"], n_blend_gated.inputs[1])
+
     # ── Banking: tilt the target around the road tangent ────────────
     # Mirror of road._conform_terrain_to_road (lines 967-992): at the
     # nearest point, compute the LEFT-perpendicular unit vector in XY
@@ -467,7 +503,7 @@ def build_road_conform_node_group() -> bpy.types.NodeTree:
     # for non-uniform vector mixing). Address by index so we wire the
     # float-factor side unambiguously. A=2, B=3, Result=0 for FLOAT.
     n_mix_z = _add_node(g, "ShaderNodeMix", 700, 0, data_type="FLOAT")
-    g.links.new(n_blend_scaled.outputs[0], n_mix_z.inputs[0])  # Factor (float)
+    g.links.new(n_blend_gated.outputs[0], n_mix_z.inputs[0])   # Factor (float, water-gated)
     g.links.new(n_pos_xyz.outputs["Z"], n_mix_z.inputs[2])     # A
     g.links.new(n_target_z.outputs[0], n_mix_z.inputs[3])      # B
 
@@ -489,7 +525,7 @@ def build_road_conform_node_group() -> bpy.types.NodeTree:
     n_clear_eff = _add_node(g, "ShaderNodeMath", 700, -200,
                             operation="MULTIPLY")
     g.links.new(p_in.outputs["Clearance"], n_clear_eff.inputs[0])
-    g.links.new(n_blend_scaled.outputs[0], n_clear_eff.inputs[1])
+    g.links.new(n_blend_gated.outputs[0], n_clear_eff.inputs[1])
     n_cap = _add_node(g, "ShaderNodeMath", 900, -150,
                       operation="SUBTRACT")
     g.links.new(n_target_z.outputs[0], n_cap.inputs[0])
@@ -684,10 +720,14 @@ def attach_road_conform_modifier(
     sibling helper / depsgraph cleanup — out of scope here)."""
     ng = bpy.data.node_groups.get(NODE_GROUP_NAME)
     # Rebuild the node group if the cached version is from an older
-    # addon revision (= missing the Source Terrain socket added when
-    # the proxy decoupling landed). Easier than trying to patch the
-    # interface in-place.
-    if ng is None or _socket_id(ng, "Source Terrain") is None:
+    # addon revision (missing sockets added in later revisions). Easier
+    # than trying to patch the interface in-place. Probe the latest
+    # socket added — currently Water Level (water-gate revision).
+    if (
+        ng is None
+        or _socket_id(ng, "Source Terrain") is None
+        or _socket_id(ng, "Water Level") is None
+    ):
         ng = build_road_conform_node_group()
 
     # Migration: the previous architecture put HV_RoadConform on the

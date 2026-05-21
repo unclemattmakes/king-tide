@@ -157,9 +157,11 @@ def _add_antigrav_curve(scene, *, location: mathutils.Vector) -> bpy.types.Objec
         bp.handle_right_type = "AUTO"
     spline.use_cyclic_u = False
     obj = bpy.data.objects.new(name, curve_data)
-    obj["kind"] = "antigrav_curve"
     obj.location = location.copy()
     scene.collection.objects.link(obj)
+    # Canonical tag via auto_tag (matches antigrav_curve_NN regex).
+    from .auto_tag import apply_canonical_tag
+    apply_canonical_tag(obj)
     return obj
 
 

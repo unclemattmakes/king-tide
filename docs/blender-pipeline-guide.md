@@ -345,7 +345,11 @@ to its altitude profile and decorates the edges with F1-style curbs.
    Tune the modifier sockets in Properties → Modifiers → HV_RoadConform:
    *Inner Radius* (full conform inside this XY band), *Blend Radius*
    (smoothstep falloff outside), *Lift*, *Clearance*, *Strength*
-   (master 0–1), *Bank Strength* (per-CP tilt multiplier).
+   (master 0–1), *Bank Strength* (per-CP tilt multiplier), *Water
+   Level* + *Water Feather* (source-terrain verts below this Z are
+   excluded from the conform — seeded from the scene's water height
+   so bridges over open ocean don't pull the seafloor up; set
+   Feather = 0 for a hard cliff at the waterline).
 
 7. **Edit the curve — the road follows automatically.** After Build
    Road has run once, the depsgraph handler in `handlers.py` watches

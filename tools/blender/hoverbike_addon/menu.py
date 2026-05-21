@@ -189,7 +189,16 @@ class HOVERBIKE_MT_add(Menu):
 
         layout.separator()
         layout.label(text="Environment")
-        layout.operator("hoverbike.add_water_volume", icon="MOD_FLUIDSIM")
+        layout.operator(
+            "hoverbike.rebuild_water_preview",
+            text="Add Water Preview",
+            icon="MOD_OCEAN",
+        )
+        layout.operator(
+            "hoverbike.add_water_volume",
+            text="Add Water Volume (wave overrides)",
+            icon="MOD_FLUIDSIM",
+        )
         layout.operator(
             "hoverbike.add_horizon_ring", text="Horizon Ring", icon="WORLD"
         )
@@ -231,7 +240,7 @@ class HOVERBIKE_MT_build(Menu):
         layout.operator(
             "hoverbike.attach_road_conform",
             text="Attach Live Road Conform",
-            icon="MOD_NODES",
+            icon="GEOMETRY_NODES",
         )
         layout.operator("hoverbike.build_road", icon="MESH_PLANE")
         layout.operator(
@@ -291,7 +300,7 @@ class HOVERBIKE_MT_build(Menu):
         layout.label(text="Previews — environment")
         layout.operator(
             "hoverbike.rebuild_water_preview",
-            text="Rebuild Water Preview",
+            text="Add / Rebuild Water Preview",
             icon="MOD_OCEAN",
         )
         layout.operator(
@@ -340,6 +349,16 @@ class HOVERBIKE_MT_spline(Menu):
             "hoverbike.cursor_snap_to_spline",
             text="Cursor → spline @ t",
             icon="PIVOT_CURSOR",
+        )
+        layout.operator(
+            "hoverbike.bind_start_to_spline",
+            text="Bind Start to Spline",
+            icon="LINKED",
+        )
+        layout.operator(
+            "hoverbike.unbind_start_from_spline",
+            text="Unbind Start from Spline",
+            icon="UNLINKED",
         )
         layout.operator(
             "hoverbike.snap_starts_to_spline",

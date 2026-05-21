@@ -40,7 +40,9 @@ _WATCHED_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # road curve when there's no dedicated road_curve_main — edits
     # here rebuild the road mesh too so authors who use a single
     # curve for both racing line and road see the road follow live.
-    ("ai_spline_main",   ("gates", "turns", "helper", "road")),
+    # "starts" is conditional on the scene's bound flag — the
+    # dispatch in _run_pending_rebuilds skips when not bound.
+    ("ai_spline_main",   ("gates", "turns", "helper", "road", "starts")),
     ("road_curve_main",  ("road",)),
     ("start_00",         ("racer",)),
     ("water_volume_main", ("water",)),
@@ -111,6 +113,17 @@ def _run_pending_rebuilds():
     if "racer" in pending and bpy.data.collections.get(RACER_PREVIEW_COLLECTION):
         try:
             _previews_mod._rebuild_racer_preview(scene)
+        except (RuntimeError, AttributeError):
+            pass
+
+    # Bound-start re-snap: when the user has bound the start pair to
+    # ai_spline_main, edits to the curve (or to hoverbike_start_t /
+    # spacing via property update callbacks) should re-derive
+    # start_00/01 positions. Calling bpy.ops here is safe — we're on
+    # the timer tick, outside the depsgraph update loop.
+    if "starts" in pending and bool(getattr(scene, "hoverbike_start_bound_to_spline", False)):
+        try:
+            bpy.ops.hoverbike.snap_starts_to_spline()
         except (RuntimeError, AttributeError):
             pass
 
