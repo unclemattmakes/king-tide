@@ -659,9 +659,43 @@ class HOVERBIKE_PT_track_road(_SelectionDrivenPanel, Panel):
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_road_conform_clearance", text="Clearance")
         row.prop(scene, "hoverbike_road_fill_shelf_width", text="Fill shelf")
+        # Non-destructive iteration flow.
+        # 1. Snap Curve — one-shot raycast that drops each curve CP
+        #    onto the terrain surface (= seeds sane Z values).
+        # 2. Build Road — builds the road strip mesh AND auto-attaches
+        #    the live HV_RoadConform modifier on the terrain. Re-run
+        #    as often as you like — never mutates terrain verts.
+        # Attach Conform stays surfaced separately for cases where the
+        # author wants to wire the modifier without rebuilding the road
+        # mesh (rare — e.g. resuming live editing after a destructive
+        # bake disabled the modifier).
+        layout.separator()
+        layout.label(text="Build (non-destructive):")
+        row = layout.row(align=True)
+        row.operator(
+            "hoverbike.snap_curve_to_terrain",
+            text="Snap Curve",
+            icon="SNAP_ON",
+        )
+        row.operator(
+            "hoverbike.attach_road_conform",
+            text="Attach Conform",
+            icon="MOD_NODES",
+        )
         row = layout.row(align=True)
         row.scale_y = 1.2
         row.operator("hoverbike.build_road", icon="MESH_PLANE")
+        # Destructive bake — for the rare export-time pass when the
+        # destructive flow's extra features (multi-segment push-down,
+        # auto-bank, fill shelf) need to land in the .blend mesh.
+        layout.separator()
+        layout.label(text="Bake to mesh (destructive — for export polish):")
+        row = layout.row(align=True)
+        row.operator(
+            "hoverbike.bake_terrain_to_road",
+            text="Bake Terrain to Road",
+            icon="MOD_SHRINKWRAP",
+        )
         row.operator(
             "hoverbike.reconform_terrain_to_road",
             text="Re-conform",

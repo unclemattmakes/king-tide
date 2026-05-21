@@ -68,6 +68,7 @@ from . import (
     previews,
     ramp,
     road,
+    road_conform_gn,
     sky_preset,
     spline,
     terrain,
@@ -109,6 +110,11 @@ _MODULES = (
     downtown,
     tunnel,
     road,
+    # road_conform_gn ships the live, non-destructive HV_RoadConform
+    # GN modifier flow. Registers after `road` so it can lazily import
+    # ROAD_CURVE_NAME / _resolve_road_curve from there at operator
+    # execution time without an import cycle.
+    road_conform_gn,
     previews,
     thumbnail,
     export,

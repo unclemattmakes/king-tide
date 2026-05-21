@@ -840,10 +840,17 @@ material assignment + face winding tweak.**
 - **The cursor's rotation_euler is read on add_ramp but lost on
   re-add.** Re-rotating the cursor between placements is finicky.
   Operator-level rotation arg would help.
-- **No undo for the road build.** A bad spline tweak → Build Road →
+- ~~**No undo for the road build.** A bad spline tweak → Build Road →
   the terrain gets re-conformed cumulatively. Ctrl+Z reverses ONE
   vertex pass; the iterations remain. A pre-build snapshot would let
-  the operator unwind cleanly.
+  the operator unwind cleanly.~~ **Obsolete (2026-05-20)** — fixed by
+  the live `HV_RoadConform` Geometry Nodes modifier in
+  `road_conform_gn.py`. The terrain mesh is no longer mutated; the
+  curve is the source of truth and the GN modifier reshapes the
+  terrain procedurally. *Attach Conform* + *Snap Curve* in the road
+  sub-panel. The destructive `Build Road` remains as the export-time
+  bake for high-fidelity bank / float / push-down features that
+  haven't been ported to GN nodes yet.
 - **Snap-to-terrain hits anything with `kind=track`.** Including the
   road itself if it's already been built. Workaround is currently to
   hide road_main before snapping. The snap operator should know to

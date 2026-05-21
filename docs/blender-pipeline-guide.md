@@ -328,21 +328,75 @@ to its altitude profile and decorates the edges with F1-style curbs.
      side strip.
    - *Stripe (m)* (2.0) — length of each red / white stripe along the
      road.
-5. **Build Road** samples the curve, conforms the terrain to the
-   sampled altitude in a `width/2 + curb_width + blend_radius` band,
-   then emits the road mesh tagged `kind=track` with materials:
-   - `mat_track_road` (asphalt, slot 0)
-   - `mat_track_curb_white` (slot 1)
-   - `mat_track_curb_red` (slot 2)
+5. **Snap Curve to Terrain** drops every control point of
+   `road_curve_main` straight down onto the terrain surface — one-shot
+   raycast, seeds sane Z values on the curve. Doesn't touch the
+   terrain. Skip points marked Float (`weight_softbody > 0.5`) so
+   bridges and ramps keep their authored height.
+6. **Build Road** builds the road strip mesh tagged `kind=track`
+   (materials: `mat_track_road` asphalt slot 0, `mat_track_curb_white`
+   slot 1, `mat_track_curb_red` slot 2, `mat_track_road_underside`
+   slot 3 when a slab thickness is set) AND auto-attaches the live
+   `HV_RoadConform` Geometry Nodes modifier on the terrain. The
+   modifier reshapes the terrain inside the conform band on every
+   evaluation — no vertex mutation, no drift, repeatable as many
+   times as you want.
 
-**Active modifiers on terrain.** Geometry-Nodes graphs (the
-`HV_Island` template, Displace, Subsurf, etc.) override raw vertex
-edits and can stack their displacement on top of the road tool's
-flatten, producing terrain spikes through the road. The operator
-errors out by default; toggle *Apply modifiers first* in the redo
-panel to bake the modifier into the source mesh before deforming.
-This is one-way — you lose parametric tunability of the procedural
-template once it's applied, so save the .blend first.
+   Tune the modifier sockets in Properties → Modifiers → HV_RoadConform:
+   *Inner Radius* (full conform inside this XY band), *Blend Radius*
+   (smoothstep falloff outside), *Lift*, *Clearance*, *Strength*
+   (master 0–1), *Bank Strength* (per-CP tilt multiplier).
+
+7. **Edit the curve — the road follows automatically.** After Build
+   Road has run once, the depsgraph handler in `handlers.py` watches
+   `road_curve_main` (or `ai_spline_main` when it's the fallback) and
+   re-runs the road mesh build ~0.2s after the last edit. Drag
+   handles in edit mode, Tab back to object mode, watch the road
+   reshape with no manual re-click. The same debounced auto-rebuild
+   fires when you tweak any of the road scene properties (width,
+   lift, blend radius, curbs, bank — anything that affects geometry).
+
+**Active terrain modifiers are fine.** Stack `HV_RoadConform` on top
+of `HV_Island`, heightmap displace, hand sculpt — any combination
+works. The conform pass is the last thing that runs before the mesh
+is rendered, so the road carves through whatever procedural shape is
+underneath. Export is unaffected: the glTF exporter applies
+viewport-visible modifiers on the way out (`export_apply=True` in
+`export.py`).
+
+**Banked roads.** Set per-control-point tilt in N-panel → Curve →
+Tilt (or Ctrl+T in edit mode on selected points). Positive tilt
+lifts the road's right side and dips the left; the conform modifier
+reads each CP's tilt at the nearest curve point and tilts the
+target Z around the road tangent so terrain follows the banked
+cross-section. Master *Bank Strength* slider scales every CP's
+effect (set to 0 to disable banking without losing the authored
+per-CP tilts).
+
+#### Bake to mesh — destructive, for export polish only
+
+For most tracks the non-destructive flow above is the full pipeline.
+The destructive **Bake Terrain to Road** operator exists for the
+rare export-time pass when you need one of these features baked into
+the .blend mesh:
+
+* Curvature-driven *auto-bank* added on top of per-CP tilt. The
+  live conform reads CP tilt only.
+* Per-CP float/conform weight — the destructive bake respects the
+  full conform-weight blend. The live conform always conforms inside
+  the band (Snap Curve respects float-mode for the seed pass but
+  the modifier doesn't gate on it yet).
+* "Always push down lowest segment" rule for overpasses or
+  doubled-back roads.
+* Downhill *fill shelf* embankment widening.
+
+Use it like this: iterate to taste with **Build Road**; when the
+layout is locked, click **Bake Terrain to Road** with *Apply
+modifiers first* on (if you have a procedural terrain modifier you
+need to flatten too). It auto-disables `HV_RoadConform` for its
+duration and leaves it disabled so the bake's vertex edits aren't
+double-counted. Toggle the modifier back on to resume live editing,
+or leave it off and ship the baked mesh.
 
 ### Tunnels
 

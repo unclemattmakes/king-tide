@@ -426,6 +426,7 @@ def _sample_road_path(
     *,
     n_samples: int,
     smooth_passes: int,
+    use_curve_z: bool = False,
 ) -> list[dict]:
     """Sample `curve_obj` at `n_samples` arc-length steps, raycast each
     sample down onto the scene's terrain, smooth the resulting Z
@@ -435,7 +436,18 @@ def _sample_road_path(
 
     Preview collections are hidden during the raycast so gizmos can't
     catch the ray. The terrain object is preferred but any other
-    `kind=track` mesh under the curve will also produce hits."""
+    `kind=track` mesh under the curve will also produce hits.
+
+    When ``use_curve_z=True`` the raycast is skipped entirely and each
+    sample's Z is taken straight from the curve's authored Z. This is
+    the non-destructive flow: the curve is the source of truth for
+    altitude (seeded once via *Snap Curve to Terrain* and edited
+    directly afterwards), so raycasting would just re-read terrain
+    that the HV_RoadConform modifier has already pulled to the curve
+    — producing iterative drift. Per-CP conform weight is still
+    respected — fully-floating points (weight ≤ 0.001) already use
+    authored Z regardless of mode, but in curve-Z mode every sample
+    behaves that way uniformly."""
     from ._legacy import _PreviewCollectionsHidden, _sample_curve_to_polyline
 
     raw = _sample_curve_to_polyline(curve_obj)
@@ -503,6 +515,21 @@ def _sample_road_path(
     # the terrain-or-water-floor Z, weighted by the per-sample conform
     # weight. Fully-floating samples (weight = 0) skip the cast and
     # the floor entirely — the authored Z is final.
+    # Non-destructive path: skip the raycast block entirely. samples[*]
+    # already have ``z = _authored_z`` from the polyline-walk loop
+    # above, so the smoothing pass below operates on curve-authored Z.
+    if use_curve_z:
+        for _ in range(max(0, int(smooth_passes))):
+            new_z = []
+            n = len(samples)
+            for i in range(n):
+                zp = samples[max(0, i - 1)]["z"]
+                zn = samples[min(n - 1, i + 1)]["z"]
+                new_z.append((zp + samples[i]["z"] * 2 + zn) / 4.0)
+            for i, z in enumerate(new_z):
+                samples[i]["z"] = z
+        return samples
+
     water_floor = _terrain_water_floor(bpy.context.scene)
     down = mathutils.Vector((0.0, 0.0, -1.0))
     ray_origin_z = 10000.0
@@ -607,7 +634,17 @@ def _build_road_strip_mesh(
     for s in samples:
         nx = -s["ty"]
         ny = s["tx"]
-        z_road = s["z"] + lift
+        # The road's BOTTOM face sits at `curve_z + lift`; the asphalt
+        # top is `thickness` above that. Was previously the other way
+        # around — asphalt top at `curve_z + lift`, slab bottom going
+        # `thickness` BELOW the curve. That meant the bottom face was
+        # `thickness - clearance` (≈ 0.4 m on defaults) deeper than
+        # the HV_RoadConform target, so the underside punched through
+        # the conformed terrain shelf on hillsides. Curve-as-bottom
+        # matches the user mental model (road sits on the curve) and
+        # makes the conform target (`curve_z + lift - clearance`)
+        # land just below the slab bottom — no clip-through.
+        z_road = s["z"] + lift + thickness
         # Per-sample radius from the curve's control-point `radius`
         # field (linearly interpolated, default 1.0). Scales width and
         # curb-band horizontally so apexes can be wider than straights.
@@ -1098,25 +1135,268 @@ class HOVERBIKE_OT_add_road_starter_curve(Operator):
         return {"FINISHED"}
 
 
-class HOVERBIKE_OT_build_road(Operator):
-    """Sample `road_curve_main` along its arc length, raycast onto the
-    terrain to get each sample's altitude, smooth the height profile,
-    build a road-strip mesh with `mat_track_road`, and deform the
-    terrain so it conforms to the road in a `width + blend_radius` band.
-    Re-runs replace any prior road mesh; the terrain deformation
-    accumulates, so undo (Ctrl+Z) is your friend during iteration.
+def rebuild_road_main(
+    scene: bpy.types.Scene,
+    *,
+    re_enable_modifier: bool = False,
+) -> dict | None:
+    """Rebuild the ``road_main`` mesh from the current road curve +
+    scene props and (re)attach the HV_RoadConform modifier on the
+    terrain. The single source of truth shared by:
 
-    If the terrain has active modifiers (e.g. a Geometry Nodes
-    procedural island), they'd override the road's vertex edits — or
-    worse, add their displacement on top so the terrain spikes upward.
-    Toggle *Apply modifiers first* to bake them in before deforming
-    (one-way: GN parametric tunability is lost in exchange for a
-    drivable road)."""
+      * ``HOVERBIKE_OT_build_road`` — explicit user click.
+      * The depsgraph live-rebuild handler in ``handlers.py`` —
+        watches ``road_curve_main`` / ``ai_spline_main`` and fires
+        this function ~0.2 s after the last edit so the road mesh
+        always tracks the curve without manual rebuild.
+
+    Returns a dict ``{"samples": int, "width": float, "terrain":
+    str, "live_modifier_was_re_enabled": bool}`` on success, or
+    ``None`` if there's no curve / no terrain / a degenerate curve
+    (handler can quietly skip; operator can surface an error).
+
+    Idempotent: replaces any existing ``road_main`` mesh and refreshes
+    the modifier's socket values from scene props. ``re_enable_modifier``
+    is False by default so the live handler doesn't second-guess a
+    user who explicitly disabled HV_RoadConform; the operator sets
+    True so clicking Build Road brings the modifier back."""
+    from .road_conform_gn import (
+        attach_road_conform_modifier,
+        find_source_terrain,
+        MODIFIER_NAME as ROAD_CONFORM_MOD_NAME,
+    )
+
+    curve_obj = _resolve_road_curve()
+    if curve_obj is None:
+        return None
+
+    # find_source_terrain is proxy-aware: returns the source mesh
+    # (tagged kind="terrain_source" once HV_RoadConform has been
+    # attached, else the largest kind=track mesh excluding road_main
+    # and the proxy itself). In bare road-only scenes there's no
+    # terrain at all — skip the conform attach and just build the
+    # road mesh.
+    terrain = find_source_terrain()
+
+    # Wipe any prior road_main BEFORE sampling. CAPTURE its name only —
+    # not the Python wrapper — because removing the object invalidates
+    # any other variables that point at it (causes ReferenceError when
+    # those are later dereferenced). Important: if the caller passed
+    # us a stale `terrain` that aliases the old road_main, that path
+    # is already short-circuited by the rename check above.
+    old_road = bpy.data.objects.get(ROAD_OBJECT_NAME)
+    if old_road is not None:
+        old_road_mesh = old_road.data
+        bpy.data.objects.remove(old_road, do_unlink=True)
+        if isinstance(old_road_mesh, bpy.types.Mesh) and old_road_mesh.users == 0:
+            bpy.data.meshes.remove(old_road_mesh)
+
+    # Sample the curve's authored Z directly — no raycast onto
+    # terrain. Iterating the curve XY → re-building the road mesh
+    # would otherwise drift each pass because the terrain it casts
+    # against has already been pulled toward the curve by
+    # HV_RoadConform. The author seeds curve Z with *Snap Curve to
+    # Terrain* once and edits handles freely afterwards.
+    samples = _sample_road_path(
+        curve_obj,
+        terrain,
+        n_samples=int(scene.hoverbike_road_samples),
+        smooth_passes=int(scene.hoverbike_road_smooth_passes),
+        use_curve_z=True,
+    )
+    if len(samples) < 2:
+        return None
+
+    width = float(scene.hoverbike_road_width)
+    lift = float(scene.hoverbike_road_lift)
+    curb_width = float(scene.hoverbike_road_curb_width)
+    curb_height = float(scene.hoverbike_road_curb_height)
+    curb_stripe = float(scene.hoverbike_road_curb_stripe_length)
+    thickness = float(scene.hoverbike_road_thickness)
+    bank_max_rad = math.radians(float(scene.hoverbike_road_bank_max_deg))
+    bank_smooth_passes = int(scene.hoverbike_road_bank_smooth_passes)
+
+    # Stamp the bank angle on each sample. Pass `bank_strength=0`
+    # so `_compute_per_sample_bank` returns per-CP tilt only — no
+    # curvature-driven auto-bank. This matches the HV_RoadConform
+    # GN modifier, which reads per-CP tilt only. Without this
+    # match, the road mesh tilts further than the conform target
+    # on every banked curve and the road clips into the terrain
+    # on one side / floats above it on the other. Authors who
+    # want auto-bank as part of the visible road geometry use the
+    # destructive Bake Terrain to Road path, which has full
+    # auto-bank fidelity. For live preview, hand-author per-CP
+    # tilt in N-panel → Curve → Tilt.
+    curve_cyclic = bool(curve_obj.data.splines and curve_obj.data.splines[0].use_cyclic_u)
+    _compute_per_sample_bank(
+        samples,
+        bank_strength=0.0,
+        bank_max_rad=bank_max_rad,
+        cyclic=curve_cyclic,
+        smoothing_passes=bank_smooth_passes,
+    )
+
+    me = _build_road_strip_mesh(
+        samples,
+        width=width,
+        lift=lift,
+        thickness=thickness,
+        curb_width=curb_width,
+        curb_height=curb_height,
+        curb_stripe_length=curb_stripe,
+    )
+    # Slot order MUST match the face material_index values emitted
+    # by `_build_road_strip_mesh`:
+    #   curbs ON:  0 asphalt | 1 curb-white | 2 curb-red | 3 underside
+    #   curbs OFF: 0 asphalt | 1 underside
+    me.materials.append(_ensure_road_material())
+    if curb_width > 0:
+        me.materials.append(_ensure_curb_material(red=False))
+        me.materials.append(_ensure_curb_material(red=True))
+    if thickness > 0:
+        me.materials.append(_ensure_road_underside_material())
+    obj = bpy.data.objects.new(ROAD_OBJECT_NAME, me)
+    obj["kind"] = "track"
+    scene.collection.objects.link(obj)
+
+    # Auto-attach the live conform modifier if a terrain exists and
+    # is distinct from the road. Bare road-only scenes (no terrain
+    # plane authored yet) skip this path — still build the road, just
+    # nothing to conform.
+    re_enabled = False
+    terrain_name = None
+    if terrain is not None:
+        # Pass scene-prop-derived values as `defaults`. attach_road_
+        # conform_modifier applies them ONLY on first creation so the
+        # user's modifier-panel edits persist across re-runs (every
+        # depsgraph-driven auto-rebuild used to blow them away, which
+        # made the modifier panel feel "frozen" — you'd type a value
+        # and it would silently revert ~0.2s later).
+        mod, _is_fresh = attach_road_conform_modifier(
+            terrain,
+            curve_obj,
+            defaults={
+                "Inner Radius": max(0.5, width * 0.5 + max(0.0, curb_width)),
+                "Blend Radius": float(scene.hoverbike_road_blend_radius),
+                "Lift": lift,
+                "Clearance": float(scene.hoverbike_road_conform_clearance),
+            },
+        )
+
+        if re_enable_modifier and not mod.show_viewport:
+            mod.show_viewport = True
+            re_enabled = True
+        terrain_name = terrain.name
+
+    return {
+        "samples": len(samples),
+        "width": width,
+        "terrain": terrain_name,
+        "live_modifier_was_re_enabled": re_enabled,
+        "floating_samples": sum(
+            1 for s in samples if float(s.get("conform", 1.0)) < 0.5
+        ),
+    }
+
+
+class HOVERBIKE_OT_build_road(Operator):
+    """Build the visible road-strip mesh (asphalt + curbs + slab) from
+    ``road_curve_main`` — **non-destructive**: never touches terrain
+    vertex data. The curve owns its altitude (seed it once via *Snap
+    Curve to Terrain*); the road mesh sits at ``curve_z + lift`` along
+    the arc; terrain reshapes to meet it through the live
+    ``HV_RoadConform`` Geometry Nodes modifier (auto-attached if
+    missing). After this runs once, **editing the curve in edit mode
+    auto-rebuilds the road mesh** within ~0.2 s of the last edit
+    (debounced depsgraph handler in handlers.py).
+
+    For users who need the destructive bake (multi-segment push-down,
+    fill-shelf embankment, baked auto-bank for a final export pass)
+    use the separate **Bake Terrain to Road** operator. That one DOES
+    push terrain vertices directly and is one-way."""
 
     bl_idname = "hoverbike.build_road"
     bl_label = "Build Road"
     bl_description = (
-        "Conform terrain to road_curve_main and build a kind=track road strip"
+        "Build the road-strip mesh from road_curve_main and attach the live "
+        "HV_RoadConform modifier on the terrain. Non-destructive; after the "
+        "first build, curve edits auto-rebuild the mesh"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        curve_obj = _resolve_road_curve()
+        if curve_obj is None:
+            self.report(
+                {"ERROR"},
+                "No road curve found — click *Add Road Curve* or "
+                "create an `ai_spline_main` curve.",
+            )
+            return {"CANCELLED"}
+
+        result = rebuild_road_main(context.scene, re_enable_modifier=True)
+        if result is None:
+            self.report({"ERROR"}, "Couldn't sample road curve — does it have ≥ 2 control points?")
+            return {"CANCELLED"}
+
+        float_msg = (
+            f", {result['floating_samples']} floating samples"
+            if result['floating_samples'] > 0 else ""
+        )
+        if result["terrain"] is None:
+            self.report(
+                {"INFO"},
+                f"Road built: {result['samples']} samples, width {result['width']:.1f}m{float_msg}. "
+                "No terrain mesh found — skipped HV_RoadConform attach. "
+                "Add a kind=track terrain plane to enable live conform.",
+            )
+        else:
+            was_disabled_msg = (
+                " (re-enabled HV_RoadConform)"
+                if result["live_modifier_was_re_enabled"] else ""
+            )
+            self.report(
+                {"INFO"},
+                f"Road built: {result['samples']} samples, width {result['width']:.1f}m{float_msg}. "
+                f"HV_RoadConform attached on {result['terrain']}{was_disabled_msg} — "
+                "terrain reshapes live; edit the curve to retune (auto-rebuilds in 0.2s).",
+            )
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_bake_terrain_to_road(Operator):
+    """**Destructive** — push terrain vertex data toward the road's
+    altitude profile in a ``width/2 + curb_width + blend_radius`` band.
+    This is the high-fidelity bake path: multi-segment push-down rule
+    for overpasses, auto-bank from curvature added on top of per-CP
+    tilt, fill-shelf embankment widening on downhill traverses, and
+    per-CP float/conform weights.
+
+    Use before export when you need the destructive carve baked into
+    the .blend mesh. For iteration, the live ``HV_RoadConform`` GN
+    modifier on the terrain stack handles conform without mutating
+    vertex data — *Build Road* attaches it automatically.
+
+    Behaviour vs. the live modifier:
+
+    * Procedural-terrain modifiers (``HV_Island`` etc.) are applied
+      first when *Apply modifiers first* is on — one-way, you lose
+      the parametric tunability of the source modifier in exchange
+      for a drivable surface. The default is OFF so the operator
+      errors loudly if it would otherwise silently destroy your
+      procedural setup.
+    * The live ``HV_RoadConform`` modifier is auto-disabled for the
+      duration of the bake (otherwise it would re-evaluate on top of
+      the carved verts) and left disabled afterwards. Re-enable in
+      Properties → Modifiers if you want to keep iterating live."""
+
+    bl_idname = "hoverbike.bake_terrain_to_road"
+    bl_label = "Bake Terrain to Road"
+    bl_description = (
+        "DESTRUCTIVE: carve terrain vertex data to follow the existing road's "
+        "altitude profile. Use for export-time fidelity (multi-segment "
+        "push-down, auto-bank, fill shelf). Iterate via Build Road + the "
+        "live HV_RoadConform modifier instead"
     )
     bl_options = {"REGISTER", "UNDO"}
 
@@ -1132,59 +1412,57 @@ class HOVERBIKE_OT_build_road(Operator):
 
     def execute(self, context):
         from ._legacy import _largest_terrain_mesh
+        from .road_conform_gn import MODIFIER_NAME as ROAD_CONFORM_MOD_NAME
 
-        # Single-curve mode: prefer `road_curve_main` if present, else
-        # fall back to `ai_spline_main`. Authors who want one curve for
-        # both racing line and road can author only the AI spline and
-        # the road follows it; authors who want a different road shape
-        # (e.g., wider apex) add a separate `road_curve_main`.
         curve_obj = _resolve_road_curve()
         if curve_obj is None:
-            self.report(
-                {"ERROR"},
-                "No road curve found — click *Add Road Curve* or "
-                "create an `ai_spline_main` curve.",
-            )
+            self.report({"ERROR"}, "No road curve found to bake against.")
             return {"CANCELLED"}
 
-        # Pick terrain: the active mesh, else the largest kind=track mesh.
         terrain = context.active_object
         if terrain is None or terrain.type != "MESH" or terrain.get("kind") != "track":
             terrain = _largest_terrain_mesh()
         if terrain is None:
-            self.report(
-                {"ERROR"},
-                "No terrain mesh found. Select a kind=track mesh, or set kind='track' on your terrain.",
-            )
+            self.report({"ERROR"}, "No kind=track terrain mesh found.")
             return {"CANCELLED"}
 
-        active_mods = _terrain_active_modifiers(terrain)
+        # Temporarily hide the live conform modifier (if attached) so
+        # its displacement doesn't ride on top of the destructive bake.
+        # Left disabled afterwards — the bake has the final say on
+        # terrain Z, and re-enabling would just layer a tiny extra
+        # blend on data that already matches the curve.
+        live_conform_mod = terrain.modifiers.get(ROAD_CONFORM_MOD_NAME)
+        live_conform_was_visible = False
+        if live_conform_mod is not None:
+            live_conform_was_visible = live_conform_mod.show_viewport
+            live_conform_mod.show_viewport = False
+
+        active_mods = [
+            m for m in _terrain_active_modifiers(terrain)
+            if m != ROAD_CONFORM_MOD_NAME
+        ]
         applied_mods: list[str] = []
         if active_mods:
             if self.apply_modifiers:
                 applied_mods = _apply_all_viewport_modifiers(terrain)
             else:
+                if live_conform_mod is not None:
+                    live_conform_mod.show_viewport = live_conform_was_visible
                 self.report(
                     {"ERROR"},
-                    f"{terrain.name} has active modifiers ({', '.join(active_mods)}) — they'd "
-                    "spike the terrain wildly because GN adds its displacement on top of the "
-                    "road's vertex edits. Toggle *Apply modifiers first* in the redo panel, or "
-                    "apply them manually (Object → Apply → Visual Geometry to Mesh) and re-run.",
+                    f"{terrain.name} has active modifiers ({', '.join(active_mods)}) — "
+                    "they'd spike the terrain wildly because GN adds its displacement "
+                    "on top of the bake's vertex edits. Toggle *Apply modifiers first* "
+                    "in the redo panel, or apply them manually first.",
                 )
                 return {"CANCELLED"}
 
         scene = context.scene
-        # Wipe any prior road_main BEFORE sampling — _sample_road_path's
-        # downward raycast would otherwise hit the existing road strip
-        # and treat it as terrain. Each re-run would then lift the road
-        # by another `lift` metres, racing the terrain up.
-        old_road = bpy.data.objects.get(ROAD_OBJECT_NAME)
-        if old_road is not None:
-            old_road_mesh = old_road.data
-            bpy.data.objects.remove(old_road, do_unlink=True)
-            if isinstance(old_road_mesh, bpy.types.Mesh) and old_road_mesh.users == 0:
-                bpy.data.meshes.remove(old_road_mesh)
-
+        # The destructive bake reads curve Z via the legacy raycast
+        # path — it needs the road mesh's altitude to follow the
+        # current terrain shape, which is what the carve will then
+        # snap the terrain to. (Snap Curve mode would be wrong here
+        # because the curve's authored Z is already the target.)
         samples = _sample_road_path(
             curve_obj,
             terrain,
@@ -1192,26 +1470,19 @@ class HOVERBIKE_OT_build_road(Operator):
             smooth_passes=int(scene.hoverbike_road_smooth_passes),
         )
         if len(samples) < 2:
-            self.report({"ERROR"}, "Couldn't sample road curve — does it have ≥ 2 control points?")
+            self.report({"ERROR"}, "Couldn't sample road curve.")
             return {"CANCELLED"}
 
         width = float(scene.hoverbike_road_width)
         lift = float(scene.hoverbike_road_lift)
         blend_radius = float(scene.hoverbike_road_blend_radius)
         curb_width = float(scene.hoverbike_road_curb_width)
-        curb_height = float(scene.hoverbike_road_curb_height)
-        curb_stripe = float(scene.hoverbike_road_curb_stripe_length)
-        thickness = float(scene.hoverbike_road_thickness)
+        clearance = float(scene.hoverbike_road_conform_clearance)
+        fill_shelf = float(scene.hoverbike_road_fill_shelf_width)
         bank_strength = float(scene.hoverbike_road_bank_strength)
         bank_max_rad = math.radians(float(scene.hoverbike_road_bank_max_deg))
         bank_smooth_passes = int(scene.hoverbike_road_bank_smooth_passes)
 
-        # Stamp the bank angle on each sample. Mutates `samples` in
-        # place to add an `s["bank"]` field that `_build_road_strip_mesh`
-        # consumes when laying out the cross-section. The curve's
-        # cyclic flag matters here — a closed loop wraps so the join
-        # doesn't get a fake straight, while an open road clamps so
-        # the endpoints don't pick up a wrap-around bogus curvature.
         curve_cyclic = bool(curve_obj.data.splines and curve_obj.data.splines[0].use_cyclic_u)
         _compute_per_sample_bank(
             samples,
@@ -1221,13 +1492,6 @@ class HOVERBIKE_OT_build_road(Operator):
             smoothing_passes=bank_smooth_passes,
         )
 
-        # Deform terrain first, then build the road strip — that way the
-        # road's Z (sampled before deformation) sits on the *original*
-        # surface and the terrain rises/falls to meet it. The conform
-        # treats the curb band as part of the road footprint so curbs
-        # don't fight the surrounding terrain.
-        clearance = float(scene.hoverbike_road_conform_clearance)
-        fill_shelf = float(scene.hoverbike_road_fill_shelf_width)
         deform_summary = _conform_terrain_to_road(
             terrain,
             samples,
@@ -1239,40 +1503,15 @@ class HOVERBIKE_OT_build_road(Operator):
             fill_shelf_width=fill_shelf,
         )
 
-        # Build the road strip mesh (the prior `road_main`, if any, was
-        # removed before sampling above so the raycast saw fresh terrain).
-        me = _build_road_strip_mesh(
-            samples,
-            width=width,
-            lift=lift,
-            thickness=thickness,
-            curb_width=curb_width,
-            curb_height=curb_height,
-            curb_stripe_length=curb_stripe,
-        )
-        # Slot order MUST match the face material_index values emitted
-        # by `_build_road_strip_mesh`:
-        #   curbs ON:  0 asphalt | 1 curb-white | 2 curb-red | 3 underside
-        #   curbs OFF: 0 asphalt | 1 underside
-        me.materials.append(_ensure_road_material())
-        if curb_width > 0:
-            me.materials.append(_ensure_curb_material(red=False))
-            me.materials.append(_ensure_curb_material(red=True))
-        if thickness > 0:
-            me.materials.append(_ensure_road_underside_material())
-        obj = bpy.data.objects.new(ROAD_OBJECT_NAME, me)
-        obj["kind"] = "track"
-        scene.collection.objects.link(obj)
-
         applied_msg = f" (applied {', '.join(applied_mods)})" if applied_mods else ""
-        float_count = sum(1 for s in samples if float(s.get("conform", 1.0)) < 0.5)
-        float_msg = f", {float_count} floating samples" if float_count > 0 else ""
+        live_msg = ""
+        if live_conform_mod is not None:
+            live_msg = " (HV_RoadConform left disabled — toggle in Modifiers to resume live editing)"
         self.report(
             {"INFO"},
-            f"Road built: {len(samples)} samples, width {width:.1f}m{float_msg}. "
-            f"Terrain: {deform_summary['flattened']} verts flattened, "
+            f"Baked terrain to road: {deform_summary['flattened']} verts flattened, "
             f"{deform_summary['blended']} blended, "
-            f"{deform_summary['floating']} skipped (floating){applied_msg}.",
+            f"{deform_summary['floating']} skipped (floating){applied_msg}{live_msg}.",
         )
         return {"FINISHED"}
 
@@ -1462,8 +1701,23 @@ class HOVERBIKE_OT_reconform_terrain_to_road(Operator):
             self.report({"ERROR"}, "No kind=track terrain mesh found.")
             return {"CANCELLED"}
 
-        active_mods = _terrain_active_modifiers(terrain)
+        # Same HV_RoadConform-aware handling as Build Road — disable
+        # the live conform modifier for the duration of the destructive
+        # carve so it doesn't fight the bake.
+        from .road_conform_gn import MODIFIER_NAME as ROAD_CONFORM_MOD_NAME
+        live_conform_mod = terrain.modifiers.get(ROAD_CONFORM_MOD_NAME)
+        live_conform_was_visible = False
+        if live_conform_mod is not None:
+            live_conform_was_visible = live_conform_mod.show_viewport
+            live_conform_mod.show_viewport = False
+
+        active_mods = [
+            m for m in _terrain_active_modifiers(terrain)
+            if m != ROAD_CONFORM_MOD_NAME
+        ]
         if active_mods:
+            if live_conform_mod is not None:
+                live_conform_mod.show_viewport = live_conform_was_visible
             self.report(
                 {"ERROR"},
                 f"{terrain.name} has active modifiers ({', '.join(active_mods)}) — "
@@ -1572,6 +1826,7 @@ class HOVERBIKE_OT_mark_selected_conforming(Operator):
 _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_add_road_starter_curve,
     HOVERBIKE_OT_build_road,
+    HOVERBIKE_OT_bake_terrain_to_road,
     HOVERBIKE_OT_reconform_terrain_to_road,
     HOVERBIKE_OT_mark_selected_floating,
     HOVERBIKE_OT_mark_selected_conforming,
@@ -1595,6 +1850,20 @@ _SCENE_PROP_NAMES: tuple[str, ...] = (
 )
 
 
+def _on_road_prop_update(self, context):
+    """Update callback shared by every road scene prop that affects
+    the road mesh's geometry or its synced HV_RoadConform sockets.
+    Routes through handlers._schedule_rebuild so the rebuild is
+    debounced — slider drags don't trigger a rebuild per frame, only
+    one rebuild ~0.2 s after the user lets go. Silent no-op if the
+    handlers module isn't registered yet (early init)."""
+    try:
+        from . import handlers as _handlers
+    except ImportError:
+        return
+    _handlers._schedule_rebuild("road")
+
+
 def register() -> None:
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
@@ -1603,46 +1872,55 @@ def register() -> None:
         name="Road width (m)",
         description="Total width of the road strip; terrain inside this band flattens fully to the road.",
         default=8.0, min=0.5, max=80.0, precision=2,
+        update=_on_road_prop_update,
     )
     bpy.types.Scene.hoverbike_road_lift = FloatProperty(
         name="Road lift (m)",
         description="Small vertical offset above terrain so the road's surface is visible against the ground.",
         default=0.15, min=0.0, max=5.0, precision=2,
+        update=_on_road_prop_update,
     )
     bpy.types.Scene.hoverbike_road_blend_radius = FloatProperty(
         name="Blend radius (m)",
         description="Outer falloff band where terrain blends from flattened to natural via smoothstep.",
         default=6.0, min=0.0, max=50.0, precision=2,
+        update=_on_road_prop_update,
     )
     bpy.types.Scene.hoverbike_road_samples = IntProperty(
         name="Samples",
         description="Number of arc-length samples along the road curve. Higher = smoother road, slower build.",
         default=64, min=4, max=512,
+        update=_on_road_prop_update,
     )
     bpy.types.Scene.hoverbike_road_smooth_passes = IntProperty(
         name="Smoothing passes",
         description="1-2-1 binomial passes applied to the height profile so the road doesn't follow every terrain bump.",
         default=4, min=0, max=32,
+        update=_on_road_prop_update,
     )
     bpy.types.Scene.hoverbike_road_curb_width = FloatProperty(
         name="Curb width (m)",
         description="Width of each F1-style curb strip. 0 disables curbs entirely.",
         default=0.6, min=0.0, max=5.0, precision=2,
+        update=_on_road_prop_update,
     )
     bpy.types.Scene.hoverbike_road_curb_height = FloatProperty(
         name="Curb height (m)",
         description="Vertical rise of the curbs above the road surface.",
         default=0.12, min=0.0, max=1.0, precision=2,
+        update=_on_road_prop_update,
     )
     bpy.types.Scene.hoverbike_road_curb_stripe_length = FloatProperty(
         name="Stripe length (m)",
         description="Length of each red/white stripe along the road. Shorter = busier rumble.",
         default=2.0, min=0.2, max=20.0, precision=2,
+        update=_on_road_prop_update,
     )
     bpy.types.Scene.hoverbike_road_thickness = FloatProperty(
         name="Slab thickness (m)",
         description="Vertical extrusion of the road into a solid slab. 0 keeps the legacy paper-thin ribbon.",
         default=0.6, min=0.0, max=10.0, precision=2,
+        update=_on_road_prop_update,
     )
     # Road banking — auto-tilt cross-section based on per-sample
     # curvature. Bank strength is a multiplier on the (kappa × ref_v²)
@@ -1654,11 +1932,13 @@ def register() -> None:
         name="Bank strength",
         description="Auto-bank multiplier driven by curvature. 0 disables auto-bank; 0.5 = subtle; 1.0 = pronounced; >1 = aggressive.",
         default=0.6, min=0.0, max=4.0, precision=2,
+        update=_on_road_prop_update,
     )
     bpy.types.Scene.hoverbike_road_bank_max_deg = FloatProperty(
         name="Bank max (deg)",
         description="Hard cap on the road's bank angle in degrees. 25° is a typical road race banking; 45° is NASCAR-superspeedway extreme.",
         default=25.0, min=0.0, max=80.0, precision=1,
+        update=_on_road_prop_update,
     )
     # Bank smoothing — 1-2-1 binomial passes over the per-sample bank
     # values after they're derived from curvature. Higher = banking
@@ -1675,6 +1955,7 @@ def register() -> None:
             "harder at corner entry/exit"
         ),
         default=6, min=0, max=64,
+        update=_on_road_prop_update,
     )
     # Conform clearance — how far below the road surface the terrain
     # is forced to sit inside the fully-flattened band. 0.20 m is a
@@ -1694,6 +1975,7 @@ def register() -> None:
             "is the new recommended floor"
         ),
         default=0.20, min=0.0, max=2.0, precision=2,
+        update=_on_road_prop_update,
     )
     # Downhill fill shelf — extra width on the fill side of a hillside
     # traverse so the road's slab underside is hidden by raised terrain

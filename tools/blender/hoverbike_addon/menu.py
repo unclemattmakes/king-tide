@@ -223,10 +223,25 @@ class HOVERBIKE_MT_build(Menu):
         layout = self.layout
 
         layout.label(text="Curve → mesh")
+        layout.operator(
+            "hoverbike.snap_curve_to_terrain",
+            text="Snap Road Curve to Terrain",
+            icon="SNAP_ON",
+        )
+        layout.operator(
+            "hoverbike.attach_road_conform",
+            text="Attach Live Road Conform",
+            icon="MOD_NODES",
+        )
         layout.operator("hoverbike.build_road", icon="MESH_PLANE")
         layout.operator(
+            "hoverbike.bake_terrain_to_road",
+            text="Bake Terrain to Road (destructive)",
+            icon="MOD_SHRINKWRAP",
+        )
+        layout.operator(
             "hoverbike.reconform_terrain_to_road",
-            text="Re-conform Terrain to Road",
+            text="Re-conform Terrain to Road (destructive)",
             icon="MOD_SHRINKWRAP",
         )
         layout.separator()
