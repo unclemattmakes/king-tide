@@ -210,6 +210,27 @@ def _rebuild_gate_preview(scene, *, spacing: float, half_width: float, height: f
     points = _sample_curve_to_polyline(sp)
     placements = _resample_by_arc_length(points, spacing, vertical_axis=2)
 
+    # Rotate placements so the one nearest start_00 is index 0 — keeps
+    # gate_preview_00 in the Outliner aligned with what the runtime
+    # treats as the lap-counter gate (= checkpoints[0] in the exported
+    # JSON, see _legacy.derive_track_json). Without this, the preview
+    # labels gates by spline-sample order while the runtime picks the
+    # nearest-to-start one, and authors get confused trying to find
+    # "the start gate" in Blender.
+    start_00 = bpy.data.objects.get("start_00")
+    if placements and start_00 is not None:
+        s_loc = start_00.matrix_world.translation
+        sx, sy = float(s_loc.x), float(s_loc.y)
+        nearest_i = min(
+            range(len(placements)),
+            key=lambda i: (
+                (placements[i]["position"][0] - sx) ** 2
+                + (placements[i]["position"][1] - sy) ** 2
+            ),
+        )
+        if nearest_i != 0:
+            placements = placements[nearest_i:] + placements[:nearest_i]
+
     # Reuse the existing collection if one is already in the scene so
     # the Outliner's expanded/collapsed state survives this rebuild.
     # Only the per-gate objects are recycled. See _clear_gate_preview_objects.
