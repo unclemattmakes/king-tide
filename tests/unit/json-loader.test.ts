@@ -100,6 +100,51 @@ describe('buildTrackFromJson', () => {
     expect(track.checkpoints[0]!.position.x).toBeCloseTo(5, 1)
   })
 
+  it('auto-flips gates that face opposite their next checkpoint', () => {
+    // Repros the legacy bug from `derive_track_json`: cps were exported
+    // with cp.rotation rotated 180° from the race direction, so race.ts
+    // never detected gate crossings (`signed < 0 → >= 0` flip never
+    // happened). The loader now corrects on read by comparing each
+    // gate's forward to the direction to the next gate.
+    const raw = baseTrack()
+    raw.checkpoints = [
+      // cp 0 at z=10, cp 1 at z=20: race direction = +Z. Rotation Ry(π)
+      // puts fwd at -Z, opposite race direction → loader should flip.
+      {
+        index: 0,
+        position: { x: 0, y: 1, z: 10 },
+        rotation: { x: 0, y: 1, z: 0, w: 0 },
+        halfWidth: 4,
+        height: 2,
+      },
+      {
+        index: 1,
+        position: { x: 0, y: 1, z: 20 },
+        rotation: { x: 0, y: 1, z: 0, w: 0 },
+        halfWidth: 4,
+        height: 2,
+      },
+    ]
+    const track = buildTrackFromJson(raw)
+    const q0 = track.checkpoints[0]!.rotation
+    // After the flip, q · (0,0,1) should be along +Z. With original
+    // q = (0,1,0,0), the swap-and-negate yields (0,0,0,-1) which is the
+    // identity (up to a sign). fwd.x = 0, fwd.z = +1.
+    const fwd0x = 2 * (q0.x * q0.z + q0.w * q0.y)
+    const fwd0z = 1 - 2 * (q0.x * q0.x + q0.y * q0.y)
+    expect(fwd0x).toBeCloseTo(0)
+    expect(fwd0z).toBeCloseTo(1)
+  })
+
+  it('leaves gates alone when they already face the next checkpoint', () => {
+    const raw = baseTrack()
+    // baseTrack's cp 0 at z=5 with identity rotation (fwd=+Z) and cp 1
+    // at z=10 — already pointing toward the next gate. Auto-fix should
+    // be a no-op.
+    const track = buildTrackFromJson(raw)
+    expect(track.checkpoints[0]!.rotation).toEqual({ x: 0, y: 0, z: 0, w: 1 })
+  })
+
   it('reads optional environmentGlb + water but tolerates absence', () => {
     const raw = baseTrack()
     delete raw.environmentGlb
