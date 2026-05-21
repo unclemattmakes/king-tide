@@ -58,17 +58,18 @@ export type WavePumpSample = {
 /** Vertical velocity (m/s) the bike must reach at the moment of
  *  takeoff for a trick window to open. Same threshold gates the
  *  pre-press buffer (a recent `vyPeak ≥ MIN_VY_PEAK` indicates a
- *  qualifying takeoff is plausible). 3.5 m/s catches a ridable wave
- *  climb or ramp lip without arming on flat-ground chop. */
-export const MIN_VY_PEAK = 3.5
+ *  qualifying takeoff is plausible). 2.0 m/s catches gentler humps —
+ *  water-to-sandbar transitions, modest ramp lips — without arming
+ *  on flat-ground chop. */
+export const MIN_VY_PEAK = 2.0
 
 /** Minimum forward speed (as a fraction of the bike's `topSpeed`) for
- *  a takeoff to qualify. 35% rejects coasting / parked bikes — tricks
- *  are a commitment move, not a stationary input. */
-export const MIN_SPEED_FRAC = 0.35
+ *  a takeoff to qualify. 25% rejects coasting / parked bikes while
+ *  still allowing a trick off a hump you're still spinning up onto. */
+export const MIN_SPEED_FRAC = 0.25
 
 /** Minimum throttle this tick for a takeoff to qualify. */
-export const MIN_THROTTLE = 0.3
+export const MIN_THROTTLE = 0.2
 
 /** Vy ceiling for the strength curve. At this takeoff vy the reward
  *  saturates to 1.0. Between `MIN_VY_PEAK` and this, strength scales

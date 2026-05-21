@@ -300,7 +300,7 @@ describe('trickHopSystem — disqualifying takeoffs', () => {
   it('does not open the window if takeoff vy is below the threshold', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
     body.vx = 22
-    body.vy = 1.0 // below MIN_VY_PEAK (3.5)
+    body.vy = 1.0 // below MIN_VY_PEAK (2.0)
     setIntent({ throttle: 0.9 })
     trickHopSystem(sim, phys)
     HoverStateStore.must(eid).isGrounded = false
@@ -311,7 +311,7 @@ describe('trickHopSystem — disqualifying takeoffs', () => {
 
   it('does not open the window when speed is below the threshold', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
-    body.vx = 3 // ~11% of topSpeed 28 — below MIN_SPEED_FRAC (0.35)
+    body.vx = 3 // ~11% of topSpeed 28 — below MIN_SPEED_FRAC (0.25)
     body.vy = 5
     setIntent({ throttle: 0.9 })
     trickHopSystem(sim, phys)
@@ -325,7 +325,7 @@ describe('trickHopSystem — disqualifying takeoffs', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
     body.vx = 22
     body.vy = 5
-    setIntent({ throttle: 0.1 }) // below MIN_THROTTLE (0.3)
+    setIntent({ throttle: 0.1 }) // below MIN_THROTTLE (0.2)
     trickHopSystem(sim, phys)
     HoverStateStore.must(eid).isGrounded = false
     trickHopSystem(sim, phys)
@@ -431,7 +431,7 @@ describe('trickHopSystem — pre-input buffer', () => {
 
 describe('trickHopSystem — reward magnitude', () => {
   it('scales fired-trick strength with takeoff vy', () => {
-    const minVy = 3.5
+    const minVy = 2.0
     const highVy = 8
     const lowFired = runQualifyingTakeoff(minVy)
     const highFired = runQualifyingTakeoff(highVy)
