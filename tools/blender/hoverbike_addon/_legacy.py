@@ -283,6 +283,29 @@ def _yaw_from_z_euler(obj: bpy.types.Object) -> float:
     return float(obj.rotation_euler.z)
 
 
+def _blender_yaw_to_three_yaw(yaw_blender: float) -> float:
+    """Convert a Blender Z-euler (where the empty's local +Y points along
+    the racing tangent) to the equivalent three.js Y-euler for a runtime
+    gate (where the gate prop's local +Z points along the same tangent).
+
+    The two conventions differ by π. Blender's "forward" axis is +Y, which
+    the GLB axis swap (Blender +Y → three.js -Z) maps to three.js -Z. So a
+    gate whose Blender +Y aligns with tangent (tx, ty) ends up, in three.js,
+    with its local -Z along (tx, 0, -ty) — i.e., local +Z along the OPPOSITE
+    direction. Adding π to the Y-rotation flips the gate so its local +Z
+    aligns with the tangent, which is what `race.ts` expects (cp.rotation ·
+    (0,0,1) = direction of bike travel through the gate).
+
+    Same convention `snap_starts_to_spline` uses for `start.yaw`
+    (`atan2(dx, -dy)` in Blender XY = atan2(dx_blender, dy_blender) + π/2 =
+    three.js Y-yaw aimed at the gate). Without this conversion, gates spawn
+    in the runtime with `cp.rotation` rotated 180° from the racing tangent,
+    so race.ts's crossed-check (signed flipping from <0 to >=0) never fires
+    and laps don't count.
+    """
+    return yaw_blender + math.pi
+
+
 def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
     by_kind: dict[str, list[bpy.types.Object]] = defaultdict(list)
     for obj in bpy.data.objects:
@@ -309,7 +332,7 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
             # facing three.js +Z (= Blender -Y, south) and the AI couldn't
             # cross any gate whose tangent had a non-south component —
             # i.e., every east/west-running stretch.
-            yaw = _yaw_from_z_euler(cp)
+            yaw = _blender_yaw_to_three_yaw(_yaw_from_z_euler(cp))
             half = 0.5 * yaw
             checkpoints.append(
                 {
@@ -353,10 +376,13 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
             for i, p in enumerate(placements):
                 px, py, pz = p["position"]
                 tx, ty, _ = p["tangent"]
-                # Empty's +Y aligns with tangent; yaw = angle from +Y to
-                # tangent measured around +Z. atan2(ty, tx) gives angle
-                # from +X; subtract π/2 to rebase to +Y.
-                yaw = math.atan2(ty, tx) - math.pi / 2.0
+                # Empty's +Y aligns with tangent; the Blender Z-euler is
+                # atan2(ty, tx) - π/2. We need the three.js Y-rotation that
+                # maps the gate's local +Z to the same tangent direction
+                # (see _blender_yaw_to_three_yaw): adding π collapses to
+                # atan2(ty, tx) + π/2.
+                yaw_blender = math.atan2(ty, tx) - math.pi / 2.0
+                yaw = _blender_yaw_to_three_yaw(yaw_blender)
                 half = 0.5 * yaw
                 checkpoints.append(
                     {

@@ -146,6 +146,42 @@ export function buildTrackFromJson(input: unknown): Track {
     }
   }
 
+  // Legacy auto-correct for cp.rotation: gates exported from Blender before
+  // the `_blender_yaw_to_three_yaw` fix (`tools/blender/hoverbike_addon/_
+  // legacy.py::derive_track_json`) ship rotated 180° from the racing
+  // tangent — race.ts's `signed < 0 → >= 0` crossed-check then never fires
+  // and laps don't count. We detect the bug per-gate by asking: does this
+  // gate's local +Z point TOWARDS the next checkpoint in the race order?
+  // If the dot is negative, the gate is facing backward and we flip it
+  // 180° around Y in place.
+  //
+  // Heuristic vs. "compare to nearest-spline tangent": the spline can be
+  // parameterised in either direction relative to race flow (calibration.
+  // json's spline goes +Z while the race goes -Z), so spline tangent isn't
+  // a reliable source of truth. cp[i] → cp[i+1] always points along the
+  // race direction at cp[i] regardless of how the curve was authored.
+  //
+  // Skipped for cps that already had `splineT` set (those were just
+  // rebound above, so their rotation is fresh and correct).
+  for (let i = 0; i < checkpoints.length; i++) {
+    const cp = checkpoints[i]!
+    if (typeof cp.splineT === 'number') continue
+    const next = checkpoints[(i + 1) % checkpoints.length]!
+    const dx = next.position.x - cp.position.x
+    const dz = next.position.z - cp.position.z
+    if (dx * dx + dz * dz < 1e-6) continue
+    const q = cp.rotation
+    // fwd = q · (0,0,1). Closed-form for an arbitrary unit quat:
+    //   fwd.x = 2(x·z + w·y), fwd.z = 1 - 2(x² + y²).
+    const fwdX = 2 * (q.x * q.z + q.w * q.y)
+    const fwdZ = 1 - 2 * (q.x * q.x + q.y * q.y)
+    if (fwdX * dx + fwdZ * dz < 0) {
+      // q' = q * Ry(π). Ry(π) as quat = (x=0, y=1, z=0, w=0); the
+      // Hamilton product collapses to the swap+negate below.
+      cp.rotation = { x: -q.z, y: q.w, z: q.x, w: -q.y }
+    }
+  }
+
   const pickupSpawnsRaw = (input as { pickupSpawns?: unknown }).pickupSpawns ?? []
   if (!Array.isArray(pickupSpawnsRaw)) {
     throw new Error('track-json: pickupSpawns must be an array if present')
