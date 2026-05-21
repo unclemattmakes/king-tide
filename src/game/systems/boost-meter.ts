@@ -33,10 +33,11 @@ import {
  * give a fixed-duration multiplier without touching the meter.
  */
 
-/** Charge cost (sec⁻¹) while boost is active. Full meter ⇒ ~2 s of
- *  sustained boost — long enough to read as a real burst, short
- *  enough that 3 tricks of charge feels like genuine progression. */
-const DRAIN_PER_SEC = 0.5
+/** Charge cost (sec⁻¹) while boost is active. Full meter ⇒ ~3 s of
+ *  sustained boost — long enough to read as a real burst and to
+ *  carry the bike through a corner exit before the player has to
+ *  refill via another trick. */
+const DRAIN_PER_SEC = 1 / 3
 /** Minimum charge required to engage the boost. Prevents a one-frame
  *  micro-burst at the bottom of the meter. Also: the player gets a
  *  clear "boost ready" cue at this fill level via the HUD. */

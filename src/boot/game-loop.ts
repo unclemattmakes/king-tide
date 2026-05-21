@@ -277,13 +277,15 @@ export interface GameLoopOpts {
  *
  * Three tiers, gated by the `tier` argument:
  *
- *   - `'trick'`   — credible trick lands. Half-strength impulse; the
- *                   bigger speed payoff comes from the boost meter
- *                   the trick fills.
+ *   - `'trick'`   — credible trick lands. Small forward impulse plus
+ *                   a vertical loft, so the bike visibly leaves the
+ *                   surface and the trick reads as happening in an
+ *                   air arc rather than on the terrain. The bigger
+ *                   speed payoff comes from the boost meter the
+ *                   trick fills.
  *   - `'boost'`   — boost-meter activation kick. Full-strength impulse,
- *                   matching the old trick magnitude. Pairs with the
- *                   sustained accel multiplier the meter system
- *                   applies via hover.ts.
+ *                   purely horizontal. Pairs with the sustained accel
+ *                   multiplier the meter system applies via hover.ts.
  *
  * The bike's velocity-cap sits at `topSpeed * PUMP_SPEED_CAP_FRAC` —
  * meaningfully above the natural topSpeed gate (which sits at 1.0) so
@@ -295,8 +297,9 @@ export interface GameLoopOpts {
  * Skipped when the rigid body or its mass isn't available — defensive
  * for the edge between bike spawn and the next physics step.
  */
-const PUMP_IMPULSE_DV_TRICK = 7.25
+const PUMP_IMPULSE_DV_TRICK = 3.0
 const PUMP_IMPULSE_DV_BOOST = 14.5
+const PUMP_IMPULSE_DV_TRICK_LIFT = 4.5
 const PUMP_SPEED_CAP_FRAC = 1.3
 function applyPumpImpulse(
   phys: PhysicsWorld,
@@ -331,8 +334,14 @@ function applyPumpImpulse(
   const baseDv = tier === 'boost' ? PUMP_IMPULSE_DV_BOOST : PUMP_IMPULSE_DV_TRICK
   const wanted = strength * baseDv
   const allowed = Math.min(wanted, Math.max(0, cap - speed))
-  if (allowed <= 0) return
-  rb.applyImpulse({ x: ux * allowed * m, y: 0, z: uz * allowed * m }, true)
+  // Vertical loft on tricks only — boost-pad / meter kicks stay purely
+  // horizontal. The loft is scaled by strength so a marginal qualifier
+  // gets a small nudge while a strong launch gets a clear arc. Applied
+  // unconditionally (no speed-cap clamp on y) because the cap is a
+  // horizontal-speed budget, not a vertical one.
+  const liftDv = tier === 'trick' ? strength * PUMP_IMPULSE_DV_TRICK_LIFT : 0
+  if (allowed <= 0 && liftDv <= 0) return
+  rb.applyImpulse({ x: ux * allowed * m, y: liftDv * m, z: uz * allowed * m }, true)
 }
 
 /**
@@ -941,8 +950,10 @@ export function startGameLoop(opts: GameLoopOpts): void {
             trickState.spinAxisZ = az
             trickState.spinDurationSec = 0.6
           }
-          // Fill the boost meter — three credible tricks ⇒ a full bar.
-          chargeBoostMeter(playerEid, 0.33)
+          // Fill the boost meter — two credible tricks ⇒ a full bar.
+          // Most of the speed payoff from tricking now flows through
+          // the meter rather than the immediate forward kick.
+          chargeBoostMeter(playerEid, 0.5)
           state.pumpEventCount = (state.pumpEventCount ?? 0) + 1
           state.lastPumpStrength = pump.strength
           state.lastPumpAt = now
