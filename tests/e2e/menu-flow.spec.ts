@@ -118,9 +118,8 @@ test.describe('cold-boot menu', () => {
     // First cup card is Reef Cup — `V1_CUPS[0]`. Dev placeholder + Dev
     // Cup get appended after the ship cups, so `.first()` is stable.
     await softClick(page.locator('#sp-cup-cards .bc-card').first())
-    // `sp-cup-tracks` renders the lineup as inert preview tiles; the
-    // commit goes through the START CUP CTA.
-    await softClick(page.locator('#sp-cup-start'))
+    // Championship cups skip the lineup-preview step and land directly
+    // on bike-select. Pick the first bike to commit the cup.
     await softClick(page.locator('#sp-bike-cards .bc-card').first())
     await page.waitForLoadState('domcontentloaded')
     const url = page.url()
