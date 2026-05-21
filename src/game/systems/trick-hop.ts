@@ -30,19 +30,31 @@ import {
  * the player doesn't press.
  *
  * Qualifying takeoff = surface-driven (not from the bike's own small
- * hop, i.e. not in `hopLockoutActive`) AND vy at takeoff ≥
- * `MIN_VY_PEAK` AND speed ≥ `MIN_SPEED_FRAC` * topSpeed AND throttle
- * ≥ `MIN_THROTTLE`. The takeoff-vy is captured for reward scaling so
- * a stronger launch pays a bigger boost — the wave-mastery reward
- * hierarchy survives the simplification.
+ * hop, i.e. not in `hopLockoutActive`) AND `max(vy, vyPeak)` at
+ * takeoff ≥ `MIN_VY_PEAK` AND speed ≥ `MIN_SPEED_FRAC` * topSpeed AND
+ * throttle ≥ `MIN_THROTTLE`. The peak is included in the vy gate
+ * because wave-following bikes release just past the crest, by which
+ * point the instantaneous vy has already begun decreasing — using the
+ * recent peak keeps the qualifying check in lockstep with the TRICK
+ * READY prompt (which fires on the upslope) so a press elicited by
+ * the prompt is honoured. The takeoff-vy is captured for reward
+ * scaling so a stronger launch pays a bigger boost — the wave-mastery
+ * reward hierarchy survives the simplification.
  *
  * Pre-input buffer: if the player presses while still grounded but
  * a qualifying takeoff is plausibly imminent (recent vyPeak crossed
  * `MIN_VY_PEAK`, speed/throttle OK, no hop-lockout), the press is
  * held for `PRE_PRESS_BUFFER_SEC` (200 ms). If the bike takes off
  * inside that window, the buffered press fires the trick at takeoff.
- * If not, the buffer expires to a small flatground hop so the input
- * still registers as something rather than vanishing.
+ * If 200 ms pass and the bike never went airborne (the wave-following
+ * hover-spring rides the bike through the wave crest without ever
+ * flipping `isGrounded` false), the system re-checks the credibility
+ * gates and — if they still hold — synthesises a deferred takeoff:
+ * applies the small-hop lift impulse and fires the trick at the
+ * recent peak vy. This guarantees the TRICK READY prompt is honoured
+ * by the press it elicited. If the gates have decayed (player let
+ * off the throttle, slowed down, etc.) the buffer falls back to the
+ * courtesy lift so the press still does *something* visible.
  *
  * Flatground press with no qualifying context = small hop only. No
  * boost, no spin, no meter — just a polite lift so the bike can
@@ -51,8 +63,8 @@ import {
  * Per bike, per fixed tick:
  *
  *   1. Decay cooldown + spin lifetime.
- *   2. Tick the pre-press buffer; expire it to a small hop if 200 ms
- *      elapsed without a qualifying takeoff.
+ *   2. Tick the pre-press buffer; on expiry, fire the deferred trick
+ *      if the gates still hold, else fall back to a courtesy small hop.
  *   3. Tick the hop-lockout state machine (unchanged — ends on
  *      airborne→grounded after a small hop).
  *   4. Maintain the vy-peak tracker (still used as the "climb
@@ -167,17 +179,27 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
       // and the speed/throttle/vy gates pass. Hop-lockout would still be
       // active for ~1 sim tick after the small hop's impulse fired, so
       // checking it here cleanly rejects self-hop takeoffs.
+      //
+      // Use `max(vy, vyPeak)` for the vy gate: on a wave-following bike,
+      // vy at the instant `isGrounded` flips false is often lower than
+      // the recent peak — hover-spring inertia carries the bike off the
+      // surface after the wave crest has already passed, so the "this
+      // was a credible launch" reading lives at the climb's peak, not
+      // the post-release residual. The TRICK READY prompt uses vyPeak
+      // for its look-ahead promise; this keeps the qualifying check in
+      // lockstep with what the player saw.
       const surfaceDriven = !trick.hopLockoutActive
-      const qualifying = surfaceDriven && vy >= MIN_VY_PEAK && speedOK && throttleOK
+      const takeoffVy = Math.max(vy, trick.vyPeak)
+      const qualifying = surfaceDriven && takeoffVy >= MIN_VY_PEAK && speedOK && throttleOK
       if (qualifying) {
         trick.trickWindowOpen = true
-        trick.trickWindowTakeoffVy = vy
+        trick.trickWindowTakeoffVy = takeoffVy
         trick.trickFiredThisAirborne = false
         // Consume a buffered press, if any. Direction was captured at
         // press time so a buffered "I committed left" still spins
         // left even if the stick moved before takeoff landed.
         if (trick.bufferedPressTimerSec > 0 && trick.bufferedPressDir !== 0) {
-          fireTrick(trick, trick.bufferedPressDir, vy)
+          fireTrick(trick, trick.bufferedPressDir, takeoffVy)
           trick.bufferedPressTimerSec = 0
           trick.bufferedPressDir = 0
         }
@@ -190,20 +212,46 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
       trick.trickFiredThisAirborne = false
     }
 
-    // Tick down + expire the pre-press buffer. Expiry without takeoff
-    // falls through to a small hop so the press still registers as
-    // *something* — better than vanishing inputs. Skipped if a trick
-    // already consumed the buffer this tick.
+    // Tick down + expire the pre-press buffer. Skipped if a trick
+    // already consumed the buffer at takeoff above.
     if (trick.bufferedPressTimerSec > 0) {
       trick.bufferedPressTimerSec = Math.max(0, trick.bufferedPressTimerSec - dt)
       if (trick.bufferedPressTimerSec === 0 && trick.bufferedPressDir !== 0) {
-        // Buffer expired without a qualifying takeoff. Fire the small
-        // hop now as the courtesy-lift fallback. Don't re-set cooldown
-        // beyond what the original press already set.
-        applySmallHop(rb)
-        trick.hopLockoutActive = true
-        trick.hopLockoutAirborneSeen = false
-        trick.hopLockoutSafetyTicks = HOP_LOCKOUT_MAX_TICKS
+        // The buffer was armed because the climb context was credible
+        // (recent vyPeak crossed `MIN_VY_PEAK`, speed/throttle gates
+        // passed). If the conditions still look credible at expiry,
+        // honor the player's commitment: synthesize a deferred-takeoff
+        // trick — apply a lift impulse so the bike visibly leaves the
+        // surface, open the airborne window, and fire the trick using
+        // the recent peak vy for reward scaling. Without this, the
+        // common "bike rides the wave crest without isGrounded flipping
+        // false" case silently expired the buffer to a courtesy hop —
+        // the TRICK READY prompt would lure the player into a press
+        // that produced no trick. The hop-lockout is engaged because
+        // the impulse we just applied IS a self-induced lift; without
+        // the flag the bike's resulting airborne transition would
+        // re-qualify on the next tick and reset `trickFiredThisAirborne`,
+        // allowing a second press to double-fire in the same airtime.
+        const stillCredible =
+          !trick.hopLockoutActive && trick.vyPeak >= MIN_VY_PEAK && speedOK && throttleOK
+        if (stillCredible) {
+          applySmallHop(rb)
+          trick.trickWindowOpen = true
+          trick.trickWindowTakeoffVy = trick.vyPeak
+          fireTrick(trick, trick.bufferedPressDir, trick.vyPeak)
+          trick.hopLockoutActive = true
+          trick.hopLockoutAirborneSeen = false
+          trick.hopLockoutSafetyTicks = HOP_LOCKOUT_MAX_TICKS
+        } else {
+          // Climb decayed between press and expiry (player let off the
+          // throttle, slowed down, etc.). Fall back to the courtesy
+          // lift so the press still does *something* visible, just not
+          // a trick.
+          applySmallHop(rb)
+          trick.hopLockoutActive = true
+          trick.hopLockoutAirborneSeen = false
+          trick.hopLockoutSafetyTicks = HOP_LOCKOUT_MAX_TICKS
+        }
         trick.bufferedPressDir = 0
       }
     }

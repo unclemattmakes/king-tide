@@ -358,7 +358,7 @@ describe('trickHopSystem — disqualifying takeoffs', () => {
 })
 
 describe('trickHopSystem — pre-input buffer', () => {
-  it('expires the buffer to a small hop if no takeoff happens within the window', () => {
+  it('fires a deferred trick on buffer expiry when the climb context still looks credible', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
     // Climb context (vyPeak ≥ threshold) + press while grounded → buffer.
     body.vx = 22
@@ -369,8 +369,12 @@ describe('trickHopSystem — pre-input buffer', () => {
     trickHopSystem(sim, phys)
     expect(TrickStateStore.must(eid).bufferedPressTimerSec).toBeGreaterThan(0)
 
-    // Hold grounded; let vy drop so the climb dies. Tick past the
-    // buffer window (200 ms at 60 Hz = 12 ticks).
+    // Player keeps the throttle on at race speed; vy drops (wave crest
+    // passes) but the bike doesn't actually leave the ground — the
+    // "rides the wave through the crest" case that used to silently
+    // eat the press. Tick past the buffer window; the climb context is
+    // still recent enough (vyPeak hasn't gone stale) so the system
+    // synthesizes the trick fire on the expiry tick.
     setIntent({ throttle: 0.9, trickRight: false })
     body.vy = 0
     const ticksToRunOut = Math.ceil(PRE_PRESS_BUFFER_SEC / phys.fixedDt) + 1
@@ -379,11 +383,49 @@ describe('trickHopSystem — pre-input buffer', () => {
     const trick = TrickStateStore.must(eid)
     expect(trick.bufferedPressTimerSec).toBe(0)
     expect(trick.bufferedPressDir).toBe(0)
-    // The expiry path should have fired the small hop as a fallback.
+    // Persistent reward markers — `trickFiredThisTick` is a one-shot
+    // edge consumed by the very next tick's top-of-loop reset, so we
+    // assert against the sticky flags + the captured direction /
+    // strength which both persist until the next press.
+    expect(trick.trickFiredThisAirborne).toBe(true)
+    expect(trick.trickFiredDirection).toBe(+1)
+    expect(trick.trickFiredStrength).toBeGreaterThan(0)
+    expect(trick.trickWindowOpen).toBe(true)
+    // Deferred-takeoff path lifts the bike with the small-hop impulse
+    // and engages the hop-lockout — the lift came from the system, not
+    // the surface, so the resulting airborne transition must not
+    // re-qualify as a free credible takeoff on the very next tick.
     expect(body.impulses.length).toBeGreaterThanOrEqual(1)
     const lastImpulse = body.impulses[body.impulses.length - 1]
     expect(lastImpulse?.y).toBeCloseTo(4.5, 5)
     expect(trick.hopLockoutActive).toBe(true)
+  })
+
+  it('falls back to a courtesy small hop when the climb context decays before expiry', () => {
+    const { eid, setIntent } = spawnBike(sim, handle)
+    body.vx = 22
+    body.vy = 5
+    setIntent({ throttle: 0.9 })
+    trickHopSystem(sim, phys)
+    setIntent({ throttle: 0.9, trickRight: true })
+    trickHopSystem(sim, phys)
+    expect(TrickStateStore.must(eid).bufferedPressTimerSec).toBeGreaterThan(0)
+
+    // Player lets off the throttle — `throttleOK` is now false, so the
+    // expiry credibility re-check fails and the fallback fires.
+    setIntent({ throttle: 0, trickRight: false })
+    body.vy = 0
+    const ticksToRunOut = Math.ceil(PRE_PRESS_BUFFER_SEC / phys.fixedDt) + 1
+    for (let i = 0; i < ticksToRunOut; i++) trickHopSystem(sim, phys)
+
+    const trick = TrickStateStore.must(eid)
+    expect(trick.bufferedPressTimerSec).toBe(0)
+    expect(trick.bufferedPressDir).toBe(0)
+    expect(trick.trickFiredThisTick).toBe(false)
+    expect(trick.hopLockoutActive).toBe(true)
+    expect(body.impulses.length).toBeGreaterThanOrEqual(1)
+    const lastImpulse = body.impulses[body.impulses.length - 1]
+    expect(lastImpulse?.y).toBeCloseTo(4.5, 5)
   })
 })
 

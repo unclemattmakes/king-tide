@@ -13,6 +13,8 @@
  * scaffold. Hidden by default; flips visible only while ready.
  */
 
+import { activeInputSource } from '@/engine/input'
+import { formatKeyCode } from '@/engine/input/bindings'
 import { playerSettings } from '@/engine/player-settings'
 
 export interface TrickPromptHud {
@@ -21,6 +23,17 @@ export interface TrickPromptHud {
   setReady(ready: boolean): void
   /** Hide the widget. The reserved slot stays in the DOM. */
   dispose(): void
+}
+
+/** Format the key/button hint based on which input source the player is
+ *  currently using. Reads the live binding tables so a rebind shows up
+ *  in the prompt without a reload. */
+function formatTrickHint(): string {
+  const src = activeInputSource()
+  if (src === 'gamepad') return 'LB / RB'
+  if (src === 'touch') return 'TAP'
+  const kb = playerSettings.keyboardBindings
+  return `${formatKeyCode(kb.trickLeft.primary)} / ${formatKeyCode(kb.trickRight.primary)}`
 }
 
 export function createTrickPromptHud(): TrickPromptHud {
@@ -33,14 +46,22 @@ export function createTrickPromptHud(): TrickPromptHud {
     <div class="tp-shell">
       <span class="tp-arrow">▲</span>
       <span class="tp-label">TRICK READY</span>
-      <span class="tp-keys">Z / C</span>
+      <span class="tp-keys">${formatTrickHint()}</span>
     </div>
   `
+  const keysEl = slot.querySelector<HTMLElement>('.tp-keys')
 
   let ready = false
 
   return {
     setReady(nowReady) {
+      // Keep the hint label fresh — if the player swapped from keyboard to
+      // controller (or rebound a key) since the last paint, reflect that
+      // on the next ready-flash. Allocation-free unless the string changed.
+      if (keysEl) {
+        const next = formatTrickHint()
+        if (keysEl.textContent !== next) keysEl.textContent = next
+      }
       if (nowReady === ready) return
       // The wave-pump intensity setting governs the whole trick FX
       // family — when off, suppress the prompt too so the HUD stays
