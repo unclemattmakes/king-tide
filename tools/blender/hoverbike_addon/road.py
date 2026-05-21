@@ -1213,24 +1213,25 @@ def rebuild_road_main(
     curb_height = float(scene.hoverbike_road_curb_height)
     curb_stripe = float(scene.hoverbike_road_curb_stripe_length)
     thickness = float(scene.hoverbike_road_thickness)
+    bank_strength = float(scene.hoverbike_road_bank_strength)
     bank_max_rad = math.radians(float(scene.hoverbike_road_bank_max_deg))
     bank_smooth_passes = int(scene.hoverbike_road_bank_smooth_passes)
 
-    # Stamp the bank angle on each sample. Pass `bank_strength=0`
-    # so `_compute_per_sample_bank` returns per-CP tilt only — no
-    # curvature-driven auto-bank. This matches the HV_RoadConform
-    # GN modifier, which reads per-CP tilt only. Without this
-    # match, the road mesh tilts further than the conform target
-    # on every banked curve and the road clips into the terrain
-    # on one side / floats above it on the other. Authors who
-    # want auto-bank as part of the visible road geometry use the
-    # destructive Bake Terrain to Road path, which has full
-    # auto-bank fidelity. For live preview, hand-author per-CP
-    # tilt in N-panel → Curve → Tilt.
+    # Stamp bank on each sample. Auto-bank from curvature scaled by
+    # the scene's Bank Strength, smoothed, then per-CP tilt added on
+    # top. The road MESH uses this combined bank for its banked
+    # cross-section. The HV_RoadConform modifier reads per-CP tilt
+    # only (curvature-driven auto-bank isn't ported to GN yet) — for
+    # tight corners with significant auto-bank, the terrain conform
+    # under-tilts compared to the road mesh by ~5-15°. Users wanting
+    # perfectly-matched bank should either lower Bank Strength to 0
+    # and dial in per-CP tilts manually, or use the destructive Bake
+    # Terrain to Road operator (which has full auto-bank in the
+    # conform too).
     curve_cyclic = bool(curve_obj.data.splines and curve_obj.data.splines[0].use_cyclic_u)
     _compute_per_sample_bank(
         samples,
-        bank_strength=0.0,
+        bank_strength=bank_strength,
         bank_max_rad=bank_max_rad,
         cyclic=curve_cyclic,
         smoothing_passes=bank_smooth_passes,
