@@ -1,6 +1,6 @@
 """Water authoring + preview.
 
-Three things live here:
+Four things live here:
 
   * **Sea level** — the scene prop ``hoverbike_water_height`` is the
     canonical source of truth. The N-panel slider writes it; the JSON
@@ -9,18 +9,27 @@ Three things live here:
     :func:`current_water_height_m`. Old ``water_volume_main``-based
     .blends migrate transparently on first read.
 
+  * **Wave shape** — the scene props ``hoverbike_water_wave_height``
+    and ``hoverbike_water_wave_freq`` are the canonical amplitude /
+    frequency scalars. They ship out as ``water.waveHeight`` /
+    ``water.waveFreq`` in the per-track JSON; the wave preview reads
+    them too so dragging a slider redisplaces the surface live. Same
+    promote-on-first-read pattern as sea level: legacy
+    ``water_volume_main.wave_height`` / ``wave_freq`` custom props are
+    pulled into the scene props on .blend open.
+
   * **Wave preview** — a subdivided plane displaced by a Gerstner sum,
-    re-evaluated whenever sea level / time / size changes. Lives in
-    ``_hoverbike_water_preview`` (hidden from render, never exported).
-    The collection itself is reused across rebuilds so the Outliner's
-    expanded/collapsed state survives debounced changes.
+    re-evaluated whenever sea level / time / size / wave-shape changes.
+    Lives in ``_hoverbike_water_preview`` (hidden from render, never
+    exported). The collection itself is reused across rebuilds so the
+    Outliner's expanded/collapsed state survives debounced changes.
+    *Fit to Scene* auto-sizes it to the world bbox.
 
   * **Legacy water volume** — ``water_volume_main`` is still spawnable
-    via :class:`HOVERBIKE_OT_add_water_volume`, but is now optional:
-    its only purpose is to carry ``wave_height`` / ``wave_freq`` custom
-    props that override the runtime's default Gerstner amplitude /
-    frequency. The empty's transform is no longer consulted for sea
-    level.
+    via :class:`HOVERBIKE_OT_add_water_volume` for back-compat with
+    older tooling that reads its custom props. Nothing inside the
+    addon depends on it any more — the scene-prop sliders are the
+    canonical UI.
 
 Per-module ``register()`` / ``unregister()`` so the package init just
 calls them. Operators are referenced from the panel by ``bl_idname``.
@@ -31,6 +40,7 @@ from __future__ import annotations
 import math
 
 import bpy
+import mathutils
 from bpy.props import FloatProperty, IntProperty
 from bpy.types import Operator
 
@@ -46,16 +56,19 @@ WATER_PREVIEW_MESH = "_hoverbike_water_surface"
 # Mirror of ``defaultWaves()`` in ``src/engine/sim/water/wave-field.ts``.
 # Tuple layout: (dirX, dirZ, amplitude, wavelength, speed, phase). Keep
 # both sides together when tuning — the preview is only useful as a
-# preview if it matches the runtime.
+# preview if it matches the runtime. Last synced 2026-05 to the coherent
+# ±25° swell-fan preset (two long swells + four chop bands).
 DEFAULT_WAVES: tuple[tuple[float, float, float, float, float, float], ...] = (
-    # Swells
-    (0.92, 0.39, 0.55, 60.0, 10.0, 0.4),
-    (0.60, 0.80, 0.40, 85.0, 11.0, 2.2),
-    # Chop
-    (1.00, 0.00, 0.65, 22.0, 4.0, 0.0),
-    (0.707, 0.707, 0.44, 14.0, 3.6, 1.1),
-    (0.30, -0.954, 0.29, 9.0, 3.0, 2.3),
-    (-0.50, 0.866, 0.16, 5.5, 2.4, 3.7),
+    # Primary swell — dominant set rolling toward the bike.
+    (1.000,  0.000, 0.50, 50.0, 8.6, 0.4),
+    # Secondary swell — same direction, beats with the primary every ~24 s.
+    (0.985,  0.174, 0.35, 85.0, 11.2, 2.2),
+    # Mid-band chop along the bearing.
+    (1.000,  0.000, 0.22, 16.0, 5.0, 0.0),
+    # Cross-chop fanned ±25° around bearing for surface variety.
+    (0.906,  0.423, 0.16, 10.0, 4.0, 1.1),
+    (0.940, -0.342, 0.10,  6.0, 3.1, 2.3),
+    (0.985,  0.174, 0.06,  4.0, 2.5, 3.7),
 )
 
 
@@ -64,15 +77,29 @@ DEFAULT_WAVES: tuple[tuple[float, float, float, float, float, float], ...] = (
 # ────────────────────────────────────────────────────────────────────
 
 
-def _sample_water_height(x: float, z: float, t: float) -> float:
+def _sample_water_height(
+    x: float,
+    z: float,
+    t: float,
+    *,
+    amp_mult: float = 1.0,
+    freq_mult: float = 1.0,
+) -> float:
     """Sum-of-sines vertical Gerstner — same formula as ``sampleHeight``
-    in ``wave-field.ts``. Returns water surface y at (x, z, t)."""
+    in ``wave-field.ts``. Returns water surface y at (x, z, t).
+
+    ``amp_mult`` scales every wave's amplitude (so 0 → flat ocean,
+    2 → twice the chop). ``freq_mult`` multiplies the wavenumber k
+    (so 0.5 → wavelengths doubled, 2.0 → wavelengths halved). Both
+    map 1:1 to the JSON ``water.waveHeight`` / ``water.waveFreq``
+    scalars the exporter ships out, so what the author sees in the
+    viewport is what the JSON encodes."""
     y = 0.0
     for dx, dz, amp, wavelength, speed, phase in DEFAULT_WAVES:
-        k = (2.0 * math.pi) / wavelength
+        k = ((2.0 * math.pi) / wavelength) * freq_mult
         omega = speed * k
         p = k * (dx * x + dz * z) - omega * t + phase
-        y += amp * math.sin(p)
+        y += amp_mult * amp * math.sin(p)
     return y
 
 
@@ -86,11 +113,20 @@ def _wipe_water_preview() -> None:
         bpy.data.meshes.remove(bpy.data.meshes[WATER_PREVIEW_MESH])
 
 
-def _build_water_plane_mesh(name: str, size: float, subdivisions: int, t: float):
+def _build_water_plane_mesh(
+    name: str,
+    size: float,
+    subdivisions: int,
+    t: float,
+    *,
+    amp_mult: float = 1.0,
+    freq_mult: float = 1.0,
+):
     """Build a subdivided plane mesh and displace each vertex by the
     wave function evaluated at world (x, y, t). The plane sits at world
     z = (sample), then the caller translates it to the volume's z after
-    assignment."""
+    assignment. ``amp_mult`` / ``freq_mult`` are forwarded to
+    :func:`_sample_water_height`."""
     if name in bpy.data.meshes:
         bpy.data.meshes.remove(bpy.data.meshes[name])
     me = bpy.data.meshes.new(name)
@@ -108,7 +144,7 @@ def _build_water_plane_mesh(name: str, size: float, subdivisions: int, t: float)
         for i in range(n + 1):
             x = -half + i * step
             y = -half + j * step
-            z = _sample_water_height(x, y, t)
+            z = _sample_water_height(x, y, t, amp_mult=amp_mult, freq_mult=freq_mult)
             verts.append((x, y, z))
     faces = []
     for j in range(n):
@@ -159,6 +195,51 @@ def current_water_height_m(scene) -> float:
     return float(raw) if isinstance(raw, (int, float)) else 0.0
 
 
+def current_wave_height_mult(scene) -> float:
+    """Canonical Gerstner-amplitude scalar (= the JSON ``water.waveHeight``
+    value the exporter ships out). Reads the scene prop
+    ``hoverbike_water_wave_height`` first; falls back to the legacy
+    ``water_volume_main.wave_height`` custom prop and promotes it into
+    the scene prop on first read so .blends authored before the slider
+    landed don't lose their authored amplitude.
+
+    Same pattern as :func:`current_water_height_m` — descriptor-path
+    read so slider edits register, dict-path read on the legacy volume
+    because custom props live in ID-properties."""
+    raw = getattr(scene, "hoverbike_water_wave_height", None)
+    if isinstance(raw, (int, float)) and float(raw) != 1.0:
+        return float(raw)
+    vol = bpy.data.objects.get(WATER_VOLUME_NAME)
+    if vol is not None:
+        legacy = vol.get("wave_height")
+        if isinstance(legacy, (int, float)) and float(legacy) != 1.0:
+            scene["hoverbike_water_wave_height"] = float(legacy)
+            return float(legacy)
+    return float(raw) if isinstance(raw, (int, float)) else 1.0
+
+
+def current_wave_freq_mult(scene) -> float:
+    """Canonical Gerstner-frequency scalar (= the JSON ``water.waveFreq``
+    value the exporter ships out). Same promote-on-first-read pattern
+    as :func:`current_wave_height_mult`.
+
+    Default is 1.0 ("authored wavelengths, no change"). Note that
+    pre-slider .blends had a legacy default of 0.5 — that value gets
+    promoted verbatim into the new scene prop, so existing tracks
+    keep their historic preview / export until the author dials it
+    deliberately."""
+    raw = getattr(scene, "hoverbike_water_wave_freq", None)
+    if isinstance(raw, (int, float)) and float(raw) != 1.0:
+        return float(raw)
+    vol = bpy.data.objects.get(WATER_VOLUME_NAME)
+    if vol is not None:
+        legacy = vol.get("wave_freq")
+        if isinstance(legacy, (int, float)) and float(legacy) != 1.0:
+            scene["hoverbike_water_wave_freq"] = float(legacy)
+            return float(legacy)
+    return float(raw) if isinstance(raw, (int, float)) else 1.0
+
+
 def rebuild_water_preview(scene, *, size: float, subdivisions: int, time: float) -> dict:
     """Create / refresh the water-preview collection. Returns a summary
     for the operator's status report.
@@ -170,17 +251,29 @@ def rebuild_water_preview(scene, *, size: float, subdivisions: int, time: float)
     The preview mesh's Z is set from :func:`current_water_height_m`
     (i.e. the ``hoverbike_water_height`` scene prop) — the slider /
     JSON-reload are the canonical control, not the volume's transform.
+    Wave amplitude / frequency multipliers come from the matching
+    scene props via :func:`current_wave_height_mult` /
+    :func:`current_wave_freq_mult`, so dragging the wave-height slider
+    immediately redisplaces the preview (via the debounced rebuild).
+
     The collection itself is reused if already present so the
     Outliner's expanded/collapsed state survives debounced rebuilds."""
     from ._legacy import _find_layer_collection  # imported lazily to avoid cycle at module load
 
     sea_level = current_water_height_m(scene)
+    amp_mult = current_wave_height_mult(scene)
+    freq_mult = current_wave_freq_mult(scene)
     center = (0.0, 0.0, sea_level)
 
     # Recycle the existing preview mesh + collection so collapse state
     # in the Outliner doesn't reset every time the slider scrubs.
     me = _build_water_plane_mesh(
-        WATER_PREVIEW_MESH, size=size, subdivisions=subdivisions, t=time
+        WATER_PREVIEW_MESH,
+        size=size,
+        subdivisions=subdivisions,
+        t=time,
+        amp_mult=amp_mult,
+        freq_mult=freq_mult,
     )
     coll = bpy.data.collections.get(WATER_PREVIEW_COLLECTION)
     if coll is None:
@@ -211,31 +304,35 @@ def rebuild_water_preview(scene, *, size: float, subdivisions: int, time: float)
         "face_count": subdivisions**2,
         "preview_at": center,
         "time_s": time,
+        "amp_mult": amp_mult,
+        "freq_mult": freq_mult,
     }
 
 
 # ────────────────────────────────────────────────────────────────────
-# Sea level (canonical) + legacy water volume
+# Sea level + wave shape (canonical) + legacy water volume
 # ────────────────────────────────────────────────────────────────────
 #
-# Sea level lives on the scene as ``hoverbike_water_height`` — see
-# :func:`current_water_height_m` above. The slider in the N-panel
-# writes the scene prop directly; the preview mesh's Z is recomputed
-# from it on every rebuild. The exporter + JSON-reload both go
-# through ``current_water_height_m``.
+# All three canonical values live on the scene as float properties:
+# ``hoverbike_water_height``, ``hoverbike_water_wave_height``,
+# ``hoverbike_water_wave_freq``. The N-panel sliders write them; the
+# exporter + JSON-reload + wave preview all go through the
+# ``current_*`` helpers above.
 #
-# ``water_volume_main`` is still optional: when present it carries
-# the ``wave_height`` / ``wave_freq`` custom props the exporter uses
-# for the Gerstner amplitude / frequency overrides. Its transform is
-# no longer load-bearing for sea level — old .blends migrate
-# lazily via the helper. Authors who don't override wave parameters
-# don't need a volume in the scene at all.
+# ``water_volume_main`` is now purely a legacy compat shim. New
+# .blends don't need one. The helpers promote any legacy
+# ``location.z`` / ``wave_height`` / ``wave_freq`` custom props on
+# the volume into the scene props on first read, so older .blends
+# migrate transparently.
 
 
 def _ensure_water_volume(scene) -> bpy.types.Object:
     """Return the legacy water-volume empty, creating it if missing.
-    Used by :class:`HOVERBIKE_OT_add_water_volume` (still around for
-    authors who want to tune ``wave_height`` / ``wave_freq``)."""
+    Used by :class:`HOVERBIKE_OT_add_water_volume`. The custom props
+    seed from the current scene-prop slider values rather than
+    hardcoded defaults, so creating a volume can't surprise the
+    author by retroactively halving the slider on next read (via the
+    promote-on-default fallback in ``current_wave_freq_mult``)."""
     obj = bpy.data.objects.get(WATER_VOLUME_NAME)
     if obj is not None:
         return obj
@@ -243,8 +340,8 @@ def _ensure_water_volume(scene) -> bpy.types.Object:
     obj.empty_display_type = "CUBE"
     obj.empty_display_size = 50.0
     obj["kind"] = "water"
-    obj["wave_height"] = 1.0
-    obj["wave_freq"] = 0.5
+    obj["wave_height"] = current_wave_height_mult(scene)
+    obj["wave_freq"] = current_wave_freq_mult(scene)
     obj.location = (0.0, 0.0, 0.0)
     scene.collection.objects.link(obj)
     return obj
@@ -323,6 +420,88 @@ class HOVERBIKE_OT_add_water_volume(Operator):
         return {"FINISHED"}
 
 
+class HOVERBIKE_OT_fit_water_preview_to_scene(Operator):
+    """Auto-size the water plane to cover every visible mesh in the
+    scene plus a margin, so it never reads as smaller than the map.
+    Writes the result to ``hoverbike_water_size`` (which triggers a
+    debounced rebuild via the slider's ``update`` callback).
+
+    "Visible" = the mesh is in a non-excluded collection. The water
+    preview, render-only previews, gates, and other addon-managed
+    helpers are skipped so they can't shrink the resulting size below
+    what the actual track geometry needs."""
+
+    bl_idname = "hoverbike.fit_water_preview_to_scene"
+    bl_label = "Fit to Scene"
+    bl_description = (
+        "Resize the water plane to cover every visible mesh in the scene plus a "
+        "10% margin. Skips addon-managed previews so they can't shrink the result"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    _SKIP_PREFIXES: tuple[str, ...] = (
+        "_hoverbike",       # all addon-managed preview collections
+        "water_preview",     # the water-plane object itself
+    )
+
+    def execute(self, context):
+        scene = context.scene
+        # Pull every mesh / curve in a non-excluded collection. Walking
+        # bpy.data.objects then checking visibility via the layer
+        # collections catches link-from-library objects too, and skips
+        # things hidden in the viewport via `exclude=True`.
+        bounds_min_x = bounds_min_y = float("inf")
+        bounds_max_x = bounds_max_y = float("-inf")
+        counted = 0
+        for obj in scene.objects:
+            if obj.type not in {"MESH", "CURVE", "EMPTY", "FONT"}:
+                continue
+            # Skip addon-managed previews so the water preview can't
+            # shrink itself, and skip anything already inside the
+            # water-preview collection (re-runs would otherwise pin
+            # the size to the last fit value).
+            if any(obj.name.startswith(p) for p in self._SKIP_PREFIXES):
+                continue
+            if not obj.visible_get():
+                continue
+            for corner in obj.bound_box:
+                # bound_box is in local space; transform to world.
+                world = obj.matrix_world @ mathutils.Vector(corner)
+                bounds_min_x = min(bounds_min_x, world.x)
+                bounds_min_y = min(bounds_min_y, world.y)
+                bounds_max_x = max(bounds_max_x, world.x)
+                bounds_max_y = max(bounds_max_y, world.y)
+                counted += 1
+        if counted == 0:
+            self.report({"WARNING"}, "No visible meshes to fit — leaving size alone.")
+            return {"CANCELLED"}
+        # The preview is a square centred at origin; use the larger of
+        # the two world extents and round up to the nearest 50 m so
+        # tiny edits don't keep nudging the size to weird values.
+        span_x = bounds_max_x - bounds_min_x
+        span_y = bounds_max_y - bounds_min_y
+        # The plane straddles the origin (extends ±size/2). If the
+        # scene is off-centre, the plane still has to cover the far
+        # edge — so the size has to be 2 × max(|coord|) on each axis.
+        reach = max(
+            abs(bounds_min_x),
+            abs(bounds_max_x),
+            abs(bounds_min_y),
+            abs(bounds_max_y),
+        )
+        needed = 2.0 * reach * 1.1  # 10% margin past the farthest edge
+        # Round up to nearest 50 m for slider readability.
+        rounded = max(50.0, math.ceil(needed / 50.0) * 50.0)
+        # Clamp to the slider's max so the assignment doesn't raise.
+        clamped = min(rounded, 4000.0)
+        scene.hoverbike_water_size = clamped
+        self.report(
+            {"INFO"},
+            f"Water size → {clamped:.0f} m (covers {span_x:.0f}×{span_y:.0f} m scene, {counted} obj corners sampled)",
+        )
+        return {"FINISHED"}
+
+
 class HOVERBIKE_OT_hide_water_preview(Operator):
     """Toggle the water-preview collection's visibility off without
     deleting it. Re-run Rebuild to bring it back."""
@@ -350,6 +529,7 @@ class HOVERBIKE_OT_hide_water_preview(Operator):
 _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_rebuild_water_preview,
     HOVERBIKE_OT_add_water_volume,
+    HOVERBIKE_OT_fit_water_preview_to_scene,
     HOVERBIKE_OT_hide_water_preview,
 )
 
@@ -358,6 +538,8 @@ _SCENE_PROP_NAMES: tuple[str, ...] = (
     "hoverbike_water_size",
     "hoverbike_water_subdivisions",
     "hoverbike_water_time",
+    "hoverbike_water_wave_height",
+    "hoverbike_water_wave_freq",
 )
 
 
@@ -386,21 +568,26 @@ def register() -> None:
     )
     bpy.types.Scene.hoverbike_water_size = FloatProperty(
         name="Water plane size (m)",
-        description="Edge length of the displaced water plane",
-        default=300.0,
+        description=(
+            "Edge length of the displaced water plane. Default 1200 m covers most "
+            "tracks out of the box; use Fit to Scene to auto-size to your map."
+        ),
+        default=1200.0,
         min=10.0,
-        max=2000.0,
+        max=4000.0,
         precision=1,
         update=_on_water_prop_changed,
     )
     bpy.types.Scene.hoverbike_water_subdivisions = IntProperty(
         name="Water subdivisions",
         description=(
-            "Per-edge subdivisions of the water plane. Higher = smoother waves, slower rebuild."
+            "Per-edge subdivisions of the water plane. Higher = smoother waves, slower rebuild. "
+            "At default (320) on a 1200 m plane the cell size is ~3.75 m — fine enough to "
+            "show every chop band in DEFAULT_WAVES without aliasing."
         ),
-        default=80,
+        default=320,
         min=8,
-        max=400,
+        max=800,
         update=_on_water_prop_changed,
     )
     bpy.types.Scene.hoverbike_water_time = FloatProperty(
@@ -411,6 +598,38 @@ def register() -> None:
         default=0.0,
         min=-60.0,
         max=60.0,
+        precision=2,
+        update=_on_water_prop_changed,
+    )
+    # Wave amplitude / frequency multipliers. These ARE the JSON
+    # `water.waveHeight` / `water.waveFreq` values the exporter ships
+    # out — what the slider shows is what the JSON encodes. Default
+    # 1.0 / 1.0 means "ride DEFAULT_WAVES as authored". Legacy
+    # `water_volume_main.wave_height` / `wave_freq` custom props get
+    # promoted into these on first read (see current_wave_*_mult), so
+    # pre-slider .blends keep their authored amplitude.
+    bpy.types.Scene.hoverbike_water_wave_height = FloatProperty(
+        name="Wave height",
+        description=(
+            "Per-wave amplitude multiplier. 0 → flat ocean, 1 → DEFAULT_WAVES as authored, "
+            "2 → twice the chop. Exported as `water.waveHeight` in the track JSON."
+        ),
+        default=1.0,
+        min=0.0,
+        max=3.0,
+        precision=2,
+        update=_on_water_prop_changed,
+    )
+    bpy.types.Scene.hoverbike_water_wave_freq = FloatProperty(
+        name="Wave freq",
+        description=(
+            "Per-wave frequency multiplier. 0.5 → wavelengths doubled (slow rolling swell), "
+            "1 → DEFAULT_WAVES as authored, 2 → wavelengths halved (jittery chop). "
+            "Exported as `water.waveFreq` in the track JSON."
+        ),
+        default=1.0,
+        min=0.0,
+        max=3.0,
         precision=2,
         update=_on_water_prop_changed,
     )

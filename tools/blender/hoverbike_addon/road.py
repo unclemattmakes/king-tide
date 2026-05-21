@@ -210,26 +210,32 @@ def _curve_control_tilts(curve_obj: bpy.types.Object) -> list[float]:
 def _terrain_water_floor(scene) -> float | None:
     """Lowest Z the road's terrain-cast result is allowed to land on.
     Reads the canonical sea level (scene prop ``hoverbike_water_height``)
-    plus the ``wave_height`` custom prop on the legacy
-    ``water_volume_main`` empty (the runtime Gerstner amplitude), with
-    a small clearance multiplier so the road sits above the highest
-    wave crest rather than at exactly the trough-to-peak average.
+    and the wave-height scalar (scene prop ``hoverbike_water_wave_height``,
+    promoted on first read from any legacy
+    ``water_volume_main.wave_height`` custom prop), with a small
+    clearance multiplier so the road sits above the highest wave crest
+    rather than at exactly the trough-to-peak average.
 
     Returns ``None`` if there is no sea level *and* no water volume in
     the scene — older inland tracks (Cliffside, alpine-sprint)
     shouldn't pick up a floor they don't need. Tracks with only a
     scene-prop sea level (no volume) still get a sensible floor."""
-    from .water import current_water_height_m
+    from .water import WATER_VOLUME_NAME, current_water_height_m, current_wave_height_mult
 
-    water = scene.objects.get("water_volume_main") if hasattr(scene, "objects") else bpy.data.objects.get("water_volume_main")
+    water = (
+        scene.objects.get(WATER_VOLUME_NAME)
+        if hasattr(scene, "objects")
+        else bpy.data.objects.get(WATER_VOLUME_NAME)
+    )
     base = current_water_height_m(scene)
     if water is None and base == 0.0:
         return None
-    wave_h = float(water.get("wave_height", 0.0)) if water is not None else 0.0
-    # 1.3× the authored wave height gives a comfortable margin over the
-    # tallest realistic crest without lifting straight stretches of road
-    # so far above water that the bridge looks stilted. Tunable; revisit
-    # if a future ramped-up wave preset clips the road.
+    # current_wave_height_mult is 1.0 at default; the DEFAULT_WAVES
+    # preset sums to ~1.4m peak, so `mult * 1.3` is roughly the peak
+    # crest in metres for typical mults. Same math as before the
+    # scene-prop migration — just sourcing the scalar from the new
+    # canonical location.
+    wave_h = current_wave_height_mult(scene)
     clearance = max(0.4, wave_h * 1.3)
     return base + clearance
 

@@ -599,25 +599,22 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
             }
         )
 
-    water = next(iter(by_kind.get("water", [])), None)
-    # Sea level — canonical source is the scene prop hoverbike_water_height
-    # (driven by the N-panel slider, written by JSON-reload). The legacy
-    # water_volume_main empty's Z is no longer load-bearing; the helper
-    # below promotes its Z into the scene prop on first read so old
-    # .blends keep exporting the same height they did before the
-    # migration. Wave amplitude / frequency overrides still live on the
-    # volume's custom props (when authored), exporting to waveHeight /
-    # waveFreq below.
-    from .water import current_water_height_m
+    # Sea level + Gerstner scalars — all canonical-source from scene
+    # props now (driven by the N-panel sliders, written by JSON-reload).
+    # The legacy water_volume_main custom props are no longer
+    # load-bearing; the helpers promote them into the scene props on
+    # first read so old .blends keep exporting the same values they
+    # did before the slider migration.
+    from .water import (
+        current_water_height_m,
+        current_wave_freq_mult,
+        current_wave_height_mult,
+    )
     water_height = current_water_height_m(bpy.context.scene)
     water_block: dict[str, float] = {
         "height": water_height,
-        "waveHeight": (
-            float(water.get("wave_height", 1.0)) if water is not None else 1.0
-        ),
-        "waveFreq": (
-            float(water.get("wave_freq", 0.5)) if water is not None else 0.5
-        ),
+        "waveHeight": current_wave_height_mult(bpy.context.scene),
+        "waveFreq": current_wave_freq_mult(bpy.context.scene),
     }
 
     # Runtime terrain-shader knobs (Item 3). Live on the scene; the
@@ -820,17 +817,31 @@ def reload_track_from_json(json_path: str) -> dict:
         if isinstance(h, (int, float)):
             scene["hoverbike_water_height"] = float(h)
             summary["water"] = True
-        # Wave amp / freq overrides still live on water_volume_main's
-        # custom props when one exists — keep round-tripping them.
+        # Wave amp / freq scalars live on scene props now too — the
+        # N-panel sliders are the canonical UI. We write via the
+        # property descriptor (`setattr`) instead of the ID-prop dict
+        # path so the slider's update callback fires and the wave
+        # preview rebuilds in-place.
+        wh = water.get("waveHeight")
+        if isinstance(wh, (int, float)) and hasattr(scene, "hoverbike_water_wave_height"):
+            setattr(scene, "hoverbike_water_wave_height", float(wh))
+            summary["water"] = True
+        wf = water.get("waveFreq")
+        if isinstance(wf, (int, float)) and hasattr(scene, "hoverbike_water_wave_freq"):
+            setattr(scene, "hoverbike_water_wave_freq", float(wf))
+            summary["water"] = True
+        # If the .blend still has a legacy water_volume_main empty,
+        # mirror the scalars onto its custom props too so older
+        # tooling that only knows about the volume (some seed
+        # scripts, the road floor calc in road.py) sees the latest
+        # values. Harmless duplication; goes away when the volume
+        # does.
         vol = bpy.data.objects.get("water_volume_main")
         if vol is not None:
-            wh = water.get("waveHeight")
             if isinstance(wh, (int, float)):
                 vol["wave_height"] = float(wh)
-            wf = water.get("waveFreq")
             if isinstance(wf, (int, float)):
                 vol["wave_freq"] = float(wf)
-            summary["water"] = True
 
     start = data.get("start")
     s0 = bpy.data.objects.get("start_00")

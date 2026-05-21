@@ -1175,14 +1175,15 @@ class HOVERBIKE_PT_track_terrain(_SelectionDrivenPanel, Panel):
 
 
 class HOVERBIKE_PT_track_water(_SelectionDrivenPanel, Panel):
-    """Sub-panel: sea-level slider + Gerstner-wave preview plane
-    controls. Sea level is a scene-wide value; the preview mesh's
-    Z tracks it on each rebuild.
+    """Sub-panel: sea-level slider, wave-shape sliders
+    (``hoverbike_water_wave_height`` / ``wave_freq``, both ship to
+    JSON), and Gerstner-wave preview plane controls. All values are
+    scene-wide; the preview mesh redisplaces live as the sliders move
+    via the debounced rebuild.
 
     Visible when the legacy ``water_volume_main`` empty *or* the
     ``water_preview`` mesh is the active object. (Volume is no longer
-    required — it's optional for ``wave_height`` / ``wave_freq``
-    custom-prop authoring.)"""
+    required — the scene-prop sliders are the canonical UI.)"""
     bl_label = "Water"
     bl_idname = "HOVERBIKE_PT_track_water"
     _active_pred = staticmethod(_is_water_active)
@@ -1196,10 +1197,21 @@ class HOVERBIKE_PT_track_water(_SelectionDrivenPanel, Panel):
         # Sea level is always editable now — the slider writes the
         # scene prop directly, regardless of whether a volume exists.
         layout.prop(scene, "hoverbike_water_height", text="Sea level (m)")
+
+        # Wave shape — both sliders ship to JSON (water.waveHeight /
+        # waveFreq) AND drive the preview's amp/freq multipliers in
+        # real time via the debounced rebuild.
+        layout.separator()
+        layout.label(text="Wave shape (ships to JSON):", icon="MOD_OCEAN")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_water_wave_height", text="Height")
+        row.prop(scene, "hoverbike_water_wave_freq", text="Freq")
         layout.separator()
 
         layout.label(text="Wave preview:", icon="HIDE_OFF")
-        layout.prop(scene, "hoverbike_water_size", text="Size (m)")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_water_size", text="Size (m)")
+        row.operator("hoverbike.fit_water_preview_to_scene", text="Fit", icon="FULLSCREEN_ENTER")
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_water_subdivisions", text="Subdiv")
         row.prop(scene, "hoverbike_water_time", text="Time (s)")
@@ -1207,30 +1219,31 @@ class HOVERBIKE_PT_track_water(_SelectionDrivenPanel, Panel):
         row.operator("hoverbike.rebuild_water_preview", icon="FILE_REFRESH")
         row.operator("hoverbike.hide_water_preview", icon="HIDE_ON")
 
-        # Legacy volume affordance — only useful for wave_height /
-        # wave_freq custom-prop authoring. The empty stops being
-        # load-bearing for sea level in 2026-05.
+        # Legacy volume affordance — the empty stops being load-bearing
+        # for either sea level or wave_height / wave_freq in 2026-05;
+        # the scene-prop sliders above are the canonical UI. Kept so
+        # older .blends that still have the empty can be inspected.
         vol = bpy.data.objects.get(WATER_VOLUME_NAME)
         layout.separator()
         if vol is None:
             row = layout.row()
             row.scale_y = 0.85
             row.label(
-                text="Optional: spawn water_volume_main for wave overrides",
+                text="Legacy: water_volume_main is no longer required",
                 icon="INFO",
             )
             layout.operator(
                 "hoverbike.add_water_volume",
-                text="Add Water Volume (for wave overrides)",
+                text="Add Water Volume (legacy / for older tooling)",
                 icon="ADD",
             )
         else:
-            layout.label(
-                text=f"wave_height={vol.get('wave_height', 1.0):.2f}, "
-                     f"wave_freq={vol.get('wave_freq', 0.5):.2f}",
-                icon="MOD_OCEAN",
+            row = layout.row()
+            row.scale_y = 0.85
+            row.label(
+                text=f"Legacy volume present (wave_height/freq mirror sliders on next reload)",
+                icon="INFO",
             )
-            layout.label(text="(edit on the empty's Custom Properties)", icon="INFO")
 
 
 class HOVERBIKE_PT_track_horizon(_SelectionDrivenPanel, Panel):
