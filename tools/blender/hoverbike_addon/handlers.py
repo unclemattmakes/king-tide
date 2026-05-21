@@ -42,10 +42,15 @@ _WATCHED_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # curve for both racing line and road see the road follow live.
     # "starts" is conditional on the scene's bound flag — the
     # dispatch in _run_pending_rebuilds skips when not bound.
-    ("ai_spline_main",   ("gates", "turns", "helper", "road", "starts")),
-    ("road_curve_main",  ("road",)),
+    # "buoys" fires unconditionally (no road_main opt-in) so water-
+    # only tracks like Sandbar grow buoys on the first spline edit —
+    # there's no road_main on those tracks to gate against.
+    ("ai_spline_main",   ("gates", "turns", "helper", "road", "starts", "buoys")),
+    ("road_curve_main",  ("road", "buoys")),
     ("start_00",         ("racer",)),
-    ("water_volume_main", ("water",)),
+    # Editing the legacy water volume changes both the surface and
+    # the over-water flag for every buoy sample, so refresh both.
+    ("water_volume_main", ("water", "buoys")),
 )
 
 _pending_rebuilds: set[str] = set()
@@ -150,10 +155,25 @@ def _run_pending_rebuilds():
     # pattern the other previews use, and avoids spamming rebuilds
     # for authors who only care about the curve, not the asphalt
     # strip.
-    if "road" in pending and bpy.data.objects.get("road_main") is not None:
+    has_road = bpy.data.objects.get("road_main") is not None
+    if "road" in pending and has_road:
         try:
             from . import road as _road_mod
             _road_mod.rebuild_road_main(scene)
+        except (RuntimeError, AttributeError):
+            pass
+
+    # Standalone buoy rebuild — fires for water-only tracks (no
+    # road_main). Skipped when "road" already fired on the same tick
+    # because rebuild_road_main calls _maybe_build_buoys_from_samples
+    # internally with the road's own samples; running both would
+    # double-build (wipe + rebuild twice). The master enable + water-
+    # present check live inside rebuild_buoys so this dispatch is
+    # cheap when those gates aren't met.
+    if "buoys" in pending and not (has_road and "road" in pending):
+        try:
+            from . import road as _road_mod
+            _road_mod.rebuild_buoys(scene)
         except (RuntimeError, AttributeError):
             pass
 

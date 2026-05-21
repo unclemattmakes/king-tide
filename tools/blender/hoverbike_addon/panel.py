@@ -763,6 +763,31 @@ class HOVERBIKE_PT_track_road(_SelectionDrivenPanel, Panel):
         row.prop(scene, "hoverbike_road_curb_height", text="Curb h")
         layout.prop(scene, "hoverbike_road_curb_stripe_length", text="Stripe (m)")
         layout.separator()
+        # Auto buoys — F1-curb-style marker buoys at the road edges
+        # wherever the road sits above open water (terrain raycast
+        # below sea level). Disabled cheaply via the master toggle so
+        # inland tracks pay nothing.
+        layout.label(text="Buoys (auto, over water):", icon="MOD_OCEAN")
+        layout.prop(scene, "hoverbike_road_buoys_enabled", text="Enable")
+        if scene.hoverbike_road_buoys_enabled:
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_road_buoy_spacing_mult", text="Spacing ×gw")
+            row.prop(scene, "hoverbike_road_buoy_side_offset", text="Side off")
+        layout.separator()
+        # Auto guardrails — Armco rail on the outside of contiguous
+        # sharp-corner runs. Reads the smoothed kappa stamp the bank
+        # calc already drives off, so threshold reads as "minimum
+        # |kappa| (1/m) for a sample to be fenced".
+        layout.label(text="Guardrails (auto, sharp corners):", icon="MOD_LATTICE")
+        layout.prop(scene, "hoverbike_road_guardrails_enabled", text="Enable")
+        if scene.hoverbike_road_guardrails_enabled:
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_road_guardrail_kappa", text="Kappa")
+            row.prop(scene, "hoverbike_road_guardrail_height", text="Rail h")
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_road_guardrail_top_offset", text="Top off")
+            row.prop(scene, "hoverbike_road_guardrail_side_offset", text="Side off")
+        layout.separator()
         # Per-point conform — toggle whether a road segment grabs its Z from
         # the terrain (default) or floats at the bezier point's authored Z
         # (bridges, ramps over water). Stored in `weight_softbody` so it
@@ -1438,6 +1463,26 @@ class HOVERBIKE_PT_track_gameplay(_SelectionDrivenPanel, Panel):
             text=("Re-stamp from Spline" if n_cp > 0 else "Materialise to cp_NN (for hand-edit)"),
             icon="OUTLINER_OB_EMPTY",
         )
+        layout.separator()
+
+        # Buoys — F1-curb-style markers along the racing-line edges
+        # wherever the spline crosses open water. Lives in the gameplay
+        # panel because it's spline-driven (works on water-only tracks
+        # like Sandbar with no road_main); the road panel also exposes
+        # the same toggles for road-having tracks where authors tune
+        # them alongside the road width.
+        layout.label(text="Buoys (auto, over water):", icon="MOD_OCEAN")
+        layout.prop(scene, "hoverbike_road_buoys_enabled", text="Enable")
+        if scene.hoverbike_road_buoys_enabled:
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_road_buoy_spacing_mult", text="Spacing ×gw")
+            row.prop(scene, "hoverbike_road_buoy_side_offset", text="Side off")
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_road_width", text="Track width")
+            row.prop(scene, "hoverbike_road_curb_width", text="Curb w")
+        layout.operator("hoverbike.rebuild_buoys", icon="FILE_REFRESH")
+        if bpy.data.objects.get("road_buoys") is not None:
+            layout.label(text="Live; auto-rebuild follows spline edits", icon="LINKED")
         layout.separator()
 
         layout.label(text="Boost pads:", icon="FORCE_FORCE")

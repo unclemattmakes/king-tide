@@ -52,6 +52,7 @@ from bpy.types import Operator
 WATER_VOLUME_NAME = "water_volume_main"
 WATER_PREVIEW_COLLECTION = "_hoverbike_water_preview"
 WATER_PREVIEW_MESH = "_hoverbike_water_surface"
+WATER_PREVIEW_MATERIAL = "mat_water_preview"
 
 # Mirror of ``defaultWaves()`` in ``src/engine/sim/water/wave-field.ts``.
 # Tuple layout: (dirX, dirZ, amplitude, wavelength, speed, phase). Keep
@@ -75,6 +76,38 @@ DEFAULT_WAVES: tuple[tuple[float, float, float, float, float, float], ...] = (
 # ────────────────────────────────────────────────────────────────────
 # Wave preview
 # ────────────────────────────────────────────────────────────────────
+
+
+def _ensure_water_preview_material() -> bpy.types.Material:
+    """Authoring-only material for the wave preview plane.
+
+    Deep-ocean blue with ~55% alpha so terrain underneath stays legible
+    while the surface reads as water instead of a featureless grey plane.
+    Runtime water shading lives in ``src/engine/render/water.ts`` — this
+    material never reaches the GLB because the preview lives in a
+    render-disabled collection.
+
+    Idempotent — re-runs return the existing datablock so re-builds
+    don't pile up duplicate materials in the .blend."""
+    mat = bpy.data.materials.get(WATER_PREVIEW_MATERIAL)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(WATER_PREVIEW_MATERIAL)
+    mat.use_nodes = True
+    mat.blend_method = "BLEND"
+    mat.show_transparent_back = False
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is not None:
+        bsdf.inputs["Base Color"].default_value = (0.06, 0.32, 0.55, 1.0)
+        bsdf.inputs["Roughness"].default_value = 0.15
+        alpha_in = bsdf.inputs.get("Alpha")
+        if alpha_in is not None:
+            alpha_in.default_value = 0.55
+        spec = bsdf.inputs.get("Specular IOR Level") or bsdf.inputs.get("Specular")
+        if spec is not None:
+            spec.default_value = 0.5
+    mat["hoverbike_preview_only"] = True
+    return mat
 
 
 def _sample_water_height(
@@ -292,6 +325,16 @@ def rebuild_water_preview(scene, *, size: float, subdivisions: int, time: float)
     obj.location = center
     obj.hide_render = True
 
+    # Translucent blue material so the preview reads as water in solid /
+    # material-preview viewport modes. Reassigned on every rebuild because
+    # ``_build_water_plane_mesh`` makes a fresh Mesh datablock — the
+    # previous mesh's materials don't carry across.
+    preview_mat = _ensure_water_preview_material()
+    if me.materials:
+        me.materials[0] = preview_mat
+    else:
+        me.materials.append(preview_mat)
+
     lc = _find_layer_collection(
         bpy.context.view_layer.layer_collection, WATER_PREVIEW_COLLECTION
     )
@@ -351,6 +394,10 @@ def _on_water_prop_changed(self, context):
     from .handlers import _schedule_rebuild
 
     _schedule_rebuild("water")
+    # Sea level / wave height affect which road samples are flagged
+    # "over water", so refresh the buoy strip too. Cheap no-op if the
+    # buoy master toggle is off or the curve / water isn't authored.
+    _schedule_rebuild("buoys")
 
 
 # ────────────────────────────────────────────────────────────────────
