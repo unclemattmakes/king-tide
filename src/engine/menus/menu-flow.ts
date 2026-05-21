@@ -80,7 +80,17 @@ const STEPS_SP_RACE: { id: Step; label: string }[] = [
   { id: 'sp-bike', label: 'BIKE' },
 ]
 
-const STEPS_SP_CUP: { id: Step; label: string }[] = [
+/** Championship cup flow — the lineup-preview step (sp-cup-tracks) is
+ *  skipped, so the breadcrumbs go MODE → CUP → BIKE. */
+const STEPS_SP_CUP_CHAMPIONSHIP: { id: Step; label: string }[] = [
+  { id: 'title', label: 'START' },
+  { id: 'mode', label: 'MODE' },
+  { id: 'sp-cup', label: 'CUP' },
+  { id: 'sp-bike', label: 'BIKE' },
+]
+
+/** Dev Cup (browse-shaped) — user picks a single track on sp-cup-tracks. */
+const STEPS_SP_CUP_BROWSE: { id: Step; label: string }[] = [
   { id: 'title', label: 'START' },
   { id: 'mode', label: 'MODE' },
   { id: 'sp-cup', label: 'CUP' },
@@ -265,7 +275,12 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       case 'multiplayer':
         return STEPS_MP
       case 'cup':
-        return STEPS_SP_CUP
+        // Until a cup is picked, default to the championship crumb path —
+        // the four ship cups + the placeholder are all championship-shaped;
+        // the Dev Cup browse path swaps in once that tile is clicked.
+        return (pickedCup?.races.length ?? 1) > 0
+          ? STEPS_SP_CUP_CHAMPIONSHIP
+          : STEPS_SP_CUP_BROWSE
       case 'tutorial':
         return STEPS_TUTORIAL
       case 'time-trial':
@@ -434,13 +449,19 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     if (!disabled) {
       card.addEventListener('click', () => {
         pickedCup = c
-        // For championship-shaped cups (real cups + placeholder), pre-
-        // seed the bike-select's `RACING AT` readout with the first
-        // race so the player sees what they're committing to.
         if (c.races.length > 0) {
+          // Championship cups commit as a single unit — skip the inert
+          // lineup-preview screen and land on bike-select directly. The
+          // first race seeds picks.trackId so the bike screen has a
+          // meaningful readout to render.
           picks.trackId = c.races[0] ?? picks.trackId
+          showStep('sp-bike')
+        } else {
+          // Browse-shaped cups (Dev Cup) still use sp-cup-tracks as the
+          // track picker — the player picks one of the tiles to launch a
+          // single race.
+          showStep('sp-cup-tracks')
         }
-        showStep('sp-cup-tracks')
       })
     }
     return card
@@ -681,6 +702,16 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     gamepadNav.focusFirst()
   }
 
+  /** Where the bike-select screen rewinds to. Championship cups skip the
+   *  lineup-preview step on the way in, so back from bike-select returns
+   *  to the cup picker. Dev cup + Time Trial still pick a track on
+   *  sp-cup-tracks, so back lands there. Race mode rewinds to sp-track. */
+  function bikeBackStep(): Step {
+    if (currentMode === 'cup' && (pickedCup?.races.length ?? 0) > 0) return 'sp-cup'
+    if (currentMode === 'cup' || currentMode === 'time-trial') return 'sp-cup-tracks'
+    return 'sp-track'
+  }
+
   function gamepadBack(): void {
     if (currentStep === 'mode') showStep('title')
     else if (currentStep === 'sp-track') showStep('mode')
@@ -690,8 +721,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       // returns to the mode picker rather than a cup screen the user
       // never saw.
       showStep(currentMode === 'time-trial' ? 'mode' : 'sp-cup')
-    else if (currentStep === 'sp-bike')
-      showStep(currentMode === 'cup' || currentMode === 'time-trial' ? 'sp-cup-tracks' : 'sp-track')
+    else if (currentStep === 'sp-bike') showStep(bikeBackStep())
     else if (currentStep === 'pre-race') showStep('sp-bike')
     else if (currentStep === 'mp-entry') showStep('mode')
     else if (currentStep === 'tutorial-intro') showStep('mode')
@@ -780,14 +810,17 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         }
       }
       const recapHtml = recap ? renderRecapHtml(recap) : ''
-      // No PRESS START button — the whole title surface is the affordance.
-      // Click anywhere on the title, or hit a meaningful key, to advance.
+      // The whole title surface advances on click, but the CTA is also a
+      // real <button> so keyboard focus + gamepad A (which clicks the
+      // active focusable, see menu-gamepad.ts) both reach the same path.
       el.innerHTML = `
         <span class="word">HOVERBIKE</span>
         ${taglineHtml}
         ${recapHtml}
         <div class="cta">
-          <div class="cta-blink">Press any key to begin</div>
+          <button class="cta-blink primary" id="title-start" type="button">
+            Press any key or button to begin
+          </button>
         </div>
       `
       el.addEventListener('click', () => showStep('mode'))
@@ -1270,9 +1303,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       const host = el.querySelector<HTMLElement>('#sp-bike-cards')
       if (host) renderBikeCards(host, true)
       el.querySelector('#sp-bike-back')?.addEventListener('click', () =>
-        showStep(
-          currentMode === 'cup' || currentMode === 'time-trial' ? 'sp-cup-tracks' : 'sp-track',
-        ),
+        showStep(bikeBackStep()),
       )
       return el
     }

@@ -7,12 +7,20 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!-- Anton: condensed bold sans for broadcast headlines.
-         Inter: humanist sans for body / chyron copy. Both swap so the
-         system fallback in `--bc-font-display` paints first. -->
+         Inter: humanist sans for body / chyron copy. Loaded async with
+         the `media="print" onload` swap so the request isn't render-
+         blocking — the system fallback in `--bc-font-display` paints
+         first, then Anton/Inter swap in when the CSS finishes. -->
     <link
       href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@300;400;500;600;700&display=swap"
       rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
     />
+    <noscript
+      ><link
+        href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet" /></noscript>
     <title>Hoverbike</title>
     <style>
       :root {
@@ -1163,12 +1171,21 @@
         margin-left: 6px;
       }
       .bc-title .cta-blink {
+        /* Reset native <button> chrome so the CTA reads as the same
+           ambient blinking text it was before; the element is a button
+           only so keyboard/gamepad focus has somewhere to land. */
+        appearance: none; background: transparent; border: 0; padding: 0;
+        cursor: pointer;
         font-family: var(--bc-font-sans);
         font-weight: 300;
         font-size: 11px; letter-spacing: 0.32em;
         color: var(--bc-ink-faint);
         text-transform: uppercase;
         animation: bc-pulse 2.6s ease-in-out infinite;
+      }
+      .bc-title .cta-blink:focus-visible {
+        outline: 1px solid var(--bc-cyan);
+        outline-offset: 6px;
       }
       @keyframes bc-pulse {
         0%, 100% { opacity: 0.85; }
