@@ -371,11 +371,22 @@ def _is_spline_active(obj: bpy.types.Object | None) -> bool:
 
 
 def _is_road_active(obj: bpy.types.Object | None) -> bool:
+    """Road tool sub-panel surfaces when the user is poking at any
+    part of the road/conform setup — the curve, the road mesh, the
+    HV_RoadConform proxy (``terrain_conformed``), or the now-hidden
+    source terrain that the proxy reads from. Otherwise authors who
+    open the modifier panel on the proxy to tweak conform settings
+    can't find Width / Curbs / Bank in the sidebar."""
     from .road import ROAD_CURVE_NAME
+    from .road_conform_gn import PROXY_OBJECT_NAME
 
     if obj is None:
         return False
-    if obj.name == ROAD_CURVE_NAME or obj.name.startswith("road_"):
+    if obj.name in (ROAD_CURVE_NAME, PROXY_OBJECT_NAME):
+        return True
+    if obj.name.startswith("road_"):
+        return True
+    if obj.get("kind") == "terrain_source":
         return True
     return False
 
@@ -616,7 +627,12 @@ class HOVERBIKE_PT_track_road(_SelectionDrivenPanel, Panel):
         row.prop(scene, "hoverbike_road_bank_max_deg", text="Max°")
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_road_bank_smooth_passes", text="Bank smoothing")
-        layout.label(text="(per-point: edit Tilt in N→Curve)", icon="INFO")
+        layout.label(text="Auto-bank scales from curvature × Bank",
+                     icon="INFO")
+        layout.label(text="Per-point: select CP, N→Item→Curve→Tilt",
+                     icon="INFO")
+        layout.label(text="(per-point Tilt drives terrain conform too)",
+                     icon="BLANK1")
         layout.separator()
         layout.label(text="F1 curbs:")
         row = layout.row(align=True)
