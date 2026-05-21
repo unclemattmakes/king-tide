@@ -289,20 +289,65 @@ class HOVERBIKE_OT_snap_starts_to_spline(Operator):
 
         tx, ty = s["tx"], s["ty"]
         rx, ry = ty, -tx
-        # Runtime yaw convention (see template-island docstring). This
-        # value, written into start.rotation_euler.z, round-trips
-        # through `_yaw_from_z_euler` → JSON → runtime, where the bike
-        # spawns facing along (tx, ty).
+        # Aim the bike at the start gate, not just along the spline
+        # tangent. The two differ whenever the spline curves between
+        # the start's t and the nearest gate's t (or whenever the gate
+        # spacing puts the gate at a different curve point). Sampling
+        # the gate placements the same way the export + gate preview
+        # do means the bike spawns staring straight at the gate it's
+        # about to cross — what the player expects on lap 1.
+        #
+        # Falls back to the spline tangent if no gates can be derived
+        # (degenerate spline, etc.) so the operator stays usable in
+        # half-set-up scenes.
         yaw = math.atan2(tx, ty)
+        try:
+            from ._legacy import _sample_curve_to_polyline
+            from .previews import _resample_by_arc_length
+            gate_spacing = float(getattr(scene, "hoverbike_gate_spacing", 120.0))
+            pts = _sample_curve_to_polyline(curve)
+            placements = _resample_by_arc_length(pts, gate_spacing, vertical_axis=2)
+        except (RuntimeError, AttributeError):
+            placements = []
 
+        # Re-aim at the nearest gate now that we know each start's
+        # final XY. Gate-facing yaw is computed per-start so the two
+        # start empties point at the same gate even when the lateral
+        # offset puts them slightly off-axis. Same convention as the
+        # existing yaw line above: atan2(dx_blender, dy_blender) such
+        # that the bike's runtime forward (after the Blender→three.js
+        # mapping) aims along (dx, dy) in Blender XY.
         snapped = 0
         for i, off in enumerate([-spacing * 0.5, +spacing * 0.5]):
             name = f"start_{i:02d}"
             obj = bpy.data.objects.get(name)
             if obj is None:
                 continue
-            obj.location = (s["x"] + rx * off, s["y"] + ry * off, target_z)
-            obj.rotation_euler = (0.0, 0.0, yaw)
+            sx_i = s["x"] + rx * off
+            sy_i = s["y"] + ry * off
+            this_yaw = yaw
+            if placements:
+                nearest_i = min(
+                    range(len(placements)),
+                    key=lambda j: (
+                        (placements[j]["position"][0] - sx_i) ** 2
+                        + (placements[j]["position"][1] - sy_i) ** 2
+                    ),
+                )
+                gx = placements[nearest_i]["position"][0]
+                gy = placements[nearest_i]["position"][1]
+                if math.hypot(gx - sx_i, gy - sy_i) > 1e-3:
+                    # Blender atan2(dx, dy) gives a yaw that — once the
+                    # runtime applies Ry(yaw) to a bike whose local +Z
+                    # is forward in three.js — leaves the bike facing
+                    # 90° clockwise of the intended direction (observed
+                    # empirically: gate ended up at the player's 9
+                    # o'clock). The Blender↔three.js Y/Z axis flip means
+                    # the equivalent runtime atan2 is over (dx, -dy),
+                    # i.e. add π/2 to the Blender-frame computation.
+                    this_yaw = math.atan2(gx - sx_i, -(gy - sy_i))
+            obj.location = (sx_i, sy_i, target_z)
+            obj.rotation_euler = (0.0, 0.0, this_yaw)
             obj["start_t"] = float(t)
             snapped += 1
 

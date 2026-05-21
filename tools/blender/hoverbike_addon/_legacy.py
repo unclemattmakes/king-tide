@@ -383,6 +383,42 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         start_pos = {"x": 0.0, "y": 0.5, "z": 0.0}
         start_yaw = 0.0
 
+    # Rotate `checkpoints` so the gate nearest `start_00` lands at
+    # index 0. The runtime treats index 0 as the finish line / lap
+    # counter (see src/game/systems/race.ts:75,
+    # src/engine/render/race-hud.ts:284 + the cp.index===0 special
+    # cases in src/engine/render/track-mesh.ts and src/main.ts), but
+    # the natural ordering — spline-sample-from-t=0 or cp_NN sort —
+    # has no relation to where the player physically starts. Without
+    # this rotation, the white "start/finish" minimap marker can land
+    # on the far side of the track from the bike grid.
+    #
+    # Rotation preserves the racing-line direction; only the cyclic
+    # phase changes (so gates 1..N still come in the order the player
+    # crosses them). We also reassign each cp's `index` field to
+    # match the new array position — the runtime keys cp.index===0
+    # not just array-position 0.
+    #
+    # Skipped when the author has dropped cp_NN empties by hand:
+    # explicit numerical naming is a strong author signal that they
+    # want cp_00 to be the start (matches "author override beats
+    # automation"). Spline-derived checkpoints (the default flow)
+    # always rotate.
+    authored_cp_empties = bool(cps)
+    if checkpoints and starts and not authored_cp_empties:
+        sx_t, sz_t = start_pos["x"], start_pos["z"]
+        nearest_i = min(
+            range(len(checkpoints)),
+            key=lambda i: (
+                (checkpoints[i]["position"]["x"] - sx_t) ** 2
+                + (checkpoints[i]["position"]["z"] - sz_t) ** 2
+            ),
+        )
+        if nearest_i != 0:
+            checkpoints = checkpoints[nearest_i:] + checkpoints[:nearest_i]
+            for i, cp in enumerate(checkpoints):
+                cp["index"] = i
+
     # Spline anchors. Two paths:
     #   - Legacy / no-banking: downsample the NURBS / Bezier tessellation
     #     into ~12 anchors. Existing track behaviour, unchanged for
@@ -843,7 +879,16 @@ def _merge_export_json(derived: dict, existing: dict | None) -> dict:
         re.match(r"^wave_zone_\d+$", o.name) and is_object_visible(o)
         for o in bpy.data.objects
     )
-    if has_cp_empties and "checkpoints" in derived:
+    # Checkpoints: spline-wins ALSO counts as ".blend authors checkpoints".
+    # If derive_track_json produced any checkpoints — either from cp_NN
+    # empties OR from sampling ai_spline_main — the .blend is the source
+    # of truth and the merged output should reflect the current spline
+    # geometry + the start-nearest rotation (see the rotation block in
+    # derive_track_json). Without this, a spline edit re-runs the
+    # derivation but the export silently preserves whatever stale
+    # checkpoints the previous JSON held, and the runtime sees the old
+    # gates / wrong finish-line index.
+    if "checkpoints" in derived and derived["checkpoints"]:
         merged["checkpoints"] = derived["checkpoints"]
     if has_pickup_empties and "pickupSpawns" in derived:
         merged["pickupSpawns"] = derived["pickupSpawns"]

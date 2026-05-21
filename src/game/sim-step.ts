@@ -25,8 +25,30 @@ import { riderPoseSystem } from './systems/rider-pose'
 import { rubberBandSystem } from './systems/rubber-band'
 import { syncFromPhysics } from './systems/sync-from-physics'
 import { wakeUpdateSystem } from './systems/wake-update'
+import { query } from 'bitecs'
+import { BikeTag, RBHandle, RBHandleStore } from './components'
 
 export type RaceTick = (sim: SimWorld, phys: PhysicsWorld, dt: number) => void
+
+/** While the race is locked (pre-countdown + countdown), keep bikes
+ *  glued to their spawn pose. Input was already zeroed at the start
+ *  of simulateStep, but bikes hovering on wave surfaces still drift
+ *  laterally as the gerstner wave field flows beneath them, and any
+ *  residual impulse from previous frames bleeds into x/z motion.
+ *  Zeroing linvel.xz + angvel each tick keeps the lock visually honest
+ *  while preserving the y component so hoverSystem's PID still holds
+ *  the bike at altitude (no fall + bounce on unlock). */
+function freezeLockedBikes(sim: SimWorld, phys: PhysicsWorld): void {
+  const eids = query(sim, [BikeTag, RBHandle])
+  for (const eid of eids) {
+    const { handle } = RBHandleStore.must(eid)
+    const rb = phys.world.getRigidBody(handle)
+    if (!rb) continue
+    const v = rb.linvel()
+    rb.setLinvel({ x: 0, y: v.y, z: 0 }, true)
+    rb.setAngvel({ x: 0, y: 0, z: 0 }, true)
+  }
+}
 
 export type StepInputs = {
   /** Per-peer control intents for this tick, keyed by peer slot. Bikes
@@ -105,6 +127,7 @@ export function simulateStep(
   // pose driver sees the bike's final orientation for this tick.
   riderPoseSystem(sim, phys, phys.fixedDt)
   phys.step()
+  if (inputs.locked) freezeLockedBikes(sim, phys)
   syncFromPhysics(sim, phys)
 
   // Rider crash detection runs after syncFromPhysics so it can compare
