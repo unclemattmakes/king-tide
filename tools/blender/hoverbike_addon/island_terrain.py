@@ -34,7 +34,7 @@ import random
 import sys
 
 import bpy
-from bpy.props import IntProperty
+from bpy.props import FloatProperty, IntProperty
 from bpy.types import Operator
 
 
@@ -333,19 +333,224 @@ def _peak_pair_count() -> int:
 
 
 # ────────────────────────────────────────────────────────────────────
+# Mod zone — non-destructive local bump
+# ────────────────────────────────────────────────────────────────────
+
+
+def find_island_modifier(obj: bpy.types.Object | None) -> bpy.types.Modifier | None:
+    """First NODES modifier on ``obj`` whose node group is HV_TemplateIsland,
+    or None. Used by the mod-zone operator to confirm the active terrain
+    actually runs the procedural-island graph (vs. a heightmap-imported
+    mesh with no procedural layer to wire mod zones into).
+
+    Tolerates ``obj is None`` so the panel can use it as a one-liner
+    visibility check without guarding the lookup itself."""
+    if obj is None:
+        return None
+    for m in obj.modifiers:
+        if m.type != "NODES":
+            continue
+        ng = m.node_group
+        if ng is not None and ng.name == HV_TEMPLATE_ISLAND_GROUP:
+            return m
+    return None
+
+
+def _collect_mod_slots(ng: bpy.types.NodeTree) -> dict[int, str]:
+    """Map ``Mod N`` socket index → identifier. Empty dict means the node
+    group predates the mod-zone refactor and needs re-seeding."""
+    out: dict[int, str] = {}
+    for item in ng.interface.items_tree:
+        if getattr(item, "item_type", None) != "SOCKET":
+            continue
+        if getattr(item, "in_out", None) != "INPUT":
+            continue
+        name = item.name
+        if not name.startswith("Mod "):
+            continue
+        suffix = name[4:]
+        if not suffix.isdigit():
+            continue
+        out[int(suffix)] = item.identifier
+    return out
+
+
+class HOVERBIKE_OT_add_island_mod_zone(Operator):
+    """Spawn a ``mod_NN`` empty at the 3D cursor and auto-bind it to the
+    next free ``Mod N`` slot on the active terrain's HV_Island modifier.
+
+    Mod zones are the non-destructive way to fine-tune local features
+    without touching the procedural base — drop one to raise a hidden
+    sandbar, carve a tucked-away lagoon, or soften a peak's shoreline.
+    The encoding on each empty:
+
+    * ``location.xy`` — zone centre (worldspace).
+    * ``location.z`` — bump amplitude in metres (positive raises,
+      negative carves). The empty floats at +amplitude metres above the
+      cursor on spawn, which makes the effect direction visually obvious.
+    * ``scale.x`` — zone radius in metres (smoothstep falloff to 0).
+
+    Drag the empty to move the zone, scale it to widen the radius, or
+    drag its Z to retune the amplitude live. Delete the empty (or
+    unbind its slot in the modifier panel) to revert with zero
+    residue."""
+
+    bl_idname = "hoverbike.add_island_mod_zone"
+    bl_label = "Add Mod Zone"
+    bl_description = (
+        "Add a non-destructive local-bump empty at the 3D cursor and auto-bind it "
+        "to the next free Mod N slot on the active terrain's HV_Island modifier"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    amplitude: FloatProperty(
+        name="Amplitude (m)",
+        description=(
+            "Bump height in metres. Positive raises the terrain (hill), negative "
+            "carves it (basin / lagoon). Stored as the empty's location.z so the "
+            "spawned empty floats at this height above the cursor — drag the empty "
+            "in Z afterwards to tweak"
+        ),
+        default=10.0, min=-200.0, max=200.0, precision=1,
+    )  # type: ignore[valid-type]
+    radius: FloatProperty(
+        name="Radius (m)",
+        description=(
+            "Zone radius in metres. Stored as the empty's scale.x; falloff is a "
+            "smoothstep from full amplitude at the centre to zero at the radius"
+        ),
+        default=80.0, min=1.0, max=1000.0, precision=1,
+    )  # type: ignore[valid-type]
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        from ._legacy import _largest_terrain_mesh
+
+        terrain = _largest_terrain_mesh()
+        if terrain is None:
+            self.report({"ERROR"}, "No terrain mesh found (kind=track).")
+            return {"CANCELLED"}
+
+        mod = find_island_modifier(terrain)
+        if mod is None:
+            self.report(
+                {"ERROR"},
+                f"'{terrain.name}' has no HV_Island modifier — mod zones only "
+                "work on procedural-island terrains. Spawn one via 'Add Island "
+                "Terrain' first.",
+            )
+            return {"CANCELLED"}
+
+        slots = _collect_mod_slots(mod.node_group)
+        if not slots:
+            self.report(
+                {"ERROR"},
+                "HV_TemplateIsland node group has no Mod N slots — it predates "
+                "the mod-zone refactor. Delete the node group (and HV_PeakProfile) "
+                "and re-run 'Add Island Terrain' to rebuild with the new sockets, "
+                "or re-seed the .blend via seed_template_island.py.",
+            )
+            return {"CANCELLED"}
+
+        # Pick the lowest unbound slot so empties allocate predictably.
+        free_slot = None
+        for i in sorted(slots.keys()):
+            if mod[slots[i]] is None:
+                free_slot = i
+                break
+        if free_slot is None:
+            self.report(
+                {"ERROR"},
+                f"All {len(slots)} Mod slots are bound. Clear one in the modifier "
+                "panel (or delete its empty) before adding another.",
+            )
+            return {"CANCELLED"}
+
+        # Find a free mod_NN name. Existing-name collisions just bump
+        # the index — keeps the names stable even when slots get reused.
+        idx = 0
+        while bpy.data.objects.get(f"mod_{idx:02d}") is not None:
+            idx += 1
+        name = f"mod_{idx:02d}"
+
+        cursor = context.scene.cursor.location
+        empty = bpy.data.objects.new(name, None)
+        empty.empty_display_type = "SPHERE"
+        empty.empty_display_size = 1.0
+        empty.location = (cursor.x, cursor.y, cursor.z + self.amplitude)
+        empty.scale = (self.radius, self.radius, 1.0)
+        empty["kind"] = "mod_zone"
+        context.scene.collection.objects.link(empty)
+
+        mod[slots[free_slot]] = empty
+
+        # Mod empties belong in the Peaks collection alongside the other
+        # terrain-shape controls if one exists; otherwise leave them in
+        # the scene root.
+        peaks_coll = bpy.data.collections.get("Peaks")
+        if peaks_coll is not None and peaks_coll.name not in (c.name for c in empty.users_collection):
+            for c in list(empty.users_collection):
+                c.objects.unlink(empty)
+            peaks_coll.objects.link(empty)
+
+        for o in context.view_layer.objects:
+            o.select_set(False)
+        empty.select_set(True)
+        context.view_layer.objects.active = empty
+
+        self.report(
+            {"INFO"},
+            f"Added {name} → Mod {free_slot} "
+            f"(amplitude {self.amplitude:+.1f} m, radius {self.radius:.0f} m). "
+            f"Drag the empty to move / scale / re-amplify the zone live.",
+        )
+        return {"FINISHED"}
+
+
+# ────────────────────────────────────────────────────────────────────
 # Registration
 # ────────────────────────────────────────────────────────────────────
 
 
-_CLASSES: tuple[type, ...] = (HOVERBIKE_OT_add_island_terrain,)
+_CLASSES: tuple[type, ...] = (
+    HOVERBIKE_OT_add_island_terrain,
+    HOVERBIKE_OT_add_island_mod_zone,
+)
+
+
+_SCENE_PROP_NAMES: tuple[str, ...] = (
+    "hoverbike_mod_zone_amplitude",
+    "hoverbike_mod_zone_radius",
+)
 
 
 def register() -> None:
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
+    bpy.types.Scene.hoverbike_mod_zone_amplitude = FloatProperty(
+        name="Mod zone Δz (m)",
+        description=(
+            "Default bump amplitude used by Add Mod Zone @ Cursor. Positive raises, "
+            "negative carves. Stored as the empty's location.z so the spawned empty "
+            "floats at this height above the cursor"
+        ),
+        default=10.0, min=-200.0, max=200.0, precision=1,
+    )
+    bpy.types.Scene.hoverbike_mod_zone_radius = FloatProperty(
+        name="Mod zone radius (m)",
+        description=(
+            "Default zone radius used by Add Mod Zone @ Cursor. Stored as the "
+            "empty's scale.x; smoothstep falloff to zero at the radius"
+        ),
+        default=80.0, min=1.0, max=1000.0, precision=1,
+    )
 
 
 def unregister() -> None:
+    for prop in _SCENE_PROP_NAMES:
+        try:
+            delattr(bpy.types.Scene, prop)
+        except AttributeError:
+            pass
     for cls in reversed(_CLASSES):
         try:
             bpy.utils.unregister_class(cls)

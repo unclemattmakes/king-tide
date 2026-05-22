@@ -57,6 +57,38 @@ matches the way real volcanic morphology decouples *footprint* from
 | Land Scale | 0.012 | Land billow frequency (smaller = larger hills) |
 | Shoreline Width | 1.5 m | Underwater dead-zone (m) where the seafloor billow fades out as it nears the waterline. Tight crisp shoreline = 0.5–1; wide sandy lagoon = 5+. (Land billow now always activates at z=0 so the cone slope's texture meets the beach without a ring.) |
 
+### Per-peak overrides
+
+Each of the 8 peak slots also exposes two **override** sockets next to the
+corresponding global knob — `Cone Erosion {i}` and `Ring Break {i}`.
+Default value is **-1** (sentinel: "inherit the global"). Setting any
+value ≥ 0 overrides the global amplitude for that one peak — 0 disables
+the effect on that peak entirely, higher values dial it up. Lets a
+single map carry a smooth tropical volcano next to a jagged eroded
+peak without splitting tracks. Overrides only apply to the *amplitude*;
+the noise *scale* sockets stay global so all peaks share a coherent
+noise field.
+
+### Mod zones — non-destructive local touch-ups
+
+Eight `Mod {i}` empty slots feed an additive smoothstep-falloff bump
+into the final height (after global noise + billow). Each `mod_NN`
+empty encodes:
+
+| Channel | Meaning |
+|---|---|
+| `location.xy` | zone centre |
+| `location.z`  | bump amplitude in metres (positive raises, negative carves) |
+| `scale.x`     | zone radius (smoothstep falloff to 0 at radius) |
+
+Spawn one via the Terrain panel's **Add Mod Zone @ Cursor** button —
+it picks the next free `Mod N` slot, drops a sphere empty at the 3D
+cursor, and auto-binds. Drag the empty to retune live. Delete the
+empty (or clear its modifier slot) to revert with zero residue. Mod
+zones are the right tool for "raise this sandbar a few metres" /
+"carve a tucked-away lagoon" tweaks without applying the modifier
+and going destructive.
+
 ### Authoring loop
 
 1. Open ``tracks-src/template-island.blend``. Default scene has 4
@@ -282,11 +314,38 @@ def build_peak_profile_group() -> bpy.types.NodeTree:
     _new_socket(g, "Noise Seed",    "INPUT",  "NodeSocketFloat",   0.0)
     _new_socket(g, "Ring Break",    "INPUT",  "NodeSocketFloat",  20.0)
     _new_socket(g, "Ring Scale",    "INPUT",  "NodeSocketFloat",   0.015)
+    # Per-peak amplitude overrides. Default -1 = sentinel "inherit
+    # global"; any value ≥ 0 wins over the corresponding global socket
+    # (0 is a real override that disables the effect on this peak). The
+    # parent graph wires one pair of these per peak instance so two
+    # neighbouring islands can read with totally different roughness
+    # signatures while sharing the global background noise.
+    _new_socket(g, "Cone Erosion Override", "INPUT", "NodeSocketFloat", -1.0, -1.0,  50.0)
+    _new_socket(g, "Ring Break Override",   "INPUT", "NodeSocketFloat", -1.0, -1.0, 200.0)
     _new_socket(g, "Sentinel",      "INPUT",  "NodeSocketFloat", -10000.0)
     _new_socket(g, "Height",        "OUTPUT", "NodeSocketFloat")
 
     gi = _add_node(g, "NodeGroupInput",  -2000, 0)
     go = _add_node(g, "NodeGroupOutput",  2000, 0)
+
+    # Override-select pair — picks between the global amplitude socket
+    # and the per-peak override based on a sentinel threshold. Output is
+    # the "effective" amplitude that downstream multiplies should use.
+    # Threshold is -0.5 so override=0 (a legitimate "disable this effect
+    # on this peak" setting) still wins over the global value.
+    def _override_select(name_global: str, name_override: str, y: float):
+        gt = _add_node(g, "ShaderNodeMath", -1700, y, operation="GREATER_THAN")
+        gt.inputs[1].default_value = -0.5
+        g.links.new(gi.outputs[name_override], gt.inputs[0])
+        mx = _add_node(g, "ShaderNodeMix", -1500, y)
+        mx.data_type = "FLOAT"; mx.clamp_factor = False
+        g.links.new(gt.outputs[0],                 mx.inputs[0])
+        g.links.new(gi.outputs[name_global],       mx.inputs["A"])
+        g.links.new(gi.outputs[name_override],     mx.inputs["B"])
+        return mx.outputs[0]
+
+    eff_cone_erosion = _override_select("Cone Erosion", "Cone Erosion Override", -1600)
+    eff_ring_break   = _override_select("Ring Break",   "Ring Break Override",   -1750)
 
     # Vertex xy from Position
     n_pos_xyz = _add_node(g, "ShaderNodeSeparateXYZ", -1800, -200)
@@ -362,7 +421,7 @@ def build_peak_profile_group() -> bpy.types.NodeTree:
     g.links.new(n_ring_noise.outputs["Fac"], n_ring_signed.inputs[0])
     n_ring_perturb = _add_node(g, "ShaderNodeMath", -800, -50, operation="MULTIPLY")
     g.links.new(n_ring_signed.outputs[0], n_ring_perturb.inputs[0])
-    g.links.new(gi.outputs["Ring Break"], n_ring_perturb.inputs[1])
+    g.links.new(eff_ring_break,           n_ring_perturb.inputs[1])
 
     # d_naive = d_naive_raw + ring_perturb (clamped to non-negative so a
     # large negative perturbation can't flip the sign of the distance).
@@ -479,7 +538,7 @@ def build_peak_profile_group() -> bpy.types.NodeTree:
     g.links.new(n_mask_c.outputs["Result"], n_erode_mul1.inputs[1])
     n_erosion = _add_node(g, "ShaderNodeMath", 800, -1700, operation="MULTIPLY")
     g.links.new(n_erode_mul1.outputs[0], n_erosion.inputs[0])
-    g.links.new(gi.outputs["Cone Erosion"], n_erosion.inputs[1])
+    g.links.new(eff_cone_erosion,         n_erosion.inputs[1])
     n_cone_eroded = _add_node(g, "ShaderNodeMath", 1000, -200, operation="ADD")
     g.links.new(n_cone_carved.outputs[0], n_cone_eroded.inputs[0])
     g.links.new(n_erosion.outputs[0], n_cone_eroded.inputs[1])
@@ -530,12 +589,29 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     for i in range(8):
         _new_socket(g, f"Base {i}", "INPUT", "NodeSocketObject")
         _new_socket(g, f"Top {i}",  "INPUT", "NodeSocketObject")
+    # Mod zone empties — non-destructive local bumps. Each empty encodes:
+    # location.xy = zone centre, location.z = bump amplitude (m; positive
+    # raises, negative carves), scale.x = zone radius (m). Falloff is a
+    # smoothstep from 1 at the centre to 0 at the radius. Unbound slots
+    # contribute nothing (an empty Object input reads location=(0,0,0),
+    # so amplitude is 0 ⇒ contribution is 0 regardless of where the
+    # vertex sits relative to the world origin).
+    for i in range(8):
+        _new_socket(g, f"Mod {i}", "INPUT", "NodeSocketObject")
     _new_socket(g, "Shelf Depth",     "INPUT", "NodeSocketFloat", -25.0, -200.0, 0.0)
     _new_socket(g, "Shore Width",     "INPUT", "NodeSocketFloat",  40.0, 0.0, 500.0)
     _new_socket(g, "Cone Erosion",    "INPUT", "NodeSocketFloat",  12.0, 0.0, 50.0)
     _new_socket(g, "Erosion Scale",   "INPUT", "NodeSocketFloat",   0.035, 0.0001, 1.0)
+    # Per-peak Cone Erosion override. Default -1 = sentinel "inherit
+    # global Cone Erosion"; 0 disables erosion on this peak only;
+    # > 0 overrides the global amplitude for this peak.
+    for i in range(8):
+        _new_socket(g, f"Cone Erosion {i}", "INPUT", "NodeSocketFloat", -1.0, -1.0, 50.0)
     _new_socket(g, "Ring Break",      "INPUT", "NodeSocketFloat",  20.0, 0.0, 200.0)
     _new_socket(g, "Ring Scale",      "INPUT", "NodeSocketFloat",   0.015, 0.0001, 1.0)
+    # Per-peak Ring Break override (sentinel semantics match the above).
+    for i in range(8):
+        _new_socket(g, f"Ring Break {i}", "INPUT", "NodeSocketFloat", -1.0, -1.0, 200.0)
     _new_socket(g, "Roughness Above", "INPUT", "NodeSocketFloat",   2.0, 0.0, 50.0)
     _new_socket(g, "Roughness Below", "INPUT", "NodeSocketFloat",   1.0, 0.0, 20.0)
     _new_socket(g, "Noise Scale",     "INPUT", "NodeSocketFloat",   0.008, 0.0001, 1.0)
@@ -585,6 +661,8 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
         g.links.new(p_in.outputs["Noise Seed"],    inst.inputs["Noise Seed"])
         g.links.new(p_in.outputs["Ring Break"],    inst.inputs["Ring Break"])
         g.links.new(p_in.outputs["Ring Scale"],    inst.inputs["Ring Scale"])
+        g.links.new(p_in.outputs[f"Cone Erosion {i}"], inst.inputs["Cone Erosion Override"])
+        g.links.new(p_in.outputs[f"Ring Break {i}"],   inst.inputs["Ring Break Override"])
         g.links.new(n_sentinel.outputs[0],         inst.inputs["Sentinel"])
         if prev is None:
             prev = inst.outputs["Height"]
@@ -775,9 +853,76 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     g.links.new(n_final2.outputs[0], n_final3.inputs[0])
     g.links.new(n_land.outputs[0],   n_final3.inputs[1])
 
+    # Mod-zone cascade — local non-destructive bumps stacked on top of
+    # the procedural base. For each ``Mod {i}`` empty:
+    #   centre.xy = empty.location.xy
+    #   radius    = empty.scale.x  (smoothstep falloff to zero at radius)
+    #   amplitude = empty.location.z  (m; signed)
+    # An unbound socket reads location=(0,0,0) and scale=(1,1,1) — the
+    # amplitude is then 0 so the multiply zeroes the contribution out
+    # before the world-origin "phantom bump" matters. No explicit
+    # active-mask required.
+    n_pos_xyz = _add_node(g, "ShaderNodeSeparateXYZ", -400, -3900)
+    g.links.new(p_pos.outputs["Position"], n_pos_xyz.inputs["Vector"])
+
+    def _mod_contribution(i: int, y: float):
+        obj = _add_node(g, "GeometryNodeObjectInfo", -200, y,
+                        transform_space="RELATIVE")
+        g.links.new(p_in.outputs[f"Mod {i}"], obj.inputs["Object"])
+        loc = _add_node(g, "ShaderNodeSeparateXYZ", 0, y)
+        g.links.new(obj.outputs["Location"], loc.inputs["Vector"])
+        scl = _add_node(g, "ShaderNodeSeparateXYZ", 0, y - 60)
+        g.links.new(obj.outputs["Scale"], scl.inputs["Vector"])
+        # dx, dy, hypot — distance from vertex to empty centre.
+        dx = _add_node(g, "ShaderNodeMath", 200, y, operation="SUBTRACT")
+        g.links.new(n_pos_xyz.outputs["X"], dx.inputs[0])
+        g.links.new(loc.outputs["X"], dx.inputs[1])
+        dy = _add_node(g, "ShaderNodeMath", 200, y - 50, operation="SUBTRACT")
+        g.links.new(n_pos_xyz.outputs["Y"], dy.inputs[0])
+        g.links.new(loc.outputs["Y"], dy.inputs[1])
+        dx2 = _add_node(g, "ShaderNodeMath", 380, y, operation="POWER")
+        dx2.inputs[1].default_value = 2.0
+        g.links.new(dx.outputs[0], dx2.inputs[0])
+        dy2 = _add_node(g, "ShaderNodeMath", 380, y - 50, operation="POWER")
+        dy2.inputs[1].default_value = 2.0
+        g.links.new(dy.outputs[0], dy2.inputs[0])
+        d_sumsq = _add_node(g, "ShaderNodeMath", 540, y - 25, operation="ADD")
+        g.links.new(dx2.outputs[0], d_sumsq.inputs[0])
+        g.links.new(dy2.outputs[0], d_sumsq.inputs[1])
+        d = _add_node(g, "ShaderNodeMath", 700, y - 25, operation="SQRT")
+        g.links.new(d_sumsq.outputs[0], d.inputs[0])
+        # Smoothstep mask: 1 at centre, 0 at radius.
+        mask = _add_node(g, "ShaderNodeMapRange", 880, y - 25,
+                         interpolation_type="SMOOTHSTEP", clamp=True)
+        g.links.new(d.outputs[0],   mask.inputs["Value"])
+        g.links.new(scl.outputs["X"], mask.inputs["From Min"])
+        mask.inputs["From Max"].default_value = 0.0
+        mask.inputs["To Min"].default_value =   0.0
+        mask.inputs["To Max"].default_value =   1.0
+        # Contribution = mask × amplitude.
+        contrib = _add_node(g, "ShaderNodeMath", 1080, y - 25, operation="MULTIPLY")
+        g.links.new(mask.outputs["Result"], contrib.inputs[0])
+        g.links.new(loc.outputs["Z"],       contrib.inputs[1])
+        return contrib.outputs[0]
+
+    mod_sum = None
+    for i in range(8):
+        c = _mod_contribution(i, -3700 - i * 180)
+        if mod_sum is None:
+            mod_sum = c
+        else:
+            acc = _add_node(g, "ShaderNodeMath", 1280, -3700 - i * 180, operation="ADD")
+            g.links.new(mod_sum, acc.inputs[0])
+            g.links.new(c,       acc.inputs[1])
+            mod_sum = acc.outputs[0]
+
+    n_final4 = _add_node(g, "ShaderNodeMath", 1200, -800, operation="ADD")
+    g.links.new(n_final3.outputs[0], n_final4.inputs[0])
+    g.links.new(mod_sum,             n_final4.inputs[1])
+
     # Set Position
     n_comb = _add_node(g, "ShaderNodeCombineXYZ", 1100, -300)
-    g.links.new(n_final3.outputs[0], n_comb.inputs["Z"])
+    g.links.new(n_final4.outputs[0], n_comb.inputs["Z"])
     n_setpos = _add_node(g, "GeometryNodeSetPosition", 1400, 0)
     g.links.new(p_in.outputs["Geometry"], n_setpos.inputs["Geometry"])
     g.links.new(n_comb.outputs["Vector"], n_setpos.inputs["Offset"])
