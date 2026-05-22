@@ -16,14 +16,30 @@ import { emptyIntent, type Intent } from './intent'
  * and clamped to [-1, 1] so >1.0 sensitivity saturates earlier instead of
  * overshooting.
  */
-function shapeAxis(v: number): number {
-  const dz = playerSettings.gamepadDeadzone
+function shapeAxis(v: number, deadzone: number = playerSettings.gamepadDeadzone): number {
   const mag = Math.abs(v)
-  if (mag < dz) return 0
-  const t = (mag - dz) / (1 - dz)
+  if (mag < deadzone) return 0
+  const t = (mag - deadzone) / (1 - deadzone)
   const shaped = Math.sign(v) * Math.min(t, 1) ** devSettings.stickCurve
   const scaled = shaped * playerSettings.gamepadSensitivity
   return Math.max(-1, Math.min(1, scaled))
+}
+
+/**
+ * Pitch-axis deadzone is wider than the steer deadzone. The left stick
+ * X (steer) wants a small deadzone for responsive turning, but the Y
+ * axis (pitch) is the source of the "I pushed forward to drive forward
+ * and the bike dove" feel-bug — players push the stick fwd-diagonally
+ * to "go and turn," and a small Y-component reads as a real dive
+ * command. A wider Y deadzone treats small accidental Y deflections as
+ * zero pitch, so casual diagonal stick gestures steer cleanly without
+ * commanding pitch. Lifted further by `PITCH_DEADZONE_FLOOR` over the
+ * player's chosen deadzone so cranking the deadzone slider down to 0
+ * still leaves some pitch slop.
+ */
+const PITCH_DEADZONE_FLOOR = 0.28
+function pitchDeadzone(): number {
+  return Math.max(PITCH_DEADZONE_FLOOR, playerSettings.gamepadDeadzone)
 }
 
 export type GamepadSnapshot = {
@@ -73,7 +89,8 @@ export function gamepadIntent(): Intent {
   // positive intent.pitch = nose UP / lift, negative = nose DOWN / dive.
   // So pull back (axes[1] = +1) → pitch +1 → lift; push forward (axes[1] = -1)
   // → pitch -1 → dive. No sign flip needed.
-  intent.pitch = shapeAxis(pad.axes[1] ?? 0)
+  // Wider deadzone for pitch — see `pitchDeadzone` comment above.
+  intent.pitch = shapeAxis(pad.axes[1] ?? 0, pitchDeadzone())
 
   const rt = pad.buttons[7]?.value ?? 0
   const a = pad.buttons[0]?.pressed ? 1 : 0
