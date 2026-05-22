@@ -203,12 +203,14 @@ async function boot() {
   // precision.
   const waveField = createWaveField(defaultWaves())
   // Camera-locked water: the mesh follows the camera XZ so its dense
-  // vertex region always covers the visible patch. Size shrinks from the
-  // legacy 800 m world plane to 240 m centered on the camera (= 120 m
-  // out in any direction, plenty of horizon). Subdivisions stay at the
-  // shader default (384), giving ≈ 0.625 m vertex spacing — the 4 m wake
-  // wavelength resolves at ~6.4 verts per crest, so ridges read as real
-  // geometry instead of single-vertex shimmer.
+  // vertex region always covers the visible patch. Size set at 480 m
+  // centered on the camera (= 240 m out to the sides, ~340 m at the
+  // corners) so wave-displaced geometry reaches well into the
+  // aerial-perspective haze ramp before the flat horizon skirt takes
+  // over — the boundary between the two reads as a tonal gradient, not
+  // a hard edge. Subdivisions default to 768, giving ≈ 0.625 m vertex
+  // spacing — the 4 m wake wavelength resolves at ~6.4 verts per crest,
+  // so ridges read as real geometry instead of single-vertex shimmer.
   const waterMesh = createWaterMesh(waveField, { backend })
   scene.add(waterMesh.mesh)
 
