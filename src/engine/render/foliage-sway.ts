@@ -54,7 +54,18 @@ export type SwayOptions = {
  * The patch reads `attribute vec3 color` (three.js's name for the
  * glTF `COLOR_0` attribute) and:
  *   - takes `color.r` as sway strength
- *   - takes `color.b` as a phase offset (mapped 0..1 → 0..2π)
+ *   - takes `color.b` as a *baseline* phase offset (mapped 0..1 → 0..2π)
+ *   - when the mesh is an `InstancedMesh` (an `EXT_mesh_gpu_instancing`
+ *     block lifted by the GLB loader), adds a deterministic per-instance
+ *     phase term hashed from `instanceMatrix[3].xz`. This desyncs the
+ *     sway across scattered palms without needing per-instance vertex
+ *     attributes — which the gltf instancing extension can't carry,
+ *     it only ships TRS. The Geometry-Nodes "Store Named Attribute"
+ *     sway-phase stamp is per-vertex on the source mesh and so gets
+ *     baked into the single frozen mesh datablock the addon's scatter
+ *     realize pass shares across all instances; the only way to vary
+ *     phase per InstancedMesh row is to derive it from the per-instance
+ *     matrix at draw time.
  *   - displaces the vertex along the wind uniform direction
  *
  * The mesh's `geometry` must include the `color` attribute. The runtime
@@ -95,13 +106,28 @@ uniform float uSwayWindScale;`,
         '#include <begin_vertex>',
         `#include <begin_vertex>
 {
-  // color.r is sway strength (0..1), color.b is phase offset (0..1).
-  // Defaults to no sway when the geometry has no COLOR_0 attribute —
-  // three.js fills color with vec3(1.0) in that case, so guard with
-  // a small material-level userData flag if you need stricter checks.
+  // color.r is sway strength (0..1), color.b is the baseline per-vertex
+  // phase offset (0..1). Defaults to no sway when the geometry has no
+  // COLOR_0 attribute -- three.js fills color with vec3(1.0) in that
+  // case, so guard with a small material-level userData flag if you
+  // need stricter checks.
   #ifdef USE_COLOR
     float swayStrength = color.r;
     float swayPhase    = color.b * 6.2831853; // 2π
+    // EXT_mesh_gpu_instancing carries only TRS per instance, not arbitrary
+    // vertex attributes -- so the scatter pipeline can't ship a per-
+    // instance COLOR_0.B value. Derive an uncorrelated phase from the
+    // instance origin instead: instanceMatrix[3].xz is the world-XZ
+    // translation column, identical across all verts of one instance
+    // but different across instances. fract(sin(dot(p, k)) * f) is the
+    // standard cheap pseudo-hash; the constants here are the usual
+    // (12.9898, 78.233) / 43758.5453 pair plus a tiny bias so two palms
+    // landing on the exact same XZ row don't collide.
+    #ifdef USE_INSTANCING
+      vec2 instOrigin = vec2(instanceMatrix[3].x, instanceMatrix[3].z);
+      float instPhase = fract(sin(dot(instOrigin, vec2(12.9898, 78.233)) + 0.31415) * 43758.5453);
+      swayPhase += instPhase * 6.2831853;
+    #endif
     float swayWave     = sin(uSwayTime * uSwayFreq + swayPhase);
     transformed.xz += uSwayWind.xz * uSwayWindScale * swayStrength * swayWave;
   #endif

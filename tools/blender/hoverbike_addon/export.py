@@ -21,6 +21,7 @@ so the export commands have a clear home in the package.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -28,6 +29,230 @@ import re
 import bpy
 from bpy.props import BoolProperty
 from bpy.types import Operator
+
+
+# ────────────────────────────────────────────────────────────────────
+# Geometry-Nodes scatter realize pass
+# ────────────────────────────────────────────────────────────────────
+#
+# Blender 5.1's glTF exporter only collapses sibling nodes into
+# ``EXT_mesh_gpu_instancing`` when they (a) share the same mesh id, and
+# (b) have no children of their own — see ``manage_gpu_instancing`` in
+# ``io_scene_gltf2/blender/exp/exporter.py``. A Geometry-Nodes scatter
+# graph whose ``Instance on Points`` source is a *Collection* generates
+# nested instance subtrees (one per collection child), so the exporter
+# silently drops the entire scatter — the ``scatter_*_surf`` node ships
+# as an Empty with no mesh and the per-instance transforms vanish.
+# This is the gap 990b2b7 flagged as "scatter zones show up in the
+# .blend but the runtime drops them"; this realize pass closes it.
+#
+# Instead of contorting the graph (single-Mesh source, hand-tuned
+# Realize Instances toggles), this context manager converts every
+# scatter modifier into the pattern the exporter already handles
+# cleanly: a flat fan of leaf Mesh objects sharing one frozen mesh
+# data block. ``gather_mesh`` dedupes them to one id; ``manage_gpu_-
+# instancing`` collapses them. The original surf is hidden for the
+# duration of the export so its GN output doesn't ship as a duplicate
+# realized blob. State is restored on exit.
+#
+# A scatter modifier is identified by node-group name prefix
+# ``HV_Scatter`` — the canonical group from ``seed_props_library.
+# build_scatter_group``, plus any author forks (``HV_Scatter_Reef``,
+# ``HV_Scatter_Alpine``, …). Name-prefix discrimination keeps the
+# convention explicit and avoids requiring a sidecar tag on every
+# fork. The realize pass also tolerates the ``hb_scatter_ng`` custom
+# property on the group as an alternate signal for graphs that don't
+# follow the naming convention.
+
+_HB_SCATTER_NG_PREFIX = "HV_Scatter"
+_HB_SCATTER_NG_TAG = "hb_scatter_ng"
+
+
+def _is_scatter_modifier(mod: bpy.types.Modifier) -> bool:
+    """True if ``mod`` is a Geometry-Nodes modifier whose node group
+    is one of the HV_Scatter family (by name prefix or explicit tag)."""
+    if mod.type != "NODES":
+        return False
+    ng = mod.node_group
+    if ng is None:
+        return False
+    if ng.name.startswith(_HB_SCATTER_NG_PREFIX):
+        return True
+    if ng.get(_HB_SCATTER_NG_TAG, False):
+        return True
+    return False
+
+
+@contextlib.contextmanager
+def _RealizedScatterInstances(scene: bpy.types.Scene):
+    """Walk every mesh whose Nodes modifier uses an ``HV_Scatter*``
+    node group (see ``_is_scatter_modifier``), evaluate the depsgraph,
+    and spawn one fresh leaf Mesh object per generated instance.
+    Frozen-mesh data blocks are shared across same-source instances
+    so the glTF exporter dedupes them to one mesh id and folds them
+    into a single ``EXT_mesh_gpu_instancing`` block per scatter parent.
+
+    Yields the total number of realized instances spawned, for logging.
+    """
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+
+    candidates = [
+        o for o in scene.objects
+        if o.type == "MESH" and any(_is_scatter_modifier(m) for m in o.modifiers)
+    ]
+    if not candidates:
+        yield 0
+        return
+
+    # Phase 1 — read-only depsgraph walk. Collect (surf, [(src_obj,
+    # matrix_world), ...]) up front so we don't mutate the scene
+    # while iterating ``depsgraph.object_instances`` (which would
+    # invalidate the iterator).
+    #
+    # Identity matching: ``depsgraph.object_instances`` is iterated
+    # once per export and yields ``DepsgraphObjectInstance`` rows for
+    # every instance in the scene. Each row's ``parent`` is the
+    # *evaluated* version of the instancer object, but Python-side
+    # equality against ``surf.evaluated_get(depsgraph)`` doesn't
+    # reliably hold (the same evaluated id-block can return distinct
+    # Python wrappers across calls). Match by ``inst.parent.original
+    # == surf`` instead — that's the pattern the Blender glTF exporter
+    # itself uses in ``tree.py``.
+    # ``inst.parent.original`` returns a fresh Python wrapper around the
+    # underlying id-block each call, so ``id()``-based matching against
+    # ``candidates`` is unreliable. Key by object name instead — names
+    # are unique within a scene, which is enough to associate a
+    # depsgraph instance row with its source surf.
+    candidate_set = {o.name: o for o in candidates}
+    by_surf: dict[str, list[tuple[bpy.types.Object, "mathutils.Matrix"]]] = {
+        o.name: [] for o in candidates
+    }
+    # Three flavours of GN-scatter output we need to handle:
+    #
+    # 1. ``Pick Instance=True`` with the source Collection's "Reset
+    #    Children" toggled ON — the picker yields the leaf *meshes*
+    #    directly, ``inst.object.data`` is the Mesh, and we use it.
+    #
+    # 2. ``Pick Instance=True`` with "Reset Children" OFF — the picker
+    #    yields the collection's *root Empty* (e.g. ``prop_palm_root``).
+    #    The evaluated empty has no children, no instance_collection.
+    #    We have to look at ``src.original`` and walk *its* children
+    #    in the source .blend to find a mesh-bearing one. Today's
+    #    ``prop_<id>`` libraries are organised as
+    #    ``prop_<id>_root (Empty) → prop_<id>_mesh (Mesh)``, so the
+    #    first mesh child is the right pick. Multi-prop collections
+    #    would land on the first one — acceptable for now, revisit
+    #    when biome kits ship multiple meshes per source collection.
+    #
+    # 3. ``inst.object`` is a Collection-Instance Empty (the hand-
+    #    placed ``palm_NN`` pattern): its ``instance_collection`` is
+    #    set; we descend into ``all_objects`` to find a mesh.
+    def _resolve_mesh_source(src: bpy.types.Object | None) -> bpy.types.Object | None:
+        if src is None:
+            return None
+        if isinstance(src.data, bpy.types.Mesh) and len(src.data.vertices) > 0:
+            return src
+        # Hand-placed Collection-Instance Empty path (case 3).
+        if src.data is None and src.instance_type == "COLLECTION" and src.instance_collection:
+            for child in src.instance_collection.all_objects:
+                if (
+                    child.type == "MESH"
+                    and child.data is not None
+                    and len(child.data.vertices) > 0
+                ):
+                    return child
+        # GN-Pick-Instance-of-Empty path (case 2). The evaluated
+        # empty has no children; look at the original.
+        original = src.original
+        if original is not None and original is not src:
+            for child in original.children:
+                if (
+                    child.type == "MESH"
+                    and child.data is not None
+                    and len(child.data.vertices) > 0
+                ):
+                    return child
+        return None
+
+    for inst in depsgraph.object_instances:
+        if not inst.is_instance:
+            continue
+        parent = inst.parent
+        if parent is None or parent.original is None:
+            continue
+        surf_name = parent.original.name
+        if surf_name not in candidate_set:
+            continue
+        mesh_src = _resolve_mesh_source(inst.object)
+        if mesh_src is None:
+            continue
+        by_surf[surf_name].append((mesh_src, inst.matrix_world.copy()))
+
+    plan: list[tuple[bpy.types.Object, list[tuple[bpy.types.Object, "mathutils.Matrix"]]]] = [
+        (candidate_set[sname], captured)
+        for sname, captured in by_surf.items()
+        if captured
+    ]
+
+    spawned: list[bpy.types.Object] = []
+    frozen_meshes: list[bpy.types.Mesh] = []
+    hidden_surfs: list[bpy.types.Object] = []
+    mesh_cache: dict[int, bpy.types.Mesh] = {}
+
+    try:
+        for surf, captured in plan:
+            parent = surf.parent or surf
+            target_coll = (
+                surf.users_collection[0]
+                if surf.users_collection
+                else scene.collection
+            )
+            for src_original, mw in captured:
+                cache_key = id(src_original)
+                frozen = mesh_cache.get(cache_key)
+                if frozen is None:
+                    # Bake the evaluated source (modifiers applied) into
+                    # a fresh mesh datablock once per source prop. All
+                    # instances of that prop share the same datablock,
+                    # which is what makes ``gather_mesh`` dedupe them.
+                    eval_src = src_original.evaluated_get(depsgraph)
+                    frozen = bpy.data.meshes.new_from_object(eval_src)
+                    frozen.name = f"_hb_scatter_frozen_{src_original.name}"
+                    mesh_cache[cache_key] = frozen
+                    frozen_meshes.append(frozen)
+                new_obj = bpy.data.objects.new(
+                    f"{surf.name}_inst_{len(spawned):04d}", frozen,
+                )
+                target_coll.objects.link(new_obj)
+                # Setting parent doesn't recompute matrix_basis, and
+                # then writing matrix_world rebuilds matrix_basis from
+                # parent_world.inverted() @ new_world for us.
+                if parent is not surf:
+                    new_obj.parent = parent
+                new_obj.matrix_world = mw
+                spawned.append(new_obj)
+
+            # Hide the original surf so the exporter (a) filters it
+            # out under ``use_visible=True`` and (b) doesn't re-emit
+            # its GN output as a parallel set of broken instance
+            # children. The realized objects we just spawned live as
+            # siblings of the surf under the scatter parent empty,
+            # so the surf going missing doesn't orphan them.
+            if not surf.hide_viewport:
+                surf.hide_viewport = True
+                hidden_surfs.append(surf)
+
+        yield len(spawned)
+
+    finally:
+        for obj in spawned:
+            for c in list(obj.users_collection):
+                c.objects.unlink(obj)
+            bpy.data.objects.remove(obj, do_unlink=True)
+        for m in frozen_meshes:
+            bpy.data.meshes.remove(m)
+        for surf in hidden_surfs:
+            surf.hide_viewport = False
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -225,7 +450,10 @@ class HOVERBIKE_OT_export_track(Operator):
         os.makedirs(os.path.dirname(glb_path), exist_ok=True)
         _ensure_active_object(context)
         try:
-            with _PreviewCollectionsHidden(context.view_layer):
+            with _PreviewCollectionsHidden(context.view_layer), \
+                 _RealizedScatterInstances(context.scene) as scatter_count:
+                if scatter_count:
+                    print(f"[hoverbike-addon] realized {scatter_count} scatter instance(s) for GLB export")
                 bpy.ops.export_scene.gltf(
                     filepath=glb_path,
                     export_format="GLB",
