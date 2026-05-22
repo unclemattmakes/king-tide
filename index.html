@@ -1069,12 +1069,19 @@
         font-variant-numeric: tabular-nums;
       }
 
-      /* Stage area (one screen visible at a time). */
+      /* Stage area (one screen visible at a time).
+         `safe center` keeps the screen centered when it fits, but flips
+         to top-aligned when content is taller than the stage —
+         otherwise overflow:auto clips the top portion and leaves it
+         un-scrollable. Extra bottom padding gives focus rings on the
+         last row room before the chyron. */
       .bc-stage {
-        flex: 1;
-        display: flex; align-items: center; justify-content: center;
-        padding: 24px 48px;
+        flex: 1; min-height: 0;
+        display: flex;
+        align-items: safe center; justify-content: safe center;
+        padding: 24px 48px 36px;
         overflow: auto;
+        overscroll-behavior: contain;
       }
       .bc-screen {
         display: none; width: 100%; max-width: 1200px;
@@ -1223,14 +1230,14 @@
       .bc-cards { display: grid; gap: 14px; }
       .bc-cards.cols-2 { grid-template-columns: 1fr 1fr; }
       .bc-cards.cols-3 { grid-template-columns: repeat(3, 1fr); }
-      .bc-cards.cols-5 { grid-template-columns: repeat(5, 1fr); }
+      /* "cols-5" is the mode-select grid (RACE / TIME TRIAL / CUP /
+         MULTIPLAYER / TUTORIAL). It renders as a 3+2 layout instead of
+         a literal 5-up because .bc-screen caps its width at 1200px —
+         spreading five cards across that range leaves each one too
+         narrow for the single-word headlines (TUTORIAL, MULTIPLAYER)
+         to fit without clipping against the card's overflow:hidden. */
+      .bc-cards.cols-5 { grid-template-columns: repeat(3, 1fr); }
       .bc-cards.cols-auto { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-      /* Mode-select 5-up collapses to a 3+2 grid on narrower viewports
-         so the trailing TUTORIAL tile doesn't drop alone full-width with
-         its headline clipping the right edge. */
-      @media (max-width: 1180px) {
-        .bc-cards.cols-5 { grid-template-columns: repeat(3, 1fr); }
-      }
       @media (max-width: 720px) {
         .bc-cards.cols-5 { grid-template-columns: repeat(2, 1fr); }
       }
@@ -1331,8 +1338,12 @@
       /* Image-led card variant — used by V1 track tiles.
          Hero thumb at the top, copy below, the cup-color accent
          dropped to a 2-px bottom rule instead of the left edge so the
-         imagery reads as the lead. */
-      .bc-card-thumb { padding: 0; overflow: hidden; }
+         imagery reads as the lead.
+
+         NOTE: `overflow` lives on `.thumb` (not the card itself) so the
+         card's focus outline + glow can extend outside the border-box
+         without being clipped. */
+      .bc-card-thumb { padding: 0; }
       .bc-card-thumb::before { display: none; }
       .bc-card-thumb .thumb {
         aspect-ratio: 16 / 9;
@@ -1341,6 +1352,7 @@
         background-size: cover;
         background-position: center;
         position: relative;
+        overflow: hidden;
       }
       .bc-card-thumb .thumb::after {
         content: '';
@@ -1404,9 +1416,12 @@
       }
       .bc-mode-card .hd {
         font-family: var(--bc-font-display);
-        font-size: clamp(28px, 3.6vw, 52px);
+        /* Capped at 44px so the longest single-word headline
+           (MULTIPLAYER / TUTORIAL) fits inside the card's
+           overflow:hidden at 5-up grid widths. */
+        font-size: clamp(28px, 3vw, 44px);
         letter-spacing: 0.02em;
-        line-height: 0.96;
+        line-height: 0.98;
       }
       .bc-mode-card .desc {
         font-size: 14px; line-height: 1.55;
@@ -1717,8 +1732,9 @@
       .bc-actions {
         margin-top: 28px;
         display: flex; gap: 14px; justify-content: space-between; align-items: center;
+        flex-wrap: wrap;
       }
-      .bc-actions .left, .bc-actions .right { display: flex; gap: 10px; }
+      .bc-actions .left, .bc-actions .right { display: flex; gap: 10px; flex-wrap: wrap; }
       .bc-btn {
         font-family: var(--bc-font-display);
         font-size: 16px; letter-spacing: 0.18em;
@@ -1806,6 +1822,149 @@
         color: var(--bc-ink-dim);
       }
 
+      /* ───────────── Unified focus indicator ─────────────
+         Strong, gamepad-friendly "this is the active button" treatment.
+         Both `:focus-visible` (keyboard tab) and `.is-menu-focus`
+         (synthesized in menu-gamepad.ts on every focusin) get the same
+         look so the cursor is always unmistakable, regardless of input
+         device. The browser's :focus-visible heuristic isn't reliable
+         for scripted .focus() calls driven from gamepad polling — the
+         class is the fallback.
+
+         Implementation: a cyan outline ring sitting just outside the
+         border-box, plus a soft outer glow. Lifted to z-index so the
+         ring isn't covered by adjacent siblings in grids. */
+      :is(
+        .bc-card,
+        .bc-mode-card,
+        .bc-lb-track,
+        .bc-btn,
+        .bc-link,
+        .bc-title .cta-blink,
+        .bc-pick .nav button,
+        .bc-crumb,
+        #pause-menu button.pm,
+        #finish button.action,
+        #cup-results button.action,
+        #devsettings button.action,
+        #water-debug button.action,
+        #rebind-menu .actions .action,
+        #rebind-menu .rb-chip,
+        #settings-menu .sm-tab,
+        #settings-menu .sm-ctrl select,
+        #settings-menu .sm-ctrl button.sm-btn,
+        #settings-menu .sm-actions button
+      ):focus-visible,
+      :is(
+        .bc-card,
+        .bc-mode-card,
+        .bc-lb-track,
+        .bc-btn,
+        .bc-link,
+        .bc-title .cta-blink,
+        .bc-pick .nav button,
+        .bc-crumb,
+        #pause-menu button.pm,
+        #finish button.action,
+        #cup-results button.action,
+        #devsettings button.action,
+        #water-debug button.action,
+        #rebind-menu .actions .action,
+        #rebind-menu .rb-chip,
+        #settings-menu .sm-tab,
+        #settings-menu .sm-ctrl select,
+        #settings-menu .sm-ctrl button.sm-btn,
+        #settings-menu .sm-actions button
+      ).is-menu-focus {
+        outline: 3px solid var(--bc-cyan);
+        outline-offset: 3px;
+        box-shadow:
+          0 0 0 1px var(--bc-cyan),
+          0 0 22px rgba(77, 214, 255, 0.55),
+          0 6px 24px rgba(0, 0, 0, 0.45);
+        z-index: 2;
+        position: relative;
+      }
+
+      /* Card variants get a slight lift + brighter surface alongside the
+         ring so the "you can press X on this" affordance reads at a
+         glance. */
+      .bc-card:focus-visible,
+      .bc-card.is-menu-focus,
+      .bc-mode-card:focus-visible,
+      .bc-mode-card.is-menu-focus {
+        transform: translateY(-3px);
+        background: rgba(20, 36, 60, 0.85);
+        border-color: var(--bc-cyan);
+      }
+      .bc-card:focus-visible::before,
+      .bc-card.is-menu-focus::before {
+        width: 6px;
+        box-shadow: 0 0 18px var(--accent, var(--bc-cyan));
+      }
+
+      /* Pill-style buttons (pause/finish/cup actions) — slide accent +
+         brighten text so the focused row pops out of the stack. */
+      #pause-menu button.pm:focus-visible,
+      #pause-menu button.pm.is-menu-focus {
+        background: var(--bc-cyan-soft);
+        border-color: var(--bc-cyan);
+        transform: translateX(4px);
+        color: var(--bc-ink);
+      }
+      #pause-menu button.pm.primary:focus-visible,
+      #pause-menu button.pm.primary.is-menu-focus {
+        filter: brightness(1.15);
+      }
+      #finish button.action:focus-visible,
+      #finish button.action.is-menu-focus,
+      #cup-results button.action:focus-visible,
+      #cup-results button.action.is-menu-focus {
+        background: rgba(77, 214, 255, 0.18);
+        border-color: var(--bc-cyan);
+        transform: translateY(-2px);
+      }
+
+      /* Leaderboard track rows + settings tabs — vertical lists need a
+         bright fill, not just an outline, since outline-offset can read
+         as ambiguous when rows are densely packed. */
+      .bc-lb-track:focus-visible,
+      .bc-lb-track.is-menu-focus {
+        background: var(--bc-cyan-soft);
+        border-color: var(--bc-cyan);
+      }
+      #settings-menu .sm-tab:focus-visible,
+      #settings-menu .sm-tab.is-menu-focus {
+        color: var(--bc-cyan);
+        background: rgba(77, 214, 255, 0.12);
+      }
+
+      /* Title-screen CTA: outline-only since it's a single ambient
+         label, not a tile. Override the generic offset so the ring
+         doesn't crowd the wordmark above it. */
+      .bc-title .cta-blink:focus-visible,
+      .bc-title .cta-blink.is-menu-focus {
+        outline-offset: 8px;
+        animation-play-state: paused;
+        opacity: 1;
+        color: var(--bc-cyan);
+      }
+
+      /* Honor user motion preferences — drop the lift/translate but
+         keep the colour change so focus is still obvious. */
+      @media (prefers-reduced-motion: reduce) {
+        .bc-card:focus-visible,
+        .bc-card.is-menu-focus,
+        .bc-mode-card:focus-visible,
+        .bc-mode-card.is-menu-focus,
+        #pause-menu button.pm:focus-visible,
+        #pause-menu button.pm.is-menu-focus,
+        #finish button.action:focus-visible,
+        #finish button.action.is-menu-focus,
+        #cup-results button.action:focus-visible,
+        #cup-results button.action.is-menu-focus { transform: none; }
+      }
+
       /* ───────────── Mobile (≤720px) ─────────────
          Collapse columns, tighten chrome, retain motion graphics. */
       @media (max-width: 720px) {
@@ -1822,7 +1981,13 @@
         .bc-crumb { padding: 2px 5px; }
         .bc-clock { display: none; }
 
-        .bc-stage { padding: 16px 14px; }
+        .bc-stage {
+          padding:
+            max(16px, env(safe-area-inset-top, 0px))
+            max(14px, env(safe-area-inset-right, 0px))
+            max(24px, env(safe-area-inset-bottom, 0px))
+            max(14px, env(safe-area-inset-left, 0px));
+        }
 
         .bc-cards.cols-2, .bc-cards.cols-3 { grid-template-columns: 1fr; }
 
