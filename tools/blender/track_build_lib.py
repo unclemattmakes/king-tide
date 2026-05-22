@@ -211,9 +211,17 @@ def build_track_from_spec(spec: TrackSpec) -> None:
     """Drive the full template → playable track pipeline headlessly.
 
     Steps: load template → reshape spline → reposition starts +
-    checkpoints → save .blend → build road (apply_modifiers=True) →
+    checkpoints → save .blend → build road (live HV_RoadConform) →
     snap spline (water-aware) → rebuild previews → save .blend →
-    lint → export GLB + JSON + manifest entry."""
+    lint → export GLB + JSON + manifest entry.
+
+    Note on road conformance: ``hoverbike.build_road`` is the modern
+    non-destructive operator — it attaches ``HV_RoadConform`` as a live
+    Geometry Nodes modifier on the terrain instead of carving vertex
+    data. The glTF exporter runs with ``export_apply=True`` so the
+    modifier still lands in the shipped GLB geometry. Use
+    ``hoverbike.bake_terrain_to_road`` separately if a destructive bake
+    is needed (multi-segment push-down, fill-shelf embankment)."""
     tag = f"[track-build:{spec.track_id}]"
     output_blend = os.path.join(REPO_ROOT, "tracks-src", f"{spec.track_id}.blend")
 
@@ -239,8 +247,13 @@ def build_track_from_spec(spec: TrackSpec) -> None:
 
     _select_terrain_active(scene)
 
-    print(f"{tag} building road (apply_modifiers=True)")
-    result = bpy.ops.hoverbike.build_road(apply_modifiers=True)
+    print(f"{tag} building road (non-destructive — attaches HV_RoadConform)")
+    # hoverbike.build_road is non-destructive: it attaches HV_RoadConform
+    # as a live GN modifier on the terrain rather than carving vertices.
+    # The glTF export step downstream uses ``export_apply=True``, so the
+    # conform still bakes into the shipped GLB. (The legacy destructive
+    # path moved to hoverbike.bake_terrain_to_road and is opt-in.)
+    result = bpy.ops.hoverbike.build_road()
     if "FINISHED" not in result:
         raise RuntimeError(f"{tag} build_road failed: {result}")
 

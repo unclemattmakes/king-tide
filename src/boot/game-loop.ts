@@ -52,6 +52,7 @@ import type { DirectionArrow } from '@/engine/render/direction-arrow'
 import { shouldRenderFrame } from '@/engine/render/frame-cap'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
 import { updateLavaTime } from '@/engine/render/lava-river-material'
+import { updateSwayTime, updateWind } from '@/engine/render/foliage-sway'
 import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finish-banner'
 import { createPerfHud, type RenderInfoLite } from '@/engine/render/perf-hud'
 import { createPumpFx } from '@/engine/render/pump-fx'
@@ -451,6 +452,13 @@ export function startGameLoop(opts: GameLoopOpts): void {
         },
       })
     : null
+
+  // Set a sensible default wind once at race start. The per-track wind
+  // round-trip is a Phase α follow-up — for now every track gets a
+  // gentle on-shore breeze so palms aren't statically rigid. Direction
+  // is world-XZ unit vector (here: +X, "east"); strength is metres of
+  // peak xz displacement applied to a fully-swaying vertex tip.
+  updateWind({ x: 1, z: 0.2 }, 0.18, 1.4)
 
   const tmpPos = new THREE.Vector3()
   const tmpQuat = new THREE.Quaternion()
@@ -1114,6 +1122,11 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // module-scope across the process, and `updateLavaTime` is one
     // assignment regardless of how many lava materials exist.
     updateLavaTime(waveField.time)
+    // Foliage sway clock — same deterministic wave-field clock as the
+    // water/lava materials so replays match. Materials patched by
+    // ``applyFoliageSway`` (palms, banners, scatter-zone foliage) sample
+    // ``uSwayTime`` once per draw; this single uniform write covers all.
+    updateSwayTime(waveField.time)
     // Keep the distant horizon silhouette wrapped around the chase camera
     // so the player never appears to outrun it. Tracks the camera (not the
     // bike) so look-back / spectator pans don't shift the horizon.
