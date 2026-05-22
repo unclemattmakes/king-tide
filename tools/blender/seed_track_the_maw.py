@@ -76,7 +76,17 @@ TrackSpec = _lib.TrackSpec
 REPO_ROOT = _lib.REPO_ROOT
 build_track_from_spec = _lib.build_track_from_spec
 
+# Shared scatter helpers (Phase β of docs/level-visual-quality-research.md).
+_scatter_spec = importlib.util.spec_from_file_location(
+    "scatter_lib", os.path.join(SCRIPT_DIR, "scatter_lib.py"),
+)
+_scatter = importlib.util.module_from_spec(_scatter_spec)
+sys.modules["scatter_lib"] = _scatter
+_scatter_spec.loader.exec_module(_scatter)
+drop_scatter_zones = _scatter.drop_scatter_zones
+
 LANDMARKS_LIBRARY = os.path.join(REPO_ROOT, "tracks-src", "landmarks-library.blend")
+PROPS_LIBRARY = os.path.join(REPO_ROOT, "tracks-src", "props-library.blend")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -218,6 +228,87 @@ ARCH_INSTANCES: tuple[tuple[str, float, float, float, float, float, float, float
     ("the_maw_arch_maw",      0.0,   40.0, -3.0, 1.60, 1.55,   4.0, 0.55, "maw"),
     ("the_maw_arch_exit",   -40.0,  200.0, -3.0, 1.00, 1.00,  12.0, 0.40, "exit"),
 )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Scatter zones — sea-stack rocks flanking the three arches
+# ─────────────────────────────────────────────────────────────────────
+#
+# Phase β step 7 of [docs/level-visual-quality-research.md](../../docs/level-visual-quality-research.md):
+# extend the South Beach scatter pattern onto the existing-tropical
+# tracks. The Maw's brief is open-Pacific with three rocky arches —
+# so rocks (not palms) on the rocky outcrops that flank each arch.
+# Each zone sits laterally offset from the racing line, far enough
+# that the GN distribute-points won't touch the racing surface; the
+# z_min altitude filter is a secondary safety, only seeding faces
+# above the waterline.
+#
+# Five zones — one on each flank of each arch except the back-stretch
+# (which the brief explicitly keeps "wide open Pacific, no landmarks").
+SCATTER_ZONES: tuple[dict, ...] = (
+    # Entry arch east flank — first rocky beat the player threads past.
+    # ``location.z = 2.0`` puts the rock bases ~4 m above the racing
+    # line (z=-2), visually "emerging from the swell". The default
+    # ``z_min = -100`` from scatter_lib effectively disables the
+    # altitude filter — the target plane is flat at zone.z so every
+    # point passes; no need to constrain further.
+    {
+        "name": "scatter_00",
+        "location": (110.0, -150.0, 2.0),
+        "half_width": 50.0,
+        "half_depth": 35.0,
+        "density": 0.018,
+        "source": "prop_rock",
+        "seed": 11,
+    },
+    # Entry arch west flank.
+    {
+        "name": "scatter_01",
+        "location": (-50.0, -150.0, 2.0),
+        "half_width": 45.0,
+        "half_depth": 35.0,
+        "density": 0.014,
+        "source": "prop_rock",
+        "seed": 19,
+    },
+    # Hero Maw arch east flank — densest cluster on the track, the
+    # rocky outcrop that frames the centre-arch silhouette in the hero
+    # camera composition.
+    {
+        "name": "scatter_02",
+        "location": (100.0, 40.0, 2.0),
+        "half_width": 50.0,
+        "half_depth": 55.0,
+        "density": 0.022,
+        "source": "prop_rock",
+        "seed": 29,
+    },
+    # Hero Maw arch west flank — mirror of scatter_02.
+    {
+        "name": "scatter_03",
+        "location": (-100.0, 40.0, 2.0),
+        "half_width": 50.0,
+        "half_depth": 55.0,
+        "density": 0.022,
+        "source": "prop_rock",
+        "seed": 37,
+    },
+    # Exit arch east flank — fades the rocky chain back into open sea.
+    {
+        "name": "scatter_04",
+        "location": (60.0, 220.0, 2.0),
+        "half_width": 50.0,
+        "half_depth": 40.0,
+        "density": 0.014,
+        "source": "prop_rock",
+        "seed": 43,
+    },
+)
+
+
+def _drop_scatter_zones(scene: bpy.types.Scene) -> int:
+    """Drop the five Maw rock-scatter zones via the shared helper."""
+    return drop_scatter_zones(scene, PROPS_LIBRARY, SCATTER_ZONES)
 
 
 def _drop_arches(scene: bpy.types.Scene) -> int:
@@ -584,6 +675,7 @@ def augment_scene() -> None:
     scene = bpy.context.scene
 
     arches = _drop_arches(scene)
+    scatter = _drop_scatter_zones(scene)
     waves = _spawn_wave_zones(scene)
     pickups = _drop_pickups(scene)
     boosts = _drop_boost_pads(scene)
@@ -591,8 +683,9 @@ def augment_scene() -> None:
     _apply_sky_preset(scene)
 
     print(
-        f"{tag} augment: {arches} arches + {waves} wave zones + "
-        f"{pickups} pickups + {boosts} boost pads + camera_hero"
+        f"{tag} augment: {arches} arches + {scatter} scatter zones + "
+        f"{waves} wave zones + {pickups} pickups + {boosts} boost pads "
+        f"+ camera_hero"
     )
 
     # Save .blend with the augmentation in place — build_track_from_spec

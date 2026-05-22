@@ -211,6 +211,62 @@ SPEC = TrackSpec(
 # ─────────────────────────────────────────────────────────────────────
 
 LANDMARKS_LIBRARY = os.path.join(REPO_ROOT, "tracks-src", "landmarks-library.blend")
+PROPS_LIBRARY = os.path.join(REPO_ROOT, "tracks-src", "props-library.blend")
+
+# Shared scatter helpers (Phase β/γ of docs/level-visual-quality-research.md).
+_scatter_spec = importlib.util.spec_from_file_location(
+    "scatter_lib", os.path.join(SCRIPT_DIR, "scatter_lib.py"),
+)
+_scatter = importlib.util.module_from_spec(_scatter_spec)
+sys.modules["scatter_lib"] = _scatter
+_scatter_spec.loader.exec_module(_scatter)
+drop_scatter_zones = _scatter.drop_scatter_zones
+
+
+# Test scatter — Phase γ verification pass for the jungle prop kit.
+# Throwaway placement pending the level rework; goal is to prove
+# `prop_fern_clump` / `prop_mossy_boulder` / `prop_fallen_pillar` flow
+# through scatter_lib + EXT_mesh_gpu_instancing into the runtime.
+SCATTER_ZONES: tuple[dict, ...] = (
+    # East courtyards — dense fern undergrowth in the Ta Prohm region.
+    # Fern is foliage; the runtime sway shader picks it up via the
+    # `mat_foliage_fern` material name + COLOR_0.R gradient.
+    {
+        "name": "scatter_00",
+        "location": (110.0, 130.0, 7.0),
+        "half_width": 50.0,
+        "half_depth": 40.0,
+        "density": 0.030,
+        "source": "prop_fern_clump",
+        "seed": 11,
+    },
+    # NW return slope — mossy boulders on the descent.
+    {
+        "name": "scatter_01",
+        "location": (-110.0, 200.0, 10.0),
+        "half_width": 40.0,
+        "half_depth": 40.0,
+        "density": 0.016,
+        "source": "prop_mossy_boulder",
+        "seed": 19,
+    },
+    # South approach — fallen pillars on the entry straight, framing
+    # the smiling-face row.
+    {
+        "name": "scatter_02",
+        "location": (-30.0, -290.0, 0.0),
+        "half_width": 25.0,
+        "half_depth": 60.0,
+        "density": 0.010,
+        "source": "prop_fallen_pillar",
+        "seed": 23,
+    },
+)
+
+
+def _drop_scatter_zones(scene) -> int:
+    """Drop the Angkor test scatter zones via the shared helper."""
+    return drop_scatter_zones(scene, PROPS_LIBRARY, SCATTER_ZONES)
 
 
 def _link_collection(library_path: str, collection_name: str) -> bpy.types.Collection | None:
@@ -1052,6 +1108,9 @@ def augment_scene() -> None:
     pickups = _drop_pickups(scene)
     boosts = _drop_boost_pads(scene)
 
+    scatter = _drop_scatter_zones(scene)
+    print(f"{tag} scatter: {scatter} zone(s) placed")
+
     print(f"{tag} adding camera_hero")
     _drop_camera_hero(scene)
 
@@ -1061,7 +1120,8 @@ def augment_scene() -> None:
         f"{tag} augment summary: 16 faces + spire + 3 hills + 5 walls + "
         f"3 roots + climb({HELIX_CONTROL_POINTS} cps, "
         f"z={HELIX_Z_MIN_M}→{HELIX_Z_MAX_M}m) + 1 wave zone + 1 emitter + "
-        f"{pickups} pickups + {boosts} boost pads + camera_hero"
+        f"{scatter} scatter zones + {pickups} pickups + {boosts} boost pads "
+        f"+ camera_hero"
     )
 
     # Nudge spline control points off any alpine outcrop the racing

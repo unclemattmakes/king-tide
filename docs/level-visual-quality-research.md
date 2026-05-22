@@ -235,11 +235,11 @@ biome and add to `props-library.blend`.
 |---|---|---|
 | Tropical island (Reef Cup) | palm, rock, buoy | driftwood log, beach umbrella, kelp clump, dock piling |
 | Atlantic / open sea (The Maw, Hatteras) | rock, buoy | sea-stack, navigation marker, kelp, foam tuft, gull-perch crag |
-| Urban (Shibuya, Marina Bay, Liberty) | — | trash can, lamp post, signage panel, antenna mast, AC unit cube, vent stack |
+| Urban (Shibuya, Marina Bay, Liberty) | ✅ **shipped**: lamp_post, antenna_mast, vent_stack, ac_unit, signage_panel | trash can, more variants |
 | Venetian (Doge's) | — | gondola, mooring post, lantern, broken paving slab, ivy patch |
-| Volcanic (Kilauea) | — | basalt boulder, ash heap, lava-tube vent, scorched stump |
-| Industrial (Marina Bay) | — | container, oil drum, mooring bollard, chain, ladder |
-| Jungle (Angkor) | — | strangler-fig root, fern clump, mossy boulder, fallen pillar fragment, banana palm |
+| Volcanic (Kilauea) | ✅ **shipped**: basalt_boulder, ash_heap, scorched_stump | lava-tube vent |
+| Industrial (Marina Bay) | ✅ **shipped**: container, oil_drum, mooring_bollard | chain, ladder |
+| Jungle (Angkor) | ✅ **shipped**: fern_clump, mossy_boulder, fallen_pillar | strangler-fig root, banana palm |
 | Waterpark (Aqualand) | — | beach ball, pool noodle, inflatable ring, slide piece, faded sign |
 
 Each archetype is a 50–200-vert procedural mesh with a placeholder
@@ -486,9 +486,13 @@ is independently shippable.
 
 Highest payoff per hour, no new content authoring.
 
-1. Wire `applyFoliageSway` at GLB load. (~0.5 day)
+1. ✅ Wire `applyFoliageSway` at GLB load. — `glb-track.ts` walks
+   `mat_foliage_*` materials at load (commit 990b2b7).
 2. Drop in bloom post-pass and audit per-track `sky.bloom` values.
-   (~1 day)
+   (~1 day) — schema is already round-tripped; renderer needs a
+   `WebGPURenderer` + `PostProcessing` pipeline that intercepts the
+   ~7 `renderer.render()` call sites (game-loop, attract, calibration,
+   replay, editor, bike-viewer).
 3. Audit `colorGrade` assignments against `track-themes.md`. (~0.5 day)
 4. Drop the 8-cell emitter pass per track from the asset-pipeline
    plan (each track gets its 3–6 emitters). (~1.5 days)
@@ -498,22 +502,44 @@ texture work. The shipped pipeline gets used to its existing capacity.
 
 ### Phase β — Scatter system + first conversion (3–4 days)
 
-5. Author `HV_Scatter` GN group + addon operator. (~2 days)
-6. Convert South Beach from 16 hand-placed palms to a 400-palm
+5. ✅ Author `HV_Scatter` GN group + addon operator. — `seed_props_library.py::build_scatter_group`
+   + `hoverbike_addon/scatter.py` (commits 990b2b7 + fe1ad51 closed
+   the exporter realize-pass gap).
+6. ✅ Convert South Beach from 16 hand-placed palms to a 400-palm
    scatter zone + sand-edge rock scatter; document as the
-   reference track. (~1 day)
-7. Roll the same pattern onto Hatteras + The Maw + Cape Town
-   (existing-tropical biome). (~1 day)
+   reference track. — 3 zones, 465 palms (commit 990b2b7).
+7. ✅ Roll the same pattern onto Hatteras + The Maw + Cape Town
+   (existing-tropical biome). — All three carry rock scatter
+   outside their racing lines (palms would float on the open-water
+   layouts):
+   * The Maw — 5 zones flanking the three arches, 802 rocks.
+   * Hatteras Light — 4 zones outside the racetrack oval, 417 rocks.
+   * Cape Town Drift — 4 zones on the harbor/Atlantic boundary, 478 rocks.
+
+   The South Beach helpers lifted into [`scatter_lib.py`](../tools/blender/scatter_lib.py)
+   so each track declares `SCATTER_ZONES` + calls `drop_scatter_zones`
+   from its augment pass — per-track scatter is now ~5 lines.
 
 End state: Reef Cup + The Maw read *populated* at race speed.
 Per-track scatter for the rest takes ~30 min apiece going forward.
 
 ### Phase γ — Biome prop kits (5–6 days)
 
-8. Add 4–6 archetype props per missing biome to the props library.
-   (~4 days, parallelisable)
-9. Convert Open Sea + Continental + Drowned cup tracks with
-   appropriate scatter zones using the new kits. (~1.5 days)
+8. ⚠️ Add 4–6 archetype props per missing biome to the props library.
+   (~4 days, parallelisable) — **Partial**: 14 archetypes shipped
+   across 4 biome kits (Urban / Industrial / Volcanic / Jungle).
+   Still pending: Venetian (Doge's), Waterpark (Aqualand), denser
+   Atlantic / open-sea kit. See [`seed_props_library.py`](../tools/blender/seed_props_library.py)
+   — every kit prop is a procedural `bmesh` build under 200 verts
+   (except `prop_mossy_boulder` at 522v, on the rework list); each
+   has a placeholder material + Asset-Browser catalog entry +
+   `scatter_source=True`.
+9. ⚠️ Convert Open Sea + Continental + Drowned cup tracks with
+   appropriate scatter zones using the new kits. — **Partial /
+   throwaway**: test scatter on Shibuya / Kilauea / Marina Bay /
+   Angkor (3 zones × 4 tracks = ~1501 new instances) verifies each
+   biome kit flows through `EXT_mesh_gpu_instancing` into the
+   runtime. Placement is throwaway pending the level rework.
 
 End state: every track has 3–8 scatter zones of biome-appropriate
 filler.

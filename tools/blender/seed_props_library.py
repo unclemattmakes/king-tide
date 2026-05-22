@@ -96,6 +96,12 @@ CATALOG_UUIDS = {
     "Hoverbike/Track Props/Buoys":     "11111111-1111-4111-8111-000000000012",
     "Hoverbike/Track Props/Gates":     "11111111-1111-4111-8111-000000000013",
     "Hoverbike/Track Props/Indicators":"11111111-1111-4111-8111-000000000014",
+    # Phase γ biome kits — keep UUIDs stable so Asset-Browser
+    # bookmarks survive re-runs.
+    "Hoverbike/Track Props/Urban":     "11111111-1111-4111-8111-000000000020",
+    "Hoverbike/Track Props/Industrial":"11111111-1111-4111-8111-000000000021",
+    "Hoverbike/Track Props/Volcanic":  "11111111-1111-4111-8111-000000000022",
+    "Hoverbike/Track Props/Jungle":    "11111111-1111-4111-8111-000000000023",
 }
 
 
@@ -541,6 +547,509 @@ def build_turn_indicator_mesh(name: str, *, length: float = 4.0, half_width: flo
 
 
 # ────────────────────────────────────────────────────────────────────
+# Biome prop kits (Phase γ of docs/level-visual-quality-research.md)
+# ────────────────────────────────────────────────────────────────────
+#
+# Each builder produces a small, distinctive silhouette under 200 verts
+# with a single material slot. Goal is "reads correctly at 40 m/s, fewer
+# than 200 verts, single material slot" — geometric placeholders an
+# author can replace with sculpted/textured versions later. Coordinates
+# are local; the props library lays each one out along +X for outliner
+# readability. Every mesh sets `COLOR_0` to terrain defaults (or to a
+# sway gradient where appropriate) so the runtime sway shader is opt-in
+# via material-name prefix.
+
+
+def _cylinder_z(bm: bmesh.types.BMesh, *, radius: float, z0: float, z1: float, segs: int = 12, cap_top: bool = True, cap_bottom: bool = True) -> tuple[list[bmesh.types.BMVert], list[bmesh.types.BMVert]]:
+    """Build a Z-axis cylinder ring stack. Returns (bottom_ring, top_ring)
+    so callers can extend with custom caps or further extrusions. Caps
+    default ON because most props need closed geometry."""
+    def ring(z: float) -> list[bmesh.types.BMVert]:
+        return [
+            bm.verts.new((math.cos(s / segs * math.tau) * radius,
+                          math.sin(s / segs * math.tau) * radius,
+                          z))
+            for s in range(segs)
+        ]
+    bottom = ring(z0)
+    top = ring(z1)
+    for i in range(segs):
+        j = (i + 1) % segs
+        bm.faces.new([bottom[i], bottom[j], top[j], top[i]])
+    if cap_bottom:
+        bm.faces.new(bottom[::-1])
+    if cap_top:
+        bm.faces.new(top)
+    return bottom, top
+
+
+def _box(bm: bmesh.types.BMesh, *, half_x: float, half_y: float, half_z: float, z_centre: float = 0.0) -> list[bmesh.types.BMVert]:
+    """8-vertex axis-aligned box centred on (0, 0, z_centre). Returns the
+    vert list in (-x-y-z, +x-y-z, +x+y-z, -x+y-z, -x-y+z, +x-y+z, +x+y+z,
+    -x+y+z) order. All six faces created."""
+    v = [
+        bm.verts.new((-half_x, -half_y, z_centre - half_z)),
+        bm.verts.new(( half_x, -half_y, z_centre - half_z)),
+        bm.verts.new(( half_x,  half_y, z_centre - half_z)),
+        bm.verts.new((-half_x,  half_y, z_centre - half_z)),
+        bm.verts.new((-half_x, -half_y, z_centre + half_z)),
+        bm.verts.new(( half_x, -half_y, z_centre + half_z)),
+        bm.verts.new(( half_x,  half_y, z_centre + half_z)),
+        bm.verts.new((-half_x,  half_y, z_centre + half_z)),
+    ]
+    bm.faces.new([v[0], v[3], v[2], v[1]])  # bottom
+    bm.faces.new([v[4], v[5], v[6], v[7]])  # top
+    bm.faces.new([v[0], v[1], v[5], v[4]])  # -Y
+    bm.faces.new([v[1], v[2], v[6], v[5]])  # +X
+    bm.faces.new([v[2], v[3], v[7], v[6]])  # +Y
+    bm.faces.new([v[3], v[0], v[4], v[7]])  # -X
+    return v
+
+
+# ── Urban kit ──────────────────────────────────────────────────────
+
+
+def build_lamp_post_mesh(name: str, *, height: float = 3.6) -> bpy.types.Mesh:
+    """Slim pole + boxy lampshade. The top face sits at z=height and
+    gets material index 1 (emissive) so the lit panel pops at night."""
+    bm = bmesh.new()
+    _cylinder_z(bm, radius=0.06, z0=0.0, z1=height - 0.3, segs=8)
+    # Lampshade — small rectangular box at the top of the pole.
+    bm.verts.ensure_lookup_table()
+    _box(bm, half_x=0.18, half_y=0.10, half_z=0.15, z_centre=height - 0.15)
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    # Mark the lampshade top face (highest face by avg z) as emissive.
+    # We tag by face index: the box was added last, its top face is the
+    # second-to-last face per `_box`'s order.
+    top_face_idx = len(me.polygons) - 5  # 5 box faces follow the top
+    me.polygons[top_face_idx].material_index = 1
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_antenna_mast_mesh(name: str, *, height: float = 7.0) -> bpy.types.Mesh:
+    """Lattice-style antenna mast: four tapered vertical struts +
+    three cross-braces. Tall thin silhouette reads as a comm tower /
+    rooftop antenna at race speed."""
+    bm = bmesh.new()
+    base_half = 0.4
+    top_half = 0.08
+
+    levels = 4   # number of horizontal cross-brace rings
+    rings: list[list[bmesh.types.BMVert]] = []
+    for li in range(levels + 1):
+        t = li / levels
+        z = t * height
+        half = base_half * (1 - t) + top_half * t
+        rings.append([
+            bm.verts.new(( half, -half, z)),
+            bm.verts.new(( half,  half, z)),
+            bm.verts.new((-half,  half, z)),
+            bm.verts.new((-half, -half, z)),
+        ])
+    # Four vertical struts via thin quad strips between adjacent ring
+    # corners. Each strut is a 4-faced ribbon.
+    for li in range(levels):
+        cur = rings[li]
+        nxt = rings[li + 1]
+        for ci in range(4):
+            cn = (ci + 1) % 4
+            # Strut face: vertical quad between two adjacent corner pairs.
+            bm.faces.new([cur[ci], nxt[ci], nxt[cn], cur[cn]])
+    # Cap top + bottom so the silhouette closes.
+    bm.faces.new(rings[0][::-1])
+    bm.faces.new(rings[-1])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_vent_stack_mesh(name: str, *, height: float = 1.2, radius: float = 0.32) -> bpy.types.Mesh:
+    """Rooftop vent / chimney — short cylinder with a mushroom cap.
+    Cap reads as a weatherproofed exhaust at distance."""
+    bm = bmesh.new()
+    _, top = _cylinder_z(bm, radius=radius, z0=0.0, z1=height - 0.18, segs=12, cap_top=False)
+    # Mushroom cap — wider ring at top.
+    cap_radius = radius * 1.4
+    cap_ring = [
+        bm.verts.new((math.cos(s / 12 * math.tau) * cap_radius,
+                      math.sin(s / 12 * math.tau) * cap_radius,
+                      height - 0.06))
+        for s in range(12)
+    ]
+    cap_top_ring = [
+        bm.verts.new((math.cos(s / 12 * math.tau) * cap_radius * 0.9,
+                      math.sin(s / 12 * math.tau) * cap_radius * 0.9,
+                      height))
+        for s in range(12)
+    ]
+    # Skirt — connect top of cylinder out to cap ring.
+    for i in range(12):
+        j = (i + 1) % 12
+        bm.faces.new([top[i], top[j], cap_ring[j], cap_ring[i]])
+        bm.faces.new([cap_ring[i], cap_ring[j], cap_top_ring[j], cap_top_ring[i]])
+    bm.faces.new(cap_top_ring)
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_ac_unit_mesh(name: str) -> bpy.types.Mesh:
+    """Boxy rooftop AC unit — 1.0 × 0.7 × 0.8 m. Two thinner inset
+    boxes on top read as condenser fans at distance."""
+    bm = bmesh.new()
+    _box(bm, half_x=0.5, half_y=0.35, half_z=0.4, z_centre=0.4)
+    # Two small "fan" bumps on top.
+    _box(bm, half_x=0.18, half_y=0.18, half_z=0.05, z_centre=0.85)
+    _box(bm, half_x=0.18, half_y=0.18, half_z=0.05, z_centre=0.85)
+    # Move the second bump to +x.
+    bm.verts.ensure_lookup_table()
+    # The second box's verts are the last 8 in the bmesh; shift them +0.3 X
+    # (in-place mutation is safe because we built them last and there are
+    # no shared verts with the first box / chassis).
+    for v in bm.verts[-8:]:
+        v.co.x += 0.30
+    # First bump verts are -16 .. -9 from the end; shift -0.3 X.
+    for v in bm.verts[-16:-8]:
+        v.co.x -= 0.30
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_signage_panel_mesh(name: str, *, panel_width: float = 2.4, panel_height: float = 1.6, post_height: float = 1.2) -> bpy.types.Mesh:
+    """Billboard panel — two stub posts + flat rectangular face. Top
+    face gets material index 1 (emissive) so neon signage reads at
+    night without bloom."""
+    bm = bmesh.new()
+    half_w = panel_width / 2
+    # Two stub posts under each end of the panel.
+    _cylinder_z(bm, radius=0.06, z0=0.0, z1=post_height, segs=8)
+    bm.verts.ensure_lookup_table()
+    # Second post at +half_w * 0.7
+    bm_count_before = len(bm.verts)
+    _cylinder_z(bm, radius=0.06, z0=0.0, z1=post_height, segs=8)
+    for v in bm.verts[bm_count_before:]:
+        v.co.x += half_w * 0.7
+    # Move first post to -half_w * 0.7.
+    for v in bm.verts[:bm_count_before]:
+        v.co.x -= half_w * 0.7
+    # Flat panel — thin box at z = post_height + panel_height / 2.
+    panel_z = post_height + panel_height / 2
+    panel_verts = _box(bm, half_x=half_w, half_y=0.05, half_z=panel_height / 2, z_centre=panel_z)
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    # The panel's +Y face is the front-facing emissive surface. Order
+    # from `_box`: bottom, top, -Y, +X, +Y, -X. So the panel's +Y face
+    # (index = len-2) is the front.
+    panel_front_idx = len(me.polygons) - 2
+    me.polygons[panel_front_idx].material_index = 1
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+# ── Industrial kit ──────────────────────────────────────────────────
+
+
+def build_container_mesh(name: str, *, length: float = 6.0, width: float = 2.4, height: float = 2.6) -> bpy.types.Mesh:
+    """Shipping container — 20-ft equivalent at ~6 × 2.4 × 2.6 m. Just a
+    box for now; corrugation can come in a follow-up modifier."""
+    bm = bmesh.new()
+    _box(bm, half_x=length / 2, half_y=width / 2, half_z=height / 2, z_centre=height / 2)
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_oil_drum_mesh(name: str, *, height: float = 0.95, radius: float = 0.30) -> bpy.types.Mesh:
+    """55-gallon drum — cylinder with two slightly-wider rings (top and
+    bottom rim bands) for visual interest. ~30 verts."""
+    bm = bmesh.new()
+    segs = 12
+    # Main body: 4 ring stack (bottom, lower-rim, upper-rim, top).
+    rings = []
+    for z, r in [
+        (0.0,            radius),
+        (0.08,           radius * 1.08),
+        (height - 0.08,  radius * 1.08),
+        (height,         radius),
+    ]:
+        rings.append([
+            bm.verts.new((math.cos(s / segs * math.tau) * r,
+                          math.sin(s / segs * math.tau) * r,
+                          z))
+            for s in range(segs)
+        ])
+    for ri in range(3):
+        cur = rings[ri]
+        nxt = rings[ri + 1]
+        for si in range(segs):
+            sn = (si + 1) % segs
+            bm.faces.new([cur[si], cur[sn], nxt[sn], nxt[si]])
+    bm.faces.new(rings[0][::-1])
+    bm.faces.new(rings[-1])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_mooring_bollard_mesh(name: str, *, height: float = 0.55, radius: float = 0.22) -> bpy.types.Mesh:
+    """Dock mooring bollard — squat cylinder + knob top. Reads as
+    "harbour" at a glance."""
+    bm = bmesh.new()
+    _, top = _cylinder_z(bm, radius=radius, z0=0.0, z1=height - 0.1, segs=10, cap_top=False)
+    # Knob — small sphere-ish cap.
+    knob_ring = [
+        bm.verts.new((math.cos(s / 10 * math.tau) * radius * 1.2,
+                      math.sin(s / 10 * math.tau) * radius * 1.2,
+                      height - 0.04))
+        for s in range(10)
+    ]
+    cap = bm.verts.new((0.0, 0.0, height + 0.08))
+    for i in range(10):
+        j = (i + 1) % 10
+        bm.faces.new([top[i], top[j], knob_ring[j], knob_ring[i]])
+        bm.faces.new([knob_ring[i], knob_ring[j], cap])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+# ── Volcanic kit ────────────────────────────────────────────────────
+
+
+def build_basalt_boulder_mesh(name: str) -> bpy.types.Mesh:
+    """Angular basalt boulder — icosphere with a bmesh.ops.bevel pass
+    to add planar facets. Reads as a chunk of cooled lava at distance."""
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=2, radius=1.0)
+    # Squish vertically so it reads as ground-borne, not a billiard ball.
+    for v in bm.verts:
+        v.co.z *= 0.65
+    bmesh.ops.bevel(bm, geom=bm.edges[:] + bm.faces[:] + bm.verts[:],
+                    offset=0.05, segments=1, profile=0.5,
+                    affect="EDGES")
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_ash_heap_mesh(name: str, *, radius: float = 1.2, height: float = 0.5) -> bpy.types.Mesh:
+    """Low ash mound — flattened half-sphere via a circle of verts
+    rising to a central peak. Cheap silhouette for cooled ash drifts."""
+    bm = bmesh.new()
+    segs = 14
+    base = [
+        bm.verts.new((math.cos(s / segs * math.tau) * radius,
+                      math.sin(s / segs * math.tau) * radius,
+                      0.0))
+        for s in range(segs)
+    ]
+    # Single mid ring for shape.
+    mid = [
+        bm.verts.new((math.cos(s / segs * math.tau) * radius * 0.55,
+                      math.sin(s / segs * math.tau) * radius * 0.55,
+                      height * 0.65))
+        for s in range(segs)
+    ]
+    apex = bm.verts.new((0.0, 0.0, height))
+    for i in range(segs):
+        j = (i + 1) % segs
+        bm.faces.new([base[i], base[j], mid[j], mid[i]])
+        bm.faces.new([mid[i], mid[j], apex])
+    # Floor disc (cap-bottom).
+    bm.faces.new(base[::-1])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_scorched_stump_mesh(name: str, *, height: float = 1.4, radius: float = 0.32) -> bpy.types.Mesh:
+    """Broken tree stump — short cylinder with a jagged top ring (per-
+    vertex Z perturbation gives the splintered silhouette)."""
+    bm = bmesh.new()
+    segs = 10
+    bottom = [
+        bm.verts.new((math.cos(s / segs * math.tau) * radius,
+                      math.sin(s / segs * math.tau) * radius,
+                      0.0))
+        for s in range(segs)
+    ]
+    # Top ring with random Z perturbation; deterministic via fixed
+    # offsets so the seed-script result is reproducible.
+    splinter_offsets = [0.18, -0.08, 0.25, -0.15, 0.10, -0.20, 0.22, -0.05, 0.15, -0.18]
+    top = [
+        bm.verts.new((math.cos(s / segs * math.tau) * radius * 0.95,
+                      math.sin(s / segs * math.tau) * radius * 0.95,
+                      height + splinter_offsets[s]))
+        for s in range(segs)
+    ]
+    for i in range(segs):
+        j = (i + 1) % segs
+        bm.faces.new([bottom[i], bottom[j], top[j], top[i]])
+    # Cap top with a fan to the centroid for a believable cross-section.
+    centroid = bm.verts.new((0.0, 0.0, height + 0.05))
+    for i in range(segs):
+        j = (i + 1) % segs
+        bm.faces.new([top[i], top[j], centroid])
+    bm.faces.new(bottom[::-1])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+# ── Jungle kit ──────────────────────────────────────────────────────
+
+
+def build_fern_clump_mesh(name: str, *, frond_count: int = 5, frond_length: float = 1.0) -> bpy.types.Mesh:
+    """Ground fern cluster — small quad-strip fronds emerging upward
+    from a tight base. Sway gradient on COLOR_0.R so the foliage shader
+    picks them up via the `mat_foliage_*` material name."""
+    bm = bmesh.new()
+    # Tiny base puck so the cluster grounds visually.
+    _cylinder_z(bm, radius=0.10, z0=0.0, z1=0.05, segs=6)
+
+    # Fronds — flat quad strips angled outward from the base.
+    frond_segs = 4
+    for fi in range(frond_count):
+        ang = (fi / frond_count) * math.tau
+        # Each frond leans outward + upward.
+        dir_xy = Vector((math.cos(ang) * 0.6, math.sin(ang) * 0.6, 1.0)).normalized()
+        side = Vector((-math.sin(ang), math.cos(ang), 0.0))
+        left, right = [], []
+        for si in range(frond_segs + 1):
+            t = si / frond_segs
+            # Slight arc: tip droops back toward the base.
+            radial = t * frond_length
+            arc_z = math.sin(t * math.pi) * 0.12
+            centre = dir_xy * radial + Vector((0.0, 0.0, arc_z + 0.05))
+            # Width: thin at base, fatter in middle, thin at tip.
+            if t < 0.2:
+                w = 0.02 + 0.10 * (t / 0.2)
+            elif t < 0.7:
+                w = 0.12
+            else:
+                w = 0.12 + (0.02 - 0.12) * ((t - 0.7) / 0.3)
+            left.append(bm.verts.new(centre + side * w))
+            right.append(bm.verts.new(centre - side * w))
+        for si in range(frond_segs):
+            bm.faces.new([left[si], left[si + 1], right[si + 1], right[si]])
+
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    # Sway gradient: trunk (z=0) doesn't sway, frond tips sway most.
+    # frond_length * 1.05 keeps the gradient just below saturation at
+    # the tips so the shader has headroom.
+    set_linear_sway_z(me, z_min=0.0, z_max=frond_length * 0.9, ao=1.0)
+    return me
+
+
+def build_mossy_boulder_mesh(name: str) -> bpy.types.Mesh:
+    """Variant of the basalt boulder — different jaggedness profile so
+    the silhouette reads distinct from the volcanic kit at scatter
+    density. Same procedural strategy, different inputs."""
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=2, radius=1.2)
+    # Wider squish — mossy boulders look squatter than basalt.
+    for v in bm.verts:
+        v.co.z *= 0.45
+    # Subtle bevel, no facet-emphasis (mossy = rounded).
+    bmesh.ops.bevel(bm, geom=bm.edges[:] + bm.faces[:] + bm.verts[:],
+                    offset=0.02, segments=2, profile=0.7,
+                    affect="EDGES")
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_fallen_pillar_mesh(name: str, *, length: float = 3.2, radius: float = 0.32) -> bpy.types.Mesh:
+    """Toppled column lying on its side along +X. One end intact (full
+    cap), other end broken (jagged ring + offset)."""
+    bm = bmesh.new()
+    segs = 10
+    bottom = []
+    top = []
+    # Cylinder along +X axis, lying on the ground at z=radius.
+    splinter = [0.0, 0.0, -0.12, -0.18, -0.08, -0.20, -0.06, -0.10, 0.0, 0.0]
+    for i in range(segs):
+        ang = i / segs * math.tau
+        y = math.cos(ang) * radius
+        z = math.sin(ang) * radius + radius  # lift so the underside touches z=0
+        bottom.append(bm.verts.new((0.0, y, z)))
+        # Top (broken) end: slightly inset radius + per-vert X recess.
+        recess = splinter[i % len(splinter)]
+        top.append(bm.verts.new((length + recess, y, z)))
+    for i in range(segs):
+        j = (i + 1) % segs
+        bm.faces.new([bottom[i], bottom[j], top[j], top[i]])
+    # Cap intact end with a fan.
+    centre_bottom = bm.verts.new((0.0, 0.0, radius))
+    for i in range(segs):
+        j = (i + 1) % segs
+        bm.faces.new([bottom[j], bottom[i], centre_bottom])
+    # Broken end — no clean cap; ring closes itself via tris to a recessed
+    # centre for that "core showing" look.
+    centre_top = bm.verts.new((length - 0.12, 0.0, radius))
+    for i in range(segs):
+        j = (i + 1) % segs
+        bm.faces.new([top[i], top[j], centre_top])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+# ────────────────────────────────────────────────────────────────────
 # HV_Scatter — Geometry Nodes graph for foliage / rock / debris scatter
 # ────────────────────────────────────────────────────────────────────
 #
@@ -814,6 +1323,26 @@ PROP_POSITIONS = {
     "prop_buoy":            (12.0, 0.0, 0.0),
     "prop_gate":            (24.0, 0.0, 0.0),
     "prop_turn_indicator":  (60.0, 0.0, 0.0),
+    # Phase γ biome kits — laid out along +X past the existing props
+    # so the .blend's viewport reads as a row of kits when opened.
+    # Urban kit (Shibuya / Marina Bay / Liberty)
+    "prop_lamp_post":       (70.0, 0.0, 0.0),
+    "prop_antenna_mast":    (76.0, 0.0, 0.0),
+    "prop_vent_stack":      (82.0, 0.0, 0.0),
+    "prop_ac_unit":         (86.0, 0.0, 0.0),
+    "prop_signage_panel":   (92.0, 0.0, 0.0),
+    # Industrial kit (Marina Bay)
+    "prop_container":       (102.0, 0.0, 0.0),
+    "prop_oil_drum":        (110.0, 0.0, 0.0),
+    "prop_mooring_bollard": (114.0, 0.0, 0.0),
+    # Volcanic kit (Kilauea)
+    "prop_basalt_boulder":  (120.0, 0.0, 0.0),
+    "prop_ash_heap":        (124.0, 0.0, 0.0),
+    "prop_scorched_stump":  (128.0, 0.0, 0.0),
+    # Jungle kit (Angkor Drowned)
+    "prop_fern_clump":      (134.0, 0.0, 0.0),
+    "prop_mossy_boulder":   (138.0, 0.0, 0.0),
+    "prop_fallen_pillar":   (142.0, 0.0, 0.0),
 }
 
 
@@ -903,9 +1432,169 @@ def build_props() -> dict:
                             tags=["indicator", "static", "emissive"])
     summary["turn_indicator"] = {"verts": len(ti_mesh.vertices)}
 
-    # Mark every collection as a scatter source for Item 4's picker.
+    # ── Phase γ biome kits ─────────────────────────────────────────
+    #
+    # Materials. The runtime sway-shader opts in via `mat_foliage_*`
+    # name prefix; everything else stays static (`mat_prop_*`). Hex
+    # colours are placeholders an author can re-roll before the trim-
+    # sheet pass (Phase δ) lands.
+
+    urban_metal_mat  = make_material("mat_prop_urban_metal", "#9aa0a8", roughness=0.55)
+    urban_lamp_mat   = make_material("mat_prop_urban_lamp", "#f7e9b2", roughness=0.30,
+                                     emission_hex="#fff2d0", emission_strength=2.5)
+    urban_sign_mat   = make_material("mat_prop_urban_signage", "#c8c8d4", roughness=0.45)
+    urban_sign_emi_mat = make_material("mat_prop_urban_signage_lit", "#ff4cc4", roughness=0.35,
+                                       emission_hex="#ff4cc4", emission_strength=2.0)
+
+    container_mat    = make_material("mat_prop_industrial_container", "#a8442a", roughness=0.7)
+    drum_mat         = make_material("mat_prop_industrial_drum", "#3a3030", roughness=0.55)
+    bollard_mat      = make_material("mat_prop_industrial_bollard", "#4a4f55", roughness=0.6)
+
+    basalt_mat       = make_material("mat_prop_volcanic_basalt", "#2e2a2a", roughness=0.85)
+    ash_mat          = make_material("mat_prop_volcanic_ash", "#a8a298", roughness=0.95)
+    scorched_mat     = make_material("mat_prop_volcanic_scorched", "#332622", roughness=0.85)
+
+    fern_mat         = make_material("mat_foliage_fern", "#3a6e2c", roughness=0.65)
+    mossy_mat        = make_material("mat_prop_jungle_mossy", "#4a5e34", roughness=0.85)
+    pillar_mat       = make_material("mat_prop_jungle_pillar", "#a89a78", roughness=0.75)
+
+    biome_summary: list[bpy.types.Collection] = []
+
+    def _add_kit(prop_id: str, mesh: bpy.types.Mesh, materials: list[bpy.types.Material],
+                 catalog_path: str, description: str, tags: list[str],
+                 emissive_face_indices: list[int] | None = None) -> bpy.types.Collection:
+        """Helper: build a prop collection from a finished mesh, mark
+        it as an Asset, flag it as a scatter source, and slot it under
+        the biome kit's catalog path. `emissive_face_indices` (optional)
+        promotes the listed face indices to material slot 1 — used by
+        builders whose mesh stamps an emissive surface via face index."""
+        coll = _make_prop_collection(
+            prop_id, mesh, None, materials,
+            position=PROP_POSITIONS[prop_id],
+        )
+        if emissive_face_indices:
+            for fi in emissive_face_indices:
+                if 0 <= fi < len(mesh.polygons):
+                    mesh.polygons[fi].material_index = 1
+        _mark_collection_asset(
+            coll,
+            catalog_path=catalog_path,
+            description=description,
+            tags=tags,
+        )
+        coll["scatter_source"] = True
+        biome_summary.append(coll)
+        summary[prop_id.removeprefix("prop_")] = {"verts": len(mesh.vertices)}
+        return coll
+
+    # Urban kit ────────────────────────────────────────────────────
+    _add_kit("prop_lamp_post",
+             build_lamp_post_mesh("prop_lamp_post_mesh"),
+             [urban_metal_mat, urban_lamp_mat],
+             "Hoverbike/Track Props/Urban",
+             "Slim street-light pole + emissive lampshade. Reads as urban dressing at race speed.",
+             ["urban", "lamp", "emissive", "scatterable"])
+
+    _add_kit("prop_antenna_mast",
+             build_antenna_mast_mesh("prop_antenna_mast_mesh"),
+             [urban_metal_mat],
+             "Hoverbike/Track Props/Urban",
+             "Rooftop comm-tower lattice. Tall thin silhouette for skyline density.",
+             ["urban", "antenna", "tall", "scatterable"])
+
+    _add_kit("prop_vent_stack",
+             build_vent_stack_mesh("prop_vent_stack_mesh"),
+             [urban_metal_mat],
+             "Hoverbike/Track Props/Urban",
+             "Rooftop vent with mushroom cap. HVAC clutter for urban rooftops.",
+             ["urban", "vent", "scatterable"])
+
+    _add_kit("prop_ac_unit",
+             build_ac_unit_mesh("prop_ac_unit_mesh"),
+             [urban_metal_mat],
+             "Hoverbike/Track Props/Urban",
+             "Rooftop AC condenser unit. Boxy clutter — pairs with prop_vent_stack.",
+             ["urban", "ac", "scatterable"])
+
+    _add_kit("prop_signage_panel",
+             build_signage_panel_mesh("prop_signage_panel_mesh"),
+             [urban_sign_mat, urban_sign_emi_mat],
+             "Hoverbike/Track Props/Urban",
+             "Billboard / signage panel on stub posts. +Y face emissive for neon-lit feel.",
+             ["urban", "signage", "emissive", "scatterable"])
+
+    # Industrial kit ───────────────────────────────────────────────
+    _add_kit("prop_container",
+             build_container_mesh("prop_container_mesh"),
+             [container_mat],
+             "Hoverbike/Track Props/Industrial",
+             "20-ft shipping container. Pairs with prop_oil_drum for harbour debris.",
+             ["industrial", "container", "scatterable"])
+
+    _add_kit("prop_oil_drum",
+             build_oil_drum_mesh("prop_oil_drum_mesh"),
+             [drum_mat],
+             "Hoverbike/Track Props/Industrial",
+             "55-gallon drum with rim bands. Small enough to scatter densely along docks.",
+             ["industrial", "drum", "scatterable"])
+
+    _add_kit("prop_mooring_bollard",
+             build_mooring_bollard_mesh("prop_mooring_bollard_mesh"),
+             [bollard_mat],
+             "Hoverbike/Track Props/Industrial",
+             "Dock mooring bollard. Reads as harbour at a glance.",
+             ["industrial", "mooring", "harbor", "scatterable"])
+
+    # Volcanic kit ─────────────────────────────────────────────────
+    _add_kit("prop_basalt_boulder",
+             build_basalt_boulder_mesh("prop_basalt_boulder_mesh"),
+             [basalt_mat],
+             "Hoverbike/Track Props/Volcanic",
+             "Angular basalt boulder — beveled icosphere. Cooled-lava chunks for Kilauea.",
+             ["volcanic", "rock", "scatterable"])
+
+    _add_kit("prop_ash_heap",
+             build_ash_heap_mesh("prop_ash_heap_mesh"),
+             [ash_mat],
+             "Hoverbike/Track Props/Volcanic",
+             "Low ash drift mound. Pairs with prop_basalt_boulder for caldera floors.",
+             ["volcanic", "ash", "scatterable"])
+
+    _add_kit("prop_scorched_stump",
+             build_scorched_stump_mesh("prop_scorched_stump_mesh"),
+             [scorched_mat],
+             "Hoverbike/Track Props/Volcanic",
+             "Burned tree stump with jagged top. Adds vertical interest in volcanic flats.",
+             ["volcanic", "stump", "scatterable"])
+
+    # Jungle kit ───────────────────────────────────────────────────
+    fern_mesh = build_fern_clump_mesh("prop_fern_clump_mesh")
+    _add_kit("prop_fern_clump",
+             fern_mesh,
+             [fern_mat],
+             "Hoverbike/Track Props/Jungle",
+             "Ground fern cluster with sway gradient on COLOR_0.R. Foliage shader picks it up "
+             "via the mat_foliage_* material name.",
+             ["jungle", "foliage", "sway", "scatterable"])
+
+    _add_kit("prop_mossy_boulder",
+             build_mossy_boulder_mesh("prop_mossy_boulder_mesh"),
+             [mossy_mat],
+             "Hoverbike/Track Props/Jungle",
+             "Mossy rounded boulder. Softer silhouette than the volcanic basalt boulder.",
+             ["jungle", "rock", "scatterable"])
+
+    _add_kit("prop_fallen_pillar",
+             build_fallen_pillar_mesh("prop_fallen_pillar_mesh"),
+             [pillar_mat],
+             "Hoverbike/Track Props/Jungle",
+             "Toppled stone column lying on its side. Broken end + intact end for variety.",
+             ["jungle", "pillar", "ruin", "scatterable"])
+
+    # Mark the legacy collections + every Phase γ collection as scatter sources.
     for c in (rock_coll, palm_coll, buoy_coll, gate_coll, ti_coll):
         c["scatter_source"] = True
+    # Phase γ collections already get `scatter_source` inside `_add_kit`.
 
     # Author the HV_Scatter geometry-nodes graph the scatter-zone
     # operator + per-track seed scripts attach to a target mesh. Lives

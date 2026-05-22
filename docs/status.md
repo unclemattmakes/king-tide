@@ -1,3 +1,58 @@
+> **Last updated: 2026-05-21** — Phase γ kicks off
+> [`docs/level-visual-quality-research.md`](./level-visual-quality-research.md):
+> four biome prop kits land alongside throwaway test scatter on
+> Shibuya / Kilauea / Marina Bay / Angkor.
+>
+> [`seed_props_library.py`](../tools/blender/seed_props_library.py) now
+> builds **19 prop archetypes** (5 legacy + 14 new):
+>
+> * **Urban** (Shibuya/Marina Bay/Liberty) — `prop_lamp_post`,
+>   `prop_antenna_mast`, `prop_vent_stack`, `prop_ac_unit`,
+>   `prop_signage_panel`.
+> * **Industrial** (Marina Bay) — `prop_container`, `prop_oil_drum`,
+>   `prop_mooring_bollard`.
+> * **Volcanic** (Kilauea) — `prop_basalt_boulder`, `prop_ash_heap`,
+>   `prop_scorched_stump`.
+> * **Jungle** (Angkor) — `prop_fern_clump`, `prop_mossy_boulder`,
+>   `prop_fallen_pillar`. Fern uses `mat_foliage_fern` so the runtime
+>   sway shader picks it up automatically.
+>
+> Each new collection: Asset-Browser-marked under its biome catalog
+> (4 new UUIDs), tagged `scatter_source=True`, placeholder material
+> with `mat_prop_*` or `mat_foliage_*` naming. All under 200 verts
+> except `prop_mossy_boulder` (522v — on the trim-pass list).
+>
+> Test scatter wired on 4 tracks to verify each kit flows end-to-end:
+> Shibuya gets 272 urban instances, Marina Bay 396 industrial, Kilauea
+> 442 volcanic, Angkor 391 jungle. Combined with Phase β step 7 the
+> seven-track scatter footprint sits at **~3273 scattered instances**
+> across the 8 tracks now carrying scatter zones. Placement on the
+> Phase γ tracks is **throwaway** pending the level rework; the
+> archetypes + the per-biome catalog structure are the durable
+> deliverable.
+>
+> Still missing: Venetian (Doge's) and Waterpark (Aqualand) prop kits.
+> Liberty Drowned has the urban kit available but isn't wired yet.
+>
+> **Last updated: 2026-05-21** — Phase β step 7 of
+> [`docs/level-visual-quality-research.md`](./level-visual-quality-research.md):
+> rock-scatter rolls onto the three remaining tropical tracks. The Maw
+> gets 5 zones (802 rocks flanking the three arches), Hatteras Light
+> gets 4 zones (417 rocks outside the racetrack oval), Cape Town
+> Drift gets 4 zones (478 rocks on the harbor/Atlantic boundary). All
+> three use `prop_rock` rather than `prop_palm` — the racing lines
+> stay at sea level on open water, so palms would float; sea-stacks
+> just above the waterline read at race-pace. The South Beach helpers
+> lifted into [`tools/blender/scatter_lib.py`](../tools/blender/scatter_lib.py)
+> so per-track scatter is now ~5 lines (declare `SCATTER_ZONES`, call
+> `drop_scatter_zones(scene, PROPS_LIBRARY, ZONES)` from `augment_scene`).
+> End-to-end verified: all four tracks export with
+> `EXT_mesh_gpu_instancing` populated (2160 total scattered rocks/palms
+> across the Reef Cup tropical biome), and `pnpm gen:tracks:validate`
+> shows the-maw/hatteras-light/cape-town-drift/south-beach-sunken all
+> at 0 errors. Phase β fully complete; Phase γ (biome prop kits for
+> non-tropical tracks) is the next leverage slice.
+>
 > **Last updated: 2026-05-19** — Blender addon UX rework lands
 > alongside Phase A gap 7 + Phase F of
 > [`docs/v1-asset-pipeline-plan.md`](./v1-asset-pipeline-plan.md). The

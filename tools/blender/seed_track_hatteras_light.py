@@ -64,6 +64,17 @@ spec.loader.exec_module(_lib)
 TrackSpec = _lib.TrackSpec
 build_track_from_spec = _lib.build_track_from_spec
 
+# Shared scatter helpers (Phase β of docs/level-visual-quality-research.md).
+_scatter_spec = importlib.util.spec_from_file_location(
+    "scatter_lib", os.path.join(SCRIPT_DIR, "scatter_lib.py"),
+)
+_scatter = importlib.util.module_from_spec(_scatter_spec)
+sys.modules["scatter_lib"] = _scatter
+_scatter_spec.loader.exec_module(_scatter)
+drop_scatter_zones = _scatter.drop_scatter_zones
+
+PROPS_LIBRARY = os.path.join(REPO_ROOT, "tracks-src", "props-library.blend")
+
 
 # ────────────────────────────────────────────────────────────────────
 # Track spec — racetrack oval around the lighthouse
@@ -458,6 +469,83 @@ BOOST_PAD_POSITIONS = (
 )
 
 
+# ────────────────────────────────────────────────────────────────────
+# Scatter zones — sparse sea-stack rocks outside the racing oval
+# ────────────────────────────────────────────────────────────────────
+#
+# Phase β step 7 of [docs/level-visual-quality-research.md](../../docs/level-visual-quality-research.md):
+# extend the South Beach scatter pattern onto the existing-tropical
+# tracks. Hatteras Light is open Atlantic — no rooftop islands to plant
+# palms on, so palm scatter would float on flat water. Rocks (low
+# density, just above the waterline) read as sea-stacks bursting from
+# chop instead. Four small clusters sit *outside* the racetrack oval
+# (half-axes 210×185) so the racing line stays clean.
+#
+# Density is deliberately light — open Atlantic should still feel open.
+# z=1.5 places rock bases ~3.5 m above the racing-line altitude (-2),
+# which reads as "rocks emerging from the swell" at race pace.
+SCATTER_ZONES: tuple[dict, ...] = (
+    # Outer east — beyond the east apex (190, 0). Sea-stacks framing
+    # the eastward run-in to the north apex.
+    {
+        "name": "scatter_00",
+        "location": (255.0, 0.0, 1.5),
+        "half_width": 35.0,
+        "half_depth": 80.0,
+        "density": 0.010,
+        "source": "prop_rock",
+        "seed": 11,
+        # z_min defaults are permissive — these are open-water rocks
+        # and the target grid is a flat plane at zone.z, so the points
+        # sit at the plane altitude regardless of terrain shape.
+    },
+    # Outer south — south of the south apex (0, -170). A scattered
+    # rock chain ahead of the start line, populating the first-lap
+    # camera angle.
+    {
+        "name": "scatter_01",
+        "location": (0.0, -235.0, 1.5),
+        "half_width": 100.0,
+        "half_depth": 30.0,
+        "density": 0.011,
+        "source": "prop_rock",
+        "seed": 19,
+    },
+    # Outer north — beyond the north apex (0, 170). Mirror of the
+    # south chain, slightly lighter density so the loop reads
+    # asymmetric.
+    {
+        "name": "scatter_02",
+        "location": (0.0, 235.0, 1.5),
+        "half_width": 100.0,
+        "half_depth": 30.0,
+        "density": 0.009,
+        "source": "prop_rock",
+        "seed": 23,
+    },
+    # NW exterior — outside the W apex of the oval. Stays clear of the
+    # corkscrew (which spirals inward from the W apex to the
+    # lighthouse, all at X ≥ -185 / Y small); this zone sits further
+    # west (-260) so the corkscrew's curve and ribbon don't intersect.
+    {
+        "name": "scatter_03",
+        "location": (-255.0, 80.0, 1.5),
+        "half_width": 35.0,
+        "half_depth": 55.0,
+        "density": 0.010,
+        "source": "prop_rock",
+        "seed": 31,
+    },
+)
+
+
+def _drop_scatter_zones(scene) -> int:
+    """Drop the four Hatteras sea-stack scatter zones via the shared
+    helper. All four are outside the racetrack oval — the racing line
+    stays clean of any GN-distributed instances."""
+    return drop_scatter_zones(scene, PROPS_LIBRARY, SCATTER_ZONES)
+
+
 def _add_pickups_and_boosts(scene) -> None:
     """Drop pickup_NN empties + boost_NN empties at the configured
     positions. The addon's export pass walks these (``kind=pickup_spawn`` /
@@ -528,6 +616,9 @@ def _augment_and_reexport() -> None:
 
     print("[seed-track-hatteras-light] adding pickups + boost pads")
     _add_pickups_and_boosts(scene)
+
+    scatter = _drop_scatter_zones(scene)
+    print(f"[seed-track-hatteras-light] scatter: {scatter} zone(s) placed")
 
     print(f"[seed-track-hatteras-light] saving {output_blend}")
     bpy.ops.wm.save_as_mainfile(filepath=output_blend)

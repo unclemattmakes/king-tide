@@ -78,10 +78,20 @@ TrackSpec = _lib.TrackSpec
 REPO_ROOT = _lib.REPO_ROOT
 build_track_from_spec = _lib.build_track_from_spec
 
+# Shared scatter helpers (Phase β of docs/level-visual-quality-research.md).
+_scatter_spec = importlib.util.spec_from_file_location(
+    "scatter_lib", os.path.join(SCRIPT_DIR, "scatter_lib.py"),
+)
+_scatter = importlib.util.module_from_spec(_scatter_spec)
+sys.modules["scatter_lib"] = _scatter
+_scatter_spec.loader.exec_module(_scatter)
+drop_scatter_zones = _scatter.drop_scatter_zones
+
 # Path to the landmarks-library blend the appender pulls archetype
 # meshes from. The library is built by ``seed_landmarks_library.py``;
 # this seed assumes it exists (CI runs it before the track seeds).
 LANDMARKS_BLEND = os.path.join(REPO_ROOT, "tracks-src", "landmarks-library.blend")
+PROPS_LIBRARY = os.path.join(REPO_ROOT, "tracks-src", "props-library.blend")
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -576,6 +586,84 @@ def _build_pickups_and_boosts(scene) -> None:
         print(f"  {name}        → @ {pos} yaw={yaw}°")
 
 
+# ────────────────────────────────────────────────────────────────────
+# Scatter zones — rocky breakwater + outer-Atlantic sea-stacks
+# ────────────────────────────────────────────────────────────────────
+#
+# Phase β step 7 of [docs/level-visual-quality-research.md](../../docs/level-visual-quality-research.md):
+# extend the South Beach scatter pattern onto the existing-tropical
+# tracks. Cape Town Drift is a harbor + open-Atlantic loop with Table
+# Mountain on the south horizon. Rocks (no palms — the racing line
+# stays at -2 m and there's no above-water landform inside the loop to
+# plant palms on) layered on the boundary between harbor and ocean
+# give the track the "rocky breakwater" feel without touching the
+# racing surface or the existing landmarks (aquarium / Cape Wheel /
+# Table Mountain / containers).
+#
+# All four zones sit *outside* the racing line — west of the
+# breakwater turn, south of the start straight, east of the aquarium
+# approach. Density is sparse: Cape Town is intro-difficulty, the
+# eye should rest on the hero landmarks rather than navigate visual
+# noise.
+SCATTER_ZONES: tuple[dict, ...] = (
+    # NW breakwater outer flank — west of the NW breakwater turn
+    # (-300, 120). Rocks line the outside of the breakwater, framing
+    # the open-Atlantic side of the turn.
+    {
+        "name": "scatter_00",
+        "location": (-390.0, 80.0, 1.5),
+        "half_width": 35.0,
+        "half_depth": 90.0,
+        "density": 0.010,
+        "source": "prop_rock",
+        "seed": 13,
+    },
+    # Outer south — beyond the start straight (0, -360). Rocks below
+    # the start line, framing Table Mountain's far-horizon silhouette
+    # on every lap-1 camera angle.
+    {
+        "name": "scatter_01",
+        "location": (-30.0, -430.0, 1.5),
+        "half_width": 130.0,
+        "half_depth": 30.0,
+        "density": 0.010,
+        "source": "prop_rock",
+        "seed": 19,
+    },
+    # Outer east — east of the aquarium approach (250, -60). Sparse
+    # sea-stacks lining the open-Atlantic side of the eastern arc.
+    # Tightly bounded so the postcard moment (broken aquarium roof)
+    # stays the eye-catcher.
+    {
+        "name": "scatter_02",
+        "location": (310.0, -80.0, 1.5),
+        "half_width": 30.0,
+        "half_depth": 80.0,
+        "density": 0.011,
+        "source": "prop_rock",
+        "seed": 23,
+    },
+    # NE outer — beyond the NE harbor apex (0, 320). Rocks on the
+    # north-outside flank of the harbor.
+    {
+        "name": "scatter_03",
+        "location": (-30.0, 390.0, 1.5),
+        "half_width": 110.0,
+        "half_depth": 25.0,
+        "density": 0.009,
+        "source": "prop_rock",
+        "seed": 29,
+    },
+)
+
+
+def _build_scatter_zones(scene) -> int:
+    """Drop the four Cape Town rock-scatter zones via the shared helper.
+    All four sit outside the racing line; the racing surface stays
+    clean of GN-distributed instances."""
+    return drop_scatter_zones(scene, PROPS_LIBRARY, SCATTER_ZONES)
+
+
 def _add_camera_hero(scene) -> None:
     """50 mm camera framed on the broken aquarium with Table Mountain
     in the background. Authors can tweak after the seed runs; the
@@ -625,6 +713,8 @@ def augment_scene() -> None:
     _build_containers(scene)
     _build_wave_zones(scene)
     _build_pickups_and_boosts(scene)
+    scatter = _build_scatter_zones(scene)
+    print(f"[cape-town-drift] scatter: {scatter} zone(s) placed")
     _add_camera_hero(scene)
     # Save .blend with augmentation in place. The build_track pipeline
     # already saved + exported before we got here, so the .blend is up

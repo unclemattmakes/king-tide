@@ -102,6 +102,60 @@ build_track_from_spec = _lib.build_track_from_spec
 # share one geometry datablock + carry their swing-period extras on
 # the linked subtree.
 LANDMARKS_LIBRARY = os.path.join(REPO_ROOT, "tracks-src", "landmarks-library.blend")
+PROPS_LIBRARY = os.path.join(REPO_ROOT, "tracks-src", "props-library.blend")
+
+# Shared scatter helpers (Phase β/γ of docs/level-visual-quality-research.md).
+_scatter_spec = importlib.util.spec_from_file_location(
+    "scatter_lib", os.path.join(SCRIPT_DIR, "scatter_lib.py"),
+)
+_scatter = importlib.util.module_from_spec(_scatter_spec)
+sys.modules["scatter_lib"] = _scatter
+_scatter_spec.loader.exec_module(_scatter)
+drop_scatter_zones = _scatter.drop_scatter_zones
+
+
+# Test scatter — Phase γ verification pass for the industrial prop kit.
+# Throwaway placement pending the level rework; goal is to prove
+# `prop_container` / `prop_oil_drum` / `prop_mooring_bollard` flow
+# through scatter_lib + EXT_mesh_gpu_instancing into the runtime.
+SCATTER_ZONES: tuple[dict, ...] = (
+    # South container street — containers spread along the harbour
+    # south of the racing line.
+    {
+        "name": "scatter_00",
+        "location": (-50.0, -260.0, 0.0),
+        "half_width": 110.0,
+        "half_depth": 30.0,
+        "density": 0.005,
+        "source": "prop_container",
+        "seed": 11,
+    },
+    # SW harbour oil drums — dense small clutter on the west pier.
+    {
+        "name": "scatter_01",
+        "location": (-220.0, -80.0, 0.0),
+        "half_width": 25.0,
+        "half_depth": 90.0,
+        "density": 0.022,
+        "source": "prop_oil_drum",
+        "seed": 19,
+    },
+    # NE harbour bollards — mooring posts on the outer eastern flank.
+    {
+        "name": "scatter_02",
+        "location": (250.0, 220.0, 0.0),
+        "half_width": 25.0,
+        "half_depth": 80.0,
+        "density": 0.018,
+        "source": "prop_mooring_bollard",
+        "seed": 23,
+    },
+)
+
+
+def _drop_scatter_zones(scene) -> int:
+    """Drop the Marina Bay test scatter zones via the shared helper."""
+    return drop_scatter_zones(scene, PROPS_LIBRARY, SCATTER_ZONES)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -732,10 +786,12 @@ def augment_scene() -> None:
     n_facades = _build_harbour_facades()
     _build_wave_zone(scene)
     _build_pickups_and_boosts(scene)
+    scatter = _drop_scatter_zones(scene)
     _add_camera_hero(scene)
     _apply_sky_preset(scene)
     print(f"[marina-bay-7] augment: {n_cranes} cranes + tanker + 12 containers + "
-          f"{n_facades} facades + 1 wave zone + 6 pickups + 2 boost pads + camera_hero")
+          f"{n_facades} facades + {scatter} scatter zones + 1 wave zone + "
+          f"6 pickups + 2 boost pads + camera_hero")
 
     # The spline brushes the beached tanker's deck-shortcut footprint;
     # the auto-shift nudges that one anchor off without disturbing the
