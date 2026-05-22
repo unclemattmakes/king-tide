@@ -518,15 +518,19 @@ export function createWaterMesh(
     backend?: 'webgpu' | 'webgl2'
   },
 ): WaterMesh {
-  const size = opts?.size ?? 240
-  // 384 subs × 240 m ≈ 0.625 m vertex spacing. The mesh follows the
+  const size = opts?.size ?? 480
+  // 768 subs × 480 m ≈ 0.625 m vertex spacing. The mesh follows the
   // camera (see `tick`'s `originXZ` arg + the meshOrigin uniform), so the
-  // 240 m of mesh stays centered on the visible patch instead of being
+  // 480 m of mesh stays centered on the visible patch instead of being
   // anchored at world origin (with the player at z ≈ 90 sitting near the
-  // edge). Combined with the higher subdivision, the 4 m wake wavelength
-  // gets ~6.4 verts per crest — ridges show up as actual geometry, not a
-  // single-vertex shimmer. 384² ≈ 147 k verts is trivial on a real GPU.
-  const subs = opts?.subdivisions ?? 384
+  // edge). 480 m half-extent (240 m to each side, ~340 m at the corners)
+  // reaches well into the horizon-skirt's haze ramp so the boundary
+  // between displaced wave geometry and the flat skirt is hidden under
+  // matched aerial-perspective colour. At the same density, the 4 m wake
+  // wavelength gets ~6.4 verts per crest — ridges show up as actual
+  // geometry, not a single-vertex shimmer. 768² ≈ 590 k verts is still
+  // trivial on a real GPU (sub-millisecond vertex pass at this density).
+  const subs = opts?.subdivisions ?? 768
 
   // ---- Debug toggles ----------------------------------------------------
   // Analytic-Gerstner displacement + procedural detail-normal map +
@@ -2425,10 +2429,11 @@ export function createWaterMesh(
   }
 
   // ── Horizon skirt ──────────────────────────────────────────────────────
-  // The main wave plane is 240 m square (camera-locked, ~120 m visible in
-  // any direction). The horizon ring sits at ~1.4 km. Without anything
-  // between them, the player sees a visible donut of sky between the water
-  // plane's edge and the horizon — i.e. the water bounds are obvious.
+  // The main wave plane is 480 m square (camera-locked, ~240 m visible to
+  // the sides, ~340 m at the corners). The horizon ring sits at ~1.4 km.
+  // Without anything between them, the player sees a visible donut of sky
+  // between the water plane's edge and the horizon — i.e. the water
+  // bounds are obvious.
   //
   // The skirt is a flat ring extending from inside the main plane out past
   // the horizon ring. It's a child of the main mesh so it inherits the
@@ -2447,10 +2452,10 @@ export function createWaterMesh(
   // ramps in over the inner edge so any tiny tonal mismatch under the
   // main plane is hidden by the main plane drawing on top, and scene
   // fog dissolves the outer rim into the sky just like everything else.
-  const SKIRT_INNER_RADIUS = 60 // m — comfortably inside the 120 m plane half-extent
+  const SKIRT_INNER_RADIUS = 120 // m — well inside the 240 m plane half-extent
   const SKIRT_OUTER_RADIUS = 1600 // m — past the default 1400 m horizon ring
-  const SKIRT_ANGULAR_SEGMENTS = 96
-  const SKIRT_RADIAL_SEGMENTS = 12
+  const SKIRT_ANGULAR_SEGMENTS = 128
+  const SKIRT_RADIAL_SEGMENTS = 16
   const skirtGeom = new THREE.RingGeometry(
     SKIRT_INNER_RADIUS,
     SKIRT_OUTER_RADIUS,
@@ -2472,11 +2477,16 @@ export function createWaterMesh(
     // offset from the camera's XZ — no need to round-trip through
     // positionWorld / cameraPosition.
     const radial = positionLocal.xz.length()
-    // Inner alpha ramp: 0 at the inner edge → 1 by the time the skirt
-    // pokes out past the main plane's worst-case half-extent (170 m at
-    // the square's corners). This keeps any tonal seam hidden under the
-    // main plane's draw, since the main plane is rendered on top.
-    const innerFadeIn = smoothstep(float(SKIRT_INNER_RADIUS), float(170), radial)
+    // Inner alpha ramp: 0 at the inner edge → 1 by the 240 m side-edge
+    // of the 480 m plane. Picking the side-edge (rather than the 340 m
+    // corner) means the skirt is fully opaque as soon as the camera can
+    // see past the plane in any cardinal direction — no half-transparent
+    // band of sky leaking through where the plane has ended but the
+    // skirt is still ramping in. In the corner zones (240–340 m radial)
+    // the plane is still drawing on top and hides the fully-opaque
+    // skirt; the tonal mismatch there is small because the plane is
+    // already deep into its own aerial-perspective ramp at that radius.
+    const innerFadeIn = smoothstep(float(SKIRT_INNER_RADIUS), float(240), radial)
     // Aerial-perspective ramp — mirrors the main plane's
     // `aerialMix = smoothstep(120, 280, camDist) * 0.5` so the colour is
     // continuous across the boundary, then continues fading past 280 m
