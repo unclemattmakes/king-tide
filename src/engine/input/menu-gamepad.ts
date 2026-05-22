@@ -57,6 +57,14 @@ function isDisabled(el: HTMLElement): boolean {
   return false
 }
 
+/**
+ * Class applied to the element that currently holds menu focus so CSS
+ * can paint a strong, gamepad-friendly indicator without relying on the
+ * browser's `:focus-visible` heuristic (which doesn't reliably fire for
+ * scripted `.focus()` calls driven from gamepad polling).
+ */
+const FOCUS_CLASS = 'is-menu-focus'
+
 export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
   let raf = 0
   let disposed = false
@@ -72,6 +80,26 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
     const els = Array.from(root.querySelectorAll<HTMLElement>(sel))
     return els.filter((el) => !isDisabled(el) && isVisible(el))
   }
+
+  // Mirror DOM focus into a marker class so CSS can paint a strong
+  // focus indicator regardless of how focus was set (keyboard tab,
+  // mouse click, or programmatic .focus() from gamepad nav).
+  function onFocusIn(e: FocusEvent): void {
+    const root = opts.container()
+    const target = e.target as HTMLElement | null
+    if (!root || !target || !root.contains(target)) return
+    const prev = root.querySelectorAll(`.${FOCUS_CLASS}`)
+    prev.forEach((el) => {
+      if (el !== target) el.classList.remove(FOCUS_CLASS)
+    })
+    target.classList.add(FOCUS_CLASS)
+  }
+  function onFocusOut(e: FocusEvent): void {
+    const target = e.target as HTMLElement | null
+    target?.classList.remove(FOCUS_CLASS)
+  }
+  document.addEventListener('focusin', onFocusIn)
+  document.addEventListener('focusout', onFocusOut)
 
   function navigate(dir: Dir): void {
     const elements = focusables()
@@ -228,6 +256,14 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
     dispose(): void {
       disposed = true
       cancelAnimationFrame(raf)
+      document.removeEventListener('focusin', onFocusIn)
+      document.removeEventListener('focusout', onFocusOut)
+      opts
+        .container()
+        ?.querySelectorAll(`.${FOCUS_CLASS}`)
+        .forEach((el) => {
+          el.classList.remove(FOCUS_CLASS)
+        })
     },
   }
 }
