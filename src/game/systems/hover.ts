@@ -850,28 +850,49 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       }
     }
 
-    // Water pitch damping. The multi-point hover's asymmetry on big swells
-    // (bow over crest fires, stern in deep trough hits the locally-airborne
-    // gate and contributes nothing) pumps pitch angvel faster than Rapier's
-    // default 2.5 angular damping can bleed it — the bike would otherwise
-    // pitch toward vertical inside a few seconds. Adds modest viscous
-    // resistance to pitch-axis rotation while grounded over water. Kept
-    // low (2 vs Rapier's default 2.5) because per-corner buoyancy already
-    // caps the wave-forcing on submerged corners — pushing damping higher
-    // here makes the player's pitch input feel sticky on water and then
-    // suddenly loose when the bike pops above the surface.
+    // Water pitch PD — self-righting torque while grounded on water.
+    //
+    // The original linear damp (constant × pitchVel) bled angular velocity
+    // but couldn't fight a constant pitch torque from the rider's stick:
+    // a held-forward stick produced runaway pitch and the bike cartwheeled
+    // forward into the water. Replace it with a true PD: a P term pulls
+    // the chassis toward the surface's pitch attitude, plus the D damp.
+    //
+    // The P term targets `surfacePitchAtTarget` (= −atan(surfaceForwardSlope))
+    // so the bike sits flat on flat water + tracks the local slope on big
+    // swells. The player's pitch input still wins in equilibrium (input
+    // torque 5 vs P torque 6 × max-angle 0.3rad ≈ 1.8) — the player can
+    // commit to a wheelie or dive, the bike just doesn't flip past 30° on
+    // its own when the stick is held.
+    //
+    // Kept off the wheelie/dive past 60° so a deliberate commit (player
+    // intentionally going past 60° to do a backflip take-off) isn't
+    // fought by the spring all the way around.
     if (isGrounded && probe.isWater) {
       const rightWater = quatRotate(rb.rotation(), { x: 1, y: 0, z: 0 })
       const angvWater = rb.angvel()
       const pitchVelWater =
         angvWater.x * rightWater.x + angvWater.y * rightWater.y + angvWater.z * rightWater.z
-      const PITCH_WATER_DAMP = 2 // rad/s² per rad/s of pitch velocity
-      const aPitchDamp = -pitchVelWater * PITCH_WATER_DAMP
+      const qW = rb.rotation()
+      const r12W = 2 * (qW.y * qW.z - qW.x * qW.w)
+      const pitchAngleWater = Math.asin(Math.max(-1, Math.min(1, -r12W)))
+      const surfacePitchTarget = -Math.atan(surfaceForwardSlope)
+      const pitchErrWater = pitchAngleWater - surfacePitchTarget
+      // P fires only while the chassis is within ±60° of the surface
+      // attitude — past that the rider has clearly committed to a
+      // trick / dive and we don't want a spring pulling them back
+      // mid-rotation. Damp keeps firing so spin still bleeds.
+      const WATER_PITCH_P = 6 // rad/s² per rad of error
+      const WATER_PITCH_D = 3 // rad/s² per rad/s
+      const inLevelBand = Math.abs(pitchErrWater) < Math.PI / 3
+      const aPitchP = inLevelBand ? -pitchErrWater * WATER_PITCH_P : 0
+      const aPitchD = -pitchVelWater * WATER_PITCH_D
+      const aPitchWater = aPitchP + aPitchD
       rb.applyTorqueImpulse(
         {
-          x: rightWater.x * aPitchDamp * m * dt,
-          y: rightWater.y * aPitchDamp * m * dt,
-          z: rightWater.z * aPitchDamp * m * dt,
+          x: rightWater.x * aPitchWater * m * dt,
+          y: rightWater.y * aPitchWater * m * dt,
+          z: rightWater.z * aPitchWater * m * dt,
         },
         true,
       )
@@ -935,25 +956,26 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // multiplies `mass * dt` to form the torque impulse, so the
     // effective angular acceleration is `coef * mass / I_pitch`. For the
     // capsule (I_pitch ≈ m·0.34) that's roughly `coef × 2.94` rad/s² at
-    // full input. The split below treats ground and air as separate
-    // tuning surfaces:
+    // full input. The three branches below treat surfaces independently:
     //
-    //   - Ground (14): the multi-point hover spring fires a strong
-    //     restoring torque against a nose-up tilt (bow above hover
-    //     height → spring pushes bow down). Wheelie input has to win
-    //     that fight visibly — 14 reads as "stick held = chassis up
-    //     ~25–30°" before spring/torque equilibrate. (c490e7d.)
+    //   - Land (9): the multi-point hover spring restores against the
+    //     rider's pitch input. At 14 the resting offset under held stick
+    //     was 25–30° (the "constantly scraping nose" feel). 9 settles
+    //     closer to 15–18° — still committing to a wheelie / nose-dip
+    //     visibly, but the bike doesn't read as plowing its bow.
+    //   - Water (5): the water PD below has a much weaker P term than
+    //     the multi-point spring's restoring torque on land, so a land-
+    //     level input torque would cartwheel the bike into the water
+    //     before the PD could catch it. 5 + the water PD's 6× restoring
+    //     give an equilibrium tilt of roughly ±25° on a held stick —
+    //     the rider can still pump waves but stops flipping forward.
     //   - Air (3): only Rapier's 2.5 angular damping bleeds the angvel,
-    //     so torque integrates straight into rotation. At the previous
-    //     value of 6, ω_eq ≈ 7 rad/s and a held stick rotated the
-    //     chassis past vertical inside the test's 1 s airborne window —
-    //     fwd.y inverted and pitch-vectored thrust averaged *down* for
-    //     E (lift), failing m9-air-control. 3 gives ω_eq ≈ 3.6 rad/s,
-    //     a full backflip / dive in ~1.75 s, and keeps fwd.y
-    //     monotonically signed across the 1 s sample window.
+    //     so torque integrates straight into rotation. 3 gives a full
+    //     backflip / dive in ~1.75 s, and keeps fwd.y monotonically
+    //     signed across the 1 s sample window for m9-air-control.
     if (Math.abs(intent.pitch) > 0.05) {
       const rightP = quatRotate(q, { x: 1, y: 0, z: 0 })
-      const PITCH_TORQUE_ACCEL = isGrounded ? 14 : 3
+      const PITCH_TORQUE_ACCEL = !isGrounded ? 3 : probe.isWater ? 5 : 9
       const aPitch = -intent.pitch * PITCH_TORQUE_ACCEL
       rb.applyTorqueImpulse(
         {

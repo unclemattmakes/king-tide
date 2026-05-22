@@ -40,12 +40,17 @@ function clamp(v: number, lo: number, hi: number): number {
  * hardcoded fraction of the virtual stick radius (the touch UI has its own
  * tuning baked into the SVG); curve reads from `devSettings.stickCurve`.
  */
-function shapeTouchAxis(v: number): number {
+function shapeTouchAxis(v: number, deadzone: number = DEADZONE): number {
   const mag = Math.abs(v)
-  if (mag < DEADZONE) return 0
-  const t = Math.min((mag - DEADZONE) / (1 - DEADZONE), 1)
+  if (mag < deadzone) return 0
+  const t = Math.min((mag - deadzone) / (1 - deadzone), 1)
   return Math.sign(v) * t ** devSettings.stickCurve
 }
+
+/** Pitch axis wants a wider deadzone than steer. Mirrors the gamepad
+ *  `PITCH_DEADZONE_FLOOR` rationale: small accidental Y deflections
+ *  while steering shouldn't read as pitch commands. */
+const TOUCH_PITCH_DEADZONE = 0.28
 
 /** Coarse pointer (phone/tablet) or explicit `?touch=1` URL flag for testing. */
 export function isTouchDevice(): boolean {
@@ -78,7 +83,7 @@ export function computeTouchIntent(
 ): Intent {
   const intent = emptyIntent()
   const sx = shapeTouchAxis(clamp(rawStickX, -1, 1))
-  const sy = shapeTouchAxis(clamp(rawStickY, -1, 1))
+  const sy = shapeTouchAxis(clamp(rawStickY, -1, 1), TOUCH_PITCH_DEADZONE)
   intent.steer = sx
   // Stick Y → pitch, inverted to match the "flight stick" / gamepad convention:
   // push the stick UP (away from the player, toward the top of the screen)
