@@ -863,36 +863,43 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       }
     }
 
-    // Water pitch PD — self-righting torque while grounded on water.
+    // Grounded pitch PD — self-righting torque while on land OR water.
     //
-    // Stronger restoring force than the original linear damp so a held-
-    // forward stick can't cartwheel the bike. P targets the surface's
-    // pitch attitude (= −atan(surfaceForwardSlope)) so flat water reads
-    // as "sit flat" and a big swell still lets the chassis tilt onto
-    // the wave face. Band is narrowed to ±45° (was ±60°) so the rider
-    // can pump waves but can't ride at extreme angles for free — past
-    // 45° the player has to actively hold input to maintain the pose.
-    if (isGrounded && probe.isWater) {
-      const rightWater = quatRotate(rb.rotation(), { x: 1, y: 0, z: 0 })
-      const angvWater = rb.angvel()
-      const pitchVelWater =
-        angvWater.x * rightWater.x + angvWater.y * rightWater.y + angvWater.z * rightWater.z
-      const qW = rb.rotation()
-      const r12W = 2 * (qW.y * qW.z - qW.x * qW.w)
-      const pitchAngleWater = Math.asin(Math.max(-1, Math.min(1, -r12W)))
+    // P targets the surface's pitch attitude (`-atan(surfaceForwardSlope)`)
+    // so flat ground / flat water reads as "sit level" and a slope or
+    // wave face still lets the chassis tilt onto its tangent. The level
+    // band is ±45°; past that, P drops and only D damps so a deliberate
+    // committed trick (wave-pump dive, big-air wheelie) isn't fought.
+    //
+    // Originally water-only — on water the multi-point spring is softened
+    // along the longitudinal axis (×0.4) and couldn't restore from a held
+    // pitch input on its own. On land the multi-point spring already
+    // provides a strong differential lift, but holding a wheelie at low
+    // speed still pumped the chassis past the locally-airborne gate and
+    // ran away to a backflip crash. Sharing the PD between both surfaces
+    // bounds the wheelie equilibrium to ~21° on land / ~31° on water with
+    // a held back-stick — committed but not crashy on either surface.
+    if (isGrounded) {
+      const rightG = quatRotate(rb.rotation(), { x: 1, y: 0, z: 0 })
+      const angvG = rb.angvel()
+      const pitchVelG =
+        angvG.x * rightG.x + angvG.y * rightG.y + angvG.z * rightG.z
+      const qG = rb.rotation()
+      const r12G = 2 * (qG.y * qG.z - qG.x * qG.w)
+      const pitchAngleG = Math.asin(Math.max(-1, Math.min(1, -r12G)))
       const surfacePitchTarget = -Math.atan(surfaceForwardSlope)
-      const pitchErrWater = pitchAngleWater - surfacePitchTarget
-      const WATER_PITCH_P = 9 // rad/s² per rad of error (was 6)
-      const WATER_PITCH_D = 3 // rad/s² per rad/s
-      const inLevelBand = Math.abs(pitchErrWater) < (45 * Math.PI) / 180
-      const aPitchP = inLevelBand ? -pitchErrWater * WATER_PITCH_P : 0
-      const aPitchD = -pitchVelWater * WATER_PITCH_D
-      const aPitchWater = aPitchP + aPitchD
+      const pitchErrG = pitchAngleG - surfacePitchTarget
+      const GROUNDED_PITCH_P = 9 // rad/s² per rad of error
+      const GROUNDED_PITCH_D = 3 // rad/s² per rad/s
+      const inLevelBand = Math.abs(pitchErrG) < (45 * Math.PI) / 180
+      const aPitchP = inLevelBand ? -pitchErrG * GROUNDED_PITCH_P : 0
+      const aPitchD = -pitchVelG * GROUNDED_PITCH_D
+      const aPitchG = aPitchP + aPitchD
       rb.applyTorqueImpulse(
         {
-          x: rightWater.x * aPitchWater * m * dt,
-          y: rightWater.y * aPitchWater * m * dt,
-          z: rightWater.z * aPitchWater * m * dt,
+          x: rightG.x * aPitchG * m * dt,
+          y: rightG.y * aPitchG * m * dt,
+          z: rightG.z * aPitchG * m * dt,
         },
         true,
       )
@@ -951,56 +958,29 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // `coef * mass / I_pitch`. For the capsule (I_pitch ≈ m·0.34)
     // that's roughly `coef × 2.94` rad/s² at full input.
     //
-    // Per-surface + per-direction tuning:
-    //
-    //   - Land + forward stick (dive): disabled. Players intuit
-    //     "push forward = drive forward"; the dive used to settle the
-    //     chassis 15–30° nose-down which read as "scraping." On land
-    //     the player has no reason to dive (no waves to crash through)
-    //     so pitch-down input is just ignored. Wheelie-only on land.
-    //   - Land + back stick (wheelie): 13. Up from 9 — players asked
-    //     for noticeably-easier wheelies. The 75° BAD_GROUND_PITCH
-    //     guard (above) still kills horizontal velocity if the chassis
-    //     pitches past vertical, so committed wheelies have a hard
-    //     ceiling. The multi-point spring's `forceHalfLength` split
-    //     (see the points[] block above) means the restoring torque
-    //     no longer scales up with speed — the wheelie height that
-    //     played at parked-bike speed now also plays at top speed.
-    //   - Water (7): both directions. Riders need to crest waves and
-    //     dive into troughs to pump speed, so neither direction is
-    //     locked out. The water PD (above) restores within ±45° of the
-    //     surface attitude with a stronger 9× P term, so holding fwd
-    //     can't cartwheel the bike like it did at the 14× ground-torque
-    //     baseline. Bumped from 5 to 7 so each push of the stick reads
-    //     as a meaningful pitch nudge.
-    //   - Air (1.8): 60% of the prior 3.0 (Δ requested in review). The
-    //     prior value rotated through a full backflip in ~1.75s, which
-    //     read as "spinny / loose" — air pitch felt twitchier than the
-    //     rest of the bike. 1.8 stretches a full backflip to ~3s while
-    //     still keeping fwd.y monotonic over the 1s m9-air-control
+    //   - Grounded (7, both directions, land + water): playtest-locked
+    //     value paired with the grounded pitch PD above (P=9, D=3,
+    //     ±45° band). Equilibrium under held wheelie is ~21° on land
+    //     and ~31° on water — committed but bounded below the band
+    //     edge, so the PD's restoring authority can't be escaped. Same
+    //     coefficient in both directions so forward stick reads as a
+    //     small intentional dive on land instead of a no-op.
+    //   - Air (1.8): 60% of the prior 3.0 — air pitch felt twitchy /
+    //     loose at 3.0. 1.8 stretches a full backflip to ~3 s while
+    //     still keeping fwd.y monotonic over the 1 s m9-air-control
     //     sample window.
     if (Math.abs(intent.pitch) > 0.05) {
       const rightP = quatRotate(q, { x: 1, y: 0, z: 0 })
-      let coef: number
-      if (!isGrounded) {
-        coef = 1.8
-      } else if (probe.isWater) {
-        coef = 7
-      } else {
-        // Land: disable forward dive entirely; allow nose-up wheelie.
-        coef = intent.pitch > 0 ? 13 : 0
-      }
-      if (coef > 0) {
-        const aPitch = -intent.pitch * coef
-        rb.applyTorqueImpulse(
-          {
-            x: rightP.x * aPitch * m * dt,
-            y: rightP.y * aPitch * m * dt,
-            z: rightP.z * aPitch * m * dt,
-          },
-          true,
-        )
-      }
+      const coef = isGrounded ? 7 : 1.8
+      const aPitch = -intent.pitch * coef
+      rb.applyTorqueImpulse(
+        {
+          x: rightP.x * aPitch * m * dt,
+          y: rightP.y * aPitch * m * dt,
+          z: rightP.z * aPitch * m * dt,
+        },
+        true,
+      )
     }
 
     if (!isGrounded) {
