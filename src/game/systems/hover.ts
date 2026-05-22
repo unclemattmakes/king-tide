@@ -706,6 +706,19 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         // On water, the longitudinal spring is softened so the bike
         // pushes THROUGH chop instead of pitching to match every wave
         // crest. Lateral (roll-axis) spring keeps full stiffness.
+        //
+        // Force vs sample length: `probeHalfLength` grows with speed
+        // (anticipation reach — sampling the surface ahead helps the
+        // bike pre-pitch into climbs). The FORCE arm, though, has to
+        // stay at the bike's physical footprint, otherwise the spring's
+        // restoring torque on a wheelie scales with speed²: longer arm
+        // × bigger height differential on a tilted chassis = wheelies
+        // become impossible at top speed. `forceHalfLength` decouples
+        // the two — sampling still anticipates, but the impulse is
+        // applied at the body's real bow/stern position. Width has no
+        // speed anticipation so port/starboard already use the physical
+        // arm (probeHalfWidth).
+        const forceHalfLength = devSettings.hoverProbeHalfLength
         const points: {
           ox: number
           oy: number
@@ -714,16 +727,16 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
           longitudinal: boolean
         }[] = [
           {
-            ox: forceFwdX * probeHalfLength,
-            oy: forceFwdY * probeHalfLength,
-            oz: forceFwdZ * probeHalfLength,
+            ox: forceFwdX * forceHalfLength,
+            oy: forceFwdY * forceHalfLength,
+            oz: forceFwdZ * forceHalfLength,
             surfProj: bowProj,
             longitudinal: true,
           },
           {
-            ox: -forceFwdX * probeHalfLength,
-            oy: -forceFwdY * probeHalfLength,
-            oz: -forceFwdZ * probeHalfLength,
+            ox: -forceFwdX * forceHalfLength,
+            oy: -forceFwdY * forceHalfLength,
+            oz: -forceFwdZ * forceHalfLength,
             surfProj: sternProj,
             longitudinal: true,
           },
@@ -949,7 +962,10 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     //     for noticeably-easier wheelies. The 75° BAD_GROUND_PITCH
     //     guard (above) still kills horizontal velocity if the chassis
     //     pitches past vertical, so committed wheelies have a hard
-    //     ceiling.
+    //     ceiling. The multi-point spring's `forceHalfLength` split
+    //     (see the points[] block above) means the restoring torque
+    //     no longer scales up with speed — the wheelie height that
+    //     played at parked-bike speed now also plays at top speed.
     //   - Water (7): both directions. Riders need to crest waves and
     //     dive into troughs to pump speed, so neither direction is
     //     locked out. The water PD (above) restores within ±45° of the
