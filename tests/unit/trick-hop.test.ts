@@ -92,7 +92,7 @@ function spawnBike(
     groundDistance: 0,
     isGrounded: true,
     surfaceIsWater: false,
-    inputPitch: 0,
+    forwardSlope: 0,
   })
   addComponent(sim, eid, TrickState)
   TrickStateStore.set(eid, {

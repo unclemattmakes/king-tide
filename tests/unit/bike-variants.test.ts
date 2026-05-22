@@ -5,6 +5,7 @@ import {
   DEFAULT_BIKE_VARIANT,
   resolveBikeVariant,
 } from '../../src/game/bikes/variants'
+import { resolveWaterLongitudinalSpringMul } from '../../src/game/systems/hover'
 
 describe('bike variants', () => {
   it('exposes the v1 five-archetype lineup (Phase F of v1-asset-pipeline-plan.md)', () => {
@@ -95,5 +96,40 @@ describe('bike variants', () => {
     expect(resolveBikeVariant(undefined).id).toBe(DEFAULT_BIKE_VARIANT)
     expect(resolveBikeVariant('').id).toBe(DEFAULT_BIKE_VARIANT)
     expect(resolveBikeVariant('does-not-exist').id).toBe(DEFAULT_BIKE_VARIANT)
+  })
+
+  // Regression guard for the long-running bug where `stats.surfaceFollow`
+  // was exposed in the menu + spec but the hover system ignored it — all
+  // variants felt identical on chop. The hover loop now reads it via
+  // `resolveWaterLongitudinalSpringMul` and applies it to the bow/stern
+  // (longitudinal) water spring. This test locks the wiring: variants
+  // with different `surfaceFollow` MUST produce different multipliers,
+  // and the ordering MUST match the data ordering — otherwise the
+  // variant pickers' advertised chop behaviour is a lie.
+  it('surfaceFollow drives the water longitudinal spring multiplier', () => {
+    const mul = (id: keyof typeof BIKE_VARIANTS) =>
+      resolveWaterLongitudinalSpringMul(BIKE_VARIANTS[id].stats)
+    // Direct mapping at default tuning values — no transformation.
+    expect(mul('cruiser')).toBeCloseTo(BIKE_VARIANTS.cruiser.stats.surfaceFollow, 5)
+    expect(mul('scout')).toBeCloseTo(BIKE_VARIANTS.scout.stats.surfaceFollow, 5)
+    expect(mul('sparrow')).toBeCloseTo(BIKE_VARIANTS.sparrow.stats.surfaceFollow, 5)
+    // Variant ordering survives the mapping — Scout ploughs, Racer is
+    // attentive, Sparrow rides every crest.
+    expect(mul('scout')).toBeLessThan(mul('cruiser'))
+    expect(mul('cruiser')).toBeLessThan(mul('racer'))
+    expect(mul('racer')).toBeLessThan(mul('stunt'))
+    expect(mul('stunt')).toBeLessThan(mul('sparrow'))
+  })
+
+  it('water longitudinal spring multiplier clamps pathological authoring', () => {
+    // Defensive clamp so a typo in a `.json` spec can't produce a
+    // negative or 10x spring that would either nose-dive or rocket the
+    // chassis.
+    expect(resolveWaterLongitudinalSpringMul({ ...defaultBikeStats(), surfaceFollow: -5 })).toBe(
+      0.1,
+    )
+    expect(resolveWaterLongitudinalSpringMul({ ...defaultBikeStats(), surfaceFollow: 999 })).toBe(
+      1.5,
+    )
   })
 })
