@@ -1163,6 +1163,25 @@ class HOVERBIKE_PT_track_terrain(_SelectionDrivenPanel, Panel):
         layout.operator("hoverbike.enter_sculpt_mode", icon="BRUSH_DATA")
         layout.separator()
 
+        # Procedural-island mod zones — only relevant when the active
+        # terrain still carries a live HV_Island modifier. After Apply
+        # (above) the modifier's gone and mod zones can't reach the
+        # mesh, so hide the section to avoid offering a dead button.
+        from .island_terrain import find_island_modifier
+        if find_island_modifier(context.active_object) is not None:
+            layout.label(text="Mod zones (non-destructive bumps):", icon="MOD_DISPLACE")
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_mod_zone_amplitude", text="Δz (m)")
+            row.prop(scene, "hoverbike_mod_zone_radius", text="Radius (m)")
+            op = layout.operator(
+                "hoverbike.add_island_mod_zone",
+                text="Add Mod Zone @ Cursor",
+                icon="ADD",
+            )
+            op.amplitude = scene.hoverbike_mod_zone_amplitude
+            op.radius = scene.hoverbike_mod_zone_radius
+            layout.separator()
+
         layout.label(text="Bulk shape @ cursor:")
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_sculpt_radius", text="Radius (m)")
