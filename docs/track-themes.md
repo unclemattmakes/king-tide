@@ -5,6 +5,17 @@
 > set within the post-flood world frame locked during track-theme
 > brainstorming.
 >
+> **Implementation specs** (beat-by-beat timing, Blender shopping
+> lists, particle / wave / audio configs per track) live in
+> [track-design-specs.md](./track-design-specs.md), which is the
+> reference the implementer should pick up. The bible below is the
+> *what* and *why*; the specs doc is the *how*.
+>
+> **Cross-game flow analysis** that informed the structural choices
+> (cup ordering, single-lap descent format, calm-water track slot,
+> per-lap escalation) lives in
+> [../research/track-flow-analysis.md](../research/track-flow-analysis.md).
+>
 > **Locked decisions:**
 > - World frame: near-future post-warming. Sea levels up ~5–10 m. Coastal
 >   cities partially drowned, inland highlands now islands. Arcade
@@ -39,6 +50,16 @@ These shaped every track in this doc; future tracks should hold to them.
    neon is still on. Bright palettes, defiant colors, music with a
    pulse. *The mood is "spectator sport during the collapse,"* not
    "ruin porn."
+7. **Cup-level escalation.** Each cup runs short → moderate →
+   spectacle-closer in lap time and set-piece intensity. The cup's
+   third track is its emotional payoff; the first track is its
+   handshake. Tracks within a cup are ordered to flow as a
+   four-stop journey, not a shuffled set.
+8. **Per-lap variation is precious.** Most tracks ship constant
+   per-lap behavior — the set-piece does the work of feeling
+   fresh. Reserve per-lap structural change to tracks where it's
+   the identity (Aqualand's escalating tsunami, Liberty's music
+   tiers).
 
 ## World frame — quick reference
 
@@ -68,14 +89,16 @@ These shaped every track in this doc; future tracks should hold to them.
 A sheltered training cove, fictional. A retrofitted post-flood marina
 serving as the Circuit's pilot-training facility — calm water, a
 small island, a single ramp, a single anti-grav arch. Teaches one
-mechanic per beat:
+mechanic per beat; **pumping is taught in the first 8 seconds** so
+the hero mechanic is the first lesson, not the second (Wave Race 64
+Sunny Beach reference):
 
-- 0–10 s: throttle + steering across flat water
-- 10–25 s: first swell, pumping prompt explicit on HUD
-- 25–35 s: drift around a marker buoy
-- 35–45 s: pickup grab + use
-- 45–55 s: ramp jump with landing prompt
-- 55–60 s: anti-grav arch entry + exit
+- 0–8 s: **throttle + first swell + pumping prompt** explicit on HUD
+- 8–20 s: steering arc across the cove
+- 20–32 s: drift around a marker buoy
+- 32–42 s: pickup grab + use
+- 42–55 s: ramp jump + anti-grav arch entry/exit
+- 55–60 s: finish straight
 
 Auto-skip toggle for returning players. The track is short, scripted,
 and visually low-key on purpose — every other track is a spectacle;
@@ -85,8 +108,10 @@ this one is a classroom.
 
 # Tier 1 — Reef Cup
 
-Starter tracks. Bright, shallow, instructive. Casual lap times. Players
-finish all three feeling competent and ready for the showcase cup.
+Starter tracks. Bright, shallow, instructive. Cup escalates
+intro-open-water → calm-skill-check → vertical-spectacle closer.
+Players finish all three feeling competent and ready for the showcase
+cup.
 
 ## 1. South Beach Sunken
 
@@ -115,11 +140,45 @@ geometry. Palm silhouettes against pink sky.
 **Lore tag:** "South Beach kept the lights on. They held a permanent
 spring break on the roofs. The Circuit comes through twice a season."
 
-## 2. Hatteras Light
+## 2. Cape Town Drift
+
+**Cup:** Reef | **Lap target:** 48 s | **Laps:** 3 | **Total race:** ~2:24
+**Water/Land:** 60/40 | **Anti-grav:** none | **Difficulty:** intro
+(calm-water skill check)
+
+**Location:** Drowned V&A Waterfront, Cape Town. Table Mountain still
+dominates the skyline, flat-top profile unmistakable. Lower city
+streets are submerged; the harbor district is a ruin field of
+shipping yards, the aquarium, and the half-tilted Cape Wheel.
+
+**Layout:** Mostly flat-water harbor — **the v1 set's calm-water
+skill check.** Outside the breakwater runs at Beaufort 3; inside the
+harbor is near-glassy. Pumping doesn't carry you here; racing-line
+precision and slalom through wreckage do. A "land" section through
+the broken aquarium roof, then back out under the leaning Ferris
+wheel. Wide racing lines, forgiving corners.
+
+**Set-piece — Two Oceans Wreck:** The Two Oceans Aquarium's glass
+predator tank shattered when the flood came. A great white still
+circles inside the broken structure. You race through the broken
+roof, past the shark (it's been there for decades, it watches you),
+and out the other side. An optional skylight shortcut on top drops
+you directly into the predator tank — one-shot-kill rim, expert line
+only.
+
+**Visual palette:** Bright Atlantic blue, the mountain's grey-green
+flat top, red Cape Wheel struts, oxidized container reds.
+
+**Audio palette:** Afrobeats fusion, marimba over electronic beats.
+
+**Lore tag:** "Table Mountain didn't notice. Everything below it did.
+Cape Town's still here — just lower."
+
+## 3. Hatteras Light
 
 **Cup:** Reef | **Lap target:** 50 s | **Laps:** 3 | **Total race:** ~2:30
 **Water/Land:** 80/20 | **Anti-grav:** light (lighthouse climb, ~5 s)
-**Difficulty:** intro
+**Difficulty:** intro (Reef Cup closer)
 
 **Location:** Cape Hatteras, North Carolina. The famous black-and-
 white spiral lighthouse now stands a third submerged. The Outer Banks
@@ -128,12 +187,14 @@ proper are gone; the lighthouse is the only landmark for kilometers.
 **Layout:** Loop around the lighthouse base over open Atlantic, with
 one circuit up-and-over the lighthouse itself. Wave swell here is
 heavier than South Beach — first real wave-reading test, but still
-gentle.
+gentle. **Every lap ends with a cliff drop from the lamp room down
+to sea level** (Jet Moto Cliffdiver reference) — the cup closer's
+emotional payoff.
 
 **Set-piece — The Lamp Room:** Anti-grav corkscrew up the lighthouse
 shaft, exiting through the open lamp room at the top. The lamp is
-still rotating. You catch big air off the lamp room's railing on the
-way down.
+still rotating; the music swells as you exit. You catch big air off
+the lamp room's railing on the way down.
 
 **Visual palette:** Cool Atlantic grays, white-and-black lighthouse
 spiral, foam-green water, low gray clouds.
@@ -143,34 +204,6 @@ synth.
 
 **Lore tag:** "Coast Guard left in '78. Someone keeps the lamp
 spinning. The Circuit doesn't ask who."
-
-## 3. Cape Town Drift
-
-**Cup:** Reef | **Lap target:** 48 s | **Laps:** 3 | **Total race:** ~2:24
-**Water/Land:** 60/40 | **Anti-grav:** none | **Difficulty:** intro
-
-**Location:** Drowned V&A Waterfront, Cape Town. Table Mountain still
-dominates the skyline, flat-top profile unmistakable. Lower city
-streets are submerged; the harbor district is a ruin field of
-shipping yards, the aquarium, and the half-tilted Cape Wheel.
-
-**Layout:** Mostly flat-water harbor with a "land" section through
-the broken aquarium roof, then back out under the leaning Ferris
-wheel. Wide racing lines, forgiving corners.
-
-**Set-piece — Two Oceans Wreck:** The Two Oceans Aquarium's glass
-predator tank shattered when the flood came. A great white still
-circles inside the broken structure. You race through the broken
-roof, past the shark (it's been there for decades, it watches you),
-and out the other side.
-
-**Visual palette:** Bright Atlantic blue, the mountain's grey-green
-flat top, red Cape Wheel struts, oxidized container reds.
-
-**Audio palette:** Afrobeats fusion, marimba over electronic beats.
-
-**Lore tag:** "Table Mountain didn't notice. Everything below it did.
-Cape Town's still here — just lower."
 
 ---
 
@@ -250,39 +283,12 @@ on because somebody is still paying the bill."
 
 # Tier 3 — Continental Cup
 
-Spectacle cup. Big landmarks, mixed land/water, the postcards. Casual
-lap times sit at the top of the band.
+Spectacle cup. Big landmarks, mixed land/water, the postcards. Cup
+escalates industrial → elegant → spectacle-descent closer. Casual
+lap times sit at the top of the band; the closer breaks the 3-lap
+default for a single-lap point-to-point descent.
 
-## 6. Kilauea Crown
-
-**Cup:** Continental | **Lap target:** 65 s | **Laps:** 3 | **Total race:** ~3:15
-**Water/Land:** 50/50 | **Anti-grav:** heavy (caldera rim loop, ~20 s)
-**Difficulty:** mid
-
-**Location:** Big Island, Hawaii. Kilauea actively erupting, the
-caldera enlarged and reshaped. The mountain is the new high ground;
-the lowlands are open ocean now.
-
-**Layout:** Climb the windward slope from sea level through old lava
-fields, anti-grav loop around the caldera rim (the rim is *banked*
-inward, you ride the inside of the bowl), descent down the leeward
-side ending in a freshly-formed lava lake at the new shoreline.
-
-**Set-piece — The Black Beach:** The leeward descent ends with a
-lava waterfall — molten rock pouring directly into ocean, exploding
-into steam. You ride *alongside* the waterfall, not through it. Black
-basalt sand, white steam plumes, orange glow under blue sky.
-
-**Visual palette:** Orange-red lava, black basalt, steam-white,
-volcanic-blue lake, lush green windward forest.
-
-**Audio palette:** Tribal percussion layered with synth pads. Big
-sub-bass when the volcano grumbles.
-
-**Lore tag:** "Pele kept building. The mountain's taller now than it
-was in '26. The Circuit times its laps to the eruption schedule."
-
-## 7. Marina Bay 7
+## 6. Marina Bay 7
 
 **Cup:** Continental | **Lap target:** 55 s | **Laps:** 3 | **Total race:** ~2:45
 **Water/Land:** 60/40 | **Anti-grav:** none | **Difficulty:** mid
@@ -314,7 +320,7 @@ sampling actual crane sounds.
 nobody told it to stop. The cranes still load empty containers from
 nowhere to nowhere. The Circuit just races around them."
 
-## 8. Doge's Drift
+## 7. Doge's Drift
 
 **Cup:** Continental | **Lap target:** 60 s | **Laps:** 3 | **Total race:** ~3:00
 **Water/Land:** 70/30 | **Anti-grav:** medium (Campanile climb, ~10 s)
@@ -327,9 +333,9 @@ Murano glassblower furnaces still burning on rooftop islands — the
 glass industry refused to die.
 
 **Layout:** Canal racing, except the canals are now just *ocean.*
-Race past Doge's Palace, under the partially-collapsed Rialto Bridge
-arch (water level rose; you ride through it like a tunnel), through
-a sequence of facades, then anti-grav climb up the Campanile
+Race past Doge's Palace, **under the partially-collapsed Rialto
+Bridge arch as a low-clearance tunnel** (clip the walls = damage),
+through a sequence of facades, then anti-grav climb up the Campanile
 exiting through the belfry with the golden St. Mark's domes below
 you.
 
@@ -337,7 +343,9 @@ you.
 of the Campanile (which has somehow survived since 1912 even through
 this), exit out the open arched belfry with a panoramic view of
 drowned Venice. The bell still rings on the hour; if your lap times
-out at the right moment, you ride past the swinging bell.
+out at the right moment, you ride past the swinging bell — on Hard
+difficulty, the bell physically blocks the exit window for ~0.4 s
+of every 3 s.
 
 **Visual palette:** Ochre and terracotta, mossy green at the
 waterline, Adriatic teal, gold Byzantine accents from St. Mark's
@@ -348,6 +356,40 @@ broken-beat'd. Periodic deep church-bell tones.
 
 **Lore tag:** "Venice was already half-flooded; the rest just took
 longer. Murano keeps blowing glass because that's what Murano does."
+
+## 8. Kilauea Crown
+
+**Cup:** Continental (closer) | **Lap target:** *single-lap point-to-point* | **Laps:** 1 | **Total race:** ~2:30
+**Water/Land:** 50/50 | **Anti-grav:** heavy (caldera rim, ~60 s)
+**Difficulty:** mid (spectacle closer)
+
+**Location:** Big Island, Hawaii. Kilauea actively erupting, the
+caldera enlarged and reshaped. The mountain is the new high ground;
+the lowlands are open ocean now.
+
+**Layout:** **Single-lap descent in three sections** (Mount Wario
+reference; the climb-rim-descend topology is naturally non-loopable).
+Section 1: climb the windward slope from sea level through old lava
+fields. Section 2: anti-grav around the caldera rim (the rim is
+*banked* inward, you ride the inside of the bowl, ~60 s of continuous
+wall-ride). Section 3: descent down the leeward side, finishing
+beside a lava waterfall pouring into the new sea.
+
+**Set-piece — The Black Beach:** The leeward descent ends with a
+lava waterfall — molten rock pouring directly into ocean, exploding
+into steam. You ride *alongside* the waterfall, not through it. Black
+basalt sand, white steam plumes, orange glow under blue sky. The
+finish line is at the base.
+
+**Visual palette:** Orange-red lava, black basalt, steam-white,
+volcanic-blue lake, lush green windward forest.
+
+**Audio palette:** Tribal percussion layered with synth pads. Big
+sub-bass when the volcano grumbles. Music ~2:45 long with a
+crescendo aligned to the lava waterfall.
+
+**Lore tag:** "Pele kept building. The mountain's taller now than it
+was in '26. The Circuit times its laps to the eruption schedule."
 
 ---
 
@@ -372,11 +414,12 @@ half-pipe slide → main concourse → back to lazy river. Five laps
 because three is over too fast. Constant proximity, constant chaos.
 
 **Set-piece — The Tsunami:** The wave pool. When the park ran, it
-generated a "tsunami" surge every 30 seconds. The mechanism still
-runs. Now the surge floods the lowest concourse section on the same
-schedule — a real wave that adds a temporary water-track and washes
-out racing lines unlucky enough to be there. The timer is fixed and
-visible on the lifeguard tower's old digital countdown sign.
+generated a "tsunami" surge once per lap. The mechanism still runs.
+The surge **escalates with each lap** (Sonic Transformed's Adder's
+Lair reference): lap 1 is a splash hazard, lap 2 floods the lower
+concourse, lap 3+ washes it out entirely and the upper bowl-wall
+anti-grav becomes mandatory. The lifeguard tower's old digital
+countdown sign tracks the next surge.
 
 **Visual palette:** Faded primary colors, sun-bleached plastic,
 algae greens, the bright blue of pool tile peeking through grime.
@@ -465,20 +508,23 @@ season because nothing else lands as hard."
 
 ## Coverage matrix
 
-| Track | Cup | Location | Anti-grav | Water | Set-piece |
-|---|---|---|---|---|---|
-| Sandbar | Tutorial | (fictional) | brief | 80% | training gates |
-| South Beach Sunken | Reef | Miami | none | 70% | Versace Steps |
-| Hatteras Light | Reef | NC outer banks | light | 80% | Lamp Room |
-| Cape Town Drift | Reef | Cape Town | none | 60% | Two Oceans Wreck |
-| The Maw | Open Sea | Big Sur | none | 100% | The Maw arch |
-| Shibuya Submerged | Open Sea | Tokyo | medium | 50% | Shibuya Crossing Cables |
-| Kilauea Crown | Continental | Hawaii | heavy | 50% | The Black Beach |
-| Marina Bay 7 | Continental | Singapore | none | 60% | The Gauntlet |
-| Doge's Drift | Continental | Venice | medium | 70% | Campanile Climb |
-| Aqualand | Drowned | Florida | light | 75% | The Tsunami |
-| Angkor Drowned | Drowned | Cambodia | heavy | 65% | Smiling Faces |
-| Liberty Drowned | Drowned | NYC | heavy | 80% | The Torch Arm |
+Tracks listed in cup-play order (each cup escalates short →
+moderate → spectacle-closer).
+
+| # | Track | Cup | Location | Anti-grav | Water | Set-piece |
+|---|---|---|---|---|---|---|
+| — | Sandbar | Tutorial | (fictional) | brief | 80% | training gates |
+| 1 | South Beach Sunken | Reef | Miami | none | 70% | Versace Steps |
+| 2 | Cape Town Drift | Reef | Cape Town | none | 60% | Two Oceans Wreck |
+| 3 | Hatteras Light | Reef | NC outer banks | light | 80% | Lamp Room |
+| 4 | The Maw | Open Sea | Big Sur | none | 100% | The Maw arch |
+| 5 | Shibuya Submerged | Open Sea | Tokyo | medium | 50% | Shibuya Crossing Cables |
+| 6 | Marina Bay 7 | Continental | Singapore | none | 60% | The Gauntlet |
+| 7 | Doge's Drift | Continental | Venice | medium | 70% | Campanile Climb |
+| 8 | Kilauea Crown | Continental | Hawaii | heavy | 50% | The Black Beach *(single-lap P2P)* |
+| 9 | Aqualand | Drowned | Florida | light | 75% | The Tsunami *(per-lap escalation)* |
+| 10 | Angkor Drowned | Drowned | Cambodia | heavy | 65% | Smiling Faces |
+| 11 | Liberty Drowned | Drowned | NYC | heavy | 80% | The Torch Arm |
 
 **Geographic spread:** Americas 5 (Miami, NC, Big Sur, Florida, NYC),
 Asia 3 (Tokyo, Singapore, Cambodia), Europe 1 (Venice), Africa 1
@@ -488,11 +534,20 @@ Asia 3 (Tokyo, Singapore, Cambodia), Europe 1 (Venice), Africa 1
 heavy). Exceeds the 2-track v1 target with significant margin.
 
 **Wave-mastery tracks:** All open-water sections (effectively all 11),
-with The Maw as the purest test.
+with The Maw as the purest test. Cape Town is the calibration
+counterweight — the calm-water track where pumping deliberately
+*doesn't* carry you, which is what makes pumping legible as a skill
+on the other ten.
 
 **Casual lap distribution:** 22 s (Aqualand chaos) → 45 s → 48 → 50 →
-55 → 58 → 60 → 60 → 62 → 65 → 70 s (Liberty finale). Weighted to
-the 45–65 s band per [design-targets.md](./design-targets.md).
+55 → 58 → 60 → 60 → 62 → 70 s + 1 × ~2:30 single-lap descent
+(Kilauea). Weighted to the 45–65 s band per
+[design-targets.md](./design-targets.md).
+
+**Format breakdown:** 10 × 3-lap loops + 1 × 5-lap chaos arena
+(Aqualand) + 1 × single-lap point-to-point descent (Kilauea).
+Default is 3 laps; deviations are intentional per the cup-pacing
+principle.
 
 ## B-list — future content packs
 
@@ -550,6 +605,13 @@ candidates for the v1.1 / first major content drop.
 
 ## References
 
+- [track-design-specs.md](./track-design-specs.md) — per-track
+  beat-by-beat implementation specs, Blender shopping lists,
+  particle / wave / audio configs. The authoring reference.
+- [../research/track-flow-analysis.md](../research/track-flow-analysis.md)
+  — cross-game flow analysis (MK8/World, Wave Race, Jet Moto,
+  Sonic Racing). The basis for cup-ordering choices, the calm-water
+  slot, single-lap descent format, and per-lap escalation.
 - [design-targets.md](./design-targets.md) — numeric targets these
   tracks fulfill (lap times, anti-grav count, set-piece-per-track
   requirement).
