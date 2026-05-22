@@ -58,10 +58,12 @@ export type BikeStatsData = {
   boostMul: number
   mass: number
   /**
-   * How much the bike conforms to the wave/ground slope (0 = skates flat
-   * regardless of surface, 1 = perfectly perpendicular). Tunable per bike
-   * for feel: a heavy hover-cruiser plows through chop with low
-   * surfaceFollow (~0.3); a light agile bike rides every ripple at ~0.7.
+   * Per-bike multiplier on the bow/stern (longitudinal) hover spring over
+   * WATER. Low values plough through chop; high values follow every wave
+   * crest. Ground unaffected. Tuning band: ~0.4 = heavy boat, "ploughs"
+   * (Scout); 0.85 = attentive default (Racer); ~1.0+ = wave-conforming
+   * jet ski (Stunt, Sparrow). The roll-axis (port/starboard) spring keeps
+   * full stiffness so steering bank is unaffected by this stat.
    */
   surfaceFollow: number
   /**
@@ -92,12 +94,12 @@ export type HoverStateData = {
    *  emission (water) and spark/dust emission (land). Defaults to `false`
    *  when there is no surface (airborne). */
   surfaceIsWater: boolean
-  /** Smoothed player-input pitch bias (radians). Tracked separately from the
-   *  surface-alignment pitch so the bike can follow the wave field at a fast
-   *  rate (visible on all bikes, AI included) while the player's input bias
-   *  decays slowly when the stick is released — preserves the "bike retains
-   *  its attitude after a wave-jump" feel without damping wave tracking. */
-  inputPitch: number
+  /** Low-pass-filtered bow→stern surface slope (dy/dx along bike-fwd).
+   *  Drives slope-momentum, climb-assist, slope-aware hover-height boost,
+   *  and the grounded pitch-PD target. Filtered with a short time constant
+   *  so a single-tick spike from a lumpy trimesh doesn't translate to a
+   *  one-frame thrust/torque kick. Reset to 0 while airborne. */
+  forwardSlope: number
 }
 export const HoverStateStore = createStore<HoverStateData>('HoverState')
 
