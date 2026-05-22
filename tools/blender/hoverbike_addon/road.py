@@ -1339,25 +1339,25 @@ def _maybe_build_buoys_from_samples(
     if not any(s.get("over_water", False) for s in samples):
         return None, 0
 
-    width = float(scene.hoverbike_road_width)
-    curb_width = float(scene.hoverbike_road_curb_width)
-    # Resolve buoy spacing from the gate full-width × the multiplier
-    # prop. Coupling buoy spacing to gate width keeps the "racing-line
-    # rhythm" coherent: a track tuned for wide / sparse gates also
-    # gets wide / sparse buoys, and a tighter twisty track with narrow
-    # gates gets tighter buoy markers, without authors having to tune
-    # two unrelated sliders. ``hoverbike_gate_half_width`` default is
-    # 14 m → full width 28 m → default 1.5× → buoys every 42 m.
-    gate_half_width = float(getattr(scene, "hoverbike_gate_half_width", 14.0))
+    # Resolve buoy spacing AND lateral offset from the gate full-width
+    # × their respective multiplier props. Coupling both to gate width
+    # keeps the "racing-line rhythm" coherent: a track tuned for wide
+    # gates also gets a wide buoy channel and sparse spacing, and a
+    # tighter twisty track with narrow gates gets tighter buoy markers
+    # closer to the curve, without authors having to tune raw metres.
+    # ``hoverbike_gate_half_width`` default is 14 m → full width 28 m
+    # → defaults spacing 1.5× → buoys every 42 m, offset 1.5× → buoy
+    # channel 42 m wide each side of the curve.
+    gate_full_width = 2.0 * float(getattr(scene, "hoverbike_gate_half_width", 14.0))
     spacing_mult = float(getattr(scene, "hoverbike_road_buoy_spacing_mult", 1.5))
-    spacing_m = max(1.0, spacing_mult * 2.0 * gate_half_width)
+    side_offset_mult = float(getattr(scene, "hoverbike_road_buoy_side_offset_mult", 1.5))
+    spacing_m = max(1.0, spacing_mult * gate_full_width)
+    lateral_m = max(0.0, side_offset_mult * gate_full_width)
     buoy_me = _build_buoy_strip_mesh(
         samples,
-        width=width,
-        curb_width=curb_width,
         sea_level=sea_level,
         spacing_m=spacing_m,
-        side_offset_m=float(getattr(scene, "hoverbike_road_buoy_side_offset", 1.2)),
+        lateral_m=lateral_m,
     )
     if buoy_me is None:
         return None, 0
@@ -1480,31 +1480,28 @@ def _build_buoy_unit_mesh() -> tuple[list[tuple[float, float, float]], list[tupl
 def _build_buoy_strip_mesh(
     samples: list[dict],
     *,
-    width: float,
-    curb_width: float,
     sea_level: float,
     spacing_m: float,
-    side_offset_m: float,
+    lateral_m: float,
 ) -> bpy.types.Mesh | None:
-    """Walk the samples, lay buoy pairs (one on each side of the road)
+    """Walk the samples, lay buoy pairs (one on each side of the curve)
     every ``spacing_m`` of arc length wherever ``sample["over_water"]``
     is True. Returns a single merged mesh containing every buoy
     instance, or None when no buoys would land.
 
     Buoys sit on the water surface (Z = sea_level) regardless of the
-    road's authored Z — bridges over open water push the road well
-    above the waves but the buoys mark the racing line on the actual
-    water below. Lateral offset is ``(road half-width) + curb_width +
-    side_offset_m`` so the buoys hug the curb's outer edge without
-    intersecting it.
+    curve's authored Z — bridges over open water push the racing line
+    well above the waves but the buoys mark the channel on the actual
+    water below. Lateral offset is ``lateral_m`` (absolute distance
+    from the curve), decoupled from road geometry so water-only tracks
+    work the same as road-having tracks.
 
     Per-sample radius (``s["r"]`` from the curve's control-point
-    radius) scales the lateral position too so apexes carrying a
-    wider road also get a wider buoy spacing."""
+    radius) still scales the lateral position so apexes carrying a
+    wider racing line also get a wider buoy channel."""
     if BUOY_MESH_NAME in bpy.data.meshes:
         bpy.data.meshes.remove(bpy.data.meshes[BUOY_MESH_NAME])
 
-    half_w = width / 2.0
     unit_verts, unit_faces, unit_mats = _build_buoy_unit_mesh()
     verts: list[tuple[float, float, float]] = []
     faces: list[tuple[int, ...]] = []
@@ -1537,7 +1534,7 @@ def _build_buoy_strip_mesh(
             continue
         # Emit at this sample's position.
         r = float(sa.get("r", 1.0))
-        lat = (half_w + max(0.0, curb_width) + max(0.0, side_offset_m)) * r
+        lat = lateral_m * r
         nx = -sa["ty"]
         ny = sa["tx"]
         add_buoy(sa["x"] + nx * lat, sa["y"] + ny * lat, sea_level)
@@ -2598,7 +2595,7 @@ _SCENE_PROP_NAMES: tuple[str, ...] = (
     "hoverbike_road_fill_shelf_width",
     "hoverbike_road_buoys_enabled",
     "hoverbike_road_buoy_spacing_mult",
-    "hoverbike_road_buoy_side_offset",
+    "hoverbike_road_buoy_side_offset_mult",
     "hoverbike_road_guardrails_enabled",
     "hoverbike_road_guardrail_kappa",
     "hoverbike_road_guardrail_height",
@@ -2782,10 +2779,17 @@ def register() -> None:
         default=1.5, min=0.1, max=10.0, precision=2,
         update=_on_road_prop_update,
     )
-    bpy.types.Scene.hoverbike_road_buoy_side_offset = FloatProperty(
-        name="Buoy side offset (m)",
-        description="Lateral gap between the curb's outer edge and the buoy centre.",
-        default=1.2, min=0.0, max=10.0, precision=2,
+    bpy.types.Scene.hoverbike_road_buoy_side_offset_mult = FloatProperty(
+        name="Buoy side offset (× gate w)",
+        description=(
+            "Lateral distance from the curve to each buoy, expressed as "
+            "a multiplier of the gate's full width (= 2 × hoverbike_gate_half_width). "
+            "Default 1.5 = each buoy lane sits 1.5× a gate's width out from the racing "
+            "line, so on default geometry (gate half-width 14 m → full 28 m) buoys "
+            "land 42 m off the curve. Per-sample radius scales this too so widened "
+            "apexes carry a wider buoy channel"
+        ),
+        default=1.5, min=0.0, max=10.0, precision=2,
         update=_on_road_prop_update,
     )
     # Guardrail placement — procedural Armco-style rail on the outside

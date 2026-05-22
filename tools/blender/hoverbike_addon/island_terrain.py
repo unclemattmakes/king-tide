@@ -30,9 +30,11 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import random
 import sys
 
 import bpy
+from bpy.props import IntProperty
 from bpy.types import Operator
 
 
@@ -147,6 +149,30 @@ class HOVERBIKE_OT_add_island_terrain(Operator):
     )
     bl_options = {"REGISTER", "UNDO"}
 
+    # Re-rolled in ``invoke`` so every fresh menu / button click produces a
+    # different-looking island. Exposed on the F9 redo panel so authors can
+    # type a specific value (or just dial through with the arrow keys) when
+    # they want a repeatable seed. Matches the modifier socket's [0, 999]
+    # range so any seed the operator picks is also reachable from the
+    # modifier panel afterward.
+    seed: IntProperty(
+        name="Noise Seed",
+        description=(
+            "Initial value written into the HV_Island modifier's Noise Seed "
+            "input. Decorrelates global background noise, cone erosion, ring "
+            "break, seafloor billow and land billow so two terrains with "
+            "identical peaks still look different. Re-rolled randomly on each "
+            "fresh invocation; adjust via F9 to lock in a specific value"
+        ),
+        default=0, min=0, max=999,
+    )  # type: ignore[valid-type]
+
+    def invoke(self, context: bpy.types.Context, event) -> set[str]:
+        # Fresh click → fresh seed. The F9 redo panel keeps whatever value
+        # ``execute`` ran with, so users can tune after the fact.
+        self.seed = random.randint(0, 999)
+        return self.execute(context)
+
     def execute(self, context: bpy.types.Context) -> set[str]:
         # Block obvious foot-guns up-front so a half-built result isn't
         # left behind on failure.
@@ -201,6 +227,7 @@ class HOVERBIKE_OT_add_island_terrain(Operator):
         # replicate the loop here with the existence check inline.
         spawned_peaks = _add_missing_peaks(seed)
         seed.bind_peak_inputs(mod, ng)
+        _set_modifier_input(mod, ng, "Noise Seed", float(self.seed))
 
         # Slap on the preview material so the new terrain doesn't read
         # default-pink while the author is iterating. The runtime
@@ -225,11 +252,35 @@ class HOVERBIKE_OT_add_island_terrain(Operator):
 
         self.report(
             {"INFO"},
-            f"Spawned {terrain.name} with HV_Island modifier and "
-            f"{spawned_peaks} new peak control(s) "
+            f"Spawned {terrain.name} with HV_Island modifier (seed={self.seed}) "
+            f"and {spawned_peaks} new peak control(s) "
             f"(total {_peak_pair_count()} peak pair(s) in scene).",
         )
         return {"FINISHED"}
+
+
+def _set_modifier_input(
+    mod: bpy.types.Modifier,
+    ng: bpy.types.NodeTree,
+    socket_name: str,
+    value,
+) -> bool:
+    """Write ``value`` into the NodesModifier's input matching ``socket_name``.
+
+    Modifier inputs aren't keyed by name — they're keyed by the socket's
+    auto-generated identifier (e.g. ``"Input_42"``). Mirrors the same
+    interface walk that ``seed.bind_peak_inputs`` does. Returns False if
+    the socket isn't found, so a later refactor that renames sockets
+    doesn't silently no-op."""
+    for item in ng.interface.items_tree:
+        if getattr(item, "item_type", None) != "SOCKET":
+            continue
+        if getattr(item, "in_out", None) != "INPUT":
+            continue
+        if item.name == socket_name:
+            mod[item.identifier] = value
+            return True
+    return False
 
 
 def _add_missing_peaks(seed) -> int:

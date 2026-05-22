@@ -783,10 +783,11 @@ def _on_gate_prop_changed(self, context):
     debounce timer in `_legacy` so the rebuild coalesces with depsgraph
     notifications from spline edits.
 
-    Also schedules ``"buoys"`` because buoy spacing is derived from
-    ``hoverbike_gate_half_width × hoverbike_road_buoy_spacing_mult`` —
-    tweaking the gate half-width should reflow the buoy strip on the
-    same debounce tick."""
+    Also schedules ``"buoys"`` because both buoy spacing and lateral
+    offset are derived from ``hoverbike_gate_half_width`` (× the
+    ``_spacing_mult`` and ``_side_offset_mult`` props) — tweaking the
+    gate half-width should reflow the buoy strip on the same debounce
+    tick."""
     from .handlers import _schedule_rebuild
 
     _schedule_rebuild("gates")

@@ -772,7 +772,7 @@ class HOVERBIKE_PT_track_road(_SelectionDrivenPanel, Panel):
         if scene.hoverbike_road_buoys_enabled:
             row = layout.row(align=True)
             row.prop(scene, "hoverbike_road_buoy_spacing_mult", text="Spacing ×gw")
-            row.prop(scene, "hoverbike_road_buoy_side_offset", text="Side off")
+            row.prop(scene, "hoverbike_road_buoy_side_offset_mult", text="Offset ×gw")
         layout.separator()
         # Auto guardrails — Armco rail on the outside of contiguous
         # sharp-corner runs. Reads the smoothed kappa stamp the bank
@@ -1476,7 +1476,7 @@ class HOVERBIKE_PT_track_gameplay(_SelectionDrivenPanel, Panel):
         if scene.hoverbike_road_buoys_enabled:
             row = layout.row(align=True)
             row.prop(scene, "hoverbike_road_buoy_spacing_mult", text="Spacing ×gw")
-            row.prop(scene, "hoverbike_road_buoy_side_offset", text="Side off")
+            row.prop(scene, "hoverbike_road_buoy_side_offset_mult", text="Offset ×gw")
             row = layout.row(align=True)
             row.prop(scene, "hoverbike_road_width", text="Track width")
             row.prop(scene, "hoverbike_road_curb_width", text="Curb w")
