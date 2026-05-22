@@ -34,7 +34,7 @@ import {
   vec2,
   vec3,
 } from 'three/tsl'
-import { MeshStandardNodeMaterial } from 'three/webgpu'
+import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
 import {
   WAKE_BASE_WIDTH,
@@ -2424,6 +2424,87 @@ export function createWaterMesh(
     }
   }
 
+  // ── Horizon skirt ──────────────────────────────────────────────────────
+  // The main wave plane is 240 m square (camera-locked, ~120 m visible in
+  // any direction). The horizon ring sits at ~1.4 km. Without anything
+  // between them, the player sees a visible donut of sky between the water
+  // plane's edge and the horizon — i.e. the water bounds are obvious.
+  //
+  // The skirt is a flat ring extending from inside the main plane out past
+  // the horizon ring. It's a child of the main mesh so it inherits the
+  // camera-locked XZ and the track's water-height Y automatically.
+  // Material is dirt-cheap: a haze-tinted unlit shader that reuses the
+  // same `horizonHazeUniform` the water shader and sky module share, so
+  // tone tracks the time-of-day palette for free. No displacement, no
+  // reflection, no foam — at this distance the main plane's wave detail
+  // is already sub-pixel and the player's eye reads the skirt as "more
+  // water out to the horizon", not as a separate object.
+  //
+  // The fragment shader matches the main plane's aerial-perspective ramp
+  // so the colour is continuous across the boundary: a darker blue-ish
+  // tint near the camera (mirroring the water shader's `reflectedOrBase`
+  // before haze) fading to the full horizon haze at distance. Alpha
+  // ramps in over the inner edge so any tiny tonal mismatch under the
+  // main plane is hidden by the main plane drawing on top, and scene
+  // fog dissolves the outer rim into the sky just like everything else.
+  const SKIRT_INNER_RADIUS = 60 // m — comfortably inside the 120 m plane half-extent
+  const SKIRT_OUTER_RADIUS = 1600 // m — past the default 1400 m horizon ring
+  const SKIRT_ANGULAR_SEGMENTS = 96
+  const SKIRT_RADIAL_SEGMENTS = 12
+  const skirtGeom = new THREE.RingGeometry(
+    SKIRT_INNER_RADIUS,
+    SKIRT_OUTER_RADIUS,
+    SKIRT_ANGULAR_SEGMENTS,
+    SKIRT_RADIAL_SEGMENTS,
+  )
+  skirtGeom.rotateX(-Math.PI / 2)
+
+  const skirtMat = new MeshBasicNodeMaterial({
+    side: THREE.DoubleSide,
+    fog: true, // dissolves into the sky at the far rim, same as the horizon ring
+    transparent: true,
+    depthWrite: false,
+  })
+  skirtMat.name = 'water-skirt'
+  {
+    // Distance from camera in world XZ. The skirt is camera-locked (it's
+    // a child of `mesh`), so positionLocal.xz is exactly the radial
+    // offset from the camera's XZ — no need to round-trip through
+    // positionWorld / cameraPosition.
+    const radial = positionLocal.xz.length()
+    // Inner alpha ramp: 0 at the inner edge → 1 by the time the skirt
+    // pokes out past the main plane's worst-case half-extent (170 m at
+    // the square's corners). This keeps any tonal seam hidden under the
+    // main plane's draw, since the main plane is rendered on top.
+    const innerFadeIn = smoothstep(float(SKIRT_INNER_RADIUS), float(170), radial)
+    // Aerial-perspective ramp — mirrors the main plane's
+    // `aerialMix = smoothstep(120, 280, camDist) * 0.5` so the colour is
+    // continuous across the boundary, then continues fading past 280 m
+    // to take the full horizon haze at long distance (where the main
+    // plane never reached).
+    const nearHaze = smoothstep(float(120), float(280), radial).mul(float(0.5))
+    const farHaze = smoothstep(float(280), float(900), radial).mul(float(0.5))
+    const hazeMix = clamp(nearHaze.add(farHaze), float(0), float(1))
+    // Stand-in for the main plane's `reflectedOrBase` at distance: a
+    // cool, slightly desaturated tint of the horizon haze (haze * cool
+    // bias). The horizon haze uniform changes with time-of-day, so this
+    // tracks sunset / twilight / day automatically.
+    const deepTint = horizonHazeUniform.mul(vec3(0.55, 0.7, 0.85))
+    skirtMat.colorNode = mix(deepTint, horizonHazeUniform, hazeMix)
+    skirtMat.opacityNode = innerFadeIn
+  }
+
+  const skirtMesh = new THREE.Mesh(skirtGeom, skirtMat as unknown as THREE.Material)
+  skirtMesh.name = 'water-skirt'
+  skirtMesh.frustumCulled = false
+  skirtMesh.castShadow = false
+  skirtMesh.receiveShadow = false
+  // Sits below the main plane in transparent draw order so the main
+  // plane paints over it in the overlap zone; both have depthWrite off
+  // so the order is purely renderOrder-driven (lower = first).
+  skirtMesh.renderOrder = -1
+  mesh.add(skirtMesh)
+
   function tick(impacts?: readonly BikeImpact[], originXZ?: { x: number; z: number }): void {
     tNode.value = field.time
     // Sync the world water-surface Y from the mesh so the shoaling /
@@ -2491,6 +2572,8 @@ export function createWaterMesh(
   function dispose() {
     geom.dispose()
     mat.dispose()
+    skirtGeom.dispose()
+    skirtMat.dispose()
     terrainHeightTex.dispose()
   }
 
