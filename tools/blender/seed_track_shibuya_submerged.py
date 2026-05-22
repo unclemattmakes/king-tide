@@ -70,6 +70,63 @@ REPO_ROOT = _lib.REPO_ROOT
 build_track_from_spec = _lib.build_track_from_spec
 
 LANDMARKS_LIBRARY = os.path.join(REPO_ROOT, "tracks-src", "landmarks-library.blend")
+PROPS_LIBRARY = os.path.join(REPO_ROOT, "tracks-src", "props-library.blend")
+
+# Shared scatter helpers (Phase β/γ of docs/level-visual-quality-research.md).
+_scatter_spec = importlib.util.spec_from_file_location(
+    "scatter_lib", os.path.join(SCRIPT_DIR, "scatter_lib.py"),
+)
+_scatter = importlib.util.module_from_spec(_scatter_spec)
+sys.modules["scatter_lib"] = _scatter
+_scatter_spec.loader.exec_module(_scatter)
+drop_scatter_zones = _scatter.drop_scatter_zones
+
+
+# Test scatter — Phase γ verification pass for the urban prop kit.
+# Placement is throwaway pending the level rework; goal here is just
+# to prove `prop_lamp_post` / `prop_antenna_mast` / `prop_vent_stack`
+# / `prop_ac_unit` / `prop_signage_panel` flow through scatter_lib +
+# EXT_mesh_gpu_instancing into the runtime.
+SCATTER_ZONES: tuple[dict, ...] = (
+    # NE rooftop antenna cluster — tall thin masts on the rooftop band
+    # east of the racing line.
+    {
+        "name": "scatter_00",
+        "location": (160.0, 90.0, 12.0),
+        "half_width": 40.0,
+        "half_depth": 30.0,
+        "density": 0.010,
+        "source": "prop_antenna_mast",
+        "seed": 11,
+    },
+    # N rooftop vent / AC cluster — denser, smaller silhouettes
+    # filling out the rooftop band.
+    {
+        "name": "scatter_01",
+        "location": (-30.0, 110.0, 12.0),
+        "half_width": 60.0,
+        "half_depth": 30.0,
+        "density": 0.022,
+        "source": "prop_vent_stack",
+        "seed": 19,
+    },
+    # Outer east signage cluster — neon billboards visible from the
+    # racing line.
+    {
+        "name": "scatter_02",
+        "location": (210.0, -30.0, 4.0),
+        "half_width": 30.0,
+        "half_depth": 80.0,
+        "density": 0.008,
+        "source": "prop_signage_panel",
+        "seed": 23,
+    },
+)
+
+
+def _drop_scatter_zones(scene) -> int:
+    """Drop the Shibuya test scatter zones via the shared helper."""
+    return drop_scatter_zones(scene, PROPS_LIBRARY, SCATTER_ZONES)
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -690,6 +747,8 @@ def augment_scene() -> None:
     _build_crossing_glass(scene)
     _build_skytree_backdrop(scene)
     _build_shinjuku_facades(scene)
+    scatter = _drop_scatter_zones(scene)
+    print(f"[shibuya-submerged] scatter: {scatter} zone(s) placed")
     print("[shibuya-submerged] adding anti-grav wall-ride")
     ribbon_ok = _add_antigrav_wall_ride(scene)
     if ribbon_ok:

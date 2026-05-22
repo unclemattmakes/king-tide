@@ -49,6 +49,15 @@ TrackSpec = _lib.TrackSpec
 REPO_ROOT = _lib.REPO_ROOT
 build_track_from_spec = _lib.build_track_from_spec
 
+# Shared scatter helpers (Phase β of docs/level-visual-quality-research.md).
+_scatter_spec = importlib.util.spec_from_file_location(
+    "scatter_lib", os.path.join(SCRIPT_DIR, "scatter_lib.py"),
+)
+_scatter = importlib.util.module_from_spec(_scatter_spec)
+sys.modules["scatter_lib"] = _scatter
+_scatter_spec.loader.exec_module(_scatter)
+drop_scatter_zones = _scatter.drop_scatter_zones
+
 
 # ─────────────────────────────────────────────────────────────────────
 # Track shape — elongated east-west loop, ~1130 m arc → ~45 s lap @ 25 m/s.
@@ -429,113 +438,14 @@ SCATTER_ZONES: tuple[dict, ...] = (
 )
 
 
-def _ensure_scatter_node_group() -> bpy.types.NodeTree | None:
-    """Link ``HV_Scatter`` from ``tracks-src/props-library.blend`` into
-    the current scene. Returns the existing block if it's already
-    present (linked or local)."""
-    g = bpy.data.node_groups.get("HV_Scatter")
-    if g is not None:
-        return g
-    if not os.path.isfile(PROPS_LIBRARY):
-        return None
-    with bpy.data.libraries.load(PROPS_LIBRARY, link=True) as (data_from, data_to):
-        if "HV_Scatter" not in data_from.node_groups:
-            return None
-        data_to.node_groups = ["HV_Scatter"]
-    return bpy.data.node_groups.get("HV_Scatter")
-
-
-def _drop_scatter_zone(scene: bpy.types.Scene, spec_: dict) -> bool:
-    """Build a ``scatter_NN`` empty + target plane child driven by the
-    shared HV_Scatter Geometry Nodes graph. The graph's
-    InstanceOnPoints output ships through the glTF exporter as
-    ``EXT_mesh_gpu_instancing`` and the runtime lifts it into one
-    ``THREE.InstancedMesh`` per source archetype.
-    """
-    group = _ensure_scatter_node_group()
-    if group is None:
-        print(f"  WARN: HV_Scatter not available, skipping {spec_['name']}")
-        return False
-    source = _link_collection(PROPS_LIBRARY, spec_["source"])
-    if source is None:
-        print(f"  WARN: source collection {spec_['source']!r} unavailable, skipping {spec_['name']}")
-        return False
-
-    cx, cy, cz = spec_["location"]
-    hw = float(spec_["half_width"])
-    hd = float(spec_["half_depth"])
-
-    # Empty — organizer + custom-prop knobs.
-    empty = bpy.data.objects.new(spec_["name"], None)
-    empty.empty_display_type = "CUBE"
-    empty.empty_display_size = 4.0
-    empty["kind"] = "decoration"
-    empty["scatter_zone"] = True
-    empty["density"] = float(spec_["density"])
-    empty["slope_max_deg"] = 90.0   # flat target — no slope filtering
-    empty["z_min"] = -100.0
-    empty["z_max"] = 500.0
-    empty["size_min"] = 0.85
-    empty["size_max"] = 1.20
-    empty["seed"] = int(spec_["seed"])
-    empty["source_collection"] = spec_["source"]
-    empty.location = (cx, cy, cz)
-    scene.collection.objects.link(empty)
-
-    # Target surface — flat grid sized to half_width × half_depth.
-    me = bpy.data.meshes.new(f"{spec_['name']}_surf_mesh")
-    bm = bmesh.new()
-    bmesh.ops.create_grid(bm, x_segments=4, y_segments=4, size=1.0, calc_uvs=False)
-    bmesh.ops.scale(bm, vec=(hw, hd, 1.0), verts=bm.verts)
-    bm.to_mesh(me)
-    bm.free()
-    me.update()
-    surf = bpy.data.objects.new(f"{spec_['name']}_surf", me)
-    surf.parent = empty
-    surf.matrix_parent_inverse.identity()
-    surf["kind"] = "decoration"
-    scene.collection.objects.link(surf)
-
-    # Attach HV_Scatter and wire the inputs.
-    mod = surf.modifiers.new(name="HV_Scatter", type="NODES")
-    mod.node_group = group
-    interface = group.interface
-    name_to_id = {}
-    for item in interface.items_tree:
-        if (
-            getattr(item, "in_out", None) == "INPUT"
-            and getattr(item, "item_type", None) == "SOCKET"
-        ):
-            name_to_id[item.name] = item.identifier
-
-    def _set(name: str, value):
-        ident = name_to_id.get(name)
-        if ident is not None:
-            try:
-                mod[ident] = value
-            except (TypeError, ValueError):
-                pass
-
-    _set("Source", source)
-    _set("Density", float(spec_["density"]))
-    _set("Slope Max (deg)", 90.0)
-    _set("Z Min", -100.0)
-    _set("Z Max", 500.0)
-    _set("Size Min", 0.85)
-    _set("Size Max", 1.20)
-    _set("Seed", int(spec_["seed"]))
-    return True
-
-
 def _drop_scatter_zones(scene: bpy.types.Scene) -> int:
     """Drop the South Beach scatter zones — Phase β reference instance of
     the scatter system. Density-of-content win on top of the existing
-    silhouette-anchor PALM_INSTANCES."""
-    placed = 0
-    for spec_ in SCATTER_ZONES:
-        if _drop_scatter_zone(scene, spec_):
-            placed += 1
-    return placed
+    silhouette-anchor ``PALM_INSTANCES``. The actual zone-building logic
+    lives in :mod:`scatter_lib`; this stays as a thin shim so the
+    augment call site reads consistently with the other ``_drop_*``
+    helpers."""
+    return drop_scatter_zones(scene, PROPS_LIBRARY, SCATTER_ZONES)
 
 
 def _drop_pickups(scene: bpy.types.Scene) -> int:

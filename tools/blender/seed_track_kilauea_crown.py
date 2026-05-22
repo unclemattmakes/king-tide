@@ -96,6 +96,61 @@ build_track_from_spec = _lib.build_track_from_spec
 
 # Library paths — appender + collection-instance flows pull from these.
 LANDMARKS_LIBRARY = os.path.join(REPO_ROOT, "tracks-src", "landmarks-library.blend")
+PROPS_LIBRARY = os.path.join(REPO_ROOT, "tracks-src", "props-library.blend")
+
+# Shared scatter helpers (Phase β/γ of docs/level-visual-quality-research.md).
+_scatter_spec = importlib.util.spec_from_file_location(
+    "scatter_lib", os.path.join(SCRIPT_DIR, "scatter_lib.py"),
+)
+_scatter = importlib.util.module_from_spec(_scatter_spec)
+sys.modules["scatter_lib"] = _scatter
+_scatter_spec.loader.exec_module(_scatter)
+drop_scatter_zones = _scatter.drop_scatter_zones
+
+
+# Test scatter — Phase γ verification pass for the volcanic prop kit.
+# Throwaway placement pending the level rework; goal is to prove
+# `prop_basalt_boulder` / `prop_ash_heap` / `prop_scorched_stump`
+# flow through scatter_lib + EXT_mesh_gpu_instancing into the runtime.
+SCATTER_ZONES: tuple[dict, ...] = (
+    # Caldera rim south slope — basalt boulders on the outer slope of
+    # the rim, between the rim and the leeward descent.
+    {
+        "name": "scatter_00",
+        "location": (60.0, -60.0, 38.0),
+        "half_width": 60.0,
+        "half_depth": 50.0,
+        "density": 0.014,
+        "source": "prop_basalt_boulder",
+        "seed": 11,
+    },
+    # Lava-lake shore — scorched stumps on the black-beach approach.
+    {
+        "name": "scatter_01",
+        "location": (300.0, -310.0, 0.0),
+        "half_width": 60.0,
+        "half_depth": 40.0,
+        "density": 0.018,
+        "source": "prop_scorched_stump",
+        "seed": 19,
+    },
+    # Rim north outer — ash drifts on the windward approach to the
+    # rim N apex.
+    {
+        "name": "scatter_02",
+        "location": (0.0, 140.0, 42.0),
+        "half_width": 80.0,
+        "half_depth": 30.0,
+        "density": 0.012,
+        "source": "prop_ash_heap",
+        "seed": 23,
+    },
+)
+
+
+def _drop_scatter_zones(scene) -> int:
+    """Drop the Kilauea test scatter zones via the shared helper."""
+    return drop_scatter_zones(scene, PROPS_LIBRARY, SCATTER_ZONES)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -766,8 +821,9 @@ def augment_scene() -> None:
     _spawn_lava_beach_wave_zone(scene)
     pickups = _drop_pickups(scene)
     boosts = _drop_boost_pads(scene)
+    scatter = _drop_scatter_zones(scene)
     _add_camera_hero(scene)
-    print(f"{tag}   {pickups} pickups + {boosts} boost pads")
+    print(f"{tag}   {pickups} pickups + {boosts} boost pads + {scatter} scatter zones")
 
     # Save the .blend with augmentation in place so the next manual
     # *Export Track to Game* picks up the new objects.
