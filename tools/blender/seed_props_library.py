@@ -541,6 +541,193 @@ def build_turn_indicator_mesh(name: str, *, length: float = 4.0, half_width: flo
 
 
 # ────────────────────────────────────────────────────────────────────
+# HV_Scatter — Geometry Nodes graph for foliage / rock / debris scatter
+# ────────────────────────────────────────────────────────────────────
+#
+# Wishlist Item 4 / Phase β of docs/level-visual-quality-research.md.
+# The graph distributes points on a target mesh (a scatter zone's child
+# plane, or a chunk of terrain) and instances a Collection's objects on
+# them. Inputs let the author dial density, size variance, slope and
+# altitude masks, and a seed. Per-instance Z rotation + random size are
+# applied so a row of palms doesn't read as a stamped grid; per-instance
+# COLOR_0.B phase is stamped via Store Named Attribute so the foliage
+# sway shader gives each palm its own swing.
+#
+# Output keeps instances un-realized — Blender's glTF exporter sees the
+# InstanceOnPoints output and emits ``EXT_mesh_gpu_instancing`` (the
+# repo's export.py already passes export_gpu_instances=True), which the
+# runtime lifts into ``THREE.InstancedMesh``. So a 400-palm scatter zone
+# costs roughly one draw call per prop archetype in the GLB.
+
+SCATTER_GROUP = "HV_Scatter"
+
+
+def build_scatter_group() -> bpy.types.NodeTree:
+    """HV_Scatter — Distribute Points on Faces → Instance on Points (from
+    a Collection), with slope + altitude filters, random rotation and
+    size, and a per-instance phase stamp on COLOR_0.B.
+
+    Inputs:
+      - Source Collection : collection to instance from (one prop per
+        point picked uniformly).
+      - Density (per m²)  : sample density on the input mesh's surface.
+      - Slope Max (deg)   : drop instances where the face normal points
+        further off +Z than this (0..90; 90 = no slope filter).
+      - Z Min / Z Max     : drop instances outside this world-Z band
+        (useful for "above waterline, below tree line").
+      - Size Min / Max    : per-instance uniform scale; sampled uniformly.
+      - Seed              : deterministic per-scatter-zone seed.
+    """
+    if SCATTER_GROUP in bpy.data.node_groups:
+        bpy.data.node_groups.remove(bpy.data.node_groups[SCATTER_GROUP])
+    g = bpy.data.node_groups.new(SCATTER_GROUP, "GeometryNodeTree")
+
+    _new_socket(g, "Geometry",         "INPUT",  "NodeSocketGeometry")
+    _new_socket(g, "Source",           "INPUT",  "NodeSocketCollection")
+    _new_socket(g, "Density",          "INPUT",  "NodeSocketFloat",  0.05, mn=0.0, mx=10.0)
+    _new_socket(g, "Slope Max (deg)",  "INPUT",  "NodeSocketFloat",  35.0, mn=0.0, mx=90.0)
+    _new_socket(g, "Z Min",            "INPUT",  "NodeSocketFloat", -100.0)
+    _new_socket(g, "Z Max",            "INPUT",  "NodeSocketFloat",  500.0)
+    _new_socket(g, "Size Min",         "INPUT",  "NodeSocketFloat",  0.85, mn=0.05)
+    _new_socket(g, "Size Max",         "INPUT",  "NodeSocketFloat",  1.20, mn=0.05)
+    _new_socket(g, "Seed",             "INPUT",  "NodeSocketInt",    0)
+    _new_socket(g, "Geometry",         "OUTPUT", "NodeSocketGeometry")
+
+    gi = _add_node(g, "NodeGroupInput",  -1800, 0)
+    go = _add_node(g, "NodeGroupOutput",  1600, 0)
+
+    # 1. Distribute points on the input mesh's surface, weighted by
+    #    Density. Random method gives a stochastic spread without the
+    #    grid-stamp look Poisson Disk would soften — at 60 fps race
+    #    pace the spread is fine. Poisson Disk + min-distance is the
+    #    upgrade path if clumping reads bad once we ship hundreds of
+    #    instances.
+    distribute = _add_node(g, "GeometryNodeDistributePointsOnFaces", -1400, 0)
+    distribute.distribute_method = "RANDOM"
+    g.links.new(gi.outputs["Geometry"], distribute.inputs["Mesh"])
+    g.links.new(gi.outputs["Density"],  distribute.inputs["Density"])
+    g.links.new(gi.outputs["Seed"],     distribute.inputs["Seed"])
+
+    # 2. Slope filter — face Normal's Z component vs cos(Slope Max).
+    #    Drop any point whose underlying normal tilts further off +Z than
+    #    Slope Max degrees. We do this via Delete Geometry on the
+    #    distributed point cloud.
+    radians = _add_node(g, "ShaderNodeMath", -1200, -300, operation="RADIANS")
+    g.links.new(gi.outputs["Slope Max (deg)"], radians.inputs[0])
+    cosine = _add_node(g, "ShaderNodeMath", -1000, -300, operation="COSINE")
+    g.links.new(radians.outputs[0], cosine.inputs[0])
+    # Separate the captured Normal vector into XYZ to get the Z component.
+    sep_normal = _add_node(g, "ShaderNodeSeparateXYZ", -1000, -100)
+    g.links.new(distribute.outputs["Normal"], sep_normal.inputs["Vector"])
+    slope_ok = _add_node(g, "ShaderNodeMath", -800, -200, operation="GREATER_THAN")
+    g.links.new(sep_normal.outputs["Z"], slope_ok.inputs[0])
+    g.links.new(cosine.outputs[0],       slope_ok.inputs[1])
+
+    # 3. Altitude filter — Position Z within [Z Min, Z Max].
+    pos = _add_node(g, "GeometryNodeInputPosition", -1000,  100)
+    sep_pos = _add_node(g, "ShaderNodeSeparateXYZ", -800,  100)
+    g.links.new(pos.outputs["Position"], sep_pos.inputs["Vector"])
+    above_min = _add_node(g, "ShaderNodeMath", -600,  200, operation="GREATER_THAN")
+    g.links.new(sep_pos.outputs["Z"], above_min.inputs[0])
+    g.links.new(gi.outputs["Z Min"],  above_min.inputs[1])
+    below_max = _add_node(g, "ShaderNodeMath", -600,  100, operation="LESS_THAN")
+    g.links.new(sep_pos.outputs["Z"], below_max.inputs[0])
+    g.links.new(gi.outputs["Z Max"],  below_max.inputs[1])
+    alt_ok = _add_node(g, "ShaderNodeMath", -400,  150, operation="MULTIPLY")
+    g.links.new(above_min.outputs[0], alt_ok.inputs[0])
+    g.links.new(below_max.outputs[0], alt_ok.inputs[1])
+
+    # 4. Combine masks: keep iff (slope_ok AND alt_ok). We multiply two
+    #    0/1 floats and compare > 0.5.
+    combined = _add_node(g, "ShaderNodeMath", -200,  0, operation="MULTIPLY")
+    g.links.new(slope_ok.outputs[0], combined.inputs[0])
+    g.links.new(alt_ok.outputs[0],   combined.inputs[1])
+    keep = _add_node(g, "ShaderNodeMath", 0, 0, operation="GREATER_THAN")
+    g.links.new(combined.outputs[0], keep.inputs[0])
+    keep.inputs[1].default_value = 0.5
+
+    # 5. Delete points whose mask is 0. Delete Geometry with Selection
+    #    inverted (delete where Selection is false) keeps the survivors.
+    invert = _add_node(g, "ShaderNodeMath", 200, 0, operation="SUBTRACT")
+    invert.inputs[0].default_value = 1.0
+    g.links.new(keep.outputs[0], invert.inputs[1])
+    delete_pts = _add_node(g, "GeometryNodeDeleteGeometry", 400, 0)
+    delete_pts.domain = "POINT"
+    delete_pts.mode = "ALL"
+    g.links.new(distribute.outputs["Points"], delete_pts.inputs["Geometry"])
+    g.links.new(invert.outputs[0],            delete_pts.inputs["Selection"])
+
+    # 6. Instance on Points — Pick Instance ON so each point picks a
+    #    random object from the source collection. Reset Children OFF
+    #    keeps each prop's hierarchy intact.
+    coll_info = _add_node(g, "GeometryNodeCollectionInfo", 200, -300)
+    coll_info.transform_space = "ORIGINAL"
+    g.links.new(gi.outputs["Source"], coll_info.inputs["Collection"])
+    coll_info.inputs["Separate Children"].default_value = True
+    coll_info.inputs["Reset Children"].default_value = False
+
+    iop = _add_node(g, "GeometryNodeInstanceOnPoints", 600, 0)
+    iop.inputs["Pick Instance"].default_value = True
+    g.links.new(delete_pts.outputs["Geometry"], iop.inputs["Points"])
+    g.links.new(coll_info.outputs["Instances"], iop.inputs["Instance"])
+    g.links.new(gi.outputs["Seed"],             iop.inputs["Instance Index"])
+
+    # 7. Random Z rotation per instance.
+    rand_rot = _add_node(g, "FunctionNodeRandomValue", 400, 300)
+    rand_rot.data_type = "FLOAT_VECTOR"
+    rand_rot.inputs["Min"].default_value = (0.0, 0.0, 0.0)
+    rand_rot.inputs["Max"].default_value = (0.0, 0.0, 6.2831853)
+    g.links.new(gi.outputs["Seed"], rand_rot.inputs["Seed"])
+    rot_inst = _add_node(g, "GeometryNodeRotateInstances", 800, 0)
+    g.links.new(iop.outputs["Instances"], rot_inst.inputs["Instances"])
+    g.links.new(rand_rot.outputs[0],      rot_inst.inputs["Rotation"])
+
+    # 8. Random uniform scale per instance.
+    rand_scale = _add_node(g, "FunctionNodeRandomValue", 800, -300)
+    rand_scale.data_type = "FLOAT"
+    g.links.new(gi.outputs["Size Min"], rand_scale.inputs[2])  # Min
+    g.links.new(gi.outputs["Size Max"], rand_scale.inputs[3])  # Max
+    seed_offset = _add_node(g, "ShaderNodeMath", 600, -300, operation="ADD")
+    seed_offset.inputs[1].default_value = 7919.0
+    g.links.new(gi.outputs["Seed"], seed_offset.inputs[0])
+    g.links.new(seed_offset.outputs[0], rand_scale.inputs["Seed"])
+    scale_inst = _add_node(g, "GeometryNodeScaleInstances", 1000, 0)
+    g.links.new(rot_inst.outputs["Instances"], scale_inst.inputs["Instances"])
+    # Scale uniform — pass the scalar through a Combine XYZ to feed all
+    # three axes the same value.
+    scale_vec = _add_node(g, "ShaderNodeCombineXYZ", 800, -150)
+    g.links.new(rand_scale.outputs[1], scale_vec.inputs["X"])
+    g.links.new(rand_scale.outputs[1], scale_vec.inputs["Y"])
+    g.links.new(rand_scale.outputs[1], scale_vec.inputs["Z"])
+    g.links.new(scale_vec.outputs[0], scale_inst.inputs["Scale"])
+
+    # 9. Per-instance COLOR_0.B phase stamp — gives each palm its own
+    #    sway phase so a cluster doesn't lock-step. Stored on the
+    #    instance domain so the runtime InstancedMesh sees it.
+    rand_phase = _add_node(g, "FunctionNodeRandomValue", 1000, 300)
+    rand_phase.data_type = "FLOAT"
+    rand_phase.inputs[2].default_value = 0.0
+    rand_phase.inputs[3].default_value = 1.0
+    seed_offset_b = _add_node(g, "ShaderNodeMath", 800, 300, operation="ADD")
+    seed_offset_b.inputs[1].default_value = 2347.0
+    g.links.new(gi.outputs["Seed"], seed_offset_b.inputs[0])
+    g.links.new(seed_offset_b.outputs[0], rand_phase.inputs["Seed"])
+    store_phase = _add_node(g, "GeometryNodeStoreNamedAttribute", 1200, 0)
+    store_phase.domain = "INSTANCE"
+    store_phase.data_type = "FLOAT"
+    store_phase.inputs["Name"].default_value = "sway_phase"
+    g.links.new(scale_inst.outputs["Instances"], store_phase.inputs["Geometry"])
+    g.links.new(rand_phase.outputs[1],           store_phase.inputs["Value"])
+
+    g.links.new(store_phase.outputs["Geometry"], go.inputs["Geometry"])
+    # The graph has no consumers inside the library .blend (each track
+    # links and applies it to its own scatter-zone target meshes). Pin
+    # a fake user so Blender's save-time purge keeps the group around.
+    g.use_fake_user = True
+    return g
+
+
+# ────────────────────────────────────────────────────────────────────
 # Per-prop builder
 # ────────────────────────────────────────────────────────────────────
 
@@ -719,6 +906,12 @@ def build_props() -> dict:
     # Mark every collection as a scatter source for Item 4's picker.
     for c in (rock_coll, palm_coll, buoy_coll, gate_coll, ti_coll):
         c["scatter_source"] = True
+
+    # Author the HV_Scatter geometry-nodes graph the scatter-zone
+    # operator + per-track seed scripts attach to a target mesh. Lives
+    # in the props-library .blend so authors link the same graph from
+    # every track .blend (rather than rebuilding it in each scene).
+    build_scatter_group()
 
     return summary
 

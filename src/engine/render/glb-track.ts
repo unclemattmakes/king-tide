@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { ExportedKind } from '@/engine/asset-kinds'
+import { applyFoliageSway } from '@/engine/render/foliage-sway'
 import { applyLavaRiverMaterialToScene } from '@/engine/render/lava-river-material'
 import { applyTerrainShaderToScene } from '@/engine/render/terrain-shader'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
@@ -108,6 +109,26 @@ export async function loadGlbTrackVisuals(
   // ``public/tracks/<id>.json`` — when present, the addon authored
   // these values in its "Terrain shader (runtime)" panel.
   applyTerrainShaderToScene(scene, opts?.terrainShader ?? {})
+  // Foliage sway hook — patches every material whose name starts with
+  // ``mat_foliage_`` into the shared vertex-displacement shader (palms,
+  // banners, grass tufts, any future swayed prop). The shader reads
+  // ``COLOR_0.R`` for sway strength + ``COLOR_0.B`` for phase, which the
+  // props-library seed already stamps on palms. Materials without the
+  // attribute fall through to no displacement (the shader guards on
+  // ``USE_COLOR``). One patch per unique material — idempotent via
+  // ``applyFoliageSway``'s own per-material marker.
+  scene.traverse((obj) => {
+    const mesh = obj as THREE.Mesh
+    if (!mesh.isMesh) return
+    const mat = mesh.material
+    if (Array.isArray(mat)) {
+      for (const m of mat) {
+        if (m?.name?.startsWith('mat_foliage_')) applyFoliageSway(m)
+      }
+    } else if (mat?.name?.startsWith('mat_foliage_')) {
+      applyFoliageSway(mat)
+    }
+  })
   // Hero-landmark emissive materials. Currently just the lava-river
   // strip — Kilauea Crown's lava-waterfall set-piece needs a glowing
   // hot-core read pulled out of the COLOR_0.R mask the seed baked into

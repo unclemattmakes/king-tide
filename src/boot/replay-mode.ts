@@ -19,6 +19,7 @@
  */
 
 import * as THREE from 'three'
+import { updateSwayTime, updateWind } from '@/engine/render/foliage-sway'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
 import type { SkySystem } from '@/engine/render/sky'
 import type { BikeImpact } from '@/engine/render/water'
@@ -248,6 +249,10 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     spectator.snap(focalPos, focalQuat)
   }
 
+  // Same default wind as the live race so palm-sway looks identical
+  // between race and playback. Per-track override is a follow-up.
+  updateWind({ x: 1, z: 0.2 }, 0.18, 1.4)
+
   let lastReplay = performance.now()
   let framesThisSecond = 0
   let fpsAccumStart = lastReplay
@@ -317,6 +322,9 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     fxTick(dt)
     particleTick(dt)
     landmarkTick(now / 1000)
+    // Foliage sway clock — deterministic wave-field clock so the
+    // playback matches the captured race's leaf motion.
+    updateSwayTime(waveField.time)
     physicsDebug.tick()
 
     spectatorHud.refresh()

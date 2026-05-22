@@ -204,6 +204,11 @@ class HOVERBIKE_MT_add(Menu):
         )
         layout.operator("hoverbike.add_downtown", text="Downtown Block", icon="MESH_CUBE")
         layout.operator("hoverbike.add_emitter", text="Emitter", icon="PARTICLES")
+        layout.operator(
+            "hoverbike.add_scatter_zone",
+            text="Scatter Zone (foliage / rocks)",
+            icon="OUTLINER_OB_POINTCLOUD",
+        )
 
         layout.separator()
         layout.label(text="Authoring helpers")
@@ -329,6 +334,11 @@ class HOVERBIKE_MT_build(Menu):
             "hoverbike.refresh_wave_zones",
             text="Refresh Wave Zones",
             icon="MOD_OCEAN",
+        )
+        layout.operator(
+            "hoverbike.refresh_scatter_zones",
+            text="Refresh Scatter Zones",
+            icon="OUTLINER_OB_POINTCLOUD",
         )
 
 
