@@ -44,7 +44,20 @@ GATE_PREVIEW_COLLECTION = "_hoverbike_gate_preview"
 GATE_PREVIEW_MESH = "_hoverbike_gate_gizmo"
 
 
-def _resample_by_arc_length(points, spacing, vertical_axis=2):
+def _resample_by_arc_length(points, spacing, vertical_axis=2, start_t=0.0):
+    """Sample evenly-spaced positions + tangents along a cyclic polyline.
+
+    ``start_t`` ∈ [0, 1) shifts placement 0 along the curve. The default
+    of 0 keeps the legacy behaviour (placement 0 at polyline-vertex 0);
+    passing the bike's ``hoverbike_start_t`` makes placement 0 land
+    exactly at the curve point the start grid anchors to, which keeps
+    the gate→bike gap consistent regardless of which direction the
+    racing line runs. Without the offset, the nearest gate sample drifts
+    by up to ``spacing / 2`` metres depending on where ``start_t``
+    happens to fall between the sample boundaries.
+    """
+    import bisect
+
     if len(points) < 2 or not (spacing > 0):
         return []
     horiz = [i for i in range(3) if i != vertical_axis]
@@ -59,13 +72,29 @@ def _resample_by_arc_length(points, spacing, vertical_axis=2):
     if total == 0:
         return []
     gate_count = max(1, round(total / spacing))
+
+    # Convert start_t (parameter ∈ [0, 1)) into arc-length metres along
+    # the polyline. ``sample_curve_at_t`` treats the polyline as
+    # *open* (it walks segments 0..n-2 only, never the closing wrap
+    # back to vertex 0), so its t-convention is "arc length / open
+    # total". We mirror that exactly here — if we used the cyclic
+    # cum[n] total instead, the offset would drift by one closing
+    # segment per loop (~20-30 m for default-spaced racing lines) and
+    # placement 0 would land off the bike's t-anchor by that much.
+    start_t_norm = ((float(start_t) % 1.0) + 1.0) % 1.0
+    if start_t_norm > 0:
+        total_open = cum[n - 1]
+        arc_offset = start_t_norm * total_open
+    else:
+        arc_offset = 0.0
+
     out = []
-    seg = 0
     for i in range(gate_count):
-        target = (i / gate_count) * total
-        while seg < n - 1 and cum[seg + 1] < target:
-            seg += 1
-        seg_len = cum[seg + 1] - cum[seg]
+        target = (arc_offset + (i / gate_count) * total) % total
+        # bisect_right gives the segment containing target; clamp to
+        # the valid range so the modulo wrap-around can't index past n-1.
+        seg = max(0, min(bisect.bisect_right(cum, target) - 1, n - 1))
+        seg_len = cum[seg + 1] - cum[seg] if (seg + 1) < len(cum) else 1.0
         frac = (target - cum[seg]) / seg_len if seg_len > 0 else 0.0
         t = (seg + frac) / n
         f = (((t % 1) + 1) % 1) * n
@@ -486,17 +515,24 @@ def _rebuild_gate_preview(scene, *, spacing: float, half_width: float, height: f
             "Gate preview needs an `ai_spline_main` curve in the scene."
         )
     points = _sample_curve_to_polyline(sp)
-    placements = _resample_by_arc_length(points, spacing, vertical_axis=2)
 
-    # Rotate placements so the one nearest start_00 is index 0 — keeps
-    # gate_preview_00 in the Outliner aligned with what the runtime
-    # treats as the lap-counter gate (= checkpoints[0] in the exported
-    # JSON, see _legacy.derive_track_json). Without this, the preview
-    # labels gates by spline-sample order while the runtime picks the
-    # nearest-to-start one, and authors get confused trying to find
-    # "the start gate" in Blender.
+    # Align gate sampling so placement 0 sits at the bike's t-anchor
+    # when the start is bound to the spline. This guarantees the
+    # gate-to-bike distance equals ``hoverbike_start_backoff_m`` exactly
+    # — without it, the nearest gate sample drifts by up to
+    # ``gate_spacing / 2`` metres depending on which way the curve
+    # runs, which is the "spacing varies by direction" symptom.
     start_00 = bpy.data.objects.get("start_00")
-    if placements and start_00 is not None:
+    start_bound = bool(getattr(scene, "hoverbike_start_bound_to_spline", False))
+    align_t = float(getattr(scene, "hoverbike_start_t", 0.0)) if start_bound else 0.0
+    placements = _resample_by_arc_length(
+        points, spacing, vertical_axis=2, start_t=align_t,
+    )
+
+    # Unbound fallback: rotate so the gate world-nearest to start_00 is
+    # index 0. When bound, the arc-offset above already puts gate 0 at
+    # the t-anchor, so the rotation is redundant.
+    if not start_bound and placements and start_00 is not None:
         s_loc = start_00.matrix_world.translation
         sx, sy = float(s_loc.x), float(s_loc.y)
         nearest_i = min(

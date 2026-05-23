@@ -496,8 +496,17 @@ class HOVERBIKE_OT_materialize_gates_to_cp_empties(Operator):
         half_w = float(getattr(scene, "hoverbike_gate_half_width", 14.0))
         height = float(getattr(scene, "hoverbike_gate_height", 8.0))
 
+        # Align placement 0 with the bike's t-anchor when the start is
+        # bound, so the stamped cp_00 lands exactly on the starting line.
+        align_t = (
+            float(getattr(scene, "hoverbike_start_t", 0.0))
+            if bool(getattr(scene, "hoverbike_start_bound_to_spline", False))
+            else 0.0
+        )
         points = _sample_curve_to_polyline(sp)
-        placements = _resample_by_arc_length(points, spacing, vertical_axis=2)
+        placements = _resample_by_arc_length(
+            points, spacing, vertical_axis=2, start_t=align_t,
+        )
         if not placements:
             self.report({"ERROR"}, "Spline produced 0 gate placements — check curve has ≥ 2 points.")
             return {"CANCELLED"}
