@@ -377,32 +377,27 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   renderer.toneMapping = resolveToneMapping(cfg.toneMapping)
 
   // Bloom post-pass — wired through `renderFrame()` in `renderer-service`.
-  // OFF BY DEFAULT: the `RenderPipeline(renderer) + pass(scene,camera) +
-  // bloom(...)` chain (three r184) was producing a solid-black framebuffer
-  // on our WebGPU scene with no console error and ~150 fps, so the visible
-  // game went black the moment any track loaded. Until we root-cause why
-  // the PassNode → RenderPipeline output collapses to zero here, opt-in
-  // via `?bloom=on` so the chain can be poked at without breaking the
-  // default boot path. Everything else in the visual commit (tone-mapping
-  // round-trip, decals, trim sheets, biome kits) is unaffected.
+  // `cfg.bloom` is the per-track strength multiplier (0..2). Building the
+  // pipeline is cheap when strength is 0 (the chain still composes, but
+  // bloom contributes nothing). Track JSON authors leave it 0 by default.
+  // The pipeline's PassNode renders the scene into its own HalfFloat RT;
+  // the shader pre-warm in `main.ts` calls back through
+  // `postPipeline.compileAsync()` so the scene's GPU pipelines exist for
+  // that RT format. Compiling against the canvas alone leaves the
+  // PassNode RT with no usable pipelines and the framebuffer renders
+  // solid black with no validation error.
   let postPipeline: PostPipeline | null = null
-  const bloomFlag =
-    typeof window !== 'undefined'
-      ? new URLSearchParams(window.location.search).get('bloom')
-      : null
-  if (bloomFlag === 'on' && cfg.bloom > 0) {
-    try {
-      postPipeline = createPostPipeline({
-        renderer,
-        scene,
-        camera,
-        bloomStrength: cfg.bloom,
-      })
-      setActivePostPipeline(postPipeline)
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.warn('[sky] failed to build post-pipeline; rendering without bloom', e)
-    }
+  try {
+    postPipeline = createPostPipeline({
+      renderer,
+      scene,
+      camera,
+      bloomStrength: cfg.bloom,
+    })
+    setActivePostPipeline(postPipeline)
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[sky] failed to build post-pipeline; rendering without bloom', e)
   }
 
   // ── Shader uniforms (mutated each tick from CPU palette eval) ───────────
