@@ -4,8 +4,8 @@
   "displayName": "Marker Buoy",
   "category": "buoy",
   "geometry": {
-    "kitPart": "pylon",
-    "scale": [0.6, 0.8, 0.6],
+    "kitPart": "buoy",
+    "scale": [1.0, 1.0, 1.0],
     "tint": "#d83d2a"
   },
   "collider": {
