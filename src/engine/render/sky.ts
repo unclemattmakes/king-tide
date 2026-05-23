@@ -451,9 +451,14 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   const worldDir = normalize(positionWorld)
 
   // Vertical palette ramp — pow keeps the horizon band wide and the zenith
-  // tight (matches the original gradient). max(...,0) avoids negative
-  // ramp below the horizon; we still render that band so fog hides the seam.
-  const ramp = pow(max(worldDir.y, float(0)), 0.55)
+  // tight. max(...,0) avoids negative ramp below the horizon; we still
+  // render that band so fog hides the seam. Exponent 0.4 pulls zenith
+  // influence down into the lower half of the dome so the sky reads as
+  // an atmospheric gradient (cool aloft, warm at the rim) rather than a
+  // uniform horizon wash at typical racing camera pitches — a steeper
+  // curve (e.g. 0.55) leaves the horizon colour dominant across most of
+  // the visible sky and makes the dome read as fog rather than sky.
+  const ramp = pow(max(worldDir.y, float(0)), 0.4)
   const baseSky = mix(uHorizon, uZenith, ramp)
 
   // Sun direction dot.

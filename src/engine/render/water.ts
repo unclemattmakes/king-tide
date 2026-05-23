@@ -2438,20 +2438,20 @@ export function createWaterMesh(
   // The skirt is a flat ring extending from inside the main plane out past
   // the horizon ring. It's a child of the main mesh so it inherits the
   // camera-locked XZ and the track's water-height Y automatically.
-  // Material is dirt-cheap: a haze-tinted unlit shader that reuses the
-  // same `horizonHazeUniform` the water shader and sky module share, so
-  // tone tracks the time-of-day palette for free. No displacement, no
-  // reflection, no foam — at this distance the main plane's wave detail
-  // is already sub-pixel and the player's eye reads the skirt as "more
-  // water out to the horizon", not as a separate object.
+  // Material is dirt-cheap: a haze-tinted unlit shader. No displacement,
+  // no reflection, no foam — at this distance the main plane's wave
+  // detail is already sub-pixel and the player's eye reads the skirt as
+  // "more water out to the horizon", not as a separate object.
   //
-  // The fragment shader matches the main plane's aerial-perspective ramp
-  // so the colour is continuous across the boundary: a darker blue-ish
-  // tint near the camera (mirroring the water shader's `reflectedOrBase`
-  // before haze) fading to the full horizon haze at distance. Alpha
-  // ramps in over the inner edge so any tiny tonal mismatch under the
-  // main plane is hidden by the main plane drawing on top, and scene
-  // fog dissolves the outer rim into the sky just like everything else.
+  // The fragment shader anchors on the same `deepColor` the wave mesh
+  // uses for its troughs so the skirt reads as water (not sky) across
+  // most of its extent — wide-angle views of the wave plane are
+  // trough-dominated, so matching that tone hides the boundary between
+  // displaced geometry and the flat skirt. The far rim ramps into the
+  // sky's `horizonHazeUniform` for aerial perspective; scene fog then
+  // dissolves the outermost band into the sky just like everything else.
+  // Alpha ramps in over the inner edge so any tiny tonal mismatch under
+  // the main plane is hidden by the main plane drawing on top.
   const SKIRT_INNER_RADIUS = 120 // m — well inside the 240 m plane half-extent
   const SKIRT_OUTER_RADIUS = 1600 // m — past the default 1400 m horizon ring
   const SKIRT_ANGULAR_SEGMENTS = 128
@@ -2487,20 +2487,25 @@ export function createWaterMesh(
     // skirt; the tonal mismatch there is small because the plane is
     // already deep into its own aerial-perspective ramp at that radius.
     const innerFadeIn = smoothstep(float(SKIRT_INNER_RADIUS), float(240), radial)
-    // Aerial-perspective ramp — mirrors the main plane's
-    // `aerialMix = smoothstep(120, 280, camDist) * 0.5` so the colour is
-    // continuous across the boundary, then continues fading past 280 m
-    // to take the full horizon haze at long distance (where the main
-    // plane never reached).
+    // Aerial-perspective ramp in two legs. First leg (120 → 280 m) mirrors
+    // the main plane's `aerialMix = smoothstep(120, 280, camDist) * 0.5`
+    // so the tone is continuous across the wave-plane boundary. Then the
+    // skirt HOLDS at 50 % water + 50 % haze across the middle band so
+    // most of its visible area reads as water, not sky. Only the
+    // outermost ~300 m ramps to full horizon haze, where scene fog
+    // takes it the rest of the way into the sky. This is the band the
+    // player perceives as "the actual horizon line."
     const nearHaze = smoothstep(float(120), float(280), radial).mul(float(0.5))
-    const farHaze = smoothstep(float(280), float(900), radial).mul(float(0.5))
+    const farHaze = smoothstep(float(1200), float(1550), radial).mul(float(0.5))
     const hazeMix = clamp(nearHaze.add(farHaze), float(0), float(1))
-    // Stand-in for the main plane's `reflectedOrBase` at distance: a
-    // cool, slightly desaturated tint of the horizon haze (haze * cool
-    // bias). The horizon haze uniform changes with time-of-day, so this
-    // tracks sunset / twilight / day automatically.
-    const deepTint = horizonHazeUniform.mul(vec3(0.55, 0.7, 0.85))
-    skirtMat.colorNode = mix(deepTint, horizonHazeUniform, hazeMix)
+    // Anchor on the wave mesh's deep trough colour (same `vec3(0.02,
+    // 0.22, 0.32)` constant used in the body-color blend above) so the
+    // flat skirt and the wide-angle view of the wave plane share a tone.
+    // The visible wave field is trough-dominated at grazing angles —
+    // matching the trough colour hides the join. Far-rim haze gives back
+    // the sky alignment for atmospheric perspective.
+    const skirtDeepColor = vec3(0.02, 0.22, 0.32)
+    skirtMat.colorNode = mix(skirtDeepColor, horizonHazeUniform, hazeMix)
     skirtMat.opacityNode = innerFadeIn
   }
 
