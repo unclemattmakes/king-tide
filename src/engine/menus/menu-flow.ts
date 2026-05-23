@@ -226,6 +226,31 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
   updateClock()
   const clockInterval = window.setInterval(updateClock, 30_000)
 
+  // Edge-fade indicator. Touch users have no native cue that the bike
+  // / track list scrolls below the fold — the persistent scrollbar
+  // helps, but a soft fade at the bottom edge of the stage reads as
+  // "more cards here" without crowding the visual. `--bc-fade-top` /
+  // `--bc-fade-bot` set on .bc-stage are picked up by its mask-image
+  // gradient. Re-runs cheap and on every signal — scroll, screen
+  // switch (via showStep below), DOM resize, viewport resize.
+  const FADE_PX = 38
+  function refreshStageFade(): void {
+    if (!stage) return
+    const max = stage.scrollHeight - stage.clientHeight
+    const top = stage.scrollTop
+    // Tolerance — sub-pixel rounding shouldn't read as "more above".
+    const hasTop = max > 1 && top > 2
+    const hasBot = max > 1 && top < max - 2
+    stage.style.setProperty('--bc-fade-top', `${hasTop ? FADE_PX : 0}px`)
+    stage.style.setProperty('--bc-fade-bot', `${hasBot ? FADE_PX : 0}px`)
+  }
+  stage.addEventListener('scroll', refreshStageFade, { passive: true })
+  const stageResizeObs =
+    typeof ResizeObserver !== 'undefined' ? new ResizeObserver(refreshStageFade) : null
+  stageResizeObs?.observe(stage)
+  window.addEventListener('resize', refreshStageFade)
+  refreshStageFade()
+
   // Idle-fade for the bottom chyron's input legend (`.keys`) — Apple-
   // sport restraint: the legend reads as helpful for the first beat
   // after you arrive on a screen, then quietly fades when you've
@@ -700,6 +725,11 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     // first focusable, which lines up nicely with what a user expects
     // when they land on each screen.
     gamepadNav.focusFirst()
+    // The new screen has different content height than the old one;
+    // refresh the scroll-overflow fade on the next frame once layout
+    // has settled. (The ResizeObserver only fires on the observed
+    // element's box-size changing, not on children swapping.)
+    requestAnimationFrame(refreshStageFade)
   }
 
   /** Where the bike-select screen rewinds to. Championship cups skip the
@@ -740,6 +770,9 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       window.removeEventListener('keydown', markActive)
       window.removeEventListener('pointermove', markActive)
       window.removeEventListener('pointerdown', markActive)
+      window.removeEventListener('resize', refreshStageFade)
+      stage?.removeEventListener('scroll', refreshStageFade)
+      stageResizeObs?.disconnect()
       if (idleTimer) window.clearTimeout(idleTimer)
       gamepadNav.dispose()
       root?.classList.remove('show')

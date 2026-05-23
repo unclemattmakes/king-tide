@@ -1075,6 +1075,15 @@
          otherwise overflow:auto clips the top portion and leaves it
          un-scrollable. Extra bottom padding gives focus rings on the
          last row room before the chyron. */
+      /* Bike / track screens often have more cards than fit in the
+         viewport. Three affordances together keep that scrollable area
+         findable on devices that don't expose hover-revealed scrollbars:
+           1. `overflow: auto` + thin always-on scrollbar (touch / mouse).
+           2. `scroll-padding` so gamepad scrollIntoView({block:'nearest'})
+              keeps the focused card clear of the header and chyron.
+           3. Mask-image edge-fade tied to --bc-fade-top / --bc-fade-bot
+              (menu-flow.ts updates them on scroll so the fade only
+              appears when there's more content past the edge). */
       .bc-stage {
         flex: 1; min-height: 0;
         display: flex;
@@ -1082,6 +1091,37 @@
         padding: 24px 48px 36px;
         overflow: auto;
         overscroll-behavior: contain;
+        scroll-padding: 64px 0 84px;
+        touch-action: pan-y;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(180, 220, 255, 0.35) transparent;
+        --bc-fade-top: 0px;
+        --bc-fade-bot: 0px;
+        -webkit-mask-image: linear-gradient(
+          180deg,
+          transparent 0,
+          #000 var(--bc-fade-top),
+          #000 calc(100% - var(--bc-fade-bot)),
+          transparent 100%
+        );
+        mask-image: linear-gradient(
+          180deg,
+          transparent 0,
+          #000 var(--bc-fade-top),
+          #000 calc(100% - var(--bc-fade-bot)),
+          transparent 100%
+        );
+      }
+      .bc-stage::-webkit-scrollbar { width: 10px; }
+      .bc-stage::-webkit-scrollbar-track { background: transparent; }
+      .bc-stage::-webkit-scrollbar-thumb {
+        background: rgba(180, 220, 255, 0.28);
+        border-radius: 6px;
+        border: 2px solid transparent;
+        background-clip: padding-box;
+      }
+      .bc-stage::-webkit-scrollbar-thumb:hover {
+        background: rgba(180, 220, 255, 0.55);
       }
       .bc-screen {
         display: none; width: 100%; max-width: 1200px;
@@ -1478,6 +1518,23 @@
         display: flex; flex-direction: column; gap: 6px;
         max-height: 540px; overflow-y: auto;
         padding-right: 4px;
+        scroll-padding: 12px 0;
+        touch-action: pan-y;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(180, 220, 255, 0.35) transparent;
+      }
+      .bc-lb-tracks::-webkit-scrollbar { width: 10px; }
+      .bc-lb-tracks::-webkit-scrollbar-track { background: transparent; }
+      .bc-lb-tracks::-webkit-scrollbar-thumb {
+        background: rgba(180, 220, 255, 0.28);
+        border-radius: 6px;
+        border: 2px solid transparent;
+        background-clip: padding-box;
+      }
+      .bc-lb-tracks::-webkit-scrollbar-thumb:hover {
+        background: rgba(180, 220, 255, 0.55);
+        background-clip: padding-box;
+        border: 2px solid transparent;
       }
       .bc-lb-track {
         position: relative;
