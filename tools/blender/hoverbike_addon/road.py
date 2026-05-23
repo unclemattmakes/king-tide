@@ -110,37 +110,8 @@ def _ensure_road_underside_material() -> bpy.types.Material:
     return mat
 
 
-BUOY_OBJECT_NAME = "road_buoys"
-BUOY_MESH_NAME = "road_buoys_mesh"
 GUARDRAIL_OBJECT_NAME = "road_guardrails"
 GUARDRAIL_MESH_NAME = "road_guardrails_mesh"
-
-
-def _ensure_buoy_material(*, top: bool) -> bpy.types.Material:
-    """Marker-buoy materials: red lacquered body + warm emissive top
-    cap so the buoy reads against the water surface at distance. Two
-    slots so the top cap can be lit without bleeding into the body."""
-    name = "mat_road_buoy_top" if top else "mat_road_buoy_body"
-    mat = bpy.data.materials.get(name)
-    if mat is not None:
-        return mat
-    mat = bpy.data.materials.new(name)
-    mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
-    if bsdf is not None:
-        if top:
-            bsdf.inputs["Base Color"].default_value = (1.0, 0.95, 0.55, 1.0)
-            bsdf.inputs["Roughness"].default_value = 0.35
-            emit = bsdf.inputs.get("Emission Color") or bsdf.inputs.get("Emission")
-            if emit is not None:
-                emit.default_value = (1.0, 0.85, 0.45, 1.0)
-            estr = bsdf.inputs.get("Emission Strength")
-            if estr is not None:
-                estr.default_value = 4.0
-        else:
-            bsdf.inputs["Base Color"].default_value = (0.82, 0.10, 0.12, 1.0)
-            bsdf.inputs["Roughness"].default_value = 0.55
-    return mat
 
 
 def _ensure_guardrail_material() -> bpy.types.Material:
@@ -1237,321 +1208,10 @@ from ._legacy import (  # noqa: E402
 )
 
 
-# ────────────────────────────────────────────────────────────────────
-# Buoys — F1-curb-like markers along the road edges over open water
-# ────────────────────────────────────────────────────────────────────
-
-
-def _flag_over_water_samples(
-    samples: list[dict],
-    terrain_obj: bpy.types.Object | None,
-    sea_level: float,
-) -> None:
-    """Stamp ``over_water`` (bool) on each sample. A sample is "over
-    water" when the terrain mesh either misses entirely or hits below
-    the sea level at that XY — i.e. the road sits above open water,
-    not above land.
-
-    Mutates ``samples`` in-place. When no terrain is in the scene every
-    sample is treated as over water (the only meaningful surface IS
-    the sea, so the buoys still appear). When no sea level was set
-    (`sea_level == 0` and no water volume) the road is presumed
-    inland — every sample gets ``over_water = False``."""
-    if terrain_obj is None:
-        for s in samples:
-            s["over_water"] = True
-        return
-
-    from ._legacy import _PreviewCollectionsHidden
-
-    down = mathutils.Vector((0.0, 0.0, -1.0))
-    ray_origin_z = 10000.0
-    terrain_mw_inv = terrain_obj.matrix_world.inverted_safe()
-    terrain_mw = terrain_obj.matrix_world
-    direction_local = terrain_mw_inv.to_3x3() @ down
-
-    with _PreviewCollectionsHidden(bpy.context.view_layer):
-        bpy.context.view_layer.update()
-        for s in samples:
-            origin_local = terrain_mw_inv @ mathutils.Vector(
-                (s["x"], s["y"], ray_origin_z)
-            )
-            result, loc_local, _normal, _index = terrain_obj.ray_cast(
-                origin_local, direction_local, distance=ray_origin_z * 2.0
-            )
-            if not result:
-                # No terrain at this XY at all — over water (or off-map).
-                s["over_water"] = True
-                continue
-            terrain_z = float((terrain_mw @ loc_local).z)
-            # Terrain below sea level here means the surface above it
-            # is water, not ground. Small epsilon so a coastal vert at
-            # exactly the waterline doesn't get flagged either way.
-            s["over_water"] = terrain_z < (sea_level - 0.05)
-
-
-def _wipe_buoys() -> None:
-    """Remove the ``road_buoys`` object and its mesh datablock. Called
-    by both the road-build path and the standalone buoy rebuild before
-    each build so previous samples / disabled toggles can't leave a
-    stale buoy strip behind."""
-    old = bpy.data.objects.get(BUOY_OBJECT_NAME)
-    if old is not None:
-        old_mesh = old.data
-        bpy.data.objects.remove(old, do_unlink=True)
-        if isinstance(old_mesh, bpy.types.Mesh) and old_mesh.users == 0:
-            bpy.data.meshes.remove(old_mesh)
-    leftover = bpy.data.meshes.get(BUOY_MESH_NAME)
-    if leftover is not None and leftover.users == 0:
-        bpy.data.meshes.remove(leftover)
-
-
-def _maybe_build_buoys_from_samples(
-    scene: bpy.types.Scene,
-    samples: list[dict],
-    terrain: bpy.types.Object | None,
-) -> tuple[str | None, int]:
-    """Build (or wipe) the ``road_buoys`` mesh from already-sampled
-    curve points. Shared entry point for both ``rebuild_road_main``
-    (which has road samples) and ``rebuild_buoys`` (which samples the
-    ai_spline directly for water-only tracks like Sandbar).
-
-    Returns ``(object_name | None, pair_count)``. Always wipes first
-    so a toggle-off or a removed water volume drops the buoys cleanly
-    instead of leaving them as orphan geometry.
-
-    Inland tracks (``sea_level == 0`` AND no ``water_volume_main``)
-    short-circuit to a wipe — without a sea level we can't tell which
-    samples are over water vs over a low-lying terrain plane, and the
-    safer default is no buoys."""
-    _wipe_buoys()
-
-    sea_level = float(getattr(scene, "hoverbike_water_height", 0.0))
-    has_water = (
-        sea_level != 0.0
-        or bpy.data.objects.get("water_volume_main") is not None
-    )
-    enable = bool(getattr(scene, "hoverbike_road_buoys_enabled", True))
-    if not (enable and has_water) or not samples:
-        return None, 0
-
-    _flag_over_water_samples(samples, terrain, sea_level)
-    if not any(s.get("over_water", False) for s in samples):
-        return None, 0
-
-    # Resolve buoy spacing AND lateral offset from the gate full-width
-    # × their respective multiplier props. Coupling both to gate width
-    # keeps the "racing-line rhythm" coherent: a track tuned for wide
-    # gates also gets a wide buoy channel and sparse spacing, and a
-    # tighter twisty track with narrow gates gets tighter buoy markers
-    # closer to the curve, without authors having to tune raw metres.
-    # ``hoverbike_gate_half_width`` default is 14 m → full width 28 m
-    # → defaults spacing 1.5× → buoys every 42 m, offset 1.5× → buoy
-    # channel 42 m wide each side of the curve.
-    gate_full_width = 2.0 * float(getattr(scene, "hoverbike_gate_half_width", 14.0))
-    spacing_mult = float(getattr(scene, "hoverbike_road_buoy_spacing_mult", 1.5))
-    side_offset_mult = float(getattr(scene, "hoverbike_road_buoy_side_offset_mult", 1.5))
-    spacing_m = max(1.0, spacing_mult * gate_full_width)
-    lateral_m = max(0.0, side_offset_mult * gate_full_width)
-    buoy_me = _build_buoy_strip_mesh(
-        samples,
-        sea_level=sea_level,
-        spacing_m=spacing_m,
-        lateral_m=lateral_m,
-    )
-    if buoy_me is None:
-        return None, 0
-
-    buoy_me.materials.append(_ensure_buoy_material(top=False))
-    buoy_me.materials.append(_ensure_buoy_material(top=True))
-    buoy_obj = bpy.data.objects.new(BUOY_OBJECT_NAME, buoy_me)
-    buoy_obj["kind"] = "track"
-    scene.collection.objects.link(buoy_obj)
-
-    # 25 faces per buoy (3 quad strips × 8 segs + 1 cap), 2 buoys per
-    # pair. Derive from the final mesh so the count stays right if the
-    # unit geometry ever evolves.
-    FACES_PER_BUOY = 25
-    n_pairs = len(buoy_me.polygons) // (FACES_PER_BUOY * 2)
-    return buoy_obj.name, n_pairs
-
-
-def rebuild_buoys(scene: bpy.types.Scene) -> dict | None:
-    """Standalone buoy rebuild — samples the resolved race-path curve
-    (``road_curve_main`` if present, else ``ai_spline_main``) and
-    builds the ``road_buoys`` mesh without requiring a ``road_main``.
-
-    Fires from the auto-rebuild handler on ai_spline / road_curve /
-    water-height edits so water-only tracks (e.g. Sandbar) get marker
-    buoys at the racing line's edges as soon as the spline is touched
-    — no Build Road click required.
-
-    Returns ``{"buoy_pairs", "curve", "object"}`` on a successful
-    build, or ``None`` when there's no curve / not enough samples /
-    no authored water (the helper still wipes any stale buoys in
-    those cases, so toggling the master flag off or removing a water
-    volume is reflected immediately)."""
-    curve_obj = _resolve_road_curve()
-    if curve_obj is None:
-        _wipe_buoys()
-        return None
-
-    from .road_conform_gn import find_source_terrain
-    terrain = find_source_terrain()
-
-    samples = _sample_road_path(
-        curve_obj,
-        terrain,
-        n_samples=int(scene.hoverbike_road_samples),
-        smooth_passes=int(scene.hoverbike_road_smooth_passes),
-        use_curve_z=True,
-    )
-    if len(samples) < 2:
-        _wipe_buoys()
-        return None
-
-    obj_name, n_pairs = _maybe_build_buoys_from_samples(scene, samples, terrain)
-    if obj_name is None:
-        return None
-    return {"buoy_pairs": n_pairs, "curve": curve_obj.name, "object": obj_name}
-
-
-def _build_buoy_unit_mesh() -> tuple[list[tuple[float, float, float]], list[tuple[int, ...]], list[int]]:
-    """Return verts + faces + per-face material slots for a single
-    canonical buoy at the local origin. The buoy is centred on the
-    water surface (z=0); top cap rises to z ≈ 1.2, keel hangs to z ≈
-    -0.25. Caller transforms the verts into world position for each
-    buoy instance.
-
-    Material slots:
-      0 — body (red lacquered)
-      1 — top cap (warm emissive)
-
-    Smaller than the prop-library buoy (radius 0.4 m vs 0.6 m) so a
-    long over-water run doesn't pile big floats along the curb. Eight
-    segments — coarse enough to feel like a marker, fine enough to
-    read as round at racing distance."""
-    segs = 8
-    radius_body = 0.4
-    radius_top = 0.18
-    radius_keel = radius_body * 1.15
-    z_keel = -0.25
-    z_water = 0.0
-    z_shoulder = 1.05
-    z_top = 1.25
-
-    def ring(r: float, z: float, start_idx: int) -> tuple[list[tuple[float, float, float]], list[int]]:
-        v: list[tuple[float, float, float]] = []
-        idx: list[int] = []
-        for k in range(segs):
-            a = (k / segs) * 2.0 * math.pi
-            v.append((math.cos(a) * r, math.sin(a) * r, z))
-            idx.append(start_idx + k)
-        return v, idx
-
-    verts: list[tuple[float, float, float]] = []
-    r0_v, r0_i = ring(radius_keel, z_keel, 0)
-    verts.extend(r0_v)
-    r1_v, r1_i = ring(radius_body, z_water, segs)
-    verts.extend(r1_v)
-    r2_v, r2_i = ring(radius_body, z_shoulder, segs * 2)
-    verts.extend(r2_v)
-    r3_v, r3_i = ring(radius_top, z_top, segs * 3)
-    verts.extend(r3_v)
-
-    faces: list[tuple[int, ...]] = []
-    mats: list[int] = []
-
-    def strip(a: list[int], b: list[int], mat: int) -> None:
-        for k in range(segs):
-            j = (k + 1) % segs
-            faces.append((a[k], a[j], b[j], b[k]))
-            mats.append(mat)
-
-    strip(r0_i, r1_i, 0)
-    strip(r1_i, r2_i, 0)
-    strip(r2_i, r3_i, 0)
-    # Top cap — single n-gon, emissive material.
-    faces.append(tuple(r3_i))
-    mats.append(1)
-    return verts, faces, mats
-
-
-def _build_buoy_strip_mesh(
-    samples: list[dict],
-    *,
-    sea_level: float,
-    spacing_m: float,
-    lateral_m: float,
-) -> bpy.types.Mesh | None:
-    """Walk the samples, lay buoy pairs (one on each side of the curve)
-    every ``spacing_m`` of arc length wherever ``sample["over_water"]``
-    is True. Returns a single merged mesh containing every buoy
-    instance, or None when no buoys would land.
-
-    Buoys sit on the water surface (Z = sea_level) regardless of the
-    curve's authored Z — bridges over open water push the racing line
-    well above the waves but the buoys mark the channel on the actual
-    water below. Lateral offset is ``lateral_m`` (absolute distance
-    from the curve), decoupled from road geometry so water-only tracks
-    work the same as road-having tracks.
-
-    Per-sample radius (``s["r"]`` from the curve's control-point
-    radius) still scales the lateral position so apexes carrying a
-    wider racing line also get a wider buoy channel."""
-    if BUOY_MESH_NAME in bpy.data.meshes:
-        bpy.data.meshes.remove(bpy.data.meshes[BUOY_MESH_NAME])
-
-    unit_verts, unit_faces, unit_mats = _build_buoy_unit_mesh()
-    verts: list[tuple[float, float, float]] = []
-    faces: list[tuple[int, ...]] = []
-    mats: list[int] = []
-
-    def add_buoy(cx: float, cy: float, cz: float) -> None:
-        base = len(verts)
-        for vx, vy, vz in unit_verts:
-            verts.append((cx + vx, cy + vy, cz + vz))
-        for f, m in zip(unit_faces, unit_mats):
-            faces.append(tuple(base + i for i in f))
-            mats.append(m)
-
-    # Step through samples in arc-length order, emitting a buoy pair
-    # at every ``spacing_m`` along the curve — but only while the
-    # current sample is over water. The accumulator resets on entering
-    # open water so the first buoy lands exactly at the shoreline
-    # transition, not at a stale offset from the last land segment.
-    arc_since_emit = float("inf")
-    placed = 0
-    for i in range(len(samples) - 1):
-        sa = samples[i]
-        sb = samples[i + 1]
-        seg_len = math.hypot(sb["x"] - sa["x"], sb["y"] - sa["y"])
-        if not sa.get("over_water", False):
-            arc_since_emit = float("inf")
-            continue
-        if arc_since_emit + seg_len < spacing_m and arc_since_emit != float("inf"):
-            arc_since_emit += seg_len
-            continue
-        # Emit at this sample's position.
-        r = float(sa.get("r", 1.0))
-        lat = lateral_m * r
-        nx = -sa["ty"]
-        ny = sa["tx"]
-        add_buoy(sa["x"] + nx * lat, sa["y"] + ny * lat, sea_level)
-        add_buoy(sa["x"] - nx * lat, sa["y"] - ny * lat, sea_level)
-        placed += 2
-        arc_since_emit = 0.0
-
-    if placed == 0:
-        return None
-
-    me = bpy.data.meshes.new(BUOY_MESH_NAME)
-    me.from_pydata(verts, [], faces)
-    me.update()
-    for i, poly in enumerate(me.polygons):
-        poly.use_smooth = True
-        poly.material_index = mats[i]
-    return me
+# Buoys live in their own module (gate_buoys.py) — they're racing-line
+# markers tied to the gate tool's half-width, not road geometry.
+# rebuild_road_main no longer triggers a buoy rebuild; the depsgraph
+# handler fires gate_buoys.rebuild_buoys on ai_spline edits directly.
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -1814,10 +1474,9 @@ def rebuild_road_main(
             bpy.data.meshes.remove(old_road_mesh)
 
     # Wipe prior guardrails before the road rebuild — they're rebuilt
-    # below from the current samples. Buoys get wiped/built inside
-    # _maybe_build_buoys_from_samples (because the same wipe is needed
-    # by the standalone rebuild_buoys path that fires for water-only
-    # tracks without a road_main).
+    # below from the current samples. Buoys are decoupled (see
+    # gate_buoys.py) and rebuild on their own schedule keyed off the
+    # racing line, not the road curve.
     old_aux = bpy.data.objects.get(GUARDRAIL_OBJECT_NAME)
     if old_aux is not None:
         old_aux_mesh = old_aux.data
@@ -1904,15 +1563,6 @@ def rebuild_road_main(
     obj["kind"] = "track"
     scene.collection.objects.link(obj)
 
-    # ── Buoy strip ─────────────────────────────────────────────────
-    # Marker buoys along the road edges wherever the road sits above
-    # open water. Delegated to :func:`_maybe_build_buoys_from_samples`
-    # because the same build also runs from :func:`rebuild_buoys` on
-    # water-only tracks (no road_main yet). Both call sites must keep
-    # the same wipe/build contract so the auto-rebuild handler can
-    # switch between them without leaving stale buoys behind.
-    buoy_object_name, n_buoy_pairs = _maybe_build_buoys_from_samples(scene, samples, terrain)
-
     # ── Guardrails ────────────────────────────────────────────────
     # Procedural Armco rail on the outside of sharp corners. Reads
     # the per-sample smoothed kappa stamped above. Threshold is in
@@ -1982,8 +1632,6 @@ def rebuild_road_main(
         "floating_samples": sum(
             1 for s in samples if float(s.get("conform", 1.0)) < 0.5
         ),
-        "buoy_pairs": n_buoy_pairs,
-        "buoy_object": buoy_object_name,
         "guardrail_object": guardrail_object_name,
     }
 
@@ -2032,12 +1680,9 @@ class HOVERBIKE_OT_build_road(Operator):
             f", {result['floating_samples']} floating samples"
             if result['floating_samples'] > 0 else ""
         )
-        # Decoration extras — both are quiet on inland tracks with no
-        # buoys + no sharp corners, so only mention them when at least
-        # one made it through.
+        # Decoration extras — quiet on tracks with no sharp corners, so
+        # only mention them when at least one made it through.
         deco_bits: list[str] = []
-        if result.get("buoy_pairs", 0) > 0:
-            deco_bits.append(f"{result['buoy_pairs']} buoy pairs")
         if result.get("guardrail_object"):
             deco_bits.append("guardrails")
         deco_msg = f" (+{', '.join(deco_bits)})" if deco_bits else ""
@@ -2059,53 +1704,6 @@ class HOVERBIKE_OT_build_road(Operator):
                 f"HV_RoadConform attached on {result['terrain']}{was_disabled_msg} — "
                 "terrain reshapes live; edit the curve to retune (auto-rebuilds in 0.2s).",
             )
-        return {"FINISHED"}
-
-
-class HOVERBIKE_OT_rebuild_buoys(Operator):
-    """Build (or refresh) the ``road_buoys`` strip from the resolved
-    race-path curve. Useful for kickstarting buoys on an existing
-    .blend without nudging the spline first — after this runs once,
-    the depsgraph handler keeps them in sync on subsequent edits.
-
-    Works on water-only tracks too (no ``road_main`` required) — the
-    operator samples ``road_curve_main`` if present, else
-    ``ai_spline_main``."""
-
-    bl_idname = "hoverbike.rebuild_buoys"
-    bl_label = "Rebuild Buoys"
-    bl_description = (
-        "Build / refresh marker buoys along the racing line's edges "
-        "wherever the curve crosses open water. Samples road_curve_main "
-        "if present, else ai_spline_main; safe to spam"
-    )
-    bl_options = {"REGISTER", "UNDO"}
-
-    def execute(self, context):
-        result = rebuild_buoys(context.scene)
-        if result is None:
-            scene = context.scene
-            sea = float(getattr(scene, "hoverbike_water_height", 0.0))
-            has_water = sea != 0.0 or bpy.data.objects.get("water_volume_main") is not None
-            if not has_water:
-                self.report(
-                    {"WARNING"},
-                    "No buoys built — set Sea level (Water panel) or add a water volume.",
-                )
-            elif _resolve_road_curve() is None:
-                self.report(
-                    {"WARNING"},
-                    "No buoys built — no ai_spline_main or road_curve_main in scene.",
-                )
-            elif not bool(getattr(scene, "hoverbike_road_buoys_enabled", True)):
-                self.report({"INFO"}, "Buoys disabled — toggle Auto buoys to enable.")
-            else:
-                self.report({"INFO"}, "No samples cross open water — no buoys placed.")
-            return {"FINISHED"}
-        self.report(
-            {"INFO"},
-            f"Buoys: {result['buoy_pairs']} pair(s) along {result['curve']}.",
-        )
         return {"FINISHED"}
 
 
@@ -2571,7 +2169,6 @@ class HOVERBIKE_OT_mark_selected_conforming(Operator):
 _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_add_road_starter_curve,
     HOVERBIKE_OT_build_road,
-    HOVERBIKE_OT_rebuild_buoys,
     HOVERBIKE_OT_bake_terrain_to_road,
     HOVERBIKE_OT_reconform_terrain_to_road,
     HOVERBIKE_OT_mark_selected_floating,
@@ -2593,9 +2190,6 @@ _SCENE_PROP_NAMES: tuple[str, ...] = (
     "hoverbike_road_bank_smooth_passes",
     "hoverbike_road_conform_clearance",
     "hoverbike_road_fill_shelf_width",
-    "hoverbike_road_buoys_enabled",
-    "hoverbike_road_buoy_spacing_mult",
-    "hoverbike_road_buoy_side_offset_mult",
     "hoverbike_road_guardrails_enabled",
     "hoverbike_road_guardrail_kappa",
     "hoverbike_road_guardrail_height",
@@ -2610,18 +2204,12 @@ def _on_road_prop_update(self, context):
     Routes through handlers._schedule_rebuild so the rebuild is
     debounced — slider drags don't trigger a rebuild per frame, only
     one rebuild ~0.2 s after the user lets go. Silent no-op if the
-    handlers module isn't registered yet (early init).
-
-    Always schedules "buoys" alongside "road" because the same props
-    (width, curb width, master toggles) shape both. The handler skips
-    the standalone buoy rebuild when the road rebuild already fired
-    on the same tick (rebuild_road_main rebuilds buoys inline)."""
+    handlers module isn't registered yet (early init)."""
     try:
         from . import handlers as _handlers
     except ImportError:
         return
     _handlers._schedule_rebuild("road")
-    _handlers._schedule_rebuild("buoys")
 
 
 def register() -> None:
@@ -2754,43 +2342,6 @@ def register() -> None:
             "shelf for steep cliff roads"
         ),
         default=3.0, min=0.0, max=40.0, precision=1,
-    )
-    # Buoy marker placement — F1-curb-style buoys hugging the road
-    # edges wherever the road sits above open water. Detected by a
-    # downward raycast on the terrain at each sample's XY.
-    bpy.types.Scene.hoverbike_road_buoys_enabled = BoolProperty(
-        name="Auto buoys (over water)",
-        description=(
-            "Place marker buoys along both road edges wherever the road sits "
-            "above open water. Buoys float at sea level; samples flagged by a "
-            "raycast hitting terrain below the water surface"
-        ),
-        default=True,
-        update=_on_road_prop_update,
-    )
-    bpy.types.Scene.hoverbike_road_buoy_spacing_mult = FloatProperty(
-        name="Buoy spacing (× gate w)",
-        description=(
-            "Arc-length distance between buoy pairs, expressed as a "
-            "multiplier of the gate's full width (= 2 × hoverbike_gate_half_width). "
-            "Default 1.5 = buoys spaced 1.5× as far apart as a gate is wide, "
-            "so on default geometry (gate half-width 14 m) pairs land every 42 m"
-        ),
-        default=1.5, min=0.1, max=10.0, precision=2,
-        update=_on_road_prop_update,
-    )
-    bpy.types.Scene.hoverbike_road_buoy_side_offset_mult = FloatProperty(
-        name="Buoy side offset (× gate w)",
-        description=(
-            "Lateral distance from the curve to each buoy, expressed as "
-            "a multiplier of the gate's full width (= 2 × hoverbike_gate_half_width). "
-            "Default 1.5 = each buoy lane sits 1.5× a gate's width out from the racing "
-            "line, so on default geometry (gate half-width 14 m → full 28 m) buoys "
-            "land 42 m off the curve. Per-sample radius scales this too so widened "
-            "apexes carry a wider buoy channel"
-        ),
-        default=1.5, min=0.0, max=10.0, precision=2,
-        update=_on_road_prop_update,
     )
     # Guardrail placement — procedural Armco-style rail on the outside
     # edge of contiguous runs where smoothed curvature exceeds the

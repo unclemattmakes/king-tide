@@ -57,6 +57,7 @@ from . import (
     downtown,
     emitter,
     export,
+    gate_buoys,
     ghost_lap,
     handlers,
     horizon,
@@ -117,6 +118,9 @@ _MODULES = (
     # ROAD_CURVE_NAME / _resolve_road_curve from there at operator
     # execution time without an import cycle.
     road_conform_gn,
+    # gate_buoys registers after road because rebuild_buoys lazily
+    # imports _sample_road_path from road.py at call time.
+    gate_buoys,
     previews,
     thumbnail,
     export,

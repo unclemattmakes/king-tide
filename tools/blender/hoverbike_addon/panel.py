@@ -763,17 +763,6 @@ class HOVERBIKE_PT_track_road(_SelectionDrivenPanel, Panel):
         row.prop(scene, "hoverbike_road_curb_height", text="Curb h")
         layout.prop(scene, "hoverbike_road_curb_stripe_length", text="Stripe (m)")
         layout.separator()
-        # Auto buoys — F1-curb-style marker buoys at the road edges
-        # wherever the road sits above open water (terrain raycast
-        # below sea level). Disabled cheaply via the master toggle so
-        # inland tracks pay nothing.
-        layout.label(text="Buoys (auto, over water):", icon="MOD_OCEAN")
-        layout.prop(scene, "hoverbike_road_buoys_enabled", text="Enable")
-        if scene.hoverbike_road_buoys_enabled:
-            row = layout.row(align=True)
-            row.prop(scene, "hoverbike_road_buoy_spacing_mult", text="Spacing ×gw")
-            row.prop(scene, "hoverbike_road_buoy_side_offset_mult", text="Offset ×gw")
-        layout.separator()
         # Auto guardrails — Armco rail on the outside of contiguous
         # sharp-corner runs. Reads the smoothed kappa stamp the bank
         # calc already drives off, so threshold reads as "minimum
@@ -1484,23 +1473,19 @@ class HOVERBIKE_PT_track_gameplay(_SelectionDrivenPanel, Panel):
         )
         layout.separator()
 
-        # Buoys — F1-curb-style markers along the racing-line edges
-        # wherever the spline crosses open water. Lives in the gameplay
-        # panel because it's spline-driven (works on water-only tracks
-        # like Sandbar with no road_main); the road panel also exposes
-        # the same toggles for road-having tracks where authors tune
-        # them alongside the road width.
+        # Buoys — floating markers along the racing-line edges wherever
+        # the spline crosses open water. Lateral offset uses the gate
+        # half-width so the buoys read as "edge of the racing lane,"
+        # spacing uses the gate full-width × the multiplier prop so
+        # rhythm tracks gate density.
         layout.label(text="Buoys (auto, over water):", icon="MOD_OCEAN")
-        layout.prop(scene, "hoverbike_road_buoys_enabled", text="Enable")
-        if scene.hoverbike_road_buoys_enabled:
+        layout.prop(scene, "hoverbike_gate_buoys_enabled", text="Enable")
+        if scene.hoverbike_gate_buoys_enabled:
             row = layout.row(align=True)
-            row.prop(scene, "hoverbike_road_buoy_spacing_mult", text="Spacing ×gw")
-            row.prop(scene, "hoverbike_road_buoy_side_offset_mult", text="Offset ×gw")
-            row = layout.row(align=True)
-            row.prop(scene, "hoverbike_road_width", text="Track width")
-            row.prop(scene, "hoverbike_road_curb_width", text="Curb w")
+            row.prop(scene, "hoverbike_gate_buoy_spacing_mult", text="Spacing ×gw")
+            row.prop(scene, "hoverbike_gate_buoy_side_offset_mult", text="Offset ×gw")
         layout.operator("hoverbike.rebuild_buoys", icon="FILE_REFRESH")
-        if bpy.data.objects.get("road_buoys") is not None:
+        if bpy.data.objects.get("gate_buoys") is not None:
             layout.label(text="Live; auto-rebuild follows spline edits", icon="LINKED")
         layout.separator()
 
