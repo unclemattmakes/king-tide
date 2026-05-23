@@ -68,6 +68,7 @@ from . import (
     panel,
     placement_helper,
     previews,
+    prop_bake,
     ramp,
     road,
     road_conform_gn,
@@ -138,6 +139,10 @@ _MODULES = (
     # references already exists in bpy.types when its draw() methods
     # run.
     panel,
+    # prop_bake's HOVERBIKE_PT_props_library_bake sub-panel parents on
+    # HOVERBIKE_PT_panel (in panel.py), so it MUST register after
+    # panel. The save_pre handler it also registers is order-agnostic.
+    prop_bake,
     # menu registers absolute-last — its submenu/pie classes call into
     # operators registered by every module above, and its
     # VIEW3D_MT_editor_menus append needs to land after Blender's stock
