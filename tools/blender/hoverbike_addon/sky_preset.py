@@ -18,11 +18,11 @@ a small ``SkyConfig`` block in the track JSON:
     dusk, 270 ≈ deep night.
   - ``colorGrade`` (preset name) — bundled LUT preset
     (``miami_pastel``, ``tokyo_neon``, etc.).
-  - ``bloom`` (0..2) — intensity multiplier on a renderer bloom pass.
-    NOTE: no bloom pass is wired into the WebGPU renderer yet; the
-    field round-trips through authoring + JSON but the runtime only
-    logs it. Useful authoring surface today, will become live when
-    the post pipeline lands.
+  - ``bloom`` (0..2) — intensity multiplier on the renderer's bloom
+    post-pass (see ``src/engine/render/post-pipeline.ts``). Typical
+    ranges: 0.2–0.4 daytime, 0.4–0.7 sunset / overcast, 0.7–1.0
+    neon / night. Above ~1.2 the bright sky starts saturating the
+    framebuffer, so test the worst-case sun angle before pinning.
   - ``seaStateBeaufort`` (0..12) — drives a global amplitude scalar
     on the wave field's base spectrum. Beaufort 4 ≈ 1.0× (current
     default look). The runtime computes the multiplier via
@@ -285,11 +285,10 @@ def register() -> None:
     bpy.types.Scene.hoverbike_sky_bloom = FloatProperty(
         name="Bloom",
         description=(
-            "Intensity multiplier on the renderer's bloom pass. NOTE: no "
-            "bloom pass is wired into the WebGPU renderer yet — the field "
-            "round-trips through authoring + JSON but the runtime only "
-            "logs it. Useful authoring surface today; goes live when the "
-            "post pipeline lands."
+            "Intensity multiplier on the renderer's bloom post-pass. "
+            "Typical ranges: 0.2–0.4 daytime, 0.4–0.7 sunset/overcast, "
+            "0.7–1.0 neon/night. Above ~1.2 bright skies start saturating "
+            "the framebuffer; test the worst-case sun angle first."
         ),
         default=0.0,
         min=0.0,

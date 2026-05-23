@@ -17,7 +17,7 @@
     "fogFar": 2200.0,
     "timeOfDay": 0.0,
     "colorGrade": "neutral",
-    "bloom": 0.0,
+    "bloom": 0.4,
     "seaStateBeaufort": 4
   },
   "audio": {

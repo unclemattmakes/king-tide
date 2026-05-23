@@ -297,6 +297,20 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   const wet = smoothstep(float(wetBand), float(0.0), abs(positionWorld.y))
   const withWet = mix(saturated, saturated.mul(vec3(0.72, 0.76, 0.86)), wet)
 
+  // ── Underwater refraction tint ──────────────────────────────────────
+  // Submerged geometry (y < 0) gets a Beer-Lambert-like cyan tint that
+  // ramps in with depth, plus a slight darkening. Reads as "the water
+  // is pulling colour out of this rock" at race speed — the wet band
+  // above only covers the splash zone; this kicks in below it. The
+  // depth scale is generous (10 m) so the tint progresses across the
+  // racing-relevant depth band without saturating at the seabed.
+  const depth = max(float(0.0), positionWorld.y.negate())
+  const depthFac = clamp(depth.mul(float(0.1)), float(0), float(1))
+  // Cyan-shift colour multiplier — keeps geometry recognisable but
+  // pulls warm tones out the deeper you go.
+  const refractTint = mix(vec3(1.0, 1.0, 1.0), vec3(0.45, 0.65, 0.78), depthFac)
+  const withRefract = withWet.mul(refractTint)
+
   // ── Baked vertex attributes (AO + path wear) ─────────────────────────
   // Vertex-baked AO + racing-line wear from the addon's "Bake AO + Path
   // Wear" operator. The GN graph stamps these into COLOR_0.G and
@@ -307,7 +321,7 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   // AO multiplies into the colour with a 0.55 floor so deep cavities
   // darken visibly but never go to black. ``vc.g`` ∈ [0, 1].
   const ao = clamp(vc.g, float(0), float(1))
-  const withAO = withWet.mul(mix(float(0.55), float(1.0), ao))
+  const withAO = withRefract.mul(mix(float(0.55), float(1.0), ao))
   // Path-worn mixes the diffuse toward the dirt-track tint. Capped at
   // 0.8 so even fully worn vertices keep a hint of the underlying
   // biome colour.

@@ -12,6 +12,8 @@ import {
   type PropType,
   SKY_COLOR_GRADES,
   type SkyColorGrade,
+  SKY_TONE_MAPPINGS,
+  type SkyToneMapping,
   type SkyConfig,
   type TerrainShaderConfig,
   type Track,
@@ -736,6 +738,15 @@ function readOptionalSky(raw: unknown): SkyConfig | null {
       throw new Error(`track-json: sky.seaStateBeaufort must be in [0, 12] (got ${v})`)
     }
     out.seaStateBeaufort = v
+  }
+  if ('toneMapping' in raw) {
+    const v = raw.toneMapping
+    if (typeof v !== 'string' || !SKY_TONE_MAPPINGS.includes(v as SkyToneMapping)) {
+      throw new Error(
+        `track-json: sky.toneMapping must be one of ${SKY_TONE_MAPPINGS.join(', ')} (got ${String(v)})`,
+      )
+    }
+    out.toneMapping = v as SkyToneMapping
   }
   return out
 }

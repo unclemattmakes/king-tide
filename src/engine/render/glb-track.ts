@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { ExportedKind } from '@/engine/asset-kinds'
+import { applyDecalsToScene } from '@/engine/render/decal-system'
 import { applyFoliageSway } from '@/engine/render/foliage-sway'
 import { applyLavaRiverMaterialToScene } from '@/engine/render/lava-river-material'
 import { applyTerrainShaderToScene } from '@/engine/render/terrain-shader'
@@ -139,6 +140,12 @@ export async function loadGlbTrackVisuals(
   // reads the player's emissive-landmarks setting; subsequent setting
   // changes mutate the same uniform without re-loading the track.
   applyLavaRiverMaterialToScene(scene, playerSettings.emissiveLandmarks)
+  // Decal overlays — alpha-blend any `kind=decal` meshes onto the
+  // surfaces they were authored on. Fire-and-forget: the atlas texture
+  // loads async, but the material profile (depthWrite off, polygon
+  // offset, no shadows) is applied even if the atlas fetch fails so
+  // the meshes don't z-fight or cast strange shadows in the interim.
+  void applyDecalsToScene(scene)
   return {
     scene,
     parsedJson,
@@ -185,6 +192,8 @@ export function attachTrackColliders(group: THREE.Object3D, phys: PhysicsWorld):
     // `attachTrackColliders` is called directly with an un-stripped
     // group. Horizon rings live 1.4 km away and never collide.
     if (obj.userData?.kind === ExportedKind.HORIZON) return
+    // Decals are render-only overlays — never collide with them.
+    if (obj.userData?.kind === ExportedKind.DECAL) return
     // Particle emitters are empties in Blender that occasionally get
     // converted to placeholder meshes by the exporter (cube primitive
     // as a viewport gizmo). Either way the particle system reads them

@@ -21,6 +21,7 @@
 import * as THREE from 'three'
 import { updateSwayTime, updateWind } from '@/engine/render/foliage-sway'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
+import { renderFrame } from '@/engine/render/renderer-service'
 import type { SkySystem } from '@/engine/render/sky'
 import type { BikeImpact } from '@/engine/render/water'
 import { updateUnderwaterFog } from '@/engine/render/water'
@@ -328,7 +329,7 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     physicsDebug.tick()
 
     spectatorHud.refresh()
-    renderer.render(scene, camera)
+    renderFrame(scene, camera)
 
     state.frame += 1
     framesThisSecond += 1

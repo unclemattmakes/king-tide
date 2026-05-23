@@ -89,6 +89,15 @@ export const ExportedKind = {
    *  override. Soft-blends across `blendRadius` so the boundary isn't
    *  visible. Authored as `wave_zone_NN` empties in Blender. */
   WAVE_ZONE: 'wave_zone',
+
+  /** Decal mesh — a thin projected quad that lays on top of terrain /
+   *  road geometry to add wear, paint, posters, oil stains, etc.
+   *  Authored as `decal_NN` meshes in Blender; the runtime walks them
+   *  on load and applies the decal material profile (alpha-blend,
+   *  depth-test ON / write OFF, slight polygon offset to avoid
+   *  z-fighting with the surface, no shadow casting). Skipped by the
+   *  trimesh-collider attach step — decals are render-only. */
+  DECAL: 'decal',
 } as const
 
 export type ExportedKindValue = (typeof ExportedKind)[keyof typeof ExportedKind]

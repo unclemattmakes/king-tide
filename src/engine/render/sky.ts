@@ -20,7 +20,9 @@ import {
   vec3,
 } from 'three/tsl'
 import { MeshBasicNodeMaterial, PMREMGenerator, type Renderer } from 'three/webgpu'
-import type { SkyColorGrade, SkyConfig } from '@/game/tracks/types'
+import type { SkyColorGrade, SkyConfig, SkyToneMapping } from '@/game/tracks/types'
+import { createPostPipeline, type PostPipeline } from './post-pipeline'
+import { setActivePostPipeline } from './renderer-service'
 
 /**
  * Sky / atmosphere system.
@@ -67,12 +69,34 @@ const DEFAULT_SKY: Required<SkyConfig> = {
   timeOfDay: 0,
   // 'neutral' is a no-op grade (identity mix on the dome shader).
   colorGrade: 'neutral',
-  // 0 = off until the renderer's bloom pass exists.
+  // 0 = bloom contributes nothing. The post-pipeline still runs the chain
+  // but the additive bloom contribution is muted, so this is "off" from
+  // the player's POV at near-zero cost.
   bloom: 0,
   // Beaufort 4 (gentle to moderate breeze) is the historical default look
   // the wave list was authored against — leaving the field at 4 makes
   // boot a no-op on tracks that haven't dialled the knob.
   seaStateBeaufort: 4,
+  // 'aces_filmic' is Three's default — punchy, high-contrast. Tracks
+  // can override per palette (AgX for golden-hour, neutral for crisp
+  // daylight, etc.).
+  toneMapping: 'aces_filmic',
+}
+
+/** Map a SkyToneMapping name → Three.js constant. */
+function resolveToneMapping(name: SkyToneMapping): THREE.ToneMapping {
+  switch (name) {
+    case 'neutral':
+      return THREE.NeutralToneMapping
+    case 'aces_filmic':
+      return THREE.ACESFilmicToneMapping
+    case 'agx':
+      return THREE.AgXToneMapping
+    case 'reinhard':
+      return THREE.ReinhardToneMapping
+    case 'cineon':
+      return THREE.CineonToneMapping
+  }
 }
 
 /**
@@ -345,14 +369,29 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   const cfg: Required<SkyConfig> = { ...DEFAULT_SKY, ...config }
   const tintColor = new THREE.Color(cfg.tint)
   const grade = SKY_GRADE_TABLE[cfg.colorGrade] ?? SKY_GRADE_TABLE.neutral
-  // bloom is round-tripped + logged but not yet applied — the WebGPU
-  // renderer has no post-process pass wired up. When that lands, this
-  // value should drive the bloom node's strength uniform.
-  if (cfg.bloom > 0) {
+  // Per-track tone-mapping. Three.js exposes one global setter on the
+  // renderer; we push the per-track value here at construction. There's
+  // no setter to "restore" — successive tracks just overwrite. The
+  // RenderPipeline picks the value up at material build time (its
+  // outputColorTransform composes a RenderOutputNode internally).
+  renderer.toneMapping = resolveToneMapping(cfg.toneMapping)
+
+  // Bloom post-pass — wired through `renderFrame()` in `renderer-service`.
+  // `cfg.bloom` is the per-track strength multiplier (0..2). Building the
+  // pipeline is cheap when strength is 0 (the chain still composes, but
+  // bloom contributes nothing). Track JSON authors leave it 0 by default.
+  let postPipeline: PostPipeline | null = null
+  try {
+    postPipeline = createPostPipeline({
+      renderer,
+      scene,
+      camera,
+      bloomStrength: cfg.bloom,
+    })
+    setActivePostPipeline(postPipeline)
+  } catch (e) {
     // eslint-disable-next-line no-console
-    console.info(
-      `[sky] bloom=${cfg.bloom} requested but no bloom pass is wired yet; ignoring`,
-    )
+    console.warn('[sky] failed to build post-pipeline; rendering without bloom', e)
   }
 
   // ── Shader uniforms (mutated each tick from CPU palette eval) ───────────
@@ -727,6 +766,11 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
     }
     scene.environment = null
     pmremGen.dispose()
+    if (postPipeline) {
+      setActivePostPipeline(null)
+      postPipeline.dispose()
+      postPipeline = null
+    }
   }
 
   // Sun, palette, lights, fog, water uniforms, and the PMREM env-map are
