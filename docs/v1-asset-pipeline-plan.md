@@ -42,7 +42,8 @@ Worth naming explicitly so the gap analysis is fair:
 - **Authoring tools that act like a level editor**: road tool with
   banking + F1 curbs + terrain conform, ramp tool, tunnel Boolean,
   heightmap import, snap-to-terrain, snap-starts-to-spline,
-  auto-place-ramps-at-curvature-peaks, live spline-edit previews.
+  reverse-spline (re-anchors the start grid + flips gate previews),
+  curve-constrained placement helper, live spline-edit previews.
 - **OceanFFT renderer** ([src/engine/render/ocean-fft/](../src/engine/render/ocean-fft/))
   with foam-feedback already exists — wave-mastery's *render* layer is built.
 - **Landmark library scaffold** ([tools/blender/seed_landmarks_library.py](../tools/blender/seed_landmarks_library.py))

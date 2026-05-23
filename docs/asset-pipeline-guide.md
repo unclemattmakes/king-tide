@@ -91,12 +91,26 @@ orange wireframe. See
 
 ### Props (`specs/props/<id>.json`)
 
-Editor-placeable static decor. Spec picks a kit part by name, applies
+Editor-placeable decor. Spec picks a kit part by name, applies
 scale + tint, and declares a primitive collider (box / sphere /
 cylinder / capsule). The in-app track editor's *+Asset* dropdown is
 populated from `manifest.json` — placing one writes
 `{ type: 'asset', assetId, position, rotation, size }` into the
 track JSON, and the runtime preloads the GLB at boot.
+
+**Wave-rider opt-in.** Adding a `waveRider: { archetype: 'buoy' | 'log' }`
+block to a prop spec stamps `wave_rider_archetype` on the GLB's
+`prop_root` (see [`build_prop.py`](../tools/blender/build_prop.py:95)).
+At load time the runtime's [`prop-loader.ts`](../src/game/assets/prop-loader.ts:124)
+picks up the field and routes those placements through the wave-rider
+entity factory ([`src/game/entities/props.ts`](../src/game/entities/props.ts:59))
++ render system instead of the static-prop path — kinematic Rapier
+body driven by analytic wave sampling, with spring-damped impact
+perturbation. `buoy` and `log` are the current archetypes; tuning
+presets live in [`src/game/components/wave-rider.ts`](../src/game/components/wave-rider.ts:66).
+Track-side wave-rider buoys are also auto-emitted from the Blender
+addon's racing-line buoy tool — see the [Wave-rider buoys](./blender-pipeline-guide.md#wave-rider-buoys)
+section of the Blender pipeline guide.
 
 ### Tracks (`specs/tracks/<id>.json`)
 
@@ -191,6 +205,16 @@ Props still use the shared kit at `tools/blender/lib/prop_kit.blend`
 (parametric small set, no per-prop .blend yet). Edit + save → watcher
 rebuilds. Use `tools/blender/seed_prop_kit.py` to regenerate
 placeholders.
+
+Individual parts can also be seeded by a focused script — see
+[`tools/blender/seed_buoy_kit_part.py`](../tools/blender/seed_buoy_kit_part.py)
+for the pattern. The script wipes any pre-existing `buoy` datablock,
+rebuilds the mesh from explicit ring/strip math (so proportions are
+tunable via constants at the top of the file), and saves back into
+`prop_kit.blend`. Re-run with
+`"$BLENDER_EXE" --background tools/blender/lib/prop_kit.blend --python tools/blender/seed_buoy_kit_part.py`
+followed by `pnpm gen:props` (rebuilds every spec under `specs/props/`,
+including `buoy.glb`) to refresh the deployed GLB.
 
 ### Add a brand-new bike
 
