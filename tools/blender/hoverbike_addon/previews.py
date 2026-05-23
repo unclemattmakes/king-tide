@@ -197,6 +197,281 @@ def _ensure_prop_gate_mesh_linked(repo_root: str | None) -> bpy.types.Mesh | Non
     return bpy.data.meshes.get(PROP_GATE_MESH_NAME)
 
 
+# ────────────────────────────────────────────────────────────────────
+# Start / finish gate decorations
+# ────────────────────────────────────────────────────────────────────
+#
+# Mirrors what the runtime adds for cp.index === 0 in
+# `src/engine/render/track-mesh.ts:289` so the Blender preview of the
+# starting gate matches what the player sees: checkered banner under the
+# crossbar, checkered ground stripe between the pillars, label box
+# above. We also add two authoring-only extras the runtime doesn't
+# bother with — a "START" text sign and a big flat forward-arrow on the
+# ground — so when the author is looking at the scene from any angle,
+# they can immediately tell which direction the racing line runs.
+
+_START_GATE_BLACK_MAT = "_hoverbike_start_gate_black"
+_START_GATE_WHITE_MAT = "_hoverbike_start_gate_white"
+_START_GATE_ARROW_MAT = "_hoverbike_start_gate_arrow"
+_START_GATE_TEXT_MAT = "_hoverbike_start_gate_text"
+
+
+def _ensure_preview_material(name: str, rgba: tuple) -> bpy.types.Material:
+    """Lookup-or-create a flat-shaded material with viewport color set
+    from ``rgba``. Workbench (solid) shading uses ``diffuse_color`` and
+    Material Preview / EEVEE read the Principled BSDF base colour, so
+    we stamp both — the preview reads the same regardless of which
+    shading mode the author has the viewport in."""
+    mat = bpy.data.materials.get(name)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(name)
+    mat.diffuse_color = rgba
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf is not None:
+        bsdf.inputs["Base Color"].default_value = rgba
+        if "Roughness" in bsdf.inputs:
+            bsdf.inputs["Roughness"].default_value = 0.85
+    return mat
+
+
+def _start_gate_checker_mesh(
+    name: str, width: float, height: float, nx: int, ny: int, lay_flat: bool
+) -> bpy.types.Mesh:
+    """Flat checker plane built as alternating-coloured quads with two
+    material slots (black=0, white=1). Cells are tiled ``nx × ny`` over
+    ``width × height``. When ``lay_flat`` the plane lies in local XZ
+    (so it sits on the ground after the gate's rotation is applied);
+    otherwise it stands in local XY (perpendicular to the racing line,
+    matching the in-game banner). Mesh is unique-per-call so the gate-
+    preview wipe can dispose its datablock without affecting other
+    cached previews."""
+    if name in bpy.data.meshes:
+        bpy.data.meshes.remove(bpy.data.meshes[name])
+    me = bpy.data.meshes.new(name)
+    cell_w = width / nx
+    cell_h = height / ny
+    verts: list[tuple[float, float, float]] = []
+    faces: list[tuple[int, int, int, int]] = []
+    mat_ids: list[int] = []
+    for j in range(ny):
+        for i in range(nx):
+            base = len(verts)
+            x0 = -width / 2 + i * cell_w
+            x1 = x0 + cell_w
+            v = -height / 2 + j * cell_h
+            v1 = v + cell_h
+            if lay_flat:
+                # XZ plane, normal +Y (up).
+                verts.extend([
+                    (x0, 0.0, v),
+                    (x1, 0.0, v),
+                    (x1, 0.0, v1),
+                    (x0, 0.0, v1),
+                ])
+            else:
+                # XY plane, normal +Z (forward).
+                verts.extend([
+                    (x0, v,  0.0),
+                    (x1, v,  0.0),
+                    (x1, v1, 0.0),
+                    (x0, v1, 0.0),
+                ])
+            faces.append((base, base + 1, base + 2, base + 3))
+            mat_ids.append((i + j) % 2)
+    me.from_pydata(verts, [], faces)
+    me.update()
+    for i, poly in enumerate(me.polygons):
+        poly.material_index = mat_ids[i]
+    return me
+
+
+def _start_gate_arrow_mesh(name: str, length: float, width: float) -> bpy.types.Mesh:
+    """Flat forward-pointing arrow in local XZ (lies on the ground
+    after gate rotation). Shaft is a rectangle, head is a triangle;
+    arrow tip is at the +Z end so it points along the racing tangent.
+    Visible from above — the canonical Blender editing angle — so a
+    glance at the scene tells the author which way the lap runs."""
+    if name in bpy.data.meshes:
+        bpy.data.meshes.remove(bpy.data.meshes[name])
+    me = bpy.data.meshes.new(name)
+    head_len = length * 0.45
+    shaft_len = length - head_len
+    shaft_w = width * 0.4
+    head_w = width
+    z_tail = -length / 2
+    z_shaft_end = z_tail + shaft_len
+    z_tip = z_tail + length
+    verts = [
+        (-shaft_w / 2, 0.0, z_tail),       # 0
+        ( shaft_w / 2, 0.0, z_tail),       # 1
+        ( shaft_w / 2, 0.0, z_shaft_end),  # 2
+        (-shaft_w / 2, 0.0, z_shaft_end),  # 3
+        (-head_w / 2,  0.0, z_shaft_end),  # 4
+        ( head_w / 2,  0.0, z_shaft_end),  # 5
+        ( 0.0,         0.0, z_tip),        # 6
+    ]
+    faces = [
+        (0, 1, 2, 3),
+        (4, 5, 6),
+    ]
+    me.from_pydata(verts, [], faces)
+    me.update()
+    return me
+
+
+def _build_start_finish_extras(
+    coll: bpy.types.Collection,
+    parent_obj: bpy.types.Object,
+    placement: dict,
+    half_width: float,
+    height: float,
+) -> None:
+    """Stamp the start/finish-gate decorations beside ``parent_obj``
+    (the gate-0 preview gizmo). Each decoration is a separate object
+    in the gate-preview collection with its world transform composed
+    from the placement's tangent — they share the same rotation as
+    the gate gizmo but never inherit its scale (which is the
+    half-width-to-prop-author-half-width ratio and would stretch the
+    text + arrow if propagated). All extras get cleaned up by the
+    normal gate-preview wipe on the next rebuild.
+
+    Geometry list, all in the gate's local frame (+X = lateral,
+    +Y = up, +Z = forward):
+
+      * ``banner``  — checkered plane in XY under the crossbar
+      * ``stripe``  — checkered plane in XZ on the ground between pillars
+      * ``label``   — white box above the crossbar (matches the in-game
+        finish-line label)
+      * ``arrow``   — big flat arrow on the ground pointing +Z
+      * ``text``    — extruded "START" curve floating above the crossbar,
+        facing forward so bikes spawned behind the gate read it on
+        approach (the runtime never bothers stamping this; it's an
+        authoring-only affordance)
+    """
+    black = _ensure_preview_material(_START_GATE_BLACK_MAT, (0.02, 0.02, 0.02, 1.0))
+    white = _ensure_preview_material(_START_GATE_WHITE_MAT, (0.95, 0.95, 0.95, 1.0))
+    arrow_mat = _ensure_preview_material(
+        _START_GATE_ARROW_MAT, (1.0, 0.85, 0.15, 1.0)
+    )
+    text_mat = _ensure_preview_material(
+        _START_GATE_TEXT_MAT, (1.0, 1.0, 1.0, 1.0)
+    )
+
+    gate_rot = _gate_rotation(placement["tangent"])
+    base_loc = mathutils.Vector(placement["position"])
+    full_w = half_width * 2.0
+
+    def _link(name: str, me: bpy.types.Mesh, local_offset: mathutils.Vector) -> bpy.types.Object:
+        obj = bpy.data.objects.new(name, me)
+        obj.rotation_mode = "QUATERNION"
+        obj.rotation_quaternion = gate_rot
+        # Convert the local-frame offset to world via the gate's rotation
+        # so the decoration lands in the right spot regardless of which
+        # way the racing tangent runs.
+        obj.location = base_loc + gate_rot @ local_offset
+        obj.hide_render = True
+        obj.show_in_front = False
+        coll.objects.link(obj)
+        return obj
+
+    # 1. Checkered banner under the crossbar (matches runtime cp.index 0).
+    banner_h = 1.6
+    banner_me = _start_gate_checker_mesh(
+        f"{parent_obj.name}_banner_mesh",
+        full_w, banner_h, nx=16, ny=4, lay_flat=False,
+    )
+    banner_me.materials.append(black)
+    banner_me.materials.append(white)
+    _link(
+        f"{parent_obj.name}_banner",
+        banner_me,
+        mathutils.Vector((0.0, height - banner_h / 2.0 - 0.4, 0.0)),
+    )
+
+    # 2. Ground stripe between pillars (matches runtime).
+    stripe_me = _start_gate_checker_mesh(
+        f"{parent_obj.name}_stripe_mesh",
+        full_w, 1.6, nx=16, ny=2, lay_flat=True,
+    )
+    stripe_me.materials.append(black)
+    stripe_me.materials.append(white)
+    _link(
+        f"{parent_obj.name}_stripe",
+        stripe_me,
+        mathutils.Vector((0.0, 0.05, 0.0)),
+    )
+
+    # 3. White label box above the crossbar (matches the in-game finish
+    # label). Built as a thin cube via primitive verts.
+    label_me_name = f"{parent_obj.name}_label_mesh"
+    if label_me_name in bpy.data.meshes:
+        bpy.data.meshes.remove(bpy.data.meshes[label_me_name])
+    label_me = bpy.data.meshes.new(label_me_name)
+    lhw = half_width * 0.6
+    lhh = 0.3
+    lhd = 0.05
+    label_verts = [
+        (-lhw, -lhh, -lhd), ( lhw, -lhh, -lhd),
+        ( lhw,  lhh, -lhd), (-lhw,  lhh, -lhd),
+        (-lhw, -lhh,  lhd), ( lhw, -lhh,  lhd),
+        ( lhw,  lhh,  lhd), (-lhw,  lhh,  lhd),
+    ]
+    label_faces = [
+        (0, 1, 2, 3), (4, 5, 6, 7),
+        (0, 1, 5, 4), (2, 3, 7, 6),
+        (1, 2, 6, 5), (0, 3, 7, 4),
+    ]
+    label_me.from_pydata(label_verts, [], label_faces)
+    label_me.update()
+    label_me.materials.append(white)
+    _link(
+        f"{parent_obj.name}_label",
+        label_me,
+        mathutils.Vector((0.0, height + 1.4, 0.0)),
+    )
+
+    # 4. Ground arrow pointing +Z (forward along the tangent).
+    arrow_len = max(8.0, full_w * 0.55)
+    arrow_w = max(3.0, full_w * 0.18)
+    arrow_me = _start_gate_arrow_mesh(
+        f"{parent_obj.name}_arrow_mesh", arrow_len, arrow_w
+    )
+    arrow_me.materials.append(arrow_mat)
+    # Park it a few metres past the gate so it doesn't z-fight with the
+    # checkered stripe sitting at the gate's centre line.
+    _link(
+        f"{parent_obj.name}_arrow",
+        arrow_me,
+        mathutils.Vector((0.0, 0.08, arrow_len * 0.5 + 1.5)),
+    )
+
+    # 5. "START" text floating above the crossbar, facing forward. Text
+    # plane normal = local +Z, so bikes spawned behind the gate (and
+    # the author looking at the start grid from above-behind) read it
+    # right-way-round. Extruded so the text is also visible edge-on
+    # from a side / top view of the scene.
+    text_data_name = f"{parent_obj.name}_text_data"
+    if text_data_name in bpy.data.curves:
+        bpy.data.curves.remove(bpy.data.curves[text_data_name])
+    text_curve = bpy.data.curves.new(text_data_name, type="FONT")
+    text_curve.body = "START"
+    text_curve.align_x = "CENTER"
+    text_curve.align_y = "CENTER"
+    text_curve.size = max(2.0, height * 0.55)
+    text_curve.extrude = 0.08
+    text_curve.materials.append(text_mat)
+    text_obj = bpy.data.objects.new(f"{parent_obj.name}_text", text_curve)
+    text_obj.rotation_mode = "QUATERNION"
+    text_obj.rotation_quaternion = gate_rot
+    text_obj.location = base_loc + gate_rot @ mathutils.Vector(
+        (0.0, height + 3.0, 0.0)
+    )
+    text_obj.hide_render = True
+    coll.objects.link(text_obj)
+
+
 def _rebuild_gate_preview(scene, *, spacing: float, half_width: float, height: float) -> int:
     """Rebuild the gate-preview collection in the scene. Returns the
     number of gates placed."""
@@ -276,6 +551,14 @@ def _rebuild_gate_preview(scene, *, spacing: float, half_width: float, height: f
         # needs X-ray to stay visible against terrain.
         obj.show_in_front = not using_prop
         coll.objects.link(obj)
+
+        # Gate 0 is the start/finish — same rule the runtime uses
+        # (cp.index === 0 → isFinishLine in track-mesh.ts:46). Mirror
+        # the in-game decorations + add the authoring-only forward
+        # arrow + "START" text so the author can identify the start
+        # gate and its forward direction at a glance.
+        if i == 0:
+            _build_start_finish_extras(coll, obj, p, half_width, height)
 
     return len(placements)
 
