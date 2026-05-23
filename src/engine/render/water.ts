@@ -1456,7 +1456,13 @@ export function createWaterMesh(
   // heightmap), waterDepthFrag is the DEEP_SENTINEL (very large
   // positive number) → transmission → 0 → body collapses to
   // deepColor, which is what we want for open ocean.
-  const BODY_ABSORPTION_DEFAULT = 1
+  // 0.7 (down from 1.0) — the per-channel σ triplet softens, so the
+  // body colour holds onto more of the bright seabedColor across mid-
+  // depths instead of collapsing to deepColor by 3 m of path. Paired
+  // with the lower shallow-water alpha (see `seabedSeeThrough` below),
+  // it means the seabed reads visibly through the water in shallow-to-
+  // mid depths without the water layer adding a heavy cyan overcoat.
+  const BODY_ABSORPTION_DEFAULT = 0.7
   const bodyAbsorptionUniform = uniform(BODY_ABSORPTION_DEFAULT)
   const sigmaR = float(0.35).mul(bodyAbsorptionUniform)
   const sigmaG = float(0.06).mul(bodyAbsorptionUniform)
@@ -2176,24 +2182,23 @@ export function createWaterMesh(
   const foamEmissive = foamColor.mul(foamMask).mul(float(0.5))
   mat.emissiveNode = fresnelEmissive.add(sunGlow).add(sunDisc).add(sunStreak).add(foamEmissive)
   // View-angle-dependent shallow-seabed transparency. Only applies in
-  // shallow water where the seabed is genuinely close along the view
-  // ray — `closeness` between 0.25 m and 6 m AND scene depth must be
-  // valid. The previous formula made downward views ~55% opaque
-  // unconditionally, which on WebGPU+MSAA (where the scene-depth
-  // copy is disabled and `closeness = 0`) painted "see-through" alpha
-  // across open ocean — the user could see the terrain mesh boundary
-  // and the void past it through the water surface. Gate the
-  // transparency on `depthValidGate` (defined upstream in the
-  // Beer-Lambert pass) so open ocean / unknown-depth pixels stay
-  // fully opaque.
+  // shallow water where there's real terrain underneath — gated by
+  // `depthValidGate` (no heightmap data → open ocean → stay fully
+  // opaque, so the void past the heightmap edge never bleeds through).
   //
-  // Grazing samples (ndotv → 0) still lift alpha further toward 1.0
-  // for the long-path absorption look, but always within the
-  // shallow-water envelope; foam stamps full opacity on top.
-  const seabedSeeThrough = mix(float(0.55), float(0.96), float(1).sub(ndotv))
+  // Downward views in shallow water resolve to alpha ≈ 0.42 so the
+  // seabed reads clearly through the water without losing the water's
+  // own colour layer; grazing samples lift toward 0.88 because the
+  // view ray travels through a much longer column of water and the
+  // body absorption + reflection should dominate at those angles.
+  // The depth range extends out to ~11 m so the see-through effect
+  // doesn't snap to opaque the moment the player skims out of the
+  // ankle-deep band — terrain stays partially visible through honest
+  // mid-depth water too. Foam stamps full opacity on top.
+  const seabedSeeThrough = mix(float(0.42), float(0.88), float(1).sub(ndotv))
   // Use flat vertical water depth (same as Beer-Lambert) so the
   // shallow-seabed transparency doesn't band along wave isolines.
-  const shallowSeabedRange = float(1).sub(smoothstep(float(2), float(6), waterDepthFrag))
+  const shallowSeabedRange = float(1).sub(smoothstep(float(3), float(11), waterDepthFrag))
   const shallowTransparency = depthValidGate.mul(shallowSeabedRange)
   const depthGatedAlpha = mix(float(0.98), seabedSeeThrough, shallowTransparency)
   mat.opacityNode = mix(depthGatedAlpha, float(0.98), foamMask)
