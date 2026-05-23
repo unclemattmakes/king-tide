@@ -653,6 +653,118 @@ class HOVERBIKE_OT_demote_gates_to_spline(Operator):
 # ────────────────────────────────────────────────────────────────────
 
 
+class HOVERBIKE_OT_reverse_spline(Operator):
+    """Flip the racing direction by reversing ``ai_spline_main``'s
+    control point order. Every spline inside the curve object is
+    reversed in place (cyclic flag preserved), and for Bezier splines
+    each point's ``handle_left`` and ``handle_right`` swap — without
+    the swap, the reversed curve would still travel the same arcs but
+    the handle-shape would point "the wrong way" at each control
+    point.
+
+    Effect on the rest of the scene (all automatic via the depsgraph
+    handler in handlers.py):
+
+      * Gate preview rebuilds in the new direction, so gate_preview_00
+        ends up at the same physical point but its tangent points the
+        other way — the START decorations (banner, ground arrow,
+        text) flip with it.
+      * Starts bound to the spline (the default after add_starts)
+        re-snap: same physical XY at t=0 but the new tangent reverses
+        their facing AND the back-off direction, so the grid moves to
+        the opposite side of the starting line and aims down the new
+        forward direction.
+      * Turn indicators / buoys / road rebuild against the new spline.
+
+    Starts in *unbound* mode are left where they are — the operator
+    doesn't touch start_00 / start_01 directly, on the assumption that
+    an unbound author has hand-placed them and wants to retain that."""
+
+    bl_idname = "hoverbike.reverse_spline"
+    bl_label = "Reverse Spline Direction"
+    bl_description = (
+        "Flip the racing direction by reversing ai_spline_main's control "
+        "point order. Gate preview, bound starts, buoys, and turn "
+        "indicators rebuild against the new direction automatically"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        sp = bpy.data.objects.get("ai_spline_main")
+        return sp is not None and sp.type == "CURVE"
+
+    def execute(self, context):
+        sp = bpy.data.objects.get("ai_spline_main")
+        if sp is None or sp.type != "CURVE":
+            self.report({"ERROR"}, "No ai_spline_main curve to reverse.")
+            return {"CANCELLED"}
+
+        n_splines = 0
+        n_points = 0
+        for spline in sp.data.splines:
+            if spline.type == "BEZIER":
+                points = spline.bezier_points
+                # Snapshot every point's mutable state before writing,
+                # so we can safely reverse without point i overwriting
+                # point N-1-i's source before it's been read.
+                snap = [
+                    (
+                        p.co.copy(),
+                        p.handle_left.copy(),
+                        p.handle_right.copy(),
+                        p.handle_left_type,
+                        p.handle_right_type,
+                        float(p.radius),
+                        float(p.tilt),
+                    )
+                    for p in points
+                ]
+                snap.reverse()
+                for i, (co, hl, hr, hlt, hrt, radius, tilt) in enumerate(snap):
+                    p = points[i]
+                    p.co = co
+                    # Walking the curve in reverse: the original
+                    # outgoing handle (handle_right) is now the
+                    # incoming handle (handle_left), and vice versa.
+                    p.handle_left = hr
+                    p.handle_right = hl
+                    p.handle_left_type = hrt
+                    p.handle_right_type = hlt
+                    p.radius = radius
+                    p.tilt = tilt
+                n_points += len(snap)
+            else:
+                # NURBS / POLY: spline.points carries 4D coords (xyz + w).
+                points = spline.points
+                snap = [
+                    (tuple(p.co), float(p.radius), float(p.tilt), float(p.weight))
+                    for p in points
+                ]
+                snap.reverse()
+                for i, (co, radius, tilt, weight) in enumerate(snap):
+                    p = points[i]
+                    p.co = co
+                    p.radius = radius
+                    p.tilt = tilt
+                    p.weight = weight
+                n_points += len(snap)
+            n_splines += 1
+
+        # update_tag on the curve datablock so the depsgraph fires the
+        # is_updated_geometry signal — handlers.py's watch on
+        # ai_spline_main then schedules the dependent rebuilds (gates,
+        # turns, helper, road, bound starts, buoys).
+        sp.data.update_tag()
+
+        self.report(
+            {"INFO"},
+            f"Reversed {n_splines} spline(s) ({n_points} control points). "
+            f"Racing direction flipped; previews + bound starts re-snap on next tick.",
+        )
+        return {"FINISHED"}
+
+
 class HOVERBIKE_OT_shift_spline_off_obstacles(Operator):
     """Push every ``ai_spline_main`` control point that clips into a
     tall kind=track mesh out of that mesh's XY footprint plus a
@@ -1128,6 +1240,7 @@ _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_unbind_start_from_spline,
     HOVERBIKE_OT_add_ramp_at_spline_t,
     HOVERBIKE_OT_auto_place_ramps,
+    HOVERBIKE_OT_reverse_spline,
     HOVERBIKE_OT_shift_spline_off_obstacles,
     HOVERBIKE_OT_materialize_gates_to_cp_empties,
     HOVERBIKE_OT_demote_gates_to_spline,
