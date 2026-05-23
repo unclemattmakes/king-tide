@@ -58,45 +58,49 @@ def _boost_pad_material() -> bpy.types.Material:
 
 
 def _build_boost_pad_gizmo_mesh(
-    name: str, *, half_width: float, half_depth: float
+    name: str, *, half_width: float, half_height: float, half_depth: float
 ) -> bpy.types.Mesh:
-    """Pad slab in local +Y-forward coords: a flat rectangle in the XY
-    plane (slab thickness ~0.1 m) with a forward-pointing arrow on top
-    so the boost direction is unambiguous in the viewport. The slab
-    matches the runtime collider's ``halfWidth × halfDepth`` bounds so
-    visual placement reflects the actual trigger volume."""
+    """Pad trigger volume in local +Y-forward coords. The mesh is an
+    edges-only box (``halfWidth × halfHeight × halfDepth``) centred on
+    the empty's origin, plus a forward-pointing arrow on the bottom
+    interior face so the boost direction is unambiguous.
+
+    Edges-only means the box reads as a wireframe in Blender's solid
+    shading without z-fighting against terrain or road geometry — the
+    runtime renders its own filled wireframe via ``makePadHelper`` /
+    ``createBoostPadMesh``."""
     if name in bpy.data.meshes:
         bpy.data.meshes.remove(bpy.data.meshes[name])
     me = bpy.data.meshes.new(name)
     hw = half_width
+    hh = half_height
     hd = half_depth
-    z_lo = 0.0
-    z_hi = 0.1
     arr_len = hd * 0.6
     arr_w = hw * 0.4
+    arr_z = -hh + 0.05  # just above the bottom face
     verts = [
-        # Slab bottom rect (4)
-        (-hw, -hd, z_lo), (hw, -hd, z_lo),
-        (hw, hd, z_lo), (-hw, hd, z_lo),
-        # Slab top rect (4)
-        (-hw, -hd, z_hi), (hw, -hd, z_hi),
-        (hw, hd, z_hi), (-hw, hd, z_hi),
-        # Top-face arrow (3) — points along +Y so the empty's +Y
-        # carries the visual direction.
-        (-arr_w, -arr_len * 0.4, z_hi + 0.02),
-        (arr_w, -arr_len * 0.4, z_hi + 0.02),
-        (0.0, arr_len, z_hi + 0.02),
+        # Box corners (8) — local +Y forward, +Z up
+        (-hw, -hd, -hh), (hw, -hd, -hh),  # 0, 1: bottom -Y edge
+        (hw,  hd, -hh), (-hw,  hd, -hh),  # 2, 3: bottom +Y edge
+        (-hw, -hd,  hh), (hw, -hd,  hh),  # 4, 5: top -Y edge
+        (hw,  hd,  hh), (-hw,  hd,  hh),  # 6, 7: top +Y edge
+        # Arrow on bottom face (3) — points +Y, the boost direction.
+        (-arr_w, -arr_len * 0.4, arr_z),
+        (arr_w,  -arr_len * 0.4, arr_z),
+        (0.0,     arr_len,       arr_z),
+    ]
+    edges = [
+        # Bottom rectangle
+        (0, 1), (1, 2), (2, 3), (3, 0),
+        # Top rectangle
+        (4, 5), (5, 6), (6, 7), (7, 4),
+        # Vertical pillars
+        (0, 4), (1, 5), (2, 6), (3, 7),
     ]
     faces = [
-        (0, 1, 2, 3),       # bottom
-        (4, 7, 6, 5),       # top (CCW from +Z)
-        (0, 4, 5, 1),       # -Y side
-        (1, 5, 6, 2),       # +X side
-        (2, 6, 7, 3),       # +Y side
-        (3, 7, 4, 0),       # -X side
-        (8, 9, 10),         # arrow on top
+        (8, 9, 10),  # arrow triangle on the bottom face
     ]
-    me.from_pydata(verts, [], faces)
+    me.from_pydata(verts, edges, faces)
     me.update()
     me.materials.append(_boost_pad_material())
     return me
@@ -153,10 +157,13 @@ def refresh_boost_pad_gizmos(scene) -> int:
     refreshed = 0
     for obj in boost_empties:
         hw = float(obj.get("half_width", 3.0))
+        hh = float(obj.get("half_height", 4.0))
         hd = float(obj.get("half_depth", 6.0))
         gizmo_name = f"{obj.name}_gizmo"
         mesh_name = f"{obj.name}_gizmo_mesh"
-        mesh = _build_boost_pad_gizmo_mesh(mesh_name, half_width=hw, half_depth=hd)
+        mesh = _build_boost_pad_gizmo_mesh(
+            mesh_name, half_width=hw, half_height=hh, half_depth=hd,
+        )
         gizmo = bpy.data.objects.get(gizmo_name)
         if gizmo is None:
             gizmo = bpy.data.objects.new(gizmo_name, mesh)
@@ -187,9 +194,9 @@ def refresh_boost_pad_gizmos(scene) -> int:
 
 
 def _on_boost_pad_prop_changed(self, context):
-    """Custom-property update callback fires when half_width / half_depth
-    / strength are scrubbed on a ``boost_NN`` empty. Rebuild the gizmos
-    so the visual matches the new bounds immediately."""
+    """Custom-property update callback fires when half_width / half_height
+    / half_depth / strength are scrubbed on a ``boost_NN`` empty. Rebuild
+    the gizmos so the visual matches the new bounds immediately."""
     scene = context.scene if context is not None else bpy.context.scene
     if scene is not None:
         refresh_boost_pad_gizmos(scene)
@@ -203,16 +210,16 @@ def _on_boost_pad_prop_changed(self, context):
 class HOVERBIKE_OT_add_boost_pad(Operator):
     """Drop a ``boost_NN`` empty at the 3D cursor. The empty carries the
     pad's runtime knobs as custom properties (``half_width``,
-    ``half_depth``, ``strength``) and exports as one entry in
-    ``boostPads[]`` on the next *Export Track to Game*. Boost direction
-    is the empty's local +Y (Blender forward → three.js +Z); rotate
-    around Z to aim it.
+    ``half_height``, ``half_depth``, ``strength``) and exports as one
+    entry in ``boostPads[]`` on the next *Export Track to Game*. Boost
+    direction is the empty's local +Y (Blender forward → three.js +Z);
+    rotate around Z to aim it.
 
-    A flat cyan slab mesh is parented to the empty as a viewport gizmo
-    so authors can see the pad's footprint and direction at a glance.
-    The gizmo lives in a preview collection that the export scrubs;
-    the actual boost trigger is the JSON-side overlap test in
-    ``boostPadSystem``."""
+    A wireframe-box gizmo (matching the runtime trigger volume) is
+    parented to the empty so authors can see the pad's footprint, height,
+    and direction at a glance. The gizmo lives in a preview collection
+    that the export scrubs; the actual boost trigger is the JSON-side
+    overlap test in ``boostPadSystem``."""
 
     bl_idname = "hoverbike.add_boost_pad"
     bl_label = "Add Boost Pad"
@@ -230,6 +237,7 @@ class HOVERBIKE_OT_add_boost_pad(Operator):
         # so a Blender-authored pad behaves identically to one placed
         # in the in-app editor.
         obj["half_width"] = 3.0
+        obj["half_height"] = 4.0
         obj["half_depth"] = 6.0
         obj["strength"] = 1.5
         cursor = context.scene.cursor
@@ -250,21 +258,21 @@ class HOVERBIKE_OT_add_boost_pad(Operator):
         self.report(
             {"INFO"},
             f"Added {name} (strength {obj['strength']}, "
-            f"{obj['half_width'] * 2:.1f}m × {obj['half_depth'] * 2:.1f}m). "
-            "Rotate around Z to aim.",
+            f"{obj['half_width'] * 2:.1f}m × {obj['half_height'] * 2:.1f}m × "
+            f"{obj['half_depth'] * 2:.1f}m). Rotate around Z to aim.",
         )
         return {"FINISHED"}
 
 
 class HOVERBIKE_OT_refresh_boost_pads(Operator):
-    """Rebuild every boost_NN empty's child slab gizmo. Use after
-    editing ``half_width`` / ``half_depth`` custom props directly on a
-    pad in the Properties panel — the panel doesn't trigger the
-    auto-refresh that addon-managed sliders do."""
+    """Rebuild every boost_NN empty's child gizmo. Use after editing
+    ``half_width`` / ``half_height`` / ``half_depth`` custom props
+    directly on a pad in the Properties panel — the panel doesn't
+    trigger the auto-refresh that addon-managed sliders do."""
 
     bl_idname = "hoverbike.refresh_boost_pads"
     bl_label = "Refresh Boost Pad Visuals"
-    bl_description = "Rebuild every boost_NN gizmo to match its current half_width / half_depth"
+    bl_description = "Rebuild every boost_NN gizmo to match its current half_width / half_height / half_depth"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):

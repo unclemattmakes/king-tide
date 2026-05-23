@@ -594,6 +594,7 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
                 "position": _b2t(loc.x, loc.y, loc.z),
                 "rotation": {"x": 0.0, "y": qy, "z": 0.0, "w": qw},
                 "halfWidth": float(bp.get("half_width", 3.0)),
+                "halfHeight": float(bp.get("half_height", 4.0)),
                 "halfDepth": float(bp.get("half_depth", 6.0)),
                 "strength": float(bp.get("strength", 1.5)),
             }

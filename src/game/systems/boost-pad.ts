@@ -14,17 +14,10 @@ import type { BoostPad, Track } from '@/game/tracks/types'
 const PAD_BOOST_REFRESH = 0.25
 
 /**
- * Vertical band around the pad center for which we still consider the bike
- * "on" it. Pads sit at the track surface and a bike at rest hovers around
- * 1.6 m; this band catches the bike in air over the pad and on the water.
- */
-const PAD_VERTICAL = 3
-
-/**
  * Pure predicate. True when `bikePos` is inside the pad's oriented box —
- * `halfWidth × halfDepth` in the pad's local XZ plane, ±`PAD_VERTICAL` in
- * world Y around the pad center. Tested directly; the system below is
- * just iteration + effect-application around this check.
+ * `halfWidth × halfHeight × halfDepth` in the pad's local frame. Tested
+ * directly; the system below is just iteration + effect-application
+ * around this check.
  */
 export function isOverBoostPad(bikePos: Vec3, pad: BoostPad): boolean {
   const dx = bikePos.x - pad.position.x
@@ -32,12 +25,14 @@ export function isOverBoostPad(bikePos: Vec3, pad: BoostPad): boolean {
   const dz = bikePos.z - pad.position.z
   const fwd = quatRotate(pad.rotation, { x: 0, y: 0, z: 1 })
   const right = quatRotate(pad.rotation, { x: 1, y: 0, z: 0 })
+  const up = quatRotate(pad.rotation, { x: 0, y: 1, z: 0 })
   const localAlong = dx * fwd.x + dy * fwd.y + dz * fwd.z
   const localAcross = dx * right.x + dy * right.y + dz * right.z
+  const localUp = dx * up.x + dy * up.y + dz * up.z
   return (
     Math.abs(localAcross) <= pad.halfWidth &&
-    Math.abs(localAlong) <= pad.halfDepth &&
-    Math.abs(dy) <= PAD_VERTICAL
+    Math.abs(localUp) <= pad.halfHeight &&
+    Math.abs(localAlong) <= pad.halfDepth
   )
 }
 

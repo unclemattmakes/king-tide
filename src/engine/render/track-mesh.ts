@@ -358,23 +358,37 @@ function createGateMesh(
 function createBoostPadMesh(pad: BoostPad): THREE.Object3D {
   const root = new THREE.Group()
   root.name = 'boost_pad'
-  root.position.set(pad.position.x, pad.position.y + 0.05, pad.position.z)
+  root.position.set(pad.position.x, pad.position.y, pad.position.z)
   root.quaternion.set(pad.rotation.x, pad.rotation.y, pad.rotation.z, pad.rotation.w)
 
   const w = pad.halfWidth * 2
+  const h = pad.halfHeight * 2
   const d = pad.halfDepth * 2
-  const slabGeom = new THREE.PlaneGeometry(w, d)
-  slabGeom.rotateX(-Math.PI / 2)
-  const slabMat = new THREE.MeshBasicMaterial({
+
+  // Wireframe box matching the trigger volume. Faint cyan fill so it
+  // reads as a glowing volume head-on but doesn't drown the track when
+  // viewed at a glancing angle.
+  const boxGeom = new THREE.BoxGeometry(w, h, d)
+  const fillMat = new THREE.MeshBasicMaterial({
     color: 0x33ddff,
     transparent: true,
-    opacity: 0.55,
+    opacity: 0.08,
     depthWrite: false,
     side: THREE.DoubleSide,
   })
-  const slab = new THREE.Mesh(slabGeom, slabMat)
-  root.add(slab)
+  root.add(new THREE.Mesh(boxGeom, fillMat))
 
+  const wireMat = new THREE.LineBasicMaterial({
+    color: 0x33ddff,
+    transparent: true,
+    opacity: 0.85,
+    depthWrite: false,
+  })
+  root.add(new THREE.LineSegments(new THREE.WireframeGeometry(boxGeom), wireMat))
+
+  // Chevron arrow on the bottom interior face, pointing +Z (boost
+  // direction). Slightly inset from the bottom so it doesn't z-fight
+  // with anything resting under the box.
   const chevGeom = new THREE.PlaneGeometry(w * 0.6, d * 0.18)
   chevGeom.rotateX(-Math.PI / 2)
   const chevMat = new THREE.MeshBasicMaterial({
@@ -384,9 +398,10 @@ function createBoostPadMesh(pad: BoostPad): THREE.Object3D {
     depthWrite: false,
     side: THREE.DoubleSide,
   })
+  const chevY = -pad.halfHeight + 0.05
   for (const offsetZ of [-d * 0.3, 0, d * 0.3]) {
     const c = new THREE.Mesh(chevGeom, chevMat)
-    c.position.set(0, 0.02, offsetZ)
+    c.position.set(0, chevY, offsetZ)
     root.add(c)
   }
   return root

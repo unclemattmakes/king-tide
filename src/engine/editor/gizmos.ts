@@ -71,16 +71,12 @@ export function configureGizmoAxes(tc: TransformControls, kind: EntityKind, mode
     return
   }
   if (mode === 'scale') {
-    // Gates: scale X (halfWidth), Y (height). Pads: scale X (halfWidth), Z (halfDepth).
-    // Props / anti-grav: scale on all three axes — interpretation per type.
+    // Gates: scale X (halfWidth), Y (height). Pads + anti-grav + props:
+    // scale on all three axes (X = halfWidth, Y = halfHeight, Z = halfDepth).
     if (kind === 'gate') {
       tc.showX = true
       tc.showY = true
       tc.showZ = false
-    } else if (kind === 'pad') {
-      tc.showX = true
-      tc.showY = false
-      tc.showZ = true
     } else {
       tc.showX = true
       tc.showY = true
@@ -265,6 +261,7 @@ export function bakeScaleToDraft(draft: Track, h: THREE.Object3D, s: NonNullable
     const pad = draft.boostPads[s.index]
     if (pad) {
       pad.halfWidth = clampPositive(pad.halfWidth * sx, 0.5, 50)
+      pad.halfHeight = clampPositive(pad.halfHeight * sy, 0.5, 50)
       pad.halfDepth = clampPositive(pad.halfDepth * sz, 0.5, 100)
     }
   } else if (s.kind === 'antiGrav') {

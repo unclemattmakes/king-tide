@@ -317,6 +317,7 @@ export function trackToJson(track: Track): TrackJson {
       position: { ...p.position },
       rotation: { ...p.rotation },
       halfWidth: p.halfWidth,
+      halfHeight: p.halfHeight,
       halfDepth: p.halfDepth,
       strength: p.strength,
     })),
@@ -486,10 +487,18 @@ function readBoostPad(raw: unknown, i: number): BoostPad {
   const halfWidth = requireNumber(raw, 'halfWidth')
   const halfDepth = requireNumber(raw, 'halfDepth')
   const strength = requireNumber(raw, 'strength')
-  if (halfWidth <= 0 || halfDepth <= 0) {
-    throw new Error(`track-json: boostPads[${i}] halfWidth/halfDepth must be positive`)
+  // halfHeight is optional for backward compat — pads authored before the
+  // 3D-volume rework had no vertical extent (the sim used a hardcoded 3 m
+  // band). Default 3 here so existing tracks keep the historic trigger
+  // band; new pads authored from Blender / the in-app editor write 4.
+  const halfHeightRaw = raw.halfHeight
+  const halfHeight = halfHeightRaw === undefined ? 3 : requireNumber(raw, 'halfHeight')
+  if (halfWidth <= 0 || halfHeight <= 0 || halfDepth <= 0) {
+    throw new Error(
+      `track-json: boostPads[${i}] halfWidth/halfHeight/halfDepth must be positive`,
+    )
   }
-  return { position, rotation, halfWidth, halfDepth, strength }
+  return { position, rotation, halfWidth, halfHeight, halfDepth, strength }
 }
 
 function readWaveZone(raw: unknown, i: number): WaveZone {

@@ -80,36 +80,50 @@ export function makePickupHelper(
 
 export function makePadHelper(pad: BoostPad, selected: boolean): THREE.Group {
   const g = new THREE.Group()
-  g.position.set(pad.position.x, pad.position.y + 0.1, pad.position.z)
+  g.position.set(pad.position.x, pad.position.y, pad.position.z)
   g.quaternion.set(pad.rotation.x, pad.rotation.y, pad.rotation.z, pad.rotation.w)
 
   const baseColor = 0x33ddff
   const selColor = 0x99ffff
   const w = pad.halfWidth * 2
+  const h = pad.halfHeight * 2
   const d = pad.halfDepth * 2
 
-  const mat = new THREE.MeshBasicMaterial({
+  // Wireframe + faint fill matching the trigger volume. Same model as
+  // the runtime mesh — kept separate so the editor can swap color on
+  // selection without touching the play-mode mesh.
+  const fillMat = new THREE.MeshBasicMaterial({
     color: selected ? selColor : baseColor,
     transparent: true,
-    opacity: 0.65,
+    opacity: 0.12,
+    depthWrite: false,
     side: THREE.DoubleSide,
   })
-  const slabGeom = new THREE.PlaneGeometry(w, d)
-  slabGeom.rotateX(-Math.PI / 2)
-  const slab = new THREE.Mesh(slabGeom, mat)
-  g.add(slab)
-  // Direction arrow pointing +Z (boost direction).
+  const boxGeom = new THREE.BoxGeometry(w, h, d)
+  g.add(new THREE.Mesh(boxGeom, fillMat))
+
+  const wireMat = new THREE.LineBasicMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+  })
+  g.add(new THREE.LineSegments(new THREE.WireframeGeometry(boxGeom), wireMat))
+
+  // Direction arrow pointing +Z (boost direction), sitting on the bottom
+  // interior face.
   const arrowGeom = new THREE.ConeGeometry(0.6, 1.2, 4)
   arrowGeom.rotateX(Math.PI / 2)
   const arrow = new THREE.Mesh(
     arrowGeom,
     new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 }),
   )
-  arrow.position.set(0, 0.05, d * 0.3)
+  arrow.position.set(0, -pad.halfHeight + 0.6, d * 0.3)
   g.add(arrow)
 
   g.userData.setSelected = (v: boolean) => {
-    mat.color.setHex(v ? selColor : baseColor)
+    fillMat.color.setHex(v ? selColor : baseColor)
+    wireMat.color.setHex(v ? selColor : baseColor)
   }
   return g
 }

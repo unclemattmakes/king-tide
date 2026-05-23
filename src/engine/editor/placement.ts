@@ -57,10 +57,16 @@ export function placeAt(opts: PlaceAtOptions): EntitySel {
     return { kind: 'pickup', index: draft.pickupSpawns.length - 1 }
   }
   if (tool === 'pad') {
+    // Place the trigger volume so its bottom face sits at the click point —
+    // pad centre is halfHeight above that. New pads default to a 4 m
+    // half-height (8 m total) so an airborne bike a few metres up still
+    // triggers as it passes through.
+    const halfHeight = 4
     draft.boostPads.push({
-      position: { x: hit.x, y: 0.05, z: hit.z },
+      position: { x: hit.x, y: hit.y + halfHeight, z: hit.z },
       rotation: { x: 0, y: 0, z: 0, w: 1 },
       halfWidth: 3,
+      halfHeight,
       halfDepth: 6,
       strength: 1.5,
     })
