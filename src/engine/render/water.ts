@@ -2339,6 +2339,7 @@ export function createWaterMesh(
     },
     setWireframe(on) {
       mat.wireframe = !!on
+      outerMat.wireframe = !!on
     },
   }
 
@@ -2351,6 +2352,8 @@ export function createWaterMesh(
       mat.wireframe = true
       mat.transparent = false
       mat.opacityNode = float(1)
+      // The outer LOD tile's wireframe is mirrored after it's constructed
+      // below — `outerMat` doesn't exist yet at this point.
     }
     // Live tuning hook for playtest: in the dev console, call
     //   __waterSteepness(0.9)
@@ -2427,6 +2430,147 @@ export function createWaterMesh(
       r.copyFramebufferToTexture(sceneDepthTexture)
     }
   }
+
+  // ── Outer LOD tile ──────────────────────────────────────────────────────
+  // Lower-detail wave plane extending past the center mesh's reach, so the
+  // visible wave geometry covers ~720 m to the sides (vs. 240 m on the
+  // center alone). Pushes the boundary between displaced water and the
+  // flat skirt well past the player's tilt-down view — at 720 m the seam
+  // is also at ~13 % fog density on the way to dissolving into sky.
+  //
+  // Shares the wave-field uniforms (amplitudes, frequencies, time,
+  // bearing, mesh origin, horizon haze) with the center mesh because the
+  // material is built inside the same closure; both meshes animate in
+  // lock-step with zero per-frame CPU pushes.
+  //
+  // Drops the expensive bits of the center shader:
+  //  - planar reflection (one full-screen mirror pass — biggest single
+  //    cost on the water; redundant at 280 m+ where the ripple detail
+  //    that mirrors carry is already sub-pixel),
+  //  - bike-wake displacement (the wake decays well within 40 m so it
+  //    contributes nothing meaningful out here, and skipping the per-
+  //    bike convolution saves both ALU and uniform bandwidth),
+  //  - sub-Gerstner detail-normal cascades (texture samples; the chop
+  //    they add is sub-pixel at this distance),
+  //  - foam, caustics, sun-streak, sun-disc — all sub-pixel detail at
+  //    the outer mesh's view range.
+  //
+  // Sun shading is reduced to a single ndotL term computed off the
+  // analytic Gerstner normal — cheap, enough to keep wave silhouettes
+  // legible without falling back to a flat-tinted plane that reads as
+  // a stuck texture.
+  //
+  // Render order: outer (-1) sits under the center mesh (0, default) and
+  // above the skirt (-2). Where the center overlaps the outer the
+  // center's full-detail shading wins on top; where only the outer
+  // overlaps the skirt the outer's wavy geometry wins; past the outer's
+  // square footprint the skirt is the last reader before fog.
+  //
+  // Geometry: 1440 m × 1440 m at 256² subs ≈ 5.6 m / vertex. That's
+  // coarse compared to the center's 0.6 m / vertex but still catches
+  // the long-period swells (the Gerstner set's shortest wavelength is
+  // 5.5 m), which is what reads at 300 m+ distance. The wake's 4 m
+  // wavelength is undersampled here but we don't draw wake on this
+  // tile anyway. ~66 k verts: roughly 1/9th of the center mesh, so the
+  // outer's vertex pass adds well under a millisecond on any real GPU.
+  const OUTER_SIZE = 1440
+  const OUTER_SUBS = 256
+
+  const outerGeom = new THREE.PlaneGeometry(OUTER_SIZE, OUTER_SIZE, OUTER_SUBS, OUTER_SUBS)
+  outerGeom.rotateX(-Math.PI / 2)
+
+  // The outer mesh is a child of the (camera-locked) center mesh, so its
+  // local origin coincides with the center's `meshOrigin{X,Z}` snap. Same
+  // formula as the center's `worldX/worldZ` — the Gerstner sum samples
+  // world coordinates so phase stays continuous across the outer/center
+  // boundary regardless of how the camera moves.
+  const outerWorldX = positionLocal.x.add(meshOriginX)
+  const outerWorldZ = positionLocal.z.add(meshOriginZ)
+  const outerGerst = gerstnerHeight(outerWorldX, outerWorldZ, tNode)
+  const outerDispVec = gerstnerDisp(outerWorldX, outerWorldZ, tNode)
+
+  // Position: Gerstner vertical + horizontal pinch, no shoaling
+  // attenuation (the shoaling sample would return DEEP_SENTINEL at most
+  // outer-tile positions anyway since the heightmap doesn't extend out
+  // this far) and no bike-wake contribution.
+  const outerPositionNode = vec3(
+    positionLocal.x.add(outerDispVec.x),
+    outerGerst.x,
+    positionLocal.z.add(outerDispVec.y),
+  )
+
+  // Camera-relative distance (radial, XZ-only) for aerial perspective.
+  const outerCamDist = positionLocal.xz.length()
+
+  // Aerial-perspective ramp: matches the center mesh's `aerialMix` cap of
+  // 0.5 at 280 m so the colour is continuous where they meet, and holds
+  // at 0.5 across the rest of the outer's extent — the outer should
+  // read as water for its entire footprint, with the skirt picking up
+  // the second-leg ramp toward full horizon haze past 1200 m. Capping
+  // here (rather than ramping to 1.0 by 700 m) keeps the outer/skirt
+  // boundary at ~720 m tonally close: both layers are ≈50 % water + 50 %
+  // haze on either side of the edge.
+  const outerAerialMix = clamp(
+    smoothstep(float(120), float(280), outerCamDist).mul(float(0.5)),
+    float(0),
+    float(1),
+  )
+
+  // Subtle directional shading off the analytic Gerstner normal so the
+  // outer reads as a lit surface rather than a stuck texture. ndotL on
+  // a flat plane is sin(sunElev); the displacement modulates around
+  // that so crests facing the sun pick up a touch more brightness than
+  // troughs. Pulled in tight (0.85..1.0) so the outer never reads as
+  // dramatically darker than the haze it dissolves into.
+  const outerNormal = vec3(outerGerst.y.negate(), float(1), outerGerst.z.negate()).normalize()
+  const outerNdotL = max(dot(outerNormal, sunDirUniform), float(0))
+  const outerShade = float(0.85).add(outerNdotL.mul(float(0.15)))
+
+  // Body colour: anchored on the same deep-trough colour the center
+  // shader and the skirt both use, with a height-driven scatter lift on
+  // crests. Same `vec3(0.02, 0.22, 0.32)` / `vec3(0.22, 0.85, 0.92)`
+  // pair as the center; clamping the scatter weight at 0.4 keeps the
+  // outer's brightness below the center's so the eye reads the center
+  // as the foreground layer if any seam shows.
+  const outerHeightVary = varying(outerGerst.x)
+  const outerHeightFactor = smoothstep(float(-1.5), float(1.5), outerHeightVary)
+  const outerDeep = vec3(0.02, 0.22, 0.32)
+  const outerScatter = vec3(0.22, 0.85, 0.92)
+  const outerBody = mix(outerDeep, outerScatter, outerHeightFactor.mul(float(0.4))).mul(outerShade)
+  const outerColorNode = mix(outerBody, horizonHazeUniform, outerAerialMix)
+
+  const outerMat = new MeshBasicNodeMaterial({
+    // Scene fog still applies — between the outer's far rim (≈720 m
+    // cardinal, ≈1018 m diagonal) and the fog-far at 2200 m the linear
+    // ramp eats whatever tone mismatch survives the aerial-perspective
+    // blend, so the outer dissolves into the same sky the horizon ring
+    // and skirt dissolve into.
+    fog: true,
+    side: THREE.FrontSide,
+  })
+  outerMat.name = 'water-outer'
+  outerMat.positionNode = outerPositionNode
+  outerMat.colorNode = outerColorNode
+
+  const outerMesh = new THREE.Mesh(outerGeom, outerMat as unknown as THREE.Material)
+  outerMesh.name = 'water-outer'
+  outerMesh.frustumCulled = false
+  outerMesh.castShadow = false
+  // The sun's shadow cascade is sized ±90 m around the player; at 720 m
+  // out, the outer tile is well past anything that could cast a shadow
+  // on it. Skip the cascade sample entirely.
+  outerMesh.receiveShadow = false
+  // Below center (default 0) and above the skirt (-2). Opaque material
+  // means depth gets written and any transparent layer drawn after
+  // (the skirt or the center's transparent pass) gets correctly culled
+  // behind the outer's wave silhouette.
+  outerMesh.renderOrder = -1
+  mesh.add(outerMesh)
+
+  // Mirror the boot-time `?wire=1` wireframe state set on the center
+  // material above. Live toggles via `debug.setWireframe` already update
+  // both materials.
+  if (wireFlag) outerMat.wireframe = true
 
   // ── Horizon skirt ──────────────────────────────────────────────────────
   // The main wave plane is 480 m square (camera-locked, ~240 m visible to
@@ -2514,10 +2658,12 @@ export function createWaterMesh(
   skirtMesh.frustumCulled = false
   skirtMesh.castShadow = false
   skirtMesh.receiveShadow = false
-  // Sits below the main plane in transparent draw order so the main
-  // plane paints over it in the overlap zone; both have depthWrite off
-  // so the order is purely renderOrder-driven (lower = first).
-  skirtMesh.renderOrder = -1
+  // Sits below both the center mesh (default 0) and the outer LOD tile
+  // (-1) in draw order, so it's the back-most water layer and only
+  // shows in the donut past the outer tile's square footprint (~720 m
+  // cardinal, ~1018 m diagonal). The outer is opaque + writes depth, so
+  // the skirt's transparent fragments behind it are correctly culled.
+  skirtMesh.renderOrder = -2
   mesh.add(skirtMesh)
 
   function tick(impacts?: readonly BikeImpact[], originXZ?: { x: number; z: number }): void {
