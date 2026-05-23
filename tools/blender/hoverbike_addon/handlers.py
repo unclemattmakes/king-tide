@@ -42,11 +42,12 @@ _WATCHED_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # curve for both racing line and road see the road follow live.
     # "starts" is conditional on the scene's bound flag — the
     # dispatch in _run_pending_rebuilds skips when not bound.
-    # "buoys" fires unconditionally (no road_main opt-in) so water-
-    # only tracks like Sandbar grow buoys on the first spline edit —
-    # there's no road_main on those tracks to gate against.
+    # "buoys" fires on spline edits because buoys are racing-line
+    # markers (gate_buoys.py samples ai_spline_main directly).
+    # road_curve_main does NOT fire "buoys" — buoys are decoupled
+    # from the road tool entirely.
     ("ai_spline_main",   ("gates", "turns", "helper", "road", "starts", "buoys")),
-    ("road_curve_main",  ("road", "buoys")),
+    ("road_curve_main",  ("road",)),
     ("start_00",         ("racer",)),
     # Editing the legacy water volume changes both the surface and
     # the over-water flag for every buoy sample, so refresh both.
@@ -163,17 +164,17 @@ def _run_pending_rebuilds():
         except (RuntimeError, AttributeError):
             pass
 
-    # Standalone buoy rebuild — fires for water-only tracks (no
-    # road_main). Skipped when "road" already fired on the same tick
-    # because rebuild_road_main calls _maybe_build_buoys_from_samples
-    # internally with the road's own samples; running both would
-    # double-build (wipe + rebuild twice). The master enable + water-
-    # present check live inside rebuild_buoys so this dispatch is
-    # cheap when those gates aren't met.
-    if "buoys" in pending and not (has_road and "road" in pending):
+    # Buoy rebuild — fires on spline / water edits via gate_buoys.
+    # Decoupled from the road tool: a road rebuild on the same tick
+    # used to suppress this, but buoys now follow ai_spline_main
+    # directly and never sample road samples, so there's nothing to
+    # double-build. The master enable + water-present check live
+    # inside rebuild_buoys so this dispatch is cheap when those
+    # gates aren't met.
+    if "buoys" in pending:
         try:
-            from . import road as _road_mod
-            _road_mod.rebuild_buoys(scene)
+            from . import gate_buoys as _gate_buoys_mod
+            _gate_buoys_mod.rebuild_buoys(scene)
         except (RuntimeError, AttributeError):
             pass
 
