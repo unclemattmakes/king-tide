@@ -72,41 +72,51 @@ class HOVERBIKE_PT_panel(Panel):
         """Parent-panel content for track-mode .blends. The bulk of the
         UI lives in sub-panels (HOVERBIKE_PT_track_*) so authors can
         collapse the sections they aren't currently using. This method
-        just shows the always-relevant header: track id, big Export
-        button, lint / reload / play / URL actions."""
-        from ._legacy import derive_asset_id
+        owns the always-on header: identity, scaffolding alerts (only
+        when broken), live lap snapshot, the primary Export action,
+        and an empty-state card guiding the next click when nothing
+        sub-panel-worthy is selected. "New Map from template" lives in
+        the top-bar menu only — duplicating it here cluttered the
+        sidebar without earning the space."""
+        from ._legacy import derive_asset_id, _largest_terrain_mesh
+        from .track_meta import _spline_arc_length, _spline_obstacle_clearance
 
         track_id = derive_asset_id("hoverbike_track_id") or "<unknown>"
+        scene = context.scene
 
-        box = layout.box()
-        box.label(text=f"Track: {track_id}", icon="WORLD_DATA")
+        # ── Identity strip — one row, two pieces of info, no box. The
+        # box treatment in the previous design felt heavy for a header
+        # that never changes. INFO icon also reads better than a
+        # WORLD_DATA globe for what is essentially a label.
+        id_row = layout.row(align=True)
+        id_row.label(text=f"{track_id}", icon="WORLD_DATA")
         if repo:
-            box.label(text=f"Repo: {os.path.basename(repo)}", icon="FILE_FOLDER")
+            id_row.label(text=os.path.basename(repo), icon="FILE_FOLDER")
         else:
-            box.label(text="Repo not found", icon="ERROR")
-            box.label(text="Save .blend inside a hoverbike/ clone.")
+            warn_row = layout.row()
+            warn_row.alert = True
+            warn_row.label(text="Save .blend inside a hoverbike clone", icon="ERROR")
 
-        # First-time scaffolding — surface missing essentials prominently
-        # so authoring a from-scratch .blend doesn't dead-end on the two
-        # lint errors that block every export (no ai_spline_main / no
-        # start_00). The box collapses itself once both pieces exist, so
-        # mature tracks don't see this clutter. Cheap to check on every
-        # redraw — just two dict lookups in bpy.data.objects.
+        # ── Scaffolding alert — only renders when essentials are
+        # missing. Single big button does the right thing for any
+        # combination of missing pieces; the per-piece Add buttons
+        # are gone since Scaffold itself is a no-op when its target
+        # already exists.
         have_sp = bpy.data.objects.get("ai_spline_main") is not None
         have_s0 = bpy.data.objects.get("start_00") is not None
         have_s1 = bpy.data.objects.get("start_01") is not None
-        if not (have_sp and have_s0 and have_s1):
+        have_terrain = _largest_terrain_mesh() is not None
+        essentials_missing = not (have_sp and have_s0 and have_s1)
+        if essentials_missing:
             sbox = layout.box()
             sbox.alert = True
-            sbox.label(text="Missing track essentials:", icon="ERROR")
+            sbox.label(text="Missing track essentials", icon="ERROR")
+            bits = []
             if not have_sp:
-                sbox.label(text="  • no ai_spline_main (racing line)")
+                bits.append("racing line")
             if not have_s0 or not have_s1:
-                missing_starts = [
-                    n for n, ok in (("start_00", have_s0), ("start_01", have_s1))
-                    if not ok
-                ]
-                sbox.label(text=f"  • no {' / '.join(missing_starts)} (spawn)")
+                bits.append("start grid")
+            sbox.label(text="Needs: " + ", ".join(bits))
             row = sbox.row()
             row.scale_y = 1.4
             row.operator(
@@ -114,81 +124,37 @@ class HOVERBIKE_PT_panel(Panel):
                 text="Scaffold Missing Essentials",
                 icon="ADD",
             )
-            srow = sbox.row(align=True)
-            if not have_sp:
-                srow.operator(
-                    "hoverbike.add_ai_spline",
-                    text="Add Spline",
-                    icon="CURVE_NCURVE",
-                )
-            if not have_s0 or not have_s1:
-                srow.operator(
-                    "hoverbike.add_starts",
-                    text="Add Starts",
-                    icon="EMPTY_ARROWS",
-                )
 
-        # Terrain hint — separate from the alert box above because
-        # terrain isn't *required* (a track could be all anti-grav
-        # ribbon over open water), but the overwhelming majority of
-        # tracks need one. Surface the procedural-island spawn one
-        # click away when there's no kind=track mesh in the scene.
-        from ._legacy import _largest_terrain_mesh as _lt_for_hint
-
-        if _lt_for_hint() is None:
-            tbox = layout.box()
-            tbox.label(text="No terrain mesh in scene", icon="INFO")
-            row = tbox.row()
-            row.scale_y = 1.2
-            row.operator(
-                "hoverbike.add_island_terrain",
-                text="Add Island Terrain (procedural)",
-                icon="RNDCURVE",
-            )
-            tbox.label(
-                text="Or: Hoverbike → Terrain → Import Heightmap…",
-                icon="INFO",
-            )
-
-        # Live lap snapshot — arc-length of `ai_spline_main`, projected
-        # lap time at the racer top speed, and gate count derived from
-        # the same spacing the exporter will use. All three update on
-        # every panel redraw (which Blender already triggers on spline
-        # edits via the depsgraph callback in handlers.py), so authors
-        # see the lap re-shape live as they drag bezier handles instead
-        # of finding out at export time that the route is twice the
-        # length they thought. Heavier stats (terrain extents, water
-        # coverage) stay in the collapsible Track stats sub-panel.
-        from .track_meta import _spline_arc_length, _spline_obstacle_clearance
-        from ._legacy import _largest_terrain_mesh
-
-        sp = bpy.data.objects.get("ai_spline_main")
-        if sp is not None and sp.type == "CURVE":
-            arc_m = _spline_arc_length(sp)
+        # ── Live lap snapshot — only when the spline exists.
+        # Designed to be a passive readout: authors scrub the spline
+        # and see the lap shape change without bouncing into Stats.
+        if have_sp:
+            sp = bpy.data.objects.get("ai_spline_main")
+            arc_m = _spline_arc_length(sp) if sp.type == "CURVE" else 0.0
             if arc_m > 0:
-                # Race pace is closer to 25 m/s through corners than the
-                # racer's 28-32 top speed, so use 25 as the "feel" baseline.
                 lap_s = arc_m / 25.0
                 gate_spacing = float(
-                    getattr(context.scene, "hoverbike_gate_spacing", 60.0) or 60.0
+                    getattr(scene, "hoverbike_gate_spacing", 60.0) or 60.0
                 )
                 n_gates = max(1, round(arc_m / gate_spacing))
                 stat_box = layout.box()
+                stat_box.scale_y = 0.9
                 stat_box.label(
-                    text=f"Lap: {arc_m:,.0f} m  ~{lap_s:.0f}s @25m/s",
+                    text=f"Lap {arc_m:,.0f} m  ~{lap_s:.0f}s  ·  {n_gates} gates",
                     icon="DRIVER_DISTANCE",
                 )
-                stat_box.label(text=f"{n_gates} gates @ {gate_spacing:.0f} m spacing")
                 # Live obstacle-clearance count — same bbox math the
-                # lint runs, but surfaced passively so authors see
-                # building / pylon clips appear and disappear as they
-                # drag the spline. Bbox math only (no raycasts), so
-                # it's cheap enough to run on every panel redraw.
+                # lint runs, surfaced passively so building / pylon
+                # clips appear and disappear as the author drags the
+                # spline. Only renders when there's something to
+                # complain about so a clean track has clean chrome.
                 clip_hits = _spline_obstacle_clearance(sp, _largest_terrain_mesh())
                 if clip_hits:
                     distinct = len({h[1] for h in clip_hits})
-                    stat_box.label(
-                        text=f"{len(clip_hits)} spline clip(s) into {distinct} obstacle(s)",
+                    warn_row = stat_box.row()
+                    warn_row.alert = True
+                    warn_row.label(
+                        text=f"{len(clip_hits)} clip(s) into {distinct} obstacle(s)",
                         icon="ERROR",
                     )
                     stat_box.operator(
@@ -196,68 +162,89 @@ class HOVERBIKE_PT_panel(Panel):
                         text="Shift Off Obstacles",
                         icon="MOD_PUSH",
                     )
-                # Comfort-band nudge — racing-feel sweet spot is roughly
-                # 30-180 s. Outside that the lap is either too punchy to
-                # read or long enough to drag.
+                # Comfort-band nudge — racing-feel sweet spot 30-180 s.
                 if lap_s < 30:
-                    stat_box.label(text="Very short lap — under 30 s", icon="ERROR")
+                    stat_box.label(text="Very short — under 30 s", icon="ERROR")
                 elif lap_s > 180:
-                    stat_box.label(text="Long lap — over 3 min", icon="ERROR")
+                    stat_box.label(text="Long — over 3 min", icon="ERROR")
 
+        # ── Primary action: Export. Auto-open checkbox sits right
+        # under it so the relationship is obvious — toggle once and
+        # every subsequent Export pops the browser.
         row = layout.row()
         row.scale_y = 1.6
         row.operator("hoverbike.export_track", icon="EXPORT")
+        layout.prop(
+            scene, "hoverbike_export_and_play",
+            text="Auto-open in browser on success",
+            icon="PLAY",
+        )
 
-        col = layout.column(align=True)
-        col.prop(context.scene, "hoverbike_laps_to_finish", text="Laps")
-        col.operator("hoverbike.lint_track", icon="CHECKMARK")
-        col.operator("hoverbike.reload_track_json", icon="FILE_REFRESH")
-        row = col.row(align=True)
+        # ── Secondary actions, two tight rows: open Play/Edit, copy URLs.
+        # Laps + Lint + Reload share a column above. Removed the
+        # vertical column wrapping these in favour of explicit rows so
+        # the alignment reads cleanly.
+        layout.prop(scene, "hoverbike_laps_to_finish", text="Laps")
+        row = layout.row(align=True)
+        row.operator("hoverbike.lint_track", icon="CHECKMARK")
+        row.operator("hoverbike.reload_track_json", text="Reload JSON", icon="FILE_REFRESH")
+        row = layout.row(align=True)
         op_play_open = row.operator("hoverbike.open_play_url", text="Play", icon="PLAY")
         op_play_open.edit = False
         op_edit_open = row.operator("hoverbike.open_play_url", text="Edit", icon="GREASEPENCIL")
         op_edit_open.edit = True
-        row = col.row(align=True)
-        op_play = row.operator(
-            "hoverbike.copy_track_url", text="Copy Play URL", icon="URL"
-        )
+        row = layout.row(align=True)
+        op_play = row.operator("hoverbike.copy_track_url", text="Copy Play", icon="URL")
         op_play.edit = False
-        op_edit = row.operator(
-            "hoverbike.copy_track_url", text="Copy Edit URL", icon="URL"
-        )
+        op_edit = row.operator("hoverbike.copy_track_url", text="Copy Edit", icon="URL")
         op_edit.edit = True
 
-        # Active-object hint — clues the author in that the sub-panels
-        # below are gated by selection. Reduces "where did the road
-        # tools go?" confusion after the move from always-on panels.
+        # ── Empty-state card OR active-object hint. When the active
+        # selection drives a sub-panel, the hint just confirms what
+        # the user clicked. When nothing relevant is selected, we
+        # surface the 3-4 most likely next actions inline so the
+        # author isn't staring at an empty sidebar. Scaffolding alert
+        # above already covers the case where essentials are missing.
         active = context.view_layer.objects.active
-        hint_box = layout.box()
-        hint_box.scale_y = 0.85
-        if active is not None:
-            kind = _active_kind_label(active)
-            if kind:
-                hint_box.label(
-                    text=f"Active: {active.name} — {kind}", icon="OBJECT_DATAMODE"
-                )
-            else:
-                hint_box.label(
-                    text=f"Active: {active.name} (no panel)",
-                    icon="OBJECT_DATAMODE",
-                )
-        else:
-            hint_box.label(text="Select an object to see its tools.", icon="INFO")
-        hint_box.label(text="Top-bar Hoverbike menu = all tools", icon="MENU_PANEL")
-        hint_box.label(text="Shift+W = quick pie menu", icon="MESH_CIRCLE")
+        active_kind = _active_kind_label(active) if active is not None else None
 
-        # Small "start another map" affordance at the bottom — out of
-        # the way of the active-track UI but discoverable for authors
-        # who finish a map and want to jump to a fresh template without
-        # the file-browser dance.
-        layout.operator(
-            "hoverbike.new_map_from_template",
-            text="New Map from Template…",
-            icon="FILE_NEW",
-        )
+        if active_kind is not None:
+            # Selection drives a sub-panel below — single-line confirmation.
+            hint = layout.row()
+            hint.scale_y = 0.85
+            hint.label(text=f"{active.name} — {active_kind}", icon="OBJECT_DATAMODE")
+        elif not essentials_missing:
+            # Nothing relevant selected. Show the empty-state card
+            # with the next-most-useful actions. Card only renders
+            # past the scaffolding gate, since a half-set-up track
+            # already has the alert pushing it to a clear next step.
+            ebox = layout.box()
+            ebox.label(text="Click an object for its tools, or:", icon="INFO")
+            col = ebox.column(align=True)
+            if not have_terrain:
+                col.operator(
+                    "hoverbike.add_island_terrain",
+                    text="Add Terrain (procedural)",
+                    icon="RNDCURVE",
+                )
+            col.operator(
+                "hoverbike.add_placement_helper",
+                text="Add Placement Helper",
+                icon="EMPTY_ARROWS",
+            )
+            col.operator(
+                "hoverbike.rebuild_gate_preview",
+                text="Rebuild Gate Preview",
+                icon="MOD_ARRAY",
+            )
+            col.operator(
+                "hoverbike.new_map_from_template",
+                text="New Map from Template…",
+                icon="FILE_NEW",
+            )
+            sub = ebox.row()
+            sub.scale_y = 0.85
+            sub.label(text="All tools: top-bar Hoverbike menu", icon="MENU_PANEL")
 
     def _draw_bike(self, context, layout, blend: str, repo: str | None) -> None:
         from ._legacy import derive_asset_id

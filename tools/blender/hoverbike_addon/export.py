@@ -542,6 +542,18 @@ class HOVERBIKE_OT_export_track(Operator):
         msg = f"Exported → {rel_glb} ({tag} {rel_json})"
         self.report({"INFO"}, msg)
         print(f"[hoverbike-addon] {msg}")
+
+        # Optional one-click playtest: open the dev server's Play URL
+        # in the browser as soon as the export lands. Gated on the
+        # Auto-open scene prop so authors who don't have the dev server
+        # running aren't ambushed by a doomed browser tab on every
+        # export. Failure of the browser launch is non-fatal — the
+        # export already succeeded by the time we get here.
+        if bool(getattr(context.scene, "hoverbike_export_and_play", False)):
+            try:
+                bpy.ops.hoverbike.open_play_url(edit=False)
+            except (RuntimeError, AttributeError) as e:  # noqa: BLE001
+                self.report({"WARNING"}, f"Auto-open after export skipped: {e}")
         return {"FINISHED"}
 
 
@@ -770,8 +782,23 @@ def register() -> None:
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
 
+    bpy.types.Scene.hoverbike_export_and_play = BoolProperty(
+        name="Auto-open browser after export",
+        description=(
+            "When set, a successful Export Track to Game opens the dev "
+            "server's Play URL for this track in the default browser. "
+            "Skipped on validation / GLB-write failures so a failed export "
+            "doesn't pop a window over a still-broken scene"
+        ),
+        default=False,
+    )
+
 
 def unregister() -> None:
+    try:
+        delattr(bpy.types.Scene, "hoverbike_export_and_play")
+    except AttributeError:
+        pass
     for cls in reversed(_CLASSES):
         try:
             bpy.utils.unregister_class(cls)
