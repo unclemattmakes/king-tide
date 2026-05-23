@@ -111,6 +111,27 @@ export const SLOPE_DAMP_RELIEF = 0.5
 // momentum path still pre-pitches the chassis to climb.
 export const MAX_BOW_LIFT_ERROR = 1.2 // metres, ≈ one hoverHeight
 
+// Dive aid — when the player is holding pitch-DOWN, the BOW corner's
+// upward spring (the part that fires when the bow dips below
+// hoverHeight) is scaled down toward this floor, letting the rider
+// "pump" the nose into wave troughs / terrain dips instead of the
+// spring overriding fwd velocity. Linear ramp on |intent.pitch| in
+// [0, 1]: 1.0 at no input, this value at full nose-down. Only the
+// positive-heightError half is softened — wheelie snap-back (negative
+// heightError pushing bow DOWN) is left alone.
+//
+// Wheelie path is also untouched: pitch-UP leaves diveAmount=0, so the
+// bow spring runs at full stiffness whether or not it's gated out by
+// `groundedCutoff`.
+export const DIVE_BOW_SPRING_MIN_MUL = 0.4
+
+// Dive aid #2 — when pitching forward, the grounded pitch PD's P-gain
+// is scaled down toward this floor. The PD targets the surface tangent
+// (level on flat ground, slope-aligned on hills); at full P it actively
+// pulls the nose back up against a held forward input, killing the
+// dive. D is unchanged so committed-trick wobble damping stays.
+export const DIVE_PITCH_P_MIN_MUL = 0.5
+
 /**
  * Marble-on-incline acceleration along the bike's horizontal forward axis.
  * Driven by the terrain-tracking pitch (positive = nose-down on a
@@ -810,6 +831,7 @@ function applyMultiPointHoverSpring(
       oz: footprint.forceFwdZ * forceHalfLength,
       surfProj: footprint.bowProj,
       longitudinal: true,
+      isBow: true,
     },
     {
       ox: -footprint.forceFwdX * forceHalfLength,
@@ -817,6 +839,7 @@ function applyMultiPointHoverSpring(
       oz: -footprint.forceFwdZ * forceHalfLength,
       surfProj: footprint.sternProj,
       longitudinal: true,
+      isBow: false,
     },
     {
       ox: footprint.forceRightX * halfW,
@@ -824,6 +847,7 @@ function applyMultiPointHoverSpring(
       oz: footprint.forceRightZ * halfW,
       surfProj: footprint.starboardProj,
       longitudinal: false,
+      isBow: false,
     },
     {
       ox: -footprint.forceRightX * halfW,
@@ -831,8 +855,14 @@ function applyMultiPointHoverSpring(
       oz: -footprint.forceRightZ * halfW,
       surfProj: footprint.portProj,
       longitudinal: false,
+      isBow: false,
     },
   ]
+  // Dive-aid bow spring softener — only the BOW corner's UPWARD lift
+  // (positive heightError, bow at or below hoverHeight) is scaled. Lets
+  // the player tuck the nose through a wave crest into the trough.
+  const diveAmount = Math.max(-frame.intent.pitch, 0)
+  const bowDiveSpringMul = 1 - (1 - DIVE_BOW_SPRING_MIN_MUL) * diveAmount
   // Per-bike longitudinal water spring multiplier — sourced from
   // `stats.surfaceFollow` so variants differentiate on chop behaviour.
   const waterLongMul = resolveWaterLongitudinalSpringMul(stats)
@@ -905,7 +935,12 @@ function applyMultiPointHoverSpring(
       // CORNER lift kick.
       const rawHeightError = effHover - localDist
       const heightError = Math.min(rawHeightError, heightErrorCap)
-      const springMul = probe.isWater && p.longitudinal ? waterLongMul : 1.0
+      let springMul = probe.isWater && p.longitudinal ? waterLongMul : 1.0
+      // Dive-aid: only soften when the bow is at/below hoverHeight
+      // (positive heightError = bow being lifted UP by the spring).
+      // Leaving the negative side at full strength keeps wheelie
+      // recovery — bow above hoverHeight gets the same DOWNWARD pull.
+      if (p.isBow && heightError > 0) springMul *= bowDiveSpringMul
       aUp = gravity + heightError * stats.hoverSpring * springMul - dampV * stats.hoverDamp
     }
     if (debugOn) {
@@ -948,7 +983,7 @@ function applyMultiPointHoverSpring(
  * ~31° on water with a held back-stick — committed but not crashy.
  */
 function applyGroundedPitchPD(frame: HoverFrame, surfaceForwardSlope: number): void {
-  const { rb, dt, m } = frame
+  const { rb, dt, m, intent } = frame
   const rightG = quatRotate(rb.rotation(), { x: 1, y: 0, z: 0 })
   const angvG = rb.angvel()
   const pitchVelG = angvG.x * rightG.x + angvG.y * rightG.y + angvG.z * rightG.z
@@ -959,8 +994,12 @@ function applyGroundedPitchPD(frame: HoverFrame, surfaceForwardSlope: number): v
   const pitchErrG = pitchAngleG - surfacePitchTarget
   const GROUNDED_PITCH_P = 9 // rad/s² per rad of error
   const GROUNDED_PITCH_D = 3 // rad/s² per rad/s
+  // Dive-aid: drop P toward DIVE_PITCH_P_MIN_MUL while pitching forward
+  // so the PD doesn't snap the nose back up against a held dive input.
+  const diveAmount = Math.max(-intent.pitch, 0)
+  const pitchPMul = 1 - (1 - DIVE_PITCH_P_MIN_MUL) * diveAmount
   const inLevelBand = Math.abs(pitchErrG) < (45 * Math.PI) / 180
-  const aPitchP = inLevelBand ? -pitchErrG * GROUNDED_PITCH_P : 0
+  const aPitchP = inLevelBand ? -pitchErrG * GROUNDED_PITCH_P * pitchPMul : 0
   const aPitchD = -pitchVelG * GROUNDED_PITCH_D
   const aPitchG = aPitchP + aPitchD
   rb.applyTorqueImpulse(
