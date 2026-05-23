@@ -97,6 +97,16 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     return 'handled'
   }
 
+  // Wave-rider validation scene: `?waveriders=1`. Water + lights + a
+  // row of buoys / logs + a WASD probe ball to ram them with. Isolates
+  // the kinematic-buoyancy + spring-perturbation system for tuning.
+  if (earlyParams.get('waveriders') !== null) {
+    setLoadingMessage('Loading wave-rider validation scene…')
+    const { bootWaveRiderMode } = await import('./wave-rider-mode')
+    await bootWaveRiderMode(appEl)
+    return 'handled'
+  }
+
   // Cold-boot menu flow — sports-broadcast styled title → mode → track
   // → bike (single-player) or → room (multiplayer). The menu only runs
   // when no game-mode URL param is present, so deep links + tests with
