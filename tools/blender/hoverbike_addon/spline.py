@@ -618,6 +618,22 @@ class HOVERBIKE_OT_reverse_spline(Operator):
             self.report({"ERROR"}, "No ai_spline_main curve to reverse.")
             return {"CANCELLED"}
 
+        # Capture start_00's current XY *before* reversal so we can
+        # re-anchor the grid to the same physical starting line on the
+        # reversed curve. Reversing renames every control point's index
+        # (old point N-1 becomes new point 0), so t=0 now refers to a
+        # different physical position — without this re-anchor the
+        # bound-start depsgraph snap would teleport the grid across the
+        # loop. start_00 may be off the curve (it sits back_off metres
+        # behind the line), but nearest_t_on_curve projects onto the
+        # closest curve point, which lands on the gate.
+        scene = context.scene
+        start_00 = bpy.data.objects.get("start_00")
+        pre_reverse_anchor: tuple[float, float] | None = None
+        if start_00 is not None:
+            loc = start_00.matrix_world.translation
+            pre_reverse_anchor = (float(loc.x), float(loc.y))
+
         n_splines = 0
         n_points = 0
         for spline in sp.data.splines:
@@ -672,14 +688,37 @@ class HOVERBIKE_OT_reverse_spline(Operator):
         # update_tag on the curve datablock so the depsgraph fires the
         # is_updated_geometry signal — handlers.py's watch on
         # ai_spline_main then schedules the dependent rebuilds (gates,
-        # turns, helper, road, bound starts, buoys).
+        # turns, helper, road, buoys).
         sp.data.update_tag()
 
-        self.report(
-            {"INFO"},
-            f"Reversed {n_splines} spline(s) ({n_points} control points). "
-            f"Racing direction flipped; previews + bound starts re-snap on next tick.",
-        )
+        # Re-anchor + re-snap the starts at the same physical gate but
+        # with the new tangent. Force-binds to the spline at the new t
+        # so the grid follows future spline edits too. Runs regardless
+        # of prior bound state — the user explicitly clicked Reverse,
+        # so it's safe to assume they want the starts to follow.
+        starts_t: float | None = None
+        if pre_reverse_anchor is not None:
+            new_t = nearest_t_on_curve(sp, *pre_reverse_anchor)
+            if new_t is not None:
+                scene.hoverbike_start_bound_to_spline = True
+                scene.hoverbike_start_t = float(new_t)
+                try:
+                    if bpy.ops.hoverbike.snap_starts_to_spline() == {"FINISHED"}:
+                        starts_t = float(new_t)
+                except (RuntimeError, AttributeError):
+                    pass
+
+        if starts_t is not None:
+            msg = (
+                f"Reversed {n_splines} spline(s) ({n_points} CPs). "
+                f"Grid re-snapped at t={starts_t:.3f} (same line, flipped facing)."
+            )
+        else:
+            msg = (
+                f"Reversed {n_splines} spline(s) ({n_points} CPs). "
+                f"Racing direction flipped."
+            )
+        self.report({"INFO"}, msg)
         return {"FINISHED"}
 
 
