@@ -36,6 +36,7 @@ import {
 import { createPhysicsDebugRenderer } from './engine/render/physics-debug'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
+import { createWaveRiderRenderSystem } from './engine/render/wave-rider-render'
 import { createRaceHud } from './engine/render/race-hud'
 import { createRaceIntro, type RaceIntro } from './engine/render/race-intro'
 import {
@@ -82,6 +83,7 @@ import { createPickupSpawn } from './game/entities/pickup-spawn'
 import { createPropColliders } from './game/entities/props'
 import { createGhostRunner, type GhostRunner } from './game/systems/ghost-runner'
 import { createRaceSystem } from './game/systems/race'
+import { createWaveRiderSystem, type WaveRiderSystem } from './game/systems/wave-rider'
 
 /**
  * Boot sequence — phases, in order:
@@ -531,9 +533,26 @@ async function boot() {
       if (entry) propAssets.set(entry[0], entry[1])
     }
   }
+  // Wave-rider sim system: drives any kinematic prop tagged as a
+  // wave-rider in its GLB extras (buoys, logs, future floating
+  // debris). Always constructed when a track has props — the asset
+  // pipeline + createPropColliders below decide which placements
+  // actually get a WaveRider entity. The sim step is hooked in via
+  // simulateStep's `waveRiders` input below.
+  let waveRiderSys: WaveRiderSystem | undefined
+  let waveRiderRender: ReturnType<typeof createWaveRiderRenderSystem> | undefined
   if (track.props.length > 0) {
     scene.add(createPropsMesh(track.props, propAssets))
-    createPropColliders(phys, track.props, propAssets)
+    waveRiderSys = createWaveRiderSystem(sim, phys, waveField)
+    const waveRiderAssetBindings = createPropColliders(phys, track.props, propAssets, sim)
+    if (waveRiderAssetBindings.size > 0) {
+      waveRiderRender = createWaveRiderRenderSystem(scene, sim, {
+        assetResolver: (eid) => {
+          const id = waveRiderAssetBindings.get(eid)
+          return id ? propAssets.get(id) : undefined
+        },
+      })
+    }
   }
 
   // Pickup spawns from track.
@@ -1356,6 +1375,8 @@ async function boot() {
     tutorialMode: params.get('tutorial') === '1',
     timeTrialMode,
     ghostRunner,
+    ...(waveRiderSys ? { waveRiderSys } : {}),
+    ...(waveRiderRender ? { waveRiderRender } : {}),
   })
 }
 

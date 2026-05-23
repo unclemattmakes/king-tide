@@ -1,0 +1,19 @@
+{
+  "$schema": "../_schema/prop.json",
+  "id": "buoy",
+  "displayName": "Marker Buoy",
+  "category": "buoy",
+  "geometry": {
+    "kitPart": "pylon",
+    "scale": [0.6, 0.8, 0.6],
+    "tint": "#d83d2a"
+  },
+  "collider": {
+    "shape": "cylinder",
+    "radius": 0.4,
+    "height": 0.9
+  },
+  "waveRider": {
+    "archetype": "buoy"
+  }
+}

@@ -15,7 +15,20 @@
     "displayName": { "type": "string", "minLength": 1 },
     "category": {
       "type": "string",
-      "enum": ["barrier", "lamppost", "crate", "pylon", "decor"]
+      "enum": ["barrier", "lamppost", "crate", "pylon", "decor", "buoy", "log"]
+    },
+    "waveRider": {
+      "type": "object",
+      "description": "When present, opts the prop into the runtime wave-rider system. The build pipeline stamps `wave_rider_archetype` extras on the prop root; the runtime spawns a kinematic body that tracks the wave surface and reacts to hits. Absent → static prop.",
+      "additionalProperties": false,
+      "required": ["archetype"],
+      "properties": {
+        "archetype": {
+          "type": "string",
+          "enum": ["buoy", "log"],
+          "description": "Picks the per-archetype tuning preset (floatOffsetY, springK, etc.) baked into game/components/wave-rider.ts. Add new archetypes there + here together."
+        }
+      }
     },
     "geometry": {
       "type": "object",

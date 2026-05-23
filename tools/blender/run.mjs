@@ -248,6 +248,14 @@ function writeManifest(built) {
       existing.bikes.push(entry)
     } else if (item.category === 'props') {
       entry.category = item.spec.category
+      // Surface the wave-rider archetype to the manifest so the editor
+      // palette can show a "rides waves" hint without re-fetching the
+      // spec. The runtime ground-truths this off the GLB's extras (see
+      // `prop-loader.ts`), so the manifest field is UI-only — divergence
+      // wouldn't change physics behaviour.
+      if (item.spec.waveRider?.archetype) {
+        entry.waveRider = item.spec.waveRider.archetype
+      }
       existing.props.push(entry)
     } else if (item.category === 'tracks') {
       // Upsert: same id → replace; new id → append; addon-built entries
@@ -314,6 +322,9 @@ if (action === 'build_bike' || action === 'build_prop' || action === 'build_trac
       entry.appearance = item.spec.appearance
     } else if (item.category === 'props') {
       entry.category = item.spec.category
+      if (item.spec.waveRider?.archetype) {
+        entry.waveRider = item.spec.waveRider.archetype
+      }
     }
     return entry
   }

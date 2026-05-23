@@ -48,6 +48,8 @@ import { ControlIntentStore, PlayerTag, RBHandleStore, TransformStore } from '@/
 import { RIDER_BONE_NAMES, Rider, RiderStore } from '@/game/components/rider'
 import { createBike } from '@/game/entities/bike'
 import { createPropColliders } from '@/game/entities/props'
+import { createWaveRiderSystem } from '@/game/systems/wave-rider'
+import { createWaveRiderRenderSystem } from '@/engine/render/wave-rider-render'
 import { createRider } from '@/game/entities/rider'
 import { simulateStep } from '@/game/sim-step'
 import { RIDER_POSE_TUNING, resetRiderForBike } from '@/game/systems/rider-pose'
@@ -138,9 +140,20 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
       if (entry) propAssets.set(entry[0], entry[1])
     }
   }
+  let waveRiderSys: ReturnType<typeof createWaveRiderSystem> | undefined
+  let waveRiderRender: ReturnType<typeof createWaveRiderRenderSystem> | undefined
   if (track.props.length > 0) {
     scene.add(createPropsMesh(track.props, propAssets))
-    createPropColliders(phys, track.props, propAssets)
+    waveRiderSys = createWaveRiderSystem(sim, phys, waveField)
+    const bindings = createPropColliders(phys, track.props, propAssets, sim)
+    if (bindings.size > 0) {
+      waveRiderRender = createWaveRiderRenderSystem(scene, sim, {
+        assetResolver: (eid) => {
+          const id = bindings.get(eid)
+          return id ? propAssets.get(id) : undefined
+        },
+      })
+    }
   }
 
   // Spawn ONE bike + rider. PlayerTag so the rider render system tints
@@ -862,6 +875,7 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
         autoPlay: false,
         waveTimeScale: waterMesh.debug.getTimeScale(),
         runAI: false,
+        ...(waveRiderSys ? { waveRiders: waveRiderSys } : {}),
       })
       physAccum -= phys.fixedDt
     }
@@ -890,6 +904,7 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
     pickupRender(dt)
     combatRender(dt)
     fxTick(dt)
+    waveRiderRender?.render()
     renderFrame(scene, camera)
     updateHud()
 

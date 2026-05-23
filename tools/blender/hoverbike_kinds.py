@@ -140,6 +140,18 @@ class ExportedKind:
     # the trimesh-collider attach step — decals are render-only.
     DECAL = "decal"
 
+    # Wave-rider marker. Reserved for future authoring sites that want
+    # to flag a non-prop node as a wave-rider (track-baked floating
+    # debris, scattered marker buoys, etc.). The current asset-prop
+    # flow keeps ``kind = prop`` on the root empty and uses a sibling
+    # extras key ``wave_rider_archetype: "buoy" | "log"`` to mark the
+    # asset as wave-riding — that path preserves backward compat with
+    # every track GLB / loader site that already special-cases
+    # ``kind == "prop"``. Adding the dedicated kind here lets future
+    # pipelines (e.g. inline wave-rider markers in a track GLB) use a
+    # single-extras tag without the prop indirection.
+    WAVE_RIDER = "wave_rider"
+
 
 class AuthoringKind:
     """Object extras kinds used only inside Blender — never shipped."""
