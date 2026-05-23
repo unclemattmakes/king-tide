@@ -263,7 +263,7 @@ class HOVERBIKE_OT_refresh_antigrav_zones(Operator):
     props directly in the Properties panel."""
 
     bl_idname = "hoverbike.refresh_antigrav_zones"
-    bl_label = "Refresh Anti-Grav Zone Visuals"
+    bl_label = "Refresh Anti-Grav Zones"
     bl_description = "Rebuild every antigrav_NN gizmo to match its current half-extents"
     bl_options = {"REGISTER", "UNDO"}
 

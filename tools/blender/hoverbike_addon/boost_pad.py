@@ -271,7 +271,7 @@ class HOVERBIKE_OT_refresh_boost_pads(Operator):
     trigger the auto-refresh that addon-managed sliders do."""
 
     bl_idname = "hoverbike.refresh_boost_pads"
-    bl_label = "Refresh Boost Pad Visuals"
+    bl_label = "Refresh Boost Pads"
     bl_description = "Rebuild every boost_NN gizmo to match its current half_width / half_height / half_depth"
     bl_options = {"REGISTER", "UNDO"}
 

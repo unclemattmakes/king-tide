@@ -606,12 +606,7 @@ class HOVERBIKE_PT_track_spline(_SelectionDrivenPanel, Panel):
         row.prop(scene, "hoverbike_start_grid_spacing", text="Start gap")
         row.operator("hoverbike.snap_starts_to_spline", text="Snap Starts", icon="EMPTY_ARROWS")
         layout.separator()
-        layout.label(text="Auto-ramp from curvature:")
-        row = layout.row(align=True)
-        row.prop(scene, "hoverbike_auto_ramp_kappa", text="|κ|")
-        row.prop(scene, "hoverbike_auto_ramp_min_spacing", text="Spacing")
         layout.operator("hoverbike.add_ramp_at_spline_t", icon="ADD")
-        layout.operator("hoverbike.auto_place_ramps", icon="MOD_PARTICLES")
 
 
 class HOVERBIKE_PT_track_start(_SelectionDrivenPanel, Panel):
@@ -715,7 +710,7 @@ class HOVERBIKE_PT_track_start(_SelectionDrivenPanel, Panel):
         row = layout.row(align=True)
         row.operator(
             "hoverbike.rebuild_racer_preview",
-            text="Show / Refresh Grid",
+            text="Rebuild Grid",
             icon="FILE_REFRESH",
         )
         row.operator(

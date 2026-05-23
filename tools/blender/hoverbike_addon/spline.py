@@ -455,88 +455,6 @@ class HOVERBIKE_OT_add_ramp_at_spline_t(Operator):
         return bpy.ops.hoverbike.add_ramp()
 
 
-class HOVERBIKE_OT_auto_place_ramps(Operator):
-    """Place ramps automatically at the high-curvature points along
-    ``ai_spline_main``. Reuses the same signed-curvature peak detector
-    that powers the Turn Indicators preview, so ramps land at the
-    same hand-of-god corners the chevrons mark. Each ramp is rotated
-    tangent to the racing line at its anchor.
-
-    Re-runs delete prior auto-placed ramps (named ``ramp_auto_NN``)
-    but leave hand-placed ramps (``ramp_NN`` / any other prefix)
-    intact."""
-
-    bl_idname = "hoverbike.auto_place_ramps"
-    bl_label = "Auto-place Ramps"
-    bl_description = "Drop tangent-aligned ramps at every curvature peak above |κ|"
-    bl_options = {"REGISTER", "UNDO"}
-
-    def execute(self, context):
-        from ._legacy import _sample_curve_to_polyline
-        from .ramp import create_gn_ramp
-        from .turn_indicators import _signed_curvature_peaks
-
-        scene = context.scene
-        sp = bpy.data.objects.get("ai_spline_main")
-        if sp is None or sp.type != "CURVE":
-            self.report({"ERROR"}, "Auto-place ramps needs `ai_spline_main` in the scene.")
-            return {"CANCELLED"}
-
-        # Wipe prior auto-placed ramps so re-runs don't pile up.
-        for name in list(bpy.data.objects.keys()):
-            if name.startswith("ramp_auto_"):
-                d = bpy.data.objects[name].data
-                bpy.data.objects.remove(bpy.data.objects[name], do_unlink=True)
-                if isinstance(d, bpy.types.Mesh) and d.users == 0:
-                    bpy.data.meshes.remove(d)
-
-        points = _sample_curve_to_polyline(sp)
-        peaks = _signed_curvature_peaks(
-            points,
-            kappa_threshold=float(scene.hoverbike_auto_ramp_kappa),
-            min_spacing_m=float(scene.hoverbike_auto_ramp_min_spacing),
-        )
-        if not peaks:
-            self.report({"WARNING"}, "No curvature peaks above threshold — no ramps placed.")
-            return {"CANCELLED"}
-
-        # Read shared dimensions for every auto-placed ramp from the
-        # standard ramp sliders. Per-instance tweaks happen after the
-        # fact via the GN modifier on each ramp's mesh.
-        length = float(scene.hoverbike_ramp_length)
-        width = float(scene.hoverbike_ramp_width)
-        height = float(scene.hoverbike_ramp_height)
-        if length <= 0 or width <= 0 or height <= 0:
-            self.report({"ERROR"}, "Invalid ramp dimensions — fix length/width/height first.")
-            return {"CANCELLED"}
-
-        # create_gn_ramp picks `ramp_NN`. Auto-placed ramps used to
-        # carry the `ramp_auto_NN` prefix so re-runs could wipe just
-        # those; with the unified GN-ramp pipeline they share the
-        # `ramp_NN` namespace. Re-runs leave prior placements alone —
-        # delete them by hand if you want a clean re-roll.
-        placed = 0
-        for p in peaks:
-            x, y, _ = p["position"]
-            tx, ty, _ = p["tangent"]
-            yaw = yaw_from_tangent_xy(tx, ty)
-            z = _cursor_road_z_at(scene, x, y, float(p["position"][2])) + 0.01
-            create_gn_ramp(
-                scene,
-                location=(x, y, z),
-                rotation_z=yaw,
-                length=length, width=width, height=height,
-            )
-            placed += 1
-
-        self.report(
-            {"INFO"},
-            f"Placed {placed} auto-ramps at curvature peaks "
-            f"(|κ| > {scene.hoverbike_auto_ramp_kappa:.3f}).",
-        )
-        return {"FINISHED"}
-
-
 # ────────────────────────────────────────────────────────────────────
 # Materialise / demote gates — bridges the spline-driven and
 # Blender-wins gate-placement modes
@@ -1239,7 +1157,6 @@ _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_bind_start_to_spline,
     HOVERBIKE_OT_unbind_start_from_spline,
     HOVERBIKE_OT_add_ramp_at_spline_t,
-    HOVERBIKE_OT_auto_place_ramps,
     HOVERBIKE_OT_reverse_spline,
     HOVERBIKE_OT_shift_spline_off_obstacles,
     HOVERBIKE_OT_materialize_gates_to_cp_empties,
@@ -1278,16 +1195,6 @@ def register() -> None:
         name="Source curve",
         description="Object name to sample for cursor / ramp-at-t placement. Defaults to `ai_spline_main`.",
         default="ai_spline_main",
-    )
-    bpy.types.Scene.hoverbike_auto_ramp_kappa = FloatProperty(
-        name="Auto-ramp |κ| min (1/m)",
-        description="Curvature threshold for auto-placed ramps. Same family as turn indicators; lower = more ramps.",
-        default=0.025, min=0.001, max=2.0, precision=4,
-    )
-    bpy.types.Scene.hoverbike_auto_ramp_min_spacing = FloatProperty(
-        name="Auto-ramp min spacing (m)",
-        description="Minimum arc-length distance between consecutive auto-placed ramps.",
-        default=40.0, min=1.0, max=500.0, precision=1,
     )
     bpy.types.Scene.hoverbike_start_grid_spacing = FloatProperty(
         name="Start spacing (m)",
@@ -1332,8 +1239,6 @@ def unregister() -> None:
     for prop in (
         "hoverbike_placement_t",
         "hoverbike_placement_curve_name",
-        "hoverbike_auto_ramp_kappa",
-        "hoverbike_auto_ramp_min_spacing",
         "hoverbike_start_grid_spacing",
         "hoverbike_start_backoff_m",
         "hoverbike_start_t",

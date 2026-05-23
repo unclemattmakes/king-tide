@@ -314,7 +314,7 @@ class HOVERBIKE_OT_refresh_wave_zones(Operator):
     the auto-refresh that addon-managed sliders do."""
 
     bl_idname = "hoverbike.refresh_wave_zones"
-    bl_label = "Refresh Wave Zone Visuals"
+    bl_label = "Refresh Wave Zones"
     bl_description = "Rebuild every wave_zone_NN gizmo to match its current half-extents"
     bl_options = {"REGISTER", "UNDO"}
 

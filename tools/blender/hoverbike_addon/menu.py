@@ -387,14 +387,6 @@ class HOVERBIKE_MT_spline(Menu):
         )
 
         layout.separator()
-        layout.label(text="Auto-place")
-        layout.operator(
-            "hoverbike.auto_place_ramps",
-            text="Auto-place Ramps from κ",
-            icon="MOD_PARTICLES",
-        )
-
-        layout.separator()
         layout.label(text="Gates")
         layout.operator(
             "hoverbike.materialize_gates_to_cp_empties",
