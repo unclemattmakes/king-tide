@@ -264,21 +264,42 @@ covers the track authoring tools, top to bottom.
 
 ### Spline tools
 
+Surfaces when `ai_spline_main`, a `start_NN`, or a `cp_NN` empty is
+the active selection. The panel is grouped into **Setup** (only
+visible when essentials are missing — Add Spline / Add Starts),
+**Shape** (curve-level edits), and **Place along the curve**
+(anything anchored to a `t` value).
+
+- **Add AI Spline** drops a cyclic 4-anchor Bezier *circle* (fitted
+  to the terrain's XY bbox at ~70% if a terrain mesh exists, else a
+  `radius`-metre loop around the cursor) and chains the standard
+  sidekick scaffolding: add_starts → rebuild_gate_preview →
+  rebuild_buoys. Re-clicking on a scene that already has the spline
+  re-runs the sidekicks only.
 - **Snap Spline to Terrain** raycasts each control point of
   `ai_spline_main` straight down onto the scene, then lifts each
   hit by *Hover (m)*. Pairs with the live gate preview — after a
   terrain edit, snap the spline back onto the new surface and the
   gates follow. Preview collections (`_hoverbike_*_preview`) are
   hidden during the cast so gizmos can't catch the ray.
+- **Reverse Spline Direction** flips the racing direction in place:
+  reverses control-point order, swaps Bezier handles, then re-anchors
+  the start grid to the same physical gate (uses `nearest_t_on_curve`
+  to find the new t for the pre-reverse start XY) so the bikes flip
+  to the other side of the line facing the new forward. Triggers the
+  full dependent-rebuild sweep (gates, turns, helper, road, buoys,
+  racer) via the handler debounce timer.
 - **Cursor → Spline** moves the 3D cursor to a parameter `t` ∈ [0,1]
   along the racing line, with rotation aligned to the tangent.
 - **Snap Starts to Spline** repositions `start_00` / `start_01` on
   the racing line at parameter `t`, lined up perpendicular to the
-  tangent at the configured *Start gap*.
-- **Auto-place Ramps** drops tangent-aligned ramps at every
-  curvature peak above `|κ|`. Same detector that powers the turn-
-  indicator preview, so ramps land at the same hand-of-god corners
-  the chevrons mark.
+  tangent at the configured *Start gap* and pushed back by
+  *Back-off (m)* (default 8 m, scene prop `hoverbike_start_backoff_m`)
+  along the negative tangent so the grid sits *behind* the line. Yaw
+  uses `atan2(tx, -ty)` — the runtime convention with the
+  Blender↔three.js Y/Z flip baked in.
+- **Add Ramp at t** spawns a tangent-aligned ramp at the current
+  *Spline t* slider value (pairs with **Cursor → Spline**).
 
 ### Placement helper
 
@@ -915,6 +936,42 @@ track. Its transform is no longer load-bearing for sea level.
 read after open promotes a legacy volume's Z into the scene prop, so
 existing tracks export the same height they always did.
 
+<a id="wave-rider-buoys"></a>
+### Wave-rider buoys
+
+Marker buoys are placed procedurally along the racing line wherever
+the spline crosses open water — same Gameplay sub-panel toggles as
+before (*Auto buoys*, *Spacing (m)*, *Offset ×gw*). The mesh you see
+in Blender is the gizmo; the buoys that actually spawn at runtime
+are wave-rider asset props that float on the wave surface and react
+to bike impacts (see [`src/game/components/wave-rider.ts`]).
+
+Two artifacts ship per buoy:
+
+- **Authoring preview** — `gate_buoys` mesh inside the
+  `_hoverbike_buoy_preview` collection (auto-excluded from the GLB
+  by the standard `_hoverbike_*_preview` scrub). The preview is
+  purely visual; no `kind` tag, no runtime presence.
+- **Runtime placements** — emitted into a new top-level
+  `waveRiderBuoys[]` array in the exported track JSON. Each entry
+  is `{position, rotation}` in three.js coords. The runtime's
+  json-loader synthesises asset Props (`assetId='buoy'`, unit size)
+  from the array, so the rest of the engine treats them as ordinary
+  wave-riders — no special-casing downstream.
+
+`waveRiderBuoys` is in `BLENDER_OWNED_JSON_KEYS`, so every re-export
+replaces the whole list (the editor never authors these directly).
+Inland tracks with no water authoring emit no entries — the
+`has_water` gate honours `hoverbike_water_height ≠ 0`,
+`water_volume_main`, **and** `water_preview`.
+
+The buoy GLB itself comes from the asset-prop pipeline
+([`specs/props/buoy.json`](../specs/props/buoy.json) → kit-part
+`buoy` in `prop_kit.blend` → `public/assets/props/buoy.glb`). Retune
+the buoy silhouette by editing the constants in
+[`tools/blender/seed_buoy_kit_part.py`](../tools/blender/seed_buoy_kit_part.py)
+and re-running the seed + `pnpm gen:props` chain.
+
 ### Boost pads
 
 Drop a `boost_NN` empty at the 3D cursor with **Add Boost Pad**. The
@@ -1242,7 +1299,7 @@ Five prop kinds ship in the seeded library:
 |---|---|---|---|
 | Track Props/Rocks    | `prop_rock`           | Distorted icosphere, FBM displacement   | Size, Jaggedness, Noise Scale, Seed |
 | Track Props/Palms    | `prop_palm`           | Tapered trunk + radial fronds           | Scale (shape/frond-count regen by re-running the seed) |
-| Track Props/Buoys    | `prop_buoy`           | Pylon + skirt + emissive top cap        | static (no GN modifier; edit verts to retune) |
+| Track Props/Buoys    | `prop_buoy`           | Pylon + skirt + emissive top cap (legacy decoration asset; runtime wave-rider buoys ship via the asset-prop pipeline — see [Wave-rider buoys](#wave-rider-buoys) below) | static (no GN modifier; edit verts to retune) |
 | Track Props/Gates    | `prop_gate`           | Two posts + crossbar at 28m × 6m gizmo dimensions | static |
 | Track Props/Indicators | `prop_turn_indicator` | Flat chevron (+X = bend direction)   | static |
 

@@ -722,21 +722,16 @@ Road Curve operator becomes optional ("I want a separate road shape
 from the racing line"). Affects `_sample_road_path` and the operator's
 curve-lookup. ~50 lines of Python. **High value, low effort.**
 
-### 2. Place ramps along the spline at curvature peaks (or arbitrary t)
+### 2. Place ramps along the spline at curvature peaks (or arbitrary t) ✅ partially shipped, partially reverted
 
-I had to compute the spline tangent in Python and place ramps with the
-3D cursor for every ramp. Two operators would close this:
-
-- **Add Ramp at Spline t** — pick a curve, pick a parameter t in [0, 1],
-  drop a ramp tangent-aligned to that point. Uses the existing
-  `_sample_curve_to_polyline` + arc-length math.
-- **Auto-place Ramps on Spline** — reuse the turn-indicator's signed-
-  curvature detector (`_signed_curvature_peaks`) to place a ramp at
-  every detected apex. Honors a min-spacing knob so racers aren't
-  jumping every 30 m.
-
-~100 lines of Python total; both reuse code that already exists.
-**High value, low effort.**
+- **Add Ramp at Spline t** — **shipped**. Lives in the *Spline tools*
+  sub-panel; pairs with the *t* slider.
+- ~~**Auto-place Ramps on Spline**~~ — shipped, then removed
+  (commit 976502a). In practice authors preferred hand-placing ramps
+  at the exact apex they wanted hits instead of trusting the
+  curvature detector. The *Cursor → Spline* + *Add Ramp at Helper*
+  combo covers the workflow without the false-positive corners the
+  auto-placer landed on.
 
 ### 3. Variable road width (taper)
 
