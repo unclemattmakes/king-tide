@@ -6,9 +6,11 @@
  *
  *   D-pad / left stick   → move focus to the neighbouring focusable
  *                          (spatial — buttons in the direction of travel)
- *   A button (0)         → click the focused element
- *   B button (1)         → onBack callback (typically Esc-equivalent)
- *   Start (9)            → onStart callback (typically pause toggle)
+ *   LB / L1   (4)        → page-scroll up + jump focus to first visible card
+ *   RB / R1   (5)        → page-scroll down + jump focus to last visible card
+ *   A button  (0)        → click the focused element
+ *   B button  (1)        → onBack callback (typically Esc-equivalent)
+ *   Start     (9)        → onStart callback (typically pause toggle)
  *
  * Distinct from `gamepadIntent()` which maps the pad to race controls.
  * This module is only active while a menu is showing.
@@ -16,6 +18,8 @@
 
 const NAV_REPEAT_INITIAL_MS = 360
 const NAV_REPEAT_MS = 130
+const PAGE_REPEAT_INITIAL_MS = 420
+const PAGE_REPEAT_MS = 200
 const AXIS_THRESHOLD = 0.55
 
 type Dir = 'up' | 'down' | 'left' | 'right'
@@ -65,6 +69,32 @@ function isDisabled(el: HTMLElement): boolean {
  */
 const FOCUS_CLASS = 'is-menu-focus'
 
+/** Walk up the DOM until we hit the closest ancestor that actually
+ *  scrolls (overflow auto/scroll + content taller than the viewport).
+ *  Used by the page-scroll shoulder buttons and by `scrollFocusIntoView`
+ *  to find the right element to nudge — typically `.bc-stage` for the
+ *  main menu and `.bc-lb-tracks` for the leaderboard track column. */
+function scrollableAncestor(el: HTMLElement | null): HTMLElement | null {
+  let cur = el?.parentElement ?? null
+  while (cur) {
+    const cs = getComputedStyle(cur)
+    const overflowY = cs.overflowY
+    if ((overflowY === 'auto' || overflowY === 'scroll') && cur.scrollHeight > cur.clientHeight) {
+      return cur
+    }
+    cur = cur.parentElement
+  }
+  return null
+}
+
+/** Pull the focused element fully into view in its nearest scroll
+ *  container, honouring CSS `scroll-padding-*` set on the container.
+ *  `block: 'nearest'` is the friendly behaviour — it only scrolls the
+ *  minimum needed, so cards that are already visible don't jump. */
+function scrollFocusIntoView(el: HTMLElement): void {
+  el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+}
+
 export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
   let raf = 0
   let disposed = false
@@ -72,6 +102,9 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
   const prevEdges = { accept: false, back: false, start: false }
   const heldSince = new Map<Dir, number>()
   const heldUntil = new Map<Dir, number>()
+  type Page = 'pageUp' | 'pageDown'
+  const pageHeldSince = new Map<Page, number>()
+  const pageHeldUntil = new Map<Page, number>()
 
   function focusables(): HTMLElement[] {
     const root = opts.container()
@@ -107,7 +140,11 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
     const root = opts.container()
     const current = document.activeElement as HTMLElement | null
     if (!current || !root?.contains(current) || !elements.includes(current)) {
-      elements[0]?.focus({ preventScroll: true })
+      const first = elements[0]
+      if (first) {
+        first.focus({ preventScroll: true })
+        scrollFocusIntoView(first)
+      }
       return
     }
     const curRect = current.getBoundingClientRect()
@@ -155,7 +192,51 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
         best = el
       }
     }
-    if (best) best.focus({ preventScroll: true })
+    if (best) {
+      best.focus({ preventScroll: true })
+      scrollFocusIntoView(best)
+    }
+  }
+
+  /** LB / RB page-scroll. Pages the focused element's scroll container
+   *  by ~80% of its visible height, then snaps focus to the topmost (LB)
+   *  or bottommost (RB) focusable that's now on-screen so the user has
+   *  an anchor to keep d-pad navigating from. Falls back to a regular
+   *  up/down nav when there's nothing scrollable in scope. */
+  function pageScroll(direction: 'up' | 'down'): void {
+    const els = focusables()
+    if (els.length === 0) return
+    const root = opts.container()
+    const current = document.activeElement as HTMLElement | null
+    const anchor = current && root?.contains(current) ? current : els[0] ?? null
+    if (!anchor) return
+    const scroller = scrollableAncestor(anchor)
+    if (!scroller) {
+      navigate(direction)
+      return
+    }
+    const step = Math.max(120, scroller.clientHeight * 0.8)
+    scroller.scrollBy({ top: direction === 'down' ? step : -step, behavior: 'smooth' })
+    // After scrolling, hand focus to a focusable that's actually visible
+    // inside the scroller now — measured against its post-scroll rect so
+    // the player's d-pad picks up at the visible edge.
+    const scrollerRect = scroller.getBoundingClientRect()
+    let pick: HTMLElement | null = null
+    let pickScore = Infinity
+    for (const el of els) {
+      const r = el.getBoundingClientRect()
+      if (r.bottom <= scrollerRect.top || r.top >= scrollerRect.bottom) continue
+      const dy =
+        direction === 'down' ? scrollerRect.bottom - r.bottom : r.top - scrollerRect.top
+      const score = Math.abs(dy)
+      if (score < pickScore) {
+        pickScore = score
+        pick = el
+      }
+    }
+    if (pick && pick !== current) {
+      pick.focus({ preventScroll: true })
+    }
   }
 
   function handleHeld(dir: Dir, held: boolean): void {
@@ -178,6 +259,26 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
     }
   }
 
+  function handlePageHeld(page: Page, held: boolean): void {
+    const now = performance.now()
+    if (!held) {
+      pageHeldSince.delete(page)
+      pageHeldUntil.delete(page)
+      return
+    }
+    if (!pageHeldSince.has(page)) {
+      pageHeldSince.set(page, now)
+      pageHeldUntil.set(page, now + PAGE_REPEAT_INITIAL_MS)
+      pageScroll(page === 'pageUp' ? 'up' : 'down')
+      return
+    }
+    const next = pageHeldUntil.get(page) ?? now
+    if (now >= next) {
+      pageHeldUntil.set(page, now + PAGE_REPEAT_MS)
+      pageScroll(page === 'pageUp' ? 'up' : 'down')
+    }
+  }
+
   function tick(): void {
     if (disposed) return
     raf = requestAnimationFrame(tick)
@@ -197,6 +298,8 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
     const right = (pad.buttons[15]?.pressed ?? false) || lx > AXIS_THRESHOLD
     const accept = pad.buttons[0]?.pressed ?? false
     const back = pad.buttons[1]?.pressed ?? false
+    const pageUp = pad.buttons[4]?.pressed ?? false
+    const pageDown = pad.buttons[5]?.pressed ?? false
     const start = pad.buttons[9]?.pressed ?? false
 
     if (!primed) {
@@ -206,8 +309,8 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
       prevEdges.accept = accept
       prevEdges.back = back
       prevEdges.start = start
-      // Treat held directions as "already consumed" — user must release
-      // and re-press to navigate.
+      // Treat held directions / shoulders as "already consumed" — user
+      // must release and re-press to navigate.
       const now = performance.now()
       const consume = (dir: Dir, held: boolean) => {
         if (!held) return
@@ -218,6 +321,13 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
       consume('down', down)
       consume('left', left)
       consume('right', right)
+      const consumePage = (page: Page, held: boolean) => {
+        if (!held) return
+        pageHeldSince.set(page, now)
+        pageHeldUntil.set(page, Number.POSITIVE_INFINITY)
+      }
+      consumePage('pageUp', pageUp)
+      consumePage('pageDown', pageDown)
       primed = true
       return
     }
@@ -226,6 +336,8 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
     handleHeld('down', down)
     handleHeld('left', left)
     handleHeld('right', right)
+    handlePageHeld('pageUp', pageUp)
+    handlePageHeld('pageDown', pageDown)
 
     if (accept && !prevEdges.accept) {
       const active = document.activeElement as HTMLElement | null
@@ -250,7 +362,15 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
         const els = focusables()
         const selected = els.find((e) => e.classList.contains('selected'))
         const primary = els.find((e) => e.classList.contains('primary'))
-        ;(selected ?? primary ?? els[0])?.focus({ preventScroll: true })
+        const target = selected ?? primary ?? els[0]
+        if (!target) return
+        target.focus({ preventScroll: true })
+        // Reset the scroll position on screen entry — if a previous
+        // visit left the list paged down, the player should land at the
+        // top of the new screen, not wherever the scroll happened to be.
+        const scroller = scrollableAncestor(target)
+        if (scroller) scroller.scrollTop = 0
+        scrollFocusIntoView(target)
       })
     },
     dispose(): void {
