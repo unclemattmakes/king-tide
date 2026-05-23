@@ -988,10 +988,13 @@ function applyGroundedPitchPD(frame: HoverFrame, surfaceForwardSlope: number): v
  *
  *   - Grounded (7, both directions): paired with the grounded pitch PD
  *     above (P=9, D=3, ±45° band). Equilibrium under held wheelie is
- *     ~21° on land / ~31° on water — committed but bounded.
+ *     ~21° on land / ~31° on water — committed but bounded. Grounded
+ *     also fires the motocross-pivot rebalance below — see comments
+ *     inside the function.
  *   - Air (1.8): 60% of the prior 3.0 — air pitch felt twitchy at 3.0.
  *     1.8 stretches a full backflip to ~3s while still keeping fwd.y
- *     monotonic over the 1s m9-air-control sample window.
+ *     monotonic over the 1s m9-air-control sample window. Air keeps the
+ *     pure-torque feel; flips spin around CM.
  */
 function applyPlayerPitchTorque(frame: HoverFrame, isGrounded: boolean): void {
   const { rb, intent, q, dt, m } = frame
@@ -999,11 +1002,52 @@ function applyPlayerPitchTorque(frame: HoverFrame, isGrounded: boolean): void {
   const rightP = quatRotate(q, { x: 1, y: 0, z: 0 })
   const coef = isGrounded ? 7 : 1.8
   const aPitch = -intent.pitch * coef
-  rb.applyTorqueImpulse(
+  const tx = rightP.x * aPitch * m * dt
+  const ty = rightP.y * aPitch * m * dt
+  const tz = rightP.z * aPitch * m * dt
+  rb.applyTorqueImpulse({ x: tx, y: ty, z: tz }, true)
+  if (!isGrounded) return
+
+  // Off-center rebalance — motocross pivot. A pure torque rotates the
+  // chassis around its CM, so a wheelie swings the front up AND the rear
+  // down by the same arc, which reads as "the whole bike tips". To make
+  // pitch feel like pivoting around the rear (wheelie) or the front
+  // (endo/stoppie), add a linear impulse that cancels the angular
+  // contribution to velocity at the chosen pivot: Δv_cm = -Δω × r_anchor.
+  // Net effect, the chosen end is instantaneously stationary and the
+  // opposite end swings through twice the arc.
+  //
+  // Asymmetric on purpose — pitch-up pivots rear (wheelie), pitch-down
+  // pivots front (endo) — matching how a real motorcycle pivots on each
+  // direction. Air pitch keeps its center-pivot feel so backflips spin
+  // around CM as before; flips that pivoted off-axis felt floaty.
+  //
+  // Note: at held-pitch equilibrium the player torque is still applied
+  // every tick (the grounded pitch PD cancels it), so this rebalance is
+  // also still applied each tick. The hover spring absorbs the resulting
+  // steady upward bias; expect the chassis to ride slightly higher
+  // during a sustained wheelie. Reads as "the bike rises while popped"
+  // which matches the motocross feel — but if it floats too much in
+  // playtest, dial PIVOT_OFFSET down toward 0.
+  const fwdP = quatRotate(q, { x: 0, y: 0, z: 1 })
+  // 0.3m = capsule halfHeight (see bike.ts collider) — lines up with the
+  // chassis end visually.
+  const PIVOT_OFFSET = 0.3
+  const sign = intent.pitch > 0 ? -1 : 1
+  const rx = fwdP.x * PIVOT_OFFSET * sign
+  const ry = fwdP.y * PIVOT_OFFSET * sign
+  const rz = fwdP.z * PIVOT_OFFSET * sign
+  // Δω = T / I_pitch. I_pitch ≈ m·0.34 for the capsule (see torque
+  // coefficient comment above). Linear impulse = m · -Δω × r_anchor.
+  const invI = 1 / (m * 0.34)
+  const wx = tx * invI
+  const wy = ty * invI
+  const wz = tz * invI
+  rb.applyImpulse(
     {
-      x: rightP.x * aPitch * m * dt,
-      y: rightP.y * aPitch * m * dt,
-      z: rightP.z * aPitch * m * dt,
+      x: -m * (wy * rz - wz * ry),
+      y: -m * (wz * rx - wx * rz),
+      z: -m * (wx * ry - wy * rx),
     },
     true,
   )
