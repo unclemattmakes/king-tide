@@ -1198,7 +1198,11 @@ function applyGroundBranch(
 
   // ── Forward thrust (boost-raised cap) ──────────────────────────────
   // Water adds extra drag — slightly less responsive. Applied along the
-  // up-plane forward so the bike accelerates along the road plane.
+  // full bike-fwd vector (not the up-plane projection) so chassis pitch
+  // vectors thrust on the ground the same way it does in the air: pop a
+  // wheelie + throttle and the bike lifts; tip into a downslope and the
+  // throttle drives you into the wave face. Lets pitch be an expressive
+  // control on land/water, not just airborne.
   const throttle = intent.throttle
   const direction = throttle >= 0 ? 1 : -1
   const scale = throttle >= 0 ? 1 : stats.reverseScale
@@ -1213,9 +1217,9 @@ function applyGroundBranch(
     Math.abs(throttle) * stats.accel * scale * speedFalloff * boost * direction * surfaceMul
   rb.applyImpulse(
     {
-      x: planeFwdX * aThrust * m * dt,
-      y: planeFwdY * aThrust * m * dt,
-      z: planeFwdZ * aThrust * m * dt,
+      x: fwd.x * aThrust * m * dt,
+      y: fwd.y * aThrust * m * dt,
+      z: fwd.z * aThrust * m * dt,
     },
     true,
   )
