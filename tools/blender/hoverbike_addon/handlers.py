@@ -184,6 +184,18 @@ def _run_pending_rebuilds():
         except (RuntimeError, AttributeError):
             pass
 
+    # Drag-to-snap path: depsgraph saw the helper move to a position
+    # that doesn't match what repose last wrote, so the user grabbed it
+    # via the manipulator. Reproject onto the curve — nearest t +
+    # signed perpendicular offset — and repose with the proper yaw + Z.
+    # The snap function suppresses the prop-update callback while it
+    # writes scene props so this stays a single tick of work.
+    if "helper_drag" in pending and bpy.data.objects.get(PLACEMENT_HELPER_NAME) is not None:
+        try:
+            _placement_helper_mod.snap_helper_to_curve_from_world(scene)
+        except (RuntimeError, AttributeError):
+            pass
+
     return None  # one-shot — don't reschedule
 
 
@@ -322,6 +334,11 @@ def _hoverbike_depsgraph_post(scene, depsgraph):
     """Run on every depsgraph evaluation; cheap unless something we
     care about just changed. The actual rebuild runs from a debounced
     timer outside this callback, so we never block evaluation."""
+    from .placement_helper import (
+        PLACEMENT_HELPER_NAME,
+        helper_position_matches_last_repose,
+    )
+
     try:
         updates = depsgraph.updates
     except AttributeError:
@@ -344,6 +361,19 @@ def _hoverbike_depsgraph_post(scene, depsgraph):
             continue
         if re.match(r"^boost_\d+$", name):
             _schedule_rebuild("boosts")
+        # Helper drag-to-snap: when the placement helper's transform
+        # updates AND the new position differs from what repose last
+        # wrote, treat it as a user drag and schedule a reproject onto
+        # the curve. The position check is what breaks the otherwise
+        # endless cycle of "repose writes location → depsgraph fires →
+        # schedules another drag-snap" — once we're back on the curve
+        # the helper's position matches and we stop scheduling.
+        if name == PLACEMENT_HELPER_NAME and getattr(upd, "is_updated_transform", False):
+            helper_obj = bpy.data.objects.get(PLACEMENT_HELPER_NAME)
+            if helper_obj is not None and not helper_position_matches_last_repose(
+                helper_obj.matrix_world.translation
+            ):
+                _schedule_rebuild("helper_drag")
 
 
 # ────────────────────────────────────────────────────────────────────
