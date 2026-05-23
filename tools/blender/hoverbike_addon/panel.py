@@ -1477,13 +1477,13 @@ class HOVERBIKE_PT_track_gameplay(_SelectionDrivenPanel, Panel):
         # Buoys — floating markers along the racing-line edges wherever
         # the spline crosses open water. Lateral offset uses the gate
         # half-width so the buoys read as "edge of the racing lane,"
-        # spacing uses the gate full-width × the multiplier prop so
-        # rhythm tracks gate density.
+        # Spacing is raw metres; offset still rides gate full-width so
+        # the buoy channel scales with the gameplay corridor.
         layout.label(text="Buoys (auto, over water):", icon="MOD_OCEAN")
         layout.prop(scene, "hoverbike_gate_buoys_enabled", text="Enable")
         if scene.hoverbike_gate_buoys_enabled:
             row = layout.row(align=True)
-            row.prop(scene, "hoverbike_gate_buoy_spacing_mult", text="Spacing ×gw")
+            row.prop(scene, "hoverbike_gate_buoy_spacing_m", text="Spacing")
             row.prop(scene, "hoverbike_gate_buoy_side_offset_mult", text="Offset ×gw")
         layout.operator("hoverbike.rebuild_buoys", icon="FILE_REFRESH")
         if bpy.data.objects.get("gate_buoys") is not None:

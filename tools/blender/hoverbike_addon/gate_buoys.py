@@ -369,18 +369,14 @@ def _maybe_build_buoys_from_samples(
     if not any(s.get("over_water", False) for s in samples):
         return None, 0
 
-    # Spacing AND lateral offset ride on the gate full-width × their
-    # respective multiplier props. Coupling both to gate width keeps
-    # the "racing-line rhythm" coherent: a track tuned for wide gates
-    # gets a wide buoy channel and sparse spacing, a tighter narrow-
-    # gate track gets tighter buoys closer to the curve, all without
-    # authors tuning raw metres. Default gate half-width 14 m → full
-    # width 28 m → spacing 1.5× → 42 m between pairs; offset 1.5× →
-    # buoys 42 m off the curve each side.
-    gate_full_width = 2.0 * float(getattr(scene, "hoverbike_gate_half_width", 14.0))
-    spacing_mult = float(getattr(scene, "hoverbike_gate_buoy_spacing_mult", 1.5))
+    # Spacing is authored directly in metres so the buoy rhythm is
+    # independent of gate width (a track that narrows its gates for
+    # difficulty shouldn't also re-space its buoys). Lateral offset
+    # stays as a gate-width multiplier so the buoy channel still
+    # scales with the gameplay corridor.
     side_offset_mult = float(getattr(scene, "hoverbike_gate_buoy_side_offset_mult", 1.5))
-    spacing_m = max(1.0, spacing_mult * gate_full_width)
+    gate_full_width = 2.0 * float(getattr(scene, "hoverbike_gate_half_width", 14.0))
+    spacing_m = max(1.0, float(getattr(scene, "hoverbike_gate_buoy_spacing_m", 42.0)))
     lateral_m = max(0.0, side_offset_mult * gate_full_width)
     buoy_me = _build_buoy_strip_mesh(
         samples,
@@ -513,7 +509,7 @@ _CLASSES: tuple[type, ...] = (
 
 _SCENE_PROP_NAMES: tuple[str, ...] = (
     "hoverbike_gate_buoys_enabled",
-    "hoverbike_gate_buoy_spacing_mult",
+    "hoverbike_gate_buoy_spacing_m",
     "hoverbike_gate_buoy_side_offset_mult",
 )
 
@@ -544,15 +540,15 @@ def register() -> None:
         default=True,
         update=_on_buoy_prop_update,
     )
-    bpy.types.Scene.hoverbike_gate_buoy_spacing_mult = FloatProperty(
-        name="Buoy spacing (× gate w)",
+    bpy.types.Scene.hoverbike_gate_buoy_spacing_m = FloatProperty(
+        name="Buoy spacing (m)",
         description=(
-            "Arc-length distance between buoy pairs, expressed as a "
-            "multiplier of the gate's full width (= 2 × hoverbike_gate_half_width). "
-            "Default 1.5 = buoys spaced 1.5× as far apart as a gate is wide, "
-            "so on default geometry (gate half-width 14 m) pairs land every 42 m"
+            "Arc-length distance between buoy pairs in metres. Independent "
+            "of gate width — narrowing gates for difficulty doesn't re-space "
+            "the buoy markers. Default 42 m matches the prior 1.5× default at "
+            "the default 28 m gate full-width"
         ),
-        default=1.5, min=0.1, max=10.0, precision=2,
+        default=42.0, min=1.0, max=500.0, precision=1, subtype="DISTANCE",
         update=_on_buoy_prop_update,
     )
     bpy.types.Scene.hoverbike_gate_buoy_side_offset_mult = FloatProperty(
