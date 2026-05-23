@@ -659,13 +659,15 @@ class HOVERBIKE_PT_track_start(_SelectionDrivenPanel, Panel):
         if bound:
             # Bound mode: the t slider is the primary control. Editing
             # it fires the live re-snap via _on_start_t_changed → the
-            # handlers module's debounced timer. Spacing edits do the
-            # same.
+            # handlers module's debounced timer. Spacing + back-off
+            # edits do the same.
             row = layout.row(align=True)
             row.prop(scene, "hoverbike_start_t", text="t", slider=True)
             row = layout.row(align=True)
             row.prop(scene, "hoverbike_start_grid_spacing", text="Spacing")
             row.prop(scene, "hoverbike_snap_hover_height", text="Hover")
+            row = layout.row(align=True)
+            row.prop(scene, "hoverbike_start_backoff_m", text="Back-off")
             row = layout.row(align=True)
             row.operator(
                 "hoverbike.unbind_start_from_spline",
@@ -688,6 +690,7 @@ class HOVERBIKE_PT_track_start(_SelectionDrivenPanel, Panel):
             # they want to apply once without binding.
             row = layout.row(align=True)
             row.prop(scene, "hoverbike_start_grid_spacing", text="Spacing")
+            row.prop(scene, "hoverbike_start_backoff_m", text="Back-off")
             row.operator(
                 "hoverbike.snap_starts_to_spline",
                 text="Snap (once)",

@@ -274,8 +274,27 @@ class HOVERBIKE_OT_snap_starts_to_spline(Operator):
             or sea != 0.0
         )
         water_z = sea if has_water else float("-inf")
-        origin = mathutils.Vector((s["x"], s["y"], 10000.0))
+
+        tx, ty = s["tx"], s["ty"]
+        rx, ry = ty, -tx
+        # Back-off along the negative tangent so starts sit *behind*
+        # the starting line (= the curve point at the chosen t),
+        # facing into it. Mirrors a real grid: bikes line up before the
+        # line, lights go green, they cross it to begin lap 1. The line
+        # itself is gate 0 in the spline-derived gate sequence, so
+        # parking the starts back from t lets the nearest-gate yaw aim
+        # them at gate 0 (which is also roughly aimed at gate 1, since
+        # the two are colinear along the tangent at t=0).
+        back_off = float(getattr(scene, "hoverbike_start_backoff_m", 8.0) or 0.0)
+        anchor_x = s["x"] - tx * back_off
+        anchor_y = s["y"] - ty * back_off
+
+        # Raycast at the back-shifted anchor (not the curve point) so a
+        # coastal / sloped start gets the right Z. Both starts share the
+        # one cast — they're laterally offset by spacing/2 each, so
+        # within a few metres of the anchor.
         down = mathutils.Vector((0.0, 0.0, -1.0))
+        origin = mathutils.Vector((anchor_x, anchor_y, 10000.0))
         with _PreviewCollectionsHidden(bpy.context.view_layer):
             bpy.context.view_layer.update()
             depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -287,8 +306,6 @@ class HOVERBIKE_OT_snap_starts_to_spline(Operator):
         clamped_to_water = water_z > terrain_z and hit
         target_z = surface_z + z_hover
 
-        tx, ty = s["tx"], s["ty"]
-        rx, ry = ty, -tx
         # Aim the bike at the start gate, not just along the spline
         # tangent. The two differ whenever the spline curves between
         # the start's t and the nearest gate's t (or whenever the gate
@@ -323,8 +340,8 @@ class HOVERBIKE_OT_snap_starts_to_spline(Operator):
             obj = bpy.data.objects.get(name)
             if obj is None:
                 continue
-            sx_i = s["x"] + rx * off
-            sy_i = s["y"] + ry * off
+            sx_i = anchor_x + rx * off
+            sy_i = anchor_y + ry * off
             this_yaw = yaw
             if placements:
                 nearest_i = min(
@@ -1051,6 +1068,16 @@ class HOVERBIKE_OT_add_starts(Operator):
         sp = bpy.data.objects.get("ai_spline_main")
         snapped = False
         if sp is not None and sp.type == "CURVE":
+            # Bind the freshly-created pair to the spline at t=0 so they
+            # land at the starting line by default. Without this the
+            # snap operator falls through to hoverbike_placement_t
+            # (default 0.25), which would park the bikes a quarter of
+            # the way around the lap — the exact bug Matt flagged.
+            # Binding also flips the start sub-panel into "bound" mode
+            # so the t slider becomes the canonical control going
+            # forward, which is what authors expect for a fresh setup.
+            scene.hoverbike_start_bound_to_spline = True
+            scene.hoverbike_start_t = 0.0
             try:
                 snap_result = bpy.ops.hoverbike.snap_starts_to_spline()
                 snapped = snap_result == {"FINISHED"}
@@ -1060,7 +1087,8 @@ class HOVERBIKE_OT_add_starts(Operator):
         if snapped:
             self.report(
                 {"INFO"},
-                f"Created {', '.join(created)} and snapped to ai_spline_main.",
+                f"Created {', '.join(created)} and snapped to ai_spline_main at t=0 "
+                f"(back-off {float(getattr(scene, 'hoverbike_start_backoff_m', 8.0)):.1f} m).",
             )
         elif sp is None:
             self.report(
@@ -1186,6 +1214,17 @@ def register() -> None:
         default=4.0, min=0.5, max=20.0, precision=1,
         update=_on_start_t_changed,
     )
+    bpy.types.Scene.hoverbike_start_backoff_m = FloatProperty(
+        name="Start back-off (m)",
+        description=(
+            "Distance to push the start pair backwards along the negative racing "
+            "tangent from the chosen t. The 'starting line' is the curve point "
+            "at t — bikes line up behind it and face into it, just like a real "
+            "grid. 0 = on the line; 8 m clears it cleanly for typical gate widths"
+        ),
+        default=8.0, min=0.0, max=50.0, precision=1, subtype="DISTANCE",
+        update=_on_start_t_changed,
+    )
     bpy.types.Scene.hoverbike_start_t = FloatProperty(
         name="Start t",
         description=(
@@ -1215,6 +1254,7 @@ def unregister() -> None:
         "hoverbike_auto_ramp_kappa",
         "hoverbike_auto_ramp_min_spacing",
         "hoverbike_start_grid_spacing",
+        "hoverbike_start_backoff_m",
         "hoverbike_start_t",
         "hoverbike_start_bound_to_spline",
     ):
