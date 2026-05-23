@@ -1,14 +1,24 @@
+import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import type { LoadedProp } from '@/game/assets/prop-loader'
+import { createWaveRider } from '@/game/entities/wave-rider'
 import type { Prop } from '@/game/tracks/types'
 
 /** Pre-loaded prop GLBs keyed by `assetId`. Empty / undefined when no
  *  asset-props are in the track. */
 export type PropAssetRegistry = Map<string, LoadedProp>
 
+/** Returned by `createPropColliders` so the render layer can match
+ *  each spawned wave-rider entity to the prop asset it came from. The
+ *  wave-rider render system uses this to clone the asset's GLB mesh
+ *  for the entity instead of the primitive-archetype fallback. Keyed
+ *  by ECS entity id; absent when the placement is a static prop. */
+export type WaveRiderAssetBindings = Map<number, string>
+
 /**
- * Static physics colliders for editor-authored props.
+ * Static physics colliders for editor-authored props, plus wave-rider
+ * entity spawns for any asset-prop tagged as a wave-rider.
  *
  *  - box        → cuboid collider (cheap + exact)
  *  - sphere     → ball collider
@@ -20,17 +30,45 @@ export type PropAssetRegistry = Map<string, LoadedProp>
  *                 trimesh on fast-moving capsules (see status.md). Wall
  *                 thickness ≥ 0.3m is recommended.
  *  - halfpipe   → trimesh, same as pipe (upper half omitted).
+ *
+ * Wave-rider behaviour: an asset prop whose GLB carries the
+ * `wave_rider_archetype` extras is routed through `createWaveRider`
+ * instead — the runtime makes a kinematic body that tracks the wave
+ * surface and reacts to hits, and the render layer hosts the visual
+ * via the wave-rider render system. Static-collider creation is
+ * skipped for that placement. `sim` is required for the wave-rider
+ * spawn path; without it (legacy call sites that haven't been
+ * upgraded), wave-rider props degrade to static colliders.
+ *
+ * Returns the eid → assetId mapping for every wave-rider that was
+ * spawned, so the render layer can pick up the right GLB mesh per
+ * entity instead of falling back to the primitive archetype mesh.
  */
 export function createPropColliders(
   phys: PhysicsWorld,
   props: Prop[],
   assets?: PropAssetRegistry,
-): void {
+  sim?: SimWorld,
+): WaveRiderAssetBindings {
+  const waveRiderBindings: WaveRiderAssetBindings = new Map()
   for (const p of props) {
     if (p.type === 'asset') {
       if (!p.assetId) continue
       const loaded = assets?.get(p.assetId)
       if (!loaded) continue
+      if (loaded.waveRider !== undefined && sim) {
+        // Wave-rider props get a kinematic Rapier body driven by the
+        // wave-rider sim system + a render mesh sourced from the
+        // loaded GLB. Static colliders are skipped — the wave-rider
+        // body owns the physics presence.
+        const eid = createWaveRider(sim, phys, {
+          position: p.position,
+          archetype: loaded.waveRider,
+          yaw: yawFromQuat(p.rotation),
+        })
+        waveRiderBindings.set(eid, p.assetId)
+        continue
+      }
       addAssetPropColliders(phys, p, loaded)
       continue
     }
@@ -91,6 +129,17 @@ export function createPropColliders(
       .setRestitution(0.05)
     phys.world.createCollider(col, rb)
   }
+  return waveRiderBindings
+}
+
+/** Yaw around world-Y from a quaternion via the YXZ Euler decomposition.
+ *  Matches the convention used in `glb-loader.readYaw` and elsewhere
+ *  so authored prop rotations survive the round-trip into the wave-
+ *  rider's initial yaw. */
+function yawFromQuat(q: Quat): number {
+  const r02 = 2 * (q.x * q.z + q.y * q.w)
+  const r22 = 1 - 2 * (q.x * q.x + q.y * q.y)
+  return Math.atan2(r02, r22)
 }
 
 /**

@@ -92,12 +92,24 @@ def build() -> None:
     bpy.ops.object.empty_add(type="PLAIN_AXES", location=(0, 0, 0))
     prop_root = bpy.context.active_object
     prop_root.name = "prop_root"
-    apply_extras(
-        prop_root,
-        kind="prop",
-        prop_id=prop_id,
-        category=spec.get("category", "decor"),
-    )
+    # The optional ``waveRider`` block opts the prop into the runtime
+    # wave-rider entity path. The runtime keys on the sibling
+    # ``wave_rider_archetype`` extras key — kind stays ``"prop"`` so
+    # existing track loaders / asset registries continue to recognise
+    # the GLB exactly the same way. Known archetypes are validated on
+    # load (see ``src/game/assets/prop-loader.ts``); unknown strings
+    # warn and fall back to a static prop at runtime.
+    root_extras: dict[str, object] = {
+        "kind": "prop",
+        "prop_id": prop_id,
+        "category": spec.get("category", "decor"),
+    }
+    wave_rider_spec = spec.get("waveRider")
+    if isinstance(wave_rider_spec, dict):
+        arche = wave_rider_spec.get("archetype")
+        if isinstance(arche, str):
+            root_extras["wave_rider_archetype"] = arche
+    apply_extras(prop_root, **root_extras)
 
     [body] = append_objects(KIT_BLEND, [geom["kitPart"]])
     body.name = "prop_body"

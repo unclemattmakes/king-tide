@@ -95,6 +95,7 @@ CATALOG_UUIDS = {
     "Hoverbike/Track Props/Rocks":     "11111111-1111-4111-8111-000000000010",
     "Hoverbike/Track Props/Palms":     "11111111-1111-4111-8111-000000000011",
     "Hoverbike/Track Props/Buoys":     "11111111-1111-4111-8111-000000000012",
+    "Hoverbike/Track Props/Logs":      "11111111-1111-4111-8111-000000000027",
     "Hoverbike/Track Props/Gates":     "11111111-1111-4111-8111-000000000013",
     "Hoverbike/Track Props/Indicators":"11111111-1111-4111-8111-000000000014",
     # Phase γ biome kits — keep UUIDs stable so Asset-Browser
@@ -476,6 +477,61 @@ def build_buoy_mesh(name: str, *, radius: float = 0.6, height: float = 1.5) -> b
     # everything else stays at index 0.
     me.polygons[-1].material_index = 1
 
+    return me
+
+
+# ────────────────────────────────────────────────────────────────────
+# Drift log — horizontal cylinder that wave-rides like a buoy
+# ────────────────────────────────────────────────────────────────────
+
+
+def build_log_mesh(name: str, *, length: float = 2.4, radius: float = 0.30) -> bpy.types.Mesh:
+    """Drift-log mesh — horizontal cylinder lying along +X. Pairs with
+    the runtime ``wave_rider_archetype = "log"`` tuning (longer tilt
+    period, smaller floatOffsetY than the buoy). The cylinder runs
+    along +X so the runtime's yaw drift reads as the log rolling about
+    its long axis when authored at yaw=0.
+
+    A subtle taper at each end + a faint mid-band sit the silhouette
+    apart from the pylon-style buoy at race speed."""
+    bm = bmesh.new()
+    segs = 12
+    half = length / 2
+
+    def ring(x: float, r: float) -> list[bmesh.types.BMVert]:
+        return [
+            bm.verts.new((x,
+                          math.cos(s / segs * math.tau) * r,
+                          math.sin(s / segs * math.tau) * r))
+            for s in range(segs)
+        ]
+
+    # Ring stack along +X — slight taper at both ends so the log reads
+    # organic and not as a perfect cylinder.
+    left_cap = ring(-half,          radius * 0.78)
+    left     = ring(-half * 0.85,   radius)
+    mid_l    = ring(-half * 0.30,   radius * 1.04)
+    mid_r    = ring( half * 0.30,   radius * 1.04)
+    right    = ring( half * 0.85,   radius)
+    right_cap = ring(half,          radius * 0.78)
+
+    rings = [left_cap, left, mid_l, mid_r, right, right_cap]
+    for i in range(len(rings) - 1):
+        cur = rings[i]
+        nxt = rings[i + 1]
+        for si in range(segs):
+            sn = (si + 1) % segs
+            bm.faces.new([cur[si], cur[sn], nxt[sn], nxt[si]])
+    # Caps.
+    bm.faces.new(left_cap[::-1])
+    bm.faces.new(right_cap)
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    set_constant(me, DEFAULT_TERRAIN)
     return me
 
 
@@ -1780,12 +1836,30 @@ def _mark_collection_asset(coll: bpy.types.Collection, *, catalog_path: str, des
         ad.tags.new(name=t)
 
 
-def _make_prop_collection(name: str, mesh: bpy.types.Mesh, gn_group: bpy.types.NodeTree | None, materials: list[bpy.types.Material], *, gn_inputs: dict | None = None, position: tuple[float, float, float] = (0, 0, 0)) -> bpy.types.Collection:
+def _make_prop_collection(
+    name: str,
+    mesh: bpy.types.Mesh,
+    gn_group: bpy.types.NodeTree | None,
+    materials: list[bpy.types.Material],
+    *,
+    gn_inputs: dict | None = None,
+    position: tuple[float, float, float] = (0, 0, 0),
+    wave_rider_archetype: str | None = None,
+) -> bpy.types.Collection:
     """Build the standard prop collection layout:
 
         Collection: prop_<id>
         ├── Empty: prop_<id>_root   (kind=prop, prop_id=<id>)
         │   └── Mesh:  prop_<id>_mesh  (GN modifier applied if group is given)
+
+    ``wave_rider_archetype`` (optional) tags the root with
+    ``wave_rider_archetype = <buoy|log>`` extras. Tracks that instance
+    the prop pick up the tag at GLB-load time; the runtime spawns a
+    kinematic wave-rider body for each placement instead of a static
+    collider. Mirror of ``waveRider.archetype`` in the build_prop spec
+    schema — this seed path is used when authors hand-export collections
+    via the addon, whereas the standalone GLB pipeline (`build_prop.py`)
+    reads the archetype from the spec JSON.
 
     Returns the collection, ready to be marked as an asset.
     """
@@ -1799,6 +1873,8 @@ def _make_prop_collection(name: str, mesh: bpy.types.Mesh, gn_group: bpy.types.N
     root.location = position
     root["kind"] = "prop"
     root["prop_id"] = name.removeprefix("prop_")
+    if wave_rider_archetype is not None:
+        root["wave_rider_archetype"] = wave_rider_archetype
     coll.objects.link(root)
 
     mesh_obj = bpy.data.objects.new(f"{name}_mesh", mesh)
@@ -1835,6 +1911,7 @@ PROP_POSITIONS = {
     "prop_rock":            ( 0.0, 0.0, 0.0),
     "prop_palm":            ( 6.0, 0.0, 0.0),
     "prop_buoy":            (12.0, 0.0, 0.0),
+    "prop_log":             (18.0, 0.0, 0.0),
     "prop_gate":            (24.0, 0.0, 0.0),
     "prop_turn_indicator":  (60.0, 0.0, 0.0),
     # Phase γ biome kits — laid out along +X past the existing props
@@ -1888,6 +1965,7 @@ def build_props() -> dict:
     palm_frond_mat = make_material("mat_foliage_palm", "#3e7a32", roughness=0.55)
     buoy_body_mat  = make_material("mat_prop_buoy", "#cc3322", roughness=0.5)
     buoy_top_mat   = make_material("mat_prop_buoy_light", "#fff2a8", roughness=0.3, emission_hex="#fff8d0", emission_strength=4.0)
+    log_mat        = make_material("mat_prop_log", "#6b4a2a", roughness=0.85)
     gate_mat       = make_material("mat_prop_gate", "#d6d3ce", roughness=0.45)
     indicator_mat  = make_material("mat_prop_indicator", "#ffaa1a", roughness=0.4, emission_hex="#ffaa1a", emission_strength=1.2)
 
@@ -1929,16 +2007,40 @@ def build_props() -> dict:
     summary["palm"] = {"verts": len(palm_mesh.vertices)}
 
     # ── Buoy ───────────────────────────────────────────────────────
+    # ``wave_rider_archetype="buoy"`` opts every instance into the
+    # runtime kinematic-buoyancy path (`createWaveRider`). The runtime
+    # picks up the tag from glTF extras on the prop root and routes
+    # placement through the wave-rider system + render system instead
+    # of the static-collider path.
     buoy_mesh  = build_buoy_mesh("prop_buoy_mesh", radius=0.6, height=1.5)
     buoy_coll  = _make_prop_collection(
         "prop_buoy", buoy_mesh, None, [buoy_body_mat, buoy_top_mat],
         position=PROP_POSITIONS["prop_buoy"],
+        wave_rider_archetype="buoy",
     )
     _mark_collection_asset(buoy_coll,
                             catalog_path="Hoverbike/Track Props/Buoys",
-                            description="Marker buoy — pylon with emissive top. Static asset; bobbing animation lives at runtime via the water shader.",
-                            tags=["buoy", "water", "emissive"])
+                            description="Marker buoy — pylon with emissive top. Wave-rider: bobs on the wave surface and reacts to bike impacts at runtime via the kinematic-body system (see src/game/components/wave-rider.ts).",
+                            tags=["buoy", "water", "emissive", "wave-rider"])
     summary["buoy"] = {"verts": len(buoy_mesh.vertices)}
+
+    # ── Log ────────────────────────────────────────────────────────
+    # Second wave-rider archetype — runs along the cylinder's long axis
+    # so authored ``yaw`` rotates the log around its waterline. Tuning
+    # (`'log'` entry in ``WAVE_RIDER_TUNING``) gives it a heavier feel
+    # than the buoy: stiffer normalFollow, longer tilt period, smaller
+    # floatOffsetY (the log half-submerges instead of bobbing on top).
+    log_mesh = build_log_mesh("prop_log_mesh", length=2.4, radius=0.30)
+    log_coll = _make_prop_collection(
+        "prop_log", log_mesh, None, [log_mat],
+        position=PROP_POSITIONS["prop_log"],
+        wave_rider_archetype="log",
+    )
+    _mark_collection_asset(log_coll,
+                            catalog_path="Hoverbike/Track Props/Logs",
+                            description="Drift log — horizontal cylinder. Wave-rider: half-submerged, rolls with the surface normal and reacts to bike impacts (heavier feel than the buoy archetype).",
+                            tags=["log", "water", "wave-rider"])
+    summary["log"] = {"verts": len(log_mesh.vertices)}
 
     # ── Gate ───────────────────────────────────────────────────────
     gate_mesh  = build_gate_mesh("prop_gate_mesh", half_width=14.0, height=6.0, post_radius=0.35)
@@ -2258,7 +2360,7 @@ def build_props() -> dict:
              ["open-sea", "rock", "scatterable"])
 
     # Mark the legacy collections + every Phase γ collection as scatter sources.
-    for c in (rock_coll, palm_coll, buoy_coll, gate_coll, ti_coll):
+    for c in (rock_coll, palm_coll, buoy_coll, log_coll, gate_coll, ti_coll):
         c["scatter_source"] = True
     # Phase γ collections already get `scatter_source` inside `_add_kit`.
 

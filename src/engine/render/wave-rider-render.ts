@@ -1,18 +1,29 @@
 /**
- * Wave-rider render system — builds a primitive mesh per archetype on
- * first sight of each WaveRider entity, then syncs its Three.js
- * Object3D transform from the ECS TransformStore each frame.
+ * Wave-rider render system — builds a mesh per WaveRider entity on
+ * first sight, then syncs its Three.js Object3D transform from the
+ * ECS TransformStore each frame.
  *
- * Visuals are intentionally simple primitives (cylinder + emissive cap
- * for buoys, horizontal cylinder for logs). The eventual production
- * pipeline will swap these out for GLB props loaded from the props
- * library; the system's only contract is "produce a visible thing per
- * entity that follows its Transform."
+ * Two visual sources, in order:
+ *
+ *   1. **Asset GLB clone** — when the entity was spawned from an
+ *      editor-authored `assetId` prop, the caller passes an
+ *      `assetResolver` that maps entity ids to a loaded
+ *      `LoadedProp`. The system clones the prop GLB once per
+ *      entity and uses that as the visual. This is the production
+ *      path: a buoy authored in Blender ships its real geometry +
+ *      materials, not a placeholder.
+ *
+ *   2. **Primitive fallback** — when no asset is bound (the
+ *      `?waveriders=1` validation scene spawns raw WaveRiders with
+ *      no prop GLB), the system falls back to a cylinder-and-cap
+ *      primitive sized for the archetype. Keeps the test scene
+ *      independent of the asset pipeline.
  */
 
 import { query } from 'bitecs'
 import * as THREE from 'three'
 import type { SimWorld } from '@/engine/sim/ecs/world'
+import { cloneLoadedProp, type LoadedProp } from '@/game/assets/prop-loader'
 import { TransformStore } from '@/game/components'
 import {
   type WaveRiderArchetypeId,
@@ -27,9 +38,22 @@ export type WaveRiderRenderSystem = {
   dispose(): void
 }
 
+/** Resolves a wave-rider entity id to the prop GLB it was instanced
+ *  from, when applicable. Returns undefined for entities spawned
+ *  outside the asset-prop pipeline (the `?waveriders=1` test scene). */
+export type WaveRiderAssetResolver = (eid: number) => LoadedProp | undefined
+
+export type WaveRiderRenderOpts = {
+  /** Optional per-entity GLB resolver. When provided + the entity has
+   *  a matching `LoadedProp`, the system clones the prop's root for
+   *  the visual. Otherwise it builds the primitive archetype mesh. */
+  assetResolver?: WaveRiderAssetResolver
+}
+
 export function createWaveRiderRenderSystem(
   scene: THREE.Scene,
   sim: SimWorld,
+  opts: WaveRiderRenderOpts = {},
 ): WaveRiderRenderSystem {
   const meshes = new Map<number, THREE.Object3D>()
   const ownedMaterials = new Set<THREE.Material>()
@@ -101,7 +125,27 @@ export function createWaveRiderRenderSystem(
       if (!mesh) {
         const wr = WaveRiderStore.get(eid)
         if (!wr) continue
-        mesh = buildArchetypeMesh(wr.archetype)
+        // Prefer the loaded asset GLB; fall back to the primitive
+        // archetype mesh when none is registered for this entity.
+        const loaded = opts.assetResolver?.(eid)
+        if (loaded) {
+          mesh = cloneLoadedProp(loaded)
+          // cloneLoadedProp doesn't own its materials/geometries —
+          // they're shared with the source GLB cache. We deliberately
+          // don't register them in ownedMaterials / ownedGeometries
+          // so disposal here doesn't yank them out from under the
+          // prop-loader cache; the cache disposes them at app
+          // teardown via its own path.
+          mesh.traverse((obj) => {
+            const m = obj as THREE.Mesh
+            if (m.isMesh) {
+              m.castShadow = true
+              m.receiveShadow = true
+            }
+          })
+        } else {
+          mesh = buildArchetypeMesh(wr.archetype)
+        }
         scene.add(mesh)
         meshes.set(eid, mesh)
       }

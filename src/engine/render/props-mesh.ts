@@ -9,6 +9,14 @@ import { buildPropGeometry } from './props-geometry'
  * buildPropGeometry; asset-prop types (`type === 'asset'` with an
  * `assetId`) are cloned from a pre-loaded GLB. Physics colliders are
  * attached separately by `createPropColliders`.
+ *
+ * Wave-rider asset props (GLBs tagged with `wave_rider_archetype` in
+ * their root extras) are skipped here — those placements spawn a
+ * WaveRider entity instead, and `wave-rider-render` owns the visual
+ * so it can drive the per-entity transform each frame from the
+ * kinematic body. Static-prop placement that happens to share the
+ * same asset id wouldn't make sense anyway: an editor placement is
+ * always one-to-one with the loaded prop's behaviour.
  */
 const DEFAULT_COLORS: Record<Exclude<PropType, 'asset'>, number> = {
   box: 0xc0a070,
@@ -30,6 +38,12 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
     if (p.type === 'asset') {
       const loaded = p.assetId ? assets?.get(p.assetId) : undefined
       if (!loaded) continue // silently skip; caller logs missing assets at boot
+      // Wave-rider props are hosted by `wave-rider-render` so it can
+      // drive the visual from the per-entity kinematic body transform
+      // each frame. Skipping here keeps a single render owner per
+      // placement — otherwise we'd have two meshes overlapping, one
+      // static and one bobbing.
+      if (loaded.waveRider !== undefined) continue
       const inst = cloneLoadedProp(loaded)
       inst.position.set(p.position.x, p.position.y, p.position.z)
       inst.quaternion.set(p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w)

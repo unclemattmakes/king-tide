@@ -25,6 +25,7 @@ import { riderPoseSystem } from './systems/rider-pose'
 import { rubberBandSystem } from './systems/rubber-band'
 import { syncFromPhysics } from './systems/sync-from-physics'
 import { wakeUpdateSystem } from './systems/wake-update'
+import type { WaveRiderSystem } from './systems/wave-rider'
 import { query } from 'bitecs'
 import { BikeTag, RBHandle, RBHandleStore } from './components'
 
@@ -73,6 +74,11 @@ export type StepInputs = {
    *  and-suspenders against future non-tag dependencies, and saves the
    *  no-op query traversal each tick. */
   runAI?: boolean
+  /** Optional wave-rider system. Tracks with no wave-rider props omit
+   *  it; passing `undefined` is a no-op. Stepped right after the wave
+   *  field advances so kinematic bodies track the new surface within
+   *  the same tick. */
+  waveRiders?: WaveRiderSystem
 }
 
 /**
@@ -95,6 +101,11 @@ export function simulateStep(
   inputs: StepInputs,
 ): void {
   advanceWaveField(waveField, phys.fixedDt * inputs.waveTimeScale)
+  // Wave-rider props ride this tick's freshly-advanced surface. Step
+  // before any bike system reads from physics — the next phys.step()
+  // commits the kinematic pose, so bikes that collide with a buoy
+  // this tick feel the post-step location, not the previous one.
+  inputs.waveRiders?.step(phys.fixedDt)
   wakeUpdateSystem(sim, phys, waveField)
 
   if (inputs.locked) {

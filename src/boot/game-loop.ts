@@ -98,6 +98,8 @@ import type { PickupType } from '@/game/components/pickup'
 import { RacerStore } from '@/game/components/race'
 import type { RaceTick } from '@/game/sim-step'
 import { simulateStep } from '@/game/sim-step'
+import type { WaveRiderSystem } from '@/game/systems/wave-rider'
+import type { WaveRiderRenderSystem } from '@/engine/render/wave-rider-render'
 import { chargeBoostMeter } from '@/game/systems/boost-meter'
 import type { GhostRunner } from '@/game/systems/ghost-runner'
 import { getHeldPickup } from '@/game/systems/pickup'
@@ -252,6 +254,14 @@ export interface GameLoopOpts {
    *  player's current lap time. Null when no saved ghost exists for
    *  (track, bike) or when not in TT mode. */
   ghostRunner?: GhostRunner | null
+  /** Optional wave-rider sim system. Present iff the track has any
+   *  prop tagged as a wave-rider. Stepped each fixed-dt tick via
+   *  `simulateStep`. */
+  waveRiderSys?: WaveRiderSystem
+  /** Optional wave-rider render system. Present when at least one
+   *  prop placement produced a WaveRider entity bound to a real prop
+   *  GLB. Called each render frame to sync mesh transforms. */
+  waveRiderRender?: WaveRiderRenderSystem
   /** Lap timing state, mutated each lap. */
   lapState: {
     lapStartRaceTime: number
@@ -399,6 +409,8 @@ export function startGameLoop(opts: GameLoopOpts): void {
     tutorialMode,
     timeTrialMode,
     ghostRunner,
+    waveRiderSys,
+    waveRiderRender,
   } = opts
 
   let finishShown = false
@@ -708,6 +720,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
           autoPlay: control.isAutoPlay(),
           waveTimeScale: waterMesh.debug.getTimeScale(),
           runAI: iAmHost,
+          ...(waveRiderSys ? { waveRiders: waveRiderSys } : {}),
         })
         // M10.11 — broadcast at 20 Hz. The send is gated on `net.ready &&
         // remotePeers > 0` inside the multiplayer handle, so this no-ops
@@ -1142,6 +1155,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     pickupRender(dt)
     combatRender(dt)
     fxTick(dt)
+    waveRiderRender?.render()
     particleTick(dt)
     // Landmark pendulum animation — render-only, driven off wall-clock
     // seconds since boot so menu pauses don't freeze the visual rhythm.

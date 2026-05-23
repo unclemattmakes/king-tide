@@ -277,10 +277,17 @@ export function createEditorPanel(opts: {
       return `<div style="color:#778;font-size:10px;margin-top:4px">No prop assets — run <code>pnpm gen:props</code></div>`
     }
     const opts = propAssets
-      .map(
-        (a) =>
-          `<option value="${escapeHtml(a.id)}"${a.id === pickedAssetId ? ' selected' : ''}>${escapeHtml(a.displayName)}</option>`,
-      )
+      .map((a) => {
+        // Wave-rider props get a "(rides waves)" suffix so authors can
+        // tell at a glance which placements will bob on the surface
+        // instead of standing still. Per-instance archetype overrides
+        // aren't authored from the editor — the archetype is asset-
+        // level metadata, so the picker just shows the hint.
+        const label = a.waveRider
+          ? `${escapeHtml(a.displayName)} (rides waves)`
+          : escapeHtml(a.displayName)
+        return `<option value="${escapeHtml(a.id)}"${a.id === pickedAssetId ? ' selected' : ''}>${label}</option>`
+      })
       .join('')
     return `<div style="color:#9bb;margin-top:4px">Assets</div>
        <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">

@@ -5,6 +5,7 @@ import { createCombatRenderSystem } from '@/engine/render/combat-render'
 import { createFxSystem } from '@/engine/render/fx'
 import { createPickupRenderSystem } from '@/engine/render/pickup-render'
 import { createPropsMesh } from '@/engine/render/props-mesh'
+import { createWaveRiderRenderSystem } from '@/engine/render/wave-rider-render'
 import { createBikeRenderSystem } from '@/engine/render/render-systems'
 import { createRenderer } from '@/engine/render/renderer'
 import { renderFrame } from '@/engine/render/renderer-service'
@@ -26,6 +27,7 @@ import { createBike } from '@/game/entities/bike'
 import { createPropColliders } from '@/game/entities/props'
 import { createRider } from '@/game/entities/rider'
 import { simulateStep } from '@/game/sim-step'
+import { createWaveRiderSystem } from '@/game/systems/wave-rider'
 import type { Track } from '@/game/tracks/types'
 import { AI_GRID_SLOTS, resolveGridSlotWorld } from './grid-offsets'
 import { loadTrackForBoot } from './track-loader'
@@ -164,9 +166,20 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
         if (entry) propAssets.set(entry[0], entry[1])
       }
     }
+    let waveRiderSys: ReturnType<typeof createWaveRiderSystem> | undefined
+    let waveRiderRender: ReturnType<typeof createWaveRiderRenderSystem> | undefined
     if (track.props.length > 0) {
       scene.add(createPropsMesh(track.props, propAssets))
-      createPropColliders(phys, track.props, propAssets)
+      waveRiderSys = createWaveRiderSystem(sim, phys, waveField)
+      const bindings = createPropColliders(phys, track.props, propAssets, sim)
+      if (bindings.size > 0) {
+        waveRiderRender = createWaveRiderRenderSystem(scene, sim, {
+          assetResolver: (eid) => {
+            const id = bindings.get(eid)
+            return id ? propAssets.get(id) : undefined
+          },
+        })
+      }
     }
 
     if (disposed) {
@@ -264,6 +277,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
           autoPlay: false,
           waveTimeScale: waterMesh.debug.getTimeScale(),
           runAI: true,
+          ...(waveRiderSys ? { waveRiders: waveRiderSys } : {}),
         })
         physAccum -= phys.fixedDt
       }
@@ -303,6 +317,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
       pickupRender(dt)
       combatRender(dt)
       fxTick(dt)
+      waveRiderRender?.render()
       renderFrame(scene, camera)
       live = true
       rafHandle = requestAnimationFrame(frame)

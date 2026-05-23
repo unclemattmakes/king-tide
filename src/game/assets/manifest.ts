@@ -42,6 +42,12 @@ export type PropManifestEntry = {
   url: string
   specPath: string
   category?: string
+  /** When set, the prop's GLB carries `wave_rider_archetype` extras and
+   *  the runtime will spawn a wave-rider entity for each placement
+   *  instead of a static collider. Mirror of the spec's
+   *  `waveRider.archetype` field; surfaced here so the editor can hint
+   *  "rides waves" in the palette without re-parsing every spec. */
+  waveRider?: 'buoy' | 'log'
 }
 
 export type RiderManifestEntry = {
