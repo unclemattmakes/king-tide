@@ -447,11 +447,13 @@ def _build_start_finish_extras(
         mathutils.Vector((0.0, 0.08, arrow_len * 0.5 + 1.5)),
     )
 
-    # 5. "START" text floating above the crossbar, facing forward. Text
-    # plane normal = local +Z, so bikes spawned behind the gate (and
-    # the author looking at the start grid from above-behind) read it
-    # right-way-round. Extruded so the text is also visible edge-on
-    # from a side / top view of the scene.
+    # 5. "START" text floating above the crossbar, facing back along the
+    # racing tangent so the bikes spawned behind the gate read it the
+    # right way up on approach. Without the extra 180° spin the text's
+    # front face points forward (+Z) and bikes see the mirrored back
+    # of the extruded glyphs ("TRATS"). Spinning around the gate's
+    # local +Y (world up) brings the readable side toward -Z, which is
+    # where the start grid sits.
     text_data_name = f"{parent_obj.name}_text_data"
     if text_data_name in bpy.data.curves:
         bpy.data.curves.remove(bpy.data.curves[text_data_name])
@@ -464,7 +466,8 @@ def _build_start_finish_extras(
     text_curve.materials.append(text_mat)
     text_obj = bpy.data.objects.new(f"{parent_obj.name}_text", text_curve)
     text_obj.rotation_mode = "QUATERNION"
-    text_obj.rotation_quaternion = gate_rot
+    flip_to_face_grid = mathutils.Quaternion((0.0, 1.0, 0.0), math.pi)
+    text_obj.rotation_quaternion = gate_rot @ flip_to_face_grid
     text_obj.location = base_loc + gate_rot @ mathutils.Vector(
         (0.0, height + 3.0, 0.0)
     )
