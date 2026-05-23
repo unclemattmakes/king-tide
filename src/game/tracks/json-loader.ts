@@ -214,6 +214,31 @@ export function buildTrackFromJson(input: unknown): Track {
   }
   const props: Prop[] = propsRaw.map((p, i) => readProp(p, i))
 
+  // Wave-rider buoys — top-level array of {position, rotation} entries
+  // emitted by the Blender exporter for every spline-derived buoy.
+  // Synthesised here as ordinary asset props (assetId='buoy', unit
+  // size) so the rest of the runtime — prop loader, wave-rider
+  // spawner, render — needs no awareness of the new field. Replaces
+  // the previous kind=track buoy trimesh that shipped inside the GLB.
+  const buoysRaw = (input as { waveRiderBuoys?: unknown }).waveRiderBuoys ?? []
+  if (!Array.isArray(buoysRaw)) {
+    throw new Error('track-json: waveRiderBuoys must be an array if present')
+  }
+  for (let i = 0; i < buoysRaw.length; i++) {
+    const buoy = buoysRaw[i]
+    if (buoy === null || typeof buoy !== 'object') {
+      throw new Error(`track-json: waveRiderBuoys[${i}] must be an object`)
+    }
+    const b = buoy as { position?: unknown; rotation?: unknown }
+    props.push({
+      type: 'asset',
+      assetId: 'buoy',
+      position: readVec3(b.position, `waveRiderBuoys[${i}].position`),
+      rotation: readQuat(b.rotation, `waveRiderBuoys[${i}].rotation`),
+      size: { x: 1, y: 1, z: 1 },
+    })
+  }
+
   const water = readOptionalWater((input as { water?: unknown }).water)
   const sky = readOptionalSky((input as { sky?: unknown }).sky)
   const horizon = readOptionalHorizon((input as { horizon?: unknown }).horizon)

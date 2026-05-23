@@ -711,6 +711,34 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
     except ImportError:
         pass
 
+    # Wave-rider buoys — same spline-derived placements the live Blender
+    # preview shows, emitted as {position, rotation} pairs in three.js
+    # coords. The runtime loader expands each one into an asset prop
+    # (assetId='buoy', size=1) which the wave-rider system spawns as a
+    # kinematic float. Replaces the older static kind=track trimesh
+    # that used to ship as part of the GLB.
+    try:
+        from .gate_buoys import compute_buoy_placements
+
+        buoy_placements = compute_buoy_placements(scn)
+        if buoy_placements:
+            body["waveRiderBuoys"] = [
+                {
+                    "position": _b2t(p["x"], p["y"], p["z"]),
+                    # Y-axis quaternion from the Blender Z-euler, same
+                    # conversion gates + boost pads use.
+                    "rotation": {
+                        "x": 0.0,
+                        "y": float(math.sin(0.5 * _blender_yaw_to_three_yaw(p["yaw"]))),
+                        "z": 0.0,
+                        "w": float(math.cos(0.5 * _blender_yaw_to_three_yaw(p["yaw"]))),
+                    },
+                }
+                for p in buoy_placements
+            ]
+    except (ImportError, AttributeError):
+        pass
+
     return body
 
 
@@ -744,6 +772,11 @@ BLENDER_OWNED_JSON_KEYS = (
     "gateSpacing",
     "lapsToFinish",
     "start",
+    # Procedural wave-rider buoys derived from the racing line. The
+    # editor doesn't author these — they ship as a function of the
+    # spline + gate-buoy scene props — so re-exports replace the
+    # whole array.
+    "waveRiderBuoys",
 )
 
 
