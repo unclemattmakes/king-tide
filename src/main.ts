@@ -46,7 +46,11 @@ import {
 import { createStartLights } from './engine/render/start-lights'
 import { createBikeRenderSystem } from './engine/render/render-systems'
 import { createRenderer } from './engine/render/renderer'
-import { applyPixelRatio, setRenderer } from './engine/render/renderer-service'
+import {
+  applyPixelRatio,
+  getActivePostPipeline,
+  setRenderer,
+} from './engine/render/renderer-service'
 import { createRiderRenderSystem } from './engine/render/rider-systems'
 import { createScene } from './engine/render/scene'
 import { createBridgeSupports } from './engine/render/bridge-supports'
@@ -1230,7 +1234,17 @@ async function boot() {
     const r = renderer as unknown as {
       compileAsync?: (scene: unknown, camera: unknown) => Promise<void>
     }
-    if (typeof r.compileAsync === 'function') {
+    // When a post-pipeline is active, the scene's render-time format is
+    // the PassNode's HalfFloat RT, *not* the canvas. Compiling against
+    // the canvas (`renderer.compileAsync(scene, camera)`) caches pipelines
+    // under the wrong key — the cache misses at render time and the
+    // framebuffer comes out solid black with no validation error. The
+    // active pipeline's `compileAsync()` warms via one eager
+    // `pipeline.render()` so the cache key matches what the rAF loop uses.
+    const activePipeline = getActivePostPipeline()
+    if (activePipeline) {
+      await activePipeline.compileAsync()
+    } else if (typeof r.compileAsync === 'function') {
       await r.compileAsync(scene, camera)
     }
   } catch (err) {
