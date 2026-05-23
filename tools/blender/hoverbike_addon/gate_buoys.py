@@ -61,10 +61,13 @@ from bpy.types import Operator
 
 BUOY_OBJECT_NAME = "gate_buoys"
 BUOY_MESH_NAME = "gate_buoys_mesh"
+BUOY_PREVIEW_COLLECTION = "_hoverbike_buoy_preview"
 
 # Legacy names we still clean up on wipe so upgraded .blends shed
 # their old buoy strip on the next auto-rebuild instead of leaving
-# orphan geometry hanging around.
+# orphan geometry hanging around. The kind="track" tag on the older
+# ``gate_buoys`` is also cleaned — buoys ship as wave-rider asset
+# props now, not as static-collider mesh in the GLB.
 _LEGACY_BUOY_OBJECT_NAME = "road_buoys"
 _LEGACY_BUOY_MESH_NAME = "road_buoys_mesh"
 
@@ -175,11 +178,12 @@ def _flag_over_water_samples(
 
 
 def _wipe_buoys() -> None:
-    """Remove the buoy object + mesh datablock. Called before each
-    rebuild so previous samples / disabled toggles can't leave a stale
-    buoy strip behind. Wipes BOTH the current name and the legacy
-    ``road_buoys`` name so .blends saved before this module existed
-    shed their old buoys on the next auto-rebuild."""
+    """Remove the buoy preview object + mesh datablock. Called before
+    each rebuild so previous samples / disabled toggles can't leave a
+    stale buoy strip behind. Wipes BOTH the current name and the
+    legacy ``road_buoys`` name so .blends saved before this module
+    existed shed their old buoys on the next auto-rebuild. Also wipes
+    the empty preview collection if it ends up orphaned."""
     for obj_name in (BUOY_OBJECT_NAME, _LEGACY_BUOY_OBJECT_NAME):
         old = bpy.data.objects.get(obj_name)
         if old is not None:
@@ -191,6 +195,45 @@ def _wipe_buoys() -> None:
         leftover = bpy.data.meshes.get(mesh_name)
         if leftover is not None and leftover.users == 0:
             bpy.data.meshes.remove(leftover)
+
+
+def _iter_buoy_anchors(
+    samples: list[dict],
+    *,
+    spacing_m: float,
+    lateral_m: float,
+):
+    """Yield ``(x, y, tx, ty)`` for every buoy that lands along the
+    over-water samples — one tuple per buoy (so each gate-line pair
+    emits two yields, left then right of the racing tangent).
+
+    Single source of truth for placement: the preview mesh and the
+    exported wave-rider JSON entries call this so the gizmos visible
+    in Blender always exactly match the props the runtime spawns. The
+    arc-since-emit accumulator resets on entering open water so the
+    first buoy lands at the shoreline transition, not at a stale
+    offset from the last land segment."""
+    arc_since_emit = float("inf")
+    for i in range(len(samples) - 1):
+        sa = samples[i]
+        sb = samples[i + 1]
+        seg_len = math.hypot(sb["x"] - sa["x"], sb["y"] - sa["y"])
+        if not sa.get("over_water", False):
+            arc_since_emit = float("inf")
+            continue
+        if arc_since_emit + seg_len < spacing_m and arc_since_emit != float("inf"):
+            arc_since_emit += seg_len
+            continue
+        r = float(sa.get("r", 1.0))
+        lat = max(0.0, lateral_m) * r
+        nx = -sa["ty"]
+        ny = sa["tx"]
+        # Left buoy then right buoy. Tangent is the racing tangent at
+        # the anchor sample — both buoys in a pair share it, which is
+        # the natural "face down the lane" yaw for a wave-rider.
+        yield (sa["x"] + nx * lat, sa["y"] + ny * lat, sa["tx"], sa["ty"])
+        yield (sa["x"] - nx * lat, sa["y"] - ny * lat, sa["tx"], sa["ty"])
+        arc_since_emit = 0.0
 
 
 def _build_buoy_unit_mesh() -> tuple[list[tuple[float, float, float]], list[tuple[int, ...]], list[int]]:
@@ -261,24 +304,17 @@ def _build_buoy_strip_mesh(
     spacing_m: float,
     lateral_m: float,
 ) -> bpy.types.Mesh | None:
-    """Walk the samples, lay buoy pairs (one on each side of the
-    racing line) every ``spacing_m`` of arc length wherever
-    ``sample["over_water"]`` is True. Returns a single merged mesh
-    containing every buoy instance, or None when no buoys would land.
+    """Render-only preview mesh of every buoy that would spawn for the
+    current scene state. Walks the same iterator the export side uses
+    (``_iter_buoy_anchors``) so the gizmo and the runtime instances
+    can't drift apart.
 
-    Buoys sit on the water surface (Z = sea_level) regardless of the
-    spline's authored Z — bridges over open water push the spline well
-    above the waves but the buoys mark the racing line on the actual
-    water below.
+    Buoys sit at sea level (Z = sea_level) regardless of the spline's
+    authored Z — bridges over open water push the spline well above
+    the waves but the buoys mark the racing line on the actual water
+    below.
 
-    Lateral offset is ``lateral_m`` (absolute distance from the
-    curve). The caller scales it from the gate full-width × a
-    multiplier prop, so a track tuned for wide gates gets a wide
-    buoy channel and a narrow-gate track gets a tight one.
-
-    Per-sample radius (``s["r"]`` from the curve's control-point
-    radius) scales the lateral position too so wide apexes also get
-    wider buoy lanes."""
+    Returns None when no buoys would land."""
     if BUOY_MESH_NAME in bpy.data.meshes:
         bpy.data.meshes.remove(bpy.data.meshes[BUOY_MESH_NAME])
 
@@ -295,31 +331,12 @@ def _build_buoy_strip_mesh(
             faces.append(tuple(base + i for i in f))
             mats.append(m)
 
-    # Step through samples in arc-length order, emitting a buoy pair
-    # at every ``spacing_m`` along the curve — but only while the
-    # current sample is over water. The accumulator resets on entering
-    # open water so the first buoy lands exactly at the shoreline
-    # transition, not at a stale offset from the last land segment.
-    arc_since_emit = float("inf")
     placed = 0
-    for i in range(len(samples) - 1):
-        sa = samples[i]
-        sb = samples[i + 1]
-        seg_len = math.hypot(sb["x"] - sa["x"], sb["y"] - sa["y"])
-        if not sa.get("over_water", False):
-            arc_since_emit = float("inf")
-            continue
-        if arc_since_emit + seg_len < spacing_m and arc_since_emit != float("inf"):
-            arc_since_emit += seg_len
-            continue
-        r = float(sa.get("r", 1.0))
-        lat = max(0.0, lateral_m) * r
-        nx = -sa["ty"]
-        ny = sa["tx"]
-        add_buoy(sa["x"] + nx * lat, sa["y"] + ny * lat, sea_level)
-        add_buoy(sa["x"] - nx * lat, sa["y"] - ny * lat, sea_level)
-        placed += 2
-        arc_since_emit = 0.0
+    for x, y, _tx, _ty in _iter_buoy_anchors(
+        samples, spacing_m=spacing_m, lateral_m=lateral_m
+    ):
+        add_buoy(x, y, sea_level)
+        placed += 1
 
     if placed == 0:
         return None
@@ -343,17 +360,17 @@ def _maybe_build_buoys_from_samples(
     samples: list[dict],
     terrain: bpy.types.Object | None,
 ) -> tuple[str | None, int]:
-    """Build (or wipe) the ``gate_buoys`` mesh from already-sampled
-    curve points.
+    """Build (or wipe) the buoy *preview* mesh from already-sampled
+    curve points. The mesh lands in the ``_hoverbike_buoy_preview``
+    collection so it's visible to the author while the .blend is open
+    but auto-excluded from the GLB export (preview-collection
+    convention). Runtime instances are emitted at export time as
+    wave-rider asset props via ``compute_buoy_placements`` — the
+    preview here is just the authoring gizmo.
 
     Returns ``(object_name | None, pair_count)``. Always wipes first
-    so a toggle-off or a removed water volume drops the buoys cleanly
-    instead of leaving them as orphan geometry.
-
-    Inland tracks (``sea_level == 0`` AND no ``water_volume_main``)
-    short-circuit to a wipe — without a sea level we can't tell which
-    samples are over water vs over a low-lying terrain plane, and the
-    safer default is no buoys."""
+    so a toggle-off or a removed water volume drops the preview
+    cleanly instead of leaving stale gizmos floating around."""
     _wipe_buoys()
 
     sea_level = float(getattr(scene, "hoverbike_water_height", 0.0))
@@ -396,8 +413,19 @@ def _maybe_build_buoys_from_samples(
     buoy_me.materials.append(_ensure_buoy_material(top=False))
     buoy_me.materials.append(_ensure_buoy_material(top=True))
     buoy_obj = bpy.data.objects.new(BUOY_OBJECT_NAME, buoy_me)
-    buoy_obj["kind"] = "track"
-    scene.collection.objects.link(buoy_obj)
+    # No kind tag — this mesh is preview-only. The export pipeline reads
+    # buoy positions from compute_buoy_placements() and emits asset-prop
+    # JSON refs (assetId='buoy') for the runtime to spawn as wave-riders.
+    buoy_obj.hide_render = True
+
+    # Park the gizmo in the dedicated buoy-preview collection. Matching
+    # the _hoverbike_*_preview pattern means _PreviewCollectionsHidden
+    # automatically excludes it during GLB export.
+    coll = bpy.data.collections.get(BUOY_PREVIEW_COLLECTION)
+    if coll is None:
+        coll = bpy.data.collections.new(BUOY_PREVIEW_COLLECTION)
+        scene.collection.children.link(coll)
+    coll.objects.link(buoy_obj)
 
     # 25 faces per buoy (3 quad strips × 8 segs + 1 cap), 2 buoys per
     # pair. Derive from the final mesh so the count stays right if the
@@ -405,6 +433,77 @@ def _maybe_build_buoys_from_samples(
     FACES_PER_BUOY = 25
     n_pairs = len(buoy_me.polygons) // (FACES_PER_BUOY * 2)
     return buoy_obj.name, n_pairs
+
+
+# ────────────────────────────────────────────────────────────────────
+# Export-side placement helper
+# ────────────────────────────────────────────────────────────────────
+
+
+def compute_buoy_placements(scene: bpy.types.Scene) -> list[dict]:
+    """Walk the racing line and return the buoy placements that the
+    JSON export should emit as wave-rider asset-prop refs.
+
+    Each entry: ``{"x", "y", "z", "yaw"}`` in Blender world coords
+    (caller converts to three.js via ``_b2t`` + a Y-axis quaternion).
+    ``yaw`` is the Blender Z-euler that aligns the prop's local +Y
+    with the racing tangent — same convention every other spline-
+    derived empty in the addon uses.
+
+    Returns ``[]`` when buoys are disabled, no water is authored, the
+    racing line is missing, or none of the samples cross open water.
+    Sea level is the floor for Z; wave-riders override it at runtime
+    by sampling the live wave field, so any value the export ships is
+    just the spawn placeholder."""
+    enable = bool(getattr(scene, "hoverbike_gate_buoys_enabled", True))
+    if not enable:
+        return []
+
+    sea_level = float(getattr(scene, "hoverbike_water_height", 0.0))
+    has_water = (
+        sea_level != 0.0
+        or bpy.data.objects.get("water_volume_main") is not None
+        or bpy.data.objects.get("water_preview") is not None
+    )
+    if not has_water:
+        return []
+
+    curve_obj = _resolve_buoy_curve()
+    if curve_obj is None:
+        return []
+
+    from .road import _sample_road_path
+    from .road_conform_gn import find_source_terrain
+
+    terrain = find_source_terrain()
+    samples = _sample_road_path(
+        curve_obj,
+        terrain,
+        n_samples=int(getattr(scene, "hoverbike_road_samples", 64)),
+        smooth_passes=int(getattr(scene, "hoverbike_road_smooth_passes", 4)),
+        use_curve_z=True,
+    )
+    if len(samples) < 2:
+        return []
+
+    _flag_over_water_samples(samples, terrain, sea_level)
+    if not any(s.get("over_water", False) for s in samples):
+        return []
+
+    side_offset_mult = float(getattr(scene, "hoverbike_gate_buoy_side_offset_mult", 1.5))
+    gate_full_width = 2.0 * float(getattr(scene, "hoverbike_gate_half_width", 14.0))
+    spacing_m = max(1.0, float(getattr(scene, "hoverbike_gate_buoy_spacing_m", 42.0)))
+    lateral_m = max(0.0, side_offset_mult * gate_full_width)
+
+    placements: list[dict] = []
+    for x, y, tx, ty in _iter_buoy_anchors(
+        samples, spacing_m=spacing_m, lateral_m=lateral_m
+    ):
+        # atan2(ty, tx) - π/2 makes Blender +Y align with the tangent,
+        # which is the same yaw convention the gate empties use.
+        yaw = math.atan2(ty, tx) - math.pi / 2.0
+        placements.append({"x": x, "y": y, "z": sea_level, "yaw": yaw})
+    return placements
 
 
 def rebuild_buoys(scene: bpy.types.Scene) -> dict | None:
