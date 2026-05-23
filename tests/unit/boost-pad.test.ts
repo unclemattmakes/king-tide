@@ -6,12 +6,14 @@ function axisAlignedPad(
   pos: { x: number; y: number; z: number },
   halfWidth = 3,
   halfDepth = 5,
+  halfHeight = 3,
   strength = 1.5,
 ): BoostPad {
   return {
     position: pos,
     rotation: { x: 0, y: 0, z: 0, w: 1 },
     halfWidth,
+    halfHeight,
     halfDepth,
     strength,
   }
@@ -57,6 +59,7 @@ describe('isOverBoostPad', () => {
       position: { x: 0, y: 0, z: 0 },
       rotation: { x: 0, y: Math.SQRT1_2, z: 0, w: Math.SQRT1_2 },
       halfWidth: 3,
+      halfHeight: 3,
       halfDepth: 5,
       strength: 1.5,
     }
@@ -64,5 +67,12 @@ describe('isOverBoostPad', () => {
     expect(isOverBoostPad({ x: 4, y: 0, z: 0 }, pad)).toBe(true)
     // 4 m along world +Z is 4 m along local -X — |4| > halfWidth (3), out.
     expect(isOverBoostPad({ x: 0, y: 0, z: 4 }, pad)).toBe(false)
+  })
+
+  it('respects an authored halfHeight (pad-local up)', () => {
+    // Larger 6 m halfHeight catches a bike that the legacy 3 m band missed.
+    const pad = axisAlignedPad({ x: 0, y: 0, z: 0 }, 3, 5, 6)
+    expect(isOverBoostPad({ x: 0, y: 5, z: 0 }, pad)).toBe(true)
+    expect(isOverBoostPad({ x: 0, y: 6.5, z: 0 }, pad)).toBe(false)
   })
 })

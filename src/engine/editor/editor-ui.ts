@@ -465,7 +465,7 @@ export function createEditorPanel(opts: {
       return [
         `<div><b>pad_${sel.index}</b></div>`,
         `<div>pos: ${fmtVec(pad.position)}</div>`,
-        `<div>halfWidth: ${pad.halfWidth.toFixed(2)} · halfDepth: ${pad.halfDepth.toFixed(2)} · strength: ${pad.strength.toFixed(2)}</div>`,
+        `<div>half: ${pad.halfWidth.toFixed(2)} × ${pad.halfHeight.toFixed(2)} × ${pad.halfDepth.toFixed(2)} · strength: ${pad.strength.toFixed(2)}</div>`,
       ].join('')
     }
     if (sel.kind === 'antiGrav') {

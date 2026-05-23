@@ -401,6 +401,7 @@ describe('buildTrackFromJson', () => {
         position: { x: 1, y: 0, z: 2 },
         rotation: { x: 0, y: 0, z: 0, w: 1 },
         halfWidth: 3,
+        halfHeight: 5,
         halfDepth: 6,
         strength: 1.7,
       },
@@ -408,7 +409,25 @@ describe('buildTrackFromJson', () => {
     const track = buildTrackFromJson(raw)
     expect(track.boostPads).toHaveLength(1)
     expect(track.boostPads[0]!.strength).toBe(1.7)
+    expect(track.boostPads[0]!.halfHeight).toBe(5)
     expect(track.boostPads[0]!.halfDepth).toBe(6)
+  })
+
+  it('defaults halfHeight to 3 on legacy boost pads without the field', () => {
+    // Pre-3D-volume tracks omitted halfHeight; the loader fills 3 to
+    // preserve the historic PAD_VERTICAL=3 trigger band.
+    const raw = baseTrack()
+    raw.boostPads = [
+      {
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        halfWidth: 3,
+        halfDepth: 6,
+        strength: 1.5,
+      },
+    ]
+    const track = buildTrackFromJson(raw)
+    expect(track.boostPads[0]!.halfHeight).toBe(3)
   })
 })
 

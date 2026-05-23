@@ -212,8 +212,14 @@ export type BoostPad = {
   /** Pad orientation. Boost direction = rotation·(+Z), the same convention
    *  as checkpoint forward. */
   rotation: Quat
-  /** Half-extent across the pad (m). */
+  /** Half-extent across the pad (m), perpendicular to boost direction. */
   halfWidth: number
+  /** Half-extent along the pad-local +Y (vertical in the pad's frame).
+   *  Pads are oriented boxes — a bike triggers the boost while its centre
+   *  is inside the volume. Default 4 m on new pads; legacy tracks without
+   *  an authored value get 3 m via json-loader to preserve the historic
+   *  hardcoded vertical band. */
+  halfHeight: number
   /** Half-extent along the boost direction (m). */
   halfDepth: number
   /** Multiplier applied to top speed while bike is on pad. 1.0 = no boost. */

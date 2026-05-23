@@ -46,8 +46,9 @@ import { createUndoStack } from './undo-redo'
  *      - Pickups + spline points support translate only.
  *      - Gates support translate, rotate (Y axis), and scale (X = half-
  *        width, Y = height).
- *      - Boost pads support translate, rotate (Y axis), and scale (X =
- *        halfWidth, Z = halfDepth).
+ *      - Boost pads support translate, rotate (Y axis), and scale on
+ *        all three axes (X = halfWidth, Y = halfHeight, Z = halfDepth)
+ *        — pads are 3D trigger volumes, not flat slabs.
  *   5. **Place buttons** drop new entities. Click +Gate / +Pickup /
  *      +Boost / +Spline pt, then click on the ground to place. The new
  *      entity is auto-selected.
