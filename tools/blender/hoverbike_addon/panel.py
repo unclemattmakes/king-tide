@@ -558,42 +558,45 @@ class HOVERBIKE_PT_track_spline(_SelectionDrivenPanel, Panel):
         layout = self.layout
         scene = context.scene
 
-        # First-time scaffolding row — always visible in this sub-panel
-        # so authors who go looking under "Spline tools" find the
-        # create-from-nothing affordances next to the snap-to-spline
-        # ones. Each operator no-ops when its target already exists,
-        # so re-clicks on mature tracks are harmless.
         have_sp = bpy.data.objects.get("ai_spline_main") is not None
         have_s0 = bpy.data.objects.get("start_00") is not None
         have_s1 = bpy.data.objects.get("start_01") is not None
-        scaffold_row = layout.row(align=True)
-        if not have_sp:
-            scaffold_row.operator(
-                "hoverbike.add_ai_spline",
-                text="Add ai_spline_main",
-                icon="CURVE_NCURVE",
-            )
-        if not (have_s0 and have_s1):
-            scaffold_row.operator(
-                "hoverbike.add_starts",
-                text="Add start_00 / 01",
-                icon="EMPTY_ARROWS",
-            )
-        if have_sp and have_s0 and have_s1:
-            scaffold_row.label(text="Essentials present", icon="CHECKMARK")
-        layout.separator()
 
-        layout.prop(scene, "hoverbike_snap_hover_height", text="Hover (m)")
-        layout.operator("hoverbike.snap_spline_to_terrain", icon="SNAP_FACE")
-        layout.operator("hoverbike.reverse_spline", icon="LOOP_BACK")
+        # ── Setup — only renders when essentials are missing.
+        # Idempotent operators on a finished track aren't worth the
+        # vertical space, so the section disappears once everything's
+        # in place. Same logic the parent-panel alert uses.
+        if not (have_sp and have_s0 and have_s1):
+            sbox = layout.box()
+            sbox.label(text="Setup", icon="ADD")
+            srow = sbox.row(align=True)
+            if not have_sp:
+                srow.operator(
+                    "hoverbike.add_ai_spline", text="Add Spline", icon="CURVE_NCURVE",
+                )
+            if not (have_s0 and have_s1):
+                srow.operator(
+                    "hoverbike.add_starts", text="Add Starts", icon="EMPTY_ARROWS",
+                )
+
+        # ── Shape — what you do to the curve itself.
+        layout.label(text="Shape", icon="OUTLINER_OB_CURVE")
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_snap_hover_height", text="Hover (m)")
+        row = layout.row(align=True)
+        row.operator("hoverbike.snap_spline_to_terrain", icon="SNAP_FACE")
+        row.operator("hoverbike.reverse_spline", text="Reverse", icon="LOOP_BACK")
+
+        # ── Place — anchor things to a point on the curve.
+        layout.separator()
+        layout.label(text="Place along the curve", icon="PIVOT_CURSOR")
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_placement_t", text="t")
-        row.operator("hoverbike.cursor_snap_to_spline", text="Cursor →", icon="PIVOT_CURSOR")
+        row.operator("hoverbike.cursor_snap_to_spline", text="Cursor", icon="PIVOT_CURSOR")
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_start_grid_spacing", text="Start gap")
         row.operator("hoverbike.snap_starts_to_spline", text="Snap Starts", icon="EMPTY_ARROWS")
-        layout.separator()
-        layout.operator("hoverbike.add_ramp_at_spline_t", icon="ADD")
+        layout.operator("hoverbike.add_ramp_at_spline_t", text="Add Ramp at t", icon="ADD")
 
 
 class HOVERBIKE_PT_track_start(_SelectionDrivenPanel, Panel):
@@ -737,12 +740,6 @@ class HOVERBIKE_PT_track_road(_SelectionDrivenPanel, Panel):
         row.prop(scene, "hoverbike_road_bank_max_deg", text="Max°")
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_road_bank_smooth_passes", text="Bank smoothing")
-        layout.label(text="Auto-bank scales from curvature × Bank",
-                     icon="INFO")
-        layout.label(text="Per-point: select CP, N→Item→Curve→Tilt",
-                     icon="INFO")
-        layout.label(text="(per-point Tilt drives terrain conform too)",
-                     icon="BLANK1")
         layout.separator()
         layout.label(text="F1 curbs:")
         row = layout.row(align=True)
@@ -799,12 +796,6 @@ class HOVERBIKE_PT_track_road(_SelectionDrivenPanel, Panel):
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_road_conform_clearance", text="Clearance")
         row.prop(scene, "hoverbike_road_fill_shelf_width", text="Fill shelf")
-        # Water-level gate is on the GN modifier itself (Properties →
-        # Modifiers → HV_RoadConform). Default seeds from the scene's
-        # `hoverbike_water_height` so bridges over ocean don't lift
-        # the seafloor. Hint here so authors find it.
-        layout.label(text="Water gate: HV_RoadConform → Water Level",
-                     icon="MOD_FLUIDSIM")
         # Non-destructive iteration flow.
         # 1. Snap Curve — one-shot raycast that drops each curve CP
         #    onto the terrain surface (= seeds sane Z values).
@@ -829,7 +820,7 @@ class HOVERBIKE_PT_track_road(_SelectionDrivenPanel, Panel):
             icon="GEOMETRY_NODES",
         )
         row = layout.row(align=True)
-        row.scale_y = 1.2
+        row.scale_y = 1.3
         row.operator("hoverbike.build_road", icon="MESH_PLANE")
         # Destructive bake — for the rare export-time pass when the
         # destructive flow's extra features (multi-segment push-down,
@@ -847,8 +838,6 @@ class HOVERBIKE_PT_track_road(_SelectionDrivenPanel, Panel):
             text="Re-conform",
             icon="MOD_SHRINKWRAP",
         )
-        if bpy.data.objects.get(ROAD_CURVE_NAME):
-            layout.label(text="Edit road_curve_main, then Build", icon="INFO")
 
 
 class HOVERBIKE_PT_track_tunnels(_SelectionDrivenPanel, Panel):
@@ -884,11 +873,9 @@ class HOVERBIKE_PT_track_tunnels(_SelectionDrivenPanel, Panel):
             edit_row.alert = True
             edit_row.operator(
                 "hoverbike.toggle_tunnel_edit_mode",
-                text="Re-attach Cuts (preview)",
+                text="Re-attach Cuts",
                 icon="MOD_BOOLEAN",
             )
-            layout.label(text="Edit mode — curve edits are fast,", icon="INFO")
-            layout.label(text="terrain boolean is off until you toggle.")
         else:
             edit_row.operator(
                 "hoverbike.toggle_tunnel_edit_mode",
@@ -898,15 +885,14 @@ class HOVERBIKE_PT_track_tunnels(_SelectionDrivenPanel, Panel):
 
         gn_cutter = bpy.data.objects.get("tunnels_cutter")
         if gn_cutter is not None and any(m.type == "NODES" for m in gn_cutter.modifiers):
-            layout.separator()
-            layout.label(text="GN rig detected — add curves to", icon="INFO")
-            layout.label(text="'Tunnel Curves' (Shift-D a curve).")
             n_curves = 0
             curves_col = bpy.data.collections.get("Tunnel Curves")
             if curves_col is not None:
                 n_curves = sum(1 for o in curves_col.objects if o.type == "CURVE")
             if n_curves > 0:
-                layout.label(text=f"{n_curves} tunnel curve(s) in scene", icon="MOD_BOOLEAN")
+                layout.label(text=f"{n_curves} tunnel curve(s) — Shift-D to add", icon="MOD_BOOLEAN")
+            else:
+                layout.label(text="Shift-D a curve into 'Tunnel Curves'", icon="INFO")
             return
 
         layout.separator()
@@ -916,9 +902,9 @@ class HOVERBIKE_PT_track_tunnels(_SelectionDrivenPanel, Panel):
         row.prop(scene, "hoverbike_tunnel_wall_thickness", text="Wall")
         layout.prop(scene, "hoverbike_tunnel_segments", text="Sides")
         layout.prop(scene, "hoverbike_tunnel_end_extend", text="End extend (m)")
-        layout.operator("hoverbike.build_tunnel", icon="MESH_CYLINDER")
-        if bpy.data.objects.get(TUNNEL_CURVE_NAME):
-            layout.label(text="Edit the curve, then Build", icon="INFO")
+        row = layout.row()
+        row.scale_y = 1.3
+        row.operator("hoverbike.build_tunnel", icon="MESH_CYLINDER")
         n_tunnels = sum(
             1 for o in bpy.data.objects
             if o.name.startswith(TUNNEL_PARENT_PREFIX) and o.name.endswith("_cutter")
@@ -1104,9 +1090,9 @@ class HOVERBIKE_PT_track_ramps(_SelectionDrivenPanel, Panel):
         row.prop(scene, "hoverbike_ramp_length", text="Length")
         row.prop(scene, "hoverbike_ramp_width", text="Width")
         layout.prop(scene, "hoverbike_ramp_height", text="Height")
-        layout.operator("hoverbike.add_ramp", icon="ADD")
-        layout.label(text="Edit Length/Width/Height on the", icon="INFO")
-        layout.label(text="mesh's HV_Ramp modifier to resize.")
+        row = layout.row()
+        row.scale_y = 1.3
+        row.operator("hoverbike.add_ramp", icon="ADD")
 
 
 class HOVERBIKE_PT_track_terrain(_SelectionDrivenPanel, Panel):
@@ -1388,15 +1374,11 @@ class HOVERBIKE_PT_track_waves(_SelectionDrivenPanel, Panel):
             1 for obj in bpy.data.objects if re.match(r"^wave_zone_(\d+)$", obj.name)
         )
         if n_zones > 0:
-            layout.label(text=f"{n_zones} zone(s) — drag, R to aim swell")
-            layout.operator("hoverbike.refresh_wave_zones", icon="FILE_REFRESH")
-            layout.label(text="Custom Properties tunes each zone:", icon="INFO")
-            layout.label(text="  height_mult, freq_mult, blend_radius_m")
-            layout.label(text="  + optional surge_period_s/_amplitude")
-            layout.label(text="  + optional direction_deg")
+            row = layout.row(align=True)
+            row.label(text=f"{n_zones} zone(s) — R to aim swell")
+            row.operator("hoverbike.refresh_wave_zones", text="Refresh", icon="FILE_REFRESH")
         else:
             layout.label(text="No zones — global Gerstner only", icon="INFO")
-        layout.label(text="Local +X = dominant swell direction", icon="ORIENTATION_LOCAL")
 
 
 class HOVERBIKE_PT_track_gameplay(_SelectionDrivenPanel, Panel):
@@ -1436,35 +1418,26 @@ class HOVERBIKE_PT_track_gameplay(_SelectionDrivenPanel, Panel):
         # for the whole array.
         n_cp = sum(1 for obj in bpy.data.objects if re.match(r"^cp_\d+$", obj.name))
         if n_cp > 0:
-            layout.label(
-                text=f"Override: {n_cp} cp_NN empties win over the spline",
-                icon="ANCHOR_TOP",
-            )
-            layout.operator(
+            row = layout.row(align=True)
+            row.label(text=f"{n_cp} cp_NN override the spline", icon="ANCHOR_TOP")
+            row.operator(
                 "hoverbike.demote_gates_to_spline",
-                text="Demote to Spline (wipe cp_NN)",
+                text="Wipe",
                 icon="X",
             )
-        elif bpy.data.collections.get(GATE_PREVIEW_COLLECTION):
-            layout.label(text="Spline-driven, live preview", icon="LINKED")
+            layout.operator(
+                "hoverbike.materialize_gates_to_cp_empties",
+                text="Re-stamp from Spline",
+                icon="OUTLINER_OB_EMPTY",
+            )
         else:
-            layout.label(text="Spline-driven; click Rebuild to preview", icon="INFO")
-        # Pin-to-empty button — works whether you're spline-driven or
-        # already overriding; in spline-driven mode it forks into
-        # editable empties so you can tweak one corner, in override
-        # mode it re-stamps from the current spline.
-        layout.operator(
-            "hoverbike.materialize_gates_to_cp_empties",
-            text=("Re-stamp from Spline" if n_cp > 0 else "Materialise to cp_NN (for hand-edit)"),
-            icon="OUTLINER_OB_EMPTY",
-        )
+            layout.operator(
+                "hoverbike.materialize_gates_to_cp_empties",
+                text="Pin Gates to cp_NN (for hand-edit)",
+                icon="OUTLINER_OB_EMPTY",
+            )
         layout.separator()
 
-        # Buoys — floating markers along the racing-line edges wherever
-        # the spline crosses open water. Lateral offset uses the gate
-        # half-width so the buoys read as "edge of the racing lane,"
-        # Spacing is raw metres; offset still rides gate full-width so
-        # the buoy channel scales with the gameplay corridor.
         layout.label(text="Buoys (auto, over water):", icon="MOD_OCEAN")
         layout.prop(scene, "hoverbike_gate_buoys_enabled", text="Enable")
         if scene.hoverbike_gate_buoys_enabled:
@@ -1472,8 +1445,6 @@ class HOVERBIKE_PT_track_gameplay(_SelectionDrivenPanel, Panel):
             row.prop(scene, "hoverbike_gate_buoy_spacing_m", text="Spacing")
             row.prop(scene, "hoverbike_gate_buoy_side_offset_mult", text="Offset ×gw")
         layout.operator("hoverbike.rebuild_buoys", icon="FILE_REFRESH")
-        if bpy.data.objects.get("gate_buoys") is not None:
-            layout.label(text="Live; auto-rebuild follows spline edits", icon="LINKED")
         layout.separator()
 
         layout.label(text="Boost pads:", icon="FORCE_FORCE")
@@ -1482,26 +1453,22 @@ class HOVERBIKE_PT_track_gameplay(_SelectionDrivenPanel, Panel):
             1 for obj in bpy.data.objects if re.match(r"^boost_(\d+)$", obj.name)
         )
         if n_pads > 0:
-            layout.label(text=f"{n_pads} pad(s) — drag, R to aim")
-            layout.operator("hoverbike.refresh_boost_pads", icon="FILE_REFRESH")
-            layout.label(text="Custom Properties tunes each pad", icon="INFO")
+            row = layout.row(align=True)
+            row.label(text=f"{n_pads} pad(s) — R to aim")
+            row.operator("hoverbike.refresh_boost_pads", text="Refresh", icon="FILE_REFRESH")
         layout.separator()
 
-        # Anti-grav: spline banking (per-anchor tilt) drives the main
-        # route; antigrav_NN empties cover off-route stretches. Both
-        # round-trip through derive_track_json.
         layout.label(text="Anti-grav:", icon="ORIENTATION_GIMBAL")
         sp = bpy.data.objects.get("ai_spline_main")
         if sp is not None:
             flag = bool(sp.get("anti_grav", False))
             row = layout.row(align=True)
             row.label(
-                text=f"ai_spline_main: {'ON' if flag else 'off'}",
+                text=f"Spline: {'ON' if flag else 'off'}",
                 icon="CHECKBOX_HLT" if flag else "CHECKBOX_DEHLT",
             )
             row.operator("hoverbike.toggle_spline_antigrav", text="Toggle")
         if context.mode == "EDIT_CURVE":
-            layout.label(text="Selected anchor tilt:", icon="DRIVER_ROTATIONAL_DIFFERENCE")
             row = layout.row(align=True)
             row.operator("hoverbike.set_spline_tilt_flat", text="Flat")
             row.operator("hoverbike.set_spline_tilt_bank_l", text="L 45°")
@@ -1510,19 +1477,14 @@ class HOVERBIKE_PT_track_gameplay(_SelectionDrivenPanel, Panel):
             row.operator("hoverbike.set_spline_tilt_wall_l", text="Wall L")
             row.operator("hoverbike.set_spline_tilt_wall_r", text="Wall R")
             row.operator("hoverbike.set_spline_tilt_ceiling", text="Ceiling")
-            layout.label(text="Or set Tilt in N-panel → Item", icon="INFO")
-        else:
-            layout.label(
-                text="Tab into Edit Mode on the spline to set tilt",
-                icon="INFO",
-            )
         layout.operator("hoverbike.add_antigrav_zone", icon="ADD", text="+ Anti-Grav Zone")
         n_zones = sum(
             1 for obj in bpy.data.objects if re.match(r"^antigrav_(\d+)$", obj.name)
         )
         if n_zones > 0:
-            layout.label(text=f"{n_zones} zone(s) — drag, R to align +Y to road normal")
-            layout.operator("hoverbike.refresh_antigrav_zones", icon="FILE_REFRESH")
+            row = layout.row(align=True)
+            row.label(text=f"{n_zones} zone(s) — R to align")
+            row.operator("hoverbike.refresh_antigrav_zones", text="Refresh", icon="FILE_REFRESH")
         layout.separator()
 
         layout.label(text="Racer preview:", icon="AUTO")
