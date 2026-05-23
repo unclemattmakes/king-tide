@@ -37,7 +37,7 @@ import math
 
 import bpy
 import mathutils
-from bpy.props import BoolProperty, FloatProperty, IntProperty, StringProperty
+from bpy.props import BoolProperty, FloatProperty, StringProperty
 from bpy.types import Operator
 
 
@@ -793,9 +793,11 @@ def _terrain_bbox_xy() -> tuple[float, float, float, float] | None:
 
 
 class HOVERBIKE_OT_add_ai_spline(Operator):
-    """Create the racing-line curve required by the exporter.
+    """Create the racing-line curve required by the exporter, plus the
+    standard sidekick scaffolding (start pair, gate gizmos, water
+    buoys).
 
-    Two modes, picked automatically:
+    Two creation modes, picked automatically:
 
       * **Promote** — if the active object is a CURVE (and isn't already
         ``ai_spline_main``), rename it + its curve data to
@@ -803,11 +805,24 @@ class HOVERBIKE_OT_add_ai_spline(Operator):
         and force every spline inside it cyclic. Lets authors draw any
         Bezier / NURBS curve in Blender's normal UI and promote it
         into the racing-line slot with no boilerplate.
-      * **Create** — drop a fresh ``N``-point cyclic NURBS loop. If a
-        ``kind=track`` terrain mesh is in the scene the loop fits ~70 %
-        of its XY bbox so the racing line sits inside the playable
-        area; otherwise the loop is an oval of ``radius`` metres
+      * **Create** — drop a fresh cyclic Bezier *circle* (or ellipse if a
+        terrain mesh forces non-square sizing). Four-anchor circle with
+        proper handle math means the loop is actually round, not the
+        slightly-octagonal NURBS approximation the previous default
+        produced. If a ``kind=track`` terrain mesh is in the scene the
+        loop fits ~70 %% of its XY bbox so the racing line sits inside
+        the playable area; otherwise it's a ``radius`` -metre circle
         around the 3D cursor.
+
+    After the spline lands, the operator chains:
+
+      * ``hoverbike.add_starts``         → spawn / snap start_00 / 01
+      * ``hoverbike.rebuild_gate_preview`` → drop gate gizmos along the line
+      * ``hoverbike.rebuild_buoys``      → marker buoys over open water
+
+    Each sub-op is a no-op when its precondition isn't met (no water
+    means no buoys; existing starts are left alone), so re-clicking the
+    button on a mature scene is harmless.
 
     No-ops (with an INFO report) if ``ai_spline_main`` already exists —
     the operator never overwrites authored work."""
@@ -815,16 +830,11 @@ class HOVERBIKE_OT_add_ai_spline(Operator):
     bl_idname = "hoverbike.add_ai_spline"
     bl_label = "Add AI Spline"
     bl_description = (
-        "Create ai_spline_main (the racing line). Promotes the active CURVE if "
-        "one is selected; otherwise drops a cyclic NURBS loop around the 3D cursor"
+        "Create ai_spline_main as a Bezier circle, then place start_00/01, "
+        "gate gizmos, and over-water buoys. Promotes the active CURVE if one is selected"
     )
     bl_options = {"REGISTER", "UNDO"}
 
-    n_points: IntProperty(  # type: ignore[valid-type]
-        name="Loop points",
-        description="Number of NURBS control points in the default loop",
-        default=8, min=3, max=64,
-    )
     radius: FloatProperty(  # type: ignore[valid-type]
         name="Loop radius (m)",
         description="Half-extent of the default loop when no terrain is present",
@@ -838,14 +848,55 @@ class HOVERBIKE_OT_add_ai_spline(Operator):
         ),
         default=True,
     )
+    place_sidekicks: BoolProperty(  # type: ignore[valid-type]
+        name="Place starts / gates / buoys",
+        description=(
+            "After the spline lands, run add_starts + rebuild_gate_preview + "
+            "rebuild_buoys so a fresh scene is ready to race in one click. "
+            "Each sub-op is a no-op when its precondition isn't met"
+        ),
+        default=True,
+    )
+
+    def _run_sidekicks(self) -> list[str]:
+        """Chain the post-spline scaffolding. Each op is independent and
+        idempotent; failures are swallowed (with a console note) so a
+        broken sub-op can't block the primary spline create. Returns the
+        sub-op labels that ran successfully — used for the operator's
+        report so authors can see what happened."""
+        ran: list[str] = []
+        for op_call, label in (
+            (bpy.ops.hoverbike.add_starts, "starts"),
+            (bpy.ops.hoverbike.rebuild_gate_preview, "gates"),
+            (bpy.ops.hoverbike.rebuild_buoys, "buoys"),
+        ):
+            try:
+                # add_starts returns CANCELLED when both empties already
+                # exist; that's still "we did the right thing" for the
+                # purpose of this chain, so count it as ran.
+                result = op_call()
+                if result and ("FINISHED" in result or "CANCELLED" in result):
+                    ran.append(label)
+            except (RuntimeError, AttributeError) as e:  # noqa: BLE001
+                print(f"[hoverbike] add_ai_spline sidekick {label!r} skipped: {e}")
+        return ran
 
     def execute(self, context):
         if bpy.data.objects.get("ai_spline_main") is not None:
-            self.report(
-                {"INFO"},
-                "ai_spline_main already exists — edit it in place instead of re-creating.",
-            )
-            return {"CANCELLED"}
+            # Spline already exists — still run the sidekick chain so
+            # this button doubles as a "re-scaffold the rest" affordance.
+            if self.place_sidekicks:
+                ran = self._run_sidekicks()
+                self.report(
+                    {"INFO"},
+                    f"ai_spline_main already exists — re-ran sidekicks: {', '.join(ran) or 'none'}.",
+                )
+            else:
+                self.report(
+                    {"INFO"},
+                    "ai_spline_main already exists — edit it in place instead of re-creating.",
+                )
+            return {"FINISHED"}
 
         # Promote path: any selected CURVE other than the spline itself
         # gets renamed + tagged + made cyclic.
@@ -867,10 +918,11 @@ class HOVERBIKE_OT_add_ai_spline(Operator):
                 sp.use_cyclic_u = True
                 if sp.type == "NURBS":
                     sp.use_endpoint_u = True
+            ran = self._run_sidekicks() if self.place_sidekicks else []
             self.report(
                 {"INFO"},
                 f"Promoted {old_name!r} → ai_spline_main "
-                f"(tagged kind=ai_spline / branch=main, forced cyclic).",
+                f"(cyclic, kind=ai_spline). Sidekicks: {', '.join(ran) or 'none'}.",
             )
             return {"FINISHED"}
 
@@ -889,23 +941,35 @@ class HOVERBIKE_OT_add_ai_spline(Operator):
                 ry = 0.35 * (ymax - ymin)
                 sized_from = "terrain bbox"
 
-        # n cyclic anchors evenly distributed on the ellipse. The first
-        # anchor lands at angle 0 (i.e. (+rx, 0) offset from centre) so
-        # start_00 — which the user typically snaps with t=0 right
-        # after — spawns at a predictable +X side of the track.
-        anchors: list[tuple[float, float, float]] = []
-        for i in range(int(self.n_points)):
-            theta = (i / float(self.n_points)) * math.tau
-            anchors.append((cx + rx * math.cos(theta), cy + ry * math.sin(theta), cz))
-
+        # Build a proper 4-anchor cyclic Bezier circle (or ellipse when
+        # rx ≠ ry). Anchor 0 sits at (+rx, 0) so start_00 — which
+        # add_starts snaps to t=0 — lands at a predictable +X side. The
+        # handle scale K = (4/3)·tan(π/8) is the standard cubic-Bezier
+        # circle approximation, accurate to ~0.06% radius. Per-axis
+        # scaling on the handles keeps the curve smooth on non-circular
+        # ellipses.
         curve = bpy.data.curves.new("ai_spline_main", type="CURVE")
         curve.dimensions = "3D"
-        spl = curve.splines.new(type="NURBS")
-        spl.points.add(len(anchors) - 1)
-        for i, (x, y, z) in enumerate(anchors):
-            spl.points[i].co = (x, y, z, 1.0)
-        spl.use_endpoint_u = True
+        spl = curve.splines.new(type="BEZIER")
+        spl.bezier_points.add(3)  # creates 4 total
+        K = (4.0 / 3.0) * math.tan(math.pi / 8.0)
+        for i in range(4):
+            theta = i * (math.pi / 2.0)
+            ct, st = math.cos(theta), math.sin(theta)
+            px = cx + rx * ct
+            py = cy + ry * st
+            # Tangent (unscaled): (-sin θ, cos θ). Scaled by per-axis
+            # radius × K so the handle reach matches the ellipse.
+            hx = -rx * K * st
+            hy = ry * K * ct
+            bp = spl.bezier_points[i]
+            bp.co = (px, py, cz)
+            bp.handle_left_type = "ALIGNED"
+            bp.handle_right_type = "ALIGNED"
+            bp.handle_left = (px - hx, py - hy, cz)
+            bp.handle_right = (px + hx, py + hy, cz)
         spl.use_cyclic_u = True
+
         obj = bpy.data.objects.new("ai_spline_main", curve)
         context.scene.collection.objects.link(obj)
         # Canonical tag via the auto_tag rule (kind=ai_spline, branch=main).
@@ -919,10 +983,12 @@ class HOVERBIKE_OT_add_ai_spline(Operator):
         obj.select_set(True)
         context.view_layer.objects.active = obj
 
+        ran = self._run_sidekicks() if self.place_sidekicks else []
+        sidekick_note = f"Sidekicks: {', '.join(ran)}." if ran else "Sidekicks skipped."
         self.report(
             {"INFO"},
-            f"Created ai_spline_main: {self.n_points}-pt NURBS loop "
-            f"({sized_from}, {2 * rx:.0f}×{2 * ry:.0f} m). "
+            f"Created ai_spline_main: 4-anchor Bezier circle "
+            f"({sized_from}, {2 * rx:.0f}×{2 * ry:.0f} m). {sidekick_note} "
             f"Tab into edit mode to reshape.",
         )
         return {"FINISHED"}

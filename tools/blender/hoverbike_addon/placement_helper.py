@@ -32,6 +32,31 @@ from bpy.types import Operator
 
 PLACEMENT_HELPER_NAME = "placement_helper"
 
+# Position the helper sat at after the last repose_placement_helper call.
+# The depsgraph handler compares the helper's current location against
+# this to distinguish a real user drag from the location-write that
+# repose itself just performed — otherwise reposing would trigger another
+# depsgraph update that schedules another reposing, and so on.
+_last_reposed_xy: tuple[float, float] | None = None
+
+# Set True while we're writing scene.hoverbike_helper_t / _offset from
+# inside snap_helper_to_curve_from_world. The FloatProperty update
+# callback short-circuits on this flag so the chain stays:
+#     drag → depsgraph → snap → repose → done
+# instead of:
+#     drag → depsgraph → snap (writes props) → prop callback → schedule
+#         helper → next tick → repose → ...
+_suppress_prop_callback = False
+
+
+def helper_position_matches_last_repose(loc, eps: float = 1e-3) -> bool:
+    """True if the helper's current XY is within ``eps`` of the position
+    repose_placement_helper last wrote. Used by the depsgraph handler to
+    drop self-triggered updates without dropping real user drags."""
+    if _last_reposed_xy is None:
+        return False
+    return abs(loc.x - _last_reposed_xy[0]) < eps and abs(loc.y - _last_reposed_xy[1]) < eps
+
 
 def _ensure_placement_helper(scene) -> bpy.types.Object:
     """Return the singleton placement-helper empty, creating it if
@@ -104,15 +129,75 @@ def repose_placement_helper(scene) -> dict | None:
     obj.rotation_euler = (0.0, 0.0, yaw_from_tangent_xy(tx, ty))
     obj["helper_t"] = float(t)
     obj["helper_offset"] = float(off)
+    global _last_reposed_xy
+    _last_reposed_xy = (x, y)
     return {"x": x, "y": y, "z": z, "tx": tx, "ty": ty}
+
+
+def snap_helper_to_curve_from_world(scene) -> dict | None:
+    """Reproject the helper's current world transform back onto the
+    racing line — used when the user has dragged the empty via the
+    viewport manipulator. Walks the curve to find the nearest t,
+    computes the signed perpendicular offset (positive = right of the
+    racing tangent, matching the offset-slider sign), writes both back
+    to the scene props, and reposes so yaw + Z + position all snap
+    cleanly to the spline.
+
+    Returns the same dict shape as ``repose_placement_helper`` so the
+    rebuild dispatcher can keep treating both paths uniformly. ``None``
+    when there's no curve / no helper / the curve is degenerate.
+
+    The depsgraph handler kicks this off via ``_schedule_rebuild
+    ('helper_drag')`` whenever the helper's transform updates with a
+    position that doesn't match what repose last wrote — so simply
+    pressing G in the viewport and translating the empty slides it
+    along the curve."""
+    from .spline import (
+        nearest_t_on_curve,
+        sample_curve_at_t,
+        spline_source_for_placement,
+    )
+
+    obj = bpy.data.objects.get(PLACEMENT_HELPER_NAME)
+    if obj is None:
+        return None
+    curve = spline_source_for_placement(scene)
+    if curve is None:
+        return None
+    loc = obj.matrix_world.translation
+    new_t = nearest_t_on_curve(curve, float(loc.x), float(loc.y))
+    if new_t is None:
+        return None
+    s = sample_curve_at_t(curve, new_t)
+    if s is None:
+        return None
+    # Signed perpendicular offset matching repose's convention:
+    # positive = right of the tangent (rx, ry) = (ty, -tx).
+    rx, ry = s["ty"], -s["tx"]
+    new_offset = (float(loc.x) - s["x"]) * rx + (float(loc.y) - s["y"]) * ry
+
+    global _suppress_prop_callback
+    _suppress_prop_callback = True
+    try:
+        scene.hoverbike_helper_t = max(0.0, min(1.0, float(new_t)))
+        scene.hoverbike_helper_offset = float(new_offset)
+    finally:
+        _suppress_prop_callback = False
+    return repose_placement_helper(scene)
 
 
 def _on_helper_prop_changed(self, context):
     """FloatProperty update callback — re-poses the helper whenever
     the user scrubs t or offset. No-ops if the helper hasn't been
-    spawned."""
+    spawned. Also bails when ``_suppress_prop_callback`` is set, which
+    happens while ``snap_helper_to_curve_from_world`` is writing back
+    the drag-derived t/offset (we don't want the prop-write half of the
+    drag path to schedule another rebuild on top of the snap we're
+    already executing)."""
     from .handlers import _schedule_rebuild
 
+    if _suppress_prop_callback:
+        return
     if bpy.data.objects.get(PLACEMENT_HELPER_NAME) is not None:
         _schedule_rebuild("helper")
 
