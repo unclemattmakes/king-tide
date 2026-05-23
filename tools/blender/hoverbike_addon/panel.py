@@ -34,6 +34,7 @@ from bpy.types import Panel
 # parent panel HOVERBIKE_PT_panel is in bpy.types first — panel runs
 # last in addon._MODULES.
 from .emitter import HOVERBIKE_PT_track_emitters
+from .decal import HOVERBIKE_PT_track_decals
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -1768,6 +1769,7 @@ _CLASSES: tuple[type, ...] = (
     # These don't have a single "thing" to select for, so they sit
     # below the selection-driven block. All open default-closed.
     HOVERBIKE_PT_track_emitters,
+    HOVERBIKE_PT_track_decals,
     HOVERBIKE_PT_track_sky,
     HOVERBIKE_PT_track_ghost,
     HOVERBIKE_PT_track_shader,

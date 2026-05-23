@@ -1,5 +1,6 @@
 """Seed ``tracks-src/props-library.blend`` — Asset-Browser-marked library
-of procedural track props (Item 3 from docs/blender-wishlist.md).
+of procedural track props (Item 3 from docs/blender-wishlist.md, with
+biome kits added per docs/level-visual-quality-research.md Layer C / γ).
 
 Run:
     "C:/Program Files/Blender Foundation/Blender 5.1/blender.exe" \\
@@ -102,6 +103,11 @@ CATALOG_UUIDS = {
     "Hoverbike/Track Props/Industrial":"11111111-1111-4111-8111-000000000021",
     "Hoverbike/Track Props/Volcanic":  "11111111-1111-4111-8111-000000000022",
     "Hoverbike/Track Props/Jungle":    "11111111-1111-4111-8111-000000000023",
+    # Final biome kits (Phase γ #8 follow-up — closes the remaining biome
+    # gaps from `docs/level-visual-quality-research.md` Layer C / Phase γ).
+    "Hoverbike/Track Props/Venetian":  "11111111-1111-4111-8111-000000000024",
+    "Hoverbike/Track Props/Waterpark": "11111111-1111-4111-8111-000000000025",
+    "Hoverbike/Track Props/Open Sea":  "11111111-1111-4111-8111-000000000026",
 }
 
 
@@ -1049,6 +1055,514 @@ def build_fallen_pillar_mesh(name: str, *, length: float = 3.2, radius: float = 
     return me
 
 
+# ── Venetian kit ────────────────────────────────────────────────────
+
+
+def build_gondola_mesh(name: str, *, length: float = 4.8, beam: float = 0.7, depth: float = 0.45) -> bpy.types.Mesh:
+    """Stylised gondola — flat-bottomed canoe silhouette with the
+    signature upturned ferro prow. Sits in the water (z=0 is the
+    waterline, hull descends to -depth). ~40 verts."""
+    bm = bmesh.new()
+    # Bottom keel: 5-point spine running along +X, slightly bowed up
+    # toward the prow end so the silhouette curls at both ends.
+    spine = []
+    for i in range(5):
+        t = i / 4  # 0..1
+        # Upturn at both ends, lowest amidships.
+        z_rise = 0.18 * abs(t - 0.5) * 2  # 0..0.18 at endpoints
+        spine.append(bm.verts.new((t * length, 0.0, -depth + z_rise)))
+    # Gunwale (deck rim): mirrored pair along +Y / -Y at z=0.
+    left = []
+    right = []
+    for i in range(5):
+        t = i / 4
+        # Beam tapers to zero at each end; widest at midships.
+        b = beam * math.sin(t * math.pi)
+        left.append(bm.verts.new((t * length, -b, 0.0)))
+        right.append(bm.verts.new((t * length,  b, 0.0)))
+    # Hull faces — quads between spine ↔ rim along each side.
+    for i in range(4):
+        bm.faces.new([spine[i], spine[i + 1], left[i + 1], left[i]])
+        bm.faces.new([spine[i], right[i], right[i + 1], spine[i + 1]])
+    # Deck — close the top with a single ngon ringing the gunwale.
+    bm.faces.new(left + list(reversed(right)))
+    # Ferro prow ornament — tall thin curl rising off the +X end.
+    ferro_base = bm.verts.new((length, 0.0, 0.0))
+    ferro_mid  = bm.verts.new((length + 0.20, 0.0, 0.45))
+    ferro_top  = bm.verts.new((length + 0.05, 0.0, 0.75))
+    # Two triangles form a flat ornament that reads in silhouette.
+    bm.faces.new([spine[-1], ferro_base, ferro_mid])
+    bm.faces.new([ferro_base, ferro_top, ferro_mid])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_venetian_mooring_mesh(name: str, *, height: float = 1.8, radius: float = 0.10) -> bpy.types.Mesh:
+    """Venice mooring post (`palina`) — slender striped pole. Two-tone
+    paint via material slot swap on the upper half-face range, so a
+    scatter pass can paint each post a different stripe colour later."""
+    bm = bmesh.new()
+    segs = 8
+    # 4-ring stack so we can mark the middle ring's faces as stripe-band.
+    rings = []
+    for z in (0.0, height * 0.45, height * 0.55, height):
+        rings.append([
+            bm.verts.new((math.cos(s / segs * math.tau) * radius,
+                          math.sin(s / segs * math.tau) * radius,
+                          z))
+            for s in range(segs)
+        ])
+    for ri in range(3):
+        cur = rings[ri]
+        nxt = rings[ri + 1]
+        for si in range(segs):
+            sn = (si + 1) % segs
+            bm.faces.new([cur[si], cur[sn], nxt[sn], nxt[si]])
+    bm.faces.new(rings[0][::-1])
+    bm.faces.new(rings[-1])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    # Middle band — faces between the two midpoint rings — gets material
+    # slot 1 (the stripe colour). The ring-stack creates them in order
+    # (bottom→mid_low, mid_low→mid_high, mid_high→top), so the stripe
+    # faces are segs .. 2*segs.
+    for i in range(segs, segs * 2):
+        me.polygons[i].material_index = 1
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_canal_lantern_mesh(name: str, *, height: float = 0.55, radius: float = 0.12) -> bpy.types.Mesh:
+    """Wrought-iron canal lantern — small box cage on a thin stem. The
+    glass panel face is material slot 1 (emissive) so the lantern lights
+    up at night."""
+    bm = bmesh.new()
+    # Stem — short stub the lantern can sit atop a mooring or rooftop.
+    _cylinder_z(bm, radius=0.025, z0=0.0, z1=height * 0.3, segs=6)
+    # Lantern body — small box centred above the stem.
+    body_centre_z = height * 0.7
+    _box(bm, half_x=radius, half_y=radius, half_z=radius, z_centre=body_centre_z)
+    # Snapshot the 4 top-of-box verts BEFORE adding the finial, otherwise
+    # `bm.verts[-4:]` would include the finial itself and a face would
+    # try to use the same vert twice.
+    bm.verts.ensure_lookup_table()
+    top_verts = list(bm.verts[-4:])
+    # Decorative finial — tiny pyramid cap.
+    finial_ring_z = body_centre_z + radius
+    finial = bm.verts.new((0.0, 0.0, finial_ring_z + radius * 0.6))
+    for i in range(4):
+        bm.faces.new([top_verts[i], top_verts[(i + 1) % 4], finial])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    # Mark all four side faces of the body box as emissive (the panes).
+    # _box face order: bottom, top, -Y, +X, +Y, -X — so the four sides
+    # are the last 4 faces of the box block. The stem-cylinder + caps
+    # came before, then the 6 box faces; subtract 4 to skip bottom+top.
+    # The fan tris are added AFTER the box, so we count back past them.
+    box_top_offset = 4 + 1 + 4 + 4  # 4 fan tris + finial + 4 box sides + box top
+    # Easier: pre-record polygon count before adding fan would have been
+    # cleaner; instead, walk the polygon list and grab the four largest
+    # vertical quads with |normal.z| < 0.2 (the four lantern panes).
+    for poly in me.polygons:
+        nz = poly.normal.z
+        if abs(nz) < 0.2 and len(poly.vertices) == 4:
+            # Lantern panes only — skip the stem cylinder side quads by
+            # rejecting anything whose face centre is below body_centre_z * 0.5.
+            cz = sum(me.vertices[i].co.z for i in poly.vertices) / 4
+            if cz > body_centre_z - radius * 0.5:
+                poly.material_index = 1
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_paving_slab_mesh(name: str, *, length: float = 0.9, width: float = 0.6, thick: float = 0.08) -> bpy.types.Mesh:
+    """Broken Istrian-stone paving slab — flat rectangle with one corner
+    chipped (replaced with an inset triangle). Reads as canal-side rubble."""
+    bm = bmesh.new()
+    half_x = length / 2
+    half_y = width / 2
+    half_z = thick / 2
+    # 5-vertex top face: 3 intact corners + 2 chip-cut verts replacing
+    # the 4th corner. The chip removes ~25 % of one corner.
+    top = [
+        bm.verts.new((-half_x, -half_y, half_z)),
+        bm.verts.new(( half_x, -half_y, half_z)),
+        bm.verts.new(( half_x,  half_y * 0.5, half_z)),  # chip-cut #1
+        bm.verts.new(( half_x * 0.5,  half_y, half_z)),  # chip-cut #2
+        bm.verts.new((-half_x,  half_y, half_z)),
+    ]
+    bot = [bm.verts.new((v.co.x, v.co.y, -half_z)) for v in top]
+    bm.faces.new(top)
+    bm.faces.new(bot[::-1])
+    # Skirt — vertical quads round the perimeter.
+    for i in range(len(top)):
+        j = (i + 1) % len(top)
+        bm.faces.new([top[i], bot[i], bot[j], top[j]])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_ivy_patch_mesh(name: str, *, count: int = 9, spread: float = 0.45) -> bpy.types.Mesh:
+    """Wall-clinging ivy clump — a cluster of overlapping cross-quads.
+    Sway gradient on COLOR_0.R via the foliage shader. Stays flat against
+    the XZ plane so authors can park it on a vertical surface."""
+    bm = bmesh.new()
+    # Two cross-quads stacked + scattered leaves around.
+    leaf_offsets = [
+        (-0.30,  0.05),
+        ( 0.25, -0.08),
+        ( 0.10,  0.32),
+        (-0.18, -0.20),
+        ( 0.32,  0.20),
+        (-0.05, -0.30),
+        ( 0.18,  0.05),
+        (-0.28,  0.28),
+        ( 0.02,  0.20),
+    ][:count]
+    for (ox, oy) in leaf_offsets:
+        # Each leaf is a flat XZ quad (Y near 0 so the cluster reads as
+        # a thin sheet glued to a wall).
+        size = 0.18
+        v00 = bm.verts.new((ox - size, 0.0, oy - size))
+        v10 = bm.verts.new((ox + size, 0.0, oy - size))
+        v11 = bm.verts.new((ox + size, 0.0, oy + size))
+        v01 = bm.verts.new((ox - size, 0.0, oy + size))
+        bm.faces.new([v00, v10, v11, v01])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    # Sway: tip leaves (higher Z) move more.
+    set_linear_sway_z(me, z_min=-0.3, z_max=0.45, ao=1.0)
+    return me
+
+
+# ── Waterpark kit ──────────────────────────────────────────────────
+
+
+def build_beach_ball_mesh(name: str, *, radius: float = 0.30) -> bpy.types.Mesh:
+    """Inflatable beach ball — low-subdiv icosphere. Single material
+    slot; the painted stripes can come from a future trim sheet."""
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=1, radius=radius)
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_pool_noodle_mesh(name: str, *, length: float = 1.4, radius: float = 0.045) -> bpy.types.Mesh:
+    """Foam pool noodle — slim tube laid along +X. Reads as bright
+    plastic clutter at race speed."""
+    bm = bmesh.new()
+    segs = 8
+    rings = 6
+    ring_verts = []
+    for ri in range(rings):
+        t = ri / (rings - 1)
+        x = t * length
+        ring_verts.append([
+            bm.verts.new((x,
+                          math.cos(s / segs * math.tau) * radius,
+                          math.sin(s / segs * math.tau) * radius + radius))
+            for s in range(segs)
+        ])
+    for ri in range(rings - 1):
+        cur = ring_verts[ri]
+        nxt = ring_verts[ri + 1]
+        for si in range(segs):
+            sn = (si + 1) % segs
+            bm.faces.new([cur[si], cur[sn], nxt[sn], nxt[si]])
+    bm.faces.new(ring_verts[0][::-1])
+    bm.faces.new(ring_verts[-1])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_inflatable_ring_mesh(name: str, *, major_radius: float = 0.45, minor_radius: float = 0.10) -> bpy.types.Mesh:
+    """Pool donut — coarse torus. ~120 verts at 12×8 subdiv. Sits on
+    the water surface (z=0 ≈ widest part)."""
+    bm = bmesh.new()
+    major_segs = 12
+    minor_segs = 8
+    rings: list[list[bmesh.types.BMVert]] = []
+    for mj in range(major_segs):
+        a = mj / major_segs * math.tau
+        cx = math.cos(a) * major_radius
+        cy = math.sin(a) * major_radius
+        ring = []
+        for mi in range(minor_segs):
+            b = mi / minor_segs * math.tau
+            r = math.cos(b) * minor_radius
+            z = math.sin(b) * minor_radius
+            # Offset normal direction is outward in the XY plane.
+            ring.append(bm.verts.new((cx + math.cos(a) * r,
+                                      cy + math.sin(a) * r,
+                                      z + minor_radius)))
+        rings.append(ring)
+    for mj in range(major_segs):
+        mj2 = (mj + 1) % major_segs
+        for mi in range(minor_segs):
+            mi2 = (mi + 1) % minor_segs
+            bm.faces.new([rings[mj][mi], rings[mj][mi2],
+                          rings[mj2][mi2], rings[mj2][mi]])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_slide_piece_mesh(name: str, *, length: float = 4.0, width: float = 1.2, wall: float = 0.45) -> bpy.types.Mesh:
+    """Half-pipe waterslide segment — open U-channel laid along +X with
+    side walls. Reads as broken-off Aqualand infrastructure scattered
+    in the lagoons."""
+    bm = bmesh.new()
+    segs = 6  # cross-section profile points
+    rings = 5  # along-length samples
+    # U-shaped cross-section: walk -y around bottom to +y.
+    profile = []
+    for si in range(segs):
+        t = si / (segs - 1)
+        ang = -math.pi / 2 - math.pi / 2 + t * math.pi  # -180°..0° in YZ plane
+        py = math.cos(ang) * (width / 2)
+        pz = math.sin(ang) * (width / 2) + (width / 2)
+        profile.append((py, pz))
+    # Extrude profile along +X.
+    rings_v: list[list[bmesh.types.BMVert]] = []
+    for ri in range(rings):
+        t = ri / (rings - 1)
+        x = t * length
+        rings_v.append([bm.verts.new((x, py, pz)) for (py, pz) in profile])
+    for ri in range(rings - 1):
+        cur = rings_v[ri]
+        nxt = rings_v[ri + 1]
+        for si in range(segs - 1):
+            bm.faces.new([cur[si], cur[si + 1], nxt[si + 1], nxt[si]])
+    # Side wall lip — extrude the two end edges of each profile up by `wall`.
+    for ri in range(rings):
+        r = rings_v[ri]
+        x = r[0].co.x
+        # Left wall — extrude profile[0] up.
+        lift_l = bm.verts.new((x, r[0].co.y, r[0].co.z + wall))
+        lift_r = bm.verts.new((x, r[-1].co.y, r[-1].co.z + wall))
+        # Stitch onto neighbour ring next iteration via deferred list.
+        r.append(lift_l)
+        r.append(lift_r)
+    for ri in range(rings - 1):
+        cur = rings_v[ri]
+        nxt = rings_v[ri + 1]
+        # Wall quads — left edge (profile[0] → lift_l) and right edge.
+        bm.faces.new([cur[0], cur[-2], nxt[-2], nxt[0]])
+        bm.faces.new([cur[-1], cur[-3], nxt[-3], nxt[-1]])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_faded_sign_mesh(name: str, *, panel_w: float = 1.8, panel_h: float = 1.2, post_h: float = 1.5) -> bpy.types.Mesh:
+    """Crooked waterpark sign — single post + tilted billboard panel.
+    Similar silhouette to prop_signage_panel but no emissive face — this
+    one's a faded leftover from before the flood."""
+    bm = bmesh.new()
+    # Single off-centre post — sign tilts slightly so it reads as not-quite-vertical.
+    _cylinder_z(bm, radius=0.07, z0=0.0, z1=post_h, segs=8)
+    # Panel — thin box at top of post, tilted via per-vertex Z offset on +X side.
+    panel_z = post_h + panel_h / 2
+    bm_count_before = len(bm.verts)
+    _box(bm, half_x=panel_w / 2, half_y=0.04, half_z=panel_h / 2, z_centre=panel_z)
+    # Apply a slight tilt — verts on +X get lifted, verts on -X stay put.
+    for v in bm.verts[bm_count_before:]:
+        if v.co.x > 0:
+            v.co.z += 0.18
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+# ── Open Sea kit ────────────────────────────────────────────────────
+
+
+def build_sea_stack_mesh(name: str, *, height: float = 6.0, base_radius: float = 1.6) -> bpy.types.Mesh:
+    """Tall thin sea-stack rock — eroded pillar. Tapers from base to ~60 %
+    radius at the top. Reads as a coastal landmark at distance."""
+    bm = bmesh.new()
+    segs = 10
+    rings = 5
+    # Profile points: deterministic "eroded" radial variation per ring.
+    radial_jitter = [1.00, 0.78, 0.92, 0.72, 0.60]
+    for ri in range(rings):
+        z = ri / (rings - 1) * height
+        r = base_radius * radial_jitter[ri]
+        ring = [
+            bm.verts.new((math.cos(s / segs * math.tau) * r,
+                          math.sin(s / segs * math.tau) * r,
+                          z))
+            for s in range(segs)
+        ]
+        if ri == 0:
+            prev = ring
+            bm.faces.new(ring[::-1])  # base cap
+            continue
+        for si in range(segs):
+            sn = (si + 1) % segs
+            bm.faces.new([prev[si], prev[sn], ring[sn], ring[si]])
+        prev = ring
+    # Cap top.
+    bm.faces.new(prev)
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_nav_marker_mesh(name: str, *, height: float = 2.4) -> bpy.types.Mesh:
+    """Channel-marker navigation buoy — flat-bottom can with topmark
+    triangle. Emissive top reads as a lit channel marker at night."""
+    bm = bmesh.new()
+    # Floating can — short squat cylinder at the waterline.
+    _, can_top = _cylinder_z(bm, radius=0.35, z0=0.0, z1=0.6, segs=10, cap_top=True)
+    # Topmark — vertical post atop the can.
+    bm_count_before = len(bm.verts)
+    _cylinder_z(bm, radius=0.05, z0=0.6, z1=height - 0.4, segs=6)
+    # Triangle topmark at the top — a flat upward-pointing dart. Single
+    # face only; the runtime material renders both sides via DoubleSide.
+    tip   = bm.verts.new((0.0, 0.0, height))
+    base_l = bm.verts.new((-0.18, 0.0, height - 0.4))
+    base_r = bm.verts.new(( 0.18, 0.0, height - 0.4))
+    bm.faces.new([base_l, base_r, tip])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    # The last polygon is the topmark triangle → emissive slot.
+    me.polygons[-1].material_index = 1
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
+def build_kelp_strand_mesh(name: str, *, height: float = 2.4) -> bpy.types.Mesh:
+    """Submerged kelp strand — vertical ribbon with a sway gradient
+    along Z. Stays under the waterline; scatter with z_max < 0 on the
+    HV_Scatter altitude filter so it doesn't poke through."""
+    bm = bmesh.new()
+    rings = 6
+    half_w = 0.12
+    for ri in range(rings - 1):
+        t0 = ri / (rings - 1)
+        t1 = (ri + 1) / (rings - 1)
+        z0 = t0 * height
+        z1 = t1 * height
+        # Slight horizontal drift — looks current-pulled rather than rigid.
+        x0 = math.sin(t0 * math.pi) * 0.10
+        x1 = math.sin(t1 * math.pi) * 0.10
+        # Taper width toward tip.
+        w0 = half_w * (1.0 - t0 * 0.7)
+        w1 = half_w * (1.0 - t1 * 0.7)
+        v00 = bm.verts.new((x0 - w0, 0.0, z0))
+        v10 = bm.verts.new((x0 + w0, 0.0, z0))
+        v11 = bm.verts.new((x1 + w1, 0.0, z1))
+        v01 = bm.verts.new((x1 - w1, 0.0, z1))
+        bm.faces.new([v00, v10, v11, v01])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    set_linear_sway_z(me, z_min=0.0, z_max=height * 0.9, ao=1.0)
+    return me
+
+
+def build_foam_tuft_mesh(name: str, *, radius: float = 0.40) -> bpy.types.Mesh:
+    """Surface-foam tuft — flat disc near the waterline with slight
+    centre-rise. Material is `mat_foliage_*` so it gets a faint sway and
+    reads as wind-blown foam at race speed."""
+    bm = bmesh.new()
+    segs = 10
+    rim = [
+        bm.verts.new((math.cos(s / segs * math.tau) * radius,
+                      math.sin(s / segs * math.tau) * radius,
+                      0.0))
+        for s in range(segs)
+    ]
+    crest = bm.verts.new((0.0, 0.0, 0.08))
+    for i in range(segs):
+        j = (i + 1) % segs
+        bm.faces.new([rim[i], rim[j], crest])
+
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    set_linear_sway_z(me, z_min=0.0, z_max=0.08, ao=1.0)
+    return me
+
+
+def build_gull_crag_mesh(name: str, *, base_radius: float = 0.8, height: float = 1.4) -> bpy.types.Mesh:
+    """Small rocky outcrop — squat icosphere with a perch on top. Adds
+    micro-relief in open-water stretches between the bigger sea-stacks."""
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=2, radius=base_radius)
+    for v in bm.verts:
+        v.co.z = v.co.z * 0.55 + base_radius * 0.55
+    # Crown — flatter top by clamping high verts.
+    for v in bm.verts:
+        if v.co.z > height * 0.85:
+            v.co.z = height * 0.85
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    set_constant(me, DEFAULT_TERRAIN)
+    return me
+
+
 # ────────────────────────────────────────────────────────────────────
 # HV_Scatter — Geometry Nodes graph for foliage / rock / debris scatter
 # ────────────────────────────────────────────────────────────────────
@@ -1343,6 +1857,24 @@ PROP_POSITIONS = {
     "prop_fern_clump":      (134.0, 0.0, 0.0),
     "prop_mossy_boulder":   (138.0, 0.0, 0.0),
     "prop_fallen_pillar":   (142.0, 0.0, 0.0),
+    # Venetian kit (Doge's Drift)
+    "prop_gondola":         (150.0, 0.0, 0.0),
+    "prop_venetian_mooring":(158.0, 0.0, 0.0),
+    "prop_canal_lantern":   (162.0, 0.0, 0.0),
+    "prop_paving_slab":     (166.0, 0.0, 0.0),
+    "prop_ivy_patch":       (170.0, 0.0, 0.0),
+    # Waterpark kit (Aqualand)
+    "prop_beach_ball":      (178.0, 0.0, 0.0),
+    "prop_pool_noodle":     (182.0, 0.0, 0.0),
+    "prop_inflatable_ring": (186.0, 0.0, 0.0),
+    "prop_slide_piece":     (192.0, 0.0, 0.0),
+    "prop_faded_sign":      (200.0, 0.0, 0.0),
+    # Open Sea kit (denser ammunition for The Maw / Hatteras / Cape Town)
+    "prop_sea_stack":       (208.0, 0.0, 0.0),
+    "prop_nav_marker":      (216.0, 0.0, 0.0),
+    "prop_kelp_strand":     (220.0, 0.0, 0.0),
+    "prop_foam_tuft":       (224.0, 0.0, 0.0),
+    "prop_gull_crag":       (228.0, 0.0, 0.0),
 }
 
 
@@ -1457,6 +1989,32 @@ def build_props() -> dict:
     fern_mat         = make_material("mat_foliage_fern", "#3a6e2c", roughness=0.65)
     mossy_mat        = make_material("mat_prop_jungle_mossy", "#4a5e34", roughness=0.85)
     pillar_mat       = make_material("mat_prop_jungle_pillar", "#a89a78", roughness=0.75)
+
+    # Venetian kit
+    gondola_mat      = make_material("mat_prop_venetian_gondola", "#1a1a1e", roughness=0.55)
+    venet_post_mat   = make_material("mat_prop_venetian_post", "#d8c8a8", roughness=0.65)
+    venet_stripe_mat = make_material("mat_prop_venetian_post_stripe", "#a83838", roughness=0.55)
+    lantern_iron_mat = make_material("mat_prop_venetian_lantern", "#2a261e", roughness=0.6)
+    lantern_lit_mat  = make_material("mat_prop_venetian_lantern_lit", "#ffe4a8", roughness=0.25,
+                                     emission_hex="#ffe4a8", emission_strength=2.5)
+    paving_mat       = make_material("mat_prop_venetian_paving", "#b8b0a0", roughness=0.85)
+    ivy_mat          = make_material("mat_foliage_ivy", "#3e6238", roughness=0.7)
+
+    # Waterpark kit
+    beach_ball_mat   = make_material("mat_prop_waterpark_ball", "#ff6688", roughness=0.40)
+    pool_noodle_mat  = make_material("mat_prop_waterpark_noodle", "#42d4ff", roughness=0.45)
+    ring_mat         = make_material("mat_prop_waterpark_ring", "#ffdc4a", roughness=0.45)
+    slide_mat        = make_material("mat_prop_waterpark_slide", "#5cc0e8", roughness=0.5)
+    faded_sign_mat   = make_material("mat_prop_waterpark_sign", "#e8d4a8", roughness=0.7)
+
+    # Open Sea kit
+    sea_stack_mat    = make_material("mat_prop_opensea_stack", "#8a8a82", roughness=0.85)
+    nav_marker_body_mat = make_material("mat_prop_opensea_nav", "#e84a1a", roughness=0.55)
+    nav_marker_lit_mat  = make_material("mat_prop_opensea_nav_lit", "#ffe098", roughness=0.30,
+                                        emission_hex="#fff2a8", emission_strength=3.5)
+    kelp_mat         = make_material("mat_foliage_kelp", "#3a583a", roughness=0.7)
+    foam_mat         = make_material("mat_foliage_foam", "#f0f4f8", roughness=0.9)
+    gull_crag_mat    = make_material("mat_prop_opensea_crag", "#6a665e", roughness=0.85)
 
     biome_summary: list[bpy.types.Collection] = []
 
@@ -1590,6 +2148,114 @@ def build_props() -> dict:
              "Hoverbike/Track Props/Jungle",
              "Toppled stone column lying on its side. Broken end + intact end for variety.",
              ["jungle", "pillar", "ruin", "scatterable"])
+
+    # Venetian kit ─────────────────────────────────────────────────
+    _add_kit("prop_gondola",
+             build_gondola_mesh("prop_gondola_mesh"),
+             [gondola_mat],
+             "Hoverbike/Track Props/Venetian",
+             "Stylised gondola — flat-bottom canoe with upturned ferro prow. Sits at waterline.",
+             ["venetian", "boat", "water", "scatterable"])
+
+    _add_kit("prop_venetian_mooring",
+             build_venetian_mooring_mesh("prop_venetian_mooring_mesh"),
+             [venet_post_mat, venet_stripe_mat],
+             "Hoverbike/Track Props/Venetian",
+             "Venice palina (mooring post) — pale stake with mid-band stripe. Pairs with prop_gondola in canals.",
+             ["venetian", "mooring", "water", "scatterable"])
+
+    _add_kit("prop_canal_lantern",
+             build_canal_lantern_mesh("prop_canal_lantern_mesh"),
+             [lantern_iron_mat, lantern_lit_mat],
+             "Hoverbike/Track Props/Venetian",
+             "Wrought-iron canal lantern on a short stub. Four emissive glass panes for night Venice.",
+             ["venetian", "lantern", "emissive", "scatterable"])
+
+    _add_kit("prop_paving_slab",
+             build_paving_slab_mesh("prop_paving_slab_mesh"),
+             [paving_mat],
+             "Hoverbike/Track Props/Venetian",
+             "Broken Istrian-stone paving slab with one chipped corner. Canal-edge rubble dressing.",
+             ["venetian", "paving", "rubble", "scatterable"])
+
+    _add_kit("prop_ivy_patch",
+             build_ivy_patch_mesh("prop_ivy_patch_mesh"),
+             [ivy_mat],
+             "Hoverbike/Track Props/Venetian",
+             "Wall-clinging ivy cluster of flat leaf cards. Sway gradient stamped via mat_foliage_*.",
+             ["venetian", "foliage", "sway", "scatterable"])
+
+    # Waterpark kit ─────────────────────────────────────────────────
+    _add_kit("prop_beach_ball",
+             build_beach_ball_mesh("prop_beach_ball_mesh"),
+             [beach_ball_mat],
+             "Hoverbike/Track Props/Waterpark",
+             "Low-poly beach ball. Bright single colour today; trim-sheet stripes in a later pass.",
+             ["waterpark", "inflatable", "small", "scatterable"])
+
+    _add_kit("prop_pool_noodle",
+             build_pool_noodle_mesh("prop_pool_noodle_mesh"),
+             [pool_noodle_mat],
+             "Hoverbike/Track Props/Waterpark",
+             "Foam pool noodle laid along +X. Bright plastic clutter for Aqualand lagoons.",
+             ["waterpark", "noodle", "small", "scatterable"])
+
+    _add_kit("prop_inflatable_ring",
+             build_inflatable_ring_mesh("prop_inflatable_ring_mesh"),
+             [ring_mat],
+             "Hoverbike/Track Props/Waterpark",
+             "Pool inflatable donut — coarse torus. Sits at the waterline.",
+             ["waterpark", "inflatable", "scatterable"])
+
+    _add_kit("prop_slide_piece",
+             build_slide_piece_mesh("prop_slide_piece_mesh"),
+             [slide_mat],
+             "Hoverbike/Track Props/Waterpark",
+             "Half-pipe waterslide segment — open U-channel. Broken-off Aqualand infrastructure.",
+             ["waterpark", "slide", "structure", "scatterable"])
+
+    _add_kit("prop_faded_sign",
+             build_faded_sign_mesh("prop_faded_sign_mesh"),
+             [faded_sign_mat],
+             "Hoverbike/Track Props/Waterpark",
+             "Crooked single-post billboard, no emission — pre-flood leftover signage.",
+             ["waterpark", "signage", "scatterable"])
+
+    # Open Sea kit ──────────────────────────────────────────────────
+    _add_kit("prop_sea_stack",
+             build_sea_stack_mesh("prop_sea_stack_mesh"),
+             [sea_stack_mat],
+             "Hoverbike/Track Props/Open Sea",
+             "Tall eroded sea-stack rock pillar. Coastal landmark silhouette at distance.",
+             ["open-sea", "rock", "tall", "scatterable"])
+
+    _add_kit("prop_nav_marker",
+             build_nav_marker_mesh("prop_nav_marker_mesh"),
+             [nav_marker_body_mat, nav_marker_lit_mat],
+             "Hoverbike/Track Props/Open Sea",
+             "Channel-marker buoy with lit triangle topmark. Pairs with prop_buoy in open water.",
+             ["open-sea", "buoy", "emissive", "scatterable"])
+
+    _add_kit("prop_kelp_strand",
+             build_kelp_strand_mesh("prop_kelp_strand_mesh"),
+             [kelp_mat],
+             "Hoverbike/Track Props/Open Sea",
+             "Submerged kelp strand with vertical sway gradient. Scatter with z_max < 0 so it stays underwater.",
+             ["open-sea", "foliage", "sway", "scatterable"])
+
+    _add_kit("prop_foam_tuft",
+             build_foam_tuft_mesh("prop_foam_tuft_mesh"),
+             [foam_mat],
+             "Hoverbike/Track Props/Open Sea",
+             "Surface-foam tuft — flat disc near the waterline with a faint sway. Reads as wind-driven foam.",
+             ["open-sea", "foam", "sway", "scatterable"])
+
+    _add_kit("prop_gull_crag",
+             build_gull_crag_mesh("prop_gull_crag_mesh"),
+             [gull_crag_mat],
+             "Hoverbike/Track Props/Open Sea",
+             "Squat rocky outcrop — adds micro-relief between sea-stacks in open-water stretches.",
+             ["open-sea", "rock", "scatterable"])
 
     # Mark the legacy collections + every Phase γ collection as scatter sources.
     for c in (rock_coll, palm_coll, buoy_coll, gate_coll, ti_coll):

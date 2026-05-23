@@ -128,6 +128,18 @@ class ExportedKind:
     # so amplitude doesn't pop at the OBB face.
     WAVE_ZONE = "wave_zone"
 
+    # Decal mesh — thin projected quad pasted on top of terrain / road
+    # geometry to add wear, paint, posters, oil stains, etc. Authored
+    # as ``decal_NN`` meshes (not empties) in Blender via the addon's
+    # *Add Decal* operator. Carries an ``atlas_cell`` extra (0..15) that
+    # picks a 256×256 tile from ``public/assets/decals/atlas.png``. The
+    # runtime walks all kind=decal meshes on load and applies the decal
+    # material profile: shared atlas-textured material, alpha-blend on,
+    # depth-test ON / write OFF, slight polygon offset to avoid
+    # z-fighting with the surface, no shadow cast/receive. Skipped by
+    # the trimesh-collider attach step — decals are render-only.
+    DECAL = "decal"
+
 
 class AuthoringKind:
     """Object extras kinds used only inside Blender — never shipped."""

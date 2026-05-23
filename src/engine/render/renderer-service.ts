@@ -19,8 +19,10 @@
  */
 
 import type * as THREE from 'three'
+import type { PostPipeline } from './post-pipeline'
 
 let instance: THREE.WebGLRenderer | null = null
+let activePipeline: PostPipeline | null = null
 
 export function setRenderer(renderer: THREE.WebGLRenderer): void {
   instance = renderer
@@ -50,7 +52,43 @@ export function applyPixelRatio(ratio: number): void {
   }
 }
 
+/**
+ * Register the active post-processing pipeline. Render call sites that go
+ * through `renderFrame(scene, camera)` route through the pipeline when
+ * the (scene, camera) tuple matches the one the pipeline was built for;
+ * otherwise they fall back to a direct `renderer.render(scene, camera)`.
+ *
+ * Sky systems call this at construction and again with `null` on dispose.
+ * Only one pipeline is active at a time (we ship one race scene at a time).
+ */
+export function setActivePostPipeline(pipeline: PostPipeline | null): void {
+  activePipeline = pipeline
+}
+
+export function getActivePostPipeline(): PostPipeline | null {
+  return activePipeline
+}
+
+/**
+ * Render a frame, routing through the active post-processing pipeline if
+ * one is registered for this (scene, camera) tuple. Falls back to a
+ * direct `renderer.render(scene, camera)` for utility renderers
+ * (track-editor, bike-viewer) that don't want bloom.
+ */
+export function renderFrame(scene: THREE.Scene, camera: THREE.Camera): void {
+  if (
+    activePipeline !== null &&
+    activePipeline.scene === scene &&
+    activePipeline.camera === camera
+  ) {
+    activePipeline.render()
+    return
+  }
+  instance?.render(scene, camera)
+}
+
 /** Test-only — clear the registered renderer between cases. */
 export function _resetRendererForTests(): void {
   instance = null
+  activePipeline = null
 }

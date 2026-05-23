@@ -387,17 +387,22 @@ export type LapWeather = {
  *                    image LUTs yet). `'neutral'` is a no-op. Defaults
  *                    to `'neutral'`.
  *   bloom          — 0..2 intensity multiplier on the renderer's bloom
- *                    pass. Defaults to 0 = off. NOTE: the WebGPU renderer
- *                    has no bloom pass wired up yet; the field round-trips
- *                    through authoring + JSON and the runtime stub logs
- *                    the value but applies nothing. Useful authoring
- *                    surface today, will become live when the post
- *                    pipeline lands.
+ *                    pass (the WebGPU post-pipeline; see
+ *                    `engine/render/post-pipeline.ts`). Defaults to 0 = off.
+ *                    Typical authored ranges: 0.2–0.4 daytime, 0.4–0.7
+ *                    sunset / overcast, 0.7–1.0 neon / night, 1.0+ for
+ *                    extreme bloom-driven looks (use with care — bright
+ *                    skies can saturate the framebuffer past ~1.2).
  *   seaStateBeaufort — 0..12 Beaufort wind scale. Drives a single
  *                    amplitude multiplier on the wave field at boot
  *                    (see `beaufortToAmplitudeScale`). Defaults to
  *                    `undefined` = leave the wave field untouched
  *                    (i.e. Beaufort ≈4 / 1.0× — current shipping look).
+ *   toneMapping    — Three.js tone-mapping curve name. The renderer's
+ *                    default is `'aces_filmic'`; per-track overrides
+ *                    let the cup match its palette (e.g. AgX for
+ *                    Big-Sur golden hour, neutral for crisp daylight,
+ *                    aces_filmic for high-contrast neon).
  */
 export type SkyConfig = {
   tint?: string
@@ -409,7 +414,24 @@ export type SkyConfig = {
   colorGrade?: SkyColorGrade
   bloom?: number
   seaStateBeaufort?: number
+  toneMapping?: SkyToneMapping
 }
+
+/**
+ * Bundled tone-mapping curve names. Mirror of the cases in
+ * `applySkyToneMapping` (in `engine/render/sky.ts`). Adding a new
+ * preset is one entry here + one mapping case + one JSON-loader
+ * accept; the unit-tested round-trip will catch drift.
+ */
+export const SKY_TONE_MAPPINGS = [
+  'neutral',       // THREE.NeutralToneMapping — flat / crisp daylight
+  'aces_filmic',   // THREE.ACESFilmicToneMapping — punchy, default
+  'agx',           // THREE.AgXToneMapping — soft roll-off, golden hour
+  'reinhard',      // THREE.ReinhardToneMapping — vintage, low contrast
+  'cineon',        // THREE.CineonToneMapping — film-emulation cold
+] as const
+
+export type SkyToneMapping = (typeof SKY_TONE_MAPPINGS)[number]
 
 /**
  * Bundled color-grade preset names. The runtime sky shader maps each to

@@ -30,6 +30,7 @@ import { createPickupRenderSystem } from '@/engine/render/pickup-render'
 import { createPropsMesh } from '@/engine/render/props-mesh'
 import { createBikeRenderSystem } from '@/engine/render/render-systems'
 import { createRenderer } from '@/engine/render/renderer'
+import { renderFrame } from '@/engine/render/renderer-service'
 import { createRiderRenderSystem } from '@/engine/render/rider-systems'
 import { createScene } from '@/engine/render/scene'
 import { createSkySystem } from '@/engine/render/sky'
@@ -889,7 +890,7 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
     pickupRender(dt)
     combatRender(dt)
     fxTick(dt)
-    renderer.render(scene, camera)
+    renderFrame(scene, camera)
     updateHud()
 
     rafHandle = requestAnimationFrame(frame)

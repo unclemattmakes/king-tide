@@ -392,10 +392,13 @@ Ordered by effort-vs-payoff.
    strength) will *pop* once bloom lands. Probably the single
    biggest "this looks finished" lift. **Effort: 0.5–1 day.**
 
-2. **Tonemapping options.** Three ships ACES Filmic, AgX, and
-   Neutral. Pick the right tonemapping per cup (`big_sur_golden`
-   wants AgX; `tokyo_neon` wants ACES) and round-trip through the
-   sky preset. **Effort: 0.5 day.**
+2. ✅ **Tonemapping options.** `SkyConfig.toneMapping` round-trips
+   through the JSON (`SKY_TONE_MAPPINGS` = neutral / aces_filmic /
+   agx / reinhard / cineon); `createSkySystem` pushes the resolved
+   `THREE.ToneMapping` constant onto `renderer.toneMapping` at boot.
+   The `RenderPipeline` picks it up via `outputColorTransform`. Default
+   stays `aces_filmic`; per-track audit pass + Blender authoring UI
+   is the remaining work.
 
 3. **Light shafts / volumetric quad sun.** A cheap fake: a
    billboard quad at the sun's position with a shader that sweeps
@@ -416,13 +419,12 @@ Ordered by effort-vs-payoff.
    out the city silhouette earlier than The Maw needs to. **Effort:
    0.5 day for the tune-up across all 12 tracks.**
 
-6. **Refraction tint under water surface.** Today the water
-   shader is fully reflective. A cheap caustics pattern + Beer-
-   Lambert depth tint on submerged geometry would make the
-   *underwater* side of every track read as wet rather than
-   neutrally lit. Mostly a shader update on the terrain shader's
-   `withWet` branch — extend the wet band downward with a depth-
-   driven multiplier. **Effort: 1 day.**
+6. ✅ **Refraction tint under water surface.** Terrain shader's
+   `withWet` branch now extends downward via a depth-driven Beer-
+   Lambert cyan tint (`depthFac = clamp(depth × 0.1, 0, 1)` then
+   `mix(white, cyan, depthFac)`). Submerged geometry reads as
+   water-attenuated at race speed without any new texture or pass.
+   Caustics pattern is the remaining work.
 
 7. **Per-cup colour-grade pinning.** All 12 tracks already have
    their `colorGrade` slot. Audit them against the palette notes
@@ -488,11 +490,14 @@ Highest payoff per hour, no new content authoring.
 
 1. ✅ Wire `applyFoliageSway` at GLB load. — `glb-track.ts` walks
    `mat_foliage_*` materials at load (commit 990b2b7).
-2. Drop in bloom post-pass and audit per-track `sky.bloom` values.
-   (~1 day) — schema is already round-tripped; renderer needs a
-   `WebGPURenderer` + `PostProcessing` pipeline that intercepts the
-   ~7 `renderer.render()` call sites (game-loop, attract, calibration,
-   replay, editor, bike-viewer).
+2. ✅ Drop in bloom post-pass and audit per-track `sky.bloom` values. —
+   `src/engine/render/post-pipeline.ts` wraps `RenderPipeline` with a
+   `pass(scene, camera) + bloom()` chain; `renderer-service.renderFrame()`
+   routes the 4 race-mode call sites (game-loop, attract, replay,
+   calibration) through the active pipeline, falling back to a direct
+   render for utility renderers (track-editor, bike-viewer). South Beach
+   / Cape Town / Hatteras bumped from 0.0 to 0.25–0.4; other tracks
+   already had authored values.
 3. Audit `colorGrade` assignments against `track-themes.md`. (~0.5 day)
 4. Drop the 8-cell emitter pass per track from the asset-pipeline
    plan (each track gets its 3–6 emitters). (~1.5 days)
@@ -525,15 +530,14 @@ Per-track scatter for the rest takes ~30 min apiece going forward.
 
 ### Phase γ — Biome prop kits (5–6 days)
 
-8. ⚠️ Add 4–6 archetype props per missing biome to the props library.
-   (~4 days, parallelisable) — **Partial**: 14 archetypes shipped
-   across 4 biome kits (Urban / Industrial / Volcanic / Jungle).
-   Still pending: Venetian (Doge's), Waterpark (Aqualand), denser
-   Atlantic / open-sea kit. See [`seed_props_library.py`](../tools/blender/seed_props_library.py)
+8. ✅ Add 4–6 archetype props per missing biome to the props library. —
+   29 archetypes shipped across 7 biome kits (Urban / Industrial /
+   Volcanic / Jungle / Venetian / Waterpark / Open Sea). See
+   [`seed_props_library.py`](../tools/blender/seed_props_library.py)
    — every kit prop is a procedural `bmesh` build under 200 verts
-   (except `prop_mossy_boulder` at 522v, on the rework list); each
-   has a placeholder material + Asset-Browser catalog entry +
-   `scatter_source=True`.
+   (except `prop_mossy_boulder` at 522v + `prop_basalt_boulder` at
+   240v, both on the rework list); each has a placeholder material +
+   Asset-Browser catalog entry + `scatter_source=True`.
 9. ⚠️ Convert Open Sea + Continental + Drowned cup tracks with
    appropriate scatter zones using the new kits. — **Partial /
    throwaway**: test scatter on Shibuya / Kilauea / Marina Bay /
@@ -546,10 +550,28 @@ filler.
 
 ### Phase δ — Decals + landmark trim sheets (5–7 days)
 
-10. Author the decal system (atlas + addon kind + runtime material).
-    (~3 days)
-11. Author the first biome trim sheet (Shibuya — highest visual ROI)
-    + re-UV the affected landmarks. (~4 days)
+10. ✅ Author the decal system (atlas + addon kind + runtime material). —
+    `ExportedKind.DECAL` flows Blender → GLB → runtime;
+    [`decal-system.ts`](../src/engine/render/decal-system.ts) walks every
+    `kind=decal` mesh on load and applies the alpha-blend + polygon-offset
+    + no-shadow profile, sharing one atlas texture
+    (`public/assets/decals/atlas.png`, 16 procedural placeholder cells —
+    rebuild with `pnpm gen:decal-atlas`). Addon ships an *Add Decal*
+    operator + sub-panel with a re-cell picker
+    ([`hoverbike_addon/decal.py`](../tools/blender/hoverbike_addon/decal.py)).
+11. ⚠️ Author the first biome trim sheet (Shibuya — highest visual ROI)
+    + re-UV the affected landmarks. — **First half shipped**:
+    `pnpm gen:trim-sheets` builds
+    `public/assets/landmarks/trim_tokyo_neon.png` (8-strip composite —
+    windows / kanji / signage / weathering / brick / neon / ledge /
+    base); `make_trim_sheet_material` references it via a
+    `ShaderNodeTexImage`; `build_drowned_facade_trimmed_mesh` UV-maps
+    a single-material slab onto the right strips. The new
+    `landmark_drowned_facade_tokyo_trim` collection ships alongside
+    the legacy multi-slot tokyo facade (32v vs 1624v — windows are
+    painted, not modelled). Re-UV pass on the other Shibuya
+    landmarks + a real artist-painted texture replacing the procedural
+    placeholder is the remaining work.
 
 End state: landmarks read as textured surfaces, not solid blocks;
 hand-placed wear / paint / signage decals layer on top of the

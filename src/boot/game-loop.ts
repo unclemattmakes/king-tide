@@ -55,6 +55,7 @@ import { updateLavaTime } from '@/engine/render/lava-river-material'
 import { updateSwayTime, updateWind } from '@/engine/render/foliage-sway'
 import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finish-banner'
 import { createPerfHud, type RenderInfoLite } from '@/engine/render/perf-hud'
+import { renderFrame } from '@/engine/render/renderer-service'
 import { createPumpFx } from '@/engine/render/pump-fx'
 import type { RaceHud } from '@/engine/render/race-hud'
 import type { RaceIntro } from '@/engine/render/race-intro'
@@ -1224,7 +1225,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // (60 fps cap = ~½ the GPU power of uncapped on a 90 Hz panel).
     const renderThisFrame = shouldRenderFrame(now, lastRenderedAt, playerSettings.framerateCap)
     if (renderThisFrame) {
-      renderer.render(scene, camera)
+      renderFrame(scene, camera)
       lastRenderedAt = now
       state.frame += 1
       framesThisSecond += 1

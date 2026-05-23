@@ -155,6 +155,10 @@ LAYOUT = {
     "landmark_mechanical_rig":            (  520.0, 200.0, 0.0),
     "landmark_carved_face_block":         (  600.0, 200.0, 0.0),
     "landmark_lava_river_strip":          (  670.0, 200.0, 0.0),
+    # Trim-sheet variants — single-material landmarks UV-mapped onto
+    # the biome's shared trim sheet. New row 2 so they stack below the
+    # legacy multi-slot facades in the .blend viewport.
+    "landmark_drowned_facade_tokyo_trim": (  230.0, 400.0, 0.0),
 }
 
 
@@ -227,6 +231,46 @@ def make_material(name: str, base_color_hex: str, *, roughness: float = 0.7,
                 em.default_value = _hex(emission_hex)
             if es is not None:
                 es.default_value = emission_strength
+    return mat
+
+
+def make_trim_sheet_material(name: str, image_path: str, *, roughness: float = 0.55) -> bpy.types.Material:
+    """Build a Principled BSDF whose Base Color is sourced from a trim
+    sheet texture on disk. Used by trim-sheet-enabled landmarks (see
+    ``build_drowned_facade_trimmed_mesh``) so a single material covers
+    every face of every facade in the biome — geometry just UV-maps onto
+    the strip it wants.
+
+    If the texture file is missing (e.g. the user hasn't run
+    ``pnpm gen:trim-sheets`` yet), the material falls back to a flat
+    grey so the seed still produces a working .blend."""
+    mat = bpy.data.materials.get(name) or bpy.data.materials.new(name=name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    bsdf = nt.nodes.get("Principled BSDF")
+    if bsdf is None:
+        return mat
+    # Idempotent: only inject the Image Texture node once per material.
+    tex_node = next((n for n in nt.nodes if n.bl_idname == "ShaderNodeTexImage"), None)
+    if tex_node is None:
+        tex_node = nt.nodes.new("ShaderNodeTexImage")
+        tex_node.location = (bsdf.location.x - 360, bsdf.location.y)
+        nt.links.new(tex_node.outputs["Color"], bsdf.inputs["Base Color"])
+    if os.path.isfile(image_path):
+        try:
+            img = bpy.data.images.load(image_path, check_existing=True)
+            img.colorspace_settings.name = "sRGB"
+            tex_node.image = img
+        except Exception as e:  # noqa: BLE001
+            print(f"[trim-sheet] failed to load {image_path}: {e}")
+    else:
+        # No texture on disk yet — leave Base Color as the bound flat
+        # grey so the seed still completes and the GLB is valid.
+        print(f"[trim-sheet] {image_path} missing; using grey fallback. "
+              f"Run `pnpm gen:trim-sheets` and re-seed to pick up the texture.")
+        bsdf.inputs["Base Color"].default_value = _hex("#a8a8ac")
+    if "Roughness" in bsdf.inputs:
+        bsdf.inputs["Roughness"].default_value = roughness
     return mat
 
 
@@ -795,6 +839,141 @@ def build_drowned_facade_mesh(name: str, *,
     return _finalise(bm, name)
 
 
+# ────────────────────────────────────────────────────────────────────
+# Trim-sheet UV helpers
+# ────────────────────────────────────────────────────────────────────
+#
+# A trim sheet (see tools/blender/build_trim_sheets.py) is a 1024×1024
+# texture packed into 8 horizontal strips. The strip legend matches
+# the Python builder:
+#
+#   0 (top)   windows
+#   1         kanji / vertical signage
+#   2         horizontal sign band
+#   3         concrete weathering streak
+#   4         brick / panel
+#   5         neon glow
+#   6         ledge / moulding
+#   7 (bot)   flat dark base
+#
+# Blender V increases upward in UV space, image V increases downward.
+# A strip index 0..7 occupies the V range [1 - (i+1)/8, 1 - i/8].
+
+TRIM_STRIPS: tuple[str, ...] = (
+    "windows", "kanji", "signage", "weathering",
+    "brick", "neon", "ledge", "base",
+)
+
+
+def _trim_strip_v_range(strip_idx: int) -> tuple[float, float]:
+    """Return (v_min, v_max) for the given strip on a Blender UV map."""
+    i = max(0, min(7, int(strip_idx)))
+    v_max = 1.0 - i / 8.0
+    v_min = 1.0 - (i + 1) / 8.0
+    return v_min, v_max
+
+
+def _set_face_uvs_to_strip(bm: bmesh.types.BMesh, faces: list[bmesh.types.BMFace],
+                            strip_idx: int, *, tile_u: float = 1.0,
+                            u_offset: float = 0.0) -> None:
+    """UV-map a set of faces onto a trim sheet strip. Each face gets the
+    same V band; U wraps across `tile_u` repeats. Vertex order around
+    the face is preserved — for a box face this means the texture
+    appears un-rotated regardless of which cube side the face is on."""
+    uv_layer = bm.loops.layers.uv.verify()
+    v_min, v_max = _trim_strip_v_range(strip_idx)
+    for face in faces:
+        # Each face's loops walk its vertices in order. Map them to a
+        # 0..tile_u × v_min..v_max box. We use loop index modulo 4 for
+        # quads (any face count works the same way).
+        n = len(face.loops)
+        for li, loop in enumerate(face.loops):
+            t = li / max(1, n - 1)
+            loop[uv_layer].uv = (
+                (u_offset + t * tile_u) % 1.0,
+                v_min if (li < n // 2) else v_max,
+            )
+
+
+def _new_face_indices(bm: bmesh.types.BMesh, pre_face_count: int) -> list[bmesh.types.BMFace]:
+    """Faces added since ``pre_face_count``. Helper for incremental
+    UV stamping after a ``_append_box`` / ``_append_cone`` call."""
+    bm.faces.ensure_lookup_table()
+    return [bm.faces[i] for i in range(pre_face_count, len(bm.faces))]
+
+
+def build_drowned_facade_trimmed_mesh(name: str, *,
+                                      style: str = "tokyo",
+                                      width: float = 24.0,
+                                      height: float = 80.0,
+                                      depth: float = 3.0) -> bpy.types.Mesh:
+    """Trim-sheet variant of ``build_drowned_facade_mesh``. Single
+    material slot; per-face UVs select the strip that paints each
+    surface. Much cheaper geometry than the multi-slot version (no
+    per-window box meshes — windows are painted on the slab via UVs).
+
+    Currently only ``style="tokyo"`` is wired; other styles fall back
+    to the multi-slot builder's pattern via the legacy function until
+    their own trim sheets land.
+    """
+    if style != "tokyo":
+        # Fall through to the legacy builder. Authors can opt back in
+        # by passing ``use_trim_sheet=False``.
+        return build_drowned_facade_mesh(name, style=style, width=width,
+                                         height=height, depth=depth)
+    bm = bmesh.new()
+
+    # ── Main slab ────────────────────────────────────────────────
+    # 6 faces: bottom, top, -Y (back), +Y (front), -X, +X. The +Y/-Y
+    # faces become the dense window grid (strip 0). The +X/-X side
+    # faces become weathering strips. Top/bottom are the flat base.
+    pre = len(bm.faces)
+    _append_box(bm, sx=width, sy=depth, sz=height, tz=height / 2)
+    slab_faces = _new_face_indices(bm, pre)
+    # bmesh's create_cube emits faces in this order via bmesh.ops:
+    # bottom (-Z), top (+Z), -Y, +Y, -X, +X — but `_append_box` calls
+    # `create_cube` then scales/translates, so the order is preserved.
+    # We tile the window grid 5 across × 20 tall on each front face.
+    win_tile_u = 5.0
+    _set_face_uvs_to_strip(bm, [slab_faces[3]], strip_idx=0, tile_u=win_tile_u)   # +Y windows
+    _set_face_uvs_to_strip(bm, [slab_faces[2]], strip_idx=0, tile_u=win_tile_u)   # -Y windows
+    _set_face_uvs_to_strip(bm, [slab_faces[4]], strip_idx=3)                       # -X weathering
+    _set_face_uvs_to_strip(bm, [slab_faces[5]], strip_idx=3)                       # +X weathering
+    _set_face_uvs_to_strip(bm, [slab_faces[0], slab_faces[1]], strip_idx=7)        # bottom + top base
+
+    # ── Top-band signage shelf ───────────────────────────────────
+    # Slightly wider than the slab, sitting on top — gets the horizontal
+    # sign band strip on its long sides, base on top/bottom.
+    pre = len(bm.faces)
+    _append_box(bm, sx=width + 0.6, sy=depth + 0.4, sz=2.0, tz=height + 1.0)
+    shelf_faces = _new_face_indices(bm, pre)
+    _set_face_uvs_to_strip(bm, [shelf_faces[2], shelf_faces[3]], strip_idx=2)      # ±Y signage
+    _set_face_uvs_to_strip(bm, [shelf_faces[4], shelf_faces[5]], strip_idx=2)      # ±X signage
+    _set_face_uvs_to_strip(bm, [shelf_faces[0], shelf_faces[1]], strip_idx=7)      # bottom + top base
+
+    # ── Vertical kanji strip on +X side ──────────────────────────
+    pre = len(bm.faces)
+    _append_box(bm, sx=0.5, sy=depth * 0.4, sz=height * 0.6,
+                tx=width * 0.45, ty=depth * 0.5,
+                tz=height * 0.5)
+    kanji_faces = _new_face_indices(bm, pre)
+    # All faces of the protruding kanji slab → kanji strip.
+    _set_face_uvs_to_strip(bm, kanji_faces, strip_idx=1)
+
+    # ── Neon ledge trim at the very top of the shelf ─────────────
+    pre = len(bm.faces)
+    _append_box(bm, sx=width + 0.8, sy=depth + 0.6, sz=0.4, tz=height + 2.4)
+    neon_faces = _new_face_indices(bm, pre)
+    # Sides only get the neon strip; top + bottom go to the base.
+    _set_face_uvs_to_strip(bm, [neon_faces[2], neon_faces[3],
+                                 neon_faces[4], neon_faces[5]], strip_idx=5)
+    _set_face_uvs_to_strip(bm, [neon_faces[0], neon_faces[1]], strip_idx=7)
+
+    # All faces use material slot 0 (the trim-sheet material). Default
+    # for new faces is 0, so no per-face material_index writes needed.
+    return _finalise(bm, name)
+
+
 def build_glass_tank_broken_mesh(name: str, *,
                                  sx: float = 20.0,
                                  sy: float = 14.0,
@@ -1229,6 +1408,15 @@ def build_landmarks() -> dict[str, dict]:
     mat_facade_nyc_trim   = make_material("mat_facade_nyc_trim",  "#3a2c20", roughness=0.7)
     mat_facade_window     = make_material("mat_facade_window",    "#1c2a30", roughness=0.2,
                                           emission_hex="#ffc77a", emission_strength=0.6)
+    # Trim-sheet materials — one per biome. The texture lives at
+    # public/assets/landmarks/trim_<biome>.png (built by
+    # tools/blender/build_trim_sheets.py). Each variant landmark UV-maps
+    # the right strip onto its faces; one material covers every face.
+    trim_tokyo_path = os.path.join(REPO_ROOT, "public", "assets", "landmarks",
+                                   "trim_tokyo_neon.png")
+    mat_facade_trim_tokyo = make_trim_sheet_material(
+        "mat_landmark_trim_tokyo", trim_tokyo_path, roughness=0.5,
+    )
     # Glass tank — emissive shard family + intact glass.
     mat_glass_shard       = make_material("mat_landmark_glass_shard","#9ed7d5", roughness=0.2,
                                           emission_hex="#cdf2f0", emission_strength=0.4)
@@ -1355,6 +1543,14 @@ def build_landmarks() -> dict[str, dict]:
             catalog="Hoverbike/Landmarks/Facades",
             description="Manhattan rooftop. 30 m × 90 m brownstone-ish slab with two procedural water-tower clusters on the roof. Stamp across the Liberty Drowned approach for the receding mid-town skyline.",
             tags=["facade", "nyc", "manhattan", "rooftop", "landmark"],
+        ),
+        dict(
+            name="landmark_drowned_facade_tokyo_trim",
+            mesh_builder=lambda n: build_drowned_facade_trimmed_mesh(n, style="tokyo", width=24.0, height=80.0),
+            materials=[mat_facade_trim_tokyo],
+            catalog="Hoverbike/Landmarks/Facades",
+            description="Trim-sheet variant of the Shibuya tower face. Single material (mat_landmark_trim_tokyo) — windows, kanji, signage, weathering, neon, and ledges are all painted from public/assets/landmarks/trim_tokyo_neon.png via per-face UVs. Lighter geometry than the multi-slot variant (no per-window box meshes). Authors can drop multiple instances + tint the BSDF for variety.",
+            tags=["facade", "tokyo", "shibuya", "neon", "trim-sheet", "landmark"],
         ),
         dict(
             name="landmark_glass_tank_broken",
