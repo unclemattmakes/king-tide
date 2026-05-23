@@ -371,8 +371,19 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
             spacing = float(getattr(scn, "hoverbike_gate_spacing", DEFAULT_GATE_SPACING_M))
             half_w = float(getattr(scn, "hoverbike_gate_half_width", 14.0))
             height = float(getattr(scn, "hoverbike_gate_height", 8.0))
+            # Align gate 0 with the bike's t-anchor when the grid is
+            # bound to the spline — same logic the live preview uses.
+            # Keeps the exported gate[0] coincident with the starting
+            # line, which is the runtime's isFinishLine reference.
+            align_t = (
+                float(getattr(scn, "hoverbike_start_t", 0.0))
+                if bool(getattr(scn, "hoverbike_start_bound_to_spline", False))
+                else 0.0
+            )
             points = _sample_curve_to_polyline(main_spline)
-            placements = _resample_by_arc_length(points, spacing, vertical_axis=2)
+            placements = _resample_by_arc_length(
+                points, spacing, vertical_axis=2, start_t=align_t,
+            )
             for i, p in enumerate(placements):
                 px, py, pz = p["position"]
                 tx, ty, _ = p["tangent"]
