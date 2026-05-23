@@ -2539,6 +2539,22 @@ export function createWaterMesh(
   const outerBody = mix(outerDeep, outerScatter, outerHeightFactor.mul(float(0.4))).mul(outerShade)
   const outerColorNode = mix(outerBody, horizonHazeUniform, outerAerialMix)
 
+  // Hide the outer tile inside the center mesh's 480 m × 480 m footprint.
+  // The center is a child plane at the same origin (parented through
+  // `mesh`), so both meshes' `positionLocal` share the same camera-locked
+  // frame: the center covers |x| ≤ 240, |z| ≤ 240. Without this fade the
+  // outer's coarse 5.6 m-per-vertex triangles linearly interpolate the
+  // Gerstner field between sparse vertex samples, which overshoots the
+  // true (curved) wave surface in the gaps between crests — and since the
+  // outer is opaque + writes depth in the opaque pass, those overshoots
+  // beat the (transparent, drawn-later) center mesh's depth test and bleed
+  // through as bright wave-trough patches across the entire near field.
+  // Ramping opacity 0 → 1 across a 40 m band straddling the center's edge
+  // lets the outer fully take over past the center's footprint while never
+  // competing with the center inside it.
+  const outerBoxCoord = max(positionLocal.x.abs(), positionLocal.z.abs())
+  const outerOpacityNode = smoothstep(float(220), float(260), outerBoxCoord)
+
   const outerMat = new MeshBasicNodeMaterial({
     // Scene fog still applies — between the outer's far rim (≈720 m
     // cardinal, ≈1018 m diagonal) and the fog-far at 2200 m the linear
@@ -2547,10 +2563,16 @@ export function createWaterMesh(
     // and skirt dissolve into.
     fog: true,
     side: THREE.FrontSide,
+    // See the `outerOpacityNode` comment above — transparent + depthWrite
+    // off so the outer never wins a depth test against the higher-detail
+    // center mesh in the overlap zone.
+    transparent: true,
+    depthWrite: false,
   })
   outerMat.name = 'water-outer'
   outerMat.positionNode = outerPositionNode
   outerMat.colorNode = outerColorNode
+  outerMat.opacityNode = outerOpacityNode
 
   const outerMesh = new THREE.Mesh(outerGeom, outerMat as unknown as THREE.Material)
   outerMesh.name = 'water-outer'
@@ -2560,10 +2582,11 @@ export function createWaterMesh(
   // out, the outer tile is well past anything that could cast a shadow
   // on it. Skip the cascade sample entirely.
   outerMesh.receiveShadow = false
-  // Below center (default 0) and above the skirt (-2). Opaque material
-  // means depth gets written and any transparent layer drawn after
-  // (the skirt or the center's transparent pass) gets correctly culled
-  // behind the outer's wave silhouette.
+  // Renders in the transparent pass (we made the material transparent so
+  // it can fade out inside the center's footprint). Sits between the
+  // skirt (-2) and the center (default 0) so back-to-front blending
+  // produces skirt → outer → center in the donut where all three
+  // overlap, and outer → center where only those two do.
   outerMesh.renderOrder = -1
   mesh.add(outerMesh)
 
