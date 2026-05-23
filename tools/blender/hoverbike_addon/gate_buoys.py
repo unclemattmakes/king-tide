@@ -357,9 +357,15 @@ def _maybe_build_buoys_from_samples(
     _wipe_buoys()
 
     sea_level = float(getattr(scene, "hoverbike_water_height", 0.0))
+    # water_preview counts as water-authoring evidence too. Earlier
+    # versions only honoured water_volume_main + non-zero sea level,
+    # which silently disabled buoys on the modern "water_preview-only"
+    # scenes the Water sub-panel produces — same bug we already
+    # patched in snap_starts_to_spline.
     has_water = (
         sea_level != 0.0
         or bpy.data.objects.get("water_volume_main") is not None
+        or bpy.data.objects.get("water_preview") is not None
     )
     enable = bool(getattr(scene, "hoverbike_gate_buoys_enabled", True))
     if not (enable and has_water) or not samples:
@@ -475,11 +481,15 @@ class HOVERBIKE_OT_rebuild_buoys(Operator):
         if result is None:
             scene = context.scene
             sea = float(getattr(scene, "hoverbike_water_height", 0.0))
-            has_water = sea != 0.0 or bpy.data.objects.get("water_volume_main") is not None
+            has_water = (
+                sea != 0.0
+                or bpy.data.objects.get("water_volume_main") is not None
+                or bpy.data.objects.get("water_preview") is not None
+            )
             if not has_water:
                 self.report(
                     {"WARNING"},
-                    "No buoys built — set Sea level (Water panel) or add a water volume.",
+                    "No buoys built — set Sea level (Water panel) or rebuild the water preview.",
                 )
             elif _resolve_buoy_curve() is None:
                 self.report(
