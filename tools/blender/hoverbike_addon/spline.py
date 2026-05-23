@@ -686,10 +686,21 @@ class HOVERBIKE_OT_reverse_spline(Operator):
             n_splines += 1
 
         # update_tag on the curve datablock so the depsgraph fires the
-        # is_updated_geometry signal — handlers.py's watch on
-        # ai_spline_main then schedules the dependent rebuilds (gates,
-        # turns, helper, road, buoys).
+        # is_updated_geometry signal on next eval. AND explicitly
+        # schedule the dependent rebuilds via the handlers debounce
+        # timer — relying on the depsgraph signal alone proved
+        # unreliable when the gate-preview collection had been built
+        # before the reverse (the handler picked up the tag late or
+        # not at all, leaving gate_preview_NN frozen at pre-reverse
+        # positions). Direct schedule is idempotent with the depsgraph
+        # path and guarantees a rebuild on the next 0.2 s tick.
         sp.data.update_tag()
+        try:
+            from . import handlers as _handlers
+            for kind in ("gates", "turns", "helper", "road", "buoys", "racer"):
+                _handlers._schedule_rebuild(kind)
+        except (ImportError, AttributeError):
+            pass
 
         # Re-anchor + re-snap the starts at the same physical gate but
         # with the new tangent. Force-binds to the spline at the new t
