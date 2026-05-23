@@ -598,6 +598,7 @@ class HOVERBIKE_PT_track_spline(_SelectionDrivenPanel, Panel):
 
         layout.prop(scene, "hoverbike_snap_hover_height", text="Hover (m)")
         layout.operator("hoverbike.snap_spline_to_terrain", icon="SNAP_FACE")
+        layout.operator("hoverbike.reverse_spline", icon="LOOP_BACK")
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_placement_t", text="t")
         row.operator("hoverbike.cursor_snap_to_spline", text="Cursor →", icon="PIVOT_CURSOR")
