@@ -142,6 +142,11 @@ In `applyGroundBranch`:
   (off = silent, subtle = half-level skid). The boost reward itself
   is applied in the sim, so a frame-dropped whoosh never costs the
   player the actual mini-turbo.
+- **Speed lines on release** — `pumpFx.speedLines(tier/3)` flashes
+  cool-white streaks (the `pf-drift` overlay variant, distinct from
+  the wave-pump's warm/cyan tiers and lighter — no FOV punch or
+  camera shake) when the mini-turbo fires. Reach scales with tier.
+  Gated by `driftIntensity`; CSS `reduced-flash` hides it.
 
 ### Anti-snake
 
