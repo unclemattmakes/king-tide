@@ -70,17 +70,20 @@ keeps its priority.
 - Charge ticks only while committed; counter-steer pauses (but doesn't
   cancel) the charge.
 
-### Charge tiers — two tiers (purple UMT deferred)
+### Charge tiers — three tiers (MT8DX parity)
 
 | Tier | Color | Charge time | Boost mult | Duration |
 |---|---|---|---|---|
 | 0 | none | < 0.6 s | — | — |
 | 1 (MT) | blue | 0.6–1.4 s | 1.30× | 0.8 s |
-| 2 (SMT) | orange | ≥ 1.4 s | 1.55× | 1.4 s |
+| 2 (SMT) | orange | 1.4–2.4 s | 1.55× | 1.4 s |
+| 3 (UMT) | purple | ≥ 2.4 s | 1.80× | 2.0 s |
 
 Tuning targets a clear "this paid off" feel without breaking topSpeed
 balance. `topSpeed × 1.55 = ~43.4 m/s`, comparable to a mid-strength
-boost pad.
+boost pad. The UMT tier is only reachable on long sweeping corners
+(the SE→SW→NW arc on the Drift Practice Range, for instance) — a
+casual hold lands on SMT.
 
 ### Boost delivery
 
@@ -106,9 +109,13 @@ In `applyGroundBranch`:
 
 ### Game feel — render layer
 
-- **Camera roll** of ~5° toward the drift direction, eased over ~150 ms.
-- **Particle sparks** from rear hover probes — white at tier 0, blue at
-  tier 1, orange at tier 2. Uses the existing 16-cell atlas.
+- **Camera roll** of ~5° / 7° / 9° toward the drift direction (tier 1
+  / 2 / 3), eased over ~150 ms.
+- **Drift sparks** from the outside-rear corner of the bike — three
+  layered pools in `src/engine/render/fx/index.ts`:
+  - blue (MT) — fires whenever `highestTier >= 1`
+  - orange (SMT) — added on top once `highestTier >= 2`
+  - purple (UMT) — added on top once `highestTier >= 3`
 - **HUD** — boost-meter widget already exists; drift-charge could be a
   thin secondary ring later (deferred).
 
@@ -121,14 +128,21 @@ In `applyGroundBranch`:
   wiggle-snake (which doesn't work here anyway given the time-based
   charging).
 
-### Bike archetypes (Phase 3, deferred)
+### Bike archetypes — inside vs outside drift
 
-Add `driftStyle?: 'outward' | 'inward'` to `BikeStatsData`:
-- **Outward** (Cruiser, Racer, Scout): MK-default, hugs the apex.
+`BikeStatsData.driftStyle` is the per-variant knob:
+
+- **Outward** (Cruiser, Racer, Scout — `driftStyle` undefined): MK-
+  default, hugs the apex with a stable flat-bias arc.
 - **Inward** (Sparrow, Stunt): sport-bike feel — tighter initial cut,
-  wider overall arc. +20 % initial yaw spike, −20 % sustained yaw.
+  wider overall arc. +20 % yaw bias spike for the first
+  `INWARD_INITIAL_WINDOW_S` (250 ms), then −20 % for the rest of the
+  drift. Combined with the Sparrow's 5.5 turnTorque (vs the 4.0
+  default), the initial cut is dramatic.
 
-Phase 3 work; not in initial M9.41 cut.
+Tuning constants live in `hover.ts` (`INWARD_INITIAL_BIAS_MUL`,
+`INWARD_TAIL_BIAS_MUL`, `INWARD_INITIAL_WINDOW_S`). Variants in
+`src/game/bikes/variants.ts` opt in via `driftStyle: 'inward'`.
 
 ## Implementation map
 
@@ -150,17 +164,26 @@ Phase 3 work; not in initial M9.41 cut.
 |---|---|---|---|
 | Tier 1 charge threshold | `TIER_1_THRESHOLD_S` in `drift.ts` | 0.6 s | 0.3–1.0 s — lower = easier MTs |
 | Tier 2 charge threshold | `TIER_2_THRESHOLD_S` | 1.4 s | 1.0–2.0 s |
+| Tier 3 (UMT) charge threshold | `TIER_3_THRESHOLD_S` | 2.4 s | 2.0–3.0 s |
 | Tier 1 boost multiplier | `DRIFT_BOOST_MUL_T1` | 1.30 | 1.15–1.45 |
 | Tier 2 boost multiplier | `DRIFT_BOOST_MUL_T2` | 1.55 | 1.40–1.75 |
+| Tier 3 boost multiplier | `DRIFT_BOOST_MUL_T3` | 1.80 | 1.65–1.95 |
 | Tier 1 boost duration | `DRIFT_BOOST_DURATION_T1` | 0.8 s | 0.5–1.2 s |
 | Tier 2 boost duration | `DRIFT_BOOST_DURATION_T2` | 1.4 s | 1.0–1.8 s |
-| Lateral-drag scale while drifting | `DRIFT_LATERAL_DRAG_SCALE` | 0.35 | 0.2–0.6 — lower = more slide |
+| Tier 3 boost duration | `DRIFT_BOOST_DURATION_T3` | 2.0 s | 1.6–2.5 s |
+| Lateral-drag scale while drifting | `DRIFT_LATERAL_DRAG_SCALE` in `hover.ts` | 0.35 | 0.2–0.6 — lower = more slide |
 | Drift yaw bias (× turnTorque) | `DRIFT_YAW_BIAS_FRAC` | 0.7 | 0.5–0.9 |
 | Player steer authority while drifting | `DRIFT_STEER_FRAC` | 0.4 | 0.2–0.6 |
+| Inward-drift spike window | `INWARD_INITIAL_WINDOW_S` | 0.25 s | 0.15–0.40 s |
+| Inward-drift spike scale | `INWARD_INITIAL_BIAS_MUL` | 1.2 | 1.1–1.4 |
+| Inward-drift tail scale | `INWARD_TAIL_BIAS_MUL` | 0.8 | 0.6–0.9 |
 | Ungrounded-cancel timeout | `UNGROUNDED_CANCEL_S` | 0.3 s | — |
 | Steer-commit threshold | `STEER_COMMIT_THRESHOLD` | 0.1 | — |
 | Drift cooldown after release | `DRIFT_COOLDOWN_S` | 0.25 s | — |
-| Camera roll on drift (render) | `DRIFT_CAMERA_ROLL_RAD` | 5° | 0–10° |
+| Camera roll on drift, T1/T2/T3 | `game-loop.ts` | 5° / 7° / 9° | 0–12° |
+| Drift spark rate (blue MT) | `DRIFT_SPARK_RATE_T1` in `fx/index.ts` | 70 /s | 40–120 /s |
+| Drift spark rate (orange SMT) | `DRIFT_SPARK_RATE_T2` | 110 /s | 60–150 /s |
+| Drift spark rate (purple UMT) | `DRIFT_SPARK_RATE_T3` | 90 /s | 60–130 /s |
 
 ## Validating the implementation — the Drift Practice Range
 
@@ -194,10 +217,13 @@ inadvertent JSON edit can't silently break a station.
 3. **Surface-aware drift.** Currently uniform on land + water. Could
    make water-drift slipper / land-drift grippier. Deferred until the
    surface-type tagging system exists.
-4. **Inside-drift archetype.** Sparrow + Stunt as sport-bike variants.
-   Phase 3, not in initial cut.
-5. **UMT (purple) third tier.** Only enable once base tuning settles
-   from playtest data.
+4. **Skid audio.** Continuous tire-scrape loop while drifting, pitch
+   modulated by speed; one-shot whoosh on release scaled by tier.
+   Hook lives next to `audio.wavePump()`. (Deferred.)
+5. **HUD tier ring.** A thin colored ring around the boost-meter
+   widget that progresses blue → orange → purple in lock-step with
+   `DriftState.highestTier`. Reads the same color language as the
+   sparks. (Deferred.)
 
 ## References
 

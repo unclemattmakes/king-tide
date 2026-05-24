@@ -2,6 +2,7 @@ import { hasComponent, query } from 'bitecs'
 import * as THREE from 'three'
 import { attribute, texture as tslTexture } from 'three/tsl'
 import { SpriteNodeMaterial } from 'three/webgpu'
+import { playerSettings } from '@/engine/player-settings'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
@@ -9,6 +10,7 @@ import {
   BikeTag,
   ControlIntent,
   ControlIntentStore,
+  DriftStateStore,
   HoverState,
   HoverStateStore,
   RBHandle,
@@ -24,6 +26,7 @@ import {
   MissileStateStore,
   MissileTag,
 } from '@/game/components/combat'
+
 /**
  * Hand-rolled particle FX driven by TSL node materials.
  *
@@ -113,6 +116,12 @@ const MISSILE_TRAIL_RATE = 35 // particles/sec per missile
 const STERN_OFFSET = new THREE.Vector3(0, 0.1, -1.4)
 const SPARK_OFFSET = new THREE.Vector3(0, -0.2, 0)
 const EXHAUST_OFFSET = new THREE.Vector3(0, -0.2, -1.6)
+// Drift sparks fire from the two rear underside corners while the
+// player is committed to a drift — the visual reads as "tyres skidding
+// across the surface." Two offsets so blue and orange both come from
+// the outside-rear corner, the canonical MK kart spark point.
+const DRIFT_SPARK_OFFSET_PORT = new THREE.Vector3(-0.45, -0.2, -1.2)
+const DRIFT_SPARK_OFFSET_STARBOARD = new THREE.Vector3(0.45, -0.2, -1.2)
 
 // Pool capacities — sized for ~5–8 bikes at full emission. Foam drifts
 // longer (lifetime ~1 s, rate ~80/s → ~80 alive per bike), so 480 covers
@@ -134,6 +143,25 @@ const EXPLOSION_CAPACITY = 240
 // Missile trail: continuous emission along missile path. ~30/s × 0.6 s
 // life × up to 4 missiles in flight = ~72 peak; 200 covers boost cases.
 const MISSILE_CAPACITY = 200
+
+// Drift sparks — two pools (blue + orange) that emit while the player
+// holds a committed drift, with the tier on `DriftState.highestTier`
+// switching color. Tier 0 emits nothing (no commitment yet). Tier 1+
+// emits blue; tier 2+ also emits the brighter orange burst layered on
+// top so the SMT tier-up reads as a visible boost in spark density.
+// Rate is constant per tier rather than speed-modulated — the player
+// already knows they're drifting; the spark cue is for the CHARGE
+// state, not the speed.
+const DRIFT_SPARK_RATE_T1 = 70 // particles/sec while drifting at blue tier
+const DRIFT_SPARK_RATE_T2 = 110 // particles/sec extra layered at orange tier
+const DRIFT_SPARK_RATE_T3 = 90 // particles/sec extra layered at purple UMT tier
+const DRIFT_SPARK_LIFE_MIN = 0.18
+const DRIFT_SPARK_LIFE_MAX = 0.45
+// Pool capacities tuned for two-bike peak emission: tier 2 emits
+// ~110/s × 0.45 s = ~50 alive per bike × 2 = 100; 160 leaves headroom.
+const DRIFT_SPARK_BLUE_CAPACITY = 160
+const DRIFT_SPARK_ORANGE_CAPACITY = 160
+const DRIFT_SPARK_PURPLE_CAPACITY = 120
 
 // Plunge bubbles — thick cloud that boils around a bike/rider when they
 // punch through the water surface, choking off at the apex of the dive
@@ -412,6 +440,39 @@ export function createFxSystem(
     gravity: -16,
     drag: 0.8,
   })
+  // Drift sparks — three pools, one per mini-turbo tier. Blue is the
+  // MT base layer; orange + purple stack on top at the higher tiers so
+  // a player visually reads SMT / UMT as "more colored sparks."
+  // Additive blending so the colors stay punchy against the bike's
+  // shadow. Smaller default size than the scrape spark — drift sparks
+  // are a flurry of small flecks, not a single arc.
+  const driftSparkBlueTex = makeRadialTexture([110, 180, 255])
+  const driftSparkOrangeTex = makeRadialTexture([255, 180, 90])
+  const driftSparkPurpleTex = makeRadialTexture([220, 130, 255])
+  const driftSparksBlue = createPool({
+    capacity: DRIFT_SPARK_BLUE_CAPACITY,
+    defaultSize: 0.22,
+    texture: driftSparkBlueTex,
+    blending: THREE.AdditiveBlending,
+    gravity: -10,
+    drag: 1.2,
+  })
+  const driftSparksOrange = createPool({
+    capacity: DRIFT_SPARK_ORANGE_CAPACITY,
+    defaultSize: 0.26,
+    texture: driftSparkOrangeTex,
+    blending: THREE.AdditiveBlending,
+    gravity: -10,
+    drag: 1.2,
+  })
+  const driftSparksPurple = createPool({
+    capacity: DRIFT_SPARK_PURPLE_CAPACITY,
+    defaultSize: 0.3,
+    texture: driftSparkPurpleTex,
+    blending: THREE.AdditiveBlending,
+    gravity: -10,
+    drag: 1.2,
+  })
   const exhaust = createPool({
     capacity: EXHAUST_CAPACITY,
     defaultSize: 0.45,
@@ -464,6 +525,9 @@ export function createFxSystem(
 
   scene.add(foam.mesh)
   scene.add(sparks.mesh)
+  scene.add(driftSparksBlue.mesh)
+  scene.add(driftSparksOrange.mesh)
+  scene.add(driftSparksPurple.mesh)
   scene.add(exhaust.mesh)
   scene.add(dust.mesh)
   scene.add(explosion.mesh)
@@ -485,7 +549,15 @@ export function createFxSystem(
   // when it crosses a whole particle.
   const emitAccum = new Map<
     number,
-    { foam: number; sparks: number; exhaust: number; dust: number }
+    {
+      foam: number
+      sparks: number
+      exhaust: number
+      dust: number
+      driftBlue: number
+      driftOrange: number
+      driftPurple: number
+    }
   >()
 
   // Per-bike transition memory for event-driven bursts. We need the
@@ -607,7 +679,15 @@ export function createFxSystem(
 
       let acc = emitAccum.get(eid)
       if (!acc) {
-        acc = { foam: 0, sparks: 0, exhaust: 0, dust: 0 }
+        acc = {
+          foam: 0,
+          sparks: 0,
+          exhaust: 0,
+          dust: 0,
+          driftBlue: 0,
+          driftOrange: 0,
+          driftPurple: 0,
+        }
         emitAccum.set(eid, acc)
       }
 
@@ -866,6 +946,111 @@ export function createFxSystem(
         acc.sparks = 0
       }
 
+      // Drift sparks — fire while the bike is in active drift state.
+      // Three colored pools layer based on the highest tier reached
+      // this drift: blue from tier 1 (MT), orange added at tier 2
+      // (SMT), purple added at tier 3 (UMT). Gated by `driftIntensity`:
+      // 'off' → no sparks; 'subtle' → blue only at half rate; 'full'
+      // → all layers at full rate. Spawn origin is the rear-OUTSIDE
+      // corner of the bike for the canonical MK kart spark read —
+      // left drift fires from port-rear, right drift from starboard-
+      // rear. Ungrounded ticks (briefly airborne mid-drift) skip
+      // emission so the sparks don't streak through the air.
+      const drift = DriftStateStore.get(eid)
+      const intensity = playerSettings.driftIntensity
+      if (
+        drift &&
+        drift.driftDir !== 0 &&
+        drift.highestTier >= 1 &&
+        hover.isGrounded &&
+        intensity !== 'off'
+      ) {
+        // Outside-rear corner (port-rear for a left drift, starboard-
+        // rear for a right drift). Drift sparks fly inward + back to
+        // read as "skidding sideways."
+        const offset =
+          drift.driftDir === -1 ? DRIFT_SPARK_OFFSET_PORT : DRIFT_SPARK_OFFSET_STARBOARD
+        sparkWorld.copy(offset).applyQuaternion(tmpQuat).add(tmpPos)
+        const rateScale = intensity === 'subtle' ? 0.5 : 1.0
+
+        // Blue layer — tier 1+.
+        acc.driftBlue += DRIFT_SPARK_RATE_T1 * rateScale * dt
+        const nBlue = Math.floor(acc.driftBlue)
+        if (nBlue > 0) {
+          acc.driftBlue -= nBlue
+          emit(
+            driftSparksBlue,
+            sparkWorld.x,
+            sparkWorld.y,
+            sparkWorld.z,
+            0,
+            1,
+            0,
+            3,
+            DRIFT_SPARK_LIFE_MIN,
+            DRIFT_SPARK_LIFE_MAX,
+            driftSparksBlue.defaultSize * (0.7 + Math.random() * 0.6),
+            nBlue,
+          )
+        }
+
+        // Orange layer — tier 2+. Only emitted on 'full' intensity so
+        // 'subtle' players see the MT tier-up via boost feel rather
+        // than spark color, keeping the visual quieter.
+        if (drift.highestTier >= 2 && intensity === 'full') {
+          acc.driftOrange += DRIFT_SPARK_RATE_T2 * dt
+          const nOrange = Math.floor(acc.driftOrange)
+          if (nOrange > 0) {
+            acc.driftOrange -= nOrange
+            emit(
+              driftSparksOrange,
+              sparkWorld.x,
+              sparkWorld.y,
+              sparkWorld.z,
+              0,
+              1.5,
+              0,
+              4,
+              DRIFT_SPARK_LIFE_MIN,
+              DRIFT_SPARK_LIFE_MAX,
+              driftSparksOrange.defaultSize * (0.7 + Math.random() * 0.6),
+              nOrange,
+            )
+          }
+        } else {
+          acc.driftOrange = 0
+        }
+
+        // Purple UMT layer — tier 3, full intensity only.
+        if (drift.highestTier >= 3 && intensity === 'full') {
+          acc.driftPurple += DRIFT_SPARK_RATE_T3 * dt
+          const nPurple = Math.floor(acc.driftPurple)
+          if (nPurple > 0) {
+            acc.driftPurple -= nPurple
+            emit(
+              driftSparksPurple,
+              sparkWorld.x,
+              sparkWorld.y,
+              sparkWorld.z,
+              0,
+              2,
+              0,
+              5,
+              DRIFT_SPARK_LIFE_MIN,
+              DRIFT_SPARK_LIFE_MAX,
+              driftSparksPurple.defaultSize * (0.7 + Math.random() * 0.6),
+              nPurple,
+            )
+          }
+        } else {
+          acc.driftPurple = 0
+        }
+      } else {
+        acc.driftBlue = 0
+        acc.driftOrange = 0
+        acc.driftPurple = 0
+      }
+
       // Dust — rotor-wash kicked up while in the hover zone over land
       // but NOT scraping. Reads as fine particulate blowing radially
       // outward at ground level. Window:
@@ -1071,6 +1256,9 @@ export function createFxSystem(
 
     advance(foam, dt)
     advance(sparks, dt)
+    advance(driftSparksBlue, dt)
+    advance(driftSparksOrange, dt)
+    advance(driftSparksPurple, dt)
     advance(exhaust, dt)
     advance(dust, dt)
     advance(explosion, dt)

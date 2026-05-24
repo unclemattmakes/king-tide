@@ -171,6 +171,15 @@ export const DRIFT_YAW_BIAS_FRAC = 0.7
  *  still tightens or opens the line. */
 export const DRIFT_STEER_FRAC = 0.4
 
+/** Inside-drift "snap" window — duration of the initial bias spike
+ *  for `driftStyle: 'inward'` bikes. Within this window the drift
+ *  yaw bias is scaled by `INWARD_INITIAL_BIAS_MUL`; past it, the
+ *  scale drops to `INWARD_TAIL_BIAS_MUL` so the overall arc widens.
+ *  Read by the inward-drift branch in `applyGroundBranch`. */
+export const INWARD_INITIAL_WINDOW_S = 0.25
+export const INWARD_INITIAL_BIAS_MUL = 1.2
+export const INWARD_TAIL_BIAS_MUL = 0.8
+
 // Chassis pitch (relative to the surface tangent) safety clamp on the
 // dive side. The dive-kick taper above bounds steady-state tilt to a
 // small angle already; this limit is a backstop for momentum carried
@@ -1535,7 +1544,18 @@ function applyGroundBranch(
   let aTurn: number
   if (drifting) {
     const dir = drift.driftDir
-    const driftBias = -dir * DRIFT_YAW_BIAS_FRAC * stats.turnTorque
+    // Inside-drift archetype (Sparrow / Stunt) front-loads the bias:
+    // a +20% spike for the first INWARD_INITIAL_WINDOW_S so the cut
+    // into the apex is dramatic, then –20% for the rest of the drift
+    // so the overall arc widens. Outside-drift bikes (Cruiser / Racer
+    // / Scout, plus anything without an explicit style) use the flat
+    // baseline bias.
+    let archetypeMul = 1
+    if (stats.driftStyle === 'inward') {
+      archetypeMul =
+        drift.chargeS < INWARD_INITIAL_WINDOW_S ? INWARD_INITIAL_BIAS_MUL : INWARD_TAIL_BIAS_MUL
+    }
+    const driftBias = -dir * DRIFT_YAW_BIAS_FRAC * stats.turnTorque * archetypeMul
     const playerInput = -intent.steer * DRIFT_STEER_FRAC * stats.turnTorque
     aTurn = (driftBias + playerInput) * turnMul
   } else {

@@ -67,6 +67,23 @@ export type BikeStatsData = {
    */
   surfaceFollow: number
   /**
+   * Drift archetype — the MK lineage's two-flavor split:
+   *
+   *  - `'outward'` (default): traditional kart-style. The drift bias
+   *    pivots the bike *around* the corner with a stable arc. The
+   *    player can hold the apex tight by steering into the drift.
+   *  - `'inward'`: sport-bike style (MK8's Yoshi Bike etc). The
+   *    initial cut is sharper but the bike then sweeps wider, so the
+   *    line picks up speed faster but commits earlier. Implemented as
+   *    a brief +20% spike on the drift yaw bias for the first ~250 ms,
+   *    then –20% for the rest of the drift.
+   *
+   * Authoring lives on `BikeVariant.stats`. Sim reads via
+   * `applyGroundBranch` in `hover.ts`. Field is optional; absent =
+   * outward (default behaviour, preserves every existing bike's feel).
+   */
+  driftStyle?: 'outward' | 'inward'
+  /**
    * Render hint: the body color the bike mesh should use when no per-variant
    * GLB exists, or as a runtime tint of the GLB's livery material. Sim
    * layer ignores this field.

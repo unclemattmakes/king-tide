@@ -884,8 +884,9 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // Drift-roll: bank the chase camera into the corner while drifting.
     // Magnitude scales with the highest tier reached this drift so the
     // visual progression matches the audible payoff hierarchy
-    // (blue MT → orange SMT). Gated by `playerSettings.driftIntensity`:
-    //   - full:   ±5° at tier 1, ±7° at tier 2
+    // (blue MT → orange SMT → purple UMT). Gated by
+    // `playerSettings.driftIntensity`:
+    //   - full:   ±5° at tier 1, ±7° at tier 2, ±9° at tier 3
     //   - subtle: half magnitude — for motion-sensitive players who
     //             still want the directional cue
     //   - off:    zero — the mechanic still applies but no camera tell
@@ -894,7 +895,8 @@ export function startGameLoop(opts: GameLoopOpts): void {
       const intensity = playerSettings.driftIntensity
       let rollRad = 0
       if (drift && drift.driftDir !== 0 && intensity !== 'off') {
-        const baseRad = drift.highestTier >= 2 ? (7 * Math.PI) / 180 : (5 * Math.PI) / 180
+        const baseDeg = drift.highestTier >= 3 ? 9 : drift.highestTier >= 2 ? 7 : 5
+        const baseRad = (baseDeg * Math.PI) / 180
         const scalar = intensity === 'subtle' ? 0.5 : 1.0
         // Sign convention: driftDir=-1 (left drift) → positive roll
         // around the camera's local Z, which rotates the horizon
