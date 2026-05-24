@@ -93,6 +93,14 @@ export interface RaceIntro {
    *  broadcast-intro UI overlay to drive its stage transitions off the
    *  same timeline the camera uses. */
   elapsed(): number
+  /** Push the chase camera's live first-tick goal pose to the director.
+   *  The final shot (descent in full mode, the single shot in short mode)
+   *  lerps toward this instead of the statically-authored `chaseGoal` so
+   *  the handoff to the chase camera is invisible — at intro end, the
+   *  camera sits exactly where the chase cam will pick up. Cheap: copies
+   *  into internal scratch vectors. No-op until called; first call enables
+   *  the override for the remainder of the intro. */
+  setChaseRest(pos: THREE.Vector3, look: THREE.Vector3): void
 }
 
 /** Per-shot anchor pair — camera moves from `from` to `to`, looking
@@ -154,6 +162,16 @@ export function createRaceIntro(opts: RaceIntroOpts): RaceIntro {
   let correctionY = 0
   const tmpPos = new THREE.Vector3()
   const tmpLook = new THREE.Vector3()
+  // Live chase-cam rest pose, pushed in via `setChaseRest`. When set, the
+  // final shot's lerp target is overridden so the descent lands exactly
+  // where the chase cam will pick up — kills the handoff pop that came
+  // from the authored `chaseGoal` differing from the chase cam's actual
+  // first-tick goal (the cam's idealOffset is rotated by the bike's live
+  // quaternion + bike position, which the spawn yaw + spawn position only
+  // approximate once the hover spring has settled).
+  const chaseRestPos = new THREE.Vector3()
+  const chaseRestLook = new THREE.Vector3()
+  let chaseRestSet = false
 
   /** Apply terrain + waterline clearance to `pos` in-place. Pure UP-lift
    *  so the cinematic framing intent (overhead, skim, descent) survives.
@@ -206,8 +224,10 @@ export function createRaceIntro(opts: RaceIntroOpts): RaceIntro {
         // next caller check.
         const last = shots[shots.length - 1]
         if (last) {
-          tmpPos.copy(last.to)
-          tmpLook.copy(last.lookTo)
+          const settlePos = chaseRestSet ? chaseRestPos : last.to
+          const settleLook = chaseRestSet ? chaseRestLook : last.lookTo
+          tmpPos.copy(settlePos)
+          tmpLook.copy(settleLook)
           applyClearance(tmpPos, tmpLook, dt)
         }
         done = true
@@ -215,15 +235,22 @@ export function createRaceIntro(opts: RaceIntroOpts): RaceIntro {
       }
       // Walk the shot list to find which one we're in.
       let acc = 0
-      for (const shot of shots) {
+      for (let i = 0; i < shots.length; i++) {
+        const shot = shots[i]!
         if (elapsed < acc + shot.duration) {
           const localT = (elapsed - acc) / shot.duration
           const eased = smootherstep(localT)
-          tmpPos.lerpVectors(shot.from, shot.to, eased)
+          // Final shot lands on the live chase rest pose if the game
+          // loop has pushed one in — otherwise on the authored chase
+          // goal. Earlier shots always use their authored targets.
+          const isLastShot = i === shots.length - 1
+          const targetPos = isLastShot && chaseRestSet ? chaseRestPos : shot.to
+          const targetLook = isLastShot && chaseRestSet ? chaseRestLook : shot.lookTo
+          tmpPos.lerpVectors(shot.from, targetPos, eased)
           // Look-at point also eases between anchors — gives a smooth
           // tracking feel rather than a snap when one shot's lookTo
           // doesn't match the next shot's lookFrom.
-          tmpLook.lerpVectors(shot.lookFrom, shot.lookTo, eased)
+          tmpLook.lerpVectors(shot.lookFrom, targetLook, eased)
           applyClearance(tmpPos, tmpLook, dt)
           return
         }
@@ -257,6 +284,11 @@ export function createRaceIntro(opts: RaceIntroOpts): RaceIntro {
       // game loop reads after a `skip()` (which primes `elapsed` past
       // `totalDuration` so the next tick lands on the final shot).
       return Math.min(elapsed, totalDuration)
+    },
+    setChaseRest(pos, look) {
+      chaseRestPos.copy(pos)
+      chaseRestLook.copy(look)
+      chaseRestSet = true
     },
   }
 }

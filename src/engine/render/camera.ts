@@ -25,6 +25,18 @@ export type ChaseCamera = {
    *  on the same time-constant as the rest of the camera so flipping
    *  the player setting mid-anti-grav doesn't snap. */
   setAntiGravFollow(weight: number): void
+  /** Write the chase cam's first-tick goal pose for the given bike pose
+   *  into the caller-supplied output vectors. Pure read — does not touch
+   *  internal damping / orbit / follow state, so it's safe to call while
+   *  another camera owner (e.g. the race-intro director) is driving the
+   *  camera. Assumes orbit + follow at their defaults (0/0), matching
+   *  what the chase cam will compute on its very first `tick()`. */
+  goalPose(
+    targetPos: THREE.Vector3,
+    targetQuat: THREE.Quaternion,
+    outPos: THREE.Vector3,
+    outLook: THREE.Vector3,
+  ): void
 }
 
 /** Time constant for the follow-weight smoothing. Matches the
@@ -59,6 +71,7 @@ export function createChaseCamera(camera: THREE.PerspectiveCamera): ChaseCamera 
   const tmpOffsetFull = new THREE.Vector3()
   const tmpLookFull = new THREE.Vector3()
   const yawQuat = new THREE.Quaternion()
+  const goalYawQuat = new THREE.Quaternion()
 
   function compute(targetPos: THREE.Vector3, targetQuat: THREE.Quaternion) {
     // Yaw-only frame for the chase camera — the steady-state default.
@@ -131,6 +144,22 @@ export function createChaseCamera(camera: THREE.PerspectiveCamera): ChaseCamera 
       currentLook.copy(goalLook)
       camera.lookAt(currentLook)
       initialized = true
+    },
+    goalPose(targetPos, targetQuat, outPos, outLook) {
+      // Yaw-only frame at orbit=0 / follow=0 — what `tick()` computes on
+      // its very first call. Same math as `compute()` minus the orbit
+      // rotation, written into the caller's vectors without touching
+      // the internal `goalPos` / `goalLook` so this can be called from
+      // the intro director while it still owns the camera.
+      const qx = targetQuat.x
+      const qy = targetQuat.y
+      const qz = targetQuat.z
+      const qw = targetQuat.w
+      const yaw = Math.atan2(2 * (qx * qz + qy * qw), 1 - 2 * (qx * qx + qy * qy))
+      const halfYaw = yaw * 0.5
+      goalYawQuat.set(0, Math.sin(halfYaw), 0, Math.cos(halfYaw))
+      outPos.copy(idealOffset).applyQuaternion(goalYawQuat).add(targetPos)
+      outLook.copy(idealLookAhead).applyQuaternion(goalYawQuat).add(targetPos)
     },
   }
 }
