@@ -69,6 +69,30 @@ describe('DIFFICULTY_TUNING', () => {
     const hWidth = h.rubberBandBoostCap - h.rubberBandPenaltyFloor
     expect(cWidth).toBeLessThan(hWidth)
   })
+
+  it('Casual disables drift entirely; Standard < Hard on aggression', () => {
+    const c = DIFFICULTY_TUNING.casual
+    const s = DIFFICULTY_TUNING.standard
+    const h = DIFFICULTY_TUNING.hard
+    // Casual short-circuits via Infinity (same pattern as pumpVyThreshold).
+    expect(c.driftCurvatureThreshold).toBe(Number.POSITIVE_INFINITY)
+    expect(c.driftMinSpeed).toBe(Number.POSITIVE_INFINITY)
+    expect(c.driftMaxHoldS).toBe(0)
+    // Hard trigger envelope is wider — drifts on less-sharp corners
+    // (lower curvature threshold), at lower speeds, and holds longer
+    // to reach the purple UMT tier.
+    expect(h.driftCurvatureThreshold).toBeLessThan(s.driftCurvatureThreshold)
+    expect(h.driftMinSpeed).toBeLessThan(s.driftMinSpeed)
+    expect(h.driftMaxHoldS).toBeGreaterThan(s.driftMaxHoldS)
+  })
+
+  it('Standard hold ceiling falls short of UMT (2.4 s); Hard reaches it', () => {
+    // Mirrors the design-doc claim that purple UMT is the Hard-AI
+    // ceiling. Standard tops out at orange SMT (1.4 s threshold).
+    const TIER_3_THRESHOLD_S = 2.4
+    expect(DIFFICULTY_TUNING.standard.driftMaxHoldS).toBeLessThan(TIER_3_THRESHOLD_S)
+    expect(DIFFICULTY_TUNING.hard.driftMaxHoldS).toBeGreaterThanOrEqual(TIER_3_THRESHOLD_S)
+  })
 })
 
 describe('defaultAIController bake-in', () => {
@@ -96,6 +120,24 @@ describe('defaultAIController bake-in', () => {
     const c = defaultAIController('main', { difficulty: 'hard', lineOffset: 3.5 })
     expect(c.lineOffset).toBe(3.5)
     expect(c.baselineTopSpeedFactor).toBe(DIFFICULTY_TUNING.hard.baselineTopSpeedFactor)
+  })
+
+  it('bakes per-difficulty drift tuning onto the component', () => {
+    const c = defaultAIController('main', { difficulty: 'casual' })
+    expect(c.driftCurvatureThreshold).toBe(DIFFICULTY_TUNING.casual.driftCurvatureThreshold)
+    expect(c.driftMinSpeed).toBe(DIFFICULTY_TUNING.casual.driftMinSpeed)
+    expect(c.driftMaxHoldS).toBe(DIFFICULTY_TUNING.casual.driftMaxHoldS)
+    const h = defaultAIController('main', { difficulty: 'hard' })
+    expect(h.driftCurvatureThreshold).toBe(DIFFICULTY_TUNING.hard.driftCurvatureThreshold)
+    expect(h.driftMinSpeed).toBe(DIFFICULTY_TUNING.hard.driftMinSpeed)
+    expect(h.driftMaxHoldS).toBe(DIFFICULTY_TUNING.hard.driftMaxHoldS)
+  })
+
+  it('starts drift state cleared — fresh AI never spawns mid-drift', () => {
+    const c = defaultAIController('main', { difficulty: 'hard' })
+    expect(c.driftDir).toBe(0)
+    expect(c.driftHoldS).toBe(0)
+    expect(c.driftCooldownS).toBe(0)
   })
 })
 

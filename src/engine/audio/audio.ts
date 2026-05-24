@@ -64,6 +64,17 @@ export interface AudioEngine {
   /** Continuous: drives engine pitch + wind volume from the player bike
    *  speed. Call once per render frame. */
   tickEngine(speed: number): void
+  /** Continuous: drives the drift-skid scrape loop's level. Caller
+   *  passes 0..1 every render frame — typically `0` when the bike
+   *  isn't drifting and `speed / topSpeed` while a drift is active.
+   *  Internally smoothed via `setTargetAtTime` so toggling on/off
+   *  fades instead of clicking. */
+  driftSkid(intensity: number): void
+  /** One-shot: fires when a player drift releases with a charged
+   *  mini-turbo. `tier` (1/2/3) drives the bell pitch + whoosh
+   *  brightness so blue MT, orange SMT, and purple UMT each read
+   *  as distinct payoffs. */
+  driftBoost(tier: number): void
   /** A bike (any bike) just put a pickup into its slot. */
   pickupCollect(): void
   /** A bike (any bike) just consumed its slot. `type` selects the SFX. */
@@ -125,6 +136,13 @@ export function createAudioEngine(): AudioEngine {
   let engineGain: GainNode | null = null
   let windFilter: BiquadFilterNode | null = null
   let windGain: GainNode | null = null
+  // Drift-skid continuous layer: filtered noise band-passed in the
+  // ~2.6 kHz range for a "scraping" character. Per-frame intensity
+  // (0..1) is multiplied into `driftSkidGain` via setTargetAtTime
+  // so the loop fades cleanly when drift starts / ends. Started
+  // once on first unlock; intensity 0 = effectively muted.
+  let driftSkidFilter: BiquadFilterNode | null = null
+  let driftSkidGain: GainNode | null = null
 
   // Per-track audio palette state. Held so the boot wiring can swap
   // tracks at runtime (track-change, return-to-menu, replays) without
@@ -133,7 +151,7 @@ export function createAudioEngine(): AudioEngine {
   // gesture unlocks the engine.
   let trackMusic: { source: AudioBufferSourceNode; gain: GainNode } | null = null
   let trackAmbient: { source: AudioBufferSourceNode; gain: GainNode }[] = []
-  let trackAudioConfig: AudioConfig | undefined = undefined
+  let trackAudioConfig: AudioConfig | undefined
   let pendingTrackAudio: { config: AudioConfig | undefined } | null = null
   const decodedAudioCache = new Map<string, AudioBuffer | null>()
 
@@ -215,6 +233,24 @@ export function createAudioEngine(): AudioEngine {
     windFilter.connect(windGain)
     windGain.connect(sfxBus)
     windNoise.start()
+
+    // Drift skid — looping noise through a tight bandpass at ~2.6 kHz
+    // for a tyre-scrape character. Distinct band from wind (1.5 kHz)
+    // so the two layers don't mask each other when drifting at speed.
+    // Idle at zero gain; `driftSkid(intensity)` ramps in/out.
+    const driftNoise = ctx.createBufferSource()
+    driftNoise.buffer = noiseBuffer
+    driftNoise.loop = true
+    driftSkidFilter = ctx.createBiquadFilter()
+    driftSkidFilter.type = 'bandpass'
+    driftSkidFilter.frequency.value = 2600
+    driftSkidFilter.Q.value = 1.4
+    driftSkidGain = ctx.createGain()
+    driftSkidGain.gain.value = 0
+    driftNoise.connect(driftSkidFilter)
+    driftSkidFilter.connect(driftSkidGain)
+    driftSkidGain.connect(sfxBus)
+    driftNoise.start()
 
     // Ambient water: filtered low rumble, fixed quiet level. Rides
     // the ambient bus.
@@ -468,6 +504,65 @@ export function createAudioEngine(): AudioEngine {
       // Wind kicks in past ~30% top speed and grows quadratically.
       const targetWindGain = u * u * 0.16
       windGain.gain.setTargetAtTime(targetWindGain, now, 0.05)
+    },
+
+    driftSkid(intensity: number) {
+      if (!ctx || !driftSkidGain || !driftSkidFilter) return
+      const u = Math.max(0, Math.min(1, intensity))
+      const now = ctx.currentTime
+      // Cap below wind's peak (~0.16) so drift skid layers in without
+      // burying the engine + wind body. A 0.10 ceiling reads as
+      // "tyre scrape just under the engine note" — present but not
+      // dominant. setTargetAtTime gives a ~70 ms fade so the loop
+      // doesn't click on/off as drift activates / cancels.
+      const targetGain = u * 0.1
+      driftSkidGain.gain.setTargetAtTime(targetGain, now, 0.07)
+      // Speed-modulated brightness — faster drift = higher band centre.
+      // Idle (drift off) stays at 2600 Hz to avoid clicks; ramps to
+      // ~3400 Hz at full intensity.
+      const targetFreq = 2600 + u * 800
+      driftSkidFilter.frequency.setTargetAtTime(targetFreq, now, 0.07)
+    },
+
+    driftBoost(tier: number) {
+      const c = ctx
+      const dest = sfxBus
+      if (!c || !dest) return
+      const now = c.currentTime
+      const t = Math.max(1, Math.min(3, Math.floor(tier)))
+      // Bell pitch climbs with tier so the player can hear which
+      // mini-turbo just fired: blue MT ≈ A5, orange SMT ≈ C#6,
+      // purple UMT ≈ E6 (an A-major chord across the tiers, parallel
+      // to the wavePump's stacked-chord idiom). Gain + whoosh
+      // brightness scale together so UMT reads as a clear afterburner.
+      const bellFreq = t === 3 ? 1318.5 : t === 2 ? 1108.7 : 880
+      const gainMul = t === 3 ? 1.5 : t === 2 ? 1.2 : 1.0
+      const baseGain = 0.22 * gainMul
+      gatePulse(c, dest, now, bellFreq, 0.01, 0.26, baseGain)
+      // Octave layer for tier 2+ — adds a brighter top so SMT/UMT
+      // ride brighter than the MT's clean bell.
+      if (t >= 2) {
+        gatePulse(c, dest, now, bellFreq * 2, 0.012, 0.22, baseGain * 0.55)
+      }
+      // Whoosh — same shape as wavePump's but shorter and centered
+      // higher so it reads as a quick punch rather than a launch.
+      // Sweep range widens with tier.
+      const noise = c.createBufferSource()
+      noise.buffer = makeNoiseBuffer(c, 0.25)
+      const filt = c.createBiquadFilter()
+      filt.type = 'bandpass'
+      filt.frequency.setValueAtTime(700, now)
+      filt.frequency.exponentialRampToValueAtTime(t === 3 ? 4200 : t === 2 ? 3200 : 2400, now + 0.2)
+      filt.Q.value = 0.85
+      const g = c.createGain()
+      g.gain.setValueAtTime(0, now)
+      g.gain.linearRampToValueAtTime(0.12 * gainMul, now + 0.015)
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.24)
+      noise.connect(filt)
+      filt.connect(g)
+      g.connect(dest)
+      noise.start(now)
+      noise.stop(now + 0.26)
     },
 
     pickupCollect() {

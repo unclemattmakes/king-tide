@@ -46,6 +46,21 @@ export type DifficultyTuning = Readonly<{
    *  briefly; the AI matches with a 0.5–0.8 nose-up tilt that hover.ts's
    *  pitch-torque integrates into a clear launch over the burst window. */
   pumpPitchStrength: number
+  /** Curvature (1/m) above which the AI will initiate a drift on the
+   *  upcoming corner. `Infinity` disables AI drift entirely (Casual).
+   *  Standard triggers on tight 90° corners (~30 m radius → 0.033 1/m);
+   *  Hard widens the trigger envelope to medium corners so the AI
+   *  exits more corners on a mini-turbo. */
+  driftCurvatureThreshold: number
+  /** Minimum horizontal speed (m/s) for an AI drift to fire. Below this
+   *  the bike isn't going fast enough for the boost-on-release to pay
+   *  for the slip, and the AI would just spin out. */
+  driftMinSpeed: number
+  /** Maximum seconds the AI will hold a single drift before releasing,
+   *  even if the corner is still ahead. Calibrated to just clear the
+   *  next tier — Standard hits SMT (1.4 s threshold), Hard reaches UMT
+   *  (2.4 s threshold) on the longest sweeps. */
+  driftMaxHoldS: number
 }>
 
 export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>> = Object.freeze({
@@ -61,6 +76,10 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     // branching on difficulty there.
     pumpVyThreshold: Number.POSITIVE_INFINITY,
     pumpPitchStrength: 0,
+    // Same Infinity short-circuit for drift — Casual AI doesn't drift.
+    driftCurvatureThreshold: Number.POSITIVE_INFINITY,
+    driftMinSpeed: Number.POSITIVE_INFINITY,
+    driftMaxHoldS: 0,
   }),
   standard: Object.freeze({
     baselineTopSpeedFactor: 0.95,
@@ -70,6 +89,14 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     rubberBandPenaltyFloor: 0.92,
     pumpVyThreshold: 1.5,
     pumpPitchStrength: 0.5,
+    // Triggers on sharp 90° corners (~30 m radius → 0.033 1/m). Holds
+    // long enough to clear the SMT threshold (1.4 s) on the typical
+    // corner length, but releases short of UMT so the orange MT is
+    // the visible Standard ceiling. Mirrors how a competent player
+    // hits the second tier consistently but rarely the third.
+    driftCurvatureThreshold: 0.033,
+    driftMinSpeed: 14,
+    driftMaxHoldS: 1.6,
   }),
   hard: Object.freeze({
     baselineTopSpeedFactor: 1.04,
@@ -79,6 +106,14 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     rubberBandPenaltyFloor: 0.9,
     pumpVyThreshold: 0.6,
     pumpPitchStrength: 0.8,
+    // Wider trigger envelope (drifts on medium corners too — radius
+    // up to ~50 m). Longer hold ceiling so the AI reaches the purple
+    // UMT tier (2.4 s) on long sweeps, matching the design-doc claim
+    // that UMT is "only reachable on long sweeping corners" — Hard AI
+    // earns those exits, Standard doesn't.
+    driftCurvatureThreshold: 0.02,
+    driftMinSpeed: 10,
+    driftMaxHoldS: 2.5,
   }),
 })
 

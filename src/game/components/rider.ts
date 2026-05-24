@@ -155,6 +155,13 @@ export type RiderPoseResponse = {
   /** Head pitch offset (radians) — small forward bias when accelerating
    *  hard, small backward bias when braking. Low-pass. */
   headPitch: number
+  /** Torso roll offset (radians) — the rider banks into a drift. Driven
+   *  by `DriftState`: leans toward the drift direction, deeper when the
+   *  player steers into the turn, shallower on counter-steer. Zero when
+   *  not drifting (decays out via low-pass). Applied at `spine_lower`
+   *  so the whole upper body banks from the hips while the hand IK
+   *  keeps the grips planted. */
+  leanRoll: number
 }
 
 export type RiderData = {

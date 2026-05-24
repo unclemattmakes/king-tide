@@ -75,7 +75,7 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
   stunt: {
     id: 'stunt',
     name: 'Stunt',
-    tagline: 'Light + agile — banks every wave',
+    tagline: 'Light + agile — banks every wave, inside-drift carve',
     bodyColor: 0x33aa66,
     accentColor: 0x66ff99,
     stats: withDefaults({
@@ -87,6 +87,10 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
       surfaceFollow: 1.0,
       hoverSpring: 32,
       hoverDamp: 6,
+      // Inside-drift sport-bike feel — sharper initial cut, wider
+      // overall arc. Pairs with the high turnTorque so the bike
+      // really snaps into the apex on the first 250 ms.
+      driftStyle: 'inward',
     }),
   },
   // Heavyweight #4 — wears the punishing-pump role from
@@ -123,7 +127,7 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
   sparrow: {
     id: 'sparrow',
     name: 'Sparrow',
-    tagline: 'Lightweight — forgiving pump, further air on chop',
+    tagline: 'Lightweight — forgiving pump, inside-drift sport bike',
     bodyColor: 0xddbb44,
     accentColor: 0xfff088,
     stats: withDefaults({
@@ -135,6 +139,11 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
       surfaceFollow: 1.05,
       hoverSpring: 38,
       hoverDamp: 5.5,
+      // Inside-drift sport-bike feel. The Sparrow's high turn-torque
+      // (5.5 vs the 4.0 default) means the initial cut is dramatic;
+      // the wider-arc tail is what stops the lightweight bike from
+      // just rotating in place mid-drift.
+      driftStyle: 'inward',
     }),
   },
 }

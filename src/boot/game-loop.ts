@@ -49,17 +49,18 @@ import { createBoostMeterHud } from '@/engine/render/boost-meter-hud'
 import type { ChaseCamera } from '@/engine/render/camera'
 import { showCupResultsOverlay } from '@/engine/render/cup-results-screen'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
+import { createDriftTierHud } from '@/engine/render/drift-tier-hud'
+import { updateSwayTime, updateWind } from '@/engine/render/foliage-sway'
 import { shouldRenderFrame } from '@/engine/render/frame-cap'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
 import { updateLavaTime } from '@/engine/render/lava-river-material'
-import { updateSwayTime, updateWind } from '@/engine/render/foliage-sway'
 import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finish-banner'
 import { createPerfHud, type RenderInfoLite } from '@/engine/render/perf-hud'
-import { renderFrame } from '@/engine/render/renderer-service'
 import { createPumpFx } from '@/engine/render/pump-fx'
 import type { RaceHud } from '@/engine/render/race-hud'
 import type { RaceIntro } from '@/engine/render/race-intro'
 import type { RaceIntroUi } from '@/engine/render/race-intro-ui'
+import { renderFrame } from '@/engine/render/renderer-service'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
 import { createTrickPromptHud } from '@/engine/render/trick-prompt-hud'
@@ -67,6 +68,7 @@ import { createTuckHud } from '@/engine/render/tuck-hud'
 import { createTutorialHud } from '@/engine/render/tutorial-hud'
 import { type BikeImpact, updateUnderwaterFog } from '@/engine/render/water'
 import { createWavePumpHud } from '@/engine/render/wave-pump-hud'
+import type { WaveRiderRenderSystem } from '@/engine/render/wave-rider-render'
 import { sliceBestLap } from '@/engine/replay/best-lap-slice'
 import { serializeReplay } from '@/engine/replay/format'
 import { getGhostBestLap, setGhost } from '@/engine/replay/ghost-state'
@@ -90,6 +92,7 @@ import {
   BikeStatsStore,
   BoostMeterStore,
   ControlIntentStore,
+  DriftStateStore,
   HoverStateStore,
   RBHandleStore,
   TrickStateStore,
@@ -99,14 +102,13 @@ import type { PickupType } from '@/game/components/pickup'
 import { RacerStore } from '@/game/components/race'
 import type { RaceTick } from '@/game/sim-step'
 import { simulateStep } from '@/game/sim-step'
-import type { WaveRiderSystem } from '@/game/systems/wave-rider'
-import type { WaveRiderRenderSystem } from '@/engine/render/wave-rider-render'
 import { chargeBoostMeter } from '@/game/systems/boost-meter'
 import type { GhostRunner } from '@/game/systems/ghost-runner'
 import { TUCK_SWEET_SPOT, tuckFactor } from '@/game/systems/hover'
 import { getHeldPickup } from '@/game/systems/pickup'
 import { tickRemoteInterp } from '@/game/systems/remote-interp'
 import { computeStandings } from '@/game/systems/standings'
+import type { WaveRiderSystem } from '@/game/systems/wave-rider'
 import type { Track } from '@/game/tracks/types'
 import type { MultiplayerHandle } from './multiplayer'
 import { downloadReplay, formatTime, ordinal } from './utils'
@@ -434,6 +436,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
   const wavePumpHud = createWavePumpHud()
   const pumpFx = createPumpFx(camera)
   const boostMeterHud = createBoostMeterHud()
+  const driftTierHud = createDriftTierHud()
   const tuckHud = createTuckHud(TUCK_SWEET_SPOT)
   const trickPromptHud = createTrickPromptHud()
 
@@ -881,6 +884,70 @@ export function startGameLoop(opts: GameLoopOpts): void {
       antiGravHud.setWeight(w)
       const scalar = ANTI_GRAV_CAMERA_SCALAR[playerSettings.antiGravCameraIntensity]
       chase.setAntiGravFollow(w * scalar)
+    }
+
+    // Drift-roll: bank the chase camera into the corner while drifting.
+    // Magnitude scales with the highest tier reached this drift so the
+    // visual progression matches the audible payoff hierarchy
+    // (blue MT → orange SMT → purple UMT). Gated by
+    // `playerSettings.driftIntensity`:
+    //   - full:   ±5° at tier 1, ±7° at tier 2, ±9° at tier 3
+    //   - subtle: half magnitude — for motion-sensitive players who
+    //             still want the directional cue
+    //   - off:    zero — the mechanic still applies but no camera tell
+    //
+    // Same DriftState read also drives the HUD tier badge + the
+    // continuous skid-audio layer + the one-shot release whoosh below.
+    {
+      const drift = DriftStateStore.get(playerEid)
+      const intensity = playerSettings.driftIntensity
+      let rollRad = 0
+      if (drift && drift.driftDir !== 0 && intensity !== 'off') {
+        const baseDeg = drift.highestTier >= 3 ? 9 : drift.highestTier >= 2 ? 7 : 5
+        const baseRad = (baseDeg * Math.PI) / 180
+        const scalar = intensity === 'subtle' ? 0.5 : 1.0
+        // Sign convention: driftDir=-1 (left drift) → positive roll
+        // around the camera's local Z, which rotates the horizon
+        // clockwise from the player's perspective and reads as
+        // "leaning left into the corner."
+        rollRad = -drift.driftDir * baseRad * scalar
+      }
+      chase.setDriftRoll(rollRad)
+      driftTierHud.update(drift?.driftDir ?? 0, drift?.highestTier ?? 0)
+
+      // Drift skid loop — continuous tyre-scrape level. Intensity =
+      // speed fraction while drifting + grounded; zero otherwise so
+      // the loop fades out on cancel (the audio engine smooths the
+      // ramp). Suppressed when `driftIntensity` is `off`, halved on
+      // `subtle` — matches the visual layer's opt-out semantics.
+      const driftAudioOn =
+        !!drift &&
+        drift.driftDir !== 0 &&
+        intensity !== 'off' &&
+        state.playerSnapshot?.isGrounded === true
+      if (driftAudioOn) {
+        const speed = state.playerSnapshot?.speed ?? 0
+        const skidIntensity = Math.min(1, speed / 28)
+        audio.driftSkid(intensity === 'subtle' ? skidIntensity * 0.5 : skidIntensity)
+      } else {
+        audio.driftSkid(0)
+      }
+
+      // One-shot whoosh on the tick a drift release fires a boost.
+      // `releasedThisTick` is the sim-side edge flag set by
+      // driftSystem; tier dictates pitch/brightness (MT/SMT/UMT).
+      if (drift?.releasedThisTick && drift.releasedTier > 0) {
+        if (intensity !== 'off') {
+          audio.driftBoost(drift.releasedTier)
+          // Speed-lines whoosh scaled by tier (MT→SMT→UMT = 1/3→1).
+          pumpFx.speedLines(drift.releasedTier / 3)
+        }
+        // Tutorial: the DRIFT beat clears on the first charged
+        // release. Signalled regardless of `driftIntensity` — the
+        // beat is about the mechanic, not the FX, and a player who
+        // turned visuals off should still graduate the beat.
+        tutorialDirector?.notifyDrift(drift.releasedTier)
+      }
     }
 
     // Tutorial director — advance the script. The "LOOK AROUND" beat
