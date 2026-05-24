@@ -2614,29 +2614,29 @@ export function createWaterMesh(
   const outerScatter = vec3(0.22, 0.85, 0.92)
   const outerBody = mix(outerDeep, outerScatter, outerHeightFactor.mul(float(0.6))).mul(outerShade)
 
-  // Sample the SAME planar-reflection texture the center mesh draws
-  // with (shared `reflectionRgb` from the closure above) instead of
-  // approximating with horizon-haze. The center fades to whatever the
-  // reflector actually paints at distance — typically the low-sky /
-  // distant-landform composite at the reflected angle, NOT pure
-  // horizon-haze — so the haze stand-in always painted a too-bright
-  // band right past the 480 m boundary. Sharing the texture means
-  // outer and center paint the same colour at the same screen pixel,
-  // and the layer boundary becomes invisible regardless of palette.
+  // Schlick fresnel toward the sky's horizon haze at grazing. We
+  // intentionally do NOT sample the center mesh's `reflectionRgb`
+  // node here even though it would paint a more faithful sky-tint:
+  // ReflectorNode hides only ONE owner material during its mirror
+  // render pass (via `material.visible = false`), so if outer/skirt
+  // also reference the reflector texture, they stay visible while the
+  // mirror RT is being WRITTEN — and they sample from it in the same
+  // pass. That's a read-write hazard on the texture in WebGPU and
+  // nukes the whole frame to black. Horizon-haze stand-in only.
   //
-  // Fall back to the haze approximation when reflections are
-  // disabled (`?reflect=0`) — better some compensation than none.
+  // Same distance fade the center uses — by 500 m the contribution is
+  // gone and the outer reads as pure outerBody. Keeps the cross-fade
+  // band (380 → 480 m) shading-continuous with the center as both
+  // ramp grazing-tint down together.
   const outerViewDir = normalize(cameraPosition.sub(positionWorld))
   const outerNdotV = max(dot(outerNormal, outerViewDir), float(0))
   const outerFresnel = pow(float(1).sub(outerNdotV), float(5))
-  // Same distance fade the center uses — by 500 m the reflection is
-  // gone and the outer reads as pure outerBody. Keeps the cross-fade
-  // band (380 → 480 m) shading-continuous with the center as both
-  // ramp reflection down together.
   const outerReflFade = float(1).sub(smoothstep(float(200), float(500), outerCamDist))
-  const outerSurfaceLit = reflectionRgb
-    ? mix(outerBody, reflectionRgb, outerFresnel.mul(outerReflFade))
-    : mix(outerBody, horizonHazeUniform, outerFresnel.mul(outerReflFade).mul(float(0.4)))
+  const outerSurfaceLit = mix(
+    outerBody,
+    horizonHazeUniform,
+    outerFresnel.mul(outerReflFade).mul(float(0.4)),
+  )
 
   const outerColorNode = mix(
     mix(outerSurfaceLit, horizonHazeUniform, outerAerialMix),
@@ -2784,27 +2784,27 @@ export function createWaterMesh(
     skirtMat.positionNode = vec3(positionLocal.x, skirtGerst.x, positionLocal.z)
 
     // Anchor on the wave mesh's deep trough colour, then lift toward
-    // the SAME planar-reflection texture the center mesh uses, via
-    // Schlick fresnel. Sharing the reflection sample (rather than
-    // approximating with horizon-haze) makes the skirt paint
-    // identically to the center / outer at the same screen pixel —
-    // the layer boundaries dissolve entirely. Falls back to the
-    // haze stand-in only when reflections are disabled.
+    // horizon haze at grazing via Schlick fresnel. We intentionally
+    // do NOT sample the center mesh's `reflectionRgb` reflector node
+    // here — see the matching note on `outerSurfaceLit` for why
+    // sharing the RT across multiple materials breaks WebGPU.
+    //
+    // Same distance fade as the center / outer. The skirt sits
+    // entirely past 480 m so its `radial` is always ≥ 480, fade is
+    // already at zero, and the skirt stays at skirtDeepColor anyway.
+    // Left in for symmetry with the other layers + so a future
+    // SKIRT_INNER_RADIUS shrink still does the right thing.
     const skirtDeepColor = vec3(0.02, 0.22, 0.32)
     const skirtNormal = vec3(skirtGerst.y.negate(), float(1), skirtGerst.z.negate()).normalize()
     const skirtViewDir = normalize(cameraPosition.sub(positionWorld))
     const skirtNdotV = max(dot(skirtNormal, skirtViewDir), float(0))
     const skirtFresnel = pow(float(1).sub(skirtNdotV), float(5))
-    // Same distance fade as the center / outer — skirt sits entirely
-    // past 480 m so its `radial` distance is always ≥ 480 → fade is
-    // already at zero, meaning the skirt never paints reflection at
-    // all and stays at skirtDeepColor. Left in for symmetry with the
-    // other layers + so a future SKIRT_INNER_RADIUS shrink still
-    // does the right thing.
     const skirtReflFade = float(1).sub(smoothstep(float(200), float(500), radial))
-    const skirtSurfaceLit = reflectionRgb
-      ? mix(skirtDeepColor, reflectionRgb, skirtFresnel.mul(skirtReflFade))
-      : mix(skirtDeepColor, horizonHazeUniform, skirtFresnel.mul(skirtReflFade).mul(float(0.4)))
+    const skirtSurfaceLit = mix(
+      skirtDeepColor,
+      horizonHazeUniform,
+      skirtFresnel.mul(skirtReflFade).mul(float(0.4)),
+    )
     skirtMat.colorNode = mix(
       mix(skirtSurfaceLit, horizonHazeUniform, hazeMix),
       skirtDebugColorUniform,
