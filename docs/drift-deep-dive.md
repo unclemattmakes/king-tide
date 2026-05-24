@@ -116,8 +116,11 @@ In `applyGroundBranch`:
   - blue (MT) — fires whenever `highestTier >= 1`
   - orange (SMT) — added on top once `highestTier >= 2`
   - purple (UMT) — added on top once `highestTier >= 3`
-- **HUD** — boost-meter widget already exists; drift-charge could be a
-  thin secondary ring later (deferred).
+- **HUD tier badge** — small circular indicator at the bottom-left,
+  next to the boost meter. Color + label switches by tier (blue MT
+  / orange SMT / purple UMT). Tier-up pulse on each upgrade. Source:
+  `src/engine/render/drift-tier-hud.ts`. Always visible during drift
+  unless `playerSettings.driftIntensity === 'off'`.
 
 ### Anti-snake
 
@@ -247,10 +250,6 @@ release, a 350 ms cooldown prevents immediate re-trigger.
 3. **Skid audio.** Continuous tire-scrape loop while drifting, pitch
    modulated by speed; one-shot whoosh on release scaled by tier.
    Hook lives next to `audio.wavePump()`. (Deferred.)
-4. **HUD tier ring.** A thin colored ring around the boost-meter
-   widget that progresses blue → orange → purple in lock-step with
-   `DriftState.highestTier`. Reads the same color language as the
-   sparks. (Deferred.)
 
 ## References
 

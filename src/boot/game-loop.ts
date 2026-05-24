@@ -49,6 +49,7 @@ import { createBoostMeterHud } from '@/engine/render/boost-meter-hud'
 import type { ChaseCamera } from '@/engine/render/camera'
 import { showCupResultsOverlay } from '@/engine/render/cup-results-screen'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
+import { createDriftTierHud } from '@/engine/render/drift-tier-hud'
 import { updateSwayTime, updateWind } from '@/engine/render/foliage-sway'
 import { shouldRenderFrame } from '@/engine/render/frame-cap'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
@@ -433,6 +434,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
   const wavePumpHud = createWavePumpHud()
   const pumpFx = createPumpFx(camera)
   const boostMeterHud = createBoostMeterHud()
+  const driftTierHud = createDriftTierHud()
   const trickPromptHud = createTrickPromptHud()
 
   // Anti-grav HUD widget. Reads the player bike's AntiGravOverride
@@ -890,6 +892,8 @@ export function startGameLoop(opts: GameLoopOpts): void {
     //   - subtle: half magnitude — for motion-sensitive players who
     //             still want the directional cue
     //   - off:    zero — the mechanic still applies but no camera tell
+    //
+    // Same DriftState read also drives the HUD tier badge below.
     {
       const drift = DriftStateStore.get(playerEid)
       const intensity = playerSettings.driftIntensity
@@ -905,6 +909,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
         rollRad = -drift.driftDir * baseRad * scalar
       }
       chase.setDriftRoll(rollRad)
+      driftTierHud.update(drift?.driftDir ?? 0, drift?.highestTier ?? 0)
     }
 
     // Tutorial director — advance the script. The "LOOK AROUND" beat
