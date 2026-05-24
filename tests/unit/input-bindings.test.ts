@@ -52,7 +52,10 @@ describe('default keyboard bindings', () => {
       secondary: 'ArrowUp',
     })
     expect(DEFAULT_KEYBOARD_BINDINGS.steerLeft).toEqual({ primary: 'KeyA', secondary: 'ArrowLeft' })
-    expect(DEFAULT_KEYBOARD_BINDINGS.boost).toEqual({ primary: 'ShiftLeft', secondary: 'ShiftRight' })
+    expect(DEFAULT_KEYBOARD_BINDINGS.boost).toEqual({
+      primary: 'ShiftLeft',
+      secondary: 'ShiftRight',
+    })
   })
 
   it('respects the Q-dives / E-lifts convention (M9.18)', () => {

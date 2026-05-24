@@ -64,6 +64,7 @@ import { renderFrame } from '@/engine/render/renderer-service'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
 import { createTrickPromptHud } from '@/engine/render/trick-prompt-hud'
+import { createTuckHud } from '@/engine/render/tuck-hud'
 import { createTutorialHud } from '@/engine/render/tutorial-hud'
 import { type BikeImpact, updateUnderwaterFog } from '@/engine/render/water'
 import { createWavePumpHud } from '@/engine/render/wave-pump-hud'
@@ -103,6 +104,7 @@ import type { RaceTick } from '@/game/sim-step'
 import { simulateStep } from '@/game/sim-step'
 import { chargeBoostMeter } from '@/game/systems/boost-meter'
 import type { GhostRunner } from '@/game/systems/ghost-runner'
+import { TUCK_SWEET_SPOT, tuckFactor } from '@/game/systems/hover'
 import { getHeldPickup } from '@/game/systems/pickup'
 import { tickRemoteInterp } from '@/game/systems/remote-interp'
 import { computeStandings } from '@/game/systems/standings'
@@ -435,6 +437,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
   const pumpFx = createPumpFx(camera)
   const boostMeterHud = createBoostMeterHud()
   const driftTierHud = createDriftTierHud()
+  const tuckHud = createTuckHud(TUCK_SWEET_SPOT)
   const trickPromptHud = createTrickPromptHud()
 
   // Anti-grav HUD widget. Reads the player bike's AntiGravOverride
@@ -1144,6 +1147,27 @@ export function startGameLoop(opts: GameLoopOpts): void {
         state.boostMeterCharge = meter.charge
       }
       state.boostBtnDown = boostDown
+    }
+
+    // Tuck meter — surface the otherwise-invisible `tuckFactor` curve so
+    // the player can tell a missed sweet spot from a mechanic that isn't
+    // firing. Reads the same signals the tuck physics does: nose-down
+    // lean (`max(-pitch, 0)`) + the grounded gate. Player-only; hidden
+    // during auto-play and when the settings toggle is off.
+    if (!playerSettings.tuckMeter || control.isAutoPlay()) {
+      tuckHud.hide()
+    } else {
+      const tuckIntent = ControlIntentStore.get(playerEid)
+      const tuckStats = BikeStatsStore.get(playerEid)
+      const grounded = HoverStateStore.get(playerEid)?.isGrounded === true
+      if (tuckIntent && tuckStats) {
+        const lean = Math.max(0, -tuckIntent.pitch)
+        const factor = grounded ? tuckFactor(lean) : 0
+        const capBonusPct = (tuckStats.tuckSpeedBoost - 1) * factor * 100
+        tuckHud.update(lean, factor, capBonusPct, grounded && lean > 0.05)
+      } else {
+        tuckHud.hide()
+      }
     }
 
     // Player slot transitions: collected (null → X), or fired with a

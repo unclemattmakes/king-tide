@@ -245,6 +245,33 @@ export function driftYawFraction(
 export const DIVE_PITCH_FWD_LIMIT_DEG = 12
 const DIVE_PITCH_FWD_LIMIT_RAD = (DIVE_PITCH_FWD_LIMIT_DEG * Math.PI) / 180
 
+// ── Tuck sweet-spot ───────────────────────────────────────────────────
+// The snowboarder's downhill duck, folded into the SAME nose-down gesture
+// the dive-aid reads (`diveAmount = max(-intent.pitch, 0)`, which also
+// sinks ride height via DIVE_HOVER_HEIGHT_MIN_MUL). Tuck has no button:
+// lean the nose forward and the bike tucks.
+//
+// The payoff is a sweet spot, not a floor-it. The factor ramps 0→1 as the
+// nose-down lean climbs to TUCK_SWEET_SPOT, then winds back DOWN past it —
+// crossing zero and bottoming out at TUCK_SCRAPE_FLOOR at full deflection,
+// where the dive-aid has the belly skimming the deck. So a feathered lean
+// (just shy of "too far") is fastest; jamming the nose down scrapes and
+// the negative factor inverts the cap/drag multipliers into a penalty.
+// Sweet spot sits high (0.8) so it lines up with "about to scrape", giving
+// the input a satisfying edge to ride.
+export const TUCK_SWEET_SPOT = 0.8
+export const TUCK_SCRAPE_FLOOR = -0.5
+
+/** Signed tuck factor from nose-down lean (`max(-intent.pitch, 0)`, 0..1).
+ *  0 at neutral, +1 at the sweet spot, negative past it (belly-scrape
+ *  penalty), TUCK_SCRAPE_FLOOR at full nose-down. */
+export function tuckFactor(forwardPitch: number): number {
+  const d = forwardPitch <= 0 ? 0 : forwardPitch >= 1 ? 1 : forwardPitch
+  if (d <= TUCK_SWEET_SPOT) return d / TUCK_SWEET_SPOT
+  const over = (d - TUCK_SWEET_SPOT) / (1 - TUCK_SWEET_SPOT)
+  return 1 + (TUCK_SCRAPE_FLOOR - 1) * over
+}
+
 /**
  * Marble-on-incline acceleration along the bike's horizontal forward axis.
  * Driven by the terrain-tracking pitch (positive = nose-down on a
@@ -1459,7 +1486,16 @@ function applyGroundBranch(
   const meterActive = BoostMeterStore.get(eid)?.active === true
   const heldBoost = meterActive ? stats.boostMul : 1
   const pickupBoost = getCurrentBoostMultiplier(eid)
-  const boost = heldBoost * pickupBoost
+  // Tuck — folded into the nose-down lean (see tuckFactor / the dive-aid's
+  // `diveAmount`). Signed: at the sweet spot it raises the cap (and cuts
+  // drag, below); past it the factor goes negative and the cap drops below
+  // base — the belly-scrape penalty for burying the nose. The cap lift only
+  // converts to real speed when something is already pushing past base
+  // topSpeed (slope momentum on a descent, throttle into a wave face,
+  // pickup boost), so a feathered lean down a hill is where it pays.
+  const tf = tuckFactor(Math.max(-intent.pitch, 0))
+  const tuckMul = 1 + (stats.tuckSpeedBoost - 1) * tf
+  const boost = heldBoost * pickupBoost * tuckMul
   // Boost raises the speed cap (see air branch for rationale).
   const speedFalloff = Math.max(0, 1 - speed / (stats.topSpeed * boost))
   const surfaceMul = probe.isWater ? 0.85 : 1.0
@@ -1505,9 +1541,14 @@ function applyGroundBranch(
       true,
     )
 
-    if (surfaceForwardSlope > 0.05 && !probe.isWater) {
+    // Scaled by forward throttle so the assist only fires when the player
+    // is actually climbing under power. Without this gate the unconditional
+    // forward push (~6.5 m/s² net on a 25° slope) overwhelms the meek
+    // uphill marble-on-incline brake and free-climbs a coasting bike.
+    const climbThrottle = Math.max(intent.throttle, 0)
+    if (surfaceForwardSlope > 0.05 && !probe.isWater && climbThrottle > 0) {
       const CLIMB_ASSIST_FRAC = 0.7
-      const aClimb = surfaceForwardSlope * gravity * CLIMB_ASSIST_FRAC
+      const aClimb = surfaceForwardSlope * gravity * CLIMB_ASSIST_FRAC * climbThrottle
       rb.applyImpulse(
         {
           x: planeFwdX * aClimb * m * dt,
@@ -1717,10 +1758,16 @@ function applyGroundBranch(
   // in both normal driving AND drift so a surface feels coherent — ice
   // is slippery whether or not you're sliding.
   const dragMul = probe.isWater ? 1.4 : 1.0
+  // Drift: cut lateral grip so the bike slides sideways like an MK kart.
   const driftDragMul = drifting ? DRIFT_LATERAL_DRAG_SCALE : 1.0
+  // Surface grip: per-material multiplier from the surface registry.
   const gripMul = surfaceGripMul(probe.surfaceType)
+  // Tuck (same signed factor as the cap lift): a clean lean cuts sideways
+  // scrub so the bike tracks its line; an over-tuck (negative factor)
+  // raises drag above base as the belly skims and grabs.
+  const tuckDrag = 1 - (1 - stats.tuckDragMul) * tf
   const lateralVel = linvel.x * planeRightX + linvel.y * planeRightY + linvel.z * planeRightZ
-  const aDrag = -lateralVel * stats.lateralDrag * dragMul * driftDragMul * gripMul
+  const aDrag = -lateralVel * stats.lateralDrag * dragMul * driftDragMul * gripMul * tuckDrag
   rb.applyImpulse(
     {
       x: planeRightX * aDrag * m * dt,

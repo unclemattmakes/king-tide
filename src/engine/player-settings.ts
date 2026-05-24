@@ -78,6 +78,19 @@ export type AntiGravCameraIntensity = 'full' | 'reduced' | 'off'
  */
 export type EmissiveLandmarksIntensity = 'full' | 'reduced' | 'off'
 
+/** Tuck VFX intensity — the slipstream streaks that fan off the bike as
+ *  the player leans into the tuck sweet spot (see the tuck mechanic in
+ *  [hover.ts](./game/systems/hover.ts) + the `tuckStream` pool in
+ *  [fx/index.ts](./render/fx/index.ts)). Render-only; the emission rate
+ *  already tracks the live tuck factor, so this knob is the global
+ *  ceiling on top of that.
+ *
+ *  - `full`:   streaks at full emission rate / size
+ *  - `subtle`: ~half rate — a hint of slipstream without the fan
+ *  - `off`:    no tuck particles at all
+ */
+export type TuckVfxIntensity = 'full' | 'subtle' | 'off'
+
 /** Pre-lap track introduction — cinematic camera shots + F1 start-lights
  *  before the race countdown arms. See
  *  [race-intro.ts](./render/race-intro.ts).
@@ -116,6 +129,12 @@ export type PlayerSettings = {
   antiGravCameraIntensity: AntiGravCameraIntensity
   /** Emissive-landmarks intensity — see `EmissiveLandmarksIntensity`. */
   emissiveLandmarks: EmissiveLandmarksIntensity
+  /** Tuck slipstream VFX intensity — see `TuckVfxIntensity`. */
+  tuckVfxIntensity: TuckVfxIntensity
+  /** Tuck meter HUD — the accuracy gauge that shows the live tuck factor
+   *  + sweet-spot target. On by default (it's a teaching aid); players who
+   *  have internalised the timing can switch it off. */
+  tuckMeter: boolean
   /** Subtitles for the tutorial framework's prompt callouts.
    *  Affects only the tutorial HUD widget — race callouts and pump
    *  feedback are unaffected. */
@@ -242,6 +261,8 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   rubberBandAssist: true,
   antiGravCameraIntensity: 'full',
   emissiveLandmarks: 'full',
+  tuckVfxIntensity: 'full',
+  tuckMeter: true,
   tutorialSubtitles: true,
   tutorialCompleted: false,
   audioMasterVolume: 0.8,
@@ -318,6 +339,17 @@ export const EMISSIVE_LANDMARKS_SCALAR: Readonly<Record<EmissiveLandmarksIntensi
     off: 0,
   })
 
+const VALID_TUCK_VFX: TuckVfxIntensity[] = ['full', 'subtle', 'off']
+
+/** Global ceiling on the tuck slipstream emission, multiplied into the
+ *  live (per-frame) tuck factor before the rate / size are computed. `off`
+ *  collapses emission to zero; `subtle` halves it. */
+export const TUCK_VFX_SCALAR: Readonly<Record<TuckVfxIntensity, number>> = Object.freeze({
+  full: 1.0,
+  subtle: 0.5,
+  off: 0,
+})
+
 /** Restore persisted values into `playerSettings`. Tolerant of missing
  *  fields and of schema drift — anything missing or invalid keeps the
  *  default. Safe to call multiple times. */
@@ -352,6 +384,15 @@ export function loadPlayerSettings(): void {
     (VALID_ANTI_GRAV_CAMERA as string[]).includes(p.antiGravCameraIntensity)
   ) {
     playerSettings.antiGravCameraIntensity = p.antiGravCameraIntensity as AntiGravCameraIntensity
+  }
+  if (
+    typeof p.tuckVfxIntensity === 'string' &&
+    (VALID_TUCK_VFX as string[]).includes(p.tuckVfxIntensity)
+  ) {
+    playerSettings.tuckVfxIntensity = p.tuckVfxIntensity as TuckVfxIntensity
+  }
+  if (typeof p.tuckMeter === 'boolean') {
+    playerSettings.tuckMeter = p.tuckMeter
   }
   if (
     typeof p.emissiveLandmarks === 'string' &&
@@ -473,6 +514,16 @@ export function savePlayerSettings(): void {
 
 export function setWavePumpIntensity(v: WavePumpIntensity): void {
   playerSettings.wavePumpIntensity = v
+  savePlayerSettings()
+}
+
+export function setTuckVfxIntensity(v: TuckVfxIntensity): void {
+  playerSettings.tuckVfxIntensity = v
+  savePlayerSettings()
+}
+
+export function setTuckMeter(on: boolean): void {
+  playerSettings.tuckMeter = on
   savePlayerSettings()
 }
 

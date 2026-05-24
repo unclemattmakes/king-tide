@@ -85,6 +85,19 @@ export type BikeStatsData = {
    */
   driftStyle?: 'outward' | 'inward'
   /**
+   * Tuck payoff at the sweet spot. Tuck has no button — it's folded into
+   * the nose-down (pitch-forward) gesture, scaled by `tuckFactor()` in
+   * hover.ts: lean in toward `TUCK_SWEET_SPOT` and these are reached in
+   * full; bury the nose past it (belly-scrape) and they wind back through
+   * neutral into a penalty. `tuckSpeedBoost` is the peak top-speed cap
+   * multiplier (stacks with boost); `tuckDragMul` is the peak lateral-drag
+   * multiplier (<1 = less scrub). Both interpolate from 1.0 (no tuck) by
+   * the signed factor, so an over-tuck (negative factor) pushes the cap
+   * below base and drag above base.
+   */
+  tuckSpeedBoost: number
+  tuckDragMul: number
+  /**
    * Render hint: the body color the bike mesh should use when no per-variant
    * GLB exists, or as a runtime tint of the GLB's livery material. Sim
    * layer ignores this field.
