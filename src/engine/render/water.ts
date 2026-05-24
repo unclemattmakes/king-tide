@@ -2117,11 +2117,15 @@ export function createWaterMesh(
   // reads as the same color as foreground water and the scene loses its
   // sense of scale. The horizon color is driven from the sky palette via
   // `horizonHazeUniform` (see `setHorizonColor` + the sky module's tick),
-  // so sunset water picks up warmth, twilight reads cool blue, etc. Same
-  // color the scene fog uses — water and sky horizon stay tonally aligned.
-  // Capped at 0.5 mix so the horizon water still reads as water-coloured
-  // beneath the haze, not solid sky.
-  const aerialMix = smoothstep(float(120), float(280), camDist).mul(float(0.5))
+  // so sunset water picks up warmth, twilight reads cool blue, etc.
+  //
+  // Cap at 0.25 (not the previous 0.5) so the shader's haze blend
+  // stays a light atmospheric tint rather than dominating the colour
+  // — scene fog (linear 500 → 2200 m) is already painting up to ~60 %
+  // sky-colour by the far skirt edge, so any higher cap here was
+  // double-counting the same horizon haze and showing as a bright
+  // band a few pixels below the horizon line where the cap maxed out.
+  const aerialMix = smoothstep(float(120), float(280), camDist).mul(float(0.25))
   const surfaceColor = mix(reflectedOrBase, horizonHazeUniform, aerialMix)
 
   const albedo = mix(
@@ -2561,16 +2565,12 @@ export function createWaterMesh(
   // Camera-relative distance (radial, XZ-only) for aerial perspective.
   const outerCamDist = positionLocal.xz.length()
 
-  // Aerial-perspective ramp: matches the center mesh's `aerialMix` cap of
-  // 0.5 at 280 m so the colour is continuous where they meet, and holds
-  // at 0.5 across the rest of the outer's extent — the outer should
-  // read as water for its entire footprint, with the skirt picking up
-  // the second-leg ramp toward full horizon haze past 1200 m. Capping
-  // here (rather than ramping to 1.0 by 700 m) keeps the outer/skirt
-  // boundary at ~720 m tonally close: both layers are ≈50 % water + 50 %
-  // haze on either side of the edge.
+  // Aerial-perspective ramp: matches the center mesh's `aerialMix` cap
+  // of 0.25 at 280 m so the colour is continuous where they meet, and
+  // holds across the rest of the outer's extent. Scene fog handles the
+  // remainder of the dissolve into sky past the outer's far rim.
   const outerAerialMix = clamp(
-    smoothstep(float(120), float(280), outerCamDist).mul(float(0.5)),
+    smoothstep(float(120), float(280), outerCamDist).mul(float(0.25)),
     float(0),
     float(1),
   )
@@ -2622,7 +2622,7 @@ export function createWaterMesh(
   const outerViewDir = normalize(cameraPosition.sub(positionWorld))
   const outerNdotV = max(dot(outerNormal, outerViewDir), float(0))
   const outerFresnel = pow(float(1).sub(outerNdotV), float(5))
-  const outerSurfaceLit = mix(outerBody, horizonHazeUniform, outerFresnel.mul(float(0.85)))
+  const outerSurfaceLit = mix(outerBody, horizonHazeUniform, outerFresnel.mul(float(0.4)))
 
   const outerColorNode = mix(
     mix(outerSurfaceLit, horizonHazeUniform, outerAerialMix),
@@ -2749,19 +2749,11 @@ export function createWaterMesh(
     // the early-opaque skirt doesn't tonally compete in the inner
     // region.
     const innerFadeIn = smoothstep(float(SKIRT_INNER_RADIUS), float(240), radial)
-    // Aerial-perspective ramp — single leg, mirrors the main plane's
-    // `aerialMix = smoothstep(120, 280, camDist) * 0.5` so the tone is
-    // continuous across the wave-plane boundary, then HOLDS at 50 %
-    // water + 50 % haze across the rest of the skirt. The previous
-    // two-leg ramp (additional 1200 → 1550 m push to 100 % haze)
-    // painted a bright tan-cream band a few pixels below the horizon
-    // — basically "painted sky on the water" — that read as the most
-    // visible water-ends-too-early seam from the bike POV. Scene fog
-    // (linear 500 → 2200 m) is already pushing the far rim past 60 %
-    // sky color at 1500 m, so the haze ramp was double-counting the
-    // sky-blend job. Letting fog do it alone preserves the skirt's
-    // water tone right up until fog fully dissolves it.
-    const hazeMix = smoothstep(float(120), float(280), radial).mul(float(0.5))
+    // Aerial-perspective ramp — mirrors the main plane's `aerialMix`
+    // cap of 0.25 so the tone is continuous across the wave-plane
+    // boundary. Scene fog (linear 500 → 2200 m) handles the rest of
+    // the dissolve into sky at the far rim.
+    const hazeMix = smoothstep(float(120), float(280), radial).mul(float(0.25))
     // Gerstner displacement on the skirt. Without it the skirt reads
     // as a flat painted ring — even at long range the eye picks up
     // "no waves here = not water" against the center mesh's displaced
@@ -2792,7 +2784,7 @@ export function createWaterMesh(
     const skirtViewDir = normalize(cameraPosition.sub(positionWorld))
     const skirtNdotV = max(dot(skirtNormal, skirtViewDir), float(0))
     const skirtFresnel = pow(float(1).sub(skirtNdotV), float(5))
-    const skirtSurfaceLit = mix(skirtDeepColor, horizonHazeUniform, skirtFresnel.mul(float(0.85)))
+    const skirtSurfaceLit = mix(skirtDeepColor, horizonHazeUniform, skirtFresnel.mul(float(0.4)))
     skirtMat.colorNode = mix(
       mix(skirtSurfaceLit, horizonHazeUniform, hazeMix),
       skirtDebugColorUniform,
