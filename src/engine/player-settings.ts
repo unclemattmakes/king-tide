@@ -78,6 +78,19 @@ export type AntiGravCameraIntensity = 'full' | 'reduced' | 'off'
  */
 export type EmissiveLandmarksIntensity = 'full' | 'reduced' | 'off'
 
+/** Tuck VFX intensity — the slipstream streaks that fan off the bike as
+ *  the player leans into the tuck sweet spot (see the tuck mechanic in
+ *  [hover.ts](./game/systems/hover.ts) + the `tuckStream` pool in
+ *  [fx/index.ts](./render/fx/index.ts)). Render-only; the emission rate
+ *  already tracks the live tuck factor, so this knob is the global
+ *  ceiling on top of that.
+ *
+ *  - `full`:   streaks at full emission rate / size
+ *  - `subtle`: ~half rate — a hint of slipstream without the fan
+ *  - `off`:    no tuck particles at all
+ */
+export type TuckVfxIntensity = 'full' | 'subtle' | 'off'
+
 /** Pre-lap track introduction — cinematic camera shots + F1 start-lights
  *  before the race countdown arms. See
  *  [race-intro.ts](./render/race-intro.ts).
@@ -89,6 +102,23 @@ export type EmissiveLandmarksIntensity = 'full' | 'reduced' | 'off'
  */
 export type PreLapIntroMode = 'full' | 'short' | 'off'
 
+/** Drift-mechanic feedback intensity. Gates the render-side game-feel
+ *  layer for the MK-style mini-turbo drift introduced in M9.41. The
+ *  sim layer (`driftSystem` + `hover.ts` modulation + `BoostEffect`
+ *  release) always runs — the setting controls only the visuals:
+ *
+ *  - `full`:    camera roll into the drift, colored sparks (blue / orange),
+ *               skid audio, HUD tier ring
+ *  - `subtle`:  sparks only — no camera roll, no audio (motion-sickness
+ *               and headphone-fatigue mitigation while keeping the
+ *               tier readability the mechanic needs to be learnable)
+ *  - `off`:     no visuals at all. The mechanic still applies its
+ *               physics + boost when the player holds Z/C + steers,
+ *               but a player who isn't using drift on purpose will
+ *               never notice it exists.
+ */
+export type DriftIntensity = 'full' | 'subtle' | 'off'
+
 export type PlayerSettings = {
   wavePumpIntensity: WavePumpIntensity
   aiDifficulty: AIDifficulty
@@ -99,6 +129,12 @@ export type PlayerSettings = {
   antiGravCameraIntensity: AntiGravCameraIntensity
   /** Emissive-landmarks intensity — see `EmissiveLandmarksIntensity`. */
   emissiveLandmarks: EmissiveLandmarksIntensity
+  /** Tuck slipstream VFX intensity — see `TuckVfxIntensity`. */
+  tuckVfxIntensity: TuckVfxIntensity
+  /** Tuck meter HUD — the accuracy gauge that shows the live tuck factor
+   *  + sweet-spot target. On by default (it's a teaching aid); players who
+   *  have internalised the timing can switch it off. */
+  tuckMeter: boolean
   /** Subtitles for the tutorial framework's prompt callouts.
    *  Affects only the tutorial HUD widget — race callouts and pump
    *  feedback are unaffected. */
@@ -214,6 +250,9 @@ export type PlayerSettings = {
    *  the camera fly-by because the lobby gate already owns the pre-race
    *  beat — flipping this off in MP only hides the lights. */
   preLapIntro: PreLapIntroMode
+  /** Drift-mechanic feedback intensity — see `DriftIntensity`. Render-
+   *  only; the sim always processes drift input. */
+  driftIntensity: DriftIntensity
 }
 
 export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
@@ -222,6 +261,8 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   rubberBandAssist: true,
   antiGravCameraIntensity: 'full',
   emissiveLandmarks: 'full',
+  tuckVfxIntensity: 'full',
+  tuckMeter: true,
   tutorialSubtitles: true,
   tutorialCompleted: false,
   audioMasterVolume: 0.8,
@@ -255,6 +296,7 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   fullscreenPreferred: false,
   animatedLandmarks: true,
   preLapIntro: 'full',
+  driftIntensity: 'full',
 })
 
 /** Live, mutable copy. Consumers read this object every frame — no
@@ -273,6 +315,7 @@ const VALID_AI_DIFFICULTY: AIDifficulty[] = ['casual', 'standard', 'hard']
 const VALID_ANTI_GRAV_CAMERA: AntiGravCameraIntensity[] = ['full', 'reduced', 'off']
 const VALID_EMISSIVE_LANDMARKS: EmissiveLandmarksIntensity[] = ['full', 'reduced', 'off']
 const VALID_PRE_LAP_INTRO: PreLapIntroMode[] = ['full', 'short', 'off']
+const VALID_DRIFT_INTENSITY: DriftIntensity[] = ['full', 'subtle', 'off']
 const VALID_COLORBLIND_MODE: ColorblindMode[] = ['off', 'deuteranopia', 'protanopia', 'tritanopia']
 
 /** Roll-follow scalar each intensity step contributes — multiplied by
@@ -295,6 +338,17 @@ export const EMISSIVE_LANDMARKS_SCALAR: Readonly<Record<EmissiveLandmarksIntensi
     reduced: 0.5,
     off: 0,
   })
+
+const VALID_TUCK_VFX: TuckVfxIntensity[] = ['full', 'subtle', 'off']
+
+/** Global ceiling on the tuck slipstream emission, multiplied into the
+ *  live (per-frame) tuck factor before the rate / size are computed. `off`
+ *  collapses emission to zero; `subtle` halves it. */
+export const TUCK_VFX_SCALAR: Readonly<Record<TuckVfxIntensity, number>> = Object.freeze({
+  full: 1.0,
+  subtle: 0.5,
+  off: 0,
+})
 
 /** Restore persisted values into `playerSettings`. Tolerant of missing
  *  fields and of schema drift — anything missing or invalid keeps the
@@ -330,6 +384,15 @@ export function loadPlayerSettings(): void {
     (VALID_ANTI_GRAV_CAMERA as string[]).includes(p.antiGravCameraIntensity)
   ) {
     playerSettings.antiGravCameraIntensity = p.antiGravCameraIntensity as AntiGravCameraIntensity
+  }
+  if (
+    typeof p.tuckVfxIntensity === 'string' &&
+    (VALID_TUCK_VFX as string[]).includes(p.tuckVfxIntensity)
+  ) {
+    playerSettings.tuckVfxIntensity = p.tuckVfxIntensity as TuckVfxIntensity
+  }
+  if (typeof p.tuckMeter === 'boolean') {
+    playerSettings.tuckMeter = p.tuckMeter
   }
   if (
     typeof p.emissiveLandmarks === 'string' &&
@@ -426,6 +489,12 @@ export function loadPlayerSettings(): void {
   ) {
     playerSettings.preLapIntro = p.preLapIntro as PreLapIntroMode
   }
+  if (
+    typeof p.driftIntensity === 'string' &&
+    (VALID_DRIFT_INTENSITY as string[]).includes(p.driftIntensity)
+  ) {
+    playerSettings.driftIntensity = p.driftIntensity as DriftIntensity
+  }
   // Apply accessibility settings to the DOM as early as we can after
   // load. Lazy-imported so `player-settings.ts` stays a tiny
   // pre-render-init module — the accessibility service pulls in palette
@@ -445,6 +514,16 @@ export function savePlayerSettings(): void {
 
 export function setWavePumpIntensity(v: WavePumpIntensity): void {
   playerSettings.wavePumpIntensity = v
+  savePlayerSettings()
+}
+
+export function setTuckVfxIntensity(v: TuckVfxIntensity): void {
+  playerSettings.tuckVfxIntensity = v
+  savePlayerSettings()
+}
+
+export function setTuckMeter(on: boolean): void {
+  playerSettings.tuckMeter = on
   savePlayerSettings()
 }
 
@@ -475,6 +554,11 @@ export function setEmissiveLandmarks(v: EmissiveLandmarksIntensity): void {
 
 export function setPreLapIntro(v: PreLapIntroMode): void {
   playerSettings.preLapIntro = v
+  savePlayerSettings()
+}
+
+export function setDriftIntensity(v: DriftIntensity): void {
+  playerSettings.driftIntensity = v
   savePlayerSettings()
 }
 

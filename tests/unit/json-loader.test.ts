@@ -261,9 +261,7 @@ describe('buildTrackFromJson', () => {
   it('rejects empty audio.music string', () => {
     const raw = baseTrack()
     raw.audio = { music: '' }
-    expect(() => buildTrackFromJson(raw)).toThrow(
-      /audio\.music must be a non-empty string/,
-    )
+    expect(() => buildTrackFromJson(raw)).toThrow(/audio\.music must be a non-empty string/)
   })
 
   it('rejects audio.ambientGains without a matching audio.ambient', () => {
@@ -291,25 +289,19 @@ describe('buildTrackFromJson', () => {
       ambient: ['a.opus'],
       ambientGains: [-0.1],
     }
-    expect(() => buildTrackFromJson(raw)).toThrow(
-      /audio\.ambientGains\[0\] must be non-negative/,
-    )
+    expect(() => buildTrackFromJson(raw)).toThrow(/audio\.ambientGains\[0\] must be non-negative/)
   })
 
   it('rejects non-string audio.ambient entries', () => {
     const raw = baseTrack()
     raw.audio = { ambient: ['ok.opus', 42] as unknown[] }
-    expect(() => buildTrackFromJson(raw)).toThrow(
-      /audio\.ambient\[1\] must be a non-empty string/,
-    )
+    expect(() => buildTrackFromJson(raw)).toThrow(/audio\.ambient\[1\] must be a non-empty string/)
   })
 
   it('rejects negative audio.music3dEffects.duckOnPump', () => {
     const raw = baseTrack()
     raw.audio = { music3dEffects: { duckOnPump: -0.5 } }
-    expect(() => buildTrackFromJson(raw)).toThrow(
-      /duckOnPump must be non-negative/,
-    )
+    expect(() => buildTrackFromJson(raw)).toThrow(/duckOnPump must be non-negative/)
   })
 
   it('round-trips colorGrade, bloom, and seaStateBeaufort', () => {
@@ -428,6 +420,54 @@ describe('buildTrackFromJson', () => {
     ]
     const track = buildTrackFromJson(raw)
     expect(track.boostPads[0]!.halfHeight).toBe(3)
+  })
+
+  it('parses a prop surface tag + round-trips it through trackToJson', () => {
+    const raw = baseTrack()
+    raw.props = [
+      {
+        type: 'box',
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        size: { x: 5, y: 0.5, z: 5 },
+        surface: 'ice',
+      },
+    ]
+    const built = buildTrackFromJson(raw)
+    expect(built.props[0]!.surface).toBe('ice')
+    const back = trackToJson(built)
+    const rebuilt = buildTrackFromJson(back)
+    expect(rebuilt.props[0]!.surface).toBe('ice')
+  })
+
+  it('drops an unknown surface tag silently (falls back to DEFAULT, no throw)', () => {
+    const raw = baseTrack()
+    raw.props = [
+      {
+        type: 'box',
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        size: { x: 5, y: 0.5, z: 5 },
+        surface: 'lava-quicksand-typo',
+      },
+    ]
+    const built = buildTrackFromJson(raw)
+    // Unknown → field omitted; the runtime treats absent as DEFAULT.
+    expect(built.props[0]!.surface).toBeUndefined()
+  })
+
+  it('leaves surface undefined when the prop has no tag', () => {
+    const raw = baseTrack()
+    raw.props = [
+      {
+        type: 'box',
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        size: { x: 5, y: 0.5, z: 5 },
+      },
+    ]
+    const built = buildTrackFromJson(raw)
+    expect(built.props[0]!.surface).toBeUndefined()
   })
 })
 

@@ -494,6 +494,7 @@ export function createRider(sim: SimWorld, phys: PhysicsWorld, opts: CreateRider
       flowYaw: 0,
       headYaw: 0,
       headPitch: 0,
+      leanRoll: 0,
     },
   }
   RiderStore.set(riderEid, data)

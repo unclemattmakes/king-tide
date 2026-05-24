@@ -171,7 +171,7 @@ const MODE_TILES: ModeTile[] = [
     id: 'tutorial',
     badge: 'LEARN',
     headline: 'TUTORIAL',
-    desc: 'Six scripted beats — throttle, cruise, look around, wave pump, anti-grav, finish. Skippable for returning players via Settings → Subtitles.',
+    desc: 'Seven scripted beats — throttle, cruise, look around, wave pump, drift, anti-grav, finish. Skippable for returning players via Settings → Subtitles.',
     enabled: true,
   },
 ]
@@ -303,9 +303,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         // Until a cup is picked, default to the championship crumb path —
         // the four ship cups + the placeholder are all championship-shaped;
         // the Dev Cup browse path swaps in once that tile is clicked.
-        return (pickedCup?.races.length ?? 1) > 0
-          ? STEPS_SP_CUP_CHAMPIONSHIP
-          : STEPS_SP_CUP_BROWSE
+        return (pickedCup?.races.length ?? 1) > 0 ? STEPS_SP_CUP_CHAMPIONSHIP : STEPS_SP_CUP_BROWSE
       case 'tutorial':
         return STEPS_TUTORIAL
       case 'time-trial':
@@ -329,16 +327,10 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         setChyron('', 'Pick a format. Disabled tiles light up as their systems land.')
         break
       case 'sp-track':
-        setChyron(
-          '',
-          'All twelve ship tracks are in production — tiles light up sprint by sprint.',
-        )
+        setChyron('', 'All twelve ship tracks are in production — tiles light up sprint by sprint.')
         break
       case 'sp-cup':
-        setChyron(
-          '',
-          'Real cups gate on their tracks shipping. Dev Cup is the playtest path.',
-        )
+        setChyron('', 'Real cups gate on their tracks shipping. Dev Cup is the playtest path.')
         break
       case 'sp-cup-tracks':
         setChyron(
@@ -831,9 +823,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       // race so the player understands where they are.
       const recap = readLastRaceRecap()
       const taglineHtml =
-        opts.reason === 'exit-from-race'
-          ? `<div class="tagline">Back to the booth</div>`
-          : ''
+        opts.reason === 'exit-from-race' ? `<div class="tagline">Back to the booth</div>` : ''
       // Stash the most recently-watched track/bike back into the picks
       // so the next race defaults to whatever the player just exited.
       if (recap) {
@@ -1064,7 +1054,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           <div class="bc-card" id="tut-start" role="button" tabindex="0" style="--accent:#ffd54a; cursor: pointer;">
             <div class="label">FRAMEWORK</div>
             <div class="name">FIRST RUN</div>
-            <div class="tag">Six beats — throttle, cruise, look around, wave pump, anti-grav, finish. Runs on any track. Subtitles toggle in Settings.</div>
+            <div class="tag">Seven beats — throttle, cruise, look around, wave pump, drift, anti-grav, finish. Runs on any track. Subtitles toggle in Settings.</div>
             <div class="record">~90s &middot; INTRO DIFFICULTY</div>
             <div class="record" style="color: var(--bc-yellow); margin-top: 6px;">${escapeHtml(ctaLabel)} &rarr;</div>
           </div>
@@ -1335,9 +1325,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       `
       const host = el.querySelector<HTMLElement>('#sp-bike-cards')
       if (host) renderBikeCards(host, true)
-      el.querySelector('#sp-bike-back')?.addEventListener('click', () =>
-        showStep(bikeBackStep()),
-      )
+      el.querySelector('#sp-bike-back')?.addEventListener('click', () => showStep(bikeBackStep()))
       return el
     }
 
@@ -1428,7 +1416,16 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       if (
         currentStep === 'title' &&
         e.code !== 'Escape' &&
-        !['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight'].includes(e.code)
+        ![
+          'ShiftLeft',
+          'ShiftRight',
+          'ControlLeft',
+          'ControlRight',
+          'AltLeft',
+          'AltRight',
+          'MetaLeft',
+          'MetaRight',
+        ].includes(e.code)
       ) {
         showStep('mode')
         e.preventDefault()

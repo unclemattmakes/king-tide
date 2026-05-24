@@ -28,6 +28,7 @@ import {
   type AIDifficulty,
   type AntiGravCameraIntensity,
   type ColorblindMode,
+  type DriftIntensity,
   type EmissiveLandmarksIntensity,
   type PreLapIntroMode,
   playerSettings,
@@ -37,6 +38,7 @@ import {
   setAudioBusVolume,
   setAudioMusicEnabled,
   setColorblindMode,
+  setDriftIntensity,
   setEmissiveLandmarks,
   setFramerateCap,
   setFullscreenPreferred,
@@ -55,8 +57,11 @@ import {
   setRubberBandAssist,
   setScreenShakeIntensity,
   setSubtitlesAlwaysOn,
+  setTuckMeter,
+  setTuckVfxIntensity,
   setTutorialSubtitles,
   setWavePumpIntensity,
+  type TuckVfxIntensity,
   type WavePumpIntensity,
 } from '@/engine/player-settings'
 import {
@@ -77,6 +82,16 @@ const WAVE_PUMP_LABEL: Record<WavePumpIntensity, string> = {
   off: 'Off',
 }
 const WAVE_PUMP_VALUE: Record<string, WavePumpIntensity> = {
+  Full: 'full',
+  Subtle: 'subtle',
+  Off: 'off',
+}
+const TUCK_VFX_LABEL: Record<TuckVfxIntensity, string> = {
+  full: 'Full',
+  subtle: 'Subtle',
+  off: 'Off',
+}
+const TUCK_VFX_VALUE: Record<string, TuckVfxIntensity> = {
   Full: 'full',
   Subtle: 'subtle',
   Off: 'off',
@@ -123,6 +138,17 @@ const PRE_LAP_INTRO_LABEL: Record<PreLapIntroMode, string> = {
 const PRE_LAP_INTRO_VALUE: Record<string, PreLapIntroMode> = {
   Full: 'full',
   Short: 'short',
+  Off: 'off',
+}
+
+const DRIFT_INTENSITY_LABEL: Record<DriftIntensity, string> = {
+  full: 'Full',
+  subtle: 'Subtle',
+  off: 'Off',
+}
+const DRIFT_INTENSITY_VALUE: Record<string, DriftIntensity> = {
+  Full: 'full',
+  Subtle: 'subtle',
   Off: 'off',
 }
 
@@ -434,6 +460,24 @@ const TAB_SPECS: TabSpec[] = [
         gate: 'Controls the in-race signal that fires on a successful pump.',
       },
       {
+        id: 'gp-tuck-vfx',
+        label: 'Tuck slipstream VFX',
+        control: {
+          kind: 'select',
+          options: ['Full', 'Subtle', 'Off'],
+          defaultValue: TUCK_VFX_LABEL[playerSettings.tuckVfxIntensity],
+        },
+        enabled: true,
+        gate: 'Vapor streaks that fan off the bike as you lean into the tuck sweet spot — denser the closer you ride it.',
+      },
+      {
+        id: 'gp-tuck-meter',
+        label: 'Tuck meter',
+        control: { kind: 'toggle', defaultValue: playerSettings.tuckMeter },
+        enabled: true,
+        gate: 'On-screen gauge showing the live tuck factor + sweet-spot target — tells you if you are nailing the lean or scraping.',
+      },
+      {
         id: 'gp-pre-lap-intro',
         label: 'Pre-lap intro',
         control: {
@@ -454,6 +498,17 @@ const TAB_SPECS: TabSpec[] = [
         },
         enabled: true,
         gate: 'Scales how much the chase camera rolls with the bike on banked walls + loops.',
+      },
+      {
+        id: 'gp-drift',
+        label: 'Drift feedback',
+        control: {
+          kind: 'select',
+          options: ['Full', 'Subtle', 'Off'],
+          defaultValue: DRIFT_INTENSITY_LABEL[playerSettings.driftIntensity],
+        },
+        enabled: true,
+        gate: 'MK-style mini-turbo drift — hold Z/C while steering. Setting controls only the camera roll + spark visuals; the physics + boost reward always apply.',
       },
       {
         id: 'gp-hud-minimap',
@@ -813,6 +868,11 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
           setTutorialSubtitles(cb.checked)
         })
       }
+      if (spec.enabled && spec.id === 'gp-tuck-meter') {
+        cb.addEventListener('change', () => {
+          setTuckMeter(cb.checked)
+        })
+      }
       if (spec.enabled && spec.id === 'audio-music-on') {
         cb.addEventListener('change', () => {
           setAudioMusicEnabled(cb.checked)
@@ -916,6 +976,12 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
           if (v) setWavePumpIntensity(v)
         })
       }
+      if (spec.enabled && spec.id === 'gp-tuck-vfx') {
+        sel.addEventListener('change', () => {
+          const v = TUCK_VFX_VALUE[sel.value]
+          if (v) setTuckVfxIntensity(v)
+        })
+      }
       if (spec.enabled && spec.id === 'gp-difficulty') {
         sel.addEventListener('change', () => {
           const v = DIFFICULTY_VALUE[sel.value]
@@ -932,6 +998,12 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
         sel.addEventListener('change', () => {
           const v = PRE_LAP_INTRO_VALUE[sel.value]
           if (v) setPreLapIntro(v)
+        })
+      }
+      if (spec.enabled && spec.id === 'gp-drift') {
+        sel.addEventListener('change', () => {
+          const v = DRIFT_INTENSITY_VALUE[sel.value]
+          if (v) setDriftIntensity(v)
         })
       }
       if (spec.enabled && spec.id === 'a11y-colorblind') {

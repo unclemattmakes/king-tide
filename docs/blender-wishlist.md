@@ -15,6 +15,17 @@ with the headless `pnpm gen:*` pipeline. The existing pipeline is in
 [blender-pipeline-guide.md](./blender-pipeline-guide.md).
 
 
+## Open tasks
+
+- **Surface-type material authoring.** Addon UI to tag a track mesh's
+  surface (`sand` / `ice` / `metal` / …) so the drift/grip physics
+  varies by material. The runtime side shipped with the drift mechanic
+  (PR #195); this is the Blender authoring half — a `SurfaceType`
+  mirror in `hoverbike_kinds.py`, a sync test, and an N-panel control
+  that writes `obj["surface"]`. Full brief:
+  [tasks/blender-surface-authoring.md](./tasks/blender-surface-authoring.md).
+
+
 ## Shipped so far
 
 - **Addon UX rework + water decoupling + island spawn (2026-05-19).**

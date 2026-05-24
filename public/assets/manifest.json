@@ -222,6 +222,12 @@
       "thumbUrl": "/assets/tracks/doges-drift-thumb.jpg"
     },
     {
+      "id": "drift-test",
+      "displayName": "Drift Practice Range",
+      "url": "/assets/tracks/drift-test.glb",
+      "specPath": "public/tracks/drift-test.json"
+    },
+    {
       "id": "dune-rally",
       "displayName": "Dune Rally",
       "url": "/assets/tracks/dune-rally.glb",

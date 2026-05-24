@@ -40,7 +40,7 @@ import type { Intent } from '@/engine/input/intent'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
-import { ControlIntentStore, RBHandleStore } from '@/game/components'
+import { ControlIntentStore, DriftStateStore, RBHandleStore } from '@/game/components'
 import {
   Rider,
   type RiderBoneName,
@@ -166,6 +166,20 @@ export const RIDER_POSE_TUNING = {
   headPitchSmoothing: 0.06,
   headPitchMax: 0.18,
 
+  /** Drift lean — the rider banks the torso into a drift. The lean
+   *  target is `leanDir × magnitude`, where magnitude grows when the
+   *  player steers INTO the drift and shrinks on counter-steer:
+   *    - neutral steer mid-drift → `driftLeanBase`
+   *    - full steer into the turn → up to `driftLeanMax` (deep bank)
+   *    - full counter-steer       → down to `driftLeanMin` (shallow)
+   *  Zero when not drifting. Low-passed by `driftLeanSmoothing`. Applied
+   *  at `spine_lower` so the whole upper body banks from the hips. */
+  driftLeanBase: 0.22,
+  driftLeanIntoGain: 0.5,
+  driftLeanMin: 0.06,
+  driftLeanMax: 0.55,
+  driftLeanSmoothing: 0.12,
+
   /** Strength of hand + foot IK. 1 = hard-locked to derived anchor, 0 =
    *  limbs follow rest pose only (no IK). Future: ramp to 0 during stun /
    *  launch transitions so the limbs flop instead of snapping. */
@@ -271,6 +285,35 @@ function zeroPoseResponse(r: RiderPoseResponse): void {
   r.flowYaw = 0
   r.headYaw = 0
   r.headPitch = 0
+  r.leanRoll = 0
+}
+
+/**
+ * Target torso roll (radians) for the rider's drift bank. Pure +
+ * exported so the lean curve is unit-pinned.
+ *
+ *  - `driftDir` 0 (not drifting) → 0 (the rider returns upright).
+ *  - Otherwise leans toward the drift direction with a magnitude that
+ *    grows when `steer` points INTO the drift and shrinks on
+ *    counter-steer (`intoSigned = steer × driftDir`, range ≈ ±0.7
+ *    after the player steer pre-scale).
+ *
+ * Sign: a left drift (`driftDir = -1`) returns a NEGATIVE roll, which
+ * `quatAxisAngle(0,0,1,·)` on `spine_lower` (chest-forward axis) banks
+ * the torso to the rider's left — into the corner. (Playtest confirmed
+ * the initial `-1` banked the wrong way; `+1` leans into the turn.)
+ */
+const DRIFT_LEAN_SIGN = 1
+export function driftLeanTarget(driftDir: number, steer: number): number {
+  if (driftDir === 0) return 0
+  const t = RIDER_POSE_TUNING
+  const intoSigned = steer * driftDir
+  const mag = clamp(
+    t.driftLeanBase + t.driftLeanIntoGain * intoSigned,
+    t.driftLeanMin,
+    t.driftLeanMax,
+  )
+  return DRIFT_LEAN_SIGN * driftDir * mag
 }
 
 /** Per-joint reactive rotation offset that the chain walker right-multiplies
@@ -286,7 +329,13 @@ function zeroPoseResponse(r: RiderPoseResponse): void {
 function reactiveOffsetFor(kind: RiderJointKind, resp: RiderPoseResponse): Quat {
   if (kind === 'spine_lower') {
     const share = RIDER_POSE_TUNING.bounceDistribution.spine_lower
-    return quatAxisAngle(1, 0, 0, resp.bouncePitch * share)
+    const pitchQ = quatAxisAngle(1, 0, 0, resp.bouncePitch * share)
+    // Drift bank — roll the torso around its forward (Z) axis. Lives
+    // at the base of the spine so the whole upper body (and, via the
+    // chain, the head) banks from the hips while hand IK keeps the
+    // grips planted.
+    const rollQ = quatAxisAngle(0, 0, 1, resp.leanRoll)
+    return quatMul(rollQ, pitchQ)
   }
   if (kind === 'spine_upper') {
     const share = RIDER_POSE_TUNING.bounceDistribution.spine_upper
@@ -314,6 +363,7 @@ function tickPoseResponse(
   bikeLinvel: Vec3,
   bikeAngvel: Vec3,
   intent: Intent | undefined,
+  driftDir: number,
   dt: number,
 ): void {
   // Bounce: critically-damped spring driven by vertical accel.
@@ -361,6 +411,11 @@ function tickPoseResponse(
     RIDER_POSE_TUNING.headPitchMax,
   )
   resp.headPitch = lerp(resp.headPitch, pitchTarget, RIDER_POSE_TUNING.headPitchSmoothing)
+
+  // Drift bank: low-pass toward the lean target (0 when not drifting,
+  // so the torso eases back upright on release).
+  const leanTarget = driftLeanTarget(driftDir, steer)
+  resp.leanRoll = lerp(resp.leanRoll, leanTarget, RIDER_POSE_TUNING.driftLeanSmoothing)
 
   resp.prevVel.x = bikeLinvel.x
   resp.prevVel.y = bikeLinvel.y
@@ -619,8 +674,9 @@ export function riderPoseSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): 
     const bikeLinvel = bikeRb.linvel()
     const bikeAngvel = bikeRb.angvel()
     const intent = ControlIntentStore.get(rider.bikeEid)
+    const driftDir = DriftStateStore.get(rider.bikeEid)?.driftDir ?? 0
 
-    tickPoseResponse(rider.poseResponse, bikeLinvel, bikeAngvel, intent, dt)
+    tickPoseResponse(rider.poseResponse, bikeLinvel, bikeAngvel, intent, driftDir, dt)
 
     const halfHeights = boneHalfHeights(rider)
 

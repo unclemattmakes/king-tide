@@ -85,7 +85,7 @@ export function createPropColliders(
         Math.max(0.05, p.size.y),
         Math.max(0.05, p.size.z),
       ).setFriction(0.7)
-      phys.world.createCollider(col, rb)
+      tagSurface(phys, phys.world.createCollider(col, rb), p.surface)
       continue
     }
     if (p.type === 'sphere') {
@@ -97,7 +97,7 @@ export function createPropColliders(
       desc.setRotation(p.rotation)
       const rb = phys.world.createRigidBody(desc)
       const col = phys.rapier.ColliderDesc.ball(Math.max(0.05, p.size.x)).setFriction(0.7)
-      phys.world.createCollider(col, rb)
+      tagSurface(phys, phys.world.createCollider(col, rb), p.surface)
       continue
     }
     if (p.type === 'cylinder') {
@@ -112,7 +112,7 @@ export function createPropColliders(
         Math.max(0.05, p.size.y),
         Math.max(0.05, p.size.x),
       ).setFriction(0.7)
-      phys.world.createCollider(col, rb)
+      tagSurface(phys, phys.world.createCollider(col, rb), p.surface)
       continue
     }
     // pipe / halfpipe — trimesh from world-space vertices.
@@ -127,9 +127,20 @@ export function createPropColliders(
     const col = phys.rapier.ColliderDesc.trimesh(verts, indices)
       .setFriction(0.6)
       .setRestitution(0.05)
-    phys.world.createCollider(col, rb)
+    tagSurface(phys, phys.world.createCollider(col, rb), p.surface)
   }
   return waveRiderBindings
+}
+
+/** Register a freshly-created collider's surface tag, if the prop
+ *  declared one. No-op for undefined / DEFAULT (the registry falls
+ *  back to DEFAULT on lookup either way). */
+function tagSurface(
+  phys: PhysicsWorld,
+  collider: { handle: number },
+  surface: Prop['surface'],
+): void {
+  if (surface) phys.surfaces.tag(collider.handle, surface)
 }
 
 /** Yaw around world-Y from a quaternion via the YXZ Euler decomposition.
@@ -196,7 +207,8 @@ function addAssetPropColliders(phys: PhysicsWorld, p: Prop, loaded: LoadedProp):
   }
   if (!col) return
   col.setFriction(0.6)
-  phys.world.createCollider(col, rb)
+  const created = phys.world.createCollider(col, rb)
+  if (p.surface) phys.surfaces.tag(created.handle, p.surface)
 }
 
 /**
