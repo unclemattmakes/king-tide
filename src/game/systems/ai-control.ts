@@ -269,6 +269,10 @@ export function aiControlSystem(
       // the AI rides without the boost reward.
       trickLeft: false,
       trickRight: false,
+      // AI doesn't tuck in v1 — the snowboard-glide tradeoff (cap up,
+      // turn down) is a player skill expression. Future: bake a "tuck on
+      // straight, stand on apex" heuristic into the AI controller.
+      tuck: false,
     })
   }
 }

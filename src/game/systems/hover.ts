@@ -498,7 +498,7 @@ function buildHoverFrame(
     // when source up ≈ −worldUp at exactly weight=0.5 (a half-blend
     // between right-side-up and upside-down). Fallback warns dev once.
     const blendX = agWeight * agOverride.upX
-    const blendY = (1 - agWeight) + agWeight * agOverride.upY
+    const blendY = 1 - agWeight + agWeight * agOverride.upY
     const blendZ = agWeight * agOverride.upZ
     const bLen = Math.hypot(blendX, blendY, blendZ)
     if (bLen > 1e-3) {
@@ -891,9 +891,7 @@ function applyMultiPointHoverSpring(
   const waterLongMul = resolveWaterLongitudinalSpringMul(stats)
   const BUOYANCY_PER_M = 14
   const BUOYANCY_CAP = 20
-  const slopeBoost = probe.isWater
-    ? 0
-    : Math.abs(footprint.surfaceForwardSlope) * SLOPE_HOVER_BOOST
+  const slopeBoost = probe.isWater ? 0 : Math.abs(footprint.surfaceForwardSlope) * SLOPE_HOVER_BOOST
   // Dive aid: target ride height drops with held pitch-down. Scale is
   // applied BEFORE slopeBoost so the climb-margin reaches its normal
   // value — the dive sinks the level-flight target only.
@@ -923,12 +921,7 @@ function applyMultiPointHoverSpring(
     const crossY = angv.z * p.ox - angv.x * p.oz
     const crossZ = angv.x * p.oy - angv.y * p.ox
     const vAtPointUp =
-      linvel.x * upX +
-      linvel.y * upY +
-      linvel.z * upZ +
-      crossX * upX +
-      crossY * upY +
-      crossZ * upZ
+      linvel.x * upX + linvel.y * upY + linvel.z * upZ + crossX * upX + crossY * upY + crossZ * upZ
     // Damp only the EXCESS upward velocity beyond what a steady climb
     // of this slope requires. On flat ground tangentUpVel=0 and we get
     // legacy "damp any lift-off" behaviour. On a climb at v m/s along a
@@ -1115,9 +1108,7 @@ function applyPlayerPitchTorque(
   // reads as altitude control via the hover-height drop. Pitch-up
   // (wheelie) is unaffected.
   const kickMul =
-    intent.pitch < 0
-      ? DIVE_KICK_TORQUE_MUL * Math.max(0, 1 - diveHoldS / DIVE_KICK_DURATION_S)
-      : 1
+    intent.pitch < 0 ? DIVE_KICK_TORQUE_MUL * Math.max(0, 1 - diveHoldS / DIVE_KICK_DURATION_S) : 1
   const aPitch = -intent.pitch * coef * kickMul
   const tx = rightP.x * aPitch * m * dt
   const ty = rightP.y * aPitch * m * dt
@@ -1206,7 +1197,9 @@ function applyAirControlBranch(frame: HoverFrame): void {
     // Held-boost is gated by the boost-meter `active` flag — see
     // boost-meter.ts for the rising-edge / drain rules.
     const meterActive = BoostMeterStore.get(eid)?.active === true
-    const boostAir = (meterActive ? stats.boostMul : 1) * getCurrentBoostMultiplier(eid)
+    const tuckAirMul = intent.tuck ? stats.tuckSpeedBoost : 1
+    const boostAir =
+      (meterActive ? stats.boostMul : 1) * getCurrentBoostMultiplier(eid) * tuckAirMul
     // Boost raises the speed cap: speedFalloff stays positive past base
     // topSpeed as long as boost > 1, so the boost actually pushes the
     // bike faster on a long straight (Burnout feel). Without this, at
@@ -1235,7 +1228,8 @@ function applyAirControlBranch(frame: HoverFrame): void {
   // rotates around the road normal, not world-Y. Reduced authority
   // (×0.3) preserved for landing alignment.
   const AIR_TURN_MUL = 0.3
-  const aTurnAir = -intent.steer * stats.turnTorque * AIR_TURN_MUL
+  const tuckTurnMulAir = intent.tuck ? stats.tuckTurnMul : 1
+  const aTurnAir = -intent.steer * stats.turnTorque * AIR_TURN_MUL * tuckTurnMulAir
   const fwdAxisDot = fwdAir.x * upX + fwdAir.y * upY + fwdAir.z * upZ
   const yawAxXAir = upX - fwdAxisDot * fwdAir.x
   const yawAxYAir = upY - fwdAxisDot * fwdAir.y
@@ -1370,7 +1364,13 @@ function applyGroundBranch(
   const meterActive = BoostMeterStore.get(eid)?.active === true
   const heldBoost = meterActive ? stats.boostMul : 1
   const pickupBoost = getCurrentBoostMultiplier(eid)
-  const boost = heldBoost * pickupBoost
+  // Tuck multiplies the effective cap — only pays off when the bike has
+  // a force pushing it past base topSpeed (slope momentum on a descent,
+  // throttle on a downhill wave face, pickup boost). On flat ground the
+  // thrust curve still saturates at the same speed because nothing is
+  // working against the still-quadratic-ish cap headroom.
+  const tuckMul = intent.tuck ? stats.tuckSpeedBoost : 1
+  const boost = heldBoost * pickupBoost * tuckMul
   // Boost raises the speed cap (see air branch for rationale).
   const speedFalloff = Math.max(0, 1 - speed / (stats.topSpeed * boost))
   const surfaceMul = probe.isWater ? 0.85 : 1.0
@@ -1506,7 +1506,10 @@ function applyGroundBranch(
   // pitch. In anti-grav we substitute the zone's up so yaw rotates
   // around the road normal (MK8 anti-grav feel).
   const turnMul = probe.isWater ? 1.1 : 1.0
-  const aTurn = -intent.steer * stats.turnTorque * turnMul
+  // Tuck trades steering for speed — the snowboarder who ducks down
+  // can't carve a tight line at the same time.
+  const tuckTurnMul = intent.tuck ? stats.tuckTurnMul : 1
+  const aTurn = -intent.steer * stats.turnTorque * turnMul * tuckTurnMul
   const yawAxXG = upX - fwdDotUpG * fwd.x
   const yawAxYG = upY - fwdDotUpG * fwd.y
   const yawAxZG = upZ - fwdDotUpG * fwd.z
@@ -1600,8 +1603,13 @@ function applyGroundBranch(
   // easily). Measured along the up-plane right axis so drag opposes
   // sideways drift across the road surface (not across world XZ).
   const dragMul = probe.isWater ? 1.4 : 1.0
+  // Tuck = less frontal area, less sideways scrub. The bike tracks the
+  // line it's already on instead of bleeding speed laterally — pays off
+  // on a clean exit out of a corner where the player straightens, tucks,
+  // and lets the slope do the rest.
+  const tuckDragMul = intent.tuck ? stats.tuckDragMul : 1
   const lateralVel = linvel.x * planeRightX + linvel.y * planeRightY + linvel.z * planeRightZ
-  const aDrag = -lateralVel * stats.lateralDrag * dragMul
+  const aDrag = -lateralVel * stats.lateralDrag * dragMul * tuckDragMul
   rb.applyImpulse(
     {
       x: planeRightX * aDrag * m * dt,
@@ -1777,7 +1785,8 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     )
     const bikeProj = frame.t.x * frame.upX + frame.t.y * frame.upY + frame.t.z * frame.upZ
     const groundDistance = probe.hasSurface ? bikeProj - probe.surfaceProj : MAX_HOVER_PROBE
-    const isGrounded = probe.hasSurface && groundDistance < stats.hoverHeight * GROUNDED_DISTANCE_MUL
+    const isGrounded =
+      probe.hasSurface && groundDistance < stats.hoverHeight * GROUNDED_DISTANCE_MUL
 
     // Prior tick's state — drives the slope filter seed, the takeoff/
     // landing transitions, the dive-kick / release-kick taper, and

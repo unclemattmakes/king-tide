@@ -32,6 +32,7 @@ function expectIntentClose(actual: Intent, expected: Intent): void {
   expect(actual.pitch).toBeCloseTo(expected.pitch, 2)
   expect(actual.fire).toBe(expected.fire)
   expect(actual.boost).toBe(expected.boost)
+  expect(actual.tuck).toBe(expected.tuck)
 }
 
 describe('InputFrame codec', () => {
@@ -56,7 +57,17 @@ describe('InputFrame codec', () => {
     const frame: InputFrame = {
       tick: 12345,
       peerId: 3,
-      intent: { throttle: 1, steer: -1, brake: 1, fire: true, boost: true, pitch: -1, trickLeft: true, trickRight: true },
+      intent: {
+        throttle: 1,
+        steer: -1,
+        brake: 1,
+        fire: true,
+        boost: true,
+        pitch: -1,
+        trickLeft: true,
+        trickRight: true,
+        tuck: true,
+      },
     }
     const decoded = decodeInputFrame(encodeInputFrame(frame))
     expect(decoded.tick).toBe(12345)
@@ -94,6 +105,19 @@ describe('InputFrame codec', () => {
     }
   })
 
+  it('preserves the tuck flag independently of other booleans', () => {
+    for (const tuck of [false, true]) {
+      const frame: InputFrame = { tick: 0, peerId: 0, intent: makeIntent({ tuck }) }
+      const out = decodeInputFrame(encodeInputFrame(frame)).intent
+      expect(out.tuck).toBe(tuck)
+      // Tuck bit must not bleed into adjacent flags.
+      expect(out.fire).toBe(false)
+      expect(out.boost).toBe(false)
+      expect(out.trickLeft).toBe(false)
+      expect(out.trickRight).toBe(false)
+    }
+  })
+
   it('preserves fire and boost independently', () => {
     const cases: Array<[boolean, boolean]> = [
       [false, false],
@@ -113,7 +137,17 @@ describe('InputFrame codec', () => {
     const frame: InputFrame = {
       tick: 0,
       peerId: 0,
-      intent: { throttle: 5, steer: -7, brake: 99, fire: false, boost: false, pitch: -3, trickLeft: false, trickRight: false },
+      intent: {
+        throttle: 5,
+        steer: -7,
+        brake: 99,
+        fire: false,
+        boost: false,
+        pitch: -3,
+        trickLeft: false,
+        trickRight: false,
+        tuck: false,
+      },
     }
     const out = decodeInputFrame(encodeInputFrame(frame)).intent
     expect(out.throttle).toBe(1)

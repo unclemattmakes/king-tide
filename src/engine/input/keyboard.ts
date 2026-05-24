@@ -94,5 +94,6 @@ export function keyboardIntent(dt: number): Intent {
   intent.pitch = smoothPitch
   intent.trickLeft = isActionDown('trickLeft', bindings)
   intent.trickRight = isActionDown('trickRight', bindings)
+  intent.tuck = isActionDown('tuck', bindings)
   return intent
 }

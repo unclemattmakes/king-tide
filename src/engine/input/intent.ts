@@ -21,6 +21,14 @@ export type Intent = {
    */
   trickLeft: boolean
   trickRight: boolean
+  /**
+   * Snowboarder-tuck — held while moving forward, raises the bike's
+   * effective top-speed cap, reduces lateral drag, trades away ~half the
+   * steering authority. Pays off on descents/wave faces where gravity is
+   * doing the work and a raised cap converts more KE into forward speed.
+   * Stacks with boost. See `src/game/systems/hover.ts`.
+   */
+  tuck: boolean
 }
 
 export function emptyIntent(): Intent {
@@ -33,5 +41,6 @@ export function emptyIntent(): Intent {
     pitch: 0,
     trickLeft: false,
     trickRight: false,
+    tuck: false,
   }
 }
