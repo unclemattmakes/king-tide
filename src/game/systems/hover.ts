@@ -113,18 +113,20 @@ export const MAX_BOW_LIFT_ERROR = 1.2 // metres, ≈ one hoverHeight
 
 // Dive model — pitch-down input is rate-limited via a per-bike
 // `diveHoldS` timer (see HoverState). On the rising edge of nose-down
-// input the player's torque starts at full strength and tapers linearly
-// to zero over DIVE_KICK_DURATION_S. After that the grounded pitch PD
-// (full-strength P) pulls the chassis back to surface-tangent attitude
-// (parallel to slope on hills, level on flat). Sustained nose-down
-// input then reads as ALTITUDE CONTROL via DIVE_HOVER_HEIGHT_MIN_MUL,
-// not chassis tilt — the bike sinks lower while staying parallel.
+// input the player's torque starts at DIVE_KICK_TORQUE_MUL × baseline
+// and tapers linearly to zero over DIVE_KICK_DURATION_S. After that
+// the grounded pitch PD (full-strength P) pulls the chassis back to
+// surface-tangent attitude (parallel to slope on hills, level on
+// flat). Sustained nose-down input then reads as ALTITUDE CONTROL
+// via DIVE_HOVER_HEIGHT_MIN_MUL, not chassis tilt — the bike sinks
+// lower while staying parallel.
 //
 // Bow / stern corner-spring boost curves (earlier iterations) are gone
 // — with the chassis returning to level via PD, both ends naturally
 // equilibrate at the lowered effHover and the per-corner asymmetry
 // isn't needed.
-export const DIVE_KICK_DURATION_S = 0.15
+export const DIVE_KICK_DURATION_S = 0.22
+export const DIVE_KICK_TORQUE_MUL = 1.3
 
 // Target hover height drops to this fraction of stats.hoverHeight at
 // full pitch-down intent (linear ramp on |intent.pitch|). Slope-aware
@@ -1072,13 +1074,16 @@ function applyPlayerPitchTorque(
   }
   const rightP = quatRotate(q, { x: 1, y: 0, z: 0 })
   const coef = isGrounded ? 7 : 1.8
-  // Dive-kick taper: nose-down torque fades from full to zero over
-  // DIVE_KICK_DURATION_S after the player starts holding pitch-down.
-  // After the kick, the pitch PD pulls the chassis back to surface
-  // tangent and sustained input reads as altitude control via the
-  // hover-height drop. Pitch-up (wheelie) is unaffected.
+  // Dive-kick taper: nose-down torque starts at DIVE_KICK_TORQUE_MUL ×
+  // baseline and fades to zero over DIVE_KICK_DURATION_S after the
+  // player starts holding pitch-down. After the kick, the pitch PD
+  // pulls the chassis back to surface tangent and sustained input
+  // reads as altitude control via the hover-height drop. Pitch-up
+  // (wheelie) is unaffected.
   const kickMul =
-    intent.pitch < 0 ? Math.max(0, 1 - diveHoldS / DIVE_KICK_DURATION_S) : 1
+    intent.pitch < 0
+      ? DIVE_KICK_TORQUE_MUL * Math.max(0, 1 - diveHoldS / DIVE_KICK_DURATION_S)
+      : 1
   const aPitch = -intent.pitch * coef * kickMul
   const tx = rightP.x * aPitch * m * dt
   const ty = rightP.y * aPitch * m * dt
