@@ -146,6 +146,8 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
   HoverStateStore.set(eid, {
     groundDistance: 0,
     isGrounded: false,
+    noseGrounded: false,
+    baseGrounded: false,
     surfaceIsWater: false,
     surfaceType: SurfaceType.DEFAULT,
     forwardSlope: 0,
@@ -170,7 +172,7 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
     trickWindowOpen: false,
     trickWindowTakeoffVy: 0,
     trickFiredThisAirborne: false,
-    wasGroundedLastTick: true,
+    wasFullyPlantedLastTick: false,
     bufferedPressTimerSec: 0,
     bufferedPressDir: 0,
     trickFiredThisTick: false,

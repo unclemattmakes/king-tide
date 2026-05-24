@@ -22,66 +22,61 @@ import {
 } from '@/game/components'
 
 /**
- * Airborne-gated trick system. MK-style: the trick window opens on
- * the grounded→airborne transition of a *qualifying* takeoff and
- * stays open until landing. Any rising-edge press inside the window
- * fires the trick — no apex-timing dance, no separate credibility
- * check at press time. The window is closed silently on landing if
- * the player doesn't press.
+ * Geometric trick system. The window is armed by the bike's *pose*, not
+ * by a vertical-velocity threshold: the moment the bike leaves its
+ * fully-planted stance — the nose lifting off a bump / lip / ramp crest
+ * while the base is still down, or a clean full takeoff — the window
+ * opens and stays open the whole airtime, closing when the bike
+ * re-plants. Any rising-edge press inside the window fires the trick
+ * (once per airtime). This is the naive, readable model: nose airborne +
+ * base grounded + press = trick, with the window persisting through the
+ * fully-airborne phase so a press *just after* the base lifts off still
+ * lands.
  *
- * Qualifying takeoff = surface-driven (not from the bike's own small
- * hop, i.e. not in `hopLockoutActive`) AND `max(vy, vyPeak)` at
- * takeoff ≥ `MIN_VY_PEAK` AND speed ≥ `MIN_SPEED_FRAC` * topSpeed AND
- * throttle ≥ `MIN_THROTTLE`. The peak is included in the vy gate
- * because wave-following bikes release just past the crest, by which
- * point the instantaneous vy has already begun decreasing — using the
- * recent peak keeps the qualifying check in lockstep with the TRICK
- * READY prompt (which fires on the upslope) so a press elicited by
- * the prompt is honoured. The takeoff-vy is captured for reward
- * scaling so a stronger launch pays a bigger boost — the wave-mastery
- * reward hierarchy survives the simplification.
+ * Why geometry beats the old vy gate: lips, humps, and ramp crests pop
+ * the nose long before the *center* probe registers `isGrounded` false
+ * or the vertical velocity crosses a threshold, so the old model simply
+ * never opened the window on most terrain features. The per-end contact
+ * flags (`HoverState.noseGrounded` / `baseGrounded`, computed by the
+ * hover spring's bow/stern probes with chatter-debouncing hysteresis)
+ * make the pop a first-class signal.
  *
- * Pre-input buffer: if the player presses while still grounded but
- * a qualifying takeoff is plausibly imminent (recent vyPeak crossed
- * `MIN_VY_PEAK`, speed/throttle OK, no hop-lockout), the press is
- * held for `PRE_PRESS_BUFFER_SEC` (200 ms). If the bike takes off
- * inside that window, the buffered press fires the trick at takeoff.
- * If 200 ms pass and the bike never went airborne (the wave-following
- * hover-spring rides the bike through the wave crest without ever
- * flipping `isGrounded` false), the system re-checks the credibility
- * gates and — if they still hold — synthesises a deferred takeoff:
- * applies the small-hop lift impulse and fires the trick at the
- * recent peak vy. This guarantees the TRICK READY prompt is honoured
- * by the press it elicited. If the gates have decayed (player let
- * off the throttle, slowed down, etc.) the buffer falls back to the
- * courtesy lift so the press still does *something* visible.
+ * Eligibility still requires the launch be surface-driven (not the
+ * bike's own courtesy hop — `hopLockoutActive`) and ridden with intent
+ * (speed ≥ `MIN_SPEED_FRAC` * topSpeed, throttle ≥ `MIN_THROTTLE`). On
+ * flat ground the bike never leaves its planted stance, so those gates
+ * plus the geometry naturally reject parked / coasting tricks without a
+ * separate vy check. Vertical velocity now scales *reward only*:
+ * `max(vy, vyPeak)` is captured at the pop and floored so even a gentle
+ * bump-crest pop pays, while a big launch pays more.
  *
- * Flatground press with no qualifying context = small hop only. No
- * boost, no spin, no meter — just a polite lift so the bike can
- * choose to leave the ground at the player's command.
+ * Pre-input buffer: a press while still planted, with a plausible pop
+ * imminent (recent `vyPeak ≥ MIN_VY_PEAK`, speed/throttle OK, no
+ * hop-lockout), is held for `PRE_PRESS_BUFFER_SEC` (200 ms). If the bike
+ * pops inside that window the buffered press fires the trick at the pop;
+ * otherwise the buffer expires to a courtesy hop.
+ *
+ * Flatground press with no plausible pop = small courtesy hop. No boost,
+ * no spin, no meter — just a polite lift at the player's command.
  *
  * Per bike, per fixed tick:
  *
  *   1. Decay cooldown + spin lifetime.
- *   2. Tick the pre-press buffer; on expiry, fire the deferred trick
- *      if the gates still hold, else fall back to a courtesy small hop.
- *   3. Tick the hop-lockout state machine (unchanged — ends on
- *      airborne→grounded after a small hop).
- *   4. Maintain the vy-peak tracker (still used as the "climb
- *      context" signal that gates whether a press should buffer).
- *   5. Detect grounded↔airborne transitions:
- *      - takeoff (qualifying): open trick window, capture takeoff-vy,
- *        consume any buffered press as a fire-at-takeoff trick.
- *      - landing: close window, clear airborne-dedup.
+ *   2. Tick the hop-lockout state machine (ends on airborne→grounded
+ *      after a courtesy hop).
+ *   3. Maintain the vy-peak tracker (climb context for the buffer +
+ *      reward scaling at the pop).
+ *   4. Geometric window: leaving the fully-planted stance arms it
+ *      (consuming any buffered press); re-planting closes it.
+ *   5. Tick the pre-press buffer; on expiry, fire a courtesy hop.
  *   6. Detect rising-edge press:
- *      - In an open window (already airborne): fire immediately.
- *      - On the ground with climb context: buffer.
- *      - On flat ground: fire small hop.
+ *      - Window open: fire (once per airtime), else swallow.
+ *      - Grounded with climb context: buffer.
+ *      - Grounded flat: fire courtesy hop.
  *
- * The render-side `wave-pump-observer` is now a thin shim that reads
- * the `trickFiredThisTick` flag and translates it to a `PumpEvent`
- * for HUD/audio/FX — no independent credibility check, no duplicated
- * vy-peak tracker.
+ * The render-side `wave-pump-observer` is a thin shim that reads the
+ * `trickFiredThisTick` flag and translates it to a `PumpEvent` for
+ * HUD/audio/FX.
  */
 
 /** Vertical velocity (m/s) for a flatground courtesy lift. Visible
@@ -168,90 +163,57 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
       }
     }
 
-    // Transition detection. Both takeoff and landing read from the
-    // previous tick's grounded state stored on the component.
-    const justTookOff = trick.wasGroundedLastTick && !hover.isGrounded
-    const justLanded = !trick.wasGroundedLastTick && hover.isGrounded
-    trick.wasGroundedLastTick = hover.isGrounded
-
-    if (justTookOff) {
-      // Takeoff qualifies if it's surface-driven (no active hop-lockout)
-      // and the speed/throttle/vy gates pass. Hop-lockout would still be
-      // active for ~1 sim tick after the small hop's impulse fired, so
-      // checking it here cleanly rejects self-hop takeoffs.
-      //
-      // Use `max(vy, vyPeak)` for the vy gate: on a wave-following bike,
-      // vy at the instant `isGrounded` flips false is often lower than
-      // the recent peak — hover-spring inertia carries the bike off the
-      // surface after the wave crest has already passed, so the "this
-      // was a credible launch" reading lives at the climb's peak, not
-      // the post-release residual. The TRICK READY prompt uses vyPeak
-      // for its look-ahead promise; this keeps the qualifying check in
-      // lockstep with what the player saw.
-      const surfaceDriven = !trick.hopLockoutActive
-      const takeoffVy = Math.max(vy, trick.vyPeak)
-      const qualifying = surfaceDriven && takeoffVy >= MIN_VY_PEAK && speedOK && throttleOK
-      if (qualifying) {
-        trick.trickWindowOpen = true
-        trick.trickWindowTakeoffVy = takeoffVy
-        trick.trickFiredThisAirborne = false
-        // Consume a buffered press, if any. Direction was captured at
-        // press time so a buffered "I committed left" still spins
-        // left even if the stick moved before takeoff landed.
-        if (trick.bufferedPressTimerSec > 0 && trick.bufferedPressDir !== 0) {
-          fireTrick(trick, trick.bufferedPressDir, takeoffVy)
-          trick.bufferedPressTimerSec = 0
-          trick.bufferedPressDir = 0
-        }
-      }
-    }
-
-    if (justLanded) {
+    // ── Geometric trick window ───────────────────────────────────────
+    // Fully-planted = center grounded AND both ends grounded. Leaving
+    // that stance (a nose-up pop with the base still down, or a clean
+    // full takeoff) arms the window; re-planting closes it. In between
+    // the window stays open the whole airtime — one press fires the
+    // trick. The per-end flags are debounced in the hover system, so a
+    // single lumpy trimesh tick can't flicker the window.
+    const fullyPlanted = hover.isGrounded && hover.noseGrounded && hover.baseGrounded
+    if (trick.trickWindowOpen && fullyPlanted) {
+      // Re-planted — close + clear the per-airtime dedup.
       trick.trickWindowOpen = false
       trick.trickWindowTakeoffVy = 0
       trick.trickFiredThisAirborne = false
+    } else if (
+      !trick.trickWindowOpen &&
+      !fullyPlanted &&
+      trick.wasFullyPlantedLastTick &&
+      !trick.hopLockoutActive &&
+      speedOK &&
+      throttleOK
+    ) {
+      // Just left the planted stance under power — arm. Reward scales on
+      // launch energy: `max(vy, vyPeak)` captures the climb's peak even
+      // if the instantaneous vy has eased off the crest. `fireTrick`
+      // floors the strength so a gentle pop still pays.
+      trick.trickWindowOpen = true
+      trick.trickWindowTakeoffVy = Math.max(vy, trick.vyPeak)
+      trick.trickFiredThisAirborne = false
+      // Consume a buffered early-press, if any — fire at the pop.
+      // Direction was captured at press time so a committed "left"
+      // still spins left even if the stick moved before the pop landed.
+      if (trick.bufferedPressTimerSec > 0 && trick.bufferedPressDir !== 0) {
+        fireTrick(trick, trick.bufferedPressDir, trick.trickWindowTakeoffVy)
+        trick.bufferedPressTimerSec = 0
+        trick.bufferedPressDir = 0
+      }
     }
+    trick.wasFullyPlantedLastTick = fullyPlanted
 
-    // Tick down + expire the pre-press buffer. Skipped if a trick
-    // already consumed the buffer at takeoff above.
+    // Tick down + expire the pre-press buffer. Skipped if the arm above
+    // already consumed it. On expiry the pop never arrived, so fall back
+    // to a courtesy hop — the press still does something visible. The
+    // hop-lockout is engaged because that lift is self-induced and must
+    // not arm a free trick on the resulting airborne transition.
     if (trick.bufferedPressTimerSec > 0) {
       trick.bufferedPressTimerSec = Math.max(0, trick.bufferedPressTimerSec - dt)
       if (trick.bufferedPressTimerSec === 0 && trick.bufferedPressDir !== 0) {
-        // The buffer was armed because the climb context was credible
-        // (recent vyPeak crossed `MIN_VY_PEAK`, speed/throttle gates
-        // passed). If the conditions still look credible at expiry,
-        // honor the player's commitment: synthesize a deferred-takeoff
-        // trick — apply a lift impulse so the bike visibly leaves the
-        // surface, open the airborne window, and fire the trick using
-        // the recent peak vy for reward scaling. Without this, the
-        // common "bike rides the wave crest without isGrounded flipping
-        // false" case silently expired the buffer to a courtesy hop —
-        // the TRICK READY prompt would lure the player into a press
-        // that produced no trick. The hop-lockout is engaged because
-        // the impulse we just applied IS a self-induced lift; without
-        // the flag the bike's resulting airborne transition would
-        // re-qualify on the next tick and reset `trickFiredThisAirborne`,
-        // allowing a second press to double-fire in the same airtime.
-        const stillCredible =
-          !trick.hopLockoutActive && trick.vyPeak >= MIN_VY_PEAK && speedOK && throttleOK
-        if (stillCredible) {
-          applySmallHop(rb)
-          trick.trickWindowOpen = true
-          trick.trickWindowTakeoffVy = trick.vyPeak
-          fireTrick(trick, trick.bufferedPressDir, trick.vyPeak)
-          trick.hopLockoutActive = true
-          trick.hopLockoutAirborneSeen = false
-          trick.hopLockoutSafetyTicks = HOP_LOCKOUT_MAX_TICKS
-        } else {
-          // Climb decayed between press and expiry (player let off the
-          // throttle, slowed down, etc.). Fall back to the courtesy
-          // lift so the press still does *something* visible, just not
-          // a trick.
-          applySmallHop(rb)
-          trick.hopLockoutActive = true
-          trick.hopLockoutAirborneSeen = false
-          trick.hopLockoutSafetyTicks = HOP_LOCKOUT_MAX_TICKS
-        }
+        applySmallHop(rb)
+        trick.hopLockoutActive = true
+        trick.hopLockoutAirborneSeen = false
+        trick.hopLockoutSafetyTicks = HOP_LOCKOUT_MAX_TICKS
         trick.bufferedPressDir = 0
       }
     }
@@ -265,37 +227,40 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
     const pressDir = leftEdge ? -1 : rightEdge ? +1 : 0
     if (pressDir === 0) continue
 
-    if (trick.trickWindowOpen && !trick.trickFiredThisAirborne) {
-      // Press inside the open window — fire immediately. Strength uses
-      // the captured takeoff-vy, not press-time vy, so the reward is
-      // committed at takeoff regardless of when in the arc the player
-      // presses.
-      fireTrick(trick, pressDir, trick.trickWindowTakeoffVy)
+    if (trick.trickWindowOpen) {
+      // Open window: fire once per airtime. Strength uses the captured
+      // pop vy, not press-time vy, so the reward is committed at the pop
+      // regardless of when in the arc the player presses. A re-press
+      // after the first fire (or while already firing) is swallowed —
+      // no courtesy hop mid-episode.
+      if (!trick.trickFiredThisAirborne) {
+        fireTrick(trick, pressDir, trick.trickWindowTakeoffVy)
+      }
       continue
     }
 
     if (!hover.isGrounded) {
-      // Airborne but either no qualifying window (self-hop, anti-grav
-      // weirdness) or we already fired this airtime — drop the press.
+      // Airborne with no open window (self-hop, anti-grav weirdness).
+      // Drop the press.
       continue
     }
 
-    // Grounded press. Decide whether to buffer or fire a small hop.
+    // Grounded press, window closed. Buffer if a pop looks imminent
+    // (recent climb + gates), else fire the courtesy hop.
     if (trick.cooldownSec > 0) continue
     const climbContext = trick.vyPeak >= MIN_VY_PEAK
-    const noHopLockout = !trick.hopLockoutActive
-    if (climbContext && speedOK && throttleOK && noHopLockout) {
-      // Plausibly about to launch — hold the press. Don't reset the
-      // cooldown yet: if takeoff happens, the trick fires (no hop
-      // cooldown needed); if the buffer expires to a small hop, the
-      // expiry branch sets things up.
+    if (climbContext && speedOK && throttleOK && !trick.hopLockoutActive) {
+      // Plausibly about to pop — hold the press. Don't reset the
+      // cooldown yet: if the pop happens the trick fires (no hop
+      // cooldown needed); if the buffer expires the courtesy-hop branch
+      // sets things up.
       trick.bufferedPressTimerSec = PRE_PRESS_BUFFER_SEC
       trick.bufferedPressDir = pressDir
       continue
     }
 
-    // Flatground press, no plausible takeoff — fire the small courtesy
-    // hop. No boost, no spin, no meter charge.
+    // Flatground press, no plausible pop — fire the small courtesy hop.
+    // No boost, no spin, no meter charge.
     applySmallHop(rb)
     trick.cooldownSec = HOP_COOLDOWN_SEC
     trick.hopLockoutActive = true
@@ -317,7 +282,10 @@ function fireTrick(
   takeoffVy: number,
 ): void {
   trick.trickFiredThisTick = true
-  trick.trickFiredStrength = strengthFromTakeoffVy(takeoffVy)
+  // Floor the vy at MIN_VY_PEAK so a geometric pop with little vertical
+  // speed (cresting a flat-topped bump) still pays the "I made it count"
+  // floor (0.4); stronger launches scale up toward 1.0.
+  trick.trickFiredStrength = strengthFromTakeoffVy(Math.max(takeoffVy, MIN_VY_PEAK))
   trick.trickFiredDirection = dir
   trick.trickFiredThisAirborne = true
 }
