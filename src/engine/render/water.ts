@@ -173,6 +173,12 @@ export type WaterMesh = {
     /** Render the wave geometry as wireframe. Useful for tuning wave /
      *  wake amplitudes against the actual displacement. */
     setWireframe(on: boolean): void
+    /** Paint each water layer in a distinct flat color (center=red,
+     *  outer=green, skirt=blue) so the LOD boundaries between the
+     *  three meshes are visible. Used with the water-test track's
+     *  camera-locked transition markers to diagnose where seams sit.
+     *  No material rebuild — flips a uniform mix factor. */
+    setColorize(on: boolean): void
     /** Time-scale getter for the main loop. */
     getTimeScale(): number
   }
@@ -202,6 +208,9 @@ export type WaterDebugDefaults = {
   /** Wave-field bearing in degrees, -180..180. */
   waveBearing: number
   wireframe: boolean
+  /** When true, each water layer paints in a distinct flat color so
+   *  LOD seams are visible. Off by default. */
+  colorize: boolean
 }
 
 /** Maximum bikes the shader supports per frame. Today's race is player +
@@ -636,6 +645,21 @@ export function createWaterMesh(
   const roughBaseUniform = uniform(ROUGH_BASE_DEFAULT)
   const roughSparkleUniform = uniform(ROUGH_SPARKLE_DEFAULT)
   const detailStrengthUniform = uniform(DETAIL_STRENGTH_DEFAULT)
+  // Debug colorize. When `debugColorizeMixUniform` is 1 each of the three
+  // water layers is painted in a distinct flat color so the boundaries
+  // between center mesh / outer LOD tile / horizon skirt are obvious —
+  // pairs with the camera-locked transition markers used by the
+  // water-test track to make the LOD architecture visible. The center
+  // mesh's emissive (foam, sun glow, sun disc/streak) is faded by the
+  // same factor so the colored zone reads clean rather than being
+  // washed out by highlights.
+  const CENTER_DEBUG_COLOR_DEFAULT = new THREE.Color(0.95, 0.18, 0.18)
+  const OUTER_DEBUG_COLOR_DEFAULT = new THREE.Color(0.18, 0.85, 0.32)
+  const SKIRT_DEBUG_COLOR_DEFAULT = new THREE.Color(0.22, 0.45, 0.98)
+  const centerDebugColorUniform = uniform(CENTER_DEBUG_COLOR_DEFAULT)
+  const outerDebugColorUniform = uniform(OUTER_DEBUG_COLOR_DEFAULT)
+  const skirtDebugColorUniform = uniform(SKIRT_DEBUG_COLOR_DEFAULT)
+  const debugColorizeMixUniform = uniform(0)
   // Per-group amplitude scales — one for swells (waves 0–1), one for chops
   // (waves 2–5). Both default to 1.0 (no scale). The shader multiplies the
   // baked per-wave constants by these uniforms; the CPU buoyancy mirrors
@@ -2100,7 +2124,11 @@ export function createWaterMesh(
   const aerialMix = smoothstep(float(120), float(280), camDist).mul(float(0.5))
   const surfaceColor = mix(reflectedOrBase, horizonHazeUniform, aerialMix)
 
-  const albedo = mix(surfaceColor, foamColor, foamMask)
+  const albedo = mix(
+    mix(surfaceColor, foamColor, foamMask),
+    centerDebugColorUniform,
+    debugColorizeMixUniform,
+  )
 
   // Sky-tint emissive: only used as a fallback when reflections are off
   // (`?reflect=0`). When the reflection is active, the actual reflected
@@ -2180,7 +2208,10 @@ export function createWaterMesh(
   // the "this wave is actually breaking" signal a player relies on for
   // arcade water reads.
   const foamEmissive = foamColor.mul(foamMask).mul(float(0.5))
-  mat.emissiveNode = fresnelEmissive.add(sunGlow).add(sunDisc).add(sunStreak).add(foamEmissive)
+  // Fade emissive contributions out when the debug colorize is on, so the
+  // center mesh's red tint isn't washed out by foam / sun-disc highlights.
+  const emissiveSum = fresnelEmissive.add(sunGlow).add(sunDisc).add(sunStreak).add(foamEmissive)
+  mat.emissiveNode = emissiveSum.mul(float(1).sub(debugColorizeMixUniform))
   // View-angle-dependent shallow-seabed transparency. Only applies in
   // shallow water where there's real terrain underneath — gated by
   // `depthValidGate` (no heightmap data → open ocean → stay fully
@@ -2246,6 +2277,7 @@ export function createWaterMesh(
     pinchDirection: PINCH_DIRECTION_DEFAULT,
     waveBearing: WAVE_BEARING_DEFAULT,
     wireframe: wireFlag,
+    colorize: false,
   }
   const clamp01 = (n: number, lo: number, hi: number) =>
     Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo))
@@ -2345,6 +2377,9 @@ export function createWaterMesh(
     setWireframe(on) {
       mat.wireframe = !!on
       outerMat.wireframe = !!on
+    },
+    setColorize(on) {
+      debugColorizeMixUniform.value = on ? 1 : 0
     },
   }
 
@@ -2542,7 +2577,11 @@ export function createWaterMesh(
   const outerDeep = vec3(0.02, 0.22, 0.32)
   const outerScatter = vec3(0.22, 0.85, 0.92)
   const outerBody = mix(outerDeep, outerScatter, outerHeightFactor.mul(float(0.4))).mul(outerShade)
-  const outerColorNode = mix(outerBody, horizonHazeUniform, outerAerialMix)
+  const outerColorNode = mix(
+    mix(outerBody, horizonHazeUniform, outerAerialMix),
+    outerDebugColorUniform,
+    debugColorizeMixUniform,
+  )
 
   // Hide the outer tile inside the center mesh's 480 m × 480 m footprint.
   // The center is a child plane at the same origin (parented through
@@ -2677,7 +2716,11 @@ export function createWaterMesh(
     // matching the trough colour hides the join. Far-rim haze gives back
     // the sky alignment for atmospheric perspective.
     const skirtDeepColor = vec3(0.02, 0.22, 0.32)
-    skirtMat.colorNode = mix(skirtDeepColor, horizonHazeUniform, hazeMix)
+    skirtMat.colorNode = mix(
+      mix(skirtDeepColor, horizonHazeUniform, hazeMix),
+      skirtDebugColorUniform,
+      debugColorizeMixUniform,
+    )
     skirtMat.opacityNode = innerFadeIn
   }
 

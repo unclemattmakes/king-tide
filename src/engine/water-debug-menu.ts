@@ -27,7 +27,7 @@ import {
 } from './water-debug-storage'
 
 type SliderDef = {
-  key: Exclude<keyof WaterDebugSettings, 'wireframe'>
+  key: Exclude<keyof WaterDebugSettings, 'wireframe' | 'colorize'>
   label: string
   min: number
   max: number
@@ -310,6 +310,30 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
     persistWaterSettings(settings)
   })
 
+  // Colorize-by-layer toggle. Paints the center mesh red, the outer
+  // LOD tile green, and the horizon skirt blue so the LOD boundaries
+  // are obvious. Pairs with the water-test track's camera-locked
+  // transition markers for diagnosing seams.
+  const colorRow = document.createElement('div')
+  colorRow.className = 'row toggle'
+  const colorLabel = document.createElement('label')
+  colorLabel.htmlFor = 'wd-colorize'
+  colorLabel.textContent = 'Colorize layers'
+  colorLabel.title =
+    'Paint center mesh red, outer LOD tile green, horizon skirt blue — makes the LOD seams obvious'
+  colorRow.appendChild(colorLabel)
+  const colorInput = document.createElement('input')
+  colorInput.type = 'checkbox'
+  colorInput.id = 'wd-colorize'
+  colorInput.checked = settings.colorize
+  colorRow.appendChild(colorInput)
+  body.appendChild(colorRow)
+  colorInput.addEventListener('change', () => {
+    settings.colorize = colorInput.checked
+    water.debug.setColorize(colorInput.checked)
+    persistWaterSettings(settings)
+  })
+
   function syncUI(): void {
     for (const b of bound) {
       const v = settings[b.def.key]
@@ -317,6 +341,7 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
       b.valEl.textContent = b.def.format(v)
     }
     wireInput.checked = settings.wireframe
+    colorInput.checked = settings.colorize
   }
 
   function open(): void {
