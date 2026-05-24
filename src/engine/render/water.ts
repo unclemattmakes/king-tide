@@ -527,18 +527,18 @@ export function createWaterMesh(
     backend?: 'webgpu' | 'webgl2'
   },
 ): WaterMesh {
-  const size = opts?.size ?? 480
-  // 768 subs × 480 m ≈ 0.625 m vertex spacing. The mesh follows the
+  const size = opts?.size ?? 960
+  // 768 subs × 960 m ≈ 1.25 m vertex spacing. The mesh follows the
   // camera (see `tick`'s `originXZ` arg + the meshOrigin uniform), so the
-  // 480 m of mesh stays centered on the visible patch instead of being
+  // 960 m of mesh stays centered on the visible patch instead of being
   // anchored at world origin (with the player at z ≈ 90 sitting near the
-  // edge). 480 m half-extent (240 m to each side, ~340 m at the corners)
-  // reaches well into the horizon-skirt's haze ramp so the boundary
-  // between displaced wave geometry and the flat skirt is hidden under
-  // matched aerial-perspective colour. At the same density, the 4 m wake
-  // wavelength gets ~6.4 verts per crest — ridges show up as actual
-  // geometry, not a single-vertex shimmer. 768² ≈ 590 k verts is still
-  // trivial on a real GPU (sub-millisecond vertex pass at this density).
+  // edge). 960 m half-extent (480 m to each side, ~680 m at the corners)
+  // pushes the geometric edge well below the bike-POV horizon line, so
+  // the center→outer cross-fade band (see `centerEdgeFade` below) lands
+  // where it reads as a continuous tone shift rather than a sharp seam.
+  // At 1.25 m spacing the 4 m wake wavelength still gets ~3.2 verts per
+  // crest — ridges read as geometry, not single-vertex shimmer. 768²
+  // ≈ 590 k verts stays sub-millisecond on a real GPU.
   const subs = opts?.subdivisions ?? 768
 
   // ---- Debug toggles ----------------------------------------------------
@@ -2232,7 +2232,26 @@ export function createWaterMesh(
   const shallowSeabedRange = float(1).sub(smoothstep(float(3), float(11), waterDepthFrag))
   const shallowTransparency = depthValidGate.mul(shallowSeabedRange)
   const depthGatedAlpha = mix(float(0.98), seabedSeeThrough, shallowTransparency)
-  mat.opacityNode = mix(depthGatedAlpha, float(0.98), foamMask)
+  // Center mesh edge fade. The center geometry is a hard 960 × 960 m
+  // square — its outer ±480 m edge sits exactly where (looking forward
+  // from bike POV) the horizon line begins. Without a fade, the
+  // PBR-lit center hard-stops at that edge and the (basic-shaded,
+  // dimmer, hazier) outer LOD tile begins, painting a visible
+  // horizontal line a few pixels below the horizon — the "water ends
+  // early" seam users notice most. Cross-blending the two over a
+  // wider band (380–480 m) hides the geometric edge: as center
+  // opacity ramps 1 → 0, the outer ramps 0 → 1 over the same band
+  // (set further down at `outerOpacityNode`), so summed coverage
+  // stays at 1 throughout and the shading character softens
+  // continuously instead of switching abruptly.
+  //
+  // Width: 100 m spans enough vertical pixels near the horizon (where
+  // pixel density per metre is highest) to read as a smooth gradient
+  // rather than a band. Anchored on the OUTSIDE edge (480 m) so the
+  // center's full-detail water stays solid through the inner 380 m.
+  const centerBoxCoord = max(positionLocal.x.abs(), positionLocal.z.abs())
+  const centerEdgeFade = float(1).sub(smoothstep(float(380), float(480), centerBoxCoord))
+  mat.opacityNode = mix(depthGatedAlpha, float(0.98), foamMask).mul(centerEdgeFade)
   // Noise-modulated roughness. In sparkle patches roughness drops from 0.18
   // to ~0.04, tightening the specular lobe and producing crisp highlights.
   // Classic mode keeps the constant 0.18 so the A/B comparison is clean.
@@ -2473,7 +2492,7 @@ export function createWaterMesh(
 
   // ── Outer LOD tile ──────────────────────────────────────────────────────
   // Lower-detail wave plane extending past the center mesh's reach, so the
-  // visible wave geometry covers ~720 m to the sides (vs. 240 m on the
+  // visible wave geometry covers ~720 m to the sides (vs. 480 m on the
   // center alone). Pushes the boundary between displaced water and the
   // flat skirt well past the player's tilt-down view — at 720 m the seam
   // is also at ~13 % fog density on the way to dissolving into sky.
@@ -2583,21 +2602,18 @@ export function createWaterMesh(
     debugColorizeMixUniform,
   )
 
-  // Hide the outer tile inside the center mesh's 480 m × 480 m footprint.
-  // The center is a child plane at the same origin (parented through
-  // `mesh`), so both meshes' `positionLocal` share the same camera-locked
-  // frame: the center covers |x| ≤ 240, |z| ≤ 240. Without this fade the
-  // outer's coarse 5.6 m-per-vertex triangles linearly interpolate the
-  // Gerstner field between sparse vertex samples, which overshoots the
-  // true (curved) wave surface in the gaps between crests — and since the
-  // outer is opaque + writes depth in the opaque pass, those overshoots
-  // beat the (transparent, drawn-later) center mesh's depth test and bleed
-  // through as bright wave-trough patches across the entire near field.
-  // Ramping opacity 0 → 1 across a 40 m band straddling the center's edge
-  // lets the outer fully take over past the center's footprint while never
-  // competing with the center inside it.
+  // Hide the outer tile inside the center mesh's 960 m × 960 m footprint
+  // and cross-fade with the center across its outer edge. The center is
+  // a child plane at the same origin (parented through `mesh`), so both
+  // meshes' `positionLocal` share the same camera-locked frame: the
+  // center covers |x| ≤ 480, |z| ≤ 480. The 380→480 m fade-in window
+  // mirrors the center's `centerEdgeFade` (set above) — as the center
+  // ramps 1 → 0 across that band, the outer ramps 0 → 1, so summed
+  // coverage stays at 1 and the eye sees a continuous tone shift from
+  // PBR-lit center water to basic-shaded outer water rather than a hard
+  // horizontal edge a few pixels below the horizon line.
   const outerBoxCoord = max(positionLocal.x.abs(), positionLocal.z.abs())
-  const outerOpacityNode = smoothstep(float(220), float(260), outerBoxCoord)
+  const outerOpacityNode = smoothstep(float(380), float(480), outerBoxCoord)
 
   const outerMat = new MeshBasicNodeMaterial({
     // Scene fog still applies — between the outer's far rim (≈720 m
@@ -2640,8 +2656,8 @@ export function createWaterMesh(
   if (wireFlag) outerMat.wireframe = true
 
   // ── Horizon skirt ──────────────────────────────────────────────────────
-  // The main wave plane is 480 m square (camera-locked, ~240 m visible to
-  // the sides, ~340 m at the corners). The horizon ring sits at ~1.4 km.
+  // The main wave plane is 960 m square (camera-locked, ~480 m visible to
+  // the sides, ~680 m at the corners). The horizon ring sits at ~1.4 km.
   // Without anything between them, the player sees a visible donut of sky
   // between the water plane's edge and the horizon — i.e. the water
   // bounds are obvious.
@@ -2663,7 +2679,7 @@ export function createWaterMesh(
   // dissolves the outermost band into the sky just like everything else.
   // Alpha ramps in over the inner edge so any tiny tonal mismatch under
   // the main plane is hidden by the main plane drawing on top.
-  const SKIRT_INNER_RADIUS = 120 // m — well inside the 240 m plane half-extent
+  const SKIRT_INNER_RADIUS = 120 // m — well inside the 480 m plane half-extent
   const SKIRT_OUTER_RADIUS = 1600 // m — past the default 1400 m horizon ring
   const SKIRT_ANGULAR_SEGMENTS = 128
   const SKIRT_RADIAL_SEGMENTS = 16
@@ -2688,15 +2704,15 @@ export function createWaterMesh(
     // offset from the camera's XZ — no need to round-trip through
     // positionWorld / cameraPosition.
     const radial = positionLocal.xz.length()
-    // Inner alpha ramp: 0 at the inner edge → 1 by the 240 m side-edge
-    // of the 480 m plane. Picking the side-edge (rather than the 340 m
-    // corner) means the skirt is fully opaque as soon as the camera can
-    // see past the plane in any cardinal direction — no half-transparent
-    // band of sky leaking through where the plane has ended but the
-    // skirt is still ramping in. In the corner zones (240–340 m radial)
-    // the plane is still drawing on top and hides the fully-opaque
-    // skirt; the tonal mismatch there is small because the plane is
-    // already deep into its own aerial-perspective ramp at that radius.
+    // Inner alpha ramp: 0 at the inner edge → 1 by 240 m, well inside
+    // the 480 m plane half-extent. Picking 240 m (rather than the new
+    // 480 m side-edge or the 680 m corner) means the skirt is fully
+    // opaque long before the center→outer cross-blend band starts at
+    // 380 m — without that head room, the band's reduced layer alpha
+    // would let sky-clear leak through if the skirt were still
+    // ramping in. The plane is fully opaque on top inside 380 m so
+    // the early-opaque skirt doesn't tonally compete in the inner
+    // region.
     const innerFadeIn = smoothstep(float(SKIRT_INNER_RADIUS), float(240), radial)
     // Aerial-perspective ramp in two legs. First leg (120 → 280 m) mirrors
     // the main plane's `aerialMix = smoothstep(120, 280, camDist) * 0.5`
