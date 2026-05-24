@@ -145,6 +145,7 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
     isGrounded: false,
     surfaceIsWater: false,
     forwardSlope: 0,
+    diveHoldS: 0,
   })
   addComponent(sim, eid, TrickState)
   TrickStateStore.set(eid, {
