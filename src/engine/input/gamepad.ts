@@ -110,7 +110,6 @@ export function gamepadIntent(): Intent {
   intent.boost = pad.buttons[bindings.boost]?.pressed ?? false
   intent.trickLeft = pad.buttons[bindings.trickLeft]?.pressed ?? false
   intent.trickRight = pad.buttons[bindings.trickRight]?.pressed ?? false
-  intent.tuck = pad.buttons[bindings.tuck]?.pressed ?? false
   return intent
 }
 

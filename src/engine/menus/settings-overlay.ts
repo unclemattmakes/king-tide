@@ -445,13 +445,6 @@ const TAB_SPECS: TabSpec[] = [
         gate: 'Cinematic establishing shots + F1 start-lights before the race begins. Single-player only.',
       },
       {
-        id: 'gp-tuck',
-        label: 'Tuck (snowboarder glide)',
-        control: { kind: 'button', label: 'REBIND…' },
-        enabled: true,
-        gate: 'Hold the tuck key to raise the cap + halve drag — pays off on descents and wave faces. Trades ~half your steering authority. Default: X or Left Ctrl (L3 on gamepad).',
-      },
-      {
         id: 'gp-anti-grav',
         label: 'Anti-grav camera intensity',
         control: {
@@ -983,11 +976,6 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
     if (spec.enabled && spec.id === 'controls-rebind-pad') {
       btn.addEventListener('click', () => {
         installRebindModal().open('gamepad')
-      })
-    }
-    if (spec.enabled && spec.id === 'gp-tuck') {
-      btn.addEventListener('click', () => {
-        installRebindModal().open('keyboard')
       })
     }
     return btn

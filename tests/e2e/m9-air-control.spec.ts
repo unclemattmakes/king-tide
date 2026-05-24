@@ -51,7 +51,6 @@ async function runScenario(
     pitch: number
     trickLeft: boolean
     trickRight: boolean
-    tuck: boolean
   },
   label: string,
 ): Promise<Scenario> {
@@ -74,7 +73,6 @@ async function runScenario(
         pitch: 0,
         trickLeft: false,
         trickRight: false,
-        tuck: false,
       })
       // Wait until clearly off the ramp (y > 3, !grounded).
       let launchY = 0
@@ -195,7 +193,6 @@ test('air control: pitch-vectored thrust + hang-time work as designed', async ({
         pitch: 0,
         trickLeft: false,
         trickRight: false,
-        tuck: false,
       },
       'baseline',
     )
@@ -210,7 +207,6 @@ test('air control: pitch-vectored thrust + hang-time work as designed', async ({
         pitch: -1,
         trickLeft: false,
         trickRight: false,
-        tuck: false,
       },
       'dive_Q',
     )
@@ -225,7 +221,6 @@ test('air control: pitch-vectored thrust + hang-time work as designed', async ({
         pitch: +1,
         trickLeft: false,
         trickRight: false,
-        tuck: false,
       },
       'lift_E',
     )

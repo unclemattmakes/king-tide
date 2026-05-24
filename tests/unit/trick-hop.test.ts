@@ -84,7 +84,6 @@ function spawnBike(
     surfaceFollow: 0.5,
     tuckSpeedBoost: 1.15,
     tuckDragMul: 0.5,
-    tuckTurnMul: 0.45,
   })
   addComponent(sim, eid, RBHandle)
   RBHandleStore.set(eid, { handle })
@@ -144,7 +143,6 @@ function intent0() {
     pitch: 0,
     trickLeft: false,
     trickRight: false,
-    tuck: false,
   }
 }
 

@@ -32,7 +32,6 @@ export type KeyboardAction =
   | 'boost'
   | 'trickLeft'
   | 'trickRight'
-  | 'tuck'
 
 export const KEYBOARD_ACTIONS: readonly KeyboardAction[] = [
   'throttleForward',
@@ -45,7 +44,6 @@ export const KEYBOARD_ACTIONS: readonly KeyboardAction[] = [
   'trickRight',
   'fire',
   'boost',
-  'tuck',
 ] as const
 
 export const KEYBOARD_ACTION_LABEL: Readonly<Record<KeyboardAction, string>> = Object.freeze({
@@ -59,7 +57,6 @@ export const KEYBOARD_ACTION_LABEL: Readonly<Record<KeyboardAction, string>> = O
   trickRight: 'Trick / hop (right)',
   fire: 'Fire pickup',
   boost: 'Boost',
-  tuck: 'Tuck (snowboard-style glide)',
 })
 
 export type KeyboardBinding = {
@@ -89,12 +86,6 @@ export const DEFAULT_KEYBOARD_BINDINGS: Readonly<KeyboardBindings> = Object.free
   trickRight: { primary: 'KeyC', secondary: null },
   fire: { primary: 'Space', secondary: null },
   boost: { primary: 'ShiftLeft', secondary: 'ShiftRight' },
-  // Hold to tuck. X sits under the trick-hand cluster (Z/X/C) so the
-  // player can chain "tuck through a corner exit, release into a trick
-  // press" without lifting off the keys. ControlLeft as secondary lines
-  // up with the universal FPS "crouch" key — the snowboard-duck mental
-  // model lands instantly.
-  tuck: { primary: 'KeyX', secondary: 'ControlLeft' },
 })
 
 /** Gamepad buttons we let the player remap. Sticks stay on the W3C
@@ -105,14 +96,13 @@ export const DEFAULT_KEYBOARD_BINDINGS: Readonly<KeyboardBindings> = Object.free
  *  MK8 layout: L1/R1 own the hop-trick (and eventually drift). Fire +
  *  boost relocated to face buttons so the bumpers stay on the trick
  *  channel where the wrist naturally rests during a drift hold. */
-export type GamepadAction = 'fire' | 'boost' | 'trickLeft' | 'trickRight' | 'tuck'
+export type GamepadAction = 'fire' | 'boost' | 'trickLeft' | 'trickRight'
 
 export const GAMEPAD_ACTIONS: readonly GamepadAction[] = [
   'trickLeft',
   'trickRight',
   'fire',
   'boost',
-  'tuck',
 ] as const
 
 export const GAMEPAD_ACTION_LABEL: Readonly<Record<GamepadAction, string>> = Object.freeze({
@@ -120,7 +110,6 @@ export const GAMEPAD_ACTION_LABEL: Readonly<Record<GamepadAction, string>> = Obj
   trickRight: 'Trick / hop (right)',
   fire: 'Fire pickup',
   boost: 'Boost',
-  tuck: 'Tuck (snowboard-style glide)',
 })
 
 export type GamepadBindings = Record<GamepadAction, number>
@@ -133,9 +122,6 @@ export const DEFAULT_GAMEPAD_BINDINGS: Readonly<GamepadBindings> = Object.freeze
   // throttle) and B (emergency brake).
   fire: 2, // X / Square
   boost: 3, // Y / Triangle
-  // L3 / stick click — the universal FPS "crouch" binding. Reachable
-  // mid-corner without breaking the thumb's hold on the stick.
-  tuck: 10,
 })
 
 const GAMEPAD_BUTTON_LABEL: Readonly<Record<number, string>> = Object.freeze({

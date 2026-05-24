@@ -32,15 +32,14 @@ export function defaultBikeStats(): BikeStatsData {
     // ploughs through). Note: ground always uses 1.0 base follow; this
     // is the water-side base only.
     surfaceFollow: 0.85,
-    // Tuck tuning — snowboarder ducking down a hill. The +15% cap is
-    // modest on flat ground (the throttle curve barely opens up past
-    // base topSpeed without help) and reads as +5 m/s of "found speed"
-    // on a sustained downslope where slope-momentum was already pushing
-    // the bike toward the cap. Halved drag lets the bike track a clean
-    // line instead of bleeding sideways. Steering chopped to ~45% so
-    // tucking through a corner punishes the player who didn't stand up.
+    // Tuck tuning — snowboarder ducking down a hill, driven by the
+    // nose-down lean (see tuckFactor in hover.ts). At the sweet spot the
+    // +15% cap reads as +5 m/s of "found speed" on a sustained downslope
+    // where slope-momentum was already pushing the bike toward the cap,
+    // and halved drag lets it track a clean line. Lean too far and the
+    // factor goes negative — these invert into a cap cut + drag spike, so
+    // burying the nose (belly-scrape) actively bleeds speed.
     tuckSpeedBoost: 1.15,
     tuckDragMul: 0.5,
-    tuckTurnMul: 0.45,
   }
 }

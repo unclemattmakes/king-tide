@@ -369,7 +369,6 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
           pitch: 0,
           trickLeft: false,
           trickRight: false,
-          tuck: false,
         }
         const rapierBT = phys.rapier.RigidBodyType
         const bodyTypeRaw = rb.bodyType()

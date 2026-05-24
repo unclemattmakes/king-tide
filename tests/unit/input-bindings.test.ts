@@ -58,14 +58,6 @@ describe('default keyboard bindings', () => {
     })
   })
 
-  it('defaults tuck to X (primary) + Left Ctrl (secondary)', () => {
-    expect(DEFAULT_KEYBOARD_BINDINGS.tuck).toEqual({ primary: 'KeyX', secondary: 'ControlLeft' })
-  })
-
-  it('defaults gamepad tuck to L3 (button 10)', () => {
-    expect(DEFAULT_GAMEPAD_BINDINGS.tuck).toBe(10)
-  })
-
   it('respects the Q-dives / E-lifts convention (M9.18)', () => {
     // intent.pitch positive = nose UP / lift. Status doc explicitly
     // documents the keyboard convention as Q = down (dive), E = up
@@ -280,7 +272,7 @@ describe('playerSettings — bindings round-trip', () => {
 
   it('persists gamepad bindings across a load cycle', () => {
     if (typeof window === 'undefined' || !window.localStorage) return
-    setGamepadBindings({ fire: 3, boost: 1, trickLeft: 4, trickRight: 5, tuck: 10 })
+    setGamepadBindings({ fire: 3, boost: 1, trickLeft: 4, trickRight: 5 })
     playerSettings.gamepadBindings = defaultGamepadBindings()
     loadPlayerSettings()
     expect(playerSettings.gamepadBindings.fire).toBe(3)

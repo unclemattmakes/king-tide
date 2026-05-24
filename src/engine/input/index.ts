@@ -67,7 +67,6 @@ export function readPlayerIntent(dt: number): Intent {
     pitch: pickAxis(k.pitch, g.pitch, t.pitch),
     trickLeft: k.trickLeft || g.trickLeft || t.trickLeft,
     trickRight: k.trickRight || g.trickRight || t.trickRight,
-    tuck: k.tuck || g.tuck || t.tuck,
   }
 }
 
