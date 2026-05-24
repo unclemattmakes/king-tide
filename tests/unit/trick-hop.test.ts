@@ -1,16 +1,18 @@
 /**
- * Airborne-gated trick system — `src/game/systems/trick-hop.ts`.
+ * Geometric trick system — `src/game/systems/trick-hop.ts`.
  *
  * The sim is the single source of truth for whether a press fires a
- * credible trick. These tests exercise the trick-hop system directly
- * with a minimal Rapier rigid-body mock and assert the
- * `TrickState.trickFiredThisTick` flag plus the supporting state
- * machine (window open/close, pre-press buffer, hop-lockout gating,
- * one-fire-per-airtime dedup).
+ * credible trick. The window is armed by the bike's *pose*: leaving the
+ * fully-planted stance (nose-up pop or full takeoff) opens it; re-planting
+ * closes it. These tests drive the system directly with a minimal Rapier
+ * rigid-body mock and a hand-set `HoverState` (center / nose / base
+ * contact), asserting the `TrickState.trickFiredThisTick` flag plus the
+ * supporting state machine (window open/close, pre-press buffer,
+ * hop-lockout gating, one-fire-per-airtime dedup).
  *
  * The mock returns a fixed `linvel()` per tick so the test controls
  * vy / horizontal-speed inputs precisely. `applyImpulse` is captured
- * for the small-hop assertions.
+ * for the courtesy-hop assertions.
  */
 
 import { addComponent, addEntity } from 'bitecs'
@@ -64,6 +66,19 @@ function makeMockPhys(body: BodyState): { phys: PhysicsWorld; bodyHandle: number
   }
 }
 
+/**
+ * Set the bike's contact state. `center` is the hover `isGrounded`; nose
+ * and base default to `center` so the common "fully planted" / "fully
+ * airborne" cases are one argument. A nose-up pop is `setGround(eid, true,
+ * false, true)`.
+ */
+function setGround(eid: number, center: boolean, nose = center, base = center): void {
+  const h = HoverStateStore.must(eid)
+  h.isGrounded = center
+  h.noseGrounded = nose
+  h.baseGrounded = base
+}
+
 function spawnBike(
   sim: SimWorld,
   handle: number,
@@ -94,6 +109,8 @@ function spawnBike(
   HoverStateStore.set(eid, {
     groundDistance: 0,
     isGrounded: true,
+    noseGrounded: true,
+    baseGrounded: true,
     surfaceIsWater: false,
     surfaceType: SurfaceType.DEFAULT,
     forwardSlope: 0,
@@ -118,7 +135,7 @@ function spawnBike(
     trickWindowOpen: false,
     trickWindowTakeoffVy: 0,
     trickFiredThisAirborne: false,
-    wasGroundedLastTick: true,
+    wasFullyPlantedLastTick: true,
     bufferedPressTimerSec: 0,
     bufferedPressDir: 0,
     trickFiredThisTick: false,
@@ -161,10 +178,11 @@ beforeEach(() => {
   handle = m.bodyHandle
 })
 
-describe('trickHopSystem — grounded press without climb context', () => {
+describe('trickHopSystem — grounded press while fully planted', () => {
   it('fires the small flatground hop and engages the hop-lockout', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
-    // Cruising on flat ground: speed + throttle high, vy 0.
+    // Cruising on flat ground (fully planted): speed + throttle high, vy 0,
+    // so no climb context to buffer against.
     body.vx = 22
     body.vy = 0
     setIntent({ throttle: 0.9, trickRight: true })
@@ -182,16 +200,13 @@ describe('trickHopSystem — grounded press without climb context', () => {
     expect(trick.cooldownSec).toBeGreaterThan(0)
   })
 
-  it('does nothing on a grounded press while the bike is parked', () => {
+  it('does nothing trick-worthy on a grounded press while the bike is parked', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
-    // No throttle, no speed — fails the speed/throttle gates, so the
-    // press still goes to the small-hop path (no buffer).
+    // No throttle, no speed — fails the gates, so the press still goes to
+    // the courtesy-hop path (no buffer, no trick).
     setIntent({ throttle: 0, trickRight: true })
     trickHopSystem(sim, phys)
 
-    // Even a flatground press fires the small hop (lift is always
-    // available when grounded + cooldown ready). The trick payoff is
-    // what's gated.
     expect(body.impulses.length).toBeGreaterThanOrEqual(1)
     const trick = TrickStateStore.must(eid)
     expect(trick.trickFiredThisTick).toBe(false)
@@ -199,18 +214,16 @@ describe('trickHopSystem — grounded press without climb context', () => {
   })
 })
 
-describe('trickHopSystem — qualifying takeoff opens the trick window', () => {
-  it('opens the window on grounded → airborne transition and fires a buffered press at takeoff', () => {
+describe('trickHopSystem — leaving the planted stance arms the window', () => {
+  it('opens the window on the pop and fires a buffered press at the pop', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
-    // Build a credible climb while still grounded: vy 5, fast, on
-    // throttle. One sim tick to seed `vyPeak`.
+    // Seed a credible climb while planted: vy 5, fast, on throttle.
     body.vx = 22
     body.vy = 5
     setIntent({ throttle: 0.9 })
     trickHopSystem(sim, phys)
 
-    // Player presses while still grounded — buffer engages because
-    // vyPeak ≥ MIN_VY_PEAK and speed/throttle pass.
+    // Press while still planted — buffer engages (climb context + gates).
     setIntent({ throttle: 0.9, trickRight: true })
     trickHopSystem(sim, phys)
     const trickMid = TrickStateStore.must(eid)
@@ -219,11 +232,11 @@ describe('trickHopSystem — qualifying takeoff opens the trick window', () => {
     expect(trickMid.trickFiredThisTick).toBe(false)
     expect(body.impulses).toHaveLength(0)
 
-    // Release the button so the next press can be a fresh edge later.
-    // Then leave the ground (qualifying takeoff: surface-driven, vy 5,
-    // fast, on throttle).
+    // Release the button, then pop: nose lifts off, base + center still
+    // read grounded for a tick (full takeoff in the same motion). Leaving
+    // the planted stance arms the window and consumes the buffer.
     setIntent({ throttle: 0.9, trickRight: false })
-    HoverStateStore.must(eid).isGrounded = false
+    setGround(eid, false)
     trickHopSystem(sim, phys)
 
     const trick = TrickStateStore.must(eid)
@@ -233,22 +246,42 @@ describe('trickHopSystem — qualifying takeoff opens the trick window', () => {
     expect(trick.trickFiredDirection).toBe(+1)
     expect(trick.trickFiredStrength).toBeGreaterThan(0)
     expect(trick.trickFiredThisAirborne).toBe(true)
+    // The pop came from terrain, not a courtesy hop — no impulse applied.
+    expect(body.impulses).toHaveLength(0)
+  })
+
+  it('arms on a nose-up pop while the base is still grounded', () => {
+    const { eid, setIntent } = spawnBike(sim, handle)
+    body.vx = 22
+    body.vy = 3
+    setIntent({ throttle: 0.9 })
+    trickHopSystem(sim, phys)
+
+    // Classic pop: center + base still grounded, nose lifts off a lip.
+    setGround(eid, true, false, true)
+    trickHopSystem(sim, phys)
+    expect(TrickStateStore.must(eid).trickWindowOpen).toBe(true)
+
+    // Press during the pop (nose airborne, base grounded) — fires.
+    setIntent({ throttle: 0.9, trickRight: true })
+    trickHopSystem(sim, phys)
+    const trick = TrickStateStore.must(eid)
+    expect(trick.trickFiredThisTick).toBe(true)
+    expect(trick.trickFiredDirection).toBe(+1)
   })
 
   it('fires immediately on an in-air press when the window is already open', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
-    // Climb + take off without pressing — window opens, no fire yet.
     body.vx = 22
     body.vy = 5
     setIntent({ throttle: 0.9 })
     trickHopSystem(sim, phys)
-    HoverStateStore.must(eid).isGrounded = false
+    setGround(eid, false)
     trickHopSystem(sim, phys)
 
     expect(TrickStateStore.must(eid).trickWindowOpen).toBe(true)
     expect(TrickStateStore.must(eid).trickFiredThisTick).toBe(false)
 
-    // Now press mid-air — fires immediately, no buffer.
     setIntent({ throttle: 0.9, trickLeft: true })
     trickHopSystem(sim, phys)
 
@@ -263,36 +296,36 @@ describe('trickHopSystem — qualifying takeoff opens the trick window', () => {
     body.vy = 5
     setIntent({ throttle: 0.9 })
     trickHopSystem(sim, phys)
-    HoverStateStore.must(eid).isGrounded = false
+    setGround(eid, false)
     trickHopSystem(sim, phys)
 
-    // First press fires.
     setIntent({ throttle: 0.9, trickRight: true })
     trickHopSystem(sim, phys)
     expect(TrickStateStore.must(eid).trickFiredThisTick).toBe(true)
 
-    // Release + re-press while still airborne — no second fire.
     setIntent({ throttle: 0.9, trickRight: false })
     trickHopSystem(sim, phys)
     expect(TrickStateStore.must(eid).trickFiredThisTick).toBe(false)
     setIntent({ throttle: 0.9, trickLeft: true })
     trickHopSystem(sim, phys)
     expect(TrickStateStore.must(eid).trickFiredThisTick).toBe(false)
+    // No courtesy hop fired during the open episode either.
+    expect(body.impulses).toHaveLength(0)
   })
 
-  it('closes the window silently on landing', () => {
+  it('closes the window silently on re-planting', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
     body.vx = 22
     body.vy = 5
     setIntent({ throttle: 0.9 })
     trickHopSystem(sim, phys)
-    HoverStateStore.must(eid).isGrounded = false
+    setGround(eid, false)
     trickHopSystem(sim, phys)
     expect(TrickStateStore.must(eid).trickWindowOpen).toBe(true)
 
-    // Land without pressing — window closes, no trick fires.
+    // Land without pressing: fully planted again → window closes.
     body.vy = 0
-    HoverStateStore.must(eid).isGrounded = true
+    setGround(eid, true)
     trickHopSystem(sim, phys)
 
     const trick = TrickStateStore.must(eid)
@@ -302,17 +335,25 @@ describe('trickHopSystem — qualifying takeoff opens the trick window', () => {
   })
 })
 
-describe('trickHopSystem — disqualifying takeoffs', () => {
-  it('does not open the window if takeoff vy is below the threshold', () => {
+describe('trickHopSystem — eligibility gates', () => {
+  it('opens the window on a low-vy pop and floors the reward (geometry, not vy, gates eligibility)', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
+    // vy well below the old 2.0 threshold — under the geometric model the
+    // pop still arms the window.
     body.vx = 22
-    body.vy = 1.0 // below MIN_VY_PEAK (2.0)
+    body.vy = 1.0
     setIntent({ throttle: 0.9 })
     trickHopSystem(sim, phys)
-    HoverStateStore.must(eid).isGrounded = false
+    setGround(eid, false)
     trickHopSystem(sim, phys)
+    expect(TrickStateStore.must(eid).trickWindowOpen).toBe(true)
 
-    expect(TrickStateStore.must(eid).trickWindowOpen).toBe(false)
+    setIntent({ throttle: 0.9, trickRight: true })
+    trickHopSystem(sim, phys)
+    const trick = TrickStateStore.must(eid)
+    expect(trick.trickFiredThisTick).toBe(true)
+    // Floored to the "I made it count" minimum even though vy < threshold.
+    expect(trick.trickFiredStrength).toBeCloseTo(0.4, 2)
   })
 
   it('does not open the window when speed is below the threshold', () => {
@@ -321,7 +362,7 @@ describe('trickHopSystem — disqualifying takeoffs', () => {
     body.vy = 5
     setIntent({ throttle: 0.9 })
     trickHopSystem(sim, phys)
-    HoverStateStore.must(eid).isGrounded = false
+    setGround(eid, false)
     trickHopSystem(sim, phys)
 
     expect(TrickStateStore.must(eid).trickWindowOpen).toBe(false)
@@ -333,30 +374,29 @@ describe('trickHopSystem — disqualifying takeoffs', () => {
     body.vy = 5
     setIntent({ throttle: 0.1 }) // below MIN_THROTTLE (0.2)
     trickHopSystem(sim, phys)
-    HoverStateStore.must(eid).isGrounded = false
+    setGround(eid, false)
     trickHopSystem(sim, phys)
 
     expect(TrickStateStore.must(eid).trickWindowOpen).toBe(false)
   })
 
-  it('does not open the window if takeoff is self-induced (hop-lockout active)', () => {
-    // A small hop's takeoff is the system's own impulse — the
-    // hop-lockout flag should stop that from arming a free trick.
+  it('does not open the window if the launch is self-induced (hop-lockout active)', () => {
+    // A courtesy hop's lift is the system's own impulse — the hop-lockout
+    // flag must stop that from arming a free trick.
     const { eid, setIntent } = spawnBike(sim, handle)
 
-    // Fire a small hop on flat ground.
+    // Fire a courtesy hop on flat ground.
     body.vx = 22
     body.vy = 0
     setIntent({ throttle: 0.9, trickRight: true })
     trickHopSystem(sim, phys)
     expect(TrickStateStore.must(eid).hopLockoutActive).toBe(true)
 
-    // Next tick the bike is now airborne (the small hop carries it
-    // off the ground). Even though body.vy may be >= threshold and
-    // speed/throttle pass, the lockout closes the window.
+    // Next tick the hop carries the bike off the ground. Even with speed /
+    // throttle passing, the lockout blocks the arm.
     setIntent({ throttle: 0.9, trickRight: false })
     body.vy = 4.5
-    HoverStateStore.must(eid).isGrounded = false
+    setGround(eid, false)
     trickHopSystem(sim, phys)
 
     expect(TrickStateStore.must(eid).trickWindowOpen).toBe(false)
@@ -364,9 +404,8 @@ describe('trickHopSystem — disqualifying takeoffs', () => {
 })
 
 describe('trickHopSystem — pre-input buffer', () => {
-  it('fires a deferred trick on buffer expiry when the climb context still looks credible', () => {
+  it('fires the trick when a pop arrives inside the buffer window', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
-    // Climb context (vyPeak ≥ threshold) + press while grounded → buffer.
     body.vx = 22
     body.vy = 5
     setIntent({ throttle: 0.9 })
@@ -375,39 +414,23 @@ describe('trickHopSystem — pre-input buffer', () => {
     trickHopSystem(sim, phys)
     expect(TrickStateStore.must(eid).bufferedPressTimerSec).toBeGreaterThan(0)
 
-    // Player keeps the throttle on at race speed; vy drops (wave crest
-    // passes) but the bike doesn't actually leave the ground — the
-    // "rides the wave through the crest" case that used to silently
-    // eat the press. Tick past the buffer window; the climb context is
-    // still recent enough (vyPeak hasn't gone stale) so the system
-    // synthesizes the trick fire on the expiry tick.
+    // Pop one tick later, still inside the 200 ms buffer — the held press
+    // fires the trick at the pop.
     setIntent({ throttle: 0.9, trickRight: false })
-    body.vy = 0
-    const ticksToRunOut = Math.ceil(PRE_PRESS_BUFFER_SEC / phys.fixedDt) + 1
-    for (let i = 0; i < ticksToRunOut; i++) trickHopSystem(sim, phys)
+    setGround(eid, false)
+    trickHopSystem(sim, phys)
 
     const trick = TrickStateStore.must(eid)
+    expect(trick.trickFiredThisTick).toBe(true)
+    expect(trick.trickFiredDirection).toBe(+1)
+    expect(trick.trickWindowOpen).toBe(true)
     expect(trick.bufferedPressTimerSec).toBe(0)
     expect(trick.bufferedPressDir).toBe(0)
-    // Persistent reward markers — `trickFiredThisTick` is a one-shot
-    // edge consumed by the very next tick's top-of-loop reset, so we
-    // assert against the sticky flags + the captured direction /
-    // strength which both persist until the next press.
-    expect(trick.trickFiredThisAirborne).toBe(true)
-    expect(trick.trickFiredDirection).toBe(+1)
-    expect(trick.trickFiredStrength).toBeGreaterThan(0)
-    expect(trick.trickWindowOpen).toBe(true)
-    // Deferred-takeoff path lifts the bike with the small-hop impulse
-    // and engages the hop-lockout — the lift came from the system, not
-    // the surface, so the resulting airborne transition must not
-    // re-qualify as a free credible takeoff on the very next tick.
-    expect(body.impulses.length).toBeGreaterThanOrEqual(1)
-    const lastImpulse = body.impulses[body.impulses.length - 1]
-    expect(lastImpulse?.y).toBeCloseTo(4.5, 5)
-    expect(trick.hopLockoutActive).toBe(true)
+    // No courtesy hop — the launch was the terrain pop.
+    expect(body.impulses).toHaveLength(0)
   })
 
-  it('falls back to a courtesy small hop when the climb context decays before expiry', () => {
+  it('expires to a courtesy hop when no pop arrives in time', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
     body.vx = 22
     body.vy = 5
@@ -417,9 +440,9 @@ describe('trickHopSystem — pre-input buffer', () => {
     trickHopSystem(sim, phys)
     expect(TrickStateStore.must(eid).bufferedPressTimerSec).toBeGreaterThan(0)
 
-    // Player lets off the throttle — `throttleOK` is now false, so the
-    // expiry credibility re-check fails and the fallback fires.
-    setIntent({ throttle: 0, trickRight: false })
+    // Bike stays planted (no pop). Tick past the buffer window — it expires
+    // to the courtesy hop, no trick.
+    setIntent({ throttle: 0.9, trickRight: false })
     body.vy = 0
     const ticksToRunOut = Math.ceil(PRE_PRESS_BUFFER_SEC / phys.fixedDt) + 1
     for (let i = 0; i < ticksToRunOut; i++) trickHopSystem(sim, phys)
@@ -428,6 +451,7 @@ describe('trickHopSystem — pre-input buffer', () => {
     expect(trick.bufferedPressTimerSec).toBe(0)
     expect(trick.bufferedPressDir).toBe(0)
     expect(trick.trickFiredThisTick).toBe(false)
+    expect(trick.trickFiredThisAirborne).toBe(false)
     expect(trick.hopLockoutActive).toBe(true)
     expect(body.impulses.length).toBeGreaterThanOrEqual(1)
     const lastImpulse = body.impulses[body.impulses.length - 1]
@@ -439,24 +463,24 @@ describe('trickHopSystem — reward magnitude', () => {
   it('scales fired-trick strength with takeoff vy', () => {
     const minVy = 2.0
     const highVy = 8
-    const lowFired = runQualifyingTakeoff(minVy)
-    const highFired = runQualifyingTakeoff(highVy)
+    const lowFired = runPop(minVy)
+    const highFired = runPop(highVy)
     expect(highFired).toBeGreaterThan(lowFired)
     expect(lowFired).toBeGreaterThan(0)
     expect(highFired).toBeCloseTo(1, 2)
   })
 })
 
-function runQualifyingTakeoff(takeoffVy: number): number {
-  const sim = createSimWorld({ seed: 1 })
-  const body: BodyState = { vx: 22, vy: takeoffVy, vz: 0, impulses: [] }
-  const m = makeMockPhys(body)
-  const { eid, setIntent } = spawnBike(sim, m.bodyHandle)
+function runPop(takeoffVy: number): number {
+  const localSim = createSimWorld({ seed: 1 })
+  const localBody: BodyState = { vx: 22, vy: takeoffVy, vz: 0, impulses: [] }
+  const m = makeMockPhys(localBody)
+  const { eid, setIntent } = spawnBike(localSim, m.bodyHandle)
   setIntent({ throttle: 0.9 })
-  trickHopSystem(sim, m.phys)
-  HoverStateStore.must(eid).isGrounded = false
-  trickHopSystem(sim, m.phys)
+  trickHopSystem(localSim, m.phys) // seed vyPeak while planted
+  setGround(eid, false) // pop / full takeoff
+  trickHopSystem(localSim, m.phys) // arm
   setIntent({ throttle: 0.9, trickRight: true })
-  trickHopSystem(sim, m.phys)
+  trickHopSystem(localSim, m.phys) // press → fire
   return TrickStateStore.must(eid).trickFiredStrength
 }

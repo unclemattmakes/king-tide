@@ -76,6 +76,16 @@ const SURFACE_FOLLOW_MAX = 1.5
  *  decides whether the center probe sees the bike as grounded. */
 const GROUNDED_DISTANCE_MUL = 1.6
 
+/** Hysteresis for the per-end (nose / base) grounded flags written to
+ *  HoverState. An end already grounded lifts off when its local distance
+ *  exceeds the full cutoff; an end already airborne only re-grounds once
+ *  it drops back below `cutoff * NOSE_REGROUND_FRAC`. The gap debounces
+ *  chattery trimesh edges around the threshold so a single lumpy tick
+ *  can't flicker the trick-arming pop — small bumps are absorbed, a real
+ *  lip flips the flag and holds it. Trigger-side only; the spring's own
+ *  per-corner skip gate is unchanged. */
+const NOSE_REGROUND_FRAC = 0.85
+
 // ============================================================================
 // Exported feel constants (re-used by the slope-momentum unit test +
 // the hover-debug overlay)
@@ -1820,10 +1830,21 @@ function applyAntiGravCorrections(frame: HoverFrame): void {
 // Persisted state + debug overlay writes
 // ============================================================================
 
+/** Per-end grounded test with hysteresis (see `NOSE_REGROUND_FRAC`). A
+ *  currently-grounded end stays grounded until its local distance exceeds
+ *  the full cutoff; a currently-airborne end re-grounds only once it drops
+ *  back below the lowered threshold. */
+function resolveCornerGrounded(localDist: number, cutoff: number, prevGrounded: boolean): boolean {
+  const threshold = prevGrounded ? cutoff : cutoff * NOSE_REGROUND_FRAC
+  return localDist < threshold
+}
+
 function writeHoverState(
   eid: number,
   groundDistance: number,
   isGrounded: boolean,
+  noseGrounded: boolean,
+  baseGrounded: boolean,
   isWater: boolean,
   surfaceType: SurfaceTypeValue,
   surfaceForwardSlope: number,
@@ -1833,6 +1854,8 @@ function writeHoverState(
   HoverStateStore.set(eid, {
     groundDistance,
     isGrounded,
+    noseGrounded,
+    baseGrounded,
     surfaceIsWater: isWater,
     // Surface material under the bike — DEFAULT while airborne (no
     // surface contact), the probed type while grounded. Render + drift
@@ -2017,6 +2040,35 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
         )
       : emptyFootprint()
 
+    // Per-end (nose / base) contact for the trick system. Reuse the
+    // spring's force-arm geometry (physical bow/stern, not the speed-
+    // anticipated sample reach) projected on up, minus the surface sample
+    // at that end. Only meaningful while the center is grounded; airborne
+    // reads both ends as off the surface. Hysteresis (resolveCornerGrounded)
+    // debounces chattery trimesh edges so the nose-up pop arms cleanly.
+    let noseGrounded = false
+    let baseGrounded = false
+    if (isGrounded) {
+      const fhl = devSettings.hoverProbeHalfLength
+      const ax = footprint.forceFwdX * fhl
+      const ay = footprint.forceFwdY * fhl
+      const az = footprint.forceFwdZ * fhl
+      const { upX, upY, upZ, t } = frame
+      const bowProbeProj = (t.x + ax) * upX + (t.y + ay) * upY + (t.z + az) * upZ
+      const sternProbeProj = (t.x - ax) * upX + (t.y - ay) * upY + (t.z - az) * upZ
+      const cutoff = stats.hoverHeight * GROUNDED_DISTANCE_MUL
+      noseGrounded = resolveCornerGrounded(
+        bowProbeProj - footprint.bowProj,
+        cutoff,
+        prevHover?.noseGrounded ?? true,
+      )
+      baseGrounded = resolveCornerGrounded(
+        sternProbeProj - footprint.sternProj,
+        cutoff,
+        prevHover?.baseGrounded ?? true,
+      )
+    }
+
     // Bad-landing / bad-attitude velocity-kill (rider-crash trigger).
     applyBadLandingChecks(frame, probe, footprint.surfaceForwardSlopeRaw, prevGrounded, isGrounded)
 
@@ -2038,6 +2090,8 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       frame.eid,
       groundDistance,
       isGrounded,
+      noseGrounded,
+      baseGrounded,
       probe.hasSurface && probe.isWater,
       probe.surfaceType,
       footprint.surfaceForwardSlope,

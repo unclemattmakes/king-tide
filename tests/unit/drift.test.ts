@@ -35,6 +35,8 @@ function groundedHover(): HoverStateData {
   return {
     groundDistance: 0.4,
     isGrounded: true,
+    noseGrounded: true,
+    baseGrounded: true,
     surfaceIsWater: false,
     surfaceType: 'default',
     forwardSlope: 0,
@@ -44,7 +46,13 @@ function groundedHover(): HoverStateData {
 }
 
 function airborneHover(): HoverStateData {
-  return { ...groundedHover(), groundDistance: 4, isGrounded: false }
+  return {
+    ...groundedHover(),
+    groundDistance: 4,
+    isGrounded: false,
+    noseGrounded: false,
+    baseGrounded: false,
+  }
 }
 
 function idleDrift(): DriftStateData {

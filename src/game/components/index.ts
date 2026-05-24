@@ -120,6 +120,18 @@ export const HoverState = { name: 'HoverState' as const }
 export type HoverStateData = {
   groundDistance: number
   isGrounded: boolean
+  /** Per-end contact, derived from the bow (nose) / stern (base) hover
+   *  probes: true when that end's local distance to its surface sample is
+   *  within the grounded cutoff. Computed with hysteresis so chattery
+   *  trimesh edges don't flip the flag on every tick — small bumps are
+   *  absorbed, a real lip / ramp crest flips it decisively. Both are
+   *  `false` while the bike's center is airborne (no footprint sampled).
+   *
+   *  The trick system reads these: the nose lifting off while the base is
+   *  still down is the "pop" that arms the trick window. `noseGrounded`
+   *  maps to the bow probe, `baseGrounded` to the stern probe. */
+  noseGrounded: boolean
+  baseGrounded: boolean
   /** True if the surface under the bike is the wave field, false if it's a
    *  hard collider. Used by the render-side FX to route between foam-puff
    *  emission (water) and spark/dust emission (land). Defaults to `false`
@@ -219,12 +231,15 @@ export const HoverDebugStore = createStore<HoverDebugData>('HoverDebug')
  *    around `(spinAxisX, spinAxisY, spinAxisZ)` by `(1 - spinPhase) * 2π`.
  *  - `prevLeftDown` / `prevRightDown` are the per-tick edge-detect
  *    bookkeeping for the trick buttons.
- *  - `trickWindowOpen` / `trickWindowTakeoffVy` are the headline new
- *    fields under the airborne-gated model: the window opens on a
- *    qualifying grounded→airborne transition and stays open the
- *    whole airtime. Press anytime in the window = trick.
+ *  - `trickWindowOpen` / `trickWindowTakeoffVy` are the headline fields
+ *    under the geometric pop model: the window opens the moment the bike
+ *    leaves its fully-planted stance (the nose lifting off while the base
+ *    is still down — a bump / lip / ramp crest — or a clean full takeoff)
+ *    and stays open the whole airtime, closing when the bike re-plants.
+ *    Press anytime in the window = trick. `trickWindowTakeoffVy` captures
+ *    `max(vy, vyPeak)` at the pop for reward scaling.
  *  - `bufferedPressTimerSec` / `bufferedPressDir` implement the
- *    MK-style early-press forgiveness (200 ms grace before takeoff).
+ *    MK-style early-press forgiveness (200 ms grace before the pop).
  *  - `trickFiredThisTick` is the one-shot edge consumed by the render
  *    hook the same frame it's set; cleared the next sim tick.
  */
@@ -267,10 +282,11 @@ export type TrickStateData = {
   hopLockoutSafetyTicks: number
 
   // ── Airborne trick window (MK-style "in the air = trickable") ─────
-  /** True for the duration of an airborne arc whose takeoff qualified
-   *  (surface-driven, ≥ minVyPeak, ≥ minSpeedFrac, ≥ minThrottle).
-   *  Opens on the qualifying grounded→airborne transition; closes
-   *  silently on the next airborne→grounded transition. */
+  /** True from the moment the bike leaves its fully-planted stance
+   *  (nose-up pop or full takeoff, while surface-driven and ≥ minSpeedFrac
+   *  / ≥ minThrottle) until it re-plants. Press anytime it's open = trick.
+   *  Replaces the old vy-gated "qualifying takeoff" — geometry decides,
+   *  vy only scales the reward. */
   trickWindowOpen: boolean
   /** World-Y velocity (m/s) sampled at the moment the trick window
    *  opened. Drives the boost-reward strength so a stronger takeoff
@@ -282,10 +298,11 @@ export type TrickStateData = {
    *  (anti-grav launches, big ramps) from banking multiple boosts off
    *  the same takeoff. */
   trickFiredThisAirborne: boolean
-  /** Previous tick's grounded state — used to detect takeoff/landing
-   *  transitions inside `trickHopSystem` without needing a shared
-   *  observer. */
-  wasGroundedLastTick: boolean
+  /** Previous tick's fully-planted state (center + nose + base all
+   *  grounded). The rising edge of *leaving* this state arms the trick
+   *  window; re-entering it closes the window. Tracked on the component
+   *  so `trickHopSystem` detects the pop without a shared observer. */
+  wasFullyPlantedLastTick: boolean
 
   // ── Pre-input buffer (Layer 1 "early press" forgiveness) ──────────
   /** Seconds remaining on a buffered press. A press while grounded

@@ -55,12 +55,14 @@ export type WavePumpSample = {
 // prompt logic in `game-loop` reads them to decide when to show the
 // "TRICK READY" cue. Changing a value here changes both behaviors.
 
-/** Vertical velocity (m/s) the bike must reach at the moment of
- *  takeoff for a trick window to open. Same threshold gates the
- *  pre-press buffer (a recent `vyPeak ≥ MIN_VY_PEAK` indicates a
- *  qualifying takeoff is plausible). 2.0 m/s catches gentler humps —
- *  water-to-sandbar transitions, modest ramp lips — without arming
- *  on flat-ground chop. */
+/** Reference vertical velocity (m/s). Under the geometric trick model
+ *  this is no longer an eligibility gate (the nose-up pop arms the
+ *  window). It now serves two roles: (a) the climb-context threshold
+ *  that decides whether a grounded press buffers (a recent
+ *  `vyPeak ≥ MIN_VY_PEAK` means a pop is plausibly imminent), and
+ *  (b) the reward-strength floor — a pop is scored at no less than
+ *  `strengthFromTakeoffVy(MIN_VY_PEAK)`. 2.0 m/s reads as a deliberate
+ *  climb, not flat-ground chop. */
 export const MIN_VY_PEAK = 2.0
 
 /** Minimum forward speed (as a fraction of the bike's `topSpeed`) for
@@ -77,19 +79,19 @@ export const MIN_THROTTLE = 0.2
 export const VY_STRENGTH_CEILING = 8.0
 
 /** Seconds the pre-input buffer holds a grounded press while waiting
- *  for a qualifying takeoff. MK-style "early press" forgiveness:
- *  commit on the upslope, the trick fires the moment you leave the
- *  ground. Buffer expires to a small flatground hop if no takeoff
- *  arrives in time. */
+ *  for the nose-up pop. MK-style "early press" forgiveness: commit on
+ *  the upslope, the trick fires the moment the bike leaves its planted
+ *  stance. Buffer expires to a small flatground hop if no pop arrives
+ *  in time. */
 export const PRE_PRESS_BUFFER_SEC = 0.2
 
 /**
  * Wave-mastery reward curve. Maps takeoff vy (m/s) → boost strength
  * (0..1). Bucketing:
  *
- *   - `vy < MIN_VY_PEAK`     → 0   (no boost; never called in
- *                                   practice — qualifying takeoff
- *                                   guarantees vy ≥ MIN_VY_PEAK.)
+ *   - `vy < MIN_VY_PEAK`     → 0   (no boost; `fireTrick` floors its
+ *                                   input at MIN_VY_PEAK, so a fired
+ *                                   trick never scores below the floor.)
  *   - `MIN_VY_PEAK`          → 0.4 (the "I made it count" floor)
  *   - `MIN_VY_PEAK..ceiling` → 0.4 → 1.0 linear ramp
  *   - `≥ VY_STRENGTH_CEILING` → 1.0 saturate
