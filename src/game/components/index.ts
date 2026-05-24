@@ -109,6 +109,13 @@ export type HoverStateData = {
    *  pitch-down input then reads as altitude control (via
    *  DIVE_HOVER_HEIGHT_MIN_MUL), not chassis tilt. */
   diveHoldS: number
+  /** Seconds remaining in the dive-release kick. Counts DOWN from
+   *  RELEASE_KICK_DURATION_S when the player releases a sustained
+   *  dive, ticking back to 0. Drives a brief NOSE-UP torque so the
+   *  bow leads as the bike rises back to baseline hover height. Zero
+   *  outside the release window; reset to 0 if the player re-presses
+   *  pitch-down (a new dive cancels the release kick). */
+  releaseKickS: number
 }
 export const HoverStateStore = createStore<HoverStateData>('HoverState')
 

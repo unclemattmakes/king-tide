@@ -94,6 +94,7 @@ function spawnBike(
     surfaceIsWater: false,
     forwardSlope: 0,
     diveHoldS: 0,
+    releaseKickS: 0,
   })
   addComponent(sim, eid, TrickState)
   TrickStateStore.set(eid, {
