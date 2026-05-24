@@ -933,8 +933,13 @@ export function startGameLoop(opts: GameLoopOpts): void {
       // One-shot whoosh on the tick a drift release fires a boost.
       // `releasedThisTick` is the sim-side edge flag set by
       // driftSystem; tier dictates pitch/brightness (MT/SMT/UMT).
-      if (drift?.releasedThisTick && drift.releasedTier > 0 && intensity !== 'off') {
-        audio.driftBoost(drift.releasedTier)
+      if (drift?.releasedThisTick && drift.releasedTier > 0) {
+        if (intensity !== 'off') audio.driftBoost(drift.releasedTier)
+        // Tutorial: the DRIFT beat clears on the first charged
+        // release. Signalled regardless of `driftIntensity` — the
+        // beat is about the mechanic, not the FX, and a player who
+        // turned visuals off should still graduate the beat.
+        tutorialDirector?.notifyDrift(drift.releasedTier)
       }
     }
 
