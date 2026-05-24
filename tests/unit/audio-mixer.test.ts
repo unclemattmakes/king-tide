@@ -17,13 +17,13 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import type { AudioBus, AudioEngine } from '../../src/engine/audio/audio'
 import {
   applyAudioBusVolume,
   applyAudioMusicEnabled,
   getAudioEngine,
   setAudioEngine,
 } from '../../src/engine/audio/audio-service'
-import type { AudioBus, AudioEngine } from '../../src/engine/audio/audio'
 import {
   DEFAULT_PLAYER_SETTINGS,
   loadPlayerSettings,
@@ -121,6 +121,8 @@ describe('audio-service', () => {
       setMusicEnabled: () => {},
       duckMusic: () => {},
       tickEngine: () => {},
+      driftSkid: () => {},
+      driftBoost: () => {},
       pickupCollect: () => {},
       pickupFire: () => {},
       explosion: () => {},
@@ -144,6 +146,8 @@ describe('audio-service', () => {
       setMusicEnabled: () => {},
       duckMusic: () => {},
       tickEngine: () => {},
+      driftSkid: () => {},
+      driftBoost: () => {},
       pickupCollect: () => {},
       pickupFire: () => {},
       explosion: () => {},

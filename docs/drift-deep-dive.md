@@ -121,6 +121,14 @@ In `applyGroundBranch`:
   / orange SMT / purple UMT). Tier-up pulse on each upgrade. Source:
   `src/engine/render/drift-tier-hud.ts`. Always visible during drift
   unless `playerSettings.driftIntensity === 'off'`.
+- **Skid audio** — continuous tyre-scrape loop (`audio.driftSkid`),
+  a band-passed noise layer at ~2.6 kHz whose level + brightness
+  scale with speed while drifting. Plus a one-shot release whoosh
+  (`audio.driftBoost`) whose bell pitch climbs with tier (A5 / C#6
+  / E6 across MT / SMT / UMT). Both gated by `driftIntensity`
+  (off = silent, subtle = half-level skid). The boost reward itself
+  is applied in the sim, so a frame-dropped whoosh never costs the
+  player the actual mini-turbo.
 
 ### Anti-snake
 
@@ -247,9 +255,6 @@ release, a 350 ms cooldown prevents immediate re-trigger.
 2. **Surface-aware drift.** Currently uniform on land + water. Could
    make water-drift slipper / land-drift grippier. Deferred until the
    surface-type tagging system exists.
-3. **Skid audio.** Continuous tire-scrape loop while drifting, pitch
-   modulated by speed; one-shot whoosh on release scaled by tier.
-   Hook lives next to `audio.wavePump()`. (Deferred.)
 
 ## References
 
