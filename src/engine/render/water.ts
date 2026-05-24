@@ -2600,29 +2600,24 @@ export function createWaterMesh(
   const outerScatter = vec3(0.22, 0.85, 0.92)
   const outerBody = mix(outerDeep, outerScatter, outerHeightFactor.mul(float(0.6))).mul(outerShade)
 
-  // Fresnel sky-tint stand-in for the center mesh's planar reflection.
-  // The center samples the actual sky via `reflector()` — at grazing
-  // angles (looking out at distance) that picks up the bright low
-  // horizon and paints the water warm/light. The outer has no
-  // reflection sample, so without compensation it reads as a darker,
-  // more-saturated band right past the 480 m boundary — the eye sees
-  // "center fades to fog colour, outer starts blue, fog kicks in
-  // again" which is exactly the seam users still notice.
+  // Sample the SAME planar-reflection texture the center mesh draws
+  // with (shared `reflectionRgb` from the closure above) instead of
+  // approximating with horizon-haze. The center fades to whatever the
+  // reflector actually paints at distance — typically the low-sky /
+  // distant-landform composite at the reflected angle, NOT pure
+  // horizon-haze — so the haze stand-in always painted a too-bright
+  // band right past the 480 m boundary. Sharing the texture means
+  // outer and center paint the same colour at the same screen pixel,
+  // and the layer boundary becomes invisible regardless of palette.
   //
-  // Approximation: blend the body toward the same `horizonHazeUniform`
-  // the rest of the water uses, weighted by Schlick-like fresnel
-  // (`(1 - ndotv)^5`). At looking-straight-down (ndotv ≈ 1) the
-  // contribution is zero so the close-in outer band keeps its body
-  // tone. At grazing (ndotv → 0) the contribution dominates,
-  // matching the center's reflection-driven brightness within
-  // perceptual tolerance. The 0.85 strength factor was tuned against
-  // the bike-POV view on the water-test track at sunset, where the
-  // seam was most stark — lower and the gap returns, higher and the
-  // outer reads as a bright horizon band rather than water.
+  // Fall back to the haze approximation when reflections are
+  // disabled (`?reflect=0`) — better some compensation than none.
   const outerViewDir = normalize(cameraPosition.sub(positionWorld))
   const outerNdotV = max(dot(outerNormal, outerViewDir), float(0))
   const outerFresnel = pow(float(1).sub(outerNdotV), float(5))
-  const outerSurfaceLit = mix(outerBody, horizonHazeUniform, outerFresnel.mul(float(0.4)))
+  const outerSurfaceLit = reflectionRgb
+    ? mix(outerBody, reflectionRgb, outerFresnel)
+    : mix(outerBody, horizonHazeUniform, outerFresnel.mul(float(0.4)))
 
   const outerColorNode = mix(
     mix(outerSurfaceLit, horizonHazeUniform, outerAerialMix),
@@ -2769,22 +2764,21 @@ export function createWaterMesh(
     const skirtGerst = gerstnerHeight(skirtWorldX, skirtWorldZ, tNode)
     skirtMat.positionNode = vec3(positionLocal.x, skirtGerst.x, positionLocal.z)
 
-    // Anchor on the wave mesh's deep trough colour (same `vec3(0.02,
-    // 0.22, 0.32)` constant used in the body-color blend above) so the
-    // skirt and the wide-angle view of the wave plane share a tone.
-    // Lift toward `horizonHazeUniform` via the same Schlick-fresnel
-    // stand-in the outer mesh uses (see the `outerSurfaceLit` block),
-    // so the skirt's grazing tone matches the outer's grazing tone
-    // and the cross-layer boundary stops reading as a brightness
-    // step. The shared horizon haze + shared aerial-mix formula take
-    // it the rest of the way into the tone the center is fading
-    // toward.
+    // Anchor on the wave mesh's deep trough colour, then lift toward
+    // the SAME planar-reflection texture the center mesh uses, via
+    // Schlick fresnel. Sharing the reflection sample (rather than
+    // approximating with horizon-haze) makes the skirt paint
+    // identically to the center / outer at the same screen pixel —
+    // the layer boundaries dissolve entirely. Falls back to the
+    // haze stand-in only when reflections are disabled.
     const skirtDeepColor = vec3(0.02, 0.22, 0.32)
     const skirtNormal = vec3(skirtGerst.y.negate(), float(1), skirtGerst.z.negate()).normalize()
     const skirtViewDir = normalize(cameraPosition.sub(positionWorld))
     const skirtNdotV = max(dot(skirtNormal, skirtViewDir), float(0))
     const skirtFresnel = pow(float(1).sub(skirtNdotV), float(5))
-    const skirtSurfaceLit = mix(skirtDeepColor, horizonHazeUniform, skirtFresnel.mul(float(0.4)))
+    const skirtSurfaceLit = reflectionRgb
+      ? mix(skirtDeepColor, reflectionRgb, skirtFresnel)
+      : mix(skirtDeepColor, horizonHazeUniform, skirtFresnel.mul(float(0.4)))
     skirtMat.colorNode = mix(
       mix(skirtSurfaceLit, horizonHazeUniform, hazeMix),
       skirtDebugColorUniform,
