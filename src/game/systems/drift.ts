@@ -62,22 +62,25 @@ export const TIER_2_THRESHOLD_S = 1.4
  *  only a committed long-arc drift hits UMT. */
 export const TIER_3_THRESHOLD_S = 2.4
 
-/** Throttle multiplier applied via `BoostEffect` on tier-1 release. */
-export const DRIFT_BOOST_MUL_T1 = 1.3
+/** Throttle multiplier applied via `BoostEffect` on tier-1 release.
+ *  Bumped from 1.30 (playtest: the blue-MT payoff was too faint to
+ *  feel like a reward). */
+export const DRIFT_BOOST_MUL_T1 = 1.45
 /** Throttle multiplier on tier-2 release. */
-export const DRIFT_BOOST_MUL_T2 = 1.55
-/** Throttle multiplier on tier-3 (UMT) release. Capped under 2× so it
- *  pairs with the bike's `boostMul` (1.6 default) without exceeding a
- *  combined 3× — past that the camera + AI both lose readability. */
-export const DRIFT_BOOST_MUL_T3 = 1.8
+export const DRIFT_BOOST_MUL_T2 = 1.75
+/** Throttle multiplier on tier-3 (UMT) release. The big payoff — a
+ *  long sweeping drift now reads as a real slingshot. Stacks with the
+ *  bike's `boostMul` (1.6) only in the rare drift-into-held-boost case;
+ *  the resulting brief ~3.1× cap is intentional flair, not the norm. */
+export const DRIFT_BOOST_MUL_T3 = 1.95
 
-/** Tier-1 boost duration (s). Reads as a quick punch out of a corner. */
-export const DRIFT_BOOST_DURATION_T1 = 0.8
+/** Tier-1 boost duration (s). A quick punch out of a corner. */
+export const DRIFT_BOOST_DURATION_T1 = 1.0
 /** Tier-2 boost duration (s). Long enough to feel like a real reward. */
-export const DRIFT_BOOST_DURATION_T2 = 1.4
-/** Tier-3 (UMT) boost duration (s). Equivalent to a Mushroom in MK
- *  feel — sustained enough to carry through the next corner. */
-export const DRIFT_BOOST_DURATION_T3 = 2.0
+export const DRIFT_BOOST_DURATION_T2 = 1.6
+/** Tier-3 (UMT) boost duration (s). Mushroom-grade — carries clean
+ *  through the next corner. */
+export const DRIFT_BOOST_DURATION_T3 = 2.3
 
 /** Seconds the player must wait after releasing a drift before a new
  *  drift can activate. Stops re-press snake — combined with the

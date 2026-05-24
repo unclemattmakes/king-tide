@@ -75,9 +75,9 @@ keeps its priority.
 | Tier | Color | Charge time | Boost mult | Duration |
 |---|---|---|---|---|
 | 0 | none | < 0.6 s | — | — |
-| 1 (MT) | blue | 0.6–1.4 s | 1.30× | 0.8 s |
-| 2 (SMT) | orange | 1.4–2.4 s | 1.55× | 1.4 s |
-| 3 (UMT) | purple | ≥ 2.4 s | 1.80× | 2.0 s |
+| 1 (MT) | blue | 0.6–1.4 s | 1.45× | 1.0 s |
+| 2 (SMT) | orange | 1.4–2.4 s | 1.75× | 1.6 s |
+| 3 (UMT) | purple | ≥ 2.4 s | 1.95× | 2.3 s |
 
 Tuning targets a clear "this paid off" feel without breaking topSpeed
 balance. `topSpeed × 1.55 = ~43.4 m/s`, comparable to a mid-strength
@@ -115,6 +115,13 @@ In `applyGroundBranch`:
 
 ### Game feel — render layer
 
+- **Rider lean** — the rider banks the torso into the drift
+  (`driftLeanTarget` in `rider-pose.ts`, applied at `spine_lower` so
+  the whole upper body rolls from the hips while hand IK keeps the
+  grips planted). Neutral mid-drift ≈ 13°, deepening to ~31° when
+  steering into the turn and easing to ~3° on counter-steer. Decays
+  back upright on release. Sim-side (drives the kinematic ragdoll
+  pose), so it's not gated by `driftIntensity`.
 - **Camera roll** of ~5° / 7° / 9° toward the drift direction (tier 1
   / 2 / 3), eased over ~150 ms.
 - **Drift sparks** from the outside-rear corner of the bike — three
@@ -182,12 +189,13 @@ Tuning constants live in `hover.ts` (`INWARD_INITIAL_BIAS_MUL`,
 | Tier 1 charge threshold | `TIER_1_THRESHOLD_S` in `drift.ts` | 0.6 s | 0.3–1.0 s — lower = easier MTs |
 | Tier 2 charge threshold | `TIER_2_THRESHOLD_S` | 1.4 s | 1.0–2.0 s |
 | Tier 3 (UMT) charge threshold | `TIER_3_THRESHOLD_S` | 2.4 s | 2.0–3.0 s |
-| Tier 1 boost multiplier | `DRIFT_BOOST_MUL_T1` | 1.30 | 1.15–1.45 |
-| Tier 2 boost multiplier | `DRIFT_BOOST_MUL_T2` | 1.55 | 1.40–1.75 |
-| Tier 3 boost multiplier | `DRIFT_BOOST_MUL_T3` | 1.80 | 1.65–1.95 |
-| Tier 1 boost duration | `DRIFT_BOOST_DURATION_T1` | 0.8 s | 0.5–1.2 s |
-| Tier 2 boost duration | `DRIFT_BOOST_DURATION_T2` | 1.4 s | 1.0–1.8 s |
-| Tier 3 boost duration | `DRIFT_BOOST_DURATION_T3` | 2.0 s | 1.6–2.5 s |
+| Tier 1 boost multiplier | `DRIFT_BOOST_MUL_T1` | 1.45 | 1.3–1.6 |
+| Tier 2 boost multiplier | `DRIFT_BOOST_MUL_T2` | 1.75 | 1.55–1.9 |
+| Tier 3 boost multiplier | `DRIFT_BOOST_MUL_T3` | 1.95 | 1.8–2.1 |
+| Tier 1 boost duration | `DRIFT_BOOST_DURATION_T1` | 1.0 s | 0.7–1.3 s |
+| Tier 2 boost duration | `DRIFT_BOOST_DURATION_T2` | 1.6 s | 1.2–2.0 s |
+| Tier 3 boost duration | `DRIFT_BOOST_DURATION_T3` | 2.3 s | 1.8–2.8 s |
+| Rider drift-lean base / max | `driftLeanBase` / `driftLeanMax` in `rider-pose.ts` | 0.22 / 0.55 rad | deepens steering in, shallows on counter |
 | Lateral-drag scale while drifting | `DRIFT_LATERAL_DRAG_SCALE` in `hover.ts` | 0.35 | 0.2–0.6 — lower = more slide |
 | Drift auto-turn-in bias (× turnTorque) | `DRIFT_YAW_BIAS_FRAC` | 0.45 | 0.3–0.6 — higher = tighter default arc |
 | Counter-steer authority while drifting | `DRIFT_STEER_FRAC` | 0.65 | 0.5–0.9 — must be ≳ bias/0.7 so full counter-steer opens the drift |
