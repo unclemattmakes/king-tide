@@ -2,6 +2,7 @@ import { hasComponent, query } from 'bitecs'
 import * as THREE from 'three'
 import { attribute, texture as tslTexture } from 'three/tsl'
 import { SpriteNodeMaterial } from 'three/webgpu'
+import { playerSettings, TUCK_VFX_SCALAR } from '@/engine/player-settings'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
@@ -24,6 +25,7 @@ import {
   MissileStateStore,
   MissileTag,
 } from '@/game/components/combat'
+import { tuckFactor } from '@/game/systems/hover'
 /**
  * Hand-rolled particle FX driven by TSL node materials.
  *
@@ -104,6 +106,16 @@ const EXHAUST_THROTTLE_MIN = 0.2 // dead-zone — no exhaust on micro inputs
 // as a smoky exhaust streak in the missile's wake.
 const MISSILE_TRAIL_RATE = 35 // particles/sec per missile
 
+// Tuck slipstream — cool vapor streaks pulled off the bike as the player
+// leans into the tuck sweet spot. Emission rate + sprite size both scale
+// with the live tuck factor (peaks at the sweet spot, falls off as the
+// lean over-shoots into the belly-scrape), so the effect is "more
+// prevalent the closer you are to the sweet spot" by construction. Gated
+// to grounded / over-water frames — the same surface the tuck physics
+// acts on. Negative tuck factor (over-tuck) emits nothing.
+const TUCK_MAX_RATE = 70 // particles/sec at a perfect sweet-spot tuck
+const TUCK_MIN_FACTOR = 0.05 // dead-zone so a feather-touch lean shows nothing
+
 // Emission origins in bike-local coords. The bike's render-systems.ts
 // applies a 2× visual scale to the mesh while keeping the physics body
 // at authored size — the bike's *transform* still uses physics-space
@@ -113,6 +125,9 @@ const MISSILE_TRAIL_RATE = 35 // particles/sec per missile
 const STERN_OFFSET = new THREE.Vector3(0, 0.1, -1.4)
 const SPARK_OFFSET = new THREE.Vector3(0, -0.2, 0)
 const EXHAUST_OFFSET = new THREE.Vector3(0, -0.2, -1.6)
+// Tuck streaks shed from the cockpit / leading shoulders of the bike,
+// then rush backward — the air the rider is ducking under.
+const TUCK_OFFSET = new THREE.Vector3(0, 0.35, 0.2)
 
 // Pool capacities — sized for ~5–8 bikes at full emission. Foam drifts
 // longer (lifetime ~1 s, rate ~80/s → ~80 alive per bike), so 480 covers
@@ -134,6 +149,10 @@ const EXPLOSION_CAPACITY = 240
 // Missile trail: continuous emission along missile path. ~30/s × 0.6 s
 // life × up to 4 missiles in flight = ~72 peak; 200 covers boost cases.
 const MISSILE_CAPACITY = 200
+// Tuck: ~70/s × ~0.5 s life ≈ 35 alive per bike at the sweet spot. Tuck
+// is overwhelmingly a player-only input (AI doesn't tuck), so a couple of
+// bikes' worth of headroom is plenty.
+const TUCK_CAPACITY = 120
 
 // Plunge bubbles — thick cloud that boils around a bike/rider when they
 // punch through the water surface, choking off at the apex of the dive
@@ -394,6 +413,9 @@ export function createFxSystem(
   // Bubbles read brighter than foam — a pale cyan-tinted white that
   // stands out against the saturated teal underwater fog.
   const bubbleTex = makeRadialTexture([220, 240, 250])
+  // Cool cyan-white — reads as cold slipstream vapor, distinct from the
+  // warm exhaust and the pale foam.
+  const tuckTex = makeRadialTexture([170, 225, 255])
 
   const foam = createPool({
     capacity: FOAM_CAPACITY,
@@ -462,6 +484,17 @@ export function createFxSystem(
     drag: 2.8,
   })
 
+  const tuckStream = createPool({
+    capacity: TUCK_CAPACITY,
+    defaultSize: 0.4,
+    texture: tuckTex,
+    blending: THREE.AdditiveBlending,
+    // Near-neutral buoyancy + light drag so streaks hang in the
+    // slipstream behind the bike and fade rather than shoot away.
+    gravity: 0.2,
+    drag: 2.0,
+  })
+
   scene.add(foam.mesh)
   scene.add(sparks.mesh)
   scene.add(exhaust.mesh)
@@ -469,12 +502,14 @@ export function createFxSystem(
   scene.add(explosion.mesh)
   scene.add(missileTrail.mesh)
   scene.add(bubbles.mesh)
+  scene.add(tuckStream.mesh)
 
   // Reusable scratch math.
   const sternWorld = new THREE.Vector3()
   const sparkWorld = new THREE.Vector3()
   const exhaustWorld = new THREE.Vector3()
   const dustWorld = new THREE.Vector3()
+  const tuckWorld = new THREE.Vector3()
   const tmpQuat = new THREE.Quaternion()
   const tmpPos = new THREE.Vector3()
   const back = new THREE.Vector3()
@@ -485,7 +520,7 @@ export function createFxSystem(
   // when it crosses a whole particle.
   const emitAccum = new Map<
     number,
-    { foam: number; sparks: number; exhaust: number; dust: number }
+    { foam: number; sparks: number; exhaust: number; dust: number; tuck: number }
   >()
 
   // Per-bike transition memory for event-driven bursts. We need the
@@ -526,6 +561,7 @@ export function createFxSystem(
       explosion,
       missileTrail,
       bubbles,
+      tuckStream,
       dive,
       stats: () => ({
         foamAlive: foam.capacity - foam.freeCount,
@@ -535,6 +571,7 @@ export function createFxSystem(
         explosionAlive: explosion.capacity - explosion.freeCount,
         missileTrailAlive: missileTrail.capacity - missileTrail.freeCount,
         bubbleAlive: bubbles.capacity - bubbles.freeCount,
+        tuckAlive: tuckStream.capacity - tuckStream.freeCount,
       }),
     }
   }
@@ -607,7 +644,7 @@ export function createFxSystem(
 
       let acc = emitAccum.get(eid)
       if (!acc) {
-        acc = { foam: 0, sparks: 0, exhaust: 0, dust: 0 }
+        acc = { foam: 0, sparks: 0, exhaust: 0, dust: 0, tuck: 0 }
         emitAccum.set(eid, acc)
       }
 
@@ -958,6 +995,58 @@ export function createFxSystem(
         }
       } else {
         acc.exhaust = 0
+      }
+
+      // Tuck slipstream — cool vapor streaks shed off the bike's shoulders
+      // as the player leans into the tuck sweet spot. Both the emission
+      // rate and the sprite size scale with the live tuck factor, clamped
+      // to its positive (sweet-spot) side: a feather-light lean shows
+      // almost nothing, the sweet spot fans out a full stream, and an
+      // over-tuck past the sweet spot (negative factor → belly-scrape)
+      // emits nothing — speed VFX shouldn't reward burying the nose. The
+      // player's VFX-intensity setting is the global ceiling on top.
+      // Grounded / over-water only, matching where tuck physics pays out.
+      const tuckSetting = TUCK_VFX_SCALAR[playerSettings.tuckVfxIntensity]
+      const tf = hover.isGrounded ? tuckFactor(Math.max(-intent.pitch, 0)) : 0
+      const tuckIntensity = Math.max(0, tf) * tuckSetting
+      if (tuckIntensity > TUCK_MIN_FACTOR) {
+        acc.tuck += TUCK_MAX_RATE * tuckIntensity * dt
+        const n = Math.floor(acc.tuck)
+        if (n > 0) {
+          acc.tuck -= n
+          tuckWorld.copy(TUCK_OFFSET).applyQuaternion(tmpQuat).add(tmpPos)
+          back.set(0, 0, -1).applyQuaternion(tmpQuat)
+          right.set(1, 0, 0).applyQuaternion(tmpQuat)
+          // Streaks rush backward relative to the bike, a touch faster +
+          // wider near the sweet spot, with a port/starboard spread so
+          // they fan off both shoulders instead of a single line.
+          const streamSpeed = 7 + speed * 0.12 + tuckIntensity * 4
+          for (let k = 0; k < n; k++) {
+            const side = (Math.random() * 2 - 1) * 0.5
+            const dx = back.x + right.x * side
+            const dy = back.y + 0.15
+            const dz = back.z + right.z * side
+            // Spawn jittered across the bike's shoulders.
+            const sx = right.x * side * 0.6
+            const sz = right.z * side * 0.6
+            emit(
+              tuckStream,
+              tuckWorld.x + sx,
+              tuckWorld.y,
+              tuckWorld.z + sz,
+              dx * streamSpeed,
+              dy * streamSpeed,
+              dz * streamSpeed,
+              0.6,
+              0.22,
+              0.5,
+              tuckStream.defaultSize * (0.7 + tuckIntensity * 0.8) * (0.7 + Math.random() * 0.6),
+              1,
+            )
+          }
+        }
+      } else {
+        acc.tuck = 0
       }
     }
 

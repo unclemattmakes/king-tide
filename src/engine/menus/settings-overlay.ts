@@ -55,8 +55,10 @@ import {
   setRubberBandAssist,
   setScreenShakeIntensity,
   setSubtitlesAlwaysOn,
+  setTuckVfxIntensity,
   setTutorialSubtitles,
   setWavePumpIntensity,
+  type TuckVfxIntensity,
   type WavePumpIntensity,
 } from '@/engine/player-settings'
 import {
@@ -77,6 +79,16 @@ const WAVE_PUMP_LABEL: Record<WavePumpIntensity, string> = {
   off: 'Off',
 }
 const WAVE_PUMP_VALUE: Record<string, WavePumpIntensity> = {
+  Full: 'full',
+  Subtle: 'subtle',
+  Off: 'off',
+}
+const TUCK_VFX_LABEL: Record<TuckVfxIntensity, string> = {
+  full: 'Full',
+  subtle: 'Subtle',
+  off: 'Off',
+}
+const TUCK_VFX_VALUE: Record<string, TuckVfxIntensity> = {
   Full: 'full',
   Subtle: 'subtle',
   Off: 'off',
@@ -432,6 +444,17 @@ const TAB_SPECS: TabSpec[] = [
         },
         enabled: true,
         gate: 'Controls the in-race signal that fires on a successful pump.',
+      },
+      {
+        id: 'gp-tuck-vfx',
+        label: 'Tuck slipstream VFX',
+        control: {
+          kind: 'select',
+          options: ['Full', 'Subtle', 'Off'],
+          defaultValue: TUCK_VFX_LABEL[playerSettings.tuckVfxIntensity],
+        },
+        enabled: true,
+        gate: 'Vapor streaks that fan off the bike as you lean into the tuck sweet spot — denser the closer you ride it.',
       },
       {
         id: 'gp-pre-lap-intro',
@@ -914,6 +937,12 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
         sel.addEventListener('change', () => {
           const v = WAVE_PUMP_VALUE[sel.value]
           if (v) setWavePumpIntensity(v)
+        })
+      }
+      if (spec.enabled && spec.id === 'gp-tuck-vfx') {
+        sel.addEventListener('change', () => {
+          const v = TUCK_VFX_VALUE[sel.value]
+          if (v) setTuckVfxIntensity(v)
         })
       }
       if (spec.enabled && spec.id === 'gp-difficulty') {
