@@ -2588,16 +2588,44 @@ export function createWaterMesh(
   // Body colour: anchored on the same deep-trough colour the center
   // shader and the skirt both use, with a height-driven scatter lift on
   // crests. Same `vec3(0.02, 0.22, 0.32)` / `vec3(0.22, 0.85, 0.92)`
-  // pair as the center; clamping the scatter weight at 0.4 keeps the
-  // outer's brightness below the center's so the eye reads the center
-  // as the foreground layer if any seam shows.
+  // pair as the center.
+  //
+  // Scatter cap raised from 0.4 → 0.6 so crests aren't artificially
+  // dimmer than the center's: at the cross-fade boundary the eye was
+  // catching the brightness step (center's reflection-lit crests vs
+  // outer's clamped-dim ones) as a tonal seam.
   const outerHeightVary = varying(outerGerst.x)
   const outerHeightFactor = smoothstep(float(-1.5), float(1.5), outerHeightVary)
   const outerDeep = vec3(0.02, 0.22, 0.32)
   const outerScatter = vec3(0.22, 0.85, 0.92)
-  const outerBody = mix(outerDeep, outerScatter, outerHeightFactor.mul(float(0.4))).mul(outerShade)
+  const outerBody = mix(outerDeep, outerScatter, outerHeightFactor.mul(float(0.6))).mul(outerShade)
+
+  // Fresnel sky-tint stand-in for the center mesh's planar reflection.
+  // The center samples the actual sky via `reflector()` — at grazing
+  // angles (looking out at distance) that picks up the bright low
+  // horizon and paints the water warm/light. The outer has no
+  // reflection sample, so without compensation it reads as a darker,
+  // more-saturated band right past the 480 m boundary — the eye sees
+  // "center fades to fog colour, outer starts blue, fog kicks in
+  // again" which is exactly the seam users still notice.
+  //
+  // Approximation: blend the body toward the same `horizonHazeUniform`
+  // the rest of the water uses, weighted by Schlick-like fresnel
+  // (`(1 - ndotv)^5`). At looking-straight-down (ndotv ≈ 1) the
+  // contribution is zero so the close-in outer band keeps its body
+  // tone. At grazing (ndotv → 0) the contribution dominates,
+  // matching the center's reflection-driven brightness within
+  // perceptual tolerance. The 0.85 strength factor was tuned against
+  // the bike-POV view on the water-test track at sunset, where the
+  // seam was most stark — lower and the gap returns, higher and the
+  // outer reads as a bright horizon band rather than water.
+  const outerViewDir = normalize(cameraPosition.sub(positionWorld))
+  const outerNdotV = max(dot(outerNormal, outerViewDir), float(0))
+  const outerFresnel = pow(float(1).sub(outerNdotV), float(5))
+  const outerSurfaceLit = mix(outerBody, horizonHazeUniform, outerFresnel.mul(float(0.85)))
+
   const outerColorNode = mix(
-    mix(outerBody, horizonHazeUniform, outerAerialMix),
+    mix(outerSurfaceLit, horizonHazeUniform, outerAerialMix),
     outerDebugColorUniform,
     debugColorizeMixUniform,
   )
@@ -2734,19 +2762,6 @@ export function createWaterMesh(
     // sky-blend job. Letting fog do it alone preserves the skirt's
     // water tone right up until fog fully dissolves it.
     const hazeMix = smoothstep(float(120), float(280), radial).mul(float(0.5))
-    // Anchor on the wave mesh's deep trough colour (same `vec3(0.02,
-    // 0.22, 0.32)` constant used in the body-color blend above) so the
-    // skirt and the wide-angle view of the wave plane share a tone.
-    // The visible wave field is trough-dominated at grazing angles —
-    // matching the trough colour hides the join.
-    const skirtDeepColor = vec3(0.02, 0.22, 0.32)
-    skirtMat.colorNode = mix(
-      mix(skirtDeepColor, horizonHazeUniform, hazeMix),
-      skirtDebugColorUniform,
-      debugColorizeMixUniform,
-    )
-    skirtMat.opacityNode = innerFadeIn
-
     // Gerstner displacement on the skirt. Without it the skirt reads
     // as a flat painted ring — even at long range the eye picks up
     // "no waves here = not water" against the center mesh's displaced
@@ -2761,6 +2776,29 @@ export function createWaterMesh(
     const skirtWorldZ = positionLocal.z.add(meshOriginZ)
     const skirtGerst = gerstnerHeight(skirtWorldX, skirtWorldZ, tNode)
     skirtMat.positionNode = vec3(positionLocal.x, skirtGerst.x, positionLocal.z)
+
+    // Anchor on the wave mesh's deep trough colour (same `vec3(0.02,
+    // 0.22, 0.32)` constant used in the body-color blend above) so the
+    // skirt and the wide-angle view of the wave plane share a tone.
+    // Lift toward `horizonHazeUniform` via the same Schlick-fresnel
+    // stand-in the outer mesh uses (see the `outerSurfaceLit` block),
+    // so the skirt's grazing tone matches the outer's grazing tone
+    // and the cross-layer boundary stops reading as a brightness
+    // step. The shared horizon haze + shared aerial-mix formula take
+    // it the rest of the way into the tone the center is fading
+    // toward.
+    const skirtDeepColor = vec3(0.02, 0.22, 0.32)
+    const skirtNormal = vec3(skirtGerst.y.negate(), float(1), skirtGerst.z.negate()).normalize()
+    const skirtViewDir = normalize(cameraPosition.sub(positionWorld))
+    const skirtNdotV = max(dot(skirtNormal, skirtViewDir), float(0))
+    const skirtFresnel = pow(float(1).sub(skirtNdotV), float(5))
+    const skirtSurfaceLit = mix(skirtDeepColor, horizonHazeUniform, skirtFresnel.mul(float(0.85)))
+    skirtMat.colorNode = mix(
+      mix(skirtSurfaceLit, horizonHazeUniform, hazeMix),
+      skirtDebugColorUniform,
+      debugColorizeMixUniform,
+    )
+    skirtMat.opacityNode = innerFadeIn
   }
 
   const skirtMesh = new THREE.Mesh(skirtGeom, skirtMat as unknown as THREE.Material)
