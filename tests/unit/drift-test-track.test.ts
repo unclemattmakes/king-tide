@@ -171,4 +171,25 @@ describe('drift-test track — drift stations', () => {
     expect(sw.length).toBeGreaterThan(0)
     expect(nw.length).toBeGreaterThan(0)
   })
+
+  it('tags an ICE patch on the west straight + a SAND patch on the south straight', () => {
+    const t = loadTrack()
+    const surfaced = t.props.filter((p) => p.surface !== undefined)
+    // Exactly the two demonstration patches — ice on the long SMT
+    // sweep (west), sand on the ramp straight (south).
+    const ice = surfaced.find((p) => p.surface === 'ice')
+    const sand = surfaced.find((p) => p.surface === 'sand')
+    expect(ice).toBeDefined()
+    expect(sand).toBeDefined()
+    // Ice sits on the west straight (x ≈ -170, the SMT payoff zone).
+    expect(ice!.position.x).toBeLessThan(-100)
+    // Sand sits on the south straight (z ≈ +130, the ramp section).
+    expect(sand!.position.z).toBeGreaterThan(100)
+    // Both patches must clear the slab top (half-extent puts it at
+    // y=0.25) so the hover probe actually reads them as the ride
+    // surface rather than the buried slab.
+    for (const patch of [ice!, sand!]) {
+      expect(patch.position.y + patch.size.y).toBeGreaterThan(0.25)
+    }
+  })
 })

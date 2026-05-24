@@ -5,6 +5,7 @@ import { isHoverDebugEnabled } from '@/engine/sim/debug-flags'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { quatRotate } from '@/engine/sim/physics/vec'
+import { SurfaceType, type SurfaceTypeValue, surfaceGripMul } from '@/engine/sim/surface-types'
 import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import {
   AntiGravOverrideStore,
@@ -263,11 +264,17 @@ function rayAlong(
  * axis — equals world-Y when up=(0,1,0), the natural distance-along-up in
  * anti-grav zones. `hasSurface=false` means no ground hit and no reachable
  * water (e.g. bike floating in the void).
+ *
+ * `surfaceType` is the material tag of whatever the center probe is riding:
+ * WATER when the wave field wins, otherwise the hit collider's registered
+ * type (DEFAULT when untagged). Drives the lateral-grip multiplier in the
+ * ground branch + the `HoverState.surfaceType` render read.
  */
 type SurfaceProbe = {
   surfaceProj: number
   isWater: boolean
   hasSurface: boolean
+  surfaceType: SurfaceTypeValue
 }
 
 /**
@@ -302,26 +309,33 @@ function probeSurface(
     ignore ?? undefined,
   )
   let groundProj = Number.NEGATIVE_INFINITY
+  let groundSurface: SurfaceTypeValue = SurfaceType.DEFAULT
   if (hit) {
     const hx = fromX + dx * hit.timeOfImpact
     const hy = fromY + dy * hit.timeOfImpact
     const hz = fromZ + dz * hit.timeOfImpact
     groundProj = hx * upX + hy * upY + hz * upZ
+    groundSurface = phys.surfaces.get(hit.collider.handle)
   }
   const waterY = field ? sampleHeight(field, fromX, fromZ) : Number.NEGATIVE_INFINITY
 
   if (groundProj === Number.NEGATIVE_INFINITY && waterY === Number.NEGATIVE_INFINITY) {
-    return { surfaceProj: 0, isWater: false, hasSurface: false }
+    return { surfaceProj: 0, isWater: false, hasSurface: false, surfaceType: SurfaceType.DEFAULT }
   }
   if (groundProj > waterY) {
-    return { surfaceProj: groundProj, isWater: false, hasSurface: true }
+    return { surfaceProj: groundProj, isWater: false, hasSurface: true, surfaceType: groundSurface }
   }
   // Water can be sampled anywhere, so water is "always reachable" — but
   // only counts as a ride surface if the bike is within probe range of
   // it. When `field` is non-null we're in world-up land, so fromY is the
   // bike's proj on up and waterY is the surface proj.
   const reachable = fromY - waterY < MAX_HOVER_PROBE
-  return { surfaceProj: waterY, isWater: true, hasSurface: reachable }
+  return {
+    surfaceProj: waterY,
+    isWater: true,
+    hasSurface: reachable,
+    surfaceType: SurfaceType.WATER,
+  }
 }
 
 /**
@@ -1656,10 +1670,18 @@ function applyGroundBranch(
   // While drifting, scale the drag down so the bike actually slides
   // sideways like an MK kart in mid-drift — `DRIFT_LATERAL_DRAG_SCALE`
   // applied as a pure multiplier on top of the water/land switch.
+  //
+  // Surface grip: per-material multiplier from the surface registry —
+  // 1.0 for DEFAULT / untagged land (so existing tracks are unchanged)
+  // and WATER (its 1.4 lateral is handled by `dragMul` above), <1 for
+  // loose/slick surfaces (sand, ice), >1 for clingy ones (metal). Reads
+  // in both normal driving AND drift so a surface feels coherent — ice
+  // is slippery whether or not you're sliding.
   const dragMul = probe.isWater ? 1.4 : 1.0
   const driftDragMul = drifting ? DRIFT_LATERAL_DRAG_SCALE : 1.0
+  const gripMul = surfaceGripMul(probe.surfaceType)
   const lateralVel = linvel.x * planeRightX + linvel.y * planeRightY + linvel.z * planeRightZ
-  const aDrag = -lateralVel * stats.lateralDrag * dragMul * driftDragMul
+  const aDrag = -lateralVel * stats.lateralDrag * dragMul * driftDragMul * gripMul
   rb.applyImpulse(
     {
       x: planeRightX * aDrag * m * dt,
@@ -1717,6 +1739,7 @@ function writeHoverState(
   groundDistance: number,
   isGrounded: boolean,
   isWater: boolean,
+  surfaceType: SurfaceTypeValue,
   surfaceForwardSlope: number,
   diveHoldS: number,
   releaseKickS: number,
@@ -1725,6 +1748,10 @@ function writeHoverState(
     groundDistance,
     isGrounded,
     surfaceIsWater: isWater,
+    // Surface material under the bike — DEFAULT while airborne (no
+    // surface contact), the probed type while grounded. Render + drift
+    // both read it.
+    surfaceType: isGrounded ? surfaceType : SurfaceType.DEFAULT,
     // Reset filtered slope to 0 while airborne so the next landing
     // seeds the filter from zero.
     forwardSlope: isGrounded ? surfaceForwardSlope : 0,
@@ -1926,6 +1953,7 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       groundDistance,
       isGrounded,
       probe.hasSurface && probe.isWater,
+      probe.surfaceType,
       footprint.surfaceForwardSlope,
       diveHoldS,
       releaseKickS,

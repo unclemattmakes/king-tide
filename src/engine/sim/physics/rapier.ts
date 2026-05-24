@@ -1,4 +1,5 @@
 import RAPIER from '@dimforge/rapier3d-compat'
+import { createSurfaceRegistry, type SurfaceRegistry } from '@/engine/sim/surface-types'
 
 export type RapierAPI = typeof RAPIER
 
@@ -7,6 +8,11 @@ export type PhysicsWorld = {
   world: RAPIER.World
   step(): void
   fixedDt: number
+  /** Collider → surface-type tags for the live track. Tagged at
+   *  collider creation (props / GLB track meshes); read by the hover
+   *  probe to set `HoverState.surfaceType`. Scoped to this world, so
+   *  it dies with the world each race. */
+  surfaces: SurfaceRegistry
 }
 
 let initPromise: Promise<void> | null = null
@@ -28,5 +34,6 @@ export async function createPhysicsWorld(opts?: { gravity?: number }): Promise<P
     world,
     step: () => world.step(),
     fixedDt: FIXED_DT,
+    surfaces: createSurfaceRegistry(),
   }
 }

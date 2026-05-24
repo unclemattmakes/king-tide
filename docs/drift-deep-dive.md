@@ -195,6 +195,7 @@ Tuning constants live in `hover.ts` (`INWARD_INITIAL_BIAS_MUL`,
 | Drift spark rate (blue MT) | `DRIFT_SPARK_RATE_T1` in `fx/index.ts` | 70 /s | 40–120 /s |
 | Drift spark rate (orange SMT) | `DRIFT_SPARK_RATE_T2` | 110 /s | 60–150 /s |
 | Drift spark rate (purple UMT) | `DRIFT_SPARK_RATE_T3` | 90 /s | 60–130 /s |
+| Per-surface lateral grip | `SURFACE_PROFILES` in `surface-types.ts` | 1.0 default | ice 0.35 → metal 1.25 |
 
 ## Validating the implementation — the Drift Practice Range
 
@@ -263,13 +264,51 @@ this beat. The game-loop fires it on `DriftState.releasedThisTick`,
 regardless of `driftIntensity` — the beat is about learning the
 mechanic, so a player with visuals off still graduates it.
 
+## Surface-aware drift
+
+A per-collider surface-type registry (`engine/sim/surface-types.ts`)
+lets a track mix materials. Each `SurfaceType` carries a
+`lateralGripMul` that scales the bike's lateral drag in BOTH normal
+driving and drift, so a surface feels coherent (ice is slippery
+whether or not you're sliding):
+
+| Surface | Grip × | Feel |
+|---|---|---|
+| `default` / `asphalt` | 1.00 | baseline (every untagged collider) |
+| `metal` | 1.25 | clingy — tight, snappy drifts |
+| `sand` | 0.70 | washes out — wide, hard-to-hold drifts |
+| `ice` | 0.35 | very slick — long, loose drifts |
+| `water` | 1.00 | neutral (water's lateral feel is the `isWater` path in hover.ts) |
+
+**Design guard:** `default` is a perfect 1.0 everywhere, so every
+existing track (none tag surfaces) is byte-identical to pre-surface
+behaviour. Only explicitly-tagged patches change feel.
+
+**Flow:** `PhysicsWorld.surfaces` (a `SurfaceRegistry`) maps collider
+handle → type, tagged at collider creation:
+- `Prop.surface` (JSON authoring) → `props.ts` tags the prop collider
+- GLB track meshes → `glb-track.ts` reads an optional `surface`
+  userData extra (validated, unknown ignored)
+
+The hover center probe reads `hit.collider.handle` each tick, looks up
+the type, and writes `HoverState.surfaceType`. The ground branch
+multiplies lateral drag by `surfaceGripMul(surfaceType)`.
+
+The **Drift Practice Range** demonstrates it: an ICE patch on the
+west straight (the SMT sweep — extra-loose) and a SAND patch on the
+south ramp straight.
+
+**Blender authoring** for the GLB `surface` extra (addon UI + a
+Python `SurfaceType` mirror + an asset-kinds-style sync test) is the
+remaining follow-up — the runtime path already honours the extra, so
+it's purely an authoring-tooling task.
+
 ## Open questions / follow-ups
 
-1. **Surface-aware drift.** Currently uniform on land + water. Could
-   make water-drift slipper / land-drift grippier. Deferred until the
-   surface-type tagging system exists — there's no per-surface
-   material/friction tagging in the track pipeline yet, so this is
-   genuinely blocked on infrastructure rather than scope.
+1. **Blender `surface` authoring UI.** The runtime reads a `surface`
+   userData extra off GLB track meshes already; the Blender addon
+   needs a panel to write it (+ a Python `SurfaceType` mirror and the
+   parse-both-sides sync test, matching the `ExportedKind` pattern).
 
 ## References
 
