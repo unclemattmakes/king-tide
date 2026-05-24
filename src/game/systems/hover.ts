@@ -113,17 +113,25 @@ export const MAX_BOW_LIFT_ERROR = 1.2 // metres, ≈ one hoverHeight
 
 // Dive aid — when the player is holding pitch-DOWN, the BOW corner's
 // upward spring (the part that fires when the bow dips below
-// hoverHeight) is scaled down toward this floor, letting the rider
-// "pump" the nose into wave troughs / terrain dips instead of the
-// spring overriding fwd velocity. Linear ramp on |intent.pitch| in
-// [0, 1]: 1.0 at no input, this value at full nose-down. Only the
-// positive-heightError half is softened — wheelie snap-back (negative
-// heightError pushing bow DOWN) is left alone.
+// hoverHeight) is curved from soft-at-top to STIFF-past-baseline as
+// the bow approaches the surface:
+//
+//   heightError = 0       (bow at hover target):  DIVE_BOW_SPRING_MIN_MUL
+//   heightError = effHover (bow at the surface):  DIVE_BOW_SPRING_MAX_MUL
+//
+// Linear lerp between, modulated by |intent.pitch|. The soft top lets
+// the rider tuck the nose into wave troughs / terrain dips; the stiff
+// bottom kicks the nose UP harder than the center/stern, so the
+// chassis pivots toward level and the BELLY scrapes the surface first
+// instead of the nose. Only the positive-heightError half is touched —
+// wheelie snap-back (negative heightError pushing bow DOWN) is left
+// alone.
 //
 // Wheelie path is also untouched: pitch-UP leaves diveAmount=0, so the
-// bow spring runs at full stiffness whether or not it's gated out by
+// bow spring runs at baseline 1.0 whether or not it's gated out by
 // `groundedCutoff`.
 export const DIVE_BOW_SPRING_MIN_MUL = 0.4
+export const DIVE_BOW_SPRING_MAX_MUL = 1.5
 
 // Dive aid #2 — when pitching forward, the grounded pitch PD's P-gain
 // is scaled down toward this floor. The PD targets the surface tangent
@@ -885,11 +893,11 @@ function applyMultiPointHoverSpring(
       isBow: false,
     },
   ]
-  // Dive-aid bow spring softener — only the BOW corner's UPWARD lift
-  // (positive heightError, bow at or below hoverHeight) is scaled. Lets
-  // the player tuck the nose through a wave crest into the trough.
+  // Dive-aid bow spring curve — soft at the top of the dive, stiff
+  // past baseline at the bottom. The curve is evaluated per-tick per-
+  // corner inside the loop using the current heightError; only the
+  // dive intent factor is precomputed here.
   const diveAmount = Math.max(-frame.intent.pitch, 0)
-  const bowDiveSpringMul = 1 - (1 - DIVE_BOW_SPRING_MIN_MUL) * diveAmount
   // Per-bike longitudinal water spring multiplier — sourced from
   // `stats.surfaceFollow` so variants differentiate on chop behaviour.
   const waterLongMul = resolveWaterLongitudinalSpringMul(stats)
@@ -967,11 +975,19 @@ function applyMultiPointHoverSpring(
       const rawHeightError = effHover - localDist
       const heightError = Math.min(rawHeightError, heightErrorCap)
       let springMul = probe.isWater && p.longitudinal ? waterLongMul : 1.0
-      // Dive-aid: only soften when the bow is at/below hoverHeight
-      // (positive heightError = bow being lifted UP by the spring).
-      // Leaving the negative side at full strength keeps wheelie
-      // recovery — bow above hoverHeight gets the same DOWNWARD pull.
-      if (p.isBow && heightError > 0) springMul *= bowDiveSpringMul
+      // Dive-aid bow curve: soft at the top (allows tuck), stiff past
+      // baseline at the bottom (lifts the nose so the BELLY is the
+      // first contact). Only applied when player is diving (linear
+      // ramp on diveAmount) and only on the positive-heightError side
+      // — wheelie recovery (negative heightError pulling bow DOWN) is
+      // left alone.
+      if (p.isBow && heightError > 0) {
+        const proximity = effHover > 0 ? Math.min(1, heightError / effHover) : 0
+        const bowMul =
+          DIVE_BOW_SPRING_MIN_MUL +
+          (DIVE_BOW_SPRING_MAX_MUL - DIVE_BOW_SPRING_MIN_MUL) * proximity
+        springMul *= 1 + (bowMul - 1) * diveAmount
+      }
       aUp = gravity + heightError * stats.hoverSpring * springMul - dampV * stats.hoverDamp
     }
     if (debugOn) {
