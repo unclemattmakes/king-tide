@@ -15,8 +15,10 @@ import {
   BRAKE_CANCEL_THRESHOLD,
   DRIFT_BOOST_DURATION_T1,
   DRIFT_BOOST_DURATION_T2,
+  DRIFT_BOOST_DURATION_T3,
   DRIFT_BOOST_MUL_T1,
   DRIFT_BOOST_MUL_T2,
+  DRIFT_BOOST_MUL_T3,
   DRIFT_COOLDOWN_S,
   driftBoostParams,
   STEER_COMMIT_THRESHOLD,
@@ -24,6 +26,7 @@ import {
   shouldStartDrift,
   TIER_1_THRESHOLD_S,
   TIER_2_THRESHOLD_S,
+  TIER_3_THRESHOLD_S,
   tierFor,
   UNGROUNDED_CANCEL_S,
 } from '../../src/game/systems/drift'
@@ -68,13 +71,19 @@ describe('tierFor', () => {
     expect(tierFor(TIER_2_THRESHOLD_S - 0.01)).toBe(1)
   })
 
-  it('returns 2 once the tier-2 threshold is reached', () => {
+  it('returns 2 once the tier-2 threshold is reached, through the tier-3 floor', () => {
     expect(tierFor(TIER_2_THRESHOLD_S)).toBe(2)
-    expect(tierFor(TIER_2_THRESHOLD_S + 5)).toBe(2)
+    expect(tierFor(TIER_3_THRESHOLD_S - 0.01)).toBe(2)
+  })
+
+  it('returns 3 (UMT) once the tier-3 threshold is reached', () => {
+    expect(tierFor(TIER_3_THRESHOLD_S)).toBe(3)
+    expect(tierFor(TIER_3_THRESHOLD_S + 5)).toBe(3)
   })
 
   it('orders thresholds correctly (sanity)', () => {
     expect(TIER_1_THRESHOLD_S).toBeLessThan(TIER_2_THRESHOLD_S)
+    expect(TIER_2_THRESHOLD_S).toBeLessThan(TIER_3_THRESHOLD_S)
   })
 })
 
@@ -98,9 +107,25 @@ describe('driftBoostParams', () => {
     })
   })
 
-  it('tier-2 is meaningfully stronger than tier-1', () => {
+  it('returns the tier-3 (purple UMT) payload', () => {
+    expect(driftBoostParams(3)).toEqual({
+      multiplier: DRIFT_BOOST_MUL_T3,
+      durationS: DRIFT_BOOST_DURATION_T3,
+    })
+  })
+
+  it('saturates at the UMT payload for tier > 3 — defensive against future expansion', () => {
+    expect(driftBoostParams(99)).toEqual({
+      multiplier: DRIFT_BOOST_MUL_T3,
+      durationS: DRIFT_BOOST_DURATION_T3,
+    })
+  })
+
+  it('each tier is meaningfully stronger than the last', () => {
     expect(DRIFT_BOOST_MUL_T2).toBeGreaterThan(DRIFT_BOOST_MUL_T1)
     expect(DRIFT_BOOST_DURATION_T2).toBeGreaterThan(DRIFT_BOOST_DURATION_T1)
+    expect(DRIFT_BOOST_MUL_T3).toBeGreaterThan(DRIFT_BOOST_MUL_T2)
+    expect(DRIFT_BOOST_DURATION_T3).toBeGreaterThan(DRIFT_BOOST_DURATION_T2)
   })
 })
 

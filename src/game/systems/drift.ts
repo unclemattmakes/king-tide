@@ -55,16 +55,29 @@ export const TIER_1_THRESHOLD_S = 0.6
 /** Charge time (s) to reach tier 2 (orange SMT). The skill-payoff
  *  threshold — sustaining a clean drift through a long corner. */
 export const TIER_2_THRESHOLD_S = 1.4
+/** Charge time (s) to reach tier 3 (purple UMT). Only reachable on
+ *  the long sweeping corners — the expert-tier payoff that MK8 Deluxe
+ *  added on top of the original two-tier MT/SMT system. The gap from
+ *  SMT to UMT is intentionally large so a casual hold lands on SMT and
+ *  only a committed long-arc drift hits UMT. */
+export const TIER_3_THRESHOLD_S = 2.4
 
 /** Throttle multiplier applied via `BoostEffect` on tier-1 release. */
 export const DRIFT_BOOST_MUL_T1 = 1.3
 /** Throttle multiplier on tier-2 release. */
 export const DRIFT_BOOST_MUL_T2 = 1.55
+/** Throttle multiplier on tier-3 (UMT) release. Capped under 2× so it
+ *  pairs with the bike's `boostMul` (1.6 default) without exceeding a
+ *  combined 3× — past that the camera + AI both lose readability. */
+export const DRIFT_BOOST_MUL_T3 = 1.8
 
 /** Tier-1 boost duration (s). Reads as a quick punch out of a corner. */
 export const DRIFT_BOOST_DURATION_T1 = 0.8
 /** Tier-2 boost duration (s). Long enough to feel like a real reward. */
 export const DRIFT_BOOST_DURATION_T2 = 1.4
+/** Tier-3 (UMT) boost duration (s). Equivalent to a Mushroom in MK
+ *  feel — sustained enough to carry through the next corner. */
+export const DRIFT_BOOST_DURATION_T3 = 2.0
 
 /** Seconds the player must wait after releasing a drift before a new
  *  drift can activate. Stops re-press snake — combined with the
@@ -91,22 +104,25 @@ export const BRAKE_CANCEL_THRESHOLD = 0.5
 // Pure helpers — load-bearing for the unit-test suite
 // ============================================================================
 
-/** Returns the tier (0, 1, 2) achievable at a given charge time. Pure;
- *  doesn't peek at the drift state's `highestTier` field — callers
- *  use `Math.max(state.highestTier, tierFor(state.chargeS))` to
- *  preserve the highest tier ever reached this drift. */
+/** Returns the tier (0, 1, 2, 3) achievable at a given charge time.
+ *  Pure; doesn't peek at the drift state's `highestTier` field —
+ *  callers use `Math.max(state.highestTier, tierFor(state.chargeS))`
+ *  to preserve the highest tier ever reached this drift. */
 export function tierFor(chargeS: number): number {
+  if (chargeS >= TIER_3_THRESHOLD_S) return 3
   if (chargeS >= TIER_2_THRESHOLD_S) return 2
   if (chargeS >= TIER_1_THRESHOLD_S) return 1
   return 0
 }
 
 /** Look up the `BoostEffect` payload for a given tier. Returns null
- *  for tier 0 — drift release at no charge fires nothing. */
+ *  for tier 0 — drift release at no charge fires nothing. Tier > 3
+ *  saturates at the UMT payload. */
 export function driftBoostParams(tier: number): { multiplier: number; durationS: number } | null {
   if (tier <= 0) return null
   if (tier === 1) return { multiplier: DRIFT_BOOST_MUL_T1, durationS: DRIFT_BOOST_DURATION_T1 }
-  return { multiplier: DRIFT_BOOST_MUL_T2, durationS: DRIFT_BOOST_DURATION_T2 }
+  if (tier === 2) return { multiplier: DRIFT_BOOST_MUL_T2, durationS: DRIFT_BOOST_DURATION_T2 }
+  return { multiplier: DRIFT_BOOST_MUL_T3, durationS: DRIFT_BOOST_DURATION_T3 }
 }
 
 /** Test whether the player's intent + hover state would START a drift
