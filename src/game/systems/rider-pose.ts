@@ -298,12 +298,12 @@ function zeroPoseResponse(r: RiderPoseResponse): void {
  *    counter-steer (`intoSigned = steer × driftDir`, range ≈ ±0.7
  *    after the player steer pre-scale).
  *
- * Sign: a left drift (`driftDir = -1`) returns a POSITIVE roll, which
+ * Sign: a left drift (`driftDir = -1`) returns a NEGATIVE roll, which
  * `quatAxisAngle(0,0,1,·)` on `spine_lower` (chest-forward axis) banks
- * the torso to the rider's left — into the corner. Flip
- * `DRIFT_LEAN_SIGN` if playtest shows it banking the wrong way.
+ * the torso to the rider's left — into the corner. (Playtest confirmed
+ * the initial `-1` banked the wrong way; `+1` leans into the turn.)
  */
-const DRIFT_LEAN_SIGN = -1
+const DRIFT_LEAN_SIGN = 1
 export function driftLeanTarget(driftDir: number, steer: number): number {
   if (driftDir === 0) return 0
   const t = RIDER_POSE_TUNING
