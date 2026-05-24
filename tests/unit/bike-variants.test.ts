@@ -132,4 +132,19 @@ describe('bike variants', () => {
       1.5,
     )
   })
+
+  // Drift archetype assignment — the inward-vs-outward split is what
+  // makes Sparrow + Stunt feel like sport bikes vs the more traditional
+  // kart feel of Cruiser/Racer/Scout. The test pins which variant
+  // carries which style so a tuning pass can't silently flip a bike.
+  it('lightweight sport variants (Sparrow, Stunt) use the inward drift archetype', () => {
+    expect(BIKE_VARIANTS.sparrow.stats.driftStyle).toBe('inward')
+    expect(BIKE_VARIANTS.stunt.stats.driftStyle).toBe('inward')
+  })
+
+  it('kart-style variants (Cruiser, Racer, Scout) leave drift style unset — defaults to outward', () => {
+    expect(BIKE_VARIANTS.cruiser.stats.driftStyle).toBeUndefined()
+    expect(BIKE_VARIANTS.racer.stats.driftStyle).toBeUndefined()
+    expect(BIKE_VARIANTS.scout.stats.driftStyle).toBeUndefined()
+  })
 })

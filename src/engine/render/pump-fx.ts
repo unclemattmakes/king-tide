@@ -60,6 +60,13 @@ export type PumpFx = {
   /** Fire all three feedback channels. `strength` is the observer's
    *  0..1 score; `perfect` upgrades to the high-tier variants. */
   fire(strength: number, perfect: boolean): void
+  /** Speed-lines-only flash, no FOV punch or camera shake — used by the
+   *  drift mini-turbo release so a boost reads as a quick "whoosh" of
+   *  streaks without the wave-pump's full screen-punch. `strength`
+   *  (0..1) scales how far the streaks reach. Uses the cool-white
+   *  `pf-drift` tint. NOT gated by `wavePumpIntensity` — the caller
+   *  gates on `driftIntensity`; `reduced-flash` still hides it via CSS. */
+  speedLines(strength: number): void
   /** Toggle the sustained boost-meter camera shake. When true, a
    *  low-amplitude jitter rides over the chase camera every render
    *  frame until set back to false. Independent of the one-shot
@@ -137,6 +144,15 @@ function injectStyles(): void {
     #${OVERLAY_ID}.pf-active.pf-perfect {
       animation-duration: 560ms;
     }
+    /* Drift mini-turbo release — cool-white streaks, distinct from the
+       wave-pump's warm/cyan tiers so the two boosts read apart. Slightly
+       quicker than the pump blast (a "lil boost" tick, not a launch). */
+    #${OVERLAY_ID}.pf-drift {
+      --pf-tint: rgba(150, 210, 255, 0.6);
+    }
+    #${OVERLAY_ID}.pf-active.pf-drift {
+      animation-duration: 360ms;
+    }
     @keyframes pf-blast {
       0%   { opacity: 0; transform: scale(0.6); }
       18%  { opacity: 1; transform: scale(1.0); }
@@ -196,7 +212,8 @@ export function createPumpFx(
   function flashOverlay(perfect: boolean): void {
     if (!overlay) return
     if (playerSettings.wavePumpIntensity === 'off') return
-    overlay.classList.remove('pf-active', 'pf-perfect')
+    overlay.classList.remove('pf-active', 'pf-perfect', 'pf-drift')
+    overlay.style.removeProperty('--pf-scale')
     // Force reflow so the next class-add reliably restarts the anim
     // even when two pumps land inside the same fade window.
     void overlay.offsetWidth
@@ -216,6 +233,18 @@ export function createPumpFx(
       lastFireAt = performance.now()
       lastWasPerfect = perfect
       flashOverlay(perfect)
+    },
+
+    speedLines(strength) {
+      if (!overlay) return
+      const s = Math.max(0, Math.min(1, strength))
+      // Reach grows with tier but stays under the wave-pump blast's
+      // 1.0–1.4 so the drift boost reads as the lighter cue.
+      const scale = 0.85 + 0.35 * s
+      overlay.classList.remove('pf-active', 'pf-perfect', 'pf-drift')
+      void overlay.offsetWidth
+      overlay.style.setProperty('--pf-scale', scale.toFixed(3))
+      overlay.classList.add('pf-active', 'pf-drift')
     },
 
     setSustainedShake(active) {

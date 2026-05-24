@@ -102,6 +102,23 @@ export type TuckVfxIntensity = 'full' | 'subtle' | 'off'
  */
 export type PreLapIntroMode = 'full' | 'short' | 'off'
 
+/** Drift-mechanic feedback intensity. Gates the render-side game-feel
+ *  layer for the MK-style mini-turbo drift introduced in M9.41. The
+ *  sim layer (`driftSystem` + `hover.ts` modulation + `BoostEffect`
+ *  release) always runs — the setting controls only the visuals:
+ *
+ *  - `full`:    camera roll into the drift, colored sparks (blue / orange),
+ *               skid audio, HUD tier ring
+ *  - `subtle`:  sparks only — no camera roll, no audio (motion-sickness
+ *               and headphone-fatigue mitigation while keeping the
+ *               tier readability the mechanic needs to be learnable)
+ *  - `off`:     no visuals at all. The mechanic still applies its
+ *               physics + boost when the player holds Z/C + steers,
+ *               but a player who isn't using drift on purpose will
+ *               never notice it exists.
+ */
+export type DriftIntensity = 'full' | 'subtle' | 'off'
+
 export type PlayerSettings = {
   wavePumpIntensity: WavePumpIntensity
   aiDifficulty: AIDifficulty
@@ -233,6 +250,9 @@ export type PlayerSettings = {
    *  the camera fly-by because the lobby gate already owns the pre-race
    *  beat — flipping this off in MP only hides the lights. */
   preLapIntro: PreLapIntroMode
+  /** Drift-mechanic feedback intensity — see `DriftIntensity`. Render-
+   *  only; the sim always processes drift input. */
+  driftIntensity: DriftIntensity
 }
 
 export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
@@ -276,6 +296,7 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   fullscreenPreferred: false,
   animatedLandmarks: true,
   preLapIntro: 'full',
+  driftIntensity: 'full',
 })
 
 /** Live, mutable copy. Consumers read this object every frame — no
@@ -294,6 +315,7 @@ const VALID_AI_DIFFICULTY: AIDifficulty[] = ['casual', 'standard', 'hard']
 const VALID_ANTI_GRAV_CAMERA: AntiGravCameraIntensity[] = ['full', 'reduced', 'off']
 const VALID_EMISSIVE_LANDMARKS: EmissiveLandmarksIntensity[] = ['full', 'reduced', 'off']
 const VALID_PRE_LAP_INTRO: PreLapIntroMode[] = ['full', 'short', 'off']
+const VALID_DRIFT_INTENSITY: DriftIntensity[] = ['full', 'subtle', 'off']
 const VALID_COLORBLIND_MODE: ColorblindMode[] = ['off', 'deuteranopia', 'protanopia', 'tritanopia']
 
 /** Roll-follow scalar each intensity step contributes — multiplied by
@@ -467,6 +489,12 @@ export function loadPlayerSettings(): void {
   ) {
     playerSettings.preLapIntro = p.preLapIntro as PreLapIntroMode
   }
+  if (
+    typeof p.driftIntensity === 'string' &&
+    (VALID_DRIFT_INTENSITY as string[]).includes(p.driftIntensity)
+  ) {
+    playerSettings.driftIntensity = p.driftIntensity as DriftIntensity
+  }
   // Apply accessibility settings to the DOM as early as we can after
   // load. Lazy-imported so `player-settings.ts` stays a tiny
   // pre-render-init module — the accessibility service pulls in palette
@@ -526,6 +554,11 @@ export function setEmissiveLandmarks(v: EmissiveLandmarksIntensity): void {
 
 export function setPreLapIntro(v: PreLapIntroMode): void {
   playerSettings.preLapIntro = v
+  savePlayerSettings()
+}
+
+export function setDriftIntensity(v: DriftIntensity): void {
+  playerSettings.driftIntensity = v
   savePlayerSettings()
 }
 

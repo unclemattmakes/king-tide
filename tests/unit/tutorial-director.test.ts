@@ -11,10 +11,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { createTutorialDirector } from '../../src/engine/tutorial/tutorial-director'
-import type {
-  TutorialBeat,
-  TutorialScript,
-} from '../../src/engine/tutorial/tutorial-script'
+import type { TutorialBeat, TutorialScript } from '../../src/engine/tutorial/tutorial-script'
 
 function makeScript(beats: TutorialBeat[]): TutorialScript {
   return {
@@ -83,9 +80,7 @@ describe('createTutorialDirector', () => {
 
   it('emits onCompleted exactly once after the final beat clears', () => {
     let completedCount = 0
-    const script = makeScript([
-      { id: 'only', title: 'ONLY', clearWhen: () => true },
-    ])
+    const script = makeScript([{ id: 'only', title: 'ONLY', clearWhen: () => true }])
     const dir = createTutorialDirector(script, {
       onCompleted: () => {
         completedCount += 1
@@ -145,6 +140,70 @@ describe('createTutorialDirector', () => {
     expect(cleared).toEqual(['look'])
   })
 
+  it('clears a drift beat once notifyDrift reports a charged release', () => {
+    const cleared: string[] = []
+    const script = makeScript([
+      {
+        id: 'drift',
+        title: 'DRIFT',
+        clearWhen: (ctx) => ctx.driftTierThisBeat >= 1,
+      },
+    ])
+    const dir = createTutorialDirector(script, {
+      onBeatCleared: (b) => cleared.push(b.id),
+    })
+    dir.tick(0.016, defaultSample) // arms beat 0
+    expect(cleared).toEqual([])
+    dir.notifyDrift(1) // blue MT release
+    dir.tick(0.016, defaultSample)
+    expect(cleared).toEqual(['drift'])
+  })
+
+  it('notifyDrift keeps the MAX tier seen this beat', () => {
+    let seenTier = 0
+    const script = makeScript([
+      {
+        id: 'drift-smt',
+        title: 'DRIFT',
+        clearWhen: (ctx) => {
+          seenTier = ctx.driftTierThisBeat
+          return ctx.driftTierThisBeat >= 2
+        },
+      },
+    ])
+    const dir = createTutorialDirector(script)
+    dir.tick(0.016, defaultSample) // arms beat 0
+    dir.notifyDrift(2) // SMT
+    dir.notifyDrift(1) // a later weaker release must NOT lower the max
+    dir.tick(0.016, defaultSample)
+    expect(seenTier).toBe(2)
+    expect(dir.isCompleted()).toBe(true)
+  })
+
+  it('driftTierThisBeat resets when a new beat arms', () => {
+    const cleared: string[] = []
+    const script = makeScript([
+      { id: 'first', title: 'FIRST', clearWhen: () => true },
+      {
+        id: 'drift-2',
+        title: 'DRIFT',
+        clearWhen: (ctx) => ctx.driftTierThisBeat >= 1,
+      },
+    ])
+    const dir = createTutorialDirector(script, {
+      onBeatCleared: (b) => cleared.push(b.id),
+    })
+    dir.tick(0.016, defaultSample) // arms + clears beat 0 (unconditional)
+    expect(cleared).toEqual(['first'])
+    // Beat 1's drift tier must start at 0 — a drift on beat 0 mustn't
+    // bleed into beat 1 and auto-clear it.
+    dir.tick(0.016, defaultSample)
+    expect(cleared).toEqual(['first'])
+    dir.notifyDrift(3)
+    dir.tick(0.016, defaultSample)
+    expect(cleared).toContain('drift-2')
+  })
+
   it('skipCurrentBeat advances past the active beat', () => {
     const cleared: string[] = []
     const script = makeScript([
@@ -173,6 +232,7 @@ describe('createTutorialDirector', () => {
     // These should not throw and not change state.
     dir.notifyPumpEvent()
     dir.notifyOrbitTouch()
+    dir.notifyDrift(3)
     expect(dir.isCompleted()).toBe(true)
   })
 

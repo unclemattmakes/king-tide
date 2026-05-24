@@ -5,6 +5,7 @@ import { isHoverDebugEnabled } from '@/engine/sim/debug-flags'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { quatRotate } from '@/engine/sim/physics/vec'
+import { SurfaceType, type SurfaceTypeValue, surfaceGripMul } from '@/engine/sim/surface-types'
 import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import {
   AntiGravOverrideStore,
@@ -16,10 +17,11 @@ import {
   ControlIntent,
   type ControlIntentData,
   ControlIntentStore,
+  DriftStateStore,
   HoverDebugStore,
+  type HoverProbe,
   HoverState,
   HoverStateStore,
-  type HoverProbe,
   RBHandle,
   RBHandleStore,
 } from '@/game/components'
@@ -144,6 +146,89 @@ export const MIN_DIVE_FOR_RELEASE_S = 0.05
 // their normal climb margin — only the level-flight target sinks.
 export const DIVE_HOVER_HEIGHT_MIN_MUL = 0.5
 
+// ── Drift physics modulation (read in `applyGroundBranch`) ─────────
+// While `DriftState.driftDir` is non-zero, the bike's lateral drag is
+// scaled down (so the bike actually slides sideways like an MK kart in
+// drift), and the yaw torque is replaced by a drift-direction bias +
+// reduced player authority. See [docs/drift-deep-dive.md] for the
+// design rationale.
+
+/** Fraction of `stats.lateralDrag` retained while drifting. Lower
+ *  = more visible slide; too low (<0.2) and the bike fishtails out
+ *  of control. 0.35 reads as a clean MK-style slide that the player
+ *  can still hold against. */
+export const DRIFT_LATERAL_DRAG_SCALE = 0.35
+
+/** Drift auto-turn-in bias as a fraction of `stats.turnTorque`. With
+ *  no steer input the bike carves into the corner at this rate. Kept
+ *  modest so the default arc is WIDE (MK-style) rather than a tight
+ *  spiral — at `turnTorque=4` + the chassis angular damping this is
+ *  ~0.7 rad/s → ~28 m radius at 20 m/s. Counter-steer
+ *  (`DRIFT_STEER_FRAC`) can fully cancel it for an even wider line. */
+export const DRIFT_YAW_BIAS_FRAC = 0.45
+
+/** Player steer authority while drifting, as a fraction of
+ *  `stats.turnTorque`. Sized so a FULL counter-steer cancels the
+ *  auto-turn-in bias: the player's steer is pre-scaled to ~0.7 max
+ *  (PLAYER_STEER_SCALE), so `0.65 × 0.7 ≈ 0.455 ≈ DRIFT_YAW_BIAS_FRAC`
+ *  — holding away from the corner opens the drift to a straight,
+ *  wide line; steering in tightens it. This is the knob that makes
+ *  the drift feel like Mario Kart instead of a fixed spiral. */
+export const DRIFT_STEER_FRAC = 0.65
+
+/** Speed (m/s) at/above which the auto-turn-in bias runs at full
+ *  strength. Below it the bias tapers linearly to zero, so a drift
+ *  that has bled speed stops auto-rotating instead of whipping the
+ *  bike around to a 180 (the classic low-speed drift spin-out). Only
+ *  the BIAS tapers — the player's counter-steer keeps full authority
+ *  at any speed so they can always straighten out. */
+export const DRIFT_YAW_SPEED_REF = 8
+
+/** Inside-drift "snap" window — duration of the initial bias spike
+ *  for `driftStyle: 'inward'` bikes. Within this window the drift
+ *  yaw bias is scaled by `INWARD_INITIAL_BIAS_MUL`; past it, the
+ *  scale drops to `INWARD_TAIL_BIAS_MUL` so the overall arc widens.
+ *  Read by the inward-drift branch in `applyGroundBranch`. */
+export const INWARD_INITIAL_WINDOW_S = 0.25
+export const INWARD_INITIAL_BIAS_MUL = 1.2
+export const INWARD_TAIL_BIAS_MUL = 0.8
+
+/**
+ * Drift yaw signal as a fraction of `stats.turnTorque` (before the
+ * water `turnMul`). Pure + exported so the counter-steer-opens
+ * behaviour is unit-pinned without a Rapier world.
+ *
+ * Two terms:
+ *  - **auto-turn-in bias** — `driftDir × DRIFT_YAW_BIAS_FRAC`, scaled
+ *    by the inward-drift archetype curve and a low-speed taper. This
+ *    is what carves the bike into the corner with no input.
+ *  - **player steer** — `-steer × DRIFT_STEER_FRAC` at FULL authority
+ *    (no speed taper), so counter-steering away from the drift cancels
+ *    (or with a sharp flick, slightly reverses) the bias → a wide line,
+ *    and steering into the drift tightens it.
+ *
+ * Sign convention matches the non-drift path (`aTurn = -intent.steer`):
+ * a left drift (`driftDir = -1`) yields a positive bias, same as a
+ * left steer would.
+ */
+export function driftYawFraction(
+  driftDir: number,
+  steer: number,
+  chargeS: number,
+  driftStyle: 'inward' | 'outward' | undefined,
+  speed: number,
+): number {
+  let archetypeMul = 1
+  if (driftStyle === 'inward') {
+    archetypeMul =
+      chargeS < INWARD_INITIAL_WINDOW_S ? INWARD_INITIAL_BIAS_MUL : INWARD_TAIL_BIAS_MUL
+  }
+  const speedTaper = Math.max(0, Math.min(1, speed / DRIFT_YAW_SPEED_REF))
+  const bias = -driftDir * DRIFT_YAW_BIAS_FRAC * archetypeMul * speedTaper
+  const playerInput = -steer * DRIFT_STEER_FRAC
+  return bias + playerInput
+}
+
 // Chassis pitch (relative to the surface tangent) safety clamp on the
 // dive side. The dive-kick taper above bounds steady-state tilt to a
 // small angle already; this limit is a backstop for momentum carried
@@ -254,11 +339,17 @@ function rayAlong(
  * axis — equals world-Y when up=(0,1,0), the natural distance-along-up in
  * anti-grav zones. `hasSurface=false` means no ground hit and no reachable
  * water (e.g. bike floating in the void).
+ *
+ * `surfaceType` is the material tag of whatever the center probe is riding:
+ * WATER when the wave field wins, otherwise the hit collider's registered
+ * type (DEFAULT when untagged). Drives the lateral-grip multiplier in the
+ * ground branch + the `HoverState.surfaceType` render read.
  */
 type SurfaceProbe = {
   surfaceProj: number
   isWater: boolean
   hasSurface: boolean
+  surfaceType: SurfaceTypeValue
 }
 
 /**
@@ -293,26 +384,33 @@ function probeSurface(
     ignore ?? undefined,
   )
   let groundProj = Number.NEGATIVE_INFINITY
+  let groundSurface: SurfaceTypeValue = SurfaceType.DEFAULT
   if (hit) {
     const hx = fromX + dx * hit.timeOfImpact
     const hy = fromY + dy * hit.timeOfImpact
     const hz = fromZ + dz * hit.timeOfImpact
     groundProj = hx * upX + hy * upY + hz * upZ
+    groundSurface = phys.surfaces.get(hit.collider.handle)
   }
   const waterY = field ? sampleHeight(field, fromX, fromZ) : Number.NEGATIVE_INFINITY
 
   if (groundProj === Number.NEGATIVE_INFINITY && waterY === Number.NEGATIVE_INFINITY) {
-    return { surfaceProj: 0, isWater: false, hasSurface: false }
+    return { surfaceProj: 0, isWater: false, hasSurface: false, surfaceType: SurfaceType.DEFAULT }
   }
   if (groundProj > waterY) {
-    return { surfaceProj: groundProj, isWater: false, hasSurface: true }
+    return { surfaceProj: groundProj, isWater: false, hasSurface: true, surfaceType: groundSurface }
   }
   // Water can be sampled anywhere, so water is "always reachable" — but
   // only counts as a ride surface if the bike is within probe range of
   // it. When `field` is non-null we're in world-up land, so fromY is the
   // bike's proj on up and waterY is the surface proj.
   const reachable = fromY - waterY < MAX_HOVER_PROBE
-  return { surfaceProj: waterY, isWater: true, hasSurface: reachable }
+  return {
+    surfaceProj: waterY,
+    isWater: true,
+    hasSurface: reachable,
+    surfaceType: SurfaceType.WATER,
+  }
 }
 
 /**
@@ -1532,8 +1630,31 @@ function applyGroundBranch(
   // by construction, so steering can't leak into roll regardless of
   // pitch. In anti-grav we substitute the zone's up so yaw rotates
   // around the road normal (MK8 anti-grav feel).
+  //
+  // Drift override: while the bike is in active drift, the base yaw is
+  // replaced by `driftYawFraction` — a speed-tapered auto-turn-in bias
+  // plus a FULL-authority counter-steer term. At full speed:
+  //   - no steer:         carves in at ~0.45× turnTorque (wide arc)
+  //   - steer into drift: up to ~0.9× (tightens the line)
+  //   - counter-steer:    ~0× or slightly negative (opens to a wide /
+  //                        straight line — "hold away for a wide drift")
+  // The bias tapers to zero below DRIFT_YAW_SPEED_REF so a drift that
+  // has bled speed doesn't whip the bike around to a 180.
+  // Sign convention: positive aTurn rotates around +up; `-intent.steer`
+  // for steerLeft (-1) → +aTurn → bike yaws toward the left of screen.
+  // A left drift (driftDir=-1) maps to a matching positive bias.
   const turnMul = probe.isWater ? 1.1 : 1.0
-  const aTurn = -intent.steer * stats.turnTorque * turnMul
+  const drift = DriftStateStore.get(eid)
+  const drifting = !!drift && drift.driftDir !== 0
+  let aTurn: number
+  if (drifting) {
+    aTurn =
+      driftYawFraction(drift.driftDir, intent.steer, drift.chargeS, stats.driftStyle, speed) *
+      stats.turnTorque *
+      turnMul
+  } else {
+    aTurn = -intent.steer * stats.turnTorque * turnMul
+  }
   const yawAxXG = upX - fwdDotUpG * fwd.x
   const yawAxYG = upY - fwdDotUpG * fwd.y
   const yawAxZG = upZ - fwdDotUpG * fwd.z
@@ -1626,13 +1747,27 @@ function applyGroundBranch(
   // Water has *more* lateral resistance (skis don't slide sideways
   // easily). Measured along the up-plane right axis so drag opposes
   // sideways drift across the road surface (not across world XZ).
+  // While drifting, scale the drag down so the bike actually slides
+  // sideways like an MK kart in mid-drift — `DRIFT_LATERAL_DRAG_SCALE`
+  // applied as a pure multiplier on top of the water/land switch.
+  //
+  // Surface grip: per-material multiplier from the surface registry —
+  // 1.0 for DEFAULT / untagged land (so existing tracks are unchanged)
+  // and WATER (its 1.4 lateral is handled by `dragMul` above), <1 for
+  // loose/slick surfaces (sand, ice), >1 for clingy ones (metal). Reads
+  // in both normal driving AND drift so a surface feels coherent — ice
+  // is slippery whether or not you're sliding.
   const dragMul = probe.isWater ? 1.4 : 1.0
+  // Drift: cut lateral grip so the bike slides sideways like an MK kart.
+  const driftDragMul = drifting ? DRIFT_LATERAL_DRAG_SCALE : 1.0
+  // Surface grip: per-material multiplier from the surface registry.
+  const gripMul = surfaceGripMul(probe.surfaceType)
   // Tuck (same signed factor as the cap lift): a clean lean cuts sideways
   // scrub so the bike tracks its line; an over-tuck (negative factor)
   // raises drag above base as the belly skims and grabs.
   const tuckDrag = 1 - (1 - stats.tuckDragMul) * tf
   const lateralVel = linvel.x * planeRightX + linvel.y * planeRightY + linvel.z * planeRightZ
-  const aDrag = -lateralVel * stats.lateralDrag * dragMul * tuckDrag
+  const aDrag = -lateralVel * stats.lateralDrag * dragMul * driftDragMul * gripMul * tuckDrag
   rb.applyImpulse(
     {
       x: planeRightX * aDrag * m * dt,
@@ -1690,6 +1825,7 @@ function writeHoverState(
   groundDistance: number,
   isGrounded: boolean,
   isWater: boolean,
+  surfaceType: SurfaceTypeValue,
   surfaceForwardSlope: number,
   diveHoldS: number,
   releaseKickS: number,
@@ -1698,6 +1834,10 @@ function writeHoverState(
     groundDistance,
     isGrounded,
     surfaceIsWater: isWater,
+    // Surface material under the bike — DEFAULT while airborne (no
+    // surface contact), the probed type while grounded. Render + drift
+    // both read it.
+    surfaceType: isGrounded ? surfaceType : SurfaceType.DEFAULT,
     // Reset filtered slope to 0 while airborne so the next landing
     // seeds the filter from zero.
     forwardSlope: isGrounded ? surfaceForwardSlope : 0,
@@ -1899,6 +2039,7 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       groundDistance,
       isGrounded,
       probe.hasSurface && probe.isWater,
+      probe.surfaceType,
       footprint.surfaceForwardSlope,
       diveHoldS,
       releaseKickS,

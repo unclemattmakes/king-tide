@@ -14,6 +14,70 @@ import {
 import type { Track } from '@/game/tracks/types'
 
 /**
+ * Pure decision helper for AI drift. Given the AI's tuning + current
+ * drift state + this-tick race signals (curvature ahead, ground speed,
+ * commanded steer), returns the next-tick drift state.
+ *
+ * Extracted so unit tests can pin the state machine without spinning
+ * up the spline / physics loop. The activation rules mirror the
+ * player-side `driftSystem` (see `src/game/systems/drift.ts`) — both
+ * sides need `Math.sign(intent.steer)` to match the drift direction
+ * for the drift to engage, so the AI sets `driftDir` to `sign(steer)`
+ * the moment it commits.
+ *
+ * Cancel rules (any one):
+ *  - corner widens below 60% of the trigger threshold
+ *  - steer flips opposite the drift direction (AI re-targeted line)
+ *  - speed drops below 70% of trigger threshold (lost momentum)
+ *  - held longer than `driftMaxHoldS` (caps per-difficulty payoff)
+ */
+export type AIDriftTuning = {
+  driftCurvatureThreshold: number
+  driftMinSpeed: number
+  driftMaxHoldS: number
+}
+
+export type AIDriftState = {
+  driftDir: number
+  driftHoldS: number
+  driftCooldownS: number
+}
+
+export function decideAIDrift(
+  tuning: AIDriftTuning,
+  state: AIDriftState,
+  signals: { curvatureAhead: number; speed: number; steer: number; dt: number },
+): AIDriftState {
+  const cooldown = Math.max(0, state.driftCooldownS - signals.dt)
+
+  if (state.driftDir !== 0) {
+    const hold = state.driftHoldS + signals.dt
+    const cornerWidened = signals.curvatureAhead < tuning.driftCurvatureThreshold * 0.6
+    const steerFlipped = Math.sign(signals.steer) !== state.driftDir
+    const tooSlow = signals.speed < tuning.driftMinSpeed * 0.7
+    const heldTooLong = hold >= tuning.driftMaxHoldS
+    if (cornerWidened || steerFlipped || tooSlow || heldTooLong) {
+      // Cooldown matches DRIFT_COOLDOWN_S in drift.ts + a small margin
+      // so the AI doesn't immediately re-trigger on the next tick.
+      return { driftDir: 0, driftHoldS: 0, driftCooldownS: 0.35 }
+    }
+    return { driftDir: state.driftDir, driftHoldS: hold, driftCooldownS: cooldown }
+  }
+
+  if (
+    tuning.driftCurvatureThreshold !== Number.POSITIVE_INFINITY &&
+    cooldown <= 0 &&
+    signals.curvatureAhead >= tuning.driftCurvatureThreshold &&
+    signals.speed >= tuning.driftMinSpeed &&
+    Math.abs(signals.steer) >= 0.3
+  ) {
+    return { driftDir: Math.sign(signals.steer), driftHoldS: 0, driftCooldownS: cooldown }
+  }
+
+  return { driftDir: 0, driftHoldS: 0, driftCooldownS: cooldown }
+}
+
+/**
  * Spline-following AI: each tick, finds a target ahead on the spline and a
  * stay-close-to-line target right under us, then writes throttle/steer/brake
  * into ControlIntent. Hover system drives the rigid body.
@@ -250,11 +314,18 @@ export function aiControlSystem(
       }
     }
 
+    // AI drift decision — runs through the pure `decideAIDrift` helper
+    // so the state machine can be unit-tested in isolation.
+    const drift = decideAIDrift(ai, ai, { curvatureAhead: curvature, speed: speedHoriz, steer, dt })
+
     AIControllerStore.set(eid, {
       ...ai,
       lastClosestIndex: bestIdx,
       pumpHoldS: nextPumpHoldS,
       pumpCooldownS: nextPumpCooldownS,
+      driftDir: drift.driftDir,
+      driftHoldS: drift.driftHoldS,
+      driftCooldownS: drift.driftCooldownS,
     })
     ControlIntentStore.set(eid, {
       throttle,
@@ -263,12 +334,12 @@ export function aiControlSystem(
       fire: false,
       boost: false,
       pitch: pumpPitch,
-      // AI doesn't trick (no boost from observer) in v1. Future:
-      // schedule trickLeft/Right edges around AI pump-hint apex passes
-      // so AIs can earn tricks too. For now the field stays false and
-      // the AI rides without the boost reward.
-      trickLeft: false,
-      trickRight: false,
+      // AI drift — translate the controller's `driftDir` into a held
+      // trick-button. driftSystem reads these alongside steer to
+      // activate the MT/SMT/UMT charge state. Both false = no drift
+      // (also = unchanged for Casual, whose threshold is Infinity).
+      trickLeft: drift.driftDir === -1,
+      trickRight: drift.driftDir === 1,
     })
   }
 }

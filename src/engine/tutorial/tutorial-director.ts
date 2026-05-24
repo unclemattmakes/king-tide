@@ -56,6 +56,10 @@ export interface TutorialDirector {
   notifyPumpEvent(): void
   /** Out-of-band: the host saw the player nudge orbit/look inputs. */
   notifyOrbitTouch(): void
+  /** Out-of-band: the player released a drift mini-turbo at `tier`
+   *  (1 = MT, 2 = SMT, 3 = UMT). The director keeps the max tier
+   *  seen this beat. */
+  notifyDrift(tier: number): void
   /** Current beat being shown (or `null` if completed / not started). */
   currentBeat(): TutorialBeat | null
   /** Index of the current beat in the script's beat list. */
@@ -76,6 +80,7 @@ export function createTutorialDirector(
   let tutorialTime = 0
   let pumpEventsThisBeat = 0
   let orbitTouchedThisBeat = false
+  let driftTierThisBeat = 0
   let completed = false
   let armed = false
 
@@ -84,6 +89,7 @@ export function createTutorialDirector(
     beatTime = 0
     pumpEventsThisBeat = 0
     orbitTouchedThisBeat = false
+    driftTierThisBeat = 0
     armed = true
     const beat = script.beats[idx]
     if (beat && events.onBeatArmed) events.onBeatArmed(beat)
@@ -127,15 +133,13 @@ export function createTutorialDirector(
         pumpEventsThisBeat,
         inAntiGrav: sample.inAntiGrav,
         orbitTouchedThisBeat,
+        driftTierThisBeat,
       }
       if (evaluatePredicate(beat, ctx)) {
         clearBeat(beat)
         return
       }
-      if (
-        typeof beat.clearAfterSeconds === 'number' &&
-        beatTime >= beat.clearAfterSeconds
-      ) {
+      if (typeof beat.clearAfterSeconds === 'number' && beatTime >= beat.clearAfterSeconds) {
         clearBeat(beat)
       }
     },
@@ -144,6 +148,11 @@ export function createTutorialDirector(
     },
     notifyOrbitTouch() {
       if (!completed && armed) orbitTouchedThisBeat = true
+    },
+    notifyDrift(tier) {
+      if (!completed && armed && tier > driftTierThisBeat) {
+        driftTierThisBeat = Math.max(0, Math.min(3, Math.floor(tier)))
+      }
     },
     currentBeat() {
       if (completed || !armed) return null
