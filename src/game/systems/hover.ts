@@ -133,6 +133,25 @@ export const MAX_BOW_LIFT_ERROR = 1.2 // metres, ≈ one hoverHeight
 export const DIVE_BOW_SPRING_MIN_MUL = 0.4
 export const DIVE_BOW_SPRING_MAX_MUL = 1.5
 
+// Dive aid — stern (rear) counterpart to the bow curve above. When the
+// rider is diving and the stern rises ABOVE its local hover target
+// (negative heightError, spring pulling stern DOWN), the down-pull is
+// scaled up toward this multiplier:
+//
+//   heightError =  0        (stern at hover target):  1.0  (baseline)
+//   heightError = -effHover (stern at "ceiling"):     DIVE_STERN_SPRING_MAX_MUL
+//
+// Mirror of the bow bottom-of-travel boost. Bow lifts the nose, stern
+// pulls the tail down — together they pivot the chassis toward the
+// SURFACE TANGENT (slope-aligned, not absolute level). heightError is
+// per-corner vs each corner's local surface projection, so on a slope
+// at rest both ends sit at hoverHeight (heightError ≈ 0) and the
+// curve doesn't fire — natural slope-following stays intact.
+//
+// Only the negative side is touched; positive heightError at the
+// stern (stern below target, spring pushing UP) is left alone.
+export const DIVE_STERN_SPRING_MAX_MUL = 1.5
+
 // Dive aid #2 — when pitching forward, the grounded pitch PD's P-gain
 // is scaled down toward this floor. The PD targets the surface tangent
 // (level on flat ground, slope-aligned on hills); at full P it actively
@@ -987,6 +1006,15 @@ function applyMultiPointHoverSpring(
           DIVE_BOW_SPRING_MIN_MUL +
           (DIVE_BOW_SPRING_MAX_MUL - DIVE_BOW_SPRING_MIN_MUL) * proximity
         springMul *= 1 + (bowMul - 1) * diveAmount
+      }
+      // Dive-aid stern mirror: when the stern rises above its target
+      // (negative heightError → spring already pulling DOWN), boost
+      // that down-pull during a dive so the chassis pivots toward the
+      // surface tangent. Per-corner heightError is slope-relative, so
+      // on a slope at rest this stays inert.
+      if (p.longitudinal && !p.isBow && heightError < 0) {
+        const proximity = effHover > 0 ? Math.min(1, -heightError / effHover) : 0
+        springMul *= 1 + (DIVE_STERN_SPRING_MAX_MUL - 1) * diveAmount * proximity
       }
       aUp = gravity + heightError * stats.hoverSpring * springMul - dampV * stats.hoverDamp
     }
