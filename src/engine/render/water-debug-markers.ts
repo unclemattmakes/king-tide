@@ -27,10 +27,10 @@
 
 import * as THREE from 'three'
 
-/** Cardinal half-extent of the center mesh (480 m square). The outer
- *  LOD tile fades in across 220–260 m on the cardinal axis; 240 m
- *  sits at the midpoint of that band. */
-const INNER_RING_RADIUS_M = 240
+/** Cardinal half-extent of the center mesh (960 m square). The outer
+ *  LOD tile fades in across 380–480 m on the cardinal axis; 480 m
+ *  pegs the outer end of that cross-blend band. */
+const INNER_RING_RADIUS_M = 480
 /** Cardinal half-extent of the outer LOD tile (1440 m square). Past
  *  this radius only the horizon skirt remains. */
 const OUTER_RING_RADIUS_M = 720
@@ -38,8 +38,8 @@ const OUTER_RING_RADIUS_M = 720
  *  in every cardinal + diagonal direction without crowding the ring. */
 const MARKER_COUNT = 8
 
-const INNER_HEIGHT_M = 8
-const INNER_RADIUS_M = 0.9
+const INNER_HEIGHT_M = 14
+const INNER_RADIUS_M = 1.4
 const OUTER_HEIGHT_M = 26
 const OUTER_RADIUS_M = 2.4
 
