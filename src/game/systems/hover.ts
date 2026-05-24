@@ -128,6 +128,16 @@ export const MAX_BOW_LIFT_ERROR = 1.2 // metres, ≈ one hoverHeight
 export const DIVE_KICK_DURATION_S = 0.22
 export const DIVE_KICK_TORQUE_MUL = 1.3
 
+// Release kick — mirror of the dive kick that fires when the player
+// LETS GO of a held nose-down input. Brief nose-UP torque so the bow
+// leads as the bike rises back to baseline hover height. Triggered
+// only when the prior dive lasted at least MIN_DIVE_FOR_RELEASE_S
+// (avoids firing on a quick tap that didn't actually dive).
+// Re-pressing pitch-down cancels the release kick.
+export const RELEASE_KICK_DURATION_S = 0.18
+export const RELEASE_KICK_TORQUE_MUL = 0.7
+export const MIN_DIVE_FOR_RELEASE_S = 0.05
+
 // Target hover height drops to this fraction of stats.hoverHeight at
 // full pitch-down intent (linear ramp on |intent.pitch|). Slope-aware
 // hover-height boost is applied AFTER this scale, so slopes still get
@@ -1053,8 +1063,32 @@ function applyPlayerPitchTorque(
   isOverWater: boolean,
   surfaceForwardSlope: number,
   diveHoldS: number,
+  releaseKickS: number,
 ): void {
   const { rb, intent, q, dt, m } = frame
+  // Release kick — fires when releaseKickS > 0 (set by the hover loop
+  // on the rising edge of a dive release; ticks down to 0). Brief
+  // nose-UP torque so the bow leads as the bike rises back to baseline
+  // hover height. Grounded only; airborne handled by free physics.
+  // Skipped if the player has fresh input — re-press cancels it via
+  // the loop's gate, but if they swung to pitch-up the player torque
+  // path below handles it directly with full authority.
+  if (releaseKickS > 0 && isGrounded && Math.abs(intent.pitch) <= 0.05) {
+    const rightR = quatRotate(q, { x: 1, y: 0, z: 0 })
+    const kickMul = RELEASE_KICK_TORQUE_MUL * (releaseKickS / RELEASE_KICK_DURATION_S)
+    // intent.pitch = +1 (nose up) sign convention: torque sign is `-coef`
+    // → applies around -rightAxis → rotates fwd toward +y. Match that.
+    const aRelease = -1 * 7 * kickMul
+    rb.applyTorqueImpulse(
+      {
+        x: rightR.x * aRelease * m * dt,
+        y: rightR.y * aRelease * m * dt,
+        z: rightR.z * aRelease * m * dt,
+      },
+      true,
+    )
+    return
+  }
   if (Math.abs(intent.pitch) <= 0.05) return
   // Dive-clamp safety: past DIVE_PITCH_FWD_LIMIT_RAD below the surface
   // tangent, suppress the nose-down torque. Primary dive bounding is the
@@ -1622,6 +1656,7 @@ function writeHoverState(
   isWater: boolean,
   surfaceForwardSlope: number,
   diveHoldS: number,
+  releaseKickS: number,
 ): void {
   HoverStateStore.set(eid, {
     groundDistance,
@@ -1631,6 +1666,7 @@ function writeHoverState(
     // seeds the filter from zero.
     forwardSlope: isGrounded ? surfaceForwardSlope : 0,
     diveHoldS,
+    releaseKickS,
   })
 }
 
@@ -1739,12 +1775,13 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const isGrounded = probe.hasSurface && groundDistance < stats.hoverHeight * GROUNDED_DISTANCE_MUL
 
     // Prior tick's state — drives the slope filter seed, the takeoff/
-    // landing transitions, the dive-kick taper, and the rendered
-    // hover-target ring.
+    // landing transitions, the dive-kick / release-kick taper, and
+    // the rendered hover-target ring.
     const prevHover = HoverStateStore.get(eid)
     const prevGrounded = prevHover?.isGrounded ?? false
     const prevForwardSlope = prevHover?.forwardSlope ?? 0
     const prevDiveHoldS = prevHover?.diveHoldS ?? 0
+    const prevReleaseKickS = prevHover?.releaseKickS ?? 0
     // Dive-hold timer: ticks up while the player holds nose-down input,
     // resets on release. Feeds the player-torque taper so the rider
     // gets one initial nose-dive transient per press, then the pitch
@@ -1752,7 +1789,23 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // input then reads as altitude control (DIVE_HOVER_HEIGHT_MIN_MUL),
     // not chassis tilt. Gated on `intent.pitch <= -0.05` to match the
     // deadzone in applyPlayerPitchTorque.
-    const diveHoldS = frame.intent.pitch <= -0.05 ? prevDiveHoldS + frame.dt : 0
+    const isDiving = frame.intent.pitch <= -0.05
+    const diveHoldS = isDiving ? prevDiveHoldS + frame.dt : 0
+    // Release-kick timer: counts DOWN from RELEASE_KICK_DURATION_S
+    // after the player releases a sustained dive, driving a brief
+    // nose-up torque (the bow leads the altitude recovery). Skipped
+    // for releases from shorter-than-threshold taps. Re-pressing
+    // pitch-down cancels the kick mid-window.
+    let releaseKickS: number
+    if (isDiving) {
+      releaseKickS = 0
+    } else if (prevDiveHoldS >= MIN_DIVE_FOR_RELEASE_S && prevReleaseKickS === 0) {
+      releaseKickS = RELEASE_KICK_DURATION_S
+    } else if (prevReleaseKickS > 0) {
+      releaseKickS = Math.max(0, prevReleaseKickS - frame.dt)
+    } else {
+      releaseKickS = 0
+    }
 
     // Debug capture — only allocates when the global flag is on.
     const debugOn = isHoverDebugEnabled()
@@ -1811,6 +1864,7 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       probe.hasSurface && probe.isWater,
       footprint.surfaceForwardSlope,
       diveHoldS,
+      releaseKickS,
     )
     if (debugOn) {
       writeHoverDebug(
@@ -1831,13 +1885,15 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // Player pitch torque — fires in BOTH air and ground branches with
     // different coefficients. `isOverWater` extends the dive clamp to
     // airborne flights over water (kills wave-pop forward flips).
-    // `diveHoldS` drives the dive-kick taper — see applyPlayerPitchTorque.
+    // `diveHoldS` / `releaseKickS` drive the dive-kick and release-kick
+    // tapers — see applyPlayerPitchTorque.
     applyPlayerPitchTorque(
       frame,
       isGrounded,
       isOverWater,
       footprint.surfaceForwardSlope,
       diveHoldS,
+      releaseKickS,
     )
 
     if (!isGrounded) {
