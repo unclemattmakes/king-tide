@@ -111,71 +111,33 @@ export const SLOPE_DAMP_RELIEF = 0.5
 // momentum path still pre-pitches the chassis to climb.
 export const MAX_BOW_LIFT_ERROR = 1.2 // metres, ≈ one hoverHeight
 
-// Dive aid — when the player is holding pitch-DOWN, the BOW corner's
-// upward spring (the part that fires when the bow dips below
-// hoverHeight) is curved from soft-at-top to STIFF-past-baseline as
-// the bow approaches the surface:
+// Dive model — pitch-down input is rate-limited via a per-bike
+// `diveHoldS` timer (see HoverState). On the rising edge of nose-down
+// input the player's torque starts at full strength and tapers linearly
+// to zero over DIVE_KICK_DURATION_S. After that the grounded pitch PD
+// (full-strength P) pulls the chassis back to surface-tangent attitude
+// (parallel to slope on hills, level on flat). Sustained nose-down
+// input then reads as ALTITUDE CONTROL via DIVE_HOVER_HEIGHT_MIN_MUL,
+// not chassis tilt — the bike sinks lower while staying parallel.
 //
-//   heightError = 0       (bow at hover target):  DIVE_BOW_SPRING_MIN_MUL
-//   heightError = effHover (bow at the surface):  DIVE_BOW_SPRING_MAX_MUL
-//
-// Linear lerp between, modulated by |intent.pitch|. The soft top lets
-// the rider tuck the nose into wave troughs / terrain dips; the stiff
-// bottom kicks the nose UP harder than the center/stern, so the
-// chassis pivots toward level and the BELLY scrapes the surface first
-// instead of the nose. Only the positive-heightError half is touched —
-// wheelie snap-back (negative heightError pushing bow DOWN) is left
-// alone.
-//
-// Wheelie path is also untouched: pitch-UP leaves diveAmount=0, so the
-// bow spring runs at baseline 1.0 whether or not it's gated out by
-// `groundedCutoff`.
-export const DIVE_BOW_SPRING_MIN_MUL = 0.4
-export const DIVE_BOW_SPRING_MAX_MUL = 1.5
+// Bow / stern corner-spring boost curves (earlier iterations) are gone
+// — with the chassis returning to level via PD, both ends naturally
+// equilibrate at the lowered effHover and the per-corner asymmetry
+// isn't needed.
+export const DIVE_KICK_DURATION_S = 0.15
 
-// Dive aid — stern (rear) counterpart to the bow curve above. When the
-// rider is diving and the stern rises ABOVE its local hover target
-// (negative heightError, spring pulling stern DOWN), the down-pull is
-// scaled up toward this multiplier:
-//
-//   heightError =  0        (stern at hover target):  1.0  (baseline)
-//   heightError = -effHover (stern at "ceiling"):     DIVE_STERN_SPRING_MAX_MUL
-//
-// Mirror of the bow bottom-of-travel boost. Bow lifts the nose, stern
-// pulls the tail down — together they pivot the chassis toward the
-// SURFACE TANGENT (slope-aligned, not absolute level). heightError is
-// per-corner vs each corner's local surface projection, so on a slope
-// at rest both ends sit at hoverHeight (heightError ≈ 0) and the
-// curve doesn't fire — natural slope-following stays intact.
-//
-// Only the negative side is touched; positive heightError at the
-// stern (stern below target, spring pushing UP) is left alone.
-export const DIVE_STERN_SPRING_MAX_MUL = 1.5
-
-// Dive aid #2 — when pitching forward, the grounded pitch PD's P-gain
-// is scaled down toward this floor. The PD targets the surface tangent
-// (level on flat ground, slope-aligned on hills); at full P it actively
-// pulls the nose back up against a held forward input, killing the
-// dive. D is unchanged so committed-trick wobble damping stays.
-export const DIVE_PITCH_P_MIN_MUL = 0.5
-
-// Dive aid #3 — target hover height drops to this fraction of
-// stats.hoverHeight at full pitch-down intent (linear ramp). Combined
-// with the bow spring softener, this lets the chassis actually sink
-// into wave troughs / terrain dips while pumping. Slope-aware
-// hover-height boost is applied AFTER this scale, so slopes still
-// get their normal climb margin — only the level-flight target sinks.
+// Target hover height drops to this fraction of stats.hoverHeight at
+// full pitch-down intent (linear ramp on |intent.pitch|). Slope-aware
+// hover-height boost is applied AFTER this scale, so slopes still get
+// their normal climb margin — only the level-flight target sinks.
 export const DIVE_HOVER_HEIGHT_MIN_MUL = 0.5
 
-// Dive aid #4 — chassis pitch (relative to the surface tangent) is
-// clamped to this many degrees on the dive side. Past the limit:
-//   • when grounded, the pitch PD reverts its P term to FULL strength
-//     (no dive softening) and pulls the chassis back up hard;
-//   • the player's nose-down pitch torque is suppressed so the rider
-//     can't shove past the wall.
-// Upper (wheelie) band still uses the original 45° committed-trick
-// cutoff. Relative-to-surface so steep downhills still let the bike
-// follow the ramp — only the chassis-vs-tangent angle is bounded.
+// Chassis pitch (relative to the surface tangent) safety clamp on the
+// dive side. The dive-kick taper above bounds steady-state tilt to a
+// small angle already; this limit is a backstop for momentum carried
+// out of the kick or rapid-tap accumulation. Past the limit the
+// player's nose-down torque is suppressed. Upper (wheelie) band
+// still uses the original 45° committed-trick cutoff.
 //
 // Player-torque suppression also fires when AIRBORNE over water:
 // without it, a brief pop off a wave crest lets the rider feed in more
@@ -885,7 +847,6 @@ function applyMultiPointHoverSpring(
       oz: footprint.forceFwdZ * forceHalfLength,
       surfProj: footprint.bowProj,
       longitudinal: true,
-      isBow: true,
     },
     {
       ox: -footprint.forceFwdX * forceHalfLength,
@@ -893,7 +854,6 @@ function applyMultiPointHoverSpring(
       oz: -footprint.forceFwdZ * forceHalfLength,
       surfProj: footprint.sternProj,
       longitudinal: true,
-      isBow: false,
     },
     {
       ox: footprint.forceRightX * halfW,
@@ -901,7 +861,6 @@ function applyMultiPointHoverSpring(
       oz: footprint.forceRightZ * halfW,
       surfProj: footprint.starboardProj,
       longitudinal: false,
-      isBow: false,
     },
     {
       ox: -footprint.forceRightX * halfW,
@@ -909,13 +868,11 @@ function applyMultiPointHoverSpring(
       oz: -footprint.forceRightZ * halfW,
       surfProj: footprint.portProj,
       longitudinal: false,
-      isBow: false,
     },
   ]
-  // Dive-aid bow spring curve — soft at the top of the dive, stiff
-  // past baseline at the bottom. The curve is evaluated per-tick per-
-  // corner inside the loop using the current heightError; only the
-  // dive intent factor is precomputed here.
+  // Dive-aid takes the form of a hover-height drop + a rate-limited
+  // pitch torque (see DIVE_KICK_DURATION_S); per-corner spring
+  // multipliers aren't modulated by dive intent.
   const diveAmount = Math.max(-frame.intent.pitch, 0)
   // Per-bike longitudinal water spring multiplier — sourced from
   // `stats.surfaceFollow` so variants differentiate on chop behaviour.
@@ -993,29 +950,7 @@ function applyMultiPointHoverSpring(
       // CORNER lift kick.
       const rawHeightError = effHover - localDist
       const heightError = Math.min(rawHeightError, heightErrorCap)
-      let springMul = probe.isWater && p.longitudinal ? waterLongMul : 1.0
-      // Dive-aid bow curve: soft at the top (allows tuck), stiff past
-      // baseline at the bottom (lifts the nose so the BELLY is the
-      // first contact). Only applied when player is diving (linear
-      // ramp on diveAmount) and only on the positive-heightError side
-      // — wheelie recovery (negative heightError pulling bow DOWN) is
-      // left alone.
-      if (p.isBow && heightError > 0) {
-        const proximity = effHover > 0 ? Math.min(1, heightError / effHover) : 0
-        const bowMul =
-          DIVE_BOW_SPRING_MIN_MUL +
-          (DIVE_BOW_SPRING_MAX_MUL - DIVE_BOW_SPRING_MIN_MUL) * proximity
-        springMul *= 1 + (bowMul - 1) * diveAmount
-      }
-      // Dive-aid stern mirror: when the stern rises above its target
-      // (negative heightError → spring already pulling DOWN), boost
-      // that down-pull during a dive so the chassis pivots toward the
-      // surface tangent. Per-corner heightError is slope-relative, so
-      // on a slope at rest this stays inert.
-      if (p.longitudinal && !p.isBow && heightError < 0) {
-        const proximity = effHover > 0 ? Math.min(1, -heightError / effHover) : 0
-        springMul *= 1 + (DIVE_STERN_SPRING_MAX_MUL - 1) * diveAmount * proximity
-      }
+      const springMul = probe.isWater && p.longitudinal ? waterLongMul : 1.0
       aUp = gravity + heightError * stats.hoverSpring * springMul - dampV * stats.hoverDamp
     }
     if (debugOn) {
@@ -1058,7 +993,7 @@ function applyMultiPointHoverSpring(
  * ~31° on water with a held back-stick — committed but not crashy.
  */
 function applyGroundedPitchPD(frame: HoverFrame, surfaceForwardSlope: number): void {
-  const { rb, dt, m, intent } = frame
+  const { rb, dt, m } = frame
   const rightG = quatRotate(rb.rotation(), { x: 1, y: 0, z: 0 })
   const angvG = rb.angvel()
   const pitchVelG = angvG.x * rightG.x + angvG.y * rightG.y + angvG.z * rightG.z
@@ -1069,23 +1004,12 @@ function applyGroundedPitchPD(frame: HoverFrame, surfaceForwardSlope: number): v
   const pitchErrG = pitchAngleG - surfacePitchTarget
   const GROUNDED_PITCH_P = 9 // rad/s² per rad of error
   const GROUNDED_PITCH_D = 3 // rad/s² per rad/s
-  // Dive-aid: drop P toward DIVE_PITCH_P_MIN_MUL while pitching forward
-  // so the PD doesn't snap the nose back up against a held dive input.
-  const diveAmount = Math.max(-intent.pitch, 0)
-  const pitchPMul = 1 - (1 - DIVE_PITCH_P_MIN_MUL) * diveAmount
-  // Asymmetric level band — upper 45° lets a committed wheelie/backflip
-  // run free; lower DIVE_PITCH_FWD_LIMIT_RAD is the dive ceiling. Past
-  // the dive ceiling P reverts to FULL strength (no softening) so the
-  // PD enforces the clamp regardless of held input.
+  // Upper-band cutoff at 45° lets a committed wheelie/backflip run
+  // free (P drops to 0 past the cutoff, only D damps). Dive side is
+  // P-active all the way to the safety clamp; no dive-side softening
+  // since the player-torque rate limit handles "let me dive" already.
   const UPPER_BAND_RAD = (45 * Math.PI) / 180
-  let aPitchP: number
-  if (pitchErrG > UPPER_BAND_RAD) {
-    aPitchP = 0
-  } else if (pitchErrG < -DIVE_PITCH_FWD_LIMIT_RAD) {
-    aPitchP = -pitchErrG * GROUNDED_PITCH_P
-  } else {
-    aPitchP = -pitchErrG * GROUNDED_PITCH_P * pitchPMul
-  }
+  const aPitchP = pitchErrG > UPPER_BAND_RAD ? 0 : -pitchErrG * GROUNDED_PITCH_P
   const aPitchD = -pitchVelG * GROUNDED_PITCH_D
   const aPitchG = aPitchP + aPitchD
   rb.applyTorqueImpulse(
@@ -1126,17 +1050,19 @@ function applyPlayerPitchTorque(
   isGrounded: boolean,
   isOverWater: boolean,
   surfaceForwardSlope: number,
+  diveHoldS: number,
 ): void {
   const { rb, intent, q, dt, m } = frame
   if (Math.abs(intent.pitch) <= 0.05) return
-  // Dive-clamp: past DIVE_PITCH_FWD_LIMIT_RAD below the surface tangent,
-  // the player's nose-down torque is suppressed. Grounded path also
-  // gets full-P restoring from applyGroundedPitchPD; the airborne-over-
-  // water path relies on input suppression alone (air has no PD by
-  // design — see hover loop's PD gate). Residual nose-down angular
-  // velocity carried into the air phase will still rotate the chassis,
-  // but the player can't add more torque past the limit. Airborne over
-  // LAND is unaffected — jump tricks off ramps run free.
+  // Dive-clamp safety: past DIVE_PITCH_FWD_LIMIT_RAD below the surface
+  // tangent, suppress the nose-down torque. Primary dive bounding is the
+  // diveHoldS taper below; this is a backstop for rapid-tap accumulation
+  // or kick-out-of-band momentum. Grounded path also gets full-P
+  // restoring from applyGroundedPitchPD; the airborne-over-water path
+  // relies on input suppression alone (air has no PD by design —
+  // residual nose-down angular velocity carried airborne will still
+  // rotate the chassis somewhat, just no fresh torque past the limit).
+  // Airborne over LAND is unaffected — jump tricks off ramps run free.
   if ((isGrounded || isOverWater) && intent.pitch < 0) {
     const qChk = rb.rotation()
     const r12Chk = 2 * (qChk.y * qChk.z - qChk.x * qChk.w)
@@ -1146,7 +1072,14 @@ function applyPlayerPitchTorque(
   }
   const rightP = quatRotate(q, { x: 1, y: 0, z: 0 })
   const coef = isGrounded ? 7 : 1.8
-  const aPitch = -intent.pitch * coef
+  // Dive-kick taper: nose-down torque fades from full to zero over
+  // DIVE_KICK_DURATION_S after the player starts holding pitch-down.
+  // After the kick, the pitch PD pulls the chassis back to surface
+  // tangent and sustained input reads as altitude control via the
+  // hover-height drop. Pitch-up (wheelie) is unaffected.
+  const kickMul =
+    intent.pitch < 0 ? Math.max(0, 1 - diveHoldS / DIVE_KICK_DURATION_S) : 1
+  const aPitch = -intent.pitch * coef * kickMul
   const tx = rightP.x * aPitch * m * dt
   const ty = rightP.y * aPitch * m * dt
   const tz = rightP.z * aPitch * m * dt
@@ -1683,6 +1616,7 @@ function writeHoverState(
   isGrounded: boolean,
   isWater: boolean,
   surfaceForwardSlope: number,
+  diveHoldS: number,
 ): void {
   HoverStateStore.set(eid, {
     groundDistance,
@@ -1691,6 +1625,7 @@ function writeHoverState(
     // Reset filtered slope to 0 while airborne so the next landing
     // seeds the filter from zero.
     forwardSlope: isGrounded ? surfaceForwardSlope : 0,
+    diveHoldS,
   })
 }
 
@@ -1799,10 +1734,20 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const isGrounded = probe.hasSurface && groundDistance < stats.hoverHeight * GROUNDED_DISTANCE_MUL
 
     // Prior tick's state — drives the slope filter seed, the takeoff/
-    // landing transitions, and the rendered hover-target ring.
+    // landing transitions, the dive-kick taper, and the rendered
+    // hover-target ring.
     const prevHover = HoverStateStore.get(eid)
     const prevGrounded = prevHover?.isGrounded ?? false
     const prevForwardSlope = prevHover?.forwardSlope ?? 0
+    const prevDiveHoldS = prevHover?.diveHoldS ?? 0
+    // Dive-hold timer: ticks up while the player holds nose-down input,
+    // resets on release. Feeds the player-torque taper so the rider
+    // gets one initial nose-dive transient per press, then the pitch
+    // PD restores the chassis to surface tangent. Sustained nose-down
+    // input then reads as altitude control (DIVE_HOVER_HEIGHT_MIN_MUL),
+    // not chassis tilt. Gated on `intent.pitch <= -0.05` to match the
+    // deadzone in applyPlayerPitchTorque.
+    const diveHoldS = frame.intent.pitch <= -0.05 ? prevDiveHoldS + frame.dt : 0
 
     // Debug capture — only allocates when the global flag is on.
     const debugOn = isHoverDebugEnabled()
@@ -1860,6 +1805,7 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       isGrounded,
       probe.hasSurface && probe.isWater,
       footprint.surfaceForwardSlope,
+      diveHoldS,
     )
     if (debugOn) {
       writeHoverDebug(
@@ -1880,7 +1826,14 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // Player pitch torque — fires in BOTH air and ground branches with
     // different coefficients. `isOverWater` extends the dive clamp to
     // airborne flights over water (kills wave-pop forward flips).
-    applyPlayerPitchTorque(frame, isGrounded, isOverWater, footprint.surfaceForwardSlope)
+    // `diveHoldS` drives the dive-kick taper — see applyPlayerPitchTorque.
+    applyPlayerPitchTorque(
+      frame,
+      isGrounded,
+      isOverWater,
+      footprint.surfaceForwardSlope,
+      diveHoldS,
+    )
 
     if (!isGrounded) {
       applyAirControlBranch(frame)

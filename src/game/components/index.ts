@@ -100,6 +100,15 @@ export type HoverStateData = {
    *  so a single-tick spike from a lumpy trimesh doesn't translate to a
    *  one-frame thrust/torque kick. Reset to 0 while airborne. */
   forwardSlope: number
+  /** Seconds the player has been holding nose-down pitch input
+   *  (intent.pitch < -0.05). Resets to 0 when input is released. Drives
+   *  the dive-kick taper in `applyPlayerPitchTorque`: the player's
+   *  nose-down torque fades over DIVE_KICK_DURATION_S, so a held input
+   *  gives one initial nose-dive transient and then the grounded pitch
+   *  PD pulls the chassis back to surface-tangent attitude. Sustained
+   *  pitch-down input then reads as altitude control (via
+   *  DIVE_HOVER_HEIGHT_MIN_MUL), not chassis tilt. */
+  diveHoldS: number
 }
 export const HoverStateStore = createStore<HoverStateData>('HoverState')
 
