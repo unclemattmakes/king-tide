@@ -476,6 +476,11 @@ export function startGameLoop(opts: GameLoopOpts): void {
   const tmpPos = new THREE.Vector3()
   const tmpQuat = new THREE.Quaternion()
   const tmpTarget = new THREE.Vector3()
+  // Scratch for pushing the chase cam's live rest pose into the race-intro
+  // director each frame — see the intro-active block below. Kept at loop
+  // scope so the push is allocation-free.
+  const introChaseRestPos = new THREE.Vector3()
+  const introChaseRestLook = new THREE.Vector3()
 
   // Reused per-frame minimap-dot buffer. raceHud copies the array each tick
   // (it sorts a shallow clone), so we can safely truncate and mutate in place.
@@ -780,6 +785,24 @@ export function startGameLoop(opts: GameLoopOpts): void {
     const introActive = raceIntro.isActive()
     if (introActive) {
       ensureIntroSkipUi()
+      // Push the chase cam's live first-tick goal to the director so the
+      // descent shot lerps onto the chase cam's actual pickup pose instead
+      // of the statically-authored `chaseGoal` (which only approximates it
+      // — the bike's hover spring has usually lifted it a hair above the
+      // spawn Y by the time the intro plays, so the two disagree by half
+      // a metre or so → visible camera pop at handoff).
+      const introRbHandle = RBHandleStore.get(playerEid)
+      if (introRbHandle) {
+        const introPlayerRb = phys.world.getRigidBody(introRbHandle.handle)
+        if (introPlayerRb) {
+          const it = introPlayerRb.translation()
+          const iq = introPlayerRb.rotation()
+          tmpPos.set(it.x, it.y, it.z)
+          tmpQuat.set(iq.x, iq.y, iq.z, iq.w)
+          chase.goalPose(tmpPos, tmpQuat, introChaseRestPos, introChaseRestLook)
+          raceIntro.setChaseRest(introChaseRestPos, introChaseRestLook)
+        }
+      }
       raceIntro.tick(dt)
       // Drive the broadcast overlay from the same elapsed clock the
       // camera uses, so the stage transitions track the shot boundaries
