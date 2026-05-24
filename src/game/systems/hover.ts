@@ -159,18 +159,30 @@ export const DIVE_HOVER_HEIGHT_MIN_MUL = 0.5
  *  can still hold against. */
 export const DRIFT_LATERAL_DRAG_SCALE = 0.35
 
-/** Drift yaw bias as a fraction of `stats.turnTorque`. When the
- *  player isn't steering, the bike turns at this rate in the
- *  drift direction — equivalent to about a "two-thirds steer"
- *  signal, which keeps the bike rotating into the corner
- *  without needing input. */
-export const DRIFT_YAW_BIAS_FRAC = 0.7
+/** Drift auto-turn-in bias as a fraction of `stats.turnTorque`. With
+ *  no steer input the bike carves into the corner at this rate. Kept
+ *  modest so the default arc is WIDE (MK-style) rather than a tight
+ *  spiral — at `turnTorque=4` + the chassis angular damping this is
+ *  ~0.7 rad/s → ~28 m radius at 20 m/s. Counter-steer
+ *  (`DRIFT_STEER_FRAC`) can fully cancel it for an even wider line. */
+export const DRIFT_YAW_BIAS_FRAC = 0.45
 
 /** Player steer authority while drifting, as a fraction of
- *  `stats.turnTorque`. Reduced from the normal 1.0 so the bike's
- *  rotation is dominated by the drift bias; the player's input
- *  still tightens or opens the line. */
-export const DRIFT_STEER_FRAC = 0.4
+ *  `stats.turnTorque`. Sized so a FULL counter-steer cancels the
+ *  auto-turn-in bias: the player's steer is pre-scaled to ~0.7 max
+ *  (PLAYER_STEER_SCALE), so `0.65 × 0.7 ≈ 0.455 ≈ DRIFT_YAW_BIAS_FRAC`
+ *  — holding away from the corner opens the drift to a straight,
+ *  wide line; steering in tightens it. This is the knob that makes
+ *  the drift feel like Mario Kart instead of a fixed spiral. */
+export const DRIFT_STEER_FRAC = 0.65
+
+/** Speed (m/s) at/above which the auto-turn-in bias runs at full
+ *  strength. Below it the bias tapers linearly to zero, so a drift
+ *  that has bled speed stops auto-rotating instead of whipping the
+ *  bike around to a 180 (the classic low-speed drift spin-out). Only
+ *  the BIAS tapers — the player's counter-steer keeps full authority
+ *  at any speed so they can always straighten out. */
+export const DRIFT_YAW_SPEED_REF = 8
 
 /** Inside-drift "snap" window — duration of the initial bias spike
  *  for `driftStyle: 'inward'` bikes. Within this window the drift
@@ -180,6 +192,42 @@ export const DRIFT_STEER_FRAC = 0.4
 export const INWARD_INITIAL_WINDOW_S = 0.25
 export const INWARD_INITIAL_BIAS_MUL = 1.2
 export const INWARD_TAIL_BIAS_MUL = 0.8
+
+/**
+ * Drift yaw signal as a fraction of `stats.turnTorque` (before the
+ * water `turnMul`). Pure + exported so the counter-steer-opens
+ * behaviour is unit-pinned without a Rapier world.
+ *
+ * Two terms:
+ *  - **auto-turn-in bias** — `driftDir × DRIFT_YAW_BIAS_FRAC`, scaled
+ *    by the inward-drift archetype curve and a low-speed taper. This
+ *    is what carves the bike into the corner with no input.
+ *  - **player steer** — `-steer × DRIFT_STEER_FRAC` at FULL authority
+ *    (no speed taper), so counter-steering away from the drift cancels
+ *    (or with a sharp flick, slightly reverses) the bias → a wide line,
+ *    and steering into the drift tightens it.
+ *
+ * Sign convention matches the non-drift path (`aTurn = -intent.steer`):
+ * a left drift (`driftDir = -1`) yields a positive bias, same as a
+ * left steer would.
+ */
+export function driftYawFraction(
+  driftDir: number,
+  steer: number,
+  chargeS: number,
+  driftStyle: 'inward' | 'outward' | undefined,
+  speed: number,
+): number {
+  let archetypeMul = 1
+  if (driftStyle === 'inward') {
+    archetypeMul =
+      chargeS < INWARD_INITIAL_WINDOW_S ? INWARD_INITIAL_BIAS_MUL : INWARD_TAIL_BIAS_MUL
+  }
+  const speedTaper = Math.max(0, Math.min(1, speed / DRIFT_YAW_SPEED_REF))
+  const bias = -driftDir * DRIFT_YAW_BIAS_FRAC * archetypeMul * speedTaper
+  const playerInput = -steer * DRIFT_STEER_FRAC
+  return bias + playerInput
+}
 
 // Chassis pitch (relative to the surface tangent) safety clamp on the
 // dive side. The dive-kick taper above bounds steady-state tilt to a
@@ -1542,36 +1590,27 @@ function applyGroundBranch(
   // pitch. In anti-grav we substitute the zone's up so yaw rotates
   // around the road normal (MK8 anti-grav feel).
   //
-  // Drift override: while the bike is in active drift, the base yaw
-  // signal is replaced by a constant drift-direction bias plus a
-  // reduced player-steer term. Effective signals:
-  //   - no steer:           driftDir × 0.7 × turnTorque (drifts in)
-  //   - steer into drift:   +1.1 ×              (tightens the line)
-  //   - counter-steer:      +0.3 ×              (opens the line, still drifting)
+  // Drift override: while the bike is in active drift, the base yaw is
+  // replaced by `driftYawFraction` — a speed-tapered auto-turn-in bias
+  // plus a FULL-authority counter-steer term. At full speed:
+  //   - no steer:         carves in at ~0.45× turnTorque (wide arc)
+  //   - steer into drift: up to ~0.9× (tightens the line)
+  //   - counter-steer:    ~0× or slightly negative (opens to a wide /
+  //                        straight line — "hold away for a wide drift")
+  // The bias tapers to zero below DRIFT_YAW_SPEED_REF so a drift that
+  // has bled speed doesn't whip the bike around to a 180.
   // Sign convention: positive aTurn rotates around +up; `-intent.steer`
-  // for steerLeft (-1) → +aTurn → bike yaws right; drift bias matches
-  // by using `-driftDir` so a left drift (driftDir=-1) → +aTurn (yaws
-  // toward the left side of the screen via the camera-facing axis).
+  // for steerLeft (-1) → +aTurn → bike yaws toward the left of screen.
+  // A left drift (driftDir=-1) maps to a matching positive bias.
   const turnMul = probe.isWater ? 1.1 : 1.0
   const drift = DriftStateStore.get(eid)
   const drifting = !!drift && drift.driftDir !== 0
   let aTurn: number
   if (drifting) {
-    const dir = drift.driftDir
-    // Inside-drift archetype (Sparrow / Stunt) front-loads the bias:
-    // a +20% spike for the first INWARD_INITIAL_WINDOW_S so the cut
-    // into the apex is dramatic, then –20% for the rest of the drift
-    // so the overall arc widens. Outside-drift bikes (Cruiser / Racer
-    // / Scout, plus anything without an explicit style) use the flat
-    // baseline bias.
-    let archetypeMul = 1
-    if (stats.driftStyle === 'inward') {
-      archetypeMul =
-        drift.chargeS < INWARD_INITIAL_WINDOW_S ? INWARD_INITIAL_BIAS_MUL : INWARD_TAIL_BIAS_MUL
-    }
-    const driftBias = -dir * DRIFT_YAW_BIAS_FRAC * stats.turnTorque * archetypeMul
-    const playerInput = -intent.steer * DRIFT_STEER_FRAC * stats.turnTorque
-    aTurn = (driftBias + playerInput) * turnMul
+    aTurn =
+      driftYawFraction(drift.driftDir, intent.steer, drift.chargeS, stats.driftStyle, speed) *
+      stats.turnTorque *
+      turnMul
   } else {
     aTurn = -intent.steer * stats.turnTorque * turnMul
   }
