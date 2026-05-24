@@ -218,8 +218,9 @@ done once after first Steam release.
   `build.rs`, capabilities, `.gitignore`. Steamworks is OFF by default;
   build with `--features steam` once an SDK is on disk.
 - **`pnpm build:deck`** — orchestrator at `tools/build-deck.mjs`.
-- **CI workflow** — `.github/workflows/build-deck.yml`, manual + tag-
-  triggered, attaches AppImage to GitHub Releases.
+- **CI workflow** — `.github/workflows/build-desktop.yml`, manual + tag-
+  triggered matrix (Linux AppImage + Windows NSIS `.exe`/`.msi`),
+  attaches both bundles to GitHub Releases.
 - **Boot wiring** — `main.ts` calls `detectSteamDeck()` +
   `applyDeckProfile()`; `playerSettings.framerateCap`,
   `pixelRatio`, `fullscreenPreferred` rows live in Settings → Video.
