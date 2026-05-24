@@ -893,7 +893,8 @@ export function startGameLoop(opts: GameLoopOpts): void {
     //             still want the directional cue
     //   - off:    zero — the mechanic still applies but no camera tell
     //
-    // Same DriftState read also drives the HUD tier badge below.
+    // Same DriftState read also drives the HUD tier badge + the
+    // continuous skid-audio layer + the one-shot release whoosh below.
     {
       const drift = DriftStateStore.get(playerEid)
       const intensity = playerSettings.driftIntensity
@@ -910,6 +911,31 @@ export function startGameLoop(opts: GameLoopOpts): void {
       }
       chase.setDriftRoll(rollRad)
       driftTierHud.update(drift?.driftDir ?? 0, drift?.highestTier ?? 0)
+
+      // Drift skid loop — continuous tyre-scrape level. Intensity =
+      // speed fraction while drifting + grounded; zero otherwise so
+      // the loop fades out on cancel (the audio engine smooths the
+      // ramp). Suppressed when `driftIntensity` is `off`, halved on
+      // `subtle` — matches the visual layer's opt-out semantics.
+      const driftAudioOn =
+        !!drift &&
+        drift.driftDir !== 0 &&
+        intensity !== 'off' &&
+        state.playerSnapshot?.isGrounded === true
+      if (driftAudioOn) {
+        const speed = state.playerSnapshot?.speed ?? 0
+        const skidIntensity = Math.min(1, speed / 28)
+        audio.driftSkid(intensity === 'subtle' ? skidIntensity * 0.5 : skidIntensity)
+      } else {
+        audio.driftSkid(0)
+      }
+
+      // One-shot whoosh on the tick a drift release fires a boost.
+      // `releasedThisTick` is the sim-side edge flag set by
+      // driftSystem; tier dictates pitch/brightness (MT/SMT/UMT).
+      if (drift?.releasedThisTick && drift.releasedTier > 0 && intensity !== 'off') {
+        audio.driftBoost(drift.releasedTier)
+      }
     }
 
     // Tutorial director — advance the script. The "LOOK AROUND" beat
