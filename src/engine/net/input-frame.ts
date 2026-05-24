@@ -18,8 +18,7 @@
  *     1    |   4   | tick           uint32 LE
  *     5    |   1   | peerId         uint8
  *     6    |   1   | flags          uint8  (bit 0 = fire, bit 1 = boost,
- *                                            bit 2 = trickLeft, bit 3 = trickRight,
- *                                            bit 4 = tuck)
+ *                                            bit 2 = trickLeft, bit 3 = trickRight)
  *     7    |   1   | throttle       int8   (value / 127)
  *     8    |   1   | steer          int8   (value / 127)
  *     9    |   1   | brake          uint8  (value / 255)
@@ -61,7 +60,6 @@ const FLAG_FIRE = 1 << 0
 const FLAG_BOOST = 1 << 1
 const FLAG_TRICK_LEFT = 1 << 2
 const FLAG_TRICK_RIGHT = 1 << 3
-const FLAG_TUCK = 1 << 4
 
 /** Clamp `v` into [lo, hi]. */
 function clamp(v: number, lo: number, hi: number): number {
@@ -99,7 +97,6 @@ export function encodeInputFrameInto(view: DataView, offset: number, frame: Inpu
   if (intent.boost) flags |= FLAG_BOOST
   if (intent.trickLeft) flags |= FLAG_TRICK_LEFT
   if (intent.trickRight) flags |= FLAG_TRICK_RIGHT
-  if (intent.tuck) flags |= FLAG_TUCK
 
   view.setUint8(offset + 0, MESSAGE_TAG_INPUT_FRAME)
   view.setUint32(offset + 1, frame.tick >>> 0, true)
@@ -146,7 +143,6 @@ export function decodeInputFrameFrom(view: DataView, offset: number): InputFrame
       pitch: clamp(pitch, -1, 1),
       trickLeft: (flags & FLAG_TRICK_LEFT) !== 0,
       trickRight: (flags & FLAG_TRICK_RIGHT) !== 0,
-      tuck: (flags & FLAG_TUCK) !== 0,
     },
   }
 }

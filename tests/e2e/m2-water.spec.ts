@@ -29,7 +29,6 @@ test.describe('M2 water', () => {
         pitch: 0,
         trickLeft: false,
         trickRight: false,
-        tuck: false,
       }),
     )
 
@@ -83,7 +82,6 @@ test.describe('M2 water', () => {
         pitch: 0,
         trickLeft: false,
         trickRight: false,
-        tuck: false,
       }),
     )
     await page.waitForFunction(() => (window.__hover?.player()?.position.z ?? 0) > 35, {

@@ -42,7 +42,6 @@ test.describe('M0 boot', () => {
         pitch: 0,
         trickLeft: false,
         trickRight: false,
-        tuck: false,
       }),
     )
 

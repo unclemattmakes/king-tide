@@ -199,7 +199,6 @@ describe('createRider', () => {
       boost: false,
       trickLeft: false,
       trickRight: false,
-      tuck: false,
     })
     // Run several pose ticks; headYaw should monotonically approach the
     // positive cap.
