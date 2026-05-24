@@ -120,6 +120,14 @@
       "category": "barrier"
     },
     {
+      "id": "buoy",
+      "displayName": "Marker Buoy",
+      "url": "/assets/props/buoy.glb",
+      "specPath": "specs/props/buoy.json",
+      "category": "buoy",
+      "waveRider": "buoy"
+    },
+    {
       "id": "crate_small",
       "displayName": "Small Crate",
       "url": "/assets/props/crate_small.glb",
@@ -132,6 +140,14 @@
       "url": "/assets/props/lamppost_tall.glb",
       "specPath": "specs/props/lamppost_tall.json",
       "category": "lamppost"
+    },
+    {
+      "id": "log",
+      "displayName": "Drift Log",
+      "url": "/assets/props/log.glb",
+      "specPath": "specs/props/log.json",
+      "category": "log",
+      "waveRider": "log"
     },
     {
       "id": "pylon_orange",
@@ -170,6 +186,12 @@
       "displayName": "Big Bay",
       "url": "/assets/tracks/big-bay.glb",
       "specPath": "public/tracks/big-bay.json"
+    },
+    {
+      "id": "bike-validation",
+      "displayName": "Bike Validation",
+      "url": "/assets/tracks/bike-validation.glb",
+      "specPath": "public/tracks/bike-validation.json"
     },
     {
       "id": "calibration",
@@ -318,5 +340,5 @@
       "thumbUrl": "/assets/tracks/the-maw-thumb.jpg"
     }
   ],
-  "generatedAt": "2026-05-10T06:41:33.421Z"
+  "generatedAt": "2026-05-23T19:34:46.259Z"
 }
