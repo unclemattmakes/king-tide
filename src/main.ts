@@ -1,5 +1,4 @@
 import { addComponent, hasComponent, removeComponent } from 'bitecs'
-import * as THREE from 'three'
 import { installControls } from './boot/controls'
 import { startEditMode } from './boot/edit-mode'
 import { startGameLoop } from './boot/game-loop'
@@ -8,6 +7,7 @@ import { setupMultiplayer } from './boot/multiplayer'
 import { startReplayMode } from './boot/replay-mode'
 import { spawnBikes } from './boot/spawn-bikes'
 import { loadTrackForBoot } from './boot/track-loader'
+import { sampleTerrainHeightAtXZ } from './engine/render/terrain-heightmap'
 import { runEarlyModeDispatch } from './boot/url-modes'
 import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug'
 import { createAudioEngine } from './engine/audio/audio'
@@ -656,32 +656,15 @@ async function boot() {
     },
   })
 
-  // Downward-raycast helper backed by Three.js' built-in Raycaster +
-  // the loaded environment GLB. Procedural tracks have no GLB root —
-  // the callback returns null in that case and the intro director
-  // falls back to the waterline clearance floor. Cached vectors keep
-  // the per-frame call allocation-free; the Raycaster itself does the
-  // BVH traversal on the GLB's meshes.
-  const introRayOrigin = new THREE.Vector3()
-  const introRayDown = new THREE.Vector3(0, -1, 0)
-  const introRaycaster = new THREE.Raycaster()
-  // Cast from well above the highest plausible camera altitude (the
-  // aerial shot tops out at ~140 m; 500 m gives generous headroom).
-  introRaycaster.far = 1500
+  // Downward terrain-height lookup. Samples the same baked terrain
+  // heightmap the water shader uses for shoaling — O(1) per query, vs the
+  // O(env-triangles) Three.js Raycaster the intro previously paid every
+  // frame (which CPU-locked the intro to ~10 fps on dense tracks). The
+  // heightmap is null for procedural / editor tracks; in that case the
+  // intro director falls back to the waterline clearance floor.
   function introRaycastDown(x: number, z: number): number | null {
-    if (!environmentGlbRoot) return null
-    introRayOrigin.set(x, 500, z)
-    introRaycaster.set(introRayOrigin, introRayDown)
-    const hits = introRaycaster.intersectObject(environmentGlbRoot, true)
-    for (const h of hits) {
-      // Skip non-collidable preview meshes (gate halos, prop placeholders
-      // tagged in userData.kind by the GLB loader). The terrain mesh
-      // either has no `kind` or `kind === 'track'` per the asset registry.
-      const kind = (h.object?.userData as { kind?: string } | undefined)?.kind
-      if (kind && kind !== 'track' && kind !== 'horizon') continue
-      return h.point.y
-    }
-    return null
+    if (!terrainHeightmap) return null
+    return sampleTerrainHeightAtXZ(terrainHeightmap, x, z)
   }
 
   // Build the cinematic director. The shots are derived from the
