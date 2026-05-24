@@ -3,6 +3,7 @@ import { emptyIntent } from '@/engine/input/intent'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import type { Vec3 } from '@/engine/sim/physics/vec'
+import { SurfaceType } from '@/engine/sim/surface-types'
 import { defaultBikeStats } from '@/game/bikes/stats'
 import {
   BikeStats,
@@ -146,6 +147,7 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
     groundDistance: 0,
     isGrounded: false,
     surfaceIsWater: false,
+    surfaceType: SurfaceType.DEFAULT,
     forwardSlope: 0,
     diveHoldS: 0,
     releaseKickS: 0,

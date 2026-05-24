@@ -3,6 +3,7 @@
 
 import type { Intent } from '@/engine/input/intent'
 import { createStore } from '@/engine/sim/ecs/store'
+import type { SurfaceTypeValue } from '@/engine/sim/surface-types'
 
 // --- Tags (no data) ---
 export const PlayerTag = { name: 'PlayerTag' as const }
@@ -111,6 +112,13 @@ export type HoverStateData = {
    *  emission (water) and spark/dust emission (land). Defaults to `false`
    *  when there is no surface (airborne). */
   surfaceIsWater: boolean
+  /** Material tag of the surface under the bike (sand / ice / metal /
+   *  asphalt / water / default). Set from the surface registry by the
+   *  hover probe each grounded tick; `default` while airborne. Drives
+   *  the lateral-grip multiplier in the ground branch and is available
+   *  to render systems for surface-specific FX. See
+   *  `engine/sim/surface-types.ts`. */
+  surfaceType: SurfaceTypeValue
   /** Low-pass-filtered bow→stern surface slope (dy/dx along bike-fwd).
    *  Drives slope-momentum, climb-assist, slope-aware hover-height boost,
    *  and the grounded pitch-PD target. Filtered with a short time constant

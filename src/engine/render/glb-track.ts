@@ -1,12 +1,13 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { ExportedKind } from '@/engine/asset-kinds'
+import { playerSettings } from '@/engine/player-settings'
 import { applyDecalsToScene } from '@/engine/render/decal-system'
 import { applyFoliageSway } from '@/engine/render/foliage-sway'
 import { applyLavaRiverMaterialToScene } from '@/engine/render/lava-river-material'
 import { applyTerrainShaderToScene } from '@/engine/render/terrain-shader'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
-import { playerSettings } from '@/engine/player-settings'
+import { asSurfaceType } from '@/engine/sim/surface-types'
 import type { GltfRoot } from '@/game/tracks/glb-loader'
 import type { TerrainShaderConfig } from '@/game/tracks/types'
 
@@ -284,7 +285,14 @@ export function attachTrackColliders(group: THREE.Object3D, phys: PhysicsWorld):
     const colDesc = phys.rapier.ColliderDesc.trimesh(worldVerts, indices)
       .setFriction(0.08)
       .setRestitution(0.05)
-    phys.world.createCollider(colDesc, rb)
+    const created = phys.world.createCollider(colDesc, rb)
+    // Surface-material tag — opportunistic read of a `surface` extra on
+    // the mesh (validated against the known set; unknown / absent →
+    // DEFAULT, no behaviour change). Blender authoring for this extra
+    // is a follow-up; the runtime path is ready so a tagged mesh just
+    // works once the addon writes the property.
+    const surface = asSurfaceType((obj.userData as { surface?: unknown })?.surface)
+    if (surface) phys.surfaces.tag(created.handle, surface)
     attached += 1
   })
   return attached

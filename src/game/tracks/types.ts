@@ -1,4 +1,5 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
+import type { SurfaceTypeValue } from '@/engine/sim/surface-types'
 
 /**
  * A track. Authored three ways, all resolving to this shape:
@@ -327,6 +328,12 @@ export type Prop = {
    *  and instantiates from `public/assets/props/<assetId>.glb` instead.
    *  Sourced from the asset manifest (built by `pnpm gen:props`). */
   assetId?: string
+  /** Optional surface material tag — `'default' | 'asphalt' | 'sand' |
+   *  'ice' | 'metal' | 'water'`. The runtime registers the prop's
+   *  collider in the surface registry so the hover/drift physics scales
+   *  grip by the material. Absent → DEFAULT (grippy, no behaviour
+   *  change). See `engine/sim/surface-types.ts`. */
+  surface?: SurfaceTypeValue
 }
 
 export type PropType = 'box' | 'sphere' | 'cylinder' | 'pipe' | 'halfpipe' | 'asset'
@@ -424,11 +431,11 @@ export type SkyConfig = {
  * accept; the unit-tested round-trip will catch drift.
  */
 export const SKY_TONE_MAPPINGS = [
-  'neutral',       // THREE.NeutralToneMapping — flat / crisp daylight
-  'aces_filmic',   // THREE.ACESFilmicToneMapping — punchy, default
-  'agx',           // THREE.AgXToneMapping — soft roll-off, golden hour
-  'reinhard',      // THREE.ReinhardToneMapping — vintage, low contrast
-  'cineon',        // THREE.CineonToneMapping — film-emulation cold
+  'neutral', // THREE.NeutralToneMapping — flat / crisp daylight
+  'aces_filmic', // THREE.ACESFilmicToneMapping — punchy, default
+  'agx', // THREE.AgXToneMapping — soft roll-off, golden hour
+  'reinhard', // THREE.ReinhardToneMapping — vintage, low contrast
+  'cineon', // THREE.CineonToneMapping — film-emulation cold
 ] as const
 
 export type SkyToneMapping = (typeof SKY_TONE_MAPPINGS)[number]

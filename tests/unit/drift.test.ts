@@ -36,6 +36,7 @@ function groundedHover(): HoverStateData {
     groundDistance: 0.4,
     isGrounded: true,
     surfaceIsWater: false,
+    surfaceType: 'default',
     forwardSlope: 0,
     diveHoldS: 0,
     releaseKickS: 0,
