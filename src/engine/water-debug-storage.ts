@@ -32,6 +32,7 @@ export type WaterDebugSettings = {
   pinchDirection: number
   waveBearing: number
   wireframe: boolean
+  colorize: boolean
 }
 
 export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
@@ -52,6 +53,7 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     pinchDirection: d.pinchDirection,
     waveBearing: d.waveBearing,
     wireframe: d.wireframe,
+    colorize: d.colorize,
   }
 }
 
@@ -74,7 +76,7 @@ export function loadStoredWaterSettings(defaults: WaterDebugDefaults): WaterDebu
   const p = parsed as Record<string, unknown>
   for (const k of Object.keys(base) as Array<keyof WaterDebugSettings>) {
     const v = p[k]
-    if (k === 'wireframe') {
+    if (k === 'wireframe' || k === 'colorize') {
       if (typeof v === 'boolean') base[k] = v
     } else if (typeof v === 'number' && Number.isFinite(v)) {
       ;(base as unknown as Record<string, number>)[k] = v
@@ -108,6 +110,7 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setPinchDirection(s.pinchDirection)
   water.debug.setWaveBearing(s.waveBearing)
   water.debug.setWireframe(s.wireframe)
+  water.debug.setColorize(s.colorize)
 }
 
 /**

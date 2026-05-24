@@ -61,6 +61,7 @@ import { logWaterCoverage, reportWaterCoverage } from './engine/render/water-cov
 import { loadGateProp } from './engine/render/gate-prop'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { createWaterMesh } from './engine/render/water'
+import { createWaterTransitionMarkers } from './engine/render/water-debug-markers'
 import { sliceBestLap } from './engine/replay/best-lap-slice'
 import { parseReplay, type ReplayBike, type ReplayFile } from './engine/replay/format'
 import { getGhost, getGhostBestLap, setGhost } from './engine/replay/ghost-state'
@@ -220,6 +221,13 @@ async function boot() {
   const waterMesh = createWaterMesh(waveField, { backend })
   scene.add(waterMesh.mesh)
 
+  // Camera-locked transition markers — tall pillars on rings at the
+  // center→outer (240 m) and outer→skirt (720 m) boundaries. Hidden
+  // by default; auto-enabled below when the water-test track loads so
+  // the diagnostic surface stays out of regular gameplay.
+  const waterTransitionMarkers = createWaterTransitionMarkers()
+  waterMesh.mesh.add(waterTransitionMarkers.group)
+
   // Phase 3 — URL params + persisted prefs.
   const params = new URLSearchParams(window.location.search)
 
@@ -296,6 +304,11 @@ async function boot() {
       : editMode
         ? 'lagoon-edit'
         : 'lagoon'
+
+  // The water-test diagnostic track exists specifically to expose the
+  // LOD-tile architecture — surface the transition markers as soon as
+  // it loads. Other tracks keep them hidden.
+  if (trackId === 'water-test') waterTransitionMarkers.setVisible(true)
 
   // Bike variant. URL `?bike=cruiser|racer|stunt` picks the player's
   // archetype; AI bikes always use the racer baseline for now. Variant

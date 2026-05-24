@@ -1,0 +1,81 @@
+{
+  "id": "water-test",
+  "name": "Water rendering test",
+  "lapsToFinish": 1,
+  "water": {
+    "height": 0.0,
+    "waveHeight": 1.0,
+    "waveFreq": 0.4
+  },
+  "sky": {
+    "tint": "#ffe6c8",
+    "cloudiness": 0.1,
+    "sunIntensity": 1.05,
+    "timeOfDay": 0.42,
+    "seaStateBeaufort": 4
+  },
+  "start": {
+    "position": { "x": 0.0, "y": 6.0, "z": 30.0 },
+    "yaw": 3.14159
+  },
+  "checkpoints": [
+    {
+      "index": 0,
+      "position": { "x": 0.0, "y": 4.0, "z": -30.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+      "halfWidth": 12.0,
+      "height": 6.0
+    }
+  ],
+  "aiSplines": [
+    {
+      "id": "main",
+      "points": [],
+      "anchors": [
+        { "x": 0.0, "y": 1.0, "z": 30.0 },
+        { "x": 30.0, "y": 1.0, "z": 0.0 },
+        { "x": 0.0, "y": 1.0, "z": -30.0 },
+        { "x": -30.0, "y": 1.0, "z": 0.0 }
+      ]
+    }
+  ],
+  "pickupSpawns": [],
+  "boostPads": [],
+  "props": [
+    {
+      "type": "cylinder",
+      "position": { "x": 0.0, "y": 1.0, "z": 0.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+      "size": { "x": 0.6, "y": 2.0, "z": 0.6 },
+      "color": "#ffffff"
+    },
+    {
+      "type": "box",
+      "position": { "x": 15.0, "y": 0.5, "z": 0.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+      "size": { "x": 1.5, "y": 0.5, "z": 1.5 },
+      "color": "#c8d8e0"
+    },
+    {
+      "type": "box",
+      "position": { "x": -15.0, "y": 0.5, "z": 0.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+      "size": { "x": 1.5, "y": 0.5, "z": 1.5 },
+      "color": "#c8d8e0"
+    },
+    {
+      "type": "box",
+      "position": { "x": 0.0, "y": 0.5, "z": 15.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+      "size": { "x": 1.5, "y": 0.5, "z": 1.5 },
+      "color": "#c8d8e0"
+    },
+    {
+      "type": "box",
+      "position": { "x": 0.0, "y": 0.5, "z": -15.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+      "size": { "x": 1.5, "y": 0.5, "z": 1.5 },
+      "color": "#c8d8e0"
+    }
+  ]
+}
