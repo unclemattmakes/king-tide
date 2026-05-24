@@ -1,4 +1,5 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
+import { asSurfaceType } from '@/engine/sim/surface-types'
 import { pointAtT, sampleCatmullRom, sampleScalarToMatch, tangentAtT } from './catmull-rom'
 import {
   type AISpline,
@@ -11,10 +12,10 @@ import {
   type Prop,
   type PropType,
   SKY_COLOR_GRADES,
-  type SkyColorGrade,
   SKY_TONE_MAPPINGS,
-  type SkyToneMapping,
+  type SkyColorGrade,
   type SkyConfig,
+  type SkyToneMapping,
   type TerrainShaderConfig,
   type Track,
   type WaterConfig,
@@ -380,6 +381,7 @@ export function trackToJson(track: Track): TrackJson {
       }
       if (p.color) out.color = p.color
       if (p.assetId) out.assetId = p.assetId
+      if (p.surface) out.surface = p.surface
       return out
     }),
   }
@@ -521,9 +523,7 @@ function readBoostPad(raw: unknown, i: number): BoostPad {
   const halfHeightRaw = raw.halfHeight
   const halfHeight = halfHeightRaw === undefined ? 3 : requireNumber(raw, 'halfHeight')
   if (halfWidth <= 0 || halfHeight <= 0 || halfDepth <= 0) {
-    throw new Error(
-      `track-json: boostPads[${i}] halfWidth/halfHeight/halfDepth must be positive`,
-    )
+    throw new Error(`track-json: boostPads[${i}] halfWidth/halfHeight/halfDepth must be positive`)
   }
   return { position, rotation, halfWidth, halfHeight, halfDepth, strength }
 }
@@ -622,6 +622,11 @@ function readProp(raw: unknown, i: number): Prop {
   if (typeof colorRaw === 'string' && colorRaw.length > 0) out.color = colorRaw
   const assetIdRaw = (raw as { assetId?: unknown }).assetId
   if (typeof assetIdRaw === 'string' && assetIdRaw.length > 0) out.assetId = assetIdRaw
+  // Surface tag — tolerant: an unknown / typo'd value is dropped
+  // silently (asSurfaceType returns undefined) so a bad string falls
+  // back to DEFAULT rather than throwing the whole track load.
+  const surface = asSurfaceType((raw as { surface?: unknown }).surface)
+  if (surface) out.surface = surface
   if (typeRaw === 'asset' && !out.assetId) {
     throw new Error(`track-json: props[${i}] type='asset' requires an assetId`)
   }

@@ -20,11 +20,20 @@ Native desktop + Steam Deck wrapper for the Hoverbike web build. See
 From the repo root:
 
 ```sh
-pnpm build:deck       # web build + AppImage
+pnpm build:deck       # web build + Linux AppImage + .deb (run on Linux)
+pnpm build:windows    # web build + Windows NSIS .exe + .msi (run on Windows)
 ```
 
-That runs `pnpm build` (Vite → `dist/`), then `cargo tauri build` here,
-which writes the AppImage to `src-tauri/target/release/bundle/appimage/`.
+Each runs `pnpm build` (Vite → `dist/`), then `cargo tauri build` here for
+the relevant target. Linux bundles land in
+`src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/{appimage,deb}/`;
+Windows installers in
+`src-tauri/target/x86_64-pc-windows-msvc/release/bundle/{nsis,msi}/`.
+
+Windows installers must be built on a Windows host (or CI on
+`windows-latest`) — Tauri's NSIS bundler invokes Windows-native tools.
+`pnpm build:windows` bails out with a pointer to CI when run on
+Linux/macOS. See [`docs/desktop-builds.md`](../docs/desktop-builds.md).
 
 For dev (live-reload from the Vite dev server):
 
@@ -61,12 +70,12 @@ inside them are TODO stubs. See `src/steam.rs`.
 
 ## Icons
 
-The repo ships **solid-teal placeholder PNGs** (4 sizes — 32 / 128 /
-256 / 512 px) so `cargo tauri build` succeeds end-to-end before the
-v1 art lands. Generate via:
+The repo ships **solid-teal placeholder icons** (PNGs at 32 / 128 /
+256 / 512 px plus a real Windows `icon.ico`) so `cargo tauri build`
+succeeds end-to-end before the v1 art lands. Generate via:
 
 ```sh
-pnpm gen:deck-icons          # writes src-tauri/icons/*.png
+pnpm gen:icons               # writes src-tauri/icons/*.png + icon.ico
 ```
 
 When the real art arrives, drop a 1024² master and run:
@@ -75,14 +84,17 @@ When the real art arrives, drop a 1024² master and run:
 cd src-tauri && cargo tauri icon path/to/master.png
 ```
 
-That generates all four PNG sizes for Linux, plus the `icon.icns`
-(macOS) and `icon.ico` (Windows) container formats when those targets
-get added to `tauri.conf.json`. Today only Linux is in `targets`.
+That generates all four PNG sizes for Linux plus the `icon.ico`
+(Windows) container; pass `--icns` once a macOS target is added.
+`tauri.conf.json` currently bundles Linux (`appimage`, `deb`) and
+Windows (`nsis`, `msi`) targets.
 
 ## CI
 
-The `.github/workflows/build-deck.yml` workflow runs on tag pushes
-(`v*`) and on manual dispatch — it builds the AppImage on a Linux
-runner and uploads it as a release artifact. Steamworks is left off
-in CI; flip the workflow's `--features` flag once we have an SDK
-checkout in the runner's cache.
+The `.github/workflows/build-desktop.yml` workflow runs on tag pushes
+(`v*`) and on manual dispatch — a matrix that builds the Linux AppImage
+on `ubuntu-22.04` and the Windows NSIS `.exe` + `.msi` on
+`windows-latest`, uploading both as artifacts (and attaching them to the
+GitHub Release on `v*` tags). Steamworks is left off in CI; flip the
+workflow's `steam_feature` input once we have an SDK checkout in the
+runner's cache.

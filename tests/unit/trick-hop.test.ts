@@ -17,6 +17,7 @@ import { addComponent, addEntity } from 'bitecs'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createSimWorld, type SimWorld } from '../../src/engine/sim/ecs/world'
 import type { PhysicsWorld } from '../../src/engine/sim/physics/rapier'
+import { SurfaceType } from '../../src/engine/sim/surface-types'
 import { PRE_PRESS_BUFFER_SEC } from '../../src/engine/wave-pump-observer'
 import {
   BikeStats,
@@ -82,6 +83,8 @@ function spawnBike(
     boostMul: 1.5,
     mass: 1,
     surfaceFollow: 0.5,
+    tuckSpeedBoost: 1.15,
+    tuckDragMul: 0.5,
   })
   addComponent(sim, eid, RBHandle)
   RBHandleStore.set(eid, { handle })
@@ -92,6 +95,7 @@ function spawnBike(
     groundDistance: 0,
     isGrounded: true,
     surfaceIsWater: false,
+    surfaceType: SurfaceType.DEFAULT,
     forwardSlope: 0,
     diveHoldS: 0,
     releaseKickS: 0,

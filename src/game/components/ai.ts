@@ -60,6 +60,28 @@ export type AIControllerData = {
    *  needs sustained `intent.pitch` to integrate a meaningful nose-up
    *  torque; a single-tick spike would barely move the chassis. */
   pumpHoldS: number
+  /** Curvature (1/m) at which the AI will initiate drift on an
+   *  upcoming corner. Baked from difficulty tuning at spawn. */
+  driftCurvatureThreshold: number
+  /** Minimum horizontal speed (m/s) for AI drift to fire. Baked from
+   *  difficulty tuning at spawn. */
+  driftMinSpeed: number
+  /** Maximum seconds the AI will hold a single drift. Baked from
+   *  difficulty tuning at spawn. */
+  driftMaxHoldS: number
+  /** Direction the AI is currently drifting: -1 left, +1 right, 0
+   *  not drifting. Mirrors `DriftState.driftDir` on the player side
+   *  but is the AI's *intent* — it gets translated into
+   *  `intent.trickLeft` / `intent.trickRight` each tick. */
+  driftDir: number
+  /** Sim-seconds the current drift has been held. Drives the release-
+   *  on-max-hold gate. Resets on release. */
+  driftHoldS: number
+  /** Sim-seconds remaining before the AI can initiate another drift
+   *  after releasing one. Slightly longer than `DRIFT_COOLDOWN_S` in
+   *  drift.ts so the AI doesn't immediately re-trigger on the next
+   *  micro-corner. */
+  driftCooldownS: number
 }
 export const AIControllerStore = createStore<AIControllerData>('AIController')
 
@@ -83,6 +105,12 @@ export function defaultAIController(
     pumpPitchStrength: tuning.pumpPitchStrength,
     pumpCooldownS: 0,
     pumpHoldS: 0,
+    driftCurvatureThreshold: tuning.driftCurvatureThreshold,
+    driftMinSpeed: tuning.driftMinSpeed,
+    driftMaxHoldS: tuning.driftMaxHoldS,
+    driftDir: 0,
+    driftHoldS: 0,
+    driftCooldownS: 0,
   }
 }
 

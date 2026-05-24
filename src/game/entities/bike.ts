@@ -3,6 +3,7 @@ import { emptyIntent } from '@/engine/input/intent'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import type { Vec3 } from '@/engine/sim/physics/vec'
+import { SurfaceType } from '@/engine/sim/surface-types'
 import { defaultBikeStats } from '@/game/bikes/stats'
 import {
   BikeStats,
@@ -13,6 +14,8 @@ import {
   BoostMeterStore,
   ControlIntent,
   ControlIntentStore,
+  DriftState,
+  DriftStateStore,
   GhostTag,
   HoverState,
   HoverStateStore,
@@ -144,6 +147,7 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
     groundDistance: 0,
     isGrounded: false,
     surfaceIsWater: false,
+    surfaceType: SurfaceType.DEFAULT,
     forwardSlope: 0,
     diveHoldS: 0,
     releaseKickS: 0,
@@ -178,6 +182,18 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
     charge: 0,
     active: false,
     prevBoostDown: false,
+  })
+  addComponent(sim, eid, DriftState)
+  DriftStateStore.set(eid, {
+    driftDir: 0,
+    chargeS: 0,
+    highestTier: 0,
+    sinceReleaseS: 0,
+    ungroundedDuringDriftS: 0,
+    prevLeftDown: false,
+    prevRightDown: false,
+    releasedThisTick: false,
+    releasedTier: 0,
   })
   // Every bike has a pickup slot.
   addComponent(sim, eid, PickupSlot)
