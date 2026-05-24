@@ -1,11 +1,14 @@
+import { query } from 'bitecs'
 import type { Intent } from '@/engine/input/intent'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { advanceWaveField, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import type { Track } from '@/game/tracks/types'
+import { BikeTag, RBHandle, RBHandleStore } from './components'
 import { aiCombatSystem } from './systems/ai-combat'
 import { aiControlSystem } from './systems/ai-control'
 import { antiGravSystem } from './systems/anti-grav'
+import { boostMeterSystem } from './systems/boost-meter'
 import { boostPadSystem } from './systems/boost-pad'
 import {
   explosionTickSystem,
@@ -15,19 +18,17 @@ import {
   stunOverrideSystem,
   stunTickSystem,
 } from './systems/combat'
-import { boostMeterSystem } from './systems/boost-meter'
+import { driftSystem } from './systems/drift'
 import { hoverSystem } from './systems/hover'
-import { trickHopSystem } from './systems/trick-hop'
 import { applyPeerInputs, EMPTY_PEER_INPUTS } from './systems/input-apply'
 import { boostTickSystem, pickupSystem, pickupUseSystem } from './systems/pickup'
 import { riderCrashSystem } from './systems/rider-crash'
 import { riderPoseSystem } from './systems/rider-pose'
 import { rubberBandSystem } from './systems/rubber-band'
 import { syncFromPhysics } from './systems/sync-from-physics'
+import { trickHopSystem } from './systems/trick-hop'
 import { wakeUpdateSystem } from './systems/wake-update'
 import type { WaveRiderSystem } from './systems/wave-rider'
-import { query } from 'bitecs'
-import { BikeTag, RBHandle, RBHandleStore } from './components'
 
 export type RaceTick = (sim: SimWorld, phys: PhysicsWorld, dt: number) => void
 
@@ -127,6 +128,12 @@ export function simulateStep(
   // Applying the vertical impulse here (before `phys.step()` below)
   // means the bike's lift integrates this tick rather than next.
   trickHopSystem(sim, phys)
+  // Drift state machine — runs after trick-hop so the small-hop
+  // (drift initiator's visible tell) has already fired its impulse,
+  // and reads the same fresh `HoverState.isGrounded`. Doesn't apply
+  // its own torques; `hoverSystem` next tick reads `DriftState` for
+  // ground-branch yaw + lateral-drag modulation.
+  driftSystem(sim, phys)
   // Boost meter — manages activate/drain/release. Must run before
   // hover reads `BoostMeter.active`, hence before any next-frame
   // hover pass; placement here also lets the same-tick rising-edge

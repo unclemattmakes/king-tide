@@ -13,6 +13,8 @@ import {
   BoostMeterStore,
   ControlIntent,
   ControlIntentStore,
+  DriftState,
+  DriftStateStore,
   GhostTag,
   HoverState,
   HoverStateStore,
@@ -178,6 +180,18 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
     charge: 0,
     active: false,
     prevBoostDown: false,
+  })
+  addComponent(sim, eid, DriftState)
+  DriftStateStore.set(eid, {
+    driftDir: 0,
+    chargeS: 0,
+    highestTier: 0,
+    sinceReleaseS: 0,
+    ungroundedDuringDriftS: 0,
+    prevLeftDown: false,
+    prevRightDown: false,
+    releasedThisTick: false,
+    releasedTier: 0,
   })
   // Every bike has a pickup slot.
   addComponent(sim, eid, PickupSlot)

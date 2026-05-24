@@ -49,23 +49,24 @@ import { createBoostMeterHud } from '@/engine/render/boost-meter-hud'
 import type { ChaseCamera } from '@/engine/render/camera'
 import { showCupResultsOverlay } from '@/engine/render/cup-results-screen'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
+import { updateSwayTime, updateWind } from '@/engine/render/foliage-sway'
 import { shouldRenderFrame } from '@/engine/render/frame-cap'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
 import { updateLavaTime } from '@/engine/render/lava-river-material'
-import { updateSwayTime, updateWind } from '@/engine/render/foliage-sway'
 import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finish-banner'
 import { createPerfHud, type RenderInfoLite } from '@/engine/render/perf-hud'
-import { renderFrame } from '@/engine/render/renderer-service'
 import { createPumpFx } from '@/engine/render/pump-fx'
 import type { RaceHud } from '@/engine/render/race-hud'
 import type { RaceIntro } from '@/engine/render/race-intro'
 import type { RaceIntroUi } from '@/engine/render/race-intro-ui'
+import { renderFrame } from '@/engine/render/renderer-service'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
 import { createTrickPromptHud } from '@/engine/render/trick-prompt-hud'
 import { createTutorialHud } from '@/engine/render/tutorial-hud'
 import { type BikeImpact, updateUnderwaterFog } from '@/engine/render/water'
 import { createWavePumpHud } from '@/engine/render/wave-pump-hud'
+import type { WaveRiderRenderSystem } from '@/engine/render/wave-rider-render'
 import { sliceBestLap } from '@/engine/replay/best-lap-slice'
 import { serializeReplay } from '@/engine/replay/format'
 import { getGhostBestLap, setGhost } from '@/engine/replay/ghost-state'
@@ -89,6 +90,7 @@ import {
   BikeStatsStore,
   BoostMeterStore,
   ControlIntentStore,
+  DriftStateStore,
   HoverStateStore,
   RBHandleStore,
   TrickStateStore,
@@ -98,13 +100,12 @@ import type { PickupType } from '@/game/components/pickup'
 import { RacerStore } from '@/game/components/race'
 import type { RaceTick } from '@/game/sim-step'
 import { simulateStep } from '@/game/sim-step'
-import type { WaveRiderSystem } from '@/game/systems/wave-rider'
-import type { WaveRiderRenderSystem } from '@/engine/render/wave-rider-render'
 import { chargeBoostMeter } from '@/game/systems/boost-meter'
 import type { GhostRunner } from '@/game/systems/ghost-runner'
 import { getHeldPickup } from '@/game/systems/pickup'
 import { tickRemoteInterp } from '@/game/systems/remote-interp'
 import { computeStandings } from '@/game/systems/standings'
+import type { WaveRiderSystem } from '@/game/systems/wave-rider'
 import type { Track } from '@/game/tracks/types'
 import type { MultiplayerHandle } from './multiplayer'
 import { downloadReplay, formatTime, ordinal } from './utils'
@@ -878,6 +879,30 @@ export function startGameLoop(opts: GameLoopOpts): void {
       antiGravHud.setWeight(w)
       const scalar = ANTI_GRAV_CAMERA_SCALAR[playerSettings.antiGravCameraIntensity]
       chase.setAntiGravFollow(w * scalar)
+    }
+
+    // Drift-roll: bank the chase camera into the corner while drifting.
+    // Magnitude scales with the highest tier reached this drift so the
+    // visual progression matches the audible payoff hierarchy
+    // (blue MT → orange SMT). Gated by `playerSettings.driftIntensity`:
+    //   - full:   ±5° at tier 1, ±7° at tier 2
+    //   - subtle: half magnitude — for motion-sensitive players who
+    //             still want the directional cue
+    //   - off:    zero — the mechanic still applies but no camera tell
+    {
+      const drift = DriftStateStore.get(playerEid)
+      const intensity = playerSettings.driftIntensity
+      let rollRad = 0
+      if (drift && drift.driftDir !== 0 && intensity !== 'off') {
+        const baseRad = drift.highestTier >= 2 ? (7 * Math.PI) / 180 : (5 * Math.PI) / 180
+        const scalar = intensity === 'subtle' ? 0.5 : 1.0
+        // Sign convention: driftDir=-1 (left drift) → positive roll
+        // around the camera's local Z, which rotates the horizon
+        // clockwise from the player's perspective and reads as
+        // "leaning left into the corner."
+        rollRad = -drift.driftDir * baseRad * scalar
+      }
+      chase.setDriftRoll(rollRad)
     }
 
     // Tutorial director — advance the script. The "LOOK AROUND" beat
