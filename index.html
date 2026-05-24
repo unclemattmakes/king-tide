@@ -2675,6 +2675,75 @@
             inset 0 0 14px rgba(255, 80, 90, 0.45);
         }
       }
+      /* Drift tier badge — small circular indicator that appears above
+         the boost-meter while the player is in active drift. The badge
+         color + label switches with the current `highestTier`:
+           tier 1 (MT)  → blue,   label "MT"
+           tier 2 (SMT) → orange, label "SMT"
+           tier 3 (UMT) → purple, label "UMT"
+         No tier ("just holding, no charge yet") fades to a low-alpha
+         white outline so the player sees the drift is engaged but
+         hasn't paid off. Color tokens picked to match the spark pool
+         tints in src/engine/render/fx/index.ts so the on-screen ring
+         and the spark color stay in lockstep. */
+      #hud-drift {
+        left: 60px; bottom: 64px;
+        width: 56px; height: 56px;
+        --df-tier: 0;
+        --df-color: rgba(220, 230, 245, 0.55);
+        --df-glow: rgba(220, 230, 245, 0.3);
+      }
+      #hud-drift[data-tier="1"] {
+        --df-color: rgb(110, 180, 255);
+        --df-glow: rgba(110, 180, 255, 0.7);
+      }
+      #hud-drift[data-tier="2"] {
+        --df-color: rgb(255, 180, 90);
+        --df-glow: rgba(255, 180, 90, 0.75);
+      }
+      #hud-drift[data-tier="3"] {
+        --df-color: rgb(220, 130, 255);
+        --df-glow: rgba(220, 130, 255, 0.8);
+      }
+      #hud-drift .df-ring {
+        position: absolute; inset: 0;
+        border-radius: 50%;
+        border: 2px solid var(--df-color);
+        background: radial-gradient(circle, rgba(8,14,22,0.78) 50%, rgba(4,8,14,0.92) 100%);
+        box-shadow:
+          0 0 18px var(--df-glow),
+          inset 0 0 10px rgba(0,0,0,0.6);
+        display: flex; align-items: center; justify-content: center;
+        opacity: 0;
+        transform: scale(0.85);
+        transition:
+          opacity 160ms var(--ease-out),
+          transform 160ms var(--ease-out),
+          border-color 200ms var(--ease-out),
+          box-shadow 200ms var(--ease-out);
+      }
+      #hud-drift[data-active="1"] .df-ring {
+        opacity: 1;
+        transform: scale(1);
+      }
+      #hud-drift .df-label {
+        font: bold 13px ui-monospace, monospace;
+        letter-spacing: 0.06em;
+        color: var(--df-color);
+        text-shadow: 0 0 6px var(--df-glow);
+        user-select: none;
+      }
+      /* Tier-up flash — fires when the badge transitions to a higher
+         tier. JS toggles `data-tierup="1"` for ~280ms after every
+         upgrade so the player gets a clear "yes that paid off" pulse
+         on top of the steady glow. */
+      #hud-drift[data-tierup="1"] .df-ring {
+        animation: df-tierup-flash 280ms ease-out;
+      }
+      @keyframes df-tierup-flash {
+        0%   { filter: brightness(1.8); transform: scale(1.18); }
+        100% { filter: brightness(1.0); transform: scale(1.0); }
+      }
       /* Anti-grav entry indicator — left side under the timer. */
       #hud-anti-grav {
         top: 116px; left: 14px;
@@ -3303,6 +3372,7 @@
       <div id="hud-wave-pump" class="hud-slot" data-system="wave-pump" hidden></div>
       <div id="hud-trick-prompt" class="hud-slot" data-system="trick-prompt" hidden></div>
       <div id="hud-boost-meter" class="hud-slot" data-system="boost-meter" hidden></div>
+      <div id="hud-drift" class="hud-slot" data-system="drift" hidden></div>
       <div id="hud-anti-grav" class="hud-slot" data-system="anti-grav" hidden></div>
       <div id="hud-tutorial" class="hud-slot" data-system="tutorial" hidden></div>
       <div id="hud-cup-points" class="hud-slot" data-system="cup-points" hidden></div>
