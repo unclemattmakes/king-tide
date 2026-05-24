@@ -35,6 +35,7 @@ test.describe('M3 race', () => {
         pitch: 0,
         trickLeft: false,
         trickRight: false,
+        tuck: false,
       }),
     )
 
@@ -67,6 +68,7 @@ test.describe('M3 race', () => {
         pitch: 0,
         trickLeft: false,
         trickRight: false,
+        tuck: false,
       }),
     )
 

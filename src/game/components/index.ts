@@ -67,6 +67,18 @@ export type BikeStatsData = {
    */
   surfaceFollow: number
   /**
+   * Hold-to-tuck multipliers. While `intent.tuck` is held the effective
+   * top-speed cap is multiplied by `tuckSpeedBoost` (stacks with boost),
+   * `lateralDrag` by `tuckDragMul`, and `turnTorque` by `tuckTurnMul`.
+   * Snowboard-tuck shape: the cap lift only pays off when something is
+   * already pushing the bike toward it (slope momentum, throttle on a
+   * downslope/wave face), and the steering tax punishes anyone trying
+   * to corner from inside a tuck.
+   */
+  tuckSpeedBoost: number
+  tuckDragMul: number
+  tuckTurnMul: number
+  /**
    * Render hint: the body color the bike mesh should use when no per-variant
    * GLB exists, or as a runtime tint of the GLB's livery material. Sim
    * layer ignores this field.

@@ -39,6 +39,7 @@ test('bike launches off the ramp on the right straight', async ({ page }) => {
       pitch: 0,
       trickLeft: false,
       trickRight: false,
+      tuck: false,
     }),
   )
 

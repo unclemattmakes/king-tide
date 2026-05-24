@@ -736,6 +736,7 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
       boost: false,
       trickLeft: false,
       trickRight: false,
+      tuck: false,
     }
     // Smooth the steer slightly so the head-yaw lerp shows nicely.
     const cur = intent
