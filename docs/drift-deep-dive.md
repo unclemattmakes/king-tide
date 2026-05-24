@@ -162,6 +162,28 @@ Phase 3 work; not in initial M9.41 cut.
 | Drift cooldown after release | `DRIFT_COOLDOWN_S` | 0.25 s | — |
 | Camera roll on drift (render) | `DRIFT_CAMERA_ROLL_RAD` | 5° | 0–10° |
 
+## Validating the implementation — the Drift Practice Range
+
+`public/tracks/drift-test.json` is a flat-surface dev diagnostic that
+exercises every drift behavior on one closed loop. It's surfaced in
+the Dev Cup picker as **"Drift Practice Range"** (dev builds) and
+loadable in any build via `?track=drift-test`.
+
+Stations, driving CCW from start:
+
+| Station | Where | What it tests |
+|---|---|---|
+| 1 | North straight (long) | Hold Z/C while driving straight — drift must NOT activate (steer-commit gate) |
+| 2 | NE corner (red cones) | Hold C + steer right → blue MT in ~0.6 s; release for boost |
+| 3 | Boost pad on E straight | Drift release + pad merge — multiplier maxes, duration extends |
+| 4 | SE corner (red cones) | Same as NE — symmetry check |
+| 5 | South straight (ramp) | Drift into the ramp — ungrounded for >300 ms cancels the drift |
+| 6 | SW corner (red cones) | Repeat blue MT right |
+| 7 | West straight + NW sweep (green cones) | Long enough to charge the orange SMT tier (~1.4 s hold) |
+
+`tests/unit/drift-test-track.test.ts` pins the layout geometry so an
+inadvertent JSON edit can't silently break a station.
+
 ## Open questions / follow-ups
 
 1. **AI drift.** `aiControlSystem` doesn't set `trickLeft/Right` today.
