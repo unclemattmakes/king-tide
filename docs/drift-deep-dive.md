@@ -207,20 +207,47 @@ Stations, driving CCW from start:
 `tests/unit/drift-test-track.test.ts` pins the layout geometry so an
 inadvertent JSON edit can't silently break a station.
 
+## AI drift
+
+`aiControlSystem` now activates drift on sharp upcoming corners. The
+state machine lives in `decideAIDrift` (pure helper) and the tuning
+is baked from `DIFFICULTY_TUNING`:
+
+| Difficulty | Trigger curvature (1/m) | Min speed (m/s) | Max hold (s) | Tier ceiling |
+|---|---|---|---|---|
+| Casual | ∞ (disabled) | ∞ | 0 | — |
+| Standard | 0.033 (~30 m radius) | 14 | 1.6 | orange SMT |
+| Hard | 0.020 (~50 m radius) | 10 | 2.5 | purple UMT |
+
+The AI's `decideAIDrift` mirrors the player-side `driftSystem`
+activation rules — same `sign(steer)` commit gate, same cancel
+conditions. So the player and AI charge the same tier curve on the
+same corners.
+
+Activation: AI enters drift when the upcoming-corner curvature exceeds
+the per-difficulty threshold, the bike is moving fast enough, the
+already-computed PD steer is committed past ±0.3, and the post-release
+cooldown has elapsed. The drift direction matches `sign(steer)` so the
+trick button matches whichever way the bike is already turning — the
+player-side `driftSystem`'s `Math.sign(intent.steer) === dir`
+activation gate passes on the very next tick.
+
+Cancel: corner widens below 60% of trigger threshold, steer flips
+opposite the drift direction (line re-acquired), speed drops below
+70% of trigger threshold, or hold exceeds the per-difficulty max. On
+release, a 350 ms cooldown prevents immediate re-trigger.
+
 ## Open questions / follow-ups
 
-1. **AI drift.** `aiControlSystem` doesn't set `trickLeft/Right` today.
-   AI bikes won't benefit from drift — gap closes when AI gets a drift
-   path follower. (Deferred to M9.42+.)
-2. **Tutorial integration.** A "DRIFT THROUGH THE CORNER" beat should
+1. **Tutorial integration.** A "DRIFT THROUGH THE CORNER" beat should
    land in the tutorial track director. (Deferred.)
-3. **Surface-aware drift.** Currently uniform on land + water. Could
+2. **Surface-aware drift.** Currently uniform on land + water. Could
    make water-drift slipper / land-drift grippier. Deferred until the
    surface-type tagging system exists.
-4. **Skid audio.** Continuous tire-scrape loop while drifting, pitch
+3. **Skid audio.** Continuous tire-scrape loop while drifting, pitch
    modulated by speed; one-shot whoosh on release scaled by tier.
    Hook lives next to `audio.wavePump()`. (Deferred.)
-5. **HUD tier ring.** A thin colored ring around the boost-meter
+4. **HUD tier ring.** A thin colored ring around the boost-meter
    widget that progresses blue → orange → purple in lock-step with
    `DriftState.highestTier`. Reads the same color language as the
    sparks. (Deferred.)
