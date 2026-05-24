@@ -2107,8 +2107,22 @@ export function createWaterMesh(
   // Foam comes LAST so it still reads as opaque white where it fires
   // (foam is water particles, not the surface — it shouldn't reflect
   // and shouldn't get blue-shifted by aerial perspective).
+  // Distance fade on the reflection contribution. The bright low-sky /
+  // horizon-haze the reflector samples at extreme grazing painted a
+  // visible "mirror band" right where the water meets the sky — even
+  // when the haze approximation was replaced with the real reflection
+  // texture, the bright sunset horizon is what the water physically
+  // reflects there, so the band stayed.
+  //
+  // Cap the reflection past ~500 m so distant water reverts to its
+  // body color (dark teal) instead of mirroring the bright sky. Past
+  // 500 m the outer LOD tile + skirt dominate anyway, both of which
+  // are already body-color → the three layers converge tonally
+  // instead of stepping. This trades physical correctness for the
+  // smoother horizon read users actually want at sunset.
+  const reflDistFade = float(1).sub(smoothstep(float(200), float(500), camDist))
   const reflectedOrBase = reflectionRgb
-    ? mix(baseColor, reflectionRgb, fresnel.mul(reflStrengthUniform))
+    ? mix(baseColor, reflectionRgb, fresnel.mul(reflStrengthUniform).mul(reflDistFade))
     : baseColor
 
   // Aerial perspective: distant water reads denser. Real ocean past
@@ -2615,9 +2629,14 @@ export function createWaterMesh(
   const outerViewDir = normalize(cameraPosition.sub(positionWorld))
   const outerNdotV = max(dot(outerNormal, outerViewDir), float(0))
   const outerFresnel = pow(float(1).sub(outerNdotV), float(5))
+  // Same distance fade the center uses — by 500 m the reflection is
+  // gone and the outer reads as pure outerBody. Keeps the cross-fade
+  // band (380 → 480 m) shading-continuous with the center as both
+  // ramp reflection down together.
+  const outerReflFade = float(1).sub(smoothstep(float(200), float(500), outerCamDist))
   const outerSurfaceLit = reflectionRgb
-    ? mix(outerBody, reflectionRgb, outerFresnel)
-    : mix(outerBody, horizonHazeUniform, outerFresnel.mul(float(0.4)))
+    ? mix(outerBody, reflectionRgb, outerFresnel.mul(outerReflFade))
+    : mix(outerBody, horizonHazeUniform, outerFresnel.mul(outerReflFade).mul(float(0.4)))
 
   const outerColorNode = mix(
     mix(outerSurfaceLit, horizonHazeUniform, outerAerialMix),
@@ -2776,9 +2795,16 @@ export function createWaterMesh(
     const skirtViewDir = normalize(cameraPosition.sub(positionWorld))
     const skirtNdotV = max(dot(skirtNormal, skirtViewDir), float(0))
     const skirtFresnel = pow(float(1).sub(skirtNdotV), float(5))
+    // Same distance fade as the center / outer — skirt sits entirely
+    // past 480 m so its `radial` distance is always ≥ 480 → fade is
+    // already at zero, meaning the skirt never paints reflection at
+    // all and stays at skirtDeepColor. Left in for symmetry with the
+    // other layers + so a future SKIRT_INNER_RADIUS shrink still
+    // does the right thing.
+    const skirtReflFade = float(1).sub(smoothstep(float(200), float(500), radial))
     const skirtSurfaceLit = reflectionRgb
-      ? mix(skirtDeepColor, reflectionRgb, skirtFresnel)
-      : mix(skirtDeepColor, horizonHazeUniform, skirtFresnel.mul(float(0.4)))
+      ? mix(skirtDeepColor, reflectionRgb, skirtFresnel.mul(skirtReflFade))
+      : mix(skirtDeepColor, horizonHazeUniform, skirtFresnel.mul(skirtReflFade).mul(float(0.4)))
     skirtMat.colorNode = mix(
       mix(skirtSurfaceLit, horizonHazeUniform, hazeMix),
       skirtDebugColorUniform,
