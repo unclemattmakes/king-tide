@@ -16,10 +16,11 @@ import {
   ControlIntent,
   type ControlIntentData,
   ControlIntentStore,
+  DriftStateStore,
   HoverDebugStore,
+  type HoverProbe,
   HoverState,
   HoverStateStore,
-  type HoverProbe,
   RBHandle,
   RBHandleStore,
 } from '@/game/components'
@@ -143,6 +144,32 @@ export const MIN_DIVE_FOR_RELEASE_S = 0.05
 // hover-height boost is applied AFTER this scale, so slopes still get
 // their normal climb margin — only the level-flight target sinks.
 export const DIVE_HOVER_HEIGHT_MIN_MUL = 0.5
+
+// ── Drift physics modulation (read in `applyGroundBranch`) ─────────
+// While `DriftState.driftDir` is non-zero, the bike's lateral drag is
+// scaled down (so the bike actually slides sideways like an MK kart in
+// drift), and the yaw torque is replaced by a drift-direction bias +
+// reduced player authority. See [docs/drift-deep-dive.md] for the
+// design rationale.
+
+/** Fraction of `stats.lateralDrag` retained while drifting. Lower
+ *  = more visible slide; too low (<0.2) and the bike fishtails out
+ *  of control. 0.35 reads as a clean MK-style slide that the player
+ *  can still hold against. */
+export const DRIFT_LATERAL_DRAG_SCALE = 0.35
+
+/** Drift yaw bias as a fraction of `stats.turnTorque`. When the
+ *  player isn't steering, the bike turns at this rate in the
+ *  drift direction — equivalent to about a "two-thirds steer"
+ *  signal, which keeps the bike rotating into the corner
+ *  without needing input. */
+export const DRIFT_YAW_BIAS_FRAC = 0.7
+
+/** Player steer authority while drifting, as a fraction of
+ *  `stats.turnTorque`. Reduced from the normal 1.0 so the bike's
+ *  rotation is dominated by the drift bias; the player's input
+ *  still tightens or opens the line. */
+export const DRIFT_STEER_FRAC = 0.4
 
 // Chassis pitch (relative to the surface tangent) safety clamp on the
 // dive side. The dive-kick taper above bounds steady-state tilt to a
@@ -498,7 +525,7 @@ function buildHoverFrame(
     // when source up ≈ −worldUp at exactly weight=0.5 (a half-blend
     // between right-side-up and upside-down). Fallback warns dev once.
     const blendX = agWeight * agOverride.upX
-    const blendY = (1 - agWeight) + agWeight * agOverride.upY
+    const blendY = 1 - agWeight + agWeight * agOverride.upY
     const blendZ = agWeight * agOverride.upZ
     const bLen = Math.hypot(blendX, blendY, blendZ)
     if (bLen > 1e-3) {
@@ -891,9 +918,7 @@ function applyMultiPointHoverSpring(
   const waterLongMul = resolveWaterLongitudinalSpringMul(stats)
   const BUOYANCY_PER_M = 14
   const BUOYANCY_CAP = 20
-  const slopeBoost = probe.isWater
-    ? 0
-    : Math.abs(footprint.surfaceForwardSlope) * SLOPE_HOVER_BOOST
+  const slopeBoost = probe.isWater ? 0 : Math.abs(footprint.surfaceForwardSlope) * SLOPE_HOVER_BOOST
   // Dive aid: target ride height drops with held pitch-down. Scale is
   // applied BEFORE slopeBoost so the climb-margin reaches its normal
   // value — the dive sinks the level-flight target only.
@@ -923,12 +948,7 @@ function applyMultiPointHoverSpring(
     const crossY = angv.z * p.ox - angv.x * p.oz
     const crossZ = angv.x * p.oy - angv.y * p.ox
     const vAtPointUp =
-      linvel.x * upX +
-      linvel.y * upY +
-      linvel.z * upZ +
-      crossX * upX +
-      crossY * upY +
-      crossZ * upZ
+      linvel.x * upX + linvel.y * upY + linvel.z * upZ + crossX * upX + crossY * upY + crossZ * upZ
     // Damp only the EXCESS upward velocity beyond what a steady climb
     // of this slope requires. On flat ground tangentUpVel=0 and we get
     // legacy "damp any lift-off" behaviour. On a climb at v m/s along a
@@ -1115,9 +1135,7 @@ function applyPlayerPitchTorque(
   // reads as altitude control via the hover-height drop. Pitch-up
   // (wheelie) is unaffected.
   const kickMul =
-    intent.pitch < 0
-      ? DIVE_KICK_TORQUE_MUL * Math.max(0, 1 - diveHoldS / DIVE_KICK_DURATION_S)
-      : 1
+    intent.pitch < 0 ? DIVE_KICK_TORQUE_MUL * Math.max(0, 1 - diveHoldS / DIVE_KICK_DURATION_S) : 1
   const aPitch = -intent.pitch * coef * kickMul
   const tx = rightP.x * aPitch * m * dt
   const ty = rightP.y * aPitch * m * dt
@@ -1500,8 +1518,29 @@ function applyGroundBranch(
   // by construction, so steering can't leak into roll regardless of
   // pitch. In anti-grav we substitute the zone's up so yaw rotates
   // around the road normal (MK8 anti-grav feel).
+  //
+  // Drift override: while the bike is in active drift, the base yaw
+  // signal is replaced by a constant drift-direction bias plus a
+  // reduced player-steer term. Effective signals:
+  //   - no steer:           driftDir × 0.7 × turnTorque (drifts in)
+  //   - steer into drift:   +1.1 ×              (tightens the line)
+  //   - counter-steer:      +0.3 ×              (opens the line, still drifting)
+  // Sign convention: positive aTurn rotates around +up; `-intent.steer`
+  // for steerLeft (-1) → +aTurn → bike yaws right; drift bias matches
+  // by using `-driftDir` so a left drift (driftDir=-1) → +aTurn (yaws
+  // toward the left side of the screen via the camera-facing axis).
   const turnMul = probe.isWater ? 1.1 : 1.0
-  const aTurn = -intent.steer * stats.turnTorque * turnMul
+  const drift = DriftStateStore.get(eid)
+  const drifting = !!drift && drift.driftDir !== 0
+  let aTurn: number
+  if (drifting) {
+    const dir = drift.driftDir
+    const driftBias = -dir * DRIFT_YAW_BIAS_FRAC * stats.turnTorque
+    const playerInput = -intent.steer * DRIFT_STEER_FRAC * stats.turnTorque
+    aTurn = (driftBias + playerInput) * turnMul
+  } else {
+    aTurn = -intent.steer * stats.turnTorque * turnMul
+  }
   const yawAxXG = upX - fwdDotUpG * fwd.x
   const yawAxYG = upY - fwdDotUpG * fwd.y
   const yawAxZG = upZ - fwdDotUpG * fwd.z
@@ -1594,9 +1633,13 @@ function applyGroundBranch(
   // Water has *more* lateral resistance (skis don't slide sideways
   // easily). Measured along the up-plane right axis so drag opposes
   // sideways drift across the road surface (not across world XZ).
+  // While drifting, scale the drag down so the bike actually slides
+  // sideways like an MK kart in mid-drift — `DRIFT_LATERAL_DRAG_SCALE`
+  // applied as a pure multiplier on top of the water/land switch.
   const dragMul = probe.isWater ? 1.4 : 1.0
+  const driftDragMul = drifting ? DRIFT_LATERAL_DRAG_SCALE : 1.0
   const lateralVel = linvel.x * planeRightX + linvel.y * planeRightY + linvel.z * planeRightZ
-  const aDrag = -lateralVel * stats.lateralDrag * dragMul
+  const aDrag = -lateralVel * stats.lateralDrag * dragMul * driftDragMul
   rb.applyImpulse(
     {
       x: planeRightX * aDrag * m * dt,
@@ -1772,7 +1815,8 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     )
     const bikeProj = frame.t.x * frame.upX + frame.t.y * frame.upY + frame.t.z * frame.upZ
     const groundDistance = probe.hasSurface ? bikeProj - probe.surfaceProj : MAX_HOVER_PROBE
-    const isGrounded = probe.hasSurface && groundDistance < stats.hoverHeight * GROUNDED_DISTANCE_MUL
+    const isGrounded =
+      probe.hasSurface && groundDistance < stats.hoverHeight * GROUNDED_DISTANCE_MUL
 
     // Prior tick's state — drives the slope filter seed, the takeoff/
     // landing transitions, the dive-kick / release-kick taper, and

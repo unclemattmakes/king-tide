@@ -25,6 +25,12 @@ export type ChaseCamera = {
    *  on the same time-constant as the rest of the camera so flipping
    *  the player setting mid-anti-grav doesn't snap. */
   setAntiGravFollow(weight: number): void
+  /** Set a target roll offset (radians) applied after the `lookAt`. The
+   *  drift system uses this to bank the camera into the corner — sign
+   *  matches the drift direction (negative = roll left). Smoothed to
+   *  the target over `DRIFT_ROLL_TAU` so toggling between drift on/off
+   *  doesn't snap. */
+  setDriftRoll(rad: number): void
   /** Write the chase cam's first-tick goal pose for the given bike pose
    *  into the caller-supplied output vectors. Pure read — does not touch
    *  internal damping / orbit / follow state, so it's safe to call while
@@ -43,6 +49,11 @@ export type ChaseCamera = {
  *  AntiGravOverride's own up-vector smoothing so the camera frame
  *  doesn't lead or lag the bike's gravity blend. */
 const FOLLOW_SMOOTH_TAU = 0.15
+
+/** Time constant for the drift-roll smoothing. Short enough to read
+ *  responsive (you commit to a drift and the camera banks within
+ *  ~150ms), long enough that a tier transition doesn't snap. */
+const DRIFT_ROLL_TAU = 0.15
 
 export function createChaseCamera(camera: THREE.PerspectiveCamera): ChaseCamera {
   // Closer + slightly lower than the pre-2× bike framing. The bike visual
@@ -65,6 +76,9 @@ export function createChaseCamera(camera: THREE.PerspectiveCamera): ChaseCamera 
 
   let followTarget = 0
   let follow = 0
+
+  let driftRollTarget = 0
+  let driftRoll = 0
 
   const tmpEuler = new THREE.Euler(0, 0, 0, 'YXZ')
   const tmpOffset = new THREE.Vector3()
@@ -115,13 +129,22 @@ export function createChaseCamera(camera: THREE.PerspectiveCamera): ChaseCamera 
     setAntiGravFollow(weight) {
       followTarget = Math.max(0, Math.min(1, weight))
     },
+    setDriftRoll(rad) {
+      // Hard clamp at 15° so a misconfigured caller can't tip the
+      // camera past the comfort zone. The drift system stays well
+      // inside this band (~5° at full intensity).
+      const limit = (15 * Math.PI) / 180
+      driftRollTarget = Math.max(-limit, Math.min(limit, rad))
+    },
     tick(targetPos, targetQuat, dt) {
-      // Lerp orbit + follow toward their targets.
+      // Lerp orbit + follow + drift-roll toward their targets.
       const ot = 1 - Math.exp(-dt * orbitDamping)
       orbitYaw += (orbitYawTarget - orbitYaw) * ot
       orbitPitch += (orbitPitchTarget - orbitPitch) * ot
       const ft = 1 - Math.exp(-dt / FOLLOW_SMOOTH_TAU)
       follow += (followTarget - follow) * ft
+      const dt2 = 1 - Math.exp(-dt / DRIFT_ROLL_TAU)
+      driftRoll += (driftRollTarget - driftRoll) * dt2
 
       compute(targetPos, targetQuat)
       if (!initialized) {
@@ -134,11 +157,21 @@ export function createChaseCamera(camera: THREE.PerspectiveCamera): ChaseCamera 
         currentLook.lerp(goalLook, t)
       }
       camera.lookAt(currentLook)
+      // Drift-roll: rotate around the camera's local Z (forward) axis
+      // post-lookAt so the horizon banks into the corner without
+      // changing the position or look-target. Smoothed via `driftRoll`
+      // above so transitions read as a lean, not a snap.
+      if (Math.abs(driftRoll) > 1e-4) {
+        camera.rotateZ(driftRoll)
+      }
     },
     snap(targetPos, targetQuat) {
       // Snap also catches up the follow weight so a respawn mid-anti-grav
-      // doesn't slide into the follow over the next 150ms.
+      // doesn't slide into the follow over the next 150ms. Drift roll
+      // resets to 0 because a respawn never inherits drift state.
       follow = followTarget
+      driftRoll = 0
+      driftRollTarget = 0
       compute(targetPos, targetQuat)
       camera.position.copy(goalPos)
       currentLook.copy(goalLook)

@@ -277,6 +277,42 @@ export type TrickStateData = {
 export const TrickStateStore = createStore<TrickStateData>('TrickState')
 
 /**
+ * Per-bike Mario-Kart-style drift state. Written by `driftSystem` each
+ * fixed tick. The hover system reads `driftDir` to modulate the ground-
+ * branch lateral drag + yaw torque. The render side reads `driftDir`
+ * + `highestTier` to drive camera roll + colored spark emission, and
+ * watches `releasedThisTick` to play the mini-turbo whoosh on release.
+ *
+ *  - `driftDir` ∈ {-1, 0, +1}: -1 = drifting left, +1 = right, 0 = idle.
+ *  - `chargeS`: time accumulated while committed-steer + grounded.
+ *  - `highestTier`: 0 = none, 1 = MT (blue), 2 = SMT (orange). Boost
+ *    parameters look this up at release time so the player gets at
+ *    least the tier they actually charged through, even if they
+ *    re-pressed counter-steer for an instant.
+ *  - `sinceReleaseS`: cooldown gate — must exceed `DRIFT_COOLDOWN_S`
+ *    before a new drift can activate. Stops button-mash snake.
+ *  - `ungroundedDuringDriftS`: ticks up while drifting in mid-air; the
+ *    drift cancels past `UNGROUNDED_CANCEL_S`. Brief hops (probe
+ *    flicker, small bumps) don't kill the drift.
+ *  - `prevLeftDown` / `prevRightDown`: edge-detect bookkeeping.
+ *  - `releasedThisTick` + `releasedTier`: one-shot edge consumed by
+ *    the render layer the same frame.
+ */
+export const DriftState = { name: 'DriftState' as const }
+export type DriftStateData = {
+  driftDir: number
+  chargeS: number
+  highestTier: number
+  sinceReleaseS: number
+  ungroundedDuringDriftS: number
+  prevLeftDown: boolean
+  prevRightDown: boolean
+  releasedThisTick: boolean
+  releasedTier: number
+}
+export const DriftStateStore = createStore<DriftStateData>('DriftState')
+
+/**
  * Per-bike Burnout-3-style boost meter. Filled by successful tricks
  * (see `wave-pump-observer` + the trick-event handler in `game-loop`),
  * consumed by holding the boost button. While `active`, the hover
