@@ -1416,9 +1416,14 @@ function applyGroundBranch(
       true,
     )
 
-    if (surfaceForwardSlope > 0.05 && !probe.isWater) {
+    // Scaled by forward throttle so the assist only fires when the player
+    // is actually climbing under power. Without this gate the unconditional
+    // forward push (~6.5 m/s² net on a 25° slope) overwhelms the meek
+    // uphill marble-on-incline brake and free-climbs a coasting bike.
+    const climbThrottle = Math.max(intent.throttle, 0)
+    if (surfaceForwardSlope > 0.05 && !probe.isWater && climbThrottle > 0) {
       const CLIMB_ASSIST_FRAC = 0.7
-      const aClimb = surfaceForwardSlope * gravity * CLIMB_ASSIST_FRAC
+      const aClimb = surfaceForwardSlope * gravity * CLIMB_ASSIST_FRAC * climbThrottle
       rb.applyImpulse(
         {
           x: planeFwdX * aClimb * m * dt,
