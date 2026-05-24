@@ -138,7 +138,7 @@ export const DIVE_PITCH_P_MIN_MUL = 0.5
 // into wave troughs / terrain dips while pumping. Slope-aware
 // hover-height boost is applied AFTER this scale, so slopes still
 // get their normal climb margin — only the level-flight target sinks.
-export const DIVE_HOVER_HEIGHT_MIN_MUL = 0.65
+export const DIVE_HOVER_HEIGHT_MIN_MUL = 0.5
 
 // Dive aid #4 — chassis pitch (relative to the surface tangent) is
 // clamped to this many degrees on the dive side. Past the limit:
@@ -149,7 +149,11 @@ export const DIVE_HOVER_HEIGHT_MIN_MUL = 0.65
 // Upper (wheelie) band still uses the original 45° committed-trick
 // cutoff. Relative-to-surface so steep downhills still let the bike
 // follow the ramp — only the chassis-vs-tangent angle is bounded.
-export const DIVE_PITCH_FWD_LIMIT_DEG = 25
+//
+// Clamp also fires when AIRBORNE over water: without it, a brief
+// pop off a wave crest lets the rider complete a forward flip while
+// the airborne branch's free physics applies pitch torque unopposed.
+export const DIVE_PITCH_FWD_LIMIT_DEG = 12
 const DIVE_PITCH_FWD_LIMIT_RAD = (DIVE_PITCH_FWD_LIMIT_DEG * Math.PI) / 180
 
 /**
@@ -1073,6 +1077,7 @@ function applyGroundedPitchPD(frame: HoverFrame, surfaceForwardSlope: number): v
 function applyPlayerPitchTorque(
   frame: HoverFrame,
   isGrounded: boolean,
+  isOverWater: boolean,
   surfaceForwardSlope: number,
 ): void {
   const { rb, intent, q, dt, m } = frame
@@ -1081,8 +1086,10 @@ function applyPlayerPitchTorque(
   // the player's nose-down torque is suppressed. The grounded pitch PD
   // (full-strength P past the limit, see applyGroundedPitchPD) handles
   // the restoring force; this prevents the rider from shoving past the
-  // wall. Airborne path is unaffected — flips/dives run free.
-  if (isGrounded && intent.pitch < 0) {
+  // wall. Fires when grounded OR airborne-over-water — the latter kills
+  // wave-pop forward flips. Airborne over LAND is unaffected (jump
+  // tricks off ramps run free).
+  if ((isGrounded || isOverWater) && intent.pitch < 0) {
     const qChk = rb.rotation()
     const r12Chk = 2 * (qChk.y * qChk.z - qChk.x * qChk.w)
     const pitchAngle = Math.asin(Math.max(-1, Math.min(1, -r12Chk)))
@@ -1790,8 +1797,13 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       applyMultiPointHoverSpring(frame, footprint, probe, groundDistance, debugOn, debugCorners)
     }
 
-    // Grounded pitch PD — self-righting torque on land + water.
-    if (isGrounded) applyGroundedPitchPD(frame, footprint.surfaceForwardSlope)
+    // Grounded pitch PD — self-righting torque on land + water. Also
+    // fires when AIRBORNE over water so a brief pop off a wave crest
+    // can't be parlayed into a forward flip. `emptyFootprint` returns
+    // slope=0, so the airborne-over-water PD targets flat (level water
+    // tangent) — exactly what we want for a soft anti-flip restorer.
+    const isOverWater = probe.hasSurface && probe.isWater
+    if (isGrounded || isOverWater) applyGroundedPitchPD(frame, footprint.surfaceForwardSlope)
 
     // Persist state for next tick + render-side reads. (HoverState is
     // written *before* the player pitch torque so its `isGrounded`
@@ -1820,8 +1832,9 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     }
 
     // Player pitch torque — fires in BOTH air and ground branches with
-    // different coefficients.
-    applyPlayerPitchTorque(frame, isGrounded, footprint.surfaceForwardSlope)
+    // different coefficients. `isOverWater` extends the dive clamp to
+    // airborne flights over water (kills wave-pop forward flips).
+    applyPlayerPitchTorque(frame, isGrounded, isOverWater, footprint.surfaceForwardSlope)
 
     if (!isGrounded) {
       applyAirControlBranch(frame)
