@@ -55,6 +55,7 @@ import {
   setRubberBandAssist,
   setScreenShakeIntensity,
   setSubtitlesAlwaysOn,
+  setTuckMeter,
   setTuckVfxIntensity,
   setTutorialSubtitles,
   setWavePumpIntensity,
@@ -457,6 +458,13 @@ const TAB_SPECS: TabSpec[] = [
         gate: 'Vapor streaks that fan off the bike as you lean into the tuck sweet spot — denser the closer you ride it.',
       },
       {
+        id: 'gp-tuck-meter',
+        label: 'Tuck meter',
+        control: { kind: 'toggle', defaultValue: playerSettings.tuckMeter },
+        enabled: true,
+        gate: 'On-screen gauge showing the live tuck factor + sweet-spot target — tells you if you are nailing the lean or scraping.',
+      },
+      {
         id: 'gp-pre-lap-intro',
         label: 'Pre-lap intro',
         control: {
@@ -834,6 +842,11 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       if (spec.enabled && spec.id === 'gp-subtitles') {
         cb.addEventListener('change', () => {
           setTutorialSubtitles(cb.checked)
+        })
+      }
+      if (spec.enabled && spec.id === 'gp-tuck-meter') {
+        cb.addEventListener('change', () => {
+          setTuckMeter(cb.checked)
         })
       }
       if (spec.enabled && spec.id === 'audio-music-on') {

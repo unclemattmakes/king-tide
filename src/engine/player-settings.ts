@@ -114,6 +114,10 @@ export type PlayerSettings = {
   emissiveLandmarks: EmissiveLandmarksIntensity
   /** Tuck slipstream VFX intensity — see `TuckVfxIntensity`. */
   tuckVfxIntensity: TuckVfxIntensity
+  /** Tuck meter HUD — the accuracy gauge that shows the live tuck factor
+   *  + sweet-spot target. On by default (it's a teaching aid); players who
+   *  have internalised the timing can switch it off. */
+  tuckMeter: boolean
   /** Subtitles for the tutorial framework's prompt callouts.
    *  Affects only the tutorial HUD widget — race callouts and pump
    *  feedback are unaffected. */
@@ -238,6 +242,7 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   antiGravCameraIntensity: 'full',
   emissiveLandmarks: 'full',
   tuckVfxIntensity: 'full',
+  tuckMeter: true,
   tutorialSubtitles: true,
   tutorialCompleted: false,
   audioMasterVolume: 0.8,
@@ -364,6 +369,9 @@ export function loadPlayerSettings(): void {
   ) {
     playerSettings.tuckVfxIntensity = p.tuckVfxIntensity as TuckVfxIntensity
   }
+  if (typeof p.tuckMeter === 'boolean') {
+    playerSettings.tuckMeter = p.tuckMeter
+  }
   if (
     typeof p.emissiveLandmarks === 'string' &&
     (VALID_EMISSIVE_LANDMARKS as string[]).includes(p.emissiveLandmarks)
@@ -483,6 +491,11 @@ export function setWavePumpIntensity(v: WavePumpIntensity): void {
 
 export function setTuckVfxIntensity(v: TuckVfxIntensity): void {
   playerSettings.tuckVfxIntensity = v
+  savePlayerSettings()
+}
+
+export function setTuckMeter(on: boolean): void {
+  playerSettings.tuckMeter = on
   savePlayerSettings()
 }
 

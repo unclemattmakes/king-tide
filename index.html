@@ -2644,6 +2644,76 @@
         0%   { filter: brightness(1.0); }
         100% { filter: brightness(1.35); }
       }
+
+      /* Tuck meter — horizontal accuracy gauge, bottom-centre. Fades in
+         only while tucking. `--tk-lean` is the raw nose-down amount (bar
+         fill); `--tk-sweet` is the sweet-spot lean (the target notch).
+         `data-state` recolours the whole widget: build (cyan) → sweet
+         (green, the target) → over (amber) → scrape (red). */
+      #hud-tuck {
+        left: 50%; bottom: 92px;
+        transform: translateX(-50%);
+        width: 210px;
+        --tk-lean: 0;
+        --tk-sweet: 0.8;
+        --tk-accent: var(--bc-cyan);
+        opacity: 0;
+        transition: opacity 160ms ease-out;
+        font: 600 11px/1.2 ui-monospace, monospace;
+        text-align: center;
+      }
+      #hud-tuck[data-active="1"] { opacity: 1; }
+      #hud-tuck .tk-label {
+        color: rgba(220, 240, 255, 0.75);
+        letter-spacing: 2px;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+        margin-bottom: 3px;
+      }
+      #hud-tuck .tk-bar {
+        position: relative;
+        height: 10px;
+        background: linear-gradient(180deg, rgba(8,14,22,0.85), rgba(4,8,14,0.92));
+        border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 5px;
+        overflow: hidden;
+      }
+      #hud-tuck .tk-fill {
+        position: absolute; left: 0; top: 0; bottom: 0;
+        width: calc(100% * var(--tk-lean));
+        background: var(--tk-accent);
+        box-shadow: 0 0 8px var(--tk-accent), inset 0 -1px 3px rgba(255,255,255,0.3);
+        transition: width 60ms linear, background 120ms ease, box-shadow 120ms ease;
+      }
+      /* Sweet-spot target notch — a bright tick the fill should reach but
+         not blow past. */
+      #hud-tuck .tk-notch {
+        position: absolute; top: -2px; bottom: -2px;
+        left: calc(100% * var(--tk-sweet));
+        width: 2px;
+        background: var(--bc-green);
+        box-shadow: 0 0 6px var(--bc-green);
+        opacity: 0.85;
+      }
+      #hud-tuck .tk-status {
+        margin-top: 3px;
+        display: flex; justify-content: center; gap: 6px;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.85);
+      }
+      #hud-tuck .tk-word { color: var(--tk-accent); letter-spacing: 1px; }
+      #hud-tuck .tk-pct { color: rgba(235, 245, 255, 0.9); }
+      /* Per-state accent. `--tk-accent` flows into the fill + label + word. */
+      #hud-tuck[data-state="build"]  { --tk-accent: var(--bc-cyan); }
+      #hud-tuck[data-state="sweet"]  { --tk-accent: var(--bc-green); }
+      #hud-tuck[data-state="over"]   { --tk-accent: var(--bc-yellow); }
+      #hud-tuck[data-state="scrape"] { --tk-accent: var(--bc-red); }
+      /* Sweet = you're nailing it: pulse the fill so the payoff reads. */
+      #hud-tuck[data-state="sweet"] .tk-fill {
+        animation: tk-sweet-pulse 320ms ease-in-out infinite alternate;
+      }
+      @keyframes tk-sweet-pulse {
+        0%   { filter: brightness(1.0); }
+        100% { filter: brightness(1.4); }
+      }
       /* Charge-flash — quick brightness pulse when a new trick adds
          charge. JS toggles `data-charged="1"` for ~250ms after a
          credible trick lands. */
@@ -3303,6 +3373,7 @@
       <div id="hud-wave-pump" class="hud-slot" data-system="wave-pump" hidden></div>
       <div id="hud-trick-prompt" class="hud-slot" data-system="trick-prompt" hidden></div>
       <div id="hud-boost-meter" class="hud-slot" data-system="boost-meter" hidden></div>
+      <div id="hud-tuck" class="hud-slot" data-system="tuck" hidden></div>
       <div id="hud-anti-grav" class="hud-slot" data-system="anti-grav" hidden></div>
       <div id="hud-tutorial" class="hud-slot" data-system="tutorial" hidden></div>
       <div id="hud-cup-points" class="hud-slot" data-system="cup-points" hidden></div>
