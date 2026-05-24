@@ -99,12 +99,18 @@ Reasons:
 
 In `applyGroundBranch`:
 - **Lateral drag** scaled to 35 % of base — visible slide.
-- **Yaw**: replace base steer torque with `driftDir × 0.7 × turnTorque`
-  (constant bias) + `steer × 0.4 × turnTorque` (reduced player
-  authority). Result:
-  - No steer → bike turns at 0.7× nominal in the drift direction.
-  - Steer into drift (committed) → 1.1× — tightens the line.
-  - Counter-steer → 0.3× — opens the line without canceling.
+- **Yaw**: replace base steer torque with a speed-tapered auto-turn-in
+  bias + a full-authority counter-steer term (`driftYawFraction`, a
+  pure exported helper). At full speed:
+  - No steer → `0.45×` turnTorque in the drift direction (~28 m radius
+    at 20 m/s — a WIDE arc, not a spiral).
+  - Steer into drift → up to `~0.9×` — tightens the line.
+  - Counter-steer (hold away) → `~0×` or slightly negative — opens the
+    drift to a wide / straight line. **This is the knob that makes it
+    feel like MK** rather than a fixed inward spiral.
+  - The bias tapers to 0 below `DRIFT_YAW_SPEED_REF` (8 m/s) so a drift
+    that has bled speed stops auto-rotating (no low-speed 180 spin-out);
+    counter-steer keeps full authority at any speed.
 - **Forward thrust** unaffected — drift doesn't kill speed (matches MK feel).
 
 ### Game feel — render layer
@@ -183,8 +189,9 @@ Tuning constants live in `hover.ts` (`INWARD_INITIAL_BIAS_MUL`,
 | Tier 2 boost duration | `DRIFT_BOOST_DURATION_T2` | 1.4 s | 1.0–1.8 s |
 | Tier 3 boost duration | `DRIFT_BOOST_DURATION_T3` | 2.0 s | 1.6–2.5 s |
 | Lateral-drag scale while drifting | `DRIFT_LATERAL_DRAG_SCALE` in `hover.ts` | 0.35 | 0.2–0.6 — lower = more slide |
-| Drift yaw bias (× turnTorque) | `DRIFT_YAW_BIAS_FRAC` | 0.7 | 0.5–0.9 |
-| Player steer authority while drifting | `DRIFT_STEER_FRAC` | 0.4 | 0.2–0.6 |
+| Drift auto-turn-in bias (× turnTorque) | `DRIFT_YAW_BIAS_FRAC` | 0.45 | 0.3–0.6 — higher = tighter default arc |
+| Counter-steer authority while drifting | `DRIFT_STEER_FRAC` | 0.65 | 0.5–0.9 — must be ≳ bias/0.7 so full counter-steer opens the drift |
+| Low-speed bias taper knee | `DRIFT_YAW_SPEED_REF` | 8 m/s | below this the auto-turn-in fades → no 180 spin-out |
 | Inward-drift spike window | `INWARD_INITIAL_WINDOW_S` | 0.25 s | 0.15–0.40 s |
 | Inward-drift spike scale | `INWARD_INITIAL_BIAS_MUL` | 1.2 | 1.1–1.4 |
 | Inward-drift tail scale | `INWARD_TAIL_BIAS_MUL` | 0.8 | 0.6–0.9 |
