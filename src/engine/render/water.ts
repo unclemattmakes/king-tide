@@ -2682,7 +2682,14 @@ export function createWaterMesh(
   const SKIRT_INNER_RADIUS = 120 // m — well inside the 480 m plane half-extent
   const SKIRT_OUTER_RADIUS = 1600 // m — past the default 1400 m horizon ring
   const SKIRT_ANGULAR_SEGMENTS = 128
-  const SKIRT_RADIAL_SEGMENTS = 16
+  // Radial subdivisions: 192 → ≈ 7.7 m between vertices across the
+  // 1480 m radial span. Carries the 25–50 m long-wavelength swells
+  // with ≥ 3 verts/crest, which is what reads at the skirt's distance
+  // (the shorter 5.5 m chop is sub-pixel past ~600 m anyway). Up from
+  // a flat 16-segment ring; the Gerstner displacement set on
+  // `skirtMat.positionNode` below has nothing to interpolate without
+  // this denser tessellation. 192 × 128 ≈ 25 k verts — trivial.
+  const SKIRT_RADIAL_SEGMENTS = 192
   const skirtGeom = new THREE.RingGeometry(
     SKIRT_INNER_RADIUS,
     SKIRT_OUTER_RADIUS,
@@ -2714,23 +2721,24 @@ export function createWaterMesh(
     // the early-opaque skirt doesn't tonally compete in the inner
     // region.
     const innerFadeIn = smoothstep(float(SKIRT_INNER_RADIUS), float(240), radial)
-    // Aerial-perspective ramp in two legs. First leg (120 → 280 m) mirrors
-    // the main plane's `aerialMix = smoothstep(120, 280, camDist) * 0.5`
-    // so the tone is continuous across the wave-plane boundary. Then the
-    // skirt HOLDS at 50 % water + 50 % haze across the middle band so
-    // most of its visible area reads as water, not sky. Only the
-    // outermost ~300 m ramps to full horizon haze, where scene fog
-    // takes it the rest of the way into the sky. This is the band the
-    // player perceives as "the actual horizon line."
-    const nearHaze = smoothstep(float(120), float(280), radial).mul(float(0.5))
-    const farHaze = smoothstep(float(1200), float(1550), radial).mul(float(0.5))
-    const hazeMix = clamp(nearHaze.add(farHaze), float(0), float(1))
+    // Aerial-perspective ramp — single leg, mirrors the main plane's
+    // `aerialMix = smoothstep(120, 280, camDist) * 0.5` so the tone is
+    // continuous across the wave-plane boundary, then HOLDS at 50 %
+    // water + 50 % haze across the rest of the skirt. The previous
+    // two-leg ramp (additional 1200 → 1550 m push to 100 % haze)
+    // painted a bright tan-cream band a few pixels below the horizon
+    // — basically "painted sky on the water" — that read as the most
+    // visible water-ends-too-early seam from the bike POV. Scene fog
+    // (linear 500 → 2200 m) is already pushing the far rim past 60 %
+    // sky color at 1500 m, so the haze ramp was double-counting the
+    // sky-blend job. Letting fog do it alone preserves the skirt's
+    // water tone right up until fog fully dissolves it.
+    const hazeMix = smoothstep(float(120), float(280), radial).mul(float(0.5))
     // Anchor on the wave mesh's deep trough colour (same `vec3(0.02,
     // 0.22, 0.32)` constant used in the body-color blend above) so the
-    // flat skirt and the wide-angle view of the wave plane share a tone.
+    // skirt and the wide-angle view of the wave plane share a tone.
     // The visible wave field is trough-dominated at grazing angles —
-    // matching the trough colour hides the join. Far-rim haze gives back
-    // the sky alignment for atmospheric perspective.
+    // matching the trough colour hides the join.
     const skirtDeepColor = vec3(0.02, 0.22, 0.32)
     skirtMat.colorNode = mix(
       mix(skirtDeepColor, horizonHazeUniform, hazeMix),
@@ -2738,6 +2746,21 @@ export function createWaterMesh(
       debugColorizeMixUniform,
     )
     skirtMat.opacityNode = innerFadeIn
+
+    // Gerstner displacement on the skirt. Without it the skirt reads
+    // as a flat painted ring — even at long range the eye picks up
+    // "no waves here = not water" against the center mesh's displaced
+    // surface. The shared gerstnerHeight call samples the SAME world
+    // coords / time / amplitudes the center + outer meshes use, so
+    // the wave phase stays continuous across all three layers (no
+    // visible "wave train jumps direction" at the skirt boundary).
+    // Skip the horizontal pinch — at this distance the sub-degree
+    // crest sharpening is sub-pixel, and dropping the dispersion
+    // sample halves the shader cost on the skirt.
+    const skirtWorldX = positionLocal.x.add(meshOriginX)
+    const skirtWorldZ = positionLocal.z.add(meshOriginZ)
+    const skirtGerst = gerstnerHeight(skirtWorldX, skirtWorldZ, tNode)
+    skirtMat.positionNode = vec3(positionLocal.x, skirtGerst.x, positionLocal.z)
   }
 
   const skirtMesh = new THREE.Mesh(skirtGeom, skirtMat as unknown as THREE.Material)
