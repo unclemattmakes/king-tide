@@ -48,6 +48,12 @@ export interface TutorialContext {
   /** Whether the player held an orbit/look-around input since the
    *  beat armed. Lets a "look around" beat clear on player action. */
   orbitTouchedThisBeat: boolean
+  /** Highest drift mini-turbo tier (0–3) released since the current
+   *  beat armed. 1 = blue MT, 2 = orange SMT, 3 = purple UMT. Lets a
+   *  "drift through the corner" beat clear once the player lands a
+   *  charged drift release. The director clears this at every beat
+   *  arm, same as `pumpEventsThisBeat`. */
+  driftTierThisBeat: number
 }
 
 /** Result of a beat's predicate. Booleans are accepted as shorthand
@@ -84,11 +90,13 @@ export interface TutorialScript {
 /** v1 framework's canned script. Track-agnostic — works on any
  *  manifest track. Sandbar adds its own scripted scenarios on top.
  *
- *  Six beats — matches the count called out in the cathedral menu
- *  copy ("Six scripted beats — throttle, swell pump, drift around a
- *  buoy, pickup, ramp, anti-grav arch") with the drift/pickup/ramp
- *  ones swapped for what we can detect generically today (look
- *  around, sustained speed, anti-grav). */
+ *  Seven beats — throttle, cruise, look-around, swell pump, drift,
+ *  anti-grav, ready. The drift beat (added once the mini-turbo
+ *  mechanic landed) is detected generically off the drift-tier
+ *  release signal, so it works on any manifest track without a
+ *  buoy-shaped corner. The remaining cathedral-copy beats (pickup,
+ *  ramp) are still swapped for what we can detect without a
+ *  Sandbar-shaped course. */
 export const DEFAULT_TUTORIAL_SCRIPT: TutorialScript = {
   id: 'first-run-intro',
   label: 'INTRO',
@@ -123,6 +131,17 @@ export const DEFAULT_TUTORIAL_SCRIPT: TutorialScript = {
       clearWhen: (ctx) => ctx.pumpEventsThisBeat >= 1,
       clearAfterSeconds: 25,
       clearMessage: '+PUMP',
+    },
+    {
+      id: 'drift',
+      title: 'DRIFT',
+      hint: 'Hold Z / C through a corner while steering, then release for a boost.',
+      // Clears on any charged release (blue MT or better). The
+      // clearAfterSeconds escape hatch keeps the script moving on a
+      // flat track with no real corner to drift through.
+      clearWhen: (ctx) => ctx.driftTierThisBeat >= 1,
+      clearAfterSeconds: 25,
+      clearMessage: '+TURBO',
     },
     {
       id: 'anti-grav',

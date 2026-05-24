@@ -248,13 +248,28 @@ opposite the drift direction (line re-acquired), speed drops below
 70% of trigger threshold, or hold exceeds the per-difficulty max. On
 release, a 350 ms cooldown prevents immediate re-trigger.
 
+## Tutorial integration
+
+The default tutorial script (`tutorial-script.ts`) now includes a
+**DRIFT** beat between WAVE PUMP and ANTI-GRAV: "Hold Z / C through a
+corner while steering, then release for a boost." It clears on the
+first charged release (`driftTierThisBeat >= 1`), with a 25 s
+`clearAfterSeconds` escape hatch so a flat track with no real corner
+still advances.
+
+The director gained a `notifyDrift(tier)` out-of-band signal (parallel
+to `notifyPumpEvent` / `notifyOrbitTouch`) that keeps the max tier seen
+this beat. The game-loop fires it on `DriftState.releasedThisTick`,
+regardless of `driftIntensity` — the beat is about learning the
+mechanic, so a player with visuals off still graduates it.
+
 ## Open questions / follow-ups
 
-1. **Tutorial integration.** A "DRIFT THROUGH THE CORNER" beat should
-   land in the tutorial track director. (Deferred.)
-2. **Surface-aware drift.** Currently uniform on land + water. Could
+1. **Surface-aware drift.** Currently uniform on land + water. Could
    make water-drift slipper / land-drift grippier. Deferred until the
-   surface-type tagging system exists.
+   surface-type tagging system exists — there's no per-surface
+   material/friction tagging in the track pipeline yet, so this is
+   genuinely blocked on infrastructure rather than scope.
 
 ## References
 
