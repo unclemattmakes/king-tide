@@ -142,17 +142,20 @@ export const DIVE_HOVER_HEIGHT_MIN_MUL = 0.5
 
 // Dive aid #4 — chassis pitch (relative to the surface tangent) is
 // clamped to this many degrees on the dive side. Past the limit:
-//   • the grounded pitch PD reverts its P term to FULL strength (no
-//     dive softening) and pulls the chassis back up hard;
+//   • when grounded, the pitch PD reverts its P term to FULL strength
+//     (no dive softening) and pulls the chassis back up hard;
 //   • the player's nose-down pitch torque is suppressed so the rider
 //     can't shove past the wall.
 // Upper (wheelie) band still uses the original 45° committed-trick
 // cutoff. Relative-to-surface so steep downhills still let the bike
 // follow the ramp — only the chassis-vs-tangent angle is bounded.
 //
-// Clamp also fires when AIRBORNE over water: without it, a brief
-// pop off a wave crest lets the rider complete a forward flip while
-// the airborne branch's free physics applies pitch torque unopposed.
+// Player-torque suppression also fires when AIRBORNE over water:
+// without it, a brief pop off a wave crest lets the rider feed in more
+// nose-down torque unopposed and complete a forward flip. There is NO
+// air-side PD by design (no auto-leveling), so residual angular
+// velocity carried airborne can still rotate the chassis somewhat —
+// just no fresh torque input past the limit.
 export const DIVE_PITCH_FWD_LIMIT_DEG = 12
 const DIVE_PITCH_FWD_LIMIT_RAD = (DIVE_PITCH_FWD_LIMIT_DEG * Math.PI) / 180
 
@@ -1083,12 +1086,13 @@ function applyPlayerPitchTorque(
   const { rb, intent, q, dt, m } = frame
   if (Math.abs(intent.pitch) <= 0.05) return
   // Dive-clamp: past DIVE_PITCH_FWD_LIMIT_RAD below the surface tangent,
-  // the player's nose-down torque is suppressed. The grounded pitch PD
-  // (full-strength P past the limit, see applyGroundedPitchPD) handles
-  // the restoring force; this prevents the rider from shoving past the
-  // wall. Fires when grounded OR airborne-over-water — the latter kills
-  // wave-pop forward flips. Airborne over LAND is unaffected (jump
-  // tricks off ramps run free).
+  // the player's nose-down torque is suppressed. Grounded path also
+  // gets full-P restoring from applyGroundedPitchPD; the airborne-over-
+  // water path relies on input suppression alone (air has no PD by
+  // design — see hover loop's PD gate). Residual nose-down angular
+  // velocity carried into the air phase will still rotate the chassis,
+  // but the player can't add more torque past the limit. Airborne over
+  // LAND is unaffected — jump tricks off ramps run free.
   if ((isGrounded || isOverWater) && intent.pitch < 0) {
     const qChk = rb.rotation()
     const r12Chk = 2 * (qChk.y * qChk.z - qChk.x * qChk.w)
@@ -1797,13 +1801,11 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       applyMultiPointHoverSpring(frame, footprint, probe, groundDistance, debugOn, debugCorners)
     }
 
-    // Grounded pitch PD — self-righting torque on land + water. Also
-    // fires when AIRBORNE over water so a brief pop off a wave crest
-    // can't be parlayed into a forward flip. `emptyFootprint` returns
-    // slope=0, so the airborne-over-water PD targets flat (level water
-    // tangent) — exactly what we want for a soft anti-flip restorer.
+    // Grounded pitch PD — self-righting torque on land + water. Air
+    // branch has no auto-leveling by design; flips and dives in air
+    // run on pure player input + chassis inertia.
     const isOverWater = probe.hasSurface && probe.isWater
-    if (isGrounded || isOverWater) applyGroundedPitchPD(frame, footprint.surfaceForwardSlope)
+    if (isGrounded) applyGroundedPitchPD(frame, footprint.surfaceForwardSlope)
 
     // Persist state for next tick + render-side reads. (HoverState is
     // written *before* the player pitch torque so its `isGrounded`
