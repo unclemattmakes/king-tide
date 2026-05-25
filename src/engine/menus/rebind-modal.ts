@@ -36,6 +36,7 @@ import {
   type KeyboardBindings,
 } from '@/engine/input/bindings'
 import { pollGamepadButtonPress } from '@/engine/input/gamepad'
+import { installMenuGamepad, type MenuGamepad } from '@/engine/input/menu-gamepad'
 import {
   playerSettings,
   resetGamepadBindings,
@@ -94,6 +95,11 @@ export function installRebindModal(): RebindModalHandle {
   let gamepadPollHandle: number | null = null
   let previousFocus: HTMLElement | null = null
   let previousPressed: Set<number> = new Set()
+  // Menu-nav poller so a controller can move between rows and hit
+  // DONE / RESET. Parks itself while a chip is in capture mode — the
+  // capture poll below owns the pad then, and a live nav poller would
+  // otherwise read the button being bound as an A/d-pad press.
+  let gamepad: MenuGamepad | null = null
 
   function renderHeader(): void {
     if (mode === 'keyboard') {
@@ -313,6 +319,15 @@ export function installRebindModal(): RebindModalHandle {
     renderList()
     renderHint()
     window.addEventListener('keydown', onKey, true)
+    gamepad = installMenuGamepad({
+      container: () => rootEl,
+      isActive: () => rootEl.classList.contains('show') && capturing === null,
+      onBack: () => {
+        if (capturing) cancelCapture()
+        else close()
+      },
+    })
+    gamepad.focusFirst()
   }
 
   function close(): void {
@@ -321,6 +336,8 @@ export function installRebindModal(): RebindModalHandle {
     rootEl.classList.remove('show')
     rootEl.setAttribute('aria-hidden', 'true')
     window.removeEventListener('keydown', onKey, true)
+    gamepad?.dispose()
+    gamepad = null
     previousFocus?.focus?.()
     previousFocus = null
   }

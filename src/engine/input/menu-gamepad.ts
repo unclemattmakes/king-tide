@@ -47,6 +47,20 @@ export type MenuGamepad = {
   dispose(): void
 }
 
+/**
+ * True if any of the named overlays (by element id) is currently shown
+ * (carries the `.show` class). A base-layer poller passes this through
+ * `isActive` to park itself while a higher overlay owns input: two live
+ * pollers reading the same gamepad tug-of-war over focus and swallow the
+ * A press, so the top overlay becomes un-navigable (regression-pinned in
+ * tests/unit/menu-gamepad.test.ts). This is the controller-side mirror of
+ * the `body.menu-active` / `paused-for-menu` CSS cascades that already
+ * keep stacked surfaces from fighting visually.
+ */
+export function isAnyOverlayShown(...ids: string[]): boolean {
+  return ids.some((id) => document.getElementById(id)?.classList.contains('show') ?? false)
+}
+
 function isVisible(el: HTMLElement): boolean {
   // offsetParent is null for display:none / inside a display:none ancestor.
   // For the rare position:fixed case we fall back to a layout check.

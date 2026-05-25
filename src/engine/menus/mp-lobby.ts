@@ -1,5 +1,6 @@
 import type { TrackManifestEntry } from '@/game/assets/manifest'
 import { BIKE_VARIANTS, type BikeVariantId, DEFAULT_BIKE_VARIANT } from '@/game/bikes/variants'
+import { installMenuGamepad, type MenuGamepad } from '../input/menu-gamepad'
 import { createNetRoom } from '../net/room'
 import { installLobbyOverlay, type LobbyView, pickRandomTrack } from '../render/lobby-overlay'
 import { buildTrackList } from './catalog'
@@ -56,14 +57,24 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
 
   let pickBanner: LobbyView['pickBanner'] = null
   let raceArmed = false
+  let gamepad: MenuGamepad | null = null
 
   return new Promise<MpLobbyResult>((resolve) => {
     function finish(href: string): void {
       window.removeEventListener('keydown', onKey)
       window.clearInterval(latencyRefresh)
+      gamepad?.dispose()
+      gamepad = null
       lobby.hide()
       net.close()
       resolve({ href })
+    }
+
+    /** Leave the lobby and re-enter the menu (Esc / controller B). */
+    function bailToMenu(): void {
+      const url = new URL(window.location.href)
+      url.search = ''
+      finish(url.toString())
     }
 
     function bikeMeta(id: string | undefined) {
@@ -237,9 +248,7 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
         e.preventDefault()
       } else if (e.code === 'Escape') {
         // Bail back to the menu.
-        const url = new URL(window.location.href)
-        url.search = ''
-        finish(url.toString())
+        bailToMenu()
         e.preventDefault()
       } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
         const dir = e.code === 'ArrowLeft' ? -1 : 1
@@ -265,5 +274,16 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
       }
     }
     window.addEventListener('keydown', onKey)
+
+    // Controller navigation: the on-screen pick (< / >) and READY
+    // controls are real buttons, so the shared spatial-focus poller
+    // drives them — d-pad to move, A to cycle a pick / toggle ready, B
+    // to bail. This is the only poller on the lobby page (the menu flow
+    // has already navigated away), so no gating is needed.
+    gamepad = installMenuGamepad({
+      container: () => document.getElementById('lobby-overlay'),
+      onBack: bailToMenu,
+    })
+    gamepad.focusFirst()
   })
 }
