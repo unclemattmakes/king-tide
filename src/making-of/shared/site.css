@@ -452,6 +452,82 @@ a:hover {
   background: var(--mo-orange);
 }
 
+/* ── Drift charge meter ──────────────────────────────────────────────── */
+.mo-ctrl-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--mo-ink-dim);
+  line-height: 1.5;
+}
+
+.mo-drift-btn {
+  width: 100%;
+  padding: 0.7rem;
+  border: 1px solid var(--mo-line);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--mo-panel-2), var(--mo-panel));
+  color: var(--mo-ink);
+  font-family: var(--mo-font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.95rem;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  transition:
+    transform 0.08s ease,
+    border-color 0.08s ease;
+}
+
+.mo-drift-btn:active {
+  transform: scale(0.97);
+  border-color: var(--mo-cyan);
+  background: var(--mo-cyan-soft);
+}
+
+.mo-charge-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.mo-charge-bar {
+  position: relative;
+  height: 18px;
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid var(--mo-line);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.mo-charge-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  opacity: 0.28;
+}
+
+.mo-charge-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 4px 0 0 4px;
+  transition: width 0.05s linear;
+}
+
+.mo-charge-ticks {
+  position: relative;
+  height: 0.9rem;
+  font-size: 0.62rem;
+  color: var(--mo-ink-faint);
+}
+
+.mo-charge-ticks span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
 /* ── Chapter cards (landing) ─────────────────────────────────────────── */
 .mo-chapters {
   display: grid;
