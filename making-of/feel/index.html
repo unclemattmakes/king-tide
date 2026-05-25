@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>Tuning the Feel — The Making of Hoverbike</title>
+    <meta
+      name="description"
+      content="The road from a twitchy prototype to a bike that feels right: the auto-leveling we deleted, the dive-then-level kick, and the tuck sweet-spot — feel as a curve, not a button."
+    />
+    <style>
+      body {
+        margin: 0;
+        background: #050a14;
+        color: #f4f8ff;
+        font-family: "Inter", system-ui, sans-serif;
+      }
+    </style>
+    <script type="module" src="/src/making-of/feel/main.ts"></script>
+  </head>
+  <body>
+    <header class="mo-topbar">
+      <a class="mo-brand" href="/making-of/">Making of <span>Hoverbike</span></a>
+      <nav>
+        <a href="/making-of/">All chapters</a>
+        <a href="/">Play the game</a>
+      </nav>
+    </header>
+
+    <main class="mo-shell">
+      <section class="mo-hero">
+        <p class="mo-eyebrow">Chapter 03 — Tuning the Feel</p>
+        <h1>The part you can't screenshot.</h1>
+        <p>
+          You can describe the wave field with a formula and the buoyancy with four probes. But
+          "does it feel good to ride?" has no equation. It's the sum of a hundred small decisions
+          about how the bike <em>responds</em> — and most of those decisions were made by building
+          something, hating how it felt, and changing it. This is that trail of changes.
+        </p>
+      </section>
+
+      <article class="mo-prose">
+        <h2>First, write down what it must <em>not</em> feel like</h2>
+        <p>
+          Before tuning anything, we wrote down the failure modes — drawn straight from the genre's
+          graveyard. Pacer and Redout 2 and the Riptide GP series each taught a lesson, and the one
+          that shaped the controls most was this, from our design targets:
+        </p>
+        <p>
+          <em>"Every mechanic must be optional flair before it becomes a difficulty gate."</em>
+        </p>
+        <p>
+          That single rule has teeth. It means no mechanic is allowed to play the game <em>for</em>
+          you, and none is allowed to wall you out if you ignore it. Hold that thought — it's the
+          reason for the first big thing we deleted.
+        </p>
+
+        <h2>The hover saga: tuning by subtraction</h2>
+        <p>
+          Early on, pitch was inert: leaning the nose had no effect on thrust along the ground, so
+          the bike felt like it was on rails. The first fix made pitch <strong>expressive</strong> —
+          pop a wheelie and throttle and the bike lifts; tip the nose down a slope and the throttle
+          drives you into the wave face. Good. But once the nose could point anywhere, the bike
+          could tumble.
+        </p>
+        <p>
+          The tempting fix was to add a gentle auto-righting force in the air — a spring that nudges
+          the bike back to level. We tried it. We reverted it the same day. The commit message is
+          blunt about why:
+        </p>
+        <div class="mo-aside">
+          <strong>revert(hover): no PD in air — air is pure free physics again.</strong> "Any P term
+          in the air branch reads as auto-leveling, which we don't want."
+        </div>
+        <p>
+          That's the anti-target in action. Auto-leveling feels like the game grabbing the bars out
+          of your hands. So instead of <em>adding</em> a force, we <strong>removed</strong> the
+          ability to flip by accident a different way: a hard clamp on how far the nose can dive
+          (12°), and — over water — suppressing fresh nose-down torque past that limit so a pop off a
+          crest can't be parlayed into an unintended front-flip. Land ramps stay unclamped, because
+          there, flips are the point.
+        </p>
+
+        <h3>From spring curves to a "dive-then-level" kick</h3>
+        <p>
+          The nose-down gesture went through a few models. First, asymmetric spring curves on the
+          bow and stern corners — soft at the top of the dive so you could pump the nose into a
+          trough, stiffening near the surface so the belly hit first, not the nose. It worked but it
+          was fiddly, four tuning knobs fighting each other.
+        </p>
+        <p>
+          The cleaner mental model that replaced it: a <strong>kick</strong>. Press nose-down and
+          you get one crisp downward transient (tapering to zero over ~0.22&nbsp;s), then a restoring
+          term pulls the chassis back to <em>surface tangent</em> — level on flat water, slope-
+          parallel on a hill. Keep holding, and the same input quietly becomes <strong>altitude
+          control</strong>: the bike sinks toward half its hover height while staying parallel to
+          the surface. Release, and a lighter <em>nose-up</em> kick (~0.18&nbsp;s) fires so the bow
+          leads the recovery as the bike rises. One gesture, three felt phases — dip, sink, rise —
+          and not a single auto-leveling spring.
+        </p>
+
+        <h2>The tuck sweet-spot: feel as a curve, not a button</h2>
+        <p>
+          That same nose-down lean carries the game's clearest feel lesson. We wanted a downhill
+          tuck — duck low, go faster — and the first version was a dedicated button (X on the
+          keyboard, L3 on a pad). It worked. It also failed the anti-target: a button is a binary,
+          and binaries don't reward <em>skill</em>, they reward <em>knowing the button exists</em>.
+        </p>
+        <p>
+          So the button came out, and the tuck became a <strong>curve</strong> folded into the lean
+          you already have. Feather the nose down toward a sweet spot and the bike speeds up and
+          slides cleaner; push <em>past</em> the sweet spot and the belly scrapes — the curve goes
+          negative and the same multipliers invert into a penalty. There's no safe "floor it." The
+          fastest line is a feathered lean held right on the edge of too-far.
+        </p>
+
+        <figure class="mo-demo">
+          <figcaption class="mo-demo-caption">
+            Live demo — the cyan curve is the real shipped <code>tuckFactor</code>. Re-tune your own
+            (orange) and feel it on the bike: the deck scrolls at the speed cap your lean earns.
+          </figcaption>
+          <div class="mo-demo-body">
+            <div class="mo-demo-stage" id="tuck-demo-stage"></div>
+            <div class="mo-demo-controls" id="tuck-demo-controls"></div>
+          </div>
+        </figure>
+
+        <p>
+          Drag <strong>Nose-down lean</strong> up slowly. Watch the top-speed cap climb to its peak
+          right at the sweet spot (the dashed line), then fall away as you keep pushing — and the
+          deck flow speeds up and slows down to match. Now move the <strong>sweet spot</strong> and
+          <strong>scrape floor</strong> sliders: that's the actual tuning dial we sat behind. We put
+          the sweet spot high, at 0.8, precisely <em>because</em> it lines up with "about to scrape"
+          — the input has a satisfying edge to ride. And the payoff only converts to real speed when
+          something is already pushing you past your base top speed (a descent, a wave face), so a
+          good tuck is a reward for committing to a fast line, not a free button.
+        </p>
+
+        <h2>Drift: borrowing thirty years of someone else's tuning</h2>
+        <p>
+          Not every feel problem is novel. When we added a Mario-Kart-style mini-turbo drift, we
+          immediately hit the exact bugs Nintendo spent decades fixing. The first pass let a held
+          drift spiral the bike into a 180; the fix was the
+          <strong>wide</strong> MK-style model where counter-steering <em>opens</em> the slide
+          instead of tightening it. We added tiered charge — blue mini-turbo at 0.6&nbsp;s, orange
+          at 1.4&nbsp;s, a purple ultra tier past that — with a HUD badge and color-shifting sparks,
+          because (another universal finding) a charge you can't <em>read</em> isn't a skill, it's a
+          guess. And the rider physically banks into the drift, because the lean sells the slide
+          more than the physics do.
+        </p>
+        <p>
+          The lesson here is humility: a lot of "game feel" is rediscovering what the masters already
+          solved. The wins came from matching reference, not reinventing it.
+        </p>
+
+        <h2>The throughline</h2>
+        <p>
+          Look back at the changes that made the bike feel right and a pattern shows up. We deleted
+          the auto-leveling. We deleted the tuck button. We widened the drift instead of constraining
+          it. Almost every step made the bike feel better by taking away something that played the
+          game for the rider, and by turning binary states into <strong>curves with a sweet spot you
+          can learn</strong>. Then we made the skill legible — tier badges, pump feedback, the
+          tuck's audible scrape — so the player can tell when they're doing it well. Feel, it turns
+          out, is mostly subtraction plus legibility.
+        </p>
+
+        <h2>Read the code</h2>
+        <p>
+          The tuck curve is its own tiny, test-pinned module:
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/game/systems/tuck-curve.ts">
+            <code>src/game/systems/tuck-curve.ts</code></a> (the demo above imports it directly). The
+          dive/kick model and the deleted air-PD live in
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/game/systems/hover.ts">
+            <code>hover.ts</code></a>; the drift tiers in
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/game/systems/drift.ts">
+            <code>drift.ts</code></a>. And the failure modes we tuned against are catalogued in
+          <code>docs/design-targets.md</code>.
+        </p>
+      </article>
+
+      <footer class="mo-footer">
+        <p>
+          <a href="/making-of/">← Back to all chapters</a> &nbsp;·&nbsp; Previous:
+          <a href="/making-of/buoyancy/">Hover &amp; Buoyancy</a>.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>
