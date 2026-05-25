@@ -894,6 +894,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           </div>
           <div class="right">
             <button class="bc-link" id="mode-leaderboards" type="button">LEADERBOARDS &middot;&middot;&middot;</button>
+            <button class="bc-link" id="mode-making-of" type="button">MAKING OF &middot;&middot;&middot;</button>
             <button class="bc-link" id="mode-settings" type="button">SETTINGS &middot;&middot;&middot;</button>
           </div>
         </div>
@@ -928,6 +929,11 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         })
       })
       el.querySelector('#mode-back')?.addEventListener('click', () => showStep('title'))
+      el.querySelector('#mode-making-of')?.addEventListener('click', () => {
+        // The making-of microsite ships alongside the game at /making-of/.
+        // Open it in a new tab so the menu stays put underneath.
+        window.open('/making-of/', '_blank', 'noopener')
+      })
       el.querySelector('#mode-settings')?.addEventListener('click', () => {
         installSettingsOverlay().open()
       })
