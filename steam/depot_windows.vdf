@@ -1,14 +1,10 @@
-// SteamPipe depot script — Windows (NSIS installer's installed payload).
+// SteamPipe depot script — Windows (Electron game tree).
 //
-// We upload the *installed* game tree, not the NSIS installer
-// itself — Steam handles install/uninstall via the depot manifest.
-// tools/steam-upload.mjs extracts the NSIS .exe with `nsis-extract`
-// (or 7z) into content/windows/ before running steamcmd.
-//
-// If running locally without an extractor, the script falls back to
-// pointing the depot at the unpacked `release/` tree that Tauri
-// emits alongside the installer (the same .exe + resources tree the
-// installer would deposit on the user's machine).
+// We upload the installed game tree, not the NSIS installer — Steam
+// handles install/uninstall via the depot manifest. tools/steam-upload.mjs
+// stages the electron-builder win-unpacked tree (Chromium bundled) into
+// content/windows/. Set the App's Windows launch executable to
+// `Hoverbike.exe` in the Steamworks backend.
 "DepotBuildConfig"
 {
 	"DepotID"		"${STEAM_DEPOT_WINDOWS}"
@@ -23,8 +19,4 @@
 	"FileExclusion"		"*.log"
 	"FileExclusion"		"*.tmp"
 	"FileExclusion"		"*.pdb"
-
-	// WebView2 Evergreen runtime: Tauri bundles a downloader
-	// bootstrapper; the installed tree doesn't carry the runtime
-	// payload itself, so nothing extra to exclude here.
 }

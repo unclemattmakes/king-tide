@@ -11,8 +11,7 @@ output/
 # Local steamcmd binary if you symlink one in for offline testing.
 steamcmd/
 
-# Cached downloads — WebView2 bootstrapper etc. Reuse-on-subsequent-
-# uploads is the point.
+# Cached downloads reused across uploads.
 cache/
 
 # Pre-baked Steam Guard config.vdf used by CI for non-interactive

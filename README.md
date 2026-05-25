@@ -14,13 +14,13 @@ Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics a
 - [Contributing](CONTRIBUTING.md) — workflow, conventions, testing expectations
 - [Cross-browser support](docs/cross-browser.md) — tier matrix + how to run `E2E_BROWSERS=all pnpm e2e`
 - [Steam Deck tuning](docs/steam-deck.md) — Deck-specific runtime concerns (battery, framerate cap, Gaming Mode, profile detection)
-- [Desktop builds](docs/desktop-builds.md) — Linux AppImage + Windows NSIS pipeline, toolchain setup, CI matrix, Steam distribution
+- [Desktop builds](docs/desktop-builds.md) — Electron Linux + Windows pipeline, toolchain setup, CI matrix, Steam distribution
 
 ## Build targets
 
 - **Web** — Chrome / Edge (tier 1), Firefox (tier 1), Safari iOS 18.2+ / macOS Sonoma+ (tier 2). See [`docs/cross-browser.md`](docs/cross-browser.md).
-- **Linux** — AppImage + deb via Tauri 2. `pnpm build:deck`. Native execution on Steam Deck (no Proton). See [`docs/desktop-builds.md`](docs/desktop-builds.md).
-- **Windows** — NSIS `.exe` + MSI installer via Tauri 2. `pnpm build:windows`. Native WebView2. See [`docs/desktop-builds.md`](docs/desktop-builds.md).
+- **Linux** — Electron game tree via `pnpm build:deck`. Native execution on Steam Deck (no Proton), real Chromium WebGPU. See [`docs/desktop-builds.md`](docs/desktop-builds.md).
+- **Windows** — Electron + NSIS `.exe` installer via `pnpm build:windows`. Bundled Chromium — no WebView2 dependency. See [`docs/desktop-builds.md`](docs/desktop-builds.md).
 - **macOS** — deferred (no test hardware).
 
 ## What's playable

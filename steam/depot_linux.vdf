@@ -1,14 +1,13 @@
-// SteamPipe depot script — Linux (AppImage).
+// SteamPipe depot script — Linux (Electron game tree).
 //
 // The Steam Deck path: a native Linux depot so the Deck always
 // prefers this over running Windows-via-Proton. Mark the depot
 // "Steam Deck verified" in the App admin after the first upload.
 //
-// Input layout: tools/steam-upload.mjs stages the AppImage at
-//   content/linux/Hoverbike.AppImage
-// (renaming the versioned bundle so users see a stable filename
-// across builds). Steam's launcher handles `chmod +x` for us via
-// the App's executable launch option.
+// Input layout: tools/steam-upload.mjs stages the electron-builder
+// linux-unpacked tree (Chromium bundled) into content/linux/. Set the
+// App's Linux launch executable to `hoverbike` in the Steamworks backend;
+// Steam handles the +x bit on the copied binary.
 "DepotBuildConfig"
 {
 	"DepotID"		"${STEAM_DEPOT_LINUX}"
