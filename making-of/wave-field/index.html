@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>Wave Mastery — The Making of Hoverbike</title>
+    <meta
+      name="description"
+      content="How a handful of stacked sine waves becomes an arcade ocean you can read, ride, and launch off — with a live demo driven by the real game code."
+    />
+    <style>
+      body {
+        margin: 0;
+        background: #050a14;
+        color: #f4f8ff;
+        font-family: "Inter", system-ui, sans-serif;
+      }
+    </style>
+    <script type="module" src="/src/making-of/wave-field/main.ts"></script>
+  </head>
+  <body>
+    <header class="mo-topbar">
+      <a class="mo-brand" href="/making-of/">Making of <span>Hoverbike</span></a>
+      <nav>
+        <a href="/making-of/">All chapters</a>
+        <a href="/">Play the game</a>
+      </nav>
+    </header>
+
+    <main class="mo-shell">
+      <section class="mo-hero">
+        <p class="mo-eyebrow">Chapter 01 — Wave Mastery</p>
+        <h1>An ocean you can read.</h1>
+        <p>
+          The whole game hangs off the water. If the sea feels random, riding it is a chore; if you
+          can <em>read</em> it — see the next crest coming, time your launch — it becomes a skill.
+          Here's how we built water that's cheap enough for a browser yet predictable enough to
+          master.
+        </p>
+      </section>
+
+      <article class="mo-prose">
+        <h2>A wave is just a moving sine</h2>
+        <p>
+          Drop one ripple on a flat sea and it's a sine wave: a smooth up-and-down with a height
+          (<strong>amplitude</strong>), a crest-to-crest distance (<strong>wavelength</strong>), and
+          a speed it travels at. On its own it looks like a bedsheet flapping — too regular to pass
+          for the sea.
+        </p>
+        <p>
+          The trick is that real water is <em>many</em> of these added together: long, slow swells
+          carry the big silhouette, and shorter, faster chop rides on top for texture. Stack a few
+          and the regularity disappears. That's the entire idea behind the field — a
+          <strong>sum of sines</strong>.
+        </p>
+        <p>
+          Pull the <strong>Wave layers</strong> slider below from 1 up to 6. One layer is that
+          flapping bedsheet. By six, you've got a believable, choppy ocean — and the orange bike is
+          floating on it the whole time.
+        </p>
+      </article>
+
+      <figure class="mo-demo">
+        <figcaption class="mo-demo-caption">
+          Live demo — <strong>drag to orbit, scroll to zoom</strong>. The surface and the bike are
+          both sampled from the game's real <code>wave-field.ts</code>.
+        </figcaption>
+        <div class="mo-demo-body">
+          <div class="mo-demo-stage" id="wave-demo-stage"></div>
+          <div class="mo-demo-controls" id="wave-demo-controls"></div>
+        </div>
+      </figure>
+
+      <article class="mo-prose">
+        <p>
+          Our default sea is six waves: two long swells (50&nbsp;m and 85&nbsp;m) whose periods beat
+          together into an "occasional big set" every ~24 seconds, plus four bands of chop fanned
+          within ±25° of the swell direction. Keeping every wave within a narrow fan is deliberate —
+          an earlier tune spread them across 190° (literally the physics definition of "confused
+          seas") and the bike just got jostled. Coherent swell marching one way is what you can
+          learn to ride.
+        </p>
+
+        <h2>Gerstner, minus the expensive half</h2>
+        <p>
+          Film and AAA water usually reaches for <strong>Gerstner waves</strong>, which don't just
+          move points up and down — they also pull them <em>sideways</em> toward each crest, giving
+          that sharp, pinched peak. Looks fantastic. The catch: once points slide horizontally, you
+          can no longer ask "what's the height at this exact spot?" without solving the motion
+          backwards. For physics that's death by a thousand iterations.
+        </p>
+        <p>
+          So we keep the vertical motion and drop the sideways shove. The height at any point is a
+          plain closed-form sum:
+        </p>
+        <p>
+          <code>y(x, z, t) = baseY + Σ Aᵢ · sin(kᵢ · (Dᵢ · xz) − ωᵢ · t + φᵢ)</code>
+        </p>
+        <p>
+          No inverse solve, no iteration — one pass and you have the height <em>and</em> the exact
+          slope (the surface normal) for free, because the derivative of a sine is just a cosine.
+          The visual loss is small at arcade amplitudes, and the part players actually feel — the
+          launch off a crest — comes from the slope, which we keep. The fine sub-meter chop that the
+          dropped term would have added is faked back in on the GPU with scrolling detail-normal
+          textures, purely cosmetic.
+        </p>
+        <div class="mo-aside">
+          <strong>Why it matters for feel:</strong> because height is closed-form, the game can ask
+          the sea "how high are you, right here, right now?" thousands of times per frame for almost
+          nothing. That budget is what lets every bike float on the same waves you see, instead of
+          on a cheaper stand-in.
+        </div>
+
+        <h2>One formula, two consumers</h2>
+        <p>
+          Here's the rule that keeps the water honest: <strong>the height function lives in exactly
+          one place</strong>, and two very different systems read from it.
+        </p>
+        <ul>
+          <li>
+            <strong>The physics (CPU).</strong> Every fixed step, each bike samples the surface
+            under its hull to know where the water is and which way it's tilted, then floats and
+            pitches accordingly.
+          </li>
+          <li>
+            <strong>The visuals (GPU).</strong> The water shader evaluates the
+            <em>same</em> sum of sines, with the same parameters and the same clock, to move the
+            mesh vertices you see.
+          </li>
+        </ul>
+        <p>
+          Because both sides compute identical math, the crest you watch roll under the bike is the
+          crest the physics launches it off — to within floating-point precision. There's no "visual
+          ocean" and "physics ocean" drifting apart. The readout panel in the demo shows the height
+          the physics would feel under the bike at this instant; watch it rise and fall as crests
+          pass, and watch the bike's tilt track the slope.
+        </p>
+
+        <h2>The wake you can jump</h2>
+        <p>
+          A moving bike drags a wake — the V-shaped wash trailing a boat. We add it as another term
+          in the very same field: a Kelvin-style V that widens behind the rider, with its ridge
+          riding the edge of the V and gentle "scallops" scrolling backward down its length.
+        </p>
+        <p>
+          Crucially, the wake isn't just a foam decal — it's real displacement in the height
+          function, which both the visuals and the physics read. So a trailing rider who clips your
+          wake genuinely gets bumped by it, and a well-timed line can <em>jump</em> off it. Switch
+          the bike to <strong>Ride a wake</strong> in the demo and orbit around behind it to see the
+          V carve into the surface.
+        </p>
+
+        <h2>Per-track wave zones</h2>
+        <p>
+          One global sea would make eleven tracks feel the same. So tracks can drop
+          <strong>wave zones</strong> — boxes that locally crank the amplitude, tighten the chop,
+          re-aim the swell, or add a periodic surge. A calm lagoon and a track with a tsunami
+          rolling through an arch can share the exact same wave engine; the zone just blends in its
+          overrides where the author painted them. (We'll give zones their own demo in a later
+          chapter.)
+        </p>
+
+        <h2>Read the code</h2>
+        <p>
+          Everything above lives in one focused, dependency-free module:
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/engine/sim/water/wave-field.ts">
+            <code>src/engine/sim/water/wave-field.ts</code></a>. It's pure math with no rendering
+          imports, which is exactly why this page could pull it straight into a Three.js demo. The
+          design notes and references (Sea of Thieves, the Atlas water talk, Tessendorf) are in
+          <code>docs/water-deep-dive.md</code>.
+        </p>
+      </article>
+
+      <footer class="mo-footer">
+        <p>
+          <a href="/making-of/">← Back to all chapters</a> &nbsp;·&nbsp; Next up: Hover &amp;
+          Buoyancy.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>
