@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>The Making of Hoverbike</title>
+    <meta
+      name="description"
+      content="How a web-first arcade hover-bike racer gets built — plain-language breakdowns with interactive 3D demos of the real systems."
+    />
+    <style>
+      body {
+        margin: 0;
+        background: #050a14;
+        color: #f4f8ff;
+        font-family: "Inter", system-ui, sans-serif;
+      }
+    </style>
+    <script type="module" src="/src/making-of/landing/main.ts"></script>
+  </head>
+  <body>
+    <header class="mo-topbar">
+      <a class="mo-brand" href="/making-of/">Making of <span>Hoverbike</span></a>
+      <nav>
+        <a href="/">Play the game</a>
+        <a href="https://github.com/occ-matt/hoverbike">Source</a>
+      </nav>
+    </header>
+
+    <main class="mo-shell">
+      <section class="mo-hero">
+        <p class="mo-eyebrow">An open build log</p>
+        <h1>How we built an arcade ocean you can race.</h1>
+        <p>
+          Hoverbike is a web-first arcade hover-bike racer — Three.js, WebGPU, and a WASM physics
+          engine running in a browser tab. This is the making-of: each chapter takes one system,
+          explains it in plain language, and hands you an interactive 3D demo wired to the
+          <em>actual</em> game code so you can poke at it yourself.
+        </p>
+      </section>
+
+      <div class="mo-prose">
+        <p>
+          Most "how it works" write-ups stop at a diagram. We wanted the demos to be honest, so
+          every interactive panel here imports the same modules the shipping game runs. When you
+          drag a slider on the wave page, you are editing the exact sum-of-sines field the bikes
+          float on — not a lookalike rebuilt for the article.
+        </p>
+        <p>
+          Start anywhere. The chapters are independent, but Wave Mastery is the heart of the game,
+          so it's the natural first read.
+        </p>
+      </div>
+
+      <nav class="mo-chapters" aria-label="Chapters">
+        <a class="mo-card" href="/making-of/wave-field/">
+          <div class="mo-card-num">CHAPTER 01</div>
+          <h3>Wave Mastery</h3>
+          <p>
+            The signature mechanic. How a handful of stacked sine waves becomes an ocean you can
+            read, ride, and launch off — and why the same math runs the physics and the visuals.
+          </p>
+        </a>
+
+        <div class="mo-card is-soon">
+          <div class="mo-card-num">CHAPTER 02</div>
+          <h3>Hover &amp; Buoyancy</h3>
+          <p>Four probes, differential heights, and how a bike settles onto moving water.</p>
+          <span class="mo-tag">Coming soon</span>
+        </div>
+
+        <div class="mo-card is-soon">
+          <div class="mo-card-num">CHAPTER 03</div>
+          <h3>The Drift</h3>
+          <p>Mario Kart's mini-turbo lineage, charge tiers, and the anti-snake guardrails.</p>
+          <span class="mo-tag">Coming soon</span>
+        </div>
+
+        <div class="mo-card is-soon">
+          <div class="mo-card-num">CHAPTER 04</div>
+          <h3>Sim vs. Render</h3>
+          <p>The ECS backbone and the one rule that keeps it honest: the sim can't see Three.js.</p>
+          <span class="mo-tag">Coming soon</span>
+        </div>
+      </nav>
+
+      <footer class="mo-footer">
+        <p>
+          Built in the open by OddballCreatureClub. Source on
+          <a href="https://github.com/occ-matt/hoverbike">GitHub</a>. &copy;
+          <span id="mo-year">2026</span>.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>
