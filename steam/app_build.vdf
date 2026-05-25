@@ -1,0 +1,49 @@
+// SteamPipe app build script — Hoverbike.
+//
+// Rendered from this template by tools/steam-upload.mjs, which
+// substitutes the ${...} placeholders from env vars before handing
+// the result to `steamcmd +run_app_build`.
+//
+// Placeholders the renderer fills in (all wrapped in dollar-curly braces):
+//   STEAM_APPID                  numeric Steam App ID (assigned by Valve)
+//   STEAM_DEPOT_LINUX            Linux AppImage depot ID
+//   STEAM_DEPOT_WINDOWS          Windows NSIS depot ID
+//   BUILD_DESCRIPTION            free-form description (commit SHA + tag)
+//   SET_LIVE                     branch name to push live, or empty for "no auto-set"
+//   STEAM_PREVIEW                "1" for dry-run, "0" for real upload
+//   CONTENT_ROOT                 absolute path to staged depot content
+//   BUILD_OUTPUT                 absolute path for steamcmd logs / manifests
+//
+// SteamPipe docs: https://partner.steamgames.com/doc/sdk/uploading
+"appbuild"
+{
+	"appid"			"${STEAM_APPID}"
+	"desc"			"${BUILD_DESCRIPTION}"
+
+	// Live branch to set after upload. Leaving this empty uploads
+	// the build but doesn't move any branch — humans pick which
+	// build to push live from the Steamworks web UI.
+	"setlive"		"${SET_LIVE}"
+
+	// Preview-only run (true = dry-run, validates the script but
+	// uploads nothing). Flip via STEAM_PREVIEW=true env var.
+	"preview"		"${STEAM_PREVIEW}"
+
+	// Local cache to skip re-uploading identical chunks. Persisted
+	// across CI runs via actions/cache if the workflow opts in.
+	"local"			""
+
+	// Absolute paths injected by tools/steam-upload.mjs so the
+	// rendered VDF location (steam/.rendered/) doesn't have to be
+	// next to the content (steam/content/) and output (steam/output/)
+	// directories. steamcmd resolves relative paths against the VDF
+	// file, which was biting us before.
+	"buildoutput"	"${BUILD_OUTPUT}"
+	"contentroot"	"${CONTENT_ROOT}"
+
+	"depots"
+	{
+		"${STEAM_DEPOT_LINUX}"		"depot_linux.vdf"
+		"${STEAM_DEPOT_WINDOWS}"	"depot_windows.vdf"
+	}
+}
