@@ -452,6 +452,22 @@ a:hover {
   background: var(--mo-orange);
 }
 
+/* ── Stage badge ─────────────────────────────────────────────────────── */
+.mo-badge {
+  position: absolute;
+  top: 0.6rem;
+  left: 0.6rem;
+  z-index: 2;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(5, 10, 20, 0.7);
+  border: 1px solid var(--mo-line);
+  color: var(--mo-cyan);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
 /* ── Drift charge meter ──────────────────────────────────────────────── */
 .mo-ctrl-hint {
   margin: 0;
