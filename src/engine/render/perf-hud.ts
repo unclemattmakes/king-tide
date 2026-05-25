@@ -40,9 +40,27 @@ export interface RenderInfoLite {
   }
 }
 
+/** Static environment diagnostics shown at the foot of the panel — set once
+ *  at boot, not per frame. Lets an on-device session confirm the active
+ *  render backend, the real GPU driver (hardware vs llvmpipe), and whether
+ *  the Steam Deck profile actually latched. */
+export interface PerfDiagnostics {
+  /** 'webgpu' | 'webgl2' — the backend Three actually initialised. */
+  backend: string
+  /** Unmasked GPU renderer string from `probeGpuRenderer()`. */
+  gpu: string
+  /** True when `applyDeckProfile()` ran this session. */
+  deckApplied: boolean
+  /** Detection signals that fired (ua / viewport / gamepad / native). */
+  deckSignals: readonly string[]
+}
+
 export interface PerfHud {
   /** Render one update. No-op when the HUD is hidden. */
   tick(stats: PerfStats, info: RenderInfoLite): void
+  /** Set the static environment rows (backend / GPU / deck profile). Persists
+   *  across show/hide toggles — call once after boot. */
+  setDiagnostics(d: PerfDiagnostics): void
   /** Show / hide the overlay. Toggling via the backquote shortcut and the
    *  `?perf=1` URL boot path both call into this. */
   setVisible(on: boolean): void
@@ -88,9 +106,17 @@ export function createPerfHud(): PerfHud {
   const fpsRow = document.createElement('div')
   const drawRow = document.createElement('div')
   const heapRow = document.createElement('div')
+  // Static env rows — set via setDiagnostics(), allowed to wrap because the
+  // GPU driver string can be long. Dimmed slightly: it's reference, not live.
+  const bkndRow = document.createElement('div')
+  const gpuRow = document.createElement('div')
+  gpuRow.style.cssText = 'white-space: normal; opacity: 0.8'
+  bkndRow.style.cssText = 'opacity: 0.8'
   root.appendChild(fpsRow)
   root.appendChild(drawRow)
   root.appendChild(heapRow)
+  root.appendChild(bkndRow)
+  root.appendChild(gpuRow)
   document.body.appendChild(root)
 
   let visible = false
@@ -115,6 +141,12 @@ export function createPerfHud(): PerfHud {
     }
   }
 
+  function setDiagnostics(d: PerfDiagnostics): void {
+    const signals = d.deckSignals.length ? ` (${d.deckSignals.join('+')})` : ''
+    bkndRow.textContent = `BKND  ${d.backend} · deck ${d.deckApplied ? 'on' : 'off'}${signals}`
+    gpuRow.textContent = `GPU   ${d.gpu}`
+  }
+
   function setVisible(on: boolean): void {
     visible = on
     root.style.display = on ? 'block' : 'none'
@@ -128,7 +160,7 @@ export function createPerfHud(): PerfHud {
     root.remove()
   }
 
-  return { tick, setVisible, isVisible, dispose }
+  return { tick, setDiagnostics, setVisible, isVisible, dispose }
 }
 
 /** Compact triangle counts: 1234 → "1k", 384000 → "384k", 1.2M → "1.2M". */

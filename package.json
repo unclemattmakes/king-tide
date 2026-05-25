@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "description": "Wave-mastery arcade hover-bike racing on a drowned Earth.",
+  "author": "Hoverbike",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "party:dev": "partykit dev --port 1999",
@@ -50,8 +53,7 @@
     "docs:dev": "vitepress dev docs-site",
     "docs:build": "vitepress build docs-site",
     "docs:preview": "vitepress preview docs-site",
-    "tauri": "cd src-tauri && cargo tauri",
-    "tauri:dev": "cd src-tauri && cargo tauri dev",
+    "electron:run": "pnpm build && electron .",
     "build:deck": "node tools/build-deck.mjs",
     "build:windows": "node tools/build-windows.mjs",
     "steam:upload": "node tools/steam-upload.mjs",
@@ -72,11 +74,12 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
     "@playwright/test": "^1.60.0",
-    "@tauri-apps/cli": "^2.11.2",
     "@types/node": "^25.9.1",
     "@types/three": "^0.184.1",
     "@vitest/coverage-v8": "^4.1.6",
     "ajv": "^8.17.1",
+    "electron": "^42.2.0",
+    "electron-builder": "^26.8.1",
     "jsdom": "^29.1.1",
     "partykit": "^0.0.115",
     "typescript": "^6.0.3",
@@ -85,6 +88,9 @@
     "vitest": "^4.1.7"
   },
   "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron"
+    ],
     "overrides": {
       "esbuild@<=0.24.2": ">=0.25.0",
       "undici@<6.23.0": ">=6.23.0",

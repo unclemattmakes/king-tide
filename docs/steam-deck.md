@@ -1,48 +1,55 @@
 # Steam Deck — build path + tuning
 
-Live path for shipping Hoverbike to the Steam Deck. The Tauri 2 wrapper
-scaffold is in `src-tauri/`; the runtime profile (framerate cap,
+Live path for shipping Hoverbike to the Steam Deck. The desktop wrapper is
+Electron (`electron/`); the runtime profile (framerate cap,
 fullscreen-on-launch, pixel ratio, AudioContext resume-after-sleep)
-auto-activates when the boot path detects a Deck. The Steamworks SDK
-hookup is feature-gated and stubbed until we have an App ID.
+auto-activates when the boot path detects a Deck. Steamworks SDK hookup is a
+tracked follow-up (nothing functional shipped in the earlier Tauri shell).
 
 Pairs with [`docs/cross-browser.md`](./cross-browser.md) (the web side)
 and the M-series milestones in
 [`docs/implementation-plan.md`](./implementation-plan.md).
 
-## Wrapper: Tauri 2
+## Wrapper: Electron
 
 We wrap the existing Vite-built web bundle in
-[Tauri 2](https://v2.tauri.app/). Why Tauri over Electron / NW.js:
+[Electron](https://www.electronjs.org/). This replaced an earlier Tauri 2
+attempt. On SteamOS, Tauri's native WebView is WebKitGTK, which (a) couldn't
+launch inside the Steam Linux Runtime container — it dynamically links a
+sprawl of host libs the container doesn't provide — and (b) had no usable
+WebGPU, so the renderer fell back to WebGL2. Electron bundles its own
+Chromium, so it runs in the runtime container and gets real WebGPU on the
+Deck's RADV/Vulkan stack.
 
-| Property | Tauri 2 | Electron |
+| Property | Electron | Tauri 2 (rejected) |
 |---|---|---|
-| Binary size | ~5–10 MB | ~150 MB |
-| Runtime | Native WebView (WebKitGTK on SteamOS) | Bundled Chromium per app |
-| Update channel | Single AppImage / Steam delta | Full re-download |
-| Steam integration | [`steamworks` crate](https://crates.io/crates/steamworks) (Rust) | `node-steam` (Node addon) |
-| Build complexity | `cargo tauri build` calls `pnpm build` | Custom multi-step packaging |
+| Runtime | Bundled Chromium (consistent everywhere) | Native WebView (WebKitGTK on SteamOS) |
+| WebGPU on Deck | Yes (Vulkan/Dawn) | No — WebGL2 fallback |
+| Steam Linux Runtime | Launches (self-contained) | Failed to launch |
+| Binary size | ~210 MB tree | ~5–10 MB |
+| Steam integration | `steamworks.js` (Node addon) | `steamworks` crate (Rust) |
 
-The Rust core lets us link the Steamworks SDK directly for achievements,
-cloud saves, Rich Presence, and (later) Workshop track sharing without
-shimming through Node.
+The size cost is the price of a Chromium that actually runs and renders on
+the Deck. Steamworks features (achievements, cloud saves, Rich Presence)
+will hook in via `steamworks.js` in the Electron main process — a tracked
+follow-up; the old Tauri stubs were never called from the web side.
 
-### Target layout
+### Layout
 
 ```
-src-tauri/
-├── Cargo.toml
-├── tauri.conf.json
-├── src/
-│   ├── main.rs           # Tauri app entry
-│   └── steam.rs          # Steamworks integration (achievements, presence)
-├── icons/
-│   └── ...               # platform icons (16/32/128/256, .ico, .icns)
-└── build.rs              # links steam_api.so/.dll at build time
+electron/
+├── main.cjs            # main process: app:// scheme, WebGPU/Vulkan flags,
+│                       #   --no-sandbox, Deck UA bridge, window config
+└── icons/              # platform icons (png set + .ico)
+electron-builder.yml    # packaging: linux `dir` tree + windows nsis
 ```
 
-The `tauri.conf.json` `build.beforeBuildCommand` runs `pnpm build`; Tauri
-then picks up the static bundle from `dist/` and packages it.
+`electron/main.cjs` serves `dist/` over a secure custom `app://bundle/`
+scheme (so Vite's absolute asset paths resolve and WebGPU gets a secure
+context), bakes in `--no-sandbox` (depot files aren't SUID, so the
+chrome-sandbox helper can't initialise inside the runtime container), and
+appends a `SteamDeck` UA token when Steam launches us with `SteamDeck=1` so
+`detectSteamDeck()` fires reliably in a shipped build.
 
 ## Steam Deck specifics
 
@@ -173,14 +180,15 @@ Video to override.
 The Deck build is part of the broader desktop pipeline. See
 [`docs/desktop-builds.md`](./desktop-builds.md) for:
 
-- Toolchain prerequisites (Rust, Tauri CLI, system libs).
+- Toolchain prerequisites (just Node + pnpm; electron-builder fetches
+  Chromium).
 - The `pnpm build:deck` / `pnpm build:windows` commands and what
   they produce.
-- The `.github/workflows/build-desktop.yml` matrix (Linux AppImage +
+- The `.github/workflows/build-desktop.yml` matrix (Linux game tree +
   Windows NSIS in parallel) — manual dispatch + `v*` tag trigger.
 - Steam Partner depot layout (Linux + Windows on the same App ID;
   Deck is told to prefer the Linux depot via the Verified flag).
-- Sideload instructions for AppImage / .exe.
+- Sideload instructions for the Linux tree / .exe.
 
 This doc keeps its focus on the **Deck-specific runtime concerns**
 (battery, framerate cap, Gaming Mode, sleep/resume); for everything
@@ -213,14 +221,14 @@ done once after first Steam release.
 
 ## What's wired today
 
-- **Tauri 2 scaffold** (`src-tauri/`) — `Cargo.toml`, `tauri.conf.json`,
-  `src/main.rs`, `src/steam.rs` (feature-gated Steamworks stubs),
-  `build.rs`, capabilities, `.gitignore`. Steamworks is OFF by default;
-  build with `--features steam` once an SDK is on disk.
-- **`pnpm build:deck`** — orchestrator at `tools/build-deck.mjs`.
+- **Electron wrapper** (`electron/main.cjs`, `electron-builder.yml`) —
+  serves `dist/` over `app://`, enables WebGPU/Vulkan, `--no-sandbox`,
+  Deck UA bridge. Steamworks not yet wired (tracked follow-up).
+- **`pnpm build:deck` / `pnpm build:windows`** — orchestrators at
+  `tools/build-deck.mjs` / `tools/build-windows.mjs`.
 - **CI workflow** — `.github/workflows/build-desktop.yml`, manual + tag-
-  triggered matrix (Linux AppImage + Windows NSIS `.exe`/`.msi`),
-  attaches both bundles to GitHub Releases.
+  triggered matrix (Linux game tree + Windows NSIS installer), attaches
+  the Linux tarball + installer to GitHub Releases.
 - **Boot wiring** — `main.ts` calls `detectSteamDeck()` +
   `applyDeckProfile()`; `playerSettings.framerateCap`,
   `pixelRatio`, `fullscreenPreferred` rows live in Settings → Video.
@@ -232,13 +240,13 @@ done once after first Steam release.
 
 ## Open follow-ups
 
-- Steamworks SDK integration in `steam.rs` (achievements, cloud save
-  for best-lap records, Rich Presence). The Tauri commands are wired;
-  the SDK calls inside them are TODO stubs.
+- Steamworks SDK integration via `steamworks.js` in the Electron main
+  process (achievements, cloud save for best-lap records, Rich
+  Presence). Nothing functional shipped before — the old Tauri stubs
+  were never called from the web side.
 - Rebind menu glyph swap — read `glyphSourceForGamepadId(pad.id)` and
   call `glyphFor(idx, source)` instead of the current standard labels.
 - On-device profiling pass once v1 art lands — confirm the ≤ 12 W
   battery target with the framerate cap engaged.
-- `release-steam.yml` workflow for `steamcmd app_build` uploads.
 - Steam Input default config — publish via Big Picture once we have a
   Steam App ID.

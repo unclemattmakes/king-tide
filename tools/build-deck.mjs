@@ -1,27 +1,24 @@
 #!/usr/bin/env node
 /**
- * Steam Deck build orchestrator.
+ * Steam Deck / Linux build orchestrator.
  *
- * 1. Run the existing `pnpm build` so `dist/` is fresh.
- * 2. Probe for a working `cargo tauri` toolchain. If it's not installed,
- *    print a friendly install message + a link to the Tauri docs and
- *    exit non-zero. We deliberately don't try to install Rust on the
- *    user's behalf — that's their decision.
- * 3. If Tauri is available, run `cargo tauri build` against the
- *    Linux x86_64 target. Pass through any flags the caller supplied,
- *    so a future CI workflow can do `pnpm build:deck -- --features steam`.
+ * 1. Run `pnpm build` so `dist/` is fresh.
+ * 2. Run `electron-builder --linux dir`, producing a self-contained
+ *    (Chromium-bundled) game tree at `dist-electron/linux-unpacked/`.
  *
- * Outputs land in `src-tauri/target/release/bundle/appimage/`. The
- * Steam Partner upload step is intentionally not part of this script
- * (a separate workflow handles it once we have the SDK + an App ID).
+ * The `dir` target is what the Steam Linux depot ships — Steam copies the
+ * tree and launches the `hoverbike` binary directly, so there's no AppImage
+ * to self-mount inside the Steam Linux Runtime container. `pnpm steam:upload`
+ * stages this tree; for a quick local sanity check run the binary directly
+ * (`./dist-electron/linux-unpacked/hoverbike`).
+ *
+ * Pass-through flags reach electron-builder, e.g. `pnpm build:deck -- --publish never`.
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const TAURI_DIR = path.join(REPO_ROOT, 'src-tauri')
 
 function fail(message) {
   console.error(`\n[build:deck] ${message}\n`)
@@ -32,11 +29,6 @@ function info(message) {
   console.log(`[build:deck] ${message}`)
 }
 
-if (!existsSync(TAURI_DIR)) {
-  fail(`src-tauri/ not found at ${TAURI_DIR}. Did you check out the full repo?`)
-}
-
-// Pass-through args (drop the first two — node + script).
 const extraArgs = process.argv.slice(2)
 
 // ---- 1. Vite build → dist/ ------------------------------------------------
@@ -50,48 +42,16 @@ if (webBuild.status !== 0) {
   fail(`web build failed (exit ${webBuild.status}). Fix the Vite/tsc errors above and rerun.`)
 }
 
-// ---- 2. Probe cargo tauri --------------------------------------------------
-info('probing cargo tauri toolchain …')
-const probe = spawnSync('cargo', ['tauri', '--version'], {
-  cwd: TAURI_DIR,
-  stdio: 'pipe',
-  shell: process.platform === 'win32',
-})
-if (probe.status !== 0) {
-  console.error(`
-[build:deck] cargo tauri is not available.
-
-Install requirements:
-  1. Rust       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-  2. Tauri CLI  cargo install tauri-cli --version "^2.0" --locked
-  3. Linux libs (Ubuntu / SteamOS Desktop):
-       sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev \\
-                        libayatana-appindicator3-dev librsvg2-dev
-
-See docs/steam-deck.md and src-tauri/README.md for full setup.
-`)
-  process.exit(127)
-}
-
-const probeOut = String(probe.stdout ?? '').trim()
-info(`cargo tauri found: ${probeOut || '(version unknown)'}`)
-
-// ---- 3. cargo tauri build --------------------------------------------------
-const target = process.platform === 'linux' ? 'x86_64-unknown-linux-gnu' : null
-const args = ['tauri', 'build']
-if (target) {
-  args.push('--target', target)
-}
-args.push(...extraArgs)
-
-info(`running: cargo ${args.join(' ')}`)
-const tauriBuild = spawnSync('cargo', args, {
-  cwd: TAURI_DIR,
+// ---- 2. electron-builder --linux dir --------------------------------------
+const args = ['electron-builder', '--linux', 'dir', ...extraArgs]
+info(`running: pnpm exec ${args.join(' ')}`)
+const build = spawnSync('pnpm', ['exec', ...args], {
+  cwd: REPO_ROOT,
   stdio: 'inherit',
   shell: process.platform === 'win32',
 })
-if (tauriBuild.status !== 0) {
-  fail(`cargo tauri build failed (exit ${tauriBuild.status}).`)
+if (build.status !== 0) {
+  fail(`electron-builder failed (exit ${build.status}).`)
 }
 
-info('done — AppImage in src-tauri/target/release/bundle/appimage/')
+info('done — game tree in dist-electron/linux-unpacked/ (binary: hoverbike).')

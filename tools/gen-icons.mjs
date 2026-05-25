@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Generate placeholder Tauri app icons across desktop platforms.
+ * Generate placeholder app icons for the Electron desktop builds.
  * Writes minimal solid-color PNGs (and a real Windows .ico container)
- * so `cargo tauri build` succeeds end-to-end during pre-art development.
- * Replace with real art via `cargo tauri icon` once the v1 brand
+ * so electron-builder has icons to stamp onto the Linux/Windows builds
+ * during pre-art development. Replace with real art once the v1 brand
  * assets land.
  *
  * Color: hoverbike teal #00B4B4 over an opaque background — keeps the
@@ -21,16 +21,19 @@
  * ICO = ICONDIR + one ICONDIRENTRY pointing at an embedded PNG (modern
  * Windows ICO format; Vista+ accepts PNG inside the container).
  *
- * macOS .icns is deliberately omitted — we don't ship macOS yet, and
- * .icns has a quirkier format that's better handled by `cargo tauri
- * icon` when the time comes.
+ * macOS .icns is deliberately omitted — we don't ship macOS yet.
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { deflateSync } from 'node:zlib'
 import { fileURLToPath } from 'node:url'
+import { deflateSync } from 'node:zlib'
 
-const ICONS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'src-tauri', 'icons')
+const ICONS_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'electron',
+  'icons',
+)
 
 mkdirSync(ICONS_DIR, { recursive: true })
 
@@ -68,11 +71,7 @@ function makePng(size) {
   // PNG signature
   const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
   // IHDR: width, height, bitdepth=8, colortype=6 (RGBA), compression=0, filter=0, interlace=0
-  const ihdr = Buffer.concat([
-    u32(size),
-    u32(size),
-    Buffer.from([8, 6, 0, 0, 0]),
-  ])
+  const ihdr = Buffer.concat([u32(size), u32(size), Buffer.from([8, 6, 0, 0, 0])])
   // IDAT: each scanline starts with filter byte 0, then RGBA pixels.
   const row = Buffer.alloc(1 + size * 4)
   row[0] = 0
@@ -115,7 +114,7 @@ for (const t of targets) {
 
 // Windows .ico — a single 256×256 PNG embedded in an ICO container.
 // Modern Windows (Vista+) parses ICO files where each entry is a PNG
-// rather than a BMP. Tauri's bundler reads this for both the .exe icon
+// rather than a BMP. electron-builder reads this for both the .exe icon
 // and the NSIS installer.
 //
 // Layout: ICONDIR header (6 B) + one ICONDIRENTRY (16 B) + PNG bytes.
@@ -140,4 +139,4 @@ const icoDest = path.join(ICONS_DIR, 'icon.ico')
 writeFileSync(icoDest, ico)
 console.log(`wrote ${icoDest} (${ico.length} B, 256×256 PNG-in-ICO)`)
 
-console.log('\ndone — placeholders ready. Swap with real art via `cargo tauri icon` when v1 art lands.')
+console.log('\ndone — placeholders ready. Swap with real art when v1 art lands.')

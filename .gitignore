@@ -36,7 +36,5 @@ tools/blender/lib/*.blend@
 __pycache__/
 *.pyc
 
-# Tauri build artefacts (Steam Deck wrapper)
-src-tauri/target/
-src-tauri/gen/
-src-tauri/steam_appid.txt
+# Electron desktop build output (Steam Deck / Windows wrappers)
+dist-electron/
