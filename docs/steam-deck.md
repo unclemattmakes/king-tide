@@ -44,6 +44,27 @@ src-tauri/
 The `tauri.conf.json` `build.beforeBuildCommand` runs `pnpm build`; Tauri
 then picks up the static bundle from `dist/` and packages it.
 
+### AppImage: strip bundled `libwayland-*` (Wayland EGL fix)
+
+Tauri's AppImage bundler copies every `ldd` dependency of GTK/WebKit into
+`usr/lib`, including `libwayland-client.so.0`. On a Wayland host — every Deck
+in Desktop Mode and Gaming Mode — that bundled (build-host) copy shadows the
+host's on the loader path. `eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND)` then
+rejects the foreign `wl_display` proxy with `EGL_BAD_PARAMETER` and WebKitGTK
+aborts **before the window opens**:
+
+```
+Could not create default EGL display: EGL_BAD_PARAMETER. Aborting...
+```
+
+The AppImage excludelist names these libs as "never bundle"; `linuxdeploy`
+honors it, Tauri does not. So both build paths run
+[`tools/fix-appimage-wayland.sh`](../tools/fix-appimage-wayland.sh) after
+`cargo tauri build` to strip `libwayland-*.so*` and repack the AppImage onto
+its own runtime (`pnpm build:deck` calls it; the CI Linux job runs it before
+upload — needs `squashfs-tools`). The webview then uses the host's wayland
+libs and the EGL display creates cleanly.
+
 ## Steam Deck specifics
 
 ### Gaming Mode vs Desktop Mode

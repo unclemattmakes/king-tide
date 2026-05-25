@@ -68,7 +68,8 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            squashfs-tools
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -106,6 +107,20 @@ jobs:
           else
             cargo tauri build --target ${{ matrix.rust_target }}
           fi
+
+      - name: Strip bundled libwayland (Wayland EGL fix)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          shopt -s nullglob
+          imgs=(src-tauri/target/${{ matrix.rust_target }}/release/bundle/appimage/*.AppImage)
+          if [ ${#imgs[@]} -eq 0 ]; then
+            echo "no .AppImage produced — bundle step must have failed" >&2
+            exit 1
+          fi
+          for img in "${imgs[@]}"; do
+            bash tools/fix-appimage-wayland.sh "$img"
+          done
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4

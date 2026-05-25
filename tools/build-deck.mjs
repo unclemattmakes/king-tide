@@ -16,7 +16,7 @@
  * (a separate workflow handles it once we have the SDK + an App ID).
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -94,4 +94,26 @@ if (tauriBuild.status !== 0) {
   fail(`cargo tauri build failed (exit ${tauriBuild.status}).`)
 }
 
-info('done — AppImage in src-tauri/target/release/bundle/appimage/')
+// ---- 4. Strip bundled libwayland-* (Wayland EGL fix) ----------------------
+// Tauri over-bundles libwayland-client.so.0; on Wayland hosts (the Steam Deck)
+// it shadows the host's copy and the webview aborts with EGL_BAD_PARAMETER
+// before the window opens. See tools/fix-appimage-wayland.sh.
+if (target) {
+  const appimageDir = path.join(TAURI_DIR, 'target', target, 'release', 'bundle', 'appimage')
+  const images = existsSync(appimageDir)
+    ? readdirSync(appimageDir).filter((f) => f.endsWith('.AppImage'))
+    : []
+  if (images.length === 0) {
+    fail(`no .AppImage found in ${appimageDir} — did the bundle step run?`)
+  }
+  const script = path.join(REPO_ROOT, 'tools', 'fix-appimage-wayland.sh')
+  for (const img of images) {
+    info(`stripping bundled libwayland-* from ${img} …`)
+    const strip = spawnSync('bash', [script, path.join(appimageDir, img)], { stdio: 'inherit' })
+    if (strip.status !== 0) {
+      fail(`libwayland strip failed for ${img} (exit ${strip.status}).`)
+    }
+  }
+}
+
+info('done — AppImage in src-tauri/target/<triple>/release/bundle/appimage/')
