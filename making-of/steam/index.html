@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>Porting to Steam — The Making of Hoverbike</title>
+    <meta
+      name="description"
+      content="A web-first game meets a console: why the Steam Deck wrapper moved from Tauri to Electron, the four bugs the spike uncovered, and what bundling your own Chromium buys."
+    />
+    <style>
+      body {
+        margin: 0;
+        background: #050a14;
+        color: #f4f8ff;
+        font-family: "Inter", system-ui, sans-serif;
+      }
+    </style>
+    <script type="module" src="/src/making-of/steam/main.ts"></script>
+  </head>
+  <body>
+    <header class="mo-topbar">
+      <a class="mo-brand" href="/making-of/">Making of <span>Hoverbike</span></a>
+      <nav>
+        <a href="/making-of/">All chapters</a>
+        <a href="/">Play the game</a>
+      </nav>
+    </header>
+
+    <main class="mo-shell">
+      <section class="mo-hero">
+        <p class="mo-eyebrow">Chapter 06 — Porting to Steam</p>
+        <h1>"It's just a web game" meets a console.</h1>
+        <p>
+          Hoverbike runs in a browser tab. To sell it on Steam — and run it on the Steam Deck — it
+          needs to look like a native app: a window, an executable, a Steam depot. The web part was
+          done. The <em>shell</em> around it nearly sank the whole Steam port — and the hardest part,
+          by a wide margin, wasn't the game at all. It was getting the thing to
+          <strong>launch through Steam</strong> in the first place.
+        </p>
+      </section>
+
+      <article class="mo-prose">
+        <h2>Why Tauri had to go</h2>
+        <p>
+          The first wrapper was <strong>Tauri</strong>: tiny binaries (~10&nbsp;MB) and a Rust core
+          that could one day link Steam's SDK directly. On paper, perfect. In practice it nearly
+          sank the port — and not for any one dramatic reason. It was death by a thousand hoops.
+        </p>
+        <p>
+          The single biggest problem, by far, was just <strong>getting it to launch through Steam at
+          all.</strong> Tauri renders with the operating system's own web view —
+          <strong>WebKitGTK</strong> on SteamOS — which dynamically links a sprawl of system
+          libraries. But Steam launches games inside the <strong>Steam Linux Runtime</strong>, a
+          locked-down container that doesn't ship that library set. Double-click it from the desktop
+          and it'd come up; launch it the way players actually do — <em>through Steam</em> — and it
+          died before a window ever appeared. Every workaround we tried just surfaced the next
+          missing piece. We sank far more time into "why won't it start?" than into anything in the
+          game itself.
+        </p>
+        <p>
+          And the reward for finally coaxing it open was a gut-punch: <strong>it wasn't performant.</strong>
+          WebKitGTK gave us no usable WebGPU, so the renderer silently fell back to the older
+          <strong>WebGL2</strong>, and the modern water pipeline (the node-material shaders from
+          <a href="/making-of/wave-field/">Chapter 01</a>) crawled. So the best case after all that
+          effort was a build that launched unreliably and, when it did, ran badly. That's not a
+          thing you can ship.
+        </p>
+        <p>
+          The hypothesis: <strong>Electron bundles its own Chromium.</strong> So it doesn't depend on
+          the container's libraries, and it ships a modern browser engine <em>with</em> WebGPU. The
+          price is size — about 210&nbsp;MB versus 10 — which is fine if it actually runs. So before
+          committing, we built a throwaway spike and tested it on a real Deck.
+        </p>
+
+        <h2>The spike, bug by bug</h2>
+        <p>
+          Four problems surfaced, in order. Tellingly, the first three were the exact same fight
+          that doomed Tauri — just getting the thing to start through Steam — except this time each
+          had a clean, one-time fix instead of a fundamental dead end. Every lesson is now baked into
+          the build.
+        </p>
+
+        <h3>1. Every asset 404s under <code>file://</code></h3>
+        <p>
+          Loading the build straight off disk, nothing loaded. Vite builds with absolute asset paths
+          (<code>/assets/…</code>), and under <code>file://</code> those resolve against the
+          filesystem root. The fix was to serve the bundle over a custom
+          <strong><code>app://bundle/</code> scheme</strong> instead — which, conveniently, also
+          gives the page a <strong>secure context</strong>, the thing WebGPU refuses to run without.
+        </p>
+
+        <h3>2. The launcher did nothing — and logged nothing</h3>
+        <p>
+          We zipped the build onto the Deck and the launcher silently did nothing — not even an
+          error log, which was the clue: the process never ran. A plain <code>.zip</code> doesn't
+          preserve Unix permissions, so the executable landed <strong>without its +x bit</strong> and
+          Steam couldn't exec it. Lesson, now permanent in CI: ship Linux trees as a
+          <strong><code>tar</code></strong>, never a zip.
+        </p>
+
+        <h3>3. "Steam says running" — but no window</h3>
+        <p>
+          Launched through Steam, the process showed as running with nothing on screen; from the file
+          manager it worked fine. The culprit: Electron's <code>chrome-sandbox</code> helper must be
+          setuid-root, copied depot files never are, and the runtime container blocks the fallback
+          the bare desktop allowed — so sandbox init failed and Electron exited silently. Because we
+          only ever load local, trusted content, the fix is the standard one for Steam:
+          <strong><code>--no-sandbox</code></strong>.
+        </p>
+
+        <h3>4. The real one: 200 lines of shader errors (and the best news of the spike)</h3>
+        <p>
+          Once it launched, the log filled with ~200 repeats of <code>unresolved interpolation
+          sampling 'either'</code>. But buried in the same log was a line that
+          <em>only ever prints when WebGPU is genuinely active</em> — so the core bet had paid off:
+          <strong>real WebGPU on the Deck.</strong> 🎉 The errors turned out to be Three.js's internal
+          mipmap shaders using a newer WGSL syntax (<code>@interpolate(flat, either)</code>) that the
+          older Dawn engine inside Electron 31 couldn't parse — a version mismatch, not a wrapper bug.
+          The fix was a one-liner: bump to <strong>Electron 42</strong>, whose Dawn understands it.
+        </p>
+
+        <figure class="mo-demo">
+          <figcaption class="mo-demo-caption">
+            Live demo — this panel runs the same checks the port hinges on, against
+            <strong>your</strong> browser right now. The water renders on WebGL2 either way; toggle
+            the fallback look to see what losing the modern path costs.
+          </figcaption>
+          <div class="mo-demo-body">
+            <div class="mo-demo-stage" id="steam-demo-stage"></div>
+            <div class="mo-demo-controls" id="steam-demo-controls"></div>
+          </div>
+        </figure>
+
+        <p>
+          If your browser shows <strong>WebGPU: available</strong> and <strong>Secure context:
+          yes</strong>, you're passing exactly the checks WebKitGTK-in-the-container failed. That gap
+          — modern Chromium versus the system web view — is the entire reason for the migration.
+        </p>
+
+        <h2>Building out the real pipeline</h2>
+        <p>
+          The spike was green, so the throwaway became the shell. A few decisions that aren't obvious
+          until a container bites you:
+        </p>
+        <ul>
+          <li>
+            <strong>The wrapper is ~40 lines.</strong> Register <code>app://bundle/</code> (with a
+            path-traversal guard), append <code>--no-sandbox</code> and the Vulkan/WebGPU flags,
+            open a window, load <code>app://bundle/index.html</code>. The Deck even gets detected for
+            free: Steam sets a <code>SteamDeck=1</code> env var, so the wrapper appends a
+            <code>SteamDeck</code> token to the user agent — the same signal the game already looks
+            for. There's no IPC at all, because the web side never called into the old Rust shell.
+          </li>
+          <li>
+            <strong>Linux ships the unpacked folder, not an AppImage.</strong> AppImages self-mount
+            via FUSE, which the Steam runtime often lacks. The plain unpacked tree is what most
+            Electron-on-Steam games ship.
+          </li>
+          <li>
+            <strong><code>asar: false</code>.</strong> Our <code>app://</code> handler reads files
+            with Electron's <code>net.fetch</code>, which can't see inside an asar archive. Loose
+            files sidestep it.
+          </li>
+          <li>
+            <strong>A whole install dance, deleted.</strong> Tauri's WebView needed Microsoft's Edge
+            WebView2 runtime bootstrapped on Windows via a Valve-approved install script. Electron
+            bundles Chromium, so the download, the cache, and the approval dance are simply gone. CI
+            also dropped the entire Rust + WebKitGTK toolchain — about five minutes off every run.
+          </li>
+        </ul>
+
+        <h2>What this cost, and what's still open</h2>
+        <p>
+          The honest ledger: binaries went from ~10&nbsp;MB to ~210&nbsp;MB. Two things are
+          deliberately <em>not</em> done yet — the Steamworks SDK (achievements, cloud saves, rich
+          presence) isn't wired in (the old Rust commands were never-called stubs, so nothing
+          functional was lost), and the online leaderboard server still rejects the
+          <code>app://bundle</code> origin, so leaderboards are offline in the desktop build until
+          that's allowed. Both are tracked.
+        </p>
+
+        <h2>The quiet lesson</h2>
+        <p>
+          "Web-first" doesn't mean "ships anywhere for free" — the native shell is a real platform
+          with sandboxes, secure-context rules, container libraries, and file-permission gotchas of
+          its own. But notice what <em>didn't</em> change: not a single line of game code. The same
+          boundary that lets this very site embed the real engine (<a href="/making-of/sim-render/">Chapter
+          05</a>) is what made ripping out one native shell and bolting on another a contained,
+          one-pull-request job. The game is just a <code>dist/</code> folder; everything else is
+          packaging.
+        </p>
+
+        <h2>Read the code</h2>
+        <p>
+          The whole wrapper is
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/electron/main.cjs">
+            <code>electron/main.cjs</code></a>; packaging in
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/electron-builder.yml">
+            <code>electron-builder.yml</code></a>; the Steam depot upload in
+          <code>tools/steam-upload.mjs</code>. The full chronological account is
+          <a href="https://github.com/occ-matt/hoverbike/pull/204">PR #204</a>, and the operator docs
+          in <code>docs/steam-deck.md</code> + <code>docs/desktop-builds.md</code>.
+        </p>
+      </article>
+
+      <footer class="mo-footer">
+        <p>
+          <a href="/making-of/">← Back to all chapters</a> &nbsp;·&nbsp; Previous:
+          <a href="/making-of/sim-render/">Sim vs. Render</a>.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

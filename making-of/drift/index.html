@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>The Drift — The Making of Hoverbike</title>
+    <meta
+      name="description"
+      content="A Mario-Kart mini-turbo for a hoverbike: why the game needed a second skill, the charge tiers, the anti-snake floor, and the 30 years of tuning we borrowed."
+    />
+    <style>
+      body {
+        margin: 0;
+        background: #050a14;
+        color: #f4f8ff;
+        font-family: "Inter", system-ui, sans-serif;
+      }
+    </style>
+    <script type="module" src="/src/making-of/drift/main.ts"></script>
+  </head>
+  <body>
+    <header class="mo-topbar">
+      <a class="mo-brand" href="/making-of/">Making of <span>Hoverbike</span></a>
+      <nav>
+        <a href="/making-of/">All chapters</a>
+        <a href="/">Play the game</a>
+      </nav>
+    </header>
+
+    <main class="mo-shell">
+      <section class="mo-hero">
+        <p class="mo-eyebrow">Chapter 04 — The Drift</p>
+        <h1>A second skill for dry land.</h1>
+        <p>
+          Wave mastery is the hero skill — but it goes quiet the moment you leave the water. On a
+          drowned-city canyon or a ramp network, a game with only wave-pumping reduces to "hold
+          throttle and steer." So the bike needed a second skill for the dry bits, and the obvious
+          one had thirty years of tuning behind it: the Mario Kart mini-turbo drift.
+        </p>
+      </section>
+
+      <article class="mo-prose">
+        <h2>Why drift, specifically</h2>
+        <p>
+          The two skills are deliberately <em>different axes</em>. Wave-pumping is vertical and about
+          <strong>timing</strong> — catch the back of a swell at the right instant. Drift is lateral
+          and about <strong>space</strong> — commit to a line through a corner. One owns the water,
+          the other owns the land, and because they never compete for the same input at the same
+          moment, learning one doesn't crowd out the other.
+        </p>
+
+        <h2>Standing on thirty years of someone else's work</h2>
+        <p>
+          Mario Kart has been refining this exact mechanic since 1992, and the history is a free
+          design doc:
+        </p>
+        <ul>
+          <li><strong>1992</strong> — drift exists only to keep you from spinning out in a corner. No reward.</li>
+          <li><strong>1996</strong> — the mini-turbo: hold a drift, get a little boost on release.</li>
+          <li><strong>2008</strong> — the Wii switches from stick-wiggling to <em>time-based</em> charging. This is the big one: it killed "snaking" (spamming drifts on straights) and lowered the skill floor without lowering the ceiling.</li>
+          <li><strong>2014 → 2017</strong> — two tiers (blue, then orange), and Deluxe adds a third (purple ultra).</li>
+        </ul>
+        <p>
+          We took the modern, time-based model wholesale: hold a trick button while steering into a
+          corner to charge, release to fire a tiered boost.
+        </p>
+
+        <figure class="mo-demo">
+          <figcaption class="mo-demo-caption">
+            Live demo — <strong>hold to charge, release to boost</strong>. The thresholds and boost
+            values are the real ones from <code>drift-tiers.ts</code>; the deck scrolls at the boost
+            your charge earns.
+          </figcaption>
+          <div class="mo-demo-body">
+            <div class="mo-demo-stage" id="drift-demo-stage"></div>
+            <div class="mo-demo-controls" id="drift-demo-controls"></div>
+          </div>
+        </figure>
+
+        <h2>The tiers, and the floor that stops the cheese</h2>
+        <p>
+          Hold longer, win bigger: blue at 0.6&nbsp;s (a 1.45× punch), orange at 1.4&nbsp;s (1.75×),
+          purple at 2.4&nbsp;s (1.95× and a duration long enough to carry clean into the next
+          corner). The gap from orange to purple is intentionally wide, so a casual hold lands on
+          orange and only a committed, long-arc drift earns the ultra.
+        </p>
+        <p>
+          But the most important number is the <strong>floor</strong>. Release before 0.6&nbsp;s and
+          you get <em>nothing</em> — try it in the demo. That floor, plus a quarter-second cooldown
+          before you can drift again, is the anti-snake rule: you can't tap-spam mini-turbos down a
+          straightaway. Charging two boosts requires two real corners. It's the Wii's lesson, baked
+          in from day one.
+        </p>
+
+        <h2>The bugs Nintendo already fixed (so we fixed them too)</h2>
+        <p>
+          A naïve drift implementation reveals its problems fast. Our first pass let a held drift
+          tighten into a death-spiral 180. The fix is the <strong>wide</strong> drift model: while
+          drifting, counter-steering <em>opens</em> the arc rather than cranking it tighter, so the
+          slide feels like a committed line you can shape, not a trap. The rider also physically
+          <strong>banks</strong> into the slide — because the lean sells the drift to your eye far
+          more than the underlying physics do — and the rear sparks shift color through the tiers
+          with a matching HUD badge, because a charge you can't <em>read</em> is a guess, not a
+          skill.
+        </p>
+
+        <h2>It doesn't rebuild the handling — it bends it</h2>
+        <p>
+          Drift isn't a separate movement system. It reaches into the same hover ground-physics from
+          <a href="/making-of/buoyancy/">Chapter 02</a> and bends two knobs: lateral drag drops to
+          about a third (so the tail slides), and the bike's turning is replaced by a
+          drift-direction bias with reduced player authority (so you're committed to the slide's
+          direction). It's also strictly <strong>grounded-only</strong> — the moment you're airborne
+          it yields to the trick window, keeping wave mastery's territory clear. And like the rest
+          of the sim, it reads only ECS state, so it stays deterministic for multiplayer.
+        </p>
+
+        <h2>Read the code</h2>
+        <p>
+          The charge curve and boost payloads are a pure, test-pinned leaf:
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/game/systems/drift-tiers.ts">
+            <code>src/game/systems/drift-tiers.ts</code></a> (imported directly by the demo). The
+          state machine lives in
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/game/systems/drift.ts">
+            <code>drift.ts</code></a>, the physics modulation in
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/game/systems/hover.ts">
+            <code>hover.ts</code></a>, and the rationale in
+          <code>docs/adr/0005-drift-mechanic.md</code> + <code>docs/drift-deep-dive.md</code>.
+        </p>
+      </article>
+
+      <footer class="mo-footer">
+        <p>
+          <a href="/making-of/">← Back to all chapters</a> &nbsp;·&nbsp; Next up:
+          <a href="/making-of/sim-render/">Sim vs. Render</a>.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

@@ -11,6 +11,7 @@ Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics a
 - [In-app track editor](docs/track-editor-guide.md) — authoring gameplay data
 - [Blender pipeline](docs/blender-pipeline-guide.md) — authoring environment geometry
 - [Dev + modder docs site](docs-site/) — VitePress site (`pnpm docs:dev`) covering build, gameplay, asset pipeline, and reference
+- [Making-of site](making-of/) — illustrated build log with playable 3D demos of the systems (wave field, buoyancy, feel tuning, drift, sim/render split, the Steam port). Ships with the game at `/making-of/`; reachable from the main menu and at [localhost:5191/making-of/](http://localhost:5191/making-of/) under `pnpm dev`
 - [Contributing](CONTRIBUTING.md) — workflow, conventions, testing expectations
 - [Cross-browser support](docs/cross-browser.md) — tier matrix + how to run `E2E_BROWSERS=all pnpm e2e`
 - [Steam Deck tuning](docs/steam-deck.md) — Deck-specific runtime concerns (battery, framerate cap, Gaming Mode, profile detection)

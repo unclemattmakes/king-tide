@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>Sim vs. Render — The Making of Hoverbike</title>
+    <meta
+      name="description"
+      content="One rule — the simulation may never import the renderer — and the freedom it buys: deterministic multiplayer, replays, headless tests, and a stable sim under a smooth render."
+    />
+    <style>
+      body {
+        margin: 0;
+        background: #050a14;
+        color: #f4f8ff;
+        font-family: "Inter", system-ui, sans-serif;
+      }
+    </style>
+    <script type="module" src="/src/making-of/sim-render/main.ts"></script>
+  </head>
+  <body>
+    <header class="mo-topbar">
+      <a class="mo-brand" href="/making-of/">Making of <span>Hoverbike</span></a>
+      <nav>
+        <a href="/making-of/">All chapters</a>
+        <a href="/">Play the game</a>
+      </nav>
+    </header>
+
+    <main class="mo-shell">
+      <section class="mo-hero">
+        <p class="mo-eyebrow">Chapter 05 — Sim vs. Render</p>
+        <h1>One rule, and the freedom it buys.</h1>
+        <p>
+          Every system in the last four chapters obeys a single architectural rule. It sounds like
+          bookkeeping, but it's the most important line in the codebase — the thing that makes
+          multiplayer, replays, automated tests, and a smooth 60&nbsp;fps all <em>possible</em>
+          instead of heroic. The rule is boring. What it buys is not.
+        </p>
+      </section>
+
+      <article class="mo-prose">
+        <h2>The rule</h2>
+        <p>
+          The game is split in two. The <strong>simulation</strong> — physics, hover, drift, AI,
+          the wave field — lives under <code>src/engine/sim/</code> and
+          <code>src/game/systems/</code>. The <strong>renderer</strong> — Three.js scenes,
+          materials, shaders, the camera — lives under <code>src/engine/render/</code>. And:
+        </p>
+        <div class="mo-aside">
+          <strong>The sim may never import Three.js. The renderer reads from the simulation, one
+          way, and never writes back.</strong>
+        </div>
+        <p>
+          That's it. It's so simple you can enforce it with a grep —
+          <code>grep -r "from 'three'" src/game/systems</code> should always come back empty. The
+          renderer reads the bike's position out of the ECS world and pushes it into a Three.js
+          object every frame; nothing ever flows the other way. Why be so strict? Four reasons, and
+          they compound.
+        </p>
+
+        <h2>1 — Determinism, which is multiplayer <em>and</em> replays</h2>
+        <p>
+          Because the sim never touches the renderer, it's a <strong>pure function of its inputs</strong>:
+          a starting seed, plus the stream of button presses, fully determines every position
+          forever. Run the same inputs on two machines and you get bit-for-bit identical results.
+          The game leans on this hard — there's a determinism harness that hashes the entire sim
+          into a string each tick, with the contract that
+          <em>"two sims advanced from the same seed and inputs MUST produce the same snapshot
+          string."</em>
+        </p>
+        <p>
+          That single property is what makes the hard features cheap. <strong>Multiplayer</strong>
+          is lockstep: peers exchange button presses, not positions, and each simulates the same
+          race in parallel. <strong>Replays and Time-Trial ghosts</strong> are just a recorded input
+          stream replayed through the same sim. Now imagine the renderer could write back into the
+          sim — say, the smoothed camera nudged a bike's position. Two players whose cameras differ
+          by a frame would instantly desync. The one-way rule is what keeps the simulation
+          trustworthy.
+        </p>
+
+        <h2>2 — The whole game tests without a browser</h2>
+        <p>
+          Three.js is a megabyte of code that wants a GPU and a DOM. If a hover or drift system
+          imported it, every unit test would have to fake a graphics context. Because they don't,
+          the entire simulation runs headless in plain Node — so the suite is
+          <strong>834 tests in about 8 seconds</strong>, no browser required. (Every demo on this
+          site was sanity-checked the same way: the sim math is just importable functions.) Fast,
+          honest tests are a direct dividend of the boundary.
+        </p>
+
+        <h2>3 — A stable sim under a smooth render (two clocks)</h2>
+        <p>
+          The split lets the two halves run on <strong>different clocks</strong>. The sim advances in
+          fixed steps — a constant 60 ticks per second — so gravity, buoyancy, and drift always
+          integrate over the exact same slice of time and behave identically whether your machine
+          renders at 30&nbsp;fps or 144. The renderer, meanwhile, draws as often as your display
+          allows and <strong>interpolates</strong> between the sim's most recent states to stay
+          smooth.
+        </p>
+        <p>
+          The demo below makes the two clocks visible. The cyan dots are discrete sim states; the
+          orange bike is what you'd actually render. Drop the sim rate to a crawl and turn
+          interpolation off — the bike lurches from tick to tick. Turn interpolation back on and it
+          glides, even though the sim is still ticking just a handful of times a second.
+        </p>
+
+        <figure class="mo-demo">
+          <figcaption class="mo-demo-caption">
+            Live demo — <strong>lower the sim tick rate, then toggle interpolation</strong>. Cyan
+            dots are the sim's discrete states; the orange bike is the interpolated render.
+          </figcaption>
+          <div class="mo-demo-body">
+            <div class="mo-demo-stage" id="sr-demo-stage"></div>
+            <div class="mo-demo-controls" id="sr-demo-controls"></div>
+          </div>
+        </figure>
+
+        <p>
+          That's exactly how networked bikes move in the real game: position snapshots arrive only
+          20 times a second, and the renderer interpolates between the two most recent ones (running
+          ~100&nbsp;ms behind, so there are always two to blend) instead of teleporting on each
+          arrival. A coarse, cheap, deterministic stream of truth; a smooth picture on top. You can
+          only pull that trick if the two layers are cleanly separated.
+        </p>
+
+        <h2>4 — One-way flow deletes a whole class of bugs</h2>
+        <p>
+          The nastiest bugs in game code come from feedback loops between rendering and simulation:
+          a value the renderer computed (an interpolated pose, a camera-relative offset) sneaks back
+          into the physics, and now the simulation depends on framerate, screen size, or which way
+          the camera was pointing. Those desyncs are miserable to track down. The "render never
+          writes back" half of the rule makes them <strong>impossible by construction</strong>.
+        </p>
+        <p>
+          When something genuinely does need to flow from the player into the sim — a key press, a
+          click in the track editor — it goes in as <strong>input intent</strong> through a narrow,
+          explicit channel, not by a render system poking an ECS component. Shared math (vector
+          helpers, the wave-field sampler) lives on the sim side, and the renderer imports
+          <em>down</em> into it; never the reverse.
+        </p>
+
+        <h2>You've been relying on it this whole time</h2>
+        <p>
+          Look back at <a href="/making-of/wave-field/">Chapter 01</a>. The reason this site can drop
+          the <em>actual</em> wave-field sampler into a Three.js demo is that the sampler is pure
+          sim — it has no idea the renderer exists. The CPU buoyancy reads it; the water shader reads
+          the same formula; neither owns the other. Every honest demo on this site is a small proof
+          that the boundary holds.
+        </p>
+
+        <h2>Read the code</h2>
+        <p>
+          The rule and its rationale are in
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/docs/adr/0002-sim-render-separation.md">
+            <code>docs/adr/0002-sim-render-separation.md</code></a>; the ECS choice that makes the
+          sim pure data in <code>0001-ecs-bitecs.md</code>. The determinism hash lives in
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/engine/sim/snapshot.ts">
+            <code>snapshot.ts</code></a>, the fixed-step accumulator in
+          <code>src/boot/game-loop.ts</code>, and the snapshot interpolation in
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/game/systems/remote-interp.ts">
+            <code>remote-interp.ts</code></a>.
+        </p>
+      </article>
+
+      <footer class="mo-footer">
+        <p>
+          <a href="/making-of/">← Back to all chapters</a> &nbsp;·&nbsp; Next up:
+          <a href="/making-of/steam/">Porting to Steam</a>.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

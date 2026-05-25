@@ -199,6 +199,34 @@ function assetPipelineWatchPlugin(): Plugin {
   }
 }
 
+/**
+ * Discover every `making-of/**​/index.html` page so the multi-page build
+ * emits each one. The making-of microsite (see making-of/) is a set of
+ * static article pages served from the same app as the game; each gets
+ * its own Rollup entry keyed by its path (e.g. `making-of/wave-field`).
+ */
+function makingOfInputs(): Record<string, string> {
+  const root = path.resolve(REPO_ROOT, 'making-of')
+  const inputs: Record<string, string> = {}
+  if (!fs.existsSync(root)) return inputs
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        walk(full)
+      } else if (entry.name === 'index.html') {
+        const key = path
+          .relative(REPO_ROOT, full)
+          .replace(/[/\\]index\.html$/, '')
+          .replace(/[/\\]/g, '-')
+        inputs[key] = full
+      }
+    }
+  }
+  walk(root)
+  return inputs
+}
+
 export default defineConfig({
   plugins: [trackEditorSavePlugin(), assetPipelineWatchPlugin()],
   resolve: {
@@ -218,6 +246,12 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: true,
+    rollupOptions: {
+      input: {
+        main: path.resolve(REPO_ROOT, 'index.html'),
+        ...makingOfInputs(),
+      },
+    },
   },
   optimizeDeps: {
     exclude: ['@dimforge/rapier3d-compat'],
