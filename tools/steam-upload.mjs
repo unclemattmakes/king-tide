@@ -29,11 +29,11 @@
  *   STEAM_PREVIEW          "true" for a SteamPipe dry-run (no upload)
  *   STEAM_SET_LIVE         branch to push live (e.g. "beta"); default empty
  *   BUILD_DESCRIPTION      free-form label; default `<short-sha> @ <iso-date>`
- *   LINUX_BUNDLE           override Linux AppImage path
- *   WINDOWS_BUNDLE_DIR     override Windows installed-tree dir
+ *   LINUX_BUNDLE_DIR       override Linux game-tree dir (default dist-electron/linux-unpacked)
+ *   WINDOWS_BUNDLE_DIR     override Windows game-tree dir (default dist-electron/win-unpacked)
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, cpSync, readdirSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -51,7 +51,13 @@ function parseArgs(argv) {
     if (a === '--dry-run') out.dryRun = true
     else if (a.startsWith('--platform=')) out.platform = a.slice('--platform='.length)
     else if (a === '-h' || a === '--help') {
-      console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 35).map(l => l.replace(/^ \*\s?/, '')).join('\n'))
+      console.log(
+        readFileSync(fileURLToPath(import.meta.url), 'utf8')
+          .split('\n')
+          .slice(1, 35)
+          .map((l) => l.replace(/^ \*\s?/, ''))
+          .join('\n'),
+      )
       process.exit(0)
     } else {
       fail(`unknown arg: ${a}`)
@@ -83,7 +89,7 @@ const requiredCore = ['STEAM_APPID']
 if (wantLinux) requiredCore.push('STEAM_DEPOT_LINUX')
 if (wantWindows) requiredCore.push('STEAM_DEPOT_WINDOWS')
 
-const missing = requiredCore.filter(k => !env[k])
+const missing = requiredCore.filter((k) => !env[k])
 if (missing.length) {
   fail(
     `missing required env var(s): ${missing.join(', ')}\n` +
@@ -119,51 +125,34 @@ function shortShaOrUnknown() {
 }
 
 // ---- 2. Locate bundles ------------------------------------------------------
+//
+// Both platforms ship an electron-builder unpacked tree (Chromium bundled).
+// Steam copies the tree wholesale and launches the binary directly, so
+// there's no AppImage / NSIS installer in the loop.
 
-const TAURI_LINUX_BUNDLE_DIR = path.join(
-  REPO_ROOT,
-  'src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage',
-)
-const TAURI_WINDOWS_RELEASE_DIR = path.join(
-  REPO_ROOT,
-  'src-tauri/target/x86_64-pc-windows-msvc/release',
-)
+const ELECTRON_LINUX_DIR = path.join(REPO_ROOT, 'dist-electron', 'linux-unpacked')
+const ELECTRON_WINDOWS_DIR = path.join(REPO_ROOT, 'dist-electron', 'win-unpacked')
 
-function resolveLinuxBundle() {
-  if (env.LINUX_BUNDLE) {
-    if (!existsSync(env.LINUX_BUNDLE)) fail(`LINUX_BUNDLE not found: ${env.LINUX_BUNDLE}`)
-    return env.LINUX_BUNDLE
-  }
-  if (!existsSync(TAURI_LINUX_BUNDLE_DIR)) {
+function resolveLinuxTree() {
+  const dir = env.LINUX_BUNDLE_DIR || ELECTRON_LINUX_DIR
+  if (!existsSync(dir)) {
     fail(
-      `Linux bundle dir not found: ${TAURI_LINUX_BUNDLE_DIR}\n` +
-        `Run \`pnpm build:deck\` first, or set LINUX_BUNDLE to an AppImage path.`,
+      `Linux game tree not found: ${dir}\n` +
+        `Run \`pnpm build:deck\` first, or set LINUX_BUNDLE_DIR to an unpacked tree.`,
     )
   }
-  const appImages = readdirSync(TAURI_LINUX_BUNDLE_DIR).filter(f => f.endsWith('.AppImage'))
-  if (appImages.length === 0) {
-    fail(`no .AppImage in ${TAURI_LINUX_BUNDLE_DIR} — run \`pnpm build:deck\`.`)
-  }
-  if (appImages.length > 1) {
-    info(`multiple AppImages in ${TAURI_LINUX_BUNDLE_DIR}: ${appImages.join(', ')}`)
-    info(`picking the alphabetically-last one (assumed to be highest version)`)
-    appImages.sort()
-  }
-  return path.join(TAURI_LINUX_BUNDLE_DIR, appImages.at(-1))
+  return dir
 }
 
 function resolveWindowsTree() {
-  if (env.WINDOWS_BUNDLE_DIR) {
-    if (!existsSync(env.WINDOWS_BUNDLE_DIR)) fail(`WINDOWS_BUNDLE_DIR not found: ${env.WINDOWS_BUNDLE_DIR}`)
-    return env.WINDOWS_BUNDLE_DIR
-  }
-  if (!existsSync(TAURI_WINDOWS_RELEASE_DIR)) {
+  const dir = env.WINDOWS_BUNDLE_DIR || ELECTRON_WINDOWS_DIR
+  if (!existsSync(dir)) {
     fail(
-      `Windows release dir not found: ${TAURI_WINDOWS_RELEASE_DIR}\n` +
-        `Run \`pnpm build:windows\` first, or set WINDOWS_BUNDLE_DIR to a tree path.`,
+      `Windows game tree not found: ${dir}\n` +
+        `Run \`pnpm build:windows\` first, or set WINDOWS_BUNDLE_DIR to an unpacked tree.`,
     )
   }
-  return TAURI_WINDOWS_RELEASE_DIR
+  return dir
 }
 
 // ---- 3. Stage content ------------------------------------------------------
@@ -174,74 +163,23 @@ mkdirSync(CONTENT_DIR, { recursive: true })
 if (ARGS.platform === 'linux' || ARGS.platform === 'both') {
   const linuxStage = path.join(CONTENT_DIR, 'linux')
   mkdirSync(linuxStage, { recursive: true })
-  const src = resolveLinuxBundle()
-  const dst = path.join(linuxStage, 'Hoverbike.AppImage')
-  info(`staging Linux:  ${path.relative(REPO_ROOT, src)} → ${path.relative(REPO_ROOT, dst)}`)
-  copyFileSync(src, dst)
+  const srcDir = resolveLinuxTree()
+  info(
+    `staging Linux:  ${path.relative(REPO_ROOT, srcDir)} → ${path.relative(REPO_ROOT, linuxStage)}`,
+  )
+  cpSync(srcDir, linuxStage, { recursive: true })
 }
 
 if (ARGS.platform === 'windows' || ARGS.platform === 'both') {
   const windowsStage = path.join(CONTENT_DIR, 'windows')
   mkdirSync(windowsStage, { recursive: true })
   const srcDir = resolveWindowsTree()
-  info(`staging Windows: ${path.relative(REPO_ROOT, srcDir)} → ${path.relative(REPO_ROOT, windowsStage)}`)
-  stageWindowsTree(srcDir, windowsStage)
-
-  // Steam install script + WebView2 bootstrapper. Tauri's WRY
-  // backend needs the Edge WebView2 Evergreen Runtime; the NSIS
-  // installer bootstraps it but Steam skips NSIS entirely, so we
-  // ship a Steam install script that runs the bootstrapper after
-  // the depot is copied to the user's machine.
-  await stageWebView2Bootstrapper(windowsStage)
-  copyFileSync(
-    path.join(STEAM_DIR, 'installscript.vdf'),
-    path.join(windowsStage, 'installscript.vdf'),
+  info(
+    `staging Windows: ${path.relative(REPO_ROOT, srcDir)} → ${path.relative(REPO_ROOT, windowsStage)}`,
   )
-  info(`staged WebView2 bootstrapper + installscript.vdf`)
-}
-
-async function stageWebView2Bootstrapper(windowsStage) {
-  const cacheDir = path.join(STEAM_DIR, 'cache')
-  const cachePath = path.join(cacheDir, 'MicrosoftEdgeWebview2Setup.exe')
-  if (!existsSync(cachePath)) {
-    info('downloading WebView2 Evergreen bootstrapper (~1.7 MB) …')
-    mkdirSync(cacheDir, { recursive: true })
-    const res = await fetch('https://go.microsoft.com/fwlink/p/?LinkId=2124703', {
-      redirect: 'follow',
-    })
-    if (!res.ok) {
-      fail(`WebView2 bootstrapper download failed: HTTP ${res.status}`)
-    }
-    const buf = Buffer.from(await res.arrayBuffer())
-    if (buf.length < 50_000) {
-      // Real bootstrapper is ~150 KB; anything smaller is a redirect HTML.
-      fail(`WebView2 bootstrapper download too small (${buf.length} B) — check the URL/redirect.`)
-    }
-    writeFileSync(cachePath, buf)
-    info(`cached WebView2 bootstrapper → ${path.relative(REPO_ROOT, cachePath)}`)
-  }
-  copyFileSync(cachePath, path.join(windowsStage, 'MicrosoftEdgeWebview2Setup.exe'))
-}
-
-function stageWindowsTree(srcDir, dstDir) {
-  // Tauri's release/ directory carries the .exe plus a `bundle/`
-  // subtree with the NSIS / MSI artefacts. The latter are the
-  // installer themselves; Steam doesn't want the installer, it
-  // wants the *installed* game tree. So copy everything in
-  // release/ EXCEPT bundle/, deps/, build/, examples/, .pdb files,
-  // and Cargo's intermediate `.d` / `.rlib` artefacts.
-  const skipNames = new Set(['bundle', 'deps', 'build', 'examples', 'incremental', '.fingerprint'])
-  const skipExt = new Set(['.pdb', '.d', '.rlib', '.exp', '.lib'])
-  for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) continue
-    if (skipNames.has(entry.name)) continue
-    const ext = path.extname(entry.name).toLowerCase()
-    if (skipExt.has(ext)) continue
-    const src = path.join(srcDir, entry.name)
-    const dst = path.join(dstDir, entry.name)
-    if (entry.isDirectory()) cpSync(src, dst, { recursive: true })
-    else copyFileSync(src, dst)
-  }
+  // electron-builder's win-unpacked is already a clean installed tree
+  // (Chromium bundled, no runtime to bootstrap), so copy it wholesale.
+  cpSync(srcDir, windowsStage, { recursive: true })
 }
 
 // ---- 4. Render VDFs --------------------------------------------------------
@@ -272,7 +210,7 @@ if (wantWindows) templates.push('depot_windows.vdf')
 
 for (const fname of templates) {
   const tpl = readFileSync(path.join(STEAM_DIR, fname), 'utf8')
-  const rendered = tpl.replace(/\$\{([A-Z_]+)\}/g, (m, k) => {
+  const rendered = tpl.replace(/\$\{([A-Z_]+)\}/g, (_m, k) => {
     if (!(k in subs)) fail(`template ${fname} references unknown placeholder \${${k}}`)
     return subs[k]
   })
@@ -313,9 +251,10 @@ function resolveSteamCmd() {
     if (!existsSync(env.STEAM_CMD)) fail(`STEAM_CMD not found: ${env.STEAM_CMD}`)
     return env.STEAM_CMD
   }
-  const local = process.platform === 'win32'
-    ? path.join(STEAM_DIR, 'steamcmd', 'steamcmd.exe')
-    : path.join(STEAM_DIR, 'steamcmd', 'steamcmd.sh')
+  const local =
+    process.platform === 'win32'
+      ? path.join(STEAM_DIR, 'steamcmd', 'steamcmd.exe')
+      : path.join(STEAM_DIR, 'steamcmd', 'steamcmd.sh')
   if (existsSync(local)) return local
   // Last resort: trust PATH.
   return 'steamcmd'
@@ -343,28 +282,31 @@ const loginArgs = env.STEAM_PASSWORD
   ? ['+login', username, env.STEAM_PASSWORD]
   : ['+login', username]
 if (!env.STEAM_PASSWORD) {
-  info(`no STEAM_PASSWORD set — trusting steamcmd's own credential cache (run \`steamcmd +login ${username}\` once interactively if you haven't)`)
+  info(
+    `no STEAM_PASSWORD set — trusting steamcmd's own credential cache (run \`steamcmd +login ${username}\` once interactively if you haven't)`,
+  )
 }
 
 const renderedAppVdf = path.join(RENDERED_DIR, 'app_build.vdf')
-const steamCmdArgs = [
-  ...loginArgs,
-  '+run_app_build',
-  renderedAppVdf,
-  '+quit',
-]
+const steamCmdArgs = [...loginArgs, '+run_app_build', renderedAppVdf, '+quit']
 
-info(`running: ${steamCmd} ${loginArgs.join(' ').replace(env.STEAM_PASSWORD ?? '', '***')} +run_app_build ${path.relative(REPO_ROOT, renderedAppVdf)} +quit`)
+info(
+  `running: ${steamCmd} ${loginArgs.join(' ').replace(env.STEAM_PASSWORD ?? '', '***')} +run_app_build ${path.relative(REPO_ROOT, renderedAppVdf)} +quit`,
+)
 const upload = spawnSync(steamCmd, steamCmdArgs, {
   cwd: STEAM_DIR,
   stdio: 'inherit',
   shell: process.platform === 'win32',
 })
 if (upload.status !== 0) {
-  fail(`steamcmd exited ${upload.status}. Check ${path.relative(REPO_ROOT, OUTPUT_DIR)} for the build log.`)
+  fail(
+    `steamcmd exited ${upload.status}. Check ${path.relative(REPO_ROOT, OUTPUT_DIR)} for the build log.`,
+  )
 }
 
 info('done — Steamworks Partner backend should now show the new build under "Builds".')
-info(setLive
-  ? `branch "${setLive}" was set live as part of this upload.`
-  : 'no branch was set live; push the build live from the Steamworks web UI.')
+info(
+  setLive
+    ? `branch "${setLive}" was set live as part of this upload.`
+    : 'no branch was set live; push the build live from the Steamworks web UI.',
+)

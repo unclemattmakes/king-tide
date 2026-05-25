@@ -1,18 +1,35 @@
-# SPIKE packaging config — builds a self-contained Linux dir (Chromium
-# bundled) so the app can be added to Steam and tested inside the Steam Linux
-# Runtime container. `asar: false` keeps dist/ as a real directory so the
-# custom-scheme file reads in electron/main.cjs don't have to go through asar.
+# electron-builder config — desktop/Steam packaging for Hoverbike.
+#
+# Linux ships the `dir` (unpacked) target: Steam wants the installed game
+# tree, not a self-mounting AppImage (AppImages need FUSE, which the Steam
+# Linux Runtime container often lacks). Windows ships `nsis` for standalone
+# distribution + GitHub releases; the win-unpacked tree it emits alongside is
+# what the Steam Windows depot uploads.
+#
+# `asar: false` keeps dist/ a real directory tree so the custom-scheme file
+# reads in electron/main.cjs go through the normal filesystem rather than an
+# asar archive (Electron's net.fetch does not read inside asar).
 appId: app.hoverbike
 productName: Hoverbike
-executableName: hoverbike
+copyright: Hoverbike
 asar: false
 directories:
   output: dist-electron
 files:
-  - electron/**/*
+  - electron/main.cjs
   - dist/**/*
   - package.json
 linux:
   target:
     - dir
+  executableName: hoverbike
   category: Game
+  icon: electron/icons/icon.png
+win:
+  target:
+    - nsis
+  icon: electron/icons/icon.ico
+nsis:
+  oneClick: true
+  perMachine: false
+  artifactName: ${productName}-${version}-setup.${ext}

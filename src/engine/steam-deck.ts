@@ -6,7 +6,7 @@
  * detection is best-effort; the caller decides whether to act on it
  * (currently main.ts wires `applyDeckProfile()` only when `isLikelyDeck`).
  *
- * See docs/steam-deck.md for the full wrapper plan (Tauri 2 + Steamworks).
+ * See docs/steam-deck.md for the full wrapper plan (Electron + Steamworks).
  */
 
 export type DeckDetectionSignal = 'ua' | 'viewport' | 'gamepad'
@@ -32,7 +32,9 @@ const DECK_GAMEPAD_ID_PATTERNS = [/steam virtual gamepad/i, /steam controller/i,
  *
  * Heuristic stack (any single signal flips `isLikelyDeck` to true):
  *   1. UA contains "SteamDeck" — Gaming Mode's bundled browser sets this,
- *      Desktop Mode's Firefox does not.
+ *      Desktop Mode's Firefox does not. The Electron wrapper also appends
+ *      this token when Steam launches us on Deck hardware (SteamDeck=1),
+ *      so this is the reliable signal in a shipped desktop build.
  *   2. Viewport is exactly 1280×800 AND devicePixelRatio is 1 — the Deck's
  *      native panel resolution. Fragile (any 1280×800 window matches) but
  *      a useful tiebreaker on Deck-only builds.
