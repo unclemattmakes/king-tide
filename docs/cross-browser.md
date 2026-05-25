@@ -13,7 +13,7 @@ e2e suite, and the platform gaps we know about. Pairs with
 | Firefox | 1 | Linux, macOS, Windows | WebGL2 fallback path. WebGPU is shipping in stable as of 2026; we still default to WebGL2 there until the node-material WGSL fallback lands. |
 | Safari | 2 | macOS 14+, iPadOS 17+, iOS 18.2+ | WebGPU lit up in iOS 18.2 / Safari 18.2 (Dec 2024). Touch overlay is the only mobile-tested input path; see "Mobile + touch" below. |
 | Mobile Chrome (Android) | 3 | Android 13+ | Touch overlay works; performance is highly device-dependent. Not in the regular test rotation. |
-| WebKitGTK (Steam Deck) | 2 | SteamOS | The Tauri 2 wrapper target — see [`docs/steam-deck.md`](./steam-deck.md). Software WebGL in Playwright, real GPU on-device. |
+| WebKitGTK (Playwright Linux) | — | (test only) | Playwright's Linux WebKit engine — a Safari proxy for e2e. Software WebGL only, not a ship target. The Steam Deck ships Electron/Chromium now, not WebKitGTK; see [`docs/steam-deck.md`](./steam-deck.md). |
 
 Tier 1 = green CI required before merge. Tier 2 = manual smoke on each
 release. Tier 3 = best-effort, no commitment.
@@ -119,10 +119,9 @@ only covers desktop viewports.
 
 ## Testing Safari without a Mac
 
-Short answer: you can't. Playwright's WebKit on Linux uses WebKitGTK,
-which is the engine used by Steam Deck's WebKit + the Linux Tauri
-wrapper — *not* the Safari you find on macOS / iOS. Behaviour overlaps
-heavily but isn't identical, especially around media + audio.
+Short answer: you can't. Playwright's WebKit on Linux uses WebKitGTK —
+*not* the Safari you find on macOS / iOS. Behaviour overlaps heavily but
+isn't identical, especially around media + audio.
 
 For real Safari coverage:
 - macOS: `E2E_BROWSERS=webkit pnpm e2e` on a Mac — the GPU-heavy skip

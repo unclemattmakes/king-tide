@@ -60,6 +60,7 @@ import { createPumpFx } from '@/engine/render/pump-fx'
 import type { RaceHud } from '@/engine/render/race-hud'
 import type { RaceIntro } from '@/engine/render/race-intro'
 import type { RaceIntroUi } from '@/engine/render/race-intro-ui'
+import { probeGpuRenderer } from '@/engine/render/renderer'
 import { renderFrame } from '@/engine/render/renderer-service'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
@@ -77,6 +78,7 @@ import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { vecHorizontalLength } from '@/engine/sim/physics/vec'
 import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
+import { detectSteamDeck, getDeckProfile } from '@/engine/steam-deck'
 import { createTutorialDirector } from '@/engine/tutorial/tutorial-director'
 import { DEFAULT_TUTORIAL_SCRIPT } from '@/engine/tutorial/tutorial-script'
 import {
@@ -530,6 +532,14 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // capture the reference once.
   const perfRecorder = createPerfRecorder()
   const perfHud = createPerfHud()
+  // Static env diagnostics — backend, real GPU driver (hardware vs llvmpipe),
+  // and whether the Deck profile latched. Set once; persists across toggles.
+  perfHud.setDiagnostics({
+    backend: state.backend,
+    gpu: probeGpuRenderer(),
+    deckApplied: getDeckProfile() !== null,
+    deckSignals: detectSteamDeck().signals,
+  })
   const rendererInfo = (renderer as unknown as { info: RenderInfoLite }).info
   const initialPerfOn =
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('perf')
