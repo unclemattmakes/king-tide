@@ -100,7 +100,7 @@
 > runtime lava-river shader, swinging-landmark kinematic colliders,
 > Phase E Sprint 3 (Drowned Cup — Aqualand, Angkor Drowned, Liberty
 > Drowned; v1 lineup complete), Phase D Sprint 2 polish, Steam Deck
-> profile wiring + Tauri 2 scaffold, Polish-QA kickoff (Perf HUD +
+> profile wiring + Electron desktop wrapper, Polish-QA kickoff (Perf HUD +
 > Accessibility tab + cross-browser Playwright projects), Phase D
 > Sprint 2 (Open Sea + Continental Cups), v1 asset-pipeline foundation
 > + Reef Cup, Multiplayer convention row closed, wave-line shimmer,

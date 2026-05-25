@@ -1,24 +1,15 @@
 name: build-desktop
 
-# Build the desktop wrappers — Linux AppImage (Steam Deck path) and
-# Windows NSIS installer (Windows desktop path). Manual dispatch +
-# tag-triggered. The Rust + Tauri toolchain install is slow (~5 min on
-# each runner) so this is not part of the standard CI loop.
+# Build the Electron desktop wrappers — a Linux game tree (Steam Deck path)
+# and a Windows NSIS installer + game tree (Windows desktop path). Electron
+# bundles its own Chromium, so there's no Rust / WebKitGTK toolchain to
+# install (the old Tauri path needed both).
 #
-# Outputs land as workflow artifacts on every run. On `v*` tag pushes
-# both installers attach to the GitHub Release.
+# Outputs land as workflow artifacts on every run. On `v*` tag pushes the
+# Linux tree tarball + Windows installer attach to the GitHub Release.
 
 on:
   workflow_dispatch:
-    inputs:
-      steam_feature:
-        description: "Build with the `steam` cargo feature (Linux only; needs STEAM_SDK)"
-        required: false
-        default: "false"
-        type: choice
-        options:
-          - "false"
-          - "true"
   push:
     tags:
       - "v*"
@@ -31,21 +22,15 @@ jobs:
   bundle:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          - label: Linux AppImage
+          - label: Linux tree
             os: ubuntu-22.04
-            rust_target: x86_64-unknown-linux-gnu
-            artifact_name: hoverbike-linux-appimage
-            bundle_glob: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
-          - label: Windows NSIS
+          - label: Windows installer
             os: windows-latest
-            rust_target: x86_64-pc-windows-msvc
-            artifact_name: hoverbike-windows-installer
-            bundle_glob: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
 
     steps:
       - uses: actions/checkout@v6
@@ -59,80 +44,63 @@ jobs:
           node-version: 20
           cache: pnpm
 
-      - name: Linux system libs (webkit2gtk + gtk3)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            squashfs-tools
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
-
-      - name: Cache cargo + tauri target
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: cargo-${{ runner.os }}-${{ matrix.rust_target }}-${{ hashFiles('src-tauri/Cargo.lock') }}
-
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2.0" --locked
-
       - run: pnpm install --frozen-lockfile
 
       - name: Generate placeholder icons
         run: pnpm gen:icons
 
-      - name: Build web bundle
-        run: pnpm build
-
-      - name: Build desktop bundle
-        working-directory: src-tauri
-        shell: bash
-        run: |
-          # The `steam` cargo feature is Linux-only today (the steamworks
-          # crate's Windows path needs an SDK we don't have in CI yet).
-          if [ "${{ runner.os }}" = "Linux" ] && [ "${{ inputs.steam_feature }}" = "true" ]; then
-            cargo tauri build --target ${{ matrix.rust_target }} --features steam
-          else
-            cargo tauri build --target ${{ matrix.rust_target }}
-          fi
-
-      - name: Strip bundled libwayland (Wayland EGL fix)
+      # ---- Linux: build the unpacked game tree ----------------------------
+      - name: Build Linux tree
         if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          shopt -s nullglob
-          imgs=(src-tauri/target/${{ matrix.rust_target }}/release/bundle/appimage/*.AppImage)
-          if [ ${#imgs[@]} -eq 0 ]; then
-            echo "no .AppImage produced — bundle step must have failed" >&2
-            exit 1
-          fi
-          for img in "${imgs[@]}"; do
-            bash tools/fix-appimage-wayland.sh "$img"
-          done
+        run: pnpm build:deck
 
-      - name: Upload bundle artifact
+      # tar preserves the executable bit on the `hoverbike` binary — a plain
+      # artifact upload (zip) would strip it and Steam would ship a tree that
+      # won't launch.
+      - name: Package Linux tree
+        if: runner.os == 'Linux'
+        run: tar -czf hoverbike-linux.tar.gz -C dist-electron linux-unpacked
+
+      - name: Upload Linux tree artifact
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.bundle_glob }}
+          name: hoverbike-linux-tree
+          path: hoverbike-linux.tar.gz
           if-no-files-found: error
           retention-days: 30
 
-      - name: Attach to Release (tag builds only)
+      # ---- Windows: build the NSIS installer + unpacked tree --------------
+      - name: Build Windows installer + tree
+        if: runner.os == 'Windows'
+        run: pnpm build:windows
+
+      - name: Upload Windows installer artifact
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hoverbike-windows-installer
+          path: dist-electron/*-setup.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Windows tree artifact
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hoverbike-windows-tree
+          path: dist-electron/win-unpacked
+          if-no-files-found: error
+          retention-days: 30
+
+      # ---- Release attach (tag builds only) -------------------------------
+      # Each matrix leg attaches whatever it produced; the other file pattern
+      # is absent on that leg, hence fail_on_unmatched_files: false.
+      - name: Attach to Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.bundle_glob }}
-          fail_on_unmatched_files: true
+          files: |
+            hoverbike-linux.tar.gz
+            dist-electron/*-setup.exe
+          fail_on_unmatched_files: false

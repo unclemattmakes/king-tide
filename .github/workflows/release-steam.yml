@@ -4,7 +4,7 @@ name: release-steam
 # only — Steam uploads aren't trivially reversible (you can't
 # delete a build, only push a different one live), so we don't auto-
 # fire on tag pushes. Trigger this after build-desktop has produced
-# the AppImage + Windows artifacts you want to ship.
+# the Linux + Windows game-tree artifacts you want to ship.
 #
 # Required repository secrets (set in Settings → Secrets and variables):
 #
@@ -106,55 +106,35 @@ jobs:
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
       # ---- Pull artifacts from that run -----------------------------------
-      - name: Download Linux AppImage artifact
+      # build-desktop uploads the electron-builder unpacked trees directly,
+      # so there's no installer to extract. The Linux tree is tarred (to keep
+      # the `hoverbike` binary's +x bit through the artifact round-trip).
+      - name: Download Linux tree artifact
         if: inputs.platforms == 'both' || inputs.platforms == 'linux'
         uses: actions/download-artifact@v5
         with:
-          name: hoverbike-linux-appimage
+          name: hoverbike-linux-tree
           path: artifacts/linux
           run-id: ${{ steps.resolve_run.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download Windows installer artifact
-        if: inputs.platforms == 'both' || inputs.platforms == 'windows'
-        uses: actions/download-artifact@v5
-        with:
-          name: hoverbike-windows-installer
-          path: artifacts/windows
-          run-id: ${{ steps.resolve_run.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      # The Windows artifact is the NSIS installer .exe. SteamPipe wants
-      # the installed game tree, not the installer. Extract via 7z which
-      # ships on every ubuntu-* runner.
-      - name: Extract Windows installer payload
-        if: inputs.platforms == 'both' || inputs.platforms == 'windows'
+      - name: Unpack Linux tree
+        if: inputs.platforms == 'both' || inputs.platforms == 'linux'
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p artifacts/windows-extracted
-          installer=$(ls artifacts/windows/*-setup.exe | head -n1)
-          echo "extracting $installer"
-          # NSIS payload lives in $PLUGINSDIR/app-64.7z (or similar) on
-          # modern installers. Two-stage extraction.
-          7z x -y -oartifacts/windows-stage1 "$installer" >/dev/null
-          inner=$(find artifacts/windows-stage1 -name 'app-64.7z' -o -name 'app.7z' -o -name 'app-32.7z' | head -n1)
-          if [ -n "$inner" ]; then
-            7z x -y -oartifacts/windows-extracted "$inner" >/dev/null
-          else
-            # Fallback: some NSIS installers don't use a nested 7z;
-            # the stage1 extraction already gave us the game tree.
-            cp -r artifacts/windows-stage1/* artifacts/windows-extracted/
-          fi
-          ls -la artifacts/windows-extracted
-          # The actual .exe should be at the root or in $INSTDIR.
-          # tools/steam-upload.mjs WINDOWS_BUNDLE_DIR points at the
-          # directory containing the .exe.
-          if find artifacts/windows-extracted -maxdepth 2 -name 'hoverbike.exe' | grep -q .; then
-            echo "found hoverbike.exe in extracted tree"
-          else
-            echo "::warning::could not locate hoverbike.exe in extracted NSIS payload — Steam may reject the depot"
-          fi
+          tar -xzf artifacts/linux/hoverbike-linux.tar.gz -C artifacts/linux
+          test -x artifacts/linux/linux-unpacked/hoverbike \
+            || echo "::warning::hoverbike binary is not executable — Steam may ship a tree that won't launch"
+
+      - name: Download Windows tree artifact
+        if: inputs.platforms == 'both' || inputs.platforms == 'windows'
+        uses: actions/download-artifact@v5
+        with:
+          name: hoverbike-windows-tree
+          path: artifacts/windows
+          run-id: ${{ steps.resolve_run.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # ---- Install steamcmd ------------------------------------------------
       - name: Install steamcmd
@@ -201,17 +181,12 @@ jobs:
           # steamcmd is on PATH from the install step above.
           STEAM_SET_LIVE: ${{ inputs.set_live }}
           STEAM_PREVIEW: ${{ inputs.preview }}
-          LINUX_BUNDLE: ${{ github.workspace }}/artifacts/linux/Hoverbike.AppImage
-          WINDOWS_BUNDLE_DIR: ${{ github.workspace }}/artifacts/windows-extracted
+          LINUX_BUNDLE_DIR: ${{ github.workspace }}/artifacts/linux/linux-unpacked
+          WINDOWS_BUNDLE_DIR: ${{ github.workspace }}/artifacts/windows
           BUILD_DESCRIPTION: ${{ github.ref_name }} (${{ github.sha }})
         shell: bash
         run: |
           set -euo pipefail
-          # The AppImage artifact may have a versioned filename — rename
-          # for the upload script's default.
-          if [ -d artifacts/linux ]; then
-            mv artifacts/linux/*.AppImage artifacts/linux/Hoverbike.AppImage || true
-          fi
           node tools/steam-upload.mjs --platform=${{ inputs.platforms }}
 
       - name: Upload SteamPipe logs (always)
