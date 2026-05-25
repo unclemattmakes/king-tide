@@ -298,11 +298,6 @@ export type TrickStateData = {
    *  (anti-grav launches, big ramps) from banking multiple boosts off
    *  the same takeoff. */
   trickFiredThisAirborne: boolean
-  /** Previous tick's fully-planted state (center + nose + base all
-   *  grounded). The rising edge of *leaving* this state arms the trick
-   *  window; re-entering it closes the window. Tracked on the component
-   *  so `trickHopSystem` detects the pop without a shared observer. */
-  wasFullyPlantedLastTick: boolean
 
   // ── Pre-input buffer (Layer 1 "early press" forgiveness) ──────────
   /** Seconds remaining on a buffered press. A press while grounded

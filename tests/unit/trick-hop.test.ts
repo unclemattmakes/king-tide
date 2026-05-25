@@ -135,7 +135,6 @@ function spawnBike(
     trickWindowOpen: false,
     trickWindowTakeoffVy: 0,
     trickFiredThisAirborne: false,
-    wasFullyPlantedLastTick: true,
     bufferedPressTimerSec: 0,
     bufferedPressDir: 0,
     trickFiredThisTick: false,
@@ -430,7 +429,7 @@ describe('trickHopSystem — pre-input buffer', () => {
     expect(body.impulses).toHaveLength(0)
   })
 
-  it('expires to a courtesy hop when no pop arrives in time', () => {
+  it('fires a deferred trick on buffer expiry when the climb context still holds', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
     body.vx = 22
     body.vy = 5
@@ -440,9 +439,45 @@ describe('trickHopSystem — pre-input buffer', () => {
     trickHopSystem(sim, phys)
     expect(TrickStateStore.must(eid).bufferedPressTimerSec).toBeGreaterThan(0)
 
-    // Bike stays planted (no pop). Tick past the buffer window — it expires
-    // to the courtesy hop, no trick.
+    // Wave-crest case: the bike rides through without the center leaving
+    // the surface and the nose never clears the cutoff, so no geometric
+    // pop arrives. But throttle stays on at speed and vyPeak is still
+    // fresh, so the climb context the prompt promised holds — the buffer
+    // synthesizes the launch and fires the trick on expiry.
     setIntent({ throttle: 0.9, trickRight: false })
+    body.vy = 0
+    const ticksToRunOut = Math.ceil(PRE_PRESS_BUFFER_SEC / phys.fixedDt) + 1
+    for (let i = 0; i < ticksToRunOut; i++) trickHopSystem(sim, phys)
+
+    const trick = TrickStateStore.must(eid)
+    expect(trick.bufferedPressTimerSec).toBe(0)
+    expect(trick.bufferedPressDir).toBe(0)
+    // One-shot fire flag is cleared the next tick; assert the sticky
+    // markers that persist until the next press.
+    expect(trick.trickFiredThisAirborne).toBe(true)
+    expect(trick.trickFiredDirection).toBe(+1)
+    expect(trick.trickFiredStrength).toBeGreaterThan(0)
+    expect(trick.trickWindowOpen).toBe(true)
+    expect(trick.hopLockoutActive).toBe(true)
+    // Synthesized lift applied so the bike visibly leaves the surface.
+    expect(body.impulses.length).toBeGreaterThanOrEqual(1)
+    const lastImpulse = body.impulses[body.impulses.length - 1]
+    expect(lastImpulse?.y).toBeCloseTo(4.5, 5)
+  })
+
+  it('falls back to a courtesy hop when the climb context decays before expiry', () => {
+    const { eid, setIntent } = spawnBike(sim, handle)
+    body.vx = 22
+    body.vy = 5
+    setIntent({ throttle: 0.9 })
+    trickHopSystem(sim, phys)
+    setIntent({ throttle: 0.9, trickRight: true })
+    trickHopSystem(sim, phys)
+    expect(TrickStateStore.must(eid).bufferedPressTimerSec).toBeGreaterThan(0)
+
+    // Player lets off the throttle — `throttleOK` is false at expiry, so
+    // the credibility re-check fails and the courtesy hop fires instead.
+    setIntent({ throttle: 0, trickRight: false })
     body.vy = 0
     const ticksToRunOut = Math.ceil(PRE_PRESS_BUFFER_SEC / phys.fixedDt) + 1
     for (let i = 0; i < ticksToRunOut; i++) trickHopSystem(sim, phys)
