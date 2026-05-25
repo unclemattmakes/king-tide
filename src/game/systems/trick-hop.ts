@@ -25,11 +25,11 @@ import {
  * Geometric trick system. The window is armed by the bike's *pose*, not
  * by a vertical-velocity threshold: the moment the bike leaves its
  * fully-planted stance — the nose lifting off a bump / lip / ramp crest
- * while the base is still down, a clean full takeoff, or riding up a
- * ramp / sandbar transition at speed (a kicker, where the nose stays
- * grounded on the rising slope so no pop fires until the crest) — the
- * window opens and stays open the whole airtime, closing when the bike
- * re-plants. Any rising-edge press inside the window fires the trick
+ * while the base is still down, a clean full takeoff, or riding a
+ * meaningful slope at speed (a kicker up a ramp / sandbar, or a drop off
+ * a ledge / embankment, where the bike follows the surface so no pop
+ * fires on its own) — the window opens and stays open the whole airtime,
+ * closing when the bike re-plants. Any rising-edge press fires the trick
  * (once per airtime). This is the naive, readable model: nose airborne +
  * base grounded + press = trick, with the window persisting through the
  * fully-airborne phase so a press *just after* the base lifts off still
@@ -101,13 +101,19 @@ const HOP_LOCKOUT_MAX_TICKS = 180
 /** Seconds between consecutive small hops on the same bike. Stops
  *  button-mash spam from chaining tiny lifts. */
 const HOP_COOLDOWN_SEC = 0.35
-/** Filtered bow→stern surface slope (rise/run, ≈ tan θ) above which a
- *  grounded bike at speed is treated as "on a kicker" and the trick
- *  window arms. Going UP a ramp / sandbar transition the nose stays
- *  grounded (it samples the rising slope ahead), so the pop-pose never
- *  fires until the crest — but players read the up-ramp as launchable.
- *  0.12 ≈ 7°: steep enough to exclude flat chop + gentle road grades,
- *  shallow enough to catch a sandbar lip. Tunable. */
+/** Filtered bow→stern surface slope *magnitude* (rise/run, ≈ tan θ)
+ *  above which a grounded bike at speed is treated as "on a launchable
+ *  feature" and the trick window arms. Covers both directions:
+ *    - UP a ramp / sandbar (kicker): the nose stays grounded on the
+ *      rising slope it samples ahead, so the pop-pose never fires until
+ *      the crest.
+ *    - DOWN a ledge / embankment: a drop gentle enough that the bike
+ *      follows it without the nose clearing the grounded cutoff and
+ *      without the center going airborne.
+ *  Neither leaves the planted stance on its own, but players read both
+ *  as trick spots. 0.12 ≈ 7°: steep enough to exclude flat chop + gentle
+ *  road grades, shallow enough to catch a sandbar lip or embankment.
+ *  Tunable. */
 const TRICK_RAMP_SLOPE_MIN = 0.12
 
 export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
@@ -193,13 +199,15 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
     // too noisy to gate the airborne window on.)
     const centerAirborne = !hover.isGrounded
     const popPose = hover.isGrounded && !hover.noseGrounded && hover.baseGrounded
-    // Kicker state: riding up a ramp / sandbar transition at speed. The
-    // nose stays grounded going uphill so the pop never fires until the
-    // crest, but the up-ramp itself reads as launchable — arm here and
-    // let the trick's loft pop the bike off. `settled` excludes it so the
-    // window doesn't close mid-climb.
-    const onRampUp = hover.isGrounded && hover.forwardSlope >= TRICK_RAMP_SLOPE_MIN
-    const settled = hover.isGrounded && hover.noseGrounded && !onRampUp
+    // Launchable-feature state: a meaningful slope either way at speed.
+    // UP a ramp / sandbar the nose stays grounded on the rising slope so
+    // no pop fires till the crest; DOWN a gentle ledge / embankment the
+    // bike follows the drop without the nose clearing the cutoff or the
+    // center going airborne. Both read as trick spots — arm here and let
+    // the trick's loft pop the bike off. `settled` excludes it so the
+    // window stays open across the feature into any airborne phase.
+    const onRamp = hover.isGrounded && Math.abs(hover.forwardSlope) >= TRICK_RAMP_SLOPE_MIN
+    const settled = hover.isGrounded && hover.noseGrounded && !onRamp
     if (trick.trickWindowOpen && settled) {
       // Re-planted — close + clear the per-airtime dedup.
       trick.trickWindowOpen = false
@@ -207,7 +215,7 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
       trick.trickFiredThisAirborne = false
     } else if (
       !trick.trickWindowOpen &&
-      (centerAirborne || popPose || onRampUp) &&
+      (centerAirborne || popPose || onRamp) &&
       !trick.hopLockoutActive &&
       speedOK &&
       throttleOK
