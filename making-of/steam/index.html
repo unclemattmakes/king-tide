@@ -41,8 +41,9 @@
         <p>
           Hoverbike runs in a browser tab. To sell it on Steam — and run it on the Steam Deck — it
           needs to look like a native app: a window, an executable, a Steam depot. The web part was
-          done; the <em>shell</em> around it turned into a small saga. This is the story of swapping
-          that shell out, and what a handheld Linux console taught us about "web-first."
+          done. The <em>shell</em> around it nearly sank the whole Steam port — and the hardest part,
+          by a wide margin, wasn't the game at all. It was getting the thing to
+          <strong>launch through Steam</strong> in the first place.
         </p>
       </section>
 
@@ -50,21 +51,27 @@
         <h2>Why Tauri had to go</h2>
         <p>
           The first wrapper was <strong>Tauri</strong>: tiny binaries (~10&nbsp;MB) and a Rust core
-          that could one day link Steam's SDK directly. On paper, perfect. On the Deck, two things
-          killed it.
+          that could one day link Steam's SDK directly. On paper, perfect. In practice it nearly
+          sank the port — and not for any one dramatic reason. It was death by a thousand hoops.
         </p>
         <p>
-          First, <strong>it wouldn't even launch through Steam.</strong> Tauri renders with the
-          operating system's own web view — <strong>WebKitGTK</strong> on SteamOS — which pulls in a
-          sprawl of system libraries. But Steam launches games inside the
-          <strong>Steam Linux Runtime</strong>, a locked-down container that doesn't ship those
-          libraries. The app died before a window appeared.
+          The single biggest problem, by far, was just <strong>getting it to launch through Steam at
+          all.</strong> Tauri renders with the operating system's own web view —
+          <strong>WebKitGTK</strong> on SteamOS — which dynamically links a sprawl of system
+          libraries. But Steam launches games inside the <strong>Steam Linux Runtime</strong>, a
+          locked-down container that doesn't ship that library set. Double-click it from the desktop
+          and it'd come up; launch it the way players actually do — <em>through Steam</em> — and it
+          died before a window ever appeared. Every workaround we tried just surfaced the next
+          missing piece. We sank far more time into "why won't it start?" than into anything in the
+          game itself.
         </p>
         <p>
-          Second, even when it did run, <strong>there was no WebGPU.</strong> WebKitGTK silently fell
-          back to the older WebGL2 — which means the entire modern water pipeline (the node-material
-          shaders from <a href="/making-of/wave-field/">Chapter 01</a>) was running on the slow path,
-          or not at all. The whole reason the game looks the way it does was gone.
+          And the reward for finally coaxing it open was a gut-punch: <strong>it wasn't performant.</strong>
+          WebKitGTK gave us no usable WebGPU, so the renderer silently fell back to the older
+          <strong>WebGL2</strong>, and the modern water pipeline (the node-material shaders from
+          <a href="/making-of/wave-field/">Chapter 01</a>) crawled. So the best case after all that
+          effort was a build that launched unreliably and, when it did, ran badly. That's not a
+          thing you can ship.
         </p>
         <p>
           The hypothesis: <strong>Electron bundles its own Chromium.</strong> So it doesn't depend on
@@ -74,7 +81,12 @@
         </p>
 
         <h2>The spike, bug by bug</h2>
-        <p>Four problems surfaced, in order. Each taught something that's now baked into the build.</p>
+        <p>
+          Four problems surfaced, in order. Tellingly, the first three were the exact same fight
+          that doomed Tauri — just getting the thing to start through Steam — except this time each
+          had a clean, one-time fix instead of a fundamental dead end. Every lesson is now baked into
+          the build.
+        </p>
 
         <h3>1. Every asset 404s under <code>file://</code></h3>
         <p>
