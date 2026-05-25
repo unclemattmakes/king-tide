@@ -1,0 +1,29 @@
+// SteamPipe depot script — Linux (AppImage).
+//
+// The Steam Deck path: a native Linux depot so the Deck always
+// prefers this over running Windows-via-Proton. Mark the depot
+// "Steam Deck verified" in the App admin after the first upload.
+//
+// Input layout: tools/steam-upload.mjs stages the AppImage at
+//   content/linux/Hoverbike.AppImage
+// (renaming the versioned bundle so users see a stable filename
+// across builds). Steam's launcher handles `chmod +x` for us via
+// the App's executable launch option.
+"DepotBuildConfig"
+{
+	"DepotID"		"${STEAM_DEPOT_LINUX}"
+
+	"FileMapping"
+	{
+		"LocalPath"		"linux\\*"
+		"DepotPath"		"."
+		"recursive"		"1"
+	}
+
+	// AppImages already contain a compressed squashfs payload; the
+	// Steam content server's own chunk dedup wins us little extra,
+	// but turning on FileExclusion patterns lets us drop dev junk
+	// if anything sneaks in.
+	"FileExclusion"		"*.log"
+	"FileExclusion"		"*.tmp"
+}

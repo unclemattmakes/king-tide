@@ -143,20 +143,38 @@ self-hosted runner; current public runners can't link the SDK).
 
 ## Steam distribution
 
-Once we have a Steam App ID:
+The SteamPipe upload layer is scaffolded in [`steam/`](../steam/) and
+the manual-dispatch workflow lives at
+[`.github/workflows/release-steam.yml`](../.github/workflows/release-steam.yml).
+Full recipe in [`steam/README.md`](../steam/README.md); summary here.
 
-1. **Steamworks SDK** — download from the Partner backend, extract to
-   a known path, set `STEAM_SDK_LOCATION` in your shell.
-2. **App config** — fill in `STEAM_APPID` env or drop a
-   `steam_appid.txt` in `src-tauri/` (gitignored). Add a Linux depot
-   for the AppImage and a Windows depot for the NSIS .exe.
-3. **`steamcmd app_build`** — wrap the depots into a build. A future
-   `.github/workflows/release-steam.yml` will run this on `v*` tags
-   once we have an `STEAM_PARTNER_TOKEN` secret.
+1. **Steamworks SDK (optional for upload)** — required only for the
+   in-game Steamworks features (achievements, presence). To enable:
+   download from the Partner backend, extract to a known path, set
+   `STEAM_SDK_LOCATION`, build with `pnpm build:deck -- --features
+   steam`. SteamPipe upload itself doesn't need the SDK — `steamcmd`
+   is enough.
+2. **Get App + depot IDs from the Partner backend.** Once Valve has
+   provisioned a Steam App ID, set up two depots (Linux + Windows)
+   in the SteamPipe section.
+3. **Bake build-account credentials** — see *First-time setup* in
+   [`steam/README.md`](../steam/README.md). One interactive
+   `steamcmd +login` on a trusted machine produces a `config.vdf` +
+   `ssfn` token that CI can reuse non-interactively.
+4. **Drop the IDs + credentials into GitHub repo secrets** (or local
+   env for a dev-box upload). The `release-steam.yml` workflow's
+   `Required repository secrets` block names them.
+5. **Trigger the workflow** — Actions tab → release-steam → Run
+   workflow. Pick the build-desktop run to ship + a set_live branch
+   (blank = upload only, human picks live build via the Steamworks
+   web UI). Run with `preview=true` first for a SteamPipe dry-run.
+6. **Mark the Linux depot as Steam Deck verified** in the App admin
+   so the Deck always picks the native Linux build over Proton. The
+   Steamworks docs cover the Verified rating checklist.
 
-Mark the Linux depot as **Steam Deck verified** in the App admin so
-the Deck always picks the native Linux build over Proton. The
-Steamworks docs cover the Verified rating checklist.
+For local uploads from a dev box: `pnpm steam:upload` after
+`pnpm build:deck` and `pnpm build:windows`. `pnpm steam:dry-run` to
+validate the staging + VDF rendering without contacting Steam.
 
 ## Local sideload (testing without Steam)
 

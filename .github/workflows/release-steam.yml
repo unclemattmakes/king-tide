@@ -1,0 +1,224 @@
+name: release-steam
+
+# Upload a desktop build to Steam via SteamPipe. Manual dispatch
+# only — Steam uploads aren't trivially reversible (you can't
+# delete a build, only push a different one live), so we don't auto-
+# fire on tag pushes. Trigger this after build-desktop has produced
+# the AppImage + Windows artifacts you want to ship.
+#
+# Required repository secrets (set in Settings → Secrets and variables):
+#
+#   STEAM_APPID            numeric app ID (e.g. "3000000")
+#   STEAM_DEPOT_LINUX      Linux depot ID
+#   STEAM_DEPOT_WINDOWS    Windows depot ID
+#   STEAM_USERNAME         Steam build account username
+#   STEAM_CONFIG_VDF       base64 of a pre-baked config.vdf (Steam Guard token)
+#   STEAM_SSFN             base64 of the matching ssfn* file
+#   STEAM_SSFN_NAME        the original ssfn filename (e.g. ssfn1234567890)
+#
+# To bake the config.vdf + ssfn from a trusted machine:
+#   steamcmd +login <user>     # complete Steam Guard once
+#   then base64 ~/.steam/config/config.vdf and the matching ssfn file.
+# See steam/README.md for the full recipe.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: "build-desktop run ID to pull bundles from (blank = latest successful on default branch)"
+        required: false
+        default: ""
+        type: string
+      set_live:
+        description: "Branch to push live after upload (blank = upload only, don't switch live build)"
+        required: false
+        default: ""
+        type: string
+      platforms:
+        description: "Which depots to upload"
+        required: false
+        default: "both"
+        type: choice
+        options:
+          - "both"
+          - "linux"
+          - "windows"
+      preview:
+        description: "SteamPipe preview run (validate, don't upload)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+concurrency:
+  group: release-steam
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    name: SteamPipe upload
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    environment: steam-release
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # ---- Resolve the build-desktop run we're shipping --------------------
+      - name: Resolve build-desktop run
+        id: resolve_run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_RUN_ID: ${{ inputs.build_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_RUN_ID}" ]; then
+            RUN_ID="${INPUT_RUN_ID}"
+            echo "using explicit build_run_id: $RUN_ID"
+          else
+            RUN_ID=$(gh run list \
+              --workflow build-desktop.yml \
+              --branch "${{ github.ref_name }}" \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId')
+            if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+              echo "::error::no successful build-desktop run on ${{ github.ref_name }} — run that workflow first or pass build_run_id explicitly."
+              exit 1
+            fi
+            echo "resolved latest build-desktop run on ${{ github.ref_name }}: $RUN_ID"
+          fi
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      # ---- Pull artifacts from that run -----------------------------------
+      - name: Download Linux AppImage artifact
+        if: inputs.platforms == 'both' || inputs.platforms == 'linux'
+        uses: actions/download-artifact@v5
+        with:
+          name: hoverbike-linux-appimage
+          path: artifacts/linux
+          run-id: ${{ steps.resolve_run.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Windows installer artifact
+        if: inputs.platforms == 'both' || inputs.platforms == 'windows'
+        uses: actions/download-artifact@v5
+        with:
+          name: hoverbike-windows-installer
+          path: artifacts/windows
+          run-id: ${{ steps.resolve_run.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # The Windows artifact is the NSIS installer .exe. SteamPipe wants
+      # the installed game tree, not the installer. Extract via 7z which
+      # ships on every ubuntu-* runner.
+      - name: Extract Windows installer payload
+        if: inputs.platforms == 'both' || inputs.platforms == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/windows-extracted
+          installer=$(ls artifacts/windows/*-setup.exe | head -n1)
+          echo "extracting $installer"
+          # NSIS payload lives in $PLUGINSDIR/app-64.7z (or similar) on
+          # modern installers. Two-stage extraction.
+          7z x -y -oartifacts/windows-stage1 "$installer" >/dev/null
+          inner=$(find artifacts/windows-stage1 -name 'app-64.7z' -o -name 'app.7z' -o -name 'app-32.7z' | head -n1)
+          if [ -n "$inner" ]; then
+            7z x -y -oartifacts/windows-extracted "$inner" >/dev/null
+          else
+            # Fallback: some NSIS installers don't use a nested 7z;
+            # the stage1 extraction already gave us the game tree.
+            cp -r artifacts/windows-stage1/* artifacts/windows-extracted/
+          fi
+          ls -la artifacts/windows-extracted
+          # The actual .exe should be at the root or in $INSTDIR.
+          # tools/steam-upload.mjs WINDOWS_BUNDLE_DIR points at the
+          # directory containing the .exe.
+          if find artifacts/windows-extracted -maxdepth 2 -name 'hoverbike.exe' | grep -q .; then
+            echo "found hoverbike.exe in extracted tree"
+          else
+            echo "::warning::could not locate hoverbike.exe in extracted NSIS payload — Steam may reject the depot"
+          fi
+
+      # ---- Install steamcmd ------------------------------------------------
+      - name: Install steamcmd
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends lib32gcc-s1
+          mkdir -p $HOME/steamcmd
+          cd $HOME/steamcmd
+          curl -sSLO https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
+          tar -xzf steamcmd_linux.tar.gz
+          # First run downloads the rest of the SDK; it'll exit non-zero
+          # on first launch but that's fine.
+          ./steamcmd.sh +quit || true
+          echo "$HOME/steamcmd" >> $GITHUB_PATH
+
+      # ---- Stage Steam Guard credentials ----------------------------------
+      - name: Stage Steam Guard credentials
+        env:
+          STEAM_CONFIG_VDF: ${{ secrets.STEAM_CONFIG_VDF }}
+          STEAM_SSFN: ${{ secrets.STEAM_SSFN }}
+          STEAM_SSFN_NAME: ${{ secrets.STEAM_SSFN_NAME }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${STEAM_CONFIG_VDF}" ] || [ -z "${STEAM_SSFN}" ] || [ -z "${STEAM_SSFN_NAME}" ]; then
+            echo "::error::STEAM_CONFIG_VDF / STEAM_SSFN / STEAM_SSFN_NAME secrets are required. See steam/README.md for how to bake them."
+            exit 1
+          fi
+          # steamcmd reads config.vdf + ssfn from ~/Steam/config/ on Linux.
+          mkdir -p $HOME/Steam/config
+          echo "$STEAM_CONFIG_VDF" | base64 -d > $HOME/Steam/config/config.vdf
+          echo "$STEAM_SSFN"       | base64 -d > $HOME/Steam/$STEAM_SSFN_NAME
+          chmod 600 $HOME/Steam/config/config.vdf $HOME/Steam/$STEAM_SSFN_NAME
+
+      # ---- Run the uploader ------------------------------------------------
+      - name: Upload to Steam
+        env:
+          STEAM_APPID: ${{ secrets.STEAM_APPID }}
+          STEAM_DEPOT_LINUX: ${{ secrets.STEAM_DEPOT_LINUX }}
+          STEAM_DEPOT_WINDOWS: ${{ secrets.STEAM_DEPOT_WINDOWS }}
+          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+          # steamcmd is on PATH from the install step above.
+          STEAM_SET_LIVE: ${{ inputs.set_live }}
+          STEAM_PREVIEW: ${{ inputs.preview }}
+          LINUX_BUNDLE: ${{ github.workspace }}/artifacts/linux/Hoverbike.AppImage
+          WINDOWS_BUNDLE_DIR: ${{ github.workspace }}/artifacts/windows-extracted
+          BUILD_DESCRIPTION: ${{ github.ref_name }} (${{ github.sha }})
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The AppImage artifact may have a versioned filename — rename
+          # for the upload script's default.
+          if [ -d artifacts/linux ]; then
+            mv artifacts/linux/*.AppImage artifacts/linux/Hoverbike.AppImage || true
+          fi
+          node tools/steam-upload.mjs --platform=${{ inputs.platforms }}
+
+      - name: Upload SteamPipe logs (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: steampipe-output
+          path: steam/output
+          if-no-files-found: ignore
+          retention-days: 14

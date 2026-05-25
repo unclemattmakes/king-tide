@@ -1,0 +1,40 @@
+// Steam install script — runs once on first install to make sure
+// the user's machine has the WebView2 Evergreen Runtime that Tauri's
+// WRY backend needs. Without it, the game exits with
+// "Could not find the WebView2 runtime" on machines that don't
+// already have Edge or another Chromium-based browser installed.
+//
+// Tauri's NSIS bundle ships a WebView2 download-bootstrapper, but
+// Steam installs by copying the depot rather than running the
+// NSIS installer — so the bootstrapper never fires. This script
+// closes that gap.
+//
+// HasRunKey is the registry key Microsoft sets when WebView2's
+// Evergreen Runtime is installed system-wide. Steam checks for the
+// key first; if present, the bootstrapper is skipped. Saves users
+// a redundant 200 MB download.
+//
+// REQUIRES VALVE APPROVAL — install scripts that run executables
+// have to be reviewed by Valve before they take effect. Post the
+// script to the Steamworks Discussions install-script thread (see
+// the docs linked from https://partner.steamgames.com/doc/sdk/installscripts)
+// and they'll flip the flag on the depot.
+//
+// The bootstrapper itself (MicrosoftEdgeWebview2Setup.exe) gets
+// staged into the Windows depot root by tools/steam-upload.mjs so
+// %INSTALLDIR%\\MicrosoftEdgeWebview2Setup.exe resolves correctly
+// at install time.
+"InstallScript"
+{
+	"Run Process"
+	{
+		"WebView2_Evergreen"
+		{
+			"HasRunKey"		"HKEY_LOCAL_MACHINE\\Software\\WOW6432Node\\Microsoft\\EdgeUpdate\\ClientState\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+			"process 1"		"%INSTALLDIR%\\MicrosoftEdgeWebview2Setup.exe"
+			"command 1"		"/silent /install"
+			"NoCleanUp"		"1"
+			"Requirement OS Type"	"WindowsNT"
+		}
+	}
+}

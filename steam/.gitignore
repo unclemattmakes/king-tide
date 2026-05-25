@@ -1,0 +1,21 @@
+# Staging area filled at upload time by tools/steam-upload.mjs.
+content/
+
+# steamcmd build logs + manifest output.
+output/
+
+# Rendered VDFs (with real App ID / depot IDs substituted in) —
+# the templates in this folder are the committed source of truth.
+.rendered/
+
+# Local steamcmd binary if you symlink one in for offline testing.
+steamcmd/
+
+# Cached downloads — WebView2 bootstrapper etc. Reuse-on-subsequent-
+# uploads is the point.
+cache/
+
+# Pre-baked Steam Guard config.vdf used by CI for non-interactive
+# login. NEVER commit this — it's the bearer of your build account.
+config.vdf
+ssfn*
