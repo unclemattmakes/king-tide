@@ -1,0 +1,617 @@
+/* Making-of microsite — shared styling.
+   Palette + type echo the game's broadcast theme (see index.html). */
+
+:root {
+  color-scheme: dark;
+  --mo-navy: #050a14;
+  --mo-navy-2: #0a1424;
+  --mo-panel: #0e1a2e;
+  --mo-panel-2: #122340;
+  --mo-line: rgba(120, 160, 210, 0.16);
+  --mo-ink: #f4f8ff;
+  --mo-ink-dim: #9fb2cd;
+  --mo-ink-faint: rgba(244, 248, 255, 0.5);
+  --mo-cyan: #4dd6ff;
+  --mo-orange: #ff7a3a;
+  --mo-yellow: #ffd54a;
+  --mo-font-display: "Anton", "Arial Narrow", system-ui, sans-serif;
+  --mo-font-body: "Inter", system-ui, -apple-system, sans-serif;
+  --mo-measure: 44rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 600px at 70% -10%, rgba(77, 214, 255, 0.1), transparent 60%),
+    linear-gradient(180deg, var(--mo-navy-2), var(--mo-navy));
+  background-attachment: fixed;
+  color: var(--mo-ink);
+  font-family: var(--mo-font-body);
+  font-size: 18px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--mo-cyan);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* ── Top bar ─────────────────────────────────────────────────────────── */
+.mo-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem clamp(1rem, 4vw, 2.5rem);
+  background: rgba(5, 10, 20, 0.78);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--mo-line);
+}
+
+.mo-topbar a {
+  color: var(--mo-ink);
+}
+
+.mo-brand {
+  font-family: var(--mo-font-display);
+  letter-spacing: 0.04em;
+  font-size: 1.1rem;
+  text-transform: uppercase;
+}
+
+.mo-brand span {
+  color: var(--mo-cyan);
+}
+
+.mo-topbar nav {
+  display: flex;
+  gap: 1.4rem;
+  font-size: 0.92rem;
+  color: var(--mo-ink-dim);
+}
+
+/* ── Layout shell ────────────────────────────────────────────────────── */
+.mo-shell {
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: 0 clamp(1rem, 4vw, 2.5rem) 6rem;
+}
+
+.mo-prose {
+  max-width: var(--mo-measure);
+  margin: 0 auto;
+}
+
+/* ── Hero ────────────────────────────────────────────────────────────── */
+.mo-hero {
+  max-width: var(--mo-measure);
+  margin: clamp(2.5rem, 8vw, 6rem) auto clamp(2rem, 5vw, 3.5rem);
+}
+
+.mo-eyebrow {
+  font-family: var(--mo-font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.85rem;
+  color: var(--mo-cyan);
+  margin: 0 0 0.8rem;
+}
+
+.mo-hero h1 {
+  font-family: var(--mo-font-display);
+  font-weight: 400;
+  font-size: clamp(2.6rem, 8vw, 4.6rem);
+  line-height: 0.98;
+  letter-spacing: 0.01em;
+  margin: 0 0 1rem;
+}
+
+.mo-hero p {
+  font-size: 1.18rem;
+  color: var(--mo-ink-dim);
+  margin: 0;
+}
+
+/* ── Prose typography ────────────────────────────────────────────────── */
+.mo-prose h2 {
+  font-family: var(--mo-font-display);
+  font-weight: 400;
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  letter-spacing: 0.01em;
+  margin: 3rem 0 0.5rem;
+  scroll-margin-top: 5rem;
+}
+
+.mo-prose h3 {
+  font-size: 1.2rem;
+  margin: 2rem 0 0.4rem;
+  color: var(--mo-cyan);
+}
+
+.mo-prose p {
+  margin: 0 0 1.1rem;
+}
+
+.mo-prose ul,
+.mo-prose ol {
+  margin: 0 0 1.1rem;
+  padding-left: 1.3rem;
+}
+
+.mo-prose li {
+  margin: 0.3rem 0;
+}
+
+.mo-prose strong {
+  color: #fff;
+}
+
+.mo-prose code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.86em;
+  background: rgba(77, 214, 255, 0.1);
+  border: 1px solid var(--mo-line);
+  border-radius: 5px;
+  padding: 0.1em 0.4em;
+  color: #cfeaff;
+}
+
+.mo-aside {
+  border-left: 3px solid var(--mo-orange);
+  background: rgba(255, 122, 58, 0.07);
+  padding: 0.9rem 1.2rem;
+  margin: 1.6rem 0;
+  border-radius: 0 8px 8px 0;
+  font-size: 0.96rem;
+  color: var(--mo-ink-dim);
+}
+
+.mo-aside strong {
+  color: var(--mo-orange);
+}
+
+/* ── Demo block ──────────────────────────────────────────────────────── */
+.mo-demo {
+  margin: 2.2rem 0;
+  border: 1px solid var(--mo-line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--mo-panel);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
+.mo-demo-caption {
+  padding: 0.7rem 1.1rem;
+  font-size: 0.85rem;
+  color: var(--mo-ink-faint);
+  border-bottom: 1px solid var(--mo-line);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.mo-demo-caption strong {
+  color: var(--mo-cyan);
+  font-weight: 600;
+}
+
+.mo-demo-body {
+  display: grid;
+  grid-template-columns: 1fr 18rem;
+  min-height: 420px;
+}
+
+.mo-demo-stage {
+  position: relative;
+  min-height: 420px;
+  background: linear-gradient(180deg, #0b1726, #060d18);
+}
+
+.mo-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.mo-demo-controls {
+  border-left: 1px solid var(--mo-line);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background: var(--mo-panel-2);
+  overflow-y: auto;
+  max-height: 560px;
+}
+
+@media (max-width: 720px) {
+  .mo-demo-body {
+    grid-template-columns: 1fr;
+  }
+
+  .mo-demo-controls {
+    border-left: none;
+    border-top: 1px solid var(--mo-line);
+    max-height: none;
+  }
+}
+
+/* ── Control widgets ─────────────────────────────────────────────────── */
+.mo-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.mo-panel-title {
+  font-family: var(--mo-font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.8rem;
+  color: var(--mo-ink-dim);
+}
+
+.mo-ctrl {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.mo-ctrl-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.mo-ctrl-label {
+  color: var(--mo-ink);
+}
+
+.mo-ctrl-value {
+  color: var(--mo-cyan);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+}
+
+.mo-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 3px;
+  background: rgba(120, 160, 210, 0.25);
+  outline: none;
+}
+
+.mo-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--mo-cyan);
+  cursor: pointer;
+  box-shadow: 0 0 0 3px rgba(77, 214, 255, 0.2);
+}
+
+.mo-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: var(--mo-cyan);
+  cursor: pointer;
+}
+
+.mo-ctrl-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+}
+
+.mo-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--mo-cyan);
+  cursor: pointer;
+}
+
+.mo-segmented {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--mo-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mo-seg-btn {
+  flex: 1;
+  padding: 0.45rem 0.5rem;
+  background: transparent;
+  border: none;
+  color: var(--mo-ink-dim);
+  font-family: var(--mo-font-body);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.mo-seg-btn.is-active {
+  background: var(--mo-cyan);
+  color: #042033;
+  font-weight: 600;
+}
+
+.mo-readout {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--mo-line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  font-size: 0.82rem;
+}
+
+.mo-readout-label {
+  color: var(--mo-ink-dim);
+}
+
+.mo-readout-value {
+  color: var(--mo-yellow);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* ── Inline SVG curve plot ───────────────────────────────────────────── */
+.mo-plot-wrap {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--mo-line);
+  border-radius: 8px;
+  padding: 0.4rem 0.4rem 0.2rem;
+}
+
+.mo-plot {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.mo-plot-axis {
+  stroke: rgba(159, 178, 205, 0.35);
+  stroke-width: 1;
+}
+
+.mo-plot-sweet {
+  stroke: rgba(255, 213, 74, 0.5);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.mo-plot-shipped {
+  stroke: var(--mo-cyan);
+  stroke-width: 2;
+  opacity: 0.65;
+}
+
+.mo-plot-yours {
+  stroke: var(--mo-orange);
+  stroke-width: 2;
+}
+
+.mo-plot-marker {
+  fill: #fff;
+  stroke: var(--mo-orange);
+  stroke-width: 2;
+}
+
+.mo-plot-label {
+  fill: var(--mo-ink-faint);
+  font-size: 9px;
+  font-family: var(--mo-font-body);
+}
+
+.mo-plot-legend {
+  display: flex;
+  gap: 0.9rem;
+  justify-content: center;
+  font-size: 0.72rem;
+  color: var(--mo-ink-dim);
+  padding-top: 0.2rem;
+}
+
+.mo-plot-key::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 2px;
+  margin-right: 0.3rem;
+  vertical-align: middle;
+}
+
+.mo-key-shipped::before {
+  background: var(--mo-cyan);
+}
+
+.mo-key-yours::before {
+  background: var(--mo-orange);
+}
+
+/* ── Stage badge ─────────────────────────────────────────────────────── */
+.mo-badge {
+  position: absolute;
+  top: 0.6rem;
+  left: 0.6rem;
+  z-index: 2;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(5, 10, 20, 0.7);
+  border: 1px solid var(--mo-line);
+  color: var(--mo-cyan);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+/* ── Drift charge meter ──────────────────────────────────────────────── */
+.mo-ctrl-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--mo-ink-dim);
+  line-height: 1.5;
+}
+
+.mo-drift-btn {
+  width: 100%;
+  padding: 0.7rem;
+  border: 1px solid var(--mo-line);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--mo-panel-2), var(--mo-panel));
+  color: var(--mo-ink);
+  font-family: var(--mo-font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.95rem;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  transition:
+    transform 0.08s ease,
+    border-color 0.08s ease;
+}
+
+.mo-drift-btn:active {
+  transform: scale(0.97);
+  border-color: var(--mo-cyan);
+  background: var(--mo-cyan-soft);
+}
+
+.mo-charge-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.mo-charge-bar {
+  position: relative;
+  height: 18px;
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid var(--mo-line);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.mo-charge-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  opacity: 0.28;
+}
+
+.mo-charge-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 4px 0 0 4px;
+  transition: width 0.05s linear;
+}
+
+.mo-charge-ticks {
+  position: relative;
+  height: 0.9rem;
+  font-size: 0.62rem;
+  color: var(--mo-ink-faint);
+}
+
+.mo-charge-ticks span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+/* ── Chapter cards (landing) ─────────────────────────────────────────── */
+.mo-chapters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 1.1rem;
+  margin: 2rem 0;
+}
+
+.mo-card {
+  display: block;
+  padding: 1.3rem;
+  border: 1px solid var(--mo-line);
+  border-radius: 12px;
+  background: var(--mo-panel);
+  color: var(--mo-ink);
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.mo-card:hover {
+  text-decoration: none;
+  transform: translateY(-3px);
+  border-color: rgba(77, 214, 255, 0.5);
+}
+
+.mo-card.is-soon {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.mo-card-num {
+  font-family: var(--mo-font-display);
+  font-size: 0.85rem;
+  color: var(--mo-cyan);
+  letter-spacing: 0.1em;
+}
+
+.mo-card h3 {
+  margin: 0.3rem 0 0.5rem;
+  font-size: 1.25rem;
+}
+
+.mo-card p {
+  margin: 0;
+  font-size: 0.94rem;
+  color: var(--mo-ink-dim);
+}
+
+.mo-tag {
+  display: inline-block;
+  margin-top: 0.8rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--mo-yellow);
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────── */
+.mo-footer {
+  max-width: var(--mo-measure);
+  margin: 4rem auto 0;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--mo-line);
+  font-size: 0.85rem;
+  color: var(--mo-ink-faint);
+}
+
+.mo-footer a {
+  color: var(--mo-ink-dim);
+}
