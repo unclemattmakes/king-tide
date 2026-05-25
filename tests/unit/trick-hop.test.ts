@@ -286,6 +286,22 @@ describe('trickHopSystem — leaving the planted stance arms the window', () => 
     expect(TrickStateStore.must(eid).trickFiredThisTick).toBe(true)
   })
 
+  it('arms while dropping off a ledge / embankment at speed (negative slope)', () => {
+    const { eid, setIntent } = spawnBike(sim, handle)
+    // Grounded, following a downward embankment — negative slope of the
+    // same magnitude as the kicker gate. The old up-only arm missed this.
+    body.vx = 22
+    body.vy = -1
+    setIntent({ throttle: 0.9 })
+    HoverStateStore.must(eid).forwardSlope = -0.2 // ≈ −11°, a real drop
+    trickHopSystem(sim, phys)
+    expect(TrickStateStore.must(eid).trickWindowOpen).toBe(true)
+
+    setIntent({ throttle: 0.9, trickRight: true })
+    trickHopSystem(sim, phys)
+    expect(TrickStateStore.must(eid).trickFiredThisTick).toBe(true)
+  })
+
   it('does not arm on a gentle grade below the kicker slope', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
     body.vx = 22
