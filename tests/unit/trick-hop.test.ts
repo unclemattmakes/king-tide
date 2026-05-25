@@ -269,6 +269,33 @@ describe('trickHopSystem — leaving the planted stance arms the window', () => 
     expect(trick.trickFiredDirection).toBe(+1)
   })
 
+  it('arms while riding up a ramp / sandbar transition at speed (kicker)', () => {
+    const { eid, setIntent } = spawnBike(sim, handle)
+    // Grounded, nose still down (climbing — the nose samples the rising
+    // slope ahead), but on a clear upslope at speed.
+    body.vx = 22
+    body.vy = 2
+    setIntent({ throttle: 0.9 })
+    HoverStateStore.must(eid).forwardSlope = 0.2 // ≈ 11°, above the kicker gate
+    trickHopSystem(sim, phys)
+    expect(TrickStateStore.must(eid).trickWindowOpen).toBe(true)
+
+    // Press while climbing the ramp — fires (the loft then pops the bike).
+    setIntent({ throttle: 0.9, trickRight: true })
+    trickHopSystem(sim, phys)
+    expect(TrickStateStore.must(eid).trickFiredThisTick).toBe(true)
+  })
+
+  it('does not arm on a gentle grade below the kicker slope', () => {
+    const { eid, setIntent } = spawnBike(sim, handle)
+    body.vx = 22
+    body.vy = 0.5
+    setIntent({ throttle: 0.9 })
+    HoverStateStore.must(eid).forwardSlope = 0.05 // below TRICK_RAMP_SLOPE_MIN
+    trickHopSystem(sim, phys)
+    expect(TrickStateStore.must(eid).trickWindowOpen).toBe(false)
+  })
+
   it('fires immediately on an in-air press when the window is already open', () => {
     const { eid, setIntent } = spawnBike(sim, handle)
     body.vx = 22
