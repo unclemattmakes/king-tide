@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>Hover &amp; Buoyancy — The Making of Hoverbike</title>
+    <meta
+      name="description"
+      content="How a hoverbike settles onto moving water: four probes around the hull, pitch and roll from height differences, and why sampling a footprint beats reading one point."
+    />
+    <style>
+      body {
+        margin: 0;
+        background: #050a14;
+        color: #f4f8ff;
+        font-family: "Inter", system-ui, sans-serif;
+      }
+    </style>
+    <script type="module" src="/src/making-of/buoyancy/main.ts"></script>
+  </head>
+  <body>
+    <header class="mo-topbar">
+      <a class="mo-brand" href="/making-of/">Making of <span>Hoverbike</span></a>
+      <nav>
+        <a href="/making-of/">All chapters</a>
+        <a href="/">Play the game</a>
+      </nav>
+    </header>
+
+    <main class="mo-shell">
+      <section class="mo-hero">
+        <p class="mo-eyebrow">Chapter 02 — Hover &amp; Buoyancy</p>
+        <h1>Settling onto a moving sea.</h1>
+        <p>
+          In <a href="/making-of/wave-field/">Chapter 01</a> we built water you can ask for a height
+          at any point. Now the bike has to <em>sit</em> on it — bobbing with the swell, pitching up
+          a wave face, leaning through a roll — without feeling like a cork in a washing machine.
+          The trick isn't fancier physics. It's <strong>where</strong> you sample.
+        </p>
+      </section>
+
+      <article class="mo-prose">
+        <h2>The obvious approach, and why it jitters</h2>
+        <p>
+          The lazy version: find the water's height and tilt directly under the bike's center, and
+          glue the bike to it. The wave field hands you an exact surface normal for free, so this is
+          almost no code. It also feels awful.
+        </p>
+        <p>
+          A real sea has chop — little ripples riding the big swells. A single center sample sees
+          every one of those ripples and the bike snaps to match each, twitching constantly. Set
+          the demo below to <strong>Center only</strong> and turn the sea up: the bike chatters,
+          tilting to ripples far smaller than itself. A bike is not a point; it shouldn't pretend to
+          be one.
+        </p>
+      </article>
+
+      <figure class="mo-demo">
+        <figcaption class="mo-demo-caption">
+          Live demo — <strong>drag to orbit</strong>. Yellow probes read pitch, cyan read roll. The
+          water and every probe height come from the game's real <code>wave-field</code> sampler.
+        </figcaption>
+        <div class="mo-demo-body">
+          <div class="mo-demo-stage" id="buoy-demo-stage"></div>
+          <div class="mo-demo-controls" id="buoy-demo-controls"></div>
+        </div>
+      </figure>
+
+      <article class="mo-prose">
+        <h2>Four probes, not one</h2>
+        <p>
+          So we give the bike a <strong>footprint</strong>. Four probes sample the surface around
+          the hull — bow, stern, port, starboard — and the bike's pose comes from how they differ:
+        </p>
+        <ul>
+          <li><strong>Height</strong> is the average of the four — the bike rides the mean water level, not whatever ripple sits dead-center.</li>
+          <li><strong>Pitch</strong> (nose up/down) is the bow-vs-stern height gap: <code>(bow − stern) / length</code>.</li>
+          <li><strong>Roll</strong> (lean) is the starboard-vs-port gap, the same way.</li>
+        </ul>
+        <p>
+          Because the probes straddle the hull, ripples smaller than the footprint average out
+          between them, while long swells — wider than the bike — still tilt it the way you'd
+          expect. Switch the demo to <strong>4 probes</strong> and widen the footprint: the chatter
+          smooths into a confident ride, and the pitch/roll readouts settle. The game's defaults are
+          a 1.6&nbsp;m × 0.8&nbsp;m footprint, matching the bike's visual size.
+        </p>
+        <div class="mo-aside">
+          <strong>One sea, water and land.</strong> In the real game each probe takes the higher of
+          the wave height and a ground raycast, so a bike straddling a shoreline reads terrain on
+          one side and wave on the other and transitions smoothly. The demo shows the water half of
+          that.
+        </div>
+
+        <h2>Looking ahead at speed</h2>
+        <p>
+          There's one more trick. If the probes sat at a fixed spread, a fast bike would only start
+          pitching up <em>after</em> its nose was already climbing a wave — too late, and it feels
+          mushy. So the fore/aft spread <strong>grows with speed</strong>: the faster you go, the
+          further ahead the bow probe reaches, and the bike begins tipping to meet a slope before it
+          arrives. Drag <strong>Approach speed</strong> up and watch the probes stretch (the reach
+          readout climbs); the bike anticipates the next face instead of reacting to it. The real
+          system extends the reach by <code>speed × 0.05</code>, capped at 1.4&nbsp;m so a very fast
+          bike doesn't over-anticipate.
+        </p>
+
+        <h2>Keeping it from buzzing</h2>
+        <p>
+          Even with a footprint, raw slope readings flicker frame to frame over choppy water — and
+          on bumpy terrain in the full game, over every little trimesh edge. So the slope is run
+          through a gentle <strong>low-pass filter</strong> (about a 50&nbsp;ms time constant)
+          before it becomes pitch and roll. Fast enough to feel responsive on a real wave face, slow
+          enough that single-frame bumps don't kick the bike. That smoothing is on in the demo's
+          4-probe mode — it's part of why the readouts glide instead of snapping.
+        </p>
+
+        <h2>Read the code</h2>
+        <p>
+          The footprint sampler is
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/game/systems/hover.ts">
+            <code>sampleSurfaceFootprint</code> in src/game/systems/hover.ts</a>. In the game its
+          four heights feed spring forces through the Rapier rigid body rather than setting the pose
+          directly — but the sampling, the differential pitch/roll, the speed-scaled reach, and the
+          50&nbsp;ms slope filter are all exactly what you're playing with above.
+        </p>
+      </article>
+
+      <footer class="mo-footer">
+        <p>
+          <a href="/making-of/">← Back to all chapters</a> &nbsp;·&nbsp; Previous:
+          <a href="/making-of/wave-field/">Wave Mastery</a>.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

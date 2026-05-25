@@ -7,6 +7,7 @@ import {
   type Wave,
 } from '@/engine/sim/water/wave-field'
 import { createDemoHarness } from '../shared/demo-harness'
+import { buildBike, buildWaterGrid } from '../shared/scene-bits'
 import { panel, readout, segmented, slider, toggle } from '../shared/ui'
 
 /**
@@ -17,7 +18,6 @@ import { panel, readout, segmented, slider, toggle } from '../shared/ui'
  */
 
 const GRID_SIZE = 72 // meters across the visible patch
-const BIKE_HALF_LEN = 1.4
 const BIKE_FLOAT = 0.12 // sits this far proud of the surface
 
 type DemoState = {
@@ -81,7 +81,7 @@ export function mountWaveDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
 
   // ── Water mesh ────────────────────────────────────────────────────────
   const seg = isCoarseDevice() ? 72 : 116
-  const geo = buildGrid(seg, GRID_SIZE)
+  const geo = buildWaterGrid(seg, GRID_SIZE)
   const waterMat = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.32,
@@ -101,7 +101,7 @@ export function mountWaveDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
   const scratchColor = new THREE.Color()
 
   // ── Floating bike ─────────────────────────────────────────────────────
-  const bike = buildBike()
+  const bike = buildBike(1.4)
   scene.add(bike)
   let bikeAngle = 0
 
@@ -264,75 +264,6 @@ export function mountWaveDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
     geo.dispose()
     waterMat.dispose()
   }
-}
-
-function buildGrid(seg: number, size: number): THREE.BufferGeometry {
-  const verts = (seg + 1) * (seg + 1)
-  const positions = new Float32Array(verts * 3)
-  const normals = new Float32Array(verts * 3)
-  const colors = new Float32Array(verts * 3)
-  const baseXZ = new Float32Array(verts * 2)
-  const half = size / 2
-  let v = 0
-  for (let j = 0; j <= seg; j++) {
-    for (let i = 0; i <= seg; i++) {
-      const x = -half + (i / seg) * size
-      const z = -half + (j / seg) * size
-      positions[v * 3] = x
-      positions[v * 3 + 1] = 0
-      positions[v * 3 + 2] = z
-      normals[v * 3 + 1] = 1
-      baseXZ[v * 2] = x
-      baseXZ[v * 2 + 1] = z
-      v++
-    }
-  }
-  const indices = new Uint32Array(seg * seg * 6)
-  let idx = 0
-  for (let j = 0; j < seg; j++) {
-    for (let i = 0; i < seg; i++) {
-      const a = j * (seg + 1) + i
-      const b = a + 1
-      const c = a + (seg + 1)
-      const d = c + 1
-      indices[idx++] = a
-      indices[idx++] = c
-      indices[idx++] = b
-      indices[idx++] = b
-      indices[idx++] = c
-      indices[idx++] = d
-    }
-  }
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-  geo.setIndex(new THREE.BufferAttribute(indices, 1))
-  geo.userData.baseXZ = baseXZ
-  return geo
-}
-
-function buildBike(): THREE.Group {
-  const group = new THREE.Group()
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff7a3a, roughness: 0.5 })
-  const trimMat = new THREE.MeshStandardMaterial({ color: 0x101826, roughness: 0.6 })
-
-  const hull = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.34, BIKE_HALF_LEN * 2), bodyMat)
-  hull.position.y = 0.17
-  group.add(hull)
-
-  // Pointed nose at +Z (forward).
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.0, 4), bodyMat)
-  nose.rotation.x = Math.PI / 2
-  nose.rotation.z = Math.PI / 4
-  nose.position.set(0, 0.17, BIKE_HALF_LEN + 0.35)
-  group.add(nose)
-
-  const rider = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.5, 0.6), trimMat)
-  rider.position.set(0, 0.55, -0.1)
-  group.add(rider)
-
-  return group
 }
 
 function isCoarseDevice(): boolean {
