@@ -8,13 +8,16 @@
 
 ## Convention — definition of done
 
-A system is "done" when **all three** are true:
+A system is "done" when **all four** are true:
 
 1. It **functions correctly** in gameplay.
 2. It has a **settings-menu entry** exposing its tunable parameters (where
    applicable).
 3. The corresponding **menu/HUD element is enabled** (no longer in the
    disabled-pending state).
+4. Any **interactive surface it adds is navigable by keyboard, controller,
+   and touch** — not just mouse. See the
+   [input-navigability convention](#convention--input-navigability) below.
 
 This forces every system to declare its player-facing surface area before
 it can be marked complete, and means every milestone produces visible payoff
@@ -37,6 +40,55 @@ Applied concretely (✅ = shipped, ⬜ = pending):
 | Leaderboard | ✅ TT PB → local cache + HMAC-signed POST to PartyKit `leaderboard` Party (deduped by handle; profanity / plausibility / rate-limit / replay-nonce gated) | ✅ gameplay → submit-times toggle + leaderboard-handle text row; inline initials prompt on first PB | ✅ menu → LEADERBOARDS opens two-pane track list + top-10 table; GLOBAL / LOCAL ONLY badge per track; admin moderation via `pnpm leaderboard:moderate` |
 | Input / controls | ✅ keyboard rebind (swap semantics) + gamepad fire/boost rebind | ✅ controls → rebind keyboard / rebind gamepad / sensitivity / deadzone / invert-Y | ✅ all five Controls rows lit |
 | Accessibility | ✅ colorblind palette / reduced flash / large text / high contrast / motion-sickness reduction / screen-shake intensity / subtitles always on | ✅ Accessibility tab with 8 rows lit | ✅ Settings → Accessibility category visible |
+
+---
+
+## Convention — input navigability
+
+Every interactive surface — menu screen, overlay, modal, results card —
+must be reachable **and** operable by **keyboard, controller, and touch**
+before it counts as done. "It works with a mouse" is not done. This is the
+input-side mirror of the disabled-state and definition-of-done conventions:
+locked once so no new screen reinvents (or silently drops) it. The recurring
+regression this prevents shipped in [PR #200](https://github.com/occ-matt/hoverbike/pull/200)
+(post-race + stacked overlays un-navigable on a pad).
+
+**Controller.** Gamepad menu nav comes from one place:
+`installMenuGamepad({ container, isActive?, onBack? })` in
+[src/engine/input/menu-gamepad.ts](../src/engine/input/menu-gamepad.ts) —
+it polls the pad and translates d-pad → focus move, A → click, B → `onBack`.
+A surface is pad-navigable **only if a poller's `container()` resolves to
+its DOM.** A new overlay with no poller is a dead end on a controller (the
+bug class that started this convention).
+
+Two pitfalls, both regression-pinned in
+[tests/unit/menu-gamepad.test.ts](../tests/unit/menu-gamepad.test.ts):
+
+1. **Two live pollers fight.** When overlay B opens *over* layer A and both
+   keep polling the same pad, they tug-of-war over focus — the A press never
+   lands a clean click and the d-pad can't advance. The layer underneath must
+   **park** while a higher overlay is up: gate its `isActive` with
+   `isAnyOverlayShown('settings-menu', 'rebind-menu', …)`. For an overlay
+   that stacks over another (cup-results over finish), prefer **one** poller
+   whose `container()` returns whichever is on top — never a second poller.
+2. **The touch overlay overlaps.** The in-race touch UI (`#touch-ui`, z-index
+   100, [src/engine/input/touch.ts](../src/engine/input/touch.ts)) sits above
+   every menu card. Any surface that can appear **during or after a race**
+   must drop it by adding a body class — `menu-active`, `paused-for-menu`, or
+   `touch-ui-hidden` — or the joystick / face buttons intercept taps meant for
+   its buttons.
+
+Checklist for a new interactive surface:
+
+- [ ] An `installMenuGamepad` poller targets it (or an existing topmost-container
+      poller already covers it).
+- [ ] If it stacks over a poller-bearing layer, that layer parks via
+      `isActive` / `isAnyOverlayShown`, or the two share one topmost-container
+      poller.
+- [ ] Esc/keyboard and gamepad B both have a back/exit path.
+- [ ] If it can show during/after a race, it sets a touch-hiding body class.
+- [ ] Walk it on a real controller and a touch device (the manual
+      navigability rows in [qa-playbook.md](./qa-playbook.md)).
 
 ---
 
@@ -128,6 +180,7 @@ milestone schedule; the steps above slot into it.
 
 | Date | Step | PR | Notes |
 |---|---|---|---|
+| 2026-05-25 | Step 8 — Controller/touch navigability for post-race + stacked overlays | [#200](https://github.com/occ-matt/hoverbike/pull/200) | Closes a recurring nav-gap class and locks the new [input-navigability convention](#convention--input-navigability) so future UI can't reopen it. The finish overlay + cup-results screen had **no** `installMenuGamepad` poller — a controller could only Start-to-exit, and the in-race touch UI (z-index 100) sat over the results buttons and ate taps. Root cause of the wider bug: a base-layer poller that keeps polling while an overlay opens on top tug-of-wars over focus (proved in the new harness), which silently broke controller nav for Settings-over-menu, Settings-over-pause, and Rebind-over-Settings; the Rebind modal and the multiplayer lobby had no poller at all. Fixes in [controls.ts](../src/boot/controls.ts) (one topmost-container poller for finish/cup-results gated on `finishShown`; `body.touch-ui-hidden` on finish), new `isAnyOverlayShown()` helper in [menu-gamepad.ts](../src/engine/input/menu-gamepad.ts) with base pollers ([menu-flow.ts](../src/engine/menus/menu-flow.ts), pause) parking while settings/rebind is up, the settings poller parking under rebind ([settings-overlay.ts](../src/engine/menus/settings-overlay.ts)), the rebind modal getting its own poller parked during button-capture ([rebind-modal.ts](../src/engine/menus/rebind-modal.ts)), and the MP lobby getting its own ([mp-lobby.ts](../src/engine/menus/mp-lobby.ts)). New `tests/unit/menu-gamepad.test.ts` (11 cases) pins the poller behaviour, the two-poller fight, and the gated-base fix; 829 unit tests green. Dev-only slider menus (dev-settings, water-debug) deliberately out of scope. |
 | 2026-05-24 | Tuck — sweet-spot nose-down lean + slipstream VFX | _pending PR_ | Snowboarder's downhill duck, folded into the existing nose-down (pitch-forward) gesture rather than a dedicated button. `tuckFactor()` in [src/game/systems/hover.ts](../src/game/systems/hover.ts) maps the lean to a signed factor — ramps 0→1 to `TUCK_SWEET_SPOT = 0.8`, then winds back through zero to `TUCK_SCRAPE_FLOOR = -0.5` at full deflection (where the dive-aid's ride-height drop already has the belly skimming). The factor interpolates `tuckSpeedBoost` (cap ×1.15) and `tuckDragMul` (drag ×0.5) off 1.0, so a feathered lean down a slope/wave face is fastest and burying the nose inverts both into a scrape penalty. Grounded/over-water only. VFX: a `tuckStream` additive-cyan particle pool in [src/engine/render/fx/index.ts](../src/engine/render/fx/index.ts) sheds slipstream streaks whose rate + size scale with the positive tuck factor — denser the closer you ride the sweet spot, gone on an over-tuck. **Settings → Gameplay → "Tuck slipstream VFX"** (Full / Subtle / Off, `playerSettings.tuckVfxIntensity`) is the global cap, clearing the definition-of-done UI gate. A `#hud-tuck` accuracy meter ([src/engine/render/tuck-hud.ts](../src/engine/render/tuck-hud.ts)) makes the otherwise-invisible curve legible — bar fill = lean, notch = sweet spot, colour + word (`LEAN IN`/`SWEET!`/`EASE OFF`/`SCRAPING`) + live cap-% report quality — toggled by **Settings → Gameplay → "Tuck meter"** (`playerSettings.tuckMeter`, default on). New unit suite `tests/unit/tuck-sweet-spot.test.ts` pins the curve; 704 unit tests green. |
 | 2026-05-19 | Step 8 — QA tooling (matrix + soak + bug bundle + playbook) | _pending PR_ | First sweep of QA-manager-grade tooling lands on top of the existing perf-recorder + cross-browser scaffolding. New `src/engine/qa/console-trap.ts` installs an install-once, ring-buffer-backed proxy over `console.error` / `console.warn` + `window.error` + `unhandledrejection` so every QA gate ("no console errors during this window") reads from one source. New `src/engine/qa/bug-bundle.ts` assembles a JSON repro bundle from the trap + perf + race + sanitized settings + net status (leaderboard handle masked to length only); `__hover.qa.downloadBundle()` triggers a download via the existing Blob+anchor pattern, `copyBundle()` ships it to the clipboard. Wired through `__hover.qa` debug surface in `src/debug.ts` (dev/test only — production exposes nothing). `installConsoleTrap()` fires at the top of `boot()` in `src/main.ts` so viewer / edit / menu shells all get errors captured. New `tools/qa/matrix.mjs` is the single source of truth for which (track × bike) cells the QA pass exercises — procedural tracks × 3 bikes (6 cells) + 9 v1 ship tracks at default bike (Reef + Open Sea + Continental cups; Drowned cup tracks left as `enabled: false` markers so a future enable flips them). New `tools/qa/runner.mjs` (`pnpm qa`) orchestrates typecheck / lint / unit / track-lint / Playwright matrix, optional `--soak`; emits Markdown + JSON to `qa-report/`. New `tools/qa/report.mjs` renders the Markdown (Shippability ✅/❌, per-step summary, log-tail under `<details>` for failures). New `tests/e2e/helpers/console-errors.ts` reusable Playwright fixture (`import { test } from './helpers/console-errors'`) so future specs drop the ad-hoc `page.on('pageerror', …)` pattern. New `tests/e2e/qa-track-matrix.spec.ts` parameterises over `enabledCells()` — boots `?autostart=1&track=…&bike=…`, drives 5s autoplay, asserts fps ≥ 30 / p95 ≤ 50ms / finite bike position / no console errors; gated on `QA_MATRIX=1` so `pnpm e2e` stays fast. New `tests/e2e/qa-soak.spec.ts` runs 60s autoplay (override via `QA_SOAK_SECONDS`) with a Chromium-only `performance.memory` heap-leak gate (end/mid ratio < 1.5) + hitch-fraction ceiling (< 5%). New `.github/workflows/qa.yml` runs `pnpm qa` non-blocking on push/PR, posts the report to the GitHub Step Summary, uploads `qa-report/` as an artifact; nightly cron runs `--soak` on main. New `.github/ISSUE_TEMPLATE/qa.yml` (QA report template — source dropdown, repro steps, bundle paste, severity dropdown, commit URL). New [docs/qa-playbook.md](./qa-playbook.md) is the convention doc — gate list, shippability semantics, matrix maintenance, bundle workflow, manual playtest checklist, roadmap. 624/624 unit tests passing across 66 files (3 new test files: `console-trap.test.ts` 9 cases, `bug-bundle.test.ts` 6 cases, `qa-matrix.test.ts` 5 cases). |
 | 2026-05-19 | Step 4 — All four ship cups unlocked + TT venue picker | _pending PR_ | With every v1 track now `status: 'ship'`, the four real race cups (Reef / Open Sea / Continental / Drowned) flip from gated to live in `tracks-catalog.ts`; cup-tracks screen renders championship START CUP CTAs for each. Time Trial venue picker now lists every shipped v1 track (previously dev-cup-only), so the TT loop has its full v1 surface. Closes the Cup-mode convention row's UI-gate line from "Dev Placeholder Cup tile active; ship cups stay gated" to "all four cups tile active". |
