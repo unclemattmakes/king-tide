@@ -308,6 +308,19 @@ through this list once per track:
 - [ ] Backspace respawn works at start gate.
 - [ ] Garage / settings tabs all reachable via keyboard alone (no
       mouse).
+- [ ] Every menu / overlay is fully navigable by **controller alone** —
+      main menu + sub-screens, bike / track / cup select, pause, Settings,
+      Rebind modal, post-race finish + cup-results, multiplayer lobby.
+      D-pad moves focus, A activates, B/back exits. Pay special attention
+      to **stacked overlays** (Settings over the pause card, Rebind over
+      Settings): opening the top one must not strand the cursor or swallow
+      the A press — see the input-navigability convention in
+      [v1-work-breakdown.md](./v1-work-breakdown.md).
+- [ ] Every menu / overlay is fully navigable by **touch** — buttons
+      tappable, and the in-race joystick / face buttons never sit over (or
+      intercept taps meant for) a results / pause / menu card. Verify the
+      finish + cup-results screens drop the touch overlay
+      (`body.touch-ui-hidden`).
 - [ ] Accessibility — colorblind palettes swap warning / success +
       leader / opponent channels on the minimap.
 - [ ] Audio sliders feel right — master / music / SFX / ambient at

@@ -30,7 +30,9 @@ post-flood. Planning trio:
   Step 0 scaffolding (full menu flow stubbed with disabled buttons),
   per-domain task inventory, and the **definition-of-done convention** —
   a system isn't done until it works *and* has a settings-menu entry *and*
-  its UI gate is cleared.
+  its UI gate is cleared *and* any UI it adds is navigable by keyboard,
+  controller, and touch (the **input-navigability convention** in the same
+  doc — read it before adding any new menu/overlay/modal).
 
 ## Authoring pipelines
 
