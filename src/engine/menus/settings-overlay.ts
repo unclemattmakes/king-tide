@@ -16,7 +16,11 @@
  * button so the overlay's DOM cost doesn't enter the initial bundle.
  */
 
-import { installMenuGamepad, type MenuGamepad } from '@/engine/input/menu-gamepad'
+import {
+  installMenuGamepad,
+  isAnyOverlayShown,
+  type MenuGamepad,
+} from '@/engine/input/menu-gamepad'
 import { installRebindModal } from '@/engine/menus/rebind-modal'
 import {
   getMpStatus,
@@ -1072,6 +1076,9 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
     gamepad = installMenuGamepad({
       container: () => rootEl,
       onBack: close,
+      // Park while the Rebind modal is layered on top — it owns input
+      // (and its own poller) until dismissed.
+      isActive: () => !isAnyOverlayShown('rebind-menu'),
     })
     gamepad.focusFirst()
   }

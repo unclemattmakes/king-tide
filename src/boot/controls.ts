@@ -14,7 +14,11 @@
  */
 
 import { clearCupProgress } from '@/engine/cup-progress'
-import { installMenuGamepad, type MenuGamepad } from '@/engine/input/menu-gamepad'
+import {
+  installMenuGamepad,
+  isAnyOverlayShown,
+  type MenuGamepad,
+} from '@/engine/input/menu-gamepad'
 import { TOUCH_MENU_EVENT } from '@/engine/input/touch'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
@@ -99,6 +103,8 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
 
   const pauseMenuEl = document.getElementById('pause-menu')
   const pauseSubtitleEl = document.getElementById('pause-subtitle')
+  const finishEl = document.getElementById('finish')
+  const cupResultsEl = document.getElementById('cup-results')
   // Gamepad navigation for the pause menu — installed lazily on first
   // open so we don't waste a rAF poller during the race itself. The
   // poller's `isActive` gate parks it while the menu is closed.
@@ -109,7 +115,9 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     if (pauseGamepad) return pauseGamepad
     pauseGamepad = installMenuGamepad({
       container: () => pauseMenuEl,
-      isActive: () => pausedForMenu,
+      // Park while Settings / Rebind is layered on top of the pause card —
+      // those run their own pollers and a second live one steals focus.
+      isActive: () => pausedForMenu && !isAnyOverlayShown('settings-menu', 'rebind-menu'),
       onBack: () => closePauseMenu(),
     })
     return pauseGamepad
@@ -172,6 +180,24 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     url.search = ''
     url.searchParams.set('back', '1')
     window.location.assign(url.toString())
+  }
+
+  // Gamepad navigation for the post-race screens: the finish overlay and
+  // the cup-results overlay that pops over it after the last cup race.
+  // A SINGLE poller whose container resolves to whichever overlay is on
+  // top — two competing pollers tug-of-war over focus and swallow the A
+  // press (see tests/unit/menu-gamepad.test.ts). Start is handled by the
+  // global watcher below; B mirrors the Esc-to-exit affordance. Installed
+  // lazily on first finish so it costs nothing during the race.
+  let finishGamepad: MenuGamepad | null = null
+  function ensureFinishGamepad(): MenuGamepad {
+    if (finishGamepad) return finishGamepad
+    finishGamepad = installMenuGamepad({
+      container: () => (cupResultsEl?.classList.contains('show') ? cupResultsEl : finishEl),
+      isActive: () => finishShown,
+      onBack: () => exitToMenu(),
+    })
+    return finishGamepad
   }
   // Wire pause-menu buttons exactly once (the DOM is shared across the
   // session, so re-binding on every open would leak click handlers).
@@ -344,6 +370,14 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     setAutoPlay,
     setFinishShown: (v) => {
       finishShown = v
+      if (v) {
+        // Suppress the in-race touch overlay so the joystick / face
+        // buttons don't sit on top of the results card (the finish +
+        // cup-results screens are z-indexed below the touch UI), then
+        // give the screen a focus anchor for controller navigation.
+        document.body.classList.add('touch-ui-hidden')
+        ensureFinishGamepad().focusFirst()
+      }
     },
   }
 }

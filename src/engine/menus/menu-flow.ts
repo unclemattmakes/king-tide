@@ -12,7 +12,7 @@ import { fetchBoard } from '@/engine/leaderboard/remote'
 import { playerSettings } from '@/engine/player-settings'
 import type { TrackManifestEntry } from '@/game/assets/manifest'
 import { type BikeVariantId, DEFAULT_BIKE_VARIANT } from '@/game/bikes/variants'
-import { installMenuGamepad } from '../input/menu-gamepad'
+import { installMenuGamepad, isAnyOverlayShown } from '../input/menu-gamepad'
 import {
   type BikeCard,
   bestLapFor,
@@ -753,6 +753,9 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
   const gamepadNav = installMenuGamepad({
     container: () => screens[currentStep] ?? null,
     onBack: gamepadBack,
+    // Park while the Settings overlay or Rebind modal sits on top — they
+    // run their own pollers and a second live one fights them for focus.
+    isActive: () => !isAnyOverlayShown('settings-menu', 'rebind-menu'),
   })
 
   return new Promise<MenuFlowResult>((resolve) => {
