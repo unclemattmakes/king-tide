@@ -17,6 +17,10 @@ export default defineConfig({
       { text: 'Contributing', link: '/contributing/' },
       { text: 'Reference', link: '/reference/conventions' },
       {
+        text: 'Making of',
+        link: 'https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app/making-of/',
+      },
+      {
         text: 'Live build',
         link: 'https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app',
       },
