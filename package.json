@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "party:dev": "partykit dev --port 1999",
@@ -57,7 +58,9 @@
     "steam:upload": "node tools/steam-upload.mjs",
     "steam:dry-run": "node tools/steam-upload.mjs --dry-run",
     "gen:icons": "node tools/gen-icons.mjs",
-    "gen:prop-gate": "node tools/blender/seed.mjs export_prop_gate.py"
+    "gen:prop-gate": "node tools/blender/seed.mjs export_prop_gate.py",
+    "spike:electron": "pnpm build && electron-builder --linux dir",
+    "spike:electron:run": "pnpm build && electron ."
   },
   "engines": {
     "node": ">=20"
@@ -77,6 +80,8 @@
     "@types/three": "^0.184.1",
     "@vitest/coverage-v8": "^4.1.6",
     "ajv": "^8.17.1",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
     "jsdom": "^29.1.1",
     "partykit": "^0.0.115",
     "typescript": "^6.0.3",
@@ -85,6 +90,9 @@
     "vitest": "^4.1.7"
   },
   "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron"
+    ],
     "overrides": {
       "esbuild@<=0.24.2": ">=0.25.0",
       "undici@<6.23.0": ">=6.23.0",
