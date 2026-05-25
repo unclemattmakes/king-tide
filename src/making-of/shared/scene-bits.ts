@@ -80,3 +80,54 @@ export function buildWaterGrid(seg: number, size: number): THREE.BufferGeometry 
   geo.userData.baseXZ = baseXZ
   return geo
 }
+
+export type ScrollDeck = {
+  /** Advance the rungs toward the camera by `dist` meters, wrapping. */
+  scroll: (dist: number) => void
+  dispose: () => void
+}
+
+/**
+ * A dark ground plane with evenly spaced "rungs" running across it. Used
+ * by the feel + drift demos as a cheap sense-of-speed cue: scroll the
+ * rungs at the bike's effective speed and a faster ride visibly flows by
+ * faster. The bike sits at the origin facing +Z; rungs scroll toward -Z
+ * (the camera) and wrap.
+ */
+export function createScrollDeck(scene: THREE.Scene): ScrollDeck {
+  const deckMat = new THREE.MeshStandardMaterial({ color: 0x0b1828, roughness: 0.9 })
+  const deck = new THREE.Mesh(new THREE.PlaneGeometry(11, 90), deckMat)
+  deck.rotation.x = -Math.PI / 2
+  deck.position.z = 10
+  scene.add(deck)
+
+  const gap = 3
+  const count = 22
+  const min = -16
+  const max = min + count * gap
+  const rungGeo = new THREE.BoxGeometry(7, 0.04, 0.22)
+  const rungMat = new THREE.MeshStandardMaterial({ color: 0x2f6f8a, emissive: 0x0a2230 })
+  const rungs: THREE.Mesh[] = []
+  for (let i = 0; i < count; i++) {
+    const r = new THREE.Mesh(rungGeo, rungMat)
+    r.position.set(0, 0.03, min + i * gap)
+    scene.add(r)
+    rungs.push(r)
+  }
+
+  return {
+    scroll(dist) {
+      for (const r of rungs) {
+        r.position.z -= dist
+        if (r.position.z < min) r.position.z += count * gap
+        else if (r.position.z > max) r.position.z -= count * gap
+      }
+    },
+    dispose() {
+      rungGeo.dispose()
+      rungMat.dispose()
+      deck.geometry.dispose()
+      deckMat.dispose()
+    },
+  }
+}

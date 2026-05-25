@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { TUCK_SCRAPE_FLOOR, TUCK_SWEET_SPOT, tuckFactor } from '@/game/systems/tuck-curve'
 import { createDemoHarness } from '../shared/demo-harness'
-import { buildBike } from '../shared/scene-bits'
+import { buildBike, createScrollDeck } from '../shared/scene-bits'
 import { el, panel, readout, slider, toggle } from '../shared/ui'
 
 /**
@@ -53,28 +53,7 @@ export function mountTuckDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
   scene.add(sun)
 
   // ── Deck + scrolling rungs (the speed cue) ────────────────────────────
-  const deck = new THREE.Mesh(
-    new THREE.PlaneGeometry(11, 90),
-    new THREE.MeshStandardMaterial({ color: 0x0b1828, roughness: 0.9 }),
-  )
-  deck.rotation.x = -Math.PI / 2
-  deck.position.z = 10
-  scene.add(deck)
-
-  const rungSpan = 66
-  const rungGap = 3
-  const rungCount = Math.floor(rungSpan / rungGap)
-  const rungGeo = new THREE.BoxGeometry(7, 0.04, 0.22)
-  const rungMat = new THREE.MeshStandardMaterial({ color: 0x2f6f8a, emissive: 0x0a2230 })
-  const rungs: THREE.Mesh[] = []
-  for (let i = 0; i < rungCount; i++) {
-    const r = new THREE.Mesh(rungGeo, rungMat)
-    r.position.set(0, 0.03, -16 + i * rungGap)
-    scene.add(r)
-    rungs.push(r)
-  }
-  const rungMin = -16
-  const rungMax = rungMin + rungCount * rungGap
+  const deck = createScrollDeck(scene)
 
   // ── Bike + scrape spark ───────────────────────────────────────────────
   const bike = buildBike(1.0)
@@ -171,12 +150,7 @@ export function mountTuckDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
     const dragMul = 1 - (1 - TUCK_DRAG_MUL) * tf
 
     // Scroll the deck at the cap the lean earns.
-    const scroll = BASE_SCROLL * capMul * dt
-    for (const r of rungs) {
-      r.position.z -= scroll
-      if (r.position.z < rungMin) r.position.z += rungCount * rungGap
-      else if (r.position.z > rungMax) r.position.z -= rungCount * rungGap
-    }
+    deck.scroll(BASE_SCROLL * capMul * dt)
 
     // Bike pitches nose-down and sinks toward the deck as the lean grows.
     bike.rotation.x = state.lean * LEAN_MAX_RAD
@@ -201,9 +175,7 @@ export function mountTuckDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
   return () => {
     unsub()
     harness.dispose()
-    rungGeo.dispose()
-    rungMat.dispose()
-    deck.geometry.dispose()
+    deck.dispose()
   }
 }
 
