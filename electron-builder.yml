@@ -1,0 +1,18 @@
+# SPIKE packaging config — builds a self-contained Linux dir (Chromium
+# bundled) so the app can be added to Steam and tested inside the Steam Linux
+# Runtime container. `asar: false` keeps dist/ as a real directory so the
+# custom-scheme file reads in electron/main.cjs don't have to go through asar.
+appId: app.hoverbike
+productName: Hoverbike
+executableName: hoverbike
+asar: false
+directories:
+  output: dist-electron
+files:
+  - electron/**/*
+  - dist/**/*
+  - package.json
+linux:
+  target:
+    - dir
+  category: Game

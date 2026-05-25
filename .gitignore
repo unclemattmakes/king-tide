@@ -40,3 +40,6 @@ __pycache__/
 src-tauri/target/
 src-tauri/gen/
 src-tauri/steam_appid.txt
+
+# Electron spike packaging output
+dist-electron/
