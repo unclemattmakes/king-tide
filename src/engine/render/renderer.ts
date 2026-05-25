@@ -81,3 +81,28 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
 
   return { renderer, backend, canvas, resize, dispose }
 }
+
+/**
+ * One-shot probe of the unmasked GPU renderer string via a throwaway WebGL2
+ * context. Surfaces what the driver actually is so the perf HUD can tell
+ * hardware from software: "AMD Custom GPU … (RADV …)" is the Deck's real GPU,
+ * whereas "llvmpipe" / "softpipe" means software rasterisation — the perf
+ * cliff to watch for when WebKitGTK can't reach the hardware EGL path.
+ *
+ * Returns 'unknown' with no context, 'masked' when the debug extension is
+ * blocked. Loses the context immediately so we don't leak a GL slot.
+ */
+export function probeGpuRenderer(): string {
+  if (typeof document === 'undefined') return 'unknown'
+  try {
+    const c = document.createElement('canvas')
+    const gl = (c.getContext('webgl2') ?? c.getContext('webgl')) as WebGLRenderingContext | null
+    if (!gl) return 'unknown'
+    const ext = gl.getExtension('WEBGL_debug_renderer_info')
+    const value = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : ''
+    gl.getExtension('WEBGL_lose_context')?.loseContext()
+    return value || 'masked'
+  } catch {
+    return 'unknown'
+  }
+}
