@@ -53,8 +53,12 @@ import {
  * Pre-input buffer: a press while still planted, with a plausible pop
  * imminent (recent `vyPeak ≥ MIN_VY_PEAK`, speed/throttle OK, no
  * hop-lockout), is held for `PRE_PRESS_BUFFER_SEC` (200 ms). If the bike
- * pops inside that window the buffered press fires the trick at the pop;
- * otherwise the buffer expires to a courtesy hop.
+ * pops inside that window the buffered press fires the trick at the pop.
+ * If no pop arrives but the climb context is still credible at expiry
+ * (the wave-crest / gentle-hump case the geometric pop misses), the
+ * press is honored anyway — a synthesized launch fires the trick, so the
+ * prompt that elicited the press never lies. Only a fully decayed climb
+ * (throttle released) expires to a plain courtesy hop.
  *
  * Flatground press with no plausible pop = small courtesy hop. No boost,
  * no spin, no meter — just a polite lift at the player's command.
@@ -163,28 +167,36 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
       }
     }
 
-    // ── Geometric trick window ───────────────────────────────────────
-    // Fully-planted = center grounded AND both ends grounded. Leaving
-    // that stance (a nose-up pop with the base still down, or a clean
-    // full takeoff) arms the window; re-planting closes it. In between
-    // the window stays open the whole airtime — one press fires the
-    // trick. The per-end flags are debounced in the hover system, so a
-    // single lumpy trimesh tick can't flicker the window.
-    const fullyPlanted = hover.isGrounded && hover.noseGrounded && hover.baseGrounded
-    if (trick.trickWindowOpen && fullyPlanted) {
+    // ── Trick window ─────────────────────────────────────────────────
+    // Open when the bike leaves its planted stance, two ways:
+    //   - pop pose: nose off the surface while the base + center are
+    //     still down — the lip / crest / bump moment the player reads as
+    //     "pop a trick". The nose probe samples *ahead*, so on a climb it
+    //     reads the rising slope and stays grounded; it only lifts at a
+    //     genuine crest, which keeps a steep climb from arming early.
+    //   - full launch: the center leaves the ground.
+    // Stays open the whole airtime and closes once the bike re-plants
+    // (center down + nose back down). The `!trickWindowOpen` latch means
+    // one episode arms once — probe flicker can't re-arm mid-flight or
+    // re-fire after the dedup. (Base contact only qualifies the pop pose;
+    // the stern probe samples *behind* / downhill while climbing and is
+    // too noisy to gate the airborne window on.)
+    const centerAirborne = !hover.isGrounded
+    const popPose = hover.isGrounded && !hover.noseGrounded && hover.baseGrounded
+    const settled = hover.isGrounded && hover.noseGrounded
+    if (trick.trickWindowOpen && settled) {
       // Re-planted — close + clear the per-airtime dedup.
       trick.trickWindowOpen = false
       trick.trickWindowTakeoffVy = 0
       trick.trickFiredThisAirborne = false
     } else if (
       !trick.trickWindowOpen &&
-      !fullyPlanted &&
-      trick.wasFullyPlantedLastTick &&
+      (centerAirborne || popPose) &&
       !trick.hopLockoutActive &&
       speedOK &&
       throttleOK
     ) {
-      // Just left the planted stance under power — arm. Reward scales on
+      // Left the planted stance under power — arm. Reward scales on
       // launch energy: `max(vy, vyPeak)` captures the climb's peak even
       // if the instantaneous vy has eased off the crest. `fireTrick`
       // floors the strength so a gentle pop still pays.
@@ -200,17 +212,34 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
         trick.bufferedPressDir = 0
       }
     }
-    trick.wasFullyPlantedLastTick = fullyPlanted
 
     // Tick down + expire the pre-press buffer. Skipped if the arm above
-    // already consumed it. On expiry the pop never arrived, so fall back
-    // to a courtesy hop — the press still does something visible. The
-    // hop-lockout is engaged because that lift is self-induced and must
-    // not arm a free trick on the resulting airborne transition.
+    // already consumed it at a clean pop. On expiry no geometric pop
+    // arrived — but the prompt that elicited this press lights on the
+    // climb context (recent vyPeak), so if that's still credible we must
+    // honor it rather than silently dropping to a hop. This is the
+    // wave-race common case: the bike rides a wave crest (or a gentle
+    // hump) without the center ever leaving the surface and without the
+    // nose clearing the grounded cutoff, so neither the geometric pop nor
+    // a hard takeoff fires. Synthesize the launch: a small lift so the
+    // bike visibly leaves, open the window, fire at the peak vy. The
+    // hop-lockout engages because that lift is self-induced and must not
+    // re-arm. If the climb decayed (throttle released, slowed down) fall
+    // back to the courtesy hop so the press still does something visible.
     if (trick.bufferedPressTimerSec > 0) {
       trick.bufferedPressTimerSec = Math.max(0, trick.bufferedPressTimerSec - dt)
       if (trick.bufferedPressTimerSec === 0 && trick.bufferedPressDir !== 0) {
-        applySmallHop(rb)
+        const stillCredible =
+          !trick.hopLockoutActive && trick.vyPeak >= MIN_VY_PEAK && speedOK && throttleOK
+        if (stillCredible) {
+          applySmallHop(rb)
+          trick.trickWindowOpen = true
+          trick.trickWindowTakeoffVy = trick.vyPeak
+          trick.trickFiredThisAirborne = false
+          fireTrick(trick, trick.bufferedPressDir, trick.vyPeak)
+        } else {
+          applySmallHop(rb)
+        }
         trick.hopLockoutActive = true
         trick.hopLockoutAirborneSeen = false
         trick.hopLockoutSafetyTicks = HOP_LOCKOUT_MAX_TICKS

@@ -172,7 +172,6 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
     trickWindowOpen: false,
     trickWindowTakeoffVy: 0,
     trickFiredThisAirborne: false,
-    wasFullyPlantedLastTick: false,
     bufferedPressTimerSec: 0,
     bufferedPressDir: 0,
     trickFiredThisTick: false,
