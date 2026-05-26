@@ -241,22 +241,20 @@ Steam Input is unreliable with Electron 27+. The game reads the raw Gamepad
 API (`navigator.getGamepads()` via `detectSteamDeck()`), so it doesn't rely
 on Steam Input — if controllers misbehave, disable Steam Input for the title.
 
-### 5. WebGPU needs Vulkan-through-ANGLE under Wayland
-The Deck's session is Wayland, and Chromium's Wayland backend **can't present
-native Vulkan** → `ERROR ... '--ozone-platform=wayland' is not compatible with
-Vulkan`, which knocks WebGPU down to WebGL2. Forcing `--ozone-platform=x11`
-*would* be Vulkan-compatible but **doesn't launch** inside the Steam Linux
-Runtime (no reachable XWayland/`DISPLAY`). The fix is to route Vulkan through
-ANGLE so the compositor presents via ANGLE (which Wayland supports) while
-WebGPU/Dawn keeps its Vulkan backend. `electron/main.cjs` sets:
-`--use-angle=vulkan` + `--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan`
-(the documented "WebGPU on Linux" combo). The feature list must live in
-`main.cjs`, not the launch command line — `appendSwitch` overwrites any
-`--enable-features` Steam passes.
+### 5. Linux WebGPU = plain Vulkan (do NOT force ANGLE)
+On Linux, WebGPU/Dawn needs the Vulkan backend, so `electron/main.cjs` sets
+`--enable-features=Vulkan` (Linux only; Windows uses D3D12). On a normal X11
+desktop session — how the native Linux build is actually used (direct /
+non-Steam) — plain Vulkan renders correctly.
 
-**These flags are gated to `process.platform === 'linux'`.** On Windows,
-Chromium's WebGPU backend is D3D12, and forcing Vulkan/ANGLE there hurts —
-especially under Proton, where the fast path is D3D12 → VKD3D-Proton → Vulkan.
+There **was** a Wayland wrinkle: inside the Steam Linux Runtime, Chromium's
+Wayland backend can't present native Vulkan (`'--ozone-platform=wayland' is
+not compatible with Vulkan`), and forcing `--ozone-platform=x11` doesn't
+launch in the container. The attempted fix — `--use-angle=vulkan` +
+`VulkanFromANGLE,DefaultANGLEVulkan` — was **never confirmed to work and
+black-screened the normal render path**, so it was removed. The whole avenue
+is moot now that the Deck ships the **Windows build via Proton** (below).
+
 The active backend is logged at boot (`[render] backend: webgpu|webgl2`) so
 you can confirm it from the log when there's no on-screen HUD.
 
@@ -290,11 +288,13 @@ References: Valve [steam-runtime #579](https://github.com/ValveSoftware/steam-ru
   `+x` bit (plain zips strip it). `chmod +x hoverbike`, or transport via
   `tar`/`rsync`, which preserve modes.
 - **`icon not found`** — run `pnpm gen:icons` from a fresh checkout.
-- **WebGPU not active (HUD shows `webgl2`)** — under Wayland, look for
-  `'--ozone-platform=wayland' is not compatible with Vulkan` in the log;
-  that's gotcha #5, fixed by the `--use-angle=vulkan` + `VulkanFromANGLE`
-  flags in `main.cjs`. Also: an older Electron whose bundled Dawn can't parse
-  Three.js's WGSL will spam shader-compile errors — keep Electron current.
+- **Black screen / WebGPU not active on Linux** — don't add
+  `--use-angle=vulkan` or `VulkanFromANGLE`/`DefaultANGLEVulkan`; those
+  black-screen the normal render path (gotcha #5). Linux wants plain
+  `--enable-features=Vulkan`. Under the Steam Linux Runtime, Wayland can't
+  present native Vulkan at all — which is why the Deck ships the Windows build
+  via Proton. Also: an older Electron whose bundled Dawn can't parse Three.js's
+  WGSL will spam shader-compile errors — keep Electron current.
 - **Windows installer build fails on Linux** — install `wine`, or build on a
   Windows host / CI. The `win-unpacked/` tree (what Steam ships) builds
   without the installer step.
