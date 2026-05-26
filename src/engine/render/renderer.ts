@@ -57,6 +57,9 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
   // type signature stable for the rest of the engine.
   const renderer = r as unknown as THREE.WebGLRenderer
   const backend: RenderBackend = hasWebGpu ? 'webgpu' : 'webgl2'
+  // Surface the active backend in the console so it's visible in logs when
+  // there's no on-screen HUD pill (e.g. diagnosing the desktop/Steam build).
+  console.info(`[render] backend: ${backend}`)
 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.setSize(window.innerWidth, window.innerHeight, false)

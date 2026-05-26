@@ -29,18 +29,25 @@ app.commandLine.appendSwitch('no-sandbox')
 // appendSwitch, since the zygote is spun up very early).
 app.commandLine.appendSwitch('no-zygote')
 
-// WebGPU on Linux/Chromium rides on Vulkan. But Chromium's Wayland backend
-// can't *present* native Vulkan ("--ozone-platform=wayland is not compatible
-// with Vulkan"), and forcing x11 doesn't launch inside the Steam Linux Runtime
-// (no reachable XWayland/DISPLAY). The fix is to run Vulkan *through* ANGLE:
-// --use-angle=vulkan + VulkanFromANGLE/DefaultANGLEVulkan let the compositor
-// present via ANGLE (which Wayland supports) while WebGPU/Dawn still gets
-// Vulkan underneath. This is the documented "WebGPU on Linux" combo
-// (gpuweb/gpuweb#5022). The feature list must be set here, not on the launch
-// command line — appendSwitch overwrites any --enable-features Steam passes.
+// Enable WebGPU everywhere. The *backend* differs by OS: Windows uses D3D12,
+// Linux uses Vulkan — so we only force the Vulkan/ANGLE path on Linux.
 app.commandLine.appendSwitch('enable-unsafe-webgpu')
-app.commandLine.appendSwitch('use-angle', 'vulkan')
-app.commandLine.appendSwitch('enable-features', 'Vulkan,VulkanFromANGLE,DefaultANGLEVulkan')
+
+// Linux only: Chromium's Wayland backend can't *present* native Vulkan
+// ("--ozone-platform=wayland is not compatible with Vulkan"), and forcing x11
+// doesn't launch inside the Steam Linux Runtime (no reachable XWayland/
+// DISPLAY). Routing Vulkan *through* ANGLE lets the compositor present via
+// ANGLE (which Wayland supports) while WebGPU/Dawn still gets Vulkan
+// underneath — the documented "WebGPU on Linux" combo (gpuweb/gpuweb#5022).
+// On Windows these would be actively harmful: WebGPU there is D3D12, and
+// forcing Vulkan/ANGLE pushes it onto a worse path (especially under Proton,
+// where D3D12 → VKD3D-Proton → Vulkan is the fast route). The feature list
+// must be set here, not on the launch command line — appendSwitch overwrites
+// any --enable-features Steam passes.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('use-angle', 'vulkan')
+  app.commandLine.appendSwitch('enable-features', 'Vulkan,VulkanFromANGLE,DefaultANGLEVulkan')
+}
 
 protocol.registerSchemesAsPrivileged([
   {

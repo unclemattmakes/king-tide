@@ -254,6 +254,20 @@ WebGPU/Dawn keeps its Vulkan backend. `electron/main.cjs` sets:
 `main.cjs`, not the launch command line — `appendSwitch` overwrites any
 `--enable-features` Steam passes.
 
+**These flags are gated to `process.platform === 'linux'`.** On Windows,
+Chromium's WebGPU backend is D3D12, and forcing Vulkan/ANGLE there hurts —
+especially under Proton, where the fast path is D3D12 → VKD3D-Proton → Vulkan.
+The active backend is logged at boot (`[render] backend: webgpu|webgl2`) so
+you can confirm it from the log when there's no on-screen HUD.
+
+> **Shipping option — Windows build via Proton.** Native Linux through the
+> Steam runtime is the painful path (everything above). The Windows build run
+> under Proton sidesteps all of it — no overlay/sandbox/zygote/Wayland issues,
+> since Proton gives Chromium a Windows-shaped environment. It launches
+> reliably on the Deck; WebGPU there depends on D3D12 → VKD3D-Proton. A
+> legitimate, common way to ship to the Deck if the native-Linux fight isn't
+> worth it.
+
 References: Valve [steam-runtime #579](https://github.com/ValveSoftware/steam-runtime/issues/579)
 (libcups), [steamworks.js #195](https://github.com/ceifa/steamworks.js/issues/195)
 (overlay), [gpuweb/gpuweb #5022](https://github.com/gpuweb/gpuweb/issues/5022)
