@@ -130,9 +130,11 @@ Full recipe in [`steam/README.md`](../steam/README.md); summary here.
 1. **Get App + depot IDs from the Partner backend.** Set up two depots
    (Linux + Windows) in the SteamPipe section.
 2. **Set the launch executables in the Steamworks backend** — Linux
-   launch option → `hoverbike`, Windows → `Hoverbike.exe`. The depot
-   VDFs only map files; the launch binary is App config. On the Deck,
-   run the Linux launch option under the **Steam Linux Runtime**.
+   launch option → **`hoverbike-launch.sh`** (the wrapper, *not* `hoverbike`
+   directly — see "Steam Deck / Linux runtime gotchas" below), Windows →
+   `Hoverbike.exe`. The depot VDFs only map files; the launch binary is App
+   config. On the Deck, run the Linux launch option under the **Steam Linux
+   Runtime**.
 3. **Bake build-account credentials** — see *First-time setup* in
    [`steam/README.md`](../steam/README.md).
 4. **Drop the IDs + credentials into GitHub repo secrets** (or local
@@ -166,12 +168,12 @@ chmod +x ~/Apps/hoverbike/hoverbike
 ```
 
 To exercise the Steam path: Desktop Mode → Steam → Games → "Add a
-Non-Steam Game" → type the path to the `hoverbike` binary → Add. In its
-**Properties → Compatibility**, force **"Steam Linux Runtime"** (this
-reproduces the pressure-vessel container a real depot launch uses), then
-launch from Steam. `--no-sandbox` is baked into the wrapper, so the
-chrome-sandbox SUID requirement won't block launch on a copied/depot
-tree.
+Non-Steam Game" → type the path to **`hoverbike-launch.sh`** (the wrapper,
+not the bare binary) → Add. In its **Properties → Compatibility**, force
+**"Steam Linux Runtime"** (this reproduces the pressure-vessel container a
+real depot launch uses), then launch from Steam. The wrapper handles the
+overlay + libcups issues covered next; `--no-sandbox` is also baked into the
+app itself.
 
 ### Windows .exe
 
@@ -183,22 +185,76 @@ tree.
 The installer drops shortcuts in the Start menu + Desktop. Uninstall
 via Apps & features.
 
+## Steam Deck / Linux runtime gotchas
+
+Wrapping a Chromium app (Electron) for the **Steam Linux Runtime** (sniper —
+the `pressure-vessel` container Steam launches games inside) hits a known set
+of issues. These are the ones we hit on-device and how the build handles
+them. The references at the bottom are the canonical write-ups.
+
+### The launch wrapper (`hoverbike-launch.sh`)
+Steam launches **`hoverbike-launch.sh`**, not `hoverbike` directly.
+`tools/build-deck.mjs` drops it (plus an `extra-lib/` dir) into the tree
+after electron-builder runs. Before exec'ing the binary it (1) strips the
+crashing Steam overlay from `LD_PRELOAD` and (2) prepends `extra-lib/` to
+`LD_LIBRARY_PATH`. Both are explained below.
+
+### 1. The Steam overlay segfaults Electron on load
+The overlay is `LD_PRELOAD`-injected as `gameoverlayrenderer.so`. With this
+Electron build its injector **crashes during library init (SIGSEGV) — in
+both Desktop *and* Gaming Mode** (confirmed via `coredumpctl info hoverbike`:
+the faulting frames are inside `gameoverlayrenderer.so`, called from
+`ld-linux` while it runs the preloaded lib's constructor). Critically, the
+per-game **"Enable the Steam Overlay" toggle does *not* stop the preload** —
+Steam still passes `--ld-preload=…/gameoverlayrenderer.so` to pressure-vessel.
+So the wrapper removes it from `LD_PRELOAD` before launch. Cost: the in-game
+overlay (Shift+Tab) is unavailable — but it barely works with Electron on
+Linux anyway, and this is the difference between *launches* and *crashes*.
+
+### 2. The runtime is missing libcups
+Electron's Chromium `dlopen()`s `libcups.so.2` (printing support), but the
+Steam Linux Runtime doesn't ship it, so Electron dies with
+`libcups.so.2: cannot open shared object file`. `build:deck` copies the build
+host's `libcups.so.2` into `extra-lib/`, and the wrapper adds that dir to
+`LD_LIBRARY_PATH`. If you hit a glibc symbol-version error inside sniper,
+source the lib from a glibc-2.31-era base (Debian 11); Ubuntu 22.04's copy
+usually loads fine.
+
+### 3. The sandbox can't initialise → `--no-sandbox`
+Depot files aren't setuid-root, so `chrome-sandbox` can't init inside the
+runtime → silent immediate exit. We bake
+`app.commandLine.appendSwitch('no-sandbox')` into `electron/main.cjs`, and the
+wrapper also passes `--no-sandbox`.
+
+### 4. Steam Input / gamepad
+Steam Input is unreliable with Electron 27+. The game reads the raw Gamepad
+API (`navigator.getGamepads()` via `detectSteamDeck()`), so it doesn't rely
+on Steam Input — if controllers misbehave, disable Steam Input for the title.
+
+References: Valve [steam-runtime #579](https://github.com/ValveSoftware/steam-runtime/issues/579)
+(libcups), [steamworks.js #195](https://github.com/ceifa/steamworks.js/issues/195)
+(overlay), and the Schemescape "browser game to Steam on Linux" series.
+
 ## Troubleshooting
 
-- **Steam says "running" but no window (Linux)** — almost always the
-  chrome-sandbox or the Steam Overlay. `--no-sandbox` is baked into
-  `electron/main.cjs`; if you still see it, disable the Steam Overlay
-  for the shortcut. Capture Chromium's stderr by launching the binary
-  with `--enable-logging=stderr` from a wrapper script.
-- **Tree won't launch after copy / unzip** — the `hoverbike` binary
-  lost its `+x` bit (plain zips strip it). `chmod +x hoverbike`, or
-  transport via `tar`/`rsync`, which preserve modes.
+- **Steam says "running" but never shows a window (Linux)** — the most
+  common cause is the Steam overlay segfaulting Electron on load (see
+  "gotchas" above); launching via `hoverbike-launch.sh` (which strips the
+  overlay preload) is the fix. Confirm a crash with
+  `coredumpctl info hoverbike` — if the top frames are in
+  `gameoverlayrenderer.so`, it's the overlay. If it's `chrome-sandbox`,
+  `--no-sandbox` is missing.
+- **`libcups.so.2: cannot open shared object file`** — the runtime's missing
+  libcups; rebuild with `build:deck` (which bundles it into `extra-lib/`) and
+  launch via the wrapper.
+- **Tree won't launch after copy / unzip** — the `hoverbike` binary lost its
+  `+x` bit (plain zips strip it). `chmod +x hoverbike`, or transport via
+  `tar`/`rsync`, which preserve modes.
 - **`icon not found`** — run `pnpm gen:icons` from a fresh checkout.
-- **WebGPU not active (HUD shows `webgl2`)** — the Deck's Vulkan/RADV
-  stack must be reachable. The wrapper enables Vulkan + WebGPU
-  explicitly; an older Electron whose bundled Dawn can't parse Three.js's
-  WGSL will spam shader-compile errors — keep Electron current.
-- **Windows installer build fails on Linux** — install `wine`, or build
-  on a Windows host / CI. The `win-unpacked/` tree (what Steam ships)
-  builds without the installer step.
-</content>
+- **WebGPU not active (HUD shows `webgl2`)** — the Deck's Vulkan/RADV stack
+  must be reachable. The wrapper enables Vulkan + WebGPU explicitly; an older
+  Electron whose bundled Dawn can't parse Three.js's WGSL will spam
+  shader-compile errors — keep Electron current.
+- **Windows installer build fails on Linux** — install `wine`, or build on a
+  Windows host / CI. The `win-unpacked/` tree (what Steam ships) builds
+  without the installer step.

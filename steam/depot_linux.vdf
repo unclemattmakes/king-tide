@@ -6,8 +6,9 @@
 //
 // Input layout: tools/steam-upload.mjs stages the electron-builder
 // linux-unpacked tree (Chromium bundled) into content/linux/. Set the
-// App's Linux launch executable to `hoverbike` in the Steamworks backend;
-// Steam handles the +x bit on the copied binary.
+// App's Linux launch executable to `hoverbike-launch.sh` (the wrapper that
+// strips the crashing Steam overlay + adds libcups — see
+// docs/desktop-builds.md), NOT `hoverbike` directly.
 "DepotBuildConfig"
 {
 	"DepotID"		"${STEAM_DEPOT_LINUX}"
