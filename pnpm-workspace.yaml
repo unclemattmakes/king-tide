@@ -1,3 +1,5 @@
 allowBuilds:
   esbuild: true
   workerd: true
+  electron: true
+  electron-winstaller: false
