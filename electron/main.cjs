@@ -29,24 +29,22 @@ app.commandLine.appendSwitch('no-sandbox')
 // appendSwitch, since the zygote is spun up very early).
 app.commandLine.appendSwitch('no-zygote')
 
-// Enable WebGPU everywhere. The *backend* differs by OS: Windows uses D3D12,
-// Linux uses Vulkan — so we only force the Vulkan/ANGLE path on Linux.
+// Enable WebGPU everywhere. The backend differs by OS: Windows uses D3D12,
+// Linux uses Vulkan.
 app.commandLine.appendSwitch('enable-unsafe-webgpu')
 
-// Linux only: Chromium's Wayland backend can't *present* native Vulkan
-// ("--ozone-platform=wayland is not compatible with Vulkan"), and forcing x11
-// doesn't launch inside the Steam Linux Runtime (no reachable XWayland/
-// DISPLAY). Routing Vulkan *through* ANGLE lets the compositor present via
-// ANGLE (which Wayland supports) while WebGPU/Dawn still gets Vulkan
-// underneath — the documented "WebGPU on Linux" combo (gpuweb/gpuweb#5022).
-// On Windows these would be actively harmful: WebGPU there is D3D12, and
-// forcing Vulkan/ANGLE pushes it onto a worse path (especially under Proton,
-// where D3D12 → VKD3D-Proton → Vulkan is the fast route). The feature list
-// must be set here, not on the launch command line — appendSwitch overwrites
-// any --enable-features Steam passes.
+// Linux only: WebGPU/Dawn needs the Vulkan backend enabled. Plain Vulkan
+// renders correctly on a normal (X11) desktop session — which is how the
+// native Linux build is used (direct / non-Steam; the Deck ships the Windows
+// build via Proton).
+//
+// NOTE: do NOT add `--use-angle=vulkan` / VulkanFromANGLE / DefaultANGLEVulkan
+// here. Those were a (never-confirmed) attempt to make Vulkan present under
+// Wayland inside the Steam Linux Runtime, and they black-screen the normal
+// render path. That whole avenue is moot now that the Deck runs the Windows
+// build via Proton.
 if (process.platform === 'linux') {
-  app.commandLine.appendSwitch('use-angle', 'vulkan')
-  app.commandLine.appendSwitch('enable-features', 'Vulkan,VulkanFromANGLE,DefaultANGLEVulkan')
+  app.commandLine.appendSwitch('enable-features', 'Vulkan')
 }
 
 protocol.registerSchemesAsPrivileged([
