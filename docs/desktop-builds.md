@@ -241,9 +241,23 @@ Steam Input is unreliable with Electron 27+. The game reads the raw Gamepad
 API (`navigator.getGamepads()` via `detectSteamDeck()`), so it doesn't rely
 on Steam Input — if controllers misbehave, disable Steam Input for the title.
 
+### 5. WebGPU needs Vulkan-through-ANGLE under Wayland
+The Deck's session is Wayland, and Chromium's Wayland backend **can't present
+native Vulkan** → `ERROR ... '--ozone-platform=wayland' is not compatible with
+Vulkan`, which knocks WebGPU down to WebGL2. Forcing `--ozone-platform=x11`
+*would* be Vulkan-compatible but **doesn't launch** inside the Steam Linux
+Runtime (no reachable XWayland/`DISPLAY`). The fix is to route Vulkan through
+ANGLE so the compositor presents via ANGLE (which Wayland supports) while
+WebGPU/Dawn keeps its Vulkan backend. `electron/main.cjs` sets:
+`--use-angle=vulkan` + `--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan`
+(the documented "WebGPU on Linux" combo). The feature list must live in
+`main.cjs`, not the launch command line — `appendSwitch` overwrites any
+`--enable-features` Steam passes.
+
 References: Valve [steam-runtime #579](https://github.com/ValveSoftware/steam-runtime/issues/579)
 (libcups), [steamworks.js #195](https://github.com/ceifa/steamworks.js/issues/195)
-(overlay), and the Schemescape "browser game to Steam on Linux" series.
+(overlay), [gpuweb/gpuweb #5022](https://github.com/gpuweb/gpuweb/issues/5022)
+(WebGPU/Vulkan flags), and the Schemescape "browser game to Steam on Linux" series.
 
 ## Troubleshooting
 
@@ -262,10 +276,11 @@ References: Valve [steam-runtime #579](https://github.com/ValveSoftware/steam-ru
   `+x` bit (plain zips strip it). `chmod +x hoverbike`, or transport via
   `tar`/`rsync`, which preserve modes.
 - **`icon not found`** — run `pnpm gen:icons` from a fresh checkout.
-- **WebGPU not active (HUD shows `webgl2`)** — the Deck's Vulkan/RADV stack
-  must be reachable. The wrapper enables Vulkan + WebGPU explicitly; an older
-  Electron whose bundled Dawn can't parse Three.js's WGSL will spam
-  shader-compile errors — keep Electron current.
+- **WebGPU not active (HUD shows `webgl2`)** — under Wayland, look for
+  `'--ozone-platform=wayland' is not compatible with Vulkan` in the log;
+  that's gotcha #5, fixed by the `--use-angle=vulkan` + `VulkanFromANGLE`
+  flags in `main.cjs`. Also: an older Electron whose bundled Dawn can't parse
+  Three.js's WGSL will spam shader-compile errors — keep Electron current.
 - **Windows installer build fails on Linux** — install `wine`, or build on a
   Windows host / CI. The `win-unpacked/` tree (what Steam ships) builds
   without the installer step.
