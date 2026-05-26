@@ -27,14 +27,40 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
   const canvas = document.createElement('canvas')
   parent.appendChild(canvas)
 
+  const params = new URLSearchParams(window.location.search)
+
+  // `?backend=webgl2|webgpu|auto` overrides the adapter probe so the desktop
+  // build can be poked at WebGL2 / WebGPU on a single deployed depot — useful
+  // when the only iteration loop is "push to Steam, launch on device." The
+  // electron wrapper bridges `HOVERBIKE_BACKEND=…` from Steam launch options
+  // into this same query string. `auto` (the default) takes the probe path.
+  const backendOverride = params.get('backend')
+  const wantWebGpu = backendOverride !== 'webgl2'
+  const forceWebGpu = backendOverride === 'webgpu'
+
   let hasWebGpu = false
-  if ('gpu' in navigator) {
+  let adapterInfo: GPUAdapterInfo | null = null
+  if (wantWebGpu && 'gpu' in navigator) {
     try {
       const adapter = await navigator.gpu!.requestAdapter()
       hasWebGpu = adapter !== null
-    } catch {
+      if (adapter) {
+        // GPUAdapter.info is the current spec; older Chromium exposes
+        // requestAdapterInfo(). Try both, ignore errors — we only use this
+        // for the boot log, not for any code path.
+        type LegacyAdapter = GPUAdapter & { requestAdapterInfo?(): Promise<GPUAdapterInfo> }
+        const a = adapter as LegacyAdapter
+        adapterInfo = a.info ?? (a.requestAdapterInfo ? await a.requestAdapterInfo() : null)
+      }
+    } catch (e) {
+      console.warn('[render] requestAdapter threw:', e)
       hasWebGpu = false
     }
+  }
+  if (forceWebGpu && !hasWebGpu) {
+    console.warn(
+      '[render] ?backend=webgpu requested but no adapter available — falling back to webgl2',
+    )
   }
 
   // `?aa=off` disables MSAA — on WebGPU that's a multisampled colour
@@ -42,8 +68,7 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
   // on (current shipping behaviour); the toggle is for low-end hardware
   // and FFT-foam debug shots where the multisample buffer adds nothing
   // visible at racing speed but eats budget on integrated GPUs.
-  const aaParam = new URLSearchParams(window.location.search).get('aa')
-  const antialias = aaParam !== 'off'
+  const antialias = params.get('aa') !== 'off'
 
   const r = new WebGPURenderer({
     canvas,
@@ -59,7 +84,20 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
   const backend: RenderBackend = hasWebGpu ? 'webgpu' : 'webgl2'
   // Surface the active backend in the console so it's visible in logs when
   // there's no on-screen HUD pill (e.g. diagnosing the desktop/Steam build).
-  console.info(`[render] backend: ${backend}`)
+  const reason = backendOverride ? ` (override=${backendOverride})` : ''
+  console.info(`[render] backend: ${backend}${reason}`)
+  if (hasWebGpu && adapterInfo) {
+    // Vendor / architecture / device strings let an on-device log distinguish
+    // a native Chromium WebGPU adapter from a translation layer (e.g.
+    // VKD3D-Proton presenting D3D12 over host Vulkan). Both fields are
+    // optional per spec, so log whichever the runtime fills in.
+    console.info(
+      `[render] adapter: vendor=${adapterInfo.vendor || '?'} ` +
+        `architecture=${adapterInfo.architecture || '?'} ` +
+        `device=${adapterInfo.device || '?'} ` +
+        `description=${adapterInfo.description || '?'}`,
+    )
+  }
 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.setSize(window.innerWidth, window.innerHeight, false)
