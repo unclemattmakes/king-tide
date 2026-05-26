@@ -29,11 +29,18 @@ app.commandLine.appendSwitch('no-sandbox')
 // appendSwitch, since the zygote is spun up very early).
 app.commandLine.appendSwitch('no-zygote')
 
-// WebGPU on Linux/Chromium rides on Vulkan; the Deck's RADV stack provides
-// it. Enable explicitly so we exercise the GPU path (harmless on platforms
-// where WebGPU is already on by default).
+// WebGPU on Linux/Chromium rides on Vulkan. But Chromium's Wayland backend
+// can't *present* native Vulkan ("--ozone-platform=wayland is not compatible
+// with Vulkan"), and forcing x11 doesn't launch inside the Steam Linux Runtime
+// (no reachable XWayland/DISPLAY). The fix is to run Vulkan *through* ANGLE:
+// --use-angle=vulkan + VulkanFromANGLE/DefaultANGLEVulkan let the compositor
+// present via ANGLE (which Wayland supports) while WebGPU/Dawn still gets
+// Vulkan underneath. This is the documented "WebGPU on Linux" combo
+// (gpuweb/gpuweb#5022). The feature list must be set here, not on the launch
+// command line — appendSwitch overwrites any --enable-features Steam passes.
 app.commandLine.appendSwitch('enable-unsafe-webgpu')
-app.commandLine.appendSwitch('enable-features', 'Vulkan')
+app.commandLine.appendSwitch('use-angle', 'vulkan')
+app.commandLine.appendSwitch('enable-features', 'Vulkan,VulkanFromANGLE,DefaultANGLEVulkan')
 
 protocol.registerSchemesAsPrivileged([
   {
