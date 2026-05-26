@@ -220,11 +220,21 @@ host's `libcups.so.2` into `extra-lib/`, and the wrapper adds that dir to
 source the lib from a glibc-2.31-era base (Debian 11); Ubuntu 22.04's copy
 usually loads fine.
 
-### 3. The sandbox can't initialise → `--no-sandbox`
-Depot files aren't setuid-root, so `chrome-sandbox` can't init inside the
-runtime → silent immediate exit. We bake
-`app.commandLine.appendSwitch('no-sandbox')` into `electron/main.cjs`, and the
-wrapper also passes `--no-sandbox`.
+### 3. The sandbox + zygote can't initialise → `--no-sandbox --no-zygote`
+Two layers here, both fatal inside the runtime:
+- Depot files aren't setuid-root, so `chrome-sandbox` can't init → silent
+  immediate exit. Fixed by `--no-sandbox`.
+- With the sandbox off, Chromium's **zygote** still tries to set up
+  namespaces via `clone()`, which pressure-vessel's seccomp/namespace
+  sandbox rejects with `EINVAL` →
+  `FATAL ... zygote_host_impl_linux.cc Check failed: . : Invalid argument (22)`.
+  This *looks* like a hang ("running", no window) because SteamOS spends a
+  while dumping the core. Fixed by `--no-zygote` (drops the fork-from-zygote
+  model; only valid alongside `--no-sandbox`).
+
+Both are baked into `electron/main.cjs` (`appendSwitch`) and passed again on
+the command line by the wrapper (more reliable, since the zygote spins up very
+early).
 
 ### 4. Steam Input / gamepad
 Steam Input is unreliable with Electron 27+. The game reads the raw Gamepad
@@ -237,13 +247,14 @@ References: Valve [steam-runtime #579](https://github.com/ValveSoftware/steam-ru
 
 ## Troubleshooting
 
-- **Steam says "running" but never shows a window (Linux)** — the most
-  common cause is the Steam overlay segfaulting Electron on load (see
-  "gotchas" above); launching via `hoverbike-launch.sh` (which strips the
-  overlay preload) is the fix. Confirm a crash with
-  `coredumpctl info hoverbike` — if the top frames are in
-  `gameoverlayrenderer.so`, it's the overlay. If it's `chrome-sandbox`,
-  `--no-sandbox` is missing.
+- **Steam says "running" but never shows a window (Linux)** — it's almost
+  always a crash that SteamOS is slowly core-dumping, not a true hang. Run
+  `coredumpctl info hoverbike` and read the top frames / the log:
+  - frames in `gameoverlayrenderer.so` → the Steam overlay; launch via
+    `hoverbike-launch.sh` (strips the overlay preload).
+  - `FATAL ... zygote_host_impl_linux.cc ... Invalid argument (22)` → the
+    zygote namespace failure; needs `--no-zygote` (the wrapper + app set it).
+  - `chrome-sandbox` errors → `--no-sandbox` missing.
 - **`libcups.so.2: cannot open shared object file`** — the runtime's missing
   libcups; rebuild with `build:deck` (which bundles it into `extra-lib/`) and
   launch via the wrapper.

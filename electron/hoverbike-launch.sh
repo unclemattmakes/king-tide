@@ -42,4 +42,8 @@ if [ -n "${LD_PRELOAD:-}" ]; then
   export LD_PRELOAD="$cleaned"
 fi
 
-exec "$HERE/hoverbike" --no-sandbox "$@"
+# --no-sandbox: chrome-sandbox can't init on non-setuid depot files.
+# --no-zygote: the zygote's namespace setup hits EINVAL inside the
+#   pressure-vessel container (FATAL in zygote_host_impl_linux.cc); dropping
+#   the zygote fork model avoids it. Must be paired with --no-sandbox.
+exec "$HERE/hoverbike" --no-sandbox --no-zygote "$@"
