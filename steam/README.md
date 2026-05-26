@@ -130,7 +130,8 @@ The script auto-discovers the electron-builder unpacked trees at
 Override via `LINUX_BUNDLE_DIR=path/to/tree/` and
 `WINDOWS_BUNDLE_DIR=path/to/tree/` if you've moved them. Set the
 launch executable for each platform in the Steamworks backend
-(`hoverbike` on Linux, `Hoverbike.exe` on Windows).
+(`hoverbike-launch.sh` on Linux — the wrapper that fixes the Steam overlay +
+libcups issues, see docs/desktop-builds.md; `Hoverbike.exe` on Windows).
 
 ## CI upload (release-steam.yml)
 
