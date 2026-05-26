@@ -22,6 +22,13 @@ const DIST = path.join(__dirname, '..', 'dist')
 // for Electron titles shipped on Steam.
 app.commandLine.appendSwitch('no-sandbox')
 
+// Inside the Steam Linux Runtime (pressure-vessel) the zygote's namespace
+// setup fails with EINVAL → FATAL in zygote_host_impl_linux.cc. Dropping the
+// zygote fork model sidesteps it. Only effective paired with --no-sandbox;
+// the launch wrapper also passes both on the command line (more reliable than
+// appendSwitch, since the zygote is spun up very early).
+app.commandLine.appendSwitch('no-zygote')
+
 // WebGPU on Linux/Chromium rides on Vulkan; the Deck's RADV stack provides
 // it. Enable explicitly so we exercise the GPU path (harmless on platforms
 // where WebGPU is already on by default).
