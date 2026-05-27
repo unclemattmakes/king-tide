@@ -1418,21 +1418,23 @@ density(prop, v) = biome_density × in_biome(v) × mask(v)
 - Default brush is Add mode (raises weight toward 1). Set it to
   Subtract in the brush settings to paint *down* from the default 1.0.
 
-### Comparison with `HV_Scatter` zones
+### Comparison with `HV_Scatter` zones + scatter strokes
 
-| | `HV_Scatter` (per-zone) | `HV_BiomePalette` (whole-terrain) |
-|---|---|---|
-| Coverage | One rectangular zone | The whole terrain |
-| Where authored | `scatter_NN` empties scattered through the scene | Singleton `scatter_biome_palette` Empty |
-| Filter | Geometric (slope, altitude band) | Painted biome (`COLOR_0.A`) |
-| Path-wear gate | ❌ ignored | ✅ via `baked_path` |
-| AO gate | ❌ ignored | ✅ via `baked_ao` |
-| Paint suppression | ❌ all-or-nothing zone | ✅ per-biome paint masks (Weight Paint) |
-| Live edit | ❌ manual *Refresh Scatter Zones* | ✅ panel writes modifier sockets |
+| | `HV_Scatter` (per-zone) | `HV_BiomePalette` (whole-terrain) | `HV_StrokeScatter` (curve) |
+|---|---|---|---|
+| Coverage | One rectangular zone | The whole terrain | Ribbon along a Bezier curve |
+| Where authored | `scatter_NN` empties | Singleton palette empty | `scatter_<prop>_stroke_NN` curve |
+| Filter | Geometric (slope, altitude) | Painted biome (`COLOR_0.A`) | Curve shape + Width |
+| Path-wear gate | ❌ ignored | ✅ via `baked_path` | ❌ v1 (TODO) |
+| AO gate | ❌ ignored | ✅ via `baked_ao` | ❌ v1 |
+| Paint suppression | ❌ all-or-nothing | ✅ per-biome paint masks | n/a (curve is the boundary) |
+| Live edit | ❌ manual refresh | ✅ panel writes modifier sockets | ✅ curve edit |
 
-Both ship through `EXT_mesh_gpu_instancing`. The two can coexist on the
-same track — use the palette for "whole island gets foliage," then
-drop a zone or two for a hand-placed grove.
+All three ship through `EXT_mesh_gpu_instancing` and coexist on the
+same track. Typical layering: palette gives "the whole island gets
+foliage" with B masks for local tweaks; strokes spike density along
+hand-shaped paths for groves, rock piles, driftwood lines, etc. The
+legacy zone tool stays as an escape hatch.
 
 ### Verifying the scatter
 
@@ -1456,6 +1458,92 @@ Expected output ends with `PASS: biome palette smoke test`. A zero
 instance count means either `baked_biome` is missing on the terrain
 (rerun *Apply Terrain Vertex Colors*) or no biome row has a non-zero
 density × source combo set.
+
+## Scatter strokes (Proposal C)
+
+Bezier curves the author draws through the area they want populated.
+Each stroke is **additive** — it composes on top of whatever the
+biome palette already produces in that region, so use it to *spike*
+density along a curve (a palm grove, a rock pile, a driftwood line at
+the water's edge) without re-tuning the whole biome.
+
+### Authoring a stroke
+
+1. **Add** — *Hoverbike → Add → Scatter Stroke (curve-bounded grove)*.
+   The Add operator dialog picks a **prop** (palm / rock / driftwood /
+   buoy), a **width** (perpendicular half-extent, default 8 m), and a
+   **density** (per m² of ribbon area, default 0.1). Drops a triplet
+   at the 3D cursor:
+   - `scatter_<prop>_stroke_NN` — Empty (organiser).
+   - `scatter_<prop>_stroke_NN_curve` — 4-anchor Bezier with a gentle
+     starter bend (~12 m long).
+   - `scatter_<prop>_stroke_NN_surf` — single-vertex mesh hosting the
+     `HV_StrokeScatter` modifier. Reads the curve via Object Info; its
+     own mesh data is irrelevant.
+2. **Shape** — the operator selects + activates the curve, so press
+   `Tab` and drag handles in Edit Mode. The scatter re-evaluates live
+   via the existing depsgraph debounce timer.
+3. **Conform to terrain** *(optional, manual for v1)* — add a
+   **Shrinkwrap modifier** to the curve (Properties → Modifiers →
+   Add → Shrinkwrap, Target = your terrain mesh, Wrap Method = Project,
+   Project Axis = -Z) and the curve's evaluated geometry follows the
+   terrain shape without altering the authored control points.
+4. **Tune** — selecting any of the three stroke objects surfaces the
+   *Scatter stroke* sub-panel with the modifier's sockets (Source,
+   Width, Density, Size min/max, Seed). All live-edit.
+
+### What the GN graph does
+
+```
+curve  ─── Curve to Mesh (Profile = Line of length 2 × Width) ──→ flat ribbon
+ribbon ─── Distribute Points on Faces (Density)               ──→ point cloud
+points ─── Instance on Points (Collection Info, Pick Instance)──→ instances
+                + random Z rotation + random uniform scale
+```
+
+The ribbon orientation follows the curve's normal — when the curve
+lies flat (in the XY plane, or shrinkwrapped to terrain), the ribbon
+lies flat and instances stand up naturally.
+
+### Multiple strokes
+
+Each Add operation gets a fresh `_NN` per prop type, so
+`scatter_palm_stroke_00`, `scatter_palm_stroke_01`, … coexist. Strokes
+are independent — own modifier, own Source, own knobs. Adding a rock
+stroke doesn't affect the palm stroke's distribution.
+
+A stroke's *Source* socket isn't locked to the name's prop — author
+can swap a `scatter_palm_stroke_*` to instance buoys instead by
+changing the modifier's Source. The naming is mnemonic, not
+constraining.
+
+### Verifying strokes
+
+A second smoke-test script lives at
+[`tools/blender/_smoke_scatter_stroke.py`](../tools/blender/_smoke_scatter_stroke.py).
+Runs `hoverbike.add_scatter_stroke` twice (palm + rock) and confirms
+each emits a non-zero instance count and that adding the second
+stroke doesn't perturb the first.
+
+```bash
+"$BLENDER_EXE" --background tracks-src/<id>.blend \
+    --python tools/blender/_smoke_scatter_stroke.py
+```
+
+### Known limitations (v1)
+
+- **No path-wear gate.** The biome palette filters scatter off the
+  racing line via `baked_path`; strokes don't yet. Workaround: shape
+  the curve to avoid the racing line. Adding the gate is a small
+  follow-up (Raycast node sampling `baked_path` at each projected
+  point).
+- **No biome filter.** A stroke crossing a beach/jungle boundary
+  scatters its prop on both sides. Same workaround as above (shape
+  the curve), or split into two strokes.
+- **No bespoke Snap-to-Terrain** for stroke curves. The existing
+  `hoverbike.snap_curve_to_terrain` operator is hard-bound to
+  `road_curve_main`; Shrinkwrap modifier on the curve is the
+  workaround for v1.
 
 ## Procedural props library (Item 3)
 

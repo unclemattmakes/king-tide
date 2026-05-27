@@ -214,6 +214,11 @@ class HOVERBIKE_MT_add(Menu):
             text="Biome Palette Scatter (auto-per-biome)",
             icon="OUTLINER_OB_POINTCLOUD",
         )
+        layout.operator(
+            "hoverbike.add_scatter_stroke",
+            text="Scatter Stroke (curve-bounded grove)",
+            icon="CURVE_BEZCURVE",
+        )
 
         layout.separator()
         layout.label(text="Authoring helpers")

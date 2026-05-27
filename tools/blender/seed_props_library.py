@@ -2071,6 +2071,144 @@ def build_biome_palette_group() -> bpy.types.NodeTree:
 
 
 # ────────────────────────────────────────────────────────────────────
+# Stroke scatter (Proposal C) — curve-bounded scatter zones
+# ────────────────────────────────────────────────────────────────────
+
+STROKE_SCATTER_GROUP = "HV_StrokeScatter"
+
+
+def build_stroke_scatter_group() -> bpy.types.NodeTree:
+    """HV_StrokeScatter — Proposal C scatter. Reads a Bezier curve via
+    Object Info, builds a flat ribbon along the curve with width
+    ``2 × Width``, scatters Distribute Points samples across the ribbon
+    at the given Density, and instances a Source collection on each.
+
+    The modifier sits on a sibling Mesh under a
+    ``scatter_<prop>_stroke_NN`` Empty (same EXT_mesh_gpu_instancing
+    requirement as the other scatter graphs). The curve itself is a
+    sibling under the same Empty — author edits the curve, the scatter
+    re-evaluates live via the existing depsgraph handler.
+
+    Inputs:
+        Geometry  — ignored (modifier owner is a near-empty surf mesh).
+        Curve     — Object whose evaluated curve geometry shapes the
+                    ribbon's centre line.
+        Source    — Collection to instance from.
+        Width     — perpendicular half-extent (metres). Ribbon area =
+                    curve_length × 2 × Width.
+        Density   — instances per m² of ribbon area.
+        Size Min / Max — uniform random scale per instance.
+        Seed      — base seed for distribution + random transforms.
+
+    Output:
+        Geometry  — instance stream (rotated, scaled).
+
+    Path-wear gating is intentionally **not** in v1 — would require a
+    Raycast node sampling the terrain's baked_path per point. The
+    author shapes the curve to avoid the racing line; a follow-up will
+    add the gate.
+    """
+    if STROKE_SCATTER_GROUP in bpy.data.node_groups:
+        bpy.data.node_groups.remove(bpy.data.node_groups[STROKE_SCATTER_GROUP])
+    g = bpy.data.node_groups.new(STROKE_SCATTER_GROUP, "GeometryNodeTree")
+
+    # ── Sockets ─────────────────────────────────────────────────────
+    _new_socket(g, "Geometry",  "INPUT",  "NodeSocketGeometry")
+    _new_socket(g, "Curve",     "INPUT",  "NodeSocketObject")
+    _new_socket(g, "Source",    "INPUT",  "NodeSocketCollection")
+    _new_socket(g, "Width",     "INPUT",  "NodeSocketFloat",  8.0,  mn=0.5, mx=200.0)
+    _new_socket(g, "Density",   "INPUT",  "NodeSocketFloat",  0.10, mn=0.0, mx=10.0)
+    _new_socket(g, "Size Min",  "INPUT",  "NodeSocketFloat",  0.85, mn=0.05)
+    _new_socket(g, "Size Max",  "INPUT",  "NodeSocketFloat",  1.20, mn=0.05)
+    _new_socket(g, "Seed",      "INPUT",  "NodeSocketInt",    0)
+    _new_socket(g, "Geometry",  "OUTPUT", "NodeSocketGeometry")
+
+    gi = _add_node(g, "NodeGroupInput",  -1800, 0)
+    go = _add_node(g, "NodeGroupOutput",  1800, 0)
+
+    # ── Read the stroke curve via Object Info ───────────────────────
+    obj_info = _add_node(g, "GeometryNodeObjectInfo", -1600, 200)
+    obj_info.transform_space = "RELATIVE"
+    g.links.new(gi.outputs["Curve"], obj_info.inputs["Object"])
+    curve_geo = obj_info.outputs["Geometry"]
+
+    # ── Build the line profile: a horizontal line of length 2 × Width.
+    #    Curve Primitive Line takes a Start and End vector; we anchor
+    #    one end at (-Width, 0, 0) and the other at (+Width, 0, 0) so
+    #    the sweep produces a flat ribbon (X = perpendicular, Y/Z =
+    #    along curve and curve normal). Curve to Mesh's auto-frame
+    #    keeps the ribbon perpendicular to the curve's tangent.
+    profile_line = _add_node(g, "GeometryNodeCurvePrimitiveLine", -1400, -300)
+    # Start vector: (-Width, 0, 0)
+    neg_width = _add_node(g, "ShaderNodeMath", -1600, -300, operation="MULTIPLY")
+    neg_width.inputs[1].default_value = -1.0
+    g.links.new(gi.outputs["Width"], neg_width.inputs[0])
+    start_vec = _add_node(g, "ShaderNodeCombineXYZ", -1450, -250)
+    g.links.new(neg_width.outputs[0], start_vec.inputs["X"])
+    g.links.new(start_vec.outputs[0], profile_line.inputs["Start"])
+    end_vec = _add_node(g, "ShaderNodeCombineXYZ", -1450, -400)
+    g.links.new(gi.outputs["Width"], end_vec.inputs["X"])
+    g.links.new(end_vec.outputs[0], profile_line.inputs["End"])
+
+    # ── Sweep the profile along the curve → ribbon mesh ─────────────
+    curve_to_mesh = _add_node(g, "GeometryNodeCurveToMesh", -1100, 0)
+    curve_to_mesh.inputs["Fill Caps"].default_value = False
+    g.links.new(curve_geo,                       curve_to_mesh.inputs["Curve"])
+    g.links.new(profile_line.outputs["Curve"],   curve_to_mesh.inputs["Profile Curve"])
+
+    # ── Distribute Points on the ribbon at Density ──────────────────
+    distribute = _add_node(g, "GeometryNodeDistributePointsOnFaces", -800, 0)
+    distribute.distribute_method = "RANDOM"
+    g.links.new(curve_to_mesh.outputs["Mesh"], distribute.inputs["Mesh"])
+    g.links.new(gi.outputs["Density"],         distribute.inputs["Density"])
+    g.links.new(gi.outputs["Seed"],            distribute.inputs["Seed"])
+
+    # ── Instance on Points from the Source collection ───────────────
+    coll_info = _add_node(g, "GeometryNodeCollectionInfo", -500, -300)
+    coll_info.transform_space = "ORIGINAL"
+    coll_info.inputs["Separate Children"].default_value = True
+    coll_info.inputs["Reset Children"].default_value = False
+    g.links.new(gi.outputs["Source"], coll_info.inputs["Collection"])
+
+    iop = _add_node(g, "GeometryNodeInstanceOnPoints", -200, 0)
+    iop.inputs["Pick Instance"].default_value = True
+    g.links.new(distribute.outputs["Points"],   iop.inputs["Points"])
+    g.links.new(coll_info.outputs["Instances"], iop.inputs["Instance"])
+    g.links.new(gi.outputs["Seed"],             iop.inputs["Instance Index"])
+
+    # ── Random Z rotation ───────────────────────────────────────────
+    rand_rot = _add_node(g, "FunctionNodeRandomValue", -200, 300)
+    rand_rot.data_type = "FLOAT_VECTOR"
+    rand_rot.inputs["Min"].default_value = (0.0, 0.0, 0.0)
+    rand_rot.inputs["Max"].default_value = (0.0, 0.0, 6.2831853)
+    g.links.new(gi.outputs["Seed"], rand_rot.inputs["Seed"])
+    rot_inst = _add_node(g, "GeometryNodeRotateInstances", 100, 0)
+    g.links.new(iop.outputs["Instances"], rot_inst.inputs["Instances"])
+    g.links.new(rand_rot.outputs[0],      rot_inst.inputs["Rotation"])
+
+    # ── Random uniform scale ────────────────────────────────────────
+    rand_scale = _add_node(g, "FunctionNodeRandomValue", 100, -300)
+    rand_scale.data_type = "FLOAT"
+    g.links.new(gi.outputs["Size Min"], rand_scale.inputs[2])
+    g.links.new(gi.outputs["Size Max"], rand_scale.inputs[3])
+    scale_seed = _add_node(g, "ShaderNodeMath", -100, -300, operation="ADD")
+    scale_seed.inputs[1].default_value = 1933.0
+    g.links.new(gi.outputs["Seed"],    scale_seed.inputs[0])
+    g.links.new(scale_seed.outputs[0], rand_scale.inputs["Seed"])
+    scale_vec = _add_node(g, "ShaderNodeCombineXYZ", 300, -300)
+    g.links.new(rand_scale.outputs[1], scale_vec.inputs["X"])
+    g.links.new(rand_scale.outputs[1], scale_vec.inputs["Y"])
+    g.links.new(rand_scale.outputs[1], scale_vec.inputs["Z"])
+    scale_inst = _add_node(g, "GeometryNodeScaleInstances", 500, 0)
+    g.links.new(rot_inst.outputs["Instances"], scale_inst.inputs["Instances"])
+    g.links.new(scale_vec.outputs[0],          scale_inst.inputs["Scale"])
+
+    g.links.new(scale_inst.outputs["Instances"], go.inputs["Geometry"])
+    g.use_fake_user = True
+    return g
+
+
+# ────────────────────────────────────────────────────────────────────
 # Per-prop builder
 # ────────────────────────────────────────────────────────────────────
 
@@ -2638,6 +2776,11 @@ def build_props() -> dict:
     # off the terrain mesh. Shares the same props-library plumbing as
     # HV_Scatter so authors link one graph from every track .blend.
     build_biome_palette_group()
+    # HV_StrokeScatter — Proposal C curve-bounded scatter. Authors draw
+    # a Bezier curve; the graph builds a ribbon of width 2 × Width
+    # along it and scatters instances across the ribbon area. Pairs
+    # with the biome palette for "biome baseline + hand-drawn groves".
+    build_stroke_scatter_group()
 
     return summary
 
