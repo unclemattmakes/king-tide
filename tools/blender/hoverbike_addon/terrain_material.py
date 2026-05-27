@@ -32,6 +32,23 @@ from bpy.types import Operator
 
 MATERIAL_NAME = "mat_terrain_main"
 
+# Bump every time ``build_island_material_nodes`` changes shape (added /
+# removed / rewired nodes, ramp-stop edits that should propagate to
+# already-saved .blends, etc.). The version is stamped as a custom
+# property on the material; ``ensure_mat_terrain_main`` rebuilds when
+# the stored version is missing or older than this constant, so an
+# author who saved a track with v1 and reopens after an addon update
+# gets the new graph automatically without having to remember to click
+# Rebuild. Pure tweaks that *shouldn't* overwrite hand-customised
+# materials (e.g. fixing a typo in a comment, renaming a local var)
+# do NOT bump the version.
+#
+# History:
+#   1 — initial extraction from seed_template_island.py
+#   2 — added COLOR_0.B → dirt-tint mix to visualise racing-line wear
+TERRAIN_MATERIAL_VERSION = 2
+VERSION_PROP = "hoverbike_terrain_material_version"
+
 
 def build_island_material_nodes(mat: bpy.types.Material) -> None:
     """Fill ``mat``'s node tree with the island-palette terrain graph.
@@ -260,13 +277,25 @@ def ensure_mat_terrain_main(*, rebuild: bool = False) -> bpy.types.Material:
     """
     mat = bpy.data.materials.get(MATERIAL_NAME)
     if mat is not None and not rebuild:
-        return mat
+        # Drift check: if the stored version is older than the current
+        # builder's, force a rebuild so the user picks up node-graph
+        # changes (e.g. new wear visualisation) without having to
+        # manually click Rebuild. Materials saved before versioning
+        # was introduced lack the property entirely → treated as v0.
+        stored = int(mat.get(VERSION_PROP, 0) or 0)
+        if stored >= TERRAIN_MATERIAL_VERSION:
+            return mat
+        print(
+            f"[hoverbike] terrain material is v{stored}, addon is "
+            f"v{TERRAIN_MATERIAL_VERSION}; rebuilding to pick up updates"
+        )
     if mat is None:
         mat = bpy.data.materials.new(MATERIAL_NAME)
         mat.use_nodes = True
     elif not mat.use_nodes:
         mat.use_nodes = True
     build_island_material_nodes(mat)
+    mat[VERSION_PROP] = TERRAIN_MATERIAL_VERSION
     return mat
 
 
