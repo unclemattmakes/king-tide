@@ -113,28 +113,17 @@ CATALOG_UUIDS = {
 
 
 # ────────────────────────────────────────────────────────────────────
-# Catalogue file
+# Catalogue file — shared with seed_landmarks_library via the merge
+# helper. Re-seeding props preserves landmark UUIDs (and vice-versa);
+# see ``blender_assets_catalog.merge_catalog_file`` for the contract.
 # ────────────────────────────────────────────────────────────────────
 
 def write_catalog_file() -> None:
-    """Blender's catalogue spec: VERSION header, then ``<uuid>:<path>:<simple_name>``
-    lines. Simple name = the leaf segment. Path uses ``/``."""
-    lines = [
-        "# This is an Asset Catalog Definition file for Blender.",
-        "#",
-        "# Empty lines and lines starting with `#` are ignored.",
-        "# The first non-ignored line should be the version indicator.",
-        "# Other lines are of the format \"UUID:catalog/path/for/assets:simple catalog name\"",
-        "",
-        "VERSION 1",
-        "",
-    ]
-    for path, uid in CATALOG_UUIDS.items():
-        simple = path.replace("/", "-")
-        lines.append(f"{uid}:{path}:{simple}")
-    os.makedirs(os.path.dirname(CATALOG_PATH), exist_ok=True)
-    with open(CATALOG_PATH, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(lines) + "\n")
+    """Merge prop-library catalogue rows into the shared
+    ``tracks-src/blender_assets.cats.txt``."""
+    from tools.blender.blender_assets_catalog import merge_catalog_file
+
+    merge_catalog_file(CATALOG_PATH, CATALOG_UUIDS)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -1807,6 +1796,281 @@ def build_scatter_group() -> bpy.types.NodeTree:
 
 
 # ────────────────────────────────────────────────────────────────────
+# Biome-palette scatter (Proposal A) — auto-distributes props per biome
+# ────────────────────────────────────────────────────────────────────
+
+BIOME_PALETTE_GROUP = "HV_BiomePalette"
+
+# Per-biome config:
+#   (display name, A min, A max, default density, seed offset, density min, density max)
+#
+# Biome buckets correspond to ``COLOR_0.A`` / ``baked_biome`` values of
+# 0.0 / 0.333 / 0.667 / 1.0. The min/max ranges are half-bucket windows
+# around each canonical value, so a face whose Captured A averages a
+# boundary value still falls into one biome — no overlap between chains.
+#
+# The seed offsets are co-prime additions to the modifier's Seed input
+# so each biome's Distribute Points pass sees a different random state
+# even when the modifier's Seed is 0 (the default).
+# Densities are per m² of terrain face area — *not* per scatter zone
+# like HV_Scatter's 0.05 default — so a 1 km² terrain sees ~5000 jungle
+# instances at the default jungle density (0.005). Sparse-forest feel,
+# Blender viewport handles it without lag. Authors crank up per-track.
+#
+# The 6th tuple entry is the per-biome **mask** vertex-group name
+# (Proposal B). The addon's Add operator initialises each group to
+# weight 1.0 on every vert when the palette is created; painting down
+# in Weight Paint reduces scatter density in that region without
+# touching A's biome routing or any other biome's distribution. Names
+# match ``BIOME_MASK_NAMES`` in ``biome_palette.py``; bumping one side
+# without the other breaks the live link.
+BIOME_PALETTE_BUCKETS = (
+    ("Deep",     -0.001, 0.166, 0.000, 101, "mask_deep"),
+    ("Seafloor",  0.166, 0.500, 0.005, 103, "mask_seafloor"),
+    ("Beach",     0.500, 0.833, 0.002, 107, "mask_beach"),
+    ("Jungle",    0.833, 1.001, 0.005, 109, "mask_jungle"),
+)
+
+
+def build_biome_palette_group() -> bpy.types.NodeTree:
+    """HV_BiomePalette — Proposal A scatter. Read ``baked_biome`` /
+    ``baked_path`` / ``baked_ao`` from a terrain object, route Distribute
+    Points samples into a per-biome Instance on Points chain (one per
+    deep / seafloor / beach / jungle bucket), join the four streams, and
+    return the union as instances.
+
+    The modifier sits on a sibling Mesh under a ``scatter_biome_palette``
+    Empty so the InstanceOnPoints output qualifies for the
+    ``EXT_mesh_gpu_instancing`` glTF extension at export.
+
+    Inputs:
+        Geometry            — ignored (passed for socket compatibility;
+                              the modifier owner is a near-empty mesh).
+        Terrain             — Object the graph reads the source geometry
+                              + baked_* attributes from.
+        <Biome> Source      — collection for each biome bucket (4×).
+        <Biome> Density     — points per m² within that biome (4×).
+        Size Min / Max      — uniform random scale per instance.
+        Path Wear Avoid     — 0..1 multiplier on COLOR_0.B's racing-line
+                              exclusion (1 = full avoidance, 0 = ignore).
+        AO Floor            — points whose baked_ao falls below this are
+                              dropped (0 = no AO gate, 0.4 = drop deep
+                              cavity points).
+        Seed                — base seed; each biome adds a co-prime offset.
+
+    Output:
+        Geometry            — joined instance streams from all four biomes.
+
+    Author flow:
+      1. Click *Add Biome Palette Scatter* — the operator drops the
+         Empty + surf + modifier and binds Terrain to the active mesh.
+      2. Tune per-biome density and source collections in the sidebar.
+      3. Run *Apply Terrain Vertex Colors* on the terrain (if not
+         already done) so ``baked_biome`` reflects world-Z biomes.
+      4. Export the track — instances ship as EXT_mesh_gpu_instancing.
+    """
+    if BIOME_PALETTE_GROUP in bpy.data.node_groups:
+        bpy.data.node_groups.remove(bpy.data.node_groups[BIOME_PALETTE_GROUP])
+    g = bpy.data.node_groups.new(BIOME_PALETTE_GROUP, "GeometryNodeTree")
+
+    # ── Sockets ─────────────────────────────────────────────────────
+    _new_socket(g, "Geometry",        "INPUT",  "NodeSocketGeometry")
+    _new_socket(g, "Terrain",         "INPUT",  "NodeSocketObject")
+    for name, _mn, _mx, default_density, _seed_off, _mask_name in BIOME_PALETTE_BUCKETS:
+        _new_socket(g, f"{name} Source",  "INPUT",  "NodeSocketCollection")
+        _new_socket(
+            g, f"{name} Density", "INPUT", "NodeSocketFloat",
+            default_density, mn=0.0, mx=10.0,
+        )
+    _new_socket(g, "Size Min",        "INPUT",  "NodeSocketFloat",  0.85, mn=0.05)
+    _new_socket(g, "Size Max",        "INPUT",  "NodeSocketFloat",  1.20, mn=0.05)
+    _new_socket(g, "Path Wear Avoid", "INPUT",  "NodeSocketFloat",  1.00, mn=0.0, mx=1.0)
+    _new_socket(g, "AO Floor",        "INPUT",  "NodeSocketFloat",  0.00, mn=0.0, mx=1.0)
+    _new_socket(g, "Seed",            "INPUT",  "NodeSocketInt",    0)
+    _new_socket(g, "Geometry",        "OUTPUT", "NodeSocketGeometry")
+
+    gi = _add_node(g, "NodeGroupInput",  -2600, 0)
+    go = _add_node(g, "NodeGroupOutput",  2600, 0)
+
+    # ── Source geometry — read the terrain object via Object Info ───
+    obj_info = _add_node(g, "GeometryNodeObjectInfo", -2400, 200)
+    obj_info.transform_space = "RELATIVE"
+    g.links.new(gi.outputs["Terrain"], obj_info.inputs["Object"])
+    terrain_geo_socket = obj_info.outputs["Geometry"]
+
+    # Per-biome chains read ``baked_biome`` directly via Named Attribute
+    # rather than going through Capture Attribute on FACE domain. Blender
+    # evaluates the named-attribute field at each face when its result is
+    # piped into Distribute Points' Density socket — and the implicit
+    # interpolation softens biome boundaries instead of blocking them on
+    # triangle topology. ``baked_path`` / ``baked_ao`` are read the same
+    # way inside each chain after distribution (point-domain sampling
+    # auto-interpolates from the underlying face). Each chain owns its
+    # own Named Attribute reader so the Blender graph stays untangled.
+
+    # ── Per-biome chains ────────────────────────────────────────────
+    join = _add_node(g, "GeometryNodeJoinGeometry", 2400, 0)
+
+    chain_y_step = -900  # vertical spacing between biome chains
+    for idx, (name, biome_min, biome_max, _default_density, seed_off, mask_name) in enumerate(BIOME_PALETTE_BUCKETS):
+        y = idx * chain_y_step
+        x = -1800  # leftmost column for this chain
+
+        # 1. Read baked_biome as a per-vertex FLOAT field.
+        named_biome = _add_node(g, "GeometryNodeInputNamedAttribute", x - 200, y, data_type="FLOAT")
+        named_biome.inputs["Name"].default_value = "baked_biome"
+
+        # 2. Biome predicate: 1.0 inside [biome_min, biome_max], else 0.0.
+        above_min = _add_node(g, "ShaderNodeMath", x, y, operation="GREATER_THAN")
+        above_min.inputs[1].default_value = biome_min
+        g.links.new(named_biome.outputs["Attribute"], above_min.inputs[0])
+
+        below_max = _add_node(g, "ShaderNodeMath", x, y - 200, operation="LESS_THAN")
+        below_max.inputs[1].default_value = biome_max
+        g.links.new(named_biome.outputs["Attribute"], below_max.inputs[0])
+
+        in_biome = _add_node(g, "ShaderNodeMath", x + 200, y - 100, operation="MULTIPLY")
+        g.links.new(above_min.outputs[0], in_biome.inputs[0])
+        g.links.new(below_max.outputs[0], in_biome.inputs[1])
+
+        # 3. Density = in_biome × biome_density. Blender evaluates this
+        #    field per-face when piped into Distribute Points' Density
+        #    socket — no Capture Attribute needed, and the implicit
+        #    point-to-face interpolation softens biome boundaries.
+        density_factor = _add_node(g, "ShaderNodeMath", x + 400, y - 100, operation="MULTIPLY")
+        g.links.new(in_biome.outputs[0], density_factor.inputs[0])
+        g.links.new(gi.outputs[f"{name} Density"], density_factor.inputs[1])
+
+        # 3a. Paint-mask multiplier (Proposal B). Each biome row reads a
+        #     per-biome vertex group as a FLOAT field; the addon's
+        #     palette-add operator initialises every weight to 1.0 so
+        #     unpainted terrain scatters A's density unchanged. Painting
+        #     in Weight Paint lowers the weight in a region, which
+        #     multiplies into the density below — paint 0 = suppress
+        #     that biome's scatter, paint somewhere between for thinning.
+        named_mask = _add_node(g, "GeometryNodeInputNamedAttribute", x + 250, y - 450, data_type="FLOAT")
+        named_mask.inputs["Name"].default_value = mask_name
+        masked_density = _add_node(g, "ShaderNodeMath", x + 600, y - 100, operation="MULTIPLY")
+        g.links.new(density_factor.outputs[0],     masked_density.inputs[0])
+        g.links.new(named_mask.outputs["Attribute"], masked_density.inputs[1])
+
+        # 4. Per-biome seed: base Seed + biome offset so the same modifier
+        #    Seed gives four uncorrelated distributions.
+        seed_node = _add_node(g, "ShaderNodeMath", x + 200, y - 300, operation="ADD")
+        seed_node.inputs[1].default_value = float(seed_off)
+        g.links.new(gi.outputs["Seed"], seed_node.inputs[0])
+
+        # 5. Distribute Points on the terrain's evaluated geometry.
+        distribute = _add_node(g, "GeometryNodeDistributePointsOnFaces", x + 800, y)
+        distribute.distribute_method = "RANDOM"
+        g.links.new(terrain_geo_socket,         distribute.inputs["Mesh"])
+        g.links.new(masked_density.outputs[0],  distribute.inputs["Density"])
+        g.links.new(seed_node.outputs[0],       distribute.inputs["Seed"])
+
+        # 5. Sample path-wear and AO at each point. Named Attribute on a
+        #    POINT-domain geometry samples by the point's underlying face
+        #    (interpolated). Path wear: factor = 1 - B × PathWearAvoid.
+        named_path = _add_node(g, "GeometryNodeInputNamedAttribute", x + 700, y - 350, data_type="FLOAT")
+        named_path.inputs["Name"].default_value = "baked_path"
+        wear_scaled = _add_node(g, "ShaderNodeMath", x + 900, y - 350, operation="MULTIPLY")
+        g.links.new(named_path.outputs["Attribute"], wear_scaled.inputs[0])
+        g.links.new(gi.outputs["Path Wear Avoid"],   wear_scaled.inputs[1])
+        wear_keep = _add_node(g, "ShaderNodeMath", x + 1100, y - 350, operation="SUBTRACT")
+        wear_keep.use_clamp = True
+        wear_keep.inputs[0].default_value = 1.0
+        g.links.new(wear_scaled.outputs[0], wear_keep.inputs[1])
+
+        # 6. AO gate: keep = smoothstep(AO Floor, 1.0, baked_ao). Use a
+        #    Map Range with SMOOTHSTEP interpolation — produces 0 below
+        #    the floor and 1 at full open sky, smoothly clamped.
+        named_ao = _add_node(g, "GeometryNodeInputNamedAttribute", x + 700, y - 550, data_type="FLOAT")
+        named_ao.inputs["Name"].default_value = "baked_ao"
+        ao_mr = _add_node(g, "ShaderNodeMapRange", x + 900, y - 550, interpolation_type="SMOOTHSTEP", clamp=True)
+        ao_mr.inputs["From Max"].default_value = 1.0
+        ao_mr.inputs["To Min"].default_value = 0.0
+        ao_mr.inputs["To Max"].default_value = 1.0
+        g.links.new(named_ao.outputs["Attribute"], ao_mr.inputs["Value"])
+        g.links.new(gi.outputs["AO Floor"],        ao_mr.inputs["From Min"])
+
+        # 7. Combine path-wear keep × AO keep → final keep factor. Then
+        #    sample a per-point random [0,1] and survive if random < keep.
+        keep = _add_node(g, "ShaderNodeMath", x + 1300, y - 450, operation="MULTIPLY")
+        g.links.new(wear_keep.outputs[0], keep.inputs[0])
+        g.links.new(ao_mr.outputs[0],     keep.inputs[1])
+
+        rand_keep = _add_node(g, "FunctionNodeRandomValue", x + 1300, y - 250)
+        rand_keep.data_type = "FLOAT"
+        rand_keep.inputs[2].default_value = 0.0
+        rand_keep.inputs[3].default_value = 1.0
+        seed_keep = _add_node(g, "ShaderNodeMath", x + 1100, y - 250, operation="ADD")
+        seed_keep.inputs[1].default_value = float(seed_off) + 0.5
+        g.links.new(gi.outputs["Seed"], seed_keep.inputs[0])
+        g.links.new(seed_keep.outputs[0], rand_keep.inputs["Seed"])
+
+        surv = _add_node(g, "ShaderNodeMath", x + 1500, y - 350, operation="LESS_THAN")
+        g.links.new(rand_keep.outputs[1], surv.inputs[0])
+        g.links.new(keep.outputs[0],      surv.inputs[1])
+
+        invert = _add_node(g, "ShaderNodeMath", x + 1700, y - 350, operation="SUBTRACT")
+        invert.inputs[0].default_value = 1.0
+        g.links.new(surv.outputs[0], invert.inputs[1])
+
+        delete_pts = _add_node(g, "GeometryNodeDeleteGeometry", x + 1900, y - 100)
+        delete_pts.domain = "POINT"
+        delete_pts.mode = "ALL"
+        g.links.new(distribute.outputs["Points"], delete_pts.inputs["Geometry"])
+        g.links.new(invert.outputs[0],            delete_pts.inputs["Selection"])
+
+        # 8. Instance on Points — Pick Instance ON randomises across the
+        #    biome collection's children.
+        coll_info = _add_node(g, "GeometryNodeCollectionInfo", x + 1900, y - 500)
+        coll_info.transform_space = "ORIGINAL"
+        coll_info.inputs["Separate Children"].default_value = True
+        coll_info.inputs["Reset Children"].default_value = False
+        g.links.new(gi.outputs[f"{name} Source"], coll_info.inputs["Collection"])
+
+        iop = _add_node(g, "GeometryNodeInstanceOnPoints", x + 2200, y - 100)
+        iop.inputs["Pick Instance"].default_value = True
+        g.links.new(delete_pts.outputs["Geometry"], iop.inputs["Points"])
+        g.links.new(coll_info.outputs["Instances"], iop.inputs["Instance"])
+        g.links.new(seed_node.outputs[0],           iop.inputs["Instance Index"])
+
+        # 9. Random Z rotation.
+        rand_rot = _add_node(g, "FunctionNodeRandomValue", x + 2400, y + 100)
+        rand_rot.data_type = "FLOAT_VECTOR"
+        rand_rot.inputs["Min"].default_value = (0.0, 0.0, 0.0)
+        rand_rot.inputs["Max"].default_value = (0.0, 0.0, 6.2831853)
+        g.links.new(seed_node.outputs[0], rand_rot.inputs["Seed"])
+        rot_inst = _add_node(g, "GeometryNodeRotateInstances", x + 2600, y - 100)
+        g.links.new(iop.outputs["Instances"], rot_inst.inputs["Instances"])
+        g.links.new(rand_rot.outputs[0],      rot_inst.inputs["Rotation"])
+
+        # 10. Random uniform scale.
+        rand_scale = _add_node(g, "FunctionNodeRandomValue", x + 2400, y - 400)
+        rand_scale.data_type = "FLOAT"
+        g.links.new(gi.outputs["Size Min"], rand_scale.inputs[2])
+        g.links.new(gi.outputs["Size Max"], rand_scale.inputs[3])
+        scale_seed = _add_node(g, "ShaderNodeMath", x + 2200, y - 400, operation="ADD")
+        scale_seed.inputs[1].default_value = float(seed_off) + 0.25
+        g.links.new(gi.outputs["Seed"], scale_seed.inputs[0])
+        g.links.new(scale_seed.outputs[0], rand_scale.inputs["Seed"])
+        scale_vec = _add_node(g, "ShaderNodeCombineXYZ", x + 2600, y - 400)
+        g.links.new(rand_scale.outputs[1], scale_vec.inputs["X"])
+        g.links.new(rand_scale.outputs[1], scale_vec.inputs["Y"])
+        g.links.new(rand_scale.outputs[1], scale_vec.inputs["Z"])
+        scale_inst = _add_node(g, "GeometryNodeScaleInstances", x + 2800, y - 100)
+        g.links.new(rot_inst.outputs["Instances"], scale_inst.inputs["Instances"])
+        g.links.new(scale_vec.outputs[0],          scale_inst.inputs["Scale"])
+
+        # 11. Join into the unified output.
+        g.links.new(scale_inst.outputs["Instances"], join.inputs["Geometry"])
+
+    g.links.new(join.outputs["Geometry"], go.inputs["Geometry"])
+    g.use_fake_user = True
+    return g
+
+
+# ────────────────────────────────────────────────────────────────────
 # Per-prop builder
 # ────────────────────────────────────────────────────────────────────
 
@@ -2369,6 +2633,11 @@ def build_props() -> dict:
     # in the props-library .blend so authors link the same graph from
     # every track .blend (rather than rebuilding it in each scene).
     build_scatter_group()
+    # HV_BiomePalette — Proposal A scatter that auto-distributes props
+    # per terrain biome by reading baked_biome / baked_path / baked_ao
+    # off the terrain mesh. Shares the same props-library plumbing as
+    # HV_Scatter so authors link one graph from every track .blend.
+    build_biome_palette_group()
 
     return summary
 

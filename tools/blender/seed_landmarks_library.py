@@ -168,39 +168,11 @@ LAYOUT = {
 
 def write_catalog_file() -> None:
     """Merge landmark catalogue rows into the shared
-    ``tracks-src/blender_assets.cats.txt``. Idempotent — preserves
-    any UUIDs from other seeds (the prop library writes its own rows)
-    and only rewrites the file when our entries are missing or stale.
+    ``tracks-src/blender_assets.cats.txt``. Delegates to the shared
+    helper; see ``blender_assets_catalog.merge_catalog_file``."""
+    from tools.blender.blender_assets_catalog import merge_catalog_file
 
-    Blender accepts a single catalogue file per folder, so this seed
-    co-operates with seed_props_library.py rather than overwriting."""
-    header = [
-        "# This is an Asset Catalog Definition file for Blender.",
-        "#",
-        "# Empty lines and lines starting with `#` are ignored.",
-        "# The first non-ignored line should be the version indicator.",
-        "# Other lines are of the format \"UUID:catalog/path/for/assets:simple catalog name\"",
-        "",
-        "VERSION 1",
-        "",
-    ]
-    existing_rows: dict[str, str] = {}
-    if os.path.exists(CATALOG_PATH):
-        with open(CATALOG_PATH, "r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line or line.startswith("#") or line.startswith("VERSION"):
-                    continue
-                parts = line.split(":", 2)
-                if len(parts) == 3:
-                    existing_rows[parts[0]] = line
-    for path, uid in CATALOG_UUIDS.items():
-        simple = path.replace("/", "-")
-        existing_rows[uid] = f"{uid}:{path}:{simple}"
-    rows = sorted(existing_rows.values())
-    os.makedirs(os.path.dirname(CATALOG_PATH), exist_ok=True)
-    with open(CATALOG_PATH, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(header + rows) + "\n")
+    merge_catalog_file(CATALOG_PATH, CATALOG_UUIDS)
 
 
 # ────────────────────────────────────────────────────────────────────
