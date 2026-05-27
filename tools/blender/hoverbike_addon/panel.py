@@ -1163,6 +1163,13 @@ class HOVERBIKE_PT_track_terrain(_SelectionDrivenPanel, Panel):
         layout.separator()
 
         layout.label(text="Vertex bakes:", icon="MATERIAL")
+        # COLOR_0 stamp — only useful for hand-rolled / ANT / heightmap
+        # terrain. Templates with a live HV_Island modifier get COLOR_0
+        # stamped by the GN graph; hide the button there to avoid
+        # offering an op that would race the modifier.
+        from .island_terrain import find_island_modifier
+        if find_island_modifier(context.active_object) is None:
+            layout.operator("hoverbike.apply_terrain_vertex_colors", icon="COLOR")
         layout.label(text="Fills baked_ao + baked_path", icon="NODE_TEXTURE")
         layout.operator("hoverbike.bake_terrain_attrs", icon="MOD_NOISE")
         # Path-worn standalone — separate knobs + faster bake (no

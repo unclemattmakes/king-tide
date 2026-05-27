@@ -1150,178 +1150,28 @@ def add_sun() -> None:
 def build_terrain_material(terrain: bpy.types.Object) -> None:
     """Slope- and altitude-aware terrain shader for the Blender preview.
 
-    Mixes two altitude ramps — a "flat" ramp (sandy / grass / forest) and
-    a "cliff" ramp (wet rock / cliff stone / volcanic) — driven by the
-    surface normal's tilt. A low-frequency variation noise breaks the
-    bands so neither sand nor grass reads as a flat fill. Roughness
-    lifts on rocks; near the waterline the shader darkens slightly to
-    suggest wet sand / wet rock.
+    The full node-graph (≈19 nodes: two altitude ColorRamps mixed by
+    slope, with variation noise + wet-band darken) lives in the addon
+    at ``hoverbike_addon/terrain_material.py``. The same builder is
+    also called by the addon's ``apply_terrain_vertex_colors`` operator
+    when an author-rolled terrain (ANT Landscape, heightmap, sculpt)
+    needs the material for its viewport preview — so the seed script
+    and the addon stay in lock-step. Delegating here keeps the two
+    callers single-source.
 
-    This material is **author-only**: the runtime ships its own terrain
-    shader that reads ``COLOR_0`` from the exported .glb. The vertex-
-    color stamp is still written by the GN graph, so when we wire the
-    runtime shader to honour it the in-game look will match this
-    preview's intent."""
-    name = "mat_terrain_main"
-    if name in bpy.data.materials:
-        bpy.data.materials.remove(bpy.data.materials[name])
-    mat = bpy.data.materials.new(name)
-    mat.use_nodes = True
-    nt = mat.node_tree
-    for n in list(nt.nodes):
-        nt.nodes.remove(n)
+    The terrain material is **author-only**: the runtime ships its own
+    terrain shader that reads ``COLOR_0`` from the exported .glb. The
+    GN-stamped vertex colour is what carries the biome data into the
+    .glb; this material just makes the .blend look plausible while
+    authoring.
+    """
+    addon = _load_addon_module()
+    if addon is None:
+        print("[seed-template-island] WARNING: addon not loadable; skipping terrain material")
+        return
+    from hoverbike_addon_disk import terrain_material  # type: ignore[import-not-found]
 
-    def add(kind, x, y, **kw):
-        n = nt.nodes.new(kind); n.location = (x, y)
-        for k, v in kw.items():
-            setattr(n, k, v)
-        return n
-
-    n_out  = add("ShaderNodeOutputMaterial",  1800,    0)
-    n_bsdf = add("ShaderNodeBsdfPrincipled",  1500,    0)
-
-    # An Attribute node reading COLOR_0 — connected through to BSDF
-    # Emission so the Blender glTF exporter's heuristic ("does this
-    # material reference any vertex-colour attribute?") returns true
-    # and the GN-stamped COLOR_0 actually ships in the .glb. The
-    # emission weight is zero so it doesn't affect the Eevee preview.
-    n_color0 = add("ShaderNodeAttribute",    -1600,  500)
-    n_color0.attribute_name = "COLOR_0"
-    nt.links.new(n_color0.outputs["Color"], n_bsdf.inputs["Emission Color"])
-    n_bsdf.inputs["Emission Strength"].default_value = 0.0
-
-    # --- inputs: position + normal ------------------------------------
-    n_geom = add("ShaderNodeNewGeometry",    -1600,  200)
-    n_pos_xyz = add("ShaderNodeSeparateXYZ", -1400,  300)
-    nt.links.new(n_geom.outputs["Position"], n_pos_xyz.inputs["Vector"])
-    n_nrm_xyz = add("ShaderNodeSeparateXYZ", -1400,    0)
-    nt.links.new(n_geom.outputs["Normal"], n_nrm_xyz.inputs["Vector"])
-
-    # --- slope mask: 0 on flat tops, 1 on cliffs ----------------------
-    # Normal.z drops from 1 (flat) to 0 (vertical). Smoothstep between
-    # ~30° (cos ≈ 0.85) and ~55° (cos ≈ 0.57) so gentle slopes still
-    # read as grass / sand.
-    n_slope_mr = add("ShaderNodeMapRange",   -1200,    0,
-                     interpolation_type="SMOOTHSTEP", clamp=True)
-    n_slope_mr.inputs["From Min"].default_value = 0.85
-    n_slope_mr.inputs["From Max"].default_value = 0.55
-    n_slope_mr.inputs["To Min"].default_value =   0.0
-    n_slope_mr.inputs["To Max"].default_value =   1.0
-    nt.links.new(n_nrm_xyz.outputs["Z"], n_slope_mr.inputs["Value"])
-
-    # --- altitude -> [0, 1] fac for the ramps -------------------------
-    # Map z ∈ [-50, 120] → [0, 1]. The flat / cliff ramps are tuned to
-    # this range; if peaks ever exceed 120 m, ramp tops just clamp.
-    n_alt_mr = add("ShaderNodeMapRange",     -1200,  300, clamp=True)
-    n_alt_mr.inputs["From Min"].default_value = -50.0
-    n_alt_mr.inputs["From Max"].default_value = 120.0
-    n_alt_mr.inputs["To Min"].default_value =     0.0
-    n_alt_mr.inputs["To Max"].default_value =     1.0
-    nt.links.new(n_pos_xyz.outputs["Z"], n_alt_mr.inputs["Value"])
-
-    def _ramp(x, y, stops):
-        r = add("ShaderNodeValToRGB", x, y)
-        cr = r.color_ramp
-        cr.interpolation = "LINEAR"
-        while len(cr.elements) > 1:
-            cr.elements.remove(cr.elements[1])
-        cr.elements[0].position = stops[0][0]
-        cr.elements[0].color = stops[0][1]
-        for pos, col in stops[1:]:
-            e = cr.elements.new(pos)
-            e.color = col
-        return r
-
-    # --- flat ramp: deep blue → sandy → wet beach → grass → forest → bare ---
-    n_flat_ramp = _ramp(-800, 400, [
-        (0.000, (0.03, 0.08, 0.20, 1.0)),   # abyssal blue   (z≈-50)
-        (0.180, (0.22, 0.30, 0.40, 1.0)),   # blue-sand      (z≈-19)
-        (0.270, (0.68, 0.66, 0.55, 1.0)),   # silty sand     (z≈-4)
-        (0.300, (0.92, 0.86, 0.72, 1.0)),   # bright sand    (z= 1)
-        (0.345, (0.78, 0.70, 0.50, 1.0)),   # wet beach tan  (z= 9)
-        (0.430, (0.36, 0.55, 0.27, 1.0)),   # grass          (z=23)
-        (0.620, (0.22, 0.40, 0.18, 1.0)),   # forest         (z=55)
-        (0.820, (0.30, 0.27, 0.21, 1.0)),   # alpine stone   (z=89)
-        (1.000, (0.18, 0.15, 0.13, 1.0)),   # volcanic top   (z=120)
-    ])
-    nt.links.new(n_alt_mr.outputs["Result"], n_flat_ramp.inputs["Fac"])
-
-    # --- cliff ramp: cool deep → wet rock → cliff stone → volcanic ---
-    n_cliff_ramp = _ramp(-800, 100, [
-        (0.000, (0.07, 0.10, 0.16, 1.0)),   # dark abyssal rock
-        (0.220, (0.20, 0.22, 0.24, 1.0)),   # wet rock
-        (0.300, (0.34, 0.32, 0.28, 1.0)),   # sea cliff
-        (0.500, (0.42, 0.39, 0.34, 1.0)),   # grey rock
-        (0.750, (0.30, 0.25, 0.22, 1.0)),   # warmer rock
-        (1.000, (0.16, 0.13, 0.13, 1.0)),   # volcanic
-    ])
-    nt.links.new(n_alt_mr.outputs["Result"], n_cliff_ramp.inputs["Fac"])
-
-    # --- mix flat + cliff by slope ------------------------------------
-    n_mix_slope = add("ShaderNodeMix", -400, 250, data_type="RGBA")
-    n_mix_slope.blend_type = "MIX"
-    n_mix_slope.clamp_factor = True
-    nt.links.new(n_slope_mr.outputs["Result"], n_mix_slope.inputs[0])
-    nt.links.new(n_flat_ramp.outputs["Color"],  n_mix_slope.inputs[6])
-    nt.links.new(n_cliff_ramp.outputs["Color"], n_mix_slope.inputs[7])
-
-    # --- variation noise: breaks ramp banding via Brightness/Contrast ---
-    # Two-octave noise drives a signed brightness offset (±0.10) so neither
-    # sand nor grass reads as a flat fill. Using Brightness/Contrast avoids
-    # ColorRamp's 0..1 colour clamping, which would otherwise lose the
-    # "brighten" half of the variation.
-    n_var_noise = add("ShaderNodeTexNoise", -1200, -300)
-    n_var_noise.noise_dimensions = "3D"; n_var_noise.normalize = True
-    n_var_noise.inputs["Scale"].default_value = 1.2
-    n_var_noise.inputs["Detail"].default_value = 6.0
-    n_var_noise.inputs["Roughness"].default_value = 0.55
-    nt.links.new(n_geom.outputs["Position"], n_var_noise.inputs["Vector"])
-    n_var_signed = add("ShaderNodeMapRange", -900, -300, clamp=True)
-    n_var_signed.inputs["From Min"].default_value =  0.0
-    n_var_signed.inputs["From Max"].default_value =  1.0
-    n_var_signed.inputs["To Min"].default_value =   -0.10
-    n_var_signed.inputs["To Max"].default_value =    0.10
-    nt.links.new(n_var_noise.outputs["Fac"], n_var_signed.inputs["Value"])
-    n_color_var = add("ShaderNodeBrightContrast", -200, -100)
-    nt.links.new(n_mix_slope.outputs[2],            n_color_var.inputs["Color"])
-    nt.links.new(n_var_signed.outputs["Result"],    n_color_var.inputs["Bright"])
-
-    # --- wet-band darken near waterline -------------------------------
-    # Triangular |z|-mask: peaks at z=0 (shoreline) and falls to 0 at
-    # |z|≥2. Pulls saturation down on damp sand / wave-washed rock
-    # without bleeding into the abyssal floor (~-25 m).
-    n_wet_abs = add("ShaderNodeMath",        -1400, -600, operation="ABSOLUTE")
-    nt.links.new(n_pos_xyz.outputs["Z"], n_wet_abs.inputs[0])
-    n_wet_mr = add("ShaderNodeMapRange",     -1200, -600,
-                   interpolation_type="SMOOTHSTEP", clamp=True)
-    n_wet_mr.inputs["From Min"].default_value =  0.0
-    n_wet_mr.inputs["From Max"].default_value =  2.0
-    n_wet_mr.inputs["To Min"].default_value =    1.0
-    n_wet_mr.inputs["To Max"].default_value =    0.0
-    nt.links.new(n_wet_abs.outputs[0], n_wet_mr.inputs["Value"])
-    n_wet_tint = add("ShaderNodeRGB", -900, -600)
-    n_wet_tint.outputs[0].default_value = (0.78, 0.78, 0.82, 1.0)
-    n_wet_mix = add("ShaderNodeMix", 100, -300, data_type="RGBA")
-    n_wet_mix.blend_type = "MULTIPLY"
-    n_wet_mix.clamp_factor = True
-    nt.links.new(n_wet_mr.outputs["Result"], n_wet_mix.inputs[0])
-    nt.links.new(n_color_var.outputs["Color"], n_wet_mix.inputs[6])
-    nt.links.new(n_wet_tint.outputs[0],  n_wet_mix.inputs[7])
-
-    nt.links.new(n_wet_mix.outputs[2], n_bsdf.inputs["Base Color"])
-
-    # --- roughness: rocks rougher than sand / grass --------------------
-    n_rough_mr = add("ShaderNodeMapRange", 300, -100, clamp=True)
-    n_rough_mr.inputs["From Min"].default_value = 0.0
-    n_rough_mr.inputs["From Max"].default_value = 1.0
-    n_rough_mr.inputs["To Min"].default_value =   0.78
-    n_rough_mr.inputs["To Max"].default_value =   0.95
-    nt.links.new(n_slope_mr.outputs["Result"], n_rough_mr.inputs["Value"])
-    nt.links.new(n_rough_mr.outputs["Result"], n_bsdf.inputs["Roughness"])
-
-    n_bsdf.inputs["Metallic"].default_value = 0.0
-    nt.links.new(n_bsdf.outputs["BSDF"], n_out.inputs["Surface"])
-
+    mat = terrain_material.ensure_mat_terrain_main(rebuild=True)
     if terrain.data.materials:
         terrain.data.materials[0] = mat
     else:

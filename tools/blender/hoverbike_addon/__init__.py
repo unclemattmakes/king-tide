@@ -76,6 +76,7 @@ from . import (
     sky_preset,
     spline,
     terrain,
+    terrain_material,
     terrain_shader,
     thumbnail,
     track_meta,
@@ -108,6 +109,11 @@ _MODULES = (
     spline,
     placement_helper,
     terrain,
+    # terrain_material registers the standalone Add Terrain Material
+    # operator. No panel of its own — wired into the Terrain top-bar
+    # menu and the terrain sub-panel below. Order doesn't matter here
+    # since nothing else references its classes at register-time.
+    terrain_material,
     terrain_shader,
     # island_terrain wraps the standalone seed_template_island.py
     # script so its builders can be invoked from an in-scene operator.
