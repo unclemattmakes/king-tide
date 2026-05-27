@@ -207,7 +207,31 @@ def build_island_material_nodes(mat: bpy.types.Material) -> None:
     nt.links.new(n_color_var.outputs["Color"], n_wet_mix.inputs[6])
     nt.links.new(n_wet_tint.outputs[0],  n_wet_mix.inputs[7])
 
-    nt.links.new(n_wet_mix.outputs[2], n_bsdf.inputs["Base Color"])
+    # --- racing-line wear: mix toward dirt tint by COLOR_0.B ----------
+    # Mirrors the runtime terrain shader (src/engine/render/terrain-shader.ts
+    # lines 325-329): mix(baseColor, pathTint, B * 0.8). The 0.8 cap keeps
+    # a hint of biome under even fully-worn vertices so the racing line
+    # reads as a worn band, not a different material. Default brown
+    # (0.30, 0.24, 0.18) matches the runtime's pathTint default — author
+    # overrides on the runtime side via track JSON's terrainShader.pathTint
+    # don't propagate to this preview, but the default is what most
+    # tracks ship with so the Blender look stays representative.
+    n_color0_split = add("ShaderNodeSeparateColor", -1400, 700, mode="RGB")
+    nt.links.new(n_color0.outputs["Color"], n_color0_split.inputs["Color"])
+    n_path_strength = add("ShaderNodeMath", -1100, 700, operation="MULTIPLY")
+    n_path_strength.inputs[1].default_value = 0.8
+    n_path_strength.use_clamp = True
+    nt.links.new(n_color0_split.outputs["Blue"], n_path_strength.inputs[0])
+    n_path_tint = add("ShaderNodeRGB", -800, 700)
+    n_path_tint.outputs[0].default_value = (0.30, 0.24, 0.18, 1.0)
+    n_path_mix = add("ShaderNodeMix", 400, 100, data_type="RGBA")
+    n_path_mix.blend_type = "MIX"
+    n_path_mix.clamp_factor = True
+    nt.links.new(n_path_strength.outputs["Value"], n_path_mix.inputs[0])
+    nt.links.new(n_wet_mix.outputs[2], n_path_mix.inputs[6])
+    nt.links.new(n_path_tint.outputs[0], n_path_mix.inputs[7])
+
+    nt.links.new(n_path_mix.outputs[2], n_bsdf.inputs["Base Color"])
 
     # --- roughness: rocks rougher than sand / grass --------------------
     n_rough_mr = add("ShaderNodeMapRange", 300, -100, clamp=True)
