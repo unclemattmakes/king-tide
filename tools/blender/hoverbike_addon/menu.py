@@ -209,6 +209,11 @@ class HOVERBIKE_MT_add(Menu):
             text="Scatter Zone (foliage / rocks)",
             icon="OUTLINER_OB_POINTCLOUD",
         )
+        layout.operator(
+            "hoverbike.add_biome_palette",
+            text="Biome Palette Scatter (auto-per-biome)",
+            icon="OUTLINER_OB_POINTCLOUD",
+        )
 
         layout.separator()
         layout.label(text="Authoring helpers")

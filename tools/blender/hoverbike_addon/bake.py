@@ -43,6 +43,15 @@ from mathutils.kdtree import KDTree
 
 BAKED_AO_ATTR = "baked_ao"
 BAKED_PATH_ATTR = "baked_path"
+# Mirror of COLOR_0.A as a plain FLOAT so Geometry-Nodes graphs can read
+# the biome cleanly via Named Attribute. Blender's GN graph can't split
+# a Color's Alpha channel out of a FLOAT_COLOR named attribute (Separate
+# Color exposes RGB but not A), so we duplicate the biome into its own
+# FLOAT. Same {0, 1/3, 2/3, 1} value as COLOR_0.A. Author-side only —
+# the runtime still reads COLOR_0; this attribute never ships in glTF
+# because the exporter's vertex-colour heuristic only picks up *Color*
+# attributes, not FLOATs (same trick ``baked_ao`` / ``baked_path`` use).
+BAKED_BIOME_ATTR = "baked_biome"
 BAKE_TEMP_ATTR = "_hoverbike_bake_target"
 
 # The canonical author-preview terrain material — every seed_template_*.py
@@ -148,7 +157,7 @@ def biome_from_z(
 
 def _ensure_baked_attrs(terrain: bpy.types.Object) -> None:
     """Make sure the source terrain mesh has the baked-* attributes the
-    GN graph reads. Both stored as plain FLOAT so glTF's vertex-colour
+    GN graph reads. All three stored as plain FLOAT so glTF's vertex-colour
     heuristic doesn't pick them up and stomp the GN-stamped COLOR_0 in
     the export. Idempotent — pre-existing attributes are left alone."""
     me = terrain.data
@@ -160,6 +169,15 @@ def _ensure_baked_attrs(terrain: bpy.types.Object) -> None:
         attr = me.attributes.new(name=BAKED_PATH_ATTR, type="FLOAT", domain="POINT")
         for i in range(len(attr.data)):
             attr.data[i].value = 0.0  # default = no wear
+    if BAKED_BIOME_ATTR not in me.attributes:
+        attr = me.attributes.new(name=BAKED_BIOME_ATTR, type="FLOAT", domain="POINT")
+        # Default to 1.0 (jungle) so a fresh terrain with no biome stamp
+        # still scatters its Jungle slot when the GN graph runs — easier
+        # to debug than "scatter looks empty because every vert reads as
+        # deep ocean". The first ``_stamp_color_0`` call overwrites these
+        # with the world-Z-derived values.
+        for i in range(len(attr.data)):
+            attr.data[i].value = 1.0
 
 
 def _bake_ao_cycles(
@@ -401,6 +419,14 @@ def _stamp_color_0(
 
     ao_attr = me.attributes.get(BAKED_AO_ATTR)
     path_attr = me.attributes.get(BAKED_PATH_ATTR)
+    # ``baked_biome`` is a FLOAT mirror of COLOR_0.A that the biome-palette
+    # scatter GN graph reads (Named Attribute on a plain FLOAT is trivial;
+    # splitting Alpha out of a FLOAT_COLOR inside GN is not). Create on
+    # demand so older .blends pick it up the first time the operator
+    # runs after the addon update.
+    if BAKED_BIOME_ATTR not in me.attributes:
+        me.attributes.new(name=BAKED_BIOME_ATTR, type="FLOAT", domain="POINT")
+    biome_attr = me.attributes[BAKED_BIOME_ATTR]
 
     if "COLOR_0" in me.color_attributes:
         me.color_attributes.remove(me.color_attributes["COLOR_0"])
@@ -420,6 +446,7 @@ def _stamp_color_0(
         g = float(ao_attr.data[i].value) if ao_attr is not None else 1.0
         b = float(path_attr.data[i].value) if path_attr is not None else 0.0
         col.data[i].color = (0.0, g, b, biome)
+        biome_attr.data[i].value = biome
         # 0, 1/3, 2/3, 1 → index 0, 1, 2, 3
         buckets[int(round(biome * 3.0))] += 1
 

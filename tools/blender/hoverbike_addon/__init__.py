@@ -53,6 +53,7 @@ from . import (
     antigrav_ribbon,
     auto_tag,
     bake,
+    biome_palette,
     boost_pad,
     decal,
     downtown,
@@ -149,6 +150,10 @@ _MODULES = (
     # HOVERBIKE_PT_panel (in panel.py), so it MUST register after
     # panel. The save_pre handler it also registers is order-agnostic.
     prop_bake,
+    # biome_palette's HOVERBIKE_PT_track_biome_palette also parents on
+    # HOVERBIKE_PT_panel — register after panel for the same reason.
+    # Order vs prop_bake is arbitrary; keep panel-children grouped here.
+    biome_palette,
     # menu registers absolute-last — its submenu/pie classes call into
     # operators registered by every module above, and its
     # VIEW3D_MT_editor_menus append needs to land after Blender's stock

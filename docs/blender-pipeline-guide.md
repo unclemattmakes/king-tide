@@ -1287,6 +1287,176 @@ node -e 'import("./tools/blender/inspect_glb.mjs").then((m) =>
 If the extension isn't emitted, the most common cause is the scattered
 output sitting outside an Empty parent — re-parent and re-export.
 
+## Biome palette scatter
+
+A whole-terrain scatter that **reads the painted biome map** and routes
+points into per-biome prop collections. One palette per track, no
+per-zone empties to place — drop the modifier on the scene, pick a
+source collection + density for each biome, and the GN graph fills the
+terrain by reading `baked_biome` / `baked_path` / `baked_ao` off the
+terrain mesh. Pairs with the [terrain coloration flow](#vertex-bakes-ao--path-worn).
+
+### Authoring loop
+
+1. **Paint the biome** — run *Apply Terrain Vertex Colors* on the
+   terrain (Hoverbike → Terrain → Bake to vertex colors). This stamps
+   `COLOR_0` plus a sibling `baked_biome` FLOAT attribute the scatter
+   GN graph reads. World-Z thresholds map verts to deep / seafloor /
+   beach / jungle buckets.
+2. **Add the palette** — Hoverbike → Add → *Biome Palette Scatter*
+   (or click *Add Biome Palette Scatter* in the sidebar's Biome scatter
+   sub-panel when the terrain is selected). Drops a singleton
+   `scatter_biome_palette` Empty + `scatter_biome_palette_surf` Mesh,
+   attaches the `HV_BiomePalette` modifier from the props library, and
+   binds the modifier's *Terrain* socket to the selected mesh.
+3. **Tune from the sidebar** — selection-driven sub-panel surfaces when
+   you have the terrain or either palette object active. Per-biome
+   rows: pick a source collection from the props library, set density
+   per m². Globals: size jitter, path-wear avoidance, AO floor, seed.
+4. **Iterate** — every panel change is a live modifier-socket write, so
+   the viewport re-evaluates immediately. No refresh button.
+5. **Export** — *Export Track to Game* picks up the InstanceOnPoints
+   output via `EXT_mesh_gpu_instancing` (same path as `HV_Scatter`).
+   The surf mesh is `kind=decoration` so the runtime doesn't try to
+   collide with it; the scattered instances are render-only.
+
+### Per-biome rows
+
+The four biome buckets correspond to `baked_biome ∈ {0, 1/3, 2/3, 1}`:
+
+| Biome | Z band (default) | Typical sources |
+|---|---|---|
+| Deep | `z < -22` | (usually empty — open water) |
+| Seafloor | `-22 ≤ z < 0` | `prop_kelp_strand`, debris, mooring bollards |
+| Beach | `0 ≤ z < 4` | `prop_palm` (sparse), driftwood, beach ball |
+| Jungle | `z ≥ 4` | `prop_palm`, `prop_fern_clump`, `prop_mossy_boulder` |
+
+The Z thresholds are the same ones [`apply_terrain_vertex_colors`](#vertex-bakes-ao--path-worn)
+writes into `COLOR_0.A`. Adjust them on the bake operator before
+re-baking if a track has a different waterline / treeline.
+
+### Density tuning
+
+Densities are **per m² of terrain face area**, *not* per scatter zone
+like the legacy `HV_Scatter` zones. A 1 km² terrain at the default
+0.005 jungle density gives ~5000 palms — sparse forest, viewport
+handles smoothly. Crank up for crowded foliage, drop for sparse
+coastlines. As a rule of thumb:
+
+| Density | Reads as |
+|---|---|
+| 0.001 | scattered, mostly empty |
+| 0.005 | sparse forest (default) |
+| 0.02 | dense canopy |
+| 0.05+ | wall-of-trees |
+
+### Path-wear avoidance + AO gate
+
+Two global gates apply on top of biome routing:
+
+- **Path Wear Avoid** (0..1, default 1.0) — multiplier on
+  `COLOR_0.B`'s contribution. At 1.0, vertices the racing line crosses
+  (where `baked_path` ≈ 1) get zero density — palms automatically
+  clear the bike's path. At 0, path-wear is ignored.
+- **AO Floor** (0..1, default 0.0) — smoothsteps point density up from
+  `baked_ao = AO Floor` to `baked_ao = 1.0`. Set to 0.4 to drop
+  scatter from deep cavities; leave at 0 for no AO filtering.
+
+Both gates re-evaluate live with the bake (the path-wear bake auto-fires
+on spline edits, so moving the racing line slides the scatter "no-go"
+band along with it).
+
+### Paint masks — fine-tune the biome palette
+
+The palette gives you a baseline keyed to painted biome. **Paint masks
+are a delta layer on top** for the cases where the baseline is mostly
+right and you want to suppress or thin scatter in a specific area —
+clear a sight line, thin out the start grid, kill the palm that's
+poking through your sky-box mountain.
+
+Each biome row has its own vertex group on the terrain:
+`mask_deep`, `mask_seafloor`, `mask_beach`, `mask_jungle`. They're
+created automatically at weight 1.0 on every vertex when you add the
+palette, so **unpainted terrain scatters exactly what A produces**.
+The GN graph multiplies each biome's per-face density by its mask
+attribute before sampling Distribute Points:
+
+```
+density(prop, v) = biome_density × in_biome(v) × mask(v)
+                                              × path_wear_keep(v) × ao_keep(v)
+```
+
+**Author flow:**
+
+1. Click **Edit mask** on the biome row you want to suppress. The
+   addon switches to Weight Paint with the right group already
+   active.
+2. **Paint to taste.** Subtract brush (`Ctrl` + click while in Weight
+   Paint, or pick from the brush settings) paints down — weight 0 =
+   "no scatter here," weight 0.5 = "half density." Add brush paints up
+   if you over-corrected.
+3. **Tab** in the viewport to return to Object Mode. The scatter
+   re-evaluates immediately.
+4. To switch biomes mid-paint, click **Edit mask** on a different row —
+   no need to exit paint mode first; the active group swaps under you.
+5. **Clear** resets a row's mask to 1.0 everywhere (undo all paint for
+   that biome).
+
+**Tradeoffs vs. paint-on-COLOR_0.A:**
+
+- Masks suppress *within* A's biome routing — they can thin or remove
+  scatter from a biome that's already there, but they can't *put*
+  palms onto a beach (that requires repainting `COLOR_0.A`). For the
+  rare "stick a palm in this exact spot" case, run Apply Terrain
+  Vertex Colors with different thresholds, or hand-place a single
+  prop instance.
+- Masks are per-biome-row, not per-prop. If the same prop is assigned
+  to multiple biome rows (e.g. palms in both Beach and Jungle),
+  suppressing palms in an area needs both `mask_beach` and
+  `mask_jungle` painted there. Usually moot — biome buckets are mostly
+  disjoint by world-Z so each vertex belongs to exactly one row.
+- Default brush is Add mode (raises weight toward 1). Set it to
+  Subtract in the brush settings to paint *down* from the default 1.0.
+
+### Comparison with `HV_Scatter` zones
+
+| | `HV_Scatter` (per-zone) | `HV_BiomePalette` (whole-terrain) |
+|---|---|---|
+| Coverage | One rectangular zone | The whole terrain |
+| Where authored | `scatter_NN` empties scattered through the scene | Singleton `scatter_biome_palette` Empty |
+| Filter | Geometric (slope, altitude band) | Painted biome (`COLOR_0.A`) |
+| Path-wear gate | ❌ ignored | ✅ via `baked_path` |
+| AO gate | ❌ ignored | ✅ via `baked_ao` |
+| Paint suppression | ❌ all-or-nothing zone | ✅ per-biome paint masks (Weight Paint) |
+| Live edit | ❌ manual *Refresh Scatter Zones* | ✅ panel writes modifier sockets |
+
+Both ship through `EXT_mesh_gpu_instancing`. The two can coexist on the
+same track — use the palette for "whole island gets foliage," then
+drop a zone or two for a hand-placed grove.
+
+### Verifying the scatter
+
+A smoke-test script lives at
+[`tools/blender/_smoke_biome_palette.py`](../tools/blender/_smoke_biome_palette.py).
+Run it against any `tracks-src/<id>.blend` to:
+
+1. Run the vertex-color bake (populates `baked_biome`).
+2. Add the biome palette (drops the empty/surf pair + modifier and
+   initialises the four `mask_*` vertex groups at weight 1.0).
+3. Evaluate the modifier and count instances.
+4. Paint `mask_jungle = 0` on half the verts and re-evaluate, asserting
+   the instance count drops by roughly half (Proposal B regression).
+
+```bash
+"$BLENDER_EXE" --background tracks-src/<id>.blend \
+    --python tools/blender/_smoke_biome_palette.py
+```
+
+Expected output ends with `PASS: biome palette smoke test`. A zero
+instance count means either `baked_biome` is missing on the terrain
+(rerun *Apply Terrain Vertex Colors*) or no biome row has a non-zero
+density × source combo set.
+
 ## Procedural props library (Item 3)
 
 `tracks-src/props-library.blend` is a shared library of procedural
