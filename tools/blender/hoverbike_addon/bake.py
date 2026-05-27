@@ -54,12 +54,17 @@ BAKE_TEMP_ATTR = "_hoverbike_bake_target"
 # avoids drift if we rename or move the builder later.
 TERRAIN_MATERIAL_NAME = "mat_terrain_main"
 
-# Path-wear defaults. Inner = 0 m → full wear on the line itself;
-# outer = 8 m → faded out beyond 8 m. Intensity is a [0, 1] multiplier
-# on the final wear value, useful for backing the racing line off
-# when the runtime ``pathTint`` is already aggressive.
+# Path-wear defaults. Inner = 0 m → full wear directly on the racing
+# line; outer = 20 m → faded out beyond 20 m. The 20 m default is sized
+# to span 3–4 vertices on typical heightmap-density terrain (128×128
+# grid over a 1024 m extent gives ~8 m vertex spacing). Anything
+# narrower bottoms out at 1-vert-wide and reads as a dotted/patchy
+# trail after the GPU interpolates vertex colours across faces.
+# Intensity is a [0, 1] multiplier on the final wear value, useful for
+# backing the racing line off when the runtime ``pathTint`` is already
+# aggressive.
 DEFAULT_PATH_WEAR_INNER_M = 0.0
-DEFAULT_PATH_WEAR_OUTER_M = 8.0
+DEFAULT_PATH_WEAR_OUTER_M = 20.0
 DEFAULT_PATH_WEAR_INTENSITY = 1.0
 
 # Biome thresholds — world-space Z (metres). Defaults match the boundaries
@@ -219,6 +224,37 @@ def _bake_ao_cycles(
             me.color_attributes.remove(me.color_attributes[BAKE_TEMP_ATTR])
 
 
+def _densify_polyline_xy(
+    points: list, max_step_m: float = 1.0
+) -> list:
+    """Insert linearly-interpolated samples into ``points`` so no
+    consecutive pair spans more than ``max_step_m`` in XY ground
+    distance. Z is interpolated alongside even though the path-wear
+    bake collapses it — keeping it in the output means this helper
+    stays generic for any other consumer that wants a dense 3D
+    polyline. Returns a fresh list; input is untouched."""
+    import math as _math
+
+    if len(points) < 2:
+        return list(points)
+    if max_step_m <= 0:
+        return list(points)
+
+    dense = [points[0]]
+    for prev, curr in zip(points, points[1:]):
+        dx = curr.x - prev.x
+        dy = curr.y - prev.y
+        seg_len = _math.hypot(dx, dy)
+        # n_extra intermediates → segment becomes (n_extra+1) sub-segments,
+        # each ≤ max_step_m long. Skip if the segment already fits.
+        n_extra = int(seg_len // max_step_m)
+        for k in range(1, n_extra + 1):
+            t = k / (n_extra + 1)
+            dense.append(prev.lerp(curr, t))
+        dense.append(curr)
+    return dense
+
+
 def _bake_path_wear(
     terrain: bpy.types.Object,
     spline: bpy.types.Object,
@@ -236,6 +272,13 @@ def _bake_path_wear(
     source mesh is one-to-one because the GN graph doesn't add or
     remove verts.
 
+    Distance is the planar XY ground distance (Blender is Z-up). The
+    spline's height — and the vertex's height — are collapsed so a
+    racing line that floats above a hill still leaves wear on the
+    ground beneath it, which is what authors expect: the worn band
+    is where the bike *would drive*, not where the spline floats in
+    3D space.
+
     Idempotent: re-running with the same inputs stamps the same values.
 
     Args:
@@ -251,30 +294,44 @@ def _bake_path_wear(
 
     dg = bpy.context.evaluated_depsgraph_get()
 
-    # Dense polyline samples from the spline. Step ~1 m so a KDTree
-    # nearest-neighbour is a very tight distance estimate.
+    # Initial polyline from the curve's evaluated mesh. This respects
+    # whatever resolution_u the curve is set to — which is usually
+    # sparse (Blender defaults the AI spline to 12 segments per Bezier
+    # span, so a 2 km track ends up with ~50 verts: ~40 m between
+    # samples). Far too coarse for an 8 m wear radius, so we densify
+    # below.
     cobj = spline.evaluated_get(dg)
     cme = cobj.to_mesh()
     try:
         sw = spline.matrix_world
-        spline_pts = [sw @ Vector(v.co) for v in cme.vertices]
+        raw_pts = [sw @ Vector(v.co) for v in cme.vertices]
     finally:
         try:
             cobj.to_mesh_clear()
         except ReferenceError:
             pass
-    if len(spline_pts) < 2:
+    if len(raw_pts) < 2:
         raise RuntimeError("ai_spline_main has too few sampled points")
 
-    # XZ-only distance (per vertex-attribute-spec): project the spline
-    # samples onto the y=0 plane before inserting. That way a vertex
-    # *under* the racing line — on a hill where the spline floats well
-    # above the terrain — still picks up wear, which is what authors
-    # expect: the worn band is where the bike *would drive*, not where
-    # the spline floats in 3D.
+    # Densify to ~1 m XY spacing. A 2 km racing line ends up with
+    # ~2 k samples — well within KDTree's comfort zone — and the
+    # nearest-sample distance from any terrain vertex becomes a
+    # tight estimate of the actual perpendicular distance to the
+    # curve. Without densification, the curve's evaluated mesh ships
+    # at whatever resolution_u the curve has (Blender defaults gave
+    # ~50 samples on the test track, ~40 m apart — way coarser than
+    # the 8 m wear band, so the worn region read as a dotted line
+    # of disks instead of a continuous band).
+    spline_pts = _densify_polyline_xy(raw_pts, max_step_m=1.0)
+
+    # Project to the XY ground plane (Blender is Z-up): collapse Z so
+    # a vertex *under* the racing line — on a hill where the spline
+    # floats well above the terrain — still picks up wear, which is
+    # what authors expect: the worn band is where the bike *would
+    # drive*, not where the spline floats in 3D.
     tree = KDTree(len(spline_pts))
     for i, p in enumerate(spline_pts):
-        tree.insert(Vector((p.x, 0.0, p.z)), i)
+        tree.insert(Vector((p.x, p.y, 0.0)), i)
     tree.balance()
 
     eobj = terrain.evaluated_get(dg)
@@ -289,14 +346,14 @@ def _bake_path_wear(
         mw = terrain.matrix_world
         path_attr = terrain.data.attributes[BAKED_PATH_ATTR]
         n_verts = len(eme.vertices)
-        # Both stored points and queries live on the y=0 plane, so the
-        # KDTree's 3D nearest-neighbour distance is the planar XZ
-        # distance from the vertex to the racing line — exactly what
-        # path-worn wants (the bike's racing footprint, not the
+        # Both stored points and queries live on the z=0 plane, so the
+        # KDTree's 3D nearest-neighbour distance is the planar XY
+        # ground distance from the vertex to the racing line — exactly
+        # what path-worn wants (the bike's racing footprint, not the
         # spline's possibly-elevated 3D arc).
         for i, v in enumerate(eme.vertices):
             world = mw @ Vector(v.co)
-            _, _, dist = tree.find(Vector((world.x, 0.0, world.z)))
+            _, _, dist = tree.find(Vector((world.x, world.y, 0.0)))
             path_attr.data[i].value = path_wear_at_distance(
                 dist, inner=inner, outer=outer, intensity=intensity
             )
@@ -458,6 +515,65 @@ def _path_wear_params(scene: bpy.types.Scene) -> tuple[float, float, float]:
         or 0.0
     )
     return inner, outer, intensity
+
+
+def auto_rebake_path_wear_on_curve_edit(scene: bpy.types.Scene) -> tuple[bool, str]:
+    """Debounced auto-rebake handler — called by ``handlers.py``'s
+    timer ~0.2 s after the last edit to ``ai_spline_main``.
+
+    Mirrors the "opt-in then automatic" pattern the other live
+    previews use: only re-bakes if the terrain already has a
+    ``baked_path`` attribute (= the user has clicked Bake Path Wear
+    at least once OR has run Apply Vertex Colors, both of which seed
+    the attribute via ``_ensure_baked_attrs``). Without that gate, a
+    fresh blend would start eating spline edits with hidden bakes the
+    author never asked for.
+
+    Also re-stamps ``COLOR_0`` after the path bake so the Blender
+    material preview reflects the new band immediately — otherwise
+    the GN graph's live attribute sampling only catches it on the
+    next depsgraph update.
+
+    Returns ``(ok, message)`` matching the export hook's convention.
+    ``ok=False`` is non-fatal — the caller's just logging.
+    """
+    inner, outer, intensity = _path_wear_params(scene)
+    if intensity <= 0.0:
+        return True, "auto path-wear rebake skipped (intensity = 0)"
+
+    terrain = _resolve_terrain()
+    if terrain is None:
+        return False, "auto path-wear rebake skipped: no kind=track terrain"
+    # Opt-in gate: the user must have seeded baked_path at least once
+    # (via Bake AO + Path Wear, Bake Path-Worn, or Apply Vertex Colors).
+    # Without this, a fresh blend with an unsaved spline edit would
+    # auto-bake silently — surprising and slow on big terrains.
+    if BAKED_PATH_ATTR not in terrain.data.attributes:
+        return True, "auto path-wear rebake skipped: terrain has no baked_path yet"
+
+    spline = bpy.data.objects.get("ai_spline_main")
+    if spline is None or spline.type != "CURVE":
+        return False, "auto path-wear rebake skipped: no ai_spline_main"
+
+    try:
+        n = _bake_path_wear(
+            terrain, spline, inner=inner, outer=outer, intensity=intensity
+        )
+    except Exception as e:  # noqa: BLE001
+        return False, f"auto path-wear rebake failed: {e}"
+
+    # Re-stamp COLOR_0 so the Blender material preview picks up the
+    # new B values. The procedural-template GN graph re-samples
+    # baked_path live, so for those terrains this is redundant; for
+    # hand-rolled (ANT / heightmap / sculpt) terrains it's required
+    # because COLOR_0 is static data, not a live sample.
+    try:
+        _stamp_color_0(terrain)
+    except Exception as e:  # noqa: BLE001
+        # Bake succeeded so the GLB export will still ship correctly.
+        return False, f"auto path-wear rebake stamped baked_path but COLOR_0 re-stamp failed: {e}"
+
+    return True, f"auto-rebaked path-wear over {n} vertices"
 
 
 def auto_bake_path_wear_for_export(scene: bpy.types.Scene) -> tuple[bool, str]:
@@ -774,13 +890,17 @@ class HOVERBIKE_OT_apply_terrain_vertex_colors(Operator):
 
 
 def _self_test() -> None:
-    # Defaults: inner=0, outer=8, intensity=1.
+    # Pass explicit (inner, outer) to every assertion so the test stays
+    # independent of the module-level DEFAULT_PATH_WEAR_OUTER_M value
+    # (which has been tuned up from 8 → 20 m to suit typical heightmap
+    # density). Hard-coding the assumption that defaults are (0, 8, 1)
+    # caused a test break the last time the default was retuned.
     eps = 1e-9
-    assert abs(path_wear_at_distance(0.0) - 1.0) < eps, "vertex on line → 1"
-    assert abs(path_wear_at_distance(8.0) - 0.0) < eps, "vertex at outer → 0"
-    assert abs(path_wear_at_distance(9.0) - 0.0) < eps, "vertex past outer → 0"
+    assert abs(path_wear_at_distance(0.0, inner=0.0, outer=8.0) - 1.0) < eps, "vertex on line → 1"
+    assert abs(path_wear_at_distance(8.0, inner=0.0, outer=8.0) - 0.0) < eps, "vertex at outer → 0"
+    assert abs(path_wear_at_distance(9.0, inner=0.0, outer=8.0) - 0.0) < eps, "vertex past outer → 0"
     # Midpoint: 4 m of an 8 m band → smoothstep(0.5) = 0.5.
-    mid = path_wear_at_distance(4.0)
+    mid = path_wear_at_distance(4.0, inner=0.0, outer=8.0)
     assert abs(mid - 0.5) < 1e-6, f"midpoint should be ~0.5, got {mid}"
 
     # Inner band: anything within 0 m saturates; pick a non-zero inner to
@@ -789,11 +909,11 @@ def _self_test() -> None:
     assert path_wear_at_distance(1.0, inner=1.0, outer=5.0) == 1.0
 
     # Intensity scales the output linearly.
-    assert abs(path_wear_at_distance(0.0, intensity=0.4) - 0.4) < eps
-    assert abs(path_wear_at_distance(4.0, intensity=0.5) - 0.25) < 1e-6
+    assert abs(path_wear_at_distance(0.0, inner=0.0, outer=8.0, intensity=0.4) - 0.4) < eps
+    assert abs(path_wear_at_distance(4.0, inner=0.0, outer=8.0, intensity=0.5) - 0.25) < 1e-6
 
     # Intensity = 0 → always 0 (used by the export hook to short-circuit).
-    assert path_wear_at_distance(0.0, intensity=0.0) == 0.0
+    assert path_wear_at_distance(0.0, inner=0.0, outer=8.0, intensity=0.0) == 0.0
 
     # Degenerate band (outer <= inner) collapses to a hard mask at inner.
     assert path_wear_at_distance(2.0, inner=5.0, outer=5.0) == 1.0
@@ -801,14 +921,14 @@ def _self_test() -> None:
 
     # Intensity gets clamped to [0, 1] so a runaway slider can't write
     # values past 1 into COLOR_0.B.
-    assert path_wear_at_distance(0.0, intensity=2.0) == 1.0
-    assert path_wear_at_distance(0.0, intensity=-1.0) == 0.0
+    assert path_wear_at_distance(0.0, inner=0.0, outer=8.0, intensity=2.0) == 1.0
+    assert path_wear_at_distance(0.0, inner=0.0, outer=8.0, intensity=-1.0) == 0.0
 
     # Monotone in distance over the falloff band.
     last = float("inf")
     for d_int in range(0, 81):
         d = d_int / 10.0  # 0.0 → 8.0 in 0.1 steps
-        w = path_wear_at_distance(d)
+        w = path_wear_at_distance(d, inner=0.0, outer=8.0)
         assert w <= last + 1e-9, f"wear should be monotone decreasing, {w} > {last}"
         last = w
 
@@ -825,6 +945,28 @@ def _self_test() -> None:
     assert biome_from_z(5.0, deep_z=0.0, sandy_z=10.0, beach_z=20.0) == 1 / 3
     assert biome_from_z(15.0, deep_z=0.0, sandy_z=10.0, beach_z=20.0) == 2 / 3
     assert biome_from_z(25.0, deep_z=0.0, sandy_z=10.0, beach_z=20.0) == 1.0
+
+    # _densify_polyline_xy — confirm the gap-fill maths produces a
+    # polyline whose adjacent samples are within max_step_m in XY.
+    class _P:
+        def __init__(self, x, y, z=0.0):
+            self.x, self.y, self.z = x, y, z
+        def lerp(self, other, t):
+            return _P(self.x + (other.x - self.x) * t,
+                     self.y + (other.y - self.y) * t,
+                     self.z + (other.z - self.z) * t)
+
+    raw = [_P(0, 0, 0), _P(10, 0, 0), _P(10, 5, 0)]
+    dense = _densify_polyline_xy(raw, max_step_m=1.0)
+    # 10 m segment + 5 m segment → at least 15 sub-segments + 3 originals.
+    assert len(dense) >= 16, f"densified polyline too short: {len(dense)}"
+    # Verify no XY gap exceeds 1.01 m (allow tiny FP slop).
+    for a, b in zip(dense, dense[1:]):
+        gap = ((a.x - b.x) ** 2 + (a.y - b.y) ** 2) ** 0.5
+        assert gap <= 1.01, f"densified polyline has gap {gap:.3f} m > 1.0"
+    # Pass-through cases.
+    assert _densify_polyline_xy([], max_step_m=1.0) == []
+    assert len(_densify_polyline_xy([_P(0, 0)], max_step_m=1.0)) == 1
 
     print("ALL PYTHON CHECKS PASS")
 

@@ -46,7 +46,7 @@ _WATCHED_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # markers (gate_buoys.py samples ai_spline_main directly).
     # road_curve_main does NOT fire "buoys" — buoys are decoupled
     # from the road tool entirely.
-    ("ai_spline_main",   ("gates", "turns", "helper", "road", "starts", "buoys")),
+    ("ai_spline_main",   ("gates", "turns", "helper", "road", "starts", "buoys", "path_wear")),
     ("road_curve_main",  ("road",)),
     ("start_00",         ("racer",)),
     # Editing the legacy water volume changes both the surface and
@@ -183,6 +183,25 @@ def _run_pending_rebuilds():
             _placement_helper_mod.repose_placement_helper(scene)
         except (RuntimeError, AttributeError):
             pass
+
+    # Path-wear auto-rebake. Self-gated in bake.py: only fires if the
+    # terrain already has a baked_path attribute (= user has clicked
+    # Bake at least once OR run Apply Vertex Colors). Re-stamps COLOR_0
+    # after the bake so the Blender material preview reflects the new
+    # band immediately. ~1 s on a 16 k-vert terrain; longer on denser
+    # meshes — debounce keeps it tolerable during continuous drags.
+    if "path_wear" in pending:
+        try:
+            from . import bake as _bake_mod
+            ok, msg = _bake_mod.auto_rebake_path_wear_on_curve_edit(scene)
+            if not ok:
+                # Informational only — the export hook will catch it next
+                # time the author actually exports. We don't pop a UI
+                # error from a timer because that would interrupt their
+                # edit flow.
+                print(f"[hoverbike] {msg}")
+        except (RuntimeError, AttributeError) as e:
+            print(f"[hoverbike] auto path-wear rebake errored: {e}")
 
     # Drag-to-snap path: depsgraph saw the helper move to a position
     # that doesn't match what repose last wrote, so the user grabbed it
