@@ -21,6 +21,7 @@ import * as THREE from 'three'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import { Transform, TransformStore, TrickState, TrickStateStore } from '@/game/components'
 import { Rider, RiderBone, RiderBoneStore, RiderBoneTag, RiderStore } from '@/game/components/rider'
+import { RIDER_APPEARANCE } from './rider-appearance'
 import { createRiderBoneMesh } from './rider-mesh'
 
 const RIDER_COLORS = [
@@ -66,7 +67,33 @@ export function createRiderRenderSystem(scene: THREE.Scene, sim: SimWorld) {
   const tmpBoneQuat = new THREE.Quaternion()
   const tmpAxis = new THREE.Vector3()
 
+  /** Appearance version the current bone meshes were built at. When the
+   *  rider editor mutates `RIDER_APPEARANCE` it bumps this version; we drop
+   *  every bone mesh so the loop below rebuilds them with the new primitive /
+   *  colour. Starts at the live version so the main game (which never edits
+   *  appearance) never rebuilds. */
+  let builtAppearanceVersion = RIDER_APPEARANCE.version
+
+  /** Dispose a bone mesh's geometry so editor rebuilds don't leak. Shared
+   *  materials are cached in rider-mesh and intentionally left alone. */
+  function disposeBoneMesh(obj: THREE.Object3D): void {
+    obj.traverse((child) => {
+      if (child instanceof THREE.Mesh) child.geometry.dispose()
+    })
+  }
+
   return function tick(): void {
+    // Appearance changed (rider editor) → drop all bone meshes so they
+    // rebuild with the new primitive / colour this frame.
+    if (RIDER_APPEARANCE.version !== builtAppearanceVersion) {
+      for (const [, mesh] of meshes) {
+        scene.remove(mesh)
+        disposeBoneMesh(mesh)
+      }
+      meshes.clear()
+      builtAppearanceVersion = RIDER_APPEARANCE.version
+    }
+
     // Build the per-bike trick-rotation cache. One pass over Rider
     // entities so the per-bone loop below stays cheap. A bike with
     // no active trick (spinPhase=0 or zero axis vector) is omitted —
@@ -109,8 +136,20 @@ export function createRiderRenderSystem(scene: THREE.Scene, sim: SimWorld) {
       if (!data) continue
       let mesh = meshes.get(eid)
       if (!mesh) {
-        const color = colorForRider(data.riderEid)
-        mesh = createRiderBoneMesh(data.name, data.halfHeight, data.radius, color)
+        const appearance = RIDER_APPEARANCE.bones[data.name]
+        // Explicit per-bone colour wins; otherwise fall back to the
+        // per-rider colour so riders stay distinguishable.
+        const color = appearance.color ?? colorForRider(data.riderEid)
+        mesh = createRiderBoneMesh(
+          data.name,
+          data.halfHeight,
+          data.radius,
+          color,
+          appearance.primitive,
+        )
+        // Per-axis visual scale (editor) — render-only, physics untouched.
+        // Persists across frames; position/rotation are rewritten below.
+        mesh.scale.set(appearance.scale.x, appearance.scale.y, appearance.scale.z)
         scene.add(mesh)
         meshes.set(eid, mesh)
       }
