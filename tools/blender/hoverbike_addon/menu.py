@@ -462,6 +462,17 @@ class HOVERBIKE_MT_terrain(Menu):
         layout.operator(
             "hoverbike.subdivide_terrain", text="Subdivide", icon="MOD_SUBSURF"
         )
+        # Material-only entry: assigns mat_terrain_main to the active
+        # mesh, building it from the addon's island-palette graph if
+        # the scene doesn't already have one. Pure cosmetic op — doesn't
+        # touch COLOR_0 or kind=track. Sits at the end of the Build
+        # section since it's typically the last setup step before
+        # vertex-colour authoring.
+        layout.operator(
+            "hoverbike.add_terrain_material",
+            text="Add Terrain Material",
+            icon="MATERIAL",
+        )
 
         layout.separator()
         layout.label(text="Sculpt")
@@ -480,6 +491,17 @@ class HOVERBIKE_MT_terrain(Menu):
 
         layout.separator()
         layout.label(text="Bake to vertex colors")
+        # First op a hand-rolled (ANT / heightmap / sculpted) terrain
+        # needs: stamp COLOR_0 from world-Z biome so the runtime shader
+        # has something to read. Procedural HV_Island terrains get this
+        # from the GN graph and don't need the button — but it's safe
+        # to click anyway (the operator just overwrites COLOR_0 with
+        # the same values the graph would produce).
+        layout.operator(
+            "hoverbike.apply_terrain_vertex_colors",
+            text="Apply Vertex Colors (COLOR_0)",
+            icon="COLOR",
+        )
         layout.operator(
             "hoverbike.bake_terrain_attrs",
             text="Bake AO + Path Worn",

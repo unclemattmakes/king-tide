@@ -1,4 +1,4 @@
-"""Terrain attribute bakers — AO + path-wear.
+"""Terrain attribute bakers — AO + path-wear + COLOR_0 stamping.
 
 Fills the ``baked_ao`` (FLOAT) and ``baked_path`` (FLOAT) attributes
 on the source terrain mesh so the GN graph can route them into
@@ -19,6 +19,13 @@ Path-wear knobs are scene-level (``hoverbike_path_wear_inner`` /
 the addon panel without re-editing the operator. See
 [docs/vertex-attribute-spec.md](../../docs/vertex-attribute-spec.md)
 for the channel contract.
+
+This module also exposes ``HOVERBIKE_OT_apply_terrain_vertex_colors``
+for hand-rolled terrain meshes (ANT Landscape output, heightmap
+imports, sculpts) that don't carry an HV_Island-style GN graph that
+would stamp ``COLOR_0`` automatically. The operator writes the
+attribute directly per-vertex using the same biome / AO / path
+contract.
 """
 
 from __future__ import annotations
@@ -38,6 +45,15 @@ BAKED_AO_ATTR = "baked_ao"
 BAKED_PATH_ATTR = "baked_path"
 BAKE_TEMP_ATTR = "_hoverbike_bake_target"
 
+# The canonical author-preview terrain material — every seed_template_*.py
+# builds one of these (a 19-node graph: biome color ramp + AO + altitude /
+# slope / noise overlays) and assigns it to the terrain so the viewport's
+# material preview shows the sand / grass / rock bands the runtime shader
+# will ultimately produce. The hand-rolled-terrain operator looks it up
+# by name and reassigns it when missing — keeping the lookup central
+# avoids drift if we rename or move the builder later.
+TERRAIN_MATERIAL_NAME = "mat_terrain_main"
+
 # Path-wear defaults. Inner = 0 m → full wear on the line itself;
 # outer = 8 m → faded out beyond 8 m. Intensity is a [0, 1] multiplier
 # on the final wear value, useful for backing the racing line off
@@ -45,6 +61,15 @@ BAKE_TEMP_ATTR = "_hoverbike_bake_target"
 DEFAULT_PATH_WEAR_INNER_M = 0.0
 DEFAULT_PATH_WEAR_OUTER_M = 8.0
 DEFAULT_PATH_WEAR_INTENSITY = 1.0
+
+# Biome thresholds — world-space Z (metres). Defaults match the boundaries
+# baked into ``seed_template_island``'s GN graph: deep below -22 m (open
+# water), sandy/shallow between -22 and 0 m (submerged shelf), beach
+# between 0 and 4 m, jungle above 4 m. The runtime terrain shader maps
+# the resulting COLOR_0.A value to its four palette bands.
+DEFAULT_BIOME_DEEP_Z_M = -22.0
+DEFAULT_BIOME_SANDY_Z_M = 0.0
+DEFAULT_BIOME_BEACH_Z_M = 4.0
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -82,6 +107,33 @@ def path_wear_at_distance(
         t = (outer - distance) / (outer - inner)
         wear = t * t * (3.0 - 2.0 * t)
     return max(0.0, min(1.0, wear * max(0.0, min(1.0, intensity))))
+
+
+def biome_from_z(
+    z: float,
+    deep_z: float = DEFAULT_BIOME_DEEP_Z_M,
+    sandy_z: float = DEFAULT_BIOME_SANDY_Z_M,
+    beach_z: float = DEFAULT_BIOME_BEACH_Z_M,
+) -> float:
+    """Map world-space ``z`` to the COLOR_0.A biome value in {0, 1/3, 2/3, 1}.
+
+    Mirrors the sum-of-three-step-functions formula used by
+    ``seed_template_island``'s GN graph:
+
+        biome = ((z > deep_z) + (z > sandy_z) + (z > beach_z)) / 3
+
+    Yielding deep (0), sandy/shallow (1/3), beach (2/3), jungle (1).
+    Thresholds *must* be monotonically increasing — the caller is
+    expected to enforce that (the operator clamps in ``execute``).
+    """
+    n = 0
+    if z > deep_z:
+        n += 1
+    if z > sandy_z:
+        n += 1
+    if z > beach_z:
+        n += 1
+    return n / 3.0
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -258,6 +310,115 @@ def _bake_path_wear(
             # up the cache reference any more. Safe to swallow.
             pass
     return n_verts
+
+
+def _stamp_color_0(
+    terrain: bpy.types.Object,
+    *,
+    deep_z: float = DEFAULT_BIOME_DEEP_Z_M,
+    sandy_z: float = DEFAULT_BIOME_SANDY_Z_M,
+    beach_z: float = DEFAULT_BIOME_BEACH_Z_M,
+) -> dict:
+    """Write ``COLOR_0`` (FLOAT_COLOR, POINT) on ``terrain`` per the
+    documented terrain channel contract: R reserved (0), G AO, B path-worn,
+    A biome from world-Z.
+
+    G / B sample ``baked_ao`` / ``baked_path`` if present on the mesh, so
+    a follow-up ``Bake AO + Path Wear`` and re-stamp produces the same
+    result as the HV_Island GN graph's live re-stamping. Without those
+    attributes the defaults are G=1.0 (no occlusion), B=0.0 (pristine).
+
+    Uses ``object.matrix_world`` for the biome lookup so the thresholds
+    are interpreted in world metres regardless of the mesh's local scale
+    (ANT Landscape often emits a unit-cube mesh you scale up; the
+    HV_Island template's GN graph reads object-space Z on a scale-1
+    mesh, which collapses to the same thing when scale = 1).
+
+    Returns a summary dict with per-biome vert counts for the operator
+    report.
+    """
+    from mathutils import Vector  # local import — bake.py already loads at addon register
+
+    me = terrain.data
+    mw = terrain.matrix_world
+
+    ao_attr = me.attributes.get(BAKED_AO_ATTR)
+    path_attr = me.attributes.get(BAKED_PATH_ATTR)
+
+    if "COLOR_0" in me.color_attributes:
+        me.color_attributes.remove(me.color_attributes["COLOR_0"])
+    col = me.color_attributes.new(name="COLOR_0", type="FLOAT_COLOR", domain="POINT")
+    # Mark it active + render so solid "Vertex" viewport shading shows
+    # the stamp immediately. Without this, recreating the attribute
+    # leaves active_color_index = -1 and the viewport falls back to
+    # default object grey, hiding the operator's effect from the author.
+    idx = me.color_attributes.find("COLOR_0")
+    me.color_attributes.active_color_index = idx
+    me.color_attributes.render_color_index = idx
+
+    buckets = [0, 0, 0, 0]  # deep / sandy / beach / jungle
+    for i, v in enumerate(me.vertices):
+        wz = (mw @ Vector(v.co)).z
+        biome = biome_from_z(wz, deep_z=deep_z, sandy_z=sandy_z, beach_z=beach_z)
+        g = float(ao_attr.data[i].value) if ao_attr is not None else 1.0
+        b = float(path_attr.data[i].value) if path_attr is not None else 0.0
+        col.data[i].color = (0.0, g, b, biome)
+        # 0, 1/3, 2/3, 1 → index 0, 1, 2, 3
+        buckets[int(round(biome * 3.0))] += 1
+
+    return {
+        "vert_count": len(me.vertices),
+        "biome_buckets": {
+            "deep": buckets[0],
+            "sandy": buckets[1],
+            "beach": buckets[2],
+            "jungle": buckets[3],
+        },
+        "had_baked_ao": ao_attr is not None,
+        "had_baked_path": path_attr is not None,
+    }
+
+
+def _assign_terrain_material(terrain: bpy.types.Object) -> tuple[bool, str]:
+    """Ensure ``mat_terrain_main`` is built and assigned to ``terrain``.
+
+    Looks up the canonical material by name; if it doesn't exist in the
+    current blend (a fresh file, or one that's never had a seed_template
+    run against it), the island-palette graph from
+    ``hoverbike_addon.terrain_material`` is built fresh. The seeded
+    procedural templates use the same builder, so the look matches the
+    in-Blender preview of `template-island.blend` regardless of how the
+    terrain mesh was authored.
+
+    Without this material the viewport falls back to raw COLOR_0 in
+    solid-Vertex view (mostly green from G=AO=1) instead of the
+    biome-banded preview — so the author sees a flat green island
+    rather than sand / grass / rock.
+
+    Returns ``(assigned, message)`` for the operator's report.
+    """
+    # Lazy import — terrain_material is part of the same addon package
+    # but has no register(), so it's not in _MODULES; lazy here keeps
+    # bake.py's module-load weight low.
+    from . import terrain_material as _tm
+
+    mat = _tm.ensure_mat_terrain_main()
+    note_built = mat.name in bpy.data.materials and bpy.data.materials[mat.name].users == mat.users
+    # We can't easily distinguish "just built" from "already present" at
+    # this point — ensure_mat_terrain_main is idempotent and returns the
+    # existing one if already there. Phrase the message accordingly.
+    built_fresh = mat.users == 0  # newly created and not yet assigned
+
+    me = terrain.data
+    if any(m is mat for m in me.materials):
+        return True, f"material {TERRAIN_MATERIAL_NAME!r} already assigned"
+    if len(me.materials) == 0:
+        me.materials.append(mat)
+    else:
+        # Replace slot 0 — the convention is one terrain material per mesh.
+        me.materials[0] = mat
+    verb = "built + assigned" if built_fresh else "assigned"
+    return True, f"{verb} {TERRAIN_MATERIAL_NAME!r}"
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -478,6 +639,133 @@ class HOVERBIKE_OT_bake_path_worn(Operator):
         return {"FINISHED"}
 
 
+class HOVERBIKE_OT_apply_terrain_vertex_colors(Operator):
+    """Stamp ``COLOR_0`` on a hand-rolled terrain mesh (ANT Landscape
+    output, heightmap import, sculpted plane — anything without an
+    HV_Island-style GN graph doing the stamping for it).
+
+    Writes the documented terrain channel contract per-vertex: R=0
+    (reserved), G=baked_ao or 1.0, B=baked_path or 0.0, A=biome from
+    world-Z via the same three-threshold formula as the templates.
+    Targets the active mesh if one is selected, otherwise falls back to
+    the largest visible kind=track mesh. Tags the target ``kind="track"``
+    if missing so the export and runtime pick it up as a collidable
+    surface."""
+
+    bl_idname = "hoverbike.apply_terrain_vertex_colors"
+    bl_label = "Apply Vertex Colors"
+    bl_description = (
+        "Stamp COLOR_0 on the active terrain mesh from world-Z biome + "
+        "baked_ao + baked_path. Use this for ANT Landscape / heightmap / "
+        "sculpted meshes that don't carry an HV_Island GN graph"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    deep_z: FloatProperty(  # type: ignore[valid-type]
+        name="Deep < Z (m)",
+        description=(
+            "World-Z below this is the deep biome (COLOR_0.A = 0). "
+            "Defaults to -22 m to match seed_template_island"
+        ),
+        default=DEFAULT_BIOME_DEEP_Z_M, min=-500.0, max=500.0, precision=2,
+    )
+    sandy_z: FloatProperty(  # type: ignore[valid-type]
+        name="Sandy < Z (m)",
+        description=(
+            "World-Z between deep_z and this is the sandy/shallow biome "
+            "(COLOR_0.A = 1/3). Defaults to 0 m (waterline)"
+        ),
+        default=DEFAULT_BIOME_SANDY_Z_M, min=-500.0, max=500.0, precision=2,
+    )
+    beach_z: FloatProperty(  # type: ignore[valid-type]
+        name="Beach < Z (m)",
+        description=(
+            "World-Z between sandy_z and this is the beach biome "
+            "(COLOR_0.A = 2/3); above this is jungle (1.0). Defaults to 4 m"
+        ),
+        default=DEFAULT_BIOME_BEACH_Z_M, min=-500.0, max=500.0, precision=2,
+    )
+    tag_as_track: BoolProperty(  # type: ignore[valid-type]
+        name="Tag as kind=track",
+        description=(
+            "Add the kind=track custom property if missing, so the GLB "
+            "exporter ships the mesh as a collidable surface"
+        ),
+        default=True,
+    )
+    assign_material: BoolProperty(  # type: ignore[valid-type]
+        name="Assign mat_terrain_main",
+        description=(
+            "Also assign the canonical mat_terrain_main material if it's "
+            "in the scene. Without it, the viewport's material preview "
+            "shows raw COLOR_0 (green-dominant) instead of the biome "
+            "bands the procedural templates produce"
+        ),
+        default=True,
+    )
+
+    def execute(self, context):
+        # Prefer the active selection if it's a mesh — lets the user point
+        # the operator at a freshly-added ANT Landscape mesh that hasn't
+        # been recognised by ``_resolve_terrain`` yet (e.g. no kind tag).
+        ao = context.active_object
+        if ao is not None and ao.type == "MESH":
+            terrain = ao
+        else:
+            terrain = _resolve_terrain()
+        if terrain is None:
+            self.report({"ERROR"}, "no terrain mesh selected and no kind=track mesh in scene")
+            return {"CANCELLED"}
+
+        # Thresholds must be monotonic — silently clamp rather than refuse
+        # so the F6 Redo panel stays interactive while the user drags.
+        deep_z = float(self.deep_z)
+        sandy_z = max(float(self.sandy_z), deep_z)
+        beach_z = max(float(self.beach_z), sandy_z)
+
+        tagged_now = False
+        if self.tag_as_track and terrain.get("kind") != "track":
+            terrain["kind"] = "track"
+            tagged_now = True
+
+        _ensure_baked_attrs(terrain)
+        try:
+            summary = _stamp_color_0(
+                terrain, deep_z=deep_z, sandy_z=sandy_z, beach_z=beach_z
+            )
+        except Exception as e:  # noqa: BLE001
+            self.report({"ERROR"}, f"COLOR_0 stamp failed: {e}")
+            return {"CANCELLED"}
+
+        material_note = ""
+        if self.assign_material:
+            try:
+                _assigned, msg = _assign_terrain_material(terrain)
+                material_note = f" [{msg}]"
+            except Exception as e:  # noqa: BLE001
+                # Material build failure is non-fatal — the COLOR_0 stamp
+                # itself succeeded so the GLB export will carry the right
+                # data. WARN so the author can fix it (or assign a material
+                # manually) without losing the bake work.
+                material_note = f" [material build failed: {e}]"
+                self.report({"WARNING"}, f"terrain material build failed: {e}")
+
+        b = summary["biome_buckets"]
+        bake_note = (
+            "baked_ao + baked_path"
+            if summary["had_baked_ao"] and summary["had_baked_path"]
+            else "defaults (run Bake AO + Path Wear for real values)"
+        )
+        tag_note = " [tagged kind=track]" if tagged_now else ""
+        self.report(
+            {"INFO"},
+            f"Stamped COLOR_0 on {terrain.name!r} over {summary['vert_count']} verts "
+            f"(deep {b['deep']} / sandy {b['sandy']} / beach {b['beach']} / "
+            f"jungle {b['jungle']}, G+B from {bake_note}){tag_note}{material_note}",
+        )
+        return {"FINISHED"}
+
+
 # ────────────────────────────────────────────────────────────────────
 # Self-test — exercised by `pnpm test:blender` and the python -m run
 # at the bottom of the file. Lives next to the math it tests so a
@@ -524,6 +812,20 @@ def _self_test() -> None:
         assert w <= last + 1e-9, f"wear should be monotone decreasing, {w} > {last}"
         last = w
 
+    # biome_from_z — defaults (-22 / 0 / 4) match the template thresholds.
+    assert biome_from_z(-100.0) == 0.0,                "deep abyss → 0"
+    assert biome_from_z(-22.0) == 0.0,                 "= deep_z → still 0 (strict >)"
+    assert abs(biome_from_z(-21.0) - 1 / 3) < 1e-9,    "above deep → 1/3"
+    assert abs(biome_from_z(-0.5) - 1 / 3) < 1e-9,     "shallow → 1/3"
+    assert abs(biome_from_z(0.5) - 2 / 3) < 1e-9,      "beach → 2/3"
+    assert abs(biome_from_z(3.5) - 2 / 3) < 1e-9,      "high beach → 2/3"
+    assert biome_from_z(4.5) == 1.0,                   "jungle → 1"
+    assert biome_from_z(100.0) == 1.0,                 "alpine → still 1"
+    # Custom thresholds — verify the per-band lookups land where expected.
+    assert biome_from_z(5.0, deep_z=0.0, sandy_z=10.0, beach_z=20.0) == 1 / 3
+    assert biome_from_z(15.0, deep_z=0.0, sandy_z=10.0, beach_z=20.0) == 2 / 3
+    assert biome_from_z(25.0, deep_z=0.0, sandy_z=10.0, beach_z=20.0) == 1.0
+
     print("ALL PYTHON CHECKS PASS")
 
 
@@ -534,6 +836,7 @@ def _self_test() -> None:
 _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_bake_terrain_attrs,
     HOVERBIKE_OT_bake_path_worn,
+    HOVERBIKE_OT_apply_terrain_vertex_colors,
 )
 
 
