@@ -305,9 +305,36 @@ def _hoverbike_load_post(*_args):
     if reloaded:
         print(f"[hoverbike] auto-reloaded {len(reloaded)} library file(s): {', '.join(reloaded)}")
 
-    # 2. JSON sync — track .blends only.
+    # 2. Track-mode-only steps. Bail early on bike .blends and the
+    #    asset libraries — they don't carry terrain material or per-
+    #    track JSON.
     if detect_mode(blend) != "track":
         return
+
+    # 2a. Terrain material upgrade. Track .blends saved before
+    #     ``TERRAIN_MATERIAL_VERSION`` was bumped carry stale
+    #     ``mat_terrain_main`` graphs (e.g. v0 has no racing-line wear
+    #     visualisation; v2 added the COLOR_0.B → dirt-tint block).
+    #     ``ensure_mat_terrain_main`` is the canonical upgrade entry
+    #     point; calling it here on every open guarantees a freshly-
+    #     opened .blend always shows the current preview without
+    #     forcing the author to run an operator manually.
+    #
+    #     Guarded on "material already exists" so opening a .blend
+    #     that never had terrain coloration set up (a hand-authored
+    #     scene with no terrain mesh, say) doesn't suddenly grow a
+    #     ``mat_terrain_main`` block. ``ensure_mat_terrain_main`` itself
+    #     is idempotent on an up-to-date material — its own version
+    #     check returns early if nothing needs rebuilding.
+    if "mat_terrain_main" in bpy.data.materials:
+        try:
+            from .terrain_material import ensure_mat_terrain_main
+
+            ensure_mat_terrain_main()
+        except Exception as e:  # noqa: BLE001 — informational only
+            print(f"[hoverbike] terrain material auto-upgrade skipped: {e}")
+
+    # 2b. JSON sync — track .blends only.
     repo = find_repo_root(blend)
     if not repo:
         return
