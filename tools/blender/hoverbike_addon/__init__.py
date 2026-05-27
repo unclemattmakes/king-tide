@@ -74,6 +74,7 @@ from . import (
     road,
     road_conform_gn,
     scatter,
+    scatter_stroke,
     sky_preset,
     spline,
     terrain,
@@ -154,6 +155,9 @@ _MODULES = (
     # HOVERBIKE_PT_panel — register after panel for the same reason.
     # Order vs prop_bake is arbitrary; keep panel-children grouped here.
     biome_palette,
+    # scatter_stroke's HOVERBIKE_PT_track_scatter_stroke is another
+    # panel child — same registration constraint, register after panel.
+    scatter_stroke,
     # menu registers absolute-last — its submenu/pie classes call into
     # operators registered by every module above, and its
     # VIEW3D_MT_editor_menus append needs to land after Blender's stock
