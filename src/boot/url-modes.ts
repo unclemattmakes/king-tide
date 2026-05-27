@@ -32,6 +32,7 @@ const GAME_SIGNALS = [
   'replay',
   'determinism',
   'calibrate',
+  'rideredit',
   'tutorial',
 ] as const
 
@@ -94,6 +95,17 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     setLoadingMessage('Loading calibration scene…')
     const { bootCalibrationMode } = await import('./calibration-mode')
     await bootCalibrationMode(appEl)
+    return 'handled'
+  }
+
+  // Rider editor: `?rideredit=1`. One bike + rider, orbit camera, panels
+  // for per-bone geometric primitive + colour and the seated pose. Loads
+  // the existing rider, lets you redesign it, and saves / exports the
+  // design. See src/boot/rider-editor-mode.ts.
+  if (earlyParams.get('rideredit') !== null) {
+    setLoadingMessage('Loading rider editor…')
+    const { bootRiderEditorMode } = await import('./rider-editor-mode')
+    await bootRiderEditorMode(appEl)
     return 'handled'
   }
 

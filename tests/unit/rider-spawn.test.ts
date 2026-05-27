@@ -14,7 +14,7 @@ import { RIDER_BONE_NAMES, RiderBoneTag, RiderStore } from '@/game/components/ri
 import { createBike } from '@/game/entities/bike'
 import { createRider } from '@/game/entities/rider'
 import { riderCrashSystem } from '@/game/systems/rider-crash'
-import { resetRiderForBike, riderPoseSystem } from '@/game/systems/rider-pose'
+import { RIDER_POSE_TUNING, resetRiderForBike, riderPoseSystem } from '@/game/systems/rider-pose'
 import { syncFromPhysics } from '@/game/systems/sync-from-physics'
 
 async function makeWorlds() {
@@ -103,11 +103,15 @@ describe('createRider', () => {
 
     const bikeT = TransformStore.must(bikeEid)
     const pelvisT = TransformStore.must(pelvisEid)
-    // Seat is ~0.6m above bike center. Allow slop for hover-spring bounce.
-    expect(Math.abs(pelvisT.x - bikeT.x)).toBeLessThan(0.4)
-    expect(Math.abs(pelvisT.z - bikeT.z)).toBeLessThan(0.4)
+    // Pelvis should track the seat anchor (bike-local). Compare against the
+    // live seat offset rather than a magic number so this stays correct as
+    // the default seated pose is re-tuned. Slop covers hover-spring bounce +
+    // any small bike pitch over the 30 ticks.
+    const seat = RIDER_POSE_TUNING.seatLocal
+    expect(Math.abs(pelvisT.x - bikeT.x - seat.x)).toBeLessThan(0.4)
+    expect(Math.abs(pelvisT.z - bikeT.z - seat.z)).toBeLessThan(0.4)
     expect(pelvisT.y - bikeT.y).toBeGreaterThan(0.2)
-    expect(pelvisT.y - bikeT.y).toBeLessThan(1.5)
+    expect(pelvisT.y - bikeT.y).toBeLessThan(seat.y + 0.6)
   })
 
   it('crash system launches the rider when bike Δv exceeds threshold', async () => {

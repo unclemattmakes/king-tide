@@ -127,7 +127,13 @@ function vnorm(v: Vec3): Vec3 {
 export const RIDER_POSE_TUNING = {
   /** Seat anchor in BIKE-LOCAL space. The pelvis sits here every tick;
    *  moving it back/forward/up/down translates the whole rider. */
-  seatLocal: { x: 0, y: 0.6, z: -0.05 } as Vec3,
+  seatLocal: { x: 0, y: 0.94, z: -0.4 } as Vec3,
+
+  /** Seat ROTATION (degrees) applied to the pelvis in bike-local space, on
+   *  top of the bike's own orientation. Lets the whole rider tilt / twist /
+   *  bank relative to the seat without moving the anchor. pitch=X, yaw=Y,
+   *  roll=Z. */
+  seatRot: { pitch: 0, yaw: 0, roll: 0 },
 
   /** Bounce: critically-damped spring driven by vertical acceleration.
    *  Defaults pushed for visibility — earlier values were so subtle the
@@ -186,6 +192,15 @@ export const RIDER_POSE_TUNING = {
   handIKStrength: 1,
   footIKStrength: 1,
 
+  /** IK pole vectors (bike-local) — the "preferred bend direction" for the
+   *  elbow / knee. The 2-bone solver projects this onto the plane perp to
+   *  shoulder→hand (hip→foot) and bends toward it, so the Z (forward/back)
+   *  sign decides which way the joint folds. `armPole.z` is NEGATIVE so the
+   *  elbows fold back-and-down toward the rider (positive Z folded them
+   *  forward — the "elbows look backwards" report). */
+  armPole: { x: 0, y: -1, z: -0.2 } as Vec3,
+  legPole: { x: 0, y: -0.3, z: 1 } as Vec3,
+
   /** Rest-pose joint angles (degrees). Read live each tick — the
    *  calibration scene's slider panel mutates these directly so the rider
    *  re-poses without a respawn.
@@ -197,11 +212,10 @@ export const RIDER_POSE_TUNING = {
   restAngles: {
     /** Lower spine forward pitch (degrees). Adds with spine_upper for the
      *  total motocross "attack" lean. */
-    spine_lower: 11,
-    spine_upper: 11,
-    /** Neck pitch — negative tilts the head back so it stays level when
-     *  the chest is leaning forward. */
-    neck: -22,
+    spine_lower: 32,
+    spine_upper: 30,
+    /** Neck pitch — relative to the (forward-leaning) chest. */
+    neck: 11,
     /** Shoulder forward pitch (shared L/R).
      *
      *  SIGN CONVENTION (matters): upper_arm attaches to chest via its +Y
@@ -210,25 +224,24 @@ export const RIDER_POSE_TUNING = {
      *  hand) BACKWARD. To swing the arm forward to the handlebars — what
      *  the IK target is derived from — we need a NEGATIVE pitch. This
      *  matches the convention used by `hip_pitch`. */
-    shoulder_pitch: -55,
+    shoulder_pitch: -120,
     /** Shoulder twist around the bone's long axis. Mirrored on the right. */
-    shoulder_yaw: 0,
+    shoulder_yaw: -10,
     /** Shoulder outward roll. Left side gets +roll, right gets -roll. */
-    shoulder_roll: 12,
-    /** Elbow bend. Positive so the forearm continues forward-and-down
-     *  rather than folding back toward the shoulder. */
-    elbow: 35,
+    shoulder_roll: 9,
+    /** Elbow bend. */
+    elbow: 30,
     /** Hip pitch — negative because of the +Y-end attachment convention
      *  (positive pitch sends the knee backward into the bike). */
-    hip_pitch: -80,
+    hip_pitch: 5,
     /** Hip yaw (twist around leg's long axis). Mirrored. */
-    hip_yaw: 0,
+    hip_yaw: -46,
     /** Hip roll — splays the leg outward. Mirrored L/R. */
-    hip_roll: 0,
+    hip_roll: 7,
     /** Knee bend relative to upper leg. Pairs with hip so the lower leg
      *  drops vertical to the footpeg. Mostly cosmetic because foot IK
      *  overrides. */
-    knee: 80,
+    knee: 63,
   },
 }
 
@@ -544,13 +557,18 @@ function walkChain(
   const poses = new Map<RiderBoneName, WorldPose>()
   const seat = RIDER_POSE_TUNING.seatLocal
   const pelvisOffset = rotByQuat(frameRot, seat.x, seat.y, seat.z)
+  // Seat rotation — tilt / twist / bank the whole rider relative to the
+  // bike's orientation. Composed onto the frame so the rest of the chain
+  // (and the IK targets derived from it) rotate with the pelvis.
+  const sr = RIDER_POSE_TUNING.seatRot
+  const pelvisRot = quatMul(frameRot, quatPYR(sr.pitch, sr.yaw, sr.roll))
   poses.set('pelvis', {
     pos: {
       x: frameOrigin.x + pelvisOffset.x,
       y: frameOrigin.y + pelvisOffset.y,
       z: frameOrigin.z + pelvisOffset.z,
     },
-    rot: frameRot,
+    rot: pelvisRot,
   })
   for (const j of rider.joints) {
     const parent = poses.get(j.parentName)
@@ -721,18 +739,13 @@ export function riderPoseSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): 
     const footTargetL = toWorld(footLocalL)
     const footTargetR = toWorld(footLocalR)
 
-    // Pole hints — "preferred elbow / knee direction" in bike-local space,
-    // rotated into world by bike orientation. The IK projects this onto
-    // the plane perpendicular to shoulder→hand (or hip→foot) and uses it
-    // to pick which side the bend points to.
-    //
-    // For motocross sitting: elbows hang DOWN (slightly forward) below
-    // the shoulder→grip line, and knees jut FORWARD ahead of the
-    // hip→peg line. Earlier pole values pointed BACK on both, which
-    // bent the elbow + knee the wrong way — matching the "arms and
-    // legs look backwards" feedback.
-    const armPoleLocal: Vec3 = { x: 0, y: -1, z: 0.2 }
-    const legPoleLocal: Vec3 = { x: 0, y: -0.3, z: 1 }
+    // Pole hints — "preferred elbow / knee bend direction" in bike-local
+    // space (tunable via the rider editor), rotated into world by bike
+    // orientation. The IK projects this onto the plane perpendicular to
+    // shoulder→hand (or hip→foot) and bends toward it. See the
+    // `armPole` / `legPole` notes on RIDER_POSE_TUNING for the sign.
+    const armPoleLocal = RIDER_POSE_TUNING.armPole
+    const legPoleLocal = RIDER_POSE_TUNING.legPole
     const armPole = rotByQuat(bikeRot, armPoleLocal.x, armPoleLocal.y, armPoleLocal.z)
     const legPole = rotByQuat(bikeRot, legPoleLocal.x, legPoleLocal.y, legPoleLocal.z)
 
