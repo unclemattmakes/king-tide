@@ -1,3 +1,179 @@
+> **Last updated: 2026-05-28** — Drift, tricks, hover polish, Electron
+> Steam port, making-of microsite.
+>
+> **Drift — Mario-Kart-style mini-turbo lands.** Hold Z (left) or C
+> (right) while steering into the corner; release fires a tiered boost
+> (blue MT → orange SMT → purple UMT). Tier thresholds 0.6 / 1.4 / 2.4 s
+> and boost multipliers 1.45× / 1.75× / 1.95× live in
+> [src/game/systems/drift-tiers.ts](../src/game/systems/drift-tiers.ts);
+> the drift system itself in [drift.ts](../src/game/systems/drift.ts)
+> overloads the existing trick buttons (small hop on a flat-ground press
+> *is* the drift initiator's tell, MK convention). HUD tier badge
+> ([drift-tier-hud.ts](../src/engine/render/drift-tier-hud.ts)),
+> color-shifted sparks at the outside-rear corner, skid-loop +
+> tier-bell release whoosh (`audio.driftSkid` / `driftBoost`), rider
+> banks into the slide, camera rolls 5/7/9° by tier. Inside-drift
+> archetype (Sparrow, Stunt — `driftStyle: 'inward'`) gets a 250 ms
+> initial-cut spike then a wider tail; outside-drift (Cruiser, Racer,
+> Scout) hugs the apex with a stable flat bias. AI hits SMT on Standard
+> and UMT on Hard from `decideAIDrift`; the tutorial picks up a DRIFT
+> beat between WAVE PUMP and ANTI-GRAV. Settings → Gameplay → "Drift
+> assist" (Full / Subtle / Off) gates sparks + audio + HUD badge +
+> camera roll. **Drift Practice Range** dev track (`?track=drift-test`,
+> surfaced in the Dev Cup picker) exercises every charge tier + grip
+> surface on one loop. Full deep dive in
+> [docs/drift-deep-dive.md](./drift-deep-dive.md).
+>
+> **Surface-type registry — per-collider lateral grip.** New
+> [src/engine/sim/surface-types.ts](../src/engine/sim/surface-types.ts)
+> tags each static collider with a `SurfaceType` (default / asphalt /
+> metal 1.25× / sand 0.70× / ice 0.35× / water). The lateral-grip
+> multiplier applies to BOTH normal driving and drift, so an ice patch
+> feels coherent whether or not you're sliding. `default` keeps every
+> untagged collider byte-identical to pre-registry behaviour — only
+> explicitly-tagged patches change feel. Authoring: JSON `Prop.surface`
+> for prop colliders, GLB `surface` userData extra for track meshes.
+> The Drift Practice Range demonstrates it (ICE on the west SMT sweep,
+> SAND on the south ramp straight). Blender authoring UI is the
+> remaining follow-up — runtime + sync test already in place.
+>
+> **Tricks — geometric pop-based window.** Replaces the old
+> vertical-velocity gate.
+> [src/game/systems/trick-hop.ts](../src/game/systems/trick-hop.ts) now
+> opens the window the moment the bike leaves its planted stance — nose
+> lifting off a lip / ramp crest while the base is still down, a clean
+> takeoff, or riding up/down a meaningful slope at speed (ramp,
+> sandbar, ledge, embankment — both directions). The per-end contact
+> flags (`HoverState.noseGrounded` / `baseGrounded`, chatter-debounced
+> by the bow/stern hover probes) make the pop a first-class signal so
+> lips, humps, and crests register long before the center probe would.
+> Speed ≥ `MIN_SPEED_FRAC` × top-speed and throttle ≥ `MIN_THROTTLE`
+> gates still reject coasting tricks. Pre-press buffer (200 ms) holds a
+> trick press mid-climb so a button mashed *before* the bike's nose
+> pops still fires when the window opens.
+>
+> **Tuck — snowboarder's nose-down sweet spot, no dedicated button.**
+> Folded into the existing nose-down lean (Q / push stick forward, same
+> `intent.pitch < 0` the dive-aid reads). Curve in
+> [src/game/systems/tuck-curve.ts](../src/game/systems/tuck-curve.ts):
+> ramps 0→1 to `TUCK_SWEET_SPOT = 0.8`, then winds back through zero to
+> `TUCK_SCRAPE_FLOOR = -0.5` at full deflection where the dive-aid's
+> ride-height drop already has the belly skimming. Signed factor
+> interpolates `tuckSpeedBoost` (cap ×1.15) and `tuckDragMul` (drag
+> ×0.5) off 1.0 — a feathered lean down a slope/wave face is fastest,
+> burying the nose over-tucks (cap below base + drag above base + belly
+> scrape). Grounded / over-water only. New `tuckStream` cyan slipstream
+> VFX pool scales with sweet-spot proximity; new
+> [`#hud-tuck`](../src/engine/render/tuck-hud.ts) accuracy meter shows
+> bar fill + sweet-spot notch + status word (`LEAN IN` / `SWEET!` /
+> `EASE OFF` / `SCRAPING`) + live cap-bonus %. Both gated by Settings →
+> Gameplay → "Tuck slipstream VFX" + "Tuck meter".
+>
+> **Hover polish — dive kick, release kick, yaw-coupling fix, climb
+> assist.** The pitch-down lean is now rate-limited and follows a
+> dive-then-level curve so it stops flipping the bike on water; on
+> release a `dive-kick` recovers the nose with a brief boost on the
+> bow spring. Stern spring's boost-on-rise mirrors the bow curve so
+> launches feel symmetric. The bow spring's stiffness curve is soft at
+> the top and stiff past 1.0 at the bottom (so a clean wave rebound
+> springs back but heavy landings absorb). Air branch reverts to pure
+> free physics — no PD in air. The latest **yaw-coupling fix**
+> (commit 20a5547) eliminates a sneaky term that pulled the nose along
+> lateral slopes, so cornering across a bank no longer drags the bike
+> sideways. Climb-assist is now gated on forward throttle so coasting
+> bikes don't ride uphill.
+>
+> **Electron desktop port — replaces Tauri.** The Steam Deck / desktop
+> wrapper is now Electron (`electron/main.cjs`) and ships its own
+> Chromium so the game gets real WebGPU inside the Steam Linux Runtime
+> container instead of the WebKitGTK WebGL2 fallback the Tauri shell
+> was stuck on. Build path: `pnpm build:deck` (Linux tree),
+> `pnpm build:windows` (NSIS installer + tree),
+> `pnpm electron:run` (quick local). Steam-Deck-specific runtime
+> patches: launch wrapper [`electron/hoverbike-launch.sh`](../electron/hoverbike-launch.sh)
+> survives the Steam Linux Runtime, `--no-zygote` clears the sniper
+> namespace crash, `--enable-unsafe-webgpu` + `--use-angle=vulkan`
+> routing gated to Linux only (Windows-on-Proton black-screens with
+> the ANGLE/Vulkan flag, Linux Wayland needs the Vulkan-through-ANGLE
+> path). Linux Steam depot dropped — Windows depot only, Proton plays
+> the Windows build on Deck (simpler than maintaining two depots).
+> [docs/desktop-builds.md](./desktop-builds.md) +
+> [docs/steam-deck.md](./steam-deck.md) document the full path.
+>
+> **Making-of microsite.** Six illustrated chapters with playable
+> Three.js demos that import the *real* sim modules so they can't drift
+> from shipped code:
+> [making-of/wave-field/](../making-of/wave-field/),
+> [buoyancy/](../making-of/buoyancy/),
+> [feel/](../making-of/feel/) (tuck curve),
+> [drift/](../making-of/drift/) (Mario-Kart-tier thresholds),
+> [sim-render/](../making-of/sim-render/) (two-clocks interpolation),
+> [steam/](../making-of/steam/) (Tauri → Electron port + live
+> WebGPU/WebGL2 probe). Ships at `/making-of/` from the same Vite
+> multi-page build; linked from the main menu (PICK YOUR FORMAT →
+> **MAKING OF**). Tuck + drift demos drove two pure-leaf extractions
+> ([tuck-curve.ts](../src/game/systems/tuck-curve.ts),
+> [drift-tiers.ts](../src/game/systems/drift-tiers.ts)) re-exported
+> from their systems so existing call sites + unit tests are
+> unchanged.
+>
+> **Perf HUD — render backend + GPU driver + Deck-profile state.**
+> [src/engine/render/perf-hud.ts](../src/engine/render/perf-hud.ts)'s
+> static-diagnostics block now surfaces the live render backend
+> (WebGPU / WebGL2), the GPU adapter / driver string, and whether the
+> Steam Deck detection fired + which signals triggered it. Toggled by
+> `?perf=1` or Backquote.
+>
+> **Water LOD — center-mesh doubling + cross-fade.** A
+> [water LOD test track](../public/tracks/water-test.json) shipped
+> alongside two material fixes: the center water mesh is now doubled
+> (inner detail + outer LOD tile), cross-fades into the outer ring
+> with a Gerstner-aware skirt (the skirt rides the wave field instead
+> of being a flat ring at z=0), and the outer + skirt now sample a
+> shared planar-reflection RT (no more two RTs fighting). Bonus
+> material fixes: reflection contribution fades to zero past 500 m,
+> Fresnel sky tint picked up at grazing angles, haze caps reconciled
+> with the fresnel coefficient so the horizon doesn't double-count.
+>
+> **Rider editor.** `?rideredit=1` opens a turntable scene where each
+> rider bone can be reshaped (capsule / box / sphere / cylinder / cone),
+> recoloured, and the seated pose adjusted (per-joint angles + seat
+> rotation). Live preview, Load / Save / Export, persistence in
+> localStorage. The shipped defaults read from
+> [src/engine/render/rider-appearance.ts](../src/engine/render/rider-appearance.ts);
+> [rider-pose.ts](../src/game/systems/rider-pose.ts) reads the same
+> `RIDER_POSE_TUNING` object the editor writes, so an in-race pose
+> change is one reload away.
+>
+> **WaveRider props.** New kinematic-position floating prop type
+> ([src/game/entities/wave-rider.ts](../src/game/entities/wave-rider.ts),
+> system in [src/game/systems/wave-rider.ts](../src/game/systems/wave-rider.ts))
+> for buoys + logs that ride the wave surface but bikes can't push.
+> Authored via track JSON; `?waveriders=1` scene
+> ([src/boot/wave-rider-mode.ts](../src/boot/wave-rider-mode.ts))
+> is a validation harness with a live tuner UI.
+>
+> **Input navigability convention — PR #200, locked.** Closes a
+> recurring nav-gap class: post-race + cup-results + Settings-over-menu
+> + Rebind-over-Settings + MP lobby all reachable on controller and
+> touch, not just mouse. New
+> [`isAnyOverlayShown()`](../src/engine/input/menu-gamepad.ts) helper
+> + parking convention pin in
+> [v1-work-breakdown.md § Convention — input navigability](./v1-work-breakdown.md#convention--input-navigability)
+> so future overlays can't reopen the regression.
+>
+> **Blender scatter — biome palettes + scatter strokes.** Proposal A/B
+> shipped per-zone biome-palette scatter (`tools/blender/hoverbike_addon/scatter.py`,
+> `biome_palette.py`) — an Empty parents a `HV_Scatter` GN mesh that
+> reads a Source Collection (palms / rocks / urban kit), emitted at
+> export as `EXT_mesh_gpu_instancing`. Proposal C added
+> [scatter strokes](../tools/blender/hoverbike_addon/scatter_stroke.py) —
+> a curve bounds a per-prop scatter line composed additively on top of
+> the palette zones. Material follow-ups: `mat_terrain_main` is now
+> version-stamped so legacy .blends auto-upgrade on open
+> (`auto-upgrade mat_terrain_main on .blend open`), and the addon ships
+> vertex-color + material ops for hand-rolled terrain authoring.
+>
 > **Last updated: 2026-05-21** — Phase γ kicks off
 > [`docs/level-visual-quality-research.md`](./level-visual-quality-research.md):
 > four biome prop kits land alongside throwaway test scatter on
@@ -95,12 +271,36 @@
 > 7 bike-variants).
 >
 > Recent landed work (one-liners — `git log` carries the full story):
-> Blender addon UX rework (top-bar menu + selection-driven N-panel +
-> pie + island-terrain spawn + sea-level decoupled from water_volume),
-> runtime lava-river shader, swinging-landmark kinematic colliders,
-> Phase E Sprint 3 (Drowned Cup — Aqualand, Angkor Drowned, Liberty
-> Drowned; v1 lineup complete), Phase D Sprint 2 polish, Steam Deck
-> profile wiring + Electron desktop wrapper, Polish-QA kickoff (Perf HUD +
+> hover yaw-coupling fix (no nose pull along lateral slopes),
+> Blender scatter through `EXT_mesh_gpu_instancing` (scatter shows
+> palms not just empties), rider editor (primitives + colours + seated
+> pose), `mat_terrain_main` auto-upgrade on .blend open, scatter
+> strokes (Proposal C — curve-bounded scatter), biome-palette scatter
+> (Proposal A + B), vertex-color + material ops for hand-rolled
+> terrain, path-wear bake fixes (Z-up + sparse-sampling +
+> narrow-defaults), Steam Linux Runtime survival kit (`--no-zygote`,
+> Vulkan/ANGLE flags gated to Linux, libwayland strip), Linux Steam
+> depot dropped (Windows-only depot, Proton handles the Deck), drift
+> mini-turbo (MK-style mini-turbo with MT/SMT/UMT tiers + inside-drift
+> archetypes + colored sparks + skid audio + HUD tier badge + AI drift
+> + DRIFT tutorial beat + Drift Practice Range), surface-type
+> registry (per-collider lateral grip — ice / sand / metal / water /
+> default), tuck sweet-spot (snowboarder lean folded into nose-down
+> pitch — meter + slipstream VFX), tricks (geometric pop-based window
+> off lips / ramps / ledges / embankments), hover dive/release-kick
+> + bow/stern spring curves + air-PD revert, water LOD + cross-fade
+> + skirt-on-waves + reflection fixes, Electron desktop wrapper
+> (replaced Tauri — real WebGPU in Steam Linux Runtime), perf-HUD
+> render-backend + GPU-driver + Deck-profile diagnostics, six-chapter
+> making-of microsite (real-sim-importing demos), input-navigability
+> convention (post-race + stacked overlays controller/touch-navigable,
+> PR #200), Phase γ biome prop kits (19 prop archetypes across urban /
+> industrial / volcanic / jungle), Blender addon UX rework (top-bar
+> menu + selection-driven N-panel + pie + island-terrain spawn +
+> sea-level decoupled from water_volume), runtime lava-river shader,
+> swinging-landmark kinematic colliders, Phase E Sprint 3 (Drowned
+> Cup — Aqualand, Angkor Drowned, Liberty Drowned; v1 lineup
+> complete), Phase D Sprint 2 polish, Polish-QA kickoff (Perf HUD +
 > Accessibility tab + cross-browser Playwright projects), Phase D
 > Sprint 2 (Open Sea + Continental Cups), v1 asset-pipeline foundation
 > + Reef Cup, Multiplayer convention row closed, wave-line shimmer,
@@ -115,6 +315,16 @@ This doc captures the build's current state, controls, known issues, and next st
 ## What works today
 
 - **Making-of site** ([making-of/](../making-of/)). Six illustrated chapters with playable Three.js demos that import the *real* sim so they can't drift from shipped code: wave field, buoyancy (the 4-probe footprint), feel tuning (the tuck sweet-spot curve), the drift mini-turbo tiers, the sim/render split (a two-clocks interpolation demo), and the Tauri→Electron Steam port (a live WebGPU/WebGL2 capability probe). Ships at `/making-of/` from the same Vite multi-page build and is linked from the main menu (PICK YOUR FORMAT → **MAKING OF**). The tuck + drift demos drove two pure-leaf extractions ([src/game/systems/tuck-curve.ts](../src/game/systems/tuck-curve.ts), [src/game/systems/drift-tiers.ts](../src/game/systems/drift-tiers.ts)) re-exported from their systems so existing call sites and unit tests are unchanged.
+- **Drift — Mario-Kart-style mini-turbo with three tiers + bike archetypes + AI + tutorial.** Hold Z (or LB) + steer left = drift left; hold C (or RB) + steer right = drift right. Release after a charged hold to fire the tier 1/2/3 mini-turbo boost (blue MT / orange SMT / purple UMT). The system overloads the existing trick buttons — a flat-ground press still fires a small hop (MK's drift initiator tell), drift only commits when the steer is committed past `STEER_COMMIT_THRESHOLD = 0.1` in the matching direction. Charge thresholds in [src/game/systems/drift-tiers.ts](../src/game/systems/drift-tiers.ts) are 0.6 s / 1.4 s / 2.4 s; boost multipliers 1.45× / 1.75× / 1.95× over `BOOST_DEFAULT_MUL`; durations 1.0 s / 1.6 s / 2.3 s. The boost fires the same one-shot `BoostEffect` boost pads use so it stacks multiplicatively with the wave-pump boost meter (chain a trick → drift for the speedrun reward). During drift: lateral drag drops to 35% of baseline (visible slide), forward thrust unchanged, yaw replaces the base steer torque with a speed-tapered auto-turn-in bias (`DRIFT_YAW_BIAS_FRAC = 0.45`) + full-authority counter-steer (`DRIFT_STEER_FRAC = 0.65`) so steering INTO the drift tightens the line and counter-steering OPENS it (no fixed 180° spiral). The low-speed bias taper (`DRIFT_YAW_SPEED_REF = 8 m/s`) kills the auto-rotate below the floor so a bleed-out drift can't spin out. Inside-drift archetypes (`BikeStatsData.driftStyle: 'inward'` — Sparrow, Stunt) get a 250 ms initial-cut spike (`INWARD_INITIAL_BIAS_MUL = 1.2`) then a wider tail (`INWARD_TAIL_BIAS_MUL = 0.8`) — sport-bike feel against the outside-drift default (Cruiser, Racer, Scout). Cancel conditions: button released, ungrounded > 300 ms, or brake > 0.5. Anti-snake: 0.6 s minimum hold before charge begins, 0.25 s release cooldown. AI activates drift on sharp upcoming corners via [decideAIDrift](../src/game/systems/drift.ts) — Casual disabled, Standard caps at SMT on ≥ 0.033 1/m curvature, Hard reaches UMT on ≥ 0.020 1/m. The default tutorial script grows a **DRIFT** beat between WAVE PUMP and ANTI-GRAV (clears on the first charged release, 25 s escape hatch). HUD tier badge ([src/engine/render/drift-tier-hud.ts](../src/engine/render/drift-tier-hud.ts)) sits next to the boost meter, color + label swapping MT → SMT → UMT with a tier-up pulse on each upgrade. Three layered drift-spark pools at the outside-rear corner (blue MT → orange SMT → purple UMT, stacked when a higher tier is live). Skid-audio loop (`audio.driftSkid`, band-passed noise at 2.6 kHz scaling with speed) + per-tier release whoosh (`audio.driftBoost`, bell pitch A5 / C#6 / E6). Rider banks 13°→31° into the drift (`driftLeanTarget` in [rider-pose.ts](../src/game/systems/rider-pose.ts)). Camera rolls 5° / 7° / 9° by tier. Settings → Gameplay → **"Drift assist"** (Full / Subtle / Off) gates sparks + audio + HUD + camera roll; the boost itself fires regardless so a frame-dropped whoosh never costs you the mini-turbo. **Drift Practice Range** dev test track ([public/tracks/drift-test.json](../public/tracks/drift-test.json), `?track=drift-test`, surfaced in the Dev Cup picker) walks every charge tier through symmetric corners + a boost-pad merge + ICE/SAND patches that demonstrate the surface registry. Full design + tuning rationale in [docs/drift-deep-dive.md](./drift-deep-dive.md); pure-helper extraction in [drift-tiers.ts](../src/game/systems/drift-tiers.ts) is what the making-of microsite's Drift chapter imports.
+- **Surface-type registry — per-collider lateral grip.** Each static collider can carry a `SurfaceType` (`default` / `asphalt` / `metal` / `sand` / `ice` / `water`) keyed in `engine/sim/surface-types.ts`'s `SurfaceRegistry`. The `lateralGripMul` from `SURFACE_PROFILES` scales the bike's lateral drag in BOTH normal driving and drift, so an ice patch feels coherent whether or not you're sliding (the alternative — drift-only grip change — would have ice feel grippy when you're trying to hold a line and slippery the instant you press drift, a "treacherous when committed" feel that doesn't match real-world expectations). Profile values: ice 0.35× (very slick — long, loose drifts), sand 0.70× (washes out — wide, hard to hold), default/asphalt 1.00 (baseline), metal 1.25× (clingy — tight, snappy drifts), water 1.00 (neutral — water feel stays owned by the `isWater` branch in `hover.ts`). **Design guard:** `default` is byte-identical to pre-registry behaviour, so every existing track (none currently tag surfaces) reads the same. Authoring: JSON `Prop.surface` field for prop colliders (props.ts tags at creation), GLB track meshes pick up an optional `surface` userData extra (glb-track.ts validates against the enum, unknown values silently ignored). The hover center probe reads `hit.collider.handle` each tick, looks up the type, and writes `HoverState.surfaceType`. The Drift Practice Range demonstrates: an ICE patch on the west SMT sweep (extra-loose) and a SAND patch on the south ramp straight. Blender authoring UI for the GLB `surface` extra is the remaining follow-up; the runtime path is already wired. See [tests/unit/surface-types.test.ts](../tests/unit/surface-types.test.ts).
+- **Tricks — geometric pop-based trick window.** Replaces the old velocity-gate model. The trick window in [src/game/systems/trick-hop.ts](../src/game/systems/trick-hop.ts) is now armed by the bike's *pose*, not a vertical-velocity threshold: the moment the bike leaves its fully-planted stance — nose lifting off a bump / lip / ramp crest while the base is still down, a clean full takeoff, OR riding a meaningful slope at speed (a kicker up a ramp / sandbar, or a drop off a ledge / embankment, where the bike follows the surface so no pop fires on its own) — the window opens and stays open the whole airtime, closing only when the bike re-plants. Any rising-edge trick press fires once per airtime. The bow/stern hover probes' chatter-debounced per-end contact flags (`HoverState.noseGrounded` / `baseGrounded`) make the pop a first-class signal so lips and crests register before the center probe would. Eligibility still requires the launch be surface-driven (not the bike's own courtesy hop — `hopLockoutActive`) and ridden with intent (speed ≥ `MIN_SPEED_FRAC` × top-speed, throttle ≥ `MIN_THROTTLE`); flat ground naturally rejects parked / coasting tricks. A 200 ms pre-press buffer holds a button mashed *before* the bike's nose pops so the press still lands when the window actually opens. See [tests/unit/trick-hop.test.ts](../tests/unit/trick-hop.test.ts).
+- **Hover polish — dive kick, release kick, bow/stern spring curves, yaw-coupling fix, climb-assist gate.** A held nose-down lean (`intent.pitch < 0`) now follows a rate-limited dive-then-level curve in [hover.ts](../src/game/systems/hover.ts) — pitch climbs to a dive limit then settles back, so a deep tuck on water no longer flips the bike. On release, a brief `dive-kick` boost on the bow spring leads the recovery — nose pops first, body follows. Stern spring's boost-on-rise mirrors the bow curve so launches feel symmetric. Bow spring stiffness curve is soft at the top and stiff past 1.0 at the bottom, so a clean wave rebound springs back but heavy landings absorb. Air branch reverts to pure free physics (no PD) — air control is throttle + pitch only. The latest commit (`20a5547`) kills a sneaky yaw-coupling term that pulled the nose along lateral slopes, so cornering across a bank no longer drags the bike sideways. Climb-assist (the small upward force that helps a forward-throttling bike crest a ramp) is now gated on forward throttle so coasting bikes don't ride uphill on their own.
+- **Water LOD + cross-fade + Gerstner skirt** ([public/tracks/water-test.json](../public/tracks/water-test.json) is the dev fixture with markers at the LOD transitions and a colorize toggle). The center water mesh now ships in *two* halves — an inner detail mesh and an outer LOD tile — that cross-fade across their shared boundary so the seam never reads as a hard line. The far-rim skirt rides the Gerstner wave field instead of being a flat ring at z=0 (so distant horizon water has the same swell as foreground), and the haze ramp drops off so the skirt doesn't blow out at grazing angles. Material fixes shipped in the same window: outer + skirt now sample a *shared* planar-reflection RT (no more two RTs fighting); reflection contribution fades to zero past 500 m so far horizon stays clean; outer + skirt pick up the Fresnel sky tint at grazing; haze caps + Fresnel coefficient reconciled so the horizon doesn't double-count.
+- **Electron desktop wrapper (replaces Tauri).** The Steam Deck / desktop wrapper is now Electron (`electron/main.cjs`). Bundles its own Chromium so the game gets real WebGPU inside the Steam Linux Runtime container — the Tauri/WebKitGTK shell was stuck on WebGL2 fallback and didn't launch through the Steam runtime on the Deck at all. Build commands: `pnpm build:deck` (Linux tree on any Linux host or WSL), `pnpm build:windows` (NSIS installer + tree on Windows host), `pnpm electron:run` (quick local build-and-launch). Steam-Linux-Runtime survival kit: launch wrapper [`electron/hoverbike-launch.sh`](../electron/hoverbike-launch.sh) sets the right env, `--no-zygote` clears the sniper namespace crash, `--enable-unsafe-webgpu` + `--use-angle=vulkan` gated to Linux only (Windows-on-Proton black-screens with the ANGLE/Vulkan flag, but Linux Wayland needs the Vulkan-through-ANGLE path); bundled `libwayland-*` stripped from the AppImage (caused Wayland EGL abort). Linux Steam depot has been dropped — only Windows depot uploads now, Proton handles the Deck (simpler than maintaining a Linux depot in parallel). Perf HUD reports the live render backend + GPU driver string + whether the Deck profile applied. See [docs/desktop-builds.md](./desktop-builds.md) + [docs/steam-deck.md](./steam-deck.md).
+- **Perf HUD — render backend + GPU driver + Deck-profile diagnostics.** [src/engine/render/perf-hud.ts](../src/engine/render/perf-hud.ts) grew a static-diagnostics block alongside the live frame stats. New rows: render backend (WebGPU / WebGL2 — sourced from the real adapter probe), GPU adapter / driver string (Chromium-only via `WEBGL_debug_renderer_info` for WebGL2; the new `getAdapterInfo()` for WebGPU), Steam Deck profile applied (Y / N) + which detection signals fired (UA / 1280×800 viewport / Steam virtual gamepad). Useful when triaging Deck-specific issues — a glance at the HUD says "yes the Deck profile kicked in, yes you're on WebGPU, yes ANGLE/Vulkan is on the command line". Toggled via `?perf=1` URL param or Backquote keyboard shortcut.
+- **Rider editor** ([src/boot/rider-editor-mode.ts](../src/boot/rider-editor-mode.ts), `?rideredit=1`). Live turntable scene where each rider bone can be reshaped (capsule / box / sphere / cylinder / cone), recoloured, and the seated pose adjusted (per-joint angles + seat rotation). Live preview on the static bike, Load / Save / Export to JSON. Persistence in localStorage. The shipped defaults read from [src/engine/render/rider-appearance.ts](../src/engine/render/rider-appearance.ts); the in-race [src/game/systems/rider-pose.ts](../src/game/systems/rider-pose.ts) reads the same `RIDER_POSE_TUNING` object the editor writes, so a pose change is one reload away from the racing rider.
+- **WaveRider props** ([src/game/entities/wave-rider.ts](../src/game/entities/wave-rider.ts) + [system](../src/game/systems/wave-rider.ts) + [components](../src/game/components/wave-rider.ts)). Kinematic-position floating prop type for buoys (cylinder, ≈ 0.9 m tall) and logs (cylinder, ≈ 1.2 m long) that ride the wave field — bikes collide but can't push. Authored via track JSON; track meshes can carry them as floating obstacle/landmark dressing. `?waveriders=1` boot mode ([src/boot/wave-rider-mode.ts](../src/boot/wave-rider-mode.ts)) is a validation scene with a live tuner UI for the prop tuning constants.
+- **Input navigability convention** (PR #200, [§ Convention — input navigability](./v1-work-breakdown.md#convention--input-navigability)). Locks the third leg of the definition-of-done convention: every interactive surface must be operable by keyboard, controller, AND touch. New [`isAnyOverlayShown()`](../src/engine/input/menu-gamepad.ts) helper + parking convention so a base-layer poller parks while a higher overlay is up (was the bug class that left controller nav silently broken on Settings-over-menu, Rebind-over-Settings, and the multiplayer lobby). The post-race + cup-results screens grew a topmost-container poller; the in-race touch UI gets `body.touch-ui-hidden` on finish so its joystick doesn't eat taps meant for the result buttons. 11-case regression-pin suite in [tests/unit/menu-gamepad.test.ts](../tests/unit/menu-gamepad.test.ts).
 - **Tuck — the snowboarder's downhill duck, folded into the nose-down lean (no dedicated button).** The bike tucks when the player leans the nose down (Q / push stick forward — the same `intent.pitch < 0` the dive-aid reads, so tuck and dive are one gesture). The payoff is a *sweet spot*, not a floor-it: `tuckFactor()` ([src/game/systems/hover.ts](../src/game/systems/hover.ts)) ramps 0→1 as the nose-down lean climbs to `TUCK_SWEET_SPOT = 0.8`, then winds back through zero to `TUCK_SCRAPE_FLOOR = -0.5` at full deflection — where the dive-aid's ride-height drop (`DIVE_HOVER_HEIGHT_MIN_MUL`) already has the belly skimming the deck. The signed factor interpolates two per-bike stats off 1.0: `tuckSpeedBoost` (peak top-speed cap ×1.15, stacks with boost) and `tuckDragMul` (peak lateral drag ×0.5). So a *feathered* lean down a slope or wave face is fastest — the raised cap lets slope-momentum / throttle convert into real speed past the base top-speed — while *burying* the nose over-tucks: the now-negative factor pushes the cap below base and drag above it, on top of the literal belly-scrape from the lowered ride height. Grounded / over-water only (airborne pitch stays a free dive — see the air branch). The reward is structural (lean right and the hill pays you) rather than a button you hold. New unit suite [tests/unit/tuck-sweet-spot.test.ts](../tests/unit/tuck-sweet-spot.test.ts) pins the curve shape (ramp, peak, zero-crossing, scrape floor). **VFX:** a `tuckStream` particle pool ([src/engine/render/fx/index.ts](../src/engine/render/fx/index.ts)) sheds cool cyan slipstream streaks off the bike's shoulders, with both emission rate *and* sprite size scaled by `Math.max(0, tuckFactor)` — so the fan thickens as you ride the sweet spot and vanishes entirely on an over-tuck (negative factor). Gated to grounded/over-water frames (where the physics pays out) and capped by a new **Settings → Gameplay → "Tuck slipstream VFX"** select (`playerSettings.tuckVfxIntensity` — Full / Subtle / Off, scalar in `TUCK_VFX_SCALAR`). **Meter:** because tuck has no button and the payoff is subtle off-slope, a `#hud-tuck` accuracy gauge ([src/engine/render/tuck-hud.ts](../src/engine/render/tuck-hud.ts)) makes the curve legible — a horizontal bar fills with the raw lean, a notch marks the sweet spot, and the colour + status word (`LEAN IN` / `SWEET!` / `EASE OFF` / `SCRAPING`) + live cap-bonus % report how well it's paying off. Fades in only while tucking; **Settings → Gameplay → "Tuck meter"** toggle (`playerSettings.tuckMeter`, default on).
 - **Bike lineup grows to five — Scout + Sparrow ship (Phase F of [docs/v1-asset-pipeline-plan.md](./v1-asset-pipeline-plan.md)).** `BIKE_VARIANTS` in [src/game/bikes/variants.ts](../src/game/bikes/variants.ts) now exposes the v1 target of five archetypes: Cruiser / Racer / Stunt + the new **Scout** (heavyweight) and **Sparrow** (lightweight). Scout is heaviest (mass 220) with the softest hover spring (22 vs default 34) and lowest surfaceFollow (0.4) — the soft spring is what makes its wave-pump timing "punishing" per the design-targets: the chassis reacts late to the crest, so an early E flick is wasted and a late one launches off air; once airborne, the inertia carries through chop. Sparrow is lightest (mass 80) with the stiffest spring (38) + highest surfaceFollow (1.05) — the bike springs off any crest with a wide pump-input tolerance window, the "forgiving + further launch" pole of the lineup. Bike-select picker drops both "Coming Soon" placeholder slots. Player bike render now passes `tintLivery: variantColor` to `cloneLoadedBike` ([src/engine/render/render-systems.ts](../src/engine/render/render-systems.ts)) so variants sharing a base GLB (Sparrow → racer.glb until a dedicated Blender source lands) read with the right colour. New `pnpm gen:bike-thumbs` ([tools/gen-bike-thumbs.mjs](../tools/gen-bike-thumbs.mjs)) drives a `BIKE_THUMBS=1`-gated Playwright spec ([tests/e2e/gen-bike-thumbnails.spec.ts](../tests/e2e/gen-bike-thumbnails.spec.ts)) that hits `?viewer=<id>&thumb=1` (suppressed HUD + grid + tighter camera in a new `thumbMode` branch of [src/viewer/bike-viewer.ts](../src/viewer/bike-viewer.ts)) and captures 480×270 JPGs per variant into `public/assets/bikes/<id>-thumb.jpg`. The viewer's render loop now flips `document.body.dataset.bikeViewerReady = '1'` on the second rendered frame so the spec has a deterministic capture gate. 7 new bike-variant tests cover the 5-archetype roster + Scout/Sparrow tuning intent.
 - **AI pumps where the wave zones tell them to (Phase A gap 7 of [docs/v1-asset-pipeline-plan.md](./v1-asset-pipeline-plan.md)).** Closes the last open Phase A gap. New pure module [src/game/ai/pump-hints.ts](../src/game/ai/pump-hints.ts) walks each AI spline against the track's `wave_zone_NN` list and flags indices inside any zone whose `heightMult > 1.2` (the default threshold gap 7 spells out — "derive automatically from spline proximity to `wave_zone_NN` empties with `height_mult > 1.2`"). The flag set is built lazily via a `WeakMap<Track, …>` cache, mirroring the existing `SPLINE_INDEX` cache in [src/game/systems/ai-control.ts](../src/game/systems/ai-control.ts) so it GC's alongside the spline cache. The AI controller now also takes the wave field as a parameter; per tick, if the AI's current spline cursor is on a hint AND the smoothed surface vy under the bike clears the difficulty's threshold AND speed ≥ 45% of top-speed (matching the player wave-pump observer's `minSpeedFrac`), it sets `intent.pitch = pumpPitchStrength` for 100 ms — the same nose-up input a player taps with E — then locks out for 500 ms (matching the player observer's `cooldownMs`). Per-difficulty tuning lives in [src/game/ai/difficulty.ts](../src/game/ai/difficulty.ts): Casual disables pumps entirely (`pumpVyThreshold = Infinity` → branch short-circuits, no per-tick cost), Standard fires at vy ≥ 1.5 with a 0.5 pitch (mirrors the player observer's `minVy`), Hard fires at vy ≥ 0.6 with a stronger 0.8 pitch. 11 new pump-hint unit tests cover empty zones, OBB inside/outside, blend-radius soft edge, low-heightMult ignore, multi-zone union, and yawed OBB orientation; 2 new difficulty-tuning tests pin the per-tier pump values inside the player observer's vy band.
@@ -991,6 +1201,8 @@ Settings → Controls → Rebind keyboard):
 | D / → | Steer right |
 | E | Pitch up (nose up — lift / jump off a wave) |
 | Q | Pitch down (nose down — dive into a wave; feather it into the tuck sweet spot for a speed bonus, bury it and the belly scrapes) |
+| Z | Trick left / **hold + steer left = drift left** (release fires the tier 1/2/3 mini-turbo) |
+| C | Trick right / **hold + steer right = drift right** |
 | Space | Fire pickup |
 | Shift (L/R) | Boost |
 | Backspace | Respawn at start (snaps to spawn pose, zero velocity) |
@@ -1012,8 +1224,10 @@ rebindable via Settings → Controls → Rebind gamepad.
 | Right trigger (RT / R2) | Throttle |
 | Left trigger (LT / L2) | Brake (held with no throttle = reverse) |
 | Right stick | Camera orbit (Y invert in Settings → Controls) |
-| RB / R1 (button 5) | Fire — default |
-| LB / L1 (button 4) | Boost — default |
+| LB / L1 (button 4) | Trick left / **hold + steer left = drift left** — default |
+| RB / R1 (button 5) | Trick right / **hold + steer right = drift right** — default |
+| X / Square (button 2) | Fire — default (relocated off the bumpers so L1/R1 own the trick/drift channel) |
+| Y / Triangle (button 3) | Boost — default |
 | A / Cross (button 0) | Throttle (digital alt to RT) |
 | B / Circle (button 1) | Emergency brake |
 
@@ -1755,6 +1969,24 @@ Open follow-ups:
 | M10.8 | Remote bikes tagged `Racer` so the local race system tracks their checkpoint crossings, lap, finish state, and surfaces them in the position HUD ("pos N/M"). Each peer computes standings against its own local sim — views may drift by network latency until shared race state lands. | ✅ |
 | M10.9 | Room HUD chip (`#hud-room`) showing room id + your peer slot + remote peers. Deterministic peer-id → livery colour so a reconnecting peer keeps the same accent. | ✅ |
 | M10.10 | Deployed PartyKit endpoint. Client `netHost` default flips on `import.meta.env.DEV`: dev → `localhost:1999`, prod → `hoverbike.occ-matt.partykit.dev`. `?host=<h>` still overrides either way. Vercel build + `pnpm party:deploy` now reach the same relay so two tabs on the live URL share a room without any flags. | ✅ |
+| M10.11–.12 | Owner-authoritative transform snapshots (20 Hz) + lobby with ready states / smash-bros pick / sticky raceStarted bit for late joiners. | ✅ |
+| M10.x (Multiplayer convention row) | Settings → Network tab + 1 Hz ping/pong latency display + mp-status pub/sub. See [v1-work-breakdown.md § Multiplayer](./v1-work-breakdown.md). | ✅ |
+| v1 Step 0 | Menu cathedral — full mode/cup/track/bike/settings flow with disabled-state convention. PR #110 | ✅ |
+| v1 Step 1 | Foundation Systems (5/5): wave-pump signal, AI difficulty + rubber-band, anti-grav HUD + camera, tutorial framework, audio mixer + music bed. | ✅ |
+| v1 Step 2 | Reef Cup tracks (Sandbar / South Beach / Hatteras / Cape Town) build + export end-to-end. | ✅ |
+| v1 Step 3 | Open Sea + Continental Cup tracks (The Maw / Shibuya / Kilauea / Marina Bay / Doge's) build + export end-to-end. | ✅ |
+| v1 Step 4 | Drowned Cup tracks (Aqualand / Angkor Drowned / Liberty Drowned) build + export end-to-end. **v1 lineup complete: 12/12 ship.** | ✅ |
+| v1 Step 6 | Time Trial + ghost recording, Cup wiring (Dev Placeholder + four ship cups), Leaderboard local + global (HMAC-signed PartyKit Party + moderation CLI). | ✅ |
+| v1 Step 7 | Multiplayer room codes + lobby + 8-bike stability (state sync polish ongoing). | ✅ |
+| v1 Step 8 (Polish/QA) | Perf HUD + perf-recorder, Accessibility tab (8 rows lit), cross-browser Playwright projects, Steam Deck profile + Electron desktop wrapper (Linux tree + Windows NSIS, real WebGPU on Deck), mobile MENU button + touch HUD, water/underwater polish, QA tooling (`pnpm qa` orchestrator + matrix + soak + bug-bundle + playbook). Perf-budget pass against the 60 fps / 8-bike target still pending. | 🟡 |
+| v1 Drift mini-turbo | MK-style mini-turbo (MT/SMT/UMT tiers) + inside-drift archetypes + colored sparks + skid audio + HUD tier badge + AI drift + DRIFT tutorial beat + Drift Practice Range. See [drift-deep-dive.md](./drift-deep-dive.md). | ✅ |
+| v1 Surface registry | Per-collider lateral grip (`SurfaceType` — default / asphalt / metal 1.25× / sand 0.70× / ice 0.35× / water). Blender authoring UI is the remaining follow-up. | 🟡 |
+| v1 Tricks rework | Geometric pop-based trick window (replaces vy gate) — fires off lips / ramp crests / ledges / embankments via per-end contact flags. Pre-press buffer (200 ms) holds presses mid-climb. | ✅ |
+| v1 Tuck sweet-spot | Snowboarder nose-down sweet spot folded into the existing pitch-down gesture — meter + slipstream VFX + per-bike `tuckSpeedBoost` / `tuckDragMul`. | ✅ |
+| v1 Hover polish | Dive kick + release kick, bow/stern spring curves, no-PD-in-air revert, climb-assist gated on forward throttle, yaw-coupling fix (`20a5547`). | ✅ |
+| v1 Water LOD | Center mesh doubled (inner + outer LOD) + cross-fade + Gerstner skirt + reflection fixes (shared planar-reflection RT, 500 m fade, fresnel-sky tint at grazing, haze cap reconciled with fresnel). | ✅ |
+| v1 Electron port | Replaces Tauri/WebKitGTK for the Steam Deck + Windows depot. Real WebGPU inside the Steam Linux Runtime; Linux Steam depot dropped (Proton handles the Deck). | ✅ |
+| v1 Making-of microsite | Six chapters with real-sim-importing playable Three.js demos. Linked from main menu. | ✅ |
 
 ## File / system map
 
@@ -1834,6 +2066,103 @@ tests/
 ├── unit/                         # Vitest, sim only (49 tests)
 └── e2e/                          # Playwright via real Vite server (25 tests)
 ```
+
+The tree above is the M9-era shape; the v1 push added several leaves that are worth
+calling out because newcomers grep for them:
+
+```
+src/
+├── boot/                         # boot-time wiring (split out from main.ts)
+│   ├── game-loop.ts              # the rAF loop + finish-overlay branching
+│   ├── controls.ts               # action installation (pause / restart / menu gamepad)
+│   ├── multiplayer.ts            # MP HUD chip + room wiring
+│   ├── rider-editor-mode.ts      # `?rideredit=1` rider customization scene
+│   ├── wave-rider-mode.ts        # `?waveriders=1` floating-prop validation
+│   └── url-modes.ts              # URL param → boot mode dispatch
+├── engine/
+│   ├── sim/
+│   │   └── surface-types.ts      # per-collider lateral-grip registry
+│   ├── render/
+│   │   ├── perf-hud.ts           # backend + GPU + Deck-profile diagnostics
+│   │   ├── water-coverage.ts     # LOD mesh + cross-fade
+│   │   ├── drift-tier-hud.ts     # MT / SMT / UMT badge
+│   │   ├── tuck-hud.ts           # nose-down sweet-spot meter
+│   │   ├── wave-line-shimmer.ts  # forward-fan crest predictor (3D)
+│   │   ├── wave-line-hud.ts      # WAVE LINE pip
+│   │   ├── anti-grav-hud.ts      # magenta-glow indicator
+│   │   ├── wave-pump-hud.ts      # post-pump chyron + strength bar
+│   │   ├── tutorial-hud.ts       # track-agnostic chyron
+│   │   ├── cup-results-screen.ts # championship summary overlay
+│   │   ├── rider-appearance.ts   # primitive-shape rider (editor-driven)
+│   │   ├── rider-mesh.ts
+│   │   ├── leaderboard-finish-banner.ts
+│   │   └── fx/index.ts           # particle pools — sparks, splashes, tuck slipstream
+│   ├── tutorial/                 # director + script + launch URL builder
+│   ├── replay/                   # pose recorder + ghost slice + ghost persistence
+│   ├── net/                      # PartyKit relay client + mp-status pub/sub + latency
+│   ├── qa/                       # console-trap + bug-bundle helpers (__hover.qa)
+│   ├── accessibility/            # palettes + DOM bridge + service pub/sub
+│   ├── leaderboard/              # signed PartyKit Party client + profanity filter
+│   ├── audio/audio.ts            # four-bus mixer (master/music/sfx/ambient) + procedural bed
+│   ├── audio/audio-service.ts    # singleton bridge to settings overlay
+│   ├── tutorial/                 # director + 6-beat default + DRIFT beat
+│   ├── menus/                    # mode-flow + settings overlay + rebind modal + MP lobby
+│   ├── input/
+│   │   ├── bindings.ts           # action set + swap-on-rebind semantics
+│   │   ├── menu-gamepad.ts       # one-poller convention + isAnyOverlayShown
+│   │   └── deck-glyphs.ts        # standard / deck / ps / switch glyph tables
+│   ├── steam-deck.ts             # Deck detection + profile application
+│   ├── player-settings.ts        # player-facing tunable inventory (v2 blob)
+│   ├── cup-progress.ts           # sessionStorage cup state + MK8 points
+│   └── wave-pump-observer.ts     # crest-launch detector (render side)
+├── game/
+│   ├── components/
+│   │   ├── wave-rider.ts         # WaveRiderTag (floating prop)
+│   │   ├── trick.ts              # TrickState (window arming)
+│   │   ├── drift.ts              # DriftState (dir + charge time + tier)
+│   │   ├── tuck.ts               # TuckState (scrape lockout)
+│   │   ├── rider-pose.ts         # RiderPose (per-bone targets)
+│   │   └── …                     # plus the M9-era components
+│   ├── systems/
+│   │   ├── drift.ts              # MK-style mini-turbo (charge / release / cancel)
+│   │   ├── drift-tiers.ts        # pure leaf — thresholds + multipliers (also imported by /making-of/drift)
+│   │   ├── trick-hop.ts          # geometric pop-based window
+│   │   ├── tuck-curve.ts         # pure leaf — sweet-spot curve (also imported by /making-of/feel)
+│   │   ├── ghost-runner.ts       # ghost Transform driven by player lap-time
+│   │   ├── rider-pose.ts         # IK pose blend + drift lean target
+│   │   ├── rider-crash.ts        # ragdoll on hit-reaction
+│   │   ├── wave-rider.ts         # pose-drive + collision tag
+│   │   ├── boost-meter.ts        # accumulator + decay
+│   │   ├── boost-pad.ts          # author-placed strength multipliers
+│   │   ├── anti-grav.ts          # weight blending + override
+│   │   ├── remote-interp.ts      # 20 Hz snapshot smoothing
+│   │   ├── apply-snapshot.ts     # owner-authoritative transform sync
+│   │   └── wake-update.ts        # per-bike wake source emission
+│   ├── ai/
+│   │   ├── difficulty.ts         # Casual / Standard / Hard tuning bundle (+ drift + pump)
+│   │   └── pump-hints.ts         # spline ⨯ wave-zone derived AI pump beats
+│   ├── entities/
+│   │   └── wave-rider.ts         # buoy + log archetypes
+│   └── sim-step.ts               # ordered system list (single source of truth)
+├── viewer/                       # bike viewer scene (`?viewer=<id>`)
+└── debug.ts                      # window.__hover dev API (now: bikes, net, qa, …)
+
+making-of/                        # six-chapter microsite (Vite multi-page)
+├── wave-field/   buoyancy/   feel/   drift/   sim-render/   steam/
+
+electron/                         # desktop wrapper (replaces Tauri)
+├── main.cjs                      # GPU flags + Steam Linux Runtime workarounds
+├── hoverbike-launch.sh           # Steam Deck launch wrapper
+└── icons/                        # placeholder teal icons (gen:icons)
+
+party/                            # PartyKit Parties
+├── relay.ts                      # InputFrame + TransformSnapshot relay (8 peers)
+└── leaderboard.ts                # signed-submit + admin / moderation
+```
+
+The unit-test count is now well into the 800s and the e2e suite carries the
+QA matrix + soak gates; see [`docs/qa-playbook.md`](./qa-playbook.md) for the
+breakdown.
 
 ## Important conventions
 

@@ -28,16 +28,21 @@ Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics a
 
 - **v1 menu cathedral** — title → mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial) → track / cup / lobby → bike-select → race. Full Settings overlay across Audio / Video / Controls / Gameplay / Accessibility / Network tabs.
 - **12 ship tracks** — full v1 lineup: tutorial Sandbar plus the Reef, Open Sea, Continental, and Drowned Cups (Lagoon Loop, Cliffside, South Beach Sunken, Hatteras Light, Cape Town Drift, The Maw, Shibuya Submerged, Kilauea Crown, Marina Bay 7, Doge's Drift, Aqualand, Angkor Drowned, Liberty Drowned). See [`docs/track-themes.md`](docs/track-themes.md) for the content bible.
-- **Three bike variants** — Cruiser / Racer / Stunt with distinct stat tradeoffs (`?bike=cruiser|racer|stunt`)
+- **Five bike variants** — Cruiser / Racer / Stunt / Scout / Sparrow with distinct stat tradeoffs (`?bike=<id>`). Sparrow + Stunt are inside-drift archetypes (sport-bike feel — tighter initial cut, wider tail); the others are outside-drift (default stable arc).
 - **Four pickups** — boost, shield, mine, homing missile (random pool)
-- **4 AI opponents** with Casual / Standard / Hard difficulty + rubber-band toggle (spline-following, fire their own pickups)
+- **4 AI opponents** with Casual / Standard / Hard difficulty + rubber-band toggle. AI hits the wave-pump where the wave zones tell it to (Standard at vy ≥ 1.5, Hard at vy ≥ 0.6) and drifts the sharp corners (Standard caps at SMT, Hard reaches UMT).
 - **3-lap races + Cup mode** — championship across the four ship cups with MK8-style points + cup-results screen
-- **Time Trial mode** with self-overwriting best-lap ghost per (track, bike)
+- **Time Trial mode** with self-overwriting best-lap ghost per (track, bike); **global leaderboard** via PartyKit Party with HMAC-signed submissions + per-track top-25 + moderation CLI
 - **Wave-mastery loop** — wave-pump signal (post-launch reward) + wave-line shimmer (forward-looking guidance) bracket the player's pump decision
-- **Multiplayer** — `?room=<id>` lobby, host-elected AI sync, 20 Hz transform snapshots, live RTT readout
-- **Best-lap save state** per (track, bike) in localStorage
-- **Tutorial framework** — track-agnostic 6-beat director (`?tutorial=1`)
-- **Procedural audio** — four-bus mixer (master / music / sfx / ambient) + sidechain duck on pump/explosion
+- **Drift mini-turbo** — Mario-Kart-style 3-tier mini-turbo: hold Z (or LB) + steer left, or hold C (or RB) + steer right; release fires the tier 1/2/3 boost (blue MT / orange SMT / purple UMT). Surface-type registry (ice / sand / metal / default) layers grip variation. **Drift Practice Range** dev track (`?track=drift-test`) walks every tier. Full design + tuning in [`docs/drift-deep-dive.md`](docs/drift-deep-dive.md).
+- **Tricks** — geometric pop-based window that arms off lips / ramp crests / sandbars / ledges / embankments via per-end hover contact flags. 200 ms pre-press buffer holds a button mashed mid-climb.
+- **Tuck sweet-spot** — snowboarder's nose-down sweet spot folded into the existing pitch-down gesture (no dedicated button); `#hud-tuck` accuracy meter + cyan slipstream VFX scale with sweet-spot proximity.
+- **Multiplayer** — `?room=<id>` lobby with smash-bros pick + ready states + sticky raceStarted bit for late joiners; host-elected AI sync, 20 Hz transform snapshots, live RTT readout, in-race HUD chip with peer slot + ping
+- **Best-lap save state** per (track, bike) in localStorage + ghost replay
+- **Tutorial framework** — track-agnostic 7-beat director (THROTTLE → CRUISE → LOOK → WAVE PUMP → DRIFT → ANTI-GRAV → READY; `?tutorial=1`)
+- **Procedural audio** — four-bus mixer (master / music / sfx / ambient) + sidechain duck on pump/explosion + drift skid loop + per-tier release whoosh + procedural music pad bed (licensed drops still pending)
+- **Accessibility** — colorblind palettes (deuteranopia / protanopia / tritanopia), reduced flash, large text, high contrast, motion-sickness reduction, screen-shake intensity, subtitles always on
+- **Rider editor** — `?rideredit=1` opens a turntable where each rider bone can be reshaped (primitives + colours + seated pose). Load / Save / Export.
 - **In-app track editor** — `?edit=1` opens a TransformControls editor over the JSON track snapshot; gates / pickups / boost pads / spline points placeable + drag-manipulable; Save writes back via a dev-only Vite middleware
 
 ## Develop
