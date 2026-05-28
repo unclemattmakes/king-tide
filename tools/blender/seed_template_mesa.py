@@ -336,6 +336,13 @@ def build_template_mesa_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     _new_socket(g, "Floor Scale",  "INPUT", "NodeSocketFloat",   0.04,  0.0001, 1.0)
     _new_socket(g, "Mesa Top Noise", "INPUT", "NodeSocketFloat", 1.0,   0.0,  10.0)
     _new_socket(g, "Noise Seed",   "INPUT", "NodeSocketFloat",   0.0,   0.0, 1000.0)
+    # Additive offset mode. When True the Z displacement is clamped to
+    # max(0, raw_z) before being applied as Offset, so this sub-group
+    # only RAISES the input geometry — required for clean stacking under
+    # HV_TemplateTerrain. Default True. Flip Additive=False to recover
+    # the destructive behaviour (the canyon floor reaches its -8 m
+    # default and water shows through the central trough).
+    _new_socket(g, "Additive",     "INPUT", "NodeSocketBool", True)
     _new_socket(g, "Geometry", "OUTPUT", "NodeSocketGeometry")
 
     p_in  = _add_node(g, "NodeGroupInput",  -1600, 0)
@@ -409,9 +416,25 @@ def build_template_mesa_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     g.links.new(prev,                          n_final.inputs[0])
     g.links.new(n_floor_amp_gated.outputs[0], n_final.inputs[1])
 
+    # Additive clamp + switch. See seed_template_island.py. Additive=True
+    # clamps the Z to max(0, z) so this sub-group only raises the input
+    # geometry (used by HV_TemplateTerrain). Additive=False preserves
+    # the signed Z (canyon floor reaches its native -8 m).
+    n_add_clamp = _add_node(g, "ShaderNodeMath", 750, -500, operation="MAXIMUM")
+    n_add_clamp.name = "HV_Additive_Clamp"
+    n_add_clamp.label = "HV_Additive_Clamp"
+    n_add_clamp.inputs[1].default_value = 0.0
+    g.links.new(n_final.outputs[0], n_add_clamp.inputs[0])
+    n_add_sw = _add_node(g, "GeometryNodeSwitch", 850, -400, input_type="FLOAT")
+    n_add_sw.name = "HV_Additive_Switch"
+    n_add_sw.label = "HV_Additive_Switch"
+    g.links.new(p_in.outputs["Additive"], n_add_sw.inputs[0])
+    g.links.new(n_final.outputs[0],       n_add_sw.inputs[1])
+    g.links.new(n_add_clamp.outputs[0],   n_add_sw.inputs[2])
+
     # Set Position.
     n_comb = _add_node(g, "ShaderNodeCombineXYZ", 900, -400)
-    g.links.new(n_final.outputs[0], n_comb.inputs["Z"])
+    g.links.new(n_add_sw.outputs[0], n_comb.inputs["Z"])
     n_setpos = _add_node(g, "GeometryNodeSetPosition", 1200, 0)
     g.links.new(p_in.outputs["Geometry"],  n_setpos.inputs["Geometry"])
     g.links.new(n_comb.outputs["Vector"], n_setpos.inputs["Offset"])

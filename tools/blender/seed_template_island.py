@@ -647,6 +647,14 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     # always activates from z=0 so the cone slope's craggy texture
     # blends smoothly into the beach without a visible ring.
     _new_socket(g, "Shoreline Width", "INPUT", "NodeSocketFloat",   1.5, 0.0, 30.0)
+    # Additive offset mode. When True the Z displacement is clamped to
+    # max(0, raw_z) before being applied as an Offset — the sub-group
+    # only RAISES the input geometry, never carves below it. That's the
+    # behaviour HV_TemplateTerrain relies on when stacking style
+    # sub-groups: dunes baseline + island peaks on top should add rather
+    # than mutually cut. Default True. Toggle False to recover the
+    # destructive behaviour (raw_z, including negative seafloor depth).
+    _new_socket(g, "Additive", "INPUT", "NodeSocketBool", True)
     _new_socket(g, "Geometry", "OUTPUT", "NodeSocketGeometry")
 
     p_in  = _add_node(g, "NodeGroupInput",  -1600, 0)
@@ -929,9 +937,26 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     g.links.new(n_final3.outputs[0], n_final4.inputs[0])
     g.links.new(mod_sum,             n_final4.inputs[1])
 
+    # Additive clamp + switch. When the Additive socket is True the raw
+    # Z is clamped to max(0, z) so the Set Position Offset only raises
+    # the input geometry. When False, raw Z is used (negative shelf/
+    # seafloor values reach the Offset unchanged). Named so they're
+    # discoverable in the modifier's node editor view.
+    n_add_clamp = _add_node(g, "ShaderNodeMath", 950, -500, operation="MAXIMUM")
+    n_add_clamp.name = "HV_Additive_Clamp"
+    n_add_clamp.label = "HV_Additive_Clamp"
+    n_add_clamp.inputs[1].default_value = 0.0
+    g.links.new(n_final4.outputs[0], n_add_clamp.inputs[0])
+    n_add_sw = _add_node(g, "GeometryNodeSwitch", 1050, -400, input_type="FLOAT")
+    n_add_sw.name = "HV_Additive_Switch"
+    n_add_sw.label = "HV_Additive_Switch"
+    g.links.new(p_in.outputs["Additive"], n_add_sw.inputs[0])
+    g.links.new(n_final4.outputs[0],      n_add_sw.inputs[1])
+    g.links.new(n_add_clamp.outputs[0],   n_add_sw.inputs[2])
+
     # Set Position
     n_comb = _add_node(g, "ShaderNodeCombineXYZ", 1100, -300)
-    g.links.new(n_final4.outputs[0], n_comb.inputs["Z"])
+    g.links.new(n_add_sw.outputs[0], n_comb.inputs["Z"])
     n_setpos = _add_node(g, "GeometryNodeSetPosition", 1400, 0)
     g.links.new(p_in.outputs["Geometry"], n_setpos.inputs["Geometry"])
     g.links.new(n_comb.outputs["Vector"], n_setpos.inputs["Offset"])
