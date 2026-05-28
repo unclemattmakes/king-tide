@@ -1752,7 +1752,10 @@ def build_scatter_group() -> bpy.types.NodeTree:
 
     # Per-point random Int driving Instance Index (the implicit per-
     # point evaluation context of FunctionNodeRandomValue gives each
-    # point a different output even with a scalar Seed).
+    # point a different output even with a scalar Seed). See PR #219
+    # for the viewport-side motivation; the export realize pass's
+    # case-2 fallback handles the half of points that still land on
+    # the invisible Empty archetype.
     rand_pick = _add_node(g, "FunctionNodeRandomValue", 400, -300)
     rand_pick.data_type = "INT"
     rand_pick.inputs[4].default_value = 0
@@ -2056,6 +2059,7 @@ def build_biome_palette_group() -> bpy.types.NodeTree:
         g.links.new(delete_pts.outputs["Geometry"], iop.inputs["Points"])
         g.links.new(coll_info.outputs["Instances"], iop.inputs["Instance"])
 
+        # Per-point random Instance Index — see HV_Scatter's comment.
         rand_pick = _add_node(g, "FunctionNodeRandomValue", x + 2000, y - 250)
         rand_pick.data_type = "INT"
         rand_pick.inputs[4].default_value = 0
@@ -2095,15 +2099,13 @@ def build_biome_palette_group() -> bpy.types.NodeTree:
 
     g.links.new(join.outputs["Geometry"], go.inputs["Geometry"])
     g.use_fake_user = True
-    # TODO(scatter-export): opt-in to the export-time realization pass
-    # via ``hb_scatter_ng=True`` once the linked-from-library bake path
-    # in ``_RealizedScatterInstances`` stops crashing. Today (without
-    # the tag) HV_BiomePalette output ships as raw modifier instances,
-    # which means EXT_mesh_gpu_instancing isn't emitted and the runtime
-    # gets the (mostly Empty) instance archetypes — invisible scatter.
-    # The viewport-side workaround is per-point random Instance Index
-    # (lands on the visible Mesh archetype ~50% of the time); the
-    # export-side workaround is still pending.
+    # Opt this graph into the export-time realization pass — the pass
+    # bakes each Instance-on-Points instance into a leaf Mesh object so
+    # Blender's glTF exporter can collapse them into EXT_mesh_gpu_-
+    # instancing. The realize pass's name-prefix detector only matches
+    # ``HV_Scatter*`` (legacy zones); HV_BiomePalette is a different
+    # name family, so this explicit tag is what opts it in.
+    g["hb_scatter_ng"] = True
     return g
 
 
@@ -2213,6 +2215,7 @@ def build_stroke_scatter_group() -> bpy.types.NodeTree:
     g.links.new(distribute.outputs["Points"],   iop.inputs["Points"])
     g.links.new(coll_info.outputs["Instances"], iop.inputs["Instance"])
 
+    # Per-point random Instance Index — see HV_Scatter's comment.
     rand_pick = _add_node(g, "FunctionNodeRandomValue", -400, -150)
     rand_pick.data_type = "INT"
     rand_pick.inputs[4].default_value = 0
@@ -2249,6 +2252,10 @@ def build_stroke_scatter_group() -> bpy.types.NodeTree:
 
     g.links.new(scale_inst.outputs["Instances"], go.inputs["Geometry"])
     g.use_fake_user = True
+    # See ``hb_scatter_ng`` comment on build_biome_palette_group.
+    # ``HV_StrokeScatter`` starts with ``HV_S`` not ``HV_Scatter``, so
+    # the realize pass's prefix match misses it without this tag.
+    g["hb_scatter_ng"] = True
     return g
 
 
