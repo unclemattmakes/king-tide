@@ -150,8 +150,23 @@ def _RealizedScatterInstances(scene: bpy.types.Scene):
     def _resolve_mesh_source(src: bpy.types.Object | None) -> bpy.types.Object | None:
         if src is None:
             return None
+        # Always return ``.original`` (the source-blend datablock),
+        # never the depsgraph-evaluated proxy ``src`` itself. Storing
+        # the proxy across the realize-pass mutation phase
+        # (link new objects / hide surfs / etc.) leaves it pointing
+        # at memory the depsgraph may reuse for a different evaluation
+        # output. Symptom: with per-point random ``Instance Index``
+        # picking Pick Instance archetypes across both Empty and Mesh
+        # children of a prop_* collection, case 1 hits this path with
+        # an evaluated Mesh and case 2 with a source-blend Mesh. Same
+        # underlying mesh data, but different Python wrapper IDs, so
+        # ``mesh_cache`` misses, two frozen meshes get baked, and the
+        # spawned-leaves bookkeeping ends with the glTF exporter
+        # reporting random leaf objects as "not in Scene Collection".
+        # Returning ``.original`` collapses both cases to a single
+        # stable cache entry per source mesh.
         if isinstance(src.data, bpy.types.Mesh) and len(src.data.vertices) > 0:
-            return src
+            return src.original if src.original is not None else src
         # Hand-placed Collection-Instance Empty path (case 3).
         if src.data is None and src.instance_type == "COLLECTION" and src.instance_collection:
             for child in src.instance_collection.all_objects:
@@ -186,6 +201,16 @@ def _RealizedScatterInstances(scene: bpy.types.Scene):
         mesh_src = _resolve_mesh_source(inst.object)
         if mesh_src is None:
             continue
+        # Defensive: ``_resolve_mesh_source`` always *intends* to return
+        # an Object (or None), but the depsgraph occasionally hands
+        # back generic ID wrappers (linked-from-library curve children
+        # walked via ``original.children`` is the case I've hit). Pass
+        # those to ``new_from_object`` and you get
+        # ``"Function.object expected a Object type, not ID"`` mid-
+        # export. Skipping non-Objects is the safest path: we lose
+        # that one instance row but the rest of the scatter survives.
+        if not isinstance(mesh_src, bpy.types.Object):
+            continue
         by_surf[surf_name].append((mesh_src, inst.matrix_world.copy()))
 
     plan: list[tuple[bpy.types.Object, list[tuple[bpy.types.Object, "mathutils.Matrix"]]]] = [
@@ -211,40 +236,39 @@ def _RealizedScatterInstances(scene: bpy.types.Scene):
                 cache_key = id(src_original)
                 frozen = mesh_cache.get(cache_key)
                 if frozen is None:
-                    # Try to bake the evaluated source (modifiers
-                    # applied) into a fresh mesh datablock. Works for
-                    # local objects with modifiers.
+                    # Two-tier bake. First try the modifier-aware path
+                    # via ``new_from_object`` — works for local objects
+                    # whose modifier stack the depsgraph has evaluated.
+                    # Fall back to a plain ``.copy()`` of the source
+                    # mesh datablock if that fails: linked-from-library
+                    # sources (every ``prop_<id>`` in the seeded props
+                    # library) aren't auto-evaluated by the depsgraph
+                    # when they're only referenced via Collection Info
+                    # → Instance on Points, so ``new_from_object``
+                    # raises "Object does not have geometry data".
+                    # ``mesh.copy()`` always works, and the linked
+                    # mesh's stored data IS the final shape — any
+                    # HV_Prop modifier ran at seed time and got baked
+                    # into the saved mesh — so the copy carries
+                    # everything the exporter needs.
+                    #
+                    # Cleanup detail: ``.copy()`` returns a local
+                    # datablock (library=None) even when the source is
+                    # linked, so ``frozen_meshes.append`` + the finally-
+                    # block's ``bpy.data.meshes.remove`` correctly
+                    # disposes of it. Pointing leaf objects at the
+                    # *linked* datablock directly was the previous
+                    # attempt's crash: the glTF exporter writes
+                    # internal metadata onto the mesh during gather,
+                    # which trips read-only enforcement on linked IDs.
                     eval_src = src_original.evaluated_get(depsgraph)
                     try:
-                        baked = bpy.data.meshes.new_from_object(eval_src)
+                        frozen = bpy.data.meshes.new_from_object(eval_src)
                     except RuntimeError:
-                        # ``new_from_object`` raises "Object does not
-                        # have geometry data" for linked-from-library
-                        # sources whose modifier stack isn't being
-                        # evaluated by the depsgraph (it isn't when
-                        # the source is only referenced via a
-                        # Collection Info → Instance on Points chain
-                        # and never placed directly in the scene).
-                        baked = None
-
-                    if baked is not None and len(baked.vertices) > 0:
-                        baked.name = f"_hb_scatter_frozen_{src_original.name}"
-                        frozen = baked
-                        frozen_meshes.append(frozen)
-                    else:
-                        # Bake produced no geometry — fall back to
-                        # reusing the source mesh datablock directly.
-                        # The linked mesh's stored data IS the final
-                        # shape (any HV_Prop modifier ran at seed time
-                        # and got baked into the saved mesh), and the
-                        # glTF exporter dedupes by mesh-data id, so all
-                        # leaf objects pointing at the same source mesh
-                        # collapse into EXT_mesh_gpu_instancing. We
-                        # don't add this to frozen_meshes — the
-                        # finally-block cleanup leaves it alone, which
-                        # is exactly right because we don't own it.
-                        if baked is not None:
-                            bpy.data.meshes.remove(baked)
+                        frozen = None
+                    if frozen is None or len(frozen.vertices) == 0:
+                        if frozen is not None:
+                            bpy.data.meshes.remove(frozen)
                         src_mesh = (
                             src_original.data
                             if isinstance(src_original.data, bpy.types.Mesh)
@@ -256,8 +280,10 @@ def _RealizedScatterInstances(scene: bpy.types.Scene):
                                 f"yielded no geometry — skipping"
                             )
                             continue
-                        frozen = src_mesh
+                        frozen = src_mesh.copy()
+                    frozen.name = f"_hb_scatter_frozen_{src_original.name}"
                     mesh_cache[cache_key] = frozen
+                    frozen_meshes.append(frozen)
                 new_obj = bpy.data.objects.new(
                     f"{surf.name}_inst_{len(spawned):04d}", frozen,
                 )
