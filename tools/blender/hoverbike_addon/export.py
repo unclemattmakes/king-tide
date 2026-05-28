@@ -211,15 +211,53 @@ def _RealizedScatterInstances(scene: bpy.types.Scene):
                 cache_key = id(src_original)
                 frozen = mesh_cache.get(cache_key)
                 if frozen is None:
-                    # Bake the evaluated source (modifiers applied) into
-                    # a fresh mesh datablock once per source prop. All
-                    # instances of that prop share the same datablock,
-                    # which is what makes ``gather_mesh`` dedupe them.
+                    # Try to bake the evaluated source (modifiers
+                    # applied) into a fresh mesh datablock. Works for
+                    # local objects with modifiers.
                     eval_src = src_original.evaluated_get(depsgraph)
-                    frozen = bpy.data.meshes.new_from_object(eval_src)
-                    frozen.name = f"_hb_scatter_frozen_{src_original.name}"
+                    try:
+                        baked = bpy.data.meshes.new_from_object(eval_src)
+                    except RuntimeError:
+                        # ``new_from_object`` raises "Object does not
+                        # have geometry data" for linked-from-library
+                        # sources whose modifier stack isn't being
+                        # evaluated by the depsgraph (it isn't when
+                        # the source is only referenced via a
+                        # Collection Info → Instance on Points chain
+                        # and never placed directly in the scene).
+                        baked = None
+
+                    if baked is not None and len(baked.vertices) > 0:
+                        baked.name = f"_hb_scatter_frozen_{src_original.name}"
+                        frozen = baked
+                        frozen_meshes.append(frozen)
+                    else:
+                        # Bake produced no geometry — fall back to
+                        # reusing the source mesh datablock directly.
+                        # The linked mesh's stored data IS the final
+                        # shape (any HV_Prop modifier ran at seed time
+                        # and got baked into the saved mesh), and the
+                        # glTF exporter dedupes by mesh-data id, so all
+                        # leaf objects pointing at the same source mesh
+                        # collapse into EXT_mesh_gpu_instancing. We
+                        # don't add this to frozen_meshes — the
+                        # finally-block cleanup leaves it alone, which
+                        # is exactly right because we don't own it.
+                        if baked is not None:
+                            bpy.data.meshes.remove(baked)
+                        src_mesh = (
+                            src_original.data
+                            if isinstance(src_original.data, bpy.types.Mesh)
+                            else None
+                        )
+                        if src_mesh is None or len(src_mesh.vertices) == 0:
+                            print(
+                                f"[hoverbike] WARN realize: {src_original.name!r} "
+                                f"yielded no geometry — skipping"
+                            )
+                            continue
+                        frozen = src_mesh
                     mesh_cache[cache_key] = frozen
-                    frozen_meshes.append(frozen)
                 new_obj = bpy.data.objects.new(
                     f"{surf.name}_inst_{len(spawned):04d}", frozen,
                 )
