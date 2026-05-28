@@ -277,6 +277,67 @@ def reload_hoverbike_libraries() -> list[str]:
 
 
 # ────────────────────────────────────────────────────────────────────
+# Node-group flag upgrade
+# ────────────────────────────────────────────────────────────────────
+
+# Names of geometry node groups the addon emits as TOP-LEVEL modifier
+# trees — these need ``is_modifier=True`` for the "Add Geometry Nodes
+# Modifier" dropdown to list them. Pre-fix .blends (anything saved
+# before the seed/addon scripts started stamping the flag) carry these
+# groups with ``is_modifier=False``, so the dropdown filters them out
+# and an author who deletes their existing modifier slot can't pick the
+# group back. Sub-groups like ``HV_PeakProfile`` / ``HV_RidgeProfile`` /
+# ``HV_MesaProfile`` are deliberately excluded — they have no Geometry
+# sockets and can't function as standalone modifiers, so flagging them
+# would put a non-functional entry in the dropdown.
+_MODIFIER_NODE_GROUPS: tuple[str, ...] = (
+    "HV_TemplateIsland",
+    "HV_TemplateAlpine",
+    "HV_TemplateDunes",
+    "HV_TemplateMesa",
+    "HV_TunnelSweep",
+    "HV_Ramp",
+    "HV_RoadConform",
+    "HV_Prop_Rock",
+    "HV_Prop_Palm",
+    "HV_Scatter",
+    "HV_BiomePalette",
+    "HV_StrokeScatter",
+)
+
+
+def upgrade_modifier_node_groups() -> list[str]:
+    """Flip ``is_modifier=True`` on any of the addon's modifier-level
+    node groups that currently have it False. Idempotent — groups
+    already flagged stay flagged. Returns the list of group names that
+    needed the upgrade (empty if nothing changed).
+
+    Mirrors the ``ensure_mat_terrain_main`` auto-upgrade pattern: detect
+    and fix legacy state at load time so existing .blends pick up the
+    fix without any per-file editing.
+
+    Linked node groups can't be mutated (library data is read-only) —
+    those raise ``AttributeError`` on the assignment; we swallow that and
+    leave the group as-is. The library's own .blend will fix itself on
+    its next open via this same handler."""
+    upgraded: list[str] = []
+    for name in _MODIFIER_NODE_GROUPS:
+        ng = bpy.data.node_groups.get(name)
+        if ng is None:
+            continue
+        if getattr(ng, "is_modifier", False):
+            continue
+        try:
+            ng.is_modifier = True
+        except (AttributeError, TypeError):
+            # Linked / read-only datablock, or an older Blender that
+            # predates the is_modifier attribute. Skip silently.
+            continue
+        upgraded.append(name)
+    return upgraded
+
+
+# ────────────────────────────────────────────────────────────────────
 # Persistent handlers
 # ────────────────────────────────────────────────────────────────────
 
@@ -304,6 +365,23 @@ def _hoverbike_load_post(*_args):
     reloaded = reload_hoverbike_libraries()
     if reloaded:
         print(f"[hoverbike] auto-reloaded {len(reloaded)} library file(s): {', '.join(reloaded)}")
+
+    # 1b. is_modifier flag upgrade — legacy .blends saved before the
+    #     seed/addon scripts started stamping ``is_modifier=True`` carry
+    #     HV_TemplateIsland & friends with the flag still False, so the
+    #     "Add Geometry Nodes Modifier" dropdown filters them out (the
+    #     symptom is "No results found" after an author deletes an
+    #     existing modifier slot and tries to re-pick the group). Flips
+    #     the flag on any known modifier-level group still at False. Runs
+    #     for every .blend — the props library carries its own subset of
+    #     these groups, so the upgrade also has to fire when opening
+    #     props-library.blend directly.
+    upgraded_ng = upgrade_modifier_node_groups()
+    if upgraded_ng:
+        print(
+            f"[hoverbike] upgraded is_modifier=True on {len(upgraded_ng)} "
+            f"node group(s): {', '.join(upgraded_ng)}"
+        )
 
     # 2. Track-mode-only steps. Bail early on bike .blends and the
     #    asset libraries — they don't carry terrain material or per-

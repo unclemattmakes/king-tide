@@ -198,6 +198,9 @@ def build_rock_group() -> bpy.types.NodeTree:
     if ROCK_GROUP in bpy.data.node_groups:
         bpy.data.node_groups.remove(bpy.data.node_groups[ROCK_GROUP])
     g = bpy.data.node_groups.new(ROCK_GROUP, "GeometryNodeTree")
+    # Required so the group is selectable in the GN modifier dropdown.
+    # See seed_template_island.py for the full rationale.
+    g.is_modifier = True
 
     _new_socket(g, "Geometry",    "INPUT",  "NodeSocketGeometry")
     _new_socket(g, "Size",        "INPUT",  "NodeSocketFloat",  1.5)
@@ -383,6 +386,9 @@ def build_palm_group() -> bpy.types.NodeTree:
     if PALM_GROUP in bpy.data.node_groups:
         bpy.data.node_groups.remove(bpy.data.node_groups[PALM_GROUP])
     g = bpy.data.node_groups.new(PALM_GROUP, "GeometryNodeTree")
+    # Required so the group is selectable in the GN modifier dropdown.
+    # See seed_template_island.py for the full rationale.
+    g.is_modifier = True
 
     _new_socket(g, "Geometry", "INPUT",  "NodeSocketGeometry")
     _new_socket(g, "Scale",    "INPUT",  "NodeSocketFloat", 1.0, mn=0.1, mx=10.0)
@@ -1649,6 +1655,9 @@ def build_scatter_group() -> bpy.types.NodeTree:
     if SCATTER_GROUP in bpy.data.node_groups:
         bpy.data.node_groups.remove(bpy.data.node_groups[SCATTER_GROUP])
     g = bpy.data.node_groups.new(SCATTER_GROUP, "GeometryNodeTree")
+    # Required so the group is selectable in the GN modifier dropdown.
+    # See seed_template_island.py for the full rationale.
+    g.is_modifier = True
 
     _new_socket(g, "Geometry",         "INPUT",  "NodeSocketGeometry")
     _new_socket(g, "Source",           "INPUT",  "NodeSocketCollection")
@@ -1895,6 +1904,9 @@ def build_biome_palette_group() -> bpy.types.NodeTree:
     if BIOME_PALETTE_GROUP in bpy.data.node_groups:
         bpy.data.node_groups.remove(bpy.data.node_groups[BIOME_PALETTE_GROUP])
     g = bpy.data.node_groups.new(BIOME_PALETTE_GROUP, "GeometryNodeTree")
+    # Required so the group is selectable in the GN modifier dropdown.
+    # See seed_template_island.py for the full rationale.
+    g.is_modifier = True
 
     # ── Sockets ─────────────────────────────────────────────────────
     _new_socket(g, "Geometry",        "INPUT",  "NodeSocketGeometry")
@@ -2150,6 +2162,9 @@ def build_stroke_scatter_group() -> bpy.types.NodeTree:
     if STROKE_SCATTER_GROUP in bpy.data.node_groups:
         bpy.data.node_groups.remove(bpy.data.node_groups[STROKE_SCATTER_GROUP])
     g = bpy.data.node_groups.new(STROKE_SCATTER_GROUP, "GeometryNodeTree")
+    # Required so the group is selectable in the GN modifier dropdown.
+    # See seed_template_island.py for the full rationale.
+    g.is_modifier = True
 
     # ── Sockets ─────────────────────────────────────────────────────
     _new_socket(g, "Geometry",  "INPUT",  "NodeSocketGeometry")

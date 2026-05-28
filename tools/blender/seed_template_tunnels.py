@@ -289,6 +289,9 @@ def _build_sweep_group() -> bpy.types.NodeTree:
     if SWEEP_GROUP_NAME in bpy.data.node_groups:
         bpy.data.node_groups.remove(bpy.data.node_groups[SWEEP_GROUP_NAME])
     g = bpy.data.node_groups.new(SWEEP_GROUP_NAME, "GeometryNodeTree")
+    # Required so the group is selectable in the GN modifier dropdown.
+    # See seed_template_island.py for the full rationale.
+    g.is_modifier = True
 
     def add_socket(n, io, st, default=None):
         s = g.interface.new_socket(n, in_out=io, socket_type=st)

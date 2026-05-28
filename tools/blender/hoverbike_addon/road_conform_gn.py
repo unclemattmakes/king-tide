@@ -150,6 +150,9 @@ def build_road_conform_node_group() -> bpy.types.NodeTree:
     if NODE_GROUP_NAME in bpy.data.node_groups:
         bpy.data.node_groups.remove(bpy.data.node_groups[NODE_GROUP_NAME])
     g = bpy.data.node_groups.new(NODE_GROUP_NAME, "GeometryNodeTree")
+    # Required so the group is selectable in the GN modifier dropdown.
+    # See tools/blender/seed_template_island.py for the full rationale.
+    g.is_modifier = True
 
     _new_socket(g, "Geometry",      "INPUT",  "NodeSocketGeometry")
     # Source Terrain is the terrain we conform — read via Object Info
