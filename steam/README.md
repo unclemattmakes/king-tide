@@ -10,8 +10,7 @@ desktop pipeline this slots into; this folder just owns the
 
 | File | Purpose |
 |---|---|
-| `app_build.vdf` | Top-level SteamPipe script template. References the per-platform depot scripts; lists buildoutput/contentroot paths. |
-| `depot_linux.vdf` | Linux depot template (Electron game tree). |
+| `app_build.vdf` | Top-level SteamPipe script template. References the Windows depot script; lists buildoutput/contentroot paths. |
 | `depot_windows.vdf` | Windows depot template (Electron game tree). |
 | `.gitignore` | Excludes `content/` (staged bundles), `output/` (steamcmd logs), `.rendered/` (env-substituted VDFs), `cache/` (reused downloads), and any local `config.vdf` / `ssfn*` credentials. |
 
@@ -27,12 +26,12 @@ The upload script + CI workflow both consume the same set:
 | Var | When required | What | Where to get it |
 |---|---|---|---|
 | `STEAM_APPID` | always | Numeric Steam App ID | Steamworks Partner backend → your app → top of the dashboard |
-| `STEAM_DEPOT_LINUX` | uploading Linux | Linux depot ID | Steamworks → Application → SteamPipe → Depots. Usually `APPID+1`. |
-| `STEAM_DEPOT_WINDOWS` | uploading Windows | Windows depot ID | Same place; usually `APPID+2`. |
+| `STEAM_DEPOT_WINDOWS` | always | Windows depot ID | Steamworks → Application → SteamPipe → Depots. |
 | `STEAM_USERNAME` | always (for upload) | Build account username | A dedicated Steam account with **Edit App Metadata + Publish Builds** permission on this app. NOT your personal account. |
 
-Single-platform uploads (`--platform=linux` or `--platform=windows`)
-only need the matching depot ID — the other one can stay unset.
+The upload is **Windows-only** — the Deck runs the Windows build via Proton,
+so there's no native Linux depot (see
+[`docs/desktop-builds.md`](../docs/desktop-builds.md)).
 
 Plus one of:
 
@@ -92,7 +91,7 @@ files into CI secrets.
    - `STEAM_SSFN` ← contents of `/tmp/ssfn.b64`
    - `STEAM_SSFN_NAME` ← the filename (e.g. `ssfn8231047219874012345`)
    - `STEAM_USERNAME` ← the build account username
-   - `STEAM_APPID`, `STEAM_DEPOT_LINUX`, `STEAM_DEPOT_WINDOWS`
+   - `STEAM_APPID`, `STEAM_DEPOT_WINDOWS`
 
    Wipe the `/tmp/*.b64` files when done.
 
@@ -102,36 +101,28 @@ files into CI secrets.
 
 ## Local upload (dev box)
 
-After running `pnpm build:deck` (Linux) and `pnpm build:windows`
-(Windows host or CI), from the repo root:
+After running `pnpm build:windows` (Windows host or CI), from the repo root:
 
 ```sh
 # Dry-run first — stages content + renders VDFs, doesn't call steamcmd.
 STEAM_APPID=3000000 \
-STEAM_DEPOT_LINUX=3000001 \
 STEAM_DEPOT_WINDOWS=3000002 \
 STEAM_USERNAME=hoverbike_build \
 pnpm steam:dry-run
 
 # Real upload — interactive Steam Guard prompt on first run.
-STEAM_APPID=… STEAM_DEPOT_LINUX=… STEAM_DEPOT_WINDOWS=… STEAM_USERNAME=… \
+STEAM_APPID=… STEAM_DEPOT_WINDOWS=… STEAM_USERNAME=… \
 STEAM_PASSWORD=… \
 pnpm steam:upload
-
-# Upload only one platform (useful when iterating per-OS):
-pnpm steam:upload -- --platform=linux
 
 # Push to a non-default branch live after upload:
 STEAM_SET_LIVE=beta pnpm steam:upload
 ```
 
-The script auto-discovers the electron-builder unpacked trees at
-`dist-electron/linux-unpacked/` and `dist-electron/win-unpacked/`.
-Override via `LINUX_BUNDLE_DIR=path/to/tree/` and
-`WINDOWS_BUNDLE_DIR=path/to/tree/` if you've moved them. Set the
-launch executable for each platform in the Steamworks backend
-(`hoverbike-launch.sh` on Linux — the wrapper that fixes the Steam overlay +
-libcups issues, see docs/desktop-builds.md; `Hoverbike.exe` on Windows).
+The script auto-discovers the electron-builder unpacked tree at
+`dist-electron/win-unpacked/`. Override via `WINDOWS_BUNDLE_DIR=path/to/tree/`
+if you've moved it. Set the Windows launch executable in the Steamworks
+backend to `Hoverbike.exe`.
 
 ## CI upload (release-steam.yml)
 
@@ -142,14 +133,12 @@ workflow is manual-dispatch only. Trigger from the Actions tab:
    successful run on the default branch).
 2. Pick a `set_live` branch (or leave blank to upload without making
    the build live).
-3. Pick `platforms` — both, linux only, or windows only.
-4. Pick `preview` — `true` for a dry-run that validates the upload
+3. Pick `preview` — `true` for a dry-run that validates the upload
    against Steam but doesn't actually push bytes.
 
 The workflow:
 
-- Downloads the game trees from the chosen build-desktop run (the
-  Linux tree is tarred to preserve the binary's +x bit).
+- Downloads the Windows game tree from the chosen build-desktop run.
 - Installs steamcmd on the runner.
 - Stages the Steam Guard credentials from secrets.
 - Runs `tools/steam-upload.mjs`.
@@ -180,7 +169,6 @@ there a human picks a branch to set live.
   it today; ignore.
 - **`No connection to Steam`** — runner can't reach Steam's CDN.
   Usually transient; retry.
-- **Linux build won't launch from Steam** — the `hoverbike` binary
-  lost its +x bit in transit (preserved via `tar` in CI / `cpSync`
-  locally), or the launch option isn't set to run under the Steam
-  Linux Runtime. See `docs/desktop-builds.md` troubleshooting.
+- **Build launches but no window / wrong renderer on the Deck** — that's
+  the Windows-via-Proton path; see `docs/desktop-builds.md` "Steam Deck /
+  Linux runtime gotchas" and the Proton notes.

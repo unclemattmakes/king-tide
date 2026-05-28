@@ -127,26 +127,26 @@ manual-dispatch workflow at
 [`.github/workflows/release-steam.yml`](../.github/workflows/release-steam.yml).
 Full recipe in [`steam/README.md`](../steam/README.md); summary here.
 
-1. **Get App + depot IDs from the Partner backend.** Set up two depots
-   (Linux + Windows) in the SteamPipe section.
-2. **Set the launch executables in the Steamworks backend** — Linux
-   launch option → **`hoverbike-launch.sh`** (the wrapper, *not* `hoverbike`
-   directly — see "Steam Deck / Linux runtime gotchas" below), Windows →
-   `Hoverbike.exe`. The depot VDFs only map files; the launch binary is App
-   config. On the Deck, run the Linux launch option under the **Steam Linux
-   Runtime**.
+**Steam ships the Windows build only** — the Deck runs it via Proton, which
+sidesteps the entire native-Linux-runtime gauntlet (see the gotchas section
+below). The native Linux tree still builds (`pnpm build:deck`) for direct /
+non-Steam distribution, but it is not uploaded to Steam.
+
+1. **Get the App ID + a Windows depot from the Partner backend** in the
+   SteamPipe section.
+2. **Set the Windows launch executable** in the Steamworks backend to
+   `Hoverbike.exe`. (The depot VDF only maps files; the launch binary is App
+   config.)
 3. **Bake build-account credentials** — see *First-time setup* in
    [`steam/README.md`](../steam/README.md).
 4. **Drop the IDs + credentials into GitHub repo secrets** (or local
    env for a dev-box upload).
 5. **Trigger the workflow** — Actions tab → release-steam → Run
    workflow. Run with `preview=true` first for a SteamPipe dry-run.
-6. **Mark the Linux depot as Steam Deck verified** in the App admin so
-   the Deck always picks the native Linux build over Proton.
 
 For local uploads from a dev box: `pnpm steam:upload` after
-`pnpm build:deck` and `pnpm build:windows`. `pnpm steam:dry-run` to
-validate staging + VDF rendering without contacting Steam.
+`pnpm build:windows`. `pnpm steam:dry-run` to validate staging + VDF
+rendering without contacting Steam.
 
 > **Steamworks SDK (achievements, rich presence)** is **not yet wired** —
 > the old Tauri shell had stub commands the web side never called, so
