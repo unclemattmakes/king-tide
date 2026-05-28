@@ -5,10 +5,9 @@ import type { Track } from '@/game/tracks/types'
 
 /**
  * Bridge-support pillars under elevated road segments. Walks the main AI
- * spline at a denser sample rate than route-markers, finds every sample
- * where the road sits at least `MIN_BRIDGE_HEIGHT_M` above the terrain
- * (or above open water), and stamps a stone pillar from ground level to
- * just under the road.
+ * spline at a dense sample rate, finds every sample where the road sits
+ * at least `MIN_BRIDGE_HEIGHT_M` above the terrain (or above open water),
+ * and stamps a stone pillar from ground level to just under the road.
  *
  * The terrain already builds up underneath authored road shoulders in
  * some Blender source files — terrain artists sometimes ramp the
