@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>Inside the Bike — The Making of Hoverbike</title>
+    <meta
+      name="description"
+      content="The hoverbike, taken apart: a stylized hull on a capsule, four hover probes, a PD spring for lift, an arcade thrust + steer model — and five archetypes that share every line of that code."
+    />
+    <style>
+      body {
+        margin: 0;
+        background: #050a14;
+        color: #f4f8ff;
+        font-family: "Inter", system-ui, sans-serif;
+      }
+    </style>
+    <script type="module" src="/src/making-of/hoverbike/main.ts"></script>
+  </head>
+  <body>
+    <header class="mo-topbar">
+      <a class="mo-brand" href="/making-of/">Making of <span>Hoverbike</span></a>
+      <nav>
+        <a href="/making-of/">All chapters</a>
+        <a href="/">Play the game</a>
+      </nav>
+    </header>
+
+    <main class="mo-shell">
+      <section class="mo-hero">
+        <p class="mo-eyebrow">Chapter 07 — Inside the Bike</p>
+        <h1>One capsule, a few stats, five rides.</h1>
+        <p>
+          Earlier chapters look <em>out</em> from the bike — at the wave it floats on, the probes it
+          reads, the curve a tuck rides. This one looks <em>at</em> the bike. A short tour of what's
+          actually under the orange paint: the hull, the four hover probes, the PD spring that
+          holds it up, the arcade thrust + steer model that pushes it around — and the variants
+          that share every line of that code.
+        </p>
+      </section>
+
+      <article class="mo-prose">
+        <h2>Anatomy of a hoverbike</h2>
+        <p>
+          The shipping bike is almost embarrassingly simple. The physics body is a
+          <strong>capsule</strong> — 0.6 m long, 0.45 m radius — wrapped in a stylized hull and a
+          rider block for the visuals. Hanging off that capsule at runtime are <strong>four hover
+          probes</strong>, one at each corner of the footprint. Bow and stern (the yellow ones)
+          read fore/aft slope and become pitch; port and starboard (the cyan ones) read side
+          slope and become roll. That's the whole vehicle, from the sim's point of view.
+        </p>
+        <p>
+          Behaviour comes from a flat little stats block — mass, hover height, top speed, accel,
+          turn torque, a couple of damping coefficients. Swap the numbers and you get a new
+          bike. The lineup ships with five archetypes that share every line of code and differ
+          only in those numbers: <strong>Racer</strong> (the baseline), <strong>Cruiser</strong>
+          (heavy, fast, sluggish), <strong>Stunt</strong> (light, agile, banky),
+          <strong>Scout</strong> (heaviest, soft hover spring, punishing wave-pump timing), and
+          <strong>Sparrow</strong> (lightest, stiff spring, forgiving launch).
+        </p>
+        <p>
+          Pick a flavor below to recolor the bike and see its real stats. Toggle the hover probes
+          and the physics capsule to see the parts the renderer normally hides.
+        </p>
+      </article>
+
+      <figure class="mo-demo">
+        <figcaption class="mo-demo-caption">
+          Live demo — anatomy. <strong>Drag to orbit, scroll to zoom.</strong> Stats are read
+          straight out of <code>src/game/bikes/variants.ts</code>.
+        </figcaption>
+        <div class="mo-demo-body">
+          <div class="mo-demo-stage" id="anatomy-demo-stage"></div>
+          <div class="mo-demo-controls" id="anatomy-demo-controls"></div>
+        </div>
+      </figure>
+
+      <article class="mo-prose">
+        <h2>The hover spring</h2>
+        <p>
+          A hoverbike that just clamps to a constant height looks like a magnet on a
+          fridge — too stiff for an arcade racer. So lift is a <strong>PD controller</strong>
+          (proportional + derivative) in acceleration units, applied vertically every fixed step:
+        </p>
+        <p>
+          <code>aUp = g + hoverSpring · (target − dist) − hoverDamp · vy</code>
+        </p>
+        <p>
+          The <strong>P term</strong> (<code>hoverSpring</code>) is a spring: how hard the bike
+          pushes back when it's off its target height. The <strong>D term</strong>
+          (<code>hoverDamp</code>) is a shock absorber: it bleeds vertical speed so a hard
+          landing doesn't pogo. The <code>+ g</code> cancels gravity at rest, so the spring's
+          equilibrium is exactly at the target height instead of sagging below it.
+        </p>
+        <p>
+          The default tune (spring 34, damp 8.5) puts the system at a damping ratio of about
+          ζ ≈ 0.73 — comfortably underdamped, so the bike settles with a single soft bounce
+          rather than creeping in. Crank the spring with the damping fixed and the bike turns
+          twitchy; zero the damping and you'll watch the bike sproing for half a minute. Both
+          failure modes are one slider away.
+        </p>
+      </article>
+
+      <figure class="mo-demo">
+        <figcaption class="mo-demo-caption">
+          Live demo — drop a bike and watch the spring settle. The plot is height vs time; the
+          yellow ring is the target.
+        </figcaption>
+        <div class="mo-demo-body">
+          <div class="mo-demo-stage" id="hover-spring-demo-stage"></div>
+          <div class="mo-demo-controls" id="hover-spring-demo-controls"></div>
+        </div>
+      </figure>
+
+      <article class="mo-prose">
+        <div class="mo-aside">
+          <strong>Why a PD at all?</strong> Because the sea is moving. A constant-height clamp
+          would force the bike to teleport with every crest; a spring lets it lag and roll —
+          which is precisely the feel that makes wave-mastery a skill. The same controller runs
+          four times per tick (one per probe) so the bike doesn't just settle to a height, it
+          settles to a <em>pose</em>.
+        </div>
+
+        <h2>Drive and steer</h2>
+        <p>
+          With lift handled, drive boils down to two impulses per tick: a forward thrust and a
+          yaw torque. Forward thrust is just <code>throttle · accel · speedFalloff</code>, where
+          <strong>speedFalloff</strong> is a linear ramp that goes to zero as you approach
+          <code>topSpeed</code>. That's the whole "the bike has a top speed" mechanic — no hard
+          clamp, just thrust that tapers to nothing. Boost and the tuck-bonus and the drift
+          mini-turbo all multiply the cap upward, so they push you past base top-speed by giving
+          <em>speedFalloff</em> more room to run.
+        </p>
+        <p>
+          Yaw is a torque too: <code>steer · turnTorque</code>. The bike has angular damping
+          built into its rigid body so the yaw doesn't keep spinning forever after you release
+          the stick. What stops the bike from skating sideways through every corner is
+          <strong>lateral drag</strong> — a force opposite the bike's right-vector component of
+          velocity, scaled by <code>lateralDrag</code>. Drop it and the bike turns into a hover
+          puck; raise it and it carves on rails.
+        </p>
+        <p>
+          Drag the joystick (or use <strong>WASD</strong>) and try all five archetype stats. The
+          Cruiser is the heaviest in the lineup; its low <code>turnTorque</code> means the
+          chassis is committed to a line. The Stunt and Sparrow turn so sharply they almost
+          pirouette — that's their <code>turnTorque</code> at 5.0 / 5.5 and their light mass
+          buying them angular acceleration. The Scout's soft hover spring isn't on this demo
+          (it's flat ground here) but its low accel + low turn-torque is — it reads as a tank.
+        </p>
+      </article>
+
+      <figure class="mo-demo">
+        <figcaption class="mo-demo-caption">
+          Live demo — drive. Pick a variant or hand-tune the stats. The simulation is the same
+          arcade thrust + lateral-drag model from <code>hover.ts</code>.
+        </figcaption>
+        <div class="mo-demo-body">
+          <div class="mo-demo-stage" id="drive-demo-stage"></div>
+          <div class="mo-demo-controls" id="drive-demo-controls"></div>
+        </div>
+      </figure>
+
+      <article class="mo-prose">
+        <h2>What's not on this page</h2>
+        <p>
+          Three big bike-feel systems live in their own chapters and aren't repeated here:
+        </p>
+        <ul>
+          <li>
+            <a href="/making-of/buoyancy/">Chapter 02 — Hover &amp; Buoyancy</a> shows the four
+            probes <em>in motion</em>, sampling the wave field and turning the height
+            differences into pitch + roll.
+          </li>
+          <li>
+            <a href="/making-of/feel/">Chapter 03 — Tuning the Feel</a> walks the tuck
+            sweet-spot curve — the snowboarder-duck input that's hidden inside the dive
+            gesture.
+          </li>
+          <li>
+            <a href="/making-of/drift/">Chapter 04 — The Drift</a> covers the Mario-Kart-style
+            mini-turbo: charge tiers, the inside-vs-outside drift styles, and how the boost
+            stacks with everything else.
+          </li>
+        </ul>
+
+        <h2>Read the code</h2>
+        <p>
+          The bike entity itself is a thin file:
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/game/entities/bike.ts">
+            <code>src/game/entities/bike.ts</code></a>. Stats and the five variants are in
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/game/bikes/stats.ts">
+            <code>stats.ts</code></a> and
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/game/bikes/variants.ts">
+            <code>variants.ts</code></a>. All the real behaviour — hover spring, slope momentum,
+          climb assist, dive kick, lateral drag, drift bias — lives in one (large) module:
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/game/systems/hover.ts">
+            <code>src/game/systems/hover.ts</code></a>. The demos on this page import the same
+          stats the shipping game uses, so the numbers you're dragging are the numbers under
+          the bike when you race.
+        </p>
+      </article>
+
+      <footer class="mo-footer">
+        <p>
+          <a href="/making-of/">← Back to all chapters</a> &nbsp;·&nbsp; Previous:
+          <a href="/making-of/steam/">Porting to Steam</a>.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

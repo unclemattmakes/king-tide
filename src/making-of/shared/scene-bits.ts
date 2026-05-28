@@ -1,15 +1,32 @@
 import * as THREE from 'three'
 
+export type BikeBuildOpts = {
+  /** Body (hull + nose) color. Defaults to the orange Racer palette. */
+  bodyColor?: number
+  /** Rider/trim color. Defaults to near-black. */
+  trimColor?: number
+}
+
 /**
  * The stylized hoverbike used across the demos: a flat hull with a pointed
  * nose at +Z (forward) and a rider block. `halfLen` sets the hull's
  * fore/aft half-extent in meters so a demo can match it to whatever probe
  * footprint it's illustrating.
+ *
+ * The body material is stashed on `group.userData.bodyMat` so a caller
+ * (e.g. the variant picker in the anatomy demo) can re-tint without
+ * rebuilding the geometry.
  */
-export function buildBike(halfLen = 1.4): THREE.Group {
+export function buildBike(halfLen = 1.4, opts: BikeBuildOpts = {}): THREE.Group {
   const group = new THREE.Group()
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff7a3a, roughness: 0.5 })
-  const trimMat = new THREE.MeshStandardMaterial({ color: 0x101826, roughness: 0.6 })
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: opts.bodyColor ?? 0xff7a3a,
+    roughness: 0.5,
+  })
+  const trimMat = new THREE.MeshStandardMaterial({
+    color: opts.trimColor ?? 0x101826,
+    roughness: 0.6,
+  })
 
   const hull = new THREE.Mesh(new THREE.BoxGeometry(halfLen * 0.7, 0.34, halfLen * 2), bodyMat)
   hull.position.y = 0.17
@@ -25,6 +42,8 @@ export function buildBike(halfLen = 1.4): THREE.Group {
   rider.position.set(0, 0.55, -0.1)
   group.add(rider)
 
+  group.userData.bodyMat = bodyMat
+  group.userData.trimMat = trimMat
   return group
 }
 
