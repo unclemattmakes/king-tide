@@ -2,15 +2,25 @@
 
 > Synthesizes the [research/](../research/) findings against the locked
 > vision in [product-plan.md](./product-plan.md) and the current
-> [status.md](./status.md) (MVP feature-complete, in M10.x multiplayer
-> milestones). Concrete numeric targets and prioritized work for the
-> next push toward a public-launchable v1.
+> [status.md](./status.md) (v1 lineup complete — 12/12 ship tracks; 5/5
+> bike variants; gameplay-systems v1 push closing out polish/QA). Concrete
+> numeric targets and prioritized work for the next push toward a
+> public-launchable v1.
 >
 > **Locked decisions** (from product-plan + this round of strategy):
 > - Signature skill axis = **wave mastery** (Wave Race lineage).
+> - **Secondary skill axis = drift mini-turbo** (MK lineage, P0 add
+>   during the v1 push). Lateral/spatial complement to wave-pump's
+>   vertical/timing axis — drowned-city tracks demand both. See
+>   [drift-deep-dive.md](./drift-deep-dive.md). The Wave Mastery framing
+>   is preserved: drift owns flat-water + land corners; wave-pump owns
+>   open-water sections.
 > - Track editor stays **author-only** for v1; no community ingest.
 > - Pillars from product-plan unchanged: water + verticality + arcade +
 >   10-min loop + light combat.
+> - Desktop target shifted from **Tauri** to **Electron** mid-push
+>   (Tauri/WebKitGTK couldn't deliver WebGPU on Linux or launch through
+>   the Steam Linux Runtime on the Deck — see [desktop-builds.md](./desktop-builds.md)).
 
 ## 1. Research → Hoverbike crosswalk
 
@@ -30,11 +40,21 @@
 | Set-piece tracks beat generic loops | Lagoon + Cliffside both have hero moments (ramp, mesa drop) | Every v1 track must have ≥1 named set-piece |
 | MK8 anti-grav universally loved | TODO per user | Ship **2–3 anti-grav tracks** at v1 |
 
-## 2. The signature axis — wave mastery
+## 2. The signature axis — wave mastery (+ drift as the lateral complement)
 
 This is the single most important decision in the doc and it's now
-locked. Wave physics is **the** skill the player is graded on. That
-means:
+locked. Wave physics is **the** skill the player is graded on.
+**Update (2026-05-26):** drift mini-turbo was added during the v1 push
+as the *lateral/spatial* skill complement to wave-pump's
+vertical/timing axis — drowned-city tracks ask for both. The framing
+holds: wave mastery owns the water sections, drift owns flat-water +
+land corners. The wave-line shimmer + post-pump chyron still bracket
+the wave-pump *decision*; the drift HUD tier badge + sparks bracket
+the drift *charge*. Both close on the player's button release. See
+[drift-deep-dive.md](./drift-deep-dive.md) for the lineage and
+tradeoff rationale (why drift doesn't dilute the wave-pump identity).
+
+Wave-mastery means:
 
 - **Tracks must reward wave-reading.** Open-water sections that are
   faster if you pump (accelerate down the back of a swell, kite up the
@@ -57,70 +77,91 @@ means:
 
 | Target | Current | v1 | Stretch |
 |---|---|---|---|
-| Tracks (ship-quality) | 4 | **8** | 12 |
-| Anti-grav tracks (subset) | 0 | **2** | 4 |
-| Casual lap time | ~25 s (Lagoon) | **45–65 s** | 30–90 s range across track set |
-| Total race time | ~75 s | **2.5–3.5 min** | 2–5 min range |
-| Race default | 3 laps | 3 laps | 3 laps + per-track override |
-| Field size | 4 AI + 1 player | **8 bikes** | 12 bikes |
-| Music tracks | 0 | **4–6** | 8+ |
-| AI difficulty options | Off / on | **3 levels + rubber-band toggle** | Per-class tuning |
-| Tutorial | None | **1 scripted track, <90 s** | Per-mechanic drills |
-| Modes | Free race | **+Time Trial w/ ghost, +Cup (4-track)** | +Knockout, +Mission |
-| Multiplayer | M10.x WIP | **Room codes, 2–4 peers + AI fill to 8** | 8 peers no AI |
-| Bike variants | 3 | 3 | 5 |
-| 60 fps target | Hit on M1/Ryzen | Hold on M1/Ryzen 1080p | Hold on integrated GPU 1080p |
+| Tracks (ship-quality) | **12** ✅ (target met at stretch) | 8 | 12 |
+| Anti-grav tracks (subset) | **5** ✅ (Hatteras / Kilauea / Shibuya / Angkor / Liberty — target met at stretch) | 2 | 4 |
+| Casual lap time | 45–65 s on v1 tracks | 45–65 s | 30–90 s range across track set |
+| Total race time | 2.5–3.5 min on v1 tracks | 2.5–3.5 min | 2–5 min range |
+| Race default | 3 laps + per-track override | 3 laps | 3 laps + per-track override |
+| Field size | **8 bikes** ✅ (state-sync stable; perf at full field is the open work) | 8 bikes | 12 bikes |
+| Music tracks | 🟡 procedural pad bed only | **4–6** | 8+ |
+| AI difficulty options | **3 levels + rubber-band toggle** ✅ (+ per-difficulty pump + drift tuning) | 3 levels + rubber-band toggle | Per-class tuning |
+| Tutorial | ✅ Track-agnostic 6-beat director (THROTTLE → CRUISE → LOOK → WAVE PUMP → DRIFT → ANTI-GRAV → READY); auto-runs on Sandbar | 1 scripted track, <90 s | Per-mechanic drills |
+| Modes | ✅ Race / Time Trial + ghost / Cup (4-cup, MK8 points) / Multiplayer / Tutorial | +Time Trial w/ ghost, +Cup (4-track) | +Knockout, +Mission |
+| Multiplayer | ✅ Room codes, lobby, sticky raceStarted, 1 Hz ping/pong | Room codes, 2–4 peers + AI fill to 8 | 8 peers no AI |
+| Bike variants | **5** ✅ (Cruiser / Racer / Stunt / Scout / Sparrow) | 3 | 5 |
+| Drift mini-turbo | ✅ MT/SMT/UMT tiers, inside-drift archetypes, AI drift, Practice Range | — (added during v1 push) | per-bike tier-time tunables |
+| Surface registry | ✅ runtime + sync test; 🟡 Blender authoring UI pending | — (added during v1 push) | Volumetric grip painting in editor |
+| Desktop targets | ✅ Linux + Windows via Electron (Steam Deck Native + Windows depot); macOS deferred | — | macOS |
+| Making-of microsite | ✅ Six chapters at `/making-of/`, demos import real sim | — | Per-chapter playthrough video |
+| 60 fps target | 🟡 Holds on M1/Ryzen at solo; perf-budget pass against 8-bike field still pending | Hold on M1/Ryzen 1080p | Hold on integrated GPU 1080p |
 | Boot-to-race | <5 s broadband | <5 s | <3 s |
 
 ## 4. Priorities
 
 ### P0 — must ship for v1 public launch
 
-1. **Track length pass.** Extend Lagoon and Cliffside to 45–65 s casual
-   laps. Either lengthen the loop or convert to 2-lap longer tracks.
-   The current ~25 s lap is below the genre's casual-play band and
-   reads as a tech demo, not a race.
-2. **4 additional ship-quality tracks.** Target: one all-ocean (wave
-   mastery hero), one urban/canyon (set-piece à la Mount Wario),
-   one mixed land/water with anti-grav section, one Baby-Park-style
-   short multi-lap chaos arena. Reuses existing Blender authoring stack.
-3. **Anti-grav system + 2 anti-grav tracks.** Hover controller must
-   handle inverted/wall orientation; trigger volumes flip gravity;
-   visual indicator on entry. Anti-grav is universally cited as MK8's
-   most-loved tactile shift; the user explicitly wants this.
-4. **Wave-pumping skill loop made legible.** Pumping already happens
-   physically; add a HUD signal so players know it's a graded skill.
-   This is what makes "wave mastery as signature axis" real instead of
-   wishful framing.
-5. **Soundtrack — 4–6 tracks licensed or commissioned.** Universal
-   research signal. Procedural SFX is fine; absence of music is a
-   "this isn't done" tell at the first 10 seconds of play.
-6. **AI difficulty slider + rubber-band toggle.** Three settings
-   (Casual / Standard / Hard) + a discrete "AI catch-up: off" option.
-   Cap rubber-band acceleration coefficient when on; data is already
-   in the AI system.
-7. **Tutorial track.** <90 s scripted run teaching: throttle, drift,
-   wave pumping (with explicit prompt), pickup use, jump landing,
-   anti-grav entry. Auto-skip toggle for returning players.
-8. **Race-line / wave-line guidance for new players.** The "Crazy Taxi
-   arrow" already exists; extend with subtle on-water shimmer when the
-   wave is pumpable. Avoids the Redout 2 onboarding failure mode.
+1. ✅ **Track length pass.** Extended via the v1 sprint — every track
+   in the v1 lineup hits the 45–65 s casual-lap target. (Lagoon stays
+   as the tutorial-adjacent short loop per the Baby-Park precedent.)
+2. ✅ **Ship-quality tracks at v1 scale.** Shipped 12/12 — Reef Cup
+   (Sandbar / South Beach Sunken / Hatteras Light / Cape Town Drift),
+   Open Sea (The Maw), Continental Cup (Shibuya Submerged / Kilauea
+   Crown / Marina Bay 7 / Doge's Drift), Drowned Cup (Aqualand /
+   Angkor Drowned / Liberty Drowned). All four cups lit; Drowned Cup
+   is the finale.
+3. ✅ **Anti-grav system + 2+ anti-grav tracks.** Shipped 5 — Hatteras
+   corkscrew, Kilauea caldera-rim ribbon, Shibuya Cocoon Tower wall-ride,
+   Angkor central spire helix, Liberty's torch-arm Möbius + crown
+   interior. HUD indicator + camera-intensity setting (Full / Reduced
+   / Off) live.
+4. ✅ **Wave-pumping skill loop legible.** Post-pump chyron + audio
+   chord on successful pump; predictive 3D `wave-line` forward fan
+   over rising swell. Settings → Gameplay → "Wave-pump prompt" +
+   "Wave-line guidance" (Full / Subtle / Off).
+5. 🟡 **Soundtrack.** Procedural pad bed shipped as stand-in on the
+   music bus (`audio-service.ts`); licensing or commissioning the
+   4–6 tracks is the open item — `setMusicEnabled(false)` is a
+   one-liner away from the swap.
+6. ✅ **AI difficulty slider + rubber-band toggle.** Casual / Standard
+   / Hard; rubber-band assist toggle is read live each tick so flipping
+   mid-race settles AI back to its baseline. Per-difficulty pump-firing
+   threshold + per-difficulty drift activation (Hard reaches UMT).
+7. ✅ **Tutorial.** Track-agnostic 6-beat director: THROTTLE → CRUISE
+   → LOOK AROUND → WAVE PUMP → DRIFT → ANTI-GRAV → READY. Activated
+   by Tutorial mode tile or Settings → Replay Tutorial. Subtitles
+   toggle hides the hint line; the chyron stays.
+8. ✅ **Wave-line guidance.** 3D forward-fan shimmer over the
+   `sampleSurface().vy` field — markers' size + brightness scale with
+   pump-score so the player sees where the next push will pay.
+9. ✅ **Drift mini-turbo (added during the v1 push).** Mario-Kart-style
+   3-tier mini-turbo with inside/outside-drift archetypes per bike.
+   Lateral skill complement to wave-pump's vertical axis. Surface-type
+   registry (ice / sand / metal) layers grip variation. AI drift on
+   sharp corners (Standard caps at SMT, Hard reaches UMT). Drift
+   Practice Range as dev fixture. See
+   [drift-deep-dive.md](./drift-deep-dive.md).
 
 ### P1 — strong v1 polish, ship if time
 
-1. **Cup mode (4-track championship)** with points table and end-of-cup
-   summary. Reuses existing race + finish-overlay UI.
-2. **Time Trial mode with ghost.** Best-lap save already exists; add
-   ghost playback + global leaderboard via Vercel KV or similar
-   (single endpoint, no account system).
-3. **Room-code multiplayer to 8 bikes.** M10.x is already on this path.
-   Don't ship public matchmaking. AI fills empty slots.
-4. **Two more bike variants** for v1 (5 total). Each variant should
-   have a clearly different wave-pumping feel (heavy = punishes pump
-   timing harder, light = pumps easier but throws further off-line).
-5. **Per-track best-lap leaderboard** (anonymous, single-table).
-6. **Photo/replay mode.** Cheap content multiplier; asked-for in
-   every research target.
+1. ✅ **Cup mode (4-track championship)** with points table and end-of-cup
+   summary. MK8-style point curve (15/12/10/9/8/7/6/5/4/3/2/1) +
+   cup-results screen with champion banner. All four ship cups lit.
+2. ✅ **Time Trial mode with ghost** + global leaderboard. Single-lap
+   ghost slice loops per lap. HMAC-signed PartyKit `leaderboard` Party
+   + moderation CLI; per-track top-25 with profanity / replay-nonce
+   gating.
+3. ✅ **Room-code multiplayer to 8 bikes.** Lobby with smash-bros pick
+   + ready states + 1 Hz ping/pong latency display + sticky raceStarted
+   bit for late joiners. State-sync stable; perf at full field still
+   pending.
+4. ✅ **Two more bike variants** — Scout (heavyweight, soft hover spring
+   → punishing wave-pump timing + biggest launch) + Sparrow (lightweight,
+   stiffest spring + highest surfaceFollow → forgiving + further launch).
+5. ✅ **Per-track best-lap leaderboard** + global submission with HMAC
+   sig + moderation CLI.
+6. ⬜ **Photo/replay mode.** Recorder + pose-replay infrastructure
+   in place (powers Time Trial ghosts); a viewer scene is the open
+   work.
 
 ### P2 — deferred (worth doing eventually, not v1-critical)
 
@@ -128,12 +169,18 @@ means:
   Big design lift; revisit after v1 traction.
 - Shareable track URLs (research moat, post-launch decision).
 - Mission Mode / scenario challenges (MK8 most-requested feature).
-- Touch on-screen controls (input is wired; overlay isn't).
+- ✅ Touch on-screen controls (mobile MENU button + touch HUD shipped
+  during Polish/QA — see status.md).
 - VR support (recurring Riptide ask, niche).
 - Original soundtrack vs. licensed (start licensed, commission once
   the game's identity is locked).
 - Career / story framing — research is mixed on whether arcade racers
   benefit. Skip for v1.
+- 🆕 **Rider customization (player-facing).** Editor (`?rideredit=1`)
+  ships with primitive shapes + colours + seated-pose tools; pulling it
+  into the main menu as a Garage feature is post-launch polish.
+- 🆕 **Surface-type Blender authoring UI.** Runtime + tests live; the
+  addon panel write-out is the remaining sliver.
 
 ## 5. Anti-targets — things we explicitly will *not* do
 
@@ -201,35 +248,65 @@ for decision before the work starts.
 ## 7. Roadmap shape
 
 This is shape, not a schedule — milestones in [implementation-plan.md](./implementation-plan.md)
-are how the work actually gets tracked. Rough sequencing:
+are how the work actually gets tracked. Original sequencing (what actually
+shipped where the original plan didn't anticipate is marked in the second
+column):
 
 ```
-M10.x — multiplayer state sync + room codes        (in flight)
+M10.x — multiplayer state sync + room codes        ✅ landed
 M11   — wave-mastery loop visible (HUD + pump feedback)
+                                                   ✅ Foundation Systems 5/5
 M12   — anti-grav system + first anti-grav track
+                                                   ✅ HUD + camera + 5 tracks
 M13   — track length pass (extend existing + 2 new tracks)
+                                                   ✅ Reef Cup (Sprint 1)
 M14   — soundtrack integration + audio mixing pass
+                                                   🟡 mixer + procedural bed;
+                                                       licensed music pending
 M15   — AI difficulty slider + tutorial track
-M16   — Time Trial + ghost
-M17   — Cup mode
-M18   — final 2 v1 tracks + polish
-v1 launch.
+                                                   ✅ both shipped + DRIFT beat
+M16   — Time Trial + ghost                         ✅ + leaderboard
+M17   — Cup mode                                   ✅ all 4 cups lit
+M18   — final 2 v1 tracks + polish                 ✅ 12/12 ship tracks
+                                                       + electron port
+                                                       + making-of microsite
+                                                       + drift / tricks / tuck
+                                                       + surface registry
+v1 launch.                                         (current target)
 post-v1 — Knockout Tour, shareable tracks, replay mode
 ```
 
+Unplanned-but-landed (rolled in during M14–M18):
+- **Drift mini-turbo** (gameplay-mechanic add) — see drift-deep-dive.md.
+- **Surface-type registry** (drift's content layer).
+- **Tuck sweet-spot** + **Tricks rework**.
+- **Electron desktop wrapper** replacing Tauri (Steam Deck blocker).
+- **Six-chapter making-of microsite** (marketing surface, also drove the
+  pure-leaf extraction of `tuck-curve.ts` + `drift-tiers.ts`).
+- **Rider editor** (`?rideredit=1`).
+
 ## 8. Success metrics for v1
 
-- **8 ship-quality tracks** with at least one named set-piece each.
-- **2 anti-grav tracks** validated for handling on chase cam.
-- **Casual lap time across the set: 30–90 s**, weighted toward 45–65 s.
-- **Total race: 2.5–4 min** at default lap count.
-- **60 fps at 1080p on M1 and Ryzen 5000**, including wave-heavy tracks
-  with 8-bike fields.
-- **Boot-to-first-race under 5 s** broadband.
-- **Tutorial completion under 90 s** for a non-gamer.
-- **First-race retention:** non-gamer plays a second race without
-  prompting. (Was in product-plan's success criteria, still open.)
-- **Soundtrack present from main menu through finish overlay.**
+- ✅ **12 ship-quality tracks** with at least one named set-piece each.
+  (Target was 8 — overshot to the stretch goal.)
+- ✅ **5 anti-grav tracks** validated for handling on chase cam (Hatteras,
+  Kilauea, Shibuya, Angkor, Liberty). (Target was 2; stretch goal was 4 —
+  overshot.)
+- ✅ **Casual lap time across the set: 30–90 s**, weighted toward 45–65 s.
+- ✅ **Total race: 2.5–4 min** at default lap count.
+- 🟡 **60 fps at 1080p on M1 and Ryzen 5000** with 8-bike fields on
+  wave-heavy tracks — perf-budget pass still pending against the full
+  field.
+- ✅ **Boot-to-first-race under 5 s** broadband.
+- 🟡 **Tutorial completion under 90 s** for a non-gamer — untested with
+  a real non-gamer.
+- ⬜ **First-race retention:** non-gamer plays a second race without
+  prompting.
+- 🟡 **Soundtrack present from main menu through finish overlay** —
+  procedural pad bed ships today; licensed/commissioned drops still
+  pending.
+- ✅ **Drift skill loop legible.** Tier-up HUD + colored sparks + bell
+  pitch + camera roll all give the same payoff signal.
 
 ## References
 

@@ -2,15 +2,17 @@
 
 > Concrete tech choices, repo layout, and milestones to deliver the Playable Demo MVP defined in [product-plan.md](./product-plan.md).
 >
-> **Status (2026-05-07):** MVP feature-complete. M0–M6 all shipped, plus
-> M7–M9.x extension milestones (real loop track, kinematic attitude
-> system, surface alignment, motion trails, combat bundle, AI pickup
-> usage, jump ramp, audio, second track, garage menu + variants + save
-> state, hybrid Blender + JSON track pipeline with in-app editor). Live
-> build at the Vercel URL in [README](../README.md). For the live state
-> of features, gotchas, and what's still open, see
-> [status.md](./status.md) — this doc covers the original architectural
-> plan; status.md tracks the actual codebase.
+> **Status (2026-05-28):** v1 push is closing out. MVP shipped 2026-05-07
+> (M0–M6 + M7–M9.x extension milestones). Since then the v1 work-breakdown
+> ([v1-work-breakdown.md](./v1-work-breakdown.md)) has shipped: full menu
+> cathedral, foundation systems (5/5), all 12 v1 ship-quality tracks
+> across 4 cups, Time Trial + ghosts + leaderboard, MP room codes +
+> lobby + 8-bike slots, drift mini-turbo + tricks + tuck + surface
+> registry, Electron desktop wrapper (replaces Tauri — real WebGPU on
+> Steam Deck), making-of microsite. Live build at the Vercel URL in
+> [README](../README.md). For the live state of features, gotchas, and
+> what's still open, see [status.md](./status.md) — this doc covers the
+> original architectural plan; status.md tracks the actual codebase.
 
 ## Architectural principle: sim ↔ render split
 
@@ -241,21 +243,26 @@ Each milestone was treated as a decision gate; M9.x sub-milestones came out of p
 
 ## What's next (post-MVP)
 
-- **AI cornering polish.** Lagoon's parallel-line AI is solid; Cliffside's
-  mesa drop still snares the AI when it overshoots a corner. Either
-  widen the mesa, add side ramps, or teach the AI to detour to the
-  climb ramp when off-elevation.
-- **Editor — phase 3.** Undo/redo, numeric input fields in the
-  properties panel, env-glb preview *inside* edit mode, boost-pad
-  runtime behaviour (the data type is wired but the sim doesn't react
-  yet), garage-menu "Edit" entry-point.
-- **On-screen touch controls.** Touch input is wired in
-  `src/engine/input/touch.ts`; needs an HTML overlay with virtual
-  stick + buttons.
-- **Music.** Procedural audio covers SFX; background music is still
-  missing.
-- Beyond MVP: multiplayer (Rapier deterministic build is ready), career
-  mode.
+Most of the original post-MVP punchlist landed during the v1 push. This
+section is preserved for archeology; the live status lives in
+[status.md](./status.md) and [v1-work-breakdown.md](./v1-work-breakdown.md).
+
+- ✅ **Multiplayer** — Rapier deterministic build powers a PartyKit relay
+  with InputFrames + 20 Hz TransformSnapshots, room codes, lobby with
+  ready states + smash-bros pick, in-race latency display.
+- ✅ **Music + audio mixer.** Four-bus mixer (master / music / sfx / ambient)
+  + sidechain duck on pump/explosion + drift skid loop + per-tier release
+  whoosh. 🟡 Licensed/commissioned music drops still pending.
+- ✅ **On-screen touch controls.** Touch HUD overlay + mobile MENU button
+  shipped during Polish/QA.
+- 🟡 **AI cornering polish.** Per-difficulty pump-firing + drift activation
+  improved the apex behaviour; per-track racing-line authoring (especially
+  Cliffside-style elevation drops) still uneven.
+- 🟡 **Editor — phase 3.** Undo/redo + Catmull-Rom anchor splines landed
+  (M9.21); numeric input fields + env-glb preview *inside* edit mode +
+  garage-menu entry-point still open.
+- **Beyond v1**: knockout-tour mode, shareable track URLs, photo/replay
+  viewer, native macOS desktop, licensed soundtrack.
 
 **Shipped in M9.16–M9.21** (originally listed here as future work):
 - ✅ End-to-end Blender → .glb pipeline (M9.16) — `tools/export_track.py`
