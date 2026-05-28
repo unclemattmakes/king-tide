@@ -1725,9 +1725,20 @@ def build_scatter_group() -> bpy.types.NodeTree:
     g.links.new(distribute.outputs["Points"], delete_pts.inputs["Geometry"])
     g.links.new(invert.outputs[0],            delete_pts.inputs["Selection"])
 
-    # 6. Instance on Points — Pick Instance ON so each point picks a
-    #    random object from the source collection. Reset Children OFF
-    #    keeps each prop's hierarchy intact.
+    # 6. Instance on Points. Separate Children=True returns each direct
+    #    child of the source collection as a candidate archetype that
+    #    Pick Instance can select per point. With ``prop_*`` collections
+    #    that contain both an organisational ``prop_<id>_root`` Empty
+    #    and the visible ``prop_<id>_mesh``, this gives 2 archetypes
+    #    per source — passing a *constant* Instance Index (the old
+    #    ``gi.outputs["Seed"]`` wire) deterministically picked the
+    #    same archetype across all points, consistently the invisible
+    #    Empty → "empties scatter, no props render." A per-point random
+    #    Int distributes ~50/50 across the [Empty, Mesh] pair: half the
+    #    points render palms in the Blender viewport, all of them
+    #    realise to a real mesh in the .glb (the export realization
+    #    pass's _resolve_mesh_source walks the Empty's children to find
+    #    the Mesh on the case 2 fallback).
     coll_info = _add_node(g, "GeometryNodeCollectionInfo", 200, -300)
     coll_info.transform_space = "ORIGINAL"
     g.links.new(gi.outputs["Source"], coll_info.inputs["Collection"])
@@ -1738,7 +1749,16 @@ def build_scatter_group() -> bpy.types.NodeTree:
     iop.inputs["Pick Instance"].default_value = True
     g.links.new(delete_pts.outputs["Geometry"], iop.inputs["Points"])
     g.links.new(coll_info.outputs["Instances"], iop.inputs["Instance"])
-    g.links.new(gi.outputs["Seed"],             iop.inputs["Instance Index"])
+
+    # Per-point random Int driving Instance Index (the implicit per-
+    # point evaluation context of FunctionNodeRandomValue gives each
+    # point a different output even with a scalar Seed).
+    rand_pick = _add_node(g, "FunctionNodeRandomValue", 400, -300)
+    rand_pick.data_type = "INT"
+    rand_pick.inputs[4].default_value = 0
+    rand_pick.inputs[5].default_value = 1_000_000
+    g.links.new(gi.outputs["Seed"], rand_pick.inputs["Seed"])
+    g.links.new(rand_pick.outputs[2], iop.inputs["Instance Index"])
 
     # 7. Random Z rotation per instance.
     rand_rot = _add_node(g, "FunctionNodeRandomValue", 400, 300)
@@ -2021,8 +2041,10 @@ def build_biome_palette_group() -> bpy.types.NodeTree:
         g.links.new(distribute.outputs["Points"], delete_pts.inputs["Geometry"])
         g.links.new(invert.outputs[0],            delete_pts.inputs["Selection"])
 
-        # 8. Instance on Points — Pick Instance ON randomises across the
-        #    biome collection's children.
+        # 8. Instance on Points — see HV_Scatter's matching comment for
+        #    why Instance Index is per-point random (constant Index
+        #    deterministically picked the invisible Empty archetype out
+        #    of every ``prop_*`` collection).
         coll_info = _add_node(g, "GeometryNodeCollectionInfo", x + 1900, y - 500)
         coll_info.transform_space = "ORIGINAL"
         coll_info.inputs["Separate Children"].default_value = True
@@ -2033,7 +2055,13 @@ def build_biome_palette_group() -> bpy.types.NodeTree:
         iop.inputs["Pick Instance"].default_value = True
         g.links.new(delete_pts.outputs["Geometry"], iop.inputs["Points"])
         g.links.new(coll_info.outputs["Instances"], iop.inputs["Instance"])
-        g.links.new(seed_node.outputs[0],           iop.inputs["Instance Index"])
+
+        rand_pick = _add_node(g, "FunctionNodeRandomValue", x + 2000, y - 250)
+        rand_pick.data_type = "INT"
+        rand_pick.inputs[4].default_value = 0
+        rand_pick.inputs[5].default_value = 1_000_000
+        g.links.new(seed_node.outputs[0], rand_pick.inputs["Seed"])
+        g.links.new(rand_pick.outputs[2], iop.inputs["Instance Index"])
 
         # 9. Random Z rotation.
         rand_rot = _add_node(g, "FunctionNodeRandomValue", x + 2400, y + 100)
@@ -2067,6 +2095,15 @@ def build_biome_palette_group() -> bpy.types.NodeTree:
 
     g.links.new(join.outputs["Geometry"], go.inputs["Geometry"])
     g.use_fake_user = True
+    # TODO(scatter-export): opt-in to the export-time realization pass
+    # via ``hb_scatter_ng=True`` once the linked-from-library bake path
+    # in ``_RealizedScatterInstances`` stops crashing. Today (without
+    # the tag) HV_BiomePalette output ships as raw modifier instances,
+    # which means EXT_mesh_gpu_instancing isn't emitted and the runtime
+    # gets the (mostly Empty) instance archetypes — invisible scatter.
+    # The viewport-side workaround is per-point random Instance Index
+    # (lands on the visible Mesh archetype ~50% of the time); the
+    # export-side workaround is still pending.
     return g
 
 
@@ -2163,7 +2200,8 @@ def build_stroke_scatter_group() -> bpy.types.NodeTree:
     g.links.new(gi.outputs["Density"],         distribute.inputs["Density"])
     g.links.new(gi.outputs["Seed"],            distribute.inputs["Seed"])
 
-    # ── Instance on Points from the Source collection ───────────────
+    # ── Instance on Points — see HV_Scatter's matching comment for
+    #    why Instance Index is per-point random.
     coll_info = _add_node(g, "GeometryNodeCollectionInfo", -500, -300)
     coll_info.transform_space = "ORIGINAL"
     coll_info.inputs["Separate Children"].default_value = True
@@ -2174,7 +2212,13 @@ def build_stroke_scatter_group() -> bpy.types.NodeTree:
     iop.inputs["Pick Instance"].default_value = True
     g.links.new(distribute.outputs["Points"],   iop.inputs["Points"])
     g.links.new(coll_info.outputs["Instances"], iop.inputs["Instance"])
-    g.links.new(gi.outputs["Seed"],             iop.inputs["Instance Index"])
+
+    rand_pick = _add_node(g, "FunctionNodeRandomValue", -400, -150)
+    rand_pick.data_type = "INT"
+    rand_pick.inputs[4].default_value = 0
+    rand_pick.inputs[5].default_value = 1_000_000
+    g.links.new(gi.outputs["Seed"], rand_pick.inputs["Seed"])
+    g.links.new(rand_pick.outputs[2], iop.inputs["Instance Index"])
 
     # ── Random Z rotation ───────────────────────────────────────────
     rand_rot = _add_node(g, "FunctionNodeRandomValue", -200, 300)
