@@ -78,7 +78,7 @@
     "@types/three": "^0.184.1",
     "@vitest/coverage-v8": "^4.1.6",
     "ajv": "^8.17.1",
-    "electron": "^42.2.0",
+    "electron": "^42.3.0",
     "electron-builder": "^26.8.1",
     "jsdom": "^29.1.1",
     "partykit": "^0.0.115",
