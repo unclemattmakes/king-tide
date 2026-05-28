@@ -6,13 +6,15 @@
 //
 // Placeholders the renderer fills in (all wrapped in dollar-curly braces):
 //   STEAM_APPID                  numeric Steam App ID (assigned by Valve)
-//   STEAM_DEPOT_LINUX            Linux AppImage depot ID
-//   STEAM_DEPOT_WINDOWS          Windows NSIS depot ID
+//   STEAM_DEPOT_WINDOWS          Windows depot ID
 //   BUILD_DESCRIPTION            free-form description (commit SHA + tag)
 //   SET_LIVE                     branch name to push live, or empty for "no auto-set"
 //   STEAM_PREVIEW                "1" for dry-run, "0" for real upload
 //   CONTENT_ROOT                 absolute path to staged depot content
 //   BUILD_OUTPUT                 absolute path for steamcmd logs / manifests
+//
+// Windows-only: the Deck runs this build via Proton, so there's no native
+// Linux depot (see docs/desktop-builds.md).
 //
 // SteamPipe docs: https://partner.steamgames.com/doc/sdk/uploading
 "appbuild"
@@ -43,7 +45,6 @@
 
 	"depots"
 	{
-		"${STEAM_DEPOT_LINUX}"		"depot_linux.vdf"
 		"${STEAM_DEPOT_WINDOWS}"	"depot_windows.vdf"
 	}
 }

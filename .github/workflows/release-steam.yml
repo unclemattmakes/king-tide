@@ -4,12 +4,12 @@ name: release-steam
 # only — Steam uploads aren't trivially reversible (you can't
 # delete a build, only push a different one live), so we don't auto-
 # fire on tag pushes. Trigger this after build-desktop has produced
-# the Linux + Windows game-tree artifacts you want to ship.
+# the Windows game-tree artifact you want to ship. (The Deck runs the
+# Windows build via Proton, so there's no native Linux depot.)
 #
 # Required repository secrets (set in Settings → Secrets and variables):
 #
 #   STEAM_APPID            numeric app ID (e.g. "3000000")
-#   STEAM_DEPOT_LINUX      Linux depot ID
 #   STEAM_DEPOT_WINDOWS    Windows depot ID
 #   STEAM_USERNAME         Steam build account username
 #   STEAM_CONFIG_VDF       base64 of a pre-baked config.vdf (Steam Guard token)
@@ -34,15 +34,6 @@ on:
         required: false
         default: ""
         type: string
-      platforms:
-        description: "Which depots to upload"
-        required: false
-        default: "both"
-        type: choice
-        options:
-          - "both"
-          - "linux"
-          - "windows"
       preview:
         description: "SteamPipe preview run (validate, don't upload)"
         required: false
@@ -105,30 +96,10 @@ jobs:
           fi
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
-      # ---- Pull artifacts from that run -----------------------------------
-      # build-desktop uploads the electron-builder unpacked trees directly,
-      # so there's no installer to extract. The Linux tree is tarred (to keep
-      # the `hoverbike` binary's +x bit through the artifact round-trip).
-      - name: Download Linux tree artifact
-        if: inputs.platforms == 'both' || inputs.platforms == 'linux'
-        uses: actions/download-artifact@v5
-        with:
-          name: hoverbike-linux-tree
-          path: artifacts/linux
-          run-id: ${{ steps.resolve_run.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Unpack Linux tree
-        if: inputs.platforms == 'both' || inputs.platforms == 'linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          tar -xzf artifacts/linux/hoverbike-linux.tar.gz -C artifacts/linux
-          test -x artifacts/linux/linux-unpacked/hoverbike \
-            || echo "::warning::hoverbike binary is not executable — Steam may ship a tree that won't launch"
-
+      # ---- Pull the Windows tree from that run ----------------------------
+      # build-desktop uploads the electron-builder win-unpacked tree directly,
+      # so there's no installer to extract. (Deck = this build via Proton.)
       - name: Download Windows tree artifact
-        if: inputs.platforms == 'both' || inputs.platforms == 'windows'
         uses: actions/download-artifact@v5
         with:
           name: hoverbike-windows-tree
@@ -175,19 +146,17 @@ jobs:
       - name: Upload to Steam
         env:
           STEAM_APPID: ${{ secrets.STEAM_APPID }}
-          STEAM_DEPOT_LINUX: ${{ secrets.STEAM_DEPOT_LINUX }}
           STEAM_DEPOT_WINDOWS: ${{ secrets.STEAM_DEPOT_WINDOWS }}
           STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
           # steamcmd is on PATH from the install step above.
           STEAM_SET_LIVE: ${{ inputs.set_live }}
           STEAM_PREVIEW: ${{ inputs.preview }}
-          LINUX_BUNDLE_DIR: ${{ github.workspace }}/artifacts/linux/linux-unpacked
           WINDOWS_BUNDLE_DIR: ${{ github.workspace }}/artifacts/windows
           BUILD_DESCRIPTION: ${{ github.ref_name }} (${{ github.sha }})
         shell: bash
         run: |
           set -euo pipefail
-          node tools/steam-upload.mjs --platform=${{ inputs.platforms }}
+          node tools/steam-upload.mjs
 
       - name: Upload SteamPipe logs (always)
         if: always()
