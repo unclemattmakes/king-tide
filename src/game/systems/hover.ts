@@ -1016,6 +1016,22 @@ function applyMultiPointHoverSpring(
   const heightErrorCap = MAX_BOW_LIFT_ERROR + slopeBoost
   const groundedCutoff = stats.hoverHeight * GROUNDED_DISTANCE_MUL
 
+  // Bow/stern force direction: zone-up projected onto the bike's
+  // sagittal plane (the local Y-Z plane, perpendicular to local +X).
+  // On an upright bike `up · forceRight = 0` and this is identity. When
+  // the bike is rolled to bank into a lateral slope, zone-up picks up a
+  // body-X component — crossed with the bow/stern offset (along body-Z)
+  // that becomes a body-Y (yaw) torque, and any forward-slope asymmetry
+  // in per-corner lift (bow drags up-slope, stern down-slope) yaws the
+  // bike further up-slope. Positive feedback runs the heading to ±90°
+  // off the contour line. Projecting kills the coupling exactly while
+  // leaving port/starboard's roll authority along zone-up untouched.
+  const upDotRight =
+    upX * footprint.forceRightX + upY * footprint.forceRightY + upZ * footprint.forceRightZ
+  const longFX = upX - upDotRight * footprint.forceRightX
+  const longFY = upY - upDotRight * footprint.forceRightY
+  const longFZ = upZ - upDotRight * footprint.forceRightZ
+
   for (let pi = 0; pi < points.length; pi++) {
     const p = points[pi]!
     // Probe point's projection on up = (t + offset) · up.
@@ -1079,13 +1095,21 @@ function applyMultiPointHoverSpring(
       dc.aUp = aUp
       dc.active = true
     }
-    // Lift along +up at the probe point's world position. The point
-    // location includes the bike's pitch contribution, which is what
-    // gives flat-ground attitude restoration (nose-up bike's bow is
-    // higher → spring pushes bow DOWN → levels chassis).
+    // Lift at the probe point's world position. The point location
+    // includes the bike's pitch contribution, which is what gives
+    // flat-ground attitude restoration (nose-up bike's bow is higher
+    // → spring pushes bow DOWN → levels chassis). Bow/stern impulses
+    // are routed through the sagittal-plane projection of zone-up
+    // (`longFX/Y/Z`, see above) so a rolled-into-the-slope chassis
+    // doesn't leak the spring's forward-slope correction into a yaw
+    // torque. Port/starboard stay along zone-up so the spring's lateral
+    // roll authority is unchanged.
+    const fX = p.longitudinal ? longFX : upX
+    const fY = p.longitudinal ? longFY : upY
+    const fZ = p.longitudinal ? longFZ : upZ
     const impMag = aUp * POINT_MASS_FRAC * m * dt
     rb.applyImpulseAtPoint(
-      { x: upX * impMag, y: upY * impMag, z: upZ * impMag },
+      { x: fX * impMag, y: fY * impMag, z: fZ * impMag },
       { x: t.x + p.ox, y: t.y + p.oy, z: t.z + p.oz },
       true,
     )
