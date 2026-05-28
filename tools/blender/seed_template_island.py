@@ -584,6 +584,15 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     if NODE_GROUP_NAME in bpy.data.node_groups:
         bpy.data.node_groups.remove(bpy.data.node_groups[NODE_GROUP_NAME])
     g = bpy.data.node_groups.new(NODE_GROUP_NAME, "GeometryNodeTree")
+    # Required so the group appears in the "Add Geometry Nodes Modifier"
+    # dropdown. Without this, the group only works if it's already
+    # attached to a modifier slot — picking it for a new slot fails
+    # with "No results found". HV_PeakProfile (the per-peak sub-group)
+    # has no Geometry sockets and is never attached directly, so it
+    # stays is_modifier=False. The load_post migration in
+    # hoverbike_addon/handlers.py flips this flag on legacy .blends
+    # whose groups were created before this fix.
+    g.is_modifier = True
 
     _new_socket(g, "Geometry", "INPUT", "NodeSocketGeometry")
     for i in range(8):

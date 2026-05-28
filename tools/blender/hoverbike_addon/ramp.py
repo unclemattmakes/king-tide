@@ -88,6 +88,9 @@ def _ensure_hv_ramp_group() -> bpy.types.NodeTree:
     if HV_RAMP_GROUP_NAME in bpy.data.node_groups:
         bpy.data.node_groups.remove(bpy.data.node_groups[HV_RAMP_GROUP_NAME])
     g = bpy.data.node_groups.new(HV_RAMP_GROUP_NAME, "GeometryNodeTree")
+    # Required so the group is selectable in the GN modifier dropdown.
+    # See seed_template_island.py for the full rationale.
+    g.is_modifier = True
 
     def add_socket(name, in_out, stype, default=None, mn=None, mx=None):
         s = g.interface.new_socket(name, in_out=in_out, socket_type=stype)

@@ -402,6 +402,11 @@ def build_template_alpine_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     if NODE_GROUP_NAME in bpy.data.node_groups:
         bpy.data.node_groups.remove(bpy.data.node_groups[NODE_GROUP_NAME])
     g = bpy.data.node_groups.new(NODE_GROUP_NAME, "GeometryNodeTree")
+    # Required so the group is selectable in the GN modifier dropdown.
+    # HV_RidgeProfile (the inner sub-group) stays is_modifier=False —
+    # it's never attached directly. See seed_template_island.py for the
+    # full rationale.
+    g.is_modifier = True
 
     _new_socket(g, "Geometry", "INPUT", "NodeSocketGeometry")
     for i in range(4):
