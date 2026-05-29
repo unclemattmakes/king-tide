@@ -50,7 +50,7 @@ import type { SkyShared } from '@/engine/render/sky'
 const DEFAULT_CLOUD_ALTITUDE = 600 // metres above terrain
 const DEFAULT_FEATURE_SCALE = 1 / 320 // ≈ 320 m per cloud feature on the ground
 const DEFAULT_WIND = { x: 0.6, z: 0.35 } // metres per (uniform) second
-const DEFAULT_SHADOW_FLOOR = 0.55 // deepest darkening under a cloud (≈ 45 % light)
+const DEFAULT_SHADOW_FLOOR = 0.35 // deepest darkening under a cloud (≈ 65 % darker)
 
 export type CloudShadowOptions = {
   /** Altitude of the virtual cloud layer in metres. Default 600 m — sits
@@ -134,13 +134,21 @@ export function buildCloudShadowMultiplier(shared: SkyShared, opts: CloudShadowO
   const cloudN = fbm3(sampleCoord)
 
   // ── Convert noise → light multiplier ─────────────────────────────────
-  // Threshold mirrors sky.ts's cloud-cover gate so where the dome shows
-  // a cloud, the ground darkens. `cloudiness` shifts the threshold so
-  // overcast tracks (`cloudiness ≈ 1`) leave the ground in a near-uniform
-  // soft shadow, while clear tracks (`cloudiness ≈ 0`) barely darken at all.
+  // The smoothstep ramp has to straddle where the FBM noise actually
+  // lives, otherwise the cover term sits at ~0 for typical fragments and
+  // the multiplier reads as a no-op. Three-octave value noise centres at
+  // ≈ 0.5 with std-dev ≈ 0.18, so an earlier `(0.37, 0.9)` ramp put 95 %+
+  // of pixels below threshold and the shadows were invisible in-game.
+  // The current `(threshold, 0.66)` band puts the upper edge just above
+  // the FBM mean — patches with fbm ≳ 0.6 saturate to full shadow, the
+  // rest stay clear, producing dappled cumulus patterns.
+  // `cloudiness` slides the lower edge so clear skies (cloudiness ≈ 0)
+  // shadow only the brightest noise peaks, and overcast (cloudiness ≈ 1)
+  // pulls the threshold under the FBM mean so the ground reads as
+  // uniformly soft-shadowed.
   const cloudiness = shared.cloudiness as unknown as Node<'float'>
-  const threshold = float(0.55).sub(cloudiness.mul(0.4))
-  const cover = clamp(smoothstep(threshold, float(0.9), cloudN), float(0), float(1))
+  const threshold = float(0.52).sub(cloudiness.mul(0.32))
+  const cover = clamp(smoothstep(threshold, float(0.66), cloudN), float(0), float(1))
 
   // mix( 1.0 → shadowFloor ) by `cover` → multiplier ∈ [floor, 1].
   return mix(float(1), float(shadowFloor), cover)
