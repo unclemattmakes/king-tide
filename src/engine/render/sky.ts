@@ -526,7 +526,10 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   const tinted = composed.mul(uGradeTint)
   const luma = tinted.x.mul(0.2126).add(tinted.y.mul(0.7152)).add(tinted.z.mul(0.0722))
   const saturated = mix(vec3(luma, luma, luma), tinted, uGradeSaturation)
-  const finalColor = saturated.sub(vec3(0.5, 0.5, 0.5)).mul(uGradeContrast).add(vec3(0.5, 0.5, 0.5))
+  const finalColor = saturated
+    .sub(vec3(0.5, 0.5, 0.5))
+    .mul(uGradeContrast)
+    .add(vec3(0.5, 0.5, 0.5))
 
   // ── Material + mesh ────────────────────────────────────────────────────
   const material = new MeshBasicNodeMaterial({

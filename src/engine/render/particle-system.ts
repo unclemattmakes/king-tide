@@ -385,8 +385,10 @@ function asNumber(v: unknown, fallback: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback
 }
 
-function asRgba(v: unknown, fallback: [number, number, number, number]):
-  [number, number, number, number] {
+function asRgba(
+  v: unknown,
+  fallback: [number, number, number, number],
+): [number, number, number, number] {
   if (!Array.isArray(v) || v.length < 3) return fallback
   const n = (i: number, d: number) =>
     typeof v[i] === 'number' && Number.isFinite(v[i]) ? (v[i] as number) : d
@@ -430,11 +432,7 @@ export function readEmitterConfig(name: string, userData: Record<string, unknown
 // Per-particle spawn
 // ────────────────────────────────────────────────────────────────────
 
-function spawnOne(
-  pool: CellPool,
-  emitter: EmitterState,
-  rand: RandomFn,
-): boolean {
+function spawnOne(pool: CellPool, emitter: EmitterState, rand: RandomFn): boolean {
   if (pool.freeCount === 0) return false
   // Honour the per-emitter cap cooperatively. If the emitter's own
   // ``alive`` count is already at its ``maxParticles``, skip the spawn

@@ -222,7 +222,7 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
     if (els.length === 0) return
     const root = opts.container()
     const current = document.activeElement as HTMLElement | null
-    const anchor = current && root?.contains(current) ? current : els[0] ?? null
+    const anchor = current && root?.contains(current) ? current : (els[0] ?? null)
     if (!anchor) return
     const scroller = scrollableAncestor(anchor)
     if (!scroller) {
@@ -240,8 +240,7 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
     for (const el of els) {
       const r = el.getBoundingClientRect()
       if (r.bottom <= scrollerRect.top || r.top >= scrollerRect.bottom) continue
-      const dy =
-        direction === 'down' ? scrollerRect.bottom - r.bottom : r.top - scrollerRect.top
+      const dy = direction === 'down' ? scrollerRect.bottom - r.bottom : r.top - scrollerRect.top
       const score = Math.abs(dy)
       if (score < pickScore) {
         pickScore = score

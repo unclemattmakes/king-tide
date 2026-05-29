@@ -95,22 +95,14 @@ BIOME_MASK_NAMES = {
 
 
 def _repo_root_from_blend() -> str | None:
-    """Walk up from the current .blend looking for a ``package.json``
-    sibling, mirroring scatter.py's same-name helper. Returns ``None``
-    if the .blend isn't saved inside a hoverbike clone — every caller
-    treats that as "library unreachable" and bails with a clear error."""
-    blend = bpy.data.filepath
-    if not blend:
-        return None
-    cur = os.path.dirname(blend)
-    for _ in range(8):
-        if os.path.isfile(os.path.join(cur, "package.json")):
-            return cur
-        parent = os.path.dirname(cur)
-        if parent == cur:
-            return None
-        cur = parent
-    return None
+    """The dir holding ``tracks-src/`` (where ``props-library.blend`` lives),
+    derived from the open .blend. Returns ``None`` if it can't be resolved —
+    every caller treats that as "library unreachable" and bails with a clear
+    error. Honors authoring outside the repo, e.g. a Drive-synced
+    ``tracks-src/``. See ``_legacy.assets_root_from_blend``."""
+    from ._legacy import assets_root_from_blend
+
+    return assets_root_from_blend(bpy.data.filepath)
 
 
 def _ensure_node_group() -> bpy.types.NodeTree | None:

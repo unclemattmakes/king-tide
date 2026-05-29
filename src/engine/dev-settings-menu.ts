@@ -10,12 +10,7 @@
  * a small handle so callers can open/close it programmatically.
  */
 
-import {
-  DEFAULT_DEV_SETTINGS,
-  devSettings,
-  resetDevSettings,
-  saveDevSettings,
-} from './dev-settings'
+import { devSettings, resetDevSettings, saveDevSettings } from './dev-settings'
 
 export type DevSettingsMenu = {
   open(): void
@@ -170,10 +165,10 @@ export function installDevSettingsMenu(): DevSettingsMenu {
 
   function open() {
     syncUI()
-    overlay!.classList.add('show')
+    overlay?.classList.add('show')
   }
   function close() {
-    overlay!.classList.remove('show')
+    overlay?.classList.remove('show')
   }
 
   toggle.addEventListener('click', open)
@@ -184,12 +179,12 @@ export function installDevSettingsMenu(): DevSettingsMenu {
   })
   // Esc closes when open.
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'Escape' && overlay!.classList.contains('show')) close()
+    if (e.code === 'Escape' && overlay?.classList.contains('show')) close()
   })
 
   return {
     open,
     close,
-    isOpen: () => overlay!.classList.contains('show'),
+    isOpen: () => overlay?.classList.contains('show'),
   }
 }

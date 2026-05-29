@@ -88,9 +88,7 @@ const ON_DECK = process.env.SteamDeck === '1'
 const BACKEND_OVERRIDE = (process.env.HOVERBIKE_BACKEND || '').toLowerCase()
 const VALID_BACKENDS = new Set(['webgl2', 'webgpu', 'auto'])
 const backendQuery =
-  BACKEND_OVERRIDE && VALID_BACKENDS.has(BACKEND_OVERRIDE)
-    ? `?backend=${BACKEND_OVERRIDE}`
-    : ''
+  BACKEND_OVERRIDE && VALID_BACKENDS.has(BACKEND_OVERRIDE) ? `?backend=${BACKEND_OVERRIDE}` : ''
 if (BACKEND_OVERRIDE && !backendQuery) {
   console.warn(
     `[main] ignoring HOVERBIKE_BACKEND='${BACKEND_OVERRIDE}' — expected one of ${[

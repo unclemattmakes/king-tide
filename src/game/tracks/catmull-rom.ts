@@ -231,7 +231,8 @@ export function curveUpAtT(
   worldUpFallback: Vec3 = { x: 0, y: 1, z: 0 },
 ): Vec3 {
   // N0 = worldUp - T * (T · worldUp), normalized.
-  const dot = tangent.x * worldUpFallback.x + tangent.y * worldUpFallback.y + tangent.z * worldUpFallback.z
+  const dot =
+    tangent.x * worldUpFallback.x + tangent.y * worldUpFallback.y + tangent.z * worldUpFallback.z
   let n0x = worldUpFallback.x - tangent.x * dot
   let n0y = worldUpFallback.y - tangent.y * dot
   let n0z = worldUpFallback.z - tangent.z * dot
@@ -273,10 +274,7 @@ export function curveUpAtT(
   }
 }
 
-export function sampleScalarToMatch(
-  anchors: number[],
-  opts: CatmullRomOptions = {},
-): number[] {
+export function sampleScalarToMatch(anchors: number[], opts: CatmullRomOptions = {}): number[] {
   const div = opts.divisionsPerSegment ?? 12
   const closed = opts.closed ?? true
   const n = anchors.length

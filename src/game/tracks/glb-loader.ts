@@ -212,9 +212,7 @@ function readWaveZoneFromGlb(node: GltfNode): WaveZone {
     )
   }
   if (!(freqMult > 0)) {
-    throw new Error(
-      `glb: ${ExportedKind.WAVE_ZONE} ${node.name ?? '?'} freq_mult must be positive`,
-    )
+    throw new Error(`glb: ${ExportedKind.WAVE_ZONE} ${node.name ?? '?'} freq_mult must be positive`)
   }
   if (!(blendRadiusM > 0)) {
     throw new Error(

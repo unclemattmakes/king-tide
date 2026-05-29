@@ -571,7 +571,7 @@ export function createFxSystem(
   const sternWorld = new THREE.Vector3()
   const sparkWorld = new THREE.Vector3()
   const exhaustWorld = new THREE.Vector3()
-  const dustWorld = new THREE.Vector3()
+  const _dustWorld = new THREE.Vector3()
   const tuckWorld = new THREE.Vector3()
   const tmpQuat = new THREE.Quaternion()
   const tmpPos = new THREE.Vector3()

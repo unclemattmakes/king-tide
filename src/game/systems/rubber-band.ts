@@ -69,8 +69,7 @@ export function rubberBandSystem(sim: SimWorld, track: Track): void {
       if (delta > 0) {
         target = baseline * (1 + (boostCap - 1) * Math.min(1, delta / BOOST_SATURATION_CP))
       } else {
-        target =
-          baseline * (1 + (penaltyFloor - 1) * Math.min(1, -delta / PENALTY_SATURATION_CP))
+        target = baseline * (1 + (penaltyFloor - 1) * Math.min(1, -delta / PENALTY_SATURATION_CP))
       }
     } else {
       // Assist off: settle topSpeedFactor back to baseline so flipping

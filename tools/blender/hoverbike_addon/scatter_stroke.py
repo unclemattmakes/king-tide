@@ -64,18 +64,12 @@ STROKE_SOURCE_PRESETS = (
 
 
 def _repo_root_from_blend() -> str | None:
-    blend = bpy.data.filepath
-    if not blend:
-        return None
-    cur = os.path.dirname(blend)
-    for _ in range(8):
-        if os.path.isfile(os.path.join(cur, "package.json")):
-            return cur
-        parent = os.path.dirname(cur)
-        if parent == cur:
-            return None
-        cur = parent
-    return None
+    # The dir holding tracks-src/ (where props-library.blend lives), derived
+    # from the open .blend. Honors authoring outside the repo, e.g. a
+    # Drive-synced tracks-src/. See _legacy.assets_root_from_blend.
+    from ._legacy import assets_root_from_blend
+
+    return assets_root_from_blend(bpy.data.filepath)
 
 
 def _ensure_node_group() -> bpy.types.NodeTree | None:

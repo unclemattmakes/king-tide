@@ -27,8 +27,16 @@ qa-report/
 .claude/
 
 # blender
+# Raw .blend authoring sources live on the asset bucket (Drive), not in
+# git — synced via `pnpm assets:pull` / `assets:push`, auto-backed-up by
+# the pre-push hook. See docs/asset-storage.md. (tracks-src/README.md +
+# blender_assets.cats.txt stay tracked.)
+tracks-src/*.blend
+bikes-src/*.blend
 tracks-src/*.blend1
+bikes-src/*.blend1
 tracks-src/*.blend@
+bikes-src/*.blend@
 tools/blender/lib/*.blend1
 tools/blender/lib/*.blend@
 

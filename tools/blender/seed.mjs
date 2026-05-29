@@ -64,9 +64,7 @@ function main() {
   if (!scriptArg) die('usage: seed.mjs <script-name>.py', 2)
   // Resolve relative to tools/blender/ so the npm-script can be
   // terse (just the basename).
-  const seedScript = path.isAbsolute(scriptArg)
-    ? scriptArg
-    : path.join(SCRIPT_DIR, scriptArg)
+  const seedScript = path.isAbsolute(scriptArg) ? scriptArg : path.join(SCRIPT_DIR, scriptArg)
   if (!existsSync(seedScript)) die(`seed script not found: ${seedScript}`, 2)
   const blender = resolveBlender()
   log(`blender: ${blender}`)

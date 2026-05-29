@@ -34,10 +34,52 @@ import mathutils
 # ── Repo discovery ──────────────────────────────────────────────────────────
 
 
+def _looks_like_clone(path: str | None) -> bool:
+    """A hoverbike clone has both ``package.json`` and ``public/``."""
+    return bool(
+        path
+        and os.path.isfile(os.path.join(path, "package.json"))
+        and os.path.isdir(os.path.join(path, "public"))
+    )
+
+
+def _configured_repo_root() -> str | None:
+    """An explicit project-root override, used when the .blend is authored
+    *outside* the clone (e.g. a Google-Drive-synced ``tracks-src/`` — see
+    docs/asset-storage.md). Checks ``$HOVERBIKE_REPO_ROOT`` first, then the
+    add-on preference. Either is ignored unless it actually points at a
+    clone, so a stale value falls through to the walk-up below."""
+    env = os.environ.get("HOVERBIKE_REPO_ROOT")
+    if env:
+        env = os.path.abspath(os.path.expanduser(env))
+        if _looks_like_clone(env):
+            return env
+    try:
+        prefs = bpy.context.preferences.addons[__package__].preferences
+        raw = (getattr(prefs, "project_root", "") or "").strip()
+        if raw:
+            candidate = os.path.abspath(bpy.path.abspath(raw))
+            if _looks_like_clone(candidate):
+                return candidate
+    except (KeyError, AttributeError):
+        pass
+    return None
+
+
 def find_repo_root(start: str | None) -> str | None:
-    """Walk up from ``start`` looking for a directory containing
-    ``package.json`` + a ``public/`` folder. Returns the absolute
-    path or None if the .blend isn't inside a hoverbike clone."""
+    """The hoverbike clone that exports get written into (``public/`` +
+    ``specs/`` live there). Resolution order:
+
+    1. An explicit override — ``$HOVERBIKE_REPO_ROOT`` or the add-on's
+       "Project root" preference — for when the .blend lives outside the
+       clone.
+    2. Walk up from ``start`` looking for ``package.json`` + ``public/``
+       (the in-repo workflow).
+
+    Returns the absolute path or None."""
+    configured = _configured_repo_root()
+    if configured:
+        return configured
     if not start:
         return None
     cur = os.path.dirname(os.path.abspath(start))
@@ -52,6 +94,35 @@ def find_repo_root(start: str | None) -> str | None:
         if parent == cur:
             break
         cur = parent
+    return None
+
+
+def assets_root_from_blend(blend_path: str | None) -> str | None:
+    """The directory that *contains* ``tracks-src/`` + ``bikes-src/`` — i.e.
+    where sibling library .blends (``props-library.blend``,
+    ``landmarks-library.blend``) live, for *linking* sources.
+
+    Distinct from :func:`find_repo_root`, which locates the clone that
+    *exports* are written into. The two coincide for the in-repo workflow,
+    but diverge when sources live in an external Drive-synced folder: the
+    libraries sit next to the open .blend, while exports go to the clone.
+
+    Derives from the open .blend's own location — its parent is
+    ``tracks-src``/``bikes-src``, so the grandparent is the assets root —
+    falling back to a ``package.json`` walk-up for unusual layouts."""
+    if not blend_path:
+        return None
+    parent = os.path.dirname(os.path.abspath(blend_path))
+    if os.path.basename(parent) in ("tracks-src", "bikes-src"):
+        return os.path.dirname(parent)
+    cur = parent
+    for _ in range(8):
+        if os.path.isfile(os.path.join(cur, "package.json")):
+            return cur
+        nxt = os.path.dirname(cur)
+        if nxt == cur:
+            break
+        cur = nxt
     return None
 
 

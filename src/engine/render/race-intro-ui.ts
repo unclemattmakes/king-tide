@@ -174,11 +174,7 @@ function buildRoot(rootId: string, opts: RaceIntroUiOpts): HTMLElement {
   // Conditions strip (bottom-left).
   const conditions = document.createElement('div')
   conditions.className = 'riu-conditions'
-  appendCondition(
-    conditions,
-    'LAPS',
-    `${opts.lapsToFinish}`,
-  )
+  appendCondition(conditions, 'LAPS', `${opts.lapsToFinish}`)
   appendCondition(conditions, 'TIME', opts.theme.timeLabel)
   appendCondition(conditions, 'CONDITIONS', opts.theme.weatherLabel)
   if (opts.theme.setPiece && opts.theme.setPiece !== '—') {
@@ -206,7 +202,7 @@ function buildRoot(rootId: string, opts: RaceIntroUiOpts): HTMLElement {
   })
   for (const r of sorted) {
     const li = document.createElement('li')
-    li.className = 'riu-roster-row' + (r.isPlayer ? ' riu-roster-player' : '')
+    li.className = `riu-roster-row${r.isPlayer ? ' riu-roster-player' : ''}`
     const swatch = document.createElement('span')
     swatch.className = 'riu-swatch'
     swatch.style.background = r.bodyColorHex

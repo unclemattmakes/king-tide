@@ -36,9 +36,7 @@ describe('buildReplayTutorialHref', () => {
   it('drops other URL params (clean tutorial route)', () => {
     // `?room=…` from a multiplayer flow shouldn't carry into the
     // single-player tutorial launch.
-    const url = new URL(
-      buildReplayTutorialHref('?track=lagoon&room=abc&debug=collision'),
-    )
+    const url = new URL(buildReplayTutorialHref('?track=lagoon&room=abc&debug=collision'))
     expect(url.searchParams.has('room')).toBe(false)
     expect(url.searchParams.has('debug')).toBe(false)
   })

@@ -145,7 +145,7 @@ for (const [id, theme] of Object.entries(THEMES)) {
   }
   const json = JSON.parse(fs.readFileSync(file, 'utf8'))
   deepMerge(json, theme)
-  fs.writeFileSync(file, JSON.stringify(json, null, 2) + '\n')
+  fs.writeFileSync(file, `${JSON.stringify(json, null, 2)}\n`)
   summary.push({
     id,
     pathTint: theme.terrainShader?.pathTint?.map((v) => v.toFixed(2)).join(','),
