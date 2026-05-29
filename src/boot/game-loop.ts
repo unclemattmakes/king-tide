@@ -71,7 +71,7 @@ import { type BikeImpact, updateUnderwaterFog } from '@/engine/render/water'
 import { createWavePumpHud } from '@/engine/render/wave-pump-hud'
 import type { WaveRiderRenderSystem } from '@/engine/render/wave-rider-render'
 import { sliceBestLap } from '@/engine/replay/best-lap-slice'
-import { serializeReplay } from '@/engine/replay/format'
+import { REPLAY_FLOATS_PER_BIKE, serializeReplay } from '@/engine/replay/format'
 import { getGhostBestLap, setGhost } from '@/engine/replay/ghost-state'
 import type { ReplayRecorder } from '@/engine/replay/recorder'
 import type { SimWorld } from '@/engine/sim/ecs/world'
@@ -99,7 +99,15 @@ import {
   RBHandleStore,
   TrickStateStore,
 } from '@/game/components'
-import { ExplosionTag, MineTag, MissileTag } from '@/game/components/combat'
+import {
+  ExplosionState,
+  ExplosionStateStore,
+  ExplosionTag,
+  MineTag,
+  MissileState,
+  MissileStateStore,
+  MissileTag,
+} from '@/game/components/combat'
 import type { PickupType } from '@/game/components/pickup'
 import { RacerStore } from '@/game/components/race'
 import type { RaceTick } from '@/game/sim-step'
@@ -597,7 +605,19 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // its own storage when it accepts a sample (rate-limited), so feeding it the
   // same buffer each frame is safe. Slot list is fixed for the session.
   const replaySlots: number[] = [playerEid, ...aiEids]
-  const replayFlat = new Float64Array(replaySlots.length * 7)
+  const replayFlat = new Float64Array(replaySlots.length * REPLAY_FLOATS_PER_BIKE)
+  // Re-used missile snapshot list, refreshed each recorder frame from
+  // the live MissileState entities. The recorder copies the values
+  // into its own per-track storage.
+  const missileSnapshots: import('@/engine/replay/recorder').MissileSnapshot[] = []
+  // Combat-event bookkeeping for the recorder. Detonation isn't an
+  // event the sim emits — we infer it from a missile we'd been
+  // sampling disappearing from the world between recorder ticks.
+  // Explosion bursts are spawned as ExplosionTag entities; the
+  // first recorder tick that sees a given eid records the burst.
+  const seenMissileEids = new Set<number>()
+  const lastMissilePos = new Map<number, { x: number; y: number; z: number }>()
+  const recordedExplosionEids = new Set<number>()
 
   // Pre-lap intro state.
   //
@@ -766,15 +786,10 @@ export function startGameLoop(opts: GameLoopOpts): void {
           const eid = replaySlots[i] as number
           const handle = RBHandleStore.get(eid)
           const rb = handle ? phys.world.getRigidBody(handle.handle) : null
-          const o = i * 7
+          const o = i * REPLAY_FLOATS_PER_BIKE
           if (!rb) {
-            replayFlat[o] = 0
-            replayFlat[o + 1] = 0
-            replayFlat[o + 2] = 0
-            replayFlat[o + 3] = 0
-            replayFlat[o + 4] = 0
-            replayFlat[o + 5] = 0
-            replayFlat[o + 6] = 1
+            for (let k = 0; k < REPLAY_FLOATS_PER_BIKE; k++) replayFlat[o + k] = 0
+            replayFlat[o + 6] = 1 // qw — keep the identity quat for the no-rb fallback
             continue
           }
           const t = rb.translation()
@@ -786,8 +801,86 @@ export function startGameLoop(opts: GameLoopOpts): void {
           replayFlat[o + 4] = q.y
           replayFlat[o + 5] = q.z
           replayFlat[o + 6] = q.w
+          // v2 input-state slots — driven from the live ECS so playback
+          // can route drift sparks / tuck slipstream / boost-blossom
+          // exhaust against the actual race state. Defaults to 0 when
+          // a component is missing so a partial-snapshot frame stays
+          // sane.
+          const intent = ControlIntentStore.get(eid)
+          const drift = DriftStateStore.get(eid)
+          replayFlat[o + 7] = intent?.pitch ?? 0
+          replayFlat[o + 8] = intent?.throttle ?? 0
+          replayFlat[o + 9] = intent?.boost ? 1 : 0
+          replayFlat[o + 10] = drift?.driftDir ?? 0
+          replayFlat[o + 11] = drift?.highestTier ?? 0
         }
         recorder.sample(elapsed, replayFlat)
+        // Live missile snapshots — one per in-flight MissileTag entity,
+        // pushed at the same cadence as bike frames so the replay-side
+        // combat driver can interpolate cleanly. The recorder
+        // aggregates per-eid streams into `ReplayMissileTrack` entries
+        // at finalize.
+        missileSnapshots.length = 0
+        const liveMissiles = query(sim, [MissileTag, MissileState])
+        const liveMissileSet = new Set<number>()
+        for (const mEid of liveMissiles) {
+          liveMissileSet.add(mEid)
+          const ms = MissileStateStore.get(mEid)
+          if (!ms || ms.detonated) continue
+          missileSnapshots.push({
+            simEid: mEid,
+            x: ms.position.x,
+            y: ms.position.y,
+            z: ms.position.z,
+            vx: ms.velocity.x,
+            vy: ms.velocity.y,
+            vz: ms.velocity.z,
+          })
+          seenMissileEids.add(mEid)
+          lastMissilePos.set(mEid, {
+            x: ms.position.x,
+            y: ms.position.y,
+            z: ms.position.z,
+          })
+        }
+        recorder.sampleMissiles(elapsed, missileSnapshots)
+        // Detonation = a missile we'd been sampling has fallen out of
+        // the live set since the last recorder tick. Mark it with its
+        // last-known position so the replay-side combat driver knows
+        // where to pin the trail's final frame.
+        for (const mEid of seenMissileEids) {
+          if (liveMissileSet.has(mEid)) continue
+          const pos = lastMissilePos.get(mEid)
+          if (pos) recorder.markMissileDetonated(mEid, elapsed, pos)
+          seenMissileEids.delete(mEid)
+          lastMissilePos.delete(mEid)
+        }
+        // New explosion bursts — every fresh ExplosionTag entity gets
+        // one record. `ageSec` lets us back-date `t` to the actual
+        // spawn moment rather than the recorder-tick boundary.
+        const liveExplosions = query(sim, [ExplosionTag, ExplosionState])
+        const liveExplosionSet = new Set<number>()
+        for (const eEid of liveExplosions) {
+          liveExplosionSet.add(eEid)
+          if (recordedExplosionEids.has(eEid)) continue
+          recordedExplosionEids.add(eEid)
+          const ex = ExplosionStateStore.get(eEid)
+          if (!ex) continue
+          recorder.recordExplosion({
+            t: Math.max(0, elapsed - ex.ageSec),
+            x: ex.position.x,
+            y: ex.position.y,
+            z: ex.position.z,
+            color: ex.color,
+            lifetime: ex.lifetime,
+          })
+        }
+        // Prune the seen set so it doesn't grow unbounded over the
+        // race. Explosions despawn after `lifetime` (~0.6 s); once
+        // they're gone they can't fire again.
+        for (const eEid of recordedExplosionEids) {
+          if (!liveExplosionSet.has(eEid)) recordedExplosionEids.delete(eEid)
+        }
       }
     }
 

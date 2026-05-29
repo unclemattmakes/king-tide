@@ -33,9 +33,14 @@ function build(frames: { t: number; x: number }[]): ReplayFile {
     sampleRateHz: 30,
     frames: frames.map((f) => ({
       t: f.t,
-      bikes: [f.x, 0, 0, 0, 0, 0, 1],
+      // v2: pose (7) + pitch / throttle / boost / driftDir / driftTier (5).
+      // The ghost runner only reads pose, so the state slots stay 0.
+      bikes: [f.x, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
     })),
     events: [],
+    missiles: [],
+    explosions: [],
+    isLegacyV1: false,
   }
 }
 

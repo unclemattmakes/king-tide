@@ -38,9 +38,10 @@ describe('replay format', () => {
       bikes: makeBikes(1),
       sampleRateHz: 60,
     })
-    // Two samples > 16ms apart at 60Hz.
-    recorder.sample(0, [1.234567, 2, 3, 0, 0, 0, 1])
-    recorder.sample(0.02, [1.5, 2, 3, 0, 0, 0, 1])
+    // Two samples > 16ms apart at 60Hz. v2 layout = 12 floats per
+    // bike: pose (7) + pitch / throttle / boost / driftDir / driftTier.
+    recorder.sample(0, [1.234567, 2, 3, 0, 0, 0, 1, 0, 0, 0, 0, 0])
+    recorder.sample(0.02, [1.5, 2, 3, 0, 0, 0, 1, 0, 0, 0, 0, 0])
     const file = recorder.finalize({
       finishPosition: 1,
       finishTime: 90.5,
@@ -70,7 +71,15 @@ describe('replay format', () => {
       trackName: 'Lagoon',
       bikes: makeBikes(2),
     })
-    recorder.sample(0, [1, 2, 3, 0, 0, 0, 1, 4, 5, 6, 0, 0, 0, 1])
+    // Two bikes × 12 floats per bike = 24 floats.
+    const sample = new Array(24).fill(0)
+    sample[0] = 1
+    sample[1] = 2
+    sample[2] = 3
+    sample[6] = 1
+    sample[12] = 4
+    sample[18] = 1
+    recorder.sample(0, sample)
     const file = recorder.finalize({ finishPosition: null, finishTime: null, bestLap: null })
     // Truncate one float in frame 0 — should fail validation.
     file.frames[0]!.bikes.pop()
@@ -89,12 +98,14 @@ describe('replay format', () => {
       bikes: makeBikes(1),
       sampleRateHz: 30,
     })
-    // 5 calls within ~33ms — should accept the first only.
-    recorder.sample(0, [0, 0, 0, 0, 0, 0, 1])
-    recorder.sample(0.005, [0, 0, 0, 0, 0, 0, 1])
-    recorder.sample(0.01, [0, 0, 0, 0, 0, 0, 1])
-    recorder.sample(0.02, [0, 0, 0, 0, 0, 0, 1])
-    recorder.sample(0.05, [0, 0, 0, 0, 0, 0, 1]) // > 1/30s — accepted
+    // 5 calls within ~33ms — should accept the first only. v2 layout
+    // = 12 floats per bike.
+    const sample = [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+    recorder.sample(0, sample)
+    recorder.sample(0.005, sample)
+    recorder.sample(0.01, sample)
+    recorder.sample(0.02, sample)
+    recorder.sample(0.05, sample) // > 1/30s — accepted
     expect(recorder.frameCount()).toBe(2)
   })
 
