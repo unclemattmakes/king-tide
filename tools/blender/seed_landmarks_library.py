@@ -253,38 +253,39 @@ def make_trim_sheet_material(name: str, image_path: str, *, roughness: float = 0
 
 def _append_box(bm: bmesh.types.BMesh, *, sx: float, sy: float, sz: float,
                 tx: float = 0, ty: float = 0, tz: float = 0,
-                material_index: int = 0) -> None:
+                material_index: int = 0) -> set[bmesh.types.BMFace]:
     """Append a box of dimensions (sx, sy, sz) centred at (tx, ty, tz)
     to ``bm``. Optionally tags every appended face with ``material_index``
     so callers can multi-material their meshes without post-pass face
-    walks."""
-    # Identify new geometry via the op's return value, never a
-    # ``bm.faces[pre:]`` slice: bmesh.ops reorder internal element
-    # storage, so the slice grabs the wrong faces after multiple
-    # _append_* calls and re-translates earlier geometry. The cube is
-    # disjoint, so its verts' link_faces are exactly its own faces.
+    walks. Returns the set of newly created faces, for callers that need
+    to UV-map or re-tag them (e.g. the trim-sheet facade)."""
+    # Identify new geometry from the op's return value, never from a
+    # ``bm.faces[pre:]`` slice — bmesh.ops reorder the bmesh's internal
+    # element storage, so a post-op index slice can silently return
+    # earlier faces (this bit the lighthouse aperture; see the "Gotchas"
+    # note in the build docs). The new cube is disjoint from any existing
+    # geometry, so its verts' link_faces are exactly its six faces.
     new_verts = bmesh.ops.create_cube(bm, size=1.0)["verts"]
     new_faces = {f for v in new_verts for f in v.link_faces}
     bmesh.ops.scale(bm, vec=(sx, sy, sz), verts=new_verts)
     bmesh.ops.translate(bm, vec=(tx, ty, tz), verts=new_verts)
     for f in new_faces:
         f.material_index = material_index
+    return new_faces
 
 
 def _append_cone(bm: bmesh.types.BMesh, *, segments: int, r_base: float,
                  r_top: float, depth: float, tx: float = 0, ty: float = 0,
                  tz: float = 0, material_index: int = 0,
-                 axis: str = "Z") -> None:
+                 axis: str = "Z") -> set[bmesh.types.BMFace]:
     """Append a cone (use r_base == r_top for a cylinder) along the
     given axis. ``axis="Z"`` matches Blender's default; ``axis="Y"`` /
     ``axis="X"`` rotate the cone into the horizontal plane (useful for
-    stadium arches, ferris-wheel spokes)."""
-    # Identify new geometry via the op's return value, never a
-    # ``bm.faces[pre:]`` slice: bmesh.ops reorder internal element
-    # storage, so the slice grabs the wrong faces after multiple
-    # _append_* calls and re-translates earlier geometry (this stacked
-    # the cylinder-tower aperture to ~2x its height). The cone is
-    # disjoint, so its verts' link_faces are exactly its own faces.
+    stadium arches, ferris-wheel spokes). Returns the set of newly
+    created faces."""
+    # New geometry from the op return, not a ``bm.faces[pre:]`` slice —
+    # see ``_append_box`` for why. The cone is disjoint, so the new
+    # verts' link_faces are exactly the cone's faces.
     new_verts = bmesh.ops.create_cone(
         bm, segments=segments, radius1=r_base, radius2=r_top,
         depth=depth, cap_ends=True,
@@ -297,6 +298,7 @@ def _append_cone(bm: bmesh.types.BMesh, *, segments: int, r_base: float,
     bmesh.ops.translate(bm, vec=(tx, ty, tz), verts=new_verts)
     for f in new_faces:
         f.material_index = material_index
+    return new_faces
 
 
 def _finalise(bm: bmesh.types.BMesh, mesh_name: str, *,
@@ -368,9 +370,10 @@ def build_tower_pyramid_cap_mesh(name: str) -> bpy.types.Mesh:
     _append_box(bm, sx=28, sy=28, sz=60, tz=30)
     _append_box(bm, sx=20, sy=20, sz=14, tz=67)
     # Pyramid: 4-sided cone rotated 45° so the corners point outward.
-    pre_face_count = len(bm.faces)
-    bmesh.ops.create_cone(bm, segments=4, radius1=10, radius2=0.3, depth=16, cap_ends=True)
-    new_verts = list({v for f in bm.faces[pre_face_count:] for v in f.verts})
+    # New verts from the op return — not a bm.faces[pre:] slice (see _append_box).
+    new_verts = bmesh.ops.create_cone(
+        bm, segments=4, radius1=10, radius2=0.3, depth=16, cap_ends=True,
+    )["verts"]
     bmesh.ops.rotate(bm, matrix=Matrix.Rotation(math.radians(45), 4, "Z"), verts=new_verts)
     bmesh.ops.translate(bm, vec=(0, 0, 82), verts=new_verts)
     return _finalise(bm, name)
@@ -383,10 +386,10 @@ def build_stadium_arched_mesh(name: str) -> bpy.types.Mesh:
     structure rather than as straight bars."""
     bm = bmesh.new()
     # Bowl — short cone, then squish along X for the oval footprint.
-    pre = len(bm.faces)
-    bmesh.ops.create_cone(bm, segments=24, radius1=42, radius2=44,
-                          depth=14, cap_ends=True)
-    bowl_verts = list({v for f in bm.faces[pre:] for v in f.verts})
+    # New verts from the op return — not a bm.faces[pre:] slice (see _append_box).
+    bowl_verts = bmesh.ops.create_cone(
+        bm, segments=24, radius1=42, radius2=44, depth=14, cap_ends=True,
+    )["verts"]
     bmesh.ops.scale(bm, vec=(1.2, 1.0, 1.0), verts=bowl_verts)
     bmesh.ops.translate(bm, vec=(0, 0, 7), verts=bowl_verts)
     # Two arches over the bowl (north + south ribs).
@@ -409,24 +412,18 @@ def build_stadium_arched_mesh(name: str) -> bpy.types.Mesh:
 
 def build_wheel_ferris_mesh(name: str) -> bpy.types.Mesh:
     """Ferris wheel archetype — torus rim + N radial spokes + central
-    hub + support pylon. Vertical wheel (axis along world +X) so it
-    reads as a Great-Wheel silhouette from the south-approach camera.
-    Default 50 m diameter, 8 spokes, 28 m centre height."""
+    hub + support pylon. Vertical wheel standing in the X-Z plane (axle
+    along world Y) so it reads as a Great-Wheel silhouette from the
+    south-approach camera looking along Y. Default 50 m diameter,
+    8 spokes, 28 m centre height."""
     bm = bmesh.new()
     R = 25.0       # rim major radius
     minor = 0.5    # rim minor radius
     spokes = 8
     cz = 28.0      # centre height above ground
-    # Build a torus using bmesh.ops, oriented along Y axis (vertical wheel facing south).
-    pre = len(bm.faces)
-    bmesh.ops.create_circle(bm, segments=24, radius=R, cap_ends=False)
-    # Now extrude into a square cross-section; simplest path is to add a
-    # torus via add_torus operator-free using bmesh.ops.
-    # Actually use bmesh.ops to build a proper torus.
-    bm.free()
-    bm = bmesh.new()
-    bmesh.ops.create_uvsphere(bm, u_segments=4, v_segments=4, radius=0.001)
-    # Fallback: hand-roll the torus.
+    # bmesh.ops has no torus primitive, so hand-roll the rim: a tube of
+    # `tube_segments` swept around `ring_segments` in the XY plane, then
+    # stood upright into the X-Z plane below.
     ring_segments = 32
     tube_segments = 8
     torus_verts: list[list[bmesh.types.BMVert]] = []
@@ -448,22 +445,27 @@ def build_wheel_ferris_mesh(name: str) -> bpy.types.Mesh:
             v00 = torus_verts[i][j]; v10 = torus_verts[nxt][j]
             v11 = torus_verts[nxt][nj]; v01 = torus_verts[i][nj]
             bm.faces.new((v00, v10, v11, v01))
-    # Reorient: torus is in the XY plane; rotate so it stands vertical
-    # (axis along X, plane in YZ).
+    # Reorient: rim is in the XY plane; rotate 90° about X so it stands
+    # vertical in the X-Z plane (face normal along Y).
     bmesh.ops.rotate(bm, matrix=Matrix.Rotation(math.radians(90), 4, "X"), verts=bm.verts)
     bmesh.ops.translate(bm, vec=(0, 0, cz), verts=bm.verts)
-    # Central hub.
+    # Central hub — short axle stub along the wheel's rotation axis (Y,
+    # perpendicular to the X-Z wheel face).
     _append_cone(bm, segments=16, r_base=2.0, r_top=2.0, depth=2.0,
-                 tz=cz, axis="X")
-    # Spokes — thin cylinders radiating from hub to rim.
+                 tz=cz, axis="Y")
+    # Spokes — thin cylinders radiating from hub to rim. Each is a full
+    # diameter (depth = 2R), so `spokes` half-turns give 2× that many
+    # visible radial arms.
     for i in range(spokes):
-        ang = (i / spokes) * math.pi  # only half — wheels visually have spokes both ways already
+        ang = (i / spokes) * math.pi  # only half — a diameter spoke covers both sides
         sk_bm = bmesh.new()
         bmesh.ops.create_cone(sk_bm, segments=8, radius1=0.12, radius2=0.12,
                               depth=R * 2, cap_ends=True)
-        # Rotate spoke to align: along world Y axis at angle `ang` in YZ plane
+        # Sweep the Z-aligned spoke within the X-Z wheel plane (rotate
+        # about Y) so it lies coplanar with the rim, instead of poking
+        # out perpendicular to the wheel.
         bmesh.ops.rotate(sk_bm,
-                         matrix=Matrix.Rotation(ang, 4, "X"),
+                         matrix=Matrix.Rotation(ang, 4, "Y"),
                          verts=sk_bm.verts)
         bmesh.ops.translate(sk_bm, vec=(0, 0, cz), verts=sk_bm.verts)
         tmp = bpy.data.meshes.new("_tmp_spoke")
@@ -505,10 +507,10 @@ def build_sign_arch_mesh(name: str) -> bpy.types.Mesh:
     # Horizontal banner above (slot 1).
     _append_box(bm, sx=8, sy=0.4, sz=2, tz=19, material_index=1)
     # Clock face (white, slot 0) — disc on the y-facing side.
-    pre = len(bm.faces)
-    bmesh.ops.create_cone(bm, segments=24, radius1=3, radius2=3,
-                          depth=0.8, cap_ends=True)
-    clock_verts = list({v for f in bm.faces[pre:] for v in f.verts})
+    # New verts from the op return — not a bm.faces[pre:] slice (see _append_box).
+    clock_verts = bmesh.ops.create_cone(
+        bm, segments=24, radius1=3, radius2=3, depth=0.8, cap_ends=True,
+    )["verts"]
     bmesh.ops.rotate(bm,
                      matrix=Matrix.Rotation(math.radians(90), 4, "X"),
                      verts=clock_verts)
@@ -611,8 +613,11 @@ def build_tower_cylinder_spiral_mesh(name: str, *,
         # by a smaller dome-like cone.
         gallery_r = r_cap * 1.35
         gallery_h = 1.6
-        # Pre-record face counts so we can tag the new geometry.
-        pre = len(bm.faces)
+        # Each _append_cone tags its own faces (material 2) and locates
+        # its geometry from the op return, so the rings stack at the
+        # intended heights. (The old code recorded a bm.faces[pre:]
+        # marker here and the stale slice drifted into the shaft, which
+        # is what doubled the aperture height.)
         _append_cone(bm, segments=segs, r_base=gallery_r, r_top=gallery_r,
                      depth=gallery_h, tz=height + gallery_h / 2,
                      material_index=2)
@@ -624,7 +629,6 @@ def build_tower_cylinder_spiral_mesh(name: str, *,
         _append_cone(bm, segments=segs, r_base=r_cap * 1.15, r_top=0.2,
                      depth=3.5, tz=height + gallery_h + 4.5,
                      material_index=2)
-        _ = pre  # silence linters; bounding marker only.
     else:
         # Flat cap.
         bm.faces.new(ring_verts[-1])
@@ -874,11 +878,27 @@ def _set_face_uvs_to_strip(bm: bmesh.types.BMesh, faces: list[bmesh.types.BMFace
             )
 
 
-def _new_face_indices(bm: bmesh.types.BMesh, pre_face_count: int) -> list[bmesh.types.BMFace]:
-    """Faces added since ``pre_face_count``. Helper for incremental
-    UV stamping after a ``_append_box`` / ``_append_cone`` call."""
-    bm.faces.ensure_lookup_table()
-    return [bm.faces[i] for i in range(pre_face_count, len(bm.faces))]
+def _box_faces_by_side(faces) -> dict[str, bmesh.types.BMFace]:
+    """Classify the six faces of an axis-aligned box by which world-axis
+    direction each one faces, keyed ``'+X'``/``'-X'``/``'+Y'``/``'-Y'``/
+    ``'+Z'``/``'-Z'``.
+
+    Robust replacement for indexing ``bm.faces`` by creation order: a
+    bmesh.ops call reorders the internal element storage, so a face's
+    creation index is not stable, but its centroid offset from the box
+    centroid is. Pass the set returned by ``_append_box`` (whose
+    create_cube + axis scale + axis translate keep every face
+    axis-aligned, so each centroid is offset along exactly one axis)."""
+    fl = list(faces)
+    centers = [f.calc_center_median() for f in fl]
+    box_c = sum(centers, Vector()) / len(centers)
+    axes = ("X", "Y", "Z")
+    out: dict[str, bmesh.types.BMFace] = {}
+    for f, c in zip(fl, centers):
+        d = c - box_c
+        i = max(range(3), key=lambda k: abs(d[k]))
+        out[("+" if d[i] >= 0 else "-") + axes[i]] = f
+    return out
 
 
 def build_drowned_facade_trimmed_mesh(name: str, *,
@@ -903,50 +923,44 @@ def build_drowned_facade_trimmed_mesh(name: str, *,
     bm = bmesh.new()
 
     # ── Main slab ────────────────────────────────────────────────
-    # 6 faces: bottom, top, -Y (back), +Y (front), -X, +X. The +Y/-Y
-    # faces become the dense window grid (strip 0). The +X/-X side
-    # faces become weathering strips. Top/bottom are the flat base.
-    pre = len(bm.faces)
-    _append_box(bm, sx=width, sy=depth, sz=height, tz=height / 2)
-    slab_faces = _new_face_indices(bm, pre)
-    # bmesh's create_cube emits faces in this order via bmesh.ops:
-    # bottom (-Z), top (+Z), -Y, +Y, -X, +X — but `_append_box` calls
-    # `create_cube` then scales/translates, so the order is preserved.
-    # We tile the window grid 5 across × 20 tall on each front face.
+    # The +Y/-Y faces become the dense window grid (strip 0), the +X/-X
+    # side faces become weathering strips, top/bottom are the flat base.
+    # We resolve each face by its outward axis (via _box_faces_by_side),
+    # not by creation order, so a bmesh.ops reorder can't scramble the
+    # mapping. Window grid tiles 5 across on each front face.
+    slab = _box_faces_by_side(
+        _append_box(bm, sx=width, sy=depth, sz=height, tz=height / 2))
     win_tile_u = 5.0
-    _set_face_uvs_to_strip(bm, [slab_faces[3]], strip_idx=0, tile_u=win_tile_u)   # +Y windows
-    _set_face_uvs_to_strip(bm, [slab_faces[2]], strip_idx=0, tile_u=win_tile_u)   # -Y windows
-    _set_face_uvs_to_strip(bm, [slab_faces[4]], strip_idx=3)                       # -X weathering
-    _set_face_uvs_to_strip(bm, [slab_faces[5]], strip_idx=3)                       # +X weathering
-    _set_face_uvs_to_strip(bm, [slab_faces[0], slab_faces[1]], strip_idx=7)        # bottom + top base
+    _set_face_uvs_to_strip(bm, [slab["+Y"]], strip_idx=0, tile_u=win_tile_u)   # +Y windows
+    _set_face_uvs_to_strip(bm, [slab["-Y"]], strip_idx=0, tile_u=win_tile_u)   # -Y windows
+    _set_face_uvs_to_strip(bm, [slab["-X"]], strip_idx=3)                       # -X weathering
+    _set_face_uvs_to_strip(bm, [slab["+X"]], strip_idx=3)                       # +X weathering
+    _set_face_uvs_to_strip(bm, [slab["-Z"], slab["+Z"]], strip_idx=7)           # bottom + top base
 
     # ── Top-band signage shelf ───────────────────────────────────
     # Slightly wider than the slab, sitting on top — gets the horizontal
     # sign band strip on its long sides, base on top/bottom.
-    pre = len(bm.faces)
-    _append_box(bm, sx=width + 0.6, sy=depth + 0.4, sz=2.0, tz=height + 1.0)
-    shelf_faces = _new_face_indices(bm, pre)
-    _set_face_uvs_to_strip(bm, [shelf_faces[2], shelf_faces[3]], strip_idx=2)      # ±Y signage
-    _set_face_uvs_to_strip(bm, [shelf_faces[4], shelf_faces[5]], strip_idx=2)      # ±X signage
-    _set_face_uvs_to_strip(bm, [shelf_faces[0], shelf_faces[1]], strip_idx=7)      # bottom + top base
+    shelf = _box_faces_by_side(
+        _append_box(bm, sx=width + 0.6, sy=depth + 0.4, sz=2.0, tz=height + 1.0))
+    _set_face_uvs_to_strip(bm, [shelf["-Y"], shelf["+Y"]], strip_idx=2)            # ±Y signage
+    _set_face_uvs_to_strip(bm, [shelf["-X"], shelf["+X"]], strip_idx=2)            # ±X signage
+    _set_face_uvs_to_strip(bm, [shelf["-Z"], shelf["+Z"]], strip_idx=7)            # bottom + top base
 
     # ── Vertical kanji strip on +X side ──────────────────────────
-    pre = len(bm.faces)
-    _append_box(bm, sx=0.5, sy=depth * 0.4, sz=height * 0.6,
-                tx=width * 0.45, ty=depth * 0.5,
-                tz=height * 0.5)
-    kanji_faces = _new_face_indices(bm, pre)
-    # All faces of the protruding kanji slab → kanji strip.
-    _set_face_uvs_to_strip(bm, kanji_faces, strip_idx=1)
+    # All faces of the protruding kanji slab → kanji strip (no per-side
+    # split needed, so the returned face set is used directly).
+    kanji_faces = _append_box(bm, sx=0.5, sy=depth * 0.4, sz=height * 0.6,
+                              tx=width * 0.45, ty=depth * 0.5,
+                              tz=height * 0.5)
+    _set_face_uvs_to_strip(bm, list(kanji_faces), strip_idx=1)
 
     # ── Neon ledge trim at the very top of the shelf ─────────────
-    pre = len(bm.faces)
-    _append_box(bm, sx=width + 0.8, sy=depth + 0.6, sz=0.4, tz=height + 2.4)
-    neon_faces = _new_face_indices(bm, pre)
+    neon = _box_faces_by_side(
+        _append_box(bm, sx=width + 0.8, sy=depth + 0.6, sz=0.4, tz=height + 2.4))
     # Sides only get the neon strip; top + bottom go to the base.
-    _set_face_uvs_to_strip(bm, [neon_faces[2], neon_faces[3],
-                                 neon_faces[4], neon_faces[5]], strip_idx=5)
-    _set_face_uvs_to_strip(bm, [neon_faces[0], neon_faces[1]], strip_idx=7)
+    _set_face_uvs_to_strip(bm, [neon["-Y"], neon["+Y"],
+                                neon["-X"], neon["+X"]], strip_idx=5)
+    _set_face_uvs_to_strip(bm, [neon["-Z"], neon["+Z"]], strip_idx=7)
 
     # All faces use material slot 0 (the trim-sheet material). Default
     # for new faces is 0, so no per-face material_index writes needed.
