@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
+import { buildShoreField, type ShoreField } from '../../src/engine/sim/water/shore-field'
 import {
   advanceWaveField,
   createWaveField,
   defaultWaves,
+  SHORE_BAND_DEPTH,
+  SHORE_DEPTH_CAP,
   sampleHeight,
   sampleSurface,
+  setShoreField,
 } from '../../src/engine/sim/water/wave-field'
 
 describe('wave field', () => {
@@ -167,5 +171,121 @@ describe('wave field', () => {
       if (dir !== 0) lastDir = dir
     }
     expect(directionChanges).toBeGreaterThanOrEqual(4)
+  })
+})
+
+// A west→east beach ramp: terrain rises with +X, crossing the water plane at
+// x = 0. Land is +X, open water is −X. depth = −0.05·x in the water.
+function rampShore(): ShoreField {
+  const RES = 64
+  const MINX = -100
+  const SIZE = 200
+  const cell = SIZE / RES
+  const raw = new Float32Array(RES * RES)
+  for (let v = 0; v < RES; v++) {
+    for (let u = 0; u < RES; u++) {
+      const x = MINX + (u + 0.5) * cell
+      raw[v * RES + u] = 0.05 * x
+    }
+  }
+  const f = buildShoreField({
+    raw,
+    resolution: RES,
+    minX: MINX,
+    minZ: MINX,
+    sizeX: SIZE,
+    sizeZ: SIZE,
+    waterLevel: 0,
+  })
+  if (!f) throw new Error('expected a shore field')
+  return f
+}
+
+describe('shore-aligned waves', () => {
+  it('adds rideable height in the surf band, and nothing when strength = 0', () => {
+    const f = createWaveField([]) // isolate the shore term (no ambient swell)
+    setShoreField(f, rampShore())
+    // x = −40 → depth ≈ 2 m, squarely in the band. Scan a beat so we don't
+    // land on a phase zero-crossing.
+    let peak = 0
+    for (let i = 0; i < 40; i++) {
+      advanceWaveField(f, 0.1)
+      peak = Math.max(peak, Math.abs(sampleHeight(f, -40, 0)))
+    }
+    expect(peak).toBeGreaterThan(0.1)
+    // Strength 0 collapses the contribution to exactly zero (empty field).
+    f.shoreWaveStrength = 0
+    for (let i = 0; i < 40; i++) {
+      advanceWaveField(f, 0.1)
+      expect(sampleHeight(f, -40, 0)).toBe(0)
+    }
+  })
+
+  it('contributes nothing on dry land or in deep water', () => {
+    const f = createWaveField([])
+    setShoreField(f, rampShore())
+    advanceWaveField(f, 1.3)
+    // Land (x = +40, depth < 0).
+    expect(sampleHeight(f, 40, 0)).toBe(0)
+    // Deep water (x = −95 → depth ≈ 4.75 ≥ SHORE_BAND_DEPTH).
+    expect(SHORE_BAND_DEPTH).toBeLessThan(4.75)
+    expect(sampleHeight(f, -95, 0)).toBe(0)
+  })
+
+  it('never breaches the seabed (|height| ≤ SHORE_DEPTH_CAP · depth)', () => {
+    const f = createWaveField([])
+    const shore = rampShore()
+    setShoreField(f, shore)
+    for (let i = 0; i < 30; i++) {
+      advanceWaveField(f, 0.17)
+      for (let x = -85; x <= -5; x += 5) {
+        const s = sampleSurface(f, x, 0) // unused beyond keeping parity warm
+        void s
+        const y = sampleHeight(f, x, 0)
+        // depth at this x from the same field the term reads.
+        const depth = -0.05 * x
+        expect(Math.abs(y)).toBeLessThanOrEqual(SHORE_DEPTH_CAP * depth + 1e-3)
+      }
+    }
+  })
+
+  it('sampleHeight and sampleSurface agree on height with a shore field', () => {
+    const f = createWaveField(defaultWaves())
+    setShoreField(f, rampShore())
+    for (let i = 0; i < 10; i++) {
+      advanceWaveField(f, 0.37)
+      for (let x = -80; x <= -10; x += 10) {
+        for (let z = -30; z <= 30; z += 15) {
+          expect(sampleHeight(f, x, z)).toBeCloseTo(sampleSurface(f, x, z).y, 9)
+        }
+      }
+    }
+  })
+
+  it('shore ∂y/∂t (vy) matches a finite difference of height', () => {
+    const f = createWaveField([]) // isolate shore so vy is purely the shore term
+    setShoreField(f, rampShore())
+    advanceWaveField(f, 2.0)
+    const x = -35
+    const z = 0
+    const vy = sampleSurface(f, x, z).vy
+    const eps = 1e-3
+    advanceWaveField(f, eps)
+    const hp = sampleHeight(f, x, z)
+    advanceWaveField(f, -2 * eps)
+    const hm = sampleHeight(f, x, z)
+    const numeric = (hp - hm) / (2 * eps)
+    expect(vy).toBeCloseTo(numeric, 3)
+  })
+
+  it('leaves the field untouched when no shore field is installed', () => {
+    const a = createWaveField(defaultWaves())
+    const b = createWaveField(defaultWaves())
+    setShoreField(b, null)
+    advanceWaveField(a, 1.1)
+    advanceWaveField(b, 1.1)
+    for (let x = -50; x <= 50; x += 25) {
+      expect(sampleHeight(a, x, 7)).toBe(sampleHeight(b, x, 7))
+    }
   })
 })

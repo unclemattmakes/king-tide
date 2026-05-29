@@ -34,7 +34,12 @@ import { installSpectatorHud } from '@/engine/replay/spectator-hud'
 import { createReplayStateReconstructor } from '@/engine/replay/state-reconstructor'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
-import { advanceWaveField, sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
+import {
+  advanceWaveField,
+  sampleHeight,
+  setShoreField,
+  type WaveFieldState,
+} from '@/engine/sim/water/wave-field'
 import { TransformStore } from '@/game/components'
 
 export interface ReplayModeOpts {
@@ -122,6 +127,11 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     backend,
     onReady,
   } = opts
+
+  // Ensure the reconstructor's wave field carries the same shore field as the
+  // live sim, so grounded/water classification during rewind matches what was
+  // recorded (the shore-aligned wave now contributes to `sampleHeight`).
+  setShoreField(waveField, terrainHeightmap?.shoreField ?? null)
 
   const stateReconstructor = createReplayStateReconstructor({
     sim,

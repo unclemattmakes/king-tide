@@ -17,7 +17,12 @@ import { createWaterMesh, updateUnderwaterFog } from '@/engine/render/water'
 import { createWaveRiderRenderSystem } from '@/engine/render/wave-rider-render'
 import { createSimWorld } from '@/engine/sim/ecs/world'
 import { createPhysicsWorld } from '@/engine/sim/physics/rapier'
-import { createWaveField, defaultWaves, sampleHeight } from '@/engine/sim/water/wave-field'
+import {
+  createWaveField,
+  defaultWaves,
+  sampleHeight,
+  setShoreField,
+} from '@/engine/sim/water/wave-field'
 import { applyStoredWaterTuning } from '@/engine/water-debug-storage'
 import { loadBike } from '@/game/assets/bike-loader'
 import { type LoadedProp, loadProp } from '@/game/assets/prop-loader'
@@ -128,6 +133,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
       return handle
     }
     if (terrainHeightmap) waterMesh.setTerrainHeightmap(terrainHeightmap)
+    setShoreField(waveField, terrainHeightmap?.shoreField ?? null)
 
     const sky = createSkySystem({
       scene,

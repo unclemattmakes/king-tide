@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { buildShoreField, type ShoreField } from '@/engine/sim/water/shore-field'
 
 /**
  * A 2D top-down heightmap of static terrain, sampled by the water shader to
@@ -26,6 +27,12 @@ export type TerrainHeightmap = {
    *  `DEEP_SENTINEL` for cells with no terrain coverage. Used for
    *  CPU diagnostics like the water-coverage check at boot. */
   raw?: Float32Array
+  /** Baked shore field (distance-to-shore + offshore normal + depth),
+   *  derived from `raw` in the same pass. Drives shore-aligned waves on
+   *  both the GPU shader and CPU buoyancy. `null` when the track has no
+   *  coastline (all-water / all-land). Pure data (no Three.js) so the sim
+   *  layer can sample it. */
+  shoreField?: ShoreField | null
 }
 
 const DEEP_SENTINEL = -10000
@@ -53,10 +60,11 @@ export const TERRAIN_HEIGHTMAP_RESOLUTION = 512
 
 export function buildTerrainHeightmap(
   roots: readonly THREE.Object3D[],
-  opts?: { padding?: number },
+  opts?: { padding?: number; waterLevel?: number },
 ): TerrainHeightmap | null {
   const resolution = TERRAIN_HEIGHTMAP_RESOLUTION
   const padding = opts?.padding ?? 8
+  const waterLevel = opts?.waterLevel ?? 0
 
   const va = new THREE.Vector3()
   const vb = new THREE.Vector3()
@@ -208,12 +216,25 @@ export function buildTerrainHeightmap(
   texture.generateMipmaps = false
   texture.needsUpdate = true
 
+  // Bake the shore field from the same grid (pure, no Three.js). Drives
+  // shore-aligned waves; `null` when there's no coastline.
+  const shoreField = buildShoreField({
+    raw: grid,
+    resolution,
+    minX,
+    minZ,
+    sizeX,
+    sizeZ,
+    waterLevel,
+  })
+
   return {
     texture,
     worldMin: new THREE.Vector2(minX, minZ),
     worldMax: new THREE.Vector2(maxX, maxZ),
     resolution,
     raw: grid,
+    shoreField,
   }
 }
 

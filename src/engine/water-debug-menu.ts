@@ -138,6 +138,15 @@ const SLIDERS: SliderDef[] = [
     format: (n) => `${n.toFixed(0)}°`,
     hint: 'Rotation of the Gerstner horizontal-displacement vector relative to wave direction. 0° = along wave (standard, sharpens crests in direction of travel) · 90° = across wave (sharpens along the crest-line axis)',
   },
+  {
+    key: 'shoreWaveStrength',
+    label: 'Shore waves',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: 'Coast-parallel breakers that fill the near-shore band, marching shoreward. Affects buoyancy (rideable). 0 = off (legacy damped shore) · 1 = default · 2 = exaggerated surf',
+  },
   // SoT-inspired fragment shading sliders.
   {
     key: 'bodyAbsorption',
@@ -284,6 +293,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'streakElongation':
           water.debug.setStreakElongation(v)
+          break
+        case 'shoreWaveStrength':
+          water.debug.setShoreWaveStrength(v)
           break
       }
     })

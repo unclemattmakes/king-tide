@@ -6,7 +6,7 @@ Reference for the SoT-style ocean upgrade. Original research compiled 2026-05-09
 
 Render: horizontal-displacement Gerstner (per-wave Q + global scale uniform, with chop amplitudes bumped 30% in M9.34 for more dramatic short-wavelength pinching), **sub-Gerstner detail-normal cascades (M9.39 — two world-XZ-aligned samples of a procedural 256² wave-detail normal map at 6 m and 1.5 m tile sizes; hardware mipmap filtering provides distance AA, and their slopes add to the analytic Gerstner gradient before the normal is built so the fine chop SoT achieves with FFT is filled in without explosive vertex counts)**, **Toksvig-style specular AA (M9.39 — fwidth of the per-pixel normal drives a roughness boost up to +0.18 so wave crests at glancing screen angles widen the specular lobe instead of pin-pricking single-pixel glints)**, two-color scatter blend (deep teal ↔ cyan-green, view + sun-direction modulated, with sun-glow emissive on backlit crests, sun direction now animated by the day-night cycle), stateless foam accumulator (lingering whitecaps via 4 time-shifted Gerstner samples, no render targets needed), depth-buffer shoreline foam with lapping noise scroll (water/land intersection breathes ±0.4m), richer bike foam pass (speed-modulated hull ring + stern propwash + bow spray + V-wake, all noise-modulated for turbulent edges), noise-modulated roughness for SoT-style "wandering glints", planar reflection via TSL `reflector()` node (M9.38 — Fresnel-mixed into base color, wave-normal-distorted UV including detail-cascade slopes so close-range reflections ripple with the chop, replaces the prior fresnelEmissive sky tint), existing analytic normal + wake-displacement V-stripe with transverse scallops (M9.35).
 
-Sim: vertical-only Gerstner (unchanged at the formulation level, with new bumped chop amplitudes in M9.34), multi-probe buoyancy (4 sample points around the bike's footprint, pitch/roll from differential heights), wake transverse modulation mirrored on the CPU sampler so trailing riders feel the same scallops they see (M9.35), unchanged underwater dive + buoyancy + asymmetric drag.
+Sim: vertical-only Gerstner (unchanged at the formulation level, with new bumped chop amplitudes in M9.34), multi-probe buoyancy (4 sample points around the bike's footprint, pitch/roll from differential heights), wake transverse modulation mirrored on the CPU sampler so trailing riders feel the same scallops they see (M9.35), **shore-aligned waves mirrored on the CPU sampler so the near-shore breakers are rideable, not just rendered (see "Shoreline transition" below)**, unchanged underwater dive + buoyancy + asymmetric drag.
 
 Lighting: directional sun light animated on a 360s loop (M9.34 — elevation 30..70°, azimuth full rotation). Position synced to the water shader's `sunDirUniform` each frame via `waterMesh.setSunDirection`.
 
@@ -27,6 +27,64 @@ The reference is Sea of Thieves. Rare's published pipeline (SIGGRAPH 2018 *The T
 | Noise-disrupted specular | Noise-modulated roughness | Same effect (highlights break into wandering glints), just realized via PBR roughness rather than a custom specular lobe |
 | SSR + cubemap blended by Fresnel | Planar reflection via TSL `reflector()` (M9.38) | Mirror-camera + half-res render target gives accurate reflections of the (mostly horizontal) scene at a fraction of SSR's cost. SoT uses SSR primarily for off-water reflection of nearby ships' hulls; for an arcade racer where bikes hover ON the water and most reflected content is sky + horizon, the planar approximation reads identically |
 
+## Shoreline transition (shore-aligned waves)
+
+The terrain heightmap's original job was purely *subtractive*: shoal the ambient
+swell to zero in the last ~3 m of depth (`shoalFactor` in the vertex shader) so
+crests stop clipping up through the seabed. That kept the geometry clean but left
+the most interesting water — the surf zone — flat and dead. Every shoreline
+reference game (Black Flag, the UE water system, the canonical "distance-to-shore
+field" technique) does the opposite near the coast: it *transforms* the swell
+into coast-parallel breakers instead of just killing it.
+
+We add that as a second wave train on top of the (still-damped) ambient swell:
+
+- **Shore field bake.** `buildShoreField` (`src/engine/sim/water/shore-field.ts`,
+  pure / no Three.js) runs in the same pass that builds the terrain heightmap and
+  produces three per-cell arrays over the *same* AABB: `dist` (distance-to-shore
+  via a deterministic 2-pass anisotropic chamfer transform, lightly blurred),
+  `nrmX/nrmZ` (the unit OFFSHORE normal = `normalize(∇dist)`), and `depth`
+  (`waterLevel − terrainY`). It returns `null` when there's no coastline.
+- **One source of truth.** The bake is attached to the `TerrainHeightmap` object.
+  `water.ts` packs it into an `RGBA16F` texture (allocate-once + copy-in, exactly
+  like the heightmap) for the GPU; `setShoreField` hands the *same arrays* to the
+  CPU wave field for buoyancy. One deterministic bake → CPU, GPU, and every
+  multiplayer peer evaluate the identical field (only `waveField.time` is
+  snapshotted, so the static field has to reproduce bit-for-bit).
+- **The wave.** Crests run parallel to the coast and march shoreward:
+  `phase = SHORE_K·dist + SHORE_OMEGA·t`. Amplitude peaks in the surf band and is
+  **capped by the water column** (`min(SHORE_AMP, SHORE_DEPTH_CAP·depth)`), so a
+  trough can never breach the seabed (`SHORE_DEPTH_CAP ≤ 1` guarantees it). The
+  term is a pure vertical displacement (no horizontal pinch), evaluated identically
+  by `computeShore` in `wave-field.ts` and the TSL shader — the `SHORE_*` constants
+  are a single export enforced by `tests/unit/shore-constants-drift.test.ts`.
+- **Foam re-sync.** The existing depth-driven `shorelineSurf` breaker foam now
+  takes its crest signal from `max(ambientHeight, shoreHeight)`, so the surf line
+  breaks in step with the shoreward-marching shore waves.
+- **Swash run-up.** The screen-space `intersectionFoam` band's reach up the beach
+  is modulated by `shoreHeightFrag` (the signed shore-wave height varying): an
+  incoming crest pushes the foam edge — both the wide band and the bright
+  waterline lip — further up the sand, and the trough lets it slide back. Because
+  `shoreHeightFrag` is already scaled by `shoreWaveStrength` and gated to 0 without
+  a shore field, the swash is a clean no-op on open water.
+- **Wet sand.** The terrain shader's existing wet-band darken (`terrain-shader.ts`)
+  was anchored to world y=0; it's now anchored to the real `waterLevel` (threaded
+  from `track.water.height` into `TerrainShaderConfig`), so the damp-sand band and
+  the underwater refraction tint sit at the actual shoreline on raised/sunken-water
+  tracks. Combined with the swash foam washing over it, the beach reads as
+  wave-washed without per-fragment state.
+- **A/B + tuning.** `shoreWaveStrength` (water debug menu, default 1, `0` =
+  byte-identical legacy) scales the whole thing on both CPU and GPU from one
+  scalar, same discipline as `waveBearing`.
+
+Known follow-ups (deliberately out of scope): the CPU buoyancy sampler still does
+**not** apply the ambient `shoalFactor` (only the GPU does), so near-shore the bike
+feels full-amplitude ambient swell beneath the shore breakers — a pre-existing
+CPU/GPU mismatch this change doesn't widen but doesn't fix. A *stateful* drying
+wet-sand trail (dark sand left behind a receding swash that slowly fades) is the
+natural next step — see [Possible next wins](#stateful-drying-wet-sand-trail) below
+for an implementation recipe.
+
 ## Key sources
 
 - [Ang et al. — *The Technical Art of Sea of Thieves*, SIGGRAPH 2018 (PDF)](https://history.siggraph.org/wp-content/uploads/2022/09/2018-Talks-Ang_The-Technical-Art-of-Sea-of-Thieves.pdf)
@@ -40,6 +98,62 @@ The reference is Sea of Thieves. Rare's published pipeline (SIGGRAPH 2018 *The T
 
 ### Possible next wins
 
+#### Stateful drying wet-sand trail
+
+The shipped wet sand is a *static* band: it darkens terrain within `wetBand` of the
+waterline regardless of whether a wave just washed over it. The next step is a
+**drying trail** — sand stays dark where the swash recently reached, then fades back
+to dry over a few seconds, so each receding wave leaves a visible wet tongue up the
+beach. This is the one genuinely *stateful* piece of the shoreline (wetness has to
+persist after the foam recedes), which is why it was deferred. Two ways to build it:
+
+**Option A — stateless analytic accumulator (recommended; matches the codebase ethos).**
+The swash run-up is a deterministic function of `(x, z, t)` — exactly the property the
+foam accumulator already exploits (`foamAccumulator` in [water.ts](../src/engine/render/water.ts),
+"did this point have a crest 0.5 s ago?" = evaluate the wave at `t − 0.5`). Reuse that
+trick in the **terrain** shader:
+
+1. Give `buildTerrainMaterial` ([terrain-shader.ts](../src/engine/render/terrain-shader.ts))
+   access to the shore field. It already has the static `waterLevel`; add (a) a
+   per-frame `time` uniform, (b) a `waterLevel` *uniform* (not the load-time const), and
+   (c) the baked shore-field texture + its bounds uniforms + the shared `SHORE_*`
+   constants. Terrain can sample the **same** `TerrainHeightmap.shoreField` the water
+   shader uses — no new bake.
+2. Define the instantaneous swash waterline as `swashY(x,z,t) = waterLevel +
+   runUp(x,z,t)`, where `runUp` is the shore-wave crest envelope (the same
+   `shoreHeight` signal, clamped to ≥ 0 so only the up-rush wets sand). The shipped
+   `SWASH_REACH` lift in `intersectionFoam` is the visual analogue — reuse the same
+   amplitude so foam and wet line agree.
+3. Accumulate wetness as a time-decayed max over N past samples (mirror
+   `foamAccumulator`'s `NUM_SAMPLES`/`DECAY_RATE` loop):
+   `wetness = max_i [ exp(−i·dt·k) · smoothstep(fragmentY + ε, fragmentY − ε,
+   swashY(x,z, t − i·dt)) ]`. A fragment is wet if the swash line was *above* its
+   height at any recent time; the `exp` decay is the drying. `k ≈ 0.3–0.7 /s` gives a
+   2–3 s dry-back; `N ≈ 6–8` samples over `dt ≈ 0.3 s` covers it.
+4. Feed `wetness` into the existing wet-band mix (extend the `withWet` line) — darken
+   + desaturate harder than the static band, and optionally bump roughness down (wet
+   sand is shinier).
+
+This stays render-target-free and deterministic (so it's replay/netcode-safe even if
+wetness ever nudged gameplay), at the cost of N extra shore-field taps + trig per
+terrain fragment **near the shore only** — gate the whole block on `abs(yRelWater) <
+wetBand + maxRunUp` so inland fragments early-out.
+
+*Boot-order note:* the terrain material is built in `loadGlbTrackVisuals`
+([track-loader.ts](../src/boot/track-loader.ts)) *before* the water mesh exists, so don't
+try to borrow the water mesh's uniforms. Instead hand the terrain material its own
+`time`/`waterLevel` uniforms + a texture built from `TerrainHeightmap.shoreField`, and
+drive `time`/`waterLevel` each frame from `main.ts` (a `setTime`/`setWaterLevel` setter
+on the returned material handle, the same shape as `waterMesh.setSunDirection`).
+
+**Option B — top-down wetness render target (heavier, more flexible).** An ortho
+"wetness map" over the track AABB: each frame decay the whole buffer toward dry
+(`*= ~0.99`) and splat the current swash-covered footprint as wet, then terrain samples
+it by world XZ. Handles wetness from *arbitrary* sources (bike spray throwing water onto
+sand, rain) that the analytic path can't, but breaks the no-RTT ethos, adds a ping-pong
+target + splat pass, and is only worth it once you want those extra sources. Wetness is
+purely cosmetic, so the buffer's non-determinism across machines is a non-issue. Build
+this only if Option A's analytic swash proves too limiting.
 
 ### Heavier lifts (defer until needed)
 
@@ -76,3 +190,9 @@ The reference is Sea of Thieves. Rare's published pipeline (SIGGRAPH 2018 *The T
 | Detail-cascade strength | `detailStrengthUniform` (debug menu slider, console `__waterDetail(n)`) | 0.5 | global multiplier on both cascades. 0 = bypass detail entirely (analytic-Gerstner only, for A/B); 1 = punchy chop; 2 = overdriven for tuning. Affects only visuals, not buoyancy — the CPU sampler doesn't know about detail normals |
 | Analytic-slope flatten window | `smoothstep(25, 140, camDist)` in `water.ts` | (25, 140) m | distance-fades the analytic Gerstner slopes toward zero to suppress sub-pixel specular glints. Detail cascades are NOT included — their mip filtering already handles LOD. Pull narrower (e.g. 20, 110) if horizon water still aliases on a particular monitor |
 | Toksvig roughness boost | `smoothstep(0.05, 0.5, length(fwidth(normalNode))).mul(0.18)` in `water.ts` | up to +0.18 | screen-space normal-variance specular AA. Raises roughness where the per-pixel normal swings fast, widening the lobe to defeat single-pixel highlight flicker. Higher cap = more aggressive AA at the cost of crispness; lower = sharper highlights with more risk of sparkle aliasing on grazing wave crests |
+| Shore-wave strength | `shoreWaveStrengthUniform` (debug menu "Shore waves", console value mirrored to `field.shoreWaveStrength`) | 1.0 | 0..2. 0 = off (byte-identical legacy damped shore); 1 = default breakers; 2 = exaggerated surf. Affects buoyancy (rideable) |
+| Shore-wave wavelength | `SHORE_WAVELENGTH` in `wave-field.ts` | 9 m | crest-to-crest of the coast-parallel breakers. Shorter = tighter, more frequent surf lines |
+| Shore-wave speed | `SHORE_SPEED` in `wave-field.ts` | 3.5 m/s | shoreward phase speed (`SHORE_OMEGA = SHORE_K·SHORE_SPEED`). Faster = quicker-arriving sets |
+| Shore-wave peak amplitude | `SHORE_AMP` in `wave-field.ts` | 0.7 m | amplitude ceiling before the per-sample depth cap. The actual crest is `min(SHORE_AMP, SHORE_DEPTH_CAP·depth)` |
+| Shore-wave band depth | `SHORE_BAND_DEPTH` in `wave-field.ts` | 4.5 m | water depth at which the shore wave has faded to zero. Beyond this it's open water |
+| Shore-wave depth cap | `SHORE_DEPTH_CAP` in `wave-field.ts` | 0.5 | amplitude ≤ `SHORE_DEPTH_CAP · depth`. Must be ≤ 1 (no seabed breach); 0.5 leaves headroom for the ambient swell's own trough |

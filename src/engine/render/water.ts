@@ -37,6 +37,15 @@ import {
 import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
 import {
+  // Shore-aligned wave constants — single source of truth shared with the CPU
+  // buoyancy sampler. `tests/unit/shore-constants-drift.test.ts` enforces that
+  // this shader imports them rather than re-declaring literals.
+  SHORE_AMP,
+  SHORE_BAND_DEPTH,
+  SHORE_DEPTH_CAP,
+  SHORE_K,
+  SHORE_OMEGA,
+  SHORE_PHASE,
   WAKE_BASE_WIDTH,
   WAKE_DISP_AMP,
   WAKE_EDGE_BELL_HALFWIDTH,
@@ -154,6 +163,12 @@ export type WaterMesh = {
     /** Streak elongation (σ_along of the 2D Gaussian). Higher =
      *  longer streak; lower = more disc-like. Default 0.4. */
     setStreakElongation(s: number): void
+    /** Shore-aligned wave strength, 0..2. Scales the amplitude of the
+     *  coast-parallel breakers that fill the near-shore band. 0 = off
+     *  (byte-identical to no shore field), 1 = default, 2 = exaggerated.
+     *  Sets both the GPU uniform and the CPU `field.shoreWaveStrength` so
+     *  buoyancy and visuals track, exactly like `setWaveBearing`. */
+    setShoreWaveStrength(s: number): void
     /** Pinch direction in degrees, 0..90. Rotates the Gerstner
      *  horizontal-displacement vector relative to the per-wave
      *  travel direction. 0° = standard Gerstner (particles bulge
@@ -203,6 +218,8 @@ export type WaterDebugDefaults = {
   sunStreakStrength: number
   /** Streak elongation σ_along. 0.4 = baseline. */
   streakElongation: number
+  /** Shore-aligned wave strength, 0..2. 1 = baseline, 0 = off. */
+  shoreWaveStrength: number
   /** Gerstner pinch direction in degrees, 0..90. */
   pinchDirection: number
   /** Wave-field bearing in degrees, -180..180. */
@@ -727,6 +744,33 @@ export function createWaterMesh(
   // keeping waves visible in mid-shallows.
   const SHOAL_FADE_DEPTH = 3.0
 
+  // Shore field (RGBA16F): R = distance-to-shore (m), G = offshore normal X,
+  // B = offshore normal Z, A = water depth (m). Same coverage + resolution as
+  // the terrain heightmap, so the vertex shader reuses `terrainU`/`terrainV`
+  // to sample it. Drives shore-aligned waves: crests parallel to the coast,
+  // marching shoreward, that bring the formerly-dead near-shore band to life.
+  // Allocated once and filled in-place by `setTerrainHeightmap` (the shore
+  // field rides on the same `TerrainHeightmap` object). While
+  // `shoreEnabledUniform = 0` (no coastline / editor) the term is bypassed.
+  const SHORE_WAVE_STRENGTH_DEFAULT = 1.0
+  const shoreFieldData = new Uint16Array(TERRAIN_HEIGHTMAP_RES * TERRAIN_HEIGHTMAP_RES * 4)
+  const shoreFieldTex = new THREE.DataTexture(
+    shoreFieldData,
+    TERRAIN_HEIGHTMAP_RES,
+    TERRAIN_HEIGHTMAP_RES,
+    THREE.RGBAFormat,
+    THREE.HalfFloatType,
+  )
+  shoreFieldTex.name = 'water:shoreField'
+  shoreFieldTex.minFilter = THREE.LinearFilter
+  shoreFieldTex.magFilter = THREE.LinearFilter
+  shoreFieldTex.wrapS = THREE.ClampToEdgeWrapping
+  shoreFieldTex.wrapT = THREE.ClampToEdgeWrapping
+  shoreFieldTex.generateMipmaps = false
+  shoreFieldTex.needsUpdate = true
+  const shoreEnabledUniform = uniform(0)
+  const shoreWaveStrengthUniform = uniform(SHORE_WAVE_STRENGTH_DEFAULT)
+
   // Bike slot uniform array. Each vec4 = (px, pz, vx, vz). Inactive slots
   // are parked at INACTIVE_FAR so their Gaussian + wake fall off to zero.
   // Velocity is stored UNWEIGHTED — `weights[i]` is the separate fade
@@ -1100,9 +1144,51 @@ export function createWaterMesh(
   const attenDispZ = vertexDisp.y.mul(shoalFactor)
   const attenQSum = vertexDisp.z.mul(shoalFactor)
 
-  const totalHeight = attenAmbient.add(vertexBike.x)
-  const totalDydx = attenDydx.add(vertexBike.y)
-  const totalDydz = attenDydz.add(vertexBike.z)
+  // Shore-aligned wave. Sample the baked shore field (shares the terrain AABB,
+  // so reuse terrainU/terrainV). Crests run parallel to the coast and march
+  // shoreward (phase = K·dist + Ω·t); amplitude peaks in the surf band and is
+  // capped by the water column so a trough can't breach the seabed. This is a
+  // pure vertical term (no horizontal displacement) — the exact mirror of
+  // `computeShore` in wave-field.ts (shared SHORE_* consts + the identical
+  // baked field), so buoyancy and the rendered surface agree. Gated to zero
+  // by `shoreEnabledUniform` when no coastline is installed.
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+  const shoreSample = texture(shoreFieldTex, vec2(terrainU, terrainV)) as any
+  // Wrap each component in float() so downstream min/max/mul resolve to the
+  // scalar overloads (a raw `any` swizzle resolves them to vec-returning ones).
+  const shoreDist = float(shoreSample.r)
+  const shoreNrmRawX = float(shoreSample.g)
+  const shoreNrmRawZ = float(shoreSample.b)
+  const shoreDepth = float(shoreSample.a)
+  // Renormalise the offshore normal — bilinear filtering shrinks it near the
+  // medial axis (matches the CPU sampler's renormalise-or-zero).
+  const shoreNrmLen = max(
+    sqrt(shoreNrmRawX.mul(shoreNrmRawX).add(shoreNrmRawZ.mul(shoreNrmRawZ))),
+    float(1e-4),
+  )
+  const shoreNrmX = shoreNrmRawX.div(shoreNrmLen)
+  const shoreNrmZ = shoreNrmRawZ.div(shoreNrmLen)
+  const shoreBandGate = float(1).sub(smoothstep(float(0), float(SHORE_BAND_DEPTH), shoreDepth))
+  const shoreAmpCap = min(float(SHORE_AMP), float(SHORE_DEPTH_CAP).mul(max(shoreDepth, float(0))))
+  const shoreAmp = shoreAmpCap
+    .mul(shoreBandGate)
+    .mul(shoreWaveStrengthUniform)
+    .mul(shoreEnabledUniform)
+  const shorePhase = float(SHORE_K)
+    .mul(shoreDist)
+    .add(tNode.mul(float(SHORE_OMEGA)))
+    .add(float(SHORE_PHASE))
+  const shoreSin = sin(shorePhase)
+  const shoreCos = cos(shorePhase)
+  const shoreY = shoreAmp.mul(shoreSin)
+  // ∂phase/∂x = K·nrmX (world frame); add alongside the world-frame ambient +
+  // bike slopes below.
+  const shoreDydx = shoreAmp.mul(shoreCos).mul(float(SHORE_K)).mul(shoreNrmX)
+  const shoreDydz = shoreAmp.mul(shoreCos).mul(float(SHORE_K)).mul(shoreNrmZ)
+
+  const totalHeight = attenAmbient.add(vertexBike.x).add(shoreY)
+  const totalDydx = attenDydx.add(vertexBike.y).add(shoreDydx)
+  const totalDydz = attenDydz.add(vertexBike.z).add(shoreDydz)
 
   // Foam accumulator (stateless, no render targets needed).
   //
@@ -1206,6 +1292,9 @@ export function createWaterMesh(
   // pulse reads this so breakers fire with the natural cadence of incoming
   // crests even where geometry has gone flat.
   const ambientHeightFrag = varying(vertexHeight.x)
+  // Shore-wave displacement, forwarded so the shoreline surf foam pulses with
+  // the shoreward-marching breakers (not just the deep-swell cadence).
+  const shoreHeightFrag = varying(shoreY)
 
   // Sub-Gerstner detail-normal cascades. Two world-XZ-aligned samples of the
   // procedural wave-detail texture at different tile sizes + scroll speeds,
@@ -1951,18 +2040,32 @@ export function createWaterMesh(
     //                    at the geometry edge" beat.
     const FOAM_BAND_BASE = 6.0
     const PEAK_RANGE = 1.0
+    // Swash run-up reach (extra metres the foam climbs the beach at the top
+    // of a shore-wave crest).
+    const SWASH_REACH = 3.0
     const behindGate = smoothstep(float(-0.05), float(0.05), closenessSigned)
+    // Swash: each shoreward-marching shore-wave crest pushes the foam edge up
+    // the beach, then the trough lets it slide back — the lacy run-up/retreat
+    // at the waterline. `shoreHeightFrag` is the signed shore-wave height
+    // (already scaled by shore strength + gated to 0 without a shore field),
+    // so this is a clean no-op on open water.
+    const swash = smoothstep(float(0.0), float(0.35), shoreHeightFrag)
     // Lapping shoreline: the depth threshold breathes ±1.0 m around
-    // the 6.0 m base as the shared foam noise scrolls.
+    // the 6.0 m base as the shared foam noise scrolls; swash extends the
+    // reach further up-beach on incoming crests.
     const noiseRangeOffset = foamNoiseRaw.sub(float(0.5)).mul(float(2.0))
-    const bandRangeNow = float(FOAM_BAND_BASE).add(noiseRangeOffset)
+    const bandRangeNow = float(FOAM_BAND_BASE)
+      .add(noiseRangeOffset)
+      .add(swash.mul(float(SWASH_REACH)))
     // Pow-0.4 falloff: fuller-bright across more of the band. At half
     // the band depth, foam still reads at ~0.76 brightness.
     const bandLinear = float(1).sub(clamp(closeness.div(bandRangeNow), float(0), float(1)))
     const bandFoam = pow(bandLinear, float(0.4))
     // Tight bright peak right at the intersection — the unmistakable
-    // waterline lip on top of the wider band.
-    const peakLinear = float(1).sub(smoothstep(float(0), float(PEAK_RANGE), closeness))
+    // waterline lip on top of the wider band. Its reach widens with the
+    // swash so the bright leading edge of foam visibly climbs the sand.
+    const peakRangeNow = float(PEAK_RANGE).add(swash.mul(float(1.5)))
+    const peakLinear = float(1).sub(smoothstep(float(0), peakRangeNow, closeness))
     const peakFoam = peakLinear.mul(float(1.15))
     const intensityModulator = mix(float(0.9), float(1.2), foamNoiseSmooth)
     return behindGate.mul(max(bandFoam, peakFoam)).mul(intensityModulator)
@@ -1983,12 +2086,13 @@ export function createWaterMesh(
     // vertex shoaling so foam and damped geometry align.
     const SURF_BAND_DEPTH = 3.0
     const shoreBand = float(1).sub(smoothstep(float(0), float(SURF_BAND_DEPTH), waterDepthFrag))
-    // Crest signal: the un-attenuated ambient wave height. Positive
-    // values are wave faces marching toward shore — exactly what we
-    // want to "break" into surf. Using the pre-attenuation height
-    // means the pulse cadence stays locked to the natural wave period
-    // even where the geometry is being damped.
-    const crestSignal = clamp(ambientHeightFrag, float(0), float(1.5))
+    // Crest signal: the stronger of the un-attenuated ambient wave height and
+    // the shore-aligned wave height. Positive values are wave faces marching
+    // toward shore — exactly what we want to "break" into surf. The ambient
+    // term keeps the pulse cadence locked to the natural swell even where the
+    // geometry is damped; the shore term makes the surf line break in step
+    // with the shoreward-marching shore waves that now drive the band.
+    const crestSignal = clamp(max(ambientHeightFrag, shoreHeightFrag), float(0), float(1.5))
     // Pow-1.6 biases the response: small crests produce faint surf;
     // once a real crest arrives, foam saturates fast.
     const crestBreaker = pow(smoothstep(float(0.05), float(0.6), crestSignal), float(1.6))
@@ -2311,6 +2415,7 @@ export function createWaterMesh(
     sunDiscStrength: SUN_DISC_STRENGTH_DEFAULT,
     sunStreakStrength: SUN_STREAK_STRENGTH_DEFAULT,
     streakElongation: STREAK_ELONGATION_DEFAULT,
+    shoreWaveStrength: SHORE_WAVE_STRENGTH_DEFAULT,
     pinchDirection: PINCH_DIRECTION_DEFAULT,
     waveBearing: WAVE_BEARING_DEFAULT,
     wireframe: wireFlag,
@@ -2385,6 +2490,14 @@ export function createWaterMesh(
       // 0.1..1.5 — σ_along of the 2D Gaussian. Lower clamps
       // toward 0.1 (disc-like); higher elongates the streak.
       streakElongationUniform.value = clamp01(s, 0.1, 1.5)
+    },
+    setShoreWaveStrength(s) {
+      // 0..2 — scales the shore-aligned breaker amplitude. Mirrors the
+      // value onto the CPU field so buoyancy rides the same waves the
+      // shader renders (same discipline as setWaveBearing).
+      const v = clamp01(s, 0, 2)
+      shoreWaveStrengthUniform.value = v
+      field.shoreWaveStrength = v
     },
     setPinchDirection(deg) {
       // 0..90° — rotation of the Gerstner horizontal-displacement
@@ -2888,6 +3001,25 @@ export function createWaterMesh(
     terrainMinUniform.value.copy(heightmap.worldMin)
     terrainMaxUniform.value.copy(heightmap.worldMax)
     terrainEnabledUniform.value = 1
+
+    // Shore field rides on the same heightmap object (baked from the same
+    // raster pass over the same AABB). Pack dist/normal/depth into the RGBA16F
+    // texture and enable the shore-wave term. A track with no coastline bakes
+    // `shoreField = null` → leave the term disabled (legacy open water).
+    const shore = heightmap.shoreField
+    if (shore && shore.resolution === TERRAIN_HEIGHTMAP_RES) {
+      for (let i = 0; i < shore.dist.length; i++) {
+        const o = i * 4
+        shoreFieldData[o] = THREE.DataUtils.toHalfFloat(shore.dist[i]!)
+        shoreFieldData[o + 1] = THREE.DataUtils.toHalfFloat(shore.nrmX[i]!)
+        shoreFieldData[o + 2] = THREE.DataUtils.toHalfFloat(shore.nrmZ[i]!)
+        shoreFieldData[o + 3] = THREE.DataUtils.toHalfFloat(shore.depth[i]!)
+      }
+      shoreFieldTex.needsUpdate = true
+      shoreEnabledUniform.value = 1
+    } else {
+      shoreEnabledUniform.value = 0
+    }
   }
 
   function dispose() {
@@ -2896,6 +3028,7 @@ export function createWaterMesh(
     skirtGeom.dispose()
     skirtMat.dispose()
     terrainHeightTex.dispose()
+    shoreFieldTex.dispose()
   }
 
   return {

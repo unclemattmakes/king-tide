@@ -90,10 +90,22 @@ export async function loadTrackForBoot(opts: {
   }
 
   if (trackId === 'cliffside') {
-    return { track: createCliffside(), terrainHeightmap: buildTerrainHeightmap(terrainRoots) }
+    const track = createCliffside()
+    return {
+      track,
+      terrainHeightmap: buildTerrainHeightmap(terrainRoots, {
+        waterLevel: track.water?.height ?? 0,
+      }),
+    }
   }
   if (trackId === 'lagoon') {
-    return { track: createLagoonLoop(), terrainHeightmap: buildTerrainHeightmap(terrainRoots) }
+    const track = createLagoonLoop()
+    return {
+      track,
+      terrainHeightmap: buildTerrainHeightmap(terrainRoots, {
+        waterLevel: track.water?.height ?? 0,
+      }),
+    }
   }
 
   // Try a JSON-authored track first (gameplay data from the in-app
@@ -115,7 +127,9 @@ export async function loadTrackForBoot(opts: {
     let environmentGlbRoot: THREE.Object3D | undefined
     if (track.environmentGlb && !editMode) {
       const env = await loadGlbTrackVisuals(track.environmentGlb, {
-        ...(track.terrainShader ? { terrainShader: track.terrainShader } : {}),
+        // Anchor the terrain wet band + underwater tint to the real water
+        // surface (not y=0) by threading the track's water height in.
+        terrainShader: { ...track.terrainShader, waterLevel: track.water?.height ?? 0 },
       })
       scene.add(env.scene)
       attachTrackColliders(env.scene, phys)
@@ -125,7 +139,9 @@ export async function loadTrackForBoot(opts: {
     }
     return {
       track,
-      terrainHeightmap: buildTerrainHeightmap(terrainRoots),
+      terrainHeightmap: buildTerrainHeightmap(terrainRoots, {
+        waterLevel: track.water?.height ?? 0,
+      }),
       ...(horizonGeometry ? { horizonGeometry } : {}),
       ...(environmentGlbRoot ? { environmentGlbRoot } : {}),
     }
@@ -156,7 +172,9 @@ export async function loadTrackForBoot(opts: {
     let horizonGeometry: THREE.BufferGeometry | undefined
     let environmentGlbRoot: THREE.Object3D | undefined
     if (!editMode) {
-      const env = await loadGlbTrackVisuals(glbUrl)
+      const env = await loadGlbTrackVisuals(glbUrl, {
+        terrainShader: { waterLevel: track.water?.height ?? 0 },
+      })
       scene.add(env.scene)
       attachTrackColliders(env.scene, phys)
       terrainRoots.push(env.scene)
@@ -165,7 +183,9 @@ export async function loadTrackForBoot(opts: {
     }
     return {
       track,
-      terrainHeightmap: buildTerrainHeightmap(terrainRoots),
+      terrainHeightmap: buildTerrainHeightmap(terrainRoots, {
+        waterLevel: track.water?.height ?? 0,
+      }),
       ...(horizonGeometry ? { horizonGeometry } : {}),
       ...(environmentGlbRoot ? { environmentGlbRoot } : {}),
     }

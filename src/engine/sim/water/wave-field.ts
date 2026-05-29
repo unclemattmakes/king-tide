@@ -1,4 +1,5 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
+import { type ShoreField, sampleShore } from './shore-field'
 
 /**
  * Sum-of-sines Gerstner wave field. Pure math — no Three.js, runs in sim layer.
@@ -82,6 +83,16 @@ export type WaveFieldState = {
    *  `setWaveZones` after the track loads. See `sampleZoneFactors`
    *  for the OBB-distance blend math. */
   zones: WaveZoneRuntime[]
+  /** Baked shore field driving shore-aligned waves near the coast. `null`
+   *  (open water / editor / no terrain) = no shore contribution, identical
+   *  to legacy behaviour. Installed via `setShoreField` at track load — the
+   *  SAME bake the GPU shader samples, so buoyancy and visuals match. */
+  shore: ShoreField | null
+  /** Global multiplier on the shore-wave amplitude. 1 = default, 0 = off
+   *  (byte-identical to no shore field). Mirrors the GPU
+   *  `shoreWaveStrength` uniform — the water debug menu sets both from one
+   *  scalar, exactly like `waveBearing`. */
+  shoreWaveStrength: number
 }
 
 /**
@@ -164,6 +175,43 @@ export const WAKE_TRANS_OMEGA = 1.0
  * the unit-test floor. */
 export const WAKE_TRANS_AMP = 0.3
 
+// ---- Shore-wave parameters ----------------------------------------------
+//
+// Shore-aligned ("shoreline transition") waves: a wave train whose crests run
+// PARALLEL to the coast and march shoreward, independent of the wind-driven
+// swell direction. They turn the formerly-dead near-shore band (where ambient
+// swell is shoaling-damped to nothing) into rideable breakers. Driven by the
+// baked {@link ShoreField}: phase advances with distance-to-shore, amplitude
+// peaks in the surf band and is capped by the water column so it can never
+// poke through the seabed.
+//
+// These constants MUST EXACTLY match the values baked into the TSL shader in
+// `src/engine/render/water.ts` (the shader imports them from this module, and
+// `tests/unit/shore-constants-drift.test.ts` enforces the single source). The
+// shore field itself is identical on both sides (one bake), so CPU buoyancy
+// and the rendered surface stay locked.
+
+/** Crest-to-crest wavelength of the shore wave, metres. ~9 m reads as surf. */
+export const SHORE_WAVELENGTH = 9
+/** Spatial wavenumber (rad / m). */
+export const SHORE_K = (2 * Math.PI) / SHORE_WAVELENGTH
+/** Shoreward phase speed, m/s. */
+export const SHORE_SPEED = 3.5
+/** Angular frequency (rad / s). Phase = K·dist + Ω·t marches crests SHOREWARD
+ *  (toward decreasing distance-to-shore). */
+export const SHORE_OMEGA = SHORE_K * SHORE_SPEED
+/** Static phase offset, radians. */
+export const SHORE_PHASE = 0
+/** Peak shore-wave amplitude (m) before the per-sample depth cap + strength. */
+export const SHORE_AMP = 0.7
+/** Water depth (m) at which the shore wave has fully faded out — beyond this
+ *  it's open water and the term is zero. */
+export const SHORE_BAND_DEPTH = 4.5
+/** Amplitude is capped at `SHORE_DEPTH_CAP · depth`, so a wave trough of
+ *  `−amplitude` never falls below the seabed (`−depth`). Must be ≤ 1; 0.5
+ *  leaves headroom for the ambient swell's own trough to coexist. */
+export const SHORE_DEPTH_CAP = 0.5
+
 export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveFieldState {
   return {
     waves,
@@ -172,6 +220,8 @@ export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveF
     baseY: opts?.baseY ?? 0,
     waveBearing: 0,
     zones: [],
+    shore: null,
+    shoreWaveStrength: 1,
   }
 }
 
@@ -457,6 +507,61 @@ function smoothstep(a: number, b: number, x: number): number {
   return t * t * (3 - 2 * t)
 }
 
+/**
+ * Install (or clear) the track's baked shore field. Pass `null` to remove it
+ * (open-water / editor tracks). Mirrors `setWaveZones`: a sim-layer function
+ * that takes the field plus per-track data, so every field-owning mode —
+ * including the replay reconstructor — can install the identical field and
+ * keep buoyancy classification deterministic.
+ */
+export function setShoreField(field: WaveFieldState, shore: ShoreField | null): void {
+  field.shore = shore
+}
+
+// Reused scratch for the shore-wave contribution. Single-threaded synchronous
+// callers read it immediately after `computeShore`, so a module-level scratch
+// avoids a per-sample allocation on the hot buoyancy path. `active` gates
+// whether the y/slope/vy fields are meaningful.
+const _shore = { y: 0, dydx: 0, dydz: 0, vy: 0, active: false }
+
+/**
+ * Evaluate the shore-aligned wave at world (x, z, t) into `_shore`. Single
+ * source of truth so `sampleHeight` (reads `.y`) and `sampleSurface` (reads
+ * `.y`, `.dydx`, `.dydz`, `.vy`) can never disagree on the height.
+ *
+ * Amplitude envelope: zero on dry land (`depth ≤ 0`) and in open water
+ * (`depth ≥ SHORE_BAND_DEPTH`), peaking in the surf band; capped at
+ * `SHORE_DEPTH_CAP · depth` so a trough never breaches the seabed. Phase
+ * `K·dist + Ω·t` marches crests shoreward; slopes are in WORLD frame (the
+ * shore normal is world-XZ, not bearing-rotated), so the caller adds them
+ * AFTER its bearing back-rotation.
+ */
+function computeShore(field: WaveFieldState, x: number, z: number, t: number): void {
+  _shore.active = false
+  const shore = field.shore
+  if (!shore || field.shoreWaveStrength <= 0) return
+  const s = sampleShore(shore, x, z)
+  if (!s) return
+  const depth = s.depth
+  if (depth <= 0 || depth >= SHORE_BAND_DEPTH) return
+  // 1 at the waterline, smoothly → 0 by SHORE_BAND_DEPTH.
+  const bandGate = 1 - smoothstep(0, SHORE_BAND_DEPTH, depth)
+  const ampCap = Math.min(SHORE_AMP, SHORE_DEPTH_CAP * depth)
+  const A = ampCap * bandGate * field.shoreWaveStrength
+  if (A <= 0) return
+  const phase = SHORE_K * s.dist + SHORE_OMEGA * t + SHORE_PHASE
+  const sinP = Math.sin(phase)
+  const cosP = Math.cos(phase)
+  _shore.y = A * sinP
+  // ∂phase/∂x = K·nrmX (nrm = ∇dist, offshore, world frame). Envelope
+  // gradient omitted — matches the ambient shoaling slope approximation.
+  _shore.dydx = A * cosP * SHORE_K * s.nrmX
+  _shore.dydz = A * cosP * SHORE_K * s.nrmZ
+  // ∂y/∂t with phase = K·dist + Ω·t.
+  _shore.vy = A * cosP * SHORE_OMEGA
+  _shore.active = true
+}
+
 /** Surface y only — the cheap path used per-bike per-tick. */
 export function sampleHeight(field: WaveFieldState, x: number, z: number): number {
   let y = field.baseY
@@ -487,6 +592,9 @@ export function sampleHeight(field: WaveFieldState, x: number, z: number): numbe
   for (const src of field.wakes) {
     y += sampleWakeFromSource(src, x, z, t).y
   }
+  // Shore-aligned wave — rideable breakers in the near-shore band.
+  computeShore(field, x, z, t)
+  if (_shore.active) y += _shore.y
   return y
 }
 
@@ -532,6 +640,16 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
     dydx += wk.dydx
     dydz += wk.dydz
     // Wake's ∂y/∂t is small relative to swell; skip for buoyancy damping.
+  }
+  // Shore-aligned wave. Slopes are already world-frame (shore normal is
+  // world-XZ), so they add AFTER the bearing back-rotation above — alongside
+  // the wake terms, not into rotDydx/rotDydz.
+  computeShore(field, x, z, t)
+  if (_shore.active) {
+    y += _shore.y
+    dydx += _shore.dydx
+    dydz += _shore.dydz
+    vy += _shore.vy
   }
   // Normal of y = f(x, z) is (−∂y/∂x, 1, −∂y/∂z), normalized.
   const nx = -dydx
