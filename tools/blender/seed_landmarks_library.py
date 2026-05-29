@@ -258,10 +258,13 @@ def _append_box(bm: bmesh.types.BMesh, *, sx: float, sy: float, sz: float,
     to ``bm``. Optionally tags every appended face with ``material_index``
     so callers can multi-material their meshes without post-pass face
     walks."""
-    pre_face_count = len(bm.faces)
-    bmesh.ops.create_cube(bm, size=1.0)
-    new_faces = [f for f in bm.faces[pre_face_count:]]
-    new_verts = list({v for f in new_faces for v in f.verts})
+    # Identify new geometry via the op's return value, never a
+    # ``bm.faces[pre:]`` slice: bmesh.ops reorder internal element
+    # storage, so the slice grabs the wrong faces after multiple
+    # _append_* calls and re-translates earlier geometry. The cube is
+    # disjoint, so its verts' link_faces are exactly its own faces.
+    new_verts = bmesh.ops.create_cube(bm, size=1.0)["verts"]
+    new_faces = {f for v in new_verts for f in v.link_faces}
     bmesh.ops.scale(bm, vec=(sx, sy, sz), verts=new_verts)
     bmesh.ops.translate(bm, vec=(tx, ty, tz), verts=new_verts)
     for f in new_faces:
@@ -276,13 +279,17 @@ def _append_cone(bm: bmesh.types.BMesh, *, segments: int, r_base: float,
     given axis. ``axis="Z"`` matches Blender's default; ``axis="Y"`` /
     ``axis="X"`` rotate the cone into the horizontal plane (useful for
     stadium arches, ferris-wheel spokes)."""
-    pre_face_count = len(bm.faces)
-    bmesh.ops.create_cone(
+    # Identify new geometry via the op's return value, never a
+    # ``bm.faces[pre:]`` slice: bmesh.ops reorder internal element
+    # storage, so the slice grabs the wrong faces after multiple
+    # _append_* calls and re-translates earlier geometry (this stacked
+    # the cylinder-tower aperture to ~2x its height). The cone is
+    # disjoint, so its verts' link_faces are exactly its own faces.
+    new_verts = bmesh.ops.create_cone(
         bm, segments=segments, radius1=r_base, radius2=r_top,
         depth=depth, cap_ends=True,
-    )
-    new_faces = [f for f in bm.faces[pre_face_count:]]
-    new_verts = list({v for f in new_faces for v in f.verts})
+    )["verts"]
+    new_faces = {f for v in new_verts for f in v.link_faces}
     if axis == "Y":
         bmesh.ops.rotate(bm, matrix=Matrix.Rotation(math.radians(90), 4, "X"), verts=new_verts)
     elif axis == "X":
