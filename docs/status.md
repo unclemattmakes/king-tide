@@ -1,5 +1,28 @@
-> **Last updated: 2026-05-28** — Drift, tricks, hover polish, Electron
-> Steam port, making-of microsite.
+> **Last updated: 2026-05-29** — Shoreline transition (shore-aligned waves,
+> swash, wet sand), drift, tricks, hover polish, Electron Steam port,
+> making-of microsite.
+>
+> **Shoreline transition — waves now break on the beach instead of dying.**
+> The terrain heightmap used to just damp the swell to zero in the last ~3 m
+> of depth (clean geometry, but a dead surf zone). It now *transforms* the
+> swell into rideable, coast-parallel breakers. A deterministic, Three-free
+> shore-field bake
+> ([src/engine/sim/water/shore-field.ts](../src/engine/sim/water/shore-field.ts):
+> distance-to-shore via a 2-pass chamfer transform + offshore normal + depth,
+> baked in the same pass as the heightmap) is the single source of truth: the
+> GPU samples it as an RGBA16F texture, the CPU buoyancy sampler reads the same
+> arrays, so the bike rides exactly what's rendered. The shore wave's crests run
+> parallel to the coast and march shoreward (`phase = K·dist + Ω·t`), amplitude
+> peaks in the surf band and is capped by the water column so a trough never
+> breaches the seabed. Foam re-syncs to the shore crests; a **swash run-up**
+> pushes the lacy foam edge up the sand on each incoming crest and pulls it back
+> in the trough; the terrain's **wet-sand** band + underwater tint were
+> re-anchored from world y=0 to the real `track.water.height`, so the damp band
+> sits at the actual shoreline on raised/sunken-water tracks. All mirrored
+> CPU↔GPU via shared `SHORE_*` constants (drift-tested) and gated behind the
+> `shoreWaveStrength` water-debug knob (0 = byte-identical legacy). Deep dive +
+> tuning knobs + the deferred stateful drying-trail recipe in
+> [docs/water-deep-dive.md](./water-deep-dive.md).
 >
 > **Drift — Mario-Kart-style mini-turbo lands.** Hold Z (left) or C
 > (right) while steering into the corner; release fires a tiered boost

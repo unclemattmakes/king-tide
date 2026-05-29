@@ -29,6 +29,7 @@ export type WaterDebugSettings = {
   sunDiscStrength: number
   sunStreakStrength: number
   streakElongation: number
+  shoreWaveStrength: number
   pinchDirection: number
   waveBearing: number
   wireframe: boolean
@@ -50,6 +51,7 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     sunDiscStrength: d.sunDiscStrength,
     sunStreakStrength: d.sunStreakStrength,
     streakElongation: d.streakElongation,
+    shoreWaveStrength: d.shoreWaveStrength,
     pinchDirection: d.pinchDirection,
     waveBearing: d.waveBearing,
     wireframe: d.wireframe,
@@ -107,6 +109,7 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setSunDiscStrength(s.sunDiscStrength)
   water.debug.setSunStreakStrength(s.sunStreakStrength)
   water.debug.setStreakElongation(s.streakElongation)
+  water.debug.setShoreWaveStrength(s.shoreWaveStrength)
   water.debug.setPinchDirection(s.pinchDirection)
   water.debug.setWaveBearing(s.waveBearing)
   water.debug.setWireframe(s.wireframe)

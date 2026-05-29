@@ -44,7 +44,12 @@ import { createTrackVisuals } from '@/engine/render/track-mesh'
 import { createWaterMesh, updateUnderwaterFog } from '@/engine/render/water'
 import { createSimWorld } from '@/engine/sim/ecs/world'
 import { createPhysicsWorld } from '@/engine/sim/physics/rapier'
-import { createWaveField, defaultWaves, sampleHeight } from '@/engine/sim/water/wave-field'
+import {
+  createWaveField,
+  defaultWaves,
+  sampleHeight,
+  setShoreField,
+} from '@/engine/sim/water/wave-field'
 import { applyStoredWaterTuning } from '@/engine/water-debug-storage'
 import { loadBike } from '@/game/assets/bike-loader'
 import { resolveBikeVariant } from '@/game/bikes/variants'
@@ -181,6 +186,7 @@ export async function bootRiderEditorMode(appEl: HTMLElement): Promise<RiderEdit
     editMode: false,
   })
   if (terrainHeightmap) waterMesh.setTerrainHeightmap(terrainHeightmap)
+  setShoreField(waveField, terrainHeightmap?.shoreField ?? null)
 
   const sky = createSkySystem({
     scene,

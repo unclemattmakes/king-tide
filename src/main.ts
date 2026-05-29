@@ -69,7 +69,12 @@ import { createReplayRecorder, type ReplayRecorder } from './engine/replay/recor
 import { getBestLap, recordLapTime } from './engine/save-state'
 import { createSimWorld } from './engine/sim/ecs/world'
 import { createPhysicsWorld } from './engine/sim/physics/rapier'
-import { createWaveField, defaultWaves, setWaveZones } from './engine/sim/water/wave-field'
+import {
+  createWaveField,
+  defaultWaves,
+  setShoreField,
+  setWaveZones,
+} from './engine/sim/water/wave-field'
 import { applyDeckProfile, detectSteamDeck } from './engine/steam-deck'
 import { applyStoredWaterTuning } from './engine/water-debug-storage'
 import { loadBike } from './game/assets/bike-loader'
@@ -389,6 +394,10 @@ async function boot() {
   // geometry; .glb tracks bake one from the loaded scene group. The
   // setter is a no-op for editor mode (terrainHeightmap === null).
   if (terrainHeightmap) waterMesh.setTerrainHeightmap(terrainHeightmap)
+  // Install the baked shore field onto the CPU wave field too, so buoyancy
+  // rides the same shore-aligned waves the shader renders. `setTerrainHeightmap`
+  // above uploads the GPU copy; this is the sim-side half of the same data.
+  setShoreField(waveField, terrainHeightmap?.shoreField ?? null)
   // Diagnose race-spline water coverage. Logs an info line when we
   // clear the v1 40 % wave-mastery target, a warning when we don't.
   // Skipped in edit mode (no heightmap, the track is mid-authoring)

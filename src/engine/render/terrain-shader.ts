@@ -179,6 +179,7 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   const slopeEnd = config.slopeEnd ?? 0.55
   const variation = config.variation ?? 0.3
   const wetBand = config.wetBand ?? 2.0
+  const waterLevel = config.waterLevel ?? 0
   const pathTint = config.pathTint ?? [0.3, 0.24, 0.18]
   // SOTA-pass extras (M-coloration). Each is a no-op at its default so
   // existing tracks keep their stock look without re-export.
@@ -291,10 +292,13 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   const saturated = mix(vec3(desat, desat, desat), variedBaseCol, max(satMul, float(0)))
 
   // ── Wet band ─────────────────────────────────────────────────────────
-  // Triangular |y|-mask around the waterline pulls saturation down and
-  // tints cool to read as damp sand / wave-washed rock. Full at y=0,
-  // zero beyond |y|≥wetBand m.
-  const wet = smoothstep(float(wetBand), float(0.0), abs(positionWorld.y))
+  // Triangular mask around the waterline pulls saturation down and tints
+  // cool to read as damp sand / wave-washed rock. Anchored to the real
+  // water surface (`waterLevel`) rather than y=0, so raised/sunken-water
+  // tracks darken at their actual shoreline. Full at the waterline, zero
+  // beyond `wetBand` m above/below it.
+  const yRelWater = positionWorld.y.sub(float(waterLevel))
+  const wet = smoothstep(float(wetBand), float(0.0), abs(yRelWater))
   const withWet = mix(saturated, saturated.mul(vec3(0.72, 0.76, 0.86)), wet)
 
   // ── Underwater refraction tint ──────────────────────────────────────
@@ -304,7 +308,7 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   // above only covers the splash zone; this kicks in below it. The
   // depth scale is generous (10 m) so the tint progresses across the
   // racing-relevant depth band without saturating at the seabed.
-  const depth = max(float(0.0), positionWorld.y.negate())
+  const depth = max(float(0.0), yRelWater.negate())
   const depthFac = clamp(depth.mul(float(0.1)), float(0), float(1))
   // Cyan-shift colour multiplier — keeps geometry recognisable but
   // pulls warm tones out the deeper you go.

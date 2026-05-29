@@ -108,6 +108,11 @@ export type TerrainShaderConfig = {
   /** Half-height (m) of the |y|-mask wet-band darken around the waterline.
    *  Default 2.0. */
   wetBand?: number
+  /** World-Y of the water surface the wet band + underwater tint anchor to.
+   *  Defaults to 0. Set from `track.water.height` at load so the damp-sand
+   *  band and submerged tint sit at the real waterline on raised / sunken-
+   *  water tracks instead of always at y=0. */
+  waterLevel?: number
   /** RGB tint mixed in where the baked racing-line wear (COLOR_0.B) is
    *  high. Default [0.30, 0.24, 0.18] — packed-dirt brown. */
   pathTint?: [number, number, number]
