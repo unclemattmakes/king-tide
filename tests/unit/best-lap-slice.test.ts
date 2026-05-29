@@ -12,8 +12,9 @@ function frame(t: number, x: number, bikes = 1): ReplayFrame {
   const floats: number[] = []
   for (let b = 0; b < bikes; b++) {
     // Each slot gets its own marker x so the slicer's "player slot
-    // only" guarantee can be checked.
-    floats.push(x + b * 1000, 0, 0, 0, 0, 0, 1)
+    // only" guarantee can be checked. Remaining floats are the v2
+    // input-state slots — zeroed since the slicer copies them as-is.
+    floats.push(x + b * 1000, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0)
   }
   return { t, bikes: floats }
 }
@@ -40,6 +41,9 @@ function build(bikes: number, frames: ReplayFrame[], events: ReplayEvent[]): Rep
     sampleRateHz: 30,
     frames,
     events,
+    missiles: [],
+    explosions: [],
+    isLegacyV1: false,
   }
 }
 

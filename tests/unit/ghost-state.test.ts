@@ -49,10 +49,13 @@ function buildGhost(bestLap: number, trackId = 'lagoon'): ReplayFile {
     ],
     sampleRateHz: 30,
     frames: [
-      { t: 0, bikes: [0, 0, 0, 0, 0, 0, 1] },
-      { t: bestLap, bikes: [10, 0, 0, 0, 0, 0, 1] },
+      { t: 0, bikes: [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0] },
+      { t: bestLap, bikes: [10, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0] },
     ],
     events: [],
+    missiles: [],
+    explosions: [],
+    isLegacyV1: false,
   }
 }
 

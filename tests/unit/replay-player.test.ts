@@ -1,9 +1,31 @@
 import { describe, expect, it } from 'vitest'
-import type { ReplayFile } from '../../src/engine/replay/format'
-import { REPLAY_VERSION } from '../../src/engine/replay/format'
+import {
+  REPLAY_FLOATS_PER_BIKE,
+  REPLAY_FLOATS_PER_BIKE_V1,
+  REPLAY_VERSION,
+  type ReplayFile,
+} from '../../src/engine/replay/format'
 import { createReplayPlayer, makePoseBuffer } from '../../src/engine/replay/player'
 
+/**
+ * Test helper — takes 7-float-per-bike pose-only frames (the v1 layout
+ * the original interpolation tests are written against) and wraps
+ * them in a v2 ReplayFile, padding each bike window to 12 floats with
+ * zeroed state slots. The interpolation behaviour these tests cover
+ * doesn't depend on pitch / throttle / boost / drift.
+ */
 function buildReplay(frames: { t: number; bikes: number[] }[], bikeCount = 1): ReplayFile {
+  const paddedFrames = frames.map((f) => {
+    const out: number[] = new Array(bikeCount * REPLAY_FLOATS_PER_BIKE).fill(0)
+    for (let s = 0; s < bikeCount; s++) {
+      const srcOff = s * REPLAY_FLOATS_PER_BIKE_V1
+      const dstOff = s * REPLAY_FLOATS_PER_BIKE
+      for (let k = 0; k < REPLAY_FLOATS_PER_BIKE_V1; k++) {
+        out[dstOff + k] = f.bikes[srcOff + k] ?? 0
+      }
+    }
+    return { t: f.t, bikes: out }
+  })
   return {
     version: REPLAY_VERSION,
     meta: {
@@ -23,8 +45,11 @@ function buildReplay(frames: { t: number; bikes: number[] }[], bikeCount = 1): R
       bodyColor: 0xff0000,
     })),
     sampleRateHz: 30,
-    frames,
+    frames: paddedFrames,
     events: [],
+    missiles: [],
+    explosions: [],
+    isLegacyV1: false,
   }
 }
 

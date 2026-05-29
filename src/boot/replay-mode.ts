@@ -23,12 +23,17 @@ import { updateSwayTime, updateWind } from '@/engine/render/foliage-sway'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
 import { renderFrame } from '@/engine/render/renderer-service'
 import type { SkySystem } from '@/engine/render/sky'
+import type { TerrainHeightmap } from '@/engine/render/terrain-heightmap'
 import type { BikeImpact } from '@/engine/render/water'
 import { updateUnderwaterFog } from '@/engine/render/water'
+import { createCombatReplayDriver } from '@/engine/replay/combat-replay-driver'
 import type { ReplayFile } from '@/engine/replay/format'
 import { createReplayPlayer, makePoseBuffer } from '@/engine/replay/player'
 import { createSpectatorCamera } from '@/engine/replay/spectator-camera'
 import { installSpectatorHud } from '@/engine/replay/spectator-hud'
+import { createReplayStateReconstructor } from '@/engine/replay/state-reconstructor'
+import type { SimWorld } from '@/engine/sim/ecs/world'
+import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { advanceWaveField, sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import { TransformStore } from '@/game/components'
 
@@ -42,6 +47,18 @@ export interface ReplayModeOpts {
   sky: SkySystem
   horizonRing: HorizonRing
   waveField: WaveFieldState
+  /** ECS + physics worlds — passed through so the per-frame state
+   *  reconstructor (which feeds the FX system in `fxTick`) can write
+   *  synthesised `HoverState` / `ControlIntent` / rigid-body velocity
+   *  for each replay bike. The sim itself is still not ticked. */
+  sim: SimWorld
+  phys: PhysicsWorld
+  /** Baked terrain heightmap for the loaded track, or null for tracks
+   *  without one (procedural / editor). When present the state
+   *  reconstructor uses it to classify whether the bike is over land
+   *  vs. water — which gates spark / dust emission. Foam works either
+   *  way (defaults to "water below" when no heightmap is available). */
+  terrainHeightmap: TerrainHeightmap | null
   waterMesh: {
     tick: (impacts: readonly BikeImpact[], focus: { x: number; z: number }) => void
     debug: { getTimeScale: () => number }
@@ -89,6 +106,9 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     sky,
     horizonRing,
     waveField,
+    sim,
+    phys,
+    terrainHeightmap,
     waterMesh,
     bikeRender,
     riderRender,
@@ -103,6 +123,22 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     backend,
     onReady,
   } = opts
+
+  const stateReconstructor = createReplayStateReconstructor({
+    sim,
+    phys,
+    bikeEids: replayBikeEids,
+    waveField,
+    terrainHeightmap,
+    isLegacyV1: activeReplay.isLegacyV1,
+  })
+
+  // Replays missile flights + explosion bursts by spawning short-lived
+  // ECS entities along the recorded tracks. Both combat-render and the
+  // FX system read straight from ECS, so the visuals light up without
+  // any further wiring. Legacy v1 files contain no combat tracks, so
+  // the driver is a no-op there.
+  const combatDriver = createCombatReplayDriver({ sim, replay: activeReplay })
 
   const replayPlayer = createReplayPlayer(activeReplay)
   const poseBuffer = makePoseBuffer(replayPlayer.bikeCount)
@@ -283,6 +319,17 @@ export function startReplayMode(opts: ReplayModeOpts): void {
         qw: p.qw,
       })
     }
+    // Synthesise per-bike velocity + HoverState + ControlIntent so the
+    // FX system's emission gates (foam wake, sparks, dust, exhaust,
+    // splash burst, plunge bubbles, drift sparks, tuck slipstream)
+    // trigger off the replayed bike state instead of the all-zero
+    // spawn defaults. Must run after the TransformStore write above and
+    // before `fxTick(dt)` below.
+    stateReconstructor.tick(dt, poseBuffer)
+    // Spawn / update / despawn missile + explosion ECS entities so
+    // their meshes (combat-render) and FX trails / bursts (fx/index)
+    // play back automatically. No-op for v1 (pose-only) replays.
+    combatDriver.syncTo(replayPlayer.time)
     const fp = poseBuffer[followedSlot] ?? (poseBuffer[0] as (typeof poseBuffer)[number])
     focalPos.set(fp.x, fp.y, fp.z)
     focalQuat.set(fp.qx, fp.qy, fp.qz, fp.qw)

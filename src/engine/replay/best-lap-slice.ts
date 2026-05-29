@@ -77,6 +77,13 @@ export function sliceBestLap(source: ReplayFile, playerSlot = 0): BestLapSlice |
     sampleRateHz: source.sampleRateHz,
     frames: window,
     events: [],
+    // Best-lap slice is for the ghost runner, which only reads
+    // transforms — combat tracks would just bloat the file. Always
+    // emit empty arrays so the slice round-trips cleanly through the
+    // v2 parser regardless of source version.
+    missiles: [],
+    explosions: [],
+    isLegacyV1: source.isLegacyV1,
   }
   return { replay, bestLap: best.lapTime, sourceLap: best.lap }
 }

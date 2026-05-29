@@ -634,6 +634,9 @@ export function createFxSystem(
       missileTrail,
       bubbles,
       tuckStream,
+      driftSparksBlue,
+      driftSparksOrange,
+      driftSparksPurple,
       dive,
       stats: () => ({
         foamAlive: foam.capacity - foam.freeCount,
@@ -644,6 +647,9 @@ export function createFxSystem(
         missileTrailAlive: missileTrail.capacity - missileTrail.freeCount,
         bubbleAlive: bubbles.capacity - bubbles.freeCount,
         tuckAlive: tuckStream.capacity - tuckStream.freeCount,
+        driftBlueAlive: driftSparksBlue.capacity - driftSparksBlue.freeCount,
+        driftOrangeAlive: driftSparksOrange.capacity - driftSparksOrange.freeCount,
+        driftPurpleAlive: driftSparksPurple.capacity - driftSparksPurple.freeCount,
       }),
     }
   }

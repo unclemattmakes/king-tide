@@ -1,6 +1,6 @@
-import { REPLAY_FLOATS_PER_BIKE, type ReplayFile } from './format'
+import { REPLAY_FLOATS_PER_BIKE, REPLAY_FLOATS_PER_BIKE_V1, type ReplayFile } from './format'
 
-/** A single bike's interpolated transform at a moment in playback time. */
+/** A single bike's interpolated transform + state at a moment in playback time. */
 export type ReplayBikePose = {
   x: number
   y: number
@@ -9,6 +9,18 @@ export type ReplayBikePose = {
   qy: number
   qz: number
   qw: number
+  /**
+   * v2-recorded input state. `null` for v1 (legacy) replays — the
+   * replay-side state reconstructor falls back to heuristics in that
+   * case. Holding pitch / throttle / boost / drift lets the FX system's
+   * drift-spark / tuck / exhaust gates fire against the original race
+   * state, not a derived approximation.
+   */
+  pitch: number
+  throttle: number
+  boost: boolean
+  driftDir: number
+  driftTier: number
 }
 
 export type ReplayPlayer = {
@@ -57,26 +69,11 @@ export function createReplayPlayer(replay: ReplayFile): ReplayPlayer {
     return lo
   }
 
-  function writePose(
-    out: ReplayBikePose[],
-    slot: number,
-    x: number,
-    y: number,
-    z: number,
-    qx: number,
-    qy: number,
-    qz: number,
-    qw: number,
-  ) {
-    const p = out[slot]!
-    p.x = x
-    p.y = y
-    p.z = z
-    p.qx = qx
-    p.qy = qy
-    p.qz = qz
-    p.qw = qw
-  }
+  // v1 (legacy) replays only stored pose. v2 stores pose + input state.
+  // Picking the per-bike stride at construction lets `sampleInto` stay
+  // a tight loop without a branch on every slot.
+  const floatsPerBike = replay.isLegacyV1 ? REPLAY_FLOATS_PER_BIKE_V1 : REPLAY_FLOATS_PER_BIKE
+  const hasInputState = !replay.isLegacyV1
 
   function sampleInto(out: ReplayBikePose[]) {
     if (frames.length === 0) return
@@ -86,7 +83,7 @@ export function createReplayPlayer(replay: ReplayFile): ReplayPlayer {
     const span = f1.t - f0.t
     const u = span > 0 ? Math.max(0, Math.min(1, (time - f0.t) / span)) : 0
     for (let s = 0; s < bikeCount; s++) {
-      const i = s * REPLAY_FLOATS_PER_BIKE
+      const i = s * floatsPerBike
       const ax = f0.bikes[i]!
       const ay = f0.bikes[i + 1]!
       const az = f0.bikes[i + 2]!
@@ -108,7 +105,33 @@ export function createReplayPlayer(replay: ReplayFile): ReplayPlayer {
       // colinear (tiny sin), which matters because at 30Hz neighbouring
       // frames are <33ms apart and quats stay close.
       const sl = slerp(aqx, aqy, aqz, aqw, bqx, bqy, bqz, bqw, u)
-      writePose(out, s, x, y, z, sl.x, sl.y, sl.z, sl.w)
+      const p = out[s]!
+      p.x = x
+      p.y = y
+      p.z = z
+      p.qx = sl.x
+      p.qy = sl.y
+      p.qz = sl.z
+      p.qw = sl.w
+      if (hasInputState) {
+        // Read state from the *current* (earlier) sample frame rather
+        // than interpolating. Discrete state like drift tier or boost
+        // shouldn't blend halfway through a transition — it should
+        // hold until the next sample crosses the threshold.
+        p.pitch = f0.bikes[i + 7] ?? 0
+        p.throttle = f0.bikes[i + 8] ?? 0
+        p.boost = (f0.bikes[i + 9] ?? 0) > 0.5
+        p.driftDir = f0.bikes[i + 10] ?? 0
+        p.driftTier = f0.bikes[i + 11] ?? 0
+      } else {
+        // v1 — leave state at neutral defaults so the consumer falls
+        // back to its heuristic path.
+        p.pitch = 0
+        p.throttle = 0
+        p.boost = false
+        p.driftDir = 0
+        p.driftTier = 0
+      }
     }
   }
 
@@ -203,7 +226,20 @@ function slerp(
 export function makePoseBuffer(bikeCount: number): ReplayBikePose[] {
   const out: ReplayBikePose[] = []
   for (let i = 0; i < bikeCount; i++) {
-    out.push({ x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 })
+    out.push({
+      x: 0,
+      y: 0,
+      z: 0,
+      qx: 0,
+      qy: 0,
+      qz: 0,
+      qw: 1,
+      pitch: 0,
+      throttle: 0,
+      boost: false,
+      driftDir: 0,
+      driftTier: 0,
+    })
   }
   return out
 }
