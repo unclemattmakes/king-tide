@@ -117,11 +117,7 @@ export function mixHotEdge(r: number): [number, number, number] {
   const t = Math.max(0, Math.min(1, (safe - LAVA_BANK_EDGE_R) / (1 - LAVA_BANK_EDGE_R)))
   const e = LAVA_BAND_EDGE_RGB
   const h = LAVA_HOT_CORE_RGB
-  return [
-    e[0] + (h[0] - e[0]) * t,
-    e[1] + (h[1] - e[1]) * t,
-    e[2] + (h[2] - e[2]) * t,
-  ]
+  return [e[0] + (h[0] - e[0]) * t, e[1] + (h[1] - e[1]) * t, e[2] + (h[2] - e[2]) * t]
 }
 
 /** Pure helper — map a settings choice to its emissive intensity
@@ -194,9 +190,7 @@ export function buildLavaRiverMaterial(): MeshStandardNodeMaterial {
   // the time multiply at graph-build time, leaving one mul + one add
   // inside the sin for the per-fragment cost.
   const flow = sin(
-    TIME_UNIFORM.mul(float(FLOW_FREQ_HZ * Math.PI * 2)).add(
-      flowPhase.mul(float(Math.PI * 2)),
-    ),
+    TIME_UNIFORM.mul(float(FLOW_FREQ_HZ * Math.PI * 2)).add(flowPhase.mul(float(Math.PI * 2))),
   ).mul(float(FLOW_MOD_AMPLITUDE))
   const mask = clamp(hotMaskRaw.add(flow), float(0), float(1))
 

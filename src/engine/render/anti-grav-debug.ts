@@ -15,8 +15,8 @@
  */
 
 import * as THREE from 'three'
-import { curveUpAtT, tangent3dAtT } from '@/game/tracks/catmull-rom'
 import { quatRotate } from '@/engine/sim/physics/vec'
+import { curveUpAtT, tangent3dAtT } from '@/game/tracks/catmull-rom'
 import type { Track } from '@/game/tracks/types'
 
 /** Arrow visualization spacing — one arrow every ~3m of arc length. */

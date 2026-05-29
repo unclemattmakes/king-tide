@@ -102,7 +102,6 @@ export function startReplayMode(opts: ReplayModeOpts): void {
     appEl,
     scene,
     camera,
-    renderer,
     sky,
     horizonRing,
     waveField,

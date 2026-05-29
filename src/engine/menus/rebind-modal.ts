@@ -88,10 +88,13 @@ export function installRebindModal(): RebindModalHandle {
   const doneBtn: HTMLButtonElement = _doneBtn
 
   let mode: RebindMode = 'keyboard'
-  let capturing: { kind: 'keyboard'; action: KeyboardAction } | {
-    kind: 'gamepad'
-    action: GamepadAction
-  } | null = null
+  let capturing:
+    | { kind: 'keyboard'; action: KeyboardAction }
+    | {
+        kind: 'gamepad'
+        action: GamepadAction
+      }
+    | null = null
   let gamepadPollHandle: number | null = null
   let previousFocus: HTMLElement | null = null
   let previousPressed: Set<number> = new Set()
@@ -104,10 +107,12 @@ export function installRebindModal(): RebindModalHandle {
   function renderHeader(): void {
     if (mode === 'keyboard') {
       titleEl.textContent = 'REBIND KEYBOARD'
-      subEl.textContent = 'Click a key chip to assign a new binding. Secondary keys stay at defaults.'
+      subEl.textContent =
+        'Click a key chip to assign a new binding. Secondary keys stay at defaults.'
     } else {
       titleEl.textContent = 'REBIND GAMEPAD'
-      subEl.textContent = 'Click a button chip then press the new button. LT / RT (triggers) are reserved.'
+      subEl.textContent =
+        'Click a button chip then press the new button. LT / RT (triggers) are reserved.'
     }
   }
 

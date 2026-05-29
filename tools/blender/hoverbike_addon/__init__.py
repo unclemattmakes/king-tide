@@ -68,6 +68,7 @@ from . import (
     new_map,
     panel,
     placement_helper,
+    prefs,
     previews,
     prop_bake,
     ramp,
@@ -94,6 +95,9 @@ from . import (
 # spline registers BEFORE placement_helper because placement_helper.py
 # lazily imports the spline-sampling helpers.
 _MODULES = (
+    # prefs registers first — the project-root preference it adds is read
+    # by find_repo_root() at export time, so it just needs to exist.
+    prefs,
     water,
     wave_zone,
     horizon,

@@ -46,6 +46,18 @@ post-flood. Planning trio:
   (`tools/blender/hoverbike_addon/`, a package) is the user-facing
   entry point; `build_*.py` files regenerate `.blend`s from JSON specs.
 
+## Asset storage — raw vs. compiled
+
+Raw authoring sources (`tracks-src/*.blend`, `bikes-src/*.blend`) live in a
+**Google Drive for Desktop** folder, **out of git** (`*.blend` is
+gitignored) — the app auto-syncs every save, so there's no manual sync step.
+Authors edit `.blend`s in that folder and point the Blender addon at their
+repo clone via its *Project root* preference (or `$HOVERBIKE_REPO_ROOT`) so
+exports still land in `public/`/`specs/`. Compiled exports under
+`public/assets/` (GLBs, thumbs, atlases) stay in git via **Git LFS** — a
+clone needs `git lfs install` for real bytes. Full convention + migration
+steps in [docs/asset-storage.md](docs/asset-storage.md).
+
 ## Blender connector — optional
 
 If a Blender MCP connection is configured for the session, Claude can:

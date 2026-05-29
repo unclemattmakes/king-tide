@@ -42,3 +42,23 @@
 # Shell scripts must stay LF even if a future contributor's git is
 # weird. Belt + suspenders given `* text=auto eol=lf` above.
 *.sh        text eol=lf
+
+# --- Large compiled/exported runtime assets → Git LFS ------------------
+#
+# The heavy, frequently-regenerated artifacts the web build + Vercel serve
+# from public/assets/ (track / bike / prop / landmark GLBs, hero & thumb
+# JPGs, texture-atlas PNGs). Storing them in LFS keeps the working .git
+# lean — re-exports add a pointer here and the bytes go to the LFS store,
+# instead of a fresh multi-MB blob in the pack on every regen.
+#
+# FORWARD-ONLY: this converts assets committed *after* this change. The
+# GLBs already in history stay as ordinary blobs until an opt-in
+# `git lfs migrate` / filter-repo rewrite (see docs/asset-storage.md).
+#
+# PREREQUISITE: every clone / CI runner / Vercel deploy that checks these
+# out must have `git lfs install` run once, or LFS-tracked files arrive as
+# pointer text. See docs/asset-storage.md for the Vercel toggle.
+public/assets/**/*.glb   filter=lfs diff=lfs merge=lfs -text
+public/assets/**/*.jpg   filter=lfs diff=lfs merge=lfs -text
+public/assets/**/*.jpeg  filter=lfs diff=lfs merge=lfs -text
+public/assets/**/*.png   filter=lfs diff=lfs merge=lfs -text

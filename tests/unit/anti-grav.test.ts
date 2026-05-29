@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { curveUpAtT } from '../../src/game/tracks/catmull-rom'
+import type { Vec3 } from '../../src/engine/sim/physics/vec'
 import {
   findContainingZone,
   isInsideAntiGravZone,
   sampleCurveGravity,
   zoneUpVector,
 } from '../../src/game/systems/anti-grav'
-import type { Vec3 } from '../../src/engine/sim/physics/vec'
+import { curveUpAtT } from '../../src/game/tracks/catmull-rom'
 import type { AISpline, AntiGravZone } from '../../src/game/tracks/types'
 
 function axisAlignedZone(
@@ -155,14 +155,20 @@ describe('sampleCurveGravity', () => {
   it('returns null when spline has no antiGrav flag', () => {
     const s: AISpline = {
       id: 'test',
-      points: [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 10 }],
+      points: [
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 0, z: 10 },
+      ],
     }
     expect(sampleCurveGravity({ x: 0, y: 0, z: 5 }, s)).toBeNull()
   })
 
   it('returns null when bike is past falloff distance', () => {
     const s = makeFlaggedSpline(
-      [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 10 }],
+      [
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 0, z: 10 },
+      ],
       [0, 0],
       4,
     )

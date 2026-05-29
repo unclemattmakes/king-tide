@@ -227,11 +227,7 @@ export function buildTerrainHeightmap(
  * shader's `LinearFilter` sampling so the CPU diagnostic reads the
  * same height the runtime water shader does for shoaling.
  */
-export function sampleTerrainHeightAtXZ(
-  hm: TerrainHeightmap,
-  x: number,
-  z: number,
-): number | null {
+export function sampleTerrainHeightAtXZ(hm: TerrainHeightmap, x: number, z: number): number | null {
   if (!hm.raw) return null
   const sizeX = hm.worldMax.x - hm.worldMin.x
   const sizeZ = hm.worldMax.y - hm.worldMin.y

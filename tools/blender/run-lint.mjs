@@ -109,11 +109,9 @@ function main() {
     // headless-with-blend invocation. Blender opens the .blend before
     // running our Python, so the lint script sees the same scene the
     // in-editor lint would.
-    const child = spawnSync(
-      blender,
-      ['--background', blend, '--python', LINT_SCRIPT],
-      { stdio: 'inherit' },
-    )
+    const child = spawnSync(blender, ['--background', blend, '--python', LINT_SCRIPT], {
+      stdio: 'inherit',
+    })
     if (child.error) die(`failed to spawn blender for ${id}: ${child.error.message}`, 2)
     if ((child.status ?? 0) !== 0) {
       failed.push(id)

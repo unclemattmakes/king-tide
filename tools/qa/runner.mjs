@@ -93,9 +93,7 @@ async function preflight() {
   checks.push({
     name: 'dependencies installed',
     ok: hasNodeModules,
-    message: hasNodeModules
-      ? 'node_modules/ present'
-      : 'node_modules/ missing — gates will fail',
+    message: hasNodeModules ? 'node_modules/ present' : 'node_modules/ missing — gates will fail',
     fix: 'pnpm install --frozen-lockfile',
   })
 

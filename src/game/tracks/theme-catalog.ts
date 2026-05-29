@@ -212,8 +212,7 @@ function timeLabelForElevation(elevDeg: number): string {
 }
 
 function weatherLabelFor(cloudiness: number, beaufort: number | undefined): string {
-  const sky =
-    cloudiness < 0.2 ? 'Clear' : cloudiness < 0.55 ? 'Scattered cloud' : 'Overcast'
+  const sky = cloudiness < 0.2 ? 'Clear' : cloudiness < 0.55 ? 'Scattered cloud' : 'Overcast'
   if (beaufort === undefined) return sky
   return `${sky} · Beaufort ${Math.round(beaufort)}`
 }

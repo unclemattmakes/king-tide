@@ -1,7 +1,7 @@
 import type * as THREE from 'three'
+import { bloom } from 'three/addons/tsl/display/BloomNode.js'
 import { pass } from 'three/tsl'
 import { RenderPipeline } from 'three/webgpu'
-import { bloom } from 'three/addons/tsl/display/BloomNode.js'
 
 /**
  * WebGPU post-processing pipeline. Owns a `RenderPipeline` that

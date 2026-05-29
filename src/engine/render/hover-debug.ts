@@ -21,12 +21,12 @@
  *   - `window.__hover.toggleHoverDebug()` (programmatic)
  */
 
+import { query } from 'bitecs'
 import * as THREE from 'three'
-import type { SimWorld } from '@/engine/sim/ecs/world'
 import { isHoverDebugEnabled, setHoverDebugEnabled } from '@/engine/sim/debug-flags'
+import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { BikeTag, HoverDebugStore, RBHandleStore } from '@/game/components'
-import { query } from 'bitecs'
 
 // Re-exported for callers that want to gate non-render-side code on the
 // flag (e.g. HUD pills) without pulling the sim-layer module directly.
@@ -89,8 +89,8 @@ export function createHoverDebugRenderer(phys: PhysicsWorld): HoverDebugRenderer
 
   // Re-used per-tick scratch arrays. Resize lazily when bike count
   // changes; otherwise we just overwrite contents.
-  let posScratch: number[] = []
-  let colScratch: number[] = []
+  const posScratch: number[] = []
+  const colScratch: number[] = []
 
   function pushSeg(
     ax: number,
@@ -294,15 +294,7 @@ export function createHoverDebugRenderer(phys: PhysicsWorld): HoverDebugRenderer
       if (!d) continue
 
       // 1. Up-axis arrow (1.5m) above bike center — shows effective hover up.
-      pushSeg(
-        d.cx,
-        d.cy,
-        d.cz,
-        d.cx + d.upX * 1.5,
-        d.cy + d.upY * 1.5,
-        d.cz + d.upZ * 1.5,
-        COL_UP,
-      )
+      pushSeg(d.cx, d.cy, d.cz, d.cx + d.upX * 1.5, d.cy + d.upY * 1.5, d.cz + d.upZ * 1.5, COL_UP)
 
       // 2. Center probe ray — full length when no surface, or up to the
       //    hit point. Cross at the hit if there is one.
@@ -388,22 +380,8 @@ export function createHoverDebugRenderer(phys: PhysicsWorld): HoverDebugRenderer
       for (const p of d.corners) {
         const hitOk = p.hx !== Number.NEGATIVE_INFINITY
         if (hitOk) {
-          pushSeg(
-            p.ox,
-            p.oy,
-            p.oz,
-            p.hx,
-            p.hy,
-            p.hz,
-            d.isWater ? COL_RAY_WATER : COL_RAY_LAND,
-          )
-          pushCross(
-            p.hx,
-            p.hy,
-            p.hz,
-            0.2,
-            d.isWater ? COL_HIT_WATER : COL_HIT_LAND,
-          )
+          pushSeg(p.ox, p.oy, p.oz, p.hx, p.hy, p.hz, d.isWater ? COL_RAY_WATER : COL_RAY_LAND)
+          pushCross(p.hx, p.hy, p.hz, 0.2, d.isWater ? COL_HIT_WATER : COL_HIT_LAND)
         } else {
           const farLen = 6
           pushSeg(

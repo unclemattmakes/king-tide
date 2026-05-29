@@ -230,8 +230,8 @@ export function parseMatrixPerfRows(logPath) {
   // can technically wrap a newline if the recorder ever grew to multiline
   // output, but today it's always single-line so this is fine.
   const re = /qa-matrix:([\w-]+):([\w-]+):perf\s+(\{.*\})/g
-  let m
-  while ((m = re.exec(raw)) !== null) {
+  let m = re.exec(raw)
+  while (m !== null) {
     const [, track, bike, jsonText] = m
     try {
       const parsed = JSON.parse(jsonText)
@@ -249,6 +249,7 @@ export function parseMatrixPerfRows(logPath) {
       // Skip malformed lines silently — a partial parse is still worth
       // surfacing rows we did get.
     }
+    m = re.exec(raw)
   }
   return rows
 }

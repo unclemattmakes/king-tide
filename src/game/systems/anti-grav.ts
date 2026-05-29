@@ -33,7 +33,6 @@
 import { addComponent, query } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
-import { curveUpAtT, tangent3dAtT } from '@/game/tracks/catmull-rom'
 import { quatRotate } from '@/engine/sim/physics/vec'
 import {
   AntiGravOverride,
@@ -42,6 +41,7 @@ import {
   RBHandle,
   RBHandleStore,
 } from '@/game/components'
+import { curveUpAtT, tangent3dAtT } from '@/game/tracks/catmull-rom'
 import type { AISpline, AntiGravZone, Track } from '@/game/tracks/types'
 
 /** Half-life (s) of the up-vector smoothing on source-switch transients. */
@@ -56,7 +56,10 @@ const DEFAULT_FALLOFF = 8
  * (q* = (-x,-y,-z,w) for a unit quaternion) to get the point in
  * zone-local coordinates, then test against the axis-aligned extents.
  */
-export function isInsideAntiGravZone(p: { x: number; y: number; z: number }, zone: AntiGravZone): boolean {
+export function isInsideAntiGravZone(
+  p: { x: number; y: number; z: number },
+  zone: AntiGravZone,
+): boolean {
   const dx = p.x - zone.position.x
   const dy = p.y - zone.position.y
   const dz = p.z - zone.position.z
@@ -167,7 +170,7 @@ export function antiGravSystem(sim: SimWorld, phys: PhysicsWorld, track: Track, 
   for (const eid of query(sim, [BikeTag, RBHandle])) {
     const { handle } = RBHandleStore.must(eid)
     const rb = phys.world.getRigidBody(handle)
-    if (!rb || !rb.isDynamic()) continue
+    if (!rb?.isDynamic()) continue
 
     const t = rb.translation()
 
