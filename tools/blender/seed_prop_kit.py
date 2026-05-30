@@ -7,6 +7,18 @@ Run:
 The kit is *placeholder* geometry — primitive proxies so build_prop.py
 has something to append. Replace with hand-sculpted parts later.
 
+**Non-destructive (merge mode).** Re-running OPENS the existing kit and
+refreshes only the objects this seed owns (the five parts below),
+preserving anything an author added by hand — most importantly the
+``buoy`` part seeded by ``seed_buoy_kit_part.py``, which lives in the
+same .blend under a name this seed never emits. To keep a hand-edited
+version of a *seed* part across re-seeds, freeze it by setting an
+``hv_locked`` custom property on that object. The per-owned-name wipe
+mirrors ``seed_buoy_kit_part.py``; the merge + lock helpers are shared
+via ``seed_merge.py``. A ``.seedbak`` copy is written before every save
+(the .blend is Drive-only — no git history). See "Locking a hand-edited
+prop" in docs/asset-pipeline-guide.md.
+
 Authoring convention (Blender axes; the yup glTF exporter rotates them):
   Blender +X = right       → three +X (right)
   Blender +Z = up          → three +Y (up)
@@ -39,26 +51,54 @@ import bpy
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+from tools.blender.seed_merge import (  # noqa: E402
+    is_locked_object,
+    is_seed_owned,
+    open_or_empty,
+    purge_orphan_meshes,
+    remove_owned_objects_by_name,
+    stamp_owned,
+    write_seedbak,
+)
+
 OUTPUT_PATH = os.path.join(REPO_ROOT, "tools", "blender", "lib", "prop_kit.blend")
+
+# The object names this seed owns. Anything else in the kit (e.g. the
+# author-added ``buoy`` from seed_buoy_kit_part.py) is left untouched.
+SEED_OBJECTS = ["barrier_a", "barrier_b", "lamppost", "crate", "pylon"]
+
+# Names skipped (locked / author-owned) during the current run, so the
+# summary reports a preserved part as preserved rather than refreshed.
+_SKIPPED_RUN: set = set()
 
 
 def reset_scene() -> None:
-    if bpy.context.object and bpy.context.object.mode != "OBJECT":
-        bpy.ops.object.mode_set(mode="OBJECT")
-    bpy.ops.object.select_all(action="SELECT")
-    bpy.ops.object.delete(use_global=False)
-    for block in (
-        bpy.data.meshes,
-        bpy.data.materials,
-        bpy.data.curves,
-        bpy.data.lights,
-        bpy.data.cameras,
-    ):
-        for item in list(block):
-            try:
-                block.remove(item)
-            except RuntimeError:
-                pass
+    """Non-destructive: OPEN the existing kit if present (so author parts
+    like ``buoy`` survive into memory), else start from empty. The per-name
+    merge in ``main`` then refreshes only the seed-owned, unlocked parts."""
+    open_or_empty(OUTPUT_PATH, log="[seed-prop-kit]")
+
+
+def _claim_object(name: str) -> bool:
+    """Merge gate for a seed-owned kit part. Returns ``True`` if the caller
+    should (re)build it, ``False`` if an author version must be preserved.
+
+    A locked or author-owned (non-``_seed_owned``) object of this name is
+    preserved and recorded in ``_SKIPPED_RUN``; otherwise the seed-owned
+    object (and any ``name.NNN`` duplicate) is wiped so the builder can
+    recreate it fresh — mirroring ``seed_buoy_kit_part.py``'s per-name
+    wipe. Author parts under *other* names are never seen here."""
+    existing = bpy.data.objects.get(name)
+    if existing is not None and (is_locked_object(existing) or not is_seed_owned(existing)):
+        reason = "hv_locked" if is_locked_object(existing) else "author-owned"
+        print(f"[seed-prop-kit]   SKIP {name} ({reason}) — preserving hand-authored version")
+        _SKIPPED_RUN.add(name)
+        return False
+    remove_owned_objects_by_name(name)
+    return True
 
 
 def get_or_create_material(
@@ -141,13 +181,19 @@ def make_pylon(material: bpy.types.Material):
     return obj
 
 
-def lay_out_in_row() -> None:
+def lay_out_in_row(names: set[str] | list[str] | None = None) -> None:
     """Spread parts along +X so authors can see every variant. Object
     transforms are layout-only; ``lib_loader.append_objects`` resets
-    them on append so the build is unaffected."""
+    them on append so the build is unaffected.
+
+    Only repositions parts in ``names`` (the parts this run actually
+    rebuilt) so a preserved / locked part keeps the position the author
+    left it at. Each part keeps its canonical slot for stable spacing."""
     spacing = 3.0
     order = ["barrier_a", "barrier_b", "lamppost", "crate", "pylon"]
     for i, name in enumerate(order):
+        if names is not None and name not in names:
+            continue
         obj = bpy.data.objects.get(name)
         if obj is None:
             continue
@@ -155,28 +201,62 @@ def lay_out_in_row() -> None:
 
 
 def main() -> None:
+    _SKIPPED_RUN.clear()
     print(f"[seed-prop-kit] writing {OUTPUT_PATH}")
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     reset_scene()
+
+    # First-run migration: a kit built before the merge convention has no
+    # _seed_owned markers, so back-stamp the seed's own parts (unlocked) —
+    # otherwise the merge would mistake them for author content and skip
+    # refreshing them. Author parts (other names, e.g. ``buoy``) stay
+    # unmarked and are left alone.
+    seed_names = set(SEED_OBJECTS)
+    _migrated = 0
+    for obj in list(bpy.data.objects):
+        if obj.name in seed_names and not is_seed_owned(obj) and not is_locked_object(obj):
+            stamp_owned(obj)
+            _migrated += 1
+    if _migrated:
+        print(f"[seed-prop-kit] first merge run: back-stamped {_migrated} pre-convention "
+              f"part(s) as seed-owned — they will be REFRESHED. Lock (hv_locked) any you "
+              f"hand-edited and re-run if you need to keep them.")
 
     barrier_mat = get_or_create_material("mat_kit_prop_barrier", (0.55, 0.50, 0.45, 1.0))
     metal_mat = get_or_create_material("mat_kit_prop_metal", (0.30, 0.32, 0.34, 1.0))
     crate_mat = get_or_create_material("mat_kit_prop_wood", (0.45, 0.30, 0.18, 1.0))
     pylon_mat = get_or_create_material("mat_kit_prop_pylon", (0.85, 0.45, 0.10, 1.0))
 
-    make_barrier_a(barrier_mat)
-    make_barrier_b(barrier_mat)
-    make_lamppost(metal_mat)
-    make_crate(crate_mat)
-    make_pylon(pylon_mat)
+    builders = [
+        ("barrier_a", lambda: make_barrier_a(barrier_mat)),
+        ("barrier_b", lambda: make_barrier_b(barrier_mat)),
+        ("lamppost", lambda: make_lamppost(metal_mat)),
+        ("crate", lambda: make_crate(crate_mat)),
+        ("pylon", lambda: make_pylon(pylon_mat)),
+    ]
+    built: list[str] = []
+    for name, build in builders:
+        if not _claim_object(name):
+            continue  # locked / author-owned — preserved, not refreshed
+        obj = build()
+        stamp_owned(obj)
+        built.append(name)
 
-    lay_out_in_row()
+    lay_out_in_row(built)
+
+    # Safety net: back up the on-disk kit before overwriting it (it's
+    # gitignored / Drive-only — no git history to recover from), then purge
+    # any mesh orphaned by a wiped part.
+    write_seedbak(OUTPUT_PATH)
+    purge_orphan_meshes()
 
     bpy.ops.wm.save_as_mainfile(filepath=OUTPUT_PATH)
     print(
         f"[seed-prop-kit] done — {len(bpy.data.objects)} objects: "
         f"{', '.join(o.name for o in bpy.data.objects)}"
     )
+    if _SKIPPED_RUN:
+        print(f"[seed-prop-kit] preserved (locked/author): {', '.join(sorted(_SKIPPED_RUN))}")
 
 
 if __name__ == "__main__":

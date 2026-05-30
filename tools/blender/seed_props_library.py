@@ -87,6 +87,15 @@ from tools.blender.vertex_attrs import (  # noqa: E402
     set_constant,
     set_linear_sway_z,
 )
+from tools.blender.seed_merge import (  # noqa: E402
+    SEED_OWNED,
+    is_locked as _is_locked,
+    open_or_empty,
+    purge_orphan_meshes,
+    remove_collection as _remove_prop_collection,
+    stamp_owned as _stamp_owned,
+    write_seedbak,
+)
 
 OUTPUT_PATH = os.path.join(REPO_ROOT, "tracks-src", "props-library.blend")
 CATALOG_PATH = os.path.join(REPO_ROOT, "tracks-src", "blender_assets.cats.txt")
@@ -138,65 +147,17 @@ def write_catalog_file() -> None:
 # ────────────────────────────────────────────────────────────────────
 
 # ── Non-destructive re-seed markers ─────────────────────────────────
-# The seed used to nuke-and-pave the library, destroying any hand-
-# authored edits. It is now MERGE-based: it opens the existing library
-# and only refreshes the assets IT owns, leaving author additions and
-# locked assets untouched. Two opposite-polarity custom-prop markers:
-#   _seed_owned : stamped BY THE SEED on everything it creates.
-#   hv_locked   : set BY THE AUTHOR on a prop_<id> collection (or its
-#                 _root empty) to freeze it — the seed never regenerates
-#                 a locked asset. This is how a hand-built replacement
-#                 (e.g. a geometry-nodes gate) survives the next re-seed.
-# Both live only on .blend datablocks; neither is exported to any GLB.
-SEED_OWNED = "_seed_owned"
-LOCK = "hv_locked"
+# The merge + author-lock convention is shared across all three hand-
+# editable seeds and lives in ``seed_merge.py`` (imported above). The
+# seed stamps ``_seed_owned`` on everything it creates and never
+# regenerates an asset an author froze with ``hv_locked`` on its
+# ``prop_<id>`` collection (or its ``_root`` empty). Neither marker is
+# exported to any GLB. See the module docstring and "Locking a hand-
+# edited prop" in docs/asset-pipeline-guide.md.
 
 # Names skipped (locked / author-owned) during the current run, so the
 # summary reports a preserved prop as preserved rather than refreshed.
 _SKIPPED_RUN: set = set()
-
-
-def _truthy(v) -> bool:
-    """Fail-safe truthiness for the lock prop: any present value counts
-    as a lock unless it is an explicit false-y 0 / '' / 'false'. (Fail
-    SAFE — when in doubt, treat as locked; never silently overwrite.)"""
-    if v is None:
-        return False
-    if isinstance(v, str):
-        return v.strip().lower() not in ("", "0", "false")
-    try:
-        return bool(v)
-    except Exception:
-        return True
-
-
-def _is_locked(coll: bpy.types.Collection) -> bool:
-    """Locked if the collection OR its _root empty carries hv_locked."""
-    if _truthy(coll.get(LOCK)):
-        return True
-    for o in coll.objects:
-        if o.name.endswith("_root") and _truthy(o.get(LOCK)):
-            return True
-    return False
-
-
-def _stamp_owned(db) -> None:
-    try:
-        db[SEED_OWNED] = True
-    except Exception:
-        pass
-
-
-def _remove_prop_collection(coll: bpy.types.Collection) -> None:
-    """Remove a seed-owned prop collection + its objects/orphan meshes so
-    the seed can rebuild it fresh. Same-name recreate is safe: links from
-    track .blends re-resolve by name on their next open."""
-    for obj in list(coll.objects):
-        mesh = obj.data if obj.type == "MESH" else None
-        bpy.data.objects.remove(obj, do_unlink=True)
-        if isinstance(mesh, bpy.types.Mesh) and mesh.users == 0:
-            bpy.data.meshes.remove(mesh)
-    bpy.data.collections.remove(coll)
 
 
 def reset_scene() -> None:
@@ -204,12 +165,7 @@ def reset_scene() -> None:
     datablocks survive into memory), else start from empty. The per-asset
     merge in ``_make_prop_collection`` then refreshes only the seed-owned,
     unlocked assets."""
-    if os.path.isfile(OUTPUT_PATH):
-        print(f"[seed-props] opening existing library (merge mode) → {OUTPUT_PATH}")
-        bpy.ops.wm.open_mainfile(filepath=OUTPUT_PATH)
-    else:
-        print("[seed-props] no existing library — building from empty")
-        bpy.ops.wm.read_homefile(use_empty=True)
+    open_or_empty(OUTPUT_PATH, log="[seed-props]")
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -2588,11 +2544,17 @@ def build_props() -> dict:
     # author content and skip refreshing it. Author-added collections
     # (names the seed never emits) stay unmarked and are left alone.
     known_ids = set(PROP_POSITIONS)
+    _migrated = 0
     for coll in bpy.data.collections:
         if coll.name in known_ids and not coll.get(SEED_OWNED) and not _is_locked(coll):
             _stamp_owned(coll)
             for o in coll.objects:
                 _stamp_owned(o)
+            _migrated += 1
+    if _migrated:
+        print(f"[seed-props] first merge run: back-stamped {_migrated} pre-convention "
+              f"prop(s) as seed-owned — they will be REFRESHED. Lock (hv_locked) any you "
+              f"hand-edited and re-run if you need to keep them.")
 
     rock_mat  = make_material("mat_prop_rock", "#7a7570", roughness=0.85)
     palm_trunk_mat = make_material("mat_foliage_palm_trunk", "#6e4a2e", roughness=0.75)
@@ -3060,15 +3022,11 @@ def main() -> None:
     _generate_previews()
 
     # Safety net: back up the on-disk library before overwriting it (it's
-    # gitignored / Drive-only — no git history to recover from).
-    if os.path.isfile(OUTPUT_PATH):
-        import shutil
-        shutil.copy2(OUTPUT_PATH, OUTPUT_PATH + ".seedbak")
-    # Purge meshes orphaned when a locked prop's freshly-built mesh went
-    # unused (every prop the seed actually refreshes keeps its mesh).
-    for m in list(bpy.data.meshes):
-        if m.users == 0:
-            bpy.data.meshes.remove(m)
+    # gitignored / Drive-only — no git history to recover from), then purge
+    # any mesh orphaned when a locked prop's freshly-built mesh went unused
+    # (every prop the seed actually refreshes keeps its mesh).
+    write_seedbak(OUTPUT_PATH)
+    purge_orphan_meshes()
 
     bpy.ops.wm.save_as_mainfile(filepath=OUTPUT_PATH)
     for nm in _SKIPPED_RUN:
