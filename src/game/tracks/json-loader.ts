@@ -11,6 +11,7 @@ import {
   type LapWeather,
   type Prop,
   type PropType,
+  type RoadSpline,
   SKY_COLOR_GRADES,
   SKY_TONE_MAPPINGS,
   type SkyColorGrade,
@@ -48,6 +49,7 @@ export type TrackJson = {
   start: { position: Vec3; yaw: number; splineT?: number }
   checkpoints: Checkpoint[]
   aiSplines: AISpline[]
+  roadSpline?: RoadSpline
   pickupSpawns: Vec3[]
   boostPads?: BoostPad[]
   antiGravZones?: AntiGravZone[]
@@ -122,6 +124,8 @@ export function buildTrackFromJson(input: unknown): Track {
   if (!aiSplines.some((s) => s.id === 'main')) {
     throw new Error('track-json: missing aiSplines entry with id="main"')
   }
+
+  const roadSpline = readOptionalRoadSpline((input as { roadSpline?: unknown }).roadSpline)
 
   // Spline-bound gates derive position + rotation from the main spline at
   // their `splineT`. Done after both arrays have been parsed so we can
@@ -285,7 +289,21 @@ export function buildTrackFromJson(input: unknown): Track {
   if (terrainShader) track.terrainShader = terrainShader
   if (audio) track.audio = audio
   if (lapWeather) track.lapWeather = lapWeather
+  if (roadSpline) track.roadSpline = roadSpline
   return track
+}
+
+function readOptionalRoadSpline(raw: unknown): RoadSpline | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (!isObject(raw)) {
+    throw new Error('track-json: roadSpline must be an object if present')
+  }
+  const pointsRaw = (raw as { points?: unknown }).points
+  if (!Array.isArray(pointsRaw) || pointsRaw.length < 2) {
+    throw new Error('track-json: roadSpline.points must be an array with ≥ 2 entries')
+  }
+  const points: Vec3[] = pointsRaw.map((p, i) => readVec3(p, `roadSpline.points[${i}]`))
+  return { points }
 }
 
 /**
@@ -402,6 +420,9 @@ export function trackToJson(track: Track): TrackJson {
     out.audio = audio
   }
   if (track.lapWeather) out.lapWeather = track.lapWeather.map((w) => ({ ...w }))
+  if (track.roadSpline) {
+    out.roadSpline = { points: track.roadSpline.points.map((p) => ({ ...p })) }
+  }
   return out
 }
 

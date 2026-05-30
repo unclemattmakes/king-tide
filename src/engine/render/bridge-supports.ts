@@ -4,10 +4,12 @@ import { DEFAULT_GATE_SPACING_M, resampleByArcLength } from '@/game/tracks/gate-
 import type { Track } from '@/game/tracks/types'
 
 /**
- * Bridge-support pillars under elevated road segments. Walks the main AI
- * spline at a dense sample rate, finds every sample where the road sits
- * at least `MIN_BRIDGE_HEIGHT_M` above the terrain (or above open water),
- * and stamps a stone pillar from ground level to just under the road.
+ * Bridge-support pillars under elevated road segments. Walks the road
+ * centerline (`track.roadSpline.points`, baked from `road_curve_main`
+ * in Blender's Road tool) at a dense sample rate, finds every sample
+ * where the road sits at least `MIN_BRIDGE_HEIGHT_M` above the terrain
+ * (or above open water), and stamps a stone pillar from ground level
+ * to just under the road.
  *
  * The terrain already builds up underneath authored road shoulders in
  * some Blender source files — terrain artists sometimes ramp the
@@ -16,6 +18,12 @@ import type { Track } from '@/game/tracks/types'
  * pillars where the road is genuinely bridged gives the section the
  * silhouette of a bridge regardless: the player reads the upright
  * columns and stops noticing the rampy shoulder.
+ *
+ * Tied to the road tool, not the AI spline, on purpose: open-water
+ * tracks (drowned-city courses) have a racing line that floats above
+ * the seafloor by design, and triggering supports off the racing line
+ * stamped pillars all the way around the loop. Authors who want bridge
+ * pillars run the Road tool; everyone else gets a clean scene.
  *
  * Pillars share one geometry + material across all instances via
  * InstancedMesh — one draw call regardless of count.
@@ -42,13 +50,16 @@ export function createBridgeSupports(deps: BridgeSupportsDeps): BridgeSupports |
   const { track, heightmap } = deps
   const waterY = deps.waterY ?? track.water?.height ?? 0
 
-  const spline = track.aiSplines.find((s) => s.id === 'main') ?? track.aiSplines[0]
-  if (!spline || spline.points.length < 2) return null
+  // Road centerline is the canonical input — see header note. Tracks
+  // without an authored road (no `road_curve_main` in Blender, or
+  // procedural / pure-water courses) get no bridge supports.
+  const roadPoints = track.roadSpline?.points
+  if (!roadPoints || roadPoints.length < 2) return null
 
   // Density: tighter than route markers so a long bridge gets enough
   // columns to read as one (rather than one column every ~60 m).
   const placements = resampleByArcLength(
-    spline.points,
+    roadPoints,
     Math.min(track.gateSpacing ?? DEFAULT_GATE_SPACING_M, BRIDGE_SAMPLE_SPACING_M),
   )
   if (placements.length === 0) return null
