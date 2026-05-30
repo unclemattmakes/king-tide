@@ -148,6 +148,11 @@ class HOVERBIKE_MT_add(Menu):
         layout.separator()
         layout.label(text="Terrain templates")
         layout.operator(
+            "hoverbike.add_multibiome_terrain",
+            text="Multi-Biome Terrain (Style menu)",
+            icon="RNDCURVE",
+        )
+        layout.operator(
             "hoverbike.add_island_terrain",
             text="Island Terrain (procedural)",
             icon="RNDCURVE",
@@ -454,6 +459,11 @@ class HOVERBIKE_MT_terrain(Menu):
         layout = self.layout
 
         layout.label(text="Build")
+        layout.operator(
+            "hoverbike.add_multibiome_terrain",
+            text="Add Multi-Biome Terrain (Style menu)",
+            icon="RNDCURVE",
+        )
         layout.operator(
             "hoverbike.add_island_terrain",
             text="Add Island Terrain (procedural)",

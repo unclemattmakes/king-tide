@@ -211,12 +211,13 @@ def build_template_dunes_group() -> bpy.types.NodeTree:
     _new_socket(g, "Oasis Depth",  "INPUT", "NodeSocketFloat", -28.0, -100.0,   0.0)
     _new_socket(g, "Noise Seed",   "INPUT", "NodeSocketFloat",   0.0,   0.0, 1000.0)
     # Additive offset mode. When True the Z displacement is clamped to
-    # max(0, raw_z) before being applied as Offset. Default True. See
-    # seed_template_island.py for the rationale — HV_TemplateTerrain
-    # uses Additive sub-groups to stack styles without mutual carving.
-    # Note: Additive=True also flattens the oasis basin (which depends
-    # on a negative Oasis Depth); flip Additive=False to see the basin.
-    _new_socket(g, "Additive",     "INPUT", "NodeSocketBool", True)
+    # max(0, raw_z) before being applied as Offset. Default False — see
+    # seed_template_island.py for the rationale (the HV_TemplateTerrain
+    # wrapper menu-switches one style at a time, so the only-raise clamp
+    # never gets a chance to stack and would just flatten the oasis basin,
+    # which depends on a negative Oasis Depth). Flip True only for a
+    # future layering pass; doing so flattens the basin.
+    _new_socket(g, "Additive",     "INPUT", "NodeSocketBool", False)
     _new_socket(g, "Geometry", "OUTPUT", "NodeSocketGeometry")
 
     p_in  = _add_node(g, "NodeGroupInput",   -1600,    0)

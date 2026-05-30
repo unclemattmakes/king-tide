@@ -421,10 +421,11 @@ def build_template_alpine_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     _new_socket(g, "Noise Seed",   "INPUT", "NodeSocketFloat",  0.0,  0.0, 1000.0)
     # Additive offset mode. When True the Z displacement is clamped to
     # max(0, raw_z) before being applied as Offset, so the sub-group
-    # only RAISES the input geometry. Default True. See
-    # seed_template_island.py for the same socket on HV_TemplateIsland —
-    # the HV_TemplateTerrain wrapper relies on this for stacking.
-    _new_socket(g, "Additive",     "INPUT", "NodeSocketBool", True)
+    # only RAISES the input geometry. Default False — see
+    # seed_template_island.py for the full rationale: the HV_TemplateTerrain
+    # wrapper menu-switches one style at a time so nothing actually stacks,
+    # and the clamp would only flatten this style's negative valley floor.
+    _new_socket(g, "Additive",     "INPUT", "NodeSocketBool", False)
     _new_socket(g, "Geometry", "OUTPUT", "NodeSocketGeometry")
 
     p_in  = _add_node(g, "NodeGroupInput",  -1600, 0)

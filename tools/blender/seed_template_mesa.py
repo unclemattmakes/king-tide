@@ -338,11 +338,13 @@ def build_template_mesa_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     _new_socket(g, "Noise Seed",   "INPUT", "NodeSocketFloat",   0.0,   0.0, 1000.0)
     # Additive offset mode. When True the Z displacement is clamped to
     # max(0, raw_z) before being applied as Offset, so this sub-group
-    # only RAISES the input geometry — required for clean stacking under
-    # HV_TemplateTerrain. Default True. Flip Additive=False to recover
-    # the destructive behaviour (the canyon floor reaches its -8 m
-    # default and water shows through the central trough).
-    _new_socket(g, "Additive",     "INPUT", "NodeSocketBool", True)
+    # only RAISES the input geometry. Default False — see
+    # seed_template_island.py for the rationale (the HV_TemplateTerrain
+    # wrapper menu-switches one style at a time, so the only-raise clamp
+    # never stacks anything and would just flatten the canyon floor to
+    # z=0). With the default the canyon floor reaches its -8 m default
+    # and water shows through the central trough, as intended.
+    _new_socket(g, "Additive",     "INPUT", "NodeSocketBool", False)
     _new_socket(g, "Geometry", "OUTPUT", "NodeSocketGeometry")
 
     p_in  = _add_node(g, "NodeGroupInput",  -1600, 0)
