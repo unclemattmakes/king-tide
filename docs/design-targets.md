@@ -21,6 +21,13 @@
 > - Desktop target shifted from **Tauri** to **Electron** mid-push
 >   (Tauri/WebKitGTK couldn't deliver WebGPU on Linux or launch through
 >   the Steam Linux Runtime on the Deck — see [desktop-builds.md](./desktop-builds.md)).
+> - **Anti-grav cut from v1** (2026-05-30, no-anti-grav reconciliation
+>   pass). The "ship 2–3 anti-grav tracks" target below (§1) and the
+>   anti-grav rows in the priority tables (§4) are **retired** — the v1
+>   target is now **0** anti-grav tracks; verticality is delivered by
+>   terrain, ramps, banked berms, and cliff drops. See the per-track docs
+>   in [tracks/](./tracks/README.md). Rows below are left as-authored for
+>   history; this banner is the source of truth where they conflict.
 
 ## 1. Research → Hoverbike crosswalk
 
@@ -38,7 +45,7 @@
 | Track editor = the unclaimed moat | In-app editor + Blender pipeline | Author-only for v1 (per decision); revisit shareable URLs post-launch |
 | Don't headline ranked MP | M10.x lobby + state sync in progress | **Room-code MP only** — no ranked, no public matchmaking |
 | Set-piece tracks beat generic loops | Lagoon + Cliffside both have hero moments (ramp, mesa drop) | Every v1 track must have ≥1 named set-piece |
-| MK8 anti-grav universally loved | TODO per user | Ship **2–3 anti-grav tracks** at v1 |
+| MK8 anti-grav universally loved | **Cut from v1** (system tax vs ship date) | ~~Ship 2–3 anti-grav tracks~~ → **0**; verticality via terrain/ramps/berms/drops (see [tracks/](./tracks/README.md)) |
 
 ## 2. The signature axis — wave mastery (+ drift as the lateral complement)
 

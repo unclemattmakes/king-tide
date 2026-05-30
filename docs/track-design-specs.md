@@ -1,5 +1,16 @@
 # Hoverbike — Track Design Specs v1
 
+> **⚠ Partly superseded (2026-05-30, no-anti-grav reconciliation pass).**
+> Anti-grav is **cut from v1.** Every `antigrav_curve_*` object and
+> "anti-grav" beat in the per-track specs below (§2.0, §2.3, §2.5, §2.7,
+> §2.8, §2.9, §2.10, §2.11) is **retired** and replaced by a
+> normal-gravity terrain/ramp solution. The replacements — and each
+> track's unique + common prop manifest — live in the canonical per-track
+> docs under [tracks/](./tracks/README.md). This doc remains authoritative
+> for everything else (beat timing, wave-zone tuning, particle/audio
+> configs, hero-camera framing). When the prose here says "anti-grav,"
+> read the matching `tracks/<id>.md` for what ships instead.
+>
 > Implementation companion to [track-themes.md](./track-themes.md) (the
 > content bible) and [../research/track-flow-analysis.md](../research/track-flow-analysis.md)
 > (the cross-game flow analysis). This doc takes each v1 track from
