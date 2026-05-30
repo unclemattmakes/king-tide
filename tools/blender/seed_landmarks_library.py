@@ -11,6 +11,16 @@ rather than scatter props. Authors drag a collection from the Asset
 Browser into a track .blend, scale to taste, and immediately have a
 silhouette readable at race-pace viewing distance.
 
+Like the prop library, it is **non-destructive (merge mode)**: re-running
+OPENS the existing ``landmarks-library.blend`` and refreshes only the
+collections the seed owns, preserving (a) any collection an author added
+and (b) any landmark an author *locked* via an ``hv_locked`` custom
+property on the ``landmark_<id>`` collection (or its ``_root`` empty). To
+keep a hand-built replacement across re-seeds, lock it — see "Locking a
+hand-edited prop" in docs/asset-pipeline-guide.md. A ``.seedbak`` copy is
+written before every save (the .blend is Drive-only — no git history).
+The merge + lock helpers are shared via ``seed_merge.py``.
+
 ### What the seed produces
 
 Originally eight Seattle-flavoured archetypes; Phase B of
@@ -101,6 +111,15 @@ from tools.blender.vertex_attrs import (  # noqa: E402
     DEFAULT_TERRAIN,
     set_color_attr,
     set_constant,
+)
+from tools.blender.seed_merge import (  # noqa: E402
+    is_locked,
+    is_seed_owned,
+    open_or_empty,
+    purge_orphan_meshes,
+    remove_collection,
+    stamp_owned,
+    write_seedbak,
 )
 
 OUTPUT_PATH = os.path.join(REPO_ROOT, "tracks-src", "landmarks-library.blend")
@@ -215,7 +234,12 @@ def make_trim_sheet_material(name: str, image_path: str, *, roughness: float = 0
 
     If the texture file is missing (e.g. the user hasn't run
     ``pnpm gen:trim-sheets`` yet), the material falls back to a flat
-    grey so the seed still produces a working .blend."""
+    grey so the seed still produces a working .blend.
+
+    Merge-mode safe: on a non-destructive re-seed the material, its
+    Image-Texture node, and the loaded image are all reused in place
+    (``get`` the material, find the existing node, ``check_existing=True``
+    on the image) — the texture is never reloaded or duplicated."""
     mat = bpy.data.materials.get(name) or bpy.data.materials.new(name=name)
     mat.use_nodes = True
     nt = mat.node_tree
@@ -1279,6 +1303,30 @@ def _layer_link(coll: bpy.types.Collection) -> None:
     bpy.context.scene.collection.children.link(coll)
 
 
+# Names skipped (locked / author-owned) during the current run, so the
+# summary reports a preserved landmark as preserved rather than refreshed.
+_SKIPPED_RUN: set = set()
+
+
+def _claim_collection(name: str) -> bool:
+    """Merge gate for a landmark collection. Returns ``True`` if the caller
+    should (re)build it, ``False`` if an author version must be preserved.
+
+    A locked or author-added (non-``_seed_owned``) collection is preserved
+    and recorded in ``_SKIPPED_RUN``; a seed-owned, unlocked collection is
+    removed so the caller can rebuild it fresh."""
+    existing = bpy.data.collections.get(name)
+    if existing is None:
+        return True
+    if is_locked(existing) or not is_seed_owned(existing):
+        reason = "hv_locked" if is_locked(existing) else "author-owned"
+        print(f"[seed-landmarks]   SKIP {name} ({reason}) — preserving hand-authored version")
+        _SKIPPED_RUN.add(name)
+        return False
+    remove_collection(existing)
+    return True
+
+
 def _make_collection(name: str, mesh: bpy.types.Mesh,
                      materials: list[bpy.types.Material], *,
                      position: tuple[float, float, float]) -> bpy.types.Collection:
@@ -1296,11 +1344,18 @@ def _make_collection(name: str, mesh: bpy.types.Mesh,
         if mat.name not in mesh.materials:
             mesh.materials.append(mat)
     coll.objects.link(obj)
+    # Stamp seed-ownership so the next re-seed knows it may refresh this.
+    stamp_owned(coll)
+    stamp_owned(obj)
     return coll
 
 
 def _mark_asset(coll: bpy.types.Collection, *, catalog_path: str,
                 description: str, tags: list[str]) -> None:
+    # Locked collections are left entirely alone — the author owns their
+    # asset metadata (catalogue / description / tags) too.
+    if is_locked(coll):
+        return
     if coll.asset_data is None:
         coll.asset_mark()
     ad = coll.asset_data
@@ -1359,11 +1414,19 @@ def _make_mechanical_rig_collection(name: str,
             arm_mesh.materials.append(mat)
     coll.objects.link(arm)
 
+    # Stamp seed-ownership on the collection and both objects (base + the
+    # parented arm) so the next re-seed knows it may refresh the rig.
+    stamp_owned(coll)
+    stamp_owned(base)
+    stamp_owned(arm)
     return coll
 
 
 def reset_scene() -> None:
-    bpy.ops.wm.read_homefile(use_empty=True)
+    """Non-destructive: OPEN the existing library if present (so author
+    datablocks survive into memory), else start from empty. The per-asset
+    merge then refreshes only the seed-owned, unlocked landmarks."""
+    open_or_empty(OUTPUT_PATH, log="[seed-landmarks]")
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -1371,6 +1434,25 @@ def reset_scene() -> None:
 # ────────────────────────────────────────────────────────────────────
 
 def build_landmarks() -> dict[str, dict]:
+    # First-run migration: a library built before the merge convention has
+    # no _seed_owned markers, so back-stamp every collection whose name is
+    # one this seed emits (and that the author hasn't locked) — otherwise
+    # the merge would mistake the whole existing library for author content
+    # and skip refreshing it. Author-added collections (names the seed
+    # never emits) stay unmarked and are left alone.
+    known_ids = set(LAYOUT)
+    _migrated = 0
+    for coll in bpy.data.collections:
+        if coll.name in known_ids and not is_seed_owned(coll) and not is_locked(coll):
+            stamp_owned(coll)
+            for o in coll.objects:
+                stamp_owned(o)
+            _migrated += 1
+    if _migrated:
+        print(f"[seed-landmarks] first merge run: back-stamped {_migrated} pre-convention "
+              f"landmark(s) as seed-owned — they will be REFRESHED. Lock (hv_locked) any you "
+              f"hand-edited and re-run if you need to keep them.")
+
     # Materials — shared across multiple archetypes where the colour story is the same.
     # One shader family per palette per the v1 pipeline plan's
     # "one shader per family" rule.
@@ -1572,6 +1654,8 @@ def build_landmarks() -> dict[str, dict]:
     ]
 
     for a in archetypes:
+        if not _claim_collection(a["name"]):
+            continue  # locked / author-owned — preserved, not refreshed
         pos = LAYOUT[a["name"]]
         mesh = a["mesh_builder"](f"{a['name']}_mesh")
         coll = _make_collection(a["name"], mesh, a["materials"], position=pos)
@@ -1580,29 +1664,30 @@ def build_landmarks() -> dict[str, dict]:
         summary[a["name"]] = {"verts": len(mesh.vertices), "faces": len(mesh.polygons)}
 
     # ── mechanical_rig — two meshes, one collection, parented arm ──
-    rig_pos = LAYOUT["landmark_mechanical_rig"]
-    base_mesh, arm_mesh = build_mechanical_rig_mesh("landmark_mechanical_rig")
-    rig_coll = _make_mechanical_rig_collection(
-        "landmark_mechanical_rig",
-        base_mesh, arm_mesh,
-        [mat_steel, mat_oxidised],
-        position=rig_pos,
-        # Default = Marina Bay gantry — 12 s back-and-forth swing across
-        # the racing lane (the Gauntlet timer). Re-tune per instance
-        # post-drag for Doge's bell (faster, smaller amplitude) and
-        # Liberty's torch flame (very fast, small flicker amplitude).
-        swing_period_s=12.0,
-        swing_amplitude_deg=40.0,
-        swing_axis="Z",
-    )
-    _mark_asset(rig_coll,
-                catalog_path="Hoverbike/Landmarks/Mechanical",
-                description="A-frame base + swinging arm + counterweight + hoist cable. 40 m tall. Drives Marina Bay gantry cranes (default — 12 s swing across deck), Doge's Campanile bell (re-scale small, re-tune swing_period_s short), Liberty torch flame fixture (re-rig as vertical flicker). Arm carries swing_period_s/amplitude_deg/axis extras for future runtime animation — today the runtime ignores them; metadata is in place for the next animation pass.",
-                tags=["mechanical", "crane", "swing", "animated", "landmark"])
-    summary["landmark_mechanical_rig"] = {
-        "verts": len(base_mesh.vertices) + len(arm_mesh.vertices),
-        "faces": len(base_mesh.polygons) + len(arm_mesh.polygons),
-    }
+    if _claim_collection("landmark_mechanical_rig"):
+        rig_pos = LAYOUT["landmark_mechanical_rig"]
+        base_mesh, arm_mesh = build_mechanical_rig_mesh("landmark_mechanical_rig")
+        rig_coll = _make_mechanical_rig_collection(
+            "landmark_mechanical_rig",
+            base_mesh, arm_mesh,
+            [mat_steel, mat_oxidised],
+            position=rig_pos,
+            # Default = Marina Bay gantry — 12 s back-and-forth swing across
+            # the racing lane (the Gauntlet timer). Re-tune per instance
+            # post-drag for Doge's bell (faster, smaller amplitude) and
+            # Liberty's torch flame (very fast, small flicker amplitude).
+            swing_period_s=12.0,
+            swing_amplitude_deg=40.0,
+            swing_axis="Z",
+        )
+        _mark_asset(rig_coll,
+                    catalog_path="Hoverbike/Landmarks/Mechanical",
+                    description="A-frame base + swinging arm + counterweight + hoist cable. 40 m tall. Drives Marina Bay gantry cranes (default — 12 s swing across deck), Doge's Campanile bell (re-scale small, re-tune swing_period_s short), Liberty torch flame fixture (re-rig as vertical flicker). Arm carries swing_period_s/amplitude_deg/axis extras for future runtime animation — today the runtime ignores them; metadata is in place for the next animation pass.",
+                    tags=["mechanical", "crane", "swing", "animated", "landmark"])
+        summary["landmark_mechanical_rig"] = {
+            "verts": len(base_mesh.vertices) + len(arm_mesh.vertices),
+            "faces": len(base_mesh.polygons) + len(arm_mesh.polygons),
+        }
 
     return summary
 
@@ -1634,6 +1719,7 @@ def _generate_previews() -> None:
 # ────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    _SKIPPED_RUN.clear()
     print(f"[seed-landmarks] writing catalogue → {CATALOG_PATH}")
     write_catalog_file()
 
@@ -1644,12 +1730,21 @@ def main() -> None:
     summary = build_landmarks()
     _generate_previews()
 
+    # Safety net: back up the on-disk library before overwriting it (it's
+    # gitignored / Drive-only — no git history to recover from), then purge
+    # any mesh orphaned when a locked landmark's freshly-built mesh went
+    # unused (every landmark the seed actually refreshes keeps its mesh).
+    write_seedbak(OUTPUT_PATH)
+    purge_orphan_meshes()
+
     bpy.ops.wm.save_as_mainfile(filepath=OUTPUT_PATH)
     parts = ", ".join(
         f"{k.removeprefix('landmark_')}={v['verts']}v/{v['faces']}f"
         for k, v in summary.items()
     )
     print(f"[seed-landmarks] done — {parts}")
+    if _SKIPPED_RUN:
+        print(f"[seed-landmarks] preserved (locked/author): {', '.join(sorted(_SKIPPED_RUN))}")
 
 
 if __name__ == "__main__":

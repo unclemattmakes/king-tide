@@ -218,30 +218,52 @@ including `buoy.glb`) to refresh the deployed GLB.
 
 ### Locking a hand-edited prop (non-destructive re-seed)
 
-`seed_props_library.py` (the procedural `tracks-src/props-library.blend`)
-is **merge-based**: re-running `pnpm seed:props-library` opens the
-existing library and refreshes only the assets the seed owns, preserving
-anything you added by hand. If you *replace* a seed prop with your own
-geometry (e.g. a geometry-nodes race gate), **lock it** so the next
-re-seed leaves it alone:
+All three hand-editable seeds are **merge-based** (the shared convention
+lives in `tools/blender/seed_merge.py`): re-running opens the existing
+`.blend` and refreshes only the assets the seed owns, preserving anything
+you added by hand. This covers:
 
-- In Blender, select the `prop_<id>` collection (or its `prop_<id>_root`
-  empty) → Object/Collection Properties → **Custom Properties → New** →
-  name it `hv_locked`, value `1`.
-- Re-seed: the log prints `SKIP prop_<id> (hv_locked) — preserving
-  hand-authored version`, and the asset's geometry, materials, and asset
-  metadata are left untouched.
+- `seed_props_library.py` → `tracks-src/props-library.blend`
+- `seed_landmarks_library.py` → `tracks-src/landmarks-library.blend`
+- `seed_prop_kit.py` → `tools/blender/lib/prop_kit.blend` (the kit's
+  author-added `buoy`, seeded by `seed_buoy_kit_part.py`, survives a
+  prop-kit re-seed because it lives under a name the kit seed never emits)
+
+If you *replace* a seed asset with your own geometry (e.g. a
+geometry-nodes race gate), **lock it** so the next re-seed leaves it alone:
+
+- In Blender, select the asset and add a **Custom Property** named
+  `hv_locked`, value `1`. For the library seeds that's the `prop_<id>` /
+  `landmark_<id>` **collection** (or its `_root` empty); for the prop kit
+  it's the **object** itself (e.g. `crate`).
+- Re-seed: the log prints `SKIP <id> (hv_locked) — preserving
+  hand-authored version`, and the asset's geometry and asset metadata
+  (catalogue / tags) are left untouched.
 
 Notes:
 
-- The seed writes a `props-library.blend.seedbak` copy before every save
-  as a one-deep safety net (the `.blend` is Drive-only — no git history).
-- Everything the seed creates is marked `_seed_owned`; a collection you
-  add by hand (a name the seed never emits) is preserved without any lock.
-- *Known gap:* `prop_rock` / `prop_palm` drive their shape from a shared
-  `HV_Prop_*` geometry-nodes group the seed rebuilds, so locking those
-  two isn't fully honoured yet. Hard-surface / baked-mesh props (gates,
-  containers, sea-stacks, …) lock cleanly.
+- Each seed writes a `<file>.seedbak` copy before every save as a one-deep
+  safety net (the `.blend`s are Drive-only — no git history).
+- Everything the seed creates is marked `_seed_owned`; an asset you add by
+  hand (a name the seed never emits) is preserved without any lock. These
+  markers are authoring-only — the runtime never reads them.
+- **First-run migration:** a library built *before* this convention has no
+  `_seed_owned` markers, so the first merge re-seed back-stamps every
+  asset whose name the seed emits and **refreshes** it. The log prints a
+  `first merge run: back-stamped N …` warning. If you hand-edited a
+  seed-named asset before locking existed, **lock it before that first
+  re-seed** — otherwise it is overwritten with the default.
+- *Known gaps* (the lock protects an asset's own geometry + asset
+  metadata, not shared data the seed regenerates wholesale):
+  - `prop_rock` / `prop_palm` drive their shape from a shared `HV_Prop_*`
+    geometry-nodes group the seed rebuilds, so locking those two isn't
+    fully honoured yet. Hard-surface / baked-mesh assets (gates,
+    containers, sea-stacks, landmarks, kit parts, …) lock cleanly.
+  - **Shared materials** (`mat_prop_*`, `mat_landmark_*`, `mat_kit_prop_*`)
+    are re-tuned in place on every re-seed. A locked asset keeps its mesh,
+    but if you re-tinted a material it *shares* with refreshed assets, the
+    re-seed resets that material. To keep a custom tint, give the locked
+    asset its own uniquely-named material.
 
 ### Add a brand-new bike
 
