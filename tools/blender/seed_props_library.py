@@ -6,9 +6,16 @@ Run:
     "C:/Program Files/Blender Foundation/Blender 5.1/blender.exe" \\
       --background --python tools/blender/seed_props_library.py
 
-This is a one-shot scaffolder, analogous to ``seed_template_island.py``
-and ``seed_bike_kit.py``. Nuke-and-paves on every run; the .blend is
-the source of truth for hand-tuned tweaks afterwards.
+This is a scaffolder analogous to ``seed_template_island.py``, but it is
+**non-destructive (merge mode)**: re-running OPENS the existing library
+and refreshes only the assets the seed owns, preserving (a) any
+collection an author added and (b) any asset an author *locked* by
+setting an ``hv_locked`` custom property on the ``prop_<id>`` collection
+(or its ``_root`` empty). To protect a hand-built (e.g. geometry-nodes)
+replacement from the next re-seed, lock it — see "Locking a hand-edited
+prop" in docs/asset-pipeline-guide.md. A ``.seedbak`` copy is written
+before every save as a safety net (the .blend is Drive-only — no git
+history to recover from).
 
 ### What the seed produces
 
@@ -130,8 +137,79 @@ def write_catalog_file() -> None:
 # Scene reset
 # ────────────────────────────────────────────────────────────────────
 
+# ── Non-destructive re-seed markers ─────────────────────────────────
+# The seed used to nuke-and-pave the library, destroying any hand-
+# authored edits. It is now MERGE-based: it opens the existing library
+# and only refreshes the assets IT owns, leaving author additions and
+# locked assets untouched. Two opposite-polarity custom-prop markers:
+#   _seed_owned : stamped BY THE SEED on everything it creates.
+#   hv_locked   : set BY THE AUTHOR on a prop_<id> collection (or its
+#                 _root empty) to freeze it — the seed never regenerates
+#                 a locked asset. This is how a hand-built replacement
+#                 (e.g. a geometry-nodes gate) survives the next re-seed.
+# Both live only on .blend datablocks; neither is exported to any GLB.
+SEED_OWNED = "_seed_owned"
+LOCK = "hv_locked"
+
+# Names skipped (locked / author-owned) during the current run, so the
+# summary reports a preserved prop as preserved rather than refreshed.
+_SKIPPED_RUN: set = set()
+
+
+def _truthy(v) -> bool:
+    """Fail-safe truthiness for the lock prop: any present value counts
+    as a lock unless it is an explicit false-y 0 / '' / 'false'. (Fail
+    SAFE — when in doubt, treat as locked; never silently overwrite.)"""
+    if v is None:
+        return False
+    if isinstance(v, str):
+        return v.strip().lower() not in ("", "0", "false")
+    try:
+        return bool(v)
+    except Exception:
+        return True
+
+
+def _is_locked(coll: bpy.types.Collection) -> bool:
+    """Locked if the collection OR its _root empty carries hv_locked."""
+    if _truthy(coll.get(LOCK)):
+        return True
+    for o in coll.objects:
+        if o.name.endswith("_root") and _truthy(o.get(LOCK)):
+            return True
+    return False
+
+
+def _stamp_owned(db) -> None:
+    try:
+        db[SEED_OWNED] = True
+    except Exception:
+        pass
+
+
+def _remove_prop_collection(coll: bpy.types.Collection) -> None:
+    """Remove a seed-owned prop collection + its objects/orphan meshes so
+    the seed can rebuild it fresh. Same-name recreate is safe: links from
+    track .blends re-resolve by name on their next open."""
+    for obj in list(coll.objects):
+        mesh = obj.data if obj.type == "MESH" else None
+        bpy.data.objects.remove(obj, do_unlink=True)
+        if isinstance(mesh, bpy.types.Mesh) and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+    bpy.data.collections.remove(coll)
+
+
 def reset_scene() -> None:
-    bpy.ops.wm.read_homefile(use_empty=True)
+    """Non-destructive: OPEN the existing library if present (so author
+    datablocks survive into memory), else start from empty. The per-asset
+    merge in ``_make_prop_collection`` then refreshes only the seed-owned,
+    unlocked assets."""
+    if os.path.isfile(OUTPUT_PATH):
+        print(f"[seed-props] opening existing library (merge mode) → {OUTPUT_PATH}")
+        bpy.ops.wm.open_mainfile(filepath=OUTPUT_PATH)
+    else:
+        print("[seed-props] no existing library — building from empty")
+        bpy.ops.wm.read_homefile(use_empty=True)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -1474,37 +1552,98 @@ def build_faded_sign_mesh(name: str, *, panel_w: float = 1.8, panel_h: float = 1
 # ── Open Sea kit ────────────────────────────────────────────────────
 
 
-def build_sea_stack_mesh(name: str, *, height: float = 6.0, base_radius: float = 1.6) -> bpy.types.Mesh:
-    """Tall thin sea-stack rock — eroded pillar. Tapers from base to ~60 %
-    radius at the top. Reads as a coastal landmark at distance."""
+# ── Procedural value-noise (deterministic; CI-reproducible) ─────────
+# Cheap integer-hash value noise + fbm, used by the sea-stack builder to
+# fracture/lean the silhouette without a Geometry-Nodes round-trip. Pure
+# Python + integer hashing so the headless seed is byte-stable run to run
+# (no Math.random / per-run state). Range ≈ [-1, 1].
+
+def _hash3i(i: int, j: int, k: int, seed: int) -> float:
+    n = (i * 374761393 + j * 668265263 + k * 1274126177 + seed * 982451653) & 0xFFFFFFFF
+    n = ((n ^ (n >> 13)) * 1274126177) & 0xFFFFFFFF
+    return (n & 0xFFFF) / 65535.0 * 2.0 - 1.0
+
+
+def _vnoise3(x: float, y: float, z: float, seed: int) -> float:
+    xi, yi, zi = math.floor(x), math.floor(y), math.floor(z)
+    xf, yf, zf = x - xi, y - yi, z - zi
+    sm = lambda t: t * t * (3.0 - 2.0 * t)
+    u, v, w = sm(xf), sm(yf), sm(zf)
+    lerp = lambda a, b, t: a + (b - a) * t
+    c000 = _hash3i(xi, yi, zi, seed);         c100 = _hash3i(xi + 1, yi, zi, seed)
+    c010 = _hash3i(xi, yi + 1, zi, seed);     c110 = _hash3i(xi + 1, yi + 1, zi, seed)
+    c001 = _hash3i(xi, yi, zi + 1, seed);     c101 = _hash3i(xi + 1, yi, zi + 1, seed)
+    c011 = _hash3i(xi, yi + 1, zi + 1, seed); c111 = _hash3i(xi + 1, yi + 1, zi + 1, seed)
+    x00 = lerp(c000, c100, u); x10 = lerp(c010, c110, u)
+    x01 = lerp(c001, c101, u); x11 = lerp(c011, c111, u)
+    return lerp(lerp(x00, x10, v), lerp(x01, x11, v), w)
+
+
+def _fbm3(x: float, y: float, z: float, seed: int, octaves: int = 4) -> float:
+    total, amp, freq = 0.0, 0.5, 1.0
+    for o in range(octaves):
+        total += amp * _vnoise3(x * freq, y * freq, z * freq, seed + o * 17)
+        amp *= 0.5
+        freq *= 2.0
+    return total
+
+
+def build_sea_stack_mesh(name: str, *, height: float = 15.0, base_radius: float = 4.2, seed: int = 3) -> bpy.types.Mesh:
+    """Eroded coastal sea-stack — an irregular columnar rock rising from
+    the waterline (Big Sur / 12-Apostles silhouette). **Authored
+    larger-than-life** (~15 m base, scatter scales it up further) per the
+    arcade-scale pillar in docs/product-plan.md — reads as a monument at
+    race pace, not a literal-scale rock. Built as a *displaced
+    ring-stack* rather than a smooth taper: 3D value-noise fractures the
+    sides into planar facets, a height-scaled lean breaks the vertical
+    symmetry, a waterline undercut pinches the base, and the crown is a
+    jagged **flat n-gon cap** (no centre fan, so it reads broken — not a
+    clean cone point). ``seed`` re-rolls the silhouette; bake a few seeds
+    into the scatter collection for a natural cluster. Flat-shaded. ~125
+    verts. Authored Z-up with the foot on z=0 so the scatter can drop the
+    base to/under the waterline and the undercut sits at sea level.
+    """
     bm = bmesh.new()
-    segs = 10
-    rings = 5
-    # Profile points: deterministic "eroded" radial variation per ring.
-    radial_jitter = [1.00, 0.78, 0.92, 0.72, 0.60]
+    rings, segs = 8, 14
+    r01 = lambda salt: _hash3i(seed, salt, salt * 3 + 1, seed) * 0.5 + 0.5
+    lean = (0.20 + 0.25 * r01(11)) * base_radius          # break vertical symmetry
+    taper_amt = 0.10 + 0.12 * r01(23)                     # how much it narrows toward the crown
+    ringv: list[list[bmesh.types.BMVert]] = []
+    for ri in range(rings + 1):
+        zt = ri / rings                                   # 0 (base) .. 1 (crown)
+        z = zt * height
+        taper = 1.0 - taper_amt * zt
+        undercut = 1.0 - 0.16 * math.exp(-((zt - 0.10) / 0.10) ** 2)   # waterline pinch
+        lx = lean * zt * _fbm3(0.0, 0.0, zt * 1.6, seed + 3, 2)
+        ly = lean * zt * _fbm3(5.0, 5.0, zt * 1.6, seed + 9, 2)
+        ring = []
+        for si in range(segs):
+            ang = si / segs * math.tau
+            cx, cy = math.cos(ang), math.sin(ang)
+            bulge = 0.12 * _fbm3(cx * 0.6, cy * 0.6, zt * 1.5, seed + 30, 2)   # organic profile
+            fracture = 0.22 * _fbm3(cx * 1.7, cy * 1.7, zt * 3.0, seed, 5)     # planar fractures
+            r = base_radius * (taper * undercut + bulge + fracture)
+            ring.append(bm.verts.new((cx * r + lx, cy * r + ly, z)))
+        ringv.append(ring)
+    # Sides.
     for ri in range(rings):
-        z = ri / (rings - 1) * height
-        r = base_radius * radial_jitter[ri]
-        ring = [
-            bm.verts.new((math.cos(s / segs * math.tau) * r,
-                          math.sin(s / segs * math.tau) * r,
-                          z))
-            for s in range(segs)
-        ]
-        if ri == 0:
-            prev = ring
-            bm.faces.new(ring[::-1])  # base cap
-            continue
         for si in range(segs):
             sn = (si + 1) % segs
-            bm.faces.new([prev[si], prev[sn], ring[sn], ring[si]])
-        prev = ring
-    # Cap top.
-    bm.faces.new(prev)
+            bm.faces.new([ringv[ri][si], ringv[ri][sn], ringv[ri + 1][sn], ringv[ri + 1][si]])
+    # Base cap.
+    bm.faces.new(ringv[0][::-1])
+    # Broken flat crown — jitter the top ring in Z, then cap with one
+    # n-gon (the glTF exporter triangulates it; no centre apex → no spike).
+    top = ringv[-1]
+    for v in top:
+        v.co.z += 0.12 * height * _fbm3(v.co.x * 2.0, v.co.y * 2.0, 9.0, seed + 13, 3)
+    bm.faces.new(top)
 
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
+    for p in me.polygons:
+        p.use_smooth = False        # flat facets read as carved rock at race pace
     set_constant(me, DEFAULT_TERRAIN)
     return me
 
@@ -2288,7 +2427,10 @@ def _layer_collection_link(coll: bpy.types.Collection) -> None:
 def _mark_collection_asset(coll: bpy.types.Collection, *, catalog_path: str, description: str, tags: list[str]) -> None:
     """Mark *coll* as an asset, assign catalogue, write tags and
     metadata. Idempotent — re-marking a collection just refreshes the
-    metadata."""
+    metadata. Locked collections are left entirely alone — the author
+    owns their asset metadata (catalogue/description/tags) too."""
+    if _is_locked(coll):
+        return
     if coll.asset_data is None:
         coll.asset_mark()
     ad = coll.asset_data
@@ -2331,6 +2473,14 @@ def _make_prop_collection(
 
     Returns the collection, ready to be marked as an asset.
     """
+    existing = bpy.data.collections.get(name)
+    if existing is not None and (_is_locked(existing) or not existing.get(SEED_OWNED)):
+        reason = "hv_locked" if _is_locked(existing) else "author-owned"
+        print(f"[seed-props]   SKIP {name} ({reason}) — preserving hand-authored version")
+        _SKIPPED_RUN.add(name)
+        return existing
+    if existing is not None:
+        _remove_prop_collection(existing)
     coll = bpy.data.collections.new(name)
     _layer_collection_link(coll)
 
@@ -2368,6 +2518,9 @@ def _make_prop_collection(
                 if ident is not None:
                     mod[ident] = value
 
+    _stamp_owned(coll)
+    _stamp_owned(root)
+    _stamp_owned(mesh_obj)
     return coll
 
 
@@ -2428,6 +2581,19 @@ PROP_POSITIONS = {
 # ────────────────────────────────────────────────────────────────────
 
 def build_props() -> dict:
+    # First-run migration: a library built before the merge convention
+    # has no _seed_owned markers, so back-stamp every collection whose
+    # name is one this seed emits (and that the author hasn't locked) —
+    # otherwise the merge would mistake the whole existing library for
+    # author content and skip refreshing it. Author-added collections
+    # (names the seed never emits) stay unmarked and are left alone.
+    known_ids = set(PROP_POSITIONS)
+    for coll in bpy.data.collections:
+        if coll.name in known_ids and not coll.get(SEED_OWNED) and not _is_locked(coll):
+            _stamp_owned(coll)
+            for o in coll.objects:
+                _stamp_owned(o)
+
     rock_mat  = make_material("mat_prop_rock", "#7a7570", roughness=0.85)
     palm_trunk_mat = make_material("mat_foliage_palm_trunk", "#6e4a2e", roughness=0.75)
     palm_frond_mat = make_material("mat_foliage_palm", "#3e7a32", roughness=0.55)
@@ -2796,7 +2962,7 @@ def build_props() -> dict:
              build_sea_stack_mesh("prop_sea_stack_mesh"),
              [sea_stack_mat],
              "Hoverbike/Track Props/Open Sea",
-             "Tall eroded sea-stack rock pillar. Coastal landmark silhouette at distance.",
+             "Eroded sea-stack — irregular columnar rock with noise-fractured facets, height-scaled lean, waterline undercut, and a broken flat crown. Big Sur / 12-Apostles silhouette. Re-seed the builder for cluster variety.",
              ["open-sea", "rock", "tall", "scatterable"])
 
     _add_kit("prop_nav_marker",
@@ -2882,6 +3048,7 @@ def _generate_previews() -> None:
 # ────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    _SKIPPED_RUN.clear()
     print(f"[seed-props] writing catalogue → {CATALOG_PATH}")
     write_catalog_file()
 
@@ -2892,9 +3059,24 @@ def main() -> None:
     summary = build_props()
     _generate_previews()
 
+    # Safety net: back up the on-disk library before overwriting it (it's
+    # gitignored / Drive-only — no git history to recover from).
+    if os.path.isfile(OUTPUT_PATH):
+        import shutil
+        shutil.copy2(OUTPUT_PATH, OUTPUT_PATH + ".seedbak")
+    # Purge meshes orphaned when a locked prop's freshly-built mesh went
+    # unused (every prop the seed actually refreshes keeps its mesh).
+    for m in list(bpy.data.meshes):
+        if m.users == 0:
+            bpy.data.meshes.remove(m)
+
     bpy.ops.wm.save_as_mainfile(filepath=OUTPUT_PATH)
+    for nm in _SKIPPED_RUN:
+        summary.pop(nm.removeprefix("prop_"), None)
     parts = ", ".join(f"{k}={v['verts']}v" for k, v in summary.items())
     print(f"[seed-props] done — {parts}")
+    if _SKIPPED_RUN:
+        print(f"[seed-props] preserved (locked/author): {', '.join(sorted(_SKIPPED_RUN))}")
 
 
 if __name__ == "__main__":

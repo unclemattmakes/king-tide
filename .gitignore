@@ -39,6 +39,10 @@ tracks-src/*.blend@
 bikes-src/*.blend@
 tools/blender/lib/*.blend1
 tools/blender/lib/*.blend@
+# Non-destructive re-seed safety backups (the seed writes <lib>.blend.seedbak
+# before every save; .preseed-bak is a manual pre-run copy).
+*.blend.seedbak
+*.blend.preseed-bak
 
 # python bytecode (Blender headless scripts)
 __pycache__/

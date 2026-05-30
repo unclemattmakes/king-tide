@@ -15,6 +15,7 @@ A web-first arcade racer in the spirit of **JetMoto**. Hover bikes that surf wav
 3. **Arcade, not sim.** Generous handling, big drifts (literal — see Mario-Kart-style mini-turbo), exaggerated speed, forgiving boundaries.
 4. **Ten-minute fun loop.** Pick bike → race → rematch in under 30 seconds. No menus to fight.
 5. **Light combat seasoning.** Pickups matter, but physics-mastery (wave-pump + drift) and racing line decide most races.
+6. **Larger-than-life scale.** Landmarks, hazards, and props are authored *bigger than life* so they read at race pace (40 m/s) and silhouette against the sky. Real-world dimensions are a floor, not a ceiling — oversize sea-stacks, monuments, and set-pieces ~2–4× past realism so they register at speed and feel monumental. Pairs with "silhouette before surface" + "reads at 40 m/s" in [props-production-plan.md](props-production-plan.md).
 
 ## Target player
 

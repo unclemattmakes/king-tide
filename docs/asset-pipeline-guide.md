@@ -216,6 +216,33 @@ tunable via constants at the top of the file), and saves back into
 followed by `pnpm gen:props` (rebuilds every spec under `specs/props/`,
 including `buoy.glb`) to refresh the deployed GLB.
 
+### Locking a hand-edited prop (non-destructive re-seed)
+
+`seed_props_library.py` (the procedural `tracks-src/props-library.blend`)
+is **merge-based**: re-running `pnpm seed:props-library` opens the
+existing library and refreshes only the assets the seed owns, preserving
+anything you added by hand. If you *replace* a seed prop with your own
+geometry (e.g. a geometry-nodes race gate), **lock it** so the next
+re-seed leaves it alone:
+
+- In Blender, select the `prop_<id>` collection (or its `prop_<id>_root`
+  empty) → Object/Collection Properties → **Custom Properties → New** →
+  name it `hv_locked`, value `1`.
+- Re-seed: the log prints `SKIP prop_<id> (hv_locked) — preserving
+  hand-authored version`, and the asset's geometry, materials, and asset
+  metadata are left untouched.
+
+Notes:
+
+- The seed writes a `props-library.blend.seedbak` copy before every save
+  as a one-deep safety net (the `.blend` is Drive-only — no git history).
+- Everything the seed creates is marked `_seed_owned`; a collection you
+  add by hand (a name the seed never emits) is preserved without any lock.
+- *Known gap:* `prop_rock` / `prop_palm` drive their shape from a shared
+  `HV_Prop_*` geometry-nodes group the seed rebuilds, so locking those
+  two isn't fully honoured yet. Hard-surface / baked-mesh props (gates,
+  containers, sea-stacks, …) lock cleanly.
+
 ### Add a brand-new bike
 
 1. Save-as an existing variant: open `bikes-src/scout.blend`, then
