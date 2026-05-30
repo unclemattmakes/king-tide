@@ -357,6 +357,58 @@ broken-beat'd. Periodic deep church-bell tones.
 **Lore tag:** "Venice was already half-flooded; the rest just took
 longer. Murano keeps blowing glass because that's what Murano does."
 
+## 12. Golden Gate Drowned
+
+**Cup:** Continental *(new content addition; final cup order set in the
+anti-grav reconciliation pass)* | **Lap target:** 58 s | **Laps:** 3 | **Total race:** ~2:54
+**Water/Land:** 55/45 | **Anti-grav:** none (terrain verticality) | **Difficulty:** mid (spectacle)
+
+**Location:** Drowned San Francisco. The Pacific came back through the
+Golden Gate and stayed. The low city went under — the Financial
+District stands waist-deep, Salesforce Tower and the Transamerica
+Pyramid rising straight out of the bay, the streets between them now
+flooded canyons. But the hills held: Nob, Russian, Telegraph, the climb
+toward Twin Peaks — dry land above the flood. The Golden Gate Bridge is
+a silhouette on the fog-bound horizon; Sutro Tower and Coit Tower break
+the skyline. And over all of it, *Karl* — the fog tide that pours
+through the gate and swallows the towers whole, then peels back.
+
+**Layout:** The track *breathes* — tight urban compressions bracketed by
+open water. Open bay (gentle swell, pump rhythm) pinches into a **tight
+downtown canyon** threading the drowned skyscraper grid, then the
+streets ramp up out of the water onto the hills. **The hills are read
+like swell that stopped moving** — you surf up the back of each crest
+and launch off the top, the same gesture you use on the bay. The
+signature design line: *land as waves frozen in time.* No anti-grav
+anywhere — the steep streets and hill crests are the verticality. This
+is the first track in the set to make terrain the vertical spectacle.
+
+**Set-piece — The Break:** You crest the steepest street — the classic
+San Francisco near-vertical-street postcard — except the bottom is gone,
+the road plunging straight down into the drowned bay. The frozen wave
+breaking into the real one. Bike airborne over the crest, the fallen
+city and skyscraper-tops spread below through the fog, then a big
+splashdown at sea level. Terrain-only, and it *lands* every lap.
+
+**The fog (signature):** San Francisco's marine layer rolls in and
+clears on a world timer — thick, and the canyon and crests are read by
+memory and street-lights; peeled back, and the drowned skyline reveals.
+The one true weather mechanic in the set. *Hatteras grades how you read
+the sea; Golden Gate grades how you read the fog.* Telegraphed, never
+blinding — edge-lights and the predictive wave-line stay visible.
+
+**Visual palette:** International Orange steel on the bridge silhouette,
+fog white-grey rolling in volume, bay steel blue-green, warm low sun
+breaking through the marine layer. Drowned-tower glass cool; survivor
+microgrid lights warm in the canyon.
+
+**Audio palette:** Foghorn drones under Bay-Area hyphy / west-coast
+hip-hop. The city moved uphill and kept the party going.
+
+**Lore tag:** "They said the bridge would outlast the city. They were
+right — it outlasted the coastline too. Karl rolls in on schedule; the
+Circuit races the gate anyway."
+
 ## 8. Kilauea Crown
 
 **Cup:** Continental (closer) | **Lap target:** *single-lap point-to-point* | **Laps:** 1 | **Total race:** ~2:30

@@ -1786,6 +1786,150 @@ game's marketing** — author it like a movie poster.
 
 ---
 
+### 2.12 Golden Gate Drowned (Continental Cup — NEW; terrain verticality, no anti-grav)
+
+> **New track** added 2026-05-29. The first track to deliver verticality
+> through **terrain** (hills + a street-to-bay drop) instead of anti-grav,
+> per the project decision to retire anti-grav from races. Final cup
+> ordering / renumber lands in the anti-grav reconciliation pass; spec'd
+> here as a mid-difficulty Continental spectacle.
+
+**Identity** — Cup: Continental · Lap: 58 s · Laps: 3 · Total: ~2:54 ·
+Water/Land: 55/45 · Anti-grav: **none** · Verticality: terrain (hills +
+street-to-bay drop) · Difficulty: mid (spectacle).
+
+**Topology & reference** — Loop alternating tight urban canyon ↔ open bay
+↔ hill-surf, with a terrain cliff-drop finish. Reference: **Wave Race**
+(the hills are authored and ridden as frozen swell) + **Jet Moto
+Cliffdiver** (the lap-ending drop into water) + **MK8 urban tracks** (the
+tight drowned-grid canyon). Design soul: *land as waves frozen in time* —
+the hover physics treat a hill crest like a swell crest.
+
+**Beat structure:**
+
+| t (s) | Beat | Description |
+|---|---|---|
+| 0–14 | Open bay / drowned FiDi | Wide open water, gentle Beaufort-3 swell — pump rhythm. The drowned Financial District rises ahead: Salesforce Tower, Transamerica, generic FiDi towers standing in the bay. Fog state established here. |
+| 14–28 | **Downtown canyon (tight)** | Thread the flooded skyscraper grid — narrow walled "street canals," tight technical line, clip the walls = damage. The bay pinches to an urban slot. |
+| 28–44 | **The hills (frozen waves)** | Streets ramp up out of the water onto Nob/Russian Hill. Surf a run of 3–4 steep hill crests, catching air off each, the drowned city falling away below. The lap's hard-section apex. |
+| 44–52 | **The Break (set-piece)** | Crest the steepest street; the road plunges straight down into the drowned bay. Big terrain drop + splashdown. Music swells on the crest. |
+| 52–58 | Bay return | Low open-water run back to the start; Alcatraz and the Golden Gate silhouette in the fog. |
+
+**Set-piece staging:** The downtown towers (dead ahead) and the Golden
+Gate silhouette (NW horizon) are visible from the start grid. The Break
+sits at ~80% of lap distance — the descent is the closer flourish; the
+hard skill stretch is the hills + canyon that precede it (the hills span
+~48–76%, inside the genre's 55–75% hard-section window). On lap 1 the
+crest-and-plunge is fully telegraphed — you see the street end in open
+water before you commit.
+
+**Hard section:** 14–44 s (canyon + hills, ~24–76% of lap). Skills:
+**threading the tight canyon line** under fog, then **carrying speed over
+the hill crests without bottoming the troughs** — pumping the land the
+way you pump swell. Over-commit a crest and you overshoot the next
+trough; under-commit and you stall the climb.
+
+**Branching:**
+- **Canyon line (16–26 s):** an inside slot between two towers is shorter
+  but tighter (clip risk); the outer flooded avenue is wider, +0.4 s.
+- **Hill crest pump timing (28–44 s):** pumping each crest like a swell
+  banks a 3–5% speed carry into The Break; coasting the crests is safe
+  but slower.
+- **The Break entry (44 s):** a steep direct plunge vs a shallower
+  side-street descent (safer landing, ~0.5 s slower).
+
+**Per-lap:** **Fog tide** — fog density swells and clears on a world timer
+(not lap-keyed; same world-time read as the Maw's swell). One full
+roll-in/clear cycle ≈ every ~18 s so each lap sees both states. Otherwise
+constant per-lap (structural per-lap change is reserved; the fog flourish
+carries the variation). Optional: survivor microgrid lights in the canyon
+brighten as the fog thickens.
+
+**Blender shopping list:**
+- Terrain: **hill landmass** as the primary `kind=track` terrain —
+  authored as a *frozen-swell heightfield* (displace a base plane with a
+  swell-profile noise so the hills literally share the bay's waveform).
+  Hills rise ~+40–70 m above sea level (z=0); the windward face ramps from
+  the waterline so streets climb out of the bay. Bake biome/AO/path attrs
+  (`hoverbike.bake_terrain_attrs`).
+- **Drowned street grid** worked into the terrain — flooded canyon floors
+  at / just below z=0 between the downtown towers.
+- **Downtown towers** as `kind=track` meshes standing in the bay:
+  Salesforce Tower (tapered round top), Transamerica Pyramid
+  (unmistakable silhouette), Coit Tower (on its hill), + 6–10 generic FiDi
+  boxes. Lower floors capped below the waterline for perf. Shared
+  `downtown_NN` instance kit where towers repeat.
+- **Sutro Tower** + **Golden Gate Bridge** as distant silhouette meshes on
+  / near the horizon ring (camera-locked) — not raced surfaces.
+- **Alcatraz** as a low `kind=track` island in the bay (turn landmark).
+- `ai_spline_main` — ~26 CPs; climbs the hills explicitly in 3D and drops
+  through The Break.
+- `cp_00`..`cp_08` — 9 checkpoints at beat boundaries (canyon entry,
+  mid-canyon, hill base, each major crest, The Break, bay return). Each
+  needs its `index` prop.
+- **No `antigrav_curve_*` / `tunnel_curve_*`.** Verticality is terrain.
+- 4 × `boost_NN`: open-bay rhythm anchor; canyon exit / hill base (rewards
+  committing to the climb); top of the final crest (rewards the pump
+  line); Break-exit splashdown (carries speed to the finish).
+- `start_00`..`start_03` — at t≈0.96 on the spline (Continental grid).
+- 3 × `pickup_*` — open bay, mid-canyon, hill approach.
+- 3 × `wave_zone_NN`:
+  - `wave_zone_bay_open`: full surrounding bay. halfWidth 120, halfDepth
+    120, heightMult 1.0, freqMult 0.9, blendRadius 35, direction_deg 80
+    (Pacific swell east-bound through the gate).
+  - `wave_zone_downtown_lee`: the flooded canyon, sheltered by towers.
+    halfWidth 40, halfDepth 40, heightMult 0.4, freqMult 1.2, blendRadius
+    15.
+  - `wave_zone_break_splash`: small zone at The Break's splashdown for a
+    punchy landing wave. halfWidth 20, halfDepth 20, heightMult 1.3,
+    blendRadius 10.
+- `scatter_debris` — floating cars, kelp, dock wreckage along the canyon
+  edges and shoals (height/biome-gated, `HV_Scatter*` modifier).
+- `scatter_rooftop` — survivor microgrid clutter on the hill streets
+  (warm-light props).
+
+**Sky preset:** new `golden_gate_fog` grade (warm sun through cool marine
+layer) — *or* reuse `cape_town_blue` with a warmer tint as the fallback.
+`cloudiness=0.5`, `sunIntensity=0.8`, `timeOfDay=300` (late-afternoon
+golden hour), `seaStateBeaufort=3` (gentle — the challenge is fog +
+terrain, not swell). **Fog is animated** (the signature): oscillate
+`fogNear` 150↔40 and `fogFar` 700↔250 on the ~18 s world timer. Needs the
+runtime fog-tide hook (see §3.8); static heavy fog (`fogNear=70`,
+`fogFar=350`) is the safe fallback if the hook slips.
+
+**Wave zones:** (see Blender shopping list above)
+
+**Particle emitters:**
+- `emitter_fog_bank` — atlas_cell 1 (smoke/mist), emit_rate 8, lifetime 8,
+  large soft sprites drifting east through the gate. The signature
+  emitter; ~3 empties across the strait mouth. Ties to the fog tide.
+- `emitter_bay_spray` — atlas_cell 9 (water spray), emit_rate 5, lifetime
+  2, gravity -2, ~3 empties across the open bay + one at The Break
+  splashdown.
+- `emitter_canyon_steam` — atlas_cell 1, emit_rate 1, lifetime 4, parked
+  at a survivor microgrid vent in the canyon (warm-lit).
+- `emitter_gulls` — atlas_cell 5, emit_rate 0.5, max_particles 6.
+- `emitter_explosion` — required.
+
+**Audio:**
+
+```json
+"audio": {
+  "music": "golden-gate-hyphy-foghorn.opus",
+  "ambient": ["foghorn-distant.opus", "bay-swell.opus", "city-wind.opus"],
+  "ambientGains": [0.4, 0.6, 0.4],
+  "music3dEffects": { "duckOnPump": 0.35 }
+}
+```
+
+**Hero camera:** Low, looking up the steepest street at the crest of The
+Break, the road falling away into the drowned bay below, downtown
+tower-tops and the Golden Gate silhouette through fog behind, warm sun
+breaking the marine layer. 28 mm lens for the vertigo, slight downward
+tilt at the crest to read the plunge.
+
+---
+
 ## 3. Cross-cutting implementation rules
 
 Picked up while writing the per-track specs; should be applied
