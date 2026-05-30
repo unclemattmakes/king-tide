@@ -25,6 +25,12 @@ export type Track = {
   pickupSpawns: Vec3[]
   /** AI splines (M4). The 'main' branch is the canonical racing line. */
   aiSplines: AISpline[]
+  /** Road centerline polyline, baked from `road_curve_main` at Blender
+   *  export time. Drives bridge-support placement at runtime — the
+   *  pillars only appear under sections where the road is genuinely
+   *  elevated. Absent on tracks without an authored road (open-water
+   *  courses, procedural tracks) — bridge supports are then skipped. */
+  roadSpline?: RoadSpline
   /** Boost pads — speed-up volumes the bike triggers by driving over. */
   boostPads: BoostPad[]
   /** Anti-gravity zones — MK8-style sections where gravity points along the
@@ -180,6 +186,23 @@ export type TrackSurface = {
   id: string
   // M3: no procedural surfaces yet — the existing island + water carry us.
   // Future: { meshData, collider } for arbitrary glTF meshes.
+}
+
+/**
+ * Road centerline. A dense polyline baked at export time from the
+ * `road_curve_main` Bezier curve in Blender's Road tool. Used by
+ * `bridge-supports.ts` to know where to drop pillars under elevated
+ * road sections; never sampled by gameplay (the AI follows
+ * `aiSplines`, not this). Absent when the author hasn't run the Road
+ * tool — bridge supports are then skipped entirely, which is the
+ * desired behavior for open-water courses like the drowned-city
+ * tracks where the racing line crosses water with no road slab.
+ */
+export type RoadSpline = {
+  /** World-space samples of the road centerline, in three.js coords.
+   *  May be open (point-to-point) or closed (loop); bridge-supports
+   *  treats either case the same. */
+  points: Vec3[]
 }
 
 export type AISpline = {

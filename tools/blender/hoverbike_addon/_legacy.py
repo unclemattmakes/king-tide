@@ -769,6 +769,25 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
     if shader_block is not None:
         body["terrainShader"] = shader_block
 
+    # Road centerline — sampled from `road_curve_main` if the Road tool
+    # has been run on this track. Drives bridge-support placement at
+    # runtime (`src/engine/render/bridge-supports.ts`). Absent when the
+    # author hasn't built a road (open-water courses, fresh tracks),
+    # in which case the runtime skips bridge supports entirely. Tied
+    # to the road tool (not the AI spline) so a racing line that floats
+    # above the seafloor doesn't trigger pillars all the way around.
+    road_curve = bpy.data.objects.get("road_curve_main")
+    if (
+        road_curve is not None
+        and road_curve.type == "CURVE"
+        and is_object_visible(road_curve)
+    ):
+        road_pts = _sample_curve_to_polyline(road_curve)
+        if len(road_pts) >= 2:
+            body["roadSpline"] = {
+                "points": [_b2t(p[0], p[1], p[2]) for p in road_pts],
+            }
+
     # Per-track sky / atmosphere preset. The sky_preset module owns the
     # full set (tint, cloudiness, sun, fog, time-of-day, color grade,
     # bloom, Beaufort sea state); we lazy-import it so this file stays
@@ -848,6 +867,10 @@ BLENDER_OWNED_JSON_KEYS = (
     # spline + gate-buoy scene props — so re-exports replace the
     # whole array.
     "waveRiderBuoys",
+    # Road centerline sampled from `road_curve_main`. Blender owns this
+    # — re-exports must overwrite (and drop, when the road curve has
+    # been deleted) instead of preserving a stale polyline.
+    "roadSpline",
 )
 
 
