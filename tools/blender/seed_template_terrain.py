@@ -8,8 +8,12 @@ Bundles the four per-style terrain templates (Island, Alpine, Dunes,
 Mesa) under one ``HV_TemplateTerrain`` Geometry Nodes group. A menu
 socket picks which style drives the terrain; an ``Additive`` toggle
 controls whether every sub-group's Z displacement is clamped to
-``max(0, z)`` before being added as an Offset (default True — the
-intended stacking semantics for layering styles on top of each other).
+``max(0, z)`` before being added as an Offset. Default **False** — the
+full signed heightfield (negative shelf / seafloor / canyon floor
+intact). ``Additive=True`` is an only-raise pass intended for a future
+style-stacking mode; since the wrapper menu-switches a single style at a
+time it does nothing useful today and just flattens whichever style's
+sub-sea geometry, so it ships off.
 
 ### Refusal guard
 
@@ -79,7 +83,11 @@ NODE_GROUP_NAME = "HV_TemplateTerrain"
 
 STYLE_ITEMS = ("Island", "Alpine", "Dunes", "Mesa")
 DEFAULT_STYLE = "Island"
-DEFAULT_ADDITIVE = True
+# Off by default: emit each style's full signed heightfield (seafloor /
+# canyon floor / oasis basin intact). The only-raise clamp is a latent
+# hook for a future style-stacking mode that the menu-switch wrapper
+# doesn't do yet — see the module docstring + seed_template_island.py.
+DEFAULT_ADDITIVE = False
 
 # Subsets of each per-style script's starter empties — the brief calls
 # for 4 peak pairs, 2 ridge pairs, 1 oasis, 4 mesas in the combined
@@ -239,8 +247,11 @@ def build_template_terrain_group(
     )
     additive_socket.default_value = DEFAULT_ADDITIVE
     additive_socket.description = (
-        "Clamp every sub-group's Z displacement to max(0, z) before "
-        "applying as Offset, so styles can stack without mutual carving"
+        "Only-raise pass: clamp every sub-group's Z displacement to "
+        "max(0, z) before applying as Offset. Off by default — leave off "
+        "to keep the full signed heightfield (seafloor / canyon / basin). "
+        "On flattens all sub-sea geometry to z=0; only useful for a future "
+        "style-stacking mode the wrapper doesn't do yet"
     )
 
     # ── Per-style panels ────────────────────────────────────────────

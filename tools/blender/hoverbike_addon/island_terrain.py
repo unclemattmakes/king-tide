@@ -46,6 +46,14 @@ SEED_FILE_BASENAME = "seed_template_island.py"
 TERRAIN_OBJECT_NAME = "terrain"
 HV_PEAK_PROFILE_GROUP = "HV_PeakProfile"
 HV_TEMPLATE_ISLAND_GROUP = "HV_TemplateIsland"
+# The unified four-style wrapper (built by the multibiome_terrain
+# operator) embeds the island group's Mod N sockets in its Island panel,
+# so mod zones + the COLOR_0 detection below work on it too — the bumps
+# land on the terrain whenever its Style menu is set to Island.
+HV_TEMPLATE_TERRAIN_GROUP = "HV_TemplateTerrain"
+# Group names whose presence means "this terrain runs the procedural
+# island graph (directly or wrapped)" — the gate for mod-zone wiring.
+_MOD_ZONE_GROUPS = frozenset({HV_TEMPLATE_ISLAND_GROUP, HV_TEMPLATE_TERRAIN_GROUP})
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -338,10 +346,12 @@ def _peak_pair_count() -> int:
 
 
 def find_island_modifier(obj: bpy.types.Object | None) -> bpy.types.Modifier | None:
-    """First NODES modifier on ``obj`` whose node group is HV_TemplateIsland,
-    or None. Used by the mod-zone operator to confirm the active terrain
-    actually runs the procedural-island graph (vs. a heightmap-imported
-    mesh with no procedural layer to wire mod zones into).
+    """First NODES modifier on ``obj`` whose node group is HV_TemplateIsland
+    or HV_TemplateTerrain, or None. Used by the mod-zone operator to confirm
+    the active terrain actually runs the procedural-island graph (vs. a
+    heightmap-imported mesh with no procedural layer to wire mod zones
+    into). The unified wrapper exposes the island group's Mod N sockets in
+    its Island panel, so both groups accept mod zones.
 
     Tolerates ``obj is None`` so the panel can use it as a one-liner
     visibility check without guarding the lookup itself."""
@@ -351,7 +361,7 @@ def find_island_modifier(obj: bpy.types.Object | None) -> bpy.types.Modifier | N
         if m.type != "NODES":
             continue
         ng = m.node_group
-        if ng is not None and ng.name == HV_TEMPLATE_ISLAND_GROUP:
+        if ng is not None and ng.name in _MOD_ZONE_GROUPS:
             return m
     return None
 

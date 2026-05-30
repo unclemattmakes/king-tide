@@ -65,6 +65,7 @@ from . import (
     horizon,
     island_terrain,
     menu,
+    multibiome_terrain,
     new_map,
     panel,
     placement_helper,
@@ -125,6 +126,11 @@ _MODULES = (
     # script so its builders can be invoked from an in-scene operator.
     # Registers after terrain since it's logically a terrain tool.
     island_terrain,
+    # multibiome_terrain is the sibling tool that drops the unified
+    # HV_TemplateTerrain (Island/Alpine/Dunes/Mesa via a Style menu).
+    # Imports _set_modifier_input from island_terrain at execute time,
+    # so it registers right after it.
+    multibiome_terrain,
     downtown,
     tunnel,
     road,

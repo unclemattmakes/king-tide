@@ -649,12 +649,17 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     _new_socket(g, "Shoreline Width", "INPUT", "NodeSocketFloat",   1.5, 0.0, 30.0)
     # Additive offset mode. When True the Z displacement is clamped to
     # max(0, raw_z) before being applied as an Offset — the sub-group
-    # only RAISES the input geometry, never carves below it. That's the
-    # behaviour HV_TemplateTerrain relies on when stacking style
-    # sub-groups: dunes baseline + island peaks on top should add rather
-    # than mutually cut. Default True. Toggle False to recover the
-    # destructive behaviour (raw_z, including negative seafloor depth).
-    _new_socket(g, "Additive", "INPUT", "NodeSocketBool", True)
+    # only RAISES the input geometry, never carves below it. That was
+    # meant for stacking styles under HV_TemplateTerrain (a dunes baseline
+    # + island peaks adding on top rather than mutually cutting). But the
+    # wrapper menu-switches a SINGLE style at a time — nothing ever
+    # stacks — so on a flat input plane the clamp only flattens this
+    # style's own seafloor (the −25 m shelf + seafloor billow) to z=0.
+    # Default False: emit the full signed height with the seafloor intact.
+    # Flip True only if a real layering mode ever lands that needs an
+    # only-raise pass; "blend onto the input mesh" is already what the
+    # Set Position Offset does in both modes.
+    _new_socket(g, "Additive", "INPUT", "NodeSocketBool", False)
     _new_socket(g, "Geometry", "OUTPUT", "NodeSocketGeometry")
 
     p_in  = _add_node(g, "NodeGroupInput",  -1600, 0)

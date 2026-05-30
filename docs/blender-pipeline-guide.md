@@ -572,20 +572,43 @@ Miami-flat valley, Nob-Hill-style 56 m grade, Telegraph-Ridge
 
 ### Spawn terrain in an existing scene
 
-Two operators drop a fresh terrain mesh into the current scene without
+A few operators drop a fresh terrain mesh into the current scene without
 needing a fresh `.blend` template:
 
+- **Add Multi-Biome Terrain (Style menu).** Hoverbike → Add → *Multi-Biome
+  Terrain* (or Terrain submenu). Spawns the unified `HV_TemplateTerrain`
+  modifier — the wrapper that bundles all four styles. A **Style** menu in
+  the modifier panel (Properties → Modifier) swaps the heightfield between
+  **Island / Alpine / Dunes / Mesa**; the scene gets every style's driver
+  empties (4 peak pairs, 2 ridge pairs, 1 oasis, 4 mesas) so each style is
+  ready to reshape. This is the in-app equivalent of
+  [`tracks-src/template-terrain.blend`](../tracks-src/template-terrain.blend),
+  layered into your existing scene. Refuses to overwrite an existing
+  `terrain` object; reuses any style node groups already present (no
+  `.001` duplicates). Mod zones work when Style = Island.
+
+  > **Additive toggle.** The modifier's `Additive` checkbox is an
+  > *only-raise* pass — it clamps each style's displacement to `max(0, z)`
+  > so nothing dips below the input plane. It defaults **off**: leave it
+  > off and the seafloor / canyon floor / oasis basin (all negative Z)
+  > render normally. Turning it on flattens all sub-sea geometry to `z=0`
+  > — it's a hook for a future style-stacking mode the wrapper doesn't do
+  > yet (today the Style menu evaluates one style at a time). If your
+  > seafloor looks squashed, this toggle is on.
+
 - **Add Island Terrain (procedural).** Hoverbike → Add → *Island
-  Terrain* (or Terrain submenu). Spawns a 1024×1024 m subdivided plane
-  (~150 k verts) with the `HV_Island` Geometry-Nodes modifier and four
-  default peak control empties (one central volcano with crater, two
-  flanking, one submerged shoal) — the same procedural setup
+  Terrain* (or Terrain submenu). The single-biome version: spawns a
+  1024×1024 m subdivided plane (~150 k verts) with the `HV_Island`
+  Geometry-Nodes modifier and four default peak control empties (one
+  central volcano with crater, two flanking, one submerged shoal) — the
+  same procedural setup
   [`tracks-src/template-island.blend`](../tracks-src/template-island.blend)
   ships with, but layered into your existing scene. Refuses to overwrite
   an existing `terrain` object; reuses any `HV_TemplateIsland` /
   `HV_PeakProfile` node groups already in the .blend (no `.001`
   duplicates). After it finishes, the new terrain is selected so the
-  Terrain N-panel opens automatically.
+  Terrain N-panel opens automatically. (Carries the same `Additive`
+  toggle, same off-by-default behaviour.)
 
 - **Import Heightmap.** Read a greyscale PNG/EXR and emit a subdivided
   plane whose verts are luminance-displaced. The output mesh

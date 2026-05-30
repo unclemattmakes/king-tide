@@ -223,8 +223,13 @@ class HOVERBIKE_PT_panel(Panel):
             col = ebox.column(align=True)
             if not have_terrain:
                 col.operator(
+                    "hoverbike.add_multibiome_terrain",
+                    text="Add Terrain (Style menu)",
+                    icon="RNDCURVE",
+                )
+                col.operator(
                     "hoverbike.add_island_terrain",
-                    text="Add Terrain (procedural)",
+                    text="Add Island Terrain",
                     icon="RNDCURVE",
                 )
             col.operator(
