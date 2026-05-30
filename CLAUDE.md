@@ -24,8 +24,13 @@ post-flood. Planning trio:
 - [docs/product-plan.md](docs/product-plan.md) — locked vision and pillars.
 - [docs/design-targets.md](docs/design-targets.md) — numeric targets, P0/P1/P2
   priorities, anti-targets from the Pacer / MK World failure modes.
-- [docs/track-themes.md](docs/track-themes.md) — 11 ship tracks + tutorial,
+- [docs/track-themes.md](docs/track-themes.md) — 12 ship tracks + tutorial,
   full content bible with set-pieces, palettes, lore tags.
+- [docs/tracks/](docs/tracks/README.md) — **canonical per-track design docs**
+  (one per track) with unique + common prop manifests. Embodies the
+  **no-anti-grav** direction (anti-grav cut from v1; verticality is terrain,
+  ramps, banked berms, cliff drops). Supersedes the per-track stat blocks in
+  the bible / specs where they disagree.
 - [docs/v1-work-breakdown.md](docs/v1-work-breakdown.md) — execution plan:
   Step 0 scaffolding (full menu flow stubbed with disabled buttons),
   per-domain task inventory, and the **definition-of-done convention** —

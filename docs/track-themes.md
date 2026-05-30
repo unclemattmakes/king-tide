@@ -26,6 +26,19 @@
 > - Every track has **at least one named set-piece moment**.
 > - Signature skill axis = **wave mastery** (per [design-targets.md](./design-targets.md)).
 > - 11 tracks across 4 cups; one tutorial track outside the cup structure.
+>   *(Now 12 ship tracks — Golden Gate Drowned was added; see below.)*
+> - **Anti-grav is cut from v1** (no-anti-grav reconciliation pass,
+>   2026-05-30). No track ships a gravity-flip moment; verticality now
+>   comes from terrain, ramps, banked berms, and cliff drops. Cutting the
+>   system helps us ship sooner.
+>
+> **Per-track docs now live in [tracks/](./tracks/README.md)** — one design
+> doc per track, each with its unique-prop manifest and (for the eight
+> reworked tracks) how terrain/ramps replaced the cut anti-grav moment. That
+> folder is **canonical** wherever it disagrees with the per-track stat
+> blocks below; this bible remains the reference for lore, palette, and
+> audio. The [tracks/README.md](./tracks/README.md) also holds the
+> **common-to-all-tracks** prop list.
 
 ## Design principles
 
@@ -43,9 +56,12 @@ These shaped every track in this doc; future tracks should hold to them.
 4. **Wave physics is the signature, not a mode.** Open-water sections
    are graded by wave-reading. The Maw is the purest test; every other
    track has at least one stretch where the swell matters.
-5. **Anti-grav is spectacle, not a system tax.** Used where it sells a
-   set-piece — climbing a lighthouse, racing the underside of the
-   Statue of Liberty's broken torch. Not sprinkled for novelty.
+5. **Verticality is terrain, not anti-grav.** *(Revised — anti-grav cut
+   from v1.)* Climb and air come from frozen-wave hills, ramps off
+   collapsed structures, banked berms (≤45°), and cliff drops — never a
+   gravity flip. The set-piece carries the spectacle; the verticality
+   gesture is "pump the land like a swell" (see Golden Gate Drowned, the
+   model for the whole pass). No surface is ridden inverted.
 6. **Visual contrast against the apocalypse.** The world ended; the
    neon is still on. Bright palettes, defiant colors, music with a
    pulse. *The mood is "spectator sport during the collapse,"* not
@@ -84,12 +100,12 @@ These shaped every track in this doc; future tracks should hold to them.
 ## Sandbar
 
 **Cup:** None (tutorial) | **Lap target:** 60 s scripted | **Laps:** 1
-**Water/Land:** 80/20 | **Anti-grav:** brief intro segment | **Difficulty:** intro
+**Water/Land:** 80/20 | **Anti-grav:** none *(was brief intro arch — cut)* | **Difficulty:** intro
 
 A sheltered training cove, fictional. A retrofitted post-flood marina
 serving as the Circuit's pilot-training facility — calm water, a
-small island, a single ramp, a single anti-grav arch. Teaches one
-mechanic per beat; **pumping is taught in the first 8 seconds** so
+small island, a single ramp, a single sand-dune crest to launch off.
+Teaches one mechanic per beat; **pumping is taught in the first 8 seconds** so
 the hero mechanic is the first lesson, not the second (Wave Race 64
 Sunny Beach reference):
 
@@ -97,7 +113,7 @@ Sunny Beach reference):
 - 8–20 s: steering arc across the cove
 - 20–32 s: drift around a marker buoy
 - 32–42 s: pickup grab + use
-- 42–55 s: ramp jump + anti-grav arch entry/exit
+- 42–55 s: ramp jump + crest launch (surf a dune crest, land on water)
 - 55–60 s: finish straight
 
 Auto-skip toggle for returning players. The track is short, scripted,
@@ -177,7 +193,7 @@ Cape Town's still here — just lower."
 ## 3. Hatteras Light
 
 **Cup:** Reef | **Lap target:** 50 s | **Laps:** 3 | **Total race:** ~2:30
-**Water/Land:** 80/20 | **Anti-grav:** light (lighthouse climb, ~5 s)
+**Water/Land:** 80/20 | **Anti-grav:** none *(was light lighthouse climb — reworked as a ramp)*
 **Difficulty:** intro (Reef Cup closer)
 
 **Location:** Cape Hatteras, North Carolina. The famous black-and-
@@ -191,10 +207,11 @@ gentle. **Every lap ends with a cliff drop from the lamp room down
 to sea level** (Jet Moto Cliffdiver reference) — the cup closer's
 emotional payoff.
 
-**Set-piece — The Lamp Room:** Anti-grav corkscrew up the lighthouse
-shaft, exiting through the open lamp room at the top. The lamp is
-still rotating; the music swells as you exit. You catch big air off
-the lamp room's railing on the way down.
+**Set-piece — The Lamp Room:** Ride the wrecked exterior gallery-spiral
+ramp up the lighthouse (a normal-gravity helix *road*, not a wall),
+past the rotating lamp at the top; the music swells as you reach it.
+You catch big air off the lamp room's railing into the cliff drop.
+*(Reworked from an anti-grav corkscrew — see [tracks/hatteras-light.md](./tracks/hatteras-light.md).)*
 
 **Visual palette:** Cool Atlantic grays, white-and-black lighthouse
 spiral, foam-green water, low gray clouds.
@@ -248,7 +265,7 @@ Maw — the way it eats riders who can't read the sea."
 ## 5. Shibuya Submerged
 
 **Cup:** Open Sea | **Lap target:** 58 s | **Laps:** 3 | **Total race:** ~2:54
-**Water/Land:** 50/50 | **Anti-grav:** medium (Cocoon Tower, ~10 s)
+**Water/Land:** 50/50 | **Anti-grav:** none *(was Cocoon wall-ride — reworked as a collapsed-lattice ramp)*
 **Difficulty:** showcase
 
 **Location:** Drowned Tokyo. Shinjuku skyscraper tops still standing,
@@ -260,8 +277,8 @@ party, not abandoned ruin.*
 **Layout:** Half the track is the network of cables, signage, and
 narrow rooftop bridges over what used to be Shibuya Crossing — now a
 flooded intersection ten storeys below. The other half threads
-between skyscraper tops, with one face of the Cocoon Tower as the
-anti-grav segment.
+between skyscraper tops, with the Cocoon Tower's collapsed diagonal
+lattice ridden as a ramp up-and-over to the next rooftop.
 
 **Set-piece — Shibuya Crossing Cables:** Race across the
 intersection on a network of toppled neon signage and powerline
@@ -323,7 +340,7 @@ nowhere to nowhere. The Circuit just races around them."
 ## 7. Doge's Drift
 
 **Cup:** Continental | **Lap target:** 60 s | **Laps:** 3 | **Total race:** ~3:00
-**Water/Land:** 70/30 | **Anti-grav:** medium (Campanile climb, ~10 s)
+**Water/Land:** 70/30 | **Anti-grav:** none *(was Campanile climb — reworked as a toppled-tower ramp)*
 **Difficulty:** mid
 
 **Location:** Drowned Venice. Acqua alta finally won. St. Mark's
@@ -335,17 +352,18 @@ glass industry refused to die.
 **Layout:** Canal racing, except the canals are now just *ocean.*
 Race past Doge's Palace, **under the partially-collapsed Rialto
 Bridge arch as a low-clearance tunnel** (clip the walls = damage),
-through a sequence of facades, then anti-grav climb up the Campanile
-exiting through the belfry with the golden St. Mark's domes below
-you.
+through a sequence of facades, then up the toppled Campanile shaft
+as a ramp, launching off the belfry stub with the golden St. Mark's
+domes below you.
 
-**Set-piece — The Campanile Climb:** Anti-grav up the brick shaft
-of the Campanile (which has somehow survived since 1912 even through
-this), exit out the open arched belfry with a panoramic view of
-drowned Venice. The bell still rings on the hour; if your lap times
-out at the right moment, you ride past the swinging bell — on Hard
-difficulty, the bell physically blocks the exit window for ~0.4 s
-of every 3 s.
+**Set-piece — The Campanile Fall:** The bell-tower has come down (it
+famously collapsed once before, in 1902) and lies toppled across the
+piazza. Ride *up its fallen brick shaft as a ramp* and launch off the
+belfry stub for big air over the basilica domes. The bell still hangs
+in the stub at the launch lip; if your lap times out at the right
+moment you launch past the swinging bell — on Hard difficulty, the
+bell physically blocks the launch window for ~0.4 s of every 3 s.
+*(Reworked from an anti-grav climb — see [tracks/doges-drift.md](./tracks/doges-drift.md).)*
 
 **Visual palette:** Ochre and terracotta, mossy green at the
 waterline, Adriatic teal, gold Byzantine accents from St. Mark's
@@ -359,8 +377,8 @@ longer. Murano keeps blowing glass because that's what Murano does."
 
 ## 12. Golden Gate Drowned
 
-**Cup:** Continental *(new content addition; final cup order set in the
-anti-grav reconciliation pass)* | **Lap target:** 58 s | **Laps:** 3 | **Total race:** ~2:54
+**Cup:** Continental #3 *(slot finalized in the no-anti-grav reconciliation
+pass — after Doge's, before Kilauea's closer)* | **Lap target:** 58 s | **Laps:** 3 | **Total race:** ~2:54
 **Water/Land:** 55/45 | **Anti-grav:** none (terrain verticality) | **Difficulty:** mid (spectacle)
 
 **Location:** Drowned San Francisco. The Pacific came back through the
@@ -412,7 +430,7 @@ Circuit races the gate anyway."
 ## 8. Kilauea Crown
 
 **Cup:** Continental (closer) | **Lap target:** *single-lap point-to-point* | **Laps:** 1 | **Total race:** ~2:30
-**Water/Land:** 50/50 | **Anti-grav:** heavy (caldera rim, ~60 s)
+**Water/Land:** 50/50 | **Anti-grav:** none *(was caldera-rim wall-ride — reworked as a banked terrain road)*
 **Difficulty:** mid (spectacle closer)
 
 **Location:** Big Island, Hawaii. Kilauea actively erupting, the
@@ -422,10 +440,11 @@ the lowlands are open ocean now.
 **Layout:** **Single-lap descent in three sections** (Mount Wario
 reference; the climb-rim-descend topology is naturally non-loopable).
 Section 1: climb the windward slope from sea level through old lava
-fields. Section 2: anti-grav around the caldera rim (the rim is
-*banked* inward, you ride the inside of the bowl, ~60 s of continuous
-wall-ride). Section 3: descent down the leeward side, finishing
-beside a lava waterfall pouring into the new sea.
+fields. Section 2: ride the caldera rim as a *banked terrain road*
+(the rim is banked inward ≤45°, ridden like a velodrome at normal
+gravity, the lava lake below, ~60 s of continuous banked cornering).
+Section 3: descent down the leeward side, finishing beside a lava
+waterfall pouring into the new sea.
 
 **Set-piece — The Black Beach:** The leeward descent ends with a
 lava waterfall — molten rock pouring directly into ocean, exploding
@@ -453,7 +472,7 @@ and the v1 finale.
 ## 9. Aqualand
 
 **Cup:** Drowned | **Lap target:** 22 s | **Laps:** 5 | **Total race:** ~1:50
-**Water/Land:** 75/25 | **Anti-grav:** light (one bowl wall, optional)
+**Water/Land:** 75/25 | **Anti-grav:** none *(was bowl-wall — reworked as a banked pool-bowl rim)*
 **Difficulty:** chaos
 
 **Location:** Abandoned Florida waterpark, doubly drowned. The pools
@@ -469,9 +488,9 @@ because three is over too fast. Constant proximity, constant chaos.
 generated a "tsunami" surge once per lap. The mechanism still runs.
 The surge **escalates with each lap** (Sonic Transformed's Adder's
 Lair reference): lap 1 is a splash hazard, lap 2 floods the lower
-concourse, lap 3+ washes it out entirely and the upper bowl-wall
-anti-grav becomes mandatory. The lifeguard tower's old digital
-countdown sign tracks the next surge.
+concourse, lap 3+ washes it out entirely and the banked upper
+pool-bowl rim becomes the mandatory line. The lifeguard tower's old
+digital countdown sign tracks the next surge.
 
 **Visual palette:** Faded primary colors, sun-bleached plastic,
 algae greens, the bright blue of pool tile peeking through grime.
@@ -487,7 +506,7 @@ hilarious."
 ## 10. Angkor Drowned
 
 **Cup:** Drowned | **Lap target:** 62 s | **Laps:** 3 | **Total race:** ~3:06
-**Water/Land:** 65/35 | **Anti-grav:** heavy (central spire climb, ~15 s)
+**Water/Land:** 65/35 | **Anti-grav:** none *(was central-spire corkscrew — reworked as temple-stair ramps)*
 **Difficulty:** late-mid
 
 **Location:** Angkor Wat complex, Cambodia. The ocean reached this
@@ -497,9 +516,10 @@ and warm sandstone gold under shafts of sunlight through the canopy.
 
 **Layout:** Enter through Bayon's smiling-face towers, weave between
 Ta Prohm's strangler-fig roots through flooded inner courtyards,
-then anti-grav climb up the central spire of Angkor Wat itself.
-Verticality is the structural surprise — this track *climbs* more
-than the others do.
+then climb the monumental stepped staircases of Angkor Wat's central
+spire (ridden as steep stone ramps), launch off the top, and descend
+the outer staircase. Verticality is the structural surprise — this
+track *climbs* more than the others do.
 
 **Set-piece — The Smiling Faces:** Bayon temple. Every tower has
 four giant serene stone faces carved into it, looking outward in
@@ -520,8 +540,8 @@ Khmer Rouge. The flood is just the latest thing it'll outlast."
 ## 11. Liberty Drowned — *FINALE*
 
 **Cup:** Drowned | **Lap target:** 70 s | **Laps:** 3 | **Total race:** ~3:30
-**Water/Land:** 80/20 | **Anti-grav:** heavy (torch arm + crown
-interior, ~25 s) | **Difficulty:** finale
+**Water/Land:** 80/20 | **Anti-grav:** none *(was torch-arm underside +
+crown interior — reworked as a ride-up ramp + spike gates + drop)* | **Difficulty:** finale
 
 **Location:** Drowned Manhattan. The Statue of Liberty half-
 submerged — water at her waist. Her torch arm has collapsed forward,
@@ -532,18 +552,20 @@ cabs. Brooklyn Bridge cables sagging into the harbor. The Planet of
 the Apes silhouette, but more of it.
 
 **Layout:** Three-section track. (1) Open harbor with Manhattan
-rooftop landmarks as you skim past. (2) Anti-grav climb up the
-underside of the broken torch arm — long single piece of geometry,
-copper-green oxidized metal, the most spectacular continuous
-anti-grav stretch in the v1 lineup. (3) Anti-grav loop through
-the inside of Liberty's crown, exiting out a window. Then back to
-the harbor for the lap restart.
+rooftop landmarks as you skim past. (2) Ride *up the top of the
+fallen torch arm* — it lies collapsed across the battlements, its
+upper surface a rising copper-green ramp — to the flame, and launch
+off the fist; the most spectacular continuous stretch in the v1
+lineup. (3) Fly the big-air gap between Liberty's broken crown
+spikes, past her head. Then back to the harbor for the lap restart.
 
 **Set-piece — The Torch Arm:** The broken arm itself. Copper-green
 oxidation, riveted construction, the torch flame still in the
-clenched fist at the far end. You ride the underside on anti-grav
-for ~10 seconds, hands-on-handlebars vertigo, harbor visible *above*
-you through Liberty's fingers. This is the postcard moment of v1.
+clenched fist at the far end. You ride *up* the fallen arm for
+~10 seconds to the torch and launch off the fist — hands-on-handlebars
+vertigo, the harbor and Liberty's fingers framing the shot. This is
+the postcard moment of v1. *(Reworked from an anti-grav underside ride —
+see [tracks/liberty-drowned.md](./tracks/liberty-drowned.md).)*
 
 **Visual palette:** Copper-green oxidation, NYC granite gray,
 harbor steel-blue, sunset orange on water. End-of-day finale
@@ -563,40 +585,46 @@ season because nothing else lands as hard."
 Tracks listed in cup-play order (each cup escalates short →
 moderate → spectacle-closer).
 
-| # | Track | Cup | Location | Anti-grav | Water | Set-piece |
+Anti-grav is **none on every track** (cut from v1); the column below is
+now the **verticality solution** that replaced it.
+
+| # | Track | Cup | Location | Verticality | Water | Set-piece |
 |---|---|---|---|---|---|---|
-| — | Sandbar | Tutorial | (fictional) | brief | 80% | training gates |
-| 1 | South Beach Sunken | Reef | Miami | none | 70% | Versace Steps |
-| 2 | Cape Town Drift | Reef | Cape Town | none | 60% | Two Oceans Wreck |
-| 3 | Hatteras Light | Reef | NC outer banks | light | 80% | Lamp Room |
-| 4 | The Maw | Open Sea | Big Sur | none | 100% | The Maw arch |
-| 5 | Shibuya Submerged | Open Sea | Tokyo | medium | 50% | Shibuya Crossing Cables |
-| 6 | Marina Bay 7 | Continental | Singapore | none | 60% | The Gauntlet |
-| 7 | Doge's Drift | Continental | Venice | medium | 70% | Campanile Climb |
-| 8 | Kilauea Crown | Continental | Hawaii | heavy | 50% | The Black Beach *(single-lap P2P)* |
-| 9 | Aqualand | Drowned | Florida | light | 75% | The Tsunami *(per-lap escalation)* |
-| 10 | Angkor Drowned | Drowned | Cambodia | heavy | 65% | Smiling Faces |
-| 11 | Liberty Drowned | Drowned | NYC | heavy | 80% | The Torch Arm |
+| — | Sandbar | Tutorial | (fictional) | crest launch | 80% | training gates |
+| 1 | South Beach Sunken | Reef | Miami | seaplane ramp | 70% | Versace Steps |
+| 2 | Cape Town Drift | Reef | Cape Town | flat / slalom | 60% | Two Oceans Wreck |
+| 3 | Hatteras Light | Reef | NC outer banks | gallery-spiral ramp + drop | 80% | Lamp Room |
+| 4 | The Maw | Open Sea | Big Sur | wave launch | 100% | The Maw arch |
+| 5 | Shibuya Submerged | Open Sea | Tokyo | Cocoon lattice ramp | 50% | Shibuya Crossing Cables |
+| 6 | Marina Bay 7 | Continental | Singapore | container/deck terrain | 60% | The Gauntlet |
+| 7 | Doge's Drift | Continental | Venice | toppled-Campanile ramp | 70% | Campanile Fall |
+| 8 | Golden Gate Drowned | Continental | San Francisco | frozen-wave hills + The Break | 55% | The Break |
+| 9 | Kilauea Crown | Continental | Hawaii | banked caldera-rim road | 50% | The Black Beach *(single-lap P2P)* |
+| 10 | Aqualand | Drowned | Florida | banked pool-bowl rim | 75% | The Tsunami *(per-lap escalation)* |
+| 11 | Angkor Drowned | Drowned | Cambodia | temple-stair ramps | 65% | Smiling Faces |
+| 12 | Liberty Drowned | Drowned | NYC | torch ramp + crown gates + drop | 80% | The Torch Arm |
 
-**Geographic spread:** Americas 5 (Miami, NC, Big Sur, Florida, NYC),
-Asia 3 (Tokyo, Singapore, Cambodia), Europe 1 (Venice), Africa 1
-(Cape Town), Hawaii 1 + 1 fictional tutorial.
+**Geographic spread:** Americas 6 (Miami, NC, Big Sur, San Francisco,
+Florida, NYC), Asia 3 (Tokyo, Singapore, Cambodia), Europe 1 (Venice),
+Africa 1 (Cape Town), Hawaii 1 + 1 fictional tutorial.
 
-**Anti-grav count:** 7 of 11 ship tracks have anti-grav (light to
-heavy). Exceeds the 2-track v1 target with significant margin.
+**Anti-grav count:** **0 of 12** — anti-grav is cut from v1. Verticality
+is delivered by terrain, ramps, banked berms (≤45°), and cliff drops
+(see the verticality column above and the per-track docs in
+[tracks/](./tracks/README.md)). The old 2–3-track target is retired.
 
-**Wave-mastery tracks:** All open-water sections (effectively all 11),
+**Wave-mastery tracks:** All open-water sections (effectively all 12),
 with The Maw as the purest test. Cape Town is the calibration
 counterweight — the calm-water track where pumping deliberately
 *doesn't* carry you, which is what makes pumping legible as a skill
 on the other ten.
 
 **Casual lap distribution:** 22 s (Aqualand chaos) → 45 s → 48 → 50 →
-55 → 58 → 60 → 60 → 62 → 70 s + 1 × ~2:30 single-lap descent
+55 → 58 → 58 → 60 → 62 → 70 s + 1 × ~2:30 single-lap descent
 (Kilauea). Weighted to the 45–65 s band per
 [design-targets.md](./design-targets.md).
 
-**Format breakdown:** 10 × 3-lap loops + 1 × 5-lap chaos arena
+**Format breakdown:** 11 × 3-lap loops + 1 × 5-lap chaos arena
 (Aqualand) + 1 × single-lap point-to-point descent (Kilauea).
 Default is 3 laps; deviations are intentional per the cup-pacing
 principle.
@@ -635,9 +663,10 @@ candidates for the v1.1 / first major content drop.
 - Set-piece geometry should be the first thing built — if the
   set-piece doesn't sell on a screenshot, the rest of the track
   doesn't matter.
-- Anti-grav segments should be authored as continuous geometry, not
-  individual gravity triggers — the controller flip needs a single
-  clear entry and exit.
+- Verticality is terrain now (no anti-grav): author ramps, banked berms
+  (≤45°), and hill crests as continuous drivable geometry with a single
+  clear entry/exit and a takeoff lip the player can read. The retired
+  `antigrav_curve_*` operators are not used on any v1 track.
 
 **For the art pass:**
 - Real-world reference photography per track, posted in the track's
