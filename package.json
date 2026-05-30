@@ -50,6 +50,7 @@
     "seed:track-aqualand": "node tools/blender/seed.mjs seed_track_aqualand.py",
     "seed:track-angkor-drowned": "node tools/blender/seed.mjs seed_track_angkor_drowned.py",
     "seed:track-liberty-drowned": "node tools/blender/seed.mjs seed_track_liberty_drowned.py",
+    "seed:track-prop-showcase": "node tools/blender/seed.mjs seed_track_prop_showcase.py",
     "leaderboard:moderate": "node tools/leaderboard-moderate.mjs",
     "docs:dev": "vitepress dev docs-site",
     "docs:build": "vitepress build docs-site",

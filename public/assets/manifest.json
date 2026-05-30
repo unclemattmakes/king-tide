@@ -278,6 +278,14 @@
       "specPath": "public/tracks/oval-loop.json"
     },
     {
+      "id": "prop-showcase",
+      "displayName": "Prop Showcase",
+      "url": "/assets/tracks/prop-showcase.glb",
+      "specPath": "public/tracks/prop-showcase.json",
+      "heroUrl": "/assets/tracks/prop-showcase-hero.jpg",
+      "thumbUrl": "/assets/tracks/prop-showcase-thumb.jpg"
+    },
+    {
       "id": "sandbar",
       "displayName": "Sandbar",
       "url": "/assets/tracks/sandbar.glb",
