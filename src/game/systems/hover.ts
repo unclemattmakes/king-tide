@@ -737,6 +737,21 @@ function sampleSurfaceFootprint(
   // hit (bike overhanging an edge with nothing below — read the missing
   // side as flat with the center rather than NaN).
   const fallbackProj = probe.surfaceProj
+  // Edge gate: a corner whose surface sits more than the grounded cutoff
+  // below the bike is over a LEDGE / VOID — a rooftop or cliff edge, or
+  // (on the flooded maps) open water far below — not a slope to follow.
+  // Read it as flat with the center, same as the no-hit overhang above.
+  // Mirrors the per-corner spring's `localDist > groundedCutoff` skip so
+  // the slope read stays consistent with which corners the spring trusts.
+  // Without it the speed-anticipated bow probe reads the drop as a steep
+  // phantom downhill, the grounded pitch PD noses the bike DOWN to
+  // "follow" it, and the rider gets yanked straight down off the edge
+  // instead of launching off it. (The corner probe samples the wave field
+  // with no range limit, so on flooded maps the bow always "finds" the sea
+  // far below an edge — the center probe gates that by reachability, here
+  // we gate by the same grounded cutoff the spring uses.)
+  const bikeProj = t.x * upX + t.y * upY + t.z * upZ
+  const cliffCutoff = frame.stats.hoverHeight * GROUNDED_DISTANCE_MUL
   const sampleAt = (px: number, py: number, pz: number, dbgIdx: number): number => {
     const v = probeSurfaceY(
       phys,
@@ -771,7 +786,8 @@ function sampleSurfaceFootprint(
         c.hx = Number.NEGATIVE_INFINITY
       }
     }
-    return v === Number.NEGATIVE_INFINITY ? fallbackProj : v
+    if (v === Number.NEGATIVE_INFINITY || bikeProj - v > cliffCutoff) return fallbackProj
+    return v
   }
   const bowProj = sampleAt(
     t.x + pfX * probeHalfLength,
