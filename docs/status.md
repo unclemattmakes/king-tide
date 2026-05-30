@@ -1,6 +1,22 @@
-> **Last updated: 2026-05-29** — Shoreline transition (shore-aligned waves,
-> swash, wet sand), drift, tricks, hover polish, Electron Steam port,
-> making-of microsite.
+> **Last updated: 2026-05-30** — Licensed soundtrack radio + credit toast,
+> shoreline transition (shore-aligned waves, swash, wet sand), drift, tricks,
+> hover polish, Electron Steam port, making-of microsite.
+>
+> **Licensed soundtrack drop — the shuffle radio the audio engine was built
+> to receive.** 14 commissioned tracks transcoded MP3 → Opus by
+> [tools/convert-music.mjs](../tools/convert-music.mjs) (`pnpm gen:music`;
+> 70.7 MB → 32.7 MB), streamed via an `<audio>` element into the music bus
+> rather than fully decoded into PCM. The jukebox
+> ([soundtrack.ts](../src/engine/audio/soundtrack.ts)) shuffles across menus
+> + races, ducks under the wave-pump / explosion sidechain for free (it's on
+> the music bus), and supersedes the procedural pad bed — which stays as the
+> no-assets fallback. An MTV / EA-Trax credit toast
+> ([music-credit-toast.ts](../src/engine/render/music-credit-toast.ts)) slides
+> in when each song starts, crediting `<artist> — <title>` parsed from the
+> source filenames. Settings → Audio gains a "Now-playing credits" toggle and
+> "Music bed enabled" became "Music enabled". Raw `.mp3`s live off-git in the
+> content folder; compiled `.opus` is tracked via Git LFS. Regenerate after
+> adding tracks with `pnpm gen:music`.
 >
 > **Shoreline transition — waves now break on the beach instead of dying.**
 > The terrain heightmap used to just damp the swell to zero in the last ~3 m

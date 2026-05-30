@@ -9,8 +9,8 @@ import { spawnBikes } from './boot/spawn-bikes'
 import { loadTrackForBoot } from './boot/track-loader'
 import { runEarlyModeDispatch } from './boot/url-modes'
 import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug'
-import { createAudioEngine } from './engine/audio/audio'
-import { applyTrackAudio, setAudioEngine } from './engine/audio/audio-service'
+import { applyTrackAudio } from './engine/audio/audio-service'
+import { installSoundtrackRadio } from './engine/audio/soundtrack-radio'
 import { loadDevSettings } from './engine/dev-settings'
 import { emptyIntent, type Intent, installInput } from './engine/input'
 import { installCameraLookInput } from './engine/input/camera-look'
@@ -195,6 +195,31 @@ async function boot() {
     // eslint-disable-next-line no-console
     console.info(`[boot] Steam Deck detected via [${deck.signals.join(', ')}]`)
   }
+
+  // Audio: stand up the soundtrack radio (engine + playlist + credit toast
+  // + the user-gesture unlock / visibility-resume listeners) BEFORE the
+  // heavy renderer + track load below. The race page is a fresh document
+  // (the menu navigates here with a reload), so its AudioContext starts
+  // suspended and needs a new gesture to unlock; attaching the listeners
+  // now means the player's first click / movement key during the loading
+  // screen unlocks audio — rather than being missed because boot() hadn't
+  // reached the audio setup yet. `playerSettings` is loaded + the Deck
+  // profile applied above, so onUnlock reads the right fullscreen pref.
+  //
+  // Step 8 — opportunistic fullscreen-on-first-gesture. The Steam Deck
+  // profile flips `fullscreenPreferred` on so Gaming Mode launches don't
+  // strand the player in a windowed view. We piggyback on the audio-unlock
+  // gesture because both need a real user gesture by browser policy.
+  // Failures (already fullscreen, blocked by sandboxing) are swallowed.
+  const audio = installSoundtrackRadio({
+    onUnlock: () => {
+      if (playerSettings.fullscreenPreferred && !document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {
+          /* user dismissed or browser blocked — non-fatal */
+        })
+      }
+    },
+  })
 
   // Phase 2 — core subsystems.
   const { renderer, backend } = await createRenderer(appEl)
@@ -1005,47 +1030,13 @@ async function boot() {
     hoverDebug.setEnabled(true)
   }
 
-  // Audio: lazy-init AudioContext on first user gesture (browsers block
-  // autoplay until then). The engine itself is safe to call before
-  // `resume()` — every method early-returns without a context.
-  const audio = createAudioEngine()
-  setAudioEngine(audio)
-  // Per-track audio palette — licensed music + ambient layers. The
-  // engine buffers the config when the AudioContext doesn't exist
-  // yet (boot path before first user gesture) and applies it lazily
-  // on resume(). Audio files are forward-looking; missing files
-  // (404) warn and fall back to the procedural pad bed without
-  // crashing.
+  // Per-track audio palette — licensed music + ambient layers, applied
+  // to the radio engine stood up early in boot() (see installSoundtrackRadio
+  // above). The engine buffers the config when the AudioContext doesn't
+  // exist yet (boot path before first user gesture) and applies it lazily
+  // on resume(). Audio files are forward-looking; missing files (404) warn
+  // and fall back to the soundtrack radio / procedural bed without crashing.
   applyTrackAudio(track.audio)
-  const unlockAudio = () => {
-    audio.resume()
-    // Step 8 — opportunistic fullscreen-on-first-gesture. The Steam Deck
-    // profile flips `fullscreenPreferred` on so Gaming Mode launches
-    // don't strand the player in a windowed view. We piggyback on the
-    // existing audio-unlock listener because both need a real user
-    // gesture by browser policy. Failures (already fullscreen, blocked
-    // by sandboxing) are swallowed — the player can always F11.
-    if (playerSettings.fullscreenPreferred && !document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {
-        /* user dismissed or browser blocked — non-fatal */
-      })
-    }
-    window.removeEventListener('keydown', unlockAudio)
-    window.removeEventListener('pointerdown', unlockAudio)
-  }
-  window.addEventListener('keydown', unlockAudio, { once: false })
-  window.addEventListener('pointerdown', unlockAudio, { once: false })
-  // Step 8 — AudioContext resume after sleep. The Steam Deck aggressively
-  // suspends to save battery; Chromium leaves the AudioContext in the
-  // 'suspended' state after a long sleep. `audio.resume()` is a no-op if
-  // the context is already running, so unconditional re-resume on
-  // visibility-restore is safe. Mobile browsers benefit too (lock-screen
-  // returns).
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      audio.resume()
-    }
-  })
 
   const state = {
     ready: false,

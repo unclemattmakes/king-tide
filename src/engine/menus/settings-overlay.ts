@@ -54,6 +54,7 @@ import {
   setLeaderboardHandle,
   setLeaderboardSubmit,
   setMotionSicknessReduction,
+  setMusicCreditsEnabled,
   setPixelRatio,
   setPreLapIntro,
   setReducedFlash,
@@ -232,7 +233,7 @@ const TAB_SPECS: TabSpec[] = [
           defaultValue: playerSettings.audioMusicVolume,
         },
         enabled: true,
-        gate: 'Procedural bed today; ducks on wave-pump + explosion.',
+        gate: 'Licensed soundtrack radio; ducks on wave-pump + explosion.',
       },
       {
         id: 'audio-sfx',
@@ -262,10 +263,17 @@ const TAB_SPECS: TabSpec[] = [
       },
       {
         id: 'audio-music-on',
-        label: 'Music bed enabled',
+        label: 'Music enabled',
         control: { kind: 'toggle', defaultValue: playerSettings.audioMusicEnabled },
         enabled: true,
-        gate: 'Disable to silence the music bed entirely (keeps the bus routed).',
+        gate: 'Disable to silence the soundtrack radio (falls back to the bed if no tracks).',
+      },
+      {
+        id: 'audio-music-credits',
+        label: 'Now-playing credits',
+        control: { kind: 'toggle', defaultValue: playerSettings.musicCreditsEnabled },
+        enabled: true,
+        gate: 'Show the artist + title toast when each song starts.',
       },
       {
         id: 'audio-mute',
@@ -880,6 +888,11 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       if (spec.enabled && spec.id === 'audio-music-on') {
         cb.addEventListener('change', () => {
           setAudioMusicEnabled(cb.checked)
+        })
+      }
+      if (spec.enabled && spec.id === 'audio-music-credits') {
+        cb.addEventListener('change', () => {
+          setMusicCreditsEnabled(cb.checked)
         })
       }
       if (spec.enabled && spec.id === 'controls-invert-y') {

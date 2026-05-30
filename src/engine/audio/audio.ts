@@ -17,13 +17,14 @@
  *
  * **Music + ducking**
  *
- * A subtle procedural music bed runs on the music bus from first
- * unlock. It exists primarily as a hook for the real licensed/
- * commissioned music drop in M11–12 — the per-frame interface is
- * stable (`setMusicEnabled`, `duckMusic`) so swapping in a real loop
- * is a one-line change in `ensureContext`. The `duckMusic` helper
- * briefly dips the music bus on big SFX (wave-pump chime, explosion)
- * so the cue cuts through.
+ * The licensed soundtrack radio (the jukebox in `soundtrack.ts`) rides
+ * the music bus and is the default music source once real tracks are
+ * loaded via `setSoundtrack`. A subtle procedural pad bed stays wired
+ * as the no-assets fallback (and for headless/test paths) — it's
+ * silenced whenever the jukebox or a per-track licensed loop owns the
+ * bus. The `duckMusic` helper briefly dips the whole music bus on big
+ * SFX (wave-pump chime, explosion) so the cue cuts through; because the
+ * jukebox feeds the same bus, it ducks for free.
  *
  * Continuous layers (engine + wind + water ambient) are looping nodes
  * built once on first unlock; one-shots (pickup chimes, weapon SFX,
@@ -39,6 +40,7 @@
 
 import { playerSettings } from '@/engine/player-settings'
 import type { AudioConfig } from '@/game/tracks/types'
+import { createJukebox, type Jukebox, type SoundtrackEntry } from './soundtrack'
 
 export type PickupSoundType = 'boost' | 'shield' | 'missile' | 'mine'
 export type AudioBus = 'master' | 'music' | 'sfx' | 'ambient'
@@ -53,9 +55,9 @@ export interface AudioEngine {
    *  until set again; called by the Settings overlay slider. Tracks
    *  `playerSettings.audio<Bus>Volume` for persistence. */
   setBusVolume(bus: AudioBus, volume: number): void
-  /** Enable / disable the procedural music bed. When disabled the
-   *  music bus is silenced but kept routed so a future licensed loop
-   *  can be slotted in without rewiring. */
+  /** Enable / disable the music layer. Pauses / resumes the soundtrack
+   *  radio and silences the fallback pad bed; the bus stays routed
+   *  either way. */
   setMusicEnabled(enabled: boolean): void
   /** Ducks the music bus down by `amount` ∈ [0,1] for `recoverSeconds`,
    *  then ramps back to the current bus level. Used by wave-pump +
@@ -101,6 +103,19 @@ export interface AudioEngine {
    *  bed + ambient water rumble only. Audio files load lazily;
    *  missing files (404) warn and fall back gracefully. */
   setTrackAudio(config: AudioConfig | undefined): void
+  /** Provide the licensed soundtrack rotation (the shuffle radio that
+   *  plays across menus + races). Once ≥1 track loads the radio
+   *  supersedes the procedural pad bed; an empty list keeps the bed as
+   *  the fallback. Safe to call before the AudioContext exists — it's
+   *  buffered and applied on first unlock. */
+  setSoundtrack(tracks: readonly SoundtrackEntry[]): void
+  /** Subscribe to soundtrack song changes — fires when each song begins,
+   *  driving the now-playing credit toast. Fires with `null` on total
+   *  playback failure (every source errored). Single subscriber; the
+   *  latest call wins. */
+  onSongChange(cb: (entry: SoundtrackEntry | null) => void): void
+  /** Skip to the next song in the soundtrack rotation. */
+  nextSong(): void
 }
 
 /** Per-bus headroom — the bus's slider value is multiplied by this
@@ -154,6 +169,17 @@ export function createAudioEngine(): AudioEngine {
   let trackAudioConfig: AudioConfig | undefined
   let pendingTrackAudio: { config: AudioConfig | undefined } | null = null
   const decodedAudioCache = new Map<string, AudioBuffer | null>()
+
+  // Soundtrack radio — the licensed-music jukebox on the music bus.
+  // `jukebox` is created on first unlock (it needs the AudioContext);
+  // `soundtrack` holds the playlist set before that. `trackMusicActive`
+  // is true while a per-track licensed loop owns the music bus, so the
+  // jukebox stays paused and doesn't double up. `songChangeCb` drives
+  // the now-playing credit toast.
+  let jukebox: Jukebox | null = null
+  let soundtrack: readonly SoundtrackEntry[] = []
+  let trackMusicActive = false
+  let songChangeCb: ((entry: SoundtrackEntry | null) => void) | null = null
 
   function busLevel(bus: AudioBus): number {
     const v =
@@ -279,14 +305,29 @@ export function createAudioEngine(): AudioEngine {
     musicBedGain.connect(musicBus)
     musicBedNodes = buildMusicBed(ctx, musicBedGain)
 
+    // Soundtrack radio — streams the licensed tracks through the music
+    // bus. Created here (it needs the live context); fed the playlist
+    // buffered by setSoundtrack before unlock. Supersedes the bed when
+    // real tracks are present (see restoreDefaultMusic).
+    jukebox = createJukebox({
+      ctx,
+      destination: musicBus,
+      getEnabled: () => musicEnabled,
+      onSongChange: (entry) => songChangeCb?.(entry),
+    })
+    jukebox.setPlaylist(soundtrack)
+
     // If setTrackAudio was called before the context existed (the
     // boot path: track loads while the user hasn't pressed a key
-    // yet), apply the buffered config now.
+    // yet), apply the buffered config now — it decides bed vs. jukebox
+    // vs. per-track loop. Otherwise start the default music source.
     if (pendingTrackAudio) {
       const { config } = pendingTrackAudio
       pendingTrackAudio = null
       // Fire-and-forget — load failures don't block the rest of boot.
       void applyTrackAudioToContext(ctx, config)
+    } else {
+      restoreDefaultMusic()
     }
 
     return ctx
@@ -309,6 +350,20 @@ export function createAudioEngine(): AudioEngine {
   function trackDuckMultiplier(): number {
     const m = trackAudioConfig?.music3dEffects?.duckOnPump
     return typeof m === 'number' && Number.isFinite(m) && m >= 0 ? m : 1
+  }
+
+  /** Route the default (non-per-track) music source. When a real
+   *  soundtrack is loaded the jukebox is the music and the procedural bed
+   *  stays silent; otherwise the bed plays per the music-enabled flag.
+   *  Called on unlock and whenever a per-track licensed loop clears. */
+  function restoreDefaultMusic(): void {
+    trackMusicActive = false
+    if (jukebox?.hasTracks()) {
+      if (musicBedGain) musicBedGain.gain.value = 0
+      jukebox.play() // no-op when music is disabled
+    } else if (musicBedGain) {
+      musicBedGain.gain.value = musicEnabled ? 1 : 0
+    }
   }
 
   async function loadAudioBuffer(c: AudioContext, url: string): Promise<AudioBuffer | null> {
@@ -372,14 +427,15 @@ export function createAudioEngine(): AudioEngine {
     stopTrackAudio()
     trackAudioConfig = config
     if (!config) {
-      // Cleared — restore the procedural pad bed audibility.
-      if (musicBedGain) musicBedGain.gain.value = musicEnabled ? 1 : 0
+      // Cleared — restore the default music source (jukebox or bed).
+      restoreDefaultMusic()
       return
     }
-    // Music: when present + reachable, mute the procedural bed and
-    // play the licensed track on the music bus. When the file misses
-    // (404), keep the procedural bed at its current level — that's
-    // the documented fallback contract.
+    // Music: when a per-track licensed loop is present + reachable, it
+    // takes over the music bus — silence the bed and pause the
+    // soundtrack radio so they don't double up. When absent or 404,
+    // fall back to the default source (radio if loaded, else bed) —
+    // that's the documented graceful-degrade contract.
     if (config.music && musicBus) {
       const url = `/audio/music/${config.music}`
       const buf = await loadAudioBuffer(c, url)
@@ -397,14 +453,15 @@ export function createAudioEngine(): AudioEngine {
           // start() throws if called twice — defensive only.
         }
         trackMusic = { source, gain }
-        // Procedural bed gets silenced while licensed music plays;
-        // it stays routed so setMusicEnabled(false) still works.
+        // Per-track loop owns the bus: silence the bed, pause the radio.
         if (musicBedGain) musicBedGain.gain.value = 0
-      } else if (musicBedGain) {
-        musicBedGain.gain.value = musicEnabled ? 1 : 0
+        trackMusicActive = true
+        jukebox?.pause()
+      } else {
+        restoreDefaultMusic()
       }
-    } else if (musicBedGain) {
-      musicBedGain.gain.value = musicEnabled ? 1 : 0
+    } else {
+      restoreDefaultMusic()
     }
     // Ambient layers — load + play each in parallel.
     if (config.ambient && config.ambient.length > 0 && ambientBus) {
@@ -448,6 +505,10 @@ export function createAudioEngine(): AudioEngine {
           // method is a no-op without a running context.
         }
       }
+      // Resume the soundtrack radio after a suspend (Steam Deck sleep,
+      // mobile lock-screen). No-op if music is disabled or already
+      // playing; skipped while a per-track loop owns the bus.
+      if (c && !trackMusicActive) jukebox?.play()
     },
 
     setMuted(m: boolean) {
@@ -481,8 +542,14 @@ export function createAudioEngine(): AudioEngine {
 
     setMusicEnabled(enabled) {
       musicEnabled = enabled
-      if (ctx && musicBedGain) {
-        musicBedGain.gain.setTargetAtTime(enabled ? 1 : 0, ctx.currentTime, 0.1)
+      if (!ctx) return
+      // The toggle now gates the whole music layer. The radio pauses /
+      // resumes; the bed only sounds when there's no real soundtrack and
+      // no per-track loop in play.
+      jukebox?.setEnabled(enabled)
+      if (musicBedGain) {
+        const bedTarget = enabled && !jukebox?.hasTracks() && !trackMusicActive ? 1 : 0
+        musicBedGain.gain.setTargetAtTime(bedTarget, ctx.currentTime, 0.1)
       }
     },
 
@@ -724,6 +791,27 @@ export function createAudioEngine(): AudioEngine {
       // Fire-and-forget — load failures (404 etc.) don't block the
       // caller and surface as console.warn at most.
       void applyTrackAudioToContext(ctx, config)
+    },
+
+    setSoundtrack(tracks) {
+      soundtrack = tracks
+      if (jukebox) {
+        jukebox.setPlaylist(tracks)
+        // Make the radio the default source if nothing else owns the bus.
+        if (!trackMusicActive) restoreDefaultMusic()
+      }
+    },
+
+    onSongChange(cb) {
+      songChangeCb = cb
+      // Replay the current song to a late subscriber so the toast can
+      // reflect what's already playing.
+      const cur = jukebox?.current() ?? null
+      if (cur) cb(cur)
+    },
+
+    nextSong() {
+      jukebox?.next()
     },
   }
 }

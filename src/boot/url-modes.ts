@@ -144,6 +144,13 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     const { bootAttractMode } = await import('./attract-mode')
     const attractPromise = watchAttractLive(bootAttractMode({ parent: attractStage }))
 
+    // Soundtrack radio — play music from the menu, not just once a race
+    // loads. Installed before the menu renders so the first click/keypress
+    // unlocks audio. (The page reloads into the race, which stands up its
+    // own radio for that lifetime.)
+    const { installSoundtrackRadio } = await import('@/engine/audio/soundtrack-radio')
+    installSoundtrackRadio()
+
     hideLoadingScreen()
     const result = await runMenuFlow({
       manifestTracks: manifest.tracks,
@@ -180,6 +187,11 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     const attractStage = ensureAttractStage()
     const { bootAttractMode: bootMp } = await import('./attract-mode')
     const attractPromise = watchAttractLive(bootMp({ parent: attractStage }))
+
+    // Same soundtrack radio behind the lobby as the menu — keeps music
+    // continuous across the pre-race surfaces.
+    const { installSoundtrackRadio } = await import('@/engine/audio/soundtrack-radio')
+    installSoundtrackRadio()
 
     hideLoadingScreen()
     const result = await runMpLobby({

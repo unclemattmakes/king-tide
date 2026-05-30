@@ -130,6 +130,9 @@ describe('audio-service', () => {
       lapCompleted: () => {},
       wavePump: () => {},
       setTrackAudio: () => {},
+      setSoundtrack: () => {},
+      onSongChange: () => {},
+      nextSong: () => {},
     }
     setAudioEngine(stub)
     expect(getAudioEngine()).toBe(stub)
@@ -155,6 +158,9 @@ describe('audio-service', () => {
       lapCompleted: () => {},
       wavePump: () => {},
       setTrackAudio: () => {},
+      setSoundtrack: () => {},
+      onSongChange: () => {},
+      nextSong: () => {},
     }
     setAudioEngine(stub)
     applyAudioBusVolume('master', 0.5)
