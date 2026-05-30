@@ -30,6 +30,7 @@
     "gen:tracks:validate": "node tools/blender/run-lint.mjs",
     "gen:all": "node tools/blender/run.mjs build_all",
     "gen:manifest": "node tools/blender/run.mjs manifest",
+    "gen:music": "node tools/convert-music.mjs",
     "gen:fx-atlas": "python tools/blender/build_sprite_atlas.py",
     "gen:decal-atlas": "python tools/blender/build_decal_atlas.py",
     "gen:trim-sheets": "python tools/blender/build_trim_sheets.py",

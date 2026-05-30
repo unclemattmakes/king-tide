@@ -155,6 +155,9 @@ export type PlayerSettings = {
    *  routed but the bed nodes are muted via `musicBedGain` — keeps
    *  the licensed-music swap point a one-liner. */
   audioMusicEnabled: boolean
+  /** Show the now-playing credit toast when a soundtrack song starts.
+   *  Toggles only the toast — the music keeps playing either way. */
+  musicCreditsEnabled: boolean
   /** Player-rebindable keyboard mapping. See `input/bindings.ts` for
    *  the action set + swap-on-rebind semantics. */
   keyboardBindings: KeyboardBindings
@@ -270,6 +273,7 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   audioSfxVolume: 0.85,
   audioAmbientVolume: 0.7,
   audioMusicEnabled: true,
+  musicCreditsEnabled: true,
   keyboardBindings: defaultKeyboardBindings(),
   gamepadBindings: defaultGamepadBindings(),
   gamepadDeadzone: 0.12,
@@ -417,6 +421,9 @@ export function loadPlayerSettings(): void {
   loadVol('audioAmbientVolume', p.audioAmbientVolume)
   if (typeof p.audioMusicEnabled === 'boolean') {
     playerSettings.audioMusicEnabled = p.audioMusicEnabled
+  }
+  if (typeof p.musicCreditsEnabled === 'boolean') {
+    playerSettings.musicCreditsEnabled = p.musicCreditsEnabled
   }
   playerSettings.keyboardBindings = parseKeyboardBindings(p.keyboardBindings)
   playerSettings.gamepadBindings = parseGamepadBindings(p.gamepadBindings)
@@ -602,6 +609,13 @@ export function setAudioMusicEnabled(on: boolean): void {
   import('./audio/audio-service').then(({ applyAudioMusicEnabled }) => {
     applyAudioMusicEnabled(on)
   })
+}
+
+/** Toggle the now-playing credit toast. The toast reads this flag live,
+ *  so there's no live-engine call to make — just persist it. */
+export function setMusicCreditsEnabled(on: boolean): void {
+  playerSettings.musicCreditsEnabled = on
+  savePlayerSettings()
 }
 
 /** Replace the live keyboard binding table — caller is responsible for

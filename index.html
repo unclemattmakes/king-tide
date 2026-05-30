@@ -957,6 +957,51 @@
         border-color: rgba(255, 58, 94, 0.5);
       }
 
+      /* ───────────── Now-playing credit toast ─────────────
+         MTV / EA-Trax lower-third: slides in bottom-left when the
+         soundtrack radio starts a new song, crediting artist + title.
+         z 55 sits above the menu (40) + HUD (17) but below the cup-results
+         celebration (65), so credits read everywhere the radio plays.
+         Non-interactive (pointer-events: none) — reduced-motion is handled
+         by the global body[data-reduced-motion-override] rule. */
+      #music-credit {
+        position: fixed;
+        left: 18px; bottom: 22px;
+        z-index: 55;
+        max-width: min(62vw, 460px);
+        padding: 9px 16px 10px 14px;
+        background: linear-gradient(110deg, rgba(10, 20, 36, 0.92), rgba(5, 10, 20, 0.74));
+        border: 1px solid var(--bc-line);
+        border-left: 3px solid var(--bc-cyan);
+        box-shadow:
+          0 0 22px rgba(77, 214, 255, 0.18),
+          0 8px 26px rgba(0, 0, 0, 0.5);
+        color: var(--bc-ink);
+        opacity: 0;
+        transform: translateX(-18px);
+        transition: opacity var(--t-base) var(--ease-out),
+                    transform var(--t-base) var(--ease-out);
+        pointer-events: none; user-select: none;
+      }
+      #music-credit.show { opacity: 1; transform: translateX(0); }
+      #music-credit .mc-kicker {
+        font-family: var(--bc-font-mono);
+        font-size: 10px; letter-spacing: 0.22em;
+        color: var(--bc-cyan);
+        margin-bottom: 3px;
+      }
+      #music-credit .mc-title {
+        font-family: var(--bc-font-display);
+        font-size: clamp(18px, 2.4vw, 26px);
+        line-height: 1.04;
+      }
+      #music-credit .mc-artist {
+        font-family: var(--bc-font-sans);
+        font-size: 12px; letter-spacing: 0.02em;
+        color: var(--bc-ink-dim);
+        margin-top: 3px;
+      }
+
       /* Minimap — slides in from bottom-right. */
       #race-minimap {
         position: fixed; bottom: 14px; right: 14px; z-index: 17;
@@ -2155,6 +2200,15 @@
           font-size: 20px; padding: 5px 12px;
           top: calc(max(10px, env(safe-area-inset-top, 0px)) + 86px);
         }
+        /* Credit toast — tighter + safe-area-aware. Non-blocking
+           (pointer-events: none) so it never eats touch-stick input. */
+        #music-credit {
+          left: 10px;
+          bottom: calc(max(10px, env(safe-area-inset-bottom, 0px)) + 10px);
+          max-width: 72vw;
+          padding: 7px 12px 8px 11px;
+        }
+        #music-credit .mc-title { font-size: 16px; }
         /* Dev HUD (fps / input source) moved to the right edge to clear
            the on-screen MENU button at top-left. */
         #hud { font-size: 10px; top: 8px; left: auto; right: 8px; text-align: right; }
