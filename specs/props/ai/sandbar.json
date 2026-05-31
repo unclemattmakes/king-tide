@@ -1,0 +1,166 @@
+{
+  "level": "sandbar",
+  "ai_props": [
+    {
+      "prop_id": "sea_boulder",
+      "family": "rock",
+      "subject": "massive solid weathered sea boulder, rounded ocean rock, barnacle and algae crusted, closed compact form",
+      "prompt": "a single massive solid weathered sea boulder, rounded ocean rock, barnacle and algae crusted, closed compact form, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "target_tris": 2000,
+      "target_height": 18.0,
+      "collider": "box",
+      "tint": "#6b7075",
+      "smooth": true,
+      "mat_family": "prop",
+      "catalog": "Rocks",
+      "sources": [
+        "scatter_rocks (README common dressing)"
+      ],
+      "seed": 12345,
+      "approved": true,
+      "concept": "concept-art\\props\\sandbar\\sea_boulder.png",
+      "mesh": "tools\\ai_prop_runs\\sandbar\\meshes\\sea_boulder.glb",
+      "conditioned_glb": "public\\assets\\props\\ai\\sea_boulder.glb",
+      "integrated": true,
+      "library_blend": "tracks-src\\props\\ai\\sea_boulder.blend"
+    },
+    {
+      "prop_id": "rubble_chunk",
+      "family": "rubble",
+      "subject": "solid chunk of broken concrete and brick rubble, compact debris block, rounded weathered masonry",
+      "prompt": "a single solid chunk of broken concrete and brick rubble, compact debris block, rounded weathered masonry, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "target_tris": 1500,
+      "target_height": 9.0,
+      "collider": "box",
+      "tint": "#8a8276",
+      "smooth": true,
+      "mat_family": "prop",
+      "catalog": "Rocks",
+      "sources": [
+        "post-flood rubble (README common dressing)"
+      ],
+      "seed": 12346,
+      "approved": true,
+      "concept": "concept-art\\props\\sandbar\\rubble_chunk.png",
+      "mesh": "tools\\ai_prop_runs\\sandbar\\meshes\\rubble_chunk.glb",
+      "conditioned_glb": "public\\assets\\props\\ai\\rubble_chunk.glb",
+      "integrated": true,
+      "library_blend": "tracks-src\\props\\ai\\rubble_chunk.blend"
+    },
+    {
+      "prop_id": "boat_wreck",
+      "family": "wreck",
+      "subject": "solid half-sunken fishing boat hull wreck, compact weathered rusted hull, no masts or rigging",
+      "prompt": "a single solid half-sunken fishing boat hull wreck, compact weathered rusted hull, no masts or rigging, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "target_tris": 2500,
+      "target_height": 15.0,
+      "collider": "box",
+      "tint": "#5d6b6e",
+      "smooth": true,
+      "mat_family": "prop",
+      "catalog": "Open Sea",
+      "sources": [
+        "submerged hull (open-water dressing)"
+      ],
+      "seed": 12347,
+      "approved": true,
+      "concept": "concept-art\\props\\sandbar\\boat_wreck.png",
+      "mesh": "tools\\ai_prop_runs\\sandbar\\meshes\\boat_wreck.glb",
+      "conditioned_glb": "public\\assets\\props\\ai\\boat_wreck.glb",
+      "integrated": true,
+      "library_blend": "tracks-src\\props\\ai\\boat_wreck.blend"
+    },
+    {
+      "prop_id": "drowned_cab",
+      "family": "vehicle",
+      "subject": "solid submerged taxi cab car body, rounded compact closed shell, algae covered, no thin antennae",
+      "prompt": "a single solid submerged taxi cab car body, rounded compact closed shell, algae covered, no thin antennae, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "target_tris": 2500,
+      "target_height": 7.8,
+      "collider": "box",
+      "tint": "#b8902a",
+      "smooth": false,
+      "mat_family": "prop",
+      "catalog": "Urban",
+      "sources": [
+        "drowned vehicle (urban dressing)"
+      ],
+      "seed": 12348,
+      "approved": true,
+      "concept": "concept-art\\props\\sandbar\\drowned_cab.png",
+      "mesh": "tools\\ai_prop_runs\\sandbar\\meshes\\drowned_cab.glb",
+      "conditioned_glb": "public\\assets\\props\\ai\\drowned_cab.glb",
+      "integrated": true,
+      "library_blend": "tracks-src\\props\\ai\\drowned_cab.blend"
+    },
+    {
+      "prop_id": "ship_anchor",
+      "family": "anchor",
+      "subject": "solid rusted heavy iron ship anchor, compact closed form",
+      "prompt": "a single solid rusted heavy iron ship anchor, compact closed form, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "target_tris": 1500,
+      "target_height": 9.0,
+      "collider": "box",
+      "tint": "#4a4640",
+      "smooth": false,
+      "mat_family": "prop",
+      "catalog": "Industrial",
+      "sources": [
+        "marina anchor (cove dressing)"
+      ],
+      "seed": 12349,
+      "approved": true,
+      "concept": "concept-art\\props\\sandbar\\ship_anchor.png",
+      "mesh": "tools\\ai_prop_runs\\sandbar\\meshes\\ship_anchor.glb",
+      "conditioned_glb": "public\\assets\\props\\ai\\ship_anchor.glb",
+      "integrated": true,
+      "library_blend": "tracks-src\\props\\ai\\ship_anchor.blend"
+    },
+    {
+      "prop_id": "marker_buoy",
+      "family": "prop",
+      "subject": "solid floating mooring buoy, compact rounded closed form, weathered painted steel, no thin pole mast or chain",
+      "prompt": "a single solid floating mooring buoy, compact rounded closed form, weathered painted steel, no thin pole mast or chain, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "target_tris": 1500,
+      "target_height": 7.5,
+      "collider": "box",
+      "tint": "#c2453a",
+      "smooth": true,
+      "mat_family": "prop",
+      "catalog": "Open Sea",
+      "sources": [
+        "marker_buoy"
+      ],
+      "seed": 12351,
+      "approved": true,
+      "concept": "concept-art\\props\\sandbar\\marker_buoy.png",
+      "mesh": "tools\\ai_prop_runs\\sandbar\\meshes\\marker_buoy.glb",
+      "conditioned_glb": "public\\assets\\props\\ai\\marker_buoy.glb",
+      "integrated": true,
+      "library_blend": "tracks-src\\props\\ai\\marker_buoy.blend"
+    }
+  ],
+  "procedural_lane": [
+    {
+      "name": "ramp_jump",
+      "reason": "large water-feature / track structure \u2014 bespoke geometry",
+      "notes": "Training ramp for the 32\u201342 s jump lesson."
+    },
+    {
+      "name": "crest_berm",
+      "reason": "large water-feature / track structure \u2014 bespoke geometry",
+      "notes": "**Frozen-wave sand-dune crest** for the 42\u201355 s launch \u2014 replaces the cut anti-grav arch."
+    },
+    {
+      "name": "Tutorial sign empties",
+      "reason": "architectural flat / facade \u2014 procedural or CC0",
+      "notes": "Arrow empties at each beat boundary; the runtime tutorial anchors HUD prompts to them."
+    },
+    {
+      "name": "scatter_palms",
+      "reason": "thin/branching foliage \u2014 use the procedural sway prop",
+      "notes": "Sparse cove-edge palms (~12)."
+    }
+  ],
+  "manual_review": []
+}

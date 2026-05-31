@@ -171,48 +171,54 @@ class AIFamily:
 # Each ``subject`` is a bare noun phrase worded TOWARD solidity — it is
 # plugged into PROMPT_RECIPE ("a single {subject}, …"), which owns the
 # "a single" framing, so subjects must NOT repeat it.
+#
+# target_height is in GAME metres, scaled ~3x above real-world size:
+# realistically-sized props read too small next to the bike + track at
+# race pace (empirical, 2026-05-31). Bump target_height here (not a
+# track's placement size) when props look undersized in the
+# ?track=prop-showcase validation scene.
 AI_FAMILIES = {
     "rock": AIFamily(
         prop_id="sea_boulder", catalog="Rocks", tint="#6b7075",
-        target_tris=2000, target_height=6.0, smooth=True,
+        target_tris=2000, target_height=18.0, smooth=True,
         subject=("massive solid weathered sea boulder, rounded ocean rock, "
                  "barnacle and algae crusted, closed compact form")),
     "rubble": AIFamily(
         prop_id="rubble_chunk", catalog="Rocks", tint="#8a8276",
-        target_tris=1500, target_height=3.0, smooth=True,
+        target_tris=1500, target_height=9.0, smooth=True,
         subject=("solid chunk of broken concrete and brick rubble, compact "
                  "debris block, rounded weathered masonry")),
     "wreck": AIFamily(
         prop_id="boat_wreck", catalog="Open Sea", tint="#5d6b6e",
-        target_tris=2500, target_height=5.0, smooth=True,
+        target_tris=2500, target_height=15.0, smooth=True,
         subject=("solid half-sunken fishing boat hull wreck, compact weathered "
                  "rusted hull, no masts or rigging")),
     "vehicle": AIFamily(
         prop_id="drowned_cab", catalog="Urban", tint="#b8902a",
-        target_tris=2500, target_height=2.6, smooth=False, collider="box",
+        target_tris=2500, target_height=7.8, smooth=False, collider="box",
         subject=("solid submerged taxi cab car body, rounded compact closed "
                  "shell, algae covered, no thin antennae")),
     "anchor": AIFamily(
         prop_id="ship_anchor", catalog="Industrial", tint="#4a4640",
-        target_tris=1500, target_height=3.0, smooth=False,
+        target_tris=1500, target_height=9.0, smooth=False,
         subject="solid rusted heavy iron ship anchor, compact closed form"),
     "vessel": AIFamily(  # urns / chests / amphorae / pots
         prop_id="relic_urn", catalog="Rocks", tint="#7a5a3a",
-        target_tris=1500, target_height=2.0, smooth=True,
+        target_tris=1500, target_height=6.0, smooth=True,
         subject="solid ancient ceramic urn, rounded compact closed pottery, weathered"),
     "statue": AIFamily(
         prop_id="statue", catalog="Rocks", tint="#5e8b78", unique=True,
-        target_tris=4000, target_height=12.0, smooth=True,
+        target_tris=4000, target_height=36.0, smooth=True,
         subject=("solid weathered monumental statue, full standing figure, "
                  "verdigris copper, closed compact sculpt")),
     "idol": AIFamily(
         prop_id="carved_idol", catalog="Jungle", tint="#7d7a66", unique=True,
-        target_tris=3000, target_height=4.0, smooth=True,
+        target_tris=3000, target_height=12.0, smooth=True,
         subject=("solid carved stone idol head, compact closed sculpt, mossy "
                  "weathered temple stone")),
     "sea_life": AIFamily(
         prop_id="sea_creature", catalog="Open Sea", tint="#7d8a93", unique=True,
-        target_tris=3000, target_height=4.0, smooth=True,
+        target_tris=3000, target_height=12.0, smooth=True,
         subject=("solid smooth sea creature body sculpture, compact closed "
                  "form, no thin fins")),
 }
