@@ -122,6 +122,38 @@ turns any imported generated mesh into a pipeline-legal asset in one call:
 Build this before generating at volume — without it, every AI asset is a
 manual slog.
 
+## AI-gen subject suitability — the lane-sorting rule
+
+**Learned from the first real generations (2026-05-30). This is the
+single most important filter on what to point the AI lane at.**
+
+Image-to-3D (Hunyuan3D, and the family generally) reconstructs a shape
+from a single view. It is excellent at **compact, solid, closed forms**
+and poor at **thin, spindly, or spanning forms** — the latter fragment
+into disconnected clumps and floating specks (the model can't infer a
+coherent thin structure from one view).
+
+| Verdict | Forms | Examples (our archetypes) |
+|---|---|---|
+| ✅ **AI lane** | Compact / solid / closed | rocks, boulders, idols + carved heads (Bayon), anchors, chests, urns, debris, crates, barrels, mooring bollards, statues, chunky sea-life (turtle, shark), the bike body |
+| ❌ **Keep procedural** | Thin / spindly / spanning | coral *fans*, kelp, branching foliage, arches, towers, bridges, cables, gates, lattice masts, lamp posts |
+
+**Evidence:** the AEGIS V bike body and a barrel conditioned cleanly; a
+*branching* coral and a sea arch both fragmented into clumpy/floaty
+messes. (The sea-stacks were authored procedurally — correct in
+hindsight: a clean columnar primitive beats a fragmented AI guess.)
+
+**Practical consequences:**
+
+1. When routing a level's prop list, send compact/solid archetypes to the
+   AI lane and flag thin/spanning ones for the procedural lane — don't
+   waste GPU time on subjects that will fragment.
+2. Prompt *toward* solidity even within a category: "massive solid brain
+   coral **boulder**, rounded" reads far better than "branching coral."
+3. Decimation: the conditioner reduces **iteratively** (≤10× per pass,
+   per the 2×0.1-Decimate finding) rather than one aggressive collapse —
+   gentle passes preserve the silhouette.
+
 ## Plan of attack — phased
 
 ### Phase 0 — Unblock the toolchain (½–1 day, highest leverage)

@@ -114,16 +114,24 @@ def _orient_z_up(obj: bpy.types.Object, source_up: str) -> None:
 
 
 def _decimate(obj: bpy.types.Object, target_tris: int) -> None:
-    """Collapse-decimate down to roughly ``target_tris`` triangles. AI
-    meshes are typically 50k–500k tris; props read fine at a few hundred."""
-    tri_count = sum(len(p.vertices) - 2 for p in obj.data.polygons)
-    if tri_count <= target_tris or target_tris <= 0:
+    """Iterative collapse-decimate down to ~``target_tris``. AI meshes are
+    typically 50k–500k tris. Each pass reduces by at most 10x (ratio
+    floored at 0.1): chaining gentle passes preserves shape and topology
+    far better than one aggressive single-shot collapse — an author found
+    two stacked 0.1 Decimate modifiers (= 0.01 effective) gave the cleanest
+    hoverbike mesh, and this generalises. The final pass uses the exact
+    remaining ratio to land near the target."""
+    if target_tris <= 0:
         return
-    md = obj.modifiers.new("HV_Condition_Decimate", "DECIMATE")
-    md.decimate_type = "COLLAPSE"
-    md.ratio = max(0.01, min(1.0, target_tris / float(tri_count)))
-    _select_only(obj)
-    bpy.ops.object.modifier_apply(modifier=md.name)
+    for i in range(8):
+        tri_count = sum(len(p.vertices) - 2 for p in obj.data.polygons)
+        if tri_count <= target_tris:
+            return
+        md = obj.modifiers.new(f"HV_Condition_Decimate_{i}", "DECIMATE")
+        md.decimate_type = "COLLAPSE"
+        md.ratio = max(0.1, target_tris / float(tri_count))   # ≤10x reduction per pass
+        _select_only(obj)
+        bpy.ops.object.modifier_apply(modifier=md.name)
 
 
 def _recenter_bottom(obj: bpy.types.Object) -> None:
