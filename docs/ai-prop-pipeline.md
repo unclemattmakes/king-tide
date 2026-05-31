@@ -19,6 +19,12 @@ Strategy, archetype list, and the **subject-suitability rule** live in
 > VRAM/server handoff driven autonomously. Compact/solid subjects come
 > out crisp; thin/spanning ones (coral fans, arches) fragment — see the
 > subject rule below.
+>
+> **Proven through the orchestrator** (2026-05-30): the full chain also ran
+> via [`make-level-props`](#orchestration--make-level-props) on The Maw's
+> `sea_boulder` — concept → Hunyuan mesh → ~2 000-tri conditioned prop
+> (single COLOR_0 + box collider) → `hv_locked` library asset, gated at the
+> two review points. See the Orchestration section below.
 
 ## Stage 1 — Concept art (ComfyUI, text→image)
 
