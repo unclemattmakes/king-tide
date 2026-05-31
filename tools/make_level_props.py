@@ -335,6 +335,61 @@ def resolve_props(level: str) -> list[dict]:
     return rows
 
 
+def resolve_common_props() -> list[dict]:
+    """Parse the ``### Common environment dressing`` table in the track-set
+    README (``docs/tracks/README.md``).
+
+    Each per-track doc lists only the props *unique* to that track; the
+    reusable dressing kit (``scatter_rocks`` → rock, palms, gulls, haze) is
+    documented once in the README and present on most tracks. Without this,
+    ``resolve_props`` saw only the unique hero sculpt and every track's AI
+    lane undercounted (sandbar resolved to zero). Returns the same
+    ``{name, kind, notes}`` shape as :func:`resolve_props`, plus
+    ``"common": True`` so callers can label provenance.
+
+    The companion ``### Required gameplay / system objects`` table is
+    deliberately NOT folded in — those are all VFX/gameplay objects that
+    route to ``skip`` and would only add noise (and a couple, like the
+    horizon ring / racer grid, would land in procedural / manual).
+
+    Name extraction prefers the canonical backticked prop id when the cell
+    has one (```scatter_rocks` / coral-debris`` → ``scatter_rocks``):
+    a descriptive alternate like "coral-debris" would otherwise hijack
+    routing, since ``coral`` matches the procedural foliage rule before the
+    AI rock rule."""
+    path = os.path.join(TRACK_DOCS, "README.md")
+    if not os.path.isfile(path):
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    rows: list[dict] = []
+    seen: set = set()
+    in_section = False
+    for ln in lines:
+        if ln.startswith("#"):
+            in_section = ln.lstrip("#").strip().lower().startswith(
+                "common environment dressing")
+            continue
+        if not in_section or not ln.lstrip().startswith("|"):
+            continue
+        cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        if cells[0].lower() in ("prop", "") or set(cells[0]) <= set("-: "):
+            continue
+        m = re.search(r"`([^`]+)`", cells[0])
+        name = m.group(1) if m else re.sub(r"[`*]", "", cells[0]).strip()
+        kind = cells[1] if len(cells) > 1 else ""
+        notes = cells[2] if len(cells) > 2 else ""
+        key = name.lower()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        rows.append({"name": name, "kind": kind, "notes": notes, "common": True})
+    return rows
+
+
 def _norm(text: str) -> str:
     """Lower-case and treat ``_``/``-`` as spaces so snake_case prop names
     (``scatter_palms``) and the ``\\b`` word-boundary rules cooperate."""
@@ -411,18 +466,46 @@ def save_manifest(level: str, data: dict) -> None:
         f.write("\n")
 
 
+def _ai_prop_has_work(p: dict) -> bool:
+    """True if an AI-prop manifest entry carries pipeline work worth keeping
+    across a re-plan: any artifact (concept / mesh / conditioned GLB /
+    integrated library .blend) or an explicit approval decision. A plan-only
+    entry (resolved but never worked) returns False — it's free to drop and
+    re-resolve from scratch."""
+    return bool(
+        p.get("concept") or p.get("mesh") or p.get("conditioned_glb")
+        or p.get("library_blend") or p.get("integrated")
+        or p.get("approved") is not None)
+
+
 def build_manifest(level: str) -> dict:
     """Resolve + route the level and (re)build its manifest, preserving any
-    prior approval/seed/state for props that still exist."""
+    prior approval/seed/state for props that still exist.
+
+    AI output isn't reproducible (docs/ai-prop-pipeline.md), so a prior AI
+    prop that no longer resolves from the docs but has real work done is
+    *preserved* as an orphan rather than silently dropped — losing it would
+    lose its conditioned GLB / library .blend / prompt pointers. See the
+    orphan pass at the end."""
     prior = load_manifest(level) or {}
     prior_props = {p["prop_id"]: p for p in prior.get("ai_props", [])}
 
     resolved = resolve_props(level)
+    # Fold in the shared dressing kit from the track-set README so each
+    # track's AI lane reflects the reusable props it actually uses (e.g.
+    # scatter_rocks → sea_boulder), not just its one unique hero sculpt.
+    # Only the AI-routable common props are folded — procedural common props
+    # (palms) and VFX/gameplay objects stay reported via the per-track tables
+    # exactly as before, so palm/gull/haze behaviour is unchanged. Appended
+    # AFTER the per-track props so a track's own, more specific row wins any
+    # dedup.
+    common_ai = [p for p in resolve_common_props() if classify(p)["lane"] == "ai"]
+
     ai: dict[str, dict] = {}
     procedural: list[dict] = []
     manual: list[dict] = []
 
-    for prop in resolved:
+    for prop in resolved + common_ai:
         r = classify(prop)
         if r["lane"] == "skip":
             continue
@@ -434,8 +517,12 @@ def build_manifest(level: str) -> dict:
                            "notes": prop["notes"]})
         else:  # ai — dedupe by prop_id, accumulate source names
             pid = r["prop_id"]
+            # Label common-dressing provenance so the summary distinguishes a
+            # shared-kit source from a track's own unique prop.
+            src = prop["name"] + (" (common dressing)" if prop.get("common") else "")
             if pid in ai:
-                ai[pid]["sources"].append(prop["name"])
+                if src not in ai[pid]["sources"]:
+                    ai[pid]["sources"].append(src)
                 continue
             prev = prior_props.get(pid, {})
             entry = {
@@ -444,7 +531,7 @@ def build_manifest(level: str) -> dict:
                 "target_tris": r["target_tris"], "target_height": r["target_height"],
                 "collider": r["collider"], "tint": r["tint"],
                 "smooth": r["smooth"], "mat_family": r["mat_family"],
-                "catalog": r["catalog"], "sources": [prop["name"]],
+                "catalog": r["catalog"], "sources": [src],
                 # Run state (preserved across re-plan):
                 "seed": prev.get("seed", 12345),
                 "approved": prev.get("approved"),       # None=pending, True, False
@@ -452,12 +539,25 @@ def build_manifest(level: str) -> dict:
                 "mesh": prev.get("mesh"),
                 "conditioned_glb": prev.get("conditioned_glb"),
                 "integrated": prev.get("integrated", False),
+                "library_blend": prev.get("library_blend"),
             }
             ai[pid] = entry
 
+    # Orphan pass: keep prior AI props that no longer resolve from the docs
+    # but carry real work (the sandbar vertical slice hand-seeded several
+    # props beyond its doc; a re-plan must not wipe them). Plan-only stale
+    # entries are dropped. Orphans are tagged so the summary flags them and a
+    # later re-appearance in the docs rebuilds them fresh (the tag is not
+    # copied onto a resolved entry).
+    orphans = [
+        {**prev, "orphan": True}
+        for pid, prev in prior_props.items()
+        if pid not in ai and _ai_prop_has_work(prev)
+    ]
+
     return {
         "level": level,
-        "ai_props": list(ai.values()),
+        "ai_props": list(ai.values()) + orphans,
         "procedural_lane": procedural,
         "manual_review": manual,
     }
@@ -966,11 +1066,19 @@ def cmd_plan(level: str) -> None:
 def print_summary(m: dict) -> None:
     level = m["level"]
     ai, proc, man = m["ai_props"], m["procedural_lane"], m["manual_review"]
+    resolved_ai = [p for p in ai if not p.get("orphan")]
+    orphan_ai = [p for p in ai if p.get("orphan")]
+    st_of = {True: "✓approved", False: "✗rejected", None: "·pending"}
     print(f"\n══ make-level-props: {level} ══")
-    print(f"\n  AI lane ({len(ai)} props — compact/solid → ComfyUI→Hunyuan→condition):")
-    for p in ai:
-        st = {True: "✓approved", False: "✗rejected", None: "·pending"}[p.get("approved")]
-        print(f"    • {p['prop_id']:<16} {st:<10} ← {', '.join(p['sources'])}")
+    print(f"\n  AI lane ({len(resolved_ai)} props — compact/solid → ComfyUI→Hunyuan→condition):")
+    for p in resolved_ai:
+        print(f"    • {p['prop_id']:<16} {st_of[p.get('approved')]:<10} ← {', '.join(p['sources'])}")
+    if orphan_ai:
+        print(f"\n  AI lane — orphaned ({len(orphan_ai)} kept; no longer in the track "
+              f"doc, preserved for their GLB/prompt):")
+        for p in orphan_ai:
+            print(f"    • {p['prop_id']:<16} {st_of[p.get('approved')]:<10} "
+                  f"← {', '.join(p.get('sources', []))}")
     print(f"\n  Procedural lane ({len(proc)} — thin/spanning/bespoke, NOT for GPU):")
     for p in proc:
         print(f"    • {p['name']}\n        ↳ {p['reason']}")
