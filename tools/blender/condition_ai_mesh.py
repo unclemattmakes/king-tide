@@ -177,12 +177,34 @@ def _assign_family_material(obj: bpy.types.Object, prop_id: str, family: str,
     return mat_name
 
 
+def _strip_color_attrs(mesh: bpy.types.Mesh) -> None:
+    """Remove every existing color attribute. AI-generated meshes ship their
+    own vertex-color layer (often a baked albedo); ``set_color_attr`` only
+    replaces a same-named ``COLOR_0``, so without this the generator's layer
+    survives and the glTF exporter emits it as a stray ``COLOR_1`` — breaking
+    the single-``COLOR_0`` contract (docs/vertex-attribute-spec.md). Wipe
+    them all so the subsequent stamp leaves exactly one clean ``COLOR_0``."""
+    while mesh.color_attributes:
+        mesh.color_attributes.remove(mesh.color_attributes[0])
+
+
 def _stamp_color0(obj: bpy.types.Object, foliage: bool) -> None:
+    _strip_color_attrs(obj.data)         # drop the generator's color layer(s) first
     if foliage:
         (_mn, _mny, mnz), (_mx, _mxy, mxz) = _local_bbox(obj)
         set_linear_sway_z(obj.data, z_min=mnz, z_max=mxz * 1.1, ao=1.0)
     else:
         set_constant(obj.data, DEFAULT_TERRAIN)
+    # Make COLOR_0 active + render color so it exports at index 0 and the
+    # Asset-Browser preview reads it.
+    ca = obj.data.color_attributes
+    c0 = ca.get("COLOR_0")
+    if c0 is not None:
+        try:
+            ca.active_color = c0
+            ca.render_color_index = list(ca).index(c0)
+        except (AttributeError, ValueError, TypeError):
+            pass
 
 
 def _add_box_collider(root: bpy.types.Object, obj: bpy.types.Object,
