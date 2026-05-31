@@ -104,7 +104,70 @@ a regenerate step.
 2. `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128` (Blackwell), then the repo's `requirements.txt`.
 3. ComfyUI: download SDXL base 1.0 to `models/checkpoints/`. Hunyuan: model auto-downloads on first run.
 
+## Orchestration — `make-level-props`
+
+The three stages above are the per-asset primitives. **`make-level-props`**
+([`tools/make_level_props.py`](../tools/make_level_props.py), also the
+`/make-props` skill) runs the whole chain over an *entire level's* prop
+list: it resolves the level's props from the track docs, auto-routes each
+to the AI or procedural lane (the subject rule), phase-batches the GPU
+(one ComfyUI pass, one Hunyuan pass — each model loaded once), gates on a
+contact sheet, conditions every approved mesh, and locks the results into
+the library. It is **phase-gated** — it stops at each human review point;
+drive it phase by phase, not in one shot.
+
+```
+python tools/make_level_props.py <level> plan        # resolve + route → manifest
+python tools/make_level_props.py <level> concepts    # Phase A (ComfyUI) → concept art + contact sheet
+#   review <content-root>/concept-art/props/<level>/_contact_sheet.html
+python tools/make_level_props.py <level> approve <id> [<id> …]   # (or reject / regen)
+python tools/make_level_props.py <level> mesh        # Phase B (Hunyuan)
+python tools/make_level_props.py <level> condition   # Phase C (Blender) → public/assets/props/ai/ (repo, Git LFS)
+#   review the conditioned GLBs (?viewer=<id>, headed/WebGPU)
+python tools/make_level_props.py <level> integrate   # one .blend per prop → <content-root>/tracks-src/props/ai/
+python tools/make_level_props.py <level> status      # manifest summary, anytime
+```
+
+- **Raw vs. compiled split (docs/asset-storage.md).** Everything raw goes to
+  the Drive-synced content root (out of git, default `C:\project-content\hoverbike`,
+  override `$HOVERBIKE_CONTENT_ROOT`); only the compiled GLB goes to the repo:
+  - **concept art** (Phase A PNGs + the contact sheet) →
+    `<content-root>/concept-art/props/<level>/` — kept next to the bike/track
+    concept art, so iterations aren't thrown away.
+  - **raw `.blend`** (Phase 6 integrate) →
+    `<content-root>/tracks-src/props/ai/<id>.blend`.
+  - **compiled GLB** (Phase C condition) → repo
+    `public/assets/props/ai/<id>.glb` (Git LFS).
+  - The committed manifest (`specs/props/ai/<level>.json`) records pointers
+    *relative* to those roots, so it stays portable (no machine paths). Same
+    rule as the track/bike sources.
+- **One .blend per prop (folder = library).** Each prop is its own
+  asset-marked, `hv_locked` collection rather than a merge into the
+  monolithic `props-library.blend`. The content root's `tracks-src/` is
+  already a registered Blender asset library, so its recursive scan
+  aggregates the AI props next to the procedural ones under the shared
+  `Hoverbike/Track Props` catalogue. Smallest blast radius — regenerating
+  one prop rewrites one small file and can't corrupt the procedural library
+  or its siblings. The committed, reproducible anchor stays the GLB + the
+  prompt in the manifest. *(Headless scatter still links by name from
+  `props-library.blend`; to scatter an AI prop, point a scatter zone at its
+  per-file `.blend` — interactive Asset-Browser placement needs no change.)*
+
+- **Manifest** (`specs/props/ai/<level>.json`, committed): per-prop prompt,
+  params, seed, and approval state — the reproducibility anchor alongside
+  the GLB, since AI output can't be regenerated deterministically.
+- **Routing output:** the AI lane goes through the GPU; the **procedural
+  lane** is a deliverable in its own right — the thin/spanning props routed
+  away (arches, towers, foliage, cables) that belong to the Blender/GN
+  procedural lane, not the AI one.
+- **VRAM handoff:** the tool stops Hunyuan / `POST /free`s ComfyUI between
+  phases automatically. It waits for ComfyUI to idle before unloading and,
+  if `/free` still can't reclaim the VRAM, stops the ComfyUI process
+  outright (a guaranteed release matters more than keeping it warm on an
+  8 GB box). Server/Blender/env paths are env-overridable at the top of the
+  script (Windows defaults match the dev machine).
+
 ## See also
 
 - [props-production-plan.md](props-production-plan.md) — strategy, archetype list, subject-suitability rule.
-- The next step, **`make-level-props`**, orchestrates this whole chain over a level's prop list (route → batch → review → condition → integrate).
+- **`make-level-props`** (above) — orchestrates this whole chain over a level's prop list (route → batch → review → condition → integrate).

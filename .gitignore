@@ -48,5 +48,10 @@ tools/blender/lib/*.blend@
 __pycache__/
 *.pyc
 
+# make-level-props scratch: raw Hunyuan meshes, Blender spec files, server
+# logs. Throwaway intermediates — the committed anchors are the conditioned
+# GLB (public/assets/props/ai/) + the manifest (specs/props/ai/).
+tools/ai_prop_runs/
+
 # Electron desktop build output (Steam Deck / Windows wrappers)
 dist-electron/

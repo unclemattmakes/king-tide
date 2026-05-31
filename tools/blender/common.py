@@ -134,11 +134,20 @@ def export_glb(
     *,
     export_animations: bool = False,
     export_skins: bool = False,
+    single_color0: bool = False,
 ) -> None:
     """Run validators and export the scene to GLB.
 
     Validators are zero-arg callables returning ``list[str]`` of
     errors. Any error aborts before writing the GLB.
+
+    ``single_color0``: force the exporter to emit only the *active* color
+    attribute as ``COLOR_0`` (``export_vertex_color="ACTIVE"`` +
+    ``export_all_vertex_colors=False``). Off by default so existing builders
+    keep their exact output; the AI-mesh path turns it on because an
+    imported generated mesh can carry a stray color layer that the default
+    "export all" would emit as a contract-breaking ``COLOR_1`` (matches the
+    addon's own export — docs/vertex-attribute-spec.md).
     """
     all_errors: list[str] = []
     for v in validators:
@@ -152,6 +161,9 @@ def export_glb(
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     print(f"[builder] writing {out_path}")
 
+    color_kwargs = (
+        {"export_vertex_color": "ACTIVE", "export_all_vertex_colors": False}
+        if single_color0 else {})
     bpy.ops.export_scene.gltf(
         filepath=out_path,
         export_format="GLB",
@@ -168,5 +180,6 @@ def export_glb(
         export_gn_mesh=True,
         export_animations=export_animations,
         export_skins=export_skins,
+        **color_kwargs,
     )
     print("[builder] done")

@@ -1,0 +1,46 @@
+{
+  "level": "the-maw",
+  "ai_props": [
+    {
+      "prop_id": "sea_boulder",
+      "family": "rock",
+      "subject": "massive solid weathered sea boulder, rounded ocean rock, barnacle and algae crusted, closed compact form",
+      "prompt": "a single massive solid weathered sea boulder, rounded ocean rock, barnacle and algae crusted, closed compact form, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "target_tris": 2000,
+      "target_height": 6.0,
+      "collider": "box",
+      "tint": "#6b7075",
+      "smooth": true,
+      "mat_family": "prop",
+      "catalog": "Rocks",
+      "sources": [
+        "scatter_rocks"
+      ],
+      "seed": 12345,
+      "approved": true,
+      "concept": "concept-art\\props\\the-maw\\sea_boulder.png",
+      "mesh": "tools\\ai_prop_runs\\the-maw\\meshes\\sea_boulder.glb",
+      "conditioned_glb": "public\\assets\\props\\ai\\sea_boulder.glb",
+      "integrated": true,
+      "library_blend": "tracks-src\\props\\ai\\sea_boulder.blend"
+    }
+  ],
+  "procedural_lane": [
+    {
+      "name": "Rock arches \u00d73",
+      "reason": "spanning arch \u2014 image-to-3D fragments it; clean procedural sweep",
+      "notes": "Hand-modeled, \u22654 m wall thickness; the Maw is ~50 m span \u00d7 ~30 m height, weathered surfaces."
+    },
+    {
+      "name": "McWay Falls cliff",
+      "reason": "large bespoke terrain geometry, not a scatter prop",
+      "notes": "Tall mesh on the east edge; the waterfall itself is decoration + emitter."
+    },
+    {
+      "name": "Bixby Bridge remnant",
+      "reason": "thin/spanning structure \u2014 fragments in image-to-3D",
+      "notes": "Collapsed concrete chunk forming a small jump in the opener \u2014 rewards pumpers who hit the rhythm."
+    }
+  ],
+  "manual_review": []
+}
