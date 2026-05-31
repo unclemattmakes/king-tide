@@ -129,7 +129,7 @@ python tools/make_level_props.py <level> concepts    # Phase A (ComfyUI) → con
 python tools/make_level_props.py <level> approve <id> [<id> …]   # (or reject / regen)
 python tools/make_level_props.py <level> mesh        # Phase B (Hunyuan)
 python tools/make_level_props.py <level> condition   # Phase C (Blender) → public/assets/props/ai/ (repo, Git LFS)
-#   review the conditioned GLBs (?viewer=<id>, headed/WebGPU)
+#   review the conditioned GLBs in the prop scene: add to prop-showcase.json props[], fly ?track=prop-showcase (headed/WebGPU)
 python tools/make_level_props.py <level> integrate   # one .blend per prop → <content-root>/tracks-src/props/ai/
 python tools/make_level_props.py <level> status      # manifest summary, anytime
 ```
@@ -172,6 +172,32 @@ python tools/make_level_props.py <level> status      # manifest summary, anytime
   outright (a guaranteed release matters more than keeping it warm on an
   8 GB box). Server/Blender/env paths are env-overridable at the top of the
   script (Windows defaults match the dev machine).
+
+## Shipping a batch
+
+An AI prop batch ships as **its own PR** — not straight to `main`. Generated
+content gets an explicit review gate, lands as a revertible unit, and bundles
+the reproducibility anchor with the binaries in one record.
+
+- **Branch:** `props/<level>-ai` (e.g. `props/sandbar-ai`).
+- **Bundle (one PR):** the conditioned GLBs (`public/assets/props/ai/*.glb`,
+  Git LFS) + the per-level manifest (`specs/props/ai/<level>.json`) + any
+  pipeline change the batch motivated (e.g. a `target_height` / scale tweak in
+  `AI_FAMILIES`) + the prop-showcase validation stations
+  (`public/tracks/prop-showcase.json` `props[]`).
+- **Review gate = the prop scene.** The reviewer loads `?track=prop-showcase`
+  (headed/WebGPU) and flies past the props at race pace — the real "reads
+  correctly at 40 m/s" + scale check. (`?viewer=` is bikes-only; props
+  validate in the prop-showcase scene.)
+- **Scale:** props read ~3× smaller than real-world size at game scale, so
+  `AI_FAMILIES` `target_height` is pre-scaled ~3×. If a prop still looks small
+  in the prop scene, bump its `target_height` (manifest + `AI_FAMILIES`) and
+  re-run `condition` — the raw Hunyuan meshes persist in
+  `tools/ai_prop_runs/<level>/meshes/`, so re-conditioning is cheap (no GPU).
+- **NOT in this PR: level placement.** Putting a prop into a content track
+  (its `props[]`, scatter, or bespoke geometry) is a **level designer** task,
+  shipped separately. The pipeline *creates + validates*; it never edits a
+  content level or regenerates a `seed_track_*` script.
 
 ## See also
 
