@@ -26,6 +26,20 @@ installs Google Drive for Desktop and the same folder appears.
 > `tracks-src/README.md` and `tracks-src/blender_assets.cats.txt` are small
 > and stay tracked in git. Only `*.blend` is ignored.
 
+The AI prop factory (`make-level-props`, see
+[ai-prop-pipeline.md](ai-prop-pipeline.md)) follows the same rule: its **raw**
+outputs land in the content root, the **compiled** GLB in git LFS.
+
+| AI prop artifact | Home |
+| --- | --- |
+| Concept art (SDXL PNGs + contact sheet) | `<content-root>/concept-art/props/<level>/` (Drive) |
+| Per-prop authoring `.blend` (one asset per file) | `<content-root>/tracks-src/props/ai/<id>.blend` (Drive) |
+| Conditioned, shippable GLB | `public/assets/props/ai/<id>.glb` (git LFS) |
+| Per-level manifest (prompts/seeds/params — the reproducibility anchor) | `specs/props/ai/<level>.json` (git) |
+
+The content root defaults to `C:\project-content\hoverbike`; override with
+`$HOVERBIKE_CONTENT_ROOT`.
+
 ### Pointing the addon at your repo (authoring outside the clone)
 
 You author `.blend`s **in the Drive folder**, but exports

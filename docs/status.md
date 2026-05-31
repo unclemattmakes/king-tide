@@ -1,3 +1,26 @@
+> **Last updated: 2026-05-30** — `make-level-props`: the local AI prop
+> factory, now a level-scale orchestrator + validated end-to-end.
+>
+> **AI prop pipeline is built and proven.**
+> [`make-level-props <level>`](../tools/make_level_props.py) (also the
+> `/make-props` skill) runs the whole local, free concept→3D→prop chain over
+> a track's prop list: resolve + auto-route (compact/solid → AI lane;
+> thin/spanning → flagged procedural), then phase-batch the 8 GB GPU —
+> ComfyUI concepts → contact-sheet **review gate** → Hunyuan image→3D →
+> `condition_ai_mesh` → **review gate** → integrate as an `hv_locked` library
+> asset. Two Blender helpers back it: `condition_ai_batch.py` (Phase C) and
+> `integrate_ai_props.py` (lock-in). Validated end-to-end on **The Maw's
+> `sea_boulder`** (clean SDXL concept → Hunyuan mesh → ~2 000-tri conditioned
+> prop with a single `COLOR_0` + box collider → `hv_locked`, asset-marked
+> `.blend`). Routing checked across all 13 tracks (≈11 AI props, the rest
+> flagged procedural); the 12 remaining levels are routed and await a GPU
+> run. Raw vs. compiled split (per [asset-storage.md](./asset-storage.md)):
+> concept PNGs + per-prop `.blend`s live in the Drive content root; the
+> committed anchors are the GLB (`public/assets/props/ai/`, Git LFS) + the
+> per-level manifest (`specs/props/ai/<level>.json`). Operational guide:
+> [ai-prop-pipeline.md](./ai-prop-pipeline.md); strategy:
+> [props-production-plan.md](./props-production-plan.md).
+>
 > **Last updated: 2026-05-30** — Licensed soundtrack radio + credit toast,
 > shoreline transition (shore-aligned waves, swash, wet sand), drift, tricks,
 > hover polish, Electron Steam port, making-of microsite.

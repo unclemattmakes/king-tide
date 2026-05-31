@@ -176,19 +176,23 @@ committed `seed_*.py` for CI reproducibility.
 What procedural can't make read well: sculpted rock/sea-stack/coral family,
 kelp, strangler-fig roots, the great-white shark, Bayon carved-face *detail*,
 and the Statue of Liberty hero sculpt. Generate → condition → instance.
+**The loop is now automated**: `make-level-props <level>` routes a track's
+props to the AI lane and drives the GPU phases; run it per level and review
+at the two gates. Routing is validated across all 13 tracks (≈11 AI props,
+the rest flagged procedural).
 
 ### Phase 3 — CC0 fill + materials (~10%)
 PolyHaven HDRIs/textures into the `mat_*` families; ambientCG / Kenney /
 Quaternius filler; existing `build_trim_sheets.py` / `build_decal_atlas.py` /
 `build_sprite_atlas.py`.
 
-### Week-1 de-risking pilot
-Prove the loop on the **rock / sea-stack family** — highest reuse (4+ tracks),
-organic enough that generation clearly beats the FBM-icosphere placeholder.
-Upgrade `props-library.blend`'s `prop_rock` (procedural first, then Rodin
-variants once installed), scatter-test on The Maw. If the loop is smooth,
-scale Phase 2 with confidence; if conditioning is painful, you learned it
-cheap on one family.
+### Week-1 de-risking pilot — ✅ loop proven
+Proved the loop on the **rock family**: The Maw's `sea_boulder` ran the full
+`make-level-props` chain (SDXL concept → Hunyuan mesh → ~2000-tri conditioned
+prop with `COLOR_0` + box collider → `hv_locked` library asset). The loop is
+smooth — Phase 2 can scale level by level. Conditioning was *not* painful
+once two export bugs were fixed (single-`COLOR_0` export; generator
+color-layer strip — see [ai-prop-pipeline.md](ai-prop-pipeline.md)).
 
 ## Master archetype list
 
