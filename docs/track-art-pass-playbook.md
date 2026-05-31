@@ -6,6 +6,12 @@
 > [tracks/README.md](./tracks/README.md) (per-track design + prop manifests),
 > [track-editor-guide.md](./track-editor-guide.md), and
 > [blender-pipeline-guide.md](./blender-pipeline-guide.md).
+>
+> This playbook is the *how* of dressing. For the *what it should look like* —
+> the track's built/broken/blooming ratio, palette family, and set-piece notes —
+> read [track-art-direction.md](./track-art-direction.md) (and
+> [prop-art-direction.md](./prop-art-direction.md) for the props you're placing)
+> before you start.
 
 An "art pass" = the foundations (terrain, racing line, checkpoints, buoys) are
 already authored; you're adding scenery. Two surfaces hold a track's data and

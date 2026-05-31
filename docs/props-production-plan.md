@@ -8,6 +8,13 @@ the v1 landmark/VFX plan lives in [v1-asset-pipeline-plan.md](v1-asset-pipeline-
 This doc is the *prop-art production strategy* layer — how each asset gets
 made, conditioned, and shipped without breaking the instancing contract.
 
+> **Before building any prop, read [art-direction.md](art-direction.md)** — the
+> "clean stylized toy" register, the built/broken/blooming material-state rule,
+> the waterline rule, and the prop-builder checklist define *how a prop should
+> look*. This doc defines how it gets *made and shipped*. For the **per-family
+> look + copy-paste ComfyUI concept prompts** (the AI-lane concept phase this
+> plan routes to), see [prop-art-direction.md](prop-art-direction.md).
+
 ## Where we are
 
 Every prop and landmark in the game today is a **procedural placeholder**:
