@@ -1,3 +1,13 @@
+> **Last updated: 2026-05-31** — Sandbar art pass: first track dressed with
+> the conditioned AI props. 30 placed props (`props[]` in
+> [public/tracks/sandbar.json](../public/tracks/sandbar.json) — sea-stacks,
+> boulders, wrecks, drowned cabs, anchors, rubble) seated on the real terrain
+> + 12 instanced cove-edge palms baked into the env GLB. All props verified
+> **outside the AI racing corridor** (Catmull-Rom AI line + buoy-wall
+> clearance) so the loop stays completable; rocks sunk ~30% to read as
+> rooted. The reusable method + gotchas are written up in
+> [track-art-pass-playbook.md](./track-art-pass-playbook.md).
+>
 > **Last updated: 2026-05-30** — `make-level-props`: the local AI prop
 > factory, now a level-scale orchestrator + validated end-to-end.
 >

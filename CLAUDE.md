@@ -43,7 +43,10 @@ post-flood. Planning trio:
 
 - **Tracks** — split between Blender (environment geometry) and the in-app editor
   (gameplay data). See [docs/blender-pipeline-guide.md](docs/blender-pipeline-guide.md)
-  and [docs/track-editor-guide.md](docs/track-editor-guide.md).
+  and [docs/track-editor-guide.md](docs/track-editor-guide.md). For dressing an
+  existing gameplay-complete track with props/foliage (placement, AI-corridor
+  clearance, GLB re-export that preserves the authored JSON, headless-verify
+  gotchas), see [docs/track-art-pass-playbook.md](docs/track-art-pass-playbook.md).
 - **Bikes** — one `.blend` per variant in `bikes-src/`, exported via the
   Hoverbike addon. See the bike section in
   [docs/asset-pipeline-guide.md](docs/asset-pipeline-guide.md).

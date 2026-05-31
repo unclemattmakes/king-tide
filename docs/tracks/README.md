@@ -142,6 +142,10 @@ when the dressing is load-bearing for the look.
 - [../track-design-specs.md](../track-design-specs.md) — deep authoring
   spec (beat timing, wave-zone tuning, emitter configs). Still authoritative
   for those numbers; anti-grav curves in it are retired by this pass.
+- [../track-art-pass-playbook.md](../track-art-pass-playbook.md) — how to dress
+  an existing gameplay-complete track with props + foliage (prop placement,
+  AI-corridor clearance, seating/sink, GLB re-export that preserves the
+  authored JSON, headless-verification gotchas). Read before doing a prop pass.
 - [../blender-pipeline-guide.md](../blender-pipeline-guide.md) — the object
   vocabulary every prop name here is sourced from.
 - [../design-targets.md](../design-targets.md) — numeric targets (the
