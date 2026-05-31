@@ -8,6 +8,12 @@
 > sized the per-track *production* work; this doc sizes the *systems*
 > that make a 2026-quality arcade racer look populated and alive
 > without burning weeks per track.
+>
+> The *creative* target these systems serve — the "clean stylized toy"
+> register, the built/broken/blooming material-state rule, the colour/light
+> grammar, and the level-builder checklist — is now codified in
+> [art-direction.md](./art-direction.md). This doc is the *systems* that
+> deliver that look; that doc is the look itself.
 
 ## 1. The starting point — what tracks actually contain today
 

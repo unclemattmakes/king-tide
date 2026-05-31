@@ -146,6 +146,10 @@ when the dressing is load-bearing for the look.
   an existing gameplay-complete track with props + foliage (prop placement,
   AI-corridor clearance, seating/sink, GLB re-export that preserves the
   authored JSON, headless-verification gotchas). Read before doing a prop pass.
+- [../track-art-direction.md](../track-art-direction.md) — per-track **art
+  direction**: material-state (built/broken/blooming) ratio, palette family,
+  waterline + set-piece dressing notes for all 13 tracks. Read alongside the
+  per-track doc before an art pass.
 - [../blender-pipeline-guide.md](../blender-pipeline-guide.md) — the object
   vocabulary every prop name here is sourced from.
 - [../design-targets.md](../design-targets.md) — numeric targets (the

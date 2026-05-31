@@ -26,6 +26,13 @@ post-flood. Planning trio:
   priorities, anti-targets from the Pacer / MK World failure modes.
 - [docs/track-themes.md](docs/track-themes.md) — 12 ship tracks + tutorial,
   full content bible with set-pieces, palettes, lore tags.
+- [docs/art-direction.md](docs/art-direction.md) — **canonical art direction**:
+  post-apocalyptic solarpunk, the "clean stylized toy" register, the
+  built/broken/blooming material-state rule, and the prop- + level-builder
+  checklists. Read before building or dressing any prop or level. Per-domain
+  companions: [art per track](docs/track-art-direction.md),
+  [art per prop family + ComfyUI prompts](docs/prop-art-direction.md),
+  [art per bike + ComfyUI prompts](docs/bike-art-direction.md).
 - [docs/tracks/](docs/tracks/README.md) — **canonical per-track design docs**
   (one per track) with unique + common prop manifests. Embodies the
   **no-anti-grav** direction (anti-grav cut from v1; verticality is terrain,
@@ -49,7 +56,9 @@ post-flood. Planning trio:
   gotchas), see [docs/track-art-pass-playbook.md](docs/track-art-pass-playbook.md).
 - **Bikes** — one `.blend` per variant in `bikes-src/`, exported via the
   Hoverbike addon. See the bike section in
-  [docs/asset-pipeline-guide.md](docs/asset-pipeline-guide.md).
+  [docs/asset-pipeline-guide.md](docs/asset-pipeline-guide.md). Per-variant art
+  direction + ComfyUI concept prompts:
+  [docs/bike-art-direction.md](docs/bike-art-direction.md).
 - **Blender scripts** live in `tools/blender/`. The Hoverbike addon
   (`tools/blender/hoverbike_addon/`, a package) is the user-facing
   entry point; `build_*.py` files regenerate `.blend`s from JSON specs.

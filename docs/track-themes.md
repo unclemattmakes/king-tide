@@ -65,7 +65,11 @@ These shaped every track in this doc; future tracks should hold to them.
 6. **Visual contrast against the apocalypse.** The world ended; the
    neon is still on. Bright palettes, defiant colors, music with a
    pulse. *The mood is "spectator sport during the collapse,"* not
-   "ruin porn."
+   "ruin porn." This principle is now fully codified in
+   [art-direction.md](./art-direction.md) — post-apocalyptic solarpunk,
+   the "clean stylized toy" register, and the built/broken/blooming
+   material-state rule. This bible stays the source of truth for per-track
+   *palette + lore*; art-direction.md governs *how the look is applied*.
 7. **Cup-level escalation.** Each cup runs short → moderate →
    spectacle-closer in lap time and set-piece intensity. The cup's
    third track is its emotional payoff; the first track is its
