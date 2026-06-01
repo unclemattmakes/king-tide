@@ -798,7 +798,15 @@ def cmd_concepts(level: str, only: set | None) -> None:
     for p in targets:
         out = os.path.join(cdir, f"{p['prop_id']}.png")
         print(f"[make-props] concept: {p['prop_id']}  seed={p['seed']}")
-        comfyui_gen.generate(p["prompt"], out, seed=int(p["seed"]))
+        # `negative` is optional per-prop (committed alongside the prompt as
+        # part of the reproducibility anchor). When absent, comfyui_gen falls
+        # back to its default clean-cutout negative, so other levels' manifests
+        # are unaffected.
+        neg = p.get("negative")
+        if neg:
+            comfyui_gen.generate(p["prompt"], out, seed=int(p["seed"]), neg=neg)
+        else:
+            comfyui_gen.generate(p["prompt"], out, seed=int(p["seed"]))
         # Store relative to the content root — keeps the committed manifest
         # portable (no machine-specific C:\Users\… paths).
         p["concept"] = os.path.relpath(out, CONTENT_ROOT)
