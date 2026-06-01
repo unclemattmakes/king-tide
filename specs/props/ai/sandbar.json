@@ -4,8 +4,8 @@
     {
       "prop_id": "sea_boulder",
       "family": "rock",
-      "subject": "massive solid weathered sea boulder, rounded ocean rock, barnacle and algae crusted, closed compact form",
-      "prompt": "a single massive solid weathered sea boulder, rounded ocean rock, barnacle and algae crusted, closed compact form, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "subject": "massive rounded sea boulder rock, one solid closed boulder, weathered pale reef stone, a band of green algae and barnacles around the lower third, a little soft moss on top, warm turquoise-tinted stone",
+      "prompt": "a single massive rounded sea boulder rock, one solid closed boulder, weathered pale reef stone, a band of green algae and barnacles around the lower third, a little soft moss on top, warm turquoise-tinted stone, one isolated centered object on a plain solid white background, full single object in frame, sharp focus, stylized 3D game prop asset, clean stylized toy look, bold flat colour blocking, soft cel shading with a gentle light-to-shadow gradient, matte surface, confident slightly-oversized rounded-but-faceted form, soft even studio lighting",
       "target_tris": 2000,
       "target_height": 18.0,
       "collider": "box",
@@ -22,13 +22,14 @@
       "mesh": "tools\\ai_prop_runs\\sandbar\\meshes\\sea_boulder.glb",
       "conditioned_glb": "public\\assets\\props\\ai\\sea_boulder.glb",
       "integrated": true,
-      "library_blend": "tracks-src\\props\\ai\\sea_boulder.blend"
+      "library_blend": "tracks-src\\props\\ai\\sea_boulder.blend",
+      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, rocks, pebbles, turtle, shell, animal, creature"
     },
     {
       "prop_id": "rubble_chunk",
       "family": "rubble",
-      "subject": "solid chunk of broken concrete and brick rubble, compact debris block, rounded weathered masonry",
-      "prompt": "a single solid chunk of broken concrete and brick rubble, compact debris block, rounded weathered masonry, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "subject": "ONE single chunk of broken concrete rubble, a solid compact block, extreme close-up filling the entire frame, cracked grey masonry with a bit of bent rebar, salt-bleached pale concrete, a little green algae along the bottom edge",
+      "prompt": "a single ONE single chunk of broken concrete rubble, a solid compact block, extreme close-up filling the entire frame, cracked grey masonry with a bit of bent rebar, salt-bleached pale concrete, a little green algae along the bottom edge, one isolated centered object on a plain solid white background, full single object in frame, sharp focus, stylized 3D game prop asset, clean stylized toy look, bold flat colour blocking, soft cel shading with a gentle light-to-shadow gradient, matte surface, confident slightly-oversized rounded-but-faceted form, soft even studio lighting",
       "target_tris": 1500,
       "target_height": 9.0,
       "collider": "box",
@@ -39,19 +40,20 @@
       "sources": [
         "post-flood rubble (README common dressing)"
       ],
-      "seed": 12346,
+      "seed": 22246,
       "approved": true,
       "concept": "concept-art\\props\\sandbar\\rubble_chunk.png",
       "mesh": "tools\\ai_prop_runs\\sandbar\\meshes\\rubble_chunk.glb",
       "conditioned_glb": "public\\assets\\props\\ai\\rubble_chunk.glb",
       "integrated": true,
-      "library_blend": "tracks-src\\props\\ai\\rubble_chunk.blend"
+      "library_blend": "tracks-src\\props\\ai\\rubble_chunk.blend",
+      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, pile, stack, heap, rocks, blocks, bricks, many, repeated, tiled, pattern, spaceship, pod"
     },
     {
       "prop_id": "boat_wreck",
       "family": "wreck",
-      "subject": "solid half-sunken fishing boat hull wreck, compact weathered rusted hull, no masts or rigging",
-      "prompt": "a single solid half-sunken fishing boat hull wreck, compact weathered rusted hull, no masts or rigging, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "subject": "one small wrecked wooden fishing boat hull, a single solid broken weathered hull tilted on its side, salt-faded blue and cream paint, green algae and barnacles along the hull waterline, no masts, no sails, no rigging",
+      "prompt": "a single one small wrecked wooden fishing boat hull, a single solid broken weathered hull tilted on its side, salt-faded blue and cream paint, green algae and barnacles along the hull waterline, no masts, no sails, no rigging, one isolated centered object on a plain solid white background, full single object in frame, sharp focus, stylized 3D game prop asset, clean stylized toy look, bold flat colour blocking, soft cel shading with a gentle light-to-shadow gradient, matte surface, confident slightly-oversized rounded-but-faceted form, soft even studio lighting",
       "target_tris": 2500,
       "target_height": 15.0,
       "collider": "box",
@@ -68,13 +70,14 @@
       "mesh": "tools\\ai_prop_runs\\sandbar\\meshes\\boat_wreck.glb",
       "conditioned_glb": "public\\assets\\props\\ai\\boat_wreck.glb",
       "integrated": true,
-      "library_blend": "tracks-src\\props\\ai\\boat_wreck.blend"
+      "library_blend": "tracks-src\\props\\ai\\boat_wreck.blend",
+      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, harbor, dock, marina, intact boat, sails, water, waves, reflection"
     },
     {
       "prop_id": "drowned_cab",
       "family": "vehicle",
-      "subject": "solid submerged taxi cab car body, rounded compact closed shell, algae covered, no thin antennae",
-      "prompt": "a single solid submerged taxi cab car body, rounded compact closed shell, algae covered, no thin antennae, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "subject": "one submerged taxi cab car body, a single solid compact car wreck, faded warm-yellow paintwork, green algae creeping over the hood and roof, no roof rack, no antenna, no rocket",
+      "prompt": "a single one submerged taxi cab car body, a single solid compact car wreck, faded warm-yellow paintwork, green algae creeping over the hood and roof, no roof rack, no antenna, no rocket, one isolated centered object on a plain solid white background, full single object in frame, sharp focus, stylized 3D game prop asset, clean stylized toy look, bold flat colour blocking, soft cel shading with a gentle light-to-shadow gradient, matte surface, confident slightly-oversized rounded-but-faceted form, soft even studio lighting",
       "target_tris": 2500,
       "target_height": 7.8,
       "collider": "box",
@@ -91,13 +94,14 @@
       "mesh": "tools\\ai_prop_runs\\sandbar\\meshes\\drowned_cab.glb",
       "conditioned_glb": "public\\assets\\props\\ai\\drowned_cab.glb",
       "integrated": true,
-      "library_blend": "tracks-src\\props\\ai\\drowned_cab.blend"
+      "library_blend": "tracks-src\\props\\ai\\drowned_cab.blend",
+      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, rocket, torpedo, roof rack, two cars, traffic"
     },
     {
       "prop_id": "ship_anchor",
       "family": "anchor",
-      "subject": "solid rusted heavy iron ship anchor, compact closed form",
-      "prompt": "a single solid rusted heavy iron ship anchor, compact closed form, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "subject": "one simple classic ship anchor, a single solid iron anchor with a straight vertical shank, one round ring at the top, two curved flukes at the bottom and a straight stock crossbar, plain clean shape, warm dark salvaged iron with light oxidation, a little green algae at the base, standing upright, medium shot showing the whole anchor",
+      "prompt": "a single one simple classic ship anchor, a single solid iron anchor with a straight vertical shank, one round ring at the top, two curved flukes at the bottom and a straight stock crossbar, plain clean shape, warm dark salvaged iron with light oxidation, a little green algae at the base, standing upright, medium shot showing the whole anchor, one isolated centered object on a plain solid white background, full single object in frame, sharp focus, stylized 3D game prop asset, clean stylized toy look, bold flat colour blocking, soft cel shading with a gentle light-to-shadow gradient, matte surface, confident slightly-oversized rounded-but-faceted form, soft even studio lighting",
       "target_tris": 1500,
       "target_height": 9.0,
       "collider": "box",
@@ -108,19 +112,20 @@
       "sources": [
         "marina anchor (cove dressing)"
       ],
-      "seed": 12349,
+      "seed": 33351,
       "approved": true,
       "concept": "concept-art\\props\\sandbar\\ship_anchor.png",
       "mesh": "tools\\ai_prop_runs\\sandbar\\meshes\\ship_anchor.glb",
       "conditioned_glb": "public\\assets\\props\\ai\\ship_anchor.glb",
       "integrated": true,
-      "library_blend": "tracks-src\\props\\ai\\ship_anchor.blend"
+      "library_blend": "tracks-src\\props\\ai\\ship_anchor.blend",
+      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, ornate, decorative, fantasy, gothic, tentacles, octopus, scrollwork, filigree, engraved, icon set, multiple anchors, repeated, tiled, pattern, flat relief, bas-relief, chain, rope, spaceship, creature"
     },
     {
       "prop_id": "marker_buoy",
       "family": "prop",
-      "subject": "solid floating mooring buoy, compact rounded closed form, weathered painted steel, no thin pole mast or chain",
-      "prompt": "a single solid floating mooring buoy, compact rounded closed form, weathered painted steel, no thin pole mast or chain, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "subject": "one floating harbour mooring buoy, a single solid round steel buoy, freshly painted warm coral-orange and white, a green algae and barnacle band around the bottom, a small flat top hatch, no pole, no mast, no chain",
+      "prompt": "a single one floating harbour mooring buoy, a single solid round steel buoy, freshly painted warm coral-orange and white, a green algae and barnacle band around the bottom, a small flat top hatch, no pole, no mast, no chain, one isolated centered object on a plain solid white background, full single object in frame, sharp focus, stylized 3D game prop asset, clean stylized toy look, bold flat colour blocking, soft cel shading with a gentle light-to-shadow gradient, matte surface, confident slightly-oversized rounded-but-faceted form, soft even studio lighting",
       "target_tris": 1500,
       "target_height": 7.5,
       "collider": "box",
@@ -137,7 +142,54 @@
       "mesh": "tools\\ai_prop_runs\\sandbar\\meshes\\marker_buoy.glb",
       "conditioned_glb": "public\\assets\\props\\ai\\marker_buoy.glb",
       "integrated": true,
-      "library_blend": "tracks-src\\props\\ai\\marker_buoy.blend"
+      "library_blend": "tracks-src\\props\\ai\\marker_buoy.blend",
+      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, fish, sea creature, animal, fins, tail, rocket, torpedo, submarine"
+    },
+    {
+      "prop_id": "drift_buoy",
+      "family": "prop",
+      "source": "midjourney",
+      "pipeline": "Midjourney v7 concept → cropped single object → Hunyuan3D-2mini single-view → condition_ai_batch",
+      "subject": "retro-future salvaged drift-marker navigation buoy, battered painted-metal float, glowing neon-mint accent ring, barnacle and algae band at the waterline",
+      "prompt": "retro-future game prop concept art, weathered salvaged retro-future style, a functional drift-marker navigation buoy (battered painted metal float, a glowing neon-mint accent ring, barnacles and algae at the waterline), bold flat color blocking, strong readable silhouette, soft cel shading, crisp rim light, matte painted salvage metal, post-apocalyptic solarpunk drowned world, painterly concept art, Moebius x Wipeout --ar 1:1 --style raw --s 250 --no cute, vinyl toy, chibi, smooth plastic, glossy, infantile",
+      "target_tris": 2000,
+      "target_height": 5.5,
+      "collider": "box",
+      "tint": "#3f8e8a",
+      "smooth": true,
+      "mat_family": "prop",
+      "catalog": "Open Sea",
+      "sources": [
+        "first Midjourney-pipeline AI prop; distinct retro-future style vs the make-props marker_buoy"
+      ],
+      "approved": true,
+      "concept": "concept-art\\midjourney\\sandbar\\sandbar_prop_buoy-and-sign.webp",
+      "mesh": "concept-art\\midjourney\\sandbar\\_mesh_out\\buoy_singleview.glb",
+      "conditioned_glb": "public\\assets\\props\\ai\\drift_buoy.glb",
+      "integrated": false
+    },
+    {
+      "prop_id": "cargo_crates",
+      "family": "prop",
+      "source": "midjourney",
+      "pipeline": "Midjourney v7 concept → Hunyuan3D-2mini single-view → condition_ai_batch",
+      "subject": "retro-future salvaged cargo cluster: stenciled crates and dented metal drums and barrels on a wooden pallet, lightly barnacled and salt-bleached at the base",
+      "prompt": "retro-future game prop concept art, weathered salvaged retro-future style, repainted and stenciled cargo crates and dented metal drums and barrels, mismatched salvaged panels, a coil of cable, lightly barnacled and salt-bleached at the base, bold flat color blocking, strong readable silhouette, soft cel shading, crisp rim light, matte painted salvage metal, post-apocalyptic solarpunk drowned world, painterly concept art, Moebius x Wipeout --ar 1:1 --style raw --s 250 --no cute, vinyl toy, chibi, smooth plastic, glossy, infantile",
+      "target_tris": 2500,
+      "target_height": 5.0,
+      "collider": "box",
+      "tint": "#6f8a72",
+      "smooth": true,
+      "mat_family": "prop",
+      "catalog": "Industrial",
+      "sources": [
+        "first Midjourney-pipeline AI prop; marina / dock dressing cluster"
+      ],
+      "approved": true,
+      "concept": "concept-art\\midjourney\\sandbar\\sandbar_prop_crates-barrels.webp",
+      "mesh": "concept-art\\midjourney\\sandbar\\_mesh_out\\crates_singleview.glb",
+      "conditioned_glb": "public\\assets\\props\\ai\\cargo_crates.glb",
+      "integrated": false
     }
   ],
   "procedural_lane": [

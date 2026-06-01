@@ -25,6 +25,13 @@ Strategy, archetype list, and the **subject-suitability rule** live in
 > `sea_boulder` — concept → Hunyuan mesh → ~2 000-tri conditioned prop
 > (single COLOR_0 + box collider) → `hv_locked` library asset, gated at the
 > two review points. See the Orchestration section below.
+>
+> **Proven from external concept art + multiview** (2026-06-01): a **Midjourney**
+> concept (cleaned to one isolated solid object) fed Hunyuan single-view
+> *directly* — skipping ComfyUI — and conditioned cleanly for Sandbar's
+> `drift_buoy` + `cargo_crates` (the first MJ-pipeline props). Separately, the
+> **multiview** model (`Hunyuan3D-2mv`) was brought up locally on the 8 GB box.
+> See "Alternative front-end" (Stage 1) and "Multiview" (Stage 2) below.
 
 ## Stage 1 — Concept art (ComfyUI, text→image)
 
@@ -37,12 +44,62 @@ Strategy, archetype list, and the **subject-suitability rule** live in
   ```
 - **Prompt recipe** (what makes a clean image→3D input): `"a single <subject>, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference"` + the client's default negative (no background / scene / multi-object / text). One isolated object on plain bg → Hunyuan's `rembg` cuts it cleanly.
 
+### Alternative front-end — external concept art (Midjourney, etc.)
+
+ComfyUI/SDXL is the *local* concept source, but Stage 2 only needs **one clean
+isolated solid object on a plain background** — so any concept tool works. To use
+an external concept (Midjourney v7 is the proven case, 2026-06-01):
+
+1. **Crop to one object.** Image-to-3D fuses everything in frame, so a two-object
+   concept (e.g. buoy + sign) must be cropped to the single subject and
+   square-padded on the plain studio bg (the conditioner re-tints anyway, so the
+   concept is for *form*, not final colour).
+2. **Feed Hunyuan single-view** (Stage 2) and **condition** (Stage 3) unchanged.
+   Provenance goes in the manifest with `"source": "midjourney"` + the prompt.
+3. **Midjourney prompt register** ([prop-art-direction.md](./prop-art-direction.md)):
+   our doc name *"clean stylized toy"* makes MJ render literal **vinyl
+   figurines** — use **"retro-future / weathered salvaged / matte painted salvage
+   metal / painterly concept art"** instead, with
+   `--no cute, vinyl toy, chibi, smooth plastic, glossy`. (Hover-craft only read
+   wheelless when you describe the *air-gap* — "hovers on a cushion of repulsion,
+   clear glowing gap beneath the hull" — never a surface verb like "skimming".)
+
+First MJ-pipeline props: Sandbar `drift_buoy` (retro-future buoy, distinct from
+the make-props `marker_buoy`) + `cargo_crates`. Raw MJ concepts + the cropped
+single-object inputs live in `<content-root>/concept-art/midjourney/<level>/`.
+
 ## Stage 2 — Image→3D (Hunyuan3D)
 
 - **Env:** `C:\Users\matts\miniconda3\envs\hunyuan` (Python 3.11, torch cu128). **Repo:** `C:\Users\matts\git\ai-gen\Hunyuan3D-2`. **Model:** `Hunyuan3D-2mini` (auto-caches to `~/.cache/huggingface`).
 - **Start** (⚠ must `cd` into the repo dir — `gradio_cache` is cwd-relative): `python api_server.py --port 8080`.
 - **⚠ IMAGE-TO-3D ONLY.** Text→3D is disabled — `pipeline_t2i` is commented out in `api_server.py`. A text prompt crashes the worker thread *and* `/status` then hangs on `"processing"` forever. Always send an image (that's why ComfyUI is the front of the chain).
 - **API:** `POST /send {image:<base64>, octree_resolution:256, num_inference_steps:20, guidance_scale:5.5, texture:false}` → `{uid}`. `GET /status/{uid}` → `{"status":"processing"}` until done, then `{"status":"completed","model_base64":<glb>}`. Run **shape-only** (`texture:false`) — the conditioner strips materials anyway; keeps VRAM ~6 GB. Output ≈ 200–500 k tris.
+
+### Multiview (Hunyuan3D-2mv) — optional, for hero assets
+
+Single-view invents the unseen back/sides; the **multiview** model rebuilds them
+from real views. The repo ships it (`shape_gen_multiview.py`): `from_pretrained(
+'tencent/Hunyuan3D-2mv', subfolder='hunyuan3d-dit-v2-mv-turbo')` taking an
+`image={'front':…, 'left':…, 'back':…}` dict (5-step FlashVDM turbo). Working
+locally as of 2026-06-01, with two gotchas:
+
+- **8 GB / 15 GB-RAM crash + fix.** mv uses a **DINOv2-giant** (~1.1 B params)
+  image conditioner built as fp32 random init *on top of* the loaded fp16 ckpt,
+  peaking past free system RAM → a Windows access violation in `nn.Linear`. Fix:
+  **construct in fp16** — wrap `from_pretrained` in
+  `torch.set_default_dtype(torch.float16)` (restore after). Run it in an isolated
+  **`hunyuan-mv`** env (`conda create --clone hunyuan`) so it can't disturb the
+  working single-view env. Runner pattern saved alongside the props.
+- **The real cost is the views.** mv needs **consistent ortho renders**
+  (front/left/back, white bg, same scale/light — see the repo's
+  `assets/example_mv_images`). Midjourney *video* frames can't meet that bar
+  (morphing parallax); the proper source is a multiview-diffusion step
+  (Zero123++), not yet installed in our ComfyUI.
+- **Verdict.** Single-vs-mv on the bundled example: fronts identical, mv's
+  back/sides truer to the inputs — a **modest** gain on symmetric/simple props.
+  **Single-view stays the default** for 40 m/s stylized props; reach for mv only
+  on a specific hero asset where the back matters *and* you can source consistent
+  views.
 
 ## Stage 3 — Mesh→prop ([`condition_ai_mesh.py`](../tools/blender/condition_ai_mesh.py))
 

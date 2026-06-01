@@ -1,3 +1,32 @@
+> **Last updated: 2026-06-01** — Midjourney → mesh: external concept art is now
+> a working front-end for the AI prop pipeline, and multiview (Hunyuan3D-2mv) is
+> unlocked on the 8 GB box.
+>
+> **The AI prop factory gained a second concept source.** A Midjourney v7
+> concept (cleaned to one isolated solid object) can skip the ComfyUI/SDXL stage
+> and feed **Hunyuan3D-2mini single-view** directly, then through the same
+> `condition_ai_batch` → `public/assets/props/ai/`. First two MJ-pipeline props
+> shipped: **`drift_buoy`** + **`cargo_crates`** (Sandbar) — conditioned
+> (~2–2.5 k tris, `COLOR_0`, box collider, `mat_prop_*`) and placed in
+> `?track=prop-showcase`; manifest provenance carries `"source": "midjourney"`.
+> MJ-prompt lesson learned: the doc register name *"clean stylized toy"* makes
+> Midjourney render literal vinyl figurines — prompt **"retro-future / weathered
+> salvaged / painterly"** instead (the loved Scout look); and a hover-craft only
+> reads wheelless when you describe *"hovers on a cushion of repulsion, clear gap
+> beneath the hull"* (never a surface verb).
+>
+> **Multiview (Hunyuan3D-2mv) now runs locally.** The repo's mv-turbo pipeline
+> (`{front,left,back}`, 5-step FlashVDM) was crashing at load with an access
+> violation building DINOv2-giant — root cause was **RAM**, not deps: the
+> conditioner builds the ~1.1 B-param encoder as fp32 random init on top of the
+> already-loaded fp16 ckpt, peaking past free RAM. Fix: construct in fp16
+> (`torch.set_default_dtype(torch.float16)`) in an isolated `hunyuan-mv` env.
+> Single-vs-mv comparison: fronts identical, mv's back/sides are truer to the
+> real view inputs — a modest gain on symmetric props. **Verdict: single-view
+> stays the default** for 40 m/s stylized props; mv is reserved for a hero asset
+> and still needs a consistent-view source (Zero123++) for our own concepts.
+> Operational detail: [ai-prop-pipeline.md](./ai-prop-pipeline.md).
+>
 > **Last updated: 2026-05-31** — Sandbar art pass: first track dressed with
 > the conditioned AI props. 30 placed props (`props[]` in
 > [public/tracks/sandbar.json](../public/tracks/sandbar.json) — sea-stacks,

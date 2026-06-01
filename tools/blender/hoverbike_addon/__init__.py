@@ -72,6 +72,7 @@ from . import (
     prefs,
     previews,
     prop_bake,
+    prop_placements,
     ramp,
     road,
     road_conform_gn,
@@ -168,6 +169,9 @@ _MODULES = (
     # scatter_stroke's HOVERBIKE_PT_track_scatter_stroke is another
     # panel child — same registration constraint, register after panel.
     scatter_stroke,
+    # prop_placements adds the HOVERBIKE_PT_props sub-panel parented on
+    # HOVERBIKE_PT_panel — another panel child, so it registers after panel.
+    prop_placements,
     # menu registers absolute-last — its submenu/pie classes call into
     # operators registered by every module above, and its
     # VIEW3D_MT_editor_menus append needs to land after Blender's stock
