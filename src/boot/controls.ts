@@ -19,7 +19,11 @@ import {
   isAnyOverlayShown,
   type MenuGamepad,
 } from '@/engine/input/menu-gamepad'
-import { TOUCH_MENU_EVENT } from '@/engine/input/touch'
+import {
+  AUTOPILOT_STATE_EVENT,
+  TOUCH_AUTOPILOT_EVENT,
+  TOUCH_MENU_EVENT,
+} from '@/engine/input/touch'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { RBHandleStore } from '@/game/components'
@@ -99,6 +103,9 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
   function setAutoPlay(on: boolean): void {
     autoPlay = on
     onSetAutoPlay(on)
+    // Let the touch overlay (and anything else) reflect the new state — keeps
+    // the on-screen AUTO button lit in sync however auto-play was toggled.
+    window.dispatchEvent(new CustomEvent(AUTOPILOT_STATE_EVENT, { detail: { on } }))
   }
 
   const pauseMenuEl = document.getElementById('pause-menu')
@@ -336,6 +343,14 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     }
     if (pausedForMenu) closePauseMenu()
     else openPauseMenu()
+  })
+
+  // Touch AUTO button (mobile-only on-screen autopilot toggle) mirrors the
+  // keyboard T / F1 binding. Ignore it on the finish screen / while paused so
+  // it can't flip autopilot under a menu.
+  window.addEventListener(TOUCH_AUTOPILOT_EVENT, () => {
+    if (finishShown || pausedForMenu) return
+    setAutoPlay(!autoPlay)
   })
 
   // Gamepad Start (button 9) mirrors keyboard Esc — toggles pause from

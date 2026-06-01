@@ -109,6 +109,60 @@ export function touchIntent(): Intent {
   })
 }
 
+/**
+ * Custom event dispatched on `window` when the player taps the on-screen
+ * AUTO button — mirrors the keyboard `T` autopilot toggle. Decoupled via an
+ * event (like {@link TOUCH_MENU_EVENT}) so this module doesn't import the
+ * controls/sim layer.
+ */
+export const TOUCH_AUTOPILOT_EVENT = 'hb:touch-autopilot'
+
+/**
+ * Custom event the controls layer dispatches on `window` whenever auto-play
+ * flips on/off from ANY source (touch AUTO button, keyboard `T`/`F1`, or the
+ * `__hover.toggleAutoPlay()` console hook). The touch overlay listens so the
+ * AUTO button's lit state stays in sync with the real autopilot state.
+ * `detail.on` carries the new boolean.
+ */
+export const AUTOPILOT_STATE_EVENT = 'hb:autoplay-changed'
+
+/** Max gap between two taps to count as a double-tap throttle lock. */
+export const THROTTLE_DOUBLE_TAP_MS = 300
+
+export interface ThrottleLockState {
+  /** Throttle is latched on; releases no longer cut it. */
+  locked: boolean
+  /** `performance.now()` of the previous press, for double-tap timing. */
+  lastPressMs: number
+}
+
+/**
+ * Pure state transition for a THRUST button press, factored out so the
+ * double-tap-to-lock behaviour can be unit-tested without the DOM.
+ *
+ *  - Tap while locked → unlock (throttle cuts on release as normal).
+ *  - Second tap within {@link THROTTLE_DOUBLE_TAP_MS} → latch throttle on.
+ *  - Otherwise → a normal momentary press, arming the double-tap window.
+ *
+ * `throttleOn` is whether the press itself should hold throttle; the release
+ * handler keeps it held only while `locked`.
+ */
+export function throttlePressTransition(
+  state: ThrottleLockState,
+  nowMs: number,
+): ThrottleLockState & { throttleOn: boolean } {
+  if (state.locked) {
+    // Any tap while latched disengages the lock; throttle falls on release.
+    return { locked: false, lastPressMs: 0, throttleOn: false }
+  }
+  if (nowMs - state.lastPressMs <= THROTTLE_DOUBLE_TAP_MS) {
+    // Second quick tap latches throttle on.
+    return { locked: true, lastPressMs: 0, throttleOn: true }
+  }
+  // First / lone tap: normal momentary throttle, arm the double-tap timer.
+  return { locked: false, lastPressMs: nowMs, throttleOn: true }
+}
+
 const STYLE = `
 #touch-ui { position: fixed; inset: 0; pointer-events: none; z-index: 100;
   touch-action: none; -webkit-user-select: none; user-select: none;
@@ -154,6 +208,13 @@ body.touch-ui-hidden #touch-ui { display: none; }
 #touch-ui .btn.brake { background: rgba(255,180,40,0.30); border-color: rgba(255,220,120,0.7); }
 #touch-ui .btn.thrust { background: rgba(120,220,120,0.34); border-color: rgba(180,255,180,0.75); }
 #touch-ui .btn.active { background: rgba(255,255,255,0.45); }
+/* THRUST latched on via double-tap — a steady ring + lit fill so the player
+   can see at a glance the gas is held hands-free. */
+#touch-ui .btn.thrust.locked {
+  background: rgba(120,220,120,0.6);
+  border-color: rgba(210,255,210,0.95);
+  box-shadow: 0 0 0 3px rgba(180,255,180,0.55), inset 0 0 10px rgba(255,255,255,0.35);
+}
 /* MENU button — anchored top-left, well clear of the centered race timer
    and bottom-corner stick / button column. Players tap it to open the
    pause overlay (same as keyboard Esc / gamepad Start). */
@@ -178,6 +239,30 @@ body.touch-ui-hidden #touch-ui { display: none; }
   background: currentColor; border-radius: 1px;
 }
 #touch-ui .menu-btn.active { background: rgba(77,214,255,0.22); border-color: rgba(77,214,255,0.7); }
+/* AUTO button — top-right mirror of MENU. Tap toggles autopilot (same as the
+   keyboard T binding); the lit engaged state tracks the live autopilot
+   state via AUTOPILOT_STATE_EVENT. */
+#touch-ui .auto-btn {
+  position: absolute; top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  min-width: 56px; height: 40px; padding: 0 14px;
+  border-radius: 22px;
+  background: rgba(5, 10, 20, 0.72);
+  border: 1px solid rgba(255,255,255,0.28);
+  color: #f4f8ff;
+  font: bold 12px ui-monospace, monospace; letter-spacing: 1.5px;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: auto; touch-action: manipulation; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#touch-ui .auto-btn.pressing { background: rgba(77,214,255,0.22); border-color: rgba(77,214,255,0.7); }
+/* Engaged: lit amber pill so an active autopilot is unmistakable. */
+#touch-ui .auto-btn.engaged {
+  background: rgba(255,196,77,0.30);
+  border-color: rgba(255,210,120,0.95);
+  color: #fff4dd;
+  box-shadow: 0 0 0 2px rgba(255,200,90,0.45), inset 0 0 8px rgba(255,210,120,0.3);
+}
 `
 
 function updateStickFromPoint(clientX: number, clientY: number) {
@@ -252,16 +337,38 @@ function installStickHandlers(stick: HTMLDivElement) {
   window.addEventListener('blur', resetStick)
 }
 
-function makeButton(cls: string, label: string, key: ButtonKey): HTMLDivElement {
+/**
+ * Build a face button. Passing `lockable` (used for THRUST) enables
+ * double-tap-to-latch: two quick taps hold throttle on hands-free, and a
+ * single tap while latched releases it. The lit `.locked` class shows the
+ * latched state. Non-lockable buttons are plain momentary holds.
+ */
+function makeButton(cls: string, label: string, key: ButtonKey, lockable = false): HTMLDivElement {
   const b = document.createElement('div')
   b.className = `btn ${cls}`
   b.textContent = label
+  let lock: ThrottleLockState = { locked: false, lastPressMs: 0 }
   const press = (e: Event) => {
     e.preventDefault()
+    if (lockable) {
+      const next = throttlePressTransition(lock, performance.now())
+      lock = { locked: next.locked, lastPressMs: next.lastPressMs }
+      if (next.throttleOn) {
+        pressed.add(key)
+        b.classList.add('active')
+      } else {
+        pressed.delete(key)
+        b.classList.remove('active')
+      }
+      b.classList.toggle('locked', lock.locked)
+      return
+    }
     pressed.add(key)
     b.classList.add('active')
   }
   const release = () => {
+    // A latched throttle ignores releases — it's held until the next tap.
+    if (lockable && lock.locked) return
     pressed.delete(key)
     b.classList.remove('active')
   }
@@ -324,6 +431,56 @@ function makeMenuButton(): HTMLDivElement {
   return b
 }
 
+/**
+ * AUTO button — anchored top-right, mirroring the MENU button at top-left and
+ * well clear of the bottom-corner stick / face-button column so it isn't
+ * brushed mid-race. A tap toggles autopilot, same as the keyboard `T` binding;
+ * the lit `.engaged` state is driven by {@link AUTOPILOT_STATE_EVENT} so it
+ * tracks the real autopilot state no matter how it was toggled.
+ */
+function makeAutopilotButton(): HTMLDivElement {
+  const b = document.createElement('div')
+  b.className = 'auto-btn'
+  b.setAttribute('role', 'button')
+  b.setAttribute('aria-label', 'Toggle autopilot')
+  b.setAttribute('aria-pressed', 'false')
+  b.textContent = 'AUTO'
+  let pressing = false
+  const press = (e: Event) => {
+    e.preventDefault()
+    pressing = true
+    b.classList.add('pressing')
+  }
+  const release = (e: Event) => {
+    if (!pressing) return
+    pressing = false
+    b.classList.remove('pressing')
+    // Fire only on a clean release over the button (mirrors makeMenuButton):
+    // touchend always counts; for mouse we gate so a drag-off doesn't toggle.
+    if (e.type === 'touchend' || e.type === 'mouseup') {
+      window.dispatchEvent(new CustomEvent(TOUCH_AUTOPILOT_EVENT))
+    }
+  }
+  const cancel = () => {
+    pressing = false
+    b.classList.remove('pressing')
+  }
+  b.addEventListener('touchstart', press, { passive: false })
+  b.addEventListener('touchend', release)
+  b.addEventListener('touchcancel', cancel)
+  b.addEventListener('mousedown', press)
+  b.addEventListener('mouseup', release)
+  b.addEventListener('mouseleave', cancel)
+  // Keep the lit state in sync with the real autopilot state (also toggled by
+  // keyboard `T` / console hook), not just our own taps.
+  window.addEventListener(AUTOPILOT_STATE_EVENT, (e) => {
+    const on = Boolean((e as CustomEvent<{ on?: boolean }>).detail?.on)
+    b.classList.toggle('engaged', on)
+    b.setAttribute('aria-pressed', String(on))
+  })
+  return b
+}
+
 export function installTouch(): void {
   if (installed) return
   if (typeof window === 'undefined' || typeof document === 'undefined') return
@@ -349,10 +506,12 @@ export function installTouch(): void {
   buttons.appendChild(makeButton('boost', 'BOOST', 'boost'))
   buttons.appendChild(makeButton('fire', 'FIRE', 'fire'))
   buttons.appendChild(makeButton('brake', 'BRAKE', 'brake'))
-  buttons.appendChild(makeButton('thrust', 'THRUST', 'thrust'))
+  // THRUST is lockable: double-tap latches throttle on, tap again releases.
+  buttons.appendChild(makeButton('thrust', 'THRUST', 'thrust', true))
   ui.appendChild(buttons)
 
   ui.appendChild(makeMenuButton())
+  ui.appendChild(makeAutopilotButton())
 
   document.body.appendChild(ui)
   installStickHandlers(stickEl)
