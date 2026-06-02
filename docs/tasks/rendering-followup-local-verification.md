@@ -1,10 +1,14 @@
 # Task: Local WebGPU verification + profiler-gated render follow-ups
 
-**Status:** open · **Depends on:** PR #260 (rendering tech review +
-WebGPU/TSL improvements) · **Scope:** in-browser verification, then
-data-gated perf work · **Est:** medium · **Requires:** a machine with a
-**real WebGPU GPU** (this is the whole point — the work below could not be
-done in the cloud container that opened PR #260).
+**Status:** Part A verified on real WebGPU hardware (RTX 5050); Part B
+profiled → P2 gate answered. **Results:**
+[rendering-followup-verification-results.md](rendering-followup-verification-results.md).
+Note: PR #260 **merged** to `main` before this ran, so the follow-up is a
+**stacked PR**, not a flip of the original draft. · **Depends on:** PR #260
+(merged) · **Scope:** in-browser verification, then data-gated perf work ·
+**Est:** medium · **Requires:** a machine with a **real WebGPU GPU** (this is
+the whole point — the work below could not be done in the cloud container that
+opened PR #260).
 
 ## Why this hands off to a local agent
 
@@ -96,9 +100,17 @@ Don't implement these blind — the doc explicitly gates them on this data.
 
 ## Done criteria
 
-- Part A checklist confirmed in-browser (screenshots in the PR), defaults tuned.
-- `pnpm typecheck`, `pnpm lint`, `pnpm test` green; relevant `pnpm e2e` if you
-  touch UI.
-- Any Part B work justified by captured profiler numbers, posted in the PR.
-- Update PR #260 (or a stacked PR) and flip it out of draft once verified.
+- [x] **Part A checklist confirmed in-browser** (RTX 5050, WebGPU). Foliage
+  sway works (+ lockstep limit characterized); profiler overlay + `__gpuProfile`
+  read; post-FX default-off identity + opt-in outline/motion-blur verified.
+  Captures under `test-results/profile/`.
+- [x] **`pnpm typecheck`** green; this branch adds **no** new lint errors / test
+  failures. (Pre-existing-on-`main`, unrelated: 3 biome *format* errors in
+  untouched files + 1 `bike-loader` asset-contract test failure — see results
+  doc. No UI touched, so no new `pnpm e2e` needed.)
+- [x] **Part B justified by captured numbers:** not GPU-bound on any track
+  (1.3–3.4 ms GPU); MSAA ≈ 2 ms; draw calls 18–24k. GPU-side P2 work (impostors,
+  GPU culling) **not** justified; `BatchedMesh` gated on draw-call attribution +
+  a production-build / target-class profile first. Numbers in the results doc.
+- [ ] Open the stacked PR. (Original #260 already merged — nothing to un-draft.)
 </content>

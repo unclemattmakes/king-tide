@@ -155,6 +155,18 @@ export type QaDebugApi = {
   copyBundle(): Promise<boolean>
 }
 
+/** Snapshot of `renderer.info` GPU-side counters, read on demand. The
+ *  per-frame `calls` / `triangles` reset each `renderer.render()`;
+ *  `geometries` / `textures` are running live totals. Surfaced so the
+ *  profiler harness can answer the draw-call question (the BatchedMesh /
+ *  GPU-culling P2 decision is gated on whether we're draw-call-bound). */
+export type RenderInfoSnapshot = {
+  calls: number
+  triangles: number
+  geometries: number
+  textures: number
+}
+
 export type PerfDebugApi = {
   /** Current rolling-window stats (≤10s @ 60 fps). Computed on demand. */
   stats(): PerfStats
@@ -166,6 +178,10 @@ export type PerfDebugApi = {
   /** Wipe the ring back to empty — useful in e2e tests when you want a
    *  clean window after a settle-in period. */
   resetWindow(): void
+  /** Last-render `renderer.info` counters (draw calls, triangles, live
+   *  geometry/texture totals). On-demand; pairs with `window.__gpuProfile`
+   *  for a full CPU-frame + GPU-time + draw-call profiling picture. */
+  renderInfo(): RenderInfoSnapshot
   /** Toggle the perf overlay's visibility. Returns the new state. */
   toggleHud(): boolean
   /** Current overlay visibility. */
@@ -535,6 +551,7 @@ export type PerfDebugInstall = {
   stats: () => PerfStats
   csv: () => string
   resetWindow: () => void
+  renderInfo: () => RenderInfoSnapshot
   toggleHud: () => boolean
   isHudOn: () => boolean
 }
@@ -549,6 +566,7 @@ export function installPerfDebugApi(install: PerfDebugInstall): void {
     stats: install.stats,
     csv: install.csv,
     resetWindow: install.resetWindow,
+    renderInfo: install.renderInfo,
     toggleHud: install.toggleHud,
     isHudOn: install.isHudOn,
     downloadCsv: (filename?: string) => {
