@@ -6,9 +6,12 @@ import {
   applyFoliageSwayToMesh,
   debugSwayState,
   setFoliageSwayBackend,
+  swayPhaseFromPosition,
   updateSwayTime,
   updateWind,
 } from '../../src/engine/render/foliage-sway'
+
+const TWO_PI = 6.2831853
 
 const NODE_SWAYED = Symbol.for('hoverbike.foliageSwayNodeSwayed')
 
@@ -135,6 +138,48 @@ describe('applyFoliageSwayToMesh — WebGL2 path', () => {
     const mats = mesh.material as THREE.Material[]
     expect(mats[0]).toBe(a)
     expect(mats[1]).toBe(b)
+  })
+})
+
+describe('swayPhaseFromPosition — per-mesh phase hash', () => {
+  it('is deterministic and within [0, 2π)', () => {
+    const a = swayPhaseFromPosition(12.5, -3.2)
+    const b = swayPhaseFromPosition(12.5, -3.2)
+    expect(a).toBe(b)
+    expect(a).toBeGreaterThanOrEqual(0)
+    expect(a).toBeLessThan(TWO_PI)
+  })
+
+  it('gives distinct phases for distinct positions (desyncs lockstep palms)', () => {
+    const phases = [
+      swayPhaseFromPosition(0, 0),
+      swayPhaseFromPosition(5, 0),
+      swayPhaseFromPosition(0, 5),
+      swayPhaseFromPosition(-12.3, 7.1),
+    ]
+    const unique = new Set(phases.map((p) => p.toFixed(4)))
+    expect(unique.size).toBe(phases.length)
+  })
+})
+
+describe('applyFoliageSwayToMesh — InstancedMesh node path', () => {
+  it('converts an InstancedMesh foliage material with a positionNode', () => {
+    setFoliageSwayBackend('webgpu')
+    const geo = new THREE.PlaneGeometry(1, 1)
+    const src = new THREE.MeshStandardMaterial({ name: 'mat_foliage_palm' })
+    const inst = new THREE.InstancedMesh(geo, src, 8)
+    expect(inst.isInstancedMesh).toBe(true)
+
+    applyFoliageSwayToMesh(inst)
+
+    const next = inst.material as unknown as MeshStandardNodeMaterial
+    expect(next).not.toBe(src)
+    expect((next as { isNodeMaterial?: boolean }).isNodeMaterial).toBe(true)
+    // The instanced path adds a per-instance phase term; the node still
+    // resolves to a valid positionNode.
+    expect(next.positionNode).not.toBeNull()
+    expect(next.positionNode).toBeDefined()
+    expect((next.userData as Record<symbol, unknown>)[NODE_SWAYED]).toBe(true)
   })
 })
 

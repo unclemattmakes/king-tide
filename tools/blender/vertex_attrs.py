@@ -101,18 +101,28 @@ def set_linear_sway_z(
     z_min: float = 0.0,
     z_max: float = 4.0,
     ao: float = 1.0,
+    phase=0.0,
     name: str = CANONICAL_NAME,
 ):
     """Convenience preset for foliage: R ramps linearly from 0 at
-    z_min to 1 at z_max (trunk → leaf-tip gradient), G = ao, B = 0,
-    A = 1. Phase offset stays 0; GN scatter is expected to overwrite B
-    per-instance later.
+    z_min to 1 at z_max (trunk → leaf-tip gradient), G = ao, B = phase,
+    A = 1.
+
+    ``phase`` is the B channel (animation phase offset in ``[0, 1)``).
+    It is either a constant float (default ``0.0``) or a callable
+    ``phase_for(i, co) -> float`` so a builder can author *per-vertex*
+    phase variation directly into the GLB — e.g. a palm giving each frond
+    its own phase so the fronds of a single palm don't sway in lockstep.
+    The default of ``0.0`` preserves the prior behaviour (GN scatter or the
+    runtime per-mesh hash supplies desync). See
+    [docs/vertex-attribute-spec.md](../../docs/vertex-attribute-spec.md).
     """
     z_range = max(z_max - z_min, 1e-6)
+    phase_for = phase if callable(phase) else (lambda i, co: phase)
 
     def value_for(i, co):
         sway = max(0.0, min(1.0, (co[2] - z_min) / z_range))
-        return (sway, ao, 0.0, 1.0)
+        return (sway, ao, float(phase_for(i, co)), 1.0)
 
     return set_color_attr(mesh, value_for, name=name)
 
