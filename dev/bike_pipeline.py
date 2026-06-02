@@ -20,6 +20,12 @@ Two subcommands (run headless: blender --background --python this -- <cmd> ...):
       rear glow), strip color attrs, delete old *-geo, save the .blend.
       --no-save renders a verification image instead of saving.
 
+Conditioning options (both subcommands):
+  --ratio R       Collapse-decimate keep-ratio per pass (default 0.1).
+  --passes N      Number of stacked Collapse passes (default 2; 2x0.1 ~ 1%).
+  --target N      Override: decimate to an absolute tri budget instead of ratio.
+  --smooth-angle D  Auto-smooth angle in degrees (default 35; integrate only).
+
 ASCII-only output (cp1252 console).
 """
 import math
@@ -31,6 +37,16 @@ from mathutils import Euler, Matrix, Vector
 
 # args after the "--" separator
 ARGV = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+
+
+def _opt(name, default=None):
+    """Pull a ``--key value`` option out of ARGV (positional args untouched)."""
+    if name in ARGV:
+        i = ARGV.index(name)
+        if i + 1 < len(ARGV):
+            return ARGV[i + 1]
+    return default
+
 
 # scratch output dir (renders), relative to this script -- gitignored
 _RUNS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bike_runs")
@@ -115,7 +131,25 @@ def keep_largest_island(obj):
     me.update()
 
 
-def decimate(obj, target_tris):
+def decimate_ratio(obj, ratio=0.1, passes=2):
+    """DEFAULT. The hand-tuned method: ``passes`` stacked Collapse decimations
+    at ``ratio`` each (2 x 0.1 ~ 1% of the raw hull). Incremental collapses
+    re-cost against the already-reduced mesh, so they hold the silhouette better
+    than one aggressive pass. Final tri count scales with the input — the raw
+    Hunyuan detail carries through to the reduction quality."""
+    for i in range(passes):
+        md = obj.modifiers.new(f"HV_Dec_{i}", "DECIMATE")
+        md.decimate_type = "COLLAPSE"
+        md.ratio = ratio
+        select_only(obj)
+        bpy.ops.object.modifier_apply(modifier=md.name)
+
+
+def decimate_target(obj, target_tris):
+    """Opt-in via ``--target N``. Absolute-budget Collapse decimation: iterate
+    (capped at 90%/pass) until at or under ``target_tris``. Deterministic final
+    count regardless of input size — use when a fixed in-game tri budget matters
+    more than matching the per-mesh ratio feel."""
     for i in range(8):
         tc = tri_count(obj)
         if tc <= target_tris:
@@ -125,6 +159,32 @@ def decimate(obj, target_tris):
         md.ratio = max(0.1, target_tris / float(tc))
         select_only(obj)
         bpy.ops.object.modifier_apply(modifier=md.name)
+
+
+def decimate_from_opts(obj):
+    """Ratio by default (``--ratio`` / ``--passes``); ``--target N`` switches to
+    the fixed-budget path."""
+    target = _opt("--target")
+    if target is not None:
+        decimate_target(obj, int(target))
+        print(f"[bike] decimated to target {int(target)} tris -> {tri_count(obj)}")
+    else:
+        ratio = float(_opt("--ratio", "0.1"))
+        passes = int(_opt("--passes", "2"))
+        decimate_ratio(obj, ratio, passes)
+        print(f"[bike] decimated {passes}x ratio {ratio} -> {tri_count(obj)} tris")
+
+
+def auto_smooth(obj, angle_deg=35.0):
+    """Angle-based shade-smooth (Blender's 'Shade Auto Smooth'): smooth normals
+    on gentle joins, hard facets where adjacent faces meet above ``angle_deg``.
+    Keeps the art direction's 'rounded-but-faceted' read, vs a blanket smooth
+    that melts every edge. Leaves a live 'Smooth by Angle' modifier on the hull;
+    the GLB builder's export_apply bakes it into the exported normals, and
+    Workbench previews evaluate it too."""
+    select_only(obj)
+    bpy.ops.object.shade_auto_smooth(angle=math.radians(angle_deg))
+    print(f"[bike] auto-smooth @ {angle_deg} deg")
 
 
 def bake_world_transform(obj):
@@ -223,7 +283,7 @@ def cmd_inspect():
     obj = join_meshes(import_glb(raw))
     bake_world_transform(obj)
     keep_largest_island(obj)
-    decimate(obj, 6000)
+    decimate_from_opts(obj)
     apply_rot(obj, rot)
     mn, mx = local_bbox(obj)
     dx, dy, dz = (mx - mn).x, (mx - mn).y, (mx - mn).z
@@ -246,7 +306,6 @@ def cmd_integrate():
     rot = ARGV[4]
     no_save = "--no-save" in ARGV
     do_glow = "--glow" in ARGV
-    target_tris = 5000
 
     bpy.ops.wm.open_mainfile(filepath=bike_blend)
 
@@ -270,7 +329,7 @@ def cmd_integrate():
     obj = join_meshes(import_glb(raw))
     bake_world_transform(obj)
     keep_largest_island(obj)
-    decimate(obj, target_tris)
+    decimate_from_opts(obj)
     apply_rot(obj, rot)
 
     # scale: match the envelope length (Y, fore-aft) — the socket-critical axis
@@ -296,12 +355,22 @@ def cmd_integrate():
     # structural hull / ski), glow (the rear thruster throats + exhaust; "glow
     # is a privilege"). Keys off the authored mat_bike_<id>_* names so the
     # build_bike spec recolour drives the final ship-locked palette.
-    livery = bpy.data.materials.get(f"mat_bike_{bike_id}_livery")
-    chassis = bpy.data.materials.get(f"mat_bike_{bike_id}_chassis")
-    glow = bpy.data.materials.get(f"mat_bike_{bike_id}_glow") if do_glow else None
-    if livery is None:                       # safety; .blends ship with these
-        livery = bpy.data.materials.new(f"mat_bike_{bike_id}_livery")
-        livery.use_nodes = True
+    def _mat(suffix):
+        """Get the authored mat_bike_<id>_<suffix>, or create a named, node-
+        based stand-in. Some .blends ship without the full 3-material scheme
+        (e.g. sparrow had only _livery); creating the slot keeps zoning intact
+        and build_bike recolours it from the spec's appearance.* at build time."""
+        name = f"mat_bike_{bike_id}_{suffix}"
+        m = bpy.data.materials.get(name)
+        if m is None:
+            m = bpy.data.materials.new(name)
+            m.use_nodes = True
+            print(f"[bike] created missing material {name}")
+        return m
+
+    livery = _mat("livery")
+    chassis = _mat("chassis")
+    glow = _mat("glow") if do_glow else None
 
     obj.data.materials.clear()
     slots = {}
@@ -326,8 +395,7 @@ def cmd_integrate():
             p.material_index = slots["livery"]
 
     strip_color_attrs(obj.data)
-    for p in obj.data.polygons:
-        p.use_smooth = True
+    auto_smooth(obj, float(_opt("--smooth-angle", "35")))
 
     obj.name = "bike_hull-geo"
     obj.data.name = "bike_hull-geo"

@@ -57,7 +57,21 @@ test.describe('bike thumbnail capture', () => {
       // still be mid-flight when bikeViewerReady fires. Force them
       // off-screen synchronously so the screenshot is just the bike.
       await page.evaluate(() => {
-        for (const id of ['hud', 'loading-screen', 'menu', 'race-hud']) {
+        // Drop `dev-build` so the dev-only chrome (garage / DEV SETTINGS /
+        // WATER toggles, gated by `body.dev-build` in index.html and shown
+        // because Playwright runs the Vite dev server) doesn't bake into the
+        // tile. import.meta.env.DEV is always true here, so without this the
+        // toggles paint over the chassis.
+        document.body.classList.remove('dev-build')
+        for (const id of [
+          'hud',
+          'loading-screen',
+          'menu',
+          'race-hud',
+          'garage-toggle',
+          'devsettings-toggle',
+          'water-debug-toggle',
+        ]) {
           const el = document.getElementById(id)
           if (el) el.style.display = 'none'
         }
