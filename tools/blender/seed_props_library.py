@@ -36,7 +36,10 @@ Each prop:
   asset's shape is purely a function of the modifier's input sockets.
   Authors retune via Properties → Modifier panel.
 - Carries ``COLOR_0`` per [docs/vertex-attribute-spec.md](../../docs/vertex-attribute-spec.md):
-  - **Foliage / animated** props (palm) store linear sway gradient in R.
+  - **Foliage / animated** props (palm) store a linear sway gradient in R
+    and a per-frond phase in B (so one palm's fronds desync). Palm-to-palm
+    and per-instance desync is layered on at runtime — see
+    ``src/engine/render/foliage-sway.ts``.
   - **Static** props (rock, buoy, gate, indicator) store terrain defaults
     (R=1, G=1, B=0, A=0). Scatter graphs overwrite B with per-instance
     random phase via ``Store Named Attribute``.
@@ -336,6 +339,12 @@ def build_palm_mesh(name: str, *, height: float = 4.5, frond_count: int = 7, fro
     the modifier panel."""
     bm = bmesh.new()
 
+    # Per-vertex sway-phase (COLOR_0.B), keyed by BMVert. Trunk verts get 0
+    # (they barely sway); each frond gets its own phase so a single palm's
+    # fronds don't move in lockstep. Resolved to a mesh-index list after the
+    # geometry is built (see below) using Blender's own vertex indices.
+    phase_map: "dict[bmesh.types.BMVert, float]" = {}
+
     # Trunk — tapered cylinder.
     trunk_segs = 8
     trunk_rings = 6
@@ -353,7 +362,9 @@ def build_palm_mesh(name: str, *, height: float = 4.5, frond_count: int = 7, fro
             ang = (si / trunk_segs) * math.tau
             x = math.cos(ang) * r + bend_x
             y = math.sin(ang) * r
-            ring.append(bm.verts.new((x, y, z)))
+            v = bm.verts.new((x, y, z))
+            phase_map[v] = 0.0
+            ring.append(v)
         ring_verts.append(ring)
     for ri in range(trunk_rings):
         cur = ring_verts[ri]
@@ -375,6 +386,9 @@ def build_palm_mesh(name: str, *, height: float = 4.5, frond_count: int = 7, fro
     for fi in range(frond_count):
         ang = (fi / frond_count) * math.tau + 0.13 * fi  # slight randomization
         dir_xy = Vector((math.cos(ang), math.sin(ang), 0.0))
+        # Golden-ratio low-discrepancy phase in [0, 1) so consecutive fronds
+        # land far apart regardless of frond_count (B channel / COLOR_0).
+        frond_phase = (fi * 0.6180339887498949) % 1.0
         # Build a quad strip along the frond's length with width that pulses.
         left_verts = []
         right_verts = []
@@ -392,12 +406,23 @@ def build_palm_mesh(name: str, *, height: float = 4.5, frond_count: int = 7, fro
             else:
                 w = frond_half_width_mid + (frond_half_width_tip - frond_half_width_mid) * ((t - 0.7) / 0.3)
             perp = Vector((-dir_xy.y, dir_xy.x, 0.0)) * w
-            left_verts.append(bm.verts.new(centre + perp))
-            right_verts.append(bm.verts.new(centre - perp))
+            lv = bm.verts.new(centre + perp)
+            rv = bm.verts.new(centre - perp)
+            phase_map[lv] = frond_phase
+            phase_map[rv] = frond_phase
+            left_verts.append(lv)
+            right_verts.append(rv)
         for si in range(frond_segs):
             bm.faces.new([left_verts[si], left_verts[si + 1], right_verts[si + 1], right_verts[si]])
 
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    # Resolve per-vertex phase to a mesh-index list. index_update() assigns
+    # the same vertex indices that to_mesh() writes, so vert_phase[i] lines up
+    # with mesh.vertices[i] without relying on creation order.
+    bm.verts.index_update()
+    vert_phase = [0.0] * len(bm.verts)
+    for v in bm.verts:
+        vert_phase[v.index] = phase_map.get(v, 0.0)
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
@@ -406,8 +431,15 @@ def build_palm_mesh(name: str, *, height: float = 4.5, frond_count: int = 7, fro
     for p in me.polygons:
         p.use_smooth = True
 
-    # Sway gradient: linear in Z from trunk base (0) to leaf tip (1).
-    set_linear_sway_z(me, z_min=0.0, z_max=height * 1.2, ao=1.0)
+    # Sway gradient: R linear in Z (trunk base 0 → leaf tip 1); B carries a
+    # per-frond phase so the fronds of a single palm desync. Palm-to-palm and
+    # instance-to-instance desync is layered on at runtime (per-mesh world-
+    # position hash / per-instance index hash in foliage-sway.ts) — separate
+    # palm meshes share this one geometry datablock, so they can't carry a
+    # per-palm B here.
+    set_linear_sway_z(
+        me, z_min=0.0, z_max=height * 1.2, ao=1.0, phase=lambda i, co: vert_phase[i]
+    )
     return me
 
 

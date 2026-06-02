@@ -31,8 +31,19 @@
 
 import * as THREE from 'three'
 import type Node from 'three/src/nodes/core/Node.js'
-import { attribute, float, positionLocal, sin, uniform, vec3 } from 'three/tsl'
+import {
+  attribute,
+  float,
+  fract,
+  instanceIndex,
+  positionLocal,
+  sin,
+  uniform,
+  vec3,
+} from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
+
+const TWO_PI = 6.2831853
 
 /** Shared wind state. The render loop updates this once per frame; every
  *  swayed material samples from it via a uniform reference. */
@@ -62,6 +73,24 @@ const PATCHED = Symbol.for('hoverbike.foliageSwayPatched')
 /** Marks a node material we've already attached a sway `positionNode` to,
  *  so `applyFoliageSwayToMesh` is idempotent and doesn't double-swap. */
 const NODE_SWAYED = Symbol.for('hoverbike.foliageSwayNodeSwayed')
+/** Marks a mesh already recorded in the debug registry (one entry per mesh). */
+const SWAY_RECORDED = Symbol.for('hoverbike.foliageSwayRecorded')
+
+/** Per-mesh sway record for dev tooling / verification — what phase each
+ *  swayed mesh got and where it is, so a probe can confirm distinct palms
+ *  desync on the live scene. Read via {@link debugSwayMeshes}. */
+export type SwayMeshRecord = {
+  name: string
+  /** Per-mesh baseline phase, radians. */
+  phase: number
+  x: number
+  y: number
+  z: number
+  instanced: boolean
+  /** Instance count (1 for a plain mesh). */
+  count: number
+}
+const SWAY_MESH_RECORDS: SwayMeshRecord[] = []
 
 /** Active renderer backend. Defaults to `'webgpu'` — the project's
  *  primary renderer — so foliage sways even if a boot path forgets to
@@ -84,7 +113,32 @@ export type SwayOptions = {
   /** Override the global wind for this material (e.g. interior banners
    *  that get less wind than open coast). 1.0 = full global wind. */
   windScale?: number
+  /** Baseline sway-phase offset in **radians**, added on top of the
+   *  per-vertex `COLOR_0.b` phase. `applyFoliageSwayToMesh` derives this
+   *  per mesh from the mesh's world position so distinct palm meshes that
+   *  share one geometry datablock (and a `COLOR_0.b` of 0) don't sway in
+   *  lockstep. Defaults to 0 when omitted. */
+  phaseOffset?: number
 }
+
+/**
+ * Deterministic per-mesh sway-phase from a world-XZ position, returned in
+ * **radians** `[0, 2π)`. Mirrors the GLSL `fract(sin(dot(p,k)) * f)` pseudo-
+ * hash the WebGL2 instancing path uses for `instanceMatrix[3].xz`, so the
+ * two backends pick comparable phases. The constants are the usual
+ * `(12.9898, 78.233) / 43758.5453` pair plus a small bias so two palms on
+ * the exact same XZ row don't collide on a 0 phase.
+ *
+ * Used to desync palms that are *separate meshes sharing one geometry*
+ * (e.g. sandbar's 12 frond meshes), where `COLOR_0.b` is 0 and there's no
+ * per-instance matrix to hash. Exported for unit testing.
+ */
+export function swayPhaseFromPosition(x: number, z: number): number {
+  const s = Math.sin(x * 12.9898 + z * 78.233 + 0.31415) * 43758.5453
+  return (s - Math.floor(s)) * TWO_PI
+}
+
+const _meshWorldPos = new THREE.Vector3()
 
 /**
  * Patch a material so its vertex shader applies the foliage sway
@@ -93,7 +147,12 @@ export type SwayOptions = {
  * The patch reads `attribute vec3 color` (three.js's name for the
  * glTF `COLOR_0` attribute) and:
  *   - takes `color.r` as sway strength
- *   - takes `color.b` as a *baseline* phase offset (mapped 0..1 → 0..2π)
+ *   - takes `color.b` as a *baseline* per-vertex phase offset (mapped
+ *     0..1 → 0..2π)
+ *   - adds `opts.phaseOffset` (radians), the caller-supplied per-mesh
+ *     phase. `applyFoliageSwayToMesh` derives it from the mesh's world
+ *     position so separate palm meshes that share one geometry datablock
+ *     (and a 0 `color.b`) don't sway in lockstep.
  *   - when the mesh is an `InstancedMesh` (an `EXT_mesh_gpu_instancing`
  *     block lifted by the GLB loader), adds a deterministic per-instance
  *     phase term hashed from `instanceMatrix[3].xz`. This desyncs the
@@ -118,6 +177,13 @@ export function applyFoliageSway(material: THREE.Material, opts: SwayOptions = {
   m.userData[PATCHED] = true
 
   const windScale = { value: typeof opts.windScale === 'number' ? opts.windScale : 1.0 }
+  // Per-mesh baseline phase (radians). On WebGL2 the material is patched in
+  // place and shared across meshes, so the value baked here is whichever
+  // mesh patched it first — true per-mesh desync for separate-mesh palms is
+  // the WebGPU path's job (one node material per mesh). This keeps the GLSL
+  // math structurally identical to the TSL path and is correct for the
+  // common single-mesh-per-material case.
+  const phaseOffset = { value: typeof opts.phaseOffset === 'number' ? opts.phaseOffset : 0 }
 
   const prevOnBeforeCompile = m.onBeforeCompile
   m.onBeforeCompile = (shader) => {
@@ -128,6 +194,7 @@ export function applyFoliageSway(material: THREE.Material, opts: SwayOptions = {
     shader.uniforms.uSwayWind = SWAY_WIND
     shader.uniforms.uSwayFreq = SWAY_FREQ
     shader.uniforms.uSwayWindScale = windScale
+    shader.uniforms.uSwayPhaseOffset = phaseOffset
 
     // Vertex shader: declare uniforms + attribute, then displace pre-projection.
     // We inject before `#include <begin_vertex>` so subsequent transforms
@@ -139,7 +206,8 @@ export function applyFoliageSway(material: THREE.Material, opts: SwayOptions = {
 uniform float uSwayTime;
 uniform vec3  uSwayWind;
 uniform float uSwayFreq;
-uniform float uSwayWindScale;`,
+uniform float uSwayWindScale;
+uniform float uSwayPhaseOffset;`,
       )
       .replace(
         '#include <begin_vertex>',
@@ -153,6 +221,9 @@ uniform float uSwayWindScale;`,
   #ifdef USE_COLOR
     float swayStrength = color.r;
     float swayPhase    = color.b * 6.2831853; // 2π
+    // Per-mesh baseline (radians) so separate palm meshes sharing one
+    // geometry datablock (color.b == 0) don't lock-step.
+    swayPhase += uSwayPhaseOffset;
     // EXT_mesh_gpu_instancing carries only TRS per instance, not arbitrary
     // vertex attributes -- so the scatter pipeline can't ship a per-
     // instance COLOR_0.B value. Derive an uncorrelated phase from the
@@ -209,30 +280,48 @@ const COPIED_STANDARD_PROPS = [
  * `applyFoliageSway`'s `onBeforeCompile` injection:
  *
  *   swayStrength = color.r
- *   swayPhase    = color.b * 2π
+ *   swayPhase    = color.b * 2π + phaseOffset (+ per-instance term)
  *   swayWave     = sin(uSwayTime * uSwayFreq + swayPhase)
  *   pos.xz      += uSwayWind.xz * windScale * swayStrength * swayWave
  *
+ * `phaseOffset` (radians) is the per-mesh baseline the caller hashes from
+ * the mesh's world position — it desyncs separate palm meshes that share
+ * one geometry datablock (and a `color.b` of 0).
+ *
+ * When `instanced` is true (an `InstancedMesh` lifted from a GLB's
+ * `EXT_mesh_gpu_instancing` block, e.g. a scatter-zone palm field), a
+ * per-instance term is added so the instances within one InstancedMesh
+ * don't lock-step either. This resolves the original TODO. We key it off
+ * the `instanceIndex` builtin rather than the instance-matrix translation
+ * column the WebGL2 path hashes: `instanceIndex` is the canonical,
+ * backend-agnostic per-instance accessor (storage / uniform-buffer /
+ * interleaved instancing all resolve it), needs no coupling to three's
+ * internal `instanceMatrix` buffer layout (the blocker the old TODO cited),
+ * and is collision-free (every instance has a distinct index, unlike the
+ * world-XZ hash which can collide for palms on the same row). The phase is
+ * uncorrelated per instance either way — visually equivalent to the
+ * position hash.
+ *
  * Returns a `positionLocal`-relative node ready to assign to
  * `material.positionNode`.
- *
- * Per-instance phase desync (the WebGL2 path's `instanceMatrix[3].xz`
- * hash for scattered InstancedMesh palms) is NOT reproduced here: TSL's
- * per-instance accessors (`instance` / `instancedMesh`) expect an
- * InstancedBufferAttribute, not the `instanceMatrix` lifted by the GLB
- * loader's `EXT_mesh_gpu_instancing` path, so there's no clean/safe node
- * for the per-instance translation column. The TSL path falls back to the
- * per-vertex `color.b` baseline phase only.
- * TODO: derive per-instance phase from the instance matrix node once a
- * clean accessor for the GLB instanceMatrix is available, to desync
- * scattered palms under WebGPU the way the WebGL2 path does.
  */
-function buildSwayPositionNode(windScale: number): Node<'vec3'> {
+function buildSwayPositionNode(
+  windScale: number,
+  phaseOffset: number,
+  instanced: boolean,
+): Node<'vec3'> {
   // three.js exposes the glTF COLOR_0 attribute as `color`. Cast mirrors
   // the pattern in terrain-shader.ts (`attribute('color') as Node<...>`).
   const color = attribute('color', 'vec3') as unknown as Node<'vec3'>
   const swayStrength = color.r
-  const swayPhase = color.b.mul(float(6.2831853)) // 2π
+  let swayPhase = color.b.mul(float(TWO_PI)).add(float(phaseOffset))
+  if (instanced) {
+    // Cheap per-instance pseudo-hash of the instance index → [0, 1).
+    // Same fract(sin(x)*f) family as the WebGL2 path's instance hash.
+    const idx = float(instanceIndex)
+    const instHash = fract(sin(idx.mul(float(12.9898)).add(float(0.31415))).mul(float(43758.5453)))
+    swayPhase = swayPhase.add(instHash.mul(float(TWO_PI)))
+  }
   const swayWave = sin(SWAY_TIME_NODE.mul(SWAY_FREQ_NODE).add(swayPhase))
   const amount = swayStrength.mul(float(windScale)).mul(swayWave)
   const offset = vec3(SWAY_WIND_NODE.x.mul(amount), float(0), SWAY_WIND_NODE.z.mul(amount))
@@ -248,7 +337,12 @@ type NodeMaterialMarked = MeshStandardNodeMaterial & {
  *  preserving the source's visual properties. Returns the existing node
  *  material untouched (but ensures it's marked) when already a node
  *  material so the swap is idempotent. */
-function toSwayNodeMaterial(src: THREE.Material, windScale: number): MeshStandardNodeMaterial {
+function toSwayNodeMaterial(
+  src: THREE.Material,
+  windScale: number,
+  phaseOffset: number,
+  instanced: boolean,
+): MeshStandardNodeMaterial {
   // Already a node material we've swayed → leave as-is (idempotent).
   if ((src as NodeMaterialMarked).userData?.[NODE_SWAYED]) {
     return src as MeshStandardNodeMaterial
@@ -268,7 +362,7 @@ function toSwayNodeMaterial(src: THREE.Material, windScale: number): MeshStandar
   // The sway math reads the `color` vertex attribute; enable vertexColors so
   // three plumbs COLOR_0 through, matching the WebGL2 path's USE_COLOR gate.
   next.vertexColors = true
-  next.positionNode = buildSwayPositionNode(windScale)
+  next.positionNode = buildSwayPositionNode(windScale, phaseOffset, instanced)
   ;(next as NodeMaterialMarked).userData[NODE_SWAYED] = true
   next.needsUpdate = true
   return next
@@ -289,18 +383,54 @@ function toSwayNodeMaterial(src: THREE.Material, windScale: number): MeshStandar
  * Idempotent: a second call is a no-op (the in-place path is guarded by its
  * own `PATCHED` marker; the node path by `NODE_SWAYED`).
  *
+ * Phase desync: each mesh gets a baseline phase hashed from its world
+ * position (so separate palm meshes sharing one geometry don't lock-step),
+ * and `InstancedMesh` foliage additionally gets a per-instance phase term
+ * (so instances within one scatter field desync too).
+ *
  * Handles both single-material and array-material (multi-slot) meshes.
  */
 export function applyFoliageSwayToMesh(mesh: THREE.Mesh, opts: SwayOptions = {}): void {
   const mat = mesh.material
   if (!mat) return
   const windScale = typeof opts.windScale === 'number' ? opts.windScale : 1.0
+  // Mesh world position drives both the per-mesh phase and the debug record.
+  // `getWorldPosition` updates the world matrix up the parent chain first,
+  // so this is correct even during GLB load before the scene is mounted.
+  mesh.getWorldPosition(_meshWorldPos)
+  // Per-mesh baseline phase (radians). Honour an explicit override, else
+  // hash the mesh's world position so separate palm meshes that share one
+  // geometry datablock (and a 0 `COLOR_0.b`) each get their own phase.
+  const phaseOffset =
+    typeof opts.phaseOffset === 'number'
+      ? opts.phaseOffset
+      : swayPhaseFromPosition(_meshWorldPos.x, _meshWorldPos.z)
+  // InstancedMesh (a GLB `EXT_mesh_gpu_instancing` scatter field) → also add
+  // a per-instance phase term in the node so the instances desync.
+  const instanced = (mesh as { isInstancedMesh?: boolean }).isInstancedMesh === true
+
+  // Record once per mesh for dev tooling (see `debugSwayMeshes`).
+  const meshRec = mesh as THREE.Mesh & { userData: { [k: symbol]: unknown } }
+  if (!meshRec.userData[SWAY_RECORDED]) {
+    meshRec.userData[SWAY_RECORDED] = true
+    const matName = Array.isArray(mat) ? (mat.find((m) => m?.name)?.name ?? '') : (mat.name ?? '')
+    SWAY_MESH_RECORDS.push({
+      name: matName,
+      phase: phaseOffset,
+      x: _meshWorldPos.x,
+      y: _meshWorldPos.y,
+      z: _meshWorldPos.z,
+      instanced,
+      count: instanced ? (mesh as THREE.InstancedMesh).count : 1,
+    })
+  }
 
   if (activeBackend === 'webgl2') {
+    const webglOpts: SwayOptions = { ...opts, phaseOffset }
     if (Array.isArray(mat)) {
-      for (const m of mat) if (m) applyFoliageSway(m, opts)
+      for (const m of mat) if (m) applyFoliageSway(m, webglOpts)
     } else {
-      applyFoliageSway(mat, opts)
+      applyFoliageSway(mat, webglOpts)
     }
     return
   }
@@ -315,12 +445,12 @@ export function applyFoliageSwayToMesh(mesh: THREE.Mesh, opts: SwayOptions = {})
         needsUpdate: boolean
       }
       if (nm.userData?.[NODE_SWAYED]) return m
-      nm.positionNode = buildSwayPositionNode(windScale)
+      nm.positionNode = buildSwayPositionNode(windScale, phaseOffset, instanced)
       nm.userData[NODE_SWAYED] = true
       nm.needsUpdate = true
       return m
     }
-    return toSwayNodeMaterial(m, windScale)
+    return toSwayNodeMaterial(m, windScale, phaseOffset, instanced)
   }
 
   if (Array.isArray(mat)) {
@@ -366,4 +496,12 @@ export function debugSwayState(): { time: number; windX: number; windZ: number; 
     windZ: SWAY_WIND.value.z,
     freq: SWAY_FREQ.value,
   }
+}
+
+/** Dev/test access: every mesh swayed this session, with the per-mesh phase
+ *  and world position it was assigned. A verification probe can confirm that
+ *  distinct palms got distinct phases (no lockstep) on the live scene. The
+ *  list is module-scoped, so it resets on page reload. */
+export function debugSwayMeshes(): readonly SwayMeshRecord[] {
+  return SWAY_MESH_RECORDS
 }

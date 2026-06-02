@@ -57,6 +57,18 @@ three shipped changes are confirmed working on real WebGPU hardware below.
     meshes, so no instance-matrix accessor is needed) — and, upstream, the
     Blender foliage builder should stamp a non-zero `COLOR_0.b`. Filed as a
     follow-up, not done here (keeps this PR to verification + tooling).
+  - **RESOLVED (follow-up).** The lockstep is fixed in `foliage-sway.ts`:
+    `applyFoliageSwayToMesh` now hashes a per-mesh phase from the mesh's world
+    position (`swayPhaseFromPosition`) and threads it through both the TSL and
+    WebGL2 paths; `InstancedMesh` foliage additionally gets a per-instance
+    phase (`instanceIndex` hash) — closing the old `TODO`. Upstream, the palm
+    builder (`build_palm_mesh`) now stamps a per-frond `COLOR_0.b` so the
+    phase data exists in the GLB (needs a props-library re-seed + re-export to
+    land in shipped GLBs; the runtime hash is the fallback that fixes the
+    *current* GLBs with no re-export). Verified on real WebGPU: the live phase
+    registry (`debugSwayMeshes`) reports **12/12 distinct phases** across
+    sandbar's 12 palm meshes, and `tools/capture-sway-desync.mjs` frames the
+    closest pair bending at visibly different phases.
 
 ### 2. GPU-time profiler (`?gpuprofile=1`) — ✅ VERIFIED
 
