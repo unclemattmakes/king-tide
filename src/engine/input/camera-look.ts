@@ -8,8 +8,9 @@
  * - When neither input is active, target decays back to (0, 0) so the
  *   camera returns to the default chase position automatically.
  *
- * Sensitivity / range / deadzone are read from `devSettings`; Y-invert
- * is the player-facing knob (Controls tab → "Invert camera Y").
+ * Sensitivity / range / deadzone are read from `devSettings`; the
+ * X / Y invert knobs are player-facing (Controls tab → "Invert camera
+ * X" / "Invert camera Y").
  */
 
 import { devSettings } from '../dev-settings'
@@ -48,7 +49,10 @@ export function installCameraLookInput(): void {
   window.addEventListener('mousemove', (e) => {
     if (!mouseDragging) return
     const sens = devSettings.cameraMouseSens
-    yaw += (e.clientX - lastMouseX) * sens
+    // Invert horizontal: flips the drag→yaw direction. Default (false)
+    // keeps the shipped "drag right pans the view right" feel.
+    const xSign = playerSettings.invertCameraX ? -1 : 1
+    yaw += (e.clientX - lastMouseX) * sens * xSign
     // Invert vertical (default): dragging mouse UP raises the camera. Dev
     // settings menu can flip this — when not inverted, dragging up looks down.
     const ySign = playerSettings.invertCameraY ? 1 : -1
@@ -70,7 +74,12 @@ export function tickCameraLook(dt: number): CameraLookState {
   const stickActive = Math.abs(stickX) > dz || Math.abs(stickY) > dz
 
   if (stickActive) {
-    yaw = stickX * devSettings.cameraStickYawRange
+    // Base sign negates X so pushing the stick right orbits the view
+    // right. Push (stick) and grab-and-drag (mouse) have opposite
+    // natural directions, so the stick's default sign is the inverse of
+    // the drag handler's — but the Invert-camera-X knob flips both.
+    const xSign = playerSettings.invertCameraX ? 1 : -1
+    yaw = stickX * devSettings.cameraStickYawRange * xSign
     // Invert vertical (default): pushing stick UP raises the camera.
     const ySign = playerSettings.invertCameraY ? 1 : -1
     pitch = stickY * devSettings.cameraStickPitchRange * ySign

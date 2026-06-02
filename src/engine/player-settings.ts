@@ -174,6 +174,12 @@ export type PlayerSettings = {
    *  the camera **down** (flight-stick convention). Default false keeps
    *  the existing "push up = look up" feel. */
   invertCameraY: boolean
+  /** When true, flips the horizontal (yaw) camera axis for both mouse
+   *  drag and the right stick. Default false keeps the shipped feel:
+   *  stick / mouse right pans the view right. Mouse and stick have
+   *  opposite *base* directions (drag vs. push), but this knob flips
+   *  both relative to their own defaults. */
+  invertCameraX: boolean
   /** Time Trial → local leaderboard submission. When on, a TT PB
    *  writes an entry to the per-track top-N board (see
    *  `leaderboard-state.ts`). When off, ghosts still save but no
@@ -279,6 +285,7 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   gamepadDeadzone: 0.12,
   gamepadSensitivity: 1.0,
   invertCameraY: false,
+  invertCameraX: false,
   leaderboardSubmit: true,
   leaderboardHandle: '',
   // Accessibility defaults all preserve the current ship behavior so
@@ -435,6 +442,9 @@ export function loadPlayerSettings(): void {
   }
   if (typeof p.invertCameraY === 'boolean') {
     playerSettings.invertCameraY = p.invertCameraY
+  }
+  if (typeof p.invertCameraX === 'boolean') {
+    playerSettings.invertCameraX = p.invertCameraX
   }
   if (typeof p.leaderboardSubmit === 'boolean') {
     playerSettings.leaderboardSubmit = p.leaderboardSubmit
@@ -654,6 +664,11 @@ export function setGamepadSensitivity(v: number): void {
 
 export function setInvertCameraY(on: boolean): void {
   playerSettings.invertCameraY = on
+  savePlayerSettings()
+}
+
+export function setInvertCameraX(on: boolean): void {
+  playerSettings.invertCameraX = on
   savePlayerSettings()
 }
 

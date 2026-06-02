@@ -49,6 +49,7 @@ import {
   setGamepadDeadzone,
   setGamepadSensitivity,
   setHighContrast,
+  setInvertCameraX,
   setInvertCameraY,
   setLargeText,
   setLeaderboardHandle,
@@ -420,6 +421,13 @@ const TAB_SPECS: TabSpec[] = [
         },
         enabled: true,
         gate: 'Left-stick magnitude below which steer / pitch read as zero.',
+      },
+      {
+        id: 'controls-invert-x',
+        label: 'Invert camera X',
+        control: { kind: 'toggle', defaultValue: playerSettings.invertCameraX },
+        enabled: true,
+        gate: 'When on, flips horizontal camera look for both stick and mouse.',
       },
       {
         id: 'controls-invert-y',
@@ -893,6 +901,11 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       if (spec.enabled && spec.id === 'audio-music-credits') {
         cb.addEventListener('change', () => {
           setMusicCreditsEnabled(cb.checked)
+        })
+      }
+      if (spec.enabled && spec.id === 'controls-invert-x') {
+        cb.addEventListener('change', () => {
+          setInvertCameraX(cb.checked)
         })
       }
       if (spec.enabled && spec.id === 'controls-invert-y') {
