@@ -85,7 +85,9 @@ function pose(
   x: number,
   y: number,
   z: number,
-  state: Partial<Pick<ReplayBikePose, 'pitch' | 'throttle' | 'boost' | 'driftDir' | 'driftTier'>> = {},
+  state: Partial<
+    Pick<ReplayBikePose, 'pitch' | 'throttle' | 'boost' | 'driftDir' | 'driftTier'>
+  > = {},
 ): ReplayBikePose {
   return {
     x,

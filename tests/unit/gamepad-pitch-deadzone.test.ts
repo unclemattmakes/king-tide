@@ -8,7 +8,7 @@
  * refactor of the shape pipeline) can't quietly re-open the
  * accidental-dive failure.
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { gamepadIntent } from '@/engine/input/gamepad'
 import { playerSettings } from '@/engine/player-settings'
 
@@ -17,21 +17,21 @@ type MockGamepad = {
   buttons: { pressed: boolean; value: number }[]
 }
 
+// Vitest runs in `environment: 'node'`, so `navigator` isn't defined on Node 20
+// (Node 21+ ships a global one — which is why this passed locally but threw
+// "navigator is not defined" in CI). Stub it via `vi.stubGlobal` rather than
+// assigning to a possibly-missing global, matching steam-deck.test.ts.
 function installMockPad(axes: [number, number, number, number]): void {
   const buttons = Array.from({ length: 17 }, () => ({ pressed: false, value: 0 }))
   const pad: MockGamepad = { axes, buttons }
-  ;(navigator as unknown as { getGamepads: () => MockGamepad[] }).getGamepads = () => [pad]
-}
-
-function clearMockPad(): void {
-  ;(navigator as unknown as { getGamepads: () => MockGamepad[] }).getGamepads = () => []
+  vi.stubGlobal('navigator', { getGamepads: () => [pad] })
 }
 
 describe('gamepad pitch deadzone', () => {
   const originalDeadzone = playerSettings.gamepadDeadzone
 
   afterEach(() => {
-    clearMockPad()
+    vi.unstubAllGlobals()
     playerSettings.gamepadDeadzone = originalDeadzone
   })
 

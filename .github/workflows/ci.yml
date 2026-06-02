@@ -19,6 +19,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        # Compiled GLB/JPG/PNG assets live in Git LFS (see docs/asset-storage.md).
+        # Without this they check out as pointer text and asset-contract tests
+        # (e.g. bike-loader) + the bundled build get the stub, not real bytes.
+        with:
+          lfs: true
 
       - uses: pnpm/action-setup@v6
         with:
@@ -69,6 +74,9 @@ jobs:
       E2E_HEADLESS: '1'
     steps:
       - uses: actions/checkout@v6
+        # E2E drives the real app, which fetches the LFS-backed GLB assets.
+        with:
+          lfs: true
       - uses: pnpm/action-setup@v6
         with:
           version: 10
