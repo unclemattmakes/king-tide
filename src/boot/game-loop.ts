@@ -47,6 +47,7 @@ import {
 import { createAntiGravHud } from '@/engine/render/anti-grav-hud'
 import { createBoostMeterHud } from '@/engine/render/boost-meter-hud'
 import type { ChaseCamera } from '@/engine/render/camera'
+import { getCameraPoseOverride } from '@/engine/render/camera-pose-override'
 import { showCupResultsOverlay } from '@/engine/render/cup-results-screen'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
 import { createDriftTierHud } from '@/engine/render/drift-tier-hud'
@@ -978,6 +979,14 @@ export function startGameLoop(opts: GameLoopOpts): void {
         // `chase.tick` so the shake offset doesn't get baked into the
         // chase camera's interpolated position before it's read.
         pumpFx.tick(dt)
+        // Dev/test posed-camera override (screenshot harness). Applied
+        // last so it wins over the chase pipeline + pump shake, giving a
+        // fixed pose for framing concept-art beats. Null in normal play.
+        const camPose = getCameraPoseOverride()
+        if (camPose) {
+          camera.position.set(camPose.pos.x, camPose.pos.y, camPose.pos.z)
+          camera.lookAt(camPose.target.x, camPose.target.y, camPose.target.z)
+        }
         state.playerSnapshot = {
           eid: playerEid,
           position: { x: t.x, y: t.y, z: t.z },

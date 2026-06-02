@@ -38,6 +38,7 @@ _SCENE_PROP_NAMES: tuple[str, ...] = (
     "hoverbike_shader_scree_band",
     "hoverbike_shader_saturation",
     "hoverbike_shader_triplanar",
+    "hoverbike_shader_waterline",
     # Per-track lap count — round-trips through track JSON.
     "hoverbike_laps_to_finish",
 )
@@ -127,6 +128,11 @@ def register() -> None:
         name="Triplanar",
         description="Blend factor between top-down (XZ-only) sampling and triplanar XYZ sampling for cliffs. 0 = stock, 1 = fully triplanar (no stretching on vertical faces).",
         default=0.6, min=0.0, max=1.0, precision=2,
+    )
+    bpy.types.Scene.hoverbike_shader_waterline = FloatProperty(
+        name="Waterline trio",
+        description="Strength of the built/broken/blooming waterline bands (algae fringe below + barnacle/verdigris crust at + salt-bleach above the sea line) painted onto terrain that crosses the waterline. 0 = off (byte-identical legacy), 1 = full. Mirrors terrainShader.waterline in terrain-shader.ts.",
+        default=0.0, min=0.0, max=1.0, precision=2,
     )
 
 
