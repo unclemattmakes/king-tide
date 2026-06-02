@@ -597,6 +597,12 @@ export function startGameLoop(opts: GameLoopOpts): void {
     stats: () => perfRecorder.stats(),
     csv: () => perfRecorder.toCsv(),
     resetWindow: () => perfRecorder.reset(),
+    renderInfo: () => ({
+      calls: rendererInfo.render.calls,
+      triangles: rendererInfo.render.triangles,
+      geometries: rendererInfo.memory.geometries,
+      textures: rendererInfo.memory.textures,
+    }),
     isHudOn: () => perfHud.isVisible(),
     toggleHud: () => {
       perfHud.setVisible(!perfHud.isVisible())
