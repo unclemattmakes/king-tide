@@ -39,6 +39,13 @@ across a re-export. So:
 
 - **Placed props → edit `public/tracks/<id>.json` `props[]` directly.** It
   survives re-export.
+- **Seeing props in Blender:** asset `props[]` are mirrored into a hidden
+  `_hoverbike_props_preview` collection (the shipping GLBs at the runtime pose).
+  This now **auto-syncs on opening a track `.blend` and on *Reload from JSON***
+  (deferred via a timer; addon `prop_placements.py:schedule_auto_import`), so
+  placed props show up like the buoy/gate/water previews. Move them and click
+  **Write Prop Placements → JSON** to push edits back. (Procedural `box`/
+  `cylinder` props are JSON-only — not mirrored into the preview.)
 - **Geometry / scatter / foliage → edit the `.blend`, re-export the GLB** — but
   see §6, the re-export rewrites the gameplay JSON too.
 - **Never run `seed_track_<id>.py`** on an authored track — it rebuilds from a

@@ -264,6 +264,102 @@ def _import_glb_mesh(repo_root: str, asset_id: str) -> bpy.types.Mesh:
     return mesh
 
 
+# ── shared import core + auto-sync ────────────────────────────────────────────
+
+
+def _import_into_scene(repo_root: str, track_id: str) -> tuple[int, int]:
+    """(Re)build the ``_hoverbike_props_preview`` collection from the track
+    JSON's ``props[]``: import each unique asset GLB once and drop one shared-
+    mesh instance per placement at the runtime pose. Returns
+    ``(placements_made, unique_props)``. A track with no asset props returns
+    ``(0, 0)`` after clearing any stale preview. Raises ``RuntimeError`` on a
+    hard error (missing GLB / LFS stub).
+
+    Uses ``bpy.ops`` (glTF import / join / transform_apply), so it must run with
+    a real window context — handler callers defer it via ``schedule_auto_import``.
+    Shared by the *Import Prop Placements* operator and the auto-sync hooks so a
+    button click and an auto-open stay byte-for-byte identical."""
+    json_path = _track_json_path(repo_root, track_id)
+    if not os.path.isfile(json_path):
+        raise RuntimeError(f"no track JSON: {json_path}")
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    all_props = data.get("props", [])
+    asset_props = [p for p in all_props if p.get("type") == "asset" and p.get("assetId")]
+
+    _ensure_object_mode()
+    coll = _ensure_preview_collection()
+    _clear_preview(coll)
+    if not asset_props:
+        return (0, 0)
+
+    mesh_cache: dict[str, bpy.types.Mesh] = {}
+    for asset_id in sorted({p["assetId"] for p in asset_props}):
+        mesh_cache[asset_id] = _import_glb_mesh(repo_root, asset_id)
+
+    made = 0
+    for i, p in enumerate(all_props):
+        if p.get("type") != "asset" or not p.get("assetId"):
+            continue
+        mesh = mesh_cache.get(p["assetId"])
+        if mesh is None:
+            continue
+        obj = bpy.data.objects.new(f"prop_{p['assetId'].split('/')[-1]}_{i:03d}", mesh)
+        coll.objects.link(obj)
+
+        pos = p.get("position", {})
+        obj.location = _blender_from_three(
+            float(pos.get("x", 0.0)), float(pos.get("y", 0.0)), float(pos.get("z", 0.0))
+        )
+        rot = p.get("rotation", {})
+        obj.rotation_mode = "QUATERNION"
+        obj.rotation_quaternion = _quat_blender_from_three(
+            float(rot.get("x", 0.0)),
+            float(rot.get("y", 0.0)),
+            float(rot.get("z", 0.0)),
+            float(rot.get("w", 1.0)),
+        )
+        sz = p.get("size", {})
+        # three.js size axes (x,y,z) → Blender scale (x,z,y); unsigned.
+        obj.scale = (float(sz.get("x", 1.0)), float(sz.get("z", 1.0)), float(sz.get("y", 1.0)))
+
+        obj[ASSET_ID_KEY] = p["assetId"]
+        obj[PROP_INDEX_KEY] = i
+        obj[KIND_KEY] = KIND_VALUE
+        made += 1
+    return (made, len(mesh_cache))
+
+
+def schedule_auto_import(delay: float = 0.0) -> None:
+    """Best-effort, deferred prop-placement import for the auto-sync hooks (the
+    ``load_post`` handler and the *Reload from JSON* operator). The real import
+    is deferred onto a one-shot ``bpy.app.timers`` callback so the GLB-import
+    ``bpy.ops`` run with a valid window context instead of inside a handler.
+    No-op in background/headless Blender (no window). Errors are swallowed and
+    logged — auto-sync must never break opening a file."""
+    if bpy.app.background:
+        return
+
+    def _run():
+        try:
+            repo_root = _repo_root()
+            track_id = _track_id()
+            if repo_root and track_id and os.path.isfile(_track_json_path(repo_root, track_id)):
+                made, n_unique = _import_into_scene(repo_root, track_id)
+                print(
+                    f"[hoverbike] auto-synced {made} prop placement(s) "
+                    f"({n_unique} unique) into {PREVIEW_COLLECTION}"
+                )
+        except Exception as e:  # noqa: BLE001 — informational; never block load
+            print(f"[hoverbike] prop-placement auto-sync skipped: {e}")
+        return None  # one-shot timer
+
+    try:
+        bpy.app.timers.register(_run, first_interval=delay)
+    except Exception as e:  # noqa: BLE001
+        print(f"[hoverbike] could not schedule prop auto-sync: {e}")
+
+
 # ── operators ────────────────────────────────────────────────────────────────
 
 
@@ -284,63 +380,15 @@ class HOVERBIKE_OT_import_prop_placements(bpy.types.Operator):
         if not track_id:
             self.report({"ERROR"}, "no track id (save the .blend or set hoverbike_track_id)")
             return {"CANCELLED"}
-        json_path = _track_json_path(repo_root, track_id)
-        if not os.path.isfile(json_path):
-            self.report({"ERROR"}, f"no track JSON: {json_path}")
+        try:
+            made, n_unique = _import_into_scene(repo_root, track_id)
+        except RuntimeError as exc:
+            self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
-
-        with open(json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        all_props = data.get("props", [])
-        asset_props = [p for p in all_props if p.get("type") == "asset" and p.get("assetId")]
-        if not asset_props:
+        if made == 0:
             self.report({"WARNING"}, "no asset props in track JSON")
             return {"CANCELLED"}
-
-        _ensure_object_mode()
-        coll = _ensure_preview_collection()
-        _clear_preview(coll)
-
-        mesh_cache: dict[str, bpy.types.Mesh] = {}
-        for asset_id in sorted({p["assetId"] for p in asset_props}):
-            try:
-                mesh_cache[asset_id] = _import_glb_mesh(repo_root, asset_id)
-            except RuntimeError as exc:
-                self.report({"ERROR"}, str(exc))
-                return {"CANCELLED"}
-
-        made = 0
-        for i, p in enumerate(all_props):
-            if p.get("type") != "asset" or not p.get("assetId"):
-                continue
-            mesh = mesh_cache.get(p["assetId"])
-            if mesh is None:
-                continue
-            obj = bpy.data.objects.new(f"prop_{p['assetId'].split('/')[-1]}_{i:03d}", mesh)
-            coll.objects.link(obj)
-
-            pos = p.get("position", {})
-            obj.location = _blender_from_three(
-                float(pos.get("x", 0.0)), float(pos.get("y", 0.0)), float(pos.get("z", 0.0))
-            )
-            rot = p.get("rotation", {})
-            obj.rotation_mode = "QUATERNION"
-            obj.rotation_quaternion = _quat_blender_from_three(
-                float(rot.get("x", 0.0)),
-                float(rot.get("y", 0.0)),
-                float(rot.get("z", 0.0)),
-                float(rot.get("w", 1.0)),
-            )
-            sz = p.get("size", {})
-            # three.js size axes (x,y,z) → Blender scale (x,z,y); unsigned.
-            obj.scale = (float(sz.get("x", 1.0)), float(sz.get("z", 1.0)), float(sz.get("y", 1.0)))
-
-            obj[ASSET_ID_KEY] = p["assetId"]
-            obj[PROP_INDEX_KEY] = i
-            obj[KIND_KEY] = KIND_VALUE
-            made += 1
-
-        self.report({"INFO"}, f"imported {made} placements ({len(mesh_cache)} unique props)")
+        self.report({"INFO"}, f"imported {made} placements ({n_unique} unique props)")
         return {"FINISHED"}
 
 

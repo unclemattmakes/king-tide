@@ -149,6 +149,12 @@ export type TerrainShaderConfig = {
    *  and triplanar (XY+YZ+XZ) sampling. 0 = stock (cliffs stretch);
    *  1 = fully triplanar (cliffs read varied). Default 0.6. */
   triplanar?: number
+  /** Strength (0..1) of the "waterline trio" shoreline banding stacked on
+   *  the wet band, bottom→top: a new-life algae/coral fringe just below the
+   *  line, a barnacle/verdigris crust at the line, and a salt-bleach strip
+   *  just above. 0 disables (every non-coastal track stays byte-identical);
+   *  1 = full. Default 0. */
+  waterline?: number
 }
 
 export type PlayerStart = {
@@ -450,6 +456,14 @@ export type SkyConfig = {
   bloom?: number
   seaStateBeaufort?: number
   toneMapping?: SkyToneMapping
+  /** 0..1 — how billowy/towering the clouds read. 0 = flat overcast band
+   *  (legacy look); higher pushes domain-warped cauliflower cumulus with
+   *  cheap self-shadow volume lighting. Pure dome-shader cost. */
+  cloudTowering?: number
+  /** Sun disc + corona angular size multiplier. 1 = tight ~1° disc
+   *  (legacy); larger gives a big dramatic low sun with a warm corona,
+   *  e.g. finale / sunset tracks. */
+  sunSize?: number
 }
 
 /**

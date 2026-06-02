@@ -190,6 +190,7 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   const screeBand = config.screeBand ?? 0.25
   const saturation = config.saturation ?? 1.05
   const triplanar = config.triplanar ?? 0.6
+  const waterline = config.waterline ?? 0
 
   const mat = new MeshStandardNodeMaterial({ metalness: 0 })
   mat.name = 'mat_terrain_runtime'
@@ -301,6 +302,35 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   const wet = smoothstep(float(wetBand), float(0.0), abs(yRelWater))
   const withWet = mix(saturated, saturated.mul(vec3(0.72, 0.76, 0.86)), wet)
 
+  // ── Waterline trio (opt-in via terrainShader.waterline) ──────────────
+  // Three stacked tide-marks keyed on height above the real waterline,
+  // bottom→top (art-direction.md waterline rule): a new-life algae/coral
+  // FRINGE just below the line (blooming), a barnacle/verdigris CRUST at
+  // the line (broken), and a chalky SALT-BLEACH strip just above. Each is
+  // a triangular height window mixed over the wet result and scaled by the
+  // per-track `waterline` strength, so a track that leaves it 0 is
+  // byte-identical to before.
+  const wlStr = float(waterline)
+  // Triangular masks (metres relative to the waterline).
+  const fringeMask = smoothstep(float(-2.4), float(-0.4), yRelWater).mul(
+    smoothstep(float(0.4), float(-0.4), yRelWater),
+  )
+  const crustMask = smoothstep(float(-0.7), float(0.15), yRelWater).mul(
+    smoothstep(float(1.0), float(0.15), yRelWater),
+  )
+  const bleachMask = smoothstep(float(0.4), float(1.2), yRelWater).mul(
+    smoothstep(float(3.0), float(1.2), yRelWater),
+  )
+  // Band tints (multiply/blend so they read as weathering on the rock,
+  // not painted decals): green-teal algae, grey-green barnacle crust,
+  // pale chalky salt-bleach.
+  const fringeCol = withWet.mul(vec3(0.52, 0.82, 0.6))
+  const crustCol = mix(withWet, vec3(0.46, 0.5, 0.45), float(0.55))
+  const bleachCol = mix(withWet, vec3(0.88, 0.88, 0.83), float(0.5))
+  const wlBand1 = mix(withWet, fringeCol, fringeMask.mul(wlStr).mul(0.7))
+  const wlBand2 = mix(wlBand1, crustCol, crustMask.mul(wlStr).mul(0.55))
+  const withBands = mix(wlBand2, bleachCol, bleachMask.mul(wlStr).mul(0.5))
+
   // ── Underwater refraction tint ──────────────────────────────────────
   // Submerged geometry (y < 0) gets a Beer-Lambert-like cyan tint that
   // ramps in with depth, plus a slight darkening. Reads as "the water
@@ -313,7 +343,7 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   // Cyan-shift colour multiplier — keeps geometry recognisable but
   // pulls warm tones out the deeper you go.
   const refractTint = mix(vec3(1.0, 1.0, 1.0), vec3(0.45, 0.65, 0.78), depthFac)
-  const withRefract = withWet.mul(refractTint)
+  const withRefract = withBands.mul(refractTint)
 
   // ── Baked vertex attributes (AO + path wear) ─────────────────────────
   // Vertex-baked AO + racing-line wear from the addon's "Bake AO + Path

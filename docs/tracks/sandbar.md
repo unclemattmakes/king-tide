@@ -78,12 +78,20 @@ while the game is *teaching* the mechanic.
 | `crest_berm` | track / terrain | **Frozen-wave sand-dune crest** for the 42–55 s launch — replaces the cut anti-grav arch. |
 | Tutorial sign empties | decoration | Arrow empties at each beat boundary; the runtime tutorial anchors HUD prompts to them. |
 | `scatter_palms` | scatter (`prop_palm`) | Sparse cove-edge palms (~12). |
+| `pilot_shack` | decoration | The marina's **pilot-school shack** — a solid corrugated-roof cabin with painted plank walls, the built hero of the cove. AI-lane prop. See [sandbar-art-target.md](./sandbar-art-target.md) §Marina hub. |
+| `marina_dock` | decoration | The stilt timber **dock/pier** the shack sits on, reaching into the cove. Procedural (spanning) — thin planks + pilings fragment in image-to-3D. |
+| `dock_piling` | decoration | Mooring **pilings / bollards** along the dock edge and cove shallows. Procedural (thin). |
 | `emitter_pump_hint` | emitter (atlas 0) | Parked on the first wave crest — "something happens here" before the player arrives. |
+| `emitter_gulls` | emitter (atlas 5) | Sparse gull flock over the cove — a few moving things to sell "alive". |
 
 > **Retired:** `antigrav_curve_NN` (the brief intro tube) — gone.
 
 ## References
 
+- [sandbar-art-target.md](./sandbar-art-target.md) — **near-shipping visual
+  build-target** from the Midjourney concept pass (per-beat build actions,
+  palette, waterline trio, build order). Layout stays as authored; this is the
+  *look* to build toward.
 - [../track-design-specs.md](../track-design-specs.md) §2.0 — beat timing,
   wave-zone, emitter, audio, camera configs.
 - [../track-themes.md](../track-themes.md) — tutorial framing.

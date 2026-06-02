@@ -81,6 +81,12 @@ const DEFAULT_SKY: Required<SkyConfig> = {
   // can override per palette (AgX for golden-hour, neutral for crisp
   // daylight, etc.).
   toneMapping: 'aces_filmic',
+  // Cloud volume + sun drama. Defaults give a gently billowy, self-shadowed
+  // cloud (a strict upgrade on the old flat band) and the legacy tight sun.
+  // Tracks dial `cloudTowering` up for cumulus towers and `sunSize` up for a
+  // big cinematic sun. Both are pure dome-shader fragment cost.
+  cloudTowering: 0.35,
+  sunSize: 1.0,
 }
 
 /** Map a SkyToneMapping name → Three.js constant. */
@@ -409,6 +415,8 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   const uTime = uniform(0)
   const uCloudiness = uniform(cfg.cloudiness)
   const uSunIntensity = uniform(cfg.sunIntensity)
+  const uCloudTowering = uniform(cfg.cloudTowering)
+  const uSunSize = uniform(cfg.sunSize)
   const uStarOpacity = uniform(0)
   // Per-grade tone uniforms — kept on the shader so future runtime
   // grade swaps (e.g. cup-final cinematic) are a uniform write rather
@@ -465,35 +473,76 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   const sunDot = dot(worldDir, uSunDir)
   const sunDotPos = max(sunDot, float(0))
 
-  // Soft halo around the sun — broad, weak, tints the surrounding sky warm.
-  const halo = pow(sunDotPos, 6.0).mul(0.55)
+  // ── Sun size: 1 = tight legacy disc, larger = giant cinematic sun. ──────
+  // sizeT remaps sunSize≈1→0 and sunSize≈4→1 ("× bigger than the tight disc").
+  const sizeT = clamp(uSunSize.sub(float(1)).mul(0.34), float(0), float(1))
 
-  // Sun disc — narrow, near-1.0 dot. Smoothstep gives a soft edge instead of
-  // a hard mathematical circle so it survives the PMREM downsample without
-  // ringing. Width tuned for ~1° angular radius.
-  const disc = smoothstep(float(0.9985), float(0.99975), sunDot)
+  // Halo: broad warm wash toward the sun. Blend a tight and a broad falloff
+  // by sun size (fixed exponents keep it cheap); a bigger sun adds a corona.
+  const haloTight = pow(sunDotPos, 6.0).mul(0.55)
+  const haloBroad = pow(sunDotPos, 3.0).mul(0.6)
+  const halo = mix(haloTight, haloBroad, sizeT)
+  const corona = pow(sunDotPos, 2.4).mul(sizeT.mul(0.6))
 
-  // Clouds — project worldDir cylindrically (xz / |y|) so clouds tile above
-  // the camera and stretch into the horizon. Scroll with uTime for wind.
-  const cloudCoord = vec2(
-    worldDir.x.div(max(abs(worldDir.y), float(0.18))),
-    worldDir.z.div(max(abs(worldDir.y), float(0.18))),
+  // Sun disc — smoothstep edge survives the PMREM downsample without ringing.
+  // The disc widens with sun size: tight ~1° at size 1 → a fat low sun higher.
+  const discOuter = mix(float(0.9985), float(0.9955), sizeT)
+  const discInner = mix(float(0.99975), float(0.99885), sizeT)
+  const disc = smoothstep(discOuter, discInner, sunDot)
+
+  // ── Clouds — domain-warped billowing cumulus with cheap 2.5D self-shadow. ─
+  // Cylindrical projection (xz / |y|). LOW frequency → big cumulus masses;
+  // towering enlarges + sharpens them further. The 0.14 floor lets the puffs
+  // sit lower toward the horizon so they read above the sea line at racing
+  // camera pitch (where most of the visible sky is the lower band).
+  const cloudFreq = float(0.46).sub(uCloudTowering.mul(0.12))
+  const cloudProj = vec2(
+    worldDir.x.div(max(abs(worldDir.y), float(0.14))),
+    worldDir.z.div(max(abs(worldDir.y), float(0.14))),
+  ).mul(cloudFreq)
+  const cloudCoord = cloudProj.add(vec2(uTime.mul(0.011), uTime.mul(0.006)))
+  // Domain warp (1-octave, cheap) bulges the band into cauliflower clumps;
+  // depth scales with towering so a flat-overcast track (towering≈0) keeps
+  // the smooth legacy band.
+  const warpAmt = uCloudTowering.mul(1.1).add(0.12)
+  const warp = vec2(
+    valueNoise(cloudCoord.mul(0.55).add(vec2(11.3, 4.1))).sub(0.5),
+    valueNoise(cloudCoord.mul(0.55).add(vec2(7.7, 19.6))).sub(0.5),
+  ).mul(warpAmt)
+  const cWarped = cloudCoord.add(warp)
+  const cloudN = fbm3(cWarped)
+  // Cover threshold; towering NARROWS the ramp → rounder, denser cauliflower
+  // tops with crisp billowing edges. Horizon mask: clouds from ~2° up.
+  const coverLo = float(0.5).sub(uCloudiness.mul(0.42)).sub(uCloudTowering.mul(0.04))
+  const coverHi = float(0.86).sub(uCloudTowering.mul(0.22))
+  const horizonMask = smoothstep(float(0.03), float(0.3), worldDir.y)
+  const cloudCover = clamp(smoothstep(coverLo, coverHi, cloudN), float(0), float(1)).mul(
+    horizonMask,
   )
-    .mul(0.6)
-    .add(vec2(uTime.mul(0.012), uTime.mul(0.007)))
-  const cloudN = fbm3(cloudCoord)
-  // cloudiness in [0,1] shifts the threshold: 0 → very clear, 1 → solid.
-  // The horizon mask hides clouds below ~5° elevation (avoids the seam where
-  // sky meets fog) and softens to ~25° so the front edge isn't a hard line.
-  const horizonMask = smoothstep(float(0.06), float(0.35), worldDir.y)
-  const cloudCover = clamp(
-    smoothstep(float(0.55).sub(uCloudiness.mul(0.4)), float(0.9), cloudN),
+  // Cheap 2.5D self-shadow: re-sample density offset toward the sun in cloud
+  // space. Denser toward the sun → shadowed flank (base); thinner → sun-lit
+  // top. Offset depth AND contrast grow with towering, so the puffs read as
+  // tall billowing volumes — the trick that sells cumulus without raymarching.
+  const sunCloudDir = vec2(uSunDir.x, uSunDir.z).mul(uCloudTowering.mul(0.5).add(0.35))
+  const cloudShadowN = fbm3(cWarped.add(sunCloudDir))
+  const lightTerm = clamp(
+    cloudN.sub(cloudShadowN).mul(uCloudTowering.mul(3.0).add(3.0)).add(0.4),
     float(0),
     float(1),
-  ).mul(horizonMask)
-  // Cloud colour: bright sun-side bottom (lit by warm glow), darker top.
-  const cloudShade = mix(uHorizon.mul(0.85), uSunGlow.mul(1.2), pow(sunDotPos, 1.5))
-  const cloudColor = mix(uHorizon.mul(0.9), cloudShade, float(0.7))
+  )
+  // Tops brighten with elevation → towering-height cue (stronger with towering).
+  const elevLift = smoothstep(float(0.12), float(0.66), worldDir.y).mul(uCloudTowering.mul(0.45))
+  // Shadowed base: COOL blue-grey (blend toward the cool zenith, then darken)
+  // so the underside reads against the warm sky — this cool-base / warm-top
+  // contrast is what gives concept-art cumulus their pop. Lit top: warm +
+  // bright, pushed toward the sun-glow near the sun.
+  const cloudBaseCol = mix(uHorizon, uZenith, float(0.55)).mul(0.58)
+  const cloudLitCol = mix(vec3(1.0, 0.99, 0.99), uSunGlow.mul(1.55), pow(sunDotPos, 1.3))
+  const cloudColor = mix(
+    cloudBaseCol,
+    cloudLitCol,
+    clamp(lightTerm.add(elevLift), float(0), float(1)),
+  )
 
   // Starfield — sparse 2D hash points on the sky dome. Sample worldDir at
   // high frequency, threshold steeply for sparsity. Faded by uStarOpacity.
@@ -505,15 +554,16 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   const starMask = smoothstep(float(0.9965), float(0.999), starHash).mul(uStarOpacity)
   const stars = vec3(starMask, starMask, starMask)
 
-  // Compose: base + halo glow toward sun + clouds (alpha-over) + stars + tint.
-  const lit = baseSky.add(uSunGlow.mul(halo))
+  // Compose: base + halo + corona toward sun + clouds (alpha-over) + stars.
+  const lit = baseSky.add(uSunGlow.mul(halo)).add(uSunGlow.mul(corona))
   const withClouds = mix(lit, cloudColor, cloudCover)
-  // Sun disc: bright additive, gated by being above the horizon AND not
-  // being occluded by a cloud (1 - cloudCover lerp). uSunIntensity dims it
-  // per-track without disturbing the rest of the shader.
+  // Sun disc: bright additive, gated above the horizon AND not cloud-occluded.
+  // uSunIntensity dims per-track; a bigger sun is dimmed a touch so it glows
+  // instead of clipping to white (bloom carries the rest).
   const sunAboveHorizon = smoothstep(float(-0.02), float(0.04), worldDir.y)
+  const discBright = mix(float(8.0), float(4.5), sizeT)
   const sunDisc = uSunGlow
-    .mul(disc.mul(float(8.0)).mul(uSunIntensity))
+    .mul(disc.mul(discBright).mul(uSunIntensity))
     .mul(sunAboveHorizon)
     .mul(float(1).sub(cloudCover.mul(0.85)))
   // Pre-grade composite (matches the historical look when the grade is
