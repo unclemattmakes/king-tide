@@ -11,14 +11,28 @@
  *
  * The full spec lives in [docs/vertex-attribute-spec.md](../../../docs/vertex-attribute-spec.md).
  *
- * Three.js note: this implementation works through WebGL2's
- * `onBeforeCompile` path. WebGPU's TSL is a follow-up — when the
- * project's WebGPU path needs sway, port the same math into a TSL
- * node-tree fragment and call it from `applyFoliageSway` based on the
- * material's `userData.isWebGPU` hint.
+ * Three.js note: the game's PRIMARY renderer is `WebGPURenderer`
+ * (three/webgpu), which uses TSL node materials — `onBeforeCompile`
+ * does nothing there. So this module ships TWO code paths that mirror
+ * the same math:
+ *
+ *   - WebGL2 fallback → `applyFoliageSway(material)` patches the
+ *     material in place via `onBeforeCompile` (the original path).
+ *   - WebGPU / node materials → `applyFoliageSwayToMesh(mesh)` CONVERTS
+ *     each foliage material to a `MeshStandardNodeMaterial` and sets its
+ *     `positionNode` to a TSL sway node (loaded GLB materials are plain
+ *     `MeshStandardMaterial`, which can't carry a `positionNode`, so the
+ *     mesh's material slot has to be replaced).
+ *
+ * Both paths read the same shared wind/time state, exposed to the WebGL2
+ * path as plain `{ value }` uniform objects and to the TSL path as
+ * `uniform()` nodes; `updateWind` / `updateSwayTime` mutate both.
  */
 
 import * as THREE from 'three'
+import type Node from 'three/src/nodes/core/Node.js'
+import { attribute, float, positionLocal, sin, uniform, vec3 } from 'three/tsl'
+import { MeshStandardNodeMaterial } from 'three/webgpu'
 
 /** Shared wind state. The render loop updates this once per frame; every
  *  swayed material samples from it via a uniform reference. */
@@ -34,7 +48,32 @@ const SWAY_WIND = {
 }
 const SWAY_FREQ = { value: windFrequency }
 
+/** TSL uniform nodes — the node-material twins of the plain-object
+ *  uniforms above. Created once at module scope so every swayed node
+ *  material shares the same GPU uniform; `updateWind` / `updateSwayTime`
+ *  mutate their `.value` in lockstep with the WebGL2 uniforms. */
+const SWAY_TIME_NODE = uniform(0)
+const SWAY_WIND_NODE = uniform(
+  new THREE.Vector3(WIND_DIR.x * windStrength, 0, WIND_DIR.z * windStrength),
+)
+const SWAY_FREQ_NODE = uniform(windFrequency)
+
 const PATCHED = Symbol.for('hoverbike.foliageSwayPatched')
+/** Marks a node material we've already attached a sway `positionNode` to,
+ *  so `applyFoliageSwayToMesh` is idempotent and doesn't double-swap. */
+const NODE_SWAYED = Symbol.for('hoverbike.foliageSwayNodeSwayed')
+
+/** Active renderer backend. Defaults to `'webgpu'` — the project's
+ *  primary renderer — so foliage sways even if a boot path forgets to
+ *  call `setFoliageSwayBackend`. Boot code that has the real backend
+ *  (from `createRenderer`) should set it before the first track loads. */
+let activeBackend: 'webgpu' | 'webgl2' = 'webgpu'
+
+/** Tell the sway system which renderer backend is live. WebGPU uses the
+ *  TSL node-material path; WebGL2 uses the `onBeforeCompile` path. */
+export function setFoliageSwayBackend(backend: 'webgpu' | 'webgl2'): void {
+  activeBackend = backend
+}
 
 type Patchable = THREE.Material & {
   onBeforeCompile?: (shader: THREE.WebGLProgramParametersWithUniforms) => void
@@ -144,6 +183,153 @@ uniform float uSwayWindScale;`,
   m.needsUpdate = true
 }
 
+/** Source visual props copied verbatim from a loaded GLB material onto its
+ *  node-material replacement so the swayed foliage keeps its authored look. */
+const COPIED_STANDARD_PROPS = [
+  'map',
+  'normalMap',
+  'roughnessMap',
+  'metalnessMap',
+  'aoMap',
+  'emissiveMap',
+  'alphaMap',
+  'roughness',
+  'metalness',
+  'transparent',
+  'opacity',
+  'alphaTest',
+  'side',
+  'depthWrite',
+  'depthTest',
+  'emissiveIntensity',
+] as const
+
+/**
+ * Build the TSL sway displacement node mirroring the GLSL math in
+ * `applyFoliageSway`'s `onBeforeCompile` injection:
+ *
+ *   swayStrength = color.r
+ *   swayPhase    = color.b * 2π
+ *   swayWave     = sin(uSwayTime * uSwayFreq + swayPhase)
+ *   pos.xz      += uSwayWind.xz * windScale * swayStrength * swayWave
+ *
+ * Returns a `positionLocal`-relative node ready to assign to
+ * `material.positionNode`.
+ *
+ * Per-instance phase desync (the WebGL2 path's `instanceMatrix[3].xz`
+ * hash for scattered InstancedMesh palms) is NOT reproduced here: TSL's
+ * per-instance accessors (`instance` / `instancedMesh`) expect an
+ * InstancedBufferAttribute, not the `instanceMatrix` lifted by the GLB
+ * loader's `EXT_mesh_gpu_instancing` path, so there's no clean/safe node
+ * for the per-instance translation column. The TSL path falls back to the
+ * per-vertex `color.b` baseline phase only.
+ * TODO: derive per-instance phase from the instance matrix node once a
+ * clean accessor for the GLB instanceMatrix is available, to desync
+ * scattered palms under WebGPU the way the WebGL2 path does.
+ */
+function buildSwayPositionNode(windScale: number): Node<'vec3'> {
+  // three.js exposes the glTF COLOR_0 attribute as `color`. Cast mirrors
+  // the pattern in terrain-shader.ts (`attribute('color') as Node<...>`).
+  const color = attribute('color', 'vec3') as unknown as Node<'vec3'>
+  const swayStrength = color.r
+  const swayPhase = color.b.mul(float(6.2831853)) // 2π
+  const swayWave = sin(SWAY_TIME_NODE.mul(SWAY_FREQ_NODE).add(swayPhase))
+  const amount = swayStrength.mul(float(windScale)).mul(swayWave)
+  const offset = vec3(SWAY_WIND_NODE.x.mul(amount), float(0), SWAY_WIND_NODE.z.mul(amount))
+  return positionLocal.add(offset) as unknown as Node<'vec3'>
+}
+
+type NodeMaterialMarked = MeshStandardNodeMaterial & {
+  userData: { [key: string]: unknown; [k: symbol]: unknown }
+}
+
+/** Convert a single plain `MeshStandardMaterial` (as loaded from a GLB)
+ *  into a `MeshStandardNodeMaterial` carrying the TSL sway `positionNode`,
+ *  preserving the source's visual properties. Returns the existing node
+ *  material untouched (but ensures it's marked) when already a node
+ *  material so the swap is idempotent. */
+function toSwayNodeMaterial(src: THREE.Material, windScale: number): MeshStandardNodeMaterial {
+  // Already a node material we've swayed → leave as-is (idempotent).
+  if ((src as NodeMaterialMarked).userData?.[NODE_SWAYED]) {
+    return src as MeshStandardNodeMaterial
+  }
+
+  const next = new MeshStandardNodeMaterial()
+  next.name = src.name
+  const std = src as Partial<THREE.MeshStandardMaterial> & THREE.Material
+  for (const key of COPIED_STANDARD_PROPS) {
+    const v = (std as unknown as Record<string, unknown>)[key]
+    if (v !== undefined && v !== null) {
+      ;(next as unknown as Record<string, unknown>)[key] = v
+    }
+  }
+  if (std.color) next.color.copy(std.color)
+  if (std.emissive) next.emissive.copy(std.emissive)
+  // The sway math reads the `color` vertex attribute; enable vertexColors so
+  // three plumbs COLOR_0 through, matching the WebGL2 path's USE_COLOR gate.
+  next.vertexColors = true
+  next.positionNode = buildSwayPositionNode(windScale)
+  ;(next as NodeMaterialMarked).userData[NODE_SWAYED] = true
+  next.needsUpdate = true
+  return next
+}
+
+/**
+ * Apply foliage sway to a mesh, choosing the path appropriate for the live
+ * renderer backend:
+ *
+ *   - WebGPU (node-material path) → CONVERT each foliage material slot to a
+ *     `MeshStandardNodeMaterial` with a TSL sway `positionNode`, then assign
+ *     the converted material(s) back to the mesh. Loaded GLB materials are
+ *     plain `MeshStandardMaterial`, which can't carry a `positionNode`, so
+ *     the slot must be replaced.
+ *   - WebGL2 → patch each material in place via the original
+ *     `applyFoliageSway` `onBeforeCompile` hook.
+ *
+ * Idempotent: a second call is a no-op (the in-place path is guarded by its
+ * own `PATCHED` marker; the node path by `NODE_SWAYED`).
+ *
+ * Handles both single-material and array-material (multi-slot) meshes.
+ */
+export function applyFoliageSwayToMesh(mesh: THREE.Mesh, opts: SwayOptions = {}): void {
+  const mat = mesh.material
+  if (!mat) return
+  const windScale = typeof opts.windScale === 'number' ? opts.windScale : 1.0
+
+  if (activeBackend === 'webgl2') {
+    if (Array.isArray(mat)) {
+      for (const m of mat) if (m) applyFoliageSway(m, opts)
+    } else {
+      applyFoliageSway(mat, opts)
+    }
+    return
+  }
+
+  // WebGPU / node-material path — convert and swap.
+  const convert = (m: THREE.Material): THREE.Material => {
+    // Already a node material (e.g. a custom material someone pre-built):
+    // patch it in place rather than wrapping it in a fresh standard node.
+    if ((m as { isNodeMaterial?: boolean }).isNodeMaterial) {
+      const nm = m as NodeMaterialMarked & {
+        positionNode?: Node<'vec3'> | null
+        needsUpdate: boolean
+      }
+      if (nm.userData?.[NODE_SWAYED]) return m
+      nm.positionNode = buildSwayPositionNode(windScale)
+      nm.userData[NODE_SWAYED] = true
+      nm.needsUpdate = true
+      return m
+    }
+    return toSwayNodeMaterial(m, windScale)
+  }
+
+  if (Array.isArray(mat)) {
+    mesh.material = mat.map((m) => (m ? convert(m) : m)) as THREE.Material[]
+  } else {
+    mesh.material = convert(mat)
+  }
+}
+
 /**
  * Update the shared wind state. Call once per frame from the render
  * loop. `direction` is a unit vector in the xz plane; `strength` is the
@@ -159,6 +345,9 @@ export function updateWind(
   windFrequency = frequency
   SWAY_WIND.value.set(WIND_DIR.x * windStrength, 0, WIND_DIR.z * windStrength)
   SWAY_FREQ.value = windFrequency
+  // Mirror into the TSL uniform nodes so the WebGPU path stays in sync.
+  SWAY_WIND_NODE.value.set(WIND_DIR.x * windStrength, 0, WIND_DIR.z * windStrength)
+  SWAY_FREQ_NODE.value = windFrequency
 }
 
 /** Advance the shared sway clock. Pass elapsed simulation time in
@@ -166,6 +355,7 @@ export function updateWind(
  *  rendering swayed materials. */
 export function updateSwayTime(seconds: number): void {
   SWAY_TIME.value = seconds
+  SWAY_TIME_NODE.value = seconds
 }
 
 /** Read access for debugging / dev tools. */

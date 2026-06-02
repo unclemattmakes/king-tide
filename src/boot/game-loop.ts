@@ -52,6 +52,7 @@ import type { DirectionArrow } from '@/engine/render/direction-arrow'
 import { createDriftTierHud } from '@/engine/render/drift-tier-hud'
 import { updateSwayTime, updateWind } from '@/engine/render/foliage-sway'
 import { shouldRenderFrame } from '@/engine/render/frame-cap'
+import { createGpuProfiler } from '@/engine/render/gpu-profiler'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
 import { updateLavaTime } from '@/engine/render/lava-river-material'
 import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finish-banner'
@@ -186,6 +187,15 @@ export interface GameLoopOpts {
   scene: THREE.Scene
   camera: THREE.PerspectiveCamera
   renderer: THREE.WebGLRenderer
+  /**
+   * True when the renderer was constructed with GPU timestamp tracking
+   * (`?gpuprofile=1` on a WebGPU backend with the `timestamp-query` feature).
+   * When set, the loop spins up the opt-in GPU-time profiler and ticks it
+   * once per rendered frame. False on WebGL2 / unsupported adapters, where
+   * the profiler is an inert no-op. Optional so the other boot modes that
+   * call `startGameLoop` don't need to thread it.
+   */
+  gpuTimestampsTracked?: boolean
   audio: AudioEngine
   chase: ChaseCamera
   waveField: WaveFieldState
@@ -382,6 +392,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     scene,
     camera,
     renderer,
+    gpuTimestampsTracked = false,
     audio,
     chase,
     waveField,
@@ -549,6 +560,15 @@ export function startGameLoop(opts: GameLoopOpts): void {
     deckSignals: detectSteamDeck().signals,
   })
   const rendererInfo = (renderer as unknown as { info: RenderInfoLite }).info
+  // Opt-in WebGPU GPU-time profiler (`?gpuprofile=1`). A no-op unless the
+  // renderer was built with timestamp tracking (WebGPU + `timestamp-query`).
+  // Ticked once per rendered frame below; it throttles the async resolve so
+  // it never blocks the hot path. `renderer` is the WebGPURenderer behind the
+  // WebGLRenderer cast — it exposes `resolveTimestampsAsync` + `info.*.timestamp`.
+  const gpuProfiler = createGpuProfiler(
+    renderer as unknown as Parameters<typeof createGpuProfiler>[0],
+    { enabled: gpuTimestampsTracked },
+  )
   const initialPerfOn =
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('perf')
   perfHud.setVisible(initialPerfOn)
@@ -1457,6 +1477,9 @@ export function startGameLoop(opts: GameLoopOpts): void {
     const renderThisFrame = shouldRenderFrame(now, lastRenderedAt, playerSettings.framerateCap)
     if (renderThisFrame) {
       renderFrame(scene, camera)
+      // GPU-time profiler tick — after the render so this frame's timestamps
+      // are queued. No-op unless `?gpuprofile=1` enabled it; never throws.
+      gpuProfiler.tick()
       lastRenderedAt = now
       state.frame += 1
       framesThisSecond += 1

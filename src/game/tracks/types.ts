@@ -464,6 +464,29 @@ export type SkyConfig = {
    *  (legacy); larger gives a big dramatic low sun with a warm corona,
    *  e.g. finale / sunset tracks. */
   sunSize?: number
+  /** Full-scene cel/ink outline (post-pipeline Sobel edge darkening). Off
+   *  by default; a track opts in for the Wind-Waker ink-line look. See
+   *  `OutlineOptions` in `engine/render/post-pipeline.ts`. */
+  outline?: {
+    enabled?: boolean
+    /** Ink darkness 0..1 at a full edge. Default 0.85. */
+    strength?: number
+    /** Ink line colour (hex). Default near-black. */
+    color?: number
+    /** Sobel magnitude below this reads as flat. Default 0.1. */
+    threshold?: number
+    /** Sobel magnitude at/above this is a full line. Default 0.4. */
+    softness?: number
+  }
+  /** Velocity-buffer motion blur (post-pipeline). Off by default; a track
+   *  opts in for a stronger speed sensation. Enabling it grows the scene
+   *  pass with a velocity MRT. See `MotionBlurOptions` in
+   *  `engine/render/post-pipeline.ts`. */
+  motionBlur?: {
+    enabled?: boolean
+    /** Sample count along the velocity vector. Default 16. */
+    samples?: number
+  }
 }
 
 /**

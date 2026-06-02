@@ -7,6 +7,14 @@ export type RendererBundle = {
   renderer: THREE.WebGLRenderer
   backend: RenderBackend
   canvas: HTMLCanvasElement
+  /**
+   * True when the renderer was constructed with GPU timestamp tracking
+   * enabled (`?gpuprofile=1` on a WebGPU backend whose adapter advertises
+   * the `timestamp-query` feature). Boot code uses this to decide whether to
+   * spin up the GPU-time profiler. False on the WebGL2 fallback, when the
+   * feature is absent, or when the flag wasn't requested.
+   */
+  gpuTimestampsTracked: boolean
   resize(): void
   dispose(): void
 }
@@ -39,12 +47,18 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
   const forceWebGpu = backendOverride === 'webgpu'
 
   let hasWebGpu = false
+  let hasTimestampQuery = false
   let adapterInfo: GPUAdapterInfo | null = null
   if (wantWebGpu && 'gpu' in navigator) {
     try {
       const adapter = await navigator.gpu!.requestAdapter()
       hasWebGpu = adapter !== null
       if (adapter) {
+        // `timestamp-query` is the optional WebGPU feature that backs the
+        // GPU-time profiler. Only probe it here; we only *request* it (via
+        // `trackTimestamp`) when `?gpuprofile=1` is set, to avoid asking for
+        // a feature the device might charge for on every boot.
+        hasTimestampQuery = adapter.features.has('timestamp-query')
         // GPUAdapter.info is the current spec; older Chromium exposes
         // requestAdapterInfo(). Try both, ignore errors — we only use this
         // for the boot log, not for any code path.
@@ -70,10 +84,26 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
   // visible at racing speed but eats budget on integrated GPUs.
   const antialias = params.get('aa') !== 'off'
 
+  // `?gpuprofile=1` opts into per-frame GPU timestamp tracking so the
+  // GPU-time profiler (gpu-profiler.ts) can read `renderer.info.*.timestamp`.
+  // Only honoured on a real WebGPU backend whose adapter supports
+  // `timestamp-query`; otherwise it's a silent no-op and we leave tracking
+  // off. Passing `trackTimestamp: true` makes recent three request the
+  // device feature itself when it initialises the backend.
+  const gpuProfileRequested = params.get('gpuprofile') === '1'
+  const gpuTimestampsTracked = gpuProfileRequested && hasWebGpu && hasTimestampQuery
+  if (gpuProfileRequested && !gpuTimestampsTracked) {
+    console.warn(
+      '[render] ?gpuprofile=1 requested but GPU timestamps unavailable ' +
+        `(webgpu=${hasWebGpu} timestamp-query=${hasTimestampQuery}) — profiler disabled`,
+    )
+  }
+
   const r = new WebGPURenderer({
     canvas,
     antialias,
     forceWebGL: !hasWebGpu,
+    trackTimestamp: gpuTimestampsTracked,
   })
   await r.init()
 
@@ -120,7 +150,7 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
     canvas.remove()
   }
 
-  return { renderer, backend, canvas, resize, dispose }
+  return { renderer, backend, canvas, gpuTimestampsTracked, resize, dispose }
 }
 
 /**

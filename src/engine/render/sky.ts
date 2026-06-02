@@ -87,6 +87,10 @@ const DEFAULT_SKY: Required<SkyConfig> = {
   // big cinematic sun. Both are pure dome-shader fragment cost.
   cloudTowering: 0.35,
   sunSize: 1.0,
+  // Post-FX both default OFF so the shipping bloom-only look is unchanged
+  // unless a track opts in. See `engine/render/post-pipeline.ts`.
+  outline: { enabled: false },
+  motionBlur: { enabled: false },
 }
 
 /** Map a SkyToneMapping name → Three.js constant. */
@@ -399,6 +403,10 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
       scene,
       camera,
       bloomStrength: cfg.bloom,
+      // Per-track cel/ink outline + motion blur. Both default-off (see
+      // DEFAULT_SKY); a track only pays for them when its JSON opts in.
+      outline: cfg.outline,
+      motionBlur: cfg.motionBlur,
     })
     setActivePostPipeline(postPipeline)
   } catch (e) {

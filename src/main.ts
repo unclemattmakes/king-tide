@@ -222,7 +222,7 @@ async function boot() {
   })
 
   // Phase 2 — core subsystems.
-  const { renderer, backend } = await createRenderer(appEl)
+  const { renderer, backend, gpuTimestampsTracked } = await createRenderer(appEl)
   setRenderer(renderer)
   // Apply the persisted pixel-ratio now that the renderer is alive.
   // `createRenderer` already calls `setPixelRatio(min(devicePixelRatio, 2))`,
@@ -1315,6 +1315,7 @@ async function boot() {
     scene,
     camera,
     renderer,
+    gpuTimestampsTracked,
     audio,
     chase,
     waveField,
