@@ -13,9 +13,7 @@
       "smooth": false,
       "mat_family": "prop",
       "catalog": "Urban",
-      "sources": [
-        "pilot_shack"
-      ],
+      "sources": ["pilot_shack"],
       "seed": 12346,
       "approved": true,
       "concept": "concept-art\\props\\sandbar\\pilot_shack.png",
@@ -36,9 +34,7 @@
       "smooth": true,
       "mat_family": "prop",
       "catalog": "Rocks",
-      "sources": [
-        "scatter_rocks (common dressing)"
-      ],
+      "sources": ["scatter_rocks (common dressing)"],
       "seed": 12345,
       "approved": true,
       "concept": "concept-art\\props\\sandbar\\sea_boulder.png",
@@ -59,9 +55,7 @@
       "smooth": true,
       "mat_family": "prop",
       "catalog": "Rocks",
-      "sources": [
-        "post-flood rubble (README common dressing)"
-      ],
+      "sources": ["post-flood rubble (README common dressing)"],
       "seed": 22246,
       "approved": true,
       "concept": "concept-art\\props\\sandbar\\rubble_chunk.png",
@@ -84,9 +78,7 @@
       "smooth": true,
       "mat_family": "prop",
       "catalog": "Open Sea",
-      "sources": [
-        "submerged hull (open-water dressing)"
-      ],
+      "sources": ["submerged hull (open-water dressing)"],
       "seed": 12347,
       "approved": true,
       "concept": "concept-art\\props\\sandbar\\boat_wreck.png",
@@ -109,9 +101,7 @@
       "smooth": false,
       "mat_family": "prop",
       "catalog": "Urban",
-      "sources": [
-        "drowned vehicle (urban dressing)"
-      ],
+      "sources": ["drowned vehicle (urban dressing)"],
       "seed": 12348,
       "approved": true,
       "concept": "concept-art\\props\\sandbar\\drowned_cab.png",
@@ -134,9 +124,7 @@
       "smooth": false,
       "mat_family": "prop",
       "catalog": "Industrial",
-      "sources": [
-        "marina anchor (cove dressing)"
-      ],
+      "sources": ["marina anchor (cove dressing)"],
       "seed": 33351,
       "approved": true,
       "concept": "concept-art\\props\\sandbar\\ship_anchor.png",
@@ -159,9 +147,7 @@
       "smooth": true,
       "mat_family": "prop",
       "catalog": "Open Sea",
-      "sources": [
-        "marker_buoy"
-      ],
+      "sources": ["marker_buoy"],
       "seed": 12351,
       "approved": true,
       "concept": "concept-art\\props\\sandbar\\marker_buoy.png",
@@ -210,9 +196,7 @@
       "smooth": true,
       "mat_family": "prop",
       "catalog": "Industrial",
-      "sources": [
-        "first Midjourney-pipeline AI prop; marina / dock dressing cluster"
-      ],
+      "sources": ["first Midjourney-pipeline AI prop; marina / dock dressing cluster"],
       "approved": true,
       "concept": "concept-art\\midjourney\\sandbar\\sandbar_prop_crates-barrels.webp",
       "mesh": "concept-art\\midjourney\\sandbar\\_mesh_out\\crates_singleview.glb",

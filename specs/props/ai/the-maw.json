@@ -13,9 +13,7 @@
       "smooth": true,
       "mat_family": "prop",
       "catalog": "Rocks",
-      "sources": [
-        "scatter_rocks"
-      ],
+      "sources": ["scatter_rocks"],
       "seed": 12345,
       "approved": true,
       "concept": "concept-art\\props\\the-maw\\sea_boulder.png",
