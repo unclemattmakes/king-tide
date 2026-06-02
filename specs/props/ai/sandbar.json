@@ -2,10 +2,33 @@
   "level": "sandbar",
   "ai_props": [
     {
+      "prop_id": "pilot_shack",
+      "family": "shack",
+      "subject": "solid boxy weathered marina pilot-school cabin, one closed rectangular hut block, corrugated metal gable roof, painted wood plank walls with shuttered windows, sitting on a low solid base, compact and chunky, no stilts no ladder no external stairs no railings no thin poles wires or antennae",
+      "prompt": "a single solid boxy weathered marina pilot-school cabin, one closed rectangular hut block, corrugated metal gable roof, painted wood plank walls with shuttered windows, sitting on a low solid base, compact and chunky, no stilts no ladder no external stairs no railings no thin poles wires or antennae, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "target_tris": 3500,
+      "target_height": 14.0,
+      "collider": "box",
+      "tint": "#6aa0a8",
+      "smooth": false,
+      "mat_family": "prop",
+      "catalog": "Urban",
+      "sources": [
+        "pilot_shack"
+      ],
+      "seed": 12346,
+      "approved": true,
+      "concept": "concept-art\\props\\sandbar\\pilot_shack.png",
+      "mesh": "tools\\ai_prop_runs\\sandbar\\meshes\\pilot_shack.glb",
+      "conditioned_glb": "public\\assets\\props\\ai\\pilot_shack.glb",
+      "integrated": true,
+      "library_blend": "tracks-src\\props\\ai\\pilot_shack.blend"
+    },
+    {
       "prop_id": "sea_boulder",
       "family": "rock",
-      "subject": "massive rounded sea boulder rock, one solid closed boulder, weathered pale reef stone, a band of green algae and barnacles around the lower third, a little soft moss on top, warm turquoise-tinted stone",
-      "prompt": "a single massive rounded sea boulder rock, one solid closed boulder, weathered pale reef stone, a band of green algae and barnacles around the lower third, a little soft moss on top, warm turquoise-tinted stone, one isolated centered object on a plain solid white background, full single object in frame, sharp focus, stylized 3D game prop asset, clean stylized toy look, bold flat colour blocking, soft cel shading with a gentle light-to-shadow gradient, matte surface, confident slightly-oversized rounded-but-faceted form, soft even studio lighting",
+      "subject": "massive solid weathered sea boulder, rounded ocean rock, barnacle and algae crusted, closed compact form",
+      "prompt": "a single massive solid weathered sea boulder, rounded ocean rock, barnacle and algae crusted, closed compact form, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
       "target_tris": 2000,
       "target_height": 18.0,
       "collider": "box",
@@ -14,7 +37,7 @@
       "mat_family": "prop",
       "catalog": "Rocks",
       "sources": [
-        "scatter_rocks (README common dressing)"
+        "scatter_rocks (common dressing)"
       ],
       "seed": 12345,
       "approved": true,
@@ -22,8 +45,7 @@
       "mesh": "tools\\ai_prop_runs\\sandbar\\meshes\\sea_boulder.glb",
       "conditioned_glb": "public\\assets\\props\\ai\\sea_boulder.glb",
       "integrated": true,
-      "library_blend": "tracks-src\\props\\ai\\sea_boulder.blend",
-      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, rocks, pebbles, turtle, shell, animal, creature"
+      "library_blend": "tracks-src\\props\\ai\\sea_boulder.blend"
     },
     {
       "prop_id": "rubble_chunk",
@@ -47,7 +69,8 @@
       "conditioned_glb": "public\\assets\\props\\ai\\rubble_chunk.glb",
       "integrated": true,
       "library_blend": "tracks-src\\props\\ai\\rubble_chunk.blend",
-      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, pile, stack, heap, rocks, blocks, bricks, many, repeated, tiled, pattern, spaceship, pod"
+      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, pile, stack, heap, rocks, blocks, bricks, many, repeated, tiled, pattern, spaceship, pod",
+      "orphan": true
     },
     {
       "prop_id": "boat_wreck",
@@ -71,7 +94,8 @@
       "conditioned_glb": "public\\assets\\props\\ai\\boat_wreck.glb",
       "integrated": true,
       "library_blend": "tracks-src\\props\\ai\\boat_wreck.blend",
-      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, harbor, dock, marina, intact boat, sails, water, waves, reflection"
+      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, harbor, dock, marina, intact boat, sails, water, waves, reflection",
+      "orphan": true
     },
     {
       "prop_id": "drowned_cab",
@@ -95,7 +119,8 @@
       "conditioned_glb": "public\\assets\\props\\ai\\drowned_cab.glb",
       "integrated": true,
       "library_blend": "tracks-src\\props\\ai\\drowned_cab.blend",
-      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, rocket, torpedo, roof rack, two cars, traffic"
+      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, rocket, torpedo, roof rack, two cars, traffic",
+      "orphan": true
     },
     {
       "prop_id": "ship_anchor",
@@ -119,7 +144,8 @@
       "conditioned_glb": "public\\assets\\props\\ai\\ship_anchor.glb",
       "integrated": true,
       "library_blend": "tracks-src\\props\\ai\\ship_anchor.blend",
-      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, ornate, decorative, fantasy, gothic, tentacles, octopus, scrollwork, filigree, engraved, icon set, multiple anchors, repeated, tiled, pattern, flat relief, bas-relief, chain, rope, spaceship, creature"
+      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, ornate, decorative, fantasy, gothic, tentacles, octopus, scrollwork, filigree, engraved, icon set, multiple anchors, repeated, tiled, pattern, flat relief, bas-relief, chain, rope, spaceship, creature",
+      "orphan": true
     },
     {
       "prop_id": "marker_buoy",
@@ -143,13 +169,14 @@
       "conditioned_glb": "public\\assets\\props\\ai\\marker_buoy.glb",
       "integrated": true,
       "library_blend": "tracks-src\\props\\ai\\marker_buoy.blend",
-      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, fish, sea creature, animal, fins, tail, rocket, torpedo, submarine"
+      "negative": "contact sheet, multiple views, turnaround, multiple objects, two objects, several objects, collection, grid, diorama, scene, landscape, island, terrain, ground, seabed, floor, water, sky, background scenery, photorealistic, photoscan, realistic PBR, heavy rust, grimdark, gritty, muddy desaturated, brown, busy surface detail, noise, text, watermark, logo, signature, lowres, blurry, thin spindly fragments, floating disconnected parts, holes, drop shadow, cropped, fish, sea creature, animal, fins, tail, rocket, torpedo, submarine",
+      "orphan": true
     },
     {
       "prop_id": "drift_buoy",
       "family": "prop",
       "source": "midjourney",
-      "pipeline": "Midjourney v7 concept → cropped single object → Hunyuan3D-2mini single-view → condition_ai_batch",
+      "pipeline": "Midjourney v7 concept \u2192 cropped single object \u2192 Hunyuan3D-2mini single-view \u2192 condition_ai_batch",
       "subject": "retro-future salvaged drift-marker navigation buoy, battered painted-metal float, glowing neon-mint accent ring, barnacle and algae band at the waterline",
       "prompt": "retro-future game prop concept art, weathered salvaged retro-future style, a functional drift-marker navigation buoy (battered painted metal float, a glowing neon-mint accent ring, barnacles and algae at the waterline), bold flat color blocking, strong readable silhouette, soft cel shading, crisp rim light, matte painted salvage metal, post-apocalyptic solarpunk drowned world, painterly concept art, Moebius x Wipeout --ar 1:1 --style raw --s 250 --no cute, vinyl toy, chibi, smooth plastic, glossy, infantile",
       "target_tris": 2000,
@@ -166,13 +193,14 @@
       "concept": "concept-art\\midjourney\\sandbar\\sandbar_prop_buoy-and-sign.webp",
       "mesh": "concept-art\\midjourney\\sandbar\\_mesh_out\\buoy_singleview.glb",
       "conditioned_glb": "public\\assets\\props\\ai\\drift_buoy.glb",
-      "integrated": false
+      "integrated": false,
+      "orphan": true
     },
     {
       "prop_id": "cargo_crates",
       "family": "prop",
       "source": "midjourney",
-      "pipeline": "Midjourney v7 concept → Hunyuan3D-2mini single-view → condition_ai_batch",
+      "pipeline": "Midjourney v7 concept \u2192 Hunyuan3D-2mini single-view \u2192 condition_ai_batch",
       "subject": "retro-future salvaged cargo cluster: stenciled crates and dented metal drums and barrels on a wooden pallet, lightly barnacled and salt-bleached at the base",
       "prompt": "retro-future game prop concept art, weathered salvaged retro-future style, repainted and stenciled cargo crates and dented metal drums and barrels, mismatched salvaged panels, a coil of cable, lightly barnacled and salt-bleached at the base, bold flat color blocking, strong readable silhouette, soft cel shading, crisp rim light, matte painted salvage metal, post-apocalyptic solarpunk drowned world, painterly concept art, Moebius x Wipeout --ar 1:1 --style raw --s 250 --no cute, vinyl toy, chibi, smooth plastic, glossy, infantile",
       "target_tris": 2500,
@@ -189,7 +217,8 @@
       "concept": "concept-art\\midjourney\\sandbar\\sandbar_prop_crates-barrels.webp",
       "mesh": "concept-art\\midjourney\\sandbar\\_mesh_out\\crates_singleview.glb",
       "conditioned_glb": "public\\assets\\props\\ai\\cargo_crates.glb",
-      "integrated": false
+      "integrated": false,
+      "orphan": true
     }
   ],
   "procedural_lane": [
@@ -212,7 +241,23 @@
       "name": "scatter_palms",
       "reason": "thin/branching foliage \u2014 use the procedural sway prop",
       "notes": "Sparse cove-edge palms (~12)."
+    },
+    {
+      "name": "marina_dock",
+      "reason": "thin/spanning structure \u2014 fragments in image-to-3D",
+      "notes": "The stilt timber **dock/pier** the shack sits on, reaching into the cove. Procedural (spanning) \u2014 thin planks + pilings fragment in image-to-3D."
+    },
+    {
+      "name": "dock_piling",
+      "reason": "thin/spanning structure \u2014 fragments in image-to-3D",
+      "notes": "Mooring **pilings / bollards** along the dock edge and cove shallows. Procedural (thin)."
     }
   ],
-  "manual_review": []
+  "manual_review": [
+    {
+      "name": "marker_buoy",
+      "reason": "no archetype matched \u2014 classify by hand (AI if compact/solid)",
+      "notes": "Drift target for the 20\u201332 s beat."
+    }
+  ]
 }

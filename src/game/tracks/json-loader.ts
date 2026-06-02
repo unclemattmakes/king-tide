@@ -682,6 +682,7 @@ function readOptionalTerrainShader(raw: unknown): TerrainShaderConfig | null {
     'screeBand',
     'saturation',
     'triplanar',
+    'waterline',
   ] as const) {
     if (key in raw) {
       const v = raw[key]
@@ -743,7 +744,15 @@ function readOptionalSky(raw: unknown): SkyConfig | null {
     }
     out.tint = v
   }
-  for (const key of ['cloudiness', 'sunIntensity', 'fogNear', 'fogFar', 'timeOfDay'] as const) {
+  for (const key of [
+    'cloudiness',
+    'sunIntensity',
+    'fogNear',
+    'fogFar',
+    'timeOfDay',
+    'cloudTowering',
+    'sunSize',
+  ] as const) {
     if (key in raw) {
       const v = raw[key]
       if (typeof v !== 'number' || !Number.isFinite(v)) {
@@ -754,6 +763,12 @@ function readOptionalSky(raw: unknown): SkyConfig | null {
   }
   if (out.cloudiness !== undefined && (out.cloudiness < 0 || out.cloudiness > 1)) {
     throw new Error(`track-json: sky.cloudiness must be in [0,1] (got ${out.cloudiness})`)
+  }
+  if (out.cloudTowering !== undefined && (out.cloudTowering < 0 || out.cloudTowering > 1)) {
+    throw new Error(`track-json: sky.cloudTowering must be in [0,1] (got ${out.cloudTowering})`)
+  }
+  if (out.sunSize !== undefined && (out.sunSize < 0.25 || out.sunSize > 8)) {
+    throw new Error(`track-json: sky.sunSize must be in [0.25,8] (got ${out.sunSize})`)
   }
   if (out.sunIntensity !== undefined && out.sunIntensity < 0) {
     throw new Error(`track-json: sky.sunIntensity must be >= 0 (got ${out.sunIntensity})`)

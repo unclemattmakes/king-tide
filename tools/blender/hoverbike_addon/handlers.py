@@ -427,6 +427,18 @@ def _hoverbike_load_post(*_args):
     except Exception as e:  # noqa: BLE001 — informational only
         print(f"[hoverbike] auto-reload-from-JSON skipped: {e}")
 
+    # 2c. Prop-placement auto-sync — rebuild the _hoverbike_props_preview
+    #     collection from props[] so placed asset props are visible on open
+    #     (matching the buoy/gate/water previews). Deferred via a timer so the
+    #     GLB-import bpy.ops run with a valid window context, not inside this
+    #     handler. Best-effort: never blocks the open.
+    try:
+        from .prop_placements import schedule_auto_import
+
+        schedule_auto_import()
+    except Exception as e:  # noqa: BLE001 — informational only
+        print(f"[hoverbike] prop auto-sync schedule skipped: {e}")
+
 
 def _update_is_real_edit(upd) -> bool:
     """Return True only when the depsgraph update represents an

@@ -221,6 +221,12 @@ AI_FAMILIES = {
         target_tris=3000, target_height=12.0, smooth=True,
         subject=("solid smooth sea creature body sculpture, compact closed "
                  "form, no thin fins")),
+    "shack": AIFamily(  # cared-for marina / pilot huts — the built "45%" hero
+        prop_id="pilot_shack", catalog="Urban", tint="#6aa0a8", unique=True,
+        target_tris=3500, target_height=14.0, smooth=False, collider="box",
+        subject=("solid compact weathered marina pilot shack cabin, closed "
+                 "boxy hut, corrugated metal roof, painted wood plank walls, "
+                 "no thin stilts wires antennae or signage poles")),
 }
 
 
@@ -242,7 +248,7 @@ ROUTES: list[tuple[str, object]] = [
     (r"\b(sea ?stack|stack)s?\b",
      ("procedural", "sea-stack — columnar; procedural primitive beats fragmented AI")),
     (r"\b(bridge|cable|pier|piling|pylon|mast|gantry|crane|antenna|lattice|"
-     r"column|pillar)s?\b",
+     r"column|pillar|dock|jetty|wharf|boardwalk|bollard)s?\b",
      ("procedural", "thin/spanning structure — fragments in image-to-3D")),
     (r"\b(palm|kelp|coral|frond|foliage|tree|fern|root|strangler|vine|reed|grass)s?\b",
      ("procedural", "thin/branching foliage — use the procedural sway prop")),
@@ -267,6 +273,7 @@ ROUTES: list[tuple[str, object]] = [
     (r"\b(urn|amphora|amphorae|chest|pot|vase|jar)s?\b", "vessel"),
     (r"\b(statue|liberty|monument|effigy)s?\b", "statue"),
     (r"\b(idol|carved face|carved head|bayon|deity)s?\b", "idol"),
+    (r"\b(shack|hut|cabin|shanty|boathouse|cottage|kiosk)s?\b", "shack"),
     (r"\b(shark|turtle|whale|dolphin|ray|fish|creature)s?\b", "sea_life"),
 ]
 
@@ -839,10 +846,10 @@ def write_contact_sheet(level: str, m: dict) -> str:
           <div class="meta">
             <h3>{p['prop_id']} <span class="badge">{state}</span></h3>
             <p class="srcs">from: {srcs}</p>
-            <p class="prompt">{p['prompt']}</p>
-            <p class="params">family={p['family']} · tris={p['target_tris']} ·
-               height={p['target_height']}m · collider={p['collider']} ·
-               smooth={p['smooth']} · seed={p['seed']}</p>
+            <p class="prompt">{p.get('prompt', '')}</p>
+            <p class="params">family={p.get('family', '?')} · tris={p.get('target_tris', '?')} ·
+               height={p.get('target_height', '?')}m · collider={p.get('collider', '?')} ·
+               smooth={p.get('smooth', '?')} · seed={p.get('seed', '?')}</p>
           </div>
         </div>""")
     html = f"""<!doctype html><meta charset="utf-8">

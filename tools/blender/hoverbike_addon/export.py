@@ -421,6 +421,14 @@ class HOVERBIKE_OT_reload_track_json(Operator):
         except (RuntimeError, ValueError) as e:
             self.report({"ERROR"}, f"Reload failed: {e}")
             return {"CANCELLED"}
+        # Also refresh the props preview from props[] so Reload from JSON syncs
+        # placed asset props too (deferred via a timer; best-effort).
+        try:
+            from .prop_placements import schedule_auto_import
+
+            schedule_auto_import()
+        except Exception as e:  # noqa: BLE001 — informational only
+            print(f"[hoverbike] prop auto-sync schedule skipped: {e}")
         synced = [k for k in ("gateSpacing", "terrainShader", "water", "start") if k in summary]
         self.report({"INFO"}, f"Reloaded {summary['json']}: {', '.join(synced) or 'no syncable fields'}")
         return {"FINISHED"}
