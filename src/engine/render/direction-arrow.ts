@@ -7,12 +7,23 @@ import * as THREE from 'three'
  *
  * The arrow is anchored to the *camera*, not the bike: a fixed forward
  * distance ahead of the camera and an upward offset sized to the vertical
- * FOV so it projects to the top quarter line of the screen, clear of the
- * bike's silhouette. Yaw still uses world-space direction from the player
- * to the target, so it points at where you need to go in the world.
+ * FOV so it projects to the upper band of the screen, clear of the bike's
+ * silhouette. Yaw uses world-space direction from the player to the target.
+ *
+ * Readability: the arrow body is **raked nose-down** (pitched toward the
+ * world) inside a child group, so even when the next gate is dead ahead —
+ * and the world-yaw points the arrow directly away from the camera — the
+ * chase cam sees the arrow's top + flank at a 3/4 angle instead of staring
+ * down the flat base of a cone (which read as a faceted gold disc / "sun").
+ * The yaw still happens on the outer group about world-up, so the rake
+ * stays consistent as the arrow swings to point left / right / back.
  */
 export type DirectionArrow = {
   mesh: THREE.Object3D
+  /** Hide / show the arrow wholesale (Settings + the screenshot harness).
+   *  When disabled, `tick` keeps it invisible regardless of target. */
+  setEnabled(on: boolean): void
+  isEnabled(): boolean
   tick(
     camera: THREE.PerspectiveCamera,
     playerPos: THREE.Vector3,
@@ -25,36 +36,46 @@ export function createDirectionArrow(): DirectionArrow {
   const group = new THREE.Group()
   group.name = 'direction-arrow'
 
-  const color = 0xffcc44
+  // Raked child so the whole arrow tips nose-down toward the world. The
+  // outer group only yaws (about world-up); this inner group owns the
+  // constant downward pitch so the camera always sees a 3/4 read — never
+  // the flat base of the cone (which read as a faceted "sun"). ~26° is
+  // enough to break the head-on case without reading as "straight down".
+  const tilt = new THREE.Group()
+  tilt.rotation.x = THREE.MathUtils.degToRad(26)
+  group.add(tilt)
+
+  const color = 0xffd23f // warm amber — the Circuit way-marker
   // Shaded material so the cone has a clear lit side / shadowed side —
   // a fullbright arrow reads as flat from any angle and you can't tell
   // which way it's pointing. depthTest stays off so it floats over the
-  // bike, and a touch of emissive keeps it glowing in the dark side
+  // bike; a touch of emissive keeps it glowing on the shadowed flank
   // without losing the form.
   const mat = new THREE.MeshStandardMaterial({
     color,
     emissive: color,
-    emissiveIntensity: 0.25,
-    roughness: 0.55,
+    emissiveIntensity: 0.22,
+    roughness: 0.5,
     metalness: 0.1,
     transparent: true,
-    opacity: 0.95,
+    opacity: 0.96,
     depthTest: false,
     depthWrite: false,
   })
 
-  // Arrowhead — cone, tip along +Z so the whole group can be yawed by Y.
-  // Sizes shrunk vs. the original (~65%) so the arrow occupies less of
-  // the screen at the closer camera-relative anchor distance.
-  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.2, 12), mat)
+  // Arrowhead — cone, tip along +Z so the group yaws by Y to point. 24
+  // radial segments (was 12) so the base never reads as a chunky hexagon
+  // even glimpsed head-on; leaner + longer than before so the silhouette
+  // says "arrow", not "lozenge".
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.46, 1.3, 24), mat)
   cone.rotation.x = Math.PI / 2
   cone.position.set(0, 0, 0.7)
-  group.add(cone)
+  tilt.add(cone)
 
-  // Shaft — short box behind the cone.
-  const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.8), mat)
-  shaft.position.set(0, 0, -0.3)
-  group.add(shaft)
+  // Shaft — slim box behind the cone.
+  const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.9), mat)
+  shaft.position.set(0, 0, -0.35)
+  tilt.add(shaft)
 
   group.renderOrder = 999
   group.visible = false
@@ -63,6 +84,7 @@ export function createDirectionArrow(): DirectionArrow {
   let tAccum = 0
   let smoothYaw = 0
   let initialised = false
+  let enabled = true
 
   // Scratch vectors to keep tick() allocation-free.
   const camForward = new THREE.Vector3()
@@ -72,11 +94,11 @@ export function createDirectionArrow(): DirectionArrow {
 
   // Camera-relative anchor: distance ahead of the camera along its
   // forward axis, and a target screen-space vertical position expressed
-  // in NDC (-1 bottom, +1 top). 0.8 sits the arrow near the top of the
-  // window — roughly co-located with the lap timer slab — without
-  // pushing it so high that the cone tip clips against the top edge.
+  // in NDC (-1 bottom, +1 top). 0.6 sits the arrow in the upper third —
+  // prominent, but BELOW the top-center lap-timer slab it used to hide
+  // behind at 0.8.
   const ANCHOR_FORWARD = 7
-  const ANCHOR_NDC_Y = 0.8
+  const ANCHOR_NDC_Y = 0.6
 
   function tick(
     camera: THREE.PerspectiveCamera,
@@ -84,7 +106,7 @@ export function createDirectionArrow(): DirectionArrow {
     targetPos: THREE.Vector3 | null,
     dt: number,
   ) {
-    if (!targetPos) {
+    if (!enabled || !targetPos) {
       group.visible = false
       return
     }
@@ -128,5 +150,13 @@ export function createDirectionArrow(): DirectionArrow {
     group.rotation.y = smoothYaw
   }
 
-  return { mesh: group, tick }
+  return {
+    mesh: group,
+    setEnabled: (on: boolean) => {
+      enabled = on
+      if (!on) group.visible = false
+    },
+    isEnabled: () => enabled,
+    tick,
+  }
 }

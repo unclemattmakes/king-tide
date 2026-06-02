@@ -25,6 +25,7 @@
     "format": "biome format --write .",
     "gen:bikes": "node tools/blender/run.mjs build_bike specs/bikes",
     "gen:bike-thumbs": "node tools/gen-bike-thumbs.mjs",
+    "gen:track-shots": "node tools/gen-track-shots.mjs",
     "gen:props": "node tools/blender/run.mjs build_prop specs/props",
     "gen:tracks": "node tools/blender/run.mjs build_track specs/tracks",
     "gen:tracks:validate": "node tools/blender/run-lint.mjs",

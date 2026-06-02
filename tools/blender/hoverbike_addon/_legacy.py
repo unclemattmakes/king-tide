@@ -733,6 +733,8 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
             shader_block["screeBand"] = float(scn.hoverbike_shader_scree_band)
             shader_block["saturation"] = float(scn.hoverbike_shader_saturation)
             shader_block["triplanar"] = float(scn.hoverbike_shader_triplanar)
+        if hasattr(scn, "hoverbike_shader_waterline"):
+            shader_block["waterline"] = float(scn.hoverbike_shader_waterline)
 
     laps = int(getattr(scn, "hoverbike_laps_to_finish", 3) or 3)
     main_spline_obj: dict[str, Any] = {
@@ -930,6 +932,7 @@ def reload_track_from_json(json_path: str) -> dict:
             ("screeBand", "hoverbike_shader_scree_band"),
             ("saturation", "hoverbike_shader_saturation"),
             ("triplanar", "hoverbike_shader_triplanar"),
+            ("waterline", "hoverbike_shader_waterline"),
         ):
             v = ts.get(key)
             if isinstance(v, (int, float)) and hasattr(scene, prop):

@@ -1354,16 +1354,17 @@ class HOVERBIKE_PT_track_sky(_HoverbikeTrackSubPanelBase, Panel):
         ):
             layout.label(text="Near must be < Far", icon="ERROR")
 
+        row = layout.row(align=True)
+        row.prop(scene, "hoverbike_sky_cloud_towering", text="Towering")
+        row.prop(scene, "hoverbike_sky_sun_size", text="Sun size")
+
         layout.separator()
         layout.label(text="Color grade (LUT preset):")
         layout.prop(scene, "hoverbike_sky_color_grade", text="")
-        # Bloom + sea state — round-trip-only / wave-field one-shot.
+        # Bloom (wired — post-pipeline.ts) + sea state (wave-field one-shot).
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_sky_bloom", text="Bloom")
         row.prop(scene, "hoverbike_sky_sea_state", text="Sea (Bft)")
-        bloom_val = float(getattr(scene, "hoverbike_sky_bloom", 0.0) or 0.0)
-        if bloom_val > 0:
-            layout.label(text="Bloom: no pass yet, value still ships", icon="INFO")
 
 
 class HOVERBIKE_PT_track_waves(_SelectionDrivenPanel, Panel):
@@ -1571,6 +1572,7 @@ class HOVERBIKE_PT_track_shader(_HoverbikeTrackSubPanelBase, Panel):
         row.prop(scene, "hoverbike_shader_scree_band", text="Scree")
         row.prop(scene, "hoverbike_shader_triplanar", text="Triplanar")
         layout.prop(scene, "hoverbike_shader_saturation", text="Saturation")
+        layout.prop(scene, "hoverbike_shader_waterline", text="Waterline trio")
 
 
 class HOVERBIKE_PT_track_thumbnail(_HoverbikeTrackSubPanelBase, Panel):

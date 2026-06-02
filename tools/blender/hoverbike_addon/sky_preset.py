@@ -69,6 +69,8 @@ SKY_COLOR_GRADES: tuple[tuple[str, str, str], ...] = (
 _SCENE_PROP_NAMES: tuple[str, ...] = (
     "hoverbike_sky_tint",
     "hoverbike_sky_cloudiness",
+    "hoverbike_sky_cloud_towering",
+    "hoverbike_sky_sun_size",
     "hoverbike_sky_sun_intensity",
     "hoverbike_sky_fog_near",
     "hoverbike_sky_fog_far",
@@ -147,6 +149,8 @@ def derive_sky_block() -> dict:
     block: dict = {
         "tint": get_sky_tint_hex(),
         "cloudiness": float(scn.hoverbike_sky_cloudiness),
+        "cloudTowering": float(getattr(scn, "hoverbike_sky_cloud_towering", 0.35)),
+        "sunSize": float(getattr(scn, "hoverbike_sky_sun_size", 1.0)),
         "sunIntensity": float(scn.hoverbike_sky_sun_intensity),
         "fogNear": float(scn.hoverbike_sky_fog_near),
         "fogFar": float(scn.hoverbike_sky_fog_far),
@@ -179,6 +183,8 @@ def reload_sky_from_json(data: dict) -> bool:
         applied = True
     for key, prop in (
         ("cloudiness", "hoverbike_sky_cloudiness"),
+        ("cloudTowering", "hoverbike_sky_cloud_towering"),
+        ("sunSize", "hoverbike_sky_sun_size"),
         ("sunIntensity", "hoverbike_sky_sun_intensity"),
         ("fogNear", "hoverbike_sky_fog_near"),
         ("fogFar", "hoverbike_sky_fog_far"),
@@ -228,6 +234,31 @@ def register() -> None:
         default=0.45,
         min=0.0,
         max=1.0,
+        precision=2,
+    )
+    bpy.types.Scene.hoverbike_sky_cloud_towering = FloatProperty(
+        name="Cloud towering",
+        description=(
+            "0..1 — domain-warped, self-shadowed billowing cumulus. 0 falls "
+            "back to the flat legacy cloud band; higher = bigger, rounder, "
+            "taller-reading masses with a cool base / warm top. Mirrors "
+            "sky.cloudTowering in sky.ts. Default 0.35."
+        ),
+        default=0.35,
+        min=0.0,
+        max=1.0,
+        precision=2,
+    )
+    bpy.types.Scene.hoverbike_sky_sun_size = FloatProperty(
+        name="Sun size",
+        description=(
+            "Sun-disc size multiplier. 1.0 = tight ~1° disc; larger widens "
+            "the disc and adds a warm corona (use a big value on sunset / "
+            "finale tracks for a giant low sun). Mirrors sky.sunSize in sky.ts."
+        ),
+        default=1.0,
+        min=0.2,
+        max=8.0,
         precision=2,
     )
     bpy.types.Scene.hoverbike_sky_sun_intensity = FloatProperty(

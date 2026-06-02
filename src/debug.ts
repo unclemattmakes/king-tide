@@ -10,6 +10,7 @@ import {
   type QaBundle,
 } from './engine/qa/bug-bundle'
 import { type ConsoleRecord, consoleTrap as getConsoleTrap } from './engine/qa/console-trap'
+import { type CameraPose, setCameraPoseOverride } from './engine/render/camera-pose-override'
 import type { RenderBackend } from './engine/render/renderer'
 import type { SimWorld } from './engine/sim/ecs/world'
 import type { PhysicsWorld } from './engine/sim/physics/rapier'
@@ -101,6 +102,16 @@ export type HoverDebug = {
   toggleHoverDebug(): boolean
   /** Current hover-debug overlay state. */
   isHoverDebugOn(): boolean
+  /** Toggle the next-checkpoint direction arrow. Returns new state. Used
+   *  by the screenshot harness to capture clean art frames; also the
+   *  programmatic hook behind a future Settings guidance toggle. */
+  toggleDirectionArrow(): boolean
+  /** Current direction-arrow visibility. */
+  isDirectionArrowOn(): boolean
+  /** Park the camera at a fixed world pose (position + look-at target),
+   *  overriding the chase camera — used by the screenshot harness to frame
+   *  concept-art beats behind/beside the start line. Pass null to release. */
+  setCameraPose(pose: CameraPose): void
   /** M10.2 determinism harness. Present only when ?determinism=1 was set
    *  at boot. The sim's RAF-driven step is gated off in that mode; the
    *  harness drives `simulateStep` here. */
@@ -236,6 +247,8 @@ export type DebugAccessors = {
   isAntiGravDebugOn(): boolean
   toggleHoverDebug(): boolean
   isHoverDebugOn(): boolean
+  toggleDirectionArrow(): boolean
+  isDirectionArrowOn(): boolean
   /** Fast-forward the start countdown — used implicitly when an intent
    *  override is set so e2e tests don't have to wait through 3-2-1. */
   skipCountdown(): void
@@ -345,6 +358,9 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     isAntiGravDebugOn: () => accessors.isAntiGravDebugOn(),
     toggleHoverDebug: () => accessors.toggleHoverDebug(),
     isHoverDebugOn: () => accessors.isHoverDebugOn(),
+    toggleDirectionArrow: () => accessors.toggleDirectionArrow(),
+    isDirectionArrowOn: () => accessors.isDirectionArrowOn(),
+    setCameraPose: (pose) => setCameraPoseOverride(pose),
     bikes: () => {
       if (!state.ready) return []
       const sim = accessors.sim()

@@ -1183,6 +1183,12 @@ async function boot() {
       return on
     },
     isHoverDebugOn: () => hoverDebug.isEnabled(),
+    toggleDirectionArrow: () => {
+      const on = !dirArrow.isEnabled()
+      dirArrow.setEnabled(on)
+      return on
+    },
+    isDirectionArrowOn: () => dirArrow.isEnabled(),
     skipCountdown: () => {
       // Scripted intent overrides (e2e / debug) skip past the
       // cinematic intro as well as the 3/2/1 ticks so test paths
