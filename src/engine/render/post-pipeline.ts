@@ -1,7 +1,18 @@
 import type * as THREE from 'three'
 import { bloom } from 'three/addons/tsl/display/BloomNode.js'
-import { pass } from 'three/tsl'
+import { motionBlur } from 'three/addons/tsl/display/MotionBlur.js'
+import { sobel } from 'three/addons/tsl/display/SobelOperatorNode.js'
+import { float, mix, mrt, output, pass, smoothstep, uniform, vec3, velocity } from 'three/tsl'
 import { RenderPipeline } from 'three/webgpu'
+
+/**
+ * Loose alias for the chainable TSL node proxies. The precise generic
+ * `Node<'vec4'>` types from `three/tsl` don't compose cleanly across the
+ * addon display nodes (sobel / bloom / motionBlur) whose return types are
+ * widened, so the rest of this file uses `as never` casts at the call
+ * boundaries — the same style the original bloom wiring used.
+ */
+type TslNode = { add: (n: unknown) => TslNode }
 
 /**
  * WebGPU post-processing pipeline. Owns a `RenderPipeline` that
@@ -16,6 +27,12 @@ import { RenderPipeline } from 'three/webgpu'
  * The bloom uniforms (strength / radius / threshold) are CPU-mutable via
  * `setBloom()` so the sky system can push per-track `sky.bloom` values
  * without rebuilding the pipeline.
+ *
+ * Two further effects — a full-scene cel/ink outline and a velocity-buffer
+ * motion blur — are available but DEFAULT-OFF. When both are disabled the
+ * pipeline's `outputNode` is byte-for-byte today's `scenePassColor.add(bloom)`
+ * with no extra nodes and no velocity MRT, so the shipping bloom-only look is
+ * unchanged unless a track opts in.
  */
 
 export type PostPipeline = {
@@ -40,8 +57,41 @@ export type PostPipeline = {
    * tracks that authored `sky.bloom: 0`.
    */
   setBloom(strength: number, radius?: number, threshold?: number): void
+  /**
+   * Live-set the cel/ink outline look. No-op when the pipeline was built
+   * with the outline effect disabled (the outline nodes don't exist in the
+   * graph in that case — toggling it on requires a rebuild). `strength = 0`
+   * mutes the ink contribution.
+   */
+  setOutline(strength: number, color?: THREE.ColorRepresentation): void
   /** Drop GPU resources. */
   dispose(): void
+}
+
+/** Per-track cel/ink outline look. All optional; effect is off unless `enabled`. */
+export type OutlineOptions = {
+  /** Master switch. Default `false` — pipeline output is unchanged. */
+  enabled?: boolean
+  /** Ink darkness 0..1 at full edge response. Default 0.85. */
+  strength?: number
+  /** Ink line colour. Default near-black (`0x0a0a0a`). */
+  color?: THREE.ColorRepresentation
+  /** Sobel magnitude below this reads as flat (no line). Default 0.1. */
+  threshold?: number
+  /** Sobel magnitude at/above this is a full-strength line. Default 0.4. */
+  softness?: number
+}
+
+/** Per-track motion blur look. All optional; effect is off unless `enabled`. */
+export type MotionBlurOptions = {
+  /**
+   * Master switch. Default `false`. When enabled the PassNode grows a
+   * velocity MRT output and the final composite is smeared along the
+   * per-pixel motion vectors.
+   */
+  enabled?: boolean
+  /** Sample count along the velocity vector. Default 16. Higher = smoother, costlier. */
+  samples?: number
 }
 
 export type PostPipelineDeps = {
@@ -56,6 +106,10 @@ export type PostPipelineDeps = {
   /** Luminance threshold (0..1). Defaults to 0.85 so daytime sky doesn't
    *  smear; only emissive landmarks + sun disc cross the threshold. */
   bloomThreshold?: number
+  /** Cel/ink full-scene outline. Off unless `outline.enabled`. */
+  outline?: OutlineOptions
+  /** Velocity-buffer motion blur. Off unless `motionBlur.enabled`. */
+  motionBlur?: MotionBlurOptions
 }
 
 export function createPostPipeline(deps: PostPipelineDeps): PostPipeline {
@@ -66,15 +120,78 @@ export function createPostPipeline(deps: PostPipelineDeps): PostPipeline {
     bloomStrength = 0,
     bloomRadius = 0.4,
     bloomThreshold = 0.85,
+    outline: outlineOpts,
+    motionBlur: motionBlurOpts,
   } = deps
 
+  const outlineEnabled = outlineOpts?.enabled === true
+  const motionBlurEnabled = motionBlurOpts?.enabled === true
+
   const scenePass = pass(scene as never, camera as never)
+
+  // Motion blur needs per-pixel motion vectors. Only grow the PassNode's
+  // render target with a velocity MRT when the effect is actually on — an
+  // off pipeline must keep exactly the shipping single-target layout.
+  if (motionBlurEnabled) {
+    scenePass.setMRT(mrt({ output, velocity }))
+  }
+
   const scenePassColor = scenePass.getTextureNode('output')
 
   const bloomPass = bloom(scenePassColor, bloomStrength, bloomRadius, bloomThreshold)
 
+  // ── Effect uniforms (kept around for dispose + live-set) ────────────────
+  // Outline ink uniforms exist only when the effect is wired; the live-set
+  // mutator no-ops otherwise so callers don't have to branch.
+  let outlineStrength: ReturnType<typeof uniform> | null = null
+  let outlineColor: ReturnType<typeof uniform> | null = null
+
+  // The beauty image the rest of the chain (bloom, motion blur) composites
+  // over. Defaults to the raw scene colour; the outline pass replaces it
+  // with an ink-darkened variant when enabled. When the outline is off this
+  // stays === scenePassColor so the graph is identical to the shipping one.
+  let beauty: TslNode = scenePassColor as unknown as TslNode
+
+  if (outlineEnabled) {
+    const inkStrength = Math.max(0, Math.min(1, outlineOpts?.strength ?? 0.85))
+    const inkThreshold = outlineOpts?.threshold ?? 0.1
+    const inkSoftness = Math.max(inkThreshold + 1e-4, outlineOpts?.softness ?? 0.4)
+    const inkColorRep = outlineOpts?.color ?? 0x0a0a0a
+
+    outlineStrength = uniform(inkStrength)
+    // Decompose to a vec3 uniform so setOutline() can recolour live without
+    // touching the graph topology.
+    const c = normalizeColor(inkColorRep)
+    outlineColor = uniform(vec3(c.r, c.g, c.b))
+
+    // Full-scene Sobel edge magnitude on the beauty colour → an ink mask.
+    // OutlineNode only outlines an explicit selectedObjects list, so it
+    // can't give a whole-scene cel line; Sobel on scene luminance does.
+    const edge = sobel(scenePassColor as never)
+    const edgeMag = (edge as unknown as { r: unknown }).r
+    const inkMask = smoothstep(float(inkThreshold), float(inkSoftness), edgeMag as never).mul(
+      outlineStrength as never,
+    )
+
+    // Multiply-darken toward the ink colour where the mask is hot. mix()
+    // keeps flat regions exactly equal to the scene colour (mask 0 → beauty).
+    beauty = mix(scenePassColor as never, outlineColor as never, inkMask as never) as TslNode
+  }
+
+  // Bloom composites over the (possibly ink-darkened) beauty, identical to
+  // the shipping additive blend when the outline is off (beauty === scene).
+  let composited: TslNode = beauty.add(bloomPass)
+
+  // Motion blur is the final stage — it smears the fully-composited image
+  // (beauty + bloom) along the velocity vectors so trails inherit bloom too.
+  if (motionBlurEnabled) {
+    const samples = Math.max(1, Math.round(motionBlurOpts?.samples ?? 16))
+    const velocityNode = scenePass.getTextureNode('velocity')
+    composited = motionBlur(composited as never, velocityNode as never, samples as never) as TslNode
+  }
+
   const pipeline = new RenderPipeline(renderer as never)
-  pipeline.outputNode = scenePassColor.add(bloomPass)
+  pipeline.outputNode = composited as never
 
   return {
     scene,
@@ -106,10 +223,41 @@ export function createPostPipeline(deps: PostPipelineDeps): PostPipeline {
       if (radius !== undefined) bloomPass.radius.value = Math.max(0, Math.min(1, radius))
       if (threshold !== undefined) bloomPass.threshold.value = Math.max(0, threshold)
     },
+    setOutline(strength: number, color?: THREE.ColorRepresentation) {
+      if (outlineStrength === null) return
+      outlineStrength.value = Math.max(0, Math.min(1, strength))
+      if (color !== undefined && outlineColor !== null) {
+        const c = normalizeColor(color)
+        // `uniform(vec3(...))` carries a THREE.Vector3 value at runtime; its
+        // static type is widened to `unknown`, hence the cast.
+        ;(outlineColor.value as THREE.Vector3).set(c.r, c.g, c.b)
+      }
+    },
     dispose() {
       pipeline.dispose()
       scenePass.dispose?.()
       bloomPass.dispose?.()
     },
   }
+}
+
+/**
+ * Resolve a `THREE.ColorRepresentation` to linear-ish {r,g,b} without
+ * importing the whole three Color class graph at the sim boundary — a hex
+ * number or `{r,g,b}` object covers every authoring path we use. Falls back
+ * to near-black so a malformed value never produces a bright ink line.
+ */
+function normalizeColor(c: THREE.ColorRepresentation): { r: number; g: number; b: number } {
+  if (typeof c === 'number') {
+    return {
+      r: ((c >> 16) & 0xff) / 255,
+      g: ((c >> 8) & 0xff) / 255,
+      b: (c & 0xff) / 255,
+    }
+  }
+  if (typeof c === 'object' && c !== null && 'r' in c && 'g' in c && 'b' in c) {
+    const o = c as { r: number; g: number; b: number }
+    return { r: o.r, g: o.g, b: o.b }
+  }
+  return { r: 0.04, g: 0.04, b: 0.04 }
 }
