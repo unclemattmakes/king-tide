@@ -1,0 +1,107 @@
+{
+  "level": "wrecks",
+  "_note": "Hand-authored manifest for a bespoke batch of decrepit post-flood watercraft/aircraft wreck props. Not resolved from a track doc (these are reusable Open-Sea dressing wrecks, not unique to one level). Drives tools/make_level_props.py phase-by-phase: concepts -> approve -> mesh -> condition -> integrate. target_height is in GAME metres (~3x real, per AI props reading small at race pace). Material state = 'broken' (oxidised/abandoned) per docs/art-direction.md; the runtime mat_prop shader + COLOR_0 carry the waterline/bloom read.",
+  "ai_props": [
+    {
+      "prop_id": "fishing_boat_private",
+      "family": "wreck",
+      "subject": "solid abandoned small private recreational fishing boat wreck, one closed compact hull, open cockpit with a small console, single small outboard motor on the stern, peeling faded paint and rusted fittings, cracked windscreen, derelict and weathered, chunky stylized toy form, no masts no rigging no thin antennae no fishing rods no trailer",
+      "prompt": "a single solid abandoned small private recreational fishing boat wreck, one closed compact hull, open cockpit with a small console, single small outboard motor on the stern, peeling faded paint and rusted fittings, cracked windscreen, derelict and weathered, chunky stylized toy form, no masts no rigging no thin antennae no fishing rods no trailer, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "negative": "sail, canvas, mast, rigging, ropes, antenna, fishing rod, trailer, water, sea, waves, dock, pier, background, scene, ground, floor, multiple objects, text, watermark, logo, people, clutter, dark, drop shadow, cropped, blurry, photorealistic, grimdark, thin spindly fragments, floating disconnected parts, holes",
+      "target_tris": 2800,
+      "target_height": 16.0,
+      "collider": "box",
+      "tint": "#5d6b6e",
+      "smooth": false,
+      "mat_family": "prop",
+      "catalog": "Open Sea",
+      "sources": [
+        "decrepit fishing vessel - private boater variant"
+      ],
+      "seed": 31001,
+      "approved": true,
+      "concept": "concept-art\\props\\wrecks\\fishing_boat_private.png",
+      "mesh": "tools\\ai_prop_runs\\wrecks\\meshes\\fishing_boat_private.glb",
+      "conditioned_glb": "public\\assets\\props\\ai\\fishing_boat_private.glb",
+      "integrated": true,
+      "library_blend": "tracks-src\\props\\ai\\fishing_boat_private.blend"
+    },
+    {
+      "prop_id": "fishing_boat_trawler",
+      "family": "wreck",
+      "subject": "solid long-abandoned commercial fishing trawler wreck, one large closed rusted steel hull, tall boxy wheelhouse near the stern, chunky deck cranes and net reels, broken stubby rigging booms, weathered oxidised steel, derelict landmark scale, chunky stylized toy form, no thin cables no thin antennae no birds",
+      "prompt": "a single solid long-abandoned commercial fishing trawler wreck, one large closed rusted steel hull, tall boxy wheelhouse near the stern, chunky deck cranes and net reels, broken stubby rigging booms, weathered oxidised steel, derelict landmark scale, chunky stylized toy form, no thin cables no thin antennae no birds, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "negative": "sail, canvas, thin cables, thin rigging lines, antenna, birds, water, sea, waves, dock, pier, harbour, background, scene, ground, floor, multiple objects, text, watermark, logo, people, clutter, dark, drop shadow, cropped, blurry, photorealistic, grimdark, thin spindly fragments, floating disconnected parts, holes",
+      "target_tris": 3200,
+      "target_height": 34.0,
+      "collider": "box",
+      "tint": "#566b6c",
+      "smooth": false,
+      "mat_family": "prop",
+      "catalog": "Open Sea",
+      "sources": [
+        "decrepit fishing vessel - commercial trawler variant"
+      ],
+      "seed": 31011,
+      "approved": true,
+      "concept": "concept-art\\props\\wrecks\\fishing_boat_trawler.png",
+      "mesh": "tools\\ai_prop_runs\\wrecks\\meshes\\fishing_boat_trawler.glb",
+      "conditioned_glb": "public\\assets\\props\\ai\\fishing_boat_trawler.glb",
+      "integrated": true,
+      "library_blend": "tracks-src\\props\\ai\\fishing_boat_trawler.blend"
+    },
+    {
+      "prop_id": "sailboat_bare_mast",
+      "family": "wreck",
+      "subject": "derelict abandoned wooden sailboat hull with one plain bare upright wooden mast pole and no sail (Midjourney v8.1)",
+      "prompt": "a single derelict abandoned open motorboat hull with one short thick stubby broken wooden post sticking straight up near the bow and absolutely no sails, the post is a plain chunky broken stump with no canvas no boom no rigging no ropes, weathered salt-bleached fiberglass hull listing and tilted, one closed compact rounded open hull, chunky stylized toy form, derelict and abandoned, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "negative": "sail, sails, canvas, sailcloth, jib, spinnaker, mainsail, billowing fabric, flag, pennant, loose ropes, water, sea, waves, dock, pier, background, scene, ground, floor, multiple objects, text, watermark, logo, people, clutter, dark, drop shadow, cropped, blurry, photorealistic, grimdark, thin spindly fragments, floating disconnected parts, holes",
+      "target_tris": 2800,
+      "target_height": 24.0,
+      "collider": "box",
+      "tint": "#7c8a86",
+      "smooth": false,
+      "mat_family": "prop",
+      "catalog": "Open Sea",
+      "sources": [
+        "old broken-down sailboat - mast only, no sail"
+      ],
+      "seed": 31024,
+      "approved": true,
+      "concept": "concept-art\\props\\wrecks\\sailboat_bare_mast.png",
+      "mesh": "tools\\ai_prop_runs\\wrecks\\meshes\\sailboat_bare_mast.glb",
+      "conditioned_glb": "public\\assets\\props\\ai\\sailboat_bare_mast.glb",
+      "integrated": true,
+      "library_blend": "tracks-src\\props\\ai\\sailboat_bare_mast.blend",
+      "concept_source": "midjourney",
+      "mj_job": "c7b22d48-1a79-47dc-a0f3-a96dbfc82b37",
+      "mj_cell": 2
+    },
+    {
+      "prop_id": "sea_plane_wreck",
+      "family": "wreck",
+      "subject": "one single abandoned small vintage floatplane on two chunky pontoon floats, a single closed corroded fuselage with a rounded boat-hull belly, a single nose propeller with one bent blade, cracked empty cockpit glass, two short stubby broken wings, derelict weathered and salt-bleached, one compact closed solid object, chunky stylized toy model, no water no waves no sky no background no other vehicles",
+      "prompt": "a single one single abandoned small vintage floatplane on two chunky pontoon floats, a single closed corroded fuselage with a rounded boat-hull belly, a single nose propeller with one bent blade, cracked empty cockpit glass, two short stubby broken wings, derelict weathered and salt-bleached, one compact closed solid object, chunky stylized toy model, no water no waves no sky no background no other vehicles, one isolated centered object on a plain solid white background, studio product photography, soft even lighting, full object in frame, sharp focus, game asset reference",
+      "negative": "thin struts, thin wires, bracing wires, antenna, water, sea, waves, runway, tarmac, background, scene, ground, floor, sky, clouds, multiple objects, text, watermark, logo, people, clutter, dark, drop shadow, cropped, blurry, photorealistic, grimdark, thin spindly fragments, floating disconnected parts, holes",
+      "target_tris": 3000,
+      "target_height": 24.0,
+      "collider": "box",
+      "tint": "#6a7470",
+      "smooth": false,
+      "mat_family": "prop",
+      "catalog": "Open Sea",
+      "sources": [
+        "old broken-down sea plane"
+      ],
+      "seed": 31032,
+      "approved": true,
+      "concept": "concept-art\\props\\wrecks\\sea_plane_wreck.png",
+      "mesh": "tools\\ai_prop_runs\\wrecks\\meshes\\sea_plane_wreck.glb",
+      "conditioned_glb": "public\\assets\\props\\ai\\sea_plane_wreck.glb",
+      "integrated": true,
+      "library_blend": "tracks-src\\props\\ai\\sea_plane_wreck.blend"
+    }
+  ],
+  "procedural_lane": [],
+  "manual_review": []
+}
