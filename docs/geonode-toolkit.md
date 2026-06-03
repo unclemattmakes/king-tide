@@ -15,16 +15,22 @@ onto an object and tune with exposed knobs; they regenerate deterministically.
 
 | Group | Type | Apply to | What it makes |
 |-------|------|----------|---------------|
-| `HV_SeaStack` | generator | single-vertex / empty mesh | Chunky golden faceted rock **stack** — flared base, irregular lumpy silhouette, strata ledges, voronoi facets, blunted tip. Knobs incl. `Taper`, `Tip` (tip bluntness), `Lumpiness`, `Facets`. Optional **boulder-cluster** pass (toggle, default on) re-skins the spire as scattered `HV_Rock` chunks fused into one mesh. |
+| `HV_SeaStack` | generator | single-vertex / empty mesh | **Cluster of faceted crystal spires** fused into one golden rock mass. A tapered, blunt-tipped **cube** column gets a **voronoi position-offset** (angular flat planes), is **instanced** over a tight scatter cluster (centre spire tallest, edge spires shorter, leaned outward), then **voxel-remeshed** (Mesh to Volume → Volume to Mesh) into one watertight stack. Knobs: `Spires`, `Cluster Radius`, `Col Radius`, `Taper`/`Tip`, `Warp`/`Facet`/`Voronoi Scale`, `Height Var`, `Lean`, `Voxel Size`. |
 | `HV_Dock` | curve-driven | a path **curve** | **Irregular planks** (jittered length/yaw/tilt/height) decking + **weathered pylons** in two edge rows dropping below the deck. |
 | `HV_Palm` | generator | single-vertex / empty mesh | **"Drunken" palm** — leaning/wobbling trunk, a fountain of pinnate **green fronds** up top and **brown dead fronds** drooping into a skirt. |
 | `HV_Ramp` | curve-driven | a path **curve** | Corrugated **sheet-metal panels** shingled along the curve, following its slope, with Pitch/Bank/Rise control — ramps over a curvy sandbar. |
-| `HV_SeaArch` | generator | single-vertex / empty mesh | Parametric eroded **rock sea-arch**; Span/Height/Thickness/Leg-Spread/Lean/Seed give endless variants. Same optional **boulder-cluster** pass as the stack (toggle, default on). |
+| `HV_SeaArch` | generator | single-vertex / empty mesh | Parametric eroded **rock sea-arch**; Span/Height/Thickness/Leg-Spread/Lean/Seed give endless variants. Optional **boulder-cluster** pass (toggle, default off) re-skins it as scattered `HV_Rock` chunks fused into one mesh. |
 | `HV_Rock` | generator | single-vertex / empty mesh | Boolean-carved faceted **boulder** — a lumpy ico-sphere whittled by a swarm of randomly-tilted cutting planes into crystal-like facets. Knobs incl. `Cut Spacing` (facet count), `Cut Depth`, `Depth Jitter`, `Tilt`. |
 
-### Rock faceting — two recipes
-**Stacks & arches** displace per **voronoi cell** (each cell pushes out as a unit)
-to build chunky stepped facets.
+### Rock faceting — three recipes
+**Sea stacks** (`HV_SeaStack`) follow the **procedural-crystal flow**: a tapered
+cube column is voronoi position-offset into angular flat planes, instanced over a
+tight scatter cluster, then **voxel-remeshed** (Mesh to Volume → Volume to Mesh)
+into one watertight spire cluster. Voxel Size is the cost throttle and is floored
+against Height so a tall stack can't ask for a pathological voxel grid.
+
+**Arches** (`HV_SeaArch`) displace a swept mesh per **voronoi cell** (each cell
+pushes out as a unit) to build chunky stepped facets.
 
 **Boulders** (`HV_Rock`) take the crystal-generator route instead (after Entagma's
 procedural-crystal tree, minus its internal planes + glass shading): a lumpy
@@ -36,23 +42,34 @@ without eroding to a sliver. The cut depth is jittered *outward only* for the sa
 reason — irregular, rocky planes that can never collapse the rock. (An edge-chip
 boolean stage existed but was cut — the chips read too small; see git history.)
 
-All three (stacks, arches, boulders) finish with a **Planar Decimate** modifier
-(`Dissolve`, ~6–12° angle limit) that collapses each facet's interior into a flat
-n-gon — the crisp planar read. The build script adds that decimate automatically
-to the demo objects; when you place one yourself, add a Planar Decimate after the
-Geometry Nodes modifier (and keep flat shading).
+Each tool finishes with its own modifier stack. The build script adds these to the
+demo objects automatically (the Smooth by Angle ones via the `_smooth_by_angle()`
+helper, which links Blender's bundled essentials group); replicate the matching
+stack when you place one yourself.
 
-### Boulder-cluster sea stacks & arches
-`HV_SeaStack` and `HV_SeaArch` carry a **`Boulder Cluster`** toggle (default **on**):
-instead of shipping the smooth voronoi spire/arch, the tool scatters carved
-`HV_Rock` boulders over that base mesh and **boolean-UNIONs** them (boulders + base)
-into one watertight, faceted rock mass — no interpenetrating instances. The boulder
-source is the `HV_Rock` group itself (so the chunks match the standalone rock tool);
-`Boulder Size` and `Boulder Density` tune chunk scale and count (spacing =
-Size / Density). Cost is one rock carve + one exact union per object, so keep the
-density modest on big spans. Because the union references `HV_Rock`, `build_all`
-builds the rock group **first** (and `_rock_cluster` builds it on demand if you
-regenerate a stack/arch alone). The shared helper is `_rock_cluster()`.
+- **Boulders** (`HV_Rock`): a **Planar Decimate** (`Dissolve`, ~6°) collapses each
+  facet's interior into a flat n-gon — the crisp planar read (keep flat shading).
+- **Sea stacks** (`HV_SeaStack`): *no* planar dissolve — the dense voxel-remesh
+  shell gets **two Collapse Decimates** (~0.25 then ~0.5) to thin it to a light
+  low-poly mesh, then **Smooth by Angle** (20°) softens the broad faces while the
+  spire ridges stay sharp.
+- **Arches** (`HV_SeaArch`): a **Planar Dissolve** (~11°) first crisps the voronoi
+  facets, *then* **two Collapse Decimates** (0.5 then 0.3333) and **Smooth by
+  Angle** (30°) — the same family as the stacks, but keeping the dissolve.
+
+### Boulder-cluster sea arches
+`HV_SeaArch` carries a **`Boulder Cluster`** toggle (default **off** — the smooth
+voronoi arch reads cleaner; flip it on to opt in): instead of shipping the smooth
+voronoi arch, the tool scatters carved `HV_Rock` boulders over the arch mesh and
+**boolean-UNIONs** them (boulders + base) into one watertight, faceted rock mass —
+no interpenetrating instances. The boulder source is the
+`HV_Rock` group itself (so the chunks match the standalone rock tool); `Boulder
+Size` and `Boulder Density` tune chunk scale and count (spacing = Size / Density).
+Cost is one rock carve + one exact union, so keep the density modest on big spans.
+Because the union references `HV_Rock`, `build_all` builds the rock group **first**
+(and `_rock_cluster` builds it on demand if you regenerate the arch alone). The
+shared helper is `_rock_cluster()`. (The sea **stack** used to carry this toggle
+too; it now uses the procedural-crystal flow above instead.)
 
 ### Generators vs curve-driven
 - **Generators** ignore input geometry — apply to any object (a single-vertex mesh
