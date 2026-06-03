@@ -6,7 +6,7 @@ with exposed knobs. Unlike the placeholder props in
 ``seed_props_library.py`` these are authoring *tools* meant to be reused
 across many tracks:
 
-    HV_SeaStack   - tall faceted rocky spire (generator)
+    HV_SeaStack   - clustered faceted crystal spires (generator)
     HV_Dock       - irregular planks + weathered pylons along a curve
     HV_Palm       - "drunken" curving palm with green + dead fronds
     HV_Ramp       - sheet-metal panels along a curve, pitch-controlled
@@ -249,6 +249,37 @@ def _place(ob, location, collection):
     return ob
 
 
+def _smooth_by_angle(ob, angle_deg=20.0):
+    """Add Blender's bundled **Smooth by Angle** modifier (edge-angle split
+    normals: faces meeting above *angle_deg* stay sharp, gentler ones smooth)
+    to the top of *ob*'s stack. Reuses the essentials node group if it is
+    already loaded; otherwise ``shade_auto_smooth`` links it from
+    ``geometry_nodes_essentials.blend``. Returns the modifier (or None)."""
+    ang = math.radians(angle_deg)
+    grp = bpy.data.node_groups.get("Smooth by Angle")
+    if grp is not None:
+        mod = ob.modifiers.new("Smooth by Angle", "NODES")
+        mod.node_group = grp
+        for it in grp.interface.items_tree:
+            if getattr(it, "item_type", "") == "SOCKET" and it.in_out == "INPUT" and it.name == "Angle":
+                try:
+                    mod[it.identifier] = ang
+                except Exception:
+                    pass
+        return mod
+    try:
+        with bpy.context.temp_override(object=ob, active_object=ob,
+                                       selected_objects=[ob], selected_editable_objects=[ob]):
+            bpy.ops.object.shade_auto_smooth(angle=ang)
+    except Exception:
+        try:
+            bpy.ops.object.shade_auto_smooth(angle=ang)
+        except Exception:
+            return None
+    return next((m for m in ob.modifiers if m.type == "NODES" and m.node_group
+                 and m.node_group.name.startswith("Smooth by Angle")), None)
+
+
 # --------------------------------------------------------------------------
 # Shared: boulder-cluster rockifier (used by the sea-stack + sea-arch tools)
 # --------------------------------------------------------------------------
@@ -323,232 +354,203 @@ def _rock_cluster(g, base_geo, size_sock, spacing_sock, seed_sock, x0=900, y0=-1
 
 
 # --------------------------------------------------------------------------
-# Tool 1: Sea Stack — tall faceted rocky spire
+# Tool 1: Sea Stack — clustered faceted crystal spires (generator)
+#
+# Reworked to follow the "procedural crystal" recipe (cube -> voronoi position
+# offset -> instance on points -> voxel remesh) after the reference flow:
+#   1. an elongated, tapered CUBE column with a blunt chiselled tip,
+#   2. a VORONOI position offset that shoves each cell sideways (Warp) and
+#      pushes it along the surface normal (Facet) -> big flat angular planes,
+#   3. that one warped column is INSTANCED over a tight cluster of scatter
+#      points, each spire randomly spun, leaned outward and height-varied
+#      (centre spire tallest, edge spires shorter) with a guaranteed centre,
+#   4. the overlapping cluster is fused into one watertight mass by a VOXEL
+#      REMESH done entirely in GN: Mesh to Volume -> Volume to Mesh.
+#
+# Flat shading + a Planar Decimate (added by the build script, as for the rock
+# and arch tools) collapse each plane into a crisp n-gon facet. Voxel Size is
+# the cost throttle (smaller = crisper + slower); it is floored against Height
+# so a tall stack can never ask for a pathological voxel grid.
+#
+# (The old single tapered-cone spire + boulder-cluster toggle was replaced by
+# this; recover it from git history if needed. The sea ARCH still carries the
+# boulder-cluster pass.)
 # --------------------------------------------------------------------------
 def build_sea_stack() -> bpy.types.GeometryNodeTree:
     g = _new_tree("HV_SeaStack")
     _out(g, "Geometry", "NodeSocketGeometry")
     _in(g, "Geometry", "NodeSocketGeometry")  # ignored (generator)
-    _in(g, "Height", "NodeSocketFloat", 18.0, mn=2.0, mx=140.0, subtype="DISTANCE")
-    _in(g, "Base Radius", "NodeSocketFloat", 2.7, mn=0.2, mx=50.0, subtype="DISTANCE")
-    _in(g, "Taper", "NodeSocketFloat", 1.05, mn=0.3, mx=5.0)
-    _in(g, "Base Flare", "NodeSocketFloat", 0.4, mn=0.0, mx=2.5)
-    _in(g, "Tip", "NodeSocketFloat", 0.12, mn=0.0, mx=0.6)
-    _in(g, "Sides", "NodeSocketInt", 7, mn=3, mx=32)
-    _in(g, "Lean", "NodeSocketFloat", 0.12, mn=-0.6, mx=0.6)
-    _in(g, "Jaggedness", "NodeSocketFloat", 0.5, mn=0.0, mx=1.5)
-    _in(g, "Flute Scale", "NodeSocketFloat", 1.4, mn=0.1, mx=6.0)
-    _in(g, "Strata", "NodeSocketFloat", 0.17, mn=0.0, mx=1.0)
-    _in(g, "Facets", "NodeSocketFloat", 0.7, mn=0.0, mx=1.5)
-    _in(g, "Lumpiness", "NodeSocketFloat", 0.4, mn=0.0, mx=1.0)
-    _in(g, "Boulder Cluster", "NodeSocketBool", True)
-    _in(g, "Boulder Size", "NodeSocketFloat", 2.4, mn=0.3, mx=20.0, subtype="DISTANCE")
-    _in(g, "Boulder Density", "NodeSocketFloat", 1.0, mn=0.2, mx=3.0)
+    _in(g, "Height", "NodeSocketFloat", 16.0, mn=2.0, mx=140.0, subtype="DISTANCE")
+    _in(g, "Col Radius", "NodeSocketFloat", 1.9, mn=0.3, mx=20.0, subtype="DISTANCE")
+    _in(g, "Cluster Radius", "NodeSocketFloat", 2.8, mn=0.0, mx=40.0, subtype="DISTANCE")
+    _in(g, "Spires", "NodeSocketInt", 7, mn=1, mx=40)
+    _in(g, "Taper", "NodeSocketFloat", 0.5, mn=0.0, mx=1.0)
+    _in(g, "Tip", "NodeSocketFloat", 0.32, mn=0.05, mx=0.7)
+    _in(g, "Lean", "NodeSocketFloat", 0.16, mn=0.0, mx=1.2)
+    _in(g, "Height Var", "NodeSocketFloat", 0.3, mn=0.0, mx=1.0)
+    _in(g, "Warp", "NodeSocketFloat", 0.1, mn=0.0, mx=1.5)
+    _in(g, "Facet", "NodeSocketFloat", 0.28, mn=0.0, mx=1.5)
+    _in(g, "Voronoi Scale", "NodeSocketFloat", 0.5, mn=0.05, mx=4.0)
+    _in(g, "Voxel Size", "NodeSocketFloat", 0.16, mn=0.06, mx=2.0, subtype="DISTANCE")
     _in(g, "Seed", "NodeSocketFloat", 0.0)
 
-    gin = _n(g, "NodeGroupInput", x=-1700, y=0)
-    gout = _n(g, "NodeGroupOutput", x=2840, y=0)
+    gin = _n(g, "NodeGroupInput", x=-2400, y=0)
+    gout = _n(g, "NodeGroupOutput", x=2760, y=0)
 
-    # --- Spine ---
-    end_v = _n(g, "ShaderNodeCombineXYZ", x=-1540, y=-60)
-    _link(g, gin.outputs["Height"], end_v.inputs["Z"])
-    line = _n(g, "GeometryNodeCurvePrimitiveLine", x=-1380, y=80)
-    _link(g, end_v.outputs["Vector"], line.inputs["End"])
-    resample = _n(g, "GeometryNodeResampleCurve", x=-1220, y=80)
-    resample.inputs["Count"].default_value = 44
-    _link(g, line.outputs["Curve"], resample.inputs["Curve"])
+    # === base column: elongated cube, base sitting at z=0 ===
+    cr2 = _n(g, "ShaderNodeMath", x=-2360, y=300, operation="MULTIPLY"); cr2.inputs[1].default_value = 2.0
+    _link(g, gin.outputs["Col Radius"], cr2.inputs[0])
+    csz = _n(g, "ShaderNodeCombineXYZ", x=-2200, y=260)
+    _link(g, cr2.outputs[0], csz.inputs["X"]); _link(g, cr2.outputs[0], csz.inputs["Y"]); _link(g, gin.outputs["Height"], csz.inputs["Z"])
+    cube = _n(g, "GeometryNodeMeshCube", x=-2040, y=240)
+    cube.inputs["Vertices X"].default_value = 5
+    cube.inputs["Vertices Y"].default_value = 5
+    cube.inputs["Vertices Z"].default_value = 14
+    _link(g, csz.outputs["Vector"], cube.inputs["Size"])
+    hh = _n(g, "ShaderNodeMath", x=-2200, y=80, operation="MULTIPLY"); hh.inputs[1].default_value = 0.5
+    _link(g, gin.outputs["Height"], hh.inputs[0])
+    upv = _n(g, "ShaderNodeCombineXYZ", x=-2040, y=60); _link(g, hh.outputs[0], upv.inputs["Z"])
+    upx = _n(g, "GeometryNodeTransform", x=-1860, y=240)
+    _link(g, cube.outputs["Mesh"], upx.inputs["Geometry"]); _link(g, upv.outputs["Vector"], upx.inputs["Translation"])
 
-    sparam = _n(g, "GeometryNodeSplineParameter", x=-1220, y=-260)
+    # taper toward a blunt tip: s = max(Tip, 1 - Taper * (z / Height))
+    pos1 = _n(g, "GeometryNodeInputPosition", x=-2040, y=-120)
+    sep1 = _n(g, "ShaderNodeSeparateXYZ", x=-1860, y=-120); _link(g, pos1.outputs["Position"], sep1.inputs["Vector"])
+    tnorm = _n(g, "ShaderNodeMath", x=-1700, y=-120, operation="DIVIDE")
+    _link(g, sep1.outputs["Z"], tnorm.inputs[0]); _link(g, gin.outputs["Height"], tnorm.inputs[1])
+    tap = _n(g, "ShaderNodeMath", x=-1540, y=-120, operation="MULTIPLY")
+    _link(g, gin.outputs["Taper"], tap.inputs[0]); _link(g, tnorm.outputs[0], tap.inputs[1])
+    sfac = _n(g, "ShaderNodeMath", x=-1380, y=-120, operation="SUBTRACT"); sfac.inputs[0].default_value = 1.0
+    _link(g, tap.outputs[0], sfac.inputs[1])
+    sfac2 = _n(g, "ShaderNodeMath", x=-1220, y=-120, operation="MAXIMUM")
+    _link(g, sfac.outputs[0], sfac2.inputs[0]); _link(g, gin.outputs["Tip"], sfac2.inputs[1])
+    sx = _n(g, "ShaderNodeMath", x=-1060, y=-60, operation="MULTIPLY")
+    _link(g, sep1.outputs["X"], sx.inputs[0]); _link(g, sfac2.outputs[0], sx.inputs[1])
+    sy = _n(g, "ShaderNodeMath", x=-1060, y=-200, operation="MULTIPLY")
+    _link(g, sep1.outputs["Y"], sy.inputs[0]); _link(g, sfac2.outputs[0], sy.inputs[1])
+    tpos = _n(g, "ShaderNodeCombineXYZ", x=-900, y=-120)
+    _link(g, sx.outputs[0], tpos.inputs["X"]); _link(g, sy.outputs[0], tpos.inputs["Y"]); _link(g, sep1.outputs["Z"], tpos.inputs["Z"])
+    sp1 = _n(g, "GeometryNodeSetPosition", x=-720, y=240)
+    _link(g, upx.outputs["Geometry"], sp1.inputs["Geometry"]); _link(g, tpos.outputs["Vector"], sp1.inputs["Position"])
 
-    # store spline factor as 'stack_t' so it survives curve->mesh
-    t_store = _n(g, "GeometryNodeStoreNamedAttribute", x=-1060, y=80)
-    t_store.data_type = "FLOAT"
-    t_store.domain = "POINT"
-    t_store.inputs["Name"].default_value = "stack_t"
-    _link(g, resample.outputs["Curve"], t_store.inputs["Geometry"])
-    _link(g, sparam.outputs["Factor"], t_store.inputs["Value"])
+    # voronoi position offset: per-cell sideways shove (Warp) + normal push (Facet)
+    pos2 = _n(g, "GeometryNodeInputPosition", x=-900, y=-380)
+    nrm2 = _n(g, "GeometryNodeInputNormal", x=-900, y=-520)
+    vor = _n(g, "ShaderNodeTexVoronoi", x=-720, y=-380)
+    vor.voronoi_dimensions = "3D"; vor.feature = "F1"
+    vor.inputs["Randomness"].default_value = 1.0
+    _link(g, gin.outputs["Voronoi Scale"], vor.inputs["Scale"]); _link(g, pos2.outputs["Position"], vor.inputs["Vector"])
+    cc = _n(g, "ShaderNodeVectorMath", x=-540, y=-380, operation="MULTIPLY_ADD")
+    cc.inputs[1].default_value = (2.0, 2.0, 2.0); cc.inputs[2].default_value = (-1.0, -1.0, -1.0)
+    _link(g, vor.outputs["Color"], cc.inputs[0])
+    warpamt = _n(g, "ShaderNodeMath", x=-720, y=-600, operation="MULTIPLY")
+    _link(g, gin.outputs["Warp"], warpamt.inputs[0]); _link(g, gin.outputs["Col Radius"], warpamt.inputs[1])
+    side = _n(g, "ShaderNodeVectorMath", x=-360, y=-380, operation="SCALE")
+    _link(g, cc.outputs[0], side.inputs[0]); _link(g, warpamt.outputs[0], side.inputs["Scale"])
+    ccs = _n(g, "ShaderNodeSeparateXYZ", x=-540, y=-600); _link(g, cc.outputs[0], ccs.inputs["Vector"])
+    facamt = _n(g, "ShaderNodeMath", x=-540, y=-740, operation="MULTIPLY")
+    _link(g, gin.outputs["Facet"], facamt.inputs[0]); _link(g, gin.outputs["Col Radius"], facamt.inputs[1])
+    facv = _n(g, "ShaderNodeMath", x=-360, y=-680, operation="MULTIPLY")
+    _link(g, ccs.outputs["X"], facv.inputs[0]); _link(g, facamt.outputs[0], facv.inputs[1])
+    npush = _n(g, "ShaderNodeVectorMath", x=-200, y=-520, operation="SCALE")
+    _link(g, nrm2.outputs["Normal"], npush.inputs[0]); _link(g, facv.outputs[0], npush.inputs["Scale"])
+    woff = _n(g, "ShaderNodeVectorMath", x=-40, y=-420, operation="ADD")
+    _link(g, side.outputs[0], woff.inputs[0]); _link(g, npush.outputs[0], woff.inputs[1])
+    sp2 = _n(g, "GeometryNodeSetPosition", x=120, y=240)
+    _link(g, sp1.outputs["Geometry"], sp2.inputs["Geometry"]); _link(g, woff.outputs["Vector"], sp2.inputs["Offset"])
 
-    # lean (X grows with factor) + gentle XY wander
-    lean_amt = _n(g, "ShaderNodeMath", x=-1220, y=-420, operation="MULTIPLY")
-    _link(g, gin.outputs["Lean"], lean_amt.inputs[0]); _link(g, gin.outputs["Height"], lean_amt.inputs[1])
-    lean_x = _n(g, "ShaderNodeMath", x=-1060, y=-380, operation="MULTIPLY")
-    _link(g, sparam.outputs["Factor"], lean_x.inputs[0]); _link(g, lean_amt.outputs["Value"], lean_x.inputs[1])
-    wnoise = _n(g, "ShaderNodeTexNoise", x=-1060, y=-600); wnoise.noise_dimensions = "4D"
-    wnoise.inputs["Scale"].default_value = 1.1
-    pos0 = _n(g, "GeometryNodeInputPosition", x=-1380, y=-720)
-    _link(g, pos0.outputs["Position"], wnoise.inputs["Vector"]); _link(g, gin.outputs["Seed"], wnoise.inputs["W"])
-    wsep = _n(g, "ShaderNodeSeparateXYZ", x=-900, y=-600); _link(g, wnoise.outputs["Color"], wsep.inputs["Vector"])
-    wx = _n(g, "ShaderNodeMath", x=-740, y=-540, operation="SUBTRACT"); wx.inputs[1].default_value = 0.5
-    _link(g, wsep.outputs["X"], wx.inputs[0])
-    wy = _n(g, "ShaderNodeMath", x=-740, y=-700, operation="SUBTRACT"); wy.inputs[1].default_value = 0.5
-    _link(g, wsep.outputs["Y"], wy.inputs[0])
-    wfac = _n(g, "ShaderNodeMath", x=-740, y=-860, operation="MULTIPLY")
-    _link(g, sparam.outputs["Factor"], wfac.inputs[0]); _link(g, gin.outputs["Base Radius"], wfac.inputs[1])
-    wxf = _n(g, "ShaderNodeMath", x=-560, y=-540, operation="MULTIPLY")
-    _link(g, wx.outputs["Value"], wxf.inputs[0]); _link(g, wfac.outputs["Value"], wxf.inputs[1])
-    wyf = _n(g, "ShaderNodeMath", x=-560, y=-700, operation="MULTIPLY")
-    _link(g, wy.outputs["Value"], wyf.inputs[0]); _link(g, wfac.outputs["Value"], wyf.inputs[1])
-    addx = _n(g, "ShaderNodeMath", x=-400, y=-440, operation="ADD")
-    _link(g, lean_x.outputs["Value"], addx.inputs[0]); _link(g, wxf.outputs["Value"], addx.inputs[1])
-    off = _n(g, "ShaderNodeCombineXYZ", x=-240, y=-440)
-    _link(g, addx.outputs["Value"], off.inputs["X"]); _link(g, wyf.outputs["Value"], off.inputs["Y"])
-    setpos_spine = _n(g, "GeometryNodeSetPosition", x=-80, y=80)
-    _link(g, t_store.outputs["Geometry"], setpos_spine.inputs["Geometry"])
-    _link(g, off.outputs["Vector"], setpos_spine.inputs["Offset"])
+    # === cluster scatter points (a disk) + a guaranteed centre spire ===
+    disk = _n(g, "GeometryNodeMeshCircle", x=-720, y=620); disk.fill_type = "NGON"
+    disk.inputs["Vertices"].default_value = 20
+    _link(g, gin.outputs["Cluster Radius"], disk.inputs["Radius"])
+    ssqrt = _n(g, "ShaderNodeMath", x=-720, y=780, operation="SQRT"); _link(g, gin.outputs["Spires"], ssqrt.inputs[0])
+    dmin = _n(g, "ShaderNodeMath", x=-560, y=780, operation="DIVIDE")
+    _link(g, gin.outputs["Cluster Radius"], dmin.inputs[0]); _link(g, ssqrt.outputs[0], dmin.inputs[1])
+    dmin2 = _n(g, "ShaderNodeMath", x=-400, y=780, operation="MULTIPLY"); dmin2.inputs[1].default_value = 1.7
+    _link(g, dmin.outputs[0], dmin2.inputs[0])
+    dist = _n(g, "GeometryNodeDistributePointsOnFaces", x=-240, y=620, distribute_method="POISSON")
+    _link(g, disk.outputs["Mesh"], dist.inputs["Mesh"]); _link(g, dmin2.outputs[0], dist.inputs["Distance Min"])
+    dist.inputs["Density Max"].default_value = 50.0
+    _link(g, gin.outputs["Seed"], dist.inputs["Seed"])
+    ctr = _n(g, "GeometryNodePoints", x=-240, y=820); ctr.inputs["Count"].default_value = 1
+    joinp = _n(g, "GeometryNodeJoinGeometry", x=-40, y=680)
+    _link(g, dist.outputs["Points"], joinp.inputs["Geometry"]); _link(g, ctr.outputs["Geometry"], joinp.inputs["Geometry"])
 
-    # --- Radius profile: Base * ((1-t)^Taper + Flare * basebump) ---
-    omt = _n(g, "ShaderNodeMath", x=-900, y=160, operation="SUBTRACT"); omt.inputs[0].default_value = 1.0
-    _link(g, sparam.outputs["Factor"], omt.inputs[1])
-    powt = _n(g, "ShaderNodeMath", x=-740, y=160, operation="POWER")
-    _link(g, omt.outputs["Value"], powt.inputs[0]); _link(g, gin.outputs["Taper"], powt.inputs[1])
-    flare_mask = _n(g, "ShaderNodeMapRange", x=-740, y=-40)  # t:0..0.22 -> 1..0
-    flare_mask.inputs["From Min"].default_value = 0.0
-    flare_mask.inputs["From Max"].default_value = 0.22
-    flare_mask.inputs["To Min"].default_value = 1.0
-    flare_mask.inputs["To Max"].default_value = 0.0
-    _link(g, sparam.outputs["Factor"], flare_mask.inputs["Value"])
-    flare_sq = _n(g, "ShaderNodeMath", x=-580, y=-40, operation="POWER"); flare_sq.inputs[1].default_value = 2.0
-    _link(g, flare_mask.outputs["Result"], flare_sq.inputs[0])
-    flare_term = _n(g, "ShaderNodeMath", x=-420, y=-40, operation="MULTIPLY")
-    _link(g, flare_sq.outputs["Value"], flare_term.inputs[0]); _link(g, gin.outputs["Base Flare"], flare_term.inputs[1])
-    rad_factor = _n(g, "ShaderNodeMath", x=-260, y=120, operation="ADD")
-    _link(g, powt.outputs["Value"], rad_factor.inputs[0]); _link(g, flare_term.outputs["Value"], rad_factor.inputs[1])
-    rad_tip = _n(g, "ShaderNodeMath", x=-180, y=120, operation="MAXIMUM")  # blunt the tip (no needle)
-    _link(g, rad_factor.outputs["Value"], rad_tip.inputs[0]); _link(g, gin.outputs["Tip"], rad_tip.inputs[1])
-    radmul = _n(g, "ShaderNodeMath", x=-100, y=200, operation="MULTIPLY")
-    _link(g, rad_tip.outputs["Value"], radmul.inputs[0]); _link(g, gin.outputs["Base Radius"], radmul.inputs[1])
-    radclamp = _n(g, "ShaderNodeMath", x=60, y=200, operation="MAXIMUM"); radclamp.inputs[1].default_value = 0.05
-    _link(g, radmul.outputs["Value"], radclamp.inputs[0])
-    # large-scale lumps along the height break the clean cone ("witch hat")
-    lfac = _n(g, "ShaderNodeMath", x=-260, y=400, operation="MULTIPLY"); lfac.inputs[1].default_value = 3.5
-    _link(g, sparam.outputs["Factor"], lfac.inputs[0])
-    lvec = _n(g, "ShaderNodeCombineXYZ", x=-100, y=400); _link(g, lfac.outputs["Value"], lvec.inputs["X"])
-    lnoise = _n(g, "ShaderNodeTexNoise", x=60, y=400); lnoise.noise_dimensions = "4D"; lnoise.inputs["Scale"].default_value = 1.0
-    _link(g, lvec.outputs["Vector"], lnoise.inputs["Vector"]); _link(g, gin.outputs["Seed"], lnoise.inputs["W"])
-    lc = _n(g, "ShaderNodeMath", x=220, y=420, operation="SUBTRACT"); lc.inputs[1].default_value = 0.5
-    _link(g, lnoise.outputs["Fac"], lc.inputs[0])
-    lcl = _n(g, "ShaderNodeMath", x=380, y=420, operation="MULTIPLY")
-    _link(g, lc.outputs["Value"], lcl.inputs[0]); _link(g, gin.outputs["Lumpiness"], lcl.inputs[1])
-    lump = _n(g, "ShaderNodeMath", x=540, y=420, operation="MULTIPLY_ADD"); lump.inputs[1].default_value = 1.7; lump.inputs[2].default_value = 1.0
-    _link(g, lcl.outputs["Value"], lump.inputs[0])
-    radlump = _n(g, "ShaderNodeMath", x=160, y=200, operation="MULTIPLY")
-    _link(g, radclamp.outputs["Value"], radlump.inputs[0]); _link(g, lump.outputs["Value"], radlump.inputs[1])
-    radlump2 = _n(g, "ShaderNodeMath", x=300, y=200, operation="MAXIMUM"); radlump2.inputs[1].default_value = 0.05
-    _link(g, radlump.outputs["Value"], radlump2.inputs[0])
-    setrad = _n(g, "GeometryNodeSetCurveRadius", x=460, y=80)
-    _link(g, setpos_spine.outputs["Geometry"], setrad.inputs["Curve"])
-    _link(g, radlump2.outputs["Value"], setrad.inputs["Radius"])
+    # per-spire transforms, driven by distance from the cluster centre
+    idx = _n(g, "GeometryNodeInputIndex", x=-40, y=960)
+    ppos = _n(g, "GeometryNodeInputPosition", x=-40, y=1100)
+    psep = _n(g, "ShaderNodeSeparateXYZ", x=120, y=1100); _link(g, ppos.outputs["Position"], psep.inputs["Vector"])
+    pxy = _n(g, "ShaderNodeCombineXYZ", x=280, y=1100)
+    _link(g, psep.outputs["X"], pxy.inputs["X"]); _link(g, psep.outputs["Y"], pxy.inputs["Y"])
+    plen = _n(g, "ShaderNodeVectorMath", x=440, y=1100, operation="LENGTH"); _link(g, pxy.outputs["Vector"], plen.inputs[0])
+    dn = _n(g, "ShaderNodeMath", x=600, y=1100, operation="DIVIDE")
+    _link(g, plen.outputs["Value"], dn.inputs[0]); _link(g, gin.outputs["Cluster Radius"], dn.inputs[1])
+    dn2 = _n(g, "ShaderNodeMath", x=760, y=1100, operation="MINIMUM"); dn2.inputs[1].default_value = 1.0
+    _link(g, dn.outputs[0], dn2.inputs[0])
+    radial = _n(g, "ShaderNodeVectorMath", x=440, y=940, operation="NORMALIZE"); _link(g, pxy.outputs["Vector"], radial.inputs[0])
+    # outward lean: tilt instance +Z toward the radial direction by Lean * distNorm
+    ang = _n(g, "ShaderNodeMath", x=760, y=940, operation="MULTIPLY")
+    _link(g, gin.outputs["Lean"], ang.inputs[0]); _link(g, dn2.outputs[0], ang.inputs[1])
+    sang = _n(g, "ShaderNodeMath", x=920, y=880, operation="SINE"); _link(g, ang.outputs[0], sang.inputs[0])
+    cang = _n(g, "ShaderNodeMath", x=920, y=1020, operation="COSINE"); _link(g, ang.outputs[0], cang.inputs[0])
+    rads = _n(g, "ShaderNodeVectorMath", x=1080, y=880, operation="SCALE")
+    _link(g, radial.outputs[0], rads.inputs[0]); _link(g, sang.outputs[0], rads.inputs["Scale"])
+    zc = _n(g, "ShaderNodeCombineXYZ", x=1080, y=1020); _link(g, cang.outputs[0], zc.inputs["Z"])
+    uptgt = _n(g, "ShaderNodeVectorMath", x=1240, y=940, operation="ADD")
+    _link(g, rads.outputs[0], uptgt.inputs[0]); _link(g, zc.outputs[0], uptgt.inputs[1])
+    al = _n(g, "FunctionNodeAlignEulerToVector", x=1400, y=940); al.axis = "Z"; al.pivot_axis = "AUTO"
+    _link(g, uptgt.outputs[0], al.inputs["Vector"])
+    rz = _n(g, "FunctionNodeRandomValue", x=1080, y=1220); rz.data_type = "FLOAT"
+    rz.inputs[2].default_value = 0.0; rz.inputs[3].default_value = 6.2832
+    _link(g, idx.outputs["Index"], rz.inputs["ID"]); _link(g, gin.outputs["Seed"], rz.inputs["Seed"])
+    zspin = _n(g, "ShaderNodeCombineXYZ", x=1240, y=1160); _link(g, rz.outputs[1], zspin.inputs["Z"])
+    erot = _n(g, "ShaderNodeVectorMath", x=1560, y=980, operation="ADD")
+    _link(g, al.outputs["Rotation"], erot.inputs[0]); _link(g, zspin.outputs["Vector"], erot.inputs[1])
+    # per-spire scale: uniform jitter; centre spires tallest, edge spires shorter
+    sseed = _n(g, "ShaderNodeMath", x=1080, y=1360, operation="ADD"); sseed.inputs[1].default_value = 23.0
+    _link(g, gin.outputs["Seed"], sseed.inputs[0])
+    rsc = _n(g, "FunctionNodeRandomValue", x=1240, y=1360); rsc.data_type = "FLOAT"
+    rsc.inputs[2].default_value = 0.8; rsc.inputs[3].default_value = 1.1
+    _link(g, idx.outputs["Index"], rsc.inputs["ID"]); _link(g, sseed.outputs[0], rsc.inputs["Seed"])
+    hvf = _n(g, "ShaderNodeMath", x=1240, y=1500, operation="MULTIPLY")
+    _link(g, gin.outputs["Height Var"], hvf.inputs[0]); _link(g, dn2.outputs[0], hvf.inputs[1])
+    hfac = _n(g, "ShaderNodeMath", x=1400, y=1500, operation="SUBTRACT"); hfac.inputs[0].default_value = 1.0
+    _link(g, hvf.outputs[0], hfac.inputs[1])
+    zscl = _n(g, "ShaderNodeMath", x=1560, y=1440, operation="MULTIPLY")
+    _link(g, rsc.outputs[1], zscl.inputs[0]); _link(g, hfac.outputs[0], zscl.inputs[1])
+    svec = _n(g, "ShaderNodeCombineXYZ", x=1720, y=1380)
+    _link(g, rsc.outputs[1], svec.inputs["X"]); _link(g, rsc.outputs[1], svec.inputs["Y"]); _link(g, zscl.outputs[0], svec.inputs["Z"])
 
-    circle = _n(g, "GeometryNodeCurvePrimitiveCircle", x=220, y=-160); circle.mode = "RADIUS"
-    _link(g, gin.outputs["Sides"], circle.inputs["Resolution"])
-    circle.inputs["Radius"].default_value = 1.0
-    ctm = _n(g, "GeometryNodeCurveToMesh", x=400, y=40)
-    _link(g, setrad.outputs["Curve"], ctm.inputs["Curve"])
-    _link(g, circle.outputs["Curve"], ctm.inputs["Profile Curve"])
-    ctm.inputs["Fill Caps"].default_value = True
-    _radius_to_scale(g, ctm, x=240, y=-120)
-    subdiv = _n(g, "GeometryNodeSubdivideMesh", x=560, y=40); subdiv.inputs["Level"].default_value = 2
-    _link(g, ctm.outputs["Mesh"], subdiv.inputs["Mesh"])
+    iop = _n(g, "GeometryNodeInstanceOnPoints", x=1880, y=680)
+    _link(g, joinp.outputs["Geometry"], iop.inputs["Points"]); _link(g, sp2.outputs["Geometry"], iop.inputs["Instance"])
+    _link(g, erot.outputs["Vector"], iop.inputs["Rotation"]); _link(g, svec.outputs["Vector"], iop.inputs["Scale"])
+    real = _n(g, "GeometryNodeRealizeInstances", x=2040, y=680); _link(g, iop.outputs["Instances"], real.inputs["Geometry"])
 
-    # --- Displacement (thickness-scaled, multi-octave + strata ledges) ---
-    pos = _n(g, "GeometryNodeInputPosition", x=400, y=-340)
-    nrm = _n(g, "GeometryNodeInputNormal", x=400, y=-440)
-    t_attr = _n(g, "GeometryNodeInputNamedAttribute", x=400, y=-560); t_attr.data_type = "FLOAT"
-    t_attr.inputs["Name"].default_value = "stack_t"
-    # local radius = Base * (1-t)^Taper ; floor scale so the tip keeps grain
-    m_omt = _n(g, "ShaderNodeMath", x=560, y=-560, operation="SUBTRACT"); m_omt.inputs[0].default_value = 1.0
-    _link(g, t_attr.outputs["Attribute"], m_omt.inputs[1])
-    m_powt = _n(g, "ShaderNodeMath", x=720, y=-560, operation="POWER")
-    _link(g, m_omt.outputs["Value"], m_powt.inputs[0]); _link(g, gin.outputs["Taper"], m_powt.inputs[1])
-    loc_rad = _n(g, "ShaderNodeMath", x=880, y=-560, operation="MULTIPLY")
-    _link(g, m_powt.outputs["Value"], loc_rad.inputs[0]); _link(g, gin.outputs["Base Radius"], loc_rad.inputs[1])
-    rad_floor = _n(g, "ShaderNodeMath", x=1040, y=-540, operation="MULTIPLY_ADD")  # 0.5*locrad + 0.12*base
-    rad_floor.inputs[1].default_value = 0.5
-    _link(g, loc_rad.outputs["Value"], rad_floor.inputs[0])
-    base_floor = _n(g, "ShaderNodeMath", x=880, y=-700, operation="MULTIPLY"); base_floor.inputs[1].default_value = 0.12
-    _link(g, gin.outputs["Base Radius"], base_floor.inputs[0])
-    _link(g, base_floor.outputs["Value"], rad_floor.inputs[2])
-    disp_scale = _n(g, "ShaderNodeMath", x=1200, y=-540, operation="MULTIPLY")
-    _link(g, rad_floor.outputs["Value"], disp_scale.inputs[0]); _link(g, gin.outputs["Jaggedness"], disp_scale.inputs[1])
+    # === voxel remesh (Mesh to Volume -> Volume to Mesh) fuses the cluster ===
+    # voxel size floored against Height so a tall stack cannot blow up the grid
+    vfloor = _n(g, "ShaderNodeMath", x=2040, y=440, operation="MULTIPLY"); vfloor.inputs[1].default_value = 0.008
+    _link(g, gin.outputs["Height"], vfloor.inputs[0])
+    vsize = _n(g, "ShaderNodeMath", x=2200, y=440, operation="MAXIMUM")
+    _link(g, gin.outputs["Voxel Size"], vsize.inputs[0]); _link(g, vfloor.outputs[0], vsize.inputs[1])
+    m2v = _n(g, "GeometryNodeMeshToVolume", x=2200, y=680)
+    _link(g, real.outputs["Geometry"], m2v.inputs["Mesh"])
+    m2v.inputs["Density"].default_value = 1.0
+    m2v.inputs["Interior Band Width"].default_value = 6.0
+    try:
+        m2v.inputs["Resolution Mode"].default_value = "Size"  # 5.1 menu socket
+    except Exception:
+        pass
+    _link(g, vsize.outputs[0], m2v.inputs["Voxel Size"])
+    v2m = _n(g, "GeometryNodeVolumeToMesh", x=2360, y=680)
+    _link(g, m2v.outputs["Volume"], v2m.inputs["Volume"])
+    v2m.inputs["Threshold"].default_value = 0.07
+    v2m.inputs["Adaptivity"].default_value = 0.0
 
-    # flute-biased coordinate (high XY freq, low Z freq)
-    fxy = _n(g, "ShaderNodeMath", x=560, y=-760, operation="MULTIPLY"); fxy.inputs[1].default_value = 2.2
-    _link(g, gin.outputs["Flute Scale"], fxy.inputs[0])
-    fz = _n(g, "ShaderNodeMath", x=560, y=-900, operation="MULTIPLY"); fz.inputs[1].default_value = 0.45
-    _link(g, gin.outputs["Flute Scale"], fz.inputs[0])
-    fscale = _n(g, "ShaderNodeCombineXYZ", x=720, y=-820)
-    _link(g, fxy.outputs["Value"], fscale.inputs["X"]); _link(g, fxy.outputs["Value"], fscale.inputs["Y"])
-    _link(g, fz.outputs["Value"], fscale.inputs["Z"])
-    sp = _n(g, "ShaderNodeVectorMath", x=880, y=-820, operation="MULTIPLY")
-    _link(g, pos.outputs["Position"], sp.inputs[0]); _link(g, fscale.outputs["Vector"], sp.inputs[1])
-    n1 = _n(g, "ShaderNodeTexNoise", x=1040, y=-820); n1.noise_dimensions = "4D"
-    n1.inputs["Scale"].default_value = 1.0; n1.inputs["Detail"].default_value = 8.0; n1.inputs["Roughness"].default_value = 0.72
-    _link(g, sp.outputs["Vector"], n1.inputs["Vector"]); _link(g, gin.outputs["Seed"], n1.inputs["W"])
-    n2 = _n(g, "ShaderNodeTexNoise", x=1040, y=-1000); n2.noise_dimensions = "4D"
-    n2.inputs["Scale"].default_value = 0.5; n2.inputs["Detail"].default_value = 3.0
-    _link(g, pos.outputs["Position"], n2.inputs["Vector"]); _link(g, gin.outputs["Seed"], n2.inputs["W"])
-    c1 = _n(g, "ShaderNodeMath", x=1200, y=-820, operation="MULTIPLY_ADD")  # (n1-0.5)*0.65
-    _link(g, n1.outputs["Fac"], c1.inputs[0]); c1.inputs[1].default_value = 0.3; c1.inputs[2].default_value = -0.15
-    c2 = _n(g, "ShaderNodeMath", x=1200, y=-1000, operation="MULTIPLY_ADD")  # (n2-0.5)*0.55
-    _link(g, n2.outputs["Fac"], c2.inputs[0]); c2.inputs[1].default_value = 0.22; c2.inputs[2].default_value = -0.11
-    dsum = _n(g, "ShaderNodeMath", x=1360, y=-900, operation="ADD")
-    _link(g, c1.outputs["Value"], dsum.inputs[0]); _link(g, c2.outputs["Value"], dsum.inputs[1])
-
-    # strata ledges: sawtooth bands along Z
-    wave = _n(g, "ShaderNodeTexWave", x=1040, y=-1180)
-    wave.wave_type = "BANDS"; wave.bands_direction = "Z"; wave.wave_profile = "SAW"
-    wave.inputs["Scale"].default_value = 0.55
-    _link(g, pos.outputs["Position"], wave.inputs["Vector"])
-    wctr = _n(g, "ShaderNodeMath", x=1200, y=-1180, operation="MULTIPLY_ADD")  # (wave-0.5)*Strata
-    _link(g, wave.outputs["Fac"], wctr.inputs[0])
-    _link(g, gin.outputs["Strata"], wctr.inputs[1])
-    whalf = _n(g, "ShaderNodeMath", x=1200, y=-1320, operation="MULTIPLY"); whalf.inputs[1].default_value = -0.5
-    _link(g, gin.outputs["Strata"], whalf.inputs[0])
-    _link(g, whalf.outputs["Value"], wctr.inputs[2])
-    dtot = _n(g, "ShaderNodeMath", x=1520, y=-980, operation="ADD")
-    _link(g, dsum.outputs["Value"], dtot.inputs[0]); _link(g, wctr.outputs["Value"], dtot.inputs[1])
-    # angular voronoi facets: sharp crack grooves at the cell boundaries...
-    facet = _facet_term(g, pos.outputs["Position"], gin.outputs["Facets"], scale=0.13, x0=820, y0=-1320, gain=3.6)
-    dtot2 = _n(g, "ShaderNodeMath", x=1680, y=-980, operation="ADD")
-    _link(g, dtot.outputs["Value"], dtot2.inputs[0]); _link(g, facet, dtot2.inputs[1])
-    # ...plus a per-cell constant push so each cell offsets as a unit -> flat
-    # stepped rock facets (the planar-decimated boulder read).
-    vorc = _n(g, "ShaderNodeTexVoronoi", x=820, y=-1560); vorc.voronoi_dimensions = "3D"; vorc.feature = "F1"
-    vorc.inputs["Scale"].default_value = 0.13
-    _link(g, pos.outputs["Position"], vorc.inputs["Vector"])
-    cellsep = _n(g, "ShaderNodeSeparateXYZ", x=980, y=-1560); _link(g, vorc.outputs["Color"], cellsep.inputs["Vector"])
-    cellc = _n(g, "ShaderNodeMath", x=1140, y=-1560, operation="MULTIPLY_ADD"); cellc.inputs[1].default_value = 1.5; cellc.inputs[2].default_value = -0.75
-    _link(g, cellsep.outputs["X"], cellc.inputs[0])
-    cellw = _n(g, "ShaderNodeMath", x=1300, y=-1560, operation="MULTIPLY")
-    _link(g, cellc.outputs["Value"], cellw.inputs[0]); _link(g, gin.outputs["Facets"], cellw.inputs[1])
-    dtot3 = _n(g, "ShaderNodeMath", x=1840, y=-980, operation="ADD")
-    _link(g, dtot2.outputs["Value"], dtot3.inputs[0]); _link(g, cellw.outputs["Value"], dtot3.inputs[1])
-
-    dmag = _n(g, "ShaderNodeMath", x=1840, y=-620, operation="MULTIPLY")
-    _link(g, dtot3.outputs["Value"], dmag.inputs[0]); _link(g, disp_scale.outputs["Value"], dmag.inputs[1])
-    dvec = _n(g, "ShaderNodeVectorMath", x=1520, y=-440, operation="SCALE")
-    _link(g, nrm.outputs["Normal"], dvec.inputs[0]); _link(g, dmag.outputs["Value"], dvec.inputs["Scale"])
-    setpos2 = _n(g, "GeometryNodeSetPosition", x=900, y=40)
-    _link(g, subdiv.outputs["Mesh"], setpos2.inputs["Geometry"])
-    _link(g, dvec.outputs["Vector"], setpos2.inputs["Offset"])
-
-    flat = _n(g, "GeometryNodeSetShadeSmooth", x=1100, y=40); flat.inputs["Shade Smooth"].default_value = False
-    _link(g, setpos2.outputs["Geometry"], flat.inputs["Geometry"])
-
-    # optional boulder-cluster pass: scatter HV_Rock chunks over the spire and
-    # boolean-union them into one faceted rock mass (toggle, default on).
-    bspace = _n(g, "ShaderNodeMath", x=700, y=-1900, operation="DIVIDE")  # spacing = Size / Density
-    _link(g, gin.outputs["Boulder Size"], bspace.inputs[0]); _link(g, gin.outputs["Boulder Density"], bspace.inputs[1])
-    cluster = _rock_cluster(g, flat.outputs["Geometry"], gin.outputs["Boulder Size"],
-                            bspace.outputs["Value"], gin.outputs["Seed"], x0=900, y0=-1900)
-    sw = _n(g, "GeometryNodeSwitch", x=2300, y=40); sw.input_type = "GEOMETRY"
-    _link(g, gin.outputs["Boulder Cluster"], sw.inputs["Switch"])
-    _link(g, flat.outputs["Geometry"], sw.inputs["False"]); _link(g, cluster, sw.inputs["True"])
-    store = _store_color0(g, sw.outputs["Output"], rgba=(1.0, 1.0, 0.0, 0.0))
-    store.location = (2480, 40)
+    flat = _n(g, "GeometryNodeSetShadeSmooth", x=2520, y=680); flat.inputs["Shade Smooth"].default_value = False
+    _link(g, v2m.outputs["Mesh"], flat.inputs["Geometry"])
+    store = _store_color0(g, flat.outputs["Geometry"], rgba=(1.0, 1.0, 0.0, 0.0)); store.location = (2520, 460)
     mat = _mat("mat_prop_sea_stack", ROCK_RGBA, roughness=0.9)
-    sm = _set_material(g, store.outputs["Geometry"], mat)
-    sm.location = (2660, 40)
+    sm = _set_material(g, store.outputs["Geometry"], mat); sm.location = (2520, 280)
     _link(g, sm.outputs["Geometry"], gout.inputs["Geometry"])
     return g
 
@@ -1291,7 +1293,7 @@ def build_sea_arch() -> bpy.types.GeometryNodeTree:
     _in(g, "Jaggedness", "NodeSocketFloat", 0.42, mn=0.0, mx=1.4)
     _in(g, "Thickness Var", "NodeSocketFloat", 0.35, mn=0.0, mx=1.0)
     _in(g, "Facets", "NodeSocketFloat", 0.5, mn=0.0, mx=1.5)
-    _in(g, "Boulder Cluster", "NodeSocketBool", True)
+    _in(g, "Boulder Cluster", "NodeSocketBool", False)  # opt-in; the smooth voronoi arch reads cleaner
     _in(g, "Boulder Size", "NodeSocketFloat", 3.4, mn=0.3, mx=20.0, subtype="DISTANCE")
     _in(g, "Boulder Density", "NodeSocketFloat", 0.9, mn=0.2, mx=3.0)
     _in(g, "Seed", "NodeSocketFloat", 0.0)
@@ -1415,7 +1417,7 @@ def build_sea_arch() -> bpy.types.GeometryNodeTree:
     _link(g, sub.outputs["Mesh"], dpos.inputs["Geometry"]); _link(g, dvec.outputs["Vector"], dpos.inputs["Offset"])
     flat = _n(g, "GeometryNodeSetShadeSmooth", x=600, y=160); flat.inputs["Shade Smooth"].default_value = False
     _link(g, dpos.outputs["Geometry"], flat.inputs["Geometry"])
-    # optional boulder-cluster pass (toggle, default on): scatter HV_Rock chunks
+    # optional boulder-cluster pass (toggle, default OFF): scatter HV_Rock chunks
     # over the arch and boolean-union them into one faceted rock mass.
     bspace = _n(g, "ShaderNodeMath", x=700, y=-1500, operation="DIVIDE")  # spacing = Size / Density
     _link(g, gin.outputs["Boulder Size"], bspace.inputs[0]); _link(g, gin.outputs["Boulder Density"], bspace.inputs[1])
@@ -1650,19 +1652,23 @@ def build_all(which=None):
     if "sea_stack" in builders:
         tree = bpy.data.node_groups["HV_SeaStack"]
         variants = [
-            ("SeaStack_A", dict(Height=16.0, **{"Base Radius": 2.5}, Taper=1.2, Sides=7, Lean=0.1, Jaggedness=0.5, Lumpiness=0.45, Seed=1.0)),
-            ("SeaStack_B", dict(Height=19.0, **{"Base Radius": 3.0}, Taper=1.0, Sides=8, Lean=-0.14, Jaggedness=0.5, Lumpiness=0.55, Seed=7.0)),
-            ("SeaStack_C", dict(Height=11.0, **{"Base Radius": 3.4}, Taper=1.4, Sides=6, Lean=0.06, Jaggedness=0.45, Lumpiness=0.5, Seed=13.0)),
+            ("SeaStack_A", dict(Height=16.0, Seed=3.0)),  # defaults: tight 7-spire cluster
+            ("SeaStack_B", dict(Height=20.0, **{"Col Radius": 1.7, "Cluster Radius": 2.4},
+                                Spires=6, Taper=0.55, Lean=0.12, **{"Height Var": 0.25}, Seed=7.0)),
+            ("SeaStack_C", dict(Height=18.0, **{"Col Radius": 2.0, "Cluster Radius": 4.2},
+                                Spires=11, Taper=0.55, Lean=0.28, **{"Height Var": 0.45}, Seed=5.0)),
         ]
         for i, (nm, kw) in enumerate(variants):
             ob = _single_vert_obj(nm)
             _apply(ob, tree, kw)
-            # planar decimation collapses the cell interiors into flat n-gon
-            # facets -> the crisp, planar boulder-rock read (per the reference).
-            dec = ob.modifiers.new("PlanarFacets", "DECIMATE")
-            dec.decimate_type = "DISSOLVE"
-            dec.angle_limit = math.radians(12)
-            _place(ob, (i * 12.0, 0.0, 0.0), col)
+            # finish the dense voxel-remesh shell: two Collapse decimates thin it
+            # to a light, faceted low-poly mesh (~0.25 then ~0.5 of the faces),
+            # then Smooth by Angle (20deg) softens the broad faces while keeping
+            # the spire ridges crisp. (Replaces the old flat Planar Dissolve.)
+            d1 = ob.modifiers.new("Decimate", "DECIMATE"); d1.decimate_type = "COLLAPSE"; d1.ratio = 0.25
+            d2 = ob.modifiers.new("Decimate.001", "DECIMATE"); d2.decimate_type = "COLLAPSE"; d2.ratio = 0.5
+            _smooth_by_angle(ob, 20.0)
+            _place(ob, (i * 14.0, 0.0, 0.0), col)
             summary["objects"].append(nm)
 
     if "dock" in builders:
@@ -1704,9 +1710,16 @@ def build_all(which=None):
         for i, (nm, kw) in enumerate(variants):
             ob = _single_vert_obj(nm)
             _apply(ob, tree, kw)
+            # planar dissolve crisps the voronoi facets into n-gons, THEN (unlike
+            # the sea stack, which drops the dissolve) two Collapse decimates thin
+            # it to a light low-poly shell and Smooth by Angle (30deg) softens the
+            # broad faces while the arch edges stay crisp.
             dec = ob.modifiers.new("PlanarFacets", "DECIMATE")
             dec.decimate_type = "DISSOLVE"
             dec.angle_limit = math.radians(11)
+            d1 = ob.modifiers.new("Decimate", "DECIMATE"); d1.decimate_type = "COLLAPSE"; d1.ratio = 0.5
+            d2 = ob.modifiers.new("Decimate.001", "DECIMATE"); d2.decimate_type = "COLLAPSE"; d2.ratio = 0.3333
+            _smooth_by_angle(ob, 30.0)
             _place(ob, (i * 30.0, 88.0, 0.0), col)
             summary["objects"].append(nm)
 
