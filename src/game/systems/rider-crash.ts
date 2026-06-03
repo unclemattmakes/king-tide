@@ -195,3 +195,29 @@ function launchRider(
   rider.stateAge = 0
   rider.motorScale = 0
 }
+
+/**
+ * Force-eject the rider for `bikeEid` as a ragdoll — e.g. when the shark takes
+ * the bike out of bounds. No-op if the bike has no rider or it's already
+ * launched. `vel` is the velocity the ragdoll inherits (typically the bike's
+ * speed just before it was taken). Mirrors the crash path so the rider tumbles
+ * the same way a wall-hit ejects them.
+ */
+export function ejectRider(
+  sim: SimWorld,
+  phys: PhysicsWorld,
+  bikeEid: number,
+  vel: { x: number; y: number; z: number },
+): void {
+  const riderEids = query(sim, [Rider])
+  for (const eid of riderEids) {
+    const rider = RiderStore.must(eid)
+    if (rider.bikeEid !== bikeEid || rider.state === 'launched') continue
+    const bikeRb = phys.world.getRigidBody(rider.bikeRbHandle)
+    const rot = bikeRb ? bikeRb.rotation() : { x: 0, y: 0, z: 0, w: 1 }
+    launchRider(rider, { x: vel.x, y: vel.y, z: vel.z }, rot, phys)
+    // Drop the Δv tracker entry so the (now stale) sample can't re-trigger.
+    prevVel.delete(bikeEid)
+    return
+  }
+}

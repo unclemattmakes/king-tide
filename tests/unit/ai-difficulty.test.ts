@@ -159,6 +159,7 @@ function runOneTick(opts: {
     checkpointsCrossed: opts.leaderCpAhead,
     finished: false,
     raceTime: 0,
+    forfeited: false,
   })
   // Chaser — Racer + AITag + AIController at checkpoint 0.
   const chaser = addEntity(sim)
@@ -171,6 +172,7 @@ function runOneTick(opts: {
     checkpointsCrossed: 0,
     finished: false,
     raceTime: 0,
+    forfeited: false,
   })
   const ctrl = defaultAIController('main', { difficulty: opts.difficulty })
   if (opts.startFactor !== undefined) ctrl.topSpeedFactor = opts.startFactor
@@ -213,6 +215,7 @@ describe('rubberBandSystem — assist on', () => {
       checkpointsCrossed: 5,
       finished: false,
       raceTime: 0,
+      forfeited: false,
     })
     // AI is 2 cps behind the leader-most racer — but starts boosted above
     // its baseline (simulating a tick after a prior rubber-band boost).
@@ -228,6 +231,7 @@ describe('rubberBandSystem — assist on', () => {
       checkpointsCrossed: 3,
       finished: false,
       raceTime: 0,
+      forfeited: false,
     })
     const ctrl = defaultAIController('main', { difficulty: 'standard' })
     ctrl.topSpeedFactor = baseline * 1.2 // boosted

@@ -58,6 +58,7 @@ import { createGpuProfiler } from '@/engine/render/gpu-profiler'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
 import { updateLavaTime } from '@/engine/render/lava-river-material'
 import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finish-banner'
+import { createOobHud } from '@/engine/render/oob-hud'
 import { createPerfHud, type RenderInfoLite } from '@/engine/render/perf-hud'
 import { createPumpFx } from '@/engine/render/pump-fx'
 import type { RaceHud } from '@/engine/render/race-hud'
@@ -65,6 +66,7 @@ import type { RaceIntro } from '@/engine/render/race-intro'
 import type { RaceIntroUi } from '@/engine/render/race-intro-ui'
 import { probeGpuRenderer } from '@/engine/render/renderer'
 import { renderFrame } from '@/engine/render/renderer-service'
+import { createSharkSequence } from '@/engine/render/shark-sequence'
 import type { SkySystem } from '@/engine/render/sky'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
 import { createTrickPromptHud } from '@/engine/render/trick-prompt-hud'
@@ -112,6 +114,7 @@ import {
   MissileStateStore,
   MissileTag,
 } from '@/game/components/combat'
+import { OutOfBoundsStore } from '@/game/components/out-of-bounds'
 import type { PickupType } from '@/game/components/pickup'
 import { RacerStore } from '@/game/components/race'
 import type { RaceTick } from '@/game/sim-step'
@@ -120,8 +123,12 @@ import { chargeBoostMeter } from '@/game/systems/boost-meter'
 import type { GhostRunner } from '@/game/systems/ghost-runner'
 import { TUCK_SWEET_SPOT, tuckFactor } from '@/game/systems/hover'
 import { interpolateRenderTransforms } from '@/game/systems/interpolate-transforms'
+import { GRACE_PRESETS } from '@/game/systems/oob-tuning'
+import { leashFor, type OobConfig, resolveOob } from '@/game/systems/out-of-bounds'
 import { getHeldPickup } from '@/game/systems/pickup'
 import { tickRemoteInterp } from '@/game/systems/remote-interp'
+import { ejectRider } from '@/game/systems/rider-crash'
+import { resetRiderForBike } from '@/game/systems/rider-pose'
 import { computeStandings } from '@/game/systems/standings'
 import type { WaveRiderSystem } from '@/game/systems/wave-rider'
 import type { Track } from '@/game/tracks/types'
@@ -176,6 +183,9 @@ export interface GameLoopHud {
 export interface GameLoopControl {
   /** True when the player bike is currently AI-driven (test/auto-play). */
   isAutoPlay(): boolean
+  /** Engage/disengage AI auto-play — flips the sim-step flag AND swaps the
+   *  player's AITag. The out-of-bounds return-to-course autopilot reuses this. */
+  setAutoPlay(on: boolean): void
   /** True when the pause menu is open (single-player gates the sim). */
   isPausedForMenu(): boolean
   /** True when the determinism harness has gated off the sim. */
@@ -443,6 +453,175 @@ export function startGameLoop(opts: GameLoopOpts): void {
   } = opts
 
   let finishShown = false
+
+  // ── Out-of-bounds (docs/out-of-bounds-design.md) ─────────────────────────
+  // Single-player Race + Time Trial only — multiplayer (lockstep determinism)
+  // and the tutorial opt out. The detection state machine lives in the sim
+  // (`outOfBoundsSystem`); here we drive the warning popup, the autopilot
+  // handoff, and the lethal consequence.
+  const oobHud = createOobHud()
+  const oobEligible = !roomId && !tutorialMode
+  // Autopilot latches: `oobAutopilotActive` = OOB turned autopilot on (so we
+  // only ever turn off what we turned on, never the dev T/F1 test mode).
+  // `oobPlayerOverride` sticks once the player touches the controls during a
+  // danger window, so we don't fight them by re-engaging autopilot.
+  let oobAutopilotActive = false
+  let oobPlayerOverride = false
+  // Which outcome the in-flight shark breach is playing — read by onComplete
+  // to decide respawn ('hit') vs ride-on ('nearmiss').
+  let sharkLethalKind: 'hit' | 'nearmiss' = 'hit'
+
+  // The AirJaws set-piece (Phase 2). Render-only; its callbacks drive the sim
+  // mutations (rider eject, bike capture/carry, respawn) against the player rb.
+  const sharkSeq = createSharkSequence({
+    scene,
+    camera,
+    waterHeight: () => track.water?.height ?? 0,
+    getBikePos: (out) => {
+      const rbh = RBHandleStore.get(playerEid)
+      const rb = rbh ? phys.world.getRigidBody(rbh.handle) : null
+      if (!rb) return null
+      const p = rb.translation()
+      return out.set(p.x, p.y, p.z)
+    },
+    onChomp: () => {
+      const rbh = RBHandleStore.get(playerEid)
+      const rb = rbh ? phys.world.getRigidBody(rbh.handle) : null
+      if (!rb) return
+      const v = rb.linvel()
+      ejectRider(sim, phys, playerEid, { x: v.x, y: v.y, z: v.z })
+      // Capture the bike — kinematic so it rides the shark's mouth cleanly
+      // (no physics fight) until the respawn restores it.
+      rb.setBodyType(phys.rapier.RigidBodyType.KinematicPositionBased, true)
+    },
+    carryBikeTo: (x, y, z) => {
+      const rbh = RBHandleStore.get(playerEid)
+      const rb = rbh ? phys.world.getRigidBody(rbh.handle) : null
+      if (rb) rb.setTranslation({ x, y, z }, true)
+    },
+    onComplete: () => {
+      if (sharkLethalKind === 'hit') respawnToLine()
+      const oob = OutOfBoundsStore.get(playerEid)
+      if (oob) resolveOob(oob)
+    },
+    audioCue: () => audio.explosion(),
+  })
+
+  function oobConfigNow(): OobConfig {
+    return {
+      enabled: oobEligible && playerSettings.outOfBounds !== 'off',
+      graceS: GRACE_PRESETS[playerSettings.oobGraceTimer],
+    }
+  }
+
+  function playerTouchedControls(i: Intent): boolean {
+    return (
+      Math.abs(i.throttle) > 0.15 ||
+      Math.abs(i.steer) > 0.15 ||
+      Math.abs(i.pitch) > 0.15 ||
+      i.brake > 0.15 ||
+      i.boost ||
+      i.fire ||
+      i.trickLeft ||
+      i.trickRight
+    )
+  }
+
+  // Engage/disengage the return-to-course autopilot from the player's OOB
+  // phase + raw intent. Reuses the existing test-mode seam: `setAutoPlay`
+  // flips the flag the sim step reads AND swaps the player's AITag.
+  function reconcileOobAutopilot(): void {
+    const oob = OutOfBoundsStore.get(playerEid)
+    const inDanger = !!oob && (oob.phase === 'warn' || oob.phase === 'brace')
+    if (!inDanger || control.isPausedForMenu() || finishShown) {
+      oobPlayerOverride = false
+      if (oobAutopilotActive) {
+        control.setAutoPlay(false)
+        oobAutopilotActive = false
+      }
+      return
+    }
+    if (playerTouchedControls(state.intent)) oobPlayerOverride = true
+    const shouldDrive = !oobPlayerOverride
+    if (shouldDrive && !oobAutopilotActive && !control.isAutoPlay()) {
+      control.setAutoPlay(true)
+      oobAutopilotActive = true
+    } else if (!shouldDrive && oobAutopilotActive) {
+      control.setAutoPlay(false)
+      oobAutopilotActive = false
+    }
+  }
+
+  // Snap the bike onto the nearest racing-line sample, facing along the line,
+  // and re-seat the rider. OOB respawn (vs. controls' respawn-to-start) so a
+  // mid-race rescue doesn't cost the whole lap of progress.
+  function respawnToLine(): void {
+    const leash = leashFor(track)
+    const rbh = RBHandleStore.get(playerEid)
+    if (!leash || !rbh) return
+    const rb = phys.world.getRigidBody(rbh.handle)
+    if (!rb) return
+    // Restore dynamics if the shark had captured the bike (kinematic).
+    if (rb.bodyType() !== phys.rapier.RigidBodyType.Dynamic) {
+      rb.setBodyType(phys.rapier.RigidBodyType.Dynamic, true)
+    }
+    const t = rb.translation()
+    const pts = leash.points
+    let best = Number.POSITIVE_INFINITY
+    let bi = 0
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i]!
+      const dx = p.x - t.x
+      const dz = p.z - t.z
+      const d = dx * dx + dz * dz
+      if (d < best) {
+        best = d
+        bi = i
+      }
+    }
+    const p = pts[bi]!
+    const nxt = pts[(bi + 1) % pts.length]!
+    // start.yaw convention: 0 = facing +Z, +π/2 = +X → atan2(dx, dz).
+    const yaw = Math.atan2(nxt.x - p.x, nxt.z - p.z)
+    const hy = yaw / 2
+    rb.setTranslation({ x: p.x, y: p.y + 1.5, z: p.z }, true)
+    rb.setRotation({ x: 0, y: Math.sin(hy), z: 0, w: Math.cos(hy) }, true)
+    rb.setLinvel({ x: 0, y: 0, z: 0 }, true)
+    rb.setAngvel({ x: 0, y: 0, z: 0 }, true)
+    resetRiderForBike(sim, phys, playerEid)
+  }
+
+  // Consume the one-shot lethal trigger. Phase 1: 'hit' snaps you back on
+  // course; 'nearmiss' lets you ride on (you recovered in time). Phase 2 swaps
+  // in the shark cutscene here. The forfeit already stands either way.
+  function handleOobLethal(): void {
+    const oob = OutOfBoundsStore.get(playerEid)
+    if (!oob || !oob.lethalTriggeredThisTick) return
+    oob.lethalTriggeredThisTick = false
+    if (playerSettings.outOfBounds === 'shark') {
+      // The great white takes over. Leave oob.phase === 'lethal' so the sim
+      // holds (the system no-ops, no re-trigger) until the sequence's
+      // onComplete respawns + resolves it.
+      sharkLethalKind = oob.lethalKind ?? 'hit'
+      const rbh = RBHandleStore.get(playerEid)
+      const rb = rbh ? phys.world.getRigidBody(rbh.handle) : null
+      const p = rb?.translation()
+      sharkSeq.start(sharkLethalKind, {
+        x: p?.x ?? 0,
+        y: p?.y ?? track.water?.height ?? 0,
+        z: p?.z ?? 0,
+      })
+    } else {
+      // Autopilot mode — quiet rescue, no shark.
+      if (oob.lethalKind === 'hit') respawnToLine()
+      resolveOob(oob)
+    }
+    if (oobAutopilotActive) {
+      control.setAutoPlay(false)
+      oobAutopilotActive = false
+    }
+    oobPlayerOverride = false
+  }
 
   // Per-frame audio dispatch needs to remember "what was true last tick" so
   // it can fire one-shots on transitions. Player slot for collect/fire
@@ -755,6 +934,12 @@ export function startGameLoop(opts: GameLoopOpts): void {
 
     state.intent = state.intentOverride ?? readPlayerIntent(dt)
 
+    // Reconcile the out-of-bounds autopilot BEFORE the accumulator so this
+    // frame's sim steps see the handoff. Reads last tick's OOB phase + this
+    // frame's raw player intent (the touch-to-resume hand-back signal).
+    reconcileOobAutopilot()
+    const oobCfg = oobConfigNow()
+
     physAccum += dt
     // Pause menu gates the sim in single-player. Reset the accumulator
     // so unpause doesn't trigger a burst of catch-up steps. Multiplayer
@@ -818,6 +1003,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
           autoPlay: control.isAutoPlay(),
           waveTimeScale: waterMesh.debug.getTimeScale(),
           runAI: iAmHost,
+          oob: oobCfg,
           ...(waveRiderSys ? { waveRiders: waveRiderSys } : {}),
         })
         // M10.11 — broadcast at 20 Hz. The send is gated on `net.ready &&
@@ -843,6 +1029,14 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // system reads TransformStore.
     const renderAlpha = physAccum / phys.fixedDt
     interpolateRenderTransforms(renderAlpha)
+
+    // Out-of-bounds — consume any lethal trigger (in shark mode this kicks off
+    // the breach; in autopilot mode it respawns / rides on), advance the
+    // breach animation, and drive the warning popup. The autopilot handoff was
+    // already reconciled at the top of the frame.
+    handleOobLethal()
+    sharkSeq.tick(dt)
+    oobHud.update(OutOfBoundsStore.get(playerEid), oobAutopilotActive)
 
     // Jitter telemetry — once per render frame, after interpolation: how
     // many steps ran, the leftover alpha, and the player's *actual rendered*
@@ -986,6 +1180,9 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // built with `deferStart: true`, so no physics state advances
     // during these shots.
     const introActive = raceIntro.isActive()
+    // The shark death-cam owns the camera during a 'hit' breach (same yield as
+    // the intro director). A near-miss leaves the chase cam running.
+    const sharkOwnsCamera = sharkSeq.ownsCamera()
     if (introActive) {
       ensureIntroSkipUi()
       // Push the chase cam's live first-tick goal to the director so the
@@ -1048,12 +1245,12 @@ export function startGameLoop(opts: GameLoopOpts): void {
           tmpPos.set(t.x, t.y, t.z)
           tmpQuat.set(q.x, q.y, q.z, q.w)
         }
-        if (!introActive) {
-          // Chase camera + camera-look only while the intro isn't
-          // owning the camera. Letting them run during the intro
-          // would lerp the chase pose against the director's pose
-          // every frame and produce a fight; suppressing them keeps
-          // the cinematic shots clean.
+        if (!introActive && !sharkOwnsCamera) {
+          // Chase camera + camera-look only while neither the intro nor the
+          // shark death-cam is owning the camera. Letting them run during a
+          // cutscene would lerp the chase pose against the director's pose
+          // every frame and produce a fight; suppressing them keeps the
+          // cinematic shots clean.
           const look = tickCameraLook(dt)
           lastLookMagnitude = Math.abs(look.yaw) + Math.abs(look.pitch)
           chase.setOrbit(look.yaw, look.pitch)
@@ -1622,6 +1819,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
             bestLapThisRace: lapState.bestLapThisRace,
             bestLapAllTime: lapState.bestLapAllTime,
             timeTrialMode: timeTrialMode === true,
+            forfeited: RacerStore.get(playerEid)?.forfeited ?? false,
           })
           onFinish()
         }
@@ -1648,6 +1846,9 @@ interface FinishOpts {
   bestLapThisRace: number | null
   bestLapAllTime: number | null
   timeTrialMode: boolean
+  /** Player left the course (crossed the OOB soft wall). Records a DNF and
+   *  skips ghost / leaderboard saves — the run no longer counts. */
+  forfeited: boolean
 }
 
 function showFinishScreen(opts: FinishOpts): void {
@@ -1666,7 +1867,10 @@ function showFinishScreen(opts: FinishOpts): void {
     bestLapThisRace,
     bestLapAllTime,
     timeTrialMode,
+    forfeited,
   } = opts
+  // A forfeited run is a DNF: no finish position, no ghost, no leaderboard.
+  const creditedPosition = forfeited ? null : meStandingPosition
 
   // Cup-mode book-keeping. Pull the live cup-progress (if any), record
   // this race's finish position into it, and re-read so the post-finish
@@ -1678,7 +1882,7 @@ function showFinishScreen(opts: FinishOpts): void {
       recordCupRaceFinish({
         cupId,
         trackId,
-        position: meStandingPosition,
+        position: creditedPosition,
         totalRacers: standings.length,
         raceTime: rs.raceTime,
       }) ?? cup
@@ -1689,20 +1893,34 @@ function showFinishScreen(opts: FinishOpts): void {
   const finishRibbon = document.getElementById('finish-ribbon')
   if (hud.finishPos) {
     // TT mode is solo — position is meaningless. Hide the row's value
-    // when it's just "1st" against no one.
-    hud.finishPos.textContent = timeTrialMode
-      ? '—'
-      : meStandingPosition !== null
-        ? ordinal(meStandingPosition)
-        : '—'
+    // when it's just "1st" against no one. Forfeit reads DNF.
+    hud.finishPos.textContent = forfeited
+      ? 'DNF'
+      : timeTrialMode
+        ? '—'
+        : meStandingPosition !== null
+          ? ordinal(meStandingPosition)
+          : '—'
   }
   if (hud.finishTime) hud.finishTime.textContent = formatTime(rs.raceTime)
-  const wonRace = meStandingPosition === 1
+  const wonRace = !forfeited && meStandingPosition === 1
   if (hud.finishTitle) {
-    hud.finishTitle.textContent = timeTrialMode ? 'TIME TRIAL' : wonRace ? 'CHAMPION' : 'FINAL'
+    hud.finishTitle.textContent = forfeited
+      ? 'DNF'
+      : timeTrialMode
+        ? 'TIME TRIAL'
+        : wonRace
+          ? 'CHAMPION'
+          : 'FINAL'
   }
   if (finishRibbon) {
-    finishRibbon.textContent = timeTrialMode ? 'CLOCK' : wonRace ? 'WINNER' : 'FINAL'
+    finishRibbon.textContent = forfeited
+      ? 'OUT'
+      : timeTrialMode
+        ? 'CLOCK'
+        : wonRace
+          ? 'WINNER'
+          : 'FINAL'
   }
   if (hud.finishSub) {
     hud.finishSub.textContent = `${track.name.toUpperCase()} · ${playerVariant.name.toUpperCase()}`
@@ -1718,11 +1936,12 @@ function showFinishScreen(opts: FinishOpts): void {
         trackName: track.name,
         bikeId: playerVariant.id,
         bikeName: playerVariant.name,
-        position: meStandingPosition,
+        position: creditedPosition,
         totalRacers: standings.length,
         time: rs.raceTime,
         bestLap: bestLapThisRace,
         wonRace,
+        forfeited,
         finishedAt: Date.now(),
       }),
     )
@@ -1741,7 +1960,7 @@ function showFinishScreen(opts: FinishOpts): void {
   let ttBestLapForBoard: number | null = null
   if (recorder) {
     const replay = recorder.finalize({
-      finishPosition: meStandingPosition,
+      finishPosition: creditedPosition,
       finishTime: rs.raceTime,
       bestLap: bestLapThisRace,
     })
@@ -1752,7 +1971,9 @@ function showFinishScreen(opts: FinishOpts): void {
     // ghost matches Wave Race / F-Zero TT convention. The leaderboard
     // banner renderer below picks this up via `ttBestLapForBoard` and
     // drives the local-cache write + remote submit lifecycle.
-    if (timeTrialMode) {
+    // A forfeited TT run never becomes a ghost or a submitted lap, even if
+    // the raw lap was fast — you left the course.
+    if (timeTrialMode && !forfeited) {
       const slice = sliceBestLap(replay, 0)
       if (slice) {
         const existing = getGhostBestLap({ trackId, bikeId: playerVariant.id })

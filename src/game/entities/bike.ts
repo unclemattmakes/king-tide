@@ -237,6 +237,7 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
       checkpointsCrossed: 0,
       finished: false,
       raceTime: 0,
+      forfeited: false,
     })
   }
 
