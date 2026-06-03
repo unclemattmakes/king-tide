@@ -15,9 +15,7 @@
       "smooth": false,
       "mat_family": "prop",
       "catalog": "Open Sea",
-      "sources": [
-        "decrepit fishing vessel - private boater variant"
-      ],
+      "sources": ["decrepit fishing vessel - private boater variant"],
       "seed": 31001,
       "approved": true,
       "concept": "concept-art\\props\\wrecks\\fishing_boat_private.png",
@@ -39,9 +37,7 @@
       "smooth": false,
       "mat_family": "prop",
       "catalog": "Open Sea",
-      "sources": [
-        "decrepit fishing vessel - commercial trawler variant"
-      ],
+      "sources": ["decrepit fishing vessel - commercial trawler variant"],
       "seed": 31011,
       "approved": true,
       "concept": "concept-art\\props\\wrecks\\fishing_boat_trawler.png",
@@ -63,9 +59,7 @@
       "smooth": false,
       "mat_family": "prop",
       "catalog": "Open Sea",
-      "sources": [
-        "old broken-down sailboat - mast only, no sail"
-      ],
+      "sources": ["old broken-down sailboat - mast only, no sail"],
       "seed": 31024,
       "approved": true,
       "concept": "concept-art\\props\\wrecks\\sailboat_bare_mast.png",
@@ -90,9 +84,7 @@
       "smooth": false,
       "mat_family": "prop",
       "catalog": "Open Sea",
-      "sources": [
-        "old broken-down sea plane"
-      ],
+      "sources": ["old broken-down sea plane"],
       "seed": 31032,
       "approved": true,
       "concept": "concept-art\\props\\wrecks\\sea_plane_wreck.png",
