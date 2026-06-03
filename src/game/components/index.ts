@@ -40,7 +40,31 @@ export type TransformData = {
   qz: number
   qw: number
 }
+/**
+ * The pose every render system reads. Written by `syncFromPhysics` each
+ * fixed step (the committed physics pose) and then OVERWRITTEN once per
+ * render frame by `interpolateRenderTransforms` with the smoothed pose
+ * (see TickTransformStore). Keeping this the single render-read store means
+ * the bike mesh, rider bones, shield, wave-riders and every bike-attached
+ * FX emitter render interpolated without per-system changes.
+ */
 export const TransformStore = createStore<TransformData>('Transform')
+
+/**
+ * Latest committed fixed-step pose ("cur"), and the one before it ("prev"),
+ * maintained by `syncFromPhysics`: before stamping the new pose it shifts
+ * the old `TickTransformStore` value into `PrevTickTransformStore`. After
+ * the accumulator loop drains, these bracket the render time, and
+ * `interpolateRenderTransforms` lerps/slerps between them by the leftover
+ * accumulator fraction (`physAccum / fixedDt`) into `TransformStore`, so the
+ * fixed 60 Hz sim renders smoothly at any refresh rate.
+ *
+ * Render-only: no tags, nothing queries them, and the determinism snapshot
+ * reads Rapier bodies rather than stores (`engine/sim/snapshot.ts`), so they
+ * carry no sim / replay / determinism obligations.
+ */
+export const TickTransformStore = createStore<TransformData>('TickTransform')
+export const PrevTickTransformStore = createStore<TransformData>('PrevTickTransform')
 
 export const RBHandle = { name: 'RBHandle' as const }
 export type RBHandleData = { handle: number }

@@ -1,5 +1,6 @@
 import { addComponent, hasComponent, query } from 'bitecs'
 import { emptyIntent, type Intent, snapshotGamepads } from './engine/input'
+import type { JitterSummary } from './engine/jitter-telemetry'
 import type { PerfStats } from './engine/perf-recorder'
 import { playerSettings } from './engine/player-settings'
 import {
@@ -125,6 +126,15 @@ export type HoverDebug = {
    *  Lets the e2e harness and Claude debug sessions read the rolling
    *  frame-time window without poking at the HUD DOM directly. */
   perf?: PerfDebugApi
+  /** Jitter telemetry summary — present only when `?jitter=1` was set at
+   *  boot (attached independently of the dev/test gate, like the
+   *  determinism harness, so it works on a prod build too). Quantifies the
+   *  fixed-step sim vs variable render-frame cadence + the player body's
+   *  per-tick vs per-frame motion smoothness, turning "the bike looks
+   *  jittery" into numbers. Also mirrored on `window.__hoverJitter` so a
+   *  prod build with no `__hover` surface can still read it. See
+   *  engine/jitter-telemetry + the wiring in boot/game-loop. */
+  jitter?: () => JitterSummary
   /** Step 8 QA bridge — console-error trap + bug-repro bundle. Attached
    *  in dev / test mode in `installDebugApi`. Production bundles ship
    *  with no `qa` surface; the trap itself stays silent. */
@@ -286,6 +296,10 @@ export type DebugAccessors = {
 declare global {
   interface Window {
     __hover?: HoverDebug
+    /** Jitter telemetry summary accessor. Attached by the game loop when
+     *  `?jitter=1` is set, independent of the `__hover` dev/test gate so
+     *  it's reachable on prod builds. See engine/jitter-telemetry. */
+    __hoverJitter?: () => JitterSummary
   }
 }
 

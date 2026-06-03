@@ -32,6 +32,7 @@ import {
 } from '@/engine/cup-progress'
 import { type Intent, inputSourceLabel, readPlayerIntent } from '@/engine/input'
 import { tickCameraLook } from '@/engine/input/camera-look'
+import { createJitterTelemetry } from '@/engine/jitter-telemetry'
 import { buildTrackList, nextTrackId } from '@/engine/menus/catalog'
 import {
   decodeInputFrameFrom,
@@ -99,6 +100,7 @@ import {
   DriftStateStore,
   HoverStateStore,
   RBHandleStore,
+  TransformStore,
   TrickStateStore,
 } from '@/game/components'
 import {
@@ -117,6 +119,7 @@ import { simulateStep } from '@/game/sim-step'
 import { chargeBoostMeter } from '@/game/systems/boost-meter'
 import type { GhostRunner } from '@/game/systems/ghost-runner'
 import { TUCK_SWEET_SPOT, tuckFactor } from '@/game/systems/hover'
+import { interpolateRenderTransforms } from '@/game/systems/interpolate-transforms'
 import { getHeldPickup } from '@/game/systems/pickup'
 import { tickRemoteInterp } from '@/game/systems/remote-interp'
 import { computeStandings } from '@/game/systems/standings'
@@ -610,6 +613,27 @@ export function startGameLoop(opts: GameLoopOpts): void {
     },
   })
 
+  // Jitter telemetry — opt-in via `?jitter=1`. Quantifies the fixed-step
+  // sim vs variable render-frame mismatch (steps-per-frame histogram +
+  // the interpolation alpha currently discarded each frame) and the
+  // player body's per-tick vs per-frame motion smoothness, so "the bike
+  // looks jittery" becomes a measured number rather than a vibe. Off by
+  // default → zero hot-path cost; when on it adds one player rigid-body
+  // read per sim tick + a periodic console summary. Reachable from
+  // `window.__hoverJitter()` (prod-safe, like the determinism harness)
+  // and `window.__hover.jitter()` in dev/test.
+  const jitterOn =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('jitter')
+  const jitter = jitterOn ? createJitterTelemetry(phys.fixedDt * 1000) : null
+  let lastJitterLogAt = last
+  if (jitter && typeof window !== 'undefined') {
+    window.__hoverJitter = () => jitter.summary()
+    if (window.__hover) window.__hover.jitter = () => jitter.summary()
+    console.info(
+      '[jitter] telemetry on (?jitter=1). window.__hoverJitter() for a live summary; logging every 2s.',
+    )
+  }
+
   // M10.4 — wire-encoded input round-trip. simTick is the monotonic count
   // of fixed-step sim ticks driven by simulateStep; it lines up across
   // peers in lockstep multiplayer because both sides advance one tick per
@@ -742,6 +766,12 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // manually via __hover.determinism.run(). physAccum keeps draining so
     // we don't spike on unpause.
     const net = multiplayer.room
+    // Jitter telemetry — count the sim steps this render frame and resolve
+    // the player body once so the per-tick / per-frame reads below are a
+    // single handle lookup. Both are no-ops unless `?jitter=1` is set.
+    let stepsThisFrame = 0
+    const jitterHandle = jitter ? RBHandleStore.get(playerEid) : null
+    const jitterRb = jitterHandle ? phys.world.getRigidBody(jitterHandle.handle) : null
     while (physAccum >= phys.fixedDt) {
       if (!control.isDeterminismPaused()) {
         // M10.4 — drive the sim from a wire-encoded InputFrame even in
@@ -795,8 +825,45 @@ export function startGameLoop(opts: GameLoopOpts): void {
         // outside a room.
         if (simTick % SNAPSHOT_TICKS === 0) multiplayer.buildAndSendSnapshot(simTick, iAmHost)
         simTick++
+        stepsThisFrame++
+        // Per-tick player pose → sim-side motion smoothness + hover-ring
+        // detector. Reads the body *after* this step committed.
+        if (jitter && jitterRb) {
+          const tp = jitterRb.translation()
+          jitter.recordTick(tp.x, tp.y, tp.z)
+        }
       }
       physAccum -= phys.fixedDt
+    }
+
+    // Render interpolation — write each physics body's render pose to the
+    // point `renderAlpha` of the way between its last two committed ticks,
+    // so the fixed 60 Hz sim renders smoothly at the variable refresh rate.
+    // Runs after the accumulator drains and before the camera + any render
+    // system reads TransformStore.
+    const renderAlpha = physAccum / phys.fixedDt
+    interpolateRenderTransforms(renderAlpha)
+
+    // Jitter telemetry — once per render frame, after interpolation: how
+    // many steps ran, the leftover alpha, and the player's *actual rendered*
+    // (interpolated) pose, so the render-jerk number reflects what's on
+    // screen. Periodic console summary so `?jitter=1` is readable without
+    // devtools.
+    if (jitter && jitterRb) {
+      const rp = TransformStore.get(playerEid) ?? jitterRb.translation()
+      jitter.recordFrame(dt * 1000, stepsThisFrame, renderAlpha, rp.x, rp.y, rp.z)
+      if (now - lastJitterLogAt >= 2000) {
+        lastJitterLogAt = now
+        const s = jitter.summary()
+        console.info(
+          `[jitter] render ${s.renderHz.toFixed(0)}Hz / sim ${s.simHz.toFixed(0)}Hz | ` +
+            `steps/frame ${s.meanStepsPerFrame.toFixed(2)} ` +
+            `(froze ${(s.zeroStepFrac * 100).toFixed(0)}%, ≥2 ${(s.multiStepFrac * 100).toFixed(0)}%) | ` +
+            `alpha discarded ${(s.meanAlpha * 100).toFixed(0)}% | ` +
+            `jerk render ${s.renderJerkMean.toFixed(4)}m vs sim ${s.simJerkMean.toFixed(4)}m | ` +
+            `vReversals ${s.vertReversalsPerSec.toFixed(1)}/s\n         ${s.verdict}`,
+        )
+      }
     }
 
     // Replay capture. The recorder rate-limits internally (default 30Hz),
@@ -965,11 +1032,22 @@ export function startGameLoop(opts: GameLoopOpts): void {
     if (rbHandle && hover) {
       const playerRb = phys.world.getRigidBody(rbHandle.handle)
       if (playerRb) {
-        const t = playerRb.translation()
         const v = playerRb.linvel()
-        const q = playerRb.rotation()
-        tmpPos.set(t.x, t.y, t.z)
-        tmpQuat.set(q.x, q.y, q.z, q.w)
+        // Camera + direction arrow + HUD follow the player's interpolated
+        // render pose (TransformStore was smoothed by
+        // `interpolateRenderTransforms` above) so they share the bike's
+        // render clock — no camera-vs-bike shimmer. Velocity stays from the
+        // rigid body; it needs no interpolation.
+        const rt = TransformStore.get(playerEid)
+        if (rt) {
+          tmpPos.set(rt.x, rt.y, rt.z)
+          tmpQuat.set(rt.qx, rt.qy, rt.qz, rt.qw)
+        } else {
+          const t = playerRb.translation()
+          const q = playerRb.rotation()
+          tmpPos.set(t.x, t.y, t.z)
+          tmpQuat.set(q.x, q.y, q.z, q.w)
+        }
         if (!introActive) {
           // Chase camera + camera-look only while the intro isn't
           // owning the camera. Letting them run during the intro
@@ -995,7 +1073,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
         }
         state.playerSnapshot = {
           eid: playerEid,
-          position: { x: t.x, y: t.y, z: t.z },
+          position: { x: tmpPos.x, y: tmpPos.y, z: tmpPos.z },
           velocity: { x: v.x, y: v.y, z: v.z },
           groundDistance: hover.groundDistance,
           isGrounded: hover.isGrounded,
@@ -1430,11 +1508,10 @@ export function startGameLoop(opts: GameLoopOpts): void {
 
       hudBikes.length = 0
       for (const s of standings) {
-        const handle = RBHandleStore.get(s.eid)
-        if (!handle) continue
-        const rb = phys.world.getRigidBody(handle.handle)
-        if (!rb) continue
-        const t = rb.translation()
+        // Interpolated render pose (smoothed above) — keeps minimap dots on
+        // the same clock as the bikes and skips a per-bike WASM body read.
+        const t = TransformStore.get(s.eid)
+        if (!t) continue
         let dot = hudBikePool[hudBikes.length]
         if (!dot) {
           dot = { x: 0, z: 0, isPlayer: false, isLeader: false }

@@ -22,8 +22,10 @@ import {
   PeerControlled,
   PeerControlledStore,
   PlayerTag,
+  PrevTickTransformStore,
   RBHandle,
   RBHandleStore,
+  TickTransformStore,
   Transform,
   TransformStore,
   TrickState,
@@ -93,6 +95,12 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
       qz: startQuat.z,
       qw: startQuat.w,
     })
+    // Render-only ghost: no RigidBody, so `syncFromPhysics` never touches it
+    // and the ghost-runner drives its Transform each frame. Drop any stale
+    // tick history (recycled entity slot) so the interpolation pass — which
+    // keys off tick history — leaves the ghost's direct writes alone.
+    TickTransformStore.delete(eid)
+    PrevTickTransformStore.delete(eid)
     addComponent(sim, eid, BikeStats)
     BikeStatsStore.set(eid, stats)
     return eid
@@ -129,7 +137,7 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
   addComponent(sim, eid, RBHandle)
   RBHandleStore.set(eid, { handle: rb.handle })
   addComponent(sim, eid, Transform)
-  TransformStore.set(eid, {
+  const spawnPose = {
     x: opts.position.x,
     y: opts.position.y,
     z: opts.position.z,
@@ -137,7 +145,14 @@ export function createBike(sim: SimWorld, phys: PhysicsWorld, opts: CreateBikeOp
     qy: startQuat.y,
     qz: startQuat.z,
     qw: startQuat.w,
-  })
+  }
+  TransformStore.set(eid, { ...spawnPose })
+  // Seed the render-interpolation tick history at the spawn pose so the
+  // first rendered frame shows the bike parked at spawn rather than smearing
+  // from a recycled entity slot's stale pose. `syncFromPhysics` takes over
+  // once the sim starts stepping.
+  TickTransformStore.set(eid, { ...spawnPose })
+  PrevTickTransformStore.set(eid, { ...spawnPose })
   addComponent(sim, eid, BikeStats)
   BikeStatsStore.set(eid, stats)
   addComponent(sim, eid, ControlIntent)
