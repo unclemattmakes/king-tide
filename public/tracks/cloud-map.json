@@ -1,0 +1,62 @@
+{
+  "id": "cloud-map",
+  "name": "Cloud Map",
+  "lapsToFinish": 1,
+  "water": {
+    "height": 0.0,
+    "waveHeight": 0.4,
+    "waveFreq": 0.25
+  },
+  "sky": {
+    "tint": "#ffffff",
+    "cloudiness": 0.18,
+    "cloudTowering": 0.1,
+    "sunIntensity": 1.05,
+    "sunSize": 1.4,
+    "timeOfDay": 80.0,
+    "fogNear": 800.0,
+    "fogFar": 3500.0,
+    "colorGrade": "neutral",
+    "toneMapping": "aces_filmic",
+    "bloom": 0.25,
+    "seaStateBeaufort": 2,
+    "clouds": {
+      "count": 32,
+      "altitude": 320.0,
+      "altitudeJitter": 70.0,
+      "spreadRadius": 1100.0,
+      "scaleRange": [60.0, 140.0],
+      "variants": 4,
+      "wind": { "x": 6.0, "z": 1.5 },
+      "seed": 1337
+    }
+  },
+  "start": {
+    "position": { "x": 0.0, "y": 6.0, "z": 40.0 },
+    "yaw": 3.14159
+  },
+  "checkpoints": [
+    {
+      "index": 0,
+      "position": { "x": 0.0, "y": 4.0, "z": -40.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
+      "halfWidth": 16.0,
+      "height": 8.0
+    }
+  ],
+  "aiSplines": [
+    {
+      "id": "main",
+      "points": [],
+      "anchors": [
+        { "x": 0.0, "y": 1.0, "z": 40.0 },
+        { "x": 40.0, "y": 1.0, "z": 0.0 },
+        { "x": 0.0, "y": 1.0, "z": -40.0 },
+        { "x": -40.0, "y": 1.0, "z": 0.0 }
+      ]
+    }
+  ],
+  "pickupSpawns": [],
+  "boostPads": [],
+  "props": []
+}

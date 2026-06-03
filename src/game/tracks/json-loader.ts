@@ -7,6 +7,7 @@ import {
   type AudioConfig,
   type BoostPad,
   type Checkpoint,
+  type CloudFieldConfig,
   type HorizonConfig,
   type LapWeather,
   type Prop,
@@ -733,6 +734,94 @@ function readOptionalHorizon(raw: unknown): HorizonConfig | null {
   return out
 }
 
+/**
+ * Validate an optional `sky.clouds` hero-cumulus field block. All fields are
+ * optional; absent → returns null (no hero clouds). See {@link CloudFieldConfig}
+ * and `engine/render/clouds.ts`.
+ */
+function readOptionalCloudField(raw: unknown): CloudFieldConfig | null {
+  if (raw === undefined || raw === null) return null
+  if (!isObject(raw)) throw new Error('track-json: sky.clouds must be an object if present')
+  const out: CloudFieldConfig = {}
+  for (const key of [
+    'count',
+    'altitude',
+    'altitudeJitter',
+    'spreadRadius',
+    'variants',
+    'sunPop',
+    'seed',
+  ] as const) {
+    if (key in raw) {
+      const v = raw[key]
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new Error(`track-json: sky.clouds.${key} must be a finite number if present`)
+      }
+      out[key] = v
+    }
+  }
+  if (out.count !== undefined && out.count < 0) {
+    throw new Error(`track-json: sky.clouds.count must be >= 0 (got ${out.count})`)
+  }
+  if (out.sunPop !== undefined && (out.sunPop < 0 || out.sunPop > 1)) {
+    throw new Error(`track-json: sky.clouds.sunPop must be in [0,1] (got ${out.sunPop})`)
+  }
+  if (out.variants !== undefined && out.variants < 1) {
+    throw new Error(`track-json: sky.clouds.variants must be >= 1 (got ${out.variants})`)
+  }
+  if (out.spreadRadius !== undefined && !(out.spreadRadius > 0)) {
+    throw new Error(`track-json: sky.clouds.spreadRadius must be > 0 (got ${out.spreadRadius})`)
+  }
+  if (out.altitudeJitter !== undefined && out.altitudeJitter < 0) {
+    throw new Error(
+      `track-json: sky.clouds.altitudeJitter must be >= 0 (got ${out.altitudeJitter})`,
+    )
+  }
+  if ('scaleRange' in raw) {
+    const v = raw.scaleRange
+    if (
+      !Array.isArray(v) ||
+      v.length !== 2 ||
+      v.some((n) => typeof n !== 'number' || !Number.isFinite(n))
+    ) {
+      throw new Error(
+        'track-json: sky.clouds.scaleRange must be a 2-element number array [min,max]',
+      )
+    }
+    const a = v[0] as number
+    const b = v[1] as number
+    if (!(a > 0) || !(b >= a)) {
+      throw new Error(
+        `track-json: sky.clouds.scaleRange must be [min>0, max>=min] (got [${a}, ${b}])`,
+      )
+    }
+    out.scaleRange = [a, b]
+  }
+  if ('wind' in raw) {
+    const v = raw.wind
+    if (
+      !isObject(v) ||
+      typeof v.x !== 'number' ||
+      typeof v.z !== 'number' ||
+      !Number.isFinite(v.x) ||
+      !Number.isFinite(v.z)
+    ) {
+      throw new Error('track-json: sky.clouds.wind must be { x: number, z: number }')
+    }
+    out.wind = { x: v.x, z: v.z }
+  }
+  for (const key of ['coolBase', 'warmTop'] as const) {
+    if (key in raw) {
+      const v = raw[key]
+      if (typeof v !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(v)) {
+        throw new Error(`track-json: sky.clouds.${key} must be a 6-digit hex color`)
+      }
+      out[key] = v
+    }
+  }
+  return out
+}
+
 function readOptionalSky(raw: unknown): SkyConfig | null {
   if (raw === undefined || raw === null) return null
   if (!isObject(raw)) throw new Error('track-json: sky must be an object if present')
@@ -814,6 +903,8 @@ function readOptionalSky(raw: unknown): SkyConfig | null {
     }
     out.toneMapping = v as SkyToneMapping
   }
+  const clouds = readOptionalCloudField(raw.clouds)
+  if (clouds) out.clouds = clouds
   return out
 }
 
