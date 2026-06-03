@@ -38,6 +38,30 @@ export type TerrainHeightmap = {
 const DEEP_SENTINEL = -10000
 
 /**
+ * Overhang cull height (metres above the water surface). Terrain triangles
+ * whose LOWEST vertex sits more than this far above the water are treated as
+ * overhangs/ceilings — arch spans, cave roofs, the underside of a toppled
+ * building — NOT as shoals, and are skipped when building the heightmap.
+ *
+ * Why: the heightmap stores the max terrain Y per XZ cell, and the water
+ * shader flattens waves toward zero as `(waterY − terrainY)` → 0 (shoaling,
+ * see `water.ts`). Without this cull, a rock arch baked as collidable
+ * (`kind=track`) geometry writes its +25 m span into the cells under the
+ * *opening*, so the wave goes dead-flat exactly where you race through it —
+ * killing the Maw's wave-launch set-piece. Culling geometry that's well above
+ * the surface keeps the water live under any ceiling while the legs / bases /
+ * cliffs that actually cross the waterline still shoal + foam normally.
+ *
+ * Principled, not a hack: only rock within a short band of the surface can
+ * affect that surface. Geometry far above the water never influenced shoaling
+ * anyway (its depth was already deeply negative), so existing tracks are
+ * unaffected. (A genuine *low* ceiling — a flooded interior under ~6 m of
+ * headroom — would still flatten; that needs a two-layer floor/ceiling
+ * heightmap, out of scope here.)
+ */
+export const CEILING_OVERHANG_CAP = 6
+
+/**
  * Build a heightmap by rasterizing all terrain triangles in the given roots.
  * Each root's `matrixWorld` is read directly (callers should ensure parents
  * have been added to the scene + updated, or pass already-world-baked
@@ -65,6 +89,10 @@ export function buildTerrainHeightmap(
   const resolution = TERRAIN_HEIGHTMAP_RESOLUTION
   const padding = opts?.padding ?? 8
   const waterLevel = opts?.waterLevel ?? 0
+  // Geometry whose lowest point is above this is an overhang/ceiling, not a
+  // shoal — skipped so the water stays live under arches / caves. See
+  // CEILING_OVERHANG_CAP.
+  const ceilingY = waterLevel + CEILING_OVERHANG_CAP
 
   const va = new THREE.Vector3()
   const vb = new THREE.Vector3()
@@ -107,6 +135,12 @@ export function buildTerrainHeightmap(
         va.fromBufferAttribute(posAttr, ai).applyMatrix4(mw)
         vb.fromBufferAttribute(posAttr, bi).applyMatrix4(mw)
         vc.fromBufferAttribute(posAttr, ci).applyMatrix4(mw)
+        // Overhang/ceiling cull: a triangle entirely above the water band is
+        // not a shoal (arch span, cave roof). Skip it — including from the
+        // bounds — so the cell under an opening reads as open water and the
+        // wave swings free instead of flattening. Legs/bases that cross the
+        // waterline have a vertex below the cap, so they're kept.
+        if (Math.min(va.y, vb.y, vc.y) > ceilingY) continue
         tris.push({
           ax: va.x,
           az: va.z,

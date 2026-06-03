@@ -56,6 +56,7 @@ import { createRiderRenderSystem } from './engine/render/rider-systems'
 import { createScene } from './engine/render/scene'
 import { beaufortToAmplitudeScale, createSkySystem } from './engine/render/sky'
 import { createStartLights } from './engine/render/start-lights'
+import { createSurgeSprayDriver, type SurgeSprayDriver } from './engine/render/surge-spray'
 import { sampleTerrainHeightAtXZ } from './engine/render/terrain-heightmap'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { createWaterMesh } from './engine/render/water'
@@ -938,6 +939,7 @@ async function boot() {
   // ``src/engine/render/particle-system.ts``.
   let particleSystem: ParticleSystem | null = null
   let particleTick: (dt: number) => void = () => {}
+  let surgeSpray: SurgeSprayDriver | null = null
   if (!editMode && environmentGlbRoot) {
     try {
       const atlasTex = await loadParticleAtlas('/assets/fx/particle-atlas.png')
@@ -947,7 +949,40 @@ async function boot() {
         // eslint-disable-next-line no-console
         console.info(`[boot] registered ${registered.length} particle emitter(s)`)
       }
-      particleTick = (dt: number) => particleSystem?.tick(dt)
+      // Surge-triggered spray: wave zones carrying a periodic surge (the Maw's
+      // timed launch wave) burst the water-spray emitters (atlas cell 9) sitting
+      // inside them on each surge peak, so the crown/breaker spray fires harder
+      // on the big swell. See engine/render/surge-spray.ts.
+      const SPRAY_ATLAS_CELL = 9
+      const surgeZones = (track.waveZones ?? [])
+        .filter((z) => (z.surgePeriodS ?? 0) > 0 && (z.surgeAmplitude ?? 0) > 0)
+        .map((z) => ({
+          x: z.position.x,
+          z: z.position.z,
+          radius: Math.max(z.halfWidth, z.halfDepth) + (z.blendRadiusM ?? 0),
+          periodS: z.surgePeriodS as number,
+          amplitude: z.surgeAmplitude as number,
+        }))
+      if (surgeZones.length > 0) {
+        const sprayEmitters = registered
+          .filter((c) => c.atlasCell === SPRAY_ATLAS_CELL)
+          .map((c) => {
+            const o = particleSystem?.getEmitter(c.name)?.origin
+            return o ? { name: c.name, x: o.x, z: o.z } : null
+          })
+          .filter((e): e is { name: string; x: number; z: number } => e !== null)
+        if (sprayEmitters.length > 0) {
+          surgeSpray = createSurgeSprayDriver({
+            zones: surgeZones,
+            emitters: sprayEmitters,
+            triggerBurst: (name, count) => particleSystem?.triggerBurst(name, count),
+          })
+        }
+      }
+      particleTick = (dt: number) => {
+        particleSystem?.tick(dt)
+        surgeSpray?.tick(waveField.time)
+      }
     } catch (err) {
       // Atlas missing or load failed — particle emitters stay dormant.
       // eslint-disable-next-line no-console

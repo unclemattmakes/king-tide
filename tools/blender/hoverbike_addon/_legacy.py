@@ -386,24 +386,37 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         if kind:
             by_kind[kind].append(obj)
 
+    # The racing-line spline drives gate + start FACING in both branches
+    # below, so authors never have to get the empty's rotation convention
+    # right (a frequent footgun — the gizmo's forward arrow and the export's
+    # +Y-forward read disagree).
+    main_spline = next(
+        (o for o in by_kind.get("ai_spline", []) if o.name == "ai_spline_main"),
+        None,
+    )
     cps = sorted(by_kind.get("checkpoint", []), key=lambda o: o.name)
     checkpoints: list[dict[str, Any]] = []
     if cps:
-        # "Blender wins" mode — the author dropped cp_NN empties by hand.
-        # Their positions and rotations override anything we could derive
-        # from the spline. Useful when an author wants a specific gate
-        # placement (e.g. just past a jump where arc length doesn't land
-        # the gate where they want).
+        # Hybrid mode — author-placed cp_NN empties fix the gate POSITIONS;
+        # rotation is derived from the racing-line tangent at each gate so it
+        # always faces the way you race through. (Set a `manual_yaw=True`
+        # custom prop on the empty to override with its own Z-euler instead.)
         for i, cp in enumerate(cps):
             loc = cp.matrix_world.translation
-            # Build a runtime quaternion from the gate's Blender Z-euler so
-            # the gate's "forward" axis (cp.rotation · +Z in the runtime
-            # frame) matches the racing-line tangent the author set up.
-            # Without this, every template-authored checkpoint defaulted to
-            # facing three.js +Z (= Blender -Y, south) and the AI couldn't
-            # cross any gate whose tangent had a non-south component —
-            # i.e., every east/west-running stretch.
-            yaw = _blender_yaw_to_three_yaw(_yaw_from_z_euler(cp))
+            # Face the gate down the spline tangent at its position. Runtime
+            # gate forward is `cp.rotation · +Z` (race.ts) — the same formula
+            # the spline-wins branch uses, so both paths agree.
+            tangent = (
+                None
+                if cp.get("manual_yaw")
+                else _spline_tangent_at_xy(main_spline, loc.x, loc.y)
+            )
+            if tangent is not None:
+                yaw = _blender_yaw_to_three_yaw(
+                    math.atan2(tangent[1], tangent[0]) - math.pi / 2.0
+                )
+            else:
+                yaw = _blender_yaw_to_three_yaw(_yaw_from_z_euler(cp))
             half = 0.5 * yaw
             checkpoints.append(
                 {
@@ -486,7 +499,19 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
         s0 = starts[0]
         s_loc = s0.matrix_world.translation
         start_pos = _b2t(s_loc.x, s_loc.y, s_loc.z)
-        start_yaw = _yaw_from_z_euler(s0)
+        # Start faces the racing line too (same derivation + `manual_yaw`
+        # opt-out as gates) so the bike spawns pointing the way it races.
+        s_tangent = (
+            None
+            if s0.get("manual_yaw")
+            else _spline_tangent_at_xy(main_spline, s_loc.x, s_loc.y)
+        )
+        if s_tangent is not None:
+            start_yaw = _blender_yaw_to_three_yaw(
+                math.atan2(s_tangent[1], s_tangent[0]) - math.pi / 2.0
+            )
+        else:
+            start_yaw = _yaw_from_z_euler(s0)
     else:
         start_pos = {"x": 0.0, "y": 0.5, "z": 0.0}
         start_yaw = 0.0
@@ -1024,7 +1049,19 @@ def _merge_export_json(derived: dict, existing: dict | None) -> dict:
     merged = dict(existing)
     for key in BLENDER_OWNED_JSON_KEYS:
         if key in derived:
-            merged[key] = derived[key]
+            existing_val = merged.get(key)
+            derived_val = derived[key]
+            if isinstance(existing_val, dict) and isinstance(derived_val, dict):
+                # Merge dict-valued fields per-subkey so settings the addon
+                # doesn't author survive a re-export. Notably `sky.clouds`
+                # (the hero-cumulus field added after the addon's sky derive
+                # — see engine/render/clouds.ts); without this, every export
+                # would silently strip it. Derived wins per subkey; existing
+                # subkeys the derive doesn't set (clouds, and any future
+                # unknown field) carry through.
+                merged[key] = {**existing_val, **derived_val}
+            else:
+                merged[key] = derived_val
         elif key in merged and key not in derived:
             # If derive_track_json deliberately omits a key (e.g. no
             # terrainShader scene props) we keep whatever the JSON had.
@@ -1323,6 +1360,30 @@ def _sample_curve_to_polyline(curve_obj: bpy.types.Object) -> list[tuple[float, 
         return [tuple(mw @ v.co) for v in mesh.vertices]
     finally:
         curve_obj.to_mesh_clear()
+
+
+def _spline_tangent_at_xy(
+    main_spline: bpy.types.Object | None, px: float, py: float
+) -> tuple[float, float] | None:
+    """Unit Blender-XY tangent of ``ai_spline_main`` at the polyline sample
+    nearest ``(px, py)``. Lets the exporter face gates / starts down the
+    racing line from their position alone — no dependence on the empty's own
+    rotation, so the manual euler convention can't be set wrong. Returns
+    ``None`` if the spline is missing / too short / degenerate there."""
+    if main_spline is None or main_spline.type != "CURVE":
+        return None
+    pts = _sample_curve_to_polyline(main_spline)
+    n = len(pts)
+    if n < 2:
+        return None
+    bi = min(range(n), key=lambda i: (pts[i][0] - px) ** 2 + (pts[i][1] - py) ** 2)
+    a = pts[(bi - 2) % n]
+    b = pts[(bi + 2) % n]
+    tx, ty = b[0] - a[0], b[1] - a[1]
+    m = math.hypot(tx, ty)
+    if m < 1e-6:
+        return None
+    return tx / m, ty / m
 
 
 def _spline_iter_points(curve_obj: bpy.types.Object):

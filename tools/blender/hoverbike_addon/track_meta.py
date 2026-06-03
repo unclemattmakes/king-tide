@@ -146,16 +146,26 @@ _OBSTACLE_NAME_EXCLUDES = (
                       # but the racing line is by design *inside* the
                       # ring. Authors who need a non-ring collider
                       # named with `_rim` can skip the suffix.
+    "arch_",          # sea arches / rock arches — hollow ride-through
+                      # spans. Same case as `_rim`: the XY bbox treats the
+                      # open archway as "inside the obstacle", but the line
+                      # threads the opening by design. (A bbox can't tell a
+                      # leg-collision from an opening-thread anyway — that's
+                      # a playtest call, not a static-lint one.)
 )
 _OBSTACLE_MIN_HEIGHT_M = 5.0
+# A spline point clears an obstacle whose TOP sits at least this far below
+# it. Submerged seabed / shoals / reefs (top below the waterline) overlap the
+# line in XY but are not collision hazards — the bike rides safely above them.
+_OBSTACLE_SUBMERGED_MARGIN_M = 2.0
 
 
 def _collect_obstacle_bboxes(
     terrain_obj: bpy.types.Object | None,
     *,
     padding: float = 0.0,
-) -> list[tuple[bpy.types.Object, float, float, float, float]]:
-    """Return ``[(obj, xmin, xmax, ymin, ymax), …]`` for every visible
+) -> list[tuple[bpy.types.Object, float, float, float, float, float]]:
+    """Return ``[(obj, xmin, xmax, ymin, ymax, top_z), …]`` for every visible
     ``kind="track"`` mesh that looks like a real obstacle — i.e. not
     the terrain, not road infrastructure, and at least
     ``_OBSTACLE_MIN_HEIGHT_M`` tall. Bbox is in world space, optionally
@@ -200,7 +210,8 @@ def _collect_obstacle_bboxes(
         obstacles.append(
             (obj,
              min(xs) - padding, max(xs) + padding,
-             min(ys) - padding, max(ys) + padding)
+             min(ys) - padding, max(ys) + padding,
+             max(zs))
         )
     return obstacles
 
@@ -256,8 +267,13 @@ def _spline_obstacle_clearance(
             else:
                 local = mathutils.Vector((pt.co[0], pt.co[1], pt.co[2]))
             w = mw @ local
-            for obj, xmin, xmax, ymin, ymax in obstacles:
+            for obj, xmin, xmax, ymin, ymax, top_z in obstacles:
                 if xmin <= w.x <= xmax and ymin <= w.y <= ymax:
+                    # Skip obstacles the line rides safely ABOVE — submerged
+                    # seabed / shoals whose top is well below the spline point
+                    # overlap in XY only and aren't collisions.
+                    if top_z + _OBSTACLE_SUBMERGED_MARGIN_M < w.z:
+                        continue
                     hits.append((f"pt_{sample_idx}", obj.name))
                     break
             sample_idx += 1

@@ -781,7 +781,7 @@ class HOVERBIKE_OT_shift_spline_off_obstacles(Operator):
 
     def execute(self, context):
         from ._legacy import _largest_terrain_mesh, _spline_iter_points
-        from .track_meta import _collect_obstacle_bboxes
+        from .track_meta import _OBSTACLE_SUBMERGED_MARGIN_M, _collect_obstacle_bboxes
 
         sp = bpy.data.objects.get("ai_spline_main")
         if sp is None or sp.type != "CURVE":
@@ -802,8 +802,11 @@ class HOVERBIKE_OT_shift_spline_off_obstacles(Operator):
         for _spline, _pt, world_co, setter in _spline_iter_points(sp):
             x, y = world_co.x, world_co.y
             new_x, new_y = x, y
-            for obj, xmin, xmax, ymin, ymax in obstacles:
+            for obj, xmin, xmax, ymin, ymax, top_z in obstacles:
                 if not (xmin <= new_x <= xmax and ymin <= new_y <= ymax):
+                    continue
+                # Don't shove the line off submerged seabed it rides above.
+                if top_z + _OBSTACLE_SUBMERGED_MARGIN_M < world_co.z:
                     continue
                 # Distance to exit each of the 4 sides from the current
                 # (already-shifted) point. Push in the cheapest direction.

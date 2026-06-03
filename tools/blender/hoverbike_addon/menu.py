@@ -88,6 +88,9 @@ class HOVERBIKE_MT_main(Menu):
             "hoverbike.copy_track_url", text="Copy Edit URL", icon="URL"
         )
         op.edit = True
+        layout.operator(
+            "hoverbike.detect_dev_servers", text="Find Dev Servers", icon="VIEWZOOM"
+        )
 
         layout.separator()
         layout.menu("HOVERBIKE_MT_add", icon="ADD")

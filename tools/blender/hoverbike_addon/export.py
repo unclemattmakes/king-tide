@@ -345,6 +345,91 @@ def _ensure_active_object(context) -> bpy.types.Object | None:
 # Playtest / URL helpers
 # ────────────────────────────────────────────────────────────────────
 
+# Vite serves on 5191 with strictPort OFF (see vite.config.ts), so a second
+# clone / branch with its own `pnpm dev` falls through to 5192, 5193, … The
+# addon used to hard-code 5191, which opened whichever clone grabbed it first
+# — often the wrong version. These helpers probe the range and find the port
+# actually serving THIS repo's track JSON.
+_DEV_SERVER_PORTS = (5191, 5192, 5193, 5194, 5195)
+
+
+def _probe_dev_port(port: int, track_id: str, local_canon: str | None, timeout: float) -> str | None:
+    """Classify a localhost port: ``"this"`` (serves the same ``track_id``
+    JSON this repo exports — the right clone), ``"game"`` (a Hoverbike dev
+    server, but a different clone / no match), or ``None`` (not the game)."""
+    import json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(
+            f"http://localhost:{port}/tracks/{track_id}.json", timeout=timeout
+        ) as resp:
+            body = resp.read().decode("utf-8")
+        try:
+            if local_canon is not None and json.dumps(json.loads(body), sort_keys=True) == local_canon:
+                return "this"
+        except Exception:
+            pass
+        return "game"
+    except Exception:
+        pass
+    # No track JSON here — still a Hoverbike dev server? (title signature)
+    try:
+        with urllib.request.urlopen(f"http://localhost:{port}/", timeout=timeout) as resp:
+            if "<title>Hoverbike</title>" in resp.read(4096).decode("utf-8", "ignore"):
+                return "game"
+    except Exception:
+        pass
+    return None
+
+
+def _detect_dev_servers(track_id: str, repo_root: str | None, timeout: float = 0.4) -> list[tuple[int, str]]:
+    """Probe the Vite port range for running Hoverbike dev servers. Returns
+    ``[(port, "this"|"game"), …]``. ``"this"`` flags the port whose served
+    ``track_id`` JSON matches this repo's file — i.e. the clone you want."""
+    import json
+    import os
+
+    local_canon: str | None = None
+    if repo_root:
+        p = os.path.join(repo_root, "public", "tracks", f"{track_id}.json")
+        if os.path.exists(p):
+            try:
+                with open(p, encoding="utf-8") as f:
+                    local_canon = json.dumps(json.load(f), sort_keys=True)
+            except Exception:
+                local_canon = None
+    found: list[tuple[int, str]] = []
+    for port in _DEV_SERVER_PORTS:
+        kind = _probe_dev_port(port, track_id, local_canon, timeout)
+        if kind:
+            found.append((port, kind))
+    return found
+
+
+def _best_dev_port(servers: list[tuple[int, str]], default: int = 5191) -> int:
+    """Pick the port to open: this-repo first, then any game server, else 5191."""
+    for port, kind in servers:
+        if kind == "this":
+            return port
+    return servers[0][0] if servers else default
+
+
+def _fmt_servers(servers: list[tuple[int, str]]) -> str:
+    if not servers:
+        return "none detected"
+    return ", ".join(f":{p}{' (this repo)' if k == 'this' else ''}" for p, k in servers)
+
+
+def _resolve_repo_root_safe() -> str | None:
+    """Best-effort repo root for the dev-server JSON comparison (never raises)."""
+    try:
+        from ._legacy import find_repo_root
+
+        return str(find_repo_root(bpy.data.filepath))
+    except Exception:
+        return None
+
 
 class HOVERBIKE_OT_open_play_url(Operator):
     """Open the current track's Play URL in the default browser. The
@@ -370,7 +455,11 @@ class HOVERBIKE_OT_open_play_url(Operator):
         if not track_id:
             self.report({"ERROR"}, "Couldn't derive a track id from the .blend filename.")
             return {"CANCELLED"}
-        url = f"http://localhost:5191/?track={track_id}"
+        # Find the dev server actually serving THIS repo (multiple clones each
+        # run their own `pnpm dev` on 5191/5192/…) instead of blindly using 5191.
+        servers = _detect_dev_servers(track_id, _resolve_repo_root_safe())
+        port = _best_dev_port(servers)
+        url = f"http://localhost:{port}/?track={track_id}"
         if self.edit:
             url += "&edit=1"
         try:
@@ -379,7 +468,20 @@ class HOVERBIKE_OT_open_play_url(Operator):
         except Exception as e:  # noqa: BLE001 — webbrowser fallbacks vary by platform
             self.report({"ERROR"}, f"Couldn't launch browser: {e}")
             return {"CANCELLED"}
-        self.report({"INFO"}, f"Opened {url}")
+        if not servers:
+            self.report(
+                {"WARNING"},
+                f"No dev server on :{_DEV_SERVER_PORTS[0]}–:{_DEV_SERVER_PORTS[-1]} — opened :{port} anyway "
+                f"(run `pnpm dev` in this repo).",
+            )
+        elif not any(k == "this" for _, k in servers):
+            self.report(
+                {"WARNING"},
+                f"This repo's dev server wasn't found — opened :{port}. Running: {_fmt_servers(servers)}. "
+                f"Start `pnpm dev` in this clone for an exact match.",
+            )
+        else:
+            self.report({"INFO"}, f"Opened :{port} (this repo). Dev servers: {_fmt_servers(servers)}")
         return {"FINISHED"}
 
 
@@ -796,11 +898,13 @@ class HOVERBIKE_OT_copy_track_url(Operator):
         if not track_id:
             self.report({"ERROR"}, "Save your .blend first to derive a track id.")
             return {"CANCELLED"}
-        url = f"http://localhost:5191/?track={track_id}"
+        servers = _detect_dev_servers(track_id, _resolve_repo_root_safe())
+        port = _best_dev_port(servers)
+        url = f"http://localhost:{port}/?track={track_id}"
         if self.edit:
             url += "&edit=1"
         context.window_manager.clipboard = url
-        self.report({"INFO"}, f"Copied to clipboard: {url}")
+        self.report({"INFO"}, f"Copied: {url}  (dev servers: {_fmt_servers(servers)})")
         return {"FINISHED"}
 
 
@@ -836,12 +940,43 @@ class HOVERBIKE_OT_copy_bike_url(Operator):
         return {"FINISHED"}
 
 
+class HOVERBIKE_OT_detect_dev_servers(Operator):
+    """Scan localhost for running Hoverbike dev servers and report which
+    ports they're on — flagging the one serving THIS repo's track. Handy
+    when several clones / branches each run ``pnpm dev``: Vite falls through
+    5191 → 5192 → … so "Play in Browser" can otherwise land on a stale one."""
+
+    bl_idname = "hoverbike.detect_dev_servers"
+    bl_label = "Find Dev Servers"
+    bl_description = (
+        "Scan localhost:5191-5195 for running Hoverbike dev servers; flags the "
+        "port serving this repo so you open the right clone"
+    )
+    bl_options = {"REGISTER"}
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        from ._legacy import derive_asset_id
+
+        track_id = derive_asset_id("hoverbike_track_id") or "the-maw"
+        servers = _detect_dev_servers(track_id, _resolve_repo_root_safe())
+        if not servers:
+            self.report(
+                {"WARNING"},
+                f"No Hoverbike dev server on :{_DEV_SERVER_PORTS[0]}-:{_DEV_SERVER_PORTS[-1]} "
+                "— start one with `pnpm dev`.",
+            )
+        else:
+            self.report({"INFO"}, f"Dev servers: {_fmt_servers(servers)}")
+        return {"FINISHED"}
+
+
 # ────────────────────────────────────────────────────────────────────
 # Registration
 # ────────────────────────────────────────────────────────────────────
 
 _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_open_play_url,
+    HOVERBIKE_OT_detect_dev_servers,
     HOVERBIKE_OT_reload_track_json,
     HOVERBIKE_OT_export_track,
     HOVERBIKE_OT_export_bike,
