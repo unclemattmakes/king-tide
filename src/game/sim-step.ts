@@ -21,6 +21,7 @@ import {
 import { driftSystem } from './systems/drift'
 import { hoverSystem } from './systems/hover'
 import { applyPeerInputs, EMPTY_PEER_INPUTS } from './systems/input-apply'
+import { type OobConfig, outOfBoundsSystem } from './systems/out-of-bounds'
 import { boostTickSystem, pickupSystem, pickupUseSystem } from './systems/pickup'
 import { riderCrashSystem } from './systems/rider-crash'
 import { riderPoseSystem } from './systems/rider-pose'
@@ -80,6 +81,10 @@ export type StepInputs = {
    *  field advances so kinematic bodies track the new surface within
    *  the same tick. */
   waveRiders?: WaveRiderSystem
+  /** Out-of-bounds leash config for the local player. Omitted (or
+   *  `enabled:false`) in modes that opt out — multiplayer, tutorial, attract.
+   *  When present the boundary system runs after the race tick each step. */
+  oob?: OobConfig
 }
 
 /**
@@ -155,6 +160,9 @@ export function simulateStep(
   riderCrashSystem(sim, phys, phys.fixedDt)
 
   if (!inputs.locked) raceTick(sim, phys, phys.fixedDt)
+  // Out-of-bounds leash — after the race tick so it sees this tick's finished
+  // state and never yanks a just-finished player. Player-only, deterministic.
+  if (inputs.oob) outOfBoundsSystem(sim, phys, track, phys.fixedDt, inputs.oob)
   pickupSystem(sim, phys, phys.fixedDt)
   pickupUseSystem(sim, phys)
   mineSystem(sim, phys, phys.fixedDt)

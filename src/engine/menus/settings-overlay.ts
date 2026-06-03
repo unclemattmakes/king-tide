@@ -34,6 +34,8 @@ import {
   type ColorblindMode,
   type DriftIntensity,
   type EmissiveLandmarksIntensity,
+  type OobGraceTimer,
+  type OutOfBoundsMode,
   type PreLapIntroMode,
   playerSettings,
   setAIDifficulty,
@@ -56,6 +58,8 @@ import {
   setLeaderboardSubmit,
   setMotionSicknessReduction,
   setMusicCreditsEnabled,
+  setOobGraceTimer,
+  setOutOfBounds,
   setPixelRatio,
   setPreLapIntro,
   setReducedFlash,
@@ -156,6 +160,28 @@ const DRIFT_INTENSITY_VALUE: Record<string, DriftIntensity> = {
   Full: 'full',
   Subtle: 'subtle',
   Off: 'off',
+}
+
+const OOB_MODE_LABEL: Record<OutOfBoundsMode, string> = {
+  off: 'Off',
+  autopilot: 'Autopilot',
+  shark: 'Shark',
+}
+const OOB_MODE_VALUE: Record<string, OutOfBoundsMode> = {
+  Off: 'off',
+  Autopilot: 'autopilot',
+  Shark: 'shark',
+}
+
+const OOB_GRACE_LABEL: Record<OobGraceTimer, string> = {
+  short: 'Short (3s)',
+  normal: 'Normal (5s)',
+  long: 'Long (8s)',
+}
+const OOB_GRACE_VALUE: Record<string, OobGraceTimer> = {
+  'Short (3s)': 'short',
+  'Normal (5s)': 'normal',
+  'Long (8s)': 'long',
 }
 
 const COLORBLIND_LABEL: Record<ColorblindMode, string> = {
@@ -529,6 +555,28 @@ const TAB_SPECS: TabSpec[] = [
         },
         enabled: true,
         gate: 'MK-style mini-turbo drift — hold Z/C while steering. Setting controls only the camera roll + spark visuals; the physics + boost reward always apply.',
+      },
+      {
+        id: 'gp-out-of-bounds',
+        label: 'Out of bounds',
+        control: {
+          kind: 'select',
+          options: ['Off', 'Autopilot', 'Shark'],
+          defaultValue: OOB_MODE_LABEL[playerSettings.outOfBounds],
+        },
+        enabled: true,
+        gate: 'Stray too far off the racing line and a warning fires + autopilot steers you back (you forfeit race credit). Shark adds the great-white attack if you do not recover in time. Single-player + Time Trial.',
+      },
+      {
+        id: 'gp-oob-grace',
+        label: 'OOB grace timer',
+        control: {
+          kind: 'select',
+          options: ['Short (3s)', 'Normal (5s)', 'Long (8s)'],
+          defaultValue: OOB_GRACE_LABEL[playerSettings.oobGraceTimer],
+        },
+        enabled: true,
+        gate: 'How long the out-of-bounds warning counts down before the attack arms.',
       },
       {
         id: 'gp-hud-minimap',
@@ -1034,6 +1082,18 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
         sel.addEventListener('change', () => {
           const v = DRIFT_INTENSITY_VALUE[sel.value]
           if (v) setDriftIntensity(v)
+        })
+      }
+      if (spec.enabled && spec.id === 'gp-out-of-bounds') {
+        sel.addEventListener('change', () => {
+          const v = OOB_MODE_VALUE[sel.value]
+          if (v) setOutOfBounds(v)
+        })
+      }
+      if (spec.enabled && spec.id === 'gp-oob-grace') {
+        sel.addEventListener('change', () => {
+          const v = OOB_GRACE_VALUE[sel.value]
+          if (v) setOobGraceTimer(v)
         })
       }
       if (spec.enabled && spec.id === 'a11y-colorblind') {

@@ -1359,6 +1359,7 @@ async function boot() {
     lapState,
     control: {
       isAutoPlay: () => controls.isAutoPlay(),
+      setAutoPlay: (on: boolean) => controls.setAutoPlay(on),
       isPausedForMenu: () => controls.isPausedForMenu(),
       isDeterminismPaused: () => determinismMode,
     },

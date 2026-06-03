@@ -119,6 +119,14 @@ export type PreLapIntroMode = 'full' | 'short' | 'off'
  */
 export type DriftIntensity = 'full' | 'subtle' | 'off'
 
+/** Out-of-bounds handling — see docs/out-of-bounds-design.md.
+ *  'off' = no boundary at all; 'autopilot' = warn + autopilot + forfeited
+ *  credit (Phase 1 only, escalation quietly respawns, never lethal);
+ *  'shark' = full escalation to the AirJaws great-white attack. */
+export type OutOfBoundsMode = 'off' | 'autopilot' | 'shark'
+/** Grace the out-of-bounds warning counts down before the attack arms. */
+export type OobGraceTimer = 'short' | 'normal' | 'long'
+
 export type PlayerSettings = {
   wavePumpIntensity: WavePumpIntensity
   aiDifficulty: AIDifficulty
@@ -262,6 +270,10 @@ export type PlayerSettings = {
   /** Drift-mechanic feedback intensity — see `DriftIntensity`. Render-
    *  only; the sim always processes drift input. */
   driftIntensity: DriftIntensity
+  /** Out-of-bounds handling — see `OutOfBoundsMode`. */
+  outOfBounds: OutOfBoundsMode
+  /** Grace timer before the out-of-bounds attack — see `OobGraceTimer`. */
+  oobGraceTimer: OobGraceTimer
 }
 
 export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
@@ -308,6 +320,8 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   animatedLandmarks: true,
   preLapIntro: 'full',
   driftIntensity: 'full',
+  outOfBounds: 'shark',
+  oobGraceTimer: 'normal',
 })
 
 /** Live, mutable copy. Consumers read this object every frame — no
@@ -327,6 +341,8 @@ const VALID_ANTI_GRAV_CAMERA: AntiGravCameraIntensity[] = ['full', 'reduced', 'o
 const VALID_EMISSIVE_LANDMARKS: EmissiveLandmarksIntensity[] = ['full', 'reduced', 'off']
 const VALID_PRE_LAP_INTRO: PreLapIntroMode[] = ['full', 'short', 'off']
 const VALID_DRIFT_INTENSITY: DriftIntensity[] = ['full', 'subtle', 'off']
+const VALID_OOB_MODE: OutOfBoundsMode[] = ['off', 'autopilot', 'shark']
+const VALID_OOB_GRACE: OobGraceTimer[] = ['short', 'normal', 'long']
 const VALID_COLORBLIND_MODE: ColorblindMode[] = ['off', 'deuteranopia', 'protanopia', 'tritanopia']
 
 /** Roll-follow scalar each intensity step contributes — multiplied by
@@ -512,6 +528,15 @@ export function loadPlayerSettings(): void {
   ) {
     playerSettings.driftIntensity = p.driftIntensity as DriftIntensity
   }
+  if (typeof p.outOfBounds === 'string' && (VALID_OOB_MODE as string[]).includes(p.outOfBounds)) {
+    playerSettings.outOfBounds = p.outOfBounds as OutOfBoundsMode
+  }
+  if (
+    typeof p.oobGraceTimer === 'string' &&
+    (VALID_OOB_GRACE as string[]).includes(p.oobGraceTimer)
+  ) {
+    playerSettings.oobGraceTimer = p.oobGraceTimer as OobGraceTimer
+  }
   // Apply accessibility settings to the DOM as early as we can after
   // load. Lazy-imported so `player-settings.ts` stays a tiny
   // pre-render-init module — the accessibility service pulls in palette
@@ -576,6 +601,16 @@ export function setPreLapIntro(v: PreLapIntroMode): void {
 
 export function setDriftIntensity(v: DriftIntensity): void {
   playerSettings.driftIntensity = v
+  savePlayerSettings()
+}
+
+export function setOutOfBounds(v: OutOfBoundsMode): void {
+  playerSettings.outOfBounds = v
+  savePlayerSettings()
+}
+
+export function setOobGraceTimer(v: OobGraceTimer): void {
+  playerSettings.oobGraceTimer = v
   savePlayerSettings()
 }
 

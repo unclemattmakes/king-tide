@@ -17,5 +17,11 @@ export type RacerData = {
   finished: boolean
   /** Wall-clock seconds since race start (advanced by RaceSystem). */
   raceTime: number
+  /** Set when the player left the course (crossed the out-of-bounds soft
+   *  wall). The run no longer counts — the finish screen records a DNF and
+   *  skips ghost / leaderboard saves. Sticky: getting back on course clears
+   *  the warning but not the forfeit. Only ever set on the local player by
+   *  `outOfBoundsSystem`; always false on AI. */
+  forfeited: boolean
 }
 export const RacerStore = createStore<RacerData>('Racer')
