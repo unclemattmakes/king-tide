@@ -21,6 +21,8 @@
  *   TRACK_SHOTS_INTERVAL  ms between frames                (default 1500)
  *   TRACK_SHOTS_WARMUP    ms to wait before first frame    (default 4000)
  *   TRACK_SHOTS_HUD       "1" keeps the DOM HUD overlays   (default hidden)
+ *   TRACK_SHOTS_POSES     JSON [{label,pos,target}] → fixed-camera shots
+ *   TRACK_SHOTS_POSE_FRAMES  frames per pose for a fixed-camera time-lapse (default 1)
  *
  * Output: test-results/track-shots/<id>/NN.jpg (gitignored) plus an
  * index.json per track listing each frame's player position + race
@@ -56,6 +58,12 @@ type PosedShot = { label: string; pos: [number, number, number]; target: [number
 const POSES: PosedShot[] | null = process.env.TRACK_SHOTS_POSES
   ? (JSON.parse(process.env.TRACK_SHOTS_POSES) as PosedShot[])
   : null
+// Frames captured per pose. Default 1 (a single still per pose — the
+// historical behaviour). Set >1 for a fixed-camera time-lapse: the engine
+// holds the pose while the sim keeps running, so successive frames show the
+// world evolve in place (clouds drifting, water moving). Frames are spaced
+// TRACK_SHOTS_INTERVAL ms apart and named pose-<label>-NN.jpg.
+const POSE_FRAMES = Math.max(1, Number(process.env.TRACK_SHOTS_POSE_FRAMES ?? 1))
 
 // The DOM overlays that sit on top of the WebGPU canvas. Hidden for a
 // clean art read unless TRACK_SHOTS_HUD=1. (Element ids are in index.html.)
@@ -82,8 +90,11 @@ test.describe('track screenshot sweep', () => {
 
   for (const id of IDS) {
     test(`${id} sweep`, async ({ page }) => {
-      // Generous — a cold WebGPU boot + N×INTERVAL of driving.
-      test.setTimeout(WARMUP + COUNT * INTERVAL + 60_000)
+      // Generous — a cold WebGPU boot + the capture window. Posed mode adds
+      // a 700 ms settle per pose plus POSE_FRAMES×INTERVAL of time-lapse.
+      const posedTime = POSES ? POSES.length * (700 + POSE_FRAMES * INTERVAL) : 0
+      const sweepTime = COUNT * INTERVAL
+      test.setTimeout(WARMUP + Math.max(sweepTime, posedTime) + 60_000)
 
       const outDir = path.join(OUT_ROOT, id)
       mkdirSync(outDir, { recursive: true })
@@ -120,9 +131,13 @@ test.describe('track screenshot sweep', () => {
 
       const frames: Array<Record<string, unknown>> = []
       if (POSES) {
-        // Posed mode: park the camera at each authored pose and grab one
-        // frame. The autopilot warmup above first lets the field clear the
-        // start area so set-pieces aren't blocked by the grid.
+        // Posed mode: park the camera at each authored pose. With
+        // POSE_FRAMES=1 (default) grab a single still (pose-<label>.jpg);
+        // with POSE_FRAMES>1 hold the fixed pose and grab a time-lapse
+        // sequence (pose-<label>-NN.jpg) spaced INTERVAL ms apart while the
+        // sim keeps running — the way to watch clouds/water drift in place.
+        // The autopilot warmup above first lets the field clear the start
+        // area so set-pieces aren't blocked by the grid.
         for (const shot of POSES) {
           await page.evaluate((s) => {
             window.__hover!.setCameraPose({
@@ -131,14 +146,21 @@ test.describe('track screenshot sweep', () => {
             })
           }, shot)
           await page.waitForTimeout(700)
-          const name = `pose-${shot.label.replace(/[^a-z0-9_-]/gi, '_')}.jpg`
-          await page.screenshot({
-            path: path.join(outDir, name),
-            type: 'jpeg',
-            quality: 90,
-            clip: { x: 0, y: 0, width: SHOT_W, height: SHOT_H },
-          })
-          frames.push({ frame: name, pos: shot.pos, target: shot.target })
+          const label = shot.label.replace(/[^a-z0-9_-]/gi, '_')
+          for (let j = 0; j < POSE_FRAMES; j++) {
+            const name =
+              POSE_FRAMES > 1
+                ? `pose-${label}-${String(j).padStart(2, '0')}.jpg`
+                : `pose-${label}.jpg`
+            await page.screenshot({
+              path: path.join(outDir, name),
+              type: 'jpeg',
+              quality: 90,
+              clip: { x: 0, y: 0, width: SHOT_W, height: SHOT_H },
+            })
+            frames.push({ frame: name, pos: shot.pos, target: shot.target })
+            if (j < POSE_FRAMES - 1) await page.waitForTimeout(INTERVAL)
+          }
         }
         await page.evaluate(() => window.__hover!.setCameraPose(null))
       } else {
@@ -167,13 +189,16 @@ test.describe('track screenshot sweep', () => {
         }
       }
 
+      const mode = POSES ? (POSE_FRAMES > 1 ? 'posed-timelapse' : 'posed') : 'sweep'
       writeFileSync(
         path.join(outDir, 'index.json'),
-        `${JSON.stringify({ id, backend, mode: POSES ? 'posed' : 'sweep', frames }, null, 2)}\n`,
+        `${JSON.stringify({ id, backend, mode, frames }, null, 2)}\n`,
       )
 
       const errored = await page.evaluate(() => window.__hover!.qa?.consoleHasErrors() ?? false)
-      console.log(`track-shots:${id}:wrote ${COUNT} frames to ${outDir} (consoleErrors=${errored})`)
+      console.log(
+        `track-shots:${id}:wrote ${frames.length} frames to ${outDir} (mode=${mode} consoleErrors=${errored})`,
+      )
     })
   }
 })

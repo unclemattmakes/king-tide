@@ -21,6 +21,7 @@ import {
 } from 'three/tsl'
 import { MeshBasicNodeMaterial, PMREMGenerator, type Renderer } from 'three/webgpu'
 import type { SkyColorGrade, SkyConfig, SkyToneMapping } from '@/game/tracks/types'
+import { type CloudLayer, createCloudLayer } from './clouds'
 import { createPostPipeline, type PostPipeline } from './post-pipeline'
 import { setActivePostPipeline } from './renderer-service'
 
@@ -91,6 +92,10 @@ const DEFAULT_SKY: Required<SkyConfig> = {
   // unless a track opts in. See `engine/render/post-pipeline.ts`.
   outline: { enabled: false },
   motionBlur: { enabled: false },
+  // Hero cumulus field OFF by default (count 0) → existing tracks are
+  // unchanged. A track opts in via its `clouds` block. See
+  // `engine/render/clouds.ts`.
+  clouds: { count: 0 },
 }
 
 /** Map a SkyToneMapping name → Three.js constant. */
@@ -644,6 +649,10 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   pmremScene.add(pmremDome)
   let currentEnv: { dispose(): void; texture: THREE.Texture } | null = null
 
+  // Hero cumulus layer — built below once `shared` exists (clouds read the
+  // sky's shared uniforms). Null when the track didn't opt in via `clouds`.
+  let cloudLayer: CloudLayer | null = null
+
   // ── Sun direction read-out vector (kept in sync with uniform) ───────────
   const sunDirOut = new THREE.Vector3()
 
@@ -781,10 +790,14 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
     }
   }
 
-  function tick(_time: number, dt: number, focus: { x: number; z: number }): void {
+  function tick(time: number, dt: number, focus: { x: number; z: number }): void {
     // Keep wind moving even with the sun frozen — uniform writes are free
     // and a fully static cloud field reads as "paused game".
     uTime.value += dt
+
+    // Drift the hero cumulus field (if any) and keep it centred on the player.
+    // Uses the sim `time` so replays reproduce cloud positions exactly.
+    cloudLayer?.tick(time, dt, focus)
 
     // Re-aim the directional sun so its shadow camera centres on the player;
     // direction (and therefore lighting) is fixed by applyStaticState().
@@ -829,6 +842,7 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   }
 
   function dispose(): void {
+    cloudLayer?.dispose()
     scene.remove(mesh)
     geom.dispose()
     material.dispose()
@@ -855,6 +869,14 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
     sunGlow: uSunGlow as unknown as Node<'vec3'>,
     time: uTime as unknown as Node<'float'>,
     cloudiness: uCloudiness as unknown as Node<'float'>,
+  }
+
+  // Hero cumulus field — opt-in per track via `sky.clouds`. Constructed here
+  // (after `shared`) so it can read the sky's frozen palette uniforms; ticked
+  // from this system's `tick` and torn down in `dispose`, so every boot path
+  // that builds a sky gets clouds with no extra game-loop wiring.
+  if (cfg.clouds && (cfg.clouds.count ?? 0) > 0) {
+    cloudLayer = createCloudLayer({ scene, shared, config: cfg.clouds })
   }
 
   return { mesh, tick, getSunDirection, setCloudiness, setSunIntensity, shared, dispose }

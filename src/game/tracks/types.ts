@@ -445,6 +445,52 @@ export type LapWeather = {
  *                    Big-Sur golden hour, neutral for crisp daylight,
  *                    aces_filmic for high-contrast neon).
  */
+/**
+ * Volumetric toy-cumulus field — discrete low-poly cloud blobs placed at
+ * altitude that parallax against the world and drift on the wind. This is a
+ * separate layer from the dome's painted `cloudiness` band (which stays for
+ * far haze / high cirrus): the dome can't give the *volume* and *parallax*
+ * of the chonky cumulus in the concept art, so a placed mesh field carries
+ * the hero clouds and the dome carries the backdrop.
+ *
+ * Absent (or `count: 0`) → no hero clouds, i.e. the existing-track look is
+ * unchanged. A track opts in by supplying a `clouds` block. All fields are
+ * optional with runtime defaults; see `createCloudLayer` in
+ * `engine/render/clouds.ts`.
+ */
+export type CloudFieldConfig = {
+  /** Number of cloud blobs in the field. 0 / absent → layer off entirely. */
+  count?: number
+  /** Altitude (metres) the cloud masses are centred on. Default 320. */
+  altitude?: number
+  /** ± vertical jitter around `altitude`, metres. Default 70. */
+  altitudeJitter?: number
+  /** Half-extent (metres) of the camera-locked scatter torus the field
+   *  drifts through. Larger → clouds spread further out toward the horizon.
+   *  Default 1100. */
+  spreadRadius?: number
+  /** Min/max uniform scale of a blob in metres (a blob is authored ~1 unit
+   *  wide). Default [55, 130]. */
+  scaleRange?: [number, number]
+  /** Wind drift in (x, z) metres per second. Default { x: 1, z: 0.2 } to
+   *  match the foliage wind so cloud / sea / foliage drift stay coherent. */
+  wind?: { x: number; z: number }
+  /** Directional-light strength on the clouds, 0..1. 1 = full sun-wrap +
+   *  sun-lit-crown highlight (sunny-cumulus pop, default). 0 = flat ambient —
+   *  only the vertical base→crown gradient survives — for an overcast look
+   *  where there's no directional sun. Default 1. */
+  sunPop?: number
+  /** Number of distinct blob silhouettes to author. Default 4. */
+  variants?: number
+  /** Shadowed-base colour (hex, sRGB). Default a cool blue-grey. */
+  coolBase?: string
+  /** Sun-lit crown colour (hex, sRGB). Default a warm white. */
+  warmTop?: string
+  /** PRNG seed for blob shapes + scatter — fixed so captures reproduce.
+   *  Default 1337. */
+  seed?: number
+}
+
 export type SkyConfig = {
   tint?: string
   cloudiness?: number
@@ -456,6 +502,9 @@ export type SkyConfig = {
   bloom?: number
   seaStateBeaufort?: number
   toneMapping?: SkyToneMapping
+  /** Hero cumulus field — discrete low-poly cloud meshes at altitude.
+   *  Absent → no hero clouds (existing look). See {@link CloudFieldConfig}. */
+  clouds?: CloudFieldConfig
   /** 0..1 — how billowy/towering the clouds read. 0 = flat overcast band
    *  (legacy look); higher pushes domain-warped cauliflower cumulus with
    *  cheap self-shadow volume lighting. Pure dome-shader cost. */
