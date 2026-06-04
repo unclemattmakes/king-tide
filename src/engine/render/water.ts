@@ -193,6 +193,13 @@ export type WaterMesh = {
      *  the GPU sample coords and the CPU sampleSurface/sampleHeight
      *  via the shared `field.waveBearing` scalar. */
     setWaveBearing(deg: number): void
+    /** Crest-mist ribbon strength, 0..1+. A soft additive haze lofted on the
+     *  upper faces of steep breaking crests, weighted toward grazing view
+     *  angles + distance so it fills in for the discrete crest-spray sprites
+     *  out where individual particles read too sparse. 0 = off (the shaded
+     *  whitecaps still draw); 1 = the default ribbon. Gated by the
+     *  Settings → Video "Wave spray" knob via `water-service`. */
+    setCrestMistStrength(s: number): void
     /** Render the wave geometry as wireframe. Useful for tuning wave /
      *  wake amplitudes against the actual displacement. */
     setWireframe(on: boolean): void
@@ -1862,6 +1869,13 @@ export function createWaterMesh(
   const sunStreakStrengthUniform = uniform(SUN_STREAK_STRENGTH_DEFAULT)
   const sunStreak = sunDiscColor.mul(streakIntensity).mul(sunStreakStrengthUniform)
 
+  // Crest-mist ribbon strength uniform. Drives the lofted wind-spray haze on
+  // breaking crests (composed into the emissive sum below). Default 1; the
+  // Settings → Video "Wave spray" knob scales it via `water-service` so the
+  // GPU haze and the discrete crest-spray sprites fade together.
+  const CREST_MIST_STRENGTH_DEFAULT = 1.0
+  const crestMistStrengthUniform = uniform(CREST_MIST_STRENGTH_DEFAULT)
+
   // Wave-driven foam — two stacked layers via max():
   //   1. The vertex-stage accumulator (`foamAccumFrag`) — sampled at 4 past
   //      time steps, decayed exponentially, max-reduced. Gives foam a
@@ -2356,9 +2370,34 @@ export function createWaterMesh(
   // the "this wave is actually breaking" signal a player relies on for
   // arcade water reads.
   const foamEmissive = foamColor.mul(foamMask).mul(float(0.5))
+
+  // Crest-mist ribbon — a soft wind-spray haze lofted on the upper faces of
+  // steep breaking crests, biased toward grazing view angles + distance where
+  // the discrete crest-spray sprites (fx/index.ts `crestSpray` pool) read too
+  // sparse to sell the break. Keyed off the same whitecap signal the foam
+  // draws from (`whitecapFoam` = height × slope × fiber), so the haze appears
+  // exactly where the surface is already whitecapping — no new wave math. The
+  // grazing + distance weighting keeps it invisible looking straight down at
+  // close range (where the sprites carry the effect) and fills the far field
+  // toward the horizon. Tinted halfway to the horizon haze so it reads as
+  // atmospheric spray rather than a second foam layer.
+  const crestMistGrazing = pow(float(1).sub(ndotv), float(3.0))
+  const crestMistDist = smoothstep(float(25), float(140), camDist)
+  const crestMistAmount = whitecapFoam
+    .mul(crestMistGrazing)
+    .mul(crestMistDist)
+    .mul(crestMistStrengthUniform)
+    .mul(float(0.6))
+  const crestMist = mix(foamColor, horizonHazeUniform, float(0.5)).mul(crestMistAmount)
+
   // Fade emissive contributions out when the debug colorize is on, so the
   // center mesh's red tint isn't washed out by foam / sun-disc highlights.
-  const emissiveSum = fresnelEmissive.add(sunGlow).add(sunDisc).add(sunStreak).add(foamEmissive)
+  const emissiveSum = fresnelEmissive
+    .add(sunGlow)
+    .add(sunDisc)
+    .add(sunStreak)
+    .add(foamEmissive)
+    .add(crestMist)
   mat.emissiveNode = emissiveSum.mul(float(1).sub(debugColorizeMixUniform))
   // View-angle-dependent shallow-seabed transparency. Only applies in
   // shallow water where there's real terrain underneath — gated by
@@ -2520,6 +2559,12 @@ export function createWaterMesh(
       // 0.1..1.5 — σ_along of the 2D Gaussian. Lower clamps
       // toward 0.1 (disc-like); higher elongates the streak.
       streakElongationUniform.value = clamp01(s, 0.1, 1.5)
+    },
+    setCrestMistStrength(s) {
+      // 0..2 — scales the lofted crest-mist haze. 0 = off (whitecaps
+      // still draw); 1 = default ribbon. The Settings "Wave spray" knob
+      // passes 0 / 0.5 / 1 for off / subtle / full.
+      crestMistStrengthUniform.value = clamp01(s, 0, 2)
     },
     setShoreWaveStrength(s) {
       // 0..2 — scales the shore-aligned breaker amplitude. Mirrors the

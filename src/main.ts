@@ -16,7 +16,7 @@ import { emptyIntent, type Intent, installInput } from './engine/input'
 import { installCameraLookInput } from './engine/input/camera-look'
 import { bindLazyMenuButton } from './engine/lazy-menu'
 import { isHostFor } from './engine/net/host-election'
-import { loadPlayerSettings, playerSettings } from './engine/player-settings'
+import { loadPlayerSettings, playerSettings, WAVE_SPRAY_SCALAR } from './engine/player-settings'
 import { installConsoleTrap } from './engine/qa/console-trap'
 import { createAntiGravDebugRenderer } from './engine/render/anti-grav-debug'
 import { createBridgeSupports } from './engine/render/bridge-supports'
@@ -62,6 +62,8 @@ import { createTrackVisuals } from './engine/render/track-mesh'
 import { createWaterMesh } from './engine/render/water'
 import { logWaterCoverage, reportWaterCoverage } from './engine/render/water-coverage'
 import { createWaterTransitionMarkers } from './engine/render/water-debug-markers'
+import { applyWaveSprayIntensity, setWaterMesh } from './engine/render/water-service'
+import { breakingFoam, createWaveCrestSprayDriver } from './engine/render/wave-crest-spray'
 import { createWaveRiderRenderSystem } from './engine/render/wave-rider-render'
 import { sliceBestLap } from './engine/replay/best-lap-slice'
 import { parseReplay, type ReplayBike, type ReplayFile } from './engine/replay/format'
@@ -73,6 +75,7 @@ import { createPhysicsWorld } from './engine/sim/physics/rapier'
 import {
   createWaveField,
   defaultWaves,
+  sampleSurface,
   setShoreField,
   setWaveZones,
 } from './engine/sim/water/wave-field'
@@ -251,6 +254,11 @@ async function boot() {
   // so ridges read as real geometry instead of single-vertex shimmer.
   const waterMesh = createWaterMesh(waveField, { backend })
   scene.add(waterMesh.mesh)
+  // Register the water mesh so the Settings overlay can live-tune the
+  // crest-mist ribbon (the GPU half of the Wave-spray knob), and seed it from
+  // the persisted setting now that the mesh exists.
+  setWaterMesh(waterMesh)
+  applyWaveSprayIntensity(playerSettings.waveSprayIntensity)
 
   // Camera-locked transition markers — tall pillars on rings at the
   // center→outer (240 m) and outer→skirt (720 m) boundaries. Hidden
@@ -929,7 +937,50 @@ async function boot() {
   const pickupRender = createPickupRenderSystem(scene, sim)
   const combatRender = createCombatRenderSystem(scene, sim)
   const fx = createFxSystem(scene, sim, phys, waveField)
-  const fxTick = fx.tick
+
+  // Ambient breaking-crest spray — sweeps a world-anchored lattice around the
+  // camera each frame and poofs spray off the sea's own crests as they break,
+  // independent of any bike (see engine/render/wave-crest-spray.ts). The
+  // detector stays pure: we inject the surface probe (folding the wave field's
+  // slope + crest height into the GPU-matched whitecap likelihood via
+  // `breakingFoam`) and the emit callback (which adds the downwind drift). The
+  // sim is never touched, so this is render-only.
+  const waveCrestSpray = createWaveCrestSprayDriver({
+    sample: (x, z) => {
+      const s = sampleSurface(waveField, x, z)
+      // slope = |∇y| = hypot(nx, nz) / ny  (n = (−dydx, 1, −dydz)/‖·‖).
+      const slope = Math.hypot(s.nx, s.nz) / Math.max(1e-4, s.ny)
+      return { y: s.y, foam: breakingFoam(slope, s.y - waveField.baseY) }
+    },
+    emit: (x, y, z, strength) => {
+      // Drift the spray downwind = along the dominant swell direction (wave 0)
+      // rotated by the live field bearing. Cheap; recomputed per burst.
+      const w0 = waveField.waves[0]
+      const cosB = Math.cos(waveField.waveBearing)
+      const sinB = Math.sin(waveField.waveBearing)
+      const wx = (w0?.dirX ?? 1) * cosB - (w0?.dirZ ?? 0) * sinB
+      const wz = (w0?.dirX ?? 1) * sinB + (w0?.dirZ ?? 0) * cosB
+      fx.emitWaveSpray(
+        x,
+        y,
+        z,
+        strength,
+        wx,
+        wz,
+        WAVE_SPRAY_SCALAR[playerSettings.waveSprayIntensity],
+      )
+    },
+  })
+
+  const fxTick = (dt: number) => {
+    fx.tick(dt)
+    // Skip the lattice sweep entirely when the player has the effect off — no
+    // sampling cost for a disabled feature. The bike-driven bow spray inside
+    // fx.tick honours the same setting on its own.
+    if (playerSettings.waveSprayIntensity !== 'off') {
+      waveCrestSpray.tick(camera.position.x, camera.position.z, waveField.time)
+    }
+  }
 
   // Unified track-emitter particle system — every `kind=emitter` empty
   // in the loaded environment GLB feeds this. Tracks without emitters

@@ -71,8 +71,10 @@ import {
   setTuckVfxIntensity,
   setTutorialSubtitles,
   setWavePumpIntensity,
+  setWaveSprayIntensity,
   type TuckVfxIntensity,
   type WavePumpIntensity,
+  type WaveSprayIntensity,
 } from '@/engine/player-settings'
 import {
   FRAMERATE_CAP_LABELS,
@@ -102,6 +104,17 @@ const TUCK_VFX_LABEL: Record<TuckVfxIntensity, string> = {
   off: 'Off',
 }
 const TUCK_VFX_VALUE: Record<string, TuckVfxIntensity> = {
+  Full: 'full',
+  Subtle: 'subtle',
+  Off: 'off',
+}
+
+const WAVE_SPRAY_LABEL: Record<WaveSprayIntensity, string> = {
+  full: 'Full',
+  subtle: 'Subtle',
+  off: 'Off',
+}
+const WAVE_SPRAY_VALUE: Record<string, WaveSprayIntensity> = {
   Full: 'full',
   Subtle: 'subtle',
   Off: 'off',
@@ -382,6 +395,17 @@ const TAB_SPECS: TabSpec[] = [
         },
         enabled: true,
         gate: "Hot-core glow for Kilauea's lava waterfall + future emissive landmarks. Reduced halves the glow for bloom-sensitive setups.",
+      },
+      {
+        id: 'video-wave-spray',
+        label: 'Wave spray',
+        control: {
+          kind: 'select',
+          options: ['Full', 'Subtle', 'Off'],
+          defaultValue: WAVE_SPRAY_LABEL[playerSettings.waveSprayIntensity],
+        },
+        enabled: true,
+        gate: 'Particle spray that poofs off breaking wave crests + a mist ribbon on distant swells. Subtle halves it; Off leaves only the shaded whitecaps.',
       },
       {
         id: 'video-quality',
@@ -1106,6 +1130,12 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
         sel.addEventListener('change', () => {
           const v = EMISSIVE_LANDMARKS_VALUE[sel.value]
           if (v) setEmissiveLandmarks(v)
+        })
+      }
+      if (spec.enabled && spec.id === 'video-wave-spray') {
+        sel.addEventListener('change', () => {
+          const v = WAVE_SPRAY_VALUE[sel.value]
+          if (v) setWaveSprayIntensity(v)
         })
       }
       if (spec.enabled && spec.id === 'video-framecap') {

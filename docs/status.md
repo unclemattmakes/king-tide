@@ -1,3 +1,19 @@
+> **Last updated: 2026-06-04** — **Breaking-crest wave spray** — the ocean now
+> throws spray off its own crests, independent of the rider, so the water stops
+> reading as a shaded rubber sheet. Three additive pieces, all gated by the new
+> Settings → Video → "Wave spray" knob (full / subtle / off): (1) an ambient
+> **crest-poof** driver ([wave-crest-spray.ts](../src/engine/render/wave-crest-spray.ts),
+> pure + unit-tested like surge-spray) that sweeps a world-anchored lattice
+> around the camera and fires a one-off `crestSpray` burst the moment a crest
+> breaks over a cell — rising-edge/re-arm hysteresis on the same `height·slope`
+> whitecap signal the GPU shades, so the poofs land where the foam already is;
+> (2) **wave-aware bow spray** off a bike's nose when it drives into a rising
+> wave face (climb-into-face "closing rate"), so pumping a crest is visibly
+> rewarded; (3) a cheap **crest-mist ribbon** GPU emissive haze on distant steep
+> crests, grazing- + distance-weighted to fill the far field where sprites read
+> sparse. Render-only (never feeds the sim). Deep dive + tuning table in
+> [docs/water-deep-dive.md](./water-deep-dive.md#breaking-crest-spray-particle-layer).
+>
 > **Last updated: 2026-06-03** — CC0 prop lane now renders **multi-tone**
 > (`keep_material`) + a scaled-up prop set.
 >
