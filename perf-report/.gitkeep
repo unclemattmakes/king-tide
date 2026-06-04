@@ -1,0 +1,7 @@
+# Output directory for `pnpm profile` (tools/profile-tracks.mjs).
+#
+# Each run writes a timestamped `perf-<ISO>.md` desktop perf table here. Those
+# generated reports are run artifacts — like the qa-report/ convention, they're
+# not meant to be committed (consider adding `perf-report/perf-*.md` to
+# .gitignore). This .gitkeep just keeps the destination present in a fresh
+# clone so the script's first run has somewhere obvious to land.

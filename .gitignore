@@ -21,6 +21,11 @@ coverage/
 # the workflow upload; local runs stay out of git.
 qa-report/
 
+# Perf profiling output (pnpm profile). The committed anchor is the
+# fill-in baseline at docs/perf-baseline.md; raw run reports stay out of
+# git. The dir itself stays (perf-report/.gitkeep is tracked).
+perf-report/perf-*.md
+
 # editor
 .vscode/
 .idea/

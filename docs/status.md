@@ -1,3 +1,23 @@
+> ⚠️ **READ FIRST — v2 status boundary (2026-06-04).** This file is a running
+> changelog; everything below this banner is **v1-historical**. Since v1 we
+> restarted content for **v2**, and three things below no longer reflect reality:
+>
+> 1. **Anti-grav is cut** (parked for a possible future DLC). No shipped track
+>    places anti-grav zones — every `antiGravZones` is empty. Entries that brag
+>    about shipping anti-grav segments (Liberty / Angkor / Kilauea) are
+>    v1-historical and were already untrue against the reset v2 track data.
+> 2. **Content is mostly greybox for v2.** Only **Sandbar, The Maw, South Beach
+>    Sunken** are art-dressed; the other tracks were intentionally reset to
+>    greybox route-stubs (PR #285) for the v2 art pass. "v1 lineup complete" is a
+>    v1 statement, not a v2 one.
+> 3. **The soundtrack is CC0 placeholder music, not commissioned/licensed.** The
+>    14 `.opus` tracks play, but licensing is still open work. Entries calling
+>    them "commissioned" / "licensed" are aspirational.
+>
+> Wave mastery has also pivoted to a motocross pitch-the-takeoff/landing model
+> (the Mario-Kart fork), away from the press-forward-on-crest pump described
+> below. See [CLAUDE.md](../CLAUDE.md) and [product-plan.md](./product-plan.md).
+
 > **Last updated: 2026-06-04** — **Breaking-crest wave spray** — the ocean now
 > throws spray off its own crests, independent of the rider, so the water stops
 > reading as a shaded rubber sheet. Three additive pieces, all gated by the new

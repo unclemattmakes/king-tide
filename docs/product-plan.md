@@ -2,7 +2,9 @@
 
 > Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics and light Mario Kart combat.
 >
-> **Status (2026-05-28):** v1 lineup complete — 12/12 ship-quality tracks across four cups, 5/5 bike variants, all foundation systems shipped, drift mini-turbo + tricks + tuck + surface registry added during the push. Live build at the Vercel URL in [README](../README.md) / [status.md](./status.md). Desktop wrapper is **Electron** (replaced an earlier Tauri shell — see [desktop-builds.md](./desktop-builds.md)); Linux + Windows depots, real WebGPU on Steam Deck. Remaining work is licensed soundtrack + 60fps@8-bike perf-budget pass + pre-launch polish.
+> **Status (v2, 2026-06-04):** Blew past v1 and **restarted content for v2.** Most tracks are now intentionally **greybox** (only Sandbar / The Maw / South Beach Sunken are dressed); `status: 'ship'` means wired/playable, not art-complete. **Wave mastery pivoted** to a motocross pitch-the-takeoff/landing model (the Mario-Kart fork), away from press-forward-on-crest. **Anti-grav cut** (parked for a possible future DLC). The shipping soundtrack is **CC0 placeholder**, licensing still open. Real remaining work: wave-mastery skill legibility, the v2 environment-art pass, a 60 fps @ 8-bike perf pass measured on target hardware, and soundtrack licensing.
+>
+> **Status (v1, 2026-05-28):** v1 lineup complete — 12/12 ship-quality tracks across four cups, 5/5 bike variants, all foundation systems shipped, drift mini-turbo + tricks + tuck + surface registry added during the push. Live build at the Vercel URL in [README](../README.md) / [status.md](./status.md). Desktop wrapper is **Electron** (replaced an earlier Tauri shell — see [desktop-builds.md](./desktop-builds.md)); Linux + Windows depots, real WebGPU on Steam Deck. Remaining work is licensed soundtrack + 60fps@8-bike perf-budget pass + pre-launch polish.
 
 ## Vision
 
@@ -10,7 +12,7 @@ A web-first arcade racer in the spirit of **JetMoto**. Hover bikes that surf wav
 
 ## Design pillars
 
-1. **Wave-Race water is the centerpiece.** Buoyancy, swell, wake, getting *thrown* by a wave — the signature feel.
+1. **Wave-Race water is the centerpiece.** Buoyancy, swell, wake, getting *thrown* by a wave — the signature feel. *(v2 skill framing: the graded mechanic is motocross-style **mastering the jump** — pitch the takeoff off a crest, pitch the landing — not the old press-forward-on-crest pump.)*
 2. **Verticality is the second pillar.** Tracks climb, dive off cliffs, splash into ocean. Drop transitions are dramatic.
 3. **Arcade, not sim.** Generous handling, big drifts (literal — see Mario-Kart-style mini-turbo), exaggerated speed, forgiving boundaries.
 4. **Ten-minute fun loop.** Pick bike → race → rematch in under 30 seconds. No menus to fight.
@@ -64,7 +66,7 @@ Casual-to-mid-core, plays desktop with a gamepad, remembers PS1/N64 arcade racer
 
 ## Success criteria
 
-- ✅ Wave physics feel "Wave-Race-y" — pumping waves, launches, hard landings all readable. Wave-pump signal + wave-line shimmer close the predictive + retrospective loop on the skill axis.
+- 🟡 Wave physics feel great — launches + hard landings read well. **v2 reframes the graded skill** as motocross pitch-mastery of takeoffs/landings (the Mario-Kart fork), not the press-forward pump; pitch already affects swell interaction, but making it legible + graded (and refitting the wave-pump signal + wave-line shimmer, which were built for the old model) is open work.
 - ✅ Cliff-to-water transitions feel dramatic, not janky. (Cliffside's 15m drop ships in M9.13; The Maw's open-ocean leaps tested in v1 Sprint 2.)
 - ✅ **Drift mini-turbo (added v1 push).** Lateral skill axis pays off with a clear tier-up signal + colored sparks + bell pitch + camera roll. Drift Practice Range is the dev fixture, ICE/SAND patches demonstrate the surface registry.
 - 🟡 AI keeps the pack tight every race. (Per-difficulty pump-firing + drift activation help; per-track racing-line authoring still uneven.)

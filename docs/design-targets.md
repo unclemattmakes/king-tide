@@ -21,8 +21,8 @@
 > - Desktop target shifted from **Tauri** to **Electron** mid-push
 >   (Tauri/WebKitGTK couldn't deliver WebGPU on Linux or launch through
 >   the Steam Linux Runtime on the Deck — see [desktop-builds.md](./desktop-builds.md)).
-> - **Anti-grav cut from v1** (2026-05-30, no-anti-grav reconciliation
->   pass). The "ship 2–3 anti-grav tracks" target below (§1) and the
+> - **Anti-grav cut from the game** (2026-05-30; parked for a possible future
+>   DLC — a fun/shippability pandora's box, not a v1-only cut). The "ship 2–3 anti-grav tracks" target below (§1) and the
 >   anti-grav rows in the priority tables (§4) are **retired** — the v1
 >   target is now **0** anti-grav tracks; verticality is delivered by
 >   terrain, ramps, banked berms, and cliff drops. See the per-track docs
@@ -48,6 +48,16 @@
 | MK8 anti-grav universally loved | **Cut from v1** (system tax vs ship date) | ~~Ship 2–3 anti-grav tracks~~ → **0**; verticality via terrain/ramps/berms/drops (see [tracks/](./tracks/README.md)) |
 
 ## 2. The signature axis — wave mastery (+ drift as the lateral complement)
+
+> **v2 update (2026-06-04) — wave mastery pivoted (the Mario-Kart fork).** The
+> graded skill is **no longer** "press forward on the crest for a boost" (the
+> Wave-Race pump described below). It is **motocross "master the jump"**: pitch
+> the takeoff off a wave crest or ramp, pitch to stick the landing — pitch
+> genuinely drives how the bike rides the swell. The pump-on-crest framing, the
+> wave-pump HUD chyron, and the wave-line shimmer in this section were built for
+> the old model and are now either superseded or pending a refit to the fork. The
+> rest of §2 is left as-authored for history; this note is the source of truth
+> where they conflict.
 
 This is the single most important decision in the doc and it's now
 locked. Wave physics is **the** skill the player is graded on.
