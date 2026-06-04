@@ -5,12 +5,14 @@ import {
   createWaveField,
   defaultWaves,
   effectiveSteepness,
+  SHOAL_FADE_DEPTH,
   SHORE_BAND_DEPTH,
   SHORE_DEPTH_CAP,
   STEEPNESS_SUM_LIMIT,
   sampleHeight,
   sampleSurface,
   setShoreField,
+  shoalAttenuation,
   steepnessSum,
 } from '../../src/engine/sim/water/wave-field'
 
@@ -203,6 +205,80 @@ function rampShore(): ShoreField {
   if (!f) throw new Error('expected a shore field')
   return f
 }
+
+describe('terrain shoaling (CPU mirror of the GPU shallow-water fade)', () => {
+  it('is 1 with no shore field and in deep water, and squares toward 0 in the shallows', () => {
+    // No shore field installed → open water → full amplitude everywhere.
+    const open = createWaveField(defaultWaves())
+    expect(shoalAttenuation(open, 0, 0)).toBe(1)
+
+    const f = createWaveField(defaultWaves())
+    setShoreField(f, rampShore()) // depth = −0.05·x in the water (x < 0)
+    // Deep water past SHOAL_FADE_DEPTH (x = −80 → depth 4 m ≥ 3) → 1.
+    expect(shoalAttenuation(f, -80, 0)).toBe(1)
+    // depth = SHOAL_FADE_DEPTH exactly (x = −60 → depth 3 m) → 1.
+    expect(shoalAttenuation(f, -SHOAL_FADE_DEPTH / 0.05, 0)).toBeCloseTo(1, 5)
+    // Shallow (x = −30 → depth 1.5 m) → (1.5/3)² = 0.25.
+    expect(shoalAttenuation(f, -30, 0)).toBeCloseTo(0.25, 5)
+    // Land (x = +40, depth < 0) → 0.
+    expect(shoalAttenuation(f, 40, 0)).toBe(0)
+  })
+
+  it('attenuates the ambient swell in shallow water vs deep', () => {
+    const f = createWaveField(defaultWaves())
+    setShoreField(f, rampShore())
+    let deepPeak = 0
+    let shallowPeak = 0
+    for (let i = 0; i < 80; i++) {
+      advanceWaveField(f, 0.1)
+      deepPeak = Math.max(deepPeak, Math.abs(sampleHeight(f, -90, 0))) // depth 4.5 m
+      shallowPeak = Math.max(shallowPeak, Math.abs(sampleHeight(f, -8, 0))) // depth 0.4 m
+    }
+    // Deep water keeps a real swell; the shallows are flattened well below it.
+    expect(deepPeak).toBeGreaterThan(0.3)
+    expect(shallowPeak).toBeLessThan(deepPeak * 0.2)
+  })
+
+  it('keeps the buoyancy surface above the seabed in the shallows (the floor bug)', () => {
+    // The "driving on the ocean floor" failure: without shoaling, a
+    // full-amplitude ambient trough drops the buoyancy target below the seabed
+    // in shallow water. Near shore (depth ≲ SHOAL_FADE_DEPTH/2) the squared
+    // fade keeps shoal·amplitude well under the water column, so the surface
+    // stays above terrain across a full time scan. (At moderate depth with
+    // absurd amplitude both CPU and GPU can still tip over — that's parity, not
+    // desync — so we assert the guarantee where it actually holds: the surf
+    // band the rider rides through onto the beach.)
+    const f = createWaveField(defaultWaves())
+    setShoreField(f, rampShore())
+    let breaches = 0
+    let breachesUnshoaled = 0
+    const unshoaled = createWaveField(defaultWaves()) // no shore field → shoal ≡ 1
+    for (let i = 0; i < 160; i++) {
+      advanceWaveField(f, 0.05)
+      advanceWaveField(unshoaled, 0.05)
+      for (let x = -28; x <= -1; x += 1) {
+        const depth = -0.05 * x // = waterLevel − terrainY; seabed at y = −depth
+        if (sampleHeight(f, x, 0) < -depth - 1e-3) breaches++
+        if (sampleHeight(unshoaled, x, 0) < -depth - 1e-3) breachesUnshoaled++
+      }
+    }
+    expect(breaches).toBe(0)
+    // Sanity: the same swell WITHOUT shoaling really does sink below the seabed
+    // in the shallows — so the test is exercising the fix, not a no-op.
+    expect(breachesUnshoaled).toBeGreaterThan(0)
+  })
+
+  it('sampleHeight and sampleSurface agree on the shoaled height', () => {
+    const f = createWaveField(defaultWaves())
+    setShoreField(f, rampShore())
+    for (let i = 0; i < 20; i++) {
+      advanceWaveField(f, 0.13)
+      for (const x of [-90, -30, -12, -4]) {
+        expect(sampleSurface(f, x, 0).y).toBeCloseTo(sampleHeight(f, x, 0), 9)
+      }
+    }
+  })
+})
 
 describe('shore-aligned waves', () => {
   it('adds rideable height in the surf band, and nothing when strength = 0', () => {
