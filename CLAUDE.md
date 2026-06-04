@@ -15,11 +15,15 @@ write to Three.js objects, never the other way around.
 
 ## Design direction (v1)
 
-The v1 plan is set in a near-future post-warming world where coastal cities are
-drowned and arcade hoverbike racing is the post-collapse spectator sport.
-Signature mechanic is **wave mastery** (Wave Race lineage). Eleven ship-quality
-tracks across four cups, every track a recognizable real-world place seen
-post-flood. Planning trio:
+v1 is set in a near-future post-warming world where coastal cities are drowned
+and arcade hoverbike racing is the post-collapse spectator sport. Signature
+mechanic is **wave mastery** (Wave Race lineage). The v1 lineup is **complete** —
+12 ship-quality tracks across four cups (Reef / Open Sea / Continental / Drowned)
+plus the tutorial Sandbar, and 5 bike variants (Cruiser / Racer / Stunt / Scout /
+Sparrow); every track is a recognizable real-world place seen post-flood.
+Remaining work is the licensed soundtrack, the 60 fps @ 8-bike perf pass, and
+pre-launch polish — see [docs/status.md](docs/status.md) for live state. Key
+planning docs:
 
 - [docs/product-plan.md](docs/product-plan.md) — locked vision and pillars.
 - [docs/design-targets.md](docs/design-targets.md) — numeric targets, P0/P1/P2
