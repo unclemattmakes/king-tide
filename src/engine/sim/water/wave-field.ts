@@ -233,6 +233,26 @@ export const SHORE_BAND_DEPTH = 4.5
  *  leaves headroom for the ambient swell's own trough to coexist. */
 export const SHORE_DEPTH_CAP = 0.5
 
+// ---- Terrain shoaling -----------------------------------------------------
+//
+// In shallow water the rendered surface fades the ambient swell/chop (and its
+// Gerstner crest-pinch) toward flat as the water column thins, so crests can't
+// poke through the seabed. The CPU buoyancy sampler MUST apply the identical
+// attenuation or the rider floats on a surface the shader never draws — a
+// full-amplitude trough would otherwise drop the buoyancy target below the
+// seabed (the "driving on the ocean floor" bug on terrain tracks). The depth
+// driving it is the same `waterLevel − terrainY` the GPU samples, read here
+// from the baked {@link ShoreField} (it stores that depth per cell). This
+// constant MUST EXACTLY match the value baked into the TSL shader in
+// `src/engine/render/water.ts` (which imports it from here);
+// `tests/unit/shore-constants-drift.test.ts` enforces the single source.
+
+/** Water depth (m) at which the ambient waves reach full strength. Below this
+ *  the swell/chop fade out as `(depth / SHOAL_FADE_DEPTH)²` (squared so the
+ *  tail of the fade reads as a gentle calming, not an abrupt edge); at or
+ *  above it the shoaling factor is 1 (open-water, full amplitude). */
+export const SHOAL_FADE_DEPTH = 3.0
+
 export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveFieldState {
   return {
     waves,
@@ -586,6 +606,33 @@ function computeShore(field: WaveFieldState, x: number, z: number, t: number): v
   _shore.active = true
 }
 
+/**
+ * Terrain shoaling factor at world (x, z) — the multiplier applied to the
+ * ambient swell/chop (and its Gerstner displacement) so shallow water flattens
+ * toward sea level, mirroring the GPU vertex shader bit-for-bit. Reads the
+ * water depth from the baked {@link ShoreField} (the same `waterLevel −
+ * terrainY` the shader samples from the terrain heightmap; baked from the same
+ * heightmap + water level, so they agree).
+ *
+ * Returns 1 (full amplitude, no attenuation) when there's no shore field
+ * installed (open water / editor / the `?waveriders=1` test map) or when the
+ * sample is outside the baked terrain AABB (open horizon) — identical to the
+ * shader's `terrainEnabledUniform = 0` / out-of-bounds fallback. Wakes are NOT
+ * attenuated (they ride full strength, same as the shader); the shore wave has
+ * its own depth cap in `computeShore`.
+ */
+export function shoalAttenuation(field: WaveFieldState, x: number, z: number): number {
+  const shore = field.shore
+  if (!shore) return 1
+  const s = sampleShore(shore, x, z)
+  if (!s) return 1
+  const depth = s.depth
+  if (depth >= SHOAL_FADE_DEPTH) return 1
+  if (depth <= 0) return 0
+  const raw = depth / SHOAL_FADE_DEPTH
+  return raw * raw
+}
+
 // ---- Gerstner horizontal-displacement inverse map -----------------------
 //
 // The GPU shader draws full Gerstner waves: besides the vertical heightfield
@@ -692,9 +739,14 @@ export function sampleHeight(field: WaveFieldState, x: number, z: number): numbe
   // (ax,az) is that rest point. Off (steepness 0) → ax,az = x,z, the legacy
   // vertical-only path (unit tests unchanged). Wakes/shore/surge stay at the
   // world point, matching the shader.
+  // Terrain shoaling: fade the ambient waves toward flat in shallow water,
+  // identical to the GPU. Also scales the Gerstner displacement fed to the
+  // inverse map (the shader displaces by `shoal · disp`), so the rest point
+  // we solve for matches the surface the shader actually draws.
+  const shoal = shoalAttenuation(field, x, z)
   let ax = x
   let az = z
-  const qEff = effectiveSteepness(field)
+  const qEff = effectiveSteepness(field) * shoal
   if (qEff > 1e-6) {
     inverseGerstner(field, x, z, qEff)
     ax = _rest.x
@@ -712,7 +764,7 @@ export function sampleHeight(field: WaveFieldState, x: number, z: number): numbe
     const k = ((2 * Math.PI) / w.wavelength) * zoneFx.freqMult
     const omega = w.speed * k
     const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
-    y += zoneFx.heightMult * w.amplitude * Math.sin(phase)
+    y += shoal * zoneFx.heightMult * w.amplitude * Math.sin(phase)
   }
   y += zoneFx.surgeY
   for (const src of field.wakes) {
@@ -741,9 +793,13 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
   // Gerstner inverse-map (same as sampleHeight) so the surface height here
   // matches buoyancy AND the shader. Slopes/vy are evaluated at the rest
   // point — a good approximation of the rendered Gerstner normal for tilt.
+  // Terrain shoaling — see `sampleHeight`. Mirrors the GPU's shallow-water
+  // fade on the ambient height, slopes, vertical velocity AND the Gerstner
+  // displacement, so buoyancy floats on exactly the surface drawn.
+  const shoal = shoalAttenuation(field, x, z)
   let ax = x
   let az = z
-  const qEff = effectiveSteepness(field)
+  const qEff = effectiveSteepness(field) * shoal
   if (qEff > 1e-6) {
     inverseGerstner(field, x, z, qEff)
     ax = _rest.x
@@ -757,7 +813,7 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
     const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
     const s = Math.sin(phase)
     const c = Math.cos(phase)
-    const a = zoneFx.heightMult * w.amplitude
+    const a = shoal * zoneFx.heightMult * w.amplitude
     y += a * s
     rotDydx += a * c * (k * w.dirX)
     rotDydz += a * c * (k * w.dirZ)

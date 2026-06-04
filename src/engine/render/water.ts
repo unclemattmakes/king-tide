@@ -41,6 +41,7 @@ import {
   // Shore-aligned wave constants — single source of truth shared with the CPU
   // buoyancy sampler. `tests/unit/shore-constants-drift.test.ts` enforces that
   // this shader imports them rather than re-declaring literals.
+  SHOAL_FADE_DEPTH,
   SHORE_AMP,
   SHORE_BAND_DEPTH,
   SHORE_DEPTH_CAP,
@@ -769,11 +770,12 @@ export function createWaterMesh(
   // which `main.ts` sets from `track.water.height`. Used to compute
   // `waterDepth = waterY − terrainY` for shoaling + surf.
   const waterYUniform = uniform(0)
-  // Wave amplitude reaches full strength by this many meters of depth and
-  // smoothly fades to zero at the waterline (depth = 0). 3 m is the user-
-  // selected "balanced" setting — reliably eliminates clipping while
-  // keeping waves visible in mid-shallows.
-  const SHOAL_FADE_DEPTH = 3.0
+  // Wave amplitude reaches full strength by `SHOAL_FADE_DEPTH` (3 m) of depth
+  // and smoothly fades to zero at the waterline (depth = 0). The constant now
+  // lives in `wave-field.ts` so the CPU buoyancy sampler attenuates by the
+  // SAME shoaling factor (a drift test enforces the single source) — without
+  // that, the rider floats on a full-amplitude surface the shader never draws
+  // and sinks below the seabed in shallow water.
 
   // Shore field (RGBA16F): R = distance-to-shore (m), G = offshore normal X,
   // B = offshore normal Z, A = water depth (m). Same coverage + resolution as

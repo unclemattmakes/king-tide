@@ -19,9 +19,13 @@ import * as waveField from '../../src/engine/sim/water/wave-field'
 
 const WATER_TS = resolve(__dirname, '../../src/engine/render/water.ts')
 
-// The shore constants that must be shared CPU↔GPU. (SHORE_WAVE_STRENGTH_DEFAULT
-// is a render-only default, not part of the shared math, so it's excluded.)
+// The shore + shoaling constants that must be shared CPU↔GPU.
+// (SHORE_WAVE_STRENGTH_DEFAULT is a render-only default, not part of the shared
+// math, so it's excluded.) SHOAL_FADE_DEPTH drives the shallow-water amplitude
+// fade applied to BOTH the GPU vertex shader and the CPU buoyancy sampler — if
+// they drift, the rider sinks below the seabed in the shallows.
 const SHARED = [
+  'SHOAL_FADE_DEPTH',
   'SHORE_AMP',
   'SHORE_BAND_DEPTH',
   'SHORE_DEPTH_CAP',
@@ -30,7 +34,7 @@ const SHARED = [
   'SHORE_PHASE',
 ] as const
 
-describe('shore-wave constants single source (wave-field.ts ↔ water.ts)', () => {
+describe('shore + shoaling constants single source (wave-field.ts ↔ water.ts)', () => {
   const src = readFileSync(WATER_TS, 'utf-8')
 
   it('wave-field.ts exports every shared constant as a finite number', () => {
