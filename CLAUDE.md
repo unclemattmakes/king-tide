@@ -13,17 +13,35 @@ the canonical entry point.
 The sim layer cannot import Three.js. Render systems read from the ECS world and
 write to Three.js objects, never the other way around.
 
-## Design direction (v1)
+## Design direction (v2 — content restart in progress)
 
-v1 is set in a near-future post-warming world where coastal cities are drowned
-and arcade hoverbike racing is the post-collapse spectator sport. Signature
-mechanic is **wave mastery** (Wave Race lineage). The v1 lineup is **complete** —
-12 ship-quality tracks across four cups (Reef / Open Sea / Continental / Drowned)
-plus the tutorial Sandbar, and 5 bike variants (Cruiser / Racer / Stunt / Scout /
-Sparrow); every track is a recognizable real-world place seen post-flood.
-Remaining work is the licensed soundtrack, the 60 fps @ 8-bike perf pass, and
-pre-launch polish — see [docs/status.md](docs/status.md) for live state. Key
-planning docs:
+Near-future post-warming world: coastal cities drowned, arcade hoverbike racing
+is the post-collapse spectator sport; every track is a recognizable real-world
+place seen post-flood.
+
+**Where we are:** v1 hit "complete" by v1 standards, then we **blew past it and
+restarted content for v2.** So `status: 'ship'` in the catalog means
+"wired/playable," **not** "art-complete" — only **Sandbar, The Maw, South Beach
+Sunken** are dressed today; the rest are greybox route-stubs awaiting the v2
+environment-art pass.
+
+**Signature mechanic — wave mastery (v2).** Took the Mario-Kart fork: **not**
+"press forward on the crest for a boost" (the old Wave-Race pump) but **motocross
+"master the jump"** — pitch the takeoff off a crest/ramp, pitch the landing;
+pitch genuinely drives how the bike rides the swell. The pieces exist (hover
+dive/release-kick, tuck sweet-spot, geometric pop tricks); the open work is making
+that skill **legible + graded** (like the tuck meter) and refitting the wave-pump
+chyron / wave-line shimmer, which were built for the press-forward model.
+
+**Anti-grav is cut** (parked for a possible future DLC — a fun/shippability
+pandora's box). `anti-grav.ts` + HUD + Blender tools stay **parked, not active
+content**; no shipped track places anti-grav zones. Docs/changelog entries calling
+anti-grav "shipped" are v1-historical.
+
+**Real remaining work:** the wave-mastery legibility/refit above, the v2 track-art
+pass, a **60 fps @ 8-bike perf pass on target hardware** (Deck / 3070 / iPhone —
+currently unmeasured there), and **soundtrack licensing** (today's 14 tracks are
+CC0 placeholders). See [docs/status.md](docs/status.md). Key planning docs:
 
 - [docs/product-plan.md](docs/product-plan.md) — locked vision and pillars.
 - [docs/design-targets.md](docs/design-targets.md) — numeric targets, P0/P1/P2
@@ -39,7 +57,8 @@ planning docs:
   [art per bike + ComfyUI prompts](docs/bike-art-direction.md).
 - [docs/tracks/](docs/tracks/README.md) — **canonical per-track design docs**
   (one per track) with unique + common prop manifests. Embodies the
-  **no-anti-grav** direction (anti-grav cut from v1; verticality is terrain,
+  **no-anti-grav** direction (anti-grav cut from the game — parked for a possible
+  future DLC; verticality is terrain,
   ramps, banked berms, cliff drops). Supersedes the per-track stat blocks in
   the bible / specs where they disagree.
 - [docs/v1-work-breakdown.md](docs/v1-work-breakdown.md) — execution plan:

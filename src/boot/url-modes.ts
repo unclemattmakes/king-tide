@@ -24,6 +24,7 @@ export type EarlyDispatch = 'handled' | 'continue'
 const GAME_SIGNALS = [
   'race',
   'autostart',
+  'bench',
   'track',
   'bike',
   'cup',

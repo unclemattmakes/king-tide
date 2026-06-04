@@ -1,4 +1,5 @@
 import { addComponent, hasComponent, removeComponent } from 'bitecs'
+import { DEFAULT_BENCH_TRACK, installBenchmark } from './boot/benchmark-mode'
 import { installControls } from './boot/controls'
 import { startEditMode } from './boot/edit-mode'
 import { startGameLoop } from './boot/game-loop'
@@ -35,6 +36,7 @@ import {
   loadParticleAtlas,
   type ParticleSystem,
 } from './engine/render/particle-system'
+import type { RenderInfoLite } from './engine/render/perf-hud'
 import { createPhysicsDebugRenderer } from './engine/render/physics-debug'
 import { createPickupRenderSystem } from './engine/render/pickup-render'
 import { createPropsMesh } from './engine/render/props-mesh'
@@ -270,6 +272,15 @@ async function boot() {
   // Phase 3 — URL params + persisted prefs.
   const params = new URLSearchParams(window.location.search)
 
+  // Performance benchmark mode (`?bench=1`). Boots a normal race with the
+  // full 8-bike field + auto-play forced on, runs a warmup→measure window,
+  // and paints a screenshot-friendly results panel. PRODUCTION-SAFE: it must
+  // run on any device by URL (iPhone Safari, Steam Deck via the Vercel
+  // build), so it is NOT gated behind dev flags. Defaults: track `sandbar`,
+  // bike `racer`. `?bench=1&track=the-maw` selects another dressed track.
+  // The benchmark director is installed after the game loop starts (below).
+  const benchMode = params.get('bench') === '1'
+
   // M10.4 — optional multiplayer relay. `?room=<id>` opts the client into
   // a PartyKit room; otherwise the game runs single-player as before.
   // Host default flips on build mode: dev builds (vite dev) target
@@ -342,7 +353,9 @@ async function boot() {
       ? rawTrack
       : editMode
         ? 'lagoon-edit'
-        : 'lagoon'
+        : benchMode
+          ? DEFAULT_BENCH_TRACK
+          : 'lagoon'
 
   // The water-test diagnostic track exists specifically to expose the
   // LOD-tile architecture — surface the transition markers as soon as
@@ -680,8 +693,11 @@ async function boot() {
   // pins the camera near the player bike during the lobby gate, so
   // adding a fly-by on top would fight the lobby UX. Replay-playback
   // gets no intro either (it boots into the saved race flow).
-  // `?skipintro=1` URL param forces it off (handy for QA + e2e).
-  const skipIntroParam = params.get('skipintro') === '1'
+  // `?skipintro=1` URL param forces it off (handy for QA + e2e). Bench
+  // mode implies skip-intro: the cinematic fly-in / start-lights are camera
+  // cuts, not real race load, and would otherwise dominate the bench
+  // warmup+measure window instead of 8 bikes actually racing.
+  const skipIntroParam = params.get('skipintro') === '1' || benchMode
   const isMultiplayer = roomId !== null
   const introMode = isMultiplayer || skipIntroParam ? 'off' : playerSettings.preLapIntro
   const useStartLights = !isMultiplayer && playerSettings.preLapIntro !== 'off'
@@ -1471,6 +1487,27 @@ async function boot() {
     ...(waveRiderSys ? { waveRiderSys } : {}),
     ...(waveRiderRender ? { waveRiderRender } : {}),
   })
+
+  // Performance benchmark director (`?bench=1`). Installed after the race
+  // game loop is live so the warmup→measure window samples a real running
+  // race. Forces auto-play on (AI drives the player bike, hands-off) and
+  // reads draw calls / triangles from the live renderer `.info`, mirroring
+  // perf-hud. Production-safe — no dev gate. See src/boot/benchmark-mode.ts.
+  if (benchMode) {
+    // Same `renderer.info` read as perf-hud / game-loop: the WebGPURenderer
+    // behind the WebGLRenderer cast exposes the live `info.render.*` counters.
+    const benchRenderer = renderer as unknown as { info: RenderInfoLite }
+    installBenchmark({
+      renderer: benchRenderer,
+      backend,
+      controls: {
+        setAutoPlay: (on: boolean) => controls.setAutoPlay(on),
+        isAutoPlay: () => controls.isAutoPlay(),
+      },
+      trackId,
+      bikeId: playerVariant.id,
+    })
+  }
 }
 
 /**

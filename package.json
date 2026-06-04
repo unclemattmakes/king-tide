@@ -19,6 +19,7 @@
     "e2e": "playwright test",
     "e2e:install": "playwright install chromium",
     "qa": "node tools/qa/runner.mjs",
+    "profile": "node tools/profile-tracks.mjs",
     "qa:smoke": "QA_MATRIX=1 playwright test tests/e2e/qa-track-matrix.spec.ts",
     "qa:soak": "QA_SOAK=1 playwright test tests/e2e/qa-soak.spec.ts",
     "lint": "biome check .",

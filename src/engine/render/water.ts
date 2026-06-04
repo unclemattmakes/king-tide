@@ -246,10 +246,16 @@ export type WaterDebugDefaults = {
   colorize: boolean
 }
 
-/** Maximum bikes the shader supports per frame. Today's race is player +
- * 4 AI = 5 bikes; if that grows, bump this. Each slot adds an unrolled
- * vertex-stage Gaussian dimple plus a fragment-stage early-out check. */
-const MAX_BIKES = 5
+/** Maximum bikes the water shader renders wakes/dimples for per frame. MUST be
+ * ≥ the live race field: the grid is player + NUM_AI (7) = 8 bikes (see
+ * `src/boot/spawn-bikes.ts` + `grid-offsets`). Each slot adds an unrolled
+ * vertex-stage Gaussian dimple plus a fragment-stage early-out check, so this
+ * is a genuine per-bike GPU cost — the 8-bike perf pass measures exactly this.
+ * NOTE: the sim's buoyancy (`wake-update.ts` → `wave-field.ts`) already
+ * deposits a wake per bike *uncapped*, so this only bounds the *rendered*
+ * wake; keep it ≥ the grid size or trailing bikes lose their visible wake.
+ * (Was 5 — a stale "player + 4 AI" assumption that predated the 8-bike grid.) */
+const MAX_BIKES = 8
 /** Cull radius for fragment-stage bike effects: outside this distance from
  * a bike's XZ position, the ring + wake foam are guaranteed ≈ 0, so we
  * skip the per-bike math via an `If` early-out. Squared comparison avoids
