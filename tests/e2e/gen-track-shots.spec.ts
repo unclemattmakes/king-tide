@@ -64,6 +64,10 @@ const POSES: PosedShot[] | null = process.env.TRACK_SHOTS_POSES
 // world evolve in place (clouds drifting, water moving). Frames are spaced
 // TRACK_SHOTS_INTERVAL ms apart and named pose-<label>-NN.jpg.
 const POSE_FRAMES = Math.max(1, Number(process.env.TRACK_SHOTS_POSE_FRAMES ?? 1))
+// Extra query params appended to the boot URL (e.g. "wire=1&wavedots=1"), so a
+// capture can flip on dev diagnostics like the sim-surface probe. Leading '&'
+// is optional.
+const EXTRA_QS = (process.env.TRACK_SHOTS_EXTRA ?? '').replace(/^&/, '')
 
 // The DOM overlays that sit on top of the WebGPU canvas. Hidden for a
 // clean art read unless TRACK_SHOTS_HUD=1. (Element ids are in index.html.)
@@ -100,7 +104,9 @@ test.describe('track screenshot sweep', () => {
       mkdirSync(outDir, { recursive: true })
 
       await page.setViewportSize({ width: SHOT_W, height: SHOT_H })
-      await page.goto(`/?autostart=1&track=${id}`)
+      const bootUrl = `/?autostart=1&track=${id}${EXTRA_QS ? `&${EXTRA_QS}` : ''}`
+      console.log(`track-shots:${id}:url=${bootUrl}`)
+      await page.goto(bootUrl)
       await waitForReady(page)
 
       const backend = await page.evaluate(() => window.__hover!.backend())
@@ -192,7 +198,7 @@ test.describe('track screenshot sweep', () => {
       const mode = POSES ? (POSE_FRAMES > 1 ? 'posed-timelapse' : 'posed') : 'sweep'
       writeFileSync(
         path.join(outDir, 'index.json'),
-        `${JSON.stringify({ id, backend, mode, frames }, null, 2)}\n`,
+        `${JSON.stringify({ id, backend, mode, extraQs: EXTRA_QS, bootUrl, frames }, null, 2)}\n`,
       )
 
       const errored = await page.evaluate(() => window.__hover!.qa?.consoleHasErrors() ?? false)
