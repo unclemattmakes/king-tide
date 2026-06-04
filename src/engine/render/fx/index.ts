@@ -2,10 +2,10 @@ import { hasComponent, query } from 'bitecs'
 import * as THREE from 'three'
 import { attribute, texture as tslTexture } from 'three/tsl'
 import { SpriteNodeMaterial } from 'three/webgpu'
-import { playerSettings, TUCK_VFX_SCALAR } from '@/engine/player-settings'
+import { playerSettings, TUCK_VFX_SCALAR, WAVE_SPRAY_SCALAR } from '@/engine/player-settings'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
-import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
+import { sampleHeight, sampleSurface, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import {
   BikeTag,
   ControlIntent,
@@ -198,6 +198,31 @@ const BUBBLE_BODY_TOP = 1.6
 // the bubble plunge-burst doesn't fire spuriously on a wave crest that
 // just brushes the bike's hull during a normal foam-wake run.
 const BUBBLE_SUBMERGE_DEPTH = 0.25
+
+// Breaking-crest spray — the ambient "poof" fired by the wave-crest-spray
+// driver (engine/render/wave-crest-spray.ts) the moment a crest breaks
+// ANYWHERE on the sea, independent of any bike. This is the layer that stops
+// the ocean reading as a shaded rubber sheet: pale wind-torn spray erupts up
+// off the breaking crest and drifts downwind, then arcs back down. Pool sized
+// for the driver's capped burst rate (≤ ~14 cells/tick × ~6–14 sprites/burst
+// × ~0.9 s life), shared across the whole visible sea at one draw call.
+const CREST_SPRAY_CAPACITY = 700
+// Per-burst sprite count = base + strength · span, so a barely-breaking crest
+// throws a wisp and a full whitecap throws a sheet.
+const CREST_SPRAY_BASE_COUNT = 5
+const CREST_SPRAY_SPAN_COUNT = 11
+
+// Bow spray — wave-aware sheet thrown off the bike's nose when it drives INTO
+// a rising wave face. Closing rate is the bike's forward speed projected onto
+// the local up-slope of the surface (m/s of vertical climb into the face), so
+// it only fires when the rider is actually punching up a crest — directly
+// rewarding the wave-mastery pump. Reuses the crest-spray pool + emitter.
+const BOW_SPRAY_MIN_CLOSING = 1.3 // m/s vertical climb before any bow spray
+const BOW_SPRAY_FULL_CLOSING = 6.0 // m/s climb at which the sheet is full
+const BOW_SPRAY_MAX_RATE = 90 // particles/sec at full closing
+// Local-space bow point (visible nose of the 2×-scaled bike) the sheet
+// erupts from; the bike's forward is local +Z.
+const BOW_OFFSET = new THREE.Vector3(0, 0.05, 1.5)
 
 function makeRadialTexture(rgb: [number, number, number]): THREE.Texture {
   const size = 64
@@ -555,6 +580,21 @@ export function createFxSystem(
     drag: 2.0,
   })
 
+  // Breaking-crest spray — pale wind-torn water lofted off the sea's own
+  // crests. Negative gravity (real droplets fall back) + light drag gives a
+  // genuine ballistic arc rather than the buoyant hang of the foam-wake
+  // puffs, so the eye reads it as water thrown UP off the break, not as
+  // surface foam. Same pale-cyan-white as the plunge bubbles.
+  const crestSprayTex = makeRadialTexture([225, 240, 255])
+  const crestSpray = createPool({
+    capacity: CREST_SPRAY_CAPACITY,
+    defaultSize: 1.1,
+    texture: crestSprayTex,
+    blending: THREE.NormalBlending,
+    gravity: -4.0,
+    drag: 1.1,
+  })
+
   scene.add(foam.mesh)
   scene.add(sparks.mesh)
   scene.add(driftSparksBlue.mesh)
@@ -566,6 +606,7 @@ export function createFxSystem(
   scene.add(missileTrail.mesh)
   scene.add(bubbles.mesh)
   scene.add(tuckStream.mesh)
+  scene.add(crestSpray.mesh)
 
   // Reusable scratch math.
   const sternWorld = new THREE.Vector3()
@@ -573,6 +614,8 @@ export function createFxSystem(
   const exhaustWorld = new THREE.Vector3()
   const _dustWorld = new THREE.Vector3()
   const tuckWorld = new THREE.Vector3()
+  const bowWorld = new THREE.Vector3()
+  const bowFwd = new THREE.Vector3()
   const tmpQuat = new THREE.Quaternion()
   const tmpPos = new THREE.Vector3()
   const back = new THREE.Vector3()
@@ -589,6 +632,7 @@ export function createFxSystem(
       exhaust: number
       dust: number
       tuck: number
+      bowSpray: number
       driftBlue: number
       driftOrange: number
       driftPurple: number
@@ -634,6 +678,7 @@ export function createFxSystem(
       missileTrail,
       bubbles,
       tuckStream,
+      crestSpray,
       driftSparksBlue,
       driftSparksOrange,
       driftSparksPurple,
@@ -647,6 +692,7 @@ export function createFxSystem(
         missileTrailAlive: missileTrail.capacity - missileTrail.freeCount,
         bubbleAlive: bubbles.capacity - bubbles.freeCount,
         tuckAlive: tuckStream.capacity - tuckStream.freeCount,
+        crestSprayAlive: crestSpray.capacity - crestSpray.freeCount,
         driftBlueAlive: driftSparksBlue.capacity - driftSparksBlue.freeCount,
         driftOrangeAlive: driftSparksOrange.capacity - driftSparksOrange.freeCount,
         driftPurpleAlive: driftSparksPurple.capacity - driftSparksPurple.freeCount,
@@ -703,6 +749,57 @@ export function createFxSystem(
     )
   }
 
+  // Ambient breaking-crest spray. Called by the wave-crest-spray driver
+  // (wired in main.ts) at a world point (x, y, z) where a crest just broke,
+  // with `strength` in [0, 1] (the breaking-foam likelihood) and a unit wind
+  // direction the spray drifts downwind along. `scale` folds in the player's
+  // "Wave spray" setting (full / subtle) so emission density tracks the knob.
+  // Sprites erupt mostly upward with a downwind lean and a wide cone, then arc
+  // back down under the pool's negative gravity.
+  function emitWaveSpray(
+    x: number,
+    y: number,
+    z: number,
+    strength: number,
+    windX: number,
+    windZ: number,
+    scale = 1,
+  ): void {
+    const s = strength < 0 ? 0 : strength > 1 ? 1 : strength
+    const count = Math.max(
+      1,
+      Math.round((CREST_SPRAY_BASE_COUNT + s * CREST_SPRAY_SPAN_COUNT) * scale),
+    )
+    // Upward eject scales with how hard the crest is breaking; downwind drift
+    // gives the plume its wind-torn lean.
+    const up = 2.2 + s * 3.4
+    const drift = 1.2 + s * 2.2
+    for (let k = 0; k < count; k++) {
+      // Spawn jittered across a small disc on the crest so the burst reads as
+      // a chunk of the wave-face tearing, not a point source.
+      const a = Math.random() * Math.PI * 2
+      const r = Math.random() * 0.8
+      const vy = up * (0.6 + Math.random() * 0.8)
+      // Each droplet also gets a small radial outward kick on top of the
+      // shared downwind drift, for the fan.
+      const radial = 0.6 + Math.random() * 1.4
+      emit(
+        crestSpray,
+        x + Math.cos(a) * r,
+        y + 0.1,
+        z + Math.sin(a) * r,
+        windX * drift + Math.cos(a) * radial,
+        vy,
+        windZ * drift + Math.sin(a) * radial,
+        0.7,
+        0.5,
+        0.95,
+        crestSpray.defaultSize * (0.6 + s * 0.6) * (0.7 + Math.random() * 0.6),
+        1,
+      )
+    }
+  }
+
   function tick(dt: number): void {
     const eids = query(sim, [BikeTag, Transform, HoverState, ControlIntent])
 
@@ -728,6 +825,7 @@ export function createFxSystem(
           exhaust: 0,
           dust: 0,
           tuck: 0,
+          bowSpray: 0,
           driftBlue: 0,
           driftOrange: 0,
           driftPurple: 0,
@@ -843,6 +941,53 @@ export function createFxSystem(
         }
       } else {
         acc.foam = 0
+      }
+
+      // Bow spray — wave-aware sheet off the nose when the bike drives INTO a
+      // rising wave face. We read the live surface slope + the bike's forward
+      // velocity to compute the vertical "closing rate" up the face: only a
+      // rider actually climbing a crest at speed throws the sheet, so pumping
+      // into a wave is visibly rewarded while skimming a flat sea is not.
+      // Gated by the same Wave-spray setting as the ambient crest poofs.
+      const waveSprayScale = WAVE_SPRAY_SCALAR[playerSettings.waveSprayIntensity]
+      if (
+        waveField &&
+        waveSprayScale > 0 &&
+        hover.isGrounded &&
+        hover.surfaceIsWater &&
+        speed > 4
+      ) {
+        const surf = sampleSurface(waveField, transform.x, transform.z)
+        // ∇y = (−nx/ny, −nz/ny); forward is bike-local +Z in world frame.
+        bowFwd.set(0, 0, 1).applyQuaternion(tmpQuat)
+        const dydx = -surf.nx / surf.ny
+        const dydz = -surf.nz / surf.ny
+        const slopeFwd = dydx * bowFwd.x + dydz * bowFwd.z // >0 = climbing the face
+        // Vertical climb rate into the face, minus the surface's own upward
+        // motion (a face rising to meet the bike closes faster).
+        const closing = speed * Math.max(0, slopeFwd) - Math.min(0, surf.vy)
+        if (closing > BOW_SPRAY_MIN_CLOSING) {
+          const t01 = Math.min(
+            1,
+            (closing - BOW_SPRAY_MIN_CLOSING) / (BOW_SPRAY_FULL_CLOSING - BOW_SPRAY_MIN_CLOSING),
+          )
+          acc.bowSpray += BOW_SPRAY_MAX_RATE * t01 * waveSprayScale * dt
+          const n = Math.floor(acc.bowSpray)
+          if (n > 0) {
+            acc.bowSpray -= n
+            bowWorld.copy(BOW_OFFSET).applyQuaternion(tmpQuat).add(tmpPos)
+            // Erupt off the surface at the bow, leaning forward (the bike's
+            // own heading) — emitWaveSpray adds the upward arc + cone.
+            bowWorld.y = transform.y - hover.groundDistance + 0.05
+            for (let k = 0; k < n; k++) {
+              emitWaveSpray(bowWorld.x, bowWorld.y, bowWorld.z, t01, bowFwd.x, bowFwd.z, 1)
+            }
+          }
+        } else {
+          acc.bowSpray = 0
+        }
+      } else {
+        acc.bowSpray = 0
       }
 
       // Plunge bubbles — fire a thick cloud burst the moment the bike
@@ -1360,7 +1505,8 @@ export function createFxSystem(
     advance(explosion, dt)
     advance(missileTrail, dt)
     advance(bubbles, dt)
+    advance(crestSpray, dt)
   }
 
-  return { tick, triggerPumpBurst }
+  return { tick, triggerPumpBurst, emitWaveSpray }
 }

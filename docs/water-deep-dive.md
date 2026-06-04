@@ -160,10 +160,52 @@ this only if Option A's analytic swash proves too limiting.
 - **[L] FFT migration.** Only worth it if we ever want crest-folding-with-overhang, multi-cascade scale separation (200m swell + 50m chop + 10m ripple as separate cascades genuinely solved on the GPU rather than approximated with detail-normal textures), or genuine Jacobian-folding foam. None of which we need for an arcade racer — the stateless foam accumulator (M9.31) closes most of the perceptual gap with FFT-based foam already, and the detail-normal cascades (M9.39) close the rest of the silhouette gap at the cost of FFT's analytic-displacement accuracy (which buoyancy doesn't care about anyway).
 - **[L] True SSR (instead of the M9.38 planar reflector).** SSR walks rays through the scene depth buffer and would catch reflections of off-plane geometry (e.g. a bike hopping a wave casts the underside of the chassis onto the water beneath it). Our planar reflector treats the water as a flat mirror at y = 0 and renders the scene from the mirrored camera — for an arcade racer where bikes hover at small Δy above the surface, the difference is invisible. SSR also breaks at screen edges where the rays leave the framebuffer. Only worth it if reflection accuracy ever becomes a notable tell.
 
+## Breaking-crest spray (particle layer)
+
+The water *sheet* shades whitecaps + crest-foam beautifully on the GPU, but
+shading alone reads as a rubber sheet because nothing ever leaves the surface
+— every spray particle used to be keyed off a *bike* (foam wake, splash, plunge
+bubbles) or a *scripted* surge zone, so crests broke silently and flatly
+wherever the player wasn't. The breaking-crest spray layer closes that gap with
+three additive pieces, all gated by the **Settings → Video → "Wave spray"** knob
+(`waveSprayIntensity`, full / subtle / off → scalar 1 / 0.5 / 0 in
+`WAVE_SPRAY_SCALAR`):
+
+1. **Ambient crest poofs** — [`wave-crest-spray.ts`](../src/engine/render/wave-crest-spray.ts)
+   is a pure, Three-free driver (mirrors `surge-spray.ts`) that sweeps a
+   **world-anchored** lattice around the camera each frame, reads a
+   breaking-foam likelihood at each cell via the injected probe (which folds the
+   wave field's slope + crest-height through `breakingFoam`, matching the GPU
+   `heightWhitecap · slopeWhitecap` recipe), and fires a one-off burst the moment
+   a crest breaks over a cell (rising-edge + re-arm hysteresis, so exactly one
+   poof per crest per spot). The lattice is anchored to a fixed world grid so a
+   crest sweeping through world space drives each point's foam up→down; cells
+   that leave the window as the camera travels are pruned. Render-only (never
+   touches the sim), so it isn't netcode-deterministic and doesn't need to be.
+   Emits into the new `crestSpray` pool in [`fx/index.ts`](../src/engine/render/fx/index.ts)
+   (negative-gravity droplets that arc up off the break and fall back, drifting
+   downwind along the dominant swell direction).
+2. **Wave-aware bow spray** — also in `fx/index.ts`: when a bike drives INTO a
+   rising wave face (forward speed projected onto the local up-slope = vertical
+   "closing rate"), it throws a sheet off the nose, scaled by how hard it's
+   climbing. Pumping into a crest is now visibly rewarded; skimming a flat sea
+   throws nothing.
+3. **Crest-mist ribbon** — a cheap GPU emissive haze (`crestMistStrengthUniform`
+   in `water.ts`) lofted on steep breaking crests, weighted toward grazing view
+   angles + distance so it fills the far field where the discrete sprites read
+   too sparse. Tinted halfway to the horizon haze so it reads atmospheric. Set
+   live via `water-service.applyWaveSprayIntensity`.
+
 ## Tuning knobs at a glance
 
 | What | Where | Default | Range |
 |---|---|---|---|
+| Wave-spray intensity | `waveSprayIntensity` (Settings → Video → "Wave spray") | full | full / subtle / off — gates all three spray pieces below |
+| Crest-spray lattice | `radius` / `spacing` in `wave-crest-spray.ts` | 72 m / 9 m | window half-extent + cell pitch; cost ∝ (2·radius/spacing)² `sampleSurface` calls/frame |
+| Crest-spray thresholds | `fireThreshold` / `rearmThreshold` / `breakingFoam` gates | 0.55 / 0.3; slope 0.32–0.72, crest 0.28–0.78 m | raise fire to poof only on the biggest breaks; widen the `breakingFoam` gates to match the GPU whitecap look |
+| Crest-spray burst cap | `maxFiresPerTick` in `wave-crest-spray.ts` | 14 | ceiling on cells firing per frame so a swell breaking across the whole window can't dump the pool in one frame |
+| Bow-spray closing rate | `BOW_SPRAY_MIN_CLOSING` / `_FULL_CLOSING` in `fx/index.ts` | 1.3 / 6.0 m/s | vertical climb-into-face rate at which the nose sheet starts / saturates |
+| Crest-mist ribbon | `crestMistStrengthUniform` (`water-service`) + grazing/dist gates | 1.0; grazing pow-3, dist smoothstep(25,140) | 0 = off (whitecaps still draw); raise for a thicker far-field haze |
 | Per-wave steepness | `Q_BASE_DEFAULTS` in `water.ts` | `[0.35, 0.35, 0.85, 0.95, 1.0, 1.0]` | 0..1 per wave |
 | Global steepness | `steepnessUniform` (URL `?steep=N`, console `__waterSteepness(n)`) | 0.7 | 0..1.5; >1 risks fold loops |
 | Probe footprint | `PROBE_HALF_LENGTH`, `PROBE_HALF_WIDTH` in `hover.ts` | 0.8m × 0.4m | match bike visual scale |

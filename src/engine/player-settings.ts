@@ -91,6 +91,20 @@ export type EmissiveLandmarksIntensity = 'full' | 'reduced' | 'off'
  */
 export type TuckVfxIntensity = 'full' | 'subtle' | 'off'
 
+/** Breaking-crest wave spray intensity — the ambient particle "poof" that
+ *  fires off the sea's own crests as they break (plus the GPU crest-mist
+ *  ribbon on distant swells), independent of any bike. See the `crestSpray`
+ *  pool + `emitWaveSpray` in [fx/index.ts](./render/fx/index.ts), the detector
+ *  in [wave-crest-spray.ts](./render/wave-crest-spray.ts), and the
+ *  `crestMistStrength` water uniform. Render-only; sells the "this is water,
+ *  not a rubber sheet" read.
+ *
+ *  - `full`:   crests poof at full emission rate + full mist ribbon
+ *  - `subtle`: ~half rate / mist — a hint of spray without the haze
+ *  - `off`:    no crest spray, no mist (the shaded whitecaps still draw)
+ */
+export type WaveSprayIntensity = 'full' | 'subtle' | 'off'
+
 /** Pre-lap track introduction — cinematic camera shots + F1 start-lights
  *  before the race countdown arms. See
  *  [race-intro.ts](./render/race-intro.ts).
@@ -139,6 +153,8 @@ export type PlayerSettings = {
   emissiveLandmarks: EmissiveLandmarksIntensity
   /** Tuck slipstream VFX intensity — see `TuckVfxIntensity`. */
   tuckVfxIntensity: TuckVfxIntensity
+  /** Breaking-crest wave spray intensity — see `WaveSprayIntensity`. */
+  waveSprayIntensity: WaveSprayIntensity
   /** Tuck meter HUD — the accuracy gauge that shows the live tuck factor
    *  + sweet-spot target. On by default (it's a teaching aid); players who
    *  have internalised the timing can switch it off. */
@@ -283,6 +299,7 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   antiGravCameraIntensity: 'full',
   emissiveLandmarks: 'full',
   tuckVfxIntensity: 'full',
+  waveSprayIntensity: 'full',
   tuckMeter: true,
   tutorialSubtitles: true,
   tutorialCompleted: false,
@@ -377,6 +394,17 @@ export const TUCK_VFX_SCALAR: Readonly<Record<TuckVfxIntensity, number>> = Objec
   off: 0,
 })
 
+const VALID_WAVE_SPRAY: WaveSprayIntensity[] = ['full', 'subtle', 'off']
+
+/** Scalar each wave-spray step contributes. Multiplied into the crest-spray
+ *  emission rate / burst size AND the GPU crest-mist ribbon strength, so one
+ *  knob gates both halves of the effect. `off` collapses both to zero. */
+export const WAVE_SPRAY_SCALAR: Readonly<Record<WaveSprayIntensity, number>> = Object.freeze({
+  full: 1.0,
+  subtle: 0.5,
+  off: 0,
+})
+
 /** Restore persisted values into `playerSettings`. Tolerant of missing
  *  fields and of schema drift — anything missing or invalid keeps the
  *  default. Safe to call multiple times. */
@@ -420,6 +448,12 @@ export function loadPlayerSettings(): void {
   }
   if (typeof p.tuckMeter === 'boolean') {
     playerSettings.tuckMeter = p.tuckMeter
+  }
+  if (
+    typeof p.waveSprayIntensity === 'string' &&
+    (VALID_WAVE_SPRAY as string[]).includes(p.waveSprayIntensity)
+  ) {
+    playerSettings.waveSprayIntensity = p.waveSprayIntensity as WaveSprayIntensity
   }
   if (
     typeof p.emissiveLandmarks === 'string' &&
@@ -567,6 +601,17 @@ export function setTuckVfxIntensity(v: TuckVfxIntensity): void {
 export function setTuckMeter(on: boolean): void {
   playerSettings.tuckMeter = on
   savePlayerSettings()
+}
+
+export function setWaveSprayIntensity(v: WaveSprayIntensity): void {
+  playerSettings.waveSprayIntensity = v
+  savePlayerSettings()
+  // Push the live water mesh's crest-mist strength so the GPU half of the
+  // effect responds immediately (the particle half reads the setting per
+  // frame). Lazy import keeps this module cheap for non-render boot paths.
+  void import('./render/water-service').then(({ applyWaveSprayIntensity }) => {
+    applyWaveSprayIntensity(v)
+  })
 }
 
 export function setAIDifficulty(v: AIDifficulty): void {
