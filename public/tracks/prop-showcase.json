@@ -3,19 +3,871 @@
   "name": "prop-showcase",
   "lapsToFinish": 1,
   "props": [
-    { "type": "asset", "assetId": "ai/sea_boulder",  "position": { "x": 251.5,  "y": 1.59, "z": 0.0 },  "rotation": { "x": 0, "y": 0.2955, "z": 0, "w": 0.9553 }, "size": { "x": 1, "y": 1, "z": 1 } },
-    { "type": "asset", "assetId": "ai/rubble_chunk", "position": { "x": 125.7,  "y": 5.44, "z": -190.0 }, "rotation": { "x": 0, "y": 0.8415, "z": 0, "w": 0.5403 }, "size": { "x": 1, "y": 1, "z": 1 } },
-    { "type": "asset", "assetId": "ai/boat_wreck",   "position": { "x": -125.7, "y": 9.48, "z": -190.0 }, "rotation": { "x": 0, "y": -0.5227, "z": 0, "w": 0.8525 }, "size": { "x": 1, "y": 1, "z": 1 } },
-    { "type": "asset", "assetId": "ai/drowned_cab",  "position": { "x": -251.5, "y": 3.9,  "z": 0.0 },  "rotation": { "x": 0, "y": 0.7833, "z": 0, "w": 0.6216 }, "size": { "x": 1, "y": 1, "z": 1 } },
-    { "type": "asset", "assetId": "ai/ship_anchor",  "position": { "x": -125.7, "y": 7.48, "z": 190.0 },  "rotation": { "x": 0, "y": 0.1987, "z": 0, "w": 0.9801 }, "size": { "x": 1, "y": 1, "z": 1 } },
-    { "type": "asset", "assetId": "ai/marker_buoy",  "position": { "x": 125.7,  "y": 3.87, "z": 190.0 },  "rotation": { "x": 0, "y": 0.0,    "z": 0, "w": 1.0 },    "size": { "x": 1, "y": 1, "z": 1 } },
-    { "type": "asset", "assetId": "ai/drift_buoy",   "position": { "x": 0.0,    "y": 3.5,  "z": 251.5 },  "rotation": { "x": 0, "y": 0.0,    "z": 0, "w": 1.0 },    "size": { "x": 1, "y": 1, "z": 1 } },
-    { "type": "asset", "assetId": "ai/cargo_crates", "position": { "x": 0.0,    "y": 3.0,  "z": -251.5 }, "rotation": { "x": 0, "y": 0.3827, "z": 0, "w": 0.9239 }, "size": { "x": 1, "y": 1, "z": 1 } }
+    {
+      "type": "asset",
+      "assetId": "ai/sea_boulder",
+      "position": {
+        "x": 251.5,
+        "y": 1.59,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0.2955,
+        "z": 0,
+        "w": 0.9553
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "ai/rubble_chunk",
+      "position": {
+        "x": 125.7,
+        "y": 5.44,
+        "z": -190
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0.8415,
+        "z": 0,
+        "w": 0.5403
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "ai/boat_wreck",
+      "position": {
+        "x": -125.7,
+        "y": 9.48,
+        "z": -190
+      },
+      "rotation": {
+        "x": 0,
+        "y": -0.5227,
+        "z": 0,
+        "w": 0.8525
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "ai/drowned_cab",
+      "position": {
+        "x": -251.5,
+        "y": 3.9,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0.7833,
+        "z": 0,
+        "w": 0.6216
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "ai/ship_anchor",
+      "position": {
+        "x": -125.7,
+        "y": 7.48,
+        "z": 190
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0.1987,
+        "z": 0,
+        "w": 0.9801
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "ai/marker_buoy",
+      "position": {
+        "x": 125.7,
+        "y": 3.87,
+        "z": 190
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "ai/drift_buoy",
+      "position": {
+        "x": 0,
+        "y": 3.5,
+        "z": 251.5
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "ai/cargo_crates",
+      "position": {
+        "x": 0,
+        "y": 3,
+        "z": -251.5
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0.3827,
+        "z": 0,
+        "w": 0.9239
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/anchor",
+      "position": {
+        "x": 234.9,
+        "y": 1,
+        "z": 85.5
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/barrel",
+      "position": {
+        "x": 176.8,
+        "y": 1,
+        "z": 176.8
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/chest",
+      "position": {
+        "x": 93.6,
+        "y": 1,
+        "z": 231.8
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/coastal_rock",
+      "position": {
+        "x": -85.5,
+        "y": 0.5,
+        "z": 234.9
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/dock_broken",
+      "position": {
+        "x": -216.5,
+        "y": 1,
+        "z": 125
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -234.9,
+        "y": 1,
+        "z": -85.5
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/oil_drum",
+      "position": {
+        "x": -85.5,
+        "y": 1,
+        "z": -234.9
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/palm",
+      "position": {
+        "x": 216.5,
+        "y": 0.3,
+        "z": -125
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/cliff_1",
+      "position": {
+        "x": 258,
+        "y": 1,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/cliff_3",
+      "position": {
+        "x": 252.4,
+        "y": 1,
+        "z": 53.6
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/rock_2",
+      "position": {
+        "x": 235.7,
+        "y": 1,
+        "z": 104.9
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/dock",
+      "position": {
+        "x": 208.7,
+        "y": 1,
+        "z": 151.6
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/palm_1",
+      "position": {
+        "x": 172.6,
+        "y": 1,
+        "z": 191.7
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/house_1",
+      "position": {
+        "x": 129,
+        "y": 1,
+        "z": 223.4
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/house_3",
+      "position": {
+        "x": 79.7,
+        "y": 1,
+        "z": 245.4
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/chest_gold",
+      "position": {
+        "x": 27,
+        "y": 1,
+        "z": 256.6
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/bucket",
+      "position": {
+        "x": -27,
+        "y": 1,
+        "z": 256.6
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/cannon",
+      "position": {
+        "x": -79.7,
+        "y": 1,
+        "z": 245.4
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/container_small",
+      "position": {
+        "x": -129,
+        "y": 1,
+        "z": 223.4
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/crate",
+      "position": {
+        "x": -172.6,
+        "y": 1,
+        "z": 191.7
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/debris_car",
+      "position": {
+        "x": -208.7,
+        "y": 1,
+        "z": 151.6
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/debris_pile",
+      "position": {
+        "x": -235.7,
+        "y": 1,
+        "z": 104.9
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/gas_tank",
+      "position": {
+        "x": -252.4,
+        "y": 1,
+        "z": 53.6
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/street_light",
+      "position": {
+        "x": -258,
+        "y": 1,
+        "z": 0
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/water_tank",
+      "position": {
+        "x": -252.4,
+        "y": 1,
+        "z": -53.6
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/bamboo",
+      "position": {
+        "x": -235.7,
+        "y": 1,
+        "z": -104.9
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/cactus",
+      "position": {
+        "x": -208.7,
+        "y": 1,
+        "z": -151.6
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/pumpkin",
+      "position": {
+        "x": -172.6,
+        "y": 1,
+        "z": -191.7
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/corn",
+      "position": {
+        "x": -129,
+        "y": 1,
+        "z": -223.4
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/boat",
+      "position": {
+        "x": -79.7,
+        "y": 1,
+        "z": -245.4
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/cruise_ship",
+      "position": {
+        "x": -27,
+        "y": 1,
+        "z": -256.6
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/sail_ship",
+      "position": {
+        "x": 27,
+        "y": 1,
+        "z": -256.6
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/clownfish",
+      "position": {
+        "x": 208.7,
+        "y": 1,
+        "z": -151.6
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/neon_sign",
+      "position": {
+        "x": 235.7,
+        "y": 1,
+        "z": -104.9
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/street_lamp_neon",
+      "position": {
+        "x": 252.4,
+        "y": 1,
+        "z": -53.6
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      }
+    }
   ],
   "environmentGlb": "/assets/tracks/prop-showcase.glb",
   "water": {
-    "height": 0.0,
-    "waveHeight": 1.0,
+    "height": 0,
+    "waveHeight": 1,
     "waveFreq": 0.4000000059604645
   },
   "start": {
@@ -31,65 +883,65 @@
       "index": 0,
       "position": {
         "x": -1.4210854715202004e-14,
-        "y": 5.0,
-        "z": -205.0
+        "y": 5,
+        "z": -205
       },
       "rotation": {
-        "x": 0.0,
-        "y": 1.0,
-        "z": 0.0,
+        "x": 0,
+        "y": 1,
+        "z": 0,
         "w": 6.123233995736766e-17
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     },
     {
       "index": 1,
       "position": {
-        "x": -235.0,
-        "y": 5.0,
+        "x": -235,
+        "y": 5,
         "z": -2.842170943040401e-14
       },
       "rotation": {
-        "x": 0.0,
-        "y": 1.0,
-        "z": 0.0,
+        "x": 0,
+        "y": 1,
+        "z": 0,
         "w": 6.123233995736766e-17
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     },
     {
       "index": 2,
       "position": {
         "x": 4.263256414560601e-14,
-        "y": 5.0,
-        "z": 205.0
+        "y": 5,
+        "z": 205
       },
       "rotation": {
-        "x": 0.0,
-        "y": 1.0,
-        "z": 0.0,
+        "x": 0,
+        "y": 1,
+        "z": 0,
         "w": 6.123233995736766e-17
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     },
     {
       "index": 3,
       "position": {
         "x": 214.91400146484375,
-        "y": 5.0,
+        "y": 5,
         "z": 65.3923568725586
       },
       "rotation": {
-        "x": 0.0,
-        "y": 1.0,
-        "z": 0.0,
+        "x": 0,
+        "y": 1,
+        "z": 0,
         "w": 6.123233995736766e-17
       },
-      "halfWidth": 14.0,
-      "height": 6.0
+      "halfWidth": 14,
+      "height": 6
     }
   ],
   "aiSplines": [
@@ -98,9 +950,9 @@
       "points": [],
       "anchors": [
         {
-          "x": 235.0,
+          "x": 235,
           "y": 3.5,
-          "z": -0.0
+          "z": 0
         },
         {
           "x": 140.06214904785156,
@@ -130,7 +982,7 @@
         {
           "x": -224.5053253173828,
           "y": 3.500000476837158,
-          "z": -0.0
+          "z": 0
         },
         {
           "x": -203.455078125,
@@ -164,23 +1016,23 @@
   "boostPads": [],
   "antiGravZones": [],
   "waveZones": [],
-  "gateSpacing": 60.0,
+  "gateSpacing": 60,
   "terrainShader": {
-    "altMin": -50.0,
-    "altMax": 120.0,
+    "altMin": -50,
+    "altMax": 120,
     "slopeStart": 0.8500000238418579,
     "slopeEnd": 0.550000011920929,
     "variation": 0.30000001192092896,
-    "wetBand": 2.0,
+    "wetBand": 2,
     "pathTint": [
       0.30000001192092896,
       0.23999999463558197,
       0.18000000715255737
     ],
     "warpStrength": 0.5,
-    "macroScale": 120.0,
-    "microScale": 8.0,
-    "altJitter": 4.0,
+    "macroScale": 120,
+    "microScale": 8,
+    "altJitter": 4,
     "screeBand": 0.25,
     "saturation": 1.0499999523162842,
     "triplanar": 0.6000000238418579
@@ -189,9 +1041,9 @@
     "tint": "#cfe3f2",
     "cloudiness": 0.30000001192092896,
     "sunIntensity": 1.149999976158142,
-    "fogNear": 350.0,
-    "fogFar": 1400.0,
-    "timeOfDay": 90.0,
+    "fogNear": 350,
+    "fogFar": 1400,
+    "timeOfDay": 90,
     "colorGrade": "big_sur_golden",
     "bloom": 0.5,
     "seaStateBeaufort": 3
