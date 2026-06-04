@@ -4,11 +4,14 @@ import {
   advanceWaveField,
   createWaveField,
   defaultWaves,
+  effectiveSteepness,
   SHORE_BAND_DEPTH,
   SHORE_DEPTH_CAP,
+  STEEPNESS_SUM_LIMIT,
   sampleHeight,
   sampleSurface,
   setShoreField,
+  steepnessSum,
 } from '../../src/engine/sim/water/wave-field'
 
 describe('wave field', () => {
@@ -287,5 +290,62 @@ describe('shore-aligned waves', () => {
     for (let x = -50; x <= 50; x += 25) {
       expect(sampleHeight(a, x, 7)).toBe(sampleHeight(b, x, 7))
     }
+  })
+})
+
+describe('gerstner sim↔render sync', () => {
+  it('steepness 0 leaves sampleHeight vertical-only (regression)', () => {
+    const a = createWaveField(defaultWaves()) // steepness defaults to 0
+    const b = createWaveField(defaultWaves())
+    b.steepness = 0
+    for (let i = 0; i < 5; i++) {
+      advanceWaveField(a, 0.31)
+      advanceWaveField(b, 0.31)
+      for (let x = -20; x <= 20; x += 10) {
+        for (let z = -20; z <= 20; z += 10) {
+          expect(sampleHeight(a, x, z)).toBeCloseTo(sampleHeight(b, x, z), 12)
+        }
+      }
+    }
+  })
+
+  it('effectiveSteepness clamps as amplitude grows (no fold) and eases the pinch', () => {
+    const f = createWaveField(defaultWaves())
+    f.steepness = 0.7
+    // Default amplitudes: budget under the limit → no clamp.
+    expect(effectiveSteepness(f)).toBeCloseTo(0.7, 12)
+    // Crank amplitude until the budget exceeds the limit → effective Q eases.
+    for (const w of f.waves) w.amplitude *= 6
+    const qEff = effectiveSteepness(f)
+    expect(qEff).toBeLessThan(0.7)
+    expect(qEff * steepnessSum(f)).toBeLessThanOrEqual(STEEPNESS_SUM_LIMIT + 1e-9)
+  })
+
+  it('sampleHeight and sampleSurface agree on height WITH steepness on', () => {
+    const f = createWaveField(defaultWaves())
+    f.steepness = 0.7
+    for (let i = 0; i < 8; i++) {
+      advanceWaveField(f, 0.29)
+      for (let x = -25; x <= 25; x += 12.5) {
+        for (let z = -25; z <= 25; z += 12.5) {
+          expect(sampleHeight(f, x, z)).toBeCloseTo(sampleSurface(f, x, z).y, 9)
+        }
+      }
+    }
+  })
+
+  it('steepness actually shifts the sampled surface (inverse-map applied)', () => {
+    const a = createWaveField(defaultWaves())
+    const b = createWaveField(defaultWaves())
+    b.steepness = 0.8
+    advanceWaveField(a, 1.0)
+    advanceWaveField(b, 1.0)
+    let maxDelta = 0
+    for (let x = -30; x <= 30; x += 3) {
+      for (let z = -30; z <= 30; z += 3) {
+        maxDelta = Math.max(maxDelta, Math.abs(sampleHeight(a, x, z) - sampleHeight(b, x, z)))
+      }
+    }
+    expect(maxDelta).toBeGreaterThan(0.05)
   })
 })

@@ -37,6 +37,7 @@ import {
 import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
 import {
+  effectiveSteepness,
   // Shore-aligned wave constants — single source of truth shared with the CPU
   // buoyancy sampler. `tests/unit/shore-constants-drift.test.ts` enforces that
   // this shader imports them rather than re-declaring literals.
@@ -112,6 +113,13 @@ export type WaterMesh = {
    *  unchanged for tracks where no heightmap is installed (e.g. editor
    *  mode) — wave amplitude stays at full strength everywhere. */
   setTerrainHeightmap(heightmap: import('./terrain-heightmap').TerrainHeightmap): void
+  /** Diagnostic: the world position the vertex shader places the rest point
+   *  (x, z) — Gerstner height + horizontal displacement — via a CPU mirror of
+   *  the shader using the same live uniforms/constants. The sim buoyancy
+   *  (`sampleHeight`) is vertical-only, so the XZ gap between this point and
+   *  (x, z) IS the render↔sim horizontal displacement. Open-water only (no
+   *  terrain/shore/bike terms). Writes into `out` to avoid per-call alloc. */
+  renderVertex(x: number, z: number, out: { x: number; y: number; z: number }): void
   /** Live-tunable knobs for the water debug menu. All setters apply
    *  immediately — no material rebuild, no reload. */
   debug: {
@@ -610,6 +618,14 @@ export function createWaterMesh(
   const pinchCosUniform = uniform(Math.cos((PINCH_DIRECTION_DEFAULT * Math.PI) / 180))
   const pinchSinUniform = uniform(Math.sin((PINCH_DIRECTION_DEFAULT * Math.PI) / 180))
 
+  // The wave field is the single source of truth for the Gerstner params the
+  // CPU buoyancy sampler reads; seed it from this mesh's construction defaults
+  // so sim + render displace identically. The menu setters + `tick` keep them
+  // in lockstep afterward.
+  field.steepness = initialSteepness
+  field.pinchCos = Math.cos((PINCH_DIRECTION_DEFAULT * Math.PI) / 180)
+  field.pinchSin = Math.sin((PINCH_DIRECTION_DEFAULT * Math.PI) / 180)
+
   // Wave bearing (degrees, -180..180). Rotates the WHOLE wave field's
   // travel direction in world XZ so the user can re-aim the swell
   // train (e.g. "waves should be coming toward the island"). Applied
@@ -677,18 +693,26 @@ export function createWaterMesh(
   const outerDebugColorUniform = uniform(OUTER_DEBUG_COLOR_DEFAULT)
   const skirtDebugColorUniform = uniform(SKIRT_DEBUG_COLOR_DEFAULT)
   const debugColorizeMixUniform = uniform(0)
-  // Per-group amplitude scales — one for swells (waves 0–1), one for chops
-  // (waves 2–5). Both default to 1.0 (no scale). The shader multiplies the
-  // baked per-wave constants by these uniforms; the CPU buoyancy mirrors
-  // by mutating `field.waves[i].amplitude` directly so the two paths stay
-  // in lockstep. Baseline amplitudes are captured here so toggling the
-  // scales preserves the relative balance of the wave preset.
+  // Per-wave amplitude is owned by `field.waves[i].amplitude` (the CPU
+  // buoyancy field) and mirrored to the GPU live (see `waveAmpUniform`),
+  // so the rendered surface and the buoyancy field can never disagree on
+  // how tall the waves are. SWELL_INDICES tags the two long swells
+  // (waves 0–1) vs the chop bands (2–5) so the debug menu's separate
+  // swell/chop sliders scale the right subset; `baseAmplitudes` is the
+  // pristine preset captured before any per-track / menu scaling, so the
+  // sliders scale from a stable baseline.
   const SWELL_INDICES = new Set([0, 1])
-  const swellScaleUniform = uniform(1)
-  const chopScaleUniform = uniform(1)
-  // Per-wave baseline amplitudes — captured here so the swell/chop
-  // scale sliders can restore the original balance after scrubbing.
   const baseAmplitudes = field.waves.map((w) => w.amplitude)
+  // Live per-wave amplitude uniform array. The vertex shader reads THIS
+  // instead of a constant baked at construction, so every amplitude writer
+  // — per-track Beaufort (main.ts), the per-lap storm ramp (lap-weather.ts),
+  // and the swell/chop sliders below — lands on the rendered surface in
+  // lockstep with CPU buoyancy, which samples the same `field.waves`.
+  // `field.waves` is the single source of truth; `tick()` copies it here
+  // each frame (≤6 scalars). This is what keeps "what you see" and "what the
+  // rider floats on" identical.
+  const liveWaveAmps = field.waves.map((w) => w.amplitude)
+  const waveAmpUniform = uniformArray(liveWaveAmps, 'float')
   // Time scale for the main loop. Stored here rather than as a uniform
   // because dt is consumed by `advanceWaveField` on the CPU side; the
   // shader reads `field.time` regardless of how fast it advances.
@@ -799,10 +823,10 @@ export function createWaterMesh(
      * long swells (which stay rolling). */
     qBase: number
   }
-  // Per-wave Q defaults — index-aligned to defaultWaves(): two long swells,
-  // four chop scales. Swells stay gentle; chops get sharp ridges.
-  const Q_BASE_DEFAULTS = [0.35, 0.35, 0.85, 0.95, 1.0, 1.0]
-  const waveConsts: WaveConst[] = field.waves.map((w, i) => {
+  // Per-wave Q comes from the wave field (`defaultWaves` sets it), so this
+  // shader and the CPU buoyancy sampler pinch crests by the same per-wave
+  // amount — they share one source of truth.
+  const waveConsts: WaveConst[] = field.waves.map((w) => {
     const k = (2 * Math.PI) / w.wavelength
     return {
       k,
@@ -811,7 +835,7 @@ export function createWaterMesh(
       dirZ: w.dirZ,
       amp: w.amplitude,
       phase: w.phase,
-      qBase: Q_BASE_DEFAULTS[i] ?? 0.7,
+      qBase: w.qBase ?? 0.7,
     }
   })
 
@@ -819,8 +843,9 @@ export function createWaterMesh(
   // same values you'd get from a vertical-only sum of sines, used both for the
   // wave's vertical displacement and for the x/z components of the surface
   // normal (cosine slopes). Waves are unrolled at build time. Per-wave amp
-  // is multiplied by `swellScaleUniform` (waves 0–1) or `chopScaleUniform`
-  // (waves 2–5) so the debug menu can rebalance swell vs chop live.
+  // is read live from `waveAmpUniform` (mirrors `field.waves[i].amplitude`),
+  // so per-track Beaufort, the lap-weather storm ramp, and the debug menu's
+  // swell/chop sliders all show on the surface in lockstep with buoyancy.
   const gerstnerHeight = Fn(([x, z, t]: [unknown, unknown, unknown]) => {
     const xN = x as ReturnType<typeof float>
     const zN = z as ReturnType<typeof float>
@@ -836,7 +861,10 @@ export function createWaterMesh(
     const rotDydz = float(0).toVar()
     for (let i = 0; i < waveConsts.length; i++) {
       const w = waveConsts[i]!
-      const ampScale = SWELL_INDICES.has(i) ? swellScaleUniform : chopScaleUniform
+      // Live per-wave amplitude (mirrors `field.waves[i].amplitude`); the
+      // wavenumber/direction/phase stay baked. See `waveAmpUniform`.
+      // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
+      const ampI = waveAmpUniform.element(i) as any
       const phase = float(w.k * w.dirX)
         .mul(xRot)
         .add(float(w.k * w.dirZ).mul(zRot))
@@ -844,9 +872,9 @@ export function createWaterMesh(
         .add(float(w.phase))
       const s = sin(phase)
       const c = cos(phase)
-      y.addAssign(s.mul(w.amp).mul(ampScale))
-      rotDydx.addAssign(c.mul(w.amp * w.k * w.dirX).mul(ampScale))
-      rotDydz.addAssign(c.mul(w.amp * w.k * w.dirZ).mul(ampScale))
+      y.addAssign(s.mul(ampI))
+      rotDydx.addAssign(c.mul(ampI).mul(float(w.k * w.dirX)))
+      rotDydz.addAssign(c.mul(ampI).mul(float(w.k * w.dirZ)))
     }
     // Rotate the rotated-frame slopes back to world XZ.
     const dydx = rotDydx.mul(waveBearingCosUniform).sub(rotDydz.mul(waveBearingSinUniform))
@@ -877,7 +905,10 @@ export function createWaterMesh(
     const qSum = float(0).toVar()
     for (let i = 0; i < waveConsts.length; i++) {
       const w = waveConsts[i]!
-      const ampScale = SWELL_INDICES.has(i) ? swellScaleUniform : chopScaleUniform
+      // Live per-wave amplitude (mirrors `field.waves[i].amplitude`); see
+      // `waveAmpUniform`. Wavenumber/direction/phase stay baked.
+      // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
+      const ampI = waveAmpUniform.element(i) as any
       const phase = float(w.k * w.dirX)
         .mul(xRot)
         .add(float(w.k * w.dirZ).mul(zRot))
@@ -903,15 +934,10 @@ export function createWaterMesh(
       // at the same y(x,z) regardless of pinch direction.
       const rotDirX = float(w.dirX).mul(pinchCosUniform).sub(float(w.dirZ).mul(pinchSinUniform))
       const rotDirZ = float(w.dirX).mul(pinchSinUniform).add(float(w.dirZ).mul(pinchCosUniform))
-      dxRot.addAssign(qScaled.mul(rotDirX).mul(float(w.amp)).mul(c).mul(ampScale))
-      dzRot.addAssign(qScaled.mul(rotDirZ).mul(float(w.amp)).mul(c).mul(ampScale))
+      dxRot.addAssign(qScaled.mul(rotDirX).mul(ampI).mul(c))
+      dzRot.addAssign(qScaled.mul(rotDirZ).mul(ampI).mul(c))
       // Normal y-component reduction: Σ Q · k · A · sin(phase)
-      qSum.addAssign(
-        qScaled
-          .mul(float(w.k * w.amp))
-          .mul(s)
-          .mul(ampScale),
-      )
+      qSum.addAssign(qScaled.mul(float(w.k)).mul(ampI).mul(s))
     }
     // Rotate the rotated-frame horizontal displacement back to
     // world XZ so the vertex shader can add it to positionLocal.xz
@@ -2430,7 +2456,8 @@ export function createWaterMesh(
     // folding at the default steepness of 0.7; beyond ~6× expect some
     // tip-over on the largest swells.
     const v = clamp01(s, 0, 8)
-    swellScaleUniform.value = v
+    // Write the CPU field only; the shader reads this live via
+    // `waveAmpUniform` (synced in tick()) — no separate GPU uniform.
     for (let i = 0; i < field.waves.length; i++) {
       if (SWELL_INDICES.has(i)) field.waves[i]!.amplitude = baseAmplitudes[i]! * v
     }
@@ -2440,7 +2467,6 @@ export function createWaterMesh(
     // than swell; this still permits a stormy surface without
     // sustained crest flips.
     const v = clamp01(s, 0, 6)
-    chopScaleUniform.value = v
     for (let i = 0; i < field.waves.length; i++) {
       if (!SWELL_INDICES.has(i)) field.waves[i]!.amplitude = baseAmplitudes[i]! * v
     }
@@ -2448,7 +2474,11 @@ export function createWaterMesh(
   const debug: WaterMesh['debug'] = {
     defaults,
     setSteepness(s) {
-      steepnessUniform.value = clamp01(s, 0, 1.5)
+      // The field owns steepness (the CPU buoyancy sampler reads it). The GPU
+      // uniform is synced to the CLAMPED effective steepness here and in tick()
+      // so both sides pinch by the same sub-folding amount.
+      field.steepness = clamp01(s, 0, 1.5)
+      steepnessUniform.value = effectiveSteepness(field)
     },
     setSwellScale: applySwellScale,
     setChopScale: applyChopScale,
@@ -2509,6 +2539,9 @@ export function createWaterMesh(
       const rad = (v * Math.PI) / 180
       pinchCosUniform.value = Math.cos(rad)
       pinchSinUniform.value = Math.sin(rad)
+      // Mirror onto the field so CPU buoyancy pinches in the same direction.
+      field.pinchCos = Math.cos(rad)
+      field.pinchSin = Math.sin(rad)
     },
     setWaveBearing(deg) {
       // -180..180° — rotate the whole wave field. Updates the
@@ -2941,6 +2974,17 @@ export function createWaterMesh(
 
   function tick(impacts?: readonly BikeImpact[], originXZ?: { x: number; z: number }): void {
     tNode.value = field.time
+    // Mirror the live per-wave amplitudes into the GPU uniform so the
+    // rendered surface tracks whatever mutated `field.waves` this frame
+    // (per-track Beaufort, the per-lap storm ramp, the debug menu). Buoyancy
+    // reads the same `field.waves`, so visuals and physics stay locked.
+    for (let i = 0; i < liveWaveAmps.length; i++) {
+      liveWaveAmps[i] = field.waves[i]!.amplitude
+    }
+    // Keep the GPU steepness at the CLAMPED effective value — it depends on the
+    // live amplitudes that Beaufort / lap-weather / the menu mutate. The CPU
+    // buoyancy sampler clamps identically, so render + physics pinch the same.
+    steepnessUniform.value = effectiveSteepness(field)
     // Sync the world water-surface Y from the mesh so the shoaling /
     // surf shader reads the right "what's the sea level" value even
     // when callers mutate `mesh.position.y` directly (e.g. tracks with
@@ -2974,6 +3018,41 @@ export function createWaterMesh(
   function setSunDirection(x: number, y: number, z: number): void {
     const len = Math.hypot(x, y, z) || 1
     sunDirUniform.value.set(x / len, y / len, z / len)
+  }
+
+  // CPU mirror of the vertex shader's transform (gerstnerHeight +
+  // gerstnerDisp) using the same live uniforms/constants the GPU reads.
+  // Open-water only: no terrain shoaling / shore / bike terms — a clean
+  // diagnostic point to compare against the vertical-only `sampleHeight`.
+  // See the WaterMesh `renderVertex` type doc.
+  function renderVertex(x: number, z: number, out: { x: number; y: number; z: number }): void {
+    const cosB = waveBearingCosUniform.value as number
+    const sinB = waveBearingSinUniform.value as number
+    const xRot = x * cosB + z * sinB
+    const zRot = -x * sinB + z * cosB
+    const t = field.time
+    const pinchCos = pinchCosUniform.value as number
+    const pinchSin = pinchSinUniform.value as number
+    const steep = steepnessUniform.value as number
+    let y = 0
+    let dxRot = 0
+    let dzRot = 0
+    for (let i = 0; i < waveConsts.length; i++) {
+      const w = waveConsts[i]!
+      const amp = liveWaveAmps[i]!
+      const phase = w.k * w.dirX * xRot + w.k * w.dirZ * zRot - t * w.omega + w.phase
+      const s = Math.sin(phase)
+      const c = Math.cos(phase)
+      y += s * amp
+      const qScaled = steep * w.qBase
+      const rotDirX = w.dirX * pinchCos - w.dirZ * pinchSin
+      const rotDirZ = w.dirX * pinchSin + w.dirZ * pinchCos
+      dxRot += qScaled * rotDirX * amp * c
+      dzRot += qScaled * rotDirZ * amp * c
+    }
+    out.x = x + dxRot * cosB - dzRot * sinB
+    out.y = y + mesh.position.y
+    out.z = z + dxRot * sinB + dzRot * cosB
   }
 
   function setHorizonColor(r: number, g: number, b: number): void {
@@ -3034,6 +3113,7 @@ export function createWaterMesh(
   return {
     mesh,
     tick,
+    renderVertex,
     setSunDirection,
     setHorizonColor,
     setTerrainHeightmap,

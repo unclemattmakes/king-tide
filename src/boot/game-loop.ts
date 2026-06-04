@@ -351,6 +351,12 @@ const PUMP_IMPULSE_DV_TRICK = 3.0
 const PUMP_IMPULSE_DV_BOOST = 14.5
 const PUMP_IMPULSE_DV_TRICK_LIFT = 4.5
 const PUMP_SPEED_CAP_FRAC = 1.3
+
+/** Minimum clearance (m) the chase camera keeps above the local water
+ *  surface. The bike rides over crests via the wave-tracking buoyancy
+ *  (see WATER_SURFACE_FOLLOW in hover.ts); this clamp is the visual safety
+ *  net so a tall crest behind the bike can't punch the lens underwater. */
+const CAMERA_WATER_CLEARANCE = 0.6
 function applyPumpImpulse(
   phys: PhysicsWorld,
   playerEid: number,
@@ -1672,11 +1678,16 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // so the player never appears to outrun it. Tracks the camera (not the
     // bike) so look-back / spectator pans don't shift the horizon.
     horizonRing.tick({ x: camera.position.x, z: camera.position.z })
-    updateUnderwaterFog(
-      scene,
-      camera.position.y,
-      sampleHeight(waveField, camera.position.x, camera.position.z),
-    )
+    // Camera water clamp + underwater-fog blend share one surface sample.
+    const camWaterY = sampleHeight(waveField, camera.position.x, camera.position.z)
+    // Keep the chase camera above the surface — the bike rides over crests via
+    // the wave-tracking buoyancy (hover.ts), and this is the visual safety net
+    // so a tall crest behind the bike can't punch the view underwater.
+    // CAMERA_WATER_CLEARANCE keeps the lens just above the waterline without
+    // floating obviously high.
+    const minCamY = camWaterY + CAMERA_WATER_CLEARANCE
+    if (camera.position.y < minCamY) camera.position.y = minCamY
+    updateUnderwaterFog(scene, camera.position.y, camWaterY)
     bikeRender()
     riderRender()
     pickupRender(dt)

@@ -15,12 +15,14 @@ import { type ShoreField, sampleShore } from './shore-field'
  *      the GPU shader so visuals and buoyancy stay locked. This is what
  *      lets a trailing rider "jump" the player's wake.
  *
- * For arcade purposes we use the simplified "vertical-only" Gerstner formulation:
+ * Ambient waves are a sum of sines:
  *   y(x, z, t) = Σ A_i · sin(k_i · (D_i · xz) − ω_i · t + φ_i)
- * skipping the horizontal displacement term. This is dramatically faster to
- * sample (no inverse mapping needed for a given (x,z)) and the visual error
- * is small for the wave amplitudes we use. The wake-and-launch feel comes from
- * the slope/normal more than from horizontal water-particle motion.
+ * When the field's `steepness` is 0 (the default, and what most tests use)
+ * this vertical-only heightfield IS the surface — cheap, no inverse mapping.
+ * When steepness > 0 the GPU shader also displaces vertices horizontally
+ * (Gerstner crest-pinch); `sampleHeight`/`sampleSurface` then inverse-map that
+ * displacement so buoyancy floats on exactly the surface the shader draws.
+ * See the "Gerstner horizontal-displacement inverse map" section below.
  */
 
 export type Wave = {
@@ -35,6 +37,12 @@ export type Wave = {
   speed: number
   /** Static phase offset, radians. */
   phase: number
+  /** Per-wave Gerstner steepness coefficient, multiplied by the field's
+   *  global `steepness`. Higher = sharper lateral crest pinch (chops sharper
+   *  than swells). Optional — the samplers fall back to a default when absent
+   *  (e.g. test-constructed waves). Mirrors the per-wave Q the GPU shader
+   *  bakes, so CPU buoyancy and the rendered mesh pinch identically. */
+  qBase?: number
 }
 
 /**
@@ -93,6 +101,19 @@ export type WaveFieldState = {
    *  `shoreWaveStrength` uniform — the water debug menu sets both from one
    *  scalar, exactly like `waveBearing`. */
   shoreWaveStrength: number
+  /** Global Gerstner steepness Q (0 = vertical-only heightfield). When > 0,
+   *  `sampleHeight`/`sampleSurface` inverse-map the horizontal displacement so
+   *  buoyancy floats on the SAME surface the GPU shader draws (which pinches
+   *  crests sideways). Set by the render layer / water menu; default 0 keeps
+   *  the legacy vertical-only behaviour (and the unit tests) unchanged. The
+   *  effective Q applied at sample time is clamped sub-folding — see
+   *  `effectiveSteepness`. */
+  steepness: number
+  /** Pre-computed cos/sin of the Gerstner pinch direction (rotates the
+   *  horizontal-displacement vector relative to wave travel). Mirrors the
+   *  shader's pinch uniforms. Default (1, 0) = along-wave. */
+  pinchCos: number
+  pinchSin: number
 }
 
 /**
@@ -222,6 +243,9 @@ export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveF
     zones: [],
     shore: null,
     shoreWaveStrength: 1,
+    steepness: 0,
+    pinchCos: 1,
+    pinchSin: 0,
   }
 }
 
@@ -562,6 +586,95 @@ function computeShore(field: WaveFieldState, x: number, z: number, t: number): v
   _shore.active = true
 }
 
+// ---- Gerstner horizontal-displacement inverse map -----------------------
+//
+// The GPU shader draws full Gerstner waves: besides the vertical heightfield
+// it pushes each vertex SIDEWAYS toward crests (∝ Q·A) to sharpen them. So the
+// rendered surface height at a world point (x,z) is the height of the rest
+// vertex that displaced TO (x,z) — NOT the vertical-only Σ A·sin(phase(x,z)).
+// To float buoyancy on exactly what the shader draws, we invert that
+// displacement: find the rest (x0,z0) whose displaced position is (x,z), then
+// evaluate the heightfield there. A few fixed-point iterations converge while
+// the steepness budget stays sub-folding (see `effectiveSteepness`).
+
+/** Fixed-point iterations for the inverse map. The displacement is a
+ *  contraction with factor ≈ Σ Q·qBase·A·k (kept < the limit below), so 4
+ *  steps drive the residual to sub-millimetre at game steepness. */
+const GERSTNER_INVERSE_ITERS = 4
+/** Hard ceiling on Σ Q·qBase·A·k. Past ~1 the Gerstner crest self-intersects
+ *  (folds) and the inverse map stops being single-valued; clamping the
+ *  effective steepness below this keeps it convergent AND auto-eases the
+ *  pinch as the player cranks amplitude. */
+export const STEEPNESS_SUM_LIMIT = 0.85
+/** qBase used when a wave omits it (e.g. test-constructed waves). */
+const Q_BASE_FALLBACK = 0.7
+
+// Module scratch — single-threaded synchronous callers read immediately.
+const _disp = { dx: 0, dz: 0 }
+const _rest = { x: 0, z: 0 }
+
+/** Σ qBase_i · |A_i| · k_i across the ambient waves — the steepness budget at
+ *  Q = 1. The effective Q is clamped so Q · this ≤ {@link STEEPNESS_SUM_LIMIT}. */
+export function steepnessSum(field: WaveFieldState): number {
+  let s = 0
+  for (const w of field.waves) {
+    const k = (2 * Math.PI) / w.wavelength
+    s += (w.qBase ?? Q_BASE_FALLBACK) * Math.abs(w.amplitude) * k
+  }
+  return s
+}
+
+/** Effective Gerstner steepness after the no-folding clamp. BOTH the CPU
+ *  sampler (here) and the GPU shader (which reads this each frame) use it, so
+ *  they displace by exactly the same amount. Returns 0 when steepness is off. */
+export function effectiveSteepness(field: WaveFieldState): number {
+  if (field.steepness <= 0) return 0
+  const s = steepnessSum(field)
+  return s > 0 ? Math.min(field.steepness, STEEPNESS_SUM_LIMIT / s) : field.steepness
+}
+
+/** Ambient Gerstner horizontal displacement at REST (x0, z0), world frame.
+ *  Mirrors the shader's `gerstnerDisp` (global waves + bearing + pinch; no
+ *  zones/shoaling, exactly as the shader does it). Writes `_disp`. */
+function ambientDisp(field: WaveFieldState, x0: number, z0: number, qEff: number): void {
+  const t = field.time
+  const cosB = Math.cos(field.waveBearing)
+  const sinB = Math.sin(field.waveBearing)
+  const xRot = x0 * cosB + z0 * sinB
+  const zRot = -x0 * sinB + z0 * cosB
+  const pcos = field.pinchCos
+  const psin = field.pinchSin
+  let dxRot = 0
+  let dzRot = 0
+  for (const w of field.waves) {
+    const k = (2 * Math.PI) / w.wavelength
+    const omega = w.speed * k
+    const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
+    const c = Math.cos(phase)
+    const qScaled = qEff * (w.qBase ?? Q_BASE_FALLBACK)
+    const rotDirX = w.dirX * pcos - w.dirZ * psin
+    const rotDirZ = w.dirX * psin + w.dirZ * pcos
+    dxRot += qScaled * rotDirX * w.amplitude * c
+    dzRot += qScaled * rotDirZ * w.amplitude * c
+  }
+  _disp.dx = dxRot * cosB - dzRot * sinB
+  _disp.dz = dxRot * sinB + dzRot * cosB
+}
+
+/** Invert the ambient Gerstner displacement: find the REST (x0,z0) whose
+ *  displaced position is world (X,Z). Fixed-point iteration; writes `_rest`. */
+function inverseGerstner(field: WaveFieldState, X: number, Z: number, qEff: number): void {
+  let x0 = X
+  let z0 = Z
+  for (let i = 0; i < GERSTNER_INVERSE_ITERS; i++) {
+    ambientDisp(field, x0, z0, qEff)
+    x0 = X - _disp.dx
+    z0 = Z - _disp.dz
+  }
+  _rest.x = x0
+  _rest.z = z0
+}
+
 /** Surface y only — the cheap path used per-bike per-tick. */
 export function sampleHeight(field: WaveFieldState, x: number, z: number): number {
   let y = field.baseY
@@ -574,11 +687,24 @@ export function sampleHeight(field: WaveFieldState, x: number, z: number): numbe
   const effectiveBearing = zoneFx.bearingRad ?? field.waveBearing
   const cosB = Math.cos(effectiveBearing)
   const sinB = Math.sin(effectiveBearing)
+  // Gerstner: float on what the shader DRAWS at (x,z) — the height of the rest
+  // vertex that displaced to (x,z). Inverse-map the ambient displacement;
+  // (ax,az) is that rest point. Off (steepness 0) → ax,az = x,z, the legacy
+  // vertical-only path (unit tests unchanged). Wakes/shore/surge stay at the
+  // world point, matching the shader.
+  let ax = x
+  let az = z
+  const qEff = effectiveSteepness(field)
+  if (qEff > 1e-6) {
+    inverseGerstner(field, x, z, qEff)
+    ax = _rest.x
+    az = _rest.z
+  }
   // Rotate sample coords by -bearing — equivalent to rotating each
   // per-wave direction by +bearing. Lets one global angle re-aim the
   // whole wave train without mutating per-wave dirX/dirZ.
-  const xRot = x * cosB + z * sinB
-  const zRot = -x * sinB + z * cosB
+  const xRot = ax * cosB + az * sinB
+  const zRot = -ax * sinB + az * cosB
   for (const w of field.waves) {
     // freqMult shortens the wavelength inside the zone — chop bands
     // become choppier, swells get tighter. heightMult scales the
@@ -612,8 +738,19 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
   const effectiveBearing = zoneFx.bearingRad ?? field.waveBearing
   const cosB = Math.cos(effectiveBearing)
   const sinB = Math.sin(effectiveBearing)
-  const xRot = x * cosB + z * sinB
-  const zRot = -x * sinB + z * cosB
+  // Gerstner inverse-map (same as sampleHeight) so the surface height here
+  // matches buoyancy AND the shader. Slopes/vy are evaluated at the rest
+  // point — a good approximation of the rendered Gerstner normal for tilt.
+  let ax = x
+  let az = z
+  const qEff = effectiveSteepness(field)
+  if (qEff > 1e-6) {
+    inverseGerstner(field, x, z, qEff)
+    ax = _rest.x
+    az = _rest.z
+  }
+  const xRot = ax * cosB + az * sinB
+  const zRot = -ax * sinB + az * cosB
   for (const w of field.waves) {
     const k = ((2 * Math.PI) / w.wavelength) * zoneFx.freqMult
     const omega = w.speed * k
@@ -690,18 +827,45 @@ export function defaultWaves(): Wave[] {
   // (≈ 9 m/s at 50 m, ≈ 11.5 m/s at 85 m, down to ~2.5 m/s for 4 m chop).
   // Sticking close to the physical relation keeps the crest visibly
   // travelling at a pace the player's eye reads as "real water."
+  // `qBase` is the per-wave steepness coefficient (chops pinch sharper than
+  // swells); it must stay index-aligned with the GPU shader's bake so CPU
+  // buoyancy and the rendered crest displace identically.
   return [
     // Primary swell — the dominant set rolling toward the bike.
-    { dirX: 1.0, dirZ: 0.0, amplitude: 0.5, wavelength: 50, speed: 8.6, phase: 0.4 },
+    { dirX: 1.0, dirZ: 0.0, amplitude: 0.5, wavelength: 50, speed: 8.6, phase: 0.4, qBase: 0.35 },
     // Secondary swell — same direction, slightly different period so the
     // two swells beat into bigger "sets" every ~24 s.
-    { dirX: 0.985, dirZ: 0.174, amplitude: 0.35, wavelength: 85, speed: 11.2, phase: 2.2 },
+    {
+      dirX: 0.985,
+      dirZ: 0.174,
+      amplitude: 0.35,
+      wavelength: 85,
+      speed: 11.2,
+      phase: 2.2,
+      qBase: 0.35,
+    },
     // Mid-band chop riding the swell face, dead-on with the bearing.
-    { dirX: 1.0, dirZ: 0.0, amplitude: 0.22, wavelength: 16, speed: 5.0, phase: 0.0 },
+    { dirX: 1.0, dirZ: 0.0, amplitude: 0.22, wavelength: 16, speed: 5.0, phase: 0.0, qBase: 0.85 },
     // Cross-chop fanned ±25° around the bearing for surface variety
     // without re-introducing the omni-directional jostle.
-    { dirX: 0.906, dirZ: 0.423, amplitude: 0.16, wavelength: 10, speed: 4.0, phase: 1.1 },
-    { dirX: 0.94, dirZ: -0.342, amplitude: 0.1, wavelength: 6, speed: 3.1, phase: 2.3 },
-    { dirX: 0.985, dirZ: 0.174, amplitude: 0.06, wavelength: 4, speed: 2.5, phase: 3.7 },
+    {
+      dirX: 0.906,
+      dirZ: 0.423,
+      amplitude: 0.16,
+      wavelength: 10,
+      speed: 4.0,
+      phase: 1.1,
+      qBase: 0.95,
+    },
+    { dirX: 0.94, dirZ: -0.342, amplitude: 0.1, wavelength: 6, speed: 3.1, phase: 2.3, qBase: 1.0 },
+    {
+      dirX: 0.985,
+      dirZ: 0.174,
+      amplitude: 0.06,
+      wavelength: 4,
+      speed: 2.5,
+      phase: 3.7,
+      qBase: 1.0,
+    },
   ]
 }
