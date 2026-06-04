@@ -486,6 +486,19 @@
         animation: bc-fade var(--t-base) var(--ease-out);
       }
       #water-debug.show, #devsettings.show { display: flex; }
+      /* WATER is a live tuning panel, not a modal: dock it to the left,
+         drop the scene-dimming backdrop (you need to watch the water react
+         to each slider), and let pointer events fall through everywhere but
+         the card — so the scene stays orbitable and the wave-rider tuner on
+         the right isn't covered. dev-settings keeps the dimmed modal look. */
+      #water-debug {
+        box-sizing: border-box;
+        justify-content: flex-start;
+        padding-left: 16px;
+        background: none; backdrop-filter: none;
+        pointer-events: none;
+      }
+      #water-debug .card { pointer-events: auto; }
       #water-debug .card, #devsettings .card {
         background: rgba(10,20,36,0.95); border: 1px solid var(--bc-line);
         padding: 24px 30px;
