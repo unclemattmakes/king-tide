@@ -133,6 +133,7 @@ import { computeStandings } from '@/game/systems/standings'
 import type { WaveRiderSystem } from '@/game/systems/wave-rider'
 import type { Track } from '@/game/tracks/types'
 import type { MultiplayerHandle } from './multiplayer'
+import { createSimSurfaceProbe } from './sim-surface-probe'
 import { downloadReplay, formatTime, ordinal } from './utils'
 
 export interface BootState {
@@ -818,6 +819,18 @@ export function startGameLoop(opts: GameLoopOpts): void {
       '[jitter] telemetry on (?jitter=1). window.__hoverJitter() for a live summary; logging every 2s.',
     )
   }
+
+  // Sim-surface probe — opt-in via `?wavedots=1`. Parks a red dot grid at the
+  // SIM water height (`sampleHeight`) around the player so the buoyancy surface
+  // can be read against the rendered mesh (pair with `?wire=1`) on a REAL track
+  // — unlike the synthetic `?waveriders=1` scene, this has the track's terrain
+  // heightmap + shore field installed, so shoaling + shore breakers show. The
+  // gap between dots and wireframe is the sim↔render discrepancy, live. Render-
+  // only; never touches the sim. See sim-surface-probe.ts.
+  const simSurfaceProbe =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('wavedots')
+      ? createSimSurfaceProbe(scene)
+      : null
 
   // M10.4 — wire-encoded input round-trip. simTick is the monotonic count
   // of fixed-step sim ticks driven by simulateStep; it lines up across
@@ -1703,6 +1716,14 @@ export function startGameLoop(opts: GameLoopOpts): void {
     landmarkTick(now / 1000)
     physicsDebug.tick()
     hoverDebug.tick(sim)
+    // Sim-surface dot grid (`?wavedots=1`) — centre on the player so the dots
+    // bracket the bike; fall back to the camera before the player transform
+    // is first written.
+    if (simSurfaceProbe) {
+      const pt = TransformStore.get(playerEid)
+      if (pt) simSurfaceProbe.tick(waveField, pt.x, pt.z)
+      else simSurfaceProbe.tick(waveField, camera.position.x, camera.position.z)
+    }
 
     // Race HUD — countdown banner, race/lap timers, gap toast, minimap.
     // Always ticked: while locked, the timers stay at zero and the
