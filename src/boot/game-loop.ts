@@ -120,6 +120,7 @@ import { RacerStore } from '@/game/components/race'
 import type { RaceTick } from '@/game/sim-step'
 import { simulateStep } from '@/game/sim-step'
 import { chargeBoostMeter } from '@/game/systems/boost-meter'
+import { isOverBoostPad } from '@/game/systems/boost-pad'
 import type { GhostRunner } from '@/game/systems/ghost-runner'
 import { TUCK_SWEET_SPOT, tuckFactor } from '@/game/systems/hover'
 import { interpolateRenderTransforms } from '@/game/systems/interpolate-transforms'
@@ -165,6 +166,10 @@ export interface BootState {
    *  detection in boostMeterSystem, which we can't easily observe
    *  from the render side). */
   boostBtnDown?: boolean
+  /** Whether the player bike was over a boost pad last render frame.
+   *  Drives the rising-edge "entered a pad" FX punch so a pad reads as
+   *  a real boost (see the boost-pad feel block in the render loop). */
+  onBoostPad?: boolean
 }
 
 export interface GameLoopHud {
@@ -1577,7 +1582,31 @@ export function startGameLoop(opts: GameLoopOpts): void {
           // threshold. Flash the HUD red so the rejection reads.
           boostMeterHud.flashRejected()
         }
-        pumpFx.setSustainedShake(nowActive)
+
+        // Boost-pad feel — the sim applies the pad's speed multiplier as a
+        // BoostEffect (boost-pad.ts), but that alone is a silent nudge. To
+        // make a pad read "as if holding boost," mirror the held-boost FX
+        // vocabulary on the render side: a one-shot FOV/speedline/audio/
+        // exhaust punch + forward kick when the bike rolls onto a pad, and
+        // the sustained chase-cam shake the whole time it's on one. The
+        // earned boost meter is deliberately untouched — pads are free.
+        const padHandle = RBHandleStore.get(playerEid)
+        const padPos = padHandle
+          ? phys.world.getRigidBody(padHandle.handle)?.translation()
+          : undefined
+        const onPad = padPos ? track.boostPads.some((p) => isOverBoostPad(padPos, p)) : false
+        if (onPad && !(state.onBoostPad ?? false)) {
+          wavePumpHud.pump(1, true)
+          if (playerSettings.wavePumpIntensity !== 'off') {
+            audio.wavePump(1, true)
+          }
+          applyPumpImpulse(phys, playerEid, stats, 1, 'boost')
+          triggerPumpBurst(playerEid, 1, true)
+          pumpFx.fire(1, true)
+        }
+        state.onBoostPad = onPad
+
+        pumpFx.setSustainedShake(nowActive || onPad)
         boostMeterHud.update(meter.charge, nowActive)
         state.boostMeterActive = nowActive
         state.boostMeterCharge = meter.charge

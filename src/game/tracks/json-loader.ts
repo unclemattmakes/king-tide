@@ -531,6 +531,20 @@ function readSpline(raw: unknown, i: number): AISpline {
   return out
 }
 
+/**
+ * Vertical half-extent (m) given to legacy boost pads that predate the
+ * `halfHeight` field. These pads were authored with a Y near world origin
+ * rather than snapped to the riding surface, so the old 3 m band missed
+ * the bike entirely on tracks where the surface sits well above 0 (e.g.
+ * South Beach Sunken, water at +3.3 m → bike rides ~4.5 m, old band topped
+ * out at 3.1 m). A generous band absorbs that placement slop — across every
+ * shipped legacy pad the bike rides within ~4.8 m of the authored pad-Y, so
+ * 6 m covers them all with headroom for wave bob. Pads authored with an
+ * explicit `halfHeight` (Blender / in-app editor, which write 4) keep their
+ * own tighter, surface-snapped band.
+ */
+const LEGACY_BOOST_PAD_HALF_HEIGHT = 6
+
 function readBoostPad(raw: unknown, i: number): BoostPad {
   if (!isObject(raw)) throw new Error(`track-json: boostPads[${i}] must be an object`)
   const position = readVec3(raw.position, `boostPads[${i}].position`)
@@ -539,11 +553,11 @@ function readBoostPad(raw: unknown, i: number): BoostPad {
   const halfDepth = requireNumber(raw, 'halfDepth')
   const strength = requireNumber(raw, 'strength')
   // halfHeight is optional for backward compat — pads authored before the
-  // 3D-volume rework had no vertical extent (the sim used a hardcoded 3 m
-  // band). Default 3 here so existing tracks keep the historic trigger
-  // band; new pads authored from Blender / the in-app editor write 4.
+  // 3D-volume rework had no vertical extent. See LEGACY_BOOST_PAD_HALF_HEIGHT
+  // for why the legacy default is generous rather than the historic 3 m.
   const halfHeightRaw = raw.halfHeight
-  const halfHeight = halfHeightRaw === undefined ? 3 : requireNumber(raw, 'halfHeight')
+  const halfHeight =
+    halfHeightRaw === undefined ? LEGACY_BOOST_PAD_HALF_HEIGHT : requireNumber(raw, 'halfHeight')
   if (halfWidth <= 0 || halfHeight <= 0 || halfDepth <= 0) {
     throw new Error(`track-json: boostPads[${i}] halfWidth/halfHeight/halfDepth must be positive`)
   }
