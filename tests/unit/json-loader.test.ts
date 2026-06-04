@@ -405,9 +405,11 @@ describe('buildTrackFromJson', () => {
     expect(track.boostPads[0]!.halfDepth).toBe(6)
   })
 
-  it('defaults halfHeight to 3 on legacy boost pads without the field', () => {
-    // Pre-3D-volume tracks omitted halfHeight; the loader fills 3 to
-    // preserve the historic PAD_VERTICAL=3 trigger band.
+  it('defaults halfHeight to a generous band on legacy boost pads without the field', () => {
+    // Pre-3D-volume tracks omitted halfHeight and authored pad-Y near
+    // origin rather than on the riding surface. The loader fills a generous
+    // band (LEGACY_BOOST_PAD_HALF_HEIGHT) so a bike hovering above a
+    // high-water surface still triggers the pad. See the constant's doc.
     const raw = baseTrack()
     raw.boostPads = [
       {
@@ -419,7 +421,9 @@ describe('buildTrackFromJson', () => {
       },
     ]
     const track = buildTrackFromJson(raw)
-    expect(track.boostPads[0]!.halfHeight).toBe(3)
+    // Must comfortably exceed the bike's worst-case ride height over the
+    // pad-Y across shipped tracks (~4.8 m), so it never silently misses.
+    expect(track.boostPads[0]!.halfHeight).toBeGreaterThanOrEqual(5)
   })
 
   it('parses a prop surface tag + round-trips it through trackToJson', () => {

@@ -75,4 +75,16 @@ describe('isOverBoostPad', () => {
     expect(isOverBoostPad({ x: 0, y: 5, z: 0 }, pad)).toBe(true)
     expect(isOverBoostPad({ x: 0, y: 6.5, z: 0 }, pad)).toBe(false)
   })
+
+  it('catches a bike hovering over a high-water surface (south-beach regression)', () => {
+    // South Beach Sunken: water at +3.3 m, pad authored at y≈0.1, bike
+    // rides ~4.5 m. The old hardcoded 3 m band topped out at 3.1 m and
+    // missed the bike entirely; the generous legacy default (6 m) catches
+    // it. Pad-local up == world up here (axis-aligned).
+    const tightLegacy = axisAlignedPad({ x: 0, y: 0.1, z: 0 }, 3, 6, 3)
+    const generousLegacy = axisAlignedPad({ x: 0, y: 0.1, z: 0 }, 3, 6, 6)
+    const ridePos = { x: 0, y: 4.5, z: 0 }
+    expect(isOverBoostPad(ridePos, tightLegacy)).toBe(false) // the bug
+    expect(isOverBoostPad(ridePos, generousLegacy)).toBe(true) // the fix
+  })
 })

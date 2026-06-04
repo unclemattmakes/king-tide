@@ -252,8 +252,9 @@ export type BoostPad = {
   /** Half-extent along the pad-local +Y (vertical in the pad's frame).
    *  Pads are oriented boxes — a bike triggers the boost while its centre
    *  is inside the volume. Default 4 m on new pads; legacy tracks without
-   *  an authored value get 3 m via json-loader to preserve the historic
-   *  hardcoded vertical band. */
+   *  an authored value get a generous band via json-loader
+   *  (LEGACY_BOOST_PAD_HALF_HEIGHT) so the bike's hover height over a
+   *  high-water surface still lands inside the volume. */
   halfHeight: number
   /** Half-extent along the boost direction (m). */
   halfDepth: number
