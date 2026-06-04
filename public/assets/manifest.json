@@ -240,6 +240,12 @@
       "specPath": "public/tracks/figure-eight.json"
     },
     {
+      "id": "golden-gate-drowned",
+      "displayName": "Golden Gate Drowned",
+      "url": "/assets/tracks/golden-gate-drowned.glb",
+      "specPath": "public/tracks/golden-gate-drowned.json"
+    },
+    {
       "id": "hatteras-light",
       "displayName": "Hatteras Light",
       "url": "/assets/tracks/hatteras-light.glb",
