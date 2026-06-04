@@ -43,7 +43,7 @@ export type V1TrackEntry = {
   status: 'ship' | 'pending'
 }
 
-/** 12 v1 tracks. Tutorial sits outside the cup structure; the other 11
+/** 13 v1 tracks. Tutorial sits outside the cup structure; the other 12
  *  fall into the four cups per `docs/track-themes.md`. */
 export const V1_TRACKS: V1TrackEntry[] = [
   {
@@ -119,18 +119,6 @@ export const V1_TRACKS: V1TrackEntry[] = [
     status: 'ship',
   },
   {
-    id: 'kilauea-crown',
-    name: 'Kilauea Crown',
-    location: 'Big Island — caldera + lava waterfall',
-    setPiece: 'The Black Beach',
-    cup: 'continental',
-    accent: '#ff5a2b',
-    lapTarget: 65,
-    laps: 3,
-    gateLabel: '',
-    status: 'ship',
-  },
-  {
     id: 'marina-bay-7',
     name: 'Marina Bay 7',
     location: 'Drowned Singapore megaport',
@@ -150,6 +138,30 @@ export const V1_TRACKS: V1TrackEntry[] = [
     cup: 'continental',
     accent: '#d8a14a',
     lapTarget: 60,
+    laps: 3,
+    gateLabel: '',
+    status: 'ship',
+  },
+  {
+    id: 'golden-gate-drowned',
+    name: 'Golden Gate Drowned',
+    location: 'Drowned San Francisco — Financial District + the hills',
+    setPiece: 'The Break — street-to-bay cliff drop',
+    cup: 'continental',
+    accent: '#c8472e',
+    lapTarget: 58,
+    laps: 3,
+    gateLabel: '',
+    status: 'ship',
+  },
+  {
+    id: 'kilauea-crown',
+    name: 'Kilauea Crown',
+    location: 'Big Island — caldera + lava waterfall',
+    setPiece: 'The Black Beach',
+    cup: 'continental',
+    accent: '#ff5a2b',
+    lapTarget: 65,
     laps: 3,
     gateLabel: '',
     status: 'ship',

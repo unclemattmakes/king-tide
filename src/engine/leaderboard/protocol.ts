@@ -108,6 +108,7 @@ export const MIN_LAP_SECONDS_BY_TRACK: Readonly<Record<string, number>> = Object
   'kilauea-crown': 22,
   'marina-bay-7': 20,
   'doges-drift': 18,
+  'golden-gate-drowned': 23,
   aqualand: 14,
   'angkor-drowned': 22,
   'liberty-drowned': 24,
