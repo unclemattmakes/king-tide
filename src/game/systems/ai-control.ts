@@ -4,7 +4,14 @@ import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { quatRotate } from '@/engine/sim/physics/vec'
 import { sampleSurface, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import { buildPumpHints, hasAnyHints } from '@/game/ai/pump-hints'
-import { ControlIntent, ControlIntentStore, RBHandle, RBHandleStore } from '@/game/components'
+import {
+  BikeStats,
+  BikeStatsStore,
+  ControlIntent,
+  ControlIntentStore,
+  RBHandle,
+  RBHandleStore,
+} from '@/game/components'
 import { AIController, AIControllerStore, AITag } from '@/game/components/ai'
 import {
   curvatureAheadLooped,
@@ -160,12 +167,13 @@ export function aiControlSystem(
   track: Track,
   waveField: WaveFieldState,
 ): void {
-  const eids = query(sim, [AITag, AIController, RBHandle, ControlIntent])
+  const eids = query(sim, [AITag, AIController, RBHandle, BikeStats, ControlIntent])
   const splines = splineIndexFor(track)
   const dt = phys.fixedDt
   const pumpCache = pumpHintsFor(track)
   for (const eid of eids) {
     const ai = AIControllerStore.must(eid)
+    const stats = BikeStatsStore.must(eid)
     const { handle } = RBHandleStore.must(eid)
     const rb = phys.world.getRigidBody(handle)
     if (!rb) continue
@@ -254,7 +262,12 @@ export function aiControlSystem(
     const curvature = scannedDist > 0 ? totalBend / scannedDist : 0
     const impliedRadius = curvature > 1e-4 ? Math.max(8, 1 / curvature) : 1e6
     const cornerSpeedCap = Math.sqrt(ai.maxLateralAccel * impliedRadius)
-    const baseTopSpeed = ai.topSpeedFactor * 30 // ~bike topSpeed; a soft target, not a hard cap
+    // Soft straight-line target scaled by the bike's OWN top speed — not a
+    // hard cap (physics enforces the real ceiling in hover.ts). Reading the
+    // variant's `stats.topSpeed` is what lets a Cruiser AI (32 m/s) plan to
+    // out-drag a Sparrow (26 m/s) instead of every AI aiming at one generic
+    // speed. Was a hardcoded `30` from when all AI rode default-stat bikes.
+    const baseTopSpeed = ai.topSpeedFactor * stats.topSpeed
     const targetSpeed = Math.min(baseTopSpeed, cornerSpeedCap)
 
     // Throttle: scale down as we approach the target speed, with a small
@@ -303,7 +316,9 @@ export function aiControlSystem(
       // sampleSurface is the same call buoyancy uses in hover.ts, so the
       // AI's reading is identical to what the player feels.
       const aiSpeedFrac =
-        ai.baselineTopSpeedFactor > 0 ? speedHoriz / (ai.baselineTopSpeedFactor * 30) : 0
+        ai.baselineTopSpeedFactor > 0
+          ? speedHoriz / (ai.baselineTopSpeedFactor * stats.topSpeed)
+          : 0
       if (aiSpeedFrac >= PUMP_MIN_SPEED_FRAC) {
         const { vy } = sampleSurface(waveField, t.x, t.z)
         if (vy >= ai.pumpVyThreshold) {

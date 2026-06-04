@@ -17,7 +17,7 @@ import { playerSettings } from '@/engine/player-settings'
 import type { ReplayFile } from '@/engine/replay/format'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
-import { type BikeVariant, resolveBikeVariant } from '@/game/bikes/variants'
+import { type BikeVariant, resolveBikeVariant, variantForAiSlot } from '@/game/bikes/variants'
 import { RBHandleStore } from '@/game/components'
 import { createBike } from '@/game/entities/bike'
 import { createRider } from '@/game/entities/rider'
@@ -130,17 +130,27 @@ export function spawnBikes(opts: {
     // mid-race won't retune already-spawned AIs (matches kart-game
     // precedent + avoids a sudden personality flip mid-lap).
     const difficulty = playerSettings.aiDifficulty
-    for (const slot of grid) {
+    grid.forEach((slot, i) => {
       const aiPos = resolveGridSlotWorld(startPos, startYaw, slot.dx, slot.dz)
+      // Each AI rides the variant its grid slot maps to (slot 0 is the
+      // player, so AI slots are 1-based). Spawning with that variant's
+      // sim stats is what makes a Cruiser AI plough heavy and a Sparrow
+      // AI flick light — previously every AI fell back to default Racer
+      // stats regardless of the bike the broadcast roster showed it on.
+      // (Render-hint fields bodyColor/variantId stay unset: the AI grid
+      // is intentionally coloured from the broadcast palette, not the
+      // variant livery — see render-systems.ts.)
+      const variant = variantForAiSlot(i + 1)
       const aiEid = createBike(sim, phys, {
         position: aiPos,
         yaw: track.start.yaw,
         asRacer: true,
         ai: { splineId: 'main', lineOffset: slot.lineOffset, difficulty },
+        stats: { ...variant.stats },
       })
       spawnRider(aiEid, aiPos)
       aiEids.push(aiEid)
-    }
+    })
 
     if (ghostVariant) {
       // The ghost spawns at the start gate. The ghost runner will

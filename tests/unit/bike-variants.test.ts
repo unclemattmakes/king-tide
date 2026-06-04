@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { defaultBikeStats } from '../../src/game/bikes/stats'
 import {
+  AI_VARIANT_ROTATION,
   BIKE_VARIANTS,
   DEFAULT_BIKE_VARIANT,
   resolveBikeVariant,
+  variantForAiSlot,
 } from '../../src/game/bikes/variants'
 import { resolveWaterLongitudinalSpringMul } from '../../src/game/systems/hover'
 
@@ -146,5 +148,28 @@ describe('bike variants', () => {
     expect(BIKE_VARIANTS.cruiser.stats.driftStyle).toBeUndefined()
     expect(BIKE_VARIANTS.racer.stats.driftStyle).toBeUndefined()
     expect(BIKE_VARIANTS.scout.stats.driftStyle).toBeUndefined()
+  })
+
+  // The AI grid rotation is the single source of truth shared by the
+  // sim-side spawn (stats), the broadcast intro roster, and the replay
+  // recorder. Slot 0 is the player, so AI slots are 1-based.
+  it('variantForAiSlot maps each 1-based AI slot to its rotation variant', () => {
+    expect(variantForAiSlot(1).id).toBe('cruiser')
+    expect(variantForAiSlot(2).id).toBe('stunt')
+    expect(variantForAiSlot(3).id).toBe('racer')
+    expect(variantForAiSlot(4).id).toBe('scout')
+    expect(variantForAiSlot(5).id).toBe('sparrow')
+  })
+
+  it('variantForAiSlot wraps past the rotation length so larger grids stay covered', () => {
+    const n = AI_VARIANT_ROTATION.length
+    expect(variantForAiSlot(n + 1).id).toBe(AI_VARIANT_ROTATION[0])
+    expect(variantForAiSlot(n + 2).id).toBe(AI_VARIANT_ROTATION[1])
+  })
+
+  it('variantForAiSlot returns a full variant (stats + livery), not just an id', () => {
+    const v = variantForAiSlot(1)
+    expect(v.stats).toEqual(BIKE_VARIANTS.cruiser.stats)
+    expect(v.bodyColor).toBe(BIKE_VARIANTS.cruiser.bodyColor)
   })
 })

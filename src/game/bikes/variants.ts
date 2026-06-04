@@ -154,3 +154,29 @@ export function resolveBikeVariant(id: string | null | undefined): BikeVariant {
   if (id && id in BIKE_VARIANTS) return BIKE_VARIANTS[id as BikeVariantId]
   return BIKE_VARIANTS[DEFAULT_BIKE_VARIANT]
 }
+
+/**
+ * Per-slot variant palette for the AI grid. Rotates through the lineup so
+ * the field has handling *and* visual variety — slot 1 rides a Cruiser,
+ * slot 2 a Stunt, and so on, wrapping for larger grids. Slot 0 is the
+ * player, so AI grid slots are 1-based.
+ *
+ * Single source of truth shared by the sim-side spawn (which applies each
+ * AI's variant stats — see `spawn-bikes.ts`), the broadcast intro roster,
+ * and the replay recorder, so all three agree on which bike each AI rides.
+ */
+export const AI_VARIANT_ROTATION: readonly BikeVariantId[] = [
+  'cruiser',
+  'stunt',
+  'racer',
+  'scout',
+  'sparrow',
+  'cruiser',
+  'stunt',
+]
+
+/** Resolve the bike variant for a 1-based AI grid slot (slot 0 = player). */
+export function variantForAiSlot(slot: number): BikeVariant {
+  const id = AI_VARIANT_ROTATION[(slot - 1) % AI_VARIANT_ROTATION.length] ?? DEFAULT_BIKE_VARIANT
+  return BIKE_VARIANTS[id]
+}

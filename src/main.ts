@@ -87,7 +87,7 @@ import { loadBike } from './game/assets/bike-loader'
 import { loadManifest } from './game/assets/manifest'
 import { type LoadedProp, loadProp } from './game/assets/prop-loader'
 import { aiCallSign } from './game/bikes/callsigns'
-import { BIKE_VARIANTS, type BikeVariantId, resolveBikeVariant } from './game/bikes/variants'
+import { resolveBikeVariant, variantForAiSlot } from './game/bikes/variants'
 import { AIController, AIControllerStore, AITag, defaultAIController } from './game/components/ai'
 import { RacerStore } from './game/components/race'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
@@ -771,24 +771,6 @@ async function boot() {
     return `#${c.toString(16).padStart(6, '0')}`
   }
 
-  // Per-slot variant palette for the AI grid. Rotates through the five
-  // bike variants for visual variety on the broadcast roster and replay
-  // playback. The sim-side bike spawn doesn't use these stats (AI bikes
-  // run on default stats by design — see spawn-bikes.ts), but the body
-  // colour + display name flow through the replay file and the intro UI.
-  const AI_VARIANT_ROTATION: readonly BikeVariantId[] = [
-    'cruiser',
-    'stunt',
-    'racer',
-    'scout',
-    'sparrow',
-    'cruiser',
-    'stunt',
-  ]
-  function variantForAiSlot(slot: number): BikeVariantId {
-    return AI_VARIANT_ROTATION[(slot - 1) % AI_VARIANT_ROTATION.length] ?? 'racer'
-  }
-
   // Build the broadcast intro overlay. Suppressed when the cinematic is
   // off (multiplayer, ?skipintro=1, or the user's setting). The UI
   // shares its racer roster with the replay recorder below so names + colours
@@ -803,8 +785,7 @@ async function boot() {
     isPlayer: true,
   })
   for (let i = 0; i < aiEids.length; i++) {
-    const variantId = variantForAiSlot(i + 1)
-    const variant = BIKE_VARIANTS[variantId]
+    const variant = variantForAiSlot(i + 1)
     introRoster.push({
       slot: i + 1,
       name: aiCallSign(track.id, i + 1),
@@ -849,9 +830,10 @@ async function boot() {
     })
     for (let i = 0; i < aiEids.length; i++) {
       // Match the intro roster's variant + call-sign pick so the replay
-      // shows the same broadcast as the live race.
-      const variantId = variantForAiSlot(i + 1)
-      const variant = BIKE_VARIANTS[variantId]
+      // shows the same broadcast as the live race. Same source as the
+      // sim-side AI spawn (spawn-bikes.ts), so the recorded variant is
+      // the one the AI is actually riding.
+      const variant = variantForAiSlot(i + 1)
       recorderBikes.push({
         slot: i + 1,
         isPlayer: false,
