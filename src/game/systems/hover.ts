@@ -6,7 +6,7 @@ import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { quatRotate } from '@/engine/sim/physics/vec'
 import { SurfaceType, type SurfaceTypeValue, surfaceGripMul } from '@/engine/sim/surface-types'
-import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
+import { sampleHeight, sampleSurface, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import {
   AntiGravOverrideStore,
   BikeStats,
@@ -116,6 +116,16 @@ export const SLOPE_HOVER_BOOST = 0.4
 // on a 25° hill at 18 m/s, overwhelms the spring, chassis drags). 0.5
 // is the playtested middle.
 export const SLOPE_DAMP_RELIEF = 0.5
+
+// Water analogue of SLOPE_DAMP_RELIEF. On water the surface itself moves
+// vertically (the wave's ∂y/∂t), so the hover damp's "excess upward velocity"
+// reference is the wave's vertical velocity, not zero. At 1.0 the bike is free
+// to ride straight up a rising crest (only velocity BEYOND the wave's is
+// damped); at 0 it falls back to the legacy "damp any lift-off" behaviour that
+// let tall fast crests overtake and submerge the bike. This is the core of the
+// "ride on top of big waves" feel — the spring tracks the surface instead of
+// fighting it.
+export const WATER_SURFACE_FOLLOW = 1.0
 
 // Upper clamp on the per-corner heightError fed into the hover spring.
 // When the bow probe looks ahead at a steep climb, localDist goes deeply
@@ -496,6 +506,11 @@ type HoverFrame = {
    *  block at the end of the ground branch. */
   agActive: boolean
   agWeight: number
+  /** Wave vertical velocity (∂y/∂t) at the bike centre. Fed into the hover
+   *  damp so the spring tracks the wave's motion instead of fighting it (the
+   *  bike rides up and over crests). 0 off water / in anti-grav. Set in
+   *  `hoverSystem` right after the centre probe. */
+  waterSurfaceVy: number
 }
 
 /**
@@ -647,6 +662,7 @@ function buildHoverFrame(
     dnZ: -upZ,
     agActive,
     agWeight,
+    waterSurfaceVy: 0,
   }
 }
 
@@ -1082,7 +1098,7 @@ function applyMultiPointHoverSpring(
       linvel.y * footprint.sampleFwdY +
       linvel.z * footprint.sampleFwdZ
     const tangentUpVel = probe.isWater
-      ? 0
+      ? frame.waterSurfaceVy * WATER_SURFACE_FOLLOW
       : horizFwdSpeed * footprint.surfaceForwardSlope * SLOPE_DAMP_RELIEF
     const dampV = Math.max(vAtPointUp - tangentUpVel, 0)
 
@@ -1994,6 +2010,12 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     const groundDistance = probe.hasSurface ? bikeProj - probe.surfaceProj : MAX_HOVER_PROBE
     const isGrounded =
       probe.hasSurface && groundDistance < stats.hoverHeight * GROUNDED_DISTANCE_MUL
+
+    // Wave vertical velocity under the bike — fed into the hover damp so the
+    // spring rides the wave's motion (up and over crests) instead of damping
+    // against it and being overtaken. Zero off water / in anti-grav.
+    frame.waterSurfaceVy =
+      probe.isWater && probeField ? sampleSurface(probeField, frame.t.x, frame.t.z).vy : 0
 
     // Prior tick's state — drives the slope filter seed, the takeoff/
     // landing transitions, the dive-kick / release-kick taper, and

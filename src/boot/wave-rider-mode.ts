@@ -18,6 +18,7 @@
  */
 
 import * as THREE from 'three'
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { createCombatRenderSystem } from '@/engine/render/combat-render'
 import { createFxSystem } from '@/engine/render/fx'
 import { createRenderer } from '@/engine/render/renderer'
@@ -34,6 +35,7 @@ import {
   defaultWaves,
   sampleHeight,
 } from '@/engine/sim/water/wave-field'
+import { installWaterDebugMenu } from '@/engine/water-debug-menu'
 import { applyStoredWaterTuning } from '@/engine/water-debug-storage'
 import {
   WAVE_RIDER_TUNING,
@@ -96,6 +98,15 @@ export async function bootWaveRiderMode(appEl: HTMLElement): Promise<WaveRiderMo
   const waterMesh = createWaterMesh(waveField, { backend })
   scene.add(waterMesh.mesh)
   applyStoredWaterTuning(waterMesh)
+  // Reuse the in-race WATER menu (top-right toggle) for live wave tuning.
+  // `dev-build` reveals the toggle button in this stand-alone scene.
+  document.body.classList.add('dev-build')
+  const waterMenu = installWaterDebugMenu(waterMesh)
+  // Default the rendered mesh to WIREFRAME so the red sim dots can be read
+  // against it; sync the menu checkbox to match the forced state.
+  waterMesh.debug.setWireframe(true)
+  const wireCheckbox = document.getElementById('wd-wire') as HTMLInputElement | null
+  if (wireCheckbox) wireCheckbox.checked = true
 
   const sky = createSkySystem({
     scene,
@@ -146,6 +157,69 @@ export async function bootWaveRiderMode(appEl: HTMLElement): Promise<WaveRiderMo
   )
   probeMesh.castShadow = true
   scene.add(probeMesh)
+
+  // ---- Sim ↔ render sync markers ------------------------------------
+  // RED dots = the sim surface (`sampleHeight`, Gerstner-aware — what the rider
+  // actually floats on), parked at each grid point and following the probe. The
+  // RENDERED surface is the water mesh itself (wireframe, defaulted on above).
+  // The buoyancy now inverse-maps the Gerstner crest-pinch, so the red dots sit
+  // ON the mesh at ANY steepness; a dot floating off the mesh would be a real
+  // sim↔render desync. Numbered labels tag each point. G toggles dots, L labels.
+  const SYNC_HALF = 12
+  const SYNC_STEP = 4
+  const syncGroup = new THREE.Group()
+  const syncGeoSim = new THREE.SphereGeometry(0.16, 10, 8)
+  const syncMatSim = new THREE.MeshBasicMaterial({ color: 0xff2d4b })
+  const labelsGroup = new THREE.Group()
+  syncGroup.add(labelsGroup)
+
+  function makeLabelSprite(text: string): THREE.Sprite {
+    const c = document.createElement('canvas')
+    c.width = 64
+    c.height = 48
+    const ctx = c.getContext('2d')!
+    ctx.font = 'bold 30px ui-monospace, monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.lineWidth = 6
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)'
+    ctx.strokeText(text, 32, 24)
+    ctx.fillStyle = '#ffffff'
+    ctx.fillText(text, 32, 24)
+    const tex = new THREE.CanvasTexture(c)
+    tex.colorSpace = THREE.SRGBColorSpace
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }),
+    )
+    sprite.scale.set(0.75, 0.56, 1)
+    return sprite
+  }
+
+  type SyncMarker = { dx: number; dz: number; sim: THREE.Mesh; label: THREE.Sprite }
+  const syncMarkers: SyncMarker[] = []
+  for (let dx = -SYNC_HALF; dx <= SYNC_HALF; dx += SYNC_STEP) {
+    for (let dz = -SYNC_HALF; dz <= SYNC_HALF; dz += SYNC_STEP) {
+      const simMesh = new THREE.Mesh(syncGeoSim, syncMatSim)
+      const label = makeLabelSprite(String(syncMarkers.length))
+      syncGroup.add(simMesh)
+      labelsGroup.add(label)
+      syncMarkers.push({ dx, dz, sim: simMesh, label })
+    }
+  }
+  scene.add(syncGroup)
+
+  function updateSyncMarkers() {
+    const p = probeRb.translation()
+    const ox = Math.round(p.x)
+    const oz = Math.round(p.z)
+    for (const mk of syncMarkers) {
+      const wx = ox + mk.dx
+      const wz = oz + mk.dz
+      const simY = sampleHeight(waveField, wx, wz)
+      mk.sim.position.set(wx, simY, wz)
+      mk.label.position.set(wx, simY + 0.5, wz)
+    }
+  }
 
   // Hit detection: each step, for each wave-rider, check if the probe
   // is touching it (centre-to-centre distance < sum of radii). On first
@@ -209,8 +283,10 @@ export async function bootWaveRiderMode(appEl: HTMLElement): Promise<WaveRiderMo
       spawnAtProbe('buoy')
     } else if (e.code === 'Digit2') {
       spawnAtProbe('log')
-    } else if (e.code === 'KeyH') {
-      orbitMode = !orbitMode
+    } else if (e.code === 'KeyL') {
+      labelsGroup.visible = !labelsGroup.visible
+    } else if (e.code === 'KeyG') {
+      syncGroup.visible = !syncGroup.visible
     } else if (e.code === 'Space') {
       probeRb.applyImpulse({ x: 0, y: PROBE_HOP_IMPULSE, z: 0 }, true)
       e.preventDefault()
@@ -265,31 +341,22 @@ export async function bootWaveRiderMode(appEl: HTMLElement): Promise<WaveRiderMo
     }
   }
 
-  // ---- Camera --------------------------------------------------------
-  let orbitMode = false
-  let orbitAngle = 0
-  const camHeight = 6
-  const camDist = 11
-  function updateCamera(dt: number) {
-    const p = probeRb.translation()
-    if (orbitMode) {
-      if (keyDown.has('ArrowLeft')) orbitAngle -= dt * 1.5
-      if (keyDown.has('ArrowRight')) orbitAngle += dt * 1.5
-      orbitAngle += dt * 0.15
-      camera.position.set(
-        p.x + Math.sin(orbitAngle) * camDist,
-        p.y + camHeight,
-        p.z + Math.cos(orbitAngle) * camDist,
-      )
-      camera.lookAt(p.x, p.y, p.z)
-    } else {
-      // Chase: behind +Z relative to probe. Static, lets the player drive
-      // around the buoy field without camera-induced disorientation.
-      const target = new THREE.Vector3(p.x, p.y + camHeight * 0.5, p.z + camDist)
-      camera.position.lerp(target, 1 - Math.exp(-dt * 4))
-      camera.lookAt(p.x, p.y, p.z)
-    }
-  }
+  // ---- Camera: free orbit (mouse drag to rotate, scroll to zoom) -----
+  // Replaces the old chase/auto-orbit — a diagnostic wants to inspect the
+  // red/green marker pairs from any angle. The target follows the probe each
+  // frame so the marker field (which centres on the probe) stays framed.
+  // Polar-clamped to keep the lens above the water plane; pan disabled so the
+  // target stays locked to the probe.
+  const orbit = new OrbitControls(camera, canvas)
+  orbit.enableDamping = true
+  orbit.dampingFactor = 0.09
+  orbit.enablePan = false
+  orbit.minDistance = 3
+  orbit.maxDistance = 80
+  orbit.maxPolarAngle = Math.PI * 0.49
+  camera.position.set(9, 7, 15)
+  orbit.target.set(0, 0, 0)
+  orbit.update()
 
   // ---- HUD -----------------------------------------------------------
   const hudEl = document.createElement('div')
@@ -324,7 +391,7 @@ export async function bootWaveRiderMode(appEl: HTMLElement): Promise<WaveRiderMo
   tunerEl.id = 'waverider-tuner'
   tunerEl.style.cssText = `
     position: fixed;
-    top: 12px;
+    top: 118px;
     right: 12px;
     z-index: 100;
     background: rgba(0, 0, 0, 0.78);
@@ -422,10 +489,17 @@ export async function bootWaveRiderMode(appEl: HTMLElement): Promise<WaveRiderMo
       <div><span style="color:#888">surface Y </span>${surfaceY.toFixed(2)} m</div>
       <div><span style="color:#888">buoys     </span>${buoyCount}</div>
       <div><span style="color:#888">logs      </span>${logCount}</div>
-      <div><span style="color:#888">camera    </span>${orbitMode ? 'ORBIT' : 'CHASE'}</div>
       <div style="margin-top:8px;color:#7cf;font-size:11px">
+        Mouse: drag orbit · scroll zoom<br>
         WASD drive · Shift sprint · Space hop · R reset<br>
-        1 spawn buoy · 2 spawn log · H toggle cam · ←/→ orbit
+        1 spawn buoy · 2 spawn log · G markers · L labels
+      </div>
+      <div style="margin-top:8px;color:#ff8090;font-size:11px;line-height:1.5">
+        <b style="color:#ff2d4b">SIM&#8596;RENDER SYNC</b><br>
+        <b style="color:#ff2d4b">Red dots</b> = the sim surface (what the rider
+        floats on). The <b>wireframe</b> = the rendered mesh. Buoyancy now
+        inverse-maps the Gerstner pinch, so red sits ON the mesh at any
+        steepness &amp; amplitude. A dot floating off the mesh = a real desync.
       </div>
     `
   }
@@ -464,9 +538,16 @@ export async function bootWaveRiderMode(appEl: HTMLElement): Promise<WaveRiderMo
     const pq = probeRb.rotation()
     probeMesh.quaternion.set(pq.x, pq.y, pq.z, pq.w)
 
-    updateCamera(dt)
+    orbit.target.set(pp.x, pp.y, pp.z)
+    orbit.update()
 
-    waterMesh.tick([], { x: camera.position.x, z: camera.position.z })
+    updateSyncMarkers()
+    // Anchor the water at world origin (NOT camera-locked) so the mesh's
+    // vertices stay pinned to fixed world points — the sim markers can then be
+    // compared against a stationary grid. Gameplay water passes the camera XZ
+    // here for an infinite ocean; the diagnostic wants a still grid so any
+    // sim↔render gap is unambiguous (no LOD re-centering scroll).
+    waterMesh.tick([])
     sky.tick(waveField.time, dt, { x: camera.position.x, z: camera.position.z })
     updateUnderwaterFog(
       scene,
@@ -492,6 +573,14 @@ export async function bootWaveRiderMode(appEl: HTMLElement): Promise<WaveRiderMo
       window.removeEventListener('keyup', onKeyUp)
       hudEl.remove()
       tunerEl.remove()
+      waterMenu.close()
+      orbit.dispose()
+      syncGeoSim.dispose()
+      syncMatSim.dispose()
+      for (const mk of syncMarkers) {
+        mk.label.material.map?.dispose()
+        mk.label.material.dispose()
+      }
       waveRiderRender.dispose()
       try {
         disposeRenderer()
