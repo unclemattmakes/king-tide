@@ -16,9 +16,16 @@ What it does to a raw mesh object:
   3. Optionally rescale to a target height (the "reads at 40 m/s",
      larger-than-life pillar — pass a generous height).
   4. Strip the generator material; assign a single ``mat_<family>_<id>``
-     in the one-shader-per-family convention.
+     in the one-shader-per-family convention. With ``keep_material=True``
+     the source material is instead *preserved* (its ``baseColorTexture``
+     + UVs kept) and merely renamed to the canonical name — for external
+     CC0 packs (Quaternius) whose multi-tone look lives in a shared
+     palette texture, not vertex colours, so stripping it would flatten
+     the prop to one tint.
   5. Stamp ``COLOR_0`` per docs/vertex-attribute-spec.md (terrain default
-     for static props, linear sway for foliage).
+     for static props, linear sway for foliage; a neutral white for
+     ``keep_material`` static props so the attribute can't tint the
+     preserved texture — see ``_stamp_color0``).
   6. Wrap in a ``prop_<id>_root`` empty (kind=prop) + a primitive
      ``collider_body`` derived from the bounding box (kind=collider).
 
@@ -66,6 +73,13 @@ from tools.blender.vertex_attrs import (  # noqa: E402
     set_constant,
     set_linear_sway_z,
 )
+
+# Neutral COLOR_0 for ``keep_material`` static props. Three.js turns a present
+# COLOR_0 into a vertex-colour albedo *multiply* (GLTFLoader sets
+# vertexColors=true; the WebGPU MeshStandardNodeMaterial multiplies diffuse by
+# it), so a non-neutral default would tint the preserved baseColorTexture.
+# (1,1,1,1) is a no-op multiply yet still a valid, present attribute (G=AO=1).
+NEUTRAL_COLOR0 = (1.0, 1.0, 1.0, 1.0)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -177,6 +191,98 @@ def _assign_family_material(obj: bpy.types.Object, prop_id: str, family: str,
     return mat_name
 
 
+def _material_has_image(mat: bpy.types.Material) -> bool:
+    """True if *mat*'s node tree references at least one image — i.e. there is a
+    real texture to preserve (vs. a flat principled colour or vertex-coloured
+    pack)."""
+    if not mat.use_nodes or mat.node_tree is None:
+        return False
+    return any(getattr(n, "image", None) is not None
+               for n in mat.node_tree.nodes if n.type == "TEX_IMAGE")
+
+
+def _force_opaque_if_degenerate(mat: bpy.types.Material) -> bool:
+    """Force *mat* fully opaque when it would otherwise render invisible /
+    over-transparent — a Principled ``Alpha`` below the mask cutoff (or a
+    non-opaque blend mode) with **no texture** to supply a real per-texel
+    cutout. Seen on FBX-sourced packs (e.g. Quaternius palms) that import with
+    ``Alpha=0`` + alpha-clip: glTF then exports ``baseColorFactor`` alpha 0 and
+    every fragment is discarded, so the prop is invisible while its shadow still
+    casts. Returns True if it changed anything.
+
+    Belt-and-braces across Blender versions: set the blend mode opaque where the
+    attribute still exists *and* pin the Principled ``Alpha`` socket to 1.0
+    (which drives the exported ``baseColorFactor`` alpha; alpha 1 means no
+    fragment is ever masked out, whatever the alphaMode)."""
+    bsdf = (mat.node_tree.nodes.get("Principled BSDF")
+            if mat.use_nodes and mat.node_tree else None)
+    alpha_in = bsdf.inputs.get("Alpha") if bsdf else None
+    low_alpha = alpha_in is not None and not alpha_in.links and alpha_in.default_value < 0.5
+    masked = getattr(mat, "blend_method", "OPAQUE") in ("CLIP", "BLEND", "HASHED")
+    if not (low_alpha or masked):
+        return False
+    try:                                   # blend_method removed in newer Blender
+        mat.blend_method = "OPAQUE"
+    except (AttributeError, TypeError):
+        pass
+    if alpha_in is not None:
+        for link in list(alpha_in.links):
+            mat.node_tree.links.remove(link)
+        alpha_in.default_value = 1.0
+    try:                                   # legacy / non-node fallback
+        mat.diffuse_color = (*mat.diffuse_color[:3], 1.0)
+    except (AttributeError, TypeError):
+        pass
+    return True
+
+
+def _preserve_material(obj: bpy.types.Object, prop_id: str, family: str) -> str:
+    """The ``keep_material`` counterpart to ``_assign_family_material``: keep the
+    source mesh's material — its ``baseColorTexture`` + UVs intact — and only
+    *rename* the primary material to ``mat_<family>_<id>`` so it still satisfies
+    the one-shader-per-family convention. External CC0 packs (Quaternius) get
+    their multi-tone look from a shared palette ``baseColorTexture`` mapped
+    through UVs; stripping + re-tinting (the default path) would flatten the prop
+    to a single colour, so here we rename-only and leave the texture untouched.
+
+    Falls back to a flat ``_assign_family_material`` when the mesh has no source
+    material at all, and warns when the kept material carries no image texture
+    (a tell that the pack stores colour in *vertex* colours instead — which the
+    later ``_strip_color_attrs`` wipes, so ``keep_material`` can't rescue it)."""
+    mats = [m for m in obj.data.materials if m is not None]
+    if not mats:
+        print(f"[condition] prop_{prop_id}: keep_material set but mesh has no "
+              f"source material — falling back to a flat mat_{family}_{prop_id}.")
+        return _assign_family_material(obj, prop_id, family, tint=None)
+    mat_name = f"mat_{family}_{prop_id}"
+    primary = mats[0]
+    primary.name = mat_name
+    # Repair degenerate alpha so preserved props actually render — textureless
+    # materials only (a textured material's alpha may be a legitimate cutout,
+    # e.g. leaf cards, so it's left alone).
+    repaired = sum(1 for m in mats
+                   if not _material_has_image(m) and _force_opaque_if_degenerate(m))
+    # Diagnose where this prop's colour actually lives, so the operator knows
+    # whether keep_material preserved it — a palette ``baseColorTexture`` *or*
+    # multiple flat material slots both round-trip multi-tone (glTF splits a
+    # multi-material mesh into one primitive per slot) — or whether it will
+    # flatten: a single-material vertex-colour pack loses its colour because
+    # the engine contract strips vertex colours (``_strip_color_attrs``).
+    has_image = any(_material_has_image(m) for m in mats)
+    if has_image:
+        source = "baseColorTexture"
+    elif len(mats) > 1:
+        source = f"{len(mats)} flat material slots"
+    elif obj.data.color_attributes:
+        source = "VERTEX COLOURS — will FLATTEN (stripped for the COLOR_0 contract)"
+        print(f"[condition] prop_{prop_id}: WARNING {source}. Bake to a texture or skip.")
+    else:
+        source = "single flat material"
+    extra = f"; repaired {repaired} degenerate-alpha material(s)" if repaired else ""
+    print(f"[condition] prop_{prop_id}: kept material {mat_name!r}; colour source: {source}{extra}.")
+    return mat_name
+
+
 def _strip_color_attrs(mesh: bpy.types.Mesh) -> None:
     """Remove every existing color attribute. AI-generated meshes ship their
     own vertex-color layer (often a baked albedo); ``set_color_attr`` only
@@ -188,11 +294,19 @@ def _strip_color_attrs(mesh: bpy.types.Mesh) -> None:
         mesh.color_attributes.remove(mesh.color_attributes[0])
 
 
-def _stamp_color0(obj: bpy.types.Object, foliage: bool) -> None:
+def _stamp_color0(obj: bpy.types.Object, foliage: bool, *,
+                  neutral_albedo: bool = False) -> None:
     _strip_color_attrs(obj.data)         # drop the generator's color layer(s) first
     if foliage:
         (_mn, _mny, mnz), (_mx, _mxy, mxz) = _local_bbox(obj)
         set_linear_sway_z(obj.data, z_min=mnz, z_max=mxz * 1.1, ao=1.0)
+    elif neutral_albedo:
+        # ``keep_material`` static props carry a real baseColorTexture. Because
+        # the runtime multiplies albedo by COLOR_0 (see NEUTRAL_COLOR0), the
+        # terrain default (1,1,0,0) would zero the texture's blue channel — a
+        # neutral white leaves the preserved texture untouched while still
+        # stamping the required single COLOR_0 (G=AO=1 → no darkening).
+        set_constant(obj.data, NEUTRAL_COLOR0)
     else:
         set_constant(obj.data, DEFAULT_TERRAIN)
     # Make COLOR_0 active + render color so it exports at index 0 and the
@@ -242,12 +356,20 @@ def condition_object(obj: bpy.types.Object, *, prop_id: str, family: str = "prop
                      target_tris: int = 400, target_height: float | None = None,
                      source_up: str = "Z", collider: str = "box",
                      tint: str | None = None, foliage: bool = False,
-                     smooth: bool = False) -> bpy.types.Object:
+                     smooth: bool = False, keep_material: bool = False) -> bpy.types.Object:
     """Condition ``obj`` (a raw generated mesh) into a pipeline-legal prop.
 
     Returns the ``prop_<id>_root`` empty. The object is mutated in place
     and re-parented under the new root, inside a fresh ``prop_<id>``
     collection ready to drag into a library or export via build_prop.
+
+    ``keep_material``: preserve the source material's ``baseColorTexture`` +
+    UVs (renaming it to ``mat_<family>_<id>``) instead of stripping it for a
+    flat ``tint``. For external CC0 packs whose colour lives in a palette
+    texture; ``tint`` is ignored in this mode. The decimate budget is honoured
+    as usual — Quaternius is low-poly so it typically no-ops at the ~2 000-tri
+    default, leaving the UVs untouched; an aggressive budget on a denser mesh
+    can still distort the UV mapping (collapse-decimate interpolates UVs).
     """
     if obj is None or obj.type != "MESH":
         raise ValueError("condition_object needs a mesh object")
@@ -258,8 +380,11 @@ def condition_object(obj: bpy.types.Object, *, prop_id: str, family: str = "prop
     _recenter_bottom(obj)
     _rescale_to_height(obj, target_height)
 
-    _assign_family_material(obj, prop_id, family, tint)
-    _stamp_color0(obj, foliage or family == "foliage")
+    if keep_material:
+        _preserve_material(obj, prop_id, family)
+    else:
+        _assign_family_material(obj, prop_id, family, tint)
+    _stamp_color0(obj, foliage or family == "foliage", neutral_albedo=keep_material)
     for p in obj.data.polygons:
         p.use_smooth = smooth
 
@@ -352,6 +477,7 @@ def main() -> None:
         collider=os.environ.get("HOVERBIKE_COLLIDER", "box"),
         tint=os.environ.get("HOVERBIKE_TINT"),
         foliage=os.environ.get("HOVERBIKE_FOLIAGE", "0") == "1",
+        keep_material=os.environ.get("HOVERBIKE_KEEP_MATERIAL", "0") == "1",
     )
 
     if out:

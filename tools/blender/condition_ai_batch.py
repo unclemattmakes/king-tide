@@ -20,7 +20,11 @@ Invoked by tools/make_level_props.py as::
         -- --spec <run>/_condition_spec.json
 
 Spec entry fields: input, prop_id, family, target_tris, target_height,
-collider, tint, smooth, output.
+collider, tint, smooth, keep_material, output.
+
+``keep_material: true`` preserves the source pack's ``baseColorTexture`` + UVs
+(rename-only) instead of stripping for a flat ``tint`` — the multi-tone lane for
+external CC0 packs (Quaternius). See ``condition_ai_mesh.condition_object``.
 """
 
 from __future__ import annotations
@@ -70,6 +74,7 @@ def main() -> None:
                 collider=entry.get("collider", "box"),
                 tint=entry.get("tint"),
                 smooth=bool(entry.get("smooth", False)),
+                keep_material=bool(entry.get("keep_material", False)),
             )
             out = entry["output"]
             os.makedirs(os.path.dirname(out), exist_ok=True)

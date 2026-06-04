@@ -112,6 +112,66 @@ condition_active(prop_id="stone_idol", family="prop", target_tris=2000,
 ```
 It **iteratively** decimates (≤10× per pass — gentle passes preserve the silhouette far better than one collapse) → orients Z-up → recenters origin to bottom-centre → rescales to `target_height` (larger-than-life) → assigns `mat_<family>_<id>` → stamps `COLOR_0` → wraps in `prop_<id>_root` (kind=prop) + a bbox-derived primitive collider. Output = a pipeline-legal `prop_<id>` collection. (`family="foliage"` opts into the sway shader; `smooth=True` reads better on organic/sculpted meshes, flat for hard-surface.) Headless `main()` (`HOVERBIKE_INPUT/PROP_ID/OUTPUT`) conditions a file straight to a GLB.
 
+## External CC0 packs (condition-only lane — skip generation)
+
+Not every prop needs the GPU. Free **CC0** packs that already fit the "clean
+stylized toy" register (Quaternius is the proven source) skip Stages 1–2 and
+enter at **Stage 3 (condition)**:
+
+1. **Download** to the content root, out of git: `<content-root>/external/<source>/`
+   (catalogue + per-pack status in that folder's `MANIFEST.md` + `manifest.json`).
+2. **Convert to glTF if the pack ships only FBX/OBJ:**
+   `blender --background --python tools/blender/fbx_to_glb_batch.py -- --root <extracted> --packs <a,b,…>`
+   → writes `<pack>/glb/*.glb`. Packs that already ship glTF skip this.
+3. **Condition with `keep_material: true`** — give `condition_ai_batch.py` a spec
+   list whose `input` is the source `.gltf`/`.glb`, `output` is
+   `public/assets/props/cc0/<id>.glb`, and **`keep_material: true`**. Unlike the
+   AI-mesh default (which *strips* the generator material and stamps one flat
+   `mat_<family>` tint), `keep_material` **preserves** the pack's own material —
+   its `baseColorTexture` + UVs, or its flat multi-material slots — and only
+   renames the primary material to `mat_<family>_<id>`. It still stamps the rest
+   of the contract (`COLOR_0` + primitive collider + larger-than-life scale), so
+   the prop renders **multi-tone**, the way the pack looks, with **no engine or
+   shader change** (the runtime draws each prop with its own GLB material;
+   `COLOR_0` is stamped *neutral* white for static props so it can't tint the
+   preserved texture — visible colour comes from the texture/material, per
+   [vertex-attribute-spec.md](vertex-attribute-spec.md)). Two source shapes both
+   round-trip multi-tone:
+   - **palette-texture packs** (e.g. pirate) — one material + a shared palette
+     PNG; the image is embedded in the binary GLB.
+   - **flat multi-material packs** (e.g. toon-shooter, ships, crops) — colour
+     lives in several flat material slots, which glTF exports as one primitive
+     per slot.
+
+   The conditioner also **repairs degenerate alpha** (textureless materials that
+   import from FBX with `Alpha = 0` / alpha-clip render invisible — a frequent
+   FBX gotcha) by forcing them opaque, and **warns** if a pack's colour lives in
+   *vertex colours* (which the single-`COLOR_0` contract strips — that pack would
+   flatten; bake to a texture or skip it). Run the whole batch in one Blender
+   launch (one `--spec` JSON, `keep_material: true` on each entry).
+4. **Record provenance** in `specs/props/cc0/<source>.json` (committed; same
+   shape as `specs/props/ai/<level>.json`, plus `keep_material`). CC0 needs no
+   attribution; we log the source pack + original model name anyway.
+5. **Validate** like any prop: add `{ "type": "asset", "assetId": "cc0/<id>", … }`
+   to `public/tracks/prop-showcase.json` `props[]` and fly `?track=prop-showcase`
+   (assetId → `/assets/props/<assetId>.glb`, manifest-independent). Headed/WebGPU
+   only — `pnpm gen:track-shots prop-showcase` captures the real look.
+
+First staged stash: 11 Quaternius packs at `<content-root>/external/quaternius/`
+(see its `MANIFEST.md`). Sketchfab is **not** a source here — its CC0 pool is
+museum photogrammetry, not toy props.
+
+**Two packs/shapes the lane does *not* handle yet** (drop or pre-process):
+- **Rigged / skinned meshes** (Quaternius `animated-fish`) condition to a
+  collapsed blob — the conditioner is built for static meshes and bakes no
+  armature. Use the *static* packs (`cute-fish`) for sea life, or apply the
+  armature in rest pose first.
+- **High-res PBR packs** (`downtown-city`, `stylized-nature`) embed multi-MB
+  texture sets (base + normal + roughness at 2K) → a single prop GLB blows past
+  10 MB, absurd for a 40 m/s prop. They need a texture-budget pass (downsize to
+  ≤512 px, drop non-base maps) before they're web-shippable. Palette-texture and
+  flat-material packs stay light (≤300 KB) with no extra work.
+
 ## The subject rule (the most important filter)
 
 Image-to-3D excels at **compact, solid, closed** forms and **fragments

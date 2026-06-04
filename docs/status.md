@@ -1,3 +1,27 @@
+> **Last updated: 2026-06-03** — CC0 prop lane now renders **multi-tone**
+> (`keep_material`) + a scaled-up prop set.
+>
+> **A third prop-sourcing lane: free CC0 packs (multi-tone).** Eleven CC0
+> **Quaternius** packs are staged at `<content-root>/external/quaternius/`
+> (extracted + catalogued in `MANIFEST.md` + `manifest.json`; the FBX-only packs
+> converted to GLB via [`tools/blender/fbx_to_glb_batch.py`](../tools/blender/fbx_to_glb_batch.py)).
+> They skip concept+Hunyuan and enter at the **conditioner** with its new
+> **`keep_material`** mode: instead of stripping each pack's material for a flat
+> `mat_prop` tint, the conditioner now **preserves** it — `baseColorTexture` +
+> UVs, or flat multi-material slots — and stamps the contract around it
+> (`COLOR_0` stamped *neutral* so it can't tint the texture; degenerate
+> FBX `Alpha = 0` repaired to opaque), so CC0 props render **multi-tone with no
+> engine/shader change**. Shipped: a **scaled-up set (~56 props)** across
+> pirate / toon-shooter / crops / ships / cute-fish / cyberpunk →
+> `public/assets/props/cc0/*.glb` (Git LFS; provenance + `keep_material` in
+> `specs/props/cc0/quaternius.json`), a representative subset placed in
+> [prop-showcase.json](../public/tracks/prop-showcase.json) `props[]` and
+> verified headed/WebGPU (`pnpm gen:track-shots prop-showcase`). Deferred:
+> **rigged** packs (`animated-fish` → conditions to a blob) and **high-PBR**
+> packs (`downtown-city`, `stylized-nature` → multi-MB GLBs) need skinned-mesh /
+> texture-budget passes first. (Sketchfab was a dead end: museum photogrammetry,
+> not toy props.) Operational steps in [ai-prop-pipeline.md](./ai-prop-pipeline.md).
+>
 > **Last updated: 2026-06-01** — Midjourney → mesh: external concept art is now
 > a working front-end for the AI prop pipeline, and multiview (Hunyuan3D-2mv) is
 > unlocked on the 8 GB box.

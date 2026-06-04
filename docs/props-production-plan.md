@@ -40,6 +40,7 @@ is this plan.
 | **Placeable prop** | Single editor-droppable decor | `specs/props/<id>.json` → `kitPart` in `prop_kit.blend` → `build_prop.py` → GLB | spec + kit `.blend` |
 | **Scattered prop** | Foliage/rocks/buoys at volume | GN collection in `props-library.blend` → `HV_Scatter` / `HV_BiomePalette` / `HV_StrokeScatter` → `EXT_mesh_gpu_instancing` | `props-library.blend` |
 | **Hero landmark** | The one postcard set-piece per track | parametric collection in `landmarks-library.blend`, or inline `bmesh` in `seed_track_*.py` | seed script + `.blend` |
+| **External CC0 pack** | Free third-party props that already fit the toy register | download → `fbx_to_glb_batch.py` (if FBX-only) → `condition_ai_batch.py` → `public/assets/props/cc0/` | conditioned GLB + `specs/props/cc0/<source>.json` |
 
 Batch production **by archetype family, not by track** — one rock family
 serves The Maw, Hatteras, Angkor, and Liberty. See the archetype list below.
