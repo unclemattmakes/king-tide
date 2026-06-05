@@ -59,8 +59,16 @@ export function createScene(): {
   sun.shadow.camera.right = 90
   sun.shadow.camera.top = 90
   sun.shadow.camera.bottom = -90
+  // Depth bias to suppress self-shadowing — the "shadow acne" striped banding
+  // that appears on large surfaces seen at a grazing angle to the sun.
+  // `normalBias` offsets the receiver's shadow lookup along its surface normal
+  // and MUST scale with texel size: at ~18 cm/texel the old 0.05 m was far too
+  // small (<1/3 of a texel), so wide flat walls banded badly. ~0.6 m (≈3
+  // texels) clears it. If contact shadows start detaching ("peter-panning")
+  // under bikes/props, dial back toward 0.3. `bias` is a small constant nudge
+  // in clip depth — kept low so face-on surfaces don't peter-pan.
   sun.shadow.bias = -0.0004
-  sun.shadow.normalBias = 0.05
+  sun.shadow.normalBias = 0.6
   scene.add(sun)
   // Target must be in the scene for its world matrix to update when the
   // sky system moves it to track the player.
