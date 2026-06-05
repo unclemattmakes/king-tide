@@ -24,6 +24,7 @@
  * (`calibration-mode.ts`), which tunes the reactive (in-motion) pose response.
  */
 
+import { assetUrl } from '@/engine/asset-url'
 import { emptyIntent } from '@/engine/input/intent'
 import { createBikeRenderSystem } from '@/engine/render/render-systems'
 import { createRenderer } from '@/engine/render/renderer'
@@ -202,7 +203,7 @@ export async function bootRiderEditorMode(appEl: HTMLElement): Promise<RiderEdit
 
   // One bike + rider at the start gate.
   const racerVariant = resolveBikeVariant('racer')
-  const racerBikeGlb = await loadBike('/assets/bikes/racer.glb')
+  const racerBikeGlb = await loadBike(assetUrl('/assets/bikes/racer.glb'))
   const bikePos = {
     x: track.start.position.x,
     y: track.start.position.y,

@@ -13,6 +13,8 @@
  * entries.
  */
 
+import { assetUrl } from '@/engine/asset-url'
+
 export type AssetManifest = {
   schemaVersion: number
   generatedAt?: string
@@ -79,7 +81,9 @@ let cached: Promise<AssetManifest> | undefined
  * is missing — that's the legitimate "haven't run gen:all yet" state
  * and shouldn't crash the app.
  */
-export async function loadManifest(url = '/assets/manifest.json'): Promise<AssetManifest> {
+export async function loadManifest(
+  url = assetUrl('/assets/manifest.json'),
+): Promise<AssetManifest> {
   if (cached) return cached
   cached = (async () => {
     try {

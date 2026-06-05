@@ -7,6 +7,15 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Compiled runtime assets (track/bike/prop GLBs, thumb/hero JPGs, atlas PNGs,
+# opus soundtrack) are served from Cloudflare R2 — NOT git. This is what keeps
+# Vercel deploys from re-pulling ~160 MB of git-LFS on every build. The app
+# fetches them from VITE_ASSET_BASE_URL in prod (see src/engine/asset-url.ts).
+# Hydrate a fresh clone for offline dev with `pnpm assets:pull`; push new
+# exports with `pnpm assets:push`. See docs/asset-storage.md.
+/public/assets/
+/public/audio/
+
 # vitepress
 docs-site/.vitepress/cache/
 docs-site/.vitepress/dist/

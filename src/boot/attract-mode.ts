@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { assetUrl } from '@/engine/asset-url'
 import type { Intent } from '@/engine/input/intent'
 import { createBroadcastDirector } from '@/engine/render/broadcast-director'
 import { createCombatRenderSystem } from '@/engine/render/combat-render'
@@ -162,7 +163,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
       const loaded = await Promise.all(
         [...assetIds].map(async (id) => {
           try {
-            return [id, await loadProp(`/assets/props/${id}.glb`)] as const
+            return [id, await loadProp(assetUrl(`/assets/props/${id}.glb`))] as const
           } catch {
             return null
           }
@@ -194,7 +195,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     }
 
     // Single bike GLB — racer baseline for every attract rider.
-    const racerBikeGlb = await loadBike('/assets/bikes/racer.glb')
+    const racerBikeGlb = await loadBike(assetUrl('/assets/bikes/racer.glb'))
     if (disposed) {
       disposeRenderer()
       return handle

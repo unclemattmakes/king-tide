@@ -94,9 +94,11 @@ gitignored) — the app auto-syncs every save, so there's no manual sync step.
 Authors edit `.blend`s in that folder and point the Blender addon at their
 repo clone via its *Project root* preference (or `$HOVERBIKE_REPO_ROOT`) so
 exports still land in `public/`/`specs/`. Compiled exports under
-`public/assets/` (GLBs, thumbs, atlases) stay in git via **Git LFS** — a
-clone needs `git lfs install` for real bytes. Full convention + migration
-steps in [docs/asset-storage.md](docs/asset-storage.md).
+`public/assets/` + `public/audio/` (GLBs, thumbs, atlases, opus) are served
+from **Cloudflare R2** (bucket `hoverbike-content`, gitignored — *not* git/LFS);
+the app fetches them via `VITE_ASSET_BASE_URL` ([src/engine/asset-url.ts](src/engine/asset-url.ts)).
+Run `pnpm assets:pull` to hydrate a fresh clone for offline dev, `assets:push`
+after a re-export. Full convention in [docs/asset-storage.md](docs/asset-storage.md).
 
 ## Blender connector — optional
 

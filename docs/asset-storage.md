@@ -8,7 +8,7 @@ that only matter when **rebuilding** assets.
 | Bucket | Examples | Home | Why |
 | --- | --- | --- | --- |
 | **Raw / authoring sources** | `tracks-src/*.blend`, `bikes-src/*.blend` | **Google Drive** (off git) | Large (~103 MB) and re-saved constantly; nothing at runtime needs them. |
-| **Compiled / exported** | `public/assets/**/*.glb`, hero/thumb `*.jpg`, atlas `*.png` | **git, via Git LFS** | The web build + Vercel serve these; they must be in a clone, but they re-export often so LFS keeps the pack lean. |
+| **Compiled / exported** | `public/assets/**/*.glb`, hero/thumb `*.jpg`, atlas `*.png`, `public/audio/**/*.opus` | **Cloudflare R2** (off git) | The web build serves these; moved off git-LFS so Vercel deploys don't re-pull ~160 MB per build. Fetched at runtime via `VITE_ASSET_BASE_URL`. |
 
 > The tiny shared kits under `tools/blender/lib/*.blend` (~0.2 MB) stay in
 > plain git for now — they're load-bearing build inputs and negligible in
@@ -28,13 +28,13 @@ installs Google Drive for Desktop and the same folder appears.
 
 The AI prop factory (`make-level-props`, see
 [ai-prop-pipeline.md](ai-prop-pipeline.md)) follows the same rule: its **raw**
-outputs land in the content root, the **compiled** GLB in git LFS.
+outputs land in the content root, the **compiled** GLB in Cloudflare R2.
 
 | AI prop artifact | Home |
 | --- | --- |
 | Concept art (SDXL PNGs + contact sheet) | `<content-root>/concept-art/props/<level>/` (Drive) |
 | Per-prop authoring `.blend` (one asset per file) | `<content-root>/tracks-src/props/ai/<id>.blend` (Drive) |
-| Conditioned, shippable GLB | `public/assets/props/ai/<id>.glb` (git LFS) |
+| Conditioned, shippable GLB | `public/assets/props/ai/<id>.glb` (R2, gitignored) |
 | Per-level manifest (prompts/seeds/params — the reproducibility anchor) | `specs/props/ai/<level>.json` (git) |
 
 The content root defaults to `C:\project-content\hoverbike`; override with
@@ -63,64 +63,84 @@ Keep the Drive folder's `tracks-src/` / `bikes-src/` subfolder names — the
 addon keys its track-vs-bike mode off them, and links sibling libraries
 (`props-library.blend`, `landmarks-library.blend`) from the same folder.
 
-## Compiled exports → Git LFS
+## Compiled exports → Cloudflare R2
 
-Tracked in [`.gitattributes`](../.gitattributes):
+The compiled runtime assets are **gitignored** (`public/assets/`,
+`public/audio/` in [`.gitignore`](../.gitignore)) and served from a public
+**Cloudflare R2** bucket — zero egress cost, and Vercel deploys no longer
+pull ~160 MB of git-LFS objects per build (the bandwidth blowup that broke
+deploys when the free quota ran out).
 
+| | |
+| --- | --- |
+| Bucket | `hoverbike-content` (account OddballCreatureClub) |
+| Public URL | `https://hoverbike-content.mattscott.dev` (R2 custom domain) |
+| CORS | `*` GET/HEAD (public, read-only) |
+| Mirrors | `public/assets/**` → `…/assets/**`, `public/audio/**` → `…/audio/**` |
+
+The app resolves every asset path through `assetUrl()`
+([src/engine/asset-url.ts](../src/engine/asset-url.ts)), which prefixes
+`VITE_ASSET_BASE_URL` in prod and is a no-op in dev (local `public/`). Set
+`VITE_ASSET_BASE_URL=https://hoverbike-content.mattscott.dev` on Vercel
+(Production + Preview); leave it unset locally so `pnpm dev` stays offline.
+Gameplay JSON under `public/tracks/*.json` stays in git (small, versioned)
+and is **not** routed to R2.
+
+### Syncing with R2 — `pnpm assets:pull` / `assets:push`
+
+Both use [`rclone`](https://rclone.org) against an S3 remote named
+`r2-hoverbike`. Configure it once with an R2 API token (*Cloudflare → R2 →
+Manage API Tokens → Object Read & Write*, scoped to the bucket):
+
+```ini
+# ~/.config/rclone/rclone.conf  (or %APPDATA%\rclone\rclone.conf on Windows)
+[r2-hoverbike]
+type = s3
+provider = Cloudflare
+access_key_id = <your R2 access key id>
+secret_access_key = <your R2 secret>
+endpoint = https://15b62d20356b80d6f588eef8479f8c8f.r2.cloudflarestorage.com
+region = auto
 ```
-public/assets/**/*.glb   filter=lfs diff=lfs merge=lfs -text
-public/assets/**/*.jpg   filter=lfs diff=lfs merge=lfs -text
-public/assets/**/*.jpeg  filter=lfs diff=lfs merge=lfs -text
-public/assets/**/*.png   filter=lfs diff=lfs merge=lfs -text
-```
 
-This is **forward-only**: assets committed *after* this lands become LFS
-pointers; the GLBs already in history stay as ordinary blobs (see the
-history-rewrite note below).
+- `pnpm assets:pull` — hydrate a fresh clone's `public/assets` + `public/audio`
+  from R2 for offline local dev. (A read-only token suffices.)
+- `pnpm assets:push` — upload newly exported GLBs/atlases/opus (after a
+  `pnpm gen:*` or a Blender re-export) to R2 so prod + previews pick them up.
+  **This replaces the old `git add` + commit step for compiled assets.**
 
-### Prerequisites — do these before relying on LFS
-
-1. **Install the LFS client everywhere these assets are checked out:**
-   ```bash
-   git lfs install      # once per machine; also on any CI runner
-   ```
-   Without it, LFS-tracked files arrive as small pointer text files and the
-   game fails to load its GLBs.
-2. **Enable LFS on Vercel.** In the Vercel project: *Settings → Git → "Git
-   LFS"* must be on, or the build checks out pointer files and every GLB
-   404s. Verify a preview deploy renders a track before trusting it.
-3. **Mind the GitHub LFS quota.** Free tier is 1 GB storage + 1 GB/month
-   bandwidth, then paid data packs. ~240 MB of GLBs re-versioned over time
-   plus Vercel pulling them per build will cross 1 GB — budget for a pack,
-   or move compiled assets to an R2/S3 + CDN fetch later if bandwidth bites.
+> rclone auto-sets sensible content-types (`application/octet-stream` for
+> `.glb`, `audio/ogg` for `.opus`); the GLB loader's HEAD check accepts
+> octet-stream, so no per-file overrides are needed.
 
 ## Migration status
 
-- ✅ Raw `.blend`s untracked from git + `.gitignore`d.
-- ✅ Sources live in the Google-Drive-synced folder (auto-backup on save).
+- ✅ Raw `.blend`s untracked from git + `.gitignore`d (Google-Drive-synced).
 - ✅ Addon honors a "Project root" override so exports reach the clone.
-- ✅ Compiled exports tracked via Git LFS (`.gitattributes`).
-- ⬜ **You:** set the addon's *Project root* to your clone, then reload the
-  addon (`F3 → Reload Scripts`) and confirm a track export still writes
-  into `public/assets/tracks/`.
-- ⬜ **You:** `git lfs install` on each machine + enable Git LFS on Vercel
-  (see the LFS prerequisites above) before regenerating any GLB.
-- ⬜ **Optional, coordinated:** reclaim the existing ~127 MB history (below).
+- ✅ Compiled assets moved off git-LFS → Cloudflare R2 (`hoverbike-content`),
+  gitignored, fetched at runtime via `VITE_ASSET_BASE_URL` / `assetUrl()`.
+- ✅ `VITE_ASSET_BASE_URL` set on Vercel (Production + Preview).
+- ⬜ **You:** configure the `r2-hoverbike` rclone remote (above) on each
+  machine that authors assets, so `pnpm assets:push` works after a re-export.
+- ⬜ **Optional, coordinated:** reclaim the existing git history (below) —
+  the old GLB/blend blobs are still in the pack.
 
-> The raw `.blend`s are still in git *history* (the untrack is forward-only),
-> so nothing is lost — they're recoverable from any prior commit until the
-> optional history rewrite.
+> Compiled assets are still in git *history* (the untrack is forward-only),
+> so nothing is lost — recoverable from any prior commit until the optional
+> history rewrite. The live bytes are in R2.
 
 ## Optional: reclaim existing history
 
-The forward-only setup does **not** shrink the current ~127 MB `.git` — the
-old GLB/blend blobs are still in the pack. To reclaim that space:
+The untrack is forward-only, so the old GLB/JPG/PNG/opus + `.blend` blobs are
+still in the `.git` pack (hundreds of MB). To reclaim that space, drop them
+from history with [`git filter-repo`](https://github.com/newren/git-filter-repo):
 
 ```bash
-git lfs migrate import --include="public/assets/**/*.glb,public/assets/**/*.jpg,public/assets/**/*.png"
-# and/or git filter-repo to drop tracks-src/*.blend from history entirely
+git filter-repo --invert-paths \
+  --path-glob 'public/assets/*' --path-glob 'public/audio/*' \
+  --path-glob 'tracks-src/*.blend' --path-glob 'bikes-src/*.blend'
 ```
 
 This **rewrites history and force-pushes** — it invalidates every existing
 clone and open PR. Do it once, deliberately, when no PRs are in flight, and
-tell collaborators to re-clone.
+tell collaborators to re-clone. The live asset bytes are safe in R2 / Drive.

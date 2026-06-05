@@ -38,6 +38,7 @@
  * crashing.
  */
 
+import { assetUrl } from '@/engine/asset-url'
 import { playerSettings } from '@/engine/player-settings'
 import type { AudioConfig } from '@/game/tracks/types'
 import { createJukebox, type Jukebox, type SoundtrackEntry } from './soundtrack'
@@ -437,7 +438,7 @@ export function createAudioEngine(): AudioEngine {
     // fall back to the default source (radio if loaded, else bed) —
     // that's the documented graceful-degrade contract.
     if (config.music && musicBus) {
-      const url = `/audio/music/${config.music}`
+      const url = assetUrl(`/audio/music/${config.music}`)
       const buf = await loadAudioBuffer(c, url)
       if (buf) {
         const source = c.createBufferSource()
@@ -468,7 +469,7 @@ export function createAudioEngine(): AudioEngine {
       const ambBus = ambientBus
       await Promise.all(
         config.ambient.map(async (name, i) => {
-          const url = `/audio/ambient/${name}`
+          const url = assetUrl(`/audio/ambient/${name}`)
           const buf = await loadAudioBuffer(c, url)
           if (!buf) return
           const source = c.createBufferSource()

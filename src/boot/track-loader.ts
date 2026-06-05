@@ -19,6 +19,7 @@
  */
 
 import type * as THREE from 'three'
+import { assetUrl } from '@/engine/asset-url'
 import { createIslandMesh } from '@/engine/render/arena-mesh'
 import { createCliffsideMesh } from '@/engine/render/cliffside-mesh'
 import { attachTrackColliders, loadGlbTrackVisuals } from '@/engine/render/glb-track'
@@ -126,7 +127,7 @@ export async function loadTrackForBoot(opts: {
     let horizonGeometry: THREE.BufferGeometry | undefined
     let environmentGlbRoot: THREE.Object3D | undefined
     if (track.environmentGlb && !editMode) {
-      const env = await loadGlbTrackVisuals(track.environmentGlb, {
+      const env = await loadGlbTrackVisuals(assetUrl(track.environmentGlb), {
         // Anchor the terrain wet band + underwater tint to the real water
         // surface (not y=0) by threading the track's water height in.
         terrainShader: { ...track.terrainShader, waterLevel: track.water?.height ?? 0 },
@@ -155,7 +156,7 @@ export async function loadTrackForBoot(opts: {
   //   - Edit mode + no GLB: stub an empty draft so the editor can
   //     open a fresh track for the user to author. Saving from the
   //     editor materialises `public/tracks/<id>.json`.
-  const glbUrl = `/assets/tracks/${trackId}.glb`
+  const glbUrl = assetUrl(`/assets/tracks/${trackId}.glb`)
   const glbHead = await fetch(glbUrl, { method: 'HEAD' })
   const glbContentType = glbHead.headers.get('content-type') ?? ''
   const glbExists =
