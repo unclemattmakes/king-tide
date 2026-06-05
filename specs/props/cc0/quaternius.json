@@ -1,7 +1,7 @@
 {
   "source": "quaternius",
   "license": "CC0",
-  "note": "Conditioned via tools/blender/condition_ai_batch.py from the staged Quaternius stash (<content-root>/external/quaternius/, see its MANIFEST.md), with keep_material=true: the conditioner PRESERVES each pack’s source material (baseColorTexture + UVs, or its flat multi-material slots) and stamps the engine contract around it (single COLOR_0 + primitive collider + larger-than-life scale + neutral COLOR_0 so it can’t tint the texture), so these render multi-tone, not flat silhouettes. Textureless FBX packs whose colour lives in flat material slots round-trip multi-tone too; degenerate alpha (invisible FBX imports) is repaired to opaque. Placed in public/tracks/prop-showcase.json props[] as cc0/<id> for validation only — level placement is the designer’s job. CC0 needs no attribution; source pack + model recorded for lineage.",
+  "note": "Conditioned via tools/blender/condition_ai_batch.py from the staged Quaternius stash (<content-root>/external/quaternius/, see its MANIFEST.md), with keep_material=true: the conditioner PRESERVES each pack’s source material (baseColorTexture + UVs, or its flat multi-material slots) and stamps the engine contract around it (single COLOR_0 + primitive collider + larger-than-life scale + neutral COLOR_0 so it can’t tint the texture), so these render multi-tone, not flat silhouettes. Textureless FBX packs whose colour lives in flat material slots round-trip multi-tone too; degenerate alpha (invisible FBX imports) is repaired to opaque. Placed in public/tracks/prop-showcase.json props[] as cc0/<id> for validation only — level placement is the designer’s job. CC0 needs no attribution; source pack + model recorded for lineage. RIGGED/ANIMATED props (entries with \"animated\": true — the Animated Fish Pack) go through a DIFFERENT lane: tools/blender/ship_animated_prop.py, which is skinning-preserving (the static conditioner decimates/recenters/bakes a collider and would blob the rig). It keeps the armature skin + the 'Swim' clip intact, renames it to 'Swim', wraps the rig in a prop_root, stamps neutral COLOR_0, and exports with skins+animations ON. Runtime side: src/engine/render/animated-props.ts builds a THREE.AnimationMixer per placement. Animated props are render-only decoration (no collider).",
   "props": [
     {
       "prop_id": "anchor",
@@ -682,6 +682,90 @@
       "smooth": false,
       "keep_material": true,
       "conditioned_glb": "public/assets/props/cc0/street_lamp_neon.glb"
+    },
+    {
+      "prop_id": "shark",
+      "source_pack": "Animated Fish Pack",
+      "source_model": "Shark",
+      "family": "fauna",
+      "animated": true,
+      "clip": "Swim",
+      "lane": "ship_animated_prop",
+      "keep_material": true,
+      "collider": "none",
+      "conditioned_glb": "public/assets/props/cc0/shark.glb"
+    },
+    {
+      "prop_id": "whale",
+      "source_pack": "Animated Fish Pack",
+      "source_model": "Whale",
+      "family": "fauna",
+      "animated": true,
+      "clip": "Swim",
+      "lane": "ship_animated_prop",
+      "keep_material": true,
+      "collider": "none",
+      "conditioned_glb": "public/assets/props/cc0/whale.glb"
+    },
+    {
+      "prop_id": "fish_1",
+      "source_pack": "Animated Fish Pack",
+      "source_model": "Fish1",
+      "family": "fauna",
+      "animated": true,
+      "clip": "Swim",
+      "lane": "ship_animated_prop",
+      "keep_material": true,
+      "collider": "none",
+      "conditioned_glb": "public/assets/props/cc0/fish_1.glb"
+    },
+    {
+      "prop_id": "fish_2",
+      "source_pack": "Animated Fish Pack",
+      "source_model": "Fish2",
+      "family": "fauna",
+      "animated": true,
+      "clip": "Swim",
+      "lane": "ship_animated_prop",
+      "keep_material": true,
+      "collider": "none",
+      "conditioned_glb": "public/assets/props/cc0/fish_2.glb"
+    },
+    {
+      "prop_id": "fish_3",
+      "source_pack": "Animated Fish Pack",
+      "source_model": "Fish3",
+      "family": "fauna",
+      "animated": true,
+      "clip": "Swim",
+      "lane": "ship_animated_prop",
+      "keep_material": true,
+      "collider": "none",
+      "conditioned_glb": "public/assets/props/cc0/fish_3.glb"
+    },
+    {
+      "prop_id": "dolphin",
+      "source_pack": "Animated Fish Pack",
+      "source_model": "Dolphin",
+      "family": "fauna",
+      "animated": true,
+      "clip": "Swim",
+      "lane": "ship_animated_prop",
+      "keep_material": true,
+      "collider": "none",
+      "conditioned_glb": "public/assets/props/cc0/dolphin.glb"
+    },
+    {
+      "prop_id": "manta_ray",
+      "source_pack": "Animated Fish Pack",
+      "source_model": "Manta ray",
+      "family": "fauna",
+      "animated": true,
+      "clip": "Swim",
+      "lane": "ship_animated_prop",
+      "keep_material": true,
+      "collider": "none",
+      "conditioned_glb": "public/assets/props/cc0/manta_ray.glb"
     }
   ]
 }

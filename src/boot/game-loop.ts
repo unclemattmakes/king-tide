@@ -46,6 +46,7 @@ import {
   markTutorialCompleted,
   playerSettings,
 } from '@/engine/player-settings'
+import type { AnimatedPropsSystem } from '@/engine/render/animated-props'
 import { createAntiGravHud } from '@/engine/render/anti-grav-hud'
 import { createBoostMeterHud } from '@/engine/render/boost-meter-hud'
 import type { ChaseCamera } from '@/engine/render/camera'
@@ -307,6 +308,12 @@ export interface GameLoopOpts {
    *  prop placement produced a WaveRider entity bound to a real prop
    *  GLB. Called each render frame to sync mesh transforms. */
   waveRiderRender?: WaveRiderRenderSystem
+  /** Optional animated-prop render system. Present when the track has any
+   *  prop with `animated:true` resolving to a GLB that ships animation
+   *  clips (e.g. the swimming great white). `update(dt)` advances each
+   *  instance's `THREE.AnimationMixer` every render frame. Render-only —
+   *  no sim coupling. */
+  animatedProps?: AnimatedPropsSystem
   /** Lap timing state, mutated each lap. */
   lapState: {
     lapStartRaceTime: number
@@ -463,6 +470,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     ghostRunner,
     waveRiderSys,
     waveRiderRender,
+    animatedProps,
   } = opts
 
   let finishShown = false
@@ -1742,6 +1750,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     combatRender(dt)
     fxTick(dt)
     waveRiderRender?.render()
+    animatedProps?.update(dt)
     particleTick(dt)
     // Landmark pendulum animation — render-only, driven off wall-clock
     // seconds since boot so menu pauses don't freeze the visual rhythm.

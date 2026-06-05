@@ -1,10 +1,13 @@
 import * as THREE from 'three'
+import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js'
+import { type LoadedProp, pickAnimationClip } from '@/game/assets/prop-loader'
 
 /**
  * Procedural great-white for the out-of-bounds AirJaws breach. Stylised "clean
  * toy" register (docs/art-direction.md) — built from primitives so it ships
  * without an asset, recognisable by silhouette (torpedo body + dorsal fin +
- * gaping jaw). Art-upgradeable later via the GLB prop pipeline.
+ * gaping jaw). The fallback when the rigged GLB shark (`createGlbShark`) hasn't
+ * loaded yet.
  *
  * Local forward is +Z; the breach sequence orients the group along its travel
  * direction. Render-only.
@@ -165,6 +168,85 @@ export function createShark(): Shark {
         if (Array.isArray(m)) for (const mm of m) mm.dispose()
         else if (m) (m as THREE.Material).dispose()
       })
+      group.removeFromParent()
+    },
+  }
+}
+
+// ── GLB shark (rigged Quaternius great white) ────────────────────────────────
+// Native model: head at local +Z, ~14.8 m long in bind pose (Face_end z≈7.3,
+// Tail_end z≈-7.5 — measured from the shipped rig). Forward +Z already matches
+// the breach sequence's convention, so no re-orientation is needed.
+const GLB_NATIVE_LEN = 14.8
+const GLB_TARGET_LEN = 9 // breach drama size (the procedural shark is ~6.7 m)
+const GLB_SCALE = GLB_TARGET_LEN / GLB_NATIVE_LEN // ≈ 0.61
+// Mouth opening in native model space (just behind the snout tip), where the
+// bike is carried "in the jaws". Scaled with the model below.
+const GLB_MOUTH = new THREE.Vector3(0, 0.0, 6.2)
+
+/**
+ * The rigged-GLB great white — the same Quaternius `cc0/shark` asset that swims
+ * in the Two Oceans aquarium, reused as the out-of-bounds breach predator. A
+ * strict upgrade over the procedural `createShark`: real modelled form + the
+ * `Swim` clip undulating the body/tail through the lunge (driven by a
+ * `THREE.AnimationMixer`, the runtime animated-prop infra).
+ *
+ * Implements the same `Shark` interface so `shark-sequence` drives it
+ * unchanged. Two intentional differences from the procedural shark:
+ *  - `setJawOpen` is a no-op: the Quaternius rig has no jaw bone, so there's no
+ *    gape to drive. The swim + vertical lunge + chomp cue still sell the breach.
+ *  - geometry/materials are shared with the prop-loader cache, so `dispose`
+ *    only stops the mixer + detaches (it must NOT dispose the shared buffers).
+ *
+ * Takes a pre-loaded `LoadedProp` (the caller resolves + caches the GLB) so this
+ * stays synchronous, matching `createShark()`.
+ */
+export function createGlbShark(loaded: LoadedProp): Shark {
+  const group = new THREE.Group()
+  // SkeletonUtils.clone rebinds the skeleton onto fresh bones (plain clone()
+  // shares one skeleton across instances). Geometry + materials stay shared.
+  const model = cloneSkeleton(loaded.root)
+  model.scale.setScalar(GLB_SCALE)
+  model.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    if (mesh.isMesh) {
+      mesh.castShadow = true
+      // A skinned mesh deforms outside its bind-pose bounds; don't let frustum
+      // culling pop the shark mid-breach.
+      mesh.frustumCulled = false
+    }
+  })
+  group.add(model)
+
+  // Mouth marker (child of the scaled model so it tracks the model's transform).
+  const mouthMarker = new THREE.Object3D()
+  mouthMarker.position.copy(GLB_MOUTH)
+  model.add(mouthMarker)
+
+  // Drive the Swim clip so the body/tail undulate through the breach.
+  const mixer = new THREE.AnimationMixer(model)
+  const clip = pickAnimationClip(loaded.animations)
+  if (clip) {
+    const action = mixer.clipAction(clip)
+    action.setLoop(THREE.LoopRepeat, Number.POSITIVE_INFINITY)
+    action.play()
+  }
+
+  return {
+    group,
+    mouthWorldPosition(target) {
+      return mouthMarker.getWorldPosition(target)
+    },
+    setJawOpen() {
+      // No jaw bone in the Quaternius rig — intentionally a no-op.
+    },
+    update(dt) {
+      mixer.update(dt)
+    },
+    dispose() {
+      mixer.stopAllAction()
+      // Shared geometry/materials are owned by the prop-loader cache — do NOT
+      // dispose them here. Just detach the cloned tree.
       group.removeFromParent()
     },
   }

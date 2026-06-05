@@ -1,5 +1,7 @@
 import * as THREE from 'three'
-import { createShark, type Shark } from './shark'
+import { assetUrl } from '@/engine/asset-url'
+import { type LoadedProp, loadProp } from '@/game/assets/prop-loader'
+import { createGlbShark, createShark, type Shark } from './shark'
 
 /**
  * The AirJaws out-of-bounds set-piece. A great white breaches from the depths:
@@ -66,6 +68,20 @@ export function createSharkSequence(opts: SharkSequenceOpts): SharkSequence {
   let chomped = false
   let completed = false
 
+  // Preload the rigged GLB great white (the same cc0/shark that swims in the
+  // Two Oceans aquarium). loadProp is globally cached, so on tracks that place
+  // the shark prop this is already resolved; elsewhere it loads once here. If a
+  // breach somehow fires before it resolves, ensureShark falls back to the
+  // procedural shark for that one breach.
+  let sharkAsset: LoadedProp | null = null
+  void loadProp(assetUrl('/assets/props/cc0/shark.glb'))
+    .then((p) => {
+      sharkAsset = p
+    })
+    .catch(() => {
+      /* keep the procedural fallback */
+    })
+
   const breach = new THREE.Vector3()
   const prevPos = new THREE.Vector3()
   const curPos = new THREE.Vector3()
@@ -75,7 +91,9 @@ export function createSharkSequence(opts: SharkSequenceOpts): SharkSequence {
   const Z = new THREE.Vector3(0, 0, 1)
 
   function ensureShark(): Shark {
-    if (!shark) shark = createShark()
+    // Prefer the rigged GLB shark once it's loaded; fall back to the procedural
+    // one only if a breach fires before the asset resolves.
+    if (!shark) shark = sharkAsset ? createGlbShark(sharkAsset) : createShark()
     if (!shark.group.parent) opts.scene.add(shark.group)
     shark.group.visible = true
     return shark

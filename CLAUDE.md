@@ -48,10 +48,12 @@ CC0 placeholders). See [docs/status.md](docs/status.md). Key planning docs:
   priorities, anti-targets from the Pacer / MK World failure modes.
 - [docs/track-themes.md](docs/track-themes.md) — 12 ship tracks + tutorial,
   full content bible with set-pieces, palettes, lore tags.
-- [docs/art-direction.md](docs/art-direction.md) — **canonical art direction**:
-  post-apocalyptic solarpunk, the "clean stylized toy" register, the
-  built/broken/blooming material-state rule, and the prop- + level-builder
-  checklists. Read before building or dressing any prop or level. Per-domain
+- [docs/art-direction.md](docs/art-direction.md) — **canonical art direction**
+  (v2): post-apocalyptic solarpunk, the **painterly-vinyl toy** register
+  (hand-painted *Sea of Thieves* surface on a *Team Fortress 2* silhouette, no
+  outlines), the built/broken/blooming material-state rule, the shader-driven
+  waterline, the prop- + level-builder checklists, and the concept-art `--sref`
+  recipe. Read before building or dressing any prop or level. Per-domain
   companions: [art per track](docs/track-art-direction.md),
   [art per prop family + ComfyUI prompts](docs/prop-art-direction.md),
   [art per bike + ComfyUI prompts](docs/bike-art-direction.md).

@@ -369,6 +369,24 @@ export type Prop = {
    *  grip by the material. Absent → DEFAULT (grippy, no behaviour
    *  change). See `engine/sim/surface-types.ts`. */
   surface?: SurfaceTypeValue
+  /** Animated-prop opt-in. When `true` AND the referenced asset GLB ships
+   *  skeletal animation clips (a rigged `SkinnedMesh`), the placement is
+   *  routed to the animated-prop render path
+   *  (`engine/render/animated-props.ts`): the GLB is skeleton-cloned per
+   *  instance, given a `THREE.AnimationMixer`, and ticked each frame.
+   *  Animated props are render-only decoration — no collider, no sim
+   *  coupling — so they're skipped by `createPropsMesh` /
+   *  `createPropColliders`. Ignored for non-asset props or assets with no
+   *  clips (those fall back to the static instanced path). */
+  animated?: boolean
+  /** Which animation clip to play, by name (exact, else case-insensitive
+   *  substring). Defaults to the GLB's first clip — robust for the
+   *  one-clip-per-asset Quaternius fish whose clip is named
+   *  `Armature|Armature|Swim`. Only meaningful with `animated: true`. */
+  clip?: string
+  /** Loop the clip (default `true`). Set `false` to play once and hold
+   *  the final pose. Only meaningful with `animated: true`. */
+  loop?: boolean
 }
 
 export type PropType = 'box' | 'sphere' | 'cylinder' | 'pipe' | 'halfpipe' | 'asset'

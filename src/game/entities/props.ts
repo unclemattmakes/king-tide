@@ -1,7 +1,7 @@
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
-import type { LoadedProp } from '@/game/assets/prop-loader'
+import { isAnimatedAssetProp, type LoadedProp } from '@/game/assets/prop-loader'
 import { createWaveRider } from '@/game/entities/wave-rider'
 import type { Prop } from '@/game/tracks/types'
 
@@ -56,6 +56,9 @@ export function createPropColliders(
       if (!p.assetId) continue
       const loaded = assets?.get(p.assetId)
       if (!loaded) continue
+      // Animated props are render-only decoration — no collider, no sim
+      // coupling (hosted by `animated-props`).
+      if (isAnimatedAssetProp(p, loaded)) continue
       if (loaded.waveRider !== undefined && sim) {
         // Wave-rider props get a kinematic Rapier body driven by the
         // wave-rider sim system + a render mesh sourced from the
