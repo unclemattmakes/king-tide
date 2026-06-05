@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { ExportedKind } from '@/engine/asset-kinds'
+import { assetUrl } from '@/engine/asset-url'
 
 /**
  * Decal system.
@@ -34,7 +35,7 @@ import { ExportedKind } from '@/engine/asset-kinds'
  * decals never pay the bytes.
  */
 
-const ATLAS_URL = '/assets/decals/atlas.png'
+const ATLAS_URL = assetUrl('/assets/decals/atlas.png')
 
 let atlasTexture: THREE.Texture | null = null
 let atlasLoadPromise: Promise<THREE.Texture> | null = null

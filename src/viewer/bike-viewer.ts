@@ -14,6 +14,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { ExportedKind } from '../engine/asset-kinds'
+import { assetUrl } from '../engine/asset-url'
 import { createRenderer } from '../engine/render/renderer'
 import { cloneLoadedBike, type LoadedBike, loadBike } from '../game/assets/bike-loader'
 import { type AssetManifest, type BikeManifestEntry, loadManifest } from '../game/assets/manifest'
@@ -119,7 +120,7 @@ export async function bootBikeViewer(parent: HTMLElement, opts: ViewerOpts): Pro
     // Initial load — thumb mode still needs the bike mounted + the
     // render loop ticking so the spec's screenshot waits on the same
     // bikeViewerReady signal as authors get in normal use.
-    const loaded = await loadBike(current.url)
+    const loaded = await loadBike(assetUrl(current.url))
     // Tint the GLB's livery to the variant's bodyColor so 5th-bike
     // variants that share a base GLB (e.g. Sparrow → racer.glb until
     // a dedicated Blender source lands) read with the right colour.
@@ -287,7 +288,7 @@ async function switchBike(refs: Refs, bikeId: string): Promise<void> {
     }
   })
 
-  refs.loaded = await loadBike(next.url)
+  refs.loaded = await loadBike(assetUrl(next.url))
   refs.bikeNode = mountBike(refs.scene, refs.axesGroup, refs.loaded)
   // Update URL so refresh keeps the same selection.
   const url = new URL(window.location.href)

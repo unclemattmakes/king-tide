@@ -12,6 +12,8 @@
     "party:deploy": "partykit deploy",
     "build": "tsc -p tsconfig.build.json && vite build",
     "preview": "vite preview",
+    "assets:pull": "rclone copy r2-hoverbike:hoverbike-content/assets public/assets --transfers 16 --checkers 16 && rclone copy r2-hoverbike:hoverbike-content/audio public/audio --transfers 16 --checkers 16",
+    "assets:push": "rclone copy public/assets r2-hoverbike:hoverbike-content/assets --transfers 16 --checkers 16 --s3-no-check-bucket && rclone copy public/audio r2-hoverbike:hoverbike-content/audio --transfers 16 --checkers 16 --s3-no-check-bucket",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

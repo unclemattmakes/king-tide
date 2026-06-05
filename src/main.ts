@@ -10,6 +10,7 @@ import { spawnBikes } from './boot/spawn-bikes'
 import { loadTrackForBoot } from './boot/track-loader'
 import { runEarlyModeDispatch } from './boot/url-modes'
 import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug'
+import { assetUrl } from './engine/asset-url'
 import { applyTrackAudio } from './engine/audio/audio-service'
 import { installSoundtrackRadio } from './engine/audio/soundtrack-radio'
 import { loadDevSettings } from './engine/dev-settings'
@@ -591,7 +592,7 @@ async function boot() {
     const loaded = await Promise.all(
       [...assetIds].map(async (id) => {
         try {
-          return [id, await loadProp(`/assets/props/${id}.glb`)] as const
+          return [id, await loadProp(assetUrl(`/assets/props/${id}.glb`))] as const
         } catch (err) {
           console.warn(`[boot] prop asset '${id}' failed to load:`, err)
           return null
@@ -635,8 +636,8 @@ async function boot() {
   // when the player's variant already is the racer.
   setLoadingMessage('Loading bikes…')
   const [playerBikeGlb, racerBikeGlb] = await Promise.all([
-    loadBike(`/assets/bikes/${playerVariant.id}.glb`),
-    loadBike('/assets/bikes/racer.glb'),
+    loadBike(assetUrl(`/assets/bikes/${playerVariant.id}.glb`)),
+    loadBike(assetUrl('/assets/bikes/racer.glb')),
   ])
 
   // Time Trial — load the saved ghost for (track, bike) before spawn
@@ -991,7 +992,7 @@ async function boot() {
   let surgeSpray: SurgeSprayDriver | null = null
   if (!editMode && environmentGlbRoot) {
     try {
-      const atlasTex = await loadParticleAtlas('/assets/fx/particle-atlas.png')
+      const atlasTex = await loadParticleAtlas(assetUrl('/assets/fx/particle-atlas.png'))
       particleSystem = createParticleSystem({ scene, atlasTexture: atlasTex })
       const registered = particleSystem.registerEmittersFromScene(environmentGlbRoot)
       if (registered.length > 0) {

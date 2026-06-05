@@ -22,6 +22,7 @@
  * at the start gate while the camera orbits.
  */
 
+import { assetUrl } from '@/engine/asset-url'
 import type { Intent } from '@/engine/input/intent'
 import { emptyIntent } from '@/engine/input/intent'
 import { createCombatRenderSystem } from '@/engine/render/combat-render'
@@ -136,7 +137,7 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
     const loaded = await Promise.all(
       [...assetIds].map(async (id) => {
         try {
-          return [id, await loadProp(`/assets/props/${id}.glb`)] as const
+          return [id, await loadProp(assetUrl(`/assets/props/${id}.glb`))] as const
         } catch {
           return null
         }
@@ -166,7 +167,7 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
   // the bike's exhaust as the "player" colour (matches the main race
   // colour scheme so calibration translates 1:1).
   const racerVariant = resolveBikeVariant('racer')
-  const racerBikeGlb = await loadBike('/assets/bikes/racer.glb')
+  const racerBikeGlb = await loadBike(assetUrl('/assets/bikes/racer.glb'))
   const bikePos = {
     x: track.start.position.x,
     y: track.start.position.y,

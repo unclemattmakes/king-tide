@@ -20,6 +20,8 @@
  * rotation logic is unit-testable without a DOM / Web Audio.
  */
 
+import { assetUrl } from '@/engine/asset-url'
+
 /** One licensed track. `file` is a basename under `public/audio/music/`. */
 export interface SoundtrackEntry {
   file: string
@@ -117,6 +119,11 @@ export function createJukebox(opts: JukeboxOptions): Jukebox {
   function ensureElement(): HTMLAudioElement {
     if (el) return el
     el = new Audio()
+    // Music streams from a cross-origin CDN (Cloudflare R2) in prod. Without
+    // crossOrigin="anonymous", media routed through createMediaElementSource
+    // below is tainted and the Web Audio graph outputs silence. Harmless for
+    // same-origin dev; requires CORS headers on the asset host.
+    el.crossOrigin = 'anonymous'
     el.preload = 'auto'
     el.loop = false // we advance manually so each start fires a credit
     // Same-origin files; routing through Web Audio means the element's
@@ -144,7 +151,7 @@ export function createJukebox(opts: JukeboxOptions): Jukebox {
     const trackIndex = order[pos]!
     const entry = playlist[trackIndex]!
     const audio = ensureElement()
-    audio.src = MUSIC_BASE_URL + entry.file
+    audio.src = assetUrl(MUSIC_BASE_URL + entry.file)
     currentEntry = entry
     onSongChange(entry)
     // play() can reject under autoplay policy; we only call it post-gesture,

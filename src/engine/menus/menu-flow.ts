@@ -1,3 +1,4 @@
+import { assetUrl } from '@/engine/asset-url'
 import { startCup } from '@/engine/cup-progress'
 import { formatLap } from '@/engine/garage'
 import { getEndpoint, isRemoteEnabled } from '@/engine/leaderboard/endpoint'
@@ -389,7 +390,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     // to an accent-tinted placeholder block.
     const thumbHtml = disabled
       ? `<div class="thumb thumb-pending" style="background: linear-gradient(135deg, ${t.accent}26, transparent 70%)"></div>`
-      : `<div class="thumb" style="background-image: url('/assets/tracks/${t.id}-thumb.jpg')"></div>`
+      : `<div class="thumb" style="background-image: url('${assetUrl(`/assets/tracks/${t.id}-thumb.jpg`)}')"></div>`
     card.innerHTML = `
       ${thumbHtml}
       <div class="body">
@@ -599,7 +600,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         )
         .join('')
       card.innerHTML = `
-        <div class="thumb" style="background-image: url('/assets/bikes/${b.id}-thumb.jpg')"></div>
+        <div class="thumb" style="background-image: url('${assetUrl(`/assets/bikes/${b.id}-thumb.jpg`)}')"></div>
         <div class="body">
           <div class="label">BIKE</div>
           <div class="name">${escapeHtml(b.name)}</div>

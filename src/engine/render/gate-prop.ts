@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { assetUrl } from '@/engine/asset-url'
 
 /**
  * Singleton loader for the canonical gate prop mesh.
@@ -51,7 +52,9 @@ let pending: Promise<THREE.Object3D | null> | null = null
  * Safe to call concurrently from multiple bootstrap paths — the
  * second caller awaits the first's promise.
  */
-export function loadGateProp(url = '/assets/props/gate.glb'): Promise<THREE.Object3D | null> {
+export function loadGateProp(
+  url = assetUrl('/assets/props/gate.glb'),
+): Promise<THREE.Object3D | null> {
   if (pending) return pending
   pending = doLoad(url)
   return pending
