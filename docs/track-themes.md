@@ -196,9 +196,9 @@ Cape Town's still here — just lower."
 
 ## 3. Hatteras Light
 
-**Cup:** Reef | **Lap target:** 50 s | **Laps:** 3 | **Total race:** ~2:30
+**Cup:** Open Sea *(v2 — moved from Reef)* | **Lap target:** 50 s | **Laps:** 3 | **Total race:** ~2:30
 **Water/Land:** 80/20 | **Anti-grav:** none *(was light lighthouse climb — reworked as a ramp)*
-**Difficulty:** intro (Reef Cup closer)
+**Difficulty:** intro (Open Sea opener)
 
 **Location:** Cape Hatteras, North Carolina. The famous black-and-
 white spiral lighthouse now stands a third submerged. The Outer Banks
@@ -597,7 +597,7 @@ now the **verticality solution** that replaced it.
 | — | Sandbar | Tutorial | (fictional) | crest launch | 80% | training gates |
 | 1 | South Beach Sunken | Reef | Miami | seaplane ramp | 70% | Versace Steps |
 | 2 | Cape Town Drift | Reef | Cape Town | flat / slalom | 60% | Two Oceans Wreck |
-| 3 | Hatteras Light | Reef | NC outer banks | gallery-spiral ramp + drop | 80% | Lamp Room |
+| 3 | Hatteras Light | Open Sea *(v2)* | NC outer banks | gallery-spiral ramp + drop | 80% | Lamp Room |
 | 4 | The Maw | Open Sea | Big Sur | wave launch | 100% | The Maw arch |
 | 5 | Shibuya Submerged | Open Sea | Tokyo | Cocoon lattice ramp | 50% | Shibuya Crossing Cables |
 | 6 | Marina Bay 7 | Continental | Singapore | container/deck terrain | 60% | The Gauntlet |

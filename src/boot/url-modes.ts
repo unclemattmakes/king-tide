@@ -120,6 +120,17 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     return 'handled'
   }
 
+  // End-of-cup podium ceremony: `?podium=1`. Reads the completed cup from
+  // sessionStorage, stages the 3D trophy ceremony, then slides the final
+  // championship standings card in. Reached from the cup-finale finish
+  // screen's "PODIUM →" button. No race subsystems.
+  if (earlyParams.get('podium') !== null) {
+    setLoadingMessage('Loading podium ceremony…')
+    const { bootPodiumMode } = await import('./podium-mode')
+    await bootPodiumMode(appEl)
+    return 'handled'
+  }
+
   // Cold-boot menu flow — sports-broadcast styled title → mode → track
   // → bike (single-player) or → room (multiplayer). The menu only runs
   // when no game-mode URL param is present, so deep links + tests with

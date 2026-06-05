@@ -1,42 +1,27 @@
 /**
- * Cup-results overlay — the championship summary screen, shown over
- * the finish screen after the last race in a cup. Populates the
- * `#cup-results` DOM (defined in index.html) with a per-race points
- * table and a champion banner, then wires its BACK TO MENU button to
- * the caller's callback.
+ * Cup-results overlay — the championship standings panel. Populates the
+ * `#cup-results` DOM (defined in index.html) with the full-field table
+ * (every rival ranked by accumulated points) and the player's trophy,
+ * then wires its BACK TO MENU button to the caller's callback.
  *
- * Single-player only for v1. The "champion" today is just the player;
- * once cup-mode supports per-AI standings the champion line will
- * surface the actual top-of-table rider.
+ * Used two ways:
+ *   - As the data panel that slides in over the 3D podium ceremony
+ *     (`podium-mode.ts`) once the trophy lift finishes.
+ *   - Standalone fallback when the renderer can't stand up a 3D scene.
+ *
+ * Full-field (v2): standings come from `cupStandings()`, so the champion
+ * line surfaces the actual top-of-table rider — which may be an AI — and
+ * the player's medal reflects their real overall placement.
  */
 
 import {
-  CUP_POINTS,
   type CupProgress,
-  pointsForPosition,
-  totalCupPoints,
+  type CupStandingRow,
+  cupStandings,
+  type TrophyTier,
+  trophyForRank,
 } from '@/engine/cup-progress'
 import { V1_CUPS } from '@/engine/menus/tracks-catalog'
-
-// Track name lookup is best-effort — the placeholder cup races use the
-// procedural / GLB ids ("lagoon", "cliffside", "big-bay") which aren't
-// in `V1_TRACKS`. For those, we humanize the id directly. Keeping the
-// lookup module-local sidesteps an import from `catalog.ts`'s
-// manifest-aware path; the overlay never needs the manifest itself.
-const DEV_TRACK_DISPLAY: Record<string, string> = {
-  lagoon: 'Lagoon Loop',
-  cliffside: 'Cliffside',
-}
-
-function displayTrackName(id: string): string {
-  if (DEV_TRACK_DISPLAY[id]) return DEV_TRACK_DISPLAY[id] as string
-  // Humanize kebab-case ids: "big-bay" → "Big Bay".
-  return id
-    .split('-')
-    .filter((p) => p.length > 0)
-    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
-    .join(' ')
-}
 
 function displayCupName(cupId: string): string {
   if (cupId === 'dev-placeholder') return 'Dev Placeholder Cup'
@@ -44,12 +29,35 @@ function displayCupName(cupId: string): string {
   return V1_CUPS.find((c) => c.id === cupId)?.name ?? cupId
 }
 
-function ordinalSuffix(n: number): string {
-  if (n <= 0) return '—'
-  if (n === 1) return '1st'
-  if (n === 2) return '2nd'
-  if (n === 3) return '3rd'
-  return `${n}th`
+const TROPHY_HEX: Record<'gold' | 'silver' | 'bronze', string> = {
+  gold: '#ffd54a',
+  silver: '#cbd5e1',
+  bronze: '#cd7f32',
+}
+
+const TROPHY_LABEL: Record<'gold' | 'silver' | 'bronze', string> = {
+  gold: 'GOLD TROPHY',
+  silver: 'SILVER TROPHY',
+  bronze: 'BRONZE TROPHY',
+}
+
+/** Headline reflecting the player's overall placement. */
+function titleForTrophy(trophy: TrophyTier): string {
+  if (trophy === 'gold') return 'CHAMPION'
+  if (trophy === 'silver') return 'RUNNER-UP'
+  if (trophy === 'bronze') return 'PODIUM FINISH'
+  return 'CUP COMPLETE'
+}
+
+function medalSwatch(rank: number): string {
+  if (rank === 1) return TROPHY_HEX.gold
+  if (rank === 2) return TROPHY_HEX.silver
+  if (rank === 3) return TROPHY_HEX.bronze
+  return ''
+}
+
+function hexColor(c: number): string {
+  return `#${(c & 0xffffff).toString(16).padStart(6, '0')}`
 }
 
 export type CupResultsOpts = {
@@ -62,79 +70,54 @@ export type CupResultsOpts = {
 
 /** Populate + show the cup-results overlay. Safe to call after the
  *  last race in a cup; idempotent (re-rendering replaces the contents
- *  in-place rather than stacking). */
-export function showCupResultsOverlay(opts: CupResultsOpts): void {
+ *  in-place rather than stacking). Returns a dispose() that detaches the
+ *  key listener so a host (the podium) can clean up. */
+export function showCupResultsOverlay(opts: CupResultsOpts): () => void {
   const root = document.getElementById('cup-results')
   if (!root) {
     // Headless / stripped test page — fall back to the menu jump so
     // the user isn't stranded.
     opts.onBackToMenu()
-    return
+    return () => {}
   }
   const title = document.getElementById('cup-results-title')
   const sub = document.getElementById('cup-results-sub')
   const ribbon = document.getElementById('cup-results-ribbon')
-  const standings = document.getElementById('cup-results-standings')
+  const standingsEl = document.getElementById('cup-results-standings')
+  const championLbl = document.querySelector<HTMLElement>('#cup-results-champion .lbl')
   const championWho = document.getElementById('cup-results-champion-who')
   const menuBtn = document.getElementById('cup-results-menu') as HTMLButtonElement | null
 
   const { progress } = opts
-  const totalPoints = totalCupPoints(progress)
+  const standings = cupStandings(progress)
+  const player = standings.find((r) => r.identity.isPlayer) ?? null
+  const champion = standings[0] ?? null
+  const trophy = player ? trophyForRank(player.rank) : null
 
   if (ribbon) ribbon.textContent = 'CHAMPIONSHIP'
-  if (title) title.textContent = 'CUP COMPLETE'
+  if (title) title.textContent = titleForTrophy(trophy)
   if (sub) {
     const name = displayCupName(progress.cupId).toUpperCase()
     sub.textContent = `${name} · ${progress.races.length} RACES`
   }
 
-  if (standings) {
-    const rows: string[] = []
-    rows.push(`
-      <div class="row head">
-        <div class="pos">#</div>
-        <div>VENUE</div>
-        <div class="pts-this">FINISH</div>
-        <div class="pts">PTS</div>
-      </div>
-    `)
-    for (let i = 0; i < progress.races.length; i++) {
-      const trackId = progress.races[i] ?? ''
-      const result = progress.results[trackId]
-      const venue = displayTrackName(trackId)
-      const finishLabel = result?.position
-        ? `${ordinalSuffix(result.position)}/${result.totalRacers}`
-        : 'DNF'
-      const points = pointsForPosition(result?.position ?? null)
-      rows.push(`
-        <div class="row">
-          <div class="pos">${i + 1}</div>
-          <div>${escapeHtml(venue)}</div>
-          <div class="pts-this">${escapeHtml(finishLabel)}</div>
-          <div class="pts">${points}</div>
-        </div>
-      `)
-    }
-    rows.push(`
-      <div class="row" style="border-bottom: none; padding-top: 12px;">
-        <div></div>
-        <div style="font-family: var(--bc-font-display); letter-spacing: 0.18em;">TOTAL</div>
-        <div></div>
-        <div class="pts" style="font-size: 18px;">${totalPoints}</div>
-      </div>
-    `)
-    standings.innerHTML = rows.join('')
+  if (standingsEl) {
+    standingsEl.innerHTML = renderStandingsRows(standings)
   }
 
-  if (championWho) {
-    // Single-player only — the player IS the championship leader by
-    // definition. The points readout makes the result legible even
-    // without per-AI standings.
-    championWho.textContent = `YOU · ${totalPoints} PTS`
-    // Suffix the line with the max possible points so the player
-    // can see their proximity to a clean sweep.
-    const maxPossible = progress.races.length * (CUP_POINTS[1] ?? 0)
-    championWho.textContent = `YOU · ${totalPoints}/${maxPossible} PTS`
+  if (championWho && champion) {
+    if (championLbl) championLbl.textContent = champion.identity.isPlayer ? 'YOU WON' : 'CHAMPION'
+    // The trophy line reads from the player's perspective: their medal +
+    // their placement, with the actual champion named when it isn't them.
+    if (trophy) {
+      championWho.innerHTML =
+        `<span style="color:${TROPHY_HEX[trophy]}">${TROPHY_LABEL[trophy]}</span>` +
+        ` · ${escapeHtml(champion.identity.name)} · ${champion.totalPoints} PTS`
+    } else if (player) {
+      championWho.textContent = `${escapeHtml(champion.identity.name)} · ${champion.totalPoints} PTS · YOU ${ordinal(player.rank)}`
+    } else {
+      championWho.textContent = `${escapeHtml(champion.identity.name)} · ${champion.totalPoints} PTS`
+    }
   }
 
   if (menuBtn) {
@@ -144,8 +127,8 @@ export function showCupResultsOverlay(opts: CupResultsOpts): void {
 
   root.classList.add('show')
 
-  // ESC also returns to menu — matches the finish-screen affordance
-  // and keeps keyboard players from being trapped.
+  // ESC / Enter also returns to menu — matches the finish-screen
+  // affordance and keeps keyboard players from being trapped.
   const onKey = (e: KeyboardEvent): void => {
     if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'NumpadEnter') {
       e.preventDefault()
@@ -154,6 +137,49 @@ export function showCupResultsOverlay(opts: CupResultsOpts): void {
     }
   }
   window.addEventListener('keydown', onKey)
+  return () => window.removeEventListener('keydown', onKey)
+}
+
+function renderStandingsRows(standings: CupStandingRow[]): string {
+  const rows: string[] = [
+    `<div class="row head">
+      <div class="pos">#</div>
+      <div>RACER</div>
+      <div class="pts-this">WINS</div>
+      <div class="pts">PTS</div>
+    </div>`,
+  ]
+  for (const row of standings) {
+    const swatch = medalSwatch(row.rank)
+    const posCell = swatch
+      ? `<div class="pos" style="color:${swatch}">${row.rank}</div>`
+      : `<div class="pos">${row.rank}</div>`
+    rows.push(`
+      <div class="row${row.identity.isPlayer ? ' me' : ''}">
+        ${posCell}
+        <div class="who"><span class="dot" style="background:${hexColor(row.identity.bodyColor)}"></span>${escapeHtml(row.identity.name)}</div>
+        <div class="pts-this">${row.wins}</div>
+        <div class="pts">${row.totalPoints}</div>
+      </div>
+    `)
+  }
+  return rows.join('')
+}
+
+function ordinal(n: number): string {
+  if (n <= 0) return '—'
+  const mod100 = n % 100
+  if (mod100 >= 11 && mod100 <= 13) return `${n}TH`
+  switch (n % 10) {
+    case 1:
+      return `${n}ST`
+    case 2:
+      return `${n}ND`
+    case 3:
+      return `${n}RD`
+    default:
+      return `${n}TH`
+  }
 }
 
 function escapeHtml(s: string): string {

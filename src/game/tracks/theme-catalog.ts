@@ -63,7 +63,7 @@ const CATALOG: Record<string, TrackTheme> = {
   'hatteras-light': {
     displayName: 'Hatteras Light',
     location: 'Cape Hatteras · North Carolina',
-    cup: 'Reef',
+    cup: 'Open Sea',
     setPiece: 'The Lamp Room',
     lore: "Coast Guard left in '78. Someone still keeps the lamp spinning.",
     palette: 'Atlantic gray + foam green',

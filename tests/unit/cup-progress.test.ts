@@ -1,15 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  buildCupRoster,
   CUP_POINTS,
   clearCupProgress,
+  cupStandings,
+  type CupFinisher,
   getCupProgress,
   getCupProgressFor,
   isCupComplete,
   nextCupTrackId,
+  playerCupStanding,
   pointsForPosition,
   recordCupRaceFinish,
   startCup,
   totalCupPoints,
+  trophyForRank,
 } from '../../src/engine/cup-progress'
 
 // Minimal sessionStorage polyfill for the vitest node env. The module
@@ -246,6 +251,184 @@ describe('cup-progress', () => {
       startCup({ cupId: 'dev-placeholder', bikeId: 'racer', races: ['lagoon'] })
       clearCupProgress()
       expect(getCupProgress()).toBeNull()
+    })
+  })
+
+  describe('buildCupRoster', () => {
+    it('seeds the player at slot 0 and seven stable rivals', () => {
+      const roster = buildCupRoster({ cupId: 'reef', bikeId: 'cruiser' })
+      expect(roster).toHaveLength(8)
+      expect(roster[0]).toMatchObject({ slot: 0, isPlayer: true, name: 'YOU', variantId: 'cruiser' })
+      for (let slot = 1; slot <= 7; slot++) {
+        const r = roster[slot]
+        expect(r?.slot).toBe(slot)
+        expect(r?.isPlayer).toBe(false)
+        expect(typeof r?.name).toBe('string')
+        expect((r?.name.length ?? 0) > 0).toBe(true)
+      }
+    })
+
+    it('is deterministic for a given cup (same names every race)', () => {
+      const a = buildCupRoster({ cupId: 'reef', bikeId: 'racer' })
+      const b = buildCupRoster({ cupId: 'reef', bikeId: 'racer' })
+      expect(a.map((r) => r.name)).toEqual(b.map((r) => r.name))
+    })
+
+    it('honours an explicit grid size', () => {
+      expect(buildCupRoster({ cupId: 'reef', bikeId: 'racer', aiCount: 3 })).toHaveLength(4)
+    })
+  })
+
+  describe('trophyForRank', () => {
+    it('awards gold/silver/bronze to the top three only', () => {
+      expect(trophyForRank(1)).toBe('gold')
+      expect(trophyForRank(2)).toBe('silver')
+      expect(trophyForRank(3)).toBe('bronze')
+      expect(trophyForRank(4)).toBeNull()
+      expect(trophyForRank(0)).toBeNull()
+    })
+  })
+
+  describe('recordCupRaceFinish (full field) + cupStandings', () => {
+    // Helper: a finisher row per slot for a small 4-rider field.
+    const field = (positions: number[], times?: number[]): CupFinisher[] =>
+      positions.map((position, slot) => ({
+        slot,
+        position,
+        raceTime: times?.[slot] ?? 30 + position,
+      }))
+
+    function seed(): void {
+      startCup({
+        cupId: 'reef',
+        bikeId: 'racer',
+        races: ['a', 'b'],
+        roster: buildCupRoster({ cupId: 'reef', bikeId: 'racer', aiCount: 3 }),
+      })
+    }
+
+    it('stores every racer’s finish, not just the player’s', () => {
+      seed()
+      const p = recordCupRaceFinish({
+        cupId: 'reef',
+        trackId: 'a',
+        position: 1,
+        totalRacers: 4,
+        raceTime: 31,
+        finishers: field([1, 2, 3, 4]),
+      })
+      expect(p?.results.a?.finishers).toHaveLength(4)
+      expect(p?.results.a?.finishers.find((f) => f.slot === 2)?.position).toBe(3)
+      // Player mirror still populated for the inline recap.
+      expect(p?.results.a?.position).toBe(1)
+    })
+
+    it('accumulates points across the cup and ranks the field', () => {
+      seed()
+      // Player (slot 0) wins both races; slot 1 is runner-up both times.
+      recordCupRaceFinish({
+        cupId: 'reef',
+        trackId: 'a',
+        position: 1,
+        totalRacers: 4,
+        raceTime: 31,
+        finishers: field([1, 2, 3, 4]),
+      })
+      recordCupRaceFinish({
+        cupId: 'reef',
+        trackId: 'b',
+        position: 1,
+        totalRacers: 4,
+        raceTime: 31,
+        finishers: field([1, 2, 3, 4]),
+      })
+      const p = getCupProgressFor('reef')
+      if (!p) throw new Error('expected active cup')
+      const table = cupStandings(p)
+      expect(table.map((r) => r.identity.slot)).toEqual([0, 1, 2, 3])
+      expect(table[0]?.totalPoints).toBe(30) // 15 + 15
+      expect(table[0]?.wins).toBe(2)
+      expect(table[0]?.rank).toBe(1)
+      expect(table[1]?.totalPoints).toBe(24) // 12 + 12
+      // Player is the champion → gold.
+      const me = playerCupStanding(p)
+      expect(me?.rank).toBe(1)
+      expect(trophyForRank(me?.rank ?? 0)).toBe('gold')
+    })
+
+    it('surfaces an AI champion when the player is off the top step', () => {
+      seed()
+      // Slot 1 wins both; the player (slot 0) comes 3rd both times.
+      recordCupRaceFinish({
+        cupId: 'reef',
+        trackId: 'a',
+        position: 3,
+        totalRacers: 4,
+        raceTime: 33,
+        finishers: field([3, 1, 2, 4]),
+      })
+      recordCupRaceFinish({
+        cupId: 'reef',
+        trackId: 'b',
+        position: 3,
+        totalRacers: 4,
+        raceTime: 33,
+        finishers: field([3, 1, 2, 4]),
+      })
+      const p = getCupProgressFor('reef')
+      if (!p) throw new Error('expected active cup')
+      const table = cupStandings(p)
+      expect(table[0]?.identity.slot).toBe(1) // AI rival on top
+      expect(table[0]?.identity.isPlayer).toBe(false)
+      const me = playerCupStanding(p)
+      expect(me?.rank).toBe(3)
+      expect(trophyForRank(me?.rank ?? 0)).toBe('bronze')
+    })
+
+    it('breaks point ties on race wins, then aggregate time', () => {
+      seed()
+      // Race a: player 1st, slot1 2nd. Race b: swap. Both end on 27 pts /
+      // 1 win — the faster aggregate time wins the tiebreak.
+      recordCupRaceFinish({
+        cupId: 'reef',
+        trackId: 'a',
+        position: 1,
+        totalRacers: 4,
+        raceTime: 40,
+        finishers: field([1, 2, 3, 4], [40, 41, 42, 43]),
+      })
+      recordCupRaceFinish({
+        cupId: 'reef',
+        trackId: 'b',
+        position: 2,
+        totalRacers: 4,
+        raceTime: 41,
+        finishers: field([2, 1, 3, 4], [41, 44, 42, 43]),
+      })
+      const p = getCupProgressFor('reef')
+      if (!p) throw new Error('expected active cup')
+      const table = cupStandings(p)
+      // slot 0 total time 81 vs slot 1 total time 85 → player wins the tie.
+      expect(table[0]?.totalPoints).toBe(table[1]?.totalPoints)
+      expect(table[0]?.identity.slot).toBe(0)
+    })
+
+    it('falls back to a player-only row for legacy results with no field', () => {
+      // Cup seeded without a roster and recorded via the player-only path.
+      startCup({ cupId: 'dev-placeholder', bikeId: 'stunt', races: ['lagoon'] })
+      recordCupRaceFinish({
+        cupId: 'dev-placeholder',
+        trackId: 'lagoon',
+        position: 2,
+        totalRacers: 6,
+        raceTime: 55,
+      })
+      const p = getCupProgressFor('dev-placeholder')
+      if (!p) throw new Error('expected active cup')
+      const table = cupStandings(p)
+      expect(table).toHaveLength(1)
+      expect(table[0]?.identity.isPlayer).toBe(true)
+      expect(table[0]?.totalPoints).toBe(12) // 2nd place
     })
   })
 })

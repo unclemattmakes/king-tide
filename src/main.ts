@@ -13,6 +13,7 @@ import { installDebugApi, type PlayerSnapshot, type RaceSnapshot } from './debug
 import { assetUrl } from './engine/asset-url'
 import { applyTrackAudio } from './engine/audio/audio-service'
 import { installSoundtrackRadio } from './engine/audio/soundtrack-radio'
+import { getCupProgressFor } from './engine/cup-progress'
 import { loadDevSettings } from './engine/dev-settings'
 import { emptyIntent, type Intent, installInput } from './engine/input'
 import { installCameraLookInput } from './engine/input/camera-look'
@@ -777,6 +778,13 @@ async function boot() {
   // shares its racer roster with the replay recorder below so names + colours
   // round-trip into saved replays.
   const introTheme = getTrackTheme(track.id) ?? deriveFallbackTheme(track.id, track.name, track.sky)
+  // In cup mode the rival names come from the championship's stable roster
+  // so the same opponents appear in every race — and match the post-race
+  // results board + podium standings. Single races fall back to the
+  // per-track call-sign.
+  const cupRoster = cupId ? (getCupProgressFor(cupId)?.roster ?? null) : null
+  const aiNameForSlot = (slot: number): string =>
+    cupRoster?.find((r) => r.slot === slot)?.name ?? aiCallSign(track.id, slot)
   const introRoster: RaceIntroUiRacer[] = []
   introRoster.push({
     slot: 0,
@@ -789,7 +797,7 @@ async function boot() {
     const variant = variantForAiSlot(i + 1)
     introRoster.push({
       slot: i + 1,
-      name: aiCallSign(track.id, i + 1),
+      name: aiNameForSlot(i + 1),
       variantName: variant.name,
       bodyColorHex: hexFromColor(variant.bodyColor),
       isPlayer: false,
@@ -839,7 +847,7 @@ async function boot() {
         slot: i + 1,
         isPlayer: false,
         variantId: variant.id,
-        displayName: aiCallSign(track.id, i + 1),
+        displayName: aiNameForSlot(i + 1),
         bodyColor: variant.bodyColor,
       })
     }
