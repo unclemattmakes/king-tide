@@ -272,6 +272,38 @@
       #finish .stat .row:nth-child(2) { animation-delay: 300ms; }
       #finish .stat .row:nth-child(3) { animation-delay: 380ms; }
       #finish .stat .row .best { color: var(--bc-yellow); }
+      /* Full-field post-race results board — every racer ranked, the
+         player highlighted. Mirrors the cup-results standings styling. */
+      #finish .results {
+        margin-top: 16px;
+        display: grid; gap: 4px;
+        font-family: var(--bc-font-mono);
+        font-size: 13px; letter-spacing: 0.03em;
+        max-height: 264px; overflow-y: auto;
+        animation: bc-slide-in-left 480ms var(--ease-out) 440ms backwards;
+      }
+      #finish .results .row {
+        display: grid; grid-template-columns: 52px 1fr 74px;
+        padding: 6px 0; align-items: center;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      }
+      #finish .results .row.head {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        font-size: 10px; letter-spacing: 0.18em; opacity: 0.55; text-transform: uppercase;
+      }
+      #finish .results .row .pos { color: var(--bc-cyan); }
+      #finish .results .row .who {
+        display: flex; align-items: center; gap: 8px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      #finish .results .row .who .dot {
+        width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+      }
+      #finish .results .row .val { text-align: right; color: var(--bc-yellow); font-weight: 600; }
+      #finish .results .row.me { background: rgba(92, 242, 255, 0.10); }
+      #finish .results .row.me .pos,
+      #finish .results .row.me .who { color: var(--bc-cyan); font-weight: 700; }
       /* Inline leaderboard banner on the finish overlay. The handle
          prompt + rank pill share the same row so they read as part of
          the "GHOST SAVED" stream rather than as a separate modal. */
@@ -3402,6 +3434,24 @@
       #cup-results .standings .row .pos { color: var(--bc-cyan); }
       #cup-results .standings .row .pts { text-align: right; color: var(--bc-yellow); font-weight: 600; }
       #cup-results .standings .row .pts-this { text-align: right; opacity: 0.65; }
+      #cup-results .standings .row .who {
+        display: flex; align-items: center; gap: 8px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      #cup-results .standings .row .who .dot {
+        width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+      }
+      #cup-results .standings .row.me { background: rgba(92, 242, 255, 0.10); }
+      #cup-results .standings .row.me .who { color: var(--bc-cyan); font-weight: 700; }
+      /* When shown over the 3D podium ceremony, drop the full-screen blur
+         and dock the card low so the podium stays visible behind it. */
+      body.podium-active #cup-results {
+        background: linear-gradient(180deg, rgba(5, 10, 20, 0) 0%, rgba(5, 10, 20, 0.35) 55%, rgba(5, 10, 20, 0.85) 100%);
+        backdrop-filter: none;
+        align-items: flex-end;
+      }
+      body.podium-active #cup-results .card { margin-bottom: 4vh; }
       #cup-results .champion {
         margin-top: 12px; padding: 16px 18px;
         background: rgba(255, 215, 64, 0.08);
@@ -3526,6 +3576,10 @@
           <div class="row"><span class="lbl">RACE TIME</span><b id="finish-time">—</b></div>
           <div class="row"><span class="lbl">BEST LAP</span><b id="finish-best">—</b></div>
         </div>
+        <!-- Full-field results board (MK8 / Jet Moto) — every racer ranked,
+             player highlighted. Populated by `renderFinishResults` in
+             game-loop.ts; hidden in solo Time Trial. -->
+        <div class="results" id="finish-results" style="display:none;"></div>
         <div class="actions">
           <button class="action primary" id="finish-next" type="button">NEXT RACE</button>
           <button class="action" id="finish-retry" type="button">RETRY</button>

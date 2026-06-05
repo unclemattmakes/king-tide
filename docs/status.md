@@ -18,6 +18,33 @@
 > (the Mario-Kart fork), away from the press-forward-on-crest pump described
 > below. See [CLAUDE.md](../CLAUDE.md) and [product-plan.md](./product-plan.md).
 
+> **Last updated: 2026-06-05** — **Cups reworked + full-field results, trophy
+> podium.** Three pieces, MK8 / Jet Moto-inspired:
+>
+> 1. **Reef Cup re-cut** to **Sandbar → South Beach Sunken → Cape Town Drift**;
+>    **Hatteras Light** moves to the **Open Sea Cup** (now a 3-track cup with
+>    The Maw + Shibuya). Lineups still derive from each track's `cup` field in
+>    [tracks-catalog.ts](../src/engine/menus/tracks-catalog.ts) (+ the mirror in
+>    [theme-catalog.ts](../src/game/tracks/theme-catalog.ts)); pinned by
+>    [tracks-catalog.test.ts](../tests/unit/tracks-catalog.test.ts).
+> 2. **Full-field championship.** A cup now seeds a **stable rival roster** at
+>    start (`buildCupRoster`) so the same opponents — names, bikes, liveries —
+>    ride every race; the broadcast intro + replay read it too. Each race
+>    records the **whole field's** finish (not just the player), and
+>    `cupStandings()` accumulates the MK8 points curve across the lineup so the
+>    champion is the real top-of-table rider (which may be an AI). All in
+>    [cup-progress.ts](../src/engine/cup-progress.ts), pinned by
+>    [cup-progress.test.ts](../tests/unit/cup-progress.test.ts).
+> 3. **Post-race results board** on the finish screen — every racer ranked, the
+>    player highlighted, with points (cup) or finish time (single race) —
+>    plus an **end-of-cup 3D podium ceremony** (`?podium=1`,
+>    [podium-mode.ts](../src/boot/podium-mode.ts)): top-three bikes on a podium,
+>    spinning trophy, confetti, scripted camera, then the championship standings
+>    card with the player's trophy (gold/silver/bronze by overall rank, via
+>    `trophyForRank`). The cup-finale finish screen's **PODIUM →** button hands
+>    off here; the old player-only cup-results overlay is now the standings card
+>    rendered over the ceremony ([cup-results-screen.ts](../src/engine/render/cup-results-screen.ts)).
+
 > **Last updated: 2026-06-04** — **Slope-aware tuck sweet spot.** The tuck
 > sweet spot is no longer pinned at 0.8 lean. On a descent it slides toward
 > the feathered end (`slopeAwareSweetSpot` in

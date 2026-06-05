@@ -1,5 +1,5 @@
 import { assetUrl } from '@/engine/asset-url'
-import { startCup } from '@/engine/cup-progress'
+import { buildCupRoster, startCup } from '@/engine/cup-progress'
 import { formatLap } from '@/engine/garage'
 import { getEndpoint, isRemoteEnabled } from '@/engine/leaderboard/endpoint'
 import {
@@ -807,6 +807,9 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         cupId: pickedCup.id,
         bikeId: picks.bikeId,
         races: pickedCup.races,
+        // Seed a stable rival field so the same opponents — names, bikes,
+        // liveries — ride every race in the championship (MK8-style).
+        roster: buildCupRoster({ cupId: pickedCup.id, bikeId: picks.bikeId }),
       })
       const firstTrack = pickedCup.races[0] ?? picks.trackId
       const url = new URL(window.location.href)

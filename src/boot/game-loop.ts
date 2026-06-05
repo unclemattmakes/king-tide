@@ -22,6 +22,7 @@ import type { PlayerSnapshot, RaceSnapshot } from '@/debug'
 import { installPerfDebugApi } from '@/debug'
 import type { AudioEngine } from '@/engine/audio/audio'
 import {
+  type CupFinisher,
   type CupProgress,
   clearCupProgress,
   getCupProgressFor,
@@ -49,7 +50,6 @@ import { createAntiGravHud } from '@/engine/render/anti-grav-hud'
 import { createBoostMeterHud } from '@/engine/render/boost-meter-hud'
 import type { ChaseCamera } from '@/engine/render/camera'
 import { getCameraPoseOverride } from '@/engine/render/camera-pose-override'
-import { showCupResultsOverlay } from '@/engine/render/cup-results-screen'
 import type { DirectionArrow } from '@/engine/render/direction-arrow'
 import { createDriftTierHud } from '@/engine/render/drift-tier-hud'
 import { updateSwayTime, updateWind } from '@/engine/render/foliage-sway'
@@ -93,7 +93,8 @@ import {
   MIN_VY_PEAK,
 } from '@/engine/wave-pump-observer'
 import type { AssetManifest } from '@/game/assets/manifest'
-import type { BikeVariant } from '@/game/bikes/variants'
+import { aiCallSign } from '@/game/bikes/callsigns'
+import { type BikeVariant, variantForAiSlot } from '@/game/bikes/variants'
 import {
   AntiGravOverrideStore,
   BikeStatsStore,
@@ -1874,6 +1875,8 @@ export function startGameLoop(opts: GameLoopOpts): void {
             rs,
             standings,
             meStandingPosition: meStanding?.position ?? null,
+            playerEid,
+            aiEids,
             hud,
             track,
             trackId,
@@ -1899,8 +1902,19 @@ export function startGameLoop(opts: GameLoopOpts): void {
 
 interface FinishOpts {
   rs: RaceSnapshot
-  standings: ReadonlyArray<{ eid: number; position: number }>
+  /** Full finishing order at the moment the player crossed the line —
+   *  drives the MK8-style per-race results board (all racers ranked). */
+  standings: ReadonlyArray<{
+    eid: number
+    position: number
+    finished: boolean
+    raceTime: number
+  }>
   meStandingPosition: number | null
+  /** Player + AI entity ids, used to map each standing back to its stable
+   *  cup-roster identity (name + livery) for the results board + recording. */
+  playerEid: number
+  aiEids: number[]
   hud: GameLoopHud
   track: Track
   trackId: string
@@ -1922,6 +1936,8 @@ function showFinishScreen(opts: FinishOpts): void {
     rs,
     standings,
     meStandingPosition,
+    playerEid,
+    aiEids,
     hud,
     track,
     trackId,
@@ -1938,12 +1954,30 @@ function showFinishScreen(opts: FinishOpts): void {
   // A forfeited run is a DNF: no finish position, no ghost, no leaderboard.
   const creditedPosition = forfeited ? null : meStandingPosition
 
-  // Cup-mode book-keeping. Pull the live cup-progress (if any), record
-  // this race's finish position into it, and re-read so the post-finish
-  // NEXT/EXIT routing knows whether more races remain.
+  // Map a racer entity back to its grid slot (0 = player, 1.. = AI in
+  // spawn order) — the join key between the live standings and the cup's
+  // stable roster.
+  const slotForEid = (eid: number): number => (eid === playerEid ? 0 : aiEids.indexOf(eid) + 1)
+
+  // Cup-mode book-keeping. Pull the live cup-progress (if any), record the
+  // whole field's finish into it, and re-read so the post-finish NEXT/EXIT
+  // routing knows whether more races remain.
   const cup = cupId !== null ? getCupProgressFor(cupId) : null
   let cupAfter = cup
   if (cup && cupId !== null) {
+    const finishers: CupFinisher[] = standings.map((s) => {
+      const isMe = s.eid === playerEid
+      let racerTime: number | null
+      if (isMe) racerTime = forfeited ? null : rs.raceTime
+      else racerTime = s.finished ? s.raceTime : null
+      return {
+        slot: slotForEid(s.eid),
+        // The player's credited position honours a forfeit (DNF); AI take
+        // their standing at the moment the player crossed the line.
+        position: isMe ? creditedPosition : s.position,
+        raceTime: racerTime,
+      }
+    })
     cupAfter =
       recordCupRaceFinish({
         cupId,
@@ -1951,10 +1985,24 @@ function showFinishScreen(opts: FinishOpts): void {
         position: creditedPosition,
         totalRacers: standings.length,
         raceTime: rs.raceTime,
+        finishers,
       }) ?? cup
   }
   const isLastCupRace = cupAfter !== null && nextCupTrackId(cupAfter) === null
   const isCupMode = cupAfter !== null
+
+  // Full-field results board — MK8 / Jet Moto style. Every racer ranked,
+  // the player highlighted, with points (cup) or finish time (single
+  // race). Hidden in solo Time Trial.
+  renderFinishResults({
+    standings,
+    playerEid,
+    aiEids,
+    playerVariant,
+    trackId,
+    cup: cupAfter,
+    timeTrialMode,
+  })
   hud.finishEl?.classList.add('show')
   const finishRibbon = document.getElementById('finish-ribbon')
   if (hud.finishPos) {
@@ -2133,21 +2181,15 @@ function showFinishScreen(opts: FinishOpts): void {
           )
         }
       } else if (isCupMode && cupAfter !== null && isLastCupRace) {
-        // Last race — open the cup-results overlay over the finish
-        // screen, then leave it to its BACK TO MENU button to clear
-        // cup-progress and navigate.
-        nextBtn.textContent = 'CUP RESULTS →'
+        // Last race — hand off to the 3D podium ceremony (`?podium=1`),
+        // which reads the completed cup from sessionStorage, plays the
+        // trophy ceremony, and owns the BACK TO MENU + cup-clear path.
+        nextBtn.textContent = 'PODIUM →'
         nextBtn.onclick = () => {
-          showCupResultsOverlay({
-            progress: cupAfter,
-            onBackToMenu: () => {
-              clearCupProgress()
-              const url = new URL(window.location.href)
-              url.search = ''
-              url.searchParams.set('back', '1')
-              window.location.assign(url.toString())
-            },
-          })
+          const url = new URL(window.location.href)
+          url.search = ''
+          url.searchParams.set('podium', '1')
+          window.location.assign(url.toString())
         }
       } else {
         // Single-race mode — original behaviour: rotate to the next
@@ -2195,6 +2237,91 @@ function showFinishScreen(opts: FinishOpts): void {
       window.location.assign(url.toString())
     }
   }
+}
+
+type FinishStanding = { eid: number; position: number; finished: boolean; raceTime: number }
+
+type FinishResultsCtx = {
+  standings: ReadonlyArray<FinishStanding>
+  playerEid: number
+  aiEids: number[]
+  playerVariant: BikeVariant
+  trackId: string
+  cup: CupProgress | null
+}
+
+/** Resolve a racer entity to its display identity for the results board.
+ *  In cup mode the name comes from the championship's stable roster so it
+ *  matches the standings + podium; single races fall back to the per-track
+ *  AI call-sign. */
+function identityForEid(
+  eid: number,
+  ctx: FinishResultsCtx,
+): { slot: number; name: string; isPlayer: boolean; color: number } {
+  if (eid === ctx.playerEid) {
+    return { slot: 0, name: 'YOU', isPlayer: true, color: ctx.playerVariant.bodyColor }
+  }
+  const idx = ctx.aiEids.indexOf(eid)
+  if (idx < 0) {
+    // Not the player and not a known AI grid slot (e.g. a remote peer in a
+    // future MP finish) — show a generic rival rather than mislabel slot 0.
+    return { slot: -1, name: 'RIVAL', isPlayer: false, color: 0x88aabb }
+  }
+  const slot = idx + 1
+  const rosterName = ctx.cup?.roster.find((r) => r.slot === slot)?.name
+  return {
+    slot,
+    name: rosterName ?? aiCallSign(ctx.trackId, slot),
+    isPlayer: false,
+    color: variantForAiSlot(slot).bodyColor,
+  }
+}
+
+function finishHexColor(c: number): string {
+  return `#${(c & 0xffffff).toString(16).padStart(6, '0')}`
+}
+
+function escapeFinishHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/** Populate the `#finish-results` board with the full finishing order —
+ *  every racer ranked, the player highlighted, with points (cup) or
+ *  finish time (single race). Hidden when there's no field to rank
+ *  (solo Time Trial). */
+function renderFinishResults(ctx: FinishResultsCtx & { timeTrialMode: boolean }): void {
+  const host = document.getElementById('finish-results')
+  if (!host) return
+  if (ctx.timeTrialMode || ctx.standings.length < 2) {
+    host.innerHTML = ''
+    host.style.display = 'none'
+    return
+  }
+  host.style.display = ''
+  const isCup = ctx.cup !== null
+  const ordered = [...ctx.standings].sort((a, b) => a.position - b.position)
+  const rows: string[] = [
+    `<div class="row head"><div class="pos">#</div><div>RACER</div><div class="val">${
+      isCup ? 'PTS' : 'TIME'
+    }</div></div>`,
+  ]
+  for (const s of ordered) {
+    const id = identityForEid(s.eid, ctx)
+    let value: string
+    if (isCup) value = String(pointsForPosition(s.position))
+    else if (s.finished) value = formatTime(s.raceTime)
+    else value = '—'
+    rows.push(
+      `<div class="row${id.isPlayer ? ' me' : ''}">` +
+        `<div class="pos">${ordinal(s.position)}</div>` +
+        `<div class="who"><span class="dot" style="background:${finishHexColor(id.color)}"></span>${escapeFinishHtml(
+          id.name,
+        )}</div>` +
+        `<div class="val">${value}</div>` +
+        '</div>',
+    )
+  }
+  host.innerHTML = rows.join('')
 }
 
 /** Inject (or replace) a compact "RACE N/M · XX PTS" row into the
