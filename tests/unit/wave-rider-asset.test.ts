@@ -44,6 +44,7 @@ function stubLoadedProp(opts: {
       },
     ],
     extras: { prop_id: opts.waveRider ?? 'stub', category: 'decor' },
+    animations: [],
     ...(opts.waveRider ? { waveRider: opts.waveRider } : {}),
   }
 }

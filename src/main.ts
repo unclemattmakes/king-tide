@@ -21,6 +21,7 @@ import { bindLazyMenuButton } from './engine/lazy-menu'
 import { isHostFor } from './engine/net/host-election'
 import { loadPlayerSettings, playerSettings, WAVE_SPRAY_SCALAR } from './engine/player-settings'
 import { installConsoleTrap } from './engine/qa/console-trap'
+import { createAnimatedPropsSystem } from './engine/render/animated-props'
 import { createAntiGravDebugRenderer } from './engine/render/anti-grav-debug'
 import { createBridgeSupports } from './engine/render/bridge-supports'
 import { createChaseCamera } from './engine/render/camera'
@@ -612,8 +613,12 @@ async function boot() {
   // simulateStep's `waveRiders` input below.
   let waveRiderSys: WaveRiderSystem | undefined
   let waveRiderRender: ReturnType<typeof createWaveRiderRenderSystem> | undefined
+  let animatedProps: ReturnType<typeof createAnimatedPropsSystem> | undefined
   if (track.props.length > 0) {
     scene.add(createPropsMesh(track.props, propAssets))
+    // Rigged props with `animated:true` (e.g. the swimming great white) are
+    // hosted here, skeleton-cloned + mixer-driven, ticked from the game loop.
+    animatedProps = createAnimatedPropsSystem(scene, track.props, propAssets, { camera })
     waveRiderSys = createWaveRiderSystem(sim, phys, waveField)
     const waveRiderAssetBindings = createPropColliders(phys, track.props, propAssets, sim)
     if (waveRiderAssetBindings.size > 0) {
@@ -1345,6 +1350,13 @@ async function boot() {
     pickupRender(0)
     combatRender(0)
     fxTick(0)
+    // Tick the animated-prop system once so any skinned prop (the swimming
+    // shark) has its skeleton bound + posed and its SkinnedMesh in the scene's
+    // render state before `compileAsync` walks it below. It's preloaded +
+    // instantiated at boot already, but it was the one render system the
+    // pre-warm skipped — so its skinned (and skinned-shadow) pipeline compiled
+    // on first sight mid-race instead: the "hitch when the shark spawns in".
+    animatedProps?.update(0)
     const r = renderer as unknown as {
       compileAsync?: (scene: unknown, camera: unknown) => Promise<void>
     }
@@ -1477,6 +1489,7 @@ async function boot() {
     ghostRunner,
     ...(waveRiderSys ? { waveRiderSys } : {}),
     ...(waveRiderRender ? { waveRiderRender } : {}),
+    ...(animatedProps ? { animatedProps } : {}),
   })
 
   // Performance benchmark director (`?bench=1`). Installed after the race

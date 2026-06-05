@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { LoadedProp } from '@/game/assets/prop-loader'
+import { isAnimatedAssetProp, type LoadedProp } from '@/game/assets/prop-loader'
 import type { Prop, PropType } from '@/game/tracks/types'
 import { ExportedKind } from '../asset-kinds'
 import { buildPropGeometry } from './props-geometry'
@@ -90,6 +90,10 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
       if (!loaded) continue // silently skip; caller logs missing assets at boot
       // Wave-rider props are hosted by `wave-rider-render` (see header).
       if (loaded.waveRider !== undefined) continue
+      // Animated props are hosted by `animated-props` (skeleton-cloned +
+      // mixer-driven). Skipped here so an instanced bind-pose copy doesn't
+      // double-render under the swimming one.
+      if (isAnimatedAssetProp(p, loaded)) continue
       let bucket = assetBuckets.get(p.assetId)
       if (!bucket) {
         bucket = []

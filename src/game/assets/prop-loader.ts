@@ -2,6 +2,7 @@ import type * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 
 import { ExportedKind } from '../../engine/asset-kinds'
+import type { Prop } from '../tracks/types'
 
 /**
  * Render-side prop GLB loader.
@@ -60,6 +61,12 @@ export type LoadedProp = {
    *  wave-rider entity factory + render system instead of the static-
    *  prop path. Absent on standard static props. */
   waveRider?: LoadedPropWaveRider
+  /** Skeletal-animation clips shipped in the GLB (empty for the static
+   *  props that are the common case). When non-empty AND a placement opts
+   *  in via `Prop.animated`, the placement is hosted by
+   *  `engine/render/animated-props.ts` — skeleton-cloned with its own
+   *  `THREE.AnimationMixer` — instead of the static instanced path. */
+  animations: THREE.AnimationClip[]
 }
 
 const cache = new Map<string, Promise<LoadedProp>>()
@@ -120,6 +127,9 @@ async function doLoad(url: string): Promise<LoadedProp> {
       prop_id: typeof e?.prop_id === 'string' ? e.prop_id : 'unknown',
       category: typeof e?.category === 'string' ? e.category : 'decor',
     },
+    // Keep the GLB's animation clips so the animated-prop path can build a
+    // mixer per placement. Static props ship none — this is `[]` for them.
+    animations: Array.isArray(gltf.animations) ? gltf.animations : [],
   }
   const waveRiderRaw = e?.wave_rider_archetype
   if (typeof waveRiderRaw === 'string' && waveRiderRaw.length > 0) {
@@ -147,4 +157,55 @@ export function cloneLoadedProp(loaded: LoadedProp): THREE.Object3D {
     if (obj.userData?.kind === ExportedKind.COLLIDER) obj.visible = false
   })
   return root
+}
+
+/**
+ * True when a placement should be hosted by the animated-prop render path
+ * (`engine/render/animated-props.ts`) rather than the static instanced
+ * mesh / collider paths. Requires an `asset` prop that opted in
+ * (`animated: true`) and resolves to a loaded GLB that actually ships
+ * animation clips. Wave-rider props are excluded — that routing wins (an
+ * asset is never both). Used at every fork (`createPropsMesh`,
+ * `createPropColliders`, and the animated system itself) so the three
+ * stay in agreement about which placements they own.
+ *
+ * Note `THREE.AnimationClip` clones — `clone(true)` does NOT rebind a
+ * `SkinnedMesh`'s skeleton, so the animated path uses `SkeletonUtils.clone`
+ * instead; this predicate just decides routing.
+ */
+export function isAnimatedAssetProp(p: Prop, loaded: LoadedProp | undefined): boolean {
+  return (
+    p.type === 'asset' &&
+    p.animated === true &&
+    loaded !== undefined &&
+    loaded.waveRider === undefined &&
+    loaded.animations.length > 0
+  )
+}
+
+/**
+ * Resolve a `Prop.clip` name to one of the GLB's clips: exact match first,
+ * then case-insensitive substring, else the first clip with a warning.
+ * Returns `undefined` only when the GLB has no clips at all. Defaulting to
+ * clip 0 is the robust path for the one-clip-per-asset Quaternius fish
+ * (their clip is `Armature|Armature|Swim`, Fish2's is `Swim.001`).
+ */
+export function pickAnimationClip(
+  animations: THREE.AnimationClip[],
+  name?: string,
+): THREE.AnimationClip | undefined {
+  if (animations.length === 0) return undefined
+  if (name) {
+    const exact = animations.find((a) => a.name === name)
+    if (exact) return exact
+    const lower = name.toLowerCase()
+    const sub = animations.find((a) => a.name.toLowerCase().includes(lower))
+    if (sub) return sub
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[animated-prop] clip "${name}" not found among ` +
+        `[${animations.map((a) => a.name).join(', ')}] — using "${animations[0]!.name}".`,
+    )
+  }
+  return animations[0]
 }

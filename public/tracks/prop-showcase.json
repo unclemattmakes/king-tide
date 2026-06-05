@@ -862,6 +862,28 @@
         "y": 1,
         "z": 1
       }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shark",
+      "animated": true,
+      "clip": "Swim",
+      "position": {
+        "x": 187,
+        "y": 8,
+        "z": -75
+      },
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "w": 1
+      },
+      "size": {
+        "x": 1.8,
+        "y": 1.8,
+        "z": 1.8
+      }
     }
   ],
   "environmentGlb": "/assets/tracks/prop-showcase.glb",

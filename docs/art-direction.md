@@ -1,4 +1,4 @@
-# Hoverbike — Art Direction v1
+# Hoverbike — Art Direction v2
 
 > The visual-language layer on top of the locked world frame. Where
 > [product-plan.md](./product-plan.md) and [track-themes.md](./track-themes.md)
@@ -17,6 +17,15 @@
 > set-piece, and the pipeline docs for the technical *how*. It changes **no**
 > locked lore and **no** per-track palette — it explains the through-line that
 > already connects them.
+>
+> **v2 — painterly-vinyl (2026-06).** The register below has moved from v1's
+> flat-gradient *"clean stylized toy"* to a hand-painted **"painterly-vinyl
+> toy"** — *Sea of Thieves surface on a Team Fortress 2 silhouette* — validated
+> on the prop-kit + race-gate concept pass. Pillars, material-state, colour
+> grammar, and palettes are **unchanged**; the **register**, **texture
+> strategy**, and **waterline mechanism** are revised. The per-domain companions
+> ([bike](./bike-art-direction.md) / [track](./track-art-direction.md) /
+> [prop](./prop-art-direction.md)) still read v1 — a ripple pass is pending.
 
 ---
 
@@ -64,39 +73,53 @@ These six override taste, schedule, and any single asset's "correctness."
 
 ---
 
-## The stylization register — "clean stylized toy"
+## The stylization register — "painterly-vinyl toy"
 
-The chosen register (Wind Waker × Wipeout × MK8, extending the existing
-*"Pacific Rim handcrafted-toy, not Forza scan-quality"* lean). Concretely:
+**Think a pro-painted designer-vinyl collectible** — or a beautifully painted
+tabletop miniature — racing on Sea-of-Thieves water. A clean cast *toy form*, a
+hand-painted *surface*, readable at 40 m/s. The register that already worked
+(*Pacific Rim handcrafted-toy, not Forza scan*) keeps its forms and gains a
+**hand-painted skin**: **Sea of Thieves surface on a Team Fortress 2
+silhouette.** Concretely:
 
-**Form language**
-- Confident, slightly oversized, **rounded-but-faceted** masses. Read like a
-  high-quality toy or a model-shop miniature, not a scan.
+**Form language** (this half was already right)
+- Confident, slightly oversized, **clean cast masses** with a strong silhouette
+  — a high-quality painted collectible or model-shop miniature, not a scan.
+  *Not* a low-poly facet study either: the geometric-facet look is a **miss** —
+  round the big edges and keep the read clean.
 - Exaggerate the one feature that defines the silhouette (the lighthouse's
   taper, the crane's jib, the palm's arc) and simplify everything else.
-- Chamfer/round the big edges so they catch light; let the medium edges stay
-  crisp. Avoid both razor CAD edges and mushy organic blobs.
+
+**The surface — the v2 change (Sea of Thieves)**
+- **Hand-painted, not flat-gradient.** The richness lives in the *painted
+  texture*: visible brushwork and weathering washes on the focal surfaces, a
+  cleaner cast finish elsewhere. Matte-satin, never glossy plastic.
+- **Painted narrative vignettes** are the signature move — a little painted
+  scene on an object's surface (the buoy's seascape band, the gate banner's
+  painted backdrop). Cheap charm, pure SoT.
+- **It's a dial with two ditches.** Too clean → low-poly mobile-toy (loses the
+  paint). Too brushy → the form melts into a 2D watercolour (loses the
+  toy-object). Aim between: **crisp cast forms wearing hand-painted skins.**
 
 **Shading (node materials, WebGPU/TSL — never `ShaderMaterial`)**
-- Flat-ish base-colour blocking with a **soft gradient** (a gentle light-to-
-  shadow ramp), not full microfacet PBR. Roughness/metalness are broad strokes,
-  not per-texel storytelling.
-- A subtle **rim / fresnel light** to pop the silhouette off the sky and water.
-- Light **ink/edge darkening** where it sharpens a read (cel-adjacent, not a
-  hard outline pass). Use sparingly — bloom and rim do most of the lifting.
+- **No outlines.** Value separation, a soft **rim / fresnel light**, and the
+  painted surface carry the silhouette off the sky and water. (v1's cel
+  ink/edge-darkening is **dropped** — SoT and TF2 both read without line art.)
+- Warm key / cool shadow **illustrative** light; the hand-painted albedo tells
+  the material story, not microfacet PBR.
 - **Bloom is the "finished" lift.** It's wired (`sky.bloom`); author emissive so
   it blooms. Test against the worst-case sun angle per track (ACES + bloom +
   emissive can blow out `nyc_sunset` / `big_sur_golden`).
 
-**Texture strategy** (cheap-to-rich, in order)
-1. **Vertex colour** (`COLOR_0`) — the default. Carries sway/AO/path-worn/biome
-   per [vertex-attribute-spec.md](./vertex-attribute-spec.md).
-2. **Small trim sheets** (≤1024², shared per cup family) for landmark surface
-   variety — brick course, window grid, ledge, signage, weathering band.
-3. **Decals** for the mid-band specifics — racing-line wear, paint, posters,
-   moss patches, neon-reflection puddles, oil.
-- **Avoid high-frequency photo textures.** They read as noise at 40 m/s and
-  fight the toy register.
+**Texture strategy** (v2: hand-painted is now first-class)
+- **Hand-painted albedo / trim is the hero** — it carries the brushwork, the
+  built/broken/blooming weathering, and the painted vignettes. This is the SoT
+  technique, and exactly what the new Blender hand-painted-stroke tools produce.
+- **Vertex colour** (`COLOR_0`) still carries sway/AO/path-worn/biome per
+  [vertex-attribute-spec.md](./vertex-attribute-spec.md); the **waterline is
+  shader-driven**, not baked (see the waterline rule below).
+- Still **no high-frequency photo textures** — the paint must read as *painted*
+  at 40 m/s, not as photo-noise. **Painterly ≠ busy.**
 
 **Colour & emissive**
 - 2–4 hues per asset, chosen for value separation. Saturated, not muddy.
@@ -104,15 +127,19 @@ The chosen register (Wind Waker × Wipeout × MK8, extending the existing
   survives bloom without smearing.
 
 **Reference triangulation**
-- *Wind Waker* — colour + silhouette confidence, the gradient-shaded toy read.
-- *Wipeout / Redout* — neon clarity and a clean sense of speed.
-- *Mario Kart 8 / World* — **density of animated background life** (30–80
-  moving objects/track) and friendly readability.
+- **Sea of Thieves** — the hand-painted surface, the painted vignette, the
+  tactile "you could hold it" weathering. *The v2 anchor.*
+- **Team Fortress 2** — silhouette-first readability, saturation hoarded on the
+  focal point, illustrative baked light. *The other v2 anchor.*
+- *Wind Waker / Wipeout / MK8* — still good for colour confidence, a clean sense
+  of speed, and animated background-life density (30–80 moving objects/track).
 - *Wave Race 64 / Jet Moto* — the *dressing density* target: palms-rocks-buoys-
   flags-flotsam **everywhere**, built from a small kit repeated densely.
 
 **Anti-references (if it looks like these, stop)**
 - Forza / photoscan fidelity; busy PBR microdetail.
+- The two sweet-spot ditches: **low-poly faceted mobile-toy** (too clean, no
+  paint) and **flat 2D painterly illustration** (too brushy, no object).
 - The Last of Us / grimdark ruin-porn; mournful desaturation; muddy brown.
 - Anything that glows that isn't alive or powered.
 
@@ -168,9 +195,18 @@ crosses the waterline gets the same three-mark treatment, bottom to top:
 3. **Salt-bleach band** (just above) — a paler, chalkier strip where spray
    reaches. *Broken→Built transition.*
 
-This is a `COLOR_0`/decal + vertex-colour job, not new geometry. It's what makes
-a drowned building read as *drowned* rather than *standing in a puddle*, and it
-ships the three-state rule for free on every shoreline.
+**v2 — drive it from the shader, not the mesh.** The three bands are a
+**world-space-height** function in the material: feed sea level in as a uniform,
+derive each band from the fragment's world-Y relative to that line, and break
+the edge with noise so it's organic. A prop then gets its waterline *wherever it
+actually sits* — drop it at any height, half-sink it, raise the tide — with
+**zero per-prop baking and no alignment baked into the mesh.** (v1 spec'd a
+`COLOR_0`/decal bake here; that's superseded — a bake can't follow a prop's
+placement.) `COLOR_0` still carries sway/AO/biome; the waterline rides the
+shader. It's what makes a drowned building read as *drowned* rather than
+*standing in a puddle*, and ships the three-state rule for free on every
+shoreline. **Pipeline task:** wire the band function into the water/terrain
+material against the sea level in `terrain-heightmap.ts`.
 
 ---
 
@@ -245,6 +281,7 @@ For anyone making a prop (see also the per-prop definition-of-done in
 | Glow only living/powered things | Make dead metal/concrete emit |
 | Show built + broken + blooming together | Make a pure-broken (ruin-porn) prop |
 | Round the big edges to catch light | Ship razor CAD edges or mushy blobs |
+| Hand-paint the surface; add a painted vignette | Outline it, or let it fall flat low-poly / 2D |
 
 ---
 
@@ -364,6 +401,32 @@ Two biomes don't share a family and carry their own grade:
 - **Aqualand** (faded waterpark): sun-bleached red `#D8695B` · faded yellow
   `#E8C75E` · pool-tile blue `#3FB0D6` · algae green `#6E8F3E` · grime grey
   `#8C8A7E`.
+
+---
+
+## Concept-art recipe (v2 lock)
+
+The repeatable way to hit this register in Midjourney — validated on the
+prop-kit + race-gate pass — so concept passes converge instead of drifting:
+
+- **Style-lock with `--sref`.** Pass the canonical reference frame in as a
+  Midjourney **style reference** (`--sref <image-url>`). This is *the* reliable
+  lever — it holds the painterly-vinyl look on any new prop. Canonical frames
+  live in the external concept-art store (out of git, per
+  [asset-storage.md](./asset-storage.md)):
+  `concept-art/midjourney/style-v2-sot-tf2/ref_style_canonical.png` (the
+  painted-buoy kit) and `ref_gate_canonical.png` (the race gate).
+- **Prompt shape:** `<subject> as a clean 3D game-asset turnaround — designer-
+  vinyl toy collectible, clean cast forms + hand-painted Sea of Thieves surfaces
+  with a painted vignette, TF2-readable silhouette, no outlines, waterline trio,
+  reef-pastel warm-sun-on-cool-water` + `--style raw --s 250`.
+- **Ban both ditches, every time:** `--no low-poly, faceted` (else it goes clean
+  mobile-toy) **and** `--no 2D illustration, painting, flat` (else it melts into
+  a flat watercolour). Omit either and MJ falls into that ditch.
+- **Mood art is a different deliverable.** Wide *key art / cinematic / painterly*
+  framings drift to flat 2D illustration — **fine for mood + asset-mining, but
+  not the render target.** Lock the render look on single-prop turnarounds, not
+  scenes.
 
 ---
 

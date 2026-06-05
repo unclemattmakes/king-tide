@@ -161,16 +161,66 @@ First staged stash: 11 Quaternius packs at `<content-root>/external/quaternius/`
 (see its `MANIFEST.md`). Sketchfab is **not** a source here — its CC0 pool is
 museum photogrammetry, not toy props.
 
-**Two packs/shapes the lane does *not* handle yet** (drop or pre-process):
-- **Rigged / skinned meshes** (Quaternius `animated-fish`) condition to a
-  collapsed blob — the conditioner is built for static meshes and bakes no
-  armature. Use the *static* packs (`cute-fish`) for sea life, or apply the
-  armature in rest pose first.
+**Rigged / skinned meshes have their own lane** (see *Animated props* below):
+the static conditioner here decimates/recenters/bakes a collider and would
+collapse an armature to a blob, so the Quaternius **Animated Fish Pack**
+(Shark, Whale, Fish1-3, Dolphin, Manta ray) ships through
+[`ship_animated_prop.py`](../tools/blender/ship_animated_prop.py) instead — it
+keeps the skin + `Swim` clip and the runtime drives a `THREE.AnimationMixer`
+per placement.
+
+**One pack/shape the lane does *not* handle yet** (drop or pre-process):
 - **High-res PBR packs** (`downtown-city`, `stylized-nature`) embed multi-MB
   texture sets (base + normal + roughness at 2K) → a single prop GLB blows past
   10 MB, absurd for a 40 m/s prop. They need a texture-budget pass (downsize to
   ≤512 px, drop non-base maps) before they're web-shippable. Palette-texture and
   flat-material packs stay light (≤300 KB) with no extra work.
+
+## Animated props (rigged sea life — skinning-preserving lane)
+
+Some library props *move*. The Quaternius **Animated Fish Pack**
+(`<content-root>/external/quaternius/extracted/animated-fish/glb/` — Shark,
+Whale, Fish1-3, Dolphin, Manta ray) ships each model with an armature skin + a
+single `Swim` clip. These replace bespoke "life" decorations (the Cape Town
+great white is the first consumer) with rigged props that actually swim.
+
+The static CC0 conditioner can't ship them — decimate/recenter/rescale/collider
+all assume a static mesh and would blob the rig (the shipped `clownfish` came
+out with 0 skins / 0 animations). The **skinning-preserving lane** is a separate
+tool:
+
+```
+blender --background --python tools/blender/ship_animated_prop.py \
+    -- --spec <spec>.json
+```
+
+Spec entries: `{input, prop_id, output, family?, clip_name?}` (`input` = the raw
+rigged GLB; `output` = `public/assets/props/cc0/<id>.glb`). It keeps the armature
++ skin + clip intact, renames the clip to `Swim`, wraps the rig under a
+`prop_<id>_root` (`kind=prop`), stamps a **neutral** `COLOR_0` (so multi-tone
+materials still render without tinting), and exports with **skins + animations
+on**. No decimate, no recenter, no collider — animated props are render-only
+decoration. (It also purges `bpy.data.actions` between batch entries, since
+`reset_scene` doesn't, or the previous fish's clip leaks into the next export.)
+
+Authoring a placement (per-track JSON `props[]`):
+
+```json
+{ "type": "asset", "assetId": "cc0/shark", "animated": true, "clip": "Swim",
+  "position": {...}, "rotation": {...}, "size": {"x":1.5,"y":1.5,"z":1.5} }
+```
+
+`animated: true` routes the placement to the runtime animated-prop lane
+([`src/engine/render/animated-props.ts`](../src/engine/render/animated-props.ts)):
+the GLB is `SkeletonUtils.clone`d per instance (plain `clone()` doesn't rebind a
+skeleton), given a `THREE.AnimationMixer`, and ticked each render frame. `clip`
+defaults to clip 0 if omitted (robust — the one-clip fish). Confirmed rendering +
+deforming on the **WebGPU** node-material renderer (no material conversion
+needed). Perf: a hard `maxInstances` cap (logged, not silent) + camera-distance
+LOD that freezes far mixers; true school density (instanced skinned animation) is
+a follow-up. `createPropsMesh` / `createPropColliders` skip these placements, so
+each is owned by exactly one path. Validate in `?track=prop-showcase` like any
+prop.
 
 ## The subject rule (the most important filter)
 

@@ -25,6 +25,7 @@
 import { assetUrl } from '@/engine/asset-url'
 import type { Intent } from '@/engine/input/intent'
 import { emptyIntent } from '@/engine/input/intent'
+import { createAnimatedPropsSystem } from '@/engine/render/animated-props'
 import { createCombatRenderSystem } from '@/engine/render/combat-render'
 import { createFxSystem } from '@/engine/render/fx'
 import { loadGateProp } from '@/engine/render/gate-prop'
@@ -149,8 +150,10 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
   }
   let waveRiderSys: ReturnType<typeof createWaveRiderSystem> | undefined
   let waveRiderRender: ReturnType<typeof createWaveRiderRenderSystem> | undefined
+  let animatedProps: ReturnType<typeof createAnimatedPropsSystem> | undefined
   if (track.props.length > 0) {
     scene.add(createPropsMesh(track.props, propAssets))
+    animatedProps = createAnimatedPropsSystem(scene, track.props, propAssets, { camera })
     waveRiderSys = createWaveRiderSystem(sim, phys, waveField)
     const bindings = createPropColliders(phys, track.props, propAssets, sim)
     if (bindings.size > 0) {
@@ -912,6 +915,7 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
     combatRender(dt)
     fxTick(dt)
     waveRiderRender?.render()
+    animatedProps?.update(dt)
     renderFrame(scene, camera)
     updateHud()
 

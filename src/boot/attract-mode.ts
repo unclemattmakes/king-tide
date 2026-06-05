@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { assetUrl } from '@/engine/asset-url'
 import type { Intent } from '@/engine/input/intent'
+import { createAnimatedPropsSystem } from '@/engine/render/animated-props'
 import { createBroadcastDirector } from '@/engine/render/broadcast-director'
 import { createCombatRenderSystem } from '@/engine/render/combat-render'
 import { createFxSystem } from '@/engine/render/fx'
@@ -175,8 +176,10 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     }
     let waveRiderSys: ReturnType<typeof createWaveRiderSystem> | undefined
     let waveRiderRender: ReturnType<typeof createWaveRiderRenderSystem> | undefined
+    let animatedProps: ReturnType<typeof createAnimatedPropsSystem> | undefined
     if (track.props.length > 0) {
       scene.add(createPropsMesh(track.props, propAssets))
+      animatedProps = createAnimatedPropsSystem(scene, track.props, propAssets, { camera })
       waveRiderSys = createWaveRiderSystem(sim, phys, waveField)
       const bindings = createPropColliders(phys, track.props, propAssets, sim)
       if (bindings.size > 0) {
@@ -325,6 +328,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
       combatRender(dt)
       fxTick(dt)
       waveRiderRender?.render()
+      animatedProps?.update(dt)
       renderFrame(scene, camera)
       live = true
       rafHandle = requestAnimationFrame(frame)

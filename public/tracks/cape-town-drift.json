@@ -314,6 +314,30 @@
   "boostPads": [],
   "antiGravZones": [],
   "waveZones": [],
+  "props": [
+    {
+      "type": "asset",
+      "assetId": "cc0/shark",
+      "animated": true,
+      "clip": "Swim",
+      "position": {
+        "x": -140.98,
+        "y": 16.48,
+        "z": -186.46
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0,
+        "w": 1.0
+      },
+      "size": {
+        "x": 1.5,
+        "y": 1.5,
+        "z": 1.5
+      }
+    }
+  ],
   "gateSpacing": 150.0,
   "terrainShader": {
     "altMin": -50.0,

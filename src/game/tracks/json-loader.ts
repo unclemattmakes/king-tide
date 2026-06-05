@@ -663,6 +663,13 @@ function readProp(raw: unknown, i: number): Prop {
   // back to DEFAULT rather than throwing the whole track load.
   const surface = asSurfaceType((raw as { surface?: unknown }).surface)
   if (surface) out.surface = surface
+  // Animated-prop opt-in (asset props only). `animated:true` routes the
+  // placement to the skeletal-animation render path; `clip` selects which
+  // clip; `loop` toggles looping. Tolerant of absent/bad values.
+  if ((raw as { animated?: unknown }).animated === true) out.animated = true
+  const clipRaw = (raw as { clip?: unknown }).clip
+  if (typeof clipRaw === 'string' && clipRaw.length > 0) out.clip = clipRaw
+  if ((raw as { loop?: unknown }).loop === false) out.loop = false
   if (typeRaw === 'asset' && !out.assetId) {
     throw new Error(`track-json: props[${i}] type='asset' requires an assetId`)
   }
