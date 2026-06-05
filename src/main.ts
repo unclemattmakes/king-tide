@@ -57,6 +57,7 @@ import {
   getActivePostPipeline,
   setRenderer,
 } from './engine/render/renderer-service'
+import { createRiderMannequinSystem } from './engine/render/rider-mannequin'
 import { createRiderRenderSystem } from './engine/render/rider-systems'
 import { createScene } from './engine/render/scene'
 import { beaufortToAmplitudeScale, createSkySystem } from './engine/render/sky'
@@ -945,7 +946,24 @@ async function boot() {
     byVariantId: { [playerVariant.id]: playerBikeGlb, racer: racerBikeGlb },
     default: racerBikeGlb,
   })
-  const riderRender = createRiderRenderSystem(scene, sim)
+  // Rider visual: capsule rig by default; `?rider=mannequin` swaps in the
+  // rigged Quaternius Universal character, driven from the same 12 sim bone
+  // poses (spike — docs/rider-character-investigation.md). Falls back to
+  // capsules if the rig asset fails to load.
+  let riderRender: () => void
+  if (params.get('rider') === 'mannequin') {
+    let riderRig: LoadedProp | undefined
+    try {
+      riderRig = await loadProp(assetUrl('/assets/props/cc0/rider_mannequin.glb'))
+    } catch (err) {
+      console.warn('[rider] mannequin rig failed to load — using capsule rider:', err)
+    }
+    riderRender = riderRig
+      ? createRiderMannequinSystem(scene, sim, riderRig)
+      : createRiderRenderSystem(scene, sim)
+  } else {
+    riderRender = createRiderRenderSystem(scene, sim)
+  }
   const pickupRender = createPickupRenderSystem(scene, sim)
   const combatRender = createCombatRenderSystem(scene, sim)
   const fx = createFxSystem(scene, sim, phys, waveField)
