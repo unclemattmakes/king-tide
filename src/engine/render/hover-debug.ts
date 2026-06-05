@@ -4,6 +4,14 @@
  * force arrows, the hover-height target ring, the isGrounded ring, and
  * the bike's actual physics collider as an orange wireframe capsule.
  *
+ * Also draws the **slope-aware tuck** overlay (grounded bikes): a line
+ * along the surface-forward-slope (bow↔stern surface hits — the signal
+ * that slides the tuck sweet spot) and a floating gauge showing the
+ * nose-down lean as a fill, the live slope-shifted sweet-spot notch, and
+ * a faint base-sweet tick so the shift is legible. The gauge is recomputed
+ * render-side from the same pure `slopeAwareSweetSpot` / `tuckFactor`
+ * helpers the physics grades off, so it can't drift from the real curve.
+ *
  * Cheap-when-off pattern, matching `physics-debug.ts` and
  * `anti-grav-debug.ts`:
  *   - One global flag (`hoverDebugEnabled`) gates both the sim-side
@@ -26,7 +34,14 @@ import * as THREE from 'three'
 import { isHoverDebugEnabled, setHoverDebugEnabled } from '@/engine/sim/debug-flags'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
-import { BikeTag, HoverDebugStore, RBHandleStore } from '@/game/components'
+import {
+  BikeTag,
+  ControlIntentStore,
+  type HoverDebugData,
+  HoverDebugStore,
+  RBHandleStore,
+} from '@/game/components'
+import { slopeAwareSweetSpot, TUCK_SWEET_SPOT, tuckFactor } from '@/game/systems/tuck-curve'
 
 // Re-exported for callers that want to gate non-render-side code on the
 // flag (e.g. HUD pills) without pulling the sim-layer module directly.
@@ -60,6 +75,30 @@ const COL_GROUND_AIR = new THREE.Color(0xff5533)
 /** Bike collider wireframe colour — orange so it reads against both
  *  land (greens / browns) and water (blues / teals). */
 const COL_COLLIDER = new THREE.Color(0xff9933)
+
+// ── Slope-aware tuck overlay ──────────────────────────────────────────
+/** Surface-forward-slope tangent line — coloured by sign: cyan downhill
+ *  (where tuck pays and the sweet spot slides), amber uphill, grey flat. */
+const COL_SLOPE_DOWN = new THREE.Color(0x33ddff)
+const COL_SLOPE_UP = new THREE.Color(0xffaa33)
+const COL_SLOPE_FLAT = new THREE.Color(0x778899)
+/** Tuck gauge — dim track, then the fill recoloured by tuck state
+ *  (build / sweet / over / scrape), matching the HTML tuck-meter words. */
+const COL_TUCK_TRACK = new THREE.Color(0x44586c)
+const COL_TUCK_BUILD = new THREE.Color(0x33ccff)
+const COL_TUCK_SWEET = new THREE.Color(0x33ff66)
+const COL_TUCK_OVER = new THREE.Color(0xffcc33)
+const COL_TUCK_SCRAPE = new THREE.Color(0xff4433)
+/** Live slope-shifted sweet-spot notch (bright) + the faint flat-ground
+ *  base-sweet tick the notch slides away from. */
+const COL_TUCK_NOTCH = new THREE.Color(0x66ff88)
+const COL_TUCK_BASE_NOTCH = new THREE.Color(0x99a3ad)
+/** Gauge bar height (m), the lean below which it reads "idle", and the
+ *  factor at/above which the fill flips to the SWEET colour (mirrors the
+ *  HTML meter's `SWEET_FACTOR`). */
+const TUCK_GAUGE_H = 1.2
+const TUCK_LEAN_MIN = 0.05
+const TUCK_SWEET_FACTOR = 0.85
 
 export type HoverDebugRenderer = {
   mesh: THREE.LineSegments
@@ -283,6 +322,98 @@ export function createHoverDebugRenderer(phys: PhysicsWorld): HoverDebugRenderer
     }
   }
 
+  /** Unit axis perpendicular to up, kept horizontal — lays the tuck
+   *  gauge's notch ticks across the vertical bar. up × worldZ, falling
+   *  back to up × worldX when up ≈ ±Z. */
+  function horizPerp(upX: number, upY: number, upZ: number): [number, number, number] {
+    let sx = upY
+    let sy = -upX
+    let sz = 0
+    let len = Math.hypot(sx, sy, sz)
+    if (len < 0.01) {
+      sx = 0
+      sy = upZ
+      sz = -upY
+      len = Math.hypot(sx, sy, sz)
+    }
+    return [sx / len, sy / len, sz / len]
+  }
+
+  /** Slope-aware tuck overlay for one grounded bike (see file header). */
+  function drawTuckViz(eid: number, d: HoverDebugData): void {
+    if (!d.isGrounded) return
+
+    // Surface tangent: stern surface-hit → bow surface-hit — the exact
+    // slope the sweet spot is computed from. Coloured by sign.
+    const bow = d.corners[0]
+    const stern = d.corners[1]
+    if (
+      bow &&
+      stern &&
+      bow.hx !== Number.NEGATIVE_INFINITY &&
+      stern.hx !== Number.NEGATIVE_INFINITY
+    ) {
+      const slopeCol =
+        d.surfaceForwardSlope < -0.05
+          ? COL_SLOPE_DOWN
+          : d.surfaceForwardSlope > 0.05
+            ? COL_SLOPE_UP
+            : COL_SLOPE_FLAT
+      pushSeg(stern.hx, stern.hy, stern.hz, bow.hx, bow.hy, bow.hz, slopeCol)
+    }
+
+    // Gauge — recomputed from the SAME pure helpers the physics uses, so
+    // it can't drift: sweet = slopeAwareSweetSpot(slope), the notch slides
+    // with the slope; the fill is the player's nose-down lean.
+    const intent = ControlIntentStore.get(eid)
+    const lean = intent ? Math.max(0, Math.min(1, -intent.pitch)) : 0
+    const sweet = slopeAwareSweetSpot(-Math.atan(d.surfaceForwardSlope))
+    const factor = tuckFactor(lean, sweet)
+
+    const [sx, sy, sz] = horizPerp(d.upX, d.upY, d.upZ)
+    // Bar base: bike centre nudged to the side + slightly up so it clears
+    // the isGrounded ring; the bar stands along +up.
+    const bx = d.cx + sx * 0.9 + d.upX * 0.2
+    const by = d.cy + sy * 0.9 + d.upY * 0.2
+    const bz = d.cz + sz * 0.9 + d.upZ * 0.2
+    const at = (h: number): [number, number, number] => [
+      bx + d.upX * (h * TUCK_GAUGE_H),
+      by + d.upY * (h * TUCK_GAUGE_H),
+      bz + d.upZ * (h * TUCK_GAUGE_H),
+    ]
+    const tickMark = (h: number, half: number, c: THREE.Color): void => {
+      const [px, py, pz] = at(h)
+      pushSeg(
+        px - sx * half,
+        py - sy * half,
+        pz - sz * half,
+        px + sx * half,
+        py + sy * half,
+        pz + sz * half,
+        c,
+      )
+    }
+    // Track (full height, dim).
+    const [tx, ty, tz] = at(1)
+    pushSeg(bx, by, bz, tx, ty, tz, COL_TUCK_TRACK)
+    // Fill (0 → lean), coloured by tuck state (mirrors the HTML meter).
+    const fillCol =
+      lean < TUCK_LEAN_MIN
+        ? COL_TUCK_TRACK
+        : factor < 0
+          ? COL_TUCK_SCRAPE
+          : factor >= TUCK_SWEET_FACTOR
+            ? COL_TUCK_SWEET
+            : lean > sweet
+              ? COL_TUCK_OVER
+              : COL_TUCK_BUILD
+    const [fx, fy, fz] = at(lean)
+    pushSeg(bx, by, bz, fx, fy, fz, fillCol)
+    // Faint flat-ground base-sweet tick, then the bright live notch.
+    tickMark(TUCK_SWEET_SPOT, 0.08, COL_TUCK_BASE_NOTCH)
+    tickMark(sweet, 0.16, COL_TUCK_NOTCH)
+  }
+
   function tick(sim: SimWorld): void {
     if (!isHoverDebugEnabled()) return
     posScratch.length = 0
@@ -416,6 +547,9 @@ export function createHoverDebugRenderer(phys: PhysicsWorld): HoverDebugRenderer
           )
         }
       }
+
+      // 7. Slope-aware tuck overlay (surface-slope line + sweet-spot gauge).
+      drawTuckViz(eid, d)
     }
 
     // Upload to the geometry. Reallocate when total vertex count

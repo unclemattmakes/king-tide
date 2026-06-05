@@ -26,7 +26,7 @@ import {
   RBHandleStore,
 } from '@/game/components'
 import { getCurrentBoostMultiplier } from '@/game/systems/pickup'
-import { TUCK_SCRAPE_FLOOR, TUCK_SWEET_SPOT, tuckFactor } from './tuck-curve'
+import { slopeAwareSweetSpot, TUCK_SCRAPE_FLOOR, TUCK_SWEET_SPOT, tuckFactor } from './tuck-curve'
 
 // ============================================================================
 // Module constants
@@ -271,7 +271,7 @@ const DIVE_PITCH_FWD_LIMIT_RAD = (DIVE_PITCH_FWD_LIMIT_DEG * Math.PI) / 180
 // leaf so the making-of demo can import them without dragging in this
 // module's physics graph). Re-exported so existing call sites keep
 // importing them from `@/game/systems/hover`.
-export { TUCK_SCRAPE_FLOOR, TUCK_SWEET_SPOT, tuckFactor }
+export { slopeAwareSweetSpot, TUCK_SCRAPE_FLOOR, TUCK_SWEET_SPOT, tuckFactor }
 
 /**
  * Marble-on-incline acceleration along the bike's horizontal forward axis.
@@ -1540,7 +1540,16 @@ function applyGroundBranch(
   // converts to real speed when something is already pushing past base
   // topSpeed (slope momentum on a descent, throttle into a wave face,
   // pickup boost), so a feathered lean down a hill is where it pays.
-  const tf = tuckFactor(Math.max(-intent.pitch, 0))
+  //
+  // The sweet spot slides toward the feathered end as the (anticipated,
+  // forward) downslope steepens: on a descent the chassis is already
+  // pitched nose-down to the surface tangent and the dive clamp eats the
+  // rest of the player's travel, so a fixed notch would grade the reward
+  // off input the bike can't execute. `surfaceForwardSlope` is the same
+  // speed-anticipated, low-pass read the pitch PD + slope-momentum trust,
+  // so the notch pre-shifts for the wave face / ramp the bow probe sees.
+  const tuckSweet = slopeAwareSweetSpot(-Math.atan(surfaceForwardSlope))
+  const tf = tuckFactor(Math.max(-intent.pitch, 0), tuckSweet)
   const tuckMul = 1 + (stats.tuckSpeedBoost - 1) * tf
   const boost = heldBoost * pickupBoost * tuckMul
   // Boost raises the speed cap (see air branch for rationale).

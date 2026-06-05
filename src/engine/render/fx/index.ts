@@ -26,7 +26,7 @@ import {
   MissileStateStore,
   MissileTag,
 } from '@/game/components/combat'
-import { tuckFactor } from '@/game/systems/hover'
+import { slopeAwareSweetSpot, tuckFactor } from '@/game/systems/hover'
 
 /**
  * Hand-rolled particle FX driven by TSL node materials.
@@ -1344,7 +1344,14 @@ export function createFxSystem(
       // player's VFX-intensity setting is the global ceiling on top.
       // Grounded / over-water only, matching where tuck physics pays out.
       const tuckSetting = TUCK_VFX_SCALAR[playerSettings.tuckVfxIntensity]
-      const tf = hover.isGrounded ? tuckFactor(Math.max(-intent.pitch, 0)) : 0
+      // Same slope-aware sweet spot the physics + HUD grade off, so the
+      // stream fans out at the lean that actually pays on this slope.
+      const tf = hover.isGrounded
+        ? tuckFactor(
+            Math.max(-intent.pitch, 0),
+            slopeAwareSweetSpot(-Math.atan(hover.forwardSlope)),
+          )
+        : 0
       const tuckIntensity = Math.max(0, tf) * tuckSetting
       if (tuckIntensity > TUCK_MIN_FACTOR) {
         acc.tuck += TUCK_MAX_RATE * tuckIntensity * dt
