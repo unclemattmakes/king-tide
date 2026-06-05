@@ -72,21 +72,30 @@ moment.
 | — | Sandbar | Tutorial | (fictional) | brief intro arch | crest-launch lesson | [sandbar.md](./sandbar.md) |
 | 1 | South Beach Sunken | Reef | Miami | none | seaplane-wing ramp | [south-beach-sunken.md](./south-beach-sunken.md) |
 | 2 | Cape Town Drift | Reef | Cape Town | none | flat / slalom | [cape-town-drift.md](./cape-town-drift.md) |
-| 3 | Hatteras Light | Reef | NC Outer Banks | lighthouse corkscrew | gallery-spiral ramp + cliff drop | [hatteras-light.md](./hatteras-light.md) |
-| 4 | The Maw | Open Sea | Big Sur | none | wave launch (arch) | [the-maw.md](./the-maw.md) |
-| 5 | Shibuya Submerged | Open Sea | Tokyo | Cocoon wall-ride | Cocoon collapsed-lattice ramp | [shibuya-submerged.md](./shibuya-submerged.md) |
+| 3 | Needle Sound | Harbor | Seattle | none | pier/ferry ramps + Space Needle saucer | [needle-sound.md](./needle-sound.md) |
+| 4 | Golden Gate Drowned | Harbor | San Francisco | none (was always terrain) | frozen-wave hills + The Break | [golden-gate-drowned.md](./golden-gate-drowned.md) |
+| 5 | Opera Drowned | Harbor (closer) | Sydney | none | Harbour Bridge arch + drop | [opera-drowned.md](./opera-drowned.md) |
 | 6 | Marina Bay 7 | Continental | Singapore | none | container/deck terrain | [marina-bay-7.md](./marina-bay-7.md) |
 | 7 | Doge's Drift | Continental | Venice | Campanile climb | toppled Campanile ramp | [doges-drift.md](./doges-drift.md) |
-| 8 | Golden Gate Drowned | Continental | San Francisco | none (was always terrain) | frozen-wave hills + The Break | [golden-gate-drowned.md](./golden-gate-drowned.md) |
+| 8 | Shibuya Submerged | Continental | Tokyo | Cocoon wall-ride | Cocoon collapsed-lattice ramp | [shibuya-submerged.md](./shibuya-submerged.md) |
 | 9 | Kilauea Crown | Continental (closer) | Hawaii | caldera-rim wall-ride | banked caldera-rim road | [kilauea-crown.md](./kilauea-crown.md) |
 | 10 | Aqualand | Drowned | Florida | bowl-wall | banked pool-bowl rim | [aqualand.md](./aqualand.md) |
 | 11 | Angkor Drowned | Drowned | Cambodia | spire corkscrew | temple-stair ramps | [angkor-drowned.md](./angkor-drowned.md) |
 | 12 | Liberty Drowned — *FINALE* | Drowned | NYC | torch underside + crown loop | ride-up torch ramp + crown gates + drop | [liberty-drowned.md](./liberty-drowned.md) |
+| — | The Maw *(parked → B-list)* | — | Big Sur | none | wave launch (arch) | [the-maw.md](./the-maw.md) |
+| — | Hatteras Light *(parked → B-list)* | — | NC Outer Banks | lighthouse corkscrew | gallery-spiral ramp + cliff drop | [hatteras-light.md](./hatteras-light.md) |
 
-> **Cup ordering / renumber** for Golden Gate's permanent slot is finalized
-> as part of this pass: it sits **Continental #3** (after Doge's, before
-> Kilauea's single-lap closer). The Drowned Cup keeps Aqualand → Angkor →
-> Liberty.
+> **Harbor Cup (v2 rework).** The open-water **Open Sea Cup** was retired in
+> the no-open-water pass — every track must now combine over-water land/props
+> with water. Its replacement, the **Harbor Cup** (drowned harbor cities),
+> runs **Needle Sound → Golden Gate Drowned → Opera Drowned**: Golden Gate
+> moved up from Continental, **Shibuya Submerged** backfilled the Continental
+> slot it vacated, and the two pure-open-water tracks — **The Maw** and
+> **Hatteras Light** — are parked to the
+> [B-list](../track-themes.md#b-list--future-content-packs) (files kept,
+> pulled from the ship cups). **Needle Sound** (Seattle) and **Opera Drowned**
+> (Sydney) are fresh concepts, greybox-pending. The Drowned Cup keeps
+> Aqualand → Angkor → Liberty.
 
 ---
 

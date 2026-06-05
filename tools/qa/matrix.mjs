@@ -42,16 +42,38 @@ export const QA_MATRIX = [
   // each cup goes live.
   { id: 'sandbar', bike: 'racer', enabled: true },
   { id: 'south-beach-sunken', bike: 'racer', enabled: true },
-  { id: 'hatteras-light', bike: 'racer', enabled: true },
   { id: 'cape-town-drift', bike: 'racer', enabled: true },
 
-  // Open Sea + Continental Cups — sprint 2 (M14). GLBs landed
-  // 2026-05-18.
-  { id: 'the-maw', bike: 'racer', enabled: true },
+  // Harbor Cup (v2) — drowned harbor cities, replacing the Open Sea
+  // Cup. Seattle + Sydney are fresh concepts with no geometry yet, so
+  // they sit as disabled TODO markers until their GLBs land. (San
+  // Francisco / Golden Gate moved up from Continental; its greybox is
+  // exercised through the menu + race-mode paths, not yet here.)
+  {
+    id: 'needle-sound',
+    bike: 'racer',
+    enabled: false,
+    note: 'Harbor Cup — Seattle concept; GLB pending',
+  },
+  {
+    id: 'opera-drowned',
+    bike: 'racer',
+    enabled: false,
+    note: 'Harbor Cup — Sydney concept; GLB pending',
+  },
+
+  // Continental Cup — sprint 2 (M14). GLBs landed 2026-05-18. Shibuya
+  // backfilled the slot Golden Gate vacated for the Harbor Cup.
   { id: 'shibuya-submerged', bike: 'racer', enabled: true },
   { id: 'kilauea-crown', bike: 'racer', enabled: true },
   { id: 'marina-bay-7', bike: 'racer', enabled: true },
   { id: 'doges-drift', bike: 'racer', enabled: true },
+
+  // Parked to the B-list (v2) — the pure-open-water tracks pulled from
+  // the ship cups in the no-open-water pass. Still in the build, so we
+  // keep QA on them to catch a regression that drops the GLB.
+  { id: 'the-maw', bike: 'racer', enabled: true },
+  { id: 'hatteras-light', bike: 'racer', enabled: true },
 
   // Drowned Cup — sprint 3 (M15). No GLBs yet; left as TODO markers
   // so `pnpm qa` reports them as "pending" rather than dropping them.

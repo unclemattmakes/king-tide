@@ -13,7 +13,7 @@
  * shipping track explicitly.
  */
 
-export type CupName = 'Tutorial' | 'Reef' | 'Open Sea' | 'Continental' | 'Drowned'
+export type CupName = 'Tutorial' | 'Reef' | 'Harbor' | 'Continental' | 'Drowned'
 
 export type TrackTheme = {
   /** Optional broadcast display name. Overrides the JSON-authored
@@ -60,15 +60,35 @@ const CATALOG: Record<string, TrackTheme> = {
     timeLabel: 'Late afternoon',
     weatherLabel: 'Clear · Beaufort 2',
   },
-  'hatteras-light': {
-    displayName: 'Hatteras Light',
-    location: 'Cape Hatteras · North Carolina',
-    cup: 'Open Sea',
-    setPiece: 'The Lamp Room',
-    lore: "Coast Guard left in '78. Someone still keeps the lamp spinning.",
-    palette: 'Atlantic gray + foam green',
-    timeLabel: 'Overcast morning',
-    weatherLabel: 'Building swell · Beaufort 5',
+  'golden-gate-drowned': {
+    displayName: 'Golden Gate Drowned',
+    location: 'Drowned San Francisco · The Bay',
+    cup: 'Harbor',
+    setPiece: 'The Break',
+    lore: 'They said the bridge would outlast the city. It outlasted the coastline too.',
+    palette: 'International Orange + fog grey',
+    timeLabel: 'Foggy morning',
+    weatherLabel: 'Marine layer · Beaufort 3',
+  },
+  'needle-sound': {
+    displayName: 'Needle Sound',
+    location: 'Drowned Seattle · Puget Sound',
+    cup: 'Harbor',
+    setPiece: 'The Saucer',
+    lore: 'The Sound took the waterfront back. The Needle still stands; the band still plays.',
+    palette: 'Evergreen + rain-slick slate',
+    timeLabel: 'Overcast midday',
+    weatherLabel: 'Drizzle · Beaufort 3',
+  },
+  'opera-drowned': {
+    displayName: 'Opera Drowned',
+    location: 'Drowned Sydney · The Harbour',
+    cup: 'Harbor',
+    setPiece: 'The Coathanger',
+    lore: 'Sydney threw the best closing party on Earth and never stopped. The sails held.',
+    palette: 'Sail white + sandstone gold',
+    timeLabel: 'Golden hour',
+    weatherLabel: 'Harbour chop · Beaufort 4',
   },
   'cape-town-drift': {
     displayName: 'Cape Town Drift',
@@ -80,20 +100,10 @@ const CATALOG: Record<string, TrackTheme> = {
     timeLabel: 'Midday',
     weatherLabel: 'Bright + breezy · Beaufort 4',
   },
-  'the-maw': {
-    displayName: 'The Maw',
-    location: 'Big Sur · California',
-    cup: 'Open Sea',
-    setPiece: 'The Maw',
-    lore: 'The bridge fell. The arches stayed. The Maw eats riders who can’t read the sea.',
-    palette: 'Golden-hour Pacific',
-    timeLabel: 'Golden hour',
-    weatherLabel: 'Open ocean · Beaufort 6',
-  },
   'shibuya-submerged': {
     displayName: 'Shibuya Submerged',
     location: 'Drowned Tokyo · Shinjuku',
-    cup: 'Open Sea',
+    cup: 'Continental',
     setPiece: 'Shibuya Crossing Cables',
     lore: "Tokyo didn't evacuate. They moved up. The neon's still on.",
     palette: 'Hot pink + electric blue neon',

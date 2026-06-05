@@ -1,13 +1,15 @@
-# Shibuya Submerged — Open Sea Cup #2
+# Shibuya Submerged — Continental Cup #3
 
-> Cup: Open Sea · The postcard that goes on the trailer. The city as
-> defiant party, not abandoned ruin.
+> Cup: Continental · The postcard that goes on the trailer. The city as
+> defiant party, not abandoned ruin. *(Moved from the retired Open Sea Cup
+> in the harbor-cup rework — it's a land+water city track, so it backfilled
+> the Continental slot Golden Gate vacated.)*
 
 ## Identity
 
 | | |
 |---|---|
-| **Cup** | Open Sea |
+| **Cup** | Continental (moved from the retired Open Sea Cup) |
 | **Lap target** | 58 s |
 | **Laps** | 3 (~2:54 total) |
 | **Water / Land** | 50 / 50 |

@@ -1,6 +1,14 @@
-# The Maw — Open Sea Cup #1
+# The Maw — parked to the B-list (was Open Sea Cup)
 
-> Cup: Open Sea · The purest test of the signature mechanic. The wave *is*
+> **Parked (v2 — no-open-water pass).** The Maw is 100 % open water — the
+> exact archetype the [no-open-water rework](./README.md) retired — so it was
+> pulled from the ship cups and parked to the
+> [B-list](../track-themes.md#b-list--future-content-packs). Its build (one of
+> the few art-dressed tracks) and the design below are kept intact for a
+> future content pack; it is simply off the cup roster. The wave-mastery test
+> it embodied now lives across the Harbor-Cup tracks' open-water stretches.
+>
+> Cup: *(parked)* · The purest test of the signature mechanic. The wave *is*
 > the track.
 
 ## Identity

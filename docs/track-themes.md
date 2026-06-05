@@ -39,6 +39,19 @@
 > blocks below; this bible remains the reference for lore, palette, and
 > audio. The [tracks/README.md](./tracks/README.md) also holds the
 > **common-to-all-tracks** prop list.
+>
+> **v2 — Open Sea Cup → Harbor Cup (no-open-water pass).** The open-water
+> **Open Sea Cup** was retired: every track must now combine over-water
+> land/props with water (no pure open sea). Its replacement, the **Harbor
+> Cup** (drowned harbor cities), runs **Needle Sound (Seattle) → Golden Gate
+> Drowned (San Francisco) → Opera Drowned (Sydney)** — Golden Gate moved up
+> from Continental, **Shibuya Submerged** backfilled Continental, and the two
+> pure-open-water tracks (**The Maw**, **Hatteras Light**) are parked to the
+> [B-list](#b-list--future-content-packs). The Tier-2 section, coverage
+> matrix, and B-list below are updated to match; the per-track stat blocks
+> for the moved/parked tracks carry a banner pointing at the canonical
+> [tracks/](./tracks/README.md) docs. Needle Sound + Opera Drowned are fresh
+> concepts (greybox-pending).
 
 ## Design principles
 
@@ -54,8 +67,10 @@ These shaped every track in this doc; future tracks should hold to them.
 3. **Water everywhere.** The pillar is water + verticality. No track
    is purely land. Even the volcano (Kilauea Crown) ends in the ocean.
 4. **Wave physics is the signature, not a mode.** Open-water sections
-   are graded by wave-reading. The Maw is the purest test; every other
-   track has at least one stretch where the swell matters.
+   are graded by wave-reading. Every track has at least one stretch where
+   the swell matters. *(The Maw was the purest test — now parked to the
+   B-list in the no-open-water pass; the skill lives across the harbor-city
+   open-water stretches.)*
 5. **Verticality is terrain, not anti-grav.** *(Revised — anti-grav cut
    from v1.)* Climb and air come from frozen-wave hills, ramps off
    collapsed structures, banked berms (≤45°), and cliff drops — never a
@@ -194,9 +209,13 @@ flat top, red Cape Wheel struts, oxidized container reds.
 **Lore tag:** "Table Mountain didn't notice. Everything below it did.
 Cape Town's still here — just lower."
 
-## 3. Hatteras Light
+## 3. Hatteras Light *(parked → B-list)*
 
-**Cup:** Open Sea *(v2 — moved from Reef)* | **Lap target:** 50 s | **Laps:** 3 | **Total race:** ~2:30
+> **Parked (v2 — no-open-water pass):** a lighthouse alone in open Atlantic;
+> pulled from the ship cups, kept for a future content pack. Canonical:
+> [tracks/hatteras-light.md](./tracks/hatteras-light.md).
+
+**Cup:** *(parked → B-list)* | **Lap target:** 50 s | **Laps:** 3 | **Total race:** ~2:30
 **Water/Land:** 80/20 | **Anti-grav:** none *(was light lighthouse climb — reworked as a ramp)*
 **Difficulty:** intro (Open Sea opener)
 
@@ -228,15 +247,101 @@ spinning. The Circuit doesn't ask who."
 
 ---
 
-# Tier 2 — Open Sea Cup
+# Tier 2 — Harbor Cup
 
-The showcase cup. Two hero tracks; deliberately kept lean. The Maw is
-the purest test of the signature mechanic; Shibuya is the postcard
-that gets put on the trailer.
+The showcase cup, reworked from the retired Open Sea Cup in the
+no-open-water pass: three drowned harbor cities, every metre land or prop
+over water — the antithesis of open sea. Cup escalates handshake →
+spectacle → postcard-closer. *(Full per-track design lives in
+[tracks/](./tracks/README.md); the blocks here are the lore/palette layer.)*
 
-## 4. The Maw
+## Needle Sound
 
-**Cup:** Open Sea | **Lap target:** 60 s | **Laps:** 3 | **Total race:** ~3:00
+**Cup:** Harbor (opener) | **Lap target:** 55 s | **Laps:** 3 | **Total race:** ~2:45
+**Water/Land:** 55/45 | **Anti-grav:** none | **Difficulty:** showcase (opener)
+
+**Location:** Drowned Seattle. Puget Sound took the waterfront — Alaskan
+Way, the piers, the lower Pike Place market all under Elliott Bay — but the
+hills held. The Space Needle stands over the flooded Seattle Center; the
+Great Wheel tilts on its drowned pier; WSF ferries swing at anchor; Mount
+Rainier owns the eastern horizon (Seattle's Table Mountain).
+
+**Layout:** A *cluttered-harbor* slalom — drowned finger-piers and anchored
+ferries threaded tight, never open water — with one short Pike Place hill
+crest and the Space Needle big-air. The dense-structure counterweight to
+Golden Gate's open terrain.
+
+**Set-piece — The Saucer:** Launch off the tilted Great Wheel gantry / a
+beached ferry car-ramp; big air across the drowned Seattle Center, threading
+the Space Needle's saucer, Mount Rainier framed dead-centre behind. Normal
+gravity — a launch + thread, not a wall-ride.
+
+**Visual palette:** Evergreen + rain-slick slate, Elliott Bay steel
+blue-green, ferry green-and-white, Pike Place red neon, Rainier alpenglow.
+
+**Audio palette:** Grunge revival reworked for a racer — driving guitars +
+electronic low end, rain + ferry horns. *The Sound.*
+
+**Lore tag:** "The Sound took the waterfront back. The Needle still stands;
+the band still plays. Seattle never minded the rain."
+
+## Golden Gate Drowned
+
+*Moved up from Continental in this pass — full stat block later in this doc
+and at
+[tracks/golden-gate-drowned.md](./tracks/golden-gate-drowned.md).* Drowned
+San Francisco: the breathing track — open bay pinching into a tight downtown
+canyon, then frozen-wave hills and **The Break** (a steep street plunging
+into the bay). Karl the fog rolls in and clears on a world timer. The Harbor
+Cup's middle spectacle.
+
+## Opera Drowned
+
+**Cup:** Harbor (closer) | **Lap target:** 60 s | **Laps:** 3 | **Total race:** ~3:00
+**Water/Land:** 60/40 | **Anti-grav:** none | **Difficulty:** showcase (closer)
+
+**Location:** Drowned Sydney. The harbour swallowed Circular Quay and the
+Opera House forecourt; the sails stand half-submerged, a couple cracked. The
+Sydney Harbour Bridge — *the Coathanger* — arches clear over the course, the
+last high ground. CBD, Fort Denison, and Luna Park's grinning face complete
+the harbour. Permanent golden-hour finale light.
+
+**Layout:** Harbour loop — slalom the half-sunk Opera House sails, bank
+around Fort Denison, then ride *up* the Harbour Bridge arch and launch off
+the apex into a drop back to the water.
+
+**Set-piece — The Coathanger:** Ride the bridge's steel arch up as a curved
+climbing road (the BridgeClimb line) and launch off the apex; the whole
+drowned harbour + the gold-lit sails spread below. The cup's postcard
+closer. Normal gravity — a rideable incline + apex launch + cliff drop, the
+standing-arch answer to Liberty's fallen torch-arm.
+
+**Visual palette:** Sandstone gold, sail-white (bone-cracked), harbour
+blue-green, bridge steel silver, ferry green-and-yellow, Luna Park primaries
+— all in golden-hour light.
+
+**Audio palette:** The closer goes big — anthemic Aussie pub-rock-meets-
+stadium, didgeridoo drone under surf-rock guitars. The harbour-city's
+closing party.
+
+**Lore tag:** "Sydney threw the best closing party on Earth and never
+stopped. The harbour rose; the sails held; the bridge still arches over the
+Circuit's last lap."
+
+---
+
+### Parked / relocated (formerly Open Sea Cup)
+
+The two blocks below are kept for lore reference. **The Maw** is parked to
+the [B-list](#b-list--future-content-packs) (100 % open water — the archetype
+this pass retired); **Shibuya Submerged** moved to the **Continental Cup**
+(it's a land+water city track, so it backfilled the slot Golden Gate
+vacated). Canonical homes: [tracks/the-maw.md](./tracks/the-maw.md),
+[tracks/shibuya-submerged.md](./tracks/shibuya-submerged.md).
+
+## The Maw *(parked → B-list)*
+
+**Cup:** *(parked → B-list)* | **Lap target:** 60 s | **Laps:** 3 | **Total race:** ~3:00
 **Water/Land:** 100/0 | **Anti-grav:** none | **Difficulty:** showcase
 
 **Location:** Big Sur, California — what's left of it. Bixby Bridge
@@ -266,9 +371,9 @@ The music swells with the actual swells.
 **Lore tag:** "The bridge fell. The arches stayed. Locals call it the
 Maw — the way it eats riders who can't read the sea."
 
-## 5. Shibuya Submerged
+## Shibuya Submerged *(moved → Continental)*
 
-**Cup:** Open Sea | **Lap target:** 58 s | **Laps:** 3 | **Total race:** ~2:54
+**Cup:** Continental *(moved from Open Sea)* | **Lap target:** 58 s | **Laps:** 3 | **Total race:** ~2:54
 **Water/Land:** 50/50 | **Anti-grav:** none *(was Cocoon wall-ride — reworked as a collapsed-lattice ramp)*
 **Difficulty:** showcase
 
@@ -379,10 +484,15 @@ broken-beat'd. Periodic deep church-bell tones.
 **Lore tag:** "Venice was already half-flooded; the rest just took
 longer. Murano keeps blowing glass because that's what Murano does."
 
-## 12. Golden Gate Drowned
+## Golden Gate Drowned — full detail *(Harbor Cup #2)*
 
-**Cup:** Continental #3 *(slot finalized in the no-anti-grav reconciliation
-pass — after Doge's, before Kilauea's closer)* | **Lap target:** 58 s | **Laps:** 3 | **Total race:** ~2:54
+> *Moved to the Harbor Cup in the no-open-water pass; this detailed block is
+> filed here from its Continental days. Summary in the Tier 2 — Harbor Cup
+> section above; canonical at
+> [tracks/golden-gate-drowned.md](./tracks/golden-gate-drowned.md).*
+
+**Cup:** Harbor #2 *(moved up from Continental — after Needle Sound, before
+Opera Drowned's closer)* | **Lap target:** 58 s | **Laps:** 3 | **Total race:** ~2:54
 **Water/Land:** 55/45 | **Anti-grav:** none (terrain verticality) | **Difficulty:** mid (spectacle)
 
 **Location:** Drowned San Francisco. The Pacific came back through the
@@ -597,20 +707,24 @@ now the **verticality solution** that replaced it.
 | — | Sandbar | Tutorial | (fictional) | crest launch | 80% | training gates |
 | 1 | South Beach Sunken | Reef | Miami | seaplane ramp | 70% | Versace Steps |
 | 2 | Cape Town Drift | Reef | Cape Town | flat / slalom | 60% | Two Oceans Wreck |
-| 3 | Hatteras Light | Open Sea *(v2)* | NC outer banks | gallery-spiral ramp + drop | 80% | Lamp Room |
-| 4 | The Maw | Open Sea | Big Sur | wave launch | 100% | The Maw arch |
-| 5 | Shibuya Submerged | Open Sea | Tokyo | Cocoon lattice ramp | 50% | Shibuya Crossing Cables |
+| 3 | Needle Sound | Harbor | Seattle | pier/ferry ramps + Needle saucer | 55% | The Saucer |
+| 4 | Golden Gate Drowned | Harbor | San Francisco | frozen-wave hills + The Break | 55% | The Break |
+| 5 | Opera Drowned | Harbor | Sydney | Harbour Bridge arch + drop | 60% | The Coathanger |
 | 6 | Marina Bay 7 | Continental | Singapore | container/deck terrain | 60% | The Gauntlet |
 | 7 | Doge's Drift | Continental | Venice | toppled-Campanile ramp | 70% | Campanile Fall |
-| 8 | Golden Gate Drowned | Continental | San Francisco | frozen-wave hills + The Break | 55% | The Break |
+| 8 | Shibuya Submerged | Continental | Tokyo | Cocoon lattice ramp | 50% | Shibuya Crossing Cables |
 | 9 | Kilauea Crown | Continental | Hawaii | banked caldera-rim road | 50% | The Black Beach *(single-lap P2P)* |
 | 10 | Aqualand | Drowned | Florida | banked pool-bowl rim | 75% | The Tsunami *(per-lap escalation)* |
 | 11 | Angkor Drowned | Drowned | Cambodia | temple-stair ramps | 65% | Smiling Faces |
 | 12 | Liberty Drowned | Drowned | NYC | torch ramp + crown gates + drop | 80% | The Torch Arm |
+| — | The Maw *(parked → B-list)* | — | Big Sur | wave launch | 100% | The Maw arch |
+| — | Hatteras Light *(parked → B-list)* | — | NC outer banks | gallery-spiral ramp + drop | 80% | Lamp Room |
 
-**Geographic spread:** Americas 6 (Miami, NC, Big Sur, San Francisco,
-Florida, NYC), Asia 3 (Tokyo, Singapore, Cambodia), Europe 1 (Venice),
-Africa 1 (Cape Town), Hawaii 1 + 1 fictional tutorial.
+**Geographic spread (active cup roster):** Americas 5 (Miami, Seattle, San
+Francisco, Florida, NYC), Asia 3 (Tokyo, Singapore, Cambodia), Oceania 1
+(Sydney — new with the Harbor Cup, the set's first Oceania track), Europe 1
+(Venice), Africa 1 (Cape Town), Hawaii 1 + 1 fictional tutorial. Parked to
+the B-list: Big Sur (The Maw), NC Outer Banks (Hatteras Light).
 
 **Anti-grav count:** **0 of 12** — anti-grav is cut from v1. Verticality
 is delivered by terrain, ramps, banked berms (≤45°), and cliff drops
@@ -618,25 +732,41 @@ is delivered by terrain, ramps, banked berms (≤45°), and cliff drops
 [tracks/](./tracks/README.md)). The old 2–3-track target is retired.
 
 **Wave-mastery tracks:** All open-water sections (effectively all 12),
-with The Maw as the purest test. Cape Town is the calibration
-counterweight — the calm-water track where pumping deliberately
-*doesn't* carry you, which is what makes pumping legible as a skill
-on the other ten.
+graded by wave-reading. With The Maw parked, no single track is a *pure*
+open-water test; the skill now lives across the Harbor-Cup harbor stretches
+and every track's swell sections. Cape Town remains the calibration
+counterweight — the calm-water track where pumping deliberately *doesn't*
+carry you, which is what makes pumping legible as a skill everywhere else.
 
-**Casual lap distribution:** 22 s (Aqualand chaos) → 45 s → 48 → 50 →
-55 → 58 → 58 → 60 → 62 → 70 s + 1 × ~2:30 single-lap descent
-(Kilauea). Weighted to the 45–65 s band per
-[design-targets.md](./design-targets.md).
+**Casual lap distribution:** 22 s (Aqualand chaos) → 45 → 48 → 55 → 55 →
+58 → 58 → 60 → 60 → 62 → 70 s + 1 × ~2:30 single-lap descent (Kilauea).
+Weighted to the 45–65 s band per
+[design-targets.md](./design-targets.md). *(Open Sea's 50 s Hatteras + 60 s
+Maw drop off as they park; Needle Sound 55 + Opera Drowned 60 join.)*
 
-**Format breakdown:** 11 × 3-lap loops + 1 × 5-lap chaos arena
-(Aqualand) + 1 × single-lap point-to-point descent (Kilauea).
-Default is 3 laps; deviations are intentional per the cup-pacing
-principle.
+**Format breakdown:** 10 × 3-lap loops + 1 × 5-lap chaos arena (Aqualand) +
+1 × single-lap point-to-point descent (Kilauea), plus the 1-lap scripted
+tutorial (Sandbar). Default is 3 laps; deviations are intentional per the
+cup-pacing principle.
 
 ## B-list — future content packs
 
 Tracks that survived brainstorm but didn't make the v1 cut. Good
 candidates for the v1.1 / first major content drop.
+
+**Parked from v1 in the no-open-water pass** (built/designed; pulled from the
+ship cups because they're pure open water — re-home them in an "open sea"
+content pack):
+
+- **The Maw** *(parked from v1)* — Big Sur, 100 % open water, the purest
+  wave-mastery test and one of the few **art-dressed** tracks. Build + full
+  design retained ([tracks/the-maw.md](./tracks/the-maw.md)) — a ready-made
+  content-pack headline.
+- **Hatteras Light** *(parked from v1)* — Cape Hatteras lighthouse alone in
+  open Atlantic (80 % open water). Build + design retained
+  ([tracks/hatteras-light.md](./tracks/hatteras-light.md)).
+
+Original brainstorm survivors:
 
 - **Bedruthan Stacks** — Cornish coast, rocky sea-stacks in heavy
   weather. Sister to The Maw with grey-Atlantic palette. Open Sea.
