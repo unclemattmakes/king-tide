@@ -19,7 +19,7 @@ import type { TrackManifestEntry } from '@/game/assets/manifest'
  * lineup stays clean as it lights up sprint by sprint.
  */
 
-export type CupId = 'reef' | 'open-sea' | 'continental' | 'drowned' | 'dev' | 'dev-placeholder'
+export type CupId = 'reef' | 'harbor' | 'continental' | 'drowned' | 'dev' | 'dev-placeholder'
 
 export type V1TrackEntry = {
   /** Canonical track id passed to ?track=. Hyphenated kebab-case to
@@ -82,41 +82,47 @@ export const V1_TRACKS: V1TrackEntry[] = [
     gateLabel: '',
     status: 'ship',
   },
+  // ── Harbor Cup (v2) — drowned harbor cities, the antithesis of open
+  //    sea. Replaces the retired Open Sea Cup: Seattle opens, San
+  //    Francisco moves up from Continental, Sydney closes. The two new
+  //    concepts ship as gated tiles until their geometry is built; the
+  //    cup itself stays `pending` until then (a championship can't run
+  //    through two unbuilt tracks).
   {
-    id: 'the-maw',
-    name: 'The Maw',
-    location: 'Big Sur — Bixby arches + McWay Falls',
-    setPiece: 'The Maw arch — pure wave-mastery',
-    cup: 'open-sea',
-    accent: '#f4c97a',
-    lapTarget: 60,
+    id: 'needle-sound',
+    name: 'Needle Sound',
+    location: 'Drowned Seattle — Puget Sound over the waterfront',
+    setPiece: 'The Saucer — Space Needle big-air',
+    cup: 'harbor',
+    accent: '#3fb59a',
+    lapTarget: 55,
     laps: 3,
-    gateLabel: '',
-    status: 'ship',
+    gateLabel: 'Concept locked · build pending',
+    status: 'pending',
   },
   {
-    id: 'shibuya-submerged',
-    name: 'Shibuya Submerged',
-    location: 'Drowned Tokyo — neon still on',
-    setPiece: 'Shibuya Crossing Cables',
-    cup: 'open-sea',
-    accent: '#ff52a2',
+    id: 'golden-gate-drowned',
+    name: 'Golden Gate Drowned',
+    location: 'Drowned San Francisco — Financial District + the hills',
+    setPiece: 'The Break — street-to-bay cliff drop',
+    cup: 'harbor',
+    accent: '#c8472e',
     lapTarget: 58,
     laps: 3,
     gateLabel: '',
     status: 'ship',
   },
   {
-    id: 'hatteras-light',
-    name: 'Hatteras Light',
-    location: 'Cape Hatteras — only landmark for kilometers',
-    setPiece: 'Lamp Room corkscrew',
-    cup: 'open-sea',
-    accent: '#b0c4d6',
-    lapTarget: 50,
+    id: 'opera-drowned',
+    name: 'Opera Drowned',
+    location: 'Drowned Sydney — half-sunk Opera House + the Coathanger',
+    setPiece: 'The Coathanger — Harbour Bridge arch launch',
+    cup: 'harbor',
+    accent: '#e9a84e',
+    lapTarget: 60,
     laps: 3,
-    gateLabel: '',
-    status: 'ship',
+    gateLabel: 'Concept locked · build pending',
+    status: 'pending',
   },
   {
     id: 'marina-bay-7',
@@ -143,12 +149,12 @@ export const V1_TRACKS: V1TrackEntry[] = [
     status: 'ship',
   },
   {
-    id: 'golden-gate-drowned',
-    name: 'Golden Gate Drowned',
-    location: 'Drowned San Francisco — Financial District + the hills',
-    setPiece: 'The Break — street-to-bay cliff drop',
+    id: 'shibuya-submerged',
+    name: 'Shibuya Submerged',
+    location: 'Drowned Tokyo — neon still on',
+    setPiece: 'Shibuya Crossing Cables',
     cup: 'continental',
-    accent: '#c8472e',
+    accent: '#ff52a2',
     lapTarget: 58,
     laps: 3,
     gateLabel: '',
@@ -240,18 +246,18 @@ export const V1_CUPS: CupEntry[] = [
     races: shipCupRaces('reef'),
   },
   {
-    id: 'open-sea',
-    name: 'Open Sea Cup',
-    tagline: 'Showcase. Wave mastery + the postcard.',
-    accent: '#ffd54a',
-    status: 'ship',
-    gateLabel: '',
-    races: shipCupRaces('open-sea'),
+    id: 'harbor',
+    name: 'Harbor Cup',
+    tagline: 'Showcase. Drowned harbor cities — bridge to bridge.',
+    accent: '#2fa7bf',
+    status: 'pending',
+    gateLabel: 'Opens when Seattle + Sydney ship',
+    races: shipCupRaces('harbor'),
   },
   {
     id: 'continental',
     name: 'Continental Cup',
-    tagline: 'Spectacle. Volcano, port, Venice.',
+    tagline: 'Spectacle. Volcano, port, Venice, Tokyo.',
     accent: '#ff7a3a',
     status: 'ship',
     gateLabel: '',

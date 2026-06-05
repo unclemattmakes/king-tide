@@ -18,6 +18,29 @@
 > (the Mario-Kart fork), away from the press-forward-on-crest pump described
 > below. See [CLAUDE.md](../CLAUDE.md) and [product-plan.md](./product-plan.md).
 
+> **Last updated: 2026-06-05** — **Open Sea Cup → Harbor Cup (no-open-water
+> pass).** After a Reef-Cup playthrough flagged open-water maps as off-pillar,
+> the open-water **Open Sea Cup** was retired: every map must now combine
+> over-water land/props with water. The replacement **Harbor Cup** (drowned
+> harbor cities) runs **Needle Sound (Seattle) → Golden Gate Drowned (San
+> Francisco) → Opera Drowned (Sydney)**:
+>
+> - **Golden Gate Drowned** moved up from Continental; **Shibuya Submerged**
+>   (a land+water city track) backfilled the Continental slot it vacated.
+> - **The Maw** + **Hatteras Light** (pure open water) parked to the
+>   [B-list](./track-themes.md#b-list--future-content-packs) — files/GLBs kept,
+>   pulled from the ship cups (still under QA so a GLB regression stays loud).
+> - **Needle Sound** + **Opera Drowned** are fresh concepts (design docs in
+>   [tracks/](./tracks/README.md)); they ship as **gated `pending` tiles** and
+>   the **Harbor Cup tile stays `pending`** until their geometry is built (a
+>   championship can't run through two unbuilt tracks). Golden Gate stays
+>   individually playable from the race-mode track grid.
+>
+> Catalog: [tracks-catalog.ts](../src/engine/menus/tracks-catalog.ts) +
+> [theme-catalog.ts](../src/game/tracks/theme-catalog.ts); pinned by
+> [tracks-catalog.test.ts](../tests/unit/tracks-catalog.test.ts). Supersedes
+> the Open Sea line in the entry below.
+
 > **Last updated: 2026-06-05** — **Cups reworked + full-field results, trophy
 > podium.** Three pieces, MK8 / Jet Moto-inspired:
 >

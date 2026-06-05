@@ -1,6 +1,6 @@
-# Golden Gate Drowned — Continental Cup #3
+# Golden Gate Drowned — Harbor Cup #2
 
-> Cup: Continental · The track that proved the no-anti-grav direction:
+> Cup: Harbor · The track that proved the no-anti-grav direction:
 > *land as waves frozen in time.* The model for the whole reconciliation
 > pass.
 
@@ -8,7 +8,7 @@
 
 | | |
 |---|---|
-| **Cup** | Continental (slot finalized by this pass: #3, before Kilauea) |
+| **Cup** | Harbor (#2 — moved up from Continental in the harbor-cup rework) |
 | **Lap target** | 58 s |
 | **Laps** | 3 (~2:54 total) |
 | **Water / Land** | 55 / 45 |

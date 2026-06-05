@@ -158,7 +158,7 @@ const MODE_TILES: ModeTile[] = [
     id: 'cup',
     badge: 'CIRCUIT',
     headline: 'CUP',
-    desc: 'Four-cup championship: Reef → Open Sea → Continental → Drowned. Each cup unlocks when its tracks ship. Dev Cup holds today’s playtest maps.',
+    desc: 'Four-cup championship: Reef → Harbor → Continental → Drowned. Each cup unlocks when its tracks ship. Dev Cup holds today’s playtest maps.',
     enabled: true,
   },
   {

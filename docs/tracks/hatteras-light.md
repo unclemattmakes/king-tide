@@ -1,6 +1,13 @@
-# Hatteras Light — Reef Cup #3 (cup closer)
+# Hatteras Light — parked to the B-list
 
-> Cup: Reef · The cup's emotional payoff: a vertical climb and a cliff
+> **Parked (v2 — no-open-water pass).** Hatteras is a lighthouse alone in
+> open Atlantic (80 % open water) — pulled from the ship cups in the
+> [no-open-water rework](./README.md) and parked to the
+> [B-list](../track-themes.md#b-list--future-content-packs). Its build +
+> design below are kept intact for a future content pack; it is simply off
+> the cup roster.
+>
+> Cup: *(parked)* · The cup's emotional payoff: a vertical climb and a cliff
 > drop that *lands* every lap.
 
 ## Identity
