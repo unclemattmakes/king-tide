@@ -1,5 +1,12 @@
 import * as THREE from 'three'
-import { TUCK_SCRAPE_FLOOR, TUCK_SWEET_SPOT, tuckFactor } from '@/game/systems/tuck-curve'
+import {
+  SLOPE_TUCK_REF,
+  slopeAwareSweetSpot,
+  TUCK_SCRAPE_FLOOR,
+  TUCK_SWEET_SPOT,
+  TUCK_SWEET_SPOT_MIN,
+  tuckFactor,
+} from '@/game/systems/tuck-curve'
 import { createDemoHarness } from '../shared/demo-harness'
 import { buildBike, createScrollDeck } from '../shared/scene-bits'
 import { el, panel, readout, slider, toggle } from '../shared/ui'
@@ -24,6 +31,9 @@ type State = {
   lean: number
   sweet: number
   floor: number
+  /** Downhill surface pitch (radians, nose-down positive) — slides the
+   *  sweet spot via slopeAwareSweetSpot. */
+  slope: number
   matchShipped: boolean
 }
 
@@ -33,6 +43,15 @@ function customTuck(d: number, sweet: number, floor: number): number {
   if (c <= sweet) return c / sweet
   const over = (c - sweet) / (1 - sweet)
   return 1 + (floor - 1) * over
+}
+
+/** Mirror of `slopeAwareSweetSpot` off a re-tunable BASE sweet spot, so the
+ *  reader's custom curve slides on a downslope the same way the shipped one
+ *  does (the shipped path always uses the real `slopeAwareSweetSpot`). */
+function customSlopeAwareSweet(base: number, slopeRad: number): number {
+  const downhill = Math.max(slopeRad, 0)
+  const t = Math.min(downhill / SLOPE_TUCK_REF, 1)
+  return base - (base - TUCK_SWEET_SPOT_MIN) * t
 }
 
 export function mountTuckDemo(stage: HTMLElement, controlsHost: HTMLElement): () => void {
@@ -70,10 +89,18 @@ export function mountTuckDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
     lean: 0,
     sweet: TUCK_SWEET_SPOT,
     floor: TUCK_SCRAPE_FLOOR,
+    slope: 0,
     matchShipped: false,
   }
+  // Effective sweet spot for the active mode, slid by the slope. Shipped
+  // mode uses the real slopeAwareSweetSpot; custom mode mirrors it off the
+  // reader's base sweet spot.
+  const effSweet = () =>
+    state.matchShipped
+      ? slopeAwareSweetSpot(state.slope)
+      : customSlopeAwareSweet(state.sweet, state.slope)
   const tfOf = (d: number) =>
-    state.matchShipped ? tuckFactor(d) : customTuck(d, state.sweet, state.floor)
+    state.matchShipped ? tuckFactor(d, effSweet()) : customTuck(d, effSweet(), state.floor)
 
   // ── Curve plot ────────────────────────────────────────────────────────
   const plot = makeCurvePlot()
@@ -82,6 +109,7 @@ export function mountTuckDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
   const speedOut = readout('Top-speed cap')
   const dragOut = readout('Lateral drag')
   const factorOut = readout('Tuck factor')
+  const sweetOut = readout('Sweet spot')
 
   controlsHost.append(
     panel('Bury the nose', [
@@ -96,9 +124,22 @@ export function mountTuckDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
           state.lean = v
         },
       }),
+      slider({
+        label: 'Downhill slope',
+        min: 0,
+        max: 28,
+        step: 1,
+        value: 0,
+        format: (v) => `${v.toFixed(0)}°`,
+        onInput: (v) => {
+          state.slope = (v * Math.PI) / 180
+          refreshCurve()
+        },
+      }),
       speedOut.node,
       dragOut.node,
       factorOut.node,
+      sweetOut.node,
     ]),
     panel('Re-tune the curve', [
       plot.node,
@@ -138,9 +179,10 @@ export function mountTuckDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
   )
 
   function refreshCurve() {
-    plot.setYourCurve((d) => tfOf(d), state.matchShipped ? TUCK_SWEET_SPOT : state.sweet)
+    plot.setYourCurve((d) => tfOf(d), effSweet())
+    // Shipped reference also slides with the slope.
+    plot.setShippedCurve((d) => tuckFactor(d, slopeAwareSweetSpot(state.slope)))
   }
-  plot.setShippedCurve((d) => tuckFactor(d))
   refreshCurve()
 
   // ── Frame loop ────────────────────────────────────────────────────────
@@ -152,8 +194,9 @@ export function mountTuckDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
     // Scroll the deck at the cap the lean earns.
     deck.scroll(BASE_SCROLL * capMul * dt)
 
-    // Bike pitches nose-down and sinks toward the deck as the lean grows.
-    bike.rotation.x = state.lean * LEAN_MAX_RAD
+    // Bike pitches nose-down with the slope it's riding plus the player's
+    // lean, and sinks toward the deck as the lean grows.
+    bike.rotation.x = state.slope + state.lean * LEAN_MAX_RAD
     bike.position.set(0, HOVER_Y - 0.6 * state.lean, 0)
 
     // Scrape spark fires once the factor goes negative (belly on the deck).
@@ -170,6 +213,7 @@ export function mountTuckDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
     speedOut.set(`${capMul.toFixed(2)}× · ${(TOP_SPEED_REF * capMul).toFixed(0)}`)
     dragOut.set(`${dragMul.toFixed(2)}×`)
     factorOut.set(`${tf >= 0 ? '+' : ''}${tf.toFixed(2)}`)
+    sweetOut.set(`${(effSweet() * 100).toFixed(0)}%`)
   })
 
   return () => {

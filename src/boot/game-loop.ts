@@ -122,7 +122,7 @@ import { simulateStep } from '@/game/sim-step'
 import { chargeBoostMeter } from '@/game/systems/boost-meter'
 import { isOverBoostPad } from '@/game/systems/boost-pad'
 import type { GhostRunner } from '@/game/systems/ghost-runner'
-import { TUCK_SWEET_SPOT, tuckFactor } from '@/game/systems/hover'
+import { slopeAwareSweetSpot, TUCK_SWEET_SPOT, tuckFactor } from '@/game/systems/hover'
 import { interpolateRenderTransforms } from '@/game/systems/interpolate-transforms'
 import { GRACE_PRESETS } from '@/game/systems/oob-tuning'
 import { leashFor, type OobConfig, resolveOob } from '@/game/systems/out-of-bounds'
@@ -1624,12 +1624,17 @@ export function startGameLoop(opts: GameLoopOpts): void {
     } else {
       const tuckIntent = ControlIntentStore.get(playerEid)
       const tuckStats = BikeStatsStore.get(playerEid)
-      const grounded = HoverStateStore.get(playerEid)?.isGrounded === true
+      const tuckHover = HoverStateStore.get(playerEid)
+      const grounded = tuckHover?.isGrounded === true
       if (tuckIntent && tuckStats) {
         const lean = Math.max(0, -tuckIntent.pitch)
-        const factor = grounded ? tuckFactor(lean) : 0
+        // Sweet spot slides with the slope under / ahead of the bike — the
+        // same signed forward slope the physics grades tuck off. 0 while
+        // airborne, so the notch rests at the flat-ground sweet spot.
+        const sweet = slopeAwareSweetSpot(-Math.atan(tuckHover?.forwardSlope ?? 0))
+        const factor = grounded ? tuckFactor(lean, sweet) : 0
         const capBonusPct = (tuckStats.tuckSpeedBoost - 1) * factor * 100
-        tuckHud.update(lean, factor, capBonusPct, grounded && lean > 0.05)
+        tuckHud.update(lean, factor, capBonusPct, grounded && lean > 0.05, sweet)
       } else {
         tuckHud.hide()
       }

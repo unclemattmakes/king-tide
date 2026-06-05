@@ -18,6 +18,36 @@
 > (the Mario-Kart fork), away from the press-forward-on-crest pump described
 > below. See [CLAUDE.md](../CLAUDE.md) and [product-plan.md](./product-plan.md).
 
+> **Last updated: 2026-06-04** — **Slope-aware tuck sweet spot.** The tuck
+> sweet spot is no longer pinned at 0.8 lean. On a descent it slides toward
+> the feathered end (`slopeAwareSweetSpot` in
+> [tuck-curve.ts](../src/game/systems/tuck-curve.ts)) so the rewarded lean
+> matches the pitch the slope actually leaves room for. The bug it fixes: on
+> a downslope the chassis is already pitched nose-down (the grounded pitch PD
+> tracks the surface tangent) and the dive clamp eats the rest of the
+> player's nose-down travel, so a fixed notch graded the reward off input the
+> bike can't execute — the meter would march into `SCRAPING` while nothing
+> scraped. The notch now reads the same speed-anticipated, low-pass
+> `surfaceForwardSlope` the pitch PD + slope-momentum trust (so it pre-shifts
+> for the wave face / ramp the bow probe sees), sliding to a 0.4 floor by
+> ~28° of descent; flat ground and climbs are unchanged. **Single source of
+> truth:** physics ([hover.ts](../src/game/systems/hover.ts)), the tuck-meter
+> notch ([tuck-hud.ts](../src/engine/render/tuck-hud.ts) — `--tk-sweet` now
+> re-set each frame), and the slipstream VFX
+> ([fx/index.ts](../src/engine/render/fx/index.ts)) all grade off the same
+> `slopeAwareSweetSpot`. A first step toward the v2 wave-mastery legibility
+> goal (graded "master the jump" pitch). Pinned by
+> [tuck-sweet-spot.test.ts](../tests/unit/tuck-sweet-spot.test.ts); the
+> making-of [feel demo](../src/making-of/feel/tuck-demo.ts) gains a slope
+> slider so the notch-slide is visible against the shipped curve. The **F4
+> hover-debug overlay** (`?debug=hover`,
+> [hover-debug.ts](../src/engine/render/hover-debug.ts)) also draws it
+> in-world: a surface-forward-slope tangent line (stern↔bow surface hits —
+> the signal that slides the notch, coloured by sign) plus a floating gauge
+> per grounded bike — lean fill recoloured by tuck state, the live
+> slope-shifted sweet-spot notch, and a faint flat-ground base-sweet tick so
+> the shift reads at a glance.
+
 > **Last updated: 2026-06-04** — **Breaking-crest wave spray** — the ocean now
 > throws spray off its own crests, independent of the rider, so the water stops
 > reading as a shaded rubber sheet. Three additive pieces, all gated by the new
