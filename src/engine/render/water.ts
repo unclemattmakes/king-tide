@@ -618,7 +618,7 @@ export function createWaterMesh(
   // ridges). Each wave has a per-wave Q_BASE in waveConsts (chops sharper
   // than swells); this uniform multiplies all of them. Default 0.7 keeps the
   // sum Σ Q_eff · k · A well below the loop-formation limit (~1).
-  const initialSteepness = Math.max(0, Math.min(1.5, Number(params?.get('steep') ?? '0.7')))
+  const initialSteepness = Math.max(0, Math.min(1.5, Number(params?.get('steep') ?? '0.44')))
   const steepnessUniform = uniform(initialSteepness)
 
   // Pinch direction (degrees, 0..90). Rotates the Gerstner horizontal-
@@ -651,7 +651,7 @@ export function createWaterMesh(
   // the normal / shading pipeline (see `worldDydx`, `worldDydz`
   // below). CPU buoyancy mirrors this in `wave-field.ts::sampleSurface`
   // so render and physics stay locked.
-  const WAVE_BEARING_DEFAULT = 0
+  const WAVE_BEARING_DEFAULT = 47
   const waveBearingDegUniform = uniform(WAVE_BEARING_DEFAULT)
   const waveBearingCosUniform = uniform(Math.cos((WAVE_BEARING_DEFAULT * Math.PI) / 180))
   const waveBearingSinUniform = uniform(Math.sin((WAVE_BEARING_DEFAULT * Math.PI) / 180))
@@ -2476,9 +2476,9 @@ export function createWaterMesh(
   // buoyancy sampler stays in lockstep with the GPU shader.
   const defaults: WaterDebugDefaults = {
     steepness: initialSteepness,
-    swellScale: 1,
-    chopScale: 1,
-    timeScale: 1,
+    swellScale: 3.2,
+    chopScale: 0.9,
+    timeScale: 0.85,
     reflectionStrength: REFLECTION_STRENGTH_DEFAULT,
     sunGlow: SUN_GLOW_DEFAULT,
     roughBase: ROUGH_BASE_DEFAULT,
