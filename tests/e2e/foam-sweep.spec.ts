@@ -1,0 +1,168 @@
+/**
+ * Foam-coverage sweep — captures the water shader at several whitecap
+ * settings on ONE frozen wave + fixed camera, so the foam-coverage pass
+ * (docs/water-foam-look-plan.md) can be dialed in apples-to-apples without
+ * re-booting per value. Real GPU (headed Chromium, like gen-track-shots).
+ *
+ * Drives `window.__hover.waterDebug()` (the live WaterMesh.debug surface)
+ * to scrub setWhitecapHeight / setWhitecapSlope / setWhitecapMode between
+ * shots. Time is frozen (timeScale 0) and the camera parked at a fixed pose
+ * so only the foam settings change frame-to-frame.
+ *
+ * Gated on FOAM_SWEEP=1. Env knobs:
+ *   FOAM_SWEEP_TRACK   track id                         (default "the-maw")
+ *   FOAM_SWEEP_TOD     time-of-day override (?tod=)     (default "285" = sunset)
+ *   FOAM_SWEEP_POSE    JSON {pos:[x,y,z],target:[x,y,z]} fixed camera
+ *   FOAM_SWEEP_GRID    JSON [{label,h,s,m}]             (default grid below)
+ *   FOAM_SWEEP_FREEZE  "0" keeps waves moving           (default freeze)
+ *
+ * Output: test-results/foam-sweep/<track>/<label>.jpg + index.json.
+ */
+import { mkdirSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
+import { test } from '@playwright/test'
+import { waitForReady } from './helpers/boot'
+
+const SHOT_W = 1280
+const SHOT_H = 720
+
+const TRACK = process.env.FOAM_SWEEP_TRACK ?? 'the-maw'
+const TOD = process.env.FOAM_SWEEP_TOD ?? '285'
+const FREEZE = process.env.FOAM_SWEEP_FREEZE !== '0'
+
+// FOAM_SWEEP_WARMTH=1 switches to the warm-tint calibration: an INTO-sun
+// pose (so the sunBackscatter rake fires hardest) + a foamWarmth grid.
+const WARMTH_MODE = process.env.FOAM_SWEEP_WARMTH === '1'
+// FOAM_SWEEP_STREAK=1 sweeps the directional-streak strength on the
+// across-swell coverage pose (where wave faces are most visible).
+const STREAK_MODE = process.env.FOAM_SWEEP_STREAK === '1'
+// FOAM_SWEEP_AB=1 captures a clean before/after on one frozen wave: the full
+// legacy look (every foam knob off) vs the shipped foam-pass defaults.
+const AB_MODE = process.env.FOAM_SWEEP_AB === '1'
+
+type Pose = { pos: [number, number, number]; target: [number, number, number] }
+// Coverage pose: elevated over The Maw's mid-section, looking DOWN (~33°) and
+// ACROSS the swell train (toward -z) so wave faces + crest lines are visible
+// rather than edge-on. The low sun (toward +x at tod 285) rakes from the right.
+const COVERAGE_POSE: Pose = { pos: [-200, 50, -120], target: [-200, -3, -205] }
+// Warmth pose: lower + looking toward the low sun (+x) so the warm foam rake
+// is at its strongest — the worst case for "does it go orange/muddy?".
+const WARMTH_POSE: Pose = { pos: [-235, 14, -150], target: [-150, -2, -150] }
+const DEFAULT_POSE: Pose = WARMTH_MODE && !AB_MODE ? WARMTH_POSE : COVERAGE_POSE
+const POSE: Pose = process.env.FOAM_SWEEP_POSE
+  ? (JSON.parse(process.env.FOAM_SWEEP_POSE) as Pose)
+  : DEFAULT_POSE
+
+// `w` = foamWarmth, `st` = foamStreak (both default to the shipped 1.0).
+type Variant = { label: string; h: number; s: number; m: number; w?: number; st?: number }
+const COVERAGE_GRID: Variant[] = [
+  { label: '0-legacy', h: 1.0, s: 0.3, m: 0.0 }, // the old glassy gate (sanity floor)
+  { label: '1-overshoot', h: 0.45, s: 0.14, m: 0.6 }, // the uniform-wash we just saw
+  { label: '2-crest', h: 0.6, s: 0.32, m: 0.3 },
+  { label: '3-balanced', h: 0.55, s: 0.3, m: 0.35 },
+  { label: '4-mid', h: 0.5, s: 0.28, m: 0.4 },
+  { label: '5-loose', h: 0.5, s: 0.24, m: 0.45 },
+  { label: '6-tight', h: 0.65, s: 0.34, m: 0.28 },
+]
+// Warm-tint calibration: hold coverage at the shipped default, sweep foamWarmth.
+const WARMTH_GRID: Variant[] = [
+  { label: '0-flat-white', h: 0.55, s: 0.3, m: 0.35, w: 0.0 },
+  { label: '1-warmth-0.6', h: 0.55, s: 0.3, m: 0.35, w: 0.6 },
+  { label: '2-warmth-1.0', h: 0.55, s: 0.3, m: 0.35, w: 1.0 },
+  { label: '3-warmth-1.4', h: 0.55, s: 0.3, m: 0.35, w: 1.4 },
+  { label: '4-warmth-2.0', h: 0.55, s: 0.3, m: 0.35, w: 2.0 },
+]
+// Streak calibration: hold coverage + warmth at the shipped (concentrated)
+// defaults, sweep the directional-streak strength.
+const STREAK_GRID: Variant[] = [
+  { label: '0-no-streak', h: 0.8, s: 0.42, m: 0.2, st: 0.0 },
+  { label: '1-streak-0.5', h: 0.8, s: 0.42, m: 0.2, st: 0.5 },
+  { label: '2-streak-1.0', h: 0.8, s: 0.42, m: 0.2, st: 1.0 },
+  { label: '3-streak-1.5', h: 0.8, s: 0.42, m: 0.2, st: 1.5 },
+  { label: '4-streak-2.0', h: 0.8, s: 0.42, m: 0.2, st: 2.0 },
+]
+// Before/after: full legacy foam (every knob at its pre-pass value) vs the
+// shipped defaults, on the same frozen wave + pose.
+const AB_GRID: Variant[] = [
+  { label: 'before-legacy', h: 1.0, s: 0.3, m: 0.0, w: 0.0, st: 0.0 },
+  { label: 'after-foampass', h: 0.55, s: 0.3, m: 0.35, w: 1.0, st: 1.0 },
+]
+const GRID: Variant[] = process.env.FOAM_SWEEP_GRID
+  ? (JSON.parse(process.env.FOAM_SWEEP_GRID) as Variant[])
+  : AB_MODE
+    ? AB_GRID
+    : WARMTH_MODE
+      ? WARMTH_GRID
+      : STREAK_MODE
+        ? STREAK_GRID
+        : COVERAGE_GRID
+
+test.describe('foam coverage sweep', () => {
+  test.skip(process.env.FOAM_SWEEP !== '1', 'gated on FOAM_SWEEP=1')
+
+  test(`${TRACK} foam sweep`, async ({ page }) => {
+    test.setTimeout(120_000)
+    const outDir = path.join(process.cwd(), 'test-results', 'foam-sweep', TRACK)
+    mkdirSync(outDir, { recursive: true })
+
+    await page.setViewportSize({ width: SHOT_W, height: SHOT_H })
+    await page.goto(`/?autostart=1&track=${TRACK}&tod=${TOD}`)
+    await waitForReady(page)
+
+    // Autopilot so the field clears the start grid, then settle.
+    await page.evaluate(() => {
+      if (!window.__hover!.isAutoPlay()) window.__hover!.toggleAutoPlay()
+      if (window.__hover!.isDirectionArrowOn()) window.__hover!.toggleDirectionArrow()
+    })
+    await page.keyboard.press('Enter')
+    await page.addStyleTag({
+      content:
+        '#hud,#hud-scaffold,#race-timer,#race-banner,#race-gap,#race-minimap,#race-intro-ui,#race-intro-skip,#hud-positions,#devsettings-toggle,#water-debug-toggle,#garage-toggle,#loading-screen{display:none!important}',
+    })
+    await page.waitForTimeout(6000)
+
+    // Park the camera + (optionally) freeze the wave field so only foam
+    // settings vary across the grid.
+    await page.evaluate(
+      ({ pose, freeze }) => {
+        window.__hover!.setCameraPose({
+          pos: { x: pose.pos[0], y: pose.pos[1], z: pose.pos[2] },
+          target: { x: pose.target[0], y: pose.target[1], z: pose.target[2] },
+        })
+        if (freeze) window.__hover!.waterDebug()?.setTimeScale(0)
+      },
+      { pose: POSE, freeze: FREEZE },
+    )
+    await page.waitForTimeout(800)
+
+    const frames: Array<Record<string, unknown>> = []
+    for (const v of GRID) {
+      await page.evaluate((variant) => {
+        const wd = window.__hover!.waterDebug()
+        if (!wd) return
+        wd.setWhitecapHeight(variant.h)
+        wd.setWhitecapSlope(variant.s)
+        wd.setWhitecapMode(variant.m)
+        wd.setFoamWarmth(variant.w ?? 1.0)
+        wd.setFoamStreak(variant.st ?? 1.0)
+      }, v)
+      await page.waitForTimeout(400)
+      const name = `${v.label}.jpg`
+      await page.screenshot({
+        path: path.join(outDir, name),
+        type: 'jpeg',
+        quality: 92,
+        clip: { x: 0, y: 0, width: SHOT_W, height: SHOT_H },
+      })
+      frames.push({ frame: name, ...v })
+    }
+    await page.evaluate(() => window.__hover!.setCameraPose(null))
+
+    writeFileSync(
+      path.join(outDir, 'index.json'),
+      `${JSON.stringify({ track: TRACK, tod: TOD, freeze: FREEZE, pose: POSE, frames }, null, 2)}\n`,
+    )
+    // eslint-disable-next-line no-console
+    console.log(`foam-sweep:${TRACK}:wrote ${frames.length} frames to ${outDir}`)
+  })
+})

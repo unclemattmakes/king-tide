@@ -1440,11 +1440,13 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         <div class="bc-credits">
           <section class="bc-credit-group">
             <h3>BRUSH TEXTURES</h3>
-            <p>Hoverbike&rsquo;s hand-painted surfaces build on the <b>Brushstroke
-              Tools</b> oil-paint brush styles by <b>Simon Thommes / Blender Studio</b>
-              (Project Gold), &copy; Blender Foundation &mdash; licensed under
-              <b>CC&nbsp;BY&nbsp;4.0</b>. Modified for this game: the scanned brush maps
-              were sliced, recentred and baked into a single tiling brush-stroke texture.</p>
+            <p>Hoverbike&rsquo;s hand-painted surfaces and ocean foam build on the
+              <b>Brushstroke Tools</b> oil-paint brush styles by <b>Simon Thommes /
+              Blender Studio</b> (Project Gold), &copy; Blender Foundation &mdash;
+              licensed under <b>CC&nbsp;BY&nbsp;4.0</b>. Modified for this game: the
+              scanned brush maps were sliced, recentred and baked into tiling
+              brush-stroke textures &mdash; the props&rsquo; painted surfaces and the
+              wave foam&rsquo;s flow-aligned streaks.</p>
             <div class="bc-credit-links">
               <a href="https://studio.blender.org/tools/addons/brushstroke_tools" target="_blank" rel="noopener">studio.blender.org</a>
               <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>

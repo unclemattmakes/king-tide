@@ -184,6 +184,55 @@ const SLIDERS: SliderDef[] = [
     format: (n) => n.toFixed(2),
     hint: 'σ_along of the 2D anisotropic Gaussian. Lower → more disc-like; higher → longer streak along the wave-front tangent. 0.4 = baseline',
   },
+  // Foam coverage — where whitecaps fire. The high-leverage knobs for the
+  // wave-mastery look: the legacy gate (height 1.0–2.0 m AND slope 0.3–0.7)
+  // sat above the calm sea so crest foam never appeared. See
+  // docs/water-foam-look-plan.md.
+  {
+    key: 'whitecapHeight',
+    label: 'Foam height',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}m`,
+    hint: 'Crest height (m above rest) where whitecap foam begins. Lower = foam on smaller crests. 0.65 = baseline (legacy was effectively 1.0, above the calm sea — so foam never fired)',
+  },
+  {
+    key: 'whitecapSlope',
+    label: 'Foam slope',
+    min: 0,
+    max: 0.7,
+    step: 0.01,
+    format: (n) => n.toFixed(2),
+    hint: 'Surface gradient (rise/run) where steep-face foam begins. Lower = foam on gentler swell faces. 0.36 = baseline (legacy used 0.3 but AND-locked it against the height gate)',
+  },
+  {
+    key: 'whitecapMode',
+    label: 'Foam gate (AND·OR)',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    format: (n) => (n < 0.01 ? 'AND' : n > 0.99 ? 'OR' : n.toFixed(2)),
+    hint: '0 = AND (tall AND steep — legacy glassy gate) · 1 = OR (tall OR steep — foam-dense). 0.25 = baseline: breaking crests foam, clean teal between',
+  },
+  {
+    key: 'foamWarmth',
+    label: 'Foam warmth',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: 'Light-driven warm tint + warm emissive bloom on sun-raked foam. 0 = flat white foam (legacy) · 1 = baseline sunset-kissed crests. Follows the sky tint, so near-neutral at midday and warm at golden/sunset',
+  },
+  {
+    key: 'foamStreak',
+    label: 'Foam streaks',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: 'Flow-aligned directional combing of foam down the wave faces (painterly brushstrokes). 0 = isotropic round bubbles only (legacy) · 1 = baseline streaks. Only applies on sloped faces, fades at distance',
+  },
 ]
 
 export type WaterDebugMenu = {
@@ -296,6 +345,21 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'shoreWaveStrength':
           water.debug.setShoreWaveStrength(v)
+          break
+        case 'whitecapHeight':
+          water.debug.setWhitecapHeight(v)
+          break
+        case 'whitecapSlope':
+          water.debug.setWhitecapSlope(v)
+          break
+        case 'whitecapMode':
+          water.debug.setWhitecapMode(v)
+          break
+        case 'foamWarmth':
+          water.debug.setFoamWarmth(v)
+          break
+        case 'foamStreak':
+          water.debug.setFoamStreak(v)
           break
       }
     })

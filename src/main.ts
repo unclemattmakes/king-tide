@@ -458,6 +458,19 @@ async function boot() {
     if (report) logWaterCoverage(trackId, report)
   }
 
+  // Optional `?tod=<seconds>` dev override of the track's frozen time-of-day,
+  // so any track can be previewed (and screenshotted) at an arbitrary point in
+  // the sky's 360 s cycle without editing its JSON — e.g. the water/foam art
+  // pass capturing a sunset grade (~tod=285) on tracks authored at high noon.
+  // Read-only at boot; no-op for an absent or non-numeric value.
+  const todParam = new URLSearchParams(window.location.search).get('tod')
+  const todOverride =
+    todParam !== null && todParam !== '' && Number.isFinite(Number(todParam))
+      ? Number(todParam)
+      : null
+  const skyConfig =
+    todOverride !== null ? { ...(track.sky ?? {}), timeOfDay: todOverride } : track.sky
+
   // Sky / atmosphere system. Owns the dome mesh, fog + hemi-light palette,
   // and the PMREM env-map. The sun position and env-map are picked once
   // here (driven by `track.sky.timeOfDay`) and frozen for the whole race —
@@ -471,7 +484,7 @@ async function boot() {
     sun,
     hemi,
     water: waterMesh,
-    config: track.sky,
+    config: skyConfig,
   })
 
   // Per-lap weather progression. No-ops for tracks without `lapWeather`
@@ -969,6 +982,21 @@ async function boot() {
   const pickupRender = createPickupRenderSystem(scene, sim)
   const combatRender = createCombatRenderSystem(scene, sim)
   const fx = createFxSystem(scene, sim, phys, waveField)
+
+  // Tint airborne water spray (wake foam, plunge bubbles, crest spray) toward
+  // the sunset, matching the surface-foam warm tint. The sky is frozen at the
+  // track's time-of-day, so this is a one-time read of the baked horizon
+  // colour: warmth = how orange the horizon is (red − blue), and the spray is
+  // pulled from cool-white toward a warm coral by that much. At midday (cool
+  // horizon) warmth ≈ 0 and the spray stays its baked cool-white.
+  {
+    // biome-ignore lint/suspicious/noExplicitAny: sky.shared exposes TSL uniforms; .value is the THREE.Vector3 set at construction
+    const h = (sky.shared.horizonColor as any).value as { x: number; y: number; z: number }
+    const warmth = Math.max(0, Math.min(1, (h.x - h.z) * 2.2))
+    // Toward coral (blue-deficient, green slightly down) — same family as the
+    // shader's foam warm tint, scaled so even full warmth stays luminous.
+    fx.setSprayTint(1, 1 - 0.16 * warmth, 1 - 0.34 * warmth)
+  }
 
   // Ambient breaking-crest spray — sweeps a world-anchored lattice around the
   // camera each frame and poofs spray off the sea's own crests as they break,
