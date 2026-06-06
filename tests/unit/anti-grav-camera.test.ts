@@ -67,10 +67,10 @@ describe('createChaseCamera anti-grav follow', () => {
     )
     chase.setAntiGravFollow(0)
     chase.snap(pos, rollQuat)
-    // Yaw-only frame: ideal offset (0, 2.5, -5.5) — camera should land
+    // Yaw-only frame: ideal offset (0, 5, -11) — camera should land
     // at +y above the origin regardless of bike roll.
-    expect(camera.position.y).toBeGreaterThan(1.5)
-    expect(camera.position.y).toBeLessThan(3.5)
+    expect(camera.position.y).toBeGreaterThan(4)
+    expect(camera.position.y).toBeLessThan(6)
   })
 
   it('follows the bike full-frame when follow weight is 1', () => {

@@ -1,4 +1,5 @@
 import type * as THREE from 'three'
+import { Vector3 } from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 
 import { ExportedKind } from '../../engine/asset-kinds'
@@ -60,6 +61,10 @@ export type LoadedBike = {
   colliders: LoadedBikeCollider[]
   /** Bike-level extras pulled off bike_root. */
   extras: LoadedBikeExtras
+  /** The `socket_seat` empty's position in bike-root-local space (three.js
+   *  Y-up), or null if the bike has no seat socket. The mannequin rider uses
+   *  this as its root anchor — engine/render/rider-mannequin.ts. */
+  seatLocal: { x: number; y: number; z: number } | null
 }
 
 const cache = new Map<string, Promise<LoadedBike>>()
@@ -125,7 +130,21 @@ async function doLoad(url: string): Promise<LoadedBike> {
     hover_height: typeof e.hover_height === 'number' ? e.hover_height : 0,
   }
 
-  return { root, socketNames, colliders, extras }
+  // Seat anchor: the `socket_seat` empty's position in bike-root-local space.
+  // worldToLocal handles the socket being nested under bike_root (or deeper).
+  let seatLocal: { x: number; y: number; z: number } | null = null
+  const seatName = socketNames.seat
+  if (seatName) {
+    const seatObj = scene.getObjectByName(seatName)
+    if (seatObj) {
+      ;(root as THREE.Object3D).updateWorldMatrix(true, false)
+      const w = seatObj.getWorldPosition(new Vector3())
+      const l = (root as THREE.Object3D).worldToLocal(w)
+      seatLocal = { x: l.x, y: l.y, z: l.z }
+    }
+  }
+
+  return { root, socketNames, colliders, extras, seatLocal }
 }
 
 export type ClonedBike = {

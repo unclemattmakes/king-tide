@@ -872,6 +872,194 @@ class HOVERBIKE_OT_export_bike(Operator):
 
 
 # ────────────────────────────────────────────────────────────────────
+# Rider rig export
+# ────────────────────────────────────────────────────────────────────
+
+
+def find_rider_root() -> bpy.types.Object | None:
+    """The prop-root empty wrapping a rideable character rig — ``kind=prop``,
+    ``category=character``, with an Armature somewhere beneath it. The rider
+    scene also holds a *reference* bike (its own ``bike_root``), so we key off
+    these extras rather than "an armature exists". Returns the first match
+    (there's normally exactly one), or None."""
+    for obj in bpy.data.objects:
+        if obj.get("kind") != "prop" or obj.get("category") != "character":
+            continue
+        if any(c.type == "ARMATURE" for c in obj.children_recursive):
+            return obj
+    return None
+
+
+class HOVERBIKE_OT_export_rider_pose(Operator):
+    """Export the posed rider rig to
+    ``public/assets/props/cc0/<prop_id>.glb`` with skins + animation clips +
+    the neutral ``COLOR_0`` + the prop extras preserved. Exports the rig
+    hierarchy *only* (selection-scoped), so the reference bike and any hidden
+    helpers/junk in the posing scene are left out."""
+
+    bl_idname = "hoverbike.export_rider_pose"
+    bl_label = "Export Ride Pose to Game"
+    bl_description = (
+        "Export the rider rig (and its animation clips) to props/cc0/<id>.glb, "
+        "keeping skins + COLOR_0 + extras. The reference bike and hidden "
+        "helpers are excluded — only the prop_*_root rig is written."
+    )
+    bl_options = {"REGISTER"}
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        from ._legacy import find_repo_root
+
+        blend = bpy.data.filepath
+        if not blend:
+            self.report({"ERROR"}, "Save your .blend first (Ctrl+S).")
+            return {"CANCELLED"}
+
+        repo = find_repo_root(blend)
+        if not repo:
+            self.report(
+                {"ERROR"},
+                "No hoverbike clone found. Set 'Project root' in the addon "
+                "preferences (or $HOVERBIKE_REPO_ROOT) to your repo clone.",
+            )
+            return {"CANCELLED"}
+
+        root = find_rider_root()
+        if root is None:
+            self.report(
+                {"ERROR"},
+                "No rider rig found — need a prop_*_root empty with kind=prop, "
+                "category=character, and an Armature beneath it.",
+            )
+            return {"CANCELLED"}
+
+        prop_id = root.get("prop_id")
+        if not isinstance(prop_id, str) or not re.fullmatch(r"[a-z0-9_]+", prop_id):
+            self.report(
+                {"ERROR"},
+                f"prop_id {prop_id!r} on {root.name} must be lowercase "
+                "letters, digits, or underscores.",
+            )
+            return {"CANCELLED"}
+
+        rig = [root, *root.children_recursive]
+        meshes = [o for o in rig if o.type == "MESH"]
+        arms = [o for o in rig if o.type == "ARMATURE"]
+        if not meshes or not arms:
+            self.report(
+                {"ERROR"},
+                f"Rig under {root.name} needs ≥1 mesh and ≥1 armature "
+                f"(found {len(meshes)} mesh, {len(arms)} armature).",
+            )
+            return {"CANCELLED"}
+
+        glb_path = os.path.join(repo, "public", "assets", "props", "cc0", f"{prop_id}.glb")
+        os.makedirs(os.path.dirname(glb_path), exist_ok=True)
+
+        # Leave Pose/Edit mode so the export + selection ops have a clean
+        # Object-mode context.
+        if context.object is not None and context.object.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+
+        # Selection-scoped export — the reference bike + hidden junk stay out.
+        bpy.ops.object.select_all(action="DESELECT")
+        for o in rig:
+            o.select_set(True)
+        context.view_layer.objects.active = root
+
+        try:
+            bpy.ops.export_scene.gltf(
+                filepath=glb_path,
+                export_format="GLB",
+                use_selection=True,
+                export_extras=True,  # keep kind / prop_id / animated
+                export_yup=True,
+                export_apply=True,
+                export_skins=True,
+                export_animations=True,
+                export_vertex_color="ACTIVE",  # keep the neutral COLOR_0…
+                export_all_vertex_colors=False,  # …and nothing else as COLOR_1
+                export_cameras=False,
+                export_lights=False,
+            )
+        except Exception as e:  # noqa: BLE001
+            self.report({"ERROR"}, f"GLB export failed: {e}")
+            return {"CANCELLED"}
+
+        rel = os.path.relpath(glb_path, repo).replace("\\", "/")
+        n = len(bpy.data.actions)
+        msg = f"Exported rider → {rel} ({n} clip{'' if n == 1 else 's'})"
+        self.report({"INFO"}, msg)
+        print(f"[hoverbike-addon] {msg}")
+        return {"FINISHED"}
+
+
+# ────────────────────────────────────────────────────────────────────
+# Seat-offset read-back
+# ────────────────────────────────────────────────────────────────────
+#
+# The runtime positions the mannequin itself — it places the rig ROOT at
+# bike-local ``SEAT_LOCAL + SEAT_OFFSET`` (three.js Y-up) every frame, so a
+# moved root in Blender does NOT travel through the GLB export. To seat the
+# rider interactively we instead READ the root's current bike-local position
+# back out as the matching engine ``SEAT_OFFSET``: grab (G) the root on the
+# bike, then copy the value into rider-mannequin.ts (it's HMR-live).
+
+# Mirrors SEAT_LOCAL in src/game/entities/rider.ts (three-space, bike-local).
+_RIDER_SEAT_LOCAL = (0.0, 0.6, -0.05)
+
+
+def seat_offset_from_root() -> dict | None:
+    """The engine ``SEAT_OFFSET`` (rider-mannequin.ts) that reproduces the rider
+    root's current position on the bike. None if no rig is in the scene.
+
+    Blender is Z-up; the glTF importer maps three ``(x,y,z) → (x,-z,y)``, so the
+    inverse (Blender bike-local → three) is ``(bx, bz, -by)``. The position is
+    taken relative to ``bike_root`` so it's correct even if the reference bike
+    was nudged."""
+    import mathutils  # noqa: F401  (local — keeps module import light)
+
+    root = find_rider_root()
+    if root is None:
+        return None
+    bike = bpy.data.objects.get("bike_root")
+    if bike is not None:
+        local = bike.matrix_world.inverted() @ root.matrix_world.to_translation()
+    else:
+        local = root.matrix_world.to_translation()
+    three = (local.x, local.z, -local.y)  # bike-local root position, three-space
+    offset = tuple(three[i] - _RIDER_SEAT_LOCAL[i] for i in range(3))
+    return {"root_three": three, "seat_offset": offset, "has_bike": bike is not None}
+
+
+class HOVERBIKE_OT_copy_seat_offset(Operator):
+    """Copy the engine ``SEAT_OFFSET`` (rider-mannequin.ts) that puts the rider
+    where its root sits on the bike right now. Grab (G) the rider root to
+    reseat first, then click — paste the line into rider-mannequin.ts (HMR-live,
+    so the running game reloads onto the real bike)."""
+
+    bl_idname = "hoverbike.copy_seat_offset"
+    bl_label = "Copy Seat Offset"
+    bl_description = (
+        "Copy the SEAT_OFFSET (rider-mannequin.ts) matching the rider root's "
+        "current spot on the bike. Grab (G) the root to reseat first."
+    )
+    bl_options = {"REGISTER"}
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        data = seat_offset_from_root()
+        if data is None:
+            self.report({"ERROR"}, "No rider rig (prop_*_root) in the scene.")
+            return {"CANCELLED"}
+        x, y, z = data["seat_offset"]
+        line = f"const SEAT_OFFSET = {{ x: {x:.3f}, y: {y:.3f}, z: {z:.3f} }}"
+        context.window_manager.clipboard = line
+        tail = "" if data["has_bike"] else "  (no bike_root — used world origin)"
+        self.report({"INFO"}, f"Copied → {line}{tail}")
+        print(f"[hoverbike-addon] seat offset copied: {line}{tail}")
+        return {"FINISHED"}
+
+
+# ────────────────────────────────────────────────────────────────────
 # URL helpers
 # ────────────────────────────────────────────────────────────────────
 
@@ -980,6 +1168,8 @@ _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_reload_track_json,
     HOVERBIKE_OT_export_track,
     HOVERBIKE_OT_export_bike,
+    HOVERBIKE_OT_export_rider_pose,
+    HOVERBIKE_OT_copy_seat_offset,
     HOVERBIKE_OT_copy_track_url,
     HOVERBIKE_OT_copy_bike_url,
 )

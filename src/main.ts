@@ -942,10 +942,11 @@ async function boot() {
   })
 
   // Phase 6 — render systems.
-  const bikeRender = createBikeRenderSystem(scene, sim, {
+  const bikeRegistry = {
     byVariantId: { [playerVariant.id]: playerBikeGlb, racer: racerBikeGlb },
     default: racerBikeGlb,
-  })
+  }
+  const bikeRender = createBikeRenderSystem(scene, sim, bikeRegistry)
   // Rider visual: capsule rig by default; `?rider=mannequin` swaps in the
   // rigged Quaternius Universal character, driven from the same 12 sim bone
   // poses (spike — docs/rider-character-investigation.md). Falls back to
@@ -959,7 +960,7 @@ async function boot() {
       console.warn('[rider] mannequin rig failed to load — using capsule rider:', err)
     }
     riderRender = riderRig
-      ? createRiderMannequinSystem(scene, sim, riderRig)
+      ? createRiderMannequinSystem(scene, sim, riderRig, bikeRegistry)
       : createRiderRenderSystem(scene, sim)
   } else {
     riderRender = createRiderRenderSystem(scene, sim)
