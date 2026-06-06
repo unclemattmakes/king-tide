@@ -54,8 +54,12 @@
 > rim/weathering dials (`[ ]` / `; '`), waterline (W) + turntable (R). On clean
 > Quaternius atlas props the vinyl effect is subtle (they sit at the clean-vinyl
 > end by design); payoff grows on flat-tint AI props, with hand-painted textures,
-> and in scene-wide coherence. **In progress:** procedural brushstrokes (hit the
-> hand-painted read with minimal manual work). **TODO (not done):** a **dev menu**
+> and in scene-wide coherence. **Brushstrokes landed (B+C):** triplanar brush
+> streaks — first procedural value-noise, now a shared **brush-stroke sheet**
+> (`public/assets/textures/brush_strokes.png`, `pnpm gen:brush-texture`) of
+> continuous bristle strokes that packs 3 stroke scales in R/G/B, blended by prop
+> size in `buildVinylMaterial`; tunable on the prop viewer's `brush`/`stroke`
+> dials, verified in real WebGPU. **TODO (not done):** a **dev menu**
 > that links every tool scene — `?propviewer`, `?viewer` (bike), `?calibrate`,
 > `?rideredit`, `?waveriders`, `?podium`, `?edit`, `?replay`, `?bench`,
 > `?track=prop-showcase` / `drift-test` — so they're discoverable instead of
