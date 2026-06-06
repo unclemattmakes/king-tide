@@ -13,6 +13,15 @@ the canonical entry point.
 The sim layer cannot import Three.js. Render systems read from the ECS world and
 write to Three.js objects, never the other way around.
 
+## CI is unreliable — verify locally
+
+GitHub Actions for this repo regularly runs out of Actions minutes (the account
+hits its spending limit and every job aborts at setup without running — a ~2s
+"recent account payments have failed / spending limit" failure on `check-and-build`,
+`e2e`, `docs`, etc.). **Don't gate work on green CI or wait for it.** Verify locally
+before landing: `pnpm typecheck`, `pnpm test`, `pnpm lint`, `pnpm build`, and
+`pnpm test:blender` for Hoverbike-addon changes.
+
 ## Design direction (v2 — content restart in progress)
 
 Near-future post-warming world: coastal cities drowned, arcade hoverbike racing
