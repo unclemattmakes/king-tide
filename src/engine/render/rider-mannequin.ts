@@ -8,7 +8,8 @@ import type { BikeRenderRegistry } from './render-systems'
 import { Rider, type RiderBoneName, RiderStore } from '@/game/components/rider'
 
 /**
- * Rider mannequin render system — SPIKE (`?rider=mannequin`).
+ * Rider mannequin render system — now the **default** rider visual
+ * (opt out with `?rider=capsule`). Started as a spike; promoted to default.
  *
  * Renders the rigged **Quaternius Universal** character (UE-mannequin skeleton,
  * `cc0/rider_mannequin`) in place of the capsule rider, to explore replacing the

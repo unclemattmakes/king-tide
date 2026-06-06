@@ -947,12 +947,15 @@ async function boot() {
     default: racerBikeGlb,
   }
   const bikeRender = createBikeRenderSystem(scene, sim, bikeRegistry)
-  // Rider visual: capsule rig by default; `?rider=mannequin` swaps in the
-  // rigged Quaternius Universal character, driven from the same 12 sim bone
-  // poses (spike — docs/rider-character-investigation.md). Falls back to
-  // capsules if the rig asset fails to load.
+  // Rider visual: the rigged Quaternius Universal mannequin by default,
+  // driven from the same 12 sim bone poses (docs/rider-character-investigation.md).
+  // Opt out with `?rider=capsule` for the lightweight capsule rig; the
+  // mannequin also falls back to capsules if its rig asset fails to load.
   let riderRender: () => void
-  if (params.get('rider') === 'mannequin') {
+  const riderMode = params.get('rider')
+  if (riderMode === 'capsule' || riderMode === 'capsules') {
+    riderRender = createRiderRenderSystem(scene, sim)
+  } else {
     let riderRig: LoadedProp | undefined
     try {
       riderRig = await loadProp(assetUrl('/assets/props/cc0/rider_mannequin.glb'))
@@ -962,8 +965,6 @@ async function boot() {
     riderRender = riderRig
       ? createRiderMannequinSystem(scene, sim, riderRig, bikeRegistry)
       : createRiderRenderSystem(scene, sim)
-  } else {
-    riderRender = createRiderRenderSystem(scene, sim)
   }
   const pickupRender = createPickupRenderSystem(scene, sim)
   const combatRender = createCombatRenderSystem(scene, sim)
