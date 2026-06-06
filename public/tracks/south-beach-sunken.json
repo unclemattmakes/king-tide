@@ -449,7 +449,26 @@
     "timeOfDay": 0.8500000238418579,
     "colorGrade": "miami_pastel",
     "bloom": 0.3499999940395355,
-    "seaStateBeaufort": 4
+    "seaStateBeaufort": 4,
+    "clouds": {
+      "count": 20,
+      "altitude": 330.0,
+      "altitudeJitter": 70.0,
+      "spreadRadius": 1200.0,
+      "scaleRange": [
+        60.0,
+        140.0
+      ],
+      "variants": 4,
+      "wind": {
+        "x": 1.6,
+        "z": 0.5
+      },
+      "sunPop": 1.0,
+      "coolBase": "#b4a8be",
+      "warmTop": "#ffe3d0",
+      "seed": 1337
+    }
   },
   "waveRiderBuoys": [
     {

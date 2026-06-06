@@ -272,7 +272,26 @@
     "timeOfDay": 0.0,
     "colorGrade": "venice_warm",
     "bloom": 0.3499999940395355,
-    "seaStateBeaufort": 1
+    "seaStateBeaufort": 1,
+    "clouds": {
+      "count": 16,
+      "altitude": 300.0,
+      "altitudeJitter": 60.0,
+      "spreadRadius": 1100.0,
+      "scaleRange": [
+        55.0,
+        120.0
+      ],
+      "variants": 4,
+      "wind": {
+        "x": 1.0,
+        "z": 0.3
+      },
+      "sunPop": 1.0,
+      "coolBase": "#bcc2cc",
+      "warmTop": "#fff4e8",
+      "seed": 1337
+    }
   },
   "audio": {
     "music": "sandbar-pad-bed.opus",

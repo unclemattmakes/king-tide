@@ -18,6 +18,23 @@
 > (the Mario-Kart fork), away from the press-forward-on-crest pump described
 > below. See [CLAUDE.md](../CLAUDE.md) and [product-plan.md](./product-plan.md).
 
+> **Last updated: 2026-06-06** — **Geonode clouds in the Reef Cup sky.** The
+> `HV_Cloud` geonode tool is now exported to four cumulus variant GLBs
+> (`cloud_{humilis,mediocris,congestus,stratocumulus}.glb`) by
+> [build_cloud_props.py](../tools/blender/build_cloud_props.py) (`pnpm gen:cloud-props`),
+> and the hero cumulus field ([clouds.ts](../src/engine/render/clouds.ts)) now loads
+> them as its variant geometries in place of the hand-rolled icosphere blobs
+> (baked to world space, normalised to ~unit size, `aHeightT` base→crown ramp
+> stamped, hot-swapped into the InstancedMeshes; the procedural builder stays as a
+> load-failure fallback). `sky.clouds` is enabled on all three Reef Cup tracks —
+> **Sandbar** (warm fair-weather), **South Beach Sunken** (flamingo-sunset) and
+> **Cape Town Drift** (already had the field; now geonode) — palette-matched
+> (`coolBase`/`warmTop`) per track. Verified in real WebGPU (`gen:track-shots` +
+> live Claude-in-Chrome): all four GLBs fetch 200, console clean, soft billowy
+> cumulus tonally locked to each sky. **Deploy step:** the GLBs live under
+> `public/assets/` (gitignored, R2-served) — run `pnpm assets:push` to publish them
+> before a deploy (local dev serves them from `public/`).
+>
 > **Last updated: 2026-06-05** — **Art Direction v2 (painterly-vinyl) + the prop
 > viewer.** The stylization register moved from flat-gradient "clean stylized
 > toy" to **painterly-vinyl** — clean cast forms wearing hand-painted *Sea of
