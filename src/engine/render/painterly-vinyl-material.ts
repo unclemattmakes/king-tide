@@ -115,10 +115,15 @@ export type VinylOptions = {
   /** Brush-streak size as a FRACTION of the prop (see propSize), so strokes read
    *  the same on a chest and a cliff. Smaller = finer strokes. */
   brushScale?: number
-  /** Sample the shared Blender/Pillow brush-stroke texture (default true) vs the
-   *  procedural value-noise streaks — the texture gives bolder, deliberate
-   *  tapered strokes. */
+  /** Sample the shared brush-stroke sheet (default true) vs the procedural
+   *  value-noise streaks — the sheet gives bolder, deliberate bristle strokes.
+   *  The sheet packs three stroke SCALES in R/G/B (coarse/medium/fine); they're
+   *  blended by prop size (see brushScaleMix). */
   brushTextured?: boolean
+  /** Override the R/G/B (coarse/medium/fine) stroke-scale blend. Omit → derived
+   *  from propSize (big props lean coarse, small lean fine). Auto-normalized to
+   *  sum 1, so the combined field stays centred and brush 0 stays a no-op. */
+  brushScaleMix?: [number, number, number]
   /** The prop's characteristic size in metres (≈ its max bbox dimension). Makes
    *  the brush-stroke size and the waterline band scale-relative so one set of
    *  dials reads right from a ~1 m chest to a ~30 m cliff. Omit → a neutral mid
@@ -180,6 +185,25 @@ function dirStreak(p: Node<'vec2'>, bScale: Node<'float'>) {
   return valueNoiseOctave2D(vec2(along.mul(float(0.8)), across.mul(float(14.0))).mul(bScale))
 }
 
+/** Blend weights for the brush sheet's three packed stroke scales
+ *  (R = coarse / G = medium / B = fine) as a function of prop size: big props
+ *  lean to coarse sweeping strokes, small props to fine dabs. Gaussian kernels
+ *  in log2(size) centred at 16 m / 4 m / 1 m, ALWAYS normalized to sum 1 — so
+ *  the combined height field stays centred on 0.5 and a brush amount of 0 stays
+ *  a true no-op. A grayscale sheet (R=G=B) collapses the blend to its old
+ *  single-field behaviour for free. */
+function brushScaleWeights(propSize: number): [number, number, number] {
+  const lp = Math.log2(Math.min(Math.max(propSize, 0.25), 64))
+  const k = (centre: number) => Math.exp(-(((lp - centre) / 1.4) ** 2))
+  return normalizeMix([k(4), k(2), k(0)]) // coarse(16 m) / medium(4 m) / fine(1 m)
+}
+
+/** Normalize a 3-weight mix to sum 1 (falls back to all-medium if degenerate). */
+function normalizeMix(m: [number, number, number]): [number, number, number] {
+  const s = m[0] + m[1] + m[2]
+  return s > 1e-6 ? [m[0] / s, m[1] / s, m[2] / s] : [0, 1, 0]
+}
+
 /**
  * Convert a single GLB material into its painterly-vinyl node-material twin.
  * Idempotent (returns the input unchanged once marked). Does not mutate `src`.
@@ -199,6 +223,9 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const waterlineTide = opts.waterlineTide ?? 0.4
   const waterlineAlgae = opts.waterlineAlgae ?? 0.5
   const propSize = Math.max(opts.propSize ?? REF_PROP_SIZE, 0.05)
+  const [wCoarse, wMed, wFine] = opts.brushScaleMix
+    ? normalizeMix(opts.brushScaleMix)
+    : brushScaleWeights(propSize)
   const roughness = opts.roughness ?? 0.82
   const edgeWear = opts.edgeWear ?? 0.66
   const edgeWearColor = opts.edgeWearColor ?? [0.95, 0.92, 0.83]
@@ -246,14 +273,20 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const bScale = float(1 / Math.max(brushScale * propSize, 0.02))
   // Triplanar brush field — blended across the 3 world planes by the world
   // normal so strokes read on every face. brushTextured (default) samples the
-  // shared Blender/Pillow stroke sheet (deliberate tapered strokes value-noise
-  // can't give); else the procedural dirStreak. The sheet is centred on mid-grey
-  // so a brush amount of 0 stays a true no-op. Feeds brushFac (albedo) + relief.
+  // shared stroke sheet (deliberate bristle strokes value-noise can't give);
+  // else the procedural dirStreak. One texel fetch per plane, combining the
+  // sheet's three packed stroke SCALES (R coarse / G medium / B fine) by the
+  // prop-size weights — sum 1, so the field stays centred on mid-grey and a
+  // brush amount of 0 stays a true no-op. Feeds brushFac (albedo) + relief.
   const brushTex = sharedBrushTexture()
-  const sampleStreak = (p: Node<'vec2'>) =>
-    brushTextured
-      ? texture(brushTex, p.mul(bScale).mul(float(BRUSH_TEX_TILE))).r
-      : dirStreak(p, bScale)
+  const sampleStreak = (p: Node<'vec2'>) => {
+    if (!brushTextured) return dirStreak(p, bScale)
+    const t = texture(brushTex, p.mul(bScale).mul(float(BRUSH_TEX_TILE)))
+    return t.r
+      .mul(float(wCoarse))
+      .add(t.g.mul(float(wMed)))
+      .add(t.b.mul(float(wFine)))
+  }
   const streak = sampleStreak(vec2(positionWorld.z, positionWorld.y))
     .mul(an.x)
     .add(sampleStreak(vec2(positionWorld.x, positionWorld.z)).mul(an.y))

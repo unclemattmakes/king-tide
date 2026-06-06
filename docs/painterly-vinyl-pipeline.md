@@ -182,13 +182,45 @@ hand-painted texture is the hero upgrade.
 > weathering dials). Reads as soft directional brushwork (not camo), but stays
 > *soft* — noise can't give deliberate tapered strokes.
 >
-> **TODO — bolder strokes (the fidelity tier):** author ONE shared
-> **brush-stroke texture in Blender** (hand-painted-stroke tools) and sample it
-> **triplanar** in `buildVinylMaterial` — deliberate strokes beyond what noise
-> gives; augments/supersedes the procedural streaks. Author once, applies to
-> every prop (minimal manual work).
+> **Bolder strokes — landed (2026-06-06, the B+C pass).** The shared brush sheet
+> (`tools/blender/build_brush_texture.py`, `pnpm gen:brush-texture`) is now real
+> **bristle strokes** — a loaded tapered body + jittered bristle scratches that
+> dry-brush out toward the end, on an arced spine, composited by toroidal
+> scatter-add (seamless by construction, no blur-crop). It packs **three stroke
+> SCALES into R/G/B** (coarse/medium/fine); `buildVinylMaterial` samples one texel
+> triplanar and blends the channels by **prop size** (big props lean coarse,
+> small lean fine — `brushScaleWeights`). Weights sum to 1 so brush 0 stays a
+> no-op, and a grayscale sheet / the 1×1 fallback degrade to the old single-field
+> behaviour for free. Verified on real WebGPU in `?propviewer` (chest): bristle
+> brushwork + impasto relief, zero shader errors. To swap the procedural strokes
+> for real scanned/hand-painted media, drop stroke-alpha PNGs into
+> `tools/blender/brush_stamps/` (the optional fidelity tier — this is the only
+> place the Blender Brushstroke Tools addon is worth harvesting; see its research
+> note in memory. The addon itself generates render-only geometry, never shipped).
 > **TODO — Kuwahara** photo-mode post toggle (opt-in; perf/speed-read caveats).
 > Otherwise aesthetic tuning is a prop-viewer dial-in.
+
+### Authoring & verifying the brush sheet (the repeatable loop)
+
+The shared sheet is a **built asset** — gitignored, served from R2 (see
+[asset-storage.md](./asset-storage.md)), with a neutral 1×1 fallback so a fresh
+clone never breaks. To change the strokes:
+
+1. **Edit** `tools/blender/build_brush_texture.py` (stroke counts / sizes / shape
+   in `CHANNELS` + `_draw_stroke`), **or** drop real stroke-alpha PNGs into
+   `tools/blender/brush_stamps/` (see its README) to composite scanned/painted
+   media instead of the procedural bristles.
+2. **Regenerate:** `pnpm gen:brush-texture` (deterministic, ~3 s, no Blender/GPU).
+3. **Verify IN-ENGINE, not in texture space.** Open `?propviewer=cc0/chest` in a
+   real-WebGPU browser, push the `brush` dial up (~0.7) and zoom in. **The
+   contrast-stretched texture preview is NOT a reliable proxy** — spaced dabs
+   blur together there but resolve as *dots* once tiled small in-engine (and the
+   normal/relief turns each dot into a shaded pit). The 2026-06-06 dots bug was
+   exactly this: strokes must be **continuous lines** (dense overlapping centres),
+   with dry-brush as a smooth along-stroke ripple/fade, never per-dab dropout.
+4. **Ship it:** the new `public/assets/textures/brush_strokes.png` only exists
+   locally until pushed — `pnpm assets:push` (or, from an un-hydrated worktree,
+   `rclone copy` just that one file to avoid junction/`audio` noise).
 
 **P0 — shared waterline helper.** Extract the world-space waterline block from
 `terrain-shader.ts` into `waterline.ts`; refactor terrain to call it (no visual
