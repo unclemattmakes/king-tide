@@ -202,9 +202,9 @@ hand-painted texture is the hero upgrade.
 > + high-contrast so each scanned stroke reads as a distinct mark — dense packs to
 > mush, sparse goes smooth; tuned to the middle. Default `brush` is **0.5** (signed
 > off on the chest). Stamps are gitignored + derived: shipping requires
-> **attribution** on the in-game credits page per the asset licence. Only the flat
-> stroke *textures* are used — the addon's stroke *geometry* is render-only and
-> never ships.
+> **attribution** on the in-game credits page — the brush assets are **CC BY 4.0**
+> (Blender Studio / Project Gold). Only the flat stroke *textures* are used — the
+> addon's stroke *geometry* is render-only and never ships.
 > **TODO — Kuwahara** photo-mode post toggle (opt-in; perf/speed-read caveats).
 > Otherwise aesthetic tuning is a prop-viewer dial-in.
 

@@ -18,6 +18,23 @@
 > (the Mario-Kart fork), away from the press-forward-on-crest pump described
 > below. See [CLAUDE.md](../CLAUDE.md) and [product-plan.md](./product-plan.md).
 
+> **Last updated: 2026-06-06** — **In-game Credits screen + brush-texture license
+> pinned.** A **CREDITS** screen ships in the cold-boot menu (new `CREDITS ···`
+> link in the mode-screen footer, beside LEADERBOARDS / MAKING OF / SETTINGS) — a
+> `credits` step in [menu-flow.ts](../src/engine/menus/menu-flow.ts)
+> (`buildCredits()`), mirroring the `leaderboard` step so it inherits keyboard /
+> controller / touch nav (BACK + links are focusables; Esc / gamepad-B back out).
+> Three attribution groups: (1) **Brush textures** — the *Brushstroke Tools*
+> oil-paint styles by Simon Thommes / Blender Studio (Project Gold), © Blender
+> Foundation, **CC BY 4.0**; (2) **Music** — all 14 tracks rendered live from the
+> generated `SOUNDTRACK` manifest so the list can't drift; (3) **3D props** —
+> **Quaternius** (CC0, courtesy credit). This pins the specific licence behind the
+> now-shipped real oil-stroke sheet (#313): the brush assets are **CC BY 4.0**, so
+> the derived `brush_strokes.png` ships commercially **with attribution**, carried
+> by the credits screen. (Music licensing itself is still open — see the v2 banner
+> caveat above; per-track license metadata isn't modeled yet, so the screen
+> credits artist + title.)
+>
 > **Last updated: 2026-06-06** — **Geonode clouds in the Reef Cup sky.** The
 > `HV_Cloud` geonode tool is now exported to four cumulus variant GLBs
 > (`cloud_{humilis,mediocris,congestus,stratocumulus}.glb`) by

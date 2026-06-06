@@ -310,8 +310,8 @@ through this list once per track:
       mouse).
 - [ ] Every menu / overlay is fully navigable by **controller alone** —
       main menu + sub-screens, bike / track / cup select, pause, Settings,
-      Rebind modal, post-race finish + cup-results, multiplayer lobby.
-      D-pad moves focus, A activates, B/back exits. Pay special attention
+      Rebind modal, post-race finish + cup-results, multiplayer lobby, credits
+      (mode → CREDITS). D-pad moves focus, A activates, B/back exits. Pay special attention
       to **stacked overlays** (Settings over the pause card, Rebind over
       Settings): opening the top one must not strand the cursor or swallow
       the A press — see the input-navigability convention in
