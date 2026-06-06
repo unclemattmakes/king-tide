@@ -135,6 +135,7 @@ import { resetRiderForBike } from '@/game/systems/rider-pose'
 import { computeStandings } from '@/game/systems/standings'
 import type { WaveRiderSystem } from '@/game/systems/wave-rider'
 import type { Track } from '@/game/tracks/types'
+import { createCameraTuner } from './camera-tuner'
 import type { MultiplayerHandle } from './multiplayer'
 import { createSimSurfaceProbe } from './sim-surface-probe'
 import { downloadReplay, formatTime, ordinal } from './utils'
@@ -845,6 +846,17 @@ export function startGameLoop(opts: GameLoopOpts): void {
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('wavedots')
       ? createSimSurfaceProbe(scene)
       : null
+
+  // Chase-camera tuner — opt-in via `?camtune=1`. A live slider panel over the
+  // running race for offset / look-ahead / orbit-pivot / damping / FOV. The
+  // chase cam re-reads CHASE_CAM_TUNING every frame, so edits re-frame the view
+  // immediately; the tuned look persists across reloads (localStorage) and the
+  // panel's "Copy Δ" reports the delta to propagate to the other cameras. The
+  // shared tuning object also drives the replay spectator-chase, so it stays in
+  // step. Dev-only; render-side, never touches the sim. See camera-tuner.ts.
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('camtune')) {
+    createCameraTuner(camera)
+  }
 
   // M10.4 — wire-encoded input round-trip. simTick is the monotonic count
   // of fixed-step sim ticks driven by simulateStep; it lines up across

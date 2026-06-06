@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { Track } from '@/game/tracks/types'
+import { CHASE_CAM_TUNING } from './camera'
 
 /**
  * Pre-lap track introduction — drives a sequence of cinematic camera
@@ -123,14 +124,22 @@ const SHOT_DURATION_SHORT = {
   descent: 2.0,
 } as const
 
-/** Idle chase-cam offset (mirrors `idealOffset` in
- *  [camera.ts](./camera.ts)) so the descent ends where the chase cam
- *  picks up. Kept inline rather than imported to avoid coupling the
- *  intro module to the chase camera's internals — the values match by
- *  inspection, and a chase-cam tweak would be caught by the seamless-
- *  handoff visual test. */
-const CHASE_IDLE_OFFSET = new THREE.Vector3(0, 2.5, -5.5)
-const CHASE_IDLE_LOOK = new THREE.Vector3(0, 1.0, 6)
+/** Idle chase-cam offset/look — built straight from CHASE_CAM_TUNING so the
+ *  descent ends exactly where the chase cam picks up and can never drift out
+ *  of sync (it silently did through the whole 2× era). Read once at module
+ *  load = the shipped/baked defaults; the descent's final target is anyway
+ *  overridden at runtime by the live chase goalPose via setChaseRest, so live
+ *  ?camtune edits still land seamlessly. */
+const CHASE_IDLE_OFFSET = new THREE.Vector3(
+  CHASE_CAM_TUNING.offsetX,
+  CHASE_CAM_TUNING.offsetY,
+  CHASE_CAM_TUNING.offsetZ,
+)
+const CHASE_IDLE_LOOK = new THREE.Vector3(
+  CHASE_CAM_TUNING.lookX,
+  CHASE_CAM_TUNING.lookY,
+  CHASE_CAM_TUNING.lookZ,
+)
 
 /** Smoothstep with an ease-in-out feel — `s` is unit interval [0,1]. */
 function smootherstep(s: number): number {

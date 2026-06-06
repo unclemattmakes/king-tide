@@ -60,7 +60,10 @@ const ORBIT_MIN_PITCH = -Math.PI / 2.2
 const ORBIT_MAX_PITCH = Math.PI / 2.5
 const ORBIT_MIN_DIST = 3
 const ORBIT_MAX_DIST = 80
-const ORBIT_DEFAULT_DIST = 12
+// Default hero-orbit distance, pulled in for the 1× bike (half its old
+// on-screen size): 12 × 0.6 ≈ the framing the old 2× bike got at 12. Matches
+// broadcast-director's BIKE_SCALE_PULL_IN; the user can still zoom freely.
+const ORBIT_DEFAULT_DIST = 7.2
 const ORBIT_DEFAULT_PITCH = 0.18
 const ORBIT_PIX_TO_RAD = 0.005
 

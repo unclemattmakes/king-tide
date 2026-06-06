@@ -66,6 +66,14 @@ export type BroadcastDirectorOpts = {
 
 const DEFAULT_SHOTS: ShotKind[] = ['chase', 'side', 'low', 'crane', 'orbit', 'hero']
 
+/** Uniform pull-in applied to every shot's bike-relative geometry. These shots
+ *  were composed in the 2× era; the 1× bike is half its old on-screen size, so
+ *  contracting each shot toward the subject re-frames the smaller bike like the
+ *  bigger one. 1 = original framing; lower = tighter on the subject. Sibling of
+ *  the chase-cam bake (the spectator free-orbit default distance gets the same
+ *  factor). Nudge to taste. */
+const BIKE_SCALE_PULL_IN = 0.6
+
 export function createBroadcastDirector(opts: BroadcastDirectorOpts): BroadcastDirector {
   const camera = opts.camera
   const shots = opts.shots ?? DEFAULT_SHOTS
@@ -203,6 +211,12 @@ export function createBroadcastDirector(opts: BroadcastDirectorOpts): BroadcastD
         break
       }
     }
+
+    // Contract the whole shot (camera + look point) toward the subject so the
+    // half-size 1× bike frames like the 2×-era bike these shots were composed
+    // for. Uniform scaling keeps each shot's angle/composition — just closer.
+    goalPos.sub(fp).multiplyScalar(BIKE_SCALE_PULL_IN).add(fp)
+    goalLook.sub(fp).multiplyScalar(BIKE_SCALE_PULL_IN).add(fp)
   }
 
   function snapToGoal(): void {

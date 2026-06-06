@@ -13,6 +13,7 @@
 
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
+import { CHASE_CAM_TUNING } from '../../src/engine/render/camera'
 import { buildShots, createRaceIntro } from '../../src/engine/render/race-intro'
 import type { Track } from '../../src/game/tracks/types'
 
@@ -76,11 +77,12 @@ describe('buildShots', () => {
     )
     expect(shots).toHaveLength(1)
     const descent = shots[0]!
-    // Chase idle for yaw=0 sits at (0, 2.5, -5.5) + start. With
-    // start.y=1 + start.z=-10, the descent ends near (0, 3.5, -15.5).
-    expect(descent.to.x).toBeCloseTo(0, 5)
-    expect(descent.to.y).toBeCloseTo(3.5, 5)
-    expect(descent.to.z).toBeCloseTo(-15.5, 5)
+    // Chase idle for yaw=0 sits at CHASE_CAM_TUNING's offset + the start pose,
+    // so the descent ends at (offset + start). Asserted relative to the tunable
+    // so re-tuning the chase cam can't break this handoff test.
+    expect(descent.to.x).toBeCloseTo(CHASE_CAM_TUNING.offsetX + PLAYER_START.x, 5)
+    expect(descent.to.y).toBeCloseTo(CHASE_CAM_TUNING.offsetY + PLAYER_START.y, 5)
+    expect(descent.to.z).toBeCloseTo(CHASE_CAM_TUNING.offsetZ + PLAYER_START.z, 5)
     // Camera starts higher than its final altitude.
     expect(descent.from.y).toBeGreaterThan(descent.to.y + 5)
   })
@@ -92,9 +94,9 @@ describe('buildShots', () => {
     )
     expect(shots).toHaveLength(3)
     const last = shots[2]!
-    expect(last.to.x).toBeCloseTo(0, 5)
-    expect(last.to.y).toBeCloseTo(3.5, 5)
-    expect(last.to.z).toBeCloseTo(-15.5, 5)
+    expect(last.to.x).toBeCloseTo(CHASE_CAM_TUNING.offsetX + PLAYER_START.x, 5)
+    expect(last.to.y).toBeCloseTo(CHASE_CAM_TUNING.offsetY + PLAYER_START.y, 5)
+    expect(last.to.z).toBeCloseTo(CHASE_CAM_TUNING.offsetZ + PLAYER_START.z, 5)
   })
 
   it("'full' mode's aerial shot starts well above the focal checkpoint", () => {
@@ -296,10 +298,11 @@ describe('createRaceIntro lifecycle', () => {
     intro.tick(0.016) // the skip-flagged tick writes the final pose + flips done
     expect(intro.isDone()).toBe(true)
     expect(intro.isActive()).toBe(false)
-    // Camera should land near the chase-idle pose.
-    expect(camera.position.x).toBeCloseTo(0, 1)
-    expect(camera.position.y).toBeCloseTo(3.5, 1)
-    expect(camera.position.z).toBeCloseTo(-15.5, 1)
+    // Camera should land near the chase-idle pose (offset + start), relative
+    // to the tunable so re-tuning the chase cam can't break this.
+    expect(camera.position.x).toBeCloseTo(CHASE_CAM_TUNING.offsetX + PLAYER_START.x, 1)
+    expect(camera.position.y).toBeCloseTo(CHASE_CAM_TUNING.offsetY + PLAYER_START.y, 1)
+    expect(camera.position.z).toBeCloseTo(CHASE_CAM_TUNING.offsetZ + PLAYER_START.z, 1)
   })
 
   it('skip() is idempotent', () => {
