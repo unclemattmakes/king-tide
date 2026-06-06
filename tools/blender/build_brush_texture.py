@@ -52,14 +52,18 @@ SEED = 1107
 # Per-channel target contrast (std around mid-grey) so the three packed scales are
 # comparable in amplitude regardless of stroke count — the runtime blend then
 # behaves predictably as the weights shift with prop size.
-TARGET_STD = 26.0
+TARGET_STD = 34.0
 
 # (R, G, B) = (coarse, medium, fine). Each tuple-range is sampled per stroke.
+# Counts are deliberately LOW: the real-oil stamps are high-coverage, so packing
+# many of them blends into a smooth mush instead of distinct marks. Few + large +
+# high-contrast keeps each scanned stroke legible as its own brushstroke (and gives
+# the per-stroke impasto the relief/normal reads from).
 CHANNELS = [
     # name      count  length        width       value      bristles
-    ("coarse", 46, (240, 430), (30, 62), (26, 54), (10, 16)),
-    ("medium", 150, (90, 200), (12, 26), (26, 54), (6, 11)),
-    ("fine", 340, (42, 110), (5, 12), (26, 54), (4, 7)),
+    ("coarse", 30, (260, 480), (40, 78), (26, 54), (10, 16)),
+    ("medium", 100, (110, 230), (18, 38), (26, 54), (6, 11)),
+    ("fine", 220, (56, 130), (9, 19), (26, 54), (4, 7)),
 ]
 
 ASSET_PATH = os.path.join(

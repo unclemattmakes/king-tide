@@ -106,7 +106,7 @@ export async function bootPropViewer(parent: HTMLElement, opts: ViewerOpts): Pro
   const vinylOpts: VinylOptions = {
     rimStrength: 0.5,
     weathering: 0.12,
-    brush: 0.2,
+    brush: 0.5,
     brushScale: 0.12,
     waterline: 0,
     waterLevel: 0,

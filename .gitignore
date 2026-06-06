@@ -16,6 +16,12 @@ Thumbs.db
 /public/assets/
 /public/audio/
 
+# Brush-stroke stamps harvested from the Blender Brushstroke Tools add-on — build
+# inputs for gen:brush-texture, derived from a third-party asset. Re-derive locally
+# with `pnpm gen:brush-stamps` (see brush_stamps/README.md). The shipped
+# brush_strokes.png lives on R2 like the other compiled assets.
+/tools/blender/brush_stamps/*.png
+
 # vitepress
 docs-site/.vitepress/cache/
 docs-site/.vitepress/dist/

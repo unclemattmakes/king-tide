@@ -71,11 +71,12 @@ const REF_PROP_SIZE = 4
  *  fixed-metre band doesn't swallow them. */
 const WATERLINE_FULL_BAND_SIZE = 6
 
-/** Brush-texture tile size as a fraction of (brushScale·propSize). The sheet
- *  packs ~13 strokes across, so the tile wants to be ≈ the prop (≈8-12 strokes
- *  across it). Without this the default brushScale would cram a whole sheet into
- *  a fraction of the prop and the strokes read as fine speckle. */
-const BRUSH_TEX_TILE = 0.08
+/** Brush-texture tile size as a fraction of (brushScale·propSize) — sets how big
+ *  the sheet's strokes read on a prop. Lower = bigger, bolder strokes (fewer
+ *  repeats across the prop); higher = finer speckle. Tuned with the sparse,
+ *  high-contrast real-oil sheet so strokes read as deliberate brushwork at race
+ *  distance rather than tiny streaks. */
+const BRUSH_TEX_TILE = 0.06
 
 /** The shared painterly brush-stroke sheet (authored by
  *  tools/blender/build_brush_texture.py), loaded once and sampled triplanar by
@@ -110,7 +111,9 @@ export type VinylOptions = {
   rimColor?: [number, number, number]
   /** Procedural value-noise weathering wash amount (0 = off). */
   weathering?: number
-  /** Directional brush-streak amount layered over the weathering (0 = off). */
+  /** Brush-stroke amount layered over the weathering — modulates albedo and
+   *  drives the impasto relief (normal + roughness). Default 0.5 (the shipped
+   *  look, tuned on the real-oil sheet); 0 = off. */
   brush?: number
   /** Brush-streak size as a FRACTION of the prop (see propSize), so strokes read
    *  the same on a chest and a cliff. Smaller = finer strokes. */
@@ -215,7 +218,7 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const rimStrength = opts.rimStrength ?? 0.5
   const rimColor = opts.rimColor ?? [1.0, 0.93, 0.82]
   const weathering = opts.weathering ?? 0.12
-  const brush = opts.brush ?? 0.12
+  const brush = opts.brush ?? 0.5
   const brushScale = opts.brushScale ?? 0.12
   const brushTextured = opts.brushTextured ?? true
   const waterLevel = opts.waterLevel ?? 0

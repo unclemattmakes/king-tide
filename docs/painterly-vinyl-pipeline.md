@@ -192,11 +192,19 @@ hand-painted texture is the hero upgrade.
 > small lean fine — `brushScaleWeights`). Weights sum to 1 so brush 0 stays a
 > no-op, and a grayscale sheet / the 1×1 fallback degrade to the old single-field
 > behaviour for free. Verified on real WebGPU in `?propviewer` (chest): bristle
-> brushwork + impasto relief, zero shader errors. To swap the procedural strokes
-> for real scanned/hand-painted media, drop stroke-alpha PNGs into
-> `tools/blender/brush_stamps/` (the optional fidelity tier — this is the only
-> place the Blender Brushstroke Tools addon is worth harvesting; see its research
-> note in memory. The addon itself generates render-only geometry, never shipped).
+> brushwork + impasto relief, zero shader errors.
+>
+> **Real oil strokes — shipped (2026-06-06).** The procedural bristles are now the
+> *fallback*; the shipped sheet composites **real scanned oil strokes** harvested
+> from the Blender Studio **Brushstroke Tools** add-on (`pnpm gen:brush-stamps` →
+> `harvest_brush_stamps.py` slices its `oil_paint-*.exr` brush-style maps into
+> single-stroke stamps under `tools/blender/brush_stamps/`). Counts are LOW + large
+> + high-contrast so each scanned stroke reads as a distinct mark — dense packs to
+> mush, sparse goes smooth; tuned to the middle. Default `brush` is **0.5** (signed
+> off on the chest). Stamps are gitignored + derived: shipping requires
+> **attribution** on the in-game credits page per the asset licence. Only the flat
+> stroke *textures* are used — the addon's stroke *geometry* is render-only and
+> never ships.
 > **TODO — Kuwahara** photo-mode post toggle (opt-in; perf/speed-read caveats).
 > Otherwise aesthetic tuning is a prop-viewer dial-in.
 
@@ -206,10 +214,11 @@ The shared sheet is a **built asset** — gitignored, served from R2 (see
 [asset-storage.md](./asset-storage.md)), with a neutral 1×1 fallback so a fresh
 clone never breaks. To change the strokes:
 
-1. **Edit** `tools/blender/build_brush_texture.py` (stroke counts / sizes / shape
-   in `CHANNELS` + `_draw_stroke`), **or** drop real stroke-alpha PNGs into
-   `tools/blender/brush_stamps/` (see its README) to composite scanned/painted
-   media instead of the procedural bristles.
+1. **Source the strokes** — `pnpm gen:brush-stamps` re-harvests real oil strokes
+   from the add-on (needs it installed), or hand-paint stamps into
+   `tools/blender/brush_stamps/`. Then tune counts/sizes in `CHANNELS`
+   (`build_brush_texture.py`): few + large + high-contrast reads as distinct
+   strokes; many small ones blend to mush.
 2. **Regenerate:** `pnpm gen:brush-texture` (deterministic, ~3 s, no Blender/GPU).
 3. **Verify IN-ENGINE, not in texture space.** Open `?propviewer=cc0/chest` in a
    real-WebGPU browser, push the `brush` dial up (~0.7) and zoom in. **The

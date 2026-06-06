@@ -1,29 +1,38 @@
-# Brush stamps — optional real stroke-alpha library
+# Brush stamps — real oil-stroke library for the brush sheet
 
-`build_brush_texture.py` (`pnpm gen:brush-texture`) draws **procedural bristle
-strokes** by default. Drop grayscale PNGs in this folder and they are composited
-**instead** — the hook for real painted media in the shared `brush_strokes.png`
-sheet.
+`build_brush_texture.py` (`pnpm gen:brush-texture`) composites the grayscale PNG
+stamps in this folder into the shared, seamless `brush_strokes.png` sheet. With
+none present it falls back to procedural bristle strokes (so a fresh clone always
+builds), but **the shipped sheet uses the real strokes harvested here.**
 
-## Format
+The `*.png` stamps are **gitignored** (derived build inputs, like other compiled
+assets — see the repo `.gitignore`). Regenerate them locally:
 
-- Grayscale PNG, **128 = transparent** (no height change). Brighter = raised
-  bristle ridge, darker = trough — same signed-height convention as the sheet.
-- One isolated stroke per file, ideally pointing roughly **+X** (the generator
-  rotates each placement to the flow field). Any size; it's resized per stroke.
-- A handful (4–10) of varied strokes is plenty — they're scattered, jittered,
-  value-flipped and rotated, so variety compounds.
+```
+pnpm gen:brush-stamps      # harvest_brush_stamps.py — needs the add-on installed
+pnpm gen:brush-texture     # composite them into brush_strokes.png
+pnpm assets:push           # ship the sheet to R2
+```
 
-## Where to get them
+## Source + ATTRIBUTION (required)
 
-- **Hand-paint** them (Krita/Photoshop/Blender texture paint) on a mid-grey
-  canvas — fastest to control and unambiguously ours to ship.
-- **Harvest** the scanned oil-stroke textures from Blender's *Brushstroke Tools*
-  brush-style packs (`studio.blender.org/tools/addons/brushstroke_tools`). Note:
-  confirm the brush-style texture licence before shipping a derived sheet. The
-  addon's stroke *geometry* is render-only and never enters the game — we only
-  ever want flat stroke alphas here. See the addon research note in memory
-  (`reference_blender_brushstroke_tools`).
+The stamps are sliced from the **Blender Studio "Brushstroke Tools"** add-on's
+scanned oil-paint brush-style maps (`assets/styles/maps/oil_paint-*.exr`), via
+`tools/blender/harvest_brush_stamps.py`. Install the extension from
+`extensions.blender.org/add-ons/brushstroke-tools/` first.
 
-Re-run `pnpm gen:brush-texture` after adding/removing stamps. With none present,
-the deterministic procedural default is used (so a fresh clone always builds).
+Shipping a sheet derived from these assets **requires attribution** per their
+licence — credited on the in-game **credits page**. Keep that credit in place if
+you re-roll the stamps. (Only the flat stroke *textures* are used; the add-on's
+stroke *geometry* is render-only and never enters the game.) See the addon
+research note in memory (`reference_blender_brushstroke_tools`).
+
+## Stamp format
+
+- Grayscale PNG, **128 = neutral** (no height change), brighter = raised stroke
+  ridge — the signed-height convention the sheet uses.
+- One isolated stroke per file, roughly pointing **+X** (the generator rotates
+  each placement to the flow field). Any size; it's resized per scattered stroke.
+
+To hand-author alternatives instead of harvesting, paint single strokes on a
+mid-grey (128) canvas and drop them here, then re-run `gen:brush-texture`.
