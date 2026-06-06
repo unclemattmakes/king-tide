@@ -65,6 +65,8 @@ class HOVERBIKE_PT_panel(Panel):
             self._draw_track(context, layout, blend, repo)
         elif mode == "bike":
             self._draw_bike(context, layout, blend, repo)
+        elif mode == "rider":
+            self._draw_rider(context, layout, blend, repo)
         else:
             self._draw_unknown(context, layout, blend, repo)
 
@@ -284,6 +286,70 @@ class HOVERBIKE_PT_panel(Panel):
         col.label(text="Shift-click Export:", icon="INFO")
         col.label(text="overwrite the spec")
         col.label(text="from the .blend.")
+
+        # Seat authoring — preview the rider on socket_seat, then re-export.
+        layout.separator()
+        seat = layout.box()
+        seat.label(text="Seat socket", icon="EMPTY_ARROWS")
+        if bpy.data.objects.get("socket_seat") is None:
+            seat.label(text="No socket_seat in this bike", icon="ERROR")
+        else:
+            row = seat.row(align=True)
+            row.operator(
+                "hoverbike.rebuild_rider_preview", text="Add Rider", icon="OUTLINER_OB_ARMATURE"
+            )
+            row.operator("hoverbike.hide_rider_preview", text="", icon="X")
+            tip = seat.column(align=True)
+            tip.scale_y = 0.85
+            tip.label(text="Move socket_seat to reseat;", icon="INFO")
+            tip.label(text="the rider follows. Re-export.")
+
+    def _draw_rider(self, context, layout, blend: str, repo: str | None) -> None:
+        from .export import find_rider_root, seat_offset_from_root
+
+        root = find_rider_root()
+        prop_id = (root.get("prop_id") if root else None) or "<none>"
+
+        box = layout.box()
+        box.label(text=f"Rider: {prop_id}", icon="ARMATURE_DATA")
+        if repo:
+            box.label(text=f"Repo: {os.path.basename(repo)}", icon="FILE_FOLDER")
+        else:
+            box.label(text="Repo not found", icon="ERROR")
+            box.label(text="Set 'Project root' in addon prefs.")
+
+        if root is None:
+            warn = layout.row()
+            warn.alert = True
+            warn.label(text="No prop_*_root character rig in scene", icon="ERROR")
+            return
+
+        row = layout.row()
+        row.scale_y = 1.6
+        row.operator("hoverbike.export_rider_pose", icon="EXPORT")
+
+        layout.separator()
+        col = layout.column(align=True)
+        col.scale_y = 0.85
+        col.label(text="Exports the rig only →", icon="INFO")
+        col.label(text="props/cc0/<id>.glb")
+        col.label(text="(bike + hidden junk excluded).")
+        col.label(text="Then: pnpm assets:push", icon="EXPORT")
+
+        # Seat position — grab (G) the rider root on the bike, read the
+        # matching engine SEAT_OFFSET back out (the GLB export can't carry it).
+        layout.separator()
+        seat = layout.box()
+        seat.label(text="Seat position", icon="EMPTY_ARROWS")
+        data = seat_offset_from_root()
+        if data:
+            x, y, z = data["seat_offset"]
+            seat.label(text=f"SEAT_OFFSET  x {x:.2f}  y {y:.2f}  z {z:.2f}")
+        hint = seat.column(align=True)
+        hint.scale_y = 0.85
+        hint.label(text="Grab (G) the rider root,", icon="INFO")
+        hint.label(text="then copy → rider-mannequin.ts:")
+        seat.operator("hoverbike.copy_seat_offset", icon="COPYDOWN")
 
     def _draw_unknown(self, context, layout, blend: str, repo: str | None) -> None:
         box = layout.box()

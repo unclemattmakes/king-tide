@@ -56,11 +56,12 @@ const FOLLOW_SMOOTH_TAU = 0.15
 const DRIFT_ROLL_TAU = 0.15
 
 export function createChaseCamera(camera: THREE.PerspectiveCamera): ChaseCamera {
-  // Closer + slightly lower than the pre-2× bike framing. The bike visual
-  // is now 2× scale (see render-systems.ts); halving the chase distance
-  // keeps the bike from shrinking on screen and tightens the framing.
-  const idealOffset = new THREE.Vector3(0, 2.5, -5.5)
-  const idealLookAhead = new THREE.Vector3(0, 1.0, 6)
+  // Framing for the 1× bike (BIKE_VISUAL_SCALE reverted 2× → 1×, see
+  // render-systems.ts). The bike is now half its old on-screen size, so the
+  // chase distance is roughly doubled back to keep the same framing.
+  // Feel-tuned — dial to taste in playtest.
+  const idealOffset = new THREE.Vector3(0, 5, -11)
+  const idealLookAhead = new THREE.Vector3(0, 2, 12)
   const damping = 6
   const orbitDamping = 10
 

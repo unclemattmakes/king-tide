@@ -126,8 +126,10 @@ function vnorm(v: Vec3): Vec3 {
  *  page reload — `window.__hover.riderTuning = { ... }` style. */
 export const RIDER_POSE_TUNING = {
   /** Seat anchor in BIKE-LOCAL space. The pelvis sits here every tick;
-   *  moving it back/forward/up/down translates the whole rider. */
-  seatLocal: { x: 0, y: 0.94, z: -0.4 } as Vec3,
+   *  moving it back/forward/up/down translates the whole rider. Lowered from
+   *  y=0.94 when the rider dropped to true human scale (RIDER_SCALE) for the
+   *  1× bike — a starting value; live-tunable in the calibration scene. */
+  seatLocal: { x: 0, y: 0.6, z: -0.4 } as Vec3,
 
   /** Seat ROTATION (degrees) applied to the pelvis in bike-local space, on
    *  top of the bike's own orientation. Lets the whole rider tilt / twist /

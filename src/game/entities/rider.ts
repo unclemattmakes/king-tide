@@ -46,8 +46,16 @@ import {
  *  that. Hardcoded here for now; phase 2 reads from the GLB's seat socket. */
 const SEAT_LOCAL: Vec3 = { x: 0, y: 0.6, z: -0.05 }
 
-/** Rider physics dimensions. Scaled ~2× human so the rider visually matches
- *  the bike's 2× visual scale without needing per-bone visual scaling. */
+/** Linear scale for the whole rider rig, applied in createRider. 1.0 = the
+ *  legacy ~2×-human authoring that matched the old 2× BIKE_VISUAL_SCALE; 0.5
+ *  brings the rider to true human scale to match the 1× bike. Multiplies every
+ *  length — the bone capsule dims AND the anatomy joint offsets — so the rig
+ *  stays proportional at any overall size. (Mass is left as-authored; the
+ *  seated anchor is RIDER_POSE_TUNING.seatLocal, tuned there.) */
+const RIDER_SCALE = 0.5
+
+/** Rider physics dimensions, authored ~2× human; RIDER_SCALE (in createRider)
+ *  brings them to the final rig size (0.5 → true human scale for the 1× bike). */
 type BoneDim = {
   halfHeight: number
   radius: number
@@ -408,7 +416,22 @@ export function createRider(sim: SimWorld, phys: PhysicsWorld, opts: CreateRider
   const riderEid = addEntity(sim)
   addComponent(sim, riderEid, RiderTag)
 
-  const edges = buildAnatomy()
+  // Scale the rig to RIDER_SCALE — the anatomy joint offsets here, the bone
+  // capsule dims in the spawn loop below — so the whole rider stays
+  // proportional at the size that matches the bike.
+  const edges = buildAnatomy().map((e) => ({
+    ...e,
+    parentLocal: {
+      x: e.parentLocal.x * RIDER_SCALE,
+      y: e.parentLocal.y * RIDER_SCALE,
+      z: e.parentLocal.z * RIDER_SCALE,
+    },
+    childLocal: {
+      x: e.childLocal.x * RIDER_SCALE,
+      y: e.childLocal.y * RIDER_SCALE,
+      z: e.childLocal.z * RIDER_SCALE,
+    },
+  }))
 
   // Compute the rest pose in BIKE-LOCAL coordinates first. Pelvis sits at
   // SEAT_LOCAL with identity rotation (relative to bike). Walk the bone
@@ -438,7 +461,12 @@ export function createRider(sim: SimWorld, phys: PhysicsWorld, opts: CreateRider
   const bones: Partial<Record<RiderBoneName, number>> = {}
   const boneDims: RiderBoneDim[] = []
   for (const name of Object.keys(BONES) as RiderBoneName[]) {
-    const dim = BONES[name]
+    const base = BONES[name]
+    const dim: BoneDim = {
+      halfHeight: base.halfHeight * RIDER_SCALE,
+      radius: base.radius * RIDER_SCALE,
+      mass: base.mass,
+    }
     const w = worldRest[name] as { pos: Vec3; rot: Quat }
     const eid = createBone(sim, phys, riderEid, name, dim, w.pos, w.rot)
     bones[name] = eid

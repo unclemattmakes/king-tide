@@ -131,11 +131,14 @@ def assets_root_from_blend(blend_path: str | None) -> str | None:
 
 def detect_mode(blend_path: str | None) -> str | None:
     """Returns ``'track'`` if the .blend lives in ``tracks-src/``,
-    ``'bike'`` if it lives in ``bikes-src/``, or ``None`` otherwise.
+    ``'bike'`` if it lives in ``bikes-src/``, ``'rider'`` if it lives in
+    ``rider-src/``, or ``None`` otherwise.
 
     Mode dictates which validator + exporter the panel uses. We key
     off the parent directory rather than scene contents so an empty
-    .blend in the right folder still surfaces the right UI.
+    .blend in the right folder still surfaces the right UI. (The rider
+    posing scene also holds a reference bike, so a contents-based check
+    would mis-read it as a bike — another reason to key off the folder.)
     """
     if not blend_path:
         return None
@@ -144,6 +147,8 @@ def detect_mode(blend_path: str | None) -> str | None:
         return "track"
     if parent == "bikes-src":
         return "bike"
+    if parent == "rider-src":
+        return "rider"
     return None
 
 

@@ -28,11 +28,14 @@ const GHOST_TINT = 0x66ddff
 const PLAYER_EXHAUST_COLOR = 0xffaa55
 const AI_EXHAUST_COLORS = [0x55ccff, 0x66ee88, 0xdd66ff, 0xffdd44, 0xff7799]
 
-// Visual-only bike scale. Physics colliders (read from the GLB at bike
-// creation) stay at authored size — only the rendered mesh is scaled,
-// so collisions / hover heights / wake source positions don't shift.
-// Camera framing (camera.ts) is tuned around this 2× scale.
-const BIKE_VISUAL_SCALE = 2.0
+// Bike visual scale. Physics colliders (read from the GLB at bike creation)
+// are authored at 1× — and so are the track + props — so 1.0 makes the
+// rendered bike match its own collider, the world, and a true human-scale
+// rider. (Was 2.0, a render-only inflation that forced the rider to be sized
+// ~2× human and the chase camera to be pulled in to compensate; both were
+// reverted alongside this — see RIDER_SCALE in entities/rider.ts and the
+// idealOffset in camera.ts.)
+const BIKE_VISUAL_SCALE = 1.0
 
 export type BikeRenderRegistry = {
   /** Resolve a variant id to a loaded GLB. Falls back to `default` when

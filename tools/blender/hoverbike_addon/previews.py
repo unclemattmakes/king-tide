@@ -800,6 +800,111 @@ def _rebuild_racer_preview(scene) -> dict:
 
 
 # ────────────────────────────────────────────────────────────────────
+# Rider preview (seated mannequin parented to socket_seat)
+# ────────────────────────────────────────────────────────────────────
+
+RIDER_PREVIEW_COLLECTION = "_hoverbike_rider_preview"
+RIDER_PREVIEW_GLB = os.path.join("public", "assets", "props", "cc0", "rider_mannequin.glb")
+RIDER_PREVIEW_CLIP = "Sitting_Idle_Loop"
+
+
+def _wipe_rider_preview() -> None:
+    coll = bpy.data.collections.get(RIDER_PREVIEW_COLLECTION)
+    if coll:
+        for obj in list(coll.objects):
+            bpy.data.objects.remove(obj, do_unlink=True)
+        bpy.data.collections.remove(coll)
+    # The glTF import leaves ~45 actions behind; drop the orphans so repeated
+    # rebuilds don't pile them up in the .blend.
+    for a in list(bpy.data.actions):
+        if a.users == 0:
+            bpy.data.actions.remove(a)
+
+
+def _rebuild_rider_preview(scene) -> dict:
+    """Import the seated mannequin as a non-exported preview, parented to the
+    bike's ``socket_seat`` so moving the socket reseats the rider. The
+    collection is render-disabled (``_hoverbike_*_preview``) so it never
+    reaches the bike .glb — matches how the runtime anchors the rider's root
+    at ``socket_seat`` (engine/render/rider-mannequin.ts)."""
+    from ._legacy import _find_layer_collection, find_repo_root
+    import mathutils
+
+    socket = bpy.data.objects.get("socket_seat")
+    if socket is None:
+        raise RuntimeError("No `socket_seat` in this bike — nothing to preview against.")
+    repo = find_repo_root(bpy.data.filepath) if bpy.data.filepath else None
+    if not repo:
+        raise RuntimeError("Repo root not found — set 'Project root' in the addon preferences.")
+    glb = os.path.join(repo, RIDER_PREVIEW_GLB)
+    if not os.path.isfile(glb):
+        raise RuntimeError(f"Rider GLB missing: {glb} — run `pnpm assets:pull`.")
+
+    _wipe_rider_preview()
+    coll = bpy.data.collections.new(RIDER_PREVIEW_COLLECTION)
+    scene.collection.children.link(coll)
+
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=glb)
+    imported = [o for o in bpy.data.objects if o not in before]
+
+    # Re-home everything the import dropped into the preview collection and
+    # render-disable it (belt-and-suspenders with the collection name strip).
+    for o in imported:
+        for c in list(o.users_collection):
+            c.objects.unlink(o)
+        coll.objects.link(o)
+        o.hide_render = True
+
+    # Seated pose so the silhouette reads as a rider, not a T-pose.
+    arm = next((o for o in imported if o.type == "ARMATURE"), None)
+    if arm is not None:
+        clip = bpy.data.actions.get(RIDER_PREVIEW_CLIP) or next(
+            (a for a in bpy.data.actions if RIDER_PREVIEW_CLIP.lower() in a.name.lower()), None
+        )
+        if clip is not None:
+            if arm.animation_data is None:
+                arm.animation_data_create()
+            arm.animation_data.action = clip
+            fr = clip.frame_range
+            scene.frame_set(int((fr[0] + fr[1]) * 0.5))
+        arm.show_in_front = True
+
+    # The rig root is the prop_*_root empty (kind=prop). The shipped GLB can
+    # also carry strays (e.g. a leftover Icosphere) — keep only the rig and
+    # drop the rest, so we don't parent junk to the socket.
+    root_obj = next((o for o in imported if o.get("kind") == "prop"), None)
+    if root_obj is None and arm is not None:
+        root_obj = arm
+        while root_obj.parent is not None:
+            root_obj = root_obj.parent
+    if root_obj is not None:
+        keep = {root_obj, *root_obj.children_recursive}
+        for o in list(imported):
+            if o not in keep:
+                bpy.data.objects.remove(o, do_unlink=True)
+        # Parent the rig root to socket_seat: keep the imported orientation /
+        # scale, snap the origin onto the socket, so the rider follows the
+        # socket as it moves (the runtime anchors the rider's root there).
+        _loc, rot, scl = root_obj.matrix_world.decompose()
+        root_obj.parent = socket
+        root_obj.matrix_world = mathutils.Matrix.LocRotScale(
+            socket.matrix_world.translation, rot, scl
+        )
+
+    lc = _find_layer_collection(bpy.context.view_layer.layer_collection, RIDER_PREVIEW_COLLECTION)
+    if lc:
+        lc.exclude = False
+    bpy.context.view_layer.update()
+
+    return {
+        "objects": len(imported),
+        "root": root_obj.name if root_obj else None,
+        "socket_at": tuple(round(v, 3) for v in socket.matrix_world.translation),
+    }
+
+
+# ────────────────────────────────────────────────────────────────────
 # Snap spline to terrain
 # ────────────────────────────────────────────────────────────────────
 #
@@ -992,6 +1097,42 @@ class HOVERBIKE_OT_hide_racer_preview(Operator):
         return {"FINISHED"}
 
 
+class HOVERBIKE_OT_rebuild_rider_preview(Operator):
+    """Import the seated mannequin parented to `socket_seat` so you can place
+    the seat with the rider visible. Move `socket_seat` to reseat — the rider
+    follows. Render-disabled preview; never reaches the bike .glb."""
+
+    bl_idname = "hoverbike.rebuild_rider_preview"
+    bl_label = "Add Rider Preview"
+    bl_description = (
+        "Drop the seated rider onto socket_seat (follows the socket as you move "
+        "it). Preview only — excluded from the bike export."
+    )
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        try:
+            summary = _rebuild_rider_preview(context.scene)
+        except RuntimeError as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Rider preview on socket_seat @ {summary['socket_at']}")
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_hide_rider_preview(Operator):
+    """Remove the rider preview (its collection + imported rig/clips)."""
+
+    bl_idname = "hoverbike.hide_rider_preview"
+    bl_label = "Remove Rider Preview"
+    bl_description = "Delete the rider preview and its imported mesh + clips"
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        _wipe_rider_preview()
+        return {"FINISHED"}
+
+
 class HOVERBIKE_OT_reload_props_library(Operator):
     """Force Blender to re-read every prop / landmark library file from
     disk and refresh in-scene previews so library edits show up.
@@ -1125,6 +1266,8 @@ _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_hide_gate_preview,
     HOVERBIKE_OT_rebuild_racer_preview,
     HOVERBIKE_OT_hide_racer_preview,
+    HOVERBIKE_OT_rebuild_rider_preview,
+    HOVERBIKE_OT_hide_rider_preview,
     HOVERBIKE_OT_reload_props_library,
     HOVERBIKE_OT_snap_spline_to_terrain,
 )

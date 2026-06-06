@@ -3,7 +3,8 @@ import * as THREE from 'three'
 import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js'
 import { type LoadedProp, pickAnimationClip } from '@/game/assets/prop-loader'
 import type { SimWorld } from '@/engine/sim/ecs/world'
-import { TransformStore } from '@/game/components'
+import { BikeStatsStore, TransformStore } from '@/game/components'
+import type { BikeRenderRegistry } from './render-systems'
 import { Rider, type RiderBoneName, RiderStore } from '@/game/components/rider'
 
 /**
@@ -88,6 +89,9 @@ type MannequinInstance = {
   bones: Map<string, THREE.Object3D>
   bikeEid: number
   seatLocal: { x: number; y: number; z: number }
+  /** The bike's authored `socket_seat` in bike-local space — used as the root
+   *  anchor when present (per-bike). Null → legacy seatLocal + SEAT_OFFSET. */
+  socketSeat: { x: number; y: number; z: number } | null
   ragdoll: boolean
 }
 
@@ -95,6 +99,7 @@ export function createRiderMannequinSystem(
   scene: THREE.Scene,
   sim: SimWorld,
   rig: LoadedProp,
+  bikeRegistry?: BikeRenderRegistry,
 ): () => void {
   const instances = new Map<number, MannequinInstance>()
   const facingQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), FACING_YAW)
@@ -117,6 +122,17 @@ export function createRiderMannequinSystem(
   const scratchScale = new THREE.Vector3()
 
   let last = 0
+
+  /** The bike's authored seat anchor (`socket_seat`) in bike-local space, or
+   *  null when the bike has no socket / no registry (procedural bikes, tests).
+   *  Per-variant constant — resolved once per rider instance. */
+  function resolveSocketSeat(bikeEid: number): { x: number; y: number; z: number } | null {
+    if (!bikeRegistry) return null
+    const variantId = BikeStatsStore.get(bikeEid)?.variantId
+    const loaded =
+      (variantId !== undefined && bikeRegistry.byVariantId[variantId]) || bikeRegistry.default
+    return loaded.seatLocal ?? null
+  }
 
   function build(
     riderEid: number,
@@ -147,6 +163,7 @@ export function createRiderMannequinSystem(
       bones,
       bikeEid,
       seatLocal,
+      socketSeat: resolveSocketSeat(bikeEid),
       ragdoll: false,
     }
     instances.set(riderEid, inst)
@@ -209,14 +226,19 @@ export function createRiderMannequinSystem(
       if (bt) {
         bikePos.set(bt.x, bt.y, bt.z)
         bikeQuat.set(bt.qx, bt.qy, bt.qz, bt.qw)
-        seat
-          .set(
+        // Seat anchor: the bike's authored socket_seat when present (per-bike,
+        // raw bike-local), else the legacy global seatLocal + SEAT_OFFSET.
+        const anchor = inst.socketSeat
+        if (anchor) {
+          seat.set(anchor.x, anchor.y, anchor.z)
+        } else {
+          seat.set(
             inst.seatLocal.x + SEAT_OFFSET.x,
             inst.seatLocal.y + SEAT_OFFSET.y,
             inst.seatLocal.z + SEAT_OFFSET.z,
           )
-          .applyQuaternion(bikeQuat)
-          .add(bikePos)
+        }
+        seat.applyQuaternion(bikeQuat).add(bikePos)
         inst.group.position.copy(seat)
         // Body orientation = bike ⊗ facing ⊗ additive reactive tilt. The
         // additive (in the rider's bike-aligned local frame) layers our
