@@ -5,7 +5,7 @@
   "physics": {
     "massKg": 80,
     "topSpeedMps": 26,
-    "hoverHeight": 1.2
+    "hoverHeight": 1.4
   },
   "appearance": {
     "liveryColor": "#ddbb44",
