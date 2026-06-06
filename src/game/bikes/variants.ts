@@ -139,6 +139,12 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
       surfaceFollow: 1.05,
       hoverSpring: 38,
       hoverDamp: 5.5,
+      // Rides tallest in the lineup — 1.4 vs the default 1.2 shared by
+      // racer / cruiser / stunt (scout sits low at 0.8). Matches the art
+      // brief's "high taut stance — it springs", and it's the last
+      // identity stat that still equalled the Racer's. Feel-affecting:
+      // re-check the crest pop on playtest.
+      hoverHeight: 1.4,
       // Inside-drift sport-bike feel. The Sparrow's high turn-torque
       // (5.5 vs the 4.0 default) means the initial cut is dramatic;
       // the wider-arc tail is what stops the lightweight bike from
