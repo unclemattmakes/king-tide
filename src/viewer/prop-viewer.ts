@@ -113,7 +113,7 @@ export async function bootPropViewer(parent: HTMLElement, opts: ViewerOpts): Pro
     waterlineTide: 0.4,
     waterlineAlgae: 0.5,
     propSize: 4,
-    edgeWear: 0,
+    edgeWear: 0.66,
   }
 
   const ui = makeUI(parent, backend)

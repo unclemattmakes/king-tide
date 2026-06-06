@@ -135,9 +135,10 @@ export type VinylOptions = {
   waterlineAlgae?: number
   /** Matte roughness (vinyl ~ 0.8). */
   roughness?: number
-  /** Edge-wear drybrush amount (0 = off): lighten convex edges toward
-   *  edgeWearColor to pop sculpted forms (rocks). Reads the per-vertex convexity
-   *  the conditioner bakes into COLOR_0.A. */
+  /** Edge-wear drybrush amount (default 0.66; 0 = off): lighten convex edges
+   *  toward edgeWearColor to pop sculpted forms (rocks). Reads the per-vertex
+   *  convexity the conditioner bakes into COLOR_0.A — a flat prop has A=1 so this
+   *  is a no-op (edge = 1−A = 0) until the prop carries real convexity. */
   edgeWear?: number
   /** Edge-wear tint (linear) — a bleached drybrush highlight. */
   edgeWearColor?: [number, number, number]
@@ -199,7 +200,7 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const waterlineAlgae = opts.waterlineAlgae ?? 0.5
   const propSize = Math.max(opts.propSize ?? REF_PROP_SIZE, 0.05)
   const roughness = opts.roughness ?? 0.82
-  const edgeWear = opts.edgeWear ?? 0.0
+  const edgeWear = opts.edgeWear ?? 0.66
   const edgeWearColor = opts.edgeWearColor ?? [0.95, 0.92, 0.83]
 
   const next = new MeshStandardNodeMaterial({ metalness: 0, roughness })
