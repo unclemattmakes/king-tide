@@ -8,12 +8,16 @@
 
 import type { WaterDebugDefaults, WaterMesh } from './render/water'
 
-// v9 bump: drops the spectrum/FFT-only knobs (choppiness,
-// seaStateIntensity, windSpeed, windDirection, windCutoff,
-// foamPersistence) along with the FFT path itself. Old v1–v8 entries
-// are silently merged onto defaults by the per-key tolerant loader
-// below — unknown keys are ignored.
-export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v9'
+// v10 bump: adds the whitecap-coverage knobs (whitecapHeight, whitecapSlope,
+// whitecapMode) from the foam-coverage pass. Old v1–v9 entries are silently
+// merged onto defaults by the per-key tolerant loader below — unknown keys
+// are ignored, missing keys fall back to the (new) defaults, so a returning
+// user keeps their other tuning and picks up the new foam baseline.
+//
+// v9 bump (prior): dropped the spectrum/FFT-only knobs (choppiness,
+// seaStateIntensity, windSpeed, windDirection, windCutoff, foamPersistence)
+// along with the FFT path itself.
+export const WATER_DEBUG_STORAGE_KEY = 'hoverbike.waterDebug.v10'
 
 export type WaterDebugSettings = {
   steepness: number
@@ -32,6 +36,11 @@ export type WaterDebugSettings = {
   shoreWaveStrength: number
   pinchDirection: number
   waveBearing: number
+  whitecapHeight: number
+  whitecapSlope: number
+  whitecapMode: number
+  foamWarmth: number
+  foamStreak: number
   wireframe: boolean
   colorize: boolean
 }
@@ -54,6 +63,11 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     shoreWaveStrength: d.shoreWaveStrength,
     pinchDirection: d.pinchDirection,
     waveBearing: d.waveBearing,
+    whitecapHeight: d.whitecapHeight,
+    whitecapSlope: d.whitecapSlope,
+    whitecapMode: d.whitecapMode,
+    foamWarmth: d.foamWarmth,
+    foamStreak: d.foamStreak,
     wireframe: d.wireframe,
     colorize: d.colorize,
   }
@@ -112,6 +126,11 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setShoreWaveStrength(s.shoreWaveStrength)
   water.debug.setPinchDirection(s.pinchDirection)
   water.debug.setWaveBearing(s.waveBearing)
+  water.debug.setWhitecapHeight(s.whitecapHeight)
+  water.debug.setWhitecapSlope(s.whitecapSlope)
+  water.debug.setWhitecapMode(s.whitecapMode)
+  water.debug.setFoamWarmth(s.foamWarmth)
+  water.debug.setFoamStreak(s.foamStreak)
   water.debug.setWireframe(s.wireframe)
   water.debug.setColorize(s.colorize)
 }

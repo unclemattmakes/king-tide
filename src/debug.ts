@@ -13,6 +13,8 @@ import {
 import { type ConsoleRecord, consoleTrap as getConsoleTrap } from './engine/qa/console-trap'
 import { type CameraPose, setCameraPoseOverride } from './engine/render/camera-pose-override'
 import type { RenderBackend } from './engine/render/renderer'
+import type { WaterMesh } from './engine/render/water'
+import { getWaterMesh } from './engine/render/water-service'
 import type { SimWorld } from './engine/sim/ecs/world'
 import type { PhysicsWorld } from './engine/sim/physics/rapier'
 import { captureSnapshot, snapshotToString } from './engine/sim/snapshot'
@@ -113,6 +115,12 @@ export type HoverDebug = {
    *  overriding the chase camera — used by the screenshot harness to frame
    *  concept-art beats behind/beside the start line. Pass null to release. */
   setCameraPose(pose: CameraPose): void
+  /** Live water-shader debug surface (`WaterMesh.debug`) for the active
+   *  track, or null on procedural / edit-mode tracks with no water mesh.
+   *  Exposes the same setters the water debug menu drives — lets the
+   *  screenshot harness scrub foam-coverage / look uniforms in a single boot
+   *  instead of re-booting per value. */
+  waterDebug(): WaterMesh['debug'] | null
   /** M10.2 determinism harness. Present only when ?determinism=1 was set
    *  at boot. The sim's RAF-driven step is gated off in that mode; the
    *  harness drives `simulateStep` here. */
@@ -391,6 +399,7 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     toggleDirectionArrow: () => accessors.toggleDirectionArrow(),
     isDirectionArrowOn: () => accessors.isDirectionArrowOn(),
     setCameraPose: (pose) => setCameraPoseOverride(pose),
+    waterDebug: () => getWaterMesh()?.debug ?? null,
     bikes: () => {
       if (!state.ready) return []
       const sim = accessors.sim()

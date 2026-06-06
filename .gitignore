@@ -31,6 +31,7 @@ test-results/
 playwright-report/
 playwright/.cache/
 coverage/
+foam-shots/
 
 # QA orchestrator output (pnpm qa). Committed CI artifacts live on
 # the workflow upload; local runs stay out of git.

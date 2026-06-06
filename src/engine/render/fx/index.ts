@@ -1,6 +1,6 @@
 import { hasComponent, query } from 'bitecs'
 import * as THREE from 'three'
-import { attribute, texture as tslTexture } from 'three/tsl'
+import { attribute, texture as tslTexture, uniform } from 'three/tsl'
 import { SpriteNodeMaterial } from 'three/webgpu'
 import { playerSettings, TUCK_VFX_SCALAR, WAVE_SPRAY_SCALAR } from '@/engine/player-settings'
 import type { SimWorld } from '@/engine/sim/ecs/world'
@@ -280,8 +280,12 @@ function createPool(params: {
   blending: THREE.Blending
   gravity: number
   drag: number
+  /** Optional live colour multiply on the sprite (a `uniform(THREE.Color)`).
+   *  Used to tint the water-spray pools toward the sunset warmth at boot —
+   *  see `setSprayTint`. Omitted pools keep the texture's baked colour. */
+  tint?: ReturnType<typeof uniform>
 }): Pool {
-  const { capacity, defaultSize, texture, blending, gravity, drag } = params
+  const { capacity, defaultSize, texture, blending, gravity, drag, tint } = params
 
   const positions = new Float32Array(capacity * 3)
   const velocities = new Float32Array(capacity * 3)
@@ -348,8 +352,13 @@ function createPool(params: {
   // Modulate texture alpha by the per-instance aAlpha so each particle
   // fades over its own lifetime independently.
   material.opacityNode = tslTexture(texture).a.mul(attribute('aAlpha', 'float'))
-  // Texture RGB is pre-tinted at canvas creation time; pass through.
-  material.colorNode = tslTexture(texture).rgb
+  // Texture RGB is pre-tinted at canvas creation time. Pools that pass a
+  // `tint` uniform multiply it in (water spray warmed toward the sunset);
+  // the rest pass the baked colour through unchanged.
+  material.colorNode = tint
+    ? // biome-ignore lint/suspicious/noExplicitAny: TSL .mul() overload doesn't accept the generic uniform() node type
+      (tslTexture(texture).rgb.mul(tint as any) as typeof material.colorNode)
+    : tslTexture(texture).rgb
 
   const mesh = new THREE.Mesh(geometry, material)
   mesh.frustumCulled = false
@@ -469,6 +478,12 @@ export function createFxSystem(
   // warm exhaust and the pale foam.
   const tuckTex = makeRadialTexture([170, 225, 255])
 
+  // Live tint for the water-spray pools (wake foam, plunge bubbles, crest
+  // spray). Set once at boot from the frozen sky warmth via `setSprayTint`
+  // so airborne spray catches the sunset like the surface foam does, instead
+  // of staying cool cyan-white against a warm sky. Default white = no-op.
+  const sprayTint = uniform(new THREE.Color(1, 1, 1))
+
   const foam = createPool({
     capacity: FOAM_CAPACITY,
     // Sized to visually match the 2× scale bike's stern footprint.
@@ -477,6 +492,7 @@ export function createFxSystem(
     blending: THREE.NormalBlending,
     gravity: 1.4, // slight upward drift (Y is up)
     drag: 1.6,
+    tint: sprayTint,
   })
   const sparks = createPool({
     capacity: SPARK_CAPACITY,
@@ -567,6 +583,7 @@ export function createFxSystem(
     // a second before drifting toward the surface and fading out.
     gravity: 4.5,
     drag: 2.8,
+    tint: sprayTint,
   })
 
   const tuckStream = createPool({
@@ -593,6 +610,7 @@ export function createFxSystem(
     blending: THREE.NormalBlending,
     gravity: -4.0,
     drag: 1.1,
+    tint: sprayTint,
   })
 
   scene.add(foam.mesh)
@@ -1515,5 +1533,14 @@ export function createFxSystem(
     advance(crestSpray, dt)
   }
 
-  return { tick, triggerPumpBurst, emitWaveSpray }
+  /** Tint the water-spray pools (wake foam, plunge bubbles, crest spray)
+   *  toward a colour — call once at boot with the frozen sky warmth so spray
+   *  catches the sunset like the surface foam. RGB in linear 0..1; (1,1,1)
+   *  restores the textures' baked cool-white. */
+  function setSprayTint(r: number, g: number, b: number): void {
+    // biome-ignore lint/suspicious/noExplicitAny: TSL uniform value is a THREE.Color
+    ;(sprayTint as any).value.setRGB(r, g, b)
+  }
+
+  return { tick, triggerPumpBurst, emitWaveSpray, setSprayTint }
 }

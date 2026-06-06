@@ -35,6 +35,7 @@ import {
   vec3,
 } from 'three/tsl'
 import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
+import { assetUrl } from '@/engine/asset-url'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
 import {
   effectiveSteepness,
@@ -201,6 +202,26 @@ export type WaterMesh = {
      *  whitecaps still draw); 1 = the default ribbon. Gated by the
      *  Settings → Video "Wave spray" knob via `water-service`. */
     setCrestMistStrength(s: number): void
+    /** Whitecap height threshold (m above rest). Crest foam ramps from this
+     *  height up. Lower = foam on smaller crests. ~0.65 default; the legacy
+     *  value was effectively 1.0 (above the calm sea's ~1.4 m peak), which is
+     *  why whitecaps never fired. */
+    setWhitecapHeight(m: number): void
+    /** Whitecap slope threshold (surface gradient, rise/run). Face foam ramps
+     *  from this slope up. Lower = foam on gentler faces. ~0.36 default (legacy
+     *  0.3, but it was AND-locked against the height gate). */
+    setWhitecapSlope(s: number): void
+    /** Whitecap gate mode, 0..1. 0 = strict AND (tall AND steep — the legacy
+     *  glassy gate); 1 = OR (tall OR steep — foam-dense). ~0.25 default. */
+    setWhitecapMode(m: number): void
+    /** Foam warmth, 0..2. Scales the light-driven warm tint + warm emissive
+     *  bloom on sun-raked foam. 0 = flat white foam (legacy); 1 = baseline
+     *  sunset-kissed crests. Follows the sky, so it's near-neutral at midday. */
+    setFoamWarmth(s: number): void
+    /** Foam streaks, 0..2. Scales the flow-aligned directional combing of foam
+     *  down wave faces (painterly brushstrokes). 0 = isotropic bubbles only
+     *  (legacy); 1 = baseline streaks. */
+    setFoamStreak(s: number): void
     /** Render the wave geometry as wireframe. Useful for tuning wave /
      *  wake amplitudes against the actual displacement. */
     setWireframe(on: boolean): void
@@ -240,6 +261,18 @@ export type WaterDebugDefaults = {
   pinchDirection: number
   /** Wave-field bearing in degrees, -180..180. */
   waveBearing: number
+  /** Whitecap height threshold, m above rest. 0.65 = baseline (legacy ~1.0). */
+  whitecapHeight: number
+  /** Whitecap slope threshold, rise/run. 0.36 = baseline (no longer AND-locked). */
+  whitecapSlope: number
+  /** Whitecap gate mode 0..1: 0 = AND (tall×steep), 1 = OR. 0.25 = baseline. */
+  whitecapMode: number
+  /** Foam warmth 0..2: light-driven warm tint + bloom on sun-raked foam.
+   *  1 = baseline, 0 = flat white (legacy). */
+  foamWarmth: number
+  /** Foam streaks 0..2: flow-aligned directional combing down wave faces.
+   *  1 = baseline, 0 = isotropic bubbles only (legacy). */
+  foamStreak: number
   wireframe: boolean
   /** When true, each water layer paints in a distinct flat color so
    *  LOD seams are visible. Off by default. */
@@ -439,6 +472,7 @@ function getWaveDetailNormalTexture(): THREE.DataTexture {
 // ---------------------------------------------------------------------------
 
 let sharedFoamBubbleTexture: THREE.DataTexture | null = null
+let sharedFoamStreakTexture: THREE.Texture | null = null
 
 function buildFoamBubbleTexture(): THREE.DataTexture {
   const N = 512
@@ -524,6 +558,49 @@ function getFoamBubbleTexture(): THREE.DataTexture {
     sharedFoamBubbleTexture = buildFoamBubbleTexture()
   }
   return sharedFoamBubbleTexture
+}
+
+/**
+ * Flow-stroke foam sheet — authored from the Blender *Brushstroke Tools* addon's
+ * bundled oil-stroke libraries (`streaky_dashes` bold + `feathery` dry-brush),
+ * composited into a tileable field of tapered strokes all running along the
+ * texture's U axis with clean gaps between (built by
+ * `tools/blender/build_foam_streaks.py`). Sampled in the fragment shader with U
+ * mapped to the wave's flow (down-face) direction, so the brushstrokes comb down
+ * the faces and trace the wave's shape/curvature — the painterly streaks the
+ * isotropic round-bubble texture can't give. R = stroke alpha (0 = clean water,
+ * 1 = stroke core). NoColorSpace + RepeatWrapping (it's a mask and tiles across
+ * the open sea). R2-served like `brush_strokes.png`.
+ */
+function getFoamStreakTexture(): THREE.Texture {
+  if (sharedFoamStreakTexture) return sharedFoamStreakTexture
+  try {
+    // onError no-op: the sheet is optional (gitignored, R2-served). If it 404s
+    // — a fresh deploy before `pnpm gen:foam-streaks` ran / the sheet was pushed
+    // to R2 — the texture stays empty (R=0 → streaks are a clean no-op) without
+    // a console error. Foam coverage + tint are unaffected.
+    const tex = new THREE.TextureLoader().load(
+      assetUrl('/assets/textures/foam_streaks.png'),
+      undefined,
+      undefined,
+      () => {},
+    )
+    tex.name = 'water:foamStreaks'
+    tex.wrapS = THREE.RepeatWrapping
+    tex.wrapT = THREE.RepeatWrapping
+    tex.colorSpace = THREE.NoColorSpace
+    tex.minFilter = THREE.LinearMipmapLinearFilter
+    tex.magFilter = THREE.LinearFilter
+    tex.anisotropy = 4
+    sharedFoamStreakTexture = tex
+  } catch {
+    // Headless / SSR / un-hydrated sheet → 1×1 black so streaks read as a no-op
+    // (R=0) until the real sheet loads. Foam coverage + tint are unaffected.
+    const black = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1)
+    black.needsUpdate = true
+    sharedFoamStreakTexture = black
+  }
+  return sharedFoamStreakTexture
 }
 
 /**
@@ -1884,6 +1961,50 @@ export function createWaterMesh(
   const CREST_MIST_STRENGTH_DEFAULT = 1.0
   const crestMistStrengthUniform = uniform(CREST_MIST_STRENGTH_DEFAULT)
 
+  // ── Whitecap coverage controls (foam-coverage pass) ──────────────────
+  // The height/slope gate that decides where crest foam fires. Historically
+  // `smoothstep(1.0, 2.0, height) * smoothstep(0.3, 0.7, slope)` — a strict
+  // AND of "tall" and "steep". That kept the sea glassy: long swells are
+  // tall-but-gentle (fail the slope test) and short wind-chop is steep-but-
+  // short (fails the height test), so a normal crest cleared neither gate and
+  // whitecaps essentially never fired (see docs/water-foam-look-plan.md — the
+  // 6-wave field peaks ~1.4 m raw, below the old 1.0–2.0 m gate even before
+  // the AND with slope). These uniforms lower both thresholds and blend the
+  // gate from AND toward OR so a crest foams when it is tall ENOUGH *or* steep
+  // enough — the foam-dense look the wave-mastery concept frames want. All
+  // live-tunable via the water debug menu; the distance-faded `foamFiber`
+  // noise (below) still breaks coverage into bubbly splotches and fades
+  // far-field speckle, so loosening the gate doesn't pebble the horizon.
+  // Defaults dialed on a real-GPU sweep (tests/e2e/foam-sweep.spec.ts). The
+  // first pass (height 0.55 / slope 0.30 / mode 0.35) foamed too much of the
+  // surface: on shallow, pale tracks at a hazy grade (Sandbar / South Beach /
+  // Cape Town) the broad thin foam read as a uniform milky sheet indistinct
+  // from light shallow water — playtest rejected it. Concentrated onto genuine
+  // breaking crests (taller height gate, steeper slope gate, blend back toward
+  // AND) so foam fires where waves actually break, leaving clean teal between.
+  const WHITECAP_HEIGHT_START_DEFAULT = 0.65 // m above rest where crest foam begins (was 1.0 legacy, 0.55 pass-1)
+  const WHITECAP_HEIGHT_BAND = 0.7 // ramp width → full foam at start + band
+  const WHITECAP_SLOPE_START_DEFAULT = 0.36 // surface gradient where face foam begins (legacy 0.3)
+  const WHITECAP_SLOPE_BAND = 0.45 // ramp width → full foam at start + band
+  const WHITECAP_MODE_DEFAULT = 0.25 // 0 = AND (tall×steep), 1 = OR (tall|steep)
+  const whitecapHeightStartUniform = uniform(WHITECAP_HEIGHT_START_DEFAULT)
+  const whitecapSlopeStartUniform = uniform(WHITECAP_SLOPE_START_DEFAULT)
+  const whitecapModeUniform = uniform(WHITECAP_MODE_DEFAULT)
+  // Foam warmth (foam-coverage pass, step 2): scales the light-driven warm
+  // tint + warm emissive bloom applied to foam where the low sun rakes it (see
+  // the foam-colour block below). 0 = flat white foam (the legacy look); 1 =
+  // baseline sunset-kissed crests. The tint follows `horizonHazeUniform`, so at
+  // midday (cool horizon) it's near-neutral and only warms at golden/sunset.
+  const FOAM_WARMTH_DEFAULT = 1.0
+  const foamWarmthUniform = uniform(FOAM_WARMTH_DEFAULT)
+  // Directional foam streaks (foam-coverage pass, step 3): scales how strongly
+  // foam is combed into flow-aligned brushstrokes down the wave faces (the
+  // painterly streaks of the concept frames) vs the isotropic round-bubble
+  // texture. 0 = bubbles only (legacy); 1 = baseline streaks. See the foam-mask
+  // block below.
+  const FOAM_STREAK_DEFAULT = 1.0
+  const foamStreakUniform = uniform(FOAM_STREAK_DEFAULT)
+
   // Wave-driven foam — two stacked layers via max():
   //   1. The vertex-stage accumulator (`foamAccumFrag`) — sampled at 4 past
   //      time steps, decayed exponentially, max-reduced. Gives foam a
@@ -1940,13 +2061,33 @@ export function createWaterMesh(
   // speckling — wider ranges read as TV-static when foam is widespread.
   const foamFiber = mix(float(0.6), float(1.0), foamNoiseSmooth)
 
-  // Height-driven whitecap foam — SoT's "foam at wave peaks" recipe.
-  // heightWhitecap requires meaningful elevation; slopeWhitecap requires
-  // chop pinching so a flat-but-tall swell stays glassy. `foamFiber`
-  // modulates with the shared foam noise.
-  const heightWhitecap = smoothstep(float(1.0), float(2.0), heightFrag)
-  const slopeWhitecap = smoothstep(float(0.3), float(0.7), pixelSlope)
-  const whitecapFoam = heightWhitecap.mul(slopeWhitecap).mul(foamFiber)
+  // Height-driven whitecap foam — SoT's "foam at wave peaks" recipe, with the
+  // thresholds + AND/OR blend exposed as uniforms (see the coverage block
+  // above). `heightWhitecap` rises as a crest clears `whitecapHeightStart`;
+  // `slopeWhitecap` rises as a face steepens past `whitecapSlopeStart`.
+  const heightWhitecap = smoothstep(
+    whitecapHeightStartUniform,
+    whitecapHeightStartUniform.add(float(WHITECAP_HEIGHT_BAND)),
+    heightFrag,
+  )
+  const slopeWhitecap = smoothstep(
+    whitecapSlopeStartUniform,
+    whitecapSlopeStartUniform.add(float(WHITECAP_SLOPE_BAND)),
+    pixelSlope,
+  )
+  // Blend the strict AND (height×slope — "tall AND steep") toward OR
+  // (max — "tall OR steep") by `whitecapModeUniform`. Pure AND kept the calm
+  // sea foamless; leaning toward OR lets long swells foam from elevation and
+  // short chop foam from steepness. `foamFiber` then modulates with the shared
+  // distance-faded foam noise so the coverage reads as bubbly turbulence.
+  // pow() sharpens the gate's soft shoulder so foam reads as a crisp cap on
+  // breaking crests, not a broad soft haze fading across every gentle face —
+  // the soft midtones were a big part of the "uniform milky wash".
+  const whitecapGate = pow(
+    mix(heightWhitecap.mul(slopeWhitecap), max(heightWhitecap, slopeWhitecap), whitecapModeUniform),
+    float(1.6),
+  )
+  const whitecapFoam = whitecapGate.mul(foamFiber)
   // History-accumulated foam (the time-shifted Gerstner sampler builds
   // a lingering trail behind each passing crest, since the analytic
   // formula is bit-identical between past and present) plus softened
@@ -1999,20 +2140,18 @@ export function createWaterMesh(
         const perp = abs(dxRel.mul(hatZ).sub(dzRel.mul(hatX)))
         const speedGate = smoothstep(float(WAKE_SPEED_LOW), float(WAKE_SPEED_HIGH), speed)
 
-        // Hull foam ring: bright at the dimple's outer edge, fading
-        // inward and outward over a small band. Speed-modulated so it
-        // reads more dramatically at race pace — at full speed the ring
-        // is ~1.6× brighter than at idle, communicating the hull's
-        // active interaction with the water.
-        const ringInner = smoothstep(float(BIKE_DIMPLE_R - 1.0), float(BIKE_DIMPLE_R - 0.2), r)
-        const ringOuter = smoothstep(float(BIKE_DIMPLE_R + 0.6), float(BIKE_DIMPLE_R - 0.2), r)
-        const ringSpeedBoost = float(1).add(speedGate.mul(0.6))
-        const ring = ringInner.mul(ringOuter).mul(weight).mul(0.55).mul(ringSpeedBoost)
+        // (Hull foam ring removed — it read as a "circle under the bike". The
+        // V-wake now comes to a point at the bike center where the ring was;
+        // the propwash below fills that apex.)
 
         // V-wake foam stripe behind the bike. Multiplied by `foamTurbulence`
         // so the edges break up into patches instead of a clean Kelvin-V
-        // outline — that's what made the prior wake feel "stamped".
-        const wakeWidth = behind.mul(WAKE_HALF_ANGLE_TAN).add(float(WAKE_BASE_WIDTH))
+        // outline — that's what made the prior wake feel "stamped". The FOAM
+        // apex width is a small local value (not the shared `WAKE_BASE_WIDTH`,
+        // which governs the sim's wake *displacement*) so the foam V tapers to
+        // a point at the bike instead of starting as a 0.55 m blunt band.
+        const FOAM_WAKE_APEX_HALF_WIDTH = 0.18
+        const wakeWidth = behind.mul(WAKE_HALF_ANGLE_TAN).add(float(FOAM_WAKE_APEX_HALF_WIDTH))
         const behindGate = smoothstep(float(0.0), float(0.3), behind)
         const decay = exp(behind.mul(-WAKE_LONG_DECAY))
         const edgeBlur = smoothstep(wakeWidth.add(0.4), wakeWidth.sub(0.5), perp)
@@ -2024,21 +2163,26 @@ export function createWaterMesh(
           .mul(0.7)
           .mul(foamTurbulence)
 
-        // Stern propwash (M9.33): bright concentrated foam directly behind
-        // the bike (peaks at ~0.3m, fades to 0 by ~2.5m). Centered on the
-        // wake axis (perp ≈ 0). What gives the wake its kinetic "boat is
-        // here" feel rather than a pure V outline. NOT noise-modulated —
-        // the propwash is a solid mass of foam that the bike actively
-        // generates, distinct from the turbulent edges trailing behind.
-        const propwashFalloff = exp(behind.mul(-1.0))
-        const propwashLateral = float(1).sub(smoothstep(float(0), float(0.7), perp))
-        const propwashGate = smoothstep(float(0.0), float(0.2), behind)
-        const propwash = propwashGate
+        // Stern propwash (M9.33): bright concentrated foam centred on the
+        // bike, peaking right AT the hull and fading back — this is the filled
+        // "point" of the V where the hull ring used to be, the kinetic "boat is
+        // here" mass. NOT noise-modulated — a solid foam mass the bike actively
+        // generates, distinct from the turbulent V edges.
+        //
+        // The axial profile must die just AHEAD of the hull: `behind` is
+        // clamped to 0 for the entire forward half-plane, so gating on it alone
+        // smears the propwash into a line in front of the rider. `forwardCut`
+        // (keyed off `ahead`) kills it within 0.35 m forward; `backFalloff`
+        // trails it behind. Peak sits at the hull (ahead ≈ behind ≈ 0).
+        const propwashBackFalloff = exp(behind.mul(-1.0))
+        const propwashForwardCut = float(1).sub(smoothstep(float(0.0), float(0.35), ahead))
+        const propwashLateral = float(1).sub(smoothstep(float(0), float(0.8), perp))
+        const propwash = propwashForwardCut
+          .mul(propwashBackFalloff)
           .mul(speedGate)
-          .mul(propwashFalloff)
           .mul(propwashLateral)
           .mul(weight)
-          .mul(0.65)
+          .mul(0.8)
 
         // Bow spray: forward foam "moustache" in front of the bike,
         // peaking just ahead and fading to 0 by ~1.5m forward. Same
@@ -2061,7 +2205,7 @@ export function createWaterMesh(
           .mul(0.85)
           .mul(foamTurbulence)
 
-        sum.addAssign(ring.add(wake).add(propwash).add(bowSpray))
+        sum.addAssign(wake.add(propwash).add(bowSpray))
       })
     }
     return sum
@@ -2186,12 +2330,102 @@ export function createWaterMesh(
   // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
   const foamBubbleSample = texture(foamBubbleTex, foamBubbleUV) as any
   const foamBubblePattern = foamBubbleSample.r
-  const foamMask = foamMaskRaw.mul(mix(float(0.35), float(1.0), foamBubblePattern))
+
+  // ── Directional foam streaks (step 3, reworked) ─────────────────────
+  // Paint foam as long flow-aligned brushstrokes down the wave faces — the
+  // streaks that read the wave's shape/curvature (the concept frames). The
+  // isotropic round-bubble texture can't do this; the dedicated flow-stroke
+  // texture (`getFoamStreakTexture`, tapered strokes along its U axis) is
+  // sampled with U mapped to the surface-gradient (down-face) direction, so
+  // its strokes comb down each face and trace the slope.
+  const slopeMagS = sqrt(effDydx.mul(effDydx).add(effDydz.mul(effDydz))).max(float(0.0008))
+  const flowDirX = effDydx.div(slopeMagS)
+  const flowDirZ = effDydz.div(slopeMagS)
+  // Flow-aligned UV: U = distance along the down-face direction (scrolled
+  // downhill in time so strokes drift down the face), V = distance across it.
+  // Tile spans 1/0.08 ≈ 12.5 m along × 1/0.14 ≈ 7 m across → strokes ~2–7 m
+  // long and ~0.2–0.4 m wide, a few across a wave face.
+  const streakAlong = positionWorld.x
+    .mul(flowDirX)
+    .add(positionWorld.z.mul(flowDirZ))
+    .sub(tNode.mul(float(0.6)))
+  const streakPerp = positionWorld.x.mul(flowDirZ.negate()).add(positionWorld.z.mul(flowDirX))
+  const streakTex = getFoamStreakTexture()
+  const streakUV = vec2(streakAlong.mul(float(0.08)), streakPerp.mul(float(0.14)))
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+  const streakSample = texture(streakTex, streakUV) as any
+  // Concentrate the streaks where the wave is actually breaking or steep — near
+  // crests (reuse `whitecapGate`) and on the steeper part of the face — NOT on
+  // every gentle swell (gating only on a low slope painted the whole sea with
+  // strokes). They still extend down the face (the steep-face term) so they
+  // trace the wave shape, just not across flat water. Faded at distance (the
+  // flow orientation goes noisy far off + the strokes alias), scaled by the
+  // uniform.
+  const streakConc = clamp(
+    max(whitecapGate, smoothstep(float(0.22), float(0.46), slopeMagS).mul(float(0.7))),
+    float(0),
+    float(1),
+  )
+  const streakFaceWeight = streakConc
+    .mul(float(1).sub(smoothstep(float(55), float(140), camDist)))
+    .mul(foamStreakUniform)
+  const streakFoam = streakSample.r.mul(streakFaceWeight)
+
+  // Bubble-texture floor (strength-aware): thin foam → 0.05 (discrete bubbles
+  // over clean water), strong foam (wake / breaking crest) → 0.6 (solid). The
+  // wash-killer — without it broad thin foam paints a uniform milky sheet.
+  // Applied to the wave/wake/shore foam; the streak layer carries its own
+  // stroke shape, so it's combined in after.
+  const foamBubbleFloor = mix(float(0.05), float(0.6), clamp(foamMaskRaw, float(0), float(1)))
+  const foamBubbly = foamMaskRaw.mul(mix(foamBubbleFloor, float(1.0), foamBubblePattern))
+  const foamCoverage = max(foamBubbly, streakFoam)
+  // Near-BINARY edge: the concept foam is on/off and SHRINKS in area rather
+  // than fading in opacity. A tight smoothstep around 0.2 snaps mid-coverage
+  // to clean water or solid foam, so as a crest passes its peak the foam patch
+  // shrinks instead of dissolving to a haze. The ramp widens with distance so
+  // the crisp edge doesn't alias/shimmer in the far field.
+  const foamEdgeAA = mix(float(0.05), float(0.2), smoothstep(float(30), float(120), camDist))
+  const foamMask = smoothstep(float(0.2).sub(foamEdgeAA), float(0.2).add(foamEdgeAA), foamCoverage)
   // Slightly warmer / brighter than v2's (0.92, 0.96, 1.0). Real surf
   // foam reads near-white-with-a-warm-tilt under sunlight; the previous
   // cool tint was getting tugged blue by the deep-water albedo it sat on
   // top of, especially while the alpha was 0.78.
   const foamColor = vec3(0.97, 0.99, 1.0)
+
+  // ── Light-driven foam tint (step 2) ──────────────────────────────────
+  // Real surf foam is not a flat white sheet: the low sun rakes its edges
+  // warm (coral/gold), the dense breaking core stays white-hot, and foam
+  // away from the sun reads cooler. We tint foam toward a saturated sunset
+  // coral — but only as much as (a) the view faces the low sun, (b) the sky
+  // itself is warm, and (c) the foam noise says, so the tint is patchy and
+  // self-disables at midday rather than dyeing every sea orange.
+  //
+  // `foamWarmRake` is the warm amount — strongest looking toward the low sun
+  // (`sunBackscatter`), lifted on crests (`heightFactor`), broken by the
+  // shared foam noise (`foamFiber`). The +0.15 / +0.4 floors keep a little
+  // warmth on crests even when the sun is behind the camera.
+  const foamWarmRake = clamp(
+    sunBackscatter.add(float(0.15)).mul(heightFactor.add(float(0.4))),
+    float(0),
+    float(1),
+  )
+    .mul(foamFiber)
+    .mul(foamWarmthUniform)
+  // How warm the sky is right now: horizon-haze red minus blue. >0 at
+  // golden/sunset, ≈0 at cool midday — so the saturated tint only fires when
+  // the light actually is warm (mixing toward the *desaturated* horizon haze,
+  // as the crest-mist does, barely shifts near-white foam — hence a dedicated
+  // saturated target gated by this).
+  const skyWarmth = clamp(
+    horizonHazeUniform.x.sub(horizonHazeUniform.z).mul(float(2.4)),
+    float(0),
+    float(1),
+  )
+  // Saturated sunset-coral foam tint. Bright (so foam stays luminous) but
+  // blue-deficient (so it reads coral/gold, not muddy orange).
+  const foamWarmTint = vec3(1.0, 0.66, 0.44)
+  const foamWarmAmount = clamp(foamWarmRake.mul(skyWarmth), float(0), float(0.82))
+  const foamColorLit = mix(foamColor, foamWarmTint, foamWarmAmount)
 
   // Fresnel: standard Schlick approximation. Used both as a strength
   // weight for the planar reflection (below) and as the fallback sky-tint
@@ -2295,7 +2529,7 @@ export function createWaterMesh(
   const surfaceColor = mix(reflectedOrBase, horizonHazeUniform, aerialMix)
 
   const albedo = mix(
-    mix(surfaceColor, foamColor, foamMask),
+    mix(surfaceColor, foamColorLit, foamMask),
     centerDebugColorUniform,
     debugColorizeMixUniform,
   )
@@ -2377,7 +2611,13 @@ export function createWaterMesh(
   // pinched breaking crests; foam should pop visibly bright since it's
   // the "this wave is actually breaking" signal a player relies on for
   // arcade water reads.
-  const foamEmissive = foamColor.mul(foamMask).mul(float(0.5))
+  //
+  // Step 2: emit the *lit* foam colour (warm where the sun rakes) and add a
+  // warm-rake bonus on top of the 0.5 base, so sun-struck crests glow brighter
+  // and the bloom pass (post-pipeline) catches them as a warm sunset bloom —
+  // the glowing crests of the concept frames. The base 0.5 keeps shadowed
+  // foam readable; the bonus tops out at +0.5 on fully sun-raked crests.
+  const foamEmissive = foamColorLit.mul(foamMask).mul(float(0.5).add(foamWarmRake.mul(float(0.5))))
 
   // Crest-mist ribbon — a soft wind-spray haze lofted on the upper faces of
   // steep breaking crests, biased toward grazing view angles + distance where
@@ -2491,6 +2731,11 @@ export function createWaterMesh(
     shoreWaveStrength: SHORE_WAVE_STRENGTH_DEFAULT,
     pinchDirection: PINCH_DIRECTION_DEFAULT,
     waveBearing: WAVE_BEARING_DEFAULT,
+    whitecapHeight: WHITECAP_HEIGHT_START_DEFAULT,
+    whitecapSlope: WHITECAP_SLOPE_START_DEFAULT,
+    whitecapMode: WHITECAP_MODE_DEFAULT,
+    foamWarmth: FOAM_WARMTH_DEFAULT,
+    foamStreak: FOAM_STREAK_DEFAULT,
     wireframe: wireFlag,
     colorize: false,
   }
@@ -2573,6 +2818,32 @@ export function createWaterMesh(
       // still draw); 1 = default ribbon. The Settings "Wave spray" knob
       // passes 0 / 0.5 / 1 for off / subtle / full.
       crestMistStrengthUniform.value = clamp01(s, 0, 2)
+    },
+    setWhitecapHeight(m) {
+      // 0..3 m — height above rest where crest foam begins ramping. Lower
+      // floods more crests with foam; higher restricts it to the tallest
+      // sets. The ramp full-point trails `WHITECAP_HEIGHT_BAND` m above.
+      whitecapHeightStartUniform.value = clamp01(m, 0, 3)
+    },
+    setWhitecapSlope(s) {
+      // 0..1 — surface gradient where steep-face foam begins ramping. Lower
+      // foams gentler faces (long swells); higher restricts to sharp chop.
+      whitecapSlopeStartUniform.value = clamp01(s, 0, 1)
+    },
+    setWhitecapMode(m) {
+      // 0..1 — 0 blends the gate as a strict AND (height×slope, the legacy
+      // glassy behaviour), 1 as OR (max — foam where tall OR steep).
+      whitecapModeUniform.value = clamp01(m, 0, 1)
+    },
+    setFoamWarmth(s) {
+      // 0..2 — scales the light-driven warm foam tint + warm emissive bloom.
+      // 0 = flat white foam (legacy); 1 = baseline; >1 = punchier sunset glow.
+      foamWarmthUniform.value = clamp01(s, 0, 2)
+    },
+    setFoamStreak(s) {
+      // 0..2 — scales the flow-aligned directional foam combing. 0 = isotropic
+      // bubbles only (legacy); 1 = baseline streaks; >1 = deeper-cut stripes.
+      foamStreakUniform.value = clamp01(s, 0, 2)
     },
     setShoreWaveStrength(s) {
       // 0..2 — scales the shore-aligned breaker amplitude. Mirrors the
