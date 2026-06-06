@@ -11,6 +11,8 @@ across many tracks:
     HV_Palm       - "drunken" curving palm with green + dead fronds
     HV_Ramp       - sheet-metal panels along a curve, pitch-controlled
     HV_SeaArch    - parametric sea arch (generator)
+    HV_Rock       - boolean-carved faceted boulder (generator)
+    HV_Cloud      - voxel-puff stylized cumulus cloud (generator)
 
 Each group is flagged ``is_modifier`` so it appears in the GN modifier
 menu, carries a ``COLOR_0`` store so realised geometry satisfies the
@@ -1621,6 +1623,290 @@ def build_rock() -> bpy.types.GeometryNodeTree:
 
 
 # --------------------------------------------------------------------------
+# Tool 7: Cloud — stylized cumulus puff (generator)
+#
+# The classic Houdini cumulus recipe (Cloud Shape from Polygon -> fill with
+# spheres -> VDB from particles -> Cloud Billowy Noise -> convert to polygons ->
+# decimate) mapped onto Blender geometry nodes, reusing the sea-stack's proven
+# Mesh to Volume -> Volume to Mesh fuse:
+#   1. a BLOBBY BASE — a flattened, low-freq-warped ellipsoid dome (wider than
+#      tall) standing in for "Cloud Shape from Polygon",
+#   2. SCATTER points over the dome's UPPER surface and INSTANCE a deformed
+#      icosphere "puff" at each (top-centre puffs biggest via Top Bias) — the
+#      cauliflower lobes; the flat base stays clean because nothing scatters
+#      on the underside,
+#   3. JOIN base + puffs and fuse them into ONE watertight blob with a VOXEL
+#      REMESH done entirely in GN (Mesh to Volume -> Volume to Mesh) — the
+#      VDB-surface -> polymesh step,
+#   4. a BILLOW high-freq noise Set Position adds the fine cauliflower crinkle
+#      (Houdini's "Cloud Billowy Noise"),
+#   5. a FLAT-BASE pass COMPRESSES (not collapses) the rounded underbelly into a
+#      flattened-but-lumpy cumulus base — the underside is what players see, and a
+#      hard clamp gave a razor-flat triangle-fan disc — then lifts it to ~z=0.
+#
+# Smooth shading (clouds are soft, not faceted) + a Collapse Decimate added by
+# the build script (like the sea stack) thin the dense voxel shell to a light
+# low-poly cloud. Voxel Size is the cost throttle, floored against Size so a big
+# cloud can't ask for a pathological grid. Seed reshuffles the puffs + noise.
+# --------------------------------------------------------------------------
+def build_cloud() -> bpy.types.GeometryNodeTree:
+    g = _new_tree("HV_Cloud")
+    _out(g, "Geometry", "NodeSocketGeometry")
+    _in(g, "Geometry", "NodeSocketGeometry")  # ignored (generator)
+    _in(g, "Size", "NodeSocketFloat", 12.0, mn=2.0, mx=160.0, subtype="DISTANCE")
+    _in(g, "Height", "NodeSocketFloat", 7.0, mn=1.0, mx=100.0, subtype="DISTANCE")
+    _in(g, "Puffs", "NodeSocketInt", 14, mn=1, mx=80)
+    _in(g, "Puff Size", "NodeSocketFloat", 0.46, mn=0.1, mx=1.2)
+    _in(g, "Puff Var", "NodeSocketFloat", 0.4, mn=0.0, mx=0.95)
+    _in(g, "Top Bias", "NodeSocketFloat", 0.45, mn=0.0, mx=1.5)
+    _in(g, "Billow", "NodeSocketFloat", 0.22, mn=0.0, mx=1.0)
+    _in(g, "Billow Scale", "NodeSocketFloat", 0.55, mn=0.05, mx=4.0)
+    _in(g, "Lumpiness", "NodeSocketFloat", 0.3, mn=0.0, mx=1.0)
+    _in(g, "Flat Base", "NodeSocketFloat", 0.8, mn=0.0, mx=1.0)
+    _in(g, "Voxel Size", "NodeSocketFloat", 0.5, mn=0.08, mx=3.0, subtype="DISTANCE")
+    _in(g, "Seed", "NodeSocketFloat", 0.0)
+
+    gin = _n(g, "NodeGroupInput", x=-2600, y=0)
+    gout = _n(g, "NodeGroupOutput", x=2980, y=0)
+    cloud_mat = _mat("mat_prop_cloud", (0.9, 0.92, 0.96, 1.0), roughness=1.0)
+
+    # === core ellipsoid (the blobby base): ico radius rxy, squashed to rz ===
+    rxy = _n(g, "ShaderNodeMath", x=-2400, y=320, operation="MULTIPLY"); rxy.inputs[1].default_value = 0.5
+    _link(g, gin.outputs["Size"], rxy.inputs[0])
+    rz = _n(g, "ShaderNodeMath", x=-2400, y=180, operation="MULTIPLY"); rz.inputs[1].default_value = 0.5
+    _link(g, gin.outputs["Height"], rz.inputs[0])
+    sph = _n(g, "GeometryNodeMeshIcoSphere", x=-2240, y=320)
+    sph.inputs["Subdivisions"].default_value = 3
+    _link(g, rxy.outputs[0], sph.inputs["Radius"])
+    zr = _n(g, "ShaderNodeMath", x=-2240, y=160, operation="DIVIDE")  # rz/rxy
+    _link(g, rz.outputs[0], zr.inputs[0]); _link(g, rxy.outputs[0], zr.inputs[1])
+    sq = _n(g, "ShaderNodeCombineXYZ", x=-2080, y=160)
+    sq.inputs["X"].default_value = 1.0; sq.inputs["Y"].default_value = 1.0
+    _link(g, zr.outputs[0], sq.inputs["Z"])
+    ell = _n(g, "GeometryNodeTransform", x=-1920, y=320)
+    _link(g, sph.outputs["Mesh"], ell.inputs["Geometry"]); _link(g, sq.outputs["Vector"], ell.inputs["Scale"])
+
+    # low-freq lumpiness warp so the base silhouette is irregular (not an egg)
+    bpos = _n(g, "GeometryNodeInputPosition", x=-2080, y=-40)
+    bn = _n(g, "ShaderNodeTexNoise", x=-1920, y=-60); bn.noise_dimensions = "4D"
+    bn.inputs["Scale"].default_value = 1.3
+    _link(g, bpos.outputs["Position"], bn.inputs["Vector"]); _link(g, gin.outputs["Seed"], bn.inputs["W"])
+    bnc = _n(g, "ShaderNodeMath", x=-1760, y=-60, operation="MULTIPLY_ADD")
+    bnc.inputs[1].default_value = 1.0; bnc.inputs[2].default_value = -0.5
+    _link(g, bn.outputs["Fac"], bnc.inputs[0])
+    bamt = _n(g, "ShaderNodeMath", x=-1760, y=-200, operation="MULTIPLY"); bamt.inputs[1].default_value = 0.5
+    _link(g, gin.outputs["Lumpiness"], bamt.inputs[0])
+    bamt2 = _n(g, "ShaderNodeMath", x=-1600, y=-200, operation="MULTIPLY")
+    _link(g, bamt.outputs[0], bamt2.inputs[0]); _link(g, rxy.outputs[0], bamt2.inputs[1])
+    bdsp = _n(g, "ShaderNodeMath", x=-1600, y=-60, operation="MULTIPLY")
+    _link(g, bnc.outputs[0], bdsp.inputs[0]); _link(g, bamt2.outputs[0], bdsp.inputs[1])
+    bnrm = _n(g, "GeometryNodeInputNormal", x=-1760, y=80)
+    bvec = _n(g, "ShaderNodeVectorMath", x=-1440, y=20, operation="SCALE")
+    _link(g, bnrm.outputs["Normal"], bvec.inputs[0]); _link(g, bdsp.outputs[0], bvec.inputs["Scale"])
+    core = _n(g, "GeometryNodeSetPosition", x=-1280, y=320)
+    _link(g, ell.outputs["Geometry"], core.inputs["Geometry"]); _link(g, bvec.outputs["Vector"], core.inputs["Offset"])
+
+    # === puff source: a deformed icosphere (radius pr = rxy * Puff Size) ===
+    pr = _n(g, "ShaderNodeMath", x=-1280, y=-280, operation="MULTIPLY")
+    _link(g, rxy.outputs[0], pr.inputs[0]); _link(g, gin.outputs["Puff Size"], pr.inputs[1])
+    psph = _n(g, "GeometryNodeMeshIcoSphere", x=-1120, y=-260)
+    psph.inputs["Subdivisions"].default_value = 2
+    _link(g, pr.outputs[0], psph.inputs["Radius"])
+    # mid-freq noise along normal -> lumpy "deformed sphere", not a perfect ball
+    ppos = _n(g, "GeometryNodeInputPosition", x=-1120, y=-440)
+    pn = _n(g, "ShaderNodeTexNoise", x=-960, y=-460); pn.noise_dimensions = "3D"
+    pn.inputs["Scale"].default_value = 1.6
+    try:
+        pn.inputs["Detail"].default_value = 1.0  # smooth lobe deform, not warts
+    except Exception:
+        pass
+    _link(g, ppos.outputs["Position"], pn.inputs["Vector"])
+    pnc = _n(g, "ShaderNodeMath", x=-800, y=-460, operation="MULTIPLY_ADD")
+    pnc.inputs[1].default_value = 1.0; pnc.inputs[2].default_value = -0.5
+    _link(g, pn.outputs["Fac"], pnc.inputs[0])
+    pdsp = _n(g, "ShaderNodeMath", x=-640, y=-460, operation="MULTIPLY")
+    _link(g, pnc.outputs[0], pdsp.inputs[0]); _link(g, pr.outputs[0], pdsp.inputs[1])
+    pdsp2 = _n(g, "ShaderNodeMath", x=-480, y=-460, operation="MULTIPLY"); pdsp2.inputs[1].default_value = 0.27
+    _link(g, pdsp.outputs[0], pdsp2.inputs[0])
+    pnrm = _n(g, "GeometryNodeInputNormal", x=-800, y=-320)
+    pvec = _n(g, "ShaderNodeVectorMath", x=-320, y=-380, operation="SCALE")
+    _link(g, pnrm.outputs["Normal"], pvec.inputs[0]); _link(g, pdsp2.outputs[0], pvec.inputs["Scale"])
+    puff = _n(g, "GeometryNodeSetPosition", x=-160, y=-260)
+    _link(g, psph.outputs["Mesh"], puff.inputs["Geometry"]); _link(g, pvec.outputs["Vector"], puff.inputs["Offset"])
+
+    # === scatter points on the core's UPPER surface ===
+    dist = _n(g, "GeometryNodeDistributePointsOnFaces", x=-1080, y=460, distribute_method="POISSON")
+    _link(g, core.outputs["Geometry"], dist.inputs["Mesh"])
+    # Distance Min ~ Size / sqrt(Puffs) -> more Puffs packs them closer
+    psqrt = _n(g, "ShaderNodeMath", x=-1340, y=600, operation="SQRT"); _link(g, gin.outputs["Puffs"], psqrt.inputs[0])
+    pdmin = _n(g, "ShaderNodeMath", x=-1180, y=600, operation="DIVIDE")
+    _link(g, gin.outputs["Size"], pdmin.inputs[0]); _link(g, psqrt.outputs[0], pdmin.inputs[1])
+    pdmin2 = _n(g, "ShaderNodeMath", x=-1020, y=600, operation="MULTIPLY"); pdmin2.inputs[1].default_value = 0.62
+    _link(g, pdmin.outputs[0], pdmin2.inputs[0])
+    _link(g, pdmin2.outputs[0], dist.inputs["Distance Min"])
+    dist.inputs["Density Max"].default_value = 100.0
+    _link(g, gin.outputs["Seed"], dist.inputs["Seed"])
+    # selection: only the upper surface (face normal z > -0.15) -> base stays clean
+    fnrm = _n(g, "GeometryNodeInputNormal", x=-1340, y=760)
+    fnz = _n(g, "ShaderNodeSeparateXYZ", x=-1180, y=760); _link(g, fnrm.outputs["Normal"], fnz.inputs["Vector"])
+    fsel = _n(g, "ShaderNodeMath", x=-1020, y=760, operation="GREATER_THAN"); fsel.inputs[1].default_value = -0.15
+    _link(g, fnz.outputs["Z"], fsel.inputs[0])
+    _link(g, fsel.outputs[0], dist.inputs["Selection"])
+
+    # per-puff transforms: random tumble + (Top Bias . z) * jittered uniform scale
+    pidx = _n(g, "GeometryNodeInputIndex", x=-980, y=300)
+    prot = _n(g, "FunctionNodeRandomValue", x=-820, y=300); prot.data_type = "FLOAT_VECTOR"
+    prot.inputs[0].default_value = (0.0, 0.0, 0.0); prot.inputs[1].default_value = (6.2832, 6.2832, 6.2832)
+    _link(g, pidx.outputs["Index"], prot.inputs["ID"]); _link(g, gin.outputs["Seed"], prot.inputs["Seed"])
+    sseed = _n(g, "ShaderNodeMath", x=-980, y=140, operation="ADD"); sseed.inputs[1].default_value = 19.0
+    _link(g, gin.outputs["Seed"], sseed.inputs[0])
+    pvarlo = _n(g, "ShaderNodeMath", x=-980, y=0, operation="SUBTRACT"); pvarlo.inputs[0].default_value = 1.0
+    _link(g, gin.outputs["Puff Var"], pvarlo.inputs[1])
+    rsc = _n(g, "FunctionNodeRandomValue", x=-820, y=80); rsc.data_type = "FLOAT"
+    _link(g, pvarlo.outputs[0], rsc.inputs[2]); rsc.inputs[3].default_value = 1.0
+    _link(g, pidx.outputs["Index"], rsc.inputs["ID"]); _link(g, sseed.outputs[0], rsc.inputs["Seed"])
+    # top bias: bigger puffs toward the crown (z_norm = pos.z/rz, clamped 0..1)
+    pp = _n(g, "GeometryNodeInputPosition", x=-980, y=-160)
+    ppz = _n(g, "ShaderNodeSeparateXYZ", x=-820, y=-160); _link(g, pp.outputs["Position"], ppz.inputs["Vector"])
+    znorm = _n(g, "ShaderNodeMath", x=-660, y=-160, operation="DIVIDE")
+    _link(g, ppz.outputs["Z"], znorm.inputs[0]); _link(g, rz.outputs[0], znorm.inputs[1])
+    zn01 = _n(g, "ShaderNodeMath", x=-500, y=-160, operation="MULTIPLY_ADD")
+    zn01.inputs[1].default_value = 0.5; zn01.inputs[2].default_value = 0.5
+    _link(g, znorm.outputs[0], zn01.inputs[0])
+    znc = _n(g, "ShaderNodeClamp", x=-360, y=-160); _link(g, zn01.outputs[0], znc.inputs["Value"])
+    tb = _n(g, "ShaderNodeMath", x=-360, y=-20, operation="MULTIPLY")
+    _link(g, gin.outputs["Top Bias"], tb.inputs[0]); _link(g, znc.outputs[0], tb.inputs[1])
+    tb1 = _n(g, "ShaderNodeMath", x=-200, y=-20, operation="ADD"); tb1.inputs[1].default_value = 1.0
+    _link(g, tb.outputs[0], tb1.inputs[0])
+    pscl = _n(g, "ShaderNodeMath", x=-40, y=80, operation="MULTIPLY")
+    _link(g, rsc.outputs[1], pscl.inputs[0]); _link(g, tb1.outputs[0], pscl.inputs[1])
+
+    iop = _n(g, "GeometryNodeInstanceOnPoints", x=200, y=460)
+    _link(g, dist.outputs["Points"], iop.inputs["Points"])
+    _link(g, puff.outputs["Geometry"], iop.inputs["Instance"])
+    _link(g, prot.outputs[0], iop.inputs["Rotation"])
+    _link(g, pscl.outputs[0], iop.inputs["Scale"])
+    real = _n(g, "GeometryNodeRealizeInstances", x=380, y=460)
+    _link(g, iop.outputs["Instances"], real.inputs["Geometry"])
+    joinc = _n(g, "GeometryNodeJoinGeometry", x=540, y=380)
+    _link(g, real.outputs["Geometry"], joinc.inputs["Geometry"])
+    _link(g, core.outputs["Geometry"], joinc.inputs["Geometry"])
+
+    # === billow: coherent large-wavelength noise Set Position -> cauliflower
+    # waviness. Done BEFORE the voxel remesh so the remesh re-welds it into a
+    # clean watertight manifold. (Offsetting the fused-but-creased surface along
+    # its own normals AFTER the remesh tore tall, top-heavy clouds into shards at
+    # the crown.) Wavelength (~rxy / Billow Scale) stays well above Voxel Size so
+    # it survives the remesh; sub-voxel crust is washed out, which is what we want
+    # for a soft cloud. ===
+    bpos2 = _n(g, "GeometryNodeInputPosition", x=420, y=140)
+    invr = _n(g, "ShaderNodeMath", x=420, y=0, operation="DIVIDE"); invr.inputs[0].default_value = 1.0
+    _link(g, rxy.outputs[0], invr.inputs[1])  # 1/rxy normalises noise space to the cloud
+    npos = _n(g, "ShaderNodeVectorMath", x=580, y=140, operation="SCALE")
+    _link(g, bpos2.outputs["Position"], npos.inputs[0]); _link(g, invr.outputs[0], npos.inputs["Scale"])
+    bscl = _n(g, "ShaderNodeMath", x=580, y=0, operation="MULTIPLY"); bscl.inputs[1].default_value = 2.5
+    _link(g, gin.outputs["Billow Scale"], bscl.inputs[0])
+    bil = _n(g, "ShaderNodeTexNoise", x=740, y=140); bil.noise_dimensions = "4D"
+    bil.inputs["Detail"].default_value = 1.0
+    _link(g, npos.outputs[0], bil.inputs["Vector"]); _link(g, bscl.outputs[0], bil.inputs["Scale"])
+    _link(g, gin.outputs["Seed"], bil.inputs["W"])
+    bilc = _n(g, "ShaderNodeMath", x=900, y=140, operation="MULTIPLY_ADD")
+    bilc.inputs[1].default_value = 1.0; bilc.inputs[2].default_value = -0.5
+    _link(g, bil.outputs["Fac"], bilc.inputs[0])
+    bamp = _n(g, "ShaderNodeMath", x=900, y=0, operation="MULTIPLY")  # amplitude = Billow * pr
+    _link(g, gin.outputs["Billow"], bamp.inputs[0]); _link(g, pr.outputs[0], bamp.inputs[1])
+    bild = _n(g, "ShaderNodeMath", x=1060, y=140, operation="MULTIPLY")
+    _link(g, bilc.outputs[0], bild.inputs[0]); _link(g, bamp.outputs[0], bild.inputs[1])
+    bnrm2 = _n(g, "GeometryNodeInputNormal", x=900, y=280)
+    bilv = _n(g, "ShaderNodeVectorMath", x=1220, y=220, operation="SCALE")
+    _link(g, bnrm2.outputs["Normal"], bilv.inputs[0]); _link(g, bild.outputs[0], bilv.inputs["Scale"])
+    sp_bil = _n(g, "GeometryNodeSetPosition", x=1220, y=400)
+    _link(g, joinc.outputs["Geometry"], sp_bil.inputs["Geometry"]); _link(g, bilv.outputs["Vector"], sp_bil.inputs["Offset"])
+
+    # === voxel remesh fuses base + billowed puffs into one blob (VDB -> mesh) ===
+    # voxel floored against BOTH Size and Height: a tall cloud has many vertical
+    # voxels at a fixed size, so floor on Height too -> tall clouds auto-coarsen,
+    # keeping the poly budget bounded and the remesh evenly smooth (the collapse
+    # decimate facets a too-dense curved shell).
+    vflS = _n(g, "ShaderNodeMath", x=1180, y=660, operation="MULTIPLY"); vflS.inputs[1].default_value = 0.012
+    _link(g, gin.outputs["Size"], vflS.inputs[0])
+    vflH = _n(g, "ShaderNodeMath", x=1180, y=560, operation="MULTIPLY"); vflH.inputs[1].default_value = 0.038
+    _link(g, gin.outputs["Height"], vflH.inputs[0])
+    vfloor = _n(g, "ShaderNodeMath", x=1340, y=620, operation="MAXIMUM")
+    _link(g, vflS.outputs[0], vfloor.inputs[0]); _link(g, vflH.outputs[0], vfloor.inputs[1])
+    vsize = _n(g, "ShaderNodeMath", x=1500, y=620, operation="MAXIMUM")
+    _link(g, gin.outputs["Voxel Size"], vsize.inputs[0]); _link(g, vfloor.outputs[0], vsize.inputs[1])
+    m2v = _n(g, "GeometryNodeMeshToVolume", x=1400, y=400)
+    _link(g, sp_bil.outputs["Geometry"], m2v.inputs["Mesh"])
+    m2v.inputs["Density"].default_value = 1.0
+    try:
+        m2v.inputs["Interior Band Width"].default_value = 8.0
+    except Exception:
+        pass
+    try:
+        m2v.inputs["Resolution Mode"].default_value = "Size"  # 5.1 menu socket
+    except Exception:
+        pass
+    _link(g, vsize.outputs[0], m2v.inputs["Voxel Size"])
+    v2m = _n(g, "GeometryNodeVolumeToMesh", x=1580, y=400)
+    _link(g, m2v.outputs["Volume"], v2m.inputs["Volume"])
+    v2m.inputs["Threshold"].default_value = 0.1
+    v2m.inputs["Adaptivity"].default_value = 0.0
+
+    # === flat base: COMPRESS the underbelly (don't collapse it) so the base reads
+    # flattened-but-lumpy from below — the view players see — instead of a razor-
+    # flat triangle-fan disc. cut = (1 - 0.9*Flat Base) * rz sets the base level
+    # (-cut); geometry below it is squashed to BASE_SQUASH of its depth (which
+    # keeps its lumps + the even remesh topology), then the whole thing is lifted
+    # so the deepest compressed point sits ~z=0.
+    BASE_SQUASH = 0.25
+    cutf = _n(g, "ShaderNodeMath", x=1840, y=180, operation="MULTIPLY"); cutf.inputs[1].default_value = 0.9
+    _link(g, gin.outputs["Flat Base"], cutf.inputs[0])
+    cutf1 = _n(g, "ShaderNodeMath", x=2000, y=180, operation="SUBTRACT"); cutf1.inputs[0].default_value = 1.0
+    _link(g, cutf.outputs[0], cutf1.inputs[1])
+    cut = _n(g, "ShaderNodeMath", x=2160, y=180, operation="MULTIPLY")
+    _link(g, cutf1.outputs[0], cut.inputs[0]); _link(g, rz.outputs[0], cut.inputs[1])
+    negcut = _n(g, "ShaderNodeMath", x=2160, y=40, operation="MULTIPLY"); negcut.inputs[1].default_value = -1.0
+    _link(g, cut.outputs[0], negcut.inputs[0])
+    cpos = _n(g, "GeometryNodeInputPosition", x=1840, y=-180)
+    csep = _n(g, "ShaderNodeSeparateXYZ", x=2000, y=-180); _link(g, cpos.outputs["Position"], csep.inputs["Vector"])
+    # d = z - base ; below base (d<0) squashes, above (d>0) is kept -> no collapse
+    dd = _n(g, "ShaderNodeMath", x=2320, y=-120, operation="SUBTRACT")
+    _link(g, csep.outputs["Z"], dd.inputs[0]); _link(g, negcut.outputs[0], dd.inputs[1])
+    dlow = _n(g, "ShaderNodeMath", x=2480, y=-60, operation="MINIMUM"); dlow.inputs[1].default_value = 0.0
+    _link(g, dd.outputs[0], dlow.inputs[0])
+    dlow2 = _n(g, "ShaderNodeMath", x=2640, y=-60, operation="MULTIPLY"); dlow2.inputs[1].default_value = BASE_SQUASH
+    _link(g, dlow.outputs[0], dlow2.inputs[0])
+    dhigh = _n(g, "ShaderNodeMath", x=2480, y=-200, operation="MAXIMUM"); dhigh.inputs[1].default_value = 0.0
+    _link(g, dd.outputs[0], dhigh.inputs[0])
+    dsum = _n(g, "ShaderNodeMath", x=2800, y=-120, operation="ADD")
+    _link(g, dhigh.outputs[0], dsum.inputs[0]); _link(g, dlow2.outputs[0], dsum.inputs[1])
+    znew = _n(g, "ShaderNodeMath", x=2960, y=-120, operation="ADD")  # base + dsum
+    _link(g, negcut.outputs[0], znew.inputs[0]); _link(g, dsum.outputs[0], znew.inputs[1])
+    # lift = cut + (rz - cut) * BASE_SQUASH  -> deepest compressed point rises ~z=0
+    rzc = _n(g, "ShaderNodeMath", x=2320, y=160, operation="SUBTRACT")
+    _link(g, rz.outputs[0], rzc.inputs[0]); _link(g, cut.outputs[0], rzc.inputs[1])
+    rzc2 = _n(g, "ShaderNodeMath", x=2480, y=160, operation="MULTIPLY"); rzc2.inputs[1].default_value = BASE_SQUASH
+    _link(g, rzc.outputs[0], rzc2.inputs[0])
+    lift = _n(g, "ShaderNodeMath", x=2640, y=160, operation="ADD")
+    _link(g, cut.outputs[0], lift.inputs[0]); _link(g, rzc2.outputs[0], lift.inputs[1])
+    zlift = _n(g, "ShaderNodeMath", x=3120, y=-120, operation="ADD")
+    _link(g, znew.outputs[0], zlift.inputs[0]); _link(g, lift.outputs[0], zlift.inputs[1])
+    cxyz = _n(g, "ShaderNodeCombineXYZ", x=3280, y=-120)
+    _link(g, csep.outputs["X"], cxyz.inputs["X"]); _link(g, csep.outputs["Y"], cxyz.inputs["Y"]); _link(g, zlift.outputs[0], cxyz.inputs["Z"])
+    sp_flat = _n(g, "GeometryNodeSetPosition", x=2360, y=460)
+    _link(g, v2m.outputs["Mesh"], sp_flat.inputs["Geometry"]); _link(g, cxyz.outputs["Vector"], sp_flat.inputs["Position"])
+
+    # === finish: smooth shade (soft cloud), tag COLOR_0, set material ===
+    smooth = _n(g, "GeometryNodeSetShadeSmooth", x=2540, y=460); smooth.inputs["Shade Smooth"].default_value = True
+    _link(g, sp_flat.outputs["Geometry"], smooth.inputs["Geometry"])
+    store = _store_color0(g, smooth.outputs["Geometry"], rgba=(1.0, 1.0, 1.0, 0.0)); store.location = (2700, 240)
+    sm = _set_material(g, store.outputs["Geometry"], cloud_mat); sm.location = (2700, 80)
+    _link(g, sm.outputs["Geometry"], gout.inputs["Geometry"])
+    return g
+
+
+# --------------------------------------------------------------------------
 # build_all
 # --------------------------------------------------------------------------
 def build_all(which=None):
@@ -1640,6 +1926,7 @@ def build_all(which=None):
         "palm": build_palm,
         "ramp": build_ramp,
         "sea_arch": build_sea_arch,
+        "cloud": build_cloud,
     }
     if which:
         builders = {k: v for k, v in builders.items() if k in which}
@@ -1738,6 +2025,26 @@ def build_all(which=None):
             dec.decimate_type = "DISSOLVE"
             dec.angle_limit = math.radians(6)
             _place(ob, (i * 16.0, 116.0, 0.0), col)
+            summary["objects"].append(nm)
+
+    if "cloud" in builders:
+        tree = bpy.data.node_groups["HV_Cloud"]
+        variants = [
+            # humilis: wide + flat ("fair-weather" puff)
+            ("Cloud_A", dict(Size=15.0, Height=5.0, Puffs=12, **{"Flat Base": 0.85, "Top Bias": 0.3}, Seed=2.0)),
+            ("Cloud_B", dict(Seed=5.0)),  # mediocris: the defaults
+            # congestus: tall, towering, lots of cauliflower
+            ("Cloud_C", dict(Size=11.0, Height=15.0, Puffs=18, **{"Top Bias": 0.7, "Flat Base": 0.72, "Billow": 0.22}, Seed=8.0)),
+        ]
+        for i, (nm, kw) in enumerate(variants):
+            ob = _single_vert_obj(nm)
+            _apply(ob, tree, kw)
+            # the dense voxel-remesh shell is smooth; one Collapse decimate thins
+            # it hard to a very light low-poly cloud, then Smooth by Angle (60deg)
+            # keeps the soft form smooth (no facets) after the collapse.
+            d1 = ob.modifiers.new("Decimate", "DECIMATE"); d1.decimate_type = "COLLAPSE"; d1.ratio = 0.1
+            _smooth_by_angle(ob, 60.0)
+            _place(ob, (i * 26.0, 150.0, 0.0), col)
             summary["objects"].append(nm)
 
     bpy.context.view_layer.update()
