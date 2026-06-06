@@ -104,10 +104,18 @@ Two non-obvious choices, both learned the hard way:
   evenly smooth and the budget bounded — with the ~0.1 Collapse Decimate the three
   demos land at ~0.8 k tris each, and stay smooth because the remesh is even.
 
-In-game a placed cloud rides the shared prop **painterly-vinyl** material (soft rim
-+ matte) for free, and its world-space waterline never triggers up in the sky, so
-it stays clean. This is a *mesh* cloud prop (placeable, fly-past massing),
-complementary to the engine's existing sky shading (`clouds.ts`).
+In-game the cumulus variants are exported as `cloud_*.glb` prop GLBs by
+[`tools/blender/build_cloud_props.py`](../tools/blender/build_cloud_props.py)
+(`pnpm gen:cloud-props`) and **fed into the hero cumulus field**
+([`src/engine/render/clouds.ts`](../src/engine/render/clouds.ts)): the field loads
+them, normalises each to ~unit size, stamps the `aHeightT` base→crown ramp, and
+instances them at altitude under the sky-locked cloud material — drift, parallax
+and tonal lock from the same field system, but with the voxel-remeshed billow
+silhouette instead of the old hand-rolled icosphere blobs (which remain a runtime
+fallback if the GLBs fail to load). A track opts in via `sky.clouds`; the Reef Cup
+trio — **Sandbar, South Beach Sunken, Cape Town Drift** — all use them. The GLBs
+also satisfy the standard prop contract (`prop_root` + box collider), so a cloud
+can be placed statically via `props[]` too — but the field is the primary consumer.
 
 ### Generators vs curve-driven
 - **Generators** ignore input geometry — apply to any object (a single-vertex mesh
@@ -158,8 +166,13 @@ Editing the build script and re-running is idempotent (groups/demo objects are
 purged and rebuilt by name).
 
 ## Not yet wired
-These are **authoring tools**, not finished prop GLBs. For a standalone prop export
-they'd still need a `prop_<id>_root` empty + primitive collider per the prop-export
-contract (`tools/blender/build_prop.py`); placed inside a track, the track export
-handles realisation + `kind` tagging. Per-tool asset previews and a settings-menu
-toggle are follow-ups.
+Most of these are **authoring tools**, not finished prop GLBs. For a standalone prop
+export they'd still need a `prop_<id>_root` empty + primitive collider per the
+prop-export contract (`tools/blender/build_prop.py`); placed inside a track, the
+track export handles realisation + `kind` tagging. Per-tool asset previews and a
+settings-menu toggle are follow-ups.
+
+**Exception — `HV_Cloud` is wired** (2026-06-06): exported to `cloud_*.glb` via
+[`build_cloud_props.py`](../tools/blender/build_cloud_props.py)
+(`pnpm gen:cloud-props`) and consumed by the hero cumulus field — see the cloud
+section above.

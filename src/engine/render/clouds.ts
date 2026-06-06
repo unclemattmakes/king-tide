@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type Node from 'three/src/nodes/core/Node.js'
 import {
@@ -17,6 +18,7 @@ import {
   vec3,
 } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
+import { assetUrl } from '@/engine/asset-url'
 import type { CloudFieldConfig } from '@/game/tracks/types'
 import type { SkyShared } from './sky'
 
@@ -259,6 +261,90 @@ function buildCloudMaterial(shared: SkyShared, coolHex: string, warmHex: string,
 type CloudInstance = { x0: number; z0: number; y: number; scale: number; yaw: number }
 type Variant = { mesh: THREE.InstancedMesh; inst: CloudInstance[] }
 
+/**
+ * Geonode cumulus variants — the `HV_Cloud` GLBs exported by
+ * `tools/blender/build_cloud_props.py`. The hero field loads these and instances
+ * their meshes in place of the hand-rolled {@link buildCumulusGeometry} blobs:
+ * same field system (drift, parallax, sky-locked material, instancing), far
+ * better silhouettes (voxel-remeshed billow + flat-compressed cumulus base).
+ * `variants` in the track config buckets the field across however many of these
+ * are used (cycling if it asks for more than exist).
+ */
+const CLOUD_VARIANT_IDS = [
+  'cloud_humilis',
+  'cloud_mediocris',
+  'cloud_congestus',
+  'cloud_stratocumulus',
+] as const
+
+/** Session-shared load of the geonode cloud geometries (resolved once, reused
+ *  across every track's cloud layer). Null until the first opted-in layer asks. */
+let cloudGeomPromise: Promise<THREE.BufferGeometry[]> | null = null
+
+function loadCloudGeometries(): Promise<THREE.BufferGeometry[]> {
+  if (cloudGeomPromise) return cloudGeomPromise
+  const loader = new GLTFLoader()
+  cloudGeomPromise = Promise.all(
+    CLOUD_VARIANT_IDS.map(async (id) => {
+      const gltf = await loader.loadAsync(assetUrl(`/assets/props/${id}.glb`))
+      let mesh: THREE.Mesh | null = null
+      gltf.scene.traverse((o) => {
+        if (!mesh && (o as THREE.Mesh).isMesh) mesh = o as THREE.Mesh
+      })
+      if (!mesh) throw new Error(`clouds: ${id}.glb has no mesh`)
+      return prepCloudGeometry(mesh)
+    }),
+  )
+  return cloudGeomPromise
+}
+
+/**
+ * Condition a loaded `HV_Cloud` mesh into a field-ready geometry: bake its world
+ * transform in, strip everything but position+normal, stamp the `aHeightT`
+ * base→crown ramp the cloud material reads, recentre (XZ centroid + vertical
+ * midpoint → origin), and normalise the wider footprint axis to 1 unit — so the
+ * field's metre `scaleRange` applies exactly as it does to {@link buildCumulusGeometry}.
+ */
+function prepCloudGeometry(mesh: THREE.Mesh): THREE.BufferGeometry {
+  mesh.updateWorldMatrix(true, false)
+  const g = mesh.geometry.clone()
+  g.applyMatrix4(mesh.matrixWorld)
+  for (const name of Object.keys(g.attributes)) {
+    if (name !== 'position' && name !== 'normal') g.deleteAttribute(name)
+  }
+
+  const pos = g.getAttribute('position') as THREE.BufferAttribute
+  const n = pos.count
+  let xMin = Infinity
+  let xMax = -Infinity
+  let yMin = Infinity
+  let yMax = -Infinity
+  let zMin = Infinity
+  let zMax = -Infinity
+  for (let i = 0; i < n; i++) {
+    xMin = Math.min(xMin, pos.getX(i))
+    xMax = Math.max(xMax, pos.getX(i))
+    yMin = Math.min(yMin, pos.getY(i))
+    yMax = Math.max(yMax, pos.getY(i))
+    zMin = Math.min(zMin, pos.getZ(i))
+    zMax = Math.max(zMax, pos.getZ(i))
+  }
+
+  // aHeightT is translation/scale-invariant → compute from raw y before moving.
+  const yRange = Math.max(1e-3, yMax - yMin)
+  const heightT = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    heightT[i] = Math.min(1, Math.max(0, (pos.getY(i) - yMin) / yRange))
+  }
+  g.setAttribute('aHeightT', new THREE.BufferAttribute(heightT, 1))
+
+  g.translate(-(xMin + xMax) * 0.5, -(yMin + yMax) * 0.5, -(zMin + zMax) * 0.5)
+  const s = 1 / Math.max(xMax - xMin, zMax - zMin, 1e-3)
+  g.scale(s, s, s)
+  g.computeBoundingSphere()
+  return g
+}
+
 export function createCloudLayer(deps: CloudLayerDeps): CloudLayer {
   const { scene, shared, config } = deps
 
@@ -341,6 +427,35 @@ export function createCloudLayer(deps: CloudLayerDeps): CloudLayer {
 
   scene.add(group)
 
+  // Procedural geometries this layer owns and must dispose. Each is removed
+  // from the set (and freed) as it's hot-swapped for its geonode counterpart;
+  // the geonode geometries are session-shared and never disposed here.
+  const ownedGeoms = new Set<THREE.BufferGeometry>(variants.map((v) => v.mesh.geometry))
+  let disposed = false
+
+  // Upgrade the field to the geonode `HV_Cloud` meshes once they load. Until
+  // then (a brief beat during track load) it renders the procedural blobs, and
+  // it silently keeps them if the GLBs can't be fetched — so the field never
+  // hard-depends on the assets being present.
+  loadCloudGeometries()
+    .then((geoms) => {
+      if (disposed || geoms.length === 0) return
+      for (let v = 0; v < variants.length; v++) {
+        const mesh = variants[v]!.mesh
+        const next = geoms[v % geoms.length]!
+        const prev = mesh.geometry
+        if (prev === next) continue
+        mesh.geometry = next
+        if (ownedGeoms.has(prev)) {
+          prev.dispose()
+          ownedGeoms.delete(prev)
+        }
+      }
+    })
+    .catch(() => {
+      /* keep the procedural fallback — non-fatal */
+    })
+
   function tick(time: number, _dt: number, focus: { x: number; z: number }): void {
     const driftX = wind.x * time
     const driftZ = wind.z * time
@@ -363,11 +478,13 @@ export function createCloudLayer(deps: CloudLayerDeps): CloudLayer {
   }
 
   function dispose(): void {
+    disposed = true
     scene.remove(group)
-    for (const { mesh } of variants) {
-      mesh.geometry.dispose()
-      scene.remove(mesh)
-    }
+    for (const { mesh } of variants) scene.remove(mesh)
+    // Free only the procedural geometries still owned (post-swap the meshes
+    // point at the session-shared geonode geometries, which outlive the layer).
+    for (const g of ownedGeoms) g.dispose()
+    ownedGeoms.clear()
     material.dispose()
   }
 
