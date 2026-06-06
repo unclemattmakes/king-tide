@@ -21,11 +21,12 @@ scanned oil-paint brush-style maps (`assets/styles/maps/oil_paint-*.exr`), via
 `tools/blender/harvest_brush_stamps.py`. Install the extension from
 `extensions.blender.org/add-ons/brushstroke-tools/` first.
 
-Shipping a sheet derived from these assets **requires attribution** per their
-licence — credited on the in-game **credits page**. Keep that credit in place if
-you re-roll the stamps. (Only the flat stroke *textures* are used; the add-on's
-stroke *geometry* is render-only and never enters the game.) See the addon
-research note in memory (`reference_blender_brushstroke_tools`).
+Shipping a sheet derived from these assets **requires attribution**: the brush
+assets are **CC BY 4.0** (Blender Studio / Project Gold, © Blender Foundation),
+so a derived sheet ships commercially with credit — carried on the in-game
+**credits page** (`buildCredits()` in `src/engine/menus/menu-flow.ts`). Keep that
+credit in place if you re-roll the stamps. (Only the flat stroke *textures* are
+used; the add-on's stroke *geometry* is render-only and never enters the game.)
 
 ## Stamp format
 
