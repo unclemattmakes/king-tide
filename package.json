@@ -41,6 +41,7 @@
     "gen:decal-atlas": "python tools/blender/build_decal_atlas.py",
     "gen:trim-sheets": "python tools/blender/build_trim_sheets.py",
     "gen:brush-texture": "python tools/blender/build_brush_texture.py",
+    "gen:brush-stamps": "node tools/blender/seed.mjs harvest_brush_stamps.py",
     "install:blender-addon": "node tools/blender/install-addon.mjs",
     "test:blender": "node tools/blender/test-addon.mjs",
     "seed:landmarks-library": "node tools/blender/seed.mjs seed_landmarks_library.py",
