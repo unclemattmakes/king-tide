@@ -60,6 +60,7 @@ from __future__ import annotations
 import os
 import sys
 
+import bmesh
 import bpy
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -70,6 +71,7 @@ if _REPO_ROOT not in sys.path:
 from tools.blender.hoverbike_kinds import ExportedKind  # noqa: E402
 from tools.blender.vertex_attrs import (  # noqa: E402
     DEFAULT_TERRAIN,
+    set_color_attr,
     set_constant,
     set_linear_sway_z,
 )
@@ -294,21 +296,53 @@ def _strip_color_attrs(mesh: bpy.types.Mesh) -> None:
         mesh.color_attributes.remove(mesh.color_attributes[0])
 
 
+def _edge_convexity(mesh: bpy.types.Mesh, gain: float = 1.6) -> list[float]:
+    """Per-vertex convex-edge strength in [0, 1] (0 = flat/concave, 1 = a sharp
+    convex ridge). Scale-invariant: for each vertex it averages
+    ``dot(normalized incident-edge direction, vertex normal)`` — a convex vertex
+    has its edges trending *away* from the normal (negative dot), a concave one
+    *toward* it. The vinyl material drybrushes high values to pop raised edges
+    (the painted-miniature look), shimmer-free because it's smooth per-vertex
+    data baked at asset time (vs screen-space curvature, which catches the
+    tessellation). Index-aligned with ``mesh.vertices``."""
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    bm.normal_update()
+    bm.verts.ensure_lookup_table()
+    out = [0.0] * len(bm.verts)
+    for v in bm.verts:
+        acc, cnt = 0.0, 0
+        for e in v.link_edges:
+            d = e.other_vert(v).co - v.co
+            ln = d.length
+            if ln < 1e-9:
+                continue
+            acc += (d / ln).dot(v.normal)
+            cnt += 1
+        if cnt:
+            out[v.index] = max(0.0, min(1.0, -(acc / cnt) * gain))
+    bm.free()
+    return out
+
+
 def _stamp_color0(obj: bpy.types.Object, foliage: bool, *,
                   neutral_albedo: bool = False) -> None:
     _strip_color_attrs(obj.data)         # drop the generator's color layer(s) first
     if foliage:
         (_mn, _mny, mnz), (_mx, _mxy, mxz) = _local_bbox(obj)
         set_linear_sway_z(obj.data, z_min=mnz, z_max=mxz * 1.1, ao=1.0)
-    elif neutral_albedo:
-        # ``keep_material`` static props carry a real baseColorTexture. Because
-        # the runtime multiplies albedo by COLOR_0 (see NEUTRAL_COLOR0), the
-        # terrain default (1,1,0,0) would zero the texture's blue channel — a
-        # neutral white leaves the preserved texture untouched while still
-        # stamping the required single COLOR_0 (G=AO=1 → no darkening).
-        set_constant(obj.data, NEUTRAL_COLOR0)
     else:
-        set_constant(obj.data, DEFAULT_TERRAIN)
+        # Static prop. Base RGB from the neutral (keep_material) or terrain
+        # default, but bake per-vertex convex-edge strength into A: 1 = flat,
+        # <1 = convex ridge. The vinyl material reads (1 - A) as edge-wear, so a
+        # flat A=1 is a no-op and foliage (A=1 from the sway preset) is untouched.
+        # keep_material props keep NEUTRAL on RGB (the terrain default's B=0 would
+        # zero the preserved texture's blue), and A is safe to vary because
+        # vertex-colour alpha is ignored on opaque props.
+        base = NEUTRAL_COLOR0 if neutral_albedo else DEFAULT_TERRAIN
+        r, g, b = base[0], base[1], base[2]
+        conv = _edge_convexity(obj.data)
+        set_color_attr(obj.data, lambda i, _co: (r, g, b, 1.0 - conv[i]))
     # Make COLOR_0 active + render color so it exports at index 0 and the
     # Asset-Browser preview reads it.
     ca = obj.data.color_attributes

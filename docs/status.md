@@ -18,6 +18,32 @@
 > (the Mario-Kart fork), away from the press-forward-on-crest pump described
 > below. See [CLAUDE.md](../CLAUDE.md) and [product-plan.md](./product-plan.md).
 
+> **Last updated: 2026-06-05** — **Art Direction v2 (painterly-vinyl) + the prop
+> viewer.** The stylization register moved from flat-gradient "clean stylized
+> toy" to **painterly-vinyl** — clean cast forms wearing hand-painted *Sea of
+> Thieves* surfaces, read at speed like *TF2*, no outlines (locked in
+> [art-direction.md](./art-direction.md); the synthesis recipe + the multi-point
+> mesh-intake pipeline in [painterly-vinyl-pipeline.md](./painterly-vinyl-pipeline.md)).
+> First runtime code landed: a shared **`buildVinylMaterial`**
+> ([painterly-vinyl-material.ts](../src/engine/render/painterly-vinyl-material.ts))
+> wraps a prop's source albedo and layers rim + matte + procedural weathering +
+> an (opt-in) world-space waterline (bands factored into
+> [waterline.ts](../src/engine/render/waterline.ts)), converted once-per-asset in
+> `createPropsMesh`. The waterline is now **shader-driven by world-Y**, not baked
+> per-prop (supersedes the v1 `COLOR_0` bake). **Validation bench:** a stand-alone
+> **prop viewer** — `?propviewer=<assetId>`
+> ([src/viewer/prop-viewer.ts](../src/viewer/prop-viewer.ts)) — model-viewer
+> (orbit, neutral studio, 44-prop catalogue) with a **raw↔vinyl toggle (V)**, live
+> rim/weathering dials (`[ ]` / `; '`), waterline (W) + turntable (R). On clean
+> Quaternius atlas props the vinyl effect is subtle (they sit at the clean-vinyl
+> end by design); payoff grows on flat-tint AI props, with hand-painted textures,
+> and in scene-wide coherence. **In progress:** procedural brushstrokes (hit the
+> hand-painted read with minimal manual work). **TODO (not done):** a **dev menu**
+> that links every tool scene — `?propviewer`, `?viewer` (bike), `?calibrate`,
+> `?rideredit`, `?waveriders`, `?podium`, `?edit`, `?replay`, `?bench`,
+> `?track=prop-showcase` / `drift-test` — so they're discoverable instead of
+> hand-typed URLs (modes live in [url-modes.ts](../src/boot/url-modes.ts)).
+
 > **Last updated: 2026-06-05** — **Open Sea Cup → Harbor Cup (no-open-water
 > pass).** After a Reef-Cup playthrough flagged open-water maps as off-pillar,
 > the open-water **Open Sea Cup** was retired: every map must now combine

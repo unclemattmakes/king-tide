@@ -13,7 +13,8 @@ Channel semantics by material type — keep in sync with the spec:
         R = wind sway strength (0..1)
         G = AO multiplier      (0..1)
         B = phase offset       (0..1, wraps to 0..2π in shader)
-        A = free / per-prop
+        A = free / per-prop    (static vinyl props: 1 - edge-wear convexity,
+                                1 = flat, <1 = convex ridge; material reads 1-A)
 
     Terrain (mat_track_*):
         R = reserved
