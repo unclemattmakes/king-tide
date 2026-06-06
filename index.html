@@ -1917,6 +1917,57 @@
       }
       .bc-link:hover { color: var(--bc-ink); }
 
+      /* Credits screen — read-only third-party attribution (brush textures /
+         music / props). Reached from the mode-screen footer; the column list
+         scrolls inside #menu-stage and inherits keyboard / controller / touch
+         focus from the menu-flow poller. */
+      .bc-credits {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 24px 44px;
+        align-items: start;
+      }
+      .bc-credit-group h3 {
+        margin: 0 0 10px;
+        font-family: var(--bc-font-display);
+        font-size: 18px; letter-spacing: 0.2em;
+        color: var(--bc-cyan);
+      }
+      .bc-credit-group p {
+        margin: 0 0 14px; max-width: 46ch;
+        font-family: var(--bc-font-sans); font-weight: 300;
+        font-size: 13px; line-height: 1.65;
+        color: var(--bc-ink-dim);
+      }
+      .bc-credit-group p b { color: var(--bc-ink); font-weight: 600; }
+      .bc-credit-tracks { margin: 0; padding: 0; list-style: none; }
+      .bc-credit-tracks li {
+        display: flex; flex-direction: column;
+        padding: 7px 0; border-bottom: 1px solid var(--bc-line);
+      }
+      .bc-credit-tracks li:first-child { padding-top: 0; }
+      .bc-credit-title {
+        font-family: var(--bc-font-sans); font-weight: 600;
+        font-size: 13px; color: var(--bc-ink);
+      }
+      .bc-credit-by {
+        font-family: var(--bc-font-sans); font-size: 11px;
+        letter-spacing: 0.04em; color: var(--bc-ink-faint);
+      }
+      .bc-credit-links { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+      .bc-credit-links a {
+        display: inline-block; padding: 2px 0;
+        font-family: var(--bc-font-display);
+        font-size: 12px; letter-spacing: 0.16em;
+        color: var(--bc-cyan); text-decoration: none;
+        border-bottom: 1px solid transparent;
+        transition: color var(--t-fast), border-color var(--t-fast);
+      }
+      .bc-credit-links a:hover,
+      .bc-credit-links a.is-menu-focus {
+        color: var(--bc-ink); border-bottom-color: var(--bc-cyan);
+      }
+
       /* Bottom chyron — quieter, Apple-sport restraint:
          - the per-step eyebrow `.tag` lost its orange chip and now
            sits as a tracked small-caps label (or hides entirely when

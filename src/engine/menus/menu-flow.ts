@@ -1,4 +1,5 @@
 import { assetUrl } from '@/engine/asset-url'
+import { SOUNDTRACK } from '@/engine/audio/soundtrack.generated'
 import { buildCupRoster, startCup } from '@/engine/cup-progress'
 import { formatLap } from '@/engine/garage'
 import { getEndpoint, isRemoteEnabled } from '@/engine/leaderboard/endpoint'
@@ -73,6 +74,7 @@ type Step =
   | 'mp-entry'
   | 'tutorial-intro'
   | 'leaderboard'
+  | 'credits'
 
 const STEPS_SP_RACE: { id: Step; label: string }[] = [
   { id: 'title', label: 'START' },
@@ -359,6 +361,9 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         break
       case 'leaderboard':
         setChyron('', 'Time Trial + leaderboard backend ship in M16.')
+        break
+      case 'credits':
+        setChyron('', 'The artists, musicians and toolmakers behind Hoverbike.')
         break
     }
   }
@@ -749,6 +754,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     else if (currentStep === 'mp-entry') showStep('mode')
     else if (currentStep === 'tutorial-intro') showStep('mode')
     else if (currentStep === 'leaderboard') showStep('mode')
+    else if (currentStep === 'credits') showStep('mode')
   }
 
   const gamepadNav = installMenuGamepad({
@@ -898,6 +904,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           </div>
           <div class="right">
             <button class="bc-link" id="mode-leaderboards" type="button">LEADERBOARDS &middot;&middot;&middot;</button>
+            <button class="bc-link" id="mode-credits" type="button">CREDITS &middot;&middot;&middot;</button>
             <button class="bc-link" id="mode-making-of" type="button">MAKING OF &middot;&middot;&middot;</button>
             <button class="bc-link" id="mode-settings" type="button">SETTINGS &middot;&middot;&middot;</button>
           </div>
@@ -933,6 +940,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         })
       })
       el.querySelector('#mode-back')?.addEventListener('click', () => showStep('title'))
+      el.querySelector('#mode-credits')?.addEventListener('click', () => showStep('credits'))
       el.querySelector('#mode-making-of')?.addEventListener('click', () => {
         // The making-of microsite ships alongside the game at /making-of/.
         // Open it in a new tab so the menu stays put underneath.
@@ -1406,6 +1414,66 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       return el
     }
 
+    /** Credits screen — read-only third-party attribution for assets that
+     *  ship in the game. Three groups today: the Blender Studio brush
+     *  textures (CC BY 4.0 — attribution is *required*), the soundtrack
+     *  artists (driven off the generated `SOUNDTRACK` manifest so the list
+     *  can never drift from what actually plays), and Quaternius (CC0 props
+     *  — no attribution required, credited as a courtesy). Reached from the
+     *  mode-screen footer; it scrolls inside `#menu-stage` and inherits
+     *  keyboard / controller / touch nav from the menu-flow poller (the
+     *  BACK link + the external `<a>`s are all focusables). */
+    function buildCredits(): HTMLElement {
+      const el = document.createElement('section')
+      el.className = 'bc-screen'
+      const tracks = SOUNDTRACK.map(
+        (t) =>
+          `<li><span class="bc-credit-title">${escapeHtml(t.title)}</span><span class="bc-credit-by">${escapeHtml(t.artist)}</span></li>`,
+      ).join('')
+      el.innerHTML = `
+        <div class="bc-section-head">
+          <div>
+            <div class="title">CREDITS</div>
+            <div class="sub">THE ARTISTS, MUSICIANS &amp; TOOLMAKERS BEHIND HOVERBIKE</div>
+          </div>
+        </div>
+        <div class="bc-credits">
+          <section class="bc-credit-group">
+            <h3>BRUSH TEXTURES</h3>
+            <p>Hoverbike&rsquo;s hand-painted surfaces build on the <b>Brushstroke
+              Tools</b> oil-paint brush styles by <b>Simon Thommes / Blender Studio</b>
+              (Project Gold), &copy; Blender Foundation &mdash; licensed under
+              <b>CC&nbsp;BY&nbsp;4.0</b>. Modified for this game: the scanned brush maps
+              were sliced, recentred and baked into a single tiling brush-stroke texture.</p>
+            <div class="bc-credit-links">
+              <a href="https://studio.blender.org/tools/addons/brushstroke_tools" target="_blank" rel="noopener">studio.blender.org</a>
+              <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>
+            </div>
+          </section>
+          <section class="bc-credit-group">
+            <h3>MUSIC</h3>
+            <p>Soundtrack by these independent artists &mdash; each track remains
+              &copy; its creator, used with thanks.</p>
+            <ul class="bc-credit-tracks">${tracks}</ul>
+          </section>
+          <section class="bc-credit-group">
+            <h3>3D PROPS</h3>
+            <p>Environment and prop models by <b>Quaternius</b>, released into the public
+              domain (<b>CC0</b>). No attribution is required &mdash; we credit them here
+              with gratitude.</p>
+            <div class="bc-credit-links">
+              <a href="https://quaternius.com" target="_blank" rel="noopener">quaternius.com</a>
+            </div>
+          </section>
+        </div>
+        <div class="bc-actions">
+          <div class="left"><button class="bc-link primary" id="credits-back" type="button">&larr; MODE</button></div>
+        </div>
+      `
+      el.querySelector('#credits-back')?.addEventListener('click', () => showStep('mode'))
+      return el
+    }
+
     screens.title = buildTitle()
     screens.mode = buildMode()
     screens['sp-track'] = buildSpTrack()
@@ -1415,6 +1483,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     screens['mp-entry'] = buildMpEntry()
     screens['tutorial-intro'] = buildTutorialIntro()
     screens.leaderboard = buildLeaderboard()
+    screens.credits = buildCredits()
     for (const s of Object.values(screens)) stage?.appendChild(s!)
 
     showStep(opts.reason === 'exit-from-race' ? 'mode' : 'title')
