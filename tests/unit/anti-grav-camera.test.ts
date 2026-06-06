@@ -18,7 +18,7 @@ import {
   playerSettings,
   setAntiGravCameraIntensity,
 } from '../../src/engine/player-settings'
-import { createChaseCamera } from '../../src/engine/render/camera'
+import { CHASE_CAM_TUNING, createChaseCamera } from '../../src/engine/render/camera'
 
 function resetPlayerSettings(): void {
   playerSettings.wavePumpIntensity = DEFAULT_PLAYER_SETTINGS.wavePumpIntensity
@@ -67,10 +67,10 @@ describe('createChaseCamera anti-grav follow', () => {
     )
     chase.setAntiGravFollow(0)
     chase.snap(pos, rollQuat)
-    // Yaw-only frame: ideal offset (0, 5, -11) — camera should land
-    // at +y above the origin regardless of bike roll.
-    expect(camera.position.y).toBeGreaterThan(4)
-    expect(camera.position.y).toBeLessThan(6)
+    // Yaw-only frame ignores roll: the camera keeps its authored height
+    // (CHASE_CAM_TUNING.offsetY) regardless of the bike rolling onto its side.
+    // Asserted relative to the tunable so re-tuning the chase can't break this.
+    expect(camera.position.y).toBeCloseTo(CHASE_CAM_TUNING.offsetY, 3)
   })
 
   it('follows the bike full-frame when follow weight is 1', () => {
@@ -86,10 +86,10 @@ describe('createChaseCamera anti-grav follow', () => {
     )
     chase.setAntiGravFollow(1)
     chase.snap(pos, rollQuat)
-    // After a +90° Z roll, the original (0, +y) offset rotates to (-y,
-    // 0) — so the camera lands at negative X with near-zero Y.
-    expect(Math.abs(camera.position.y)).toBeLessThan(1.5)
-    expect(camera.position.x).toBeLessThan(-1.0)
+    // After a +90° Z roll the up-offset (0, offsetY) rotates to (−offsetY, 0):
+    // camera lands at −offsetY on X with ~0 Y. Relative to the tunable.
+    expect(Math.abs(camera.position.y)).toBeLessThan(0.5)
+    expect(camera.position.x).toBeCloseTo(-CHASE_CAM_TUNING.offsetY, 3)
   })
 
   it('snap() catches up the follow weight (no slide-in after respawn)', () => {
@@ -105,7 +105,8 @@ describe('createChaseCamera anti-grav follow', () => {
     // tick() which would lerp follow over ~150ms).
     chase.snap(pos, rollQuat)
     const xAfterSnap = camera.position.x
-    expect(xAfterSnap).toBeLessThan(-1.0)
+    // Full-follow applied in a single snap → camera at −offsetY on X.
+    expect(xAfterSnap).toBeCloseTo(-CHASE_CAM_TUNING.offsetY, 3)
   })
 
   it('blends between yaw-only and full frame proportionally', () => {

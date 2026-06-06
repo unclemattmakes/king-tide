@@ -55,15 +55,81 @@ const FOLLOW_SMOOTH_TAU = 0.15
  *  ~150ms), long enough that a tier transition doesn't snap. */
 const DRIFT_ROLL_TAU = 0.15
 
+/** Live-tunable chase-camera framing — what the `?camtune=1` in-game tuner
+ *  ([camera-tuner.ts](../../boot/camera-tuner.ts)) mutates. `createChaseCamera`
+ *  re-reads this every frame so edits show up live without recreating the
+ *  camera, and it's a single module-level object so it's shared across every
+ *  chase instance: tuning the race chase cam tunes the replay spectator-chase
+ *  cam to match (both go through `createChaseCamera`). */
+export type ChaseCamTuning = {
+  /** Camera position relative to the bike, in bike-local space (−Z is behind
+   *  the bike, +Y is up). */
+  offsetX: number
+  offsetY: number
+  offsetZ: number
+  /** Look-at point relative to the bike, in bike-local space (+Z is ahead). */
+  lookX: number
+  lookY: number
+  lookZ: number
+  /** Orbit (look-around) pivot: distance IN FRONT of the bike, bike-local +Z,
+   *  that the camera yaws/pitches around when the player looks with the right
+   *  stick / mouse. 0 = pivot about the bike centre (bike planted dead-centre,
+   *  world spins behind it); positive moves the pivot ahead so a look sweeps
+   *  the bike across the frame and leads the eye down-track. Only affects the
+   *  orbit — the steady-state follow is a rigid offset whose pivot is moot. */
+  orbitPivotForward: number
+  /** Follow-spring convergence rate (higher = snappier catch-up). */
+  damping: number
+}
+
+/**
+ * Chase framing for the 1× bike — dialed in live via `?camtune=1` and baked
+ * here. After the bike dropped 2× → 1× (half its old on-screen size, see
+ * BIKE_VISUAL_SCALE in render-systems.ts), the camera was tuned low, close and
+ * snappy so the small bike still reads big and the speed reads strong: a tight
+ * behind-the-bike chase that looks essentially AT the bike (look-ahead pulled
+ * almost to zero) on a fast follow spring. `orbitPivotForward` is 0 — the
+ * look-around pivots about the bike centre (the in-front-pivot knob stays in,
+ * just dialed off). Re-tune any time with `?camtune=1`; the race-intro
+ * CHASE_IDLE_OFFSET mirror tracks these values.
+ */
+export const CHASE_CAM_TUNING: ChaseCamTuning = {
+  offsetX: 0,
+  offsetY: 1.1,
+  offsetZ: -3.7,
+  lookX: 0,
+  lookY: 1.1,
+  lookZ: 1,
+  orbitPivotForward: 0,
+  damping: 12,
+}
+
+/** Frozen snapshot of the shipped defaults so the tuner can report the delta
+ *  you dialed in (tuned − baseline) — that delta is what gets propagated to
+ *  the other bike-framing cameras (broadcast, spectator-orbit, intro). */
+export const CHASE_CAM_BASELINE: Readonly<ChaseCamTuning> = Object.freeze({
+  ...CHASE_CAM_TUNING,
+})
+
 export function createChaseCamera(camera: THREE.PerspectiveCamera): ChaseCamera {
-  // Framing for the 1× bike (BIKE_VISUAL_SCALE reverted 2× → 1×, see
-  // render-systems.ts). The bike is now half its old on-screen size, so the
-  // chase distance is roughly doubled back to keep the same framing.
-  // Feel-tuned — dial to taste in playtest.
-  const idealOffset = new THREE.Vector3(0, 5, -11)
-  const idealLookAhead = new THREE.Vector3(0, 2, 12)
-  const damping = 6
   const orbitDamping = 10
+
+  // Framing scratch — refreshed from CHASE_CAM_TUNING each frame by
+  // syncTuning() so live tuner edits (and the values it restores from
+  // localStorage on boot) take effect without recreating the camera.
+  const idealOffset = new THREE.Vector3()
+  const idealLookAhead = new THREE.Vector3()
+  const orbitPivot = new THREE.Vector3()
+
+  /** Pull the latest tunable framing into the scratch vectors (in-place,
+   *  alloc-free). Called at the top of compute() and goalPose() so both the
+   *  steady-state follow and the intro-handoff read honour live edits. */
+  function syncTuning(): void {
+    const t = CHASE_CAM_TUNING
+    idealOffset.set(t.offsetX, t.offsetY, t.offsetZ)
+    idealLookAhead.set(t.lookX, t.lookY, t.lookZ)
+    orbitPivot.set(0, 0, t.orbitPivotForward)
+  }
 
   const goalPos = new THREE.Vector3()
   const goalLook = new THREE.Vector3()
@@ -89,6 +155,7 @@ export function createChaseCamera(camera: THREE.PerspectiveCamera): ChaseCamera 
   const goalYawQuat = new THREE.Quaternion()
 
   function compute(targetPos: THREE.Vector3, targetQuat: THREE.Quaternion) {
+    syncTuning()
     // Yaw-only frame for the chase camera — the steady-state default.
     // Yaw is extracted as Math.atan2(2(xz+yw), 1−2(x²+y²)).
     const qx = targetQuat.x
@@ -102,7 +169,18 @@ export function createChaseCamera(camera: THREE.PerspectiveCamera): ChaseCamera 
     tmpEuler.set(orbitPitch, orbitYaw, 0, 'YXZ')
 
     // Yaw-only goal: offset + look-ahead rotated by the bike's yaw only.
-    tmpOffset.copy(idealOffset).applyEuler(tmpEuler).applyQuaternion(yawQuat)
+    // The orbit (look-around) rotation pivots about `orbitPivot` — a point
+    // ahead of the bike — by subtracting it before the orbit euler and adding
+    // it back after, so a player look sweeps around in front of the vehicle
+    // rather than around its centre. At orbit 0 this is a no-op (sub then add
+    // the same vector, no rotation between), so the steady-state frame and the
+    // intro handoff (goalPose) are untouched.
+    tmpOffset
+      .copy(idealOffset)
+      .sub(orbitPivot)
+      .applyEuler(tmpEuler)
+      .add(orbitPivot)
+      .applyQuaternion(yawQuat)
     goalPos.copy(tmpOffset).add(targetPos)
     goalLook.copy(idealLookAhead).applyQuaternion(yawQuat).add(targetPos)
 
@@ -112,7 +190,12 @@ export function createChaseCamera(camera: THREE.PerspectiveCamera): ChaseCamera 
       // wall or upside-down loop the seat-of-the-pants view rotates
       // with the bike, exactly what the anti-grav signature mechanic
       // is supposed to feel like.
-      tmpOffsetFull.copy(idealOffset).applyEuler(tmpEuler).applyQuaternion(targetQuat)
+      tmpOffsetFull
+        .copy(idealOffset)
+        .sub(orbitPivot)
+        .applyEuler(tmpEuler)
+        .add(orbitPivot)
+        .applyQuaternion(targetQuat)
       tmpLookFull.copy(idealLookAhead).applyQuaternion(targetQuat)
       // Blend the two goals by the live follow weight (lerped toward
       // followTarget on the FOLLOW_SMOOTH_TAU time constant).
@@ -153,7 +236,7 @@ export function createChaseCamera(camera: THREE.PerspectiveCamera): ChaseCamera 
         currentLook.copy(goalLook)
         initialized = true
       } else {
-        const t = 1 - Math.exp(-dt * damping)
+        const t = 1 - Math.exp(-dt * CHASE_CAM_TUNING.damping)
         camera.position.lerp(goalPos, t)
         currentLook.lerp(goalLook, t)
       }
@@ -180,6 +263,7 @@ export function createChaseCamera(camera: THREE.PerspectiveCamera): ChaseCamera 
       initialized = true
     },
     goalPose(targetPos, targetQuat, outPos, outLook) {
+      syncTuning()
       // Yaw-only frame at orbit=0 / follow=0 — what `tick()` computes on
       // its very first call. Same math as `compute()` minus the orbit
       // rotation, written into the caller's vectors without touching
