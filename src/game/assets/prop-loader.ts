@@ -1,5 +1,6 @@
 import type * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js'
 
 import { ExportedKind } from '../../engine/asset-kinds'
 import type { Prop } from '../tracks/types'
@@ -71,6 +72,46 @@ export type LoadedProp = {
 
 const cache = new Map<string, Promise<LoadedProp>>()
 
+/** Auto-smooth crease angle (radians). Faces meeting ABOVE this angle stay hard;
+ *  everything flatter is smoothed — three's equivalent of Blender's "shade
+ *  auto-smooth". Set HIGH (~80°): the AI/CC0 organic meshes (buoys, rocks, hulls)
+ *  have irregular low-poly topology whose faces meet well past 30-40°, so a low
+ *  angle would crease almost everything (leaving them faceted). 80° smooths those
+ *  while still preserving near-perpendicular hard edges — crate/container/box
+ *  corners are ~90° and stay crisp. */
+const AUTO_SMOOTH_ANGLE = (80 * Math.PI) / 180
+
+/**
+ * De-facet a freshly loaded prop in place. Props arrive with whatever normals
+ * their GLB carries (Quaternius/AI meshes are frequently flat-shaded), so every
+ * non-skinned visual mesh gets `toCreasedNormals` once at load — smoothed
+ * normals with hard edges preserved above {@link AUTO_SMOOTH_ANGLE}. Runs on the
+ * shared geometry before any clone/instance, so all placements inherit it for
+ * free. `toCreasedNormals` rebuilds normals on a non-indexed copy that carries
+ * `uv` + `COLOR_0` through, so the vinyl material's albedo + AO reads still hold.
+ * Skinned meshes are skipped — they're hosted by the animated-prop path and we
+ * don't want to expand/disturb their skin attributes.
+ */
+function autoSmoothProp(rootObj: THREE.Object3D): void {
+  rootObj.traverse((obj) => {
+    const mesh = obj as THREE.Mesh
+    if (!mesh.isMesh || !mesh.geometry) return
+    if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) return
+    try {
+      const creased = toCreasedNormals(mesh.geometry, AUTO_SMOOTH_ANGLE)
+      const prev = mesh.geometry
+      mesh.geometry = creased
+      prev.dispose() // never GPU-uploaded yet (load time) — just frees CPU buffers
+    } catch (e) {
+      // Leave the original normals on any topology toCreasedNormals rejects.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[prop-loader] auto-smooth skipped for "${mesh.name || 'mesh'}": ${(e as Error).message}`,
+      )
+    }
+  })
+}
+
 export async function loadProp(url: string): Promise<LoadedProp> {
   let pending = cache.get(url)
   if (!pending) {
@@ -119,6 +160,9 @@ async function doLoad(url: string): Promise<LoadedProp> {
   if (!root) {
     throw new Error(`prop GLB ${url} is missing a node with extras.kind="${ExportedKind.PROP}"`)
   }
+  // De-facet every visual mesh once, on the shared geometry (before clone /
+  // instancing), so all placements read smooth. See autoSmoothProp.
+  autoSmoothProp(scene)
   const e = (root as THREE.Object3D).userData
   const out: LoadedProp = {
     root,

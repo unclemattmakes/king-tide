@@ -89,6 +89,20 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     return 'handled'
   }
 
+  // Stand-alone prop viewer: `?propviewer=<assetId>` (or `=1`/empty for the
+  // first catalogue prop). The validation bench for the painterly-vinyl look —
+  // one prop on a neutral studio stage, orbit cam, raw/vinyl toggle, live dials.
+  // No game boot. See src/viewer/prop-viewer.ts + docs/painterly-vinyl-pipeline.md.
+  const propViewerParam = earlyParams.get('propviewer')
+  if (propViewerParam !== null) {
+    setLoadingMessage('Loading prop viewer…')
+    const { bootPropViewer } = await import('@/viewer/prop-viewer')
+    const propId = propViewerParam === '1' || propViewerParam === '' ? null : propViewerParam
+    await bootPropViewer(appEl, { propId })
+    hideLoadingScreen()
+    return 'handled'
+  }
+
   // Rider-pose calibration scene: `?calibrate=1`. One bike + one rider,
   // orbit camera, turbulence generator. Used to dial in rest-pose joint
   // angles and reactive-pose tuning constants.

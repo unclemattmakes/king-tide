@@ -84,6 +84,14 @@ CC0 placeholders). See [docs/status.md](docs/status.md). Key planning docs:
   [docs/asset-pipeline-guide.md](docs/asset-pipeline-guide.md). Per-variant art
   direction + ComfyUI concept prompts:
   [docs/bike-art-direction.md](docs/bike-art-direction.md).
+- **The look / props** — how the painterly-vinyl look is achieved in-engine +
+  the multi-point mesh-intake pipeline (shape-only → fully textured):
+  [docs/painterly-vinyl-pipeline.md](docs/painterly-vinyl-pipeline.md). Validate +
+  tune props in the stand-alone **prop viewer** (`?propviewer=<assetId>`,
+  [src/viewer/prop-viewer.ts](src/viewer/prop-viewer.ts)). Other dev/tool scenes
+  are URL-param modes in [src/boot/url-modes.ts](src/boot/url-modes.ts) (`?viewer`
+  bike, `?calibrate`, `?rideredit`, `?waveriders`, `?podium`, `?edit`) — a dev
+  menu linking them is a TODO (see [docs/status.md](docs/status.md)).
 - **Blender scripts** live in `tools/blender/`. The Hoverbike addon
   (`tools/blender/hoverbike_addon/`, a package) is the user-facing
   entry point; `build_*.py` files regenerate `.blend`s from JSON specs.

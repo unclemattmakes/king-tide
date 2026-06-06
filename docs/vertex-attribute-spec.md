@@ -52,7 +52,7 @@ shader reads only the channels it knows about.
 | `R` | **Wind sway strength.** `0` = rigid, `1` = full sway. | Palm leaf tips → `1.0`; trunk base → `0.0`; smooth gradient between. |
 | `G` | **AO multiplier.** `1` = no darkening, `0` = full shadow. | Inside seams and under-leaf regions → low; exposed surfaces → `1`. |
 | `B` | **Per-instance animation phase offset** in `[0, 1)`. Used to desync a cluster's anim so it doesn't move in lockstep. | Authored at the GN-scatter level (random per instance) OR by `build_*.py` from a deterministic hash of the source mesh + transform. |
-| `A` | **Free / per-prop semantics.** E.g. emissive multiplier for buoys, tear-line mask for banners. | Document the per-prop usage where you set it. |
+| `A` | **Free / per-prop semantics.** On **static vinyl props** the conditioner bakes **`1 − edge-wear convexity`** here (`1` = flat, `<1` = convex ridge); the painterly-vinyl material reads `(1 − A)` to drybrush raised edges (`condition_ai_mesh._edge_convexity`). Else e.g. emissive multiplier for buoys, tear-line mask for banners. | Stamped automatically for static props; document any other per-prop usage where you set it. |
 
 ### Terrain (`mat_track_*`)
 

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { isAnimatedAssetProp, type LoadedProp } from '@/game/assets/prop-loader'
 import type { Prop, PropType } from '@/game/tracks/types'
 import { ExportedKind } from '../asset-kinds'
+import { buildVinylMaterial } from './painterly-vinyl-material'
 import { buildPropGeometry } from './props-geometry'
 
 /**
@@ -76,6 +77,38 @@ function collectPrototypeSubmeshes(loaded: LoadedProp): PrototypeSubmesh[] {
   return out
 }
 
+/** One painterly-vinyl material per (source material, prop-size bucket), shared
+ *  across every placement/sub-mesh that references it (conversion runs once per
+ *  asset, not per placement). The size bucket lets the material scale its brush
+ *  strokes + waterline band to the prop (see propSize in buildVinylMaterial), so
+ *  two differently-sized assets sharing a source material each still get the
+ *  right scale. Keyed weakly on the source so unloaded prop materials can be GC'd. */
+const vinylMaterialCache = new WeakMap<THREE.Material, Map<string, THREE.Material>>()
+
+/** Wrap a prop sub-mesh's material(s) in the painterly-vinyl runtime material,
+ *  caching by (source, propSize) so a material shared by reference converts once
+ *  per size. See painterly-vinyl-material.ts / docs/painterly-vinyl-pipeline.md. */
+function vinylizeMaterial(
+  mat: THREE.Material | THREE.Material[],
+  propSize: number,
+): THREE.Material | THREE.Material[] {
+  // Quantise to 0.5 m so near-identical sizes share a material (more cache hits).
+  const sizeKey = (Math.round(propSize * 2) / 2).toFixed(1)
+  const one = (m: THREE.Material): THREE.Material => {
+    let bySize = vinylMaterialCache.get(m)
+    if (!bySize) {
+      bySize = new Map()
+      vinylMaterialCache.set(m, bySize)
+    }
+    const cached = bySize.get(sizeKey)
+    if (cached) return cached
+    const v = buildVinylMaterial(m, { propSize })
+    bySize.set(sizeKey, v)
+    return v
+  }
+  return Array.isArray(mat) ? mat.map(one) : one(mat)
+}
+
 export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THREE.Group {
   const group = new THREE.Group()
   group.name = 'track:props'
@@ -133,6 +166,13 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
     const submeshes = collectPrototypeSubmeshes(loaded)
     if (submeshes.length === 0) continue
 
+    // The prop's intrinsic size (prototype bbox max dimension) drives the
+    // scale-relative brush + waterline band in the vinyl material — once per asset.
+    loaded.root.updateMatrixWorld(true)
+    const assetSize = new THREE.Vector3()
+    new THREE.Box3().setFromObject(loaded.root).getSize(assetSize)
+    const propSize = Math.max(assetSize.x, assetSize.y, assetSize.z, 0.05)
+
     // Precompute each placement's parent matrix once (shared across submeshes).
     const placementMatrices = bucket.map((p) => {
       pos.set(p.position.x, p.position.y, p.position.z)
@@ -142,7 +182,11 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
     })
 
     for (const sm of submeshes) {
-      const inst = new THREE.InstancedMesh(sm.geometry, sm.material, bucket.length)
+      const inst = new THREE.InstancedMesh(
+        sm.geometry,
+        vinylizeMaterial(sm.material, propSize),
+        bucket.length,
+      )
       inst.name = `track:props:${assetId}`
       inst.castShadow = true
       inst.receiveShadow = true
