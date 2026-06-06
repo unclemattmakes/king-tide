@@ -79,6 +79,15 @@ literal `8-vert / 6-face` cubes. A light **bevel + silhouette-cue pass** on the
 building kits is cheap and transforms the read.
 
 ### C. Dressing density — *use the Quaternius library*
+> **✅ First pass done 2026-06-05.** The library-swap for the box placeholders
+> shipped on all three Reef tracks: Cape Town's freighter→`cruise_ship`, container
+> box-blobs→118 real containers (red/rust), harbour skyline→houses/boats/crates;
+> South Beach wrecks→boats + 36 palms→`cc0` palms; Sandbar marina shack→
+> `ai/pilot_shack`. Cape Town now places 135 props, South Beach 38, Sandbar 26.
+> See [reef-cup-prop-replacement-catalog.md](reef-cup-prop-replacement-catalog.md).
+> Still open: emitters, market stalls, cute-fish in the aquarium tank, and the
+> hero hotels (modeling, not a swap).
+
 Per the CC0 `keep_material` lane (~56 multi-tone Quaternius props in
 `public/assets/props/cc0/`), most **dressing is a placement job, not a modelling
 job**: boats, crates, market stalls, barrels, urban kit, palms, cute-fish for

@@ -336,6 +336,2686 @@
         "y": 1.5,
         "z": 1.5
       }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/cruise_ship",
+      "position": {
+        "x": 158.095,
+        "y": 9.266,
+        "z": -268.965
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.707107,
+        "z": 0.0,
+        "w": 0.707107
+      },
+      "size": {
+        "x": 1.828,
+        "y": 1.828,
+        "z": 1.828
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -251.34,
+        "y": -1.039,
+        "z": -96.032
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.736513,
+        "z": 0.0,
+        "w": 0.676424
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -219.569,
+        "y": -0.169,
+        "z": -93.169
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.093474,
+        "z": 0.0,
+        "w": 0.995622
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -224.211,
+        "y": 5.403,
+        "z": -92.444
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.891171,
+        "z": 0.0,
+        "w": 0.453667
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -218.188,
+        "y": 0.484,
+        "z": -83.527
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.020415,
+        "z": 0.0,
+        "w": 0.999792
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -269.082,
+        "y": 0.556,
+        "z": -101.738
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.134015,
+        "z": 0.0,
+        "w": 0.990979
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -253.264,
+        "y": -0.169,
+        "z": -120.455
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.947374,
+        "z": 0.0,
+        "w": 0.320128
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -245.62,
+        "y": 5.402,
+        "z": -125.729
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.928072,
+        "z": 0.0,
+        "w": 0.372402
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -225.727,
+        "y": -0.694,
+        "z": -119.096
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.970618,
+        "z": 0.0,
+        "w": 0.240624
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -157.0,
+        "y": 0.987,
+        "z": -203.176
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.248057,
+        "z": 0.0,
+        "w": 0.968745
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -154.663,
+        "y": 1.497,
+        "z": -220.852
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.911186,
+        "z": 0.0,
+        "w": 0.411995
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -153.361,
+        "y": 7.069,
+        "z": -220.72
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.893792,
+        "z": 0.0,
+        "w": 0.448483
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -138.961,
+        "y": 9.628,
+        "z": -234.821
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.929145,
+        "z": 0.0,
+        "w": 0.369715
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -162.068,
+        "y": 2.387,
+        "z": -187.054
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.473883,
+        "z": 0.0,
+        "w": 0.880588
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -178.303,
+        "y": 2.37,
+        "z": -191.128
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.745399,
+        "z": 0.0,
+        "w": 0.666619
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -169.737,
+        "y": 7.942,
+        "z": -201.259
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.88312,
+        "z": 0.0,
+        "w": 0.469147
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -144.19,
+        "y": 6.48,
+        "z": -250.749
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.699575,
+        "z": 0.0,
+        "w": 0.714559
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -152.012,
+        "y": 12.052,
+        "z": -252.258
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.950473,
+        "z": 0.0,
+        "w": 0.310808
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -171.823,
+        "y": 1.97,
+        "z": -228.206
+      },
+      "rotation": {
+        "x": -0.235276,
+        "y": -0.901761,
+        "z": -0.11681,
+        "w": 0.34326
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -180.183,
+        "y": 2.799,
+        "z": -248.542
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.012185,
+        "z": 0.0,
+        "w": 0.999926
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -173.596,
+        "y": 8.371,
+        "z": -258.109
+      },
+      "rotation": {
+        "x": 0.092181,
+        "y": -0.986003,
+        "z": 0.088746,
+        "w": 0.106884
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -198.189,
+        "y": 2.775,
+        "z": -225.662
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.989451,
+        "z": 0.0,
+        "w": 0.14487
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -164.042,
+        "y": 5.181,
+        "z": -259.845
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.532246,
+        "z": 0.0,
+        "w": 0.84659
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -195.2,
+        "y": 3.113,
+        "z": -201.562
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.941972,
+        "z": 0.0,
+        "w": 0.335692
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/container_small",
+      "position": {
+        "x": -197.145,
+        "y": 2.039,
+        "z": -250.873
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.995457,
+        "z": 0.0,
+        "w": 0.095214
+      },
+      "size": {
+        "x": 1.942,
+        "y": 1.942,
+        "z": 1.942
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/container_small",
+      "position": {
+        "x": -226.058,
+        "y": 1.383,
+        "z": -213.13
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.371855,
+        "z": 0.0,
+        "w": 0.928291
+      },
+      "size": {
+        "x": 1.942,
+        "y": 1.942,
+        "z": 1.942
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -233.026,
+        "y": 1.28,
+        "z": -238.971
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.165893,
+        "z": 0.0,
+        "w": 0.986144
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -230.884,
+        "y": 6.852,
+        "z": -239.106
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.671071,
+        "z": 0.0,
+        "w": 0.741393
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/container_small",
+      "position": {
+        "x": -229.76,
+        "y": 0.547,
+        "z": -268.816
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.390121,
+        "z": 0.0,
+        "w": 0.920763
+      },
+      "size": {
+        "x": 1.942,
+        "y": 1.942,
+        "z": 1.942
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -232.922,
+        "y": 6.119,
+        "z": -268.69
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.590707,
+        "z": 0.0,
+        "w": 0.806886
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -201.097,
+        "y": -0.952,
+        "z": -273.282
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.998476,
+        "z": 0.0,
+        "w": 0.055188
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/container_small",
+      "position": {
+        "x": -217.325,
+        "y": -1.485,
+        "z": -294.404
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.661582,
+        "z": 0.0,
+        "w": 0.749873
+      },
+      "size": {
+        "x": 1.942,
+        "y": 1.942,
+        "z": 1.942
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -123.792,
+        "y": -2.179,
+        "z": -321.694
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.292779,
+        "z": 0.0,
+        "w": 0.95618
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -126.125,
+        "y": -0.933,
+        "z": -297.753
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.62337,
+        "z": 0.0,
+        "w": 0.781927
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -115.749,
+        "y": 4.639,
+        "z": -301.749
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.626175,
+        "z": 0.0,
+        "w": 0.779682
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -120.641,
+        "y": -1.714,
+        "z": -338.102
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.971318,
+        "z": 0.0,
+        "w": 0.237785
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -114.177,
+        "y": 3.858,
+        "z": -345.02
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.304286,
+        "z": 0.0,
+        "w": 0.952581
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -102.138,
+        "y": 0.145,
+        "z": -323.958
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.562626,
+        "z": 0.0,
+        "w": 0.826711
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -101.147,
+        "y": 5.717,
+        "z": -316.96
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.23874,
+        "z": 0.0,
+        "w": 0.971083
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -93.535,
+        "y": 0.899,
+        "z": -303.192
+      },
+      "rotation": {
+        "x": 0.233486,
+        "y": -0.127123,
+        "z": -0.124736,
+        "w": 0.955911
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -93.687,
+        "y": 6.471,
+        "z": -298.584
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.622167,
+        "z": 0.0,
+        "w": 0.782885
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -110.994,
+        "y": 7.666,
+        "z": -280.975
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.74006,
+        "z": 0.0,
+        "w": 0.672541
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -106.237,
+        "y": 13.238,
+        "z": -281.504
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.01438,
+        "z": 0.0,
+        "w": 0.999897
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -99.436,
+        "y": 0.503,
+        "z": -337.172
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.098144,
+        "z": 0.0,
+        "w": 0.995172
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -101.551,
+        "y": 6.075,
+        "z": -344.29
+      },
+      "rotation": {
+        "x": 0.034461,
+        "y": -0.446083,
+        "z": 0.015757,
+        "w": 0.894189
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/container_small",
+      "position": {
+        "x": -67.123,
+        "y": 5.839,
+        "z": -320.313
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.955761,
+        "z": 0.0,
+        "w": 0.294146
+      },
+      "size": {
+        "x": 1.942,
+        "y": 1.942,
+        "z": 1.942
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -75.83,
+        "y": 11.41,
+        "z": -320.791
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.69865,
+        "z": 0.0,
+        "w": 0.715464
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -70.422,
+        "y": 6.71,
+        "z": -304.281
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.99744,
+        "z": 0.0,
+        "w": 0.071513
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -77.995,
+        "y": 11.54,
+        "z": -285.618
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.946882,
+        "z": 0.0,
+        "w": 0.321581
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -76.846,
+        "y": 17.112,
+        "z": -280.818
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.225933,
+        "z": 0.0,
+        "w": 0.974143
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -57.674,
+        "y": 8.849,
+        "z": -345.692
+      },
+      "rotation": {
+        "x": -0.14697,
+        "y": -0.218534,
+        "z": 0.075653,
+        "w": 0.961727
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -45.341,
+        "y": 8.883,
+        "z": -322.787
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.49888,
+        "z": 0.0,
+        "w": 0.866671
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -48.552,
+        "y": 14.454,
+        "z": -330.199
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.024575,
+        "z": 0.0,
+        "w": 0.999698
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -53.301,
+        "y": 9.271,
+        "z": -306.283
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.409484,
+        "z": 0.0,
+        "w": 0.912318
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/container_small",
+      "position": {
+        "x": -54.953,
+        "y": 12.214,
+        "z": -283.273
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.946258,
+        "z": 0.0,
+        "w": 0.323412
+      },
+      "size": {
+        "x": 1.942,
+        "y": 1.942,
+        "z": 1.942
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -30.222,
+        "y": 6.568,
+        "z": -323.07
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.999351,
+        "z": 0.0,
+        "w": 0.03602
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -22.574,
+        "y": 5.827,
+        "z": -294.522
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.763824,
+        "z": 0.0,
+        "w": 0.645425
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -23.474,
+        "y": 11.398,
+        "z": -301.06
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.726316,
+        "z": 0.0,
+        "w": 0.687361
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -36.911,
+        "y": 10.285,
+        "z": -279.615
+      },
+      "rotation": {
+        "x": 0.200348,
+        "y": -0.963451,
+        "z": 0.141572,
+        "w": 0.107612
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": -34.463,
+        "y": 8.535,
+        "z": -335.854
+      },
+      "rotation": {
+        "x": 0.038336,
+        "y": -0.573464,
+        "z": -0.193322,
+        "w": 0.79517
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 3.97,
+        "y": 1.811,
+        "z": -322.868
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.317352,
+        "z": 0.0,
+        "w": 0.948308
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 3.793,
+        "y": 7.383,
+        "z": -325.223
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.466689,
+        "z": 0.0,
+        "w": 0.884421
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 4.6,
+        "y": 1.783,
+        "z": -303.33
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.363984,
+        "z": 0.0,
+        "w": 0.931405
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 3.064,
+        "y": 7.355,
+        "z": -295.601
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.58209,
+        "z": 0.0,
+        "w": 0.813124
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 11.987,
+        "y": 6.148,
+        "z": -334.846
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.333103,
+        "z": 0.0,
+        "w": 0.942891
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 28.735,
+        "y": -1.632,
+        "z": -321.652
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.992234,
+        "z": 0.0,
+        "w": 0.124388
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 27.976,
+        "y": 3.94,
+        "z": -321.714
+      },
+      "rotation": {
+        "x": -0.156578,
+        "y": -0.417886,
+        "z": 0.0129,
+        "w": 0.894812
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 19.589,
+        "y": -1.459,
+        "z": -306.333
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.059185,
+        "z": 0.0,
+        "w": 0.998247
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 27.109,
+        "y": 1.903,
+        "z": -279.303
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.532022,
+        "z": 0.0,
+        "w": 0.84673
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 19.024,
+        "y": 7.475,
+        "z": -279.22
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.753126,
+        "z": 0.0,
+        "w": 0.657876
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 83.566,
+        "y": -2.085,
+        "z": -302.668
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.971193,
+        "z": 0.0,
+        "w": 0.238294
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 88.786,
+        "y": -2.123,
+        "z": -314.086
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.992712,
+        "z": 0.0,
+        "w": 0.120507
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 77.557,
+        "y": 1.93,
+        "z": -281.206
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.218063,
+        "z": 0.0,
+        "w": 0.975935
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 96.966,
+        "y": -1.382,
+        "z": -325.937
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.771005,
+        "z": 0.0,
+        "w": 0.636829
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 96.715,
+        "y": 4.19,
+        "z": -327.071
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.800919,
+        "z": 0.0,
+        "w": 0.598773
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/container_small",
+      "position": {
+        "x": 101.551,
+        "y": 0.484,
+        "z": -304.079
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.300623,
+        "z": 0.0,
+        "w": 0.953743
+      },
+      "size": {
+        "x": 1.942,
+        "y": 1.942,
+        "z": 1.942
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 100.117,
+        "y": 6.056,
+        "z": -299.37
+      },
+      "rotation": {
+        "x": -0.054208,
+        "y": -0.964417,
+        "z": -0.084882,
+        "w": 0.244453
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 99.313,
+        "y": 4.012,
+        "z": -277.956
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.996454,
+        "z": 0.0,
+        "w": 0.084139
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 103.286,
+        "y": 9.583,
+        "z": -274.687
+      },
+      "rotation": {
+        "x": -0.048514,
+        "y": 0.867143,
+        "z": -0.035622,
+        "w": 0.494409
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 125.974,
+        "y": 5.309,
+        "z": -300.13
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.585572,
+        "z": 0.0,
+        "w": 0.810621
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 119.899,
+        "y": 10.881,
+        "z": -297.758
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.226806,
+        "z": 0.0,
+        "w": 0.97394
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 128.091,
+        "y": 4.614,
+        "z": -314.437
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.999844,
+        "z": 0.0,
+        "w": 0.017664
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 128.407,
+        "y": 10.186,
+        "z": -312.171
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.661203,
+        "z": 0.0,
+        "w": 0.750207
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/container_small",
+      "position": {
+        "x": 128.441,
+        "y": 9.146,
+        "z": -277.171
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.998409,
+        "z": 0.0,
+        "w": 0.056386
+      },
+      "size": {
+        "x": 1.942,
+        "y": 1.942,
+        "z": 1.942
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 126.33,
+        "y": 14.718,
+        "z": -285.24
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.584179,
+        "z": 0.0,
+        "w": 0.811625
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 157.794,
+        "y": 11.901,
+        "z": -294.595
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.33452,
+        "z": 0.0,
+        "w": 0.942389
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 154.571,
+        "y": 17.473,
+        "z": -293.507
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.988712,
+        "z": 0.0,
+        "w": 0.149828
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 128.712,
+        "y": 12.374,
+        "z": -261.06
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.700948,
+        "z": 0.0,
+        "w": 0.713212
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 128.978,
+        "y": 17.946,
+        "z": -261.62
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.759584,
+        "z": 0.0,
+        "w": 0.650409
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/container_small",
+      "position": {
+        "x": 150.23,
+        "y": 11.464,
+        "z": -310.866
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.992055,
+        "z": 0.0,
+        "w": 0.125808
+      },
+      "size": {
+        "x": 1.942,
+        "y": 1.942,
+        "z": 1.942
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 149.576,
+        "y": 17.036,
+        "z": -315.933
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.200414,
+        "z": 0.0,
+        "w": 0.979711
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 150.887,
+        "y": 14.912,
+        "z": -272.453
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.968695,
+        "z": 0.0,
+        "w": 0.248253
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 172.417,
+        "y": 14.546,
+        "z": -274.472
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.67163,
+        "z": 0.0,
+        "w": 0.740887
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 147.587,
+        "y": 15.408,
+        "z": -248.428
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.444313,
+        "z": 0.0,
+        "w": 0.895872
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 152.544,
+        "y": 20.98,
+        "z": -253.177
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.947849,
+        "z": 0.0,
+        "w": 0.318719
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 171.184,
+        "y": 16.589,
+        "z": -287.761
+      },
+      "rotation": {
+        "x": -0.09845,
+        "y": 0.951227,
+        "z": 0.046364,
+        "w": 0.288661
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/container_small",
+      "position": {
+        "x": 177.432,
+        "y": 6.747,
+        "z": -246.368
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.084616,
+        "z": 0.0,
+        "w": 0.996414
+      },
+      "size": {
+        "x": 1.942,
+        "y": 1.942,
+        "z": 1.942
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 178.596,
+        "y": 12.319,
+        "z": -245.161
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.413516,
+        "z": 0.0,
+        "w": 0.910497
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 195.068,
+        "y": 10.372,
+        "z": -272.266
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.855656,
+        "z": 0.0,
+        "w": 0.517546
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 199.014,
+        "y": 15.944,
+        "z": -276.741
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.712135,
+        "z": 0.0,
+        "w": 0.702043
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/container_small",
+      "position": {
+        "x": 194.162,
+        "y": 5.989,
+        "z": -250.946
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.89095,
+        "z": 0.0,
+        "w": 0.454102
+      },
+      "size": {
+        "x": 1.942,
+        "y": 1.942,
+        "z": 1.942
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 203.304,
+        "y": 11.56,
+        "z": -252.294
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.157639,
+        "z": 0.0,
+        "w": 0.987497
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 154.187,
+        "y": 12.129,
+        "z": -224.793
+      },
+      "rotation": {
+        "x": 0.040833,
+        "y": 0.628686,
+        "z": -0.070394,
+        "w": 0.773389
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 163.145,
+        "y": 17.701,
+        "z": -224.978
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.7117,
+        "z": 0.0,
+        "w": 0.702484
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/container_small",
+      "position": {
+        "x": 181.892,
+        "y": 4.525,
+        "z": -227.936
+      },
+      "rotation": {
+        "x": -0.181716,
+        "y": -0.836002,
+        "z": -0.135472,
+        "w": 0.499728
+      },
+      "size": {
+        "x": 1.942,
+        "y": 1.942,
+        "z": 1.942
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 176.821,
+        "y": 10.097,
+        "z": -224.94
+      },
+      "rotation": {
+        "x": 0.063242,
+        "y": 0.308368,
+        "z": -0.081036,
+        "w": 0.945697
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 206.493,
+        "y": -3.767,
+        "z": -226.041
+      },
+      "rotation": {
+        "x": -0.010902,
+        "y": 0.846394,
+        "z": -0.247246,
+        "w": 0.471558
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 200.736,
+        "y": 1.804,
+        "z": -224.908
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.455178,
+        "z": 0.0,
+        "w": 0.890401
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 216.809,
+        "y": 1.406,
+        "z": -248.451
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.512533,
+        "z": 0.0,
+        "w": 0.858668
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 220.768,
+        "y": 6.978,
+        "z": -245.727
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.750282,
+        "z": 0.0,
+        "w": 0.661118
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 226.014,
+        "y": -2.958,
+        "z": -224.097
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.747975,
+        "z": 0.0,
+        "w": 0.663727
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 229.776,
+        "y": 2.614,
+        "z": -228.264
+      },
+      "rotation": {
+        "x": 0.131402,
+        "y": 0.974917,
+        "z": -0.156177,
+        "w": 0.088761
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 179.142,
+        "y": 3.431,
+        "z": -203.294
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.540698,
+        "z": 0.0,
+        "w": 0.841217
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 184.168,
+        "y": 9.002,
+        "z": -207.033
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.806826,
+        "z": 0.0,
+        "w": 0.59079
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 245.767,
+        "y": -1.376,
+        "z": -103.009
+      },
+      "rotation": {
+        "x": 0.068159,
+        "y": -0.684987,
+        "z": 0.071804,
+        "w": 0.721798
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 231.257,
+        "y": -0.435,
+        "z": -94.71
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.28819,
+        "z": 0.0,
+        "w": 0.957573
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 231.807,
+        "y": 5.137,
+        "z": -92.494
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.996474,
+        "z": 0.0,
+        "w": 0.083906
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 276.624,
+        "y": -0.53,
+        "z": -99.049
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.803713,
+        "z": 0.0,
+        "w": 0.595018
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/shipping_container",
+      "position": {
+        "x": 274.535,
+        "y": 5.042,
+        "z": -91.545
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.366824,
+        "z": 0.0,
+        "w": 0.930291
+      },
+      "size": {
+        "x": 1.466,
+        "y": 1.466,
+        "z": 1.466
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/house_1",
+      "position": {
+        "x": -55.0,
+        "y": 1.5,
+        "z": 378.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.996123,
+        "z": 0.0,
+        "w": 0.08797
+      },
+      "size": {
+        "x": 2.535,
+        "y": 2.535,
+        "z": 2.535
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/house_2",
+      "position": {
+        "x": -25.0,
+        "y": 1.5,
+        "z": 372.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.9848,
+        "z": 0.0,
+        "w": 0.17369
+      },
+      "size": {
+        "x": 2.163,
+        "y": 2.163,
+        "z": 2.163
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/house_3",
+      "position": {
+        "x": 5.0,
+        "y": 1.5,
+        "z": 380.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.997154,
+        "z": 0.0,
+        "w": 0.075396
+      },
+      "size": {
+        "x": 3.002,
+        "y": 3.002,
+        "z": 3.002
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/house_1",
+      "position": {
+        "x": 35.0,
+        "y": 1.5,
+        "z": 374.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.977236,
+        "z": 0.0,
+        "w": 0.212157
+      },
+      "size": {
+        "x": 2.363,
+        "y": 2.363,
+        "z": 2.363
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/house_2",
+      "position": {
+        "x": 150.0,
+        "y": 1.5,
+        "z": 376.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.999839,
+        "z": 0.0,
+        "w": 0.01794
+      },
+      "size": {
+        "x": 1.638,
+        "y": 1.638,
+        "z": 1.638
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/house_3",
+      "position": {
+        "x": 180.0,
+        "y": 1.5,
+        "z": 371.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.997746,
+        "z": 0.0,
+        "w": 0.067105
+      },
+      "size": {
+        "x": 2.716,
+        "y": 2.716,
+        "z": 2.716
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/house_1",
+      "position": {
+        "x": 210.0,
+        "y": 1.5,
+        "z": 380.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.975679,
+        "z": 0.0,
+        "w": 0.219206
+      },
+      "size": {
+        "x": 2.463,
+        "y": 2.463,
+        "z": 2.463
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/house_2",
+      "position": {
+        "x": 240.0,
+        "y": 1.5,
+        "z": 374.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.999993,
+        "z": 0.0,
+        "w": 0.003718
+      },
+      "size": {
+        "x": 2.013,
+        "y": 2.013,
+        "z": 2.013
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/boat",
+      "position": {
+        "x": 70.0,
+        "y": 0.3,
+        "z": 340.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.642788,
+        "z": 0.0,
+        "w": 0.766044
+      },
+      "size": {
+        "x": 0.646,
+        "y": 0.646,
+        "z": 0.646
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/boat",
+      "position": {
+        "x": 195.0,
+        "y": 0.3,
+        "z": 342.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.737277,
+        "z": 0.0,
+        "w": 0.67559
+      },
+      "size": {
+        "x": 0.646,
+        "y": 0.646,
+        "z": 0.646
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/barrel",
+      "position": {
+        "x": -27.806,
+        "y": 1.5,
+        "z": 366.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.434676,
+        "z": 0.0,
+        "w": 0.900587
+      },
+      "size": {
+        "x": 1.4,
+        "y": 1.4,
+        "z": 1.4
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/barrel",
+      "position": {
+        "x": 39.711,
+        "y": 1.5,
+        "z": 367.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.43981,
+        "z": 0.0,
+        "w": 0.898091
+      },
+      "size": {
+        "x": 1.4,
+        "y": 1.4,
+        "z": 1.4
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/crate",
+      "position": {
+        "x": 148.108,
+        "y": 1.5,
+        "z": 367.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.9993,
+        "z": 0.0,
+        "w": 0.037403
+      },
+      "size": {
+        "x": 1.4,
+        "y": 1.4,
+        "z": 1.4
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/crate",
+      "position": {
+        "x": 207.565,
+        "y": 1.5,
+        "z": 368.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.815251,
+        "z": 0.0,
+        "w": 0.579107
+      },
+      "size": {
+        "x": 1.4,
+        "y": 1.4,
+        "z": 1.4
+      }
+    },
+    {
+      "type": "asset",
+      "assetId": "cc0/crate",
+      "position": {
+        "x": 5.232,
+        "y": 1.5,
+        "z": 366.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": -0.337613,
+        "z": 0.0,
+        "w": 0.941285
+      },
+      "size": {
+        "x": 1.4,
+        "y": 1.4,
+        "z": 1.4
+      }
     }
   ],
   "gateSpacing": 150.0,
