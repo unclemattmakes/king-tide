@@ -8,9 +8,10 @@ import { createFxSystem } from '@/engine/render/fx'
 import { loadGateProp } from '@/engine/render/gate-prop'
 import { createPickupRenderSystem } from '@/engine/render/pickup-render'
 import { createPropsMesh } from '@/engine/render/props-mesh'
-import { createBikeRenderSystem } from '@/engine/render/render-systems'
+import { type BikeRenderRegistry, createBikeRenderSystem } from '@/engine/render/render-systems'
 import { createRenderer } from '@/engine/render/renderer'
 import { renderFrame } from '@/engine/render/renderer-service'
+import { createRiderMannequinSystem } from '@/engine/render/rider-mannequin'
 import { createRiderRenderSystem } from '@/engine/render/rider-systems'
 import { createScene } from '@/engine/render/scene'
 import { createSkySystem } from '@/engine/render/sky'
@@ -26,9 +27,9 @@ import {
   setShoreField,
 } from '@/engine/sim/water/wave-field'
 import { applyStoredWaterTuning } from '@/engine/water-debug-storage'
-import { loadBike } from '@/game/assets/bike-loader'
+import { type LoadedBike, loadBike } from '@/game/assets/bike-loader'
 import { type LoadedProp, loadProp } from '@/game/assets/prop-loader'
-import { resolveBikeVariant } from '@/game/bikes/variants'
+import { variantForAiSlot } from '@/game/bikes/variants'
 import { ControlIntentStore, RBHandleStore } from '@/game/components'
 import { createBike } from '@/game/entities/bike'
 import { createPropColliders } from '@/game/entities/props'
@@ -197,19 +198,53 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
       return handle
     }
 
-    // Single bike GLB — racer baseline for every attract rider.
-    const racerBikeGlb = await loadBike(assetUrl('/assets/bikes/racer.glb'))
+    // Mixed vehicle field — one bike per grid slot, each a different
+    // archetype drawn from the same AI_VARIANT_ROTATION the real grid uses
+    // (`variantForAiSlot`). With 5 slots that's the full lineup
+    // (Cruiser / Stunt / Racer / Scout / Sparrow), so the broadcast cuts
+    // between visibly distinct vehicles instead of five identical Racers.
+    // Slot 0 is the player in a real race, so AI slots are 1-based.
+    const grid = AI_GRID_SLOTS.slice(0, Math.min(5, AI_GRID_SLOTS.length))
+    const field = grid.map((slot, i) => ({ slot, variant: variantForAiSlot(i + 1) }))
+
+    // Load every bike GLB the field needs (+ the racer baseline as the
+    // registry default) and the rider mannequin rig, all in parallel.
+    // Failures degrade gracefully: a missing variant GLB falls back to the
+    // racer mesh, a missing rig falls back to the capsule rider.
+    const byVariantId: Record<string, LoadedBike> = {}
+    let riderRig: LoadedProp | undefined
+    const neededBikeIds = new Set<string>(field.map((f) => f.variant.id))
+    neededBikeIds.add('racer')
+    await Promise.all([
+      ...[...neededBikeIds].map(async (id) => {
+        try {
+          byVariantId[id] = await loadBike(assetUrl(`/assets/bikes/${id}.glb`))
+        } catch (err) {
+          console.warn(`[attract] bike GLB '${id}' failed to load:`, err)
+        }
+      }),
+      (async () => {
+        try {
+          riderRig = await loadProp(assetUrl('/assets/props/cc0/rider_mannequin.glb'))
+        } catch (err) {
+          console.warn('[attract] mannequin rig failed to load — using capsule rider:', err)
+        }
+      })(),
+    ])
     if (disposed) {
       disposeRenderer()
       return handle
     }
+    // The racer GLB is the registry default; without it there's nothing to
+    // render, so bail to the silent black-canvas fallback.
+    const racerBikeGlb = byVariantId.racer
+    if (!racerBikeGlb) throw new Error('attract: racer bike GLB failed to load')
+    const bikeRegistry: BikeRenderRegistry = { byVariantId, default: racerBikeGlb }
 
     // Spawn one bike per grid slot, all AI-controlled, NOT racer-tagged
-    // (the field loops the spline indefinitely; no lap counters, no
-    // finish state). Spread them around the spline so the broadcast
-    // camera always has something to cut between.
-    const racerVariant = resolveBikeVariant('racer')
-    const grid = AI_GRID_SLOTS.slice(0, Math.min(5, AI_GRID_SLOTS.length))
+    // (the field loops the spline indefinitely; no lap counters, no finish
+    // state). Each carries its variant's sim stats + variantId so it both
+    // handles AND renders as that archetype.
     const aiEids: number[] = []
     const halfStartYaw = track.start.yaw / 2
     const startQuat = {
@@ -218,24 +253,24 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
       z: 0,
       w: Math.cos(halfStartYaw),
     }
-    for (const slot of grid) {
+    for (const { slot, variant } of field) {
       const pos = resolveGridSlotWorld(track.start.position, track.start.yaw, slot.dx, slot.dz)
       const eid = createBike(sim, phys, {
         position: pos,
         yaw: track.start.yaw,
         asRacer: false,
         stats: {
-          ...racerVariant.stats,
-          bodyColor: racerVariant.bodyColor,
-          variantId: racerVariant.id,
+          ...variant.stats,
+          bodyColor: variant.bodyColor,
+          variantId: variant.id,
         },
         ai: { splineId: 'main', lineOffset: slot.lineOffset },
       })
-      const handle = RBHandleStore.get(eid)
-      if (handle) {
+      const rb = RBHandleStore.get(eid)
+      if (rb) {
         createRider(sim, phys, {
           bikeEid: eid,
-          bikeRbHandle: handle.handle,
+          bikeRbHandle: rb.handle,
           bikePos: pos,
           bikeRot: startQuat,
         })
@@ -246,11 +281,14 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     // tight pack — gives the broadcast a wider sample.
     staggerAlongSpline(track, phys.world, aiEids)
 
-    const bikeRender = createBikeRenderSystem(scene, sim, {
-      byVariantId: { racer: racerBikeGlb },
-      default: racerBikeGlb,
-    })
-    const riderRender = createRiderRenderSystem(scene, sim)
+    const bikeRender = createBikeRenderSystem(scene, sim, bikeRegistry)
+    // Rider visual: the rigged Quaternius mannequin — the default rider
+    // everywhere else (main.ts) — driven from the same 12 sim bone poses,
+    // with per-variant seated clips. Falls back to the capsule rig if the
+    // mannequin asset failed to load above.
+    const riderRender = riderRig
+      ? createRiderMannequinSystem(scene, sim, riderRig, bikeRegistry)
+      : createRiderRenderSystem(scene, sim)
     const pickupRender = createPickupRenderSystem(scene, sim)
     const combatRender = createCombatRenderSystem(scene, sim)
     const fxTick = createFxSystem(scene, sim, phys, waveField).tick
