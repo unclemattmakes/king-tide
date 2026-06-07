@@ -320,6 +320,171 @@ def _RealizedScatterInstances(scene: bpy.types.Scene):
 
 
 # ────────────────────────────────────────────────────────────────────
+# Auto dock colliders
+# ────────────────────────────────────────────────────────────────────
+#
+# Authors build a dock as ONE object (a curve + the HV_Dock GN modifier).
+# At export we give each one a temporary smooth-slab collision proxy
+# (HV_DockCollider, kind="collider_mesh") so the bike rides a clean swept
+# surface instead of every floating plank — then delete the proxies after
+# the GLB is written. The visible dock is also forced to export render-only
+# (kind="decoration") so its planks don't double-collide with the proxy.
+# (See docs / the dock_smooth_collider memory for the why.)
+
+# HV_Dock inputs whose values must be mirrored onto the collider so the
+# proxy lines up with the visible deck + pylons.
+_DOCK_SHARED_INPUTS = (
+    "Deck Width",
+    "Plank Thickness",
+    "Pylon Spacing",
+    "Pylon Radius",
+    "Pylon Above",
+    "Pylon Drop",
+)
+
+
+def _is_dock_modifier(m: bpy.types.Modifier) -> bool:
+    return m.type == "NODES" and m.node_group is not None and m.node_group.name == "HV_Dock"
+
+
+def _gn_inputs_by_name(node_group) -> dict[str, str]:
+    """Map an exposed GN input socket name → its identifier (for ``mod[id]``)."""
+    return {
+        it.name: it.identifier
+        for it in node_group.interface.items_tree
+        if getattr(it, "item_type", "") == "SOCKET" and it.in_out == "INPUT"
+    }
+
+
+def _ensure_dock_collider_group():
+    """Return the ``HV_DockCollider`` node group, building it from the
+    canonical tool (``tools/blender/build_geonode_props.py``) if the file
+    doesn't already carry it. Returns None if it can't be resolved — the
+    caller then leaves the docks untouched rather than ship a collider-less
+    deck."""
+    g = bpy.data.node_groups.get("HV_DockCollider")
+    if g is not None:
+        return g
+    from ._legacy import find_repo_root
+
+    repo = find_repo_root(bpy.data.filepath)
+    if not repo:
+        return None
+    path = os.path.join(repo, "tools", "blender", "build_geonode_props.py")
+    if not os.path.isfile(path):
+        return None
+    import importlib.util as _ilu
+
+    spec = _ilu.spec_from_file_location("hv_build_geonode_props", path)
+    if spec is None or spec.loader is None:
+        return None
+    try:
+        m = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        m.build_dock_collider()
+    except Exception:  # noqa: BLE001 — best effort; warn at the call site
+        return None
+    return bpy.data.node_groups.get("HV_DockCollider")
+
+
+@contextlib.contextmanager
+def _AutoDockColliders(scene: bpy.types.Scene):
+    """For every visible HV_Dock object, spawn a temporary collider proxy
+    (HV_DockCollider → ``kind="collider_mesh"``) and force the dock itself to
+    export as ``kind="decoration"``. Proxies + forced kinds are reverted on
+    exit, so the author's scene is unchanged. Yields the proxy count.
+
+    Each proxy gets its OWN copy of the dock's curve — a shared data-block
+    would make the glTF exporter dedup the proxy to the plank mesh (it dedups
+    shared source data even under ``export_apply``)."""
+    docks = [
+        o
+        for o in scene.objects
+        if o.type == "CURVE"
+        and not o.hide_viewport
+        and any(_is_dock_modifier(m) for m in o.modifiers)
+    ]
+    if not docks:
+        yield 0
+        return
+
+    ctree = _ensure_dock_collider_group()
+    spawned: list[bpy.types.Object] = []
+    spawned_curves: list[bpy.types.Curve] = []
+    kind_restore: list[tuple[bpy.types.Object, bool, object]] = []
+    try:
+        if ctree is None:
+            print(
+                "[hoverbike-addon] WARNING: HV_Dock object(s) present but "
+                "HV_DockCollider could not be built — docks exported WITHOUT a "
+                "collider. Run the geonode toolkit (build_geonode_props) once."
+            )
+            yield 0
+            return
+        cby = _gn_inputs_by_name(ctree)
+        for ob in docks:
+            # Force the visible dock render-only so its planks don't collide.
+            kind_restore.append((ob, "kind" in ob, ob.get("kind")))
+            ob["kind"] = "decoration"
+
+            # Mirror the dock's deck/pylon inputs onto the collider.
+            vals: dict[str, object] = {}
+            for m in ob.modifiers:
+                if _is_dock_modifier(m):
+                    dby = _gn_inputs_by_name(m.node_group)
+                    for k in _DOCK_SHARED_INPUTS:
+                        ident = dby.get(k)
+                        if ident is not None:
+                            try:
+                                vals[k] = m[ident]
+                            except Exception:  # noqa: BLE001
+                                pass
+                    break
+
+            curve_copy = ob.data.copy()
+            curve_copy.name = f"{ob.name}_autocol"
+            proxy = bpy.data.objects.new(f"{ob.name}_autocol", curve_copy)
+            # Mirror the full transform (incl. parenting) so the proxy lands
+            # exactly where the visible dock does.
+            proxy.parent = ob.parent
+            if ob.parent is not None:
+                proxy.matrix_parent_inverse = ob.matrix_parent_inverse.copy()
+            proxy.matrix_basis = ob.matrix_basis.copy()
+            for c in ob.users_collection or (scene.collection,):
+                c.objects.link(proxy)
+
+            cmod = proxy.modifiers.new("HV_DockCollider", "NODES")
+            cmod.node_group = ctree
+            for k, v in vals.items():
+                ident = cby.get(k)
+                if ident is not None:
+                    try:
+                        cmod[ident] = v
+                    except Exception:  # noqa: BLE001
+                        pass
+            proxy["kind"] = "collider_mesh"
+            spawned.append(proxy)
+            spawned_curves.append(curve_copy)
+
+        yield len(spawned)
+    finally:
+        for o in spawned:
+            for c in list(o.users_collection):
+                c.objects.unlink(o)
+            bpy.data.objects.remove(o, do_unlink=True)
+        for cu in spawned_curves:
+            try:
+                bpy.data.curves.remove(cu)
+            except Exception:  # noqa: BLE001
+                pass
+        for ob, had, old in kind_restore:
+            if had:
+                ob["kind"] = old
+            elif "kind" in ob:
+                del ob["kind"]
+
+
+# ────────────────────────────────────────────────────────────────────
 # Shared helpers
 # ────────────────────────────────────────────────────────────────────
 
@@ -625,9 +790,12 @@ class HOVERBIKE_OT_export_track(Operator):
         _ensure_active_object(context)
         try:
             with _PreviewCollectionsHidden(context.view_layer), \
-                 _RealizedScatterInstances(context.scene) as scatter_count:
+                 _RealizedScatterInstances(context.scene) as scatter_count, \
+                 _AutoDockColliders(context.scene) as dock_collider_count:
                 if scatter_count:
                     print(f"[hoverbike-addon] realized {scatter_count} scatter instance(s) for GLB export")
+                if dock_collider_count:
+                    print(f"[hoverbike-addon] auto-generated {dock_collider_count} dock collider proxy(ies) for GLB export")
                 bpy.ops.export_scene.gltf(
                     filepath=glb_path,
                     export_format="GLB",

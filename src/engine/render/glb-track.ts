@@ -98,6 +98,17 @@ export async function loadGlbTrackVisuals(
         mesh.receiveShadow = false
         return
       }
+      // Collide-but-don't-render proxies (e.g. HV_Dock's smooth swept
+      // deck slab). Hidden from render so only the paired `decoration`
+      // visual shows — but left in the scene graph so the trimesh-attach
+      // + heightmap traversals (which visit invisible objects) still find
+      // it and build the collider against it.
+      if (obj.userData?.kind === ExportedKind.COLLIDER_MESH) {
+        mesh.visible = false
+        mesh.castShadow = false
+        mesh.receiveShadow = false
+        return
+      }
       mesh.castShadow = true
       mesh.receiveShadow = true
     }

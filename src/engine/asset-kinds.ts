@@ -51,6 +51,20 @@ export const ExportedKind = {
    * `height`, etc.). */
   COLLIDER: 'collider',
 
+  /** Collide-but-don't-render mesh — a real triangle mesh that gets a
+   *  trimesh collider (exactly like `track`) but is HIDDEN from render.
+   *  The vehicle pattern (a hidden primitive `collider` empty + a
+   *  separate visible mesh) extended to curve-/generator-driven track
+   *  geometry, where the collider must be a swept surface, not a box.
+   *  Pair it with a detailed visible mesh tagged `decoration` (which
+   *  opts out of collision) to get a simplified invisible collision
+   *  proxy. First user: HV_Dock's smooth swept deck slab — the irregular
+   *  plank deck renders as `decoration`, this slab carries collision so
+   *  the bike rides a smooth surface instead of every floating plank.
+   *  Hidden by `loadGlbTrackVisuals` but INCLUDED by `attachTrackColliders`
+   *  and `buildTerrainHeightmap`, so collision + shoaling stay consistent. */
+  COLLIDER_MESH: 'collider_mesh',
+
   /** Prop root empty — every prop GLB carries exactly one. */
   PROP: 'prop',
 

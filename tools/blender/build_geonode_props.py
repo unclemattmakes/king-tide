@@ -197,17 +197,32 @@ def _single_vert_obj(name):
     return ob
 
 
-def _curve_obj(name, points):
-    """A poly curve host for curve-driven GN groups."""
+def _curve_obj(name, points, spline_type="BEZIER"):
+    """A curve host for curve-driven GN groups. Defaults to a smooth
+    AUTO-handle **bezier** through the control points — a flowing base line
+    for docks / ramps rather than the faceted segments a POLY curve gives
+    (the dock deck + its swept collider both read much cleaner off a bezier).
+    Pass ``spline_type="POLY"`` for the old hard-segment behaviour."""
     cu = bpy.data.curves.get(name)
     if cu:
         bpy.data.curves.remove(cu)
     cu = bpy.data.curves.new(name, "CURVE")
     cu.dimensions = "3D"
-    sp = cu.splines.new("POLY")
-    sp.points.add(len(points) - 1)
-    for i, p in enumerate(points):
-        sp.points[i].co = (p[0], p[1], p[2], 1.0)
+    if spline_type == "BEZIER":
+        sp = cu.splines.new("BEZIER")
+        sp.bezier_points.add(len(points) - 1)
+        for i, p in enumerate(points):
+            bp = sp.bezier_points[i]
+            bp.co = (p[0], p[1], p[2])
+            # AUTO handles -> Blender fits a smooth tangent through each
+            # control point; no manual handle placement needed.
+            bp.handle_left_type = "AUTO"
+            bp.handle_right_type = "AUTO"
+    else:
+        sp = cu.splines.new("POLY")
+        sp.points.add(len(points) - 1)
+        for i, p in enumerate(points):
+            sp.points[i].co = (p[0], p[1], p[2], 1.0)
     ob = bpy.data.objects.get(name)
     if ob:
         bpy.data.objects.remove(ob)
@@ -585,8 +600,20 @@ def build_dock() -> bpy.types.GeometryNodeTree:
     pos = _n(g, "GeometryNodeInputPosition", x=-1500, y=-700)
 
     # ============ PLANK DECK ============
+    # Capture the curve's per-point tilt into a generic "dock_tilt" float
+    # BEFORE Curve-to-Points — the built-in tilt isn't carried to resampled
+    # points but a generic POINT attribute is. Drives per-section deck banking
+    # (same mechanism as HV_Ramp). Only the PLANK branch reads it; the pylons
+    # use world-up instead, so they stay vertical regardless of tilt.
+    tilt_in = _n(g, "GeometryNodeInputCurveTilt", x=-1640, y=440)
+    tiltcap = _n(g, "GeometryNodeStoreNamedAttribute", x=-1560, y=380)
+    tiltcap.data_type = "FLOAT"; tiltcap.domain = "POINT"
+    tiltcap.inputs["Name"].default_value = "dock_tilt"
+    _link(g, gin.outputs["Geometry"], tiltcap.inputs["Geometry"])
+    _link(g, tilt_in.outputs["Tilt"], tiltcap.inputs["Value"])
+
     c2p = _n(g, "GeometryNodeCurveToPoints", x=-1400, y=240); c2p.mode = "LENGTH"
-    _link(g, gin.outputs["Geometry"], c2p.inputs["Curve"])
+    _link(g, tiltcap.outputs["Geometry"], c2p.inputs["Curve"])
     _link(g, gin.outputs["Plank Pitch"], c2p.inputs["Length"])
 
     # plank board: cube (X along path, Y across deck, Z up)
@@ -606,9 +633,22 @@ def build_dock() -> bpy.types.GeometryNodeTree:
     _link(g, pos.outputs["Position"], wn.inputs["Vector"]); _link(g, gin.outputs["Seed"], wn.inputs["W"])
     wn_col = _n(g, "ShaderNodeSeparateXYZ", x=-1240, y=-520); _link(g, wn.outputs["Color"], wn_col.inputs["Vector"])
 
-    # align X to tangent (Z up) + small random yaw/tilt
-    align = _n(g, "FunctionNodeAlignEulerToVector", x=-1080, y=-220); align.axis = "X"; align.pivot_axis = "Z"
-    _link(g, c2p.outputs["Tangent"], align.inputs["Vector"])
+    # Orient planks to the curve frame (matches HV_Ramp): +X along the 3-D
+    # tangent (planks pitch to follow the path's slope), then roll +Z onto a
+    # world-up vector that's been rotated around the tangent by the point's
+    # tilt — so tilt=0 lies FLAT and editing a control point's tilt banks that
+    # section of deck. Small random yaw/tilt jitter is layered on top.
+    e1 = _n(g, "FunctionNodeAlignEulerToVector", x=-1060, y=-160); e1.axis = "X"; e1.pivot_axis = "AUTO"
+    _link(g, c2p.outputs["Tangent"], e1.inputs["Vector"])
+    worldup = _n(g, "ShaderNodeCombineXYZ", x=-1280, y=-100); worldup.inputs["Z"].default_value = 1.0
+    tiltattr = _n(g, "GeometryNodeInputNamedAttribute", x=-1280, y=-20); tiltattr.data_type = "FLOAT"
+    tiltattr.inputs["Name"].default_value = "dock_tilt"
+    tiltedup = _n(g, "ShaderNodeVectorRotate", x=-1100, y=-60); tiltedup.rotation_type = "AXIS_ANGLE"
+    _link(g, worldup.outputs["Vector"], tiltedup.inputs["Vector"])
+    _link(g, c2p.outputs["Tangent"], tiltedup.inputs["Axis"])
+    _link(g, tiltattr.outputs["Attribute"], tiltedup.inputs["Angle"])
+    align = _n(g, "FunctionNodeAlignEulerToVector", x=-900, y=-180); align.axis = "Z"; align.pivot_axis = "X"
+    _link(g, e1.outputs["Rotation"], align.inputs["Rotation"]); _link(g, tiltedup.outputs["Vector"], align.inputs["Vector"])
     # random euler offset = (tilt, tilt, yaw) * Irregular
     rj = _n(g, "ShaderNodeVectorMath", x=-1240, y=-320, operation="MULTIPLY_ADD")  # color*2-1
     _link(g, wn.outputs["Color"], rj.inputs[0]); rj.inputs[1].default_value = (2.0, 2.0, 2.0); rj.inputs[2].default_value = (-1.0, -1.0, -1.0)
@@ -764,6 +804,134 @@ def build_dock() -> bpy.types.GeometryNodeTree:
     _link(g, join.outputs["Geometry"], realize.inputs["Geometry"])
     store = _store_color0(g, realize.outputs["Geometry"], rgba=(1.0, 1.0, 0.0, 0.0))
     store.location = (720, 300)
+    _link(g, store.outputs["Geometry"], gout.inputs["Geometry"])
+    return g
+
+
+# --------------------------------------------------------------------------
+# Tool 2b: Dock collider — invisible smooth swept deck slab + pylon posts
+# --------------------------------------------------------------------------
+def build_dock_collider() -> bpy.types.GeometryNodeTree:
+    """Collision proxy for HV_Dock.
+
+    The visible HV_Dock mesh instances a *separate cube per plank*, so the
+    runtime trimesh collider it would build is one bumpy box per plank with a
+    gap between each — heavy and rough to ride. This group sweeps ONE smooth
+    deck slab (Curve to Mesh of a rectangle profile, top flush with the plank
+    tops at curve level) plus simple low-poly pylon posts, so the bike rides a
+    clean continuous surface. Author it on a sibling object that SHARES the
+    dock's curve, tag the object ``kind="collider_mesh"`` (collides, hidden
+    from render) and tag the visible HV_Dock object ``kind="decoration"``
+    (renders, no collider). Drive the shared inputs (Deck Width, Pylon *)
+    with the SAME values as HV_Dock so the proxy matches the visible dock.
+    """
+    g = _new_tree("HV_DockCollider")
+    _out(g, "Geometry", "NodeSocketGeometry")
+    _in(g, "Geometry", "NodeSocketGeometry")  # the path curve (shared w/ HV_Dock)
+    _in(g, "Deck Width", "NodeSocketFloat", 3.2, mn=0.4, mx=20.0, subtype="DISTANCE")
+    # How deep the invisible slab hangs below the deck top. Generous by
+    # default — it never renders, and real volume keeps Rapier's discrete
+    # broadphase from tunnelling a fast bike through a thin plane.
+    _in(g, "Collider Depth", "NodeSocketFloat", 0.5, mn=0.05, mx=4.0, subtype="DISTANCE")
+    _in(g, "Plank Thickness", "NodeSocketFloat", 0.13, mn=0.02, mx=0.6, subtype="DISTANCE")
+    _in(g, "Pylon Spacing", "NodeSocketFloat", 3.2, mn=0.6, mx=12.0, subtype="DISTANCE")
+    _in(g, "Pylon Radius", "NodeSocketFloat", 0.24, mn=0.04, mx=1.5, subtype="DISTANCE")
+    _in(g, "Pylon Above", "NodeSocketFloat", 0.0, mn=0.0, mx=4.0, subtype="DISTANCE")
+    _in(g, "Pylon Drop", "NodeSocketFloat", 4.5, mn=0.2, mx=30.0, subtype="DISTANCE")
+
+    gin = _n(g, "NodeGroupInput", x=-1700, y=0)
+    gout = _n(g, "NodeGroupOutput", x=1500, y=0)
+    col_mat = _mat("mat_prop_dock_collider", (0.85, 0.12, 0.12, 1.0), roughness=1.0)
+
+    # ============ DECK SLAB (smooth continuous sweep) ============
+    # Force the curve frame level so the swept profile doesn't bank/roll:
+    # Z_UP aims the curve normal as close to world +Z as the tangent allows.
+    setn = _n(g, "GeometryNodeSetCurveNormal", x=-1400, y=320, mode="Z_UP")
+    _link(g, gin.outputs["Geometry"], setn.inputs["Curve"])
+
+    # Rectangle profile. Curve to Mesh (verified headless) maps profile +X ->
+    # the horizontal side and profile +Y -> the curve normal (≈ world +Z under
+    # Z_UP). So Width drives the HORIZONTAL deck width and Height the VERTICAL
+    # slab depth. (If a future Blender flips the convention, swap these two +
+    # the shift axis below.)
+    rect = _n(g, "GeometryNodeCurvePrimitiveQuadrilateral", x=-1200, y=160, mode="RECTANGLE")
+    _link(g, gin.outputs["Deck Width"], rect.inputs["Width"])
+    _link(g, gin.outputs["Collider Depth"], rect.inputs["Height"])
+    # Shift the profile so its TOP edge sits on the curve line — flush with the
+    # plank tops HV_Dock drops to curve level, so the bike rides the slab at the
+    # same height as the visible deck. Profile +Y maps to world -Z (verified
+    # headless), so a +Depth/2 profile-Y shift moves the slab DOWN to span world
+    # Z ∈ [-Depth, 0].
+    halfd = _n(g, "ShaderNodeMath", x=-1200, y=0, operation="MULTIPLY")
+    _link(g, gin.outputs["Collider Depth"], halfd.inputs[0]); halfd.inputs[1].default_value = 0.5
+    shv = _n(g, "ShaderNodeCombineXYZ", x=-1040, y=0)
+    _link(g, halfd.outputs["Value"], shv.inputs["Y"])
+    rxf = _n(g, "GeometryNodeTransform", x=-900, y=160)
+    _link(g, rect.outputs["Curve"], rxf.inputs["Geometry"]); _link(g, shv.outputs["Vector"], rxf.inputs["Translation"])
+
+    ctm = _n(g, "GeometryNodeCurveToMesh", x=-700, y=320)
+    _link(g, setn.outputs["Curve"], ctm.inputs["Curve"])
+    _link(g, rxf.outputs["Geometry"], ctm.inputs["Profile Curve"])
+    ctm.inputs["Fill Caps"].default_value = True  # closed solid beam (has volume)
+    slab_setmat = _set_material(g, ctm.outputs["Mesh"], col_mat); slab_setmat.location = (-520, 320)
+
+    # ============ PYLON POSTS (simple straight cylinders) ============
+    # Same placement as HV_Dock: points every Pylon Spacing, offset left/right
+    # to the deck edges along the horizontal normal (tangent × world-up).
+    c2pp = _n(g, "GeometryNodeCurveToPoints", x=-1400, y=-340, mode="LENGTH")
+    _link(g, gin.outputs["Geometry"], c2pp.inputs["Curve"])
+    _link(g, gin.outputs["Pylon Spacing"], c2pp.inputs["Length"])
+    zup = _n(g, "ShaderNodeCombineXYZ", x=-1400, y=-520); zup.inputs["Z"].default_value = 1.0
+    cross = _n(g, "ShaderNodeVectorMath", x=-1240, y=-380, operation="CROSS_PRODUCT")
+    _link(g, c2pp.outputs["Tangent"], cross.inputs[0]); _link(g, zup.outputs["Vector"], cross.inputs[1])
+    crossn = _n(g, "ShaderNodeVectorMath", x=-1080, y=-380, operation="NORMALIZE")
+    _link(g, cross.outputs["Vector"], crossn.inputs[0])
+    half_w = _n(g, "ShaderNodeMath", x=-1080, y=-240, operation="MULTIPLY_ADD")
+    _link(g, gin.outputs["Deck Width"], half_w.inputs[0]); half_w.inputs[1].default_value = 0.5; half_w.inputs[2].default_value = -0.12
+    offL = _n(g, "ShaderNodeVectorMath", x=-920, y=-380, operation="SCALE")
+    _link(g, crossn.outputs["Vector"], offL.inputs[0]); _link(g, half_w.outputs["Value"], offL.inputs["Scale"])
+    negw = _n(g, "ShaderNodeMath", x=-1080, y=-560, operation="MULTIPLY"); negw.inputs[1].default_value = -1.0
+    _link(g, half_w.outputs["Value"], negw.inputs[0])
+    offR = _n(g, "ShaderNodeVectorMath", x=-920, y=-500, operation="SCALE")
+    _link(g, crossn.outputs["Vector"], offR.inputs[0]); _link(g, negw.outputs["Value"], offR.inputs["Scale"])
+    ptsL = _n(g, "GeometryNodeSetPosition", x=-760, y=-380)
+    _link(g, c2pp.outputs["Points"], ptsL.inputs["Geometry"]); _link(g, offL.outputs["Vector"], ptsL.inputs["Offset"])
+    ptsR = _n(g, "GeometryNodeSetPosition", x=-760, y=-520)
+    _link(g, c2pp.outputs["Points"], ptsR.inputs["Geometry"]); _link(g, offR.outputs["Vector"], ptsR.inputs["Offset"])
+    ptsJ = _n(g, "GeometryNodeJoinGeometry", x=-600, y=-420)
+    _link(g, ptsL.outputs["Geometry"], ptsJ.inputs["Geometry"]); _link(g, ptsR.outputs["Geometry"], ptsJ.inputs["Geometry"])
+
+    # Post height: top at z = Pylon Above, bottom at z = -(Thickness + Drop),
+    # matching the visible pylon cone. Mesh Cylinder is origin-centred
+    # (z ∈ [-Depth/2, +Depth/2]) so translate up to (Above - Depth/2).
+    total_h0 = _n(g, "ShaderNodeMath", x=-1400, y=-720, operation="ADD")
+    _link(g, gin.outputs["Pylon Above"], total_h0.inputs[0]); _link(g, gin.outputs["Pylon Drop"], total_h0.inputs[1])
+    total_h = _n(g, "ShaderNodeMath", x=-1240, y=-720, operation="ADD")
+    _link(g, total_h0.outputs["Value"], total_h.inputs[0]); _link(g, gin.outputs["Plank Thickness"], total_h.inputs[1])
+    cyl = _n(g, "GeometryNodeMeshCylinder", x=-1080, y=-760)
+    cyl.inputs["Vertices"].default_value = 8
+    _link(g, gin.outputs["Pylon Radius"], cyl.inputs["Radius"])
+    _link(g, total_h.outputs["Value"], cyl.inputs["Depth"])
+    halfh = _n(g, "ShaderNodeMath", x=-1080, y=-900, operation="MULTIPLY"); halfh.inputs[1].default_value = -0.5
+    _link(g, total_h.outputs["Value"], halfh.inputs[0])
+    czf = _n(g, "ShaderNodeMath", x=-920, y=-900, operation="ADD")
+    _link(g, gin.outputs["Pylon Above"], czf.inputs[0]); _link(g, halfh.outputs["Value"], czf.inputs[1])
+    czv = _n(g, "ShaderNodeCombineXYZ", x=-760, y=-900); _link(g, czf.outputs["Value"], czv.inputs["Z"])
+    cylx = _n(g, "GeometryNodeTransform", x=-600, y=-760)
+    _link(g, cyl.outputs["Mesh"], cylx.inputs["Geometry"]); _link(g, czv.outputs["Vector"], cylx.inputs["Translation"])
+    iop = _n(g, "GeometryNodeInstanceOnPoints", x=-420, y=-420)
+    _link(g, ptsJ.outputs["Geometry"], iop.inputs["Points"])
+    _link(g, cylx.outputs["Geometry"], iop.inputs["Instance"])
+    pyl_setmat = _set_material(g, iop.outputs["Instances"], col_mat); pyl_setmat.location = (-240, -420)
+
+    # ============ JOIN / REALIZE / OUTPUT ============
+    join = _n(g, "GeometryNodeJoinGeometry", x=200, y=120)
+    _link(g, slab_setmat.outputs["Geometry"], join.inputs["Geometry"])
+    _link(g, pyl_setmat.outputs["Geometry"], join.inputs["Geometry"])
+    realize = _n(g, "GeometryNodeRealizeInstances", x=420, y=120)
+    _link(g, join.outputs["Geometry"], realize.inputs["Geometry"])
+    store = _store_color0(g, realize.outputs["Geometry"], rgba=(1.0, 1.0, 0.0, 0.0))
+    store.location = (720, 120)
     _link(g, store.outputs["Geometry"], gout.inputs["Geometry"])
     return g
 
@@ -1923,6 +2091,7 @@ def build_all(which=None):
         "rock": build_rock,
         "sea_stack": build_sea_stack,
         "dock": build_dock,
+        "dock_collider": build_dock_collider,
         "palm": build_palm,
         "ramp": build_ramp,
         "sea_arch": build_sea_arch,
@@ -1960,9 +2129,20 @@ def build_all(which=None):
 
     if "dock" in builders:
         tree = bpy.data.node_groups["HV_Dock"]
+        # Ensure the collider group exists even if build_all was called with
+        # which=["dock"] only — the addon's export-time auto-collider
+        # (_AutoDockColliders) clones it onto a temp proxy per dock.
+        if "HV_DockCollider" not in bpy.data.node_groups:
+            build_dock_collider()
         path = [(-12, 0, 0), (-6, 2.5, 0), (0, -1.5, 0), (6, 1.5, 0), (13, -0.5, 0)]
-        ob = _curve_obj("Dock_Demo", path)
+        # A dock is ONE authored object: a curve + the HV_Dock modifier, tagged
+        # "decoration" (render-only). The smooth swept-slab collider is built
+        # automatically at export and deleted afterwards — no second object to
+        # maintain. Planks follow the curve's per-point tilt (bank a section by
+        # editing its tilt); pylons stay vertical.
+        ob = _curve_obj("Dock_Demo", path)  # smooth bezier base
         _apply(ob, tree, {})
+        ob["kind"] = "decoration"
         _place(ob, (0.0, 22.0, 0.0), col)
         summary["objects"].append("Dock_Demo")
 

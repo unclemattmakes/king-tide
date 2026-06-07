@@ -82,6 +82,21 @@ class ExportedKind:
     # `height`, etc.) describing the primitive.
     COLLIDER = "collider"
 
+    # Collide-but-don't-render mesh — a real triangle mesh the runtime
+    # builds a trimesh collider against (exactly like `track`) but HIDES
+    # from render. The vehicle pattern (a hidden primitive `collider`
+    # empty paired with a separate visible mesh) applied to curve-/
+    # generator-driven *track* geometry, where the collider has to be a
+    # swept surface rather than a box. Use it to pair a detailed visible
+    # mesh (tagged `decoration`, so it doesn't collide) with a simplified
+    # invisible collision proxy. First user: HV_Dock's smooth swept deck
+    # slab — the irregular plank deck renders as `decoration`, this slab
+    # carries the collision so the bike rides a smooth surface instead of
+    # every floating plank. Skipped by render (hidden in glb-track's
+    # loadGlbTrackVisuals) but INCLUDED by the trimesh-collider attach +
+    # the terrain heightmap, so collision + shoaling stay consistent.
+    COLLIDER_MESH = "collider_mesh"
+
     # Prop root empty — every prop GLB carries exactly one.
     PROP = "prop"
 
