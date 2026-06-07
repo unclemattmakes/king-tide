@@ -78,9 +78,9 @@ export function nearestAnchorInsertIndex(hit: { x: number; z: number }, anchors:
   if (anchors.length === 0) return 0
   let bestI = anchors.length
   let bestD = Infinity
-  for (let i = 0; i < anchors.length; i++) {
-    const a = anchors[i]!
-    const b = anchors[(i + 1) % anchors.length]!
+  for (const [i, a] of anchors.entries()) {
+    const b = anchors[(i + 1) % anchors.length]
+    if (!b) continue
     const d = distToSegmentXZ(hit.x, hit.z, a.x, a.z, b.x, b.z)
     if (d < bestD) {
       bestD = d

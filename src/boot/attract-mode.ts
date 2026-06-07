@@ -218,8 +218,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
       z: 0,
       w: Math.cos(halfStartYaw),
     }
-    for (let i = 0; i < grid.length; i++) {
-      const slot = grid[i]!
+    for (const slot of grid) {
       const pos = resolveGridSlotWorld(track.start.position, track.start.yaw, slot.dx, slot.dz)
       const eid = createBike(sim, phys, {
         position: pos,
@@ -293,15 +292,15 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
       }
 
       // Refresh poses for the director.
-      for (let i = 0; i < aiEids.length; i++) {
-        const eid = aiEids[i]!
+      for (const [i, eid] of aiEids.entries()) {
         const h = RBHandleStore.get(eid)
         if (!h) continue
         const rb = phys.world.getRigidBody(h.handle)
         if (!rb) continue
+        const pose = tmpPoses[i]
+        if (!pose) continue
         const t = rb.translation()
         const q = rb.rotation()
-        const pose = tmpPoses[i]!
         pose.position.set(t.x, t.y, t.z)
         pose.quaternion.set(q.x, q.y, q.z, q.w)
         // Score: forward speed (rough leader bias). Doesn't have to be
@@ -365,8 +364,7 @@ function staggerAlongSpline(
   const spline = track.aiSplines.find((s) => s.id === 'main') ?? track.aiSplines[0]
   if (!spline || spline.points.length < 2) return
   const pts = spline.points
-  for (let i = 0; i < eids.length; i++) {
-    const eid = eids[i]!
+  for (const [i, eid] of eids.entries()) {
     const handleRecord = RBHandleStore.get(eid)
     if (!handleRecord) continue
     const rb = world.getRigidBody(handleRecord.handle) as {
@@ -377,8 +375,9 @@ function staggerAlongSpline(
     if (!rb) continue
     const frac = (i + 0.4) / eids.length
     const idx = Math.min(pts.length - 1, Math.floor(frac * pts.length))
-    const a = pts[idx]!
-    const b = pts[(idx + 1) % pts.length]!
+    const a = pts[idx]
+    const b = pts[(idx + 1) % pts.length]
+    if (!a || !b) continue
     const dx = b.x - a.x
     const dz = b.z - a.z
     const yaw = Math.atan2(dx, dz)

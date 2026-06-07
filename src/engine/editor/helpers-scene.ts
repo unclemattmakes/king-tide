@@ -100,40 +100,37 @@ export function createHelpersScene(opts: {
       helpers.set(k, h)
       helpersGroup.add(h)
     }
-    for (let i = 0; i < draft.checkpoints.length; i++) {
+    for (const [i, cp] of draft.checkpoints.entries()) {
       const k = `gate:${i}`
-      const h = makeGateHelper(draft.checkpoints[i]!, isSel(sel, { kind: 'gate', index: i }))
+      const h = makeGateHelper(cp, isSel(sel, { kind: 'gate', index: i }))
       h.userData.entityKey = k
       helpers.set(k, h)
       helpersGroup.add(h)
     }
-    for (let i = 0; i < draft.props.length; i++) {
+    for (const [i, prop] of draft.props.entries()) {
       const k = `prop:${i}`
-      const h = makePropHelper(draft.props[i]!, isSel(sel, { kind: 'prop', index: i }))
+      const h = makePropHelper(prop, isSel(sel, { kind: 'prop', index: i }))
       h.userData.entityKey = k
       helpers.set(k, h)
       helpersGroup.add(h)
     }
-    for (let i = 0; i < draft.pickupSpawns.length; i++) {
+    for (const [i, spawn] of draft.pickupSpawns.entries()) {
       const k = `pickup:${i}`
-      const h = makePickupHelper(draft.pickupSpawns[i]!, isSel(sel, { kind: 'pickup', index: i }))
+      const h = makePickupHelper(spawn, isSel(sel, { kind: 'pickup', index: i }))
       h.userData.entityKey = k
       helpers.set(k, h)
       helpersGroup.add(h)
     }
-    for (let i = 0; i < draft.boostPads.length; i++) {
+    for (const [i, pad] of draft.boostPads.entries()) {
       const k = `pad:${i}`
-      const h = makePadHelper(draft.boostPads[i]!, isSel(sel, { kind: 'pad', index: i }))
+      const h = makePadHelper(pad, isSel(sel, { kind: 'pad', index: i }))
       h.userData.entityKey = k
       helpers.set(k, h)
       helpersGroup.add(h)
     }
-    for (let i = 0; i < draft.antiGravZones.length; i++) {
+    for (const [i, zone] of draft.antiGravZones.entries()) {
       const k = `antigrav:${i}`
-      const h = makeAntiGravHelper(
-        draft.antiGravZones[i]!,
-        isSel(sel, { kind: 'antiGrav', index: i }),
-      )
+      const h = makeAntiGravHelper(zone, isSel(sel, { kind: 'antiGrav', index: i }))
       h.userData.entityKey = k
       helpers.set(k, h)
       helpersGroup.add(h)
@@ -142,10 +139,10 @@ export function createHelpersScene(opts: {
     if (main) {
       const anchors = editableSplinePoints(draft)
       const isAnchored = !!main.anchors
-      for (let pi = 0; pi < anchors.length; pi++) {
+      for (const [pi, anchor] of anchors.entries()) {
         const k = `spline:0:${pi}`
         const selected = isSel(sel, { kind: 'spline', splineIndex: 0, pointIndex: pi })
-        const h = makeAnchorHelper(anchors[pi]!, selected, isAnchored)
+        const h = makeAnchorHelper(anchor, selected, isAnchored)
         h.userData.entityKey = k
         helpers.set(k, h)
         helpersGroup.add(h)
@@ -180,20 +177,24 @@ export function createHelpersScene(opts: {
       helpersGroup.add(splinePolyline)
       return
     }
-    for (let i = 0; i < main.points.length; i++) {
-      arr[i * 3] = main.points[i]!.x
-      arr[i * 3 + 1] = main.points[i]!.y + 0.2
-      arr[i * 3 + 2] = main.points[i]!.z
+    for (const [i, p] of main.points.entries()) {
+      arr[i * 3] = p.x
+      arr[i * 3 + 1] = p.y + 0.2
+      arr[i * 3 + 2] = p.z
     }
-    arr[main.points.length * 3] = main.points[0]!.x
-    arr[main.points.length * 3 + 1] = main.points[0]!.y + 0.2
-    arr[main.points.length * 3 + 2] = main.points[0]!.z
+    // Close the loop back to the first point. `length >= 2` is guaranteed by
+    // the early return above, so `first` is always defined.
+    const first = main.points[0]
+    if (first) {
+      arr[main.points.length * 3] = first.x
+      arr[main.points.length * 3 + 1] = first.y + 0.2
+      arr[main.points.length * 3 + 2] = first.z
+    }
     ;(splinePolyline.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true
   }
 
   function refreshBoundGateHelpers(): void {
-    for (let i = 0; i < draft.checkpoints.length; i++) {
-      const cp = draft.checkpoints[i]!
+    for (const [i, cp] of draft.checkpoints.entries()) {
       if (typeof cp.splineT !== 'number') continue
       const h = helpers.get(`gate:${i}`)
       if (!h) continue
