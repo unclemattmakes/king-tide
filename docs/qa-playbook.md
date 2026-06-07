@@ -291,8 +291,8 @@ through this list once per track:
       distinct from gate / lap dings.
 - [ ] Wave-line shimmer fans forward of the bike; lock pip turns
       yellow on a strong swell.
-- [ ] Anti-grav entry / exit visuals fire; camera intensity setting
-      respected.
+- _Anti-grav: **cut for v2** (parked for a possible DLC). No shipped track
+      places anti-grav zones, so there's nothing to verify here._
 - [ ] AI completes a full lap on each difficulty (Casual / Standard /
       Hard) within the lap-target window.
 - [ ] Rubber-band assist toggle takes effect mid-race without

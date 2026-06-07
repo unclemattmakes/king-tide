@@ -379,34 +379,6 @@ For full worked examples — Aqualand tsunami, Cape Town swell at a
 turn, Marina Bay harbour calm, Doge's Drift channelled chop — see
 the [Wave zones cookbook](./wave-zones).
 
-## Optional: anti-grav surfaces
-
-Curve-driven tubes, wall-rides, and loops. The tool sweeps a
-cross-section profile along a Bezier and auto-drops the entry /
-exit anti-grav zone empties that flip the bike's gravity at the
-boundaries.
-
-1. Hoverbike sidebar → **Anti-grav surfaces** → pick a **Profile**
-   (Tube / Ribbon / Banked strip). Tube uses *Radius* + *Sides*;
-   the other two use *Width* + *Thick*. *Samples* controls
-   arc-length density (48 is plenty for a single loop; bump for
-   long corkscrews).
-2. Click **Add Anti-Grav Curve** to drop a fresh
-   `antigrav_curve_NN` Bezier at the 3D cursor. Tab into edit
-   mode and shape the path.
-3. For a **Banked strip**, set per-control-point **Tilt** in
-   N-panel → Item → Tilt: 0 = flat, ±π/4 = banked corner,
-   ±π/2 = wall, ±π = ceiling. The **Anti-Grav presets** row in
-   the Gameplay sub-panel (in EDIT_CURVE mode) is one-click for
-   these values.
-4. Tab out, **Build Anti-Grav Surface**. The tool emits the
-   swept mesh + two oriented zone empties at the curve endpoints.
-
-`tracks-src/template-antigrav-showcase.blend` is the canonical
-reference — one tube corkscrew climbing a pillar, one ribbon
-wall-ride, one banked-strip loop. For full worked examples see the
-[Anti-grav surfaces cookbook](./antigrav-surfaces).
-
 ## Optional: horizon ring
 
 The runtime gives every track a procedural distant-mountain

@@ -9,6 +9,11 @@ For the full walk-through, see [Your first track](./your-first-track).
 For the panels + operators that author these conventions for you, see
 [Addon reference](./addon-reference).
 
+> **Anti-grav kinds are parked.** Anti-grav is cut (parked for a possible DLC).
+> The `antigrav_zone` / `antigrav_NN_surface` kinds and the `anti_grav` spline
+> flag still exist in the exporter and are listed below for completeness, but no
+> shipped track places them — don't author anti-grav into a v2 track.
+
 ## Object kinds — track mode
 
 | Kind | Naming pattern | Required Blender type | Required `extras` |
@@ -261,7 +266,6 @@ export always uses viewport visibility.
 - [Your first track](./your-first-track) — guided walk-through.
 - [Addon reference](./addon-reference) — every panel + operator.
 - [Wave zones cookbook](./wave-zones) — in-depth wave-mastery examples.
-- [Anti-grav surfaces cookbook](./antigrav-surfaces) — in-depth tube / ribbon / banked-strip examples.
 - [Modding → Tracks](/modding/tracks) — the spec-driven + editor-driven workflows.
 - [Modding → Bikes](/modding/bikes) — bike-specific authoring.
 - In-repo docs: [`docs/blender-pipeline-guide.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-pipeline-guide.md) — the source material these pages are distilled from.

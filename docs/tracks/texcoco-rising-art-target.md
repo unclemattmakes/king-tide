@@ -122,7 +122,7 @@ the **bright, instructive** waterline (this is among the friendliest in the set)
 ## Waterline trio (universal — per art-direction)
 
 Every static surface crossing the lake line gets three marks, bottom→top — a
-`COLOR_0`/decal job, **not** new geometry:
+**shader-driven** pass (world-Y waterline), **not** new geometry:
 
 1. **New-life fringe** (below + at line): chinampa reed / lily / algae skirt. *Blooming.*
 2. **Crust band** (at line): mineral / verdigris — keep it **bright and clean**, not grimy.
@@ -135,7 +135,7 @@ Every static surface crossing the lake line gets three marks, bottom→top — a
 2. **Causeway-run dressing** (beat 2) — the one place to spend prop density:
    painted facades, signage, banners, jacarandas.
 3. **El Ángel** (beat 4) — gold statue + collapsed-freeway ramp.
-4. **Waterline trio** decal/`COLOR_0` pass on every passed shore + the cathedral / causeway bases.
+4. **Waterline trio** (shader-driven, world-Y) on every passed shore + the cathedral / causeway bases.
 5. **Zócalo lagoon** (beat 3) — cathedral lean, Templo Mayor steps, trajineras.
 6. **Sparse life** — papel-picado drift, jacaranda fall, gilt flicker, distant volcano reflection.
 

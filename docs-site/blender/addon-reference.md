@@ -4,9 +4,8 @@ Comprehensive reference for the in-Blender addon — every panel, every
 operator, and the headless builders that mirror them. For a guided
 walk-through that uses these tools end-to-end, see
 [Your first track](./your-first-track). For worked examples of two
-of the more involved subsystems, see
-[Wave zones cookbook](./wave-zones) and
-[Anti-grav surfaces cookbook](./antigrav-surfaces).
+of the more involved subsystems, see the
+[Wave zones cookbook](./wave-zones).
 
 ## Top-level panel
 
@@ -148,6 +147,10 @@ canonical implementation.
 
 ### Anti-grav surfaces
 
+> **Parked — anti-grav is cut** (parked for a possible DLC). These operators
+> still ship in the addon, but no shipped track places anti-grav zones; don't
+> author anti-grav into a v2 track. Documented here for completeness.
+
 Sweep a cross-section profile along a Bezier curve to produce a
 drivable corkscrew tube, wall-ride ribbon, or banked / wall /
 ceiling strip — and auto-drop the entry / exit anti-grav zone
@@ -201,8 +204,6 @@ corkscrew climbing a pillar, one ribbon wall-ride, one banked-strip
 loop. Open it with **Hoverbike → Utility → New Map from Template**
 to start a new track from this base.
 :::
-
-For workflow walk-throughs see [Anti-grav surfaces cookbook](./antigrav-surfaces).
 
 ### Ramps
 

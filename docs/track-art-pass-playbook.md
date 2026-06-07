@@ -161,9 +161,11 @@ geometry), so the restored JSON stays perfectly consistent. Then **save the
 
 ## 7. Verification — what you can and can't check headlessly
 
-- **All prop GLBs fetch (no 404), no console errors, track loads** — checkable
-  via the Claude-Preview dev server (`?track=<id>`): `preview_network` (filter
-  `failed`), `__hover.qa.consoleHasErrors()`, `__hover.ready`.
+- **All prop GLBs fetch (no 404), no console errors, track loads** — checkable on
+  **your own** dev server (`pnpm dev --port <N> --strictPort`, then `?track=<id>`):
+  the network panel (filter `failed`), `__hover.qa.consoleHasErrors()`,
+  `__hover.ready`. Use your own browser + server, **not** the Claude in-app preview
+  or a shared tab (CLAUDE.md hard rule 2).
 - **AI lap completion / feel — NOT reliably checkable headlessly.** A
   backgrounded preview tab **pauses `requestAnimationFrame`** (`__hover.fps()`
   → 0), so the sim never steps and bikes read idle regardless of props.

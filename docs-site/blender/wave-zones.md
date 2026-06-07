@@ -1,9 +1,8 @@
 # Wave zones cookbook
 
-In-depth recipes for the **wave-zone** authoring tool — the
-wave-mastery analogue of anti-grav zones. Drop a `wave_zone_NN`
-empty, tune its custom properties, ship a track where the water
-is part of the racing instead of background fill.
+In-depth recipes for the **wave-zone** authoring tool. Drop a
+`wave_zone_NN` empty, tune its custom properties, ship a track
+where the water is part of the racing instead of background fill.
 
 This page assumes you've already read [Your first track](./your-first-track)
 and have a `.blend` open with `water_volume_main` placed. For the

@@ -135,7 +135,7 @@ This is the *spec image* for the waterline trio below — match it on every shor
 ## Waterline trio (universal — match `sandbar_waterline_detail`)
 
 Every static surface crossing the sea line (`y=−1.5`) gets three marks,
-bottom→top — a `COLOR_0`/decal job, **not** new geometry:
+bottom→top — a **shader-driven** pass (world-Y waterline), **not** new geometry:
 
 1. **New-life fringe** (below + at line): coral / kelp / algae skirt. *Blooming.*
 2. **Crust band** (at line): barnacle / verdigris / slime. *Broken* — keep it
@@ -149,7 +149,7 @@ bottom→top — a `COLOR_0`/decal job, **not** new geometry:
 2. **Terrain `COLOR_0`** elevation bands (wet-sand → sand → green → neutral peak),
    awash-band wet-sand at the east bar.
 3. **Marina hub set-piece** (beat 2) — the one place to spend prop density.
-4. **Waterline trio** decal/`COLOR_0` pass on every passed shore + the pilings.
+4. **Waterline trio** (shader-driven, world-Y) on every passed shore + the pilings.
 5. **Crest-launch** dune material + clean-sky framing.
 6. **Sparse life** — animated gulls, palm sway, buoy bob, a couple of distant
    wrecks for scale. A few moving things sell "alive."

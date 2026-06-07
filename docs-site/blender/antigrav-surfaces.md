@@ -1,5 +1,10 @@
 # Anti-grav surfaces cookbook
 
+> **Unpublished — anti-grav is cut** (parked for a possible DLC). This page is
+> kept in the repo for a possible future DLC but is excluded from the built
+> docs site (`srcExclude` in `.vitepress/config.ts`); no shipped track places
+> anti-grav zones. Don't author anti-grav into a v2 track.
+
 In-depth recipes for the **anti-grav surfaces** authoring tool.
 Sweep a cross-section profile (tube / ribbon / banked strip) along
 a Bezier curve to produce a drivable corkscrew, wall-ride, or loop

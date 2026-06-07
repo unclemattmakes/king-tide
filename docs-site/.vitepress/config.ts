@@ -6,6 +6,11 @@ export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
 
+  // Anti-grav is cut (parked for a possible DLC). Its authoring cookbook is
+  // kept in-repo but excluded from the built site so modders aren't shown a
+  // feature no shipped track uses.
+  srcExclude: ['blender/antigrav-surfaces.md'],
+
   head: [['link', { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }]],
 
   themeConfig: {
@@ -70,10 +75,7 @@ export default defineConfig({
         },
         {
           text: 'Cookbooks',
-          items: [
-            { text: 'Wave zones', link: '/blender/wave-zones' },
-            { text: 'Anti-grav surfaces', link: '/blender/antigrav-surfaces' },
-          ],
+          items: [{ text: 'Wave zones', link: '/blender/wave-zones' }],
         },
       ],
       '/reference/': [

@@ -1,5 +1,14 @@
 # Hoverbike — v1 Work Breakdown
 
+> **⚠ v2 status (2026-06).** A v1 execution log — several rows below are
+> v1-historical. **Anti-grav is cut** (parked for a possible DLC): the
+> "Anti-grav" row in the system matrix ("controller flips, geometry rideable"),
+> the anti-grav HUD / indicator slots, and milestone items like "add anti-grav
+> lighthouse corkscrew" are **retired** — no shipped track places anti-grav
+> zones. **Wave mastery** also pivoted to a motocross pitch-the-takeoff/landing
+> model, not the press-forward-on-crest pump these rows assume. Rows are left
+> as-authored for history; this banner + [status.md](./status.md) win on conflict.
+
 > Execution plan companion to [design-targets.md](./design-targets.md) (the
 > *what* and *why*) and [track-themes.md](./track-themes.md) (the *world*).
 > This doc is the *how*: scaffolding-first phased work, per-domain task

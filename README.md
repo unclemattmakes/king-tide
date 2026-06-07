@@ -4,6 +4,16 @@ Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics a
 
 **Live:** [hoverbike-...vercel.app](https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app) — every push to `main` auto-deploys.
 
+> **⚠ v2 status (2026-06).** "What's playable" below is the **v1** lineup;
+> content restarted for **v2** since. Net corrections: `status: 'ship'` means
+> wired/playable, **not** art-complete (only **Sandbar** + **The Maw** are
+> dressed — the rest are greybox route-stubs); **anti-grav is cut** (parked for a
+> possible DLC — no shipped track places zones, and the tutorial's `ANTI-GRAV`
+> beat is parked with it); **wave mastery** is now a motocross *master-the-jump*
+> model (pitch the takeoff/landing), not the press-forward-on-crest pump; the
+> soundtrack is **CC0 placeholder**, licensing still open. See
+> [docs/status.md](docs/status.md) and [docs/product-plan.md](docs/product-plan.md).
+
 - [Status](docs/status.md) — current state, controls, known issues, roadmap
 - [Product plan](docs/product-plan.md) — vision + MVP scope
 - [Implementation plan](docs/implementation-plan.md) — architecture + milestones

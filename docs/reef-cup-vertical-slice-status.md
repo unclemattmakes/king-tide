@@ -1,5 +1,15 @@
 # Reef Cup — Vertical Slice Status & Path to Complete
 
+> ⚠️ **South Beach Sunken / Miami was cut (2026-06 content pass).** The Reef
+> opener is being rebuilt from scratch as **Texcoco Rising** (drowned Mexico City
+> — [tracks/texcoco-rising.md](tracks/texcoco-rising.md)). The Reef Cup roster is
+> now **Sandbar → Texcoco Rising → Cape Town Drift**; all "South Beach" rows and
+> blockers below are **historical** (the discarded Miami build), kept for the
+> flipped-normals render-bug lesson that carries over; the `COLOR_0`/waterline
+> finding below is **superseded** (see cross-cut #1). Sibling audits:
+> [reef-cup-art-quality-catalog.md](reef-cup-art-quality-catalog.md) +
+> [reef-cup-prop-replacement-catalog.md](reef-cup-prop-replacement-catalog.md).
+
 > **Date:** 2026-06-05 · **Scope:** the three Reef Cup tracks —
 > **Sandbar** (tutorial, technically "no cup" but ships in front of the Reef
 > Cup as the classroom), **South Beach Sunken** (Reef #1), **Cape Town Drift**
@@ -50,15 +60,19 @@ dressing, and proving the full 8-bike field completes each loop.**
 | **South Beach** | ✅ built (1.5 MB GLB, full Art-Deco kit + Versace + seaplane ramp) | ❌ sky preset chosen but **not graded** to sunset target; water choppy (Beaufort 4); waterline **off** | ❌ **buildings render dark** in-engine despite a colored material palette | **Dark-render bug** — colors aren't reaching the building masses | **~4–6 days** (diagnose + full grade/dress/wire) |
 | **Cape Town** | ✅ built (2.7 MB GLB, all landmarks + set-pieces) | ✅ cool `cape_town_blue` + clouds **landing**; water needs a calm slalom zone | ⚠️ Table Mtn + Cape Wheel **present but not reading**; harbour detail is flat | Landmark legibility + weathering/rust pass; `timeOfDay:125` anomaly | **~3–4 days** (legibility + dress + wire) |
 
-**The single highest-leverage finding:** a **vertex-color (`COLOR_0`) export
-gap** runs through all three tracks. Only the `terrain_mesh` carries `COLOR_0`;
+**The single highest-leverage finding** *(superseded 2026-06 — see cross-cut #1:
+the waterline + built/broken/blooming weathering are now **shader-driven**
+(painterly-vinyl default, #328) and reach every prop regardless of `COLOR_0`, so
+this no longer gates the look — `COLOR_0` now only carries sway/AO/biome)*. The
+original finding: a **vertex-color (`COLOR_0`) export gap** runs through all three
+tracks. Only the `terrain_mesh` carries `COLOR_0`;
 **every building/prop mesh ships without it** (South Beach 262/263 meshes
 missing, Cape Town 25/26, Sandbar's 16 marina props). The capture log throws
 30+ `THREE.AttributeNode: Vertex attribute "color" not found on geometry`
 warnings. This (a) is the likely contributor to South Beach reading dark, (b)
 means the **waterline trio + built/broken/blooming weathering can't reach any
-building or prop** on any track (it's a vertex-color/`COLOR_0` job per
-[art-direction.md](art-direction.md)), and (c) is a single pipeline fix that
+building or prop** on any track (the v1 framing; [art-direction.md](art-direction.md)
+now specs the waterline **shader-driven**, not a `COLOR_0` job), and (c) is a single pipeline fix that
 lifts all three at once. **Fix the export first.**
 
 ---
@@ -107,10 +121,14 @@ slice-internal.
   - `mat_terrain_main` has **no `baseColorFactor`** (`base=none`) — it tints
     *entirely* from `COLOR_0`. Terrain is the one mesh that has it, so terrain
     is fine; everything that relies on vertex color for tint/weathering is not.
-  - The **waterline trio** and the **built/broken/blooming weathering** are
-    authored as a `COLOR_0`/decal job (per [art-direction.md](art-direction.md)).
-    With no `COLOR_0` on buildings/props, **none of that reaches them** — which
-    is why `terrainShader.waterline` only ever affects the terrain today.
+  - **Superseded (2026-06 — painterly-vinyl is now the default look, #328):** the
+    **waterline trio** + **built/broken/blooming weathering** are **shader-driven**
+    (world-Y, applied by the shared vinyl material on top of any albedo —
+    [art-direction.md](art-direction.md)), so they reach every prop / building
+    **regardless of `COLOR_0`**. The "fix the `COLOR_0` export to get the
+    waterline/weathering" angle here is stale; `COLOR_0` now only carries
+    **sway / AO / path-worn / biome** (still worth exporting on props for *those*,
+    but it no longer gates the look).
   - It is **not** the cause of South Beach's dark render — that turned out to be
     **flipped normals** (confirmed by reading the GLB vertex normals; see that
     section). A missing `COLOR_0` fills vertex colour *white* in three.js, so it
