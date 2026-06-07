@@ -20,14 +20,15 @@
     "bloom": 0.699999988079071,
     "seaStateBeaufort": 5,
     "clouds": {
-      "count": 32,
+      "count": 34,
       "altitude": 360,
-      "altitudeJitter": 90,
-      "spreadRadius": 1300,
+      "altitudeJitter": 120,
+      "spreadRadius": 1700,
       "scaleRange": [
-        80,
-        180
+        220,
+        560
       ],
+      "towering": 0.6,
       "variants": 4,
       "wind": {
         "x": 5,

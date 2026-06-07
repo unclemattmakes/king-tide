@@ -7322,8 +7322,8 @@
   },
   "sky": {
     "tint": "#ffffff",
-    "cloudiness": 0.11999999731779099,
-    "cloudTowering": 0.10000000149011612,
+    "cloudiness": 0.18000000715255737,
+    "cloudTowering": 0.30000001192092896,
     "sunSize": 1.0,
     "sunIntensity": 1.0499999523162842,
     "fogNear": 700.0,
@@ -7333,14 +7333,15 @@
     "bloom": 0.1599999964237213,
     "seaStateBeaufort": 2,
     "clouds": {
-      "count": 18,
-      "altitude": 340.0,
-      "altitudeJitter": 75.0,
-      "spreadRadius": 1100.0,
+      "count": 26,
+      "altitude": 380.0,
+      "altitudeJitter": 130.0,
+      "spreadRadius": 1800.0,
       "scaleRange": [
-        70.0,
-        150.0
+        220.0,
+        560.0
       ],
+      "towering": 0.6,
       "variants": 4,
       "wind": {
         "x": 4.0,

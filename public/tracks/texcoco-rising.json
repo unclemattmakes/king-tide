@@ -451,14 +451,15 @@
     "bloom": 0.3499999940395355,
     "seaStateBeaufort": 4,
     "clouds": {
-      "count": 20,
-      "altitude": 330.0,
-      "altitudeJitter": 70.0,
-      "spreadRadius": 1200.0,
+      "count": 24,
+      "altitude": 340.0,
+      "altitudeJitter": 110.0,
+      "spreadRadius": 1600.0,
       "scaleRange": [
-        60.0,
-        140.0
+        200.0,
+        500.0
       ],
+      "towering": 0.55,
       "variants": 4,
       "wind": {
         "x": 1.6,
