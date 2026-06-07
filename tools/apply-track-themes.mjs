@@ -35,11 +35,13 @@ const THEMES = {
       wetBand: 2.0,
     },
   },
-  'south-beach-sunken': {
-    sky: { cloudiness: 0.18, colorGrade: 'miami_pastel', seaStateBeaufort: 2 },
+  'texcoco-rising': {
+    // Drowned Mexico City — high-altitude lake, rosa-mexicano + marigold
+    // palette, gold Ángel. Warm magenta lift, punchy saturation, calm lake.
+    sky: { cloudiness: 0.22, colorGrade: 'mexico_city_rosa', seaStateBeaufort: 2 },
     terrainShader: {
-      pathTint: [0.82, 0.72, 0.7],
-      saturation: 1.1,
+      pathTint: [0.5, 0.34, 0.3],
+      saturation: 1.15,
       wetBand: 2.5,
     },
   },

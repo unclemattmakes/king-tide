@@ -41,7 +41,10 @@ export const QA_MATRIX = [
   // flip to `status: 'ship'`; expand to all three bikes per track as
   // each cup goes live.
   { id: 'sandbar', bike: 'racer', enabled: true },
-  { id: 'south-beach-sunken', bike: 'racer', enabled: true },
+  // Texcoco Rising (Mexico City) replaced South Beach in the opener slot;
+  // it's a locked concept with no geometry yet, so it sits disabled like
+  // the Harbor concepts until its GLB lands.
+  { id: 'texcoco-rising', bike: 'racer', enabled: false },
   { id: 'cape-town-drift', bike: 'racer', enabled: true },
 
   // Harbor Cup (v2) — drowned harbor cities, replacing the Open Sea

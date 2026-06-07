@@ -585,6 +585,7 @@ export type SkyToneMapping = (typeof SKY_TONE_MAPPINGS)[number]
 export type SkyColorGrade =
   | 'neutral'
   | 'miami_pastel'
+  | 'mexico_city_rosa'
   | 'tokyo_neon'
   | 'big_sur_golden'
   | 'venice_warm'
@@ -595,6 +596,7 @@ export type SkyColorGrade =
 export const SKY_COLOR_GRADES: readonly SkyColorGrade[] = [
   'neutral',
   'miami_pastel',
+  'mexico_city_rosa',
   'tokyo_neon',
   'big_sur_golden',
   'venice_warm',

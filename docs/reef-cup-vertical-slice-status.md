@@ -218,15 +218,22 @@ decay. The `marina_hub` plate is the one hero set-piece.
 
 ---
 
-## South Beach Sunken — *Reef #1* (most built, worst-rendering)
+## South Beach Sunken — *Reef #1* (most built, worst-rendering) — ⚠️ CUT
 
-**Design intent** ([south-beach-sunken.md](tracks/south-beach-sunken.md)):
+> **Historical (pre-cut).** South Beach Sunken / Miami was **cut in the
+> 2026-06 content pass** and the Reef-opener slot rebuilt from scratch as
+> **Texcoco Rising** (drowned Mexico City — [tracks/texcoco-rising.md](tracks/texcoco-rising.md)),
+> currently concept-locked / geometry-pending. The blockin analysed below is
+> the discarded Miami build; it's kept as a record of the flipped-normals
+> finding (still worth heeding on the rebuild), not as current state.
+
+**Design intent** (*historical — Miami*):
 drowned Miami Beach, Art-Deco rooftops as a chain of pastel islands; 45 s lap ×
 3; beats run Atlantic swell → **rooftop-chain weave** → **Versace Steps**
 (seaplane wing-ramp big air) → inner-bay calm (pool-deck shortcut) → finish past
 the lifeguard hut.
 
-**Art target** ([south-beach-sunken-art-target.md](tracks/south-beach-sunken-art-target.md),
+**Art target** (*historical — Miami*,
 Reef pastel **45 / 15 / 40**): golden-hour **flamingo-pink sunset** over glassy
 turquoise reef; "they kept the lights on" — kept-painted pastel hotels, neon-mint
 signage, warm string-lights; the most defiantly-alive shoreline in the set. The
@@ -435,11 +442,11 @@ fix and the South Beach render diagnosis, which de-risk the rest.
 
 ### Cross-references
 - Design: [tracks/sandbar.md](tracks/sandbar.md) ·
-  [tracks/south-beach-sunken.md](tracks/south-beach-sunken.md) ·
+  [tracks/texcoco-rising.md](tracks/texcoco-rising.md) *(was South Beach / Miami)* ·
   [tracks/cape-town-drift.md](tracks/cape-town-drift.md)
 - Art: [track-art-direction.md](track-art-direction.md) +
   [tracks/sandbar-art-target.md](tracks/sandbar-art-target.md) ·
-  [tracks/south-beach-sunken-art-target.md](tracks/south-beach-sunken-art-target.md) ·
+  [tracks/texcoco-rising-art-target.md](tracks/texcoco-rising-art-target.md) *(was South Beach / Miami)* ·
   [tracks/cape-town-drift-art-target.md](tracks/cape-town-drift-art-target.md)
 - Process: [track-art-pass-playbook.md](track-art-pass-playbook.md) ·
   [v1-work-breakdown.md](v1-work-breakdown.md) · [status.md](status.md)

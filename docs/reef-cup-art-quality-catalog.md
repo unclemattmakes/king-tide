@@ -1,5 +1,12 @@
 # Reef Cup — Art-Quality Catalog (path to AA-indie)
 
+> ⚠️ **South Beach Sunken / Miami was cut (2026-06 content pass).** The Reef
+> opener is being rebuilt from scratch as **Texcoco Rising** (drowned Mexico
+> City — [tracks/texcoco-rising.md](tracks/texcoco-rising.md)), concept-locked /
+> geometry-pending. All "South Beach" audit notes below are **historical** —
+> kept as reference (e.g. the flipped-normals lesson) for the rebuild, not as
+> current work.
+
 > **Companion to** [reef-cup-vertical-slice-status.md](reef-cup-vertical-slice-status.md).
 > That doc answered *"is it wired / does it exist?"* — and over-credited
 > "set-piece **built**" as if a box labelled `seaplane` were done. **This doc is

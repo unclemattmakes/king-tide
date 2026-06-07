@@ -150,6 +150,6 @@ actions:**
 ## References
 - [shibuya-submerged.md](./shibuya-submerged.md) — the track (beats, props, palette).
 - [the-maw-art-target.md](./the-maw-art-target.md) — Open Sea cup sister.
-- Reef cup: [south-beach](./south-beach-sunken-art-target.md) · [cape-town](./cape-town-drift-art-target.md) · [hatteras](./hatteras-light-art-target.md) · [sandbar](./sandbar-art-target.md).
+- Reef cup: [texcoco](./texcoco-rising-art-target.md) · [cape-town](./cape-town-drift-art-target.md) · [hatteras](./hatteras-light-art-target.md) · [sandbar](./sandbar-art-target.md).
 - [track-art-pass-playbook.md](../track-art-pass-playbook.md) — placement / re-export.
 - [art-direction.md](../art-direction.md) — register, material-state rule, waterline trio, palette appendix.

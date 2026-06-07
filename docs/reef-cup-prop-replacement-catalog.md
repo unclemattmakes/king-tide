@@ -1,5 +1,11 @@
 # Reef Cup — External-Prop Replacement Catalog
 
+> ⚠️ **South Beach Sunken / Miami was cut (2026-06 content pass)** and the Reef
+> opener rebuilt from scratch as **Texcoco Rising** (drowned Mexico City —
+> [tracks/texcoco-rising.md](tracks/texcoco-rising.md)), concept-locked /
+> geometry-pending. All "South Beach" prop-replacement notes below are
+> **historical** (they describe the discarded Miami build).
+
 > **✅ IMPLEMENTED 2026-06-05.** The placeholder→Quaternius swap is **done and
 > verified in-engine on all three Reef tracks** (Sandbar, Cape Town, South Beach).
 > See [Status — implemented](#status--implemented-2026-06-05) at the bottom for

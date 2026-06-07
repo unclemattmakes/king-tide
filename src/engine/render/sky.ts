@@ -144,6 +144,14 @@ const SKY_GRADE_TABLE: Record<SkyColorGrade, SkyGradeTone> = {
     saturation: 0.85,
     contrast: 0.92,
   },
+  mexico_city_rosa: {
+    // Rosa-mexicano warmth over a high-altitude lake: strong magenta-pink
+    // lift, punchy saturation for the marigold + papel-picado palette, and
+    // a touch of contrast so the gold Ángel reads against the teal water.
+    tintMul: new THREE.Color(1.08, 0.95, 1.0),
+    saturation: 1.18,
+    contrast: 1.06,
+  },
   tokyo_neon: {
     // Cool magenta-cyan lean; punch up saturation + contrast for hot night.
     tintMul: new THREE.Color(0.96, 0.94, 1.08),

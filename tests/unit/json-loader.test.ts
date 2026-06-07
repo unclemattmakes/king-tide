@@ -328,6 +328,7 @@ describe('buildTrackFromJson', () => {
     for (const grade of [
       'neutral',
       'miami_pastel',
+      'mexico_city_rosa',
       'tokyo_neon',
       'big_sur_golden',
       'venice_warm',

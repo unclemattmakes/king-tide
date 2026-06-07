@@ -171,7 +171,7 @@ Each spec is structured identically:
 13. **Hero camera framing** — where to park `camera_hero` and what
     it should frame.
 
-Names assume the slugified track ids: `sandbar`, `south-beach-sunken`,
+Names assume the slugified track ids: `sandbar`, `texcoco-rising`,
 `cape-town-drift`, `hatteras-light`, `the-maw`, `shibuya-submerged`,
 `marina-bay-7`, `doges-drift`, `kilauea-crown`, `aqualand`,
 `angkor-drowned`, `liberty-drowned`.
@@ -276,123 +276,121 @@ frame. Sun at golden-hour angle, lens flare bias on.
 
 ---
 
-### 2.1 South Beach Sunken (Reef Cup #1)
+### 2.1 Texcoco Rising (Reef Cup #1)
+
+> *Replaced South Beach Sunken (Miami) in the 2026-06 content pass. Built
+> the **current way** — empty scene → track shape → blockin terrain +
+> landmarks → progressive dressing — **not** the retired per-track seed
+> script. Status: concept locked, geometry pending. Workflow references:
+> Sandbar (furthest along), Cape Town Drift (mid blockin→props swap).*
 
 **Identity** — Cup: Reef · Lap: 45 s · Laps: 3 · Total: ~2:15 ·
-Water/Land: 70/30 · Anti-grav: none · Difficulty: intro
+Water/Land: 65/35 · Anti-grav: none · Difficulty: intro
 
-**Topology & reference** — Loop (asymmetric kidney). Reference:
-**Wave Race 64 Sunset Bay** (ramp introduction) + **Sunny Beach**
-(palette/tone).
+**Topology & reference** — Causeway loop over a calm lake. Reference:
+**Wave Race 64 Sunny Beach** (bright friendly opener) + a Mario-Kart
+city-grid causeway thread. The lake is calm — pumping is gentle; this is
+the handshake.
 
 **Beat structure:**
 
 | t (s) | Beat | Description |
 |---|---|---|
-| 0–10 | Atlantic swell straight | Open-water start; pumping pays off, swell rolling shoreward |
-| 10–22 | Rooftop chain weave | Three pastel hotel rooftops in series; ride water *between* them, brief skim across each roof crown |
-| 22–32 | **Versace Steps (set-piece)** | Approach via wide right; seaplane wing ramp launches into next lagoon |
-| 32–40 | Inner-bay calm | Gulf-side, calmer water; bisected path — hotel pool deck shortcut OR longer outer route |
-| 40–45 | Finish wraparound | Tight left-hander past the lifeguard station to start |
+| 0–10 | Calzada start | Causeway straight, drowned Centro Histórico facades either side, calm lake |
+| 10–20 | Zócalo lagoon | Weave the half-sunk cathedral + Templo Mayor steps; trajineras fanned across the water |
+| 20–28 | Reforma run-up | Speed line down Paseo de la Reforma toward the gold Ángel |
+| 28–36 | **El Ángel (set-piece)** | Ride *up* the collapsed Segundo Piso freeway deck; launch past the golden statue |
+| 36–45 | Chapultepec turn / finish | Bank through drowned Chapultepec park back to the causeway start |
 
-**Set-piece staging:** Versace Steps' seaplane wing is **visible
-from the start grid** at the far end of the Atlantic-side swell. The
-ramp is at 55–70% of lap distance — squarely in the hardest-section
-slot. The half-buried seaplane casts a long shadow on the steps;
-players see it at t=4 from the start.
+**Set-piece staging:** The gold Ángel reads as a distant gleam across the
+lake from the start grid; the collapsed Segundo Piso deck is the obvious
+ramp on the Reforma run-up. Ramp at ~62–80% of lap distance — squarely the
+hardest-section slot.
 
-**Hard section:** 22–32 s (Versace Steps approach). The skill is
-**timing the wing-ramp launch with the incoming swell** — pump too
-early and you over-launch into the back lagoon's wall; pump too late
-and the ramp drops you short.
+**Hard section:** 28–36 s (El Ángel approach). The skill is **timing the
+launch off the broken freeway lip** — beginner-forgiving, as befits the
+opener.
 
 **Branching:**
 
-- **Pool deck shortcut** (32–40 beat) — through a hotel's rooftop
-  pool deck. Saves ~1.5 s, costs the line into the finish wraparound
-  (sharper entry angle). Marked with subtle pastel-pink pool tile
-  visible from the air.
-- The Versace Steps ramp itself is bypassable on Casual difficulty —
-  you can swim around the seaplane on the outside. Pro line *always*
-  takes the ramp.
+- **Trajinera-raft line** (10–20 beat) — skip across the moored Xochimilco
+  boats spanning the Zócalo lagoon. Saves ~1.5 s, costs the cathedral-gap
+  angle into the Reforma run-up.
+- The freeway ramp is bypassable on Casual — skim around at water level.
+  Pro line *always* takes the ramp.
 
-**Per-lap:** No structural changes between laps. Tide level is
-constant. (This is the simplest track; per-lap variation belongs on
-deeper tracks.)
+**Per-lap:** No structural changes between laps. The lake stays calm. (This
+is the simplest track; per-lap variation belongs on deeper tracks.)
 
-**Blender shopping list:**
+**Blender shopping list:** *(author in an empty scene, current workflow)*
 
-- Terrain: **3 raised plinth meshes** (`mat_track_road` material)
-  as the rooftop chain — flat rectangles ~25 × 15 m each, lifted
-  ~3 m above sea level so they sit just at-or-above the water
-  surface. `kind=track`. Add 30 cm slab thickness.
-- 1 × **half-buried seaplane** static mesh as the Versace Steps
-  ramp — author as a single `kind=track` mesh with a smoothed wing
-  curve. The wing's leading edge is the ramp's takeoff lip.
-- 1 × **pool-deck shortcut** — small flat plinth (`kind=track`)
-  threading between two hotel rooftops.
-- `road_curve_main` — not used; the racing surface is water + the
-  rooftop plinths.
-- `ai_spline_main` — 16 CPs traced through the full loop including
-  the Versace ramp launch and landing.
+- Terrain: **Aztec causeway clusters** (`mat_track_road`) — raised stone
+  roadways ~12 m wide, lifted to sit just above the lake surface.
+  `kind=track`. The loop's spine — the only "land."
+- 1 × **collapsed Segundo Piso freeway deck** as the El Ángel ramp — single
+  `kind=track` mesh; tilted deck = run-up, broken lip = takeoff lip.
+- **Templo Mayor pyramid steps** — stepped stone mass (`kind=track`) at the
+  Zócalo, skimmed past.
+- **Catedral Metropolitana** — half-sunk + tilted; lower mass `kind=track`,
+  towers `kind=decoration`.
+- `ai_spline_main` — ~16 CPs through the full loop incl. the ramp launch +
+  landing.
 - `cp_00`..`cp_07` — 8 checkpoints at beat boundaries (×3 lap structure).
-- 2 × `boost_NN` — one on the Atlantic swell straight (mid-lap
-  rhythm boost), one on the inner-bay calm (compensates for the
-  calmer water there).
-- `start_00`, `start_01` — at t≈0.95 on the spline (just before
-  the finish line so lap 1 timer starts clean).
-- 2 × `pickup_*` — one on the rooftop chain weave, one on the
-  inner bay.
+- 2 × `boost_NN` — one on the Calzada start straight, one on the Reforma
+  run-up.
+- `start_00`, `start_01` — at t≈0.95 on the spline (just before the finish
+  line so lap 1 timer starts clean).
+- 2 × `pickup_*` — one on the Zócalo lagoon, one on the Reforma straight.
 - **No anti-grav** (per intro-tier identity).
-- 2 × `wave_zone_NN`:
-  - `wave_zone_atlantic`: covers the Atlantic-side straight.
-    halfWidth 40, halfDepth 25, heightMult 1.4, freqMult 1.0,
-    blendRadius 20. direction_deg 90 (shoreward swell).
-  - `wave_zone_inner_bay`: covers the Gulf-side calm. halfWidth
-    30, halfDepth 30, heightMult 0.6, freqMult 1.2, blendRadius
-    15. (Smaller, choppier swell — diegetic harbor chop.)
-- `scatter_palms` GN scatter — ~20 palms on rooftop islands using
-  the `prop_palm` collection from props-library.
-- `scatter_rocks` GN scatter — coral / debris under the water line,
-  visible through the wave surface (~30 instances of `prop_rock`).
-- **Decoration meshes:** half-submerged lounge chairs, faded
-  Art-Deco hotel signage (Versace, Carlyle, Tides), a single
-  flamingo lawn ornament on one rooftop. All `kind=decoration`.
+- 1 × `wave_zone_lake`: covers the whole loop. halfWidth large, heightMult
+  0.6, freqMult 1.0, blendRadius 25. A calm high-altitude lake — gentle
+  swell so the open stretches still pump, but nothing punishing.
+- `scatter_jacaranda` GN scatter — jacaranda + ahuehuete cypress on the
+  causeway edges (replaces the tropical-palm scatter).
+- `scatter_rocks` GN scatter — submerged rubble + chinampa debris under the
+  water line (~30 instances of `prop_rock`).
+- **Decoration meshes:** the **Ángel de la Independencia** column (gold, no
+  collision), **trajinera** boats (colourful, fanned across the lagoon),
+  drowned colonial facades, papel-picado banner strings. All
+  `kind=decoration`.
+- **Horizon ring (bespoke):** Popocatépetl + Iztaccíhuatl twin-volcano
+  silhouette (one smoking) — the track's distant identity; **lock early.**
 
-**Sky preset:** `miami_pastel`. `cloudiness=0.15`, `sunIntensity=1.1`,
-`fogNear=180`, `fogFar=700`, `timeOfDay=300` (late afternoon —
-sunset golden hour on Ocean Drive), `seaStateBeaufort=3`.
+**Sky preset:** `mexico_city_rosa`. `cloudiness=0.22`, `sunIntensity=1.1`,
+`fogNear=180`, `fogFar=700`, `timeOfDay=300` (late afternoon — warm
+rosa-mexicano light over the lake), `seaStateBeaufort=2`.
 
 **Wave zones:** (see Blender shopping list above)
 
 **Particle emitters:**
 
-- `emitter_seaplane_shimmer` — atlas_cell 10 (glow halo),
-  emit_rate 2, lifetime 4, parked above the seaplane wing.
-  Heat-shimmer on metal.
-- `emitter_gulls` — atlas_cell 5, emit_rate 0.5, lifetime 12,
-  max_particles 8. Ambient.
-- `emitter_palm_sway_motes` — atlas_cell 6 (leaf), emit_rate 1,
-  lifetime 6, gravity -0.3, parked under each rooftop palm cluster
-  (instance the emitter empty multiple times).
-- `emitter_explosion` — for crash VFX; required by the runtime if
-  pickups/combat exist on the track. atlas_cell 1 (smoke).
+- `emitter_papel_picado` — atlas_cell 6 (leaf/paper), emit_rate 1.5,
+  lifetime 6, gravity -0.2, parked over the Zócalo. Drifting cut-paper
+  colour.
+- `emitter_lake_birds` — atlas_cell 5, emit_rate 0.5, lifetime 12,
+  max_particles 8. Ambient (inland-lake waterbirds; the gull emitter
+  re-skinned).
+- `emitter_jacaranda_fall` — atlas_cell 6 (leaf), emit_rate 1, lifetime 6,
+  gravity -0.3, parked under the jacaranda clusters (instance multiple
+  times). Purple petal drift.
+- `emitter_explosion` — for crash VFX; required by the runtime.
+  atlas_cell 1 (smoke).
 
 **Audio:**
 
 ```json
 "audio": {
-  "music": "south-beach-vaporwave.opus",
-  "ambient": ["gulls.opus", "surf-light.opus", "neon-hum.opus"],
-  "ambientGains": [0.4, 0.6, 0.2],
+  "music": "texcoco-cumbia.opus",
+  "ambient": ["lake-birds.opus", "city-distant.opus", "marimba-busker.opus"],
+  "ambientGains": [0.4, 0.5, 0.25],
   "music3dEffects": { "duckOnPump": 0.35 }
 }
 ```
 
-**Hero camera:** Low across the water, looking down the Atlantic
-swell straight with the half-buried seaplane on the Versace Steps
-in the right third of frame, sunset sky in the back. 50 mm lens,
-slight Dutch tilt (3°) for Miami glamour.
+**Hero camera:** Low across the lake, looking down the Reforma run-up with
+the gold Ángel in the right third of frame, the collapsed freeway ramp
+leading the eye, Popocatépetl smoking in the back. 50 mm lens, slight Dutch
+tilt (3°) for the postcard.
 
 ---
 

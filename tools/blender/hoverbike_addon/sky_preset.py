@@ -53,7 +53,8 @@ from bpy.props import EnumProperty, FloatProperty, IntProperty
 # hoverbike_kinds.py / asset-kinds.ts.
 SKY_COLOR_GRADES: tuple[tuple[str, str, str], ...] = (
     ("neutral", "Neutral", "No grade — identity tint × saturation × contrast"),
-    ("miami_pastel", "Miami Pastel", "Soft warm-pink lift, lower saturation; South Beach sunset"),
+    ("miami_pastel", "Miami Pastel", "Soft warm-pink lift, lower saturation; sunset haze (Sandbar)"),
+    ("mexico_city_rosa", "Mexico City Rosa", "Rosa-mexicano lift, punchy saturation; Texcoco Rising lake"),
     ("tokyo_neon", "Tokyo Neon", "Cool magenta-cyan lean, punchy saturation; Shibuya night"),
     ("big_sur_golden", "Big Sur Golden", "Golden-hour warmth; California / The Maw mid-day"),
     ("venice_warm", "Venice Warm", "Adriatic warm-stone amber; Doge's Drift"),
