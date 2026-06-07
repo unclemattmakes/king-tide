@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildCupRoster,
   CUP_POINTS,
+  type CupFinisher,
   clearCupProgress,
   cupStandings,
-  type CupFinisher,
   getCupProgress,
   getCupProgressFor,
   isCupComplete,
@@ -258,7 +258,12 @@ describe('cup-progress', () => {
     it('seeds the player at slot 0 and seven stable rivals', () => {
       const roster = buildCupRoster({ cupId: 'reef', bikeId: 'cruiser' })
       expect(roster).toHaveLength(8)
-      expect(roster[0]).toMatchObject({ slot: 0, isPlayer: true, name: 'YOU', variantId: 'cruiser' })
+      expect(roster[0]).toMatchObject({
+        slot: 0,
+        isPlayer: true,
+        name: 'YOU',
+        variantId: 'cruiser',
+      })
       for (let slot = 1; slot <= 7; slot++) {
         const r = roster[slot]
         expect(r?.slot).toBe(slot)

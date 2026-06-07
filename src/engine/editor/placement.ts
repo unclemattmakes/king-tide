@@ -37,7 +37,6 @@ export function placeAt(opts: PlaceAtOptions): EntitySel {
   if (tool === 'gate') {
     const idx = draft.checkpoints.length
     const main = draft.aiSplines.find((s) => s.id === 'main')
-    const useSpline = !!main && main.points.length >= 2
     const cp: Checkpoint = {
       index: idx,
       position: { x: hit.x, y: 1.5, z: hit.z },
@@ -45,9 +44,9 @@ export function placeAt(opts: PlaceAtOptions): EntitySel {
       halfWidth: 8,
       height: 4,
     }
-    if (useSpline) {
+    if (main && main.points.length >= 2) {
       // Auto-bind to the main spline at the click's nearest curve point.
-      cp.splineT = nearestT({ x: hit.x, y: 0, z: hit.z }, main!.points)
+      cp.splineT = nearestT({ x: hit.x, y: 0, z: hit.z }, main.points)
     }
     draft.checkpoints.push(cp)
     return { kind: 'gate', index: idx }
@@ -139,7 +138,7 @@ export function deleteSelected(draft: Track, sel: EntitySel): boolean {
   if (sel.kind === 'start') return false // start is a singleton — cannot be deleted
   if (sel.kind === 'gate') {
     draft.checkpoints.splice(sel.index, 1)
-    for (let i = 0; i < draft.checkpoints.length; i++) draft.checkpoints[i]!.index = i
+    for (const [i, cp] of draft.checkpoints.entries()) cp.index = i
     return true
   }
   if (sel.kind === 'pickup') {

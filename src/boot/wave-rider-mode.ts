@@ -177,15 +177,17 @@ export async function bootWaveRiderMode(appEl: HTMLElement): Promise<WaveRiderMo
     const c = document.createElement('canvas')
     c.width = 64
     c.height = 48
-    const ctx = c.getContext('2d')!
-    ctx.font = 'bold 30px ui-monospace, monospace'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.lineWidth = 6
-    ctx.strokeStyle = 'rgba(0,0,0,0.85)'
-    ctx.strokeText(text, 32, 24)
-    ctx.fillStyle = '#ffffff'
-    ctx.fillText(text, 32, 24)
+    const ctx = c.getContext('2d')
+    if (ctx) {
+      ctx.font = 'bold 30px ui-monospace, monospace'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.lineWidth = 6
+      ctx.strokeStyle = 'rgba(0,0,0,0.85)'
+      ctx.strokeText(text, 32, 24)
+      ctx.fillStyle = '#ffffff'
+      ctx.fillText(text, 32, 24)
+    }
     const tex = new THREE.CanvasTexture(c)
     tex.colorSpace = THREE.SRGBColorSpace
     const sprite = new THREE.Sprite(

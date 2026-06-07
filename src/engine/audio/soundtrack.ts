@@ -38,9 +38,14 @@ export function makeShuffleOrder(n: number, rand: () => number = Math.random): n
   const order = Array.from({ length: n }, (_, i) => i)
   for (let i = n - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1))
-    const tmp = order[i]!
-    order[i] = order[j]!
-    order[j] = tmp
+    const a = order[i]
+    const b = order[j]
+    // i and j are always in [0, n); the guard only satisfies the
+    // type-checker (noUncheckedIndexedAccess) and never fails at runtime.
+    if (a !== undefined && b !== undefined) {
+      order[i] = b
+      order[j] = a
+    }
   }
   return order
 }
@@ -148,8 +153,9 @@ export function createJukebox(opts: JukeboxOptions): Jukebox {
   function loadAndPlay(orderPos: number): void {
     if (playlist.length === 0) return
     pos = ((orderPos % order.length) + order.length) % order.length
-    const trackIndex = order[pos]!
-    const entry = playlist[trackIndex]!
+    const trackIndex = order[pos]
+    const entry = trackIndex === undefined ? undefined : playlist[trackIndex]
+    if (!entry) return
     const audio = ensureElement()
     audio.src = assetUrl(MUSIC_BASE_URL + entry.file)
     currentEntry = entry
@@ -161,7 +167,7 @@ export function createJukebox(opts: JukeboxOptions): Jukebox {
 
   function advance(): void {
     if (!getEnabled() || playlist.length === 0) return
-    const lastTrack = order[pos]!
+    const lastTrack = order[pos] ?? 0
     if (pos + 1 >= order.length) {
       order = reshuffleAvoiding(playlist.length, lastTrack, rand)
       loadAndPlay(0)
@@ -183,7 +189,7 @@ export function createJukebox(opts: JukeboxOptions): Jukebox {
       if (!started) {
         started = true
         loadAndPlay(0)
-      } else if (el && el.paused) {
+      } else if (el?.paused) {
         el.play().catch(() => {})
       }
     },
