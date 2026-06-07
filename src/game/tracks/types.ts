@@ -161,6 +161,21 @@ export type TerrainShaderConfig = {
    *  just above. 0 disables (every non-coastal track stays byte-identical);
    *  1 = full. Default 0. */
   waterline?: number
+  /** Painterly brush-stroke impasto on the terrain, riding the shared brush
+   *  sheet props + buildings use so the whole scene reads as one painted
+   *  surface. Modulates albedo + roughness. UNLIKE the other extras this
+   *  defaults ON (0.75 — tuned for the soft real oil-stroke sheet) — the
+   *  brushwork is meant to be the default terrain read; set 0 to restore the
+   *  exact pre-brush look. */
+  brush?: number
+  /** Approximate brush-stroke size on the ground, in metres (the sheet tiles
+   *  ~every `brushScale` m). Bigger = broader sweeps. Default 4. */
+  brushScale?: number
+  /** How strongly the brush is gated by surface curvature: 0 = uniform strokes
+   *  everywhere, 1 = strokes concentrate on the sculpted bends (cliff faces,
+   *  scree breaks, ridgelines) with only a floor on the flats. Curvature is a
+   *  steepness + screen-space normal-variation proxy. Default 0.55. */
+  brushCurvature?: number
 }
 
 export type PlayerStart = {
