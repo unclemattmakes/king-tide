@@ -40,6 +40,12 @@ export type BikeVariant = {
   accentColor: number
   /** Sim-side stats for the bike. */
   stats: BikeStatsData
+  /** Named seated clip in `rider_mannequin.glb` this bike's rider poses with.
+   *  Resolved per-bike in `rider-mannequin.ts`; falls back to `Sitting_Idle_Loop`
+   *  until an Action of this name exists in the rig (so naming a pose that
+   *  isn't authored yet is harmless). Author the pose in
+   *  `rider-src/rider_riding_pose.blend` with a matching Action name. */
+  riderClip?: string
 }
 
 function withDefaults(overrides: Partial<BikeStatsData>): BikeStatsData {
@@ -49,6 +55,7 @@ function withDefaults(overrides: Partial<BikeStatsData>): BikeStatsData {
 export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
   cruiser: {
     id: 'cruiser',
+    riderClip: 'Ride_cruiser',
     name: 'Cruiser',
     tagline: 'Heavy hitter — big top speed, plows through chop',
     bodyColor: 0x335599,
@@ -66,6 +73,7 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
   },
   racer: {
     id: 'racer',
+    riderClip: 'Ride_racer',
     name: 'Racer',
     tagline: 'Balanced all-rounder — the default',
     bodyColor: 0xff7733,
@@ -74,6 +82,7 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
   },
   stunt: {
     id: 'stunt',
+    riderClip: 'Ride_stunt',
     name: 'Stunt',
     tagline: 'Light + agile — banks every wave, inside-drift carve',
     bodyColor: 0x33aa66,
@@ -101,6 +110,7 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
   // carries the most kinetic energy through the chop.
   scout: {
     id: 'scout',
+    riderClip: 'Ride_scout',
     name: 'Scout',
     tagline: 'Heavyweight — punishing pump, biggest launch',
     bodyColor: 0xff6633,
@@ -126,6 +136,7 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
   // tradeoff for the pump latitude.
   sparrow: {
     id: 'sparrow',
+    riderClip: 'Ride_sparrow',
     name: 'Sparrow',
     tagline: 'Lightweight — forgiving pump, inside-drift sport bike',
     bodyColor: 0xddbb44,

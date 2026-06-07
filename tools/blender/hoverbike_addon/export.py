@@ -1060,6 +1060,148 @@ class HOVERBIKE_OT_copy_seat_offset(Operator):
 
 
 # ────────────────────────────────────────────────────────────────────
+# Bike-reference refresh (rider posing bench)
+# ────────────────────────────────────────────────────────────────────
+#
+# The rider posing scene shows each bike as an IMPORTED COPY of its exported
+# GLB (not a live link), positioned so the bike's socket_seat lands on the rig
+# root — i.e. exactly where the runtime seats the rider (rider-mannequin.ts).
+# After re-exporting a bike from bikes-src/, run this to pull the updated shapes
+# back in. The refs are selection-locked (hide_select) so they can't be
+# accidentally edited: pose work happens on the rig, geometry in bikes-src/.
+
+_BIKE_REF_PARENT = "_posing_refs"
+# GLBs in public/assets/bikes/ that aren't rideable ship bikes.
+_BIKE_REF_SKIP = {"calibration", "bike-validation", "bike-autogen"}
+
+
+def _refresh_bike_refs(repo: str) -> dict:
+    """Rebuild ``_posing_refs/ref_<id>`` from the current bike GLBs, each aligned
+    so its ``socket_seat`` sits on the rider rig root. Returns a report dict;
+    raises ``ValueError`` with a user-facing message on setup problems."""
+    root = find_rider_root()
+    if root is None:
+        raise ValueError("No rider rig (prop_*_root) in the scene.")
+    bikes_dir = os.path.join(repo, "public", "assets", "bikes")
+    if not os.path.isdir(bikes_dir):
+        raise ValueError(f"No bikes folder at {bikes_dir} (export a bike first).")
+    glbs = sorted(
+        f[:-4]
+        for f in os.listdir(bikes_dir)
+        if f.lower().endswith(".glb") and f[:-4] not in _BIKE_REF_SKIP
+    )
+    if not glbs:
+        raise ValueError("No bike GLBs found to reference.")
+
+    anchor = root.matrix_world.translation.copy()
+
+    parent = bpy.data.collections.get(_BIKE_REF_PARENT)
+    if parent is None:
+        parent = bpy.data.collections.new(_BIKE_REF_PARENT)
+        bpy.context.scene.collection.children.link(parent)
+
+    # Remember which bike was on screen so the rebuild doesn't change the view.
+    prev_shown = next(
+        (c.name[4:] for c in parent.children if c.name.startswith("ref_") and not c.hide_viewport),
+        None,
+    )
+
+    imported_per = {}
+    for bid in glbs:
+        old = bpy.data.collections.get(f"ref_{bid}")
+        if old is not None:
+            for o in list(old.objects):
+                bpy.data.objects.remove(o, do_unlink=True)
+            try:
+                parent.children.unlink(old)
+            except Exception:  # noqa: BLE001
+                pass
+            bpy.data.collections.remove(old)
+        before = set(bpy.data.objects)
+        bpy.ops.import_scene.gltf(filepath=os.path.join(bikes_dir, f"{bid}.glb"))
+        imported = [o for o in bpy.data.objects if o not in before]
+        bpy.context.view_layer.update()
+        sock = next(
+            (o for o in imported if (o.get("slot") == "seat") or o.name.startswith("socket_seat")),
+            None,
+        )
+        roots = [o for o in imported if o.parent not in imported]
+        if sock is not None:
+            offset = anchor - sock.matrix_world.translation
+            for r in roots:
+                r.location = r.location + offset
+        bpy.context.view_layer.update()
+        col = bpy.data.collections.new(f"ref_{bid}")
+        parent.children.link(col)
+        for o in imported:
+            for c in list(o.users_collection):
+                c.objects.unlink(o)
+            col.objects.link(o)
+            o.hide_select = True  # reference geometry: visible, not grabbable
+        imported_per[bid] = len(imported)
+
+    # Restore which ref is shown: previously-shown bike, else racer, else first.
+    shown = prev_shown if prev_shown in glbs else ("racer" if "racer" in glbs else glbs[0])
+    for bid in glbs:
+        c = bpy.data.collections.get(f"ref_{bid}")
+        if c is not None:
+            c.hide_viewport = bid != shown
+
+    # Purge data orphaned by the removed copies (incl. any accidental edits).
+    purged = 0
+    for coll in (bpy.data.meshes, bpy.data.materials, bpy.data.images):
+        for d in list(coll):
+            if d.users == 0:
+                coll.remove(d)
+                purged += 1
+
+    return {"bikes": list(glbs), "shown": shown, "imported": imported_per, "purged": purged}
+
+
+class HOVERBIKE_OT_refresh_bike_refs(Operator):
+    """Re-import every bike's current GLB into the posing scene as a
+    selection-locked, socket-aligned reference (rig root = where the runtime
+    seats the rider). Run after re-exporting a bike from ``bikes-src/``."""
+
+    bl_idname = "hoverbike.refresh_bike_refs"
+    bl_label = "Refresh Bike Refs"
+    bl_description = (
+        "Re-import all bikes' current GLBs as selection-locked, socket-aligned "
+        "posing references. Run after re-exporting a bike. Save to keep."
+    )
+    bl_options = {"REGISTER"}
+
+    def execute(self, context: bpy.types.Context) -> set[str]:
+        from ._legacy import find_repo_root
+
+        blend = bpy.data.filepath
+        if not blend:
+            self.report({"ERROR"}, "Save your .blend first (Ctrl+S).")
+            return {"CANCELLED"}
+        repo = find_repo_root(blend)
+        if not repo:
+            self.report(
+                {"ERROR"},
+                "No hoverbike clone found. Set 'Project root' in the addon "
+                "preferences (or $HOVERBIKE_REPO_ROOT).",
+            )
+            return {"CANCELLED"}
+        try:
+            rep = _refresh_bike_refs(repo)
+        except ValueError as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        except Exception as e:  # noqa: BLE001
+            self.report({"ERROR"}, f"Refresh failed: {e}")
+            return {"CANCELLED"}
+        n = len(rep["bikes"])
+        msg = f"Refreshed {n} bike ref{'' if n == 1 else 's'} (showing {rep['shown']}). Save to keep."
+        self.report({"INFO"}, msg)
+        print(f"[hoverbike-addon] {msg}: {rep}")
+        return {"FINISHED"}
+
+
+# ────────────────────────────────────────────────────────────────────
 # URL helpers
 # ────────────────────────────────────────────────────────────────────
 
@@ -1170,6 +1312,7 @@ _CLASSES: tuple[type, ...] = (
     HOVERBIKE_OT_export_bike,
     HOVERBIKE_OT_export_rider_pose,
     HOVERBIKE_OT_copy_seat_offset,
+    HOVERBIKE_OT_refresh_bike_refs,
     HOVERBIKE_OT_copy_track_url,
     HOVERBIKE_OT_copy_bike_url,
 )

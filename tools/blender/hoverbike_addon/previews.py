@@ -856,16 +856,30 @@ def _rebuild_rider_preview(scene) -> dict:
         coll.objects.link(o)
         o.hide_render = True
 
-    # Seated pose so the silhouette reads as a rider, not a T-pose.
+    # Pose: prefer THIS bike's authored Ride_<id> clip so the preview matches
+    # exactly what the runtime renders for it (rider-mannequin.ts resolves the
+    # same name per bike). Fall back to the shared seated idle, then any
+    # sitting clip — so a bike whose pose isn't authored/exported yet still
+    # reads as seated instead of a T-pose.
+    bike_root = bpy.data.objects.get("bike_root")
+    bike_id = bike_root.get("bike_id") if bike_root else None
+    want = f"Ride_{bike_id}" if isinstance(bike_id, str) and bike_id else None
+    clip_used = None
     arm = next((o for o in imported if o.type == "ARMATURE"), None)
     if arm is not None:
-        clip = bpy.data.actions.get(RIDER_PREVIEW_CLIP) or next(
-            (a for a in bpy.data.actions if RIDER_PREVIEW_CLIP.lower() in a.name.lower()), None
+        clip = (
+            (bpy.data.actions.get(want) if want else None)
+            or bpy.data.actions.get(RIDER_PREVIEW_CLIP)
+            or next(
+                (a for a in bpy.data.actions if RIDER_PREVIEW_CLIP.lower() in a.name.lower()),
+                None,
+            )
         )
         if clip is not None:
             if arm.animation_data is None:
                 arm.animation_data_create()
             arm.animation_data.action = clip
+            clip_used = clip.name
             fr = clip.frame_range
             scene.frame_set(int((fr[0] + fr[1]) * 0.5))
         arm.show_in_front = True
@@ -883,6 +897,11 @@ def _rebuild_rider_preview(scene) -> dict:
         for o in list(imported):
             if o not in keep:
                 bpy.data.objects.remove(o, do_unlink=True)
+        # Selection-lock the preview so it can't be accidentally grabbed/edited
+        # — reseat by moving socket_seat, not the rider (toggle in the Outliner
+        # if you ever need to select it).
+        for o in keep:
+            o.hide_select = True
         # Parent the rig root to socket_seat: keep the imported orientation /
         # scale, snap the origin onto the socket, so the rider follows the
         # socket as it moves (the runtime anchors the rider's root there).
@@ -900,6 +919,7 @@ def _rebuild_rider_preview(scene) -> dict:
     return {
         "objects": len(imported),
         "root": root_obj.name if root_obj else None,
+        "clip": clip_used,
         "socket_at": tuple(round(v, 3) for v in socket.matrix_world.translation),
     }
 
@@ -1105,8 +1125,9 @@ class HOVERBIKE_OT_rebuild_rider_preview(Operator):
     bl_idname = "hoverbike.rebuild_rider_preview"
     bl_label = "Add Rider Preview"
     bl_description = (
-        "Drop the seated rider onto socket_seat (follows the socket as you move "
-        "it). Preview only — excluded from the bike export."
+        "Drop the rider in THIS bike's pose (Ride_<id>, else seated idle) onto "
+        "socket_seat — follows the socket as you move it. Preview only, "
+        "selection-locked + excluded from the bike export."
     )
     bl_options = {"REGISTER"}
 
@@ -1116,7 +1137,10 @@ class HOVERBIKE_OT_rebuild_rider_preview(Operator):
         except RuntimeError as e:
             self.report({"ERROR"}, str(e))
             return {"CANCELLED"}
-        self.report({"INFO"}, f"Rider preview on socket_seat @ {summary['socket_at']}")
+        clip = summary.get("clip") or "default seated"
+        self.report(
+            {"INFO"}, f"Rider preview ({clip}) on socket_seat @ {summary['socket_at']}"
+        )
         return {"FINISHED"}
 
 

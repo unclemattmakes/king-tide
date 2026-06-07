@@ -1,11 +1,12 @@
 import { query } from 'bitecs'
 import * as THREE from 'three'
 import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js'
-import { type LoadedProp, pickAnimationClip } from '@/game/assets/prop-loader'
 import type { SimWorld } from '@/engine/sim/ecs/world'
+import type { LoadedProp } from '@/game/assets/prop-loader'
+import { resolveBikeVariant } from '@/game/bikes/variants'
 import { BikeStatsStore, TransformStore } from '@/game/components'
-import type { BikeRenderRegistry } from './render-systems'
 import { Rider, type RiderBoneName, RiderStore } from '@/game/components/rider'
+import type { BikeRenderRegistry } from './render-systems'
 
 /**
  * Rider mannequin render system — now the **default** rider visual
@@ -135,6 +136,26 @@ export function createRiderMannequinSystem(
     return loaded.seatLocal ?? null
   }
 
+  /** The seated clip name this bike poses with — the per-variant `riderClip`
+   *  (undefined → the shared default). Resolved per rider instance. */
+  function resolveRiderClip(bikeEid: number): string | undefined {
+    const variantId = BikeStatsStore.get(bikeEid)?.variantId
+    return resolveBikeVariant(variantId).riderClip
+  }
+
+  /** Resolve a seated clip by name with graceful fallback: the bike's authored
+   *  clip when it exists in the rig, else the shared `Sitting_Idle_Loop`, else
+   *  the first clip. A per-bike name that hasn't been authored yet falls back
+   *  to the seated idle rather than T-posing (clip 0 is `A_TPose`). */
+  function resolveSeatedClip(name: string | undefined): THREE.AnimationClip | undefined {
+    const want = name ?? RIDE_CLIP
+    return (
+      rig.animations.find((a) => a.name === want) ??
+      rig.animations.find((a) => a.name === RIDE_CLIP) ??
+      rig.animations[0]
+    )
+  }
+
   function build(
     riderEid: number,
     bikeEid: number,
@@ -154,7 +175,7 @@ export function createRiderMannequinSystem(
     })
     scene.add(group)
     const mixer = new THREE.AnimationMixer(group)
-    const clip = pickAnimationClip(rig.animations, RIDE_CLIP)
+    const clip = resolveSeatedClip(resolveRiderClip(bikeEid))
     const action = clip ? mixer.clipAction(clip) : null
     action?.play()
     const inst: MannequinInstance = {
