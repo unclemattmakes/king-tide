@@ -159,7 +159,20 @@ three verified in-engine (`gen:track-shots`, `consoleErrors=false`).
 
 | Track | Was (placeholder) | Now (`props[]`) |
 |---|---|---|
-| **Cape Town** | `grounded_freighter` box; `wreck_containers` (332 box-blobs); `harbour_dressing` box skyline | **135 props** — `cruise_ship` (grounded), **118 `shipping_container`/`container_small`** (renders red/rust), 8 `house_*` + 2 `boat` + 5 `crate`/`barrel` on the kept quay; animated `shark` preserved |
+| **Cape Town** | `grounded_freighter` box; `wreck_containers` (332 box-blobs); `harbour_dressing` box skyline | **349 props** — `cruise_ship` (grounded), **332 `shipping_container`** rebuilt 1:1 from the `wreck_containers` block-in (exact position, **full 3D orientation incl. the tilted ride-off ramps**, and per-box size; now genuinely collidable), 8 `house_*` + 2 `boat` + 5 `crate`/`barrel` on the kept quay; animated `shark` preserved |
+
+> **Revised 2026-06-06.** The first swap (above, 118 props) replaced the 332-box
+> block-in with a fresh, sparser scatter whose **orientations didn't match** the
+> deliberately-placed yard (p50 yaw off 43°) and which had **no working collision**.
+> Root cause of the latter was an **engine bug**, not the assets: `addAssetPropColliders`
+> ignored the GLB collider node's local offset, so every base-pivoted prop's collider
+> sank below its visual (containers/cruise_ship/houses on every track). Fixed in
+> `src/game/entities/props.ts` (+ regression test). Containers then rebuilt 1:1 from the
+> pre-swap `wreck_containers` mesh: each of the 332 box islands fitted with a full
+> **oriented bounding box** (numpy PCA) so the **tilt is preserved** — the originals are
+> ramps (median tilt 11.7°, max 44.6°, 259/332 tilted >5°) you ride up and launch off;
+> pose+size mapped onto `cc0/shipping_container` (the box collider inherits the prop's
+> full rotation, so the collidable shape tilts with the visual).
 | **South Beach** | 2 `sb_wreck*` boxes; 36 flat `sb_palm` | **38 props** — 2 `boat`/`lifeboat` (tilted, half-sunk), 36 lush `cc0` palms. *Hotels/Versace/seaplane left for a modeling pass (no library match); `kind=track` barges + seaplane ramp untouched.* |
 | **Sandbar** | `marina_shack_body`+`_roof` box+pyramid | marina shack → **`ai/pilot_shack`** (built but never wired). *(Sea-stacks→cliffs + wrecks→boats already done earlier.)* |
 
@@ -173,8 +186,13 @@ gitignored → R2, so they need **`pnpm assets:push`**.
   house won't read as a lifeguard tower) — deferred.
 - **`cc0/anchor` + `cc0/debris_pile` re-condition** — mis-scaled flat slabs (the
   only two unusable library props); tracked separately.
-- **8-bike AI-jam check** on Cape Town's now-collidable container slalom (collision
-  is intended/correct per design — this is just the standard field-completion gate).
+- **8-bike AI ride-over check** on Cape Town's container yard. The tilted containers
+  sit on/along the race line by design (**82 of 332 within 6 m**) — they're ride-up-and-
+  launch-off ramps, not walls (collision is opt-out via `kind` for GLB-baked geometry;
+  these are props with box colliders). The player line is the fun; the open gate is
+  confirming the **AI field rides the ramps instead of jamming** on the steepest /
+  most-on-line ones. If any prove to be hard blockers for the bots, nudge those few
+  aside or lower their tilt — don't flatten the field.
 - **Other (non-Reef) tracks** place zero props (greybox-pending) — nothing to swap
   until their v2 art pass.
 
