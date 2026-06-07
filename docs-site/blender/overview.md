@@ -8,9 +8,9 @@ distinct surfaces:
 1. **The in-Blender addon** (`tools/blender/hoverbike_addon/`) — a
    sidebar in Blender's 3D viewport with one-click **Export to
    Game** buttons, parametric authoring tools (road, tunnel, ramp,
-   downtown, anti-grav surfaces, horizon, wave zones, particle
+   downtown, horizon, wave zones, particle
    emitters), and live previews of gates / racers / water / boost
-   pads / anti-grav zones / wave zones that follow your edits.
+   pads / wave zones that follow your edits.
 2. **Headless builders** (`tools/blender/build_*.py`) — Python
    scripts run via `blender --background`. Pair with JSON specs to
    produce GLBs in CI / batch. The sprite atlas behind every
@@ -18,8 +18,8 @@ distinct surfaces:
    (`build_sprite_atlas.py`).
 3. **Seed scripts** (`tools/blender/seed_*.py`) — one-shot
    generators that materialise canonical `.blend` files (template
-   islands / alpine / dunes / mesa / downtown / tunnels / anti-grav
-   showcase, prop and landmark libraries, calibration scene) from
+   islands / alpine / dunes / mesa / downtown / tunnels, prop and
+   landmark libraries, calibration scene) from
    code.
 
 Authoring usually means **opening an existing `.blend`, editing,
@@ -52,14 +52,13 @@ appears.
 | Tunnels | Bezier curve → boolean cut through the hill + concrete-liner interior shell. |
 | Placement helper | A persistent curve-constrained empty for parking ramps / boosts / props at any (t, offset). |
 | Downtown | Procedural city block at the 3D cursor (multi-block grid, terrain-conformed plinth). |
-| Anti-grav surfaces | Sweep a tube, ribbon, or banked strip along a Bezier curve. Auto-drops entry / exit anti-grav zone empties. |
 | Ramps | Drop a parametric stunt wedge at the 3D cursor. |
 | Terrain | Heightmap import, sculpt-mode entry, raise/lower at cursor, smooth, AO + path-wear bakes. |
 | Water | Sea-level slider + wave preview plane. |
 | Horizon | Per-track distant silhouette mesh (or procedural ring fallback). |
 | Sky preset | Per-track tint, cloudiness, sun, fog, time-of-day, colour grade, sea-state Beaufort. |
 | Wave zones | Per-zone wave amplitude / frequency / surge multipliers. See [Wave zones cookbook](./wave-zones). |
-| Gameplay | Gates, boost pads, anti-grav zones, racer preview, turn indicators — placement + previews. |
+| Gameplay | Gates, boost pads, racer preview, turn indicators — placement + previews. |
 | Emitters | Particle systems for VFX (steam, foam, embers, gulls, neon, ash). |
 | Ghost lap + chase cam | Auto-flying preview bike along the racing line. |
 | Terrain shader (runtime) | Tunes the runtime ramp / slope / wet-band / coloration without touching the .ts. |
@@ -75,9 +74,8 @@ runtime JSON into the scene custom properties).
 
 For the full operator + panel reference, see
 [Addon reference](./addon-reference). For worked, end-to-end
-examples of the wave-mastery and anti-grav tools see
-[Wave zones cookbook](./wave-zones) and
-[Anti-grav surfaces cookbook](./antigrav-surfaces).
+examples of the wave-mastery tools see the
+[Wave zones cookbook](./wave-zones).
 
 ## What lives where
 
@@ -209,7 +207,6 @@ For the full naming + extras matrix see [Scene conventions](./scene-conventions)
 - **Building your first track from scratch?** → [Your first track](./your-first-track) — full walk-through from blank scene to playable map.
 - **Want a comprehensive reference of every panel + operator?** → [Addon reference](./addon-reference).
 - **In-depth wave-mastery authoring (tsunami timers, harbour calm, set-piece swells)?** → [Wave zones cookbook](./wave-zones).
-- **Curve-driven anti-grav surfaces (tubes, wall-rides, loops)?** → [Anti-grav surfaces cookbook](./antigrav-surfaces).
 - **Need the at-a-glance kind / extras matrix?** → [Scene conventions](./scene-conventions).
 - **Authoring a bike, not a track?** → [Modding → Authoring bikes](/modding/bikes).
 - **CI / batch builds?** The headless `pnpm gen:tracks` / `pnpm gen:bikes` / `pnpm gen:props` scripts are documented inline in [Addon reference → Headless builders](./addon-reference#headless-builders).

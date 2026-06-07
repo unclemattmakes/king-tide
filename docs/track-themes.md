@@ -1,5 +1,15 @@
 # Hoverbike — Track Themes v1
 
+> **⚠ v2 status (2026-06).** The *themes / lore / set-pieces* below are current,
+> but the **v1 lineup framing is historical**: content restarted for v2, so most
+> tracks are **greybox** (only **Sandbar** + **The Maw** are dressed) and
+> `status: 'ship'` means wired/playable, not art-complete. The Reef opener (South
+> Beach / Miami) was cut and is being rebuilt as **Texcoco Rising**; **anti-grav
+> is cut** (parked for a possible DLC); **wave mastery** is now the motocross
+> pitch-the-takeoff/landing model, not press-forward-on-crest. Canonical per-track
+> truth lives in [tracks/](./tracks/README.md); current state in
+> [status.md](./status.md).
+
 > Content bible for the 11 ship-quality tracks targeted for v1, plus a
 > tutorial track. Companion to [design-targets.md](./design-targets.md);
 > set within the post-flood world frame locked during track-theme

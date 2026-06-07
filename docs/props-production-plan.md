@@ -253,7 +253,8 @@ A prop is "done" when it:
 
 - [v1-asset-pipeline-plan.md](v1-asset-pipeline-plan.md) — landmark/VFX plan,
   the seven hard-surface archetypes (Phase B here).
-- [track-build-playbook.md](track-build-playbook.md) — the four-pass track build.
+- [level-design-playbook.md](level-design-playbook.md) — the pass-by-pass track
+  build (supersedes the archived track-build-playbook).
 - [blender-pipeline-guide.md](blender-pipeline-guide.md) — scatter, biome
   palette, strokes, object-kind reference.
 - [asset-pipeline-guide.md](asset-pipeline-guide.md) — spec → GLB round-trip.

@@ -1,5 +1,15 @@
 # Level-design playbook — building a track from a shape-only canvas
 
+> **⚠ Canonical track-build workflow (consolidated 2026-06).** This is *the*
+> build-a-track-from-scratch playbook — it supersedes the archived
+> [track-build-playbook.md](./track-build-playbook.md), whose unique gotchas were
+> folded into "Before you start" + §8 here. Written during the **South Beach
+> Sunken** build, which was cut in the 2026-06 content pass (the Reef opener is
+> being rebuilt as **Texcoco Rising**) — the *track* changed, the *pass workflow
+> is current and track-agnostic*. **Anti-grav is cut** (parked for a possible
+> DLC): don't author anti-grav set-pieces; verticality comes from terrain, ramps,
+> berms, and cliffs.
+
 > How to take a **shape-only** track (a locked racing line on open water, no
 > geometry) all the way to a dressed, playable level. Written from the **South
 > Beach Sunken** build (2026-06). This is the *build-from-scratch* companion to
@@ -26,6 +36,19 @@
    [track-art-direction.md](./track-art-direction.md) section first. Treat plates
    as mood/material/proportion, not literal geometry.
 2. **WORK IN PASSES; CONFIRM AT EACH BOUNDARY WITH A DIAGRAM.** Don't run ahead.
+
+## Before you start (tooling)
+
+- **Read the design + the concept-art plates first** (rule 0 above): the track's
+  `docs/tracks/<id>.md`, its `-art-target`, `track-themes.md`, and the beat table
+  in `track-design-specs.md`.
+- **Addon installed/symlinked** — `pnpm install:blender-addon`.
+- **`props-library.blend` exists** in `tracks-src/`, or the scatter ops have
+  nothing to link — seed it with `node tools/blender/seed.mjs seed_props_library.py`
+  if missing.
+- **The addon's *Project root* pref / `$HOVERBIKE_REPO_ROOT` points at the clone
+  you want exports to land in** — exports go *there*, not wherever the `.blend`
+  lives, and not necessarily your current git worktree (see §8).
 
 ## 1. The pass workflow (the spine)
 
@@ -149,15 +172,30 @@ else (`props[], pickupSpawns, boostPads, waveZones`) is **editor-canonical**
 (reversed spline first anchor, sky grade, buoy/boost/pickup/zone counts). Parsing
 the GLB/JSON directly is the **one reliable verification you have** (see §6).
 
+### Pre-export checklist
+
+- [ ] Lap length within ~10% of the spec target.
+- [ ] Start grid placed; ≥1 checkpoint per beat; every `cp` has an `index`.
+- [ ] Every gameplay element authored as an empty (pickups, boosts, zones) — not
+      left to merge from stale JSON.
+- [ ] Hero camera (`camera_hero`) present for the thumbnail.
+- [ ] `lint_track` clean.
+- [ ] After export: the right files changed in the right repo, and the look
+      verified in a **headed/WebGPU** browser on **your own** dev server (§6).
+
 ## 6. Verification reality — what you can and can't see
 
 - **Workbench clay ≠ in-engine.** Pastels (BSDF base color), translucent turquoise
   (the submerged floors!), the sunset grade, neon glow, and the horizon shader **all
   only read in the WebGPU renderer.** Judge **massing / composition / clearance**
   from Blender; do **not** judge the look from clay.
-- **Headless can't help with the look.** A backgrounded preview tab pauses `rAF`
-  and WebGPU can't be screenshotted; the autostart loader is flaky. Use it at most
-  for a clean *load* check (no console errors); don't fight it for visuals.
+- **Headless can't help with the look — and neither can a shared preview.** A
+  backgrounded preview tab pauses `rAF` and WebGPU can't be screenshotted; the
+  autostart loader is flaky. Verify look + feel in **your own headed browser on
+  your own dev server** — `pnpm dev --port <N> --strictPort`, open
+  `localhost:<N>` — **not** the Claude in-app preview and **not** a shared
+  web-extension tab (parallel instances cascade ports; CLAUDE.md hard rule 2).
+  Use it at most for a clean *load* check (no console errors).
 - **Verify the artifact, not the render.** Parse the exported GLB (node `kind`
   counts, biggest-mesh sanity, no preview leak) and the JSON (gameplay keys) with a
   tiny Node script — that's deterministic and trustworthy.
@@ -196,6 +234,21 @@ the GLB/JSON directly is the **one reliable verification you have** (see §6).
   `render_viewport_to_path` and `Read` the PNG instead.
 - **Don't park objects in `_hoverbike_*` preview collections** — operators
   regenerate those collections and deleted my preview camera.
+
+Folded from the earlier Cape Hatteras build:
+
+- **Orphan datablocks break the terrain finders.** Unlinked leftovers in
+  `bpy.data` get picked up (`'_orphan_terrain' has no evaluated mesh data`).
+  Purge them first; renaming isn't enough (finders key on `kind` / largest-bbox).
+- **`cp_NN` needs an `index` custom prop** (`cp["index"]=N`) or export validation
+  cancels — or use `hoverbike.materialize_gates_to_cp_empties`, which sets it.
+- **JSON export is opt-in merge, not stomp.** It overwrites
+  `pickupSpawns`/`boostPads`/`waveZones`/`checkpoints` only when the scene has the
+  matching visible empties — build from scratch but skip placing those empties and
+  the *old* JSON's values silently leak through. Author **every** gameplay element
+  as empties in one pass.
+- **Exports land in the configured clone, not your worktree.** After exporting,
+  `git status` the main clone and decide deliberately where the files belong.
 
 ## 9. Tool cheat-sheet
 

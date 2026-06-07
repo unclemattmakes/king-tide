@@ -20,6 +20,17 @@
 > (the Mario-Kart fork), away from the press-forward-on-crest pump described
 > below. See [CLAUDE.md](../CLAUDE.md) and [product-plan.md](./product-plan.md).
 
+> **Where we are now (2026-06).** Racing mechanics are **in** and in
+> **precision-tuning** — wave-mastery pitch model, drift mini-turbo, tricks, tuck,
+> hover, AI; the remaining work is feel/legibility, not net-new systems. The
+> Blender level tooling is **in** and ready for real level work (terrain,
+> road/ramp/tunnel, downtown, wave zones, scatter, export). The current
+> proof-of-thesis is making **shippable versions of the Reef Cup maps** —
+> **Sandbar → Texcoco Rising → Cape Town Drift** (see
+> [reef-cup-vertical-slice-status.md](./reef-cup-vertical-slice-status.md)).
+> Verify with **headed Playwright on your own dev server** (focused test scenes as
+> needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
+
 > **Last updated: 2026-06-07** — **Float anything on the swell — per-instance
 > props + track-level checkpoint gates.** Wave-riding is no longer asset-only.
 > (1) **Per-instance props:** any placed asset prop can be tagged to float via

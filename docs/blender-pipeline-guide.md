@@ -1,5 +1,12 @@
 # Track authoring pipeline
 
+> **⚠ Anti-grav is cut** (2026-06; parked for a possible DLC). The
+> [Anti-grav surfaces](#anti-grav-surfaces) section and the `antigrav_zone` row
+> in the kind table below document a **parked** authoring tool — **no shipped
+> track places anti-grav zones, so don't build them into a v2 track.** The tool
+> + `antigrav.py` runtime stay in the tree for a possible future DLC. Everything
+> else here is current. See [status.md](./status.md).
+
 > Authoring **bikes**? See the bike section in
 > [asset-pipeline-guide.md](./asset-pipeline-guide.md#bikes-bikes-srcidblend--specsbikesidjson)
 > — same one-click flow, but the .blend is the source of truth for
@@ -472,6 +479,10 @@ three mountains with a tunnel through each, AI-completable racing
 line that threads all three.
 
 ### Anti-grav surfaces
+
+> **Parked — anti-grav is cut** (parked for a possible DLC). No shipped track
+> places anti-grav zones; the steps below document a dormant tool kept for a
+> possible future DLC. Don't add anti-grav segments to a v2 track.
 
 Curve-driven anti-grav segments — corkscrew climbs, wall-rides,
 caldera loops, Möbius torch arms, ceiling runs. Same authoring shape
