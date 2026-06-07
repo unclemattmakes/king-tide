@@ -117,6 +117,49 @@ describe('createPropColliders + wave-rider asset-prop branch', () => {
     expect(phys.world.bodies.len()).toBeGreaterThan(before)
   })
 
+  it('lifts the static collider by the GLB collider local offset (scaled by size)', async () => {
+    // Regression: library props like the shipping container pivot at their
+    // BASE, with the collider carrying a +Y offset to sit at the model centre.
+    // The collider must inherit that offset (scaled per-axis), or it sinks
+    // below the visible mesh — see addAssetPropColliders.
+    const phys = await createPhysicsWorld({ gravity: 0 })
+    const loaded: LoadedProp = {
+      root: { userData: {}, traverse: () => {} } as unknown as LoadedProp['root'],
+      colliders: [
+        {
+          shape: 'box',
+          position: { x: 0, y: 2, z: 0 }, // collider centre offset above the base pivot
+          rotation: { x: 0, y: 0, z: 0, w: 1 },
+          halfExtents: [4, 2, 1.9],
+        },
+      ],
+      extras: { prop_id: 'container', category: 'decor' },
+      animations: [],
+    }
+    const assets: PropAssetRegistry = new Map([['container', loaded]])
+    const props: Prop[] = [
+      {
+        type: 'asset',
+        assetId: 'container',
+        position: { x: 10, y: 0, z: 5 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        size: { x: 1.5, y: 1.5, z: 1.5 },
+      },
+    ]
+    createPropColliders(phys, props, assets)
+    const translations: Array<{ x: number; y: number; z: number }> = []
+    phys.world.forEachCollider((c) => {
+      const t = c.translation()
+      translations.push({ x: t.x, y: t.y, z: t.z })
+    })
+    expect(translations.length).toBe(1)
+    const w = translations[0]
+    // body.y (0) + offset.y (2) * size.y (1.5) = 3 — NOT 0 (the pre-fix bug).
+    expect(w?.y).toBeCloseTo(3, 5)
+    expect(w?.x).toBeCloseTo(10, 5)
+    expect(w?.z).toBeCloseTo(5, 5)
+  })
+
   it('falls back to static collider when sim is absent (legacy callers)', async () => {
     const phys = await createPhysicsWorld({ gravity: 0 })
     const assets: PropAssetRegistry = new Map([['buoy', stubLoadedProp({ waveRider: 'buoy' })]])

@@ -209,6 +209,16 @@ function addAssetPropColliders(phys: PhysicsWorld, p: Prop, loaded: LoadedProp):
     )
   }
   if (!col) return
+  // Honor the collider's local pose within the prop. The GLB collider is
+  // authored relative to `prop_root`, which for most library props pivots at
+  // the model's BASE — so the collider carries a +Y offset to sit at the
+  // model's centre (e.g. the shipping container's collider is at local
+  // y=+2). Skipping this offset sinks the collider by that amount (scaled),
+  // leaving the visible upper half non-collidable and, for half-sunk props,
+  // the whole collider underwater. Scale the offset per-axis to match the
+  // half-extent scaling; the body's own rotation is applied by Rapier on top.
+  col.setTranslation(c.position.x * sx, c.position.y * sy, c.position.z * sz)
+  col.setRotation(c.rotation)
   col.setFriction(0.6)
   const created = phys.world.createCollider(col, rb)
   if (p.surface) phys.surfaces.tag(created.handle, p.surface)
