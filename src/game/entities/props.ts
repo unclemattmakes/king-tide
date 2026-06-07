@@ -2,6 +2,8 @@ import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import { isAnimatedAssetProp, type LoadedProp } from '@/game/assets/prop-loader'
+import { deriveWaveRiderTuning } from '@/game/components/wave-rider'
+import { buildPropColliderDesc, colliderExtents } from '@/game/entities/prop-collider'
 import { createWaveRider } from '@/game/entities/wave-rider'
 import type { Prop } from '@/game/tracks/types'
 
@@ -31,13 +33,17 @@ export type WaveRiderAssetBindings = Map<number, string>
  *                 thickness ≥ 0.3m is recommended.
  *  - halfpipe   → trimesh, same as pipe (upper half omitted).
  *
- * Wave-rider behaviour: an asset prop whose GLB carries the
- * `wave_rider_archetype` extras is routed through `createWaveRider`
- * instead — the runtime makes a kinematic body that tracks the wave
- * surface and reacts to hits, and the render layer hosts the visual
- * via the wave-rider render system. Static-collider creation is
- * skipped for that placement. `sim` is required for the wave-rider
- * spawn path; without it (legacy call sites that haven't been
+ * Wave-rider behaviour: a placement floats when EITHER its GLB carries
+ * the `wave_rider_archetype` extras (asset-level buoy/log) OR the
+ * placement itself opts in via `p.waveRider` (per-instance "float on
+ * waves", which wins). Floats are routed through `createWaveRider` — the
+ * runtime makes a kinematic body that tracks the wave surface and reacts
+ * to hits, and the render layer hosts the visual via the wave-rider
+ * render system. Static-collider creation is skipped for that placement.
+ * Per-instance floats use the prop's OWN collider + a tuning auto-derived
+ * from its size that rests at the authored height (`position.y` above
+ * `opts.baseY`, the mean water level). `sim` is required for the
+ * wave-rider spawn path; without it (legacy call sites that haven't been
  * upgraded), wave-rider props degrade to static colliders.
  *
  * Returns the eid → assetId mapping for every wave-rider that was
@@ -49,8 +55,12 @@ export function createPropColliders(
   props: Prop[],
   assets?: PropAssetRegistry,
   sim?: SimWorld,
+  opts: { baseY?: number } = {},
 ): WaveRiderAssetBindings {
   const waveRiderBindings: WaveRiderAssetBindings = new Map()
+  // Mean water level — per-instance floats rest at `position.y` relative
+  // to this, so a floated prop bobs around where the author placed it.
+  const baseY = opts.baseY ?? 0
   for (const p of props) {
     if (p.type === 'asset') {
       if (!p.assetId) continue
@@ -59,11 +69,34 @@ export function createPropColliders(
       // Animated props are render-only decoration — no collider, no sim
       // coupling (hosted by `animated-props`).
       if (isAnimatedAssetProp(p, loaded)) continue
+      // Per-instance float: THIS placement opts in via `p.waveRider`,
+      // regardless of the asset's own archetype. Floats with the prop's
+      // own collider + a size-derived tuning resting at the authored
+      // height. Wins over the asset-level archetype below.
+      if (p.waveRider !== undefined && sim) {
+        const first = loaded.colliders[0]
+        const ext = first ? colliderExtents(first, p.size) : { halfHeight: 0.5, footprint: 0.5 }
+        const tuning = deriveWaveRiderTuning({
+          halfHeight: ext.halfHeight,
+          footprint: ext.footprint,
+          restOffsetY: p.position.y - baseY,
+          dof: p.waveRider.dof ?? 'locked',
+        })
+        const eid = createWaveRider(sim, phys, {
+          position: p.position,
+          yaw: yawFromQuat(p.rotation),
+          tuning,
+          colliders: loaded.colliders,
+          size: p.size,
+        })
+        waveRiderBindings.set(eid, p.assetId)
+        continue
+      }
       if (loaded.waveRider !== undefined && sim) {
-        // Wave-rider props get a kinematic Rapier body driven by the
-        // wave-rider sim system + a render mesh sourced from the
-        // loaded GLB. Static colliders are skipped — the wave-rider
-        // body owns the physics presence.
+        // Asset-level wave-rider (buoy/log GLB): kinematic body with the
+        // archetype's hand-tuned preset + primitive collider. Unchanged
+        // path for shipped buoys/logs. Static colliders are skipped — the
+        // wave-rider body owns the physics presence.
         const eid = createWaveRider(sim, phys, {
           position: p.position,
           archetype: loaded.waveRider,
@@ -157,22 +190,19 @@ function yawFromQuat(q: Quat): number {
 }
 
 /**
- * Static colliders for an asset-prop instance. Reads the shape from the
- * GLB's first `collider_*` extras, applies the prop's spec scale, then
- * positions the rigid body at the editor-authored pose.
- *
- * The prop's `size` field is repurposed as a uniform-ish scale on each
- * axis when the type is `asset`. The collider is scaled by the
- * average of the size components so non-uniform scaling doesn't
- * deform a sphere/capsule into something Rapier doesn't support.
+ * Static collider for an asset-prop instance. Builds the collider from the
+ * GLB's first `collider_*` descriptor via {@link buildPropColliderDesc}
+ * (scaled by the prop's `size`, carrying its local pose within `prop_root`),
+ * then attaches it to a fixed body at the editor-authored pose. The local
+ * pose matters: library props often pivot at the model BASE with the
+ * collider carrying a +Y offset to sit at the centre, so dropping it would
+ * sink the collider below the visible mesh.
  */
 function addAssetPropColliders(phys: PhysicsWorld, p: Prop, loaded: LoadedProp): void {
   if (loaded.colliders.length === 0) return
-  const c = loaded.colliders[0]!
-  const sx = Math.max(0.01, p.size.x)
-  const sy = Math.max(0.01, p.size.y)
-  const sz = Math.max(0.01, p.size.z)
-  const sAvg = (sx + sy + sz) / 3
+  const col = buildPropColliderDesc(phys, loaded.colliders[0]!, p.size)
+  if (!col) return
+  col.setFriction(0.6)
   const desc = phys.rapier.RigidBodyDesc.fixed().setTranslation(
     p.position.x,
     p.position.y,
@@ -180,46 +210,6 @@ function addAssetPropColliders(phys: PhysicsWorld, p: Prop, loaded: LoadedProp):
   )
   desc.setRotation(p.rotation)
   const rb = phys.world.createRigidBody(desc)
-  let col: ReturnType<PhysicsWorld['rapier']['ColliderDesc']['cuboid']> | null = null
-  if (c.shape === 'box' && c.halfExtents) {
-    col = phys.rapier.ColliderDesc.cuboid(
-      Math.max(0.05, c.halfExtents[0] * sx),
-      Math.max(0.05, c.halfExtents[1] * sy),
-      Math.max(0.05, c.halfExtents[2] * sz),
-    )
-  } else if (c.shape === 'sphere' && typeof c.radius === 'number') {
-    col = phys.rapier.ColliderDesc.ball(Math.max(0.05, c.radius * sAvg))
-  } else if (
-    c.shape === 'cylinder' &&
-    typeof c.radius === 'number' &&
-    typeof c.height === 'number'
-  ) {
-    col = phys.rapier.ColliderDesc.cylinder(
-      Math.max(0.05, c.height * 0.5 * sy),
-      Math.max(0.05, c.radius * sAvg),
-    )
-  } else if (
-    c.shape === 'capsule' &&
-    typeof c.radius === 'number' &&
-    typeof c.height === 'number'
-  ) {
-    col = phys.rapier.ColliderDesc.capsule(
-      Math.max(0.05, c.height * 0.5 * sy),
-      Math.max(0.05, c.radius * sAvg),
-    )
-  }
-  if (!col) return
-  // Honor the collider's local pose within the prop. The GLB collider is
-  // authored relative to `prop_root`, which for most library props pivots at
-  // the model's BASE — so the collider carries a +Y offset to sit at the
-  // model's centre (e.g. the shipping container's collider is at local
-  // y=+2). Skipping this offset sinks the collider by that amount (scaled),
-  // leaving the visible upper half non-collidable and, for half-sunk props,
-  // the whole collider underwater. Scale the offset per-axis to match the
-  // half-extent scaling; the body's own rotation is applied by Rapier on top.
-  col.setTranslation(c.position.x * sx, c.position.y * sy, c.position.z * sz)
-  col.setRotation(c.rotation)
-  col.setFriction(0.6)
   const created = phys.world.createCollider(col, rb)
   if (p.surface) phys.surfaces.tag(created.handle, p.surface)
 }

@@ -634,7 +634,9 @@ async function boot() {
     // hosted here, skeleton-cloned + mixer-driven, ticked from the game loop.
     animatedProps = createAnimatedPropsSystem(scene, track.props, propAssets, { camera })
     waveRiderSys = createWaveRiderSystem(sim, phys, waveField)
-    const waveRiderAssetBindings = createPropColliders(phys, track.props, propAssets, sim)
+    const waveRiderAssetBindings = createPropColliders(phys, track.props, propAssets, sim, {
+      baseY: waveField.baseY,
+    })
     if (waveRiderAssetBindings.size > 0) {
       waveRiderRender = createWaveRiderRenderSystem(scene, sim, {
         assetResolver: (eid) => {

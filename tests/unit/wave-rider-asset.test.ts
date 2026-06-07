@@ -21,7 +21,11 @@ import { describe, expect, it } from 'vitest'
 import { createSimWorld } from '../../src/engine/sim/ecs/world'
 import { createPhysicsWorld } from '../../src/engine/sim/physics/rapier'
 import type { LoadedProp } from '../../src/game/assets/prop-loader'
-import { WaveRiderStore, WaveRiderTag } from '../../src/game/components/wave-rider'
+import {
+  deriveWaveRiderTuning,
+  WaveRiderStore,
+  WaveRiderTag,
+} from '../../src/game/components/wave-rider'
 import { createPropColliders, type PropAssetRegistry } from '../../src/game/entities/props'
 import type { Prop } from '../../src/game/tracks/types'
 
@@ -177,5 +181,97 @@ describe('createPropColliders + wave-rider asset-prop branch', () => {
     expect(bindings.size).toBe(0)
     // The static-collider path created a fixed body for the prop.
     expect(phys.world.bodies.len()).toBeGreaterThan(before)
+  })
+
+  it('floats a per-instance prop (not a wave-rider asset) using its own collider', async () => {
+    const sim = createSimWorld({ seed: 4 })
+    const phys = await createPhysicsWorld({ gravity: 0 })
+    // A plain crate asset — NOT tagged as a wave-rider at the asset level.
+    const assets: PropAssetRegistry = new Map([['crate', stubLoadedProp({})]])
+    const props: Prop[] = [
+      {
+        type: 'asset',
+        assetId: 'crate',
+        position: { x: 1, y: 3, z: 2 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        size: { x: 1, y: 1, z: 1 },
+        waveRider: { dof: 'locked' },
+      },
+    ]
+    const bindings = createPropColliders(phys, props, assets, sim, { baseY: 0.5 })
+    const entities = query(sim, [WaveRiderTag])
+    expect(entities.length).toBe(1)
+    const wr = WaveRiderStore.get(entities[0]!)!
+    // Per-instance floats carry no archetype — they auto-tune off the
+    // collider and render from their own GLB.
+    expect(wr.archetype).toBeUndefined()
+    // Rests where it was placed: authored y (3) − mean level (0.5).
+    expect(wr.tuning.floatOffsetY).toBeCloseTo(2.5, 5)
+    // 'locked' DOF holds the heading — no yaw drift.
+    expect(wr.tuning.yawDriftRate).toBe(0)
+    expect(bindings.get(entities[0]!)).toBe('crate')
+  })
+
+  it("'yaw' DOF enables yaw drift", async () => {
+    const sim = createSimWorld({ seed: 5 })
+    const phys = await createPhysicsWorld({ gravity: 0 })
+    const assets: PropAssetRegistry = new Map([['crate', stubLoadedProp({})]])
+    const props: Prop[] = [
+      {
+        type: 'asset',
+        assetId: 'crate',
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        size: { x: 1, y: 1, z: 1 },
+        waveRider: { dof: 'yaw' },
+      },
+    ]
+    createPropColliders(phys, props, assets, sim, { baseY: 0 })
+    const wr = WaveRiderStore.get(query(sim, [WaveRiderTag])[0]!)!
+    expect(wr.tuning.yawDriftRate).not.toBe(0)
+  })
+
+  it('per-instance float overrides an asset-level archetype', async () => {
+    const sim = createSimWorld({ seed: 6 })
+    const phys = await createPhysicsWorld({ gravity: 0 })
+    // Asset IS a buoy, but the placement opts into per-instance float —
+    // the per-instance path (auto tuning, no archetype) should win.
+    const assets: PropAssetRegistry = new Map([['buoy', stubLoadedProp({ waveRider: 'buoy' })]])
+    const props: Prop[] = [
+      {
+        type: 'asset',
+        assetId: 'buoy',
+        position: { x: 0, y: 1, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        size: { x: 1, y: 1, z: 1 },
+        waveRider: { dof: 'locked' },
+      },
+    ]
+    createPropColliders(phys, props, assets, sim, { baseY: 0 })
+    const entities = query(sim, [WaveRiderTag])
+    expect(entities.length).toBe(1)
+    expect(WaveRiderStore.get(entities[0]!)!.archetype).toBeUndefined()
+  })
+
+  it('deriveWaveRiderTuning reproduces the buoy preset at buoy size and softens for big props', () => {
+    const buoyish = deriveWaveRiderTuning({
+      halfHeight: 0.45,
+      footprint: 0.4,
+      restOffsetY: 0.35,
+      dof: 'locked',
+    })
+    expect(buoyish.springK).toBeCloseTo(36, 0)
+    expect(buoyish.normalFollow).toBeCloseTo(0.6, 2)
+    expect(buoyish.floatOffsetY).toBe(0.35)
+    expect(buoyish.yawDriftRate).toBe(0)
+    const boatish = deriveWaveRiderTuning({
+      halfHeight: 2,
+      footprint: 4,
+      restOffsetY: 0,
+      dof: 'locked',
+    })
+    // Bigger props bob slower and resist tilting.
+    expect(boatish.springK).toBeLessThan(buoyish.springK)
+    expect(boatish.normalFollow).toBeLessThan(buoyish.normalFollow)
   })
 })
