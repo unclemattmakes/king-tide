@@ -2,10 +2,11 @@
 
 > **What this is.** A forward-looking visual build-target for the Texcoco
 > Rising track (Reef Cup #1 — drowned Mexico City), grounded in the design
-> docs. There is **no authored `.blend` and no concept-plate pass yet** —
-> the track is concept-locked, geometry pending — so these are pure
-> mood/material targets to build toward. A Midjourney/ComfyUI concept pass
-> (prompt lane below) is **TODO** before the art pass. The layout follows
+> docs. The **Midjourney concept pass is DONE** (2026-06-07,
+> [#321](https://github.com/occ-matt/hoverbike/issues/321)) — plates live in the
+> external store (see *Source material* below). There is still **no authored
+> `.blend`** — the track is concept-locked, geometry pending — so the build notes
+> here are mood/material targets to build toward. The layout follows
 > [tracks/texcoco-rising.md](./texcoco-rising.md), the *look* follows this doc.
 >
 > **This doc is downstream of** [art-direction.md](../art-direction.md) (register,
@@ -18,10 +19,16 @@
 
 ## Source material
 
-- **Concept plates:** *none yet.* Run the MJ/ComfyUI lane below for a 6-beat
-  best-of (hero aerial, causeway run, Zócalo lagoon, El Ángel set-piece,
-  Chapultepec finish, waterline detail) and curate to
-  `concept-art/.../texcoco-rising/best/` before the art pass.
+- **Concept plates:** ✅ **done (2026-06-07).** A 7-beat Midjourney pass (hero
+  aerial, causeway run, Zócalo lagoon, El Ángel set-piece, Chapultepec finish,
+  waterline detail, + twin-volcano horizon bonus) lives in the external store at
+  `concept-art/midjourney/texcoco-rising/` — raw cells `<beat>_0..3.png`, curated
+  picks in `best/<beat>.png`, `best/_BEST_STRIP.png`, and `CONTACT_SHEET.png`.
+  Style-locked to the painterly-vinyl `--sref` canonical frame; the El Ángel
+  set-piece rendered wheel-free. Curated picks (best cell per beat): hero_aerial
+  `0`, calzada_run `0`, zocalo_lagoon `2`, el_angel `2`, chapultepec_finish `3`,
+  waterline_detail `3`, volcano_horizon `0`. Shot sheet:
+  [texcoco-rising-concept-pass.md](./texcoco-rising-concept-pass.md).
 - **MJ prompt lane** (reproducible — same lane as Sandbar, restyled to Mexico
   City): `<concrete scene>; painterly cinematic concept art, retro-future
   post-apocalyptic solarpunk drowned-world hover-bike racing game, warm

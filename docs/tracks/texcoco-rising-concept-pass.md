@@ -6,10 +6,14 @@
 > and the track look ([texcoco-rising-art-target.md](./texcoco-rising-art-target.md)).
 > Beats follow [texcoco-rising.md](./texcoco-rising.md).
 >
-> *(Authored on a remote session with no image generator — this is the
-> direction + prompts, not the rendered plates. Run the lane, curate a
-> best-of to `concept-art/midjourney/texcoco-rising/best/`, then drive the
-> bespoke-prop sculpts from [texcoco-rising-prop-manifest.md](./texcoco-rising-prop-manifest.md).)*
+> *(Prompts authored on a remote session with no image generator. **The pass
+> has since been run — ✅ 2026-06-07 ([#321](https://github.com/occ-matt/hoverbike/issues/321)).**
+> All 7 beats rendered on the lane below, carrying the painterly-vinyl `--sref`
+> canonical frame and the `--no` ban list; curated to
+> `concept-art/midjourney/texcoco-rising/best/`. Curated picks (best cell per
+> beat): hero_aerial `0`, calzada_run `0`, zocalo_lagoon `2`, el_angel `2`,
+> chapultepec_finish `3`, waterline_detail `3`, volcano_horizon `0`. Next: drive
+> the bespoke-prop sculpts from [texcoco-rising-prop-manifest.md](./texcoco-rising-prop-manifest.md).)*
 
 ## How to read this
 
@@ -69,6 +73,12 @@ The hero; build + light first after water/sky.
 > off the broken lip soaring past the towering gold Ángel de la Independencia
 > winged-victory statue, Popocatépetl volcano smoking behind, the teal lake and
 > trajineras spread far below**
+>
+> *(Bike beat — carries the wheels-trap mitigation: the hover-craft "magic
+> phrase" (`"jet-ski"-adjacent … hovers on a cushion of anti-grav repulsion`),
+> air-gap language, hover/glide verbs instead of "launch/jump," and an extended
+> `--no wheels, tires, motorbike, motorcycle, dirt bike`. In the 2026-06-07 run
+> this rendered all 4 cells wheel-free.)*
 
 ### 5 — Chapultepec finish · `texcoco_chapultepec_finish`  *(36–45 s, turn)*
 > `<concrete scene>` = **a sweeping bank through a drowned park of flooded
