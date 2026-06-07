@@ -299,3 +299,99 @@ energetic maps:
 Re-verified: `pnpm typecheck`, `pnpm test` (1038), `pnpm build` green; foam reads
 as concentrated bubbly foam + flow-aligned brushstrokes with clean teal between
 on South Beach / Cape Town / The Maw real-GPU captures.
+
+## 11 · Crest-placement rework (2026-06-06) — supersedes §9–§10 on whitecap placement
+
+Playtest read: foam was painting the **rising face** of the wave, not the
+**crest** — "gentle shadows and white foam UNDER where the whitecaps should be."
+Root cause (the §10 gate was still slope-weighted): for a wave, **slope is max
+mid-face and ≈0 at the crest**, while **height is max at the crest**. Every
+slope-driven foam term therefore peaks *below* the crest:
+
+- the whitecap gate's dominant term was the AND `heightWhitecap × slopeWhitecap`,
+  whose product peaks on the upper face (≈ kx=π/4), not the peak;
+- `pixelFoam` (`pow(pixelSlope, 3)`) is pure slope → paints the face;
+- the vertex foam accumulator's `slopeFoam` is pure slope → trailing face foam.
+
+Fixes (all in `water.ts`, all fragment/vertex visual — buoyancy untouched):
+
+1. **Height-led whitecap gate.** `whitecapGate = pow(mix(heightWhitecap,
+   max(heightWhitecap, slopeWhitecap), whitecapMode), 1.6)`. At `whitecapMode 0`
+   the cap is **pure height** → foam sits ON the crest; raising `whitecapMode`
+   OR-blends slope back in to also foam steep breaking faces, but never relocates
+   the cap off the crest. Default `whitecapMode` **0.25 → 0.0**.
+2. **Downweighted the slope-face foam** so it can't out-vote the crest cap in the
+   `max()`: `pixelFoam ×0.3`, accumulator `slopeFoam ×0.45` (crest-aligned
+   `foldFoam` kept at full weight for the trail).
+3. **Tighter height ramp + lower start** for a solid cap on real crests:
+   `WHITECAP_HEIGHT_BAND 0.7 → 0.4`, `whitecapHeight 0.65 → 0.5` (so gentler
+   crests still cap now that placement is crest-concentrated rather than broad).
+4. **Foam-bubble texture = solid overlapping discs.** `buildFoamBubbleTexture`
+   rewritten from the bright-center two-octave Worley "fizz of tiny rings" to
+   flat-filled white circles (one jittered disc per cell, unioned via `max` so
+   neighbours overlap into chunky clusters; 8² + 14² discs, thin AA rim). Per the
+   user's ask: "solid white circles that can overlap (at least for now)."
+
+Verified on real WebGPU (headed Chrome, `?track=the-maw`, posed free-camera over
+**deep open ocean** — see note below — across gentle → energetic swell, frozen
+via `waterDebug().setTimeScale(0)`): foam now reads as solid white caps on the
+crest tips with clean teal in the troughs/faces, built from overlapping solid
+circles. `pnpm typecheck` / `pnpm test` (1044) / `pnpm build` green.
+
+> **Verification note — deep-water test bed.** Shallow water (the foam-test /
+> Sandbar / Maw *start* areas) drowns wave-crest foam in shoaling + surf/
+> intersection foam, so it's useless for judging whitecaps. The camera-pose
+> override (`window.__hover.setCameraPose({pos,target})`) is applied **before**
+> the water mesh's per-frame `tick(camera.xz)` (game-loop.ts), so the water
+> re-centers on a posed camera — park it far from any island (e.g. `z≈2000` on
+> The Maw) for full-amplitude open-ocean swell with no shoaling/surf foam, then
+> `setSwellScale`/`setSteepness` + `setTimeScale(0)` to freeze a crest for study.
+
+## 12 · Curvature + leading-edge whitecap (2026-06-06) — supersedes §11's placement
+
+Playtest of §11: the height-led cap read as **wide white bars** straddling the
+crest — because height is a poor *placement* signal (the whole top of a swell
+clears any height threshold, so foam covers a broad symmetric band). Matt asked
+for **curvature-based** foam **biased to the leading (front) edge** of the wave.
+That's the physically-correct FFT-ocean model (foam where the surface *folds*,
+spilling down the breaking front). Implemented:
+
+1. **Analytic crest signals** (`gerstnerCrestSignals`, a sibling of
+   `gerstnerHeight` reusing the same per-wave sin/cos — nearly free, and
+   **steepness-independent**, which matters because the Gerstner pinch is
+   effectively unused — its sim↔render phase drifts, so visuals must not lean on
+   it; see `feedback_steepness_pinch_unused` in memory):
+   - **crest curvature** = `Σ A·k²·sin φ` — the negative Laplacian of the height
+     field, most positive at sharp crests, ≤0 in troughs. Forwarded as a
+     varying, clamped ≥0 in the fragment, gained by `whitecapCurvature`. Sharply
+     peaked at the crest → foam is a thin line ON the crest, not a band.
+   - **∂h/∂t** = `−Σ A·ω·cos φ` — vertical surface velocity; >0 where the water
+     is rising = the **leading/front face** of an advancing crest.
+2. **New gate** = `pow(curvCoverage × leadBias, 1.4)`, where `leadBias =
+   mix(1, smoothstep(−ref, +ref, ∂h/∂t), whitecapLeadBias)` → ~0 trailing face,
+   ~0.5 crest, ~1 leading face. So `whitecapLeadBias` cuts the trailing half of
+   the old bar and pushes the cap onto the front — the "breaking forward" look.
+3. **Knobs** (replace the height/slope/mode sliders in the water debug menu):
+   `whitecapCurvature` (gain, default **4** — higher = more coverage / gentler
+   crests foam; lower = only the sharpest breakers) and `whitecapLeadBias`
+   (default **1** = front-only … 0 = symmetric). The legacy height/slope/mode
+   uniforms + setters + storage keys are **retained** (no store bump; per-key
+   loader gives the two new keys their defaults) but no longer feed the wave
+   whitecap — safe to retire in a follow-up cleanup.
+
+**Characteristic to know:** pure curvature means **long gentle swells foam very
+little** (low k² → low curvature) — the foam comes from the sharper chop and
+from where chop rides up onto swell crests (constructive, sharpest combined
+crests). That's physically right (gentle swells don't whitecap), but it means
+`chopScale 0` ≈ foamless; crank `whitecapCurvature` for more coverage.
+
+**Leading-edge direction** is derived to point at the front (∂h/∂t > 0 ahead of
+an advancing crest); the derivation is internally consistent with the phase
+`gerstnerHeight` uses, but per the sign-convention history it should be eyeballed
+in motion and flipped (negate the `dhdt` accumulation, or swap the `leadBiasRaw`
+smoothstep bounds) if foam reads as a *trailing* wake instead.
+
+Verified on real WebGPU (deep-ocean test bed, gentle → energetic swell): foam
+reads as crest-following, forward-loaded caps with a crisp bright leading edge —
+no wide bars. `pnpm typecheck` / `pnpm test` (1044) / `pnpm build` green; water.ts
+lint error-clean (pre-existing `noNonNullAssertion` warnings only).

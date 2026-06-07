@@ -14,6 +14,12 @@ import type { WaterDebugDefaults, WaterMesh } from './render/water'
 // are ignored, missing keys fall back to the (new) defaults, so a returning
 // user keeps their other tuning and picks up the new foam baseline.
 //
+// No key bump for the foam-v3 curvature rework: it ADDS whitecapCurvature +
+// whitecapLeadBias (missing-key → new default via the loader) and leaves the
+// now-legacy height/slope/mode keys in place (they load but no longer affect
+// the wave whitecap), so v10 stays compatible and returning users pick up the
+// curvature whitecap automatically.
+//
 // v9 bump (prior): dropped the spectrum/FFT-only knobs (choppiness,
 // seaStateIntensity, windSpeed, windDirection, windCutoff, foamPersistence)
 // along with the FFT path itself.
@@ -36,6 +42,8 @@ export type WaterDebugSettings = {
   shoreWaveStrength: number
   pinchDirection: number
   waveBearing: number
+  whitecapCurvature: number
+  whitecapLeadBias: number
   whitecapHeight: number
   whitecapSlope: number
   whitecapMode: number
@@ -63,6 +71,8 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     shoreWaveStrength: d.shoreWaveStrength,
     pinchDirection: d.pinchDirection,
     waveBearing: d.waveBearing,
+    whitecapCurvature: d.whitecapCurvature,
+    whitecapLeadBias: d.whitecapLeadBias,
     whitecapHeight: d.whitecapHeight,
     whitecapSlope: d.whitecapSlope,
     whitecapMode: d.whitecapMode,
@@ -126,6 +136,8 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setShoreWaveStrength(s.shoreWaveStrength)
   water.debug.setPinchDirection(s.pinchDirection)
   water.debug.setWaveBearing(s.waveBearing)
+  water.debug.setWhitecapCurvature(s.whitecapCurvature)
+  water.debug.setWhitecapLeadBias(s.whitecapLeadBias)
   water.debug.setWhitecapHeight(s.whitecapHeight)
   water.debug.setWhitecapSlope(s.whitecapSlope)
   water.debug.setWhitecapMode(s.whitecapMode)

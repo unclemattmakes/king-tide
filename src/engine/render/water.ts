@@ -202,17 +202,22 @@ export type WaterMesh = {
      *  whitecaps still draw); 1 = the default ribbon. Gated by the
      *  Settings → Video "Wave spray" knob via `water-service`. */
     setCrestMistStrength(s: number): void
-    /** Whitecap height threshold (m above rest). Crest foam ramps from this
-     *  height up. Lower = foam on smaller crests. ~0.65 default; the legacy
-     *  value was effectively 1.0 (above the calm sea's ~1.4 m peak), which is
-     *  why whitecaps never fired. */
+    /** Curvature-based whitecap gain. The PRIMARY whitecap control (foam v3):
+     *  foam fires on crest CURVATURE (sharp crests), so it reads as a thin line
+     *  ON the crest, not a wide height band. Higher = foam on gentler curvature
+     *  (more coverage); lower = only the sharpest breaking crests. ~4 default. */
+    setWhitecapCurvature(g: number): void
+    /** Leading-edge bias, 0..1. How hard to push the whitecap onto the wave's
+     *  LEADING (rising/front) face via ∂h/∂t. 0 = symmetric crest line; 1 =
+     *  front-only ("breaking forward"). 1 default. */
+    setWhitecapLeadBias(b: number): void
+    /** @deprecated Legacy height/slope/mode whitecap knobs — no longer affect
+     *  the wave whitecap (curvature replaced them). Kept so persisted tuning +
+     *  the foam-sweep harness keep loading; safe to retire in a cleanup pass. */
     setWhitecapHeight(m: number): void
-    /** Whitecap slope threshold (surface gradient, rise/run). Face foam ramps
-     *  from this slope up. Lower = foam on gentler faces. ~0.36 default (legacy
-     *  0.3, but it was AND-locked against the height gate). */
+    /** @deprecated See {@link setWhitecapCurvature}. No-op for the wave whitecap. */
     setWhitecapSlope(s: number): void
-    /** Whitecap gate mode, 0..1. 0 = strict AND (tall AND steep — the legacy
-     *  glassy gate); 1 = OR (tall OR steep — foam-dense). ~0.25 default. */
+    /** @deprecated See {@link setWhitecapLeadBias}. No-op for the wave whitecap. */
     setWhitecapMode(m: number): void
     /** Foam warmth, 0..2. Scales the light-driven warm tint + warm emissive
      *  bloom on sun-raked foam. 0 = flat white foam (legacy); 1 = baseline
@@ -261,11 +266,18 @@ export type WaterDebugDefaults = {
   pinchDirection: number
   /** Wave-field bearing in degrees, -180..180. */
   waveBearing: number
-  /** Whitecap height threshold, m above rest. 0.65 = baseline (legacy ~1.0). */
+  /** Curvature-based whitecap gain (foam v3). 4 = baseline. Higher = foam on
+   *  gentler curvature; lower = only the sharpest crests. Primary whitecap knob. */
+  whitecapCurvature: number
+  /** Leading-edge bias 0..1: push the whitecap onto the rising/front face.
+   *  1 = baseline (front-loaded), 0 = symmetric crest line. */
+  whitecapLeadBias: number
+  /** @deprecated Legacy whitecap height threshold — no longer drives the wave
+   *  whitecap (curvature replaced it). Retained for store back-compat. */
   whitecapHeight: number
-  /** Whitecap slope threshold, rise/run. 0.36 = baseline (no longer AND-locked). */
+  /** @deprecated Legacy whitecap slope threshold — no-op for the wave whitecap. */
   whitecapSlope: number
-  /** Whitecap gate mode 0..1: 0 = AND (tall×steep), 1 = OR. 0.25 = baseline. */
+  /** @deprecated Legacy whitecap gate mode — no-op for the wave whitecap. */
   whitecapMode: number
   /** Foam warmth 0..2: light-driven warm tint + bloom on sun-raked foam.
    *  1 = baseline, 0 = flat white (legacy). */
@@ -453,22 +465,24 @@ function getWaveDetailNormalTexture(): THREE.DataTexture {
 }
 
 // ---------------------------------------------------------------------------
-// Procedural foam-bubble texture.
+// Procedural foam-bubble texture — solid overlapping discs.
 //
 // The SoT SIGGRAPH 2018 paper credits its foam look to "blending the foam
-// mask with artist-authored textures." We don't have authored foam art,
-// so this builder bakes a tileable two-octave Worley-noise field that
-// reads as overlapping bubble clusters. Sampled per-pixel by the foam
-// composition; multiplies into `foamMask` so every foam source (wake,
-// bow spray, shoreline surf, breaking-wave fold-foam) inherits the same
-// bubble structure for free, breaking up the previous smooth-blob foam
-// edges into a scrubby cluster look.
+// mask with artist-authored textures." We don't have authored foam art, so
+// this builder bakes a tileable field of SOLID white circles — one jittered
+// disc per cell, unioned via max() so neighbouring discs overlap into chunky
+// clusters. Deliberately simple: flat-filled discs (1 inside, 0 outside, with
+// a thin AA rim), NOT the previous bright-center two-octave Worley bubbles,
+// which read as a fizz of tiny rings. Sampled per-pixel by the foam
+// composition and multiplied into `foamMask`, so every foam source (wake,
+// bow spray, shoreline surf, breaking-crest cap) inherits the same disc
+// structure: where a disc covers, foam punches to full white; between discs
+// the strength-aware floor dims toward clean water.
 //
-// Two octaves at different cell densities (16² big bubbles + 32² fine
-// bubbles), composited via summed quadratic-falloff distance fields per
-// cell. Toroidal cell-index wrap keeps the texture tileable under
-// REPEAT sampling. Output is a grayscale R8 packed into RGBA8 (the
-// shader reads the .r channel only).
+// Two octaves of differently-sized discs (8² big + 14² medium) give a little
+// size variation while staying bold. Toroidal cell-index wrap keeps the
+// texture tileable under REPEAT sampling. Output is grayscale packed into
+// RGBA8 (the shader reads the .r channel only).
 // ---------------------------------------------------------------------------
 
 let sharedFoamBubbleTexture: THREE.DataTexture | null = null
@@ -478,35 +492,39 @@ function buildFoamBubbleTexture(): THREE.DataTexture {
   const N = 512
   const data = new Uint8Array(N * N * 4)
 
-  // Deterministic per-cell hash → jittered cell-center offset in [0,1]².
+  // Deterministic per-cell hash → jittered disc-center offset in [0,1]².
   function hash2(cx: number, cy: number, salt: number): [number, number] {
     const s1 = Math.sin(cx * 12.9898 + cy * 78.233 + salt * 53.123) * 43758.5453
     const s2 = Math.sin(cx * 39.346 + cy * 11.135 + salt * 17.421) * 91234.7891
     return [s1 - Math.floor(s1), s2 - Math.floor(s2)]
   }
 
-  type Octave = { cells: number; weight: number; salt: number; bubbleRadius: number }
+  // One jittered SOLID disc per cell. `radius` is in cell units; > 0.5 so a
+  // disc reaches into its neighbours and the union reads as overlapping
+  // circles rather than a tiled grid of separate dots.
+  type Octave = { cells: number; radius: number; salt: number }
   const octaves: Octave[] = [
-    // Big bubbles — 16 cells × 16 cells across the 512-pixel tile so each
-    // bubble is ~32 px ≈ 1/16 of tile. Reads as the "main bubble cluster"
-    // pattern under typical sampling.
-    { cells: 16, weight: 0.7, salt: 0, bubbleRadius: 0.55 },
-    // Fine bubbles — 32 cells, ~16-px bubbles. Adds the small-bubble
-    // grain that catches light when sampled close to the camera.
-    { cells: 32, weight: 0.4, salt: 1, bubbleRadius: 0.5 },
+    // Big bold circles — 8 across the 512-px tile (~64-px discs).
+    { cells: 8, radius: 0.62, salt: 0 },
+    // Medium fill circles — 14 across (~37-px discs), for some size variety.
+    { cells: 14, radius: 0.5, salt: 1 },
   ]
+  // Soft-rim width (cell units) — antialiases the disc edge so close-up rims
+  // don't stair-step. Small relative to radius → discs stay flat-solid inside.
+  const AA = 0.05
 
   for (let py = 0; py < N; py++) {
     for (let px = 0; px < N; px++) {
-      let totalIntensity = 0
+      // Union (max) of every disc covering this texel — overlapping discs
+      // merge into solid clusters instead of darkening at the seams.
+      let v = 0
 
       for (const oct of octaves) {
         const cellSize = N / oct.cells
         const cx = Math.floor(px / cellSize)
         const cy = Math.floor(py / cellSize)
 
-        let minDistNorm = Number.POSITIVE_INFINITY
-        // 3×3 neighbor cells (with toroidal wrap) so the bubble field is
+        // 3×3 neighbor cells (with toroidal wrap) so the disc field is
         // seamless across the tile edge.
         for (let dy = -1; dy <= 1; dy++) {
           for (let dx = -1; dx <= 1; dx++) {
@@ -515,23 +533,14 @@ function buildFoamBubbleTexture(): THREE.DataTexture {
             const [hx, hy] = hash2(ncx, ncy, oct.salt)
             const centerPx = (cx + dx + hx) * cellSize
             const centerPy = (cy + dy + hy) * cellSize
-            const ddx = px - centerPx
-            const ddy = py - centerPy
-            const distNorm = Math.hypot(ddx, ddy) / cellSize
-            if (distNorm < minDistNorm) minDistNorm = distNorm
+            const distCell = Math.hypot(px - centerPx, py - centerPy) / cellSize
+            // Solid disc: 1 inside (radius − AA), linear AA ramp to 0 at radius.
+            const disc = Math.max(0, Math.min(1, (oct.radius - distCell) / AA))
+            if (disc > v) v = disc
           }
         }
-
-        // Bubble: bright at center, falls off to zero by bubbleRadius.
-        // Quadratic falloff (`x²`) gives a soft inner highlight + crisp
-        // edge that reads like the bright dome of an air bubble rather
-        // than a uniform spot.
-        const f = Math.max(0, 1 - minDistNorm / oct.bubbleRadius)
-        totalIntensity += oct.weight * f * f
       }
 
-      // Slight gamma lift so the texture's perceptual range hits [0,1].
-      const v = Math.min(1, totalIntensity ** 0.85)
       const byte = Math.round(v * 255)
       const idx = (py * N + px) * 4
       data[idx + 0] = byte
@@ -974,6 +983,48 @@ export function createWaterMesh(
     return vec3(y, dydx, dydz)
   })
 
+  // Analytic crest signals for curvature-based whitecap foam (foam pass v3).
+  // Two extra sums over the same waves the height uses — both reuse sin/cos so
+  // they cost almost nothing, and both are STEEPNESS-INDEPENDENT: they read the
+  // raw height field, not the Gerstner pinch (which Matt no longer uses because
+  // its sim↔render phase drifts — so visuals must not lean on it).
+  //   .x = crest curvature = Σ A·k²·sin(phase)  — the negative Laplacian of the
+  //        height field: most POSITIVE at sharp crests, negative in troughs (the
+  //        fragment clamps ≥0 so only crests foam). Sharply peaked at the crest,
+  //        so foam reads as a thin line on the crest, not a wide height band.
+  //   .y = ∂h/∂t = −Σ A·ω·cos(phase)  — vertical surface velocity: >0 where the
+  //        water is RISING = the leading/FRONT face of an advancing crest, <0 on
+  //        the trailing face. Drives the leading-edge bias.
+  // Both are rotation-invariant scalars (a Laplacian and a time derivative), so
+  // unlike the slopes there's no rotate-back — the bearing only enters via the
+  // rotated phase, which is identical to gerstnerHeight's.
+  const gerstnerCrestSignals = Fn(([x, z, t]: [unknown, unknown, unknown]) => {
+    const xN = x as ReturnType<typeof float>
+    const zN = z as ReturnType<typeof float>
+    const tN = t as ReturnType<typeof float>
+    const xRot = xN.mul(waveBearingCosUniform).add(zN.mul(waveBearingSinUniform))
+    const zRot = xN.mul(waveBearingSinUniform.negate()).add(zN.mul(waveBearingCosUniform))
+    const curv = float(0).toVar()
+    const dhdt = float(0).toVar()
+    for (let i = 0; i < waveConsts.length; i++) {
+      const w = waveConsts[i]!
+      // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
+      const ampI = waveAmpUniform.element(i) as any
+      const phase = float(w.k * w.dirX)
+        .mul(xRot)
+        .add(float(w.k * w.dirZ).mul(zRot))
+        .sub(tN.mul(w.omega))
+        .add(float(w.phase))
+      curv.addAssign(
+        sin(phase)
+          .mul(ampI)
+          .mul(float(w.k * w.k)),
+      )
+      dhdt.addAssign(cos(phase).mul(ampI).mul(float(-w.omega)))
+    }
+    return vec2(curv, dhdt)
+  })
+
   // Gerstner — horizontal-displacement part: returns vec3(dx, dz, qSum).
   // The horizontal displacement is what produces the SoT-style pinched
   // ridges (vs round bumps). qSum is the y-component reduction in the
@@ -1357,7 +1408,12 @@ export function createWaterMesh(
         clamp(max(float(0), d.z).mul(float(3.0)), float(0), float(1)),
         float(2.0),
       )
-      const localFoam = max(slopeFoam, foldFoam)
+      // slopeFoam peaks on the wave FACE (slope is max mid-face, ~0 at the
+      // crest), so it's downweighted — the bright foam belongs on the crest
+      // cap (height-driven, in the fragment), not banded across the face.
+      // foldFoam (Tessendorf pinch, crest-aligned) keeps full weight and
+      // carries the lingering trail behind a passing crest.
+      const localFoam = max(slopeFoam.mul(float(0.45)), foldFoam)
       const decay = float(Math.exp(-dt * DECAY_RATE))
       maxFoam.assign(max(maxFoam, localFoam.mul(decay)))
     }
@@ -1391,6 +1447,14 @@ export function createWaterMesh(
   const qSumFrag = varying(attenQSum)
   const foamAccumFrag = varying(vertexFoamAccum)
   const waterDepthFrag = varying(vertexWaterDepth)
+  // Curvature + leading-edge signals for the curvature-based whitecap (foam v3).
+  // Attenuated by the same shoaling factor as the geometry, so shallow water —
+  // where the waves are damped flat — doesn't sprout foam from residual
+  // curvature. `.x` = crest curvature (neg-Laplacian), `.y` = ∂h/∂t (rising =
+  // front face). See `gerstnerCrestSignals` + the whitecap gate below.
+  const crestSignals = gerstnerCrestSignals(worldX, worldZ, tNode)
+  const crestCurvFrag = varying(crestSignals.x.mul(shoalFactor))
+  const crestRiseFrag = varying(crestSignals.y.mul(shoalFactor))
   // Wave-peak mask — the magnitude of the horizontal Tessendorf
   // displacement (λ·Dx, λ·Dz) already in `attenDispX`/`attenDispZ`.
   // Sea of Thieves' SIGGRAPH 2018 talk credits this signal as the
@@ -1961,32 +2025,39 @@ export function createWaterMesh(
   const CREST_MIST_STRENGTH_DEFAULT = 1.0
   const crestMistStrengthUniform = uniform(CREST_MIST_STRENGTH_DEFAULT)
 
-  // ── Whitecap coverage controls (foam-coverage pass) ──────────────────
-  // The height/slope gate that decides where crest foam fires. Historically
-  // `smoothstep(1.0, 2.0, height) * smoothstep(0.3, 0.7, slope)` — a strict
-  // AND of "tall" and "steep". That kept the sea glassy: long swells are
-  // tall-but-gentle (fail the slope test) and short wind-chop is steep-but-
-  // short (fails the height test), so a normal crest cleared neither gate and
-  // whitecaps essentially never fired (see docs/water-foam-look-plan.md — the
-  // 6-wave field peaks ~1.4 m raw, below the old 1.0–2.0 m gate even before
-  // the AND with slope). These uniforms lower both thresholds and blend the
-  // gate from AND toward OR so a crest foams when it is tall ENOUGH *or* steep
-  // enough — the foam-dense look the wave-mastery concept frames want. All
-  // live-tunable via the water debug menu; the distance-faded `foamFiber`
-  // noise (below) still breaks coverage into bubbly splotches and fades
-  // far-field speckle, so loosening the gate doesn't pebble the horizon.
-  // Defaults dialed on a real-GPU sweep (tests/e2e/foam-sweep.spec.ts). The
-  // first pass (height 0.55 / slope 0.30 / mode 0.35) foamed too much of the
-  // surface: on shallow, pale tracks at a hazy grade (Sandbar / South Beach /
-  // Cape Town) the broad thin foam read as a uniform milky sheet indistinct
-  // from light shallow water — playtest rejected it. Concentrated onto genuine
-  // breaking crests (taller height gate, steeper slope gate, blend back toward
-  // AND) so foam fires where waves actually break, leaving clean teal between.
-  const WHITECAP_HEIGHT_START_DEFAULT = 0.65 // m above rest where crest foam begins (was 1.0 legacy, 0.55 pass-1)
-  const WHITECAP_HEIGHT_BAND = 0.7 // ramp width → full foam at start + band
-  const WHITECAP_SLOPE_START_DEFAULT = 0.36 // surface gradient where face foam begins (legacy 0.3)
-  const WHITECAP_SLOPE_BAND = 0.45 // ramp width → full foam at start + band
-  const WHITECAP_MODE_DEFAULT = 0.25 // 0 = AND (tall×steep), 1 = OR (tall|steep)
+  // ── Whitecap controls (foam pass v3 — curvature + leading-edge) ──────
+  // Foam fires on crest CURVATURE biased toward the wave's LEADING edge, NOT on
+  // height. The height-led predecessor painted a wide symmetric band straddling
+  // the crest, which read as flat "white bars" — height is a poor placement
+  // signal because the whole top of a swell clears any height threshold.
+  //
+  //   `whitecapCurvature` — gain on the crest-curvature signal (the negative
+  //   Laplacian of the height field, `crestCurvFrag`). Higher = foam on gentler
+  //   curvature (more coverage); lower = only the sharpest breaking crests.
+  //   Curvature is sharply peaked at the crest, so foam reads as a thin line ON
+  //   the crest instead of a band. Steepness-independent (reads the height
+  //   field, not the Gerstner pinch, which is effectively unused — see
+  //   feedback_steepness_pinch_unused in memory / docs).
+  //
+  //   `whitecapLeadBias` — 0..1, how hard to push foam onto the LEADING (rising/
+  //   front) face via ∂h/∂t (`crestRiseFrag`). 0 = symmetric crest line; 1 =
+  //   front-only, the "wave breaking forward" look. This is what turns the old
+  //   symmetric bar into a forward-loaded cap.
+  //
+  //   `WHITECAP_LEAD_REF` — ∂h/∂t magnitude (m/s) at which the front face is
+  //   fully lit / the back fully cut. Not a knob; tuned with the field.
+  const WHITECAP_CURVATURE_DEFAULT = 4.0
+  const WHITECAP_LEAD_BIAS_DEFAULT = 1.0
+  const WHITECAP_LEAD_REF = 0.5
+  const whitecapCurvatureUniform = uniform(WHITECAP_CURVATURE_DEFAULT)
+  const whitecapLeadBiasUniform = uniform(WHITECAP_LEAD_BIAS_DEFAULT)
+  // Legacy height/slope/mode whitecap uniforms — no longer feed the wave
+  // whitecap gate (curvature replaced them), but retained so the existing debug
+  // setters / persisted-store keys / foam-sweep harness keep working without a
+  // store-version bump. Safe to retire in a follow-up cleanup pass.
+  const WHITECAP_HEIGHT_START_DEFAULT = 0.5
+  const WHITECAP_SLOPE_START_DEFAULT = 0.36
+  const WHITECAP_MODE_DEFAULT = 0.0
   const whitecapHeightStartUniform = uniform(WHITECAP_HEIGHT_START_DEFAULT)
   const whitecapSlopeStartUniform = uniform(WHITECAP_SLOPE_START_DEFAULT)
   const whitecapModeUniform = uniform(WHITECAP_MODE_DEFAULT)
@@ -2061,39 +2132,39 @@ export function createWaterMesh(
   // speckling — wider ranges read as TV-static when foam is widespread.
   const foamFiber = mix(float(0.6), float(1.0), foamNoiseSmooth)
 
-  // Height-driven whitecap foam — SoT's "foam at wave peaks" recipe, with the
-  // thresholds + AND/OR blend exposed as uniforms (see the coverage block
-  // above). `heightWhitecap` rises as a crest clears `whitecapHeightStart`;
-  // `slopeWhitecap` rises as a face steepens past `whitecapSlopeStart`.
-  const heightWhitecap = smoothstep(
-    whitecapHeightStartUniform,
-    whitecapHeightStartUniform.add(float(WHITECAP_HEIGHT_BAND)),
-    heightFrag,
-  )
-  const slopeWhitecap = smoothstep(
-    whitecapSlopeStartUniform,
-    whitecapSlopeStartUniform.add(float(WHITECAP_SLOPE_BAND)),
-    pixelSlope,
-  )
-  // Blend the strict AND (height×slope — "tall AND steep") toward OR
-  // (max — "tall OR steep") by `whitecapModeUniform`. Pure AND kept the calm
-  // sea foamless; leaning toward OR lets long swells foam from elevation and
-  // short chop foam from steepness. `foamFiber` then modulates with the shared
-  // distance-faded foam noise so the coverage reads as bubbly turbulence.
-  // pow() sharpens the gate's soft shoulder so foam reads as a crisp cap on
-  // breaking crests, not a broad soft haze fading across every gentle face —
-  // the soft midtones were a big part of the "uniform milky wash".
-  const whitecapGate = pow(
-    mix(heightWhitecap.mul(slopeWhitecap), max(heightWhitecap, slopeWhitecap), whitecapModeUniform),
-    float(1.6),
-  )
+  // Curvature-based whitecap foam (foam pass v3) — see the whitecap controls
+  // block above. Replaces the height/slope/mode gate, which painted a wide
+  // symmetric band straddling the crest ("white bars").
+  //
+  //   WHERE — `crestCurvFrag` is the negative Laplacian of the height field
+  //   (Σ A·k²·sin φ), most positive at sharp crests, ≤0 in troughs. Clamp ≥0 and
+  //   gain by `whitecapCurvature`, then it concentrates foam to a thin line ON
+  //   the crest rather than a height band. (smoothstep into [0,1] for a soft
+  //   coverage ramp.)
+  const crestCurvature = max(float(0), crestCurvFrag)
+  const curvCoverage = smoothstep(float(0), float(1), crestCurvature.mul(whitecapCurvatureUniform))
+  //   WHICH SIDE — `crestRiseFrag` is ∂h/∂t. `leadBiasRaw` = smoothstep(−ref,
+  //   +ref, ∂h/∂t) → ~0 on the trailing face, ~0.5 at the crest, ~1 on the
+  //   leading/front face. `whitecapLeadBias` mixes from symmetric (0) to
+  //   front-only (1): it cuts the trailing half of the old bar and pushes the
+  //   cap onto the wave's leading edge — the "breaking forward" look.
+  const leadBiasRaw = smoothstep(float(-WHITECAP_LEAD_REF), float(WHITECAP_LEAD_REF), crestRiseFrag)
+  const leadBias = mix(float(1), leadBiasRaw, whitecapLeadBiasUniform)
+  // pow() sharpens the soft shoulder so the cap reads as crisp solid white, not
+  // a soft haze; `foamFiber` breaks it into bubbly turbulence.
+  const whitecapGate = pow(curvCoverage.mul(leadBias), float(1.4))
   const whitecapFoam = whitecapGate.mul(foamFiber)
   // History-accumulated foam (the time-shifted Gerstner sampler builds
   // a lingering trail behind each passing crest, since the analytic
   // formula is bit-identical between past and present) plus softened
   // pixelFoam and whitecapFoam — the three combine to give crests both
   // an active highlight and a fading trail.
-  const waveFoam = max(max(foamAccumFrag.mul(float(0.7)), pixelFoam), whitecapFoam)
+  //
+  // `pixelFoam` is SLOPE-driven, so it paints the rising FACE, not the crest —
+  // it was a big part of the "white foam under the whitecap" look. Downweighted
+  // to a faint wisp so the height-driven crest cap (`whitecapFoam`) is the
+  // dominant bright foam; the accumulator still carries the trailing foam.
+  const waveFoam = max(max(foamAccumFrag.mul(float(0.7)), pixelFoam.mul(float(0.3))), whitecapFoam)
 
   // Per-bike foam: hull ring + V-wake stripe. We wrap the per-bike work in
   // a Fn() so we can use If(...) to early-out for slots whose bike is far
@@ -2119,7 +2190,8 @@ export function createWaterMesh(
       const dzRel = positionWorld.z.sub(slot.y) as any
       const r2 = dxRel.mul(dxRel).add(dzRel.mul(dzRel))
       If(r2.lessThan(float(BIKE_INFLUENCE_R_SQ)), () => {
-        const r = sqrt(r2)
+        // (`r = sqrt(r2)` was used by the since-removed hull foam ring — see the
+        // note below. The wake/propwash terms use `r2`/`parallel`/`perp`, not r.)
         // biome-ignore lint/suspicious/noExplicitAny: TSL UniformArrayElementNode lacks float-typing in TS
         const weight = weightsUniform.element(i) as any
 
@@ -2731,6 +2803,8 @@ export function createWaterMesh(
     shoreWaveStrength: SHORE_WAVE_STRENGTH_DEFAULT,
     pinchDirection: PINCH_DIRECTION_DEFAULT,
     waveBearing: WAVE_BEARING_DEFAULT,
+    whitecapCurvature: WHITECAP_CURVATURE_DEFAULT,
+    whitecapLeadBias: WHITECAP_LEAD_BIAS_DEFAULT,
     whitecapHeight: WHITECAP_HEIGHT_START_DEFAULT,
     whitecapSlope: WHITECAP_SLOPE_START_DEFAULT,
     whitecapMode: WHITECAP_MODE_DEFAULT,
@@ -2819,20 +2893,28 @@ export function createWaterMesh(
       // passes 0 / 0.5 / 1 for off / subtle / full.
       crestMistStrengthUniform.value = clamp01(s, 0, 2)
     },
+    setWhitecapCurvature(g) {
+      // 0..12 — gain on the crest-curvature signal. Higher foams gentler
+      // curvature (more coverage); lower restricts to the sharpest breaking
+      // crests. The primary whitecap control (foam v3).
+      whitecapCurvatureUniform.value = clamp01(g, 0, 12)
+    },
+    setWhitecapLeadBias(b) {
+      // 0..1 — push the whitecap onto the rising/front (leading) face via ∂h/∂t.
+      // 0 = symmetric crest line; 1 = front-only ("breaking forward").
+      whitecapLeadBiasUniform.value = clamp01(b, 0, 1)
+    },
     setWhitecapHeight(m) {
-      // 0..3 m — height above rest where crest foam begins ramping. Lower
-      // floods more crests with foam; higher restricts it to the tallest
-      // sets. The ramp full-point trails `WHITECAP_HEIGHT_BAND` m above.
+      // @deprecated legacy — no longer affects the wave whitecap (curvature
+      // replaced it). Kept so persisted tuning still loads without throwing.
       whitecapHeightStartUniform.value = clamp01(m, 0, 3)
     },
     setWhitecapSlope(s) {
-      // 0..1 — surface gradient where steep-face foam begins ramping. Lower
-      // foams gentler faces (long swells); higher restricts to sharp chop.
+      // @deprecated legacy — no-op for the wave whitecap.
       whitecapSlopeStartUniform.value = clamp01(s, 0, 1)
     },
     setWhitecapMode(m) {
-      // 0..1 — 0 blends the gate as a strict AND (height×slope, the legacy
-      // glassy behaviour), 1 as OR (max — foam where tall OR steep).
+      // @deprecated legacy — no-op for the wave whitecap.
       whitecapModeUniform.value = clamp01(m, 0, 1)
     },
     setFoamWarmth(s) {

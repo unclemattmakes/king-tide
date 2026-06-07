@@ -184,36 +184,28 @@ const SLIDERS: SliderDef[] = [
     format: (n) => n.toFixed(2),
     hint: 'σ_along of the 2D anisotropic Gaussian. Lower → more disc-like; higher → longer streak along the wave-front tangent. 0.4 = baseline',
   },
-  // Foam coverage — where whitecaps fire. The high-leverage knobs for the
-  // wave-mastery look: the legacy gate (height 1.0–2.0 m AND slope 0.3–0.7)
-  // sat above the calm sea so crest foam never appeared. See
-  // docs/water-foam-look-plan.md.
+  // Foam coverage — where whitecaps fire (foam v3, curvature-based). Foam fires
+  // on crest CURVATURE biased to the wave's leading edge, so it reads as a thin
+  // forward-loaded cap ON the crest instead of the old wide "white bar". See
+  // docs/water-foam-look-plan.md. (The legacy height/slope/mode knobs were
+  // retired from this menu — they no longer affect the wave whitecap.)
   {
-    key: 'whitecapHeight',
-    label: 'Foam height',
+    key: 'whitecapCurvature',
+    label: 'Foam curvature',
     min: 0,
-    max: 2,
-    step: 0.05,
-    format: (n) => `${n.toFixed(2)}m`,
-    hint: 'Crest height (m above rest) where whitecap foam begins. Lower = foam on smaller crests. 0.65 = baseline (legacy was effectively 1.0, above the calm sea — so foam never fired)',
+    max: 12,
+    step: 0.25,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: 'Gain on the crest-curvature signal — the primary whitecap control. Higher = foam on gentler crests (more coverage); lower = only the sharpest breaking crests. 4 = baseline. Foam sits as a thin line on the crest, not a wide band',
   },
   {
-    key: 'whitecapSlope',
-    label: 'Foam slope',
-    min: 0,
-    max: 0.7,
-    step: 0.01,
-    format: (n) => n.toFixed(2),
-    hint: 'Surface gradient (rise/run) where steep-face foam begins. Lower = foam on gentler swell faces. 0.36 = baseline (legacy used 0.3 but AND-locked it against the height gate)',
-  },
-  {
-    key: 'whitecapMode',
-    label: 'Foam gate (AND·OR)',
+    key: 'whitecapLeadBias',
+    label: 'Foam lead bias',
     min: 0,
     max: 1,
     step: 0.05,
-    format: (n) => (n < 0.01 ? 'AND' : n > 0.99 ? 'OR' : n.toFixed(2)),
-    hint: '0 = AND (tall AND steep — legacy glassy gate) · 1 = OR (tall OR steep — foam-dense). 0.25 = baseline: breaking crests foam, clean teal between',
+    format: (n) => (n < 0.01 ? 'sym' : n > 0.99 ? 'front' : n.toFixed(2)),
+    hint: 'Push the whitecap onto the wave\'s leading (rising/front) face via ∂h/∂t. 0 = symmetric crest line · 1 = front-only ("breaking forward"). 1 = baseline',
   },
   {
     key: 'foamWarmth',
@@ -346,14 +338,11 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
         case 'shoreWaveStrength':
           water.debug.setShoreWaveStrength(v)
           break
-        case 'whitecapHeight':
-          water.debug.setWhitecapHeight(v)
+        case 'whitecapCurvature':
+          water.debug.setWhitecapCurvature(v)
           break
-        case 'whitecapSlope':
-          water.debug.setWhitecapSlope(v)
-          break
-        case 'whitecapMode':
-          water.debug.setWhitecapMode(v)
+        case 'whitecapLeadBias':
+          water.debug.setWhitecapLeadBias(v)
           break
         case 'foamWarmth':
           water.debug.setFoamWarmth(v)
