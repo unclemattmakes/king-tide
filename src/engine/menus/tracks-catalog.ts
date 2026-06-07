@@ -59,16 +59,16 @@ export const V1_TRACKS: V1TrackEntry[] = [
     status: 'ship',
   },
   {
-    id: 'south-beach-sunken',
-    name: 'South Beach Sunken',
-    location: 'Drowned Miami — Ocean Drive rooftops',
-    setPiece: 'Versace Steps seaplane ramp',
+    id: 'texcoco-rising',
+    name: 'Texcoco Rising',
+    location: 'Drowned Mexico City — the lake returns',
+    setPiece: 'El Ángel — Reforma freeway launch',
     cup: 'reef',
-    accent: '#ff7ec1',
+    accent: '#e4007c',
     lapTarget: 45,
     laps: 3,
-    gateLabel: '',
-    status: 'ship',
+    gateLabel: 'Concept locked · build pending',
+    status: 'pending',
   },
   {
     id: 'cape-town-drift',
@@ -241,8 +241,12 @@ export const V1_CUPS: CupEntry[] = [
     name: 'Reef Cup',
     tagline: 'Starters. Bright, shallow, instructive.',
     accent: '#4dd6ff',
-    status: 'ship',
-    gateLabel: '',
+    // Gated while the opener (Texcoco Rising) is a locked-but-unbuilt
+    // concept — a championship can't run through a track with no geometry.
+    // Flips back to 'ship' once Texcoco Rising's build lands. Same
+    // convention as the Harbor Cup's two pending concepts.
+    status: 'pending',
+    gateLabel: 'Opens when Texcoco Rising ships',
     races: shipCupRaces('reef'),
   },
   {

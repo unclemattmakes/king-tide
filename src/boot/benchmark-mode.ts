@@ -41,10 +41,11 @@ import { createPerfRecorder, type PerfStats } from '@/engine/perf-recorder'
 import type { RenderInfoLite } from '@/engine/render/perf-hud'
 
 /** Tracks offered as one-click re-run links on the results panel. These are
- *  the three dressed (art-complete) tracks — the meaningful targets for a
- *  perf pass. The default track when `?bench=1` carries no `&track=` is the
- *  first entry. */
-export const BENCH_TRACKS = ['sandbar', 'the-maw', 'south-beach-sunken'] as const
+ *  the dressed (art-complete) tracks — the meaningful targets for a perf
+ *  pass. The default track when `?bench=1` carries no `&track=` is the
+ *  first entry. (South Beach Sunken dropped out when its slot was rebuilt
+ *  as the greybox-pending Texcoco Rising — Mexico City.) */
+export const BENCH_TRACKS = ['sandbar', 'the-maw'] as const
 export type BenchTrackId = (typeof BENCH_TRACKS)[number]
 
 /** Default bench track when `?bench=1` is opened without `&track=`. */

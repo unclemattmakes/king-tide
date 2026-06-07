@@ -28,7 +28,7 @@ place.
 | # | Track | Palette family | Built / Broken / Blooming | Signature treatment |
 |---|---|---|---|---|
 | — | Sandbar | Reef pastel | 45 / 15 / 40 | calm classroom — low-key, friendly, legible |
-| 1 | South Beach Sunken | Reef pastel | 45 / 15 / 40 | permanent spring break, neon-mint on pastel |
+| 1 | Texcoco Rising | Reef rosa | 50 / 20 / 30 | party on the water, gold Ángel over a teal lake |
 | 2 | Cape Town Drift | Reef pastel *(cool)* | 25 / 50 / 25 | ruin-field harbour, mountain grey-green |
 | 3 | Hatteras Light | Reef pastel *(cool)* | 30 / 35 / 35 | cool Atlantic grey, the kept lamp |
 | 4 | The Maw | Open Sea cool | 5 / 30 / 65 | golden-hour Pacific, nature-dominant |
@@ -64,22 +64,27 @@ purpose** — every other track is a spectacle; this is a classroom, so dress it
   the read dead-simple — a clean takeoff lip against open sky, no clutter to
   distract from the lesson.
 
-## 1. South Beach Sunken · Reef pastel · 45 / 15 / 40
+## 1. Texcoco Rising · Reef rosa · 50 / 20 / 30
 
-"They held a permanent spring break on the roofs." The most *defiantly-alive*
-Reef track — high built + blooming, low broken.
+"They drained the lake to build the city. The lake was patient." A defiantly-
+alive drowned megacity — high built + blooming, ruin kept to a budget. Warm
+rosa-mexicano-and-marigold light over a teal high-altitude lake. *(Replaced
+South Beach Sunken / Miami in the 2026-06 content pass.)*
 
-- **Built (45):** pastel Art-Deco hotel rooftops kept painted and lit; neon-mint
-  signage, string lights, rooftop bars. Casa Casuarina facade.
-- **Broken (15):** the half-buried seaplane, a salt-bleach band on the lower
-  facades — light.
-- **Blooming (40):** rooftop palms locals kept alive, turquoise reef below,
-  flowering planters.
-- **Waterline:** pastel facades meet turquoise water with a bright coral fringe —
-  keep it *bright*, this is the friendliest shoreline in the set.
-- **Set-piece (Versace Steps + seaplane ramp):** the famous steps emerging from
-  water with the seaplane wing as the launch. Make the wing read as an obvious
-  takeoff lip; pink sky behind sells the postcard.
+- **Built (50):** painted colonial facades + Aztec stonework kept lit, the gold
+  Ángel, the half-sunk cathedral with gilded altarpiece glints, colourful
+  trajineras, papel-picado, the causeway roadways.
+- **Broken (20):** the collapsed Segundo Piso freeway deck (the ramp), the
+  cathedral's lean, a mineral/salt band on lower facades — keep it a budget.
+- **Blooming (30):** jacarandas + ahuehuete cypress locals kept, chinampa reeds
+  and floating-garden green, lily/algae fringe at the line, the lake itself.
+- **Waterline:** facades + basalt causeway meet teal water with a bright reed/
+  lily fringe — keep it *bright*, among the friendliest shorelines in the set
+  (the lake is alkaline, so a paler salt-bleach band reads true).
+- **Set-piece (El Ángel + collapsed-freeway ramp):** the gold Ángel standing in
+  the lake with the fallen Segundo Piso deck as the launch. Make the tilted deck
+  read as an obvious takeoff lip; the gold statue + Popocatépetl behind sell the
+  postcard.
 
 ## 2. Cape Town Drift · Reef pastel (cool grade) · 25 / 50 / 25
 

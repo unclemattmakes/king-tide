@@ -239,7 +239,7 @@ itembox placement → audio palette → track-specific music. Full content
 specs in [track-themes.md](./track-themes.md).
 
 - **Sandbar** — tutorial, new, scripted gate scenarios (P0)
-- **South Beach Sunken** — rework Lagoon, ~2× length, Versace seaplane set-piece (P0)
+- **Texcoco Rising** — Reef opener (drowned Mexico City), causeway loop, El Ángel collapsed-freeway set-piece (P0). *Replaced South Beach Sunken / Miami in the 2026-06 content pass; rebuilt from scratch.*
 - **Hatteras Light** — rework Cliffside, add anti-grav lighthouse corkscrew (P0)
 - **Cape Town Drift** — new, Two Oceans Aquarium wreck (P0)
 - **The Maw** — new, wave-mastery hero, all-ocean (P0)

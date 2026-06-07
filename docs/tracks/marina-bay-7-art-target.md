@@ -113,5 +113,5 @@ half-submerged oxidised container/hull meeting murky water:
 
 ## References
 - [marina-bay-7.md](./marina-bay-7.md) — the track (beats, props, palette).
-- Sister passes: Open Sea ([the-maw](./the-maw-art-target.md) · [shibuya](./shibuya-submerged-art-target.md)); Reef ([south-beach](./south-beach-sunken-art-target.md) · [cape-town](./cape-town-drift-art-target.md) · [hatteras](./hatteras-light-art-target.md) · [sandbar](./sandbar-art-target.md)).
+- Sister passes: Open Sea ([the-maw](./the-maw-art-target.md) · [shibuya](./shibuya-submerged-art-target.md)); Reef ([texcoco](./texcoco-rising-art-target.md) · [cape-town](./cape-town-drift-art-target.md) · [hatteras](./hatteras-light-art-target.md) · [sandbar](./sandbar-art-target.md)).
 - [art-direction.md](../art-direction.md) — register, material-state rule, waterline trio.

@@ -148,32 +148,41 @@ intro-open-water → calm-skill-check → vertical-spectacle closer.
 Players finish all three feeling competent and ready for the showcase
 cup.
 
-## 1. South Beach Sunken
+## 1. Texcoco Rising
+
+> *Replaced South Beach Sunken (Miami) in the 2026-06 content pass — the
+> Reef opener is now an **inland** drowning, the set's surprise.*
 
 **Cup:** Reef | **Lap target:** 45 s | **Laps:** 3 | **Total race:** ~2:15
-**Water/Land:** 70/30 | **Anti-grav:** none | **Difficulty:** intro
+**Water/Land:** 65/35 | **Anti-grav:** none | **Difficulty:** intro
 
-**Location:** Drowned Miami Beach. Ocean Drive underwater, Art Deco
-hotel rooftops poking through as a chain of pastel islands. Palms
-still standing on rooftop "islands" — locals kept them alive.
+**Location:** Drowned Mexico City. The set's inland surprise — a megacity at
+2,240 m that *nobody* planned to flood, built on the drained bed of **Lake
+Texcoco** (Aztec Tenochtitlán) and sinking for a century. The reborn lake
+leaves the Aztec **causeways** as the only land, **Xochimilco's trajinera**
+boats floating again, the **Zócalo** cathedral half-sunk beside the
+re-emerging **Templo Mayor**, and the gold **Ángel de la Independencia**
+standing over the water. Popocatépetl and Iztaccíhuatl on the horizon.
 
-**Layout:** Loop around three rooftop clusters, with a flooded Ocean
-Drive stretch on one side and an open-bay stretch on the other.
-Gentle swell. The "land" sections are flat hotel roofs you skim
-across.
+**Layout:** Causeway loop over the new lake — raised Aztec roadways threaded
+between drowned landmarks (cathedral, Templo Mayor, Paseo de la Reforma).
+Bright, calm water, wide forgiving lines: the handshake track. The "land"
+sections are stone causeways you skim across.
 
-**Set-piece — Versace Steps:** Casa Casuarina's famous front
-steps emerge from the water; a half-buried seaplane sits across them
-as a natural ramp. You launch off the wing for a big-air boost into
-the next lagoon.
+**Set-piece — El Ángel:** The golden Ángel de la Independencia stands in the
+lake on Paseo de la Reforma; a collapsed section of the **Segundo Piso**
+elevated freeway lies fallen across the avenue. You ride *up* its tilted deck
+as a ramp and launch off the broken lip, past the gold statue, the lake and
+the trajineras spread below and Popocatépetl smoking behind.
 
-**Visual palette:** Pastel pink, turquoise, neon mint. Art Deco
-geometry. Palm silhouettes against pink sky.
+**Visual palette:** Rosa mexicano, marigold orange, papel-picado multicolor,
+gold, lake teal-green, basalt black, jacaranda purple.
 
-**Audio palette:** Vaporwave, Miami synth-funk, distant gulls.
+**Audio palette:** Cumbia / sonidero / Latin electronic, mariachi-horn stabs,
+marimba.
 
-**Lore tag:** "South Beach kept the lights on. They held a permanent
-spring break on the roofs. The Circuit comes through twice a season."
+**Lore tag:** "They drained the lake to build the city. The lake was patient.
+The Circuit opens its season on the water that won."
 
 ## 2. Cape Town Drift
 
@@ -225,7 +234,7 @@ proper are gone; the lighthouse is the only landmark for kilometers.
 
 **Layout:** Loop around the lighthouse base over open Atlantic, with
 one circuit up-and-over the lighthouse itself. Wave swell here is
-heavier than South Beach — first real wave-reading test, but still
+heavier than the calm Reef opener — first real wave-reading test, but still
 gentle. **Every lap ends with a cliff drop from the lamp room down
 to sea level** (Jet Moto Cliffdiver reference) — the cup closer's
 emotional payoff.
@@ -705,7 +714,7 @@ now the **verticality solution** that replaced it.
 | # | Track | Cup | Location | Verticality | Water | Set-piece |
 |---|---|---|---|---|---|---|
 | — | Sandbar | Tutorial | (fictional) | crest launch | 80% | training gates |
-| 1 | South Beach Sunken | Reef | Miami | seaplane ramp | 70% | Versace Steps |
+| 1 | Texcoco Rising | Reef | Mexico City | collapsed-freeway ramp | 65% | El Ángel |
 | 2 | Cape Town Drift | Reef | Cape Town | flat / slalom | 60% | Two Oceans Wreck |
 | 3 | Needle Sound | Harbor | Seattle | pier/ferry ramps + Needle saucer | 55% | The Saucer |
 | 4 | Golden Gate Drowned | Harbor | San Francisco | frozen-wave hills + The Break | 55% | The Break |
@@ -720,7 +729,7 @@ now the **verticality solution** that replaced it.
 | — | The Maw *(parked → B-list)* | — | Big Sur | wave launch | 100% | The Maw arch |
 | — | Hatteras Light *(parked → B-list)* | — | NC outer banks | gallery-spiral ramp + drop | 80% | Lamp Room |
 
-**Geographic spread (active cup roster):** Americas 5 (Miami, Seattle, San
+**Geographic spread (active cup roster):** Americas 5 (Mexico City, Seattle, San
 Francisco, Florida, NYC), Asia 3 (Tokyo, Singapore, Cambodia), Oceania 1
 (Sydney — new with the Harbor Cup, the set's first Oceania track), Europe 1
 (Venice), Africa 1 (Cape Town), Hawaii 1 + 1 fictional tutorial. Parked to

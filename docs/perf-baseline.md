@@ -14,9 +14,13 @@ the headline target in [design-targets.md §3](./design-targets.md#3-numeric-tar
 is still flagged 🟡: a guess, not a measurement. This sheet captures numbers
 on the actual target devices so that target stops being a guess.
 
-We measure the **three dressed tracks only** — `sandbar`, `the-maw`,
-`south-beach-sunken`. Per [CLAUDE.md](../CLAUDE.md), the rest are greybox
-route-stubs; their perf isn't representative until the v2 art pass lands.
+We measure the **dressed tracks only** — `sandbar` and `the-maw`. Per
+[CLAUDE.md](../CLAUDE.md), the rest are greybox route-stubs; their perf isn't
+representative until the v2 art pass lands. *(The `south-beach-sunken` rows
+below are **stale**: Miami was cut in the 2026-06 content pass and the Reef
+opener is being rebuilt from scratch as `texcoco-rising` / Mexico City —
+concept-locked, not yet measurable. Rows kept as placeholders until the
+rebuild lands.)*
 
 ## The target
 

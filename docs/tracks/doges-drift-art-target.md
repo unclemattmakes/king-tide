@@ -118,5 +118,5 @@ ochre marble (a palace colonnade base in teal water):
 
 ## References
 - [doges-drift.md](./doges-drift.md) — the track (beats, props, palette).
-- Sister passes: [marina-bay-7](./marina-bay-7-art-target.md) · [the-maw](./the-maw-art-target.md) · [shibuya](./shibuya-submerged-art-target.md) · Reef ([south-beach](./south-beach-sunken-art-target.md) · [cape-town](./cape-town-drift-art-target.md) · [hatteras](./hatteras-light-art-target.md) · [sandbar](./sandbar-art-target.md)).
+- Sister passes: [marina-bay-7](./marina-bay-7-art-target.md) · [the-maw](./the-maw-art-target.md) · [shibuya](./shibuya-submerged-art-target.md) · Reef ([texcoco](./texcoco-rising-art-target.md) · [cape-town](./cape-town-drift-art-target.md) · [hatteras](./hatteras-light-art-target.md) · [sandbar](./sandbar-art-target.md)).
 - [art-direction.md](../art-direction.md) — register, material-state rule, waterline trio.

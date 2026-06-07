@@ -50,15 +50,15 @@ const CATALOG: Record<string, TrackTheme> = {
     timeLabel: 'Mid-morning',
     weatherLabel: 'Calm · Beaufort 1',
   },
-  'south-beach-sunken': {
-    displayName: 'South Beach Sunken',
-    location: 'Drowned Miami Beach · Florida',
+  'texcoco-rising': {
+    displayName: 'Texcoco Rising',
+    location: 'Drowned Mexico City · Valle de México',
     cup: 'Reef',
-    setPiece: 'Versace Steps',
-    lore: 'South Beach kept the lights on. Permanent spring break on the roofs.',
-    palette: 'Pastel pink + neon mint',
+    setPiece: 'El Ángel',
+    lore: 'They drained the lake to build the city. The lake was patient.',
+    palette: 'Rosa mexicano + marigold + lake teal',
     timeLabel: 'Late afternoon',
-    weatherLabel: 'Clear · Beaufort 2',
+    weatherLabel: 'Calm lake · Beaufort 2',
   },
   'golden-gate-drowned': {
     displayName: 'Golden Gate Drowned',

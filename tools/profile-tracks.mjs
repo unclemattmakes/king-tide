@@ -46,10 +46,12 @@ const HEADLESS = process.env.E2E_HEADLESS === '1'
 const SCREENSHOT_DIR = 'test-results/profile'
 const REPORT_DIR = 'perf-report'
 
-// The three art-complete tracks (Sandbar, The Maw, South Beach Sunken). The
-// rest of the catalog is greybox route-stubs awaiting the v2 art pass, so
-// profiling them would measure unfinished scenes — skip by default.
-const DEFAULT_TRACKS = ['sandbar', 'the-maw', 'south-beach-sunken']
+// The art-complete tracks (Sandbar, The Maw). The rest of the catalog is
+// greybox route-stubs awaiting the v2 art pass, so profiling them would
+// measure unfinished scenes — skip by default. (South Beach Sunken left
+// this list when its slot was rebuilt as the greybox-pending Texcoco
+// Rising / Mexico City.)
+const DEFAULT_TRACKS = ['sandbar', 'the-maw']
 
 const args = process.argv.slice(2)
 const TRACKS = args.length > 0 ? args : DEFAULT_TRACKS

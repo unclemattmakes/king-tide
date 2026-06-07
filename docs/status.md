@@ -6,10 +6,12 @@
 >    places anti-grav zones — every `antiGravZones` is empty. Entries that brag
 >    about shipping anti-grav segments (Liberty / Angkor / Kilauea) are
 >    v1-historical and were already untrue against the reset v2 track data.
-> 2. **Content is mostly greybox for v2.** Only **Sandbar, The Maw, South Beach
->    Sunken** are art-dressed; the other tracks were intentionally reset to
->    greybox route-stubs (PR #285) for the v2 art pass. "v1 lineup complete" is a
->    v1 statement, not a v2 one.
+> 2. **Content is mostly greybox for v2.** Only **Sandbar** and **The Maw** are
+>    art-dressed; the other tracks were intentionally reset to greybox
+>    route-stubs (PR #285) for the v2 art pass. "v1 lineup complete" is a v1
+>    statement, not a v2 one. *(South Beach Sunken / Miami was cut in the 2026-06
+>    content pass; the Reef opener is being rebuilt from scratch as **Texcoco
+>    Rising** — drowned Mexico City — concept-locked / geometry-pending.)*
 > 3. **The soundtrack is CC0 placeholder music, not commissioned/licensed.** The
 >    14 `.opus` tracks play, but licensing is still open work. Entries calling
 >    them "commissioned" / "licensed" are aspirational.
@@ -44,7 +46,8 @@
 > (baked to world space, normalised to ~unit size, `aHeightT` base→crown ramp
 > stamped, hot-swapped into the InstancedMeshes; the procedural builder stays as a
 > load-failure fallback). `sky.clouds` is enabled on all three Reef Cup tracks —
-> **Sandbar** (warm fair-weather), **South Beach Sunken** (flamingo-sunset) and
+> **Sandbar** (warm fair-weather), **Texcoco Rising** (rosa-mexicano lake sunset;
+replaced South Beach / Miami in the 2026-06 content pass) and
 > **Cape Town Drift** (already had the field; now geonode) — palette-matched
 > (`coolBase`/`warmTop`) per track. Verified in real WebGPU (`gen:track-shots` +
 > live Claude-in-Chrome): all four GLBs fetch 200, console clean, soft billowy

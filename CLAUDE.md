@@ -30,9 +30,11 @@ place seen post-flood.
 
 **Where we are:** v1 hit "complete" by v1 standards, then we **blew past it and
 restarted content for v2.** So `status: 'ship'` in the catalog means
-"wired/playable," **not** "art-complete" — only **Sandbar, The Maw, South Beach
-Sunken** are dressed today; the rest are greybox route-stubs awaiting the v2
-environment-art pass.
+"wired/playable," **not** "art-complete" — only **Sandbar** and **The Maw** are
+dressed today; the rest are greybox route-stubs awaiting the v2 environment-art
+pass. *(The Reef opener — South Beach Sunken / Miami — was cut in the 2026-06
+content pass and is being rebuilt from scratch as **Texcoco Rising**, drowned
+Mexico City; it's concept-locked / geometry-pending.)*
 
 **Signature mechanic — wave mastery (v2).** Took the Mario-Kart fork: **not**
 "press forward on the crest for a boost" (the old Wave-Race pump) but **motocross
