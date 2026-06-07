@@ -10,6 +10,41 @@ user): low-poly **toy cloud meshes** (not soft sprites, not shader-only),
 prototyped on a dedicated **cloud-map** test scene, verified with
 **static-camera time-lapse** captures so we can watch them drift.
 
+### Update — "make it gigantic" pass (2026-06-07)
+
+The geonode clouds had landed but read **tiny** in-game (small, uniformly-sized
+puffs scattered evenly) — nothing like the towering masses in the concept art.
+The fix was scale + placement, not new geometry (the geonode silhouettes/shading
+are good). Changes in [`clouds.ts`](../../src/engine/render/clouds.ts):
+
+- **Base-seated geometry.** Both blob builders now recentre on the **flat
+  bottom (yMin → 0)**, not the vertical midpoint. So `altitude` is a true
+  shared **cloudbase**, the towering stretch grows masses **upward** from that
+  shelf, and nothing dips toward the water however tall it gets (drops the old
+  size-coupled "lift" hack).
+- **Size-grading.** The biggest masses skew toward the **horizon** (outer
+  radius) so the far edge reads as a towering cumulus skyline; nearer clouds
+  stay a mix → depth.
+- **Towering (new `sky.clouds.towering` knob, default 0.4).** Per-instance
+  vertical stretch on the largest masses (sizeT² gated, capped) → cumulonimbus
+  columns while small puffs stay rounded. Wired through `types.ts` +
+  `json-loader.ts`.
+- **Bigger defaults** — `scaleRange` `[55,130]→[150,380]`, `altitude` `320→340`
+  (cloudbase), `spreadRadius` `1100→1500`, `altitudeJitter` `70→100`.
+
+Per-track `sky.clouds` blocks bumped to match (≈3× scale + `towering`):
+**cloud-map, the-maw, sandbar, south-beach-sunken, cape-town-drift** and the
+five `cloud-stress-*` presets. Tight-fog tracks (sandbar `fogFar:1200`) keep a
+smaller spread so clouds stay inside the fog-visible band; generous-fog tracks
+(cape-town `fogFar:3200`) push the spread out for horizon towers. Verified in
+real WebGPU across all four moods (neutral midday, golden hour, warm daytime,
+clear blue) — clouds now dominate the upper sky and frame the action.
+
+**Still open (deferred):** the masses read a touch **smooth/pillowy** at large
+scale (the geonode puff detail stretches out) — crisper cauliflower billows
+would need a geonode rebuild (more/smaller puffs per blob in
+`build_cloud_props.py`). Cosmetic, not blocking.
+
 ### What shipped (Phase 1 — procedural geometry)
 
 - [`src/engine/render/clouds.ts`](../../src/engine/render/clouds.ts) — the hero

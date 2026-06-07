@@ -771,6 +771,7 @@ function readOptionalCloudField(raw: unknown): CloudFieldConfig | null {
     'spreadRadius',
     'variants',
     'sunPop',
+    'towering',
     'seed',
   ] as const) {
     if (key in raw) {
@@ -786,6 +787,9 @@ function readOptionalCloudField(raw: unknown): CloudFieldConfig | null {
   }
   if (out.sunPop !== undefined && (out.sunPop < 0 || out.sunPop > 1)) {
     throw new Error(`track-json: sky.clouds.sunPop must be in [0,1] (got ${out.sunPop})`)
+  }
+  if (out.towering !== undefined && out.towering < 0) {
+    throw new Error(`track-json: sky.clouds.towering must be >= 0 (got ${out.towering})`)
   }
   if (out.variants !== undefined && out.variants < 1) {
     throw new Error(`track-json: sky.clouds.variants must be >= 1 (got ${out.variants})`)

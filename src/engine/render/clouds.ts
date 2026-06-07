@@ -35,6 +35,16 @@ import type { SkyShared } from './sky'
  *   - parallax against the islands / horizon as the player moves,
  *   - sit at varying distances and drift past on the wind.
  *
+ * To read *gigantic* rather than as a scattered fair-weather puff field (the
+ * concept art is built around towering masses), the field is shaped three ways:
+ *   - **size-graded** — the biggest masses skew toward the horizon, so the far
+ *     edge reads as a towering cumulus skyline while nearer clouds stay a mix;
+ *   - **towering** — the largest masses stretch upward into cumulonimbus columns
+ *     (small puffs stay rounded), via a per-instance vertical scale;
+ *   - **base-seated** — every blob's flat bottom sits on a shared cloudbase
+ *     (`altitude`), so towers grow up from a believable shelf and nothing dips
+ *     toward the water however tall it gets.
+ *
  * The look is the "clean stylized toy" register: each blob is a handful of
  * merged low-poly icospheres (smooth normals → soft puffs, not hard facets),
  * lit by an unlit TSL material that mixes a cool shadowed base into a warm
@@ -57,11 +67,12 @@ import type { SkyShared } from './sky'
 const UP = new THREE.Vector3(0, 1, 0)
 
 const DEFAULTS = {
-  count: 28,
-  altitude: 320,
-  altitudeJitter: 70,
-  spreadRadius: 1100,
-  scaleRange: [55, 130] as [number, number],
+  count: 24,
+  altitude: 340,
+  altitudeJitter: 100,
+  spreadRadius: 1500,
+  scaleRange: [150, 380] as [number, number],
+  towering: 0.4,
   wind: { x: 1, z: 0.2 },
   sunPop: 1,
   variants: 4,
@@ -166,8 +177,11 @@ function buildCumulusGeometry(rng: () => number): THREE.BufferGeometry {
     throw new Error('clouds: failed to merge cumulus lobes')
   }
 
-  // Measure extents, stamp aHeightT (raw, translation-invariant), then recentre
-  // XZ centroid → 0 and vertical midpoint → 0.
+  // Measure extents, stamp aHeightT (raw, translation-invariant), then seat the
+  // blob on its base: XZ centroid → 0 and flat bottom (yMin) → 0. Base-at-origin
+  // (not midpoint) means the per-instance vertical towering stretch grows the
+  // mass *upward* from a shared cloudbase, and the bottoms of every cloud line
+  // up on that shelf — the recognizable flat-bottomed cumulus look.
   const pos = merged.getAttribute('position') as THREE.BufferAttribute
   const n = pos.count
   let yMin = Infinity
@@ -187,7 +201,7 @@ function buildCumulusGeometry(rng: () => number): THREE.BufferGeometry {
     heightT[i] = Math.min(1, Math.max(0, (pos.getY(i) - yMin) / yRange))
   }
   merged.setAttribute('aHeightT', new THREE.BufferAttribute(heightT, 1))
-  merged.translate(-sx / n, -(yMin + yMax) * 0.5, -sz / n)
+  merged.translate(-sx / n, -yMin, -sz / n)
   merged.computeBoundingSphere()
   return merged
 }
@@ -258,7 +272,16 @@ function buildCloudMaterial(shared: SkyShared, coolHex: string, warmHex: string,
   return material
 }
 
-type CloudInstance = { x0: number; z0: number; y: number; scale: number; yaw: number }
+type CloudInstance = {
+  x0: number
+  z0: number
+  y: number
+  scale: number
+  /** Vertical scale multiplier (towering) — 1 keeps the authored aspect, >1
+   *  stretches the mass into a taller cumulonimbus column. */
+  sy: number
+  yaw: number
+}
 type Variant = { mesh: THREE.InstancedMesh; inst: CloudInstance[] }
 
 /**
@@ -338,7 +361,9 @@ function prepCloudGeometry(mesh: THREE.Mesh): THREE.BufferGeometry {
   }
   g.setAttribute('aHeightT', new THREE.BufferAttribute(heightT, 1))
 
-  g.translate(-(xMin + xMax) * 0.5, -(yMin + yMax) * 0.5, -(zMin + zMax) * 0.5)
+  // Seat on the base: XZ centroid → 0, flat bottom (yMin) → 0 (see
+  // buildCumulusGeometry — towering grows upward from a shared cloudbase).
+  g.translate(-(xMin + xMax) * 0.5, -yMin, -(zMin + zMax) * 0.5)
   const s = 1 / Math.max(xMax - xMin, zMax - zMin, 1e-3)
   g.scale(s, s, s)
   g.computeBoundingSphere()
@@ -353,6 +378,7 @@ export function createCloudLayer(deps: CloudLayerDeps): CloudLayer {
   const altJitter = config.altitudeJitter ?? DEFAULTS.altitudeJitter
   const spreadRadius = config.spreadRadius ?? DEFAULTS.spreadRadius
   const [scaleMin, scaleMax] = config.scaleRange ?? DEFAULTS.scaleRange
+  const towering = Math.max(0, config.towering ?? DEFAULTS.towering)
   const wind = config.wind ?? DEFAULTS.wind
   const variantCount = Math.max(1, Math.floor(config.variants ?? DEFAULTS.variants))
   const seed = config.seed ?? DEFAULTS.seed
@@ -376,13 +402,28 @@ export function createCloudLayer(deps: CloudLayerDeps): CloudLayer {
   const buckets: CloudInstance[][] = geometries.map(() => [])
   for (let i = 0; i < count; i++) {
     const theta = rng() * Math.PI * 2
-    // Bias the radius outward a touch so the field isn't bunched at the centre.
-    const rad = spreadRadius * (0.18 + 0.82 * rng())
+    // Area-uniform radius (sqrt) so the field doesn't bunch at the centre,
+    // then a floor so nothing sits right on top of the player.
+    const radialT = Math.sqrt(0.05 + 0.95 * rng())
+    const rad = spreadRadius * (0.1 + 0.9 * radialT)
+    // Size-grade the field: skew the biggest masses toward the horizon so the
+    // far edge reads as a towering cumulus skyline while nearer clouds stay a
+    // mix — the concept art's "wall of cloud out there, puffs overhead" depth.
+    const sizeT = Math.min(1, Math.max(0, 0.4 * rng() + 0.6 * radialT))
+    const scale = scaleMin + (scaleMax - scaleMin) * sizeT
+    // Towering: the largest masses stretch upward into cumulonimbus columns
+    // (sizeT² keeps the small fair-weather puffs rounded). Capped so the
+    // stretch never gets cartoonishly thin.
+    const sy = 1 + Math.min(1.5, towering * sizeT * sizeT)
     const inst: CloudInstance = {
       x0: Math.cos(theta) * rad,
       z0: Math.sin(theta) * rad,
+      // `altitude` is the cloudbase the flat bottoms sit on (geometry is
+      // seated base-at-origin), and the towering stretch grows each mass up
+      // from there — so no mass dips toward the water however tall it gets.
       y: altitude + (rng() * 2 - 1) * altJitter,
-      scale: scaleMin + (scaleMax - scaleMin) * rng(),
+      scale,
+      sy,
       yaw: rng() * Math.PI * 2,
     }
     buckets[i % variantCount]!.push(inst)
@@ -416,7 +457,7 @@ export function createCloudLayer(deps: CloudLayerDeps): CloudLayer {
       const c = inst[i]!
       pos.set(c.x0, c.y, c.z0)
       quat.setFromAxisAngle(UP, c.yaw)
-      scl.setScalar(c.scale)
+      scl.set(c.scale, c.scale * c.sy, c.scale)
       mtx.compose(pos, quat, scl)
       mesh.setMatrixAt(i, mtx)
     }
@@ -469,7 +510,7 @@ export function createCloudLayer(deps: CloudLayerDeps): CloudLayer {
         const z = focus.z + wrapSigned(c.z0 + driftZ - focus.z, spreadRadius)
         pos.set(x, c.y, z)
         quat.setFromAxisAngle(UP, c.yaw)
-        scl.setScalar(c.scale)
+        scl.set(c.scale, c.scale * c.sy, c.scale)
         mtx.compose(pos, quat, scl)
         mesh.setMatrixAt(i, mtx)
       }

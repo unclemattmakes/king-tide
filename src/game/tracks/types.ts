@@ -488,9 +488,16 @@ export type CloudFieldConfig = {
    *  drifts through. Larger → clouds spread further out toward the horizon.
    *  Default 1100. */
   spreadRadius?: number
-  /** Min/max uniform scale of a blob in metres (a blob is authored ~1 unit
-   *  wide). Default [55, 130]. */
+  /** Min/max scale of a blob in metres (a blob is authored ~1 unit wide).
+   *  This is the dominant "how big do the clouds feel" lever. The field
+   *  size-grades within this range, skewing the biggest masses toward the
+   *  horizon so they read as a towering cumulus skyline. Default [150, 380]. */
   scaleRange?: [number, number]
+  /** Vertical towering, 0..~1.5. Stretches the largest masses upward into
+   *  cumulonimbus columns (small fair-weather puffs stay rounded), for the
+   *  big billowing towers the concept art is built around. 0 = no stretch
+   *  (every blob keeps its authored aspect). Default 0.4. */
+  towering?: number
   /** Wind drift in (x, z) metres per second. Default { x: 1, z: 0.2 } to
    *  match the foliage wind so cloud / sea / foliage drift stay coherent. */
   wind?: { x: number; z: number }
