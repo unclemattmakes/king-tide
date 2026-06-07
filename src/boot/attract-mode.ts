@@ -318,6 +318,9 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
 
       waterMesh.tick([], { x: camera.position.x, z: camera.position.z })
       sky.tick(waveField.time, dt, { x: camera.position.x, z: camera.position.z })
+      // Bob floating checkpoint gates on the swell (no-op unless the track
+      // set `floatGates`).
+      trackVisuals.tick(waveField)
       updateUnderwaterFog(
         scene,
         camera.position.y,

@@ -1026,14 +1026,33 @@ unfloat, untick **Float** and re-apply, then write.
 - **+ Yaw** (`dof: "yaw"`) — also yaws gently with the swell.
 
 Free horizontal motion (a dynamic, shoveable float) is **planned** — it
-needs a dynamic body rather than the current kinematic one. Two related
-follow-ons not yet wired: **ramps** become floatable once authored as
-asset-prop GLBs (rather than baked `kind=track` geometry); **gates** are
-intended to keep a static oversized trigger while their visual floats —
-neither ships yet. Tuning the float feel is best done by eye on a water
-track or in the `?waveriders=1` scene
+needs a dynamic body rather than the current kinematic one. **Ramps**
+become floatable once authored as asset-prop GLBs (rather than baked
+`kind=track` geometry) — still a follow-on. Tuning the float feel is best
+done by eye on a water track or in the `?waveriders=1` scene
 ([`src/game/components/wave-rider.ts`](../src/game/components/wave-rider.ts)
 `deriveWaveRiderTuning`).
+
+<a id="floating-gates"></a>
+### Floating gates
+
+Checkpoint gates can ride the swell too. In the Hoverbike panel's **Gates**
+section, tick **Float gates on waves** (scene prop `hoverbike_float_gates`,
+round-tripped as the track-level `floatGates` in the JSON). At runtime, on
+that track:
+
+- Each gate that sits **over water** bobs vertically on the wave surface at
+  its own XZ (visual only). Gates raised onto dry structures — base more
+  than `GATE_FLOAT_WATER_BAND_M` (4 m) above the water line — **stay static**
+  ("auto-off over land"), so a gate on a bridge or rooftop doesn't bob.
+- The **crossing trigger stays put** and is **widened** vertically by the
+  wave amplitude, so a bike passing through at any wave phase still
+  registers ("oversized static trigger"). See `gateFloatsOnWaves`
+  ([`src/game/tracks/gate-float.ts`](../src/game/tracks/gate-float.ts)) —
+  one predicate shared by the render bob and the trigger so they agree.
+
+It's a track-wide toggle (no per-gate authoring); "over land" gates opt
+themselves out automatically. Motion is strictly vertical (heave) by design.
 
 ### Boost pads
 

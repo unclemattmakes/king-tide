@@ -5,6 +5,7 @@ import type { Vec3 } from '@/engine/sim/physics/vec'
 import { quatRotate } from '@/engine/sim/physics/vec'
 import { RBHandle, RBHandleStore } from '@/game/components'
 import { Racer, RacerStore } from '@/game/components/race'
+import { gateFloatsOnWaves } from '@/game/tracks/gate-float'
 import type { Track } from '@/game/tracks/types'
 
 /**
@@ -68,7 +69,18 @@ export function createRaceSystem(track: Track, events: RaceEvents = {}) {
       // the gate's base still registers the crossing. Slipping under was
       // a common bug — the player would pass between the pillars but at a
       // y the trigger rejected.
-      const insideVertically = vertical > -3 && vertical < cp.height + 2
+      let lowerBound = -3
+      let upperBound = cp.height + 2
+      if (gateFloatsOnWaves(track, cp)) {
+        // The gate VISUAL bobs on the swell while this trigger plane stays
+        // put, so widen the vertical window by the wave amplitude (both
+        // ways) — an "oversized static trigger" that still catches a
+        // crossing at any wave phase.
+        const amp = (track.water?.waveHeight ?? 0) * 2 + 2
+        lowerBound -= amp
+        upperBound += amp
+      }
+      const insideVertically = vertical > lowerBound && vertical < upperBound
 
       if (crossed && insideLaterally && insideVertically) {
         const wasFirstCrossing = racer.checkpointsCrossed === 0
