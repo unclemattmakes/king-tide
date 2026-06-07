@@ -61,6 +61,7 @@ export type TrackJson = {
   sky?: SkyConfig
   horizon?: HorizonConfig
   gateSpacing?: number
+  floatGates?: boolean
   terrainShader?: TerrainShaderConfig
   audio?: AudioConfig
   lapWeather?: LapWeather[]
@@ -267,6 +268,9 @@ export function buildTrackFromJson(input: unknown): Track {
     }
     gateSpacing = gateSpacingRaw
   }
+  // Track-level "float gates on waves" toggle. Per-gate eligibility
+  // (auto-off over land) is decided at use sites via `gateFloatsOnWaves`.
+  const floatGates = (input as { floatGates?: unknown }).floatGates === true
 
   const track: Track = {
     id,
@@ -287,6 +291,7 @@ export function buildTrackFromJson(input: unknown): Track {
   if (sky) track.sky = sky
   if (horizon) track.horizon = horizon
   if (gateSpacing !== undefined) track.gateSpacing = gateSpacing
+  if (floatGates) track.floatGates = true
   if (terrainShader) track.terrainShader = terrainShader
   if (audio) track.audio = audio
   if (lapWeather) track.lapWeather = lapWeather
@@ -415,6 +420,7 @@ export function trackToJson(track: Track): TrackJson {
   if (track.sky) out.sky = { ...track.sky }
   if (track.horizon) out.horizon = { ...track.horizon }
   if (track.gateSpacing !== undefined) out.gateSpacing = track.gateSpacing
+  if (track.floatGates) out.floatGates = true
   if (track.terrainShader) out.terrainShader = { ...track.terrainShader }
   if (track.audio) {
     const audio: AudioConfig = {}

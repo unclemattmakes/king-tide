@@ -435,7 +435,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     sky,
     lapWeather,
     horizonRing,
-    trackVisuals: _trackVisuals,
+    trackVisuals,
     raceHud,
     raceIntro,
     raceIntroUi,
@@ -1746,6 +1746,9 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // so the player never appears to outrun it. Tracks the camera (not the
     // bike) so look-back / spectator pans don't shift the horizon.
     horizonRing.tick({ x: camera.position.x, z: camera.position.z })
+    // Bob any floating checkpoint gates onto the (now-advanced) wave
+    // surface. No-op unless the track set `floatGates`.
+    trackVisuals.tick(waveField)
     // Camera water clamp + underwater-fog blend share one surface sample.
     const camWaterY = sampleHeight(waveField, camera.position.x, camera.position.z)
     // Keep the chase camera above the surface — the bike rides over crests via

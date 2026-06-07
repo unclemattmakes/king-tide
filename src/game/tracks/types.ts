@@ -50,6 +50,12 @@ export type Track = {
    *  `gate-placement.ts` for the algorithm. Defaults to
    *  `DEFAULT_GATE_SPACING_M` when absent from the JSON. */
   gateSpacing?: number
+  /** When true, checkpoint gates over water bob on the wave surface
+   *  (visual only — the crossing trigger stays put, just widened to cover
+   *  the swell). Gates raised onto dry structures (base well above the
+   *  water line) stay static even when this is on ("auto-off over land").
+   *  See `gateFloatsOnWaves`. Default false. */
+  floatGates?: boolean
   /** Editor-authored static props (boxes, pipes, half-pipes, etc).
    *  Rendered + collidable at runtime. Empty for procedural tracks. */
   props: Prop[]

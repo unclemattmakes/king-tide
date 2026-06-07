@@ -25,7 +25,7 @@ import os
 
 import bpy
 import mathutils
-from bpy.props import FloatProperty
+from bpy.props import BoolProperty, FloatProperty
 from bpy.types import Operator
 
 
@@ -1300,6 +1300,7 @@ _SCENE_PROP_NAMES: tuple[str, ...] = (
     "hoverbike_gate_spacing",
     "hoverbike_gate_half_width",
     "hoverbike_gate_height",
+    "hoverbike_float_gates",
     "hoverbike_snap_hover_height",
 )
 
@@ -1333,6 +1334,18 @@ def register() -> None:
         max=100.0,
         precision=1,
         update=_on_gate_prop_changed,
+    )
+
+    # Floating gates: when on, checkpoint gates that sit over water bob on
+    # the wave surface at runtime (visual only — the crossing trigger stays
+    # static + widened). Gates raised onto dry structures stay static
+    # ("auto-off over land"). Round-trips as `floatGates` in the track JSON.
+    bpy.types.Scene.hoverbike_float_gates = BoolProperty(
+        name="Float gates on waves",
+        description="Bob checkpoint gates over water on the swell at runtime "
+        "(visual only; the crossing trigger stays put). Gates on dry "
+        "structures stay static.",
+        default=False,
     )
 
     # Snap-spline-to-terrain hover height. Matches a typical hoverbike

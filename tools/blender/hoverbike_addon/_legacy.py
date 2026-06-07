@@ -798,6 +798,10 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
     # when the field is absent.
     if hasattr(scn, "hoverbike_gate_spacing"):
         body["gateSpacing"] = float(scn.hoverbike_gate_spacing)
+    # floatGates round-trips so the runtime bobs checkpoint gates over
+    # water on the swell (visual only; the trigger stays static + widened).
+    if hasattr(scn, "hoverbike_float_gates"):
+        body["floatGates"] = bool(scn.hoverbike_float_gates)
     if shader_block is not None:
         body["terrainShader"] = shader_block
 
@@ -892,6 +896,7 @@ BLENDER_OWNED_JSON_KEYS = (
     "sky",
     "aiSplines",
     "gateSpacing",
+    "floatGates",
     "lapsToFinish",
     "start",
     # Procedural wave-rider buoys derived from the racing line. The
@@ -945,6 +950,11 @@ def reload_track_from_json(json_path: str) -> dict:
     if isinstance(laps, int) and laps > 0 and hasattr(scene, "hoverbike_laps_to_finish"):
         scene.hoverbike_laps_to_finish = int(laps)
         summary["lapsToFinish"] = int(laps)
+
+    fg = data.get("floatGates")
+    if isinstance(fg, bool) and hasattr(scene, "hoverbike_float_gates"):
+        scene.hoverbike_float_gates = fg
+        summary["floatGates"] = fg
 
     ts = data.get("terrainShader")
     if isinstance(ts, dict):

@@ -1,10 +1,16 @@
 import * as THREE from 'three'
+import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
+import { gateFloatsOnWaves } from '@/game/tracks/gate-float'
 import type { AntiGravZone, BoostPad, Checkpoint, Track } from '@/game/tracks/types'
 import { cloneGateProp } from './gate-prop'
 
 export type TrackVisuals = {
   group: THREE.Object3D
   setCheckpointState(index: number, state: CheckpointVisualState): void
+  /** Per-frame: bob floating gates (track `floatGates`, gates over water)
+   *  onto the wave surface. No-op when the track has none. Call after the
+   *  wave field has advanced for the frame. */
+  tick(waveField: WaveFieldState): void
   dispose(): void
 }
 
@@ -34,6 +40,10 @@ export function createTrackVisuals(track: Track, options: TrackVisualsOptions = 
 
   const gatePropTemplate = options.gatePropTemplate ?? null
   const gateMeshesByIndex = new Map<number, GateMesh>()
+  // Gates that bob on the swell (track opted into `floatGates` + this gate
+  // sits over water). Each frame `tick` sets their root Y to the wave
+  // surface; the authored Y is the rest height. Empty → tick is a no-op.
+  const floatingGates: { root: THREE.Object3D; x: number; y: number; z: number }[] = []
 
   for (const cp of track.checkpoints) {
     const gate = createGateMesh(cp, cp.index === 0, gatePropTemplate)
@@ -41,6 +51,9 @@ export function createTrackVisuals(track: Track, options: TrackVisualsOptions = 
     gate.root.quaternion.set(cp.rotation.x, cp.rotation.y, cp.rotation.z, cp.rotation.w)
     group.add(gate.root)
     gateMeshesByIndex.set(cp.index, gate)
+    if (gateFloatsOnWaves(track, cp)) {
+      floatingGates.push({ root: gate.root, x: cp.position.x, y: cp.position.y, z: cp.position.z })
+    }
   }
 
   for (const cp of track.checkpoints) {
@@ -61,11 +74,22 @@ export function createTrackVisuals(track: Track, options: TrackVisualsOptions = 
     setStateOn(gate, state)
   }
 
+  function tick(waveField: WaveFieldState) {
+    if (floatingGates.length === 0) return
+    // Rest at the authored height, displaced by the live wave at the gate's
+    // XZ: y = authoredY + (surface − meanLevel). For a gate placed on the
+    // water (authoredY ≈ baseY) this rides the surface; the trigger
+    // (race.ts) stays static and is widened instead.
+    for (const g of floatingGates) {
+      g.root.position.y = g.y + sampleHeight(waveField, g.x, g.z) - waveField.baseY
+    }
+  }
+
   function dispose() {
     for (const g of gateMeshesByIndex.values()) g.dispose()
   }
 
-  return { group, setCheckpointState, dispose }
+  return { group, setCheckpointState, tick, dispose }
 }
 
 type GateMesh = {
