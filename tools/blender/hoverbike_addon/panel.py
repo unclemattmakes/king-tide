@@ -1497,6 +1497,7 @@ class HOVERBIKE_PT_track_gameplay(_SelectionDrivenPanel, Panel):
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_gate_half_width", text="Half-width")
         row.prop(scene, "hoverbike_gate_height", text="Height")
+        layout.prop(scene, "hoverbike_float_gates")
         row = layout.row(align=True)
         row.operator("hoverbike.rebuild_gate_preview", icon="FILE_REFRESH")
         row.operator("hoverbike.hide_gate_preview", icon="HIDE_ON")

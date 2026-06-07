@@ -155,7 +155,9 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
     scene.add(createPropsMesh(track.props, propAssets))
     animatedProps = createAnimatedPropsSystem(scene, track.props, propAssets, { camera })
     waveRiderSys = createWaveRiderSystem(sim, phys, waveField)
-    const bindings = createPropColliders(phys, track.props, propAssets, sim)
+    const bindings = createPropColliders(phys, track.props, propAssets, sim, {
+      baseY: waveField.baseY,
+    })
     if (bindings.size > 0) {
       waveRiderRender = createWaveRiderRenderSystem(scene, sim, {
         assetResolver: (eid) => {

@@ -182,7 +182,9 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
       scene.add(createPropsMesh(track.props, propAssets))
       animatedProps = createAnimatedPropsSystem(scene, track.props, propAssets, { camera })
       waveRiderSys = createWaveRiderSystem(sim, phys, waveField)
-      const bindings = createPropColliders(phys, track.props, propAssets, sim)
+      const bindings = createPropColliders(phys, track.props, propAssets, sim, {
+        baseY: waveField.baseY,
+      })
       if (bindings.size > 0) {
         waveRiderRender = createWaveRiderRenderSystem(scene, sim, {
           assetResolver: (eid) => {
@@ -354,6 +356,9 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
 
       waterMesh.tick([], { x: camera.position.x, z: camera.position.z })
       sky.tick(waveField.time, dt, { x: camera.position.x, z: camera.position.z })
+      // Bob floating checkpoint gates on the swell (no-op unless the track
+      // set `floatGates`).
+      trackVisuals.tick(waveField)
       updateUnderwaterFog(
         scene,
         camera.position.y,

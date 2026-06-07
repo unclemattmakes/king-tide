@@ -995,6 +995,65 @@ the buoy silhouette by editing the constants in
 [`tools/blender/seed_buoy_kit_part.py`](../tools/blender/seed_buoy_kit_part.py)
 and re-running the seed + `pnpm gen:props` chain.
 
+<a id="float-any-prop"></a>
+### Float any prop on waves (per-instance)
+
+Buoys/logs above float because their *asset* is tagged a wave-rider. To
+float **any** placed asset prop — a wrecked boat, a crate, a container —
+**per instance** (so the same asset can be static in one spot and bobbing
+in another), tag the **placement**, not the asset, in the **Prop
+Placements** panel:
+
+1. **Import Prop Placements** (Hoverbike → Prop Placements) to pull the
+   track's `props[]` into the `_hoverbike_props_preview` collection as
+   movable instances of their shipping GLBs.
+2. Select the prop instance(s) you want floating.
+3. In the panel's **Float on Waves** box, tick **Float**, pick a
+   **Motion** mode, and click **Apply Float to Selected**.
+4. **Write Prop Placements → JSON** to persist it.
+
+This stamps `props[i].waveRider` in the track JSON. At runtime the
+placement becomes a kinematic body that tracks the swell using **the
+prop's own collider** (not a substituted buoy cylinder), resting at the
+height you placed it. Spring/tilt feel is auto-derived from the
+collider's size, so a big hull bobs slower and tips less than a cork. To
+unfloat, untick **Float** and re-apply, then write.
+
+**Motion (degrees of freedom):**
+
+- **Heave + tilt** (`dof: "locked"`, default) — vertical bob + pitch/roll
+  with the wave normal; the prop holds its authored heading and XZ.
+- **+ Yaw** (`dof: "yaw"`) — also yaws gently with the swell.
+
+Free horizontal motion (a dynamic, shoveable float) is **planned** — it
+needs a dynamic body rather than the current kinematic one. **Ramps**
+become floatable once authored as asset-prop GLBs (rather than baked
+`kind=track` geometry) — still a follow-on. Tuning the float feel is best
+done by eye on a water track or in the `?waveriders=1` scene
+([`src/game/components/wave-rider.ts`](../src/game/components/wave-rider.ts)
+`deriveWaveRiderTuning`).
+
+<a id="floating-gates"></a>
+### Floating gates
+
+Checkpoint gates can ride the swell too. In the Hoverbike panel's **Gates**
+section, tick **Float gates on waves** (scene prop `hoverbike_float_gates`,
+round-tripped as the track-level `floatGates` in the JSON). At runtime, on
+that track:
+
+- Each gate that sits **over water** bobs vertically on the wave surface at
+  its own XZ (visual only). Gates raised onto dry structures — base more
+  than `GATE_FLOAT_WATER_BAND_M` (4 m) above the water line — **stay static**
+  ("auto-off over land"), so a gate on a bridge or rooftop doesn't bob.
+- The **crossing trigger stays put** and is **widened** vertically by the
+  wave amplitude, so a bike passing through at any wave phase still
+  registers ("oversized static trigger"). See `gateFloatsOnWaves`
+  ([`src/game/tracks/gate-float.ts`](../src/game/tracks/gate-float.ts)) —
+  one predicate shared by the render bob and the trigger so they agree.
+
+It's a track-wide toggle (no per-gate authoring); "over land" gates opt
+themselves out automatically. Motion is strictly vertical (heave) by design.
+
 ### Boost pads
 
 Drop a `boost_NN` empty at the 3D cursor with **Add Boost Pad**. The

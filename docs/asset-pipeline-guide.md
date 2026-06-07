@@ -112,6 +112,15 @@ Track-side wave-rider buoys are also auto-emitted from the Blender
 addon's racing-line buoy tool — see the [Wave-rider buoys](./blender-pipeline-guide.md#wave-rider-buoys)
 section of the Blender pipeline guide.
 
+**Per-instance float (no asset change).** Any placed asset prop can be
+floated *per placement* — even one whose GLB isn't a wave-rider — via a
+`waveRider` field on the **placement** (not the spec). It floats on the
+prop's own collider with a size-derived tuning, resting at the authored
+height; DOF is `locked` (heave + pitch/roll) or `yaw`. Authored in
+Blender's Prop Placements panel. Checkpoint gates have a separate
+track-level `floatGates` toggle. See
+[Float any prop on waves](./blender-pipeline-guide.md#float-any-prop).
+
 ### Tracks (`specs/tracks/<id>.json`)
 
 Declarative replacement for the legacy
