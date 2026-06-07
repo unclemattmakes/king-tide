@@ -61,6 +61,7 @@ export type TrackJson = {
   sky?: SkyConfig
   horizon?: HorizonConfig
   gateSpacing?: number
+  floatGates?: boolean
   terrainShader?: TerrainShaderConfig
   audio?: AudioConfig
   lapWeather?: LapWeather[]
@@ -267,6 +268,9 @@ export function buildTrackFromJson(input: unknown): Track {
     }
     gateSpacing = gateSpacingRaw
   }
+  // Track-level "float gates on waves" toggle. Per-gate eligibility
+  // (auto-off over land) is decided at use sites via `gateFloatsOnWaves`.
+  const floatGates = (input as { floatGates?: unknown }).floatGates === true
 
   const track: Track = {
     id,
@@ -287,6 +291,7 @@ export function buildTrackFromJson(input: unknown): Track {
   if (sky) track.sky = sky
   if (horizon) track.horizon = horizon
   if (gateSpacing !== undefined) track.gateSpacing = gateSpacing
+  if (floatGates) track.floatGates = true
   if (terrainShader) track.terrainShader = terrainShader
   if (audio) track.audio = audio
   if (lapWeather) track.lapWeather = lapWeather
@@ -401,6 +406,12 @@ export function trackToJson(track: Track): TrackJson {
       if (p.color) out.color = p.color
       if (p.assetId) out.assetId = p.assetId
       if (p.surface) out.surface = p.surface
+      // Preserve asset-prop behaviour flags so an editor save round-trips
+      // them instead of silently dropping them.
+      if (p.animated) out.animated = true
+      if (p.clip) out.clip = p.clip
+      if (p.loop === false) out.loop = false
+      if (p.waveRider) out.waveRider = { dof: p.waveRider.dof ?? 'locked' }
       return out
     }),
   }
@@ -409,6 +420,7 @@ export function trackToJson(track: Track): TrackJson {
   if (track.sky) out.sky = { ...track.sky }
   if (track.horizon) out.horizon = { ...track.horizon }
   if (track.gateSpacing !== undefined) out.gateSpacing = track.gateSpacing
+  if (track.floatGates) out.floatGates = true
   if (track.terrainShader) out.terrainShader = { ...track.terrainShader }
   if (track.audio) {
     const audio: AudioConfig = {}
@@ -670,6 +682,14 @@ function readProp(raw: unknown, i: number): Prop {
   const clipRaw = (raw as { clip?: unknown }).clip
   if (typeof clipRaw === 'string' && clipRaw.length > 0) out.clip = clipRaw
   if ((raw as { loop?: unknown }).loop === false) out.loop = false
+  // Per-instance "float on waves" opt-in (asset props). Tolerant: an
+  // object with an optional `dof` ('locked' | 'yaw'); any other `dof`
+  // value falls back to 'locked' rather than throwing the track load.
+  const waveRiderRaw = (raw as { waveRider?: unknown }).waveRider
+  if (isObject(waveRiderRaw)) {
+    const dof = (waveRiderRaw as { dof?: unknown }).dof === 'yaw' ? 'yaw' : 'locked'
+    out.waveRider = { dof }
+  }
   if (typeRaw === 'asset' && !out.assetId) {
     throw new Error(`track-json: props[${i}] type='asset' requires an assetId`)
   }

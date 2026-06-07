@@ -46,6 +46,11 @@ across a re-export. So:
   placed props show up like the buoy/gate/water previews. Move them and click
   **Write Prop Placements → JSON** to push edits back. (Procedural `box`/
   `cylinder` props are JSON-only — not mirrored into the preview.)
+- **Float a placed prop on the water** (boats, debris, …) — select its preview
+  instance(s), tick **Float on Waves** in the Prop Placements panel, pick a
+  Motion mode, **Apply Float to Selected**, then **Write**. Per-instance, uses
+  the prop's own collider. See
+  [blender-pipeline-guide.md → Float any prop on waves](blender-pipeline-guide.md#float-any-prop).
 - **Geometry / scatter / foliage → edit the `.blend`, re-export the GLB** — but
   see §6, the re-export rewrites the gameplay JSON too.
 - **Never run `seed_track_<id>.py`** on an authored track — it rebuilds from a

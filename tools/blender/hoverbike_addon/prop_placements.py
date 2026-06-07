@@ -42,6 +42,16 @@ KIND_VALUE = "prop_preview"
 MESH_PREFIX = "hbprop::"
 TRACK_ID_SCENE_PROP = "hoverbike_track_id"
 
+# Per-instance "float on waves" tags carried on each preview object so the
+# round-trip can write them back into ``props[].waveRider``. WAVE_RIDER_KEY
+# is a bool ("does this instance float"); WAVE_RIDER_DOF_KEY is the motion
+# DOF ("locked" | "yaw"). Mirror of ``Prop.waveRider`` in
+# ``src/game/tracks/types.ts`` — a floated prop becomes a kinematic body
+# at runtime that tracks the swell using the prop's own collider.
+WAVE_RIDER_KEY = "hb_wave_rider"
+WAVE_RIDER_DOF_KEY = "hb_wave_rider_dof"
+WAVE_RIDER_DOFS = ("locked", "yaw")
+
 
 # ── repo / track resolution ──────────────────────────────────────────────────
 
@@ -126,7 +136,11 @@ def _same_pose(orig: dict | None, fresh: dict) -> bool:
             return False
     oq, fq = orig.get("rotation", {}), fresh["rotation"]
     dot = sum(oq.get(c, 0.0) * fq[c] for c in ("x", "y", "z", "w"))
-    return abs(dot) > 1.0 - 1e-5
+    if abs(dot) <= 1.0 - 1e-5:
+        return False
+    # Treat a changed "float on waves" flag as a change too, so toggling
+    # float on a prop that hasn't moved still writes a fresh entry.
+    return orig.get("waveRider") == fresh.get("waveRider")
 
 
 # ── props[] JSON splice (preserves the rest of the file verbatim) ─────────────
@@ -326,6 +340,11 @@ def _import_into_scene(repo_root: str, track_id: str) -> tuple[int, int]:
         obj[ASSET_ID_KEY] = p["assetId"]
         obj[PROP_INDEX_KEY] = i
         obj[KIND_KEY] = KIND_VALUE
+        wr = p.get("waveRider")
+        if isinstance(wr, dict):
+            obj[WAVE_RIDER_KEY] = True
+            dof = wr.get("dof")
+            obj[WAVE_RIDER_DOF_KEY] = dof if dof in WAVE_RIDER_DOFS else "locked"
         made += 1
     return (made, len(mesh_cache))
 
@@ -440,6 +459,9 @@ class HOVERBIKE_OT_write_prop_placements(bpy.types.Operator):
                 # Blender scale (x,y,z) → three.js size (x,z,y); unsigned.
                 "size": {"x": _r(scale.x, 3), "y": _r(scale.z, 3), "z": _r(scale.y, 3)},
             }
+            if obj.get(WAVE_RIDER_KEY):
+                dof = obj.get(WAVE_RIDER_DOF_KEY)
+                fresh["waveRider"] = {"dof": dof if dof in WAVE_RIDER_DOFS else "locked"}
             # If this instance hasn't actually moved since import, re-emit the
             # ORIGINAL entry verbatim. The decompose() above canonicalises the
             # quaternion sign (q and -q are the same rotation), so an unmoved
@@ -452,6 +474,40 @@ class HOVERBIKE_OT_write_prop_placements(bpy.types.Operator):
 
         _splice_props_into_json(json_path, preserved + asset_props)
         self.report({"INFO"}, f"wrote {len(asset_props)} placements ({len(preserved)} preserved)")
+        return {"FINISHED"}
+
+
+class HOVERBIKE_OT_set_prop_float(bpy.types.Operator):
+    """Tag the selected prop-placement previews to float on waves (or clear
+    the tag), using the panel's Float + Motion settings. Stamped onto the
+    preview objects and written into ``props[].waveRider`` by the next
+    *Write Prop Placements → JSON*. At runtime a floated prop becomes a
+    kinematic body that tracks the swell using the prop's own collider."""
+
+    bl_idname = "hoverbike.set_prop_float"
+    bl_label = "Apply Float to Selected"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scn = context.scene
+        enabled = bool(getattr(scn, "hb_wave_rider_enabled", True))
+        dof = getattr(scn, "hb_wave_rider_dof", "locked")
+        n = 0
+        for obj in context.selected_objects:
+            if obj.get(ASSET_ID_KEY) is None:
+                continue  # only prop-placement previews carry the asset id
+            if enabled:
+                obj[WAVE_RIDER_KEY] = True
+                obj[WAVE_RIDER_DOF_KEY] = dof
+            else:
+                for key in (WAVE_RIDER_KEY, WAVE_RIDER_DOF_KEY):
+                    if key in obj.keys():
+                        del obj[key]
+            n += 1
+        if n == 0:
+            self.report({"WARNING"}, "no prop-placement previews selected (Import first)")
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"set {n} prop(s) → {'floating' if enabled else 'static'}")
         return {"FINISHED"}
 
 
@@ -468,15 +524,38 @@ class HOVERBIKE_PT_props(bpy.types.Panel):
         col.operator("hoverbike.import_prop_placements", icon="IMPORT")
         col.operator("hoverbike.write_prop_placements", icon="EXPORT")
 
+        box = self.layout.box()
+        box.label(text="Float on Waves", icon="MOD_OCEAN")
+        box.prop(context.scene, "hb_wave_rider_enabled")
+        sub = box.column()
+        sub.enabled = bool(getattr(context.scene, "hb_wave_rider_enabled", True))
+        sub.prop(context.scene, "hb_wave_rider_dof")
+        box.operator("hoverbike.set_prop_float", icon="CHECKMARK")
+
 
 _CLASSES = (
     HOVERBIKE_OT_import_prop_placements,
     HOVERBIKE_OT_write_prop_placements,
+    HOVERBIKE_OT_set_prop_float,
     HOVERBIKE_PT_props,
 )
 
 
 def register() -> None:
+    bpy.types.Scene.hb_wave_rider_enabled = bpy.props.BoolProperty(
+        name="Float",
+        description="Tag selected prop instances to float on the wave surface",
+        default=True,
+    )
+    bpy.types.Scene.hb_wave_rider_dof = bpy.props.EnumProperty(
+        name="Motion",
+        description="Degrees of freedom for the float",
+        items=[
+            ("locked", "Heave + tilt", "Vertical bob + pitch/roll; authored heading held"),
+            ("yaw", "+ Yaw", "Also yaw gently with the swell"),
+        ],
+        default="locked",
+    )
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
 
@@ -487,3 +566,6 @@ def unregister() -> None:
             bpy.utils.unregister_class(cls)
         except Exception:
             pass
+    for attr in ("hb_wave_rider_enabled", "hb_wave_rider_dof"):
+        if hasattr(bpy.types.Scene, attr):
+            delattr(bpy.types.Scene, attr)

@@ -59,7 +59,11 @@ export function createWaveRiderRenderSystem(
   const ownedMaterials = new Set<THREE.Material>()
   const ownedGeometries = new Set<THREE.BufferGeometry>()
 
-  function buildArchetypeMesh(archetype: WaveRiderArchetypeId): THREE.Object3D {
+  function buildArchetypeMesh(archetype: WaveRiderArchetypeId | undefined): THREE.Object3D {
+    // Only reached when an entity has no bound asset GLB (the
+    // `?waveriders=1` test scene). Per-instance floats always resolve to
+    // their real GLB above, so `undefined` here just falls to the neutral
+    // log-style primitive.
     const group = new THREE.Group()
     if (archetype === 'buoy') {
       const bodyGeom = new THREE.CylinderGeometry(0.38, 0.42, 0.9, 18, 1, false)
