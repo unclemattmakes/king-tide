@@ -301,8 +301,9 @@ class HOVERBIKE_PT_panel(Panel):
             row.operator("hoverbike.hide_rider_preview", text="", icon="X")
             tip = seat.column(align=True)
             tip.scale_y = 0.85
-            tip.label(text="Move socket_seat to reseat;", icon="INFO")
-            tip.label(text="the rider follows. Re-export.")
+            tip.label(text="Posed in this bike's Ride_<id>", icon="INFO")
+            tip.label(text="clip (else seated idle). Move")
+            tip.label(text="socket_seat to reseat — rider follows.")
 
     def _draw_rider(self, context, layout, blend: str, repo: str | None) -> None:
         from .export import find_rider_root, seat_offset_from_root
@@ -335,6 +336,18 @@ class HOVERBIKE_PT_panel(Panel):
         col.label(text="props/cc0/<id>.glb")
         col.label(text="(bike + hidden junk excluded).")
         col.label(text="Then: pnpm assets:push", icon="EXPORT")
+
+        # Posing references — re-import each bike's current GLB, socket-aligned
+        # to the rig root + selection-locked. Run after a bikes-src re-export.
+        layout.separator()
+        refs = layout.box()
+        refs.label(text="Posing references", icon="OUTLINER_OB_MESH")
+        refs.operator("hoverbike.refresh_bike_refs", icon="FILE_REFRESH")
+        rhint = refs.column(align=True)
+        rhint.scale_y = 0.85
+        rhint.label(text="Re-import bikes after a", icon="INFO")
+        rhint.label(text="bikes-src re-export. Refs are")
+        rhint.label(text="locked — edit geo in bikes-src.")
 
         # Seat position — grab (G) the rider root on the bike, read the
         # matching engine SEAT_OFFSET back out (the GLB export can't carry it).
