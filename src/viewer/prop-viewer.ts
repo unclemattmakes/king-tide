@@ -47,6 +47,11 @@ function collectAssetIds(node: unknown, out: Set<string>): void {
 }
 
 export async function bootPropViewer(parent: HTMLElement, opts: ViewerOpts): Promise<void> {
+  // `?thumb=1` strips the studio grid + the whole HUD so a capture harness
+  // (`pnpm gen:prop-sheets`) gets a clean, chrome-free tile — same convention
+  // the bike viewer uses for `pnpm gen:bike-thumbs`. Nobody hand-types it.
+  const thumbMode = new URLSearchParams(window.location.search).get('thumb') === '1'
+
   // ── Catalogue ──────────────────────────────────────────────────────────────
   const ids = new Set<string>()
   try {
@@ -87,7 +92,7 @@ export async function bootPropViewer(parent: HTMLElement, opts: ViewerOpts): Pro
   backLight.position.set(-2, 3, -6)
   scene.add(backLight)
 
-  scene.add(new THREE.GridHelper(40, 40, 0x4a86c4, 0x2a3340))
+  if (!thumbMode) scene.add(new THREE.GridHelper(40, 40, 0x4a86c4, 0x2a3340))
 
   const orbit = new OrbitControls(camera, canvas)
   orbit.enableDamping = true
@@ -106,7 +111,7 @@ export async function bootPropViewer(parent: HTMLElement, opts: ViewerOpts): Pro
   const vinylOpts: VinylOptions = {
     rimStrength: 0.5,
     weathering: 0.12,
-    brush: 0.5,
+    brush: 0.7,
     brushScale: 0.12,
     waterline: 0,
     waterLevel: 0,
@@ -116,7 +121,7 @@ export async function bootPropViewer(parent: HTMLElement, opts: ViewerOpts): Pro
     edgeWear: 0.66,
   }
 
-  const ui = makeUI(parent, backend)
+  const ui = makeUI(parent, backend, thumbMode)
 
   // ── Material handling ──────────────────────────────────────────────────────
   function applyMode(): void {
@@ -151,7 +156,9 @@ export async function bootPropViewer(parent: HTMLElement, opts: ViewerOpts): Pro
     bbox.getCenter(center)
     const radius = Math.max(size.x, size.y, size.z, 0.5) * 0.5
     orbit.target.copy(center)
-    const dist = radius * 3.2 + 1
+    // Thumb mode (capture harness) frames tighter so the prop fills ~70% of the
+    // tile; interactive mode keeps the roomier studio view for socket eyeballing.
+    const dist = thumbMode ? radius * 2.2 : radius * 3.2 + 1
     camera.position.set(center.x + dist, center.y + dist * 0.55, center.z + dist)
     camera.near = Math.max(0.01, radius * 0.04)
     camera.far = radius * 60 + 100
@@ -207,6 +214,15 @@ export async function bootPropViewer(parent: HTMLElement, opts: ViewerOpts): Pro
     scene.add(node)
     frameNode()
     syncWaterline() // applies waterline strength + rebuilds vinyl + applies mode
+    // Publish the prop's measured bbox so a capture harness can label each
+    // sheet cell without re-parsing the GLB (consumed by gen-prop-sheets).
+    if (node) {
+      const b = new THREE.Box3().setFromObject(node)
+      const s = new THREE.Vector3()
+      b.getSize(s)
+      document.body.dataset.propBbox = `${s.x.toFixed(2)}×${s.y.toFixed(2)}×${s.z.toFixed(2)}`
+      document.body.dataset.propCategory = category
+    }
     renderInfo()
     const url = new URL(window.location.href)
     url.searchParams.set('propviewer', id)
@@ -426,8 +442,10 @@ export async function bootPropViewer(parent: HTMLElement, opts: ViewerOpts): Pro
 }
 
 /** Build the persistent HUD scaffold (info + chips + controls + prop list) and
- *  the bottom-right help card. */
-function makeUI(parent: HTMLElement, backend: string): ViewerUI {
+ *  the bottom-right help card. In `thumbMode` the scaffold is still built (so
+ *  the rest of the viewer's wiring is unchanged) but both cards are hidden, so
+ *  a capture tile is just the prop on the studio background. */
+function makeUI(parent: HTMLElement, backend: string, thumbMode = false): ViewerUI {
   const hud = document.createElement('div')
   hud.style.cssText = [
     'position:fixed',
@@ -479,6 +497,11 @@ function makeUI(parent: HTMLElement, backend: string): ViewerUI {
     '<b>V</b> raw/vinyl · <b>W</b> waterline · <b>R</b> turntable · <b>&larr;/&rarr;</b> prop<br>' +
     `backend: <b>${backend}</b>`
   parent.appendChild(help)
+
+  if (thumbMode) {
+    hud.style.display = 'none'
+    help.style.display = 'none'
+  }
 
   return { info, chips, controls, list }
 }
