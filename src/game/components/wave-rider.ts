@@ -12,6 +12,7 @@
  */
 
 import { createStore } from '@/engine/sim/ecs/store'
+import type { WaveRiderDof } from '@/game/tracks/types'
 
 export const WaveRiderTag = { name: 'WaveRiderTag' as const }
 
@@ -40,7 +41,10 @@ export type WaveRiderTuning = {
 }
 
 export type WaveRiderState = {
-  archetype: WaveRiderArchetypeId
+  /** Archetype preset this rider was spawned from (`buoy`/`log`). Absent
+   *  for per-instance floats, which carry an auto-derived `tuning` and
+   *  render from their own GLB instead of the primitive fallback. */
+  archetype?: WaveRiderArchetypeId
   tuning: WaveRiderTuning
   /** Spring-damped vertical offset on top of restY. */
   perturbY: number
@@ -82,4 +86,50 @@ export const WAVE_RIDER_TUNING: Record<WaveRiderArchetypeId, WaveRiderTuning> = 
     tiltDamping: 2.0,
     yawDriftRate: -0.18,
   },
+}
+
+/** Characteristic size (m) the auto-tuning is normalised against — a
+ *  small marker buoy. At this size {@link deriveWaveRiderTuning}
+ *  reproduces the hand-tuned `buoy` preset; larger props scale toward a
+ *  slower, heavier bob that resists tilting. */
+const REF_SIZE = 0.45
+
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v
+}
+
+/**
+ * Derive a wave-rider tuning preset from a prop's own collider extents,
+ * so ANY asset can float without a hand-authored archetype (the
+ * per-instance "float on waves" path). Bigger props bob slower (lower
+ * spring frequency) and follow the wave normal less — a wide hull
+ * shouldn't tip like a cork. `restOffsetY` is the rest height above the
+ * mean surface (authored `position.y` − wave-field `baseY`), so a floated
+ * prop sits where it was placed. `dof` gates yaw: `'locked'` holds the
+ * authored heading; `'yaw'` adds a gentle drift.
+ *
+ * Damping targets a lightly-underdamped ratio so a knock reads as a few
+ * visible bobs before settling. These are starting points — tune by eye
+ * in the `?waveriders=1` scene / on a real water track.
+ */
+export function deriveWaveRiderTuning(opts: {
+  halfHeight: number
+  footprint: number
+  restOffsetY: number
+  dof: WaveRiderDof
+}): WaveRiderTuning {
+  const charSize = Math.max(REF_SIZE * 0.5, opts.halfHeight, opts.footprint)
+  const sizeScale = REF_SIZE / charSize // 1 at buoy size, < 1 for big props
+  const springK = clamp(36 * sizeScale, 4, 40)
+  const tiltK = clamp(20 * sizeScale, 3, 24)
+  const normalFollow = clamp(0.6 * (REF_SIZE / Math.max(REF_SIZE, opts.footprint)), 0.15, 0.95)
+  return {
+    floatOffsetY: opts.restOffsetY,
+    normalFollow,
+    springK,
+    springDamping: 2 * 0.32 * Math.sqrt(springK),
+    tiltK,
+    tiltDamping: 2 * 0.27 * Math.sqrt(tiltK),
+    yawDriftRate: opts.dof === 'yaw' ? 0.05 : 0,
+  }
 }

@@ -352,6 +352,21 @@ export type WaveZone = {
  * tube runs along local +Z (drive-through axis); their "open" face for
  * halfpipe is +Y (sky).
  */
+/** Degrees-of-freedom for a floating (wave-rider) prop instance.
+ *  - `'locked'` (default): vertical heave + pitch/roll only — the prop
+ *    tracks the wave height and tips with the surface normal, but holds
+ *    its authored heading and XZ position.
+ *  - `'yaw'`: also yaws gently with the swell.
+ *  Free horizontal motion (a dynamic, shoveable float) is planned — see
+ *  docs/blender-pipeline-guide.md. */
+export type WaveRiderDof = 'locked' | 'yaw'
+
+/** Per-instance "float on waves" config on a placed asset prop. See
+ *  `Prop.waveRider`. */
+export type PropWaveRider = {
+  dof?: WaveRiderDof
+}
+
 export type Prop = {
   type: PropType
   position: Vec3
@@ -387,6 +402,14 @@ export type Prop = {
   /** Loop the clip (default `true`). Set `false` to play once and hold
    *  the final pose. Only meaningful with `animated: true`. */
   loop?: boolean
+  /** Per-instance "float on waves" opt-in (asset props only). When set,
+   *  THIS placement is hosted by the wave-rider sim + render systems —
+   *  a kinematic body that tracks the swell using the prop's OWN
+   *  collider — regardless of whether the asset GLB is authored as a
+   *  wave-rider. Spring / tilt feel is auto-derived from the collider's
+   *  size; resting height is the authored `position.y`. Routed by
+   *  `createPropColliders`; overrides any asset-level archetype. */
+  waveRider?: PropWaveRider
 }
 
 export type PropType = 'box' | 'sphere' | 'cylinder' | 'pipe' | 'halfpipe' | 'asset'
