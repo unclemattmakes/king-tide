@@ -49,6 +49,7 @@ import {
   dot,
   float,
   fract,
+  fwidth,
   max,
   mix,
   normalize,
@@ -62,6 +63,7 @@ import {
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
 import type { TerrainShaderConfig } from '@/game/tracks/types'
+import { BRUSH_TEX_TILE, brushHeightTriplanar, brushScaleWeights } from './brush-strokes'
 
 type ColorStop = { pos: number; color: [number, number, number] }
 
@@ -191,6 +193,15 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   const saturation = config.saturation ?? 1.05
   const triplanar = config.triplanar ?? 0.6
   const waterline = config.waterline ?? 0
+  // Painterly brush strokes on the terrain itself (shared sheet with
+  // props/buildings via ./brush-strokes). Unlike the other extras these default
+  // ON (0.75) — the brushwork is meant to be the DEFAULT terrain read, not an
+  // opt-in. Tuned for the real scanned oil-stroke sheet, which is softer / lower
+  // frequency than the procedural fallback, so it wants more push to read at
+  // race distance. brush 0 restores the exact pre-brush look.
+  const brush = config.brush ?? 0.75
+  const brushScale = config.brushScale ?? 4.0
+  const brushCurvature = config.brushCurvature ?? 0.4
 
   const mat = new MeshStandardNodeMaterial({ metalness: 0 })
   mat.name = 'mat_terrain_runtime'
@@ -362,14 +373,54 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   const path = clamp(vc.b, float(0), float(1))
   const withPath = mix(withAO, vec3(pathTint[0], pathTint[1], pathTint[2]), path.mul(0.8))
 
+  // ── Painterly brush strokes (curvature-gated) ────────────────────────
+  // Ride the SAME shared brush sheet props + buildings use over the terrain
+  // colour as impasto, so the whole scene reads as one painted surface. The
+  // stroke deviation is gated by a curvature proxy — the steepness mask
+  // (`slope`, stable) plus a screen-space normal-variation term
+  // (`fwidth(worldNorm)`, which spikes on ridges / creases / cliff breaks) —
+  // so the painterly hand lands on the sculpted bends and stays light on flat
+  // sand. `brushCurvature` blends from uniform (0) to fully curvature-gated
+  // (1); even at full gate a floor keeps some brush on the flats. Computed in
+  // JS-`if` so `brush = 0` is byte-identical to the pre-brush terrain.
+  let brushedCol = withPath
+  // The gated stroke deviation (~−0.5..0.5), reused by colour + roughness. null
+  // when brush is off so both collapse to the pre-brush expressions.
+  let brushDev: Node<'float'> | null = null
+  if (brush > 0) {
+    // worldScale chosen so the sheet tiles roughly every `brushScale` metres on
+    // the ground (the helper folds BRUSH_TEX_TILE back in).
+    const worldScale = 1 / Math.max(brushScale * BRUSH_TEX_TILE, 1e-4)
+    const streak = brushHeightTriplanar(
+      positionWorld,
+      worldNorm,
+      worldScale,
+      brushScaleWeights(brushScale),
+    )
+    // Screen-space curvature: how fast the world normal changes across the
+    // frame. Clamped so its distance-driven growth saturates (a gate tolerates
+    // mild shimmer the way a hard edge-line wouldn't). True baked mean-curvature
+    // would need a new vertex attribute + re-export — a follow-up if this proxy
+    // isn't enough.
+    const normCurv = clamp(fwidth(worldNorm).length().mul(float(8.0)), float(0), float(1))
+    const curvature = clamp(slope.mul(float(0.6)).add(normCurv.mul(float(0.7))), float(0), float(1))
+    const brushGate = mix(float(1), curvature, float(brushCurvature))
+    brushDev = streak.sub(float(0.5)).mul(brushGate)
+    brushedCol = withPath.mul(float(1).add(brushDev.mul(float(brush).mul(float(2.4)))))
+  }
+
   // Clamp final colour so any combined gain (saturation lift × macro
-  // bias × brightness pulse) never blows past linear-1 and wrecks
+  // bias × brightness pulse × brush) never blows past linear-1 and wrecks
   // tonemapping downstream.
-  mat.colorNode = clamp(withPath, vec3(0, 0, 0), vec3(1.6, 1.6, 1.6))
+  mat.colorNode = clamp(brushedCol, vec3(0, 0, 0), vec3(1.6, 1.6, 1.6))
   // Slope-driven roughness lift — rocks rougher than sand / grass so
   // lighting doesn't go uniformly matte across the island. Scree sits
-  // between the two so gravel doesn't read as wet asphalt.
-  mat.roughnessNode = mix(float(0.78), float(0.95), slope)
+  // between the two so gravel doesn't read as wet asphalt. The brush adds a
+  // subtle along-stroke roughness ripple so light catches the impasto.
+  const baseRough = mix(float(0.78), float(0.95), slope)
+  mat.roughnessNode = brushDev
+    ? clamp(baseRough.add(brushDev.mul(float(brush).mul(float(0.8)))), float(0.4), float(1.0))
+    : baseRough
 
   return mat
 }

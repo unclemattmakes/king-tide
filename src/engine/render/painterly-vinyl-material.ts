@@ -1,14 +1,18 @@
 /**
- * Painterly-vinyl runtime material — the unified "look" layer for props.
+ * Painterly-vinyl runtime material — the unified "look" layer for props AND
+ * the track's buildings / set-pieces.
  *
- * Props are instanced with their raw GLB material today (`props-mesh.ts`), so
- * they bypass every look pass. This wraps a prop's source material in a
+ * Props are instanced with their raw GLB material (`props-mesh.ts`) and the
+ * track's buildings/docks/ramps ship with whatever stock material Blender
+ * exported, so both bypass every look pass. This wraps a source material in a
  * `MeshStandardNodeMaterial` that KEEPS the incoming albedo (texture or flat
  * colour) and layers the intake-independent painterly-vinyl signature on top:
- * soft fresnel rim, matte finish, a subtle procedural weathering wash, and
- * (opt-in) the world-space waterline trio. The look becomes intake-independent —
- * a clean Quaternius atlas and an AI-painted skin both read painterly-vinyl
- * because they share this treatment. See docs/painterly-vinyl-pipeline.md.
+ * soft fresnel rim, matte finish, a subtle procedural weathering wash, brush
+ * strokes, and (opt-in) the world-space waterline trio. The look becomes
+ * intake-independent — a clean Quaternius atlas and an AI-painted skin both read
+ * painterly-vinyl because they share this treatment. `buildVinylMaterial`
+ * converts one material; `applyVinylMaterialToScene` runs it over every
+ * still-stock mesh in a loaded track. See docs/painterly-vinyl-pipeline.md.
  *
  * Built on idioms already shipping: the GLB->node copy pattern from
  * `foliage-sway.ts` (`toSwayNodeMaterial`), the fresnel rim from `clouds.ts`,
@@ -38,7 +42,8 @@ import {
   vec3,
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
-import { assetUrl } from '../asset-url'
+import { ExportedKind } from '../asset-kinds'
+import { brushHeightTriplanar, brushScaleWeights, normalizeMix } from './brush-strokes'
 import { applyWaterlineBands } from './waterline'
 
 /** Marks a material we've already vinyl-converted, so conversion is idempotent
@@ -66,43 +71,17 @@ const COPIED_PROPS = [
 /** propSize the absolute look was tuned at — a call with no propSize behaves as
  *  if dressing a prop this big (metres). */
 const REF_PROP_SIZE = 4
+/** The brush stops treating a prop as "bigger" past this size (metres). Stroke
+ *  size tracks prop size up to here, then holds — so a big form (a 20 m sea
+ *  stack, a cliff, a hull) gets MORE strokes rather than a few giant ones.
+ *  Without the cap, brushScaleWeights drives big props fully to the coarse
+ *  channel and the tile period blows out, so the brushwork reads as a flat wash.
+ *  Small / medium props (< cap) are unaffected — the chest/barrel tuning holds. */
+const BRUSH_PROP_SIZE_CAP = 6
 /** At/above this size (metres) the waterline band keeps its full physical height
  *  — a thin line on a big prop. Smaller props scale it down proportionally so a
  *  fixed-metre band doesn't swallow them. */
 const WATERLINE_FULL_BAND_SIZE = 6
-
-/** Brush-texture tile size as a fraction of (brushScale·propSize) — sets how big
- *  the sheet's strokes read on a prop. Lower = bigger, bolder strokes (fewer
- *  repeats across the prop); higher = finer speckle. Tuned with the sparse,
- *  high-contrast real-oil sheet so strokes read as deliberate brushwork at race
- *  distance rather than tiny streaks. */
-const BRUSH_TEX_TILE = 0.06
-
-/** The shared painterly brush-stroke sheet (authored by
- *  tools/blender/build_brush_texture.py), loaded once and sampled triplanar by
- *  every vinyl material. It's DATA, not albedo — NoColorSpace + RepeatWrapping so
- *  it tiles seamlessly under the world/object-space sampling. */
-let sharedBrushTex: THREE.Texture | null = null
-function sharedBrushTexture(): THREE.Texture {
-  if (sharedBrushTex) return sharedBrushTex
-  try {
-    const tex = new THREE.TextureLoader().load(assetUrl('/assets/textures/brush_strokes.png'))
-    tex.wrapS = THREE.RepeatWrapping
-    tex.wrapT = THREE.RepeatWrapping
-    tex.colorSpace = THREE.NoColorSpace
-    tex.minFilter = THREE.LinearMipmapLinearFilter
-    tex.magFilter = THREE.LinearFilter
-    sharedBrushTex = tex
-  } catch {
-    // No DOM image support (headless tests / SSR) — fall back to a neutral 1×1
-    // mid-grey so material construction never throws; brush streaks read as a
-    // no-op (0.5) until a real image-capable context loads the sheet.
-    const grey = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1)
-    grey.needsUpdate = true
-    sharedBrushTex = grey
-  }
-  return sharedBrushTex
-}
 
 export type VinylOptions = {
   /** Mix toward the rim tint at the silhouette (0..~0.6). */
@@ -112,8 +91,9 @@ export type VinylOptions = {
   /** Procedural value-noise weathering wash amount (0 = off). */
   weathering?: number
   /** Brush-stroke amount layered over the weathering — modulates albedo and
-   *  drives the impasto relief (normal + roughness). Default 0.5 (the shipped
-   *  look, tuned on the real-oil sheet); 0 = off. */
+   *  drives the impasto relief (normal + roughness). Default 0.7 (props +
+   *  buildings; landed strong-then-pulled-back on the real oil-stroke sheet,
+   *  which reads softer than the procedural fallback); 0 = off. */
   brush?: number
   /** Brush-streak size as a FRACTION of the prop (see propSize), so strokes read
    *  the same on a chest and a cliff. Smaller = finer strokes. */
@@ -188,25 +168,6 @@ function dirStreak(p: Node<'vec2'>, bScale: Node<'float'>) {
   return valueNoiseOctave2D(vec2(along.mul(float(0.8)), across.mul(float(14.0))).mul(bScale))
 }
 
-/** Blend weights for the brush sheet's three packed stroke scales
- *  (R = coarse / G = medium / B = fine) as a function of prop size: big props
- *  lean to coarse sweeping strokes, small props to fine dabs. Gaussian kernels
- *  in log2(size) centred at 16 m / 4 m / 1 m, ALWAYS normalized to sum 1 — so
- *  the combined height field stays centred on 0.5 and a brush amount of 0 stays
- *  a true no-op. A grayscale sheet (R=G=B) collapses the blend to its old
- *  single-field behaviour for free. */
-function brushScaleWeights(propSize: number): [number, number, number] {
-  const lp = Math.log2(Math.min(Math.max(propSize, 0.25), 64))
-  const k = (centre: number) => Math.exp(-(((lp - centre) / 1.4) ** 2))
-  return normalizeMix([k(4), k(2), k(0)]) // coarse(16 m) / medium(4 m) / fine(1 m)
-}
-
-/** Normalize a 3-weight mix to sum 1 (falls back to all-medium if degenerate). */
-function normalizeMix(m: [number, number, number]): [number, number, number] {
-  const s = m[0] + m[1] + m[2]
-  return s > 1e-6 ? [m[0] / s, m[1] / s, m[2] / s] : [0, 1, 0]
-}
-
 /**
  * Convert a single GLB material into its painterly-vinyl node-material twin.
  * Idempotent (returns the input unchanged once marked). Does not mutate `src`.
@@ -218,7 +179,7 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const rimStrength = opts.rimStrength ?? 0.5
   const rimColor = opts.rimColor ?? [1.0, 0.93, 0.82]
   const weathering = opts.weathering ?? 0.12
-  const brush = opts.brush ?? 0.5
+  const brush = opts.brush ?? 0.7
   const brushScale = opts.brushScale ?? 0.12
   const brushTextured = opts.brushTextured ?? true
   const waterLevel = opts.waterLevel ?? 0
@@ -226,9 +187,14 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const waterlineTide = opts.waterlineTide ?? 0.4
   const waterlineAlgae = opts.waterlineAlgae ?? 0.5
   const propSize = Math.max(opts.propSize ?? REF_PROP_SIZE, 0.05)
+  // Cap the size the BRUSH reads (not the waterline band) so big props get more
+  // strokes, not giant ones — see BRUSH_PROP_SIZE_CAP. This is the fix for the
+  // sea-stack/cliff "reads flat" case: they're 13–32 m, which without the cap
+  // leans fully coarse + a ~40 m tile period = 2–3 huge strokes.
+  const brushPropSize = Math.min(propSize, BRUSH_PROP_SIZE_CAP)
   const [wCoarse, wMed, wFine] = opts.brushScaleMix
     ? normalizeMix(opts.brushScaleMix)
-    : brushScaleWeights(propSize)
+    : brushScaleWeights(brushPropSize)
   const roughness = opts.roughness ?? 0.82
   const edgeWear = opts.edgeWear ?? 0.66
   const edgeWearColor = opts.edgeWearColor ?? [0.95, 0.92, 0.83]
@@ -269,32 +235,34 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   // blended by the world normal. brush 0 -> no-op. (dirStreak does the per-plane
   // flow-rotate + stretch.)
   const nrm = normalize(normalWorld)
-  const an = vec3(abs(nrm.x), abs(nrm.y), abs(nrm.z))
-  const wsum = an.x.add(an.y).add(an.z).add(float(1e-4))
-  // brushScale is a FRACTION of the prop (propSize) — stroke size tracks prop
-  // size, so the same dial reads on a 1 m chest and a 30 m cliff.
-  const bScale = float(1 / Math.max(brushScale * propSize, 0.02))
-  // Triplanar brush field — blended across the 3 world planes by the world
-  // normal so strokes read on every face. brushTextured (default) samples the
-  // shared stroke sheet (deliberate bristle strokes value-noise can't give);
-  // else the procedural dirStreak. One texel fetch per plane, combining the
-  // sheet's three packed stroke SCALES (R coarse / G medium / B fine) by the
-  // prop-size weights — sum 1, so the field stays centred on mid-grey and a
-  // brush amount of 0 stays a true no-op. Feeds brushFac (albedo) + relief.
-  const brushTex = sharedBrushTexture()
-  const sampleStreak = (p: Node<'vec2'>) => {
-    if (!brushTextured) return dirStreak(p, bScale)
-    const t = texture(brushTex, p.mul(bScale).mul(float(BRUSH_TEX_TILE)))
-    return t.r
-      .mul(float(wCoarse))
-      .add(t.g.mul(float(wMed)))
-      .add(t.b.mul(float(wFine)))
+  // Triplanar brush field — strokes read on every face, combining the sheet's
+  // three packed stroke SCALES (R coarse / G medium / B fine) by the prop-size
+  // weights (sum 1, so the field stays centred on mid-grey and brush 0 is a true
+  // no-op). brushScale is a FRACTION of the prop (brushPropSize) so stroke size
+  // tracks prop size up to BRUSH_PROP_SIZE_CAP, then holds — small props read the
+  // same while big forms get more strokes, not giant ones. The textured sheet
+  // (default) gives deliberate bristle strokes value-noise can't; brushTextured=
+  // false falls back to the procedural dirStreak. Feeds brushFac (albedo) + the
+  // impasto relief. Shared with terrain via ./brush-strokes.
+  const brushWorldScale = 1 / Math.max(brushScale * brushPropSize, 0.02)
+  let streak: Node<'float'>
+  if (brushTextured) {
+    streak = brushHeightTriplanar(positionWorld, normalWorld, brushWorldScale, [
+      wCoarse,
+      wMed,
+      wFine,
+    ])
+  } else {
+    const an = vec3(abs(nrm.x), abs(nrm.y), abs(nrm.z))
+    const wsum = an.x.add(an.y).add(an.z).add(float(1e-4))
+    const bScale = float(brushWorldScale)
+    const sampleStreak = (p: Node<'vec2'>) => dirStreak(p, bScale)
+    streak = sampleStreak(vec2(positionWorld.z, positionWorld.y))
+      .mul(an.x)
+      .add(sampleStreak(vec2(positionWorld.x, positionWorld.z)).mul(an.y))
+      .add(sampleStreak(vec2(positionWorld.x, positionWorld.y)).mul(an.z))
+      .div(wsum)
   }
-  const streak = sampleStreak(vec2(positionWorld.z, positionWorld.y))
-    .mul(an.x)
-    .add(sampleStreak(vec2(positionWorld.x, positionWorld.z)).mul(an.y))
-    .add(sampleStreak(vec2(positionWorld.x, positionWorld.y)).mul(an.z))
-    .div(wsum)
   const brushFac = float(1).add(streak.sub(float(0.5)).mul(float(brush).mul(float(3.0))))
 
   // World-space waterline trio FIRST, on the UN-brushed wash (opt-in; strength
@@ -353,4 +321,146 @@ function marked2(
   m: THREE.Material,
 ): THREE.Material & { userData: Record<string | symbol, unknown> } {
   return m as THREE.Material & { userData: Record<string | symbol, unknown> }
+}
+
+/** Kinds whose meshes never take the vinyl look: render-only overlays, hidden
+ *  collision proxies, the far-field ring, and the water marker. Terrain, foliage
+ *  and lava are excluded by material name below (they own bespoke materials). */
+const VINYL_SKIP_KINDS: ReadonlySet<string> = new Set([
+  ExportedKind.DECAL,
+  ExportedKind.EMITTER,
+  ExportedKind.HORIZON,
+  ExportedKind.COLLIDER_MESH,
+  ExportedKind.WATER,
+])
+
+/** True for materials another look-pass already owns (terrain / foliage / lava)
+ *  or one we've already converted — leave them be. */
+function ownedByAnotherPass(m: THREE.Material): boolean {
+  const n = m?.name ?? ''
+  return (
+    n.startsWith('mat_terrain') || // slope/altitude shader
+    n.startsWith('mat_foliage_') || // wind sway
+    n.startsWith('mat_lava') || // emissive landmark
+    n.startsWith('mat_vinyl') // already us
+  )
+}
+
+/** Stamp a neutral white COLOR_0 on a geometry that lacks one so the vinyl
+ *  material's COLOR_0-driven channels collapse to no-ops. Track buildings /
+ *  set-pieces ship WITHOUT COLOR_0 (only terrain gets it baked — see
+ *  docs note track_glb_color0_export_gap), and an absent attribute reads 0 on
+ *  every channel under TSL: that would drive AO (vc.g) to 0 — darkening the
+ *  mesh to 0.55× — and edge-wear (1 − vc.a) to 1 — bleaching every face. White
+ *  means AO 1 (no darken) and A 1 (edgeMask 0, no wear). Idempotent; the
+ *  material reads the attribute explicitly (vertexColors stays off) so this
+ *  never doubles as an albedo multiply. */
+function ensureNeutralVertexColor(geom: THREE.BufferGeometry): void {
+  if (geom.getAttribute('color')) return
+  const n = geom.getAttribute('position')?.count ?? 0
+  if (!n) return
+  const data = new Float32Array(n * 4).fill(1)
+  geom.setAttribute('color', new THREE.BufferAttribute(data, 4))
+}
+
+export type VinylSceneOptions = {
+  /** Real sea level for the (opt-in) waterline bands on set-pieces. */
+  waterLevel?: number
+  /** Waterline strength (0 = off). Thread the track's terrain waterline here so
+   *  a coastal building gets the same salt/algae read as the terrain it sits on. */
+  waterline?: number
+  /** Override the brush amount for set-pieces (default: buildVinylMaterial's
+   *  shipped 0.5). Backdrop walls can want a gentler hand than hero props. */
+  brush?: number
+}
+
+/**
+ * Walk a loaded glTF track scene and wrap every still-stock mesh in the
+ * painterly-vinyl material — the buildings / docks / ramps / set-pieces that
+ * `loadGlbTrackVisuals` otherwise leaves on their raw Blender material. This is
+ * what makes the vinyl look the DEFAULT read of a track rather than a prop-only
+ * treatment (see docs/painterly-vinyl-pipeline.md, P2).
+ *
+ * Additive: the vinyl material KEEPS each mesh's incoming albedo and only layers
+ * rim + matte + weathering + brush on top, so authored building colours survive.
+ * Skips terrain (slope shader), foliage (sway), lava (emissive), and the
+ * render-only / hidden kinds. Per-mesh size scales the brush + waterline band.
+ *
+ * Returns the number of materials converted, for caller logging.
+ */
+export function applyVinylMaterialToScene(
+  root: THREE.Object3D,
+  opts: VinylSceneOptions = {},
+): number {
+  root.updateMatrixWorld(true)
+  // Convert once per (source material, size bucket): a material shared across
+  // meshes yields one vinyl twin, preserving whatever batching existed.
+  const cache = new Map<THREE.Material, Map<string, THREE.Material>>()
+  const localBox = new THREE.Box3()
+  const sizeV = new THREE.Vector3()
+  const scaleV = new THREE.Vector3()
+  const tmpPos = new THREE.Vector3()
+  const tmpQuat = new THREE.Quaternion()
+  let count = 0
+
+  root.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh) || !obj.visible) return
+    const kind = (obj.userData as { kind?: unknown })?.kind
+    if (typeof kind === 'string' && VINYL_SKIP_KINDS.has(kind)) return
+    // Terrain keeps its slope/altitude shader (name OR material match, mirroring
+    // applyTerrainShaderToScene's detection).
+    if (typeof obj.name === 'string' && obj.name.startsWith('terrain')) return
+    const mat = obj.material as THREE.Material | THREE.Material[] | undefined
+    if (!mat) return
+    const allOwned = Array.isArray(mat) ? mat.every(ownedByAnotherPass) : ownedByAnotherPass(mat)
+    if (allOwned) return
+
+    // Per-mesh characteristic size (its own geometry bbox × world scale, NOT the
+    // subtree) drives the scale-relative brush + waterline band.
+    const geom = obj.geometry as THREE.BufferGeometry
+    if (!geom.boundingBox) geom.computeBoundingBox()
+    let propSize = 4
+    if (geom.boundingBox) {
+      geom.boundingBox.getSize(sizeV)
+      obj.matrixWorld.decompose(tmpPos, tmpQuat, scaleV)
+      propSize = Math.max(
+        sizeV.x * Math.abs(scaleV.x),
+        sizeV.y * Math.abs(scaleV.y),
+        sizeV.z * Math.abs(scaleV.z),
+        0.05,
+      )
+    } else {
+      localBox.setFromObject(obj)
+      localBox.getSize(sizeV)
+      propSize = Math.max(sizeV.x, sizeV.y, sizeV.z, 0.05)
+    }
+
+    ensureNeutralVertexColor(geom)
+    const sizeKey = (Math.round(propSize * 2) / 2).toFixed(1)
+    const convert = (m: THREE.Material): THREE.Material => {
+      if (ownedByAnotherPass(m)) return m
+      let bySize = cache.get(m)
+      if (!bySize) {
+        bySize = new Map()
+        cache.set(m, bySize)
+      }
+      const hit = bySize.get(sizeKey)
+      if (hit) return hit
+      const v = buildVinylMaterial(m, {
+        propSize,
+        waterLevel: opts.waterLevel ?? 0,
+        waterline: opts.waterline ?? 0,
+        ...(opts.brush !== undefined ? { brush: opts.brush } : {}),
+        // Buildings carry no baked convexity (COLOR_0.A is stamped neutral
+        // above), so disable edge wear explicitly — a future real-COLOR_0
+        // set-piece shouldn't get surprise drybrush bleaching from this pass.
+        edgeWear: 0,
+      })
+      bySize.set(sizeKey, v)
+      count++
+      return v
+    }
+    obj.material = Array.isArray(mat) ? mat.map(convert) : convert(mat)
+  })
+  return count
 }

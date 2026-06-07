@@ -5,6 +5,7 @@ import { playerSettings } from '@/engine/player-settings'
 import { applyDecalsToScene } from '@/engine/render/decal-system'
 import { applyFoliageSwayToMesh } from '@/engine/render/foliage-sway'
 import { applyLavaRiverMaterialToScene } from '@/engine/render/lava-river-material'
+import { applyVinylMaterialToScene } from '@/engine/render/painterly-vinyl-material'
 import { applyTerrainShaderToScene } from '@/engine/render/terrain-shader'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { asSurfaceType } from '@/engine/sim/surface-types'
@@ -154,6 +155,19 @@ export async function loadGlbTrackVisuals(
   // reads the player's emissive-landmarks setting; subsequent setting
   // changes mutate the same uniform without re-loading the track.
   applyLavaRiverMaterialToScene(scene, playerSettings.emissiveLandmarks)
+  // Painterly-vinyl look on every still-stock mesh — the buildings, docks,
+  // ramps and set-pieces that the passes above don't touch otherwise keep
+  // their raw Blender material and miss the unified rim/matte/weathering/brush
+  // read. This makes the vinyl look the DEFAULT surface of a track, not a
+  // prop-only treatment. Additive (keeps each mesh's albedo); skips terrain /
+  // foliage / lava / decal / emitter / horizon / collider. Runs AFTER those so
+  // their material-name tags are in place for the skip check. Waterline threads
+  // from the same terrain config so a coastal building bleaches at the real sea
+  // level the terrain does. See painterly-vinyl-material.ts / pipeline doc P2.
+  applyVinylMaterialToScene(scene, {
+    waterLevel: opts?.terrainShader?.waterLevel ?? 0,
+    waterline: opts?.terrainShader?.waterline ?? 0,
+  })
   // Decal overlays — alpha-blend any `kind=decal` meshes onto the
   // surfaces they were authored on. Fire-and-forget: the atlas texture
   // loads async, but the material profile (depthWrite off, polygon
