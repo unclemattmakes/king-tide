@@ -20,6 +20,33 @@
 > (the Mario-Kart fork), away from the press-forward-on-crest pump described
 > below. See [CLAUDE.md](../CLAUDE.md) and [product-plan.md](./product-plan.md).
 
+> **Last updated: 2026-06-07** — **Float anything on the swell — per-instance
+> props + track-level checkpoint gates.** Wave-riding is no longer asset-only.
+> (1) **Per-instance props:** any placed asset prop can be tagged to float via
+> `Prop.waveRider` ([types.ts](../src/game/tracks/types.ts)), regardless of
+> whether its GLB is a wave-rider — a kinematic body that tracks the wave using
+> the prop's **own** collider (shared
+> [prop-collider.ts](../src/game/entities/prop-collider.ts)), resting at the
+> authored height, with spring/tilt feel auto-derived from collider size
+> (`deriveWaveRiderTuning`). DOF is progressive: `locked` (heave + pitch/roll) →
+> `yaw`; free horizontal is a planned dynamic-body follow-on. Authored in
+> Blender's **Prop Placements** panel (Float toggle + Motion dropdown, carried
+> through the Import/Write round-trip —
+> [prop_placements.py](../tools/blender/hoverbike_addon/prop_placements.py)).
+> (2) **Floating gates:** a track-level `floatGates` toggle bobs checkpoint-gate
+> *visuals* over water on the swell while the crossing trigger stays static +
+> widened ([gate-float.ts](../src/game/tracks/gate-float.ts),
+> [track-mesh.ts](../src/engine/render/track-mesh.ts),
+> [race.ts](../src/game/systems/race.ts)); gates raised onto dry structures
+> auto-stay-static ("auto-off over land"). Blender: **Float gates on waves** in
+> the Gates panel (`hoverbike_float_gates` → `floatGates`). Also fixes
+> `trackToJson` dropping `animated`/`clip`/`loop` on editor saves. Authoring
+> walkthrough in
+> [blender-pipeline-guide.md](./blender-pipeline-guide.md#float-any-prop). Feel
+> is heuristic — tune on a water track or the `?waveriders=1` scene.
+> **Follow-on:** ramps float once authored as asset-prop GLBs (not baked
+> `kind=track` geometry).
+>
 > **Last updated: 2026-06-06** — **In-game Credits screen + brush-texture license
 > pinned.** A **CREDITS** screen ships in the cold-boot menu (new `CREDITS ···`
 > link in the mode-screen footer, beside LEADERBOARDS / MAKING OF / SETTINGS) — a
