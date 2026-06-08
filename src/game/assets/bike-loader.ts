@@ -57,6 +57,11 @@ export type LoadedBike = {
   /** Map slot → socket Object3D under `root`. Resolved via getObjectByName
    *  on the clone, since cloning preserves object names. */
   socketNames: Record<string, string>
+  /** Each socket slot → its position in bike-root-local space (three.js Y-up),
+   *  resolved like `seatLocal`. The FX emitters read `fx_thruster_l` /
+   *  `fx_thruster_r` / `fx_exhaust` from here to spawn at the bike's authored
+   *  engine nozzles. */
+  socketLocals: Record<string, { x: number; y: number; z: number }>
   /** Collider descriptors in bike-root local space. */
   colliders: LoadedBikeCollider[]
   /** Bike-level extras pulled off bike_root. */
@@ -130,21 +135,21 @@ async function doLoad(url: string): Promise<LoadedBike> {
     hover_height: typeof e.hover_height === 'number' ? e.hover_height : 0,
   }
 
-  // Seat anchor: the `socket_seat` empty's position in bike-root-local space.
-  // worldToLocal handles the socket being nested under bike_root (or deeper).
-  let seatLocal: { x: number; y: number; z: number } | null = null
-  const seatName = socketNames.seat
-  if (seatName) {
-    const seatObj = scene.getObjectByName(seatName)
-    if (seatObj) {
-      ;(root as THREE.Object3D).updateWorldMatrix(true, false)
-      const w = seatObj.getWorldPosition(new Vector3())
-      const l = (root as THREE.Object3D).worldToLocal(w)
-      seatLocal = { x: l.x, y: l.y, z: l.z }
-    }
+  // Resolve every socket's position in bike-root-local space (the rider seat,
+  // the FX thruster/exhaust emitters, the nose cam). worldToLocal handles
+  // sockets nested under bike_root; the render bike is authored at 1× so these
+  // locals apply straight to the bike's world transform downstream (FX + rider).
+  ;(root as THREE.Object3D).updateWorldMatrix(true, false)
+  const socketLocals: Record<string, { x: number; y: number; z: number }> = {}
+  for (const [slot, name] of Object.entries(socketNames)) {
+    const obj = scene.getObjectByName(name)
+    if (!obj) continue
+    const l = (root as THREE.Object3D).worldToLocal(obj.getWorldPosition(new Vector3()))
+    socketLocals[slot] = { x: l.x, y: l.y, z: l.z }
   }
+  const seatLocal = socketLocals.seat ?? null
 
-  return { root, socketNames, colliders, extras, seatLocal }
+  return { root, socketNames, socketLocals, colliders, extras, seatLocal }
 }
 
 export type ClonedBike = {
