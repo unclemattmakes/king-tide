@@ -60,6 +60,14 @@ import { applyWaterlineBands } from './waterline'
  *  and a source material shared by reference converts once. */
 const VINYL_MARKED = Symbol.for('hoverbike.painterlyVinyl')
 
+/** Count of distinct vinyl materials actually built this session — each is a
+ *  shader the pre-warm must compile. Read by the boot trace so the loading-time
+ *  breakdown shows how many variants the look generated. */
+let vinylBuilt = 0
+export function vinylMaterialsBuilt(): number {
+  return vinylBuilt
+}
+
 /** Source visual props copied from the GLB material onto the node replacement.
  *  Deliberately DROPS roughnessMap/metalnessMap/aoMap — vinyl wants a uniform
  *  matte finish and computes its own AO from COLOR_0. */
@@ -156,6 +164,21 @@ export type VinylOptions = {
    *  we multiply by this to keep the stroke SIZE matched to the world-space look.
    *  Default 1. */
   objectScale?: number
+  /** Read the base albedo tint from a per-INSTANCE vertex attribute of this name
+   *  (a vec3 linear colour) instead of the material's flat `color`. This is what
+   *  lets ONE shared vinyl material serve a whole `InstancedMesh` field with
+   *  per-bike livery — the caller stamps the attribute on each instanced geometry
+   *  (see instanced-bikes.ts). Omit → flat `color` (the normal path). */
+  tintAttribute?: string
+  /** With `tintAttribute` set, also drive emissive from that same per-instance
+   *  colour — the bike's exhaust glow, whose accent hue must stay per-bike when
+   *  the thruster sub-mesh is instanced. Omit → emissive stays the flat value. */
+  emissiveFromTint?: boolean
+  /** Drive emissive from a SEPARATE per-instance vec3 attribute of this name (the
+   *  value IS the emissive colour — bake any intensity in CPU-side). Lets one
+   *  shared material light only SOME instances, e.g. the "next" race gate glowing
+   *  while every other gate stays dark. Takes precedence over `emissiveFromTint`. */
+  emissiveAttribute?: string
 }
 
 // ── Self-contained value noise (verbatim from terrain-shader.ts) ────────────
@@ -201,6 +224,7 @@ function dirStreak(p: Node<'vec2'>, bScale: Node<'float'>) {
 export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {}): THREE.Material {
   const marked = src as THREE.Material & { userData: Record<string | symbol, unknown> }
   if (marked.userData && marked.userData[VINYL_MARKED]) return src
+  vinylBuilt++
 
   const rimStrength = opts.rimStrength ?? 0.5
   const rimColor = opts.rimColor ?? [1.0, 0.93, 0.82]
@@ -227,6 +251,9 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const edgeWearColor = opts.edgeWearColor ?? [0.95, 0.92, 0.83]
   const brushObjectSpace = opts.brushObjectSpace ?? false
   const objectScale = opts.objectScale ?? 1
+  const tintAttribute = opts.tintAttribute
+  const emissiveFromTint = opts.emissiveFromTint ?? false
+  const emissiveAttribute = opts.emissiveAttribute
 
   const next = new MeshStandardNodeMaterial({ metalness: 0, roughness })
   next.name = src.name ? `mat_vinyl_${src.name}` : 'mat_vinyl'
@@ -243,7 +270,12 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   // can layer nodes; deliberately does NOT fold COLOR_0 in as a tint (it's a
   // parameter channel here, not vertex colour — this also sidesteps the
   // auto-vertexColors albedo multiply that would otherwise darken props).
-  const baseTint = vec3(next.color.r, next.color.g, next.color.b)
+  // baseTint is normally the material's flat colour. In instanced mode it reads a
+  // per-instance vec3 attribute, so one shared material renders a field of bikes
+  // each with its own livery (and, for the exhaust glow, its own emissive accent).
+  const baseTint = tintAttribute
+    ? (attribute(tintAttribute, 'vec3') as Node<'vec3'>)
+    : vec3(next.color.r, next.color.g, next.color.b)
   const mapRgb = std.map ? texture(std.map as THREE.Texture).rgb : vec3(1, 1, 1)
   const albedo = mapRgb.mul(baseTint)
 
@@ -360,6 +392,18 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const withRim = mix(worn, rimTint, rim.mul(float(rimStrength)))
 
   next.colorNode = clamp(withRim, vec3(0, 0, 0), vec3(1.6, 1.6, 1.6))
+
+  // Per-instance emissive (exhaust glow): emissiveNode replaces emissive directly
+  // (three does NOT fold in emissiveIntensity once a node is set — three.webgpu
+  // line ~21754), so bake the copied intensity into the node to match the flat
+  // path's `emissive × emissiveIntensity`.
+  if (emissiveAttribute) {
+    // The attribute value is the emissive colour directly (intensity baked in).
+    next.emissiveNode = attribute(emissiveAttribute, 'vec3') as Node<'vec3'>
+  } else if (tintAttribute && emissiveFromTint) {
+    const emi = next.emissiveIntensity ?? 1
+    next.emissiveNode = (attribute(tintAttribute, 'vec3') as Node<'vec3'>).mul(float(emi))
+  }
 
   // Brush RELIEF — the impasto read. Stroke height modulates roughness (matte
   // sheen breaks up along strokes) and perturbs the shading normal (light

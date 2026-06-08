@@ -126,6 +126,14 @@ export function createRiderMannequinSystem(
   const one = new THREE.Vector3(1, 1, 1)
   const scratchScale = new THREE.Vector3()
 
+  // Convert the SHARED rig's materials to painterly-vinyl ONCE, up front, so every
+  // cloned rider references the SAME vinyl material — one shader compile for the
+  // whole field instead of one per rider. Skinned meshes can't be merged into an
+  // InstancedMesh (each needs its own skeleton), but they can share a material;
+  // skinning is per-mesh, the material is not. brushObjectSpace keeps the strokes
+  // riding the skin (bind-pose frame) rather than swimming as the rider moves.
+  applyVinylMaterialToScene(rig.root, { brush: RIDER_BRUSH, brushObjectSpace: true })
+
   let last = 0
 
   /** The bike's authored seat anchor (`socket_seat`) in bike-local space, or
@@ -176,13 +184,8 @@ export function createRiderMannequinSystem(
       }
       if (o.name) bones.set(o.name, o)
     })
-    // Painterly-vinyl brush strokes on the rider — sized to the FIT_SCALE'd
-    // (displayed) mannequin so strokes read human-scale, not rig-scale. Skinned-
-    // mesh safe (MeshStandardNodeMaterial skins); stamps a neutral COLOR_0.
-    // brushObjectSpace samples the strokes in the rider's own (bind-pose) frame
-    // so they ride with the skin instead of swimming as the rider moves with the
-    // bike (the world-space field swims on movers).
-    applyVinylMaterialToScene(group, { brush: RIDER_BRUSH, brushObjectSpace: true })
+    // Material is already painterly-vinyl (converted once on the shared rig above),
+    // so the clone references it by reference — no per-rider conversion or compile.
     scene.add(group)
     const mixer = new THREE.AnimationMixer(group)
     const clip = resolveSeatedClip(resolveRiderClip(bikeEid))

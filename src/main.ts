@@ -1,10 +1,16 @@
 import { addComponent, hasComponent, removeComponent } from 'bitecs'
 import { DEFAULT_BENCH_TRACK, installBenchmark } from './boot/benchmark-mode'
+import { bootMark, bootReport, bootStat } from './boot/boot-trace'
 import { installControls } from './boot/controls'
 import { startEditMode } from './boot/edit-mode'
 import { startGameLoop } from './boot/game-loop'
 import { hideLoadingScreen, setLoadingMessage } from './boot/loading-screen'
 import { setupMultiplayer } from './boot/multiplayer'
+import {
+  collectVinylScenery,
+  deferSceneryWarm,
+  type ProgressiveWarm,
+} from './boot/progressive-warm'
 import { startReplayMode } from './boot/replay-mode'
 import { spawnBikes } from './boot/spawn-bikes'
 import { loadTrackForBoot } from './boot/track-loader'
@@ -35,6 +41,7 @@ import { createHorizonRing } from './engine/render/horizon-ring'
 import { createHoverDebugRenderer } from './engine/render/hover-debug'
 import { createLandmarkAnimation } from './engine/render/landmark-animation'
 import { createLapWeatherSystem } from './engine/render/lap-weather'
+import { vinylMaterialsBuilt } from './engine/render/painterly-vinyl-material'
 import {
   createParticleSystem,
   loadParticleAtlas,
@@ -166,6 +173,7 @@ async function boot() {
   // menu shells all benefit from having errors captured into the ring.
   // Idempotent so HMR re-runs don't accumulate proxy layers.
   installConsoleTrap()
+  bootMark('start')
 
   const appEl = document.getElementById('app')
   if (!appEl) throw new Error('#app not found')
@@ -235,6 +243,7 @@ async function boot() {
 
   // Phase 2 — core subsystems.
   const { renderer, backend, gpuTimestampsTracked } = await createRenderer(appEl)
+  bootMark('renderer')
   setRenderer(renderer)
   // Apply the persisted pixel-ratio now that the renderer is alive.
   // `createRenderer` already calls `setPixelRatio(min(devicePixelRatio, 2))`,
@@ -242,6 +251,10 @@ async function boot() {
   // it for perf, the lower value takes effect on the first frame.
   applyPixelRatio(playerSettings.pixelRatio)
   const { scene, camera, sun, hemi } = createScene()
+  // Dev-only scene handle for inspection (the draw-call census + ad-hoc debugging).
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    ;(window as unknown as { __scene?: typeof scene }).__scene = scene
+  }
   const phys = await createPhysicsWorld()
   const sim = createSimWorld()
   const chase = createChaseCamera(camera)
@@ -267,6 +280,7 @@ async function boot() {
   // the persisted setting now that the mesh exists.
   setWaterMesh(waterMesh)
   applyWaveSprayIntensity(playerSettings.waveSprayIntensity)
+  bootMark('subsystems')
 
   // Camera-locked transition markers — tall pillars on rings at the
   // center→outer (240 m) and outer→skirt (720 m) boundaries. Hidden
@@ -380,6 +394,7 @@ async function boot() {
   // + (via the cold-boot menu) the track picker.
   setLoadingMessage('Loading manifest…')
   const manifest = await loadManifest()
+  bootMark('manifest')
 
   // Apply any persisted water tuning eagerly, so the page opens in the
   // visual state the user last left. The tuning sliders themselves —
@@ -414,6 +429,8 @@ async function boot() {
     phys,
     editMode,
   })
+  bootMark('track+env')
+  bootStat('vinylAfterEnv', vinylMaterialsBuilt())
 
   // Track-driven sea level: shift both the water mesh and the buoyancy
   // sampler so the surface reads as a custom Y for tracks that want
@@ -633,8 +650,10 @@ async function boot() {
   let waveRiderSys: WaveRiderSystem | undefined
   let waveRiderRender: ReturnType<typeof createWaveRiderRenderSystem> | undefined
   let animatedProps: ReturnType<typeof createAnimatedPropsSystem> | undefined
+  let propsGroup: ReturnType<typeof createPropsMesh> | undefined
   if (track.props.length > 0) {
-    scene.add(createPropsMesh(track.props, propAssets))
+    propsGroup = createPropsMesh(track.props, propAssets)
+    scene.add(propsGroup)
     // Rigged props with `animated:true` (e.g. the swimming great white) are
     // hosted here, skeleton-cloned + mixer-driven, ticked from the game loop.
     animatedProps = createAnimatedPropsSystem(scene, track.props, propAssets, { camera })
@@ -652,6 +671,9 @@ async function boot() {
     }
   }
 
+  bootMark('props')
+  bootStat('vinylAfterProps', vinylMaterialsBuilt())
+
   // Pickup spawns from track.
   for (let i = 0; i < track.pickupSpawns.length; i++) {
     createPickupSpawn(sim, track.pickupSpawns[i] as (typeof track.pickupSpawns)[number], i)
@@ -666,6 +688,7 @@ async function boot() {
     loadBike(assetUrl(`/assets/bikes/${playerVariant.id}.glb`)),
     loadBike(assetUrl('/assets/bikes/racer.glb')),
   ])
+  bootMark('bikes')
 
   // Time Trial — load the saved ghost for (track, bike) before spawn
   // so spawnBikes can attach a ghost entity. Ghost is null on first
@@ -966,7 +989,9 @@ async function boot() {
     byVariantId: { [playerVariant.id]: playerBikeGlb, racer: racerBikeGlb },
     default: racerBikeGlb,
   }
-  const bikeRender = createBikeRenderSystem(scene, sim, bikeRegistry)
+  const bikeRender = createBikeRenderSystem(scene, sim, bikeRegistry, {
+    instanced: params.get('instbikes') !== '0',
+  })
   // Rider visual: the rigged Quaternius Universal mannequin by default,
   // driven from the same 12 sim bone poses (docs/rider-character-investigation.md).
   // Opt out with `?rider=capsule` for the lightweight capsule rig; the
@@ -990,6 +1015,8 @@ async function boot() {
   const combatRender = createCombatRenderSystem(scene, sim)
   const fx = createFxSystem(scene, sim, phys, waveField)
   const engineTrail = createEngineTrailSystem(scene, sim, bikeRegistry)
+  bootMark('systems')
+  bootStat('vinylAfterSystems', vinylMaterialsBuilt())
 
   // Tint airborne water spray (wake foam, plunge bubbles, crest spray) toward
   // the sunset, matching the surface-foam warm tint. The sky is frozen at the
@@ -1400,6 +1427,15 @@ async function boot() {
   // `compileAsync` walks the scene — the static-scene compiles
   // (terrain, water, sky, props, shadow pass) would happen either
   // way but the per-entity ones wouldn't.
+  //
+  // Progressive warm: three's WebGPU pipeline cache keys per material instance,
+  // so a dressed track pays ~one compile per vinyl material (~87 ≈ 5 s on
+  // Sandbar). We hide the static scenery (props + track buildings) so only the
+  // player-essential set (bikes, riders, water, sky, terrain, gates) compiles
+  // under the loading screen — the screen drops sooner — then reveal the scenery
+  // a few meshes per frame once the race is live, letting the running loop
+  // compile each on first sight (see progressive-warm.ts). Opt out: ?progwarm=0.
+  let progWarm: ProgressiveWarm | null = null
   try {
     setLoadingMessage('Warming up shaders…')
     bikeRender()
@@ -1414,6 +1450,10 @@ async function boot() {
     // pre-warm skipped — so its skinned (and skinned-shadow) pipeline compiled
     // on first sight mid-race instead: the "hitch when the shark spawns in".
     animatedProps?.update(0)
+    if (params.get('progwarm') !== '0') {
+      progWarm = deferSceneryWarm(collectVinylScenery([propsGroup, environmentGlbRoot]))
+      bootStat('deferredScenery', progWarm.count)
+    }
     const r = renderer as unknown as {
       compileAsync?: (scene: unknown, camera: unknown) => Promise<void>
     }
@@ -1437,6 +1477,16 @@ async function boot() {
     // eslint-disable-next-line no-console
     console.warn('[main] shader pre-warm failed; first frame may hitch:', err)
   }
+  bootMark('prewarm')
+
+  // Reveal the deferred scenery a few meshes per frame. rAF-scheduled, so it
+  // runs after startGameLoop / startReplayMode below kick their render loops —
+  // each newly-visible mesh compiles on its first rendered frame, spreading the
+  // deferred compile across the countdown instead of the loading screen.
+  progWarm?.reveal(2, () => {
+    bootMark('scenery')
+    bootReport()
+  })
 
   // Phase 8 — game loop. Replay playback gets a separate frame that
   // interpolates recorded poses; the live race uses the fixed-step sim +
@@ -1474,6 +1524,9 @@ async function boot() {
     return
   }
 
+  bootStat('vinylMaterials', vinylMaterialsBuilt())
+  bootStat('props', track.props.length)
+  bootReport()
   state.ready = true
   hideLoadingScreen()
   startGameLoop({

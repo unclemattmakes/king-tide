@@ -803,7 +803,10 @@ export function startGameLoop(opts: GameLoopOpts): void {
     csv: () => perfRecorder.toCsv(),
     resetWindow: () => perfRecorder.reset(),
     renderInfo: () => ({
-      calls: rendererInfo.render.calls,
+      // drawCalls is the PER-FRAME count; render.calls is a cumulative-since-boot
+      // total (three only resets it in setAnimationLoop, which this app's custom
+      // rAF loop bypasses — renderFrame() resets the per-frame metrics instead).
+      calls: rendererInfo.render.drawCalls,
       triangles: rendererInfo.render.triangles,
       geometries: rendererInfo.memory.geometries,
       textures: rendererInfo.memory.textures,

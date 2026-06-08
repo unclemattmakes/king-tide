@@ -76,6 +76,14 @@ export function getActivePostPipeline(): PostPipeline | null {
  * (track-editor, bike-viewer) that don't want bloom.
  */
 export function renderFrame(scene: THREE.Scene, camera: THREE.Camera): void {
+  // Reset the per-frame render counters here, at the single per-frame render
+  // choke point. three only auto-resets `renderer.info` inside its own
+  // `setAnimationLoop` update — and this app drives its OWN requestAnimationFrame
+  // loop, so without this `info.render.calls/triangles` accumulate since boot and
+  // the perf HUD / `__hover.perf.renderInfo()` report a running total instead of a
+  // per-frame count. Resetting before the render (so the shadow + planar-reflection
+  // + bloom sub-passes all tally into this frame) makes the readout truthful.
+  if (instance) instance.info.reset()
   if (
     activePipeline !== null &&
     activePipeline.scene === scene &&
