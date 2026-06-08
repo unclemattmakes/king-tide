@@ -31,6 +31,24 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-07** — **Dev-tools palette + live brush/world tuners.**
+> Every buried dev surface is now one discoverable place (dev builds only): a
+> right-edge **dock rail** + **Ctrl/⌘K command bar** that launch every hidden
+> scene (`?viewer`/`?propviewer`/`?calibrate`/`?rideredit`/`?waveriders`/…), live
+> tuner, in-race debug toggle, and boot param — registry in
+> [src/engine/dev/tools.ts](../src/engine/dev/tools.ts), installed from
+> `startGameLoop`. Formerly reload-only knobs are now **live**: time-of-day (sky
+> re-bake, [sky-service.ts](../src/engine/render/sky-service.ts)), water
+> wireframe / sim-probe / freeze, and a new **Brush strokes** tuner that re-dials
+> the painterly stroke size/curvature/strength for **terrain and rocks/props
+> independently** (shader uniforms — no reload;
+> [brush-tuning-service.ts](../src/engine/render/brush-tuning-service.ts), dial
+> guide in [painterly-vinyl-pipeline.md](./painterly-vinyl-pipeline.md)). The old
+> always-on dev HUD strip is off by default (palette toggle); `DEV SETTINGS` /
+> `WATER` folded into the rail; the dev-settings panel docks scene-visible instead
+> of blackening. Dev-only — the shipped look is unchanged (the brush uniform
+> refactor is a verified no-op at default dials).
+>
 > **Last updated: 2026-06-07** — **Float anything on the swell — per-instance
 > props + track-level checkpoint gates.** Wave-riding is no longer asset-only.
 > (1) **Per-instance props:** any placed asset prop can be tagged to float via

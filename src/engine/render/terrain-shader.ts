@@ -58,12 +58,14 @@ import {
   sin,
   smoothstep,
   texture,
+  uniform,
   vec2,
   vec3,
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
 import type { TerrainShaderConfig } from '@/game/tracks/types'
 import { BRUSH_TEX_TILE, brushHeightTriplanar, brushScaleWeights } from './brush-strokes'
+import { registerTerrainBrush, type TerrainBrushHandle } from './brush-tuning-service'
 
 type ColorStop = { pos: number; color: [number, number, number] }
 
@@ -380,34 +382,42 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   // (`slope`, stable) plus a screen-space normal-variation term
   // (`fwidth(worldNorm)`, which spikes on ridges / creases / cliff breaks) —
   // so the painterly hand lands on the sculpted bends and stays light on flat
-  // sand. `brushCurvature` blends from uniform (0) to fully curvature-gated
-  // (1); even at full gate a floor keeps some brush on the flats. Computed in
-  // JS-`if` so `brush = 0` is byte-identical to the pre-brush terrain.
-  let brushedCol = withPath
-  // The gated stroke deviation (~−0.5..0.5), reused by colour + roughness. null
-  // when brush is off so both collapse to the pre-brush expressions.
-  let brushDev: Node<'float'> | null = null
-  if (brush > 0) {
-    // worldScale chosen so the sheet tiles roughly every `brushScale` metres on
-    // the ground (the helper folds BRUSH_TEX_TILE back in).
-    const worldScale = 1 / Math.max(brushScale * BRUSH_TEX_TILE, 1e-4)
-    const streak = brushHeightTriplanar(
-      positionWorld,
-      worldNorm,
-      worldScale,
-      brushScaleWeights(brushScale),
-    )
-    // Screen-space curvature: how fast the world normal changes across the
-    // frame. Clamped so its distance-driven growth saturates (a gate tolerates
-    // mild shimmer the way a hard edge-line wouldn't). True baked mean-curvature
-    // would need a new vertex attribute + re-export — a follow-up if this proxy
-    // isn't enough.
-    const normCurv = clamp(fwidth(worldNorm).length().mul(float(8.0)), float(0), float(1))
-    const curvature = clamp(slope.mul(float(0.6)).add(normCurv.mul(float(0.7))), float(0), float(1))
-    const brushGate = mix(float(1), curvature, float(brushCurvature))
-    brushDev = streak.sub(float(0.5)).mul(brushGate)
-    brushedCol = withPath.mul(float(1).add(brushDev.mul(float(brush).mul(float(2.4)))))
+  // sand. `brushCurvature` blends from uniform (0) to fully curvature-gated (1).
+  //
+  // brush / curvature / stroke-freq / scale-weights are UNIFORMS so the dev
+  // "Brush strokes" tuner can re-dial them live (brush-tuning-service.ts). The
+  // path is built unconditionally now; at `uBrush = 0` every expression below
+  // collapses to the pre-brush result (`baseRough` ∈ [0.78,0.95] is inside the
+  // clamp), so a `brush: 0` track stays visually identical — and can be raised
+  // live. `freq` folds BRUSH_TEX_TILE back in to match the old baked frequency
+  // exactly at the default scale.
+  const uBrush = uniform(brush)
+  const uBrushCurvature = uniform(brushCurvature)
+  const terrainWorldScale = 1 / Math.max(brushScale * BRUSH_TEX_TILE, 1e-4)
+  const uBrushFreq = uniform(terrainWorldScale * BRUSH_TEX_TILE)
+  const w0 = brushScaleWeights(brushScale)
+  const uBrushWeights = uniform(new THREE.Vector3(w0[0], w0[1], w0[2]))
+
+  const streak = brushHeightTriplanar(positionWorld, worldNorm, uBrushFreq, uBrushWeights)
+  const normCurv = clamp(fwidth(worldNorm).length().mul(float(8.0)), float(0), float(1))
+  const curvature = clamp(slope.mul(float(0.6)).add(normCurv.mul(float(0.7))), float(0), float(1))
+  const brushGate = mix(float(1), curvature, uBrushCurvature)
+  const brushDev = streak.sub(float(0.5)).mul(brushGate)
+  const brushedCol = withPath.mul(float(1).add(brushDev.mul(uBrush.mul(float(2.4)))))
+
+  // Live-tuner handle: recompute freq + weights from brushScale, push uniforms.
+  const brushHandle: TerrainBrushHandle = {
+    initial: { brush, brushScale, brushCurvature },
+    set(v) {
+      uBrush.value = v.brush
+      uBrushCurvature.value = v.brushCurvature
+      const ws = 1 / Math.max(v.brushScale * BRUSH_TEX_TILE, 1e-4)
+      uBrushFreq.value = ws * BRUSH_TEX_TILE
+      const w = brushScaleWeights(v.brushScale)
+      uBrushWeights.value.set(w[0], w[1], w[2])
+    },
   }
+  mat.userData.terrainBrushHandle = brushHandle
 
   // Clamp final colour so any combined gain (saturation lift × macro
   // bias × brightness pulse × brush) never blows past linear-1 and wrecks
@@ -418,9 +428,11 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   // between the two so gravel doesn't read as wet asphalt. The brush adds a
   // subtle along-stroke roughness ripple so light catches the impasto.
   const baseRough = mix(float(0.78), float(0.95), slope)
-  mat.roughnessNode = brushDev
-    ? clamp(baseRough.add(brushDev.mul(float(brush).mul(float(0.8)))), float(0.4), float(1.0))
-    : baseRough
+  mat.roughnessNode = clamp(
+    baseRough.add(brushDev.mul(uBrush.mul(float(0.8)))),
+    float(0.4),
+    float(1.0),
+  )
 
   return mat
 }
@@ -485,6 +497,9 @@ export function applyTerrainShaderToScene(
       nameIsTerrain || (Array.isArray(mat) ? mat.some(isTerrainName) : isTerrainName(mat))
     if (!isTerrain) return
     const next = buildTerrainMaterial(config)
+    // Register the brush-uniform handle so the dev Brush tuner can re-dial it live.
+    const handle = (next.userData as { terrainBrushHandle?: TerrainBrushHandle }).terrainBrushHandle
+    if (handle) registerTerrainBrush(handle)
     // Dispose the original glTF material to free its baseColor texture etc.
     const dispose = (m: THREE.Material) => {
       try {

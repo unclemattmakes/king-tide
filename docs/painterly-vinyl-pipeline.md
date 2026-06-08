@@ -246,6 +246,37 @@ clone never breaks. To change the strokes:
    locally until pushed — `pnpm assets:push` (or, from an un-hydrated worktree,
    `rclone copy` just that one file to avoid junction/`audio` noise).
 
+### Live look-tuning: the in-engine Brush tuner
+
+The brush *sheet* above sets the stroke **shapes**; the brush **look** (how big
+the strokes read, where they land, how strong) is live-tunable in-engine — no
+reload. Open the dev palette (**Ctrl/⌘K → "brush"**, or the dock rail's *Tuners*
+group; dev builds only) for the **Brush strokes** panel. Terrain and
+rocks/props/buildings are **independent** dial sets — terrain stroke values never
+force the same onto a dock or building. The dials are shader uniforms driven
+through [brush-tuning-service.ts](../src/engine/render/brush-tuning-service.ts), so
+dragging re-paints with no recompile (default values render identical to the baked
+look — a no-op refactor at defaults).
+
+The busy "straw/speckle" on big terrain + rocks isn't the sheet — it's that big
+surfaces get clamped to a SMALL stroke that tiles many times. Fix: let big things
+use bigger strokes + gate to curvature so flats stay clean (*dense small = straw;
+few big = deliberate brushwork*):
+
+| Surface | Dial | Default | Direction → first-pass |
+|---|---|---|---|
+| **Terrain** | stroke size | 4 m | bigger/sparser → **10** (the #1 straw lever) |
+| | curvature gate | 0.4 | flats stay clean → **0.7** (0 = uniform, 1 = slopes/ridges only) |
+| | strength | 0.75 | gentler → **0.5** |
+| **Rocks/props** | size cap | 6 m | more strokes (not giant) on big forms → **12** |
+| | stroke size (frac) | 0.12 | lower = bigger strokes |
+| | strength | 0.7 | gentler → **0.5** |
+
+**Copy** emits the terrain `terrainShader` block to paste into
+`public/tracks/<id>.json`; the rock values map to `VinylSceneOptions`
+(`glb-track.ts`) / `buildVinylMaterial` defaults (`BRUSH_PROP_SIZE_CAP`). The
+sheet's own stroke *counts* are NOT tunable here — that's the regen loop above.
+
 **P0 — shared waterline helper.** Extract the world-space waterline block from
 `terrain-shader.ts` into `waterline.ts`; refactor terrain to call it (no visual
 change — regression-check via `gen:track-shots`).

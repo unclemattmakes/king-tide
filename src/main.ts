@@ -62,6 +62,7 @@ import { createRiderMannequinSystem } from './engine/render/rider-mannequin'
 import { createRiderRenderSystem } from './engine/render/rider-systems'
 import { createScene } from './engine/render/scene'
 import { beaufortToAmplitudeScale, createSkySystem } from './engine/render/sky'
+import { setSkySystem } from './engine/render/sky-service'
 import { createStartLights } from './engine/render/start-lights'
 import { createSurgeSprayDriver, type SurgeSprayDriver } from './engine/render/surge-spray'
 import { sampleTerrainHeightAtXZ } from './engine/render/terrain-heightmap'
@@ -487,6 +488,9 @@ async function boot() {
     water: waterMesh,
     config: skyConfig,
   })
+  // Register the sky in its service singleton so the dev palette's live
+  // "Time of day" control can re-bake the sky without a reload.
+  setSkySystem(sky)
 
   // Per-lap weather progression. No-ops for tracks without `lapWeather`
   // (most of them); for Hatteras + The Maw it ramps cloudiness + Beaufort

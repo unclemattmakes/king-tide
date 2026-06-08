@@ -355,6 +355,12 @@ export type SkySystem = {
    *  values < 1 for "the storm covered the sun", > 1 for "the clouds
    *  parted". */
   setSunIntensity(s: number): void
+  /** Re-apply the whole frozen sky state for a new time-of-day (seconds into
+   *  the 0–360s cycle): sun direction, palette, fog, lights, water uniforms,
+   *  and a fresh PMREM env-map bake. Costs one bake hitch — fine for a dev
+   *  tool, which is the only caller (the live `?tod` equivalent). The bake is
+   *  deliberately NOT run per-frame in normal play. */
+  setTimeOfDay(time: number): void
   /** Shared TSL uniforms (read-only consumers: horizon ring, cloud shadows). */
   shared: SkyShared
   /** Drop GPU resources. */
@@ -849,6 +855,16 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
     }
   }
 
+  function setTimeOfDay(time: number): void {
+    // `applyStaticState` re-bakes a fresh PMREM env-map into `currentEnv`
+    // without freeing the old one (it was written as a once-at-boot call), so
+    // dispose the previous bake first or live TOD scrubbing leaks render
+    // targets. The bake hitch is acceptable for a dev tool.
+    currentEnv?.dispose()
+    currentEnv = null
+    applyStaticState(time)
+  }
+
   function dispose(): void {
     cloudLayer?.dispose()
     scene.remove(mesh)
@@ -887,5 +903,14 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
     cloudLayer = createCloudLayer({ scene, shared, config: cfg.clouds })
   }
 
-  return { mesh, tick, getSunDirection, setCloudiness, setSunIntensity, shared, dispose }
+  return {
+    mesh,
+    tick,
+    getSunDirection,
+    setCloudiness,
+    setSunIntensity,
+    setTimeOfDay,
+    shared,
+    dispose,
+  }
 }
