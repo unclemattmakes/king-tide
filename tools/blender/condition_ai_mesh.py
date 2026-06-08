@@ -60,7 +60,6 @@ from __future__ import annotations
 import os
 import sys
 
-import bmesh
 import bpy
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -74,6 +73,7 @@ from tools.blender.vertex_attrs import (  # noqa: E402
     set_color_attr,
     set_constant,
     set_linear_sway_z,
+    welded_convexity,
 )
 
 # Neutral COLOR_0 for ``keep_material`` static props. Three.js turns a present
@@ -298,31 +298,17 @@ def _strip_color_attrs(mesh: bpy.types.Mesh) -> None:
 
 def _edge_convexity(mesh: bpy.types.Mesh, gain: float = 1.6) -> list[float]:
     """Per-vertex convex-edge strength in [0, 1] (0 = flat/concave, 1 = a sharp
-    convex ridge). Scale-invariant: for each vertex it averages
-    ``dot(normalized incident-edge direction, vertex normal)`` — a convex vertex
-    has its edges trending *away* from the normal (negative dot), a concave one
-    *toward* it. The vinyl material drybrushes high values to pop raised edges
-    (the painted-miniature look), shimmer-free because it's smooth per-vertex
-    data baked at asset time (vs screen-space curvature, which catches the
-    tessellation). Index-aligned with ``mesh.vertices``."""
-    bm = bmesh.new()
-    bm.from_mesh(mesh)
-    bm.normal_update()
-    bm.verts.ensure_lookup_table()
-    out = [0.0] * len(bm.verts)
-    for v in bm.verts:
-        acc, cnt = 0.0, 0
-        for e in v.link_edges:
-            d = e.other_vert(v).co - v.co
-            ln = d.length
-            if ln < 1e-9:
-                continue
-            acc += (d / ln).dot(v.normal)
-            cnt += 1
-        if cnt:
-            out[v.index] = max(0.0, min(1.0, -(acc / cnt) * gain))
-    bm.free()
-    return out
+    convex ridge) — the painted-miniature drybrush mask the vinyl material reads
+    as ``1 - A``. Shimmer-free because it's smooth per-vertex data baked at asset
+    time (vs screen-space curvature, which catches the tessellation).
+
+    Delegates to the shared ``vertex_attrs.welded_convexity`` so the source bake
+    here, the GLB retrofit (``patch_convexity.py``), and the runtime primitive
+    stamp (``edge-wear-convexity.ts``) all agree. The welded view is what lets
+    hard-surface props — whose vertices are SPLIT along every hard edge — read
+    convex at all; the old per-vertex bmesh walk saw only coplanar in-face edges
+    on those and reported ~0 (flat). Index-aligned with ``mesh.vertices``."""
+    return welded_convexity(mesh, gain=gain)
 
 
 def _stamp_color0(obj: bpy.types.Object, foliage: bool, *,

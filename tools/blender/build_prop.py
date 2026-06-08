@@ -37,6 +37,7 @@ from tools.blender.common import (  # noqa: E402
     validate_required_kinds,
 )
 from tools.blender.lib_loader import append_objects  # noqa: E402
+from tools.blender.vertex_attrs import set_static_prop_color0  # noqa: E402
 
 KIT_BLEND = os.path.join(REPO_ROOT, "tools", "blender", "lib", "prop_kit.blend")
 
@@ -123,6 +124,23 @@ def build() -> None:
     body.data.materials.clear()
     body.data.materials.append(tint_mat)
 
+    # Stamp the static-vinyl-prop COLOR_0 (G = AO = 1, A = 1 - welded edge-wear
+    # convexity) so kit props carry the same hard-surface edge wear as
+    # conditioned/AI props — and so they ship WITH a COLOR_0 at all. A
+    # fully-absent attribute reads 0 on every channel under the runtime vinyl
+    # material (AO darken + full edge bleach); this is the durable fix vs relying
+    # on a post-hoc patch_convexity pass. Mark it active so the glTF exporter
+    # emits it as COLOR_0 (common.export_glb uses export_vertex_color="ACTIVE").
+    set_static_prop_color0(body.data)
+    ca = body.data.color_attributes
+    c0 = ca.get("COLOR_0")
+    if c0 is not None:
+        try:
+            ca.active_color = c0
+            ca.render_color_index = list(ca).index(c0)
+        except (AttributeError, ValueError, TypeError):
+            pass
+
     # Collider — primitive empty whose extras carry the runtime's
     # description. We pick a gizmo type matching the shape so authors
     # can see it in viewport when editing the kit later.
@@ -142,7 +160,12 @@ def build() -> None:
     def validators() -> list[str]:
         return validate_required_kinds({"prop": 1, "collider": (1, None)})
 
-    export_glb(out, validators=[validators])
+    # single_color0: force export_vertex_color="ACTIVE" so the stamped COLOR_0
+    # (edge-wear convexity in A) actually ships. The exporter's default
+    # "MATERIAL" mode only emits a color attribute the material references via an
+    # Attribute node — our plain Principled material references none, so the
+    # stamp would be silently dropped. Same flag the AI-mesh conditioner uses.
+    export_glb(out, validators=[validators], single_color0=True)
 
 
 if __name__ == "__main__":

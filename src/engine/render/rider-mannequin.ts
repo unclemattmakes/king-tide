@@ -179,7 +179,10 @@ export function createRiderMannequinSystem(
     // Painterly-vinyl brush strokes on the rider — sized to the FIT_SCALE'd
     // (displayed) mannequin so strokes read human-scale, not rig-scale. Skinned-
     // mesh safe (MeshStandardNodeMaterial skins); stamps a neutral COLOR_0.
-    applyVinylMaterialToScene(group, { brush: RIDER_BRUSH })
+    // brushObjectSpace samples the strokes in the rider's own (bind-pose) frame
+    // so they ride with the skin instead of swimming as the rider moves with the
+    // bike (the world-space field swims on movers).
+    applyVinylMaterialToScene(group, { brush: RIDER_BRUSH, brushObjectSpace: true })
     scene.add(group)
     const mixer = new THREE.AnimationMixer(group)
     const clip = resolveSeatedClip(resolveRiderClip(bikeEid))

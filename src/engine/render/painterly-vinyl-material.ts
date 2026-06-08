@@ -33,7 +33,9 @@ import {
   fract,
   mix,
   normalize,
+  normalLocal,
   normalWorld,
+  positionLocal,
   positionWorld,
   pow,
   sin,
@@ -51,6 +53,7 @@ import {
   normalizeMix,
 } from './brush-strokes'
 import { registerVinylBrush, type VinylBrushHandle } from './brush-tuning-service'
+import { stampConvexityColor0 } from './edge-wear-convexity'
 import { applyWaterlineBands } from './waterline'
 
 /** Marks a material we've already vinyl-converted, so conversion is idempotent
@@ -141,6 +144,18 @@ export type VinylOptions = {
   edgeWear?: number
   /** Edge-wear tint (linear) — a bleached drybrush highlight. */
   edgeWearColor?: [number, number, number]
+  /** Sample the brush strokes + procedural weathering in OBJECT space
+   *  (`positionLocal`) instead of world space. World-space sampling locks the
+   *  strokes to world coordinates, so they "swim" across a surface that MOVES
+   *  through the world (a bike, a skinned rider). Object space paints the strokes
+   *  onto the mesh so they ride along with it. Default false (world) — correct
+   *  for static terrain / buildings / placed props. */
+  brushObjectSpace?: boolean
+  /** The mesh's world scale (metres per local unit), used only when
+   *  `brushObjectSpace` is set: `positionLocal` is in un-scaled model units, so
+   *  we multiply by this to keep the stroke SIZE matched to the world-space look.
+   *  Default 1. */
+  objectScale?: number
 }
 
 // ── Self-contained value noise (verbatim from terrain-shader.ts) ────────────
@@ -210,6 +225,8 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const roughness = opts.roughness ?? 0.82
   const edgeWear = opts.edgeWear ?? 0.66
   const edgeWearColor = opts.edgeWearColor ?? [0.95, 0.92, 0.83]
+  const brushObjectSpace = opts.brushObjectSpace ?? false
+  const objectScale = opts.objectScale ?? 1
 
   const next = new MeshStandardNodeMaterial({ metalness: 0, roughness })
   next.name = src.name ? `mat_vinyl_${src.name}` : 'mat_vinyl'
@@ -235,9 +252,17 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const ao = clamp(vc.g, float(0), float(1))
   const withAO = albedo.mul(mix(float(0.55), float(1.0), ao))
 
-  // Procedural weathering wash — subtle value-noise mottling in world XZ so a
-  // flat-tint prop reads as painted, not plastic. weathering 0 -> washFac 1.
-  const wn = valueNoiseOctave2D(positionWorld.xz.mul(float(1 / 3)))
+  // Brush + weathering sample basis. World space by default — strokes flow
+  // continuously across the scene and stay put on static surfaces. Object space
+  // (positionLocal × objectScale, normalLocal) for movers: the strokes are
+  // painted onto the mesh's own frame so they ride along with a bike / skinned
+  // rider instead of swimming through a world-locked field as it travels.
+  const brushPos = brushObjectSpace ? positionLocal.mul(float(objectScale)) : positionWorld
+  const brushNrm = brushObjectSpace ? normalLocal : normalWorld
+
+  // Procedural weathering wash — subtle value-noise mottling so a flat-tint prop
+  // reads as painted, not plastic. weathering 0 -> washFac 1.
+  const wn = valueNoiseOctave2D(brushPos.xz.mul(float(1 / 3)))
   const washFac = float(1.0 - weathering * 0.5).add(wn.mul(float(weathering)))
   const washed = withAO.mul(washFac)
 
@@ -268,15 +293,17 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const uBrushWeights = uniform(new THREE.Vector3(wCoarse, wMed, wFine))
   let streak: Node<'float'>
   if (brushTextured) {
-    streak = brushHeightTriplanar(positionWorld, normalWorld, uBrushFreq, uBrushWeights)
+    // Object-space positions (swim fix) feeding the tunable freq/weights uniforms.
+    streak = brushHeightTriplanar(brushPos, brushNrm, uBrushFreq, uBrushWeights)
   } else {
-    const an = vec3(abs(nrm.x), abs(nrm.y), abs(nrm.z))
+    const bn = normalize(brushNrm)
+    const an = vec3(abs(bn.x), abs(bn.y), abs(bn.z))
     const wsum = an.x.add(an.y).add(an.z).add(float(1e-4))
     const sampleStreak = (p: Node<'vec2'>) => dirStreak(p, uBrushFreq)
-    streak = sampleStreak(vec2(positionWorld.z, positionWorld.y))
+    streak = sampleStreak(vec2(brushPos.z, brushPos.y))
       .mul(an.x)
-      .add(sampleStreak(vec2(positionWorld.x, positionWorld.z)).mul(an.y))
-      .add(sampleStreak(vec2(positionWorld.x, positionWorld.y)).mul(an.z))
+      .add(sampleStreak(vec2(brushPos.x, brushPos.z)).mul(an.y))
+      .add(sampleStreak(vec2(brushPos.x, brushPos.y)).mul(an.z))
       .div(wsum)
   }
   const brushFac = float(1).add(streak.sub(float(0.5)).mul(uBrush.mul(float(3.0))))
@@ -410,6 +437,15 @@ export type VinylSceneOptions = {
   /** Override the brush prop-size cap in metres (default 6) — bigger = sparser
    *  strokes on large rocks/cliffs/buildings (the main anti-"straw" lever). */
   brushPropSizeCap?: number
+  /** Edge-wear drybrush amount (default 0 = off for stock set-pieces, which
+   *  carry no baked convexity). When > 0, real per-vertex convexity is baked
+   *  into each mesh (`stampConvexityColor0`) so the wear lands on actual edges —
+   *  use it on hero meshes that should pop (e.g. bikes). */
+  edgeWear?: number
+  /** Sample the brush + weathering in object space so they don't swim on a mesh
+   *  that MOVES through the world (a bike, a skinned rider). Default false
+   *  (world) — correct for static buildings / set-pieces. */
+  brushObjectSpace?: boolean
 }
 
 /**
@@ -431,6 +467,8 @@ export function applyVinylMaterialToScene(
   opts: VinylSceneOptions = {},
 ): number {
   root.updateMatrixWorld(true)
+  const edgeWear = opts.edgeWear ?? 0
+  const brushObjectSpace = opts.brushObjectSpace ?? false
   // Convert once per (source material, size bucket): a material shared across
   // meshes yields one vinyl twin, preserving whatever batching existed.
   const cache = new Map<THREE.Material, Map<string, THREE.Material>>()
@@ -473,8 +511,19 @@ export function applyVinylMaterialToScene(
       propSize = Math.max(sizeV.x, sizeV.y, sizeV.z, 0.05)
     }
 
-    ensureNeutralVertexColor(geom)
-    const sizeKey = (Math.round(propSize * 2) / 2).toFixed(1)
+    // Edge wear needs real per-vertex convexity: bake it when requested,
+    // otherwise stamp a neutral COLOR_0 so the AO/edge reads are safe no-ops
+    // (a fully-absent attribute reads 0 on every channel under TSL). The bake is
+    // idempotent + a no-op for a mesh that already carries COLOR_0.
+    if (edgeWear > 0) stampConvexityColor0(geom)
+    else ensureNeutralVertexColor(geom)
+    // Object-space brush needs the mesh's world scale to keep the stroke size
+    // matched (positionLocal is in un-scaled model units).
+    obj.matrixWorld.decompose(tmpPos, tmpQuat, scaleV)
+    const objectScale = Math.max(Math.abs(scaleV.x), Math.abs(scaleV.y), Math.abs(scaleV.z), 0.01)
+    const sizeKey = brushObjectSpace
+      ? `${(Math.round(propSize * 2) / 2).toFixed(1)}|${(Math.round(objectScale * 4) / 4).toFixed(2)}`
+      : (Math.round(propSize * 2) / 2).toFixed(1)
     const convert = (m: THREE.Material): THREE.Material => {
       if (ownedByAnotherPass(m)) return m
       let bySize = cache.get(m)
@@ -491,10 +540,9 @@ export function applyVinylMaterialToScene(
         ...(opts.brush !== undefined ? { brush: opts.brush } : {}),
         ...(opts.brushScale !== undefined ? { brushScale: opts.brushScale } : {}),
         ...(opts.brushPropSizeCap !== undefined ? { brushPropSizeCap: opts.brushPropSizeCap } : {}),
-        // Buildings carry no baked convexity (COLOR_0.A is stamped neutral
-        // above), so disable edge wear explicitly — a future real-COLOR_0
-        // set-piece shouldn't get surprise drybrush bleaching from this pass.
-        edgeWear: 0,
+        edgeWear,
+        brushObjectSpace,
+        objectScale,
       })
       const h = (v.userData as { vinylBrushHandle?: VinylBrushHandle }).vinylBrushHandle
       if (h) registerVinylBrush(h)
