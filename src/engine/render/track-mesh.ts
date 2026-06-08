@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import { gateFloatsOnWaves } from '@/game/tracks/gate-float'
 import type { AntiGravZone, BoostPad, Checkpoint, Track } from '@/game/tracks/types'
-import { cloneGateProp } from './gate-prop'
+import { createInstancedGates, type InstancedGates } from './instanced-gates'
 
 export type TrackVisuals = {
   group: THREE.Object3D
@@ -39,25 +39,47 @@ export function createTrackVisuals(track: Track, options: TrackVisualsOptions = 
   group.name = `track:${track.id}`
 
   const gatePropTemplate = options.gatePropTemplate ?? null
-  const gateMeshesByIndex = new Map<number, GateMesh>()
-  // Gates that bob on the swell (track opted into `floatGates` + this gate
-  // sits over water). Each frame `tick` sets their root Y to the wave
-  // surface; the authored Y is the rest height. Empty → tick is a no-op.
-  const floatingGates: { root: THREE.Object3D; x: number; y: number; z: number }[] = []
-
+  // Gates that bob on the swell (track opted into `floatGates` + this gate sits
+  // over water). Each frame `tick` drives their Y onto the wave surface; the
+  // authored Y is the rest height. Empty → tick is a no-op.
+  const floatingGates: { index: number; x: number; y: number; z: number }[] = []
   for (const cp of track.checkpoints) {
-    const gate = createGateMesh(cp, cp.index === 0, gatePropTemplate)
-    gate.root.position.set(cp.position.x, cp.position.y, cp.position.z)
-    gate.root.quaternion.set(cp.rotation.x, cp.rotation.y, cp.rotation.z, cp.rotation.w)
-    group.add(gate.root)
-    gateMeshesByIndex.set(cp.index, gate)
     if (gateFloatsOnWaves(track, cp)) {
-      floatingGates.push({ root: gate.root, x: cp.position.x, y: cp.position.y, z: cp.position.z })
+      floatingGates.push({ index: cp.index, x: cp.position.x, y: cp.position.y, z: cp.position.z })
     }
   }
 
-  for (const cp of track.checkpoints) {
-    setStateOn(gateMeshesByIndex.get(cp.index)!, cp.index === 0 ? 'next' : 'upcoming')
+  // Library-mesh path: the whole gate set draws through ONE InstancedMesh (shared
+  // painterly-vinyl material, per-instance state colour + next-gate glow). The
+  // procedural-fallback path (no `gate.glb` yet) keeps per-gate primitive clones.
+  let instancedGates: InstancedGates | null = null
+  const proceduralGates = new Map<number, GateMesh>()
+
+  if (gatePropTemplate) {
+    instancedGates = createInstancedGates(track.checkpoints, gatePropTemplate)
+    group.add(instancedGates.group)
+    for (const cp of track.checkpoints) {
+      if (cp.index === 0) {
+        // The start/finish gate's checkered banner + ground stripe are unique
+        // (one gate), so they stay as their own meshes alongside the instanced arch.
+        const fx = createFinishExtras(cp)
+        fx.position.set(cp.position.x, cp.position.y, cp.position.z)
+        fx.quaternion.set(cp.rotation.x, cp.rotation.y, cp.rotation.z, cp.rotation.w)
+        group.add(fx)
+      }
+      instancedGates.setState(cp.index, cp.index === 0 ? 'next' : 'upcoming')
+    }
+  } else {
+    for (const cp of track.checkpoints) {
+      const gate = createGateMesh(cp, cp.index === 0)
+      gate.root.position.set(cp.position.x, cp.position.y, cp.position.z)
+      gate.root.quaternion.set(cp.rotation.x, cp.rotation.y, cp.rotation.z, cp.rotation.w)
+      group.add(gate.root)
+      proceduralGates.set(cp.index, gate)
+    }
+    for (const cp of track.checkpoints) {
+      setStateOn(proceduralGates.get(cp.index) as GateMesh, cp.index === 0 ? 'next' : 'upcoming')
+    }
   }
 
   for (const pad of track.boostPads) {
@@ -69,24 +91,32 @@ export function createTrackVisuals(track: Track, options: TrackVisualsOptions = 
   }
 
   function setCheckpointState(index: number, state: CheckpointVisualState) {
-    const gate = gateMeshesByIndex.get(index)
-    if (!gate) return
-    setStateOn(gate, state)
+    if (instancedGates) {
+      instancedGates.setState(index, state)
+      return
+    }
+    const gate = proceduralGates.get(index)
+    if (gate) setStateOn(gate, state)
   }
 
   function tick(waveField: WaveFieldState) {
     if (floatingGates.length === 0) return
-    // Rest at the authored height, displaced by the live wave at the gate's
-    // XZ: y = authoredY + (surface − meanLevel). For a gate placed on the
-    // water (authoredY ≈ baseY) this rides the surface; the trigger
-    // (race.ts) stays static and is widened instead.
+    // y = authoredY + (surface − meanLevel): a gate on the water rides the swell;
+    // the trigger (race.ts) stays static and is widened instead.
     for (const g of floatingGates) {
-      g.root.position.y = g.y + sampleHeight(waveField, g.x, g.z) - waveField.baseY
+      const y = g.y + sampleHeight(waveField, g.x, g.z) - waveField.baseY
+      if (instancedGates) {
+        instancedGates.setY(g.index, y)
+      } else {
+        const gate = proceduralGates.get(g.index)
+        if (gate) gate.root.position.y = y
+      }
     }
   }
 
   function dispose() {
-    for (const g of gateMeshesByIndex.values()) g.dispose()
+    instancedGates?.dispose()
+    for (const g of proceduralGates.values()) g.dispose()
   }
 
   return { group, setCheckpointState, tick, dispose }
@@ -98,35 +128,17 @@ type GateMesh = {
   dispose(): void
 }
 
-function createGateMesh(
-  cp: Checkpoint,
-  isFinishLine: boolean,
-  gatePropTemplate: THREE.Object3D | null,
-): GateMesh {
+// Procedural gate — primitive Cylinder posts + Box bar. The fallback path when
+// `gate.glb` hasn't been generated yet (fresh checkout / CI before
+// `pnpm gen:prop-gate`); the library-mesh path goes through the instanced gates
+// in createTrackVisuals.
+function createGateMesh(cp: Checkpoint, isFinishLine: boolean): GateMesh {
   const root = new THREE.Group()
   root.name = `gate:${cp.index}`
 
   const recolorables: THREE.Mesh[] = []
-  // Geometries owned by this gate (procedural fallback only). The
-  // prop-template path shares geometries across instances via
-  // `clone(true)`; only materials are cloned per-gate.
   const ownedGeoms: THREE.BufferGeometry[] = []
-
-  if (gatePropTemplate) {
-    // Library-mesh path: clone `prop_gate_mesh` and scale to the
-    // checkpoint's authored dimensions. Same mesh the Blender N-panel
-    // gate-preview gizmo shows — placement parity is automatic
-    // because both sides read `cp.position` / `cp.rotation` /
-    // `cp.halfWidth` / `cp.height` from the same JSON.
-    const clone = cloneGateProp(gatePropTemplate, cp.halfWidth, cp.height)
-    root.add(clone.root)
-    for (const mesh of clone.recolorables) recolorables.push(mesh)
-  } else {
-    // Procedural fallback — runs when `public/assets/props/gate.glb`
-    // hasn't been generated yet (e.g. fresh checkout, CI before
-    // `pnpm gen:prop-gate`). Same primitives the runtime used pre-
-    // 2026-05-19; kept as a defense-in-depth path so the gate
-    // visual is never missing.
+  {
     const pillarGeom = new THREE.CylinderGeometry(0.4, 0.4, cp.height, 12)
     ownedGeoms.push(pillarGeom)
     const pillarMat = new THREE.MeshStandardMaterial({ color: 0x4d6b7a, emissive: 0x000000 })
@@ -155,50 +167,12 @@ function createGateMesh(
     recolorables.push(bar)
   }
 
-  // The start/finish gate gets a checkered banner under the cross-bar
-  // and a checkered strip stamped on the ground between the pillars,
-  // so it reads as the "finish line" from any approach angle. This is
-  // purely visual — gate behaviour (lap completion on cp 0) is identical
-  // to any other checkpoint.
+  // The start/finish gate gets a checkered banner + ground stripe so it reads as
+  // the "finish line" from any approach angle (purely visual — lap completion on
+  // cp 0 is identical to any other checkpoint). Shared with the instanced-gate
+  // path, which adds the same extras as their own meshes alongside the arch.
   if (isFinishLine) {
-    const checker = makeCheckerTexture(16, 4)
-    const bannerHeight = 1.6
-    const bannerGeom = new THREE.PlaneGeometry(cp.halfWidth * 2, bannerHeight)
-    const bannerMat = new THREE.MeshBasicMaterial({
-      map: checker,
-      side: THREE.DoubleSide,
-    })
-    const bannerFront = new THREE.Mesh(bannerGeom, bannerMat)
-    bannerFront.position.set(0, cp.height - bannerHeight / 2 - 0.4, 0)
-    root.add(bannerFront)
-
-    const stripeGeom = new THREE.PlaneGeometry(cp.halfWidth * 2, 1.6)
-    stripeGeom.rotateX(-Math.PI / 2)
-    const stripeMat = new THREE.MeshBasicMaterial({
-      map: checker,
-      transparent: true,
-      opacity: 0.95,
-      depthWrite: false,
-    })
-    const stripe = new THREE.Mesh(stripeGeom, stripeMat)
-    // Sit just above the gate's local ground plane so it doesn't
-    // z-fight with the water/track beneath.
-    stripe.position.set(0, -cp.position.y + 0.05, 0)
-    stripe.renderOrder = 1
-    root.add(stripe)
-
-    const finishLabelMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.9,
-      depthWrite: false,
-    })
-    const finishLabel = new THREE.Mesh(
-      new THREE.BoxGeometry(cp.halfWidth * 0.6, 0.6, 0.1),
-      finishLabelMat,
-    )
-    finishLabel.position.set(0, cp.height + 1.4, 0)
-    root.add(finishLabel)
+    root.add(createFinishExtras(cp))
   }
 
   // Note: the "next" gate used to also wear a tall glowing beacon column,
@@ -222,6 +196,55 @@ function createGateMesh(
   }
 
   return { root, recolorables, dispose }
+}
+
+/**
+ * Start/finish-line extras (checkered banner + ground stripe + label) in a gate's
+ * LOCAL frame — the caller positions the returned group at the gate's
+ * pose. Factored out so both the procedural gate and the instanced-gate path
+ * render the identical finish dressing.
+ */
+function createFinishExtras(cp: Checkpoint): THREE.Object3D {
+  const root = new THREE.Group()
+  root.name = 'gate_finish_extras'
+  const checker = makeCheckerTexture(16, 4)
+
+  const bannerHeight = 1.6
+  const bannerFront = new THREE.Mesh(
+    new THREE.PlaneGeometry(cp.halfWidth * 2, bannerHeight),
+    new THREE.MeshBasicMaterial({ map: checker, side: THREE.DoubleSide }),
+  )
+  bannerFront.position.set(0, cp.height - bannerHeight / 2 - 0.4, 0)
+  root.add(bannerFront)
+
+  const stripeGeom = new THREE.PlaneGeometry(cp.halfWidth * 2, 1.6)
+  stripeGeom.rotateX(-Math.PI / 2)
+  const stripe = new THREE.Mesh(
+    stripeGeom,
+    new THREE.MeshBasicMaterial({
+      map: checker,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+    }),
+  )
+  // Sit just above the gate's local ground plane so it doesn't z-fight the water.
+  stripe.position.set(0, -cp.position.y + 0.05, 0)
+  stripe.renderOrder = 1
+  root.add(stripe)
+
+  const finishLabel = new THREE.Mesh(
+    new THREE.BoxGeometry(cp.halfWidth * 0.6, 0.6, 0.1),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+    }),
+  )
+  finishLabel.position.set(0, cp.height + 1.4, 0)
+  root.add(finishLabel)
+  return root
 }
 
 /**

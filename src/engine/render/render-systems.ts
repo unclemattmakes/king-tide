@@ -15,6 +15,7 @@ import {
   TrickStateStore,
 } from '@/game/components'
 import { createBikeMesh } from './bike-mesh'
+import { createInstancedBikeField } from './instanced-bikes'
 import { applyVinylMaterialToScene } from './painterly-vinyl-material'
 
 const PLAYER_FALLBACK_COLOR = 0xff7733
@@ -63,6 +64,11 @@ const BIKE_BRUSH = 0.85
  *  baked vertex attribute, not a world-space field. Tune by eye. */
 const BIKE_EDGE_WEAR = 0.55
 
+/** Capacity of the instanced AI/peer field — the max non-player, non-ghost bikes
+ *  drawn through the shared racer GLB (single-player tops out ~7; leaves room for
+ *  a full multiplayer room). */
+const MAX_INSTANCED_BIKES = 16
+
 export type BikeRenderRegistry = {
   /** Resolve a variant id to a loaded GLB. Falls back to `default` when
    *  the id is unknown. */
@@ -88,6 +94,7 @@ export function createBikeRenderSystem(
   scene: THREE.Scene,
   sim: SimWorld,
   registry?: BikeRenderRegistry,
+  opts?: { instanced?: boolean },
 ) {
   const meshes = new Map<number, THREE.Object3D>()
   // Reused per-frame scratch for the live-eids reconciliation set.
@@ -99,92 +106,114 @@ export function createBikeRenderSystem(
   const spinQuat = new THREE.Quaternion()
   const spinAxis = new THREE.Vector3()
 
+  // Instanced AI/peer field on the racer GLB — built eagerly (when a registry is
+  // present) so its handful of shared materials compile in the boot pre-warm
+  // instead of one set per cloned bike.
+  const field =
+    registry && opts?.instanced !== false
+      ? createInstancedBikeField(registry.default, MAX_INSTANCED_BIKES, {
+          brush: BIKE_BRUSH,
+          edgeWear: BIKE_EDGE_WEAR,
+          visualScale: BIKE_VISUAL_SCALE,
+        })
+      : null
+  if (field) {
+    scene.add(field.group)
+    // Dev/test read-back hook so a harness can assert the field renders distinct,
+    // placed bikes regardless of camera framing.
+    if (import.meta.env.DEV && typeof window !== 'undefined') {
+      ;(window as unknown as { __bikeField?: typeof field }).__bikeField = field
+    }
+  }
+  const bikeIndex = new Map<number, number>()
+  const freeIndices: number[] = []
+  let nextIndex = 0
+  const bikePos = new THREE.Vector3()
+  const bikeMat = new THREE.Matrix4()
+  const ONE = new THREE.Vector3(1, 1, 1)
+
+  // AI/peer bikes whose variant resolves to the default (racer) GLB render in the
+  // instanced field; the player, the TT ghost, any non-default variant, and the
+  // no-registry test path stay on the per-clone single-mesh path.
+  function instanceable(eid: number, isPlayer: boolean, isGhost: boolean): boolean {
+    if (!field || !registry || isPlayer || isGhost) return false
+    const variantId = BikeStatsStore.get(eid)?.variantId
+    const loaded = (variantId && registry.byVariantId[variantId]) || registry.default
+    return loaded === registry.default
+  }
+
+  // Per-bike accent colours: a deterministic peerId slot for remote peers, else
+  // the cursor cycle for AI. Shared by the instanced + single paths.
+  function aiColors(eid: number): { livery: number; exhaust: number } {
+    const peer = hasComponent(sim, eid, PeerControlled) ? PeerControlledStore.get(eid) : null
+    const slot =
+      peer !== null && peer !== undefined
+        ? peer.peerId % AI_BODY_COLORS.length
+        : aiColorCursor++ % AI_BODY_COLORS.length
+    return {
+      livery: AI_BODY_COLORS[slot] ?? 0xaaaaaa,
+      exhaust: AI_EXHAUST_COLORS[slot] ?? 0xffffff,
+    }
+  }
+
+  // Build a per-clone bike mesh (player / TT ghost / non-default AI / procedural).
+  function createSingleBikeMesh(eid: number, isPlayer: boolean, isGhost: boolean): THREE.Object3D {
+    const stats = BikeStatsStore.get(eid)
+    const variantId = stats?.variantId
+    const variantColor = stats?.bodyColor
+    let mesh: THREE.Object3D
+    if (registry) {
+      const loaded = (variantId && registry.byVariantId[variantId]) || registry.default
+      if (isGhost) {
+        mesh = cloneLoadedBike(loaded, { tintLivery: GHOST_TINT, tintExhaust: GHOST_TINT }).root
+      } else if (isPlayer) {
+        // Player livery follows the variant's bodyColor so the bike picker reads
+        // visibly distinct in race (Sparrow etc. ship as a Racer copy for now).
+        const tintLivery = variantColor
+        mesh = cloneLoadedBike(loaded, {
+          tintExhaust: PLAYER_EXHAUST_COLOR,
+          ...(tintLivery !== undefined ? { tintLivery } : {}),
+        }).root
+      } else {
+        const c = aiColors(eid)
+        mesh = cloneLoadedBike(loaded, { tintLivery: c.livery, tintExhaust: c.exhaust }).root
+      }
+    } else {
+      const color = isGhost
+        ? GHOST_TINT
+        : isPlayer
+          ? (variantColor ?? PLAYER_FALLBACK_COLOR)
+          : aiColors(eid).livery
+      mesh = createBikeMesh({ bodyColor: color })
+    }
+    mesh.scale.setScalar(BIKE_VISUAL_SCALE)
+    // Ghosts keep their clean hologram look; everything else takes the painterly-
+    // vinyl brush in the bike's own (object) space so strokes don't swim as it
+    // tears across the map.
+    if (isGhost) applyGhostMaterial(mesh)
+    else
+      applyVinylMaterialToScene(mesh, {
+        brush: BIKE_BRUSH,
+        edgeWear: BIKE_EDGE_WEAR,
+        brushObjectSpace: true,
+      })
+    return mesh
+  }
+
   return function tick(): void {
     const eids = query(sim, [BikeTag, Transform])
     live.clear()
     for (const eid of eids) {
       live.add(eid)
-      let mesh = meshes.get(eid)
-      if (!mesh) {
-        const isPlayer = hasComponent(sim, eid, PlayerTag)
-        const isGhost = hasComponent(sim, eid, GhostTag)
-        const stats = BikeStatsStore.get(eid)
-        const variantId = stats?.variantId
-        const variantColor = stats?.bodyColor
+      const isPlayer = hasComponent(sim, eid, PlayerTag)
+      const isGhost = hasComponent(sim, eid, GhostTag)
 
-        if (registry) {
-          const loaded = (variantId && registry.byVariantId[variantId]) || registry.default
-          if (isGhost) {
-            mesh = cloneLoadedBike(loaded, {
-              tintLivery: GHOST_TINT,
-              tintExhaust: GHOST_TINT,
-            }).root
-          } else if (isPlayer) {
-            // Player livery follows the variant's bodyColor so the
-            // 5-bike picker reads visibly distinct in race. Phase F
-            // of the asset-pipeline plan introduced Scout (orange) +
-            // Sparrow (yellow) — without this tint, Sparrow would
-            // render as the baked Racer orange since its GLB ships
-            // as a Racer copy until a dedicated Blender source lands.
-            const tintLivery = variantColor
-            mesh = cloneLoadedBike(loaded, {
-              tintExhaust: PLAYER_EXHAUST_COLOR,
-              ...(tintLivery !== undefined ? { tintLivery } : {}),
-            }).root
-          } else {
-            // M10.9 — remote-peer bikes (tagged PeerControlled) use a
-            // deterministic peerId-based color slot so a peer who
-            // reconnects gets the same hue. AI bikes (no PeerControlled)
-            // fall back to the cursor cycle.
-            const peer = hasComponent(sim, eid, PeerControlled)
-              ? PeerControlledStore.get(eid)
-              : null
-            const slot =
-              peer !== null && peer !== undefined
-                ? peer.peerId % AI_BODY_COLORS.length
-                : aiColorCursor++ % AI_BODY_COLORS.length
-            const tintLivery = AI_BODY_COLORS[slot] ?? 0xaaaaaa
-            const tintExhaust = AI_EXHAUST_COLORS[slot] ?? 0xffffff
-            mesh = cloneLoadedBike(loaded, { tintLivery, tintExhaust }).root
-          }
-        } else {
-          const color = isGhost
-            ? GHOST_TINT
-            : isPlayer
-              ? (variantColor ?? PLAYER_FALLBACK_COLOR)
-              : (AI_BODY_COLORS[aiColorCursor++ % AI_BODY_COLORS.length] ?? 0xaaaaaa)
-          mesh = createBikeMesh({ bodyColor: color })
-        }
-        mesh.scale.setScalar(BIKE_VISUAL_SCALE)
-        // Painterly-vinyl brush treatment on the bike (ghosts keep their clean
-        // hologram look). Runs AFTER cloneLoadedBike's per-bike livery/exhaust
-        // tint so strokes ride on the racer colour; sizes the strokes per mesh
-        // and preserves the emissive glow material. `edgeWear` bakes per-vertex
-        // convexity so the chassis edges drybrush; `brushObjectSpace` samples the
-        // strokes in the bike's own frame so they DON'T swim as it tears across
-        // the map (the world-space field swims on movers — see
-        // docs/painterly-vinyl-pipeline.md).
-        if (isGhost) applyGhostMaterial(mesh)
-        else
-          applyVinylMaterialToScene(mesh, {
-            brush: BIKE_BRUSH,
-            edgeWear: BIKE_EDGE_WEAR,
-            brushObjectSpace: true,
-          })
-        scene.add(mesh)
-        meshes.set(eid, mesh)
-      }
+      // Base orientation + the visual-only trick spin — shared by both render
+      // paths. (Y = yaw, X = flip, Z = roll; phase 1 → 0 eases one clean
+      // revolution. The rigid body never sees this, so a trick mid-corner doesn't
+      // veer the bike off its line.)
       const t = TransformStore.must(eid)
-      mesh.position.set(t.x, t.y, t.z)
       baseQuat.set(t.qx, t.qy, t.qz, t.qw)
-      // Visual-only trick spin — multiply a signed-axis rotation
-      // (Y = yaw, X = flip, Z = roll) onto the bike's base
-      // quaternion. Phase 1 → 0 over the trick's lifetime, so
-      // `(1 − phase)` is the eased "progress through the spin";
-      // full 360° gives the bike one clean revolution around the
-      // chosen axis. The rigid body never sees this — heading +
-      // collision stay on the simulation's quaternion, so a trick
-      // mid-corner doesn't veer the bike off line.
       const trick = hasComponent(sim, eid, TrickState) ? TrickStateStore.get(eid) : null
       if (trick && trick.spinPhase > 0) {
         const ax = trick.spinAxisX
@@ -193,21 +222,48 @@ export function createBikeRenderSystem(
         const len2 = ax * ax + ay * ay + az * az
         if (len2 > 1e-6) {
           const progress = 1 - trick.spinPhase
-          // Quadratic ease-out so the spin starts crisp and decelerates
-          // toward the landing pose — easier to read than a linear spin
-          // at typical 0.6 s duration.
           const eased = 1 - (1 - progress) * (1 - progress)
           const angle = eased * Math.PI * 2
-          // Sign + magnitude come from the axis vector — only one
-          // component is non-zero per trick. Normalise just in case
-          // an external setter writes a non-unit vector.
           const invLen = 1 / Math.sqrt(len2)
           spinAxis.set(ax * invLen, ay * invLen, az * invLen)
           spinQuat.setFromAxisAngle(spinAxis, angle)
           baseQuat.multiply(spinQuat)
         }
       }
+
+      // ── Instanced path: AI / peer bikes sharing the racer GLB. ──
+      if (field && instanceable(eid, isPlayer, isGhost)) {
+        let idx = bikeIndex.get(eid)
+        if (idx === undefined) {
+          idx = freeIndices.pop() ?? nextIndex++
+          bikeIndex.set(eid, idx)
+          const c = aiColors(eid)
+          field.setColors(idx, c.livery, c.exhaust)
+        }
+        bikePos.set(t.x, t.y, t.z)
+        bikeMat.compose(bikePos, baseQuat, ONE)
+        field.setMatrix(idx, bikeMat)
+        continue
+      }
+
+      // ── Single-mesh path: player, TT ghost, non-default AI, procedural. ──
+      let mesh = meshes.get(eid)
+      if (!mesh) {
+        mesh = createSingleBikeMesh(eid, isPlayer, isGhost)
+        scene.add(mesh)
+        meshes.set(eid, mesh)
+      }
+      mesh.position.set(t.x, t.y, t.z)
       mesh.quaternion.copy(baseQuat)
+    }
+
+    // Despawn — free instanced slots, drop single meshes.
+    for (const [eid, idx] of bikeIndex) {
+      if (!live.has(eid)) {
+        field?.park(idx)
+        freeIndices.push(idx)
+        bikeIndex.delete(eid)
+      }
     }
     for (const [eid, mesh] of meshes) {
       if (!live.has(eid)) {
@@ -215,6 +271,8 @@ export function createBikeRenderSystem(
         meshes.delete(eid)
       }
     }
+    field?.setDrawCount(nextIndex)
+    field?.flush()
   }
 }
 

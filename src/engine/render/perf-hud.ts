@@ -29,9 +29,14 @@ import type { PerfStats } from '@/engine/perf-recorder'
  *  so this module doesn't import Three. */
 export interface RenderInfoLite {
   render: {
-    /** Draw calls submitted on the last render(). */
+    /** Cumulative render-pass count SINCE BOOT (three increments this forever and
+     *  only resets it inside its own setAnimationLoop, which we don't use) — not a
+     *  per-frame number. Prefer `drawCalls`. */
     calls: number
-    /** Triangle count. */
+    /** Draw calls of the CURRENT frame — the meaningful "how many draws" number.
+     *  Per-frame because `renderFrame()` resets `renderer.info` each frame. */
+    drawCalls: number
+    /** Triangle count for the current frame. */
     triangles: number
   }
   memory: {
@@ -125,10 +130,12 @@ export function createPerfHud(): PerfHud {
     if (!visible) return
     // Row 1: rolling frame-time stats.
     fpsRow.textContent = `FPS   ${stats.fps.toFixed(0).padStart(2)}  · P95 ${stats.p95Ms.toFixed(0)}ms · P99 ${stats.p99Ms.toFixed(0)}ms · HITCH ${stats.hitchCount}`
-    // Row 2: GPU-side stats from renderer.info. Three resets render.calls
-    // / render.triangles per renderer.render() call but does NOT reset
-    // memory.geometries / memory.textures (those are running totals).
-    drawRow.textContent = `DRAW  ${info.render.calls}  · TRI ${formatTriangles(info.render.triangles)} · GEO ${info.memory.geometries}  · TEX ${info.memory.textures}`
+    // Row 2: GPU-side stats from renderer.info. DRAW uses `render.drawCalls` (the
+    // PER-FRAME count) — NOT `render.calls`, which three increments forever and
+    // only resets inside its own setAnimationLoop (this app's custom rAF loop
+    // doesn't use it; renderFrame() resets the per-frame metrics each frame).
+    // memory.geometries / memory.textures are running totals (resident GPU objects).
+    drawRow.textContent = `DRAW  ${info.render.drawCalls}  · TRI ${formatTriangles(info.render.triangles)} · GEO ${info.memory.geometries}  · TEX ${info.memory.textures}`
     // Row 3: JS heap usage. Chromium-only — Firefox / Safari leave
     // `performance.memory` undefined and we show an em-dash instead.
     const mem = (performance as unknown as { memory?: ChromeMemory }).memory
