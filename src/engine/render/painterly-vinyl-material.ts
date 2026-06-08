@@ -38,12 +38,19 @@ import {
   pow,
   sin,
   texture,
+  uniform,
   vec2,
   vec3,
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
 import { ExportedKind } from '../asset-kinds'
-import { brushHeightTriplanar, brushScaleWeights, normalizeMix } from './brush-strokes'
+import {
+  BRUSH_TEX_TILE,
+  brushHeightTriplanar,
+  brushScaleWeights,
+  normalizeMix,
+} from './brush-strokes'
+import { registerVinylBrush, type VinylBrushHandle } from './brush-tuning-service'
 import { applyWaterlineBands } from './waterline'
 
 /** Marks a material we've already vinyl-converted, so conversion is idempotent
@@ -98,6 +105,10 @@ export type VinylOptions = {
   /** Brush-streak size as a FRACTION of the prop (see propSize), so strokes read
    *  the same on a chest and a cliff. Smaller = finer strokes. */
   brushScale?: number
+  /** The brush stops treating a prop as "bigger" past this size in metres — the
+   *  main lever against big-rock/cliff "straw". Default `BRUSH_PROP_SIZE_CAP` (6).
+   *  Live-dialable via the dev Brush tuner. */
+  brushPropSizeCap?: number
   /** Sample the shared brush-stroke sheet (default true) vs the procedural
    *  value-noise streaks — the sheet gives bolder, deliberate bristle strokes.
    *  The sheet packs three stroke SCALES in R/G/B (coarse/medium/fine); they're
@@ -181,6 +192,7 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const weathering = opts.weathering ?? 0.12
   const brush = opts.brush ?? 0.7
   const brushScale = opts.brushScale ?? 0.12
+  const brushPropSizeCap = opts.brushPropSizeCap ?? BRUSH_PROP_SIZE_CAP
   const brushTextured = opts.brushTextured ?? true
   const waterLevel = opts.waterLevel ?? 0
   const waterlineStr = opts.waterline ?? 0
@@ -191,7 +203,7 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   // strokes, not giant ones — see BRUSH_PROP_SIZE_CAP. This is the fix for the
   // sea-stack/cliff "reads flat" case: they're 13–32 m, which without the cap
   // leans fully coarse + a ~40 m tile period = 2–3 huge strokes.
-  const brushPropSize = Math.min(propSize, BRUSH_PROP_SIZE_CAP)
+  const brushPropSize = Math.min(propSize, brushPropSizeCap)
   const [wCoarse, wMed, wFine] = opts.brushScaleMix
     ? normalizeMix(opts.brushScaleMix)
     : brushScaleWeights(brushPropSize)
@@ -245,25 +257,46 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   // false falls back to the procedural dirStreak. Feeds brushFac (albedo) + the
   // impasto relief. Shared with terrain via ./brush-strokes.
   const brushWorldScale = 1 / Math.max(brushScale * brushPropSize, 0.02)
+  // brush strength + stroke frequency + R/G/B scale-weights as UNIFORMS so the
+  // dev Brush tuner re-dials the rock/prop/building look live (no recompile) —
+  // see brush-tuning-service.ts. The textured freq folds BRUSH_TEX_TILE back in
+  // (matching the old baked frequency exactly at the defaults); the procedural
+  // fallback uses the raw worldScale. uBrushWeights is unused on the procedural
+  // path (harmless — not wired into that graph).
+  const uBrush = uniform(brush)
+  const uBrushFreq = uniform(brushTextured ? brushWorldScale * BRUSH_TEX_TILE : brushWorldScale)
+  const uBrushWeights = uniform(new THREE.Vector3(wCoarse, wMed, wFine))
   let streak: Node<'float'>
   if (brushTextured) {
-    streak = brushHeightTriplanar(positionWorld, normalWorld, brushWorldScale, [
-      wCoarse,
-      wMed,
-      wFine,
-    ])
+    streak = brushHeightTriplanar(positionWorld, normalWorld, uBrushFreq, uBrushWeights)
   } else {
     const an = vec3(abs(nrm.x), abs(nrm.y), abs(nrm.z))
     const wsum = an.x.add(an.y).add(an.z).add(float(1e-4))
-    const bScale = float(brushWorldScale)
-    const sampleStreak = (p: Node<'vec2'>) => dirStreak(p, bScale)
+    const sampleStreak = (p: Node<'vec2'>) => dirStreak(p, uBrushFreq)
     streak = sampleStreak(vec2(positionWorld.z, positionWorld.y))
       .mul(an.x)
       .add(sampleStreak(vec2(positionWorld.x, positionWorld.z)).mul(an.y))
       .add(sampleStreak(vec2(positionWorld.x, positionWorld.y)).mul(an.z))
       .div(wsum)
   }
-  const brushFac = float(1).add(streak.sub(float(0.5)).mul(float(brush).mul(float(3.0))))
+  const brushFac = float(1).add(streak.sub(float(0.5)).mul(uBrush.mul(float(3.0))))
+
+  // Live-tuner handle — recompute freq + weights from (brushScale, cap, propSize).
+  const brushHandle: VinylBrushHandle = {
+    initial: { brush, brushScale, brushPropSizeCap },
+    set(v) {
+      uBrush.value = v.brush
+      const bp = Math.min(propSize, v.brushPropSizeCap)
+      const bws = 1 / Math.max(v.brushScale * bp, 0.02)
+      uBrushFreq.value = brushTextured ? bws * BRUSH_TEX_TILE : bws
+      // brushScaleMix pins the weights explicitly — leave them; else size-derive.
+      if (brushTextured && !opts.brushScaleMix) {
+        const w = brushScaleWeights(bp)
+        uBrushWeights.value.set(w[0], w[1], w[2])
+      }
+    },
+  }
+  next.userData.vinylBrushHandle = brushHandle
 
   // World-space waterline trio FIRST, on the UN-brushed wash (opt-in; strength
   // 0 = no-op). The band height shrinks on small props (kept full on big ones)
@@ -306,11 +339,11 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   // catches the ridges). Both scale with `brush`, so brush 0 leaves the matte
   // surface untouched.
   next.roughnessNode = clamp(
-    float(roughness).add(streak.sub(float(0.5)).mul(float(brush).mul(float(1.2)))),
+    float(roughness).add(streak.sub(float(0.5)).mul(uBrush.mul(float(1.2)))),
     float(0.4),
     float(1.0),
   )
-  next.normalNode = bumpMap(streak, float(brush).mul(float(2.5)))
+  next.normalNode = bumpMap(streak, uBrush.mul(float(2.5)))
 
   marked2(next).userData[VINYL_MARKED] = true
   next.needsUpdate = true
@@ -372,6 +405,11 @@ export type VinylSceneOptions = {
   /** Override the brush amount for set-pieces (default: buildVinylMaterial's
    *  shipped 0.5). Backdrop walls can want a gentler hand than hero props. */
   brush?: number
+  /** Override the brush stroke size (fraction of prop size; default 0.12). */
+  brushScale?: number
+  /** Override the brush prop-size cap in metres (default 6) — bigger = sparser
+   *  strokes on large rocks/cliffs/buildings (the main anti-"straw" lever). */
+  brushPropSizeCap?: number
 }
 
 /**
@@ -451,11 +489,15 @@ export function applyVinylMaterialToScene(
         waterLevel: opts.waterLevel ?? 0,
         waterline: opts.waterline ?? 0,
         ...(opts.brush !== undefined ? { brush: opts.brush } : {}),
+        ...(opts.brushScale !== undefined ? { brushScale: opts.brushScale } : {}),
+        ...(opts.brushPropSizeCap !== undefined ? { brushPropSizeCap: opts.brushPropSizeCap } : {}),
         // Buildings carry no baked convexity (COLOR_0.A is stamped neutral
         // above), so disable edge wear explicitly — a future real-COLOR_0
         // set-piece shouldn't get surprise drybrush bleaching from this pass.
         edgeWear: 0,
       })
+      const h = (v.userData as { vinylBrushHandle?: VinylBrushHandle }).vinylBrushHandle
+      if (h) registerVinylBrush(h)
       bySize.set(sizeKey, v)
       count++
       return v

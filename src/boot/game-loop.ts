@@ -31,6 +31,7 @@ import {
   recordCupRaceFinish,
   totalCupPoints,
 } from '@/engine/cup-progress'
+import { setWaveDotsController } from '@/engine/dev/dev-runtime'
 import { type Intent, inputSourceLabel, readPlayerIntent } from '@/engine/input'
 import { tickCameraLook } from '@/engine/input/camera-look'
 import { createJitterTelemetry } from '@/engine/jitter-telemetry'
@@ -842,10 +843,31 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // heightmap + shore field installed, so shoaling + shore breakers show. The
   // gap between dots and wireframe is the sim↔render discrepancy, live. Render-
   // only; never touches the sim. See sim-surface-probe.ts.
-  const simSurfaceProbe =
+  let simSurfaceProbe =
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('wavedots')
       ? createSimSurfaceProbe(scene)
       : null
+  // Let the dev palette toggle the sim-surface probe live (no `?wavedots`
+  // reload). The probe needs the loop's `scene` to build its dot grid and is
+  // ticked below, so the loop owns the lifecycle and hands the palette a
+  // create/dispose toggle. Dev builds only — same gate as the palette itself.
+  if (
+    typeof window !== 'undefined' &&
+    (import.meta.env.DEV || new URLSearchParams(window.location.search).has('dev'))
+  ) {
+    setWaveDotsController({
+      isOn: () => simSurfaceProbe !== null,
+      toggle: () => {
+        if (simSurfaceProbe) {
+          simSurfaceProbe.dispose()
+          simSurfaceProbe = null
+        } else {
+          simSurfaceProbe = createSimSurfaceProbe(scene)
+        }
+        return simSurfaceProbe !== null
+      },
+    })
+  }
 
   // Chase-camera tuner — opt-in via `?camtune=1`. A live slider panel over the
   // running race for offset / look-ahead / orbit-pivot / damping / FOV. The
@@ -856,6 +878,20 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // step. Dev-only; render-side, never touches the sim. See camera-tuner.ts.
   if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('camtune')) {
     createCameraTuner(camera)
+  }
+
+  // Dev-tools palette — the always-visible dock rail + Ctrl/⌘K command bar that
+  // surface every buried dev scene / tuner / debug toggle in one searchable
+  // place. Dev builds only (same gate as the `body.dev-build` chrome in
+  // main.ts). Loaded as its own chunk and fire-and-forget, since startGameLoop
+  // is synchronous; the palette owns the dev-settings / water / camera tuners
+  // now (their old top-right buttons are folded into the rail). See
+  // src/engine/dev/palette.ts.
+  if (
+    typeof window !== 'undefined' &&
+    (import.meta.env.DEV || new URLSearchParams(window.location.search).has('dev'))
+  ) {
+    void import('@/engine/dev/palette').then((m) => m.installDevPalette({ camera }))
   }
 
   // M10.4 — wire-encoded input round-trip. simTick is the monotonic count

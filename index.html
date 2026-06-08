@@ -91,11 +91,13 @@
       }
 
       /* ───────────── HUD (race-mode top-left dev info) ─────────────
-         Kept readable, but unobtrusive — only painted in non-menu mode.
-         Hidden in non-dev builds; `body.dev-build` gates it on (set at
-         boot from `import.meta.env.DEV` or `?dev=1`). */
+         The fps / backend / input / race / audio telemetry strip. Off by
+         default now (it was always-on clutter); the dev palette's "Dev HUD"
+         toggle adds the `dev-hud` body class to bring it back. Still fully
+         gated to dev builds (`body.dev-build`, set from `import.meta.env.DEV`
+         or `?dev=1`) so it can never appear in a shipped build. */
       #hud { display: none; }
-      body.dev-build #hud {
+      body.dev-build.dev-hud #hud {
         display: block;
         position: fixed; top: 10px; left: 10px; z-index: 20;
         pointer-events: none; user-select: none;
@@ -480,18 +482,11 @@
          Hidden in non-dev builds; `body.dev-build` (set at boot from
          `import.meta.env.DEV` or `?dev=1`) flips them back on. */
       #garage-toggle, #devsettings-toggle, #water-debug-toggle { display: none; }
-      body.dev-build #devsettings-toggle,
-      body.dev-build #water-debug-toggle {
-        display: inline-block;
-        position: fixed; right: 10px; z-index: 22;
-        background: rgba(5, 10, 20, 0.6);
-        border: 1px solid var(--bc-line);
-        font: 600 11px var(--bc-font-mono); letter-spacing: 0.16em;
-        padding: 6px 12px; cursor: pointer; user-select: none;
-        text-transform: uppercase;
-        border-radius: 2px;
-        transition: background var(--t-fast) var(--ease-out), border-color var(--t-fast);
-      }
+      /* DEV SETTINGS + WATER buttons are folded into the dev dock rail
+         (src/engine/dev/dock-rail.ts) and no longer revealed here. The markup
+         stays in the DOM so installDevSettingsMenu / installWaterDebugMenu still
+         resolve #devsettings-toggle / #water-debug-toggle; the dock + tuner host
+         open those panels now. GARAGE keeps its own reveal below. */
       body.dev-build #garage-toggle {
         position: fixed; right: 10px; z-index: 22;
         background: rgba(5, 10, 20, 0.6);
@@ -518,19 +513,20 @@
         animation: bc-fade var(--t-base) var(--ease-out);
       }
       #water-debug.show, #devsettings.show { display: flex; }
-      /* WATER is a live tuning panel, not a modal: dock it to the left,
-         drop the scene-dimming backdrop (you need to watch the water react
-         to each slider), and let pointer events fall through everywhere but
-         the card — so the scene stays orbitable and the wave-rider tuner on
-         the right isn't covered. dev-settings keeps the dimmed modal look. */
-      #water-debug {
+      /* WATER + DEV SETTINGS are live tuning panels, not modals: dock them to
+         the left, drop the scene-dimming backdrop (you need to watch the bike
+         / water react to each slider), and let pointer events fall through
+         everywhere but the card — so the scene stays orbitable and the dev
+         dock rail on the right isn't covered. The tuner host keeps only one
+         of these open at a time, so they never share the left gutter. */
+      #water-debug, #devsettings {
         box-sizing: border-box;
         justify-content: flex-start;
         padding-left: 16px;
         background: none; backdrop-filter: none;
         pointer-events: none;
       }
-      #water-debug .card { pointer-events: auto; }
+      #water-debug .card, #devsettings .card { pointer-events: auto; }
       #water-debug .card, #devsettings .card {
         background: rgba(10,20,36,0.95); border: 1px solid var(--bc-line);
         padding: 24px 30px;

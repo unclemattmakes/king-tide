@@ -75,29 +75,26 @@ export function brushScaleWeights(featureSize: number): [number, number, number]
  * three packed stroke SCALES (R/G/B) by `scaleWeights`. One texel fetch per
  * plane.
  *
- * `worldScale` is the stroke frequency in 1/metres (i.e. 1 / stroke-size-metres);
- * the caller picks it so strokes track the size of what's being painted. The
- * returned node is reusable — feed it to both an albedo modulation and the
- * roughness/normal relief so the strokes and their impasto agree.
+ * `freq` is the sampling frequency in 1/metres (≈ 1 / stroke-size-metres, with
+ * BRUSH_TEX_TILE already folded in by the caller). `weights` is the R/G/B
+ * coarse/medium/fine blend. BOTH are Nodes (typically `uniform()`s) so the dev
+ * Brush tuner can re-dial stroke size + scale-blend live without a recompile —
+ * see brush-tuning-service.ts. The returned node is reusable — feed it to both
+ * an albedo modulation and the roughness/normal relief so they agree.
  */
 export function brushHeightTriplanar(
   posWorld: Node<'vec3'>,
   normWorld: Node<'vec3'>,
-  worldScale: number,
-  scaleWeights: [number, number, number],
+  freq: Node<'float'>,
+  weights: Node<'vec3'>,
 ): Node<'float'> {
   const nrm = normalize(normWorld)
   const an = vec3(abs(nrm.x), abs(nrm.y), abs(nrm.z))
   const wsum = an.x.add(an.y).add(an.z).add(float(1e-4))
   const tex = sharedBrushTexture()
-  const [wCoarse, wMed, wFine] = scaleWeights
-  const freq = float(worldScale).mul(float(BRUSH_TEX_TILE))
   const sample = (p: Node<'vec2'>) => {
     const t = texture(tex, p.mul(freq))
-    return t.r
-      .mul(float(wCoarse))
-      .add(t.g.mul(float(wMed)))
-      .add(t.b.mul(float(wFine)))
+    return t.r.mul(weights.x).add(t.g.mul(weights.y)).add(t.b.mul(weights.z))
   }
   return sample(vec2(posWorld.z, posWorld.y))
     .mul(an.x)

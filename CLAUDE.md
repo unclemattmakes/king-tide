@@ -113,6 +113,15 @@ supersede the bible's stat blocks where they disagree.
 `?calibrate`, `?rideredit`, `?waveriders`, `?podium`, `?edit`); the prop viewer is
 [src/viewer/prop-viewer.ts](src/viewer/prop-viewer.ts). Asset URLs resolve through
 [src/engine/asset-url.ts](src/engine/asset-url.ts) (`VITE_ASSET_BASE_URL`).
+In a dev build, **all** of these scenes — plus the live tuners (input/water/camera/brush),
+the in-race debug toggles (collision/hover/anti-grav/perf, water wireframe/probe…),
+live world controls (time-of-day, freeze water — no reload) and the few genuinely
+reload-only render params (backend/aa/rider) — are launchable from the **dev
+palette**: the right-edge dock rail + **Ctrl/⌘K** command bar. Registry in
+[src/engine/dev/tools.ts](src/engine/dev/tools.ts) (add one entry to surface a new
+tool in both surfaces); install point is `startGameLoop` in
+[src/boot/game-loop.ts](src/boot/game-loop.ts). Live time-of-day re-bakes the sky
+via `SkySystem.setTimeOfDay` ([sky.ts](src/engine/render/sky.ts)).
 
 ## Blender
 

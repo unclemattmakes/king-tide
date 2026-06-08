@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { ExportedKind, resolveNodeKind } from '@/engine/asset-kinds'
 import { playerSettings } from '@/engine/player-settings'
+import { clearBrushTargets } from '@/engine/render/brush-tuning-service'
 import { applyDecalsToScene } from '@/engine/render/decal-system'
 import { applyFoliageSwayToMesh } from '@/engine/render/foliage-sway'
 import { applyLavaRiverMaterialToScene } from '@/engine/render/lava-river-material'
@@ -125,6 +126,9 @@ export async function loadGlbTrackVisuals(
   // the optional per-track override block from
   // ``public/tracks/<id>.json`` — when present, the addon authored
   // these values in its "Terrain shader (runtime)" panel.
+  // Fresh brush-tuner targets for this load — the terrain + vinyl passes below
+  // re-register their live brush-uniform handles (brush-tuning-service.ts).
+  clearBrushTargets()
   applyTerrainShaderToScene(scene, opts?.terrainShader ?? {})
   // Foliage sway hook — adds the shared wind vertex-displacement to every
   // mesh with a material whose name starts with ``mat_foliage_`` (palms,
