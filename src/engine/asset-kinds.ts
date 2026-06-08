@@ -139,3 +139,41 @@ export function asExportedKind(value: unknown): ExportedKindValue | undefined {
   if (typeof value !== 'string') return undefined
   return EXPORTED_KIND_VALUES.has(value) ? (value as ExportedKindValue) : undefined
 }
+
+/** Minimal structural shape of a three.js `Object3D` needed to resolve a
+ *  `kind`. Declared structurally so this widely-imported module stays
+ *  Three-free. */
+type KindCarrier = {
+  userData?: { kind?: unknown }
+  parent?: KindCarrier | null
+}
+
+/**
+ * Resolve the authored `kind` for a loaded glTF object, walking up the
+ * parent chain to the nearest ancestor that carries one.
+ *
+ * Why the walk and not a plain `obj.userData?.kind`: Blender writes `kind`
+ * as a glTF **node** extra, but three.js's GLTFLoader splits a
+ * multi-primitive node (a mesh with >1 material) into a parent `Group` —
+ * which receives the node extras — plus one child `Mesh` per primitive
+ * carrying only *mesh*-level extras, i.e. no `kind`. So a per-mesh read
+ * misses the tag on every multi-material authored object: e.g. HV_Dock's
+ * plank deck + pylons (2 materials → 2 primitives) loads as
+ * `Group{kind:'decoration'} → [Mesh(planks), Mesh(pylons)]`, and a
+ * collider/heightmap pass that checks the child `Mesh` would never see the
+ * `decoration` opt-out — so the deck still collides per-plank. Resolving
+ * through the parent restores the authored intent for the split children.
+ *
+ * Returns the nearest `kind` string (note `'decoration'` is a valid value
+ * even though it isn't in `ExportedKind`), or undefined if neither the
+ * object nor any ancestor carries one.
+ */
+export function resolveNodeKind(obj: KindCarrier | null | undefined): string | undefined {
+  let cur: KindCarrier | null | undefined = obj
+  while (cur) {
+    const k = cur.userData?.kind
+    if (typeof k === 'string') return k
+    cur = cur.parent
+  }
+  return undefined
+}

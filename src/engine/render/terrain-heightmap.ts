@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { resolveNodeKind } from '@/engine/asset-kinds'
 import { buildShoreField, type ShoreField } from '@/engine/sim/water/shore-field'
 
 /**
@@ -120,7 +121,10 @@ export function buildTerrainHeightmap(
     root.updateMatrixWorld(true)
     root.traverse((obj) => {
       if (!(obj instanceof THREE.Mesh)) return
-      if (obj.userData?.kind === 'decoration') return
+      // Resolve through the parent so multi-primitive `decoration` nodes
+      // (their split child meshes carry no `kind`) stay out of the shoaling
+      // field — matching attachTrackColliders. See resolveNodeKind.
+      if (resolveNodeKind(obj) === 'decoration') return
       if (obj instanceof THREE.InstancedMesh) return
       const geom = obj.geometry as THREE.BufferGeometry
       const posAttr = geom.attributes.position

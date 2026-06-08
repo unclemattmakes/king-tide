@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { ExportedKind } from '../../src/engine/asset-kinds'
+import { ExportedKind, resolveNodeKind } from '../../src/engine/asset-kinds'
 
 /**
  * Asserts the TS `ExportedKind` registry stays in sync with the Python
@@ -59,5 +59,38 @@ describe('asset-kinds.ts ↔ hoverbike_kinds.py sync', () => {
   it('exposes every value via Object.values for runtime iteration', () => {
     expect(Object.values(ExportedKind).length).toBeGreaterThan(0)
     expect(new Set(Object.values(ExportedKind)).size).toBe(Object.values(ExportedKind).length)
+  })
+})
+
+describe('resolveNodeKind — multi-primitive parent walk', () => {
+  it('returns the object’s own kind when present', () => {
+    expect(resolveNodeKind({ userData: { kind: ExportedKind.TRACK } })).toBe(ExportedKind.TRACK)
+  })
+
+  it('inherits a parent node’s kind when the child mesh carries none', () => {
+    // Models three.js’s GLTFLoader split of a 2-material HV_Dock node:
+    // Group{kind:'decoration'} → child Mesh{} (no kind). The collider/
+    // heightmap passes visit the child, which must still read 'decoration'.
+    const group = { userData: { kind: 'decoration' } }
+    const childMesh = { userData: {}, parent: group }
+    expect(resolveNodeKind(childMesh)).toBe('decoration')
+  })
+
+  it('returns undefined when neither the object nor any ancestor has a kind', () => {
+    const root = { userData: {} }
+    const child = { userData: {}, parent: root }
+    expect(resolveNodeKind(child)).toBeUndefined()
+  })
+
+  it('prefers the nearest kind — a child’s own tag wins over an ancestor’s', () => {
+    const grandparent = { userData: { kind: ExportedKind.TRACK } }
+    const parent = { userData: { kind: ExportedKind.COLLIDER_MESH }, parent: grandparent }
+    const child = { userData: {}, parent }
+    expect(resolveNodeKind(child)).toBe(ExportedKind.COLLIDER_MESH)
+  })
+
+  it('tolerates null / undefined input', () => {
+    expect(resolveNodeKind(null)).toBeUndefined()
+    expect(resolveNodeKind(undefined)).toBeUndefined()
   })
 })

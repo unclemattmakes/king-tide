@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import { ExportedKind } from '@/engine/asset-kinds'
+import { ExportedKind, resolveNodeKind } from '@/engine/asset-kinds'
 import { playerSettings } from '@/engine/player-settings'
 import { applyDecalsToScene } from '@/engine/render/decal-system'
 import { applyFoliageSwayToMesh } from '@/engine/render/foliage-sway'
@@ -93,7 +93,10 @@ export async function loadGlbTrackVisuals(
   scene.traverse((obj) => {
     const mesh = obj as THREE.Mesh
     if (mesh.isMesh) {
-      if (obj.userData?.kind === ExportedKind.EMITTER) {
+      // Resolve through the parent so a multi-primitive node's split child
+      // meshes inherit the node's `kind` (see resolveNodeKind).
+      const kind = resolveNodeKind(obj)
+      if (kind === ExportedKind.EMITTER) {
         mesh.visible = false
         mesh.castShadow = false
         mesh.receiveShadow = false
@@ -104,7 +107,7 @@ export async function loadGlbTrackVisuals(
       // visual shows — but left in the scene graph so the trimesh-attach
       // + heightmap traversals (which visit invisible objects) still find
       // it and build the collider against it.
-      if (obj.userData?.kind === ExportedKind.COLLIDER_MESH) {
+      if (kind === ExportedKind.COLLIDER_MESH) {
         mesh.visible = false
         mesh.castShadow = false
         mesh.receiveShadow = false
@@ -214,21 +217,29 @@ export function attachTrackColliders(group: THREE.Object3D, phys: PhysicsWorld):
   let attached = 0
   group.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh)) return
-    if (obj.userData?.kind === 'decoration') return
+    // Resolve `kind` through the parent chain: three.js splits a
+    // multi-primitive (multi-material) authored node into a parent Group
+    // that holds the node's `kind` extra plus one child Mesh per
+    // primitive that carries none. Reading `obj.userData.kind` directly
+    // here would miss the `decoration` opt-out on every split child — so
+    // e.g. HV_Dock's plank deck (planks + pylons = 2 materials) collided
+    // per-plank despite being tagged `decoration`. See resolveNodeKind.
+    const kind = resolveNodeKind(obj)
+    if (kind === 'decoration') return
     // Belt-and-suspenders: `loadGlbTrackVisuals` strips horizon meshes
     // out of the scene before we get here, but check anyway in case
     // `attachTrackColliders` is called directly with an un-stripped
     // group. Horizon rings live 1.4 km away and never collide.
-    if (obj.userData?.kind === ExportedKind.HORIZON) return
+    if (kind === ExportedKind.HORIZON) return
     // Decals are render-only overlays — never collide with them.
-    if (obj.userData?.kind === ExportedKind.DECAL) return
+    if (kind === ExportedKind.DECAL) return
     // Particle emitters are empties in Blender that occasionally get
     // converted to placeholder meshes by the exporter (cube primitive
     // as a viewport gizmo). Either way the particle system reads them
     // for spawn poses, not as collidable geometry — skip the trimesh
     // attach. Mesh stays in the scene graph so the particle-system
     // traversal finds the kind=emitter tag.
-    if (obj.userData?.kind === ExportedKind.EMITTER) return
+    if (kind === ExportedKind.EMITTER) return
     // EXT_mesh_gpu_instancing produces THREE.InstancedMesh — scattered
     // props from Blender's GN scatter pipeline land here. The mesh's
     // matrixWorld is the prototype's transform, not the per-instance
