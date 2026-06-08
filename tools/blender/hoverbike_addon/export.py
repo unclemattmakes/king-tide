@@ -320,16 +320,30 @@ def _RealizedScatterInstances(scene: bpy.types.Scene):
 
 
 # ────────────────────────────────────────────────────────────────────
-# Auto dock colliders
+# Dock export meshes (realize curve-GN docks to clean frozen meshes)
 # ────────────────────────────────────────────────────────────────────
 #
 # Authors build a dock as ONE object (a curve + the HV_Dock GN modifier).
-# At export we give each one a temporary smooth-slab collision proxy
-# (HV_DockCollider, kind="collider_mesh") so the bike rides a clean swept
-# surface instead of every floating plank — then delete the proxies after
-# the GLB is written. The visible dock is also forced to export render-only
-# (kind="decoration") so its planks don't double-collide with the proxy.
-# (See docs / the dock_smooth_collider memory for the why.)
+# Exporting that curve directly is broken two ways, so at export we replace
+# each visible dock with two REALIZED plain-mesh objects and hide the curve:
+#
+#   * <name>_deck    — the evaluated HV_Dock mesh, kind="decoration"
+#                      (renders planks + pylons; opts out of collision).
+#   * <name>_autocol — an HV_DockCollider smooth swept slab, kind="collider_mesh"
+#                      (collides, hidden from render) so the bike rides a clean
+#                      surface instead of every floating plank.
+#
+# Why realize instead of exporting the curve + a sibling proxy curve: with
+# ``export_gn_mesh=True`` (which we need so the GN-assigned plank/pylon
+# materials ship at all) the exporter emits a curve-GN object as a child
+# "GN Instance" mesh carrying the real materials PLUS the original curve node
+# carrying a SECOND copy of the geometry with NULL materials. That null-material
+# copy renders as a gray slab z-fighting the visible deck. A plain frozen mesh
+# has no GN modifier, so the exporter writes ONE clean node per object — no gray
+# duplicate, no per-plank collider, and (filtering on ``visible_get()``) no
+# phantom collider for an eye-hidden dock. Mesh-based GN tools (sea stacks,
+# palms) don't hit the duplication; only curve-driven ones do.
+# (See docs / the dock_smooth_collider memory for the collider rationale.)
 
 # HV_Dock inputs whose values must be mirrored onto the collider so the
 # proxy lines up with the visible deck + pylons.
@@ -387,21 +401,43 @@ def _ensure_dock_collider_group():
     return bpy.data.node_groups.get("HV_DockCollider")
 
 
-@contextlib.contextmanager
-def _AutoDockColliders(scene: bpy.types.Scene):
-    """For every visible HV_Dock object, spawn a temporary collider proxy
-    (HV_DockCollider → ``kind="collider_mesh"``) and force the dock itself to
-    export as ``kind="decoration"``. Proxies + forced kinds are reverted on
-    exit, so the author's scene is unchanged. Yields the proxy count.
+def _mark_color0_active(me: bpy.types.Mesh) -> None:
+    """Make ``COLOR_0`` the active color attribute on a realized mesh.
 
-    Each proxy gets its OWN copy of the dock's curve — a shared data-block
-    would make the glTF exporter dedup the proxy to the plank mesh (it dedups
-    shared source data even under ``export_apply``)."""
+    ``new_from_object`` keeps the COLOR_0 attribute itself but can drop the
+    active-color flag, and the exporter ships only the *active* color under
+    ``export_vertex_color="ACTIVE"``. Without COLOR_0 the runtime vinyl pass
+    reads a fully-absent buffer as 0 on every channel (AO=0 → the dock
+    darkens). See the reference_tsl_attribute_padding memory."""
+    names = [a.name for a in me.color_attributes]
+    if "COLOR_0" in names:
+        try:
+            me.color_attributes.active_color_index = names.index("COLOR_0")
+        except Exception:  # noqa: BLE001
+            pass
+
+
+@contextlib.contextmanager
+def _RealizedDockMeshes(scene: bpy.types.Scene):
+    """Replace every visible HV_Dock curve with two realized frozen-mesh
+    objects for the duration of the export (see the section header for why):
+
+      * ``<name>_deck``    — the evaluated HV_Dock mesh, ``kind="decoration"``.
+      * ``<name>_autocol`` — the HV_DockCollider swept slab,
+                             ``kind="collider_mesh"`` (skipped if the collider
+                             group can't be built — degrades to no collider).
+
+    The original curve is hidden so ``use_visible=True`` skips it; everything is
+    removed and the originals un-hidden on exit, so the author's scene is
+    unchanged. Yields the dock count for logging.
+
+    Each collider proxy gets its OWN copy of the dock's curve — a shared
+    data-block would make the exporter dedup it to the deck mesh."""
     docks = [
         o
         for o in scene.objects
         if o.type == "CURVE"
-        and not o.hide_viewport
+        and o.visible_get()
         and any(_is_dock_modifier(m) for m in o.modifiers)
     ]
     if not docks:
@@ -409,25 +445,26 @@ def _AutoDockColliders(scene: bpy.types.Scene):
         return
 
     ctree = _ensure_dock_collider_group()
-    spawned: list[bpy.types.Object] = []
-    spawned_curves: list[bpy.types.Curve] = []
-    kind_restore: list[tuple[bpy.types.Object, bool, object]] = []
-    try:
-        if ctree is None:
-            print(
-                "[hoverbike-addon] WARNING: HV_Dock object(s) present but "
-                "HV_DockCollider could not be built — docks exported WITHOUT a "
-                "collider. Run the geonode toolkit (build_geonode_props) once."
-            )
-            yield 0
-            return
-        cby = _gn_inputs_by_name(ctree)
-        for ob in docks:
-            # Force the visible dock render-only so its planks don't collide.
-            kind_restore.append((ob, "kind" in ob, ob.get("kind")))
-            ob["kind"] = "decoration"
+    if ctree is None:
+        print(
+            "[hoverbike-addon] WARNING: HV_Dock object(s) present but "
+            "HV_DockCollider could not be built — docks exported WITHOUT a "
+            "collider. Run the geonode toolkit (build_geonode_props) once."
+        )
 
-            # Mirror the dock's deck/pylon inputs onto the collider.
+    spawned: list[bpy.types.Object] = []
+    spawned_meshes: list[bpy.types.Mesh] = []
+    proxy_curves: list[tuple[bpy.types.Object, bpy.types.Curve]] = []
+    hide_restore: list[tuple[bpy.types.Object, bool]] = []
+    try:
+        cby = _gn_inputs_by_name(ctree) if ctree is not None else {}
+
+        # Phase 1 — a private collider-proxy curve per dock, with the dock's
+        # deck/pylon inputs mirrored across so the swept slab matches.
+        proxies: dict[str, bpy.types.Object] = {}
+        for ob in docks:
+            if ctree is None:
+                continue
             vals: dict[str, object] = {}
             for m in ob.modifiers:
                 if _is_dock_modifier(m):
@@ -442,18 +479,12 @@ def _AutoDockColliders(scene: bpy.types.Scene):
                     break
 
             curve_copy = ob.data.copy()
-            curve_copy.name = f"{ob.name}_autocol"
-            proxy = bpy.data.objects.new(f"{ob.name}_autocol", curve_copy)
-            # Mirror the full transform (incl. parenting) so the proxy lands
-            # exactly where the visible dock does.
-            proxy.parent = ob.parent
-            if ob.parent is not None:
-                proxy.matrix_parent_inverse = ob.matrix_parent_inverse.copy()
-            proxy.matrix_basis = ob.matrix_basis.copy()
+            curve_copy.name = f"{ob.name}_autocol_curve"
+            pc = bpy.data.objects.new(f"{ob.name}_autocol_curve", curve_copy)
+            pc.matrix_world = ob.matrix_world.copy()
             for c in ob.users_collection or (scene.collection,):
-                c.objects.link(proxy)
-
-            cmod = proxy.modifiers.new("HV_DockCollider", "NODES")
+                c.objects.link(pc)
+            cmod = pc.modifiers.new("HV_DockCollider", "NODES")
             cmod.node_group = ctree
             for k, v in vals.items():
                 ident = cby.get(k)
@@ -462,26 +493,93 @@ def _AutoDockColliders(scene: bpy.types.Scene):
                         cmod[ident] = v
                     except Exception:  # noqa: BLE001
                         pass
-            proxy["kind"] = "collider_mesh"
-            spawned.append(proxy)
-            spawned_curves.append(curve_copy)
+            proxies[ob.name] = pc
+            proxy_curves.append((pc, curve_copy))
 
-        yield len(spawned)
+        # Phase 2 — refresh the depsgraph so the freshly-linked proxy curves
+        # evaluate, then freeze each dock + proxy to a plain mesh datablock.
+        bpy.context.view_layer.update()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        realized: list[tuple[bpy.types.Object, bpy.types.Mesh, bpy.types.Mesh | None]] = []
+        for ob in docks:
+            deck_me = bpy.data.meshes.new_from_object(
+                ob.evaluated_get(depsgraph),
+                preserve_all_data_layers=True,
+                depsgraph=depsgraph,
+            )
+            deck_me.name = f"{ob.name}_deck"
+            _mark_color0_active(deck_me)
+            spawned_meshes.append(deck_me)
+
+            col_me = None
+            pc = proxies.get(ob.name)
+            if pc is not None:
+                col_me = bpy.data.meshes.new_from_object(
+                    pc.evaluated_get(depsgraph),
+                    preserve_all_data_layers=True,
+                    depsgraph=depsgraph,
+                )
+                col_me.name = f"{ob.name}_autocol"
+                spawned_meshes.append(col_me)
+            realized.append((ob, deck_me, col_me))
+
+        # Phase 3 — spawn the realized objects, tag kinds, hide the originals.
+        for ob, deck_me, col_me in realized:
+            deck = bpy.data.objects.new(f"{ob.name}_deck", deck_me)
+            deck.matrix_world = ob.matrix_world.copy()
+            deck["kind"] = "decoration"
+            for c in ob.users_collection or (scene.collection,):
+                c.objects.link(deck)
+            spawned.append(deck)
+
+            if col_me is not None:
+                col = bpy.data.objects.new(f"{ob.name}_autocol", col_me)
+                col.matrix_world = ob.matrix_world.copy()
+                col["kind"] = "collider_mesh"
+                for c in ob.users_collection or (scene.collection,):
+                    c.objects.link(col)
+                spawned.append(col)
+
+            hide_restore.append((ob, ob.hide_get()))
+            ob.hide_set(True)
+
+        # The proxy curves were only needed to evaluate the swept slab — drop
+        # them (object + curve datablock) before the export walk so they don't
+        # ship as stray curve nodes.
+        for pc, cu in proxy_curves:
+            for c in list(pc.users_collection):
+                c.objects.unlink(pc)
+            bpy.data.objects.remove(pc, do_unlink=True)
+            try:
+                bpy.data.curves.remove(cu)
+            except Exception:  # noqa: BLE001
+                pass
+        proxy_curves = []
+
+        yield len(docks)
     finally:
         for o in spawned:
             for c in list(o.users_collection):
                 c.objects.unlink(o)
             bpy.data.objects.remove(o, do_unlink=True)
-        for cu in spawned_curves:
+        for me in spawned_meshes:
+            try:
+                bpy.data.meshes.remove(me)
+            except Exception:  # noqa: BLE001
+                pass
+        for pc, cu in proxy_curves:
+            for c in list(pc.users_collection):
+                c.objects.unlink(pc)
+            bpy.data.objects.remove(pc, do_unlink=True)
             try:
                 bpy.data.curves.remove(cu)
             except Exception:  # noqa: BLE001
                 pass
-        for ob, had, old in kind_restore:
-            if had:
-                ob["kind"] = old
-            elif "kind" in ob:
-                del ob["kind"]
+        for ob, h in hide_restore:
+            try:
+                ob.hide_set(h)
+            except Exception:  # noqa: BLE001
+                pass
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -791,11 +889,11 @@ class HOVERBIKE_OT_export_track(Operator):
         try:
             with _PreviewCollectionsHidden(context.view_layer), \
                  _RealizedScatterInstances(context.scene) as scatter_count, \
-                 _AutoDockColliders(context.scene) as dock_collider_count:
+                 _RealizedDockMeshes(context.scene) as dock_collider_count:
                 if scatter_count:
                     print(f"[hoverbike-addon] realized {scatter_count} scatter instance(s) for GLB export")
                 if dock_collider_count:
-                    print(f"[hoverbike-addon] auto-generated {dock_collider_count} dock collider proxy(ies) for GLB export")
+                    print(f"[hoverbike-addon] realized {dock_collider_count} dock(s) to clean deck + collider meshes for GLB export")
                 bpy.ops.export_scene.gltf(
                     filepath=glb_path,
                     export_format="GLB",
