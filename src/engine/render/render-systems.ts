@@ -22,6 +22,20 @@ const GHOST_OPACITY = 0.35
 // Cyan-ish overlay tint so the ghost reads as "you (last run)" rather
 // than a regular opponent. Matches the wave-pump HUD palette family.
 const GHOST_TINT = 0x66ddff
+// The ghost is the only bike rendered transparent with depthWrite=false
+// (a hologram), so it never lands in the depth buffer. The center water
+// surface is also transparent but writes depth and is near-opaque, and
+// it's camera-locked — so its sort centroid sits nearer the camera than
+// the chase-distance ghost and, in the back-to-front transparent sort,
+// the water reliably draws AFTER the ghost and repaints every pixel where
+// water is the backdrop, erasing it. A renderOrder above the water's (0)
+// forces the ghost to composite after it; depthTest stays on, so the
+// genuinely-submerged parts are still culled. Kept below the spray / foam
+// particle FX (renderOrder 2) so kicked-up spray layers over the ghost
+// the same way it does over opaque bikes. Opaque bikes don't need this —
+// they're in the depth buffer already, so the water depth-tests against
+// them and never paints over them.
+const GHOST_RENDER_ORDER = 1
 // Exhaust glow tints — formerly the long-ribbon trail colors. The thruster
 // cone material (`mat_bike_*_glow`) is retinted per-bike so each racer
 // stays color-identifiable now that the ribbon trails are gone.
@@ -191,6 +205,10 @@ function applyGhostMaterial(root: THREE.Object3D): void {
     if (!mesh.isMesh) return
     mesh.castShadow = false
     mesh.receiveShadow = false
+    // Composite after the (transparent, camera-locked) water — see
+    // GHOST_RENDER_ORDER. Per-mesh because the transparent sort keys off
+    // each object's own renderOrder, not the parent group's.
+    mesh.renderOrder = GHOST_RENDER_ORDER
     const mat = mesh.material as
       | THREE.Material
       | THREE.Material[]
