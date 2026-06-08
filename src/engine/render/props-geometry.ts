@@ -15,10 +15,17 @@ import type { PropType } from '@/game/tracks/types'
  */
 export function buildPropGeometry(type: PropType, size: Vec3): THREE.BufferGeometry {
   if (type === 'box') {
+    // 3 segments/face so the painterly-vinyl edge-wear stamp (welded per-vertex
+    // convexity, see edge-wear-convexity.ts) localises to the edges/corners with
+    // clean face interiors — an un-subdivided box is all-corners, which would
+    // drybrush the whole surface instead of just the edges.
     return new THREE.BoxGeometry(
       Math.max(0.1, size.x * 2),
       Math.max(0.1, size.y * 2),
       Math.max(0.1, size.z * 2),
+      3,
+      3,
+      3,
     )
   }
   if (type === 'sphere') {

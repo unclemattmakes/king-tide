@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { isAnimatedAssetProp, type LoadedProp } from '@/game/assets/prop-loader'
 import type { Prop, PropType } from '@/game/tracks/types'
 import { ExportedKind } from '../asset-kinds'
+import { stampConvexityColor0 } from './edge-wear-convexity'
 import { buildVinylMaterial } from './painterly-vinyl-material'
 import { buildPropGeometry } from './props-geometry'
 
@@ -135,17 +136,25 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
       bucket.push(p)
       continue
     }
-    // Procedural prop — one mesh per placement.
+    // Procedural prop — one mesh per placement. Route it through the same
+    // painterly-vinyl material as asset props (look + hard-surface edge wear)
+    // instead of a flat MeshLambert. buildPropGeometry stamps no COLOR_0, so
+    // bake welded-convexity edge-wear data first — this also makes the vinyl
+    // AO/edge channel reads safe no-ops vs a fully-absent attribute (which TSL
+    // would read as 0 on every channel: AO darken + full edge bleach).
     const color = p.color ? new THREE.Color(p.color).getHex() : DEFAULT_COLORS[p.type]
-    const mat = new THREE.MeshLambertMaterial({
+    const isRing = p.type === 'pipe' || p.type === 'halfpipe'
+    const geom = buildPropGeometry(p.type, p.size)
+    stampConvexityColor0(geom)
+    const baseMat = new THREE.MeshStandardMaterial({
+      color,
       // Ring (pipe / halfpipe) needs DoubleSide because the inner wall's
       // triangles face inward; viewing the open-top half-pipe from above
       // should show the inside surface lit.
-      color,
-      side: p.type === 'pipe' || p.type === 'halfpipe' ? THREE.DoubleSide : THREE.FrontSide,
+      side: isRing ? THREE.DoubleSide : THREE.FrontSide,
     })
-    const geom = buildPropGeometry(p.type, p.size)
-    const mesh = new THREE.Mesh(geom, mat)
+    const propSize = Math.max(p.size.x, p.size.y, p.size.z, 0.05) * 2
+    const mesh = new THREE.Mesh(geom, buildVinylMaterial(baseMat, { propSize }))
     mesh.position.set(p.position.x, p.position.y, p.position.z)
     mesh.quaternion.set(p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w)
     mesh.castShadow = true
@@ -182,6 +191,11 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
     })
 
     for (const sm of submeshes) {
+      // Safety net: every shipped prop GLB carries COLOR_0 (baked convexity), so
+      // this is a no-op for them — but a prop that somehow lacks it would read 0
+      // on every channel under TSL (AO darken + full edge bleach). Stamp welded
+      // convexity so a missing channel becomes correct edge-wear data instead.
+      stampConvexityColor0(sm.geometry)
       const inst = new THREE.InstancedMesh(
         sm.geometry,
         vinylizeMaterial(sm.material, propSize),

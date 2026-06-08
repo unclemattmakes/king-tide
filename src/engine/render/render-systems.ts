@@ -57,6 +57,12 @@ const BIKE_VISUAL_SCALE = 1.0
  *  close chase-cam distance. Tune by eye. */
 const BIKE_BRUSH = 0.85
 
+/** Edge-wear drybrush on the bikes — bakes per-vertex convexity and lightens the
+ *  hard chassis edges (the painted-miniature pop). A touch under the 0.66 prop
+ *  default so the livery still reads. Stable on the moving bike because it's a
+ *  baked vertex attribute, not a world-space field. Tune by eye. */
+const BIKE_EDGE_WEAR = 0.55
+
 export type BikeRenderRegistry = {
   /** Resolve a variant id to a loaded GLB. Falls back to `default` when
    *  the id is unknown. */
@@ -152,11 +158,19 @@ export function createBikeRenderSystem(
         mesh.scale.setScalar(BIKE_VISUAL_SCALE)
         // Painterly-vinyl brush treatment on the bike (ghosts keep their clean
         // hologram look). Runs AFTER cloneLoadedBike's per-bike livery/exhaust
-        // tint so strokes ride on the racer colour; applyVinylMaterialToScene
-        // stamps a neutral COLOR_0 (bikes carry none → no AO-darken), sizes the
-        // strokes per mesh, and preserves the emissive glow material.
+        // tint so strokes ride on the racer colour; sizes the strokes per mesh
+        // and preserves the emissive glow material. `edgeWear` bakes per-vertex
+        // convexity so the chassis edges drybrush; `brushObjectSpace` samples the
+        // strokes in the bike's own frame so they DON'T swim as it tears across
+        // the map (the world-space field swims on movers — see
+        // docs/painterly-vinyl-pipeline.md).
         if (isGhost) applyGhostMaterial(mesh)
-        else applyVinylMaterialToScene(mesh, { brush: BIKE_BRUSH })
+        else
+          applyVinylMaterialToScene(mesh, {
+            brush: BIKE_BRUSH,
+            edgeWear: BIKE_EDGE_WEAR,
+            brushObjectSpace: true,
+          })
         scene.add(mesh)
         meshes.set(eid, mesh)
       }

@@ -1,12 +1,27 @@
 """Patch per-vertex edge-wear convexity into already-conditioned prop GLBs'
-COLOR_0.A, in place — the way to add the edge-wear channel to the EXISTING prop
-library without re-conditioning from source (which risks the keep_material
-texture).
+COLOR_0.A, in place — the way to add (or refresh) the edge-wear channel on the
+EXISTING prop library without re-conditioning from source (which risks the
+keep_material texture).
 
-Mirrors ``condition_ai_mesh._edge_convexity``: for each vertex, average
-``dot(normalized incident-edge dir, vertex normal)`` — convex verts trend
-negative — and store ``A = 1 - convex-edge-strength`` (1 = flat, <1 = convex
-ridge). The painterly-vinyl material reads ``(1 - A)`` to drybrush raised edges.
+For each vertex, average ``dot(normalized incident-edge dir, vertex normal)`` —
+convex verts trend negative — and store ``A = 1 - convex-edge-strength`` (1 = flat,
+<1 = convex ridge). The painterly-vinyl material reads ``(1 - A)`` to drybrush
+raised edges.
+
+WELDED CONVEXITY. Hard-surface game-kit props (Quaternius crates, barrels,
+containers, fences…) ship with the vertices SPLIT along every hard edge, so a
+naive per-primitive neighbour graph only ever connects coplanar in-face verts —
+whose incident edges are perpendicular to the face normal — and convexity reads
+~0 everywhere (the prop stays flat A=1, no wear). We therefore weld vertices by
+position first: dedupe coincident verts, recompute a SMOOTH per-position normal
+from the incident faces, build the neighbour graph in welded space, compute one
+convexity per unique position, and map ``A = 1 - conv`` back onto every original
+(split) vertex sharing that position. This lights up the corners/edges of
+hard-surface props while leaving genuinely-smooth forms (a featureless sphere)
+correctly at ~0. Same algorithm as the source bake
+(``vertex_attrs.welded_convexity``, used by ``condition_ai_mesh`` + the runtime
+primitive stamp ``edge-wear-convexity.ts``) — kept standalone (pure Python, no
+Blender) so it can run over shipped GLBs.
 
 ONLY the COLOR_0 alpha component is rewritten (same accessor layout, in place),
 so POSITION/NORMAL/UVs, material, embedded texture, collider, and extras are all
@@ -14,7 +29,7 @@ left byte-for-byte untouched. Pure Python — no Blender, no deps.
 
 Run:
     python tools/blender/patch_convexity.py public/assets/props/cc0/cliff_1.glb
-    python tools/blender/patch_convexity.py public/assets/props/**/*.glb
+    python tools/blender/patch_convexity.py "public/assets/props/**/*.glb"
 """
 from __future__ import annotations
 
@@ -25,6 +40,10 @@ import struct
 import sys
 
 GAIN = 1.6
+# Position-weld grid (metres). Coincident split verts share an EXACT position so
+# any precision merges them; this only bounds how close two DISTINCT verts may be
+# before they fold together — 0.01 mm is far below any real game-prop feature.
+WELD_DECIMALS = 5
 _JSON, _BIN = 0x4E4F534A, 0x004E4942
 # glTF componentType -> (struct char, byte size)
 _CT = {5120: ("b", 1), 5121: ("B", 1), 5122: ("h", 2), 5123: ("H", 2),
@@ -48,7 +67,27 @@ def _read(gltf, binbuf, idx):
     return [struct.unpack_from(fmt, binbuf, base + i * stride) for i in range(a["count"])]
 
 
-def _vertex_normals(pos, tris):
+def _weld(pos):
+    """Group vertices by quantized position. Returns ``(uniq_pos, orig2uniq)``
+    where ``orig2uniq[i]`` is the unique-position index of original vert ``i``."""
+    key_to_uniq: dict = {}
+    uniq_pos: list = []
+    orig2uniq = [0] * len(pos)
+    for i, p in enumerate(pos):
+        key = (round(p[0], WELD_DECIMALS), round(p[1], WELD_DECIMALS), round(p[2], WELD_DECIMALS))
+        u = key_to_uniq.get(key)
+        if u is None:
+            u = len(uniq_pos)
+            key_to_uniq[key] = u
+            uniq_pos.append(p)
+        orig2uniq[i] = u
+    return uniq_pos, orig2uniq
+
+
+def _smooth_normals(pos, tris):
+    """Area-weighted (un-normalized) vertex normals from incident face normals —
+    the SMOOTH normal a welded mesh would carry, which is what convexity wants
+    (the GLB's per-split-vert hard normal would defeat the measure)."""
     nrm = [[0.0, 0.0, 0.0] for _ in pos]
     for a, b, c in tris:
         ax, ay, az = pos[a]
@@ -59,7 +98,7 @@ def _vertex_normals(pos, tris):
             nrm[k][0] += fx
             nrm[k][1] += fy
             nrm[k][2] += fz
-    return [tuple(v) for v in nrm]
+    return nrm
 
 
 def _convexity(pos, nrm, neigh):
@@ -82,6 +121,22 @@ def _convexity(pos, nrm, neigh):
         if cnt:
             out[i] = max(0.0, min(1.0, -(acc / cnt) * GAIN))
     return out
+
+
+def _welded_convexity(pos, tris):
+    """Per-ORIGINAL-vertex convexity computed on the position-welded mesh, so
+    hard-edge corners (split into several coincident verts) read convex. Returns
+    a list index-aligned with ``pos``."""
+    uniq_pos, orig2uniq = _weld(pos)
+    utris = [(orig2uniq[a], orig2uniq[b], orig2uniq[c]) for a, b, c in tris]
+    unrm = _smooth_normals(uniq_pos, utris)
+    uneigh = [set() for _ in uniq_pos]
+    for a, b, c in utris:
+        uneigh[a].update((b, c))
+        uneigh[b].update((a, c))
+        uneigh[c].update((a, b))
+    uconv = _convexity(uniq_pos, unrm, uneigh)
+    return [uconv[orig2uniq[i]] for i in range(len(pos))]
 
 
 def patch(path: str) -> None:
@@ -113,13 +168,7 @@ def patch(path: str) -> None:
             pos = _read(gltf, binbuf, at["POSITION"])
             idx = [v[0] for v in _read(gltf, binbuf, prim["indices"])]
             tris = [(idx[t], idx[t + 1], idx[t + 2]) for t in range(0, len(idx) - 2, 3)]
-            neigh = [set() for _ in pos]
-            for a, b, c in tris:
-                neigh[a].update((b, c))
-                neigh[b].update((a, c))
-                neigh[c].update((a, b))
-            nrm = _read(gltf, binbuf, at["NORMAL"]) if "NORMAL" in at else _vertex_normals(pos, tris)
-            conv = _convexity(pos, nrm, neigh)
+            conv = _welded_convexity(pos, tris)
             cct = ca["componentType"]
             maxv = {5121: 255.0, 5123: 65535.0}.get(cct)
             for i in range(len(pos)):

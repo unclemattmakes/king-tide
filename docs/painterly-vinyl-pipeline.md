@@ -217,11 +217,16 @@ hand-painted texture is the hero upgrade.
 > authored thruster sockets (`fx_thruster_l/_r`, resolved from the bike-loader's
 > `socketLocals`) — camera-facing quad-strips whose length = speed × `TRAIL_SECONDS`
 > (a time window: gentle stub when slow, long streak at speed; width + alpha also
-> ramp with speed). Adapted from the retired `trail-render.ts`. **KNOWN ISSUE:** the
-> world-space triplanar brush *swims* on these MOVING surfaces (correct for static
-> terrain/buildings, wrong for bikes/riders). Fix = object-space sampling
-> (`positionLocal × objectScale` + `normalLocal`, gated by a `brushObjectSpace` opt
-> defaulting to world) — handed to the material instance.
+> ramp with speed). Adapted from the retired `trail-render.ts`. **Swim fixed:** the
+> world-space triplanar brush *swam* on these MOVING surfaces (correct for static
+> terrain/buildings, wrong for bikes/riders). `buildVinylMaterial` now takes a
+> `brushObjectSpace` opt (defaulting to world) that samples the brush + weathering
+> at `positionLocal × objectScale` / `normalLocal`, so the strokes are painted in
+> the mesh's own frame and ride along with it. `applyVinylMaterialToScene` threads
+> it through (plus `objectScale` from the mesh's world scale); bikes + riders pass
+> `brushObjectSpace: true`. Bikes also pass `edgeWear` (`BIKE_EDGE_WEAR`), which
+> bakes per-vertex convexity (`stampConvexityColor0`) — edge wear is a baked vertex
+> attribute, so it never swam in the first place.
 
 ### Authoring & verifying the brush sheet (the repeatable loop)
 

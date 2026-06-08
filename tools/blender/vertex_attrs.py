@@ -44,6 +44,113 @@ DEFAULT_FOLIAGE = (0.0, 1.0, 0.0, 1.0)
 DEFAULT_TERRAIN = (1.0, 1.0, 0.0, 0.0)
 
 
+def welded_convexity(mesh, gain: float = 1.6, weld_decimals: int = 5) -> "list[float]":
+    """Per-vertex convex-edge strength in ``[0, 1]`` (0 = flat/concave, 1 = a
+    sharp convex ridge), computed on a POSITION-WELDED view of *mesh* and
+    index-aligned with ``mesh.vertices``.
+
+    Hard-surface props split their vertices along every hard edge, so a naive
+    per-vertex measure only sees coplanar in-face edges (perpendicular to the
+    face normal → convexity ~0) and the prop reads flat. Welding by position
+    reconnects the corners: dedupe coincident verts, recompute a smooth
+    per-position normal from the incident faces, average ``dot(edge dir,
+    normal)`` over the welded neighbours (convex verts trend negative, so
+    negate), and map the result back onto every original vertex sharing the
+    position.
+
+    The runtime painterly-vinyl material reads ``(1 - A)`` where ``A = 1 -
+    convexity`` to drybrush raised edges. Mirrors
+    ``tools/blender/patch_convexity.py`` and
+    ``src/engine/render/edge-wear-convexity.ts`` so the source bake, the GLB
+    retrofit, and the in-engine primitive stamp all agree.
+    """
+    import math as _math
+
+    n = len(mesh.vertices)
+    if n == 0:
+        return []
+
+    # Weld vertices by quantized position. Coincident split verts share an
+    # exact position so any precision merges them; this only bounds how close
+    # two distinct verts may sit before folding together (1e-5 m = 0.01 mm).
+    q = 10 ** weld_decimals
+    key_to_u: dict = {}
+    orig2uniq = [0] * n
+    upos: list = []
+    for i, v in enumerate(mesh.vertices):
+        co = v.co
+        key = (round(co.x * q), round(co.y * q), round(co.z * q))
+        u = key_to_u.get(key)
+        if u is None:
+            u = len(upos)
+            key_to_u[key] = u
+            upos.append((co.x, co.y, co.z))
+        orig2uniq[i] = u
+    un = len(upos)
+
+    # Smooth per-position normal (Newell, accumulated over incident faces) +
+    # the set of unique welded edges. Reads ``mesh.polygons`` directly — robust
+    # across Blender versions and quad/ngon kit parts, no triangulation needed.
+    nx = [0.0] * un
+    ny = [0.0] * un
+    nz = [0.0] * un
+    edges: set = set()
+    for poly in mesh.polygons:
+        uvs = [orig2uniq[vi] for vi in poly.vertices]
+        m = len(uvs)
+        if m < 3:
+            continue
+        fx = fy = fz = 0.0
+        for k in range(m):
+            x0, y0, z0 = upos[uvs[k]]
+            x1, y1, z1 = upos[uvs[(k + 1) % m]]
+            fx += (y0 - y1) * (z0 + z1)
+            fy += (z0 - z1) * (x0 + x1)
+            fz += (x0 - x1) * (y0 + y1)
+            a, b = uvs[k], uvs[(k + 1) % m]
+            if a != b:
+                edges.add((a, b) if a < b else (b, a))
+        for u in set(uvs):
+            nx[u] += fx
+            ny[u] += fy
+            nz[u] += fz
+
+    # Accumulate dot(edge dir, unit normal) per welded vertex over unique edges.
+    sums = [0.0] * un
+    cnts = [0] * un
+    for a, b in edges:
+        ax, ay, az = upos[a]
+        bx, by, bz = upos[b]
+        ex, ey, ez = bx - ax, by - ay, bz - az
+        el = _math.sqrt(ex * ex + ey * ey + ez * ez)
+        if el < 1e-9:
+            continue
+        nla = _math.sqrt(nx[a] ** 2 + ny[a] ** 2 + nz[a] ** 2) or 1.0
+        sums[a] += (ex * nx[a] + ey * ny[a] + ez * nz[a]) / (el * nla)
+        cnts[a] += 1
+        nlb = _math.sqrt(nx[b] ** 2 + ny[b] ** 2 + nz[b] ** 2) or 1.0
+        sums[b] += (-ex * nx[b] - ey * ny[b] - ez * nz[b]) / (el * nlb)
+        cnts[b] += 1
+
+    uconv = [0.0] * un
+    for u in range(un):
+        if cnts[u]:
+            uconv[u] = max(0.0, min(1.0, -(sums[u] / cnts[u]) * gain))
+    return [uconv[orig2uniq[i]] for i in range(n)]
+
+
+def set_static_prop_color0(mesh, base_rgb: "tuple[float, float, float]" = (1.0, 1.0, 0.0),
+                           name: str = CANONICAL_NAME):
+    """Stamp the static-vinyl-prop ``COLOR_0``: ``R, G, B`` from *base_rgb*
+    (default ``G = AO = 1`` so the prop isn't darkened) and ``A = 1 -
+    welded_convexity`` so the painterly-vinyl material drybrushes its raised
+    edges. The single contract a procedural prop builder needs — used by
+    ``build_prop.py`` and mirrored by ``condition_ai_mesh``."""
+    conv = welded_convexity(mesh)
+    r, g, b = base_rgb
+    return set_color_attr(mesh, lambda i, _co: (r, g, b, 1.0 - conv[i]), name=name)
+
+
 def set_color_attr(
     mesh,
     value_for: Callable[[int, "tuple[float, float, float]"], "tuple[float, float, float, float]"],
