@@ -6,6 +6,7 @@ import type { LoadedProp } from '@/game/assets/prop-loader'
 import { resolveBikeVariant } from '@/game/bikes/variants'
 import { BikeStatsStore, TransformStore } from '@/game/components'
 import { Rider, type RiderBoneName, RiderStore } from '@/game/components/rider'
+import { applyVinylMaterialToScene } from './painterly-vinyl-material'
 import type { BikeRenderRegistry } from './render-systems'
 
 /**
@@ -35,6 +36,8 @@ import type { BikeRenderRegistry } from './render-systems'
 
 // Seated idle loop (falls back to the first clip if absent).
 const RIDE_CLIP = 'Sitting_Idle_Loop'
+/** Brush-stroke amount on the rider mannequin (tune by eye). */
+const RIDER_BRUSH = 0.85
 // Yaw to align the mannequin's facing onto the bike's forward (π faced it
 // backwards in playtest, so 0).
 const FACING_YAW = 0
@@ -173,6 +176,10 @@ export function createRiderMannequinSystem(
       }
       if (o.name) bones.set(o.name, o)
     })
+    // Painterly-vinyl brush strokes on the rider — sized to the FIT_SCALE'd
+    // (displayed) mannequin so strokes read human-scale, not rig-scale. Skinned-
+    // mesh safe (MeshStandardNodeMaterial skins); stamps a neutral COLOR_0.
+    applyVinylMaterialToScene(group, { brush: RIDER_BRUSH })
     scene.add(group)
     const mixer = new THREE.AnimationMixer(group)
     const clip = resolveSeatedClip(resolveRiderClip(bikeEid))

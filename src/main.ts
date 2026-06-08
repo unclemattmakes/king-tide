@@ -28,6 +28,7 @@ import { createChaseCamera } from './engine/render/camera'
 import { applyCloudShadowsToScene, buildCloudShadowMultiplier } from './engine/render/cloud-shadows'
 import { createCombatRenderSystem } from './engine/render/combat-render'
 import { createDirectionArrow } from './engine/render/direction-arrow'
+import { createEngineTrailSystem } from './engine/render/engine-trail'
 import { createFxSystem } from './engine/render/fx'
 import { loadGateProp } from './engine/render/gate-prop'
 import { createHorizonRing } from './engine/render/horizon-ring'
@@ -984,6 +985,7 @@ async function boot() {
   const pickupRender = createPickupRenderSystem(scene, sim)
   const combatRender = createCombatRenderSystem(scene, sim)
   const fx = createFxSystem(scene, sim, phys, waveField)
+  const engineTrail = createEngineTrailSystem(scene, sim, bikeRegistry)
 
   // Tint airborne water spray (wake foam, plunge bubbles, crest spray) toward
   // the sunset, matching the surface-foam warm tint. The sky is frozen at the
@@ -1036,6 +1038,7 @@ async function boot() {
 
   const fxTick = (dt: number) => {
     fx.tick(dt)
+    engineTrail.tick(camera, dt)
     // Skip the lattice sweep entirely when the player has the effect off — no
     // sampling cost for a disabled feature. The bike-driven bow spray inside
     // fx.tick honours the same setting on its own.

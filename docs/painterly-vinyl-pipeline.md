@@ -207,6 +207,21 @@ hand-painted texture is the hero upgrade.
 > addon's stroke *geometry* is render-only and never ships.
 > **TODO — Kuwahara** photo-mode post toggle (opt-in; perf/speed-read caveats).
 > Otherwise aesthetic tuning is a prop-viewer dial-in.
+>
+> **Extended to bikes + riders + engine trails — landed (2026-06-07).** The vinyl
+> brush now also rides the **bikes** (`createBikeRenderSystem` →
+> `applyVinylMaterialToScene` per non-ghost bike, after the livery/exhaust tint —
+> emissive glow + per-bike recolor preserved, ghosts excluded; `BIKE_BRUSH`) and the
+> **rider mannequin** (`rider-mannequin.ts`, skinned-mesh safe; `RIDER_BRUSH`). New
+> **brush-stroke engine ribbon trails** (`engine-trail.ts`) stream off each bike's
+> authored thruster sockets (`fx_thruster_l/_r`, resolved from the bike-loader's
+> `socketLocals`) — camera-facing quad-strips whose length = speed × `TRAIL_SECONDS`
+> (a time window: gentle stub when slow, long streak at speed; width + alpha also
+> ramp with speed). Adapted from the retired `trail-render.ts`. **KNOWN ISSUE:** the
+> world-space triplanar brush *swims* on these MOVING surfaces (correct for static
+> terrain/buildings, wrong for bikes/riders). Fix = object-space sampling
+> (`positionLocal × objectScale` + `normalLocal`, gated by a `brushObjectSpace` opt
+> defaulting to world) — handed to the material instance.
 
 ### Authoring & verifying the brush sheet (the repeatable loop)
 

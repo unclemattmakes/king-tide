@@ -15,6 +15,7 @@ import {
   TrickStateStore,
 } from '@/game/components'
 import { createBikeMesh } from './bike-mesh'
+import { applyVinylMaterialToScene } from './painterly-vinyl-material'
 
 const PLAYER_FALLBACK_COLOR = 0xff7733
 const AI_BODY_COLORS = [0x33aaff, 0x44dd66, 0xcc55ff, 0xffcc33, 0xff5577]
@@ -50,6 +51,11 @@ const AI_EXHAUST_COLORS = [0x55ccff, 0x66ee88, 0xdd66ff, 0xffdd44, 0xff7799]
 // reverted alongside this — see RIDER_SCALE in entities/rider.ts and the
 // idealOffset in camera.ts.)
 const BIKE_VISUAL_SCALE = 1.0
+
+/** Brush-stroke amount on the bikes — a touch lighter than the prop/building
+ *  default so the sleek hero chassis reads painterly without going busy at the
+ *  close chase-cam distance. Tune by eye. */
+const BIKE_BRUSH = 0.85
 
 export type BikeRenderRegistry = {
   /** Resolve a variant id to a loaded GLB. Falls back to `default` when
@@ -144,7 +150,13 @@ export function createBikeRenderSystem(
           mesh = createBikeMesh({ bodyColor: color })
         }
         mesh.scale.setScalar(BIKE_VISUAL_SCALE)
+        // Painterly-vinyl brush treatment on the bike (ghosts keep their clean
+        // hologram look). Runs AFTER cloneLoadedBike's per-bike livery/exhaust
+        // tint so strokes ride on the racer colour; applyVinylMaterialToScene
+        // stamps a neutral COLOR_0 (bikes carry none → no AO-darken), sizes the
+        // strokes per mesh, and preserves the emissive glow material.
         if (isGhost) applyGhostMaterial(mesh)
+        else applyVinylMaterialToScene(mesh, { brush: BIKE_BRUSH })
         scene.add(mesh)
         meshes.set(eid, mesh)
       }
