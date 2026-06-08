@@ -152,6 +152,34 @@ stands the panel on edge. `HV_Ramp` therefore builds orientation explicitly —
 +Z to world-up — so panels lie flat by default. `Pitch`/`Bank` are offsets from
 that flat resting pose; no per-point curve tilt needed.
 
+## Gotcha: curve-driven tools export a gray null-material twin (`export_gn_mesh`)
+
+The track GLB export runs the glTF exporter with `export_gn_mesh=True` — required so
+the GN `Set Material` colours on realised geometry ship at all. But for a **curve
+object carrying a GN modifier** that flag makes the exporter write the geometry
+**twice**: a child `GN Instance` node with the real materials **plus** the original
+curve node with a second copy that has **null materials**. The null-material copy
+renders **gray** and z-fights the real (e.g. brown plank) mesh in-engine — even
+though Blender's viewport shows a single correct object. Mesh-based generators (sea
+stack, palm, rock, arch, cloud) are unaffected; only the **curve-driven** `HV_Dock` /
+`HV_Ramp` hit it. (Turning the flag off instead loses the GN materials entirely — the
+single node then renders all-gray — so it must stay on.)
+
+The track exporter sidesteps this by **realising every visible curve-GN dock to a
+plain frozen mesh** before the glTF write (`_RealizedDockMeshes` in
+`tools/blender/hoverbike_addon/export.py`): `bpy.data.meshes.new_from_object(...,
+preserve_all_data_layers=True)` freezes the evaluated mesh (re-marking `COLOR_0`
+active so the vinyl pass doesn't read AO = 0 and darken it), tags it `decoration`
+(deck) / `collider_mesh` (the swept `HV_DockCollider` slab), and hides the original
+curve so only the clean single node ships. A plain mesh has no GN modifier, so the
+exporter emits one node — no twin, no double collider, ~half the bytes. (It also
+filters on `visible_get()`, so an eye-hidden dock no longer ships a phantom collider.)
+
+**If you ship a new curve-driven tool inside a track** (an `HV_Ramp`, or any future
+curve-GN family member), give it the same realise-to-mesh treatment at export or it
+will z-fight. Diagnostic: parse the track GLB — a node whose mesh has all-null-material
+primitives **and** a `GN Instance` child is the bug.
+
 ## Regenerate / iterate
 ```python
 import importlib.util, sys
