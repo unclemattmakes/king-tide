@@ -102,23 +102,36 @@ overlay `start`/`checkpoints`/`waveRiderBuoys`/`props` from the JSON) to design
 against. Blender's Workbench/EEVEE render works fine for this — only the game's
 **WebGPU** path can't be screenshotted headlessly (§7).
 
-## 4. HARD RULE — keep props out of the AI racing corridor
+## 4. HARD RULE — never *block* the AI racing line
 
-Props with colliders sitting in the corridor make the **AI unable to finish the
-race** (they get stuck). "Distance to nearest buoy" is **not** a sufficient
-check. Verify against the real corridor:
+The AI follows the spline **with no obstacle avoidance** (`src/game/ai` has no
+steer-around), so a collider on the spline **centerline** stalls the whole field.
+The rule is therefore about **blocking**, not mere presence — two prop classes:
+
+- **Big / wall-like props** (buildings, set-pieces, the cathedral, dense
+  clusters — anything that spans the groove) stay **outside the buoy wall**:
+  `dist(prop, AI line) ≥ (local buoy half-width) + ~12 m`.
+- **Small, scattered, avoidable props** (trees, lamp posts, single rocks, market
+  clutter) **may sit inside the corridor as flavor** — but each collider must
+  **flank** the line, never sit on it: keep `dist(collider, AI spline) ≥ ~8 m`
+  (bike half-width ~2 + prop footprint ~4 + margin) and keep them scattered so a
+  continuous drivable groove always remains. A flooded causeway lined with trees
+  is exactly this: *on* the race line, but you weave through them. (Texcoco
+  Rising's lake grove flanks the start/Zócalo line at 8 m — Matt's call, 2026-06:
+  any on-line tree within 8 m of the spline gets nudged out perpendicular,
+  keeping its along-track position.)
+
+Verify against the real corridor:
 
 1. Densely sample the AI line: closed **Catmull-Rom through
    `aiSplines[0].anchors`** (~12+ pts/segment).
 2. Corridor half-width = distance from each `waveRiderBuoys` entry to that line
    (buoys are the channel walls; ~42 m half-width on Sandbar).
-3. A prop is safe only if `dist(prop, AI line) ≥ (local buoy half-width) + ~12 m`
-   — i.e. **outside the buoy wall**. Also keep ≥ ~16 m from any checkpoint
-   centre (gate `halfWidth` is ~14).
+3. Apply the two-class rule above. Also keep ≥ ~16 m from any checkpoint centre
+   (gate `halfWidth` is ~14) regardless of prop size.
 
-If a region's shoreline falls *inside* the corridor (e.g. a bay the line sweeps
-through), **leave it bare** rather than crowd the line. Scenery reads fine at
-50–120 m off the line.
+A shoreline falling *inside* the corridor can still be **left bare** — flanking
+flavor props are optional; blocking ones are forbidden.
 
 ## 5. Seat + sink so props look rooted
 
