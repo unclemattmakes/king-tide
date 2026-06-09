@@ -1500,14 +1500,35 @@ async function boot() {
   }
   bootMark('prewarm')
 
-  // Reveal the deferred scenery a few meshes per frame. rAF-scheduled, so it
-  // runs after startGameLoop / startReplayMode below kick their render loops —
-  // each newly-visible mesh compiles on its first rendered frame, spreading the
-  // deferred compile across the countdown instead of the loading screen.
-  progWarm?.reveal(2, () => {
-    bootMark('scenery')
-    bootReport()
-  })
+  // Warm + reveal the deferred scenery. Each mesh is compiled asynchronously
+  // (createRenderPipelineAsync, main-thread yields) under the live render
+  // path's cache key — the post-pipeline's PassNode RT when one is active —
+  // and only made visible once its pipelines are cached, so the running loop
+  // never pays a synchronous first-sight compile — letting it do so stalled
+  // rAF 250–700 ms per reveal frame for the first ~7 s of the race. The
+  // compile hook is
+  // best-effort: progressive-warm falls back to the visibility-only reveal
+  // without one, and reveals a mesh anyway if its compile rejects.
+  let sceneryWarmComplete = true
+  if (progWarm) {
+    sceneryWarmComplete = progWarm.count === 0
+    const warmPipeline = getActivePostPipeline()
+    const warmRenderer = renderer as unknown as {
+      compileAsync?: (scene: unknown, camera: unknown, targetScene?: unknown) => Promise<void>
+    }
+    progWarm.reveal({
+      compile: warmPipeline
+        ? (o) => warmPipeline.compileSubtreeAsync(o)
+        : typeof warmRenderer.compileAsync === 'function'
+          ? (o) => warmRenderer.compileAsync?.(o, camera, scene) ?? Promise.resolve()
+          : undefined,
+      onDone: () => {
+        sceneryWarmComplete = true
+        bootMark('scenery')
+        bootReport()
+      },
+    })
+  }
 
   // Phase 8 — game loop. Replay playback gets a separate frame that
   // interpolates recorded poses; the live race uses the fixed-step sim +
@@ -1621,6 +1642,7 @@ async function boot() {
     ...(waveRiderSys ? { waveRiderSys } : {}),
     ...(waveRiderRender ? { waveRiderRender } : {}),
     ...(animatedProps ? { animatedProps } : {}),
+    sceneryWarmed: () => sceneryWarmComplete,
   })
 
   // Performance benchmark director (`?bench=1`). Installed after the race
