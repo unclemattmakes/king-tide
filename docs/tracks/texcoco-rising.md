@@ -110,15 +110,30 @@ Standard pump-duck (the lake is calm but the open stretches still pump).
 
 ## Build status
 
-**Concept locked; geometry pending** (catalog tile gated `status: 'pending'`).
-The old South Beach blockin was discarded with the Miami cut — the Reef opener
-is being rebuilt from scratch as Mexico City.
+**Geometry + gameplay BUILT; art pass in progress** (2026-06-08). Catalog tile
+still `status: 'pending'` — playable via `?track=texcoco-rising`. Authored from
+scratch the **current way** in `tracks-src/texcoco-rising.blend`, exported to
+`public/assets/tracks/texcoco-rising.glb` + `public/tracks/texcoco-rising.json`.
+**Loads + drives clean in-engine** (headed WebGPU autopilot completes, 0 console
+errors).
 
-Built the **current way**, not the retired per-track seed script:
-empty scene → lay out the causeway-loop **track shape** → block in the **lake
-terrain + landmarks** (El Ángel, Templo Mayor, the half-sunk cathedral, the
-twin-volcano horizon) → progressive **dressing**. Workflow references:
-**Sandbar** (furthest along) and **Cape Town Drift** (mid blockin→props swap).
+> **Mirror gotcha:** the `.blend` is built **N-S mirrored** so Blender's top view
+> reads north-up like the concept sketch (three.js `Z→−Y` flips the editor view);
+> the exported coords are therefore the N-S mirror of the sketch. Author in
+> Blender's north-up view; don't "fix" the flip.
+
+**In:** shallow lake (−8 floor) + twin volcanoes rising from the water (Popo
+smoking via `emitter_volcano_smoke`), Chapultepec hill+castle (east), gentle
+terrain rises the line conforms to; **hover-on-the-lake** line snapped just under
+the waterline (no continuous causeway); El Ángel **launch ramp** embedded in the
+terrain; 13 checkpoints + start + 3 boosts + 9 pickups + wave zone + buoys; all
+landmarks **collidable** + pushed clear of the line; POIs **Diana Cazadora**
+(Reforma glorieta) + **Palacio de Bellas Artes**; jungle ahuehuete placeholders.
+
+**Art-pass TODO:** painterly-vinyl materials + waterline trio; the collapsed
+Segundo-Piso freeway-deck look on the ramp; landmark detail; discrete raised
+calzada modules for the 35% "land"; trajineras + papel-picado + jacaranda
+dressing; remaining VFX. Workflow refs: **Sandbar** + **Cape Town Drift**.
 
 ## References
 
