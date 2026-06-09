@@ -461,6 +461,24 @@ export type WaterConfig = {
    *  loader now ignores them and the Blender exporter no longer emits
    *  them. */
   swellBearingDeg?: number
+  /** Wave-set envelope ("sets" — the surf rhythm of bigger wave groups,
+   *  water-next-research §7.2): ambient amplitude breathes as
+   *  `1 + depth·sin(2π·t/periodS)`, identically in buoyancy and the
+   *  shader. Foam/whitecaps and the P1 readability ramp follow
+   *  automatically (they're amplitude-driven), so "the big set is coming"
+   *  reads at distance. Reading sets IS surf timing skill — calm tutorial
+   *  tracks author none; a pronounced finale ≈ `{ periodS: 60,
+   *  depth: 0.3 }`. Absent = off. */
+  swellSets?: {
+    /** Seconds between set peaks (20–90 is the useful band; ≤ 0 = off). */
+    periodS: number
+    /** Amplitude swing, 0..0.6: the sea breathes between (1−depth)× and
+     *  (1+depth)× of its static sea state. */
+    depth: number
+    /** Phase offset, radians. Optional; shifts where in the cycle the
+     *  race starts (default 0 = mid-swing, rising). */
+    phase?: number
+  }
 }
 
 /**

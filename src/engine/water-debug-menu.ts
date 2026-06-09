@@ -306,43 +306,85 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
   type Bound = { def: SliderDef; input: HTMLInputElement; valEl: HTMLElement }
   const bound: Bound[] = []
 
-  // Wave bearing — hand-built LIVE-ONLY row, deliberately outside the
-  // SLIDERS table + persistence. The bearing is per-track authored data
-  // (`water.swellBearingDeg`, applied at boot; water-next-research.md
-  // §4.5), so this seeds from the live mesh value and any drag lasts only
-  // for the session. Persisting it was how a bearing dialed on one track
-  // silently re-aimed every other track's swell on that machine. RESET
-  // doesn't touch it either — "default" for bearing means "what the track
-  // authored", which is already what boot applied.
-  {
+  // Live-only rows — hand-built, deliberately outside the SLIDERS table +
+  // persistence: these knobs are per-track AUTHORED data (track JSON keys,
+  // applied at boot), so each seeds from the live mesh value and any drag
+  // lasts only for the session. Persisting the bearing was how a value
+  // dialed on one track silently re-aimed every other track's swell on
+  // that machine (water-next-research §4.5); the wave-set rows follow the
+  // same rule. RESET doesn't touch them either — "default" here means
+  // "what the track authored", which is already what boot applied.
+  const liveRow = (opts: {
+    id: string
+    label: string
+    hint: string
+    min: number
+    max: number
+    step: number
+    get: () => number
+    set: (v: number) => void
+    format: (n: number) => string
+  }): void => {
     const row = document.createElement('div')
     row.className = 'row'
     const label = document.createElement('label')
-    label.htmlFor = 'wd-waveBearingLive'
-    label.textContent = 'Wave bearing'
-    label.title =
-      'Global wave-train direction (CCW from world +X). Authored per track via water.swellBearingDeg — this slider is a live session override and is NOT saved. Render + CPU buoyancy track together.'
+    label.htmlFor = `wd-${opts.id}`
+    label.textContent = opts.label
+    label.title = opts.hint
     row.appendChild(label)
     const input = document.createElement('input')
     input.type = 'range'
-    input.id = 'wd-waveBearingLive'
-    input.min = '-180'
-    input.max = '180'
-    input.step = '1'
-    input.value = String(water.debug.getWaveBearing())
+    input.id = `wd-${opts.id}`
+    input.min = String(opts.min)
+    input.max = String(opts.max)
+    input.step = String(opts.step)
+    input.value = String(opts.get())
     row.appendChild(input)
     const valEl = document.createElement('span')
     valEl.className = 'val'
-    valEl.textContent = `${water.debug.getWaveBearing().toFixed(0)}°`
+    valEl.textContent = opts.format(opts.get())
     row.appendChild(valEl)
     body.appendChild(row)
     input.addEventListener('input', () => {
       const v = Number.parseFloat(input.value)
       if (!Number.isFinite(v)) return
-      water.debug.setWaveBearing(v)
-      valEl.textContent = `${v.toFixed(0)}°`
+      opts.set(v)
+      valEl.textContent = opts.format(v)
     })
   }
+  liveRow({
+    id: 'waveBearingLive',
+    label: 'Wave bearing',
+    hint: 'Global wave-train direction (CCW from world +X). Authored per track via water.swellBearingDeg — this slider is a live session override and is NOT saved. Render + CPU buoyancy track together.',
+    min: -180,
+    max: 180,
+    step: 1,
+    get: () => water.debug.getWaveBearing(),
+    set: (v) => water.debug.setWaveBearing(v),
+    format: (n) => `${n.toFixed(0)}°`,
+  })
+  liveRow({
+    id: 'swellSetPeriodLive',
+    label: 'Set period',
+    hint: 'Wave-set envelope period, seconds between set peaks (0 = off). Sea breathes ±depth around its static state; buoyancy follows. Authored per track via water.swellSets — live override, NOT saved.',
+    min: 0,
+    max: 120,
+    step: 1,
+    get: () => water.debug.getSwellSet().periodS,
+    set: (v) => water.debug.setSwellSetPeriod(v),
+    format: (n) => (n > 0 ? `${n.toFixed(0)} s` : 'off'),
+  })
+  liveRow({
+    id: 'swellSetDepthLive',
+    label: 'Set depth',
+    hint: 'Wave-set envelope amplitude swing, 0..0.6 (0.3 → sea breathes between 0.7× and 1.3×). Authored per track via water.swellSets — live override, NOT saved.',
+    min: 0,
+    max: 0.6,
+    step: 0.05,
+    get: () => water.debug.getSwellSet().depth,
+    set: (v) => water.debug.setSwellSetDepth(v),
+    format: (n) => n.toFixed(2),
+  })
 
   // Build the sliders from the SLIDERS table.
   for (const def of SLIDERS) {

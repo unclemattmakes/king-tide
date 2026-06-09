@@ -31,6 +31,27 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-09** — **Water P2.1 wave sets: the authorable surf
+> rhythm.** Per-track `water.swellSets {periodS, depth}` makes the ambient sea
+> breathe `1 + depth·sin(2π·t/periodS)` — the "bigger set is coming" timing
+> skill from the surf research (water-next-research §7.2). Implemented as a
+> first-class wave-field term (`waveSetFactor`) multiplying the same
+> amplitude slot the zones use, identically in CPU buoyancy (incl. an exact
+> `vy` rate term for hover damping), the GPU (all three layers — center /
+> outer / skirt, mirrored uniforms per tick) and the `renderVertex` mirror —
+> chosen over amplitude mutation so it composes with Beaufort / lap-weather /
+> menu writers instead of compounding, and stays a pure function of the sim
+> clock (replay/determinism-safe; spec re-run green). Foam, whitecaps and the
+> P1 value ramp follow the envelope for free (amplitude-driven). **Cape Town
+> Drift authors a pronounced 60 s / 0.3 set** (the finale per the roadmap —
+> playtest-gated); other tracks default off (byte-identical surface). Live
+> menu rows (Set period / Set depth, non-persisted like the bearing).
+> Verified: equivalence-oracle unit suite
+> ([wave-sets.test.ts](../tests/unit/wave-sets.test.ts)) + headed waterSync
+> transects across three phases of the Cape Town cycle, ≤ 1.2e-6 m
+> ([wave-set-sync.spec.ts](../tests/e2e/wave-set-sync.spec.ts), captures in
+> `artifacts/wave-set-sync/`).
+>
 > **Last updated: 2026-06-09** — **Water P1 readability layers: posterized
 > value ramp + contour-line foam + Wind-Waker relief pair.** The wave-mastery
 > read ("where's the crest, how hard will it kick") now has dedicated render

@@ -707,6 +707,18 @@ function readOptionalWater(raw: unknown): WaterConfig | null {
   if ('swellBearingDeg' in raw) {
     out.swellBearingDeg = requireNumber(raw, 'swellBearingDeg')
   }
+  // Wave-set envelope (P2.1). Tolerant: object with required periodS/depth
+  // and optional phase; anything malformed throws (authoring error, not a
+  // legacy-compat case).
+  const setsRaw = (raw as { swellSets?: unknown }).swellSets
+  if (setsRaw !== undefined && setsRaw !== null) {
+    if (!isObject(setsRaw)) throw new Error('track-json: water.swellSets must be an object')
+    out.swellSets = {
+      periodS: requireNumber(setsRaw, 'periodS'),
+      depth: requireNumber(setsRaw, 'depth'),
+    }
+    if ('phase' in setsRaw) out.swellSets.phase = requireNumber(setsRaw, 'phase')
+  }
   // `waveHeight` / `waveFreq` are deprecated dead knobs (real amplitude is
   // sky.seaStateBeaufort + waveZones) — silently ignored when present so
   // old JSONs keep loading. See water-next-research.md §4.5.
