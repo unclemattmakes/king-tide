@@ -31,6 +31,19 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-09** — **Water research + roadmap doc.** Full
+> investigation of the water system (sim + render + coupling) with external
+> research (shipped-game tech, algorithms, perception science) and a phased
+> plan for readability/nuance/anti-repetition:
+> [water-next-research.md](./water-next-research.md). Headline findings:
+> **wave zones are felt by buoyancy but never drawn by the GPU shader**
+> (Sandbar/Maw/Texcoco all ship zones — likely root of the "ride-on-top
+> inconclusive" feel and a P0 fix); the Gerstner-pinch distrust needs a
+> `?wavedots` diagnosis before any Q-dependent visuals; the 2026-06-06
+> cel/contour water experiment **was never committed** (memory ≠ repo — main
+> still runs the SoT pipeline + #315 curvature whitecaps). Docs only — no
+> code changes.
+
 > **Last updated: 2026-06-07** — **Dev-tools palette + live brush/world tuners.**
 > Every buried dev surface is now one discoverable place (dev builds only): a
 > right-edge **dock rail** + **Ctrl/⌘K command bar** that launch every hidden
