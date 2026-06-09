@@ -52,6 +52,29 @@ export type PostPipeline = {
    */
   compileAsync(): Promise<void>
   /**
+   * Asynchronously pre-warm one subtree's GPU pipelines under the *same*
+   * cache key the live `render()` uses — `renderer.compileAsync(object,
+   * camera, scene)` bracketed by the PassNode's renderTarget + MRT (the
+   * exact renderer state `PassNode.updateBefore` sets for the scene pass).
+   * Pipeline creation goes through `createRenderPipelineAsync` with
+   * main-thread yields between objects, so — unlike a first-sight compile
+   * in the rAF loop — it never stalls a frame. Used by the progressive
+   * scenery warm to compile each deferred mesh *before* revealing it.
+   *
+   * Only valid after `compileAsync()` (or the first `render()`) has run:
+   * the PassNode's RT samples/type are populated in its first
+   * `updateBefore`, and compiling against an unconfigured RT caches under
+   * a stale key (the silent black-framebuffer failure described above).
+   *
+   * Note `object.visible` (and `frustumCulled`, against the renderer's
+   * stale compile-time frustum) gate the synchronous project step inside
+   * `renderer.compileAsync` — callers warming a hidden mesh must flip
+   * those flags for the duration of this call (the synchronous prologue
+   * captures the render list; the flags can be restored as soon as the
+   * call returns, before awaiting).
+   */
+  compileSubtreeAsync(object: THREE.Object3D): Promise<void>
+  /**
    * Live-set bloom parameters. `strength = 0` short-circuits to a passthrough
    * (no bloom contribution) — cheaper than tearing the pipeline down for
    * tracks that authored `sky.bloom: 0`.
@@ -217,6 +240,39 @@ export function createPostPipeline(deps: PostPipelineDeps): PostPipeline {
       pipeline.render()
       // Yield to the GPU queue before rAF starts hammering render().
       await Promise.resolve()
+    },
+    async compileSubtreeAsync(object: THREE.Object3D) {
+      const r = renderer as unknown as {
+        getRenderTarget(): unknown
+        setRenderTarget(rt: unknown): void
+        getMRT(): unknown
+        setMRT(mrt: unknown): void
+        compileAsync?: (scene: unknown, camera: unknown, targetScene?: unknown) => Promise<void>
+      }
+      if (typeof r.compileAsync !== 'function') return
+      const passInternals = scenePass as unknown as {
+        renderTarget: unknown
+        getMRT(): unknown
+      }
+      // renderer.compileAsync reads the *currently set* render target + MRT in
+      // its synchronous prologue (everything up to its first await, including
+      // projecting `object` into a render list and queueing one compile work
+      // item per material). Swapping to the PassNode's RT/MRT for exactly that
+      // window keys the compiled pipelines + render objects identically to the
+      // live scene pass; restoring before the await means interleaved rAF
+      // frames never observe the swap.
+      const prevRT = r.getRenderTarget()
+      const prevMRT = r.getMRT()
+      r.setRenderTarget(passInternals.renderTarget)
+      r.setMRT(passInternals.getMRT())
+      let compiled: Promise<void> | undefined
+      try {
+        compiled = r.compileAsync(object, camera, scene)
+      } finally {
+        r.setRenderTarget(prevRT)
+        r.setMRT(prevMRT)
+      }
+      await compiled
     },
     setBloom(strength: number, radius?: number, threshold?: number) {
       bloomPass.strength.value = Math.max(0, strength)

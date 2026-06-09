@@ -102,6 +102,32 @@
 > (wave-zones cookbook now states the GPU evaluation + 8-zone cap;
 > design-targets no longer claims the cut wave-line HUD ships).
 >
+> **Last updated: 2026-06-09** — **Race-start hitching fixed — the progressive
+> scenery warm now compiles async + off the hot path.** The #336 warm hid the
+> vinyl scenery at boot and let the live loop compile each revealed mesh on
+> first sight — a synchronous D3D12 pipeline compile *inside* a rAF frame
+> (100–700 ms each; Sandbar: ten ≥250 ms frames + 7.3 s total stall in the
+> first ~8 s, plus 100–130 ms echo hitches through all of lap 1 from meshes
+> frustum-culled at reveal time — the reported "hitching up to 20 s after race
+> start"). Now each deferred mesh is pre-compiled via
+> `renderer.compileAsync` (async `createRenderPipelineAsync`, main-thread
+> yields) under the live render path's exact cache key — the post-pipeline
+> PassNode's RT+MRT, see `compileSubtreeAsync` in
+> [post-pipeline.ts](../src/engine/render/post-pipeline.ts) — and only made
+> visible once resident; meshes sharing material+layout warm/reveal as one
+> group ([progressive-warm.ts](../src/boot/progressive-warm.ts)). When a
+> cinematic intro played, the countdown additionally holds (≤6 s cap) until
+> the warm completes — skip/off/multiplayer paths arm immediately, unchanged.
+> Measured (headed, real flow): Sandbar **post-green-light frames >50 ms:
+> 0** (was 28 >50 ms incl. lap-long echoes); `?progwarm=0` for comparison
+> still pays a 1.8–2.7 s freeze mid-intro + ~5 s longer boot. Texcoco still
+> shows scattered ≤266 ms dips while its warm drains — its real lever is
+> **155 vinyl materials** (the per-size-bucket split in
+> `applyVinylMaterialToScene` forks shared source materials), a follow-up.
+> Measure with [hitch-profile.spec.ts](../tests/e2e/hitch-profile.spec.ts)
+> (`E2E_PORT=<N> [HITCH_TRACK=<id>] pnpm e2e ...` — per-second worst-frame
+> table + pre/post-green split; artifacts in `artifacts/hitch/`).
+>
 > **Last updated: 2026-06-09** — **Wave zones now render — GPU port closes the
 > sim↔render desync (P0.1 from the water roadmap, below).** Per-track wave zones
 > (heightMult / freqMult / bearing override / surge OBBs) modified CPU buoyancy
