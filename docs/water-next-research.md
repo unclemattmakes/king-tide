@@ -569,13 +569,17 @@ to this exact problem and worth buying just to read.)
 
 **7.8 Hex-tiling + cascade hygiene (shading-level anti-repetition).**
 Mikkelsen's 3-tap hex tiling (JCGT 2022) on the detail-normal + foam-bubble
-textures kills their tiling without touching any signal; and the two cascade
-tile sizes are currently **6 m / 1.5 m — an exact 4:1**, which re-aligns every
-6 m (the known "common factor" tiling artifact); nudge to an irrational-ish
-ratio (e.g. 6 / 1.45). Also: tangential-only domain warp on foam masks (warp
-along-crest, never in height — height warp would falsify the steepness
-signal), `fwidth`-based contour thinning at distance, index contours (every
-Nth line heavier). **Verdict: do (P2, polish tier).**
+textures kills their tiling without touching any signal. ~~The two cascade
+tile sizes are currently 6 m / 1.5 m — an exact 4:1~~ *(stale — corrected
+2026-06-09: the cascades already run 11 m / 2 m with off-axis rotations
+(+23° / −37°) AND a 35 m domain warp on the sample coords, so the strict
+common-factor beat is already broken; 11:2 still re-aligns every 22 m but
+under the warp it's not the visible artifact this section assumed).* Also:
+tangential-only domain warp on foam masks (warp along-crest, never in
+height — height warp would falsify the steepness signal). `fwidth`-based
+contour thinning + index contours **shipped with P1** (the contour layer
+does both). **Verdict: remaining P2.3 scope = hex-tiling the detail/foam
+textures + tangential foam-mask warp + Langmuir streak lanes.**
 
 **7.9 Water Surface Wavelets / shallow-water solvers / screen-space
 contour extraction.** Wavelets (Jeschke et al. 2018): impressive
