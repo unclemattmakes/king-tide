@@ -3,9 +3,7 @@
   "name": "Lagoon Loop (editable)",
   "lapsToFinish": 3,
   "water": {
-    "height": 0,
-    "waveHeight": 1,
-    "waveFreq": 0.5
+    "height": 0
   },
   "start": {
     "position": {

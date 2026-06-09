@@ -3,9 +3,7 @@
   "name": "Drift Practice Range",
   "lapsToFinish": 2,
   "water": {
-    "height": -5.0,
-    "waveHeight": 0.0,
-    "waveFreq": 0.2
+    "height": -5.0
   },
   "start": {
     "position": { "x": -130.0, "y": 1.5, "z": -130.0 },

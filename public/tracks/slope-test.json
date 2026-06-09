@@ -4,9 +4,7 @@
   "lapsToFinish": 1,
   "environmentGlb": "/assets/tracks/slope-test.glb",
   "water": {
-    "height": -20.0,
-    "waveHeight": 0.0,
-    "waveFreq": 0.0
+    "height": -20.0
   },
   "start": {
     "position": {

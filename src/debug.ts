@@ -18,7 +18,16 @@ import { getWaterMesh } from './engine/render/water-service'
 import type { SimWorld } from './engine/sim/ecs/world'
 import type { PhysicsWorld } from './engine/sim/physics/rapier'
 import { captureSnapshot, snapshotToString } from './engine/sim/snapshot'
-import type { WaveFieldState } from './engine/sim/water/wave-field'
+import { sampleShore } from './engine/sim/water/shore-field'
+import {
+  effectiveSteepness,
+  SHOAL_FADE_DEPTH,
+  SHORE_BAND_DEPTH,
+  sampleHeight,
+  sampleWakeFromSource,
+  sampleZoneFactors,
+  type WaveFieldState,
+} from './engine/sim/water/wave-field'
 import { BikeTag, ControlIntentStore, PeerControlledStore, RBHandleStore } from './game/components'
 import { AITag } from './game/components/ai'
 import { MineTag, MissileTag, ShieldEffectStore, StunStore } from './game/components/combat'
@@ -121,6 +130,29 @@ export type HoverDebug = {
    *  screenshot harness scrub foam-coverage / look uniforms in a single boot
    *  instead of re-booting per value. */
   waterDebug(): WaterMesh['debug'] | null
+  /** Gerstner sim↔render transect (water-next-research.md §9): walks a line
+   *  of rest points, displaces each through `WaterMesh.renderVertex` (the CPU
+   *  mirror of the GPU vertex transform — pinch + zones + live amplitudes),
+   *  then asks the buoyancy sampler (`sampleHeight`) what it floats on at the
+   *  displaced world point. Any |Δy| beyond inverse-map noise is a positional
+   *  desync between what the rider feels and what the mirror says the shader
+   *  draws. Pair with `?wavedots=1&wire=1` (GPU ground truth) to close the
+   *  loop — this probe alone can't catch a TSL-side bug the mirror doesn't
+   *  share. Shore/shoaling-band points are skipped (the mirror is open-water
+   *  only); wake terms are subtracted exactly. Defaults: 129 points × 1.5 m
+   *  centred on the player, along world +X. Null before boot / no water. */
+  waterSync(opts?: {
+    /** Transect centre, world XZ. Default: the player. */
+    x?: number
+    z?: number
+    /** Transect direction (normalised internally). Default (1, 0). */
+    dirX?: number
+    dirZ?: number
+    /** Rest-point spacing, metres. Default 1.5 (sub-chop). */
+    step?: number
+    /** Number of rest points. Default 129 (≈192 m span). */
+    count?: number
+  }): WaterSyncReport | null
   /** M10.2 determinism harness. Present only when ?determinism=1 was set
    *  at boot. The sim's RAF-driven step is gated off in that mode; the
    *  harness drives `simulateStep` here. */
@@ -245,6 +277,30 @@ export type DeterminismHarness = {
 export type CombatDebugSnapshot = {
   shieldRemaining: number
   stunRemaining: number
+}
+
+/** Result of a `waterSync` transect. All heights in metres. */
+export type WaterSyncReport = {
+  /** Usable (deep-water) samples actually compared. */
+  samples: number
+  /** Points dropped because they fell inside the shore-wave / shoaling band
+   *  (depth < max(SHOAL_FADE_DEPTH, SHORE_BAND_DEPTH)) — `renderVertex` is
+   *  open-water-only, so shallow points would report shoaling, not pinch. */
+  skippedShallow: number
+  /** Raw field steepness Q, and the post-no-fold-clamp Q actually applied. */
+  steepness: number
+  effectiveQ: number
+  /** True when any wave zone had non-neutral factors over a usable sample. */
+  zoned: boolean
+  /** Largest |horizontal pinch displacement| seen — proves the transect
+   *  exercised the Gerstner pinch rather than degenerating to Q ≈ 0. */
+  maxDisp: number
+  /** max / RMS / mean of (sim height − mirrored render height). */
+  maxAbsDy: number
+  rmsDy: number
+  meanDy: number
+  /** Displaced world position of the worst sample. */
+  worst: { x: number; z: number; dy: number }
 }
 
 export type BikeDebugSnapshot = {
@@ -400,6 +456,88 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     isDirectionArrowOn: () => accessors.isDirectionArrowOn(),
     setCameraPose: (pose) => setCameraPoseOverride(pose),
     waterDebug: () => getWaterMesh()?.debug ?? null,
+    waterSync: (opts) => {
+      const mesh = getWaterMesh()
+      if (!mesh || !state.ready) return null
+      const field = accessors.waveField()
+      const p = state.playerSnapshot
+      const cx = opts?.x ?? p?.position.x ?? 0
+      const cz = opts?.z ?? p?.position.z ?? 0
+      const count = Math.max(2, Math.floor(opts?.count ?? 129))
+      const step = opts?.step ?? 1.5
+      const dLen = Math.hypot(opts?.dirX ?? 1, opts?.dirZ ?? 0) || 1
+      const dirX = (opts?.dirX ?? 1) / dLen
+      const dirZ = (opts?.dirZ ?? 0) / dLen
+      // Centre the transect on (cx, cz).
+      const x0 = cx - (dirX * step * (count - 1)) / 2
+      const z0 = cz - (dirZ * step * (count - 1)) / 2
+      // Past this depth both the shore wave (< SHORE_BAND_DEPTH) and the
+      // shoaling fade (< SHOAL_FADE_DEPTH) are inert, so the open-water
+      // mirror and the full sampler evaluate the same terms.
+      const deepThreshold = Math.max(SHOAL_FADE_DEPTH, SHORE_BAND_DEPTH)
+      const v = { x: 0, y: 0, z: 0 }
+      let samples = 0
+      let skippedShallow = 0
+      let sumDy = 0
+      let sumSqDy = 0
+      let maxAbsDy = 0
+      let maxDisp = 0
+      let zoned = false
+      const worst = { x: 0, z: 0, dy: 0 }
+      for (let i = 0; i < count; i++) {
+        const rx = x0 + dirX * step * i
+        const rz = z0 + dirZ * step * i
+        mesh.renderVertex(rx, rz, v)
+        if (field.shore) {
+          const s = sampleShore(field.shore, v.x, v.z)
+          if (s && s.depth < deepThreshold) {
+            skippedShallow++
+            continue
+          }
+        }
+        const fx = sampleZoneFactors(field.zones, v.x, v.z, field.time)
+        if (
+          fx.heightMult !== 1 ||
+          fx.freqMult !== 1 ||
+          fx.surgeY !== 0 ||
+          fx.bearingRad !== undefined
+        ) {
+          zoned = true
+        }
+        // The sampler adds per-bike wakes; the mirror doesn't. The wake is a
+        // closed-form world-point term (no inverse-map interaction), so
+        // subtracting it here is exact, not an approximation.
+        let wakeY = 0
+        for (const src of field.wakes) {
+          wakeY += sampleWakeFromSource(src, v.x, v.z, field.time).y
+        }
+        const dy = sampleHeight(field, v.x, v.z) - wakeY - v.y
+        const disp = Math.hypot(v.x - rx, v.z - rz)
+        if (disp > maxDisp) maxDisp = disp
+        samples++
+        sumDy += dy
+        sumSqDy += dy * dy
+        const a = Math.abs(dy)
+        if (a > maxAbsDy) {
+          maxAbsDy = a
+          worst.x = v.x
+          worst.z = v.z
+          worst.dy = dy
+        }
+      }
+      return {
+        samples,
+        skippedShallow,
+        steepness: field.steepness,
+        effectiveQ: effectiveSteepness(field),
+        zoned,
+        maxDisp,
+        maxAbsDy,
+        rmsDy: samples > 0 ? Math.sqrt(sumSqDy / samples) : 0,
+        meanDy: samples > 0 ? sumDy / samples : 0,
+        worst,
+      }
+    },
     bikes: () => {
       if (!state.ready) return []
       const sim = accessors.sim()

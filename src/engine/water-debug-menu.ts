@@ -38,15 +38,9 @@ type SliderDef = {
 
 const SLIDERS: SliderDef[] = [
   // Wave shape — the load-bearing knobs for "tuning the waves".
-  {
-    key: 'waveBearing',
-    label: 'Wave bearing',
-    min: -180,
-    max: 180,
-    step: 1,
-    format: (n) => `${n.toFixed(0)}°`,
-    hint: 'Global wave-train direction (CCW from world +X). Rotates ALL waves together so the swell can be aimed (e.g. toward an island). Render + CPU buoyancy track together — bike float math stays in sync',
-  },
+  // (Wave bearing is NOT in this table: it's track-authored data
+  // (`water.swellBearingDeg`), so its slider is a hand-built live-only
+  // row below — applied on drag, never persisted.)
   {
     key: 'steepness',
     label: 'Steepness (Q)',
@@ -255,6 +249,44 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
   type Bound = { def: SliderDef; input: HTMLInputElement; valEl: HTMLElement }
   const bound: Bound[] = []
 
+  // Wave bearing — hand-built LIVE-ONLY row, deliberately outside the
+  // SLIDERS table + persistence. The bearing is per-track authored data
+  // (`water.swellBearingDeg`, applied at boot; water-next-research.md
+  // §4.5), so this seeds from the live mesh value and any drag lasts only
+  // for the session. Persisting it was how a bearing dialed on one track
+  // silently re-aimed every other track's swell on that machine. RESET
+  // doesn't touch it either — "default" for bearing means "what the track
+  // authored", which is already what boot applied.
+  {
+    const row = document.createElement('div')
+    row.className = 'row'
+    const label = document.createElement('label')
+    label.htmlFor = 'wd-waveBearingLive'
+    label.textContent = 'Wave bearing'
+    label.title =
+      'Global wave-train direction (CCW from world +X). Authored per track via water.swellBearingDeg — this slider is a live session override and is NOT saved. Render + CPU buoyancy track together.'
+    row.appendChild(label)
+    const input = document.createElement('input')
+    input.type = 'range'
+    input.id = 'wd-waveBearingLive'
+    input.min = '-180'
+    input.max = '180'
+    input.step = '1'
+    input.value = String(water.debug.getWaveBearing())
+    row.appendChild(input)
+    const valEl = document.createElement('span')
+    valEl.className = 'val'
+    valEl.textContent = `${water.debug.getWaveBearing().toFixed(0)}°`
+    row.appendChild(valEl)
+    body.appendChild(row)
+    input.addEventListener('input', () => {
+      const v = Number.parseFloat(input.value)
+      if (!Number.isFinite(v)) return
+      water.debug.setWaveBearing(v)
+      valEl.textContent = `${v.toFixed(0)}°`
+    })
+  }
+
   // Build the sliders from the SLIDERS table.
   for (const def of SLIDERS) {
     const row = document.createElement('div')
@@ -319,9 +351,6 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'pinchDirection':
           water.debug.setPinchDirection(v)
-          break
-        case 'waveBearing':
-          water.debug.setWaveBearing(v)
           break
         case 'bodyAbsorption':
           water.debug.setBodyAbsorption(v)

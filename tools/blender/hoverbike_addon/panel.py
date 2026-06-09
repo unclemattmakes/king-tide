@@ -1295,11 +1295,15 @@ class HOVERBIKE_PT_track_water(_SelectionDrivenPanel, Panel):
         # scene prop directly, regardless of whether a volume exists.
         layout.prop(scene, "hoverbike_water_height", text="Sea level (m)")
 
-        # Wave shape — both sliders ship to JSON (water.waveHeight /
-        # waveFreq) AND drive the preview's amp/freq multipliers in
-        # real time via the debounced rebuild.
+        # Wave shape — PREVIEW-ONLY since the P0.3 hygiene pass: the old
+        # water.waveHeight / waveFreq JSON keys were dead knobs the
+        # runtime never read (real amplitude = sky.seaStateBeaufort +
+        # waveZones), so the exporter stopped emitting them. The sliders
+        # still drive the in-viewport preview's amp/freq multipliers in
+        # real time via the debounced rebuild — useful for eyeballing
+        # gate clearance against a chosen swell scale.
         layout.separator()
-        layout.label(text="Wave shape (ships to JSON):", icon="MOD_OCEAN")
+        layout.label(text="Wave shape (preview only):", icon="MOD_OCEAN")
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_water_wave_height", text="Height")
         row.prop(scene, "hoverbike_water_wave_freq", text="Freq")

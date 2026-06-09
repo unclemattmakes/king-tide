@@ -105,8 +105,8 @@ Pickups, AI-spline points, and start poses follow the same convention.
 | `surface.thickness` | Slab thickness in metres. **Default 1.0; do not set 0.** A 0-thickness plane trimesh is tunnel-prone in Rapier 0.19's discrete broadphase. |
 | `water.center` | `[x, y, z]` of the water volume center. |
 | `water.extents` | `[ex, ey, ez]` half-extents of the water box. |
-| `water.waveHeight` | Peak Gerstner amplitude. |
-| `water.waveFreq` | Per-wave frequency multiplier. |
+| `water.waveHeight` | **Blender-preview-only** amplitude multiplier for the in-viewport wave preview. No longer exported to the runtime JSON (the runtime never read it — live amplitude comes from `sky.seaStateBeaufort` + `waveZones`). |
+| `water.waveFreq` | **Blender-preview-only** frequency multiplier. Same deal as `waveHeight`. |
 | `checkpoints[].x/y/z` | Center of the gate (Blender axes). `x` defaults to 0 if omitted. |
 | `checkpoints[].halfWidth` | Lateral half-width of the gate window. |
 | `checkpoints[].height` | Vertical height of the gate window. |

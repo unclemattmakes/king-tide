@@ -4,9 +4,7 @@
   "lapsToFinish": 3,
   "environmentGlb": "/assets/tracks/dune-rally.glb",
   "water": {
-    "height": 0.0,
-    "waveHeight": 0.4,
-    "waveFreq": 0.6
+    "height": 0.0
   },
   "start": {
     "position": {

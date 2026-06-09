@@ -3,9 +3,7 @@
   "name": "Cloud Map",
   "lapsToFinish": 1,
   "water": {
-    "height": 0.0,
-    "waveHeight": 0.4,
-    "waveFreq": 0.25
+    "height": 0.0
   },
   "sky": {
     "tint": "#ffffff",
