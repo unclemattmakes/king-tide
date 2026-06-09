@@ -644,6 +644,26 @@ preview; CLAUDE.md hard rule 2).
 
 ### P1 — Readability layers (the curvature ask, directly)
 
+> ✅ **SHIPPED (2026-06-09) — pending Matt's playtest verdict on defaults.**
+> All four items landed: posterized swell-keyed value ramp (default 0.45 ×
+> 3 bands × 0.7 posterize), contour-line foam (0.55 × 0.45 m spacing,
+> fwidth-thinned, crowd-faded, 3rd-line index contours), Wind-Waker dark
+> twin (0.6, sun-away first-order offset), all live in the water debug menu
+> (`Value ramp` … `Contour relief`) and persisted per-key; the sun/bearing
+> rule + Reef Cup audit live in
+> [track-art-direction.md](./track-art-direction.md) §Cross-track rules.
+> Implementation keys on a new swell-only varying (waves 0–1, zone/shoal
+> scaled); all signals fade before the center↔outer LOD cross-fade band.
+> NOTE for future varyings: WebGPU caps vertex outputs at 16 locations and
+> the material WAS at the cap — per-vertex signals are now packed 4-per-vec4
+> (`interPackA…D` in water.ts) with ~7 locations of headroom. Verification:
+> readability A/B grid (`FOAM_SWEEP=1 FOAM_SWEEP_READABILITY=1`, captures in
+> `artifacts/readability-sweep-p1/`), within-boot perf A/B = no measurable
+> cost (p50 identical ON/OFF), Reef Cup `gen:track-shots` pass
+> (`artifacts/track-shots-p1/`) — Sandbar's calm lagoon correctly shows no
+> lines (slope gate), Texcoco's gentle swell shows them subtly (flagged as
+> the first knob-tuning question for the playtest).
+
 All fragment-only, all behind live debug-menu knobs (the cel session's
 console-only hooks are part of why that work was lost):
 
