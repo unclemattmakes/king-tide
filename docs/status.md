@@ -31,6 +31,32 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-09** — **Water P1 readability layers: posterized
+> value ramp + contour-line foam + Wind-Waker relief pair.** The wave-mastery
+> read ("where's the crest, how hard will it kick") now has dedicated render
+> signals (water-next-research P1): a crest-to-trough **value sweep posterized
+> into bands** keyed to a new **swell-only** varying (waves 0–1, zone/shoal
+> scaled — chop in the key was the cel-session failure), **iso-height contour
+> lines** in the foam language (fixed 0.45 m interval so line packing IS the
+> steepness cue; fwidth-thinned, crowd-faded, every 3rd heavier), and a
+> **dark-teal twin line** offset away from the sun (embossed relief). All six
+> knobs live in the water debug menu + persist per-key; defaults are
+> conservative and ON (calm water shows nothing — slope-gated). The sun/swell
+> bearing **track-grading rule** + Reef Cup audit are in
+> [track-art-direction.md](./track-art-direction.md). Two build notes:
+> the water material sat at WebGPU's **16-location vertex-output cap** —
+> per-vertex signals are now packed 4-per-vec4 (headroom ~7 slots for future
+> work; loose floats there kill the whole pipeline with "EntryPoint infringes
+> limits"); and the foam-sweep harness gained a readability A/B mode
+> (`FOAM_SWEEP_READABILITY=1`). Verified headed (own server, port 5402):
+> A/B grid (`artifacts/readability-sweep-p1/`), within-boot perf A/B — no
+> measurable cost (p50 identical ON/OFF on The Maw), Reef Cup
+> `gen:track-shots` (`artifacts/track-shots-p1/`). m2-water rides-waves +
+> m9-air-control fail identically on pristine main under this machine's load
+> (documented pre-existing flakes; P1 is fragment-only). **Matt's playtest
+> decides the defaults** — first flagged tuning question: contour lines on
+> gentle Beaufort-2.4 swell (Texcoco) read slightly grid-like.
+>
 > **Last updated: 2026-06-09** — **Water P0 closed out: the pinch is exonerated
 > (Q trusted) + authoring hygiene.** P0.2 — the Gerstner steepness distrust
 > ("physics out of phase with visuals") got its instrumented verdict: a new

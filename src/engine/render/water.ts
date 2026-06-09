@@ -10,6 +10,7 @@ import {
   exp,
   Fn,
   float,
+  floor,
   fract,
   fwidth,
   If,
@@ -247,6 +248,23 @@ export type WaterMesh = {
      *  down wave faces (painterly brushstrokes). 0 = isotropic bubbles only
      *  (legacy); 1 = baseline streaks. */
     setFoamStreak(s: number): void
+    /** P1 readability — crest-to-trough value-ramp strength, 0..1. Scales the
+     *  posterized "one value sweep per wave face" brightness modulation
+     *  (water-next-research §8 P1.1). 0 = off. */
+    setRampStrength(s: number): void
+    /** P1 readability — number of posterize bands in the value ramp, 2..5. */
+    setRampSteps(n: number): void
+    /** P1 readability — 0 = continuous ramp, 1 = fully quantized bands. */
+    setRampPosterize(s: number): void
+    /** P1 readability — contour-line foam strength, 0..1.5 (§8 P1.2). The
+     *  iso-height "topo lines" whose packing IS the steepness cue. 0 = off. */
+    setContourStrength(s: number): void
+    /** P1 readability — vertical interval between contour lines, metres
+     *  (0.2..1.5). Smaller = more lines = finer height reading. */
+    setContourSpacing(m: number): void
+    /** P1 readability — Wind-Waker dark-twin strength, 0..1 (§8 P1.3). Draws
+     *  a dark teal line offset away from the sun beside each light line. */
+    setContourRelief(s: number): void
     /** Render the wave geometry as wireframe. Useful for tuning wave /
      *  wake amplitudes against the actual displacement. */
     setWireframe(on: boolean): void
@@ -300,6 +318,18 @@ export type WaterDebugDefaults = {
   /** Foam warmth 0..2: light-driven warm tint + bloom on sun-raked foam.
    *  1 = baseline, 0 = flat white (legacy). */
   foamWarmth: number
+  /** P1 readability ramp strength 0..1 (posterized value sweep). */
+  rampStrength: number
+  /** P1 readability ramp band count, 2..5. */
+  rampSteps: number
+  /** P1 readability ramp posterize blend, 0..1. */
+  rampPosterize: number
+  /** P1 readability contour-line strength, 0..1.5. */
+  contourStrength: number
+  /** P1 readability contour spacing, metres. */
+  contourSpacing: number
+  /** P1 readability relief (dark twin) strength, 0..1. */
+  contourRelief: number
   /** Foam streaks 0..2: flow-aligned directional combing down wave faces.
    *  1 = baseline, 0 = isotropic bubbles only (legacy). */
   foamStreak: number
@@ -1179,6 +1209,70 @@ export function createWaterMesh(
     },
   )
 
+  // Swell-only twin of `gerstnerHeight`: sums ONLY the two long-period swells
+  // (SWELL_INDICES), same live amps / zone factors / bearing math as the full
+  // sum. The P1 readability layers (value ramp + contour-line foam,
+  // water-next-research.md §8 P1) key on THIS field rather than the full
+  // height: the 2026-06-06 cel experiment showed chop in the key carves the
+  // bands/lines into squiggles, while the swell-only field gives one clean
+  // sweep per readable wave face (§4.3). Costs two extra sin/cos pairs per
+  // vertex on top of the existing ~30.
+  const gerstnerSwellHeight = Fn(
+    ([x, z, t, zHeightMult, zFreqMult, zCosB, zSinB]: [
+      unknown,
+      unknown,
+      unknown,
+      unknown,
+      unknown,
+      unknown,
+      unknown,
+    ]) => {
+      const xN = x as ReturnType<typeof float>
+      const zN = z as ReturnType<typeof float>
+      const tN = t as ReturnType<typeof float>
+      const hm = zHeightMult as ReturnType<typeof float>
+      const fm = zFreqMult as ReturnType<typeof float>
+      const cosB = zCosB as ReturnType<typeof float>
+      const sinB = zSinB as ReturnType<typeof float>
+      const xRot = xN.mul(cosB).add(zN.mul(sinB))
+      const zRot = zN.mul(cosB).sub(xN.mul(sinB))
+      const y = float(0).toVar()
+      const rotDydx = float(0).toVar()
+      const rotDydz = float(0).toVar()
+      for (let i = 0; i < waveConsts.length; i++) {
+        if (!SWELL_INDICES.has(i)) continue
+        const w = waveConsts[i]!
+        // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
+        const ampI = waveAmpUniform.element(i) as any
+        const ampZ = hm.mul(ampI)
+        const phase = float(w.k * w.dirX)
+          .mul(xRot)
+          .add(float(w.k * w.dirZ).mul(zRot))
+          .sub(tN.mul(w.omega))
+          .mul(fm)
+          .add(float(w.phase))
+        const s = sin(phase)
+        const c = cos(phase)
+        y.addAssign(s.mul(ampZ))
+        rotDydx.addAssign(
+          c
+            .mul(ampZ)
+            .mul(float(w.k * w.dirX))
+            .mul(fm),
+        )
+        rotDydz.addAssign(
+          c
+            .mul(ampZ)
+            .mul(float(w.k * w.dirZ))
+            .mul(fm),
+        )
+      }
+      const dydx = rotDydx.mul(cosB).sub(rotDydz.mul(sinB))
+      const dydz = rotDydx.mul(sinB).add(rotDydz.mul(cosB))
+      return vec3(y, dydx, dydz)
+    },
+  )
+
   // Analytic crest signals for curvature-based whitecap foam (foam pass v3).
   // Two extra sums over the same waves the height uses — both reuse sin/cos so
   // they cost almost nothing, and both are STEEPNESS-INDEPENDENT: they read the
@@ -1729,16 +1823,6 @@ export function createWaterMesh(
     positionLocal.z.add(attenDispZ),
   )
 
-  // Forward height + gradient + qSum + accumulated foam to fragment via
-  // varyings. The framework marks these as vertex-stage and inserts the
-  // interpolated reads. Extra varyings carry the depth + shoaling factor
-  // so the fragment surf foam can pulse with incoming wave crests.
-  const heightFrag = varying(totalHeight)
-  const dydx = varying(totalDydx)
-  const dydz = varying(totalDydz)
-  const qSumFrag = varying(attenQSum)
-  const foamAccumFrag = varying(vertexFoamAccum)
-  const waterDepthFrag = varying(vertexWaterDepth)
   // Curvature + leading-edge signals for the curvature-based whitecap (foam v3).
   // Attenuated by the same shoaling factor as the geometry, so shallow water —
   // where the waves are damped flat — doesn't sprout foam from residual
@@ -1753,8 +1837,6 @@ export function createWaterMesh(
     zoneCosBearing,
     zoneSinBearing,
   )
-  const crestCurvFrag = varying(crestSignals.x.mul(shoalFactor))
-  const crestRiseFrag = varying(crestSignals.y.mul(shoalFactor))
   // Wave-peak mask — the magnitude of the horizontal Tessendorf
   // displacement (λ·Dx, λ·Dz) already in `attenDispX`/`attenDispZ`.
   // Sea of Thieves' SIGGRAPH 2018 talk credits this signal as the
@@ -1768,15 +1850,63 @@ export function createWaterMesh(
   // attenDispX/Z are the closed-form Tessendorf horizontal pinch
   // (qSum·Dx, qSum·Dz) summed across the 6 waves.
   const peakSignal = attenDispX.mul(attenDispX).add(attenDispZ.mul(attenDispZ)).sqrt()
-  const peakMaskFrag = varying(peakSignal)
-  // Pre-attenuation wave height — the height the swells/chops WOULD have
-  // had at this position if shoaling didn't shrink them. The fragment surf
-  // pulse reads this so breakers fire with the natural cadence of incoming
-  // crests even where geometry has gone flat.
-  const ambientHeightFrag = varying(vertexHeight.x)
-  // Shore-wave displacement, forwarded so the shoreline surf foam pulses with
-  // the shoreward-marching breakers (not just the deep-swell cadence).
-  const shoreHeightFrag = varying(shoreY)
+  // Swell-only height + world-frame gradient for the P1 readability layers
+  // (value ramp + contour-line foam — see the fragment block below).
+  // Shoal-scaled like the drawn geometry so the layers die out in shallows
+  // alongside the swell itself. Shore / surge / wake terms are deliberately
+  // EXCLUDED: surge lifts a whole zone uniformly (iso-lines keyed on it
+  // would detach from the swell shape), and wakes/shore carry their own
+  // foam languages. The gradient also powers the relief twin's first-order
+  // offset re-sample, so it must carry the same zone/shoal scaling as the
+  // height.
+  const swellSig = gerstnerSwellHeight(
+    worldX,
+    worldZ,
+    tNode,
+    zoneHeightMult,
+    zoneFreqMult,
+    zoneCosBearing,
+    zoneSinBearing,
+  )
+  const swellScaled = swellSig.mul(shoalFactor)
+
+  // Forward the per-vertex signals to the fragment stage, PACKED four to a
+  // vec4. WebGPU caps vertex outputs at 16 LOCATIONS and every varying —
+  // even a single float — burns a whole location; the eleven loose float
+  // varyings this material used to declare put it at exactly the cap, and
+  // the P1 swell varying pushed it to 17 ("EntryPoint main infringes
+  // limits" → the whole surface vanished). Packing is numerically a no-op
+  // (interpolation is per-component) and leaves ~7 locations of headroom
+  // for future signals. The unpacked names keep every downstream read
+  // source-identical.
+  const interPackA = varying(vec4(totalHeight, totalDydx, totalDydz, attenQSum))
+  const heightFrag = interPackA.x
+  const dydx = interPackA.y
+  const dydz = interPackA.z
+  const qSumFrag = interPackA.w
+  const interPackB = varying(
+    vec4(
+      vertexFoamAccum,
+      vertexWaterDepth,
+      crestSignals.x.mul(shoalFactor),
+      crestSignals.y.mul(shoalFactor),
+    ),
+  )
+  const foamAccumFrag = interPackB.x
+  const waterDepthFrag = interPackB.y
+  const crestCurvFrag = interPackB.z
+  const crestRiseFrag = interPackB.w
+  // Pack C: peak mask + pre-attenuation ambient height (the surf pulse
+  // reads it so breakers keep the incoming-crest cadence where geometry
+  // went flat) + shore-wave displacement + the P1 swell-only height.
+  const interPackC = varying(vec4(peakSignal, vertexHeight.x, shoreY, swellScaled.x))
+  const peakMaskFrag = interPackC.x
+  const ambientHeightFrag = interPackC.y
+  const shoreHeightFrag = interPackC.z
+  const swellHeightFrag = interPackC.w
+  const interPackD = varying(vec2(swellScaled.y, swellScaled.z))
+  const swellDydxFrag = interPackD.x
+  const swellDydzFrag = interPackD.y
 
   // Sub-Gerstner detail-normal cascades. Two world-XZ-aligned samples of the
   // procedural wave-detail texture at different tile sizes + scroll speeds,
@@ -2860,6 +2990,150 @@ export function createWaterMesh(
     reflectorTarget = m.target
   }
 
+  // ── P1 readability layers (water-next-research.md §5, §8 P1) ─────────
+  // Fragment-only signals that make the SWELL SHAPE readable at race speed,
+  // pairing the two channels the perception research says reinforce each
+  // other (shaded relief + contours beat either alone):
+  //
+  //  1. Crest-to-trough VALUE RAMP, posterized into bands — "one value
+  //     sweep per wave face" (the Wave Race 64 lesson). Keyed to the
+  //     swell-only varying; band BOUNDARIES are the signal, and posterizing
+  //     a smooth field preserves the orientation flow that carries shape
+  //     (Fleming et al.). NOTE this is intentionally the opposite call from
+  //     the old "height isolines" bug fix at `heightNorm` above: those bands
+  //     were accidental, full-spectrum (chop included) and uncontrolled —
+  //     these are swell-only, quantized on purpose, and behind live knobs.
+  //  2. CONTOUR-LINE FOAM — thin iso-height lines off the same swell-only
+  //     field (the re-landed 2026-06-06 cel-session layer, §4.3). A fixed
+  //     height interval means lines pack together exactly where the face
+  //     steepens — line density IS the steepness cue (the topo-map
+  //     property). fwidth keeps the width ~constant in pixels, and the
+  //     lines fade wherever they'd crowd below a few pixels (the known
+  //     distant-moiré failure), with every 3rd line heavier (cartographic
+  //     index contours) so the eye can count big intervals at a glance.
+  //  3. WIND-WAKER RELIEF PAIR — the same line mask re-sampled on a height
+  //     extrapolated a small step AWAY from the sun (first-order, via the
+  //     swell gradient varying) paints a dark-teal twin beside each light
+  //     line: the cheapest "embossed relief" read.
+  //
+  // All three die out (a) in shallows (the varyings are shoal-scaled), (b)
+  // toward the center↔outer LOD cross-fade band (the outer tile doesn't run
+  // them, so they fade before the seam could show a tonal step), and (c)
+  // the ramp additionally backs off as the sun climbs — at high noon the
+  // luminance field frequency-doubles against the surface and extra band
+  // contrast reads as dirt, not shape (the cel session's auto-centering
+  // lesson, simplified to a guard).
+  const RAMP_STRENGTH_DEFAULT = 0.45
+  const RAMP_STEPS_DEFAULT = 3
+  const RAMP_POSTERIZE_DEFAULT = 0.7
+  const CONTOUR_STRENGTH_DEFAULT = 0.55
+  const CONTOUR_SPACING_DEFAULT = 0.45
+  const CONTOUR_RELIEF_DEFAULT = 0.6
+  const rampStrengthUniform = uniform(RAMP_STRENGTH_DEFAULT)
+  const rampStepsUniform = uniform(RAMP_STEPS_DEFAULT)
+  const rampPosterizeUniform = uniform(RAMP_POSTERIZE_DEFAULT)
+  const contourStrengthUniform = uniform(CONTOUR_STRENGTH_DEFAULT)
+  const contourSpacingUniform = uniform(CONTOUR_SPACING_DEFAULT)
+  const contourReliefUniform = uniform(CONTOUR_RELIEF_DEFAULT)
+
+  // Normalised swell phase 0..1 across the LIVE swell envelope — the amps
+  // come from the same mirrored uniform buoyancy uses, so Beaufort, the
+  // lap-weather storm ramp and the menu sliders keep the bands centred.
+  // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
+  const swellAmp0 = waveAmpUniform.element(0) as any
+  // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
+  const swellAmp1 = waveAmpUniform.element(1) as any
+  const swellSpan = max(abs(float(swellAmp0)).add(abs(float(swellAmp1))), float(0.05))
+  const rampT = clamp(
+    swellHeightFrag.div(swellSpan.mul(float(2))).add(float(0.5)),
+    float(0),
+    float(1),
+  )
+  const rampStepsF = max(rampStepsUniform, float(2))
+  const rampQ = clamp(
+    floor(rampT.mul(rampStepsF)).add(float(0.5)).div(rampStepsF),
+    float(0),
+    float(1),
+  )
+  const rampMix = mix(rampT, rampQ, rampPosterizeUniform)
+  const sunHighGuard = mix(
+    float(1.0),
+    float(0.55),
+    smoothstep(float(0.55), float(0.9), sunDirUniform.y),
+  )
+  const rampDistFade = float(1).sub(smoothstep(float(130), float(260), camDist))
+  // Value sweep, multiplicative around 1 so the Beer-Lambert body + scatter
+  // hues keep their identity; warm/teal duality rides on top — crest bands
+  // lean warm only as much as the sky itself is warm (sunset palette), so
+  // the duality self-disables at midday instead of dyeing the sea.
+  const rampDeviation = rampMix
+    .sub(float(0.5))
+    .mul(rampStrengthUniform)
+    .mul(float(0.55))
+    .mul(sunHighGuard)
+    .mul(rampDistFade)
+  const rampBandTint = mix(vec3(0.94, 1.0, 1.04), vec3(1.06, 1.0, 0.95), rampMix)
+  const rampTint = mix(vec3(1, 1, 1), rampBandTint, skyWarmth.mul(rampDistFade))
+
+  // Contour lines. Slope gate: fract(h/spacing) degenerates into giant
+  // on/off regions on near-flat water (which needs no shape cue anyway).
+  const swellSlopeMag = sqrt(swellDydxFrag.mul(swellDydxFrag).add(swellDydzFrag.mul(swellDydzFrag)))
+  const contourSlopeGate = smoothstep(float(0.02), float(0.06), swellSlopeMag)
+  // Screen-space height derivative — line width stays ~constant in pixels
+  // on any face angle, and lines fade out where they'd pack below ~5 px.
+  const swellHeightPx = max(fwidth(swellHeightFrag), float(1e-5))
+  const contourSpacing = max(contourSpacingUniform, float(0.1))
+  // Plain JS helper (compile-time unrolled, not a TSL Fn): node params are
+  // typed loosely because derived/varying float nodes don't satisfy the
+  // narrower VarNode the `float()` constructor returns.
+  const contourLineMask = (h: unknown, spacingN: unknown, widthPx: number) => {
+    const hN = h as ReturnType<typeof float>
+    const spN = spacingN as ReturnType<typeof float>
+    const ph = fract(hN.div(spN))
+    const distH = min(ph, float(1).sub(ph)).mul(spN)
+    const w = swellHeightPx.mul(float(widthPx))
+    return float(1).sub(smoothstep(w.mul(float(0.5)), w.mul(float(1.5)), distH))
+  }
+  const contourMinor = contourLineMask(swellHeightFrag, contourSpacing, 1.1)
+  const contourIndex = contourLineMask(swellHeightFrag, contourSpacing.mul(float(3)), 2.0)
+  const contourCrowdFade = float(1).sub(
+    smoothstep(contourSpacing.div(float(9)), contourSpacing.div(float(4.5)), swellHeightPx),
+  )
+  const contourDistFade = float(1).sub(smoothstep(float(160), float(300), camDist))
+  const contourBase = max(contourMinor.mul(float(0.75)), contourIndex)
+    .mul(contourSlopeGate)
+    .mul(contourCrowdFade)
+    .mul(contourDistFade)
+  const contourLight = clamp(contourBase.mul(contourStrengthUniform), float(0), float(1))
+  // Relief twin: extrapolate the swell height a small step away from the
+  // sun (horizontal), re-run the same line masks, draw dark where the
+  // light line isn't. First-order h + ∇h·offset is exact enough at swell
+  // wavelengths (50–85 m) for a sub-meter offset, and the gradient varying
+  // carries the zone/shoal scaling so the twin hugs the drawn surface.
+  const sunAwayLen = max(
+    sqrt(sunDirUniform.x.mul(sunDirUniform.x).add(sunDirUniform.z.mul(sunDirUniform.z))),
+    float(1e-3),
+  )
+  const RELIEF_OFFSET_M = 0.55
+  const reliefShift = swellDydxFrag
+    .mul(sunDirUniform.x.negate().div(sunAwayLen))
+    .add(swellDydzFrag.mul(sunDirUniform.z.negate().div(sunAwayLen)))
+    .mul(float(RELIEF_OFFSET_M))
+  const swellHeightShifted = swellHeightFrag.add(reliefShift)
+  const contourMinorD = contourLineMask(swellHeightShifted, contourSpacing, 1.1)
+  const contourIndexD = contourLineMask(swellHeightShifted, contourSpacing.mul(float(3)), 2.0)
+  const contourDark = clamp(
+    max(contourMinorD.mul(float(0.75)), contourIndexD)
+      .mul(contourSlopeGate)
+      .mul(contourCrowdFade)
+      .mul(contourDistFade)
+      .mul(contourReliefUniform)
+      .mul(contourStrengthUniform)
+      .mul(float(1).sub(contourLight)),
+    float(0),
+    float(1),
+  )
+
   // Albedo composition: deep/scatter blend → planar reflection (Fresnel-
   // weighted) → aerial perspective haze → foam paints over the result.
   // Foam comes LAST so it still reads as opaque white where it fires
@@ -2900,8 +3174,20 @@ export function createWaterMesh(
   const aerialMix = smoothstep(float(120), float(280), camDist).mul(float(0.25))
   const surfaceColor = mix(reflectedOrBase, horizonHazeUniform, aerialMix)
 
+  // P1 layers land here: the posterized value sweep + warm/teal band tint
+  // modulate the shaded surface, the dark relief twin carves its line, and
+  // the light contour line joins the foam mask so it inherits the foam
+  // color/warmth (it IS foam — the §4.3 layer re-landed inside the stack).
+  const surfaceReadable = surfaceColor.mul(float(1).add(rampDeviation)).mul(rampTint)
+  const surfaceWithRelief = mix(
+    surfaceReadable,
+    deepColor.mul(float(0.7)),
+    contourDark.mul(float(0.8)),
+  )
+  const foamMaskWithContours = max(foamMask, contourLight)
+
   const albedo = mix(
-    mix(surfaceColor, foamColorLit, foamMask),
+    mix(surfaceWithRelief, foamColorLit, foamMaskWithContours),
     centerDebugColorUniform,
     debugColorizeMixUniform,
   )
@@ -2989,7 +3275,12 @@ export function createWaterMesh(
   // and the bloom pass (post-pipeline) catches them as a warm sunset bloom —
   // the glowing crests of the concept frames. The base 0.5 keeps shadowed
   // foam readable; the bonus tops out at +0.5 on fully sun-raked crests.
-  const foamEmissive = foamColorLit.mul(foamMask).mul(float(0.5).add(foamWarmRake.mul(float(0.5))))
+  // Contour lines join at half weight — enough emissive lift to stay
+  // readable in cliff shadow without blooming like a breaking crest.
+  const foamEmissiveMask = max(foamMask, contourLight.mul(float(0.5)))
+  const foamEmissive = foamColorLit
+    .mul(foamEmissiveMask)
+    .mul(float(0.5).add(foamWarmRake.mul(float(0.5))))
 
   // Crest-mist ribbon — a soft wind-spray haze lofted on the upper faces of
   // steep breaking crests, biased toward grazing view angles + distance where
@@ -3109,6 +3400,12 @@ export function createWaterMesh(
     whitecapMode: WHITECAP_MODE_DEFAULT,
     foamWarmth: FOAM_WARMTH_DEFAULT,
     foamStreak: FOAM_STREAK_DEFAULT,
+    rampStrength: RAMP_STRENGTH_DEFAULT,
+    rampSteps: RAMP_STEPS_DEFAULT,
+    rampPosterize: RAMP_POSTERIZE_DEFAULT,
+    contourStrength: CONTOUR_STRENGTH_DEFAULT,
+    contourSpacing: CONTOUR_SPACING_DEFAULT,
+    contourRelief: CONTOUR_RELIEF_DEFAULT,
     wireframe: wireFlag,
     colorize: false,
   }
@@ -3225,6 +3522,25 @@ export function createWaterMesh(
       // 0..2 — scales the flow-aligned directional foam combing. 0 = isotropic
       // bubbles only (legacy); 1 = baseline streaks; >1 = deeper-cut stripes.
       foamStreakUniform.value = clamp01(s, 0, 2)
+    },
+    // P1 readability layers — all fragment-only uniforms, no rebuild.
+    setRampStrength(s) {
+      rampStrengthUniform.value = clamp01(s, 0, 1)
+    },
+    setRampSteps(n) {
+      rampStepsUniform.value = clamp01(Math.round(n), 2, 5)
+    },
+    setRampPosterize(s) {
+      rampPosterizeUniform.value = clamp01(s, 0, 1)
+    },
+    setContourStrength(s) {
+      contourStrengthUniform.value = clamp01(s, 0, 1.5)
+    },
+    setContourSpacing(m) {
+      contourSpacingUniform.value = clamp01(m, 0.2, 1.5)
+    },
+    setContourRelief(s) {
+      contourReliefUniform.value = clamp01(s, 0, 1)
     },
     setShoreWaveStrength(s) {
       // 0..2 — scales the shore-aligned breaker amplitude. Mirrors the

@@ -303,6 +303,30 @@ A few things every track art pass should honour (from
   supports, never competes.
 - **Light explorer touch.** A planted Circuit flag at the set-piece, maybe one
   base-camp cluster near the grid — don't overdo it.
+- **Sun + swell bearing rule (wave readability — P1.4,
+  [water-next-research.md](./water-next-research.md) §5).** Light direction is
+  not a vibe choice: frontal light makes luminance "frequency-double" against
+  the swell (two bright cycles per bump — actively misleading), while a **low,
+  raking, cross-track sun** maximises how well a rider reads an approaching
+  face. On every wave-reading section the grade must satisfy: sun LOW
+  (sunset/sunrise band — our default palette already is), and **cross-track or
+  over-shoulder relative to the section's travel direction — never dead-ahead
+  down a wave straight** (silhouetted faces) and never dead-behind at noon
+  height. Both levers are per-track JSON: `sky.timeOfDay` (sun) and
+  `water.swellBearingDeg` (swell train; absent = the global 47°). When a
+  layout forces a sun-aligned straight, re-aim the *swell* instead of the sun
+  — the bearing is the cheaper, grade-neutral lever. Verify in the
+  chase-cam `pnpm gen:track-shots` captures: on wave sections you should see
+  lit face / shadowed back per swell, not a uniform glare field.
+
+  **Reef Cup audit (2026-06-09, at the time of the P1 pass):** none of the
+  trio authors `swellBearingDeg` yet (all ride the global 47°). Sandbar
+  `timeOfDay 0.0` / Beaufort 1, Texcoco Rising `0.85` / 2.4, Cape Town Drift
+  `125.0` / 2 — mixed encodings (normalized vs degrees) that resolve through
+  `SkySystem.setTimeOfDay`. Action for the per-track grade passes: check each
+  map's main wave-reading straights against the rule in the track-shot
+  captures, and author `swellBearingDeg` where a straight runs sun-aligned.
+  Playtest verdict (Matt's hands) outranks the captures.
 
 ## References
 

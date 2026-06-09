@@ -28,6 +28,11 @@ import type { WaterDebugDefaults, WaterMesh } from './render/water'
 // point: a bearing dialed on one track must never silently re-aim every
 // other track's swell on that machine.
 //
+// No key bump for the P1 readability layers either: rampStrength/rampSteps/
+// rampPosterize/contourStrength/contourSpacing/contourRelief are ADDED keys
+// (missing-key -> new default via the loader), so returning users pick up the
+// readability defaults and keep their other tuning.
+//
 // v9 bump (prior): dropped the spectrum/FFT-only knobs (choppiness,
 // seaStateIntensity, windSpeed, windDirection, windCutoff, foamPersistence)
 // along with the FFT path itself.
@@ -56,6 +61,12 @@ export type WaterDebugSettings = {
   whitecapMode: number
   foamWarmth: number
   foamStreak: number
+  rampStrength: number
+  rampSteps: number
+  rampPosterize: number
+  contourStrength: number
+  contourSpacing: number
+  contourRelief: number
   wireframe: boolean
   colorize: boolean
 }
@@ -84,6 +95,12 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     whitecapMode: d.whitecapMode,
     foamWarmth: d.foamWarmth,
     foamStreak: d.foamStreak,
+    rampStrength: d.rampStrength,
+    rampSteps: d.rampSteps,
+    rampPosterize: d.rampPosterize,
+    contourStrength: d.contourStrength,
+    contourSpacing: d.contourSpacing,
+    contourRelief: d.contourRelief,
     wireframe: d.wireframe,
     colorize: d.colorize,
   }
@@ -148,6 +165,12 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setWhitecapMode(s.whitecapMode)
   water.debug.setFoamWarmth(s.foamWarmth)
   water.debug.setFoamStreak(s.foamStreak)
+  water.debug.setRampStrength(s.rampStrength)
+  water.debug.setRampSteps(s.rampSteps)
+  water.debug.setRampPosterize(s.rampPosterize)
+  water.debug.setContourStrength(s.contourStrength)
+  water.debug.setContourSpacing(s.contourSpacing)
+  water.debug.setContourRelief(s.contourRelief)
   water.debug.setWireframe(s.wireframe)
   water.debug.setColorize(s.colorize)
 }
