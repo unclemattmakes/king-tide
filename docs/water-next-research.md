@@ -686,10 +686,25 @@ Matt playtests — the readability claim is only provable by hands + eyes.
 
 ### P2 — Nuance + anti-repetition
 
-1. **Wave sets/groups** (§7.2) — bichromatic swell pairs (deliberate, tuned
-   beat periods) and/or slow analytic envelopes via the existing amplitude
-   mirror; foam/ramp brightness follows the envelope; tune set period per
-   track (calm tutorial = none; Cape Town = pronounced ~60 s sets).
+1. ✅ **Wave sets/groups** (§7.2) — **SHIPPED (2026-06-09)** as an analytic
+   envelope: `water.swellSets {periodS, depth, phase?}` →
+   `1 + depth·sin(2π·t/periodS + φ)` multiplying the ambient amplitude in
+   both samplers + every GPU layer via the zone-heightMult slot
+   (`waveSetFactor` in wave-field.ts / `setEnvNode` in water.ts — a
+   first-class field term rather than the doc's amplitude-mutation sketch,
+   so it can't compound with Beaufort / lap-weather / menu writers and
+   replays stay pure-in-t; exact `vy` rate term included for hover
+   damping). Foam/whitecaps + the P1 ramp follow automatically (they're
+   amplitude-driven). The accidental 24 s bichromatic pair stays as the
+   global texture beat (see the `defaultWaves` note for why the authorable
+   rhythm is the envelope, not per-track pair re-spacing). Cape Town
+   authors `{60 s, 0.3}` (playtest-gated); live-only menu rows (Set
+   period / Set depth) for tuning. Verified:
+   [wave-sets.test.ts](../tests/unit/wave-sets.test.ts) (purity +
+   hand-scaled-amplitude equivalence oracle + vy finite-difference) and
+   [wave-set-sync.spec.ts](../tests/e2e/wave-set-sync.spec.ts) (waterSync
+   ≤ 1.2e-6 m across three phases of Cape Town's cycle; set-high/low
+   captures in `artifacts/wave-set-sync/`).
 2. **Per-track spectrum presets** (§7.1) — `water.spectrum` JSON block
    (preset name + seed + spread + swell/chop balance), generator emits the
    `Wave[]`; perf-gate the vertex-displacing count (measure 8/12/16 on the

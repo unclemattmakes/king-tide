@@ -265,6 +265,16 @@ export type WaterMesh = {
     /** P1 readability — Wind-Waker dark-twin strength, 0..1 (§8 P1.3). Draws
      *  a dark teal line offset away from the sun beside each light line. */
     setContourRelief(s: number): void
+    /** P2.1 wave sets — envelope period in seconds (0 = off). Writes the
+     *  FIELD (the sim source of truth, like setWaveBearing); tick() mirrors
+     *  to the GPU. Track-authored via `water.swellSets` — the menu rows are
+     *  live session overrides, not persisted. */
+    setSwellSetPeriod(s: number): void
+    /** P2.1 wave sets — envelope depth 0..0.6 (amplitude swings ±depth
+     *  around the static sea state). 0 = off. */
+    setSwellSetDepth(d: number): void
+    /** Current swell-set envelope params (for live-only menu rows). */
+    getSwellSet(): { periodS: number; depth: number }
     /** Render the wave geometry as wireframe. Useful for tuning wave /
      *  wake amplitudes against the actual displacement. */
     setWireframe(on: boolean): void
@@ -801,6 +811,21 @@ export function createWaterMesh(
   // bearing locally, so a single pre-computed cos/sin pair no longer
   // covers the whole surface).
   const waveBearingDegUniform = uniform(WAVE_BEARING_DEFAULT)
+
+  // Wave-set envelope (water-next-research §7.2) — `1 + depth·sin(ω·t + φ)`
+  // multiplying the ambient amplitude on EVERY layer (center / outer /
+  // skirt) via the zone heightMult slot. The three scalars mirror
+  // `field.swellSet*` each tick() (omega pre-derived from periodS, depth
+  // gated to 0 when the period is unset) so CPU buoyancy — which applies
+  // `waveSetFactor` to the same slot — and the rendered surface breathe
+  // through a set in lockstep. Pure function of the shared sim clock, so
+  // it's deterministic and replay-safe by construction.
+  const swellSetOmegaUniform = uniform(0)
+  const swellSetDepthUniform = uniform(0)
+  const swellSetPhaseUniform = uniform(0)
+  const setEnvNode = float(1).add(
+    swellSetDepthUniform.mul(sin(tNode.mul(swellSetOmegaUniform).add(swellSetPhaseUniform))),
+  )
 
   // ---- Tunable scalars (water debug menu) -------------------------------
   // Each is a uniform so the menu can scrub it live without rebuilding the
@@ -1587,7 +1612,11 @@ export function createWaterMesh(
   // (1, 1, global bearing, 0) and the surface is bit-identical to the
   // pre-zone shader.
   const zoneFx = waveZoneFactors(worldX, worldZ, tNode)
-  const zoneHeightMult = zoneFx.x
+  // Wave-set envelope rides the same amplitude-multiplier slot as the
+  // zones — every wave function below (height, disp, crest signals, foam
+  // accumulator, swell-only signals) inherits it through this one product,
+  // exactly like the CPU samplers' `envHeightMult`.
+  const zoneHeightMult = zoneFx.x.mul(setEnvNode)
   const zoneFreqMult = zoneFx.y
   const zoneCosBearing = cos(zoneFx.z)
   const zoneSinBearing = sin(zoneFx.z)
@@ -3542,6 +3571,20 @@ export function createWaterMesh(
     setContourRelief(s) {
       contourReliefUniform.value = clamp01(s, 0, 1)
     },
+    // P2.1 wave-set envelope — the field owns the params (CPU buoyancy reads
+    // them via waveSetFactor); tick() mirrors them to the GPU uniforms.
+    setSwellSetPeriod(s) {
+      field.swellSetPeriodS = clamp01(s, 0, 180)
+    },
+    setSwellSetDepth(d) {
+      // 0.6 cap: past that the trough phase of a set (factor 0.4) starts
+      // reading as "the sea turned off", and the crest phase (1.6×) can
+      // push high-Beaufort tracks into constant whitecap.
+      field.swellSetDepth = clamp01(d, 0, 0.6)
+    },
+    getSwellSet() {
+      return { periodS: field.swellSetPeriodS, depth: field.swellSetDepth }
+    },
     setShoreWaveStrength(s) {
       // 0..2 — scales the shore-aligned breaker amplitude. Mirrors the
       // value onto the CPU field so buoyancy rides the same waves the
@@ -3737,11 +3780,15 @@ export function createWaterMesh(
   const outerZoneFx = waveZoneFactors(outerWorldX, outerWorldZ, tNode)
   const outerZoneCosB = cos(outerZoneFx.z)
   const outerZoneSinB = sin(outerZoneFx.z)
+  // Same zone × set-envelope amplitude slot as the center mesh — an
+  // envelope swelling the center but not the outer would show as a
+  // breathing seam at the 380→480 m cross-fade band.
+  const outerHeightMult = outerZoneFx.x.mul(setEnvNode)
   const outerGerst = gerstnerHeight(
     outerWorldX,
     outerWorldZ,
     tNode,
-    outerZoneFx.x,
+    outerHeightMult,
     outerZoneFx.y,
     outerZoneCosB,
     outerZoneSinB,
@@ -3750,7 +3797,7 @@ export function createWaterMesh(
     outerWorldX,
     outerWorldZ,
     tNode,
-    outerZoneFx.x,
+    outerHeightMult,
     outerZoneFx.y,
     outerZoneCosB,
     outerZoneSinB,
@@ -3979,7 +4026,8 @@ export function createWaterMesh(
       skirtWorldX,
       skirtWorldZ,
       tNode,
-      skirtZoneFx.x,
+      // Zone × set envelope, matching the center + outer layers.
+      skirtZoneFx.x.mul(setEnvNode),
       skirtZoneFx.y,
       cos(skirtZoneFx.z),
       sin(skirtZoneFx.z),
@@ -4076,6 +4124,15 @@ export function createWaterMesh(
     // live amplitudes that Beaufort / lap-weather / the menu mutate. The CPU
     // buoyancy sampler clamps identically, so render + physics pinch the same.
     steepnessUniform.value = effectiveSteepness(field)
+    // Wave-set envelope params — field-owned (the CPU sampler reads them
+    // via waveSetFactor), mirrored every frame like the amplitudes so the
+    // two sides can never disagree on the set rhythm. Omega pre-derived;
+    // depth gated to 0 for an unset/invalid period (matches the CPU's
+    // early-out in waveSetFactor).
+    const setOn = field.swellSetPeriodS > 0 && field.swellSetDepth > 0
+    swellSetOmegaUniform.value = setOn ? (2 * Math.PI) / field.swellSetPeriodS : 0
+    swellSetDepthUniform.value = setOn ? field.swellSetDepth : 0
+    swellSetPhaseUniform.value = field.swellSetPhase
     // Sync the world water-surface Y from the mesh so the shoaling /
     // surf shader reads the right "what's the sea level" value even
     // when callers mutate `mesh.position.y` directly (e.g. tracks with
@@ -4130,12 +4187,21 @@ export function createWaterMesh(
     const pinchCos = pinchCosUniform.value as number
     const pinchSin = pinchSinUniform.value as number
     const steep = steepnessUniform.value as number
+    // Wave-set envelope — mirror the GPU exactly: recompute the factor
+    // from the SYNCED uniforms (not the field) so this stays a faithful
+    // twin of what the vertex stage evaluates this frame.
+    const envFactor =
+      1 +
+      (swellSetDepthUniform.value as number) *
+        Math.sin(
+          t * (swellSetOmegaUniform.value as number) + (swellSetPhaseUniform.value as number),
+        )
     let y = 0
     let dxRot = 0
     let dzRot = 0
     for (let i = 0; i < waveConsts.length; i++) {
       const w = waveConsts[i]!
-      const amp = liveWaveAmps[i]! * zoneFx.heightMult
+      const amp = liveWaveAmps[i]! * zoneFx.heightMult * envFactor
       const k = w.k * zoneFx.freqMult
       const omega = w.omega * zoneFx.freqMult
       const phase = k * w.dirX * xRot + k * w.dirZ * zRot - t * omega + w.phase
