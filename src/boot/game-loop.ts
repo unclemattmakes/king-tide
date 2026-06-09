@@ -316,6 +316,14 @@ export interface GameLoopOpts {
    *  instance's `THREE.AnimationMixer` every render frame. Render-only —
    *  no sim coupling. */
   animatedProps?: AnimatedPropsSystem
+  /** True once the progressive scenery warm has compiled + revealed every
+   *  deferred mesh (always true when nothing was deferred / `?progwarm=0`).
+   *  When a cinematic intro played, the countdown holds — briefly, capped —
+   *  until this reports true, so the warm's per-material node-build dips land
+   *  on the start grid instead of the opening seconds of the race. Optional:
+   *  the other `startGameLoop` callers (benchmark, wave-rider) don't thread
+   *  it and get today's immediate arm. */
+  sceneryWarmed?: () => boolean
   /** Lap timing state, mutated each lap. */
   lapState: {
     lapStartRaceTime: number
@@ -373,6 +381,13 @@ const PUMP_SPEED_CAP_FRAC = 1.3
  *  (see WATER_SURFACE_FOLLOW in hover.ts); this clamp is the visual safety
  *  net so a tall crest behind the bike can't punch the lens underwater. */
 const CAMERA_WATER_CLEARANCE = 0.6
+
+/** Longest the countdown waits on the progressive scenery warm after the
+ *  intro finishes. On big dressed tracks (Texcoco: ~155 vinyl materials) the
+ *  warm legitimately outlives any reasonable grid wait — the cap keeps the
+ *  race startable no matter what, trading the tail back for a prompt start. */
+const SCENERY_WARM_HOLD_CAP_MS = 6_000
+
 function applyPumpImpulse(
   phys: PhysicsWorld,
   playerEid: number,
@@ -473,6 +488,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     waveRiderSys,
     waveRiderRender,
     animatedProps,
+    sceneryWarmed,
   } = opts
 
   let finishShown = false
@@ -947,6 +963,9 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // skip-prompt DOM node + cleanup; lazily created on the first
   // active frame and torn down when the intro ends.
   let introArmed = raceIntro.isDone()
+  // Stamped on the first frame after the director finishes; anchors the
+  // scenery-warm hold cap (see the arm branch below).
+  let introHoldStartedAt: number | null = null
   let introSkipPromptEl: HTMLElement | null = null
   let introSkipKeyHandler: ((e: KeyboardEvent) => void) | null = null
   let introSkipPointerHandler: ((e: Event) => void) | null = null
@@ -1294,17 +1313,32 @@ export function startGameLoop(opts: GameLoopOpts): void {
       // root); safe on the hot path.
       raceIntroUi?.tick(raceIntro.elapsed())
     } else if (!introArmed) {
-      // First frame after the director reports done: arm the
-      // countdown so the 3/2/1/GO ticks (which drive the start-lights
-      // overlay) start playing. Tear down the skip prompt so it
-      // doesn't linger past the GO! moment. Multiplayer compositions
-      // also call `armCountdown` from the lobby clear path; both
-      // call sites are idempotent because `armCountdown` early-outs
-      // if the countdown is already running.
-      raceHud.armCountdown()
-      teardownIntroSkipUi()
-      raceIntroUi?.hide()
-      introArmed = true
+      // First frame after the director reports done: tear down the skip
+      // prompt, then arm the countdown so the 3/2/1/GO ticks (which drive
+      // the start-lights overlay) start playing. Multiplayer compositions
+      // also call `armCountdown` from the lobby clear path; both call
+      // sites are idempotent because `armCountdown` early-outs if the
+      // countdown is already running.
+      //
+      // Scenery-warm hold: if the progressive scenery warm is still
+      // compiling (big dressed tracks, slow machines), wait for it —
+      // capped — before lighting the countdown, so its per-material
+      // node-build frame dips land while the player idles on the grid
+      // rather than in the opening seconds of the race. Only reachable
+      // when a cinematic actually played: intro mode 'off' (multiplayer,
+      // `?skipintro=1`, user setting) constructs the director already done,
+      // so `introArmed` starts true and this branch — hold included —
+      // never runs there.
+      if (introHoldStartedAt === null) {
+        introHoldStartedAt = performance.now()
+        teardownIntroSkipUi()
+        raceIntroUi?.hide()
+      }
+      const warmDone = sceneryWarmed?.() ?? true
+      if (warmDone || performance.now() - introHoldStartedAt >= SCENERY_WARM_HOLD_CAP_MS) {
+        raceHud.armCountdown()
+        introArmed = true
+      }
     }
 
     let lastLookMagnitude = 0
