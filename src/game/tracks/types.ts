@@ -446,10 +446,21 @@ export type PropType = 'box' | 'sphere' | 'cylinder' | 'pipe' | 'halfpipe' | 'as
 export type WaterConfig = {
   /** Mean water surface y (m). 0 by default. */
   height: number
-  /** Wave amplitude scalar passed to the wave field. */
-  waveHeight: number
-  /** Wave frequency scalar passed to the wave field. */
-  waveFreq: number
+  /** Swell-train bearing, degrees CCW from world +X (−180..180). Rotates
+   *  the WHOLE ambient wave train — every per-wave direction together — so
+   *  the swell can be aimed relative to the racing line and the sun, a
+   *  per-track readability lever (water-next-research.md §4.5/§5: low
+   *  cross-track sun + a bearing the player can track beat any amount of
+   *  surface detail). Optional; absent falls back to the renderer's
+   *  `WAVE_BEARING_DEFAULT` (the pre-P0.3 shipped look). The water debug
+   *  menu's bearing slider is a live session override and is deliberately
+   *  NOT persisted — this key is the authored source of truth.
+   *
+   *  NOTE: the old `waveHeight` / `waveFreq` keys were dead knobs (real
+   *  amplitude comes from `sky.seaStateBeaufort` + `waveZones`); the
+   *  loader now ignores them and the Blender exporter no longer emits
+   *  them. */
+  swellBearingDeg?: number
 }
 
 /**

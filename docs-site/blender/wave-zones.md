@@ -293,6 +293,15 @@ should visibly differ inside the OBB; if `surge_*` is set, watch
 for the periodic rise (one frame snapshot won't show it — let
 several `surgePeriodS` cycles pass).
 
+> **History note:** between the TSL water landing and PR #340 the GPU
+> shader did NOT evaluate zones — buoyancy felt them but the surface
+> never showed them. That's fixed: the vertex stage now runs the same
+> OBB soft-max blend as the CPU. The definitive check is
+> `?wavedots=1&wire=1` — red dots are the buoyancy surface, the
+> wireframe is what the GPU draws; inside a zone the dots must sit ON
+> the wireframe (`tests/e2e/wave-zone-sync.spec.ts` captures this per
+> track).
+
 ## Performance
 
 Wave zones are cheap. The sample math is a per-zone
@@ -302,9 +311,17 @@ few thousand renderer vertices). A track with five wave zones
 costs a few microseconds per frame on a modern CPU.
 
 The renderer's wave-displaced plane re-evaluates every vertex, but
-the per-vertex zone test is also a few flops. Don't worry about
-zone count up to ~20 per track; beyond that the soft-max merge
-will start to flatten interesting overlaps anyway.
+the per-vertex zone test is also a few flops (measured: no frame-time
+cost on The Maw's two zones across ~660k verts).
+
+**Hard cap: 8 zones per track** (`MAX_WAVE_ZONES`, owned by
+`wave-field.ts` and imported by the shader — drift-tested). The GPU
+evaluates a fixed-size zone uniform array, and the CPU truncates to
+the same cap with a console warning so buoyancy can never feel a zone
+the player can't see. A unit test fails any shipped track JSON that
+exceeds it. Shipped tracks use 1–2; if a design genuinely wants more
+than 8, that's a conversation about raising the constant (and paying
+the per-vertex ALU), not about authoring more empties.
 
 ## Common mistakes
 

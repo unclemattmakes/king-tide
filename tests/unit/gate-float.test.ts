@@ -17,10 +17,7 @@ function cpAt(y: number): Checkpoint {
   }
 }
 
-function track(over: {
-  floatGates?: boolean
-  water?: { height: number; waveHeight: number; waveFreq: number }
-}): Track {
+function track(over: { floatGates?: boolean; water?: { height: number } }): Track {
   return { floatGates: false, ...over } as unknown as Track
 }
 
@@ -42,7 +39,7 @@ describe('gateFloatsOnWaves', () => {
   it('respects a non-zero water height', () => {
     const t = track({
       floatGates: true,
-      water: { height: 20, waveHeight: 1, waveFreq: 1 },
+      water: { height: 20 },
     })
     expect(gateFloatsOnWaves(t, cpAt(20))).toBe(true) // at the raised water line
     expect(gateFloatsOnWaves(t, cpAt(0))).toBe(true) // below water still floats up

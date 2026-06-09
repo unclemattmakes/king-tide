@@ -2,7 +2,7 @@
   "id": "cloud-stress-overcast",
   "name": "Cloud Stress — Teal overcast (lighthouse plate)",
   "lapsToFinish": 1,
-  "water": { "height": 0.0, "waveHeight": 0.8, "waveFreq": 0.35 },
+  "water": { "height": 0.0 },
   "sky": {
     "tint": "#ffffff",
     "cloudiness": 0.85,

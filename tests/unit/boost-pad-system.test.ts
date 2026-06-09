@@ -64,7 +64,7 @@ function trackJsonWithLegacyPad(pad: Record<string, unknown>): Record<string, un
     name: 'Unit Test',
     lapsToFinish: 1,
     environmentGlb: '/assets/tracks/x.glb',
-    water: { height: 3.3, waveHeight: 1, waveFreq: 0.5 },
+    water: { height: 3.3 },
     start: { position: { x: 0, y: 1, z: 0 }, yaw: 0 },
     checkpoints: [
       {

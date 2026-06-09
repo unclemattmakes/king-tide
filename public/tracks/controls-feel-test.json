@@ -3,9 +3,7 @@
   "name": "Controls Feel Test",
   "lapsToFinish": 1,
   "water": {
-    "height": 0.0,
-    "waveHeight": 0.0,
-    "waveFreq": 0.2
+    "height": 0.0
   },
   "start": {
     "position": { "x": 0.0, "y": 1.5, "z": 0.0 },

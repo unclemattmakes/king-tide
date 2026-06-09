@@ -3,9 +3,7 @@
   "name": "Water rendering test",
   "lapsToFinish": 1,
   "water": {
-    "height": 0.0,
-    "waveHeight": 1.0,
-    "waveFreq": 0.4
+    "height": 0.0
   },
   "sky": {
     "tint": "#ffe6c8",

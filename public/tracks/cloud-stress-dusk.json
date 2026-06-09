@@ -2,7 +2,7 @@
   "id": "cloud-stress-dusk",
   "name": "Cloud Stress — Fiery dusk (rusted tower plate)",
   "lapsToFinish": 1,
-  "water": { "height": 0.0, "waveHeight": 0.4, "waveFreq": 0.25 },
+  "water": { "height": 0.0 },
   "sky": {
     "tint": "#ffffff",
     "cloudiness": 0.25,

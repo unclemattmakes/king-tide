@@ -46,8 +46,16 @@
           "minItems": 3,
           "maxItems": 3
         },
-        "waveHeight": { "type": "number", "minimum": 0 },
-        "waveFreq": { "type": "number", "minimum": 0 }
+        "waveHeight": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Blender wave-preview amplitude multiplier only; NOT exported to runtime JSON (runtime amplitude = sky.seaStateBeaufort + waveZones)."
+        },
+        "waveFreq": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Blender wave-preview frequency multiplier only; NOT exported to runtime JSON."
+        }
       }
     },
     "checkpoints": {

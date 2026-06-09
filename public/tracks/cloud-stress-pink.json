@@ -2,7 +2,7 @@
   "id": "cloud-stress-pink",
   "name": "Cloud Stress — Pink sunset (islands plate)",
   "lapsToFinish": 1,
-  "water": { "height": 0.0, "waveHeight": 0.3, "waveFreq": 0.22 },
+  "water": { "height": 0.0 },
   "sky": {
     "tint": "#ffffff",
     "cloudiness": 0.2,

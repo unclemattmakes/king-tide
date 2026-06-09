@@ -27,7 +27,7 @@ function makeTrack(floatGates: boolean): Track {
     boostPads: [],
     antiGravZones: [],
     floatGates,
-    water: { height: 0, waveHeight: 1, waveFreq: 1 },
+    water: { height: 0 },
   } as unknown as Track
 }
 

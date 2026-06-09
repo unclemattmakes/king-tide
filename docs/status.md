@@ -31,6 +31,30 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-09** — **Water P0 closed out: the pinch is exonerated
+> (Q trusted) + authoring hygiene.** P0.2 — the Gerstner steepness distrust
+> ("physics out of phase with visuals") got its instrumented verdict: a new
+> `__hover.waterSync()` transect probe (rest points → `renderVertex` CPU mirror
+> → diffed against `sampleHeight` at the displaced world point) +
+> `?wavedots=1&wire=1` GPU-truth captures
+> ([pinch-diagnosis.spec.ts](../tests/e2e/pinch-diagnosis.spec.ts)) show
+> buoyancy on the pinched surface to ≤ 3.1 mm at Q = 1.2 (≈3× shipped) on
+> open water and ≤ 5e-8 m inside Sandbar's zone — **the math is sound, the
+> historical desync was the zones (#340); shipped default Q = 0.44 stands
+> trusted**, unblocking the Q-gated foam signals (Jacobian / peak mask).
+> Verdict written into [water-next-research.md](./water-next-research.md) §4.2.
+> P0.3 — authoring hygiene: **`water.swellBearingDeg` is now per-track data**
+> (absent → 47°, the previous effective look); the water-menu bearing slider is
+> a live-only override and **no longer persists** (a bearing dialed on one
+> track used to silently re-aim every track on that machine — covered by
+> [swell-bearing.spec.ts](../tests/e2e/swell-bearing.spec.ts)); the dead
+> `water.waveHeight`/`waveFreq` knobs are pruned from all 42 track JSONs,
+> ignored by the loader, dropped from the Blender exporter (N-panel wave
+> sliders remain, relabeled preview-only), and the floating-gate respawn
+> margin in race.ts uses a constant envelope instead; stale docs fixed
+> (wave-zones cookbook now states the GPU evaluation + 8-zone cap;
+> design-targets no longer claims the cut wave-line HUD ships).
+>
 > **Last updated: 2026-06-09** — **Wave zones now render — GPU port closes the
 > sim↔render desync (P0.1 from the water roadmap, below).** Per-track wave zones
 > (heightMult / freqMult / bearing override / surge OBBs) modified CPU buoyancy

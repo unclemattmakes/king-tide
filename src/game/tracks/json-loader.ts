@@ -699,11 +699,18 @@ function readProp(raw: unknown, i: number): Prop {
 function readOptionalWater(raw: unknown): WaterConfig | null {
   if (raw === undefined || raw === null) return null
   if (!isObject(raw)) throw new Error('track-json: water must be an object if present')
-  return {
+  const out: WaterConfig = {
     height: requireNumber(raw, 'height'),
-    waveHeight: requireNumber(raw, 'waveHeight'),
-    waveFreq: requireNumber(raw, 'waveFreq'),
   }
+  // Authored swell bearing (deg CCW, −180..180). Absent → the renderer's
+  // global default applies (main.ts falls back to WAVE_BEARING_DEFAULT).
+  if ('swellBearingDeg' in raw) {
+    out.swellBearingDeg = requireNumber(raw, 'swellBearingDeg')
+  }
+  // `waveHeight` / `waveFreq` are deprecated dead knobs (real amplitude is
+  // sky.seaStateBeaufort + waveZones) — silently ignored when present so
+  // old JSONs keep loading. See water-next-research.md §4.5.
+  return out
 }
 
 function readOptionalTerrainShader(raw: unknown): TerrainShaderConfig | null {

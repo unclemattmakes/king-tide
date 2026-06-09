@@ -4,9 +4,7 @@
   "lapsToFinish": 3,
   "environmentGlb": "/assets/tracks/oval-loop.glb",
   "water": {
-    "height": -2.0,
-    "waveHeight": 1.0,
-    "waveFreq": 0.4
+    "height": -2.0
   },
   "start": {
     "position": {
