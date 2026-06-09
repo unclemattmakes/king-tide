@@ -114,6 +114,43 @@ export type WaveFieldState = {
    *  shader's pinch uniforms. Default (1, 0) = along-wave. */
   pinchCos: number
   pinchSin: number
+  /** Wave-set envelope ("sets" — the surf rhythm of bigger wave groups
+   *  arriving every few tens of seconds; water-next-research §7.2). A pure
+   *  analytic amplitude factor `1 + depth·sin(2π·t/periodS + phase)` that
+   *  multiplies the AMBIENT swell/chop in both CPU samplers and the GPU
+   *  shader (mirrored uniforms, synced in tick()), layered ON TOP of
+   *  whatever the static amplitude writers (Beaufort, lap-weather, menu
+   *  sliders) put in `waves[i].amplitude` — a separate term rather than an
+   *  amplitude mutation so it can never compound with those writers or
+   *  drift across replays (it's a pure function of `time`). Wakes, the
+   *  shore wave and zone surge are NOT enveloped (they're not sea-state).
+   *  `swellSetPeriodS <= 0` or `swellSetDepth <= 0` disables it (factor 1,
+   *  byte-identical to pre-envelope behaviour). Authored per track via
+   *  `water.swellSets`. */
+  swellSetPeriodS: number
+  swellSetDepth: number
+  swellSetPhase: number
+}
+
+/** The wave-set envelope factor at time `t` (default: the field's clock).
+ *  1 when disabled. Mirrored EXACTLY by the GPU (`setEnvNode`) and the
+ *  `renderVertex` CPU mirror — all three compute `1 + depth·sin(ω·t + φ)`
+ *  from the same scalars, so buoyancy and the rendered surface breathe in
+ *  lockstep through a set. */
+export function waveSetFactor(field: WaveFieldState, t: number = field.time): number {
+  if (field.swellSetDepth <= 0 || field.swellSetPeriodS <= 0) return 1
+  const omega = (2 * Math.PI) / field.swellSetPeriodS
+  return 1 + field.swellSetDepth * Math.sin(omega * t + field.swellSetPhase)
+}
+
+/** ∂(waveSetFactor)/∂t — needed for the exact surface vertical velocity
+ *  (`vy`) the hover damping reads: y = env(t)·Σ(...) ⇒ ∂y/∂t picks up an
+ *  `env'(t)·Σ(...)` term alongside the usual phase term. Small (≤ ~3 % of
+ *  the wave's own vy at a 60 s / 0.3 set) but exact is cheap. */
+export function waveSetFactorRate(field: WaveFieldState, t: number = field.time): number {
+  if (field.swellSetDepth <= 0 || field.swellSetPeriodS <= 0) return 0
+  const omega = (2 * Math.PI) / field.swellSetPeriodS
+  return field.swellSetDepth * omega * Math.cos(omega * t + field.swellSetPhase)
 }
 
 /**
@@ -266,6 +303,9 @@ export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveF
     steepness: 0,
     pinchCos: 1,
     pinchSin: 0,
+    swellSetPeriodS: 0,
+    swellSetDepth: 0,
+    swellSetPhase: 0,
   }
 }
 
@@ -782,6 +822,11 @@ export function sampleHeight(field: WaveFieldState, x: number, z: number): numbe
   // so the multiplications below are no-ops and we avoid a branch
   // explosion across the two wave-field kinds.
   const zoneFx = sampleZoneFactors(field.zones, x, z, t)
+  // Wave-set envelope folds into the same amplitude-multiplier slot the
+  // zones use — one effective heightMult feeds the wave loop AND the
+  // Gerstner inverse map, mirroring the GPU exactly (which multiplies
+  // `setEnvNode` into the zone factor's heightMult on every layer).
+  const envHeightMult = zoneFx.heightMult * waveSetFactor(field, t)
   const effectiveBearing = zoneFx.bearingRad ?? field.waveBearing
   const cosB = Math.cos(effectiveBearing)
   const sinB = Math.sin(effectiveBearing)
@@ -799,7 +844,7 @@ export function sampleHeight(field: WaveFieldState, x: number, z: number): numbe
   let az = z
   const qEff = effectiveSteepness(field) * shoal
   if (qEff > 1e-6) {
-    inverseGerstner(field, x, z, qEff, zoneFx.heightMult, zoneFx.freqMult, cosB, sinB)
+    inverseGerstner(field, x, z, qEff, envHeightMult, zoneFx.freqMult, cosB, sinB)
     ax = _rest.x
     az = _rest.z
   }
@@ -810,12 +855,12 @@ export function sampleHeight(field: WaveFieldState, x: number, z: number): numbe
   const zRot = -ax * sinB + az * cosB
   for (const w of field.waves) {
     // freqMult shortens the wavelength inside the zone — chop bands
-    // become choppier, swells get tighter. heightMult scales the
-    // amplitude.
+    // become choppier, swells get tighter. heightMult (zone × set
+    // envelope) scales the amplitude.
     const k = ((2 * Math.PI) / w.wavelength) * zoneFx.freqMult
     const omega = w.speed * k
     const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
-    y += shoal * zoneFx.heightMult * w.amplitude * Math.sin(phase)
+    y += shoal * envHeightMult * w.amplitude * Math.sin(phase)
   }
   y += zoneFx.surgeY
   for (const src of field.wakes) {
@@ -838,6 +883,11 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
   let vy = 0
   const t = field.time
   const zoneFx = sampleZoneFactors(field.zones, x, z, t)
+  // Zone × wave-set envelope — one effective amplitude multiplier, exactly
+  // as in `sampleHeight` (and the GPU). The envelope is itself a function
+  // of time, so `vy` picks up an extra `env'(t) · Σ ambient` term below.
+  const envFactor = waveSetFactor(field, t)
+  const envHeightMult = zoneFx.heightMult * envFactor
   const effectiveBearing = zoneFx.bearingRad ?? field.waveBearing
   const cosB = Math.cos(effectiveBearing)
   const sinB = Math.sin(effectiveBearing)
@@ -852,23 +902,33 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
   let az = z
   const qEff = effectiveSteepness(field) * shoal
   if (qEff > 1e-6) {
-    inverseGerstner(field, x, z, qEff, zoneFx.heightMult, zoneFx.freqMult, cosB, sinB)
+    inverseGerstner(field, x, z, qEff, envHeightMult, zoneFx.freqMult, cosB, sinB)
     ax = _rest.x
     az = _rest.z
   }
   const xRot = ax * cosB + az * sinB
   const zRot = -ax * sinB + az * cosB
+  let ambientY = 0
   for (const w of field.waves) {
     const k = ((2 * Math.PI) / w.wavelength) * zoneFx.freqMult
     const omega = w.speed * k
     const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
     const s = Math.sin(phase)
     const c = Math.cos(phase)
-    const a = shoal * zoneFx.heightMult * w.amplitude
+    const a = shoal * envHeightMult * w.amplitude
     y += a * s
+    ambientY += a * s
     rotDydx += a * c * (k * w.dirX)
     rotDydz += a * c * (k * w.dirZ)
     vy += a * c * -omega
+  }
+  // Envelope rate term: y = env(t)·f(x,z,t) ⇒ ∂y/∂t = env·f' (the loop
+  // above, since `a` carries env) + env'·f. `ambientY` IS env·f, so
+  // env'·f = ambientY · (env'/env). env is bounded away from 0 (depth is
+  // clamped ≤ 0.6 at the setters), so the division is safe; when the
+  // envelope is off the rate is 0 and this is a no-op.
+  if (envFactor > 1e-6) {
+    vy += ambientY * (waveSetFactorRate(field, t) / envFactor)
   }
   // Surge adds height only — its ∂/∂x and ∂/∂z are zero (uniform
   // inside the zone's weight envelope), so we don't bias slopes /
@@ -942,6 +1002,16 @@ export function defaultWaves(): Wave[] {
     { dirX: 1.0, dirZ: 0.0, amplitude: 0.5, wavelength: 50, speed: 8.6, phase: 0.4, qBase: 0.35 },
     // Secondary swell — same direction, slightly different period so the
     // two swells beat into bigger "sets" every ~24 s.
+    //
+    // P2.1 note (water-next-research §7.2): this accidental bichromatic
+    // pair STAYS as the global texture-level beat. The per-track,
+    // AUTHORABLE set rhythm is the separate `swellSets` envelope
+    // (waveSetFactor) rather than re-spacing this pair per track — hitting
+    // a target beat period bichromatically means resolving λ₁ from the
+    // dispersion relation (detuning phase speed instead reads wrong;
+    // players subconsciously track group timing), which changes the
+    // silhouette per track. The envelope is orthogonal, exact on both
+    // sides, and leaves this bank alone.
     {
       dirX: 0.985,
       dirZ: 0.174,
