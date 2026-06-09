@@ -32,6 +32,11 @@ playwright-report/
 playwright/.cache/
 coverage/
 foam-shots/
+# Local capture evidence from harness specs (wave-zone-sync,
+# determinism-snapshot) — kept OUT of test-results/ so Playwright's
+# run-start clean doesn't delete a `before` capture, and out of git
+# because they're machine-local screenshots/snapshots.
+artifacts/
 
 # QA orchestrator output (pnpm qa). Committed CI artifacts live on
 # the workflow upload; local runs stay out of git.

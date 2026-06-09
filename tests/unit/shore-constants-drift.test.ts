@@ -24,7 +24,12 @@ const WATER_TS = resolve(__dirname, '../../src/engine/render/water.ts')
 // math, so it's excluded.) SHOAL_FADE_DEPTH drives the shallow-water amplitude
 // fade applied to BOTH the GPU vertex shader and the CPU buoyancy sampler — if
 // they drift, the rider sinks below the seabed in the shallows.
+// MAX_WAVE_ZONES sizes the shader's fixed zone uniform arrays AND the CPU-side
+// truncation in `setWaveZones` — if they drift, a zone past the smaller cap is
+// felt by buoyancy but never drawn (or vice versa), which is the exact desync
+// the wave-zone GPU port exists to close.
 const SHARED = [
+  'MAX_WAVE_ZONES',
   'SHOAL_FADE_DEPTH',
   'SHORE_AMP',
   'SHORE_BAND_DEPTH',
@@ -34,7 +39,7 @@ const SHARED = [
   'SHORE_PHASE',
 ] as const
 
-describe('shore + shoaling constants single source (wave-field.ts ↔ water.ts)', () => {
+describe('shore + shoaling + wave-zone constants single source (wave-field.ts ↔ water.ts)', () => {
   const src = readFileSync(WATER_TS, 'utf-8')
 
   it('wave-field.ts exports every shared constant as a finite number', () => {
