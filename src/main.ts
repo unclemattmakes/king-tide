@@ -448,6 +448,14 @@ async function boot() {
   // boot; the water debug menu's slider stays available as a live,
   // non-persisted session override.
   waterMesh.debug.setWaveBearing(track.water?.swellBearingDeg ?? WAVE_BEARING_DEFAULT)
+  // Track-authored wave-set envelope (water-next-research §7.2): the sea
+  // breathes between (1−depth)× and (1+depth)× of its static state every
+  // periodS seconds — identically in buoyancy and the shader (the field
+  // owns the params; the water mesh mirrors them per tick). Absent = off,
+  // byte-identical to the pre-envelope surface.
+  waveField.swellSetPeriodS = track.water?.swellSets?.periodS ?? 0
+  waveField.swellSetDepth = track.water?.swellSets?.depth ?? 0
+  waveField.swellSetPhase = track.water?.swellSets?.phase ?? 0
   // Per-track sea-state: Beaufort number drives a global amplitude
   // scalar on the wave field's base spectrum. Beaufort 4 ≈ 1.0× so the
   // historical (pre-knob) look is the default; calm tracks dial down

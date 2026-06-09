@@ -569,13 +569,17 @@ to this exact problem and worth buying just to read.)
 
 **7.8 Hex-tiling + cascade hygiene (shading-level anti-repetition).**
 Mikkelsen's 3-tap hex tiling (JCGT 2022) on the detail-normal + foam-bubble
-textures kills their tiling without touching any signal; and the two cascade
-tile sizes are currently **6 m / 1.5 m — an exact 4:1**, which re-aligns every
-6 m (the known "common factor" tiling artifact); nudge to an irrational-ish
-ratio (e.g. 6 / 1.45). Also: tangential-only domain warp on foam masks (warp
-along-crest, never in height — height warp would falsify the steepness
-signal), `fwidth`-based contour thinning at distance, index contours (every
-Nth line heavier). **Verdict: do (P2, polish tier).**
+textures kills their tiling without touching any signal. ~~The two cascade
+tile sizes are currently 6 m / 1.5 m — an exact 4:1~~ *(stale — corrected
+2026-06-09: the cascades already run 11 m / 2 m with off-axis rotations
+(+23° / −37°) AND a 35 m domain warp on the sample coords, so the strict
+common-factor beat is already broken; 11:2 still re-aligns every 22 m but
+under the warp it's not the visible artifact this section assumed).* Also:
+tangential-only domain warp on foam masks (warp along-crest, never in
+height — height warp would falsify the steepness signal). `fwidth`-based
+contour thinning + index contours **shipped with P1** (the contour layer
+does both). **Verdict: remaining P2.3 scope = hex-tiling the detail/foam
+textures + tangential foam-mask warp + Langmuir streak lanes.**
 
 **7.9 Water Surface Wavelets / shallow-water solvers / screen-space
 contour extraction.** Wavelets (Jeschke et al. 2018): impressive
@@ -686,10 +690,25 @@ Matt playtests — the readability claim is only provable by hands + eyes.
 
 ### P2 — Nuance + anti-repetition
 
-1. **Wave sets/groups** (§7.2) — bichromatic swell pairs (deliberate, tuned
-   beat periods) and/or slow analytic envelopes via the existing amplitude
-   mirror; foam/ramp brightness follows the envelope; tune set period per
-   track (calm tutorial = none; Cape Town = pronounced ~60 s sets).
+1. ✅ **Wave sets/groups** (§7.2) — **SHIPPED (2026-06-09)** as an analytic
+   envelope: `water.swellSets {periodS, depth, phase?}` →
+   `1 + depth·sin(2π·t/periodS + φ)` multiplying the ambient amplitude in
+   both samplers + every GPU layer via the zone-heightMult slot
+   (`waveSetFactor` in wave-field.ts / `setEnvNode` in water.ts — a
+   first-class field term rather than the doc's amplitude-mutation sketch,
+   so it can't compound with Beaufort / lap-weather / menu writers and
+   replays stay pure-in-t; exact `vy` rate term included for hover
+   damping). Foam/whitecaps + the P1 ramp follow automatically (they're
+   amplitude-driven). The accidental 24 s bichromatic pair stays as the
+   global texture beat (see the `defaultWaves` note for why the authorable
+   rhythm is the envelope, not per-track pair re-spacing). Cape Town
+   authors `{60 s, 0.3}` (playtest-gated); live-only menu rows (Set
+   period / Set depth) for tuning. Verified:
+   [wave-sets.test.ts](../tests/unit/wave-sets.test.ts) (purity +
+   hand-scaled-amplitude equivalence oracle + vy finite-difference) and
+   [wave-set-sync.spec.ts](../tests/e2e/wave-set-sync.spec.ts) (waterSync
+   ≤ 1.2e-6 m across three phases of Cape Town's cycle; set-high/low
+   captures in `artifacts/wave-set-sync/`).
 2. **Per-track spectrum presets** (§7.1) — `water.spectrum` JSON block
    (preset name + seed + spread + swell/chop balance), generator emits the
    `Wave[]`; perf-gate the vertex-displacing count (measure 8/12/16 on the
