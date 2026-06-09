@@ -352,7 +352,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
           waterDragSnapshotted = true
         }
         if (!draft.water) {
-          draft.water = { height: h, waveHeight: 1.0, waveFreq: 0.5 }
+          draft.water = { height: h }
         } else {
           draft.water.height = h
         }

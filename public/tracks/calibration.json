@@ -4,9 +4,7 @@
   "lapsToFinish": 1,
   "environmentGlb": "/assets/tracks/calibration.glb",
   "water": {
-    "height": 0,
-    "waveHeight": 1.0,
-    "waveFreq": 0.5
+    "height": 0
   },
   "start": {
     "position": { "x": -1, "y": 0.5, "z": 10 },

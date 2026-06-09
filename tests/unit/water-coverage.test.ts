@@ -44,7 +44,7 @@ function makeTrack(points: { x: number; z: number; y?: number }[], waterHeight =
     antiGravZones: [],
     waveZones: [],
     props: [],
-    water: { height: waterHeight, waveHeight: 1, waveFreq: 0.4 },
+    water: { height: waterHeight },
   } as unknown as Track
 }
 

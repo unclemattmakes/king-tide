@@ -4,9 +4,7 @@
   "lapsToFinish": 3,
   "environmentGlb": "/assets/tracks/sandbar.glb",
   "water": {
-    "height": -1.5,
-    "waveHeight": 1.0,
-    "waveFreq": 0.5
+    "height": -1.5
   },
   "start": {
     "position": {

@@ -4,9 +4,7 @@
   "lapsToFinish": 3,
   "environmentGlb": "/assets/tracks/figure-eight.glb",
   "water": {
-    "height": -3.0,
-    "waveHeight": 1.0,
-    "waveFreq": 0.4
+    "height": -3.0
   },
   "start": {
     "position": {

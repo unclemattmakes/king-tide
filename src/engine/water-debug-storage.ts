@@ -20,6 +20,14 @@ import type { WaterDebugDefaults, WaterMesh } from './render/water'
 // the wave whitecap), so v10 stays compatible and returning users pick up the
 // curvature whitecap automatically.
 //
+// No key bump for the P0.3 bearing demotion either: `waveBearing` was REMOVED
+// from the settings shape (the swell bearing is per-track authoring now —
+// `water.swellBearingDeg` — and the menu slider is a live, non-persisted
+// override; see water-next-research.md §4.5). A stale `waveBearing` in an old
+// v10 entry is simply ignored by the per-key loader below, which is the
+// point: a bearing dialed on one track must never silently re-aim every
+// other track's swell on that machine.
+//
 // v9 bump (prior): dropped the spectrum/FFT-only knobs (choppiness,
 // seaStateIntensity, windSpeed, windDirection, windCutoff, foamPersistence)
 // along with the FFT path itself.
@@ -41,7 +49,6 @@ export type WaterDebugSettings = {
   streakElongation: number
   shoreWaveStrength: number
   pinchDirection: number
-  waveBearing: number
   whitecapCurvature: number
   whitecapLeadBias: number
   whitecapHeight: number
@@ -70,7 +77,6 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     streakElongation: d.streakElongation,
     shoreWaveStrength: d.shoreWaveStrength,
     pinchDirection: d.pinchDirection,
-    waveBearing: d.waveBearing,
     whitecapCurvature: d.whitecapCurvature,
     whitecapLeadBias: d.whitecapLeadBias,
     whitecapHeight: d.whitecapHeight,
@@ -135,7 +141,6 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setStreakElongation(s.streakElongation)
   water.debug.setShoreWaveStrength(s.shoreWaveStrength)
   water.debug.setPinchDirection(s.pinchDirection)
-  water.debug.setWaveBearing(s.waveBearing)
   water.debug.setWhitecapCurvature(s.whitecapCurvature)
   water.debug.setWhitecapLeadBias(s.whitecapLeadBias)
   water.debug.setWhitecapHeight(s.whitecapHeight)

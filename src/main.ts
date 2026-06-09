@@ -74,7 +74,7 @@ import { createStartLights } from './engine/render/start-lights'
 import { createSurgeSprayDriver, type SurgeSprayDriver } from './engine/render/surge-spray'
 import { sampleTerrainHeightAtXZ } from './engine/render/terrain-heightmap'
 import { createTrackVisuals } from './engine/render/track-mesh'
-import { createWaterMesh } from './engine/render/water'
+import { createWaterMesh, WAVE_BEARING_DEFAULT } from './engine/render/water'
 import { logWaterCoverage, reportWaterCoverage } from './engine/render/water-coverage'
 import { createWaterTransitionMarkers } from './engine/render/water-debug-markers'
 import { applyWaveSprayIntensity, setWaterMesh } from './engine/render/water-service'
@@ -439,6 +439,15 @@ async function boot() {
   const waterHeight = track.water?.height ?? 0
   waveField.baseY = waterHeight
   waterMesh.mesh.position.y = waterHeight
+  // Track-authored swell bearing (water-next-research.md §4.5): the global
+  // wave-train direction is per-track data — readability hangs on bearing
+  // vs racing line vs sun, so it's graded per track, not dialed globally.
+  // Absent key → WAVE_BEARING_DEFAULT, the look every shipped track was
+  // graded against. This runs AFTER applyStoredWaterTuning (which no
+  // longer carries a bearing), so the authored value is authoritative at
+  // boot; the water debug menu's slider stays available as a live,
+  // non-persisted session override.
+  waterMesh.debug.setWaveBearing(track.water?.swellBearingDeg ?? WAVE_BEARING_DEFAULT)
   // Per-track sea-state: Beaufort number drives a global amplitude
   // scalar on the wave field's base spectrum. Beaufort 4 ≈ 1.0× so the
   // historical (pre-knob) look is the default; calm tracks dial down

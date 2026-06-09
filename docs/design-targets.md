@@ -131,10 +131,14 @@ Wave-mastery means:
    Angkor central spire helix, Liberty's torch-arm Möbius + crown
    interior. HUD indicator + camera-intensity setting (Full / Reduced
    / Off) live.
-4. ✅ **Wave-pumping skill loop legible.** Post-pump chyron + audio
-   chord on successful pump; predictive 3D `wave-line` forward fan
-   over rising swell. Settings → Gameplay → "Wave-pump prompt" +
-   "Wave-line guidance" (Full / Subtle / Off).
+4. ⚠️ **Wave-pumping skill loop legible.** *(v1-historical — cut with the
+   pump→pitch pivot, §2 banner.)* The post-pump chyron + the predictive 3D
+   `wave-line` forward fan **no longer exist in `src/`** — do not cite them
+   as shipped. Under the v2 wave-mastery model the *water itself* must
+   carry the read-the-swell signal (value ramp / contour foam / whitecaps —
+   [water-next-research.md](./water-next-research.md) §5, P1); if a
+   guidance accessibility option ever returns it should render ON the
+   water surface (sampling the same wave field), not as a HUD fan.
 5. 🟡 **Soundtrack.** Procedural pad bed shipped as stand-in on the
    music bus (`audio-service.ts`); licensing or commissioning the
    4–6 tracks is the open item — `setMusicEnabled(false)` is a

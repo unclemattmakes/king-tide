@@ -4,9 +4,7 @@
   "lapsToFinish": 3,
   "environmentGlb": "/assets/tracks/alpine-sprint.glb",
   "water": {
-    "height": 0.0,
-    "waveHeight": 0.5,
-    "waveFreq": 0.7
+    "height": 0.0
   },
   "start": {
     "position": {

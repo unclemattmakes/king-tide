@@ -888,9 +888,7 @@
   ],
   "environmentGlb": "/assets/tracks/prop-showcase.glb",
   "water": {
-    "height": 0,
-    "waveHeight": 1,
-    "waveFreq": 0.4000000059604645
+    "height": 0
   },
   "start": {
     "position": {

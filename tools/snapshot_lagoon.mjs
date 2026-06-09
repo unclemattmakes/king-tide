@@ -68,7 +68,7 @@ function buildLagoon() {
     id: 'lagoon-edit',
     name: 'Lagoon Loop (editable)',
     lapsToFinish: 3,
-    water: { height: 0, waveHeight: 1.0, waveFreq: 0.5 },
+    water: { height: 0 },
     start: { position: { x: 50, y: 2, z: -15 }, yaw: 0 },
     checkpoints,
     aiSplines: [{ id: 'main', points: [], anchors }],
