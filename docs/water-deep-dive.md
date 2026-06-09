@@ -2,6 +2,11 @@
 
 Reference for the SoT-style ocean upgrade. Original research compiled 2026-05-09; first wave of changes shipped as M9.29 (see [status.md](./status.md)).
 
+> **Forward-looking companion:** [water-next-research.md](./water-next-research.md)
+> (2026-06-09) — investigation of readability/nuance/repetition + the roadmap
+> for what comes after this doc's pipeline, including known sim↔render truth
+> gaps (wave zones aren't rendered; pinch distrust) and the phased plan.
+
 ## Current state (M9.29 → M9.39)
 
 Render: horizontal-displacement Gerstner (per-wave Q + global scale uniform, with chop amplitudes bumped 30% in M9.34 for more dramatic short-wavelength pinching), **sub-Gerstner detail-normal cascades (M9.39 — two world-XZ-aligned samples of a procedural 256² wave-detail normal map at 6 m and 1.5 m tile sizes; hardware mipmap filtering provides distance AA, and their slopes add to the analytic Gerstner gradient before the normal is built so the fine chop SoT achieves with FFT is filled in without explosive vertex counts)**, **Toksvig-style specular AA (M9.39 — fwidth of the per-pixel normal drives a roughness boost up to +0.18 so wave crests at glancing screen angles widen the specular lobe instead of pin-pricking single-pixel glints)**, two-color scatter blend (deep teal ↔ cyan-green, view + sun-direction modulated, with sun-glow emissive on backlit crests, sun direction now animated by the day-night cycle), stateless foam accumulator (lingering whitecaps via 4 time-shifted Gerstner samples, no render targets needed), depth-buffer shoreline foam with lapping noise scroll (water/land intersection breathes ±0.4m), richer bike foam pass (speed-modulated hull ring + stern propwash + bow spray + V-wake, all noise-modulated for turbulent edges), noise-modulated roughness for SoT-style "wandering glints", planar reflection via TSL `reflector()` node (M9.38 — Fresnel-mixed into base color, wave-normal-distorted UV including detail-cascade slopes so close-range reflections ripple with the chop, replaces the prior fresnelEmissive sky tint), existing analytic normal + wake-displacement V-stripe with transverse scallops (M9.35).
