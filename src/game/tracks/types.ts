@@ -318,7 +318,15 @@ export type AntiGravZone = {
  * larger amplifier wins without a step at the seam.
  *
  * Authoring lives in Blender as `wave_zone_NN` empties; runtime evaluation
- * is in `wave-field.ts::sampleZoneFactors`.
+ * is in `wave-field.ts::sampleZoneFactors` (CPU buoyancy) AND its TSL
+ * mirror `waveZoneFactors` in `render/water.ts` (the visible surface) —
+ * one set of zone data drives both, so what the rider feels is what the
+ * player sees.
+ *
+ * **Cap: at most `MAX_WAVE_ZONES` (8) zones per track.** The GPU evaluates
+ * a fixed-size zone uniform array per vertex; `setWaveZones` truncates the
+ * CPU list to the same cap (with a console warning) so an over-authored
+ * track degrades in lockstep on both sides. Shipped tracks use 1–2.
  */
 export type WaveZone = {
   position: Vec3

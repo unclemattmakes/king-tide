@@ -285,15 +285,40 @@ export function advanceWaveField(field: WaveFieldState, dt: number): void {
 export type WaveZoneInput = Omit<WaveZoneRuntime, '_cosYaw' | '_sinYaw'>
 
 /**
+ * Hard cap on zones per field. The GPU water shader evaluates the zone
+ * blend per vertex from a fixed-size uniform array (unrolled loop), so
+ * the cap is a real shader-side limit — `setWaveZones` truncates to it
+ * on the CPU too, keeping buoyancy and visuals in lockstep even for an
+ * over-authored track. Shipped tracks use 1–2 zones; 8 leaves ample
+ * headroom without paying per-vertex ALU for slots nothing uses.
+ * `tests/unit/wave-zone.test.ts` asserts the truncation and that no
+ * shipped track JSON exceeds the cap; the shader imports THIS constant
+ * (drift-tested) rather than re-declaring it.
+ */
+export const MAX_WAVE_ZONES = 8
+
+/**
  * Replace the field's zone list. Each input zone's quaternion is
  * decomposed to its world-Y yaw (the only rotation axis that matters
  * for an XZ-plane OBB test) and cached. Pass `[]` to clear.
+ *
+ * Zones beyond {@link MAX_WAVE_ZONES} are dropped (with a warning) —
+ * the GPU shader can only evaluate that many, and a zone felt by
+ * buoyancy but never drawn is exactly the desync this cap prevents.
  *
  * Idempotent — call it whenever a new track loads or the editor
  * mutates the zone list.
  */
 export function setWaveZones(field: WaveFieldState, zones: readonly WaveZoneInput[]): void {
-  field.zones = zones.map((z) => {
+  let kept = zones
+  if (zones.length > MAX_WAVE_ZONES) {
+    // biome-ignore lint/suspicious/noConsole: authoring-time misuse warning
+    console.warn(
+      `[wave-field] ${zones.length} wave zones requested; capping at ${MAX_WAVE_ZONES} (the GPU shader evaluates a fixed-size zone array). Dropping the rest.`,
+    )
+    kept = zones.slice(0, MAX_WAVE_ZONES)
+  }
+  field.zones = kept.map((z) => {
     const yaw = yawFromQuat(z.rotation)
     return {
       ...z,
@@ -681,12 +706,27 @@ export function effectiveSteepness(field: WaveFieldState): number {
 }
 
 /** Ambient Gerstner horizontal displacement at REST (x0, z0), world frame.
- *  Mirrors the shader's `gerstnerDisp` (global waves + bearing + pinch; no
- *  zones/shoaling, exactly as the shader does it). Writes `_disp`. */
-function ambientDisp(field: WaveFieldState, x0: number, z0: number, qEff: number): void {
+ *  Mirrors the shader's `gerstnerDisp` (global waves + bearing + pinch +
+ *  per-zone height/freq/bearing factors, exactly as the shader does it).
+ *  The zone factors are passed in pre-blended: the caller samples them ONCE
+ *  at the world query point and reuses them for every inverse-map iteration
+ *  — same approximation class as evaluating shoaling at the world point
+ *  rather than the rest point (the displacement is sub-meter at game
+ *  steepness while zone blend radii are tens of meters, so the factor
+ *  difference across that distance is negligible). The GPU evaluates its
+ *  zone factors at the rest-grid vertex; both land on the same surface to
+ *  within that approximation. Writes `_disp`. */
+function ambientDisp(
+  field: WaveFieldState,
+  x0: number,
+  z0: number,
+  qEff: number,
+  heightMult: number,
+  freqMult: number,
+  cosB: number,
+  sinB: number,
+): void {
   const t = field.time
-  const cosB = Math.cos(field.waveBearing)
-  const sinB = Math.sin(field.waveBearing)
   const xRot = x0 * cosB + z0 * sinB
   const zRot = -x0 * sinB + z0 * cosB
   const pcos = field.pinchCos
@@ -694,27 +734,38 @@ function ambientDisp(field: WaveFieldState, x0: number, z0: number, qEff: number
   let dxRot = 0
   let dzRot = 0
   for (const w of field.waves) {
-    const k = (2 * Math.PI) / w.wavelength
+    const k = ((2 * Math.PI) / w.wavelength) * freqMult
     const omega = w.speed * k
     const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
     const c = Math.cos(phase)
     const qScaled = qEff * (w.qBase ?? Q_BASE_FALLBACK)
     const rotDirX = w.dirX * pcos - w.dirZ * psin
     const rotDirZ = w.dirX * psin + w.dirZ * pcos
-    dxRot += qScaled * rotDirX * w.amplitude * c
-    dzRot += qScaled * rotDirZ * w.amplitude * c
+    dxRot += qScaled * rotDirX * w.amplitude * heightMult * c
+    dzRot += qScaled * rotDirZ * w.amplitude * heightMult * c
   }
   _disp.dx = dxRot * cosB - dzRot * sinB
   _disp.dz = dxRot * sinB + dzRot * cosB
 }
 
 /** Invert the ambient Gerstner displacement: find the REST (x0,z0) whose
- *  displaced position is world (X,Z). Fixed-point iteration; writes `_rest`. */
-function inverseGerstner(field: WaveFieldState, X: number, Z: number, qEff: number): void {
+ *  displaced position is world (X,Z). Fixed-point iteration; writes `_rest`.
+ *  Zone factors + effective bearing are threaded through to `ambientDisp`
+ *  so the rest point matches the zone-modified surface the shader draws. */
+function inverseGerstner(
+  field: WaveFieldState,
+  X: number,
+  Z: number,
+  qEff: number,
+  heightMult: number,
+  freqMult: number,
+  cosB: number,
+  sinB: number,
+): void {
   let x0 = X
   let z0 = Z
   for (let i = 0; i < GERSTNER_INVERSE_ITERS; i++) {
-    ambientDisp(field, x0, z0, qEff)
+    ambientDisp(field, x0, z0, qEff, heightMult, freqMult, cosB, sinB)
     x0 = X - _disp.dx
     z0 = Z - _disp.dz
   }
@@ -748,7 +799,7 @@ export function sampleHeight(field: WaveFieldState, x: number, z: number): numbe
   let az = z
   const qEff = effectiveSteepness(field) * shoal
   if (qEff > 1e-6) {
-    inverseGerstner(field, x, z, qEff)
+    inverseGerstner(field, x, z, qEff, zoneFx.heightMult, zoneFx.freqMult, cosB, sinB)
     ax = _rest.x
     az = _rest.z
   }
@@ -801,7 +852,7 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
   let az = z
   const qEff = effectiveSteepness(field) * shoal
   if (qEff > 1e-6) {
-    inverseGerstner(field, x, z, qEff)
+    inverseGerstner(field, x, z, qEff, zoneFx.heightMult, zoneFx.freqMult, cosB, sinB)
     ax = _rest.x
     az = _rest.z
   }

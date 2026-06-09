@@ -31,6 +31,35 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-09** — **Wave zones now render — GPU port closes the
+> sim↔render desync (P0.1 from the water roadmap, below).** Per-track wave zones
+> (heightMult / freqMult / bearing override / surge OBBs) modified CPU buoyancy
+> but were never evaluated by the water shader, so the rider felt waves the
+> player couldn't see: Sandbar's whole-area 0.5× calm rode under full-height
+> visuals, The Maw's 1.4×/0.85-freq zone put felt crests at different positions
+> than drawn ones (and its surge never showed), Texcoco's local 1.3× likewise.
+> The TSL vertex stage now evaluates the same smoothstep-OBB soft-max blend as
+> the CPU (`waveZoneFactors` in [water.ts](../src/engine/render/water.ts) mirrors
+> `sampleZoneFactors`/`zoneWeight` exactly, sticky-bearing quirk included) from
+> fixed-size zone uniform arrays — cap `MAX_WAVE_ZONES = 8`, sim-owned constant
+> imported by the shader (drift-tested) and enforced CPU-side by `setWaveZones`
+> truncation. Factors thread through `gerstnerHeight` / `gerstnerDisp` /
+> `gerstnerCrestSignals` + the foam accumulator and the outer LOD tile + horizon
+> skirt (phase continuity across the cross-fade band); surge adds after the wave
+> loops on every layer. The CPU Gerstner inverse map (`ambientDisp` /
+> `inverseGerstner`) folds the zone factors in too, so buoyancy floats on the
+> zone-displaced surface — new oracle tests in
+> [wave-zone.test.ts](../tests/unit/wave-zone.test.ts) pin it. Verified per hard
+> rule 2 with `?wavedots=1&wire=1` headed-Playwright captures
+> ([wave-zone-sync.spec.ts](../tests/e2e/wave-zone-sync.spec.ts), artifacts in
+> `artifacts/wave-zone-sync/`): before — red sim dots visibly off the wireframe
+> inside zones on Sandbar/The Maw; after — dots on the wireframe. The Maw FPS
+> probe shows no zone-ALU cost (p50 11.1 ms before and after). Texcoco's zone
+> sits ~80 m off the racing line (probe follows the player, so no in-zone visual
+> there — same code path as the proven tracks). Note: zone `directionDeg`
+> override snaps at the blend edge (CPU semantics, mirrored exactly); no shipped
+> track uses it — blend it on both sides in lockstep if one ever does.
+>
 > **Last updated: 2026-06-09** — **Water research + roadmap doc.** Full
 > investigation of the water system (sim + render + coupling) with external
 > research (shipped-game tech, algorithms, perception science) and a phased
@@ -38,12 +67,11 @@
 > [water-next-research.md](./water-next-research.md). Headline findings:
 > **wave zones are felt by buoyancy but never drawn by the GPU shader**
 > (Sandbar/Maw/Texcoco all ship zones — likely root of the "ride-on-top
-> inconclusive" feel and a P0 fix); the Gerstner-pinch distrust needs a
-> `?wavedots` diagnosis before any Q-dependent visuals; the 2026-06-06
-> cel/contour water experiment **was never committed** (memory ≠ repo — main
-> still runs the SoT pipeline + #315 curvature whitecaps). Docs only — no
-> code changes.
-
+> inconclusive" feel and a P0 fix — **now closed, see the entry above**); the
+> Gerstner-pinch distrust needs a `?wavedots` diagnosis before any Q-dependent
+> visuals; the 2026-06-06 cel/contour water experiment **was never committed**
+> (memory ≠ repo — main still runs the SoT pipeline + #315 curvature whitecaps).
+> Docs only — no code changes.
 > **Last updated: 2026-06-07** — **Dev-tools palette + live brush/world tuners.**
 > Every buried dev surface is now one discoverable place (dev builds only): a
 > right-edge **dock rail** + **Ctrl/⌘K command bar** that launch every hidden

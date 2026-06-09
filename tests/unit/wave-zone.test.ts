@@ -1,11 +1,16 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   createWaveField,
   defaultWaves,
+  effectiveSteepness,
+  MAX_WAVE_ZONES,
   sampleHeight,
   sampleSurface,
   sampleZoneFactors,
   setWaveZones,
+  type WaveFieldState,
   type WaveZoneInput,
 } from '../../src/engine/sim/water/wave-field'
 
@@ -179,6 +184,34 @@ describe('wave-zone blend math', () => {
     expect(Math.hypot(zoned.nx, zoned.ny, zoned.nz)).toBeCloseTo(1, 6)
   })
 
+  it(`setWaveZones caps the list at MAX_WAVE_ZONES (${MAX_WAVE_ZONES})`, () => {
+    const field = createWaveField([])
+    const zones = Array.from({ length: MAX_WAVE_ZONES + 3 }, (_, i) =>
+      makeZone({ position: { x: i * 100, y: 0, z: 0 } }),
+    )
+    setWaveZones(field, zones)
+    // The GPU shader evaluates a fixed-size zone array; the CPU must feel
+    // exactly the zones the player can see, so the overflow is dropped.
+    expect(field.zones.length).toBe(MAX_WAVE_ZONES)
+    expect(field.zones[0]!.position.x).toBe(0)
+    expect(field.zones[MAX_WAVE_ZONES - 1]!.position.x).toBe((MAX_WAVE_ZONES - 1) * 100)
+  })
+
+  it(`no shipped track JSON exceeds MAX_WAVE_ZONES zones`, () => {
+    const dir = resolve(__dirname, '../../public/tracks')
+    const files = readdirSync(dir).filter((f) => f.endsWith('.json'))
+    expect(files.length).toBeGreaterThan(0)
+    for (const f of files) {
+      const raw = JSON.parse(readFileSync(resolve(dir, f), 'utf-8')) as {
+        waveZones?: unknown[]
+      }
+      const n = Array.isArray(raw.waveZones) ? raw.waveZones.length : 0
+      expect(n, `${f} has ${n} waveZones — over the MAX_WAVE_ZONES cap`).toBeLessThanOrEqual(
+        MAX_WAVE_ZONES,
+      )
+    }
+  })
+
   it("rotated zone aligns its OBB with the empty's yaw (90° case)", () => {
     // 90° yaw around world-Y. Quaternion: (0, sin(π/4), 0, cos(π/4)).
     // After a 90° rotation the zone's local +X aligns with one of the
@@ -209,5 +242,119 @@ describe('wave-zone blend math', () => {
     const outsideHits = [probeXMult, probeZMult].filter((m) => m < 1.5).length
     expect(insideHits).toBe(1)
     expect(outsideHits).toBe(1)
+  })
+})
+
+describe('zone factors × Gerstner inverse map (steepness > 0)', () => {
+  /**
+   * Independent oracle for the GPU vertex transform WITH zone factors: the
+   * shader displaces each rest-grid vertex (vx, vz) by the zone-scaled
+   * Gerstner horizontal pinch and lifts it to the zone-scaled height. This
+   * reimplements that formula from the spec (zone factors evaluated at the
+   * REST vertex, exactly like the shader's `waveZoneFactors(worldX, worldZ)`)
+   * so the test doesn't share code with the sampler it's checking.
+   */
+  function shaderSurfaceAt(
+    field: WaveFieldState,
+    vx: number,
+    vz: number,
+  ): { x: number; z: number; y: number } {
+    const t = field.time
+    const fx = sampleZoneFactors(field.zones, vx, vz, t)
+    const bearing = fx.bearingRad ?? field.waveBearing
+    const cosB = Math.cos(bearing)
+    const sinB = Math.sin(bearing)
+    const qEff = effectiveSteepness(field) // no shore field installed → shoal = 1
+    const xRot = vx * cosB + vz * sinB
+    const zRot = -vx * sinB + vz * cosB
+    let y = 0
+    let dxRot = 0
+    let dzRot = 0
+    for (const w of field.waves) {
+      const k = ((2 * Math.PI) / w.wavelength) * fx.freqMult
+      const omega = w.speed * k
+      const phase = k * (w.dirX * xRot + w.dirZ * zRot) - omega * t + w.phase
+      const amp = w.amplitude * fx.heightMult
+      y += amp * Math.sin(phase)
+      const q = qEff * (w.qBase ?? 0.7)
+      // Default pinch direction (pinchCos=1, pinchSin=0) → along-wave.
+      dxRot += q * w.dirX * amp * Math.cos(phase)
+      dzRot += q * w.dirZ * amp * Math.cos(phase)
+    }
+    return {
+      x: vx + (dxRot * cosB - dzRot * sinB),
+      z: vz + (dxRot * sinB + dzRot * cosB),
+      y: y + fx.surgeY,
+    }
+  }
+
+  /** Solve for the rest vertex whose displaced position is (X, Z), then
+   *  return the surface height the shader would draw at world (X, Z). */
+  function renderedHeightAt(field: WaveFieldState, X: number, Z: number): number {
+    let vx = X
+    let vz = Z
+    for (let i = 0; i < 40; i++) {
+      const s = shaderSurfaceAt(field, vx, vz)
+      vx += X - s.x
+      vz += Z - s.z
+    }
+    const s = shaderSurfaceAt(field, vx, vz)
+    // The fixed-point solve must have converged or the oracle is meaningless.
+    expect(Math.hypot(s.x - X, s.z - Z)).toBeLessThan(1e-4)
+    return s.y
+  }
+
+  it('buoyancy floats on the zone-scaled displaced surface deep inside a zone', () => {
+    const field = createWaveField(defaultWaves())
+    field.steepness = 0.44
+    field.time = 3.7
+    setWaveZones(field, [
+      {
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        halfWidth: 200,
+        halfHeight: 30,
+        halfDepth: 200,
+        heightMult: 1.6,
+        freqMult: 0.8,
+        blendRadiusM: 20,
+      },
+    ])
+    // Deep inside the zone the blend weight saturates at 1, so the CPU's
+    // evaluate-factors-at-the-query-point approximation is exact and the
+    // sampler must land on the displaced surface to inverse-map precision.
+    for (const [X, Z] of [
+      [12.3, -7.9],
+      [-31.0, 24.5],
+      [3.1, 88.8],
+    ] as const) {
+      expect(sampleHeight(field, X, Z)).toBeCloseTo(renderedHeightAt(field, X, Z), 2)
+    }
+  })
+
+  it('bearing-override zone: buoyancy still matches the displaced surface', () => {
+    const field = createWaveField(defaultWaves())
+    field.steepness = 0.44
+    field.time = 9.2
+    field.waveBearing = 0.6 // non-trivial global bearing the zone overrides
+    setWaveZones(field, [
+      {
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        halfWidth: 200,
+        halfHeight: 30,
+        halfDepth: 200,
+        heightMult: 1.2,
+        freqMult: 1.1,
+        directionDeg: 90,
+        blendRadiusM: 20,
+      },
+    ])
+    for (const [X, Z] of [
+      [5.5, 14.0],
+      [-44.4, -2.2],
+    ] as const) {
+      expect(sampleHeight(field, X, Z)).toBeCloseTo(renderedHeightAt(field, X, Z), 2)
+    }
   })
 })

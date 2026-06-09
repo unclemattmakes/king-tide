@@ -455,7 +455,11 @@ async function boot() {
   // the wave field so `sampleHeight`/`sampleSurface` apply the per-zone
   // amplitude / frequency / surge / direction multipliers around set
   // pieces (The Maw's central swell, Aqualand's tsunami timer, etc.).
-  // Empty list = pure global Gerstner, identical to pre-wave-zone behaviour.
+  // The water mesh mirrors this same list into its zone uniforms on its
+  // next tick (it watches `field.zones` by reference), so the rendered
+  // surface shows exactly the waves buoyancy feels — no separate GPU
+  // install step. Empty list = pure global Gerstner, identical to
+  // pre-wave-zone behaviour.
   setWaveZones(waveField, track.waveZones)
   // Terrain heightmap: when present, the water shader attenuates wave
   // displacement in shallow water (so crests stop clipping through
