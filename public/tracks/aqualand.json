@@ -4,9 +4,7 @@
   "lapsToFinish": 5,
   "environmentGlb": "/assets/tracks/aqualand.glb",
   "water": {
-    "height": 0.0,
-    "waveHeight": 1.0,
-    "waveFreq": 1.0
+    "height": 0.0
   },
   "start": {
     "position": {

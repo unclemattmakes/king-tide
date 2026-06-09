@@ -1,6 +1,10 @@
 # Water — what's next (research + roadmap)
 
-> **Status: RESEARCH (2026-06-09).** Investigation of how the water system works
+> **Status: RESEARCH (2026-06-09) — now executing.** P0.1 (zone GPU port)
+> landed as PR #340; P0.2 (pinch diagnosis) has a written verdict in §4.2 —
+> Q is trusted. Remaining phases tracked in §8.
+>
+> Investigation of how the water system works
 > end-to-end, what other games/papers have done, and a recommended path to
 > **more nuance, less visible repetition, and a surface players can read** —
 > the wave-mastery contract: a rider at 30–40 m/s must judge an approaching
@@ -257,6 +261,28 @@ deep-ocean test bed (no zones/terrain) and (b) Sandbar. If (a) is clean and
 **sharp crests are themselves a curvature cue**, and two shelved signals — the
 Jacobian compression foam and SoT's choppiness-driven peak mask (§5, §7) —
 need a non-zero, trusted Q.
+
+> **VERDICT (2026-06-09, post-#340): the math is sound — Q stays, trusted.**
+> Instrumented per §9 with the new `__hover.waterSync()` transect probe
+> (rest points → `renderVertex`, the CPU mirror of the GPU vertex transform
+> with live uniforms → diffed against `sampleHeight` at the displaced world
+> point) plus `?wavedots=1&wire=1` GPU-truth captures
+> ([pinch-diagnosis.spec.ts](../tests/e2e/pinch-diagnosis.spec.ts), artifacts
+> under `artifacts/pinch-diagnosis/`). At Q = 1.2 — ≈3× the shipped 0.44 —
+> buoyancy lands on the pinched surface to **≤ 3.1 mm** worst-case on
+> full-amplitude open water (lagoon-edit; pinch displacement up to 1.37 m)
+> and ≤ 5e-8 m inside Sandbar's 0.5× zone; the Q = 0 controls sit at float
+> noise (1e-15), and the red sim dots ride the GPU wireframe on both tracks.
+> So: candidate **(3) math mismatch — refuted**; candidate **(1) zones — was
+> real, fixed by #340**; any "out of phase" feel that survives a post-#340
+> playtest is candidate **(2) hover-spring phase lag** on sharper crests — a
+> coupling-tuning question (§6 rule 3: tune the coupling, never the field),
+> which is Matt's-hands territory, not a sync bug. Default **Q = 0.44 is now
+> trusted**, and §7.4's Q-gated signals (Jacobian compression foam, SoT-style
+> choppiness peak mask) are unblocked. One machine-local trap: the water
+> debug menu persists steepness in localStorage (`hoverbike.waterDebug.v10`),
+> so a distrust-era 0 keeps overriding the trusted default on that machine
+> until the menu's RESET is hit.
 
 ### 4.3 The readability experiment that worked was never landed
 
@@ -593,18 +619,28 @@ preview; CLAUDE.md hard rule 2).
 
 ### P0 — Restore truth (prerequisite for everything)
 
-1. **Port wave zones to the GPU** (§4.1) — uniform-array OBB soft-max in the
-   vertex wave loop, zone-constants drift test, `?wavedots` QA pass on
-   Sandbar/Maw/Texcoco. *This is the highest-leverage single change in the
-   doc:* it fixes a felt-vs-seen lie on three shipped tracks and re-opens the
-   zone vocabulary (incl. surge set-pieces) for level design.
-2. **Diagnose the pinch** (§4.2) — `?wavedots` + `renderVertex` transect at
-   `?steep=1` on deep ocean vs Sandbar; classify as zones / spring-lag /
-   math; fix or formally retire Q. Exit criterion: a written verdict + either
-   a trusted default Q ≈ 0.4–0.7 or a removed code path.
-3. **Authoring hygiene** (§4.5) — `water.swellBearingDeg` in track JSON;
-   demote the debug bearing to an override; deprecate `waveHeight`/`waveFreq`;
-   fix the wave-zones cookbook + design-targets wave-line claim.
+1. ✅ **Port wave zones to the GPU** (§4.1) — **LANDED (PR #340,
+   2026-06-09).** Uniform-array OBB soft-max in the vertex wave loop
+   (`waveZoneFactors`), `MAX_WAVE_ZONES = 8` sim-owned + drift-tested, CPU
+   inverse map folds zone factors in, `?wavedots` QA pass on
+   Sandbar/Maw/Texcoco captured in
+   [wave-zone-sync.spec.ts](../tests/e2e/wave-zone-sync.spec.ts).
+2. ✅ **Diagnose the pinch** (§4.2) — **VERDICT WRITTEN (2026-06-09): Q
+   trusted at the shipped 0.44 default.** See the verdict block in §4.2 —
+   math refuted as a cause (≤ 3.1 mm worst-case at Q = 1.2), zones were the
+   real desync (#340), residual feel = hover-spring lag → coupling tuning.
+   Diagnostics institutionalized: `__hover.waterSync()` +
+   [pinch-diagnosis.spec.ts](../tests/e2e/pinch-diagnosis.spec.ts).
+3. ✅ **Authoring hygiene** (§4.5) — **DONE (2026-06-09).**
+   `water.swellBearingDeg` is track-authorable (absent →
+   `WAVE_BEARING_DEFAULT` = 47°, the pre-existing shipped look); the debug
+   menu's bearing slider is a live-only override (no longer persisted —
+   stale localStorage bearings are ignored by the per-key loader);
+   `waveHeight`/`waveFreq` pruned from every shipped JSON, ignored by the
+   loader, dropped from the Blender exporter (N-panel sliders remain as
+   preview-only), and race.ts's respawn margin no longer reads them; the
+   wave-zones cookbook now states the GPU evaluation + the 8-zone cap, and
+   design-targets' wave-line claim is corrected to "cut".
 
 ### P1 — Readability layers (the curvature ask, directly)
 

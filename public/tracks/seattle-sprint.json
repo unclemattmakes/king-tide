@@ -4,9 +4,7 @@
   "lapsToFinish": 2,
   "environmentGlb": "/assets/tracks/seattle-sprint.glb",
   "water": {
-    "height": 0.0,
-    "waveHeight": 0.7,
-    "waveFreq": 0.45
+    "height": 0.0
   },
   "start": {
     "position": {

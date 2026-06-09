@@ -202,8 +202,19 @@ export type WaterMesh = {
      *  direction (e.g. "waves should be coming toward shore").
      *  Render + CPU buoyancy stay locked — the bearing rotates both
      *  the GPU sample coords and the CPU sampleSurface/sampleHeight
-     *  via the shared `field.waveBearing` scalar. */
+     *  via the shared `field.waveBearing` scalar.
+     *
+     *  The SOURCE of this value is per-track authoring
+     *  (`water.swellBearingDeg`, applied at boot; absent →
+     *  {@link WAVE_BEARING_DEFAULT}). The debug menu's slider is a live
+     *  session override and is deliberately not persisted — a bearing
+     *  dialed on one track must never silently re-aim every other
+     *  track's swell (water-next-research.md §4.5). */
     setWaveBearing(deg: number): void
+    /** Current wave-field bearing in degrees. Lets the (lazily-installed)
+     *  debug menu seed its live-only bearing slider from the
+     *  track-authored value rather than a persisted setting. */
+    getWaveBearing(): number
     /** Crest-mist ribbon strength, 0..1+. A soft additive haze lofted on the
      *  upper faces of steep breaking crests, weighted toward grazing view
      *  angles + distance so it fills in for the discrete crest-spray sprites
@@ -273,8 +284,6 @@ export type WaterDebugDefaults = {
   shoreWaveStrength: number
   /** Gerstner pinch direction in degrees, 0..90. */
   pinchDirection: number
-  /** Wave-field bearing in degrees, -180..180. */
-  waveBearing: number
   /** Curvature-based whitecap gain (foam v3). 4 = baseline. Higher = foam on
    *  gentler curvature; lower = only the sharpest crests. Primary whitecap knob. */
   whitecapCurvature: number
@@ -622,6 +631,17 @@ function getFoamStreakTexture(): THREE.Texture {
 }
 
 /**
+ * Global swell-train bearing applied when a track doesn't author
+ * `water.swellBearingDeg` (degrees CCW from world +X). 47° is the look every
+ * shipped track was graded against before the bearing became per-track data
+ * (P0.3, water-next-research.md §4.5) — it was the construction default the
+ * debug menu used to persist machine-wide. Tracks that want a different
+ * bearing author the JSON key; this constant only preserves the legacy look
+ * for the ones that don't.
+ */
+export const WAVE_BEARING_DEFAULT = 47
+
+/**
  * GPU-shader water built on Three.js's TSL node pipeline.
  *
  * The vertex shader Gerstner-displaces a flat plane and subtracts a per-bike
@@ -750,7 +770,6 @@ export function createWaterMesh(
   // cos/sin per vertex inside `waveZoneFactors` (zones can override the
   // bearing locally, so a single pre-computed cos/sin pair no longer
   // covers the whole surface).
-  const WAVE_BEARING_DEFAULT = 47
   const waveBearingDegUniform = uniform(WAVE_BEARING_DEFAULT)
 
   // ---- Tunable scalars (water debug menu) -------------------------------
@@ -3083,7 +3102,6 @@ export function createWaterMesh(
     streakElongation: STREAK_ELONGATION_DEFAULT,
     shoreWaveStrength: SHORE_WAVE_STRENGTH_DEFAULT,
     pinchDirection: PINCH_DIRECTION_DEFAULT,
-    waveBearing: WAVE_BEARING_DEFAULT,
     whitecapCurvature: WHITECAP_CURVATURE_DEFAULT,
     whitecapLeadBias: WHITECAP_LEAD_BIAS_DEFAULT,
     whitecapHeight: WHITECAP_HEIGHT_START_DEFAULT,
@@ -3241,6 +3259,9 @@ export function createWaterMesh(
       const v = clamp01(deg, -180, 180)
       waveBearingDegUniform.value = v
       field.waveBearing = (v * Math.PI) / 180
+    },
+    getWaveBearing() {
+      return waveBearingDegUniform.value as number
     },
     setWireframe(on) {
       mat.wireframe = !!on

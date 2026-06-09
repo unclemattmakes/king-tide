@@ -4,9 +4,7 @@
   "lapsToFinish": 3,
   "environmentGlb": "/assets/tracks/canyon-run.glb",
   "water": {
-    "height": 0.0,
-    "waveHeight": 0.3,
-    "waveFreq": 0.5
+    "height": 0.0
   },
   "start": {
     "position": {

@@ -4,9 +4,7 @@
   "lapsToFinish": 3,
   "environmentGlb": "/assets/tracks/cape-town-drift.glb",
   "water": {
-    "height": 0.29999998211860657,
-    "waveHeight": 1.0,
-    "waveFreq": 1.0
+    "height": 0.29999998211860657
   },
   "start": {
     "position": {

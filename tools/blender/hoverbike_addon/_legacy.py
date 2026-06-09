@@ -712,22 +712,23 @@ def derive_track_json(track_id: str, glb_url: str) -> dict[str, Any]:
             }
         )
 
-    # Sea level + Gerstner scalars — all canonical-source from scene
-    # props now (driven by the N-panel sliders, written by JSON-reload).
-    # The legacy water_volume_main custom props are no longer
-    # load-bearing; the helpers promote them into the scene props on
-    # first read so old .blends keep exporting the same values they
-    # did before the slider migration.
-    from .water import (
-        current_water_height_m,
-        current_wave_freq_mult,
-        current_wave_height_mult,
-    )
+    # Sea level — canonical-source from the scene prop (driven by the
+    # N-panel slider, written by JSON-reload). The legacy
+    # water_volume_main custom props are no longer load-bearing; the
+    # helper promotes them into the scene prop on first read so old
+    # .blends keep exporting the same value they did before the slider
+    # migration.
+    from .water import current_water_height_m
     water_height = current_water_height_m(bpy.context.scene)
+    # NOTE: waveHeight / waveFreq are deliberately NOT exported anymore —
+    # the runtime never read them (real amplitude = sky.seaStateBeaufort +
+    # waveZones; see docs/water-next-research.md §4.5). The N-panel wave
+    # sliders still drive the in-Blender wave PREVIEW, but they're
+    # preview-only now. The per-subkey export merge means any hand-edited
+    # runtime keys in the water block (e.g. `swellBearingDeg`) survive
+    # re-exports untouched.
     water_block: dict[str, float] = {
         "height": water_height,
-        "waveHeight": current_wave_height_mult(bpy.context.scene),
-        "waveFreq": current_wave_freq_mult(bpy.context.scene),
     }
 
     # Runtime terrain-shader knobs (Item 3). Live on the scene; the

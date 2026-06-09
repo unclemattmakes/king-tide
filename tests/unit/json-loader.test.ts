@@ -22,7 +22,21 @@ describe('buildTrackFromJson', () => {
     expect(track.aiSplines[0]!.points.length).toBeGreaterThan(10)
     expect(track.pickupSpawns).toHaveLength(1)
     expect(track.boostPads).toHaveLength(0)
-    expect(track.water).toEqual({ height: 0, waveHeight: 1, waveFreq: 0.5 })
+    expect(track.water).toEqual({ height: 0 })
+  })
+
+  it('water: reads optional swellBearingDeg, ignores the deprecated dead knobs', () => {
+    const raw = baseTrack()
+    // Old JSONs (and old Blender exports) carry the dead waveHeight /
+    // waveFreq pair — the loader must tolerate AND drop them, so nothing
+    // downstream can "tune" a knob the wave field never reads.
+    raw.water = { height: -1.5, swellBearingDeg: 120, waveHeight: 1, waveFreq: 0.5 }
+    const track = buildTrackFromJson(raw)
+    expect(track.water).toEqual({ height: -1.5, swellBearingDeg: 120 })
+    // Absent bearing stays absent (boot falls back to WAVE_BEARING_DEFAULT).
+    const rawNoBearing = baseTrack()
+    rawNoBearing.water = { height: 2 }
+    expect(buildTrackFromJson(rawNoBearing).water).toEqual({ height: 2 })
   })
 
   it('round-trips: trackToJson(buildTrackFromJson(x)) preserves shape', () => {
@@ -490,7 +504,7 @@ function baseTrack(): Record<string, unknown> & {
     name: 'Unit Test',
     lapsToFinish: 1,
     environmentGlb: '/assets/tracks/x.glb',
-    water: { height: 0, waveHeight: 1, waveFreq: 0.5 },
+    water: { height: 0 },
     start: { position: { x: 0, y: 1, z: 0 }, yaw: 0 },
     checkpoints: [
       {

@@ -73,10 +73,13 @@ export function createRaceSystem(track: Track, events: RaceEvents = {}) {
       let upperBound = cp.height + 2
       if (gateFloatsOnWaves(track, cp)) {
         // The gate VISUAL bobs on the swell while this trigger plane stays
-        // put, so widen the vertical window by the wave amplitude (both
-        // ways) — an "oversized static trigger" that still catches a
-        // crossing at any wave phase.
-        const amp = (track.water?.waveHeight ?? 0) * 2 + 2
+        // put, so widen the vertical window enough to catch a crossing at
+        // any wave phase. Constant 4 m covers the wave envelope at every
+        // shipped sea state (peak ambient crest ≈ 2 m at Beaufort 5 plus
+        // zone multipliers); it used to scale off the per-track
+        // `water.waveHeight`, a dead knob the wave field never read
+        // (range 2.5–4 m across shipped tracks), now removed.
+        const amp = 4
         lowerBound -= amp
         upperBound += amp
       }

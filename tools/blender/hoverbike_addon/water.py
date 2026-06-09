@@ -10,10 +10,13 @@ Four things live here:
     .blends migrate transparently on first read.
 
   * **Wave shape** — the scene props ``hoverbike_water_wave_height``
-    and ``hoverbike_water_wave_freq`` are the canonical amplitude /
-    frequency scalars. They ship out as ``water.waveHeight`` /
-    ``water.waveFreq`` in the per-track JSON; the wave preview reads
-    them too so dragging a slider redisplaces the surface live. Same
+    and ``hoverbike_water_wave_freq`` are amplitude / frequency scalars
+    for the in-viewport wave PREVIEW only. They used to ship out as
+    ``water.waveHeight`` / ``water.waveFreq`` in the per-track JSON, but
+    the runtime never read those keys (real amplitude comes from
+    ``sky.seaStateBeaufort`` + ``waveZones``), so the exporter stopped
+    emitting them (P0.3 hygiene, docs/water-next-research.md §4.5).
+    Dragging a slider still redisplaces the preview surface live. Same
     promote-on-first-read pattern as sea level: legacy
     ``water_volume_main.wave_height`` / ``wave_freq`` custom props are
     pulled into the scene props on .blend open.
@@ -123,10 +126,10 @@ def _sample_water_height(
 
     ``amp_mult`` scales every wave's amplitude (so 0 → flat ocean,
     2 → twice the chop). ``freq_mult`` multiplies the wavenumber k
-    (so 0.5 → wavelengths doubled, 2.0 → wavelengths halved). Both
-    map 1:1 to the JSON ``water.waveHeight`` / ``water.waveFreq``
-    scalars the exporter ships out, so what the author sees in the
-    viewport is what the JSON encodes."""
+    (so 0.5 → wavelengths doubled, 2.0 → wavelengths halved). Both are
+    PREVIEW-ONLY scalars (the old ``water.waveHeight`` / ``waveFreq``
+    JSON keys are dead and no longer exported); the runtime's actual
+    amplitude driver is ``sky.seaStateBeaufort`` + ``waveZones``."""
     y = 0.0
     for dx, dz, amp, wavelength, speed, phase in DEFAULT_WAVES:
         k = ((2.0 * math.pi) / wavelength) * freq_mult
@@ -229,8 +232,9 @@ def current_water_height_m(scene) -> float:
 
 
 def current_wave_height_mult(scene) -> float:
-    """Canonical Gerstner-amplitude scalar (= the JSON ``water.waveHeight``
-    value the exporter ships out). Reads the scene prop
+    """Gerstner-amplitude scalar for the in-viewport wave PREVIEW (the
+    old ``water.waveHeight`` JSON key is dead — no longer exported, never
+    read by the runtime). Reads the scene prop
     ``hoverbike_water_wave_height`` first; falls back to the legacy
     ``water_volume_main.wave_height`` custom prop and promotes it into
     the scene prop on first read so .blends authored before the slider
@@ -252,14 +256,15 @@ def current_wave_height_mult(scene) -> float:
 
 
 def current_wave_freq_mult(scene) -> float:
-    """Canonical Gerstner-frequency scalar (= the JSON ``water.waveFreq``
-    value the exporter ships out). Same promote-on-first-read pattern
-    as :func:`current_wave_height_mult`.
+    """Gerstner-frequency scalar for the in-viewport wave PREVIEW (the
+    old ``water.waveFreq`` JSON key is dead — no longer exported, never
+    read by the runtime). Same promote-on-first-read pattern as
+    :func:`current_wave_height_mult`.
 
     Default is 1.0 ("authored wavelengths, no change"). Note that
     pre-slider .blends had a legacy default of 0.5 — that value gets
     promoted verbatim into the new scene prop, so existing tracks
-    keep their historic preview / export until the author dials it
+    keep their historic preview until the author dials it
     deliberately."""
     raw = getattr(scene, "hoverbike_water_wave_freq", None)
     if isinstance(raw, (int, float)) and float(raw) != 1.0:
@@ -648,18 +653,21 @@ def register() -> None:
         precision=2,
         update=_on_water_prop_changed,
     )
-    # Wave amplitude / frequency multipliers. These ARE the JSON
-    # `water.waveHeight` / `water.waveFreq` values the exporter ships
-    # out — what the slider shows is what the JSON encodes. Default
-    # 1.0 / 1.0 means "ride DEFAULT_WAVES as authored". Legacy
-    # `water_volume_main.wave_height` / `wave_freq` custom props get
-    # promoted into these on first read (see current_wave_*_mult), so
-    # pre-slider .blends keep their authored amplitude.
+    # Wave amplitude / frequency multipliers — PREVIEW-ONLY. They used
+    # to ship as the JSON `water.waveHeight` / `water.waveFreq` keys,
+    # but the runtime never read those (real amplitude comes from
+    # `sky.seaStateBeaufort` + `waveZones`), so the exporter dropped
+    # them (P0.3 hygiene). Default 1.0 / 1.0 means "ride DEFAULT_WAVES
+    # as authored". Legacy `water_volume_main.wave_height` / `wave_freq`
+    # custom props get promoted into these on first read (see
+    # current_wave_*_mult), so pre-slider .blends keep their authored
+    # preview amplitude.
     bpy.types.Scene.hoverbike_water_wave_height = FloatProperty(
         name="Wave height",
         description=(
-            "Per-wave amplitude multiplier. 0 → flat ocean, 1 → DEFAULT_WAVES as authored, "
-            "2 → twice the chop. Exported as `water.waveHeight` in the track JSON."
+            "Per-wave amplitude multiplier for the viewport wave preview. 0 → flat ocean, "
+            "1 → DEFAULT_WAVES as authored, 2 → twice the chop. Preview-only — NOT exported "
+            "(the runtime's amplitude driver is sky.seaStateBeaufort + waveZones)."
         ),
         default=1.0,
         min=0.0,
@@ -670,9 +678,9 @@ def register() -> None:
     bpy.types.Scene.hoverbike_water_wave_freq = FloatProperty(
         name="Wave freq",
         description=(
-            "Per-wave frequency multiplier. 0.5 → wavelengths doubled (slow rolling swell), "
-            "1 → DEFAULT_WAVES as authored, 2 → wavelengths halved (jittery chop). "
-            "Exported as `water.waveFreq` in the track JSON."
+            "Per-wave frequency multiplier for the viewport wave preview. 0.5 → wavelengths "
+            "doubled (slow rolling swell), 1 → DEFAULT_WAVES as authored, 2 → wavelengths "
+            "halved (jittery chop). Preview-only — NOT exported."
         ),
         default=1.0,
         min=0.0,
