@@ -39,6 +39,11 @@ const STREAK_MODE = process.env.FOAM_SWEEP_STREAK === '1'
 // FOAM_SWEEP_AB=1 captures a clean before/after on one frozen wave: the full
 // legacy look (every foam knob off) vs the shipped foam-pass defaults.
 const AB_MODE = process.env.FOAM_SWEEP_AB === '1'
+// FOAM_SWEEP_READABILITY=1 sweeps the P1 readability layers (posterized value
+// ramp + contour-line foam + Wind-Waker relief pair — water-next-research §8
+// P1) on the coverage pose: off → shipped defaults → each layer isolated →
+// strong, so the A/B grid shows exactly what each layer buys.
+const READABILITY_MODE = process.env.FOAM_SWEEP_READABILITY === '1'
 
 type Pose = { pos: [number, number, number]; target: [number, number, number] }
 // Coverage pose: elevated over The Maw's mid-section, looking DOWN (~33°) and
@@ -54,7 +59,24 @@ const POSE: Pose = process.env.FOAM_SWEEP_POSE
   : DEFAULT_POSE
 
 // `w` = foamWarmth, `st` = foamStreak (both default to the shipped 1.0).
-type Variant = { label: string; h: number; s: number; m: number; w?: number; st?: number }
+// Readability fields (P1): `ramp`/`steps`/`post` = value-ramp strength /
+// bands / posterize, `cs`/`csp`/`rel` = contour strength / spacing / relief.
+// Whitecap h/s/m are optional so readability variants can leave the foam
+// stack at its live defaults instead of forcing values through the setters.
+type Variant = {
+  label: string
+  h?: number
+  s?: number
+  m?: number
+  w?: number
+  st?: number
+  ramp?: number
+  steps?: number
+  post?: number
+  cs?: number
+  csp?: number
+  rel?: number
+}
 const COVERAGE_GRID: Variant[] = [
   { label: '0-legacy', h: 1.0, s: 0.3, m: 0.0 }, // the old glassy gate (sanity floor)
   { label: '1-overshoot', h: 0.45, s: 0.14, m: 0.6 }, // the uniform-wash we just saw
@@ -87,15 +109,29 @@ const AB_GRID: Variant[] = [
   { label: 'before-legacy', h: 1.0, s: 0.3, m: 0.0, w: 0.0, st: 0.0 },
   { label: 'after-foampass', h: 0.55, s: 0.3, m: 0.35, w: 1.0, st: 1.0 },
 ]
+// P1 readability A/B: layers off (pre-P1 look) → shipped defaults → each
+// layer isolated → strong. Foam knobs untouched (live defaults).
+const READABILITY_GRID: Variant[] = [
+  { label: '0-off', ramp: 0, steps: 3, post: 0.7, cs: 0, csp: 0.45, rel: 0.6 },
+  { label: '1-default', ramp: 0.45, steps: 3, post: 0.7, cs: 0.55, csp: 0.45, rel: 0.6 },
+  { label: '2-ramp-only', ramp: 0.45, steps: 3, post: 0.7, cs: 0, csp: 0.45, rel: 0.6 },
+  { label: '3-contours-only', ramp: 0, steps: 3, post: 0.7, cs: 0.55, csp: 0.45, rel: 0.6 },
+  { label: '4-contours-no-relief', ramp: 0, steps: 3, post: 0.7, cs: 0.55, csp: 0.45, rel: 0 },
+  { label: '5-strong', ramp: 0.8, steps: 3, post: 1.0, cs: 1.0, csp: 0.35, rel: 0.9 },
+  { label: '6-bands-2', ramp: 0.6, steps: 2, post: 1.0, cs: 0.55, csp: 0.45, rel: 0.6 },
+  { label: '7-bands-4', ramp: 0.6, steps: 4, post: 1.0, cs: 0.55, csp: 0.45, rel: 0.6 },
+]
 const GRID: Variant[] = process.env.FOAM_SWEEP_GRID
   ? (JSON.parse(process.env.FOAM_SWEEP_GRID) as Variant[])
-  : AB_MODE
-    ? AB_GRID
-    : WARMTH_MODE
-      ? WARMTH_GRID
-      : STREAK_MODE
-        ? STREAK_GRID
-        : COVERAGE_GRID
+  : READABILITY_MODE
+    ? READABILITY_GRID
+    : AB_MODE
+      ? AB_GRID
+      : WARMTH_MODE
+        ? WARMTH_GRID
+        : STREAK_MODE
+          ? STREAK_GRID
+          : COVERAGE_GRID
 
 test.describe('foam coverage sweep', () => {
   test.skip(process.env.FOAM_SWEEP !== '1', 'gated on FOAM_SWEEP=1')
@@ -117,7 +153,7 @@ test.describe('foam coverage sweep', () => {
     await page.keyboard.press('Enter')
     await page.addStyleTag({
       content:
-        '#hud,#hud-scaffold,#race-timer,#race-banner,#race-gap,#race-minimap,#race-intro-ui,#race-intro-skip,#hud-positions,#devsettings-toggle,#water-debug-toggle,#garage-toggle,#loading-screen{display:none!important}',
+        '#hud,#hud-scaffold,#race-timer,#race-banner,#race-gap,#race-minimap,#race-intro-ui,#race-intro-skip,#hud-positions,#devsettings-toggle,#water-debug-toggle,#garage-toggle,#loading-screen,#dev-dock{display:none!important}',
     })
     await page.waitForTimeout(6000)
 
@@ -140,11 +176,19 @@ test.describe('foam coverage sweep', () => {
       await page.evaluate((variant) => {
         const wd = window.__hover!.waterDebug()
         if (!wd) return
-        wd.setWhitecapHeight(variant.h)
-        wd.setWhitecapSlope(variant.s)
-        wd.setWhitecapMode(variant.m)
-        wd.setFoamWarmth(variant.w ?? 1.0)
-        wd.setFoamStreak(variant.st ?? 1.0)
+        // Only drive knobs the variant specifies — readability variants
+        // leave the foam stack at its live defaults and vice versa.
+        if (variant.h !== undefined) wd.setWhitecapHeight(variant.h)
+        if (variant.s !== undefined) wd.setWhitecapSlope(variant.s)
+        if (variant.m !== undefined) wd.setWhitecapMode(variant.m)
+        if (variant.h !== undefined) wd.setFoamWarmth(variant.w ?? 1.0)
+        if (variant.h !== undefined) wd.setFoamStreak(variant.st ?? 1.0)
+        if (variant.ramp !== undefined) wd.setRampStrength(variant.ramp)
+        if (variant.steps !== undefined) wd.setRampSteps(variant.steps)
+        if (variant.post !== undefined) wd.setRampPosterize(variant.post)
+        if (variant.cs !== undefined) wd.setContourStrength(variant.cs)
+        if (variant.csp !== undefined) wd.setContourSpacing(variant.csp)
+        if (variant.rel !== undefined) wd.setContourRelief(variant.rel)
       }, v)
       await page.waitForTimeout(400)
       const name = `${v.label}.jpg`
