@@ -219,6 +219,63 @@ const SLIDERS: SliderDef[] = [
     format: (n) => `${n.toFixed(2)}×`,
     hint: 'Flow-aligned directional combing of foam down the wave faces (painterly brushstrokes). 0 = isotropic round bubbles only (legacy) · 1 = baseline streaks. Only applies on sloped faces, fades at distance',
   },
+  // P1 readability layers (water-next-research §8 P1) — the live knobs are
+  // the point: the 2026-06-06 cel session was lost partly because its hooks
+  // were console-only.
+  {
+    key: 'rampStrength',
+    label: 'Value ramp',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    format: (n) => n.toFixed(2),
+    hint: 'Crest-to-trough brightness sweep ("one value sweep per wave face" — the Wave Race lesson). Keyed to the swell-only field so chop never carves it. 0 = off',
+  },
+  {
+    key: 'rampSteps',
+    label: 'Ramp bands',
+    min: 2,
+    max: 5,
+    step: 1,
+    format: (n) => n.toFixed(0),
+    hint: 'Posterize band count for the value ramp. Band boundaries are the readability signal (cel-session + perception research)',
+  },
+  {
+    key: 'rampPosterize',
+    label: 'Ramp posterize',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    format: (n) => n.toFixed(2),
+    hint: '0 = continuous gradient, 1 = hard quantized bands. Mid values keep a hint of band edge over a smooth sweep',
+  },
+  {
+    key: 'contourStrength',
+    label: 'Contour lines',
+    min: 0,
+    max: 1.5,
+    step: 0.05,
+    format: (n) => n.toFixed(2),
+    hint: 'Iso-height foam lines off the swell-only field — they pack together where the face steepens (line density IS the steepness cue). fwidth-thinned, fade when crowded, every 3rd heavier. 0 = off',
+  },
+  {
+    key: 'contourSpacing',
+    label: 'Contour spacing',
+    min: 0.2,
+    max: 1.5,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)} m`,
+    hint: 'Vertical interval between contour lines, metres. Smaller = more lines per face = finer height reading (and earlier crowd-fade at distance)',
+  },
+  {
+    key: 'contourRelief',
+    label: 'Contour relief',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    format: (n) => n.toFixed(2),
+    hint: 'Wind-Waker light/dark pair: a dark-teal twin line offset away from the sun beside each light line — the cheap embossed-relief read. 0 = light lines only',
+  },
 ]
 
 export type WaterDebugMenu = {
@@ -378,6 +435,24 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'foamStreak':
           water.debug.setFoamStreak(v)
+          break
+        case 'rampStrength':
+          water.debug.setRampStrength(v)
+          break
+        case 'rampSteps':
+          water.debug.setRampSteps(v)
+          break
+        case 'rampPosterize':
+          water.debug.setRampPosterize(v)
+          break
+        case 'contourStrength':
+          water.debug.setContourStrength(v)
+          break
+        case 'contourSpacing':
+          water.debug.setContourSpacing(v)
+          break
+        case 'contourRelief':
+          water.debug.setContourRelief(v)
           break
       }
     })
