@@ -165,11 +165,17 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
 
     function buildRaceHref(trackId: string): string {
       const url = new URL(window.location.href)
+      // An explicit `?host=` override (custom relay — e2e sidecars, a
+      // localhost relay against a prod build) must survive into the
+      // race URL, or the race tab silently reconnects to the DEFAULT
+      // relay and the room's peers/lock state diverge from the lobby's.
+      const hostOverride = url.searchParams.get('host')
       url.search = ''
       url.searchParams.set('room', opts.roomId)
       url.searchParams.set('track', trackId)
       url.searchParams.set('bike', local.bikeId)
       url.searchParams.set('race', '1')
+      if (hostOverride) url.searchParams.set('host', hostOverride)
       return url.toString()
     }
 
@@ -231,9 +237,12 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
           selectedTrackId: local.trackId,
         })
         refresh()
-        // If we joined a race already in progress (`raceStarted`), the
-        // room fires onStartRace with the server-stamped track right
-        // after this callback — navigation is handled there.
+        // Joining within the race-start grace window (the cohort is
+        // still loading in): `raceStarted` rides the hello and the room
+        // fires onStartRace with the server-stamped track right after
+        // this callback — navigation is handled there, and we make the
+        // shared countdown. Post-grace arrivals never get here — the
+        // relay rejects them and onRaceInProgress shows the lock notice.
         void raceStarted
       },
       onPeerJoined: () => refresh(),
@@ -252,7 +261,19 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
         armRace(trackId ?? armedTrackId ?? local.trackId, 'server')
       },
       onRoomFull: () => {
-        pickBanner = { winnerLabel: 'ROOM FULL', subtitle: 'Try another code.' }
+        pickBanner = { winnerLabel: 'ROOM FULL', subtitle: 'Try another code.', plain: true }
+        refresh()
+      },
+      onRaceInProgress: () => {
+        // No mid-race joins (product rule, 2026-06-09): the room locked
+        // when its race started. The room has already closed itself —
+        // leave the player in the lobby shell with the notice; Esc / B
+        // still bails to the menu.
+        pickBanner = {
+          winnerLabel: 'RACE IN PROGRESS',
+          subtitle: 'This room is mid-race. Try again when the race ends.',
+          plain: true,
+        }
         refresh()
       },
     })
