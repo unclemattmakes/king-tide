@@ -62,6 +62,20 @@ export type BikePosesProbe = {
   remote: Record<number, { x: number; y: number; z: number }>
 }
 
+/** Synchronized-start barrier state, read by the game loop each frame
+ *  to decide when to arm the deferred 3-2-1 (and by the e2e probe).
+ *  Timestamps are `Date.now()` so two tabs on one machine compare. */
+export type StartBarrierState = {
+  /** Relay speaks the barrier protocol (hello carried `startBarrier`).
+   *  False until connected, and against an old relay — in which case
+   *  the loop arms locally as soon as the room is ready (legacy). */
+  supported: boolean
+  /** When this tab reported `race-loaded`, or null. */
+  loadedAt: number | null
+  /** When the relay's `race-go` arrived, or null while holding. */
+  goAt: number | null
+}
+
 export interface MultiplayerHandle {
   /** Live PartyKit room accessor, or `null` in single-player. Function
    *  so a leaving host can hand the room off without invalidating the
@@ -78,6 +92,11 @@ export interface MultiplayerHandle {
   renderRoomChip(): void
   /** Read-only pose probe (see {@link BikePosesProbe}). */
   probeBikePoses(): BikePosesProbe
+  /** Synchronized start — report this tab loaded (idempotent; resent on
+   *  reconnect while the hold is open). No-op in single-player. */
+  markRaceLoaded(): void
+  /** Live barrier state (see {@link StartBarrierState}). */
+  raceStartBarrier(): Readonly<StartBarrierState>
 }
 
 export interface SetupMultiplayerOpts {
@@ -110,6 +129,16 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
   const remoteEids = new Map<number, number>()
   const recentRemoteFrames: InputFrame[] = []
   let net: NetRoom | null = null
+
+  // Synchronized start — see StartBarrierState. Written here (room
+  // callbacks + markRaceLoaded), read each frame by the game loop.
+  const startBarrier: StartBarrierState = { supported: false, loadedAt: null, goAt: null }
+
+  function markRaceLoaded(): void {
+    if (!net) return
+    if (startBarrier.loadedAt === null) startBarrier.loadedAt = Date.now()
+    net.sendRaceLoaded()
+  }
 
   /** Tenure-aware election (longest-tenured peer wins; slot order as
    *  tie-break / old-relay fallback). Outside a room, or before the
@@ -358,6 +387,14 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
         console.log(
           `[net] joined room "${roomId}" as peer ${peerId}, others: [${others.join(', ')}]`,
         )
+        // Synchronized start — capability comes from this hello. If we
+        // had already reported loaded and the go hasn't landed (socket
+        // blip mid-hold), re-report: the relay's loaded-set may live on
+        // a recycled instance that never saw us.
+        startBarrier.supported = net?.serverStartBarrier === true
+        if (startBarrier.loadedAt !== null && startBarrier.goAt === null) {
+          net?.sendRaceLoaded()
+        }
         // The local player bike was spawned with the placeholder slot 0
         // (correct for single-player). Now that the relay has assigned our
         // real slot, re-tag PeerControlled so applyPeerInputs routes our
@@ -389,6 +426,11 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
           roomEl.style.color = '#ff7777'
           roomEl.textContent = `room: ${roomId} FULL`
         }
+      },
+      onRaceGo: () => {
+        if (startBarrier.goAt !== null) return // idempotent (late replays)
+        startBarrier.goAt = Date.now()
+        console.log(`[net] race-go — grid released, arming countdown`)
       },
       onRaceInProgress: () => {
         // The relay's no-mid-race-joins lock turned us away (a fresh
@@ -524,5 +566,7 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
     buildAndSendSnapshot,
     renderRoomChip,
     probeBikePoses,
+    markRaceLoaded,
+    raceStartBarrier: () => startBarrier,
   }
 }

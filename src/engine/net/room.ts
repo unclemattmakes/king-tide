@@ -84,6 +84,12 @@ export type NetRoomConfig = {
    *  caller (smash-bros-style random over picks); when absent, the
    *  receiver falls back to its current URL track. */
   onStartRace?: (trackId?: string) => void
+  /** Synchronized start — the relay released the grid: every expected
+   *  racer reported `race-loaded` (or the relay's hold timed out).
+   *  Arm the local 3-2-1 NOW; start skew between peers is one-way
+   *  relay latency. Only sent by barrier-aware relays (see
+   *  `serverStartBarrier`). */
+  onRaceGo?: () => void
 }
 
 /** Per-peer lobby-flow selections. Both fields are optional — clients
@@ -112,6 +118,15 @@ export type NetRoom = {
    *  removed as dead relay load. Retained (with the receive path) for
    *  M10.13's owner-authoritative combat events. */
   sendFrame(frame: InputFrame): void
+  /** Synchronized start — report that this race tab has finished
+   *  loading and is holding its 3-2-1 for the shared `race-go`.
+   *  No-ops until connected. Safe to re-send (reconnects). */
+  sendRaceLoaded(): void
+  /** True when the connected relay speaks the synchronized-start
+   *  protocol (hello carried `startBarrier`). Against an older relay
+   *  the caller should arm its countdown locally, as before the
+   *  barrier existed. */
+  readonly serverStartBarrier: boolean
   /**
    * Latest-known `Intent` per remote peer slot, mutated each time a remote
    * frame arrives. Sim loop drains this into the per-tick peer-input map
@@ -195,6 +210,9 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
   // order inside isHostSeat.
   let myJoinSeq: number | undefined
   const remotePeerSeqs = new Map<number, number>()
+  // Synchronized-start capability, learned from the hello. False against
+  // an old relay → callers arm their countdown locally (legacy).
+  let serverStartBarrier = false
   function mySeat(): PeerSeat {
     return { peerId: myPeerId, joinSeq: myJoinSeq }
   }
@@ -274,6 +292,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
     socketOpen = false
     myPeerId = -1
     myJoinSeq = undefined
+    serverStartBarrier = false
     remotePeers.clear()
     remotePeerSeqs.clear()
     latestPeerIntents.clear()
@@ -313,6 +332,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
         case 'hello':
           myPeerId = msg.peerId
           myJoinSeq = msg.joinSeq
+          serverStartBarrier = msg.startBarrier === true
           remotePeers.clear()
           remotePeerSeqs.clear()
           latestPeerReady.clear()
@@ -395,6 +415,9 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
           break
         case 'start-race':
           cfg.onStartRace?.(msg.trackId)
+          break
+        case 'race-go':
+          cfg.onRaceGo?.()
           break
         // Both rejection notices self-close: the server will reject
         // every retry until the room changes state, so reconnect
@@ -524,6 +547,14 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
       if (!socketOpen || myPeerId < 0) return
       const msg: ClientControlMessage = { type: 'start-race', trackId }
       socket.send(JSON.stringify(msg))
+    },
+    sendRaceLoaded() {
+      if (!socketOpen || myPeerId < 0) return
+      const msg: ClientControlMessage = { type: 'race-loaded' }
+      socket.send(JSON.stringify(msg))
+    },
+    get serverStartBarrier() {
+      return serverStartBarrier
     },
     get latestPeerReady() {
       return latestPeerReady

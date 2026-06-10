@@ -780,11 +780,13 @@ async function boot() {
 
   const raceHud = createRaceHud({
     track,
-    // Defer the countdown until the cinematic shots finish. Multi-
-    // player enters this code path AFTER the lobby has cleared (see
-    // `mp-lobby.ts`), so its countdown auto-starts here — same as
-    // existing behaviour — and the intro never plays.
-    deferStart: introMode !== 'off',
+    // Defer the countdown until the gate clears: single-player waits
+    // for the cinematic shots to finish; multiplayer waits for the
+    // relay's synchronized-start `race-go` (every cohort member loaded
+    // — see the barrier driver in game-loop.ts), so all tabs run the
+    // same 3-2-1 from one shared moment instead of each arming at its
+    // own load time.
+    deferStart: introMode !== 'off' || isMultiplayer,
     // Suppress the giant 3/2/1/GO text — the start-lights row is the
     // canonical visual when the intro is on. Multiplayer keeps the
     // banner (lobby gate already has its own UI; no intro shots fly).
@@ -1435,6 +1437,7 @@ async function boot() {
         },
         snapshotsReceived: () => room.snapshotsReceived,
         bikePoses: () => multiplayer.probeBikePoses(),
+        barrier: () => ({ ...multiplayer.raceStartBarrier() }),
       }
     },
   })

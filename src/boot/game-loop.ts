@@ -966,6 +966,19 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // Stamped on the first frame after the director finishes; anchors the
   // scenery-warm hold cap (see the arm branch below).
   let introHoldStartedAt: number | null = null
+
+  // Synchronized start (multiplayer). The HUD is built with deferStart
+  // in a room, so no tab's 3-2-1 runs until the relay's race-go
+  // releases the whole grid at once — start skew becomes one-way relay
+  // latency instead of load-time difference. The loop reports
+  // race-loaded once the room is ready (being inside frame() means
+  // we're rendering), then arms on the go. Fallbacks: an old relay
+  // (no startBarrier in its hello) arms immediately on ready — the
+  // pre-barrier behavior — and a hard timeout covers a dead relay or a
+  // lost go so the grid can never hang forever.
+  const MP_START_FAILSAFE_MS = 15_000
+  let mpStartArmed = !roomId // single-player: barrier not in play
+  const mpBootedAt = performance.now()
   let introSkipPromptEl: HTMLElement | null = null
   let introSkipKeyHandler: ((e: KeyboardEvent) => void) | null = null
   let introSkipPointerHandler: ((e: Event) => void) | null = null
@@ -1339,6 +1352,24 @@ export function startGameLoop(opts: GameLoopOpts): void {
       if (warmDone || performance.now() - introHoldStartedAt >= SCENERY_WARM_HOLD_CAP_MS) {
         raceHud.armCountdown()
         introArmed = true
+      }
+    }
+
+    // Multiplayer synchronized start — see MP_START_FAILSAFE_MS above.
+    if (!mpStartArmed) {
+      const barrier = multiplayer.raceStartBarrier()
+      if (barrier.loadedAt === null && net?.ready) {
+        multiplayer.markRaceLoaded()
+        raceHud.setHoldBanner('WAITING FOR RIDERS…')
+      }
+      const timedOut = performance.now() - mpBootedAt > MP_START_FAILSAFE_MS
+      const legacyRelay = net?.ready === true && !barrier.supported
+      if (barrier.goAt !== null || legacyRelay || timedOut) {
+        if (timedOut && barrier.goAt === null && !legacyRelay) {
+          console.warn('[net] start-barrier timeout — arming countdown locally')
+        }
+        raceHud.armCountdown()
+        mpStartArmed = true
       }
     }
 
