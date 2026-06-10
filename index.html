@@ -1486,8 +1486,9 @@
         background: linear-gradient(180deg, transparent 55%, rgba(5, 10, 20, 0.6) 100%);
         pointer-events: none;
       }
+      /* Pending tiles: dark base here; the accent tint arrives as an inline
+         `background-image` gradient from buildV1TrackCard (menu-flow.ts). */
       .bc-card-thumb .thumb-pending {
-        background-image: none !important;
         background-color: rgba(10, 20, 36, 0.6);
       }
       .bc-card-thumb .body {
@@ -2413,7 +2414,7 @@
       /* biome-ignore-end lint/complexity/noImportantStyles: required to defeat per-element animation/transition rules of higher specificity. */
 
       /* ───────────── Cascade-order overrides ─────────────
-         Rules collected at the bottom of the stylesheet so each one comes
+         Rules collected late in the stylesheet so each one comes
          AFTER every lower-specificity selector it must beat. Keeping them
          here lets the rest of the file stay grouped by feature without
          tripping `noDescendingSpecificity`. */
@@ -2443,7 +2444,10 @@
       .bc-cards .bc-card:nth-child(4) { animation-delay: 300ms; }
 
       #water-debug .row label, #devsettings .row label { opacity: 0.85; }
-      #water-debug .row .val, #devsettings .row .val {
+      /* `.card` is the panels' real wrapper; it bumps specificity to (1,3,0)
+         so this rule doesn't read as descending against the earlier
+         `#finish .results .row .val` (1,3,0). */
+      #water-debug .card .row .val, #devsettings .card .row .val {
         font-variant-numeric: tabular-nums; opacity: 0.8; text-align: right;
       }
       #water-debug .sub, #devsettings .sub {
@@ -3509,7 +3513,10 @@
       #cup-results .champion .lbl {
         font-size: 11px; opacity: 0.7; letter-spacing: 0.28em; margin-bottom: 6px;
       }
-      #cup-results .champion .who {
+      /* `.card` is the overlay's real wrapper; it bumps specificity to (1,3,0)
+         so this rule doesn't read as descending against the earlier
+         `#finish .results .row .who` (1,3,0). */
+      #cup-results .card .champion .who {
         font-size: 22px; color: var(--bc-yellow);
       }
       #cup-results .actions {
