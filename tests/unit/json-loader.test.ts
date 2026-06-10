@@ -39,6 +39,33 @@ describe('buildTrackFromJson', () => {
     expect(buildTrackFromJson(rawNoBearing).water).toEqual({ height: 2 })
   })
 
+  it('water: reads the optional spectrum block, validates the preset name', () => {
+    const raw = baseTrack()
+    raw.water = {
+      height: 0,
+      spectrum: { preset: 'open-swell', seed: 3, components: 14, swellBias: 0.7 },
+    }
+    const track = buildTrackFromJson(raw)
+    expect(track.water?.spectrum).toEqual({
+      preset: 'open-swell',
+      seed: 3,
+      components: 14,
+      swellBias: 0.7,
+    })
+    // Spectrum survives the editor's save round-trip — a stripped key
+    // would silently revert a track to the default bank on next save.
+    expect(buildTrackFromJson(trackToJson(track)).water?.spectrum).toEqual(track.water?.spectrum)
+
+    // Unknown preset = authoring error, not a silent default-bank fallback.
+    const rawBadPreset = baseTrack()
+    rawBadPreset.water = { height: 0, spectrum: { preset: 'tsunami-madness' } }
+    expect(() => buildTrackFromJson(rawBadPreset)).toThrow(/water\.spectrum\.preset/)
+
+    const rawBadShape = baseTrack()
+    rawBadShape.water = { height: 0, spectrum: 'open-swell' }
+    expect(() => buildTrackFromJson(rawBadShape)).toThrow(/water\.spectrum must be an object/)
+  })
+
   it('round-trips: trackToJson(buildTrackFromJson(x)) preserves shape', () => {
     const raw = JSON.parse(fs.readFileSync(CALIBRATION_JSON, 'utf8'))
     const built = buildTrackFromJson(raw)

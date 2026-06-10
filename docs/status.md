@@ -31,6 +31,22 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-10** — **P2.2 per-track wave spectra.** Tracks
+> can now author `water.spectrum {preset, seed, …}` (presets `mixed-sea`
+> / `open-swell` / `lagoon-chop` / `storm-cross`) — a deterministic
+> seeded JONSWAP-sampled 12-wave bank replaces the global hand-tuned
+> 6-wave one per track, normalized to the shipped sea's effective energy
+> so `seaStateBeaufort` keeps owning loudness. Boot builds the water mesh
+> after track load (the shader bakes the bank at construction);
+> `?spectrum=<preset>[:seed[:count]]` / `?spectrum=off` for A/B. Outer
+> tile + horizon skirt now draw only the swell band (chop was sub-pixel
+> + grid-aliased out there), so far-layer cost stays flat as counts grow;
+> perf grid measured 6/8/12/16 components at identical p50/p95 on the dev
+> GPU (`WAVE_PERF=1 pnpm e2e wave-count-perf`). Cape Town Drift authors
+> `{open-swell, seed 1}` — **playtest-gated**. Sync evidence: buoyancy on
+> the generated surface to float noise (Q=0) / ≤2 mm (shipped Q=0.44).
+> See water-next-research.md §8 P2.2.
+
 > **Last updated: 2026-06-09 (j)** — **Synchronized race start.** Per
 > Matt: everyone shares the 3-2-1. Multiplayer race tabs now hold their
 > countdown ("WAITING FOR RIDERS…") and report `race-loaded`; the relay
