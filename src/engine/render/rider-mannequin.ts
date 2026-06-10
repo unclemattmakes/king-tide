@@ -21,12 +21,21 @@ import type { BikeRenderRegistry } from './render-systems'
  *
  * Two states, read from `RiderData.state`:
  *
- *  - **attached → clip + additive physics.** Plays `Sitting_Idle_Loop` on a
- *    per-rider `AnimationMixer` (correct mannequin proportions; the seated base
- *    pose is refined in-anim). On top: the group is seated on the bike and
- *    inherits the bike's full orientation (banks/pitches/bounces with the bike),
- *    PLUS the rider's smoothed `RiderPoseResponse` (bounce / drift-lean / turn-in
- *    twist) is layered ADDITIVELY as an extra body tilt — "physics on the anim."
+ *  - **attached → clip + additive physics.** Plays the bike's seated idle (the
+ *    per-variant `riderClip`, default `Sitting_Idle_Loop`) on a per-rider
+ *    `AnimationMixer` (correct mannequin proportions; the seated base pose is
+ *    refined in-anim). On top: the group is seated on the bike and inherits the
+ *    bike's full orientation (banks/pitches/bounces with the bike), PLUS the
+ *    rider's smoothed `RiderPoseResponse` (bounce / drift-lean / turn-in twist)
+ *    is layered ADDITIVELY as an extra body tilt — "physics on the anim."
+ *
+ *    Bone-level additives (the head-look) MUST go through the clip-pose cache:
+ *    restore the cached pure clip pose, `mixer.update`, re-cache, then multiply
+ *    the offset on top. Multiplying directly and trusting the mixer to re-write
+ *    the bone next frame breaks on the vehicle-specific idles — they're static
+ *    pose clips, and `PropertyMixer.apply` skips `setValue` when the sampled
+ *    value didn't change, so the offset would accumulate frame over frame
+ *    (the "rider heads spin freely" bug).
  *
  *  - **launched → full ragdoll.** On a crash / shark-grab the sim rider goes
  *    dynamic; here we stop the clip and drive the UE bones straight from the 12
@@ -55,7 +64,18 @@ const SEAT_OFFSET = { x: 0, y: -0.4, z: 0 }
 const PITCH_GAIN = 0.5 // bouncePitch  → lean forward / back (about local X)
 const YAW_GAIN = 0.3 // flowYaw      → torso twist into the turn (about local Y)
 const ROLL_GAIN = 0.7 // leanRoll     → bank into the drift (about local Z)
-const HEAD_YAW_GAIN = 0.6 // headYaw   → head leads the steer (Head bone, local Y)
+const HEAD_YAW_GAIN = 0.6 // headYaw   → head leads the steer (about local Y)
+const HEAD_PITCH_GAIN = 0.5 // headPitch → nod with throttle / brake (about local X)
+
+/** Bones that take the head-look offset, with their share of the total angle.
+ *  Splitting across neck + head reads as the rider turning to look rather than
+ *  the skull hinging on a frozen neck. Shares sum to 1 so the total equals the
+ *  tuned single-bone gain. Both bones' local axes sit ≈ character-aligned in
+ *  this rig (Y up, X right), so a local-Y yaw / local-X pitch is correct. */
+const HEAD_LOOK_BONES: ReadonlyArray<{ bone: string; share: number }> = [
+  { bone: 'neck_01', share: 0.35 },
+  { bone: 'Head', share: 0.65 },
+]
 
 /** 12 logical rider bones → UE-mannequin bone (skin joint) names — ragdoll. */
 const BONE_MAP: Record<RiderBoneName, string> = {
@@ -98,6 +118,14 @@ type MannequinInstance = {
    *  anchor when present (per-bike). Null → legacy seatLocal + SEAT_OFFSET. */
   socketSeat: { x: number; y: number; z: number } | null
   ragdoll: boolean
+  /** Pure clip pose of each head-look bone, cached AFTER `mixer.update` and
+   *  restored before the next one — see the layering note in the header. */
+  clipPose: Map<string, THREE.Quaternion>
+  /** Load-time local pose of every bone this system writes outside the mixer
+   *  (ragdoll-driven + head-look). Restored on ragdoll → attached re-arm,
+   *  because a static pose clip's mixer skips redundant writes and would
+   *  otherwise leave the skeleton mangled where the ragdoll dropped it. */
+  restPose: Map<string, { p: THREE.Vector3; q: THREE.Quaternion }>
 }
 
 export function createRiderMannequinSystem(
@@ -135,6 +163,33 @@ export function createRiderMannequinSystem(
   applyVinylMaterialToScene(rig.root, { brush: RIDER_BRUSH, brushObjectSpace: true })
 
   let last = 0
+
+  // Dev/test read-back hook (mirrors `__bikeField`) so a harness can assert
+  // head-pose boundedness without depending on camera framing. Head/neck are
+  // LOCAL quaternions: the clip pose ⊗ the bounded reactive offset, so their
+  // deviation from the seated pose must stay small while attached.
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    const debug = () => {
+      const riders = []
+      for (const [eid, inst] of instances) {
+        const head = inst.bones.get('Head')
+        const neck = inst.bones.get('neck_01')
+        riders.push({
+          eid,
+          ragdoll: inst.ragdoll,
+          clip: inst.action ? inst.action.getClip().name : null,
+          running: inst.action?.isRunning() ?? false,
+          headLocal: head ? head.quaternion.toArray() : [0, 0, 0, 1],
+          neckLocal: neck ? neck.quaternion.toArray() : [0, 0, 0, 1],
+          headYaw: RiderStore.get(eid)?.poseResponse.headYaw ?? 0,
+        })
+      }
+      return riders
+    }
+    ;(window as unknown as { __riderMannequin?: { debug: typeof debug } }).__riderMannequin = {
+      debug,
+    }
+  }
 
   /** The bike's authored seat anchor (`socket_seat`) in bike-local space, or
    *  null when the bike has no socket / no registry (procedural bikes, tests).
@@ -191,6 +246,15 @@ export function createRiderMannequinSystem(
     const clip = resolveSeatedClip(resolveRiderClip(bikeEid))
     const action = clip ? mixer.clipAction(clip) : null
     action?.play()
+    const restPose = new Map<string, { p: THREE.Vector3; q: THREE.Quaternion }>()
+    const written = new Set<string>([
+      ...Object.values(BONE_MAP),
+      ...HEAD_LOOK_BONES.map((h) => h.bone),
+    ])
+    for (const name of written) {
+      const bone = bones.get(name)
+      if (bone) restPose.set(name, { p: bone.position.clone(), q: bone.quaternion.clone() })
+    }
     const inst: MannequinInstance = {
       group,
       mixer,
@@ -200,6 +264,8 @@ export function createRiderMannequinSystem(
       seatLocal,
       socketSeat: resolveSocketSeat(bikeEid),
       ragdoll: false,
+      clipPose: new Map(),
+      restPose,
     }
     instances.set(riderEid, inst)
     return inst
@@ -254,6 +320,15 @@ export function createRiderMannequinSystem(
       // ── Attached: re-arm the clip after a respawn, then seat + react. ──
       if (inst.ragdoll) {
         inst.ragdoll = false
+        // Hand-restore every bone the ragdoll drove: a static pose clip's
+        // mixer skips redundant writes, so it would never repair them.
+        for (const [name, rest] of inst.restPose) {
+          const bone = inst.bones.get(name)
+          if (!bone) continue
+          bone.position.copy(rest.p)
+          bone.quaternion.copy(rest.q)
+          bone.scale.set(1, 1, 1)
+        }
         inst.action?.reset().play()
       }
 
@@ -290,14 +365,32 @@ export function createRiderMannequinSystem(
         inst.group.quaternion.copy(bikeQuat).multiply(facingQuat).multiply(additiveQuat)
       }
 
+      // Undo last frame's head-look so the mixer sees — and, when it skips the
+      // redundant write of a static pose clip, the graph keeps — the pure clip
+      // pose. Without this the additive multiply below accumulates.
+      for (const [name, q] of inst.clipPose) inst.bones.get(name)?.quaternion.copy(q)
+
       inst.mixer.update(dt)
 
-      // Head leads the steer — layered on top of the clip's neck pose.
-      const head = inst.bones.get('Head')
-      if (head) {
-        headEuler.set(0, r.poseResponse.headYaw * HEAD_YAW_GAIN, 0, 'XYZ')
+      // Head leads the steer + nods with throttle, split across neck + head,
+      // layered on the clip's pose (re-cached pure each frame).
+      for (const { bone: name, share } of HEAD_LOOK_BONES) {
+        const bone = inst.bones.get(name)
+        if (!bone) continue
+        let cached = inst.clipPose.get(name)
+        if (!cached) {
+          cached = new THREE.Quaternion()
+          inst.clipPose.set(name, cached)
+        }
+        cached.copy(bone.quaternion)
+        headEuler.set(
+          r.poseResponse.headPitch * HEAD_PITCH_GAIN * share,
+          r.poseResponse.headYaw * HEAD_YAW_GAIN * share,
+          0,
+          'XYZ',
+        )
         headQuat.setFromEuler(headEuler)
-        head.quaternion.multiply(headQuat)
+        bone.quaternion.multiply(headQuat)
       }
     }
 

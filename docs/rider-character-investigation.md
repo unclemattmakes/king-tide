@@ -104,6 +104,12 @@ keeps driving the 12-bone rig; the skinned mesh just *follows* it.
   `AnimationMixer`, then apply the reactive offsets as **additive** bone writes
   after `mixer.update` (lean/head/bounce on top of the clip), IK still locking
   hands/feet to bars/pegs. Higher-fidelity idle than the pure-procedural rest.
+  **Trap (hit in practice):** an additive bone write must restore the cached
+  pure clip pose *before* the next `mixer.update` — three's `PropertyMixer`
+  skips `setValue` when the sampled value didn't change, so on a **static pose
+  clip** (the per-bike `Ride_*` idles) the mixer never re-writes the bone and a
+  naive multiply accumulates frame over frame (the "heads spin freely" bug; see
+  the layering note in `rider-mannequin.ts`).
 - Swap the physics ragdoll for **`Death01`/`Hit_*`/`Roll`** where a canned
   reaction reads better, or blend (ragdoll for big hits, clip for near-misses).
 
