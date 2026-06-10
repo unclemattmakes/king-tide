@@ -23,7 +23,7 @@ import {
   packSheetRGBA8,
   rasterizeOilStrokeSheet,
 } from '@/engine/render/oil-stroke-texture'
-import { generateWindStreamline } from '@/engine/render/wind-streamline'
+import { generateWindStreamline, resolveWindRegime } from '@/engine/render/wind-streamline'
 
 /**
  * Ambient wind VFX — Wind-Waker-style illustrated gusts: white calligraphic
@@ -50,6 +50,13 @@ import { generateWindStreamline } from '@/engine/render/wind-streamline'
  *     water foam (`oil-stroke-texture.ts`, PR #346): a seeded long-streak
  *     sheet erodes the stroke's flanks into bristle tips while the spine
  *     stays solid — painted, never airbrushed. No asset fetch, can't 404.
+ *   - The look splits by what the rider feels: each respawn samples the
+ *     APPARENT wind (true wind − smoothed camera velocity). Still = lazy,
+ *     long-lived ghostly calligraphy drifting on the true wind, where a curl
+ *     is a rare flourish; moving = speed-line streaks sweeping fast against
+ *     your travel. `resolveWindRegime` blends the two continuously, with the
+ *     ramp anchored to the bike: at 40% of normal top speed the lines are
+ *     fully straight and curls stop spawning entirely (a hard rule).
  *
  * Render-only ambience: reads the camera + a wind/ground probe injected by
  * the caller, writes Three objects. The sim never knows wind trails exist.
@@ -59,10 +66,12 @@ import { generateWindStreamline } from '@/engine/render/wind-streamline'
  */
 
 export type WindSample = {
-  /** Downwind direction, world XZ (need not be normalized). */
+  /** TRUE-wind downwind direction, world XZ (need not be normalized). */
   x: number
   z: number
-  /** Wind speed (m/s) — the stroke window's travel speed along its curve. */
+  /** True wind speed (m/s). What the strokes actually follow is the APPARENT
+   *  wind (true wind − camera velocity, see resolveWindRegime), so this is
+   *  the sweep speed only while the camera is still. */
   speed: number
 }
 
@@ -81,6 +90,9 @@ export type WindTrailsOptions = {
   count?: number
   /** RNG seed for the curve shapes. */
   seed?: number
+  /** The player bike's nominal top speed (m/s). Anchors the regime ramp and
+   *  the hard no-curls cutoff at 40% of it. Default 28 (the stats baseline). */
+  topSpeedMps?: number
 }
 
 export type WindTrailsSystem = {
@@ -94,6 +106,8 @@ export type WindTrailsSystem = {
   setTint(r: number, g: number, b: number): void
   /** Trails currently mid-stroke (debug/test hook). */
   activeCount(): number
+  /** Per-trail spawn regime metadata (debug/test hook). */
+  debug(): WindTrailDebug[]
   dispose(): void
 }
 
@@ -103,10 +117,16 @@ const WINDOW = 0.42
 // Curve resolution. 96 segments keeps a 1.5 m-radius curl (~24 segments
 // around) round to the eye.
 const SEGMENTS = 96
-const HALF_WIDTH = 0.45 // metres at the stroke's fattest
-const BASE_OPACITY = 0.95 // stroke-core alpha at intensity 1
+const HALF_WIDTH = 0.225 // metres at the stroke's fattest
+const BASE_OPACITY = 0.55 // stroke-core alpha at intensity 1 — ghostly, not solid
 const CLEARANCE = 1.1 // min metres above ground/water for any curve point
 const TILE_METERS = 16 // world metres of stroke per grain-sheet repeat
+// Curls are a rare flourish, and a hard rule kills them once you're moving
+// with intent: at ≥ CURL_CUTOFF_FRAC of the bike's top speed every new
+// streamline is loop-free — straight lines only.
+const CURL_CHANCE_STILL = 0.22
+const CURL_CUTOFF_FRAC = 0.4
+const DEFAULT_TOP_SPEED = 28 // bikes/stats.ts default, for callers without stats
 
 /**
  * The wind-stroke grain sheet: sparse, long, heavily-tapered bristle streaks
@@ -165,6 +185,18 @@ function mulberry32(seed: number): () => number {
 type TrailState = {
   birth: number
   duration: number
+  /** Regime blend (0 ambient → 1 speed-lines) this trail spawned under. */
+  blend: number
+  /** Whether this trail's streamline carries a curl. */
+  hasLoop: boolean
+}
+
+/** Per-trail spawn metadata, exposed for specs/tuning via `debug()`. */
+export type WindTrailDebug = {
+  blend: number
+  hasLoop: boolean
+  /** Mid-stroke right now (per the last ticked clock). */
+  active: boolean
 }
 
 export function createWindTrailsSystem(
@@ -175,6 +207,9 @@ export function createWindTrailsSystem(
   const count = Math.max(1, opts.count ?? Math.min(24, Math.round(6 + beaufort * 1.8)))
   const baseY = opts.baseY ?? 0
   const rng = mulberry32(opts.seed ?? 7331)
+  // 40% of normal top speed: the regime ramp completes here AND new curls
+  // stop spawning here — past it the wind is straight lines only.
+  const curlCutoff = CURL_CUTOFF_FRAC * (opts.topSpeedMps ?? DEFAULT_TOP_SPEED)
 
   // ---- Geometry: `count` ribbons in one buffer, (SEGMENTS+1)×2 verts each.
   const ringsPerTrail = SEGMENTS + 1
@@ -302,7 +337,9 @@ export function createWindTrailsSystem(
 
   // ---- Pool state + respawn.
   const trails: TrailState[] = []
-  for (let i = 0; i < count; i++) trails.push({ birth: Number.POSITIVE_INFINITY, duration: 4 })
+  for (let i = 0; i < count; i++) {
+    trails.push({ birth: Number.POSITIVE_INFINITY, duration: 4, blend: 0, hasLoop: false })
+  }
 
   const camPos = new THREE.Vector3()
   const camFwd = new THREE.Vector3()
@@ -319,23 +356,40 @@ export function createWindTrailsSystem(
   /** Regenerate one trail on a fresh streamline near the camera. `stagger`
    *  pushes its birth into the future so respawns never pop in mid-stroke. */
   function respawn(index: number, now: number, stagger: number): void {
-    const wind = opts.getWind()
-    const speed = Math.min(22, Math.max(3, wind.speed))
-    const duration = 3.4 + rng() * 1.8
-    const lengthM = Math.min(60, Math.max(14, (speed * duration) / (1 + WINDOW)))
+    // Two regimes, blended by camera speed via the apparent wind (see
+    // resolveWindRegime): still = the ambient calligraphy — slow, gently
+    // curling, long-lived, drifting on the true wind; moving = speed-lines —
+    // straight, short-lived streaks sweeping fast against your travel. The
+    // ramp completes at the curl cutoff (40% of top speed), so by the time
+    // curls are banned the lines are already fully straight.
+    const regime = resolveWindRegime(opts.getWind(), camVel.x, camVel.z, {
+      lo: curlCutoff * 0.45,
+      hi: curlCutoff,
+    })
+    const b = regime.blend
+    const lerp = (still: number, fast: number) => still + (fast - still) * b
+    const drawnDuration = lerp(3.6, 1.6) + rng() * lerp(2.0, 0.8)
+    // The hard rule: at ≥40% of normal top speed, no curls — straight lines
+    // only. Below it they're a rare flourish that thins as you speed up.
+    const camSpeed = Math.hypot(camVel.x, camVel.z)
+    const curlChance = camSpeed >= curlCutoff ? 0 : CURL_CHANCE_STILL * (1 - b)
+    // Clamp the curve length, then re-derive the life so the stroke window's
+    // sweep speed stays the regime's apparent wind speed even when clamped.
+    const lengthM = Math.min(60, Math.max(14, (regime.speed * drawnDuration) / (1 + WINDOW)))
+    const duration = (lengthM * (1 + WINDOW)) / regime.speed
 
-    const { points } = generateWindStreamline(rng, {
-      dirX: wind.x,
-      dirZ: wind.z,
+    const { points, loop } = generateWindStreamline(rng, {
+      dirX: regime.dirX,
+      dirZ: regime.dirZ,
       lengthM,
       segments: SEGMENTS,
-      loopChance: 0.65,
+      loopChance: curlChance,
       loopRadiusMin: 1.1,
       loopRadiusMax: 2.6,
       tiltMin: 0.45,
       tiltMax: 1.35,
-      wander: 0.42,
-      bobAmp: 0.5,
+      wander: lerp(0.5, 0.1),
+      bobAmp: lerp(0.6, 0.25),
     })
 
     // Anchor the curve midpoint in a shell biased ahead of the camera, low
@@ -343,7 +397,6 @@ export function createWindTrailsSystem(
     // "Ahead" follows the camera's motion when it's really moving (racing —
     // lead by where the camera will be mid-way through this stroke's life)
     // and its facing when near-still (countdown, podium drift).
-    const camSpeed = Math.hypot(camVel.x, camVel.z)
     let fx = camSpeed > 3 ? camVel.x / camSpeed : camFwd.x
     let fz = camSpeed > 3 ? camVel.z / camSpeed : camFwd.z
     const fl = Math.hypot(fx, fz)
@@ -360,9 +413,9 @@ export function createWindTrailsSystem(
     const ax = camPos.x + fx * dist - fz * lat
     const az = camPos.z + fz * dist + fx * lat
     // Most gusts skim low so the white reads against water/terrain rather than
-    // washing out on a bright sky; roughly one in six rides high as a sky
-    // calligraphy accent.
-    const skyRider = rng() < 0.17
+    // washing out on a bright sky; a few ride high as sky calligraphy accents
+    // when idle, almost none once you're racing (speed-lines hug the course).
+    const skyRider = rng() < lerp(0.2, 0.04)
     const ay =
       groundAt(ax, az) + CLEARANCE + 0.4 + rng() * rng() * 6 + (skyRider ? 7 + rng() * 7 : 0)
 
@@ -411,6 +464,8 @@ export function createWindTrailsSystem(
     const trail = trails[index]!
     trail.birth = now + stagger
     trail.duration = duration
+    trail.blend = b
+    trail.hasLoop = loop !== null
     const s01 = rng()
     const uRepeat = lengthM / TILE_METERS
     for (let v = 0; v < vertsPerTrail; v++) {
@@ -495,6 +550,12 @@ export function createWindTrailsSystem(
       ;(uColor as unknown as { value: THREE.Color }).value.setRGB(r, g, b)
     },
     activeCount,
+    debug() {
+      return trails.map((trail) => {
+        const life = (lastTime - trail.birth) / trail.duration
+        return { blend: trail.blend, hasLoop: trail.hasLoop, active: life > 0 && life < 1 }
+      })
+    },
     dispose() {
       scene.remove(mesh)
       geometry.dispose()

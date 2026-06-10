@@ -52,6 +52,62 @@ const smooth01 = (t: number): number => {
   return x * x * (3 - 2 * x)
 }
 
+/** Default camera speeds (m/s) where the gust field starts shifting from the
+ *  ambient regime toward the speed regime, and where the shift completes.
+ *  Callers usually override `hi` with a fraction of the bike's top speed so
+ *  "fully speed-lines" lands on a gameplay-meaningful pace. */
+const REGIME_SPEED_LO = 6
+const REGIME_SPEED_HI = 22
+
+export type WindRegime = {
+  /** Streamline direction, world XZ (unit). At rest this is the true wind;
+   *  at speed it rotates toward the apparent wind (≈ opposite your travel). */
+  dirX: number
+  dirZ: number
+  /** Stroke sweep speed (m/s) — the apparent wind magnitude, clamped sane. */
+  speed: number
+  /** 0 = still (ambient curling calligraphy) → 1 = racing (straight rushing
+   *  streaks). Callers lerp shape params (wander / curl chance / life) by it. */
+  blend: number
+}
+
+/**
+ * Resolve the wind regime a new streamline should spawn under, from the true
+ * wind and the (smoothed) camera velocity: **apparent wind** = true wind −
+ * camera velocity, the wind a rider actually feels. Standing still that's the
+ * ambient downwind drift; at race speed your own motion dominates, so gusts
+ * straighten against the direction of travel and sweep past much faster —
+ * which is exactly how the look should split (lazy curls idle, speed-lines
+ * racing). Pure math, unit-tested.
+ */
+export function resolveWindRegime(
+  wind: { x: number; z: number; speed: number },
+  velX: number,
+  velZ: number,
+  bounds?: { lo?: number; hi?: number },
+): WindRegime {
+  const lo = bounds?.lo ?? REGIME_SPEED_LO
+  const hi = Math.max(lo + 0.1, bounds?.hi ?? REGIME_SPEED_HI)
+  const wl = Math.hypot(wind.x, wind.z)
+  const wdx = wl > 1e-6 ? wind.x / wl : 1
+  const wdz = wl > 1e-6 ? wind.z / wl : 0
+  const windSpeed = Math.max(0, wind.speed)
+  const ax = wdx * windSpeed - velX
+  const az = wdz * windSpeed - velZ
+  const al = Math.hypot(ax, az)
+  // Riding dead-downwind at exactly wind speed zeroes the apparent wind —
+  // fall back to the true wind direction rather than NaN.
+  const dirX = al > 1e-3 ? ax / al : wdx
+  const dirZ = al > 1e-3 ? az / al : wdz
+  const camSpeed = Math.hypot(velX, velZ)
+  return {
+    dirX,
+    dirZ,
+    speed: Math.min(45, Math.max(3, al)),
+    blend: Math.min(1, Math.max(0, (camSpeed - lo) / (hi - lo))),
+  }
+}
+
 export function generateWindStreamline(
   rng: () => number,
   spec: WindStreamlineSpec,

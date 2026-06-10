@@ -31,7 +31,26 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
-> **Last updated: 2026-06-09 (d)** — **Contour-line break-up: the iso lines no
+> **Last updated: 2026-06-09 (e)** — **Wind VFX refined — speed-aware
+> regimes, ghostly half-width strokes, rare curls.** Strokes halved to
+> `HALF_WIDTH` 0.225 and made translucent (`BASE_OPACITY` 0.55 — ghostly,
+> not solid). The field splits by what the rider feels: each respawn samples
+> the **apparent wind** (true wind − smoothed camera velocity,
+> `resolveWindRegime` in `wind-streamline.ts`, unit-tested). Still = ambient
+> calligraphy (slow true-wind sweep, wander 0.5, lives ~3.6–5.6 s, some sky
+> riders) where a curl is a **rare flourish** (`CURL_CHANCE_STILL` 0.22);
+> moving = speed-lines sweeping fast against your travel — direction and
+> sweep speed fall out of the apparent-wind vector, no hand-tuned mode
+> switch. **Hard rule (Matt): at ≥40% of the bike's normal top speed
+> (`playerVariant.stats.topSpeed`, racer ⇒ 11.2 m/s) curls stop spawning
+> entirely — straight lines only** — and the regime ramp is anchored to
+> complete at that same cutoff so the lines are already fully straight when
+> the ban kicks in. Pinned by a deterministic e2e assert via
+> `__windTrails.debug()` spawn metadata: every full-blend trail sampled
+> across three racing generations must be loop-free
+> (`tests/e2e/wind-trails.spec.ts`).
+
+> **2026-06-09 (d)** — **Contour-line break-up: the iso lines no
 > longer run unbroken across the whole sea.** An iso-height mask is constant
 > along its own line, so every P1 contour streamed ocean-length — too clean for
 > the painted read (playtest note). A procedural dash sheet
@@ -59,7 +78,7 @@
 > `FOAM_SWEEP_GRID` burst for motion-coherence checks). Zero new varyings
 > (all fragment-side off existing signals) — verified compiling + rendering
 > on real WebGPU via the sweeps.
->
+
 > **2026-06-09 (c)** — **Wind VFX shipped — Wind-Waker-style
 > gust strokes.** New ambient render system
 > (`src/engine/render/wind-trails.ts` + pure-math

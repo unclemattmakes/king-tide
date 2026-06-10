@@ -1062,6 +1062,9 @@ async function boot() {
           waveField.baseY,
       ),
     baseY: waveField.baseY,
+    // Anchors the speed-line regime ramp + the hard no-curls-at-40%-of-top-
+    // speed rule to the bike actually being ridden.
+    topSpeedMps: playerVariant.stats.topSpeed,
     ...(beaufort !== undefined ? { beaufort } : {}),
   })
   {

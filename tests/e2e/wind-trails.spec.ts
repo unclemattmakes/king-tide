@@ -63,6 +63,80 @@ test.describe('wind trails', () => {
     expect(later!.active).toBeGreaterThanOrEqual(3)
   })
 
+  test('regimes split: curly ambient gusts when still, straight speed-lines racing', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000)
+    await page.goto(`/?autostart=1&track=${TRACK}&skipintro=1`)
+    await page.bringToFront()
+    await waitForReady(page, { timeout: 60_000 })
+
+    type Dbg = { blend: number; hasLoop: boolean; active: boolean }
+    type DbgHook = { debug(): Dbg[] }
+    const sample = () =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __windTrails?: { debug(): Dbg[] } }).__windTrails?.debug() ?? [],
+      )
+    const stats = (trails: Dbg[]) => ({
+      n: trails.length,
+      meanBlend: trails.reduce((s, t) => s + t.blend, 0) / Math.max(1, trails.length),
+      loopFrac: trails.filter((t) => t.hasLoop).length / Math.max(1, trails.length),
+    })
+
+    // Still on the start line (autostart leaves the player parked): the pool
+    // spawns under the ambient regime — true-wind speed. Curls are a rare
+    // flourish by design (CURL_CHANCE_STILL), so only the blend is asserted
+    // here; loopChance semantics are pinned at the unit layer.
+    await page.waitForFunction(
+      () => {
+        const w = (window as unknown as { __windTrails?: DbgHook }).__windTrails
+        return (w?.debug().filter((t) => t.active).length ?? 0) >= 3
+      },
+      null,
+      { timeout: 30_000 },
+    )
+    const still = stats(await sample())
+    expect(still.meanBlend).toBeLessThan(0.15)
+
+    // Auto-play drives the player up to race speed. Trail lives are short in
+    // the speed regime, so the pool recycles onto speed-spawned curves within
+    // a few seconds of sustained pace — wait on the pool state itself rather
+    // than a fixed clock (AI pace varies run to run).
+    await page.evaluate(() => {
+      if (!window.__hover?.isAutoPlay()) window.__hover?.toggleAutoPlay()
+    })
+    await page.waitForFunction(
+      () => {
+        const w = (window as unknown as { __windTrails?: DbgHook }).__windTrails
+        const t = w?.debug() ?? []
+        if (t.length === 0) return false
+        return t.reduce((s, x) => s + x.blend, 0) / t.length > 0.6
+      },
+      null,
+      { timeout: 45_000 },
+    )
+    // The hard rule — at ≥40% of top speed (blend pins to 1) curls never
+    // spawn. Sample the recycling pool a few times so the assert covers a few
+    // generations of spawns, not one instant.
+    const fullSpeed: Dbg[] = []
+    let racing = stats(await sample())
+    for (let i = 0; i < 3; i++) {
+      const trails = await sample()
+      racing = stats(trails)
+      fullSpeed.push(...trails.filter((t) => t.blend >= 0.999))
+      if (i < 2) await page.waitForTimeout(2500)
+    }
+    console.log(
+      `still: blend=${still.meanBlend.toFixed(2)} loops=${still.loopFrac.toFixed(2)} | ` +
+        `racing: blend=${racing.meanBlend.toFixed(2)} loops=${racing.loopFrac.toFixed(2)} ` +
+        `fullSpeedTrails=${fullSpeed.length}`,
+    )
+    expect(racing.meanBlend).toBeGreaterThan(0.6)
+    expect(fullSpeed.length).toBeGreaterThanOrEqual(5)
+    expect(fullSpeed.every((t) => !t.hasLoop)).toBe(true)
+  })
+
   test('?wind=0 boots the gusts disabled', async ({ page }) => {
     test.setTimeout(120_000)
     await page.goto(`/?autostart=1&track=${TRACK}&skipintro=1&wind=0`)
