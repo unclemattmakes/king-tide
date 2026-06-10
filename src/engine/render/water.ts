@@ -30,6 +30,7 @@ import {
   sin,
   smoothstep,
   sqrt,
+  step,
   texture,
   uniform,
   uniformArray,
@@ -281,6 +282,15 @@ export type WaterMesh = {
      *  round-disc bubble sheet (0) to oil-paint brush strokes pulled along
      *  the crest lines (1) — the engine-trail painted read applied to foam. */
     setFoamBrush(s: number): void
+    /** P2.3 tangential foam warp, 0..2. Wobbles the foam break-up sample
+     *  coords along the CREST axis (±4 m at 1) so stroke/bubble rows bend
+     *  organically instead of running straight forever. Never warps the
+     *  travel/height axes (those carry the steepness/timing signal). */
+    setFoamWarp(s: number): void
+    /** P2.3 Langmuir streak lanes, 0..1.5. Faint travel-aligned windrow
+     *  brightness lanes on calm low-slope water — the "which way is the
+     *  sea moving" prime where no crest/foam cue fires. 0 = off. */
+    setLangmuir(s: number): void
     /** Bike-wake strength, 0..2. Scales the trail wake — both the churn/rail
      *  foam ribbon laid along each bike's ridden path and its V-ridge
      *  DISPLACEMENT. 1 = baseline; 0 = no rendered wake (buoyancy still
@@ -394,6 +404,12 @@ export type WaterDebugDefaults = {
   foamStreak: number
   /** Foam brush 0..1: disc-bubble (0) ↔ oil-stroke (1) foam break-up. */
   foamBrush: number
+  /** P2.3 tangential foam warp 0..2: along-crest wobble of the foam
+   *  break-up sample coords. 1 = baseline ±4 m. */
+  foamWarp: number
+  /** P2.3 Langmuir lanes 0..1.5: travel-aligned windrow brightness lanes
+   *  on calm water. 0.6 = baseline. */
+  langmuir: number
   /** Bike-wake strength 0..2: trail-wake foam + ridge displacement. */
   wakeStrength: number
   wireframe: boolean
@@ -762,6 +778,73 @@ function getFoamStrokeMassTexture(): THREE.DataTexture {
 }
 
 /**
+ * Hex-tiled (stochastic) texture tap — the P2.3 anti-tiling sampler
+ * (water-next-research §7.8; Mikkelsen, *Practical Real-Time Hex-Tiling*,
+ * JCGT 2022 — this is the lean triangle-lattice/3-tap core of it, without
+ * the per-tile rotations or histogram preservation the full method adds).
+ *
+ * UV space is partitioned into a triangle lattice (~2 texture tiles per
+ * cell); each lattice vertex gets a stable hashed UV offset; the texture
+ * is sampled at the three surrounding vertices' offset UVs and blended
+ * with the barycentric weights. Strict periodicity dies because no two
+ * lattice regions read the same patch of texture in the same place —
+ * the repeat distance becomes the lattice hash period (effectively
+ * never) instead of the tile size.
+ *
+ * Two properties make the cheap variant artifact-free here:
+ *  - at any lattice edge, the vertex whose hash CHANGES has barycentric
+ *    weight 0, so there is no visible pattern seam (and the mip-
+ *    derivative spike on that sample is invisible for the same reason);
+ *  - the blend zones linearly mix three decorrelated samples, which
+ *    slightly softens contrast there — acceptable for our low-contrast
+ *    slope/mask sheets (they all feed smoothstep gates downstream), so
+ *    the full method's histogram-preserving transform isn't needed.
+ *
+ * Plain JS code-gen helper (not a TSL Fn): emits the node graph inline at
+ * the call site, three `texture()` taps per call.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: TSL node-graph builder values
+function hexTiledTap(tex: THREE.Texture, uv: any): any {
+  // Lattice cells span ~2 texture tiles — big enough that each randomized
+  // region shows a coherent stretch of pattern, small enough that the eye
+  // never sees two aligned repeats.
+  const HEX_LATTICE_SCALE = 0.5
+  // biome-ignore lint/suspicious/noExplicitAny: TSL node-graph builder values
+  const st = (uv as any).mul(float(HEX_LATTICE_SCALE))
+  // Skew UV into the triangle lattice frame.
+  const sx = st.x.sub(st.y.mul(float(0.57735027)))
+  const sy = st.y.mul(float(1.15470054))
+  const cellX = floor(sx)
+  const cellY = floor(sy)
+  const fx = fract(sx)
+  const fy = fract(sy)
+  const fz = float(1).sub(fx).sub(fy)
+  // Branchless lower/upper triangle select: weights sum to 1 in both.
+  const up = step(fz, float(0)) // 0 = lower triangle, 1 = upper
+  const w1 = mix(fz, fz.negate(), up)
+  const w2 = mix(fy, float(1).sub(fy), up)
+  const w3 = mix(fx, float(1).sub(fx), up)
+  const v1 = vec2(cellX, cellY).add(mix(vec2(0, 0), vec2(1, 1), up))
+  const v2 = vec2(cellX, cellY).add(mix(vec2(0, 1), vec2(1, 0), up))
+  const v3 = vec2(cellX, cellY).add(mix(vec2(1, 0), vec2(0, 1), up))
+  // Stable per-vertex hash → UV offset in [0,1)² (REPEAT wrap makes any
+  // offset valid). Two decorrelated dot-hashes per vertex.
+  // biome-ignore lint/suspicious/noExplicitAny: TSL node-graph builder values
+  const hashOffset = (v: any) =>
+    vec2(
+      fract(sin(dot(v, vec2(127.1, 311.7))).mul(float(43758.5453))),
+      fract(sin(dot(v, vec2(269.5, 183.3))).mul(float(43758.5453))),
+    )
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
+  const t1 = texture(tex, (uv as any).add(hashOffset(v1))) as any
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
+  const t2 = texture(tex, (uv as any).add(hashOffset(v2))) as any
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
+  const t3 = texture(tex, (uv as any).add(hashOffset(v3))) as any
+  return t1.mul(w1).add(t2.mul(w2)).add(t3.mul(w3))
+}
+
+/**
  * Contour-dash sheet — a stack of independent 1-D dash rows the contour layer
  * uses as a KEEP mask so its iso-height lines dissolve into hand-pulled
  * dashes instead of running unbroken across the whole sea. Each iso line
@@ -895,6 +978,11 @@ export function createWaterMesh(
   const aaOn = params?.get('aa') !== 'off'
   const disableSceneDepthCopy = opts?.backend === 'webgpu' && aaOn
   const wireFlag = params?.get('wire') === '1'
+  // P2.3 anti-tiling sampler kill switch (`?hextile=0`) — structural
+  // shader change, so the A/B is per-boot rather than a live knob. ON by
+  // default; the off path keeps the plain single-tap samples for
+  // comparison shots + a perf control.
+  const hexTileFlag = params?.get('hextile') !== '0'
 
   const geom = new THREE.PlaneGeometry(size, size, subs, subs)
   geom.rotateX(-Math.PI / 2)
@@ -2255,10 +2343,19 @@ export function createWaterMesh(
   const detailUvB = vec2(wxB0, wzB0)
     .div(float(DETAIL_B_TILE))
     .add(vec2(tNode.mul(float(-0.11)), tNode.mul(float(0.08))))
+  // Hex-tiled taps (P2.3): the 11 m / 2 m cascades repeat every tile
+  // without it — under the 35 m warp the strict beat is already broken,
+  // but the PATTERN content still recurs per tile; the stochastic tap
+  // decorrelates it per ~2-tile lattice cell. `?hextile=0` restores the
+  // plain taps for A/B.
   // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
-  const detailSampleA = texture(detailTex, detailUvA) as any
+  const detailSampleA = (
+    hexTileFlag ? hexTiledTap(detailTex, detailUvA) : texture(detailTex, detailUvA)
+  ) as any
   // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
-  const detailSampleB = texture(detailTex, detailUvB) as any
+  const detailSampleB = (
+    hexTileFlag ? hexTiledTap(detailTex, detailUvB) : texture(detailTex, detailUvB)
+  ) as any
   // Decoded slopes are in TILE-LOCAL frame (because the UV was rotated).
   // Rotate them back into world XZ via the inverse rotation matrix
   // (transpose of the forward rotation) so they add correctly to the
@@ -2770,6 +2867,18 @@ export function createWaterMesh(
   // to every foam fringe. See the foam-mask block below.
   const FOAM_BRUSH_DEFAULT = 1.0
   const foamBrushUniform = uniform(FOAM_BRUSH_DEFAULT)
+  // P2.3 tangential foam-mask warp: low-frequency wobble of the foam
+  // break-up sample coords ALONG the crest axis only (never along travel
+  // or in height — those carry the steepness/timing signal; §7.8's rule).
+  // 1 = baseline ±4 m wobble at the 35 m warp-noise scale, 0 = off.
+  const FOAM_WARP_DEFAULT = 1.0
+  const foamWarpUniform = uniform(FOAM_WARP_DEFAULT)
+  // P2.3 Langmuir streak lanes: faint elongated brightness lanes aligned
+  // WITH the swell travel direction (real windrows align with the wind),
+  // gated to calm low-slope water — the "which way is the sea moving"
+  // prime on stretches where no crest/foam cue fires (§5's calm gap).
+  const LANGMUIR_DEFAULT = 0.6
+  const langmuirUniform = uniform(LANGMUIR_DEFAULT)
 
   // Wave-driven foam — two stacked layers via max():
   //   1. The vertex-stage accumulator (`foamAccumFrag`) — sampled at 4 past
@@ -3167,12 +3276,38 @@ export function createWaterMesh(
   // wake, bow spray, shoreline surf, breaking-wave fold-foam — inherits
   // bubble structure. mix(0.35, 1.0, bubble) keeps strong-foam zones
   // bright while breaking dim-foam edges into discrete bubble blobs.
+  // Swell frame for the foam break-up patterns + the Langmuir lanes below:
+  // world XZ rotated by the global wave bearing. (Computed before the
+  // bubble sample now — both break-up sheets share the tangential warp.)
+  const brushBearingRad = waveBearingDegUniform.mul(float(Math.PI / 180))
+  const brushCos = float(cos(brushBearingRad))
+  const brushSin = float(sin(brushBearingRad))
+  // P2.3 tangential warp scalar: the 35 m detail-warp noise projected onto
+  // the CREST axis — a slow ±4 m wobble that bends the break-up patterns
+  // along the wave fronts. Along-crest ONLY (§7.8): warping the travel
+  // coordinate would slide foam against the wave motion, and any height
+  // warp would falsify the steepness read. Reuses `warpX/warpZ` (already
+  // sampled for the detail cascades) so it costs zero extra taps.
+  const crestAxisWarp = float(
+    warpZ.mul(brushCos).sub(warpX.mul(brushSin)).mul(float(1.6)).mul(foamWarpUniform),
+  )
+
   const foamBubbleTex = getFoamBubbleTexture()
-  const foamBubbleUV = positionWorld.xz
+  // The bubble sheet is isotropic in world XZ; its tangential warp shifts
+  // the sample position along the world-space crest direction. float()
+  // wraps resolve the scalar overloads (file convention).
+  const bubbleWarpX = float(brushSin.negate().mul(crestAxisWarp))
+  const bubbleWarpZ = float(brushCos.mul(crestAxisWarp))
+  const foamBubbleUV = vec2(
+    float(positionWorld.x.add(bubbleWarpX)),
+    float(positionWorld.z.add(bubbleWarpZ)),
+  )
     .div(float(4.0))
     .add(vec2(tNode.mul(float(0.012)), tNode.mul(float(-0.008))))
   // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
-  const foamBubbleSample = texture(foamBubbleTex, foamBubbleUV) as any
+  const foamBubbleSample = (
+    hexTileFlag ? hexTiledTap(foamBubbleTex, foamBubbleUV) : texture(foamBubbleTex, foamBubbleUV)
+  ) as any
   const foamBubblePattern = foamBubbleSample.r
 
   // Oil-stroke foam mass — the painterly alternative to the disc bubbles.
@@ -3187,23 +3322,50 @@ export function createWaterMesh(
   // the on-face variant of the same crest-parallel language. The travel
   // coordinate drifts slowly with time so the paint rides with the waves.
   const FOAM_BRUSH_TILE_M = 5.0
-  const brushBearingRad = waveBearingDegUniform.mul(float(Math.PI / 180))
-  const brushCos = cos(brushBearingRad)
-  const brushSin = sin(brushBearingRad)
   // Coordinate along the swell's TRAVEL direction (waves advance along it)…
   const brushTravel = positionWorld.x
     .mul(brushCos)
     .add(positionWorld.z.mul(brushSin))
     .sub(tNode.mul(float(0.1)))
-  // …and along the CREST direction (perpendicular — the wave-front axis).
-  const brushCrest = positionWorld.x.mul(brushSin.negate()).add(positionWorld.z.mul(brushCos))
+  // …and along the CREST direction (perpendicular — the wave-front axis),
+  // wobbled by the tangential warp so the stroke rows don't run
+  // geometrically straight forever.
+  const brushCrest = positionWorld.x
+    .mul(brushSin.negate())
+    .add(positionWorld.z.mul(brushCos))
+    .add(crestAxisWarp)
   const foamStrokeMassTex = getFoamStrokeMassTexture()
   // Texture U (the strokes' long axis) ← crest coordinate; V ← travel.
   const foamStrokeMassUV = vec2(brushCrest, brushTravel).div(float(FOAM_BRUSH_TILE_M))
   // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
-  const foamStrokeMassSample = texture(foamStrokeMassTex, foamStrokeMassUV) as any
+  const foamStrokeMassSample = (
+    hexTileFlag
+      ? hexTiledTap(foamStrokeMassTex, foamStrokeMassUV)
+      : texture(foamStrokeMassTex, foamStrokeMassUV)
+  ) as any
   // The break-up pattern every foam source inherits: disc bubbles ↔ strokes.
   const foamBreakupPattern = mix(foamBubblePattern, foamStrokeMassSample.r, foamBrushUniform)
+
+  // ── P2.3 Langmuir streak lanes ──────────────────────────────────────
+  // Real seas under sustained wind develop windrows — faint foam/slick
+  // lanes ALIGNED WITH the wind, tens of metres apart. They're the one
+  // natural cue that signals the sea's travel direction on water too calm
+  // for crest/foam cues to fire (§5's "nothing on calm stretches" gap).
+  // Implementation: the detail texture sampled in the swell frame with a
+  // strongly anisotropic tile (≈140 m along travel × 18 m across), gated
+  // to a sparse lane mask, faded out wherever the ANALYTIC swell slope
+  // says the sea already carries shape cues, and faded with distance
+  // (sub-pixel past ~300 m). Brightness-only modulation on the surface
+  // color — no vertex or foam-gate contribution, so it can't lie about
+  // the physics (it sits safely in §3's normal/shading-only band).
+  const laneUv = vec2(brushTravel.div(float(140)), brushCrest.div(float(18)))
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+  const laneSample = texture(detailTex, laneUv) as any
+  const laneMask = smoothstep(float(0.58), float(0.82), laneSample.r)
+  const analyticSlopeMag = sqrt(dydx.mul(dydx).add(dydz.mul(dydz)))
+  const laneCalmGate = float(1).sub(smoothstep(float(0.1), float(0.22), analyticSlopeMag))
+  const laneDistFade = float(1).sub(smoothstep(float(160), float(300), camDist))
+  const langmuirLane = laneMask.mul(laneCalmGate).mul(laneDistFade).mul(langmuirUniform)
 
   // ── Directional foam streaks (step 3, reworked) ─────────────────────
   // Paint foam on the wave faces as long brushstrokes running ALONG the
@@ -3610,7 +3772,15 @@ export function createWaterMesh(
   // modulate the shaded surface, the dark relief twin carves its line, and
   // the light contour line joins the foam mask so it inherits the foam
   // color/warmth (it IS foam — the §4.3 layer re-landed inside the stack).
-  const surfaceReadable = surfaceColor.mul(float(1).add(rampDeviation)).mul(rampTint)
+  // The P2.3 Langmuir lanes ride the same multiplicative slot: a faint
+  // (≤ +7 %) brightness lift along the travel-aligned windrow lanes.
+  const surfaceReadable = surfaceColor
+    .mul(
+      float(1)
+        .add(rampDeviation)
+        .add(langmuirLane.mul(float(0.07))),
+    )
+    .mul(rampTint)
   const surfaceWithRelief = mix(
     surfaceReadable,
     deepColor.mul(float(0.7)),
@@ -3836,6 +4006,8 @@ export function createWaterMesh(
     foamWarmth: FOAM_WARMTH_DEFAULT,
     foamStreak: FOAM_STREAK_DEFAULT,
     foamBrush: FOAM_BRUSH_DEFAULT,
+    foamWarp: FOAM_WARP_DEFAULT,
+    langmuir: LANGMUIR_DEFAULT,
     wakeStrength: WAKE_STRENGTH_DEFAULT,
     rampStrength: RAMP_STRENGTH_DEFAULT,
     rampSteps: RAMP_STEPS_DEFAULT,
@@ -3965,6 +4137,14 @@ export function createWaterMesh(
       // 0..1 — foam break-up pattern: disc bubbles (0) ↔ crest-parallel
       // oil-paint strokes (1).
       foamBrushUniform.value = clamp01(s, 0, 1)
+    },
+    setFoamWarp(s) {
+      // 0..2 — along-crest wobble of the foam break-up sample coords.
+      foamWarpUniform.value = clamp01(s, 0, 2)
+    },
+    setLangmuir(s) {
+      // 0..1.5 — travel-aligned windrow lanes on calm water.
+      langmuirUniform.value = clamp01(s, 0, 1.5)
     },
     setWakeStrength(s) {
       // 0..2 — trail-wake master strength (churn/rail foam AND ridge

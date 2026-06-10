@@ -229,6 +229,24 @@ const SLIDERS: SliderDef[] = [
     hint: 'Foam break-up pattern: 0 = round bubble discs (legacy) · 1 = oil-paint brush strokes pulled along the crest lines (the engine-trail painted read). Fringes and thin foam dissolve into tapered strokes; solid foam cores stay solid',
   },
   {
+    key: 'foamWarp',
+    label: 'Foam warp',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: 'P2.3 tangential warp: wobbles the foam break-up pattern ALONG the crest axis (±4 m at 1×) so stroke/bubble rows bend organically instead of running straight forever. Never warps travel/height — those carry the steepness signal',
+  },
+  {
+    key: 'langmuir',
+    label: 'Langmuir lanes',
+    min: 0,
+    max: 1.5,
+    step: 0.05,
+    format: (n) => (n < 0.01 ? 'off' : `${n.toFixed(2)}×`),
+    hint: 'P2.3 windrow lanes: faint brightness streaks aligned WITH the swell travel direction, only on calm low-slope water — the "which way is the sea moving" prime where no crest/foam cue fires. Brightness-only (never displaces geometry)',
+  },
+  {
     key: 'wakeStrength',
     label: 'Bike wake',
     min: 0,
@@ -507,6 +525,12 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'foamBrush':
           water.debug.setFoamBrush(v)
+          break
+        case 'foamWarp':
+          water.debug.setFoamWarp(v)
+          break
+        case 'langmuir':
+          water.debug.setLangmuir(v)
           break
         case 'wakeStrength':
           water.debug.setWakeStrength(v)

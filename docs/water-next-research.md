@@ -748,10 +748,31 @@ Matt playtests — the readability claim is only provable by hands + eyes.
    (`waterSync` on the generated bank: float-noise at Q=0, ≤2 mm at the
    shipped Q=0.44, wavedots captures; default-track 6-wave regression;
    `__hover.waveBank()` plumbing probe).
-3. **Shading anti-repetition kit** (§7.8) — hex-tile detail normals + foam
-   bubbles, fix the 4:1 cascade ratio, tangential foam-mask warp, Langmuir
-   streak lanes (faint, swell-aligned — a "which way is the sea moving" prime
-   on calm stretches).
+3. ✅ **Shading anti-repetition kit** (§7.8) — **SHIPPED (2026-06-10).**
+   (The 4:1-cascade-ratio item was already stale — see §7.8's correction.)
+   Three pieces, all fragment-only:
+   (a) **Hex-tiled sampling** (`hexTiledTap` in water.ts — the lean
+   triangle-lattice/3-tap core of Mikkelsen JCGT 2022, offsets-only, no
+   histogram transform needed for our low-contrast sheets) on the two
+   detail-normal cascades + the foam bubble sheet + the oil-stroke mass
+   sheet; strict tile periodicity dies at the lattice hash period.
+   `?hextile=0` boot flag restores plain taps for A/B. Perf: p50/p95
+   identical to pre-P2.3 on the dev RTX 5050 (the +8 small-texture taps
+   are free; re-measured via the `WAVE_PERF=1` grid).
+   (b) **Tangential foam-mask warp** — the 35 m detail-warp noise (already
+   sampled, zero extra taps) projected onto the CREST axis wobbles the
+   break-up sample coords ±4 m along the wave fronts; never along travel
+   or height (those carry the steepness/timing signal). `Foam warp` menu
+   knob, persisted.
+   (c) **Langmuir streak lanes** — faint (≤ +7 %) brightness windrows
+   aligned WITH swell travel (detail tex at a 140×18 m anisotropic tile in
+   the swell frame), gated to calm low-slope water + distance-faded —
+   the "which way is the sea moving" prime for §5's calm-stretch gap.
+   Brightness-only (§3 shading-only band — physics can't be lied to).
+   `Langmuir lanes` menu knob (default 0.6), persisted. Verified: A/B
+   captures in `artifacts/p23-anti-repetition/` (hex on/off tiling pair,
+   becalmed lanes on/off pair, warp pair), zero console errors both
+   shader paths, m2-water green, within-noise perf.
 
 ### P3 — Surf zones + signature waves (the wave-mastery content layer)
 
