@@ -12,11 +12,10 @@ import {
   type TrackVote,
 } from '../../src/engine/menus/lobby-pick'
 
-const votes: TrackVote[] = [
-  { peerId: 0, trackId: 'lagoon' },
-  { peerId: 1, trackId: 'sandbar' },
-  { peerId: 2, trackId: 'the-maw' },
-]
+const vote0: TrackVote = { peerId: 0, trackId: 'lagoon' }
+const vote1: TrackVote = { peerId: 1, trackId: 'sandbar' }
+const vote2: TrackVote = { peerId: 2, trackId: 'the-maw' }
+const votes: TrackVote[] = [vote0, vote1, vote2]
 
 describe('hashStringToSeed', () => {
   it('is stable for the same input', () => {
@@ -41,7 +40,7 @@ describe('deterministicTrackPick', () => {
   it('returns the same winner regardless of vote order', () => {
     const a = deterministicTrackPick(votes, 'RACE-1234', 'fallback')
     const b = deterministicTrackPick([...votes].reverse(), 'RACE-1234', 'fallback')
-    const c = deterministicTrackPick([votes[1]!, votes[2]!, votes[0]!], 'RACE-1234', 'fallback')
+    const c = deterministicTrackPick([vote1, vote2, vote0], 'RACE-1234', 'fallback')
     expect(b).toBe(a)
     expect(c).toBe(a)
   })

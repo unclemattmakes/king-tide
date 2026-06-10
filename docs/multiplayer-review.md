@@ -102,11 +102,11 @@ Phased so each lands independently with local verification
 
 ### Phase 3 — disconnect/reconnect lifecycle (#3, #4, #9)
 
-- [ ] **3.1** `room.ts`: new `onDisconnected` config callback (fires only when
+- [x] **3.1** `room.ts`: new `onDisconnected` config callback (fires only when
   a previously-established session drops, not on first-connect retries);
   explicit-close flag so `close()` publishes `closed` and suppresses both the
   callback and the bogus `connecting` re-publish.
-- [ ] **3.2** `multiplayer.ts`: on `onDisconnected` — despawn all remote bikes
+- [x] **3.2** `multiplayer.ts`: on `onDisconnected` — despawn all remote bikes
   (kills zombies + makes reconnect re-spawn clean), restamp the local bike's
   `PeerControlled` to `LOCAL_PEER_ID` (input keeps flowing solo), and
   `applyHostRole(true)` (AI resumes locally from current poses — graceful solo
@@ -115,40 +115,40 @@ Phased so each lands independently with local verification
 
 ### Phase 4 — host-election tenure (#5) + snapshot authority (#6, #7)
 
-- [ ] **4.1** `relay.ts` + `protocol.ts`: per-connection monotonic `joinSeq`
+- [x] **4.1** `relay.ts` + `protocol.ts`: per-connection monotonic `joinSeq`
   (room-instance counter), carried in `hello` (self + per-peer map) and
   `peer-joined`. Optional fields — old clients ignore them; new clients fall
   back to slot election when absent (old relay), so deploy order is safe.
-- [ ] **4.2** `host-election.ts`: seat-based election (`lowest joinSeq wins,
+- [x] **4.2** `host-election.ts`: seat-based election (`lowest joinSeq wins,
   tie → lowest slot, missing seqs → slot order`), keeping `isHostFor` for the
   no-seq fallback. `room.ts` tracks seats; `multiplayer.ts` + mp-status use
   them. Unit tests for seq priority / tie / fallback / mixed.
-- [ ] **4.3** `multiplayer.ts` receive filters: drop `bikeKind=0` records whose
+- [x] **4.3** `multiplayer.ts` receive filters: drop `bikeKind=0` records whose
   `ownerPeerId ≠ senderPeerId`; drop `bikeKind=1` records from any sender that
   isn't the locally-computed AI authority.
-- [ ] **4.4** Note in the doc + status.md: relay change requires
+- [x] **4.4** Note in the doc + status.md: relay change requires
   `pnpm party:deploy` to take effect in prod (client is fallback-safe either
   way).
 
 ### Phase 5 — wire efficiency (#8)
 
-- [ ] **5.1** Stop broadcasting InputFrames (keep the codec, the local
+- [x] **5.1** Stop broadcasting InputFrames (keep the codec, the local
   encode→decode feel-parity round-trip, and the receive path for
   cross-version tolerance). Comment explains M10.13 will reintroduce intent
   traffic deliberately as events.
 
 ### Phase 6 — race-state guard (#10)
 
-- [ ] **6.1** `race.ts`: per-eid previous-position memory; a > 5 m per-tick
+- [x] **6.1** `race.ts`: per-eid previous-position memory; a > 5 m per-tick
   jump updates `prevSigned` without testing the crossing (teleport ≠ gate
   cross). Also covers OOB/respawn warps in single-player. Unit-tested.
 
 ### Phase 7 — tests + drift (#11, #12, #13)
 
-- [ ] **7.1** `tests/unit/remote-interp.test.ts`: buffer seed/slide, interp
+- [x] **7.1** `tests/unit/remote-interp.test.ts`: buffer seed/slide, interp
   midpoint, extrapolation clamp at `MAX_EXTRAPOLATE_T`, dynamic-body skip,
   clear/reset lifecycle, shortest-arc slerp (q vs −q).
-- [ ] **7.2** Fix comment drift (`MAX_EXTRAPOLATE_T`, `LATENCY_STALE_MS`);
+- [x] **7.2** Fix comment drift (`MAX_EXTRAPOLATE_T`, `LATENCY_STALE_MS`);
   add a dated revision note to `m10-11-state-sync.md` (NUM_AI=7 bandwidth,
   input-frame send removal, tenure election); status.md entry pointing here.
 - [ ] **7.3** *(deferred, unchanged)* Two-tab Playwright spec — needs a
@@ -160,3 +160,13 @@ Phased so each lands independently with local verification
 - 2026-06-09 — Phases 1–2: `pnpm typecheck` clean; `lobby-pick.test.ts`
   9/9 green. (`pickRandomTrack` removed from lobby-overlay; logic now lives
   in `lobby-pick.ts`.)
+- 2026-06-09 — Phases 3–7 landed: `pnpm typecheck` clean; **full unit suite
+  115 files / 1144 tests green** (includes new `remote-interp`,
+  `race-teleport-guard`, `lobby-pick` suites + tenure cases in
+  `host-election`); `pnpm build` green; biome adds no new warnings on
+  touched files (repo-wide warning count predates this pass).
+- **Not yet verified live:** a two-browser smoke (host + joiner over
+  `pnpm party:dev`) is recommended before relying on multiplayer, and the
+  tenure election only takes effect in prod after **`pnpm party:deploy`**
+  (clients fall back to slot-order election against the old relay, i.e.
+  current behavior, until then).

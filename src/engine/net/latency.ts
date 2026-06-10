@@ -20,9 +20,9 @@
 const EWMA_ALPHA = 0.25
 
 /** Pongs are considered stale after this many milliseconds — we'd
- *  expect a pong every PING_PERIOD_MS, so 4× that is a generous slop
- *  for one or two dropped exchanges before we admit the channel went
- *  quiet. */
+ *  expect a pong every second (room.ts pings at 1 Hz), so 6× that
+ *  tolerates a handful of dropped exchanges before we admit the
+ *  channel went quiet and the readout flips to "—". */
 export const LATENCY_STALE_MS = 6000
 
 export type LatencyTracker = {
