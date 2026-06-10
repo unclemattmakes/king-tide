@@ -1434,6 +1434,7 @@ async function boot() {
           return out
         },
         snapshotsReceived: () => room.snapshotsReceived,
+        bikePoses: () => multiplayer.probeBikePoses(),
       }
     },
   })
