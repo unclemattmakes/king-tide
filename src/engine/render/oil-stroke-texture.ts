@@ -435,3 +435,28 @@ export const FOAM_STROKE_STREAK_SPEC: OilStrokeSheetSpec = {
   taperStart: 0.35,
   raggedness: 0.45,
 }
+
+/**
+ * The bike-wake churn sheet — sampled in TRAIL-ALIGNED UV (U = arc length
+ * along the ridden path, V = lateral offset), so its strokes comb along the
+ * wake the way prop-churned water actually streams off a hull. Replaces the
+ * world-anchored disc-bubble / crest-combed break-up inside the wake band,
+ * both of which read wrong there (polka dots, or strokes pulled along the
+ * SWELL instead of the wake). Denser + ropier than the face streaks: mostly
+ * near-axis runs in two weights, ragged enough to dissolve the ribbon's
+ * edges into churned tufts rather than a clean outline.
+ */
+export const WAKE_STROKE_SPEC: OilStrokeSheetSpec = {
+  size: 512,
+  seed: 6011,
+  classes: [
+    // Long ropy churn streaks — the wake's main "streaming" language.
+    { count: 18, lenMin: 0.3, lenMax: 0.55, widthMin: 0.013, widthMax: 0.022, angleJitterDeg: 6 },
+    // Short turbulent tufts filling between the ropes.
+    { count: 30, lenMin: 0.09, lenMax: 0.2, widthMin: 0.008, widthMax: 0.015, angleJitterDeg: 14 },
+  ],
+  bristleMin: 3,
+  bristleMax: 5,
+  taperStart: 0.4,
+  raggedness: 0.45,
+}
