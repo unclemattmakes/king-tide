@@ -76,10 +76,22 @@ export type PeerLeftMessage = {
   peerId: number
 }
 
-/** Sent by the server when the room is full. The client should close
- *  cleanly rather than retry. */
+/** Sent by the server when the room is full, immediately before it
+ *  closes the connection with code 4000. The close CODE is the reliable
+ *  signal — this courtesy message can be dropped when the close races
+ *  the send — and the client must stop retrying either way. */
 export type RoomFullMessage = {
   type: 'room-full'
+}
+
+/** Sent by the server when a connection arrives after the room's race
+ *  has locked (start-race fired more than the join-grace ago), followed
+ *  by a close with code 4001 (same delivery caveat as `room-full`).
+ *  Product rule (2026-06-09): no mid-race joins — players enter through
+ *  the lobby cohort and share the load-in + countdown. The client
+ *  should stop retrying; the lock clears when the room empties. */
+export type RaceInProgressMessage = {
+  type: 'race-in-progress'
 }
 
 /** M10.12 lobby — peer announces their ready/not-ready state and
@@ -137,6 +149,7 @@ export type ServerControlMessage =
   | PeerJoinedMessage
   | PeerLeftMessage
   | RoomFullMessage
+  | RaceInProgressMessage
   | ReadyMessage
   | StartRaceMessage
   | PongMessage

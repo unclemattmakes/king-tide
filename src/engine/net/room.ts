@@ -56,6 +56,11 @@ export type NetRoomConfig = {
   onConnected?: (myPeerId: number, otherPeers: readonly number[], raceStarted: boolean) => void
   /** Called when the server reports the room is full. */
   onRoomFull?: () => void
+  /** Called when the server rejects us because the room's race is
+   *  locked (start-race fired more than the join grace ago — no
+   *  mid-race joins). The room closes itself after this fires so
+   *  partysocket doesn't retry into the same rejection. */
+  onRaceInProgress?: () => void
   /** Called when a previously-established session drops (socket closed
    *  after we'd been assigned a slot) and partysocket is about to retry
    *  in the background. NOT fired for first-connect retries, nor after
@@ -261,7 +266,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
   socket.addEventListener('open', () => {
     socketOpen = true
   })
-  socket.addEventListener('close', () => {
+  socket.addEventListener('close', (event) => {
     // Did this close tear down an established session (slot assigned)?
     // Captured before the reset so onDisconnected only fires for real
     // drops, not for retry cycles that never got a hello.
@@ -280,6 +285,19 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
     // Explicit close(): the caller already published 'closed' — don't
     // overwrite it with 'connecting', and don't report a "drop".
     if (explicitClose) return
+    // Server rejections close with an application code (4000 = room
+    // full, 4001 = race in progress). The courtesy JSON notice can be
+    // DROPPED when the server's close races its send (observed against
+    // partykit dev), so the code is the reliable contract — map it to
+    // the same callback and stop retrying: every retry would be
+    // rejected identically until the room changes state.
+    const code = (event as CloseEvent | undefined)?.code
+    if (code === 4000 || code === 4001) {
+      if (code === 4000) cfg.onRoomFull?.()
+      else cfg.onRaceInProgress?.()
+      closeRoom()
+      return
+    }
     // partysocket auto-reconnects unless we explicitly called close();
     // distinguish "first-time connecting" from "re-establishing".
     publishStatus(everConnected ? 'reconnecting' : 'connecting')
@@ -378,8 +396,19 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
         case 'start-race':
           cfg.onStartRace?.(msg.trackId)
           break
+        // Both rejection notices self-close: the server will reject
+        // every retry until the room changes state, so reconnect
+        // attempts are pure noise. closeRoom() sets explicitClose,
+        // which also suppresses the close-code fallback below firing
+        // the callback a second time (the server closes with 4000 /
+        // 4001 right after sending these — see the close handler).
         case 'room-full':
           cfg.onRoomFull?.()
+          closeRoom()
+          break
+        case 'race-in-progress':
+          cfg.onRaceInProgress?.()
+          closeRoom()
           break
       }
       return
@@ -419,6 +448,18 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
 
   function ready(): boolean {
     return socketOpen && myPeerId >= 0
+  }
+
+  /** Tear the connection down for good (no partysocket retries). Shared
+   *  by the public `close()` and the server's race-in-progress
+   *  rejection. */
+  function closeRoom(): void {
+    explicitClose = true
+    stopPingLoop()
+    socket.close()
+    latency.reset()
+    everConnected = false
+    publishStatus('closed')
   }
 
   return {
@@ -500,12 +541,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
       return everConnected
     },
     close() {
-      explicitClose = true
-      stopPingLoop()
-      socket.close()
-      latency.reset()
-      everConnected = false
-      publishStatus('closed')
+      closeRoom()
     },
   }
 }

@@ -45,8 +45,10 @@ export type LobbyView = {
   bikeOptions: { id: string; label: string; accent: string }[]
   trackOptions: { id: string; label: string }[]
   /** Most-recent "pick rolled" banner, e.g. when the smash-bros choice
-   *  has been made. Null hides the banner. */
-  pickBanner?: { winnerLabel: string; subtitle: string } | null | undefined
+   *  has been made. Null hides the banner. `plain` drops the "THE BOOTH
+   *  HAS SPOKEN" prefix — used for non-celebratory notices like the
+   *  race-in-progress rejection. */
+  pickBanner?: { winnerLabel: string; subtitle: string; plain?: boolean } | null | undefined
   /** Room code shown in the side panel + the copy hint. */
   roomId: string
   /** Smoothed RTT in milliseconds, or -1 if no recent pong has landed.
@@ -266,11 +268,23 @@ export function installLobbyOverlay(opts: LobbyOverlayOpts): LobbyOverlay {
     // connecting/connected. Stale or pre-measured shows "—".
     pingEl.textContent = formatPing(view.latencyMs)
 
+    // Banner paints in every state — the race-in-progress rejection
+    // arrives right before the room closes itself, which flips the view
+    // back to `connecting`; the notice must survive that.
+    if (view.pickBanner) {
+      bannerEl.classList.add('show')
+      const prefix = view.pickBanner.plain ? '' : 'THE BOOTH HAS SPOKEN — '
+      bannerEl.innerHTML = `${prefix}<b>${escapeHtml(view.pickBanner.winnerLabel.toUpperCase())}</b> &middot; ${escapeHtml(view.pickBanner.subtitle)}`
+    } else {
+      bannerEl.classList.remove('show')
+      bannerEl.textContent = ''
+    }
+
     if (view.connecting) {
-      subEl.textContent = 'CONNECTING TO THE BROADCAST…'
+      subEl.textContent = view.pickBanner ? 'ROOM UNAVAILABLE' : 'CONNECTING TO THE BROADCAST…'
       slotsEl.innerHTML = ''
       readyBtn.disabled = true
-      readyBtn.textContent = 'CONNECTING…'
+      readyBtn.textContent = view.pickBanner ? 'UNAVAILABLE' : 'CONNECTING…'
       bikeValEl.textContent = '—'
       trackValEl.textContent = '—'
       return
@@ -288,14 +302,6 @@ export function installLobbyOverlay(opts: LobbyOverlayOpts): LobbyOverlay {
     bikeValEl.style.color = view.localBike.accent
     readyBtn.textContent = view.localReady ? "I'M READY ✓" : 'CLICK WHEN READY'
     readyBtn.classList.toggle('primary', !view.localReady)
-
-    if (view.pickBanner) {
-      bannerEl.classList.add('show')
-      bannerEl.innerHTML = `THE BOOTH HAS SPOKEN — <b>${escapeHtml(view.pickBanner.winnerLabel.toUpperCase())}</b> &middot; ${escapeHtml(view.pickBanner.subtitle)}`
-    } else {
-      bannerEl.classList.remove('show')
-      bannerEl.textContent = ''
-    }
   }
 
   function hide(): void {
