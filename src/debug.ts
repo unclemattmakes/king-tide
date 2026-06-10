@@ -528,9 +528,11 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
       // Centre the transect on (cx, cz).
       const x0 = cx - (dirX * step * (count - 1)) / 2
       const z0 = cz - (dirZ * step * (count - 1)) / 2
-      // Past this depth both the shore wave (< SHORE_BAND_DEPTH) and the
-      // shoaling fade (< SHOAL_FADE_DEPTH) are inert, so the open-water
-      // mirror and the full sampler evaluate the same terms.
+      // Past this depth the shore wave (< SHORE_BAND_DEPTH) is inert and
+      // the mirror + sampler evaluate the same terms. Terrain shoaling is
+      // NOT a skip reason: `renderVertex` models the same factor the GPU
+      // applies (it must, since shoaling v2 reaches to 14 m — coastal
+      // transects would have nowhere left to compare).
       const deepThreshold = Math.max(SHOAL_FADE_DEPTH, SHORE_BAND_DEPTH)
       const v = { x: 0, y: 0, z: 0 }
       let samples = 0

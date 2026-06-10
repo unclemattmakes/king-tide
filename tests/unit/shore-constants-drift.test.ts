@@ -31,12 +31,25 @@ const WATER_TS = resolve(__dirname, '../../src/engine/render/water.ts')
 const SHARED = [
   'MAX_WAVE_ZONES',
   'SHOAL_FADE_DEPTH',
+  // Shoaling v2 (P3.1): the Green's-law gain + depth-limited break cap are
+  // evaluated per vertex on the GPU and per sample in `shoalAttenuation` —
+  // a drifted constant moves the break line on one side only.
+  'SHOAL_BREAK_GAMMA',
+  'SHOAL_GAIN_MAX',
+  'SHOAL_GREEN_REF_DEPTH',
+  'SHOAL_HEFF_MIN',
   'SHORE_AMP',
   'SHORE_BAND_DEPTH',
   'SHORE_DEPTH_CAP',
   'SHORE_K',
   'SHORE_OMEGA',
   'SHORE_PHASE',
+  // Shore-wave v2: swell drive + breaker-forward asymmetry.
+  'SHORE_SWELL_DRIVE_REF',
+  'SHORE_SWELL_DRIVE_MIN',
+  'SHORE_SWELL_DRIVE_MAX',
+  'SHORE_ASYM',
+  'SHORE_ASYM_PHASE',
 ] as const
 
 describe('shore + shoaling + wave-zone constants single source (wave-field.ts ↔ water.ts)', () => {

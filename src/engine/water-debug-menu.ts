@@ -141,6 +141,15 @@ const SLIDERS: SliderDef[] = [
     format: (n) => `${n.toFixed(2)}×`,
     hint: 'Coast-parallel breakers that fill the near-shore band, marching shoreward. Affects buoyancy (rideable). 0 = off (legacy damped shore) · 1 = default · 2 = exaggerated surf',
   },
+  {
+    key: 'shoalSurf',
+    label: 'Surf shoaling',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    format: (n) => (n < 0.01 ? 'legacy' : n > 0.99 ? 'surf' : n.toFixed(2)),
+    hint: 'Shoaling v2 (P3.1): 0 = legacy shallow-water fade-to-flat · 1 = real surf — swell stacks up (Green’s law) then breaks at the depth line (H/h ≈ 0.78); shore breakers scale with the live swell + set envelope and lean forward. CHANGES BUOYANCY near shores — sim + render move together',
+  },
   // SoT-inspired fragment shading sliders.
   {
     key: 'bodyAbsorption',
@@ -227,6 +236,24 @@ const SLIDERS: SliderDef[] = [
     step: 0.05,
     format: (n) => (n < 0.01 ? 'discs' : n > 0.99 ? 'oil' : n.toFixed(2)),
     hint: 'Foam break-up pattern: 0 = round bubble discs (legacy) · 1 = oil-paint brush strokes pulled along the crest lines (the engine-trail painted read). Fringes and thin foam dissolve into tapered strokes; solid foam cores stay solid',
+  },
+  {
+    key: 'foamWarp',
+    label: 'Foam warp',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: 'P2.3 tangential warp: wobbles the foam break-up pattern ALONG the crest axis (±4 m at 1×) so stroke/bubble rows bend organically instead of running straight forever. Never warps travel/height — those carry the steepness signal',
+  },
+  {
+    key: 'langmuir',
+    label: 'Langmuir lanes',
+    min: 0,
+    max: 1.5,
+    step: 0.05,
+    format: (n) => (n < 0.01 ? 'off' : `${n.toFixed(2)}×`),
+    hint: 'P2.3 windrow lanes: faint brightness streaks aligned WITH the swell travel direction, only on calm low-slope water — the "which way is the sea moving" prime where no crest/foam cue fires. Brightness-only (never displaces geometry)',
   },
   {
     key: 'wakeStrength',
@@ -493,6 +520,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
         case 'shoreWaveStrength':
           water.debug.setShoreWaveStrength(v)
           break
+        case 'shoalSurf':
+          water.debug.setShoalSurf(v)
+          break
         case 'whitecapCurvature':
           water.debug.setWhitecapCurvature(v)
           break
@@ -507,6 +537,12 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'foamBrush':
           water.debug.setFoamBrush(v)
+          break
+        case 'foamWarp':
+          water.debug.setFoamWarp(v)
+          break
+        case 'langmuir':
+          water.debug.setLangmuir(v)
           break
         case 'wakeStrength':
           water.debug.setWakeStrength(v)

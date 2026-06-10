@@ -30,6 +30,7 @@ import {
   sin,
   smoothstep,
   sqrt,
+  step,
   texture,
   uniform,
   uniformArray,
@@ -69,16 +70,25 @@ import {
   // Zone cap shared with the CPU sampler (`setWaveZones` truncates to it; the
   // uniform arrays below are sized by it). Drift-tested like the SHORE_* set.
   MAX_WAVE_ZONES,
-  // Shore-aligned wave constants — single source of truth shared with the CPU
-  // buoyancy sampler. `tests/unit/shore-constants-drift.test.ts` enforces that
-  // this shader imports them rather than re-declaring literals.
+  // Shore-aligned wave + shoaling constants — single source of truth shared
+  // with the CPU buoyancy sampler. `tests/unit/shore-constants-drift.test.ts`
+  // enforces that this shader imports them rather than re-declaring literals.
+  SHOAL_BREAK_GAMMA,
   SHOAL_FADE_DEPTH,
+  SHOAL_GAIN_MAX,
+  SHOAL_GREEN_REF_DEPTH,
+  SHOAL_HEFF_MIN,
   SHORE_AMP,
+  SHORE_ASYM,
+  SHORE_ASYM_PHASE,
   SHORE_BAND_DEPTH,
   SHORE_DEPTH_CAP,
   SHORE_K,
   SHORE_OMEGA,
   SHORE_PHASE,
+  SHORE_SWELL_DRIVE_MAX,
+  SHORE_SWELL_DRIVE_MIN,
+  SHORE_SWELL_DRIVE_REF,
   // Swell/chop wavelength threshold — the SWELL_INDICES subset below is
   // derived from it per bank (per-track spectrum banks reorder/resize the
   // wave list, so hardcoded indices would silently mistag).
@@ -87,6 +97,10 @@ import {
   // diagnostic stays an exact twin of the vertex stage. The shader itself
   // re-implements the same math in TSL (`waveZoneFactors`).
   sampleZoneFactors,
+  // CPU shoal factor — used by the `renderVertex` CPU mirror so the
+  // diagnostic models the same shallow-water attenuation the vertex
+  // stage applies (the shader mirrors the math in TSL above).
+  shoalAttenuation,
   WAKE_BASE_WIDTH,
   WAKE_DISP_AMP,
   WAKE_EDGE_BELL_HALFWIDTH,
@@ -218,6 +232,13 @@ export type WaterMesh = {
      *  Sets both the GPU uniform and the CPU `field.shoreWaveStrength` so
      *  buoyancy and visuals track, exactly like `setWaveBearing`. */
     setShoreWaveStrength(s: number): void
+    /** Shoaling-v2 blend, 0..1 (water-next-research §7.3). 0 = the legacy
+     *  quadratic shallow-water kill-switch, 1 = full surf (Green's-law
+     *  stack + depth-limited breaking + swell-driven, forward-leaning
+     *  shore breakers). Writes the FIELD and the GPU uniform from one
+     *  scalar, like setSteepness, so buoyancy and visuals always shoal
+     *  identically. */
+    setShoalSurf(s: number): void
     /** Pinch direction in degrees, 0..90. Rotates the Gerstner
      *  horizontal-displacement vector relative to the per-wave
      *  travel direction. 0° = standard Gerstner (particles bulge
@@ -281,6 +302,15 @@ export type WaterMesh = {
      *  round-disc bubble sheet (0) to oil-paint brush strokes pulled along
      *  the crest lines (1) — the engine-trail painted read applied to foam. */
     setFoamBrush(s: number): void
+    /** P2.3 tangential foam warp, 0..2. Wobbles the foam break-up sample
+     *  coords along the CREST axis (±4 m at 1) so stroke/bubble rows bend
+     *  organically instead of running straight forever. Never warps the
+     *  travel/height axes (those carry the steepness/timing signal). */
+    setFoamWarp(s: number): void
+    /** P2.3 Langmuir streak lanes, 0..1.5. Faint travel-aligned windrow
+     *  brightness lanes on calm low-slope water — the "which way is the
+     *  sea moving" prime where no crest/foam cue fires. 0 = off. */
+    setLangmuir(s: number): void
     /** Bike-wake strength, 0..2. Scales the trail wake — both the churn/rail
      *  foam ribbon laid along each bike's ridden path and its V-ridge
      *  DISPLACEMENT. 1 = baseline; 0 = no rendered wake (buoyancy still
@@ -357,6 +387,8 @@ export type WaterDebugDefaults = {
   streakElongation: number
   /** Shore-aligned wave strength, 0..2. 1 = baseline, 0 = off. */
   shoreWaveStrength: number
+  /** Shoaling-v2 blend 0..1: legacy kill-switch (0) ↔ full surf (1). */
+  shoalSurf: number
   /** Gerstner pinch direction in degrees, 0..90. */
   pinchDirection: number
   /** Curvature-based whitecap gain (foam v3). 4 = baseline. Higher = foam on
@@ -394,6 +426,12 @@ export type WaterDebugDefaults = {
   foamStreak: number
   /** Foam brush 0..1: disc-bubble (0) ↔ oil-stroke (1) foam break-up. */
   foamBrush: number
+  /** P2.3 tangential foam warp 0..2: along-crest wobble of the foam
+   *  break-up sample coords. 1 = baseline ±4 m. */
+  foamWarp: number
+  /** P2.3 Langmuir lanes 0..1.5: travel-aligned windrow brightness lanes
+   *  on calm water. 0.6 = baseline. */
+  langmuir: number
   /** Bike-wake strength 0..2: trail-wake foam + ridge displacement. */
   wakeStrength: number
   wireframe: boolean
@@ -762,6 +800,73 @@ function getFoamStrokeMassTexture(): THREE.DataTexture {
 }
 
 /**
+ * Hex-tiled (stochastic) texture tap — the P2.3 anti-tiling sampler
+ * (water-next-research §7.8; Mikkelsen, *Practical Real-Time Hex-Tiling*,
+ * JCGT 2022 — this is the lean triangle-lattice/3-tap core of it, without
+ * the per-tile rotations or histogram preservation the full method adds).
+ *
+ * UV space is partitioned into a triangle lattice (~2 texture tiles per
+ * cell); each lattice vertex gets a stable hashed UV offset; the texture
+ * is sampled at the three surrounding vertices' offset UVs and blended
+ * with the barycentric weights. Strict periodicity dies because no two
+ * lattice regions read the same patch of texture in the same place —
+ * the repeat distance becomes the lattice hash period (effectively
+ * never) instead of the tile size.
+ *
+ * Two properties make the cheap variant artifact-free here:
+ *  - at any lattice edge, the vertex whose hash CHANGES has barycentric
+ *    weight 0, so there is no visible pattern seam (and the mip-
+ *    derivative spike on that sample is invisible for the same reason);
+ *  - the blend zones linearly mix three decorrelated samples, which
+ *    slightly softens contrast there — acceptable for our low-contrast
+ *    slope/mask sheets (they all feed smoothstep gates downstream), so
+ *    the full method's histogram-preserving transform isn't needed.
+ *
+ * Plain JS code-gen helper (not a TSL Fn): emits the node graph inline at
+ * the call site, three `texture()` taps per call.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: TSL node-graph builder values
+function hexTiledTap(tex: THREE.Texture, uv: any): any {
+  // Lattice cells span ~2 texture tiles — big enough that each randomized
+  // region shows a coherent stretch of pattern, small enough that the eye
+  // never sees two aligned repeats.
+  const HEX_LATTICE_SCALE = 0.5
+  // biome-ignore lint/suspicious/noExplicitAny: TSL node-graph builder values
+  const st = (uv as any).mul(float(HEX_LATTICE_SCALE))
+  // Skew UV into the triangle lattice frame.
+  const sx = st.x.sub(st.y.mul(float(0.57735027)))
+  const sy = st.y.mul(float(1.15470054))
+  const cellX = floor(sx)
+  const cellY = floor(sy)
+  const fx = fract(sx)
+  const fy = fract(sy)
+  const fz = float(1).sub(fx).sub(fy)
+  // Branchless lower/upper triangle select: weights sum to 1 in both.
+  const up = step(fz, float(0)) // 0 = lower triangle, 1 = upper
+  const w1 = mix(fz, fz.negate(), up)
+  const w2 = mix(fy, float(1).sub(fy), up)
+  const w3 = mix(fx, float(1).sub(fx), up)
+  const v1 = vec2(cellX, cellY).add(mix(vec2(0, 0), vec2(1, 1), up))
+  const v2 = vec2(cellX, cellY).add(mix(vec2(0, 1), vec2(1, 0), up))
+  const v3 = vec2(cellX, cellY).add(mix(vec2(1, 0), vec2(0, 1), up))
+  // Stable per-vertex hash → UV offset in [0,1)² (REPEAT wrap makes any
+  // offset valid). Two decorrelated dot-hashes per vertex.
+  // biome-ignore lint/suspicious/noExplicitAny: TSL node-graph builder values
+  const hashOffset = (v: any) =>
+    vec2(
+      fract(sin(dot(v, vec2(127.1, 311.7))).mul(float(43758.5453))),
+      fract(sin(dot(v, vec2(269.5, 183.3))).mul(float(43758.5453))),
+    )
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
+  const t1 = texture(tex, (uv as any).add(hashOffset(v1))) as any
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
+  const t2 = texture(tex, (uv as any).add(hashOffset(v2))) as any
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
+  const t3 = texture(tex, (uv as any).add(hashOffset(v3))) as any
+  return t1.mul(w1).add(t2.mul(w2)).add(t3.mul(w3))
+}
+
+/**
  * Contour-dash sheet — a stack of independent 1-D dash rows the contour layer
  * uses as a KEEP mask so its iso-height lines dissolve into hand-pulled
  * dashes instead of running unbroken across the whole sea. Each iso line
@@ -895,6 +1000,11 @@ export function createWaterMesh(
   const aaOn = params?.get('aa') !== 'off'
   const disableSceneDepthCopy = opts?.backend === 'webgpu' && aaOn
   const wireFlag = params?.get('wire') === '1'
+  // P2.3 anti-tiling sampler kill switch (`?hextile=0`) — structural
+  // shader change, so the A/B is per-boot rather than a live knob. ON by
+  // default; the off path keeps the plain single-tap samples for
+  // comparison shots + a perf control.
+  const hexTileFlag = params?.get('hextile') !== '0'
 
   const geom = new THREE.PlaneGeometry(size, size, subs, subs)
   geom.rotateX(-Math.PI / 2)
@@ -1044,6 +1154,22 @@ export function createWaterMesh(
   // rider floats on" identical.
   const liveWaveAmps = field.waves.map((w) => w.amplitude)
   const waveAmpUniform = uniformArray(liveWaveAmps, 'float')
+  // Live swell-band amplitude sum — Σ|A_i| over SWELL_INDICES, from the
+  // same mirrored uniform buoyancy reads. Three consumers: the shoaling-v2
+  // break cap + the shore-wave swell drive (vertex stage, both × the set
+  // envelope = the CPU's `shoalEffectiveSwell` / `shoreSwellDrive`), and
+  // the P1 ramp's span normalisation (fragment).
+  // biome-ignore lint/suspicious/noExplicitAny: TSL node accumulated across a JS-level loop
+  let swellAmpSumAcc: any = float(0)
+  for (const i of SWELL_INDICES) {
+    // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
+    swellAmpSumAcc = swellAmpSumAcc.add(abs(float(waveAmpUniform.element(i) as any)))
+  }
+  const swellAmpSum = float(swellAmpSumAcc)
+  // Shoaling-v2 blend (legacy kill-switch ↔ surf), mirroring
+  // `field.shoalSurfStrength` — the setter writes both, like steepness.
+  const SHOAL_SURF_DEFAULT = 1.0
+  const shoalSurfUniform = uniform(SHOAL_SURF_DEFAULT)
   // Time scale for the main loop. Stored here rather than as a uniform
   // because dt is consumed by `advanceWaveField` on the CPU side; the
   // shader reads `field.time` regardless of how fast it advances.
@@ -1912,11 +2038,31 @@ export function createWaterMesh(
   const inBounds = inU.mul(inV).mul(terrainEnabledUniform)
   const effectiveTerrainY = mix(float(-10000), sampledTerrainY, inBounds)
   const vertexWaterDepth = waterYUniform.sub(effectiveTerrainY)
-  // Smooth fade from "no waves" at depth ≤ 0 to "full waves" at the chosen
-  // shoaling depth. Squared falloff on the inner side so the tail of
-  // attenuation reads as a gentle calming rather than an abrupt edge.
+  // Shoaling factor — exact mirror of the CPU's `shoalAttenuation` (two
+  // regimes blended by the shared `shoalSurfStrength` scalar):
+  //  - LEGACY (blend 0): quadratic fade to flat below SHOAL_FADE_DEPTH —
+  //    the original geometric kill-switch.
+  //  - SURF v2 (blend 1, default — water-next-research §7.3): Green's-law
+  //    gain as the swell feels the bottom (clamped (REF/d)^¼ ≤ GAIN_MAX),
+  //    capped by depth-limited breaking γ·d / H_eff — the cap doubles as
+  //    the seabed guard (trough ≥ −γ·d), which is what lets surf stay
+  //    ALIVE right up the beach where the quadratic had flattened it.
+  // H_eff = live swell-band Σ|A| × the set envelope (mirrored scalars), so
+  // a big set breaks farther out — on both sides identically.
   const shoalRaw = clamp(vertexWaterDepth.div(float(SHOAL_FADE_DEPTH)), float(0), float(1))
-  const shoalFactor = shoalRaw.mul(shoalRaw)
+  const shoalLegacy = shoalRaw.mul(shoalRaw)
+  const shoalHEff = max(float(SHOAL_HEFF_MIN), swellAmpSum.mul(setEnvNode))
+  const shoalDepthPos = max(vertexWaterDepth, float(1e-4))
+  const shoalGain = clamp(
+    pow(float(SHOAL_GREEN_REF_DEPTH).div(shoalDepthPos), float(0.25)),
+    float(1),
+    float(SHOAL_GAIN_MAX),
+  )
+  const shoalBreakCap = float(SHOAL_BREAK_GAMMA).mul(shoalDepthPos).div(shoalHEff)
+  // step() zeroes the factor on dry land (depth ≤ 0), mirroring the CPU's
+  // early-out.
+  const shoalSurf = min(shoalGain, shoalBreakCap).mul(step(float(0), vertexWaterDepth))
+  const shoalFactor = mix(shoalLegacy, shoalSurf, shoalSurfUniform)
 
   // Apply the shoaling attenuation to BOTH the ambient swell/chop and the
   // horizontal Gerstner displacement. Wake (bikeSurfaceContrib) is left at
@@ -1957,7 +2103,22 @@ export function createWaterMesh(
   const shoreNrmX = shoreNrmRawX.div(shoreNrmLen)
   const shoreNrmZ = shoreNrmRawZ.div(shoreNrmLen)
   const shoreBandGate = float(1).sub(smoothstep(float(0), float(SHORE_BAND_DEPTH), shoreDepth))
-  const shoreAmpCap = min(float(SHORE_AMP), float(SHORE_DEPTH_CAP).mul(max(shoreDepth, float(0))))
+  // Shore-wave v2 (shoaling v2): the breaker amplitude scales with the
+  // live ambient swell — Σ|A_swell| × set envelope vs the shipped
+  // reference, clamped — so calm lagoons lap and storm sets pound. The
+  // depth cap keeps the final word (seabed guard). Mirror of
+  // `shoreSwellDrive` in wave-field.ts; `shoalSurfUniform` blends the
+  // drive away toward the legacy constant amplitude.
+  const shoreDriveRaw = clamp(
+    swellAmpSum.mul(setEnvNode).div(float(SHORE_SWELL_DRIVE_REF)),
+    float(SHORE_SWELL_DRIVE_MIN),
+    float(SHORE_SWELL_DRIVE_MAX),
+  )
+  const shoreDrive = mix(float(1), shoreDriveRaw, shoalSurfUniform)
+  const shoreAmpCap = min(
+    float(SHORE_AMP).mul(shoreDrive),
+    float(SHORE_DEPTH_CAP).mul(max(shoreDepth, float(0))),
+  )
   const shoreAmp = shoreAmpCap
     .mul(shoreBandGate)
     .mul(shoreWaveStrengthUniform)
@@ -1968,11 +2129,22 @@ export function createWaterMesh(
     .add(float(SHORE_PHASE))
   const shoreSin = sin(shorePhase)
   const shoreCos = cos(shorePhase)
-  const shoreY = shoreAmp.mul(shoreSin)
-  // ∂phase/∂x = K·nrmX (world frame); add alongside the world-frame ambient +
-  // bike slopes below.
-  const shoreDydx = shoreAmp.mul(shoreCos).mul(float(SHORE_K)).mul(shoreNrmX)
-  const shoreDydz = shoreAmp.mul(shoreCos).mul(float(SHORE_K)).mul(shoreNrmZ)
+  // Breaker-forward asymmetry (shoaling v2): phase-locked second harmonic
+  // leans each breaker's shoreward face steeper than its back — y/A =
+  // sin φ + a₂·sin(2φ + β). Mirror of `computeShore`; fades in with the
+  // surf blend.
+  const shoreAsym = float(SHORE_ASYM).mul(clamp(shoalSurfUniform, float(0), float(1)))
+  const shorePhase2 = shorePhase.mul(float(2)).add(float(SHORE_ASYM_PHASE))
+  const shoreSin2 = sin(shorePhase2)
+  const shoreCos2 = cos(shorePhase2)
+  const shoreY = shoreAmp.mul(shoreSin.add(shoreAsym.mul(shoreSin2)))
+  // ∂phase/∂x = K·nrmX (world frame; harmonic at 2K); add alongside the
+  // world-frame ambient + bike slopes below.
+  const shoreWaveSlope = shoreAmp
+    .mul(float(SHORE_K))
+    .mul(shoreCos.add(shoreAsym.mul(shoreCos2).mul(float(2))))
+  const shoreDydx = shoreWaveSlope.mul(shoreNrmX)
+  const shoreDydz = shoreWaveSlope.mul(shoreNrmZ)
 
   // Zone surge joins UNattenuated, after the shoal-multiplied wave sum —
   // mirror of `sampleHeight` (`y += zoneFx.surgeY` outside the shoal term).
@@ -2255,10 +2427,19 @@ export function createWaterMesh(
   const detailUvB = vec2(wxB0, wzB0)
     .div(float(DETAIL_B_TILE))
     .add(vec2(tNode.mul(float(-0.11)), tNode.mul(float(0.08))))
+  // Hex-tiled taps (P2.3): the 11 m / 2 m cascades repeat every tile
+  // without it — under the 35 m warp the strict beat is already broken,
+  // but the PATTERN content still recurs per tile; the stochastic tap
+  // decorrelates it per ~2-tile lattice cell. `?hextile=0` restores the
+  // plain taps for A/B.
   // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
-  const detailSampleA = texture(detailTex, detailUvA) as any
+  const detailSampleA = (
+    hexTileFlag ? hexTiledTap(detailTex, detailUvA) : texture(detailTex, detailUvA)
+  ) as any
   // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
-  const detailSampleB = texture(detailTex, detailUvB) as any
+  const detailSampleB = (
+    hexTileFlag ? hexTiledTap(detailTex, detailUvB) : texture(detailTex, detailUvB)
+  ) as any
   // Decoded slopes are in TILE-LOCAL frame (because the UV was rotated).
   // Rotate them back into world XZ via the inverse rotation matrix
   // (transpose of the forward rotation) so they add correctly to the
@@ -2770,6 +2951,18 @@ export function createWaterMesh(
   // to every foam fringe. See the foam-mask block below.
   const FOAM_BRUSH_DEFAULT = 1.0
   const foamBrushUniform = uniform(FOAM_BRUSH_DEFAULT)
+  // P2.3 tangential foam-mask warp: low-frequency wobble of the foam
+  // break-up sample coords ALONG the crest axis only (never along travel
+  // or in height — those carry the steepness/timing signal; §7.8's rule).
+  // 1 = baseline ±4 m wobble at the 35 m warp-noise scale, 0 = off.
+  const FOAM_WARP_DEFAULT = 1.0
+  const foamWarpUniform = uniform(FOAM_WARP_DEFAULT)
+  // P2.3 Langmuir streak lanes: faint elongated brightness lanes aligned
+  // WITH the swell travel direction (real windrows align with the wind),
+  // gated to calm low-slope water — the "which way is the sea moving"
+  // prime on stretches where no crest/foam cue fires (§5's calm gap).
+  const LANGMUIR_DEFAULT = 0.6
+  const langmuirUniform = uniform(LANGMUIR_DEFAULT)
 
   // Wave-driven foam — two stacked layers via max():
   //   1. The vertex-stage accumulator (`foamAccumFrag`) — sampled at 4 past
@@ -3167,12 +3360,38 @@ export function createWaterMesh(
   // wake, bow spray, shoreline surf, breaking-wave fold-foam — inherits
   // bubble structure. mix(0.35, 1.0, bubble) keeps strong-foam zones
   // bright while breaking dim-foam edges into discrete bubble blobs.
+  // Swell frame for the foam break-up patterns + the Langmuir lanes below:
+  // world XZ rotated by the global wave bearing. (Computed before the
+  // bubble sample now — both break-up sheets share the tangential warp.)
+  const brushBearingRad = waveBearingDegUniform.mul(float(Math.PI / 180))
+  const brushCos = float(cos(brushBearingRad))
+  const brushSin = float(sin(brushBearingRad))
+  // P2.3 tangential warp scalar: the 35 m detail-warp noise projected onto
+  // the CREST axis — a slow ±4 m wobble that bends the break-up patterns
+  // along the wave fronts. Along-crest ONLY (§7.8): warping the travel
+  // coordinate would slide foam against the wave motion, and any height
+  // warp would falsify the steepness read. Reuses `warpX/warpZ` (already
+  // sampled for the detail cascades) so it costs zero extra taps.
+  const crestAxisWarp = float(
+    warpZ.mul(brushCos).sub(warpX.mul(brushSin)).mul(float(1.6)).mul(foamWarpUniform),
+  )
+
   const foamBubbleTex = getFoamBubbleTexture()
-  const foamBubbleUV = positionWorld.xz
+  // The bubble sheet is isotropic in world XZ; its tangential warp shifts
+  // the sample position along the world-space crest direction. float()
+  // wraps resolve the scalar overloads (file convention).
+  const bubbleWarpX = float(brushSin.negate().mul(crestAxisWarp))
+  const bubbleWarpZ = float(brushCos.mul(crestAxisWarp))
+  const foamBubbleUV = vec2(
+    float(positionWorld.x.add(bubbleWarpX)),
+    float(positionWorld.z.add(bubbleWarpZ)),
+  )
     .div(float(4.0))
     .add(vec2(tNode.mul(float(0.012)), tNode.mul(float(-0.008))))
   // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
-  const foamBubbleSample = texture(foamBubbleTex, foamBubbleUV) as any
+  const foamBubbleSample = (
+    hexTileFlag ? hexTiledTap(foamBubbleTex, foamBubbleUV) : texture(foamBubbleTex, foamBubbleUV)
+  ) as any
   const foamBubblePattern = foamBubbleSample.r
 
   // Oil-stroke foam mass — the painterly alternative to the disc bubbles.
@@ -3187,23 +3406,50 @@ export function createWaterMesh(
   // the on-face variant of the same crest-parallel language. The travel
   // coordinate drifts slowly with time so the paint rides with the waves.
   const FOAM_BRUSH_TILE_M = 5.0
-  const brushBearingRad = waveBearingDegUniform.mul(float(Math.PI / 180))
-  const brushCos = cos(brushBearingRad)
-  const brushSin = sin(brushBearingRad)
   // Coordinate along the swell's TRAVEL direction (waves advance along it)…
   const brushTravel = positionWorld.x
     .mul(brushCos)
     .add(positionWorld.z.mul(brushSin))
     .sub(tNode.mul(float(0.1)))
-  // …and along the CREST direction (perpendicular — the wave-front axis).
-  const brushCrest = positionWorld.x.mul(brushSin.negate()).add(positionWorld.z.mul(brushCos))
+  // …and along the CREST direction (perpendicular — the wave-front axis),
+  // wobbled by the tangential warp so the stroke rows don't run
+  // geometrically straight forever.
+  const brushCrest = positionWorld.x
+    .mul(brushSin.negate())
+    .add(positionWorld.z.mul(brushCos))
+    .add(crestAxisWarp)
   const foamStrokeMassTex = getFoamStrokeMassTexture()
   // Texture U (the strokes' long axis) ← crest coordinate; V ← travel.
   const foamStrokeMassUV = vec2(brushCrest, brushTravel).div(float(FOAM_BRUSH_TILE_M))
   // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
-  const foamStrokeMassSample = texture(foamStrokeMassTex, foamStrokeMassUV) as any
+  const foamStrokeMassSample = (
+    hexTileFlag
+      ? hexTiledTap(foamStrokeMassTex, foamStrokeMassUV)
+      : texture(foamStrokeMassTex, foamStrokeMassUV)
+  ) as any
   // The break-up pattern every foam source inherits: disc bubbles ↔ strokes.
   const foamBreakupPattern = mix(foamBubblePattern, foamStrokeMassSample.r, foamBrushUniform)
+
+  // ── P2.3 Langmuir streak lanes ──────────────────────────────────────
+  // Real seas under sustained wind develop windrows — faint foam/slick
+  // lanes ALIGNED WITH the wind, tens of metres apart. They're the one
+  // natural cue that signals the sea's travel direction on water too calm
+  // for crest/foam cues to fire (§5's "nothing on calm stretches" gap).
+  // Implementation: the detail texture sampled in the swell frame with a
+  // strongly anisotropic tile (≈140 m along travel × 18 m across), gated
+  // to a sparse lane mask, faded out wherever the ANALYTIC swell slope
+  // says the sea already carries shape cues, and faded with distance
+  // (sub-pixel past ~300 m). Brightness-only modulation on the surface
+  // color — no vertex or foam-gate contribution, so it can't lie about
+  // the physics (it sits safely in §3's normal/shading-only band).
+  const laneUv = vec2(brushTravel.div(float(140)), brushCrest.div(float(18)))
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+  const laneSample = texture(detailTex, laneUv) as any
+  const laneMask = smoothstep(float(0.58), float(0.82), laneSample.r)
+  const analyticSlopeMag = sqrt(dydx.mul(dydx).add(dydz.mul(dydz)))
+  const laneCalmGate = float(1).sub(smoothstep(float(0.1), float(0.22), analyticSlopeMag))
+  const laneDistFade = float(1).sub(smoothstep(float(160), float(300), camDist))
+  const langmuirLane = laneMask.mul(laneCalmGate).mul(laneDistFade).mul(langmuirUniform)
 
   // ── Directional foam streaks (step 3, reworked) ─────────────────────
   // Paint foam on the wave faces as long brushstrokes running ALONG the
@@ -3419,15 +3665,9 @@ export function createWaterMesh(
   // Normalised swell phase 0..1 across the LIVE swell envelope — the amps
   // come from the same mirrored uniform buoyancy uses, so Beaufort, the
   // lap-weather storm ramp and the menu sliders keep the bands centred.
-  // Summed across the bank's SWELL_INDICES subset (NOT hardcoded waves
-  // 0–1 — per-track spectrum banks carry 1..N swells).
-  // biome-ignore lint/suspicious/noExplicitAny: TSL node accumulated across a JS-level loop
-  let swellAmpSum: any = float(0)
-  for (const i of SWELL_INDICES) {
-    // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
-    swellAmpSum = swellAmpSum.add(abs(float(waveAmpUniform.element(i) as any)))
-  }
-  const swellSpan = max(float(swellAmpSum), float(0.05))
+  // (`swellAmpSum` is the shared swell-band Σ|A| node defined alongside
+  // `waveAmpUniform` — the shoaling-v2 break cap reads the same one.)
+  const swellSpan = max(swellAmpSum, float(0.05))
   const rampT = clamp(
     swellHeightFrag.div(swellSpan.mul(float(2))).add(float(0.5)),
     float(0),
@@ -3610,7 +3850,15 @@ export function createWaterMesh(
   // modulate the shaded surface, the dark relief twin carves its line, and
   // the light contour line joins the foam mask so it inherits the foam
   // color/warmth (it IS foam — the §4.3 layer re-landed inside the stack).
-  const surfaceReadable = surfaceColor.mul(float(1).add(rampDeviation)).mul(rampTint)
+  // The P2.3 Langmuir lanes ride the same multiplicative slot: a faint
+  // (≤ +7 %) brightness lift along the travel-aligned windrow lanes.
+  const surfaceReadable = surfaceColor
+    .mul(
+      float(1)
+        .add(rampDeviation)
+        .add(langmuirLane.mul(float(0.07))),
+    )
+    .mul(rampTint)
   const surfaceWithRelief = mix(
     surfaceReadable,
     deepColor.mul(float(0.7)),
@@ -3827,6 +4075,7 @@ export function createWaterMesh(
     sunStreakStrength: SUN_STREAK_STRENGTH_DEFAULT,
     streakElongation: STREAK_ELONGATION_DEFAULT,
     shoreWaveStrength: SHORE_WAVE_STRENGTH_DEFAULT,
+    shoalSurf: SHOAL_SURF_DEFAULT,
     pinchDirection: PINCH_DIRECTION_DEFAULT,
     whitecapCurvature: WHITECAP_CURVATURE_DEFAULT,
     whitecapLeadBias: WHITECAP_LEAD_BIAS_DEFAULT,
@@ -3836,6 +4085,8 @@ export function createWaterMesh(
     foamWarmth: FOAM_WARMTH_DEFAULT,
     foamStreak: FOAM_STREAK_DEFAULT,
     foamBrush: FOAM_BRUSH_DEFAULT,
+    foamWarp: FOAM_WARP_DEFAULT,
+    langmuir: LANGMUIR_DEFAULT,
     wakeStrength: WAKE_STRENGTH_DEFAULT,
     rampStrength: RAMP_STRENGTH_DEFAULT,
     rampSteps: RAMP_STEPS_DEFAULT,
@@ -3966,6 +4217,14 @@ export function createWaterMesh(
       // oil-paint strokes (1).
       foamBrushUniform.value = clamp01(s, 0, 1)
     },
+    setFoamWarp(s) {
+      // 0..2 — along-crest wobble of the foam break-up sample coords.
+      foamWarpUniform.value = clamp01(s, 0, 2)
+    },
+    setLangmuir(s) {
+      // 0..1.5 — travel-aligned windrow lanes on calm water.
+      langmuirUniform.value = clamp01(s, 0, 1.5)
+    },
     setWakeStrength(s) {
       // 0..2 — trail-wake master strength (churn/rail foam AND ridge
       // displacement). 1 = baseline; 0 = no drawn wake. Render-only: the sim
@@ -4026,6 +4285,15 @@ export function createWaterMesh(
       const v = clamp01(s, 0, 2)
       shoreWaveStrengthUniform.value = v
       field.shoreWaveStrength = v
+    },
+    setShoalSurf(s) {
+      // 0..1 — legacy shallow-water kill-switch ↔ full shoaling-v2 surf.
+      // Field + uniform from one scalar (the setSteepness discipline):
+      // the factor changes BUOYANCY near shores, so the two sides must
+      // never see different blends.
+      const v = clamp01(s, 0, 1)
+      shoalSurfUniform.value = v
+      field.shoalSurfStrength = v
     },
     setPinchDirection(deg) {
       // 0..90° — rotation of the Gerstner horizontal-displacement
@@ -4661,10 +4929,17 @@ export function createWaterMesh(
   }
 
   // CPU mirror of the vertex shader's transform (waveZoneFactors +
-  // gerstnerHeight + gerstnerDisp) using the same live uniforms/constants
-  // the GPU reads. Open-water only: no terrain shoaling / shore / bike
-  // terms — a clean diagnostic point to compare against the vertical-only
-  // `sampleHeight`. Zone factors are evaluated at the REST point (x, z),
+  // gerstnerHeight + gerstnerDisp + the shoaling factor) using the same
+  // live uniforms/constants the GPU reads. No shore-wave or bike terms —
+  // a clean diagnostic point to compare against the vertical-only
+  // `sampleHeight` anywhere outside the shore-wave band (depth ≥
+  // SHORE_BAND_DEPTH). Terrain shoaling IS modelled (since shoaling v2
+  // reaches out to SHOAL_GREEN_REF_DEPTH = 14 m, coastal-track transects
+  // would otherwise have nowhere left to compare): the factor comes from
+  // `shoalAttenuation` — the baked shore field's depth, vs the GPU's
+  // heightmap texture sample of the same bake; sub-mm filtering
+  // differences, same approximation class as the zone-factor rest-point
+  // note below. Zone factors are evaluated at the REST point (x, z),
   // exactly where the GPU evaluates them for a mesh vertex.
   // See the WaterMesh `renderVertex` type doc.
   function renderVertex(x: number, z: number, out: { x: number; y: number; z: number }): void {
@@ -4688,6 +4963,9 @@ export function createWaterMesh(
         Math.sin(
           t * (swellSetOmegaUniform.value as number) + (swellSetPhaseUniform.value as number),
         )
+    // Shoaling factor at the rest point — the GPU multiplies BOTH the
+    // ambient height and the horizontal pinch displacement by it.
+    const shoal = shoalAttenuation(field, x, z)
     let y = 0
     let dxRot = 0
     let dzRot = 0
@@ -4706,9 +4984,9 @@ export function createWaterMesh(
       dxRot += qScaled * rotDirX * amp * c
       dzRot += qScaled * rotDirZ * amp * c
     }
-    out.x = x + dxRot * cosB - dzRot * sinB
-    out.y = y + zoneFx.surgeY + mesh.position.y
-    out.z = z + dxRot * sinB + dzRot * cosB
+    out.x = x + (dxRot * cosB - dzRot * sinB) * shoal
+    out.y = y * shoal + zoneFx.surgeY + mesh.position.y
+    out.z = z + (dxRot * sinB + dzRot * cosB) * shoal
   }
 
   function setHorizonColor(r: number, g: number, b: number): void {

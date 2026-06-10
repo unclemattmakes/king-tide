@@ -37,6 +37,17 @@ import type { WaterDebugDefaults, WaterMesh } from './render/water'
 // (missing-key -> default 1.0), so returning users get the trailing wake at
 // baseline strength automatically.
 //
+// No key bump for shoaling v2 (P3.1) either: shoalSurf is an ADDED key
+// (missing-key -> default 1.0 = full surf), so returning users pick up the
+// depth-driven surf automatically; its 0-endpoint is the exact legacy
+// kill-switch for A/B.
+//
+// No key bump for the P2.3 anti-repetition kit either: foamWarp + langmuir
+// are ADDED keys (missing-key -> defaults 1.0 / 0.6), so returning users
+// pick up the tangential foam warp + Langmuir lanes at baseline and keep
+// their other tuning. (The hex-tiled sampling itself is structural — a
+// `?hextile=0` boot flag, not a stored knob.)
+//
 // v9 bump (prior): dropped the spectrum/FFT-only knobs (choppiness,
 // seaStateIntensity, windSpeed, windDirection, windCutoff, foamPersistence)
 // along with the FFT path itself.
@@ -57,6 +68,7 @@ export type WaterDebugSettings = {
   sunStreakStrength: number
   streakElongation: number
   shoreWaveStrength: number
+  shoalSurf: number
   pinchDirection: number
   whitecapCurvature: number
   whitecapLeadBias: number
@@ -66,6 +78,8 @@ export type WaterDebugSettings = {
   foamWarmth: number
   foamStreak: number
   foamBrush: number
+  foamWarp: number
+  langmuir: number
   wakeStrength: number
   rampStrength: number
   rampSteps: number
@@ -94,6 +108,7 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     sunStreakStrength: d.sunStreakStrength,
     streakElongation: d.streakElongation,
     shoreWaveStrength: d.shoreWaveStrength,
+    shoalSurf: d.shoalSurf,
     pinchDirection: d.pinchDirection,
     whitecapCurvature: d.whitecapCurvature,
     whitecapLeadBias: d.whitecapLeadBias,
@@ -103,6 +118,8 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     foamWarmth: d.foamWarmth,
     foamStreak: d.foamStreak,
     foamBrush: d.foamBrush,
+    foamWarp: d.foamWarp,
+    langmuir: d.langmuir,
     wakeStrength: d.wakeStrength,
     rampStrength: d.rampStrength,
     rampSteps: d.rampSteps,
@@ -167,6 +184,7 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setSunStreakStrength(s.sunStreakStrength)
   water.debug.setStreakElongation(s.streakElongation)
   water.debug.setShoreWaveStrength(s.shoreWaveStrength)
+  water.debug.setShoalSurf(s.shoalSurf)
   water.debug.setPinchDirection(s.pinchDirection)
   water.debug.setWhitecapCurvature(s.whitecapCurvature)
   water.debug.setWhitecapLeadBias(s.whitecapLeadBias)
@@ -176,6 +194,8 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setFoamWarmth(s.foamWarmth)
   water.debug.setFoamStreak(s.foamStreak)
   water.debug.setFoamBrush(s.foamBrush)
+  water.debug.setFoamWarp(s.foamWarp)
+  water.debug.setLangmuir(s.langmuir)
   water.debug.setWakeStrength(s.wakeStrength)
   water.debug.setRampStrength(s.rampStrength)
   water.debug.setRampSteps(s.rampSteps)
