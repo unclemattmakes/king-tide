@@ -739,16 +739,17 @@ export function startGameLoop(opts: GameLoopOpts): void {
   const hudBikes: HudBike[] = []
   const hudBikePool: HudBike[] = []
 
-  // Reused per-frame buffer for the GPU water shader's bike impact array.
-  // Sourced from `waveField.wakes`, which `wakeUpdateSystem` populated in
-  // the physics loop above. `id` (the eid) keys the render-side wake-trail
-  // history; the dimple/propwash displacement itself still comes from the
-  // same positions buoyancy reads.
+  // Reused per-frame buffer for the GPU water shader's bike impact array —
+  // drives the at-hull effects (dimple, propwash, bow spray). Sourced from
+  // `waveField.wakes`, which `wakeUpdateSystem` populated in the physics
+  // loop above. The trailing WAKE itself doesn't ride this: the water mesh
+  // reads the sim's `waveField.trails` directly (the same points buoyancy
+  // samples), so the drawn wake and the felt wake can't diverge.
   const bikeImpacts: BikeImpact[] = []
   function gatherBikeImpacts(): readonly BikeImpact[] {
     bikeImpacts.length = 0
     for (const w of waveField.wakes) {
-      bikeImpacts.push({ x: w.x, z: w.z, vx: w.vx, vz: w.vz, weight: w.weight, id: w.id })
+      bikeImpacts.push({ x: w.x, z: w.z, vx: w.vx, vz: w.vz, weight: w.weight })
     }
     return bikeImpacts
   }

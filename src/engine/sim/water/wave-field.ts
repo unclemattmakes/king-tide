@@ -1,5 +1,6 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import { type ShoreField, sampleShore } from './shore-field'
+import { sampleWakeFromTrail, type WakeSampleOut, type WakeTrail } from './wake-trail'
 
 /**
  * Sum-of-sines Gerstner wave field. Pure math — no Three.js, runs in sim layer.
@@ -10,15 +11,15 @@ import { type ShoreField, sampleShore } from './shore-field'
  * Two contributions are summed:
  *   1. Ambient Gerstner waves (wind-driven swell + chop). Static parameters,
  *      animate via time only.
- *   2. Per-bike wakes — each moving bike carries a transverse oscillating
- *      wake stripe behind it. This is what lets a trailing rider "jump" the
- *      player's wake. NOTE: buoyancy evaluates this as a closed-form V along
- *      the bike's CURRENT heading; the GPU shader draws the same profile but
- *      along a short recorded TRAIL of the bike's actual path (water.ts).
- *      The two agree for straight-line riding (where wake-jumping happens);
- *      mid-turn the drawn ridge curves with the path while the felt ridge
- *      stays on the heading ray. Keeping buoyancy closed-form keeps the sim
- *      stateless per step (rollback/replay-safe with no trail snapshots).
+ *   2. Per-bike wake trails — each bike records a short breadcrumb TRAIL of
+ *      its ridden path (`wake-trail.ts`, fed once per fixed step) and the
+ *      wake profile is evaluated along it: a transverse oscillating ridge
+ *      that curves with the line, gaps where the bike flew, and age-fades
+ *      where it stopped. Buoyancy here and the GPU shader evaluate the SAME
+ *      profile against the SAME trail points, so the bump a trailing rider
+ *      feels ("jump my wake") is exactly the ridge the shader draws — turns
+ *      included. Trails are deterministic per fixed step but deliberately
+ *      not snapshotted (self-healing after rollback/seek; see wake-trail.ts).
  *
  * Ambient waves are a sum of sines:
  *   y(x, z, t) = Σ A_i · sin(k_i · (D_i · xz) − ω_i · t + φ_i)
@@ -63,10 +64,6 @@ export type WakeSource = {
   vz: number
   /** 0 = inactive (airborne / disabled), 1 = full strength. */
   weight: number
-  /** Stable per-bike identity (the ECS eid). Sim-inert — buoyancy never reads
-   *  it. The render side keys its per-bike wake TRAIL history on it, so a
-   *  field-order change can't graft one bike's trail onto another. */
-  id?: number
 }
 
 export type WaveSample = {
@@ -88,6 +85,13 @@ export type WaveSample = {
 export type WaveFieldState = {
   waves: Wave[]
   wakes: WakeSource[]
+  /** Per-bike wake trails — the recorded path history the wake profile is
+   *  evaluated along (see wake-trail.ts). Fed once per fixed step by
+   *  `wakeUpdateSystem` via `acquireWakeTrail` + `feedWakeTrail`; persistent
+   *  across steps (unlike `wakes`, which is re-derived every step). Both the
+   *  buoyancy samplers here and the GPU water shader read these same points,
+   *  so the felt wake IS the drawn wake. */
+  trails: WakeTrail[]
   time: number
   baseY: number
   /** Global wave-field bearing in radians (CCW). Rotates ALL per-wave
@@ -197,50 +201,25 @@ export type WaveZoneRuntime = {
 
 // ---- Wake parameters -----------------------------------------------------
 //
-// These constants must EXACTLY match the values baked into the TSL shader in
-// `src/engine/render/water.ts`. Any change here without a matching shader
-// change will desync visuals from buoyancy.
-
-/** Peak vertical displacement of the wake's ridge, meters. The wake
- * appears as a real bump in the geometry, not just a foam stripe. */
-export const WAKE_DISP_AMP = 0.6
-/** Speed at which the wake starts to appear (m/s). */
-export const WAKE_SPEED_LOW = 1.5
-/** Speed at which the wake reaches full strength (m/s). */
-export const WAKE_SPEED_HIGH = 8.0
-/** Tan of the V-wake half-angle (V opens at this rate behind the bike). */
-export const WAKE_HALF_ANGLE_TAN = 0.4
-/** Width of the V-wake at the bike before it widens behind, meters. */
-export const WAKE_BASE_WIDTH = 0.55
-/** Half-width of the amplitude bell that rides along each V edge, meters.
- * The wake's height peaks AT the V boundary (real Kelvin-style diverging
- * wave look) rather than uniformly across the inside of the V. Anything
- * past this many meters from the boundary fades to zero. */
-export const WAKE_EDGE_BELL_HALFWIDTH = 0.7
-/** Longitudinal ramp-in (1 / meters). Gives the wake a soft start so it
- * doesn't punch up directly under the bike. */
-export const WAKE_LONG_RAMP = 0.6
-/** Longitudinal decay (1 / meters). Wake fades to ~e^-1 at 1/this distance
- * behind the bike. 0.04 → e-folds at ~25 m. */
-export const WAKE_LONG_DECAY = 0.04
-/** Transverse-wave wavenumber (rad / meter, M9.35). Real Kelvin wakes
- * have oscillating ridges along the bike's heading axis — the "scallops"
- * behind a moving boat. K = 0.7 → wavelength ≈ 9m, so ~3 visible
- * scallops fit in the 25m wake length. Chosen so sin(K · 10) > 0 at the
- * unit-test sample point (behind=10, t=0), which keeps the existing
- * "yEdge > 0.3 / yAxis < -0.3" assertions firmly in the pass region
- * (modulation BOOSTS by ~20% there rather than reducing amplitude). */
-export const WAKE_TRANS_K = 0.7
-/** Transverse-wave angular frequency (rad / s). 1.0 → period ≈ 6.3s,
- * a gentle scroll that makes the scallops feel alive without pulsing
- * distractingly. */
-export const WAKE_TRANS_OMEGA = 1.0
-/** Modulation amplitude (dimensionless multiplier, range 1 ± value).
- * 0.3 → wake amplitude varies between 0.7× and 1.3× of base across
- * each scallop period. Larger = more dramatic peaks/troughs along
- * the wake; capped here so sin = -1 doesn't push the V edge below
- * the unit-test floor. */
-export const WAKE_TRANS_AMP = 0.3
+// The wake profile + trail machinery live in `wake-trail.ts` (one bike =
+// one recorded path trail; the profile is evaluated in trail coordinates by
+// both this module's samplers and the TSL shader). Re-exported here so the
+// shader and older call sites keep importing wake constants from the same
+// module as every other sim↔render shared constant.
+export {
+  WAKE_AGE_TAU,
+  WAKE_BASE_WIDTH,
+  WAKE_DISP_AMP,
+  WAKE_EDGE_BELL_HALFWIDTH,
+  WAKE_HALF_ANGLE_TAN,
+  WAKE_LONG_DECAY,
+  WAKE_LONG_RAMP,
+  WAKE_SPEED_HIGH,
+  WAKE_SPEED_LOW,
+  WAKE_TRANS_AMP,
+  WAKE_TRANS_K,
+  WAKE_TRANS_OMEGA,
+} from './wake-trail'
 
 // ---- Shore-wave parameters ----------------------------------------------
 //
@@ -303,6 +282,7 @@ export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveF
   return {
     waves,
     wakes: [],
+    trails: [],
     time: 0,
     baseY: opts?.baseY ?? 0,
     waveBearing: 0,
@@ -521,107 +501,11 @@ export function pointInWaveZone3D(zone: WaveZoneRuntime, x: number, y: number, z
   )
 }
 
-/**
- * Wake displacement at (x, z) from a single source at time t. Returns 0
- * when the source is in front of the sample point, slow, or off in
- * perpendicular space.
- *
- * Profile across the V (perp = perpendicular distance from the bike's
- * heading axis):
- *   - Inside the V (perp < wakeWidth): a half-cosine trough, going from
- *     -AMP at perp=0 to +AMP at perp=wakeWidth. The water "channels"
- *     down between the diverging wave arms.
- *   - At the boundary (perp = wakeWidth): peak (+AMP), the wake's
- *     visible ridge.
- *   - Just outside (wakeWidth < perp < wakeWidth + EDGE_BELL_HALFWIDTH):
- *     linear fade to 0.
- *   - Beyond: 0.
- *
- * Longitudinal modulation (M9.35): the V's amplitude is multiplied by
- * `(1 + WAKE_TRANS_AMP · sin(K · behind − ω · t))` to produce the
- * transverse "scallops" seen in real ship wakes. The whole V breathes
- * up and down along its length, with the modulation pattern slowly
- * scrolling backward as time advances. Pre-M9.35 the V was a static
- * Kelvin shape — the new modulation makes the wake feel alive without
- * disturbing the V's silhouette.
- *
- * The TSL shader's trail-wake block evaluates this same profile (same
- * constants, same scallop phase) in trail coordinates — `behind` becomes
- * arc-distance back along the recorded path, `perp` lateral offset from the
- * nearest trail segment. Change the profile here and the shader's version
- * must move with it (`trailWakeScan` callers in water.ts).
- */
-export function sampleWakeFromSource(
-  src: WakeSource,
-  x: number,
-  z: number,
-  t: number,
-): { y: number; dydx: number; dydz: number } {
-  const speed = Math.hypot(src.vx, src.vz)
-  if (speed < WAKE_SPEED_LOW || src.weight <= 0) {
-    return { y: 0, dydx: 0, dydz: 0 }
-  }
-  const dx = x - src.x
-  const dz = z - src.z
-  const hatX = src.vx / speed
-  const hatZ = src.vz / speed
-  const parallel = dx * hatX + dz * hatZ
-  const behind = Math.max(-parallel, 0)
-  if (behind <= 0) return { y: 0, dydx: 0, dydz: 0 }
-  const perp = Math.abs(dx * hatZ - dz * hatX)
-
-  const speedGate = smoothstep(WAKE_SPEED_LOW, WAKE_SPEED_HIGH, speed)
-  const wakeWidth = behind * WAKE_HALF_ANGLE_TAN + WAKE_BASE_WIDTH
-
-  // Two-piece signed profile across the V:
-  //   inside V:  -cos(π · perp / wakeWidth)         // -1..+1
-  //   outside V: 1 · max(0, 1 - (perp - wakeWidth) / halfwidth)  // fade 1→0
-  // Combined via min/max so it's branchless-friendly for the shader.
-  const insideArg = (Math.min(perp, wakeWidth) / wakeWidth) * Math.PI
-  const insidePart = -Math.cos(insideArg) // varies -1 (perp=0) → +1 (perp=wakeWidth)
-  const fadeOut = Math.max(0, 1 - Math.max(0, perp - wakeWidth) / WAKE_EDGE_BELL_HALFWIDTH)
-  // For perp <= wakeWidth: insidePart∈[-1,1], fadeOut=1. profile = insidePart.
-  // For perp > wakeWidth:  insidePart=1 (clamped),  fadeOut∈[0,1]. profile = fadeOut.
-  const transverseSigned = insidePart * fadeOut
-
-  const longRamp = 1 - Math.exp(-behind * WAKE_LONG_RAMP)
-  const longDecay = Math.exp(-behind * WAKE_LONG_DECAY)
-  // Transverse "scallops": the V's amplitude oscillates along its length.
-  // sin(K · behind − ω · t) drifts backward in the bike's frame as t
-  // advances (the pattern travels with the wake's tail).
-  const longPhase = WAKE_TRANS_K * behind - WAKE_TRANS_OMEGA * t
-  const transverseMod = 1 + WAKE_TRANS_AMP * Math.sin(longPhase)
-
-  const amp = WAKE_DISP_AMP * speedGate * src.weight * longRamp * longDecay * transverseMod
-  const y = amp * transverseSigned
-
-  // Analytic gradient — dominated by the perp direction (the V shape) and
-  // by the longitudinal decay (slow change with `behind`). The cross
-  // terms involving ∂(longRamp·longDecay)/∂behind are small relative to
-  // the perp slope at typical arcade scales; including them complicates
-  // the shader without a visible payoff.
-  //
-  // d transverseSigned / d perp:
-  //   inside V:  (π / wakeWidth) · sin(π · perp / wakeWidth)
-  //   in fade:   -1 / EDGE_BELL_HALFWIDTH
-  //   outside:   0
-  let dProfileDPerp: number
-  if (perp < wakeWidth) {
-    dProfileDPerp = (Math.PI / wakeWidth) * Math.sin(insideArg)
-  } else if (perp < wakeWidth + WAKE_EDGE_BELL_HALFWIDTH) {
-    dProfileDPerp = -1 / WAKE_EDGE_BELL_HALFWIDTH
-  } else {
-    dProfileDPerp = 0
-  }
-  // ∂perp/∂x = sign(c) · hatZ, where c = dx·hatZ − dz·hatX.
-  const c = dx * hatZ - dz * hatX
-  const signC = c >= 0 ? 1 : -1
-  const dPerpDx = signC * hatZ
-  const dPerpDz = -signC * hatX
-  const dydx = amp * dProfileDPerp * dPerpDx
-  const dydz = amp * dProfileDPerp * dPerpDz
-  return { y, dydx, dydz }
-}
+// (The closed-form heading-ray wake — `sampleWakeFromSource` — was replaced
+// by the trail-based `sampleWakeFromTrail` in wake-trail.ts: same Kelvin
+// cross-profile, but "behind" is arc-distance back along the bike's RECORDED
+// path instead of a ray from its current heading, so the felt wake curves
+// with the line exactly like the drawn one.)
 
 function smoothstep(a: number, b: number, x: number): number {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)))
@@ -644,6 +528,10 @@ export function setShoreField(field: WaveFieldState, shore: ShoreField | null): 
 // avoids a per-sample allocation on the hot buoyancy path. `active` gates
 // whether the y/slope/vy fields are meaningful.
 const _shore = { y: 0, dydx: 0, dydz: 0, vy: 0, active: false }
+// Reused scratch for the per-trail wake contribution — same single-threaded
+// pattern as `_shore`/`_disp` (`sampleWakeFromTrail` writes, the sampler
+// loop reads immediately).
+const _wake: WakeSampleOut = { y: 0, dydx: 0, dydz: 0 }
 
 /**
  * Evaluate the shore-aligned wave at world (x, z, t) into `_shore`. Single
@@ -825,8 +713,19 @@ function inverseGerstner(
   _rest.z = z0
 }
 
-/** Surface y only — the cheap path used per-bike per-tick. */
-export function sampleHeight(field: WaveFieldState, x: number, z: number): number {
+/** Surface y only — the cheap path used per-bike per-tick.
+ *
+ *  `includeWakes = false` returns the AMBIENT surface (no bike-wake trails):
+ *  used by `wakeUpdateSystem`'s altitude→weight fade so the weight a bike
+ *  deposits can't depend on wakes (its own or others') — that was previously
+ *  guaranteed by clearing `field.wakes` before sampling, but trails persist
+ *  across steps, so the exclusion is now explicit. */
+export function sampleHeight(
+  field: WaveFieldState,
+  x: number,
+  z: number,
+  includeWakes = true,
+): number {
   let y = field.baseY
   const t = field.time
   // Per-zone factors are blended once per sample. When no zones are
@@ -875,8 +774,11 @@ export function sampleHeight(field: WaveFieldState, x: number, z: number): numbe
     y += shoal * envHeightMult * w.amplitude * Math.sin(phase)
   }
   y += zoneFx.surgeY
-  for (const src of field.wakes) {
-    y += sampleWakeFromSource(src, x, z, t).y
+  if (includeWakes) {
+    for (const tr of field.trails) {
+      sampleWakeFromTrail(tr, x, z, t, _wake)
+      y += _wake.y
+    }
   }
   // Shore-aligned wave — rideable breakers in the near-shore band.
   computeShore(field, x, z, t)
@@ -950,11 +852,11 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
   // Convert rotated-frame slopes back to world frame.
   let dydx = rotDydx * cosB - rotDydz * sinB
   let dydz = rotDydx * sinB + rotDydz * cosB
-  for (const src of field.wakes) {
-    const wk = sampleWakeFromSource(src, x, z, t)
-    y += wk.y
-    dydx += wk.dydx
-    dydz += wk.dydz
+  for (const tr of field.trails) {
+    sampleWakeFromTrail(tr, x, z, t, _wake)
+    y += _wake.y
+    dydx += _wake.dydx
+    dydz += _wake.dydz
     // Wake's ∂y/∂t is small relative to swell; skip for buoyancy damping.
   }
   // Shore-aligned wave. Slopes are already world-frame (shore normal is
