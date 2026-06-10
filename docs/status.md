@@ -31,6 +31,32 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-10 (f)** — **Waterline contact effects — the sea
+> acknowledges the world.** Static geometry that pierces the surface
+> (bridge pillars, placed rocks, dock pylons) is auto-discovered at load
+> (`water-contacts.ts` walks the environment GLB + static props root:
+> compact straddling meshes only, instanced props expanded per placement,
+> terrain/water/decals/hidden proxies excluded) and gets two render-only
+> layers. (1) **Foam collars**: the water shader draws a wave-modulated
+> collar + outward wash wavelets around each contact — packed into the
+> SHARED event uniform array (24 nearest slots; no new uniform buffer, the
+> WebGPU 12/stage cap) and folded into the foam stack via max so it
+> inherits the painterly break-up; the collar surges as each crest washes
+> through (same `ambientHeightFrag` signal as the shoreline surf). (2)
+> **Contact splash**: a pure driver (`contact-splash.ts`, per-contact
+> rising-edge hysteresis + cooldown like the crest/surge drivers) fires
+> `fx.emitContactSplash` the moment the local surface stands tall AND is
+> rising fast — a sheet of spray up the obstacle's face on the swell side.
+> Both honour the Wave-spray setting; new `Contact foam` water-menu knob
+> (persisted, default 1); `?contact=0` kills both halves. Displacement is
+> untouched, so there is NO buoyancy mirror to drift. e2e
+> `contact-look.spec.ts` injects synthetic contacts over deep water via
+> the `__waterContacts` hook, asserts bursts fire off the live swell, and
+> captures collar on/off + close-up frames (artifacts/contact/); sandbar
+> auto-discovers 6 contacts on shipped dressing. Gates/buoys are NOT yet
+> contact sources (gates spawn in their own renderer; floats move) — a
+> follow-up lane if the look earns it.
+
 > **Last updated: 2026-06-10 (e)** — **P4 dynamic water — the water
 > roadmap is now fully executed.** Two pieces: (1) **Splash rings** — a
 > hard water landing (≥ 3 m/s into the surface) radiates an expanding

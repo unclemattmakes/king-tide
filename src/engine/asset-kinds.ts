@@ -144,8 +144,8 @@ export function asExportedKind(value: unknown): ExportedKindValue | undefined {
  *  `kind`. Declared structurally so this widely-imported module stays
  *  Three-free. */
 type KindCarrier = {
-  userData?: { kind?: unknown }
-  parent?: KindCarrier | null
+  userData?: { kind?: unknown } | undefined
+  parent?: KindCarrier | null | undefined
 }
 
 /**
