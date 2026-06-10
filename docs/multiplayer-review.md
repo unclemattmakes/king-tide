@@ -165,8 +165,16 @@ Phased so each lands independently with local verification
   `race-teleport-guard`, `lobby-pick` suites + tenure cases in
   `host-election`); `pnpm build` green; biome adds no new warnings on
   touched files (repo-wide warning count predates this pass).
-- **Not yet verified live:** a two-browser smoke (host + joiner over
-  `pnpm party:dev`) is recommended before relying on multiplayer, and the
-  tenure election only takes effect in prod after **`pnpm party:deploy`**
-  (clients fall back to slot-order election against the old relay, i.e.
-  current behavior, until then).
+- 2026-06-09 — **live two-tab smoke green** (throwaway Playwright script,
+  `pnpm party:dev` + `pnpm dev`, two Chromium contexts on
+  `?room=REVSMOKE&race=1&track=sandbar`, sandbar = 7-AI grid): tab A
+  (peer 0, host via the new joinSeq path — `party:dev` ran the updated
+  relay) broadcast **8-bike snapshots at 20 Hz for 5+ s while rendering
+  continuously** (frame 77→504; pre-fix this tab threw `RangeError` and
+  froze on the first send), tab B received 157 snapshots, A received B's
+  88, exactly one host, **zero uncaught page errors**. Probe surface for
+  future two-tab specs: `window.__hover.net`
+  (`ready/peerId/remotePeers/isHost/snapshotsReceived`).
+- **Prod note:** tenure election takes effect after **`pnpm party:deploy`**;
+  clients fall back to slot-order election against the old relay (current
+  behavior) until then.
