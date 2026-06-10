@@ -150,6 +150,15 @@ const SLIDERS: SliderDef[] = [
     format: (n) => (n < 0.01 ? 'legacy' : n > 0.99 ? 'surf' : n.toFixed(2)),
     hint: 'Shoaling v2 (P3.1): 0 = legacy shallow-water fade-to-flat · 1 = real surf — swell stacks up (Green’s law) then breaks at the depth line (H/h ≈ 0.78); shore breakers scale with the live swell + set envelope and lean forward. CHANGES BUOYANCY near shores — sim + render move together',
   },
+  {
+    key: 'splashRings',
+    label: 'Splash rings',
+    min: 0,
+    max: 1.5,
+    step: 0.05,
+    format: (n) => (n < 0.01 ? 'off' : `${n.toFixed(2)}\u00d7`),
+    hint: 'P4.1 landing event waves: a hard water landing radiates an expanding ring other riders SEE and FEEL (sim-owned deterministic pool, mirrored to the GPU). Scales amplitude on both sides; 0 disables spawning too',
+  },
   // SoT-inspired fragment shading sliders.
   {
     key: 'bodyAbsorption',
@@ -522,6 +531,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'shoalSurf':
           water.debug.setShoalSurf(v)
+          break
+        case 'splashRings':
+          water.debug.setSplashRings(v)
           break
         case 'whitecapCurvature':
           water.debug.setWhitecapCurvature(v)
