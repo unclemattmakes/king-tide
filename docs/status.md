@@ -31,6 +31,33 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-09 (c)** — **Multiplayer review + hardening pass.**
+> A full netcode read produced [multiplayer-review.md](./multiplayer-review.md)
+> (findings, prioritized plan — everything implemented except the
+> long-deferred two-tab e2e). Headline: a **P0 regression** — the host's
+> snapshot send buffer was still sized for 4 AI after the 2×4 grid bump to
+> 7, so the host tab threw `RangeError` and froze (rAF chain dies) the
+> moment a second player joined; the buffer is now sized from the live
+> roster. Also landed: **deterministic lobby track pick** (per-client
+> `Math.random` + arm-before-receive could navigate two peers to different
+> tracks in the same room; now seeded by room id + sorted votes, with the
+> relay's sticky winner overriding an armed pick until navigation),
+> **reconnect lifecycle** (`onDisconnected` → despawn remote bikes /
+> restamp `PeerControlled` / resume local AI — fixes duplicate+zombie
+> remote bikes and dead controls during partysocket retries), **tenure
+> host election** (relay-stamped `joinSeq`, lowest wins, slot tie-break;
+> a mid-race rejoiner landing on recycled slot 0 can no longer seize AI
+> authority and teleport the field — **takes effect in prod after
+> `pnpm party:deploy`**; clients fall back to slot order against the old
+> relay), **snapshot filters** (AI records only from the elected host;
+> player records only for the sender's own bike), **removed the dead
+> 60 Hz InputFrame broadcast** (~20× the snapshot message rate for zero
+> gameplay effect since M10.11 — codec + receive path stay for M10.13),
+> and the **§11 race teleport guard** (warps / snapshot sweeps can't score
+> phantom checkpoints; covers OOB respawns too). New unit suites:
+> `lobby-pick`, `remote-interp`, `race-teleport-guard`, tenure cases in
+> `host-election`.
+>
 > **Last updated: 2026-06-09 (b)** — **The two "pre-existing flakes" diagnosed —
 > one was a real sim bug.** m2-water rides-waves + m9-air-control (the failures
 > documented under load on pristine main) were characterized with trace probes,
