@@ -257,7 +257,13 @@ async function runScenario(
       // Below the floor there was no measurable arc in any attempt — a
       // broken ramp, not a wave-phase miss. Above it, return the best.
       if (bestAirS >= floorAirS) {
-        return { label, attempts, launchY: bestLaunchY, launchVy: bestLaunchVy, samples: bestSamples }
+        return {
+          label,
+          attempts,
+          launchY: bestLaunchY,
+          launchVy: bestLaunchVy,
+          samples: bestSamples,
+        }
       }
       return { label, attempts, launchY: 0, launchVy: 0, samples: [] }
     },

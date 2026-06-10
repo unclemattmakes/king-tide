@@ -32,10 +32,7 @@ function pitchQuat(rad: number): { x: number; y: number; z: number; w: number } 
 
 type Vec = { x: number; y: number; z: number }
 
-function makeFrame(
-  pitchRad: number,
-  intentPitch: number,
-): { frame: HoverFrame; torques: Vec[] } {
+function makeFrame(pitchRad: number, intentPitch: number): { frame: HoverFrame; torques: Vec[] } {
   const q = pitchQuat(pitchRad)
   const torques: Vec[] = []
   const rb = {
