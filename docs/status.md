@@ -31,6 +31,26 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-09 (e)** — **Synchronized race start.** Per
+> Matt: everyone shares the 3-2-1. Multiplayer race tabs now hold their
+> countdown ("WAITING FOR RIDERS…") and report `race-loaded`; the relay
+> broadcasts a single **`race-go`** once every racer from the lobby
+> cohort (count captured at `start-race`, persisted in room storage) has
+> loaded — or after a 25 s hold timeout so a vanished player can't hang
+> the grid. Start skew between peers becomes one-way relay latency
+> instead of load-time difference; a racer who loads after the go counts
+> down solo and starts behind. Deliberately no release-on-departure: a
+> transient socket drop during a slow load looks identical to leaving,
+> and an early release split the start when the racer reconnected
+> (caught live by the e2e). Fallbacks: old relay → arm on connect
+> (pre-barrier behavior); dead relay / lost go → 15 s client failsafe.
+> Single-player untouched. Covered by the 6-test `relay-start-barrier`
+> unit suite + Date.now barrier stamps in the two-tab e2e (one go,
+> ≤750 ms cross-tab skew, only after the last tab loaded) — green 3
+> consecutive runs. **`pnpm party:deploy` required** (with the race lock
+> + tenure election). Detail: [multiplayer-review.md](./multiplayer-review.md)
+> Phase 9.
+>
 > **Last updated: 2026-06-09 (d)** — **No mid-race joins (product rule) +
 > the two-tab multiplayer e2e finally exists.** Per Matt: players enter
 > through the shared lobby, load in together, and race from the 3-2-1 —
