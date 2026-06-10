@@ -263,13 +263,25 @@ function median(xs: number[]): number {
   return s[Math.floor(s.length / 2)] ?? Number.NaN
 }
 
-/** Skip the pre-lap intro if it's running (any-key skip is the intro's
- *  own contract; harmless once the race is live). */
-async function skipIntro(page: Page): Promise<void> {
-  await page.waitForTimeout(1000)
-  await page.keyboard.press('Space')
-  await page.waitForTimeout(1000)
-  await page.keyboard.press('Space')
+type BarrierStamps = { supported: boolean; loadedAt: number | null; goAt: number | null }
+
+/** Poll the synchronized-start stamps until race-go has landed.
+ *  Timestamps are Date.now, so two tabs on one machine compare. */
+async function waitBarrierGo(
+  page: Page,
+  label: string,
+): Promise<BarrierStamps & { goAt: number; loadedAt: number }> {
+  const deadline = Date.now() + 60_000
+  for (;;) {
+    const b = await page.evaluate(() => window.__hover?.net?.barrier() ?? null)
+    if (b?.goAt != null && b.loadedAt != null) {
+      return b as BarrierStamps & { goAt: number; loadedAt: number }
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`timeout waiting for ${label}; last barrier: ${JSON.stringify(b)}`)
+    }
+    await page.waitForTimeout(200)
+  }
 }
 
 /** Lobby URL for this worker's relay. No `race=1` — the lobby phase owns
@@ -291,6 +303,14 @@ async function readyUp(tab: Tab, expectedRiders: number): Promise<void> {
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
+
+// Sequential in ONE worker (overrides the config's fullyParallel):
+// each test boots multiple full app instances, and three tests' worth
+// of parallel chromium boots + cold vite transforms can push a race
+// tab's load past the relay's 25 s start timeout — which releases the
+// grid early and reads as a barrier-skew failure. 'default' (not
+// 'serial') so a failure doesn't skip the remaining tests.
+test.describe.configure({ mode: 'default' })
 
 test.describe('M10.11 two-tab state sync', () => {
   test('lobby cohort races together; snapshots converge; host hands off on leave', async () => {
@@ -344,11 +364,26 @@ test.describe('M10.11 two-tab state sync', () => {
     const S = aNet?.isHost ? B : A // spectator of the AI field
     const hPeerId = (aNet?.isHost ? aNet : bNet)?.peerId as number
 
-    await skipIntro(H.page)
-    await skipIntro(S.page)
+    // ── Synchronized start. Each tab reports race-loaded and holds its
+    // 3-2-1 until the relay's single race-go. The Date.now stamps prove
+    // the barrier semantics: one go, delivered to both tabs nearly
+    // simultaneously, and only after the LAST tab finished loading —
+    // start skew is relay latency, not load-time difference.
+    const barH = await waitBarrierGo(H.page, 'H race-go')
+    const barS = await waitBarrierGo(S.page, 'S race-go')
+    expect(barH.supported, 'relay advertises the start barrier').toBe(true)
+    expect(Math.abs(barH.goAt - barS.goAt), `go skew: H=${barH.goAt} S=${barS.goAt}`).toBeLessThan(
+      750,
+    )
+    // 250 ms fudge: loadedAt stamps before the report hits the wire and
+    // the relay's go comes back, so exact ordering has a small window.
+    expect(barH.goAt, 'go waited for S to load').toBeGreaterThanOrEqual(barS.loadedAt - 250)
+    expect(barS.goAt, 'go waited for H to load').toBeGreaterThanOrEqual(barH.loadedAt - 250)
+
     // Drive the host's player in a wide arc via the intent override
-    // (which also fast-forwards its countdown) so the remote-player
-    // convergence check sees real motion, not a bike idling at spawn.
+    // (which also fast-forwards its countdown — fine, the shared-start
+    // proof above is already banked) so the remote-player convergence
+    // check sees real motion, not a bike idling at spawn.
     await H.page.evaluate(() => {
       window.__hover?.setIntentOverride({
         throttle: 0.55,
