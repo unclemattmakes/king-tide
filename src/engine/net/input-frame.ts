@@ -50,6 +50,13 @@ export type InputFrame = {
   intent: Intent
 }
 
+/** Slot used to stamp frames when no room is connected (single-player,
+ *  or the gap while a dropped socket reconnects). The sim's per-peer
+ *  input map and the local bike's `PeerControlled` tag must agree on
+ *  this value for input to flow outside a room — both the game loop and
+ *  the multiplayer boot wiring import it from here. */
+export const LOCAL_PEER_ID = 0
+
 /** Payload size (without the 1-byte tag). Useful for batching N payloads. */
 export const INPUT_FRAME_BYTES = 10
 

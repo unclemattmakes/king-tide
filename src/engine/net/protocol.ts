@@ -26,6 +26,17 @@ export type HelloMessage = {
   peerId: number
   /** Slots currently held by other connected peers (excludes me). */
   otherPeers: number[]
+  /** Tenure protocol — my join sequence number: a per-room-session
+   *  monotonic counter stamped by the relay at connect. Host election
+   *  prefers the longest-tenured peer (lowest joinSeq) so a rejoiner
+   *  who happens to land on a recycled low slot can't seize AI
+   *  authority mid-race and teleport the field to its local spawn
+   *  state. Optional: absent when talking to a relay that predates the
+   *  field, in which case clients fall back to slot-order election. */
+  joinSeq?: number | undefined
+  /** Tenure protocol — joinSeq per other peer, keyed by slot. Same
+   *  optionality contract as `joinSeq`. */
+  otherPeerSeqs?: Record<number, number> | undefined
   /** M10.12 lobby — true once any peer in this room session has
    *  signalled `start-race`. Late joiners read this and immediately arm
    *  their countdown so they don't get stuck in the lobby waiting for
@@ -54,6 +65,9 @@ export type HelloMessage = {
 export type PeerJoinedMessage = {
   type: 'peer-joined'
   peerId: number
+  /** Tenure protocol — the joiner's relay-stamped join sequence (see
+   *  `HelloMessage.joinSeq`). Optional for old-relay compatibility. */
+  joinSeq?: number | undefined
 }
 
 /** Sent by the server when a peer disconnects (their slot frees up). */

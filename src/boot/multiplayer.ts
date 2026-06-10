@@ -23,8 +23,8 @@
  */
 
 import { addComponent, hasComponent, removeComponent, removeEntity } from 'bitecs'
-import { isHostFor } from '@/engine/net/host-election'
-import type { InputFrame } from '@/engine/net/input-frame'
+import { electHostSeat, isHostSeat } from '@/engine/net/host-election'
+import { type InputFrame, LOCAL_PEER_ID } from '@/engine/net/input-frame'
 import { onMpStatusChange } from '@/engine/net/mp-status'
 import { createNetRoom, type NetRoom } from '@/engine/net/room'
 import {
@@ -91,6 +91,21 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
   const recentRemoteFrames: InputFrame[] = []
   let net: NetRoom | null = null
 
+  /** Tenure-aware election (longest-tenured peer wins; slot order as
+   *  tie-break / old-relay fallback). Outside a room, or before the
+   *  hello lands: we're host — single-player semantics. */
+  function computeIsHost(): boolean {
+    return net?.ready ? isHostSeat(net.mySeat, net.remoteSeats) : true
+  }
+
+  /** Slot of the peer whose AI snapshots we accept, or -1 when that's
+   *  us / we're not in a room. Recomputed per snapshot — cheap, and the
+   *  peer set can change between any two messages. */
+  function aiAuthorityPeer(): number {
+    if (!net?.ready) return -1
+    return electHostSeat(net.mySeat, net.remoteSeats).peerId
+  }
+
   // M10.7 — remote-peer bike spawn. Each connected remote peer gets a
   // PeerControlled bike whose ControlIntent is driven by the relay's
   // last-known intent for that slot (drained in the sim loop). Variant
@@ -104,6 +119,11 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
   // The position HUD updates as remote bikes pass gates. Mid-race joiners
   // start at lap 1 / cp 0 — they naturally land at the back of the field.
   function spawnRemoteBike(peerId: number): number {
+    // Idempotent: a reconnect's hello replays peers we may already have
+    // spawned (and a buggy/raced server double-join must not leak a
+    // duplicate kinematic Racer into the standings).
+    const existing = remoteEids.get(peerId)
+    if (existing !== undefined) return existing
     const picks = net?.latestPeerPicks.get(peerId)
     const variant = resolveBikeVariant(picks?.selectedBikeId)
     // Spread peers 4m apart across the start line, 15m behind the local
@@ -170,7 +190,7 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
     }
     const remote = net.remotePeers
     const peers = remote.length === 0 ? 'alone' : `+ P${remote.join(', P')}`
-    const hostMark = isHostFor(net.peerId, remote) ? ' [host]' : ''
+    const hostMark = computeIsHost() ? ' [host]' : ''
     const ping = net.latencyMs
     const pingLabel = Number.isFinite(ping) && ping >= 0 ? ` | ${Math.round(ping)}ms` : ''
     roomEl.style.display = ''
@@ -273,9 +293,21 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
         // the body type hasn't flipped yet) still take the hard-set path
         // via `applySnapshot` — they're rare and need to lock immediately.
         const now = performance.now()
+        // Only the elected AI host's bikeKind=1 records count. During a
+        // handoff window two peers can both believe they're host and
+        // broadcast divergent AI states — without this filter receivers
+        // flicker between them (and any peer could spoof the AI field).
+        const aiAuthority = aiAuthorityPeer()
         const dynamicRecords: BikeSnapshotRecord[] = []
         for (const record of snap.bikes) {
-          if (currentlyHost && record.bikeKind === 1) continue
+          if (record.bikeKind === 1) {
+            if (currentlyHost) continue
+            if (snap.senderPeerId !== aiAuthority) continue
+          } else if (record.ownerPeerId !== snap.senderPeerId) {
+            // Player records: a peer is only authoritative for its OWN
+            // bike. Drop records claiming someone else's (spoof/bug).
+            continue
+          }
           const eid = snapshotLookup(record)
           if (eid === null) continue
           const handle = RBHandleStore.get(eid)
@@ -305,19 +337,19 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
         // Existing peers in the room need their bikes spawned too —
         // peer-joined only fires for joins AFTER us.
         for (const p of others) spawnRemoteBike(p)
-        applyHostRole(isHostFor(peerId, others))
+        applyHostRole(computeIsHost())
         renderRoomChip()
       },
       onPeerJoined: (peerId) => {
         console.log(`[net] peer ${peerId} joined`)
         spawnRemoteBike(peerId)
-        if (net) applyHostRole(isHostFor(net.peerId, net.remotePeers))
+        applyHostRole(computeIsHost())
         renderRoomChip()
       },
       onPeerLeft: (peerId) => {
         console.log(`[net] peer ${peerId} left`)
         despawnRemoteBike(peerId)
-        if (net) applyHostRole(isHostFor(net.peerId, net.remotePeers))
+        applyHostRole(computeIsHost())
         renderRoomChip()
       },
       onRoomFull: () => {
@@ -327,6 +359,30 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
           roomEl.style.color = '#ff7777'
           roomEl.textContent = `room: ${roomId} FULL`
         }
+      },
+      onDisconnected: () => {
+        // Established session dropped; partysocket retries in the
+        // background. Degrade to solo so the race stays playable:
+        console.warn(`[net] room "${roomId}" connection lost — running solo until reconnect`)
+        // 1. Despawn every remote bike. Without inbound snapshots they
+        //    freeze within 50 ms, and slots may be recycled to different
+        //    players while we're gone — a clean slate lets the reconnect
+        //    hello re-spawn exactly the live set (no duplicates, no
+        //    zombie Racers polluting the standings).
+        for (const peerId of [...remoteEids.keys()]) despawnRemoteBike(peerId)
+        // 2. Re-stamp the local bike with the no-room slot. The loop
+        //    stamps outgoing frames with LOCAL_PEER_ID while no slot is
+        //    held; without this the bike keeps its old room slot and
+        //    applyPeerInputs feeds it empty intents — dead controls for
+        //    the whole reconnect window.
+        PeerControlledStore.set(playerEid, { peerId: LOCAL_PEER_ID })
+        // 3. We're alone now — take AI authority. The kinematic bodies
+        //    hold their last snapshot pose, so flipping them dynamic
+        //    resumes the field in place (no teleport). A reconnect's
+        //    onConnected re-runs the election and hands authority back
+        //    if someone else outranks us.
+        applyHostRole(true)
+        renderRoomChip()
       },
     })
   }
@@ -401,7 +457,7 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
       return net
     },
     recentRemoteFrames,
-    isHost: () => (net?.ready ? isHostFor(net.peerId, net.remotePeers) : true),
+    isHost: computeIsHost,
     buildAndSendSnapshot,
     renderRoomChip,
   }

@@ -36,7 +36,7 @@ import {
 } from '../src/engine/net/protocol'
 import { assignLowestFreeSlot } from '../src/engine/net/slot-assign'
 
-type PeerState = { slot: number }
+type PeerState = { slot: number; joinSeq: number }
 
 function parseClientControl(text: string): ClientControlMessage | null {
   try {
@@ -61,6 +61,12 @@ export default class RelayServer implements Party.Server {
    *  the client armed without picking). Replayed in `hello` so late
    *  joiners load the same environment. */
   private raceTrackId: string | undefined = undefined
+  /** Tenure counter — stamped onto each connection at join so clients
+   *  can elect the longest-tenured peer as AI host (slots recycle, so
+   *  slot order alone lets a rejoiner seize hostship mid-race; see
+   *  src/engine/net/host-election.ts). Monotonic per room session;
+   *  resets when the room empties, alongside `raceStarted`. */
+  private joinCounter = 0
   /** Per-slot last-known lobby state (ready + picks). Replayed in
    *  `hello` so a fresh join paints the lobby in one frame. Cleared on
    *  peer disconnect and room empty. Fields are `string | undefined`
@@ -79,10 +85,15 @@ export default class RelayServer implements Party.Server {
 
   onConnect(conn: Party.Connection, _ctx: Party.ConnectionContext): void {
     const taken: number[] = []
+    const takenSeqs: Record<number, number> = {}
     for (const c of this.room.getConnections<PeerState>()) {
       if (c.id === conn.id) continue
       const slot = c.state?.slot
-      if (typeof slot === 'number') taken.push(slot)
+      if (typeof slot === 'number') {
+        taken.push(slot)
+        const seq = c.state?.joinSeq
+        if (typeof seq === 'number') takenSeqs[slot] = seq
+      }
     }
 
     const slot = assignLowestFreeSlot(taken, MAX_PEERS_PER_ROOM)
@@ -93,19 +104,22 @@ export default class RelayServer implements Party.Server {
       return
     }
 
-    conn.setState({ slot })
+    const joinSeq = this.joinCounter++
+    conn.setState({ slot, joinSeq })
 
     const hello: HelloMessage = {
       type: 'hello',
       peerId: slot,
       otherPeers: taken,
+      joinSeq,
+      otherPeerSeqs: takenSeqs,
       raceStarted: this.raceStarted,
       peerPicks: { ...this.peerPicks },
       raceTrackId: this.raceTrackId,
     }
     conn.send(JSON.stringify(hello))
 
-    const joined: PeerJoinedMessage = { type: 'peer-joined', peerId: slot }
+    const joined: PeerJoinedMessage = { type: 'peer-joined', peerId: slot, joinSeq }
     this.room.broadcast(JSON.stringify(joined), [conn.id])
   }
 
@@ -175,6 +189,7 @@ export default class RelayServer implements Party.Server {
       this.raceStarted = false
       this.raceTrackId = undefined
       this.peerPicks = {}
+      this.joinCounter = 0
     }
   }
 }
