@@ -25,7 +25,6 @@ import { loadDevSettings } from './engine/dev-settings'
 import { emptyIntent, type Intent, installInput } from './engine/input'
 import { installCameraLookInput } from './engine/input/camera-look'
 import { bindLazyMenuButton } from './engine/lazy-menu'
-import { isHostFor } from './engine/net/host-election'
 import { loadPlayerSettings, playerSettings, WAVE_SPRAY_SCALAR } from './engine/player-settings'
 import { installConsoleTrap } from './engine/qa/console-trap'
 import { createAnimatedPropsSystem } from './engine/render/animated-props'
@@ -783,11 +782,13 @@ async function boot() {
 
   const raceHud = createRaceHud({
     track,
-    // Defer the countdown until the cinematic shots finish. Multi-
-    // player enters this code path AFTER the lobby has cleared (see
-    // `mp-lobby.ts`), so its countdown auto-starts here — same as
-    // existing behaviour — and the intro never plays.
-    deferStart: introMode !== 'off',
+    // Defer the countdown until the gate clears: single-player waits
+    // for the cinematic shots to finish; multiplayer waits for the
+    // relay's synchronized-start `race-go` (every cohort member loaded
+    // — see the barrier driver in game-loop.ts), so all tabs run the
+    // same 3-2-1 from one shared moment instead of each arming at its
+    // own load time.
+    deferStart: introMode !== 'off' || isMultiplayer,
     // Suppress the giant 3/2/1/GO text — the start-lights row is the
     // canonical visual when the intro is on. Multiplayer keeps the
     // banner (lobby gate already has its own UI; no intro shots fly).
@@ -1467,7 +1468,9 @@ async function boot() {
         ready: () => room.ready,
         peerId: () => room.peerId,
         remotePeers: () => room.remotePeers,
-        isHost: () => (room.ready ? isHostFor(room.peerId, room.remotePeers) : true),
+        // Tenure-aware — must agree with multiplayer.isHost() or the
+        // probe lies about who's simulating the AI.
+        isHost: () => multiplayer.isHost(),
         recentRemoteFrames: () =>
           // Shallow-copy so devtools probes can't mutate the live buffer.
           multiplayer.recentRemoteFrames.map((f) => ({
@@ -1485,6 +1488,8 @@ async function boot() {
           return out
         },
         snapshotsReceived: () => room.snapshotsReceived,
+        bikePoses: () => multiplayer.probeBikePoses(),
+        barrier: () => ({ ...multiplayer.raceStartBarrier() }),
       }
     },
   })

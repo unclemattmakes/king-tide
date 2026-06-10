@@ -2,8 +2,9 @@ import type { TrackManifestEntry } from '@/game/assets/manifest'
 import { BIKE_VARIANTS, type BikeVariantId, DEFAULT_BIKE_VARIANT } from '@/game/bikes/variants'
 import { installMenuGamepad, type MenuGamepad } from '../input/menu-gamepad'
 import { createNetRoom } from '../net/room'
-import { installLobbyOverlay, type LobbyView, pickRandomTrack } from '../render/lobby-overlay'
+import { installLobbyOverlay, type LobbyView } from '../render/lobby-overlay'
 import { buildTrackList } from './catalog'
+import { deterministicTrackPick, type TrackVote } from './lobby-pick'
 
 /**
  * Multiplayer lobby phase — runs AFTER the menu and BEFORE the race.
@@ -57,6 +58,11 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
 
   let pickBanner: LobbyView['pickBanner'] = null
   let raceArmed = false
+  /** Track we'll navigate to when the banner timer fires. Mutable after
+   *  arming: a relay `start-race` carrying a different winner (another
+   *  peer armed first — its pick is the sticky one the server replays)
+   *  overrides this until the navigation actually happens. */
+  let armedTrackId: string | null = null
   let gamepad: MenuGamepad | null = null
 
   return new Promise<MpLobbyResult>((resolve) => {
@@ -159,16 +165,49 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
 
     function buildRaceHref(trackId: string): string {
       const url = new URL(window.location.href)
+      // An explicit `?host=` override (custom relay — e2e sidecars, a
+      // localhost relay against a prod build) must survive into the
+      // race URL, or the race tab silently reconnects to the DEFAULT
+      // relay and the room's peers/lock state diverge from the lobby's.
+      const hostOverride = url.searchParams.get('host')
       url.search = ''
       url.searchParams.set('room', opts.roomId)
       url.searchParams.set('track', trackId)
       url.searchParams.set('bike', local.bikeId)
       url.searchParams.set('race', '1')
+      if (hostOverride) url.searchParams.set('host', hostOverride)
       return url.toString()
     }
 
+    /** Arm the start banner + navigation timer for `trackId`.
+     *
+     *  More than one client can arm at effectively the same moment: the
+     *  final `ready` toggle and the toggler's `start-race` arrive
+     *  back-to-back, and a receiver runs `tryStartRace` inside its
+     *  `ready` handler — before it processes the queued `start-race`.
+     *  The deterministic pick makes simultaneous arms agree; this
+     *  function adds the backstop: a relay `start-race` (`source:
+     *  'server'`) with a different winner overrides the local pick up
+     *  until navigation fires, so even disagreeing clients converge on
+     *  the relay's sticky first-wins track. */
+    function armRace(trackId: string, source: 'local' | 'server'): void {
+      if (raceArmed && (source === 'local' || trackId === armedTrackId)) return
+      const firstArm = !raceArmed
+      raceArmed = true
+      armedTrackId = trackId
+      const winnerLabel = trackOptions.find((t) => t.id === trackId)?.label ?? trackId
+      pickBanner = { winnerLabel, subtitle: 'Lights out in 3…' }
+      refresh()
+      if (firstArm) {
+        // Brief banner pause so players see the pick, then navigate to
+        // whatever `armedTrackId` holds by the time the timer fires.
+        window.setTimeout(() => finish(buildRaceHref(armedTrackId ?? trackId)), 1400)
+      }
+    }
+
     /** When the local view sees everyone ready, pick the winning track
-     *  (smash-bros) and signal the relay. Idempotent. */
+     *  (deterministic smash-bros random — same answer on every client,
+     *  see lobby-pick.ts) and signal the relay. Idempotent. */
     function tryStartRace(): void {
       if (raceArmed) return
       if (!net.ready) return
@@ -177,18 +216,13 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
       for (const v of ready.values()) if (!v) return
       // All ready — pick a track from the votes.
       const picks = net.latestPeerPicks
-      const votes: (string | undefined)[] = []
+      const votes: TrackVote[] = []
       for (const peerId of ready.keys()) {
-        votes.push(picks.get(peerId)?.selectedTrackId)
+        votes.push({ peerId, trackId: picks.get(peerId)?.selectedTrackId })
       }
-      const chosen = pickRandomTrack(votes, local.trackId)
-      raceArmed = true
-      const winnerLabel = trackOptions.find((t) => t.id === chosen)?.label ?? chosen
-      pickBanner = { winnerLabel, subtitle: 'Lights out in 3…' }
-      refresh()
+      const chosen = deterministicTrackPick(votes, opts.roomId, local.trackId)
       net.sendStartRace(chosen)
-      // Brief banner pause so players see the pick, then navigate.
-      window.setTimeout(() => finish(buildRaceHref(chosen)), 1400)
+      armRace(chosen, 'local')
     }
 
     const net = createNetRoom({
@@ -203,12 +237,13 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
           selectedTrackId: local.trackId,
         })
         refresh()
-        // If we joined a race already in progress, the server stamps
-        // the chosen track in `hello`; skip the lobby UI entirely.
-        if (raceStarted) {
-          // onStartRace fires from the room with the trackId — handle
-          // there to avoid duplicating navigation logic.
-        }
+        // Joining within the race-start grace window (the cohort is
+        // still loading in): `raceStarted` rides the hello and the room
+        // fires onStartRace with the server-stamped track right after
+        // this callback — navigation is handled there, and we make the
+        // shared countdown. Post-grace arrivals never get here — the
+        // relay rejects them and onRaceInProgress shows the lock notice.
+        void raceStarted
       },
       onPeerJoined: () => refresh(),
       onPeerLeft: () => {
@@ -220,16 +255,25 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
         tryStartRace()
       },
       onStartRace: (trackId) => {
-        if (raceArmed) return
-        raceArmed = true
-        const chosen = trackId ?? local.trackId
-        const winnerLabel = trackOptions.find((t) => t.id === chosen)?.label ?? chosen
-        pickBanner = { winnerLabel, subtitle: 'Lights out in 3…' }
-        refresh()
-        window.setTimeout(() => finish(buildRaceHref(chosen)), 1400)
+        // Relay-delivered start (another peer armed, or the sticky
+        // raceStarted replay for late joiners). Server's track wins —
+        // including over a locally-armed pick that hasn't navigated yet.
+        armRace(trackId ?? armedTrackId ?? local.trackId, 'server')
       },
       onRoomFull: () => {
-        pickBanner = { winnerLabel: 'ROOM FULL', subtitle: 'Try another code.' }
+        pickBanner = { winnerLabel: 'ROOM FULL', subtitle: 'Try another code.', plain: true }
+        refresh()
+      },
+      onRaceInProgress: () => {
+        // No mid-race joins (product rule, 2026-06-09): the room locked
+        // when its race started. The room has already closed itself —
+        // leave the player in the lobby shell with the notice; Esc / B
+        // still bails to the menu.
+        pickBanner = {
+          winnerLabel: 'RACE IN PROGRESS',
+          subtitle: 'This room is mid-race. Try again when the race ends.',
+          plain: true,
+        }
         refresh()
       },
     })

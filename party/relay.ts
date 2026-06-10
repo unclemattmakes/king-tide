@@ -12,8 +12,15 @@
  * Control messages flow through here too — the server stamps each
  * peer's slot (so peers can't spoof each other) and keeps a small
  * amount of presence state:
- *   - `raceStarted` sticky bit + the chosen `raceTrackId` (so late
- *     joiners get routed straight into the same race environment)
+ *   - `raceStarted` sticky bit + `raceStartedAtMs` + the chosen
+ *     `raceTrackId` — the RACE LOCK (product rule 2026-06-09: no
+ *     mid-race joins). Within RACE_JOIN_GRACE_MS of start-race, new
+ *     connections are admitted and routed into the same race (the
+ *     cohort's own race tabs + a share-link friend who still makes the
+ *     countdown); after it, joins are rejected with
+ *     `race-in-progress` / close 4001 until the room empties. The lock
+ *     lives in room storage because the lobby→race navigation handoff
+ *     empties the room and recycles this instance every time.
  *   - per-peer ready/pick map (so a fresh join can paint the lobby
  *     without waiting for everyone to re-broadcast)
  *
@@ -30,13 +37,46 @@ import {
   type PeerJoinedMessage,
   type PeerLeftMessage,
   type PongMessage,
+  type RaceGoMessage,
+  type RaceInProgressMessage,
   type ReadyMessage,
   type RoomFullMessage,
   type StartRaceMessage,
 } from '../src/engine/net/protocol'
 import { assignLowestFreeSlot } from '../src/engine/net/slot-assign'
 
-type PeerState = { slot: number }
+/** How long after `start-race` the room stays joinable. Covers the lobby
+ *  cohort's banner pause + navigation + a slow load-in (so a friend who
+ *  clicked the share link seconds late still makes the countdown), while
+ *  locking out genuine mid-race arrivals. Product rule (2026-06-09): no
+ *  mid-race joins — see docs/multiplayer-review.md. */
+const RACE_JOIN_GRACE_MS = 30_000
+
+/** How long after `start-race` the relay will hold the synchronized
+ *  start waiting for every expected racer to report `race-loaded`.
+ *  Past this, `race-go` fires with whoever made it — one crashed or
+ *  vanished player must not hang the whole grid. Below the 30 s join
+ *  grace so a go always fires while stragglers can still be admitted. */
+const RACE_START_TIMEOUT_MS = 25_000
+
+/** Persisted race-session record (see RACE_STORAGE_KEY). */
+type RaceRecord = {
+  startedAtMs: number
+  trackId?: string | undefined
+  /** Connections present at `start-race` — the lobby cohort size. The
+   *  synchronized start waits for this many `race-loaded` reports. */
+  expectedRacers?: number | undefined
+  /** Epoch ms when `race-go` was broadcast, or 0 while still holding. */
+  goAtMs?: number | undefined
+}
+
+/** Room-storage key holding the {@link RaceRecord} while a race is
+ *  live. Storage (not instance memory) because the platform recycles
+ *  the server instance whenever the room empties — which the
+ *  lobby→race navigation handoff does every time. */
+const RACE_STORAGE_KEY = 'race'
+
+type PeerState = { slot: number; joinSeq: number }
 
 function parseClientControl(text: string): ClientControlMessage | null {
   try {
@@ -44,6 +84,7 @@ function parseClientControl(text: string): ClientControlMessage | null {
     if (!obj || typeof obj !== 'object' || typeof obj.type !== 'string') return null
     if (obj.type === 'ready' && typeof obj.ready === 'boolean') return obj as ClientControlMessage
     if (obj.type === 'start-race') return obj as ClientControlMessage
+    if (obj.type === 'race-loaded') return obj as ClientControlMessage
     if (obj.type === 'ping' && typeof obj.t === 'number') return obj as ClientControlMessage
   } catch {
     // fall through
@@ -58,9 +99,28 @@ export default class RelayServer implements Party.Server {
   // running. Resets when the room empties (see `onClose`).
   private raceStarted = false
   /** Track id chosen by the start-race signaller (may be undefined if
-   *  the client armed without picking). Replayed in `hello` so late
+   *  the client armed without picking). Replayed in `hello` so in-grace
    *  joiners load the same environment. */
   private raceTrackId: string | undefined = undefined
+  /** Epoch ms when `raceStarted` flipped. Drives the join lock: more
+   *  than RACE_JOIN_GRACE_MS later, new connections are rejected with
+   *  `race-in-progress` until the room empties. */
+  private raceStartedAtMs = 0
+  /** Synchronized start — how many racers the cohort expects (counted
+   *  at `start-race`), which slots have reported `race-loaded`, and
+   *  when `race-go` fired (0 = still holding). `loadedSlots` is
+   *  in-memory only: once the first race tab connects the room stays
+   *  occupied, so the instance survives; the rest rides the storage
+   *  record for handoff-recycle safety. */
+  private expectedRacers = 0
+  private loadedSlots = new Set<number>()
+  private raceGoAtMs = 0
+  /** Tenure counter — stamped onto each connection at join so clients
+   *  can elect the longest-tenured peer as AI host (slots recycle, so
+   *  slot order alone lets a rejoiner seize hostship mid-race; see
+   *  src/engine/net/host-election.ts). Monotonic per room session;
+   *  resets when the room empties, alongside `raceStarted`. */
+  private joinCounter = 0
   /** Per-slot last-known lobby state (ready + picks). Replayed in
    *  `hello` so a fresh join paints the lobby in one frame. Cleared on
    *  peer disconnect and room empty. Fields are `string | undefined`
@@ -77,12 +137,65 @@ export default class RelayServer implements Party.Server {
 
   constructor(readonly room: Party.Room) {}
 
-  onConnect(conn: Party.Connection, _ctx: Party.ConnectionContext): void {
+  async onConnect(conn: Party.Connection, _ctx: Party.ConnectionContext): Promise<void> {
+    // Recover the race lock after an instance recycle. The platform
+    // disposes a room's server instance whenever the room empties — and
+    // the lobby→race handoff reliably empties it (every cohort member's
+    // lobby socket closes at the same banner timeout while their race
+    // tabs spend seconds loading). In-memory state alone therefore
+    // NEVER survives into the race; room storage does (verified against
+    // partykit dev — and Cloudflare evicts idle DOs in prod too).
+    if (!this.raceStarted) {
+      const saved = await this.room.storage.get<RaceRecord>(RACE_STORAGE_KEY)
+      if (saved) {
+        this.raceStarted = true
+        this.raceStartedAtMs = saved.startedAtMs
+        this.raceTrackId = saved.trackId
+        this.expectedRacers = saved.expectedRacers ?? 1
+        this.raceGoAtMs = saved.goAtMs ?? 0
+      }
+    }
+
+    let othersConnected = 0
+    for (const c of this.room.getConnections()) {
+      if (c.id !== conn.id) othersConnected++
+    }
+
+    const raceAgeMs = this.raceStarted ? Date.now() - this.raceStartedAtMs : -1
+    console.log(
+      `[relay] connect ${conn.id} (room ${this.room.id}): others=${othersConnected}, raceStarted=${this.raceStarted}, ageS=${raceAgeMs < 0 ? '-' : Math.round(raceAgeMs / 1000)}`,
+    )
+    if (othersConnected === 0 && !(this.raceStarted && raceAgeMs <= RACE_JOIN_GRACE_MS)) {
+      // First connection of a NEW session — clear any leftover race
+      // state: an empty room past the grace is an abandoned session,
+      // not a race in progress. Within the grace an empty room is
+      // presumed mid-handoff and the lock survives.
+      this.resetRaceState()
+    } else if (this.raceStarted && raceAgeMs > RACE_JOIN_GRACE_MS) {
+      // Race lock — no mid-race joins (product rule 2026-06-09). The
+      // grace admits the cohort's own race tabs (and a share-link friend
+      // arriving seconds late — they still make the countdown); after
+      // it, the room is closed to newcomers until it empties. Applies
+      // to solo rooms too: their race is just as in-progress.
+      console.log(
+        `[relay] reject ${conn.id} (room ${this.room.id}): race in progress, age ${Math.round(raceAgeMs / 1000)}s`,
+      )
+      const msg: RaceInProgressMessage = { type: 'race-in-progress' }
+      conn.send(JSON.stringify(msg))
+      conn.close(4001, 'race in progress')
+      return
+    }
+
     const taken: number[] = []
+    const takenSeqs: Record<number, number> = {}
     for (const c of this.room.getConnections<PeerState>()) {
       if (c.id === conn.id) continue
       const slot = c.state?.slot
-      if (typeof slot === 'number') taken.push(slot)
+      if (typeof slot === 'number') {
+        taken.push(slot)
+        const seq = c.state?.joinSeq
+        if (typeof seq === 'number') takenSeqs[slot] = seq
+      }
     }
 
     const slot = assignLowestFreeSlot(taken, MAX_PEERS_PER_ROOM)
@@ -93,23 +206,35 @@ export default class RelayServer implements Party.Server {
       return
     }
 
-    conn.setState({ slot })
+    const joinSeq = this.joinCounter++
+    conn.setState({ slot, joinSeq })
 
     const hello: HelloMessage = {
       type: 'hello',
       peerId: slot,
       otherPeers: taken,
+      joinSeq,
+      otherPeerSeqs: takenSeqs,
+      startBarrier: true,
       raceStarted: this.raceStarted,
       peerPicks: { ...this.peerPicks },
       raceTrackId: this.raceTrackId,
     }
     conn.send(JSON.stringify(hello))
 
-    const joined: PeerJoinedMessage = { type: 'peer-joined', peerId: slot }
+    const joined: PeerJoinedMessage = { type: 'peer-joined', peerId: slot, joinSeq }
     this.room.broadcast(JSON.stringify(joined), [conn.id])
+
+    // A connect is also a barrier event: if the hold has already aged
+    // past the start timeout (e.g. a cohort member never arrived and no
+    // other event re-evaluated), release the grid now.
+    await this.maybeRaceGo('connect')
   }
 
-  onMessage(message: string | ArrayBuffer | ArrayBufferView, sender: Party.Connection): void {
+  async onMessage(
+    message: string | ArrayBuffer | ArrayBufferView,
+    sender: Party.Connection,
+  ): Promise<void> {
     // Binary frames are InputFrames / TransformSnapshots — relay them
     // as-is. The codec lives on the clients; the server stays
     // format-agnostic so future binary message types can share this
@@ -149,9 +274,39 @@ export default class RelayServer implements Party.Server {
       if (!this.raceStarted) {
         this.raceStarted = true
         this.raceTrackId = ctl.trackId
+        this.raceStartedAtMs = Date.now()
+        // Synchronized start: everyone connected right now IS the
+        // cohort (their lobby sockets are still open — the navigation
+        // happens 1.4 s after this message). The barrier waits for this
+        // many race-loaded reports before releasing the grid.
+        let cohort = 0
+        for (const _ of this.room.getConnections()) cohort++
+        this.expectedRacers = Math.max(1, cohort)
+        this.loadedSlots.clear()
+        this.raceGoAtMs = 0
+        // Persist BEFORE broadcasting — the race lock + barrier must
+        // survive the instance recycle that the handoff causes.
+        await this.putRaceRecord()
+        console.log(
+          `[relay] start-race (room ${this.room.id}): track=${this.raceTrackId ?? '-'}, cohort=${this.expectedRacers}, lock armed`,
+        )
       }
       const out: StartRaceMessage = { type: 'start-race', trackId: this.raceTrackId }
       this.room.broadcast(JSON.stringify(out), [sender.id])
+    } else if (ctl.type === 'race-loaded') {
+      // Synchronized start: this race tab is rendered + connected and
+      // holding its 3-2-1. When the whole cohort has reported (or the
+      // start timeout lapses), release everyone with one race-go.
+      this.loadedSlots.add(slot)
+      if (this.raceGoAtMs > 0) {
+        // The grid already launched (late in-grace joiner, or a
+        // reconnecting racer re-reporting): release just this peer —
+        // they count down solo and start behind.
+        const go: RaceGoMessage = { type: 'race-go' }
+        sender.send(JSON.stringify(go))
+        return
+      }
+      await this.maybeRaceGo('loaded')
     } else if (ctl.type === 'ping') {
       // Stateless RTT echo. Server doesn't touch `t` — the round-trip
       // timing is computed entirely client-side from the value the
@@ -161,20 +316,82 @@ export default class RelayServer implements Party.Server {
     }
   }
 
-  onClose(conn: Party.Connection): void {
+  /** Release the synchronized start if its condition is met: every
+   *  racer the lobby cohort expected has loaded, OR the hold has
+   *  outlived RACE_START_TIMEOUT_MS (one vanished player can't hang
+   *  the grid). Deliberately NO release-on-departure rule: a transient
+   *  socket close during a slow tab's load-in is indistinguishable
+   *  from abandonment, and releasing early splits the start the moment
+   *  the dropped racer reconnects (observed in the two-tab e2e under
+   *  cold-compile load) — the timeout already bounds the genuine-
+   *  abandon wait. */
+  private async maybeRaceGo(reason: 'loaded' | 'close' | 'connect'): Promise<void> {
+    if (!this.raceStarted || this.raceGoAtMs > 0) return
+    if (this.loadedSlots.size === 0) return // nobody on the grid yet
+    const ageMs = Date.now() - this.raceStartedAtMs
+
+    const everyoneExpected = this.loadedSlots.size >= this.expectedRacers
+    const timedOut = ageMs > RACE_START_TIMEOUT_MS
+    if (!everyoneExpected && !timedOut) return
+
+    this.raceGoAtMs = Date.now()
+    await this.putRaceRecord()
+    console.log(
+      `[relay] race-go (room ${this.room.id}): ${reason}, loaded=${this.loadedSlots.size}/${this.expectedRacers}, age ${Math.round(ageMs / 1000)}s`,
+    )
+    const go: RaceGoMessage = { type: 'race-go' }
+    this.room.broadcast(JSON.stringify(go))
+  }
+
+  /** Persist the live race session (lock + barrier) — see RaceRecord. */
+  private putRaceRecord(): Promise<void> {
+    const record: RaceRecord = {
+      startedAtMs: this.raceStartedAtMs,
+      trackId: this.raceTrackId,
+      expectedRacers: this.expectedRacers,
+      goAtMs: this.raceGoAtMs,
+    }
+    return this.room.storage.put(RACE_STORAGE_KEY, record)
+  }
+
+  async onClose(conn: Party.Connection): Promise<void> {
     const slot = (conn.state as PeerState | null)?.slot
     if (typeof slot !== 'number') return
     delete this.peerPicks[slot]
+    // A departed racer isn't coming to the grid — drop them from the
+    // loaded set and re-evaluate the hold so the remaining riders
+    // aren't stuck waiting on a closed tab.
+    this.loadedSlots.delete(slot)
+    await this.maybeRaceGo('close')
     const left: PeerLeftMessage = { type: 'peer-left', peerId: slot }
     this.room.broadcast(JSON.stringify(left))
-    // Reset the sticky raceStarted bit when the room empties so the
-    // next session starts in lobby state. We check AFTER broadcasting
-    // peer-left so any remaining peer counts AFTER this close.
+    // Reset the sticky race state when the room empties — UNLESS the
+    // race is inside its join grace: the lobby→race handoff empties the
+    // room every time (all lobby sockets close at the banner timeout,
+    // race tabs take seconds to load), and resetting here would wipe
+    // the lock before the cohort's race tabs arrive. Past the grace an
+    // empty room is an abandoned session. We check AFTER broadcasting
+    // peer-left so any remaining peer counts AFTER this close. (The
+    // empty-room check in onConnect covers the case where this close
+    // never fires cleanly.)
     const remaining = [...this.room.getConnections()].filter((c) => c.id !== conn.id).length
     if (remaining === 0) {
-      this.raceStarted = false
-      this.raceTrackId = undefined
-      this.peerPicks = {}
+      const midHandoff = this.raceStarted && Date.now() - this.raceStartedAtMs <= RACE_JOIN_GRACE_MS
+      if (!midHandoff) this.resetRaceState()
     }
+  }
+
+  private resetRaceState(): void {
+    this.raceStarted = false
+    this.raceTrackId = undefined
+    this.raceStartedAtMs = 0
+    this.expectedRacers = 0
+    this.loadedSlots.clear()
+    this.raceGoAtMs = 0
+    this.peerPicks = {}
+    this.joinCounter = 0
+    // Fire-and-forget: callers are sync paths (onClose) or have already
+    // updated the in-memory mirror that all decisions read first.
+    void this.room.storage.delete(RACE_STORAGE_KEY)
   }
 }

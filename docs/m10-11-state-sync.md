@@ -7,6 +7,49 @@
 > stateless-relay DoS posture). For the live state of multiplayer (RTT
 > telemetry, lobby, reconnect labelling) see [`status.md`](./status.md).
 
+> **2026-06-09 revision** ([multiplayer-review.md](./multiplayer-review.md))
+> — four deltas vs. the design below, applied by the hardening pass:
+>
+> 1. **The AI grid is 7 bikes** (2×4 grid), not the 4 assumed throughout
+>    §3. Host snapshots are `8 + 8×24 = 200 B` at 20 Hz — still trivial.
+>    The send buffer is sized from the live roster now, after the stale
+>    `1 + 4` constant froze host tabs (review finding #1).
+> 2. **The 60 Hz InputFrame broadcast is removed.** §5c made remote bikes
+>    pose-driven, which left relayed intents driving nothing at ~20× the
+>    snapshot message rate. The local encode→decode round-trip (feel
+>    parity), the codec, `NetRoom.sendFrame` and the receive path remain
+>    for M10.13's owner-authoritative combat.
+> 3. **Host election is tenure-based**, not lowest-slot (§4). The relay
+>    stamps a per-room-session `joinSeq` on every connection; lowest seq
+>    wins, slot order breaks ties and covers an old relay. Rationale:
+>    slots recycle lowest-free, so a mid-race joiner could land on slot 0
+>    and instantly seize AI authority with its AI parked at spawn.
+>    Receivers also only accept AI records from the elected host, and
+>    player records only for the sender's own bike.
+> 4. **§11's `prevSigned` mitigation is implemented** — `race.ts` re-seeds
+>    its gate-plane memory on >5 m/tick jumps instead of testing the
+>    crossing, so snapshot sweeps and OOB respawns can't score phantom
+>    checkpoints.
+> 5. **Mid-race joining is removed** (product rule, same day): players
+>    enter through the shared lobby and load in together. The relay
+>    locks the room `RACE_JOIN_GRACE_MS` (30 s) after `start-race` —
+>    rejecting with `race-in-progress` / close 4001 — and persists the
+>    lock in room storage because the lobby→race handoff empties the
+>    room (which recycles the server instance; this is also why the
+>    *original* late-join `raceStarted` replay never actually worked in
+>    cohort races). The grace admits the cohort's own race tabs and a
+>    share-link friend who still makes the countdown.
+> 6. **§10's two-tab spec exists** — `tests/e2e/m10-11-state-sync.spec.ts`
+>    (own `partykit dev` sidecar per worker): lobby→race convergence
+>    within 10 m, kinematic/dynamic role invariants, host handoff on
+>    leave, deterministic track agreement, and the race lock.
+> 7. **The start is synchronized** (same day, follow-up): race tabs hold
+>    their 3-2-1 ("WAITING FOR RIDERS…") and report `race-loaded`; the
+>    relay broadcasts one `race-go` when the whole lobby cohort has
+>    loaded (or its 25 s hold times out), so start skew is one-way relay
+>    latency instead of load-time difference. Old-relay fallback: arm on
+>    connect, as before. See multiplayer-review.md Phase 9.
+
 Prereq: M10.10.1 (commit 5f2191b — local bike's `PeerControlled.peerId` patched in `onConnected`).
 
 ## 1. Problem & goal

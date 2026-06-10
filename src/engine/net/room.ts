@@ -18,7 +18,7 @@
 import PartySocket from 'partysocket'
 
 import type { Intent } from '../input/intent'
-import { isHostFor } from './host-election'
+import { isHostSeat, type PeerSeat } from './host-election'
 import {
   decodeInputFrameFrom,
   encodeInputFrame,
@@ -56,6 +56,19 @@ export type NetRoomConfig = {
   onConnected?: (myPeerId: number, otherPeers: readonly number[], raceStarted: boolean) => void
   /** Called when the server reports the room is full. */
   onRoomFull?: () => void
+  /** Called when the server rejects us because the room's race is
+   *  locked (start-race fired more than the join grace ago — no
+   *  mid-race joins). The room closes itself after this fires so
+   *  partysocket doesn't retry into the same rejection. */
+  onRaceInProgress?: () => void
+  /** Called when a previously-established session drops (socket closed
+   *  after we'd been assigned a slot) and partysocket is about to retry
+   *  in the background. NOT fired for first-connect retries, nor after
+   *  an explicit `close()`. The race owner uses this to degrade to solo
+   *  cleanly: despawn remote bikes, re-stamp the local slot, resume
+   *  local AI. On reconnect `onConnected` fires again with a fresh
+   *  slot + peer set. */
+  onDisconnected?: () => void
   /** M10.12 lobby — called when any remote peer toggles their ready
    *  state. Local toggles are NOT echoed; `latestPeerReady` is updated
    *  locally on `sendReady` to keep the source of truth in one map. The
@@ -71,6 +84,12 @@ export type NetRoomConfig = {
    *  caller (smash-bros-style random over picks); when absent, the
    *  receiver falls back to its current URL track. */
   onStartRace?: (trackId?: string) => void
+  /** Synchronized start — the relay released the grid: every expected
+   *  racer reported `race-loaded` (or the relay's hold timed out).
+   *  Arm the local 3-2-1 NOW; start skew between peers is one-way
+   *  relay latency. Only sent by barrier-aware relays (see
+   *  `serverStartBarrier`). */
+  onRaceGo?: () => void
 }
 
 /** Per-peer lobby-flow selections. Both fields are optional — clients
@@ -89,7 +108,25 @@ export type NetRoom = {
   readonly ready: boolean
   /** Slots currently held by remote peers. Live — mutated on join/leave. */
   readonly remotePeers: readonly number[]
+  /** My election seat: slot + relay-stamped join tenure (joinSeq is
+   *  undefined against a relay that predates the tenure protocol). */
+  readonly mySeat: PeerSeat
+  /** Election seats for every remote peer. Fresh array per read. */
+  readonly remoteSeats: readonly PeerSeat[]
+  /** Encode + send one InputFrame. Currently uncalled in-race — M10.11
+   *  made remote bikes pose-driven, so the 60 Hz intent broadcast was
+   *  removed as dead relay load. Retained (with the receive path) for
+   *  M10.13's owner-authoritative combat events. */
   sendFrame(frame: InputFrame): void
+  /** Synchronized start — report that this race tab has finished
+   *  loading and is holding its 3-2-1 for the shared `race-go`.
+   *  No-ops until connected. Safe to re-send (reconnects). */
+  sendRaceLoaded(): void
+  /** True when the connected relay speaks the synchronized-start
+   *  protocol (hello carried `startBarrier`). Against an older relay
+   *  the caller should arm its countdown locally, as before the
+   *  barrier existed. */
+  readonly serverStartBarrier: boolean
   /**
    * Latest-known `Intent` per remote peer slot, mutated each time a remote
    * frame arrives. Sim loop drains this into the per-tick peer-input map
@@ -162,8 +199,26 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
   let myPeerId = -1
   let socketOpen = false
   let everConnected = false
+  // Set by close() so the socket's async 'close' event doesn't overwrite
+  // the published 'closed' state with 'connecting' (and doesn't fire
+  // onDisconnected for a teardown the caller initiated).
+  let explicitClose = false
   let snapshotsReceived = 0
   const remotePeers = new Set<number>()
+  // Tenure protocol — relay-stamped join sequences (see protocol.ts).
+  // Empty / undefined against an old relay; election falls back to slot
+  // order inside isHostSeat.
+  let myJoinSeq: number | undefined
+  const remotePeerSeqs = new Map<number, number>()
+  // Synchronized-start capability, learned from the hello. False against
+  // an old relay → callers arm their countdown locally (legacy).
+  let serverStartBarrier = false
+  function mySeat(): PeerSeat {
+    return { peerId: myPeerId, joinSeq: myJoinSeq }
+  }
+  function remoteSeats(): PeerSeat[] {
+    return [...remotePeers].map((p) => ({ peerId: p, joinSeq: remotePeerSeqs.get(p) }))
+  }
   const latency = createLatencyTracker()
   // 1 Hz ping cadence — fast enough that the readout updates within a
   // second when conditions change, slow enough that it's not a real
@@ -185,7 +240,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
       peerId: myPeerId,
       remoteCount: remotePeers.size,
       latencyMs: latency.current(Date.now()),
-      isHost: myPeerId >= 0 && isHostFor(myPeerId, [...remotePeers]),
+      isHost: myPeerId >= 0 && isHostSeat(mySeat(), remoteSeats()),
     })
   }
   // M10.12 lobby — peer slot → ready boolean. Includes self once
@@ -229,19 +284,43 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
   socket.addEventListener('open', () => {
     socketOpen = true
   })
-  socket.addEventListener('close', () => {
+  socket.addEventListener('close', (event) => {
+    // Did this close tear down an established session (slot assigned)?
+    // Captured before the reset so onDisconnected only fires for real
+    // drops, not for retry cycles that never got a hello.
+    const hadSession = myPeerId >= 0
     socketOpen = false
     myPeerId = -1
+    myJoinSeq = undefined
+    serverStartBarrier = false
     remotePeers.clear()
+    remotePeerSeqs.clear()
     latestPeerIntents.clear()
     latestPeerReady.clear()
     latestPeerPicks.clear()
     snapshotsReceived = 0
     latency.reset()
     stopPingLoop()
+    // Explicit close(): the caller already published 'closed' — don't
+    // overwrite it with 'connecting', and don't report a "drop".
+    if (explicitClose) return
+    // Server rejections close with an application code (4000 = room
+    // full, 4001 = race in progress). The courtesy JSON notice can be
+    // DROPPED when the server's close races its send (observed against
+    // partykit dev), so the code is the reliable contract — map it to
+    // the same callback and stop retrying: every retry would be
+    // rejected identically until the room changes state.
+    const code = (event as CloseEvent | undefined)?.code
+    if (code === 4000 || code === 4001) {
+      if (code === 4000) cfg.onRoomFull?.()
+      else cfg.onRaceInProgress?.()
+      closeRoom()
+      return
+    }
     // partysocket auto-reconnects unless we explicitly called close();
     // distinguish "first-time connecting" from "re-establishing".
     publishStatus(everConnected ? 'reconnecting' : 'connecting')
+    if (hadSession) cfg.onDisconnected?.()
   })
 
   socket.addEventListener('message', (event: MessageEvent) => {
@@ -252,7 +331,10 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
       switch (msg.type) {
         case 'hello':
           myPeerId = msg.peerId
+          myJoinSeq = msg.joinSeq
+          serverStartBarrier = msg.startBarrier === true
           remotePeers.clear()
+          remotePeerSeqs.clear()
           latestPeerReady.clear()
           latestPeerPicks.clear()
           // Seed every visible slot (us + others) as not-ready. Local
@@ -262,6 +344,8 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
           for (const p of msg.otherPeers) {
             remotePeers.add(p)
             latestPeerReady.set(p, false)
+            const seq = msg.otherPeerSeqs?.[p]
+            if (typeof seq === 'number') remotePeerSeqs.set(p, seq)
           }
           // Replay any picks the server has on file (peers who readied
           // before we joined). Bare-bones for back-compat: missing
@@ -285,6 +369,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
           break
         case 'peer-joined':
           remotePeers.add(msg.peerId)
+          if (typeof msg.joinSeq === 'number') remotePeerSeqs.set(msg.peerId, msg.joinSeq)
           latestPeerReady.set(msg.peerId, false)
           publishStatus('connected')
           cfg.onPeerJoined?.(msg.peerId)
@@ -294,6 +379,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
           // Drop the departed peer's buffered intent + picks so a future
           // room member assigned the same slot doesn't inherit stale
           // controls or selections.
+          remotePeerSeqs.delete(msg.peerId)
           latestPeerIntents.delete(msg.peerId)
           latestPeerReady.delete(msg.peerId)
           latestPeerPicks.delete(msg.peerId)
@@ -330,8 +416,22 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
         case 'start-race':
           cfg.onStartRace?.(msg.trackId)
           break
+        case 'race-go':
+          cfg.onRaceGo?.()
+          break
+        // Both rejection notices self-close: the server will reject
+        // every retry until the room changes state, so reconnect
+        // attempts are pure noise. closeRoom() sets explicitClose,
+        // which also suppresses the close-code fallback below firing
+        // the callback a second time (the server closes with 4000 /
+        // 4001 right after sending these — see the close handler).
         case 'room-full':
           cfg.onRoomFull?.()
+          closeRoom()
+          break
+        case 'race-in-progress':
+          cfg.onRaceInProgress?.()
+          closeRoom()
           break
       }
       return
@@ -373,6 +473,18 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
     return socketOpen && myPeerId >= 0
   }
 
+  /** Tear the connection down for good (no partysocket retries). Shared
+   *  by the public `close()` and the server's race-in-progress
+   *  rejection. */
+  function closeRoom(): void {
+    explicitClose = true
+    stopPingLoop()
+    socket.close()
+    latency.reset()
+    everConnected = false
+    publishStatus('closed')
+  }
+
   return {
     get peerId() {
       return myPeerId
@@ -382,6 +494,12 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
     },
     get remotePeers() {
       return [...remotePeers]
+    },
+    get mySeat() {
+      return mySeat()
+    },
+    get remoteSeats() {
+      return remoteSeats()
     },
     get latestPeerIntents() {
       return latestPeerIntents
@@ -430,6 +548,14 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
       const msg: ClientControlMessage = { type: 'start-race', trackId }
       socket.send(JSON.stringify(msg))
     },
+    sendRaceLoaded() {
+      if (!socketOpen || myPeerId < 0) return
+      const msg: ClientControlMessage = { type: 'race-loaded' }
+      socket.send(JSON.stringify(msg))
+    },
+    get serverStartBarrier() {
+      return serverStartBarrier
+    },
     get latestPeerReady() {
       return latestPeerReady
     },
@@ -446,11 +572,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
       return everConnected
     },
     close() {
-      stopPingLoop()
-      socket.close()
-      latency.reset()
-      everConnected = false
-      publishStatus('closed')
+      closeRoom()
     },
   }
 }
