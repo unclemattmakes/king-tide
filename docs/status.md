@@ -53,9 +53,16 @@
 > `contact-look.spec.ts` injects synthetic contacts over deep water via
 > the `__waterContacts` hook, asserts bursts fire off the live swell, and
 > captures collar on/off + close-up frames (artifacts/contact/); sandbar
-> auto-discovers 6 contacts on shipped dressing. Gates/buoys are NOT yet
-> contact sources (gates spawn in their own renderer; floats move) — a
-> follow-up lane if the look earns it.
+> auto-discovers 6 contacts on shipped dressing. **Follow-up landed same
+> day:** gate posts (pure checkpoint math — posts at ±halfWidth along the
+> gate's +X; only posts over submerged seabed qualify, so a beach+surf
+> gate foams on the wet side only) and floating wave-riders (buoys/logs
+> bob IN PLACE — `anchorX/Z` pinned at spawn — so each gets a static
+> collar at its anchor and bobs above it, collar pulse + bob reading the
+> same field). Sandbar now fields 115 contacts: 6 scanned + 9 wet gate
+> posts + 100 buoy-wall floats; shader still pays only the nearest 24.
+> Collars are intentionally quiet on calm water (lap line) and surge in
+> swell — the `Contact foam` knob scales the whole layer for playtest.
 
 > **Last updated: 2026-06-10 (e)** — **P4 dynamic water — the water
 > roadmap is now fully executed.** Two pieces: (1) **Splash rings** — a
