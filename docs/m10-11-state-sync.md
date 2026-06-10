@@ -30,6 +30,19 @@
 >    its gate-plane memory on >5 m/tick jumps instead of testing the
 >    crossing, so snapshot sweeps and OOB respawns can't score phantom
 >    checkpoints.
+> 5. **Mid-race joining is removed** (product rule, same day): players
+>    enter through the shared lobby and load in together. The relay
+>    locks the room `RACE_JOIN_GRACE_MS` (30 s) after `start-race` —
+>    rejecting with `race-in-progress` / close 4001 — and persists the
+>    lock in room storage because the lobby→race handoff empties the
+>    room (which recycles the server instance; this is also why the
+>    *original* late-join `raceStarted` replay never actually worked in
+>    cohort races). The grace admits the cohort's own race tabs and a
+>    share-link friend who still makes the countdown.
+> 6. **§10's two-tab spec exists** — `tests/e2e/m10-11-state-sync.spec.ts`
+>    (own `partykit dev` sidecar per worker): lobby→race convergence
+>    within 10 m, kinematic/dynamic role invariants, host handoff on
+>    leave, deterministic track agreement, and the race lock.
 
 Prereq: M10.10.1 (commit 5f2191b — local bike's `PeerControlled.peerId` patched in `onConnected`).
 
