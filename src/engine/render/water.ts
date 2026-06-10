@@ -37,7 +37,12 @@ import {
   vec4,
 } from 'three/tsl'
 import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
-import { assetUrl } from '@/engine/asset-url'
+import {
+  FOAM_STROKE_MASS_SPEC,
+  FOAM_STROKE_STREAK_SPEC,
+  packSheetRGBA8,
+  rasterizeOilStrokeSheet,
+} from '@/engine/render/oil-stroke-texture'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
 import {
   effectiveSteepness,
@@ -244,10 +249,14 @@ export type WaterMesh = {
      *  bloom on sun-raked foam. 0 = flat white foam (legacy); 1 = baseline
      *  sunset-kissed crests. Follows the sky, so it's near-neutral at midday. */
     setFoamWarmth(s: number): void
-    /** Foam streaks, 0..2. Scales the flow-aligned directional combing of foam
-     *  down wave faces (painterly brushstrokes). 0 = isotropic bubbles only
+    /** Foam streaks, 0..2. Scales the brushstroke foam bands on steep wave
+     *  faces (running along the local crest line). 0 = isotropic bubbles only
      *  (legacy); 1 = baseline streaks. */
     setFoamStreak(s: number): void
+    /** Foam brush, 0..1. Blends the foam break-up pattern from the legacy
+     *  round-disc bubble sheet (0) to oil-paint brush strokes pulled along
+     *  the crest lines (1) — the engine-trail painted read applied to foam. */
+    setFoamBrush(s: number): void
     /** P1 readability — crest-to-trough value-ramp strength, 0..1. Scales the
      *  posterized "one value sweep per wave face" brightness modulation
      *  (water-next-research §8 P1.1). 0 = off. */
@@ -340,9 +349,11 @@ export type WaterDebugDefaults = {
   contourSpacing: number
   /** P1 readability relief (dark twin) strength, 0..1. */
   contourRelief: number
-  /** Foam streaks 0..2: flow-aligned directional combing down wave faces.
-   *  1 = baseline, 0 = isotropic bubbles only (legacy). */
+  /** Foam streaks 0..2: brushstroke bands on steep faces, along the local
+   *  crest line. 1 = baseline, 0 = isotropic bubbles only (legacy). */
   foamStreak: number
+  /** Foam brush 0..1: disc-bubble (0) ↔ oil-stroke (1) foam break-up. */
+  foamBrush: number
   wireframe: boolean
   /** When true, each water layer paints in a distinct flat color so
    *  LOD seams are visible. Off by default. */
@@ -544,7 +555,33 @@ function getWaveDetailNormalTexture(): THREE.DataTexture {
 // ---------------------------------------------------------------------------
 
 let sharedFoamBubbleTexture: THREE.DataTexture | null = null
-let sharedFoamStreakTexture: THREE.Texture | null = null
+let sharedFoamStreakTexture: THREE.DataTexture | null = null
+let sharedFoamStrokeMassTexture: THREE.DataTexture | null = null
+
+/** Wrap one of the procedural oil-stroke sheets in a repeat-tiling mask
+ *  DataTexture (grayscale in `.r`, same sampler setup as the bubble sheet). */
+function buildOilStrokeDataTexture(
+  spec: typeof FOAM_STROKE_MASS_SPEC,
+  name: string,
+): THREE.DataTexture {
+  const data = packSheetRGBA8(rasterizeOilStrokeSheet(spec))
+  const tex = new THREE.DataTexture(
+    data,
+    spec.size,
+    spec.size,
+    THREE.RGBAFormat,
+    THREE.UnsignedByteType,
+  )
+  tex.name = name
+  tex.wrapS = THREE.RepeatWrapping
+  tex.wrapT = THREE.RepeatWrapping
+  tex.magFilter = THREE.LinearFilter
+  tex.minFilter = THREE.LinearMipmapLinearFilter
+  tex.generateMipmaps = true
+  tex.anisotropy = 4
+  tex.needsUpdate = true
+  return tex
+}
 
 function buildFoamBubbleTexture(): THREE.DataTexture {
   const N = 512
@@ -628,46 +665,45 @@ function getFoamBubbleTexture(): THREE.DataTexture {
 }
 
 /**
- * Flow-stroke foam sheet — authored from the Blender *Brushstroke Tools* addon's
- * bundled oil-stroke libraries (`streaky_dashes` bold + `feathery` dry-brush),
- * composited into a tileable field of tapered strokes all running along the
- * texture's U axis with clean gaps between (built by
- * `tools/blender/build_foam_streaks.py`). Sampled in the fragment shader with U
- * mapped to the wave's flow (down-face) direction, so the brushstrokes comb down
- * the faces and trace the wave's shape/curvature — the painterly streaks the
- * isotropic round-bubble texture can't give. R = stroke alpha (0 = clean water,
- * 1 = stroke core). NoColorSpace + RepeatWrapping (it's a mask and tiles across
- * the open sea). R2-served like `brush_strokes.png`.
+ * Flow-stroke foam sheet — long thin tapered oil strokes running along the
+ * texture's U axis with clean gaps between, rasterized procedurally at first
+ * use (`oil-stroke-texture.ts`, `FOAM_STROKE_STREAK_SPEC`). Sampled in the
+ * fragment shader with U mapped to the cross-slope direction, so on steep
+ * faces the brushstrokes run along the local crest line and trace the wave's
+ * shape/curvature. R = stroke alpha (0 = clean water, 1 = stroke core).
+ *
+ * Replaces the R2-served `foam_streaks.png` (Brushstroke-Tools harvest): that
+ * sheet's silent-404 fallback meant any clone that hadn't run `assets:pull`
+ * since it was pushed rendered NO streaks in dev — the look silently forked
+ * between machines. Procedural = identical bytes everywhere, no hydration.
  */
-function getFoamStreakTexture(): THREE.Texture {
-  if (sharedFoamStreakTexture) return sharedFoamStreakTexture
-  try {
-    // onError no-op: the sheet is optional (gitignored, R2-served). If it 404s
-    // — a fresh deploy before `pnpm gen:foam-streaks` ran / the sheet was pushed
-    // to R2 — the texture stays empty (R=0 → streaks are a clean no-op) without
-    // a console error. Foam coverage + tint are unaffected.
-    const tex = new THREE.TextureLoader().load(
-      assetUrl('/assets/textures/foam_streaks.png'),
-      undefined,
-      undefined,
-      () => {},
+function getFoamStreakTexture(): THREE.DataTexture {
+  if (!sharedFoamStreakTexture) {
+    sharedFoamStreakTexture = buildOilStrokeDataTexture(
+      FOAM_STROKE_STREAK_SPEC,
+      'water:foamStreaks',
     )
-    tex.name = 'water:foamStreaks'
-    tex.wrapS = THREE.RepeatWrapping
-    tex.wrapT = THREE.RepeatWrapping
-    tex.colorSpace = THREE.NoColorSpace
-    tex.minFilter = THREE.LinearMipmapLinearFilter
-    tex.magFilter = THREE.LinearFilter
-    tex.anisotropy = 4
-    sharedFoamStreakTexture = tex
-  } catch {
-    // Headless / SSR / un-hydrated sheet → 1×1 black so streaks read as a no-op
-    // (R=0) until the real sheet loads. Foam coverage + tint are unaffected.
-    const black = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1)
-    black.needsUpdate = true
-    sharedFoamStreakTexture = black
   }
   return sharedFoamStreakTexture
+}
+
+/**
+ * Oil-stroke foam-mass sheet — chunky tapered brush dabs (two size classes,
+ * bristle-split tails, per-stroke paint strength), the painterly alternative
+ * to the round-disc bubble sheet as the foam break-up pattern. Sampled with U
+ * aligned to the CREST direction (perpendicular to swell travel) so foam
+ * dissolves into strokes pulled along the wave fronts — the painted read of
+ * the bikes' engine-trail ribbons, tracing the crests. The `foamBrush` knob
+ * blends disc ↔ stroke break-up live.
+ */
+function getFoamStrokeMassTexture(): THREE.DataTexture {
+  if (!sharedFoamStrokeMassTexture) {
+    sharedFoamStrokeMassTexture = buildOilStrokeDataTexture(
+      FOAM_STROKE_MASS_SPEC,
+      'water:foamStrokeMass',
+    )
+  }
+  return sharedFoamStrokeMassTexture
 }
 
 /**
@@ -2527,13 +2563,19 @@ export function createWaterMesh(
   // midday (cool horizon) it's near-neutral and only warms at golden/sunset.
   const FOAM_WARMTH_DEFAULT = 1.0
   const foamWarmthUniform = uniform(FOAM_WARMTH_DEFAULT)
-  // Directional foam streaks (foam-coverage pass, step 3): scales how strongly
-  // foam is combed into flow-aligned brushstrokes down the wave faces (the
-  // painterly streaks of the concept frames) vs the isotropic round-bubble
-  // texture. 0 = bubbles only (legacy); 1 = baseline streaks. See the foam-mask
-  // block below.
+  // Directional foam streaks (foam-coverage pass, step 3): scales the
+  // brushstroke foam bands painted on steep wave faces, running along the
+  // local crest line (the painterly streaks of the concept frames) vs the
+  // isotropic round-bubble texture. 0 = bubbles only (legacy); 1 = baseline
+  // streaks. See the foam-mask block below.
   const FOAM_STREAK_DEFAULT = 1.0
   const foamStreakUniform = uniform(FOAM_STREAK_DEFAULT)
+  // Foam brush (oil-stroke rework): blends the foam BREAK-UP pattern from the
+  // legacy round-disc bubble sheet (0) to tapered oil-paint brush strokes
+  // pulled along the crest lines (1) — the engine-trail painted read applied
+  // to every foam fringe. See the foam-mask block below.
+  const FOAM_BRUSH_DEFAULT = 1.0
+  const foamBrushUniform = uniform(FOAM_BRUSH_DEFAULT)
 
   // Wave-driven foam — two stacked layers via max():
   //   1. The vertex-stage accumulator (`foamAccumFrag`) — sampled at 4 past
@@ -2862,27 +2904,61 @@ export function createWaterMesh(
   const foamBubbleSample = texture(foamBubbleTex, foamBubbleUV) as any
   const foamBubblePattern = foamBubbleSample.r
 
+  // Oil-stroke foam mass — the painterly alternative to the disc bubbles.
+  // Sampled in a CREST-ALIGNED frame (world XZ rotated by the global wave
+  // bearing) so the sheet's tapered strokes run PARALLEL TO THE CREST
+  // LINES — foam dissolves into brush strokes that trace the wave fronts,
+  // the way a seascape painter pulls the brush along each crest.
+  // (Playtest-corrected: the first cut combed strokes along the swell's
+  // TRAVEL direction and read exactly 90° wrong.) The frame is constant
+  // per track (no per-fragment flow rotation), so the pattern never warps
+  // or seams where the local gradient flips; the streak layer below adds
+  // the on-face variant of the same crest-parallel language. The travel
+  // coordinate drifts slowly with time so the paint rides with the waves.
+  const FOAM_BRUSH_TILE_M = 5.0
+  const brushBearingRad = waveBearingDegUniform.mul(float(Math.PI / 180))
+  const brushCos = cos(brushBearingRad)
+  const brushSin = sin(brushBearingRad)
+  // Coordinate along the swell's TRAVEL direction (waves advance along it)…
+  const brushTravel = positionWorld.x
+    .mul(brushCos)
+    .add(positionWorld.z.mul(brushSin))
+    .sub(tNode.mul(float(0.1)))
+  // …and along the CREST direction (perpendicular — the wave-front axis).
+  const brushCrest = positionWorld.x.mul(brushSin.negate()).add(positionWorld.z.mul(brushCos))
+  const foamStrokeMassTex = getFoamStrokeMassTexture()
+  // Texture U (the strokes' long axis) ← crest coordinate; V ← travel.
+  const foamStrokeMassUV = vec2(brushCrest, brushTravel).div(float(FOAM_BRUSH_TILE_M))
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+  const foamStrokeMassSample = texture(foamStrokeMassTex, foamStrokeMassUV) as any
+  // The break-up pattern every foam source inherits: disc bubbles ↔ strokes.
+  const foamBreakupPattern = mix(foamBubblePattern, foamStrokeMassSample.r, foamBrushUniform)
+
   // ── Directional foam streaks (step 3, reworked) ─────────────────────
-  // Paint foam as long flow-aligned brushstrokes down the wave faces — the
-  // streaks that read the wave's shape/curvature (the concept frames). The
-  // isotropic round-bubble texture can't do this; the dedicated flow-stroke
-  // texture (`getFoamStreakTexture`, tapered strokes along its U axis) is
-  // sampled with U mapped to the surface-gradient (down-face) direction, so
-  // its strokes comb down each face and trace the slope.
+  // Paint foam on the wave faces as long brushstrokes running ALONG the
+  // local crest line (perpendicular to the surface gradient) — the on-face
+  // variant of the crest-parallel stroke language above, tracing the wave's
+  // shape the way the contour-line layer does. (Playtest-corrected with the
+  // mass pattern: strokes originally combed DOWN the face — 90° wrong.) The
+  // stroke sheet (`getFoamStreakTexture`, tapered strokes along its U axis)
+  // is sampled with U mapped to the cross-slope direction; the down-face
+  // coordinate scrolls with time so the stroke bands still slide down each
+  // breaking face.
   const slopeMagS = sqrt(effDydx.mul(effDydx).add(effDydz.mul(effDydz))).max(float(0.0008))
   const flowDirX = effDydx.div(slopeMagS)
   const flowDirZ = effDydz.div(slopeMagS)
-  // Flow-aligned UV: U = distance along the down-face direction (scrolled
-  // downhill in time so strokes drift down the face), V = distance across it.
-  // Tile spans 1/0.08 ≈ 12.5 m along × 1/0.14 ≈ 7 m across → strokes ~2–7 m
-  // long and ~0.2–0.4 m wide, a few across a wave face.
-  const streakAlong = positionWorld.x
+  // Down-face (gradient) coordinate, scrolled so strokes drift downhill…
+  const streakFlow = positionWorld.x
     .mul(flowDirX)
     .add(positionWorld.z.mul(flowDirZ))
     .sub(tNode.mul(float(0.6)))
-  const streakPerp = positionWorld.x.mul(flowDirZ.negate()).add(positionWorld.z.mul(flowDirX))
+  // …and the cross-slope coordinate — the local crest-line direction.
+  const streakCross = positionWorld.x.mul(flowDirZ.negate()).add(positionWorld.z.mul(flowDirX))
   const streakTex = getFoamStreakTexture()
-  const streakUV = vec2(streakAlong.mul(float(0.08)), streakPerp.mul(float(0.14)))
+  // U (stroke long axis) ← cross-slope, V ← down-face. Tile spans
+  // 1/0.08 ≈ 12.5 m along the crest × 1/0.14 ≈ 7 m down the face →
+  // strokes ~2–7 m long and ~0.2–0.4 m wide, a few stacked per face.
+  const streakUV = vec2(streakCross.mul(float(0.08)), streakFlow.mul(float(0.14)))
   // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
   const streakSample = texture(streakTex, streakUV) as any
   // Concentrate the streaks where the wave is actually breaking or steep — near
@@ -2908,7 +2984,7 @@ export function createWaterMesh(
   // Applied to the wave/wake/shore foam; the streak layer carries its own
   // stroke shape, so it's combined in after.
   const foamBubbleFloor = mix(float(0.05), float(0.6), clamp(foamMaskRaw, float(0), float(1)))
-  const foamBubbly = foamMaskRaw.mul(mix(foamBubbleFloor, float(1.0), foamBubblePattern))
+  const foamBubbly = foamMaskRaw.mul(mix(foamBubbleFloor, float(1.0), foamBreakupPattern))
   const foamCoverage = max(foamBubbly, streakFoam)
   // Near-BINARY edge: the concept foam is on/off and SHRINKS in area rather
   // than fading in opacity. A tight smoothstep around 0.2 snaps mid-coverage
@@ -3429,6 +3505,7 @@ export function createWaterMesh(
     whitecapMode: WHITECAP_MODE_DEFAULT,
     foamWarmth: FOAM_WARMTH_DEFAULT,
     foamStreak: FOAM_STREAK_DEFAULT,
+    foamBrush: FOAM_BRUSH_DEFAULT,
     rampStrength: RAMP_STRENGTH_DEFAULT,
     rampSteps: RAMP_STEPS_DEFAULT,
     rampPosterize: RAMP_POSTERIZE_DEFAULT,
@@ -3551,6 +3628,11 @@ export function createWaterMesh(
       // 0..2 — scales the flow-aligned directional foam combing. 0 = isotropic
       // bubbles only (legacy); 1 = baseline streaks; >1 = deeper-cut stripes.
       foamStreakUniform.value = clamp01(s, 0, 2)
+    },
+    setFoamBrush(s) {
+      // 0..1 — foam break-up pattern: disc bubbles (0) ↔ crest-parallel
+      // oil-paint strokes (1).
+      foamBrushUniform.value = clamp01(s, 0, 1)
     },
     // P1 readability layers — all fragment-only uniforms, no rebuild.
     setRampStrength(s) {

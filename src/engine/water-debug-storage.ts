@@ -61,6 +61,7 @@ export type WaterDebugSettings = {
   whitecapMode: number
   foamWarmth: number
   foamStreak: number
+  foamBrush: number
   rampStrength: number
   rampSteps: number
   rampPosterize: number
@@ -95,6 +96,7 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     whitecapMode: d.whitecapMode,
     foamWarmth: d.foamWarmth,
     foamStreak: d.foamStreak,
+    foamBrush: d.foamBrush,
     rampStrength: d.rampStrength,
     rampSteps: d.rampSteps,
     rampPosterize: d.rampPosterize,
@@ -165,6 +167,7 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setWhitecapMode(s.whitecapMode)
   water.debug.setFoamWarmth(s.foamWarmth)
   water.debug.setFoamStreak(s.foamStreak)
+  water.debug.setFoamBrush(s.foamBrush)
   water.debug.setRampStrength(s.rampStrength)
   water.debug.setRampSteps(s.rampSteps)
   water.debug.setRampPosterize(s.rampPosterize)

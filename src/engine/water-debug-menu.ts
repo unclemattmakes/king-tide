@@ -217,7 +217,16 @@ const SLIDERS: SliderDef[] = [
     max: 2,
     step: 0.05,
     format: (n) => `${n.toFixed(2)}×`,
-    hint: 'Flow-aligned directional combing of foam down the wave faces (painterly brushstrokes). 0 = isotropic round bubbles only (legacy) · 1 = baseline streaks. Only applies on sloped faces, fades at distance',
+    hint: 'Brushstroke foam bands on the wave faces, running along the local crest line. 0 = isotropic round bubbles only (legacy) · 1 = baseline streaks. Only applies on sloped faces, fades at distance',
+  },
+  {
+    key: 'foamBrush',
+    label: 'Foam brush',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    format: (n) => (n < 0.01 ? 'discs' : n > 0.99 ? 'oil' : n.toFixed(2)),
+    hint: 'Foam break-up pattern: 0 = round bubble discs (legacy) · 1 = oil-paint brush strokes pulled along the crest lines (the engine-trail painted read). Fringes and thin foam dissolve into tapered strokes; solid foam cores stay solid',
   },
   // P1 readability layers (water-next-research §8 P1) — the live knobs are
   // the point: the 2026-06-06 cel session was lost partly because its hooks
@@ -477,6 +486,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'foamStreak':
           water.debug.setFoamStreak(v)
+          break
+        case 'foamBrush':
+          water.debug.setFoamBrush(v)
           break
         case 'rampStrength':
           water.debug.setRampStrength(v)

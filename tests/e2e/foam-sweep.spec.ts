@@ -44,6 +44,10 @@ const AB_MODE = process.env.FOAM_SWEEP_AB === '1'
 // P1) on the coverage pose: off → shipped defaults → each layer isolated →
 // strong, so the A/B grid shows exactly what each layer buys.
 const READABILITY_MODE = process.env.FOAM_SWEEP_READABILITY === '1'
+// FOAM_SWEEP_BRUSH=1 A/Bs the foam break-up pattern (oil-stroke rework):
+// legacy round-disc bubbles vs swell-combed oil-paint strokes, with the
+// face-streak layer off/on/strong around each.
+const BRUSH_MODE = process.env.FOAM_SWEEP_BRUSH === '1'
 
 type Pose = { pos: [number, number, number]; target: [number, number, number] }
 // Coverage pose: elevated over The Maw's mid-section, looking DOWN (~33°) and
@@ -70,6 +74,8 @@ type Variant = {
   m?: number
   w?: number
   st?: number
+  /** foamBrush — disc-bubble (0) ↔ oil-stroke (1) foam break-up. */
+  br?: number
   ramp?: number
   steps?: number
   post?: number
@@ -109,6 +115,17 @@ const AB_GRID: Variant[] = [
   { label: 'before-legacy', h: 1.0, s: 0.3, m: 0.0, w: 0.0, st: 0.0 },
   { label: 'after-foampass', h: 0.55, s: 0.3, m: 0.35, w: 1.0, st: 1.0 },
 ]
+// Foam-brush A/B (oil-stroke rework): the legacy disc-bubble break-up vs
+// oil-paint strokes, each with the face-streak layer off and on, plus a
+// strong-streak variant. Whitecap coverage stays at its live defaults so the
+// ONLY thing changing is the foam's texture treatment.
+const BRUSH_GRID: Variant[] = [
+  { label: '0-discs', br: 0, st: 0 },
+  { label: '1-discs-streaks', br: 0, st: 1 },
+  { label: '2-oil-mass-only', br: 1, st: 0 },
+  { label: '3-oil-full', br: 1, st: 1 },
+  { label: '4-oil-strong-streaks', br: 1, st: 1.6 },
+]
 // P1 readability A/B: layers off (pre-P1 look) → shipped defaults → each
 // layer isolated → strong. Foam knobs untouched (live defaults).
 const READABILITY_GRID: Variant[] = [
@@ -123,15 +140,17 @@ const READABILITY_GRID: Variant[] = [
 ]
 const GRID: Variant[] = process.env.FOAM_SWEEP_GRID
   ? (JSON.parse(process.env.FOAM_SWEEP_GRID) as Variant[])
-  : READABILITY_MODE
-    ? READABILITY_GRID
-    : AB_MODE
-      ? AB_GRID
-      : WARMTH_MODE
-        ? WARMTH_GRID
-        : STREAK_MODE
-          ? STREAK_GRID
-          : COVERAGE_GRID
+  : BRUSH_MODE
+    ? BRUSH_GRID
+    : READABILITY_MODE
+      ? READABILITY_GRID
+      : AB_MODE
+        ? AB_GRID
+        : WARMTH_MODE
+          ? WARMTH_GRID
+          : STREAK_MODE
+            ? STREAK_GRID
+            : COVERAGE_GRID
 
 test.describe('foam coverage sweep', () => {
   test.skip(process.env.FOAM_SWEEP !== '1', 'gated on FOAM_SWEEP=1')
@@ -181,8 +200,9 @@ test.describe('foam coverage sweep', () => {
         if (variant.h !== undefined) wd.setWhitecapHeight(variant.h)
         if (variant.s !== undefined) wd.setWhitecapSlope(variant.s)
         if (variant.m !== undefined) wd.setWhitecapMode(variant.m)
-        if (variant.h !== undefined) wd.setFoamWarmth(variant.w ?? 1.0)
-        if (variant.h !== undefined) wd.setFoamStreak(variant.st ?? 1.0)
+        if (variant.h !== undefined || variant.w !== undefined) wd.setFoamWarmth(variant.w ?? 1.0)
+        if (variant.h !== undefined || variant.st !== undefined) wd.setFoamStreak(variant.st ?? 1.0)
+        if (variant.br !== undefined) wd.setFoamBrush(variant.br)
         if (variant.ramp !== undefined) wd.setRampStrength(variant.ramp)
         if (variant.steps !== undefined) wd.setRampSteps(variant.steps)
         if (variant.post !== undefined) wd.setRampPosterize(variant.post)

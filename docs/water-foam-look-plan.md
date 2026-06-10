@@ -395,3 +395,51 @@ Verified on real WebGPU (deep-ocean test bed, gentle → energetic swell): foam
 reads as crest-following, forward-loaded caps with a crisp bright leading edge —
 no wide bars. `pnpm typecheck` / `pnpm test` (1044) / `pnpm build` green; water.ts
 lint error-clean (pre-existing `noNonNullAssertion` warnings only).
+
+## 13 · Oil-stroke foam textures (2026-06-09) — supersedes §10.3 and §11.4
+
+Playtest verdict on the §11 "solid overlapping discs": not a fan of the
+texture — foam read as rows of white dots ("bubble wrap"), and the ask was an
+**oil-paint brush-stroke** read, like the bikes' engine-trail ribbons
+(`engine-trail.ts`: tapered band + bristle grain). Two findings and a rework:
+
+1. **The §10.3 Brushstroke-Tools streak sheet had been silently absent from
+   dev playtests.** `foam_streaks.png` is R2-served with a silent-404 →
+   1×1-black no-op fallback; in dev (no `VITE_ASSET_BASE_URL`) assets resolve
+   to local `public/`, and a clone that never ran `assets:pull` after the
+   sheet was pushed simply never loaded it. Every dev playtest of §10–§12 was
+   judging disc-bubbles with **zero** streak layer. Lesson recorded: a look
+   feature must not live or die on optional asset hydration.
+2. **Both foam textures are now procedural oil strokes, generated in-code**
+   ([oil-stroke-texture.ts](../src/engine/render/oil-stroke-texture.ts)):
+   deterministic seeded rasterizer that stamps tapered, bristle-split,
+   edge-jittered strokes (blunt pressed head → ragged lifted-off tips, union
+   via max, per-stroke paint strength 0.7–1.0 so dimmer strokes surface only
+   in stronger foam). Two sheets: a 512² **mass** sheet (chunky dabs, two size
+   classes — replaces the disc-bubble sheet as the break-up pattern every foam
+   source inherits) and a 1024² **streak** sheet (long thin combing strokes —
+   replaces the R2 PNG in the §10.3 down-face streak layer, same gating).
+   Build cost ~0.1 s once, lazy. `tools/blender/build_foam_streaks.py` +
+   `pnpm gen:foam-streaks` are deleted; the R2 `foam_streaks.png` object is
+   orphaned (nothing reads it). The credits screen's Brushstroke-Tools CC-BY
+   entry now covers only the prop/terrain vinyl sheet (`brush_strokes.png`),
+   which still derives from those maps.
+3. **Strokes run parallel to the crest lines** (playtest-corrected: the first
+   cut combed them along the swell's *travel* direction and read exactly 90°
+   wrong). The mass pattern samples a crest-aligned frame — world XZ rotated
+   by `waveBearingDegUniform`, texture U = the wave-front axis, the travel
+   coordinate drifting slowly so paint rides with the waves, 5 m tile —
+   constant per track, so no per-fragment rotation warping/seams. The §10.3
+   streak layer is the on-face variant of the same language: U = the *local*
+   cross-slope (crest-line) direction, down-face coordinate scrolled so the
+   stroke bands slide down breaking faces. New live knob **`foamBrush`**
+   (water debug menu, persisted per-key, default **1**): 0 = legacy disc
+   bubbles ↔ 1 = oil strokes, so the A/B is one slider drag.
+
+Verified on real WebGPU via the new `FOAM_SWEEP_BRUSH=1` grid (discs ↔
+strokes × streak off/on/strong, The Maw at sunset, elevated + race-height
+poses — captures in `artifacts/foam-brush-v2*/`): crest caps and fringes read
+as combed tapered strokes along the swell, solid cores stay solid, far field
+mushes gracefully into streaking lanes. Unit-pinned in
+`tests/unit/oil-stroke-texture.test.ts` (determinism, range, coverage band,
++U anisotropy).

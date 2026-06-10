@@ -43,7 +43,6 @@
     "gen:trim-sheets": "python tools/blender/build_trim_sheets.py",
     "gen:brush-texture": "python tools/blender/build_brush_texture.py",
     "gen:brush-stamps": "node tools/blender/seed.mjs harvest_brush_stamps.py",
-    "gen:foam-streaks": "node tools/blender/seed.mjs build_foam_streaks.py",
     "install:blender-addon": "node tools/blender/install-addon.mjs",
     "test:blender": "node tools/blender/test-addon.mjs",
     "seed:landmarks-library": "node tools/blender/seed.mjs seed_landmarks_library.py",
