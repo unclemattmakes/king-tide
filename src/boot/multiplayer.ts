@@ -44,11 +44,6 @@ import { applySnapshot } from '@/game/systems/apply-snapshot'
 import { clearRemoteInterp, pushRemoteSnapshot } from '@/game/systems/remote-interp'
 import type { Track } from '@/game/tracks/types'
 
-/** Upper bound on the number of bike records the AI host can pack into a
- *  single snapshot: own player + four AI bikes. Used to pre-size the
- *  reusable send buffer. */
-const MAX_SNAPSHOT_BIKES = 1 + 4
-
 export interface MultiplayerHandle {
   /** Live PartyKit room accessor, or `null` in single-player. Function
    *  so a leaving host can hand the room off without invalidating the
@@ -336,9 +331,14 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
     })
   }
 
-  // M10.11 — TransformSnapshot broadcast. Reused buffer sized for 5
-  // records (max we ever send) so we don't allocate per send.
-  const snapshotSendBuf = new Uint8Array(snapshotByteLength(MAX_SNAPSHOT_BIKES))
+  // M10.11 — TransformSnapshot broadcast. Reused buffer sized from the
+  // live roster (own player + every AI bike the host may broadcast) so we
+  // don't allocate per send. Sized from `aiEids.length` — NOT a constant —
+  // because the AI grid size has changed before (4 → 7) and a stale
+  // constant here overflows the DataView on the host's first broadcast.
+  // The aiEids array's membership is fixed for the session; host flips
+  // only retag the same eids.
+  const snapshotSendBuf = new Uint8Array(snapshotByteLength(1 + aiEids.length))
   const snapshotSendView = new DataView(snapshotSendBuf.buffer)
   // Reused snapshot literal — bikes array is rebuilt per send to avoid
   // allocating a fresh TransformSnapshot wrapper.
