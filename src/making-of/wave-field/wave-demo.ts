@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { acquireWakeTrail, feedWakeTrail } from '@/engine/sim/water/wake-trail'
 import {
   advanceWaveField,
   createWaveField,
@@ -47,7 +48,6 @@ export function mountWaveDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
   // ── Wave field (the real sim state) ───────────────────────────────────
   const baseWaves = defaultWaves()
   const field = createWaveField([], { baseY: 0 })
-  field.wakes.push({ x: 0, z: 0, vx: 0, vz: 0, weight: 0 })
 
   const state: DemoState = {
     layers: 1,
@@ -202,7 +202,10 @@ export function mountWaveDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
     if (!state.paused) advanceWaveField(field, dt)
 
     // Drive the bike: either parked at the origin or circling so its
-    // wake carves the surface.
+    // wake carves the surface. Moving feeds the bike's wake TRAIL (the
+    // same recorded-path machinery the game's wakeUpdateSystem drives) —
+    // the wake follows the circle. Parked, the trail simply stops being
+    // fed and the carved ring age-fades away.
     let bx = 0
     let bz = 0
     if (state.moving) {
@@ -211,19 +214,10 @@ export function mountWaveDemo(stage: HTMLElement, controlsHost: HTMLElement): ()
       bikeAngle += (speed / radius) * (state.paused ? 0 : dt)
       bx = Math.cos(bikeAngle) * radius
       bz = Math.sin(bikeAngle) * radius
-      const vx = -Math.sin(bikeAngle) * speed
-      const vz = Math.cos(bikeAngle) * speed
-      const wake = field.wakes[0]
-      if (wake) {
-        wake.x = bx
-        wake.z = bz
-        wake.vx = vx
-        wake.vz = vz
-        wake.weight = 1
+      if (!state.paused) {
+        const trail = acquireWakeTrail(field.trails, 1, bx, bz, field.time)
+        feedWakeTrail(trail, bx, bz, 1, speed, field.time)
       }
-    } else {
-      const wake = field.wakes[0]
-      if (wake) wake.weight = 0
     }
 
     // Deform the water surface from the real sampler.

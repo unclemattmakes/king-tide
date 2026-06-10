@@ -68,11 +68,13 @@ Implementation in [`src/game/systems/hover.ts`](https://github.com/occ-matt/hove
 
 ## Bike wakes are physical, not cosmetic — *load-bearing*
 
-Each bike's trailing wake **displaces the water mesh** AND **contributes to buoyancy**. The wake math lives in [`engine/sim/water/wave-field.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/engine/sim/water/wave-field.ts) (`sampleWakeFromSource`), is mirrored bit-for-bit in the GPU shader at [`engine/render/water.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/engine/render/water.ts), and the same constants are imported from the sim module so they can't drift apart.
+Each bike's trailing wake **displaces the water mesh** AND **contributes to buoyancy**, and it follows the bike's **recorded path** — not a ray from its current heading. The sim owns a per-bike breadcrumb trail ([`engine/sim/water/wake-trail.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/engine/sim/water/wake-trail.ts), `field.trails`); buoyancy evaluates the wake profile along it (`sampleWakeFromTrail`, summed by the samplers in [`wave-field.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/engine/sim/water/wave-field.ts)), and the GPU shader at [`engine/render/water.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/engine/render/water.ts) uploads **the same trail points** each frame and mirrors the same profile — so the ridge a trailing rider feels is exactly the one drawn, through turns, jumps (real gaps) and dissolving stopped wakes.
 
-`wakeUpdateSystem` populates `field.wakes` once per fixed step **before** `hoverSystem` reads the surface — that's what makes the lead bike's wake felt by trailing buoyancy. The bike's own wake doesn't affect itself (`behind > 0` gate).
+`wakeUpdateSystem` feeds `field.trails` (and re-derives `field.wakes`, which only drives the at-hull dimple/propwash visuals) once per fixed step **before** `hoverSystem` reads the surface — that's what makes the lead bike's wake felt by trailing buoyancy. The bike's own wake doesn't affect itself at speed (the longitudinal ramp is zero at the live head), but riding back over your own laid trail is a real bump — donut-hopping is physical.
 
-If you're tweaking the wake constants, change them in **one place** (`wave-field.ts`) and the shader will pick them up via the imported names. Don't fork the values.
+Trails are deterministic (pure functions of sim history at the fixed step) but intentionally **not snapshotted** — after a rollback/replay-seek they self-heal within ~2 s via the gap rules in `feedWakeTrail`.
+
+If you're tweaking the wake constants, change them in **one place** (`wake-trail.ts`; re-exported through `wave-field.ts`) and both the CPU sampler and the shader pick them up via the imported names. Don't fork the values.
 
 ## Pitch + throttle on water is intentional — *not a bug*
 

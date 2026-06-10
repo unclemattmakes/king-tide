@@ -31,7 +31,7 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
-> **Last updated: 2026-06-09 (h)** — **Synchronized race start.** Per
+> **Last updated: 2026-06-09 (j)** — **Synchronized race start.** Per
 > Matt: everyone shares the 3-2-1. Multiplayer race tabs now hold their
 > countdown ("WAITING FOR RIDERS…") and report `race-loaded`; the relay
 > broadcasts a single **`race-go`** once every racer from the lobby
@@ -51,7 +51,7 @@
 > + tenure election). Detail: [multiplayer-review.md](./multiplayer-review.md)
 > Phase 9.
 >
-> **2026-06-09 (g)** — **No mid-race joins (product rule) +
+> **2026-06-09 (i)** — **No mid-race joins (product rule) +
 > the two-tab multiplayer e2e finally exists.** Per Matt: players enter
 > through the shared lobby, load in together, and race from the 3-2-1 —
 > nobody drops into a running race. The relay now arms a **race lock** 30 s
@@ -79,7 +79,7 @@
 > in prod. Full detail: [multiplayer-review.md](./multiplayer-review.md)
 > Phase 8.
 >
-> **2026-06-09 (f)** — **Multiplayer review + hardening pass.**
+> **2026-06-09 (h)** — **Multiplayer review + hardening pass.**
 > A full netcode read produced [multiplayer-review.md](./multiplayer-review.md)
 > (findings, prioritized plan — everything implemented except the
 > long-deferred two-tab e2e). Headline: a **P0 regression** — the host's
@@ -105,6 +105,69 @@
 > phantom checkpoints; covers OOB respawns too). New unit suites:
 > `lobby-pick`, `remote-interp`, `race-teleport-guard`, tenure cases in
 > `host-election`.
+>
+> **2026-06-09 (g)** — **Wake trails are now physical: buoyancy
+> reads the same recorded path the render draws.** Follow-up to (f): the sim
+> owns the trails now. New sim module `wake-trail.ts` (pure math, no Three)
+> holds the trail ring + ALL wake profile constants (wave-field re-exports
+> them, so the shader's import paths didn't move) plus `sampleWakeFromTrail`
+> — the nearest-capsule-segment scan + Kelvin cross-profile, the exact CPU
+> twin of the shader's `emitTrailScan`. `wakeUpdateSystem` feeds
+> `field.trails` per fixed step (deterministic — m10 bit-identical specs
+> green); `sampleHeight`/`sampleSurface` sum trails instead of the old
+> closed-form heading-ray V (`sampleWakeFromSource` deleted), so a trailing
+> rider now FEELS the curved ridge exactly where it's drawn — turns, jump
+> gaps and age-fade included, and riding back over your own laid trail is a
+> real bump (donut-hopping is physical). The render's tick() became a pure
+> upload of `field.trails` (its duplicate trail bookkeeping deleted), so
+> drawn-vs-felt can't drift by construction. Gap rules per feed: ≤6 m =
+> normal drops, 6–40 m = airborne hop (arc counts the flight, the over-long
+> segment IS the gap, pre-jump wake survives — unit-tested), >40 m =
+> respawn hard-reset. Trails are deliberately NOT snapshotted — rollback /
+> replay-seek self-heals within ~2 s (documented in wake-trail.ts);
+> `wakeStrength` stays render-only (a localStorage knob must never reach the
+> deterministic sim; ≠1 desyncs drawn-vs-felt, dev-only). The weight
+> altitude-fade now reads `sampleHeight(..., includeWakes=false)` (the old
+> clear-then-sample trick can't exclude persistent trails). The making-of
+> wave demo rides the real trail machinery (its circling bike now carves a
+> curving ring that age-fades when parked). Perf unchanged (89 fps avg /
+> p95 14 ms full-field autoplay; per-trail AABB reject keeps the sampler
+> ~free). m1/m2/m10/wake-look/perf-budget + 1127 unit tests green (4 new:
+> curve-following, hop gap + pre-jump survival, feed determinism,
+> ambient-only flag). Awaiting playtest — wake-jump feel through corners is
+> the thing to test.
+>
+> **2026-06-09 (f)** — **Trailing wakes: the bike wake now
+> follows the ridden path instead of pivoting as a rigid V.** The wake was a
+> closed-form Kelvin V evaluated from each bike's *current* position+heading
+> (foam and displacement both), so the whole V rotated rigidly with the bike
+> — no trail through corners (playtest note). The render side now records a
+> per-bike breadcrumb TRAIL (15 × 2 m ring + live head, id-keyed off the eid
+> so airborne compaction can't graft trails; uploaded as uniform blocks) and
+> BOTH shader stages evaluate the same wake profile against the nearest trail
+> segment via a TSL `Loop` + per-trail CPU-fit cull circles: "behind" is now
+> arc-meters back along the path, so the wake curves with the line, a jump
+> leaves a real gap (per-point strength = airborne weight × speed gate at
+> drop), and a stopped bike's wake age-fades in place (τ=3 s). Foam stops
+> inheriting the world-anchored disc/crest break-up (the polka-dot wake) —
+> cross-profile is now center churn + edge rails on the ridge, broken up by a
+> dedicated `WAKE_STROKE_SPEC` sheet sampled in TRAIL-ALIGNED UV (U pinned to
+> arc length, so laid foam stays painted on the world); break-up ramps in
+> down the trail (solid near hull → dissolving tufts) and the foam fades
+> within ~8 m of the camera so your own wake can't blow out the chase frame.
+> **Sim buoyancy intentionally keeps the closed-form heading-ray V**
+> (`sampleWakeFromSource` untouched — straight-line wake-jumping feels
+> identical; stateless per step → no trail snapshots for rollback/replay; the
+> drawn-vs-felt ridge diverges only mid-turn, documented in wave-field.ts —
+> `?wavedots=1` will show the gap near turning bikes). New `wakeStrength`
+> knob (0–2, foam+displacement) in the water tuner, persisted per-key (no
+> store bump). Zero new varyings (uniform arrays only — 16-varying cap
+> untouched). Verified on real WebGPU via the new `WAKE_LOOK=1`
+> `tests/e2e/wake-look.spec.ts` (scripted straight/carve/dissolve beats +
+> 8-bike race probe asserting trails lay per-meter-ridden, screenshots to
+> `test-results/wake-look/`); m2-water + perf-budget (81 fps avg under the
+> full autoplay field) + 1123 unit tests green. Awaiting playtest for feel
+> tuning.
 >
 > **2026-06-09 (e)** — **Wind VFX refined — speed-aware
 > regimes, ghostly half-width strokes, rare curls.** Strokes halved to

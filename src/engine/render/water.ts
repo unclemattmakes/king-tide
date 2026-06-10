@@ -14,6 +14,8 @@ import {
   fract,
   fwidth,
   If,
+  int,
+  Loop,
   max,
   min,
   mix,
@@ -44,8 +46,19 @@ import {
   packSheetRGBA8,
   rasterizeContourDashRows,
   rasterizeOilStrokeSheet,
+  WAKE_STROKE_SPEC,
 } from '@/engine/render/oil-stroke-texture'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
+// Trail recording rules — sim-owned (`field.trails` is fed by
+// wakeUpdateSystem; this module only uploads + mirrors the profile in TSL).
+// Imported, never re-declared, so the GPU segment loop can't drift from the
+// CPU buoyancy sampler.
+import {
+  MAX_WAKE_TRAILS,
+  WAKE_AGE_TAU,
+  WAKE_TRAIL_MAX_SEG,
+  WAKE_TRAIL_POINTS,
+} from '@/engine/sim/water/wake-trail'
 import {
   effectiveSteepness,
   // Zone cap shared with the CPU sampler (`setWaveZones` truncates to it; the
@@ -259,6 +272,11 @@ export type WaterMesh = {
      *  round-disc bubble sheet (0) to oil-paint brush strokes pulled along
      *  the crest lines (1) — the engine-trail painted read applied to foam. */
     setFoamBrush(s: number): void
+    /** Bike-wake strength, 0..2. Scales the trail wake — both the churn/rail
+     *  foam ribbon laid along each bike's ridden path and its V-ridge
+     *  DISPLACEMENT. 1 = baseline; 0 = no rendered wake (buoyancy still
+     *  feels the analytic sim wake — dev-only setting). */
+    setWakeStrength(s: number): void
     /** P1 readability — crest-to-trough value-ramp strength, 0..1. Scales the
      *  posterized "one value sweep per wave face" brightness modulation
      *  (water-next-research §8 P1.1). 0 = off. */
@@ -291,6 +309,10 @@ export type WaterMesh = {
     setSwellSetDepth(d: number): void
     /** Current swell-set envelope params (for live-only menu rows). */
     getSwellSet(): { periodS: number; depth: number }
+    /** Snapshot of the live wake trails (e2e harness probe): one entry per
+     *  active trail with the breadcrumb count and total recorded arc length.
+     *  Cheap copy — call freely from test code, not per-frame game code. */
+    getWakeTrails(): Array<{ id: number; count: number; headArc: number }>
     /** Render the wave geometry as wireframe. Useful for tuning wave /
      *  wake amplitudes against the actual displacement. */
     setWireframe(on: boolean): void
@@ -363,6 +385,8 @@ export type WaterDebugDefaults = {
   foamStreak: number
   /** Foam brush 0..1: disc-bubble (0) ↔ oil-stroke (1) foam break-up. */
   foamBrush: number
+  /** Bike-wake strength 0..2: trail-wake foam + ridge displacement. */
+  wakeStrength: number
   wireframe: boolean
   /** When true, each water layer paints in a distinct flat color so
    *  LOD seams are visible. Off by default. */
@@ -379,11 +403,12 @@ export type WaterDebugDefaults = {
  * wake; keep it ≥ the grid size or trailing bikes lose their visible wake.
  * (Was 5 — a stale "player + 4 AI" assumption that predated the 8-bike grid.) */
 const MAX_BIKES = 8
-/** Cull radius for fragment-stage bike effects: outside this distance from
- * a bike's XZ position, the ring + wake foam are guaranteed ≈ 0, so we
- * skip the per-bike math via an `If` early-out. Squared comparison avoids
- * a sqrt. Tune up if longer wakes are added. */
-const BIKE_INFLUENCE_R = 35.0
+/** Cull radius for fragment-stage AT-BIKE effects (stern propwash + bow
+ * spray — the trail wake culls separately per trail, below). Propwash dies
+ * within ~4 m behind the hull and bow spray ~2.5 m ahead, so outside this
+ * radius the per-bike math is guaranteed ≈ 0 and an `If` early-out skips it.
+ * Squared comparison avoids a sqrt. */
+const BIKE_INFLUENCE_R = 14.0
 const BIKE_INFLUENCE_R_SQ = BIKE_INFLUENCE_R * BIKE_INFLUENCE_R
 /** Hull dimple radius (Gaussian σ) — controls how wide the depression is. */
 const BIKE_DIMPLE_R = 1.6
@@ -392,13 +417,26 @@ const BIKE_DIMPLE_DEPTH = 0.32
 /** Squared cull radius for the vertex-stage dimple. exp(-r²/R²) is below
  * 1e-7 outside ~6σ, so we can skip the exp entirely past this distance. */
 const BIKE_DIMPLE_CULL_R_SQ = BIKE_DIMPLE_R * 6 * (BIKE_DIMPLE_R * 6)
-/** Cull radius for vertex-stage wake displacement. The wake's exponential
- * decay (exp(-behind · LONG_DECAY)) reaches ~20% of peak by 40m, so the
- * residual is below visual noise. Tighter than the foam radius because the
- * vertex stage runs over the full water mesh — most vertices need to early-
- * out cheaply or headless WebGL2 (SwiftShader) tanks to ~3 fps. */
-const WAKE_DISP_CULL_R = 40.0
-const WAKE_DISP_CULL_R_SQ = WAKE_DISP_CULL_R * WAKE_DISP_CULL_R
+
+// ---- Wake trail (the trailing wake's path history) -------------------------
+//
+// The wake follows a recorded breadcrumb TRAIL of each bike's ridden path —
+// "behind" is arc-distance back along the path and "perp" the lateral offset
+// from the nearest trail segment, so the wake curves with the line, a jump
+// leaves a real gap, and a stopped bike's wake age-fades in place.
+//
+// THE SIM OWNS THE TRAILS (`wake-trail.ts`, fed per fixed step by
+// `wakeUpdateSystem` into `field.trails`): CPU buoyancy samples the same
+// points with the same profile (`sampleWakeFromTrail`), so the ridge a
+// trailing rider feels — and can jump — is exactly the one drawn here. This
+// module only UPLOADS those points each frame (`tick()`) and mirrors the
+// profile in TSL; all trail constants + recording rules live sim-side and
+// are imported, never re-declared.
+
+/** Trail-aligned stroke-sheet tiles: U (along the ridden path) / V (lateral).
+ * 7 m × 3.5 m puts the sheet's 0.3–0.55-fraction ropy streaks at ~2–4 m. */
+const WAKE_STROKE_TILE_U = 7.0
+const WAKE_STROKE_TILE_V = 3.5
 
 const INACTIVE_FAR = 1e6
 
@@ -567,6 +605,7 @@ let sharedFoamBubbleTexture: THREE.DataTexture | null = null
 let sharedFoamStreakTexture: THREE.DataTexture | null = null
 let sharedFoamStrokeMassTexture: THREE.DataTexture | null = null
 let sharedContourDashTexture: THREE.DataTexture | null = null
+let sharedWakeStrokeTexture: THREE.DataTexture | null = null
 
 /** Wrap a procedural mask grid in a repeat-tiling DataTexture (grayscale in
  *  `.r`, same sampler setup as the bubble sheet). */
@@ -733,6 +772,26 @@ function getContourDashTexture(): THREE.DataTexture {
 }
 
 /**
+ * Bike-wake churn sheet — ropy along-axis streaks + short tufts, sampled in
+ * TRAIL-ALIGNED UV (U = arc length along the ridden path, V = lateral offset)
+ * so the strokes stream along the wake. Because U is pinned to path arc
+ * length the pattern is painted onto the world and stays put as the bike
+ * pulls away — the trailing-wake read — instead of the world-anchored bubble
+ * discs the wake foam used to inherit (polka dots) or the crest-combed mass
+ * strokes (combed along the SWELL, not the wake).
+ */
+function getWakeStrokeTexture(): THREE.DataTexture {
+  if (!sharedWakeStrokeTexture) {
+    sharedWakeStrokeTexture = buildStrokeMaskDataTexture(
+      rasterizeOilStrokeSheet(WAKE_STROKE_SPEC),
+      WAKE_STROKE_SPEC.size,
+      'water:wakeStrokes',
+    )
+  }
+  return sharedWakeStrokeTexture
+}
+
+/**
  * Global swell-train bearing applied when a track doesn't author
  * `water.swellBearingDeg` (degrees CCW from world +X). 47° is the look every
  * shipped track was graded against before the bearing became per-track data
@@ -746,20 +805,22 @@ export const WAVE_BEARING_DEFAULT = 47
 /**
  * GPU-shader water built on Three.js's TSL node pipeline.
  *
- * The vertex shader Gerstner-displaces a flat plane and subtracts a per-bike
- * Gaussian "hull dimple" + adds each bike's transverse wake oscillation. The
- * wake displacement uses the same closed-form function as the sim layer's
- * `sampleWakeFromSource`, so the buoyancy field a trailing rider feels
- * matches the visual ripples one-to-one — the lead bike's wake becomes a
- * real bump that other bikes can launch off ("jump my wake").
+ * The vertex shader Gerstner-displaces a flat plane, subtracts a per-bike
+ * Gaussian "hull dimple", and adds each bike's wake ridge evaluated along a
+ * recorded TRAIL of its ridden path (see the wake-trail constants block).
+ * The wake profile mirrors the sim's `sampleWakeFromSource` cross-section, so
+ * for straight-line riding the buoyancy bump a trailing rider feels lines up
+ * with the drawn ridge ("jump my wake"); mid-turn the drawn wake follows the
+ * path while buoyancy stays on the heading ray (documented divergence).
  *
  * The fragment shader recomputes the analytic normal per pixel — including
  * both the dimple and wake gradients — and adds:
  *
  *  - PBR-style albedo gradient (deep blue → cyan with crest height)
  *  - Crest foam from height + slope of the wave field
- *  - Hull foam ring around each bike
- *  - V-shaped wake foam stripe trailing behind each moving bike
+ *  - Trailing wake foam (center churn + diverging edge rails) laid along
+ *    each bike's trail, broken up by a trail-aligned stroke sheet
+ *  - Stern propwash + bow spray anchored at each hull
  *  - Fresnel sky-tint on the emissive channel
  *  - Cheap hash-noise sparkle, gated to crests
  *
@@ -1056,6 +1117,47 @@ export function createWaterMesh(
   }
   const bikesUniform = uniformArray(bikeSlots, 'vec4')
   const weightsUniform = uniformArray(bikeWeights, 'float')
+
+  // Wake-trail uniform arrays — MAX_BIKES blocks of WAKE_TRAIL_POINTS slots.
+  // Per point: vec4(x, z, arcLen, dropTime) + a separate strength float
+  // (airborne weight × speed gate, baked at drop so a bike that slows keeps
+  // the fast wake it already laid). Slot order inside a block is
+  // oldest→newest with slot WAKE_TRAIL_POINTS-1 the live head (the bike's
+  // current position) — the shader walks consecutive pairs as segments with
+  // no head-segment special case. Unfilled slots park at INACTIVE_FAR so
+  // their segments fail the MAX_SEG gate.
+  // Wake-trail uniform blocks — a GPU copy of the SIM's `field.trails`
+  // (wake-trail.ts), re-uploaded each tick(). Per point: vec4(x, z, arcLen,
+  // dropTime) + a separate strength float. Slot order inside a block is
+  // oldest→newest with the last slot the live head (the bike's current
+  // position) — the shader walks consecutive pairs as segments with no
+  // head-segment special case. Unfilled slots park at INACTIVE_FAR so their
+  // segments fail the MAX_SEG gate.
+  const wakeTrailSlots: THREE.Vector4[] = []
+  const wakeTrailStrengths: number[] = []
+  for (let i = 0; i < MAX_WAKE_TRAILS * WAKE_TRAIL_POINTS; i++) {
+    wakeTrailSlots.push(new THREE.Vector4(INACTIVE_FAR, INACTIVE_FAR, 0, 0))
+    wakeTrailStrengths.push(0)
+  }
+  const wakeTrailUniform = uniformArray(wakeTrailSlots, 'vec4')
+  const wakeTrailStrengthUniform = uniformArray(wakeTrailStrengths, 'float')
+  // Per-trail cull circle, CPU-fit each frame over the live points:
+  // vec4(centerX, centerZ, radius², headArc). Tighter than a bike-centered
+  // circle (the trail extends ~30 m BEHIND the bike) and one compare per
+  // trail per vertex/fragment. headArc rides along so the shader can turn a
+  // segment's interpolated arc into "meters behind the bike". (Render-only
+  // view data — the sim's sampler reject is its own AABB on the trail.)
+  const wakeTrailCulls: THREE.Vector4[] = []
+  for (let i = 0; i < MAX_WAKE_TRAILS; i++) {
+    wakeTrailCulls.push(new THREE.Vector4(INACTIVE_FAR, INACTIVE_FAR, 0, 0))
+  }
+  const wakeTrailCullUniform = uniformArray(wakeTrailCulls, 'vec4')
+  // Trail-wake master strength (debug knob): scales foam AND displacement.
+  // RENDER-ONLY — buoyancy ignores it (a localStorage-persisted knob must
+  // never reach the deterministic sim), so any value ≠ 1 desyncs the drawn
+  // ridge from the felt one. Dev/tuning setting, not a shippable look.
+  const WAKE_STRENGTH_DEFAULT = 1.0
+  const wakeStrengthUniform = uniform(WAKE_STRENGTH_DEFAULT)
 
   type WaveConst = {
     k: number
@@ -1508,21 +1610,117 @@ export function createWaterMesh(
     },
   )
 
-  // Fused per-bike vertex contribution: hull dimple (subtractive) + wake
-  // displacement (additive). We iterate slots ONCE per vertex and compute
-  // r² ONCE per slot — the dimple uses a tight cull (≈ 9.6 m), the wake
-  // uses a wider cull (40 m). Splitting into two Fns doubled the per-vertex
-  // slot fetch + r² compute; the headless WebGL2 software fallback
-  // (SwiftShader, used by Playwright) was tanking to ~3 fps. Fused, the
-  // per-vertex base cost is one r², one mul-mul-add. Returns
-  // vec3(deltaY, ddelta/dx, ddelta/dz) where dimple subtracts and wake
-  // adds, so callers do `wave + bikeContrib`.
+  // Nearest-segment scan over one bike's wake trail. JS-level code-gen
+  // helper, NOT a TSL Fn — it emits the scan inline wherever it's called
+  // (must be inside an Fn body: it uses If/Loop + toVar) and returns the
+  // result registers as an object, which a TSL Fn's single return value
+  // can't do. Called once per bike by BOTH the vertex displacement and the
+  // fragment foam, so the trail parameterization can't drift between them.
+  //
+  // Walks the WAKE_TRAIL_POINTS-1 consecutive segment pairs (slot layout:
+  // oldest→newest, last slot = live bike head) and keeps the segment whose
+  // CAPSULE distance to (xN, zN) is smallest. Returns:
+  //  - dist2:      squared capsule distance (lateral inside the polyline;
+  //                naturally rounds the tail cap so the wake can't smear
+  //                past the oldest point)
+  //  - perpSigned: lateral offset signed by the segment normal — the stroke
+  //                sheet's V coordinate
+  //  - behind:     arc-meters back from the live head (the trail "behind")
+  //  - arc:        absolute arc length at the foot — the stroke sheet's U
+  //                coordinate; pinned to the path so laid foam STAYS PUT
+  //  - strength:   per-point drop strength lerped along the segment
+  //  - age:        seconds since the foot's points were dropped
+  //  - dirX/dirZ:  unit direction fragment←foot (∇ of the capsule distance,
+  //                the displacement gradient direction)
+  // All zero/huge when no live segment is in range (strength 0 kills every
+  // downstream term).
+  //
+  // biome-ignore lint/suspicious/noExplicitAny: TSL node-graph builder values
+  function emitTrailScan(bikeIndex: number, xN: any, zN: any, tN: any) {
+    const base = bikeIndex * WAKE_TRAIL_POINTS
+    // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
+    const cull = wakeTrailCullUniform.element(bikeIndex) as any
+    const headArc = cull.w
+    const bestD2 = float(1e9).toVar()
+    const bestPerpSigned = float(0).toVar()
+    const bestBehind = float(0).toVar()
+    const bestArc = float(0).toVar()
+    const bestStrength = float(0).toVar()
+    const bestAge = float(0).toVar()
+    const bestDirX = float(0).toVar()
+    const bestDirZ = float(0).toVar()
+    Loop(WAKE_TRAIL_POINTS - 1, ({ i }) => {
+      const idxA = int(base).add(i)
+      const idxB = idxA.add(int(1))
+      // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
+      const a = wakeTrailUniform.element(idxA) as any
+      // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
+      const b = wakeTrailUniform.element(idxB) as any
+      const abx = b.x.sub(a.x)
+      const abz = b.y.sub(a.y)
+      const segLen2 = abx.mul(abx).add(abz.mul(abz)).toVar()
+      // Live segments only: INACTIVE_FAR padding and teleport gaps fail the
+      // MAX_SEG gate; the lower floor drops degenerate zero-length pairs.
+      If(segLen2.lessThan(float(WAKE_TRAIL_MAX_SEG * WAKE_TRAIL_MAX_SEG)), () => {
+        If(segLen2.greaterThan(float(1e-6)), () => {
+          const apx = xN.sub(a.x)
+          const apz = zN.sub(a.y)
+          const tSeg = clamp(apx.mul(abx).add(apz.mul(abz)).div(segLen2), float(0), float(1))
+          const dxF = apx.sub(abx.mul(tSeg))
+          const dzF = apz.sub(abz.mul(tSeg))
+          const d2 = dxF.mul(dxF).add(dzF.mul(dzF))
+          If(d2.lessThan(bestD2), () => {
+            bestD2.assign(d2)
+            // Lateral offset signed by the left-of-travel normal (a→b is
+            // older→newer, i.e. the direction the bike rode).
+            bestPerpSigned.assign(
+              dzF
+                .mul(abx)
+                .sub(dxF.mul(abz))
+                .div(max(sqrt(segLen2), float(1e-4))),
+            )
+            const arcAtFoot = mix(a.z, b.z, tSeg)
+            bestArc.assign(arcAtFoot)
+            bestBehind.assign(max(headArc.sub(arcAtFoot), float(0)))
+            // biome-ignore lint/suspicious/noExplicitAny: TSL UniformArrayElementNode lacks float-typing in TS
+            const sA = wakeTrailStrengthUniform.element(idxA) as any
+            // biome-ignore lint/suspicious/noExplicitAny: TSL UniformArrayElementNode lacks float-typing in TS
+            const sB = wakeTrailStrengthUniform.element(idxB) as any
+            bestStrength.assign(mix(sA, sB, tSeg))
+            bestAge.assign(max(tN.sub(mix(a.w, b.w, tSeg)), float(0)))
+            const d = max(sqrt(d2), float(1e-4))
+            bestDirX.assign(dxF.div(d))
+            bestDirZ.assign(dzF.div(d))
+          })
+        })
+      })
+    })
+    return {
+      dist2: bestD2,
+      perpSigned: bestPerpSigned,
+      behind: bestBehind,
+      arc: bestArc,
+      strength: bestStrength,
+      age: bestAge,
+      dirX: bestDirX,
+      dirZ: bestDirZ,
+    }
+  }
+
+  // Per-bike vertex contribution: hull dimple (subtractive, from the
+  // bike's CURRENT position) + trail-wake ridge displacement (additive,
+  // evaluated along the sim's recorded path — see the wake-trail block).
+  // Returns vec3(deltaY, ddelta/dx, ddelta/dz) so callers do
+  // `wave + bikeContrib`.
   //
   // Dimple:  -D · exp(-r² / R²)
-  // Wake:    A · weight · gate(speed) · trans(perp) · ramp(b) · decay(b)
-  //          · sin(K · behind − Ω · t)
-  // where b = max(-(P − bike)·hat, 0), perp = |(P − bike) × hat|,
-  // hat = v / |v|. Mirror of `sampleWakeFromSource` in wave-field.ts.
+  // Wake:    A · strength(drop) · trans(perp) · ramp(b) · decay(b)
+  //          · sin(K · b − Ω · t) · agefade · knob
+  // where b = arc-meters behind the live head and perp = capsule distance to
+  // the trail polyline. EXACT mirror of the sim's `sampleWakeFromTrail`
+  // (same trail points via the uniforms, same profile constants), so the
+  // ridge a trailing rider feels through buoyancy is the ridge drawn here —
+  // straights, turns, gaps and all. Change one and the other must move.
   const bikeSurfaceContrib = Fn(([x, z, t]: [unknown, unknown, unknown]) => {
     const xN = x as ReturnType<typeof float>
     const zN = z as ReturnType<typeof float>
@@ -1532,6 +1730,7 @@ export function createWaterMesh(
     const dydz = float(0).toVar()
     const invR2 = 1 / (BIKE_DIMPLE_R * BIKE_DIMPLE_R)
     for (let i = 0; i < MAX_BIKES; i++) {
+      // ----- Dimple (close-in band around the live bike) -----
       // TSL's UniformArrayElementNode types don't expose vec4 swizzles even
       // though the runtime proxy makes `.x`/`.y`/`.z`/`.w` work. Cast to
       // `any` so the build-time TS check stops complaining without us
@@ -1543,36 +1742,32 @@ export function createWaterMesh(
       // biome-ignore lint/suspicious/noExplicitAny: TSL types lose precision here
       const dz = zN.sub(slot.y) as any
       const r2 = dx.mul(dx).add(dz.mul(dz))
-      // Wake cull is wider than dimple cull. Wrap both in the wake-radius
-      // check so the common case (vertex far from this bike) skips
-      // everything in one branch.
-      If(r2.lessThan(float(WAKE_DISP_CULL_R_SQ)), () => {
-        // ----- Dimple (only the close-in band) -----
-        If(r2.lessThan(float(BIKE_DIMPLE_CULL_R_SQ)), () => {
-          const e = exp(r2.mul(-invR2))
-          const depth = e.mul(-BIKE_DIMPLE_DEPTH)
-          y.addAssign(depth)
-          // d(depth)/dx = depth · (-2 dx / R²) — note: depth is negative
-          // here (dimple is subtractive), so the gradient sign also flips.
-          dydx.addAssign(depth.mul(dx).mul(-2 * invR2))
-          dydz.addAssign(depth.mul(dz).mul(-2 * invR2))
-        })
-        // ----- Wake (mirror of sampleWakeFromSource) -----
-        // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
-        const vx = slot.z as any
-        // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
-        const vz = slot.w as any
-        const speed = sqrt(vx.mul(vx).add(vz.mul(vz)))
-        const safeSpeed = max(speed, float(0.0001))
-        const hatX = vx.div(safeSpeed)
-        const hatZ = vz.div(safeSpeed)
-        const parallel = dx.mul(hatX).add(dz.mul(hatZ))
-        const behind = max(parallel.negate(), float(0))
-        // Skip when sample is in front of the bike — wake only exists
-        // behind. behind > 0 also rules out the bike's own location.
-        If(behind.greaterThan(float(0)), () => {
-          const perp = abs(dx.mul(hatZ).sub(dz.mul(hatX)))
-          const speedGate = smoothstep(float(WAKE_SPEED_LOW), float(WAKE_SPEED_HIGH), speed)
+      If(r2.lessThan(float(BIKE_DIMPLE_CULL_R_SQ)), () => {
+        const e = exp(r2.mul(-invR2))
+        const depth = e.mul(-BIKE_DIMPLE_DEPTH)
+        y.addAssign(depth)
+        // d(depth)/dx = depth · (-2 dx / R²) — note: depth is negative
+        // here (dimple is subtractive), so the gradient sign also flips.
+        dydx.addAssign(depth.mul(dx).mul(-2 * invR2))
+        dydz.addAssign(depth.mul(dz).mul(-2 * invR2))
+      })
+    }
+    for (let i = 0; i < MAX_WAKE_TRAILS; i++) {
+      // ----- Trail-wake ridge (whole recorded path) -----
+      // Per-trail CPU-fit cull circle: one compare for the common case
+      // (vertex nowhere near this trail). The circle is parked at
+      // INACTIVE_FAR with r²=0 for slots with no live trail.
+      // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
+      const cull = wakeTrailCullUniform.element(i) as any
+      // biome-ignore lint/suspicious/noExplicitAny: TSL types lose precision here
+      const cdx = xN.sub(cull.x) as any
+      // biome-ignore lint/suspicious/noExplicitAny: TSL types lose precision here
+      const cdz = zN.sub(cull.y) as any
+      If(cdx.mul(cdx).add(cdz.mul(cdz)).lessThan(cull.z), () => {
+        const scan = emitTrailScan(i, xN, zN, tN)
+        If(scan.strength.greaterThan(float(0.001)), () => {
+          const perp = sqrt(scan.dist2)
+          const behind = scan.behind
           const wakeWidth = behind.mul(WAKE_HALF_ANGLE_TAN).add(float(WAKE_BASE_WIDTH))
           // Two-piece signed transverse profile (Kelvin-style V):
           //   inside V (perp < wakeWidth):   -cos(π · perp / wakeWidth)
@@ -1590,39 +1785,29 @@ export function createWaterMesh(
           const transverseSigned = insidePart.mul(fadeOut)
           const longRamp = float(1).sub(exp(behind.mul(-WAKE_LONG_RAMP)))
           const longDecay = exp(behind.mul(-WAKE_LONG_DECAY))
-          // Transverse "scallops" (M9.35): mirrors sampleWakeFromSource.
-          // sin(K · behind − ω · t) modulates the V's amplitude along its
-          // length; the pattern drifts backward in the bike's frame as t
-          // advances, giving the wake the live oscillating ridges of a
-          // real Kelvin wake.
+          // Transverse "scallops" (M9.35): sin(K · behind − ω · t) modulates
+          // the ridge along its length; the pattern drifts backward along
+          // the trail as t advances — now following the ridden path.
           const longPhase = tN.mul(-WAKE_TRANS_OMEGA).add(behind.mul(WAKE_TRANS_K))
           const transverseMod = float(1).add(sin(longPhase).mul(WAKE_TRANS_AMP))
-          // biome-ignore lint/suspicious/noExplicitAny: TSL UniformArrayElementNode lacks float-typing in TS
-          const weight = weightsUniform.element(i) as any
+          const ageFade = exp(scan.age.div(-WAKE_AGE_TAU))
           const amp = float(WAKE_DISP_AMP)
-            .mul(weight)
-            .mul(speedGate)
+            .mul(scan.strength)
             .mul(longRamp)
             .mul(longDecay)
             .mul(transverseMod)
+            .mul(ageFade)
+            .mul(wakeStrengthUniform)
           y.addAssign(amp.mul(transverseSigned))
-          // Approximate gradient: dominated by the perp direction (the V
-          // shape's slope). Use the inside-V slope as a uniform-ish
-          // approximation across the wake — visible shading on the V's
-          // inner trough wall, less accurate at the outer fade. Drops the
-          // longitudinal-decay cross-term (small effect at typical scale).
-          // ∂profile/∂perp ≈ (π / wakeWidth) · sin(π · perp / wakeWidth) inside V.
+          // Approximate gradient: dominated by the lateral direction (the V
+          // shape's slope across the trail). scan.dirX/dirZ is ∇(capsule
+          // distance), so the inside-V slope rides it directly. Drops the
+          // longitudinal-decay cross-term (small at typical scale), same as
+          // the old heading-ray version.
           const dProfileDPerp = sin(insideArg).mul(float(Math.PI).div(wakeWidth))
-          // ∂perp/∂x = sign(dx·hatZ − dz·hatX) · hatZ. We don't have a
-          // built-in sign() — recover it as c / |c| where |c| = perp (with
-          // a small floor to avoid div-by-zero on-axis).
-          const c = dx.mul(hatZ).sub(dz.mul(hatX))
-          const signC = c.div(max(perp, float(0.0001)))
-          const dPerpDx = signC.mul(hatZ)
-          const dPerpDz = signC.mul(hatX).negate()
           const ampDProfile = amp.mul(dProfileDPerp)
-          dydx.addAssign(ampDProfile.mul(dPerpDx))
-          dydz.addAssign(ampDProfile.mul(dPerpDz))
+          dydx.addAssign(ampDProfile.mul(scan.dirX))
+          dydz.addAssign(ampDProfile.mul(scan.dirZ))
         })
       })
     }
@@ -2693,7 +2878,9 @@ export function createWaterMesh(
   // dominant bright foam; the accumulator still carries the trailing foam.
   const waveFoam = max(max(foamAccumFrag.mul(float(0.7)), pixelFoam.mul(float(0.3))), whitecapFoam)
 
-  // Per-bike foam: hull ring + V-wake stripe. We wrap the per-bike work in
+  // Per-bike AT-HULL foam: stern propwash + bow spray. (The trailing wake
+  // foam moved to `computeWakeTrail` below — it follows the recorded path,
+  // not the bike's current heading.) We wrap the per-bike work in
   // a Fn() so we can use If(...) to early-out for slots whose bike is far
   // from this fragment — most fragments are far from every bike, so this
   // turns a constant per-fragment cost into a roughly O(1) one. Using `If`
@@ -2703,7 +2890,7 @@ export function createWaterMesh(
   // Inactive slots are parked at distance 1e6 by `tick()`, so their squared
   // distance is ≫ the cull radius and they short-circuit on the first cmp.
   //
-  // The wake's perpendicular distance uses a 2D cross product
+  // The perpendicular distance uses a 2D cross product
   // (|d.x*hat.y - d.y*hat.x|) rather than `length(d - hat * parallel)` —
   // one mul + one mul + one sub + one abs vs. a square + sqrt.
   const computeBikeFoam = Fn(() => {
@@ -2717,12 +2904,8 @@ export function createWaterMesh(
       const dzRel = positionWorld.z.sub(slot.y) as any
       const r2 = dxRel.mul(dxRel).add(dzRel.mul(dzRel))
       If(r2.lessThan(float(BIKE_INFLUENCE_R_SQ)), () => {
-        // (`r = sqrt(r2)` was used by the since-removed hull foam ring — see the
-        // note below. The wake/propwash terms use `r2`/`parallel`/`perp`, not r.)
         // biome-ignore lint/suspicious/noExplicitAny: TSL UniformArrayElementNode lacks float-typing in TS
         const weight = weightsUniform.element(i) as any
-
-        // V-wake foam stripe behind the bike.
         // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
         const vx = slot.z as any
         // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
@@ -2739,28 +2922,8 @@ export function createWaterMesh(
         const perp = abs(dxRel.mul(hatZ).sub(dzRel.mul(hatX)))
         const speedGate = smoothstep(float(WAKE_SPEED_LOW), float(WAKE_SPEED_HIGH), speed)
 
-        // (Hull foam ring removed — it read as a "circle under the bike". The
-        // V-wake now comes to a point at the bike center where the ring was;
-        // the propwash below fills that apex.)
-
-        // V-wake foam stripe behind the bike. Multiplied by `foamTurbulence`
-        // so the edges break up into patches instead of a clean Kelvin-V
-        // outline — that's what made the prior wake feel "stamped". The FOAM
-        // apex width is a small local value (not the shared `WAKE_BASE_WIDTH`,
-        // which governs the sim's wake *displacement*) so the foam V tapers to
-        // a point at the bike instead of starting as a 0.55 m blunt band.
-        const FOAM_WAKE_APEX_HALF_WIDTH = 0.18
-        const wakeWidth = behind.mul(WAKE_HALF_ANGLE_TAN).add(float(FOAM_WAKE_APEX_HALF_WIDTH))
-        const behindGate = smoothstep(float(0.0), float(0.3), behind)
-        const decay = exp(behind.mul(-WAKE_LONG_DECAY))
-        const edgeBlur = smoothstep(wakeWidth.add(0.4), wakeWidth.sub(0.5), perp)
-        const wake = behindGate
-          .mul(speedGate)
-          .mul(decay)
-          .mul(edgeBlur)
-          .mul(weight)
-          .mul(0.7)
-          .mul(foamTurbulence)
+        // (Hull foam ring removed — it read as a "circle under the bike".
+        // The propwash below fills the wake's apex where the ring was.)
 
         // Stern propwash (M9.33): bright concentrated foam centred on the
         // bike, peaking right AT the hull and fading back — this is the filled
@@ -2804,12 +2967,111 @@ export function createWaterMesh(
           .mul(0.85)
           .mul(foamTurbulence)
 
-        sum.addAssign(wake.add(propwash).add(bowSpray))
+        sum.addAssign(propwash.add(bowSpray))
       })
     }
     return sum
   })
   const bikeFoam = computeBikeFoam()
+
+  // Trailing wake foam — the V that used to be stamped from the bike's
+  // current heading now lies along each bike's recorded trail (same scan the
+  // vertex displacement uses, so foam sits ON the ridge it displaces).
+  // Cross-profile is two parts instead of the old filled wedge:
+  //  - center CHURN: a narrow, slowly-widening strip of prop-churned water
+  //    down the trail axis — the long "trailing wake" spine. Persists
+  //    (e-fold ~18 m behind).
+  //  - edge RAILS: thin bells riding the diverging displacement ridge
+  //    (|perp| = wakeWidth), bright near the bike and gone by ~20 m — the
+  //    Kelvin arms. Their angle matches the felt buoyancy bump.
+  // Returns vec3(mask, arcU, perpV): the mask plus the trail-frame texture
+  // coordinate of the STRONGEST contributing trail. The wake stroke sheet is
+  // sampled OUTSIDE this Fn — fragment texture reads with implicit
+  // derivatives aren't allowed in the non-uniform control flow inside.
+  const computeWakeTrail = Fn(() => {
+    const mask = float(0).toVar()
+    const arcU = float(0).toVar()
+    const perpV = float(0).toVar()
+    const behindOut = float(0).toVar()
+    for (let i = 0; i < MAX_WAKE_TRAILS; i++) {
+      // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
+      const cull = wakeTrailCullUniform.element(i) as any
+      // biome-ignore lint/suspicious/noExplicitAny: TSL types lose precision here
+      const cdx = positionWorld.x.sub(cull.x) as any
+      // biome-ignore lint/suspicious/noExplicitAny: TSL types lose precision here
+      const cdz = positionWorld.z.sub(cull.y) as any
+      If(cdx.mul(cdx).add(cdz.mul(cdz)).lessThan(cull.z), () => {
+        const scan = emitTrailScan(i, positionWorld.x, positionWorld.z, tNode)
+        If(scan.strength.greaterThan(float(0.001)), () => {
+          const dLat = sqrt(scan.dist2)
+          const behind = scan.behind
+          // Center churn strip: solid at the axis, soft edge, widening
+          // slowly (NOT at the V's rate — churn is hull-width turbulence).
+          // Amplitude gets a strong close-in boost (the prop-churned water
+          // right off the hull) on top of the long tail decay, so the wake
+          // reads as a confident ribbon near the bike that thins into
+          // dissolving tufts down the trail.
+          const churnHW = behind.mul(0.06).add(float(0.65))
+          const churn = smoothstep(churnHW, churnHW.mul(0.5), dLat)
+          const churnFade = exp(behind.mul(-0.055)).mul(
+            float(0.7).add(exp(behind.mul(-1 / 7)).mul(0.4)),
+          )
+          // Edge rails on the displacement ridge.
+          const wakeWidth = behind.mul(WAKE_HALF_ANGLE_TAN).add(float(WAKE_BASE_WIDTH))
+          const rail = float(1).sub(smoothstep(float(0), float(1.1), abs(dLat.sub(wakeWidth))))
+          const railFade = exp(behind.mul(-0.11))
+          // Taper into the propwash apex at the hull.
+          const headRamp = smoothstep(float(0.0), float(1.2), behind)
+          const ageFade = exp(scan.age.div(-WAKE_AGE_TAU))
+          const m = churn
+            .mul(churnFade)
+            .add(rail.mul(railFade).mul(0.9))
+            .mul(headRamp)
+            .mul(scan.strength)
+            .mul(ageFade)
+            .mul(wakeStrengthUniform)
+          // Strongest trail wins the texture frame (overlaps are brief and
+          // both trails sample the same sheet — no visible handoff).
+          If(m.greaterThan(mask), () => {
+            mask.assign(m)
+            arcU.assign(scan.arc)
+            perpV.assign(scan.perpSigned)
+            behindOut.assign(behind)
+          })
+        })
+      })
+    }
+    return vec4(clamp(mask, float(0), float(1)), arcU, perpV, behindOut)
+  })
+  const wakeTrail = computeWakeTrail()
+  // Trail-aligned churn strokes: U pinned to path arc length (the pattern is
+  // painted onto the world and trails behind the bike), V lateral. Sampled
+  // at top level — see the Fn note above.
+  const wakeStrokeUV = vec2(
+    wakeTrail.y.div(float(WAKE_STROKE_TILE_U)),
+    wakeTrail.z.div(float(WAKE_STROKE_TILE_V)),
+  )
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+  const wakeStrokeSample = texture(getWakeStrokeTexture(), wakeStrokeUV) as any
+  // Stroke break-up ramps in DOWN the trail: near the hull the ribbon stays
+  // a solid sheet (high floor — fresh churn hasn't broken up yet); by ~16 m
+  // back the floor drops and the 0.2 edge-snap downstream dissolves the
+  // tail into the sheet's painted tufts.
+  const wakeStrokeFloor = mix(
+    float(0.65),
+    float(0.25),
+    smoothstep(float(2.0), float(16.0), wakeTrail.w),
+  )
+  // Chase-cam guard: the player's OWN near wake sits right under the low
+  // chase camera, and foreshortening turns a few meters of solid churn into
+  // the whole bottom third of the frame — a blown-out white sheet. Fade the
+  // wake foam out within ~8 m of the camera; everyone else's wake (and your
+  // own, one beat back) is past that. The ridge displacement is untouched,
+  // so the faded band still reads as moving water, not a hole.
+  const wakeCamFade = smoothstep(float(4.0), float(9.0), camDist)
+  const wakeTrailFoam = wakeTrail.x
+    .mul(mix(wakeStrokeFloor, float(1.0), wakeStrokeSample.r))
+    .mul(wakeCamFade)
 
   // Shoreline foam: white foam where terrain is just below the water
   // surface. Reads from the shared `closeness` / `closenessSigned`
@@ -3005,13 +3267,15 @@ export function createWaterMesh(
   const streakFoam = streakSample.r.mul(streakFaceWeight)
 
   // Bubble-texture floor (strength-aware): thin foam → 0.05 (discrete bubbles
-  // over clean water), strong foam (wake / breaking crest) → 0.6 (solid). The
-  // wash-killer — without it broad thin foam paints a uniform milky sheet.
-  // Applied to the wave/wake/shore foam; the streak layer carries its own
-  // stroke shape, so it's combined in after.
+  // over clean water), strong foam (propwash / breaking crest) → 0.6 (solid).
+  // The wash-killer — without it broad thin foam paints a uniform milky sheet.
+  // Applied to the wave/shore/at-hull foam; the streak layer and the trail
+  // wake carry their own stroke shapes, so they're combined in after — the
+  // trail wake in particular must NOT inherit this world-anchored disc/crest
+  // pattern (polka-dot wake was the exact complaint that retired it).
   const foamBubbleFloor = mix(float(0.05), float(0.6), clamp(foamMaskRaw, float(0), float(1)))
   const foamBubbly = foamMaskRaw.mul(mix(foamBubbleFloor, float(1.0), foamBreakupPattern))
-  const foamCoverage = max(foamBubbly, streakFoam)
+  const foamCoverage = max(foamBubbly, max(streakFoam, wakeTrailFoam))
   // Near-BINARY edge: the concept foam is on/off and SHRINKS in area rather
   // than fading in opacity. A tight smoothstep around 0.2 snaps mid-coverage
   // to clean water or solid foam, so as a crest passes its peak the foam patch
@@ -3582,6 +3846,7 @@ export function createWaterMesh(
     foamWarmth: FOAM_WARMTH_DEFAULT,
     foamStreak: FOAM_STREAK_DEFAULT,
     foamBrush: FOAM_BRUSH_DEFAULT,
+    wakeStrength: WAKE_STRENGTH_DEFAULT,
     rampStrength: RAMP_STRENGTH_DEFAULT,
     rampSteps: RAMP_STEPS_DEFAULT,
     rampPosterize: RAMP_POSTERIZE_DEFAULT,
@@ -3710,6 +3975,23 @@ export function createWaterMesh(
       // 0..1 — foam break-up pattern: disc bubbles (0) ↔ crest-parallel
       // oil-paint strokes (1).
       foamBrushUniform.value = clamp01(s, 0, 1)
+    },
+    setWakeStrength(s) {
+      // 0..2 — trail-wake master strength (churn/rail foam AND ridge
+      // displacement). 1 = baseline; 0 = no drawn wake. Render-only: the sim
+      // wake buoyancy is untouched, so 0 leaves invisible-but-feelable
+      // ridges — a dev/tuning setting, not a shippable look.
+      wakeStrengthUniform.value = clamp01(s, 0, 2)
+    },
+    getWakeTrails() {
+      // Read-through to the SIM's trails (field.trails) — the same points
+      // this mesh uploads and buoyancy samples.
+      const out: Array<{ id: number; count: number; headArc: number }> = []
+      for (const tr of field.trails) {
+        if (tr.count === 0) continue
+        out.push({ id: tr.id, count: tr.count, headArc: tr.headArc })
+      }
+      return out
     },
     // P1 readability layers — all fragment-only uniforms, no rebuild.
     setRampStrength(s) {
@@ -4322,6 +4604,56 @@ export function createWaterMesh(
         slot.set(INACTIVE_FAR, INACTIVE_FAR, 0, 0)
         bikeWeights[i] = 0
       }
+    }
+
+    // ---- Wake trails: upload the SIM's `field.trails` into the uniform
+    // blocks. The sim owns the recording (wakeUpdateSystem feeds the trails
+    // per fixed step; buoyancy samples the same points), so this is a pure
+    // copy — no render-side trail state to drift. History right-aligns
+    // against INACTIVE_FAR left-padding (those segments fail the shader's
+    // MAX_SEG gate); the last slot is the live head. Fully age-faded trails
+    // (abandoned bikes, modes that never feed) park their cull circle so
+    // they cost one dead compare per vertex/fragment.
+    const trailCount = Math.min(field.trails.length, MAX_WAKE_TRAILS)
+    for (let i = 0; i < MAX_WAKE_TRAILS; i++) {
+      const tr = i < trailCount ? field.trails[i] : undefined
+      const blockBase = i * WAKE_TRAIL_POINTS
+      const histSlots = WAKE_TRAIL_POINTS - 1
+      const dead = !tr || tr.count === 0 || field.time - tr.headT > WAKE_AGE_TAU * 5
+      const pad = tr ? histSlots - tr.count : histSlots
+      for (let j = 0; j < histSlots; j++) {
+        const slot = wakeTrailSlots[blockBase + j]!
+        if (dead || j < pad) {
+          slot.set(INACTIVE_FAR, INACTIVE_FAR, 0, 0)
+          wakeTrailStrengths[blockBase + j] = 0
+        } else {
+          const src = j - pad
+          slot.set(tr!.px[src]!, tr!.pz[src]!, tr!.arc[src]!, tr!.dropT[src]!)
+          wakeTrailStrengths[blockBase + j] = tr!.str[src]!
+        }
+      }
+      const headSlot = wakeTrailSlots[blockBase + histSlots]!
+      const cullSlot = wakeTrailCulls[i]!
+      if (dead) {
+        headSlot.set(INACTIVE_FAR, INACTIVE_FAR, 0, 0)
+        wakeTrailStrengths[blockBase + histSlots] = 0
+        cullSlot.set(INACTIVE_FAR, INACTIVE_FAR, 0, 0)
+        continue
+      }
+      headSlot.set(tr!.headX, tr!.headZ, tr!.headArc, tr!.headT)
+      wakeTrailStrengths[blockBase + histSlots] = tr!.headStr
+      // Cull circle fit over the live span, padded by the widest possible
+      // lateral reach (V half-width at the tail + edge bell + rail blur).
+      const cx = (tr!.px[0]! + tr!.headX) * 0.5
+      const cz = (tr!.pz[0]! + tr!.headZ) * 0.5
+      let r = Math.hypot(tr!.headX - cx, tr!.headZ - cz)
+      for (let j = 0; j < tr!.count; j++) {
+        const dj = Math.hypot(tr!.px[j]! - cx, tr!.pz[j]! - cz)
+        if (dj > r) r = dj
+      }
+      const span = tr!.headArc - tr!.arc[0]!
+      const reach = WAKE_BASE_WIDTH + WAKE_HALF_ANGLE_TAN * span + WAKE_EDGE_BELL_HALFWIDTH + 1.5
+      cullSlot.set(cx, cz, (r + reach) * (r + reach), tr!.headArc)
     }
   }
 
