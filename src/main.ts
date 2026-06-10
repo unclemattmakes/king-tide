@@ -98,6 +98,7 @@ import {
   defaultWaves,
   sampleSurface,
   setShoreField,
+  setWaveStamps,
   setWaveZones,
 } from './engine/sim/water/wave-field'
 import { applyDeckProfile, detectSteamDeck } from './engine/steam-deck'
@@ -506,6 +507,10 @@ async function boot() {
   // install step. Empty list = pure global Gerstner, identical to
   // pre-wave-zone behaviour.
   setWaveZones(waveField, track.waveZones)
+  // Authored wave stamps — the per-track signature jump waves (P3.2). The
+  // water mesh mirrors `field.stamps` into its uniforms on its next tick
+  // (reference watch, like zones), so the drawn pulse IS the felt one.
+  setWaveStamps(waveField, track.waveStamps ?? [])
   // Terrain heightmap: when present, the water shader attenuates wave
   // displacement in shallow water (so crests stop clipping through
   // seabed/shoreline geometry) and drives depth-driven surf foam at the
