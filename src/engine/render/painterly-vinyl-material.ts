@@ -32,6 +32,7 @@ import {
   float,
   fract,
   mix,
+  nodeObject,
   normalize,
   normalLocal,
   normalWorld,
@@ -41,6 +42,7 @@ import {
   sin,
   texture,
   uniform,
+  userData,
   vec2,
   vec3,
 } from 'three/tsl'
@@ -52,13 +54,33 @@ import {
   brushScaleWeights,
   normalizeMix,
 } from './brush-strokes'
-import { registerVinylBrush, type VinylBrushHandle } from './brush-tuning-service'
+import {
+  registerVinylBrush,
+  VINYL_BRUSH_DEFAULTS,
+  type VinylBrushHandle,
+} from './brush-tuning-service'
 import { stampConvexityColor0 } from './edge-wear-convexity'
 import { applyWaterlineBands } from './waterline'
 
 /** Marks a material we've already vinyl-converted, so conversion is idempotent
  *  and a source material shared by reference converts once. */
 const VINYL_MARKED = Symbol.for('hoverbike.painterlyVinyl')
+
+/** Per-object userData keys a size-shared (`sizePerObject`) vinyl material
+ *  reads at render time — three `userData()` reference nodes, whose value is
+ *  re-read from the rendered mesh's `userData` and uploaded into that render
+ *  object's own uniform buffer each frame. Stamped by `stampVinylObjectSize`. */
+const UD_BRUSH_FREQ = 'vinylBrushFreq'
+const UD_BRUSH_WEIGHTS = 'vinylBrushWeights'
+const UD_BAND_SCALE = 'vinylBandScale'
+const UD_OBJECT_SCALE = 'vinylObjectScale'
+/** Raw characteristic size record so a Brush-tuner re-dial can re-derive the
+ *  frequency/weights without re-measuring the mesh. */
+const UD_PROP_SIZE = 'vinylPropSize'
+/** Material-userData marker: this vinyl twin reads per-object sizes, so every
+ *  mesh wearing it must carry the stamps above. String (not a symbol) because
+ *  `Material.copy` JSON-roundtrips userData and the marker must survive. */
+const SIZE_PER_OBJECT_MARK = 'vinylSizePerObject'
 
 /** Count of distinct vinyl materials actually built this session — each is a
  *  shader the pre-warm must compile. Read by the boot trace so the loading-time
@@ -179,6 +201,19 @@ export type VinylOptions = {
    *  shared material light only SOME instances, e.g. the "next" race gate glowing
    *  while every other gate stays dark. Takes precedence over `emissiveFromTint`. */
   emissiveAttribute?: string
+  /** Share ONE material instance across meshes of every size: read the
+   *  size-derived inputs (brush stroke frequency + scale-blend weights, the
+   *  waterline band scale, the object-space stroke scale) from each MESH's
+   *  `userData` at render time instead of baking them into the node graph.
+   *  three's WebGPU pipeline cache keys per material INSTANCE — converting
+   *  the baked constants to material-scoped uniforms does NOT dedupe — so
+   *  per-size twins each paid their own ~60–130 ms main-thread node-build +
+   *  WGSL codegen in the scenery warm; sharing the instance is what collapses
+   *  material count to source-material count. Every mesh wearing the material
+   *  MUST be stamped via `stampVinylObjectSize` (an unstamped mesh reads
+   *  undefined → NaN uniforms). `propSize`/`objectScale` only seed the tuner
+   *  handle here, and `brushScaleMix` is unsupported in this mode. */
+  sizePerObject?: boolean
 }
 
 // ── Self-contained value noise (verbatim from terrain-shader.ts) ────────────
@@ -254,6 +289,7 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const tintAttribute = opts.tintAttribute
   const emissiveFromTint = opts.emissiveFromTint ?? false
   const emissiveAttribute = opts.emissiveAttribute
+  const sizePerObject = opts.sizePerObject ?? false
 
   const next = new MeshStandardNodeMaterial({ metalness: 0, roughness })
   next.name = src.name ? `mat_vinyl_${src.name}` : 'mat_vinyl'
@@ -289,7 +325,15 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   // (positionLocal × objectScale, normalLocal) for movers: the strokes are
   // painted onto the mesh's own frame so they ride along with a bike / skinned
   // rider instead of swimming through a world-locked field as it travels.
-  const brushPos = brushObjectSpace ? positionLocal.mul(float(objectScale)) : positionWorld
+  // (`nodeObject` wraps the raw userData reference nodes in the TSL proxy —
+  // swizzles/chaining live on the proxy, not the node class.)
+  const brushPos = brushObjectSpace
+    ? positionLocal.mul(
+        sizePerObject
+          ? (nodeObject(userData(UD_OBJECT_SCALE, 'float')) as unknown as Node<'float'>)
+          : float(objectScale),
+      )
+    : positionWorld
   const brushNrm = brushObjectSpace ? normalLocal : normalWorld
 
   // Procedural weathering wash — subtle value-noise mottling so a flat-tint prop
@@ -314,24 +358,62 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   // false falls back to the procedural dirStreak. Feeds brushFac (albedo) + the
   // impasto relief. Shared with terrain via ./brush-strokes.
   const brushWorldScale = 1 / Math.max(brushScale * brushPropSize, 0.02)
-  // brush strength + stroke frequency + R/G/B scale-weights as UNIFORMS so the
-  // dev Brush tuner re-dials the rock/prop/building look live (no recompile) —
-  // see brush-tuning-service.ts. The textured freq folds BRUSH_TEX_TILE back in
-  // (matching the old baked frequency exactly at the defaults); the procedural
-  // fallback uses the raw worldScale. uBrushWeights is unused on the procedural
-  // path (harmless — not wired into that graph).
+  // brush strength + stroke frequency + R/G/B scale-weights drive the live dev
+  // Brush tuner (no recompile) — see brush-tuning-service.ts. Strength is always
+  // a material uniform. Frequency + weights are SIZE-derived, so they live in
+  // one of two places: baked mode (default) keeps them as material uniforms —
+  // this material serves one size — while sizePerObject mode reads them from
+  // each mesh's userData (stampVinylObjectSize), letting one instance serve
+  // every size. The textured freq folds BRUSH_TEX_TILE back in (matching the
+  // old baked frequency exactly at the defaults); the procedural fallback uses
+  // the raw worldScale. The weights are unused on the procedural path
+  // (harmless — not wired into that graph).
   const uBrush = uniform(brush)
-  const uBrushFreq = uniform(brushTextured ? brushWorldScale * BRUSH_TEX_TILE : brushWorldScale)
-  const uBrushWeights = uniform(new THREE.Vector3(wCoarse, wMed, wFine))
+  let streakFreq: Node<'float'>
+  let streakWeights: Node<'vec3'>
+  let brushHandle: VinylBrushHandle
+  if (sizePerObject) {
+    streakFreq = nodeObject(userData(UD_BRUSH_FREQ, 'float')) as unknown as Node<'float'>
+    streakWeights = nodeObject(userData(UD_BRUSH_WEIGHTS, 'vec3')) as unknown as Node<'vec3'>
+    // Freq/weights live per MESH here — the scene pass registers its own
+    // handle that re-stamps every mesh (it knows each mesh's size); this
+    // material-level handle owns only the strength uniform.
+    brushHandle = {
+      initial: { brush, brushScale, brushPropSizeCap },
+      set(v) {
+        uBrush.value = v.brush
+      },
+    }
+  } else {
+    const uBrushFreq = uniform(brushTextured ? brushWorldScale * BRUSH_TEX_TILE : brushWorldScale)
+    const uBrushWeights = uniform(new THREE.Vector3(wCoarse, wMed, wFine))
+    streakFreq = uBrushFreq
+    streakWeights = uBrushWeights
+    // Live-tuner handle — recompute freq + weights from (brushScale, cap, propSize).
+    brushHandle = {
+      initial: { brush, brushScale, brushPropSizeCap },
+      set(v) {
+        uBrush.value = v.brush
+        const bp = Math.min(propSize, v.brushPropSizeCap)
+        const bws = 1 / Math.max(v.brushScale * bp, 0.02)
+        uBrushFreq.value = brushTextured ? bws * BRUSH_TEX_TILE : bws
+        // brushScaleMix pins the weights explicitly — leave them; else size-derive.
+        if (brushTextured && !opts.brushScaleMix) {
+          const w = brushScaleWeights(bp)
+          uBrushWeights.value.set(w[0], w[1], w[2])
+        }
+      },
+    }
+  }
   let streak: Node<'float'>
   if (brushTextured) {
-    // Object-space positions (swim fix) feeding the tunable freq/weights uniforms.
-    streak = brushHeightTriplanar(brushPos, brushNrm, uBrushFreq, uBrushWeights)
+    // Object-space positions (swim fix) feeding the tunable freq/weights.
+    streak = brushHeightTriplanar(brushPos, brushNrm, streakFreq, streakWeights)
   } else {
     const bn = normalize(brushNrm)
     const an = vec3(abs(bn.x), abs(bn.y), abs(bn.z))
     const wsum = an.x.add(an.y).add(an.z).add(float(1e-4))
-    const sampleStreak = (p: Node<'vec2'>) => dirStreak(p, uBrushFreq)
+    const sampleStreak = (p: Node<'vec2'>) => dirStreak(p, streakFreq)
     streak = sampleStreak(vec2(brushPos.z, brushPos.y))
       .mul(an.x)
       .add(sampleStreak(vec2(brushPos.x, brushPos.z)).mul(an.y))
@@ -340,27 +422,16 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   }
   const brushFac = float(1).add(streak.sub(float(0.5)).mul(uBrush.mul(float(3.0))))
 
-  // Live-tuner handle — recompute freq + weights from (brushScale, cap, propSize).
-  const brushHandle: VinylBrushHandle = {
-    initial: { brush, brushScale, brushPropSizeCap },
-    set(v) {
-      uBrush.value = v.brush
-      const bp = Math.min(propSize, v.brushPropSizeCap)
-      const bws = 1 / Math.max(v.brushScale * bp, 0.02)
-      uBrushFreq.value = brushTextured ? bws * BRUSH_TEX_TILE : bws
-      // brushScaleMix pins the weights explicitly — leave them; else size-derive.
-      if (brushTextured && !opts.brushScaleMix) {
-        const w = brushScaleWeights(bp)
-        uBrushWeights.value.set(w[0], w[1], w[2])
-      }
-    },
-  }
   next.userData.vinylBrushHandle = brushHandle
 
   // World-space waterline trio FIRST, on the UN-brushed wash (opt-in; strength
   // 0 = no-op). The band height shrinks on small props (kept full on big ones)
-  // so a fixed-metre salt band doesn't swallow a 1 m chest.
-  const bandScale = Math.min(propSize / WATERLINE_FULL_BAND_SIZE, 1)
+  // so a fixed-metre salt band doesn't swallow a 1 m chest. Per-object mode
+  // reads the pre-clamped scale from mesh userData (stampVinylObjectSize does
+  // the min(size/6, 1) CPU-side).
+  const bandScale = sizePerObject
+    ? (nodeObject(userData(UD_BAND_SCALE, 'float')) as unknown as Node<'float'>)
+    : Math.min(propSize / WATERLINE_FULL_BAND_SIZE, 1)
   const banded = applyWaterlineBands(
     washed,
     waterLevel,
@@ -417,8 +488,69 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   next.normalNode = bumpMap(streak, uBrush.mul(float(2.5)))
 
   marked2(next).userData[VINYL_MARKED] = true
+  if (sizePerObject) next.userData[SIZE_PER_OBJECT_MARK] = true
   next.needsUpdate = true
   return next
+}
+
+/** True when `m` is a size-shared vinyl twin (`sizePerObject`) — every mesh
+ *  wearing one must carry the per-object stamps (see stampVinylObjectSize). */
+export function isSizePerObjectVinyl(m: THREE.Material | null | undefined): boolean {
+  if (!m) return false
+  return (m.userData as Record<string, unknown> | undefined)?.[SIZE_PER_OBJECT_MARK] === true
+}
+
+export type VinylStampConfig = {
+  /** Brush-streak size as a fraction of the (capped) prop size — mirrors
+   *  `VinylOptions.brushScale` (default 0.12). */
+  brushScale: number
+  /** Metres past which the brush stops treating a prop as bigger — mirrors
+   *  `VinylOptions.brushPropSizeCap` (default 6). */
+  brushPropSizeCap: number
+  /** Sheet-based brush, which folds BRUSH_TEX_TILE into the frequency —
+   *  mirrors `VinylOptions.brushTextured` (default true). */
+  brushTextured?: boolean
+}
+
+/**
+ * Stamp the per-object inputs a `sizePerObject` vinyl material reads at render
+ * time onto `obj.userData`: the brush stroke frequency + coarse/medium/fine
+ * scale weights (identical formulas to the baked path — capped prop size into
+ * `brushScaleWeights` and the BRUSH_TEX_TILE fold), the waterline band scale,
+ * and the object-space stroke scale. Also records the raw propSize so a live
+ * Brush-tuner re-dial can re-derive freq/weights without re-measuring.
+ *
+ * Values are JSON-safe on purpose — `Object3D.clone()` JSON-roundtrips
+ * userData, so a cloned mesh keeps working stamps. The weights are a plain
+ * `{x,y,z}` (not a Vector3): three's vec3 uniform upload only reads `.x/.y/.z`,
+ * which both shapes satisfy.
+ */
+export function stampVinylObjectSize(
+  obj: THREE.Object3D,
+  propSize: number,
+  objectScale: number,
+  cfg: VinylStampConfig,
+): void {
+  const size = Math.max(propSize, 0.05)
+  const bp = Math.min(size, cfg.brushPropSizeCap)
+  const ws = 1 / Math.max(cfg.brushScale * bp, 0.02)
+  const [wCoarse, wMed, wFine] = brushScaleWeights(bp)
+  const ud = obj.userData as Record<string, unknown>
+  ud[UD_PROP_SIZE] = size
+  ud[UD_OBJECT_SCALE] = Math.max(objectScale, 0.01)
+  ud[UD_BAND_SCALE] = Math.min(size / WATERLINE_FULL_BAND_SIZE, 1)
+  ud[UD_BRUSH_FREQ] = (cfg.brushTextured ?? true) ? ws * BRUSH_TEX_TILE : ws
+  ud[UD_BRUSH_WEIGHTS] = { x: wCoarse, y: wMed, z: wFine }
+}
+
+/** Re-derive a previously-stamped mesh's freq/weights for new tuner dials,
+ *  keeping its recorded size. No-op-ish fallback (REF_PROP_SIZE) if the mesh
+ *  was never stamped. */
+function restampVinylObjectSize(obj: THREE.Object3D, cfg: VinylStampConfig): void {
+  const ud = obj.userData as Record<string, unknown>
+  const size = typeof ud[UD_PROP_SIZE] === 'number' ? (ud[UD_PROP_SIZE] as number) : REF_PROP_SIZE
+  const oScale = typeof ud[UD_OBJECT_SCALE] === 'number' ? (ud[UD_OBJECT_SCALE] as number) : 1
+  stampVinylObjectSize(obj, size, oScale, cfg)
 }
 
 function marked2(
@@ -513,9 +645,21 @@ export function applyVinylMaterialToScene(
   root.updateMatrixWorld(true)
   const edgeWear = opts.edgeWear ?? 0
   const brushObjectSpace = opts.brushObjectSpace ?? false
-  // Convert once per (source material, size bucket): a material shared across
-  // meshes yields one vinyl twin, preserving whatever batching existed.
-  const cache = new Map<THREE.Material, Map<string, THREE.Material>>()
+  // ONE vinyl twin per source material: the size-derived inputs are per-OBJECT
+  // userData reads (`sizePerObject`), so differently-sized meshes share the
+  // same instance and the cache needs no size key. Material COUNT is the
+  // shader pre-warm lever — three's WebGPU pipeline cache keys per material
+  // INSTANCE, so every per-size twin paid its own ~60–130 ms main-thread
+  // node-build + WGSL codegen during the progressive scenery warm (155
+  // materials on Texcoco Rising = frame dips ~10 s past the green light).
+  const cache = new Map<THREE.Material, THREE.Material>()
+  const stampCfg: VinylStampConfig = {
+    brushScale: opts.brushScale ?? VINYL_BRUSH_DEFAULTS.brushScale,
+    brushPropSizeCap: opts.brushPropSizeCap ?? VINYL_BRUSH_DEFAULTS.brushPropSizeCap,
+  }
+  /** Meshes carrying per-object stamps — the pass-level tuner handle re-stamps
+   *  these on a brushScale/cap re-dial (each keeps its own recorded size). */
+  const stamped: THREE.Object3D[] = []
   const localBox = new THREE.Box3()
   const sizeV = new THREE.Vector3()
   const scaleV = new THREE.Vector3()
@@ -532,53 +676,65 @@ export function applyVinylMaterialToScene(
     if (typeof obj.name === 'string' && obj.name.startsWith('terrain')) return
     const mat = obj.material as THREE.Material | THREE.Material[] | undefined
     if (!mat) return
-    const allOwned = Array.isArray(mat) ? mat.every(ownedByAnotherPass) : ownedByAnotherPass(mat)
-    if (allOwned) return
 
     // Per-mesh characteristic size (its own geometry bbox × world scale, NOT the
-    // subtree) drives the scale-relative brush + waterline band.
-    const geom = obj.geometry as THREE.BufferGeometry
-    if (!geom.boundingBox) geom.computeBoundingBox()
-    let propSize = 4
-    if (geom.boundingBox) {
-      geom.boundingBox.getSize(sizeV)
+    // subtree) drives the scale-relative brush + waterline band. Object-space
+    // brush additionally needs the mesh's world scale to keep the stroke size
+    // matched (positionLocal is in un-scaled model units).
+    const measure = (): { propSize: number; objectScale: number } => {
+      const geom = obj.geometry as THREE.BufferGeometry
+      if (!geom.boundingBox) geom.computeBoundingBox()
+      let propSize = 4
+      if (geom.boundingBox) {
+        geom.boundingBox.getSize(sizeV)
+        obj.matrixWorld.decompose(tmpPos, tmpQuat, scaleV)
+        propSize = Math.max(
+          sizeV.x * Math.abs(scaleV.x),
+          sizeV.y * Math.abs(scaleV.y),
+          sizeV.z * Math.abs(scaleV.z),
+          0.05,
+        )
+      } else {
+        localBox.setFromObject(obj)
+        localBox.getSize(sizeV)
+        propSize = Math.max(sizeV.x, sizeV.y, sizeV.z, 0.05)
+      }
       obj.matrixWorld.decompose(tmpPos, tmpQuat, scaleV)
-      propSize = Math.max(
-        sizeV.x * Math.abs(scaleV.x),
-        sizeV.y * Math.abs(scaleV.y),
-        sizeV.z * Math.abs(scaleV.z),
-        0.05,
-      )
-    } else {
-      localBox.setFromObject(obj)
-      localBox.getSize(sizeV)
-      propSize = Math.max(sizeV.x, sizeV.y, sizeV.z, 0.05)
+      const objectScale = Math.max(Math.abs(scaleV.x), Math.abs(scaleV.y), Math.abs(scaleV.z), 0.01)
+      return { propSize, objectScale }
+    }
+    const stamp = (): void => {
+      const m = measure()
+      stampVinylObjectSize(obj, m.propSize, m.objectScale, stampCfg)
+      stamped.push(obj)
+    }
+
+    const allOwned = Array.isArray(mat) ? mat.every(ownedByAnotherPass) : ownedByAnotherPass(mat)
+    if (allOwned) {
+      // Nothing to convert — but a mesh can arrive already WEARING a size-shared
+      // vinyl (a clone of a converted tree shares materials by reference). It
+      // still needs its OWN per-object stamps: without them the material's
+      // userData reads are undefined → NaN uniforms on this mesh.
+      if ((Array.isArray(mat) ? mat : [mat]).some(isSizePerObjectVinyl)) {
+        stamp()
+        ensureNeutralVertexColor(obj.geometry as THREE.BufferGeometry)
+      }
+      return
     }
 
     // Edge wear needs real per-vertex convexity: bake it when requested,
     // otherwise stamp a neutral COLOR_0 so the AO/edge reads are safe no-ops
     // (a fully-absent attribute reads 0 on every channel under TSL). The bake is
     // idempotent + a no-op for a mesh that already carries COLOR_0.
+    const geom = obj.geometry as THREE.BufferGeometry
     if (edgeWear > 0) stampConvexityColor0(geom)
     else ensureNeutralVertexColor(geom)
-    // Object-space brush needs the mesh's world scale to keep the stroke size
-    // matched (positionLocal is in un-scaled model units).
-    obj.matrixWorld.decompose(tmpPos, tmpQuat, scaleV)
-    const objectScale = Math.max(Math.abs(scaleV.x), Math.abs(scaleV.y), Math.abs(scaleV.z), 0.01)
-    const sizeKey = brushObjectSpace
-      ? `${(Math.round(propSize * 2) / 2).toFixed(1)}|${(Math.round(objectScale * 4) / 4).toFixed(2)}`
-      : (Math.round(propSize * 2) / 2).toFixed(1)
     const convert = (m: THREE.Material): THREE.Material => {
       if (ownedByAnotherPass(m)) return m
-      let bySize = cache.get(m)
-      if (!bySize) {
-        bySize = new Map()
-        cache.set(m, bySize)
-      }
-      const hit = bySize.get(sizeKey)
+      const hit = cache.get(m)
       if (hit) return hit
       const v = buildVinylMaterial(m, {
-        propSize,
+        sizePerObject: true,
         waterLevel: opts.waterLevel ?? 0,
         waterline: opts.waterline ?? 0,
         ...(opts.brush !== undefined ? { brush: opts.brush } : {}),
@@ -586,15 +742,38 @@ export function applyVinylMaterialToScene(
         ...(opts.brushPropSizeCap !== undefined ? { brushPropSizeCap: opts.brushPropSizeCap } : {}),
         edgeWear,
         brushObjectSpace,
-        objectScale,
       })
       const h = (v.userData as { vinylBrushHandle?: VinylBrushHandle }).vinylBrushHandle
       if (h) registerVinylBrush(h)
-      bySize.set(sizeKey, v)
+      cache.set(m, v)
       count++
       return v
     }
     obj.material = Array.isArray(mat) ? mat.map(convert) : convert(mat)
+    const now = obj.material as THREE.Material | THREE.Material[]
+    if ((Array.isArray(now) ? now : [now]).some(isSizePerObjectVinyl)) stamp()
   })
+
+  // The per-material handles registered above only re-dial brush STRENGTH in
+  // per-object mode — the size half (freq/weights) lives in mesh userData. One
+  // pass-level handle re-stamps every mesh from its recorded size, so the dev
+  // Brush tuner keeps working end-to-end. Registered after the material
+  // handles, so the tuner's initial-value seeding stays material-first.
+  if (stamped.length > 0) {
+    registerVinylBrush({
+      initial: {
+        brush: opts.brush ?? VINYL_BRUSH_DEFAULTS.brush,
+        brushScale: stampCfg.brushScale,
+        brushPropSizeCap: stampCfg.brushPropSizeCap,
+      },
+      set(v) {
+        const cfg: VinylStampConfig = {
+          brushScale: v.brushScale,
+          brushPropSizeCap: v.brushPropSizeCap,
+        }
+        for (const m of stamped) restampVinylObjectSize(m, cfg)
+      },
+    })
+  }
   return count
 }

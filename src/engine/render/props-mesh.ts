@@ -2,8 +2,9 @@ import * as THREE from 'three'
 import { isAnimatedAssetProp, type LoadedProp } from '@/game/assets/prop-loader'
 import type { Prop, PropType } from '@/game/tracks/types'
 import { ExportedKind } from '../asset-kinds'
+import { VINYL_BRUSH_DEFAULTS } from './brush-tuning-service'
 import { stampConvexityColor0 } from './edge-wear-convexity'
-import { buildVinylMaterial } from './painterly-vinyl-material'
+import { buildVinylMaterial, stampVinylObjectSize } from './painterly-vinyl-material'
 import { buildPropGeometry } from './props-geometry'
 
 /**
@@ -78,33 +79,38 @@ function collectPrototypeSubmeshes(loaded: LoadedProp): PrototypeSubmesh[] {
   return out
 }
 
-/** One painterly-vinyl material per (source material, prop-size bucket), shared
- *  across every placement/sub-mesh that references it (conversion runs once per
- *  asset, not per placement). The size bucket lets the material scale its brush
- *  strokes + waterline band to the prop (see propSize in buildVinylMaterial), so
- *  two differently-sized assets sharing a source material each still get the
- *  right scale. Keyed weakly on the source so unloaded prop materials can be GC'd. */
-const vinylMaterialCache = new WeakMap<THREE.Material, Map<string, THREE.Material>>()
+/** ONE painterly-vinyl material per source material, shared across every
+ *  asset/placement/sub-mesh that references it (conversion runs once per
+ *  source, not per placement or size). The size-derived inputs (brush stroke
+ *  scale + waterline band) are per-OBJECT userData reads — each InstancedMesh
+ *  is stamped with its asset's size below — so two differently-sized assets
+ *  sharing a source material still read at the right scale while sharing the
+ *  instance. Material COUNT is the shader pre-warm lever (one main-thread
+ *  node-build + codegen per material), so the old per-size twins were paying
+ *  for themselves in progressive-warm frame dips. Keyed weakly on the source
+ *  so unloaded prop materials can be GC'd. */
+const vinylMaterialCache = new WeakMap<THREE.Material, THREE.Material>()
 
-/** Wrap a prop sub-mesh's material(s) in the painterly-vinyl runtime material,
- *  caching by (source, propSize) so a material shared by reference converts once
- *  per size. See painterly-vinyl-material.ts / docs/painterly-vinyl-pipeline.md. */
+/** The stamp config matching buildVinylMaterial's defaults — props don't
+ *  override any brush dial. */
+const PROP_STAMP_CFG = {
+  brushScale: VINYL_BRUSH_DEFAULTS.brushScale,
+  brushPropSizeCap: VINYL_BRUSH_DEFAULTS.brushPropSizeCap,
+}
+
+/** Wrap a prop sub-mesh's material(s) in the (size-shared) painterly-vinyl
+ *  runtime material. The caller MUST stamp each mesh wearing the result via
+ *  `stampVinylObjectSize`. See painterly-vinyl-material.ts /
+ *  docs/painterly-vinyl-pipeline.md. */
 function vinylizeMaterial(
   mat: THREE.Material | THREE.Material[],
-  propSize: number,
 ): THREE.Material | THREE.Material[] {
-  // Quantise to 0.5 m so near-identical sizes share a material (more cache hits).
-  const sizeKey = (Math.round(propSize * 2) / 2).toFixed(1)
   const one = (m: THREE.Material): THREE.Material => {
-    let bySize = vinylMaterialCache.get(m)
-    if (!bySize) {
-      bySize = new Map()
-      vinylMaterialCache.set(m, bySize)
+    let v = vinylMaterialCache.get(m)
+    if (!v) {
+      v = buildVinylMaterial(m, { sizePerObject: true })
+      vinylMaterialCache.set(m, v)
     }
-    const cached = bySize.get(sizeKey)
-    if (cached) return cached
-    const v = buildVinylMaterial(m, { propSize })
-    bySize.set(sizeKey, v)
     return v
   }
   return Array.isArray(mat) ? mat.map(one) : one(mat)
@@ -198,7 +204,7 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
       stampConvexityColor0(sm.geometry)
       const inst = new THREE.InstancedMesh(
         sm.geometry,
-        vinylizeMaterial(sm.material, propSize),
+        vinylizeMaterial(sm.material),
         bucket.length,
       )
       inst.name = `track:props:${assetId}`
@@ -206,6 +212,11 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
       inst.receiveShadow = true
       inst.userData.kind = 'prop'
       inst.userData.assetId = assetId
+      // Per-object size inputs for the shared vinyl material — one stamp per
+      // InstancedMesh, i.e. per asset: every placement of the asset reads the
+      // prototype's size, exactly like the old per-asset size bucket did.
+      // (objectScale 1: the prop brush samples world space.)
+      stampVinylObjectSize(inst, propSize, 1, PROP_STAMP_CFG)
       for (let i = 0; i < placementMatrices.length; i++) {
         const pm = placementMatrices[i]
         if (!pm) continue

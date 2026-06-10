@@ -16,7 +16,7 @@
  * (see docs/painterly-vinyl-pipeline.md).
  */
 import type Node from 'three/src/nodes/core/Node.js'
-import { float, mix, positionWorld, smoothstep, vec3 } from 'three/tsl'
+import { float, max, mix, positionWorld, smoothstep, vec3 } from 'three/tsl'
 
 export type WaterlinePalette = {
   /** Submerged algae coloration (below the line). */
@@ -37,7 +37,11 @@ const DEFAULT_SALT: [number, number, number] = [0.88, 0.88, 0.82]
  * @param tideHeight how far ABOVE the line the salt band reaches (m)
  * @param algae      submerged tint depth 0..1 (0 = none, 1 = full algae tone)
  * @param bandScale  multiplies every band height; <1 shrinks the whole waterline
- *                   for small props so it stays a thin line, not a slab
+ *                   for small props so it stays a thin line, not a slab. A
+ *                   number bakes the thresholds as constants; a float NODE
+ *                   (the size-shared vinyl material's per-object read) does
+ *                   the same scaling in-shader so one material instance can
+ *                   serve meshes of every size
  * @param palette    optional colour overrides
  */
 export function applyWaterlineBands(
@@ -46,25 +50,36 @@ export function applyWaterlineBands(
   strength: number,
   tideHeight = 0.4,
   algae = 0.5,
-  bandScale = 1,
+  bandScale: number | Node<'float'> = 1,
   palette: WaterlinePalette = {},
 ): Node<'vec3'> {
   const yRel = positionWorld.y.sub(float(waterLevel))
   const wlStr = float(strength)
   // Every metre threshold below scales with bandScale, so the whole band shrinks
   // proportionally on small props (1 = full physical height on big props).
-  const bs = Math.max(bandScale, 0.05)
-  const th = Math.max(tideHeight, 0.05) * bs
-
+  //
   // ALGAE: fully solid for everything below ~the salt line (yRel < 0.08·bs), THEN
   // fades out. Holding it solid until the salt is opaque above means the
   // algae->salt transition is always fully covered — no dark base seam.
-  const algaeMask = smoothstep(float(0.2 * bs), float(0.08 * bs), yRel)
   // SALT line: rises to full at ~0.08·bs (just above the surface), holds as the
   // bright tide line, then fades to dry rock by `tideHeight`·bs.
-  const saltMask = smoothstep(float(-0.1 * bs), float(0.08 * bs), yRel).mul(
-    smoothstep(float(th), float(th * 0.45), yRel),
-  )
+  let algaeMask: Node<'float'>
+  let saltMask: Node<'float'>
+  if (typeof bandScale === 'number') {
+    const bs = Math.max(bandScale, 0.05)
+    const th = Math.max(tideHeight, 0.05) * bs
+    algaeMask = smoothstep(float(0.2 * bs), float(0.08 * bs), yRel)
+    saltMask = smoothstep(float(-0.1 * bs), float(0.08 * bs), yRel).mul(
+      smoothstep(float(th), float(th * 0.45), yRel),
+    )
+  } else {
+    const bs = max(bandScale, float(0.05))
+    const th = bs.mul(float(Math.max(tideHeight, 0.05)))
+    algaeMask = smoothstep(bs.mul(float(0.2)), bs.mul(float(0.08)), yRel)
+    saltMask = smoothstep(bs.mul(float(-0.1)), bs.mul(float(0.08)), yRel).mul(
+      smoothstep(th, th.mul(float(0.45)), yRel),
+    )
+  }
 
   const a = palette.under ?? DEFAULT_UNDER
   const s = palette.salt ?? DEFAULT_SALT
