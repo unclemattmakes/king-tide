@@ -33,6 +33,10 @@ import type { WaterDebugDefaults, WaterMesh } from './render/water'
 // (missing-key -> new default via the loader), so returning users pick up the
 // readability defaults and keep their other tuning.
 //
+// No key bump for the trail-wake rework either: wakeStrength is an ADDED key
+// (missing-key -> default 1.0), so returning users get the trailing wake at
+// baseline strength automatically.
+//
 // v9 bump (prior): dropped the spectrum/FFT-only knobs (choppiness,
 // seaStateIntensity, windSpeed, windDirection, windCutoff, foamPersistence)
 // along with the FFT path itself.
@@ -62,6 +66,7 @@ export type WaterDebugSettings = {
   foamWarmth: number
   foamStreak: number
   foamBrush: number
+  wakeStrength: number
   rampStrength: number
   rampSteps: number
   rampPosterize: number
@@ -98,6 +103,7 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     foamWarmth: d.foamWarmth,
     foamStreak: d.foamStreak,
     foamBrush: d.foamBrush,
+    wakeStrength: d.wakeStrength,
     rampStrength: d.rampStrength,
     rampSteps: d.rampSteps,
     rampPosterize: d.rampPosterize,
@@ -170,6 +176,7 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setFoamWarmth(s.foamWarmth)
   water.debug.setFoamStreak(s.foamStreak)
   water.debug.setFoamBrush(s.foamBrush)
+  water.debug.setWakeStrength(s.wakeStrength)
   water.debug.setRampStrength(s.rampStrength)
   water.debug.setRampSteps(s.rampSteps)
   water.debug.setRampPosterize(s.rampPosterize)

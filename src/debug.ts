@@ -19,12 +19,12 @@ import type { SimWorld } from './engine/sim/ecs/world'
 import type { PhysicsWorld } from './engine/sim/physics/rapier'
 import { captureSnapshot, snapshotToString } from './engine/sim/snapshot'
 import { sampleShore } from './engine/sim/water/shore-field'
+import { sampleWakeFromTrail, type WakeSampleOut } from './engine/sim/water/wake-trail'
 import {
   effectiveSteepness,
   SHOAL_FADE_DEPTH,
   SHORE_BAND_DEPTH,
   sampleHeight,
-  sampleWakeFromSource,
   sampleZoneFactors,
   type WaveFieldState,
 } from './engine/sim/water/wave-field'
@@ -36,6 +36,10 @@ import { type RaceTick, simulateStep } from './game/sim-step'
 import { getHeldPickup } from './game/systems/pickup'
 import { computeStandings, type Standing } from './game/systems/standings'
 import type { Track } from './game/tracks/types'
+
+// Scratch for the waterSync diagnostic's wake subtraction (same single-
+// threaded reuse pattern as the sim samplers' module scratch).
+const _wakeScratch: WakeSampleOut = { y: 0, dydx: 0, dydz: 0 }
 
 /**
  * Dev-only debug API. Lets Playwright (and Claude in a Chrome session) drive
@@ -522,12 +526,13 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
         ) {
           zoned = true
         }
-        // The sampler adds per-bike wakes; the mirror doesn't. The wake is a
-        // closed-form world-point term (no inverse-map interaction), so
-        // subtracting it here is exact, not an approximation.
+        // The sampler adds per-bike wake trails; the mirror doesn't. The wake
+        // is a world-point term (no inverse-map interaction), so subtracting
+        // it here is exact, not an approximation.
         let wakeY = 0
-        for (const src of field.wakes) {
-          wakeY += sampleWakeFromSource(src, v.x, v.z, field.time).y
+        for (const tr of field.trails) {
+          sampleWakeFromTrail(tr, v.x, v.z, field.time, _wakeScratch)
+          wakeY += _wakeScratch.y
         }
         const dy = sampleHeight(field, v.x, v.z) - wakeY - v.y
         const disp = Math.hypot(v.x - rx, v.z - rz)
