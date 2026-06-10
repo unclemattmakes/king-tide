@@ -31,6 +31,22 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-10 (c)** — **P3.1 shoaling v2: depth-driven
+> surf.** Shallow water no longer just flattens the swell: it STACKS it
+> (Green's law, capped 1.3×) and then BREAKS it at a depth-determined
+> line (H/h ≈ 0.78) that moves with the live swell + set envelope — big
+> sets break farther out, identically in buoyancy and the shader (shared
+> drift-tested constants). Shore breakers now scale with the live swell
+> (calm lagoons lap, storms pound) and lean forward (second harmonic;
+> direction pinned by measurement in the unit test). New `Surf shoaling`
+> water-menu knob (persisted, default 1 = surf ON; 0 = the exact legacy
+> kill-switch for A/B). **CHANGES BUOYANCY near shores — playtest-gated**:
+> Matt's hands on beach approaches + a QA-matrix pass for AI on
+> shore-adjacent corridors. The `renderVertex` mirror now models the
+> shoal factor, so `waterSync` verifies sim↔render THROUGH the shoal
+> band. A/B captures in artifacts/shoaling-v2/. See
+> water-next-research.md §8 P3.1.
+
 > **Last updated: 2026-06-10 (b)** — **P2.3 shading anti-repetition kit.**
 > Fragment-only, three pieces: hex-tiled (stochastic 3-tap) sampling on
 > the detail-normal cascades + foam break-up sheets kills strict tile
