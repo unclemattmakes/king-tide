@@ -258,6 +258,19 @@ export type NetDebugProbe = {
    *  since connect. Useful as an e2e wait point ("wait until tab 2 has
    *  applied at least one snapshot from tab 1"). */
   snapshotsReceived(): number
+  /** Sim-truth bike positions straight from the Rapier bodies (player /
+   *  AI by index / remote by peer slot) — NOT render interpolation. The
+   *  two-tab e2e (m10-11-state-sync.spec.ts) compares these across tabs
+   *  to assert snapshot-sync convergence; AI indices line up with the
+   *  snapshot wire format's `bikeIndex`. */
+  bikePoses(): {
+    player: { x: number; y: number; z: number } | null
+    ai: ({ x: number; y: number; z: number } | null)[]
+    /** true = Dynamic (locally simulated); false = kinematic
+     *  (snapshot-driven). Aligned with `ai`. */
+    aiDynamic: boolean[]
+    remote: Record<number, { x: number; y: number; z: number }>
+  }
 }
 
 export type DeterminismHarness = {

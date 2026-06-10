@@ -44,6 +44,24 @@ import { applySnapshot } from '@/game/systems/apply-snapshot'
 import { clearRemoteInterp, pushRemoteSnapshot } from '@/game/systems/remote-interp'
 import type { Track } from '@/game/tracks/types'
 
+/** Sim-truth bike positions, read straight from the Rapier bodies (NOT
+ *  the render-interpolated transforms). Probe surface for the two-tab
+ *  e2e (tests/e2e/m10-11-state-sync.spec.ts) and devtools. */
+export type BikePosesProbe = {
+  player: { x: number; y: number; z: number } | null
+  /** Indexed like `aiEids` — the same index a snapshot's `bikeIndex`
+   *  refers to, so cross-tab comparisons line up bike-for-bike. */
+  ai: ({ x: number; y: number; z: number } | null)[]
+  /** Per-AI body mode, aligned with `ai`: true = Dynamic (locally
+   *  simulated — this tab is/was AI host), false = kinematic
+   *  (snapshot-driven). The two-tab spec's triage breadcrumb: a
+   *  non-host with dynamic AI bikes is running a divergent local race;
+   *  a non-host with frozen kinematic bikes isn't applying snapshots. */
+  aiDynamic: boolean[]
+  /** Remote-peer bikes keyed by peer slot. */
+  remote: Record<number, { x: number; y: number; z: number }>
+}
+
 export interface MultiplayerHandle {
   /** Live PartyKit room accessor, or `null` in single-player. Function
    *  so a leaving host can hand the room off without invalidating the
@@ -58,6 +76,8 @@ export interface MultiplayerHandle {
   buildAndSendSnapshot(tick: number, iAmHost: boolean): void
   /** Refresh the room-id HUD pill (post-snapshot, post-join, etc.). */
   renderRoomChip(): void
+  /** Read-only pose probe (see {@link BikePosesProbe}). */
+  probeBikePoses(): BikePosesProbe
 }
 
 export interface SetupMultiplayerOpts {
@@ -178,8 +198,18 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
     remoteEids.delete(peerId)
   }
 
+  // Set when the relay rejects us because the room's race locked (no
+  // mid-race joins — e.g. a reconnect attempt after the join grace).
+  // The room has closed itself; we keep racing solo.
+  let raceLocked = false
+
   function renderRoomChip(): void {
     if (!roomEl) return
+    if (raceLocked) {
+      roomEl.style.display = ''
+      roomEl.textContent = `room: ${roomId} locked (race in progress) — riding solo`
+      return
+    }
     if (!net?.ready) {
       roomEl.style.display = roomId ? '' : 'none'
       // partysocket auto-reconnects; the chip distinguishes the two
@@ -360,6 +390,15 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
           roomEl.textContent = `room: ${roomId} FULL`
         }
       },
+      onRaceInProgress: () => {
+        // The relay's no-mid-race-joins lock turned us away (a fresh
+        // join via a shared race URL, or a reconnect after the join
+        // grace). The room already closed itself; if we were racing,
+        // onDisconnected has degraded us to solo — just label it.
+        console.warn(`[net] room "${roomId}" race is locked — continuing solo`)
+        raceLocked = true
+        renderRoomChip()
+      },
       onDisconnected: () => {
         // Established session dropped; partysocket retries in the
         // background. Degrade to solo so the race stays playable:
@@ -452,6 +491,30 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
     net.sendBinary(snapshotSendBuf.subarray(0, byteLength))
   }
 
+  function probeBikePoses(): BikePosesProbe {
+    const body = (eid: number) => {
+      const h = RBHandleStore.get(eid)
+      return h ? phys.world.getRigidBody(h.handle) : null
+    }
+    const pose = (eid: number) => {
+      const rb = body(eid)
+      if (!rb) return null
+      const t = rb.translation()
+      return { x: t.x, y: t.y, z: t.z }
+    }
+    const remote: Record<number, { x: number; y: number; z: number }> = {}
+    for (const [pid, eid] of remoteEids) {
+      const p = pose(eid)
+      if (p) remote[pid] = p
+    }
+    return {
+      player: pose(playerEid),
+      ai: aiEids.map(pose),
+      aiDynamic: aiEids.map((eid) => body(eid)?.bodyType() === phys.rapier.RigidBodyType.Dynamic),
+      remote,
+    }
+  }
+
   return {
     get room() {
       return net
@@ -460,5 +523,6 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
     isHost: computeIsHost,
     buildAndSendSnapshot,
     renderRoomChip,
+    probeBikePoses,
   }
 }
