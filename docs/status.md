@@ -31,6 +31,37 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-09 (b)** — **The two "pre-existing flakes" diagnosed —
+> one was a real sim bug.** m2-water rides-waves + m9-air-control (the failures
+> documented under load on pristine main) were characterized with trace probes,
+> ~5× idle + ~5× loaded each. (1) **Sim bug (fixed):** the airborne-over-water
+> dive clamp in `applyPlayerPitchTorque` shipped with the comparison inverted
+> since 916fa6e — it suppressed the Q dive-kick exactly when the nose was HIGH
+> (the pitch-the-landing case), gated per-tick by the wave slope scrolling under
+> the flight, so dive authority was wave-phase roulette. Sign convention proven
+> from the quaternion algebra + grounded-PD restoring direction; now pinned by
+> `tests/unit/hover-dive-clamp.test.ts`. **Playtest flag for Matt:** Q in air
+> now bites reliably after nose-high launches (it randomly didn't before); the
+> 12° ceiling still bounds it near the surface tangent — if dive wants more or
+> steadier authority the lever is `DIVE_PITCH_FWD_LIMIT_DEG` (or referencing
+> the horizon instead of the instantaneous wave tangent while airborne, which
+> still duty-cycles the kick — left as-shipped). (2) **Spec scaffolding
+> hardened (the actual flake):** both specs drove a 40m wave straight into a
+> ±3m-wide ramp with AI traffic — launch lotteries (misses / lip face-plants in
+> troughs / AI wipeouts), splashdown transients straddling m2's z>60 window,
+> and wall-clock sampling that dilates vs the sim under load (the rAF dt clamp
+> is 1/15s; `race().raceTime` is the sim clock — accel measured against wall
+> time shrinks by the dilation factor). Both specs now run `?autostart=1&tt=1`
+> (no AI), steer a calibrated line (m2 clear of the ramp at x=58; m9 onto its
+> center), gate launches on rising-airborne state with per-scenario retries,
+> and measure fixed sim-clock windows. m9's dive-vs-baseline `< baseA−1`
+> assertion is re-pinned (soft bound + Q≪E separation): the old margin was
+> only ever satisfiable through the inverted clamp letting lucky launches
+> over-rotate past the designed 12° ceiling — green-by-accident since 6bd1276.
+> Thresholds otherwise unchanged. Verified 10/10 idle + 10/10 under load
+> (8-core busy-loop harness, ~62%+ CPU); see `tests/e2e/m2-water.spec.ts` /
+> `tests/e2e/m9-air-control.spec.ts` headers for the full rationale.
+>
 > **Last updated: 2026-06-09** — **Water P2.1 wave sets: the authorable surf
 > rhythm.** Per-track `water.swellSets {periodS, depth}` makes the ambient sea
 > breathe `1 + depth·sin(2π·t/periodS)` — the "bigger set is coming" timing
