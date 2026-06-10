@@ -15,7 +15,11 @@ import {
   TrickStateStore,
 } from '@/game/components'
 import { createBikeMesh } from './bike-mesh'
-import { createInstancedBikeField } from './instanced-bikes'
+import {
+  createInstancedBikeField,
+  type InstancedBikeField,
+  type SharedVinylCache,
+} from './instanced-bikes'
 import { applyVinylMaterialToScene } from './painterly-vinyl-material'
 
 const PLAYER_FALLBACK_COLOR = 0xff7733
@@ -81,10 +85,10 @@ export type BikeRenderRegistry = {
 /**
  * Bike render system.
  *
- * If a `registry` is supplied (the runtime path), each bike's mesh is
- * cloned from a loaded bike GLB — the player gets their picked variant,
- * AI bikes use the default visual with their slot's accent color
- * tinting the livery material so the field reads varied.
+ * If a `registry` is supplied (the runtime path), each bike renders its
+ * variant's GLB — the player as a per-clone hero mesh with variant livery,
+ * AI/peer bikes through a per-variant instanced field with their slot's
+ * accent color as a per-instance tint so the grid reads varied.
  *
  * Without a registry the system falls back to the procedural
  * `createBikeMesh()` (kept for tests and any path that doesn't want to
@@ -106,41 +110,83 @@ export function createBikeRenderSystem(
   const spinQuat = new THREE.Quaternion()
   const spinAxis = new THREE.Vector3()
 
-  // Instanced AI/peer field on the racer GLB — built eagerly (when a registry is
-  // present) so its handful of shared materials compile in the boot pre-warm
-  // instead of one set per cloned bike.
-  const field =
-    registry && opts?.instanced !== false
-      ? createInstancedBikeField(registry.default, MAX_INSTANCED_BIKES, {
+  // Instanced AI/peer fields — ONE per distinct bike GLB in play (AI spawn with
+  // their slot's variantId, so a race grid fields every variant). Each field
+  // shares a single vinyl material set across its instances with per-instance
+  // aTint livery; the records for bikes that already spawned (phase 5 precedes
+  // render-system construction) are built eagerly below so their materials
+  // compile in the boot pre-warm. Late arrivals (multiplayer joins) build
+  // their field on first claim.
+  type FieldRecord = {
+    field: InstancedBikeField
+    bikeIndex: Map<number, number>
+    freeIndices: number[]
+    nextIndex: number
+  }
+  const instancedOn = Boolean(registry && opts?.instanced !== false)
+  const fields = new Map<LoadedBike, FieldRecord>()
+  // One vinyl cache across ALL fields: equivalent materials in different
+  // variant GLBs (untextured livery/glow under aTint, the near-black chassis
+  // family) collapse to single compiled instances, so a five-variant grid
+  // pre-warms ~one field's worth of materials, not five.
+  const sharedVinyl: SharedVinylCache = new Map()
+
+  /** The GLB a bike renders with (variant when loaded, else the default). */
+  function resolveLoadedBike(eid: number): LoadedBike | null {
+    if (!registry) return null
+    const variantId = BikeStatsStore.get(eid)?.variantId
+    return (variantId && registry.byVariantId[variantId]) || registry.default
+  }
+
+  function fieldFor(loaded: LoadedBike): FieldRecord {
+    let rec = fields.get(loaded)
+    if (!rec) {
+      rec = {
+        field: createInstancedBikeField(loaded, MAX_INSTANCED_BIKES, {
           brush: BIKE_BRUSH,
           edgeWear: BIKE_EDGE_WEAR,
           visualScale: BIKE_VISUAL_SCALE,
-        })
-      : null
-  if (field) {
-    scene.add(field.group)
-    // Dev/test read-back hook so a harness can assert the field renders distinct,
-    // placed bikes regardless of camera framing.
+          sharedVinyl,
+        }),
+        bikeIndex: new Map(),
+        freeIndices: [],
+        nextIndex: 0,
+      }
+      scene.add(rec.field.group)
+      fields.set(loaded, rec)
+    }
+    return rec
+  }
+
+  // AI/peer bikes render in the instanced field for their variant's GLB; the
+  // player (hero clone with variant livery), the TT ghost (hologram material),
+  // and the no-registry test path stay on the per-clone single-mesh path.
+  function instanceable(isPlayer: boolean, isGhost: boolean): boolean {
+    return instancedOn && !isPlayer && !isGhost
+  }
+
+  if (instancedOn) {
+    // Eager pre-build for the spawned grid so the pre-warm sees every field.
+    for (const eid of query(sim, [BikeTag])) {
+      const isPlayer = hasComponent(sim, eid, PlayerTag)
+      const isGhost = hasComponent(sim, eid, GhostTag)
+      if (!instanceable(isPlayer, isGhost)) continue
+      const loaded = resolveLoadedBike(eid)
+      if (loaded) fieldFor(loaded)
+    }
+    // Dev/test read-back hook so a harness can assert the field renders
+    // distinct, placed bikes regardless of camera framing. Aggregates across
+    // the per-variant fields.
     if (import.meta.env.DEV && typeof window !== 'undefined') {
-      ;(window as unknown as { __bikeField?: typeof field }).__bikeField = field
+      const aggregate = {
+        debug: () => [...fields.values()].flatMap((rec) => rec.field.debug()),
+      }
+      ;(window as unknown as { __bikeField?: typeof aggregate }).__bikeField = aggregate
     }
   }
-  const bikeIndex = new Map<number, number>()
-  const freeIndices: number[] = []
-  let nextIndex = 0
   const bikePos = new THREE.Vector3()
   const bikeMat = new THREE.Matrix4()
   const ONE = new THREE.Vector3(1, 1, 1)
-
-  // AI/peer bikes whose variant resolves to the default (racer) GLB render in the
-  // instanced field; the player, the TT ghost, any non-default variant, and the
-  // no-registry test path stay on the per-clone single-mesh path.
-  function instanceable(eid: number, isPlayer: boolean, isGhost: boolean): boolean {
-    if (!field || !registry || isPlayer || isGhost) return false
-    const variantId = BikeStatsStore.get(eid)?.variantId
-    const loaded = (variantId && registry.byVariantId[variantId]) || registry.default
-    return loaded === registry.default
-  }
 
   // Per-bike accent colours: a deterministic peerId slot for remote peers, else
   // the cursor cycle for AI. Shared by the instanced + single paths.
@@ -231,19 +277,23 @@ export function createBikeRenderSystem(
         }
       }
 
-      // ── Instanced path: AI / peer bikes sharing the racer GLB. ──
-      if (field && instanceable(eid, isPlayer, isGhost)) {
-        let idx = bikeIndex.get(eid)
-        if (idx === undefined) {
-          idx = freeIndices.pop() ?? nextIndex++
-          bikeIndex.set(eid, idx)
-          const c = aiColors(eid)
-          field.setColors(idx, c.livery, c.exhaust)
+      // ── Instanced path: AI / peer bikes on their variant's field. ──
+      if (instanceable(isPlayer, isGhost)) {
+        const loaded = resolveLoadedBike(eid)
+        if (loaded) {
+          const rec = fieldFor(loaded)
+          let idx = rec.bikeIndex.get(eid)
+          if (idx === undefined) {
+            idx = rec.freeIndices.pop() ?? rec.nextIndex++
+            rec.bikeIndex.set(eid, idx)
+            const c = aiColors(eid)
+            rec.field.setColors(idx, c.livery, c.exhaust)
+          }
+          bikePos.set(t.x, t.y, t.z)
+          bikeMat.compose(bikePos, baseQuat, ONE)
+          rec.field.setMatrix(idx, bikeMat)
+          continue
         }
-        bikePos.set(t.x, t.y, t.z)
-        bikeMat.compose(bikePos, baseQuat, ONE)
-        field.setMatrix(idx, bikeMat)
-        continue
       }
 
       // ── Single-mesh path: player, TT ghost, non-default AI, procedural. ──
@@ -258,11 +308,13 @@ export function createBikeRenderSystem(
     }
 
     // Despawn — free instanced slots, drop single meshes.
-    for (const [eid, idx] of bikeIndex) {
-      if (!live.has(eid)) {
-        field?.park(idx)
-        freeIndices.push(idx)
-        bikeIndex.delete(eid)
+    for (const rec of fields.values()) {
+      for (const [eid, idx] of rec.bikeIndex) {
+        if (!live.has(eid)) {
+          rec.field.park(idx)
+          rec.freeIndices.push(idx)
+          rec.bikeIndex.delete(eid)
+        }
       }
     }
     for (const [eid, mesh] of meshes) {
@@ -271,8 +323,10 @@ export function createBikeRenderSystem(
         meshes.delete(eid)
       }
     }
-    field?.setDrawCount(nextIndex)
-    field?.flush()
+    for (const rec of fields.values()) {
+      rec.field.setDrawCount(rec.nextIndex)
+      rec.field.flush()
+    }
   }
 }
 

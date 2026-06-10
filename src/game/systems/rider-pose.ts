@@ -26,7 +26,8 @@
  *     spring. Hard landings flex the torso forward, then settle.
  *   - Chest yaw (flow) — bike yaw rate drives a low-pass yaw offset.
  *     The whole upper body pivots from the hips toward the turn.
- *   - Head yaw / pitch — ControlIntent.steer + (throttle - brake).
+ *   - Head yaw / pitch — raw stick steer (pre the player steer scale +
+ *     smoothing, so the head leads the bike) + (throttle - brake).
  *
  * Launched riders are skipped: their bones are dynamic at that point and
  * are owned by Rapier's iterative solver.
@@ -48,6 +49,7 @@ import {
   type RiderPoseResponse,
   RiderStore,
 } from '@/game/components/rider'
+import { rawSteerFor } from '@/game/systems/input-apply'
 
 const IDENT_QUAT: Quat = { x: 0, y: 0, z: 0, w: 1 }
 
@@ -166,8 +168,15 @@ export const RIDER_POSE_TUNING = {
   /** Clamp on chest yaw offset (rad). */
   flowMaxYaw: 0.8,
 
-  /** Head yaw: low-pass on ControlIntent.steer. */
-  headYawSmoothing: 0.12,
+  /** Head yaw — the look LEADS the bike. Driven by raw stick steer (the
+   *  player's declared future heading, ahead of any physics yaw), with an
+   *  asymmetric response: a fast ATTACK so the head is visibly the first
+   *  thing to move on input — before the bike or torso react — and a lazy
+   *  RELEASE so it eases back to centre instead of snapping. Per-tick lerp
+   *  factors at the fixed sim rate (attack 0.45 ≈ 90% of target in ~60 ms;
+   *  release 0.12 ≈ the old smoothing). */
+  headYawAttack: 0.45,
+  headYawRelease: 0.12,
   headYawMax: 0.7,
 
   /** Head pitch: low-pass on ControlIntent.throttle - brake. */
@@ -378,6 +387,11 @@ function tickPoseResponse(
   bikeLinvel: Vec3,
   bikeAngvel: Vec3,
   intent: Intent | undefined,
+  /** Unshaped stick steer for the head-look (player: raw input, pre the
+   *  PLAYER_STEER_SCALE + smoothing the bike's steering goes through; AI:
+   *  same as `intent.steer`). The head must lead the bike, so it can't
+   *  read the bike's own filtered steer. */
+  lookSteer: number,
   driftDir: number,
   dt: number,
 ): void {
@@ -408,14 +422,21 @@ function tickPoseResponse(
   )
   resp.flowYaw = lerp(resp.flowYaw, flowTarget, RIDER_POSE_TUNING.flowSmoothing)
 
-  // Head yaw: driven by raw steer input.
-  const steer = intent?.steer ?? 0
+  // Head yaw: driven by the RAW stick (`lookSteer`), attack/release
+  // asymmetric — the head whips toward where the player is steering
+  // (deeper deflection or a direction flip both attack) and drifts back
+  // when the stick releases.
   const headYawTarget = clamp(
-    steer * RIDER_POSE_TUNING.headYawMax,
+    lookSteer * RIDER_POSE_TUNING.headYawMax,
     -RIDER_POSE_TUNING.headYawMax,
     RIDER_POSE_TUNING.headYawMax,
   )
-  resp.headYaw = lerp(resp.headYaw, headYawTarget, RIDER_POSE_TUNING.headYawSmoothing)
+  const headYawFlip = headYawTarget * resp.headYaw < 0
+  const headYawRate =
+    headYawFlip || Math.abs(headYawTarget) > Math.abs(resp.headYaw)
+      ? RIDER_POSE_TUNING.headYawAttack
+      : RIDER_POSE_TUNING.headYawRelease
+  resp.headYaw = lerp(resp.headYaw, headYawTarget, headYawRate)
 
   // Head pitch: throttle - brake.
   const throttle = intent?.throttle ?? 0
@@ -428,8 +449,9 @@ function tickPoseResponse(
   resp.headPitch = lerp(resp.headPitch, pitchTarget, RIDER_POSE_TUNING.headPitchSmoothing)
 
   // Drift bank: low-pass toward the lean target (0 when not drifting,
-  // so the torso eases back upright on release).
-  const leanTarget = driftLeanTarget(driftDir, steer)
+  // so the torso eases back upright on release). Stays on the bike's
+  // SHAPED steer — driftLeanIntoGain is tuned against its ±0.7 range.
+  const leanTarget = driftLeanTarget(driftDir, intent?.steer ?? 0)
   resp.leanRoll = lerp(resp.leanRoll, leanTarget, RIDER_POSE_TUNING.driftLeanSmoothing)
 
   resp.prevVel.x = bikeLinvel.x
@@ -695,8 +717,12 @@ export function riderPoseSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): 
     const bikeAngvel = bikeRb.angvel()
     const intent = ControlIntentStore.get(rider.bikeEid)
     const driftDir = DriftStateStore.get(rider.bikeEid)?.driftDir ?? 0
+    // Head-look source: the raw stick when this bike routes through the
+    // player input pipeline, else the bike's ControlIntent (AI / replay —
+    // already unshaped).
+    const lookSteer = rawSteerFor(rider.bikeEid) ?? intent?.steer ?? 0
 
-    tickPoseResponse(rider.poseResponse, bikeLinvel, bikeAngvel, intent, driftDir, dt)
+    tickPoseResponse(rider.poseResponse, bikeLinvel, bikeAngvel, intent, lookSteer, driftDir, dt)
 
     const halfHeights = boneHalfHeights(rider)
 
