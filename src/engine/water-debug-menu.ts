@@ -285,6 +285,15 @@ const SLIDERS: SliderDef[] = [
     format: (n) => n.toFixed(2),
     hint: 'Wind-Waker light/dark pair: a dark-teal twin line offset away from the sun beside each light line — the cheap embossed-relief read. 0 = light lines only',
   },
+  {
+    key: 'contourBreakup',
+    label: 'Contour breakup',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    format: (n) => n.toFixed(2),
+    hint: 'Breaks the iso lines into crest-aligned brush dashes — gentle nicks near the crests, near-total in the troughs so lines cling to the crests instead of running the whole sea. 0 = solid unbroken lines',
+  },
 ]
 
 export type WaterDebugMenu = {
@@ -507,6 +516,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'contourRelief':
           water.debug.setContourRelief(v)
+          break
+        case 'contourBreakup':
+          water.debug.setContourBreakup(v)
           break
       }
     })

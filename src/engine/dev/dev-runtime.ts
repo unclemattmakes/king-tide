@@ -29,3 +29,16 @@ export function setWaveDotsController(c: LiveToggle | null): void {
 export function getWaveDotsController(): LiveToggle | null {
   return waveDots
 }
+
+// Ambient wind-gust strokes (engine/render/wind-trails.ts) — registered by
+// main.ts at boot so the palette can flip them live (`?wind=0` only sets the
+// boot default).
+let windTrails: LiveToggle | null = null
+
+export function setWindTrailsController(c: LiveToggle | null): void {
+  windTrails = c
+}
+
+export function getWindTrailsController(): LiveToggle | null {
+  return windTrails
+}
