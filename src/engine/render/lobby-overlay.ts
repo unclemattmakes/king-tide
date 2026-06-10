@@ -329,21 +329,9 @@ export function installLobbyOverlay(opts: LobbyOverlayOpts): LobbyOverlay {
   }
 }
 
-/** Smash-Bros-style track pick: collect each peer's pick, then sample
- *  one weighted by how many peers voted for it. Ties are broken
- *  uniformly random (a single random index over the flattened votes
- *  produces the right distribution naturally). If nobody picked, the
- *  caller's fallback is used. */
-export function pickRandomTrack(
-  picks: ReadonlyArray<string | undefined>,
-  fallback: string,
-  rng: () => number = Math.random,
-): string {
-  const votes = picks.filter((p): p is string => typeof p === 'string' && p.length > 0)
-  if (votes.length === 0) return fallback
-  const idx = Math.floor(rng() * votes.length)
-  return votes[idx] ?? fallback
-}
+// The Smash-Bros-style track pick moved to `engine/menus/lobby-pick.ts`
+// (deterministic, seeded by room id + votes) — a per-client Math.random
+// here let simultaneously-arming peers navigate to different tracks.
 
 function formatPing(latencyMs: number | undefined): string {
   if (latencyMs === undefined || !Number.isFinite(latencyMs) || latencyMs < 0) return '—'
