@@ -818,6 +818,59 @@ export function createFxSystem(
     }
   }
 
+  // Obstacle contact splash. Called by the contact-splash driver (wired in
+  // main.ts) when a crest slams a waterline obstacle — a pillar, rock or
+  // pylon at (x, y≈surface, z) with footprint `radius`. (`faceX`, `faceZ`)
+  // is the unit direction the sheet should throw — back toward where the
+  // swell came from (reflection off the face). Sprites spawn along the rim
+  // arc facing the swell and kick UP hard with a modest outward fan, so the
+  // burst reads as water exploding up the obstacle's face rather than a
+  // crest poof (same pool + look family as `emitWaveSpray`, so tint and
+  // settings follow automatically).
+  function emitContactSplash(
+    x: number,
+    y: number,
+    z: number,
+    strength: number,
+    faceX: number,
+    faceZ: number,
+    radius: number,
+    scale = 1,
+  ): void {
+    const s = strength < 0 ? 0 : strength > 1 ? 1 : strength
+    // Wider obstacles throw wider sheets — more sprites, same density.
+    const radMul = Math.min(2.2, Math.max(0.75, radius / 1.2))
+    const count = Math.max(2, Math.round((6 + s * 14) * radMul * scale))
+    const faceAngle = Math.atan2(faceZ, faceX)
+    const up = 2.8 + s * 4.2
+    for (let k = 0; k < count; k++) {
+      // Spawn across the rim arc facing the incoming swell (±~75°), just
+      // outside the mesh so sprites never birth inside the pillar.
+      const a = faceAngle + (Math.random() - 0.5) * 2.6
+      const rimR = radius * (0.8 + Math.random() * 0.35)
+      const cosA = Math.cos(a)
+      const sinA = Math.sin(a)
+      // Mostly vertical, with a radial-outward fan + a kick-back along the
+      // face direction (the reflected slap).
+      const radial = 0.5 + Math.random() * 1.3
+      const kickBack = (0.5 + s * 1.3) * (0.5 + Math.random() * 0.7)
+      emit(
+        crestSpray,
+        x + cosA * rimR,
+        y + 0.08,
+        z + sinA * rimR,
+        cosA * radial + faceX * kickBack,
+        up * (0.55 + Math.random() * 0.9),
+        sinA * radial + faceZ * kickBack,
+        0.6,
+        0.45,
+        0.9,
+        crestSpray.defaultSize * (0.7 + s * 0.7) * (0.7 + Math.random() * 0.6),
+        1,
+      )
+    }
+  }
+
   function tick(dt: number): void {
     const eids = query(sim, [BikeTag, Transform, HoverState, ControlIntent])
 
@@ -1542,5 +1595,5 @@ export function createFxSystem(
     ;(sprayTint as any).value.setRGB(r, g, b)
   }
 
-  return { tick, triggerPumpBurst, emitWaveSpray, setSprayTint }
+  return { tick, triggerPumpBurst, emitWaveSpray, emitContactSplash, setSprayTint }
 }

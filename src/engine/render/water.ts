@@ -50,6 +50,13 @@ import {
   WAKE_STROKE_SPEC,
 } from '@/engine/render/oil-stroke-texture'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
+// Waterline obstacle contacts — foam collars around pillars/rocks/pylons.
+// Render-only shading (no displacement), so no buoyancy mirror is needed.
+import {
+  MAX_WATER_CONTACTS,
+  selectNearestContacts,
+  type WaterContact,
+} from '@/engine/render/water-contacts'
 import {
   MAX_SPLASH_RINGS,
   SPLASH_RING_LIFE_S,
@@ -185,6 +192,13 @@ export type WaterMesh = {
    *  unchanged for tracks where no heightmap is installed (e.g. editor
    *  mode) — wave amplitude stays at full strength everywhere. */
   setTerrainHeightmap(heightmap: import('./terrain-heightmap').TerrainHeightmap): void
+  /** Install / replace the waterline obstacle contacts (pillars, rocks,
+   *  pylons — see water-contacts.ts). The shader draws a wave-modulated foam
+   *  collar + wash ripples around each; the nearest `MAX_WATER_CONTACTS` to
+   *  the mesh origin are uploaded per tick, so lists may exceed the slot cap.
+   *  Pass an empty array to clear. Shading-only — displacement (and so
+   *  buoyancy) is untouched. */
+  setWaterContacts(contacts: readonly WaterContact[]): void
   /** Diagnostic: the world position the vertex shader places the rest point
    *  (x, z) — Gerstner height + horizontal displacement — via a CPU mirror of
    *  the shader using the same live uniforms/constants. The sim buoyancy
@@ -260,6 +274,9 @@ export type WaterMesh = {
      *  scalar drives BOTH buoyancy and the GPU (the shoreWaveStrength
      *  discipline). 0 = off (and the spawner stops filling the pool). */
     setSplashRings(s: number): void
+    /** Contact-foam collar strength, 0..2 (waterline obstacles). Render-only
+     *  shading — safe to scrub live. 0 = collars off. */
+    setContactFoam(s: number): void
     /** Pinch direction in degrees, 0..90. Rotates the Gerstner
      *  horizontal-displacement vector relative to the per-wave
      *  travel direction. 0° = standard Gerstner (particles bulge
@@ -412,6 +429,9 @@ export type WaterDebugDefaults = {
   shoalSurf: number
   /** Splash-ring strength 0..1.5 (landing event waves). 1 = baseline. */
   splashRings: number
+  /** Contact-foam collar strength 0..2 (waterline obstacles). 1 = baseline,
+   *  0 = off. */
+  contactFoam: number
   /** Gerstner pinch direction in degrees, 0..90. */
   pinchDirection: number
   /** Curvature-based whitecap gain (foam v3). 4 = baseline. Higher = foam on
@@ -1441,12 +1461,17 @@ export function createWaterMesh(
   //   [i*3 + 1]  stamp i row B: (len, amplitude, widthM, periodS)
   //   [i*3 + 2]  stamp i row C: (phase01, speed, approachM, 0)
   //   [RING_BASE + j]  ring j: (x, z, t0, amp)
+  //   [CONTACT_BASE + k]  contact k: (x, z, radius, strength) — waterline
+  //                       obstacle foam collars (water-contacts.ts)
   const WAVE_EVENT_RING_BASE = MAX_WAVE_STAMPS * 3
+  const WAVE_EVENT_CONTACT_BASE = WAVE_EVENT_RING_BASE + MAX_SPLASH_RINGS
   const waveEventSlots: THREE.Vector4[] = []
-  for (let i = 0; i < WAVE_EVENT_RING_BASE + MAX_SPLASH_RINGS; i++) {
+  for (let i = 0; i < WAVE_EVENT_CONTACT_BASE + MAX_WATER_CONTACTS; i++) {
     waveEventSlots.push(new THREE.Vector4(0, 0, 0, 0))
   }
-  // Park ring slots dead (t0 = −1e9 → age far past LIFE).
+  // Park ring slots dead (t0 = −1e9 → age far past LIFE). Contact slots park
+  // at radius 0 (the collar band evaluates to 0 there) and are further gated
+  // by the count uniform.
   for (let j = 0; j < MAX_SPLASH_RINGS; j++) {
     waveEventSlots[WAVE_EVENT_RING_BASE + j]!.set(0, 0, -1e9, 0)
   }
@@ -1626,6 +1651,107 @@ export function createWaterMesh(
     }
     return vec3(y, dydx, dydz)
   })
+
+  // ---- Waterline contact foam (obstacle collars) --------------------------
+  //
+  // Static obstacles that pierce the surface — bridge pillars, placed rocks,
+  // dock pylons — discovered by water-contacts.ts and uploaded nearest-first
+  // into the shared event array (slots CONTACT_BASE+, one vec4 each:
+  // x, z, radius, strength). Each gets a foam collar hugging the mesh at the
+  // waterline plus faint concentric wash ripples drifting outward — the
+  // "sea acknowledges the world" read. SHADING ONLY: contacts add zero
+  // displacement, so unlike rings/stamps there is no buoyancy mirror to keep
+  // in lockstep — the sim never knows they exist.
+  //
+  // The collar breathes with the live sea: brightness + width surge as the
+  // local ambient crest sweeps through (the same signal the shoreline surf
+  // keys on), so a passing wave visibly washes UP the obstacle instead of
+  // sliding under it. The contact-splash particle driver fires off the same
+  // crests, so foam and spray agree about when the sea is angry.
+  const CONTACT_FOAM_DEFAULT = 1.0
+  const contactFoamStrengthUniform = uniform(CONTACT_FOAM_DEFAULT)
+  const waterContactCountUniform = uniform(0)
+  // Fragment-stage sum. `ambientH` is the un-attenuated ambient wave height
+  // at the fragment (≥ 0 on crests) — the crest-pass pulse.
+  const contactFoamSum = Fn(([x, z, t, ambientH]: [unknown, unknown, unknown, unknown]) => {
+    const xN = x as ReturnType<typeof float>
+    const zN = z as ReturnType<typeof float>
+    const tN = t as ReturnType<typeof float>
+    const ambientHN = ambientH as ReturnType<typeof float>
+    const foam = float(0).toVar()
+    for (let i = 0; i < MAX_WATER_CONTACTS; i++) {
+      If(float(i).lessThan(waterContactCountUniform), () => {
+        // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray swizzle proxy
+        const slot = waveEventsUniform.element(WAVE_EVENT_CONTACT_BASE + i) as any
+        const cx = float(slot.x)
+        const cz = float(slot.y)
+        const radius = float(slot.z)
+        const strength = float(slot.w)
+        const dx = xN.sub(cx)
+        const dz = zN.sub(cz)
+        const r = sqrt(dx.mul(dx).add(dz.mul(dz)).add(float(1e-6)))
+        const edge = r.sub(radius) // 0 at the rim, positive outside
+        // Crest-pass pulse: how tall the local ambient sea stands right here,
+        // squashed to 0..1. Drives collar brightness AND width so a passing
+        // wave widens the wash as it climbs the obstacle.
+        const pulse = clamp(ambientHN.mul(float(0.8)), float(0), float(1))
+        const collarW = clamp(radius.mul(float(0.55)), float(0.5), float(2.2)).mul(
+          float(1).add(pulse.mul(float(0.7))),
+        )
+        // Band: peaks at the rim, gone by collarW outward. The inner gate
+        // keeps foam out of the disc interior so thin/open obstacles (gate
+        // posts, lattice legs) don't read as a filled white disc.
+        const band = float(1)
+          .sub(smoothstep(float(0), collarW, edge))
+          .mul(smoothstep(radius.mul(float(0.3)), radius.mul(float(0.85)), r))
+        // Wash ripples: concentric wavelets drifting outward off the rim
+        // (~0.5 m/s, ~1.2 m wavelength), damped within ~2.6 collar widths.
+        // Squared so they read as discrete crests; per-contact phase from
+        // the centre coordinate breaks cross-contact sync.
+        const ringPhase = edge
+          .mul(float(5.2))
+          .sub(tN.mul(float(2.6)))
+          .add(cx.mul(float(0.7)))
+        const ringWave = sin(ringPhase).mul(float(0.5)).add(float(0.5))
+        const ringDamp = float(1).sub(smoothstep(float(0), collarW.mul(float(2.6)), edge))
+        const ripples = ringWave.mul(ringWave).mul(ringDamp).mul(float(0.3))
+        // Calm seas keep a quiet lap line (base 0.5); crests surge the core.
+        const core = band.mul(float(0.5).add(pulse.mul(float(0.75))))
+        const washing = ripples.mul(float(0.45).add(pulse.mul(float(0.55))))
+        foam.assign(max(foam, strength.mul(core.add(washing))))
+      })
+    }
+    return foam.mul(contactFoamStrengthUniform)
+  })
+
+  // CPU-side contact store + nearest-N upload. The LIST is static per track
+  // (or swapped live by the dev hook / floating-prop follower), but the slot
+  // SELECTION tracks the camera-locked mesh origin with a 12 m hysteresis so
+  // big tracks with more contacts than slots always spend the budget on the
+  // discs the player can actually see.
+  let liveContacts: readonly WaterContact[] = []
+  let contactSelectionDirty = false
+  let lastContactOriginX = Infinity
+  let lastContactOriginZ = Infinity
+  function setWaterContacts(contacts: readonly WaterContact[]): void {
+    liveContacts = contacts
+    contactSelectionDirty = true
+  }
+  function syncWaterContacts(originX: number, originZ: number): void {
+    const dxO = originX - lastContactOriginX
+    const dzO = originZ - lastContactOriginZ
+    if (!contactSelectionDirty && dxO * dxO + dzO * dzO < 12 * 12) return
+    contactSelectionDirty = false
+    lastContactOriginX = originX
+    lastContactOriginZ = originZ
+    const picked = selectNearestContacts(liveContacts, originX, originZ, MAX_WATER_CONTACTS)
+    for (let i = 0; i < MAX_WATER_CONTACTS; i++) {
+      const c = picked[i]
+      if (c) waveEventSlots[WAVE_EVENT_CONTACT_BASE + i]!.set(c.x, c.z, c.radius, c.strength)
+      else waveEventSlots[WAVE_EVENT_CONTACT_BASE + i]!.set(0, 0, 0, 0)
+    }
+    waterContactCountUniform.value = Math.min(picked.length, MAX_WATER_CONTACTS)
+  }
 
   // Blended zone factors at world (x, z) and field time t. Returns
   // vec4(heightMult, freqMult, effectiveBearingRad, surgeY) — the effective
@@ -3580,6 +3706,10 @@ export function createWaterMesh(
     return max(breaker, waterlineBase.mul(shoreBand))
   })()
 
+  // Waterline obstacle collars + wash ripples (see contactFoamSum above) —
+  // skipped entirely by the uniform count gate on contact-free tracks.
+  const contactFoam = contactFoamSum(positionWorld.x, positionWorld.z, tNode, ambientHeightFrag)
+
   // Intersection foam is full-opaque white where it fires (we want the
   // shoreline edge to read clearly against the water), so we max-combine
   // it with the (waveFoam + bikeFoam) sum rather than adding — additive
@@ -3587,9 +3717,11 @@ export function createWaterMesh(
   // ramp hits water. Final clamp raised from 0.95 to 1.0 so the bright
   // peak at the water-line can reach pure white. The new `shorelineSurf`
   // (depth-driven pulsing breakers) folds in via max so its bright
-  // crest-strike pulses can paint over the static intersection band.
+  // crest-strike pulses can paint over the static intersection band; the
+  // obstacle contact foam folds the same way so collars never over-brighten
+  // where they overlap surf or wakes.
   const foamMaskRaw = clamp(
-    max(max(waveFoam.add(bikeFoam), intersectionFoam), shorelineSurf),
+    max(max(waveFoam.add(bikeFoam), intersectionFoam), max(shorelineSurf, contactFoam)),
     float(0),
     float(1),
   )
@@ -4321,6 +4453,7 @@ export function createWaterMesh(
     shoreWaveStrength: SHORE_WAVE_STRENGTH_DEFAULT,
     shoalSurf: SHOAL_SURF_DEFAULT,
     splashRings: SPLASH_RING_STRENGTH_DEFAULT,
+    contactFoam: CONTACT_FOAM_DEFAULT,
     pinchDirection: PINCH_DIRECTION_DEFAULT,
     whitecapCurvature: WHITECAP_CURVATURE_DEFAULT,
     whitecapLeadBias: WHITECAP_LEAD_BIAS_DEFAULT,
@@ -4545,6 +4678,11 @@ export function createWaterMesh(
       const v = clamp01(s, 0, 1.5)
       splashRingStrengthUniform.value = v
       field.splashRingStrength = v
+    },
+    setContactFoam(s) {
+      // 0..2 — obstacle collar + wash-ripple strength. Render-only shading
+      // (contacts never displace), so scrubbing live is always safe.
+      contactFoamStrengthUniform.value = clamp01(s, 0, 2)
     },
     setPinchDirection(deg) {
       // 0..90° — rotation of the Gerstner horizontal-displacement
@@ -5084,6 +5222,11 @@ export function createWaterMesh(
     syncWaveStamps()
     // Splash rings — re-uploaded every tick (the pool mutates in place).
     syncSplashRings()
+    // Waterline contact collars — nearest-N selection follows the
+    // camera-locked mesh origin (re-picked on 12 m moves / list swaps).
+    // Originless callers (editor) select around the world origin, which is
+    // moot anyway: no environment GLB → no contacts.
+    syncWaterContacts(originXZ?.x ?? 0, originXZ?.z ?? 0)
     // Keep the GPU steepness at the CLAMPED effective value — it depends on the
     // live amplitudes that Beaufort / lap-weather / the menu mutate. The CPU
     // buoyancy sampler clamps identically, so render + physics pinch the same.
@@ -5312,6 +5455,7 @@ export function createWaterMesh(
     setSunDirection,
     setHorizonColor,
     setTerrainHeightmap,
+    setWaterContacts,
     debug,
     dispose,
   }
