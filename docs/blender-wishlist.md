@@ -964,3 +964,16 @@ of the Hoverbike panel) does it from the viewport: pick `Spline t`
 on the panel, click *Snap Starts to Spline*. Reuses the existing
 `_sample_curve_at_t` helper. Available headlessly as
 `bpy.ops.hoverbike.snap_starts_to_spline()`.
+
+## Wave-stamp authoring lane (P3.2 follow-up, 2026-06-10)
+
+The runtime + JSON schema for authored wave stamps shipped with the water
+P3.2 pass (`waveStamps[]` in track JSON — crest segment p0→p1 +
+amplitude/widthM/periodS/phase01/speed/approachM; see
+water-next-research.md §7.10). What's missing is the Blender half, modeled
+on the wave-zone exporter: author a 2-point curve (or an empty pair) named
+`HV_WaveStamp*` with custom props for the pulse params, export merges them
+into `waveStamps[]`. Until then stamps are hand-authored in the track JSON
+(they're 10 numbers — workable), or injected live for tuning via
+`__hover.setWaveStamps([...])` in the console and copied into the JSON
+once the placement feels right.

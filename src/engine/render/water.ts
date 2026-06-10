@@ -67,8 +67,9 @@ import {
   DEFAULT_CHOP_TUNING_SCALE,
   DEFAULT_SWELL_TUNING_SCALE,
   effectiveSteepness,
-  // Zone cap shared with the CPU sampler (`setWaveZones` truncates to it; the
-  // uniform arrays below are sized by it). Drift-tested like the SHORE_* set.
+  // Stamp + zone caps shared with the CPU sampler (the setters truncate to
+  // them; the uniform arrays below are sized by them). Drift-tested.
+  MAX_WAVE_STAMPS,
   MAX_WAVE_ZONES,
   // Shore-aligned wave + shoaling constants — single source of truth shared
   // with the CPU buoyancy sampler. `tests/unit/shore-constants-drift.test.ts`
@@ -89,10 +90,16 @@ import {
   SHORE_SWELL_DRIVE_MAX,
   SHORE_SWELL_DRIVE_MIN,
   SHORE_SWELL_DRIVE_REF,
+  STAMP_DEPTH_CAP,
+  STAMP_END_FEATHER_M,
+  STAMP_RELEASE_RATIO,
   // Swell/chop wavelength threshold — the SWELL_INDICES subset below is
   // derived from it per bank (per-track spectrum banks reorder/resize the
   // wave list, so hardcoded indices would silently mistag).
   SWELL_WAVELENGTH_MIN,
+  // CPU stamp sampler — the `renderVertex` mirror adds the authored
+  // stamps the vertex stage draws.
+  sampleStampsAt,
   // CPU zone-factor blend — used by the `renderVertex` CPU mirror so the
   // diagnostic stays an exact twin of the vertex stage. The shader itself
   // re-implements the same math in TSL (`waveZoneFactors`).
@@ -113,6 +120,7 @@ import {
   WAKE_TRANS_K,
   WAKE_TRANS_OMEGA,
   type WaveFieldState,
+  type WaveStampRuntime,
   type WaveZoneRuntime,
 } from '@/engine/sim/water/wave-field'
 
@@ -1397,6 +1405,143 @@ export function createWaterMesh(
   const waveZoneSurgeAmpUniform = uniformArray(waveZoneSurgeAmps, 'float')
   const waveZoneCountUniform = uniform(0)
 
+  // ---- Authored wave stamps (water-next-research §7.10, P3.2) -----------
+  //
+  // The signature jump waves: crest segment + traveling sech² pulse,
+  // evaluated per vertex from fixed-size uniform arrays (MAX_WAVE_STAMPS
+  // slots; `setWaveStamps` truncates the CPU list to the same cap).
+  // Packing, per slot:
+  //   A: (x0, z0, ux, uz)            — segment origin + unit direction
+  //   B: (len, amplitude, widthM, periodS)
+  //   C: (phase01, speed, approachM, 0)
+  // `syncWaveStamps` uploads on reference change (setWaveStamps installs a
+  // new array), exactly like the zone sync.
+  const waveStampSlotsA: THREE.Vector4[] = []
+  const waveStampSlotsB: THREE.Vector4[] = []
+  const waveStampSlotsC: THREE.Vector4[] = []
+  for (let i = 0; i < MAX_WAVE_STAMPS; i++) {
+    waveStampSlotsA.push(new THREE.Vector4(0, 0, 1, 0))
+    waveStampSlotsB.push(new THREE.Vector4(1, 0, 1, 1))
+    waveStampSlotsC.push(new THREE.Vector4(0, 1, 1, 0))
+  }
+  const waveStampsAUniform = uniformArray(waveStampSlotsA, 'vec4')
+  const waveStampsBUniform = uniformArray(waveStampSlotsB, 'vec4')
+  const waveStampsCUniform = uniformArray(waveStampSlotsC, 'vec4')
+  const waveStampCountUniform = uniform(0)
+
+  // Per-vertex stamp evaluation — two TSL Fns over the same unrolled
+  // slot loop (an Fn body is required for If/toVar; one Fn can return only
+  // one node, hence the geometry/signals split — the same constraint that
+  // split gerstnerHeight/gerstnerDisp). Mirrors `computeStamps` in
+  // wave-field.ts term for term: the same sech² pulse, life/feather
+  // envelopes, and depth cap (GPU depth comes from the terrain heightmap —
+  // the same bake the CPU's shore field carries).
+  //
+  //  - waveStampGeometry → vec3(y, dy/dx, dy/dz): the ridge the vertex
+  //    rides (travel-direction slopes only, like the CPU).
+  //  - waveStampSignals → vec2(curv, rise): the crest curvature
+  //    (−∂²y/∂d², a thin whitecap line on the stamp's crest) and ∂h/∂t
+  //    (leading-edge bias on its rising face) — fed into the foam stack so
+  //    an authored jump wave foams like any natural breaking crest.
+  //
+  // biome-ignore lint/suspicious/noExplicitAny: TSL node-graph builder values
+  function emitStampLoop(xN: any, zN: any, tN: any, depthN: any, emit: 'geometry' | 'signals') {
+    const out0 = float(0).toVar()
+    const out1 = float(0).toVar()
+    const out2 = float(0).toVar()
+    for (let i = 0; i < MAX_WAVE_STAMPS; i++) {
+      If(float(i).lessThan(waveStampCountUniform), () => {
+        // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray swizzle proxy
+        const a = waveStampsAUniform.element(i) as any
+        // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray swizzle proxy
+        const b = waveStampsBUniform.element(i) as any
+        // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray swizzle proxy
+        const cc = waveStampsCUniform.element(i) as any
+        const x0 = float(a.x)
+        const z0 = float(a.y)
+        const ux = float(a.z)
+        const uz = float(a.w)
+        const segLen = float(b.x)
+        const amplitude = float(b.y)
+        const widthM = float(b.z)
+        const periodS = float(b.w)
+        const phase01 = float(cc.x)
+        const speed = float(cc.y)
+        const approachM = float(cc.z)
+        const releaseM = approachM.mul(float(STAMP_RELEASE_RATIO))
+        // Pulse center for this cycle (fract = the CPU's mod-floor).
+        const tt = fract(tN.div(periodS).add(phase01))
+        const c = approachM.negate().add(tt.mul(speed).mul(periodS))
+        // Segment frame.
+        const rx = xN.sub(x0)
+        const rz = zN.sub(z0)
+        const sAlong = rx.mul(ux).add(rz.mul(uz))
+        const nxN = uz.negate()
+        const nzN = ux
+        const d = rx.mul(nxN).add(rz.mul(nzN))
+        const xi = d.sub(c).div(widthM)
+        // Life + feather envelopes (mirror computeStamps; smoothstep is the
+        // same cubic both sides).
+        const life = smoothstep(approachM.negate(), approachM.negate().mul(float(0.55)), c).mul(
+          float(1).sub(smoothstep(releaseM.mul(float(0.25)), releaseM, c)),
+        )
+        const feather = smoothstep(float(0), float(STAMP_END_FEATHER_M), sAlong).mul(
+          float(1).sub(smoothstep(segLen.sub(float(STAMP_END_FEATHER_M)), segLen, sAlong)),
+        )
+        // Depth cap (no-op in bottomless water: depth is huge there).
+        const amp = max(min(amplitude, float(STAMP_DEPTH_CAP).mul(depthN)), float(0))
+        // sech/tanh via one exp (clamped ξ keeps exp finite; sech² ≈ 0 by
+        // |ξ| = 6 anyway, matching the CPU early-out).
+        const xiC = clamp(xi, float(-6), float(6))
+        const eP = exp(xiC)
+        const eM = float(1).div(eP)
+        const sech = float(2).div(eP.add(eM))
+        const sech2 = sech.mul(sech)
+        const tanhN = eP.sub(eM).div(eP.add(eM))
+        const envelope = amp.mul(life).mul(feather)
+        if (emit === 'geometry') {
+          out0.addAssign(envelope.mul(sech2))
+          const dyDd = envelope.mul(float(-2)).div(widthM).mul(sech2).mul(tanhN)
+          out1.addAssign(dyDd.mul(nxN))
+          out2.addAssign(dyDd.mul(nzN))
+        } else {
+          // −∂²y/∂d² = (E/w²)·(2sech⁴ − 4sech²tanh²) peaks at the pulse
+          // crest; ∂h/∂t (pulse-motion term) > 0 on the rising front face.
+          out0.addAssign(
+            envelope
+              .div(widthM.mul(widthM))
+              .mul(float(2).mul(sech2).mul(sech2).sub(float(4).mul(sech2).mul(tanhN).mul(tanhN))),
+          )
+          out1.addAssign(envelope.mul(float(2)).div(widthM).mul(sech2).mul(tanhN).mul(speed))
+        }
+      })
+    }
+    return { out0, out1, out2 }
+  }
+  const waveStampGeometry = Fn(([x, z, t, depth]: [unknown, unknown, unknown, unknown]) => {
+    const r = emitStampLoop(x, z, t, depth, 'geometry')
+    return vec3(r.out0, r.out1, r.out2)
+  })
+  const waveStampSignals = Fn(([x, z, t, depth]: [unknown, unknown, unknown, unknown]) => {
+    const r = emitStampLoop(x, z, t, depth, 'signals')
+    return vec2(r.out0, r.out1)
+  })
+
+  let lastUploadedStamps: readonly WaveStampRuntime[] | null = null
+  function syncWaveStamps(): void {
+    if (field.stamps === lastUploadedStamps) return
+    lastUploadedStamps = field.stamps
+    let n = 0
+    for (const st of field.stamps) {
+      if (n >= MAX_WAVE_STAMPS) break
+      waveStampSlotsA[n]!.set(st.x0, st.z0, st._ux, st._uz)
+      waveStampSlotsB[n]!.set(st._len, st.amplitude, st.widthM, st.periodS)
+      waveStampSlotsC[n]!.set(st.phase01 ?? 0, st.speed, st.approachM, 0)
+      n++
+    }
+    waveStampCountUniform.value = n
+  }
+
   // Blended zone factors at world (x, z) and field time t. Returns
   // vec4(heightMult, freqMult, effectiveBearingRad, surgeY) — the effective
   // bearing defaults to the GLOBAL wave bearing so callers can take cos/sin
@@ -2146,14 +2291,21 @@ export function createWaterMesh(
   const shoreDydx = shoreWaveSlope.mul(shoreNrmX)
   const shoreDydz = shoreWaveSlope.mul(shoreNrmZ)
 
+  // Authored wave stamps — the signature jump waves, evaluated at the
+  // vertex's world XZ with the heightmap depth for the cap. Unattenuated
+  // by shoaling (authored absolutes; the cap is their seabed guard) and
+  // outside the set envelope, mirroring `sampleHeight`.
+  const stampGeom = waveStampGeometry(worldX, worldZ, tNode, vertexWaterDepth)
+  const stampSig = waveStampSignals(worldX, worldZ, tNode, vertexWaterDepth)
+
   // Zone surge joins UNattenuated, after the shoal-multiplied wave sum —
   // mirror of `sampleHeight` (`y += zoneFx.surgeY` outside the shoal term).
   // Like the CPU, surge contributes height only: zero slope (the lift is
   // near-uniform inside the zone's weight envelope), so the normals below
   // don't tilt with it.
-  const totalHeight = attenAmbient.add(vertexBike.x).add(shoreY).add(zoneSurgeY)
-  const totalDydx = attenDydx.add(vertexBike.y).add(shoreDydx)
-  const totalDydz = attenDydz.add(vertexBike.z).add(shoreDydz)
+  const totalHeight = attenAmbient.add(vertexBike.x).add(shoreY).add(zoneSurgeY).add(stampGeom.x)
+  const totalDydx = attenDydx.add(vertexBike.y).add(shoreDydx).add(stampGeom.y)
+  const totalDydz = attenDydz.add(vertexBike.z).add(shoreDydz).add(stampGeom.z)
 
   // Foam accumulator (stateless, no render targets needed).
   //
@@ -2319,8 +2471,8 @@ export function createWaterMesh(
     vec4(
       vertexFoamAccum,
       vertexWaterDepth,
-      crestSignals.x.mul(shoalFactor),
-      crestSignals.y.mul(shoalFactor),
+      crestSignals.x.mul(shoalFactor).add(stampSig.x),
+      crestSignals.y.mul(shoalFactor).add(stampSig.y),
     ),
   )
   const foamAccumFrag = interPackB.x
@@ -4828,8 +4980,9 @@ export function createWaterMesh(
     for (let i = 0; i < liveWaveAmps.length; i++) {
       liveWaveAmps[i] = field.waves[i]!.amplitude
     }
-    // Per-track wave zones — re-uploaded only when the zone list changes.
+    // Per-track wave zones + stamps — re-uploaded only on list change.
     syncWaveZones()
+    syncWaveStamps()
     // Keep the GPU steepness at the CLAMPED effective value — it depends on the
     // live amplitudes that Beaufort / lap-weather / the menu mutate. The CPU
     // buoyancy sampler clamps identically, so render + physics pinch the same.
@@ -4985,7 +5138,9 @@ export function createWaterMesh(
       dzRot += qScaled * rotDirZ * amp * c
     }
     out.x = x + (dxRot * cosB - dzRot * sinB) * shoal
-    out.y = y * shoal + zoneFx.surgeY + mesh.position.y
+    // Authored stamps join unattenuated, like surge (the GPU adds them to
+    // totalHeight outside the shoal multiply).
+    out.y = y * shoal + zoneFx.surgeY + sampleStampsAt(field, x, z, t).y + mesh.position.y
     out.z = z + (dxRot * sinB + dzRot * cosB) * shoal
   }
 

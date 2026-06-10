@@ -819,10 +819,36 @@ Matt playtests — the readability claim is only provable by hands + eyes.
    beach approaches (Sandbar awash bar, Cape Town harbour) + a QA-matrix
    pass for AI stability on shore-adjacent corridors** — `Surf shoaling`
    at 0 is the instant revert.
-2. **Authored wave stamps** (§7.10) — Blender-authored crest splines +
-   analytic traveling profiles, superposed on the ambient field, identical
-   both sides; fired on the set rhythm (P2.1). Learnable signature jumps —
-   same wave, same place, every lap. Start with one per Reef Cup track.
+2. ✅ **Authored wave stamps** (§7.10) — **SYSTEM SHIPPED (2026-06-10);
+   placement is the designer's move.** A stamp = a crest SEGMENT (p0→p1,
+   curved fronts chain 2–3) + a traveling sech² pulse that fades in
+   across an authored approach run-up, **peaks exactly ON the line**
+   (the jump spot), and dies past it — then waits out the rest of its
+   `periodS` (author it onto the track's set rhythm). Pure function of
+   `field.time`: deterministic, replay/multiplayer-safe; per-stamp
+   `amplitude/widthM/periodS/phase01/speed/approachM`, end-feathered,
+   depth-capped over shallows, life clamped to fit the period (no
+   mid-life teleport at the cycle wrap). Authored as `waveStamps[]` in
+   track JSON; evaluated identically by both samplers + the GPU vertex
+   stage (uniformArray mirror like zones; constants drift-tested), and
+   it feeds the **crest-curvature + ∂h/∂t foam signals**, so the jump
+   wave whitecaps like a natural breaking crest. Two contract findings
+   baked in: stamps are evaluated at the Gerstner REST point (their 6 m
+   faces are steep enough that the ambient pinch's half-metre offset
+   was a measured ~4 cm felt-vs-drawn gap — unlike the wide zone
+   blends), and `vy` carries the exact pulse-motion + life-rate terms
+   (hover damping reads it). e2e injects stamps at runtime via
+   `__hover.setWaveStamps` and steers the water clock onto the pulse
+   peak via the new `waterSync().fieldTime` — sync ≤ 1e-5 m through
+   approach/peak/release/dead-time, liveness proven by a with/without
+   `meanRenderY` delta at the same frozen instant
+   ([wave-stamp-sync.spec.ts](../tests/e2e/wave-stamp-sync.spec.ts) +
+   9 unit tests incl. measured travel direction + finite-difference vy).
+   **Not yet placed on any shipped track** — placement is level design
+   (the designer-places rule), so the Reef Cup signature jumps await
+   Matt/the level pass; the Blender authoring lane (curve + custom
+   props → `waveStamps[]` at export, like wave zones) is queued in
+   [blender-wishlist](./blender-wishlist.md).
 
 ### P4 — Dynamic water (simulate better, with gameplay teeth)
 

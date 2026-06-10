@@ -50,6 +50,12 @@ const SHARED = [
   'SHORE_SWELL_DRIVE_MAX',
   'SHORE_ASYM',
   'SHORE_ASYM_PHASE',
+  // Authored wave stamps (P3.2): the pulse waveform + caps are evaluated
+  // per vertex on the GPU and per sample in computeStamps.
+  'MAX_WAVE_STAMPS',
+  'STAMP_DEPTH_CAP',
+  'STAMP_END_FEATHER_M',
+  'STAMP_RELEASE_RATIO',
 ] as const
 
 describe('shore + shoaling + wave-zone constants single source (wave-field.ts ↔ water.ts)', () => {

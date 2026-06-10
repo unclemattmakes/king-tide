@@ -31,6 +31,23 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-10 (d)** — **P3.2 authored wave stamps: the
+> signature-jump system.** Tracks can author `waveStamps[]` (crest
+> segment + amplitude/width/period/phase/speed/approach): a traveling
+> sech² pulse fades in across the approach, **peaks exactly on the
+> authored line, on the authored rhythm** — same wave, same place, every
+> lap (the motocross jump made of water; Horizon/surf-game lesson).
+> Deterministic in `field.time`; identical in buoyancy + shader (uniform
+> mirror, drift-tested constants, evaluated at the Gerstner rest point —
+> a measured ~4 cm pinch-offset gap forced that); feeds the whitecap
+> curvature + leading-edge foam signals so it breaks like a real crest;
+> depth-capped over shallows. e2e injects stamps live
+> (`__hover.setWaveStamps`) and steers the water clock onto the pulse
+> peak (`waterSync().fieldTime`): sync ≤ 1e-5 m through the whole cycle.
+> **No shipped track places one yet — placement is level design** (tune
+> live in the console, copy into JSON); Blender exporter lane queued in
+> blender-wishlist.md. **P3 complete.** See water-next-research.md §8.
+
 > **Last updated: 2026-06-10 (c)** — **P3.1 shoaling v2: depth-driven
 > surf.** Shallow water no longer just flattens the swell: it STACKS it
 > (Green's law, capped 1.3×) and then BREAKS it at a depth-determined
