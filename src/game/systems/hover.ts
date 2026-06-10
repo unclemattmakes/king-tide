@@ -482,7 +482,7 @@ function probeSurfaceY(
  * `rb.angvel()` explicitly. Tick-start is fine for "what did this tick
  * look like" reads (drag, brake, fishtail).
  */
-type HoverFrame = {
+export type HoverFrame = {
   eid: number
   rb: RAPIER.RigidBody
   stats: BikeStatsData
@@ -1222,7 +1222,7 @@ function applyGroundedPitchPD(frame: HoverFrame, surfaceForwardSlope: number): v
  *     monotonic over the 1s m9-air-control sample window. Air keeps the
  *     pure-torque feel; flips spin around CM.
  */
-function applyPlayerPitchTorque(
+export function applyPlayerPitchTorque(
   frame: HoverFrame,
   isGrounded: boolean,
   isOverWater: boolean,
@@ -1264,12 +1264,19 @@ function applyPlayerPitchTorque(
   // residual nose-down angular velocity carried airborne will still
   // rotate the chassis somewhat, just no fresh torque past the limit).
   // Airborne over LAND is unaffected — jump tricks off ramps run free.
+  //
+  // Sign convention: pitchAngle = asin(−fwd.y), so positive = nose DOWN
+  // (the grounded PD above corrects positive error with nose-up torque).
+  // The clamp therefore fires on pitchAngle − target > +limit; with the
+  // comparison mirrored it instead eats the dive kick on any nose-high
+  // wave/ramp launch over an unfavourable slope — Q randomly dead for
+  // the whole arc.
   if ((isGrounded || isOverWater) && intent.pitch < 0) {
     const qChk = rb.rotation()
     const r12Chk = 2 * (qChk.y * qChk.z - qChk.x * qChk.w)
     const pitchAngle = Math.asin(Math.max(-1, Math.min(1, -r12Chk)))
     const surfacePitchTarget = -Math.atan(surfaceForwardSlope)
-    if (pitchAngle - surfacePitchTarget < -DIVE_PITCH_FWD_LIMIT_RAD) return
+    if (pitchAngle - surfacePitchTarget > DIVE_PITCH_FWD_LIMIT_RAD) return
   }
   const rightP = quatRotate(q, { x: 1, y: 0, z: 0 })
   const coef = isGrounded ? 7 : 1.8
