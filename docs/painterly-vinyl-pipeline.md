@@ -92,6 +92,26 @@ callers. Highest-value reuse in the plan.
   converting every still-stock mesh (skip `kind` terrain/decal/emitter/horizon).
   `waterLevel` threads from the track JSON like `terrainShader` already does.
 
+**One material instance per source material (size-shared).** The size-relative
+inputs — brush stroke frequency + coarse/medium/fine blend, waterline band
+scale, object-space stroke scale — are NOT baked into the node graph: the
+material reads them from each mesh's `userData` at render time (three
+`userData()` reference nodes; the value uploads into each render object's own
+uniform buffer), and both attach points stamp every mesh with its measured
+size via `stampVinylObjectSize`. This is a load-time lever, not a look change.
+three's WebGPU pipeline cache keys per material *instance* — a structurally
+identical twin still pays its own ~60–130 ms main-thread TSL node-build + WGSL
+codegen, and converting the baked constants to material-scoped uniforms does
+NOT dedupe — so the earlier per-(material, size-bucket) twins multiplied
+shader compiles (155 materials on Texcoco Rising). Sharing the instance
+collapses material count to source-material count (Texcoco: 73), which halves
+the progressive scenery warm's drain: `progressive-warm.ts` warms one
+pipeline-GROUP at a time (`groupForWarm` keys on material + attribute layout +
+class), so group count ≈ vinyl-material count. If you hand a size-shared vinyl
+material to a new mesh yourself, stamp the mesh — an unstamped wearer reads
+undefined → NaN uniforms (`applyVinylMaterialToScene` stamps already-converted
+wearers for exactly this reason).
+
 ---
 
 ## Layer 2 — multi-point intake (form + albedo)
