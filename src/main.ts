@@ -110,11 +110,11 @@ import {
 } from './engine/sim/water/wave-field'
 import { applyDeckProfile, detectSteamDeck } from './engine/steam-deck'
 import { applyStoredWaterTuning } from './engine/water-debug-storage'
-import { loadBike } from './game/assets/bike-loader'
+import { type LoadedBike, loadBike } from './game/assets/bike-loader'
 import { loadManifest } from './game/assets/manifest'
 import { type LoadedProp, loadProp } from './game/assets/prop-loader'
 import { aiCallSign } from './game/bikes/callsigns'
-import { resolveBikeVariant, variantForAiSlot } from './game/bikes/variants'
+import { BIKE_VARIANTS, resolveBikeVariant, variantForAiSlot } from './game/bikes/variants'
 import { AIController, AIControllerStore, AITag, defaultAIController } from './game/components/ai'
 import { RacerStore } from './game/components/race'
 import { WaveRiderStore, WaveRiderTag } from './game/components/wave-rider'
@@ -751,15 +751,24 @@ async function boot() {
     createPickupSpawn(sim, track.pickupSpawns[i] as (typeof track.pickupSpawns)[number], i)
   }
 
-  // Load bike GLBs in parallel: the player's chosen variant plus the
-  // racer baseline (used by AI bikes, and as the fallback if the
-  // player's variant fetch fails). The cache in bike-loader dedupes
-  // when the player's variant already is the racer.
+  // Load bike GLBs in parallel. Solo Time Trial only ever renders the
+  // player's variant (+ the racer baseline the ghost/fallback paths use);
+  // a race grid or multiplayer room can field EVERY variant — each AI
+  // spawns with its slot's variantId, so render + seat socket + rider
+  // pose all resolve per-variant (the GLBs are ~100–180 KB each and the
+  // bike-loader cache dedupes repeats).
   setLoadingMessage('Loading bikes…')
-  const [playerBikeGlb, racerBikeGlb] = await Promise.all([
-    loadBike(assetUrl(`/assets/bikes/${playerVariant.id}.glb`)),
-    loadBike(assetUrl('/assets/bikes/racer.glb')),
-  ])
+  const bikeIdsToLoad = [
+    ...new Set([playerVariant.id, 'racer', ...(timeTrialMode ? [] : Object.keys(BIKE_VARIANTS))]),
+  ]
+  const loadedBikeGlbs = await Promise.all(
+    bikeIdsToLoad.map((id) => loadBike(assetUrl(`/assets/bikes/${id}.glb`))),
+  )
+  const bikeGlbsById: Record<string, LoadedBike> = {}
+  bikeIdsToLoad.forEach((id, i) => {
+    bikeGlbsById[id] = loadedBikeGlbs[i] as LoadedBike
+  })
+  const racerBikeGlb = bikeGlbsById.racer as LoadedBike
   bootMark('bikes')
 
   // Time Trial — load the saved ghost for (track, bike) before spawn
@@ -1060,7 +1069,7 @@ async function boot() {
 
   // Phase 6 — render systems.
   const bikeRegistry = {
-    byVariantId: { [playerVariant.id]: playerBikeGlb, racer: racerBikeGlb },
+    byVariantId: bikeGlbsById,
     default: racerBikeGlb,
   }
   const bikeRender = createBikeRenderSystem(scene, sim, bikeRegistry, {

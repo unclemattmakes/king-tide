@@ -64,7 +64,10 @@ const SEAT_OFFSET = { x: 0, y: -0.4, z: 0 }
 const PITCH_GAIN = 0.5 // bouncePitch  → lean forward / back (about local X)
 const YAW_GAIN = 0.3 // flowYaw      → torso twist into the turn (about local Y)
 const ROLL_GAIN = 0.7 // leanRoll     → bank into the drift (about local Z)
-const HEAD_YAW_GAIN = 0.6 // headYaw   → head leads the steer (about local Y)
+const HEAD_YAW_GAIN = 0.75 // headYaw  → head leads the steer (about local Y).
+// Bumped 0.6 → 0.75 with the fast-attack look (rider-pose.ts headYawAttack)
+// so the "head turns first" read is legible at chase-cam distance: full
+// deflection ≈ 30° total across neck + head. Tune by eye on playtest.
 const HEAD_PITCH_GAIN = 0.5 // headPitch → nod with throttle / brake (about local X)
 
 /** Bones that take the head-look offset, with their share of the total angle.
@@ -176,6 +179,7 @@ export function createRiderMannequinSystem(
         const neck = inst.bones.get('neck_01')
         riders.push({
           eid,
+          bikeEid: inst.bikeEid,
           ragdoll: inst.ragdoll,
           clip: inst.action ? inst.action.getClip().name : null,
           running: inst.action?.isRunning() ?? false,
