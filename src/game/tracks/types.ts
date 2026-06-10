@@ -44,6 +44,15 @@ export type Track = {
    *  edges via `blendRadiusM` so the boundary isn't visible. Required
    *  field; defaults to empty for tracks with uniform global seas. */
   waveZones: WaveZone[]
+  /** Authored wave stamps (water-next-research §7.10) — per-track
+   *  signature jump waves: a crest line + a traveling pulse that peaks ON
+   *  the line every `periodS` seconds. Same wave, same place, every lap.
+   *  Shape defined in `engine/sim/water/wave-field.ts`
+   *  ({@link import('@/engine/sim/water/spectrum').SpectrumSpec | sim layer})
+   *  — the runtime + GPU evaluate it identically (uniform mirror like
+   *  zones). Author the rhythm onto the track's `water.swellSets`.
+   *  Absent/empty = none. */
+  waveStamps?: import('@/engine/sim/water/wave-field').WaveStampInput[]
   /** Target gate spacing in metres, used by the editor's "Auto-place gates
    *  from spline" action and Blender's gate-preview overlay. The actual
    *  count is rounded to fit the closed-loop arc length cleanly; see
