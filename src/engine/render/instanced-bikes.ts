@@ -1,16 +1,16 @@
 /**
- * Instanced AI/peer bike field.
+ * Instanced AI/peer bike field — one field per bike GLB.
  *
- * The AI field all resolves to the same racer GLB (the render registry only
- * carries the player's variant + the racer default — see render-systems.ts), so
- * the only per-bike variation is two material tints: `mat_bike_*_livery` (body)
- * and `mat_bike_*_glow` (exhaust). That makes the field a textbook instancing
- * target: one `InstancedMesh` per visual sub-mesh, each sharing a SINGLE vinyl
- * material across the whole field, with the livery / exhaust colour supplied as a
- * per-instance `aTint` attribute the material reads (painterly-vinyl-material.ts
- * `tintAttribute`). Result: the whole field draws in one call per sub-mesh
- * instead of one object tree per bike, and the pre-warm compiles one material set
- * instead of one per clone.
+ * Within a field every bike shares the same GLB (render-systems.ts builds one
+ * field per distinct variant model in play), so the only per-bike variation is
+ * two material tints: `mat_bike_*_livery` (body) and `mat_bike_*_glow`
+ * (exhaust). That makes each field a textbook instancing target: one
+ * `InstancedMesh` per visual sub-mesh, each sharing a SINGLE vinyl material
+ * across the field, with the livery / exhaust colour supplied as a per-instance
+ * `aTint` attribute the material reads (painterly-vinyl-material.ts
+ * `tintAttribute`). Result: a field draws in one call per sub-mesh instead of
+ * one object tree per bike, and the pre-warm compiles one material set per
+ * variant instead of one per clone.
  *
  * The player bike + the Time-Trial ghost stay on the per-clone path
  * (render-systems.ts) — the hero bike the player stares at is left untouched, and
@@ -24,6 +24,41 @@ import { buildVinylMaterial } from './painterly-vinyl-material'
 
 /** Per-instance livery/exhaust colour attribute the vinyl material samples. */
 const TINT_ATTR = 'aTint'
+
+/** Cross-FIELD vinyl material cache (see `fieldMaterialKey`). The caller owns
+ *  one map and passes it to every field it builds, so equivalent materials in
+ *  different variant GLBs collapse to a single compiled vinyl instance —
+ *  material COUNT is the shader pre-warm lever. */
+export type SharedVinylCache = Map<string, THREE.Material>
+
+/** Structural share-key for a field material, or null when it must stay
+ *  per-source (textured — a unique look we can't prove equivalent).
+ *
+ *  - Tinted roles (livery / exhaust): the per-instance `aTint` REPLACES the
+ *    base colour in the vinyl graph (and drives emissive for the exhaust), so
+ *    the source colour is irrelevant — one material per role serves EVERY
+ *    variant's field.
+ *  - Untinted (chassis): vinyl flattens PBR (metalness 0, house roughness),
+ *    so only the baked colour + emissive survive conversion. Quantised to
+ *    1/64 — sub-perceptual for the near-black chassis family this exists for.
+ */
+function fieldMaterialKey(src: THREE.Material, tintKind: FieldSubmesh['tintKind']): string | null {
+  const std = src as Partial<THREE.MeshStandardMaterial>
+  const textured = Boolean(
+    std.map ||
+      std.normalMap ||
+      std.emissiveMap ||
+      std.roughnessMap ||
+      std.metalnessMap ||
+      std.aoMap,
+  )
+  if (textured) return null
+  const emi = std.emissiveIntensity ?? 1
+  if (tintKind) return `tint:${tintKind}:${emi}`
+  const q = (c: THREE.Color | undefined): string =>
+    c ? `${Math.round(c.r * 64)},${Math.round(c.g * 64)},${Math.round(c.b * 64)}` : '-'
+  return `plain:${q(std.color)}:${q(std.emissive)}:${emi}`
+}
 
 type FieldSubmesh = {
   inst: THREE.InstancedMesh
@@ -67,7 +102,15 @@ const ZERO_MATRIX = new THREE.Matrix4().makeScale(0, 0, 0)
 export function createInstancedBikeField(
   loaded: LoadedBike,
   capacity: number,
-  opts: { brush: number; edgeWear: number; visualScale: number },
+  opts: {
+    brush: number
+    edgeWear: number
+    visualScale: number
+    /** Share equivalent vinyl materials ACROSS fields (pass the same map to
+     *  every per-variant field — see `SharedVinylCache`). Omit → materials
+     *  are only deduped within this field. */
+    sharedVinyl?: SharedVinylCache
+  },
 ): InstancedBikeField {
   const group = new THREE.Group()
   group.name = 'bikes:instanced'
@@ -111,7 +154,8 @@ export function createInstancedBikeField(
       geom.setAttribute(TINT_ATTR, tint)
     }
 
-    let vinyl = matCache.get(srcMat)
+    const shareKey = opts.sharedVinyl ? fieldMaterialKey(srcMat, tintKind) : null
+    let vinyl = shareKey ? opts.sharedVinyl?.get(shareKey) : matCache.get(srcMat)
     if (!vinyl) {
       vinyl = buildVinylMaterial(srcMat, {
         brush: opts.brush,
@@ -120,7 +164,8 @@ export function createInstancedBikeField(
         ...(tintKind ? { tintAttribute: TINT_ATTR } : {}),
         ...(tintKind === 'exhaust' ? { emissiveFromTint: true } : {}),
       })
-      matCache.set(srcMat, vinyl)
+      if (shareKey) opts.sharedVinyl?.set(shareKey, vinyl)
+      else matCache.set(srcMat, vinyl)
     }
 
     const inst = new THREE.InstancedMesh(geom, vinyl, capacity)

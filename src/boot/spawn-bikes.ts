@@ -137,16 +137,18 @@ export function spawnBikes(opts: {
       // sim stats is what makes a Cruiser AI plough heavy and a Sparrow
       // AI flick light — previously every AI fell back to default Racer
       // stats regardless of the bike the broadcast roster showed it on.
-      // (Render-hint fields bodyColor/variantId stay unset: the AI grid
-      // is intentionally coloured from the broadcast palette, not the
-      // variant livery — see render-systems.ts.)
+      // variantId rides along so the render side agrees with the roster:
+      // bike model, seat socket, engine-trail anchors, and the rider's
+      // seated pose clip all resolve per-variant. bodyColor stays unset —
+      // AI livery is intentionally the broadcast palette, not the variant
+      // colour (render-systems.ts aiColors).
       const variant = variantForAiSlot(i + 1)
       const aiEid = createBike(sim, phys, {
         position: aiPos,
         yaw: track.start.yaw,
         asRacer: true,
         ai: { splineId: 'main', lineOffset: slot.lineOffset, difficulty },
-        stats: { ...variant.stats },
+        stats: { ...variant.stats, variantId: variant.id },
       })
       spawnRider(aiEid, aiPos)
       aiEids.push(aiEid)

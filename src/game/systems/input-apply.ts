@@ -48,6 +48,20 @@ type Smoothed = { steer: number; throttle: number }
 // of the deterministic sim snapshot.
 const smoothed = new Map<number, Smoothed>()
 
+// Raw (pre-scale, pre-smoothing) stick steer per peer bike. For systems that
+// want the player's DECLARED direction rather than the bike's shaped steering:
+// the rider's head-look reads this so the head moves the instant the stick
+// does and LEADS the bike, instead of trailing the steer smoothing above.
+// Same lifecycle + rationale as `smoothed`.
+const rawSteer = new Map<number, number>()
+
+/** The unshaped stick steer for a peer-controlled bike this tick, or
+ *  `undefined` for bikes that don't route through `applyPeerInputs` (AI —
+ *  whose ControlIntent is already raw — and replay playback). */
+export function rawSteerFor(eid: number): number | undefined {
+  return rawSteer.get(eid)
+}
+
 function approach(current: number, target: number, dt: number, rate: number): number {
   const a = 1 - Math.exp(-rate * dt)
   return current + (target - current) * a
@@ -87,6 +101,7 @@ export function applyPeerInputs(
     const peer = PeerControlledStore.get(eid)
     if (!peer) continue
     const intent = peerInputs.get(peer.peerId) ?? emptyIntent()
+    rawSteer.set(eid, intent.steer)
 
     const targetSteer = intent.steer * PLAYER_STEER_SCALE
     const targetThrottle = intent.throttle
@@ -132,6 +147,9 @@ export function applyPeerInputs(
   // tiny, but tidy.
   if (smoothed.size > seen.size) {
     for (const k of smoothed.keys()) if (!seen.has(k)) smoothed.delete(k)
+  }
+  if (rawSteer.size > seen.size) {
+    for (const k of rawSteer.keys()) if (!seen.has(k)) rawSteer.delete(k)
   }
 }
 
