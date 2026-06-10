@@ -199,7 +199,7 @@ test.describe('M2 water', () => {
       const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
       window.__hover!.setIntentOverride(null)
       const r0 = window.__hover!.race()?.raceTime ?? 0
-      while (((window.__hover!.race()?.raceTime ?? 0) - r0) < 2) await wait(30)
+      while ((window.__hover!.race()?.raceTime ?? 0) - r0 < 2) await wait(30)
       const out: { r: number; y: number; g: boolean }[] = []
       const rW0 = window.__hover!.race()?.raceTime ?? 0
       while (true) {
