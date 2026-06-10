@@ -271,6 +271,11 @@ export type NetDebugProbe = {
     aiDynamic: boolean[]
     remote: Record<number, { x: number; y: number; z: number }>
   }
+  /** Synchronized-start barrier stamps (Date.now): when this tab
+   *  reported race-loaded, when the relay's race-go arrived, and
+   *  whether the relay speaks the barrier protocol at all. The two-tab
+   *  e2e compares stamps across tabs to prove the shared start. */
+  barrier(): { supported: boolean; loadedAt: number | null; goAt: number | null }
 }
 
 export type DeterminismHarness = {

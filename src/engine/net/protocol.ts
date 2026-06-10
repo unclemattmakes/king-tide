@@ -34,6 +34,10 @@ export type HelloMessage = {
    *  state. Optional: absent when talking to a relay that predates the
    *  field, in which case clients fall back to slot-order election. */
   joinSeq?: number | undefined
+  /** True when the relay speaks the synchronized-start protocol
+   *  (`race-loaded` / `race-go`). Absent on older relays — clients arm
+   *  their countdown locally on load, as before the barrier existed. */
+  startBarrier?: boolean | undefined
   /** Tenure protocol — joinSeq per other peer, keyed by slot. Same
    *  optionality contract as `joinSeq`. */
   otherPeerSeqs?: Record<number, number> | undefined
@@ -126,6 +130,19 @@ export type StartRaceMessage = {
   trackId?: string | undefined
 }
 
+/** Server → all peers: the synchronized start signal. Sent once per
+ *  race, when every racer expected from the lobby cohort (counted at
+ *  `start-race`) has reported `race-loaded` — or when the relay's
+ *  start timeout expires, so one vanished player can't hang the grid.
+ *  Clients arm their local 3-2-1 on receipt: start skew between peers
+ *  becomes one-way relay latency instead of load-time difference.
+ *  Replayed directly to any racer whose `race-loaded` arrives after
+ *  the signal fired (a late in-grace joiner counts down solo and
+ *  starts behind). */
+export type RaceGoMessage = {
+  type: 'race-go'
+}
+
 /** Client → server ping. The server echoes the same `t` back as a
  *  `PongMessage` without touching it; the client computes RTT as
  *  `now - t`. Stateless on the server — pings don't bump presence and
@@ -152,6 +169,7 @@ export type ServerControlMessage =
   | RaceInProgressMessage
   | ReadyMessage
   | StartRaceMessage
+  | RaceGoMessage
   | PongMessage
 
 /** Messages sent from a client to the server.
@@ -160,8 +178,12 @@ export type ServerControlMessage =
  *  - `start-race`: a peer's local view found all peers ready and is
  *    arming the countdown. Server sets `raceStarted` and broadcasts a
  *    `StartRaceMessage` (with the chosen `trackId`) to everyone else
- *    so they arm too. Late joiners are told via the `raceStarted` flag
- *    in their `HelloMessage`.
+ *    so they arm too. In-grace joiners are told via the `raceStarted`
+ *    flag in their `HelloMessage`.
+ *  - `race-loaded`: this race tab finished loading (sim + assets up,
+ *    game loop rendering) and is holding its 3-2-1 for the
+ *    synchronized start. Server replies with `RaceGoMessage` once the
+ *    whole cohort has reported in (or its timeout fires).
  *  - `ping`: RTT probe. Server echoes `t` back in a `PongMessage`. */
 export type ClientControlMessage =
   | {
@@ -171,4 +193,5 @@ export type ClientControlMessage =
       selectedTrackId?: string | undefined
     }
   | { type: 'start-race'; trackId?: string | undefined }
+  | { type: 'race-loaded' }
   | PingMessage
