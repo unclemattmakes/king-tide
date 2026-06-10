@@ -20,6 +20,7 @@ import { assetUrl } from './engine/asset-url'
 import { applyTrackAudio } from './engine/audio/audio-service'
 import { installSoundtrackRadio } from './engine/audio/soundtrack-radio'
 import { getCupProgressFor } from './engine/cup-progress'
+import { setWindTrailsController } from './engine/dev/dev-runtime'
 import { loadDevSettings } from './engine/dev-settings'
 import { emptyIntent, type Intent, installInput } from './engine/input'
 import { installCameraLookInput } from './engine/input/camera-look'
@@ -80,6 +81,7 @@ import { createWaterTransitionMarkers } from './engine/render/water-debug-marker
 import { applyWaveSprayIntensity, setWaterMesh } from './engine/render/water-service'
 import { breakingFoam, createWaveCrestSprayDriver } from './engine/render/wave-crest-spray'
 import { createWaveRiderRenderSystem } from './engine/render/wave-rider-render'
+import { createWindTrailsSystem } from './engine/render/wind-trails'
 import { sliceBestLap } from './engine/replay/best-lap-slice'
 import { parseReplay, type ReplayBike, type ReplayFile } from './engine/replay/format'
 import { getGhost, getGhostBestLap, setGhost } from './engine/replay/ghost-state'
@@ -1036,6 +1038,47 @@ async function boot() {
   const combatRender = createCombatRenderSystem(scene, sim)
   const fx = createFxSystem(scene, sim, phys, waveField)
   const engineTrail = createEngineTrailSystem(scene, sim, bikeRegistry)
+  // Ambient wind gusts — illustrated white strokes curling downwind around
+  // the player (engine/render/wind-trails.ts). Downwind = the dominant swell
+  // travel (wave 0 rotated by the live field bearing) — the exact vector the
+  // crest spray drifts on — so air and sea visibly move together, and the
+  // Beaufort sea state scales how busy/fast the gust field is. `?wind=0`
+  // disables; any other number scales intensity (`?wind=1.5` for capture).
+  const windTrails = createWindTrailsSystem(scene, {
+    getWind: () => {
+      const w0 = waveField.waves[0]
+      const cosB = Math.cos(waveField.waveBearing)
+      const sinB = Math.sin(waveField.waveBearing)
+      return {
+        x: (w0?.dirX ?? 1) * cosB - (w0?.dirZ ?? 0) * sinB,
+        z: (w0?.dirX ?? 1) * sinB + (w0?.dirZ ?? 0) * cosB,
+        speed: 5 + 1.2 * (beaufort ?? 4),
+      }
+    },
+    groundY: (x, z) =>
+      Math.max(
+        waveField.baseY,
+        (terrainHeightmap ? sampleTerrainHeightAtXZ(terrainHeightmap, x, z) : null) ??
+          waveField.baseY,
+      ),
+    baseY: waveField.baseY,
+    ...(beaufort !== undefined ? { beaufort } : {}),
+  })
+  {
+    const windParam = params.get('wind')
+    if (windParam === '0') windTrails.setEnabled(false)
+    else if (windParam !== null) {
+      const f = Number(windParam)
+      if (Number.isFinite(f)) windTrails.setIntensity(f)
+    }
+  }
+  setWindTrailsController({
+    isOn: () => windTrails.isEnabled(),
+    toggle: () => {
+      windTrails.setEnabled(!windTrails.isEnabled())
+      return windTrails.isEnabled()
+    },
+  })
   bootMark('systems')
   bootStat('vinylAfterSystems', vinylMaterialsBuilt())
 
@@ -1052,6 +1095,9 @@ async function boot() {
     // Toward coral (blue-deficient, green slightly down) — same family as the
     // shader's foam warm tint, scaled so even full warmth stays luminous.
     fx.setSprayTint(1, 1 - 0.16 * warmth, 1 - 0.34 * warmth)
+    // The wind strokes deliberately do NOT take this warmth: against warm
+    // haze skies a warmed white disappears — they keep their cool-white HDR
+    // default (see wind-trails.ts) so they stay legible at sunset.
   }
 
   // Ambient breaking-crest spray — sweeps a world-anchored lattice around the
@@ -1091,6 +1137,9 @@ async function boot() {
   const fxTick = (dt: number) => {
     fx.tick(dt)
     engineTrail.tick(camera, dt)
+    // Wind gusts run on the wave-field clock (not dt) so freeze-water stills
+    // them for screenshots and replay scrubs reseed them cleanly.
+    windTrails.tick(camera, waveField.time)
     // Skip the lattice sweep entirely when the player has the effect off — no
     // sampling cost for a disabled feature. The bike-driven bow spray inside
     // fx.tick honours the same setting on its own.
