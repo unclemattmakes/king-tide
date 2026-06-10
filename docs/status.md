@@ -31,6 +31,34 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-09 (d)** — **No mid-race joins (product rule) +
+> the two-tab multiplayer e2e finally exists.** Per Matt: players enter
+> through the shared lobby, load in together, and race from the 3-2-1 —
+> nobody drops into a running race. The relay now arms a **race lock** 30 s
+> after `start-race` (`RACE_JOIN_GRACE_MS` — the grace admits the cohort's
+> own race tabs and a share-link friend who still makes the countdown) and
+> rejects later joins with `race-in-progress` / close **4001**; the lobby
+> shows a RACE IN PROGRESS notice, a rejected race tab rides on solo, and
+> rejections stop the reconnect loop (close-code contract — the courtesy
+> JSON can be dropped when the close races the send). The lock lives in
+> **room storage** with an in-grace empty-room exception, because the
+> lobby→race handoff *always* empties the room and recycles the relay
+> instance — which is also why **M10.12's late-join `raceStarted` replay
+> had been silently broken in every real cohort race**. Also fixed:
+> `buildRaceHref` dropped the `?host=` relay override (race tabs silently
+> reconnected to the default relay). The long-deferred **two-tab Playwright
+> spec landed** ([m10-11-state-sync.spec.ts](../tests/e2e/m10-11-state-sync.spec.ts),
+> per-worker `partykit dev` sidecar): lobby-cohort → race convergence
+> (≤10 m median cross-tab gap + kinematic/dynamic role invariants via the
+> new `__hover.net.bikePoses()` probe), host handoff on leave,
+> deterministic track agreement, and the race lock — green 3 consecutive
+> runs, 9/9, zero retries. Testing trap for posterity: Chromium pauses rAF
+> in fully-occluded windows, so two stacked headed tabs silently throttle
+> each other's sims — the spec runs two browsers with non-overlapping
+> windows. **`pnpm party:deploy` required** for the lock + tenure election
+> in prod. Full detail: [multiplayer-review.md](./multiplayer-review.md)
+> Phase 8.
+>
 > **Last updated: 2026-06-09 (c)** — **Multiplayer review + hardening pass.**
 > A full netcode read produced [multiplayer-review.md](./multiplayer-review.md)
 > (findings, prioritized plan — everything implemented except the
@@ -1819,15 +1847,15 @@ See [implementation-plan.md](./implementation-plan.md) for repo layout and the a
 
 ## Known bugs / quirks
 
-### Multiplayer e2e coverage — *deferred*
-M10.11 transform-snapshot sync is covered by unit tests
-(`host-election`, `transform-snapshot`, `apply-snapshot`) and was
-verified end-to-end via Chrome MCP for solo / two-peer / late-joiner
-scenarios. A two-tab Playwright probe (`tests/e2e/m10-11-state-sync.spec.ts`)
-was sketched in the design doc §10 but is not yet automated. Bugs
-that only manifest cross-tab need to be reproduced manually until
-that lands. Good first-PR target for someone with Playwright
-experience — design notes in [`docs/m10-11-state-sync.md`](./m10-11-state-sync.md).
+### Multiplayer e2e coverage — *landed 2026-06-09*
+The two-tab Playwright probe sketched in the design doc §10 now exists:
+[`tests/e2e/m10-11-state-sync.spec.ts`](../tests/e2e/m10-11-state-sync.spec.ts)
+spawns its own `partykit dev` sidecar per worker and covers lobby-cohort →
+race convergence, host handoff, deterministic track agreement, and the
+no-mid-race-joins race lock. Run with
+`$env:E2E_PORT='<N>'; pnpm e2e m10-11-state-sync` (headed). See
+[multiplayer-review.md](./multiplayer-review.md) Phases 7–8 for what it
+caught on the way in.
 
 ### Cliffside AI mesa recovery — *open level-design fix*
 Detailed in [AI navigation — Lagoon solid, Cliffside still rough](#ai-navigation--lagoon-solid-cliffside-still-rough)

@@ -151,9 +151,54 @@ Phased so each lands independently with local verification
 - [x] **7.2** Fix comment drift (`MAX_EXTRAPOLATE_T`, `LATENCY_STALE_MS`);
   add a dated revision note to `m10-11-state-sync.md` (NUM_AI=7 bandwidth,
   input-frame send removal, tenure election); status.md entry pointing here.
-- [ ] **7.3** *(deferred, unchanged)* Two-tab Playwright spec — needs a
-  `partykit dev` sidecar in the e2e harness; tracked in status.md as before.
-  This review re-affirms it's the right next investment after this pass.
+- [x] **7.3** Two-tab Playwright spec —
+  [m10-11-state-sync.spec.ts](../tests/e2e/m10-11-state-sync.spec.ts), with a
+  per-worker `partykit dev` sidecar (pid-salted port; readiness probe that
+  can't be satisfied by an orphaned stale relay). Three tests: lobby-cohort
+  → race convergence (≤10 m median cross-tab AI/player gap, kinematic /
+  dynamic role invariants via the new `bikePoses.aiDynamic` probe, host
+  handoff on leave), deterministic track agreement with differing votes,
+  and the race lock (below). Verified 3 consecutive full-suite runs, 9/9
+  tests, zero retries.
+
+### Phase 8 — product rule: no mid-race joins (2026-06-09, follow-up session)
+
+Matt's call: players join the same lobby, load in together, and share the
+3-2-1 — nobody drops into a running race.
+
+- [x] **8.1** Relay race lock: `start-race` stamps `raceStartedAtMs`; joins
+  more than `RACE_JOIN_GRACE_MS` (30 s) later are rejected with
+  `race-in-progress` + close **4001** until the room empties. The grace
+  admits the cohort's own race tabs and a share-link friend who still makes
+  the countdown. Lock state lives in **room storage** with an in-grace
+  empty-room exception in both `onConnect` and `onClose`, because the
+  lobby→race handoff *always* empties the room (all lobby sockets close at
+  the banner timeout; race tabs take seconds to boot) and the platform
+  recycles the server instance on empty.
+- [x] **8.2** Client handling: lobby shows a plain "RACE IN PROGRESS"
+  banner (survives the connecting-state early-return); a rejected race tab
+  labels the room chip and keeps riding solo. Rejections stop partysocket
+  retries, with the close **code** (4000/4001) as the reliable contract —
+  the courtesy JSON can be dropped when the server's close races its send.
+- [x] **8.3** Bugs found by the spec along the way, all fixed:
+  `buildRaceHref` dropped the `?host=` relay override (race tabs silently
+  reconnected to the *default* relay — also the reason the spec kept
+  "passing" against a stray old-code workerd); and the relay's in-memory
+  race state never survived the handoff recycle — meaning **M10.12's
+  original late-join `raceStarted` replay had been silently broken in every
+  real cohort race**. Relay now logs joins/rejects (`[relay] …`) for
+  `partykit tail` triage; the sidecar pipes them into test output.
+
+### Testing trap worth remembering (cost a day of flake-chasing)
+
+Chromium pauses rAF in fully-occluded windows, and two headed same-size
+Playwright windows overlap exactly. A throttled tab's fixed-step sim crawls
+at the dt-clamp rate (~6 %), its 20 Hz broadcast drops to ~1.3/s, and its
+kinematic remote bikes freeze between sparse samples — while WebSocket
+receipt (off-rAF) keeps every `snapshotsReceived` gate green. The
+anti-throttling launch flags alone did **not** reliably prevent it; the
+structural fix is two separate browsers with non-overlapping
+`--window-position` windows (see the spec's `launchSideBySide`).
 
 ## Verification log
 
@@ -175,6 +220,20 @@ Phased so each lands independently with local verification
   88, exactly one host, **zero uncaught page errors**. Probe surface for
   future two-tab specs: `window.__hover.net`
   (`ready/peerId/remotePeers/isHost/snapshotsReceived`).
-- **Prod note:** tenure election takes effect after **`pnpm party:deploy`**;
-  clients fall back to slot-order election against the old relay (current
-  behavior) until then.
+- **Prod note:** tenure election **and the race lock** take effect after
+  **`pnpm party:deploy`**; clients fall back to slot-order election / no
+  lock against the old relay (current behavior) until then.
+- 2026-06-09 (later) — Phase 7.3 + Phase 8 landed: spec green **3
+  consecutive full runs (9/9 tests, zero retries)** against the spec's own
+  relay sidecars; raw-WebSocket relay probes verified the lock surviving
+  the empty handoff gap and the 4001 rejection; `pnpm typecheck` clean;
+  full unit suite **1144 green** (relay-ping suite updated for the async
+  storage-backed relay); `pnpm build` green; no new biome warnings on
+  touched files.
+- **Known gap (accepted, documented):** per-tab 3-2-1 means starts align
+  only as well as load times do. A true synchronized start barrier (host
+  broadcasts "go at tick T", everyone unlocks together) is the right next
+  netcode slice if staggered starts bother playtests. Also: remote-bike
+  liveries fall back to the default variant in cohort races — lobby picks
+  are keyed by slot and don't survive the handoff recycle; carrying picks
+  through needs session identity, same bucket as the start barrier.
