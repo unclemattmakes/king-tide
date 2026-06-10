@@ -1,4 +1,4 @@
-import { addComponent, hasComponent, removeComponent } from 'bitecs'
+import { addComponent, hasComponent, query, removeComponent } from 'bitecs'
 import { DEFAULT_BENCH_TRACK, installBenchmark } from './boot/benchmark-mode'
 import { bootMark, bootReport, bootStat } from './boot/boot-trace'
 import { installControls } from './boot/controls'
@@ -33,6 +33,7 @@ import { createBridgeSupports } from './engine/render/bridge-supports'
 import { createChaseCamera } from './engine/render/camera'
 import { applyCloudShadowsToScene, buildCloudShadowMultiplier } from './engine/render/cloud-shadows'
 import { createCombatRenderSystem } from './engine/render/combat-render'
+import { type ContactSplashDriver, createContactSplashDriver } from './engine/render/contact-splash'
 import { createDirectionArrow } from './engine/render/direction-arrow'
 import { createEngineTrailSystem } from './engine/render/engine-trail'
 import { createFxSystem } from './engine/render/fx'
@@ -75,6 +76,12 @@ import { createSurgeSprayDriver, type SurgeSprayDriver } from './engine/render/s
 import { sampleTerrainHeightAtXZ } from './engine/render/terrain-heightmap'
 import { createTrackVisuals } from './engine/render/track-mesh'
 import { createWaterMesh, WAVE_BEARING_DEFAULT } from './engine/render/water'
+import {
+  type ContactScanNode,
+  collectWaterContacts,
+  gatePostWaterContacts,
+  type WaterContact,
+} from './engine/render/water-contacts'
 import { logWaterCoverage, reportWaterCoverage } from './engine/render/water-coverage'
 import { createWaterTransitionMarkers } from './engine/render/water-debug-markers'
 import { applyWaveSprayIntensity, setWaterMesh } from './engine/render/water-service'
@@ -110,6 +117,7 @@ import { aiCallSign } from './game/bikes/callsigns'
 import { resolveBikeVariant, variantForAiSlot } from './game/bikes/variants'
 import { AIController, AIControllerStore, AITag, defaultAIController } from './game/components/ai'
 import { RacerStore } from './game/components/race'
+import { WaveRiderStore, WaveRiderTag } from './game/components/wave-rider'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
 import { createPropColliders } from './game/entities/props'
 import { createGhostRunner, type GhostRunner } from './game/systems/ghost-runner'
@@ -1180,6 +1188,108 @@ async function boot() {
     },
   })
 
+  // Waterline contact effects — the sea acknowledging the world. Discovery
+  // walks the loaded environment GLB + static props root for compact meshes
+  // that pierce the water band (bridge pillars, placed rocks, dock pylons —
+  // see water-contacts.ts). The water shader draws a wave-modulated foam
+  // collar + wash ripples around each (`setWaterContacts`); the splash
+  // driver below bursts spray off each one the moment a crest slams it, so
+  // obstacles read as standing IN the sea instead of pasted onto it.
+  // Render-only on both halves — displacement/buoyancy never know.
+  // `?contact=0` kills both for A/B comparison.
+  let contactSplash: ContactSplashDriver | null = null
+  let liveWaterContacts: readonly WaterContact[] = []
+  if (params.get('contact') !== '0' && !editMode) {
+    environmentGlbRoot?.updateMatrixWorld(true)
+    propsGroup?.updateMatrixWorld(true)
+    const contactRoots: ContactScanNode[] = []
+    if (environmentGlbRoot) contactRoots.push(environmentGlbRoot)
+    if (propsGroup) contactRoots.push(propsGroup)
+    // Straddle band: how far the live swell can climb/drop an obstacle.
+    // Generous (sum of all wave amplitudes) so storm seas still catch
+    // contacts the calm waterline wouldn't.
+    const reach = Math.min(
+      4,
+      Math.max(
+        0.8,
+        waveField.waves.reduce((a, w) => a + w.amplitude, 0),
+      ),
+    )
+    const discovered = collectWaterContacts(contactRoots, { waterY: waveField.baseY, reach })
+    // Gate posts — gates spawn in their own instanced renderer, so the scene
+    // scan can't see them; their pose is pure checkpoint data. Only posts
+    // standing over submerged seabed qualify (one post on the beach + one in
+    // the surf is a common gate).
+    const seabedY = (x: number, z: number) =>
+      (terrainHeightmap ? sampleTerrainHeightAtXZ(terrainHeightmap, x, z) : null) ?? -10000
+    const gatePosts = gatePostWaterContacts(track.checkpoints, {
+      waterY: waveField.baseY,
+      reach,
+      groundY: seabedY,
+    })
+    // Floating props (buoys / logs) bob IN PLACE — the wave-rider sim pins
+    // their XZ anchor at spawn — so each gets a static collar at its anchor:
+    // the prop bobs above the disc and both breathe with the same wave
+    // field. (If floats ever start drifting, `setWaterContacts` re-uploads
+    // cheaply enough to call per frame.)
+    const floatContacts: WaterContact[] = []
+    for (const eid of query(sim, [WaveRiderTag])) {
+      const wr = WaveRiderStore.get(eid)
+      if (wr) floatContacts.push({ x: wr.anchorX, z: wr.anchorZ, radius: 0.6, strength: 0.85 })
+    }
+    liveWaterContacts = [...discovered, ...gatePosts, ...floatContacts]
+    if (liveWaterContacts.length > 0) {
+      // eslint-disable-next-line no-console
+      console.info(
+        `[boot] waterline contacts: ${discovered.length} scanned + ${gatePosts.length} gate post(s) + ${floatContacts.length} float(s)`,
+      )
+    }
+    waterMesh.setWaterContacts(liveWaterContacts)
+    contactSplash = createContactSplashDriver({
+      contacts: liveWaterContacts,
+      baseY: waveField.baseY,
+      sample: (x, z) => {
+        const s = sampleSurface(waveField, x, z)
+        return { y: s.y, vy: s.vy }
+      },
+      emit: (c, surfaceY, strength) => {
+        // Sheet faces BACK toward where the swell came from (reflected
+        // slap) — the same live-bearing swell direction the crest spray
+        // drifts along, negated.
+        const w0 = waveField.waves[0]
+        const cosB = Math.cos(waveField.waveBearing)
+        const sinB = Math.sin(waveField.waveBearing)
+        const wx = (w0?.dirX ?? 1) * cosB - (w0?.dirZ ?? 0) * sinB
+        const wz = (w0?.dirX ?? 1) * sinB + (w0?.dirZ ?? 0) * cosB
+        fx.emitContactSplash(
+          c.x,
+          surfaceY,
+          c.z,
+          strength,
+          -wx,
+          -wz,
+          c.radius,
+          WAVE_SPRAY_SCALAR[playerSettings.waveSprayIntensity],
+        )
+      },
+    })
+  }
+  // Dev/e2e hook — same shape family as __windTrails/__particles: inject
+  // synthetic contacts on open water, read burst counts, scrub the collar.
+  if (typeof window !== 'undefined') {
+    ;(window as unknown as { __waterContacts?: unknown }).__waterContacts = {
+      count: () => liveWaterContacts.length,
+      list: () => liveWaterContacts.map((c) => ({ ...c })),
+      fires: () => contactSplash?.firedCount() ?? 0,
+      set: (list: WaterContact[]) => {
+        liveWaterContacts = list
+        waterMesh.setWaterContacts(list)
+        contactSplash?.setContacts(list)
+      },
+      setCollarStrength: (s: number) => waterMesh.debug.setContactFoam(s),
+    }
+  }
+
   const fxTick = (dt: number) => {
     fx.tick(dt)
     engineTrail.tick(camera, dt)
@@ -1191,6 +1301,8 @@ async function boot() {
     // fx.tick honours the same setting on its own.
     if (playerSettings.waveSprayIntensity !== 'off') {
       waveCrestSpray.tick(camera.position.x, camera.position.z, waveField.time)
+      // Obstacle slams ride the same setting + clock (freeze-water stills them).
+      contactSplash?.tick(camera.position.x, camera.position.z, waveField.time)
     }
   }
 

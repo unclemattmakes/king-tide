@@ -159,6 +159,15 @@ const SLIDERS: SliderDef[] = [
     format: (n) => (n < 0.01 ? 'off' : `${n.toFixed(2)}\u00d7`),
     hint: 'P4.1 landing event waves: a hard water landing radiates an expanding ring other riders SEE and FEEL (sim-owned deterministic pool, mirrored to the GPU). Scales amplitude on both sides; 0 disables spawning too',
   },
+  {
+    key: 'contactFoam',
+    label: 'Contact foam',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    format: (n) => (n < 0.01 ? 'off' : `${n.toFixed(2)}\u00d7`),
+    hint: 'Foam collars + outward wash ripples around waterline obstacles (bridge pillars, placed rocks, pylons \u2014 auto-discovered at load). Collars surge as each crest washes through; the contact splash bursts fire off the same crests. Render-only shading \u2014 never displaces water',
+  },
   // SoT-inspired fragment shading sliders.
   {
     key: 'bodyAbsorption',
@@ -534,6 +543,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'splashRings':
           water.debug.setSplashRings(v)
+          break
+        case 'contactFoam':
+          water.debug.setContactFoam(v)
           break
         case 'whitecapCurvature':
           water.debug.setWhitecapCurvature(v)

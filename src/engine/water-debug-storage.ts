@@ -40,6 +40,10 @@ import type { WaterDebugDefaults, WaterMesh } from './render/water'
 // No key bump for P4.1 either: splashRings is an ADDED key (missing-key
 // -> default 1.0), so returning users get landing event waves at baseline.
 //
+// No key bump for the waterline contact pass either: contactFoam is an ADDED
+// key (missing-key -> default 1.0), so returning users get obstacle foam
+// collars at baseline and keep their other tuning.
+//
 // No key bump for shoaling v2 (P3.1) either: shoalSurf is an ADDED key
 // (missing-key -> default 1.0 = full surf), so returning users pick up the
 // depth-driven surf automatically; its 0-endpoint is the exact legacy
@@ -73,6 +77,7 @@ export type WaterDebugSettings = {
   shoreWaveStrength: number
   shoalSurf: number
   splashRings: number
+  contactFoam: number
   pinchDirection: number
   whitecapCurvature: number
   whitecapLeadBias: number
@@ -114,6 +119,7 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     shoreWaveStrength: d.shoreWaveStrength,
     shoalSurf: d.shoalSurf,
     splashRings: d.splashRings,
+    contactFoam: d.contactFoam,
     pinchDirection: d.pinchDirection,
     whitecapCurvature: d.whitecapCurvature,
     whitecapLeadBias: d.whitecapLeadBias,
@@ -191,6 +197,7 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setShoreWaveStrength(s.shoreWaveStrength)
   water.debug.setShoalSurf(s.shoalSurf)
   water.debug.setSplashRings(s.splashRings)
+  water.debug.setContactFoam(s.contactFoam)
   water.debug.setPinchDirection(s.pinchDirection)
   water.debug.setWhitecapCurvature(s.whitecapCurvature)
   water.debug.setWhitecapLeadBias(s.whitecapLeadBias)
