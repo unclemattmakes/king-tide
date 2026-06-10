@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   generateWindStreamline,
+  resolveWindRegime,
   type WindStreamlineSpec,
 } from '../../src/engine/render/wind-streamline'
 
@@ -137,5 +138,61 @@ describe('wind streamline generator', () => {
       expect(loop.at).toBeGreaterThan(0.2)
       expect(loop.at).toBeLessThan(0.8)
     }
+  })
+})
+
+describe('wind regime (apparent wind)', () => {
+  const WIND = { x: 1, z: 0, speed: 10 }
+
+  it('still camera = the true wind, fully ambient', () => {
+    const r = resolveWindRegime(WIND, 0, 0)
+    expect(r.dirX).toBeCloseTo(1)
+    expect(r.dirZ).toBeCloseTo(0)
+    expect(r.speed).toBeCloseTo(10)
+    expect(r.blend).toBe(0)
+  })
+
+  it('racing camera = apparent wind opposing travel, full speed-line blend', () => {
+    // 30 m/s along +Z with a 10 m/s wind along +X.
+    const r = resolveWindRegime(WIND, 0, 30)
+    const expectedLen = Math.hypot(10, 30)
+    expect(r.speed).toBeCloseTo(expectedLen, 3)
+    expect(r.dirX).toBeCloseTo(10 / expectedLen, 3)
+    expect(r.dirZ).toBeCloseTo(-30 / expectedLen, 3) // streaks run against the travel
+    expect(r.blend).toBe(1)
+  })
+
+  it('blend ramps between the regime speed bounds', () => {
+    expect(resolveWindRegime(WIND, 6, 0).blend).toBe(0)
+    const mid = resolveWindRegime(WIND, 14, 0).blend
+    expect(mid).toBeGreaterThan(0.3)
+    expect(mid).toBeLessThan(0.7)
+    expect(resolveWindRegime(WIND, 22, 0).blend).toBe(1)
+  })
+
+  it('riding dead-downwind at wind speed falls back to the true wind dir (no NaN)', () => {
+    const r = resolveWindRegime(WIND, 10, 0)
+    expect(Number.isFinite(r.dirX)).toBe(true)
+    expect(r.dirX).toBeCloseTo(1)
+    expect(r.dirZ).toBeCloseTo(0)
+    expect(r.speed).toBe(3) // clamped floor keeps the window sweeping
+  })
+
+  it('normalizes a non-unit wind direction', () => {
+    const r = resolveWindRegime({ x: 3, z: 4, speed: 5 }, 0, 0)
+    expect(r.dirX).toBeCloseTo(0.6)
+    expect(r.dirZ).toBeCloseTo(0.8)
+    expect(r.speed).toBeCloseTo(5)
+  })
+
+  it('custom bounds re-anchor the ramp (e.g. 40% of a bike top speed)', () => {
+    // racer topSpeed 28 → cutoff 11.2; ramp [5.04, 11.2].
+    const bounds = { lo: 5.04, hi: 11.2 }
+    expect(resolveWindRegime(WIND, 5, 0, bounds).blend).toBe(0)
+    expect(resolveWindRegime(WIND, 11.2, 0, bounds).blend).toBe(1)
+    expect(resolveWindRegime(WIND, 20, 0, bounds).blend).toBe(1)
+    const mid = resolveWindRegime(WIND, 8.1, 0, bounds).blend
+    expect(mid).toBeGreaterThan(0.4)
+    expect(mid).toBeLessThan(0.6)
   })
 })
