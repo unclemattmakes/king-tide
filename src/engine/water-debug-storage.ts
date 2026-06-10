@@ -37,6 +37,9 @@ import type { WaterDebugDefaults, WaterMesh } from './render/water'
 // (missing-key -> default 1.0), so returning users get the trailing wake at
 // baseline strength automatically.
 //
+// No key bump for P4.1 either: splashRings is an ADDED key (missing-key
+// -> default 1.0), so returning users get landing event waves at baseline.
+//
 // No key bump for shoaling v2 (P3.1) either: shoalSurf is an ADDED key
 // (missing-key -> default 1.0 = full surf), so returning users pick up the
 // depth-driven surf automatically; its 0-endpoint is the exact legacy
@@ -69,6 +72,7 @@ export type WaterDebugSettings = {
   streakElongation: number
   shoreWaveStrength: number
   shoalSurf: number
+  splashRings: number
   pinchDirection: number
   whitecapCurvature: number
   whitecapLeadBias: number
@@ -109,6 +113,7 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     streakElongation: d.streakElongation,
     shoreWaveStrength: d.shoreWaveStrength,
     shoalSurf: d.shoalSurf,
+    splashRings: d.splashRings,
     pinchDirection: d.pinchDirection,
     whitecapCurvature: d.whitecapCurvature,
     whitecapLeadBias: d.whitecapLeadBias,
@@ -185,6 +190,7 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setStreakElongation(s.streakElongation)
   water.debug.setShoreWaveStrength(s.shoreWaveStrength)
   water.debug.setShoalSurf(s.shoalSurf)
+  water.debug.setSplashRings(s.splashRings)
   water.debug.setPinchDirection(s.pinchDirection)
   water.debug.setWhitecapCurvature(s.whitecapCurvature)
   water.debug.setWhitecapLeadBias(s.whitecapLeadBias)

@@ -1,5 +1,6 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import { type ShoreField, sampleShore } from './shore-field'
+import { type SplashRing, sampleSplashRings } from './splash-rings'
 import { sampleWakeFromTrail, type WakeSampleOut, type WakeTrail } from './wake-trail'
 
 /**
@@ -127,6 +128,15 @@ export type WaveFieldState = {
    *  shader's pinch uniforms. Default (1, 0) = along-wave. */
   pinchCos: number
   pinchSin: number
+  /** Splash-ring pool (water-next-research §7.5, P4.1) — deterministic
+   *  landing waves spawned by the hover system's water-landing events;
+   *  see splash-rings.ts. Self-healing (≤ 4 s decay), not snapshotted —
+   *  the wake-trail discipline. */
+  rings: SplashRing[]
+  /** Splash-ring strength, 0..1.5 (1 = baseline, 0 = off). One scalar
+   *  for BOTH buoyancy and the GPU (the shoreWaveStrength discipline) —
+   *  set by the water debug menu. */
+  splashRingStrength: number
   /** Authored wave stamps (water-next-research §7.10) — the per-track
    *  signature jump waves. Empty by default; installed via
    *  `setWaveStamps` from `track.waveStamps`. Both samplers and the GPU
@@ -639,6 +649,8 @@ export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveF
     shoreWaveStrength: 1,
     shoalSurfStrength: 1,
     stamps: [],
+    rings: [],
+    splashRingStrength: 1,
     steepness: 0,
     pinchCos: 1,
     pinchSin: 0,
@@ -1218,6 +1230,11 @@ export function sampleHeight(
   if (field.stamps.length > 0) {
     y += sampleStampsAt(field, ax, az, t).y
   }
+  // Splash rings — landing waves other riders feel. Rest-point evaluation
+  // for the same reason as stamps (2 m-scale faces vs the pinch offset).
+  if (field.rings.length > 0) {
+    y += sampleSplashRings(field, ax, az, t).y
+  }
   return y
 }
 
@@ -1314,6 +1331,13 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
     dydx += st.dydx
     dydz += st.dydz
     vy += st.vy
+  }
+  if (field.rings.length > 0) {
+    const rg = sampleSplashRings(field, ax, az, t)
+    y += rg.y
+    dydx += rg.dydx
+    dydz += rg.dydz
+    vy += rg.vy
   }
   // Normal of y = f(x, z) is (−∂y/∂x, 1, −∂y/∂z), normalized.
   const nx = -dydx

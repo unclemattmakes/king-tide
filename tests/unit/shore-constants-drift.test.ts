@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
+import * as splashRings from '../../src/engine/sim/water/splash-rings'
 import * as waveField from '../../src/engine/sim/water/wave-field'
 
 /**
@@ -58,6 +59,15 @@ const SHARED = [
   'STAMP_RELEASE_RATIO',
 ] as const
 
+// Splash-ring constants (P4.1) live in their own sim module; same
+// single-source rule — the shader imports them from splash-rings.ts.
+const SHARED_RINGS = [
+  'MAX_SPLASH_RINGS',
+  'SPLASH_RING_LIFE_S',
+  'SPLASH_RING_SPEED',
+  'SPLASH_RING_WIDTH',
+] as const
+
 describe('shore + shoaling + wave-zone constants single source (wave-field.ts ↔ water.ts)', () => {
   const src = readFileSync(WATER_TS, 'utf-8')
 
@@ -80,6 +90,27 @@ describe('shore + shoaling + wave-zone constants single source (wave-field.ts �
         new RegExp(`\\b${name}\\b`).test(specifiers),
         `water.ts must import ${name} from wave-field (single source of truth)`,
       ).toBe(true)
+    }
+  })
+
+  it('water.ts imports the splash-ring constants from splash-rings (single source)', () => {
+    for (const name of SHARED_RINGS) {
+      const v = (splashRings as unknown as Record<string, unknown>)[name]
+      expect(typeof v, `${name} must be exported from splash-rings.ts`).toBe('number')
+    }
+    const m = src.match(
+      /import\s*\{([\s\S]*?)\}\s*from\s*['"]@\/engine\/sim\/water\/splash-rings['"]/,
+    )
+    expect(m, 'water.ts must import from @/engine/sim/water/splash-rings').not.toBeNull()
+    for (const name of SHARED_RINGS) {
+      expect(
+        new RegExp(`\\b${name}\\b`).test(m![1]!),
+        `water.ts must import ${name} from splash-rings`,
+      ).toBe(true)
+      expect(
+        new RegExp(`(const|let|var)\\s+${name}\\b`).test(src),
+        `water.ts must not re-declare ${name}`,
+      ).toBe(false)
     }
   })
 
