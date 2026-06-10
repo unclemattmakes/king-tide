@@ -66,6 +66,35 @@ describe('buildTrackFromJson', () => {
     expect(() => buildTrackFromJson(rawBadShape)).toThrow(/water\.spectrum must be an object/)
   })
 
+  it('waveStamps: reads the authored stamp list, validates shape, round-trips', () => {
+    const raw = baseTrack()
+    raw.waveStamps = [
+      {
+        x0: 10,
+        z0: -40,
+        x1: 10,
+        z1: 40,
+        amplitude: 1.4,
+        widthM: 6,
+        periodS: 20,
+        speed: 10,
+        approachM: 60,
+        phase01: 0.25,
+      },
+    ]
+    const track = buildTrackFromJson(raw)
+    expect(track.waveStamps).toHaveLength(1)
+    expect(track.waveStamps![0]!.amplitude).toBe(1.4)
+    expect(track.waveStamps![0]!.phase01).toBe(0.25)
+    // Survives the editor's save round-trip.
+    expect(buildTrackFromJson(trackToJson(track)).waveStamps).toEqual(track.waveStamps)
+    // Absent → undefined/empty, and malformed entries throw.
+    expect(buildTrackFromJson(baseTrack()).waveStamps ?? []).toHaveLength(0)
+    const bad = baseTrack()
+    bad.waveStamps = [{ x0: 1 }]
+    expect(() => buildTrackFromJson(bad)).toThrow(/missing required field/)
+  })
+
   it('round-trips: trackToJson(buildTrackFromJson(x)) preserves shape', () => {
     const raw = JSON.parse(fs.readFileSync(CALIBRATION_JSON, 'utf8'))
     const built = buildTrackFromJson(raw)

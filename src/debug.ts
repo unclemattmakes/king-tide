@@ -27,6 +27,7 @@ import {
   SWELL_WAVELENGTH_MIN,
   sampleHeight,
   sampleZoneFactors,
+  setWaveStamps,
   type WaveFieldState,
 } from './engine/sim/water/wave-field'
 import { BikeTag, ControlIntentStore, PeerControlledStore, RBHandleStore } from './game/components'
@@ -158,6 +159,12 @@ export type HoverDebug = {
     /** Number of rest points. Default 129 (≈192 m span). */
     count?: number
   }): WaterSyncReport | null
+  /** Install (or clear) authored wave stamps on the live field — the e2e
+   *  harness uses this to exercise the stamp sim↔render path on any
+   *  track without authoring throwaway JSON. The water mesh mirrors the
+   *  new list into its uniforms on the next tick (reference watch), so
+   *  this drives BOTH sides, exactly like track-authored stamps. */
+  setWaveStamps(stamps: import('./engine/sim/water/wave-field').WaveStampInput[]): void
   /** Snapshot of the live ambient wave bank — the hand-tuned default or
    *  a per-track generated spectrum (water-next-research §7.1). The e2e
    *  plumbing probe: asserts a track's `water.spectrum` actually reached
@@ -341,6 +348,19 @@ export type WaterSyncReport = {
   maxAbsDy: number
   rmsDy: number
   meanDy: number
+  /** Highest mirrored render-surface height seen on the transect (world
+   *  Y). Lets specs prove a feature was LIVE where they probed — e.g. an
+   *  injected wave stamp's ridge towers over the ambient baseline. */
+  maxRenderY: number
+  /** Mean mirrored render-surface height across the transect (world Y).
+   *  With/without-feature probes at the SAME frozen clock difference out
+   *  the ambient exactly — the deterministic liveness oracle for
+   *  localized features (a stamp's ridge area) where maxRenderY depends
+   *  on what the ambient happens to be doing at the ridge. */
+  meanRenderY: number
+  /** The water clock the transect was evaluated at — lets specs steer the
+   *  clock onto a deterministic cycle moment (e.g. a stamp's peak). */
+  fieldTime: number
   /** Displaced world position of the worst sample. */
   worst: { x: number; z: number; dy: number }
 }
@@ -498,6 +518,10 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     isDirectionArrowOn: () => accessors.isDirectionArrowOn(),
     setCameraPose: (pose) => setCameraPoseOverride(pose),
     waterDebug: () => getWaterMesh()?.debug ?? null,
+    setWaveStamps: (stamps) => {
+      if (!state.ready) return
+      setWaveStamps(accessors.waveField(), stamps)
+    },
     waveBank: () => {
       if (!state.ready) return null
       const field = accessors.waveField()
@@ -541,6 +565,8 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
       let sumSqDy = 0
       let maxAbsDy = 0
       let maxDisp = 0
+      let maxRenderY = Number.NEGATIVE_INFINITY
+      let sumRenderY = 0
       let zoned = false
       const worst = { x: 0, z: 0, dy: 0 }
       for (let i = 0; i < count; i++) {
@@ -574,6 +600,8 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
         const dy = sampleHeight(field, v.x, v.z) - wakeY - v.y
         const disp = Math.hypot(v.x - rx, v.z - rz)
         if (disp > maxDisp) maxDisp = disp
+        if (v.y > maxRenderY) maxRenderY = v.y
+        sumRenderY += v.y
         samples++
         sumDy += dy
         sumSqDy += dy * dy
@@ -595,6 +623,9 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
         maxAbsDy,
         rmsDy: samples > 0 ? Math.sqrt(sumSqDy / samples) : 0,
         meanDy: samples > 0 ? sumDy / samples : 0,
+        maxRenderY: samples > 0 ? maxRenderY : 0,
+        meanRenderY: samples > 0 ? sumRenderY / samples : 0,
+        fieldTime: field.time,
         worst,
       }
     },

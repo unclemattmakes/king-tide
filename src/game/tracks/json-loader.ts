@@ -5,6 +5,7 @@ import {
   SPECTRUM_PRESET_NAMES,
   type SpectrumSpec,
 } from '@/engine/sim/water/spectrum'
+import type { WaveStampInput } from '@/engine/sim/water/wave-field'
 import { pointAtT, sampleCatmullRom, sampleScalarToMatch, tangentAtT } from './catmull-rom'
 import {
   type AISpline,
@@ -60,6 +61,7 @@ export type TrackJson = {
   boostPads?: BoostPad[]
   antiGravZones?: AntiGravZone[]
   waveZones?: WaveZone[]
+  waveStamps?: WaveStampInput[]
   props?: Prop[]
   environmentGlb?: string
   water?: WaterConfig
@@ -220,6 +222,12 @@ export function buildTrackFromJson(input: unknown): Track {
   }
   const waveZones: WaveZone[] = waveZonesRaw.map((z, i) => readWaveZone(z, i))
 
+  const waveStampsRaw = (input as { waveStamps?: unknown }).waveStamps ?? []
+  if (!Array.isArray(waveStampsRaw)) {
+    throw new Error('track-json: waveStamps must be an array if present')
+  }
+  const waveStamps: WaveStampInput[] = waveStampsRaw.map((st, i) => readWaveStamp(st, i))
+
   const propsRaw = (input as { props?: unknown }).props ?? []
   if (!Array.isArray(propsRaw)) {
     throw new Error('track-json: props must be an array if present')
@@ -288,6 +296,7 @@ export function buildTrackFromJson(input: unknown): Track {
     boostPads,
     antiGravZones,
     waveZones,
+    waveStamps,
     props,
     surfaces: [],
   }
@@ -422,6 +431,9 @@ export function trackToJson(track: Track): TrackJson {
   }
   if (track.environmentGlb) out.environmentGlb = track.environmentGlb
   if (track.water) out.water = { ...track.water }
+  if (track.waveStamps && track.waveStamps.length > 0) {
+    out.waveStamps = track.waveStamps.map((st) => ({ ...st }))
+  }
   if (track.sky) out.sky = { ...track.sky }
   if (track.horizon) out.horizon = { ...track.horizon }
   if (track.gateSpacing !== undefined) out.gateSpacing = track.gateSpacing
@@ -698,6 +710,25 @@ function readProp(raw: unknown, i: number): Prop {
   if (typeRaw === 'asset' && !out.assetId) {
     throw new Error(`track-json: props[${i}] type='asset' requires an assetId`)
   }
+  return out
+}
+
+/** Authored wave stamp (P3.2). Strict like swellSets: malformed numbers
+ *  throw (authoring error, not legacy compat); optional phase01 only. */
+function readWaveStamp(raw: unknown, i: number): WaveStampInput {
+  if (!isObject(raw)) throw new Error(`track-json: waveStamps[${i}] must be an object`)
+  const out: WaveStampInput = {
+    x0: requireNumber(raw, 'x0'),
+    z0: requireNumber(raw, 'z0'),
+    x1: requireNumber(raw, 'x1'),
+    z1: requireNumber(raw, 'z1'),
+    amplitude: requireNumber(raw, 'amplitude'),
+    widthM: requireNumber(raw, 'widthM'),
+    periodS: requireNumber(raw, 'periodS'),
+    speed: requireNumber(raw, 'speed'),
+    approachM: requireNumber(raw, 'approachM'),
+  }
+  if ('phase01' in raw) out.phase01 = requireNumber(raw, 'phase01')
   return out
 }
 

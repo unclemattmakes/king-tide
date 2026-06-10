@@ -127,6 +127,12 @@ export type WaveFieldState = {
    *  shader's pinch uniforms. Default (1, 0) = along-wave. */
   pinchCos: number
   pinchSin: number
+  /** Authored wave stamps (water-next-research §7.10) — the per-track
+   *  signature jump waves. Empty by default; installed via
+   *  `setWaveStamps` from `track.waveStamps`. Both samplers and the GPU
+   *  evaluate the same pulse math (uniform mirror synced by reference in
+   *  the water mesh's tick, like zones). */
+  stamps: WaveStampRuntime[]
   /** Shoaling v2 blend, 0..1 (water-next-research §7.3): 0 = the legacy
    *  quadratic shallow-water kill-switch, 1 = full surf behaviour
    *  (Green's-law gain + depth-limited breaking via `shoalAttenuation`).
@@ -378,6 +384,248 @@ export const SHOAL_BREAK_GAMMA = 0.78
  *  infinity. */
 export const SHOAL_HEFF_MIN = 0.2
 
+// ---- Authored wave stamps (water-next-research §7.10, P3.2) ---------------
+//
+// The wave-mastery content layer: a stamp is an AUTHORED, LEARNABLE jump
+// wave — a crest line placed by the designer plus a traveling pulse that
+// approaches it on a fixed rhythm, peaks exactly ON the line, and dies
+// past it. Same wave, same place, every lap: the motocross jump made of
+// water (the Horizon/surf-game lesson — signature waves are content, not
+// spectrum accidents).
+//
+// Geometry: the crest is a SEGMENT p0→p1 (curved fronts = chain 2–3
+// stamps). The pulse is a sech² ridge parallel to the segment, traveling
+// along the segment's LEFT normal (swap endpoints to flip approach
+// direction), with:
+//   s  = along-crest coordinate (feathered at the ends),
+//   d  = signed travel coordinate (0 on the authored line),
+//   c(t) = pulse center: enters at −approachM, crosses 0, exits at
+//          +approachM·STAMP_RELEASE_RATIO, then waits out the rest of the
+//          period (the "set" gap). Pure function of field.time —
+//          deterministic, replay/multiplayer-safe.
+//   y  = A · life(c) · sech²((d−c)/width) · feather(s)
+// life() ramps the pulse up across the approach and decays it after the
+// line, so the authored line is where it PEAKS — the jump spot.
+//
+// Both samplers and the GPU vertex stage evaluate this identical closed
+// form (uniformArray mirror like zones/wakes; constants drift-tested), so
+// the kick the rider feels IS the wave the player saw coming. Stamps are
+// NOT shoal-attenuated or set-enveloped (they're authored absolutes —
+// author the rhythm via periodS/phase01 to sit on the track's set
+// timing); a depth cap keeps a stamp placed over shallows from breaching
+// the seabed.
+
+/** Hard cap on stamps per track — sizes the GPU uniform arrays (unrolled
+ *  loop), mirrored by `setWaveStamps` truncation. One signature wave per
+ *  track is the design target; 8 leaves room for chained/multi-line
+ *  set-ups. */
+export const MAX_WAVE_STAMPS = 8
+/** Along-crest end feather (m) — the ridge fades to zero across this span
+ *  at both segment ends instead of stopping in a wall. */
+export const STAMP_END_FEATHER_M = 6
+/** The pulse's post-line travel, as a fraction of `approachM`: it decays
+ *  across this distance past the authored line. */
+export const STAMP_RELEASE_RATIO = 0.6
+/** Depth cap: stamp amplitude ≤ STAMP_DEPTH_CAP · water depth where a
+ *  shore field exists, so an authored wave over a sandbar can't push its
+ *  trough through the seabed (same guard family as SHORE_DEPTH_CAP). */
+export const STAMP_DEPTH_CAP = 0.6
+
+/** Authoring shape — mirrors `Track.waveStamps[]` in track JSON. */
+export type WaveStampInput = {
+  /** Crest-line endpoints, world XZ. The pulse travels along the
+   *  segment's LEFT normal (normalize(p1−p0) rotated −90°); swap the
+   *  endpoints to flip the approach direction. */
+  x0: number
+  z0: number
+  x1: number
+  z1: number
+  /** Peak ridge height at the authored line, metres. */
+  amplitude: number
+  /** sech² half-width along the travel direction, metres (~ how fat the
+   *  ridge reads; 4–8 m rides like a jump face). */
+  widthM: number
+  /** Seconds between pulses — author this onto the track's set rhythm
+   *  (swellSets.periodS or a divisor of it). */
+  periodS: number
+  /** Cycle offset, 0..1. */
+  phase01?: number
+  /** Pulse travel speed, m/s (the deep-water swell band reads ~8–12). */
+  speed: number
+  /** Approach run-up (m): the pulse fades in from −approachM and peaks at
+   *  the line. Must fit the period: speed·periodS ≥ (1+RELEASE)·approachM
+   *  — `setWaveStamps` warns and clamps approachM down otherwise. */
+  approachM: number
+}
+
+export type WaveStampRuntime = WaveStampInput & {
+  /** Unit along-crest direction (cached). */
+  _ux: number
+  _uz: number
+  /** Segment length (cached). */
+  _len: number
+}
+
+/**
+ * Install (or clear) the track's authored wave stamps. Validates +
+ * caches segment frames; truncates to {@link MAX_WAVE_STAMPS} (the GPU
+ * evaluates a fixed-size array — a stamp felt but never drawn is the
+ * exact desync this cap prevents); drops degenerate segments; clamps
+ * `approachM` so the full enter→peak→exit life fits inside one period
+ * (otherwise the pulse would teleport mid-life at the cycle wrap and
+ * buoyancy would feel a discontinuity).
+ */
+export function setWaveStamps(field: WaveFieldState, stamps: readonly WaveStampInput[]): void {
+  let kept = stamps
+  if (stamps.length > MAX_WAVE_STAMPS) {
+    // biome-ignore lint/suspicious/noConsole: authoring-time misuse warning
+    console.warn(
+      `[wave-field] ${stamps.length} wave stamps requested; capping at ${MAX_WAVE_STAMPS}. Dropping the rest.`,
+    )
+    kept = stamps.slice(0, MAX_WAVE_STAMPS)
+  }
+  const out: WaveStampRuntime[] = []
+  for (const st of kept) {
+    const ex = st.x1 - st.x0
+    const ez = st.z1 - st.z0
+    const len = Math.hypot(ex, ez)
+    if (!(len > 1e-3) || !(st.amplitude > 0) || !(st.widthM > 0) || !(st.periodS > 0)) {
+      // biome-ignore lint/suspicious/noConsole: authoring-time misuse warning
+      console.warn('[wave-field] dropping degenerate wave stamp', st)
+      continue
+    }
+    const travelSpan = st.speed * st.periodS
+    const lifeSpan = (1 + STAMP_RELEASE_RATIO) * st.approachM
+    let approachM = st.approachM
+    if (lifeSpan > travelSpan) {
+      approachM = travelSpan / (1 + STAMP_RELEASE_RATIO)
+      // biome-ignore lint/suspicious/noConsole: authoring-time misuse warning
+      console.warn(
+        `[wave-field] wave stamp life (${lifeSpan.toFixed(0)} m) exceeds its period's travel ` +
+          `(${travelSpan.toFixed(0)} m); clamping approachM ${st.approachM} → ${approachM.toFixed(1)}`,
+      )
+    }
+    out.push({ ...st, approachM, _ux: ex / len, _uz: ez / len, _len: len })
+  }
+  field.stamps = out
+}
+
+// Reused scratch for the stamp contribution (same single-threaded pattern
+// as `_shore`).
+const _stamps = { y: 0, dydx: 0, dydz: 0, vy: 0 }
+
+function stampSmoothstep(a: number, b: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)))
+  return t * t * (3 - 2 * t)
+}
+
+/**
+ * Sum every stamp's contribution at world (x, z, t) into `_stamps`.
+ * Slopes carry the pulse's travel-direction gradient only (the life/
+ * feather envelope gradients are omitted — the same approximation class
+ * as the shore wave's envelope); `vy` is EXACT (pulse motion + life
+ * rate), finite-difference-tested, because hover damping reads it.
+ * `depth` < 0 means "no shore field / unknown" → no depth cap.
+ */
+function computeStamps(
+  field: WaveFieldState,
+  x: number,
+  z: number,
+  t: number,
+  depth: number,
+): void {
+  _stamps.y = 0
+  _stamps.dydx = 0
+  _stamps.dydz = 0
+  _stamps.vy = 0
+  const stamps = field.stamps
+  for (const st of stamps) {
+    const releaseM = st.approachM * STAMP_RELEASE_RATIO
+    // Cycle phase → pulse center c ∈ [−approachM, …) sweeping at `speed`.
+    const cyc = t / st.periodS + (st.phase01 ?? 0)
+    const tt = cyc - Math.floor(cyc)
+    const c = -st.approachM + tt * st.speed * st.periodS
+    if (c > releaseM) continue // pulse done; waiting for the next set
+    // Segment frame.
+    const rx = x - st.x0
+    const rz = z - st.z0
+    const s = rx * st._ux + rz * st._uz
+    if (s < -st.widthM || s > st._len + st.widthM) continue
+    // Left normal = travel direction (pulse approaches from −n).
+    const nx = -st._uz
+    const nz = st._ux
+    const d = rx * nx + rz * nz
+    const xi = (d - c) / st.widthM
+    if (xi < -6 || xi > 6) continue // sech² ≈ 0 past ±6
+    // Life envelope: ramp in across the first 45 % of the approach, hold,
+    // decay to zero by the release point. Zero at both cycle ends, so the
+    // wrap teleport never moves a live pulse.
+    const life =
+      stampSmoothstep(-st.approachM, -st.approachM * 0.55, c) *
+      (1 - stampSmoothstep(releaseM * 0.25, releaseM, c))
+    if (life <= 0) continue
+    const feather =
+      stampSmoothstep(0, STAMP_END_FEATHER_M, s) *
+      (1 - stampSmoothstep(st._len - STAMP_END_FEATHER_M, st._len, s))
+    if (feather <= 0) continue
+    let amp = st.amplitude
+    if (depth >= 0) amp = Math.min(amp, STAMP_DEPTH_CAP * depth)
+    if (amp <= 0) continue
+    const sech = 1 / Math.cosh(xi)
+    const sech2 = sech * sech
+    const tanh = Math.tanh(xi)
+    const envelope = amp * life * feather
+    _stamps.y += envelope * sech2
+    // ∂y/∂d = envelope · d/dd sech²(ξ) = envelope · (−2/w)·sech²·tanh.
+    const dyDd = envelope * ((-2 / st.widthM) * sech2 * tanh)
+    _stamps.dydx += dyDd * nx
+    _stamps.dydz += dyDd * nz
+    // ∂y/∂t — two exact terms: the pulse moving (ξ̇ = −ċ/w with ċ = speed)
+    // and the life envelope changing. Feather is time-constant.
+    const dLifeDc =
+      smoothstepDeriv(-st.approachM, -st.approachM * 0.55, c) *
+        (1 - stampSmoothstep(releaseM * 0.25, releaseM, c)) -
+      stampSmoothstep(-st.approachM, -st.approachM * 0.55, c) *
+        smoothstepDeriv(releaseM * 0.25, releaseM, c)
+    _stamps.vy +=
+      amp *
+      feather *
+      (dLifeDc * st.speed * sech2 + life * (2 / st.widthM) * sech2 * tanh * st.speed)
+  }
+}
+
+/**
+ * Public stamp sampler: every stamp's summed contribution at world
+ * (x, z, t), depth-capped from the field's shore bake when present.
+ * Returns a module-level scratch (single-threaded synchronous callers
+ * read it immediately — same pattern as `_shore`). Used by both CPU
+ * samplers and the render layer's `renderVertex` mirror.
+ */
+export function sampleStampsAt(
+  field: WaveFieldState,
+  x: number,
+  z: number,
+  t: number,
+): { y: number; dydx: number; dydz: number; vy: number } {
+  if (field.stamps.length === 0) {
+    _stamps.y = 0
+    _stamps.dydx = 0
+    _stamps.dydz = 0
+    _stamps.vy = 0
+    return _stamps
+  }
+  const depth = field.shore ? (sampleShore(field.shore, x, z)?.depth ?? -1) : -1
+  computeStamps(field, x, z, t, depth)
+  return _stamps
+}
+
+/** d/dx smoothstep(a, b, x) — 6t(1−t)/(b−a) inside the band, 0 outside. */
+function smoothstepDeriv(a: number, b: number, x: number): number {
+  const t = (x - a) / (b - a)
+  if (t <= 0 || t >= 1) return 0
+  return (6 * t * (1 - t)) / (b - a)
+}
+
 export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveFieldState {
   return {
     waves,
@@ -390,6 +638,7 @@ export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveF
     shore: null,
     shoreWaveStrength: 1,
     shoalSurfStrength: 1,
+    stamps: [],
     steepness: 0,
     pinchCos: 1,
     pinchSin: 0,
@@ -958,6 +1207,17 @@ export function sampleHeight(
   // Shore-aligned wave — rideable breakers in the near-shore band.
   computeShore(field, x, z, t)
   if (_shore.active) y += _shore.y
+  // Authored wave stamps — the signature jump waves (depth-capped where a
+  // shore field exists so an over-shallows stamp can't breach the seabed).
+  // Evaluated at the REST point (ax, az), not the world query point: the
+  // GPU adds the stamp at the rest vertex and then displaces it sideways
+  // with the ambient pinch, and a stamp's 6 m-scale face is steep enough
+  // that the half-metre pinch offset is a real felt-vs-drawn gap (the
+  // sync spec measured ~4 cm) — unlike the tens-of-metres zone blends
+  // where the world-point approximation is fine.
+  if (field.stamps.length > 0) {
+    y += sampleStampsAt(field, ax, az, t).y
+  }
   return y
 }
 
@@ -1043,6 +1303,17 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
     dydx += _shore.dydx
     dydz += _shore.dydz
     vy += _shore.vy
+  }
+  // Authored wave stamps — world-frame slopes (the pulse travels along
+  // its own segment normal), added after the bearing back-rotation like
+  // the wake/shore terms.
+  if (field.stamps.length > 0) {
+    // Rest-point evaluation — see the sampleHeight note.
+    const st = sampleStampsAt(field, ax, az, t)
+    y += st.y
+    dydx += st.dydx
+    dydz += st.dydz
+    vy += st.vy
   }
   // Normal of y = f(x, z) is (−∂y/∂x, 1, −∂y/∂z), normalized.
   const nx = -dydx
