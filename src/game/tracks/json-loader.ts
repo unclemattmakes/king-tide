@@ -1,5 +1,10 @@
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
 import { asSurfaceType } from '@/engine/sim/surface-types'
+import {
+  isSpectrumPresetName,
+  SPECTRUM_PRESET_NAMES,
+  type SpectrumSpec,
+} from '@/engine/sim/water/spectrum'
 import { pointAtT, sampleCatmullRom, sampleScalarToMatch, tangentAtT } from './catmull-rom'
 import {
   type AISpline,
@@ -718,6 +723,31 @@ function readOptionalWater(raw: unknown): WaterConfig | null {
       depth: requireNumber(setsRaw, 'depth'),
     }
     if ('phase' in setsRaw) out.swellSets.phase = requireNumber(setsRaw, 'phase')
+  }
+  // Per-track wave spectrum (P2.2). Strict like swellSets: a malformed
+  // block is an authoring error and throws, an unknown preset name
+  // throws (silently falling back to the default bank would hide the
+  // typo and quietly ship the wrong sea).
+  const spectrumRaw = (raw as { spectrum?: unknown }).spectrum
+  if (spectrumRaw !== undefined && spectrumRaw !== null) {
+    if (!isObject(spectrumRaw)) throw new Error('track-json: water.spectrum must be an object')
+    const presetRaw = (spectrumRaw as { preset?: unknown }).preset
+    if (!isSpectrumPresetName(presetRaw)) {
+      throw new Error(
+        `track-json: water.spectrum.preset must be one of ${SPECTRUM_PRESET_NAMES.join(', ')} (got ${String(presetRaw)})`,
+      )
+    }
+    const spectrum: SpectrumSpec = { preset: presetRaw }
+    if ('seed' in spectrumRaw) spectrum.seed = requireNumber(spectrumRaw, 'seed')
+    if ('components' in spectrumRaw) {
+      spectrum.components = requireNumber(spectrumRaw, 'components')
+    }
+    if ('spreadDeg' in spectrumRaw) spectrum.spreadDeg = requireNumber(spectrumRaw, 'spreadDeg')
+    if ('swellBias' in spectrumRaw) spectrum.swellBias = requireNumber(spectrumRaw, 'swellBias')
+    if ('peakWavelengthM' in spectrumRaw) {
+      spectrum.peakWavelengthM = requireNumber(spectrumRaw, 'peakWavelengthM')
+    }
+    out.spectrum = spectrum
   }
   // `waveHeight` / `waveFreq` are deprecated dead knobs (real amplitude is
   // sky.seaStateBeaufort + waveZones) — silently ignored when present so

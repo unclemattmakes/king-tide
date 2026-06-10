@@ -878,6 +878,34 @@ export function sampleSurface(field: WaveFieldState, x: number, z: number): Wave
 }
 
 /**
+ * Swell/chop classification threshold (m). Waves at or above this
+ * wavelength are "swell" — the long-period components that carry the
+ * sea's readable silhouette; everything shorter is "chop" texture.
+ * Consumed by the render layer (the swell-only outer/skirt geometry,
+ * the P1 readability field, the debug menu's swell/chop sliders) and by
+ * the spectrum generator's energy-tilt + sorting (spectrum.ts), so the
+ * classification can never disagree across sim and render. The default
+ * bank's split lands exactly where it was hand-tagged: 50 m + 85 m
+ * swells above, 4–16 m chop below.
+ */
+export const SWELL_WAVELENGTH_MIN = 30
+
+/**
+ * The per-band amplitude scales the SHIPPED LOOK runs at. The water
+ * debug menu's swell/chop sliders default to these, and
+ * `applyStoredWaterTuning` applies them at every boot (storage empty or
+ * not) — so the sea every track was graded against is `defaultWaves()`
+ * with its swells ×3.2 and its chop ×0.9, NOT the raw bank. Single
+ * source shared by the menu defaults (water.ts) and the spectrum
+ * generator (spectrum.ts), which works in this post-scale "effective"
+ * space and pre-divides its output so the boot-time stomp lands every
+ * generated bank exactly on its designed sea. If the look re-tunes
+ * these, generated banks follow automatically.
+ */
+export const DEFAULT_SWELL_TUNING_SCALE = 3.2
+export const DEFAULT_CHOP_TUNING_SCALE = 0.9
+
+/**
  * Default wave preset — a coherent swell train tuned for Wave-Race-style
  * riding. The previous preset summed six directions spanning 190° (literally
  * the physics definition of "confused seas"), which produced unpredictable

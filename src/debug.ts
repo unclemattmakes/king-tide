@@ -24,6 +24,7 @@ import {
   effectiveSteepness,
   SHOAL_FADE_DEPTH,
   SHORE_BAND_DEPTH,
+  SWELL_WAVELENGTH_MIN,
   sampleHeight,
   sampleZoneFactors,
   type WaveFieldState,
@@ -157,6 +158,25 @@ export type HoverDebug = {
     /** Number of rest points. Default 129 (≈192 m span). */
     count?: number
   }): WaterSyncReport | null
+  /** Snapshot of the live ambient wave bank — the hand-tuned default or
+   *  a per-track generated spectrum (water-next-research §7.1). The e2e
+   *  plumbing probe: asserts a track's `water.spectrum` actually reached
+   *  the field the buoyancy sampler + shader were built from. Null
+   *  before boot. */
+  waveBank(): {
+    count: number
+    /** Entries with wavelength ≥ SWELL_WAVELENGTH_MIN (the subset the
+     *  outer/skirt water layers draw and the P1 readability field keys
+     *  on). */
+    swellCount: number
+    waves: Array<{
+      wavelength: number
+      amplitude: number
+      speed: number
+      /** Travel direction, degrees CCW from +X (pre-bearing). */
+      dirDeg: number
+    }>
+  } | null
   /** M10.2 determinism harness. Present only when ?determinism=1 was set
    *  at boot. The sim's RAF-driven step is gated off in that mode; the
    *  harness drives `simulateStep` here. */
@@ -478,6 +498,21 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     isDirectionArrowOn: () => accessors.isDirectionArrowOn(),
     setCameraPose: (pose) => setCameraPoseOverride(pose),
     waterDebug: () => getWaterMesh()?.debug ?? null,
+    waveBank: () => {
+      if (!state.ready) return null
+      const field = accessors.waveField()
+      const waves = field.waves.map((w) => ({
+        wavelength: w.wavelength,
+        amplitude: w.amplitude,
+        speed: w.speed,
+        dirDeg: (Math.atan2(w.dirZ, w.dirX) * 180) / Math.PI,
+      }))
+      return {
+        count: waves.length,
+        swellCount: field.waves.filter((w) => w.wavelength >= SWELL_WAVELENGTH_MIN).length,
+        waves,
+      }
+    },
     waterSync: (opts) => {
       const mesh = getWaterMesh()
       if (!mesh || !state.ready) return null
