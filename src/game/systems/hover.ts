@@ -6,7 +6,14 @@ import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { quatRotate } from '@/engine/sim/physics/vec'
 import { SurfaceType, type SurfaceTypeValue, surfaceGripMul } from '@/engine/sim/surface-types'
+import { spawnSplashRing } from '@/engine/sim/water/splash-rings'
 import { sampleHeight, sampleSurface, type WaveFieldState } from '@/engine/sim/water/wave-field'
+import { WAVE_FEEL } from './wave-feel-flags'
+
+// Reused scratch for the P4.2 drafting probe (single-threaded sim step).
+const _draftWakeScratch: WakeSampleOut = { y: 0, dydx: 0, dydz: 0 }
+
+import { sampleWakeFromTrail, type WakeSampleOut } from '@/engine/sim/water/wake-trail'
 import {
   AntiGravOverrideStore,
   BikeStats,
@@ -1481,6 +1488,7 @@ function applyGroundBranch(
   probe: SurfaceProbe,
   prevGrounded: boolean,
   groundDistance: number,
+  field: WaveFieldState | null,
 ): void {
   const { rb, stats, intent, dt, m, gravity, eid, linvel, q, upX, upY, upZ, agActive } = frame
   const fwd = quatRotate(q, { x: 0, y: 0, z: 1 })
@@ -1603,6 +1611,61 @@ function applyGroundBranch(
       },
       true,
     )
+
+    // ── P4.2 prototypes (water-next-research §7.6) — DEV-FLAGGED, both
+    // default OFF (WAVE_FEEL gains; `?wavepush=` / `?draft=`). Playtest
+    // gate: these change race balance, so they're here to be FELT, not
+    // shipped silently.
+    if (probe.isWater && field) {
+      // Catch-the-wave momentum: riding WITH the swell on a rising face
+      // gets a forward push — slope momentum is direction-blind (the back
+      // of a wave pays like the face of one); this keys the reward to
+      // dot(forward, travel) × ∂h/∂t, both already computed. Faces become
+      // directional conveyors: surf the set, or fight it and bog.
+      if (WAVE_FEEL.wavePush > 0) {
+        const WAVE_PUSH_GAIN = 1.2 // m/s² per (m/s rise × alignment) at gain 1
+        const travelX = Math.cos(field.waveBearing)
+        const travelZ = Math.sin(field.waveBearing)
+        const along = planeFwdX * travelX + planeFwdZ * travelZ
+        const rising = Math.max(0, frame.waterSurfaceVy)
+        const aPush = WAVE_PUSH_GAIN * rising * Math.max(0, along) * WAVE_FEEL.wavePush
+        if (aPush > 0) {
+          rb.applyImpulse(
+            {
+              x: planeFwdX * aPush * m * dt,
+              y: planeFwdY * aPush * m * dt,
+              z: planeFwdZ * aPush * m * dt,
+            },
+            true,
+          )
+        }
+      }
+      // Wake drafting: a forward boost inside the calm center TROUGH of a
+      // rival's wake (HTH's best emergent racing mechanic — steer into the
+      // V's channel). Keyed to the depth of the rivals' summed wake trough
+      // at the bike, saturating at 15 cm; own trail excluded.
+      if (WAVE_FEEL.draft > 0 && field.trails.length > 0) {
+        const DRAFT_GAIN = 1.5 // m/s² at full trough, gain 1
+        let troughDepth = 0
+        for (const tr of field.trails) {
+          if (tr.id === eid) continue
+          sampleWakeFromTrail(tr, frame.t.x, frame.t.z, field.time, _draftWakeScratch)
+          troughDepth += Math.min(0, _draftWakeScratch.y)
+        }
+        const inTrough = Math.min(1, -troughDepth / 0.15)
+        if (inTrough > 0) {
+          const aDraft = DRAFT_GAIN * inTrough * WAVE_FEEL.draft
+          rb.applyImpulse(
+            {
+              x: planeFwdX * aDraft * m * dt,
+              y: planeFwdY * aDraft * m * dt,
+              z: planeFwdZ * aDraft * m * dt,
+            },
+            true,
+          )
+        }
+      }
+    }
 
     // Scaled by forward throttle so the assist only fires when the player
     // is actually climbing under power. Without this gate the unconditional
@@ -2038,6 +2101,16 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
     // the rendered hover-target ring.
     const prevHover = HoverStateStore.get(eid)
     const prevGrounded = prevHover?.isGrounded ?? false
+
+    // P4.1 splash rings: a hard water landing radiates a ring wave other
+    // riders see AND feel (the pool lives on the field; the water mesh
+    // mirrors it per tick). Impact speed is measured relative to the
+    // surface's own vertical motion so riding down a swell face doesn't
+    // read as an impact. Fixed-step sim event → deterministic.
+    if (probeField && probe.isWater && isGrounded && !prevGrounded) {
+      const impact = Math.max(0, -(frame.linvel.y - frame.waterSurfaceVy))
+      spawnSplashRing(probeField, frame.t.x, frame.t.z, impact)
+    }
     const prevForwardSlope = prevHover?.forwardSlope ?? 0
     const prevDiveHoldS = prevHover?.diveHoldS ?? 0
     const prevReleaseKickS = prevHover?.releaseKickS ?? 0
@@ -2192,7 +2265,7 @@ export function hoverSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveFieldS
       continue
     }
 
-    applyGroundBranch(frame, footprint, probe, prevGrounded, groundDistance)
+    applyGroundBranch(frame, footprint, probe, prevGrounded, groundDistance, probeField)
     if (frame.agActive) applyAntiGravCorrections(frame)
   }
 }
