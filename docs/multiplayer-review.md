@@ -189,6 +189,39 @@ Matt's call: players join the same lobby, load in together, and share the
   real cohort race**. Relay now logs joins/rejects (`[relay] …`) for
   `partykit tail` triage; the sidecar pipes them into test output.
 
+### Phase 9 — synchronized race start (2026-06-09, follow-up session)
+
+Matt's follow-up: everyone should share the 3-2-1. Previously each tab armed
+its own countdown at its own load time, so starts differed by load-time
+deltas (seconds).
+
+- [x] **9.1** Relay start barrier: `start-race` captures the cohort size
+  (connections at that moment, persisted in the race storage record);
+  each race tab reports **`race-loaded`** once its loop is rendering and
+  the room is ready; the relay broadcasts one **`race-go`** when every
+  expected racer has reported — or after `RACE_START_TIMEOUT_MS` (25 s,
+  inside the 30 s join grace) so a vanished player can't hang the grid. A
+  racer who loads after the go gets a direct replay (counts down solo,
+  starts behind). Deliberately **no release-on-departure rule**: a
+  transient socket close during a slow load is indistinguishable from
+  abandonment, and an early go splits the start when the dropped racer
+  reconnects (observed live under cold-compile load) — the timeout
+  bounds the genuine-abandon wait.
+- [x] **9.2** Client: the race HUD is built with `deferStart` in
+  multiplayer and shows **"WAITING FOR RIDERS…"** (new
+  `setHoldBanner`); the game loop reports loaded, then arms the 3-2-1 on
+  `race-go` — start skew between peers is one-way relay latency instead
+  of load-time difference. Fallbacks: an old relay (no `startBarrier` in
+  its hello) arms immediately on connect (pre-barrier behavior), and a
+  15 s client failsafe covers a dead relay or a lost go. Single-player
+  is untouched.
+- [x] **9.3** Coverage: `relay-start-barrier.test.ts` (hold-for-cohort,
+  fire-once, late-loader replay, hold-through-departure + timeout,
+  expected-count surviving the instance recycle via storage) and barrier
+  stamps in the two-tab e2e — `__hover.net.barrier()` Date.now stamps
+  prove one go, ≤750 ms cross-tab skew, delivered only after the LAST
+  tab loaded.
+
 ### Testing trap worth remembering (cost a day of flake-chasing)
 
 Chromium pauses rAF in fully-occluded windows, and two headed same-size
@@ -230,10 +263,16 @@ structural fix is two separate browsers with non-overlapping
   full unit suite **1144 green** (relay-ping suite updated for the async
   storage-backed relay); `pnpm build` green; no new biome warnings on
   touched files.
-- **Known gap (accepted, documented):** per-tab 3-2-1 means starts align
-  only as well as load times do. A true synchronized start barrier (host
-  broadcasts "go at tick T", everyone unlocks together) is the right next
-  netcode slice if staggered starts bother playtests. Also: remote-bike
-  liveries fall back to the default variant in cohort races — lobby picks
-  are keyed by slot and don't survive the handoff recycle; carrying picks
-  through needs session identity, same bucket as the start barrier.
+- ~~**Known gap:** per-tab 3-2-1 means starts align only as well as load
+  times do.~~ **Closed by Phase 9** (synchronized start barrier). Still
+  open: remote-bike liveries fall back to the default variant in cohort
+  races — lobby picks are keyed by slot and don't survive the handoff
+  recycle; carrying picks through needs session identity.
+- 2026-06-09 (later still) — Phase 9 landed: `pnpm typecheck` clean; full
+  unit suite **1150 green** (incl. the 6-test `relay-start-barrier`
+  suite); `pnpm build` green; two-tab e2e with the new barrier asserts
+  green **3 consecutive runs, 9/9, zero retries** (spec now runs its
+  three tests sequentially in one worker — parallel cold-compile
+  contention could push a tab's load past the 25 s relay timeout and
+  read as barrier skew); no new biome warnings. Barrier verified in the
+  sidecar logs: cohort release `loaded=2/2`, solo release `loaded=1/1`.

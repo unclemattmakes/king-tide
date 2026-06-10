@@ -43,6 +43,12 @@
 >    (own `partykit dev` sidecar per worker): lobby→race convergence
 >    within 10 m, kinematic/dynamic role invariants, host handoff on
 >    leave, deterministic track agreement, and the race lock.
+> 7. **The start is synchronized** (same day, follow-up): race tabs hold
+>    their 3-2-1 ("WAITING FOR RIDERS…") and report `race-loaded`; the
+>    relay broadcasts one `race-go` when the whole lobby cohort has
+>    loaded (or its 25 s hold times out), so start skew is one-way relay
+>    latency instead of load-time difference. Old-relay fallback: arm on
+>    connect, as before. See multiplayer-review.md Phase 9.
 
 Prereq: M10.10.1 (commit 5f2191b — local bike's `PeerControlled.peerId` patched in `onConnected`).
 
