@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CONTOUR_DASH_SPEC,
   FOAM_STROKE_MASS_SPEC,
   FOAM_STROKE_STREAK_SPEC,
   packSheetRGBA8,
+  rasterizeContourDashRows,
   rasterizeOilStrokeSheet,
 } from '@/engine/render/oil-stroke-texture'
 
@@ -68,6 +70,65 @@ describe('oil-stroke foam sheets', () => {
       expect(dv / du).toBeGreaterThan(1.5)
     })
   }
+
+  it('contour-dash rows are deterministic', () => {
+    const a = rasterizeContourDashRows(CONTOUR_DASH_SPEC)
+    const b = rasterizeContourDashRows(CONTOUR_DASH_SPEC)
+    expect(a).toEqual(b)
+  })
+
+  it('contour-dash rows support both cut regimes (dashed crest / sparse trough)', () => {
+    // The water shader reads this sheet as a stack of 1-D dash rows: each
+    // contour line samples ONE row at its V center (keyed to the line's iso
+    // level) and slides the keep threshold with the swell phase (water.ts
+    // contour-breakup block). Measure exactly that: per-row on-fraction at
+    // the crest cut (long confident dashes with generous negative space —
+    // deliberately around a third of the row) and the trough cut (sparse
+    // stroke cores only). Pinned so a spec/rasterizer change can't silently
+    // collapse one regime into the other, fill the gaps back in, or leave a
+    // row bare (a bare row = a whole contour line silently missing — the
+    // failure mode that killed the scattered-sheet approach). Deterministic;
+    // the ranges document intent.
+    const grid = rasterizeContourDashRows(CONTOUR_DASH_SPEC)
+    const n = CONTOUR_DASH_SPEC.size
+    const rows = CONTOUR_DASH_SPEC.rows
+    const rowOnFraction = (row: number, cut: number): number => {
+      const y = Math.min(n - 1, Math.round((row + 0.5) * (n / rows)))
+      let on = 0
+      for (let x = 0; x < n; x++) if (grid[y * n + x]! >= cut) on++
+      return on / n
+    }
+    let crestSum = 0
+    let troughSum = 0
+    let crestMin = Number.POSITIVE_INFINITY
+    for (let row = 0; row < rows; row++) {
+      const crest = rowOnFraction(row, 0.16)
+      crestSum += crest
+      troughSum += rowOnFraction(row, 0.92)
+      if (crest < crestMin) crestMin = crest
+    }
+    const crestOn = crestSum / rows
+    const troughOn = troughSum / rows
+    expect(crestOn).toBeGreaterThan(0.2)
+    expect(crestOn).toBeLessThan(0.32)
+    expect(troughOn).toBeGreaterThan(0.02)
+    expect(troughOn).toBeLessThan(0.12)
+    expect(crestOn).toBeGreaterThan(troughOn * 2.5)
+    // Every row is a designed dash sequence — none may read near-bare.
+    expect(crestMin).toBeGreaterThan(0.12)
+    // And like the foam sheets, dashes must run along +U so they align with
+    // the line direction when the shader maps U ← crest axis.
+    let du = 0
+    let dv = 0
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const v = grid[y * n + x]!
+        du += Math.abs(grid[y * n + ((x + 1) % n)]! - v)
+        dv += Math.abs(grid[((y + 1) % n) * n + x]! - v)
+      }
+    }
+    expect(dv / du).toBeGreaterThan(1.5)
+  })
 
   it('packs to RGBA8 with opaque alpha and grayscale channels', () => {
     const rgba = packSheetRGBA8(Float32Array.from([0, 0.5, 1, 2, -1]))

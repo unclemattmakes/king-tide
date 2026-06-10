@@ -48,6 +48,10 @@ const READABILITY_MODE = process.env.FOAM_SWEEP_READABILITY === '1'
 // legacy round-disc bubbles vs swell-combed oil-paint strokes, with the
 // face-streak layer off/on/strong around each.
 const BRUSH_MODE = process.env.FOAM_SWEEP_BRUSH === '1'
+// FOAM_SWEEP_CBREAK=1 A/Bs the contour-line break-up: solid unbroken iso
+// lines vs trough-biased brush dashes, at shipped and boosted contour
+// strength so the dash structure is legible in the captures.
+const CBREAK_MODE = process.env.FOAM_SWEEP_CBREAK === '1'
 
 type Pose = { pos: [number, number, number]; target: [number, number, number] }
 // Coverage pose: elevated over The Maw's mid-section, looking DOWN (~33°) and
@@ -82,6 +86,8 @@ type Variant = {
   cs?: number
   csp?: number
   rel?: number
+  /** contourBreakup — solid iso lines (0) ↔ trough-biased brush dashes (1). */
+  cb?: number
 }
 const COVERAGE_GRID: Variant[] = [
   { label: '0-legacy', h: 1.0, s: 0.3, m: 0.0 }, // the old glassy gate (sanity floor)
@@ -126,6 +132,17 @@ const BRUSH_GRID: Variant[] = [
   { label: '3-oil-full', br: 1, st: 1 },
   { label: '4-oil-strong-streaks', br: 1, st: 1.6 },
 ]
+// Contour break-up A/B: the same frozen wave with solid lines (pre-breakup
+// look), the shipped dash default, and the half setting — then the pair
+// again at boosted contour strength where the dash structure is easiest to
+// judge. Everything else stays at live defaults.
+const CBREAK_GRID: Variant[] = [
+  { label: '0-solid', cb: 0 },
+  { label: '1-half', cb: 0.5 },
+  { label: '2-default', cb: 1 },
+  { label: '3-strong-contours-solid', cs: 1.0, cb: 0 },
+  { label: '4-strong-contours-broken', cs: 1.0, cb: 1 },
+]
 // P1 readability A/B: layers off (pre-P1 look) → shipped defaults → each
 // layer isolated → strong. Foam knobs untouched (live defaults).
 const READABILITY_GRID: Variant[] = [
@@ -140,17 +157,19 @@ const READABILITY_GRID: Variant[] = [
 ]
 const GRID: Variant[] = process.env.FOAM_SWEEP_GRID
   ? (JSON.parse(process.env.FOAM_SWEEP_GRID) as Variant[])
-  : BRUSH_MODE
-    ? BRUSH_GRID
-    : READABILITY_MODE
-      ? READABILITY_GRID
-      : AB_MODE
-        ? AB_GRID
-        : WARMTH_MODE
-          ? WARMTH_GRID
-          : STREAK_MODE
-            ? STREAK_GRID
-            : COVERAGE_GRID
+  : CBREAK_MODE
+    ? CBREAK_GRID
+    : BRUSH_MODE
+      ? BRUSH_GRID
+      : READABILITY_MODE
+        ? READABILITY_GRID
+        : AB_MODE
+          ? AB_GRID
+          : WARMTH_MODE
+            ? WARMTH_GRID
+            : STREAK_MODE
+              ? STREAK_GRID
+              : COVERAGE_GRID
 
 test.describe('foam coverage sweep', () => {
   test.skip(process.env.FOAM_SWEEP !== '1', 'gated on FOAM_SWEEP=1')
@@ -209,6 +228,7 @@ test.describe('foam coverage sweep', () => {
         if (variant.cs !== undefined) wd.setContourStrength(variant.cs)
         if (variant.csp !== undefined) wd.setContourSpacing(variant.csp)
         if (variant.rel !== undefined) wd.setContourRelief(variant.rel)
+        if (variant.cb !== undefined) wd.setContourBreakup(variant.cb)
       }, v)
       await page.waitForTimeout(400)
       const name = `${v.label}.jpg`

@@ -68,6 +68,7 @@ export type WaterDebugSettings = {
   contourStrength: number
   contourSpacing: number
   contourRelief: number
+  contourBreakup: number
   wireframe: boolean
   colorize: boolean
 }
@@ -103,6 +104,7 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     contourStrength: d.contourStrength,
     contourSpacing: d.contourSpacing,
     contourRelief: d.contourRelief,
+    contourBreakup: d.contourBreakup,
     wireframe: d.wireframe,
     colorize: d.colorize,
   }
@@ -174,6 +176,7 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setContourStrength(s.contourStrength)
   water.debug.setContourSpacing(s.contourSpacing)
   water.debug.setContourRelief(s.contourRelief)
+  water.debug.setContourBreakup(s.contourBreakup)
   water.debug.setWireframe(s.wireframe)
   water.debug.setColorize(s.colorize)
 }

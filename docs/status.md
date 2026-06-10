@@ -31,7 +31,36 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
-> **Last updated: 2026-06-09 (c)** — **Wind VFX shipped — Wind-Waker-style
+> **Last updated: 2026-06-09 (d)** — **Contour-line break-up: the iso lines no
+> longer run unbroken across the whole sea.** An iso-height mask is constant
+> along its own line, so every P1 contour streamed ocean-length — too clean for
+> the painted read (playtest note). A procedural dash sheet
+> (`CONTOUR_DASH_SPEC`, the #346 oil-stroke stamp organized as **8 independent
+> 1-D dash rows**, each budgeted to its paint target so no row can roll bare)
+> acts as a KEEP mask keyed to invariants that **ride with the line**: U = the
+> crest-axis coordinate, V = one row per iso LEVEL. That phase-locking is
+> load-bearing — the first cut sampled the mask in world space and **strobed
+> in motion** (a travelling line crosses a ~0.4 m stroke footprint in 2–3
+> frames at ~10 m/s phase speed, blinking every dash; playtest-caught), where
+> now a line carries its dash pattern as it travels and the only residual
+> drift is the slow two-swell interference meander. The cut threshold rides
+> the live swell phase (`rampT`, constant per line): crest lines keep ~25% of
+> their length as long confident dashes (**~75% negative space** — the second
+> playtest ask), trough lines climb the cut into the per-dash gain range so
+> only sparse stroke cores survive — lines cling to the crests and the trough
+> floor reads clean, with surviving trough dashes carrying ~30% less paint.
+> The dark Wind-Waker relief twin shares the row + break-up (the sub-metre
+> relief shift never crosses a band midpoint) so the pair dashes together.
+> New `contourBreakup` knob (0 = legacy solid lines, 1 = default) in the water
+> tuner, persisted per-key (no store bump); the per-row on-fractions at both
+> cut operating points are pinned in `tests/unit/oil-stroke-texture.test.ts`
+> (the `stampStroke` extraction is verified byte-identical for the foam
+> sheets), and `FOAM_SWEEP_CBREAK=1` captures the A/B grid (plus an unfrozen
+> `FOAM_SWEEP_GRID` burst for motion-coherence checks). Zero new varyings
+> (all fragment-side off existing signals) — verified compiling + rendering
+> on real WebGPU via the sweeps.
+>
+> **2026-06-09 (c)** — **Wind VFX shipped — Wind-Waker-style
 > gust strokes.** New ambient render system
 > (`src/engine/render/wind-trails.ts` + pure-math
 > `wind-streamline.ts` shape generator): white calligraphic strokes that draw
