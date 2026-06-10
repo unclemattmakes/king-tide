@@ -60,6 +60,11 @@ import {
   WAKE_TRAIL_POINTS,
 } from '@/engine/sim/water/wake-trail'
 import {
+  // Shipped-look per-band amplitude scales — the menu defaults below use
+  // these so the spectrum generator's pre-divide (spectrum.ts) can never
+  // drift from what boot applies.
+  DEFAULT_CHOP_TUNING_SCALE,
+  DEFAULT_SWELL_TUNING_SCALE,
   effectiveSteepness,
   // Zone cap shared with the CPU sampler (`setWaveZones` truncates to it; the
   // uniform arrays below are sized by it). Drift-tested like the SHORE_* set.
@@ -74,6 +79,10 @@ import {
   SHORE_K,
   SHORE_OMEGA,
   SHORE_PHASE,
+  // Swell/chop wavelength threshold — the SWELL_INDICES subset below is
+  // derived from it per bank (per-track spectrum banks reorder/resize the
+  // wave list, so hardcoded indices would silently mistag).
+  SWELL_WAVELENGTH_MIN,
   // CPU zone-factor blend — used by the `renderVertex` CPU mirror so the
   // diagnostic stays an exact twin of the vertex stage. The shader itself
   // re-implements the same math in TSL (`waveZoneFactors`).
@@ -828,8 +837,12 @@ export const WAVE_BEARING_DEFAULT = 47
  * the rendered surface and the buoyancy field stay in lock-step. The CPU
  * sampler remains the source of truth for buoyancy; this is its visual twin.
  *
- * Wave parameters are baked into the shader at construction. If
- * `defaultWaves()` ever changes at runtime, rebuild the material.
+ * Wave parameters (wavelength / direction / phase / count) are baked into
+ * the shader at construction from whatever `field.waves` holds at that
+ * moment — the hand-tuned `defaultWaves()` bank or a per-track generated
+ * spectrum (spectrum.ts; main.ts installs it on the field BEFORE building
+ * this mesh). Only amplitudes are live-mirrored. If the bank is ever
+ * mutated structurally at runtime, rebuild the material.
  */
 export function createWaterMesh(
   field: WaveFieldState,
@@ -1004,12 +1017,22 @@ export function createWaterMesh(
   // Per-wave amplitude is owned by `field.waves[i].amplitude` (the CPU
   // buoyancy field) and mirrored to the GPU live (see `waveAmpUniform`),
   // so the rendered surface and the buoyancy field can never disagree on
-  // how tall the waves are. SWELL_INDICES tags the two long swells
-  // (waves 0–1) vs the chop bands (2–5) so the debug menu's separate
-  // swell/chop sliders scale the right subset; `baseAmplitudes` is the
-  // pristine preset captured before any per-track / menu scaling, so the
-  // sliders scale from a stable baseline.
-  const SWELL_INDICES = new Set([0, 1])
+  // how tall the waves are. SWELL_INDICES tags the long-period swells vs
+  // the chop bands so the debug menu's separate swell/chop sliders scale
+  // the right subset, the P1 readability layers key on a swell-only
+  // field, and the outer/skirt layers draw only the swells. Derived from
+  // wavelength (≥ SWELL_WAVELENGTH_MIN) rather than hardcoded indices —
+  // per-track spectrum banks (spectrum.ts) replace the default 6-wave
+  // list with sorted generated components, so positions aren't stable
+  // across tracks. For the default bank this lands on the historical
+  // {0, 1}. `baseAmplitudes` is the pristine preset captured before any
+  // per-track / menu scaling, so the sliders scale from a stable
+  // baseline.
+  const SWELL_INDICES = new Set(
+    field.waves
+      .map((w, i) => (w.wavelength >= SWELL_WAVELENGTH_MIN ? i : -1))
+      .filter((i) => i >= 0),
+  )
   const baseAmplitudes = field.waves.map((w) => w.amplitude)
   // Live per-wave amplitude uniform array. The vertex shader reads THIS
   // instead of a constant baked at construction, so every amplitude writer
@@ -1331,136 +1354,87 @@ export function createWaterMesh(
   // Zone factors (zHeightMult / zFreqMult / the effective-bearing cos/sin)
   // arrive pre-blended from `waveZoneFactors` — passed in rather than
   // re-evaluated so one zone pass per vertex serves every wave function.
-  const gerstnerHeight = Fn(
-    ([x, z, t, zHeightMult, zFreqMult, zCosB, zSinB]: [
-      unknown,
-      unknown,
-      unknown,
-      unknown,
-      unknown,
-      unknown,
-      unknown,
-    ]) => {
-      const xN = x as ReturnType<typeof float>
-      const zN = z as ReturnType<typeof float>
-      const tN = t as ReturnType<typeof float>
-      const hm = zHeightMult as ReturnType<typeof float>
-      const fm = zFreqMult as ReturnType<typeof float>
-      const cosB = zCosB as ReturnType<typeof float>
-      const sinB = zSinB as ReturnType<typeof float>
-      // Apply the EFFECTIVE wave-bearing rotation (global, or the winning
-      // zone's override — pre-resolved by `waveZoneFactors`) to the sample
-      // coords — equivalent to rotating every wave's (dirX, dirZ) by
-      // +bearing. Slopes accumulate in the rotated frame and get rotated
-      // back to world frame after the per-wave loop (chain rule).
-      const xRot = xN.mul(cosB).add(zN.mul(sinB))
-      const zRot = zN.mul(cosB).sub(xN.mul(sinB))
-      const y = float(0).toVar()
-      const rotDydx = float(0).toVar()
-      const rotDydz = float(0).toVar()
-      for (let i = 0; i < waveConsts.length; i++) {
-        const w = waveConsts[i]!
-        // Live per-wave amplitude (mirrors `field.waves[i].amplitude`); the
-        // wavenumber/direction/phase stay baked. See `waveAmpUniform`.
-        // Zone heightMult scales amplitude. Zone freqMult scales the
-        // DYNAMIC part of the phase: k' = k·fm and ω' = speed·k' = ω·fm,
-        // so k'·(D·x) − ω'·t = fm·(k·(D·x) − ω·t) — the static phase
-        // offset is NOT scaled. Mirror of `sampleHeight` in wave-field.ts.
-        // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
-        const ampI = waveAmpUniform.element(i) as any
-        const ampZ = hm.mul(ampI)
-        const phase = float(w.k * w.dirX)
-          .mul(xRot)
-          .add(float(w.k * w.dirZ).mul(zRot))
-          .sub(tN.mul(w.omega))
-          .mul(fm)
-          .add(float(w.phase))
-        const s = sin(phase)
-        const c = cos(phase)
-        y.addAssign(s.mul(ampZ))
-        rotDydx.addAssign(
-          c
-            .mul(ampZ)
-            .mul(float(w.k * w.dirX))
-            .mul(fm),
-        )
-        rotDydz.addAssign(
-          c
-            .mul(ampZ)
-            .mul(float(w.k * w.dirZ))
-            .mul(fm),
-        )
-      }
-      // Rotate the rotated-frame slopes back to world XZ.
-      const dydx = rotDydx.mul(cosB).sub(rotDydz.mul(sinB))
-      const dydz = rotDydx.mul(sinB).add(rotDydz.mul(cosB))
-      return vec3(y, dydx, dydz)
-    },
-  )
-
-  // Swell-only twin of `gerstnerHeight`: sums ONLY the two long-period swells
-  // (SWELL_INDICES), same live amps / zone factors / bearing math as the full
-  // sum. The P1 readability layers (value ramp + contour-line foam,
-  // water-next-research.md §8 P1) key on THIS field rather than the full
-  // height: the 2026-06-06 cel experiment showed chop in the key carves the
-  // bands/lines into squiggles, while the swell-only field gives one clean
-  // sweep per readable wave face (§4.3). Costs two extra sin/cos pairs per
-  // vertex on top of the existing ~30.
-  const gerstnerSwellHeight = Fn(
-    ([x, z, t, zHeightMult, zFreqMult, zCosB, zSinB]: [
-      unknown,
-      unknown,
-      unknown,
-      unknown,
-      unknown,
-      unknown,
-      unknown,
-    ]) => {
-      const xN = x as ReturnType<typeof float>
-      const zN = z as ReturnType<typeof float>
-      const tN = t as ReturnType<typeof float>
-      const hm = zHeightMult as ReturnType<typeof float>
-      const fm = zFreqMult as ReturnType<typeof float>
-      const cosB = zCosB as ReturnType<typeof float>
-      const sinB = zSinB as ReturnType<typeof float>
-      const xRot = xN.mul(cosB).add(zN.mul(sinB))
-      const zRot = zN.mul(cosB).sub(xN.mul(sinB))
-      const y = float(0).toVar()
-      const rotDydx = float(0).toVar()
-      const rotDydz = float(0).toVar()
-      for (let i = 0; i < waveConsts.length; i++) {
-        if (!SWELL_INDICES.has(i)) continue
-        const w = waveConsts[i]!
-        // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
-        const ampI = waveAmpUniform.element(i) as any
-        const ampZ = hm.mul(ampI)
-        const phase = float(w.k * w.dirX)
-          .mul(xRot)
-          .add(float(w.k * w.dirZ).mul(zRot))
-          .sub(tN.mul(w.omega))
-          .mul(fm)
-          .add(float(w.phase))
-        const s = sin(phase)
-        const c = cos(phase)
-        y.addAssign(s.mul(ampZ))
-        rotDydx.addAssign(
-          c
-            .mul(ampZ)
-            .mul(float(w.k * w.dirX))
-            .mul(fm),
-        )
-        rotDydz.addAssign(
-          c
-            .mul(ampZ)
-            .mul(float(w.k * w.dirZ))
-            .mul(fm),
-        )
-      }
-      const dydx = rotDydx.mul(cosB).sub(rotDydz.mul(sinB))
-      const dydz = rotDydx.mul(sinB).add(rotDydz.mul(cosB))
-      return vec3(y, dydx, dydz)
-    },
-  )
+  //
+  // Built per index-subset: `null` = the full bank (the center plane's
+  // truth), SWELL_INDICES = the long-period swells only. The swell variant
+  // serves two consumers:
+  //  - the P1 readability layers key on a swell-only field (chop in the key
+  //    carves the bands/lines into squiggles — §4.3's cel-session lesson);
+  //  - the OUTER TILE + HORIZON SKIRT geometry (P2.2): at 380 m+ the chop
+  //    bands are sub-pixel AND under-sampled by the outer's 5.6 m vertex
+  //    grid (alias shimmer, not detail) — the silhouette only needs the
+  //    swells, and dropping chop there keeps those layers' vertex cost
+  //    flat as per-track spectrum banks grow the component count.
+  const buildGerstnerHeight = (indices: ReadonlySet<number> | null) =>
+    Fn(
+      ([x, z, t, zHeightMult, zFreqMult, zCosB, zSinB]: [
+        unknown,
+        unknown,
+        unknown,
+        unknown,
+        unknown,
+        unknown,
+        unknown,
+      ]) => {
+        const xN = x as ReturnType<typeof float>
+        const zN = z as ReturnType<typeof float>
+        const tN = t as ReturnType<typeof float>
+        const hm = zHeightMult as ReturnType<typeof float>
+        const fm = zFreqMult as ReturnType<typeof float>
+        const cosB = zCosB as ReturnType<typeof float>
+        const sinB = zSinB as ReturnType<typeof float>
+        // Apply the EFFECTIVE wave-bearing rotation (global, or the winning
+        // zone's override — pre-resolved by `waveZoneFactors`) to the sample
+        // coords — equivalent to rotating every wave's (dirX, dirZ) by
+        // +bearing. Slopes accumulate in the rotated frame and get rotated
+        // back to world frame after the per-wave loop (chain rule).
+        const xRot = xN.mul(cosB).add(zN.mul(sinB))
+        const zRot = zN.mul(cosB).sub(xN.mul(sinB))
+        const y = float(0).toVar()
+        const rotDydx = float(0).toVar()
+        const rotDydz = float(0).toVar()
+        for (let i = 0; i < waveConsts.length; i++) {
+          if (indices && !indices.has(i)) continue
+          const w = waveConsts[i]!
+          // Live per-wave amplitude (mirrors `field.waves[i].amplitude`); the
+          // wavenumber/direction/phase stay baked. See `waveAmpUniform`.
+          // Zone heightMult scales amplitude. Zone freqMult scales the
+          // DYNAMIC part of the phase: k' = k·fm and ω' = speed·k' = ω·fm,
+          // so k'·(D·x) − ω'·t = fm·(k·(D·x) − ω·t) — the static phase
+          // offset is NOT scaled. Mirror of `sampleHeight` in wave-field.ts.
+          // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
+          const ampI = waveAmpUniform.element(i) as any
+          const ampZ = hm.mul(ampI)
+          const phase = float(w.k * w.dirX)
+            .mul(xRot)
+            .add(float(w.k * w.dirZ).mul(zRot))
+            .sub(tN.mul(w.omega))
+            .mul(fm)
+            .add(float(w.phase))
+          const s = sin(phase)
+          const c = cos(phase)
+          y.addAssign(s.mul(ampZ))
+          rotDydx.addAssign(
+            c
+              .mul(ampZ)
+              .mul(float(w.k * w.dirX))
+              .mul(fm),
+          )
+          rotDydz.addAssign(
+            c
+              .mul(ampZ)
+              .mul(float(w.k * w.dirZ))
+              .mul(fm),
+          )
+        }
+        // Rotate the rotated-frame slopes back to world XZ.
+        const dydx = rotDydx.mul(cosB).sub(rotDydz.mul(sinB))
+        const dydz = rotDydx.mul(sinB).add(rotDydz.mul(cosB))
+        return vec3(y, dydx, dydz)
+      },
+    )
+  const gerstnerHeight = buildGerstnerHeight(null)
+  const gerstnerSwellHeight = buildGerstnerHeight(SWELL_INDICES)
 
   // Analytic crest signals for curvature-based whitecap foam (foam pass v3).
   // Two extra sums over the same waves the height uses — both reuse sin/cos so
@@ -1533,82 +1507,91 @@ export function createWaterMesh(
   // node return; the duplicated sin/cos per wave is trivial on a real GPU.
   // With Q=0 (`?water=classic`) this Fn returns vec3(0, 0, 0) and the
   // surface collapses to the pure heightfield case.
-  const gerstnerDisp = Fn(
-    ([x, z, t, zHeightMult, zFreqMult, zCosB, zSinB]: [
-      unknown,
-      unknown,
-      unknown,
-      unknown,
-      unknown,
-      unknown,
-      unknown,
-    ]) => {
-      const xN = x as ReturnType<typeof float>
-      const zN = z as ReturnType<typeof float>
-      const tN = t as ReturnType<typeof float>
-      const hm = zHeightMult as ReturnType<typeof float>
-      const fm = zFreqMult as ReturnType<typeof float>
-      const cosB = zCosB as ReturnType<typeof float>
-      const sinB = zSinB as ReturnType<typeof float>
-      // Bearing-rotated sample coords (same convention as gerstnerHeight).
-      const xRot = xN.mul(cosB).add(zN.mul(sinB))
-      const zRot = zN.mul(cosB).sub(xN.mul(sinB))
-      // dx, dz accumulate in the rotated frame; we rotate back to world
-      // XZ at the end so the horizontal displacement applied to the
-      // vertex position uses world coordinates.
-      const dxRot = float(0).toVar()
-      const dzRot = float(0).toVar()
-      const qSum = float(0).toVar()
-      for (let i = 0; i < waveConsts.length; i++) {
-        const w = waveConsts[i]!
-        // Live per-wave amplitude (mirrors `field.waves[i].amplitude`); see
-        // `waveAmpUniform`. Wavenumber/direction/phase stay baked. Zone
-        // factors scale amplitude (hm) and the dynamic phase / wavenumber
-        // (fm) exactly as in gerstnerHeight, mirrored by the CPU's
-        // `ambientDisp` so the buoyancy inverse map lands on this surface.
-        // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
-        const ampI = waveAmpUniform.element(i) as any
-        const ampZ = hm.mul(ampI)
-        const phase = float(w.k * w.dirX)
-          .mul(xRot)
-          .add(float(w.k * w.dirZ).mul(zRot))
-          .sub(tN.mul(w.omega))
-          .mul(fm)
-          .add(float(w.phase))
-        const s = sin(phase)
-        const c = cos(phase)
-        const qScaled = steepnessUniform.mul(float(w.qBase))
-        // Horizontal displacement: P.x += Q·A·D.x · cos(phase),
-        //                          P.z += Q·A·D.z · cos(phase)
-        //
-        // The displacement DIRECTION is rotated by `pinchDirection`
-        // (a uniform-driven 2D rotation) from the wave direction
-        // (dirX, dirZ). At 0° the displacement runs along the wave,
-        // particles bulge forward, and crest LINES sharpen in the
-        // direction of travel — standard Gerstner. At 90° the
-        // displacement runs along the crest-line axis (the
-        // perpendicular: (-dirZ, dirX)), so particles bulge along
-        // the crest and the wave reads as elongated ridges running
-        // in the direction of travel instead of short across-axis
-        // bumps. The CPU buoyancy sampler inverse-maps this exact
-        // displacement (`ambientDisp` mirrors this loop, pinch and
-        // zone factors included) so the bike floats on the pinched
-        // surface the shader draws.
-        const rotDirX = float(w.dirX).mul(pinchCosUniform).sub(float(w.dirZ).mul(pinchSinUniform))
-        const rotDirZ = float(w.dirX).mul(pinchSinUniform).add(float(w.dirZ).mul(pinchCosUniform))
-        dxRot.addAssign(qScaled.mul(rotDirX).mul(ampZ).mul(c))
-        dzRot.addAssign(qScaled.mul(rotDirZ).mul(ampZ).mul(c))
-        // Normal y-component reduction: Σ Q · k' · A' · sin(phase)
-        qSum.addAssign(qScaled.mul(float(w.k)).mul(fm).mul(ampZ).mul(s))
-      }
-      // Rotate the rotated-frame horizontal displacement back to
-      // world XZ so the vertex shader can add it to positionLocal.xz
-      // in world coords.
-      const dx = dxRot.mul(cosB).sub(dzRot.mul(sinB))
-      const dz = dxRot.mul(sinB).add(dzRot.mul(cosB))
-      return vec3(dx, dz, qSum)
-    },
-  )
+  //
+  // Built per index-subset like `buildGerstnerHeight` — the swell-only
+  // variant displaces the outer tile (whose height also sums only swells;
+  // a full-bank pinch on a swell-only height would shear phantom chop
+  // texture into geometry that doesn't carry it).
+  const buildGerstnerDisp = (indices: ReadonlySet<number> | null) =>
+    Fn(
+      ([x, z, t, zHeightMult, zFreqMult, zCosB, zSinB]: [
+        unknown,
+        unknown,
+        unknown,
+        unknown,
+        unknown,
+        unknown,
+        unknown,
+      ]) => {
+        const xN = x as ReturnType<typeof float>
+        const zN = z as ReturnType<typeof float>
+        const tN = t as ReturnType<typeof float>
+        const hm = zHeightMult as ReturnType<typeof float>
+        const fm = zFreqMult as ReturnType<typeof float>
+        const cosB = zCosB as ReturnType<typeof float>
+        const sinB = zSinB as ReturnType<typeof float>
+        // Bearing-rotated sample coords (same convention as gerstnerHeight).
+        const xRot = xN.mul(cosB).add(zN.mul(sinB))
+        const zRot = zN.mul(cosB).sub(xN.mul(sinB))
+        // dx, dz accumulate in the rotated frame; we rotate back to world
+        // XZ at the end so the horizontal displacement applied to the
+        // vertex position uses world coordinates.
+        const dxRot = float(0).toVar()
+        const dzRot = float(0).toVar()
+        const qSum = float(0).toVar()
+        for (let i = 0; i < waveConsts.length; i++) {
+          if (indices && !indices.has(i)) continue
+          const w = waveConsts[i]!
+          // Live per-wave amplitude (mirrors `field.waves[i].amplitude`); see
+          // `waveAmpUniform`. Wavenumber/direction/phase stay baked. Zone
+          // factors scale amplitude (hm) and the dynamic phase / wavenumber
+          // (fm) exactly as in gerstnerHeight, mirrored by the CPU's
+          // `ambientDisp` so the buoyancy inverse map lands on this surface.
+          // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
+          const ampI = waveAmpUniform.element(i) as any
+          const ampZ = hm.mul(ampI)
+          const phase = float(w.k * w.dirX)
+            .mul(xRot)
+            .add(float(w.k * w.dirZ).mul(zRot))
+            .sub(tN.mul(w.omega))
+            .mul(fm)
+            .add(float(w.phase))
+          const s = sin(phase)
+          const c = cos(phase)
+          const qScaled = steepnessUniform.mul(float(w.qBase))
+          // Horizontal displacement: P.x += Q·A·D.x · cos(phase),
+          //                          P.z += Q·A·D.z · cos(phase)
+          //
+          // The displacement DIRECTION is rotated by `pinchDirection`
+          // (a uniform-driven 2D rotation) from the wave direction
+          // (dirX, dirZ). At 0° the displacement runs along the wave,
+          // particles bulge forward, and crest LINES sharpen in the
+          // direction of travel — standard Gerstner. At 90° the
+          // displacement runs along the crest-line axis (the
+          // perpendicular: (-dirZ, dirX)), so particles bulge along
+          // the crest and the wave reads as elongated ridges running
+          // in the direction of travel instead of short across-axis
+          // bumps. The CPU buoyancy sampler inverse-maps this exact
+          // displacement (`ambientDisp` mirrors this loop, pinch and
+          // zone factors included) so the bike floats on the pinched
+          // surface the shader draws.
+          const rotDirX = float(w.dirX).mul(pinchCosUniform).sub(float(w.dirZ).mul(pinchSinUniform))
+          const rotDirZ = float(w.dirX).mul(pinchSinUniform).add(float(w.dirZ).mul(pinchCosUniform))
+          dxRot.addAssign(qScaled.mul(rotDirX).mul(ampZ).mul(c))
+          dzRot.addAssign(qScaled.mul(rotDirZ).mul(ampZ).mul(c))
+          // Normal y-component reduction: Σ Q · k' · A' · sin(phase)
+          qSum.addAssign(qScaled.mul(float(w.k)).mul(fm).mul(ampZ).mul(s))
+        }
+        // Rotate the rotated-frame horizontal displacement back to
+        // world XZ so the vertex shader can add it to positionLocal.xz
+        // in world coords.
+        const dx = dxRot.mul(cosB).sub(dzRot.mul(sinB))
+        const dz = dxRot.mul(sinB).add(dzRot.mul(cosB))
+        return vec3(dx, dz, qSum)
+      },
+    )
+  const gerstnerDisp = buildGerstnerDisp(null)
+  const gerstnerSwellDisp = buildGerstnerDisp(SWELL_INDICES)
 
   // Nearest-segment scan over one bike's wake trail. JS-level code-gen
   // helper, NOT a TSL Fn — it emits the scan inline wherever it's called
@@ -3436,11 +3419,15 @@ export function createWaterMesh(
   // Normalised swell phase 0..1 across the LIVE swell envelope — the amps
   // come from the same mirrored uniform buoyancy uses, so Beaufort, the
   // lap-weather storm ramp and the menu sliders keep the bands centred.
-  // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
-  const swellAmp0 = waveAmpUniform.element(0) as any
-  // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
-  const swellAmp1 = waveAmpUniform.element(1) as any
-  const swellSpan = max(abs(float(swellAmp0)).add(abs(float(swellAmp1))), float(0.05))
+  // Summed across the bank's SWELL_INDICES subset (NOT hardcoded waves
+  // 0–1 — per-track spectrum banks carry 1..N swells).
+  // biome-ignore lint/suspicious/noExplicitAny: TSL node accumulated across a JS-level loop
+  let swellAmpSum: any = float(0)
+  for (const i of SWELL_INDICES) {
+    // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
+    swellAmpSum = swellAmpSum.add(abs(float(waveAmpUniform.element(i) as any)))
+  }
+  const swellSpan = max(float(swellAmpSum), float(0.05))
   const rampT = clamp(
     swellHeightFrag.div(swellSpan.mul(float(2))).add(float(0.5)),
     float(0),
@@ -3824,8 +3811,11 @@ export function createWaterMesh(
   // buoyancy sampler stays in lockstep with the GPU shader.
   const defaults: WaterDebugDefaults = {
     steepness: initialSteepness,
-    swellScale: 3.2,
-    chopScale: 0.9,
+    // The shipped-look per-band scales — imported from wave-field.ts so
+    // the spectrum generator (which pre-divides by them) can never drift
+    // from what boot actually applies.
+    swellScale: DEFAULT_SWELL_TUNING_SCALE,
+    chopScale: DEFAULT_CHOP_TUNING_SCALE,
     timeScale: 0.85,
     reflectionStrength: REFLECTION_STRENGTH_DEFAULT,
     sunGlow: SUN_GLOW_DEFAULT,
@@ -4199,12 +4189,17 @@ export function createWaterMesh(
   // square footprint the skirt is the last reader before fog.
   //
   // Geometry: 1440 m × 1440 m at 256² subs ≈ 5.6 m / vertex. That's
-  // coarse compared to the center's 0.6 m / vertex but still catches
-  // the long-period swells (the Gerstner set's shortest wavelength is
-  // 5.5 m), which is what reads at 300 m+ distance. The wake's 4 m
-  // wavelength is undersampled here but we don't draw wake on this
-  // tile anyway. ~66 k verts: roughly 1/9th of the center mesh, so the
-  // outer's vertex pass adds well under a millisecond on any real GPU.
+  // coarse compared to the center's 0.6 m / vertex but it resolves the
+  // long-period swells, which is all that reads at 300 m+ distance —
+  // and all this tile SUMS: the outer evaluates the swell-only Gerstner
+  // subset (P2.2). The chop bands (λ < 30 m) are sub-pixel out here and
+  // under-sampled by the 5.6 m grid (alias shimmer, not detail), and at
+  // the 380→480 m cross-fade band the center's chop amplitude (≤ 0.22 m)
+  // is well under a pixel, so the blend can't show the difference. The
+  // wake's 4 m wavelength was never drawn on this tile. ~66 k verts:
+  // roughly 1/9th of the center mesh, so the outer's vertex pass adds
+  // well under a millisecond on any real GPU — and stays flat as
+  // per-track spectrum banks (spectrum.ts) grow the chop count.
   const OUTER_SIZE = 1440
   const OUTER_SUBS = 256
 
@@ -4228,7 +4223,7 @@ export function createWaterMesh(
   // envelope swelling the center but not the outer would show as a
   // breathing seam at the 380→480 m cross-fade band.
   const outerHeightMult = outerZoneFx.x.mul(setEnvNode)
-  const outerGerst = gerstnerHeight(
+  const outerGerst = gerstnerSwellHeight(
     outerWorldX,
     outerWorldZ,
     tNode,
@@ -4237,7 +4232,7 @@ export function createWaterMesh(
     outerZoneCosB,
     outerZoneSinB,
   )
-  const outerDispVec = gerstnerDisp(
+  const outerDispVec = gerstnerSwellDisp(
     outerWorldX,
     outerWorldZ,
     tNode,
@@ -4466,7 +4461,10 @@ export function createWaterMesh(
     // layers, same as the outer tile above (a large zone or surge can
     // reach the skirt's inner band).
     const skirtZoneFx = waveZoneFactors(skirtWorldX, skirtWorldZ, tNode)
-    const skirtGerst = gerstnerHeight(
+    // Swell-only sum (P2.2) — chop is sub-pixel everywhere the skirt is
+    // visible (720 m+), and the swell subset keeps the skirt's vertex
+    // cost flat as per-track spectrum banks grow the chop count.
+    const skirtGerst = gerstnerSwellHeight(
       skirtWorldX,
       skirtWorldZ,
       tNode,
