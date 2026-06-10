@@ -16,7 +16,7 @@ import * as THREE from 'three'
 import { resetDevSettings } from '../dev-settings'
 import { getSkySystem } from '../render/sky-service'
 import { getWaterMesh } from '../render/water-service'
-import { getWaveDotsController } from './dev-runtime'
+import { getWaveDotsController, getWindTrailsController } from './dev-runtime'
 import type {
   ActionTool,
   DevTool,
@@ -316,6 +316,16 @@ export function createDevTools(deps: DevToolDeps): DevTool[] {
         const n = Number(entered.trim())
         if (Number.isFinite(n)) sky.setTimeOfDay(n)
       },
+    },
+    {
+      kind: 'toggle',
+      group: 'World',
+      id: 'world.wind-trails',
+      label: 'Wind gusts',
+      hint: 'Wind-Waker-ish white gust strokes (live; ?wind=0 boots them off)',
+      keywords: 'wind trails gusts streamers vfx ambience',
+      toggle: () => getWindTrailsController()?.toggle(),
+      isOn: () => getWindTrailsController()?.isOn() ?? false,
     },
     {
       kind: 'toggle',

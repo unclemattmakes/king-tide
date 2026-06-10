@@ -31,7 +31,7 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
-> **Last updated: 2026-06-09 (e)** — **Synchronized race start.** Per
+> **Last updated: 2026-06-09 (h)** — **Synchronized race start.** Per
 > Matt: everyone shares the 3-2-1. Multiplayer race tabs now hold their
 > countdown ("WAITING FOR RIDERS…") and report `race-loaded`; the relay
 > broadcasts a single **`race-go`** once every racer from the lobby
@@ -51,7 +51,7 @@
 > + tenure election). Detail: [multiplayer-review.md](./multiplayer-review.md)
 > Phase 9.
 >
-> **Last updated: 2026-06-09 (d)** — **No mid-race joins (product rule) +
+> **2026-06-09 (g)** — **No mid-race joins (product rule) +
 > the two-tab multiplayer e2e finally exists.** Per Matt: players enter
 > through the shared lobby, load in together, and race from the 3-2-1 —
 > nobody drops into a running race. The relay now arms a **race lock** 30 s
@@ -79,7 +79,7 @@
 > in prod. Full detail: [multiplayer-review.md](./multiplayer-review.md)
 > Phase 8.
 >
-> **Last updated: 2026-06-09 (c)** — **Multiplayer review + hardening pass.**
+> **2026-06-09 (f)** — **Multiplayer review + hardening pass.**
 > A full netcode read produced [multiplayer-review.md](./multiplayer-review.md)
 > (findings, prioritized plan — everything implemented except the
 > long-deferred two-tab e2e). Headline: a **P0 regression** — the host's
@@ -106,7 +106,78 @@
 > `lobby-pick`, `remote-interp`, `race-teleport-guard`, tenure cases in
 > `host-election`.
 >
-> **Last updated: 2026-06-09 (b)** — **The two "pre-existing flakes" diagnosed —
+> **2026-06-09 (e)** — **Wind VFX refined — speed-aware
+> regimes, ghostly half-width strokes, rare curls.** Strokes halved to
+> `HALF_WIDTH` 0.225 and made translucent (`BASE_OPACITY` 0.55 — ghostly,
+> not solid). The field splits by what the rider feels: each respawn samples
+> the **apparent wind** (true wind − smoothed camera velocity,
+> `resolveWindRegime` in `wind-streamline.ts`, unit-tested). Still = ambient
+> calligraphy (slow true-wind sweep, wander 0.5, lives ~3.6–5.6 s, some sky
+> riders) where a curl is a **rare flourish** (`CURL_CHANCE_STILL` 0.22);
+> moving = speed-lines sweeping fast against your travel — direction and
+> sweep speed fall out of the apparent-wind vector, no hand-tuned mode
+> switch. **Hard rule (Matt): at ≥40% of the bike's normal top speed
+> (`playerVariant.stats.topSpeed`, racer ⇒ 11.2 m/s) curls stop spawning
+> entirely — straight lines only** — and the regime ramp is anchored to
+> complete at that same cutoff so the lines are already fully straight when
+> the ban kicks in. Pinned by a deterministic e2e assert via
+> `__windTrails.debug()` spawn metadata: every full-blend trail sampled
+> across three racing generations must be loop-free
+> (`tests/e2e/wind-trails.spec.ts`).
+
+> **2026-06-09 (d)** — **Contour-line break-up: the iso lines no
+> longer run unbroken across the whole sea.** An iso-height mask is constant
+> along its own line, so every P1 contour streamed ocean-length — too clean for
+> the painted read (playtest note). A procedural dash sheet
+> (`CONTOUR_DASH_SPEC`, the #346 oil-stroke stamp organized as **8 independent
+> 1-D dash rows**, each budgeted to its paint target so no row can roll bare)
+> acts as a KEEP mask keyed to invariants that **ride with the line**: U = the
+> crest-axis coordinate, V = one row per iso LEVEL. That phase-locking is
+> load-bearing — the first cut sampled the mask in world space and **strobed
+> in motion** (a travelling line crosses a ~0.4 m stroke footprint in 2–3
+> frames at ~10 m/s phase speed, blinking every dash; playtest-caught), where
+> now a line carries its dash pattern as it travels and the only residual
+> drift is the slow two-swell interference meander. The cut threshold rides
+> the live swell phase (`rampT`, constant per line): crest lines keep ~25% of
+> their length as long confident dashes (**~75% negative space** — the second
+> playtest ask), trough lines climb the cut into the per-dash gain range so
+> only sparse stroke cores survive — lines cling to the crests and the trough
+> floor reads clean, with surviving trough dashes carrying ~30% less paint.
+> The dark Wind-Waker relief twin shares the row + break-up (the sub-metre
+> relief shift never crosses a band midpoint) so the pair dashes together.
+> New `contourBreakup` knob (0 = legacy solid lines, 1 = default) in the water
+> tuner, persisted per-key (no store bump); the per-row on-fractions at both
+> cut operating points are pinned in `tests/unit/oil-stroke-texture.test.ts`
+> (the `stampStroke` extraction is verified byte-identical for the foam
+> sheets), and `FOAM_SWEEP_CBREAK=1` captures the A/B grid (plus an unfrozen
+> `FOAM_SWEEP_GRID` burst for motion-coherence checks). Zero new varyings
+> (all fragment-side off existing signals) — verified compiling + rendering
+> on real WebGPU via the sweeps.
+
+> **2026-06-09 (c)** — **Wind VFX shipped — Wind-Waker-style
+> gust strokes.** New ambient render system
+> (`src/engine/render/wind-trails.ts` + pure-math
+> `wind-streamline.ts` shape generator): white calligraphic strokes that draw
+> themselves along streamline curves around/ahead of the player — hand-drawn
+> meander, ~65% carry a full loop-de-loop curl — travelling **downwind = the
+> swell direction** (same vector the crest spray drifts on), with pool size +
+> speed scaled by the track's `seaStateBeaufort`. One merged geometry, ONE
+> node material, one draw call; the stroke window animates entirely on the
+> GPU off the wave-field clock (freeze-water stills it; replays reproduce
+> it). Edges erode through a seeded `oil-stroke-texture.ts` sheet (the foam's
+> brush language, PR #346) so flanks bristle instead of airbrushing; strokes
+> fade near the camera so fly-throughs never white out. Spawn shell leads the
+> camera by its smoothed velocity, so gusts draw in ahead at race speed.
+> Verified headed on Sandbar (static + autoplay racing, on/off pixel-diff
+> isolation): `tests/e2e/wind-trails.spec.ts` (regression) +
+> `wind-look.spec.ts` (capture harness, artifacts/wind/). Dev levers:
+> `?wind=0` off, `?wind=<f>` intensity, palette **World → Wind gusts**
+> (live). **Playtest flags for Matt:** density/width/opacity are first-pass
+> (`HALF_WIDTH`/`BASE_OPACITY`/count map at the top of wind-trails.ts);
+> strokes read best over water/terrain and stay subtle against the bright
+> haze sky band by design.
+
+> **2026-06-09 (b)** — **The two "pre-existing flakes" diagnosed —
 > one was a real sim bug.** m2-water rides-waves + m9-air-control (the failures
 > documented under load on pristine main) were characterized with trace probes,
 > ~5× idle + ~5× loaded each. (1) **Sim bug (fixed):** the airborne-over-water
