@@ -24,7 +24,6 @@ import { loadDevSettings } from './engine/dev-settings'
 import { emptyIntent, type Intent, installInput } from './engine/input'
 import { installCameraLookInput } from './engine/input/camera-look'
 import { bindLazyMenuButton } from './engine/lazy-menu'
-import { isHostFor } from './engine/net/host-election'
 import { loadPlayerSettings, playerSettings, WAVE_SPRAY_SCALAR } from './engine/player-settings'
 import { installConsoleTrap } from './engine/qa/console-trap'
 import { createAnimatedPropsSystem } from './engine/render/animated-props'
@@ -1415,7 +1414,9 @@ async function boot() {
         ready: () => room.ready,
         peerId: () => room.peerId,
         remotePeers: () => room.remotePeers,
-        isHost: () => (room.ready ? isHostFor(room.peerId, room.remotePeers) : true),
+        // Tenure-aware — must agree with multiplayer.isHost() or the
+        // probe lies about who's simulating the AI.
+        isHost: () => multiplayer.isHost(),
         recentRemoteFrames: () =>
           // Shallow-copy so devtools probes can't mutate the live buffer.
           multiplayer.recentRemoteFrames.map((f) => ({

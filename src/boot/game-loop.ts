@@ -40,6 +40,7 @@ import {
   decodeInputFrameFrom,
   encodeInputFrameInto,
   INPUT_FRAME_WIRE_BYTES,
+  LOCAL_PEER_ID,
 } from '@/engine/net/input-frame'
 import { createPerfRecorder, type PerfStats } from '@/engine/perf-recorder'
 import {
@@ -917,9 +918,8 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // of fixed-step sim ticks driven by simulateStep; it lines up across
   // peers in lockstep multiplayer because both sides advance one tick per
   // delivered InputFrame batch. The DataView is reused per tick to avoid
-  // a per-frame allocation. LOCAL_PEER_ID is the slot in a future room;
-  // in single-player there is exactly one peer (slot 0).
-  const LOCAL_PEER_ID = 0
+  // a per-frame allocation. LOCAL_PEER_ID (shared with boot/multiplayer's
+  // disconnect handler) stamps frames whenever no room slot is held.
   let simTick = 0
   const inputFrameBuffer = new ArrayBuffer(INPUT_FRAME_WIRE_BYTES)
   const inputFrameView = new DataView(inputFrameBuffer)
@@ -1066,11 +1066,13 @@ export function startGameLoop(opts: GameLoopOpts): void {
         // single-player. The round-trip is cheap (~10 bytes / one alloc)
         // and ensures the same quantization is applied locally as remotely,
         // so any feel changes from the wire format are visible day one.
-        // When connected to a room, stamp the frame with the assigned
-        // peerId (falls back to LOCAL_PEER_ID otherwise) and ship it to
-        // the relay BEFORE stepping locally — that ordering means a
-        // future lockstep gate could pause here waiting on remote frames
-        // without changing the encode/decode contract.
+        // Frames are no longer BROADCAST, though: since M10.11 remote
+        // bikes are pose-driven by TransformSnapshots (no PeerControlled
+        // tag), so relayed intents drove nothing while costing
+        // 60 msg/s/peer through the relay — ~20x the snapshot message
+        // rate. M10.13 (owner-authoritative combat) will reintroduce
+        // intent/event traffic deliberately; the codec, NetRoom.sendFrame
+        // and the receive path stay wired for it.
         const myPeerId = net?.ready ? net.peerId : LOCAL_PEER_ID
         const localFrame = {
           tick: simTick,
@@ -1078,7 +1080,6 @@ export function startGameLoop(opts: GameLoopOpts): void {
           intent: state.intent,
         }
         encodeInputFrameInto(inputFrameView, 0, localFrame)
-        net?.sendFrame(localFrame)
         const decoded = decodeInputFrameFrom(inputFrameView, 0)
         // M10.5 — sim consumes a per-peer input map. Single-player passes
         // exactly one entry (slot 0). M10.6 — when a room is connected,

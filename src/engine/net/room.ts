@@ -18,7 +18,7 @@
 import PartySocket from 'partysocket'
 
 import type { Intent } from '../input/intent'
-import { isHostFor } from './host-election'
+import { isHostSeat, type PeerSeat } from './host-election'
 import {
   decodeInputFrameFrom,
   encodeInputFrame,
@@ -56,6 +56,14 @@ export type NetRoomConfig = {
   onConnected?: (myPeerId: number, otherPeers: readonly number[], raceStarted: boolean) => void
   /** Called when the server reports the room is full. */
   onRoomFull?: () => void
+  /** Called when a previously-established session drops (socket closed
+   *  after we'd been assigned a slot) and partysocket is about to retry
+   *  in the background. NOT fired for first-connect retries, nor after
+   *  an explicit `close()`. The race owner uses this to degrade to solo
+   *  cleanly: despawn remote bikes, re-stamp the local slot, resume
+   *  local AI. On reconnect `onConnected` fires again with a fresh
+   *  slot + peer set. */
+  onDisconnected?: () => void
   /** M10.12 lobby — called when any remote peer toggles their ready
    *  state. Local toggles are NOT echoed; `latestPeerReady` is updated
    *  locally on `sendReady` to keep the source of truth in one map. The
@@ -89,6 +97,15 @@ export type NetRoom = {
   readonly ready: boolean
   /** Slots currently held by remote peers. Live — mutated on join/leave. */
   readonly remotePeers: readonly number[]
+  /** My election seat: slot + relay-stamped join tenure (joinSeq is
+   *  undefined against a relay that predates the tenure protocol). */
+  readonly mySeat: PeerSeat
+  /** Election seats for every remote peer. Fresh array per read. */
+  readonly remoteSeats: readonly PeerSeat[]
+  /** Encode + send one InputFrame. Currently uncalled in-race — M10.11
+   *  made remote bikes pose-driven, so the 60 Hz intent broadcast was
+   *  removed as dead relay load. Retained (with the receive path) for
+   *  M10.13's owner-authoritative combat events. */
   sendFrame(frame: InputFrame): void
   /**
    * Latest-known `Intent` per remote peer slot, mutated each time a remote
@@ -162,8 +179,23 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
   let myPeerId = -1
   let socketOpen = false
   let everConnected = false
+  // Set by close() so the socket's async 'close' event doesn't overwrite
+  // the published 'closed' state with 'connecting' (and doesn't fire
+  // onDisconnected for a teardown the caller initiated).
+  let explicitClose = false
   let snapshotsReceived = 0
   const remotePeers = new Set<number>()
+  // Tenure protocol — relay-stamped join sequences (see protocol.ts).
+  // Empty / undefined against an old relay; election falls back to slot
+  // order inside isHostSeat.
+  let myJoinSeq: number | undefined
+  const remotePeerSeqs = new Map<number, number>()
+  function mySeat(): PeerSeat {
+    return { peerId: myPeerId, joinSeq: myJoinSeq }
+  }
+  function remoteSeats(): PeerSeat[] {
+    return [...remotePeers].map((p) => ({ peerId: p, joinSeq: remotePeerSeqs.get(p) }))
+  }
   const latency = createLatencyTracker()
   // 1 Hz ping cadence — fast enough that the readout updates within a
   // second when conditions change, slow enough that it's not a real
@@ -185,7 +217,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
       peerId: myPeerId,
       remoteCount: remotePeers.size,
       latencyMs: latency.current(Date.now()),
-      isHost: myPeerId >= 0 && isHostFor(myPeerId, [...remotePeers]),
+      isHost: myPeerId >= 0 && isHostSeat(mySeat(), remoteSeats()),
     })
   }
   // M10.12 lobby — peer slot → ready boolean. Includes self once
@@ -230,18 +262,28 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
     socketOpen = true
   })
   socket.addEventListener('close', () => {
+    // Did this close tear down an established session (slot assigned)?
+    // Captured before the reset so onDisconnected only fires for real
+    // drops, not for retry cycles that never got a hello.
+    const hadSession = myPeerId >= 0
     socketOpen = false
     myPeerId = -1
+    myJoinSeq = undefined
     remotePeers.clear()
+    remotePeerSeqs.clear()
     latestPeerIntents.clear()
     latestPeerReady.clear()
     latestPeerPicks.clear()
     snapshotsReceived = 0
     latency.reset()
     stopPingLoop()
+    // Explicit close(): the caller already published 'closed' — don't
+    // overwrite it with 'connecting', and don't report a "drop".
+    if (explicitClose) return
     // partysocket auto-reconnects unless we explicitly called close();
     // distinguish "first-time connecting" from "re-establishing".
     publishStatus(everConnected ? 'reconnecting' : 'connecting')
+    if (hadSession) cfg.onDisconnected?.()
   })
 
   socket.addEventListener('message', (event: MessageEvent) => {
@@ -252,7 +294,9 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
       switch (msg.type) {
         case 'hello':
           myPeerId = msg.peerId
+          myJoinSeq = msg.joinSeq
           remotePeers.clear()
+          remotePeerSeqs.clear()
           latestPeerReady.clear()
           latestPeerPicks.clear()
           // Seed every visible slot (us + others) as not-ready. Local
@@ -262,6 +306,8 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
           for (const p of msg.otherPeers) {
             remotePeers.add(p)
             latestPeerReady.set(p, false)
+            const seq = msg.otherPeerSeqs?.[p]
+            if (typeof seq === 'number') remotePeerSeqs.set(p, seq)
           }
           // Replay any picks the server has on file (peers who readied
           // before we joined). Bare-bones for back-compat: missing
@@ -285,6 +331,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
           break
         case 'peer-joined':
           remotePeers.add(msg.peerId)
+          if (typeof msg.joinSeq === 'number') remotePeerSeqs.set(msg.peerId, msg.joinSeq)
           latestPeerReady.set(msg.peerId, false)
           publishStatus('connected')
           cfg.onPeerJoined?.(msg.peerId)
@@ -294,6 +341,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
           // Drop the departed peer's buffered intent + picks so a future
           // room member assigned the same slot doesn't inherit stale
           // controls or selections.
+          remotePeerSeqs.delete(msg.peerId)
           latestPeerIntents.delete(msg.peerId)
           latestPeerReady.delete(msg.peerId)
           latestPeerPicks.delete(msg.peerId)
@@ -383,6 +431,12 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
     get remotePeers() {
       return [...remotePeers]
     },
+    get mySeat() {
+      return mySeat()
+    },
+    get remoteSeats() {
+      return remoteSeats()
+    },
     get latestPeerIntents() {
       return latestPeerIntents
     },
@@ -446,6 +500,7 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
       return everConnected
     },
     close() {
+      explicitClose = true
       stopPingLoop()
       socket.close()
       latency.reset()
