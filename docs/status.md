@@ -31,7 +31,30 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
-> **Last updated: 2026-06-09 (b)** — **The two "pre-existing flakes" diagnosed —
+> **Last updated: 2026-06-09 (c)** — **Wind VFX shipped — Wind-Waker-style
+> gust strokes.** New ambient render system
+> (`src/engine/render/wind-trails.ts` + pure-math
+> `wind-streamline.ts` shape generator): white calligraphic strokes that draw
+> themselves along streamline curves around/ahead of the player — hand-drawn
+> meander, ~65% carry a full loop-de-loop curl — travelling **downwind = the
+> swell direction** (same vector the crest spray drifts on), with pool size +
+> speed scaled by the track's `seaStateBeaufort`. One merged geometry, ONE
+> node material, one draw call; the stroke window animates entirely on the
+> GPU off the wave-field clock (freeze-water stills it; replays reproduce
+> it). Edges erode through a seeded `oil-stroke-texture.ts` sheet (the foam's
+> brush language, PR #346) so flanks bristle instead of airbrushing; strokes
+> fade near the camera so fly-throughs never white out. Spawn shell leads the
+> camera by its smoothed velocity, so gusts draw in ahead at race speed.
+> Verified headed on Sandbar (static + autoplay racing, on/off pixel-diff
+> isolation): `tests/e2e/wind-trails.spec.ts` (regression) +
+> `wind-look.spec.ts` (capture harness, artifacts/wind/). Dev levers:
+> `?wind=0` off, `?wind=<f>` intensity, palette **World → Wind gusts**
+> (live). **Playtest flags for Matt:** density/width/opacity are first-pass
+> (`HALF_WIDTH`/`BASE_OPACITY`/count map at the top of wind-trails.ts);
+> strokes read best over water/terrain and stay subtle against the bright
+> haze sky band by design.
+
+> **2026-06-09 (b)** — **The two "pre-existing flakes" diagnosed —
 > one was a real sim bug.** m2-water rides-waves + m9-air-control (the failures
 > documented under load on pristine main) were characterized with trace probes,
 > ~5× idle + ~5× loaded each. (1) **Sim bug (fixed):** the airborne-over-water
