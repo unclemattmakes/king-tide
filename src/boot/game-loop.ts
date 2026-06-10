@@ -741,13 +741,14 @@ export function startGameLoop(opts: GameLoopOpts): void {
 
   // Reused per-frame buffer for the GPU water shader's bike impact array.
   // Sourced from `waveField.wakes`, which `wakeUpdateSystem` populated in
-  // the physics loop above. Single source of truth: the displacement the
-  // shader draws is the same displacement buoyancy reads.
+  // the physics loop above. `id` (the eid) keys the render-side wake-trail
+  // history; the dimple/propwash displacement itself still comes from the
+  // same positions buoyancy reads.
   const bikeImpacts: BikeImpact[] = []
   function gatherBikeImpacts(): readonly BikeImpact[] {
     bikeImpacts.length = 0
     for (const w of waveField.wakes) {
-      bikeImpacts.push({ x: w.x, z: w.z, vx: w.vx, vz: w.vz, weight: w.weight })
+      bikeImpacts.push({ x: w.x, z: w.z, vx: w.vx, vz: w.vz, weight: w.weight, id: w.id })
     }
     return bikeImpacts
   }

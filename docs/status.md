@@ -31,7 +31,39 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
-> **Last updated: 2026-06-09 (e)** — **Wind VFX refined — speed-aware
+> **Last updated: 2026-06-09 (f)** — **Trailing wakes: the bike wake now
+> follows the ridden path instead of pivoting as a rigid V.** The wake was a
+> closed-form Kelvin V evaluated from each bike's *current* position+heading
+> (foam and displacement both), so the whole V rotated rigidly with the bike
+> — no trail through corners (playtest note). The render side now records a
+> per-bike breadcrumb TRAIL (15 × 2 m ring + live head, id-keyed off the eid
+> so airborne compaction can't graft trails; uploaded as uniform blocks) and
+> BOTH shader stages evaluate the same wake profile against the nearest trail
+> segment via a TSL `Loop` + per-trail CPU-fit cull circles: "behind" is now
+> arc-meters back along the path, so the wake curves with the line, a jump
+> leaves a real gap (per-point strength = airborne weight × speed gate at
+> drop), and a stopped bike's wake age-fades in place (τ=3 s). Foam stops
+> inheriting the world-anchored disc/crest break-up (the polka-dot wake) —
+> cross-profile is now center churn + edge rails on the ridge, broken up by a
+> dedicated `WAKE_STROKE_SPEC` sheet sampled in TRAIL-ALIGNED UV (U pinned to
+> arc length, so laid foam stays painted on the world); break-up ramps in
+> down the trail (solid near hull → dissolving tufts) and the foam fades
+> within ~8 m of the camera so your own wake can't blow out the chase frame.
+> **Sim buoyancy intentionally keeps the closed-form heading-ray V**
+> (`sampleWakeFromSource` untouched — straight-line wake-jumping feels
+> identical; stateless per step → no trail snapshots for rollback/replay; the
+> drawn-vs-felt ridge diverges only mid-turn, documented in wave-field.ts —
+> `?wavedots=1` will show the gap near turning bikes). New `wakeStrength`
+> knob (0–2, foam+displacement) in the water tuner, persisted per-key (no
+> store bump). Zero new varyings (uniform arrays only — 16-varying cap
+> untouched). Verified on real WebGPU via the new `WAKE_LOOK=1`
+> `tests/e2e/wake-look.spec.ts` (scripted straight/carve/dissolve beats +
+> 8-bike race probe asserting trails lay per-meter-ridden, screenshots to
+> `test-results/wake-look/`); m2-water + perf-budget (81 fps avg under the
+> full autoplay field) + 1123 unit tests green. Awaiting playtest for feel
+> tuning.
+>
+> **2026-06-09 (e)** — **Wind VFX refined — speed-aware
 > regimes, ghostly half-width strokes, rare curls.** Strokes halved to
 > `HALF_WIDTH` 0.225 and made translucent (`BASE_OPACITY` 0.55 — ghostly,
 > not solid). The field splits by what the rider feels: each respawn samples

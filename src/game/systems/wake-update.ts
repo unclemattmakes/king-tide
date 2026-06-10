@@ -33,6 +33,6 @@ export function wakeUpdateSystem(sim: SimWorld, phys: PhysicsWorld, field: WaveF
       weight = Math.max(0, 1 - (altitude - 0.5) / 1.5)
     }
     if (weight <= 0.05) continue
-    field.wakes.push({ x: t.x, z: t.z, vx: v.x, vz: v.z, weight })
+    field.wakes.push({ x: t.x, z: t.z, vx: v.x, vz: v.z, weight, id: eid })
   }
 }

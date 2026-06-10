@@ -228,6 +228,15 @@ const SLIDERS: SliderDef[] = [
     format: (n) => (n < 0.01 ? 'discs' : n > 0.99 ? 'oil' : n.toFixed(2)),
     hint: 'Foam break-up pattern: 0 = round bubble discs (legacy) · 1 = oil-paint brush strokes pulled along the crest lines (the engine-trail painted read). Fringes and thin foam dissolve into tapered strokes; solid foam cores stay solid',
   },
+  {
+    key: 'wakeStrength',
+    label: 'Bike wake',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    format: (n) => `${n.toFixed(2)}×`,
+    hint: "Trail-wake strength: the churn + edge-rail foam laid along each bike's ridden path AND its V-ridge displacement. 1 = baseline · 0 = no drawn wake (buoyancy still feels the sim wake — dev setting only)",
+  },
   // P1 readability layers (water-next-research §8 P1) — the live knobs are
   // the point: the 2026-06-06 cel session was lost partly because its hooks
   // were console-only.
@@ -498,6 +507,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'foamBrush':
           water.debug.setFoamBrush(v)
+          break
+        case 'wakeStrength':
+          water.debug.setWakeStrength(v)
           break
         case 'rampStrength':
           water.debug.setRampStrength(v)

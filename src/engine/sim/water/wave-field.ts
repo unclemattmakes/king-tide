@@ -11,9 +11,14 @@ import { type ShoreField, sampleShore } from './shore-field'
  *   1. Ambient Gerstner waves (wind-driven swell + chop). Static parameters,
  *      animate via time only.
  *   2. Per-bike wakes — each moving bike carries a transverse oscillating
- *      wake stripe behind it. The same closed-form function is mirrored in
- *      the GPU shader so visuals and buoyancy stay locked. This is what
- *      lets a trailing rider "jump" the player's wake.
+ *      wake stripe behind it. This is what lets a trailing rider "jump" the
+ *      player's wake. NOTE: buoyancy evaluates this as a closed-form V along
+ *      the bike's CURRENT heading; the GPU shader draws the same profile but
+ *      along a short recorded TRAIL of the bike's actual path (water.ts).
+ *      The two agree for straight-line riding (where wake-jumping happens);
+ *      mid-turn the drawn ridge curves with the path while the felt ridge
+ *      stays on the heading ray. Keeping buoyancy closed-form keeps the sim
+ *      stateless per step (rollback/replay-safe with no trail snapshots).
  *
  * Ambient waves are a sum of sines:
  *   y(x, z, t) = Σ A_i · sin(k_i · (D_i · xz) − ω_i · t + φ_i)
@@ -58,6 +63,10 @@ export type WakeSource = {
   vz: number
   /** 0 = inactive (airborne / disabled), 1 = full strength. */
   weight: number
+  /** Stable per-bike identity (the ECS eid). Sim-inert — buoyancy never reads
+   *  it. The render side keys its per-bike wake TRAIL history on it, so a
+   *  field-order change can't graft one bike's trail onto another. */
+  id?: number
 }
 
 export type WaveSample = {
@@ -536,8 +545,11 @@ export function pointInWaveZone3D(zone: WaveZoneRuntime, x: number, y: number, z
  * Kelvin shape — the new modulation makes the wake feel alive without
  * disturbing the V's silhouette.
  *
- * Mirrored bit-for-bit by the TSL shader's bikeSurfaceContrib block —
- * keep them in sync.
+ * The TSL shader's trail-wake block evaluates this same profile (same
+ * constants, same scallop phase) in trail coordinates — `behind` becomes
+ * arc-distance back along the recorded path, `perp` lateral offset from the
+ * nearest trail segment. Change the profile here and the shader's version
+ * must move with it (`trailWakeScan` callers in water.ts).
  */
 export function sampleWakeFromSource(
   src: WakeSource,
