@@ -711,11 +711,43 @@ Matt playtests — the readability claim is only provable by hands + eyes.
    [wave-set-sync.spec.ts](../tests/e2e/wave-set-sync.spec.ts) (waterSync
    ≤ 1.2e-6 m across three phases of Cape Town's cycle; set-high/low
    captures in `artifacts/wave-set-sync/`).
-2. **Per-track spectrum presets** (§7.1) — `water.spectrum` JSON block
-   (preset name + seed + spread + swell/chop balance), generator emits the
-   `Wave[]`; perf-gate the vertex-displacing count (measure 8/12/16 on the
-   768² plane), shader-only sub-threshold tail for extra texture, drop chop
-   from outer/skirt layers. Per-track water identity is content (§6 rule 4).
+2. ✅ **Per-track spectrum presets** (§7.1) — **SHIPPED (2026-06-10).**
+   `water.spectrum {preset, seed?, components?, spreadDeg?, swellBias?,
+   peakWavelengthM?}` → deterministic seeded generator
+   ([spectrum.ts](../src/engine/sim/water/spectrum.ts)): JONSWAP energy per
+   octave bin, log-uniform (non-harmonic) λ inside bins, deep-water
+   dispersion for speed, fanned directions (swell tight / chop wide),
+   per-wave qBase on the hand bank's pinch curve. Four presets:
+   `mixed-sea` / `open-swell` / `lagoon-chop` / `storm-cross` (the last
+   rotates its second swell train off-axis). Boot now builds the water
+   mesh AFTER track load so the bank bakes per-track;
+   `?spectrum=<preset>[:seed[:components]]` overrides for A/B,
+   `?spectrum=off` forces the default bank. Two discoveries worth
+   knowing: (a) the SHIPPED sea is `defaultWaves()` × the water-menu
+   default scales (swells ×3.2, chop ×0.9 — `applyStoredWaterTuning`
+   stomps them every boot), so the generator designs in that EFFECTIVE
+   space, normalizes to the shipped effective variance (Beaufort stays
+   the loudness dial) and pre-divides per band; (b) the buoyancy inverse
+   map's contraction factor is Q·Σ(q·A·k), so the generated banks' budget
+   matches the shipped sea's ≈0.43 (a hotter 0.6 budget measurably left
+   ~5 cm residual at the Q=1.2 stress diagnostic). Perf-gated per §9.4:
+   p50/p95 frame times are IDENTICAL for 6/8/12/16 components on the dev
+   RTX 5050 ([wave-count-perf.spec.ts](../tests/e2e/wave-count-perf.spec.ts),
+   `WAVE_PERF=1`) — default 12, cap 16. The outer tile + horizon skirt now
+   sum ONLY the swell band (λ ≥ 30 m; chop is sub-pixel and
+   grid-undersampled out there), so far-layer cost stays flat as counts
+   grow; the planned shader-only sub-threshold tail was NOT built —
+   at-cap component counts showed zero measured cost, so an extra
+   visual-only mechanism wasn't justified (revisit only if a track wants
+   >16 components). Cape Town authors `{open-swell, seed 1}` on top of
+   its set envelope (playtest-gated, `?spectrum=off` to A/B). Verified:
+   [wave-spectrum.test.ts](../tests/unit/wave-spectrum.test.ts)
+   (determinism / effective-variance invariant / dispersion / fan /
+   budget / bias) +
+   [wave-spectrum-sync.spec.ts](../tests/e2e/wave-spectrum-sync.spec.ts)
+   (`waterSync` on the generated bank: float-noise at Q=0, ≤2 mm at the
+   shipped Q=0.44, wavedots captures; default-track 6-wave regression;
+   `__hover.waveBank()` plumbing probe).
 3. **Shading anti-repetition kit** (§7.8) — hex-tile detail normals + foam
    bubbles, fix the 4:1 cascade ratio, tangential foam-mask warp, Langmuir
    streak lanes (faint, swell-aligned — a "which way is the sea moving" prime

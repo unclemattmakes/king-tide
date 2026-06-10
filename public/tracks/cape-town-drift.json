@@ -5,7 +5,8 @@
   "environmentGlb": "/assets/tracks/cape-town-drift.glb",
   "water": {
     "height": 0.29999998211860657,
-    "swellSets": { "periodS": 60, "depth": 0.3 }
+    "swellSets": { "periodS": 60, "depth": 0.3 },
+    "spectrum": { "preset": "open-swell", "seed": 1 }
   },
   "start": {
     "position": {

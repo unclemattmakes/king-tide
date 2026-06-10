@@ -479,6 +479,18 @@ export type WaterConfig = {
      *  race starts (default 0 = mid-swing, rising). */
     phase?: number
   }
+  /** Per-track wave-spectrum preset (water-next-research §7.1, P2.2):
+   *  replaces the global hand-tuned 6-wave bank with a deterministic
+   *  seeded JONSWAP-sampled bank — per-track water identity (clean
+   *  groundswell vs lagoon chop vs storm cross-sea) without touching the
+   *  sim/render contract. The spectrum shapes the sea's CHARACTER only;
+   *  total energy is normalized to the default bank's, so
+   *  `sky.seaStateBeaufort` stays the single loudness dial. Absent =
+   *  the default bank, byte-identical to pre-spectrum behaviour. Type
+   *  lives in `engine/sim/water/spectrum.ts` (preset + seed +
+   *  components + spread/bias/peak overrides); the loader validates the
+   *  preset name against `SPECTRUM_PRESETS`. */
+  spectrum?: import('@/engine/sim/water/spectrum').SpectrumSpec
 }
 
 /**

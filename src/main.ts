@@ -89,6 +89,11 @@ import { getBestLap, recordLapTime } from './engine/save-state'
 import { createSimWorld } from './engine/sim/ecs/world'
 import { createPhysicsWorld } from './engine/sim/physics/rapier'
 import {
+  generateSpectrumWaves,
+  parseSpectrumParam,
+  type SpectrumSpec,
+} from './engine/sim/water/spectrum'
+import {
   createWaveField,
   defaultWaves,
   sampleSurface,
@@ -260,35 +265,15 @@ async function boot() {
   const sim = createSimWorld()
   const chase = createChaseCamera(camera)
 
-  // Wave field — hand-tuned 6-wave analytic Gerstner sum. CPU buoyancy
-  // and the GPU vertex shader evaluate the same closed-form formula, so
-  // bike float math tracks the rendered surface to within float
-  // precision.
+  // Wave field — the analytic Gerstner sum CPU buoyancy and the GPU
+  // vertex shader both evaluate, so bike float math tracks the rendered
+  // surface to within float precision. Seeded with the hand-tuned 6-wave
+  // default bank; a track that authors `water.spectrum` replaces the bank
+  // after its JSON loads (below) — which is why the water MESH is built
+  // after track load: the shader bakes wavelength/direction/phase/count
+  // at construction and live-mirrors only amplitudes.
   const waveField = createWaveField(defaultWaves())
-  // Camera-locked water: the mesh follows the camera XZ so its dense
-  // vertex region always covers the visible patch. Size set at 480 m
-  // centered on the camera (= 240 m out to the sides, ~340 m at the
-  // corners) so wave-displaced geometry reaches well into the
-  // aerial-perspective haze ramp before the flat horizon skirt takes
-  // over — the boundary between the two reads as a tonal gradient, not
-  // a hard edge. Subdivisions default to 768, giving ≈ 0.625 m vertex
-  // spacing — the 4 m wake wavelength resolves at ~6.4 verts per crest,
-  // so ridges read as real geometry instead of single-vertex shimmer.
-  const waterMesh = createWaterMesh(waveField, { backend })
-  scene.add(waterMesh.mesh)
-  // Register the water mesh so the Settings overlay can live-tune the
-  // crest-mist ribbon (the GPU half of the Wave-spray knob), and seed it from
-  // the persisted setting now that the mesh exists.
-  setWaterMesh(waterMesh)
-  applyWaveSprayIntensity(playerSettings.waveSprayIntensity)
   bootMark('subsystems')
-
-  // Camera-locked transition markers — tall pillars on rings at the
-  // center→outer (240 m) and outer→skirt (720 m) boundaries. Hidden
-  // by default; auto-enabled below when the water-test track loads so
-  // the diagnostic surface stays out of regular gameplay.
-  const waterTransitionMarkers = createWaterTransitionMarkers()
-  waterMesh.mesh.add(waterTransitionMarkers.group)
 
   // Phase 3 — URL params + persisted prefs.
   const params = new URLSearchParams(window.location.search)
@@ -378,11 +363,6 @@ async function boot() {
           ? DEFAULT_BENCH_TRACK
           : 'lagoon'
 
-  // The water-test diagnostic track exists specifically to expose the
-  // LOD-tile architecture — surface the transition markers as soon as
-  // it loads. Other tracks keep them hidden.
-  if (trackId === 'water-test') waterTransitionMarkers.setVisible(true)
-
   // Bike variant. URL `?bike=cruiser|racer|stunt` picks the player's
   // archetype; AI bikes always use the racer baseline for now. Variant
   // controls both stats and body color via BikeStats.bodyColor. Replay
@@ -397,18 +377,12 @@ async function boot() {
   const manifest = await loadManifest()
   bootMark('manifest')
 
-  // Apply any persisted water tuning eagerly, so the page opens in the
-  // visual state the user last left. The tuning sliders themselves —
-  // along with the dev-settings sliders — are dynamic-imported on first
-  // toggle-button click so their UI code stays out of the main bundle.
-  applyStoredWaterTuning(waterMesh)
+  // Dev-settings sliders are dynamic-imported on first toggle-button
+  // click so their UI code stays out of the main bundle. (The water
+  // debug menu binds below, once the water mesh exists.)
   bindLazyMenuButton('devsettings-toggle', async () => {
     const { installDevSettingsMenu } = await import('./engine/dev-settings-menu')
     return installDevSettingsMenu()
-  })
-  bindLazyMenuButton('water-debug-toggle', async () => {
-    const { installWaterDebugMenu } = await import('./engine/water-debug-menu')
-    return installWaterDebugMenu(waterMesh)
   })
 
   // Best-lap tracking. We compare each completed lap to the saved best
@@ -432,6 +406,59 @@ async function boot() {
   })
   bootMark('track+env')
   bootStat('vinylAfterEnv', vinylMaterialsBuilt())
+
+  // Per-track wave bank (P2.2 spectrum presets, water-next-research §7.1):
+  // a track that authors `water.spectrum` swaps the default hand-tuned
+  // 6-wave bank for a deterministic seeded JONSWAP-sampled one — per-track
+  // water identity is content. This MUST land on the field before
+  // `createWaterMesh` below (the shader bakes wavelength/direction/phase/
+  // count at construction; only amplitudes are live-mirrored).
+  // `?spectrum=<preset>[:seed[:components]]` overrides the JSON for A/B
+  // tuning; `?spectrum=off` forces the default bank on a spectrum track.
+  const spectrumOverride = parseSpectrumParam(params.get('spectrum'))
+  const activeSpectrum: SpectrumSpec | null =
+    spectrumOverride === 'off' ? null : (spectrumOverride ?? track.water?.spectrum ?? null)
+  if (activeSpectrum) {
+    const generated = generateSpectrumWaves(activeSpectrum)
+    waveField.waves = generated.waves
+    // eslint-disable-next-line no-console
+    console.info(
+      `[water] spectrum '${activeSpectrum.preset}' seed=${activeSpectrum.seed ?? 1}: ` +
+        `${generated.waves.length} components (${generated.swellCount} swell), ` +
+        `λ ${generated.waves[generated.waves.length - 1]!.wavelength.toFixed(1)}–` +
+        `${generated.waves[0]!.wavelength.toFixed(1)} m`,
+    )
+  }
+  // Camera-locked water: the mesh follows the camera XZ so its dense
+  // vertex region always covers the visible patch — built now, with the
+  // per-track bank installed. Size 960 m (480 m half-extent, ~680 m at
+  // the corners) so wave-displaced geometry reaches well into the
+  // aerial-perspective haze ramp before the flat horizon skirt takes
+  // over. Subdivisions default to 768 ≈ 1.25 m vertex spacing; the 4 m
+  // chop resolves at ~3 verts per crest on the center plane.
+  const waterMesh = createWaterMesh(waveField, { backend })
+  scene.add(waterMesh.mesh)
+  // Register the water mesh so the Settings overlay can live-tune the
+  // crest-mist ribbon (the GPU half of the Wave-spray knob), and seed it
+  // from the persisted setting now that the mesh exists.
+  setWaterMesh(waterMesh)
+  applyWaveSprayIntensity(playerSettings.waveSprayIntensity)
+  // Apply any persisted water tuning eagerly, so the page opens in the
+  // visual state the user last left; the tuning sliders themselves are
+  // dynamic-imported on first click (same pattern as dev-settings above).
+  applyStoredWaterTuning(waterMesh)
+  bindLazyMenuButton('water-debug-toggle', async () => {
+    const { installWaterDebugMenu } = await import('./engine/water-debug-menu')
+    return installWaterDebugMenu(waterMesh)
+  })
+  // Camera-locked transition markers — tall pillars on rings at the
+  // center→outer and outer→skirt boundaries. Hidden by default; the
+  // water-test diagnostic track exists specifically to expose the
+  // LOD-tile architecture, so they surface with it.
+  const waterTransitionMarkers = createWaterTransitionMarkers()
+  waterMesh.mesh.add(waterTransitionMarkers.group)
+  if (trackId === 'water-test') waterTransitionMarkers.setVisible(true)
+  bootMark('water')
 
   // Track-driven sea level: shift both the water mesh and the buoyancy
   // sampler so the surface reads as a custom Y for tracks that want
