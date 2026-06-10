@@ -7,6 +7,8 @@ import {
   defaultWaves,
   effectiveSteepness,
   SHOAL_FADE_DEPTH,
+  SHOAL_GAIN_MAX,
+  SHORE_ASYM,
   SHORE_BAND_DEPTH,
   SHORE_DEPTH_CAP,
   STEEPNESS_SUM_LIMIT,
@@ -313,12 +315,15 @@ function rampShore(): ShoreField {
 }
 
 describe('terrain shoaling (CPU mirror of the GPU shallow-water fade)', () => {
-  it('is 1 with no shore field and in deep water, and squares toward 0 in the shallows', () => {
+  it('is 1 with no shore field; legacy regime (strength 0) squares toward 0 in the shallows', () => {
     // No shore field installed → open water → full amplitude everywhere.
     const open = createWaveField(defaultWaves())
     expect(shoalAttenuation(open, 0, 0)).toBe(1)
 
+    // Shoaling v2 ships default-ON; this test pins the LEGACY endpoint
+    // (strength 0 — the exact pre-P3.1 kill-switch, the A/B baseline).
     const f = createWaveField(defaultWaves())
+    f.shoalSurfStrength = 0
     setShoreField(f, rampShore()) // depth = −0.05·x in the water (x < 0)
     // Deep water past SHOAL_FADE_DEPTH (x = −80 → depth 4 m ≥ 3) → 1.
     expect(shoalAttenuation(f, -80, 0)).toBe(1)
@@ -328,21 +333,42 @@ describe('terrain shoaling (CPU mirror of the GPU shallow-water fade)', () => {
     expect(shoalAttenuation(f, -30, 0)).toBeCloseTo(0.25, 5)
     // Land (x = +40, depth < 0) → 0.
     expect(shoalAttenuation(f, 40, 0)).toBe(0)
+
+    // Surf regime (default strength 1): amplifies toward the break, never
+    // past the gain clamp, still 0 on land. (Full curve coverage lives in
+    // wave-shoaling.test.ts.)
+    const surf = createWaveField(defaultWaves())
+    setShoreField(surf, rampShore())
+    expect(shoalAttenuation(surf, -80, 0)).toBeGreaterThan(1)
+    expect(shoalAttenuation(surf, -80, 0)).toBeLessThanOrEqual(SHOAL_GAIN_MAX)
+    expect(shoalAttenuation(surf, 40, 0)).toBe(0)
   })
 
-  it('attenuates the ambient swell in shallow water vs deep', () => {
+  it('bounds the ambient swell in the shallows (depth-limited in surf, flattened in legacy)', () => {
     const f = createWaveField(defaultWaves())
     setShoreField(f, rampShore())
+    const legacy = createWaveField(defaultWaves())
+    legacy.shoalSurfStrength = 0
+    setShoreField(legacy, rampShore())
     let deepPeak = 0
     let shallowPeak = 0
+    let shallowPeakLegacy = 0
     for (let i = 0; i < 80; i++) {
       advanceWaveField(f, 0.1)
+      advanceWaveField(legacy, 0.1)
       deepPeak = Math.max(deepPeak, Math.abs(sampleHeight(f, -90, 0))) // depth 4.5 m
       shallowPeak = Math.max(shallowPeak, Math.abs(sampleHeight(f, -8, 0))) // depth 0.4 m
+      shallowPeakLegacy = Math.max(shallowPeakLegacy, Math.abs(sampleHeight(legacy, -8, 0)))
     }
-    // Deep water keeps a real swell; the shallows are flattened well below it.
+    // Deep water keeps a real swell.
     expect(deepPeak).toBeGreaterThan(0.3)
-    expect(shallowPeak).toBeLessThan(deepPeak * 0.2)
+    // Legacy: the shallows are flattened well below the deep swell.
+    expect(shallowPeakLegacy).toBeLessThan(deepPeak * 0.2)
+    // Surf v2: the shallows stay ALIVE (that's the feature) but
+    // depth-limited — bounded by the breaking ratio + the shore-breaker
+    // budget at this 0.4 m depth, well under an unshoaled swell.
+    expect(shallowPeak).toBeGreaterThan(shallowPeakLegacy)
+    expect(shallowPeak).toBeLessThan(deepPeak * 0.6)
   })
 
   it('keeps the buoyancy surface above the seabed in the shallows (the floor bug)', () => {
@@ -417,7 +443,11 @@ describe('shore-aligned waves', () => {
     expect(sampleHeight(f, -95, 0)).toBe(0)
   })
 
-  it('never breaches the seabed (|height| ≤ SHORE_DEPTH_CAP · depth)', () => {
+  it('never breaches the seabed (|height| ≤ SHORE_DEPTH_CAP·(1+SHORE_ASYM)·depth)', () => {
+    // The depth cap bounds the breaker's FUNDAMENTAL amplitude A; the
+    // forward-lean second harmonic (shoaling v2) adds up to SHORE_ASYM·A
+    // on top, so the waveform bound is (1 + a₂)·A — still half the water
+    // column at the shipped 0.5 cap.
     const f = createWaveField([])
     const shore = rampShore()
     setShoreField(f, shore)
@@ -429,7 +459,7 @@ describe('shore-aligned waves', () => {
         const y = sampleHeight(f, x, 0)
         // depth at this x from the same field the term reads.
         const depth = -0.05 * x
-        expect(Math.abs(y)).toBeLessThanOrEqual(SHORE_DEPTH_CAP * depth + 1e-3)
+        expect(Math.abs(y)).toBeLessThanOrEqual(SHORE_DEPTH_CAP * (1 + SHORE_ASYM) * depth + 1e-3)
       }
     }
   })

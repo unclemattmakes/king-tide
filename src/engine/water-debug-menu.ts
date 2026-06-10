@@ -141,6 +141,15 @@ const SLIDERS: SliderDef[] = [
     format: (n) => `${n.toFixed(2)}×`,
     hint: 'Coast-parallel breakers that fill the near-shore band, marching shoreward. Affects buoyancy (rideable). 0 = off (legacy damped shore) · 1 = default · 2 = exaggerated surf',
   },
+  {
+    key: 'shoalSurf',
+    label: 'Surf shoaling',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    format: (n) => (n < 0.01 ? 'legacy' : n > 0.99 ? 'surf' : n.toFixed(2)),
+    hint: 'Shoaling v2 (P3.1): 0 = legacy shallow-water fade-to-flat · 1 = real surf — swell stacks up (Green’s law) then breaks at the depth line (H/h ≈ 0.78); shore breakers scale with the live swell + set envelope and lean forward. CHANGES BUOYANCY near shores — sim + render move together',
+  },
   // SoT-inspired fragment shading sliders.
   {
     key: 'bodyAbsorption',
@@ -510,6 +519,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'shoreWaveStrength':
           water.debug.setShoreWaveStrength(v)
+          break
+        case 'shoalSurf':
+          water.debug.setShoalSurf(v)
           break
         case 'whitecapCurvature':
           water.debug.setWhitecapCurvature(v)

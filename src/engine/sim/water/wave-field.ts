@@ -127,6 +127,14 @@ export type WaveFieldState = {
    *  shader's pinch uniforms. Default (1, 0) = along-wave. */
   pinchCos: number
   pinchSin: number
+  /** Shoaling v2 blend, 0..1 (water-next-research §7.3): 0 = the legacy
+   *  quadratic shallow-water kill-switch, 1 = full surf behaviour
+   *  (Green's-law gain + depth-limited breaking via `shoalAttenuation`).
+   *  Owned by the field like `steepness` — the water debug menu sets it
+   *  here AND on the GPU uniform from one scalar, so buoyancy and the
+   *  rendered surface always shoal identically. Default 1 (surf ON);
+   *  playtest-gated like every feel change. */
+  shoalSurfStrength: number
   /** Wave-set envelope ("sets" — the surf rhythm of bigger wave groups
    *  arriving every few tens of seconds; water-next-research §7.2). A pure
    *  analytic amplitude factor `1 + depth·sin(2π·t/periodS + phase)` that
@@ -258,6 +266,46 @@ export const SHORE_BAND_DEPTH = 4.5
  *  leaves headroom for the ambient swell's own trough to coexist. */
 export const SHORE_DEPTH_CAP = 0.5
 
+// ---- Shore-wave v2 (shoaling v2, water-next-research §7.3) ----------------
+//
+// Two upgrades, both pure functions of already-mirrored state so CPU and
+// GPU can't disagree (constants drift-tested like the rest of SHORE_*):
+//
+//  1. SWELL DRIVE — the breaker amplitude scales with the live ambient
+//     swell (swell-band amplitude sum × the set envelope) instead of the
+//     fixed SHORE_AMP: calm lagoons get lapping shore-break, storm seas
+//     and big sets send bigger waves up the beach. Normalised against the
+//     shipped default sea's swell sum, clamped so authoring extremes
+//     can't kill or blow out the surf band.
+//  2. FORWARD ASYMMETRY — a phase-locked second harmonic leans each
+//     breaker's front (shoreward) face steeper than its back, the classic
+//     near-breaking profile (War Thunder pitches its breaker tops forward
+//     the same way). Pure waveform change: y = A·(sin φ + a₂·sin(2φ+β)),
+//     derivatives follow by chain rule on both sides.
+
+/** Reference swell-band amplitude sum (m) at which the swell drive is 1 —
+ *  the shipped default sea's two swells at their boot tuning (0.5·3.2 +
+ *  0.35·3.2 = 2.72). */
+export const SHORE_SWELL_DRIVE_REF = 2.72
+/** Clamp range for the swell drive so the surf band stays present but
+ *  sane across authoring extremes (Beaufort 0 tutorials … storm finales
+ *  mid-set). */
+export const SHORE_SWELL_DRIVE_MIN = 0.35
+export const SHORE_SWELL_DRIVE_MAX = 1.6
+/** Second-harmonic strength a₂ (fraction of the fundamental). 0 = the old
+ *  pure sine; 0.26 reads as a clear forward lean without cusping. */
+export const SHORE_ASYM = 0.26
+/** Second-harmonic phase offset β (rad). With y/A = sin φ + a₂·sin(2φ+β):
+ *  β = ±π/2 only SHARPENS crests symmetrically (the waveform becomes a
+ *  pure function of sin φ — Stokes-style, no lean); fore-aft asymmetry
+ *  needs the harmonic IN PHASE (β = 0) or ANTI-PHASE (β = π). β = 0
+ *  shifts each crest's apex to φ ≈ π/2 − 2a₂, compressing the SHOREWARD
+ *  face (phase = K·dist + Ω·t marches toward −dist, so smaller φ = the
+ *  face the wave is breaking onto) — the forward-leaning profile. The
+ *  unit test measures the face-slope split and pins the direction
+ *  (β = π was measured leaning the wrong way, split 0.5 vs ~2.0). */
+export const SHORE_ASYM_PHASE = 0
+
 // ---- Terrain shoaling -----------------------------------------------------
 //
 // In shallow water the rendered surface fades the ambient swell/chop (and its
@@ -273,10 +321,62 @@ export const SHORE_DEPTH_CAP = 0.5
 // `tests/unit/shore-constants-drift.test.ts` enforces the single source.
 
 /** Water depth (m) at which the ambient waves reach full strength. Below this
- *  the swell/chop fade out as `(depth / SHOAL_FADE_DEPTH)²` (squared so the
- *  tail of the fade reads as a gentle calming, not an abrupt edge); at or
- *  above it the shoaling factor is 1 (open-water, full amplitude). */
+ *  the LEGACY shoaling factor fades the swell/chop out as
+ *  `(depth / SHOAL_FADE_DEPTH)²` (squared so the tail of the fade reads as
+ *  a gentle calming, not an abrupt edge); at or above it the factor is 1
+ *  (open-water, full amplitude). Shoaling v2 (below) blends away from this
+ *  kill-switch toward real surf behaviour; the legacy curve remains the
+ *  `shoalSurfStrength = 0` endpoint. */
 export const SHOAL_FADE_DEPTH = 3.0
+
+// ---- Shoaling v2 — depth-driven surf (water-next-research §7.3, P3.1) -----
+//
+// The legacy factor above just KILLS the swell in shallow water. Real
+// shoaling first amplifies it (energy flux conservation — Green's law,
+// H ∝ h^(−1/4)) and then breaks it at a depth-determined line (H/h ≈ 0.78,
+// the standard depth-limited breaking ratio). Modelled as a closed-form
+// per-sample factor of (depth, live swell scale) so both samplers and the
+// GPU vertex stage evaluate it identically through the SAME single
+// `shoalFactor` slot the legacy curve used:
+//
+//   gain(d)  = clamp((SHOAL_GREEN_REF_DEPTH / d)^¼, 1, SHOAL_GAIN_MAX)
+//   cap(d)   = SHOAL_BREAK_GAMMA · d / H_eff      (depth-limited breaking)
+//   f_v2(d)  = min(gain, max(cap, 0))
+//
+// `H_eff` is the live swell-band amplitude sum × the set envelope — the
+// same mirrored scalars buoyancy and the shader already share, so a big
+// set BREAKS FARTHER OUT (deeper water) exactly like real surf. The break
+// cap doubles as the seabed guard for the AMBIENT sum: its trough
+// −H_eff·f ≥ −γ·d stays above the seabed while γ < 1, which is what lets
+// v2 keep waves ALIVE right up the beach where the legacy quadratic had
+// already flattened them — the rideable-surf payoff. (The combined
+// surface — ambient + the shore breaker's own SHORE_DEPTH_CAP·d budget —
+// can theoretically underdip the seabed by ≈ (γ + 0.5·(1+a₂) − 1)·d when
+// every trough aligns; measured worst case is centimetres at the swash
+// line, the dip hides UNDER the beach geometry, and buoyancy reads
+// max(terrain, wave) so the bike never feels it — the v1 "driving on the
+// ocean floor" bug was metre-scale unattenuated troughs, a different
+// regime. The unit test pins the bounded-breach guarantee.)
+// `field.shoalSurfStrength` blends legacy ↔ v2 (0 = byte-identical
+// legacy, 1 = full surf; the water menu knob mirrors the GPU uniform
+// like steepness/shoreWaveStrength).
+//
+// All four constants are imported by the TSL shader and drift-tested
+// (`tests/unit/shore-constants-drift.test.ts`).
+
+/** Depth (m) where the Green's-law gain starts to bite (≈ λ/4 of the
+ *  primary 50 m swell — about where real groundswell feels the bottom). */
+export const SHOAL_GREEN_REF_DEPTH = 14
+/** Cap on the shoaling amplification. Green's law diverges as d → 0; real
+ *  waves break first. 1.3× keeps the pre-break stack readable without
+ *  doubling the buoyancy target. */
+export const SHOAL_GAIN_MAX = 1.3
+/** Depth-limited breaking ratio H/h — the textbook 0.78. */
+export const SHOAL_BREAK_GAMMA = 0.78
+/** Floor on the effective swell scale H_eff (m) so a near-flat calm sea
+ *  (menu sliders at 0, Beaufort 0) can't divide the break cap toward
+ *  infinity. */
+export const SHOAL_HEFF_MIN = 0.2
 
 export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveFieldState {
   return {
@@ -289,6 +389,7 @@ export function createWaveField(waves: Wave[], opts?: { baseY?: number }): WaveF
     zones: [],
     shore: null,
     shoreWaveStrength: 1,
+    shoalSurfStrength: 1,
     steepness: 0,
     pinchCos: 1,
     pinchSin: 0,
@@ -533,6 +634,22 @@ const _shore = { y: 0, dydx: 0, dydz: 0, vy: 0, active: false }
 // loop reads immediately).
 const _wake: WakeSampleOut = { y: 0, dydx: 0, dydz: 0 }
 
+/** The shore wave's swell drive (shoaling v2): how hard the live ambient
+ *  swell is pushing the surf band, normalised against the shipped default
+ *  sea and clamped. Both samplers and the GPU evaluate it from the same
+ *  mirrored scalars. `shoalSurfStrength` blends it away toward the legacy
+ *  constant-amplitude behaviour (drive = 1). */
+export function shoreSwellDrive(field: WaveFieldState, t: number = field.time): number {
+  if (field.shoalSurfStrength <= 0) return 1
+  let sum = 0
+  for (const w of field.waves) {
+    if (w.wavelength >= SWELL_WAVELENGTH_MIN) sum += Math.abs(w.amplitude)
+  }
+  const raw = (sum * waveSetFactor(field, t)) / SHORE_SWELL_DRIVE_REF
+  const drive = Math.min(SHORE_SWELL_DRIVE_MAX, Math.max(SHORE_SWELL_DRIVE_MIN, raw))
+  return 1 + (drive - 1) * Math.min(1, field.shoalSurfStrength)
+}
+
 /**
  * Evaluate the shore-aligned wave at world (x, z, t) into `_shore`. Single
  * source of truth so `sampleHeight` (reads `.y`) and `sampleSurface` (reads
@@ -540,8 +657,12 @@ const _wake: WakeSampleOut = { y: 0, dydx: 0, dydz: 0 }
  *
  * Amplitude envelope: zero on dry land (`depth ≤ 0`) and in open water
  * (`depth ≥ SHORE_BAND_DEPTH`), peaking in the surf band; capped at
- * `SHORE_DEPTH_CAP · depth` so a trough never breaches the seabed. Phase
- * `K·dist + Ω·t` marches crests shoreward; slopes are in WORLD frame (the
+ * `SHORE_DEPTH_CAP · depth` so a trough never breaches the seabed; scaled
+ * by the live swell drive (shoaling v2 — big sets send bigger breakers up
+ * the beach). Phase `K·dist + Ω·t` marches crests shoreward; the waveform
+ * carries a phase-locked second harmonic that leans each breaker's
+ * shoreward face steeper than its back (`SHORE_ASYM`/`SHORE_ASYM_PHASE`),
+ * fading in with `shoalSurfStrength`. Slopes are in WORLD frame (the
  * shore normal is world-XZ, not bearing-rotated), so the caller adds them
  * AFTER its bearing back-rotation.
  */
@@ -555,29 +676,76 @@ function computeShore(field: WaveFieldState, x: number, z: number, t: number): v
   if (depth <= 0 || depth >= SHORE_BAND_DEPTH) return
   // 1 at the waterline, smoothly → 0 by SHORE_BAND_DEPTH.
   const bandGate = 1 - smoothstep(0, SHORE_BAND_DEPTH, depth)
-  const ampCap = Math.min(SHORE_AMP, SHORE_DEPTH_CAP * depth)
+  // Swell drive scales the pre-cap amplitude; the depth cap still has the
+  // final word so a driven trough can never breach the seabed.
+  const drive = shoreSwellDrive(field, t)
+  const ampCap = Math.min(SHORE_AMP * drive, SHORE_DEPTH_CAP * depth)
   const A = ampCap * bandGate * field.shoreWaveStrength
   if (A <= 0) return
   const phase = SHORE_K * s.dist + SHORE_OMEGA * t + SHORE_PHASE
   const sinP = Math.sin(phase)
   const cosP = Math.cos(phase)
-  _shore.y = A * sinP
-  // ∂phase/∂x = K·nrmX (nrm = ∇dist, offshore, world frame). Envelope
-  // gradient omitted — matches the ambient shoaling slope approximation.
-  _shore.dydx = A * cosP * SHORE_K * s.nrmX
-  _shore.dydz = A * cosP * SHORE_K * s.nrmZ
-  // ∂y/∂t with phase = K·dist + Ω·t.
-  _shore.vy = A * cosP * SHORE_OMEGA
+  // Breaker-forward asymmetry: y/A = sin φ + a₂·sin(2φ + β). The harmonic
+  // budget stays inside the seabed guard: |sin φ + a₂·sin(...)| ≤ 1 + a₂,
+  // and SHORE_DEPTH_CAP (0.5) leaves 2× headroom against the column.
+  const asym = SHORE_ASYM * Math.min(1, Math.max(0, field.shoalSurfStrength))
+  const phase2 = 2 * phase + SHORE_ASYM_PHASE
+  const sin2 = Math.sin(phase2)
+  const cos2 = Math.cos(phase2)
+  _shore.y = A * (sinP + asym * sin2)
+  // ∂phase/∂x = K·nrmX (nrm = ∇dist, offshore, world frame); the harmonic
+  // contributes at 2K. Envelope gradient omitted — matches the ambient
+  // shoaling slope approximation.
+  const waveSlope = A * SHORE_K * (cosP + 2 * asym * cos2)
+  _shore.dydx = waveSlope * s.nrmX
+  _shore.dydz = waveSlope * s.nrmZ
+  // ∂y/∂t with phase = K·dist + Ω·t (harmonic at 2Ω). The drive's own
+  // slow set-envelope rate is omitted (≤ cm/s — same approximation class
+  // as the envelope gradient above).
+  _shore.vy = A * SHORE_OMEGA * (cosP + 2 * asym * cos2)
   _shore.active = true
+}
+
+/** Live effective swell scale H_eff (m): the swell-band amplitude sum ×
+ *  the set envelope, floored by {@link SHOAL_HEFF_MIN}. The denominator of
+ *  the depth-limited break cap — both samplers and the GPU evaluate it
+ *  from the same mirrored scalars (`waveAmpUniform` swell subset ×
+ *  `setEnvNode`), so the break line can never disagree across sides. */
+export function shoalEffectiveSwell(field: WaveFieldState, t: number = field.time): number {
+  let sum = 0
+  for (const w of field.waves) {
+    if (w.wavelength >= SWELL_WAVELENGTH_MIN) sum += Math.abs(w.amplitude)
+  }
+  return Math.max(SHOAL_HEFF_MIN, sum * waveSetFactor(field, t))
+}
+
+/** The shoaling-v2 factor at `depth`, given the live swell scale `hEff` —
+ *  Green's-law gain capped by depth-limited breaking (see the constants
+ *  block above). Pure math shared by {@link shoalAttenuation} and the
+ *  unit tests; the TSL shader mirrors it from the same constants. */
+export function shoalSurfFactor(depth: number, hEff: number): number {
+  if (depth <= 0) return 0
+  const gain = Math.min(SHOAL_GAIN_MAX, Math.max(1, (SHOAL_GREEN_REF_DEPTH / depth) ** 0.25))
+  const cap = (SHOAL_BREAK_GAMMA * depth) / Math.max(hEff, SHOAL_HEFF_MIN)
+  return Math.min(gain, cap)
 }
 
 /**
  * Terrain shoaling factor at world (x, z) — the multiplier applied to the
- * ambient swell/chop (and its Gerstner displacement) so shallow water flattens
- * toward sea level, mirroring the GPU vertex shader bit-for-bit. Reads the
- * water depth from the baked {@link ShoreField} (the same `waterLevel −
- * terrainY` the shader samples from the terrain heightmap; baked from the same
- * heightmap + water level, so they agree).
+ * ambient swell/chop (and its Gerstner displacement) so shallow water behaves,
+ * mirroring the GPU vertex shader bit-for-bit. Reads the water depth from the
+ * baked {@link ShoreField} (the same `waterLevel − terrainY` the shader
+ * samples from the terrain heightmap; baked from the same heightmap + water
+ * level, so they agree).
+ *
+ * Two regimes, blended by `field.shoalSurfStrength`:
+ *  - LEGACY (strength 0): quadratic fade to flat below SHOAL_FADE_DEPTH —
+ *    the original kill-switch.
+ *  - SURF v2 (strength 1, default): Green's-law amplification as the swell
+ *    feels the bottom, then a depth-limited breaking cap (γ·d / H_eff) that
+ *    keeps waves alive — and breaking — right up the beach while doubling
+ *    as the seabed guard (trough ≥ −γ·d > −d). See the §7.3 constants
+ *    block.
  *
  * Returns 1 (full amplitude, no attenuation) when there's no shore field
  * installed (open water / editor / the `?waveriders=1` test map) or when the
@@ -592,10 +760,17 @@ export function shoalAttenuation(field: WaveFieldState, x: number, z: number): n
   const s = sampleShore(shore, x, z)
   if (!s) return 1
   const depth = s.depth
-  if (depth >= SHOAL_FADE_DEPTH) return 1
+  // Open water: both regimes are exactly 1 beyond the deeper of their two
+  // onset depths, so skip the math (and the v2 gain's fractional pow) for
+  // the vast majority of samples.
+  if (depth >= SHOAL_GREEN_REF_DEPTH) return 1
   if (depth <= 0) return 0
-  const raw = depth / SHOAL_FADE_DEPTH
-  return raw * raw
+  const surf = field.shoalSurfStrength
+  const v2 = surf > 0 ? shoalSurfFactor(depth, shoalEffectiveSwell(field)) : 0
+  if (surf >= 1) return v2
+  const raw = Math.min(1, depth / SHOAL_FADE_DEPTH)
+  const legacy = raw * raw
+  return legacy + (v2 - legacy) * surf
 }
 
 // ---- Gerstner horizontal-displacement inverse map -----------------------

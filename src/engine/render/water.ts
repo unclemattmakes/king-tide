@@ -70,16 +70,25 @@ import {
   // Zone cap shared with the CPU sampler (`setWaveZones` truncates to it; the
   // uniform arrays below are sized by it). Drift-tested like the SHORE_* set.
   MAX_WAVE_ZONES,
-  // Shore-aligned wave constants — single source of truth shared with the CPU
-  // buoyancy sampler. `tests/unit/shore-constants-drift.test.ts` enforces that
-  // this shader imports them rather than re-declaring literals.
+  // Shore-aligned wave + shoaling constants — single source of truth shared
+  // with the CPU buoyancy sampler. `tests/unit/shore-constants-drift.test.ts`
+  // enforces that this shader imports them rather than re-declaring literals.
+  SHOAL_BREAK_GAMMA,
   SHOAL_FADE_DEPTH,
+  SHOAL_GAIN_MAX,
+  SHOAL_GREEN_REF_DEPTH,
+  SHOAL_HEFF_MIN,
   SHORE_AMP,
+  SHORE_ASYM,
+  SHORE_ASYM_PHASE,
   SHORE_BAND_DEPTH,
   SHORE_DEPTH_CAP,
   SHORE_K,
   SHORE_OMEGA,
   SHORE_PHASE,
+  SHORE_SWELL_DRIVE_MAX,
+  SHORE_SWELL_DRIVE_MIN,
+  SHORE_SWELL_DRIVE_REF,
   // Swell/chop wavelength threshold — the SWELL_INDICES subset below is
   // derived from it per bank (per-track spectrum banks reorder/resize the
   // wave list, so hardcoded indices would silently mistag).
@@ -88,6 +97,10 @@ import {
   // diagnostic stays an exact twin of the vertex stage. The shader itself
   // re-implements the same math in TSL (`waveZoneFactors`).
   sampleZoneFactors,
+  // CPU shoal factor — used by the `renderVertex` CPU mirror so the
+  // diagnostic models the same shallow-water attenuation the vertex
+  // stage applies (the shader mirrors the math in TSL above).
+  shoalAttenuation,
   WAKE_BASE_WIDTH,
   WAKE_DISP_AMP,
   WAKE_EDGE_BELL_HALFWIDTH,
@@ -219,6 +232,13 @@ export type WaterMesh = {
      *  Sets both the GPU uniform and the CPU `field.shoreWaveStrength` so
      *  buoyancy and visuals track, exactly like `setWaveBearing`. */
     setShoreWaveStrength(s: number): void
+    /** Shoaling-v2 blend, 0..1 (water-next-research §7.3). 0 = the legacy
+     *  quadratic shallow-water kill-switch, 1 = full surf (Green's-law
+     *  stack + depth-limited breaking + swell-driven, forward-leaning
+     *  shore breakers). Writes the FIELD and the GPU uniform from one
+     *  scalar, like setSteepness, so buoyancy and visuals always shoal
+     *  identically. */
+    setShoalSurf(s: number): void
     /** Pinch direction in degrees, 0..90. Rotates the Gerstner
      *  horizontal-displacement vector relative to the per-wave
      *  travel direction. 0° = standard Gerstner (particles bulge
@@ -367,6 +387,8 @@ export type WaterDebugDefaults = {
   streakElongation: number
   /** Shore-aligned wave strength, 0..2. 1 = baseline, 0 = off. */
   shoreWaveStrength: number
+  /** Shoaling-v2 blend 0..1: legacy kill-switch (0) ↔ full surf (1). */
+  shoalSurf: number
   /** Gerstner pinch direction in degrees, 0..90. */
   pinchDirection: number
   /** Curvature-based whitecap gain (foam v3). 4 = baseline. Higher = foam on
@@ -1132,6 +1154,22 @@ export function createWaterMesh(
   // rider floats on" identical.
   const liveWaveAmps = field.waves.map((w) => w.amplitude)
   const waveAmpUniform = uniformArray(liveWaveAmps, 'float')
+  // Live swell-band amplitude sum — Σ|A_i| over SWELL_INDICES, from the
+  // same mirrored uniform buoyancy reads. Three consumers: the shoaling-v2
+  // break cap + the shore-wave swell drive (vertex stage, both × the set
+  // envelope = the CPU's `shoalEffectiveSwell` / `shoreSwellDrive`), and
+  // the P1 ramp's span normalisation (fragment).
+  // biome-ignore lint/suspicious/noExplicitAny: TSL node accumulated across a JS-level loop
+  let swellAmpSumAcc: any = float(0)
+  for (const i of SWELL_INDICES) {
+    // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
+    swellAmpSumAcc = swellAmpSumAcc.add(abs(float(waveAmpUniform.element(i) as any)))
+  }
+  const swellAmpSum = float(swellAmpSumAcc)
+  // Shoaling-v2 blend (legacy kill-switch ↔ surf), mirroring
+  // `field.shoalSurfStrength` — the setter writes both, like steepness.
+  const SHOAL_SURF_DEFAULT = 1.0
+  const shoalSurfUniform = uniform(SHOAL_SURF_DEFAULT)
   // Time scale for the main loop. Stored here rather than as a uniform
   // because dt is consumed by `advanceWaveField` on the CPU side; the
   // shader reads `field.time` regardless of how fast it advances.
@@ -2000,11 +2038,31 @@ export function createWaterMesh(
   const inBounds = inU.mul(inV).mul(terrainEnabledUniform)
   const effectiveTerrainY = mix(float(-10000), sampledTerrainY, inBounds)
   const vertexWaterDepth = waterYUniform.sub(effectiveTerrainY)
-  // Smooth fade from "no waves" at depth ≤ 0 to "full waves" at the chosen
-  // shoaling depth. Squared falloff on the inner side so the tail of
-  // attenuation reads as a gentle calming rather than an abrupt edge.
+  // Shoaling factor — exact mirror of the CPU's `shoalAttenuation` (two
+  // regimes blended by the shared `shoalSurfStrength` scalar):
+  //  - LEGACY (blend 0): quadratic fade to flat below SHOAL_FADE_DEPTH —
+  //    the original geometric kill-switch.
+  //  - SURF v2 (blend 1, default — water-next-research §7.3): Green's-law
+  //    gain as the swell feels the bottom (clamped (REF/d)^¼ ≤ GAIN_MAX),
+  //    capped by depth-limited breaking γ·d / H_eff — the cap doubles as
+  //    the seabed guard (trough ≥ −γ·d), which is what lets surf stay
+  //    ALIVE right up the beach where the quadratic had flattened it.
+  // H_eff = live swell-band Σ|A| × the set envelope (mirrored scalars), so
+  // a big set breaks farther out — on both sides identically.
   const shoalRaw = clamp(vertexWaterDepth.div(float(SHOAL_FADE_DEPTH)), float(0), float(1))
-  const shoalFactor = shoalRaw.mul(shoalRaw)
+  const shoalLegacy = shoalRaw.mul(shoalRaw)
+  const shoalHEff = max(float(SHOAL_HEFF_MIN), swellAmpSum.mul(setEnvNode))
+  const shoalDepthPos = max(vertexWaterDepth, float(1e-4))
+  const shoalGain = clamp(
+    pow(float(SHOAL_GREEN_REF_DEPTH).div(shoalDepthPos), float(0.25)),
+    float(1),
+    float(SHOAL_GAIN_MAX),
+  )
+  const shoalBreakCap = float(SHOAL_BREAK_GAMMA).mul(shoalDepthPos).div(shoalHEff)
+  // step() zeroes the factor on dry land (depth ≤ 0), mirroring the CPU's
+  // early-out.
+  const shoalSurf = min(shoalGain, shoalBreakCap).mul(step(float(0), vertexWaterDepth))
+  const shoalFactor = mix(shoalLegacy, shoalSurf, shoalSurfUniform)
 
   // Apply the shoaling attenuation to BOTH the ambient swell/chop and the
   // horizontal Gerstner displacement. Wake (bikeSurfaceContrib) is left at
@@ -2045,7 +2103,22 @@ export function createWaterMesh(
   const shoreNrmX = shoreNrmRawX.div(shoreNrmLen)
   const shoreNrmZ = shoreNrmRawZ.div(shoreNrmLen)
   const shoreBandGate = float(1).sub(smoothstep(float(0), float(SHORE_BAND_DEPTH), shoreDepth))
-  const shoreAmpCap = min(float(SHORE_AMP), float(SHORE_DEPTH_CAP).mul(max(shoreDepth, float(0))))
+  // Shore-wave v2 (shoaling v2): the breaker amplitude scales with the
+  // live ambient swell — Σ|A_swell| × set envelope vs the shipped
+  // reference, clamped — so calm lagoons lap and storm sets pound. The
+  // depth cap keeps the final word (seabed guard). Mirror of
+  // `shoreSwellDrive` in wave-field.ts; `shoalSurfUniform` blends the
+  // drive away toward the legacy constant amplitude.
+  const shoreDriveRaw = clamp(
+    swellAmpSum.mul(setEnvNode).div(float(SHORE_SWELL_DRIVE_REF)),
+    float(SHORE_SWELL_DRIVE_MIN),
+    float(SHORE_SWELL_DRIVE_MAX),
+  )
+  const shoreDrive = mix(float(1), shoreDriveRaw, shoalSurfUniform)
+  const shoreAmpCap = min(
+    float(SHORE_AMP).mul(shoreDrive),
+    float(SHORE_DEPTH_CAP).mul(max(shoreDepth, float(0))),
+  )
   const shoreAmp = shoreAmpCap
     .mul(shoreBandGate)
     .mul(shoreWaveStrengthUniform)
@@ -2056,11 +2129,22 @@ export function createWaterMesh(
     .add(float(SHORE_PHASE))
   const shoreSin = sin(shorePhase)
   const shoreCos = cos(shorePhase)
-  const shoreY = shoreAmp.mul(shoreSin)
-  // ∂phase/∂x = K·nrmX (world frame); add alongside the world-frame ambient +
-  // bike slopes below.
-  const shoreDydx = shoreAmp.mul(shoreCos).mul(float(SHORE_K)).mul(shoreNrmX)
-  const shoreDydz = shoreAmp.mul(shoreCos).mul(float(SHORE_K)).mul(shoreNrmZ)
+  // Breaker-forward asymmetry (shoaling v2): phase-locked second harmonic
+  // leans each breaker's shoreward face steeper than its back — y/A =
+  // sin φ + a₂·sin(2φ + β). Mirror of `computeShore`; fades in with the
+  // surf blend.
+  const shoreAsym = float(SHORE_ASYM).mul(clamp(shoalSurfUniform, float(0), float(1)))
+  const shorePhase2 = shorePhase.mul(float(2)).add(float(SHORE_ASYM_PHASE))
+  const shoreSin2 = sin(shorePhase2)
+  const shoreCos2 = cos(shorePhase2)
+  const shoreY = shoreAmp.mul(shoreSin.add(shoreAsym.mul(shoreSin2)))
+  // ∂phase/∂x = K·nrmX (world frame; harmonic at 2K); add alongside the
+  // world-frame ambient + bike slopes below.
+  const shoreWaveSlope = shoreAmp
+    .mul(float(SHORE_K))
+    .mul(shoreCos.add(shoreAsym.mul(shoreCos2).mul(float(2))))
+  const shoreDydx = shoreWaveSlope.mul(shoreNrmX)
+  const shoreDydz = shoreWaveSlope.mul(shoreNrmZ)
 
   // Zone surge joins UNattenuated, after the shoal-multiplied wave sum —
   // mirror of `sampleHeight` (`y += zoneFx.surgeY` outside the shoal term).
@@ -3581,15 +3665,9 @@ export function createWaterMesh(
   // Normalised swell phase 0..1 across the LIVE swell envelope — the amps
   // come from the same mirrored uniform buoyancy uses, so Beaufort, the
   // lap-weather storm ramp and the menu sliders keep the bands centred.
-  // Summed across the bank's SWELL_INDICES subset (NOT hardcoded waves
-  // 0–1 — per-track spectrum banks carry 1..N swells).
-  // biome-ignore lint/suspicious/noExplicitAny: TSL node accumulated across a JS-level loop
-  let swellAmpSum: any = float(0)
-  for (const i of SWELL_INDICES) {
-    // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
-    swellAmpSum = swellAmpSum.add(abs(float(waveAmpUniform.element(i) as any)))
-  }
-  const swellSpan = max(float(swellAmpSum), float(0.05))
+  // (`swellAmpSum` is the shared swell-band Σ|A| node defined alongside
+  // `waveAmpUniform` — the shoaling-v2 break cap reads the same one.)
+  const swellSpan = max(swellAmpSum, float(0.05))
   const rampT = clamp(
     swellHeightFrag.div(swellSpan.mul(float(2))).add(float(0.5)),
     float(0),
@@ -3997,6 +4075,7 @@ export function createWaterMesh(
     sunStreakStrength: SUN_STREAK_STRENGTH_DEFAULT,
     streakElongation: STREAK_ELONGATION_DEFAULT,
     shoreWaveStrength: SHORE_WAVE_STRENGTH_DEFAULT,
+    shoalSurf: SHOAL_SURF_DEFAULT,
     pinchDirection: PINCH_DIRECTION_DEFAULT,
     whitecapCurvature: WHITECAP_CURVATURE_DEFAULT,
     whitecapLeadBias: WHITECAP_LEAD_BIAS_DEFAULT,
@@ -4206,6 +4285,15 @@ export function createWaterMesh(
       const v = clamp01(s, 0, 2)
       shoreWaveStrengthUniform.value = v
       field.shoreWaveStrength = v
+    },
+    setShoalSurf(s) {
+      // 0..1 — legacy shallow-water kill-switch ↔ full shoaling-v2 surf.
+      // Field + uniform from one scalar (the setSteepness discipline):
+      // the factor changes BUOYANCY near shores, so the two sides must
+      // never see different blends.
+      const v = clamp01(s, 0, 1)
+      shoalSurfUniform.value = v
+      field.shoalSurfStrength = v
     },
     setPinchDirection(deg) {
       // 0..90° — rotation of the Gerstner horizontal-displacement
@@ -4841,10 +4929,17 @@ export function createWaterMesh(
   }
 
   // CPU mirror of the vertex shader's transform (waveZoneFactors +
-  // gerstnerHeight + gerstnerDisp) using the same live uniforms/constants
-  // the GPU reads. Open-water only: no terrain shoaling / shore / bike
-  // terms — a clean diagnostic point to compare against the vertical-only
-  // `sampleHeight`. Zone factors are evaluated at the REST point (x, z),
+  // gerstnerHeight + gerstnerDisp + the shoaling factor) using the same
+  // live uniforms/constants the GPU reads. No shore-wave or bike terms —
+  // a clean diagnostic point to compare against the vertical-only
+  // `sampleHeight` anywhere outside the shore-wave band (depth ≥
+  // SHORE_BAND_DEPTH). Terrain shoaling IS modelled (since shoaling v2
+  // reaches out to SHOAL_GREEN_REF_DEPTH = 14 m, coastal-track transects
+  // would otherwise have nowhere left to compare): the factor comes from
+  // `shoalAttenuation` — the baked shore field's depth, vs the GPU's
+  // heightmap texture sample of the same bake; sub-mm filtering
+  // differences, same approximation class as the zone-factor rest-point
+  // note below. Zone factors are evaluated at the REST point (x, z),
   // exactly where the GPU evaluates them for a mesh vertex.
   // See the WaterMesh `renderVertex` type doc.
   function renderVertex(x: number, z: number, out: { x: number; y: number; z: number }): void {
@@ -4868,6 +4963,9 @@ export function createWaterMesh(
         Math.sin(
           t * (swellSetOmegaUniform.value as number) + (swellSetPhaseUniform.value as number),
         )
+    // Shoaling factor at the rest point — the GPU multiplies BOTH the
+    // ambient height and the horizontal pinch displacement by it.
+    const shoal = shoalAttenuation(field, x, z)
     let y = 0
     let dxRot = 0
     let dzRot = 0
@@ -4886,9 +4984,9 @@ export function createWaterMesh(
       dxRot += qScaled * rotDirX * amp * c
       dzRot += qScaled * rotDirZ * amp * c
     }
-    out.x = x + dxRot * cosB - dzRot * sinB
-    out.y = y + zoneFx.surgeY + mesh.position.y
-    out.z = z + dxRot * sinB + dzRot * cosB
+    out.x = x + (dxRot * cosB - dzRot * sinB) * shoal
+    out.y = y * shoal + zoneFx.surgeY + mesh.position.y
+    out.z = z + (dxRot * sinB + dzRot * cosB) * shoal
   }
 
   function setHorizonColor(r: number, g: number, b: number): void {

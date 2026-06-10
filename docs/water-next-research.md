@@ -776,13 +776,49 @@ Matt playtests — the readability claim is only provable by hands + eyes.
 
 ### P3 — Surf zones + signature waves (the wave-mastery content layer)
 
-1. **Shoaling v2** (§7.3) — swell that visibly slows/steepens/stacks into the
-   shallows and breaks at a depth-determined line (Green's law gain,
-   `H/h ≈ 0.78` + steepness break criteria with hysteresis, refraction nudge,
-   breaker-forward asymmetry), phased on the existing shore-field distance
-   bake. Turns every island approach into readable, rideable surf and gives
-   Sandbar/Cape Town their signature breaks. (This is where the cut
-   South-Beach "wave zone TODO" energy actually belongs.)
+1. ✅ **Shoaling v2** (§7.3) — **SHIPPED (2026-06-10), playtest-gated.**
+   The legacy quadratic kill-switch is now the 0-endpoint of a blended
+   factor (`shoalSurfStrength`, field-owned like steepness, `Surf
+   shoaling` menu knob, persisted, default 1):
+   - **Green's-law stack**: ambient amplitude rises `(14 m/d)^¼` (capped
+     1.3×) as the swell feels the bottom, then a **depth-limited break
+     cap** `γ·d / H_eff` (γ = 0.78) takes over — H_eff = live swell-band
+     Σ|A| × set envelope (mirrored scalars), so **big sets break farther
+     out**, on both sides identically. The cap doubles as the seabed
+     guard and keeps waves ALIVE up the beach where legacy flattened
+     them — the rideable-surf payoff.
+   - **Swell-driven shore breakers**: the shore wave's amplitude scales
+     with the same live swell drive (clamped 0.35–1.6× vs the shipped
+     reference) — calm lagoons lap, storm sets pound.
+   - **Breaker-forward asymmetry**: phase-locked second harmonic
+     (`a₂ = 0.26, β = 0`) leans each breaker's shoreward face steeper —
+     β was chosen by MEASUREMENT (the unit test pins the face-slope
+     split; ±π/2 turned out to be Stokes-sharpening with no lean, π
+     leaned seaward).
+   - **Deliberately NOT built**: ambient wavelength-shortening/refraction
+     (per-sample k(depth) or D(depth) breaks phase continuity — the
+     path-integral problem; the shore wave, which rides the baked
+     distance field, IS the shortened/slowed/refracted regime, and the
+     swell drive is the handoff), and stateful break hysteresis (the
+     foam accumulator's time taps give the lingering-foam read
+     statelessly).
+   All constants shared + drift-tested (`shore-constants-drift`); the
+   `renderVertex` CPU mirror now models the shoal factor so `waterSync`
+   verifies sync THROUGH the shoal band (Cape Town's 4.5–14 m corridor,
+   sandbar at Q=1.2). Known bounded approximations, documented in code:
+   combined ambient+breaker trough can underdip the seabed by
+   centimetres at the swash line (hidden under the beach; buoyancy reads
+   max(terrain, wave)); H_eff ignores zone heightMult (break-line
+   prediction slightly conservative inside zones); the drive's slow
+   set-envelope rate is omitted from vy (≤ cm/s). Verified:
+   [wave-shoaling.test.ts](../tests/unit/wave-shoaling.test.ts) (13
+   tests: gain curve, break cap, bounded breach, drive clamps, vy
+   exactness, measured lean direction) + sandbar/cape-town sync e2e green
+   + A/B captures in `artifacts/shoaling-v2/` (legacy flat sheet vs live
+   breaker rows on Sandbar's beach band). **Feel gate: Matt's hands on
+   beach approaches (Sandbar awash bar, Cape Town harbour) + a QA-matrix
+   pass for AI stability on shore-adjacent corridors** — `Surf shoaling`
+   at 0 is the instant revert.
 2. **Authored wave stamps** (§7.10) — Blender-authored crest splines +
    analytic traveling profiles, superposed on the ambient field, identical
    both sides; fired on the set rhythm (P2.1). Learnable signature jumps —
