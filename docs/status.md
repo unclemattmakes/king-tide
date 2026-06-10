@@ -31,7 +31,38 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
-> **Last updated: 2026-06-09 (f)** — **Trailing wakes: the bike wake now
+> **Last updated: 2026-06-09 (g)** — **Wake trails are now physical: buoyancy
+> reads the same recorded path the render draws.** Follow-up to (f): the sim
+> owns the trails now. New sim module `wake-trail.ts` (pure math, no Three)
+> holds the trail ring + ALL wake profile constants (wave-field re-exports
+> them, so the shader's import paths didn't move) plus `sampleWakeFromTrail`
+> — the nearest-capsule-segment scan + Kelvin cross-profile, the exact CPU
+> twin of the shader's `emitTrailScan`. `wakeUpdateSystem` feeds
+> `field.trails` per fixed step (deterministic — m10 bit-identical specs
+> green); `sampleHeight`/`sampleSurface` sum trails instead of the old
+> closed-form heading-ray V (`sampleWakeFromSource` deleted), so a trailing
+> rider now FEELS the curved ridge exactly where it's drawn — turns, jump
+> gaps and age-fade included, and riding back over your own laid trail is a
+> real bump (donut-hopping is physical). The render's tick() became a pure
+> upload of `field.trails` (its duplicate trail bookkeeping deleted), so
+> drawn-vs-felt can't drift by construction. Gap rules per feed: ≤6 m =
+> normal drops, 6–40 m = airborne hop (arc counts the flight, the over-long
+> segment IS the gap, pre-jump wake survives — unit-tested), >40 m =
+> respawn hard-reset. Trails are deliberately NOT snapshotted — rollback /
+> replay-seek self-heals within ~2 s (documented in wake-trail.ts);
+> `wakeStrength` stays render-only (a localStorage knob must never reach the
+> deterministic sim; ≠1 desyncs drawn-vs-felt, dev-only). The weight
+> altitude-fade now reads `sampleHeight(..., includeWakes=false)` (the old
+> clear-then-sample trick can't exclude persistent trails). The making-of
+> wave demo rides the real trail machinery (its circling bike now carves a
+> curving ring that age-fades when parked). Perf unchanged (89 fps avg /
+> p95 14 ms full-field autoplay; per-trail AABB reject keeps the sampler
+> ~free). m1/m2/m10/wake-look/perf-budget + 1127 unit tests green (4 new:
+> curve-following, hop gap + pre-jump survival, feed determinism,
+> ambient-only flag). Awaiting playtest — wake-jump feel through corners is
+> the thing to test.
+>
+> **2026-06-09 (f)** — **Trailing wakes: the bike wake now
 > follows the ridden path instead of pivoting as a rigid V.** The wake was a
 > closed-form Kelvin V evaluated from each bike's *current* position+heading
 > (foam and displacement both), so the whole V rotated rigidly with the bike

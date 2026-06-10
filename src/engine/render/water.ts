@@ -49,6 +49,16 @@ import {
   WAKE_STROKE_SPEC,
 } from '@/engine/render/oil-stroke-texture'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
+// Trail recording rules — sim-owned (`field.trails` is fed by
+// wakeUpdateSystem; this module only uploads + mirrors the profile in TSL).
+// Imported, never re-declared, so the GPU segment loop can't drift from the
+// CPU buoyancy sampler.
+import {
+  MAX_WAKE_TRAILS,
+  WAKE_AGE_TAU,
+  WAKE_TRAIL_MAX_SEG,
+  WAKE_TRAIL_POINTS,
+} from '@/engine/sim/water/wake-trail'
 import {
   effectiveSteepness,
   // Zone cap shared with the CPU sampler (`setWaveZones` truncates to it; the
@@ -97,12 +107,6 @@ export type BikeImpact = {
   vx: number
   vz: number
   weight: number
-  /** Stable per-bike identity (the ECS eid). Keys the wake-trail history so
-   *  trails survive the impact array compacting (airborne bikes drop out of
-   *  `field.wakes` entirely) without grafting one bike's trail onto another.
-   *  Callers without stable ids (tools/demo modes) may omit it — trails then
-   *  key on array index. */
-  id?: number | undefined
 }
 
 export type WaterMesh = {
@@ -416,43 +420,19 @@ const BIKE_DIMPLE_CULL_R_SQ = BIKE_DIMPLE_R * 6 * (BIKE_DIMPLE_R * 6)
 
 // ---- Wake trail (the trailing wake's path history) -------------------------
 //
-// The wake used to be a closed-form Kelvin V evaluated from each bike's
-// CURRENT position + heading — which made the whole V pivot rigidly with the
-// bike instead of trailing along the ridden line. Both shader stages now
-// evaluate the same wake profile against a short recorded TRAIL of surface
-// positions per bike (CPU ring buffer in `tick()`, uploaded as uniforms):
-// "behind" becomes arc-distance back along the path and "perp" the lateral
-// offset from the nearest trail segment, so the wake curves with the line the
-// bike actually rode and a jump leaves a real gap (per-point strength is the
-// airborne weight at drop time).
+// The wake follows a recorded breadcrumb TRAIL of each bike's ridden path —
+// "behind" is arc-distance back along the path and "perp" the lateral offset
+// from the nearest trail segment, so the wake curves with the line, a jump
+// leaves a real gap, and a stopped bike's wake age-fades in place.
 //
-// The SIM's buoyancy wake (`sampleWakeFromSource`) intentionally stays the
-// closed-form heading-ray V: it matches this trail for straight-line riding —
-// where wake-jumping actually happens — and keeping it stateless per step
-// avoids snapshotting trail history for rollback/replay. See wave-field.ts.
+// THE SIM OWNS THE TRAILS (`wake-trail.ts`, fed per fixed step by
+// `wakeUpdateSystem` into `field.trails`): CPU buoyancy samples the same
+// points with the same profile (`sampleWakeFromTrail`), so the ridge a
+// trailing rider feels — and can jump — is exactly the one drawn here. This
+// module only UPLOADS those points each frame (`tick()`) and mirrors the
+// profile in TSL; all trail constants + recording rules live sim-side and
+// are imported, never re-declared.
 
-/** Uniform slots per bike: `WAKE_TRAIL_HISTORY` dropped breadcrumbs
- * (oldest→newest) + 1 live head slot holding the bike's current position,
- * so the shader's segment loop needs no special head-segment branch. */
-const WAKE_TRAIL_HISTORY = 15
-const WAKE_TRAIL_POINTS = WAKE_TRAIL_HISTORY + 1
-/** Drop a breadcrumb every this many meters of XZ travel. 15 × 2 = 30 m of
- * recorded wake — past that the profile's longitudinal decay (e-fold at
- * 25 m) has the tail near the foam threshold anyway. 2 m keeps the ridge
- * highlight from showing polyline corners in the tightest donut turns
- * (chord error grows with spacing²). */
-const WAKE_TRAIL_SPACING = 2.0
-/** Segments longer than this are skipped in the shader: parks (INACTIVE_FAR
- * padding), teleports the CPU reset missed, and the gap left when a slot's
- * history hasn't filled yet. 3× the drop spacing leaves headroom for the
- * frame-quantized drop overshoot at top speed. */
-const WAKE_TRAIL_MAX_SEG = WAKE_TRAIL_SPACING * 3
-/** A per-frame head jump bigger than this is a teleport/respawn — reset the
- * trail instead of sweeping a wake across the map. */
-const WAKE_TRAIL_TELEPORT_DIST = 12.0
-/** Age fade e-fold time, seconds. Arc decay handles the spatial falloff;
- * this cleans up the wake a slowed/stopped bike leaves painted behind it. */
-const WAKE_AGE_TAU = 3.0
 /** Trail-aligned stroke-sheet tiles: U (along the ridden path) / V (lateral).
  * 7 m × 3.5 m puts the sheet's 0.3–0.55-fraction ropy streaks at ~2–4 m. */
 const WAKE_STROKE_TILE_U = 7.0
@@ -1146,92 +1126,38 @@ export function createWaterMesh(
   // current position) — the shader walks consecutive pairs as segments with
   // no head-segment special case. Unfilled slots park at INACTIVE_FAR so
   // their segments fail the MAX_SEG gate.
+  // Wake-trail uniform blocks — a GPU copy of the SIM's `field.trails`
+  // (wake-trail.ts), re-uploaded each tick(). Per point: vec4(x, z, arcLen,
+  // dropTime) + a separate strength float. Slot order inside a block is
+  // oldest→newest with the last slot the live head (the bike's current
+  // position) — the shader walks consecutive pairs as segments with no
+  // head-segment special case. Unfilled slots park at INACTIVE_FAR so their
+  // segments fail the MAX_SEG gate.
   const wakeTrailSlots: THREE.Vector4[] = []
   const wakeTrailStrengths: number[] = []
-  for (let i = 0; i < MAX_BIKES * WAKE_TRAIL_POINTS; i++) {
+  for (let i = 0; i < MAX_WAKE_TRAILS * WAKE_TRAIL_POINTS; i++) {
     wakeTrailSlots.push(new THREE.Vector4(INACTIVE_FAR, INACTIVE_FAR, 0, 0))
     wakeTrailStrengths.push(0)
   }
   const wakeTrailUniform = uniformArray(wakeTrailSlots, 'vec4')
   const wakeTrailStrengthUniform = uniformArray(wakeTrailStrengths, 'float')
-  // Per-bike trail cull circle, CPU-fit each frame over the live points:
+  // Per-trail cull circle, CPU-fit each frame over the live points:
   // vec4(centerX, centerZ, radius², headArc). Tighter than a bike-centered
-  // circle (the trail extends ~40 m BEHIND the bike) and one compare per
-  // bike per vertex/fragment. headArc rides along so the shader can turn a
-  // segment's interpolated arc into "meters behind the bike".
+  // circle (the trail extends ~30 m BEHIND the bike) and one compare per
+  // trail per vertex/fragment. headArc rides along so the shader can turn a
+  // segment's interpolated arc into "meters behind the bike". (Render-only
+  // view data — the sim's sampler reject is its own AABB on the trail.)
   const wakeTrailCulls: THREE.Vector4[] = []
-  for (let i = 0; i < MAX_BIKES; i++) {
+  for (let i = 0; i < MAX_WAKE_TRAILS; i++) {
     wakeTrailCulls.push(new THREE.Vector4(INACTIVE_FAR, INACTIVE_FAR, 0, 0))
   }
   const wakeTrailCullUniform = uniformArray(wakeTrailCulls, 'vec4')
   // Trail-wake master strength (debug knob): scales foam AND displacement.
+  // RENDER-ONLY — buoyancy ignores it (a localStorage-persisted knob must
+  // never reach the deterministic sim), so any value ≠ 1 desyncs the drawn
+  // ridge from the felt one. Dev/tuning setting, not a shippable look.
   const WAKE_STRENGTH_DEFAULT = 1.0
   const wakeStrengthUniform = uniform(WAKE_STRENGTH_DEFAULT)
-
-  // CPU side of the wake trails — breadcrumb ring per bike, fed by `tick()`
-  // and uploaded into the uniform blocks above. Keyed by impact id (NOT
-  // array index — `field.wakes` compacts when a bike goes airborne) so a
-  // trail keeps fading in place while its bike flies, then resumes on
-  // splashdown.
-  type WakeTrailState = {
-    /** Impact id owning this trail; negative = keyed by impact index
-     *  (callers without stable ids). null = slot never used. */
-    id: number | null
-    /** Live history points, oldest→newest in [0, count). */
-    count: number
-    px: Float64Array
-    pz: Float64Array
-    arc: Float64Array
-    dropT: Float64Array
-    str: Float64Array
-    headX: number
-    headZ: number
-    headArc: number
-    headStr: number
-    /** Field-clock stamp of the last live feed — the head slot's dropTime.
-     *  NOT refreshed for abandoned trails, so the whole trail (head
-     *  included) age-fades once its bike leaves the water. */
-    headT: number
-    /** Tick serial of the last live feed — eviction order. */
-    lastSeen: number
-  }
-  const wakeTrails: WakeTrailState[] = []
-  for (let i = 0; i < MAX_BIKES; i++) {
-    wakeTrails.push({
-      id: null,
-      count: 0,
-      px: new Float64Array(WAKE_TRAIL_HISTORY),
-      pz: new Float64Array(WAKE_TRAIL_HISTORY),
-      arc: new Float64Array(WAKE_TRAIL_HISTORY),
-      dropT: new Float64Array(WAKE_TRAIL_HISTORY),
-      str: new Float64Array(WAKE_TRAIL_HISTORY),
-      headX: INACTIVE_FAR,
-      headZ: INACTIVE_FAR,
-      headArc: 0,
-      headStr: 0,
-      headT: 0,
-      lastSeen: -1,
-    })
-  }
-  let wakeTrailTickSerial = 0
-  const cpuSmoothstep = (e0: number, e1: number, x: number): number => {
-    const u = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)))
-    return u * u * (3 - 2 * u)
-  }
-  function resetWakeTrail(tr: WakeTrailState, id: number, x: number, z: number, s: number): void {
-    tr.id = id
-    tr.count = 1
-    tr.px[0] = x
-    tr.pz[0] = z
-    tr.arc[0] = 0
-    tr.dropT[0] = field.time
-    tr.str[0] = s
-    tr.headX = x
-    tr.headZ = z
-    tr.headArc = 0
-    tr.headStr = s
-    tr.headT = field.time
-  }
 
   type WaveConst = {
     k: number
@@ -1781,9 +1707,9 @@ export function createWaterMesh(
     }
   }
 
-  // Fused per-bike vertex contribution: hull dimple (subtractive, from the
+  // Per-bike vertex contribution: hull dimple (subtractive, from the
   // bike's CURRENT position) + trail-wake ridge displacement (additive,
-  // evaluated along the recorded path — see the wake-trail constants block).
+  // evaluated along the sim's recorded path — see the wake-trail block).
   // Returns vec3(deltaY, ddelta/dx, ddelta/dz) so callers do
   // `wave + bikeContrib`.
   //
@@ -1791,9 +1717,10 @@ export function createWaterMesh(
   // Wake:    A · strength(drop) · trans(perp) · ramp(b) · decay(b)
   //          · sin(K · b − Ω · t) · agefade · knob
   // where b = arc-meters behind the live head and perp = capsule distance to
-  // the trail polyline. Same cross-profile + constants as the sim's
-  // `sampleWakeFromSource` (which keeps the closed-form heading-ray V for
-  // buoyancy), so a straight-line wake still feels like it looks.
+  // the trail polyline. EXACT mirror of the sim's `sampleWakeFromTrail`
+  // (same trail points via the uniforms, same profile constants), so the
+  // ridge a trailing rider feels through buoyancy is the ridge drawn here —
+  // straights, turns, gaps and all. Change one and the other must move.
   const bikeSurfaceContrib = Fn(([x, z, t]: [unknown, unknown, unknown]) => {
     const xN = x as ReturnType<typeof float>
     const zN = z as ReturnType<typeof float>
@@ -1824,9 +1751,11 @@ export function createWaterMesh(
         dydx.addAssign(depth.mul(dx).mul(-2 * invR2))
         dydz.addAssign(depth.mul(dz).mul(-2 * invR2))
       })
+    }
+    for (let i = 0; i < MAX_WAKE_TRAILS; i++) {
       // ----- Trail-wake ridge (whole recorded path) -----
       // Per-trail CPU-fit cull circle: one compare for the common case
-      // (vertex nowhere near this bike's trail). The circle is parked at
+      // (vertex nowhere near this trail). The circle is parked at
       // INACTIVE_FAR with r²=0 for slots with no live trail.
       // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
       const cull = wakeTrailCullUniform.element(i) as any
@@ -3064,7 +2993,7 @@ export function createWaterMesh(
     const arcU = float(0).toVar()
     const perpV = float(0).toVar()
     const behindOut = float(0).toVar()
-    for (let i = 0; i < MAX_BIKES; i++) {
+    for (let i = 0; i < MAX_WAKE_TRAILS; i++) {
       // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
       const cull = wakeTrailCullUniform.element(i) as any
       // biome-ignore lint/suspicious/noExplicitAny: TSL types lose precision here
@@ -4055,9 +3984,11 @@ export function createWaterMesh(
       wakeStrengthUniform.value = clamp01(s, 0, 2)
     },
     getWakeTrails() {
+      // Read-through to the SIM's trails (field.trails) — the same points
+      // this mesh uploads and buoyancy samples.
       const out: Array<{ id: number; count: number; headArc: number }> = []
-      for (const tr of wakeTrails) {
-        if (tr.id === null || tr.count === 0) continue
+      for (const tr of field.trails) {
+        if (tr.count === 0) continue
         out.push({ id: tr.id, count: tr.count, headArc: tr.headArc })
       }
       return out
@@ -4675,126 +4606,54 @@ export function createWaterMesh(
       }
     }
 
-    // ---- Wake trails: feed breadcrumbs, then upload the uniform blocks ----
-    wakeTrailTickSerial++
-    const nIm = impacts ? Math.min(impacts.length, MAX_BIKES) : 0
-    for (let k = 0; k < nIm; k++) {
-      const im = impacts![k]!
-      const key = im.id ?? -(k + 1)
-      let tr: WakeTrailState | null = null
-      for (const t of wakeTrails) {
-        if (t.id === key) {
-          tr = t
-          break
-        }
-      }
-      const speed = Math.hypot(im.vx, im.vz)
-      // Strength bakes airborne weight × speed gate AT DROP TIME — a bike
-      // that slows down keeps the fast wake it already laid, and a jump
-      // leaves a real gap of near-zero-strength points.
-      const sNow = im.weight * cpuSmoothstep(WAKE_SPEED_LOW, WAKE_SPEED_HIGH, speed)
-      if (!tr) {
-        // Allocate: prefer a never-used slot, else evict the stalest trail.
-        for (const t of wakeTrails) {
-          if (t.id === null) {
-            tr = t
-            break
-          }
-        }
-        if (!tr) {
-          tr = wakeTrails[0]!
-          for (const t of wakeTrails) if (t.lastSeen < tr.lastSeen) tr = t
-        }
-        resetWakeTrail(tr, key, im.x, im.z, sNow)
-        tr.lastSeen = wakeTrailTickSerial
-        continue
-      }
-      tr.lastSeen = wakeTrailTickSerial
-      if (Math.hypot(im.x - tr.headX, im.z - tr.headZ) > WAKE_TRAIL_TELEPORT_DIST) {
-        // Teleport / respawn — restart rather than sweep a wake across the map.
-        resetWakeTrail(tr, key, im.x, im.z, sNow)
-        continue
-      }
-      tr.headX = im.x
-      tr.headZ = im.z
-      tr.headStr = sNow
-      tr.headT = field.time
-      // Drop breadcrumbs every SPACING meters of travel. A loop, not an if:
-      // one hitched frame can cover several spacings, and a single drop
-      // would leave a segment longer than the shader's MAX_SEG gate.
-      // Catch-up points are laid along the straight old-head→head line.
-      let guard = 0
-      while (guard++ < WAKE_TRAIL_HISTORY) {
-        const newest = tr.count - 1
-        const nx = tr.px[newest]!
-        const nz = tr.pz[newest]!
-        const d = Math.hypot(im.x - nx, im.z - nz)
-        if (d < WAKE_TRAIL_SPACING) break
-        const f = WAKE_TRAIL_SPACING / d
-        if (tr.count === WAKE_TRAIL_HISTORY) {
-          for (let j = 0; j < WAKE_TRAIL_HISTORY - 1; j++) {
-            tr.px[j] = tr.px[j + 1]!
-            tr.pz[j] = tr.pz[j + 1]!
-            tr.arc[j] = tr.arc[j + 1]!
-            tr.dropT[j] = tr.dropT[j + 1]!
-            tr.str[j] = tr.str[j + 1]!
-          }
-          tr.count--
-        }
-        const prev = tr.count - 1
-        tr.px[tr.count] = tr.px[prev]! + (im.x - tr.px[prev]!) * f
-        tr.pz[tr.count] = tr.pz[prev]! + (im.z - tr.pz[prev]!) * f
-        tr.arc[tr.count] = tr.arc[prev]! + WAKE_TRAIL_SPACING
-        tr.dropT[tr.count] = field.time
-        tr.str[tr.count] = sNow
-        tr.count++
-      }
-      tr.headArc =
-        tr.arc[tr.count - 1]! + Math.hypot(im.x - tr.px[tr.count - 1]!, im.z - tr.pz[tr.count - 1]!)
-    }
-    // Upload. History left-pads with INACTIVE_FAR (those segments fail the
-    // shader's MAX_SEG gate); slot WAKE_TRAIL_HISTORY is the live head.
-    // Abandoned trails keep uploading so they age-fade in place; once fully
-    // faded the cull circle is parked so they cost one dead compare.
-    for (let i = 0; i < MAX_BIKES; i++) {
-      const tr = wakeTrails[i]!
+    // ---- Wake trails: upload the SIM's `field.trails` into the uniform
+    // blocks. The sim owns the recording (wakeUpdateSystem feeds the trails
+    // per fixed step; buoyancy samples the same points), so this is a pure
+    // copy — no render-side trail state to drift. History right-aligns
+    // against INACTIVE_FAR left-padding (those segments fail the shader's
+    // MAX_SEG gate); the last slot is the live head. Fully age-faded trails
+    // (abandoned bikes, modes that never feed) park their cull circle so
+    // they cost one dead compare per vertex/fragment.
+    const trailCount = Math.min(field.trails.length, MAX_WAKE_TRAILS)
+    for (let i = 0; i < MAX_WAKE_TRAILS; i++) {
+      const tr = i < trailCount ? field.trails[i] : undefined
       const blockBase = i * WAKE_TRAIL_POINTS
-      const faded = tr.id !== null && field.time - tr.headT > WAKE_AGE_TAU * 5
-      const dead = tr.id === null || tr.count === 0 || faded
-      const pad = WAKE_TRAIL_HISTORY - tr.count
-      for (let j = 0; j < WAKE_TRAIL_HISTORY; j++) {
+      const histSlots = WAKE_TRAIL_POINTS - 1
+      const dead = !tr || tr.count === 0 || field.time - tr.headT > WAKE_AGE_TAU * 5
+      const pad = tr ? histSlots - tr.count : histSlots
+      for (let j = 0; j < histSlots; j++) {
         const slot = wakeTrailSlots[blockBase + j]!
         if (dead || j < pad) {
           slot.set(INACTIVE_FAR, INACTIVE_FAR, 0, 0)
           wakeTrailStrengths[blockBase + j] = 0
         } else {
           const src = j - pad
-          slot.set(tr.px[src]!, tr.pz[src]!, tr.arc[src]!, tr.dropT[src]!)
-          wakeTrailStrengths[blockBase + j] = tr.str[src]!
+          slot.set(tr!.px[src]!, tr!.pz[src]!, tr!.arc[src]!, tr!.dropT[src]!)
+          wakeTrailStrengths[blockBase + j] = tr!.str[src]!
         }
       }
-      const headSlot = wakeTrailSlots[blockBase + WAKE_TRAIL_HISTORY]!
+      const headSlot = wakeTrailSlots[blockBase + histSlots]!
       const cullSlot = wakeTrailCulls[i]!
       if (dead) {
         headSlot.set(INACTIVE_FAR, INACTIVE_FAR, 0, 0)
-        wakeTrailStrengths[blockBase + WAKE_TRAIL_HISTORY] = 0
+        wakeTrailStrengths[blockBase + histSlots] = 0
         cullSlot.set(INACTIVE_FAR, INACTIVE_FAR, 0, 0)
         continue
       }
-      headSlot.set(tr.headX, tr.headZ, tr.headArc, tr.headT)
-      wakeTrailStrengths[blockBase + WAKE_TRAIL_HISTORY] = tr.headStr
+      headSlot.set(tr!.headX, tr!.headZ, tr!.headArc, tr!.headT)
+      wakeTrailStrengths[blockBase + histSlots] = tr!.headStr
       // Cull circle fit over the live span, padded by the widest possible
       // lateral reach (V half-width at the tail + edge bell + rail blur).
-      const cx = (tr.px[0]! + tr.headX) * 0.5
-      const cz = (tr.pz[0]! + tr.headZ) * 0.5
-      let r = Math.hypot(tr.headX - cx, tr.headZ - cz)
-      for (let j = 0; j < tr.count; j++) {
-        const dj = Math.hypot(tr.px[j]! - cx, tr.pz[j]! - cz)
+      const cx = (tr!.px[0]! + tr!.headX) * 0.5
+      const cz = (tr!.pz[0]! + tr!.headZ) * 0.5
+      let r = Math.hypot(tr!.headX - cx, tr!.headZ - cz)
+      for (let j = 0; j < tr!.count; j++) {
+        const dj = Math.hypot(tr!.px[j]! - cx, tr!.pz[j]! - cz)
         if (dj > r) r = dj
       }
-      const span = tr.headArc - tr.arc[0]!
+      const span = tr!.headArc - tr!.arc[0]!
       const reach = WAKE_BASE_WIDTH + WAKE_HALF_ANGLE_TAN * span + WAKE_EDGE_BELL_HALFWIDTH + 1.5
-      cullSlot.set(cx, cz, (r + reach) * (r + reach), tr.headArc)
+      cullSlot.set(cx, cz, (r + reach) * (r + reach), tr!.headArc)
     }
   }
 
