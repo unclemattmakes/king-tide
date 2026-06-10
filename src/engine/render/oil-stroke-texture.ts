@@ -115,8 +115,70 @@ function stampDisc(
   }
 }
 
+/** Per-stroke geometry + paint params. Drawn by the caller, NOT inside
+ *  `stampStroke`, so each sheet builder owns its own top-level RNG call order
+ *  (the shipped foam sheets' byte-stability depends on theirs not changing). */
+type StrokeParams = {
+  cx: number
+  cy: number
+  theta: number
+  L: number
+  W: number
+  bow: number
+  flip: number
+  gain: number
+  bristles: number
+  taperStart: number
+  raggedness: number
+}
+
+/** Stamp one bristle-split stroke into the grid. Draws the per-bristle
+ *  randomness from `rng` in the same fixed order the original inline loop
+ *  used (extraction must keep the foam sheets byte-identical). */
+function stampStroke(grid: Float32Array, size: number, p: StrokeParams, rng: () => number): void {
+  const { cx, cy, theta, L, W, bow, flip, gain, bristles, taperStart, raggedness } = p
+  const cosT = Math.cos(theta)
+  const sinT = Math.sin(theta)
+
+  for (let k = 0; k < bristles; k++) {
+    // Bristle 0 is the loaded core of the stroke: centred, near-full
+    // length, fat. The rest scatter inside the width envelope with
+    // shorter, thinner runs — their differing lengths are what splits
+    // the tail into separate lifted-off tips.
+    const isCore = k === 0
+    const vOff = isCore ? 0 : (rng() * 2 - 1) * 0.85 * W
+    const lenF = isCore ? 0.88 + rng() * 0.12 : 0.5 + rng() * 0.45
+    const rBase = W * (isCore ? 0.62 : 0.26 + rng() * 0.24)
+    const noisePhase = rng() * 100
+    const Lb = L * lenF
+
+    let u = 0
+    while (u <= Lb) {
+      const t = u / L
+      // Blunt pressed-down head (strokes start at ~60% width, not a
+      // point), pointed lifted-off tail.
+      const head = 0.6 + 0.4 * smoothstep(0, 0.1 * L, u)
+      const taper = 1 - smoothstep(taperStart, 1, u / Lb)
+      let r = rBase * head * (0.08 + 0.92 * taper)
+      // Ragged dry-brush edge — low-frequency width wobble per bristle.
+      r *= 1 + raggedness * (valueNoise1D(u * 0.12 + noisePhase) - 0.5)
+      // March in steps proportional to the CURRENT radius so shrinking
+      // tips stay a connected point, not a dotted trail.
+      const step = Math.max(0.6, r * 0.5)
+      if (r >= 0.55) {
+        const v = bow * Math.sin(Math.PI * t) + vOff
+        const lx = (u - L * 0.5) * flip
+        const px = cx + lx * cosT - v * sinT
+        const py = cy + lx * sinT + v * cosT
+        stampDisc(grid, size, px, py, r, gain)
+      }
+      u += step
+    }
+  }
+}
+
 /**
- * Rasterize the sheet. Returns a single-channel float grid in [0,1]
+ * Rasterize a scattered sheet. Returns a single-channel float grid in [0,1]
  * (row-major, `size`²) — callers pack it into whatever texture format they
  * need. Strokes are stamped as overlapping discs marched along each bristle's
  * spine (how 2-D paint brushes actually work), unioned via max() so crossing
@@ -155,45 +217,134 @@ export function rasterizeOilStrokeSheet(spec: OilStrokeSheetSpec): Float32Array 
       // foam mask is stronger, staging a painterly build-up instead of every
       // stroke popping at the same threshold.
       const gain = 0.7 + 0.3 * rng()
-      const cosT = Math.cos(theta)
-      const sinT = Math.sin(theta)
       const bristles = bristleMin + Math.floor(rng() * (bristleMax - bristleMin + 1))
+      stampStroke(
+        grid,
+        size,
+        { cx, cy, theta, L, W, bow, flip, gain, bristles, taperStart, raggedness },
+        rng,
+      )
+    }
+  }
+  return grid
+}
 
-      for (let k = 0; k < bristles; k++) {
-        // Bristle 0 is the loaded core of the stroke: centred, near-full
-        // length, fat. The rest scatter inside the width envelope with
-        // shorter, thinner runs — their differing lengths are what splits
-        // the tail into separate lifted-off tips.
-        const isCore = k === 0
-        const vOff = isCore ? 0 : (rng() * 2 - 1) * 0.85 * W
-        const lenF = isCore ? 0.88 + rng() * 0.12 : 0.5 + rng() * 0.45
-        const rBase = W * (isCore ? 0.62 : 0.26 + rng() * 0.24)
-        const noisePhase = rng() * 100
-        const Lb = L * lenF
+/** Row-organized dash sheet spec — see `rasterizeContourDashRows`. */
+export type ContourDashRowSpec = {
+  /** Output resolution (square, power of two for mips). */
+  size: number
+  /** RNG seed — same spec + seed → identical bytes, every platform. */
+  seed: number
+  /** Number of independent dash rows stacked down the sheet's V axis. */
+  rows: number
+  /** Planned per-row paint fraction band (0..1). Every row's dash lengths are
+   *  normalized to a target drawn from this band, so no row can come out
+   *  near-bare on a bad roll. The stamped result reads ~0.7× the plan — the
+   *  tail taper thins below the stamp floor and raggedness erodes edges. */
+  paintMin: number
+  paintMax: number
+  /** Dash length range (fraction of tile edge) — relative shape of the runs;
+   *  the whole set is scaled to hit the row's paint target. */
+  dashMin: number
+  dashMax: number
+  /** Gap weight range — relative widths of the inter-dash gaps (scaled to
+   *  fill whatever the dashes don't claim). */
+  gapMin: number
+  gapMax: number
+  /** Stroke half-width range (fraction of tile edge). */
+  widthMin: number
+  widthMax: number
+  /** Bristles per dash. */
+  bristleMin: number
+  bristleMax: number
+  /** Where along the dash the tail taper begins (0..1 of its length). */
+  taperStart: number
+  /** Edge-jitter amplitude (dry-brush raggedness). */
+  raggedness: number
+}
 
-        let u = 0
-        while (u <= Lb) {
-          const t = u / L
-          // Blunt pressed-down head (strokes start at ~60% width, not a
-          // point), pointed lifted-off tail.
-          const head = 0.6 + 0.4 * smoothstep(0, 0.1 * L, u)
-          const taper = 1 - smoothstep(taperStart, 1, u / Lb)
-          let r = rBase * head * (0.08 + 0.92 * taper)
-          // Ragged dry-brush edge — low-frequency width wobble per bristle.
-          r *= 1 + raggedness * (valueNoise1D(u * 0.12 + noisePhase) - 0.5)
-          // March in steps proportional to the CURRENT radius so shrinking
-          // tips stay a connected point, not a dotted trail.
-          const step = Math.max(0.6, r * 0.5)
-          if (r >= 0.55) {
-            const v = bow * Math.sin(Math.PI * t) + vOff
-            const lx = (u - L * 0.5) * flip
-            const px = cx + lx * cosT - v * sinT
-            const py = cy + lx * sinT + v * cosT
-            stampDisc(grid, size, px, py, r, gain)
-          }
-          u += step
-        }
-      }
+/**
+ * Rasterize a sheet organized as `rows` independent horizontal dash rows —
+ * each row a seamless 1-D sequence of hand-pulled dashes with designed
+ * negative space between them. Built for the water shader's contour break-up,
+ * which assigns each iso line ONE row (sampled at the row's V center) so a
+ * line's dash pattern is guaranteed paint — a scattered sheet leaves some
+ * sampled rows empty and whole contour lines silently vanish.
+ *
+ * Each row is BUDGETED, not just drawn: dash lengths are normalized to a
+ * paint-fraction target from `paintMin..paintMax` and the gaps are scaled to
+ * fill the remainder exactly, so the toroidal wrap lands mid-pattern with no
+ * seam butt-joint and every row carries its designed share of paint. Dashes
+ * are then painted with the same bristle-split stroke stamp the foam sheets
+ * use.
+ */
+export function rasterizeContourDashRows(spec: ContourDashRowSpec): Float32Array {
+  const { size, rows } = spec
+  const rng = mulberry32(spec.seed)
+  const grid = new Float32Array(size * size)
+  const rowPitch = size / rows
+
+  for (let row = 0; row < rows; row++) {
+    const cy = (row + 0.5) * rowPitch
+    // Plan the row against its paint budget: draw dash lengths until they
+    // overshoot the target, scale them to claim exactly the budget, then
+    // scale gap weights to fill the rest of the tile.
+    const paintTarget = (spec.paintMin + rng() * (spec.paintMax - spec.paintMin)) * size
+    const dashLens: number[] = []
+    let dashSum = 0
+    while (dashSum < paintTarget) {
+      const len = (spec.dashMin + rng() * (spec.dashMax - spec.dashMin)) * size
+      dashLens.push(len)
+      dashSum += len
+    }
+    const gapWeights: number[] = []
+    let gapSum = 0
+    for (let i = 0; i < dashLens.length; i++) {
+      const w = spec.gapMin + rng() * (spec.gapMax - spec.gapMin)
+      gapWeights.push(w)
+      gapSum += w
+    }
+    const dashScale = paintTarget / dashSum
+    const gapScale = (size - paintTarget) / gapSum
+    const dashes: Array<{ start: number; len: number }> = []
+    let u = 0
+    for (let i = 0; i < dashLens.length; i++) {
+      const len = dashLens[i]! * dashScale
+      dashes.push({ start: u, len })
+      u += len + gapWeights[i]! * gapScale
+    }
+    for (const d of dashes) {
+      const L = d.len
+      const cx = d.start + d.len * 0.5
+      // Near-axis dashes with a whisper of tilt + per-dash vertical wobble so
+      // rows read hand-laid, not ruled onto graph paper.
+      const theta = ((rng() * 2 - 1) * (3 * Math.PI)) / 180
+      const W = (spec.widthMin + rng() * (spec.widthMax - spec.widthMin)) * size
+      const bow = (rng() * 2 - 1) * 0.07 * L
+      const flip = rng() < 0.5 ? -1 : 1
+      // Same gain staging as the scattered sheets: the trough cut keeps only
+      // the strongest cores, so per-dash strength is what thins trough lines.
+      const gain = 0.7 + 0.3 * rng()
+      const bristles = spec.bristleMin + Math.floor(rng() * (spec.bristleMax - spec.bristleMin + 1))
+      const cyJit = cy + (rng() * 2 - 1) * 0.012 * size
+      stampStroke(
+        grid,
+        size,
+        {
+          cx,
+          cy: cyJit,
+          theta,
+          L,
+          W,
+          bow,
+          flip,
+          gain,
+          bristles,
+          taperStart: spec.taperStart,
+          raggedness: spec.raggedness,
+        },
+        rng,
+      )
     }
   }
   return grid
@@ -230,6 +381,41 @@ export const FOAM_STROKE_MASS_SPEC: OilStrokeSheetSpec = {
     // Smaller secondary flicks filling between.
     { count: 34, lenMin: 0.09, lenMax: 0.18, widthMin: 0.013, widthMax: 0.021, angleJitterDeg: 17 },
   ],
+}
+
+/**
+ * The contour-dash sheet — a stack of independent 1-D dash rows used as the
+ * keep mask that breaks the P1 contour lines into hand-pulled dashes (an
+ * iso-height line is constant along its own length, so without this every
+ * contour runs unbroken across the whole sea). Each contour line samples ONE
+ * row (V keyed to its iso level, so the pattern travels WITH the wave instead
+ * of strobing as the line sweeps world space) and U runs along the line.
+ * Coverage is the contract — and it is deliberately SPARSE: thresholded LOW
+ * (crest lines) roughly a third of every row survives as long confident
+ * dashes (the negative space between them is the look); thresholded HIGH
+ * (trough lines) only the strongest dash cores remain, via the per-dash gain
+ * spread (0.7–1.0). `tests/unit/oil-stroke-texture.test.ts` pins the per-row
+ * on-fraction at both operating points.
+ */
+export const CONTOUR_DASH_SPEC: ContourDashRowSpec = {
+  size: 512,
+  seed: 4117,
+  rows: 8,
+  // Budgeted ≈ 0.38–0.46 planned paint per row → ≈ 0.26 stamped (the tail
+  // taper + ragged edges erode planned runs by ~⅓–½), i.e. ~74 % negative
+  // space, as ~1.5–4 m dashes at the shader's 11 m tile.
+  paintMin: 0.38,
+  paintMax: 0.46,
+  dashMin: 0.12,
+  dashMax: 0.34,
+  gapMin: 0.2,
+  gapMax: 0.52,
+  widthMin: 0.014,
+  widthMax: 0.021,
+  bristleMin: 2,
+  bristleMax: 4,
+  taperStart: 0.5,
+  raggedness: 0.4,
 }
 
 /**

@@ -38,9 +38,11 @@ import {
 } from 'three/tsl'
 import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
 import {
+  CONTOUR_DASH_SPEC,
   FOAM_STROKE_MASS_SPEC,
   FOAM_STROKE_STREAK_SPEC,
   packSheetRGBA8,
+  rasterizeContourDashRows,
   rasterizeOilStrokeSheet,
 } from '@/engine/render/oil-stroke-texture'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
@@ -274,6 +276,11 @@ export type WaterMesh = {
     /** P1 readability — Wind-Waker dark-twin strength, 0..1 (§8 P1.3). Draws
      *  a dark teal line offset away from the sun beside each light line. */
     setContourRelief(s: number): void
+    /** P1 readability — contour-line break-up, 0..1. 0 = solid unbroken iso
+     *  lines; 1 = lines dissolve into crest-aligned brush dashes, gently
+     *  nicked near crests and hardest in the troughs (lines cling to the
+     *  crests instead of running the whole sea). */
+    setContourBreakup(s: number): void
     /** P2.1 wave sets — envelope period in seconds (0 = off). Writes the
      *  FIELD (the sim source of truth, like setWaveBearing); tick() mirrors
      *  to the GPU. Track-authored via `water.swellSets` — the menu rows are
@@ -349,6 +356,8 @@ export type WaterDebugDefaults = {
   contourSpacing: number
   /** P1 readability relief (dark twin) strength, 0..1. */
   contourRelief: number
+  /** P1 readability contour break-up, 0..1 (solid lines ↔ trough-biased dashes). */
+  contourBreakup: number
   /** Foam streaks 0..2: brushstroke bands on steep faces, along the local
    *  crest line. 1 = baseline, 0 = isotropic bubbles only (legacy). */
   foamStreak: number
@@ -557,21 +566,17 @@ function getWaveDetailNormalTexture(): THREE.DataTexture {
 let sharedFoamBubbleTexture: THREE.DataTexture | null = null
 let sharedFoamStreakTexture: THREE.DataTexture | null = null
 let sharedFoamStrokeMassTexture: THREE.DataTexture | null = null
+let sharedContourDashTexture: THREE.DataTexture | null = null
 
-/** Wrap one of the procedural oil-stroke sheets in a repeat-tiling mask
- *  DataTexture (grayscale in `.r`, same sampler setup as the bubble sheet). */
-function buildOilStrokeDataTexture(
-  spec: typeof FOAM_STROKE_MASS_SPEC,
+/** Wrap a procedural mask grid in a repeat-tiling DataTexture (grayscale in
+ *  `.r`, same sampler setup as the bubble sheet). */
+function buildStrokeMaskDataTexture(
+  grid: Float32Array,
+  size: number,
   name: string,
 ): THREE.DataTexture {
-  const data = packSheetRGBA8(rasterizeOilStrokeSheet(spec))
-  const tex = new THREE.DataTexture(
-    data,
-    spec.size,
-    spec.size,
-    THREE.RGBAFormat,
-    THREE.UnsignedByteType,
-  )
+  const data = packSheetRGBA8(grid)
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType)
   tex.name = name
   tex.wrapS = THREE.RepeatWrapping
   tex.wrapT = THREE.RepeatWrapping
@@ -679,8 +684,9 @@ function getFoamBubbleTexture(): THREE.DataTexture {
  */
 function getFoamStreakTexture(): THREE.DataTexture {
   if (!sharedFoamStreakTexture) {
-    sharedFoamStreakTexture = buildOilStrokeDataTexture(
-      FOAM_STROKE_STREAK_SPEC,
+    sharedFoamStreakTexture = buildStrokeMaskDataTexture(
+      rasterizeOilStrokeSheet(FOAM_STROKE_STREAK_SPEC),
+      FOAM_STROKE_STREAK_SPEC.size,
       'water:foamStreaks',
     )
   }
@@ -698,12 +704,32 @@ function getFoamStreakTexture(): THREE.DataTexture {
  */
 function getFoamStrokeMassTexture(): THREE.DataTexture {
   if (!sharedFoamStrokeMassTexture) {
-    sharedFoamStrokeMassTexture = buildOilStrokeDataTexture(
-      FOAM_STROKE_MASS_SPEC,
+    sharedFoamStrokeMassTexture = buildStrokeMaskDataTexture(
+      rasterizeOilStrokeSheet(FOAM_STROKE_MASS_SPEC),
+      FOAM_STROKE_MASS_SPEC.size,
       'water:foamStrokeMass',
     )
   }
   return sharedFoamStrokeMassTexture
+}
+
+/**
+ * Contour-dash sheet — a stack of independent 1-D dash rows the contour layer
+ * uses as a KEEP mask so its iso-height lines dissolve into hand-pulled
+ * dashes instead of running unbroken across the whole sea. Each iso line
+ * samples one row at its V center (keyed to the line's level) — see the
+ * contour-breakup block in the fragment stage for the phase-locking
+ * rationale.
+ */
+function getContourDashTexture(): THREE.DataTexture {
+  if (!sharedContourDashTexture) {
+    sharedContourDashTexture = buildStrokeMaskDataTexture(
+      rasterizeContourDashRows(CONTOUR_DASH_SPEC),
+      CONTOUR_DASH_SPEC.size,
+      'water:contourDash',
+    )
+  }
+  return sharedContourDashTexture
 }
 
 /**
@@ -3134,12 +3160,14 @@ export function createWaterMesh(
   const CONTOUR_STRENGTH_DEFAULT = 0.55
   const CONTOUR_SPACING_DEFAULT = 0.45
   const CONTOUR_RELIEF_DEFAULT = 0.6
+  const CONTOUR_BREAKUP_DEFAULT = 1.0
   const rampStrengthUniform = uniform(RAMP_STRENGTH_DEFAULT)
   const rampStepsUniform = uniform(RAMP_STEPS_DEFAULT)
   const rampPosterizeUniform = uniform(RAMP_POSTERIZE_DEFAULT)
   const contourStrengthUniform = uniform(CONTOUR_STRENGTH_DEFAULT)
   const contourSpacingUniform = uniform(CONTOUR_SPACING_DEFAULT)
   const contourReliefUniform = uniform(CONTOUR_RELIEF_DEFAULT)
+  const contourBreakupUniform = uniform(CONTOUR_BREAKUP_DEFAULT)
 
   // Normalised swell phase 0..1 across the LIVE swell envelope — the amps
   // come from the same mirrored uniform buoyancy uses, so Beaufort, the
@@ -3205,10 +3233,55 @@ export function createWaterMesh(
     smoothstep(contourSpacing.div(float(9)), contourSpacing.div(float(4.5)), swellHeightPx),
   )
   const contourDistFade = float(1).sub(smoothstep(float(160), float(300), camDist))
+  // Break-up: an iso-height mask is constant along its own line, so without
+  // help every contour runs unbroken across the whole sea — too clean for the
+  // painted read. The dash sheet is a stack of 1-D dash rows used as a KEEP
+  // mask, keyed to invariants that RIDE WITH the line: U is the crest-axis
+  // coordinate (a point on a travelling iso line keeps its crest-axis
+  // position — swell advances perpendicular to it) and V picks one row per
+  // iso LEVEL (a line is its level, forever; neighbouring lines cycle
+  // different rows; index lines coincide with every 3rd minor level so one id
+  // covers both, and the sub-metre relief shift never moves h across a band
+  // midpoint so the dark twin shares the row). The first cut sampled
+  // world-space instead and strobed: lines cross a ~0.4 m stroke footprint in
+  // 2–3 frames at swell phase speed (~10 m/s), blinking every dash. V is
+  // piecewise-constant; its derivative blows up only at band midpoints, where
+  // the line masks are zero by construction, so the garbage mip fetch there
+  // is always masked. The cut rides the swell phase (`rampT`, 0 = trough,
+  // 1 = crest — constant per line, so each line keeps one dash character):
+  // crest lines keep long confident dashes with generous negative space, and
+  // in the troughs the cut climbs into the per-dash gain range so only sparse
+  // stroke cores survive — lines cling to the crests and the trough floor
+  // reads clean. Both cut points are pinned against the sheet's rows in
+  // oil-stroke-texture.test.ts.
+  const CONTOUR_DASH_TILE_M = 11.0
+  const CONTOUR_DASH_ROWS = CONTOUR_DASH_SPEC.rows
+  const contourBandId = floor(swellHeightFrag.div(contourSpacing).add(float(0.5)))
+  const contourDashUV = vec2(
+    brushCrest.div(float(CONTOUR_DASH_TILE_M)),
+    // Row CENTER for level k (fract wraps negative levels into 0..rows-1).
+    fract(contourBandId.div(float(CONTOUR_DASH_ROWS))).add(float(0.5 / CONTOUR_DASH_ROWS)),
+  )
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+  const contourDashSample = texture(getContourDashTexture(), contourDashUV) as any
+  const contourCrestBias = smoothstep(float(0.12), float(0.62), rampT)
+  const contourDashCut = mix(float(0.92), float(0.16), contourCrestBias)
+  const contourDashMask = smoothstep(
+    contourDashCut.sub(float(0.1)),
+    contourDashCut.add(float(0.1)),
+    contourDashSample.r,
+  )
+  // Surviving trough dashes also carry less paint — brush pressure easing off.
+  const contourBreakup = mix(
+    float(1),
+    contourDashMask.mul(mix(float(0.7), float(1), contourCrestBias)),
+    contourBreakupUniform,
+  )
   const contourBase = max(contourMinor.mul(float(0.75)), contourIndex)
     .mul(contourSlopeGate)
     .mul(contourCrowdFade)
     .mul(contourDistFade)
+    .mul(contourBreakup)
   const contourLight = clamp(contourBase.mul(contourStrengthUniform), float(0), float(1))
   // Relief twin: extrapolate the swell height a small step away from the
   // sun (horizontal), re-run the same line masks, draw dark where the
@@ -3232,6 +3305,9 @@ export function createWaterMesh(
       .mul(contourSlopeGate)
       .mul(contourCrowdFade)
       .mul(contourDistFade)
+      // Same break-up as the light line so the relief pair dashes together —
+      // a solid dark twin under a dashed light line reads as a glitch.
+      .mul(contourBreakup)
       .mul(contourReliefUniform)
       .mul(contourStrengthUniform)
       .mul(float(1).sub(contourLight)),
@@ -3512,6 +3588,7 @@ export function createWaterMesh(
     contourStrength: CONTOUR_STRENGTH_DEFAULT,
     contourSpacing: CONTOUR_SPACING_DEFAULT,
     contourRelief: CONTOUR_RELIEF_DEFAULT,
+    contourBreakup: CONTOUR_BREAKUP_DEFAULT,
     wireframe: wireFlag,
     colorize: false,
   }
@@ -3652,6 +3729,9 @@ export function createWaterMesh(
     },
     setContourRelief(s) {
       contourReliefUniform.value = clamp01(s, 0, 1)
+    },
+    setContourBreakup(s) {
+      contourBreakupUniform.value = clamp01(s, 0, 1)
     },
     // P2.1 wave-set envelope — the field owns the params (CPU buoyancy reads
     // them via waveSetFactor); tick() mirrors them to the GPU uniforms.
