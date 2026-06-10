@@ -24,9 +24,19 @@ export type RaceEvents = {
   onFinish?(eid: number): void
 }
 
+/** A bike can't travel this far in one 60 Hz tick under its own power
+ *  (top speed ≈ 28 m/s → ~0.5 m/tick). Larger per-tick jumps are warps:
+ *  respawn after out-of-bounds, a multiplayer snapshot catch-up sweep
+ *  after a packet gap, a recycled entity slot at race start. A warp's
+ *  path crossing the gate plane is not a gate crossing — see the
+ *  teleport handling below (docs/m10-11-state-sync.md §11). */
+const TELEPORT_DIST_SQ = 5 * 5
+
 export function createRaceSystem(track: Track, events: RaceEvents = {}) {
   // Per-eid memory of the previous-tick signed distance to the gate plane.
   const prevSigned = new Map<number, number>()
+  // Per-eid previous-tick position — the teleport detector's memory.
+  const prevPos = new Map<number, Vec3>()
 
   return function tick(sim: SimWorld, phys: PhysicsWorld, dt: number): void {
     const eids = query(sim, [Racer, RBHandle])
@@ -45,6 +55,26 @@ export function createRaceSystem(track: Track, events: RaceEvents = {}) {
       if (!cp) continue
 
       const t = rb.translation()
+
+      // Teleport guard: a super-physical jump since last tick invalidates
+      // the prev-tick signed distance — without this, a warp whose
+      // straight-line path happens to sweep through the gate plane scores
+      // a phantom checkpoint (false positives observed with multiplayer
+      // snapshot corrections; also covers OOB respawns).
+      const lp = prevPos.get(eid)
+      let teleported = false
+      if (lp) {
+        const jx = t.x - lp.x
+        const jy = t.y - lp.y
+        const jz = t.z - lp.z
+        teleported = jx * jx + jy * jy + jz * jz > TELEPORT_DIST_SQ
+        lp.x = t.x
+        lp.y = t.y
+        lp.z = t.z
+      } else {
+        prevPos.set(eid, { x: t.x, y: t.y, z: t.z })
+      }
+
       const dx = t.x - cp.position.x
       const dy = t.y - cp.position.y
       const dz = t.z - cp.position.z
@@ -61,8 +91,9 @@ export function createRaceSystem(track: Track, events: RaceEvents = {}) {
       prevSigned.set(eid, signed)
 
       // Crossed = signed flipped from < 0 to >= 0 (player passes through gate
-      // moving in +fwd direction).
-      const crossed = prev !== undefined && prev < 0 && signed >= 0
+      // moving in +fwd direction). A teleport re-seeds `prevSigned` (the
+      // set() above) without testing the flip.
+      const crossed = !teleported && prev !== undefined && prev < 0 && signed >= 0
       const insideLaterally = Math.abs(lateral) < cp.halfWidth
       // Trigger extends 2× further below the gate origin than its original
       // tight box, so a bike skimming the water or briefly dipping below

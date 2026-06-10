@@ -40,6 +40,7 @@ import {
   decodeInputFrameFrom,
   encodeInputFrameInto,
   INPUT_FRAME_WIRE_BYTES,
+  LOCAL_PEER_ID,
 } from '@/engine/net/input-frame'
 import { createPerfRecorder, type PerfStats } from '@/engine/perf-recorder'
 import {
@@ -919,9 +920,8 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // of fixed-step sim ticks driven by simulateStep; it lines up across
   // peers in lockstep multiplayer because both sides advance one tick per
   // delivered InputFrame batch. The DataView is reused per tick to avoid
-  // a per-frame allocation. LOCAL_PEER_ID is the slot in a future room;
-  // in single-player there is exactly one peer (slot 0).
-  const LOCAL_PEER_ID = 0
+  // a per-frame allocation. LOCAL_PEER_ID (shared with boot/multiplayer's
+  // disconnect handler) stamps frames whenever no room slot is held.
   let simTick = 0
   const inputFrameBuffer = new ArrayBuffer(INPUT_FRAME_WIRE_BYTES)
   const inputFrameView = new DataView(inputFrameBuffer)
@@ -968,6 +968,19 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // Stamped on the first frame after the director finishes; anchors the
   // scenery-warm hold cap (see the arm branch below).
   let introHoldStartedAt: number | null = null
+
+  // Synchronized start (multiplayer). The HUD is built with deferStart
+  // in a room, so no tab's 3-2-1 runs until the relay's race-go
+  // releases the whole grid at once — start skew becomes one-way relay
+  // latency instead of load-time difference. The loop reports
+  // race-loaded once the room is ready (being inside frame() means
+  // we're rendering), then arms on the go. Fallbacks: an old relay
+  // (no startBarrier in its hello) arms immediately on ready — the
+  // pre-barrier behavior — and a hard timeout covers a dead relay or a
+  // lost go so the grid can never hang forever.
+  const MP_START_FAILSAFE_MS = 15_000
+  let mpStartArmed = !roomId // single-player: barrier not in play
+  const mpBootedAt = performance.now()
   let introSkipPromptEl: HTMLElement | null = null
   let introSkipKeyHandler: ((e: KeyboardEvent) => void) | null = null
   let introSkipPointerHandler: ((e: Event) => void) | null = null
@@ -1068,11 +1081,13 @@ export function startGameLoop(opts: GameLoopOpts): void {
         // single-player. The round-trip is cheap (~10 bytes / one alloc)
         // and ensures the same quantization is applied locally as remotely,
         // so any feel changes from the wire format are visible day one.
-        // When connected to a room, stamp the frame with the assigned
-        // peerId (falls back to LOCAL_PEER_ID otherwise) and ship it to
-        // the relay BEFORE stepping locally — that ordering means a
-        // future lockstep gate could pause here waiting on remote frames
-        // without changing the encode/decode contract.
+        // Frames are no longer BROADCAST, though: since M10.11 remote
+        // bikes are pose-driven by TransformSnapshots (no PeerControlled
+        // tag), so relayed intents drove nothing while costing
+        // 60 msg/s/peer through the relay — ~20x the snapshot message
+        // rate. M10.13 (owner-authoritative combat) will reintroduce
+        // intent/event traffic deliberately; the codec, NetRoom.sendFrame
+        // and the receive path stay wired for it.
         const myPeerId = net?.ready ? net.peerId : LOCAL_PEER_ID
         const localFrame = {
           tick: simTick,
@@ -1080,7 +1095,6 @@ export function startGameLoop(opts: GameLoopOpts): void {
           intent: state.intent,
         }
         encodeInputFrameInto(inputFrameView, 0, localFrame)
-        net?.sendFrame(localFrame)
         const decoded = decodeInputFrameFrom(inputFrameView, 0)
         // M10.5 — sim consumes a per-peer input map. Single-player passes
         // exactly one entry (slot 0). M10.6 — when a room is connected,
@@ -1340,6 +1354,24 @@ export function startGameLoop(opts: GameLoopOpts): void {
       if (warmDone || performance.now() - introHoldStartedAt >= SCENERY_WARM_HOLD_CAP_MS) {
         raceHud.armCountdown()
         introArmed = true
+      }
+    }
+
+    // Multiplayer synchronized start — see MP_START_FAILSAFE_MS above.
+    if (!mpStartArmed) {
+      const barrier = multiplayer.raceStartBarrier()
+      if (barrier.loadedAt === null && net?.ready) {
+        multiplayer.markRaceLoaded()
+        raceHud.setHoldBanner('WAITING FOR RIDERS…')
+      }
+      const timedOut = performance.now() - mpBootedAt > MP_START_FAILSAFE_MS
+      const legacyRelay = net?.ready === true && !barrier.supported
+      if (barrier.goAt !== null || legacyRelay || timedOut) {
+        if (timedOut && barrier.goAt === null && !legacyRelay) {
+          console.warn('[net] start-barrier timeout — arming countdown locally')
+        }
+        raceHud.armCountdown()
+        mpStartArmed = true
       }
     }
 

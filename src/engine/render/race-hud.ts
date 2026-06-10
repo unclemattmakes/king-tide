@@ -49,6 +49,11 @@ export interface RaceHud {
    *  hasn't been armed yet. While this is true, `isLocked()` also
    *  returns true. The lobby UI uses this to decide visibility. */
   isWaitingForLobby(): boolean
+  /** While the start is deferred (multiplayer's synchronized-start
+   *  barrier), show a small holding message in the countdown banner
+   *  (e.g. "WAITING FOR RIDERS…"). Cleared automatically when the
+   *  countdown arms or is skipped; no-op once the hold has released. */
+  setHoldBanner(text: string | null): void
 }
 
 export interface RaceHudInput {
@@ -539,6 +544,14 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     bestCrossingTime.clear()
   }
 
+  /** Drop any hold-banner styling/text (see setHoldBanner). */
+  function clearHoldBanner(): void {
+    banner.classList.remove('show', 'flash-go', 'pop')
+    bannerText.textContent = ''
+    bannerText.style.fontSize = ''
+    bannerText.style.opacity = ''
+  }
+
   function skipCountdown(): void {
     // Skip implies arming, so lobby holds also release.
     waitingForLobby = false
@@ -546,17 +559,34 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     // call observes "elapsed >= total" and shuts the banner down.
     countdownStartMs = performance.now() - COUNTDOWN_TOTAL * 1000 - 1
     countdownDone = true
-    banner.classList.remove('show', 'flash-go', 'pop')
-    bannerText.textContent = ''
+    clearHoldBanner()
   }
 
   function armCountdown(): void {
     if (!waitingForLobby) return
     waitingForLobby = false
+    // Clear the hold banner ("WAITING FOR RIDERS…") so the preroll
+    // starts from a blank slate; tickCountdown owns the text from here.
+    clearHoldBanner()
     // Re-anchor as if the first tick is happening right now so the
     // preroll + 3-2-1 plays out from a clean wall clock — no time lost
     // to however long the lobby took to clear.
     countdownStartMs = -1
+  }
+
+  function setHoldBanner(text: string | null): void {
+    if (!waitingForLobby) return
+    if (text) {
+      banner.classList.add('show')
+      bannerText.textContent = text
+      // The banner is sized for a giant "3"/"GO!" glyph — a sentence at
+      // that size overflows the screen. Inline-shrink while holding;
+      // armCountdown / skipCountdown reset the style.
+      bannerText.style.fontSize = '26px'
+      bannerText.style.opacity = '0.85'
+    } else {
+      clearHoldBanner()
+    }
   }
 
   return {
@@ -574,6 +604,7 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     reset,
     armCountdown,
     isWaitingForLobby: () => waitingForLobby,
+    setHoldBanner,
   }
 }
 

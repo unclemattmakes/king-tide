@@ -29,10 +29,10 @@ import { RBHandleStore } from '@/game/components'
  *  remote peers but eliminates the per-snapshot teleport. */
 const INTERP_DELAY_MS = 100
 
-/** Cap on extrapolation when the next snapshot is overdue. 0.5 = render
- *  one half-interval past the last known sample before freezing — keeps
- *  the bike moving plausibly during a brief packet gap without flinging
- *  it to infinity. */
+/** Cap on the interpolation parameter when the next snapshot is overdue.
+ *  t=1 is the latest sample; 1.5 lets the bike coast half a snapshot
+ *  interval past it before freezing — keeps motion plausible during a
+ *  brief packet gap without flinging the bike to infinity. */
 const MAX_EXTRAPOLATE_T = 1.5
 
 type Sample = {
