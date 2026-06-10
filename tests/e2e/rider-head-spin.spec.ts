@@ -1,13 +1,19 @@
 /**
- * Rider head-pose boundedness (bug report: "heads spin freely when riding").
+ * Rider head-look regression pack.
  *
- * Boots Sandbar into a live race, autopilots the player, then samples every
- * rider's Head/neck LOCAL quaternions per frame for ~8s via the
- * `__riderMannequin` dev hook. While attached, the head's local pose is the
- * seated clip's pose ⊗ a bounded headYaw offset (≤ headYawMax · gain ≈ 24°),
- * so its angular deviation from the first sample must stay small. A
- * free-spinning / accumulating head walks toward 180°. Ragdoll frames are
- * excluded (the clip is stopped and physics owns the bones).
+ * Test 1 — boundedness (bug report: "heads spin freely when riding"): boots
+ * Sandbar into a live race, autopilots the player, then samples every rider's
+ * Head/neck LOCAL quaternions per frame for ~8s via the `__riderMannequin`
+ * dev hook. While attached, the head's local pose is the seated clip's pose ⊗
+ * a bounded headYaw offset, so its angular deviation from the first sample
+ * must stay small. A free-spinning / accumulating head walks toward 180°.
+ * Ragdoll frames are excluded (the clip is stopped and physics owns the
+ * bones). Also asserts the grid poses with DISTINCT per-variant clips (AI
+ * spawn with their slot's variantId).
+ *
+ * Test 2 — responsiveness ("head is the first thing to move; the look leads
+ * the bike"): overrides the player's intent with a full-stick flick and
+ * times the sim headYaw attack (fast) and release (lazy).
  *
  * Screenshots land in artifacts/rider-head/ for the eyeball check.
  *
@@ -19,6 +25,7 @@ import { waitForReady } from './helpers/boot'
 
 type RiderSample = {
   eid: number
+  bikeEid: number
   ragdoll: boolean
   clip: string | null
   running: boolean
@@ -127,6 +134,96 @@ test('rider heads stay bounded to the seated clip pose while racing', async ({ p
   // The probe saw real steering — the head-look path actually ran.
   expect((maxYawSeen * 180) / Math.PI).toBeGreaterThan(2)
   // Bounded design budget: clip idle wobble (≤ ~10°) + headYaw offset
-  // (≤ ~24°). 60° only trips on runaway accumulation, not tuning.
+  // (≤ ~30° at full deflection, Head share thereof). 60° only trips on
+  // runaway accumulation, not tuning.
   expect(worst.dev).toBeLessThan(60)
+
+  // Vehicle-specific idles: AI spawn with their slot's variantId, so the
+  // grid's riders pose with DISTINCT per-bike clips (the rotation fields
+  // cruiser/stunt/racer/scout/sparrow), not a single shared one.
+  const clips = new Set<string>()
+  for (const f of samples) for (const r of f.riders) if (r.clip) clips.add(r.clip)
+  console.log(`rider clips in field: ${[...clips].join(', ')}`)
+  expect(clips.size).toBeGreaterThanOrEqual(3)
+})
+
+test('head look attacks fast on stick input and releases slow', async ({ page }) => {
+  test.setTimeout(120_000)
+
+  await page.goto('/?autostart=1&track=sandbar&skipintro=1')
+  await page.bringToFront()
+  await waitForReady(page, { timeout: 60_000 })
+  // Past the countdown so player intent isn't gated.
+  await page.waitForFunction(() => (window.__hover?.frame() ?? 0) > 400, null, { timeout: 90_000 })
+
+  // Slam the stick via the intent override, sample the player rider's sim
+  // headYaw per frame, then release and time the ease back to centre.
+  const result = await page.evaluate(
+    () =>
+      new Promise<{ attackMs: number; peak: number; releaseMs: number }>((resolve, reject) => {
+        type Hook = { debug(): { bikeEid: number; headYaw: number }[] }
+        const hook = (window as unknown as { __riderMannequin?: Hook }).__riderMannequin
+        const hover = window.__hover
+        if (!hook || !hover) {
+          reject(new Error('debug hooks missing'))
+          return
+        }
+        const playerEid = hover.playerEid()
+        const headYaw = () => hook.debug().find((r) => r.bikeEid === playerEid)?.headYaw ?? 0
+        const steer = (v: number) =>
+          hover.setIntentOverride({
+            throttle: 0.5,
+            steer: v,
+            brake: 0,
+            fire: false,
+            boost: false,
+            pitch: 0,
+            trickLeft: false,
+            trickRight: false,
+          })
+
+        const HEAD_YAW_MAX = 0.7 // rider-pose.ts headYawMax (rad)
+        const t0 = performance.now()
+        let attackMs = -1
+        let peak = 0
+        let releaseStart = 0
+        let phase: 'attack' | 'release' = 'attack'
+        steer(1)
+        const tick = () => {
+          const t = performance.now() - t0
+          const y = headYaw()
+          peak = Math.max(peak, y)
+          if (phase === 'attack') {
+            if (attackMs < 0 && y >= 0.6 * HEAD_YAW_MAX) attackMs = t
+            if (t > 1200) {
+              phase = 'release'
+              releaseStart = t
+              steer(0)
+            }
+          } else if (y <= 0.15 || t - releaseStart > 4000) {
+            hover.setIntentOverride(null)
+            resolve({ attackMs, peak, releaseMs: y <= 0.15 ? t - releaseStart : -1 })
+            return
+          }
+          requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      }),
+  )
+  console.log(
+    `head-look: attack→60% in ${result.attackMs.toFixed(0)}ms, ` +
+      `peak ${result.peak.toFixed(2)} rad, release→0.15rad in ${result.releaseMs.toFixed(0)}ms`,
+  )
+
+  // Attack: the head is the FIRST thing to move — 60% of full deflection
+  // within 150ms of the stick (the tuned curve does it in ~2 sim ticks;
+  // the budget absorbs frame drops).
+  expect(result.attackMs).toBeGreaterThanOrEqual(0)
+  expect(result.attackMs).toBeLessThan(150)
+  // Holds (near) full deflection while the stick is held.
+  expect(result.peak).toBeGreaterThan(0.6)
+  // Release is the lazy side — measurably slower than the attack, but it
+  // does come home.
+  expect(result.releaseMs).toBeGreaterThan(result.attackMs)
+  expect(result.releaseMs).toBeLessThan(1500)
 })
