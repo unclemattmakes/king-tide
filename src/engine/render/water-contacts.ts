@@ -267,6 +267,68 @@ export function mergeNearbyContacts(contacts: readonly WaterContact[]): WaterCon
   return out
 }
 
+/** Structural slice of a track checkpoint the gate-post derivation needs
+ *  (matches `Checkpoint` in game/tracks/types.ts without importing it —
+ *  keeps this module game-layer-free). */
+export type GateLike = {
+  position: { x: number; y: number; z: number }
+  /** Gate orientation; the posts sit along rotation·(+X) at ±halfWidth. */
+  rotation: { x: number; y: number; z: number; w: number }
+  halfWidth: number
+}
+
+const GATE_POST_RADIUS_M = 0.5
+const GATE_POST_STRENGTH = 0.9
+
+/**
+ * Contacts for checkpoint-gate posts. Gates spawn in their own instanced
+ * renderer (instanced-gates.ts), so the scene scan never sees them — but
+ * their pose is pure checkpoint data: posts stand at ±halfWidth along the
+ * gate's local +X. A post earns a collar when the gate's BASE sits near the
+ * waterline (floating water gates ride the surface; terrain-snapped gates
+ * sit ~1 m up) AND the seabed at the post's own XZ is actually submerged —
+ * the same gate often has one post on the beach and one in the surf, and
+ * only the wet one should foam.
+ *
+ * `groundY` is the raw terrain height probe (NO clamp to sea level — a
+ * sea-floor read must come back below `waterY` to qualify).
+ */
+export function gatePostWaterContacts(
+  checkpoints: readonly GateLike[],
+  opts: {
+    waterY: number
+    /** Vertical tolerance on the gate base; defaults to max(2, reach). */
+    reach?: number
+    groundY?: (x: number, z: number) => number
+    postRadius?: number
+  },
+): WaterContact[] {
+  const reach = Math.max(2, opts.reach ?? DEFAULT_REACH_M)
+  const out: WaterContact[] = []
+  for (const cp of checkpoints) {
+    if (Math.abs(cp.position.y - opts.waterY) > reach) continue
+    // right = rotation · (+X), the post axis. Posts at ±halfWidth along it;
+    // taking the world XZ of that point IS the projection for banked gates.
+    const q = cp.rotation
+    const rx = 1 - 2 * (q.y * q.y + q.z * q.z)
+    const rz = 2 * (q.x * q.z - q.y * q.w)
+    for (const side of [1, -1]) {
+      const px = cp.position.x + rx * cp.halfWidth * side
+      const pz = cp.position.z + rz * cp.halfWidth * side
+      // Submerged-seabed gate: a post planted on the beach gets shore foam
+      // from the terrain system already, not a collar.
+      if (opts.groundY && opts.groundY(px, pz) >= opts.waterY - 0.25) continue
+      out.push({
+        x: px,
+        z: pz,
+        radius: opts.postRadius ?? GATE_POST_RADIUS_M,
+        strength: GATE_POST_STRENGTH,
+      })
+    }
+  }
+  return out
+}
+
 /** Nearest-N selection for the shader's fixed slot budget. Stable for ties;
  *  returns a new array, never mutates input. */
 export function selectNearestContacts(

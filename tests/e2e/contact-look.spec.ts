@@ -150,4 +150,26 @@ test('auto-discovery finds contacts on shipped tracks', async ({ page }) => {
       await page.waitForTimeout(1100)
     }
   }
+
+  // Small-contact framing: buoys (r 0.6) and gate posts (r 0.5) — the
+  // follow-up sources. Frame one with neighbours in shot (the buoy wall
+  // is a line, so a low 18 m pull-back catches several collars at once).
+  const small = contacts.filter((c) => c.radius <= 0.7)
+  if (small.length > 0) {
+    const b = small[Math.floor(small.length / 2)]!
+    await page.evaluate(
+      ({ x, z }) => {
+        window.__hover?.setCameraPose({
+          pos: { x: x - 13, y: 4, z: z - 13 },
+          target: { x, y: 0.4, z },
+        })
+      },
+      { x: b.x, z: b.z },
+    )
+    await page.waitForTimeout(1500)
+    for (let i = 0; i < 3; i++) {
+      await page.screenshot({ path: `artifacts/contact/buoy-${i}.png` })
+      await page.waitForTimeout(1200)
+    }
+  }
 })

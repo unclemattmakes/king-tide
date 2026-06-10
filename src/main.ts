@@ -1,4 +1,4 @@
-import { addComponent, hasComponent, removeComponent } from 'bitecs'
+import { addComponent, hasComponent, query, removeComponent } from 'bitecs'
 import { DEFAULT_BENCH_TRACK, installBenchmark } from './boot/benchmark-mode'
 import { bootMark, bootReport, bootStat } from './boot/boot-trace'
 import { installControls } from './boot/controls'
@@ -79,6 +79,7 @@ import { createWaterMesh, WAVE_BEARING_DEFAULT } from './engine/render/water'
 import {
   type ContactScanNode,
   collectWaterContacts,
+  gatePostWaterContacts,
   type WaterContact,
 } from './engine/render/water-contacts'
 import { logWaterCoverage, reportWaterCoverage } from './engine/render/water-coverage'
@@ -116,6 +117,7 @@ import { aiCallSign } from './game/bikes/callsigns'
 import { resolveBikeVariant, variantForAiSlot } from './game/bikes/variants'
 import { AIController, AIControllerStore, AITag, defaultAIController } from './game/components/ai'
 import { RacerStore } from './game/components/race'
+import { WaveRiderStore, WaveRiderTag } from './game/components/wave-rider'
 import { createPickupSpawn } from './game/entities/pickup-spawn'
 import { createPropColliders } from './game/entities/props'
 import { createGhostRunner, type GhostRunner } from './game/systems/ghost-runner'
@@ -1213,10 +1215,34 @@ async function boot() {
         waveField.waves.reduce((a, w) => a + w.amplitude, 0),
       ),
     )
-    liveWaterContacts = collectWaterContacts(contactRoots, { waterY: waveField.baseY, reach })
+    const discovered = collectWaterContacts(contactRoots, { waterY: waveField.baseY, reach })
+    // Gate posts — gates spawn in their own instanced renderer, so the scene
+    // scan can't see them; their pose is pure checkpoint data. Only posts
+    // standing over submerged seabed qualify (one post on the beach + one in
+    // the surf is a common gate).
+    const seabedY = (x: number, z: number) =>
+      (terrainHeightmap ? sampleTerrainHeightAtXZ(terrainHeightmap, x, z) : null) ?? -10000
+    const gatePosts = gatePostWaterContacts(track.checkpoints, {
+      waterY: waveField.baseY,
+      reach,
+      groundY: seabedY,
+    })
+    // Floating props (buoys / logs) bob IN PLACE — the wave-rider sim pins
+    // their XZ anchor at spawn — so each gets a static collar at its anchor:
+    // the prop bobs above the disc and both breathe with the same wave
+    // field. (If floats ever start drifting, `setWaterContacts` re-uploads
+    // cheaply enough to call per frame.)
+    const floatContacts: WaterContact[] = []
+    for (const eid of query(sim, [WaveRiderTag])) {
+      const wr = WaveRiderStore.get(eid)
+      if (wr) floatContacts.push({ x: wr.anchorX, z: wr.anchorZ, radius: 0.6, strength: 0.85 })
+    }
+    liveWaterContacts = [...discovered, ...gatePosts, ...floatContacts]
     if (liveWaterContacts.length > 0) {
       // eslint-disable-next-line no-console
-      console.info(`[boot] ${liveWaterContacts.length} waterline contact(s) discovered`)
+      console.info(
+        `[boot] waterline contacts: ${discovered.length} scanned + ${gatePosts.length} gate post(s) + ${floatContacts.length} float(s)`,
+      )
     }
     waterMesh.setWaterContacts(liveWaterContacts)
     contactSplash = createContactSplashDriver({

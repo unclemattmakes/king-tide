@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   type ContactScanNode,
   collectWaterContacts,
+  gatePostWaterContacts,
   MAX_WATER_CONTACTS,
   mergeNearbyContacts,
   selectNearestContacts,
@@ -163,6 +164,62 @@ describe('mergeNearbyContacts', () => {
     const c: WaterContact = { x: 30, z: 0, radius: 1, strength: 1 }
     const out = mergeNearbyContacts([a, b, c])
     expect(out.length).toBe(2)
+  })
+})
+
+describe('gatePostWaterContacts', () => {
+  const IDENTITY_Q = { x: 0, y: 0, z: 0, w: 1 }
+  const DEEP = () => -50 // submerged seabed everywhere
+
+  it('puts one disc at each post of a water-level gate', () => {
+    const out = gatePostWaterContacts(
+      [{ position: { x: 5, y: 0.4, z: -2 }, rotation: IDENTITY_Q, halfWidth: 10 }],
+      { waterY: 0, groundY: DEEP },
+    )
+    expect(out.length).toBe(2)
+    const xs = out.map((c) => c.x).sort((a, b) => a - b)
+    expect(xs[0]).toBeCloseTo(-5)
+    expect(xs[1]).toBeCloseTo(15)
+    expect(out[0]!.z).toBeCloseTo(-2)
+    expect(out[0]!.radius).toBeGreaterThan(0)
+  })
+
+  it('rotates post positions with the gate yaw', () => {
+    // 90° about Y: local +X → world −Z, so posts land at z = ∓halfWidth.
+    const s = Math.SQRT1_2
+    const out = gatePostWaterContacts(
+      [{ position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: s, z: 0, w: s }, halfWidth: 8 }],
+      { waterY: 0, groundY: DEEP },
+    )
+    expect(out.length).toBe(2)
+    const zs = out.map((c) => c.z).sort((a, b) => a - b)
+    expect(zs[0]).toBeCloseTo(-8)
+    expect(zs[1]).toBeCloseTo(8)
+    expect(Math.abs(out[0]!.x)).toBeLessThan(1e-6)
+  })
+
+  it('keeps only the post over submerged seabed (beach + surf gate)', () => {
+    const out = gatePostWaterContacts(
+      [{ position: { x: 0, y: 0, z: 0 }, rotation: IDENTITY_Q, halfWidth: 12 }],
+      // Beach on +X (above the waterline), sea on −X.
+      { waterY: 0, groundY: (x) => (x > 0 ? 1.5 : -30) },
+    )
+    expect(out.length).toBe(1)
+    expect(out[0]!.x).toBeCloseTo(-12)
+  })
+
+  it('skips gates whose base is far from the waterline', () => {
+    const out = gatePostWaterContacts(
+      [{ position: { x: 0, y: 10, z: 0 }, rotation: IDENTITY_Q, halfWidth: 10 }],
+      { waterY: 0, groundY: DEEP },
+    )
+    expect(out.length).toBe(0)
+    // …unless a storm-sea reach widens the band.
+    const storm = gatePostWaterContacts(
+      [{ position: { x: 0, y: 3, z: 0 }, rotation: IDENTITY_Q, halfWidth: 10 }],
+      { waterY: 0, reach: 4, groundY: DEEP },
+    )
+    expect(storm.length).toBe(2)
   })
 })
 
