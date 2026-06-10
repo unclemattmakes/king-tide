@@ -114,6 +114,7 @@ import { createPickupSpawn } from './game/entities/pickup-spawn'
 import { createPropColliders } from './game/entities/props'
 import { createGhostRunner, type GhostRunner } from './game/systems/ghost-runner'
 import { createRaceSystem } from './game/systems/race'
+import { setWaveFeelFlags } from './game/systems/wave-feel-flags'
 import { createWaveRiderSystem, type WaveRiderSystem } from './game/systems/wave-rider'
 import { deriveFallbackTheme, getTrackTheme } from './game/tracks/theme-catalog'
 
@@ -416,6 +417,15 @@ async function boot() {
   // count at construction; only amplitudes are live-mirrored).
   // `?spectrum=<preset>[:seed[:components]]` overrides the JSON for A/B
   // tuning; `?spectrum=off` forces the default bank on a spectrum track.
+  // P4.2 water-feel prototypes (dev-flagged, default OFF): `?wavepush=1`
+  // adds the catch-the-wave forward push, `?draft=1` the wake-drafting
+  // boost; fractional values scale the gains. Playtest-gated — see
+  // wave-feel-flags.ts.
+  setWaveFeelFlags({
+    wavePush: params.get('wavepush') !== null ? Number(params.get('wavepush') || 1) : undefined,
+    draft: params.get('draft') !== null ? Number(params.get('draft') || 1) : undefined,
+  })
+
   const spectrumOverride = parseSpectrumParam(params.get('spectrum'))
   const activeSpectrum: SpectrumSpec | null =
     spectrumOverride === 'off' ? null : (spectrumOverride ?? track.water?.spectrum ?? null)

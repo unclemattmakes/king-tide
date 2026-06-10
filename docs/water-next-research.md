@@ -1,8 +1,15 @@
 # Water — what's next (research + roadmap)
 
-> **Status: RESEARCH (2026-06-09) — now executing.** P0.1 (zone GPU port)
-> landed as PR #340; P0.2 (pinch diagnosis) has a written verdict in §4.2 —
-> Q is trusted. Remaining phases tracked in §8.
+> **Status: EXECUTED (2026-06-10).** Every phase of §8 is now shipped —
+> P0 (truth restored, PR #340/#341), P1 (readability layers, #343), P2
+> (sets #344, per-track spectra, anti-repetition kit), P3 (shoaling v2,
+> wave stamps), P4 (splash rings, feel prototypes). What remains is
+> HANDS, not code: the playtest gates (P1 knob defaults, Cape Town's
+> spectrum, surf shoaling feel + AI on shore corridors, splash-ring
+> read, the OFF-by-default P4.2 prototypes) and the designer moves
+> (placing the Reef Cup signature wave stamps; the Blender stamp
+> exporter is queued in blender-wishlist.md). Per-item verdicts +
+> verification evidence live in §8's ✅ blocks.
 >
 > Investigation of how the water system works
 > end-to-end, what other games/papers have done, and a recommended path to
@@ -852,11 +859,40 @@ Matt playtests — the readability claim is only provable by hands + eyes.
 
 ### P4 — Dynamic water (simulate better, with gameplay teeth)
 
-1. **Wave particles / event waves** (§7.5) — landing splashes + set-piece
-   rings, sim-owned deterministic pool, GPU mirror like bikes/wakes; never
-   the ambient sea.
-2. **Catch-the-wave momentum + wake drafting** (§7.6) — dev-flag prototypes,
-   Matt playtest gate, AI/lap-time rebalance if adopted.
+1. ✅ **Wave particles / event waves** (§7.5) — **SHIPPED (2026-06-10)**
+   in the smallest honest form: **splash rings**
+   ([splash-rings.ts](../src/engine/sim/water/splash-rings.ts)). A hard
+   water landing (impact ≥ 3 m/s relative to the surface's own motion,
+   detected at the hover system's airborne→grounded transition — a
+   fixed-step sim event, so deterministic) radiates an expanding sech²
+   ring ridge other riders SEE and FEEL: sim-owned 12-slot pool
+   (oldest-reuse; NOT snapshotted — the wake-trail self-healing
+   discipline), closed-form in (x, z, t) with cylindrical 1/√(1+R)
+   energy spread + quadratic die-off over 3.5 s, evaluated identically
+   by both samplers (rest-point, like stamps), the GPU vertex stage and
+   the renderVertex mirror; exact vy (finite-difference-tested).
+   `Splash rings` menu knob (persisted, default 1; one scalar drives
+   both sides; 0 also stops spawning). Set-piece ring EMITTERS (zone- or
+   script-driven) are deliberately deferred — the pool API supports them
+   when a track wants one. **Hard-won shader lesson:** the new uniform
+   arrays blew WebGPU's 12-uniform-buffer-per-stage cap (every TSL
+   `uniformArray` is its own buffer; the pipeline failed to CREATE and
+   only console-error-checking specs caught it) — stamps + rings now
+   pack into ONE shared `waveEventsUniform` vec4 array; treat that cap
+   like the 16-varying cap when adding water uniforms.
+2. ✅ **Catch-the-wave momentum + wake drafting** (§7.6) — **PROTOTYPES
+   SHIPPED (2026-06-10), both default OFF** (the doc's own gate: these
+   change race balance, so they exist to be FELT —
+   `feedback_playtest_truth`). `?wavepush=1` adds the forward push for
+   riding WITH the swell on a rising face (dot(forward, travel) ×
+   max(0, ∂h/∂t) × 1.2 m/s² gain — slope momentum stops being
+   direction-blind; faces become directional conveyors); `?draft=1`
+   adds the Hydro-Thunder drafting boost inside the calm center TROUGH
+   of a rival's wake (summed rivals' wake depth at the bike, saturating
+   at 15 cm → up to 1.5 m/s²); fractional values scale the gains
+   (`wave-feel-flags.ts`, boot-set from URL → deterministic per
+   session). Adoption = Matt's hands + AI/lap-time rebalance; until
+   then they are zero-cost dormant branches.
 
 ### Explicitly parked
 

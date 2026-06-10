@@ -31,6 +31,22 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-10 (e)** — **P4 dynamic water — the water
+> roadmap is now fully executed.** Two pieces: (1) **Splash rings** — a
+> hard water landing (≥ 3 m/s into the surface) radiates an expanding
+> ring other riders see AND feel; sim-owned deterministic 12-slot pool,
+> identical closed form in buoyancy/shader/mirror, `Splash rings` knob
+> (persisted, default 1). (2) **Feel prototypes, default OFF**:
+> `?wavepush=1` (forward push riding WITH the swell on a rising face —
+> faces become directional conveyors) and `?draft=1` (boost in the calm
+> trough of a rival's wake, the Hydro Thunder mechanic) — playtest-gated
+> per the doc; adoption means AI/lap rebalance. Shader lesson logged:
+> WebGPU caps uniform BUFFERS at 12/stage (every TSL uniformArray is one
+> buffer — the water pipeline failed to create at 14); stamps + rings
+> now share one packed event array. **Every coding phase of
+> water-next-research.md §8 is ✅** — remaining items are playtest
+> verdicts + placing the Reef Cup signature stamps.
+
 > **Last updated: 2026-06-10 (d)** — **P3.2 authored wave stamps: the
 > signature-jump system.** Tracks can author `waveStamps[]` (crest
 > segment + amplitude/width/period/phase/speed/approach): a traveling

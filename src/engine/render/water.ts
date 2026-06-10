@@ -50,6 +50,15 @@ import {
   WAKE_STROKE_SPEC,
 } from '@/engine/render/oil-stroke-texture'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
+import {
+  MAX_SPLASH_RINGS,
+  SPLASH_RING_LIFE_S,
+  SPLASH_RING_SPEED,
+  SPLASH_RING_WIDTH,
+  // Ring waveform constants + the CPU sampler (renderVertex mirror) —
+  // single source, drift-tested like the SHORE_*/STAMP_* sets.
+  sampleSplashRings,
+} from '@/engine/sim/water/splash-rings'
 // Trail recording rules — sim-owned (`field.trails` is fed by
 // wakeUpdateSystem; this module only uploads + mirrors the profile in TSL).
 // Imported, never re-declared, so the GPU segment loop can't drift from the
@@ -247,6 +256,10 @@ export type WaterMesh = {
      *  scalar, like setSteepness, so buoyancy and visuals always shoal
      *  identically. */
     setShoalSurf(s: number): void
+    /** Splash-ring strength, 0..1.5 (P4.1 landing event waves). One
+     *  scalar drives BOTH buoyancy and the GPU (the shoreWaveStrength
+     *  discipline). 0 = off (and the spawner stops filling the pool). */
+    setSplashRings(s: number): void
     /** Pinch direction in degrees, 0..90. Rotates the Gerstner
      *  horizontal-displacement vector relative to the per-wave
      *  travel direction. 0° = standard Gerstner (particles bulge
@@ -397,6 +410,8 @@ export type WaterDebugDefaults = {
   shoreWaveStrength: number
   /** Shoaling-v2 blend 0..1: legacy kill-switch (0) ↔ full surf (1). */
   shoalSurf: number
+  /** Splash-ring strength 0..1.5 (landing event waves). 1 = baseline. */
+  splashRings: number
   /** Gerstner pinch direction in degrees, 0..90. */
   pinchDirection: number
   /** Curvature-based whitecap gain (foam v3). 4 = baseline. Higher = foam on
@@ -1416,17 +1431,26 @@ export function createWaterMesh(
   //   C: (phase01, speed, approachM, 0)
   // `syncWaveStamps` uploads on reference change (setWaveStamps installs a
   // new array), exactly like the zone sync.
-  const waveStampSlotsA: THREE.Vector4[] = []
-  const waveStampSlotsB: THREE.Vector4[] = []
-  const waveStampSlotsC: THREE.Vector4[] = []
-  for (let i = 0; i < MAX_WAVE_STAMPS; i++) {
-    waveStampSlotsA.push(new THREE.Vector4(0, 0, 1, 0))
-    waveStampSlotsB.push(new THREE.Vector4(1, 0, 1, 1))
-    waveStampSlotsC.push(new THREE.Vector4(0, 1, 1, 0))
+  // ONE shared event-uniform array for stamps (3 vec4 rows each) AND the
+  // splash rings (1 vec4 each, appended after the stamp block). WebGPU
+  // caps UNIFORM BUFFERS at 12 per stage and every TSL uniformArray is
+  // its own buffer — four separate event arrays blew the vertex stage to
+  // 14 ("exceeds the maximum per-stage limit"), the bind-group cousin of
+  // the 16-varying cap. Packing layout:
+  //   [i*3 + 0]  stamp i row A: (x0, z0, ux, uz)
+  //   [i*3 + 1]  stamp i row B: (len, amplitude, widthM, periodS)
+  //   [i*3 + 2]  stamp i row C: (phase01, speed, approachM, 0)
+  //   [RING_BASE + j]  ring j: (x, z, t0, amp)
+  const WAVE_EVENT_RING_BASE = MAX_WAVE_STAMPS * 3
+  const waveEventSlots: THREE.Vector4[] = []
+  for (let i = 0; i < WAVE_EVENT_RING_BASE + MAX_SPLASH_RINGS; i++) {
+    waveEventSlots.push(new THREE.Vector4(0, 0, 0, 0))
   }
-  const waveStampsAUniform = uniformArray(waveStampSlotsA, 'vec4')
-  const waveStampsBUniform = uniformArray(waveStampSlotsB, 'vec4')
-  const waveStampsCUniform = uniformArray(waveStampSlotsC, 'vec4')
+  // Park ring slots dead (t0 = −1e9 → age far past LIFE).
+  for (let j = 0; j < MAX_SPLASH_RINGS; j++) {
+    waveEventSlots[WAVE_EVENT_RING_BASE + j]!.set(0, 0, -1e9, 0)
+  }
+  const waveEventsUniform = uniformArray(waveEventSlots, 'vec4')
   const waveStampCountUniform = uniform(0)
 
   // Per-vertex stamp evaluation — two TSL Fns over the same unrolled
@@ -1452,11 +1476,11 @@ export function createWaterMesh(
     for (let i = 0; i < MAX_WAVE_STAMPS; i++) {
       If(float(i).lessThan(waveStampCountUniform), () => {
         // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray swizzle proxy
-        const a = waveStampsAUniform.element(i) as any
+        const a = waveEventsUniform.element(i * 3) as any
         // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray swizzle proxy
-        const b = waveStampsBUniform.element(i) as any
+        const b = waveEventsUniform.element(i * 3 + 1) as any
         // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray swizzle proxy
-        const cc = waveStampsCUniform.element(i) as any
+        const cc = waveEventsUniform.element(i * 3 + 2) as any
         const x0 = float(a.x)
         const z0 = float(a.y)
         const ux = float(a.z)
@@ -1534,13 +1558,74 @@ export function createWaterMesh(
     let n = 0
     for (const st of field.stamps) {
       if (n >= MAX_WAVE_STAMPS) break
-      waveStampSlotsA[n]!.set(st.x0, st.z0, st._ux, st._uz)
-      waveStampSlotsB[n]!.set(st._len, st.amplitude, st.widthM, st.periodS)
-      waveStampSlotsC[n]!.set(st.phase01 ?? 0, st.speed, st.approachM, 0)
+      waveEventSlots[n * 3]!.set(st.x0, st.z0, st._ux, st._uz)
+      waveEventSlots[n * 3 + 1]!.set(st._len, st.amplitude, st.widthM, st.periodS)
+      waveEventSlots[n * 3 + 2]!.set(st.phase01 ?? 0, st.speed, st.approachM, 0)
       n++
     }
     waveStampCountUniform.value = n
   }
+
+  // ---- Splash rings (water-next-research §7.5, P4.1) ---------------------
+  //
+  // Landing event waves: the sim's `field.rings` pool (splash-rings.ts)
+  // mirrored into a fixed uniform array — vec4(x, z, t0, amp) per slot,
+  // re-uploaded every tick like the wake trails (rings mutate in place;
+  // 12 vec4s is nothing). The vertex Fn below evaluates the identical
+  // closed form the CPU samplers use, so the bump a trailing rider feels
+  // from someone's landing IS the ring the player sees radiate.
+  const SPLASH_RING_STRENGTH_DEFAULT = 1.0
+  const splashRingStrengthUniform = uniform(SPLASH_RING_STRENGTH_DEFAULT)
+  function syncSplashRings(): void {
+    for (let i = 0; i < MAX_SPLASH_RINGS; i++) {
+      const ring = field.rings[i]
+      const slot = waveEventSlots[WAVE_EVENT_RING_BASE + i]!
+      if (ring) slot.set(ring.x, ring.z, ring.t0, ring.amp)
+      else slot.set(0, 0, -1e9, 0)
+    }
+  }
+
+  // vec3(y, dy/dx, dy/dz) — mirror of `sampleSplashRings` (vy is CPU-only).
+  // Dead slots (t0 = −1e9 → age past LIFE) zero out via the age gate.
+  const splashRingSum = Fn(([x, z, t]: [unknown, unknown, unknown]) => {
+    const xN = x as ReturnType<typeof float>
+    const zN = z as ReturnType<typeof float>
+    const tN = t as ReturnType<typeof float>
+    const y = float(0).toVar()
+    const dydx = float(0).toVar()
+    const dydz = float(0).toVar()
+    for (let i = 0; i < MAX_SPLASH_RINGS; i++) {
+      // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray swizzle proxy
+      const slot = waveEventsUniform.element(WAVE_EVENT_RING_BASE + i) as any
+      const ox = float(slot.x)
+      const oz = float(slot.y)
+      const t0 = float(slot.z)
+      const ampRaw = float(slot.w)
+      const age = tN.sub(t0)
+      // Age gate folds the slot-dead case in (huge age → 0).
+      const aliveT = clamp(float(1).sub(age.div(float(SPLASH_RING_LIFE_S))), float(0), float(1))
+      If(aliveT.greaterThan(float(0)).and(age.greaterThan(float(0))), () => {
+        const dx = xN.sub(ox)
+        const dz = zN.sub(oz)
+        const r = sqrt(dx.mul(dx).add(dz.mul(dz)).add(float(1e-9)))
+        const R = age.mul(float(SPLASH_RING_SPEED))
+        const xi = clamp(r.sub(R).div(float(SPLASH_RING_WIDTH)), float(-6), float(6))
+        const decay = aliveT.mul(aliveT)
+        const spread = float(1).div(sqrt(float(1).add(R)))
+        const eP = exp(xi)
+        const eM = float(1).div(eP)
+        const sech = float(2).div(eP.add(eM))
+        const sech2 = sech.mul(sech)
+        const tanhN = eP.sub(eM).div(eP.add(eM))
+        const envelope = ampRaw.mul(splashRingStrengthUniform).mul(decay).mul(spread)
+        y.addAssign(envelope.mul(sech2))
+        const dyDr = envelope.mul(float(-2)).div(float(SPLASH_RING_WIDTH)).mul(sech2).mul(tanhN)
+        dydx.addAssign(dyDr.mul(dx).div(r))
+        dydz.addAssign(dyDr.mul(dz).div(r))
+      })
+    }
+    return vec3(y, dydx, dydz)
+  })
 
   // Blended zone factors at world (x, z) and field time t. Returns
   // vec4(heightMult, freqMult, effectiveBearingRad, surgeY) — the effective
@@ -2297,15 +2382,22 @@ export function createWaterMesh(
   // outside the set envelope, mirroring `sampleHeight`.
   const stampGeom = waveStampGeometry(worldX, worldZ, tNode, vertexWaterDepth)
   const stampSig = waveStampSignals(worldX, worldZ, tNode, vertexWaterDepth)
+  // Splash rings — landing event waves, same world-XZ evaluation.
+  const ringGeom = splashRingSum(worldX, worldZ, tNode)
 
   // Zone surge joins UNattenuated, after the shoal-multiplied wave sum —
   // mirror of `sampleHeight` (`y += zoneFx.surgeY` outside the shoal term).
   // Like the CPU, surge contributes height only: zero slope (the lift is
   // near-uniform inside the zone's weight envelope), so the normals below
   // don't tilt with it.
-  const totalHeight = attenAmbient.add(vertexBike.x).add(shoreY).add(zoneSurgeY).add(stampGeom.x)
-  const totalDydx = attenDydx.add(vertexBike.y).add(shoreDydx).add(stampGeom.y)
-  const totalDydz = attenDydz.add(vertexBike.z).add(shoreDydz).add(stampGeom.z)
+  const totalHeight = attenAmbient
+    .add(vertexBike.x)
+    .add(shoreY)
+    .add(zoneSurgeY)
+    .add(stampGeom.x)
+    .add(ringGeom.x)
+  const totalDydx = attenDydx.add(vertexBike.y).add(shoreDydx).add(stampGeom.y).add(ringGeom.y)
+  const totalDydz = attenDydz.add(vertexBike.z).add(shoreDydz).add(stampGeom.z).add(ringGeom.z)
 
   // Foam accumulator (stateless, no render targets needed).
   //
@@ -4228,6 +4320,7 @@ export function createWaterMesh(
     streakElongation: STREAK_ELONGATION_DEFAULT,
     shoreWaveStrength: SHORE_WAVE_STRENGTH_DEFAULT,
     shoalSurf: SHOAL_SURF_DEFAULT,
+    splashRings: SPLASH_RING_STRENGTH_DEFAULT,
     pinchDirection: PINCH_DIRECTION_DEFAULT,
     whitecapCurvature: WHITECAP_CURVATURE_DEFAULT,
     whitecapLeadBias: WHITECAP_LEAD_BIAS_DEFAULT,
@@ -4446,6 +4539,12 @@ export function createWaterMesh(
       const v = clamp01(s, 0, 1)
       shoalSurfUniform.value = v
       field.shoalSurfStrength = v
+    },
+    setSplashRings(s) {
+      // 0..1.5 — landing event-wave strength, both sides from one scalar.
+      const v = clamp01(s, 0, 1.5)
+      splashRingStrengthUniform.value = v
+      field.splashRingStrength = v
     },
     setPinchDirection(deg) {
       // 0..90° — rotation of the Gerstner horizontal-displacement
@@ -4983,6 +5082,8 @@ export function createWaterMesh(
     // Per-track wave zones + stamps — re-uploaded only on list change.
     syncWaveZones()
     syncWaveStamps()
+    // Splash rings — re-uploaded every tick (the pool mutates in place).
+    syncSplashRings()
     // Keep the GPU steepness at the CLAMPED effective value — it depends on the
     // live amplitudes that Beaufort / lap-weather / the menu mutate. The CPU
     // buoyancy sampler clamps identically, so render + physics pinch the same.
@@ -5138,9 +5239,14 @@ export function createWaterMesh(
       dzRot += qScaled * rotDirZ * amp * c
     }
     out.x = x + (dxRot * cosB - dzRot * sinB) * shoal
-    // Authored stamps join unattenuated, like surge (the GPU adds them to
-    // totalHeight outside the shoal multiply).
-    out.y = y * shoal + zoneFx.surgeY + sampleStampsAt(field, x, z, t).y + mesh.position.y
+    // Authored stamps + splash rings join unattenuated, like surge (the
+    // GPU adds them to totalHeight outside the shoal multiply).
+    out.y =
+      y * shoal +
+      zoneFx.surgeY +
+      sampleStampsAt(field, x, z, t).y +
+      sampleSplashRings(field, x, z, t).y +
+      mesh.position.y
     out.z = z + (dxRot * sinB + dzRot * cosB) * shoal
   }
 
