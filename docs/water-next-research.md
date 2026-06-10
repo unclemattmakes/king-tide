@@ -120,8 +120,10 @@ depth absorption with seabed transmission, two detail-normal cascades (6 m /
 noise-wandering roughness/sparkle + Toksvig specular AA, Karis sun disc +
 anisotropic streak, and the **2026-06 foam stack**: curvature-placed whitecaps
 (`Σ A·k²·sin φ`, steepness-independent) biased to the **leading edge**
-(`∂h/∂t > 0` = rising = front face), near-binary solid-disc bubble texture,
-brushstroke streak sheet combed down steep faces, shoreline surf + swash,
+(`∂h/∂t > 0` = rising = front face), near-binary break-up masking by
+procedural **oil-stroke sheets** pulled parallel to the crest lines (global
+mass dabs + on-face streak bands — `foamBrush` knob, foam-look-plan §13;
+replaced the solid-disc bubble texture 2026-06-09), shoreline surf + swash,
 crest-mist ribbon. Spray layers (crest poofs, climb-rate bow spray, surge
 spray) are CPU-driven render-only particles.
 
