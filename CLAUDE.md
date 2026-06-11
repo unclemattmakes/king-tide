@@ -58,12 +58,12 @@ linked docs — extend those rather than growing this file.
 ## Current direction (v2) — orientation only; detail in the docs
 
 Web-first arcade hover-bike racer; near-future post-warming world where every
-track is a recognizable real place seen post-flood.
+track is named for a city — real or fictional — seen post-flood.
 
 **Where we are now:** racing mechanics are **in** and in **precision-tuning**;
 the Blender level tooling is **in** and ready for real level work; the current
-proof-of-thesis is making **shippable versions of the Reef Cup maps** (Sandbar →
-Texcoco Rising → Cape Town Drift). Verify against that with **headed Playwright**
+proof-of-thesis is making **shippable versions of the Reef Cup maps** (Mayday Bay →
+Mexico City → Cape Town Drift). Verify against that with **headed Playwright**
 (hard rule 2), not the preview tool.
 
 Three things that are easy to assume wrong from older docs:
@@ -71,8 +71,8 @@ Three things that are easy to assume wrong from older docs:
 - **Anti-grav is cut** (parked for a possible future DLC). `anti-grav.ts` + HUD +
   Blender tools stay parked; no shipped track places anti-grav zones. Anything
   calling it "shipped" is v1-historical.
-- **`status: 'ship'` means wired/playable, not art-complete.** Only **Sandbar**
-  and **The Maw** are dressed; the rest are greybox route-stubs awaiting the v2
+- **`status: 'ship'` means wired/playable, not art-complete.** Only **Mayday Bay**
+  (the tutorial lagoon, slug `sandbar`) and **The Maw** are dressed; the rest are greybox route-stubs awaiting the v2
   art pass.
 - **Signature mechanic is wave mastery** — the motocross "master the jump" model
   (pitch the takeoff/landing), not the old press-forward-on-crest pump.

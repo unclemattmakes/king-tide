@@ -4,7 +4,7 @@
 > v1 finale), from a Midjourney environment-concept pass (2026-06-01). No authored
 > `.blend` yet — mood/material targets grounded in the design docs. Layout follows
 > [tracks/liberty-drowned.md](./liberty-drowned.md), the *look* follows this doc.
-> **Completes the v1 art-target set (all 12 tracks + sandbar).**
+> **Completes the v1 art-target set (all 12 tracks + Mayday Bay).**
 >
 > Downstream of [art-direction.md](../art-direction.md) and
 > [track-art-direction.md](../track-art-direction.md#12-liberty-drowned--urban-neon--15--55--30----finale)

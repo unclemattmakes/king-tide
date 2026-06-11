@@ -175,9 +175,11 @@ Wave-mastery means:
    + ready states + 1 Hz ping/pong latency display + sticky raceStarted
    bit for late joiners. State-sync stable; perf at full field still
    pending.
-4. ✅ **Two more bike variants** — Scout (heavyweight, soft hover spring
-   → punishing wave-pump timing + biggest launch) + Sparrow (lightweight,
-   stiffest spring + highest surfaceFollow → forgiving + further launch).
+4. ✅ **Two more bike variants** — Scout (heaviest chassis, soft hover spring
+   → late-but-biggest launch) + Sparrow (lightest chassis, stiffest spring +
+   highest surfaceFollow → most-forgiving pump). The five bikes are one
+   balanced class, not a weight-tier — each wins on a couple of axes, none is
+   a strict upgrade (see `src/game/bikes/variants.ts`).
 5. ✅ **Per-track best-lap leaderboard** + global submission with HMAC
    sig + moderation CLI.
 6. ⬜ **Photo/replay mode.** Recorder + pose-replay infrastructure

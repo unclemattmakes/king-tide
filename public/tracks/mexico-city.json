@@ -1,8 +1,8 @@
 {
-  "id": "texcoco-rising",
-  "name": "texcoco-rising",
+  "id": "mexico-city",
+  "name": "mexico-city",
   "lapsToFinish": 3,
-  "environmentGlb": "/assets/tracks/texcoco-rising.glb",
+  "environmentGlb": "/assets/tracks/mexico-city.glb",
   "water": {
     "height": 0.0
   },
@@ -1878,7 +1878,7 @@
   "props": [
     {
       "type": "asset",
-      "assetId": "tex/trajinera",
+      "assetId": "mxc/trajinera",
       "position": {
         "x": -120.0,
         "y": -0.3,
@@ -1898,7 +1898,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/trajinera",
+      "assetId": "mxc/trajinera",
       "position": {
         "x": 150.0,
         "y": -0.3,
@@ -1918,7 +1918,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": -113.234,
         "y": -1.5,
@@ -1938,7 +1938,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": -108.69,
         "y": -1.5,
@@ -1958,7 +1958,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": -119.692,
         "y": -1.5,
@@ -1978,7 +1978,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": -95.046,
         "y": -1.5,
@@ -1998,7 +1998,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": -92.12,
         "y": -1.5,
@@ -2018,7 +2018,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": -95.245,
         "y": -1.5,
@@ -2038,7 +2038,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": -63.354,
         "y": -1.5,
@@ -2058,7 +2058,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": -75.73,
         "y": -1.5,
@@ -2078,7 +2078,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": -61.268,
         "y": -1.5,
@@ -2098,7 +2098,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 21.693,
         "y": -1.5,
@@ -2118,7 +2118,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 14.751,
         "y": -1.5,
@@ -2138,7 +2138,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 7.752,
         "y": -1.5,
@@ -2158,7 +2158,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 24.402,
         "y": -1.5,
@@ -2178,7 +2178,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 42.248,
         "y": -1.5,
@@ -2198,7 +2198,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 47.165,
         "y": -1.5,
@@ -2218,7 +2218,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 51.903,
         "y": -1.5,
@@ -2238,7 +2238,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 54.111,
         "y": -1.5,
@@ -2258,7 +2258,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 36.515,
         "y": -1.5,
@@ -2278,7 +2278,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 60.408,
         "y": -1.5,
@@ -2298,7 +2298,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 64.774,
         "y": -1.5,
@@ -2318,7 +2318,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 82.511,
         "y": -1.5,
@@ -2338,7 +2338,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 68.359,
         "y": -1.5,
@@ -2358,7 +2358,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 82.625,
         "y": -1.5,
@@ -2378,7 +2378,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 99.392,
         "y": -1.5,
@@ -2398,7 +2398,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 97.566,
         "y": -1.5,
@@ -2418,7 +2418,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 125.642,
         "y": -1.5,
@@ -2438,7 +2438,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 115.628,
         "y": -1.5,
@@ -2458,7 +2458,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 114.093,
         "y": -1.5,
@@ -2478,7 +2478,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 127.304,
         "y": -1.5,
@@ -2498,7 +2498,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 141.147,
         "y": -1.5,
@@ -2518,7 +2518,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 150.255,
         "y": -1.5,
@@ -2538,7 +2538,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 139.356,
         "y": -1.5,
@@ -2558,7 +2558,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 150.002,
         "y": -1.5,
@@ -2578,7 +2578,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 170.926,
         "y": -1.5,
@@ -2598,7 +2598,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 166.721,
         "y": -1.5,
@@ -2618,7 +2618,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 166.339,
         "y": -1.5,
@@ -2638,7 +2638,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/trajinera",
+      "assetId": "mxc/trajinera",
       "position": {
         "x": -40,
         "y": -0.3,
@@ -2658,7 +2658,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/trajinera",
+      "assetId": "mxc/trajinera",
       "position": {
         "x": -150,
         "y": -0.3,
@@ -2678,7 +2678,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/trajinera",
+      "assetId": "mxc/trajinera",
       "position": {
         "x": 150,
         "y": -0.3,
@@ -2698,7 +2698,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/trajinera",
+      "assetId": "mxc/trajinera",
       "position": {
         "x": 40,
         "y": -0.3,
@@ -2718,7 +2718,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/trajinera",
+      "assetId": "mxc/trajinera",
       "position": {
         "x": -120,
         "y": -0.3,
@@ -2858,7 +2858,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 434.2,
         "y": 25.21,
@@ -2878,7 +2878,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 426.2,
         "y": 26.56,
@@ -2898,7 +2898,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 359.9,
         "y": 22.77,
@@ -2918,7 +2918,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 412.1,
         "y": 35.04,
@@ -2938,7 +2938,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 375.6,
         "y": 22.3,
@@ -2958,7 +2958,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 368.9,
         "y": 23.64,
@@ -2978,7 +2978,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 351.6,
         "y": 27.93,
@@ -2998,7 +2998,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 446.5,
         "y": 25.56,
@@ -3018,7 +3018,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": -5.6,
         "y": -1.5,
@@ -3038,7 +3038,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": -26.102,
         "y": -1.5,
@@ -3058,7 +3058,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 34.9,
         "y": -1.5,
@@ -3078,7 +3078,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": -43.0,
         "y": -1.5,
@@ -3098,7 +3098,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": -37.1,
         "y": -1.5,
@@ -3118,7 +3118,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 14.415,
         "y": -1.5,
@@ -3138,7 +3138,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 13.9,
         "y": -1.5,
@@ -3158,7 +3158,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 19.9,
         "y": -1.5,
@@ -3178,7 +3178,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": -14.43,
         "y": -1.5,
@@ -3198,7 +3198,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": -10.8,
         "y": -1.5,
@@ -3218,7 +3218,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": -22.2,
         "y": -1.5,
@@ -3238,7 +3238,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 4.5,
         "y": -1.5,
@@ -3258,7 +3258,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": -95.941,
         "y": -1.5,
@@ -3278,7 +3278,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": -121.5,
         "y": -1.5,
@@ -3298,7 +3298,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": -57.9,
         "y": -1.5,
@@ -3318,7 +3318,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": -76.385,
         "y": -1.5,
@@ -3338,7 +3338,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": -112.71,
         "y": -1.5,
@@ -3358,7 +3358,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 47.5,
         "y": -1.5,
@@ -3378,7 +3378,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 53.0,
         "y": -1.5,
@@ -3398,7 +3398,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/jacaranda",
+      "assetId": "mxc/jacaranda",
       "position": {
         "x": 55.1,
         "y": -1.5,
@@ -3418,7 +3418,7 @@
     },
     {
       "type": "asset",
-      "assetId": "tex/ahuehuete",
+      "assetId": "mxc/ahuehuete",
       "position": {
         "x": 86.5,
         "y": -1.5,

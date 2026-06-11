@@ -12,7 +12,7 @@
 > (Hatteras = Reef pastel **cool grade**, **30 built / 35 broken / 35 blooming** —
 > the most *balanced* Reef track: the lighthouse is kept, the sea is winning).
 > Completes the Reef cup alongside
-> [texcoco-rising-art-target.md](./texcoco-rising-art-target.md) (warm) and
+> [mexico-city-art-target.md](./mexico-city-art-target.md) (warm) and
 > [cape-town-drift-art-target.md](./cape-town-drift-art-target.md) (cool bright).
 > Hatteras is the **moody overcast** end of the Reef range.
 
@@ -147,6 +147,6 @@ waterline in the Reef cup (decades of rising water). Match it on the base:
 
 ## References
 - [hatteras-light.md](./hatteras-light.md) — the track (beats, props, palette).
-- [texcoco-rising-art-target.md](./texcoco-rising-art-target.md) · [cape-town-drift-art-target.md](./cape-town-drift-art-target.md) · [sandbar-art-target.md](./sandbar-art-target.md) — sister passes.
+- [mexico-city-art-target.md](./mexico-city-art-target.md) · [cape-town-drift-art-target.md](./cape-town-drift-art-target.md) · [sandbar-art-target.md](./sandbar-art-target.md) — sister passes.
 - [track-art-pass-playbook.md](../track-art-pass-playbook.md) — placement / AI-corridor clearance / re-export.
 - [art-direction.md](../art-direction.md) — register, material-state rule, waterline trio, palette appendix.

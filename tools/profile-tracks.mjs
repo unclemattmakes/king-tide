@@ -49,7 +49,7 @@ const REPORT_DIR = 'perf-report'
 // The art-complete tracks (Sandbar, The Maw). The rest of the catalog is
 // greybox route-stubs awaiting the v2 art pass, so profiling them would
 // measure unfinished scenes — skip by default. (South Beach Sunken left
-// this list when its slot was rebuilt as the greybox-pending Texcoco
+// this list when its slot was rebuilt as the greybox-pending Mexico City
 // Rising / Mexico City.)
 const DEFAULT_TRACKS = ['sandbar', 'the-maw']
 

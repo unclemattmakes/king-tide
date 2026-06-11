@@ -100,7 +100,7 @@ export const MIN_LAP_SECONDS_BY_TRACK: Readonly<Record<string, number>> = Object
   // V1 ship tracks — derived from `V1_TRACKS.lapTarget × 0.4`. Numbers
   // here are static so the server doesn't need the menu catalogue.
   sandbar: 24,
-  'texcoco-rising': 18,
+  'mexico-city': 18,
   'hatteras-light': 20,
   'cape-town-drift': 19,
   'the-maw': 24,

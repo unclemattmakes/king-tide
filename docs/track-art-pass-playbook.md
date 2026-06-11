@@ -116,8 +116,8 @@ The rule is therefore about **blocking**, not mere presence — two prop classes
   **flank** the line, never sit on it: keep `dist(collider, AI spline) ≥ ~8 m`
   (bike half-width ~2 + prop footprint ~4 + margin) and keep them scattered so a
   continuous drivable groove always remains. A flooded causeway lined with trees
-  is exactly this: *on* the race line, but you weave through them. (Texcoco
-  Rising's lake grove flanks the start/Zócalo line at 8 m — Matt's call, 2026-06:
+  is exactly this: *on* the race line, but you weave through them. (Mexico
+  City's lake grove flanks the start/Zócalo line at 8 m — Matt's call, 2026-06:
   any on-line tree within 8 m of the spline gets nudged out perpendicular,
   keeping its along-track position.)
 

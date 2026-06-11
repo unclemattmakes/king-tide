@@ -52,7 +52,7 @@ Surveyed by grepping `emitter_NN` / `wave_zone_NN` / `landmark_*` /
 
 | Track | Wave zones | Emitters | Library landmarks | Foliage / scatter |
 |---|---|---|---|---|
-| Sandbar | tutorial-low | **8** | 0 | 0 |
+| Mayday Bay | tutorial-low | **8** | 0 | 0 |
 | South Beach Sunken | 7 | 1 | 4 facades | **16 palms (only track w/ palms)** |
 | Hatteras Light | 11 | 1 | 1 lighthouse | 0 |
 | Cape Town Drift | 3 | 1 | aquarium + wheel | 0 |
@@ -470,7 +470,7 @@ biome for 3 structure archetypes.
 ### Layer I — Emitter coverage (use what's already shipped)
 
 The particle system supports 16 atlas cells and an unbounded number
-of emitter empties; only Sandbar uses more than 1 emitter (it uses
+of emitter empties; only Mayday Bay uses more than 1 emitter (it uses
 8). The asset-pipeline plan called for **3–6 emitters per track**
 covering wave-pump flash, lava steam, neon glare, gull flocks, palm
 sway, torch flame, oxidation shimmer, jungle motes, container rust,
