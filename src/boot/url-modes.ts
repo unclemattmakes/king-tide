@@ -159,6 +159,17 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     return 'handled'
   }
 
+  // Water lab: `?waterlab=1`. Deep open ocean + the full WATER tuner
+  // (auto-opened) + motion ground-truth instruments (phase-speed pace
+  // cones, drifter grid, analytic iso-line speed probe) for analyzing
+  // the water's look — built for the contour-line "sliding" study.
+  if (earlyParams.get('waterlab') !== null) {
+    setLoadingMessage('Loading water lab…')
+    const { bootWaterLabMode } = await import('./water-lab-mode')
+    await bootWaterLabMode(appEl)
+    return 'handled'
+  }
+
   // End-of-cup podium ceremony: `?podium=1`. Reads the completed cup from
   // sessionStorage, stages the 3D trophy ceremony, then slides the final
   // championship standings card in. Reached from the cup-finale finish

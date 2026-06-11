@@ -376,6 +376,28 @@ export type WaterMesh = {
      *  nicked near crests and hardest in the troughs (lines cling to the
      *  crests instead of running the whole sea). */
     setContourBreakup(s: number): void
+    /** Iso-coherence for the readability field (ramp + contours + relief),
+     *  0..1. Iso-lines of the legacy multi-train swell sum locally race far
+     *  past any train's phase speed where the trains' slopes cancel (the
+     *  "contours slide over the surface" artifact, worst once per set-beat
+     *  cycle); at 1 the field keys to the dominant train only, so every
+     *  contour rides the primary swell at exactly its phase speed. */
+    setContourCoherence(s: number): void
+    /** Live EFFECTIVE iso-coherence (authored base + the speed-coupled calm
+     *  drive, as rendered this frame) — the `?waterlab` CPU probe mirrors
+     *  the GPU blend with it. */
+    getContourCoherence(): number
+    /** Speed-coupled contour calm, 0..1. Drives the effective coherence
+     *  toward 1 as the observer (camera origin) slows: standing riders and
+     *  the intro flyby see lines pinned to the primary swell (riding the
+     *  crests, never outrunning them), and the authored two-train
+     *  liveliness fades back in by ~11 m/s. 0 = no coupling (legacy). */
+    setContourCalmAtRest(s: number): void
+    /** Contour slope-gate raise, 0..1. Iso-lines sweep at ∂h/∂t ÷ slope, so
+     *  the flattest gated-in faces carry the fastest-sliding lines; raising
+     *  the window (0 = legacy 0.02..0.06 → 1 = 0.06..0.14) trims those
+     *  first. */
+    setContourGate(s: number): void
     /** Rising-face strokes, 0..2. Tapered brush strokes pulled UP the leading
      *  (rising) face of an approaching wave — perpendicular to the contour
      *  crest lines (the "vertical strokes climbing the wave coming at you"
@@ -469,6 +491,15 @@ export type WaterDebugDefaults = {
   contourRelief: number
   /** P1 readability contour break-up, 0..1 (solid lines ↔ trough-biased dashes). */
   contourBreakup: number
+  /** Iso-coherence 0..1: legacy multi-train readability field (0) ↔ keyed to
+   *  the dominant swell train only (1) — kills the iso-line "racing". */
+  contourCoherence: number
+  /** Speed-coupled calm 0..1: effective coherence → 1 as the observer slows
+   *  (rest/intro = lines pinned to the primary swell), authored look returns
+   *  at speed. 0 = no coupling. */
+  contourCalmAtRest: number
+  /** Contour slope-gate raise 0..1 (legacy 0.02..0.06 ↔ 0.06..0.14 window). */
+  contourGate: number
   /** Rising-face strokes, 0..2: crest-perpendicular brush marks climbing the
    *  leading face of approaching waves. 0.5 = baseline, 0 = off. */
   riseStroke: number
@@ -1217,6 +1248,67 @@ export function createWaterMesh(
     swellAmpSumAcc = swellAmpSumAcc.add(abs(float(waveAmpUniform.element(i) as any)))
   }
   const swellAmpSum = float(swellAmpSumAcc)
+  // Iso-coherence for the P1 readability field (ramp + contour lines +
+  // relief twin — the `?waterlab` scene's primary knob). An iso-height line
+  // of a height field sweeps at −∂h/∂t ÷ |∇h|: for a SINGLE wave train
+  // that's exactly its phase speed everywhere, but for the multi-train
+  // swell sum it exceeds the primary train's phase speed with sideways
+  // direction wobble wherever the trains' slopes partially cancel (which
+  // the deliberate set-beat pair guarantees every cycle; ~10–11 m/s vs
+  // the 8.6 m/s primary at gated-in slopes, unbounded below the gate
+  // where lines fade) — the "contour lines slide over the surface faster
+  // than the water" artifact. At coherence 1 the readability field keys
+  // to the DOMINANT swell train alone, so every contour rides the
+  // primary swell at exactly its phase speed; 0 = legacy full swell sum.
+  // Blended in the VERTEX stage so no extra varyings are spent; costs one
+  // extra wave's sin/cos per vertex. Render-readability only — buoyancy,
+  // shoaling and the drawn geometry never read it.
+  const CONTOUR_COHERENCE_DEFAULT = 0
+  const contourCoherenceUniform = uniform(CONTOUR_COHERENCE_DEFAULT)
+  // Speed-coupled calm (Matt's call after the ?waterlab study): the slide
+  // reads worst when the OBSERVER is still — standing riders, the intro
+  // flyby — because nothing masks the line motion; at race speed your own
+  // motion dominates and the livelier two-train field is fine. So tick()
+  // drives the EFFECTIVE coherence toward 1 as the observer slows:
+  //   effective = mix(authored base, 1, calmAtRest × (1 − speedFactor))
+  // where speedFactor ramps 0→1 over CALM_SPEED_LO..HI m/s of smoothed
+  // mesh-origin (camera) speed. At rest the lines pin to the primary swell
+  // (riding the crests, never outrunning them); by ~swell phase speed the
+  // authored look is fully back. calmAtRest 0 = no coupling (legacy).
+  const CONTOUR_CALM_AT_REST_DEFAULT = 1
+  let contourCoherenceBase = CONTOUR_COHERENCE_DEFAULT
+  let contourCalmAtRest = CONTOUR_CALM_AT_REST_DEFAULT
+  const CALM_SPEED_LO = 2
+  const CALM_SPEED_HI = 11
+  /** Observer-speed smoothing time constant, s — absorbs chase-cam bob and
+   *  the 1 m origin snap without lagging a real launch/stop by much. */
+  const CALM_SPEED_TAU = 0.6
+  /** Instantaneous speed cap, m/s — a respawn/camera-cut teleport must not
+   *  spike the EMA with a 1-frame multi-hundred-m/s sample. */
+  const CALM_SPEED_MAX = 60
+  let observerSpeedSmoothed = 0
+  let observerPrevX: number | null = null
+  let observerPrevZ: number | null = null
+  let observerPrevMs: number | null = null
+  let dominantSwellIndex = -1
+  for (const i of SWELL_INDICES) {
+    const a = Math.abs(baseAmplitudes[i] ?? 0)
+    if (dominantSwellIndex < 0 || a > Math.abs(baseAmplitudes[dominantSwellIndex] ?? 0)) {
+      dominantSwellIndex = i
+    }
+  }
+  const DOMINANT_SWELL_INDICES: ReadonlySet<number> = new Set(
+    dominantSwellIndex >= 0 ? [dominantSwellIndex] : [],
+  )
+  // Live |A| of the dominant train — the ramp's span normalisation follows
+  // the coherence blend (full swell span ↔ dominant-only span) so band
+  // centring holds at any coherence. (Amplitude writers scale the swell
+  // band together, so the static argmax pick stays the live dominant.)
+  const dominantSwellAmpAbs =
+    dominantSwellIndex >= 0
+      ? // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray element
+        abs(float(waveAmpUniform.element(dominantSwellIndex) as any))
+      : float(0)
   // Shoaling-v2 blend (legacy kill-switch ↔ surf), mirroring
   // `field.shoalSurfStrength` — the setter writes both, like steepness.
   const SHOAL_SURF_DEFAULT = 1.0
@@ -1937,6 +2029,9 @@ export function createWaterMesh(
     )
   const gerstnerHeight = buildGerstnerHeight(null)
   const gerstnerSwellHeight = buildGerstnerHeight(SWELL_INDICES)
+  // Dominant-train-only variant for the readability iso-coherence blend
+  // (see CONTOUR_COHERENCE_DEFAULT above). Drawn geometry never uses it.
+  const gerstnerDominantSwellHeight = buildGerstnerHeight(DOMINANT_SWELL_INDICES)
 
   // Analytic crest signals for curvature-based whitecap foam (foam pass v3).
   // Two extra sums over the same waves the height uses — both reuse sin/cos so
@@ -2693,7 +2788,7 @@ export function createWaterMesh(
   // foam languages. The gradient also powers the relief twin's first-order
   // offset re-sample, so it must carry the same zone/shoal scaling as the
   // height.
-  const swellSig = gerstnerSwellHeight(
+  const swellSigFull = gerstnerSwellHeight(
     worldX,
     worldZ,
     tNode,
@@ -2702,6 +2797,20 @@ export function createWaterMesh(
     zoneCosBearing,
     zoneSinBearing,
   )
+  // Iso-coherence blend (see CONTOUR_COHERENCE_DEFAULT): full swell sum ↔
+  // dominant train only. mix(full, dom, c) = dom + (1−c)·(other trains),
+  // so 0 is byte-identical to the legacy field. Blending HERE (before the
+  // varying pack) is what keeps the varying budget flat at the WebGPU cap.
+  const swellSigDominant = gerstnerDominantSwellHeight(
+    worldX,
+    worldZ,
+    tNode,
+    zoneHeightMult,
+    zoneFreqMult,
+    zoneCosBearing,
+    zoneSinBearing,
+  )
+  const swellSig = mix(swellSigFull, swellSigDominant, contourCoherenceUniform)
   const swellScaled = swellSig.mul(shoalFactor)
 
   // Forward the per-vertex signals to the fragment stage, PACKED four to a
@@ -4071,6 +4180,12 @@ export function createWaterMesh(
   const CONTOUR_SPACING_DEFAULT = 0.45
   const CONTOUR_RELIEF_DEFAULT = 0.6
   const CONTOUR_BREAKUP_DEFAULT = 1.0
+  // Slope-gate raise (the iso-coherence knob's partner — `?waterlab`).
+  // Iso-lines sweep at ∂h/∂t ÷ slope, so the FLATTEST faces that pass the
+  // gate carry the fastest-sliding lines; raising the gate window from the
+  // legacy (0.02, 0.06) toward (0.06, 0.14) trims those first while steep
+  // faces (where lines pack into the steepness cue) keep their contours.
+  const CONTOUR_GATE_DEFAULT = 0
   const rampStrengthUniform = uniform(RAMP_STRENGTH_DEFAULT)
   const rampStepsUniform = uniform(RAMP_STEPS_DEFAULT)
   const rampPosterizeUniform = uniform(RAMP_POSTERIZE_DEFAULT)
@@ -4078,6 +4193,7 @@ export function createWaterMesh(
   const contourSpacingUniform = uniform(CONTOUR_SPACING_DEFAULT)
   const contourReliefUniform = uniform(CONTOUR_RELIEF_DEFAULT)
   const contourBreakupUniform = uniform(CONTOUR_BREAKUP_DEFAULT)
+  const contourGateUniform = uniform(CONTOUR_GATE_DEFAULT)
   // Rising-face strokes (2026-06-10) — the perpendicular partner of the
   // contour lines. Where contours trace iso-height bands ALONG each crest,
   // these are tapered brush strokes pulled UP the leading (rising) face of an
@@ -4093,7 +4209,9 @@ export function createWaterMesh(
   // lap-weather storm ramp and the menu sliders keep the bands centred.
   // (`swellAmpSum` is the shared swell-band Σ|A| node defined alongside
   // `waveAmpUniform` — the shoaling-v2 break cap reads the same one.)
-  const swellSpan = max(swellAmpSum, float(0.05))
+  // Span follows the iso-coherence blend (full swell span ↔ dominant-only
+  // span) so the ramp bands stay centred on the field actually drawn.
+  const swellSpan = max(mix(swellAmpSum, dominantSwellAmpAbs, contourCoherenceUniform), float(0.05))
   const rampT = clamp(
     swellHeightFrag.div(swellSpan.mul(float(2))).add(float(0.5)),
     float(0),
@@ -4128,7 +4246,12 @@ export function createWaterMesh(
   // Contour lines. Slope gate: fract(h/spacing) degenerates into giant
   // on/off regions on near-flat water (which needs no shape cue anyway).
   const swellSlopeMag = sqrt(swellDydxFrag.mul(swellDydxFrag).add(swellDydzFrag.mul(swellDydzFrag)))
-  const contourSlopeGate = smoothstep(float(0.02), float(0.06), swellSlopeMag)
+  // Gate window rides the contourGate knob: legacy (0.02, 0.06) at 0 up to
+  // (0.06, 0.14) at 1 — see CONTOUR_GATE_DEFAULT for why raising it tames
+  // the fast-sliding lines on near-flat faces.
+  const contourGateLo = mix(float(0.02), float(0.06), contourGateUniform)
+  const contourGateHi = mix(float(0.06), float(0.14), contourGateUniform)
+  const contourSlopeGate = smoothstep(contourGateLo, contourGateHi, swellSlopeMag)
   // Screen-space height derivative — line width stays ~constant in pixels
   // on any face angle, and lines fade out where they'd pack below ~5 px.
   const swellHeightPx = max(fwidth(swellHeightFrag), float(1e-5))
@@ -4567,6 +4690,9 @@ export function createWaterMesh(
     contourSpacing: CONTOUR_SPACING_DEFAULT,
     contourRelief: CONTOUR_RELIEF_DEFAULT,
     contourBreakup: CONTOUR_BREAKUP_DEFAULT,
+    contourCoherence: CONTOUR_COHERENCE_DEFAULT,
+    contourCalmAtRest: CONTOUR_CALM_AT_REST_DEFAULT,
+    contourGate: CONTOUR_GATE_DEFAULT,
     riseStroke: RISE_STROKE_DEFAULT,
     wireframe: wireFlag,
     colorize: false,
@@ -4736,6 +4862,18 @@ export function createWaterMesh(
     },
     setContourBreakup(s) {
       contourBreakupUniform.value = clamp01(s, 0, 1)
+    },
+    setContourCoherence(s) {
+      // Authored BASE — tick() blends it toward 1 by calmAtRest × rest
+      // factor and writes the effective value to the uniform.
+      contourCoherenceBase = clamp01(s, 0, 1)
+    },
+    getContourCoherence: () => contourCoherenceUniform.value,
+    setContourCalmAtRest(s) {
+      contourCalmAtRest = clamp01(s, 0, 1)
+    },
+    setContourGate(s) {
+      contourGateUniform.value = clamp01(s, 0, 1)
     },
     setRiseStroke(s) {
       riseStrokeUniform.value = clamp01(s, 0, 2)
@@ -5354,6 +5492,36 @@ export function createWaterMesh(
       meshOriginZ.value = oz
       mesh.position.x = ox
       mesh.position.z = oz
+    }
+    // Speed-coupled contour calm (see CONTOUR_CALM_AT_REST_DEFAULT).
+    // Observer speed = raw (un-snapped) origin delta over wall time — the
+    // origin IS the camera in every gameplay mode, and it's the observer's
+    // motion that masks (or exposes) the iso-line slide. Originless scenes
+    // (?waterlab, ?waveriders, editor) decay to rest, which is the calm
+    // endpoint they want anyway.
+    {
+      const nowMs = performance.now()
+      const rawX = originXZ?.x ?? 0
+      const rawZ = originXZ?.z ?? 0
+      if (observerPrevMs !== null && observerPrevX !== null && observerPrevZ !== null) {
+        const dtS = Math.min(Math.max((nowMs - observerPrevMs) / 1000, 1e-3), 0.25)
+        const inst = Math.min(
+          Math.hypot(rawX - observerPrevX, rawZ - observerPrevZ) / dtS,
+          CALM_SPEED_MAX,
+        )
+        const alpha = 1 - Math.exp(-dtS / CALM_SPEED_TAU)
+        observerSpeedSmoothed += (inst - observerSpeedSmoothed) * alpha
+      }
+      observerPrevX = rawX
+      observerPrevZ = rawZ
+      observerPrevMs = nowMs
+      const t = Math.min(
+        Math.max((observerSpeedSmoothed - CALM_SPEED_LO) / (CALM_SPEED_HI - CALM_SPEED_LO), 0),
+        1,
+      )
+      const speedFactor = t * t * (3 - 2 * t)
+      const calmDrive = contourCalmAtRest * (1 - speedFactor)
+      contourCoherenceUniform.value = contourCoherenceBase + (1 - contourCoherenceBase) * calmDrive
     }
     for (let i = 0; i < MAX_BIKES; i++) {
       const slot = bikeSlots[i]!

@@ -113,7 +113,7 @@ supersede the bible's stat blocks where they disagree.
 
 **Dev / tool scenes** — URL-param modes in
 [src/boot/url-modes.ts](src/boot/url-modes.ts) (`?viewer` bike, `?propviewer=<id>`,
-`?calibrate`, `?rideredit`, `?waveriders`, `?podium`, `?edit`); the prop viewer is
+`?calibrate`, `?rideredit`, `?waveriders`, `?waterlab`, `?podium`, `?edit`); the prop viewer is
 [src/viewer/prop-viewer.ts](src/viewer/prop-viewer.ts). Asset URLs resolve through
 [src/engine/asset-url.ts](src/engine/asset-url.ts) (`VITE_ASSET_BASE_URL`).
 In a dev build, **all** of these scenes — plus the live tuners (input/water/camera/brush),
