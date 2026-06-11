@@ -358,6 +358,15 @@ const SLIDERS: SliderDef[] = [
     hint: 'Fix for contour lines SLIDING over the surface: iso-lines of the two-train swell sum sweep past the primary swell’s phase speed with sideways wobble wherever the trains’ slopes partially cancel (once per set-beat; unboundedly fast below the slope gate). 1 = key the ramp + contour field to the dominant swell only, so every line rides the primary swell at exactly its phase speed. 0 = legacy two-train field. A/B it in ?waterlab',
   },
   {
+    key: 'contourCalmAtRest',
+    label: 'Contour calm at rest',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    format: (n) => (n < 0.01 ? 'off' : n.toFixed(2)),
+    hint: 'Speed-couples Contour coherence: as the observer (camera) slows below ~11 m/s the effective coherence rises toward 1, so standing riders and the intro flyby see lines pinned to the primary swell — riding the crests instead of outrunning them — while the authored two-train liveliness returns at race speed. 1 = full calm when still · 0 = no coupling (legacy)',
+  },
+  {
     key: 'contourGate',
     label: 'Contour slope gate',
     min: 0,
@@ -621,6 +630,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'contourCoherence':
           water.debug.setContourCoherence(v)
+          break
+        case 'contourCalmAtRest':
+          water.debug.setContourCalmAtRest(v)
           break
         case 'contourGate':
           water.debug.setContourGate(v)

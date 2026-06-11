@@ -59,7 +59,16 @@
 > `tests/e2e/water-lab.spec.ts` asserts the diagnosis numerically (legacy scans
 > exceed 9.5 / 10.5 m/s at the half/faint gate floors; coherence 1 pins to
 > 8.6 ± 0.1) + captures a frozen same-phase coherence A/B pair into
-> `artifacts/water-lab/`.
+> `artifacts/water-lab/`. **Follow-up (same day, Matt's call):** the slide
+> reads worst when the OBSERVER is still (standing riders, the intro flyby) —
+> so a third knob, **Contour calm at rest** (persisted, **default 1 = ON**),
+> speed-couples the coherence: `tick()` measures observer speed from the
+> camera-locked mesh-origin delta (EMA τ 0.6 s, capped vs teleports) and
+> drives the effective coherence toward 1 below ~2 m/s, fading the authored
+> two-train liveliness back in by ~11 m/s. Standing still the lines pin to
+> the primary swell (riding the crests, never outrunning them); racing is
+> untouched. `getContourCoherence()` now returns the EFFECTIVE value (lab
+> HUD + CPU probe mirror it); spec gained a calm-at-rest scan assertion.
 
 > **Last updated: 2026-06-10 (h)** — **Reef Cup map renames + bikes flattened to
 > one balanced class.** Naming convention: tracks are named after cities (real or

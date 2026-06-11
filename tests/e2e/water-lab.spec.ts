@@ -56,6 +56,14 @@ test('iso-line racing is real and contour coherence pins it to phase speed', asy
   expect(beat!).toBeGreaterThan(20)
   expect(beat!).toBeLessThan(30)
 
+  // The lab is origin-anchored (observer at rest), so the default speed-
+  // coupled calm holds effective coherence at 1 — switch the coupling off
+  // to measure the LEGACY field first. Effective values update on tick.
+  await page.evaluate(() => window.__waterlab!.water.setContourCalmAtRest(0))
+  await page.waitForFunction(() => window.__waterlab!.water.getContourCoherence() < 0.01, null, {
+    timeout: 10_000,
+  })
+
   // Diagnosis: with the legacy field (coherence 0) iso-lines on faces the
   // slope gate draws sweep well past the PRIMARY train's 8.6 m/s phase
   // speed (analytic max ≈ 10.3 at slope ≥ 0.04 ≈ half-gate, ≈ 11.3 at the
@@ -73,19 +81,33 @@ test('iso-line racing is real and contour coherence pins it to phase speed', asy
   // Fix: at coherence 1 the field is the dominant train alone, whose
   // iso-lines move at EXACTLY its phase speed (8.6 m/s) everywhere.
   await page.evaluate(() => window.__waterlab!.water.setContourCoherence(1))
-  const cohRead = await page.evaluate(() => window.__waterlab!.water.getContourCoherence())
-  expect(cohRead).toBe(1)
+  await page.waitForFunction(() => window.__waterlab!.water.getContourCoherence() > 0.99, null, {
+    timeout: 10_000,
+  })
   const coherentMax = await page.evaluate(() =>
     window.__waterlab!.scanIsoMax({ durationS: 30, slopeMin: 0.04 }),
   )
   expect(Math.abs(coherentMax.maxV - 8.6)).toBeLessThan(0.1)
 
+  // Speed-coupled calm (the shipped default): authored base 0 + calm 1 +
+  // an at-rest observer must drive the EFFECTIVE coherence to 1 — same
+  // pinned-to-phase-speed scan as manual coherence 1.
+  await page.evaluate(() => {
+    window.__waterlab!.water.setContourCoherence(0)
+    window.__waterlab!.water.setContourCalmAtRest(1)
+  })
+  await page.waitForFunction(() => window.__waterlab!.water.getContourCoherence() > 0.99, null, {
+    timeout: 10_000,
+  })
+  const calmMax = await page.evaluate(() =>
+    window.__waterlab!.scanIsoMax({ durationS: 30, slopeMin: 0.04 }),
+  )
+  expect(Math.abs(calmMax.maxV - 8.6)).toBeLessThan(0.1)
+
   // Live probe publishes a finite speed.
   const live = await page.evaluate(() => window.__waterlab!.isoSpeed())
   expect(Number.isFinite(live)).toBe(true)
   expect(live).toBeGreaterThanOrEqual(0)
-
-  await page.evaluate(() => window.__waterlab!.water.setContourCoherence(0))
 })
 
 test('pause freezes the wave clock and step advances one frame', async ({ page }) => {
@@ -136,9 +158,12 @@ test('capture lab views + coherence A/B pair at identical wave phase', async ({ 
   await page.screenshot({ path: 'artifacts/water-lab/lab-graze.png' })
 
   // Frozen top-down A/B: same wave phase, only the coherence knob moves.
+  // The speed-coupled calm would pin the at-rest lab to coherence 1, so
+  // switch it off — the A/B isolates the manual knob.
   await page.evaluate(() => {
     window.__waterlab!.setCamPreset(3)
     window.__waterlab!.setPaused(true)
+    window.__waterlab!.water.setContourCalmAtRest(0)
     window.__waterlab!.water.setContourCoherence(0)
   })
   await page.waitForTimeout(400)
