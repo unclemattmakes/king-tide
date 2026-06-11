@@ -1,8 +1,8 @@
 # Reef Cup — Art-Quality Catalog (path to AA-indie)
 
 > ⚠️ **South Beach Sunken / Miami was cut (2026-06 content pass).** The Reef
-> opener is being rebuilt from scratch as **Texcoco Rising** (drowned Mexico
-> City — [tracks/texcoco-rising.md](tracks/texcoco-rising.md)), concept-locked /
+> opener is being rebuilt from scratch as **Mexico City** (the drowned
+> capital — [tracks/mexico-city.md](tracks/mexico-city.md)), concept-locked /
 > geometry-pending. All "South Beach" audit notes below are **historical** —
 > kept as reference (e.g. the flipped-normals lesson) for the rebuild, not as
 > current work.
@@ -72,7 +72,7 @@ weakest assets relative to their importance.**
   So today nothing has barnacles, rust streaks, salt bleach, or algae — the
   "working ruin" / "defiantly alive" notes are entirely unexpressed.
 - **Emissive is unverified.** South Beach authored `mat_track_sb_neon_*` and Cape
-  Town/Sandbar have signage materials, but whether they actually *emit* (the
+  Town/Mayday Bay have signage materials, but whether they actually *emit* (the
   "only powered things glow" rule) needs confirming — in-engine nothing glows.
 - **Work:** a stylized-material system pass — even just **baked AO + a
   gradient/edge-wear ramp + the waterline trio + working emissive** — would lift
@@ -89,8 +89,8 @@ building kits is cheap and transforms the read.
 > **✅ First pass done 2026-06-05.** The library-swap for the box placeholders
 > shipped on all three Reef tracks: Cape Town's freighter→`cruise_ship`, container
 > box-blobs→118 real containers (red/rust), harbour skyline→houses/boats/crates;
-> South Beach wrecks→boats + 36 palms→`cc0` palms; Sandbar marina shack→
-> `ai/pilot_shack`. Cape Town now places 135 props, South Beach 38, Sandbar 26.
+> South Beach wrecks→boats + 36 palms→`cc0` palms; Mayday Bay marina shack→
+> `ai/pilot_shack`. Cape Town now places 135 props, South Beach 38, Mayday Bay 26.
 > See [reef-cup-prop-replacement-catalog.md](reef-cup-prop-replacement-catalog.md).
 > Still open: emitters, market stalls, cute-fish in the aquarium tank, and the
 > hero hotels (modeling, not a swap).
@@ -148,9 +148,9 @@ without body deformation — cheaper, but no tail-swim.
 
 ---
 
-## Sandbar — current craft ceiling (our most-complete track)
+## Mayday Bay — current craft ceiling (our most-complete track)
 
-Sandbar is the reference for "our current best," and even here the hero is a
+Mayday Bay is the reference for "our current best," and even here the hero is a
 blockout. The dock structure is the nicest thing in the cup.
 
 | Asset | Tier | Eye-verified state | AA work | Approach |
@@ -221,7 +221,7 @@ are currently their track's **weakest** asset:
 2. **Cape Town — Two Oceans Wreck** → a good *intact* arched hall + a good shark,
    not yet a *shattered, lit* predator tank. **A detailing/break + lighting pass**
    on assets that are already 70% there — best effort-to-payoff in the cup.
-3. **Sandbar — marina hub** → a box shack on a nice dock, when a **better AI
+3. **Mayday Bay — marina hub** → a box shack on a nice dock, when a **better AI
    `pilot_shack` already exists unused.** Possibly a *wiring* fix, not a build.
 
 ---
@@ -240,7 +240,7 @@ hero-model the postcards, then detail the kits, then dress.
    ramp + **waterline trio** + working emissive, applied across all three. *The
    highest-ROI task; do it first.* **~2–4 days.**
 2. **Hero set-pieces** (the 3 postcards): South Beach mansion + seaplane (model),
-   Cape Town aquarium shatter + lit interior (detail), Sandbar shack (wire the AI
+   Cape Town aquarium shatter + lit interior (detail), Mayday Bay shack (wire the AI
    prop or model). **~4–7 days.**
 3. **Kit silhouette pass**: bevel/Deco cues on South Beach's hotel kit; container
    corrugation; freighter remodel/replace. **~3–5 days.**

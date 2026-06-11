@@ -247,8 +247,8 @@ environment art → skybox/lighting → AI racing line → spawn/checkpoint/
 itembox placement → audio palette → track-specific music. Full content
 specs in [track-themes.md](./track-themes.md).
 
-- **Sandbar** — tutorial, new, scripted gate scenarios (P0)
-- **Texcoco Rising** — Reef opener (drowned Mexico City), causeway loop, El Ángel collapsed-freeway set-piece (P0). *Replaced South Beach Sunken / Miami in the 2026-06 content pass; rebuilt from scratch.*
+- **Mayday Bay** — tutorial, new, scripted gate scenarios (P0)
+- **Mexico City** — Reef opener (drowned, on the old Lake Texcoco bed), causeway loop, El Ángel collapsed-freeway set-piece (P0). *Replaced South Beach Sunken / Miami in the 2026-06 content pass; rebuilt from scratch.*
 - **Hatteras Light** — rework Cliffside, add anti-grav lighthouse corkscrew (P0)
 - **Cape Town Drift** — new, Two Oceans Aquarium wreck (P0)
 - **The Maw** — new, wave-mastery hero, all-ocean (P0)
@@ -304,7 +304,7 @@ specs in [track-themes.md](./track-themes.md).
 
 ### Assets — bikes
 
-- ✅ 2 new bike variants (3 → 5 total) — Scout (heavyweight) + Sparrow (lightweight)
+- ✅ 2 new bike variants (3 → 5 total) — Scout (heaviest chassis) + Sparrow (lightest chassis). The five are one balanced class of peers, not a weight-tier
 - ✅ Per-variant wave-pump feel tuned (Scout: soft hover spring → punishing
   pump timing + biggest launch; Sparrow: stiff spring + high surfaceFollow →
   forgiving + further launch)

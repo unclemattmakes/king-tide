@@ -2,29 +2,32 @@ import type { BikeStatsData } from '@/game/components'
 import { defaultBikeStats } from './stats'
 
 /**
- * Bike archetypes. Five flavors with explicit handling tradeoffs so
- * picking a bike feels like a real choice, not just a recolor. Closes
- * Phase F of `docs/v1-asset-pipeline-plan.md` (the design-targets target
- * of five variants — three middleweights bracketed by a heavy + a light
- * so wave-pump feel reads across the band).
+ * Bike roster. Five peers in a SINGLE class — pick by playstyle, not by
+ * tier. Each bike wins on a couple of axes and gives ground on the others,
+ * so none is a strict upgrade over another (Mario-Kart-style balance):
+ * the heavier chassis trade handling for top speed, mass and launch; the
+ * lighter chassis trade top speed and mass for acceleration, agility and
+ * wave-grip; the Racer sits dead-centre with no weak axis. The spread is
+ * tuned to a roughly equal competitive budget — final balance is a
+ * playtest call, so treat these numbers as the starting point.
  *
- * - racer: the balanced default. Numbers come straight from
- *   defaultBikeStats(); preserves every existing test and tuning.
- * - cruiser: heavy, high top speed, sluggish handling. Loves long
- *   straights, wallows through chop. Lowest surfaceFollow so waves
- *   don't toss it around.
- * - stunt: light, agile, lower top speed but strong accel + handling.
- *   Highest surfaceFollow — banks the wave geometry hard, fun on
- *   Cliffside's drops.
- * - scout: heavyweight — punishing wave-pump timing, biggest launch.
- *   Soft hover spring + low surfaceFollow means the bike feels late
- *   off the crest; nail the timing and the inertia carries through
- *   the chop. Per v1-work-breakdown.md: "heavy = punishing wave-pump
- *   timing + biggest launch".
- * - sparrow: lightweight — forgiving wave-pump timing, further air
- *   on small swells. Stiff hover spring + high surfaceFollow means
- *   even a sloppy crest read produces a clean launch. Per
- *   v1-work-breakdown.md: "light = forgiving + further launch".
+ * What each bike wins on:
+ * - racer:   the balanced default. Exactly `defaultBikeStats()` — the test
+ *            suite and every tuning baseline key off it, so it stays put.
+ * - cruiser: top speed + boost. Fastest flat-out and the strongest boost
+ *            multiplier; pays with sluggish turn-in and the least wave-grip.
+ *            Loves long straights, wallows in the chop.
+ * - scout:   mass + launch. Heaviest chassis in the field (wins every
+ *            contact) and the biggest air — its soft hover spring (24 vs the
+ *            34 default) reacts late to a crest, so a well-timed pump
+ *            slingshots the most kinetic energy of any bike. Low ride,
+ *            modest accel + agility.
+ * - stunt:   agility. Sharpest turn authority and high wave-grip — banks the
+ *            wave geometry hard and carves the tightest line. Inside-drift.
+ *            Low top speed is the price.
+ * - sparrow: acceleration + forgiveness. Quickest off the line, lightest
+ *            chassis, stiffest hover spring (37) for the widest pump window,
+ *            highest wave-grip. Lowest top speed. Inside-drift.
  */
 export type BikeVariantId = 'cruiser' | 'racer' | 'stunt' | 'scout' | 'sparrow'
 
@@ -57,109 +60,102 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
     id: 'cruiser',
     riderClip: 'Ride_cruiser',
     name: 'Cruiser',
-    tagline: 'Heavy hitter — big top speed, plows through chop',
+    tagline: 'Top-speed cruiser — fastest flat-out, wide through the turns',
     bodyColor: 0x335599,
     accentColor: 0x55aaff,
+    // Straight-line specialist: highest top speed + strongest boost,
+    // bought with the weakest turn authority and the least wave-grip.
     stats: withDefaults({
-      mass: 200,
-      accel: 16,
+      mass: 190,
+      accel: 17,
       topSpeed: 32,
-      turnTorque: 3.0,
+      turnTorque: 3.6,
       lateralDrag: 7,
-      surfaceFollow: 0.55,
-      hoverSpring: 24,
+      surfaceFollow: 0.7,
+      hoverSpring: 30,
       hoverDamp: 9,
+      boostMul: 1.7,
     }),
   },
   racer: {
     id: 'racer',
     riderClip: 'Ride_racer',
     name: 'Racer',
-    tagline: 'Balanced all-rounder — the default',
+    tagline: 'Balanced all-rounder — no weak axis',
     bodyColor: 0xff7733,
     accentColor: 0xffaa55,
-    stats: withDefaults({}), // stays at defaults
+    stats: withDefaults({}), // the balanced centre — stays at defaults
   },
   stunt: {
     id: 'stunt',
     riderClip: 'Ride_stunt',
     name: 'Stunt',
-    tagline: 'Light + agile — banks every wave, inside-drift carve',
+    tagline: 'Carver — sharpest handling, banks every wave, inside-drift',
     bodyColor: 0x33aa66,
     accentColor: 0x66ff99,
+    // Agility specialist: top turn authority + high wave-grip, with the
+    // inside-drift sport-bike carve. Lowest-but-one top speed is the cost.
     stats: withDefaults({
-      mass: 115,
-      accel: 24,
-      topSpeed: 25,
-      turnTorque: 5.0,
+      mass: 128,
+      accel: 21,
+      topSpeed: 27,
+      turnTorque: 5.3,
       lateralDrag: 9,
-      surfaceFollow: 1.0,
-      hoverSpring: 32,
-      hoverDamp: 6,
-      // Inside-drift sport-bike feel — sharper initial cut, wider
-      // overall arc. Pairs with the high turnTorque so the bike
-      // really snaps into the apex on the first 250 ms.
+      surfaceFollow: 0.98,
+      hoverSpring: 31,
+      hoverDamp: 6.5,
+      // Inside-drift: sharper initial cut, wider tail. Pairs with the high
+      // turnTorque so the bike really snaps into the apex on the first 250 ms.
       driftStyle: 'inward',
     }),
   },
-  // Heavyweight #4 — wears the punishing-pump role from
-  // v1-asset-pipeline-plan.md Phase F. Soft hover spring (22 vs 34
-  // default) is what makes the timing "punishing": the bike reacts
-  // late to the crest, so an early E flick is wasted and a late one
-  // launches off air. Once airborne, the heaviest mass in the lineup
-  // carries the most kinetic energy through the chop.
   scout: {
     id: 'scout',
     riderClip: 'Ride_scout',
     name: 'Scout',
-    tagline: 'Heavyweight — punishing pump, biggest launch',
+    tagline: 'Big-air bruiser — heaviest chassis, biggest launch off ramps',
     bodyColor: 0xff6633,
     accentColor: 0x5cf2ff,
+    // Mass + launch specialist. Soft hover spring (24 vs 34 default) reacts
+    // late to a crest — an early pump is wasted, a late one launches off
+    // air. The heaviest chassis then carries the most kinetic energy
+    // through the chop and bullies the field in contact. Rides low.
     stats: withDefaults({
-      mass: 220,
-      accel: 14,
-      topSpeed: 32,
-      turnTorque: 2.5,
+      mass: 210,
+      accel: 17,
+      topSpeed: 30,
+      turnTorque: 3.5,
       lateralDrag: 6,
-      surfaceFollow: 0.4,
-      hoverSpring: 22,
+      surfaceFollow: 0.66,
+      hoverSpring: 24,
       hoverDamp: 10,
-      hoverHeight: 0.8,
+      hoverHeight: 0.9,
     }),
   },
-  // Lightweight #5 — the design-targets "forgiving + further air".
-  // Stiff hover spring (38) means the bike springs off a crest with a
-  // wide tolerance window for the pump input; high surfaceFollow
-  // (1.05) keeps the chassis tracking small wavelets so even sloppy
-  // wave-reading still produces meaningful lift. Modest top speed
-  // keeps it from out-running the Cruiser on long straights — the
-  // tradeoff for the pump latitude.
   sparrow: {
     id: 'sparrow',
     riderClip: 'Ride_sparrow',
     name: 'Sparrow',
-    tagline: 'Lightweight — forgiving pump, inside-drift sport bike',
+    tagline: 'Sprinter — quickest off the line, forgiving pump, inside-drift',
     bodyColor: 0xddbb44,
     accentColor: 0xfff088,
+    // Acceleration + forgiveness specialist. Lightest chassis, stiffest
+    // hover spring (37) → the widest pump window (even a sloppy crest read
+    // still launches) and the highest wave-grip. Lowest top speed is the
+    // tradeoff, so it can't out-drag the Cruiser on a long straight.
     stats: withDefaults({
-      mass: 80,
-      accel: 22,
+      mass: 115,
+      accel: 23,
       topSpeed: 26,
-      turnTorque: 5.5,
+      turnTorque: 4.7,
       lateralDrag: 9,
       surfaceFollow: 1.05,
-      hoverSpring: 38,
-      hoverDamp: 5.5,
-      // Rides tallest in the lineup — 1.4 vs the default 1.2 shared by
-      // racer / cruiser / stunt (scout sits low at 0.8). Matches the art
-      // brief's "high taut stance — it springs", and it's the last
-      // identity stat that still equalled the Racer's. Feel-affecting:
-      // re-check the crest pop on playtest.
-      hoverHeight: 1.4,
-      // Inside-drift sport-bike feel. The Sparrow's high turn-torque
-      // (5.5 vs the 4.0 default) means the initial cut is dramatic;
-      // the wider-arc tail is what stops the lightweight bike from
-      // just rotating in place mid-drift.
+      hoverSpring: 37,
+      hoverDamp: 6,
+      // Rides tallest in the lineup — high taut stance, it springs.
+      hoverHeight: 1.35,
+      // Inside-drift: dramatic initial cut, wider-arc tail keeps the light
+      // chassis from just rotating in place mid-drift.
       driftStyle: 'inward',
     }),
   },
@@ -173,7 +169,7 @@ export function resolveBikeVariant(id: string | null | undefined): BikeVariant {
 }
 
 /**
- * Per-slot variant palette for the AI grid. Rotates through the lineup so
+ * Per-slot variant palette for the AI grid. Rotates through the roster so
  * the field has handling *and* visual variety — slot 1 rides a Cruiser,
  * slot 2 a Stunt, and so on, wrapping for larger grids. Slot 0 is the
  * player, so AI grid slots are 1-based.

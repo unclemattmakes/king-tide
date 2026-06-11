@@ -12,12 +12,12 @@ import { V1_CUPS, V1_TRACKS } from '../../src/engine/menus/tracks-catalog'
 describe('tracks-catalog cup lineups', () => {
   const cupRaces = (id: string): string[] => V1_CUPS.find((c) => c.id === id)?.races ?? []
 
-  it('Reef Cup is Sandbar → Texcoco Rising → Cape Town', () => {
-    expect(cupRaces('reef')).toEqual(['sandbar', 'texcoco-rising', 'cape-town-drift'])
+  it('Reef Cup is Mayday Bay → Mexico City → Cape Town', () => {
+    expect(cupRaces('reef')).toEqual(['sandbar', 'mexico-city', 'cape-town-drift'])
   })
 
-  it('the Reef opener (Texcoco Rising) is gated until its geometry is built', () => {
-    const t = V1_TRACKS.find((x) => x.id === 'texcoco-rising')
+  it('the Reef opener (Mexico City) is gated until its geometry is built', () => {
+    const t = V1_TRACKS.find((x) => x.id === 'mexico-city')
     expect(t?.status).toBe('pending')
     expect(t?.gateLabel.length ?? 0).toBeGreaterThan(0)
     // Like the Harbor Cup, the Reef Cup can't run a championship through an

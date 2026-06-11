@@ -3,8 +3,8 @@
   "id": "stunt",
   "displayName": "Stunt",
   "physics": {
-    "massKg": 90,
-    "topSpeedMps": 25,
+    "massKg": 128,
+    "topSpeedMps": 27,
     "hoverHeight": 1.2
   },
   "appearance": {

@@ -33,7 +33,7 @@ and [track-design-specs.md](../track-design-specs.md) flagged as pending
 ("final cup order set in the anti-grav reconciliation pass"). Eight
 tracks carried anti-grav and have been reworked below; the four that
 never used it (the Reef opener, Cape Town, The Maw, Marina Bay 7) and Golden
-Gate are unchanged. *(The Reef opener is now Texcoco Rising / Mexico City,
+Gate are unchanged. *(The Reef opener is now Mexico City,
 which replaced South Beach Sunken / Miami in the 2026-06 content pass — it
 likewise never used anti-grav.)*
 
@@ -71,8 +71,8 @@ moment.
 
 | # | Track | Cup | Location | Old anti-grav | New verticality | Doc |
 |---|---|---|---|---|---|---|
-| — | Sandbar | Tutorial | (fictional) | brief intro arch | crest-launch lesson | [sandbar.md](./sandbar.md) |
-| 1 | Texcoco Rising | Reef | Mexico City | none | collapsed-freeway ramp | [texcoco-rising.md](./texcoco-rising.md) |
+| — | Mayday Bay | Tutorial | (fictional) | brief intro arch | crest-launch lesson | [sandbar.md](./sandbar.md) |
+| 1 | Mexico City | Reef | Mexico City | none | collapsed-freeway ramp | [mexico-city.md](./mexico-city.md) |
 | 2 | Cape Town Drift | Reef | Cape Town | none | flat / slalom | [cape-town-drift.md](./cape-town-drift.md) |
 | 3 | Needle Sound | Harbor | Seattle | none | pier/ferry ramps + Space Needle saucer | [needle-sound.md](./needle-sound.md) |
 | 4 | Golden Gate Drowned | Harbor | San Francisco | none (was always terrain) | frozen-wave hills + The Break | [golden-gate-drowned.md](./golden-gate-drowned.md) |
@@ -140,7 +140,7 @@ when the dressing is load-bearing for the look.
 | `emitter_gulls` | emitter (atlas_cell 5) | Every coastal/open-water track (all but the deep-jungle/industrial interiors, which swap it for cicadas/none). |
 | `scatter_rocks` / coral-debris | GN scatter of `prop_rock` | Most tracks — submerged rock, coral, or rubble under the water line. |
 | Ambient haze / dust-mote emitter | emitter (atlas_cell 4) | Most tracks — sun-haze, dust, or heat shimmer that sells volume. |
-| `scatter_palms` | GN scatter of `prop_palm` | **Tropical tracks only** (Sandbar, Kilauea sea-level, Aqualand, Angkor). Listed per-track because counts/tints vary. (Texcoco Rising scatters jacaranda/ahuehuete instead — see its doc.) |
+| `scatter_palms` | GN scatter of `prop_palm` | **Tropical tracks only** (Mayday Bay, Kilauea sea-level, Aqualand, Angkor). Listed per-track because counts/tints vary. (Mexico City scatters jacaranda/ahuehuete instead — see its doc.) |
 
 > **One anti-grav prop is now retired set-wide:** `antigrav_curve_*` (in
 > all three profiles — Tube, Banked strip, Ribbon). It appears on **zero**

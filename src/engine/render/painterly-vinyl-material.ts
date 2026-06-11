@@ -651,7 +651,7 @@ export function applyVinylMaterialToScene(
   // shader pre-warm lever — three's WebGPU pipeline cache keys per material
   // INSTANCE, so every per-size twin paid its own ~60–130 ms main-thread
   // node-build + WGSL codegen during the progressive scenery warm (155
-  // materials on Texcoco Rising = frame dips ~10 s past the green light).
+  // materials on Mexico City = frame dips ~10 s past the green light).
   const cache = new Map<THREE.Material, THREE.Material>()
   const stampCfg: VinylStampConfig = {
     brushScale: opts.brushScale ?? VINYL_BRUSH_DEFAULTS.brushScale,

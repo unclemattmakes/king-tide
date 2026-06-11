@@ -3,7 +3,7 @@
   "id": "racer",
   "displayName": "Racer",
   "physics": {
-    "massKg": 120,
+    "massKg": 150,
     "topSpeedMps": 28,
     "hoverHeight": 1.2
   },
