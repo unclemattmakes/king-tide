@@ -112,15 +112,23 @@ not yet measured). Verdict per the [interpretation guide](#interpreting-the-numb
 without WebGPU falls back to WebGL2; so does Firefox). It's the single
 biggest swing factor, so always note it.
 
-### This laptop — _(fill in: model / SoC / GPU)_
+### This laptop — RTX 5050 dev machine
 
 | Track | Backend | FPS | p50 ms | p95 ms | p99 ms | Draw calls | Triangles | Verdict |
 |---|---|---|---|---|---|---|---|---|
-| `sandbar` | — | — | — | — | — | — | — | — |
+| `sandbar` | WebGPU | 40.0 | 22.0 | 77.7 | 138.9 | 320 | 4.53 M | ❌ |
 | `the-maw` | — | — | — | — | — | — | — | — |
-| `south-beach-sunken` | — | — | — | — | — | — | — | — |
+| `mexico-city` | WebGPU | 18.2¹ | 27.6 | 129.0 | 169.2 | 898 | 4.72 M | ❌ |
 
-_Date / build SHA / notes:_
+_Date / build SHA / notes:_ 2026-06-10, boot-overhaul branch, **dev build**
+(vite, unminified) at 1280×720 — relative reads only, not absolute prod
+numbers. Measured AFTER the June-10 water roadmap landed (trails, contacts,
+rings, stamps, hex-tiling, rising strokes all on). ¹ mexico-city's sample
+window still overlapped its 477-mesh scenery stream (one 9.4 s stall
+included) — lap-1 experience, steady-state p50 is the honest row. For
+context: the same machine held 100+ fps on these tracks before the June-10
+water layers + Mexico City dressing; the frame regression is content/shader
+cost, not the boot path (see docs/boot-overhaul-plan.md follow-ups).
 
 ### Steam Deck — native Electron build
 
