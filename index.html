@@ -173,14 +173,22 @@
       }
       #loading-screen .ls-bar::after {
         content: '';
-        position: absolute; top: 0; bottom: 0; left: -40%;
+        position: absolute; top: 0; bottom: 0; left: 0;
         width: 40%;
         background: linear-gradient(90deg, transparent, var(--bc-cyan), transparent);
+        /* Animate TRANSFORM, not `left`: transform animations run on the
+           compositor thread, so the sweep keeps moving even while the main
+           thread is pinned by a shader-compile stall — the player can tell
+           "still loading" from "crashed". (translateX % is relative to the
+           40%-wide element itself: -100% parks it just off the bar's left
+           edge, 250% walks it off the right edge.) */
+        transform: translateX(-100%);
+        will-change: transform;
         animation: ls-sweep 1.2s linear infinite;
       }
       @keyframes ls-sweep {
-        from { left: -40%; }
-        to   { left: 100%; }
+        from { transform: translateX(-100%); }
+        to   { transform: translateX(250%); }
       }
       #loading-screen .ls-msg {
         font-family: var(--bc-font-mono);
@@ -190,7 +198,7 @@
         min-height: 1.2em;
       }
       @media (prefers-reduced-motion: reduce) {
-        #loading-screen .ls-bar::after { animation: none; left: 0; width: 100%; opacity: 0.5; }
+        #loading-screen .ls-bar::after { animation: none; transform: none; left: 0; width: 100%; opacity: 0.5; }
         #loading-screen, #attract-stage { transition: none; }
       }
 

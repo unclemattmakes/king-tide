@@ -32,6 +32,31 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-10 (i)** — **Loading overhaul — fresh load no longer
+> reads as a crash.** The June-10 landings had doubled race boot (4.2 → 8.1 s
+> on sandbar) and frozen the fresh-load menu for ~11 s of its first 12
+> (synchronous pipeline pre-warm + the menu awaiting the full game-graph
+> import + a main-thread-animated loading bar). Landed: thin entry shell
+> (`main.ts` → dynamic [race-boot.ts](../src/boot/race-boot.ts)) so the menu
+> paints at **~170 ms** (was 7.6 s); staged attract import + chunked attract
+> pipeline warm (worst menu stall 7.0 s → **~1.0 s**); split race-boot warm
+> (two short eager renders bracketing load instead of one 4.6–5.3 s freeze);
+> water-shader event layers de-unrolled into dynamic TSL `Loop`s; renderer ∥
+> Rapier init + early asset/track prefetch; attract disposed before the
+> menu→race navigation (reloading over a live WebGPU page stalls the next
+> page's main thread — also why boot measurements use blank-gap navs now);
+> compositor-driven loading bar. Mexico City race boot 8.3 → **6.3 s** median.
+> Verified: boot-timing + menu-boot-timing (new spec) + instanced-bikes +
+> wake-look/contact-look captures, 1241 unit, typecheck/lint/build. **Boot
+> floor is now per-pipeline compile × material count** — next lever is vinyl
+> structural sharing; full numbers + follow-ups in
+> [boot-overhaul-plan.md](./boot-overhaul-plan.md). **Separate finding:** the
+> in-race frame ALSO regressed (sandbar 40 fps / mexico-city 18 fps at 720p
+> dev vs the remembered 100+) — that's the June-10 water layers + Mexico City
+> dressing + 898 draw calls, recorded in
+> [perf-baseline.md](./perf-baseline.md), playtest/tuning territory, not
+> fixed here.
+>
 > **Last updated: 2026-06-10 (h)** — **Reef Cup map renames + bikes flattened to
 > one balanced class.** Naming convention: tracks are named after cities (real or
 > fictional). Reef opener **Texcoco Rising → Mexico City** (full rename — slug
