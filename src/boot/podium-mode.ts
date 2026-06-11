@@ -227,7 +227,7 @@ function easeOutCubic(x: number): number {
 
 /** Hex string for a podium medal colour (0=gold, 1=silver, 2=bronze). */
 function medalHex(index: number): string | null {
-  if (index === 0) return '#ffd54a'
+  if (index === 0) return '#ffd27a'
   if (index === 1) return '#cbd5e1'
   if (index === 2) return '#cd7f32'
   return null
@@ -376,7 +376,7 @@ function makeTextSprite(text: string, hex: string): THREE.Sprite {
   const ctx = canvas.getContext('2d')
   if (ctx) {
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.fillStyle = 'rgba(5, 10, 20, 0.6)'
+    ctx.fillStyle = 'rgba(7, 30, 38, 0.6)'
     roundRect(ctx, 6, 30, 500, 68, 12)
     ctx.fill()
     ctx.font = 'bold 44px system-ui, -apple-system, sans-serif'

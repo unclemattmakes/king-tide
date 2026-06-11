@@ -241,7 +241,7 @@ function ensureStyles(): void {
       display: flex; align-items: stretch; gap: 0;
       background: linear-gradient(180deg, rgba(10,20,36,0.92), rgba(5,10,20,0.92));
       border: 1px solid var(--bc-line, rgba(255,255,255,0.08));
-      border-top: 2px solid var(--bc-cyan, #4dd6ff);
+      border-top: 2px solid var(--bc-cyan, #6cffc8);
       box-shadow: 0 6px 20px rgba(0,0,0,0.45);
     }
     #replay-hud .rb-tag {
@@ -249,7 +249,7 @@ function ensureStyles(): void {
       padding: 14px 22px;
       font-family: var(--bc-font-display, sans-serif);
       font-size: 14px; letter-spacing: 0.26em;
-      background: var(--bc-cyan, #4dd6ff); color: var(--bc-navy, #050a14);
+      background: var(--bc-cyan, #6cffc8); color: var(--bc-navy, #07222c);
     }
     #replay-hud .rb-venue, #replay-hud .rb-rider,
     #replay-hud .rb-shot, #replay-hud .rb-meta {
@@ -266,14 +266,14 @@ function ensureStyles(): void {
     #replay-hud .rb-val {
       font-family: var(--bc-font-display, sans-serif);
       font-size: 18px; letter-spacing: 0.06em;
-      color: var(--bc-ink, #f4f8ff);
+      color: var(--bc-ink, #fff5e1);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       margin-top: 2px;
     }
-    #replay-hud .rb-rider .rb-val { color: var(--bc-yellow, #ffd54a); }
-    #replay-hud .rb-shot .rb-val { color: var(--bc-cyan, #4dd6ff); }
+    #replay-hud .rb-rider .rb-val { color: var(--bc-yellow, #ffd27a); }
+    #replay-hud .rb-shot .rb-val { color: var(--bc-cyan, #6cffc8); }
     #replay-hud .rb-exit {
-      background: transparent; color: var(--bc-red, #ff3a5e);
+      background: transparent; color: var(--bc-red, #ff5a6e);
       border: 0;
       border-left: 1px solid var(--bc-line, rgba(255,255,255,0.08));
       font: 600 11px var(--bc-font-mono, monospace); letter-spacing: 0.22em;
@@ -282,7 +282,7 @@ function ensureStyles(): void {
     }
     #replay-hud .rb-exit:hover {
       background: rgba(255, 58, 94, 0.12);
-      color: var(--bc-red, #ff3a5e);
+      color: var(--bc-red, #ff5a6e);
     }
 
     /* ── Lower control card ── */
@@ -296,9 +296,9 @@ function ensureStyles(): void {
       width: min(900px, 100%);
       background: linear-gradient(180deg, rgba(10,20,36,0.92), rgba(5,10,20,0.92));
       border: 1px solid var(--bc-line, rgba(255,255,255,0.08));
-      border-bottom: 2px solid var(--bc-cyan, #4dd6ff);
+      border-bottom: 2px solid var(--bc-cyan, #6cffc8);
       padding: 14px 18px 10px;
-      color: var(--bc-ink, #f4f8ff);
+      color: var(--bc-ink, #fff5e1);
       box-shadow: 0 -8px 28px rgba(0,0,0,0.5);
     }
     #replay-hud .rb-scrub-row {
@@ -306,7 +306,7 @@ function ensureStyles(): void {
       margin-bottom: 12px;
     }
     #replay-hud .rb-btn {
-      background: var(--bc-cyan, #4dd6ff); color: var(--bc-navy, #050a14);
+      background: var(--bc-cyan, #6cffc8); color: var(--bc-navy, #07222c);
       border: 0;
       font: 600 14px var(--bc-font-mono, monospace);
       width: 36px; height: 30px; cursor: pointer;
@@ -320,7 +320,7 @@ function ensureStyles(): void {
       min-width: 48px; text-align: center;
       letter-spacing: 0.06em;
     }
-    #replay-hud .rb-scrub { flex: 1; accent-color: var(--bc-cyan, #4dd6ff); }
+    #replay-hud .rb-scrub { flex: 1; accent-color: var(--bc-cyan, #6cffc8); }
 
     #replay-hud .rb-ctl-row {
       display: flex; flex-wrap: wrap; gap: 14px 20px;
@@ -346,22 +346,22 @@ function ensureStyles(): void {
     }
     #replay-hud .rb-pill:hover {
       background: rgba(255,255,255,0.08);
-      color: var(--bc-ink, #f4f8ff);
+      color: var(--bc-ink, #fff5e1);
     }
     #replay-hud .rb-pill.selected {
-      background: var(--bc-cyan, #4dd6ff);
-      color: var(--bc-navy, #050a14);
-      border-color: var(--bc-cyan, #4dd6ff);
+      background: var(--bc-cyan, #6cffc8);
+      color: var(--bc-navy, #07222c);
+      border-color: var(--bc-cyan, #6cffc8);
     }
     #replay-hud .rb-cut {
-      background: rgba(255, 213, 74, 0.16); color: var(--bc-yellow, #ffd54a);
+      background: rgba(255, 213, 74, 0.16); color: var(--bc-yellow, #ffd27a);
       border-color: rgba(255, 213, 74, 0.45);
       border-left-color: rgba(255, 213, 74, 0.45);
       margin-left: 4px;
     }
     #replay-hud .rb-cut:hover {
       background: rgba(255, 213, 74, 0.26);
-      color: var(--bc-yellow, #ffd54a);
+      color: var(--bc-yellow, #ffd27a);
     }
     #replay-hud .rb-hint {
       margin-top: 8px;

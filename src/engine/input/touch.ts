@@ -223,10 +223,10 @@ body.touch-ui-hidden #touch-ui { display: none; }
   left: max(10px, env(safe-area-inset-left));
   min-width: 56px; height: 40px; padding: 0 12px;
   border-radius: 22px;
-  background: rgba(5, 10, 20, 0.72);
+  background: rgba(7, 30, 38, 0.78);
   border: 1px solid rgba(255,255,255,0.28);
-  color: #f4f8ff;
-  font: bold 12px ui-monospace, monospace; letter-spacing: 1.5px;
+  color: #fff5e1;
+  font: 800 12px Nunito, system-ui, sans-serif; letter-spacing: 1px;
   display: flex; align-items: center; justify-content: center; gap: 8px;
   pointer-events: auto; touch-action: manipulation; user-select: none;
   -webkit-tap-highlight-color: transparent;
@@ -247,10 +247,10 @@ body.touch-ui-hidden #touch-ui { display: none; }
   right: max(10px, env(safe-area-inset-right));
   min-width: 56px; height: 40px; padding: 0 14px;
   border-radius: 22px;
-  background: rgba(5, 10, 20, 0.72);
+  background: rgba(7, 30, 38, 0.78);
   border: 1px solid rgba(255,255,255,0.28);
-  color: #f4f8ff;
-  font: bold 12px ui-monospace, monospace; letter-spacing: 1.5px;
+  color: #fff5e1;
+  font: 800 12px Nunito, system-ui, sans-serif; letter-spacing: 1px;
   display: flex; align-items: center; justify-content: center;
   pointer-events: auto; touch-action: manipulation; user-select: none;
   -webkit-tap-highlight-color: transparent;

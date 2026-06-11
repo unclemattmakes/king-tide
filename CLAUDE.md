@@ -89,7 +89,10 @@ the **input-navigability convention** — read before adding any menu/overlay/mo
 builder checklists, concept-art `--sref` recipe). Per domain:
 [tracks](docs/track-art-direction.md) ·
 [props + ComfyUI prompts](docs/prop-art-direction.md) ·
-[bikes + ComfyUI prompts](docs/bike-art-direction.md). The look in-engine + the
+[bikes + ComfyUI prompts](docs/bike-art-direction.md) ·
+[UI/HUD](docs/ui-art-direction.md) ("Regatta" painted race-day signage — UI tokens
+in `index.html`, product name in `src/engine/branding.ts`, verify with
+`pnpm gen:ui-shots <label>`). The look in-engine + the
 mesh-intake pipeline: [painterly-vinyl-pipeline.md](docs/painterly-vinyl-pipeline.md).
 
 **Track content** — [track-themes.md](docs/track-themes.md) (content bible) +

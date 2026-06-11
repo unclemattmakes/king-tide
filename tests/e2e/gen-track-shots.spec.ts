@@ -75,6 +75,7 @@ const HUD_HIDE_SELECTOR = [
   '#hud', // dev diagnostics (top-left)
   '#hud-scaffold', // gameplay HUD layer (wave-pump / boost / drift / tuck / ...)
   '#race-timer', // top-center lap/time card
+  '#race-position-badge', // top-left position ordinal + lap chip
   '#race-banner', // 3-2-1-GO countdown banner
   '#race-gap', // gap toast
   '#race-minimap', // bottom-right minimap

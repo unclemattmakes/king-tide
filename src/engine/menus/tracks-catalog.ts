@@ -240,7 +240,7 @@ export const V1_CUPS: CupEntry[] = [
     id: 'reef',
     name: 'Reef Cup',
     tagline: 'Starters. Bright, shallow, instructive.',
-    accent: '#4dd6ff',
+    accent: '#36c8c0',
     // Gated while the opener (Texcoco Rising) is a locked-but-unbuilt
     // concept — a championship can't run through a track with no geometry.
     // Flips back to 'ship' once Texcoco Rising's build lands. Same
@@ -262,7 +262,7 @@ export const V1_CUPS: CupEntry[] = [
     id: 'continental',
     name: 'Continental Cup',
     tagline: 'Spectacle. Volcano, port, Venice, Tokyo.',
-    accent: '#ff7a3a',
+    accent: '#ff7a52',
     status: 'ship',
     gateLabel: '',
     races: shipCupRaces('continental'),
@@ -271,7 +271,7 @@ export const V1_CUPS: CupEntry[] = [
     id: 'drowned',
     name: 'Drowned Cup',
     tagline: 'Finale. Chaos, jungle climb, Liberty.',
-    accent: '#ff3a5e',
+    accent: '#e8503a',
     status: 'ship',
     gateLabel: '',
     races: shipCupRaces('drowned'),
