@@ -697,6 +697,27 @@ Verification: deep-ocean test bed A/B grid (extend `foam-sweep.spec.ts` with
 the new knobs), then chase-cam `gen:track-shots` on the Reef Cup trio, then
 Matt playtests — the readability claim is only provable by hands + eyes.
 
+**P1.5 — Rising-face strokes (crest-PERPENDICULAR brush marks).** Follow-on
+(2026-06-10): the contour lines (item 2) trace iso-height bands *along* each
+crest; this adds their perpendicular partner — tapered oil-stroke brush marks
+pulled **up the leading (rising) face** of an approaching wave, the "vertical
+strokes climbing the wave coming at you" read. Reuses the face-streak oil sheet
+(`FOAM_STROKE_STREAK_SPEC`) but samples it in the **global swell frame** with
+U ← the travel axis (`brushTravel`, so each stroke climbs the face) and V ← the
+crest axis (`brushCrest`, so strokes sit side-by-side across the front) — the
+transpose of the crest-parallel foam-mass mapping. Gates: front face only via
+`crestRiseFrag` (∂h/∂t > 0, the same lead-bias signal the whitecap uses) ·
+steep **swell** slope only (no chop, so the gate doesn't crawl) · builds up the
+face toward the crest (`rampT`) · distance-faded (60→150 m). Folded into the
+foam paint (`foamMaskWithContours`/`foamEmissiveMask`) so it inherits the foam
+colour/warmth/bloom. Live knob `Rising strokes` (water debug menu, 0..2,
+default 0.5), persisted per-key. No new varying (reuses the swell-only pack) and
+no new uniform buffer. Verification: `FOAM_SWEEP=1 FOAM_SWEEP_RISE=1`
+(in-context off→max) and `FOAM_SWEEP_ISO=1` (strokes alone on bare swell) on the
+deep-ocean test bed — the iso diff confirms the strokes band onto rising faces
+and run square to the crest (not the 90°-wrong trap that bit the foam streaks
+twice). Awaiting Matt's playtest verdict on the default strength.
+
 ### P2 — Nuance + anti-repetition
 
 1. ✅ **Wave sets/groups** (§7.2) — **SHIPPED (2026-06-09)** as an analytic

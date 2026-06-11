@@ -31,7 +31,9 @@ import type { WaterDebugDefaults, WaterMesh } from './render/water'
 // No key bump for the P1 readability layers either: rampStrength/rampSteps/
 // rampPosterize/contourStrength/contourSpacing/contourRelief are ADDED keys
 // (missing-key -> new default via the loader), so returning users pick up the
-// readability defaults and keep their other tuning.
+// readability defaults and keep their other tuning. (`riseStroke`, the
+// crest-perpendicular rising-face strokes, is likewise an ADDED key ->
+// default 0.5, so returning users pick it up at baseline.)
 //
 // No key bump for the trail-wake rework either: wakeStrength is an ADDED key
 // (missing-key -> default 1.0), so returning users get the trailing wake at
@@ -97,6 +99,7 @@ export type WaterDebugSettings = {
   contourSpacing: number
   contourRelief: number
   contourBreakup: number
+  riseStroke: number
   wireframe: boolean
   colorize: boolean
 }
@@ -139,6 +142,7 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     contourSpacing: d.contourSpacing,
     contourRelief: d.contourRelief,
     contourBreakup: d.contourBreakup,
+    riseStroke: d.riseStroke,
     wireframe: d.wireframe,
     colorize: d.colorize,
   }
@@ -217,6 +221,7 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setContourSpacing(s.contourSpacing)
   water.debug.setContourRelief(s.contourRelief)
   water.debug.setContourBreakup(s.contourBreakup)
+  water.debug.setRiseStroke(s.riseStroke)
   water.debug.setWireframe(s.wireframe)
   water.debug.setColorize(s.colorize)
 }

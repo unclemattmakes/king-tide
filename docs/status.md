@@ -32,7 +32,7 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
-> **Last updated: 2026-06-10 (g)** — **Reef Cup map renames + bikes flattened to
+> **Last updated: 2026-06-10 (h)** — **Reef Cup map renames + bikes flattened to
 > one balanced class.** Naming convention: tracks are named after cities (real or
 > fictional). Reef opener **Texcoco Rising → Mexico City** (full rename — slug
 > `texcoco-rising` → `mexico-city`, GLB/hero/thumb + the `tex/` prop folder →
@@ -45,6 +45,29 @@
 > spread). Racer stays at `defaultBikeStats()`; treat the spread as a playtest
 > starting point. See [src/game/bikes/variants.ts](../src/game/bikes/variants.ts).
 >
+
+> **Last updated: 2026-06-10 (g)** — **Rising-face strokes — vertical
+> brushwork on the waves coming at you.** The crest-PERPENDICULAR partner of
+> the P1 contour lines: where contours trace iso-height bands ALONG each
+> crest, these are tapered oil strokes pulled UP the leading (rising) face of
+> an approaching wave — the "vertical strokes climbing the wave" read. Reuses
+> the face-streak oil sheet (`FOAM_STROKE_STREAK_SPEC`) sampled in the GLOBAL
+> swell frame — U ← the travel axis (so each stroke climbs the face), V ← the
+> crest axis (so strokes sit side-by-side across the front), the transpose of
+> the crest-parallel foam-mass mapping. Gated front-face-only via
+> `crestRiseFrag` (∂h/∂t > 0, the same lead-bias signal the whitecap uses) ·
+> steep SWELL slope only (no chop, so the gate doesn't crawl) · building up
+> the face toward the crest (`rampT`) · distance-faded. Folded into the foam
+> stack via max (`foamMaskWithContours`/`foamEmissiveMask`) so it inherits the
+> foam colour/warmth/bloom. New persisted `Rising strokes` knob (water menu,
+> 0–2, default 0.5). Zero new varyings or uniform buffers (reuses the
+> swell-only pack). Verified headed on the deep-ocean test bed:
+> `FOAM_SWEEP=1 FOAM_SWEEP_RISE=1` (in-context off→max) +`FOAM_SWEEP_ISO=1`
+> (strokes alone on bare swell) — the iso diff proves the strokes band onto
+> rising faces and run square to the crest (NOT the 90°-wrong trap that bit
+> the foam streaks twice). Awaiting Matt's playtest on the default strength.
+> See water-next-research.md §P1.5.
+
 > **Last updated: 2026-06-10 (f)** — **Waterline contact effects — the sea
 > acknowledges the world.** Static geometry that pierces the surface
 > (bridge pillars, placed rocks, dock pylons) is auto-discovered at load
