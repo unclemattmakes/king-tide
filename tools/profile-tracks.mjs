@@ -97,11 +97,17 @@ async function ensureServer(base) {
   }
   const port = new URL(base).port || '5191'
   console.log(`[profile] no server at ${base}; starting \`pnpm dev --port ${port}\` …`)
-  // detached so we can signal the whole process group on teardown — Vite
-  // spawns child workers that otherwise outlive a bare child.kill().
+  const isWin = process.platform === 'win32'
+  // POSIX: detached so we can signal the whole process group on teardown —
+  // Vite spawns child workers that otherwise outlive a bare child.kill().
+  // Windows: `pnpm` is a .cmd shim, which Node refuses to spawn without a
+  // shell (CVE-2024-27980 hardening) — `spawn pnpm ENOENT`. Use a shell
+  // there, and tear down via `taskkill /T` (kills the cmd→pnpm→vite tree;
+  // process groups / negative-pid signals don't exist on Windows).
   const child = spawn('pnpm', ['dev', '--port', port, '--strictPort'], {
     stdio: 'ignore',
-    detached: true,
+    detached: !isWin,
+    shell: isWin,
   })
   child.on('error', (e) => {
     console.error(`[profile] failed to spawn dev server: ${String(e)}`)
@@ -112,6 +118,12 @@ async function ensureServer(base) {
       console.log(`[profile] dev server is up at ${base}`)
       return {
         stop: async () => {
+          if (isWin) {
+            try {
+              spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+            } catch {}
+            return
+          }
           try {
             // Negative pid → signal the process group (Vite + workers).
             process.kill(-child.pid, 'SIGTERM')
