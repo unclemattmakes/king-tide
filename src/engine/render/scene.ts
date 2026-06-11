@@ -60,7 +60,19 @@ export function createScene(): {
   // difference at racing speed was negligible. PCFSoftShadowMap (set in
   // renderer.ts) hides aliasing on the larger texels.
   sun.castShadow = true
-  sun.shadow.mapSize.set(1024, 1024)
+  // `?shadowmap=<n>` (256..2048) overrides the map resolution per boot —
+  // the depth-pass cost scales quadratically with the map (that's what
+  // motivated 2048→1024 below), so this is the cheap ladder axis to A/B
+  // without a rebuild. Default stays 1024.
+  const shadowMapParam =
+    typeof window !== 'undefined'
+      ? Number(new URLSearchParams(window.location.search).get('shadowmap'))
+      : Number.NaN
+  const shadowMapSize =
+    Number.isFinite(shadowMapParam) && shadowMapParam >= 256 && shadowMapParam <= 2048
+      ? Math.round(shadowMapParam)
+      : 1024
+  sun.shadow.mapSize.set(shadowMapSize, shadowMapSize)
   sun.shadow.camera.near = 1
   sun.shadow.camera.far = 500
   sun.shadow.camera.left = -90
