@@ -417,21 +417,30 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   // PassNode RT with no usable pipelines and the framebuffer renders
   // solid black with no validation error.
   let postPipeline: PostPipeline | null = null
-  try {
-    postPipeline = createPostPipeline({
-      renderer,
-      scene,
-      camera,
-      bloomStrength: cfg.bloom,
-      // Per-track cel/ink outline + motion blur. Both default-off (see
-      // DEFAULT_SKY); a track only pays for them when its JSON opts in.
-      outline: cfg.outline,
-      motionBlur: cfg.motionBlur,
-    })
-    setActivePostPipeline(postPipeline)
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    console.warn('[sky] failed to build post-pipeline; rendering without bloom', e)
+  // `?post=0` skips the whole post chain (PassNode scene RT + bloom mips).
+  // `setBloom(0)` only mutes the bloom MIX — the passes still render — so a
+  // real "post off" has to happen here at build time. The no-pipeline render
+  // path is the same one the catch-arm below already ships. Frame-ablation
+  // axis and the future Low-preset switch.
+  const postParam =
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('post') : null
+  if (postParam !== '0') {
+    try {
+      postPipeline = createPostPipeline({
+        renderer,
+        scene,
+        camera,
+        bloomStrength: cfg.bloom,
+        // Per-track cel/ink outline + motion blur. Both default-off (see
+        // DEFAULT_SKY); a track only pays for them when its JSON opts in.
+        outline: cfg.outline,
+        motionBlur: cfg.motionBlur,
+      })
+      setActivePostPipeline(postPipeline)
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[sky] failed to build post-pipeline; rendering without bloom', e)
+    }
   }
 
   // ── Shader uniforms (mutated each tick from CPU palette eval) ───────────

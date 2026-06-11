@@ -136,6 +136,15 @@ export type HoverDebug = {
    *  screenshot harness scrub foam-coverage / look uniforms in a single boot
    *  instead of re-booting per value. */
   waterDebug(): WaterMesh['debug'] | null
+  /** Live handle over the track's static vinyl dressing (env-GLB
+   *  buildings/set-pieces + the placed-prop group) behind one visibility
+   *  switch — the frame-ablation kit's "what does the dressed scene cost"
+   *  probe, the scenery sibling of `waterDebug().setWaterVisible`. Hiding
+   *  snapshots the currently-visible set and showing restores exactly that
+   *  set, so a mid-stream progressive reveal is never force-completed into
+   *  uncompiled pipelines. Null before boot or on boot paths that don't
+   *  wire it (edit mode, attract). */
+  scenery(): { count: number; setVisible(on: boolean): void } | null
   /** Gerstner sim↔render transect (water-next-research.md §9): walks a line
    *  of rest points, displaces each through `WaterMesh.renderVertex` (the CPU
    *  mirror of the GPU vertex transform — pinch + zones + live amplitudes),
@@ -401,6 +410,10 @@ export type DebugAccessors = {
   isHoverDebugOn(): boolean
   toggleDirectionArrow(): boolean
   isDirectionArrowOn(): boolean
+  /** Optional frame-ablation scenery handle — the track's vinyl dressing
+   *  behind one visibility switch (see HoverDebug.scenery). Boot paths
+   *  without GLB dressing (edit mode) simply don't provide it. */
+  scenery?(): { count: number; setVisible(on: boolean): void }
   /** Fast-forward the start countdown — used implicitly when an intent
    *  override is set so e2e tests don't have to wait through 3-2-1. */
   skipCountdown(): void
@@ -518,6 +531,7 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
     isDirectionArrowOn: () => accessors.isDirectionArrowOn(),
     setCameraPose: (pose) => setCameraPoseOverride(pose),
     waterDebug: () => getWaterMesh()?.debug ?? null,
+    scenery: () => (state.ready ? (accessors.scenery?.() ?? null) : null),
     setWaveStamps: (stamps) => {
       if (!state.ready) return
       setWaveStamps(accessors.waveField(), stamps)

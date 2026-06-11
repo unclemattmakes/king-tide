@@ -41,11 +41,11 @@ import { createPerfRecorder, type PerfStats } from '@/engine/perf-recorder'
 import type { RenderInfoLite } from '@/engine/render/perf-hud'
 
 /** Tracks offered as one-click re-run links on the results panel. These are
- *  the dressed (art-complete) tracks — the meaningful targets for a perf
- *  pass. The default track when `?bench=1` carries no `&track=` is the
- *  first entry. (South Beach Sunken dropped out when its slot was rebuilt
- *  as the greybox-pending Mexico City — Mexico City.) */
-export const BENCH_TRACKS = ['sandbar', 'the-maw'] as const
+ *  the shipped/dressed tracks — the meaningful targets for a perf pass.
+ *  The default track when `?bench=1` carries no `&track=` is the first
+ *  entry. (Mexico City joined when the Reef Cup was ungated 2026-06-10;
+ *  it's the current draw-call worst case, so it belongs in every run.) */
+export const BENCH_TRACKS = ['sandbar', 'the-maw', 'mexico-city'] as const
 export type BenchTrackId = (typeof BENCH_TRACKS)[number]
 
 /** Default bench track when `?bench=1` is opened without `&track=`. */

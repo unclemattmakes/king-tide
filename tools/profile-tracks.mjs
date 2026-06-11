@@ -46,12 +46,11 @@ const HEADLESS = process.env.E2E_HEADLESS === '1'
 const SCREENSHOT_DIR = 'test-results/profile'
 const REPORT_DIR = 'perf-report'
 
-// The art-complete tracks (Sandbar, The Maw). The rest of the catalog is
-// greybox route-stubs awaiting the v2 art pass, so profiling them would
-// measure unfinished scenes — skip by default. (South Beach Sunken left
-// this list when its slot was rebuilt as the greybox-pending Mexico City
-// Rising / Mexico City.)
-const DEFAULT_TRACKS = ['sandbar', 'the-maw']
+// The shipped/dressed tracks (Mayday Bay, The Maw, Mexico City — the Reef
+// opener ships as of 2026-06-10 and is the current draw-call worst case).
+// The rest of the catalog is greybox route-stubs awaiting the v2 art pass,
+// so profiling them would measure unfinished scenes — skip by default.
+const DEFAULT_TRACKS = ['sandbar', 'the-maw', 'mexico-city']
 
 const args = process.argv.slice(2)
 const TRACKS = args.length > 0 ? args : DEFAULT_TRACKS
@@ -224,10 +223,16 @@ async function profileTrack(browser, spec) {
       perf: window.__hover.perf.stats(),
       render: window.__hover.perf.renderInfo(),
       standings: window.__hover.standings?.()?.length ?? null,
+      // Rolling GPU render-pass average from the `?gpuprofile=1` profiler —
+      // null unless the spec carried `#gpuprofile=1` AND the adapter has
+      // timestamp-query (see gpu-profiler.ts). Lets one run record the
+      // GPU/CPU split next to the CPU frame stats.
+      gpuMs: window.__gpuProfile?.renderMs ?? null,
     }))
     result.perf = snap.perf
     result.render = snap.render
     result.bikes = snap.standings
+    result.gpuMs = snap.gpuMs
     phase = 'screenshot'
     await page
       .screenshot({ path: `${SCREENSHOT_DIR}/${label.replace(/[^a-z0-9-]/gi, '_')}.png` })
@@ -272,23 +277,25 @@ function renderMarkdown(results, meta) {
   if (meta.headless)
     lines.push('- **NOTE:** ran headless — software-GL fallback, numbers NOT representative')
   lines.push('')
+  // GPU ms sits LAST so the first nine columns keep matching the `?bench=1`
+  // panel's markdown row (benchMarkdownRow) and the perf-baseline tables.
   lines.push(
-    '| Track | Backend | FPS | p50 ms | p95 ms | p99 ms | Hitches | Draw calls | Triangles |',
+    '| Track | Backend | FPS | p50 ms | p95 ms | p99 ms | Hitches | Draw calls | Triangles | GPU ms |',
   )
-  lines.push('| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |')
+  lines.push('| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |')
   for (const r of results) {
     if (!r.ok) {
       // Keep failed tracks in the table so a partial run is still legible;
       // backend may have been read before the failure, otherwise '?'.
       lines.push(
-        `| ${r.label} | ${r.backend ?? '?'} | FAILED: ${r.error ?? 'unknown'} | | | | | | |`,
+        `| ${r.label} | ${r.backend ?? '?'} | FAILED: ${r.error ?? 'unknown'} | | | | | | | |`,
       )
       continue
     }
     const p = r.perf ?? {}
     const d = r.render ?? {}
     lines.push(
-      `| ${r.label} | ${r.backend ?? '?'} | ${fmt(p.fps)} | ${fmt(p.p50Ms, 2)} | ${fmt(p.p95Ms, 2)} | ${fmt(p.p99Ms, 2)} | ${p.hitchCount ?? '—'} | ${d.calls ?? '—'} | ${fmtTriangles(d.triangles)} |`,
+      `| ${r.label} | ${r.backend ?? '?'} | ${fmt(p.fps)} | ${fmt(p.p50Ms, 2)} | ${fmt(p.p95Ms, 2)} | ${fmt(p.p99Ms, 2)} | ${p.hitchCount ?? '—'} | ${d.calls ?? '—'} | ${fmtTriangles(d.triangles)} | ${fmt(r.gpuMs, 2)} |`,
     )
   }
   lines.push('')
