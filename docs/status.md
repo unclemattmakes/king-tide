@@ -32,6 +32,44 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-10 (j)** — **Water lab (`?waterlab=1`) + the
+> contour-slide diagnosis.** Matt flagged the P1 contour lines sliding over the
+> surface faster than the water travels. Root cause (not a time-scroll bug): the
+> readability field sums TWO swell trains (λ50 @ 8.6 m/s + λ85 @ 11.2 m/s — the
+> deliberate ~25 s set-beat pair), and an iso-height line sweeps at −∂h/∂t ÷
+> |∇h|, which exceeds the primary train's phase speed wherever the trains'
+> slopes partially cancel (guaranteed once per beat: ~10.3 m/s at half-gate
+> slope 0.04, ~11.3 m/s at the faint-gate floor, with sideways direction
+> wobble; unbounded below the gate where lines fade) — while the painted
+> layers the eye anchors to (foam-mass drift 0.1 m/s, bubbles ~static) barely
+> move. So even the BASELINE 8.6–11.2 m/s iso motion reads as foam-looking
+> paint outrunning a near-static painted surface, and the beat adds faster
+> wobbling patches on top. Two new persisted
+> water-menu knobs, both defaulting to the legacy look pending Matt's playtest:
+> **Contour coherence** (0..1 — keys the ramp+contour+relief field to the
+> dominant train only; vertex-stage `mix`, zero new varyings; at 1 every line
+> rides the primary swell at exactly 8.6 m/s) and **Contour slope gate** (raises
+> the gate window toward 0.06..0.14 — trims the flattest, fastest-sliding lines
+> first). New dedicated analysis scene **`?waterlab=1`** (dev palette: "Water
+> lab"): deep open ocean + auto-opened WATER tuner + phase-speed **pace cones**
+> per swell train (+ a 0.1 m/s foam-paint marker), red **drifter grid** (the
+> "water itself" reference), an origin pillar with a live analytic **iso-sweep
+> speed probe** (CPU mirror of the GPU field incl. the coherence blend),
+> pause/frame-step, camera presets (graze/¾/top-down), time-of-day stepping.
+> `tests/e2e/water-lab.spec.ts` asserts the diagnosis numerically (legacy scans
+> exceed 9.5 / 10.5 m/s at the half/faint gate floors; coherence 1 pins to
+> 8.6 ± 0.1) + captures a frozen same-phase coherence A/B pair into
+> `artifacts/water-lab/`. **Follow-up (same day, Matt's call):** the slide
+> reads worst when the OBSERVER is still (standing riders, the intro flyby) —
+> so a third knob, **Contour calm at rest** (persisted, **default 1 = ON**),
+> speed-couples the coherence: `tick()` measures observer speed from the
+> camera-locked mesh-origin delta (EMA τ 0.6 s, capped vs teleports) and
+> drives the effective coherence toward 1 below ~2 m/s, fading the authored
+> two-train liveliness back in by ~11 m/s. Standing still the lines pin to
+> the primary swell (riding the crests, never outrunning them); racing is
+> untouched. `getContourCoherence()` now returns the EFFECTIVE value (lab
+> HUD + CPU probe mirror it); spec gained a calm-at-rest scan assertion.
+
 > **Last updated: 2026-06-10 (i)** — **Loading overhaul — fresh load no longer
 > reads as a crash.** The June-10 landings had doubled race boot (4.2 → 8.1 s
 > on sandbar) and frozen the fresh-load menu for ~11 s of its first 12
