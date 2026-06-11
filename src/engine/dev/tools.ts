@@ -171,6 +171,10 @@ export function createDevTools(deps: DevToolDeps): DevTool[] {
       hint: 'Buoyancy + spring tuning against a row of floats',
       keywords: 'water buoyancy float',
     }),
+    scene('scene.waterlab', 'Water lab', 'waterlab', {
+      hint: 'Open-ocean water analysis: tuner + phase-speed pace cones + iso-line speed probe',
+      keywords: 'water contour swell shader tuning ocean waves',
+    }),
     scene('scene.podium', 'Podium ceremony', 'podium', {
       hint: 'Cup-win trophy + standings sequence',
       keywords: 'trophy win cup',
