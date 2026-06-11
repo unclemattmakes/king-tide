@@ -1,7 +1,10 @@
-# Sandbar — Tutorial
+# Mayday Bay — Tutorial
 
 > Cup: none (tutorial) · The classroom. Every other track is a spectacle;
 > this one teaches one mechanic per beat.
+>
+> *Display name **Mayday Bay** (a storm-hit tropical waterpark resort-town,
+> Typhoon-Lagoon-flavoured); internal slug + asset files stay `sandbar`.*
 
 ## Identity
 
@@ -66,7 +69,7 @@ None — single scripted lap, no branches.
 pump-duck (0.5)** so the audio swap on a successful pump is unmistakable
 while the game is *teaching* the mechanic.
 
-## Props — unique to Sandbar
+## Props — unique to Mayday Bay
 
 *(Common gameplay/system + dressing props are in [README.md](./README.md#props--common-to-all-tracks).)*
 

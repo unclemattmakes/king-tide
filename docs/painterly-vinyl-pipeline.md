@@ -103,8 +103,8 @@ three's WebGPU pipeline cache keys per material *instance* — a structurally
 identical twin still pays its own ~60–130 ms main-thread TSL node-build + WGSL
 codegen, and converting the baked constants to material-scoped uniforms does
 NOT dedupe — so the earlier per-(material, size-bucket) twins multiplied
-shader compiles (155 materials on Texcoco Rising). Sharing the instance
-collapses material count to source-material count (Texcoco: 73), which halves
+shader compiles (155 materials on Mexico City). Sharing the instance
+collapses material count to source-material count (Mexico City: 73), which halves
 the progressive scenery warm's drain: `progressive-warm.ts` warms one
 pipeline-GROUP at a time (`groupForWarm` keys on material + attribute layout +
 class), so group count ≈ vinyl-material count. If you hand a size-shared vinyl

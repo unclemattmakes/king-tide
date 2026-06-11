@@ -3,9 +3,9 @@
   "id": "scout",
   "displayName": "Scout",
   "physics": {
-    "massKg": 220,
-    "topSpeedMps": 32,
-    "hoverHeight": 0.8
+    "massKg": 210,
+    "topSpeedMps": 30,
+    "hoverHeight": 0.9
   },
   "appearance": {
     "liveryColor": "#ff6633",

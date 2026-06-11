@@ -129,7 +129,7 @@ export function collectVinylScenery(roots: Array<THREE.Object3D | undefined | nu
  * indexed-ness — the inputs three's pipeline + node-builder cache keys derive
  * from. One compile of the group's lead mesh warms every member, so a dressed
  * track's hundreds of scenery meshes collapse to ~one compile per distinct
- * vinyl material (Texcoco: 477 meshes → ~155 groups) and a whole family
+ * vinyl material (Mexico City: 477 meshes → ~155 groups) and a whole family
  * (a landmark's detail set, a prop run) pops in together instead of
  * trickling. Anything that would change the pipeline key splits the group.
  */

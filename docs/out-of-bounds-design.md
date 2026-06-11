@@ -40,7 +40,7 @@ the player's bike only.
 2. The buoys arrive as ordinary props: `json-loader.ts` synthesises each
    `waveRiderBuoys` entry into `track.props` with `assetId === 'buoy'`.
 3. `corridorHalfWidth = median( dist(buoy, nearest AI-line point) )` over all
-   `'buoy'` props. (~42 m on Sandbar per the playbook.) Median, not mean, so a
+   `'buoy'` props. (~42 m on Mayday Bay per the playbook.) Median, not mean, so a
    stray decorative buoy doesn't skew the wall.
 4. **Fallback** when a track has no buoys: `DEFAULT_CORRIDOR_HALF_WIDTH_M = 45`.
 

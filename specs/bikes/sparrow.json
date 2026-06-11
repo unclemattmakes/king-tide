@@ -3,9 +3,9 @@
   "id": "sparrow",
   "displayName": "Sparrow",
   "physics": {
-    "massKg": 80,
+    "massKg": 115,
     "topSpeedMps": 26,
-    "hoverHeight": 1.4
+    "hoverHeight": 1.35
   },
   "appearance": {
     "liveryColor": "#ddbb44",

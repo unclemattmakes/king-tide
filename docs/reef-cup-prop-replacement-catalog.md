@@ -1,13 +1,13 @@
 # Reef Cup — External-Prop Replacement Catalog
 
 > ⚠️ **South Beach Sunken / Miami was cut (2026-06 content pass)** and the Reef
-> opener rebuilt from scratch as **Texcoco Rising** (drowned Mexico City —
-> [tracks/texcoco-rising.md](tracks/texcoco-rising.md)), concept-locked /
+> opener rebuilt from scratch as **Mexico City** (the drowned capital —
+> [tracks/mexico-city.md](tracks/mexico-city.md)), concept-locked /
 > geometry-pending. All "South Beach" prop-replacement notes below are
 > **historical** (they describe the discarded Miami build).
 
 > **✅ IMPLEMENTED 2026-06-05.** The placeholder→Quaternius swap is **done and
-> verified in-engine on all three Reef tracks** (Sandbar, Cape Town, South Beach).
+> verified in-engine on all three Reef tracks** (Mayday Bay, Cape Town, South Beach).
 > See [Status — implemented](#status--implemented-2026-06-05) at the bottom for
 > exactly what shipped. This doc is kept as the rationale + per-track replace map.
 
@@ -17,7 +17,7 @@
 > (cross-cut #4: runtime props absent on two of three tracks).
 >
 > **Purpose.** Catalog the **external prop library** and map it onto the three
-> Reef Cup tracks — **Sandbar, South Beach Sunken, Cape Town Drift** — so the
+> Reef Cup tracks — **Mayday Bay, South Beach Sunken, Cape Town Drift** — so the
 > crude blocked-in / box-kitbash dressing can be **replaced with library props**
 > (a placement job, not a modelling job).
 >
@@ -50,7 +50,7 @@ Two facts that shape everything below:
    render with their painted multi-tone surface; the AI props are a single flat
    tint (the AI lane strips material for a `mat_<family>` colour). Where both
    exist for the same need, **prefer the CC0 prop** for finished look. (The AI
-   props are still fine Tier-B dressing — Sandbar already ships 25 of them.)
+   props are still fine Tier-B dressing — Mayday Bay already ships 25 of them.)
 
 ---
 
@@ -60,17 +60,17 @@ Legend: **GLB-baked** = geometry inside the track `.glb` (delete + re-export to
 replace). **JSON** = pure `props[]` placement. Tiers (C/B/A) from the
 [art-quality catalog](reef-cup-art-quality-catalog.md).
 
-### Sandbar (tutorial / classroom)
+### Mayday Bay (tutorial / classroom)
 
 | Blocked-in today | Where | Replace with | Notes |
 |---|---|---|---|
-| **Marina shack** — box + pyramid roof (Tier C) | GLB-baked | **`ai/pilot_shack`** (already built, unused) *or* **`cc0/house_1`** (pirate cabin) | The art-quality catalog's top Sandbar fix: a real shack exists — wire it. `house_1` is a weathered tropical cabin alternative. |
+| **Marina shack** — box + pyramid roof (Tier C) | GLB-baked | **`ai/pilot_shack`** (already built, unused) *or* **`cc0/house_1`** (pirate cabin) | The art-quality catalog's top Mayday Bay fix: a real shack exists — wire it. `house_1` is a weathered tropical cabin alternative. |
 | Marina **dock / pilings** (Tier B, fine) | GLB-baked | optionally accent with **`cc0/dock`, `cc0/dock_pole`, `cc0/dock_broken`** | The dock is the nicest thing in the cup — keep it; add broken-dock + extra pilings for ruin texture at the cove edge. |
 | `scatter_palms` (~12, instanced kit) | JSON/scatter | **`cc0/palm_2`** (lush) + `palm_1`/`palm_3` for variety | Pirate palms read fuller than the current kit. |
 | Marina clutter (none placed) | JSON | **`cc0/anchor`, `cc0/barrel`, `cc0/crate`, `cc0/bucket`, `cc0/boat`, `cc0/lifeboat`** | "Cared-for marina" dressing — anchor + a moored boat sell the pilot-school. |
 | Coral/debris under waterline | JSON | **`cc0/coastal_rock`, `cc0/rock_2..5`** | Replaces/augments `scatter_rocks`. |
 
-> Sandbar is already the most-dressed (25 `ai/*` + 100 buoys). The win here is the
+> Mayday Bay is already the most-dressed (25 `ai/*` + 100 buoys). The win here is the
 > **`pilot_shack` swap** + a few CC0 marina accents, not volume.
 
 ### South Beach Sunken (Reef #1) — currently **0 props placed**
@@ -180,7 +180,7 @@ three verified in-engine (`gen:track-shots`, `consoleErrors=false`).
 > pose+size mapped onto `cc0/shipping_container` (the box collider inherits the prop's
 > full rotation, so the collidable shape tilts with the visual).
 | **South Beach** | 2 `sb_wreck*` boxes; 36 flat `sb_palm` | **38 props** — 2 `boat`/`lifeboat` (tilted, half-sunk), 36 lush `cc0` palms. *Hotels/Versace/seaplane left for a modeling pass (no library match); `kind=track` barges + seaplane ramp untouched.* |
-| **Sandbar** | `marina_shack_body`+`_roof` box+pyramid | marina shack → **`ai/pilot_shack`** (built but never wired). *(Sea-stacks→cliffs + wrecks→boats already done earlier.)* |
+| **Mayday Bay** | `marina_shack_body`+`_roof` box+pyramid | marina shack → **`ai/pilot_shack`** (built but never wired). *(Sea-stacks→cliffs + wrecks→boats already done earlier.)* |
 
 **Deploy:** track `*.json` are git-tracked (commit); the re-exported GLBs are
 gitignored → R2, so they need **`pnpm assets:push`**.

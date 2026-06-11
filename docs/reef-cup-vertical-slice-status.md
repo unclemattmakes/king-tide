@@ -1,9 +1,9 @@
 # Reef Cup — Vertical Slice Status & Path to Complete
 
 > ⚠️ **South Beach Sunken / Miami was cut (2026-06 content pass).** The Reef
-> opener is being rebuilt from scratch as **Texcoco Rising** (drowned Mexico City
-> — [tracks/texcoco-rising.md](tracks/texcoco-rising.md)). The Reef Cup roster is
-> now **Sandbar → Texcoco Rising → Cape Town Drift**; all "South Beach" rows and
+> opener is being rebuilt from scratch as **Mexico City** (drowned Mexico City
+> — [tracks/mexico-city.md](tracks/mexico-city.md)). The Reef Cup roster is
+> now **Mayday Bay → Mexico City → Cape Town Drift**; all "South Beach" rows and
 > blockers below are **historical** (the discarded Miami build), kept for the
 > flipped-normals render-bug lesson that carries over; the `COLOR_0`/waterline
 > finding below is **superseded** (see cross-cut #1). Sibling audits:
@@ -11,7 +11,7 @@
 > [reef-cup-prop-replacement-catalog.md](reef-cup-prop-replacement-catalog.md).
 
 > **Date:** 2026-06-05 · **Scope:** the three Reef Cup tracks —
-> **Sandbar** (tutorial, technically "no cup" but ships in front of the Reef
+> **Mayday Bay** (tutorial, technically "no cup" but ships in front of the Reef
 > Cup as the classroom), **South Beach Sunken** (Reef #1), **Cape Town Drift**
 > (Reef #2) — plus the cup shell that strings them together.
 >
@@ -56,7 +56,7 @@ dressing, and proving the full 8-bike field completes each loop.**
 
 | Track | Loop & geometry | Grade / water / sky | Dressing & set-piece legibility | Headline blocker | Est. to slice-complete |
 |---|---|---|---|---|---|
-| **Sandbar** | ✅ built (15 MB GLB, 8 gates, drivable) | ✅ **landing** — warm `venice_warm`, two-tone turquoise, waterline on | ⚠️ marina hub set-piece reads thin/muted; crest-launch dune unnamed | Marina props don't carry their tint (no COLOR_0) + framing | **~1–2 days** (polish) |
+| **Mayday Bay** | ✅ built (15 MB GLB, 8 gates, drivable) | ✅ **landing** — warm `venice_warm`, two-tone turquoise, waterline on | ⚠️ marina hub set-piece reads thin/muted; crest-launch dune unnamed | Marina props don't carry their tint (no COLOR_0) + framing | **~1–2 days** (polish) |
 | **South Beach** | ✅ built (1.5 MB GLB, full Art-Deco kit + Versace + seaplane ramp) | ❌ sky preset chosen but **not graded** to sunset target; water choppy (Beaufort 4); waterline **off** | ❌ **buildings render dark** in-engine despite a colored material palette | **Dark-render bug** — colors aren't reaching the building masses | **~4–6 days** (diagnose + full grade/dress/wire) |
 | **Cape Town** | ✅ built (2.7 MB GLB, all landmarks + set-pieces) | ✅ cool `cape_town_blue` + clouds **landing**; water needs a calm slalom zone | ⚠️ Table Mtn + Cape Wheel **present but not reading**; harbour detail is flat | Landmark legibility + weathering/rust pass; `timeOfDay:125` anomaly | **~3–4 days** (legibility + dress + wire) |
 
@@ -67,7 +67,7 @@ this no longer gates the look — `COLOR_0` now only carries sway/AO/biome)*. Th
 original finding: a **vertex-color (`COLOR_0`) export gap** runs through all three
 tracks. Only the `terrain_mesh` carries `COLOR_0`;
 **every building/prop mesh ships without it** (South Beach 262/263 meshes
-missing, Cape Town 25/26, Sandbar's 16 marina props). The capture log throws
+missing, Cape Town 25/26, Mayday Bay's 16 marina props). The capture log throws
 30+ `THREE.AttributeNode: Vertex attribute "color" not found on geometry`
 warnings. This (a) is the likely contributor to South Beach reading dark, (b)
 means the **waterline trio + built/broken/blooming weathering can't reach any
@@ -103,7 +103,7 @@ Out of scope for *this* slice (tracked elsewhere, flagged so they're not
 forgotten): **soundtrack licensing** (today's tracks are CC0 placeholders) and
 the **wave-mastery legibility refit** (the "master the jump" pitch grading +
 wave-pump chyron rework from [CLAUDE.md](../CLAUDE.md)). The slice should still
-*exercise* wave-mastery — Sandbar's crest-launch + South Beach's wing-ramp are
+*exercise* wave-mastery — Mayday Bay's crest-launch + South Beach's wing-ramp are
 where players first meet it — so its legibility is **slice-adjacent**, not
 slice-internal.
 
@@ -114,7 +114,7 @@ slice-internal.
 ### 1. The `COLOR_0` / vertex-color export gap — **P0, shared**
 - **Evidence:** of all mesh primitives in the shipped GLBs, only `terrain_mesh`
   carries `COLOR_0`. South Beach: **1 of 263** primitives has it; Cape Town:
-  **1 of 26**; Sandbar: 15 of 31 (terrain + main meshes yes, the 16 marina
+  **1 of 26**; Mayday Bay: 15 of 31 (terrain + main meshes yes, the 16 marina
   props no). The-maw (the art-dressed reference that looks right) has **40 of
   50**. Capture logs spam `Vertex attribute "color" not found`.
 - **Why it matters:**
@@ -139,7 +139,7 @@ slice-internal.
   the export config stripping it), re-export all three. One pipeline fix.
 
 ### 2. Waterline trio is terrain-only on every track — **P1, shared**
-- `terrainShader.waterline` = `1` on Sandbar, **`0`** on South Beach and Cape
+- `terrainShader.waterline` = `1` on Mayday Bay, **`0`** on South Beach and Cape
   Town. Even where it's on, it only marks the terrain (see #1). The art targets
   call for the trio (new-life fringe / crust / salt-bleach) on **every static
   surface crossing the sea line** — hotels, containers, pilings, the aquarium.
@@ -155,7 +155,7 @@ slice-internal.
 ### 4. Runtime props / emitters are absent on two of three — **P1**
 > **✅ Largely resolved 2026-06-05 (Quaternius prop pass).** Placeholder boxes were
 > swapped for library props across all three tracks (placed in Blender → `props[]`
-> via the addon round-trip, verified in-engine). Counts now: **Sandbar 26**
+> via the addon round-trip, verified in-engine). Counts now: **Mayday Bay 26**
 > (cliffs/rocks/boats + `ai/pilot_shack`, replacing the marina-shack box) **+ 100
 > buoys**; **Cape Town 135** (`cruise_ship` + 118 red containers + harbour
 > houses/boats/crates, animated shark preserved); **South Beach 38** (2 wreck-boats
@@ -164,7 +164,7 @@ slice-internal.
 > ferry-as-mover, and South Beach's hero hotels (modeling, not props). See
 > [reef-cup-prop-replacement-catalog.md](reef-cup-prop-replacement-catalog.md). The
 > original (pre-pass) state is preserved below for context.
-- `props[]` in JSON: Sandbar **25** (AI boulders/wrecks/cab/anchor) + 100
+- `props[]` in JSON: Mayday Bay **25** (AI boulders/wrecks/cab/anchor) + 100
   wave-rider buoys; South Beach **0**; Cape Town **0**. The unique-prop manifests
   call for gulls, palm-sway motes, seaplane heat-shimmer, container-rust,
   shark-tank foam, signage glow, lounge chairs, flamingo, market stalls, the
@@ -182,7 +182,7 @@ slice-internal.
 
 ---
 
-## Sandbar — *the classroom* (closest to done)
+## Mayday Bay — *the classroom* (closest to done)
 
 **Design intent** ([sandbar.md](tracks/sandbar.md)): a low-key 60 s scripted
 tutorial cove, one lesson per beat, **pump taught in the first 8 s**, ending on
@@ -240,7 +240,7 @@ decay. The `marina_hub` plate is the one hero set-piece.
 
 > **Historical (pre-cut).** South Beach Sunken / Miami was **cut in the
 > 2026-06 content pass** and the Reef-opener slot rebuilt from scratch as
-> **Texcoco Rising** (drowned Mexico City — [tracks/texcoco-rising.md](tracks/texcoco-rising.md)),
+> **Mexico City** (drowned Mexico City — [tracks/mexico-city.md](tracks/mexico-city.md)),
 > currently concept-locked / geometry-pending. The blockin analysed below is
 > the discarded Miami build; it's kept as a record of the flipped-normals
 > finding (still worth heeding on the rebuild), not as current state.
@@ -273,7 +273,7 @@ hero plates (`hero_aerial`, `versace_steps`) are lush and warm.
   **every South Beach building/set-piece mesh points INWARD** — avg
   `normal·(outward dir)` ≈ **−0.27 to −0.46** on `sb_s0_mass`, `sb_versace_base`,
   `sb_plane_fuse`, `sb_plane_wingramp`, `sb_lg_hut`, `sb_s0_awn` — whereas Cape
-  Town's and Sandbar's meshes point **outward** (+0.37 to +0.58). Under
+  Town's and Mayday Bay's meshes point **outward** (+0.37 to +0.58). Under
   `MeshStandardMaterial` + default `FrontSide`, inward normals put the lit side
   away from the camera (`N·L < 0`) → no diffuse → ambient-only black. The whole
   box-kit shipped with inverted winding/normals (no negative scales — checked;
@@ -283,7 +283,7 @@ hero plates (`hero_aerial`, `versace_steps`) are lush and warm.
   a posed in-engine WebGPU capture confirms the rooftop chain now renders
   cream/pastel with **glowing neon** signage.
 - **Sky: preset chosen, not graded.** `miami_pastel` + `timeOfDay 0.85` are set,
-  but `sunSize 1.1` / `cloudTowering 0.35` are at defaults (Sandbar uses
+  but `sunSize 1.1` / `cloudTowering 0.35` are at defaults (Mayday Bay uses
   `1.7`/`0.75`). In-engine the sky is a flat pale peach with a small high sun —
   not the dramatic flamingo-pink sunset with a big low sun the plates demand.
 - **Water: wrong mood + no zoning.** Global `seaStateBeaufort 4` → choppy, vs the
@@ -397,11 +397,11 @@ horizon. "Lock the Table-Mountain ring + Cape Wheel first."
 3. **Full-field (8-bike) completion** on all three (cross-cut #3) — cheap, and it
    gates "playable." Fix any gate-jam before investing in art. *(½ day + fixes)*
 4. **Per-track grade/water/wiring**: SB sunset grade + calm bay zone; CT landmark
-   legibility + calm slalom zone + `timeOfDay`; Sandbar marina brighten/reframe +
-   crest dune. *(1–2 days each for SB/CT, ½ for Sandbar)*
+   legibility + calm slalom zone + `timeOfDay`; Mayday Bay marina brighten/reframe +
+   crest dune. *(1–2 days each for SB/CT, ½ for Mayday Bay)*
 5. **Waterline trio + weathering pass** on every shore/structure (now unblocked).
    *(1 day across all three)*
-6. **Dressing + emitters** to JetMoto edge-density; **commit Sandbar's racing-line
+6. **Dressing + emitters** to JetMoto edge-density; **commit Mayday Bay's racing-line
    WIP**. *(1–2 days)*
 7. **Slice playthrough**: menu → 3 races → standings → podium, on target-ish
    hardware, eyeballing the 8-bike perf (single-bike is 74–106 fps on the dev GPU
@@ -419,9 +419,9 @@ fix and the South Beach render diagnosis, which de-risk the rest.
   material-binding is it? (Determines whether SB is ~2 days or ~6.)
 - **`timeOfDay: 125`** on Cape Town — typo for `0.125`, a different unit, or
   harmless? Normalize and confirm sun angle.
-- **Sandbar crest-launch dune** — is the wave-mastery lesson actually built
+- **Mayday Bay crest-launch dune** — is the wave-mastery lesson actually built
   (no `crest_berm` node in the GLB), and does it read?
-- **Sandbar horizon silhouettes** — intended distant dunes, or stray mountains?
+- **Mayday Bay horizon silhouettes** — intended distant dunes, or stray mountains?
 - **`wave_zone` empties in the GLBs vs empty `waveZones[]` in JSON** — is the
   per-beat zoning meant to come from the GLB empty (and isn't being consumed) or
   from JSON (and was never authored)? Pick one source of truth.
@@ -431,7 +431,7 @@ fix and the South Beach render diagnosis, which de-risk the rest.
 ## Appendix — evidence
 
 ### Sky / grade / water knobs (from `public/tracks/<id>.json`)
-| Knob | Sandbar | South Beach | Cape Town |
+| Knob | Mayday Bay | South Beach | Cape Town |
 |---|---|---|---|
 | `colorGrade` | `venice_warm` | `miami_pastel` | `cape_town_blue` |
 | `cloudTowering` | **0.75** | 0.35 (default) | 0.10 (+`clouds` block) |
@@ -445,7 +445,7 @@ fix and the South Beach render diagnosis, which de-risk the rest.
 | checkpoints | 7 | 13 | 14 |
 
 ### GLB geometry inventory (`public/assets/tracks/<id>.glb`)
-| | Sandbar | South Beach | Cape Town | (the-maw ref) |
+| | Mayday Bay | South Beach | Cape Town | (the-maw ref) |
 |---|---|---|---|---|
 | size | 15.0 MB | 1.5 MB | 2.7 MB | 15.6 MB |
 | nodes / meshes / mats | 50 / 28 / 12 | 313 / 252 / 21 | 19 / 8 / 23 | — |
@@ -460,11 +460,11 @@ fix and the South Beach render diagnosis, which de-risk the rest.
 
 ### Cross-references
 - Design: [tracks/sandbar.md](tracks/sandbar.md) ·
-  [tracks/texcoco-rising.md](tracks/texcoco-rising.md) *(was South Beach / Miami)* ·
+  [tracks/mexico-city.md](tracks/mexico-city.md) *(was South Beach / Miami)* ·
   [tracks/cape-town-drift.md](tracks/cape-town-drift.md)
 - Art: [track-art-direction.md](track-art-direction.md) +
   [tracks/sandbar-art-target.md](tracks/sandbar-art-target.md) ·
-  [tracks/texcoco-rising-art-target.md](tracks/texcoco-rising-art-target.md) *(was South Beach / Miami)* ·
+  [tracks/mexico-city-art-target.md](tracks/mexico-city-art-target.md) *(was South Beach / Miami)* ·
   [tracks/cape-town-drift-art-target.md](tracks/cape-town-drift-art-target.md)
 - Process: [track-art-pass-playbook.md](track-art-pass-playbook.md) ·
   [v1-work-breakdown.md](v1-work-breakdown.md) · [status.md](status.md)

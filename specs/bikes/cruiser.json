@@ -3,7 +3,7 @@
   "id": "cruiser",
   "displayName": "Cruiser",
   "physics": {
-    "massKg": 160,
+    "massKg": 190,
     "topSpeedMps": 32,
     "hoverHeight": 1.2
   },
