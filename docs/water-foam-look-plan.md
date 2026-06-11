@@ -109,7 +109,7 @@ and sun-glint together** — one high-leverage move. Prefer doing it **shader-si
 buoyancy/gameplay (`wave-field.ts`) and changes how the bike rides.
 
 > Part of the calm look may also be a deliberately gentle track (the screenshot
-> looks like the Sandbar tutorial). Test an energetic zone too (The Maw has 17
+> looks like the Mayday Bay tutorial). Test an energetic zone too (The Maw has 17
 > wave zones). But the whitecap gate is mistuned high **regardless** of track.
 
 ## 5. The plan (re-ordered after the screenshot)
@@ -169,7 +169,7 @@ Coverage moved from "do last, gently" to **first** — it's the prerequisite.
 1. Run the app locally (WebGPU, real GPU) — see [run] / [verify] skills and
    `docs/water-deep-dive.md` for the `?reflect`, `?steep`, `?aa`, `?detail` URL
    knobs and the in-game water debug menu.
-2. Screenshot **before** on a calm track (Sandbar) and an energetic zone (The Maw)
+2. Screenshot **before** on a calm track (Mayday Bay) and an energetic zone (The Maw)
    at a **sunset/golden** sky grade.
 3. Apply Step 1, scrub the new sliders, screenshot **after**; compare foam
    coverage to the concept frames.
@@ -215,7 +215,7 @@ fire. Shipped defaults (constants in `water.ts`, captured into
 | `whitecapMode` | **0.35** | 0 (strict AND) | 0 = AND (tall×steep) … 1 = OR |
 
 The distance-faded `foamFiber` noise still breaks coverage into bubbly splotches,
-so the calm sea (Sandbar) stays mostly glassy while energetic zones (The Maw)
+so the calm sea (Mayday Bay) stays mostly glassy while energetic zones (The Maw)
 foam — per-track wave energy drives coverage for free.
 
 ### Step 2 — light-driven warm tint + spray tint + bloom
@@ -256,7 +256,7 @@ bubbles only).
 
 ## 10 · Playtest rework (2026-06-06) — supersedes §9 where they differ
 
-Playtest on the **shallow, pale tracks at a hazy grade** (Sandbar / South Beach /
+Playtest on the **shallow, pale tracks at a hazy grade** (Mayday Bay / South Beach /
 Cape Town — *not* the deep-teal sunset Maw §9 was tuned on) rejected the first
 pass: the foam read as a **uniform milky sheet** indistinct from light shallow
 water, and the streaks didn't read at all. Three fixes, all verified on those
@@ -339,7 +339,7 @@ crest tips with clean teal in the troughs/faces, built from overlapping solid
 circles. `pnpm typecheck` / `pnpm test` (1044) / `pnpm build` green.
 
 > **Verification note — deep-water test bed.** Shallow water (the foam-test /
-> Sandbar / Maw *start* areas) drowns wave-crest foam in shoaling + surf/
+> Mayday Bay / Maw *start* areas) drowns wave-crest foam in shoaling + surf/
 > intersection foam, so it's useless for judging whitecaps. The camera-pose
 > override (`window.__hover.setCameraPose({pos,target})`) is applied **before**
 > the water mesh's per-frame `tick(camera.xz)` (game-loop.ts), so the water

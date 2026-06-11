@@ -7,7 +7,7 @@
  * (full upfront warm) — so deferred-compile hitches are isolated by A/B.
  *
  *   E2E_PORT=5407 pnpm e2e tests/e2e/hitch-profile.spec.ts
- *   HITCH_TRACK=texcoco-rising E2E_PORT=5407 pnpm e2e tests/e2e/hitch-profile.spec.ts
+ *   HITCH_TRACK=mexico-city E2E_PORT=5407 pnpm e2e tests/e2e/hitch-profile.spec.ts
  *
  * Prints a per-second worst-frame table per case and writes the raw samples
  * to artifacts/hitch/ (test-results/ is wiped per run; artifacts/ survives).

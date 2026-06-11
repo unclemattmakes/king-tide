@@ -27,8 +27,8 @@ place.
 
 | # | Track | Palette family | Built / Broken / Blooming | Signature treatment |
 |---|---|---|---|---|
-| — | Sandbar | Reef pastel | 45 / 15 / 40 | calm classroom — low-key, friendly, legible |
-| 1 | Texcoco Rising | Reef rosa | 50 / 20 / 30 | party on the water, gold Ángel over a teal lake |
+| — | Mayday Bay | Reef pastel | 45 / 15 / 40 | calm classroom — low-key, friendly, legible |
+| 1 | Mexico City | Reef rosa | 50 / 20 / 30 | party on the water, gold Ángel over a teal lake |
 | 2 | Cape Town Drift | Reef pastel *(cool)* | 25 / 50 / 25 | ruin-field harbour, mountain grey-green |
 | 3 | Hatteras Light | Reef pastel *(cool)* | 30 / 35 / 35 | cool Atlantic grey, the kept lamp |
 | 4 | The Maw | Open Sea cool | 5 / 30 / 65 | golden-hour Pacific, nature-dominant |
@@ -46,7 +46,7 @@ Palette hexes for each family are in
 
 ---
 
-## Tutorial — Sandbar · Reef pastel · 45 / 15 / 40
+## Tutorial — Mayday Bay · Reef pastel · 45 / 15 / 40
 
 A retrofitted post-flood marina serving as the pilot-training cove. **Low-key on
 purpose** — every other track is a spectacle; this is a classroom, so dress it
@@ -64,7 +64,7 @@ purpose** — every other track is a spectacle; this is a classroom, so dress it
   the read dead-simple — a clean takeoff lip against open sky, no clutter to
   distract from the lesson.
 
-## 1. Texcoco Rising · Reef rosa · 50 / 20 / 30
+## 1. Mexico City · Reef rosa · 50 / 20 / 30
 
 "They drained the lake to build the city. The lake was patient." A defiantly-
 alive drowned megacity — high built + blooming, ruin kept to a budget. Warm
@@ -320,8 +320,8 @@ A few things every track art pass should honour (from
   lit face / shadowed back per swell, not a uniform glare field.
 
   **Reef Cup audit (2026-06-09, at the time of the P1 pass):** none of the
-  trio authors `swellBearingDeg` yet (all ride the global 47°). Sandbar
-  `timeOfDay 0.0` / Beaufort 1, Texcoco Rising `0.85` / 2.4, Cape Town Drift
+  trio authors `swellBearingDeg` yet (all ride the global 47°). Mayday Bay
+  `timeOfDay 0.0` / Beaufort 1, Mexico City `0.85` / 2.4, Cape Town Drift
   `125.0` / 2 — mixed encodings (normalized vs degrees) that resolve through
   `SkySystem.setTimeOfDay`. Action for the per-track grade passes: check each
   map's main wave-reading straights against the rule in the track-shot

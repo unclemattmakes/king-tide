@@ -48,8 +48,8 @@ export type V1TrackEntry = {
 export const V1_TRACKS: V1TrackEntry[] = [
   {
     id: 'sandbar',
-    name: 'Sandbar',
-    location: 'Tutorial cove — fictional retrofit marina',
+    name: 'Mayday Bay',
+    location: 'Tutorial lagoon — fictional storm-hit resort town',
     setPiece: 'Scripted training gates',
     cup: 'reef',
     accent: '#9bdcf2',
@@ -59,8 +59,8 @@ export const V1_TRACKS: V1TrackEntry[] = [
     status: 'ship',
   },
   {
-    id: 'texcoco-rising',
-    name: 'Texcoco Rising',
+    id: 'mexico-city',
+    name: 'Mexico City',
     location: 'Drowned Mexico City — the lake returns',
     setPiece: 'El Ángel — Reforma freeway launch',
     cup: 'reef',
@@ -241,12 +241,12 @@ export const V1_CUPS: CupEntry[] = [
     name: 'Reef Cup',
     tagline: 'Starters. Bright, shallow, instructive.',
     accent: '#4dd6ff',
-    // Gated while the opener (Texcoco Rising) is a locked-but-unbuilt
+    // Gated while the opener (Mexico City) is a locked-but-unbuilt
     // concept — a championship can't run through a track with no geometry.
-    // Flips back to 'ship' once Texcoco Rising's build lands. Same
+    // Flips back to 'ship' once Mexico City's build lands. Same
     // convention as the Harbor Cup's two pending concepts.
     status: 'pending',
-    gateLabel: 'Opens when Texcoco Rising ships',
+    gateLabel: 'Opens when Mexico City ships',
     races: shipCupRaces('reef'),
   },
   {

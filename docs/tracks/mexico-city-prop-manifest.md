@@ -1,12 +1,12 @@
-# Texcoco Rising — Bespoke Prop Manifest
+# Mexico City — Bespoke Prop Manifest
 
-> The **bespoke** props Texcoco Rising (drowned Mexico City) needs that the
+> The **bespoke** props Mexico City (the drowned capital) needs that the
 > shared library doesn't already cover — derived from the design beats
-> ([texcoco-rising.md](./texcoco-rising.md)) and the concept pass
-> ([texcoco-rising-concept-pass.md](./texcoco-rising-concept-pass.md)), applying
+> ([mexico-city.md](./mexico-city.md)) and the concept pass
+> ([mexico-city-concept-pass.md](./mexico-city-concept-pass.md)), applying
 > [prop-art-direction.md](../prop-art-direction.md) (lane rule, material-state,
 > waterline trio, "glow is a privilege") and the track's **50 built / 20 broken
-> / 30 blooming** ratio ([track-art-direction.md](../track-art-direction.md#1-texcoco-rising--reef-rosa--50--20--30)).
+> / 30 blooming** ratio ([track-art-direction.md](../track-art-direction.md#1-mexico-city--reef-rosa--50--20--30)).
 >
 > *(Common props — `scatter_rocks`, `emitter_explosion`, AI line, checkpoints,
 > start grid, water surface, etc. — are in the
@@ -182,7 +182,7 @@ spindly fragments, floating disconnected parts, holes
 6. **VFX emitters** (D) + **waterline trio** decal pass on every passed shore.
 
 ## References
-- [texcoco-rising.md](./texcoco-rising.md) · [texcoco-rising-art-target.md](./texcoco-rising-art-target.md) · [texcoco-rising-concept-pass.md](./texcoco-rising-concept-pass.md)
+- [mexico-city.md](./mexico-city.md) · [mexico-city-art-target.md](./mexico-city-art-target.md) · [mexico-city-concept-pass.md](./mexico-city-concept-pass.md)
 - [prop-art-direction.md](../prop-art-direction.md) — lane rule, ComfyUI blocks, family looks.
 - [props-production-plan.md](../props-production-plan.md) — production lanes + per-prop definition-of-done.
 - [painterly-vinyl-pipeline.md](../painterly-vinyl-pipeline.md) — mesh-intake (shape-only → textured).

@@ -11,7 +11,7 @@
 > [track-art-direction.md](../track-art-direction.md#2-cape-town-drift--reef-pastel-cool-grade--25--50--25)
 > (Cape Town = Reef pastel **cool grade**, **25 built / 50 broken / 25 blooming** —
 > the Reef cup's *broken-heavy ruin-field*). Sister docs:
-> [texcoco-rising-art-target.md](./texcoco-rising-art-target.md),
+> [mexico-city-art-target.md](./mexico-city-art-target.md),
 > [sandbar-art-target.md](./sandbar-art-target.md). Cape Town is the **cool**
 > counterweight to South Beach's warm pastel.
 
@@ -151,6 +151,6 @@ heavier waterline. Match it on every container and wreck:
 
 ## References
 - [cape-town-drift.md](./cape-town-drift.md) — the track (beats, props, palette).
-- [texcoco-rising-art-target.md](./texcoco-rising-art-target.md) · [sandbar-art-target.md](./sandbar-art-target.md) — sister passes.
+- [mexico-city-art-target.md](./mexico-city-art-target.md) · [sandbar-art-target.md](./sandbar-art-target.md) — sister passes.
 - [track-art-pass-playbook.md](../track-art-pass-playbook.md) — placement / AI-corridor clearance / re-export.
 - [art-direction.md](../art-direction.md) — register, material-state rule, waterline trio, palette appendix.

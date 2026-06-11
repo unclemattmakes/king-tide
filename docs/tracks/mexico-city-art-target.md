@@ -1,18 +1,18 @@
-# Texcoco Rising — Art Target (Reef Cup visual pass)
+# Mexico City — Art Target (Reef Cup visual pass)
 
-> **What this is.** A forward-looking visual build-target for the Texcoco
-> Rising track (Reef Cup #1 — drowned Mexico City), grounded in the design
+> **What this is.** A forward-looking visual build-target for the Mexico City
+> track (Reef Cup #1 — drowned Mexico City), grounded in the design
 > docs. The **Midjourney concept pass is DONE** (2026-06-07,
 > [#321](https://github.com/occ-matt/hoverbike/issues/321)) — plates live in the
 > external store (see *Source material* below). There is still **no authored
 > `.blend`** — the track is concept-locked, geometry pending — so the build notes
 > here are mood/material targets to build toward. The layout follows
-> [tracks/texcoco-rising.md](./texcoco-rising.md), the *look* follows this doc.
+> [tracks/mexico-city.md](./mexico-city.md), the *look* follows this doc.
 >
 > **This doc is downstream of** [art-direction.md](../art-direction.md) (register,
 > material-state rule, waterline trio) and
-> [track-art-direction.md](../track-art-direction.md#1-texcoco-rising--reef-rosa--50--20--30)
-> (Texcoco Rising = Reef rosa, **50 built / 20 broken / 30 blooming**). It does
+> [track-art-direction.md](../track-art-direction.md#1-mexico-city--reef-rosa--50--20--30)
+> (Mexico City = Reef rosa, **50 built / 20 broken / 30 blooming**). It does
 > not change lore, palette, or layout — it shows how to *apply* them here. Pairs
 > with [sandbar-art-target.md](./sandbar-art-target.md), which set the Reef
 > house look first.
@@ -22,14 +22,14 @@
 - **Concept plates:** ✅ **done (2026-06-07).** A 7-beat Midjourney pass (hero
   aerial, causeway run, Zócalo lagoon, El Ángel set-piece, Chapultepec finish,
   waterline detail, + twin-volcano horizon bonus) lives in the external store at
-  `concept-art/midjourney/texcoco-rising/` — raw cells `<beat>_0..3.png`, curated
+  `concept-art/midjourney/mexico-city/` — raw cells `<beat>_0..3.png`, curated
   picks in `best/<beat>.png`, `best/_BEST_STRIP.png`, and `CONTACT_SHEET.png`.
   Style-locked to the painterly-vinyl `--sref` canonical frame; the El Ángel
   set-piece rendered wheel-free. Curated picks (best cell per beat): hero_aerial
   `0`, calzada_run `0`, zocalo_lagoon `2`, el_angel `2`, chapultepec_finish `3`,
   waterline_detail `3`, volcano_horizon `0`. Shot sheet:
-  [texcoco-rising-concept-pass.md](./texcoco-rising-concept-pass.md).
-- **MJ prompt lane** (reproducible — same lane as Sandbar, restyled to Mexico
+  [mexico-city-concept-pass.md](./mexico-city-concept-pass.md).
+- **MJ prompt lane** (reproducible — same lane as Mayday Bay, restyled to Mexico
   City): `<concrete scene>; painterly cinematic concept art, retro-future
   post-apocalyptic solarpunk drowned-world hover-bike racing game, warm
   rosa-mexicano-pink and marigold sunset over a calm teal high-altitude lake,
@@ -51,7 +51,7 @@ re-surfacing Aztec city. The lake came back and the city threw a party on it.
 
 ## Palette (Reef rosa — sample by role)
 
-| Role | Hex | Use on Texcoco Rising |
+| Role | Hex | Use on Mexico City |
 |---|---|---|
 | Sky / key (warm) | `#E4007C` → `#FF8C1A` | rosa-mexicano-to-marigold sunset gradient, the master warm |
 | Water (cool) | `#2E9E8F` | teal lake shallows; deeper green-blue off the causeway drop-offs |
@@ -62,11 +62,11 @@ re-surfacing Aztec city. The lake came back and the city threw a party on it.
 
 Sky preset: **`mexico_city_rosa`** (added with this track) — rosa-mexicano lift,
 punchy saturation. Grade to late-afternoon. Keep saturation *up* — this is the
-brightest, friendliest grade in the Reef cup alongside Sandbar.
+brightest, friendliest grade in the Reef cup alongside Mayday Bay.
 
 ## Material-state ratio: 50 built / 20 broken / 30 blooming
 
-All three must read in the hero framing. Texcoco leans **built + blooming** —
+All three must read in the hero framing. Mexico City leans **built + blooming** —
 a dense, defiantly-alive city, with ruin kept to a budget.
 
 - **Built (50):** painted colonial facades + Aztec stonework kept lit, the gold
@@ -80,7 +80,7 @@ a dense, defiantly-alive city, with ruin kept to a budget.
 
 ## Per-beat build notes
 
-Beats follow [texcoco-rising.md](./texcoco-rising.md) (causeway loop, 45 s lap).
+Beats follow [mexico-city.md](./mexico-city.md) (causeway loop, 45 s lap).
 
 ### 1 — Hero aerial
 The postcard: a teal lake threaded by raised Aztec causeways, the gold Ángel
@@ -143,9 +143,9 @@ Every static surface crossing the lake line gets three marks, bottom→top — a
 > this). Density at the *edges*, empty on the *line*.
 
 ## References
-- [texcoco-rising.md](./texcoco-rising.md) — the track (beats, props, palette).
-- [texcoco-rising-concept-pass.md](./texcoco-rising-concept-pass.md) — per-beat concept prompts (the shot sheet).
-- [texcoco-rising-prop-manifest.md](./texcoco-rising-prop-manifest.md) — bespoke props + ComfyUI sculpt prompts.
+- [mexico-city.md](./mexico-city.md) — the track (beats, props, palette).
+- [mexico-city-concept-pass.md](./mexico-city-concept-pass.md) — per-beat concept prompts (the shot sheet).
+- [mexico-city-prop-manifest.md](./mexico-city-prop-manifest.md) — bespoke props + ComfyUI sculpt prompts.
 - [sandbar-art-target.md](./sandbar-art-target.md) — sister doc; set the Reef house look.
 - [track-art-pass-playbook.md](../track-art-pass-playbook.md) — placement /
   AI-corridor clearance / GLB re-export procedure.

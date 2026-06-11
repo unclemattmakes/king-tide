@@ -28,7 +28,7 @@ Strategy, archetype list, and the **subject-suitability rule** live in
 >
 > **Proven from external concept art + multiview** (2026-06-01): a **Midjourney**
 > concept (cleaned to one isolated solid object) fed Hunyuan single-view
-> *directly* — skipping ComfyUI — and conditioned cleanly for Sandbar's
+> *directly* — skipping ComfyUI — and conditioned cleanly for Mayday Bay's
 > `drift_buoy` + `cargo_crates` (the first MJ-pipeline props). Separately, the
 > **multiview** model (`Hunyuan3D-2mv`) was brought up locally on the 8 GB box.
 > See "Alternative front-end" (Stage 1) and "Multiview" (Stage 2) below.
@@ -64,7 +64,7 @@ an external concept (Midjourney v7 is the proven case, 2026-06-01):
    wheelless when you describe the *air-gap* — "hovers on a cushion of repulsion,
    clear glowing gap beneath the hull" — never a surface verb like "skimming".)
 
-First MJ-pipeline props: Sandbar `drift_buoy` (retro-future buoy, distinct from
+First MJ-pipeline props: Mayday Bay `drift_buoy` (retro-future buoy, distinct from
 the make-props `marker_buoy`) + `cargo_crates`. Raw MJ concepts + the cropped
 single-object inputs live in `<content-root>/concept-art/midjourney/<level>/`.
 

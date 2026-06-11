@@ -1,19 +1,19 @@
-# Texcoco Rising — Concept-Art Pass (per-beat shot sheet)
+# Mexico City — Concept-Art Pass (per-beat shot sheet)
 
-> **What this is.** The runnable per-beat concept prompts for Texcoco Rising
+> **What this is.** The runnable per-beat concept prompts for Mexico City
 > (Reef Cup #1 — drowned Mexico City). Paste-ready for Midjourney, built from
 > the project recipe ([art-direction.md § Concept-art recipe](../art-direction.md#concept-art-recipe-v2-lock))
-> and the track look ([texcoco-rising-art-target.md](./texcoco-rising-art-target.md)).
-> Beats follow [texcoco-rising.md](./texcoco-rising.md).
+> and the track look ([mexico-city-art-target.md](./mexico-city-art-target.md)).
+> Beats follow [mexico-city.md](./mexico-city.md).
 >
 > *(Prompts authored on a remote session with no image generator. **The pass
 > has since been run — ✅ 2026-06-07 ([#321](https://github.com/occ-matt/hoverbike/issues/321)).**
 > All 7 beats rendered on the lane below, carrying the painterly-vinyl `--sref`
 > canonical frame and the `--no` ban list; curated to
-> `concept-art/midjourney/texcoco-rising/best/`. Curated picks (best cell per
+> `concept-art/midjourney/mexico-city/best/`. Curated picks (best cell per
 > beat): hero_aerial `0`, calzada_run `0`, zocalo_lagoon `2`, el_angel `2`,
 > chapultepec_finish `3`, waterline_detail `3`, volcano_horizon `0`. Next: drive
-> the bespoke-prop sculpts from [texcoco-rising-prop-manifest.md](./texcoco-rising-prop-manifest.md).)*
+> the bespoke-prop sculpts from [mexico-city-prop-manifest.md](./mexico-city-prop-manifest.md).)*
 
 ## How to read this
 
@@ -45,7 +45,7 @@ text, watermark, wheels
 
 ## Beats
 
-### 1 — Hero aerial · `texcoco_hero_aerial`
+### 1 — Hero aerial · `mexico_city_hero_aerial`
 The postcard; get water + sky grade right here first.
 > `<concrete scene>` = **aerial postcard of a drowned Mexico City: a teal lake
 > threaded by raised stone Aztec causeways, the tall gold Ángel de la
@@ -53,20 +53,20 @@ The postcard; get water + sky grade right here first.
 > trajinera boats fanned across the water, the half-sunk cathedral and a stepped
 > pyramid off to one side, twin volcanoes — one smoking — on the horizon**
 
-### 2 — Calzada causeway run · `texcoco_calzada_run`  *(0–10 s)*
+### 2 — Calzada causeway run · `mexico_city_calzada_run`  *(0–10 s)*
 The built heart; where to spend prop density.
 > `<concrete scene>` = **low racing view down a raised Aztec stone causeway over
 > a calm teal lake, painted colonial facades (rosa, cobalt, ochre) and purple
 > jacaranda trees lining it, papel-picado banners strung overhead, warm
 > string-lights, water reflecting the sunset**
 
-### 3 — Zócalo lagoon · `texcoco_zocalo_lagoon`  *(10–20 s, weave)*
+### 3 — Zócalo lagoon · `mexico_city_zocalo_lagoon`  *(10–20 s, weave)*
 > `<concrete scene>` = **the half-sunk Catedral Metropolitana leaning over a
 > teal lagoon beside the re-emerging stepped Templo Mayor pyramid with carved
 > stone serpent heads, colourful trajinera boats and floating marigold petals,
 > gilded altarpiece glints catching the light**
 
-### 4 — El Ángel · `texcoco_el_angel`  *(28–36 s, the set-piece)*
+### 4 — El Ángel · `mexico_city_el_angel`  *(28–36 s, the set-piece)*
 The hero; build + light first after water/sky.
 > `<concrete scene>` = **hero shot: a collapsed double-decker concrete freeway
 > deck fallen across a flooded avenue as a launch ramp, a hover-bike airborne
@@ -80,13 +80,13 @@ The hero; build + light first after water/sky.
 > `--no wheels, tires, motorbike, motorcycle, dirt bike`. In the 2026-06-07 run
 > this rendered all 4 cells wheel-free.)*
 
-### 5 — Chapultepec finish · `texcoco_chapultepec_finish`  *(36–45 s, turn)*
+### 5 — Chapultepec finish · `mexico_city_chapultepec_finish`  *(36–45 s, turn)*
 > `<concrete scene>` = **a sweeping bank through a drowned park of flooded
 > ahuehuete cypress groves, a castle silhouette on a green hill as the finish
 > landmark, distant twin volcanoes and skyline silhouette mirrored in the calm
 > teal water**
 
-### 6 — Waterline detail · `texcoco_waterline_detail`
+### 6 — Waterline detail · `mexico_city_waterline_detail`
 The spec image for the waterline trio (closer to a material study).
 > `<concrete scene>` = **instructional close-up: a painted colonial facade and a
 > basalt causeway edge meeting clear teal alkaline lake water, the waterline
@@ -94,7 +94,7 @@ The spec image for the waterline trio (closer to a material study).
 > chalky salt-bleach band above — submerged rubble and chinampa reeds below the
 > surface**
 
-### (bonus) Twin-volcano horizon · `texcoco_volcano_horizon`
+### (bonus) Twin-volcano horizon · `mexico_city_volcano_horizon`
 Mood reference for the bespoke `horizon_ring` silhouette.
 > `<concrete scene>` = **wide silhouette study of Popocatépetl and Iztaccíhuatl
 > (the smoking volcano + the sleeping-woman ridge) on the horizon at sunset
@@ -103,13 +103,13 @@ Mood reference for the bespoke `horizon_ring` silhouette.
 ## Next
 
 1. Run the lane, curate a best-of (6 beats + horizon) to the external store.
-2. Mine the plates for **bespoke sculpts** → [texcoco-rising-prop-manifest.md](./texcoco-rising-prop-manifest.md)
+2. Mine the plates for **bespoke sculpts** → [mexico-city-prop-manifest.md](./mexico-city-prop-manifest.md)
    (the prop manifest carries the render-locked single-prop ComfyUI/MJ prompts).
 3. Build the `.blend` the current way (empty scene → the **South Beach track
-   shape carried in `public/tracks/texcoco-rising.json`** → blockin terrain +
+   shape carried in `public/tracks/mexico-city.json`** → blockin terrain +
    landmarks → dressing). See [track-design-specs.md §2.1](../track-design-specs.md).
 
 ## References
-- [texcoco-rising-art-target.md](./texcoco-rising-art-target.md) — the look spec.
-- [texcoco-rising.md](./texcoco-rising.md) — the track (beats, props).
+- [mexico-city-art-target.md](./mexico-city-art-target.md) — the look spec.
+- [mexico-city.md](./mexico-city.md) — the track (beats, props).
 - [art-direction.md](../art-direction.md#concept-art-recipe-v2-lock) — the recipe.

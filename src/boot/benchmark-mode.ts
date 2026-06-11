@@ -44,7 +44,7 @@ import type { RenderInfoLite } from '@/engine/render/perf-hud'
  *  the dressed (art-complete) tracks — the meaningful targets for a perf
  *  pass. The default track when `?bench=1` carries no `&track=` is the
  *  first entry. (South Beach Sunken dropped out when its slot was rebuilt
- *  as the greybox-pending Texcoco Rising — Mexico City.) */
+ *  as the greybox-pending Mexico City — Mexico City.) */
 export const BENCH_TRACKS = ['sandbar', 'the-maw'] as const
 export type BenchTrackId = (typeof BENCH_TRACKS)[number]
 

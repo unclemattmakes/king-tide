@@ -384,7 +384,7 @@ const PUMP_SPEED_CAP_FRAC = 1.3
 const CAMERA_WATER_CLEARANCE = 0.6
 
 /** Longest the countdown waits on the progressive scenery warm after the
- *  intro finishes. On big dressed tracks (Texcoco: ~155 vinyl materials) the
+ *  intro finishes. On big dressed tracks (Mexico City: ~155 vinyl materials) the
  *  warm legitimately outlives any reasonable grid wait — the cap keeps the
  *  race startable no matter what, trading the tail back for a prompt start. */
 const SCENERY_WARM_HOLD_CAP_MS = 6_000
