@@ -67,8 +67,8 @@ export const V1_TRACKS: V1TrackEntry[] = [
     accent: '#e4007c',
     lapTarget: 45,
     laps: 3,
-    gateLabel: 'Concept locked · build pending',
-    status: 'pending',
+    gateLabel: '',
+    status: 'ship',
   },
   {
     id: 'cape-town-drift',
@@ -241,12 +241,11 @@ export const V1_CUPS: CupEntry[] = [
     name: 'Reef Cup',
     tagline: 'Starters. Bright, shallow, instructive.',
     accent: '#4dd6ff',
-    // Gated while the opener (Mexico City) is a locked-but-unbuilt
-    // concept — a championship can't run through a track with no geometry.
-    // Flips back to 'ship' once Mexico City's build lands. Same
-    // convention as the Harbor Cup's two pending concepts.
-    status: 'pending',
-    gateLabel: 'Opens when Mexico City ships',
+    // All three Reef tracks are built + wired (Mayday Bay, Mexico City,
+    // Cape Town Drift), so the cup ships. Mexico City's build landed via
+    // the Texcoco art pass; the opener gate was flipped 2026-06-10.
+    status: 'ship',
+    gateLabel: '',
     races: shipCupRaces('reef'),
   },
   {
