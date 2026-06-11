@@ -431,7 +431,7 @@ export async function bootWaterLabMode(appEl: HTMLElement): Promise<WaterLabMode
       <div style="font-weight:600;color:#7cf;font-size:13px;margin-bottom:6px">WATER LAB</div>
       <div><span style="color:#888">iso sweep @pillar </span><b style="color:${isoColor}">${probeIso.toFixed(1)} m/s</b><span style="color:#888"> · peak ${PROBE_PEAK_HOLD_S}s </span>${probePeak.toFixed(1)} m/s${fadedTag}</div>
       <div><span style="color:#888">swell trains      </span>${trains.map((t) => `λ${t.wavelength.toFixed(0)} @ ${t.speed.toFixed(1)} m/s`).join(' · ')}</div>
-      <div><span style="color:#888">set beat          </span>${beat ? `${beat.toFixed(1)} s` : '—'}<span style="color:#888"> · coherence </span>${coherence.toFixed(2)}${labPaused ? ' · <b style="color:#ffc83c">PAUSED</b>' : ''}${todSeconds !== null ? `<span style="color:#888"> · tod </span>${todSeconds.toFixed(0)}s` : ''}</div>
+      <div><span style="color:#888">set beat          </span>${beat ? `${beat.toFixed(1)} s` : '—'}<span style="color:#888"> · coherence(eff) </span>${coherence.toFixed(2)}${labPaused ? ' · <b style="color:#ffc83c">PAUSED</b>' : ''}${todSeconds !== null ? `<span style="color:#888"> · tod </span>${todSeconds.toFixed(0)}s` : ''}</div>
       <div style="margin-top:8px;color:#7cf;font-size:11px">
         1/2/3 cam (graze · ¾ · top-down) · drag orbit<br>
         Space pause · . step · G drifters · P pace cones · O pillar<br>

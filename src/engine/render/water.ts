@@ -383,9 +383,16 @@ export type WaterMesh = {
      *  cycle); at 1 the field keys to the dominant train only, so every
      *  contour rides the primary swell at exactly its phase speed. */
     setContourCoherence(s: number): void
-    /** Live iso-coherence value — the `?waterlab` CPU probe mirrors the GPU
-     *  blend with it. */
+    /** Live EFFECTIVE iso-coherence (authored base + the speed-coupled calm
+     *  drive, as rendered this frame) — the `?waterlab` CPU probe mirrors
+     *  the GPU blend with it. */
     getContourCoherence(): number
+    /** Speed-coupled contour calm, 0..1. Drives the effective coherence
+     *  toward 1 as the observer (camera origin) slows: standing riders and
+     *  the intro flyby see lines pinned to the primary swell (riding the
+     *  crests, never outrunning them), and the authored two-train
+     *  liveliness fades back in by ~11 m/s. 0 = no coupling (legacy). */
+    setContourCalmAtRest(s: number): void
     /** Contour slope-gate raise, 0..1. Iso-lines sweep at ∂h/∂t ÷ slope, so
      *  the flattest gated-in faces carry the fastest-sliding lines; raising
      *  the window (0 = legacy 0.02..0.06 → 1 = 0.06..0.14) trims those
@@ -487,6 +494,10 @@ export type WaterDebugDefaults = {
   /** Iso-coherence 0..1: legacy multi-train readability field (0) ↔ keyed to
    *  the dominant swell train only (1) — kills the iso-line "racing". */
   contourCoherence: number
+  /** Speed-coupled calm 0..1: effective coherence → 1 as the observer slows
+   *  (rest/intro = lines pinned to the primary swell), authored look returns
+   *  at speed. 0 = no coupling. */
+  contourCalmAtRest: number
   /** Contour slope-gate raise 0..1 (legacy 0.02..0.06 ↔ 0.06..0.14 window). */
   contourGate: number
   /** Rising-face strokes, 0..2: crest-perpendicular brush marks climbing the
@@ -1254,6 +1265,31 @@ export function createWaterMesh(
   // shoaling and the drawn geometry never read it.
   const CONTOUR_COHERENCE_DEFAULT = 0
   const contourCoherenceUniform = uniform(CONTOUR_COHERENCE_DEFAULT)
+  // Speed-coupled calm (Matt's call after the ?waterlab study): the slide
+  // reads worst when the OBSERVER is still — standing riders, the intro
+  // flyby — because nothing masks the line motion; at race speed your own
+  // motion dominates and the livelier two-train field is fine. So tick()
+  // drives the EFFECTIVE coherence toward 1 as the observer slows:
+  //   effective = mix(authored base, 1, calmAtRest × (1 − speedFactor))
+  // where speedFactor ramps 0→1 over CALM_SPEED_LO..HI m/s of smoothed
+  // mesh-origin (camera) speed. At rest the lines pin to the primary swell
+  // (riding the crests, never outrunning them); by ~swell phase speed the
+  // authored look is fully back. calmAtRest 0 = no coupling (legacy).
+  const CONTOUR_CALM_AT_REST_DEFAULT = 1
+  let contourCoherenceBase = CONTOUR_COHERENCE_DEFAULT
+  let contourCalmAtRest = CONTOUR_CALM_AT_REST_DEFAULT
+  const CALM_SPEED_LO = 2
+  const CALM_SPEED_HI = 11
+  /** Observer-speed smoothing time constant, s — absorbs chase-cam bob and
+   *  the 1 m origin snap without lagging a real launch/stop by much. */
+  const CALM_SPEED_TAU = 0.6
+  /** Instantaneous speed cap, m/s — a respawn/camera-cut teleport must not
+   *  spike the EMA with a 1-frame multi-hundred-m/s sample. */
+  const CALM_SPEED_MAX = 60
+  let observerSpeedSmoothed = 0
+  let observerPrevX: number | null = null
+  let observerPrevZ: number | null = null
+  let observerPrevMs: number | null = null
   let dominantSwellIndex = -1
   for (const i of SWELL_INDICES) {
     const a = Math.abs(baseAmplitudes[i] ?? 0)
@@ -4622,6 +4658,7 @@ export function createWaterMesh(
     contourRelief: CONTOUR_RELIEF_DEFAULT,
     contourBreakup: CONTOUR_BREAKUP_DEFAULT,
     contourCoherence: CONTOUR_COHERENCE_DEFAULT,
+    contourCalmAtRest: CONTOUR_CALM_AT_REST_DEFAULT,
     contourGate: CONTOUR_GATE_DEFAULT,
     riseStroke: RISE_STROKE_DEFAULT,
     wireframe: wireFlag,
@@ -4794,9 +4831,14 @@ export function createWaterMesh(
       contourBreakupUniform.value = clamp01(s, 0, 1)
     },
     setContourCoherence(s) {
-      contourCoherenceUniform.value = clamp01(s, 0, 1)
+      // Authored BASE — tick() blends it toward 1 by calmAtRest × rest
+      // factor and writes the effective value to the uniform.
+      contourCoherenceBase = clamp01(s, 0, 1)
     },
     getContourCoherence: () => contourCoherenceUniform.value,
+    setContourCalmAtRest(s) {
+      contourCalmAtRest = clamp01(s, 0, 1)
+    },
     setContourGate(s) {
       contourGateUniform.value = clamp01(s, 0, 1)
     },
@@ -5417,6 +5459,36 @@ export function createWaterMesh(
       meshOriginZ.value = oz
       mesh.position.x = ox
       mesh.position.z = oz
+    }
+    // Speed-coupled contour calm (see CONTOUR_CALM_AT_REST_DEFAULT).
+    // Observer speed = raw (un-snapped) origin delta over wall time — the
+    // origin IS the camera in every gameplay mode, and it's the observer's
+    // motion that masks (or exposes) the iso-line slide. Originless scenes
+    // (?waterlab, ?waveriders, editor) decay to rest, which is the calm
+    // endpoint they want anyway.
+    {
+      const nowMs = performance.now()
+      const rawX = originXZ?.x ?? 0
+      const rawZ = originXZ?.z ?? 0
+      if (observerPrevMs !== null && observerPrevX !== null && observerPrevZ !== null) {
+        const dtS = Math.min(Math.max((nowMs - observerPrevMs) / 1000, 1e-3), 0.25)
+        const inst = Math.min(
+          Math.hypot(rawX - observerPrevX, rawZ - observerPrevZ) / dtS,
+          CALM_SPEED_MAX,
+        )
+        const alpha = 1 - Math.exp(-dtS / CALM_SPEED_TAU)
+        observerSpeedSmoothed += (inst - observerSpeedSmoothed) * alpha
+      }
+      observerPrevX = rawX
+      observerPrevZ = rawZ
+      observerPrevMs = nowMs
+      const t = Math.min(
+        Math.max((observerSpeedSmoothed - CALM_SPEED_LO) / (CALM_SPEED_HI - CALM_SPEED_LO), 0),
+        1,
+      )
+      const speedFactor = t * t * (3 - 2 * t)
+      const calmDrive = contourCalmAtRest * (1 - speedFactor)
+      contourCoherenceUniform.value = contourCoherenceBase + (1 - contourCoherenceBase) * calmDrive
     }
     for (let i = 0; i < MAX_BIKES; i++) {
       const slot = bikeSlots[i]!
