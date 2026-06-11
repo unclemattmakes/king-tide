@@ -348,6 +348,15 @@ const SLIDERS: SliderDef[] = [
     format: (n) => n.toFixed(2),
     hint: 'Breaks the iso lines into crest-aligned brush dashes — gentle nicks near the crests, near-total in the troughs so lines cling to the crests instead of running the whole sea. 0 = solid unbroken lines',
   },
+  {
+    key: 'riseStroke',
+    label: 'Rising strokes',
+    min: 0,
+    max: 2,
+    step: 0.05,
+    format: (n) => (n < 0.01 ? 'off' : `${n.toFixed(2)}×`),
+    hint: 'Crest-PERPENDICULAR brush strokes climbing the leading (rising) face of an approaching wave — the vertical partner of the contour crest lines. Front-face gated (∂h/∂t), steep swell faces only, building up toward the crest. 0 = off · 0.5 = baseline',
+  },
 ]
 
 export type WaterDebugMenu = {
@@ -591,6 +600,9 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'contourBreakup':
           water.debug.setContourBreakup(v)
+          break
+        case 'riseStroke':
+          water.debug.setRiseStroke(v)
           break
       }
     })
