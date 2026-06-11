@@ -141,5 +141,11 @@ reload over a live race page (teardown contention — see below):
   GLBs, compiled pipelines). Biggest remaining structural win; large
   `race-boot.ts` refactor.
 - Mexico City content diet (material count / prop merging) — content work.
-- fps tuning of the June-10 water layers — playtest territory
-  (see perf-report/ for the 8-bike numbers).
+- ~~fps tuning of the June-10 water layers~~ **RESOLVED 2026-06-11, and the
+  cause was not the layers**: the water-ablation kit measured every June-10
+  look layer together as ≈ free; the regression was the planar-reflection
+  pass re-encoding the scene every frame (+ the 768² water mesh). Fixed by
+  the mirror layer cull + 512² default — sandbar 58–65 → 82–88 fps,
+  mexico-city steady-state p50 16.7 ms (see status.md + perf-baseline.md).
+  Mexico City's remaining frame cost is its own draw count + the lap-1
+  scenery stream — the vinyl-structural-sharing / content-diet items above.
