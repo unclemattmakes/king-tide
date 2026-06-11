@@ -30,6 +30,7 @@
     "gen:bikes": "node tools/blender/run.mjs build_bike specs/bikes",
     "gen:bike-thumbs": "node tools/gen-bike-thumbs.mjs",
     "gen:track-shots": "node tools/gen-track-shots.mjs",
+    "gen:ui-shots": "node tools/gen-ui-shots.mjs",
     "gen:prop-sheets": "node tools/gen-prop-sheets.mjs",
     "gen:props": "node tools/blender/run.mjs build_prop specs/props",
     "gen:cloud-props": "node tools/blender/seed.mjs build_cloud_props.py",

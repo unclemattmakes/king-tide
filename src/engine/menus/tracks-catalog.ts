@@ -240,7 +240,7 @@ export const V1_CUPS: CupEntry[] = [
     id: 'reef',
     name: 'Reef Cup',
     tagline: 'Starters. Bright, shallow, instructive.',
-    accent: '#4dd6ff',
+    accent: '#36c8c0',
     // All three Reef tracks are built + wired (Mayday Bay, Mexico City,
     // Cape Town Drift), so the cup ships. Mexico City's build landed via
     // the Texcoco art pass; the opener gate was flipped 2026-06-10.
@@ -261,7 +261,7 @@ export const V1_CUPS: CupEntry[] = [
     id: 'continental',
     name: 'Continental Cup',
     tagline: 'Spectacle. Volcano, port, Venice, Tokyo.',
-    accent: '#ff7a3a',
+    accent: '#ff7a52',
     status: 'ship',
     gateLabel: '',
     races: shipCupRaces('continental'),
@@ -270,7 +270,7 @@ export const V1_CUPS: CupEntry[] = [
     id: 'drowned',
     name: 'Drowned Cup',
     tagline: 'Finale. Chaos, jungle climb, Liberty.',
-    accent: '#ff3a5e',
+    accent: '#e8503a',
     status: 'ship',
     gateLabel: '',
     races: shipCupRaces('drowned'),
