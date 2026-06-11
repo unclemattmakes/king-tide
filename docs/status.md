@@ -10,9 +10,9 @@
 >    and **The Maw** are art-dressed; the other tracks were intentionally reset
 >    to greybox route-stubs (PR #285) for the v2 art pass. "v1 lineup complete"
 >    is a v1 statement, not a v2 one. *(South Beach Sunken / Miami was cut in the
->    2026-06 content pass; the Reef opener is being rebuilt from scratch as
->    **Mexico City** (slug `mexico-city`) — drowned, on the old Lake Texcoco bed
->    — concept-locked / geometry-pending.)*
+>    2026-06 content pass; the Reef opener **Mexico City** (slug `mexico-city`)
+>    — drowned, on the old Lake Texcoco bed — was rebuilt via the Texcoco art
+>    pass and now ships, so the Reef Cup is ungated as of 2026-06-10.)*
 > 3. **The soundtrack is CC0 placeholder music, not commissioned/licensed.** The
 >    14 `.opus` tracks play, but licensing is still open work. Entries calling
 >    them "commissioned" / "licensed" are aspirational.
