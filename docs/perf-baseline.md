@@ -103,6 +103,21 @@ Runs the same three tracks at the 8-bike field via Playwright on the real GPU,
 and writes a Markdown table to `perf-report/`. Paste its rows into the tables
 below.
 
+### Path C — water-cost attribution (when a number above regresses)
+
+```
+node tools/water-ablation.mjs            # sandbar; TRACK=<id> to override
+```
+
+One 8-bike autoplay boot; flips each water layer via `__hover.waterDebug()`
+and samples `__hover.perf` per config, plus separate boots for structural
+variants (`?reflect=0` / `?reflectfull=1`, `?hextile=0`, `?watersubs=<n>`).
+This is what attributed the June-10 regression to the reflection pass rather
+than the look layers. Caveats: 5 s windows alias the autoplay lap (the
+baseline-repeat row bounds the drift) and p50 quantizes at vsync — read mean
+FPS + p95 + draw calls together. `tools/water-reflect-ab.mjs` captures posed
+culled-vs-full mirror pairs for the visual half of the story.
+
 ## Results
 
 One table per device. Rows are pre-filled; fill the metric cells (`—` =
