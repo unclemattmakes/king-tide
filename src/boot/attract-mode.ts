@@ -10,7 +10,7 @@ import { createPickupRenderSystem } from '@/engine/render/pickup-render'
 import { createPropsMesh } from '@/engine/render/props-mesh'
 import { type BikeRenderRegistry, createBikeRenderSystem } from '@/engine/render/render-systems'
 import { createRenderer } from '@/engine/render/renderer'
-import { renderFrame } from '@/engine/render/renderer-service'
+import { getActivePostPipeline, renderFrame } from '@/engine/render/renderer-service'
 import { createRiderMannequinSystem } from '@/engine/render/rider-mannequin'
 import { createRiderRenderSystem } from '@/engine/render/rider-systems'
 import { createScene } from '@/engine/render/scene'
@@ -38,6 +38,7 @@ import { simulateStep } from '@/game/sim-step'
 import { createWaveRiderSystem } from '@/game/systems/wave-rider'
 import type { Track } from '@/game/tracks/types'
 import { AI_GRID_SLOTS, resolveGridSlotWorld } from './grid-offsets'
+import { collectVinylScenery, deferSceneryWarm } from './progressive-warm'
 import { loadTrackForBoot } from './track-loader'
 
 /**
@@ -125,7 +126,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     applyStoredWaterTuning(waterMesh)
 
     const trackId = opts.trackId ?? 'lagoon'
-    const { track, terrainHeightmap } = await loadTrackForBoot({
+    const { track, terrainHeightmap, environmentGlbRoot } = await loadTrackForBoot({
       trackId,
       scene,
       phys,
@@ -178,8 +179,10 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     let waveRiderSys: ReturnType<typeof createWaveRiderSystem> | undefined
     let waveRiderRender: ReturnType<typeof createWaveRiderRenderSystem> | undefined
     let animatedProps: ReturnType<typeof createAnimatedPropsSystem> | undefined
+    let propsGroup: ReturnType<typeof createPropsMesh> | undefined
     if (track.props.length > 0) {
-      scene.add(createPropsMesh(track.props, propAssets))
+      propsGroup = createPropsMesh(track.props, propAssets)
+      scene.add(propsGroup)
       animatedProps = createAnimatedPropsSystem(scene, track.props, propAssets, { camera })
       waveRiderSys = createWaveRiderSystem(sim, phys, waveField)
       const bindings = createPropColliders(phys, track.props, propAssets, sim, {
@@ -294,6 +297,52 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     const pickupRender = createPickupRenderSystem(scene, sim)
     const combatRender = createCombatRenderSystem(scene, sim)
     const fxTick = createFxSystem(scene, sim, phys, waveField).tick
+
+    // ── Chunked pipeline warm ────────────────────────────────────────────
+    // The menu must stay responsive while this background scene compiles.
+    // Letting the first rAF frame compile everything created every pipeline
+    // in ONE synchronous multi-second main-thread stall — the "menu frozen /
+    // app looks crashed" fresh-load symptom (docs/boot-overhaul-plan.md).
+    // Instead: static vinyl scenery is deferred exactly like the race boot,
+    // one system tick gives the movers their meshes, and the scene roots are
+    // then revealed a few at a time with an eager render after each — the
+    // same correct-by-construction warm, but in bounded chunks with real rAF
+    // gaps between them. The canvas stays behind the menu's solid backdrop
+    // until `attract-live`, so the staged renders are never visible.
+    bikeRender()
+    riderRender()
+    pickupRender(0)
+    combatRender(0)
+    fxTick(0)
+    animatedProps?.update(0)
+    const attractScenery = collectVinylScenery([environmentGlbRoot, propsGroup])
+    for (const m of attractScenery) m.visible = false
+    const sceneryWarm = deferSceneryWarm(attractScenery)
+    {
+      const restore = scene.children.map((k) => ({ k, visible: k.visible }))
+      for (const r of restore) r.k.visible = false
+      const CHUNK = 4
+      const nextFrame = () => new Promise<void>((res) => requestAnimationFrame(() => res()))
+      for (let s = 0; s < restore.length && !disposed; s += CHUNK) {
+        for (const r of restore.slice(s, s + CHUNK)) r.k.visible = r.visible
+        renderFrame(scene, camera)
+        await nextFrame()
+      }
+      for (const r of restore) r.k.visible = r.visible
+    }
+    if (disposed) {
+      disposeRenderer()
+      return handle
+    }
+    // Stream the deferred scenery back in off the hot path — the chunk
+    // renders above made the post-pipeline state real, so the async compile
+    // hook caches under the same key the live loop uses (progressive-warm).
+    {
+      const warmPipeline = getActivePostPipeline()
+      sceneryWarm.reveal(
+        warmPipeline ? { compile: (o) => warmPipeline.compileSubtreeAsync(o) } : {},
+      )
+    }
 
     const director = createBroadcastDirector({ camera })
 

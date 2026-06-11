@@ -1506,14 +1506,19 @@ export function createWaterMesh(
     const out0 = float(0).toVar()
     const out1 = float(0).toVar()
     const out2 = float(0).toVar()
-    for (let i = 0; i < MAX_WAVE_STAMPS; i++) {
-      If(float(i).lessThan(waveStampCountUniform), () => {
+    // Dynamic loop to the live stamp count — ONE emitted body instead of
+    // MAX_WAVE_STAMPS unrolled copies (×2 call sites). Slot math is identical
+    // per iteration, so the surface is unchanged; only the generated WGSL
+    // shrinks (pipeline-compile time is the boot lever).
+    Loop(
+      { start: int(0), end: int(waveStampCountUniform), type: 'int', condition: '<' },
+      ({ i }) => {
         // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray swizzle proxy
-        const a = waveEventsUniform.element(i * 3) as any
+        const a = waveEventsUniform.element(int(i).mul(3)) as any
         // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray swizzle proxy
-        const b = waveEventsUniform.element(i * 3 + 1) as any
+        const b = waveEventsUniform.element(int(i).mul(3).add(1)) as any
         // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray swizzle proxy
-        const cc = waveEventsUniform.element(i * 3 + 2) as any
+        const cc = waveEventsUniform.element(int(i).mul(3).add(2)) as any
         const x0 = float(a.x)
         const z0 = float(a.y)
         const ux = float(a.z)
@@ -1571,8 +1576,8 @@ export function createWaterMesh(
           )
           out1.addAssign(envelope.mul(float(2)).div(widthM).mul(sech2).mul(tanhN).mul(speed))
         }
-      })
-    }
+      },
+    )
     return { out0, out1, out2 }
   }
   const waveStampGeometry = Fn(([x, z, t, depth]: [unknown, unknown, unknown, unknown]) => {
@@ -1627,9 +1632,12 @@ export function createWaterMesh(
     const y = float(0).toVar()
     const dydx = float(0).toVar()
     const dydz = float(0).toVar()
-    for (let i = 0; i < MAX_SPLASH_RINGS; i++) {
+    // Dynamic loop over the ring slots — one emitted body instead of
+    // MAX_SPLASH_RINGS unrolled copies (dead slots still zero out via the
+    // age gate, exactly as before; only the generated WGSL shrinks).
+    Loop(MAX_SPLASH_RINGS, ({ i }) => {
       // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray swizzle proxy
-      const slot = waveEventsUniform.element(WAVE_EVENT_RING_BASE + i) as any
+      const slot = waveEventsUniform.element(int(i).add(WAVE_EVENT_RING_BASE)) as any
       const ox = float(slot.x)
       const oz = float(slot.y)
       const t0 = float(slot.z)
@@ -1656,7 +1664,7 @@ export function createWaterMesh(
         dydx.addAssign(dyDr.mul(dx).div(r))
         dydz.addAssign(dyDr.mul(dz).div(r))
       })
-    }
+    })
     return vec3(y, dydx, dydz)
   })
 
@@ -1687,10 +1695,14 @@ export function createWaterMesh(
     const tN = t as ReturnType<typeof float>
     const ambientHN = ambientH as ReturnType<typeof float>
     const foam = float(0).toVar()
-    for (let i = 0; i < MAX_WATER_CONTACTS; i++) {
-      If(float(i).lessThan(waterContactCountUniform), () => {
+    // Dynamic loop to the live contact count — one emitted body instead of
+    // MAX_WATER_CONTACTS (24!) unrolled copies in the fragment stage, and the
+    // GPU only iterates the populated slots instead of predicating all 24.
+    Loop(
+      { start: int(0), end: int(waterContactCountUniform), type: 'int', condition: '<' },
+      ({ i }) => {
         // biome-ignore lint/suspicious/noExplicitAny: TSL uniformArray swizzle proxy
-        const slot = waveEventsUniform.element(WAVE_EVENT_CONTACT_BASE + i) as any
+        const slot = waveEventsUniform.element(int(i).add(WAVE_EVENT_CONTACT_BASE)) as any
         const cx = float(slot.x)
         const cz = float(slot.y)
         const radius = float(slot.z)
@@ -1727,8 +1739,8 @@ export function createWaterMesh(
         const core = band.mul(float(0.5).add(pulse.mul(float(0.75))))
         const washing = ripples.mul(float(0.45).add(pulse.mul(float(0.55))))
         foam.assign(max(foam, strength.mul(core.add(washing))))
-      })
-    }
+      },
+    )
     return foam.mul(contactFoamStrengthUniform)
   })
 
@@ -2108,11 +2120,15 @@ export function createWaterMesh(
   // All zero/huge when no live segment is in range (strength 0 kills every
   // downstream term).
   //
+  // `trailIndex` is a TSL int node (the caller's per-trail loop var), so this
+  // body is emitted ONCE per stage and iterated, instead of MAX_WAKE_TRAILS
+  // unrolled copies — the wake-trail WGSL was the single biggest contributor
+  // to the water pipeline's compile time.
   // biome-ignore lint/suspicious/noExplicitAny: TSL node-graph builder values
-  function emitTrailScan(bikeIndex: number, xN: any, zN: any, tN: any) {
-    const base = bikeIndex * WAKE_TRAIL_POINTS
+  function emitTrailScan(trailIndex: any, xN: any, zN: any, tN: any) {
+    const base = int(trailIndex).mul(WAKE_TRAIL_POINTS)
     // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
-    const cull = wakeTrailCullUniform.element(bikeIndex) as any
+    const cull = wakeTrailCullUniform.element(int(trailIndex)) as any
     const headArc = cull.w
     const bestD2 = float(1e9).toVar()
     const bestPerpSigned = float(0).toVar()
@@ -2123,7 +2139,7 @@ export function createWaterMesh(
     const bestDirX = float(0).toVar()
     const bestDirZ = float(0).toVar()
     Loop(WAKE_TRAIL_POINTS - 1, ({ i }) => {
-      const idxA = int(base).add(i)
+      const idxA = base.add(i)
       const idxB = idxA.add(int(1))
       // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
       const a = wakeTrailUniform.element(idxA) as any
@@ -2225,65 +2241,74 @@ export function createWaterMesh(
         dydz.addAssign(depth.mul(dz).mul(-2 * invR2))
       })
     }
-    for (let i = 0; i < MAX_WAKE_TRAILS; i++) {
-      // ----- Trail-wake ridge (whole recorded path) -----
-      // Per-trail CPU-fit cull circle: one compare for the common case
-      // (vertex nowhere near this trail). The circle is parked at
-      // INACTIVE_FAR with r²=0 for slots with no live trail.
-      // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
-      const cull = wakeTrailCullUniform.element(i) as any
-      // biome-ignore lint/suspicious/noExplicitAny: TSL types lose precision here
-      const cdx = xN.sub(cull.x) as any
-      // biome-ignore lint/suspicious/noExplicitAny: TSL types lose precision here
-      const cdz = zN.sub(cull.y) as any
-      If(cdx.mul(cdx).add(cdz.mul(cdz)).lessThan(cull.z), () => {
-        const scan = emitTrailScan(i, xN, zN, tN)
-        If(scan.strength.greaterThan(float(0.001)), () => {
-          const perp = sqrt(scan.dist2)
-          const behind = scan.behind
-          const wakeWidth = behind.mul(WAKE_HALF_ANGLE_TAN).add(float(WAKE_BASE_WIDTH))
-          // Two-piece signed transverse profile (Kelvin-style V):
-          //   inside V (perp < wakeWidth):   -cos(π · perp / wakeWidth)
-          //                                   → -1 at axis (trough), +1 at edge (ridge)
-          //   outside V (perp >= wakeWidth): linear fade 1 → 0 over halfwidth
-          // Combined: `insidePart * fadeOut`. For perp <= wakeWidth, fadeOut=1
-          // so the cosine dominates. For perp > wakeWidth, insidePart clamps
-          // to +1 (cos(π) = -1, negated → 1) and fadeOut handles the falloff.
-          const insideArg = min(perp, wakeWidth).div(wakeWidth).mul(Math.PI)
-          const insidePart = cos(insideArg).negate()
-          const fadeOut = max(
-            float(0),
-            float(1).sub(max(float(0), perp.sub(wakeWidth)).div(float(WAKE_EDGE_BELL_HALFWIDTH))),
-          )
-          const transverseSigned = insidePart.mul(fadeOut)
-          const longRamp = float(1).sub(exp(behind.mul(-WAKE_LONG_RAMP)))
-          const longDecay = exp(behind.mul(-WAKE_LONG_DECAY))
-          // Transverse "scallops" (M9.35): sin(K · behind − ω · t) modulates
-          // the ridge along its length; the pattern drifts backward along
-          // the trail as t advances — now following the ridden path.
-          const longPhase = tN.mul(-WAKE_TRANS_OMEGA).add(behind.mul(WAKE_TRANS_K))
-          const transverseMod = float(1).add(sin(longPhase).mul(WAKE_TRANS_AMP))
-          const ageFade = exp(scan.age.div(-WAKE_AGE_TAU))
-          const amp = float(WAKE_DISP_AMP)
-            .mul(scan.strength)
-            .mul(longRamp)
-            .mul(longDecay)
-            .mul(transverseMod)
-            .mul(ageFade)
-            .mul(wakeStrengthUniform)
-          y.addAssign(amp.mul(transverseSigned))
-          // Approximate gradient: dominated by the lateral direction (the V
-          // shape's slope across the trail). scan.dirX/dirZ is ∇(capsule
-          // distance), so the inside-V slope rides it directly. Drops the
-          // longitudinal-decay cross-term (small at typical scale), same as
-          // the old heading-ray version.
-          const dProfileDPerp = sin(insideArg).mul(float(Math.PI).div(wakeWidth))
-          const ampDProfile = amp.mul(dProfileDPerp)
-          dydx.addAssign(ampDProfile.mul(scan.dirX))
-          dydz.addAssign(ampDProfile.mul(scan.dirZ))
+    // Dynamic per-trail loop ('ti' — distinct name so it can't shadow the
+    // segment scan's inner 'i'). One ridge body in the WGSL instead of
+    // MAX_WAKE_TRAILS unrolled copies. (`name` is supported by LoopNode at
+    // runtime; the published .d.ts lags, hence the casts.)
+    Loop(
+      // biome-ignore lint/suspicious/noExplicitAny: LoopNode accepts `name` at runtime
+      { start: int(0), end: int(MAX_WAKE_TRAILS), type: 'int', condition: '<', name: 'ti' } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: named loop var surfaces under its custom key
+      ({ ti }: any) => {
+        // ----- Trail-wake ridge (whole recorded path) -----
+        // Per-trail CPU-fit cull circle: one compare for the common case
+        // (vertex nowhere near this trail). The circle is parked at
+        // INACTIVE_FAR with r²=0 for slots with no live trail.
+        // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
+        const cull = wakeTrailCullUniform.element(int(ti)) as any
+        // biome-ignore lint/suspicious/noExplicitAny: TSL types lose precision here
+        const cdx = xN.sub(cull.x) as any
+        // biome-ignore lint/suspicious/noExplicitAny: TSL types lose precision here
+        const cdz = zN.sub(cull.y) as any
+        If(cdx.mul(cdx).add(cdz.mul(cdz)).lessThan(cull.z), () => {
+          const scan = emitTrailScan(ti, xN, zN, tN)
+          If(scan.strength.greaterThan(float(0.001)), () => {
+            const perp = sqrt(scan.dist2)
+            const behind = scan.behind
+            const wakeWidth = behind.mul(WAKE_HALF_ANGLE_TAN).add(float(WAKE_BASE_WIDTH))
+            // Two-piece signed transverse profile (Kelvin-style V):
+            //   inside V (perp < wakeWidth):   -cos(π · perp / wakeWidth)
+            //                                   → -1 at axis (trough), +1 at edge (ridge)
+            //   outside V (perp >= wakeWidth): linear fade 1 → 0 over halfwidth
+            // Combined: `insidePart * fadeOut`. For perp <= wakeWidth, fadeOut=1
+            // so the cosine dominates. For perp > wakeWidth, insidePart clamps
+            // to +1 (cos(π) = -1, negated → 1) and fadeOut handles the falloff.
+            const insideArg = min(perp, wakeWidth).div(wakeWidth).mul(Math.PI)
+            const insidePart = cos(insideArg).negate()
+            const fadeOut = max(
+              float(0),
+              float(1).sub(max(float(0), perp.sub(wakeWidth)).div(float(WAKE_EDGE_BELL_HALFWIDTH))),
+            )
+            const transverseSigned = insidePart.mul(fadeOut)
+            const longRamp = float(1).sub(exp(behind.mul(-WAKE_LONG_RAMP)))
+            const longDecay = exp(behind.mul(-WAKE_LONG_DECAY))
+            // Transverse "scallops" (M9.35): sin(K · behind − ω · t) modulates
+            // the ridge along its length; the pattern drifts backward along
+            // the trail as t advances — now following the ridden path.
+            const longPhase = tN.mul(-WAKE_TRANS_OMEGA).add(behind.mul(WAKE_TRANS_K))
+            const transverseMod = float(1).add(sin(longPhase).mul(WAKE_TRANS_AMP))
+            const ageFade = exp(scan.age.div(-WAKE_AGE_TAU))
+            const amp = float(WAKE_DISP_AMP)
+              .mul(scan.strength)
+              .mul(longRamp)
+              .mul(longDecay)
+              .mul(transverseMod)
+              .mul(ageFade)
+              .mul(wakeStrengthUniform)
+            y.addAssign(amp.mul(transverseSigned))
+            // Approximate gradient: dominated by the lateral direction (the V
+            // shape's slope across the trail). scan.dirX/dirZ is ∇(capsule
+            // distance), so the inside-V slope rides it directly. Drops the
+            // longitudinal-decay cross-term (small at typical scale), same as
+            // the old heading-ray version.
+            const dProfileDPerp = sin(insideArg).mul(float(Math.PI).div(wakeWidth))
+            const ampDProfile = amp.mul(dProfileDPerp)
+            dydx.addAssign(ampDProfile.mul(scan.dirX))
+            dydz.addAssign(ampDProfile.mul(scan.dirZ))
+          })
         })
-      })
-    }
+      },
+    )
     return vec3(y, dydx, dydz)
   })
 
@@ -3547,54 +3572,62 @@ export function createWaterMesh(
     const arcU = float(0).toVar()
     const perpV = float(0).toVar()
     const behindOut = float(0).toVar()
-    for (let i = 0; i < MAX_WAKE_TRAILS; i++) {
-      // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
-      const cull = wakeTrailCullUniform.element(i) as any
-      // biome-ignore lint/suspicious/noExplicitAny: TSL types lose precision here
-      const cdx = positionWorld.x.sub(cull.x) as any
-      // biome-ignore lint/suspicious/noExplicitAny: TSL types lose precision here
-      const cdz = positionWorld.z.sub(cull.y) as any
-      If(cdx.mul(cdx).add(cdz.mul(cdz)).lessThan(cull.z), () => {
-        const scan = emitTrailScan(i, positionWorld.x, positionWorld.z, tNode)
-        If(scan.strength.greaterThan(float(0.001)), () => {
-          const dLat = sqrt(scan.dist2)
-          const behind = scan.behind
-          // Center churn strip: solid at the axis, soft edge, widening
-          // slowly (NOT at the V's rate — churn is hull-width turbulence).
-          // Amplitude gets a strong close-in boost (the prop-churned water
-          // right off the hull) on top of the long tail decay, so the wake
-          // reads as a confident ribbon near the bike that thins into
-          // dissolving tufts down the trail.
-          const churnHW = behind.mul(0.06).add(float(0.65))
-          const churn = smoothstep(churnHW, churnHW.mul(0.5), dLat)
-          const churnFade = exp(behind.mul(-0.055)).mul(
-            float(0.7).add(exp(behind.mul(-1 / 7)).mul(0.4)),
-          )
-          // Edge rails on the displacement ridge.
-          const wakeWidth = behind.mul(WAKE_HALF_ANGLE_TAN).add(float(WAKE_BASE_WIDTH))
-          const rail = float(1).sub(smoothstep(float(0), float(1.1), abs(dLat.sub(wakeWidth))))
-          const railFade = exp(behind.mul(-0.11))
-          // Taper into the propwash apex at the hull.
-          const headRamp = smoothstep(float(0.0), float(1.2), behind)
-          const ageFade = exp(scan.age.div(-WAKE_AGE_TAU))
-          const m = churn
-            .mul(churnFade)
-            .add(rail.mul(railFade).mul(0.9))
-            .mul(headRamp)
-            .mul(scan.strength)
-            .mul(ageFade)
-            .mul(wakeStrengthUniform)
-          // Strongest trail wins the texture frame (overlaps are brief and
-          // both trails sample the same sheet — no visible handoff).
-          If(m.greaterThan(mask), () => {
-            mask.assign(m)
-            arcU.assign(scan.arc)
-            perpV.assign(scan.perpSigned)
-            behindOut.assign(behind)
+    // Same dynamic per-trail loop as the vertex ridge ('ti' so the segment
+    // scan's inner 'i' can't shadow) — one churn/rail body in the fragment
+    // WGSL instead of MAX_WAKE_TRAILS unrolled copies.
+    Loop(
+      // biome-ignore lint/suspicious/noExplicitAny: LoopNode accepts `name` at runtime
+      { start: int(0), end: int(MAX_WAKE_TRAILS), type: 'int', condition: '<', name: 'ti' } as any,
+      // biome-ignore lint/suspicious/noExplicitAny: named loop var surfaces under its custom key
+      ({ ti }: any) => {
+        // biome-ignore lint/suspicious/noExplicitAny: TSL swizzle proxy
+        const cull = wakeTrailCullUniform.element(int(ti)) as any
+        // biome-ignore lint/suspicious/noExplicitAny: TSL types lose precision here
+        const cdx = positionWorld.x.sub(cull.x) as any
+        // biome-ignore lint/suspicious/noExplicitAny: TSL types lose precision here
+        const cdz = positionWorld.z.sub(cull.y) as any
+        If(cdx.mul(cdx).add(cdz.mul(cdz)).lessThan(cull.z), () => {
+          const scan = emitTrailScan(ti, positionWorld.x, positionWorld.z, tNode)
+          If(scan.strength.greaterThan(float(0.001)), () => {
+            const dLat = sqrt(scan.dist2)
+            const behind = scan.behind
+            // Center churn strip: solid at the axis, soft edge, widening
+            // slowly (NOT at the V's rate — churn is hull-width turbulence).
+            // Amplitude gets a strong close-in boost (the prop-churned water
+            // right off the hull) on top of the long tail decay, so the wake
+            // reads as a confident ribbon near the bike that thins into
+            // dissolving tufts down the trail.
+            const churnHW = behind.mul(0.06).add(float(0.65))
+            const churn = smoothstep(churnHW, churnHW.mul(0.5), dLat)
+            const churnFade = exp(behind.mul(-0.055)).mul(
+              float(0.7).add(exp(behind.mul(-1 / 7)).mul(0.4)),
+            )
+            // Edge rails on the displacement ridge.
+            const wakeWidth = behind.mul(WAKE_HALF_ANGLE_TAN).add(float(WAKE_BASE_WIDTH))
+            const rail = float(1).sub(smoothstep(float(0), float(1.1), abs(dLat.sub(wakeWidth))))
+            const railFade = exp(behind.mul(-0.11))
+            // Taper into the propwash apex at the hull.
+            const headRamp = smoothstep(float(0.0), float(1.2), behind)
+            const ageFade = exp(scan.age.div(-WAKE_AGE_TAU))
+            const m = churn
+              .mul(churnFade)
+              .add(rail.mul(railFade).mul(0.9))
+              .mul(headRamp)
+              .mul(scan.strength)
+              .mul(ageFade)
+              .mul(wakeStrengthUniform)
+            // Strongest trail wins the texture frame (overlaps are brief and
+            // both trails sample the same sheet — no visible handoff).
+            If(m.greaterThan(mask), () => {
+              mask.assign(m)
+              arcU.assign(scan.arc)
+              perpV.assign(scan.perpSigned)
+              behindOut.assign(behind)
+            })
           })
         })
-      })
-    }
+      },
+    )
     return vec4(clamp(mask, float(0), float(1)), arcU, perpV, behindOut)
   })
   const wakeTrail = computeWakeTrail()
