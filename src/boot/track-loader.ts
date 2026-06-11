@@ -18,13 +18,14 @@
  * front so anything that bricks during track build still has ground.
  */
 
-import type * as THREE from 'three'
+import * as THREE from 'three'
 import { assetUrl } from '@/engine/asset-url'
 import { createIslandMesh } from '@/engine/render/arena-mesh'
 import { createCliffsideMesh } from '@/engine/render/cliffside-mesh'
 import { attachTrackColliders, loadGlbTrackVisuals } from '@/engine/render/glb-track'
 import { createRampMesh } from '@/engine/render/ramp-mesh'
 import { buildTerrainHeightmap, type TerrainHeightmap } from '@/engine/render/terrain-heightmap'
+import { WATER_REFLECTION_LAYER } from '@/engine/render/water'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { createLagoonIsland, createSafetyFloor } from '@/game/entities/arena'
 import { createCliffsideTerrain } from '@/game/entities/cliffside-terrain'
@@ -71,6 +72,33 @@ export async function loadTrackForBoot(opts: {
   // whose world-baked geometry the heightmap walks.
   const terrainRoots: THREE.Object3D[] = []
 
+  // Opt landmark-scale meshes into the water mirror's layer, then bake the
+  // heightmap — both walk the same finished terrainRoots, so every track
+  // path funnels through here right before returning. The water reflection
+  // renders ONLY sky + this opt-in set (water.ts WATER_REFLECTION_LAYER):
+  // terrain islands + monumental landmarks clear the size gate and keep
+  // their mirrored silhouettes; small dressing / props / streamed scenery
+  // stay out, which is what keeps the mirror pass from re-encoding the
+  // scene (the water-ablation finding — ~98 extra draw calls on sandbar).
+  const bakeHeightmapAndMarkReflections = (waterLevel: number) => {
+    const REFLECT_MIN_RADIUS_M = 25
+    const worldScale = new THREE.Vector3()
+    for (const root of terrainRoots) {
+      root.updateMatrixWorld(true)
+      root.traverse((o) => {
+        const m = o as THREE.Mesh
+        if (!m.isMesh || !m.geometry) return
+        const geo = m.geometry as THREE.BufferGeometry
+        if (!geo.boundingSphere) geo.computeBoundingSphere()
+        worldScale.setFromMatrixScale(m.matrixWorld)
+        const worldR =
+          (geo.boundingSphere?.radius ?? 0) * Math.max(worldScale.x, worldScale.y, worldScale.z)
+        if (worldR >= REFLECT_MIN_RADIUS_M) m.layers.enable(WATER_REFLECTION_LAYER)
+      })
+    }
+    return buildTerrainHeightmap(terrainRoots, { waterLevel })
+  }
+
   // Per-track terrain (physics + visuals). Procedural tracks build their
   // own terrain in code; .glb-backed tracks load mesh + collider geometry
   // straight from the asset.
@@ -94,18 +122,14 @@ export async function loadTrackForBoot(opts: {
     const track = createCliffside()
     return {
       track,
-      terrainHeightmap: buildTerrainHeightmap(terrainRoots, {
-        waterLevel: track.water?.height ?? 0,
-      }),
+      terrainHeightmap: bakeHeightmapAndMarkReflections(track.water?.height ?? 0),
     }
   }
   if (trackId === 'lagoon') {
     const track = createLagoonLoop()
     return {
       track,
-      terrainHeightmap: buildTerrainHeightmap(terrainRoots, {
-        waterLevel: track.water?.height ?? 0,
-      }),
+      terrainHeightmap: bakeHeightmapAndMarkReflections(track.water?.height ?? 0),
     }
   }
 
@@ -140,9 +164,7 @@ export async function loadTrackForBoot(opts: {
     }
     return {
       track,
-      terrainHeightmap: buildTerrainHeightmap(terrainRoots, {
-        waterLevel: track.water?.height ?? 0,
-      }),
+      terrainHeightmap: bakeHeightmapAndMarkReflections(track.water?.height ?? 0),
       ...(horizonGeometry ? { horizonGeometry } : {}),
       ...(environmentGlbRoot ? { environmentGlbRoot } : {}),
     }
@@ -184,9 +206,7 @@ export async function loadTrackForBoot(opts: {
     }
     return {
       track,
-      terrainHeightmap: buildTerrainHeightmap(terrainRoots, {
-        waterLevel: track.water?.height ?? 0,
-      }),
+      terrainHeightmap: bakeHeightmapAndMarkReflections(track.water?.height ?? 0),
       ...(horizonGeometry ? { horizonGeometry } : {}),
       ...(environmentGlbRoot ? { environmentGlbRoot } : {}),
     }

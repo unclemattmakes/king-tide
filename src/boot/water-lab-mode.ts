@@ -130,6 +130,9 @@ export async function bootWaterLabMode(appEl: HTMLElement): Promise<WaterLabMode
   const waveField = createWaveField(defaultWaves())
   const waterMesh = createWaterMesh(waveField, { backend })
   scene.add(waterMesh.mesh)
+  // Mirror-pass cull (sky-only here — no terrain in the lab); keeps the
+  // lab's frame representative of the shipped reflection cost.
+  waterMesh.configureReflectionCulling(camera)
   applyStoredWaterTuning(waterMesh)
   // Full WATER tuner, auto-opened — this scene exists to turn its knobs.
   document.body.classList.add('dev-build')

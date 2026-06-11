@@ -123,6 +123,9 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     const waveField = createWaveField(defaultWaves())
     const waterMesh = createWaterMesh(waveField, { backend })
     scene.add(waterMesh.mesh)
+    // Same mirror-pass cull as the race boot — the attract backdrop pays
+    // the same reflection re-encode otherwise (see WATER_REFLECTION_LAYER).
+    waterMesh.configureReflectionCulling(camera)
     applyStoredWaterTuning(waterMesh)
 
     const trackId = opts.trackId ?? 'lagoon'

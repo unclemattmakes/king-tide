@@ -97,6 +97,8 @@ export async function bootWaveRiderMode(appEl: HTMLElement): Promise<WaveRiderMo
   const waveField = createWaveField(defaultWaves())
   const waterMesh = createWaterMesh(waveField, { backend })
   scene.add(waterMesh.mesh)
+  // Mirror-pass cull, same as every water scene (sky-only mirror here).
+  waterMesh.configureReflectionCulling(camera)
   applyStoredWaterTuning(waterMesh)
   // Reuse the in-race WATER menu (top-right toggle) for live wave tuning.
   // `dev-build` reveals the toggle button in this stand-alone scene.

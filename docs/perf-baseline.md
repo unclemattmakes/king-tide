@@ -103,6 +103,21 @@ Runs the same three tracks at the 8-bike field via Playwright on the real GPU,
 and writes a Markdown table to `perf-report/`. Paste its rows into the tables
 below.
 
+### Path C — water-cost attribution (when a number above regresses)
+
+```
+node tools/water-ablation.mjs            # sandbar; TRACK=<id> to override
+```
+
+One 8-bike autoplay boot; flips each water layer via `__hover.waterDebug()`
+and samples `__hover.perf` per config, plus separate boots for structural
+variants (`?reflect=0` / `?reflectfull=1`, `?hextile=0`, `?watersubs=<n>`).
+This is what attributed the June-10 regression to the reflection pass rather
+than the look layers. Caveats: 5 s windows alias the autoplay lap (the
+baseline-repeat row bounds the drift) and p50 quantizes at vsync — read mean
+FPS + p95 + draw calls together. `tools/water-reflect-ab.mjs` captures posed
+culled-vs-full mirror pairs for the visual half of the story.
+
 ## Results
 
 One table per device. Rows are pre-filled; fill the metric cells (`—` =
@@ -129,6 +144,25 @@ included) — lap-1 experience, steady-state p50 is the honest row. For
 context: the same machine held 100+ fps on these tracks before the June-10
 water layers + Mexico City dressing; the frame regression is content/shader
 cost, not the boot path (see docs/boot-overhaul-plan.md follow-ups).
+
+### nitro-deck — Ryzen 5 240 / Radeon 760M iGPU (dev box)
+
+Measured with `node tools/water-ablation.mjs` (same `__hover.perf` surfaces as
+`pnpm profile`, 1280×720 dev build, 8-bike autoplay) **before/after the
+2026-06-11 water-perf pass** (mirror-pass layer cull + 512² water mesh — see
+status.md):
+
+| Track | Backend | FPS | p50 ms | p95 ms | Draw calls | Triangles | Verdict |
+|---|---|---|---|---|---|---|---|
+| `sandbar` (pre-pass) | WebGPU | 58–65 | 13.6 | 20.2 | 272 | 4.46M | 🟡 |
+| `sandbar` (post-pass) | WebGPU | 82–88 | 11.1 | 16.7 | 182 | 2.68M | ✅ |
+| `mexico-city` (post-pass, steady-state) | WebGPU | 53–67 | 16.7 | 22–28 | 349–513¹ | 2.3M | ✅/🟡 |
+
+_2026-06-11. ¹ mexico-city draw calls swing with the lap (city density) and
+its lap-1 scenery stream still hitches (p95 112 ms in stream-overlapped
+windows) — that's content streaming, not water. For scale: the same track
+recorded 18.2 fps / p50 27.6 / 898 draws on the RTX 5050 box pre-pass; the
+mirror pass was re-encoding the dressed city every frame._
 
 ### Steam Deck — native Electron build
 

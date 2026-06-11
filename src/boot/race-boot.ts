@@ -475,6 +475,11 @@ export async function bootRace(appEl: HTMLElement) {
   // chop resolves at ~3 verts per crest on the center plane.
   const waterMesh = createWaterMesh(waveField, { backend })
   scene.add(waterMesh.mesh)
+  // Mirror-pass cull: the reflection renders sky + landmark silhouettes
+  // only (opt-in layer — see WATER_REFLECTION_LAYER in water.ts). Without
+  // this the reflector re-encodes most of the scene's draw calls into its
+  // RT every frame — the water-ablation tool's headline cost.
+  waterMesh.configureReflectionCulling(camera)
   // Register the water mesh so the Settings overlay can live-tune the
   // crest-mist ribbon (the GPU half of the Wave-spray knob), and seed it
   // from the persisted setting now that the mesh exists.
