@@ -113,7 +113,7 @@ instances them at altitude under the sky-locked cloud material — drift, parall
 and tonal lock from the same field system, but with the voxel-remeshed billow
 silhouette instead of the old hand-rolled icosphere blobs (which remain a runtime
 fallback if the GLBs fail to load). A track opts in via `sky.clouds`; the Reef Cup
-trio — **Sandbar, South Beach Sunken, Cape Town Drift** — all use them. The GLBs
+trio — **Mayday Bay, South Beach Sunken, Cape Town Drift** — all use them. The GLBs
 also satisfy the standard prop contract (`prop_root` + box collider), so a cloud
 can be placed statically via `props[]` too — but the field is the primary consumer.
 

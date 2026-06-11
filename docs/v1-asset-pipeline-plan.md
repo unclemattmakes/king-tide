@@ -420,7 +420,7 @@ art tuning.
 
 | Track | Base template | Arc length | Lap target | GLB size |
 |---|---|---|---|---|
-| Sandbar (tutorial) | template-island | ~1530 m | ~61 s | 8.4 MB |
+| Mayday Bay (tutorial) | template-island | ~1530 m | ~61 s | 8.4 MB |
 | South Beach Sunken | template-island | ~1191 m | ~48 s | 8.5 MB |
 | Hatteras Light | template-island | ~1263 m | ~50 s | 8.5 MB |
 | Cape Town Drift | template-island | ~1200 m | ~48 s | 8.6 MB |
@@ -429,7 +429,7 @@ Lowest-difficulty tracks first; uses the most mature templates.
 
 | Track | Base template | Key landmarks | Wave zones | VFX emitters | Estimated effort |
 |---|---|---|---|---|---|
-| Sandbar (tutorial) | template-island | none new | 1 (gentle) | palm sway × N | 2 days |
+| Mayday Bay (tutorial) | template-island | none new | 1 (gentle) | palm sway × N | 2 days |
 | South Beach Sunken | template-island + drowned_facade (art_deco style) | 3 hotel facade clusters + 1 partial seaplane (small `arch_ruin`) | 2 (lagoon + open bay) | palm sway, gull flock, sun-haze motes | 3 days |
 | Hatteras Light | template-island + `tower_cylinder_spiral` (spiral stripe) | 1 lighthouse | 3 (heavier Atlantic chop on one side) | foghorn ambient + rotating beam (anti-grav segment lights it) | 3 days |
 | Cape Town Drift | template-mesa (Table Mountain backdrop) + `glass_tank_broken` + leaning `landmark_wheel_ferris` (existing) | aquarium tank, Cape Wheel | 1 (calm harbour) | algae greens, container-rust streaks | 4 days |
@@ -523,12 +523,13 @@ existing per-track `camera_hero` + headless render flow.
 
 - **2 new bike variants** ✅. `BIKE_VARIANTS` in
   [src/game/bikes/variants.ts](../src/game/bikes/variants.ts) now
-  carries five archetypes — **Scout** (heavyweight, mass 220, soft
-  hover spring 22, lowest surfaceFollow 0.4 → "punishing pump
-  timing + biggest launch") and **Sparrow** (lightweight, mass 80,
-  stiffest spring 38, highest surfaceFollow 1.05 → "forgiving pump
-  + further air") bracket the existing Cruiser / Racer / Stunt
-  trio. Scout's GLB shipped earlier; Sparrow seeds from
+  carries five archetypes — **Scout** (heaviest chassis, mass 210, soft
+  hover spring 24, lowest surfaceFollow 0.66 → "late-but-biggest
+  launch") and **Sparrow** (lightest chassis, mass 115, stiffest spring
+  37, highest surfaceFollow 1.05 → "most-forgiving pump") alongside the
+  existing Cruiser / Racer / Stunt trio. The five are one balanced class
+  of peers (no weight-tier) — rebalanced 2026-06-10 so none is a strict
+  upgrade. Scout's GLB shipped earlier; Sparrow seeds from
   `racer.glb` until a dedicated Blender source lands (the runtime
   livery tint in [src/engine/render/render-systems.ts](../src/engine/render/render-systems.ts)
   recolors at clone time so the visual still reads distinct).

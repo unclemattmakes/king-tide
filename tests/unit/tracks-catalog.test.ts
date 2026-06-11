@@ -12,17 +12,16 @@ import { V1_CUPS, V1_TRACKS } from '../../src/engine/menus/tracks-catalog'
 describe('tracks-catalog cup lineups', () => {
   const cupRaces = (id: string): string[] => V1_CUPS.find((c) => c.id === id)?.races ?? []
 
-  it('Reef Cup is Sandbar → Texcoco Rising → Cape Town', () => {
-    expect(cupRaces('reef')).toEqual(['sandbar', 'texcoco-rising', 'cape-town-drift'])
+  it('Reef Cup is Mayday Bay → Mexico City → Cape Town', () => {
+    expect(cupRaces('reef')).toEqual(['sandbar', 'mexico-city', 'cape-town-drift'])
   })
 
-  it('the Reef opener (Texcoco Rising) is gated until its geometry is built', () => {
-    const t = V1_TRACKS.find((x) => x.id === 'texcoco-rising')
-    expect(t?.status).toBe('pending')
-    expect(t?.gateLabel.length ?? 0).toBeGreaterThan(0)
-    // Like the Harbor Cup, the Reef Cup can't run a championship through an
-    // unbuilt track, so the cup tile gates with its opener.
-    expect(V1_CUPS.find((c) => c.id === 'reef')?.status).toBe('pending')
+  it('the Reef Cup ships — Mexico City is built + ungated', () => {
+    const t = V1_TRACKS.find((x) => x.id === 'mexico-city')
+    expect(t?.status).toBe('ship')
+    expect(t?.gateLabel).toBe('')
+    // All three Reef tracks are built + wired, so the cup runs ungated.
+    expect(V1_CUPS.find((c) => c.id === 'reef')?.status).toBe('ship')
   })
 
   it('Harbor Cup is Needle Sound → Golden Gate Drowned → Opera Drowned', () => {

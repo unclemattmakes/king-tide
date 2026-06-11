@@ -2,9 +2,9 @@
 
 > **⚠ v2 status (2026-06).** The *themes / lore / set-pieces* below are current,
 > but the **v1 lineup framing is historical**: content restarted for v2, so most
-> tracks are **greybox** (only **Sandbar** + **The Maw** are dressed) and
+> tracks are **greybox** (only **Mayday Bay** + **The Maw** are dressed) and
 > `status: 'ship'` means wired/playable, not art-complete. The Reef opener (South
-> Beach / Miami) was cut and is being rebuilt as **Texcoco Rising**; **anti-grav
+> Beach / Miami) was cut and is being rebuilt as **Mexico City**; **anti-grav
 > is cut** (parked for a possible DLC); **wave mastery** is now the motocross
 > pitch-the-takeoff/landing model, not press-forward-on-crest. Canonical per-track
 > truth lives in [tracks/](./tracks/README.md); current state in
@@ -126,7 +126,7 @@ These shaped every track in this doc; future tracks should hold to them.
 
 # Tutorial track
 
-## Sandbar
+## Mayday Bay
 
 **Cup:** None (tutorial) | **Lap target:** 60 s scripted | **Laps:** 1
 **Water/Land:** 80/20 | **Anti-grav:** none *(was brief intro arch — cut)* | **Difficulty:** intro
@@ -158,7 +158,7 @@ intro-open-water → calm-skill-check → vertical-spectacle closer.
 Players finish all three feeling competent and ready for the showcase
 cup.
 
-## 1. Texcoco Rising
+## 1. Mexico City
 
 > *Replaced South Beach Sunken (Miami) in the 2026-06 content pass — the
 > Reef opener is now an **inland** drowning, the set's surprise.*
@@ -723,8 +723,8 @@ now the **verticality solution** that replaced it.
 
 | # | Track | Cup | Location | Verticality | Water | Set-piece |
 |---|---|---|---|---|---|---|
-| — | Sandbar | Tutorial | (fictional) | crest launch | 80% | training gates |
-| 1 | Texcoco Rising | Reef | Mexico City | collapsed-freeway ramp | 65% | El Ángel |
+| — | Mayday Bay | Tutorial | (fictional) | crest launch | 80% | training gates |
+| 1 | Mexico City | Reef | Mexico City | collapsed-freeway ramp | 65% | El Ángel |
 | 2 | Cape Town Drift | Reef | Cape Town | flat / slalom | 60% | Two Oceans Wreck |
 | 3 | Needle Sound | Harbor | Seattle | pier/ferry ramps + Needle saucer | 55% | The Saucer |
 | 4 | Golden Gate Drowned | Harbor | San Francisco | frozen-wave hills + The Break | 55% | The Break |
@@ -765,7 +765,7 @@ Maw drop off as they park; Needle Sound 55 + Opera Drowned 60 join.)*
 
 **Format breakdown:** 10 × 3-lap loops + 1 × 5-lap chaos arena (Aqualand) +
 1 × single-lap point-to-point descent (Kilauea), plus the 1-lap scripted
-tutorial (Sandbar). Default is 3 laps; deviations are intentional per the
+tutorial (Mayday Bay). Default is 3 laps; deviations are intentional per the
 cup-pacing principle.
 
 ## B-list — future content packs

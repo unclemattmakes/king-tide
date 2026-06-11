@@ -35,7 +35,7 @@ const THEMES = {
       wetBand: 2.0,
     },
   },
-  'texcoco-rising': {
+  'mexico-city': {
     // Drowned Mexico City — high-altitude lake, rosa-mexicano + marigold
     // palette, gold Ángel. Warm magenta lift, punchy saturation, calm lake.
     sky: { cloudiness: 0.22, colorGrade: 'mexico_city_rosa', seaStateBeaufort: 2 },

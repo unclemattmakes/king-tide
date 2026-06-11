@@ -50,7 +50,7 @@ const CASES: ZoneCase[] = [
   // comes closer than ~50 m (nearest AI anchor 79 m, start 82 m), so the
   // best a player-following dot grid can do is clip the blend edge —
   // treat this shot as context; sandbar + the-maw are the decisive pair.
-  { id: 'texcoco-rising', zonePoint: { x: 0, z: 95, radius: 70 } },
+  { id: 'mexico-city', zonePoint: { x: 0, z: 95, radius: 70 } },
 ]
 
 for (const c of CASES) {

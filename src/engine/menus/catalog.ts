@@ -81,11 +81,11 @@ export function buildBikeCards(): BikeCard[] {
       tagline: v.tagline,
       accent: `#${v.accentColor.toString(16).padStart(6, '0')}`,
       bars: [
-        { label: 'TOP', value: pct(s.topSpeed, 20, 35), raw: `${s.topSpeed.toFixed(0)}` },
-        { label: 'ACCEL', value: pct(s.accel, 14, 30), raw: `${s.accel.toFixed(0)}` },
-        { label: 'AGILITY', value: pct(s.turnTorque, 2.5, 6), raw: `${s.turnTorque.toFixed(1)}` },
-        { label: 'WEIGHT', value: pct(s.mass, 80, 180), raw: `${s.mass.toFixed(0)}` },
-        { label: 'WAVE', value: s.surfaceFollow, raw: s.surfaceFollow.toFixed(2) },
+        { label: 'TOP', value: pct(s.topSpeed, 24, 33), raw: `${s.topSpeed.toFixed(0)}` },
+        { label: 'ACCEL', value: pct(s.accel, 15, 24), raw: `${s.accel.toFixed(0)}` },
+        { label: 'AGILITY', value: pct(s.turnTorque, 3.0, 5.5), raw: `${s.turnTorque.toFixed(1)}` },
+        { label: 'WEIGHT', value: pct(s.mass, 100, 220), raw: `${s.mass.toFixed(0)}` },
+        { label: 'WAVE', value: pct(s.surfaceFollow, 0.6, 1.1), raw: s.surfaceFollow.toFixed(2) },
       ],
     }
   })

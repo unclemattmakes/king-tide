@@ -1396,7 +1396,7 @@ export function createWaterMesh(
   // a periodic surge. The CPU buoyancy sampler has applied them since they
   // shipped (`sampleZoneFactors` in wave-field.ts); this block is the GPU
   // half — without it the rider FEELS zone waves the player never SEES
-  // (sandbar's 0.5× calm, The Maw's 1.4×/0.85-freq swell, Texcoco's local
+  // (sandbar's 0.5× calm, The Maw's 1.4×/0.85-freq swell, Mexico City's local
   // 1.3×). The math below mirrors `zoneWeight` + `sampleZoneFactors`
   // EXACTLY, quirks included:
   //
