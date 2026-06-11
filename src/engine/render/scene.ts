@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { WATER_REFLECTION_LAYER } from './water'
 
 /**
  * M6 scene: lighting + fog + camera. The sky dome and its day-night cycle
@@ -39,10 +40,17 @@ export function createScene(): {
     camera.updateProjectionMatrix()
   })
 
+  // Lights pass a per-camera layer test (`light.layers.test(camera.layers)`),
+  // and the water's mirror camera renders ONLY the opt-in reflection layer —
+  // without these bits the mirror's terrain/landmarks draw unlit black and
+  // the "reflection" reads as a black sea (found via the reflect A/B
+  // captures). Layer 0 stays on, so main cameras see no change.
   const hemi = new THREE.HemisphereLight(0xa6c8e8, 0x223040, 0.85)
+  hemi.layers.enable(WATER_REFLECTION_LAYER)
   scene.add(hemi)
 
   const sun = new THREE.DirectionalLight(0xfff2dc, 1.4)
+  sun.layers.enable(WATER_REFLECTION_LAYER)
   sun.position.set(50, 70, 70) // sky system animates this; starting pose matches the original
   // Shadow map: orthographic frustum sized to follow the player (sky system
   // re-positions sun + target each frame). ±90 m covers the visible play

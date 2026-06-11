@@ -32,6 +32,31 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-11** — **Water perf pass — the June-10 fps
+> regression was the reflection pass, not the look layers.** New
+> `tools/water-ablation.mjs` (boots one 8-bike autoplay race, flips each
+> water knob via `__hover.waterDebug()`, samples `__hover.perf` per config)
+> attributed the frame: every June-10 LOOK layer together ≈ free; the cost
+> was (1) the planar-reflection pass re-rendering the scene into its RT
+> every frame (~98 extra draw calls on sandbar; on mexico-city it re-encoded
+> the dressed city — the 18 fps disaster) and (2) the 768² water mesh
+> (~2.4 M tris of June-10-heavier vertex work). Landed: **mirror-pass layer
+> cull** — the reflector's virtual camera renders only the opt-in
+> `WATER_REFLECTION_LAYER` (sky dome opts in at creation; terrain +
+> landmark-scale meshes ≥25 m bounding radius opt in via track-loader's size
+> gate; props/bikes/FX/streamed dressing default OUT, so new content can't
+> regress the mirror) — the mirror now adds ~5 draws instead of ~98, and
+> reflections are KEPT (`?reflectfull=1` boot flag + live
+> `setReflectionFullScene` debug toggle restore the legacy mirror for A/B);
+> **water mesh 768²→512²** (win saturates there; `?watersubs=<n>` is the
+> A/B axis); `setWaterVisible` + `?watersubs` perf probes. Numbers
+> (nitro-deck iGPU, 720p dev, 8 bikes): sandbar 58–65 fps / p95 20.2 →
+> **82–88 fps / p95 16.7**; mexico-city steady-state → **p50 16.7 ms,
+> 53–67 fps** (was 18 fps / p50 27.6 on the RTX box; remaining cost there is
+> city draws + the lap-1 scenery stream, not water). Tables in
+> [perf-baseline.md](./perf-baseline.md) + `perf-report/water-ablation-*`;
+> visual A/B pairs in `artifacts/water-perf/`.
+
 > **Last updated: 2026-06-10 (j)** — **Water lab (`?waterlab=1`) + the
 > contour-slide diagnosis.** Matt flagged the P1 contour lines sliding over the
 > surface faster than the water travels. Root cause (not a time-scroll bug): the
