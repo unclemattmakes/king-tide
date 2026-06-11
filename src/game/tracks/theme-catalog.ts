@@ -41,17 +41,17 @@ export type TrackTheme = {
 
 const CATALOG: Record<string, TrackTheme> = {
   sandbar: {
-    displayName: 'Sandbar',
-    location: 'Pilot Cove · Sandbar Atoll',
+    displayName: 'Mayday Bay',
+    location: 'Mayday Bay · Castaway Lagoon',
     cup: 'Tutorial',
     setPiece: 'Training Gates',
-    lore: 'A retrofitted marina, calm water, one ramp. Welcome to the Circuit.',
+    lore: 'A storm-wrecked resort lagoon, calm now, one ramp. Welcome to the Circuit.',
     palette: 'Soft turquoise lagoon',
     timeLabel: 'Mid-morning',
     weatherLabel: 'Calm · Beaufort 1',
   },
-  'texcoco-rising': {
-    displayName: 'Texcoco Rising',
+  'mexico-city': {
+    displayName: 'Mexico City',
     location: 'Drowned Mexico City · Valle de México',
     cup: 'Reef',
     setPiece: 'El Ángel',

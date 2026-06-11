@@ -1,7 +1,7 @@
-# Texcoco Rising — Reef Cup #1
+# Mexico City — Reef Cup #1
 
 > Cup: Reef · The opener: bright, shallow, instructive — first racing track
-> after the Sandbar tutorial. *(Replaced South Beach Sunken / Miami in the
+> after the Mayday Bay tutorial. *(Replaced South Beach Sunken / Miami in the
 > 2026-06 content pass.)*
 
 ## Identity
@@ -90,7 +90,7 @@ late-afternoon warm light. Cumbia / sonidero / Latin-electronic with
 mariachi-horn stabs and marimba — the city that throws a party on the water.
 Standard pump-duck (the lake is calm but the open stretches still pump).
 
-## Props — unique to Texcoco Rising
+## Props — unique to Mexico City
 
 *(Common props in [README.md](./README.md#props--common-to-all-tracks).)*
 
@@ -111,9 +111,9 @@ Standard pump-duck (the lake is calm but the open stretches still pump).
 ## Build status
 
 **Geometry + gameplay BUILT; art pass in progress** (2026-06-08). Catalog tile
-still `status: 'pending'` — playable via `?track=texcoco-rising`. Authored from
-scratch the **current way** in `tracks-src/texcoco-rising.blend`, exported to
-`public/assets/tracks/texcoco-rising.glb` + `public/tracks/texcoco-rising.json`.
+still `status: 'pending'` — playable via `?track=mexico-city`. Authored from
+scratch the **current way** in `tracks-src/mexico-city.blend`, exported to
+`public/assets/tracks/mexico-city.glb` + `public/tracks/mexico-city.json`.
 **Loads + drives clean in-engine** (headed WebGPU autopilot completes, 0 console
 errors).
 
@@ -133,12 +133,12 @@ landmarks **collidable** + pushed clear of the line; POIs **Diana Cazadora**
 **Art-pass TODO:** painterly-vinyl materials + waterline trio; the collapsed
 Segundo-Piso freeway-deck look on the ramp; landmark detail; discrete raised
 calzada modules for the 35% "land"; trajineras + papel-picado + jacaranda
-dressing; remaining VFX. Workflow refs: **Sandbar** + **Cape Town Drift**.
+dressing; remaining VFX. Workflow refs: **Mayday Bay** + **Cape Town Drift**.
 
 ## References
 
 - [../track-design-specs.md](../track-design-specs.md) §2.1.
 - [../track-themes.md](../track-themes.md) — content bible (lore, palette).
-- [texcoco-rising-art-target.md](./texcoco-rising-art-target.md) — the look spec.
-- [texcoco-rising-concept-pass.md](./texcoco-rising-concept-pass.md) — per-beat concept prompts.
-- [texcoco-rising-prop-manifest.md](./texcoco-rising-prop-manifest.md) — bespoke props + ComfyUI sculpt prompts.
+- [mexico-city-art-target.md](./mexico-city-art-target.md) — the look spec.
+- [mexico-city-concept-pass.md](./mexico-city-concept-pass.md) — per-beat concept prompts.
+- [mexico-city-prop-manifest.md](./mexico-city-prop-manifest.md) — bespoke props + ComfyUI sculpt prompts.

@@ -119,5 +119,5 @@ is being *born*.
 
 ## References
 - [kilauea-crown.md](./kilauea-crown.md) — the track (sections, props, palette).
-- Sister passes: [marina-bay-7](./marina-bay-7-art-target.md) · [doges-drift](./doges-drift-art-target.md) · [golden-gate-drowned](./golden-gate-drowned-art-target.md) · [the-maw](./the-maw-art-target.md) · [shibuya](./shibuya-submerged-art-target.md) · Reef ([texcoco](./texcoco-rising-art-target.md) · [cape-town](./cape-town-drift-art-target.md) · [hatteras](./hatteras-light-art-target.md) · [sandbar](./sandbar-art-target.md)).
+- Sister passes: [marina-bay-7](./marina-bay-7-art-target.md) · [doges-drift](./doges-drift-art-target.md) · [golden-gate-drowned](./golden-gate-drowned-art-target.md) · [the-maw](./the-maw-art-target.md) · [shibuya](./shibuya-submerged-art-target.md) · Reef ([mexico-city](./mexico-city-art-target.md) · [cape-town](./cape-town-drift-art-target.md) · [hatteras](./hatteras-light-art-target.md) · [sandbar](./sandbar-art-target.md)).
 - [art-direction.md](../art-direction.md) — register, material-state rule, waterline trio.

@@ -347,7 +347,7 @@ These feed the `mat_landmark_trim_*` / `mat_prop_*` families — one trim sheet 
 family per [level-visual-quality-research.md](./level-visual-quality-research.md)
 Layer E (the urban-neon exemplar, `trim_tokyo_neon.png`, is already built).
 
-### Reef pastel — Sandbar · South Beach · Cape Town · Hatteras
+### Reef pastel — Mayday Bay · South Beach · Cape Town · Hatteras
 
 | Role | Hex | State / use |
 |---|---|---|

@@ -376,6 +376,11 @@ export type WaterMesh = {
      *  nicked near crests and hardest in the troughs (lines cling to the
      *  crests instead of running the whole sea). */
     setContourBreakup(s: number): void
+    /** Rising-face strokes, 0..2. Tapered brush strokes pulled UP the leading
+     *  (rising) face of an approaching wave — perpendicular to the contour
+     *  crest lines (the "vertical strokes climbing the wave coming at you"
+     *  read). 0 = off, 0.5 = baseline. Front-face + steep-swell gated. */
+    setRiseStroke(s: number): void
     /** P2.1 wave sets — envelope period in seconds (0 = off). Writes the
      *  FIELD (the sim source of truth, like setWaveBearing); tick() mirrors
      *  to the GPU. Track-authored via `water.swellSets` — the menu rows are
@@ -464,6 +469,9 @@ export type WaterDebugDefaults = {
   contourRelief: number
   /** P1 readability contour break-up, 0..1 (solid lines ↔ trough-biased dashes). */
   contourBreakup: number
+  /** Rising-face strokes, 0..2: crest-perpendicular brush marks climbing the
+   *  leading face of approaching waves. 0.5 = baseline, 0 = off. */
+  riseStroke: number
   /** Foam streaks 0..2: brushstroke bands on steep faces, along the local
    *  crest line. 1 = baseline, 0 = isotropic bubbles only (legacy). */
   foamStreak: number
@@ -1388,7 +1396,7 @@ export function createWaterMesh(
   // a periodic surge. The CPU buoyancy sampler has applied them since they
   // shipped (`sampleZoneFactors` in wave-field.ts); this block is the GPU
   // half — without it the rider FEELS zone waves the player never SEES
-  // (sandbar's 0.5× calm, The Maw's 1.4×/0.85-freq swell, Texcoco's local
+  // (sandbar's 0.5× calm, The Maw's 1.4×/0.85-freq swell, Mexico City's local
   // 1.3×). The math below mirrors `zoneWeight` + `sampleZoneFactors`
   // EXACTLY, quirks included:
   //
@@ -4037,6 +4045,15 @@ export function createWaterMesh(
   const contourSpacingUniform = uniform(CONTOUR_SPACING_DEFAULT)
   const contourReliefUniform = uniform(CONTOUR_RELIEF_DEFAULT)
   const contourBreakupUniform = uniform(CONTOUR_BREAKUP_DEFAULT)
+  // Rising-face strokes (2026-06-10) — the perpendicular partner of the
+  // contour lines. Where contours trace iso-height bands ALONG each crest,
+  // these are tapered brush strokes pulled UP the leading (rising) face of an
+  // approaching wave — perpendicular to the crest, the "vertical strokes
+  // climbing the wave coming at you" read. Same painterly foam-stroke language
+  // as the face streaks, but oriented along the swell TRAVEL axis and gated to
+  // the front face via ∂h/∂t. 0 = off.
+  const RISE_STROKE_DEFAULT = 0.5
+  const riseStrokeUniform = uniform(RISE_STROKE_DEFAULT)
 
   // Normalised swell phase 0..1 across the LIVE swell envelope — the amps
   // come from the same mirrored uniform buoyancy uses, so Beaufort, the
@@ -4182,6 +4199,47 @@ export function createWaterMesh(
     float(1),
   )
 
+  // ── Rising-face strokes (crest-perpendicular brush marks) ────────────
+  // The sibling of the contour lines: contours run ALONG the crests (iso
+  // height); these run UP the face, square to them. Reuses the face-streak
+  // oil sheet (tapered strokes along its +U axis) but samples it in the
+  // GLOBAL swell frame with U ← the TRAVEL axis (so each stroke's long axis
+  // climbs the face, perpendicular to the crest) and V ← the crest axis (so
+  // strokes sit side-by-side across the front). Gates:
+  //   • front/rising face only — `crestRiseFrag` is ∂h/∂t, > 0 on the
+  //     leading face of an approaching wave (the same signal the whitecap
+  //     lead-bias rides); strokes never paint the trailing/back face.
+  //   • steep SWELL faces only (no chop in the gate) — flat water stays clean
+  //     and the gate doesn't crawl with the sub-metre ripple.
+  //   • build UP the face toward the crest (`rampT`) so they read as climbing
+  //     strokes, faint at the trough.
+  //   • fade with distance (the strokes alias once sub-pixel).
+  // World-anchored like the face streaks: a stroke lights up smoothly as a
+  // wave front sweeps over it (∂h/∂t ramps across ~a second — no strobe) and
+  // fades as the crest passes. Folded into the foam paint so it inherits the
+  // foam colour / warmth / bloom — it IS foam, pulled into vertical strokes.
+  const RISE_STROKE_TILE_M = 8.0
+  const riseStrokeUV = vec2(brushTravel, brushCrest).div(float(RISE_STROKE_TILE_M))
+  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
+  const riseStrokeSample = texture(getFoamStreakTexture(), riseStrokeUV) as any
+  // Crisp-ish stroke cores with negative space between (a painted read, not a
+  // smear). The swell-only slope keeps the gate off the chop.
+  const riseStrokeCore = smoothstep(float(0.25), float(0.7), riseStrokeSample.r)
+  const riseFrontFace = smoothstep(float(0), float(0.45), crestRiseFrag)
+  const riseSlopeGate = smoothstep(float(0.05), float(0.14), swellSlopeMag)
+  const risePhaseWeight = mix(float(0.35), float(1), smoothstep(float(0.2), float(0.85), rampT))
+  const riseDistFade = float(1).sub(smoothstep(float(60), float(150), camDist))
+  const riseStrokeLight = clamp(
+    riseStrokeCore
+      .mul(riseFrontFace)
+      .mul(riseSlopeGate)
+      .mul(risePhaseWeight)
+      .mul(riseDistFade)
+      .mul(riseStrokeUniform),
+    float(0),
+    float(1),
+  )
+
   // Albedo composition: deep/scatter blend → planar reflection (Fresnel-
   // weighted) → aerial perspective haze → foam paints over the result.
   // Foam comes LAST so it still reads as opaque white where it fires
@@ -4240,7 +4298,7 @@ export function createWaterMesh(
     deepColor.mul(float(0.7)),
     contourDark.mul(float(0.8)),
   )
-  const foamMaskWithContours = max(foamMask, contourLight)
+  const foamMaskWithContours = max(max(foamMask, contourLight), riseStrokeLight)
 
   const albedo = mix(
     mix(surfaceWithRelief, foamColorLit, foamMaskWithContours),
@@ -4333,7 +4391,10 @@ export function createWaterMesh(
   // foam readable; the bonus tops out at +0.5 on fully sun-raked crests.
   // Contour lines join at half weight — enough emissive lift to stay
   // readable in cliff shadow without blooming like a breaking crest.
-  const foamEmissiveMask = max(foamMask, contourLight.mul(float(0.5)))
+  const foamEmissiveMask = max(
+    max(foamMask, contourLight.mul(float(0.5))),
+    riseStrokeLight.mul(float(0.5)),
+  )
   const foamEmissive = foamColorLit
     .mul(foamEmissiveMask)
     .mul(float(0.5).add(foamWarmRake.mul(float(0.5))))
@@ -4473,6 +4534,7 @@ export function createWaterMesh(
     contourSpacing: CONTOUR_SPACING_DEFAULT,
     contourRelief: CONTOUR_RELIEF_DEFAULT,
     contourBreakup: CONTOUR_BREAKUP_DEFAULT,
+    riseStroke: RISE_STROKE_DEFAULT,
     wireframe: wireFlag,
     colorize: false,
   }
@@ -4641,6 +4703,9 @@ export function createWaterMesh(
     },
     setContourBreakup(s) {
       contourBreakupUniform.value = clamp01(s, 0, 1)
+    },
+    setRiseStroke(s) {
+      riseStrokeUniform.value = clamp01(s, 0, 2)
     },
     // P2.1 wave-set envelope — the field owns the params (CPU buoyancy reads
     // them via waveSetFactor); tick() mirrors them to the GPU uniforms.

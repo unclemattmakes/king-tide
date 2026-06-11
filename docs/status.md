@@ -6,12 +6,13 @@
 >    places anti-grav zones — every `antiGravZones` is empty. Entries that brag
 >    about shipping anti-grav segments (Liberty / Angkor / Kilauea) are
 >    v1-historical and were already untrue against the reset v2 track data.
-> 2. **Content is mostly greybox for v2.** Only **Sandbar** and **The Maw** are
->    art-dressed; the other tracks were intentionally reset to greybox
->    route-stubs (PR #285) for the v2 art pass. "v1 lineup complete" is a v1
->    statement, not a v2 one. *(South Beach Sunken / Miami was cut in the 2026-06
->    content pass; the Reef opener is being rebuilt from scratch as **Texcoco
->    Rising** — drowned Mexico City — concept-locked / geometry-pending.)*
+> 2. **Content is mostly greybox for v2.** Only **Mayday Bay** (slug `sandbar`)
+>    and **The Maw** are art-dressed; the other tracks were intentionally reset
+>    to greybox route-stubs (PR #285) for the v2 art pass. "v1 lineup complete"
+>    is a v1 statement, not a v2 one. *(South Beach Sunken / Miami was cut in the
+>    2026-06 content pass; the Reef opener **Mexico City** (slug `mexico-city`)
+>    — drowned, on the old Lake Texcoco bed — was rebuilt via the Texcoco art
+>    pass and now ships, so the Reef Cup is ungated as of 2026-06-10.)*
 > 3. **The soundtrack is CC0 placeholder music, not commissioned/licensed.** The
 >    14 `.opus` tracks play, but licensing is still open work. Entries calling
 >    them "commissioned" / "licensed" are aspirational.
@@ -26,10 +27,46 @@
 > Blender level tooling is **in** and ready for real level work (terrain,
 > road/ramp/tunnel, downtown, wave zones, scatter, export). The current
 > proof-of-thesis is making **shippable versions of the Reef Cup maps** —
-> **Sandbar → Texcoco Rising → Cape Town Drift** (see
+> **Mayday Bay → Mexico City → Cape Town Drift** (see
 > [reef-cup-vertical-slice-status.md](./reef-cup-vertical-slice-status.md)).
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
+
+> **Last updated: 2026-06-10 (h)** — **Reef Cup map renames + bikes flattened to
+> one balanced class.** Naming convention: tracks are named after cities (real or
+> fictional). Reef opener **Texcoco Rising → Mexico City** (full rename — slug
+> `texcoco-rising` → `mexico-city`, GLB/hero/thumb + the `tex/` prop folder →
+> `mxc/`, JSON/manifest/tests, R2 re-push). Tutorial **Sandbar → Mayday Bay**
+> (display name only — slug stays `sandbar`; a storm-hit-resort nod to Typhoon
+> Lagoon). In older log entries below, "Texcoco" = Mexico City and "Sandbar" =
+> Mayday Bay. **Bikes**: the weight-class framing is gone — the five bikes
+> (Cruiser / Racer / Stunt / Scout / Sparrow) are now one balanced class of
+> peers, each winning on a couple of axes with no strict upgrade (Mario-Kart
+> spread). Racer stays at `defaultBikeStats()`; treat the spread as a playtest
+> starting point. See [src/game/bikes/variants.ts](../src/game/bikes/variants.ts).
+>
+
+> **Last updated: 2026-06-10 (g)** — **Rising-face strokes — vertical
+> brushwork on the waves coming at you.** The crest-PERPENDICULAR partner of
+> the P1 contour lines: where contours trace iso-height bands ALONG each
+> crest, these are tapered oil strokes pulled UP the leading (rising) face of
+> an approaching wave — the "vertical strokes climbing the wave" read. Reuses
+> the face-streak oil sheet (`FOAM_STROKE_STREAK_SPEC`) sampled in the GLOBAL
+> swell frame — U ← the travel axis (so each stroke climbs the face), V ← the
+> crest axis (so strokes sit side-by-side across the front), the transpose of
+> the crest-parallel foam-mass mapping. Gated front-face-only via
+> `crestRiseFrag` (∂h/∂t > 0, the same lead-bias signal the whitecap uses) ·
+> steep SWELL slope only (no chop, so the gate doesn't crawl) · building up
+> the face toward the crest (`rampT`) · distance-faded. Folded into the foam
+> stack via max (`foamMaskWithContours`/`foamEmissiveMask`) so it inherits the
+> foam colour/warmth/bloom. New persisted `Rising strokes` knob (water menu,
+> 0–2, default 0.5). Zero new varyings or uniform buffers (reuses the
+> swell-only pack). Verified headed on the deep-ocean test bed:
+> `FOAM_SWEEP=1 FOAM_SWEEP_RISE=1` (in-context off→max) +`FOAM_SWEEP_ISO=1`
+> (strokes alone on bare swell) — the iso diff proves the strokes band onto
+> rising faces and run square to the crest (NOT the 90°-wrong trap that bit
+> the foam streaks twice). Awaiting Matt's playtest on the default strength.
+> See water-next-research.md §P1.5.
 
 > **Last updated: 2026-06-10 (f)** — **Waterline contact effects — the sea
 > acknowledges the world.** Static geometry that pierces the surface

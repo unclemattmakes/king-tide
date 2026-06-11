@@ -7,7 +7,7 @@
 > layout follows [tracks/the-maw.md](./the-maw.md), the *look* follows this doc.
 >
 > **First Open Sea cup pass** — opens a new palette family after the Reef cup
-> ([sandbar](./sandbar-art-target.md) · [texcoco](./texcoco-rising-art-target.md)
+> ([sandbar](./sandbar-art-target.md) · [mexico-city](./mexico-city-art-target.md)
 > · [cape-town](./cape-town-drift-art-target.md) · [hatteras](./hatteras-light-art-target.md)).
 > Downstream of [art-direction.md](../art-direction.md) and
 > [track-art-direction.md](../track-art-direction.md#4-the-maw--open-sea-cool--5--30--65)
@@ -147,6 +147,6 @@ Clear navy water with sun-dappled caustics over the submerged rock.
 
 ## References
 - [the-maw.md](./the-maw.md) — the track (beats, props, palette, wave config).
-- Reef cup sisters: [texcoco](./texcoco-rising-art-target.md) · [cape-town](./cape-town-drift-art-target.md) · [hatteras](./hatteras-light-art-target.md) · [sandbar](./sandbar-art-target.md).
+- Reef cup sisters: [mexico-city](./mexico-city-art-target.md) · [cape-town](./cape-town-drift-art-target.md) · [hatteras](./hatteras-light-art-target.md) · [sandbar](./sandbar-art-target.md).
 - [track-art-pass-playbook.md](../track-art-pass-playbook.md) — placement / re-export.
 - [art-direction.md](../art-direction.md) — register, material-state rule, waterline trio, palette appendix.

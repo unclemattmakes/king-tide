@@ -171,14 +171,14 @@ Each spec is structured identically:
 13. **Hero camera framing** — where to park `camera_hero` and what
     it should frame.
 
-Names assume the slugified track ids: `sandbar`, `texcoco-rising`,
+Names assume the slugified track ids: `sandbar`, `mexico-city`,
 `cape-town-drift`, `hatteras-light`, `the-maw`, `shibuya-submerged`,
 `marina-bay-7`, `doges-drift`, `kilauea-crown`, `aqualand`,
 `angkor-drowned`, `liberty-drowned`.
 
 ---
 
-### 2.0 Sandbar (tutorial)
+### 2.0 Mayday Bay (tutorial)
 
 **Identity** — Cup: none · Lap: 60 s scripted · Laps: 1 · Total: 60 s ·
 Water/Land: 80/20 · Anti-grav: brief · Difficulty: intro
@@ -276,13 +276,13 @@ frame. Sun at golden-hour angle, lens flare bias on.
 
 ---
 
-### 2.1 Texcoco Rising (Reef Cup #1)
+### 2.1 Mexico City (Reef Cup #1)
 
 > *Replaced South Beach Sunken (Miami) in the 2026-06 content pass. Built
 > the **current way** — empty scene → track shape → blockin terrain +
 > landmarks → progressive dressing — **not** the retired per-track seed
 > script. Status: concept locked, geometry pending. Workflow references:
-> Sandbar (furthest along), Cape Town Drift (mid blockin→props swap).*
+> Mayday Bay (furthest along), Cape Town Drift (mid blockin→props swap).*
 
 **Identity** — Cup: Reef · Lap: 45 s · Laps: 3 · Total: ~2:15 ·
 Water/Land: 65/35 · Anti-grav: none · Difficulty: intro
@@ -380,7 +380,7 @@ rosa-mexicano light over the lake), `seaStateBeaufort=2`.
 
 ```json
 "audio": {
-  "music": "texcoco-cumbia.opus",
+  "music": "mexico-city-cumbia.opus",
   "ambient": ["lake-birds.opus", "city-distant.opus", "marimba-busker.opus"],
   "ambientGains": [0.4, 0.5, 0.25],
   "music3dEffects": { "duckOnPump": 0.35 }
@@ -1973,7 +1973,7 @@ Every track's music asset (`.opus`) should have:
   must-have for this; others are nice-to-have.)
 - **Ducking via `music3dEffects.duckOnPump`** tuned per track:
   - High pump duck (0.40–0.50) for wave-mastery tracks (Maw,
-    Hatteras, Liberty, Sandbar).
+    Hatteras, Liberty, Mayday Bay).
   - Standard (0.30–0.35) for mixed-skill tracks.
   - Low (0.20–0.25) for calm-water or chaos tracks (Cape Town,
     Aqualand, Marina Bay 7).
@@ -2088,7 +2088,7 @@ heaviest set-pieces.
 
 | Track | Stage | Topology | Reference | Anti-grav | Wave zones | Emitters | New runtime hook |
 |---|---|---|---|---|---|---|---|
-| Sandbar | 1 (template) | Loop simple | WR64 Sunny Beach | 1 brief tube | 1 | 2 | — |
+| Mayday Bay | 1 (template) | Loop simple | WR64 Sunny Beach | 1 brief tube | 1 | 2 | — |
 | South Beach Sunken | 2 | Loop | WR64 Sunset Bay | none | 2 | 4 | — |
 | Cape Town Drift | 3 | Loop + tunnel | WR64 Drake Lake | none | 2 | 4 | — |
 | Hatteras Light | 4 | Loop + column | MK8 Shy Guy Falls / Cliffdiver | 1 tube | 2 (surge) | 5 | lap-keyed lamp shader |

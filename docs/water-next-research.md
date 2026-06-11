@@ -35,7 +35,7 @@ chosen to **strengthen it, never bypass it**.
 
 But the investigation found the contract is currently **violated in three
 places** (§4): wave zones are *felt but never drawn* (the GPU shader has no
-zone code, while Sandbar/The Maw/Texcoco all ship zones); the Gerstner pinch
+zone code, while Mayday Bay/The Maw/Mexico City all ship zones); the Gerstner pinch
 is distrusted ("physics out of phase with visuals") and so steepness — our
 best curvature-sharpening lever — sits unused; and the readability work that
 proved out (posterized bands + contour-line foam, 2026-06-06 session) was
@@ -219,11 +219,11 @@ amplitudes. The [wave-zones cookbook](../docs-site/blender/wave-zones.md)
 claims "the renderer's wave-displaced plane" applies zones — true of the v1
 CPU-displaced plane, **stale since the TSL water landed**.
 
-Shipped v2 tracks are live counter-examples: **Sandbar** wraps its whole play
+Shipped v2 tracks are live counter-examples: **Mayday Bay** wraps its whole play
 area in `heightMult 0.5` (the rider floats on *half* the rendered amplitude —
 crests visually swallow the bike, troughs leave it hovering on air), **The Maw**
 runs `1.4×` height + `0.85×` *frequency* over most of the course (frequency
-change = **different crest positions**, a literal phase mismatch), **Texcoco**
+change = **different crest positions**, a literal phase mismatch), **Mexico City**
 a local `1.3×`. This is the most likely root of the long-standing
 "ride-on-top buoyancy still inconclusive" feel note, and plausibly feeds the
 pinch distrust (§4.2): any steepness tuning done while riding a zoned track
@@ -254,7 +254,7 @@ surface. Candidate explanations, in order of likelihood:
 
 1. **§4.1.** On zoned tracks the surface is out of phase *regardless* of
    pinch; raising steepness sharpens the visual crests and makes the
-   pre-existing mismatch obvious. Sandbar (0.5× everywhere) is the worst case.
+   pre-existing mismatch obvious. Mayday Bay (0.5× everywhere) is the worst case.
 2. **Hover-spring phase lag, amplified.** Sharper crests = higher temporal
    frequency under a 40 m/s bike; the same PD lag that's invisible on round
    swells reads as "the bump arrived early/late" on pinched ones. That's a
@@ -265,7 +265,7 @@ surface. Candidate explanations, in order of likelihood:
    catch this — diff it against `sampleHeight` along a transect at high Q.
 
 **P0 is a diagnosis, not a rewrite**: run `?wavedots` at `?steep=1` on (a) the
-deep-ocean test bed (no zones/terrain) and (b) Sandbar. If (a) is clean and
+deep-ocean test bed (no zones/terrain) and (b) Mayday Bay. If (a) is clean and
 (b) isn't → it was §4.1 all along. Getting pinch trusted matters beyond feel:
 **sharp crests are themselves a curvature cue**, and two shelved signals — the
 Jacobian compression foam and SoT's choppiness-driven peak mask (§5, §7) —
@@ -280,7 +280,7 @@ need a non-zero, trusted Q.
 > under `artifacts/pinch-diagnosis/`). At Q = 1.2 — ≈3× the shipped 0.44 —
 > buoyancy lands on the pinched surface to **≤ 3.1 mm** worst-case on
 > full-amplitude open water (lagoon-edit; pinch displacement up to 1.37 m)
-> and ≤ 5e-8 m inside Sandbar's 0.5× zone; the Q = 0 controls sit at float
+> and ≤ 5e-8 m inside Mayday Bay's 0.5× zone; the Q = 0 controls sit at float
 > noise (1e-15), and the red sim dots ride the GPU wireframe on both tracks.
 > So: candidate **(3) math mismatch — refuted**; candidate **(1) zones — was
 > real, fixed by #340**; any "out of phase" feel that survives a post-#340
@@ -636,7 +636,7 @@ preview; CLAUDE.md hard rule 2).
    2026-06-09).** Uniform-array OBB soft-max in the vertex wave loop
    (`waveZoneFactors`), `MAX_WAVE_ZONES = 8` sim-owned + drift-tested, CPU
    inverse map folds zone factors in, `?wavedots` QA pass on
-   Sandbar/Maw/Texcoco captured in
+   Mayday Bay/Maw/Mexico City captured in
    [wave-zone-sync.spec.ts](../tests/e2e/wave-zone-sync.spec.ts).
 2. ✅ **Diagnose the pinch** (§4.2) — **VERDICT WRITTEN (2026-06-09): Q
    trusted at the shipped 0.44 default.** See the verdict block in §4.2 —
@@ -673,8 +673,8 @@ preview; CLAUDE.md hard rule 2).
 > readability A/B grid (`FOAM_SWEEP=1 FOAM_SWEEP_READABILITY=1`, captures in
 > `artifacts/readability-sweep-p1/`), within-boot perf A/B = no measurable
 > cost (p50 identical ON/OFF), Reef Cup `gen:track-shots` pass
-> (`artifacts/track-shots-p1/`) — Sandbar's calm lagoon correctly shows no
-> lines (slope gate), Texcoco's gentle swell shows them subtly (flagged as
+> (`artifacts/track-shots-p1/`) — Mayday Bay's calm lagoon correctly shows no
+> lines (slope gate), Mexico City's gentle swell shows them subtly (flagged as
 > the first knob-tuning question for the playtest).
 
 All fragment-only, all behind live debug-menu knobs (the cel session's
@@ -696,6 +696,27 @@ console-only hooks are part of why that work was lost):
 Verification: deep-ocean test bed A/B grid (extend `foam-sweep.spec.ts` with
 the new knobs), then chase-cam `gen:track-shots` on the Reef Cup trio, then
 Matt playtests — the readability claim is only provable by hands + eyes.
+
+**P1.5 — Rising-face strokes (crest-PERPENDICULAR brush marks).** Follow-on
+(2026-06-10): the contour lines (item 2) trace iso-height bands *along* each
+crest; this adds their perpendicular partner — tapered oil-stroke brush marks
+pulled **up the leading (rising) face** of an approaching wave, the "vertical
+strokes climbing the wave coming at you" read. Reuses the face-streak oil sheet
+(`FOAM_STROKE_STREAK_SPEC`) but samples it in the **global swell frame** with
+U ← the travel axis (`brushTravel`, so each stroke climbs the face) and V ← the
+crest axis (`brushCrest`, so strokes sit side-by-side across the front) — the
+transpose of the crest-parallel foam-mass mapping. Gates: front face only via
+`crestRiseFrag` (∂h/∂t > 0, the same lead-bias signal the whitecap uses) ·
+steep **swell** slope only (no chop, so the gate doesn't crawl) · builds up the
+face toward the crest (`rampT`) · distance-faded (60→150 m). Folded into the
+foam paint (`foamMaskWithContours`/`foamEmissiveMask`) so it inherits the foam
+colour/warmth/bloom. Live knob `Rising strokes` (water debug menu, 0..2,
+default 0.5), persisted per-key. No new varying (reuses the swell-only pack) and
+no new uniform buffer. Verification: `FOAM_SWEEP=1 FOAM_SWEEP_RISE=1`
+(in-context off→max) and `FOAM_SWEEP_ISO=1` (strokes alone on bare swell) on the
+deep-ocean test bed — the iso diff confirms the strokes band onto rising faces
+and run square to the crest (not the 90°-wrong trap that bit the foam streaks
+twice). Awaiting Matt's playtest verdict on the default strength.
 
 ### P2 — Nuance + anti-repetition
 
@@ -822,8 +843,8 @@ Matt playtests — the readability claim is only provable by hands + eyes.
    tests: gain curve, break cap, bounded breach, drive clamps, vy
    exactness, measured lean direction) + sandbar/cape-town sync e2e green
    + A/B captures in `artifacts/shoaling-v2/` (legacy flat sheet vs live
-   breaker rows on Sandbar's beach band). **Feel gate: Matt's hands on
-   beach approaches (Sandbar awash bar, Cape Town harbour) + a QA-matrix
+   breaker rows on Mayday Bay's beach band). **Feel gate: Matt's hands on
+   beach approaches (Mayday Bay awash bar, Cape Town harbour) + a QA-matrix
    pass for AI stability on shore-adjacent corridors** — `Surf shoaling`
    at 0 is the instant revert.
 2. ✅ **Authored wave stamps** (§7.10) — **SYSTEM SHIPPED (2026-06-10);

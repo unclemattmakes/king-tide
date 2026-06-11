@@ -1,6 +1,6 @@
-# Sandbar — Art Target (near-shipping visual pass)
+# Mayday Bay — Art Target (near-shipping visual pass)
 
-> **What this is.** A visual build-target for the Sandbar tutorial track, derived
+> **What this is.** A visual build-target for the Mayday Bay tutorial track, derived
 > from a Midjourney environment-concept pass (2026-06-01) that pushes the
 > *look* to near-shipping while the **gameplay layout stays exactly as authored**
 > in `tracks-src/sandbar.blend`. The concept plates are the postcard we're
@@ -8,8 +8,8 @@
 >
 > **This doc is downstream of** [art-direction.md](../art-direction.md) (register,
 > material-state rule, waterline trio) and
-> [track-art-direction.md](../track-art-direction.md#tutorial--sandbar--reef-pastel--45--15--40)
-> (Sandbar = Reef pastel, **45 built / 15 broken / 40 blooming**). It does not
+> [track-art-direction.md](../track-art-direction.md#tutorial--mayday-bay--reef-pastel--45--15--40)
+> (Mayday Bay = Reef pastel, **45 built / 15 broken / 40 blooming**). It does not
 > change lore, palette, or layout — it shows how to *apply* them here.
 
 ## Source material
@@ -40,7 +40,7 @@ band and one half-sunk piling — no more.
 
 ## Palette (Reef pastel — sample by role)
 
-| Role | Hex | Use on Sandbar |
+| Role | Hex | Use on Mayday Bay |
 |---|---|---|
 | Sky / key (warm) | `#FFB3C7` → peach | rose-peach mid-morning gradient, the master warm |
 | Water (cool) | `#36C8C0` | turquoise shallows; darken to deep teal off the steep island shores |
@@ -54,7 +54,7 @@ sunIntensity 1.1, low cloud). The plates match that; keep it.
 
 ## Material-state ratio: 45 built / 15 broken / 40 blooming
 
-All three must read in the hero framing. Sandbar leans **built + blooming** with
+All three must read in the hero framing. Mayday Bay leans **built + blooming** with
 near-zero decay — it's a *classroom*, kept tidy on purpose.
 
 - **Built (45):** the retrofitted marina — repainted timber dock on stilts,
@@ -176,7 +176,7 @@ extra fragment-noise taps:
 The cloud upgrade (cool-base self-shadow + elevation lift) is a strict
 improvement for **every** track; the drama is opt-in via the two knobs.
 
-**Sandbar values:** `cloudiness 0.5`, `cloudTowering 0.75`, `sunSize 1.7` —
+**Mayday Bay values:** `cloudiness 0.5`, `cloudTowering 0.75`, `sunSize 1.7` —
 big soft cumulus + a warm low sun, kept friendly for the calm classroom.
 Perf: ~2 FBM + 2 value-noise taps per sky pixel (dome only); held 70+ fps on
 the dev GPU. If the M1/Ryzen floor ever struggles, the second (self-shadow) FBM

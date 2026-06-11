@@ -5,7 +5,7 @@
 > [track-build-playbook.md](./track-build-playbook.md), whose unique gotchas were
 > folded into "Before you start" + §8 here. Written during the **South Beach
 > Sunken** build, which was cut in the 2026-06 content pass (the Reef opener is
-> being rebuilt as **Texcoco Rising**) — the *track* changed, the *pass workflow
+> being rebuilt as **Mexico City**) — the *track* changed, the *pass workflow
 > is current and track-agnostic*. **Anti-grav is cut** (parked for a possible
 > DLC): don't author anti-grav set-pieces; verticality comes from terrain, ramps,
 > berms, and cliffs.

@@ -10,7 +10,7 @@
 > [track-art-direction.md](../track-art-direction.md#7-doges-drift--drowned-ochre--35--35--30)
 > (Doge's = **Drowned ochre**, **35 built / 35 broken / 30 blooming** — the most
 > *balanced* track, all three states in tension). Shares the `venice_warm` sky with
-> the [Sandbar](./sandbar-art-target.md) grade.
+> the [Mayday Bay](./sandbar-art-target.md) grade.
 
 ## Source material
 
@@ -118,5 +118,5 @@ ochre marble (a palace colonnade base in teal water):
 
 ## References
 - [doges-drift.md](./doges-drift.md) — the track (beats, props, palette).
-- Sister passes: [marina-bay-7](./marina-bay-7-art-target.md) · [the-maw](./the-maw-art-target.md) · [shibuya](./shibuya-submerged-art-target.md) · Reef ([texcoco](./texcoco-rising-art-target.md) · [cape-town](./cape-town-drift-art-target.md) · [hatteras](./hatteras-light-art-target.md) · [sandbar](./sandbar-art-target.md)).
+- Sister passes: [marina-bay-7](./marina-bay-7-art-target.md) · [the-maw](./the-maw-art-target.md) · [shibuya](./shibuya-submerged-art-target.md) · Reef ([mexico-city](./mexico-city-art-target.md) · [cape-town](./cape-town-drift-art-target.md) · [hatteras](./hatteras-light-art-target.md) · [sandbar](./sandbar-art-target.md)).
 - [art-direction.md](../art-direction.md) — register, material-state rule, waterline trio.
