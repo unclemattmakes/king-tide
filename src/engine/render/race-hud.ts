@@ -113,6 +113,7 @@ export interface RaceHudOptions {
 export function createRaceHud(opts: RaceHudOptions): RaceHud {
   const banner = ensureElement('race-banner', 'div')
   const timerCard = ensureElement('race-timer', 'div')
+  const posBadge = ensureElement('race-position-badge', 'div')
   const gapToast = ensureElement('race-gap', 'div')
   const minimap = ensureElement('race-minimap', 'canvas') as HTMLCanvasElement
   const minimapCtx = minimap.getContext('2d')
@@ -126,13 +127,23 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
       <div class="race-timer-value" id="race-time-value">0:00.00</div>
     </div>
     <div class="race-timer-row">
-      <div class="race-timer-label">LAP <span id="race-lap-label">1/3</span></div>
+      <div class="race-timer-label">LAP</div>
       <div class="race-timer-value race-timer-current" id="race-laptime-value">0:00.00</div>
     </div>
     <div class="race-timer-meta">
-      <span id="race-position">P1/5</span>
       <span id="race-laptime-extra"></span>
     </div>
+  `
+  // Position badge — the HUD hero (docs/ui-art-direction.md). Big painted
+  // ordinal + field size, lap chip beneath. The board hides in solo time
+  // trial (no field to place in) while the lap chip stays.
+  posBadge.innerHTML = `
+    <div class="rp-board" id="rp-board">
+      <span class="rp-num" id="rp-num">1</span>
+      <span class="rp-suffix" id="rp-suf">st</span>
+      <span class="rp-total" id="rp-total">/8</span>
+    </div>
+    <div class="rp-lap" id="rp-lap">LAP <b>1/3</b></div>
   `
 
   minimap.width = 180
@@ -140,10 +151,13 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
 
   const bannerText = document.getElementById('race-banner-text') as HTMLElement
   const timeValue = document.getElementById('race-time-value') as HTMLElement
-  const lapLabel = document.getElementById('race-lap-label') as HTMLElement
   const lapTimeValue = document.getElementById('race-laptime-value') as HTMLElement
   const lapTimeExtra = document.getElementById('race-laptime-extra') as HTMLElement
-  const positionEl = document.getElementById('race-position') as HTMLElement
+  const rpBoard = document.getElementById('rp-board') as HTMLElement
+  const rpNum = document.getElementById('rp-num') as HTMLElement
+  const rpSuf = document.getElementById('rp-suf') as HTMLElement
+  const rpTotal = document.getElementById('rp-total') as HTMLElement
+  const rpLap = document.getElementById('rp-lap') as HTMLElement
 
   // ---- Countdown state -----------------------------------------------------
   // Anchored on a wall-clock timestamp captured on the first tick so the
@@ -251,19 +265,14 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     const h = staticLayer.height
     const palette = currentHudPalette()
 
+    // Painted chart: deep-water fill (the rounded porthole frame is CSS
+    // on the canvas element), sand-cream route with the palette's info
+    // hue inside it so colorblind swaps still land.
     ctx.clearRect(0, 0, w, h)
-    ctx.fillStyle = 'rgba(8, 14, 24, 0.78)'
+    ctx.fillStyle = 'rgba(7, 32, 40, 0.84)'
     ctx.fillRect(0, 0, w, h)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)'
-    ctx.lineWidth = 1
-    ctx.strokeRect(0.5, 0.5, w - 1, h - 1)
 
     if (splinePoints.length > 1) {
-      // Spline is rendered as the racing line; the `info` palette slot
-      // is what HUDs use for "neutral lane hint" — feed that through so
-      // the line shifts under colorblind modes that need an info-hue swap.
-      ctx.strokeStyle = applyAlpha(palette.info, 0.55)
-      ctx.lineWidth = 6
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
       ctx.beginPath()
@@ -279,10 +288,15 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
         ctx.lineTo(c.cx, c.cy)
       }
       ctx.lineTo(firstCx, firstCy)
+      // Sand-cream causeway…
+      ctx.strokeStyle = 'rgba(255, 245, 225, 0.5)'
+      ctx.lineWidth = 7
       ctx.stroke()
-
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)'
-      ctx.lineWidth = 1.5
+      // …with the lane hint painted down its middle. The `info` palette
+      // slot shifts under colorblind modes, so the meaningful hue still
+      // resolves.
+      ctx.strokeStyle = applyAlpha(palette.info, 0.85)
+      ctx.lineWidth = 2.5
       ctx.stroke()
     }
 
@@ -378,16 +392,41 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
   // ---- HUD text dirty-flag state -------------------------------------------
   // Every text field is skipped when the input value hasn't changed since the
   // last tick. Race / lap time advance most frames so they update most frames,
-  // but lap label / position / lap-extra change only on lap crossings — those
-  // saved DOM writes are the main win. Using NaN as the sentinel guarantees
-  // the first tick always writes.
+  // but lap chip / position badge / lap-extra change only on lap crossings —
+  // those saved DOM writes are the main win. Using NaN as the sentinel
+  // guarantees the first tick always writes.
   let lastRaceTime = Number.NaN
   let lastLapTimeNum = Number.NaN
   let lastLapKey = -1 // lap * 1000 + lapsToFinish
   let lastPositionKey = -1 // playerPosition * 1000 + totalRacers
+  let lastPosition = -1 // previous playerPosition, for gain/lose flashes
+  let badgeFlashTimer: ReturnType<typeof setTimeout> | null = null
   let lastExtraLast: number | null | undefined
   let lastExtraBest: number | null | undefined
   let lastFinished: boolean | undefined
+
+  /** Pop the position board and tint it mint (gained places) or hazard
+   *  (lost places) for a beat. Purely cosmetic — a rapid re-pass just
+   *  restarts the flash. */
+  function flashBoard(direction: 'gain' | 'lose'): void {
+    rpBoard.classList.remove('pop', 'gain', 'lose')
+    // Force a reflow so re-adding `pop` restarts the CSS animation.
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+    void rpBoard.offsetWidth
+    rpBoard.classList.add('pop', direction)
+    if (badgeFlashTimer !== null) clearTimeout(badgeFlashTimer)
+    badgeFlashTimer = setTimeout(() => {
+      rpBoard.classList.remove('pop', 'gain', 'lose')
+      badgeFlashTimer = null
+    }, 700)
+  }
+
+  const ORDINAL_SUFFIX = ['th', 'st', 'nd', 'rd'] as const
+  function ordinalSuffix(n: number): string {
+    const tens = n % 100
+    if (tens >= 11 && tens <= 13) return 'th'
+    return ORDINAL_SUFFIX[n % 10] ?? 'th'
+  }
 
   function tick(input: RaceHudInput): void {
     tickCountdown()
@@ -401,15 +440,30 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
       lapTimeValue.textContent = formatTime(input.currentLapTime)
       lastLapTimeNum = input.currentLapTime
     }
-    const lapKey = Math.min(input.lap, input.lapsToFinish) * 1000 + input.lapsToFinish
+
+    // ---- Position badge + lap chip ----------------------------------------
+    posBadge.classList.add('show')
+    const lapShown = Math.min(input.lap, input.lapsToFinish)
+    const lapKey = lapShown * 1000 + input.lapsToFinish
     if (lapKey !== lastLapKey) {
-      lapLabel.textContent = `${Math.min(input.lap, input.lapsToFinish)}/${input.lapsToFinish}`
+      rpLap.innerHTML = `LAP <b>${lapShown}/${input.lapsToFinish}</b>`
+      rpLap.classList.toggle('final', lapShown === input.lapsToFinish && input.lapsToFinish > 1)
       lastLapKey = lapKey
     }
     const posKey = input.totalRacers > 0 ? input.playerPosition * 1000 + input.totalRacers : 0
     if (posKey !== lastPositionKey) {
-      positionEl.textContent =
-        input.totalRacers > 0 ? `P${input.playerPosition}/${input.totalRacers}` : ''
+      // Solo time trial has no field to place in — hide the board, keep
+      // the lap chip.
+      rpBoard.style.display = input.totalRacers > 1 ? '' : 'none'
+      if (input.totalRacers > 1) {
+        rpNum.textContent = String(input.playerPosition)
+        rpSuf.textContent = ordinalSuffix(input.playerPosition)
+        rpTotal.textContent = `/${input.totalRacers}`
+        if (lastPosition > 0 && input.playerPosition !== lastPosition) {
+          flashBoard(input.playerPosition < lastPosition ? 'gain' : 'lose')
+        }
+      }
+      lastPosition = input.playerPosition
       lastPositionKey = posKey
     }
     if (input.lastLapTime !== lastExtraLast || input.bestLapTime !== lastExtraBest) {
@@ -492,7 +546,7 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
 
   function drawMinimapDot(ctx: CanvasRenderingContext2D, dot: MinimapDot): void {
     const c = worldToCanvas(dot.x, dot.z)
-    const r = dot.isPlayer ? 4.5 : dot.isLeader ? 4 : 3.2
+    const r = dot.isPlayer ? 5 : dot.isLeader ? 4 : 3.2
     const palette = currentHudPalette()
     ctx.fillStyle = dot.isPlayer
       ? palette.player
@@ -502,9 +556,14 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     ctx.beginPath()
     ctx.arc(c.cx, c.cy, r, 0, Math.PI * 2)
     ctx.fill()
+    // Vinyl-pin read: a dark seat ring on everyone so dots hold up over
+    // the light route stroke, plus a cream cap ring on the player.
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)'
+    ctx.lineWidth = 1
+    ctx.stroke()
     if (dot.isPlayer) {
-      ctx.strokeStyle = '#000'
-      ctx.lineWidth = 1.4
+      ctx.strokeStyle = 'rgba(255, 245, 225, 0.95)'
+      ctx.lineWidth = 2
       ctx.stroke()
     }
   }
@@ -542,6 +601,9 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     lastTickValue = -1
     gapVisibleFor = 0
     bestCrossingTime.clear()
+    // Forget the previous placing so a respawn/replay doesn't flash a
+    // phantom gain/lose on its first tick.
+    lastPosition = -1
   }
 
   /** Drop any hold-banner styling/text (see setHoldBanner). */

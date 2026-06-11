@@ -30,7 +30,7 @@ function displayCupName(cupId: string): string {
 }
 
 const TROPHY_HEX: Record<'gold' | 'silver' | 'bronze', string> = {
-  gold: '#ffd54a',
+  gold: '#ffd27a',
   silver: '#cbd5e1',
   bronze: '#cd7f32',
 }

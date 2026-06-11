@@ -17,6 +17,7 @@
  * (or ready=true) message with the new pick.
  */
 
+import { GAME_TITLE } from '@/engine/branding'
 import { MAX_PEERS_PER_ROOM } from '../net/protocol'
 
 export type LobbyPeerView = {
@@ -87,7 +88,7 @@ export function installLobbyOverlay(opts: LobbyOverlayOpts): LobbyOverlay {
     <header class="bc-header">
       <div class="bc-brand">
         <span class="bar"></span>
-        <span class="name">HOVERBIKE</span>
+        <span class="name">${GAME_TITLE}</span>
         <span class="live">LIVE</span>
       </div>
       <nav class="bc-crumbs">
@@ -168,7 +169,7 @@ export function installLobbyOverlay(opts: LobbyOverlayOpts): LobbyOverlay {
       background:
         radial-gradient(ellipse 90% 60% at 50% -10%, rgba(0, 212, 255, 0.18), transparent 55%),
         radial-gradient(ellipse 60% 50% at 100% 100%, rgba(255, 90, 31, 0.10), transparent 60%),
-        linear-gradient(180deg, var(--bc-navy) 0%, #050a14 100%);
+        linear-gradient(180deg, var(--bc-navy) 0%, #04141b 100%);
       overflow: hidden;
     }
     #lobby-overlay.hidden { display: none; }
