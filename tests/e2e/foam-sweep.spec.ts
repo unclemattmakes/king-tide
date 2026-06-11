@@ -225,7 +225,7 @@ test.describe('foam coverage sweep', () => {
     await page.keyboard.press('Enter')
     await page.addStyleTag({
       content:
-        '#hud,#hud-scaffold,#race-timer,#race-banner,#race-gap,#race-minimap,#race-intro-ui,#race-intro-skip,#hud-positions,#devsettings-toggle,#water-debug-toggle,#garage-toggle,#loading-screen,#dev-dock{display:none!important}',
+        '#hud,#hud-scaffold,#race-timer,#race-position-badge,#race-banner,#race-gap,#race-minimap,#race-intro-ui,#race-intro-skip,#hud-positions,#devsettings-toggle,#water-debug-toggle,#garage-toggle,#loading-screen,#dev-dock{display:none!important}',
     })
     await page.waitForTimeout(6000)
 

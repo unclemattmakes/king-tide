@@ -78,7 +78,7 @@ test.describe('wake trail look', () => {
     await waitFullyBooted(page)
     await page.addStyleTag({
       content:
-        '#hud,#hud-scaffold,#race-timer,#race-banner,#race-gap,#race-minimap,#race-intro-ui,#race-intro-skip,#hud-positions,#devsettings-toggle,#water-debug-toggle,#garage-toggle,#loading-screen,#dev-dock{display:none!important}',
+        '#hud,#hud-scaffold,#race-timer,#race-position-badge,#race-banner,#race-gap,#race-minimap,#race-intro-ui,#race-intro-skip,#hud-positions,#devsettings-toggle,#water-debug-toggle,#garage-toggle,#loading-screen,#dev-dock{display:none!important}',
     })
 
     // Camera helper: park above-behind the bike's CURRENT heading so the
@@ -183,7 +183,7 @@ test.describe('wake trail look', () => {
     await page.keyboard.press('Enter')
     await page.addStyleTag({
       content:
-        '#hud,#hud-scaffold,#race-timer,#race-banner,#race-gap,#race-minimap,#race-intro-ui,#race-intro-skip,#hud-positions,#devsettings-toggle,#water-debug-toggle,#garage-toggle,#loading-screen,#dev-dock{display:none!important}',
+        '#hud,#hud-scaffold,#race-timer,#race-position-badge,#race-banner,#race-gap,#race-minimap,#race-intro-ui,#race-intro-skip,#hud-positions,#devsettings-toggle,#water-debug-toggle,#garage-toggle,#loading-screen,#dev-dock{display:none!important}',
     })
     // Wall-clock waits undercount here: the intro flythrough + countdown eat
     // ~10 s before the race clock starts, and the first stretch of the start

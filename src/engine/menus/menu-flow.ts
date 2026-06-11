@@ -1,5 +1,6 @@
 import { assetUrl } from '@/engine/asset-url'
 import { SOUNDTRACK } from '@/engine/audio/soundtrack.generated'
+import { GAME_TAGLINE, GAME_TITLE, GAME_TITLE_PROSE } from '@/engine/branding'
 import { buildCupRoster, startCup } from '@/engine/cup-progress'
 import { formatLap } from '@/engine/garage'
 import { getEndpoint, isRemoteEnabled } from '@/engine/leaderboard/endpoint'
@@ -363,7 +364,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         setChyron('', 'Time Trial + leaderboard backend ship in M16.')
         break
       case 'credits':
-        setChyron('', 'The artists, musicians and toolmakers behind Hoverbike.')
+        setChyron('', `The artists, musicians and toolmakers behind ${GAME_TITLE_PROSE}.`)
         break
     }
   }
@@ -838,7 +839,9 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       // race so the player understands where they are.
       const recap = readLastRaceRecap()
       const taglineHtml =
-        opts.reason === 'exit-from-race' ? `<div class="tagline">Back to the booth</div>` : ''
+        opts.reason === 'exit-from-race'
+          ? `<div class="tagline">Back at the docks</div>`
+          : `<div class="tagline">${escapeHtml(GAME_TAGLINE)}</div>`
       // Stash the most recently-watched track/bike back into the picks
       // so the next race defaults to whatever the player just exited.
       if (recap) {
@@ -852,12 +855,17 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       // real <button> so keyboard focus + gamepad A (which clicks the
       // active focusable, see menu-gamepad.ts) both reach the same path.
       el.innerHTML = `
-        <span class="word">HOVERBIKE</span>
+        <span class="word">${escapeHtml(GAME_TITLE)}</span>
+        <svg class="wave-stroke" viewBox="0 0 460 22" fill="none" aria-hidden="true"
+          preserveAspectRatio="none">
+          <path d="M4 14 C 40 4, 78 4, 116 12 S 192 20, 230 12 S 306 4, 344 12 S 420 20, 456 10"
+            stroke="currentColor" stroke-width="7" stroke-linecap="round" />
+        </svg>
         ${taglineHtml}
         ${recapHtml}
         <div class="cta">
           <button class="cta-blink primary" id="title-start" type="button">
-            Press any key or button to begin
+            Press anything &mdash; let&rsquo;s ride
           </button>
         </div>
       `
@@ -891,12 +899,12 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         <div class="bc-section-head">
           <div class="num">01</div>
           <div>
-            <div class="title">PICK YOUR FORMAT</div>
-            <div class="sub">FIVE MODES &middot; DISABLED TILES LIGHT UP AS SYSTEMS LAND</div>
+            <div class="title">RACE DAY</div>
+            <div class="sub">WHAT ARE WE RUNNING?</div>
           </div>
           <div class="meta">
-            <div class="sub">CHANNEL</div>
-            <div style="font-family: var(--bc-font-display); font-size: 28px;">HBN 1</div>
+            <div class="sub">SEASON</div>
+            <div style="font-family: var(--bc-font-display); font-size: 28px;">ONE</div>
           </div>
         </div>
         <div class="bc-cards cols-5" id="mode-cards">${tilesHtml}</div>
@@ -1074,7 +1082,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           </div>
         </div>
         <div class="bc-cards cols-2">
-          <div class="bc-card" id="tut-start" role="button" tabindex="0" style="--accent:#ffd54a; cursor: pointer;">
+          <div class="bc-card" id="tut-start" role="button" tabindex="0" style="--accent:#ffd27a; cursor: pointer;">
             <div class="label">FRAMEWORK</div>
             <div class="name">FIRST RUN</div>
             <div class="tag">Seven beats — throttle, cruise, look around, wave pump, drift, anti-grav, finish. Runs on any track. Subtitles toggle in Settings.</div>
@@ -1436,13 +1444,13 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         <div class="bc-section-head">
           <div>
             <div class="title">CREDITS</div>
-            <div class="sub">THE ARTISTS, MUSICIANS &amp; TOOLMAKERS BEHIND HOVERBIKE</div>
+            <div class="sub">THE ARTISTS, MUSICIANS &amp; TOOLMAKERS BEHIND ${GAME_TITLE}</div>
           </div>
         </div>
         <div class="bc-credits">
           <section class="bc-credit-group">
             <h3>BRUSH TEXTURES</h3>
-            <p>Hoverbike&rsquo;s hand-painted surfaces build on the
+            <p>${GAME_TITLE_PROSE}&rsquo;s hand-painted surfaces build on the
               <b>Brushstroke Tools</b> oil-paint brush styles by <b>Simon Thommes /
               Blender Studio</b> (Project Gold), &copy; Blender Foundation &mdash;
               licensed under <b>CC&nbsp;BY&nbsp;4.0</b>. Modified for this game: the
