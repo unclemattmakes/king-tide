@@ -69,6 +69,31 @@ function watchAttractLive(
 }
 
 /**
+ * Import the attract-mode module graph in STAGES with frame yields between.
+ *
+ * On a warm cache (every dev reload; production with HTTP cache) a single
+ * `import('./attract-mode')` evaluates the whole game graph — three.js +
+ * every render/sim system — as ONE continuous main-thread task (~4.6 s on
+ * the dev server, smaller but same-shaped minified): the freshly-painted
+ * menu freezes for all of it. Pre-importing the big libraries one at a time
+ * with a rAF gap after each breaks that into bounded tasks — each stage's
+ * eval is cached by the module registry, so the final attract import only
+ * pays the game-code remainder. The 250 ms lead-in lets the player's first
+ * hover/click land before any eval task does.
+ */
+async function importAttractStaged(): Promise<typeof import('./attract-mode')> {
+  const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  await import('three')
+  await nextFrame()
+  await import('three/webgpu')
+  await nextFrame()
+  await import('three/tsl')
+  await nextFrame()
+  return import('./attract-mode')
+}
+
+/**
  * Inspect URL params and run the relevant pre-race surface. When this
  * function returns `'handled'`, `boot()` should return without touching
  * any further game subsystems.
@@ -161,15 +186,6 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     const manifest = await loadManifest()
     const reason = earlyParams.get('back') === '1' ? 'exit-from-race' : 'cold'
 
-    // Kick off the attract-mode background race in parallel with the
-    // menu render. The menu paints immediately (CSS-only) while the
-    // attract loop streams in scene + bikes; once the first attract
-    // frame renders we drop the menu's solid backdrop so the live
-    // footage becomes the menu's background.
-    const attractStage = ensureAttractStage()
-    const { bootAttractMode } = await import('./attract-mode')
-    const attractPromise = watchAttractLive(bootAttractMode({ parent: attractStage }))
-
     // Soundtrack radio — play music from the menu, not just once a race
     // loads. Installed before the menu renders so the first click/keypress
     // unlocks audio. (The page reloads into the race, which stands up its
@@ -177,15 +193,44 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     const { installSoundtrackRadio } = await import('@/engine/audio/soundtrack-radio')
     installSoundtrackRadio()
 
+    // Menu first, attract second. The attract-mode import pulls the whole
+    // game module graph (three.js + every render/sim system) — awaiting it
+    // here kept the loading screen up for the entire module evaluation
+    // (~4.6 s single main-thread task on a warm dev server; smaller but
+    // same-shaped in production). Hide the loading screen and run the menu
+    // NOW, then kick the attract import fire-and-forget after a short idle
+    // gap so the player's first hover/click lands before the heavy eval
+    // task does. Once the first attract frame renders, `attract-live`
+    // drops the menu's solid backdrop exactly as before.
     hideLoadingScreen()
+    const attractStage = ensureAttractStage()
+    const attractPromise = watchAttractLive(
+      importAttractStaged().then(({ bootAttractMode }) =>
+        bootAttractMode({ parent: attractStage }),
+      ),
+    )
+
     const result = await runMenuFlow({
       manifestTracks: manifest.tracks,
       reason,
     })
-    // Final commit — tear the attract loop down so the next page load
-    // boots a fresh renderer into the live race without two canvases
-    // competing for the GPU.
-    attractPromise.then((handle) => handle.dispose()).catch(() => undefined)
+    // Final commit — tear the attract loop down BEFORE navigating, and give
+    // the browser a short beat to start draining the GPU-side destruction
+    // (device, 590k-vert water buffers, pipelines). Navigating while that
+    // teardown is in flight contends with the race page's load in the same
+    // renderer process — measured as a multi-second main-thread blob at the
+    // start of the next page. The 200 ms grace is imperceptible on a click
+    // that already implies a page load.
+    try {
+      const handle = await Promise.race([
+        attractPromise,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 1_500)),
+      ])
+      handle?.dispose()
+      if (handle) await new Promise((resolve) => setTimeout(resolve, 200))
+    } catch {
+      /* attract never came up — nothing to tear down */
+    }
     window.location.assign(result.href)
     return 'handled'
   }
@@ -208,18 +253,20 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     const bikeParam = earlyParams.get('bike')
     const trackParam = earlyParams.get('track')
 
-    // Same broadcast attract feed sits behind the lobby — keeps the
-    // hand-off into the live race feeling cohesive.
-    const attractStage = ensureAttractStage()
-    const { bootAttractMode: bootMp } = await import('./attract-mode')
-    const attractPromise = watchAttractLive(bootMp({ parent: attractStage }))
-
     // Same soundtrack radio behind the lobby as the menu — keeps music
     // continuous across the pre-race surfaces.
     const { installSoundtrackRadio } = await import('@/engine/audio/soundtrack-radio')
     installSoundtrackRadio()
 
     hideLoadingScreen()
+    // Same broadcast attract feed sits behind the lobby — keeps the
+    // hand-off into the live race feeling cohesive. Same lobby-first
+    // ordering as the menu path above: never block the surface on the
+    // heavy attract import.
+    const attractStage = ensureAttractStage()
+    const attractPromise = watchAttractLive(
+      importAttractStaged().then(({ bootAttractMode: bootMp }) => bootMp({ parent: attractStage })),
+    )
     const result = await runMpLobby({
       roomId: earlyParams.get('room') as string,
       netHost,
@@ -227,7 +274,17 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
       ...(bikeParam ? { initialBikeId: bikeParam as 'cruiser' | 'racer' | 'stunt' } : {}),
       ...(trackParam ? { initialTrackId: trackParam } : {}),
     })
-    attractPromise.then((handle) => handle.dispose()).catch(() => undefined)
+    // Same dispose-then-breathe handoff as the menu path above.
+    try {
+      const handle = await Promise.race([
+        attractPromise,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 1_500)),
+      ])
+      handle?.dispose()
+      if (handle) await new Promise((resolve) => setTimeout(resolve, 200))
+    } catch {
+      /* attract never came up — nothing to tear down */
+    }
     window.location.assign(result.href)
     return 'handled'
   }
