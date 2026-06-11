@@ -349,6 +349,24 @@ const SLIDERS: SliderDef[] = [
     hint: 'Breaks the iso lines into crest-aligned brush dashes — gentle nicks near the crests, near-total in the troughs so lines cling to the crests instead of running the whole sea. 0 = solid unbroken lines',
   },
   {
+    key: 'contourCoherence',
+    label: 'Contour coherence',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    format: (n) => n.toFixed(2),
+    hint: 'Fix for contour lines SLIDING over the surface: iso-lines of the two-train swell sum sweep past the primary swell’s phase speed with sideways wobble wherever the trains’ slopes partially cancel (once per set-beat; unboundedly fast below the slope gate). 1 = key the ramp + contour field to the dominant swell only, so every line rides the primary swell at exactly its phase speed. 0 = legacy two-train field. A/B it in ?waterlab',
+  },
+  {
+    key: 'contourGate',
+    label: 'Contour slope gate',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    format: (n) => n.toFixed(2),
+    hint: 'Raises the minimum face slope where contour lines draw (0 = legacy 0.02..0.06 window → 1 = 0.06..0.14). Iso-lines sweep at ∂h/∂t ÷ slope, so the flattest faces carry the fastest-sliding lines — raising the gate trims those first while steep faces keep their density cue',
+  },
+  {
     key: 'riseStroke',
     label: 'Rising strokes',
     min: 0,
@@ -600,6 +618,12 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
           break
         case 'contourBreakup':
           water.debug.setContourBreakup(v)
+          break
+        case 'contourCoherence':
+          water.debug.setContourCoherence(v)
+          break
+        case 'contourGate':
+          water.debug.setContourGate(v)
           break
         case 'riseStroke':
           water.debug.setRiseStroke(v)

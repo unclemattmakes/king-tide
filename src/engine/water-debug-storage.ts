@@ -46,6 +46,11 @@ import type { WaterDebugDefaults, WaterMesh } from './render/water'
 // key (missing-key -> default 1.0), so returning users get obstacle foam
 // collars at baseline and keep their other tuning.
 //
+// No key bump for the contour-slide pass either: contourCoherence +
+// contourGate are ADDED keys (missing-key -> defaults 0 / 0 = the legacy
+// look), so returning users see no change until they reach for the new
+// `?waterlab` knobs.
+//
 // No key bump for shoaling v2 (P3.1) either: shoalSurf is an ADDED key
 // (missing-key -> default 1.0 = full surf), so returning users pick up the
 // depth-driven surf automatically; its 0-endpoint is the exact legacy
@@ -99,6 +104,8 @@ export type WaterDebugSettings = {
   contourSpacing: number
   contourRelief: number
   contourBreakup: number
+  contourCoherence: number
+  contourGate: number
   riseStroke: number
   wireframe: boolean
   colorize: boolean
@@ -142,6 +149,8 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     contourSpacing: d.contourSpacing,
     contourRelief: d.contourRelief,
     contourBreakup: d.contourBreakup,
+    contourCoherence: d.contourCoherence,
+    contourGate: d.contourGate,
     riseStroke: d.riseStroke,
     wireframe: d.wireframe,
     colorize: d.colorize,
@@ -221,6 +230,8 @@ export function applyWaterSettings(water: WaterMesh, s: WaterDebugSettings): voi
   water.debug.setContourSpacing(s.contourSpacing)
   water.debug.setContourRelief(s.contourRelief)
   water.debug.setContourBreakup(s.contourBreakup)
+  water.debug.setContourCoherence(s.contourCoherence)
+  water.debug.setContourGate(s.contourGate)
   water.debug.setRiseStroke(s.riseStroke)
   water.debug.setWireframe(s.wireframe)
   water.debug.setColorize(s.colorize)
