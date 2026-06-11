@@ -156,6 +156,18 @@ export type BikeImpact = {
   weight: number
 }
 
+/**
+ * Opt-in camera layer for the planar-reflection pass. The mirror's virtual
+ * camera renders ONLY this layer (see `configureReflectionCulling`): the sky
+ * dome opts in at creation (sky.ts) and terrain/landmark-scale meshes opt in
+ * via track-loader's size gate. Everything else — props, bikes, FX, small
+ * dressing, late-streamed scenery — stays mirror-invisible by default, which
+ * is what keeps the reflection pass from re-encoding the whole scene
+ * (~98 extra draw calls on sandbar pre-cull; the water-ablation headline).
+ * Objects keep layer 0, so main cameras are unaffected.
+ */
+export const WATER_REFLECTION_LAYER = 1
+
 export type WaterMesh = {
   mesh: THREE.Mesh
   /**
@@ -206,6 +218,13 @@ export type WaterMesh = {
    *  (x, z) IS the render↔sim horizontal displacement. Open-water only (no
    *  terrain/shore/bike terms). Writes into `out` to avoid per-call alloc. */
   renderVertex(x: number, z: number, out: { x: number; y: number; z: number }): void
+  /** Restrict the planar-reflection pass to the opt-in
+   *  `WATER_REFLECTION_LAYER` for renders through `camera` (the mirror then
+   *  draws sky + terrain/landmark silhouettes only — see the layer's doc).
+   *  Call once per scene after the camera exists; no-op when the reflection
+   *  pass is disabled (`?reflect=0`) or `?reflectfull=1` requests the
+   *  legacy full-scene mirror. Safe to call again after a camera swap. */
+  configureReflectionCulling(camera: THREE.Camera): void
   /** Live-tunable knobs for the water debug menu. All setters apply
    *  immediately — no material rebuild, no reload. */
   debug: {
@@ -426,6 +445,14 @@ export type WaterMesh = {
      *  camera-locked transition markers to diagnose where seams sit.
      *  No material rebuild — flips a uniform mix factor. */
     setColorize(on: boolean): void
+    /** Hide/show the whole water stack (center + outer LOD + skirt) — the
+     *  water-ablation tool's "what does ALL water cost" probe. Dev-only;
+     *  not persisted, not in the menu. */
+    setWaterVisible(on: boolean): void
+    /** Live A/B for the mirror cull: true = legacy full-scene reflection,
+     *  false = the opt-in `WATER_REFLECTION_LAYER` (default). Applies to
+     *  cameras already configured via `configureReflectionCulling`. */
+    setReflectionFullScene(on: boolean): void
     /** Time-scale getter for the main loop. */
     getTimeScale(): number
   }
@@ -1053,10 +1080,23 @@ export function createWaterMesh(
   // pushes the geometric edge well below the bike-POV horizon line, so
   // the center→outer cross-fade band (see `centerEdgeFade` below) lands
   // where it reads as a continuous tone shift rather than a sharp seam.
-  // At 1.25 m spacing the 4 m wake wavelength still gets ~3.2 verts per
-  // crest — ridges read as geometry, not single-vertex shimmer. 768²
-  // ≈ 590 k verts stays sub-millisecond on a real GPU.
-  const subs = opts?.subdivisions ?? 768
+  // Default dropped 768² → 512² (1.25 → 1.875 m spacing) on the water-
+  // ablation numbers: the June-10 vertex work (trails/stamps/rings/crest
+  // signals per vertex) made density a real lever — 512² is +7 fps on the
+  // iGPU dev box and the win is already saturated there (384² measures the
+  // same), while the 4 m wake wavelength keeps ~2.1 verts per crest and
+  // the sub-4 m chop lives in the detail-normal cascades anyway (verified
+  // against the wake-look captures). `?watersubs=<n>` (64..1024) remains
+  // the per-boot A/B axis — `?watersubs=768` is the legacy density.
+  const subsParam =
+    typeof window !== 'undefined'
+      ? Number(new URLSearchParams(window.location.search).get('watersubs'))
+      : Number.NaN
+  const subs =
+    opts?.subdivisions ??
+    (Number.isFinite(subsParam) && subsParam >= 64 && subsParam <= 1024
+      ? Math.round(subsParam)
+      : 512)
 
   // ---- Debug toggles ----------------------------------------------------
   // Analytic-Gerstner displacement + procedural detail-normal map +
@@ -4114,14 +4154,29 @@ export function createWaterMesh(
   // pass). At 0.5 resolutionScale on a 1080p framebuffer that's 540p, a
   // few hundred k pixels — trivial on real GPUs, fine on WebGPU + WebGL2.
   const reflectFlag = params?.get('reflect') !== '0'
+  // Mirror-pass scene cull (the water-ablation tool's headline finding):
+  // the reflector re-renders the scene into its RT every frame — ~98 extra
+  // draw calls on sandbar, ~÷2 fps — yet at our fresnel cap + wave
+  // distortion the reflection legibly carries only the SKY and the big
+  // terrain/landmark silhouettes. So the virtual camera is restricted to
+  // an OPT-IN layer (`WATER_REFLECTION_LAYER`): the sky dome opts in at
+  // creation (sky.ts), terrain + landmark-scale meshes opt in via the
+  // size gate in track-loader.ts, and everything else — props, bikes,
+  // FX, small dressing, anything streamed later — stays out by default,
+  // so new content can't silently regress the mirror cost.
+  // `?reflectfull=1` restores the legacy full-scene mirror for A/B.
+  const reflectFullFlag = params?.get('reflectfull') === '1'
   let reflectionRgb: ReturnType<typeof vec3> | null = null
   let reflectorTarget: THREE.Object3D | null = null
+  // biome-ignore lint/suspicious/noExplicitAny: TSL ReflectorNode TS surface lacks getVirtualCamera
+  let reflectorNode: any = null
   if (reflectFlag) {
     const mirror = reflector({
       resolutionScale: 0.5,
       bounces: false,
       generateMipmaps: false,
     })
+    reflectorNode = mirror
     // Distortion: scale wave-normal gradients by an inverse-distance
     // factor so the close-in 1–2 m of water in front of the camera
     // distorts visibly while horizon samples stay nearly mirror-flat.
@@ -4956,6 +5011,18 @@ export function createWaterMesh(
     setColorize(on) {
       debugColorizeMixUniform.value = on ? 1 : 0
     },
+    setWaterVisible(on) {
+      mesh.visible = on
+    },
+    setReflectionFullScene(on) {
+      const base = reflectorBase()
+      if (!base) return
+      for (const cam of reflectionCulledCams) {
+        const vc = base.getVirtualCamera(cam) as THREE.Camera
+        if (on) vc.layers.enableAll()
+        else vc.layers.set(WATER_REFLECTION_LAYER)
+      }
+    },
   }
 
   // Debug: ?wire=1 renders the water mesh as wireframe so you can see
@@ -5714,6 +5781,20 @@ export function createWaterMesh(
     shoreFieldTex.dispose()
   }
 
+  // Cameras whose mirror virtual-cameras have been culled to the opt-in
+  // layer — the debug full-scene toggle re-walks them for live A/B.
+  const reflectionCulledCams: THREE.Camera[] = []
+  // `reflector()` returns the TextureNode wrapper; the virtual-camera
+  // registry lives on its `.reflector` (the ReflectorBaseNode).
+  const reflectorBase = () => reflectorNode?.reflector ?? null
+  function configureReflectionCulling(camera: THREE.Camera): void {
+    const base = reflectorBase()
+    if (!base || reflectFullFlag) return
+    const vc = base.getVirtualCamera(camera) as THREE.Camera
+    vc.layers.set(WATER_REFLECTION_LAYER)
+    if (!reflectionCulledCams.includes(camera)) reflectionCulledCams.push(camera)
+  }
+
   return {
     mesh,
     tick,
@@ -5722,6 +5803,7 @@ export function createWaterMesh(
     setHorizonColor,
     setTerrainHeightmap,
     setWaterContacts,
+    configureReflectionCulling,
     debug,
     dispose,
   }

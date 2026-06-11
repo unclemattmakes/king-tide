@@ -130,6 +130,25 @@ context: the same machine held 100+ fps on these tracks before the June-10
 water layers + Mexico City dressing; the frame regression is content/shader
 cost, not the boot path (see docs/boot-overhaul-plan.md follow-ups).
 
+### dev-box — Ryzen 5 240 / Radeon 760M iGPU (dev box)
+
+Measured with `node tools/water-ablation.mjs` (same `__hover.perf` surfaces as
+`pnpm profile`, 1280×720 dev build, 8-bike autoplay) **before/after the
+2026-06-11 water-perf pass** (mirror-pass layer cull + 512² water mesh — see
+status.md):
+
+| Track | Backend | FPS | p50 ms | p95 ms | Draw calls | Triangles | Verdict |
+|---|---|---|---|---|---|---|---|
+| `sandbar` (pre-pass) | WebGPU | 58–65 | 13.6 | 20.2 | 272 | 4.46M | 🟡 |
+| `sandbar` (post-pass) | WebGPU | 82–88 | 11.1 | 16.7 | 182 | 2.68M | ✅ |
+| `mexico-city` (post-pass, steady-state) | WebGPU | 53–67 | 16.7 | 22–28 | 349–513¹ | 2.3M | ✅/🟡 |
+
+_2026-06-11. ¹ mexico-city draw calls swing with the lap (city density) and
+its lap-1 scenery stream still hitches (p95 112 ms in stream-overlapped
+windows) — that's content streaming, not water. For scale: the same track
+recorded 18.2 fps / p50 27.6 / 898 draws on the RTX 5050 box pre-pass; the
+mirror pass was re-encoding the dressed city every frame._
+
 ### Steam Deck — native Electron build
 
 Per [steam-deck.md](./steam-deck.md): native Electron (real Chromium WebGPU on

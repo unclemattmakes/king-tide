@@ -24,6 +24,7 @@ import type { SkyColorGrade, SkyConfig, SkyToneMapping } from '@/game/tracks/typ
 import { type CloudLayer, createCloudLayer } from './clouds'
 import { createPostPipeline, type PostPipeline } from './post-pipeline'
 import { setActivePostPipeline } from './renderer-service'
+import { WATER_REFLECTION_LAYER } from './water'
 
 /**
  * Sky / atmosphere system.
@@ -623,6 +624,10 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   // Render order -1 forces the dome to draw before opaque scene geometry,
   // letting depth-prepassed bikes/terrain occlude the cheaper sky shader.
   mesh.renderOrder = -1
+  // The dome is the one thing the water's culled mirror pass MUST see —
+  // the reflection reads as sky first, silhouettes second (water.ts's
+  // `WATER_REFLECTION_LAYER`; layer 0 stays on for the main cameras).
+  mesh.layers.enable(WATER_REFLECTION_LAYER)
   scene.add(mesh)
 
   // Capture base intensities so palette `*Mul` values are relative scalings
