@@ -844,6 +844,11 @@ export async function bootRace(appEl: HTMLElement) {
     activeReplay,
     ghostVariant: ghostReplay ? playerVariant : null,
   }
+  // `?ai=<n>` caps the AI field (player + n; clamped to 0..NUM_AI inside
+  // spawnBikes). The frame-ablation 6-bike row — design-targets §6's
+  // wave-heavy-track field hedge — and a handy CPU-load A/B in general.
+  const aiParam = Number(params.get('ai'))
+  if (params.get('ai') !== null && Number.isFinite(aiParam)) spawnArgs.aiCount = aiParam
   if (timeTrialMode) spawnArgs.aiCount = 0
   const { playerEid, aiEids, replayBikeEids, ghostEid } = spawnBikes(spawnArgs)
 
@@ -1630,11 +1635,39 @@ export async function bootRace(appEl: HTMLElement) {
     onHoverDebugChanged: updateHoverDebugPill,
   })
 
+  // Frame-ablation scenery hook (`__hover.scenery()` — see debug.ts).
+  // Collected lazily so the walk only runs when the perf tooling asks, and
+  // independently of the boot-path defer lists (which are empty under
+  // `?progwarm=0`). Hiding snapshots the currently-visible set and showing
+  // restores exactly that set, so a mid-stream progressive reveal is never
+  // force-completed into uncompiled pipelines.
+  let sceneryDebugMeshes: ReturnType<typeof collectVinylScenery> | null = null
+  let sceneryHiddenSnapshot: ReturnType<typeof collectVinylScenery> | null = null
+
   installDebugApi(state, {
     sim: () => sim,
     phys: () => phys,
     track: () => track,
     playerEid: () => playerEid,
+    scenery: () => {
+      if (!sceneryDebugMeshes) {
+        sceneryDebugMeshes = collectVinylScenery([environmentGlbRoot, propsGroup])
+      }
+      const meshes = sceneryDebugMeshes
+      return {
+        count: meshes.length,
+        setVisible(on: boolean) {
+          if (!on) {
+            if (sceneryHiddenSnapshot) return
+            sceneryHiddenSnapshot = meshes.filter((m) => m.visible)
+            for (const m of sceneryHiddenSnapshot) m.visible = false
+          } else if (sceneryHiddenSnapshot) {
+            for (const m of sceneryHiddenSnapshot) m.visible = true
+            sceneryHiddenSnapshot = null
+          }
+        },
+      }
+    },
     toggleAutoPlay: () => {
       controls.setAutoPlay(!controls.isAutoPlay())
       return controls.isAutoPlay()

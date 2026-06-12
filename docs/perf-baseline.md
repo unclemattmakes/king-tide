@@ -118,6 +118,24 @@ baseline-repeat row bounds the drift) and p50 quantizes at vsync — read mean
 FPS + p95 + draw calls together. `tools/water-reflect-ab.mjs` captures posed
 culled-vs-full mirror pairs for the visual half of the story.
 
+### Path D — whole-frame attribution + production builds
+
+```
+node tools/frame-ablation.mjs           # sandbar; TRACK=<id> to override
+pnpm build && node tools/bench-prod.mjs # production-build rows
+```
+
+`frame-ablation.mjs` is the water kit's sibling for the REST of the frame:
+one boot per structural axis (`?shadows=0`, `?shadowmap=512`, `?post=0`,
+`?aa=off`, `?reflect=0`, `?ai=5`) plus a live scenery-hidden row
+(`__hover.scenery()`), each with the `?gpuprofile=1` GPU-pass average so
+CPU and GPU attribution land in the same table. `bench-prod.mjs` drives the
+production-safe `?bench=1` director against a `pnpm preview` of `dist/`
+(the dev `__hover.perf` surface is dev/test-gated, so prod numbers can only
+come from the bench panel) — note its window starts 3 s after boot, so
+dressed-track rows include the lap-1 scenery stream; `track#progwarm=0`
+specs give the steady-state variant.
+
 ## Results
 
 One table per device. Rows are pre-filled; fill the metric cells (`—` =
@@ -163,6 +181,72 @@ its lap-1 scenery stream still hitches (p95 112 ms in stream-overlapped
 windows) — that's content streaming, not water. For scale: the same track
 recorded 18.2 fps / p50 27.6 / 898 draws on the RTX 5050 box pre-pass; the
 mirror pass was re-encoding the dressed city every frame._
+
+**2026-06-11 (later) — post-#371 main, `pnpm profile` with the new GPU-split
+column (`#gpuprofile=1` variants), same box / 720p / 8-bike autoplay:**
+
+| Track | Backend | FPS | p50 ms | p95 ms | p99 ms | Draw calls | Triangles | GPU ms | Verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| `sandbar` | WebGPU | 82.1 | 13.2 | 14.1 | 20.2 | 185 | 2.75M | 4.0 | ✅ |
+| `the-maw` | WebGPU | 89.8 | 13.1 | 13.8 | 14.2 | 216 | 1.86M | 4.0 | ✅ |
+| `mexico-city` | WebGPU | 46.7 | 19.9 | 59.7 | 96.0 | 385 | 2.58M | 4.2 | ❌ (hitches) |
+
+**The GPU column is the headline: ~4 ms flat on every dressed track — the
+iGPU is NOT the bottleneck at 720p.** The frame is CPU-bound (dev build)
+plus hitch-bound; mexico-city's ❌ is 28–36 hitches per 10 s window from the
+lap-1 scenery-compile stream, not steady-state pixels.
+
+**Same day — production build (`pnpm build` + `node tools/bench-prod.mjs`,
+the `?bench=1` panel rows):**
+
+| Track | Backend | FPS | p50 ms | p95 ms | p99 ms | Hitches | Verdict |
+|---|---|---|---|---|---|---|---|
+| `sandbar` | WebGPU | 45.2 | 16.7 | 72.3 | 116.7 | 43 | ❌ (lap-1 window) |
+| `the-maw` | WebGPU | 75.9 | 11.2 | 16.8 | 17.0 | 1 | ✅ |
+| `mexico-city` | WebGPU | 48.9 | 16.7 | 55.6 | 100.0 | 37 | ❌ (lap-1 window) |
+| `sandbar#progwarm=0` (steady state) | WebGPU | 96.8 | 7.1 | 14.1 | 14.1 | 2 | ✅ |
+| `mexico-city#progwarm=0` (steady state) | WebGPU | 50.4 | 21.0 | 28.0 | 37.8 | 8 | 🟡 |
+
+_Prod caveats: the bench director's fixed 3 s warmup samples INSIDE the lap-1
+scenery-compile stream on dressed tracks — the default rows are honest
+"first lap on a cold load"; the `#progwarm=0` rows (scenery compiled under
+the loading screen) are steady state. Steady-state reading: sandbar's whole
+prod problem was the stream (43 hitches → 2, p50 7.1 ms ✅); mexico-city's
+steady 21 ms CPU is REAL in prod, not dev overhead — the shadow-caster /
+per-mesh cost the ablation table below attributes. The panel's draw-call
+cell is the cumulative-since-boot counter on prod (no `?perf=1` reset
+path) — ignore it until the per-frame `drawCalls` fix (branch
+`claude/peaceful-khorana-fe9df1`) lands._
+
+**Same day — whole-frame attribution (`node tools/frame-ablation.mjs`, full
+tables in `perf-report/frame-ablation-*`):**
+
+| Axis (off vs baseline) | sandbar (75 fps base) | mexico-city (33–46 fps base¹) |
+|---|---|---|
+| Scenery hidden (`__hover.scenery()`) | free at p50; p95 19.9→14.4 | **+47 fps (→79.7), p95 87.9→14.6** |
+| Shadow pass off (`?shadows=0`) | **+27 fps (→102.3)** | **+28 fps (→60.6)** |
+| Post/bloom off (`?post=0`) | **+24 fps (→99.7)** | ~free |
+| Reflection pass off (`?reflect=0`, post-cull) | +16 fps | free |
+| MSAA off (`?aa=off`) | +11 fps (GPU 1.8→1.0 ms) | free (GPU 2.3→1.4 ms) |
+| Shadow map 1024²→512² (`?shadowmap=512`) | free | free |
+| 6-bike field (`?ai=5`) | ~free | free |
+| **Floor (shadows+post+aa+reflect off)** | **134 fps / 6.6 ms** | **89 fps / 13.1 ms** |
+
+_¹ mexico-city baseline windows overlap its scenery stream (repeat row 46 fps
+vs first 32.7 — the documented drift), but the structural reads hold._
+
+**Reading.** GPU render is ~2 ms everywhere — at 720p this class is entirely
+CPU-side. Mexico City's deficit and its hitches are one mechanism: the
+dressed city's ~477 meshes, dominated by their **shadow-caster** cost —
+scenery-hidden (−6.6 ms) ≈ shadows-off (−6.5 ms), i.e. the dressing's
+main-pass draws are nearly free while every mesh re-encodes into the sun's
+depth pass per frame. Map **resolution** is free; caster **count** is the
+bill. The design-targets §6 six-bike hedge buys nothing on this class.
+Measured lever order: (1) shadow-caster size gate (the mirror cull's ≥25 m
+precedent, inverted for small dressing), (2) the city's residual floor
+(13.1 vs sandbar's 6.6 ms — per-mesh CPU, the vinyl structural-sharing /
+content-diet items), (3) post / MSAA / reflection as quality-ladder rungs
+(they pay on lighter tracks and weaker GPUs, not on the city's CPU wall).
 
 ### Steam Deck — native Electron build
 
