@@ -136,7 +136,9 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
   // mesh by the systems that build them (bike clones, props, terrain).
   // Water is intentionally excluded — its node-material shader drives its
   // own lighting and we don't want the surface mottled by shadow maps.
-  renderer.shadowMap.enabled = true
+  // `?shadows=0` drops the whole shadow pass (sun depth render + PCF taps)
+  // — a frame-ablation axis and the natural Low-quality-preset switch.
+  renderer.shadowMap.enabled = params.get('shadows') !== '0'
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
 
   const resize = () => {

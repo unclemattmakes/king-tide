@@ -32,6 +32,33 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-11 (b)** — **Whole-frame perf attribution — the CPU
+> owns the frame, and shadows are the bill.** Phase 0/1 of the perf push
+> (plan: measure → attribute → land → quality ladder). New
+> `tools/frame-ablation.mjs` (the water kit's sibling for the REST of the
+> frame: one boot per structural axis, each with the `?gpuprofile=1` GPU
+> average) + `tools/bench-prod.mjs` (production-build rows via the `?bench=1`
+> panel — `__hover.perf` is dev-gated) + new boot axes `?shadows=0`,
+> `?shadowmap=<n>`, `?post=0` (a REAL post-off — `setBloom(0)` still pays the
+> pass), `?ai=<n>`, and a `__hover.scenery()` hide/show hook (the dressing
+> sibling of `setWaterVisible`). `pnpm profile` gained a GPU-ms column and
+> mexico-city joined `BENCH_TRACKS`/profile defaults. **Findings (dev-box
+> iGPU, 720p, 8 bikes, dev): GPU is ~2 ms on every dressed track — the game
+> is CPU-side on this class.** Sandbar 75→102 fps with `?shadows=0`, →134 fps
+> at the shadows+post+aa+reflect floor. Mexico City's whole deficit AND its
+> lap-1 hitches are the dressed city's meshes as **shadow casters**
+> (scenery-hidden −6.6 ms ≈ shadows-off −6.5 ms; 32.7→79.7 fps, p95
+> 87.9→14.6 when hidden); shadow-map **resolution** is free — caster COUNT is
+> the cost. Post (+24 fps) / MSAA (~1 ms GPU) / reflection (+16 fps) pay on
+> sandbar but not on the city's CPU wall; the §6 six-bike hedge buys ~nothing.
+> Measured lever order for the next pass: (1) shadow-caster size gate
+> (mirror-cull precedent), (2) city per-mesh CPU (vinyl structural sharing /
+> content diet — floor still 13.1 ms vs sandbar's 6.6), (3) the off-switches
+> as quality-preset rungs. Tables in [perf-baseline.md](./perf-baseline.md) +
+> `perf-report/frame-ablation-*`; prod rows note the bench's 3 s warmup
+> samples inside the lap-1 stream (the-maw shows the clean prod win:
+> p50 13.1→11.2 ms).
+>
 > **Last updated: 2026-06-11** — **Water perf pass — the June-10 fps
 > regression was the reflection pass, not the look layers.** New
 > `tools/water-ablation.mjs` (boots one 8-bike autoplay race, flips each

@@ -141,6 +141,13 @@ reload over a live race page (teardown contention — see below):
   GLBs, compiled pipelines). Biggest remaining structural win; large
   `race-boot.ts` refactor.
 - Mexico City content diet (material count / prop merging) — content work.
+  **Sized 2026-06-11 by the whole-frame ablation** (perf-baseline.md): the
+  dressing costs ~6.6 ms CPU/frame on the iGPU box and ~all of it is the
+  meshes' **shadow-caster** encode (scenery-hidden ≈ shadows-off), so the
+  cheap engine-side first fix is a shadow-caster size gate (mirror-cull
+  precedent); the diet + structural sharing then address the residual
+  per-mesh floor (13.1 ms vs sandbar's 6.6, and prod steady-state p50
+  21 ms vs sandbar's 7.1).
 - ~~fps tuning of the June-10 water layers~~ **RESOLVED 2026-06-11, and the
   cause was not the layers**: the water-ablation kit measured every June-10
   look layer together as ≈ free; the regression was the planar-reflection
