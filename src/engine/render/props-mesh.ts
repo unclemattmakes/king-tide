@@ -6,6 +6,7 @@ import { VINYL_BRUSH_DEFAULTS } from './brush-tuning-service'
 import { stampConvexityColor0 } from './edge-wear-convexity'
 import { buildVinylMaterial, stampVinylObjectSize } from './painterly-vinyl-material'
 import { buildPropGeometry } from './props-geometry'
+import { gateShadowCaster, resolveShadowCastMinRadius } from './shadow-caster-gate'
 
 /**
  * Build a Three.js group containing the visual meshes for every
@@ -120,6 +121,10 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
   const group = new THREE.Group()
   group.name = 'track:props'
 
+  // Shadow-caster size gate threshold (`?shadowcast=<m>`, 0 = gate off) —
+  // resolved once per build; see shadow-caster-gate.ts.
+  const shadowMinR = resolveShadowCastMinRadius()
+
   // Bucket asset placements by assetId so repeats instance together. Keep the
   // original order stable; procedural props render in place as we go.
   const assetBuckets = new Map<string, Prop[]>()
@@ -165,6 +170,10 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
     mesh.quaternion.set(p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w)
     mesh.castShadow = true
     mesh.receiveShadow = true
+    // Size gate: small dressing stops casting into the sun's depth pass
+    // (caster count is the cost — see shadow-caster-gate.ts). p.size is the
+    // half-extent set, so propSize/2 ≈ the world bounding radius.
+    gateShadowCaster(mesh, propSize / 2, shadowMinR)
     mesh.userData.kind = 'prop'
     group.add(mesh)
   }
@@ -195,6 +204,12 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
       scl.set(Math.max(0.01, p.size.x), Math.max(0.01, p.size.y), Math.max(0.01, p.size.z))
       return new THREE.Matrix4().compose(pos, quat, scl)
     })
+    // Largest placement scale in the bucket — the shadow gate judges the
+    // whole instanced field by its biggest member.
+    const maxPlacementScale = bucket.reduce(
+      (mx, p) => Math.max(mx, p.size.x, p.size.y, p.size.z),
+      0.01,
+    )
 
     for (const sm of submeshes) {
       // Safety net: every shipped prop GLB carries COLOR_0 (baked convexity), so
@@ -210,6 +225,11 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
       inst.name = `track:props:${assetId}`
       inst.castShadow = true
       inst.receiveShadow = true
+      // Size gate per ASSET: the whole instanced field casts (one depth draw)
+      // only when the prototype at its largest placement scale clears the
+      // threshold — see shadow-caster-gate.ts. propSize is the prototype's
+      // bbox max dimension, so /2 ≈ radius.
+      gateShadowCaster(inst, (propSize / 2) * maxPlacementScale, shadowMinR)
       inst.userData.kind = 'prop'
       inst.userData.assetId = assetId
       // Per-object size inputs for the shared vinyl material — one stamp per

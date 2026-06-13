@@ -140,14 +140,14 @@ reload over a live race page (teardown contention — see below):
 - **Single-boot menu→race handoff** (no page reload; reuse device, WASM,
   GLBs, compiled pipelines). Biggest remaining structural win; large
   `race-boot.ts` refactor.
-- Mexico City content diet (material count / prop merging) — content work.
-  **Sized 2026-06-11 by the whole-frame ablation** (perf-baseline.md): the
-  dressing costs ~6.6 ms CPU/frame on the iGPU box and ~all of it is the
-  meshes' **shadow-caster** encode (scenery-hidden ≈ shadows-off), so the
-  cheap engine-side first fix is a shadow-caster size gate (mirror-cull
-  precedent); the diet + structural sharing then address the residual
-  per-mesh floor (13.1 ms vs sandbar's 6.6, and prod steady-state p50
-  21 ms vs sandbar's 7.1).
+- ~~Mexico City content diet (material count / prop merging)~~ **DONE
+  2026-06-12** — both halves landed and measured (perf-baseline.md): the
+  shadow-caster size gate (shadow-caster-gate.ts) plus the decoration merge
+  (tools/blender/optimize_track_glb.py, 455→117 GLB meshes) took the city
+  from p50 22.1 ms / 50 fps to **11.2 ms / ~75–80 fps** steady-state on the
+  iGPU box. Material COUNT (41) is unchanged — vinyl structural sharing
+  remains the boot-time lever above; the frame-time problem it shared with
+  this item is resolved.
 - ~~fps tuning of the June-10 water layers~~ **RESOLVED 2026-06-11, and the
   cause was not the layers**: the water-ablation kit measured every June-10
   look layer together as ≈ free; the regression was the planar-reflection

@@ -24,6 +24,7 @@ import { createIslandMesh } from '@/engine/render/arena-mesh'
 import { createCliffsideMesh } from '@/engine/render/cliffside-mesh'
 import { attachTrackColliders, loadGlbTrackVisuals } from '@/engine/render/glb-track'
 import { createRampMesh } from '@/engine/render/ramp-mesh'
+import { gateShadowCaster, resolveShadowCastMinRadius } from '@/engine/render/shadow-caster-gate'
 import { buildTerrainHeightmap, type TerrainHeightmap } from '@/engine/render/terrain-heightmap'
 import { WATER_REFLECTION_LAYER } from '@/engine/render/water'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
@@ -82,6 +83,14 @@ export async function loadTrackForBoot(opts: {
   // scene (the water-ablation finding — ~98 extra draw calls on sandbar).
   const bakeHeightmapAndMarkReflections = (waterLevel: number) => {
     const REFLECT_MIN_RADIUS_M = 25
+    // Shadow-caster size gate — same walk, inverted polarity: reflections
+    // opt the big things IN, shadows opt the small things OUT. The sun's
+    // depth pass pays per CASTER (mexico-city's ~477 dressing casters were
+    // its whole ~6.5 ms CPU gap; map resolution measured free) — see
+    // shadow-caster-gate.ts + docs/perf-baseline.md. `?shadowcast=0` = legacy.
+    const shadowMinR = resolveShadowCastMinRadius()
+    let castersSeen = 0
+    let castersGated = 0
     const worldScale = new THREE.Vector3()
     for (const root of terrainRoots) {
       root.updateMatrixWorld(true)
@@ -94,7 +103,15 @@ export async function loadTrackForBoot(opts: {
         const worldR =
           (geo.boundingSphere?.radius ?? 0) * Math.max(worldScale.x, worldScale.y, worldScale.z)
         if (worldR >= REFLECT_MIN_RADIUS_M) m.layers.enable(WATER_REFLECTION_LAYER)
+        if (m.castShadow) castersSeen++
+        if (gateShadowCaster(m, worldR, shadowMinR)) castersGated++
       })
+    }
+    if (castersGated > 0) {
+      // eslint-disable-next-line no-console
+      console.info(
+        `[shadow-gate] ${castersGated}/${castersSeen} static casters below ${shadowMinR} m stop casting`,
+      )
     }
     return buildTerrainHeightmap(terrainRoots, { waterLevel })
   }

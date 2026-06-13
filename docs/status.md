@@ -32,6 +32,33 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-12** — **Mexico City frame fixed: 50 → ~75–80 fps
+> steady-state on the iGPU box (p50 22.1 → 11.2 ms, p95 27.6 → 16.8).** Two
+> landings, both measured by the frame-ablation kit (15 s steady-state
+> windows; tables in [perf-baseline.md](./perf-baseline.md)): (1) a
+> **shadow-caster size gate** ([shadow-caster-gate.ts](../src/engine/render/shadow-caster-gate.ts),
+> default 6 m world radius, foliage exempt, `?shadowcast=<m>` / `0`=legacy) —
+> small dressing stops re-encoding into the sun's 1024² depth pass each
+> frame (368/455 casters gated on the pre-merge city, ~5.1 ms; wave-rider
+> buoy/log fields never cast now — water receives no shadow maps, so that
+> encode was pure waste); (2) a **decoration merge** of the city GLB
+> ([tools/blender/optimize_track_glb.py](../tools/blender/optimize_track_glb.py),
+> headless Blender): joins `kind=decoration` LMd_* pieces per
+> (landmark-group × material), 455 → 117 mesh nodes; gameplay
+> (`kind=track`) meshes / terrain / materials / COLOR_0 untouched; visual
+> A/B pairs + posed city captures in `artifacts/shadow-gate/` read clean at
+> race framing. **Merged GLB is local-only pending Matt's playtest —
+> `pnpm assets:push` ships it** (pre-merge backup:
+> `tracks-src/mexico-city.glb.pre-merge.bak`). Content-state note found on
+> the way: the LMd_ detail pass exists ONLY in the shipped GLB — the
+> 2026-06-09 detailing session exported without saving
+> `texcoco-rising.blend` (6/8 state, base hulls only), so the GLB is the
+> recoverable source for that work. Sandbar: gate is ms-neutral (its
+> casters are the movers — 8 bikes + 8 multi-primitive riders, measured
+> 4.75 ms via `?shadows=0` — the named next lever). New kit knobs:
+> `SAMPLE=/SETTLE=/ONLY=/EXTRA=` envs on frame-ablation (lap aliasing +
+> row-order bias lessons), `tools/shadow-gate-ab.mjs` capture pairs.
+>
 > **Last updated: 2026-06-11 (b)** — **Whole-frame perf attribution — the CPU
 > owns the frame, and shadows are the bill.** Phase 0/1 of the perf push
 > (plan: measure → attribute → land → quality ladder). New
