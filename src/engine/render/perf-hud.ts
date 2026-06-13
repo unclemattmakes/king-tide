@@ -58,6 +58,9 @@ export interface PerfDiagnostics {
   deckApplied: boolean
   /** Detection signals that fired (ua / viewport / gamepad / native). */
   deckSignals: readonly string[]
+  /** Resolved quality tier in force (high/medium/low) — what `auto`
+   *  actually picked, for on-device confirmation. Optional. */
+  quality?: string
 }
 
 export interface PerfHud {
@@ -150,7 +153,8 @@ export function createPerfHud(): PerfHud {
 
   function setDiagnostics(d: PerfDiagnostics): void {
     const signals = d.deckSignals.length ? ` (${d.deckSignals.join('+')})` : ''
-    bkndRow.textContent = `BKND  ${d.backend} · deck ${d.deckApplied ? 'on' : 'off'}${signals}`
+    const q = d.quality ? ` · q ${d.quality}` : ''
+    bkndRow.textContent = `BKND  ${d.backend} · deck ${d.deckApplied ? 'on' : 'off'}${signals}${q}`
     gpuRow.textContent = `GPU   ${d.gpu}`
   }
 

@@ -32,6 +32,28 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-13 (b)** — **Quality preset ladder shipped — the
+> "various devices" knob.** The per-knob render levers the ablation measured
+> are now composed into **Auto / High / Medium / Low** at Settings → Video →
+> Quality preset (persisted), resolver in
+> [`render/quality-preset.ts`](../src/engine/render/quality-preset.ts),
+> per-boot override `?quality=<tier>`, active tier echoed in the perf HUD
+> `BKND` row. High = today's look (shadows + MSAA + reflection + bloom + 512²
+> water); Medium drops MSAA + halves the shadow map (look intact); Low drops
+> the shadow PASS, reflection, bloom, MSAA + coarsens water to 384². `auto`
+> tiers from reliable signals only — WebGL2 (Safari/FF no-WebGPU fallback) →
+> Low, Steam Deck → Medium, real WebGPU → High (no fragile GPU-string
+> sniffing). Each render read-site keeps its `?param` override so the ablation
+> flags still win; `pixelRatio`/`framerateCap` stay independent user sliders
+> the preset never stomps. Boot is a fresh navigation, so a preset chosen in
+> the menu applies on the next race with no manual reload. **Measured ladder
+> (dev-box iGPU, mexico-city worst case, 720p, 8 bikes): high 66.8 fps /
+> p50 13.7 → low 110.8 fps / p50 7.1** (+44 fps; shadow casters gone from
+> draws 249→152, reflection + water-mesh from tris 2.55M→1.31M). Medium's
+> MSAA-off shows only in GPU ms here (CPU-bound track) and widens on weaker /
+> higher-DPI GPUs. 8 new unit tests pin the resolver + auto-tiering. Tables in
+> [perf-baseline.md](./perf-baseline.md).
+>
 > **Last updated: 2026-06-12** — **Mexico City frame fixed: 50 → ~75–80 fps
 > steady-state on the iGPU box (p50 22.1 → 11.2 ms, p95 27.6 → 16.8).** Two
 > landings, both measured by the frame-ablation kit (15 s steady-state

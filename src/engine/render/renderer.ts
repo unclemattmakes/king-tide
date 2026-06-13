@@ -1,5 +1,13 @@
 import * as THREE from 'three'
 import { WebGPURenderer } from 'three/webgpu'
+import { playerSettings } from '@/engine/player-settings'
+import { detectSteamDeck } from '@/engine/steam-deck'
+import {
+  QUALITY_PRESETS,
+  type QualityPreset,
+  resolveQuality,
+  setActiveQuality,
+} from './quality-preset'
 
 export type RenderBackend = 'webgpu' | 'webgl2'
 
@@ -77,12 +85,27 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
     )
   }
 
-  // `?aa=off` disables MSAA — on WebGPU that's a multisampled colour
-  // attachment, costing 2–4× bandwidth on the main pass. Default stays
-  // on (current shipping behaviour); the toggle is for low-end hardware
-  // and FFT-foam debug shots where the multisample buffer adds nothing
-  // visible at racing speed but eats budget on integrated GPUs.
-  const antialias = params.get('aa') !== 'off'
+  // Resolve the quality tier NOW — this is the first place the real backend
+  // is known, and the later-constructed systems (scene shadow map, sky post,
+  // water) read the published knobs. `?quality=<tier>` overrides the
+  // persisted preset for a single boot (testing + the ablation kit); `auto`
+  // picks a tier from backend + Deck detection (see quality-preset.ts).
+  const tierBackend: RenderBackend = hasWebGpu ? 'webgpu' : 'webgl2'
+  const quretParam = params.get('quality')
+  const preset: QualityPreset = QUALITY_PRESETS.includes(quretParam as QualityPreset)
+    ? (quretParam as QualityPreset)
+    : playerSettings.qualityPreset
+  const { tier, knobs } = resolveQuality(preset, {
+    backend: tierBackend,
+    isDeck: detectSteamDeck().isLikelyDeck,
+  })
+  setActiveQuality(tier, knobs)
+  console.info(`[render] quality: ${preset}${preset === 'auto' ? ` → ${tier}` : ''}`)
+
+  // MSAA — a multisampled colour attachment on WebGPU, 2–4× main-pass
+  // bandwidth. `?aa=off|on` forces it (ablation + debug shots); otherwise
+  // the resolved tier decides (off below High).
+  const antialias = params.has('aa') ? params.get('aa') !== 'off' : knobs.msaa
 
   // `?gpuprofile=1` opts into per-frame GPU timestamp tracking so the
   // GPU-time profiler (gpu-profiler.ts) can read `renderer.info.*.timestamp`.
@@ -136,9 +159,10 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
   // mesh by the systems that build them (bike clones, props, terrain).
   // Water is intentionally excluded — its node-material shader drives its
   // own lighting and we don't want the surface mottled by shadow maps.
-  // `?shadows=0` drops the whole shadow pass (sun depth render + PCF taps)
-  // — a frame-ablation axis and the natural Low-quality-preset switch.
-  renderer.shadowMap.enabled = params.get('shadows') !== '0'
+  // `?shadows=0|1` forces the whole shadow pass (sun depth render + PCF
+  // taps) — the frame-ablation axis; otherwise the resolved tier decides
+  // (off on Low — the measured +19–27 fps lever).
+  renderer.shadowMap.enabled = params.has('shadows') ? params.get('shadows') !== '0' : knobs.shadows
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
 
   const resize = () => {
