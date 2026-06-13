@@ -56,10 +56,18 @@ const TRACK = process.env.TRACK ?? 'sandbar'
 const BIKE = process.env.BIKE ?? 'racer'
 const HEADLESS = process.env.E2E_HEADLESS === '1'
 const GPU_FLAG = process.env.GPU === '0' ? '' : '&gpuprofile=1'
+// Extra URL params appended to EVERY boot (e.g. EXTRA="&progwarm=0" to
+// pre-compile the scenery stream under the loading screen — without it,
+// mexico-city's stream drains DURING the run and later rows read faster
+// than earlier ones regardless of their axis: row-order bias).
+const EXTRA = process.env.EXTRA ?? ''
 const REPORT_DIR = 'perf-report'
 
-const SETTLE_MS = 1200
-const SAMPLE_MS = 5000
+// Window sizes are env-tunable: mexico-city's draw count swings ~340→460
+// with lap section, so 5 s windows alias the lap (±1 vsync quantum on p50).
+// SAMPLE=15000 spans enough of the lap to settle close A/Bs.
+const SETTLE_MS = Number(process.env.SETTLE ?? 1200)
+const SAMPLE_MS = Number(process.env.SAMPLE ?? 5000)
 const WARMUP_MS = 3000
 
 mkdirSync(REPORT_DIR, { recursive: true })
@@ -125,7 +133,7 @@ async function bootRacePage(browser, extra = '') {
       window.localStorage.removeItem('hoverbike.waterDebug.v10')
     } catch {}
   })
-  const url = `${BASE}/?race=1&track=${TRACK}&bike=${BIKE}&perf=1${GPU_FLAG}${extra}`
+  const url = `${BASE}/?race=1&track=${TRACK}&bike=${BIKE}&perf=1${GPU_FLAG}${EXTRA}${extra}`
   await page.goto(url, { waitUntil: 'domcontentloaded' })
   await page.waitForFunction(() => window.__hover?.ready === true, null, { timeout: 45_000 })
   await page.waitForFunction(() => window.__hover?.perf != null, null, { timeout: 30_000 })
@@ -161,6 +169,7 @@ async function sampleConfig(page, label, applyJs) {
 /** Boot-level structural variants. Each gets a fresh page. */
 const BOOT_CONFIGS = [
   { label: 'baseline (all defaults)', extra: '' },
+  { label: 'shadow gate off (?shadowcast=0)', extra: '&shadowcast=0' },
   { label: 'shadows off (?shadows=0)', extra: '&shadows=0' },
   { label: 'shadow map 512² (?shadowmap=512)', extra: '&shadowmap=512' },
   { label: 'post/bloom off (?post=0)', extra: '&post=0' },
@@ -172,6 +181,14 @@ const BOOT_CONFIGS = [
     extra: '&shadows=0&post=0&aa=off&reflect=0',
   },
 ]
+
+// ONLY="baseline,shadow gate off,shadows off" runs just those boot rows
+// (label-prefix match) — the cheap way to re-run a close A/B with longer
+// windows without paying the whole table.
+const ONLY = process.env.ONLY ? process.env.ONLY.split(',').map((s) => s.trim()) : null
+const bootConfigs = ONLY
+  ? BOOT_CONFIGS.filter((c) => ONLY.some((p) => c.label.startsWith(p)))
+  : BOOT_CONFIGS
 
 function fmt(n, digits = 1) {
   return n == null || !Number.isFinite(n) ? '—' : n.toFixed(digits)
@@ -191,6 +208,7 @@ function renderMarkdown(rows, meta) {
   lines.push(`- **Date:** ${meta.date}`)
   lines.push(`- **Host:** ${meta.host} — ${meta.cpu}`)
   lines.push(`- **Backend:** ${meta.backend} (dev build — relative reads only)`)
+  if (EXTRA) lines.push(`- **Extra params on every boot:** \`${EXTRA}\``)
   lines.push(
     `- **Window:** ${SETTLE_MS / 1000}s settle, ${SAMPLE_MS / 1000}s sample per config; GPU ms = rolling render-pass avg (\`?gpuprofile=1\`)`,
   )
@@ -225,7 +243,7 @@ const browser = await chromium.launch({ headless: HEADLESS })
 const rows = []
 let backend = '?'
 try {
-  for (const cfg of BOOT_CONFIGS) {
+  for (const cfg of bootConfigs) {
     process.stdout.write(`[frame-ablate] ${cfg.label} … `)
     try {
       const page = await bootRacePage(browser, cfg.extra)

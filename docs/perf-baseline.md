@@ -248,6 +248,34 @@ precedent, inverted for small dressing), (2) the city's residual floor
 content-diet items), (3) post / MSAA / reflection as quality-ladder rungs
 (they pay on lighter tracks and weaker GPUs, not on the city's CPU wall).
 
+**2026-06-12 — both mexico-city fixes landed and measured** (same box,
+15 s windows, `&progwarm=0` steady state, dev build):
+
+| mexico-city config | FPS | p50 ms | p95 ms | Draw calls |
+|---|---|---|---|---|
+| legacy (no gate, pre-merge GLB) | 50.1 | 22.1–22.2 | 27.6 | 413 |
+| + shadow-caster size gate (default 6 m) | 53.7 | 16.7–17.1 | 23.3 | 338 |
+| + decoration merge (455→117 GLB meshes) | **74.1–79.9** | **11.1–11.2** | **16.7–16.8** | 202–278 |
+
+- **Shadow-caster size gate** ([shadow-caster-gate.ts](../src/engine/render/shadow-caster-gate.ts),
+  `?shadowcast=<m>`, default 6 m, foliage exempt, `0` = legacy): gated
+  368/455 casters pre-merge (~5.1 ms back). Post-merge the merged clusters
+  exceed the gate (17/117 gated) and the mesh-count win dominates instead —
+  the gate stays as the guard rail against future many-small-casters content.
+  Wave-rider fields (buoys/logs) never cast now: their shadows land on
+  water, which receives no shadow maps.
+- **Decoration merge** ([tools/blender/optimize_track_glb.py](../tools/blender/optimize_track_glb.py),
+  headless): joins `kind=decoration` pieces per (landmark-group × material) —
+  455→117 mesh nodes; `kind=track` gameplay meshes, terrain, materials, and
+  COLOR_0 untouched. The city dressing's steady-state CPU went 5.5 ms →
+  ~0.1 ms. Visual pairs: `artifacts/shadow-gate/`. The GLB is R2-hosted —
+  re-run the script after any re-export, then `pnpm assets:push`.
+- **Sandbar with the gate**: ms-neutral (draws 227→190; its casters were
+  never the dressing). Its remaining shadow cost is the **movers** — 8 bikes
+  + 8 multi-primitive procedural riders — measured at **4.75 ms**
+  (`?shadows=0`: 97.3→119.3 fps, p50 11.1→6.35). Gating/merging tiny rider
+  segment casters is the named next lever.
+
 ### Steam Deck — native Electron build
 
 Per [steam-deck.md](./steam-deck.md): native Electron (real Chromium WebGPU on

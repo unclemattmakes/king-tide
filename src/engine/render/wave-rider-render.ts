@@ -119,7 +119,11 @@ export function createWaveRiderRenderSystem(
         FIELD_CAPACITY,
       )
       inst.name = `wave-rider:${loaded.extras.prop_id}`
-      inst.castShadow = true
+      // Wave-riders live ON the water, and the water surface doesn't receive
+      // shadow maps (renderer.ts excludes it by design) — a buoy/log field
+      // casting into the sun's depth pass is encode cost with no visible
+      // shadow. See shadow-caster-gate.ts / docs/perf-baseline.md.
+      inst.castShadow = false
       inst.receiveShadow = true
       // Buoy/log fields are spread along a wall; the prototype's origin-local
       // bounding sphere would wrongly cull the whole field.
@@ -174,8 +178,8 @@ export function createWaveRiderRenderSystem(
       const body = new THREE.Mesh(bodyGeom, bodyMat)
       const cap = new THREE.Mesh(capGeom, capMat)
       cap.position.y = 0.6
-      body.castShadow = true
-      cap.castShadow = true
+      // No casting — floats sit on water, which receives no shadow maps
+      // (same rationale as the instanced fields above).
       group.add(body, cap)
       ownedGeometries.add(bodyGeom).add(capGeom)
       ownedMaterials.add(bodyMat).add(capMat)
@@ -184,7 +188,6 @@ export function createWaveRiderRenderSystem(
       const logMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 0.88 })
       const log = new THREE.Mesh(logGeom, logMat)
       log.rotation.z = Math.PI / 2
-      log.castShadow = true
       group.add(log)
       ownedGeometries.add(logGeom)
       ownedMaterials.add(logMat)
