@@ -23,6 +23,7 @@ import { MeshBasicNodeMaterial, PMREMGenerator, type Renderer } from 'three/webg
 import type { SkyColorGrade, SkyConfig, SkyToneMapping } from '@/game/tracks/types'
 import { type CloudLayer, createCloudLayer } from './clouds'
 import { createPostPipeline, type PostPipeline } from './post-pipeline'
+import { getActiveQuality } from './quality-preset'
 import { setActivePostPipeline } from './renderer-service'
 import { WATER_REFLECTION_LAYER } from './water'
 
@@ -420,11 +421,13 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
   // `?post=0` skips the whole post chain (PassNode scene RT + bloom mips).
   // `setBloom(0)` only mutes the bloom MIX — the passes still render — so a
   // real "post off" has to happen here at build time. The no-pipeline render
-  // path is the same one the catch-arm below already ships. Frame-ablation
-  // axis and the future Low-preset switch.
+  // path is the same one the catch-arm below already ships. `?post=0|1`
+  // forces it (frame-ablation axis); absent → the resolved quality tier
+  // (bloom off on Low — the measured +24 fps lever on lighter tracks).
   const postParam =
     typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('post') : null
-  if (postParam !== '0') {
+  const postEnabled = postParam !== null ? postParam !== '0' : getActiveQuality().bloom
+  if (postEnabled) {
     try {
       postPipeline = createPostPipeline({
         renderer,

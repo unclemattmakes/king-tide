@@ -293,6 +293,46 @@ it's a per-track/per-tier call, not a global default.) This is the
 measure-don't-assume rule earning its keep: the skinned-rider hypothesis was
 plausible and wrong.
 
+## Quality presets (the "various devices" ladder)
+
+The per-knob levers above are composed into three tiers + an `auto` in
+[`render/quality-preset.ts`](../src/engine/render/quality-preset.ts),
+selectable at **Settings → Video → Quality preset** (persisted) or per-boot
+via `?quality=high|medium|low|auto`. The active tier shows in the perf HUD's
+`BKND` row (`q <tier>`). Each render read-site keeps its own `?param`
+override (so the ablation flags + `?quality=` still win for testing); the
+tier is just the default when nothing's forced.
+
+| Tier | Shadows | Shadow map | MSAA | Reflection | Water mesh | Bloom |
+|---|---|---|---|---|---|---|
+| High (default on WebGPU) | on | 1024² | on | on | 512² | on |
+| Medium (Steam Deck auto) | on | 512² | **off** | on | 512² | on |
+| Low (WebGL2 auto) | **off** | 512² | **off** | **off** | 384² | **off** |
+
+`auto` picks from reliable device signals only — WebGL2 backend (the
+Safari/Firefox no-WebGPU fallback) → Low, Steam Deck → Medium, real WebGPU →
+High. GPU-string heuristics are deliberately avoided (fragile across
+drivers/translation layers). `pixelRatio` / `framerateCap` stay independent
+user sliders — the preset never stomps them.
+
+**Measured ladder (nitro-deck iGPU, mexico-city — the worst track — 720p,
+8 bikes, 12 s steady-state windows):**
+
+| `?quality=` | FPS | p50 ms | GPU ms | Draw calls | Triangles |
+|---|---|---|---|---|---|
+| high | 66.8 | 13.7 | 2.33 | 249 | 2.55M |
+| medium | 65.3 | 13.7 | 1.97 | 250 | 2.55M |
+| **low** | **110.8** | **7.1** | 1.39 | 152 | 1.31M |
+
+Every knob lands: Medium's MSAA-off shows only in GPU ms (2.33→1.97) since
+the track is CPU-bound; **Low nearly doubles the frame rate** (+44 fps, p50
+halved) — shadow casters gone from the draw count (249→152), reflection +
+coarser water mesh from the triangles (2.55M→1.31M). Low is the headroom a
+sub-iGPU device (the WebGL2 tier, a weak laptop) gets for free on `auto`.
+Medium's win is GPU-fill-bound, so it widens on higher-DPI / weaker-GPU
+devices than this CPU-bound iGPU box — the device baseline tables above are
+where those rows get filled per device.
+
 ### Steam Deck — native Electron build
 
 Per [steam-deck.md](./steam-deck.md): native Electron (real Chromium WebGPU on

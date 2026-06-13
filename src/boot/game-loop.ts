@@ -64,6 +64,7 @@ import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finis
 import { createOobHud } from '@/engine/render/oob-hud'
 import { createPerfHud, type RenderInfoLite } from '@/engine/render/perf-hud'
 import { createPumpFx } from '@/engine/render/pump-fx'
+import { getActiveTier } from '@/engine/render/quality-preset'
 import type { RaceHud } from '@/engine/render/race-hud'
 import type { RaceIntro } from '@/engine/render/race-intro'
 import type { RaceIntroUi } from '@/engine/render/race-intro-ui'
@@ -783,6 +784,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     gpu: probeGpuRenderer(),
     deckApplied: getDeckProfile() !== null,
     deckSignals: detectSteamDeck().signals,
+    quality: getActiveTier(),
   })
   const rendererInfo = (renderer as unknown as { info: RenderInfoLite }).info
   // Opt-in WebGPU GPU-time profiler (`?gpuprofile=1`). A no-op unless the

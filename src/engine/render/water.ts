@@ -49,6 +49,7 @@ import {
   rasterizeOilStrokeSheet,
   WAKE_STROKE_SPEC,
 } from '@/engine/render/oil-stroke-texture'
+import { getActiveQuality } from '@/engine/render/quality-preset'
 import { TERRAIN_HEIGHTMAP_RESOLUTION } from '@/engine/render/terrain-heightmap'
 // Waterline obstacle contacts — foam collars around pillars/rocks/pylons.
 // Render-only shading (no displacement), so no buoyancy mirror is needed.
@@ -1096,7 +1097,7 @@ export function createWaterMesh(
     opts?.subdivisions ??
     (Number.isFinite(subsParam) && subsParam >= 64 && subsParam <= 1024
       ? Math.round(subsParam)
-      : 512)
+      : getActiveQuality().waterSubdivisions)
 
   // ---- Debug toggles ----------------------------------------------------
   // Analytic-Gerstner displacement + procedural detail-normal map +
@@ -4153,7 +4154,12 @@ export function createWaterMesh(
   // itself (the reflector toggles `material.visible = false` during its
   // pass). At 0.5 resolutionScale on a 1080p framebuffer that's 540p, a
   // few hundred k pixels — trivial on real GPUs, fine on WebGPU + WebGL2.
-  const reflectFlag = params?.get('reflect') !== '0'
+  // `?reflect=0|1` forces the planar-reflection pass (ablation axis);
+  // absent → the resolved quality tier (off on Low). The pass is already
+  // layer-culled (#371), so this is the Low-tier "drop it entirely" switch.
+  const reflectFlag = params?.has('reflect')
+    ? params.get('reflect') !== '0'
+    : getActiveQuality().reflection
   // Mirror-pass scene cull (the water-ablation tool's headline finding):
   // the reflector re-renders the scene into its RT every frame — ~98 extra
   // draw calls on sandbar, ~÷2 fps — yet at our fresnel cap + wave

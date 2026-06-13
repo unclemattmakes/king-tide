@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { getActiveQuality } from './quality-preset'
 import { WATER_REFLECTION_LAYER } from './water'
 
 /**
@@ -63,7 +64,8 @@ export function createScene(): {
   // `?shadowmap=<n>` (256..2048) overrides the map resolution per boot —
   // the depth-pass cost scales quadratically with the map (that's what
   // motivated 2048→1024 below), so this is the cheap ladder axis to A/B
-  // without a rebuild. Default stays 1024.
+  // without a rebuild. Absent → the resolved quality tier (1024 High,
+  // 512 Medium/Low — see quality-preset.ts).
   const shadowMapParam =
     typeof window !== 'undefined'
       ? Number(new URLSearchParams(window.location.search).get('shadowmap'))
@@ -71,7 +73,7 @@ export function createScene(): {
   const shadowMapSize =
     Number.isFinite(shadowMapParam) && shadowMapParam >= 256 && shadowMapParam <= 2048
       ? Math.round(shadowMapParam)
-      : 1024
+      : getActiveQuality().shadowMapSize
   sun.shadow.mapSize.set(shadowMapSize, shadowMapSize)
   sun.shadow.camera.near = 1
   sun.shadow.camera.far = 500

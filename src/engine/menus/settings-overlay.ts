@@ -62,6 +62,7 @@ import {
   setOutOfBounds,
   setPixelRatio,
   setPreLapIntro,
+  setQualityPreset,
   setReducedFlash,
   setReducedMotion,
   setRubberBandAssist,
@@ -81,6 +82,7 @@ import {
   framerateCapFromLabel,
   framerateCapToLabel,
 } from '@/engine/render/frame-cap'
+import type { QualityPreset } from '@/engine/render/quality-preset'
 import { buildReplayTutorialHref } from '@/engine/tutorial/tutorial-launch'
 
 type Tab = 'audio' | 'video' | 'controls' | 'gameplay' | 'accessibility' | 'network'
@@ -118,6 +120,19 @@ const WAVE_SPRAY_VALUE: Record<string, WaveSprayIntensity> = {
   Full: 'full',
   Subtle: 'subtle',
   Off: 'off',
+}
+
+const QUALITY_LABEL: Record<QualityPreset, string> = {
+  auto: 'Auto',
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
+}
+const QUALITY_VALUE: Record<string, QualityPreset> = {
+  Auto: 'auto',
+  High: 'high',
+  Medium: 'medium',
+  Low: 'low',
 }
 
 const DIFFICULTY_LABEL: Record<AIDifficulty, string> = {
@@ -329,6 +344,17 @@ const TAB_SPECS: TabSpec[] = [
     label: 'VIDEO',
     description: 'Renderer + display options. Mostly browser-managed today.',
     rows: [
+      {
+        id: 'video-quality',
+        label: 'Quality preset',
+        control: {
+          kind: 'select',
+          options: ['Auto', 'High', 'Medium', 'Low'],
+          defaultValue: QUALITY_LABEL[playerSettings.qualityPreset],
+        },
+        enabled: true,
+        gate: 'Auto picks a tier from your device (WebGL2 → Low, Steam Deck → Medium, WebGPU → High). High = shadows + MSAA + reflections + bloom; Medium drops MSAA + halves the shadow map; Low drops the shadow pass, reflections, bloom + MSAA. Applies on the next race.',
+      },
       {
         id: 'video-resolution',
         label: 'Resolution',
@@ -1141,6 +1167,12 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
       if (spec.enabled && spec.id === 'video-framecap') {
         sel.addEventListener('change', () => {
           setFramerateCap(framerateCapFromLabel(sel.value))
+        })
+      }
+      if (spec.enabled && spec.id === 'video-quality') {
+        sel.addEventListener('change', () => {
+          const v = QUALITY_VALUE[sel.value]
+          if (v) setQualityPreset(v)
         })
       }
       return sel

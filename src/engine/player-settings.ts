@@ -26,6 +26,7 @@ import {
   parseGamepadBindings,
   parseKeyboardBindings,
 } from './input/bindings'
+import { QUALITY_PRESETS, type QualityPreset } from './render/quality-preset'
 
 // Bumped to v2 with the M-Step-8 accessibility fields. The load path
 // remains tolerant — old v1 blobs would simply be ignored at the key
@@ -260,11 +261,20 @@ export type PlayerSettings = {
    *  fit the LCD panel + the ≤12 W battery target without the player
    *  touching Settings. */
   framerateCap: number
+  /** Video — render quality preset. `auto` picks a tier from the device at
+   *  boot (WebGL2 fallback → low, Steam Deck → medium, real WebGPU →
+   *  high); the explicit tiers compose the measured render levers (shadow
+   *  pass, MSAA, reflection, water mesh, bloom — see
+   *  `render/quality-preset.ts`). Read once at boot in `createRenderer`;
+   *  changing it needs a reload to re-resolve the boot-time passes. The
+   *  `?quality=<tier>` URL param overrides it for a single boot. */
+  qualityPreset: QualityPreset
   /** Video — render-pixel ratio. Scales the off-screen framebuffer
    *  relative to the canvas CSS size. `1.0` = native, `0.75` ≈ 56% of
    *  pixels, `0.5` ≈ 25%. The renderer caps the actual ratio at
    *  `min(devicePixelRatio, 2)` so this value is a *requested ceiling*
-   *  rather than a guarantee on hi-DPI screens. */
+   *  rather than a guarantee on hi-DPI screens. Independent of the quality
+   *  preset (a user slider the preset never stomps). */
   pixelRatio: number
   /** Video — when true the boot path requests fullscreen on the first
    *  user gesture. Default off; the Steam Deck profile flips it on so
@@ -332,6 +342,7 @@ export const DEFAULT_PLAYER_SETTINGS: Readonly<PlayerSettings> = Object.freeze({
   // Steam Deck profile mutates these via the dedicated setters so a
   // detection flip lights up the persisted UI rows.
   framerateCap: 0,
+  qualityPreset: 'auto',
   pixelRatio: 1.0,
   fullscreenPreferred: false,
   animatedLandmarks: true,
@@ -540,6 +551,9 @@ export function loadPlayerSettings(): void {
     // [30, 240] is almost certainly a malformed save.
     const v = p.framerateCap
     playerSettings.framerateCap = v <= 0 ? 0 : Math.max(30, Math.min(240, v))
+  }
+  if (QUALITY_PRESETS.includes(p.qualityPreset as QualityPreset)) {
+    playerSettings.qualityPreset = p.qualityPreset as QualityPreset
   }
   if (typeof p.pixelRatio === 'number' && Number.isFinite(p.pixelRatio)) {
     playerSettings.pixelRatio = Math.max(0.5, Math.min(2.0, p.pixelRatio))
@@ -843,6 +857,15 @@ export function setFramerateCap(cap: number): void {
   } else {
     playerSettings.framerateCap = Math.max(30, Math.min(240, cap))
   }
+  savePlayerSettings()
+}
+
+/** Set the render quality preset. Persists immediately. Takes effect on the
+ *  next reload (the boot-time render passes resolve in `createRenderer`);
+ *  the Settings row notes the restart. */
+export function setQualityPreset(preset: QualityPreset): void {
+  if (!QUALITY_PRESETS.includes(preset)) return
+  playerSettings.qualityPreset = preset
   savePlayerSettings()
 }
 
