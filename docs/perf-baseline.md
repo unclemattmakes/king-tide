@@ -271,10 +271,27 @@ content-diet items), (3) post / MSAA / reflection as quality-ladder rungs
   ~0.1 ms. Visual pairs: `artifacts/shadow-gate/`. The GLB is R2-hosted —
   re-run the script after any re-export, then `pnpm assets:push`.
 - **Sandbar with the gate**: ms-neutral (draws 227→190; its casters were
-  never the dressing). Its remaining shadow cost is the **movers** — 8 bikes
-  + 8 multi-primitive procedural riders — measured at **4.75 ms**
-  (`?shadows=0`: 97.3→119.3 fps, p50 11.1→6.35). Gating/merging tiny rider
-  segment casters is the named next lever.
+  never the dressing). Its remaining shadow cost is ~4 ms / ~+19 fps
+  (`?shadows=0`: ~89→108 fps steady-state) — but see the correction below.
+
+**2026-06-13 — the sandbar shadow cost is the depth PASS, not the riders
+(hypothesis tested and rejected).** Riders are skinned meshes (2 prims,
+65 joints × 8), so they looked like the obvious skinned-depth culprit. A
+direct A/B disproved it: restoring rider shadows (`?ridershadow=1`, against
+a build where they were off) **added 33 draw calls and moved frame time by
+0.0 ms** (88.4 vs 89.0 fps — noise). So the ~4 ms is the **shadow-map render
+pass itself** — re-rendering the 148k-vert terrain island (+ instanced
+bikes) into the depth map — against which 16 small skinned rider meshes are
+a rounding error. There is **no cheap surgical mover-side win here**, and a
+look change (riders losing their ground shadow) for 0 ms is a bad trade — so
+no default changed. The real lever is the whole pass (`?shadows=0`), which
+belongs in the quality ladder for weaker-than-iGPU devices, not as a forced
+default on a track already at ~89 fps. (A terrain-`castShadow=false` probe
+could cut the pass on FLAT tracks, but terrain self-shadowing is
+load-bearing on the vertical tracks — the-maw arches, cape-town cliffs — so
+it's a per-track/per-tier call, not a global default.) This is the
+measure-don't-assume rule earning its keep: the skinned-rider hypothesis was
+plausible and wrong.
 
 ### Steam Deck — native Electron build
 

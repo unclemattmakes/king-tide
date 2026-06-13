@@ -53,11 +53,25 @@
 > the way: the LMd_ detail pass exists ONLY in the shipped GLB — the
 > 2026-06-09 detailing session exported without saving
 > `texcoco-rising.blend` (6/8 state, base hulls only), so the GLB is the
-> recoverable source for that work. Sandbar: gate is ms-neutral (its
-> casters are the movers — 8 bikes + 8 multi-primitive riders, measured
-> 4.75 ms via `?shadows=0` — the named next lever). New kit knobs:
-> `SAMPLE=/SETTLE=/ONLY=/EXTRA=` envs on frame-ablation (lap aliasing +
-> row-order bias lessons), `tools/shadow-gate-ab.mjs` capture pairs.
+> recoverable source for that work. Sandbar: gate is ms-neutral; its ~4 ms
+> shadow cost is the depth PASS itself (148k-vert terrain island + bikes
+> rendering into the shadow map). New kit knobs: `SAMPLE=/SETTLE=/ONLY=/EXTRA=`
+> envs on frame-ablation (lap aliasing + row-order bias lessons),
+> `tools/shadow-gate-ab.mjs` capture pairs.
+>
+> **Last updated: 2026-06-13** — **Mover shadow hypothesis tested and
+> rejected — the sandbar shadow cost is the depth pass, not the riders.**
+> Riders are skinned (2 prims, 65 joints × 8), the obvious skinned-depth
+> suspect; a direct A/B (`?ridershadow=1` vs a riders-off build) added 33
+> draw calls and moved frame time **0.0 ms** (88.4 vs 89.0 fps). So the ~4 ms
+> `?shadows=0` win on sandbar is the shadow-map render PASS (terrain island +
+> instanced bikes), against which the riders are noise. No default changed —
+> a look change (riders losing their ground shadow) for 0 ms is a bad trade.
+> The whole-pass lever stays a **quality-ladder rung** (Phase 3) for
+> sub-iGPU devices, not a forced default on a track already at ~89 fps. A
+> terrain-`castShadow=false` cut could help FLAT tracks but breaks
+> self-shadowing on the vertical ones (the-maw, cape-town) — per-tier, not
+> global. Measure-don't-assume earning its keep.
 >
 > **Last updated: 2026-06-11 (b)** — **Whole-frame perf attribution — the CPU
 > owns the frame, and shadows are the bill.** Phase 0/1 of the perf push
