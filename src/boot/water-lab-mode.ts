@@ -96,13 +96,34 @@ export type WaterLabHook = {
     gridStep?: number
     dtS?: number
   }): { maxV: number; atSlope: number }
-  /** Sim surface height at world (x, z) — pause assertions read it. */
+  /** Sim surface height at world (x, z) — what the red drifter dots trace
+   *  and what buoyancy floats the bike on (`sampleHeight`). Pause assertions
+   *  read it. */
   surfaceYAt(x: number, z: number): number
+  /** The RENDERED mesh position for the rest-grid vertex (x, z): the GPU
+   *  vertex shader's forward Gerstner transform mirrored on the CPU
+   *  (`waterMesh.renderVertex`). Returns the displaced world position
+   *  `{ x, y, z }` — where the wireframe actually draws that vertex. */
+  meshVertexAt(x: number, z: number): { x: number; y: number; z: number }
+  /**
+   * Dot↔mesh sync scan: for a rest-grid of vertices, forward-transform each
+   * to its drawn world position via the GPU mirror, then sample the SIM
+   * surface (the red dots) at that same world XZ. The residual `dot − mesh`
+   * is the vertical gap the dots show against the rendered wireframe — 0
+   * means the buoyancy field the bike feels is exactly the surface drawn.
+   * Pure math, no rendering; pause first for a stable phase.
+   */
+  dotMeshResidual(opts?: { half?: number; step?: number }): {
+    maxAbs: number
+    mean: number
+    n: number
+    worst: { x: number; z: number; dot: number; mesh: number; d: number }
+  }
   setPaused(on: boolean): void
   isPaused(): boolean
   /** Advance exactly one 60 Hz frame (works while paused). */
   step(): void
-  setCamPreset(n: 1 | 2 | 3): void
+  setCamPreset(n: 1 | 2 | 3 | 4): void
   /** The live water-shader debug surface (same object the tuner drives). */
   water: WaterMesh['debug']
 }
@@ -371,7 +392,7 @@ export async function bootWaterLabMode(appEl: HTMLElement): Promise<WaterLabMode
   orbit.maxPolarAngle = Math.PI * 0.495
   orbit.target.set(0, 0, 0)
 
-  function setCamPreset(n: 1 | 2 | 3): void {
+  function setCamPreset(n: 1 | 2 | 3 | 4): void {
     const bearingRad = (waterMesh.debug.getWaveBearing() * Math.PI) / 180
     const wx = Math.cos(bearingRad)
     const wz = Math.sin(bearingRad)
@@ -381,9 +402,19 @@ export async function bootWaterLabMode(appEl: HTMLElement): Promise<WaterLabMode
     } else if (n === 2) {
       // Three-quarter diagnostic view.
       camera.position.set(wx * 38 - wz * 30, 26, wz * 38 + wx * 30)
-    } else {
+    } else if (n === 3) {
       // Top-down — the topo-map read; iso-line motion is most legible here.
       camera.position.set(2, 95, 2)
+    } else {
+      // Side PROFILE — sit out along the crest axis (perpendicular to wave
+      // travel) at near-water height and look horizontally across the swell.
+      // Crests run toward/away from camera, so the surface reads as a 2-D
+      // wave profile and the red sim dots sit visibly ON (or floating OFF)
+      // the rendered mesh. This is the dot↔mesh height check — perspective
+      // can't fake a vertical gap here the way the ¾/persp views can.
+      const cx = -wz
+      const cz = wx
+      camera.position.set(cx * 58, 5.5, cz * 58)
     }
     orbit.target.set(0, 0, 0)
     orbit.update()
@@ -436,7 +467,7 @@ export async function bootWaterLabMode(appEl: HTMLElement): Promise<WaterLabMode
       <div><span style="color:#888">swell trains      </span>${trains.map((t) => `λ${t.wavelength.toFixed(0)} @ ${t.speed.toFixed(1)} m/s`).join(' · ')}</div>
       <div><span style="color:#888">set beat          </span>${beat ? `${beat.toFixed(1)} s` : '—'}<span style="color:#888"> · coherence(eff) </span>${coherence.toFixed(2)}${labPaused ? ' · <b style="color:#ffc83c">PAUSED</b>' : ''}${todSeconds !== null ? `<span style="color:#888"> · tod </span>${todSeconds.toFixed(0)}s` : ''}</div>
       <div style="margin-top:8px;color:#7cf;font-size:11px">
-        1/2/3 cam (graze · ¾ · top-down) · drag orbit<br>
+        1/2/3/4 cam (graze · ¾ · top-down · side) · drag orbit<br>
         Space pause · . step · G drifters · P pace cones · O pillar<br>
         T / Shift+T time of day · tuner → WATER (top-right)
       </div>
@@ -469,6 +500,8 @@ export async function bootWaterLabMode(appEl: HTMLElement): Promise<WaterLabMode
       setCamPreset(2)
     } else if (e.code === 'Digit3') {
       setCamPreset(3)
+    } else if (e.code === 'Digit4') {
+      setCamPreset(4)
     } else if (e.code === 'KeyT') {
       const step = e.shiftKey ? -20 : 20
       todSeconds = ((((todSeconds ?? 40) + step) % 360) + 360) % 360
@@ -510,6 +543,41 @@ export async function bootWaterLabMode(appEl: HTMLElement): Promise<WaterLabMode
       return { maxV, atSlope }
     },
     surfaceYAt: (x, z) => sampleHeight(waveField, x, z),
+    meshVertexAt(x, z) {
+      const out = { x: 0, y: 0, z: 0 }
+      waterMesh.renderVertex(x, z, out)
+      return out
+    },
+    dotMeshResidual(opts) {
+      const half = opts?.half ?? 24
+      const step = opts?.step ?? 2
+      const out = { x: 0, y: 0, z: 0 }
+      let maxAbs = 0
+      let sum = 0
+      let n = 0
+      const worst = { x: 0, z: 0, dot: 0, mesh: 0, d: 0 }
+      for (let rx = -half; rx <= half; rx += step) {
+        for (let rz = -half; rz <= half; rz += step) {
+          // Forward-displace the rest vertex to where the GPU draws it…
+          waterMesh.renderVertex(rx, rz, out)
+          // …then sample the SIM surface (the dots) at that drawn XZ.
+          const dot = sampleHeight(waveField, out.x, out.z)
+          const d = dot - out.y
+          const ad = Math.abs(d)
+          if (ad > maxAbs) {
+            maxAbs = ad
+            worst.x = out.x
+            worst.z = out.z
+            worst.dot = dot
+            worst.mesh = out.y
+            worst.d = d
+          }
+          sum += ad
+          n++
+        }
+      }
+      return { maxAbs, mean: n > 0 ? sum / n : 0, n, worst }
+    },
     setPaused(on) {
       labPaused = on
     },

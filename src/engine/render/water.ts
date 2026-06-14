@@ -1163,6 +1163,18 @@ export function createWaterMesh(
   field.steepness = initialSteepness
   field.pinchCos = Math.cos((PINCH_DIRECTION_DEFAULT * Math.PI) / 180)
   field.pinchSin = Math.sin((PINCH_DIRECTION_DEFAULT * Math.PI) / 180)
+  // Seed the bearing too (the GPU's `waveBearingDegUniform` defaults to
+  // WAVE_BEARING_DEFAULT). Omitting it left `field.waveBearing` at 0 while the
+  // shader rotated the whole swell by the default angle — so the rendered
+  // surface and the CPU buoyancy field (the `?wavedots`/`?waterlab` red dots)
+  // agreed only at the world origin and diverged by metres with distance.
+  // Shipped races escaped it because `race-boot` always calls
+  // `setWaveBearing(swellBearingDeg ?? WAVE_BEARING_DEFAULT)` (writing both
+  // sides) at track load; the desync bit the dev scenes that build the mesh
+  // WITHOUT race-boot — `?waterlab`, `?waveriders`, the editor. Seeding here
+  // syncs them at construction; `setWaveBearing` keeps both sides in lockstep
+  // after a track (or the menu) re-aims the swell.
+  field.waveBearing = (WAVE_BEARING_DEFAULT * Math.PI) / 180
 
   // Wave bearing (degrees, -180..180). Rotates the WHOLE wave field's
   // travel direction in world XZ so the user can re-aim the swell
