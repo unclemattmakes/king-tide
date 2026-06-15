@@ -14,6 +14,7 @@
 
 import * as THREE from 'three'
 import { resetDevSettings } from '../dev-settings'
+import { racingLineRibbonEnabled, setRacingLineRibbonEnabled } from '../render/racing-line-ribbon'
 import { getActivePostPipeline } from '../render/renderer-service'
 import { setSignalsEnabled, signalsEnabled } from '../render/signal-state'
 import { getSkySystem } from '../render/sky-service'
@@ -327,6 +328,16 @@ export function createDevTools(deps: DevToolDeps): DevTool[] {
       {
         hint: 'Style-as-legibility rim signals — drift-charge ladder + pickup pulse (live)',
         keywords: 'legibility rim signal charge drift pickup boost hazard slipstream',
+      },
+    ),
+    toggle(
+      'toggle.raceline',
+      'Racing-line ribbon',
+      () => setRacingLineRibbonEnabled(!racingLineRibbonEnabled()),
+      () => racingLineRibbonEnabled(),
+      {
+        hint: 'B3 painted flow ribbon on the water along the racing line — cool=hold, warm=brake/off-line (live)',
+        keywords: 'legibility racing line ribbon flow wayfinding forza wave brake guidance',
       },
     ),
 
