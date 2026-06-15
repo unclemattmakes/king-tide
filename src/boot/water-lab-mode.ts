@@ -52,7 +52,7 @@ import {
   sampleHeight,
 } from '@/engine/sim/water/wave-field'
 import { installWaterDebugMenu } from '@/engine/water-debug-menu'
-import { applyStoredWaterTuning } from '@/engine/water-debug-storage'
+import { applyStoredWaterTuning, setWaterTuningScope } from '@/engine/water-debug-storage'
 import { hideLoadingScreen, setLoadingMessage } from './loading-screen'
 import { createSimSurfaceProbe } from './sim-surface-probe'
 
@@ -154,10 +154,23 @@ export async function bootWaterLabMode(appEl: HTMLElement): Promise<WaterLabMode
   // Mirror-pass cull (sky-only here — no terrain in the lab); keeps the
   // lab's frame representative of the shipped reflection cost.
   waterMesh.configureReflectionCulling(camera)
+  // Lab is GLOBAL scope: the tuner persists to the machine-wide store, and the
+  // knobs that can't act in open ocean (no seabed / shore / obstacles / bikes)
+  // are tagged inert so they don't read as broken.
+  setWaterTuningScope({ kind: 'global' })
   applyStoredWaterTuning(waterMesh)
   // Full WATER tuner, auto-opened — this scene exists to turn its knobs.
   document.body.classList.add('dev-build')
-  const waterMenu = installWaterDebugMenu(waterMesh)
+  const waterMenu = installWaterDebugMenu(waterMesh, {
+    sceneNotes: {
+      bodyAbsorption: 'needs a seabed',
+      shoreWaveStrength: 'needs a shore',
+      shoalSurf: 'needs a shore',
+      splashRings: 'needs landings',
+      contactFoam: 'needs obstacles',
+      wakeStrength: 'needs ridden bikes',
+    },
+  })
   waterMenu.open()
 
   const sky = createSkySystem({
@@ -437,8 +450,8 @@ export async function bootWaterLabMode(appEl: HTMLElement): Promise<WaterLabMode
   hudEl.id = 'waterlab-hud'
   hudEl.style.cssText = `
     position: fixed;
-    top: 12px;
-    left: 12px;
+    bottom: 12px;
+    right: 12px;
     z-index: 100;
     background: rgba(0, 0, 0, 0.72);
     color: #eee;
@@ -447,6 +460,7 @@ export async function bootWaterLabMode(appEl: HTMLElement): Promise<WaterLabMode
     padding: 12px 16px;
     border-radius: 6px;
     min-width: 320px;
+    max-width: 360px;
     pointer-events: none;
     line-height: 1.45;
   `
@@ -469,7 +483,7 @@ export async function bootWaterLabMode(appEl: HTMLElement): Promise<WaterLabMode
       <div style="margin-top:8px;color:#7cf;font-size:11px">
         1/2/3/4 cam (graze · ¾ · top-down · side) · drag orbit<br>
         Space pause · . step · G drifters · P pace cones · O pillar<br>
-        T / Shift+T time of day · tuner → WATER (top-right)
+        T / Shift+T time of day · tuner → WATER (left)
       </div>
       <div style="margin-top:8px;color:#9fb3c8;font-size:11px;line-height:1.5">
         Contour lines should ride the <b style="color:#36e26a">pace cones</b> —
