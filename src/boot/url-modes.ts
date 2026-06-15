@@ -170,6 +170,20 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     return 'handled'
   }
 
+  // Water tune: `?watertune=<slug>`. Loads a REAL track's environment + water
+  // config with a free orbit camera and the WATER tuner (track-scoped) — and
+  // none of the race machinery. Tune a level's water look in context (contact
+  // foam has obstacles, body absorption has a seabed), then EXPORT its block.
+  // Bare `?watertune` / `=1` defaults to the tutorial lagoon.
+  const waterTuneParam = earlyParams.get('watertune')
+  if (waterTuneParam !== null) {
+    setLoadingMessage('Loading water tune…')
+    const { bootWaterTuneMode } = await import('./water-tune-mode')
+    const slug = waterTuneParam === '' || waterTuneParam === '1' ? 'sandbar' : waterTuneParam
+    await bootWaterTuneMode(appEl, slug)
+    return 'handled'
+  }
+
   // End-of-cup podium ceremony: `?podium=1`. Reads the completed cup from
   // sessionStorage, stages the 3D trophy ceremony, then slides the final
   // championship standings card in. Reached from the cup-finale finish
