@@ -36,7 +36,7 @@ import {
   sampleHeight,
 } from '@/engine/sim/water/wave-field'
 import { installWaterDebugMenu } from '@/engine/water-debug-menu'
-import { applyStoredWaterTuning } from '@/engine/water-debug-storage'
+import { applyStoredWaterTuning, setWaterTuningScope } from '@/engine/water-debug-storage'
 import {
   WAVE_RIDER_TUNING,
   type WaveRiderArchetypeId,
@@ -99,6 +99,8 @@ export async function bootWaveRiderMode(appEl: HTMLElement): Promise<WaveRiderMo
   scene.add(waterMesh.mesh)
   // Mirror-pass cull, same as every water scene (sky-only mirror here).
   waterMesh.configureReflectionCulling(camera)
+  // Buoyancy bench — no track, so GLOBAL scope (machine-wide look store).
+  setWaterTuningScope({ kind: 'global' })
   applyStoredWaterTuning(waterMesh)
   // Reuse the in-race WATER menu (top-right toggle) for live wave tuning.
   // `dev-build` reveals the toggle button in this stand-alone scene.

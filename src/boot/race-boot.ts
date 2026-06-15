@@ -106,7 +106,11 @@ import {
   setWaveZones,
 } from '@/engine/sim/water/wave-field'
 import { applyDeckProfile, detectSteamDeck } from '@/engine/steam-deck'
-import { applyStoredWaterTuning } from '@/engine/water-debug-storage'
+import {
+  applyLookOverrides,
+  loadTrackOverrides,
+  setWaterTuningScope,
+} from '@/engine/water-debug-storage'
 import { type LoadedBike, loadBike } from '@/game/assets/bike-loader'
 import { loadManifest } from '@/game/assets/manifest'
 import { type LoadedProp, loadProp } from '@/game/assets/prop-loader'
@@ -485,10 +489,19 @@ export async function bootRace(appEl: HTMLElement) {
   // from the persisted setting now that the mesh exists.
   setWaterMesh(waterMesh)
   applyWaveSprayIntensity(playerSettings.waveSprayIntensity)
-  // Apply any persisted water tuning eagerly, so the page opens in the
-  // visual state the user last left; the tuning sliders themselves are
-  // dynamic-imported on first click (same pattern as dev-settings above).
-  applyStoredWaterTuning(waterMesh)
+  // Per-track water look (water-defaults pass, 2026-06-14). In a level the
+  // shipped baseline is the constructor defaults — NOT the machine-wide global
+  // store, which is lab scope now, so you tune against what ships, not another
+  // track's leftover look. A track's committed `water.look` (JSON) overrides
+  // the defaults sparsely; any in-progress per-slug tuning rides on top. The
+  // mesh already sits at constructor defaults from createWaterMesh, so we only
+  // apply the sparse overrides. Setting the scope tells the WATER tuner
+  // (installed below / via the dev palette) to persist edits per slug, reset to
+  // this track's shipped look, and export a `water.look` block.
+  const committedLook = track.water?.look ?? {}
+  setWaterTuningScope({ kind: 'track', slug: trackId, committed: committedLook })
+  applyLookOverrides(waterMesh, committedLook)
+  applyLookOverrides(waterMesh, loadTrackOverrides(trackId))
   bindLazyMenuButton('water-debug-toggle', async () => {
     const { installWaterDebugMenu } = await import('@/engine/water-debug-menu')
     return installWaterDebugMenu(waterMesh)

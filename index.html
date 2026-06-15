@@ -606,6 +606,42 @@
       }
       #water-debug button.action:hover, #devsettings button.action:hover { filter: brightness(1.18); }
 
+      /* ── WATER mixer board (water-defaults pass) ──
+         Section headers + a 4th row column reserving the mute/solo cell, so
+         the sliders stay column-aligned whether or not a row has M/S. */
+      #water-debug h2 {
+        font: 600 11px var(--bc-font-mono);
+        letter-spacing: 0.07em; color: #6ad9c5;
+        margin: 16px 0 7px; padding-bottom: 4px;
+        border-bottom: 1px solid var(--bc-line);
+      }
+      #water-debug h2:first-of-type { margin-top: 2px; }
+      #water-debug .row { grid-template-columns: 180px 1fr 70px 46px; }
+      #water-debug .row .mix { display: flex; gap: 4px; justify-content: flex-end; }
+      #water-debug .row .mx-btn {
+        width: 20px; height: 20px; padding: 0; cursor: pointer;
+        font: 700 10px var(--bc-font-mono); line-height: 1;
+        border-radius: 5px; color: var(--bc-ink-dim);
+        background: rgba(255, 255, 255, 0.05); border: 1px solid var(--bc-line);
+        transition: filter var(--t-fast) var(--ease-out);
+      }
+      #water-debug .row .mx-btn:hover { filter: brightness(1.4); }
+      #water-debug .row .mx-mute.on {
+        color: #1a1400; background: var(--bc-yellow); border-color: var(--bc-yellow);
+      }
+      #water-debug .row .mx-solo.on {
+        color: #04201a; background: #6ad9c5; border-color: #6ad9c5;
+      }
+      #water-debug .row.mx-off label,
+      #water-debug .row.mx-off .val,
+      #water-debug .row.mx-off input[type="range"] { opacity: 0.38; }
+      #water-debug .lab-note {
+        font: 600 9px var(--bc-font-mono); letter-spacing: 0.03em;
+        text-transform: uppercase; color: var(--bc-yellow);
+        border: 1px solid rgba(245, 200, 90, 0.35); border-radius: 4px;
+        padding: 0 4px; margin-left: 2px; white-space: nowrap; vertical-align: middle;
+      }
+
       /* ───────────── Arcade race HUD ─────────────
          Countdown banner, position badge, lap/race timer, gap pill,
          minimap porthole. Painted race-day signage (docs/ui-art-direction.md)

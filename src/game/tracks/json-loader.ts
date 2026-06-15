@@ -6,6 +6,7 @@ import {
   type SpectrumSpec,
 } from '@/engine/sim/water/spectrum'
 import type { WaveStampInput } from '@/engine/sim/water/wave-field'
+import { isWaterLookKey, type WaterLookOverrides } from '@/engine/water-debug-storage'
 import { pointAtT, sampleCatmullRom, sampleScalarToMatch, tangentAtT } from './catmull-rom'
 import {
   type AISpline,
@@ -779,6 +780,20 @@ function readOptionalWater(raw: unknown): WaterConfig | null {
       spectrum.peakWavelengthM = requireNumber(spectrumRaw, 'peakWavelengthM')
     }
     out.spectrum = spectrum
+  }
+  // Per-track painterly-look overrides (water-defaults pass). SPARSE +
+  // TOLERANT: an object of look-knob → number; only recognised keys with
+  // finite numbers are kept, anything else (unknown/legacy key, non-number)
+  // is skipped so old + future JSONs keep loading. Authored via the WATER
+  // tuner's EXPORT; applied at boot on top of the shipped defaults.
+  const lookRaw = (raw as { look?: unknown }).look
+  if (lookRaw !== undefined && lookRaw !== null) {
+    if (!isObject(lookRaw)) throw new Error('track-json: water.look must be an object')
+    const look: WaterLookOverrides = {}
+    for (const [k, v] of Object.entries(lookRaw)) {
+      if (isWaterLookKey(k) && typeof v === 'number' && Number.isFinite(v)) look[k] = v
+    }
+    if (Object.keys(look).length > 0) out.look = look
   }
   // `waveHeight` / `waveFreq` are deprecated dead knobs (real amplitude is
   // sky.seaStateBeaufort + waveZones) — silently ignored when present so

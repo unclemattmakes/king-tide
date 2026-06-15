@@ -17,13 +17,20 @@
  * static surface the install function needs.
  */
 
-import type { WaterMesh } from './render/water'
+import { WAVE_BEARING_DEFAULT, type WaterMesh } from './render/water'
 import {
   applyWaterSettings,
+  clearTrackOverrides,
   defaultsToSettings,
+  diffLook,
+  getWaterTuningScope,
   loadStoredWaterSettings,
+  loadTrackOverrides,
+  persistTrackOverrides,
   persistWaterSettings,
+  WATER_SETTERS,
   type WaterDebugSettings,
+  type WaterLookKey,
 } from './water-debug-storage'
 
 type SliderDef = {
@@ -386,6 +393,101 @@ const SLIDERS: SliderDef[] = [
   },
 ]
 
+/** Look layers that A/B cleanly: 0 means "off / absent", so mute (→ 0) and
+ *  solo (mute every other one of these) read as a real isolation. The rest are
+ *  shape / time / modifier knobs with no clean "off", so they get no M/S. */
+const MUTABLE_KEYS = new Set<WaterLookKey>([
+  'reflectionStrength',
+  'sunGlow',
+  'detailStrength',
+  'sunDiscStrength',
+  'sunStreakStrength',
+  'shoreWaveStrength',
+  'whitecapCurvature',
+  'foamWarmth',
+  'foamStreak',
+  'langmuir',
+  'rampStrength',
+  'contourStrength',
+  'contourRelief',
+  'contourBreakup',
+  'riseStroke',
+  'splashRings',
+  'contactFoam',
+  'wakeStrength',
+])
+
+/** Mixer sections — every rendered slider grouped under a header. The authored,
+ *  non-persisted live rows (bearing + swell sets) render at the top of
+ *  "Shape & motion". Keys not listed here aren't shown (the legacy whitecap
+ *  height/slope/mode knobs). */
+const SECTIONS: { title: string; keys: WaterLookKey[] }[] = [
+  {
+    title: 'Shape & motion',
+    keys: [
+      'steepness',
+      'swellScale',
+      'chopScale',
+      'timeScale',
+      'pinchDirection',
+      'shoreWaveStrength',
+      'shoalSurf',
+    ],
+  },
+  {
+    title: 'Lighting & body',
+    keys: [
+      'reflectionStrength',
+      'sunGlow',
+      'roughBase',
+      'roughSparkle',
+      'detailStrength',
+      'bodyAbsorption',
+      'sunDiscStrength',
+      'sunStreakStrength',
+      'streakElongation',
+    ],
+  },
+  {
+    title: 'Foam & whitecaps',
+    keys: [
+      'whitecapCurvature',
+      'whitecapLeadBias',
+      'foamWarmth',
+      'foamStreak',
+      'foamBrush',
+      'foamWarp',
+      'langmuir',
+    ],
+  },
+  {
+    title: 'Readability',
+    keys: [
+      'rampStrength',
+      'rampSteps',
+      'rampPosterize',
+      'contourStrength',
+      'contourSpacing',
+      'contourRelief',
+      'contourBreakup',
+      'contourCoherence',
+      'contourCalmAtRest',
+      'contourGate',
+      'riseStroke',
+    ],
+  },
+  {
+    title: 'Contacts & dynamic',
+    keys: ['splashRings', 'contactFoam', 'wakeStrength'],
+  },
+]
+
+/** Options for the water tuner install. `sceneNotes` tags knobs that can't act
+ *  in the current scene (e.g. contact foam in the open-ocean lab — no obstacles). */
+export type WaterDebugMenuOptions = {
+  sceneNotes?: Partial<Record<WaterLookKey, string>>
+}
+
 export type WaterDebugMenu = {
   open(): void
   close(): void
@@ -398,7 +500,10 @@ export type WaterDebugMenu = {
  * sliders the user last left. Returns a small handle for programmatic
  * open/close (matching `installDevSettingsMenu`).
  */
-export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
+export function installWaterDebugMenu(
+  water: WaterMesh,
+  opts: WaterDebugMenuOptions = {},
+): WaterDebugMenu {
   const overlay = document.getElementById('water-debug')
   const toggle = document.getElementById('water-debug-toggle')
   const closeBtn = document.getElementById('wd-close')
@@ -408,11 +513,72 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
     return { open() {}, close() {}, isOpen: () => false }
   }
 
-  const settings = loadStoredWaterSettings(water.debug.defaults)
+  const sceneNotes = opts.sceneNotes ?? {}
+  const scope = getWaterTuningScope()
+  const defaults = defaultsToSettings(water.debug.defaults)
+  // Baseline = what this scene "ships": the machine-wide global store in the
+  // lab, or defaults + the track's committed `water.look` in a level. Seed the
+  // sliders from baseline + any machine-local working overrides, then mirror
+  // that onto the mesh so panel + sea agree the moment it opens.
+  const baseline: WaterDebugSettings =
+    scope.kind === 'track'
+      ? Object.assign({ ...defaults }, scope.committed)
+      : loadStoredWaterSettings(water.debug.defaults)
+  const settings: WaterDebugSettings = { ...baseline }
+  if (scope.kind === 'track') Object.assign(settings, loadTrackOverrides(scope.slug))
   applyWaterSettings(water, settings)
 
-  type Bound = { def: SliderDef; input: HTMLInputElement; valEl: HTMLElement }
+  // Persist target depends on scope: per-slug working deltas in a level
+  // (sparse — only what differs from this track's shipped look), or the
+  // machine-wide store in the lab.
+  function persist(): void {
+    if (scope.kind === 'track') {
+      persistTrackOverrides(scope.slug, diffLook(settings, baseline))
+    } else {
+      persistWaterSettings(settings)
+    }
+  }
+
+  // ---- mixer state (session only — never persisted) -------------------
+  // `muted` forces a layer to 0; `soloed` mutes every OTHER mutable layer.
+  // Structural rows aren't mutable, so soloing a shading layer still rides the
+  // live sea. settings[] keeps the real value, so mute is reversible and
+  // export/persist reflect intent, not the muted 0.
+  const muted = new Set<WaterLookKey>()
+  const soloed = new Set<WaterLookKey>()
+  function effective(key: WaterLookKey): number {
+    if (muted.has(key)) return 0
+    if (soloed.size > 0 && !soloed.has(key)) return 0
+    return settings[key]
+  }
+  function applyKey(key: WaterLookKey): void {
+    WATER_SETTERS[key](water, MUTABLE_KEYS.has(key) ? effective(key) : settings[key])
+  }
+
+  type Bound = {
+    def: SliderDef
+    input: HTMLInputElement
+    valEl: HTMLElement
+    row: HTMLElement
+    muteBtn?: HTMLButtonElement
+    soloBtn?: HTMLButtonElement
+  }
   const bound: Bound[] = []
+
+  function refreshMixerState(): void {
+    const anySolo = soloed.size > 0
+    for (const b of bound) {
+      if (!MUTABLE_KEYS.has(b.def.key)) continue
+      const off = muted.has(b.def.key) || (anySolo && !soloed.has(b.def.key))
+      b.row.classList.toggle('mx-off', off)
+      b.muteBtn?.classList.toggle('on', muted.has(b.def.key))
+      b.soloBtn?.classList.toggle('on', soloed.has(b.def.key))
+    }
+  }
+  function applyMixer(): void {
+    for (const b of bound) if (MUTABLE_KEYS.has(b.def.key)) applyKey(b.def.key)
+    refreshMixerState()
+  }
 
   // Live-only rows — hand-built, deliberately outside the SLIDERS table +
   // persistence: these knobs are per-track AUTHORED data (track JSON keys,
@@ -460,42 +626,10 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
       valEl.textContent = opts.format(v)
     })
   }
-  liveRow({
-    id: 'waveBearingLive',
-    label: 'Wave bearing',
-    hint: 'Global wave-train direction (CCW from world +X). Authored per track via water.swellBearingDeg — this slider is a live session override and is NOT saved. Render + CPU buoyancy track together.',
-    min: -180,
-    max: 180,
-    step: 1,
-    get: () => water.debug.getWaveBearing(),
-    set: (v) => water.debug.setWaveBearing(v),
-    format: (n) => `${n.toFixed(0)}°`,
-  })
-  liveRow({
-    id: 'swellSetPeriodLive',
-    label: 'Set period',
-    hint: 'Wave-set envelope period, seconds between set peaks (0 = off). Sea breathes ±depth around its static state; buoyancy follows. Authored per track via water.swellSets — live override, NOT saved.',
-    min: 0,
-    max: 120,
-    step: 1,
-    get: () => water.debug.getSwellSet().periodS,
-    set: (v) => water.debug.setSwellSetPeriod(v),
-    format: (n) => (n > 0 ? `${n.toFixed(0)} s` : 'off'),
-  })
-  liveRow({
-    id: 'swellSetDepthLive',
-    label: 'Set depth',
-    hint: 'Wave-set envelope amplitude swing, 0..0.6 (0.3 → sea breathes between 0.7× and 1.3×). Authored per track via water.swellSets — live override, NOT saved.',
-    min: 0,
-    max: 0.6,
-    step: 0.05,
-    get: () => water.debug.getSwellSet().depth,
-    set: (v) => water.debug.setSwellSetDepth(v),
-    format: (n) => n.toFixed(2),
-  })
-
-  // Build the sliders from the SLIDERS table.
-  for (const def of SLIDERS) {
+  // Build one slider row — label (+ optional inert-scene tag), range, value,
+  // and for the mute/solo-eligible look layers, M/S buttons. Drag updates the
+  // stored value + mesh live; drag-end persists (scope-aware).
+  function buildSliderRow(def: SliderDef): void {
     const row = document.createElement('div')
     row.className = 'row'
 
@@ -503,6 +637,15 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
     label.htmlFor = `wd-${def.key}`
     label.textContent = def.label
     if (def.hint) label.title = def.hint
+    const note = sceneNotes[def.key]
+    if (note) {
+      const tag = document.createElement('span')
+      tag.className = 'lab-note'
+      tag.textContent = note
+      tag.title = `Inert in this scene — ${note}. The knob works; it just has nothing to act on here.`
+      label.appendChild(document.createTextNode(' '))
+      label.appendChild(tag)
+    }
     row.appendChild(label)
 
     const input = document.createElement('input')
@@ -519,131 +662,101 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
     valEl.textContent = def.format(settings[def.key])
     row.appendChild(valEl)
 
-    body.appendChild(row)
-    bound.push({ def, input, valEl })
+    const b: Bound = { def, input, valEl, row }
+
+    if (MUTABLE_KEYS.has(def.key)) {
+      const mix = document.createElement('div')
+      mix.className = 'mix'
+      const muteBtn = document.createElement('button')
+      muteBtn.type = 'button'
+      muteBtn.className = 'mx-btn mx-mute'
+      muteBtn.textContent = 'M'
+      muteBtn.title = 'Mute — force this layer off (its intensity is remembered)'
+      const soloBtn = document.createElement('button')
+      soloBtn.type = 'button'
+      soloBtn.className = 'mx-btn mx-solo'
+      soloBtn.textContent = 'S'
+      soloBtn.title = 'Solo — mute every other shading layer'
+      mix.appendChild(muteBtn)
+      mix.appendChild(soloBtn)
+      row.appendChild(mix)
+      b.muteBtn = muteBtn
+      b.soloBtn = soloBtn
+      muteBtn.addEventListener('click', () => {
+        if (muted.has(def.key)) muted.delete(def.key)
+        else muted.add(def.key)
+        applyMixer()
+      })
+      soloBtn.addEventListener('click', () => {
+        if (soloed.has(def.key)) soloed.delete(def.key)
+        else soloed.add(def.key)
+        applyMixer()
+      })
+    }
+
+    body!.appendChild(row)
+    bound.push(b)
 
     input.addEventListener('input', () => {
       const v = Number.parseFloat(input.value)
       if (!Number.isFinite(v)) return
       ;(settings as unknown as Record<string, number>)[def.key] = v
       valEl.textContent = def.format(v)
-      // Apply directly — no need to call applyAll on every drag tick.
-      switch (def.key) {
-        case 'steepness':
-          water.debug.setSteepness(v)
-          break
-        case 'swellScale':
-          water.debug.setSwellScale(v)
-          break
-        case 'chopScale':
-          water.debug.setChopScale(v)
-          break
-        case 'timeScale':
-          water.debug.setTimeScale(v)
-          break
-        case 'reflectionStrength':
-          water.debug.setReflectionStrength(v)
-          break
-        case 'sunGlow':
-          water.debug.setSunGlow(v)
-          break
-        case 'roughBase':
-          water.debug.setRoughBase(v)
-          break
-        case 'roughSparkle':
-          water.debug.setRoughSparkle(v)
-          break
-        case 'detailStrength':
-          water.debug.setDetailStrength(v)
-          break
-        case 'pinchDirection':
-          water.debug.setPinchDirection(v)
-          break
-        case 'bodyAbsorption':
-          water.debug.setBodyAbsorption(v)
-          break
-        case 'sunDiscStrength':
-          water.debug.setSunDiscStrength(v)
-          break
-        case 'sunStreakStrength':
-          water.debug.setSunStreakStrength(v)
-          break
-        case 'streakElongation':
-          water.debug.setStreakElongation(v)
-          break
-        case 'shoreWaveStrength':
-          water.debug.setShoreWaveStrength(v)
-          break
-        case 'shoalSurf':
-          water.debug.setShoalSurf(v)
-          break
-        case 'splashRings':
-          water.debug.setSplashRings(v)
-          break
-        case 'contactFoam':
-          water.debug.setContactFoam(v)
-          break
-        case 'whitecapCurvature':
-          water.debug.setWhitecapCurvature(v)
-          break
-        case 'whitecapLeadBias':
-          water.debug.setWhitecapLeadBias(v)
-          break
-        case 'foamWarmth':
-          water.debug.setFoamWarmth(v)
-          break
-        case 'foamStreak':
-          water.debug.setFoamStreak(v)
-          break
-        case 'foamBrush':
-          water.debug.setFoamBrush(v)
-          break
-        case 'foamWarp':
-          water.debug.setFoamWarp(v)
-          break
-        case 'langmuir':
-          water.debug.setLangmuir(v)
-          break
-        case 'wakeStrength':
-          water.debug.setWakeStrength(v)
-          break
-        case 'rampStrength':
-          water.debug.setRampStrength(v)
-          break
-        case 'rampSteps':
-          water.debug.setRampSteps(v)
-          break
-        case 'rampPosterize':
-          water.debug.setRampPosterize(v)
-          break
-        case 'contourStrength':
-          water.debug.setContourStrength(v)
-          break
-        case 'contourSpacing':
-          water.debug.setContourSpacing(v)
-          break
-        case 'contourRelief':
-          water.debug.setContourRelief(v)
-          break
-        case 'contourBreakup':
-          water.debug.setContourBreakup(v)
-          break
-        case 'contourCoherence':
-          water.debug.setContourCoherence(v)
-          break
-        case 'contourCalmAtRest':
-          water.debug.setContourCalmAtRest(v)
-          break
-        case 'contourGate':
-          water.debug.setContourGate(v)
-          break
-        case 'riseStroke':
-          water.debug.setRiseStroke(v)
-          break
-      }
+      applyKey(def.key)
     })
-    input.addEventListener('change', () => persistWaterSettings(settings))
+    input.addEventListener('change', persist)
   }
+
+  // Build the mixer board section by section. The authored, non-persisted live
+  // rows (bearing + swell sets) head up "Shape & motion" — each seeds from the
+  // live mesh value and any drag lasts only for the session; persisting the
+  // bearing was how a value dialed on one track silently re-aimed every other
+  // track's swell (water-next-research §4.5). RESET doesn't touch them.
+  const defByKey = new Map(SLIDERS.map((d) => [d.key, d] as const))
+  SECTIONS.forEach((section, si) => {
+    const h = document.createElement('h2')
+    h.textContent = section.title
+    body.appendChild(h)
+    if (si === 0) {
+      liveRow({
+        id: 'waveBearingLive',
+        label: 'Wave bearing',
+        hint: 'Global wave-train direction (CCW from world +X). Authored per track via water.swellBearingDeg — this slider is a live session override and is NOT saved. Render + CPU buoyancy track together.',
+        min: -180,
+        max: 180,
+        step: 1,
+        get: () => water.debug.getWaveBearing(),
+        set: (v) => water.debug.setWaveBearing(v),
+        format: (n) => `${n.toFixed(0)}°`,
+      })
+      liveRow({
+        id: 'swellSetPeriodLive',
+        label: 'Set period',
+        hint: 'Wave-set envelope period, seconds between set peaks (0 = off). Sea breathes ±depth around its static state; buoyancy follows. Authored per track via water.swellSets — live override, NOT saved.',
+        min: 0,
+        max: 120,
+        step: 1,
+        get: () => water.debug.getSwellSet().periodS,
+        set: (v) => water.debug.setSwellSetPeriod(v),
+        format: (n) => (n > 0 ? `${n.toFixed(0)} s` : 'off'),
+      })
+      liveRow({
+        id: 'swellSetDepthLive',
+        label: 'Set depth',
+        hint: 'Wave-set envelope amplitude swing, 0..0.6 (0.3 → sea breathes between 0.7× and 1.3×). Authored per track via water.swellSets — live override, NOT saved.',
+        min: 0,
+        max: 0.6,
+        step: 0.05,
+        get: () => water.debug.getSwellSet().depth,
+        set: (v) => water.debug.setSwellSetDepth(v),
+        format: (n) => n.toFixed(2),
+      })
+    }
+    for (const key of section.keys) {
+      const def = defByKey.get(key)
+      if (def) buildSliderRow(def)
+    }
+  })
 
   // Wireframe toggle row.
   const wireRow = document.createElement('div')
@@ -662,7 +775,7 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
   wireInput.addEventListener('change', () => {
     settings.wireframe = wireInput.checked
     water.debug.setWireframe(wireInput.checked)
-    persistWaterSettings(settings)
+    persist()
   })
 
   // Colorize-by-layer toggle. Paints the center mesh red, the outer
@@ -686,7 +799,7 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
   colorInput.addEventListener('change', () => {
     settings.colorize = colorInput.checked
     water.debug.setColorize(colorInput.checked)
-    persistWaterSettings(settings)
+    persist()
   })
 
   function syncUI(): void {
@@ -697,6 +810,7 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
     }
     wireInput.checked = settings.wireframe
     colorInput.checked = settings.colorize
+    refreshMixerState()
   }
 
   function open(): void {
@@ -706,13 +820,78 @@ export function installWaterDebugMenu(water: WaterMesh): WaterDebugMenu {
     overlay!.classList.remove('show')
   }
 
+  // EXPORT — copy this scene's water block to the clipboard. The look is the
+  // sparse diff-from-defaults (so it layers on the shipped global look); the
+  // live bearing / swell-set authoring rides along. In a level it's the track's
+  // `water` block, ready to paste into public/tracks/<slug>.json.
+  const round = (n: number, p = 3): number => {
+    const f = 10 ** p
+    return Math.round(n * f) / f
+  }
+  function buildExportBlock(): string {
+    const waterBlock: Record<string, unknown> = {}
+    const bearing = water.debug.getWaveBearing()
+    if (Math.abs(bearing - WAVE_BEARING_DEFAULT) > 0.5) {
+      waterBlock.swellBearingDeg = round(bearing, 1)
+    }
+    const sset = water.debug.getSwellSet()
+    if (sset.periodS > 0) {
+      const sets: Record<string, number> = {
+        periodS: round(sset.periodS, 2),
+        depth: round(sset.depth, 3),
+      }
+      const phase = (sset as { phase?: number }).phase
+      if (phase) sets.phase = round(phase, 3)
+      waterBlock.swellSets = sets
+    }
+    const lookDiff = diffLook(settings, defaults)
+    const lookKeys = Object.keys(lookDiff) as WaterLookKey[]
+    if (lookKeys.length > 0) {
+      const lookOut: Record<string, number> = {}
+      for (const k of lookKeys) lookOut[k] = round(lookDiff[k] as number)
+      waterBlock.look = lookOut
+    }
+    return JSON.stringify({ water: waterBlock }, null, 2)
+  }
+  const exportBtn = document.createElement('button')
+  exportBtn.type = 'button'
+  exportBtn.className = 'action secondary'
+  exportBtn.id = 'wd-export'
+  exportBtn.textContent = 'EXPORT'
+  exportBtn.title =
+    scope.kind === 'track'
+      ? `Copy this track's water block → paste into public/tracks/${scope.slug}.json`
+      : 'Copy the current water look as a JSON block'
+  resetBtn.parentElement?.insertBefore(exportBtn, resetBtn)
+  let exportFlash = 0
+  exportBtn.addEventListener('click', () => {
+    const json = buildExportBlock()
+    void navigator.clipboard?.writeText(json)
+    const dest = scope.kind === 'track' ? `public/tracks/${scope.slug}.json` : '(global look)'
+    console.log(`[water] export → ${dest}\n${json}`)
+    exportBtn.textContent = 'COPIED ✓'
+    window.clearTimeout(exportFlash)
+    exportFlash = window.setTimeout(() => {
+      exportBtn.textContent = 'EXPORT'
+    }, 1200)
+  })
+
   toggle.addEventListener('click', open)
   closeBtn.addEventListener('click', close)
   resetBtn.addEventListener('click', () => {
-    Object.assign(settings, defaultsToSettings(water.debug.defaults))
+    // Track scope: drop the per-slug working overrides → back to this track's
+    // shipped look (defaults + committed). Lab: back to constructor defaults.
+    if (scope.kind === 'track') {
+      clearTrackOverrides(scope.slug)
+      Object.assign(settings, baseline)
+    } else {
+      Object.assign(settings, defaultsToSettings(water.debug.defaults))
+    }
+    muted.clear()
+    soloed.clear()
     applyWaterSettings(water, settings)
     syncUI()
-    persistWaterSettings(settings)
+    persist()
   })
   // Esc closes when open. Doesn't intercept when other overlays own the key.
   window.addEventListener('keydown', (e) => {

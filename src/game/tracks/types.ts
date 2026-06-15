@@ -500,6 +500,15 @@ export type WaterConfig = {
    *  components + spread/bias/peak overrides); the loader validates the
    *  preset name against `SPECTRUM_PRESETS`. */
   spectrum?: import('@/engine/sim/water/spectrum').SpectrumSpec
+  /** Per-track painterly-look overrides (water-defaults pass, 2026-06-14).
+   *  SPARSE: only the knobs this track changes from the shipped global look
+   *  (the constructor defaults) — every absent key inherits that baseline, so
+   *  a track authors only its deviations (calmer foam, punchier contours, a
+   *  warmer ramp…). Keys are the water-debug look knobs (see `WATER_LOOK_KEYS`);
+   *  values are absolute. Authored live in-level via the WATER tuner's EXPORT
+   *  button, applied at boot on top of the defaults + the machine-local
+   *  per-slug working store. Unknown / legacy keys are ignored by the loader. */
+  look?: import('@/engine/water-debug-storage').WaterLookOverrides
 }
 
 /**
