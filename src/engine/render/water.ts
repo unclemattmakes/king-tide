@@ -369,6 +369,15 @@ export type WaterMesh = {
      *  brightness lanes on calm low-slope water — the "which way is the
      *  sea moving" prime where no crest/foam cue fires. 0 = off. */
     setLangmuir(s: number): void
+    /** Crest sub-surface glow (SoT), 0..1. Lerps the wave-peak albedo toward a
+     *  brighter translucent tube-glow tint, gated by the choppiness peak mask ×
+     *  crest height — so pinched crests read as lit-from-within independent of
+     *  sun alignment (deepens the shipped sun-backlit SSS). 0 = off (today's
+     *  look). Render-only; no displacement. Live-tuning dial only — NOT
+     *  persisted (see water-debug-menu's live rows). */
+    setCrestSSS(s: number): void
+    /** Live crest-SSS strength — seeds the `?waterlab` live dial. */
+    getCrestSSS(): number
     /** Bike-wake strength, 0..2. Scales the trail wake — both the churn/rail
      *  foam ribbon laid along each bike's ridden path and its V-ridge
      *  DISPLACEMENT. 1 = baseline; 0 = no rendered wake (buoyancy still
@@ -3356,7 +3365,47 @@ export function createWaterMesh(
   // surface color". Goes through the lighting model so shadow + night
   // dim it naturally.
   const causticColor = vec3(0.45, 0.85, 0.78)
-  const baseColor = baseColorPreCaustic.add(causticColor.mul(causticIntensity))
+  const baseColorScattered = baseColorPreCaustic.add(causticColor.mul(causticIntensity))
+
+  // ── Crest sub-surface glow (SoT, gated default-OFF) ──────────────────
+  // A SECOND, opt-in pass of the Sea-of-Thieves "lit from within" idea,
+  // layered on top of the shipped scatter/SSS blend above. The shipped
+  // blend (`sssGate`) is gated by SUN BACKLIGHT × peak — so on the usual
+  // sunset palette (sun behind the player) the crests barely glow. This
+  // knob deepens the painterly read by letting the player push a brighter
+  // translucent sub-surface tint onto the wave PEAKS regardless of sun
+  // alignment — the "every crest is a backlit wax tip" look.
+  //
+  // Signal is IN-FRAGMENT ONLY — no new varying, no new uniform buffer:
+  //   • `peakMaskScaled` — the choppiness / Gerstner horizontal-pinch peak
+  //     mask (|λ·Dx, λ·Dz| / 0.35), already unpacked from interPackC.x
+  //     (`peakMaskFrag`) and computed above. Large pinch ⇒ crest ⇒ short
+  //     light path ⇒ scatter. (SoT credit this exact signal.)
+  //   • `heightFactor` — already in scope (L~3125). Restricts the lift to
+  //     the upper wave face so flat-but-pinching troughs don't glow.
+  // Their product is the crest mask; the only NEW state is one scalar
+  // strength uniform (`crestSSSUniform`) — the same kind of plain
+  // `uniform(float)` as every other knob here (packed into the existing
+  // material UBO by three; it does NOT add a per-stage uniform *buffer*
+  // the way a `uniformArray` would, so the 12-buffer cap is untouched).
+  //
+  // DEFAULT 0 ⇒ `mix(base, tint, 0)` is byte-identical to today's water.
+  // The tint is a brighter, lighter turquoise than the shipped `sssColor`
+  // so a dialed-in value reads as a luminous translucent crest, not just
+  // "more body colour".
+  const CREST_SSS_DEFAULT = 0
+  const crestSSSUniform = uniform(CREST_SSS_DEFAULT)
+  // Brighter translucent tube-glow tint (lighter/greener than sssColor's
+  // (0.35, 0.95, 0.85)) — the colour light emerges as after a short path
+  // through a backlit crest. Render-only: it tints albedo, so it still
+  // rides the lighting model (shadowed crests don't self-illuminate).
+  const crestSSSColor = vec3(0.55, 1.0, 0.92)
+  const crestSSSMask = clamp(peakMaskScaled.mul(heightFactor), float(0), float(1))
+  const baseColor = mix(
+    baseColorScattered,
+    crestSSSColor,
+    crestSSSMask.mul(crestSSSUniform),
+  )
 
   // Sun glow emissive — additive on top of the scatter blend for the
   // unmistakable SoT "lit-from-behind" wave glow. Peaks on tall crests
@@ -4897,6 +4946,12 @@ export function createWaterMesh(
       // 0..1.5 — travel-aligned windrow lanes on calm water.
       langmuirUniform.value = clamp01(s, 0, 1.5)
     },
+    setCrestSSS(s) {
+      // 0..1 — crest sub-surface glow strength (peak-mask × height lerp to a
+      // brighter translucent tint). 0 = off (today's look).
+      crestSSSUniform.value = clamp01(s, 0, 1)
+    },
+    getCrestSSS: () => crestSSSUniform.value,
     setWakeStrength(s) {
       // 0..2 — trail-wake master strength (churn/rail foam AND ridge
       // displacement). 1 = baseline; 0 = no drawn wake. Render-only: the sim
