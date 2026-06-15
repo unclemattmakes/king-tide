@@ -1045,6 +1045,47 @@ function readOptionalSky(raw: unknown): SkyConfig | null {
   }
   const clouds = readOptionalCloudField(raw.clouds)
   if (clouds) out.clouds = clouds
+  const scenicGrade = readOptionalScenicGrade(raw.scenicGrade)
+  if (scenicGrade) out.scenicGrade = scenicGrade
+  return out
+}
+
+/**
+ * Validate an optional `sky.scenicGrade` block — the scene-wide colour grade
+ * (contrast/saturation budget). All four fields optional; absent → returns null
+ * (no grade authored = identity, byte-identical to today's look). Per-field
+ * bounds mirror `GradeOptions` in `engine/render/post-pipeline.ts`
+ * (exposure/saturation/contrast >= 0, temperature in [-1, 1]); the runtime
+ * clamps too, but we reject out-of-range here so authoring typos fail loud the
+ * same way `sky.bloom` does. Three-free (plain number checks only).
+ */
+function readOptionalScenicGrade(raw: unknown): SkyConfig['scenicGrade'] | null {
+  if (raw === undefined || raw === null) return null
+  if (!isObject(raw)) throw new Error('track-json: sky.scenicGrade must be an object if present')
+  const out: NonNullable<SkyConfig['scenicGrade']> = {}
+  for (const key of ['exposure', 'temperature', 'saturation', 'contrast'] as const) {
+    if (key in raw) {
+      const v = raw[key]
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new Error(`track-json: sky.scenicGrade.${key} must be a finite number if present`)
+      }
+      out[key] = v
+    }
+  }
+  if (out.exposure !== undefined && out.exposure < 0) {
+    throw new Error(`track-json: sky.scenicGrade.exposure must be >= 0 (got ${out.exposure})`)
+  }
+  if (out.saturation !== undefined && out.saturation < 0) {
+    throw new Error(`track-json: sky.scenicGrade.saturation must be >= 0 (got ${out.saturation})`)
+  }
+  if (out.contrast !== undefined && out.contrast < 0) {
+    throw new Error(`track-json: sky.scenicGrade.contrast must be >= 0 (got ${out.contrast})`)
+  }
+  if (out.temperature !== undefined && (out.temperature < -1 || out.temperature > 1)) {
+    throw new Error(
+      `track-json: sky.scenicGrade.temperature must be in [-1, 1] (got ${out.temperature})`,
+    )
+  }
   return out
 }
 
