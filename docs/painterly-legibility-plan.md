@@ -103,11 +103,32 @@ Foundations shipped default-off; then, per Matt's call, the **diffuse warp**, th
 - **B3** racing/wave-line flow ribbon — **delivered** by the spawned A4/B3 session
   ([racing-line-ribbon.ts](../src/engine/render/racing-line-ribbon.ts) + a dev-menu
   toggle + `tools/verify-raceline.mjs`): a Forza-grammar cool/warm ribbon along the
-  track's `aiSplines` line with scrolling brushstroke flow, default-off. *In the
-  working tree, pending commit + a playtest pass.*
-- **A4** painterly normals — assessed **already covered** by the existing brush
-  relief (`normalNode = bumpMap(streak, …)` in painterly-vinyl-material.ts); not
-  separately implemented.
+  track's `main` `aiSplines` line (reused, not re-derived) with scrolling
+  brushstroke flow + a forward chevron in the **alpha** (the painted surface IS the
+  arrow), default-off. One unlit `MeshBasicNodeMaterial`, `renderOrder = 1` (the
+  ghost-vs-water sort fix), `depthTest` on so crests/terrain/the bike occlude it; a
+  lead-fade keeps it brightest around + ahead of the bike. Master flag DEFAULTS OFF
+  (frame byte-identical until enabled): dev palette → Toggles → **Racing-line
+  ribbon**, `?raceline=1` for e2e, `window.__raceline` (enable + live width /
+  opacity / flow / brake dials). **Verified headed (real WebGPU, 0 console
+  errors):** reads as a green flow band tracing the line, fading ahead, warming to
+  amber on the curved approaches; clean on/off. *In the working tree on
+  `claude/painterly-a4b3`, pending a playtest pass.* **Open for the playtest:** over
+  Mayday Bay's teal lagoon the ideal-green sits a touch close in hue (it pops more
+  over deep-blue ocean + with the A2 muted grade on) — colour balance, width and
+  brake thresholds are the live dials for the owner to sign off by eye.
+- **A4** painterly normals — assessed headed (warp `illum=1` default-on) and
+  **already covered**, not separately implemented. The vinyl material's
+  `normalNode = bumpMap(streak, uBrush.mul(2.5))`
+  ([painterly-vinyl-material.ts](../src/engine/render/painterly-vinyl-material.ts))
+  already perturbs the shading normal from the brush-stroke height, and that
+  perturbed `normalView` flows through the TF2 ramp — so the *lighting* already
+  reads brushed. Cranking `brush` moves mostly the **albedo** mottle; the
+  normal-relief term is a subtle tertiary contributor at race distance, and the
+  curvature half is carried by the edge-wear convexity drybrush (`COLOR_0.A`, wired
+  + on). A dedicated tangent-space brush normal map would only refine that tertiary
+  term, at the cost of authoring a sheet, an extra fetch on every vinyl material,
+  and double-perturbation risk — **below the bar.**
 - **B2** event juice — **CUT** (2026-06-15, Matt's call): hitstop touches sim
   timing, which we won't risk in a multiplayer game. The render-only parts (event
   flash, anticipation telegraphs) remain possible later but are deprioritized.

@@ -68,6 +68,7 @@ import { getActiveTier } from '@/engine/render/quality-preset'
 import type { RaceHud } from '@/engine/render/race-hud'
 import type { RaceIntro } from '@/engine/render/race-intro'
 import type { RaceIntroUi } from '@/engine/render/race-intro-ui'
+import type { RacingLineRibbon } from '@/engine/render/racing-line-ribbon'
 import { probeGpuRenderer } from '@/engine/render/renderer'
 import { renderFrame } from '@/engine/render/renderer-service'
 import { createSharkSequence } from '@/engine/render/shark-sequence'
@@ -256,6 +257,12 @@ export interface GameLoopOpts {
   raceIntroUi: RaceIntroUi | null
   raceTick: RaceTick
   dirArrow: DirectionArrow
+  /** Optional B3 racing-line flow ribbon. Present on the race path when the
+   *  track has a `main` AI spline; absent (null) for splineless / procedural
+   *  tracks and the other `startGameLoop` callers. Ticked each render frame with
+   *  the wave-field clock + the player XZ; self-hides while its master flag is
+   *  off, so it costs one early-out per frame until a playtest turns it on. */
+  racingLineRibbon?: RacingLineRibbon | null
   physicsDebug: { tick: () => void }
   /** Per-bike hover-spring visualizer. Tick is cheap-when-off (early
    *  return on the global flag) so we always call it in the render loop. */
@@ -459,6 +466,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     raceIntroUi,
     raceTick,
     dirArrow,
+    racingLineRibbon,
     physicsDebug,
     hoverDebug,
     bikeRender,
@@ -1956,6 +1964,13 @@ export function startGameLoop(opts: GameLoopOpts): void {
     } else {
       dirArrow.tick(camera, tmpPos, null, dt)
     }
+
+    // B3 racing-line flow ribbon — the painted wayfinding line on the water.
+    // Driven by the deterministic wave-field clock (so freeze-water freezes the
+    // flow) + the player's render XZ (the lead fade + off-line warm-shift).
+    // Self-hides while its master flag is off, so this is a cheap early-out
+    // until a playtest enables it.
+    racingLineRibbon?.tick(waveField.time, tmpPos.x, tmpPos.z)
 
     // Step 8 — frame-rate cap. When `playerSettings.framerateCap > 0`
     // we skip the GPU render + frame counter on rAF ticks that arrive
