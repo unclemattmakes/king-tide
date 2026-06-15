@@ -51,17 +51,20 @@ is **not** a Kuwahara/oil-paint post pass. It's three moves:
 
 ## Implementation status (2026-06-14)
 
-Built on branch `claude/painterly-legibility` via parallel Opus-agent passes,
-each **gated default-off so the shipped look is byte-identical** until dialed in
-a playtest. Every commit passes `pnpm typecheck` / `pnpm test` (1249) / `pnpm build`.
+Built on branch `claude/painterly-legibility` via parallel Opus-agent passes.
+Foundations shipped default-off; then, per Matt's call, the **diffuse warp**, the
+**prop waterline trio**, and **foam oil-strokes** were flipped **on by default**
+(see "Defaults flipped ON" below). Every commit passes `pnpm typecheck` /
+`pnpm test` (1249) / `pnpm build`, headed-verified on real WebGPU.
 
 **Landed (committed):**
 - **A1 — TF2 illustrative lighting** ([illustrative-lighting.ts](../src/engine/render/illustrative-lighting.ts)):
   warp-ramp diffuse + true additive rim via an `IllustrativeLightingModel`
   (subclasses `PhysicalLightingModel`, overrides only `direct()` — shadows /
-  ambient / specular preserved). Dials `illum` / `rimEmissive` / `rimColor`,
-  default 0. **Verified headed (real WebGPU).** Tune: dev palette → Tuners →
-  **Brush strokes** → *Illustrative warp* / *Rim glow* (live, in-race).
+  ambient / specular preserved). **`illum` now defaults ON (1)** — the warp is the
+  default vinyl look; the additive `rimEmissive` stays 0 (it's the signal channel).
+  **Verified headed (real WebGPU).** Tune: dev palette → Tuners → **Brush strokes**
+  → *Illustrative warp* / *Rim glow* (live, in-race).
 - **A2 — scene-wide colour grade** ([post-pipeline.ts](../src/engine/render/post-pipeline.ts)):
   identity-default `setGrade()` + per-track `sky.scenicGrade` authoring. The
   contrast-budget vehicle. **Verified headed.** Toggle: dev palette → World →
@@ -72,17 +75,28 @@ a playtest. Every commit passes `pnpm typecheck` / `pnpm test` (1249) / `pnpm bu
 - **B0 — signal-colour vocabulary** ([signal-colors.ts](../src/engine/render/signal-colors.ts)):
   the reserved, double-coded palette (blue/orange primary).
 - **B1 / B5 — rim-as-signal** ([signal-state.ts](../src/engine/render/signal-state.ts)):
-  drift-charge ladder on AI/peer bikes + magenta pickup pulse, behind a default-off
-  master flag — toggle: dev palette → Toggles → **Gameplay signals (rim)**
-  (`?signals=1` / `window.__signals` still work for automation).
+  drift-charge ladder on **every bike incl. the player's own** (the instanced path
+  + the single-mesh hop in render-systems.ts are both wired) + magenta pickup pulse,
+  behind a default-off master flag — toggle: dev palette → Toggles → **Gameplay
+  signals (rim)** (`?signals=1` / `window.__signals` still work for automation).
+  **Finding:** the charge signal only fires on a **human mini-turbo drift-charge** —
+  AI/autopilot don't drift-charge, so the ladder won't show on AI bikes in practice
+  (the broadly-visible rival cue is the draft rim — see Deferred).
 - **A0a — foliage sway** backend wired at boot (WebGL2-fallback fix + verification
   harness); the TSL sway itself was already correct — the original "broken on
   WebGPU" item was stale doc drift (fixed in PR #260).
 
+**Defaults flipped ON (2026-06-14, Matt's call — the look-changing knobs):**
+- **Diffuse warp** (`illum` 0 → 1) — the TF2 re-light is now the default vinyl look.
+- **Prop waterline trio** — props get the algae/barnacle/salt-bleach bands by
+  default (world-height gated; sea level threaded from `track.water.height`); opt
+  out per prop via `Prop.waterline = false` (per-asset for instanced placements).
+- **Foam oil-strokes** — already the default (`FOAM_BRUSH_DEFAULT = 1.0`); confirmed.
+
 **Deferred — precise next steps (feel-dependent; want a headed playtest, not blind code):**
-- Player's *own*-bike rim: a handle-cache hop in [render-systems.ts](../src/engine/render/render-systems.ts)
-  reading `vinylRimHandle(mat)` per single-mesh bike (AI/peer + pickups are wired).
-- Rival/draft rim: needs a per-bike `DraftState` component written in [hover.ts](../src/game/systems/hover.ts).
+- Rival/draft rim (the broadly-visible "assess the threat" cue): needs a per-bike
+  `DraftState` component written in [hover.ts](../src/game/systems/hover.ts), then
+  call `signalRivalDraft` from the render layer.
 - **A4** painterly normals · **B2** event juice (anticipation + flash + hitstop) ·
   **B3** racing/wave-line flow ribbon · **B4** turning the water readability layers on.
 
