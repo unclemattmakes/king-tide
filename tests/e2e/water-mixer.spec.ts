@@ -109,6 +109,27 @@ test('lab: EXPORT copies a parseable water block', async ({ page }) => {
   expect(parsed.water.look.rampStrength).toBeCloseTo(1, 2)
 })
 
+test('watertune: loads a real track free-cam, track-scoped tuner, no race', async ({ page }) => {
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/?watertune=sandbar')
+  await page.bringToFront()
+  // The tuner auto-opens at the end of boot → 5 sections present means booted.
+  await expect(page.locator('#wd-body h2')).toHaveCount(5, { timeout: 90_000 })
+  // Track-scoped: EXPORT targets sandbar's JSON, and NOTHING is inert (the real
+  // level has a seabed + obstacles, unlike the open-ocean lab).
+  await expect(page.locator('#wd-export')).toHaveAttribute('title', /sandbar\.json/)
+  await expect(page.locator('#wd-body .lab-note')).toHaveCount(0)
+  // No race chrome, and the free-cam HUD names the mode.
+  await expect(page.locator('#race-banner')).toBeHidden()
+  await expect(page.locator('#watertune-hud')).toContainText('WATER TUNE')
+  // Let the loading overlay fade + the water/scene render a few seconds before
+  // the proof shot (the tuner builds a tick before hideLoadingScreen).
+  await page.waitForSelector('#loading-screen', { state: 'hidden', timeout: 15_000 }).catch(() => {})
+  await page.waitForTimeout(4000)
+  await page.screenshot({ path: 'artifacts/water-mixer/watertune-sandbar.png' })
+})
+
 test('track: panel is track-scoped — no inert tags, slug export, per-slug persist', async ({
   page,
 }) => {
