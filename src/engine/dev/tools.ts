@@ -16,6 +16,7 @@ import * as THREE from 'three'
 import { resetDevSettings } from '../dev-settings'
 import { getSkySystem } from '../render/sky-service'
 import { getWaterMesh } from '../render/water-service'
+import { getWaterTuningScope } from '../water-debug-storage'
 import { getWaveDotsController, getWindTrailsController } from './dev-runtime'
 import type {
   ActionTool,
@@ -175,6 +176,19 @@ export function createDevTools(deps: DevToolDeps): DevTool[] {
       hint: 'Open-ocean water analysis: tuner + phase-speed pace cones + iso-line speed probe',
       keywords: 'water contour swell shader tuning ocean waves',
     }),
+    {
+      kind: 'action',
+      group: 'Scenes',
+      id: 'scene.watertune',
+      label: 'Water tune (free cam)',
+      hint: 'Reload THIS level into a free-cam water tuner — track-scoped, no race',
+      keywords: 'water tune free camera look foam contour body absorption swell level',
+      run: () => {
+        const scope = getWaterTuningScope()
+        const slug = scope.kind === 'track' ? scope.slug : 'sandbar'
+        window.location.assign(`${location.pathname}?watertune=${encodeURIComponent(slug)}`)
+      },
+    },
     scene('scene.podium', 'Podium ceremony', 'podium', {
       hint: 'Cup-win trophy + standings sequence',
       keywords: 'trophy win cup',
