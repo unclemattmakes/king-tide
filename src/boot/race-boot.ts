@@ -34,6 +34,7 @@ import { createCombatRenderSystem } from '@/engine/render/combat-render'
 import { type ContactSplashDriver, createContactSplashDriver } from '@/engine/render/contact-splash'
 import { createDirectionArrow } from '@/engine/render/direction-arrow'
 import { createEngineTrailSystem } from '@/engine/render/engine-trail'
+import { setFoliageSwayBackend } from '@/engine/render/foliage-sway'
 import { createFxSystem } from '@/engine/render/fx'
 import { loadGateProp } from '@/engine/render/gate-prop'
 import { createHorizonRing } from '@/engine/render/horizon-ring'
@@ -236,6 +237,16 @@ export async function bootRace(appEl: HTMLElement) {
   const { renderer, backend, gpuTimestampsTracked } = rendererBundle
   bootMark('renderer')
   setRenderer(renderer)
+  // Publish the resolved backend to the foliage-sway module BEFORE any track
+  // loads (`loadTrackForBoot` below → `glb-track.ts` calls
+  // `applyFoliageSwayToMesh`, the only production call site). The module
+  // defaults to 'webgpu', so on a real WebGL2 fallback (Safari/Firefox without
+  // WebGPU, or `?backend=webgl2`) this is what routes foliage to the
+  // `onBeforeCompile` patch path instead of swapping each mesh to a node
+  // material. Must run before track load — doing it later (e.g. in the game
+  // loop) would be too late: the foliage would already be applied with the
+  // default. Edit/replay paths share this same pre-track-load setup.
+  setFoliageSwayBackend(backend)
   // Apply the persisted pixel-ratio now that the renderer is alive.
   // `createRenderer` already calls `setPixelRatio(min(devicePixelRatio, 2))`,
   // so this is a no-op when the player kept the default; if they dropped
