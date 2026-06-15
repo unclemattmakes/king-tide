@@ -100,9 +100,12 @@ Foundations shipped default-off; then, per Matt's call, the **diffuse warp**, th
 - **Rival draft rim** — shipped this pass (render-only, default-off behind signals).
 
 **Deferred — precise next steps (feel-dependent; want a headed playtest, not blind code):**
-- **A4** painterly normals (largely covered by the existing brush relief) ·
-  **B2** event juice (anticipation + flash + hitstop — touches sim timing) ·
-  **B3** racing/wave-line flow ribbon (the remaining big legibility piece).
+- **A4** painterly normals + **B3** racing/wave-line flow ribbon — **handed to a
+  spawned session** (branch off `claude/painterly-legibility`). A4 is likely
+  already covered by the existing brush relief (assess first); B3 is the main piece.
+- **B2** event juice — **CUT** (2026-06-15, Matt's call): hitstop touches sim
+  timing, which we won't risk in a multiplayer game. The render-only parts (event
+  flash, anticipation telegraphs) remain possible later but are deprioritized.
 
 **How to evaluate:** run headed on your own server (`pnpm dev --port <N>
 --strictPort`, or `BASE=… node tools/verify-painterly.mjs` for an autopilot
