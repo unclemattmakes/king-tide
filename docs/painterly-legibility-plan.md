@@ -60,17 +60,21 @@ a playtest. Every commit passes `pnpm typecheck` / `pnpm test` (1249) / `pnpm bu
   warp-ramp diffuse + true additive rim via an `IllustrativeLightingModel`
   (subclasses `PhysicalLightingModel`, overrides only `direct()` — shadows /
   ambient / specular preserved). Dials `illum` / `rimEmissive` / `rimColor`,
-  default 0. Tune: `?propviewer=cc0/chest` → `setVinylBrush({ illum: 1 })`.
+  default 0. **Verified headed (real WebGPU).** Tune: dev palette → Tuners →
+  **Brush strokes** → *Illustrative warp* / *Rim glow* (live, in-race).
 - **A2 — scene-wide colour grade** ([post-pipeline.ts](../src/engine/render/post-pipeline.ts)):
   identity-default `setGrade()` + per-track `sky.scenicGrade` authoring. The
-  contrast-budget vehicle. `getActivePostPipeline()?.setGrade({ saturation: 0.8, contrast: 0.9 })`.
+  contrast-budget vehicle. **Verified headed.** Toggle: dev palette → World →
+  **Scene grade (muted)** (coarse on/off); per-track via `sky.scenicGrade`.
 - **A3 — SoT crest sub-surface glow** ([water.ts](../src/engine/render/water.ts)):
-  in-fragment (no new varying/uniform), `crestSSS` dial (default 0), `?waterlab`.
+  in-fragment (no new varying/uniform), default 0. Dial: dev palette → Tuners →
+  **Water debug** → *Crest SSS glow* (or `?waterlab`).
 - **B0 — signal-colour vocabulary** ([signal-colors.ts](../src/engine/render/signal-colors.ts)):
   the reserved, double-coded palette (blue/orange primary).
 - **B1 / B5 — rim-as-signal** ([signal-state.ts](../src/engine/render/signal-state.ts)):
   drift-charge ladder on AI/peer bikes + magenta pickup pulse, behind a default-off
-  master flag (`?signals=1` / `window.__signals`).
+  master flag — toggle: dev palette → Toggles → **Gameplay signals (rim)**
+  (`?signals=1` / `window.__signals` still work for automation).
 - **A0a — foliage sway** backend wired at boot (WebGL2-fallback fix + verification
   harness); the TSL sway itself was already correct — the original "broken on
   WebGPU" item was stale doc drift (fixed in PR #260).
@@ -82,10 +86,13 @@ a playtest. Every commit passes `pnpm typecheck` / `pnpm test` (1249) / `pnpm bu
 - **A4** painterly normals · **B2** event juice (anticipation + flash + hitstop) ·
   **B3** racing/wave-line flow ribbon · **B4** turning the water readability layers on.
 
-**How to evaluate:** run headed on your own server (`E2E_PORT=<N> pnpm e2e` or
-`pnpm dev --port <N> --strictPort`) and dial by eye — nothing changes the look
-until you enable it. The warp ramp curve, grade values, and signal hues are all
-playtest-validatable starting points, not final.
+**How to evaluate:** run headed on your own server (`pnpm dev --port <N>
+--strictPort`, or `BASE=… node tools/verify-painterly.mjs` for an autopilot
+capture), open the **dev palette (Ctrl/⌘K)**, and flip the entries above by eye —
+nothing changes the look until you do. The warp ramp curve, grade values, and
+signal hues are all playtest-validatable starting points, not final. (Note:
+`?propviewer` has its *own* per-prop sliders and is **not** wired to the live
+brush tuner — exercise illum/rim in-race.)
 
 ---
 
