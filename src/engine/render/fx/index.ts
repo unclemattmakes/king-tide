@@ -13,6 +13,7 @@ import {
   DriftStateStore,
   HoverState,
   HoverStateStore,
+  PlayerTag,
   RBHandle,
   RBHandleStore,
   Transform,
@@ -30,8 +31,11 @@ import { slopeAwareSweetSpot, tuckFactor } from '@/game/systems/hover'
 import {
   type BikeRimSignal,
   clearBikeSignal,
+  type DraftRole,
   fillChargeRimSignal,
+  fillDraftRimSignal,
   makeRimSignal,
+  RIVAL_RIM_STRENGTH,
   setBikeSignal,
   signalsEnabled,
 } from '../signal-state'
@@ -231,6 +235,39 @@ const BOW_SPRAY_MAX_RATE = 90 // particles/sec at full closing
 // Local-space bow point (visible nose of the 2×-scaled bike) the sheet
 // erupts from; the bike's forward is local +Z.
 const BOW_OFFSET = new THREE.Vector3(0, 0.05, 1.5)
+
+// ── Rival-draft rim detection (B1 — the "assess the threat" cue) ──────────────
+// A RENDER-SIDE relationship test (no sim component — the rim is purely visual
+// and needn't be deterministic). Each frame we read the local player's pose +
+// the other bikes' poses from the ECS and classify, from the PLAYER's frame:
+//   • player sitting in a rival's slipstream (rival is AHEAD of the player along
+//     the player's travel dir, inside the range + cone) → that rival rims CYAN
+//     ('inDraftOf' — good for you, close the gap);
+//   • a rival sitting in the PLAYER's slipstream (rival is BEHIND, inside the
+//     range + cone) → that rival rims WARM ('draftingYou' — a threat).
+// We rim the SINGLE CLOSEST rival per role (one cyan + one warm at most) so the
+// signal stays a clean "the bike you're tucked behind" / "the bike on your tail",
+// not a field-wide light show. All playtest-tunable; the hues are locked in
+// signal-colors.ts.
+//
+// Geometry (XZ plane — drafting is a ground-plane relationship; height is
+// ignored so a wave crest between the bikes doesn't drop the cue): let `d` be the
+// vector player→rival and `fwd` the player's unit travel direction.
+//   • along = dot(d, fwd)  (signed distance along the player's heading; >0 ahead)
+//   • lateral offset       = |d − along·fwd|  (perpendicular miss distance)
+// A rival qualifies for a role when |along| is within DRAFT_MAX_DIST and the
+// cone test holds — we use a perpendicular HALF-WIDTH that grows with |along|
+// (a true cone: tan(halfAngle)·|along|) rather than a fixed corridor, so a bike
+// dead-ahead-but-far still reads as "in the tube" while one off to the side does
+// not. A small DRAFT_MIN_DIST dead-zone avoids flticker when bikes overlap.
+const DRAFT_MAX_DIST = 35 // m along-heading reach of the slipstream (race spacing, not bike-lengths)
+const DRAFT_MIN_DIST = 1.5 // m dead-zone so near-overlap doesn't flicker the cue
+const DRAFT_CONE_HALF_ANGLE = 0.5 // rad (~29°) half-angle of the draft cone
+const DRAFT_CONE_TAN = Math.tan(DRAFT_CONE_HALF_ANGLE) // perp half-width = this × |along|
+// Minimum player speed (m/s, XZ) before the draft test runs. A near-stationary
+// player has no meaningful "travel direction", so velocity-derived heading is
+// noise; below this we fall back to the chassis forward (see the detector).
+const DRAFT_MIN_PLAYER_SPEED = 2
 
 function makeRadialTexture(rgb: [number, number, number]): THREE.Texture {
   const size = 64
@@ -671,16 +708,29 @@ export function createFxSystem(
   // lazily on first sight of each bike.
   const lastGrounded = new Map<number, boolean>()
 
-  // ── Style-as-legibility signal producer (B5 drift/charge rim) ──────────────
+  // ── Style-as-legibility signal producer (B1 draft rim + B5 drift/charge rim) ─
   // FX is the natural producer: it already iterates every bike with its
-  // DriftStateStore read-only. Each frame (when the master flag is on) we map a
-  // bike's mini-turbo charge tier to its additive-rim signal colour/strength and
+  // DriftStateStore + Transform + rigid-body velocity read-only. Each frame (when
+  // the master flag is on) we resolve EACH bike to its single final rim signal and
   // publish it per-eid in signal-state.ts; the bike render system reads it back
   // keyed by the eid it owns and drives the rim (per-instance for AI fields, the
   // per-object uniform for the player) — see signal-state.ts for why this is the
-  // decoupled seam. One reusable BikeRimSignal per eid so the loop allocates
-  // nothing. Master flag OFF ⇒ setBikeSignal is a no-op and getBikeSignal returns
-  // NO_SIGNAL ⇒ rim strength 0 ⇒ byte-identical to today.
+  // decoupled seam.
+  //
+  // TWO producers feed the one rim, unified so neither clobbers the other (every
+  // bike is set or cleared EXACTLY ONCE per frame — never twice with the later
+  // write winning):
+  //   • B5 (player): the local player's own mini-turbo charge tier → ladder colour
+  //     + charge→strength (fillChargeRimSignal).
+  //   • B1 (rivals): the draft RELATIONSHIP between the player and each rival →
+  //     cyan when you're drafting them / warm when they're drafting you
+  //     (fillDraftRimSignal). Computed render-side from poses + velocities (see the
+  //     DRAFT_* tunables); no sim component, not deterministic — fine for a rim.
+  // They don't overlap in practice (charge is a player cue, draft a rival cue), but
+  // `resolveBikeSignal` makes the precedence explicit regardless: charge first,
+  // then draft, else clear. One reusable BikeRimSignal per eid so the loop
+  // allocates nothing. Master flag OFF ⇒ setBikeSignal is a no-op and getBikeSignal
+  // returns NO_SIGNAL ⇒ rim strength 0 ⇒ byte-identical to today.
   const rimSignals = new Map<number, BikeRimSignal>()
   function bikeRimSignal(eid: number): BikeRimSignal {
     let s = rimSignals.get(eid)
@@ -689,6 +739,132 @@ export function createFxSystem(
       rimSignals.set(eid, s)
     }
     return s
+  }
+
+  // Per-frame draft role for each rival, rebuilt by `computeDraftRoles` at the top
+  // of every tick (only when the master flag is on). Cleared+refilled in place so
+  // the per-bike resolve can ask "is this eid a drafting rival, and which side?"
+  // without re-running the geometry. At most two entries (closest 'inDraftOf' +
+  // closest 'draftingYou'). Keyed by rival eid.
+  const draftRoles = new Map<number, DraftRole>()
+  // Player-pose scratch for the draft test (filled once per frame).
+  const playerPos = new THREE.Vector3()
+  const playerFwd = new THREE.Vector3() // unit travel direction (velocity, or chassis fwd)
+  const draftD = new THREE.Vector3() // player→rival, reused per rival
+  const draftQuat = new THREE.Quaternion()
+
+  /**
+   * Rebuild {@link draftRoles} for this frame from the local player's pose +
+   * heading and every other bike's position. Render-only, reads the ECS/physics
+   * read-only (exactly like the rest of this system), allocates nothing. Picks the
+   * single closest rival per role so the rim stays "the bike you're tucked behind"
+   * / "the bike on your tail", not a field-wide light show. No-op caller-side when
+   * the master flag is off (we never call this then). `bikeEids` is the already-
+   * queried bike set; `velOf` reads a bike's XZ velocity from its rigid body.
+   */
+  function computeDraftRoles(
+    bikeEids: ArrayLike<number> & Iterable<number>,
+    velOf: (eid: number) => { x: number; z: number } | null,
+  ): void {
+    draftRoles.clear()
+
+    // Find the local player and its pose.
+    let playerEid = -1
+    for (const eid of bikeEids) {
+      if (hasComponent(sim, eid, PlayerTag)) {
+        playerEid = eid
+        break
+      }
+    }
+    if (playerEid < 0) return
+    const pT = TransformStore.get(playerEid)
+    if (!pT) return
+    playerPos.set(pT.x, pT.y, pT.z)
+
+    // Travel direction: prefer the player's actual velocity (where they're
+    // heading); fall back to the chassis forward (bike-local +Z) when nearly
+    // stationary, so the cue still reads sensibly at a standstill.
+    const pv = velOf(playerEid)
+    const pSpeed = pv ? Math.hypot(pv.x, pv.z) : 0
+    if (pv && pSpeed >= DRAFT_MIN_PLAYER_SPEED) {
+      playerFwd.set(pv.x / pSpeed, 0, pv.z / pSpeed)
+    } else {
+      draftQuat.set(pT.qx, pT.qy, pT.qz, pT.qw)
+      playerFwd.set(0, 0, 1).applyQuaternion(draftQuat)
+      playerFwd.y = 0
+      const fl = Math.hypot(playerFwd.x, playerFwd.z)
+      if (fl < 1e-4) return // degenerate heading — skip this frame
+      playerFwd.x /= fl
+      playerFwd.z /= fl
+    }
+
+    // Closest qualifier per role (by |along-heading| distance).
+    let bestAheadEid = -1
+    let bestAheadDist = Infinity
+    let bestBehindEid = -1
+    let bestBehindDist = Infinity
+
+    for (const eid of bikeEids) {
+      if (eid === playerEid) continue
+      const rT = TransformStore.get(eid)
+      if (!rT) continue
+      // XZ-plane vector player→rival; height ignored (a crest between bikes must
+      // not drop the cue).
+      draftD.set(rT.x - playerPos.x, 0, rT.z - playerPos.z)
+      const along = draftD.x * playerFwd.x + draftD.z * playerFwd.z // signed; >0 = ahead
+      const absAlong = Math.abs(along)
+      if (absAlong < DRAFT_MIN_DIST || absAlong > DRAFT_MAX_DIST) continue
+      // Perpendicular miss distance = |d − along·fwd| in the XZ plane.
+      const perpX = draftD.x - along * playerFwd.x
+      const perpZ = draftD.z - along * playerFwd.z
+      const lateral = Math.hypot(perpX, perpZ)
+      // True cone: allowed half-width grows with distance along the heading.
+      if (lateral > DRAFT_CONE_TAN * absAlong) continue
+      if (along > 0) {
+        // Rival ahead of the player → the player is in ITS slipstream.
+        if (absAlong < bestAheadDist) {
+          bestAheadDist = absAlong
+          bestAheadEid = eid
+        }
+      } else {
+        // Rival behind the player → it is in the PLAYER's slipstream.
+        if (absAlong < bestBehindDist) {
+          bestBehindDist = absAlong
+          bestBehindEid = eid
+        }
+      }
+    }
+
+    if (bestAheadEid >= 0) draftRoles.set(bestAheadEid, 'inDraftOf') // you draft them → cyan
+    if (bestBehindEid >= 0) draftRoles.set(bestBehindEid, 'draftingYou') // they draft you → warm
+  }
+
+  /**
+   * Resolve bike `eid`'s single final rim signal for this frame and publish it
+   * (or clear it). Precedence: the player's own drift-charge ladder (B5) first,
+   * else the draft rim (B1) if `eid` is a drafting rival this frame, else cleared.
+   * Called once per bike per frame so no bike is set twice. Caller guarantees the
+   * master flag is on. `driftSig` is the bike's DriftState (may be null).
+   */
+  function resolveBikeSignal(
+    eid: number,
+    driftSig: { highestTier: number; chargeS: number } | null,
+  ): void {
+    const sig = bikeRimSignal(eid)
+    // B5 — drift-charge ladder (only ever non-zero for a human mini-turbo drift,
+    // i.e. the player in practice).
+    if (driftSig && fillChargeRimSignal(sig, driftSig.highestTier, driftSig.chargeS)) {
+      setBikeSignal(eid, sig)
+      return
+    }
+    // B1 — rival draft rim. fillDraftRimSignal writes into this eid's OWN reusable
+    // signal (no shared scratch ⇒ no multi-rival aliasing).
+    const role = draftRoles.get(eid)
+    if (role) {
+      setBikeSignal(eid, fillDraftRimSignal(sig, role, RIVAL_RIM_STRENGTH))
+      return
+    }
+    clearBikeSignal(eid)
   }
 
   // Per-bike plunge state. The dive lifecycle is:
@@ -902,6 +1078,23 @@ export function createFxSystem(
   function tick(dt: number): void {
     const eids = query(sim, [BikeTag, Transform, HoverState, ControlIntent])
 
+    // B1 draft rim — resolve the player↔rival draft relationships ONCE per frame
+    // before the per-bike loop, so each bike's resolve below can read its role.
+    // Only when the master flag is on (off ⇒ draftRoles stays empty ⇒ the resolve
+    // clears, which setBikeSignal no-ops anyway). Reads the rigid body's linear
+    // velocity read-only — same source the per-bike loop uses for speed.
+    if (signalsEnabled()) {
+      computeDraftRoles(eids, (eid) => {
+        if (!hasComponent(sim, eid, RBHandle)) return null
+        const rb = phys.world.getRigidBody(RBHandleStore.must(eid).handle)
+        if (!rb) return null
+        const lv = rb.linvel()
+        return { x: lv.x, z: lv.z }
+      })
+    } else {
+      draftRoles.clear()
+    }
+
     for (const eid of eids) {
       if (!hasComponent(sim, eid, RBHandle)) continue
       const rbh = RBHandleStore.must(eid)
@@ -975,20 +1168,15 @@ export function createFxSystem(
       }
       lastGrounded.set(eid, hover.isGrounded)
 
-      // Drift/charge rim signal (B5) — publish this bike's mini-turbo tier as an
-      // additive-rim colour/strength for the bike render layer to paint. Read the
-      // same DriftState the coloured drift sparks use; map tier→ladder colour +
-      // charge→strength in signal-state.ts so every surface agrees. Gated by the
-      // master flag (off ⇒ no-op, today's look). Cleared when not charging so the
-      // rim drops the instant the player releases / a tier resets.
+      // Rim signal (B1 draft + B5 drift/charge) — resolve this bike's single final
+      // rim for the frame and publish it. Precedence (in resolveBikeSignal): the
+      // player's own mini-turbo charge ladder first, else the rival-draft rim if
+      // this bike is a drafting rival this frame (draftRoles, computed above), else
+      // cleared. ONE set/clear per bike per frame, so the two producers never
+      // clobber each other. Gated by the master flag (off ⇒ no-op, today's look);
+      // cleared when neither applies so the rim drops the instant it stops.
       if (signalsEnabled()) {
-        const driftSig = DriftStateStore.get(eid)
-        const sig = bikeRimSignal(eid)
-        if (driftSig && fillChargeRimSignal(sig, driftSig.highestTier, driftSig.chargeS)) {
-          setBikeSignal(eid, sig)
-        } else {
-          clearBikeSignal(eid)
-        }
+        resolveBikeSignal(eid, DriftStateStore.get(eid) ?? null)
       }
 
       // Foam — turbulent spray plume springing from the *water surface*
@@ -1510,8 +1698,8 @@ export function createFxSystem(
     }
 
     // Prune the per-eid rim-signal state for bikes that despawned this frame, so
-    // a reused eid never inherits a stale charge rim (and the store doesn't grow
-    // unbounded across a session). Cheap — the field is small.
+    // a reused eid never inherits a stale rim (charge or draft) — and the store
+    // doesn't grow unbounded across a session. Cheap — the field is small.
     if (rimSignals.size > 0) {
       const liveBikes = new Set(eids)
       for (const eid of rimSignals.keys()) {

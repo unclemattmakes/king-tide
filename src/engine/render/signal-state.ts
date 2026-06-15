@@ -235,24 +235,46 @@ const DRAFT_ROLE_STATE: Record<DraftRole, SignalState> = {
 /** Default rim strength for the rival hook (playtest-tunable). */
 export const RIVAL_RIM_STRENGTH = 0.7
 
-/** Reusable signal for the rival hook (single local player ⇒ one rival rim at a
- *  time is the common case; a multi-rival driver would own its own per-eid set). */
+/**
+ * Fill `out` for a rival's draft role (B1's cyan/warm pair) — the MULTI-RIVAL-safe
+ * way to produce the draft rim. Writes the role's reserved hue + strength into the
+ * caller-owned `out` and returns it, so a producer that owns ONE `BikeRimSignal`
+ * PER EID can resolve every rival in a frame without aliasing. Pure: touches only
+ * `out` (no shared scratch, no store write — the caller publishes via
+ * {@link setBikeSignal}), so it's also unaffected by the master flag (the caller
+ * gates). The role→colour mapping lives here so every surface agrees.
+ *
+ * Prefer this over {@link signalRivalDraft} whenever more than one rival can be
+ * lit in the same frame: `signalRivalDraft` shares a single module scratch and
+ * stores it BY REFERENCE, so calling it for several rivals in one frame aliases
+ * them all to the last rival's colour. This helper has no such hazard.
+ */
+export function fillDraftRimSignal(
+  out: BikeRimSignal,
+  role: DraftRole,
+  strength = RIVAL_RIM_STRENGTH,
+): BikeRimSignal {
+  fillStateRimSignal(out, DRAFT_ROLE_STATE[role], strength)
+  return out
+}
+
+/** Reusable signal for the single-rival hook below (a multi-rival driver owns its
+ *  own per-eid set via {@link fillDraftRimSignal} instead — see its note). */
 const rivalScratch: BikeRimSignal = { color: new THREE.Color(0, 0, 0), strength: 0 }
 
 /**
- * HOOK (plumbing): rim rival bike `eid` for the given draft role. This is the
- * entry point B1 wants — the colour mapping + publish are done; all that's
- * missing is the CALLER that knows the draft relationship.
+ * HOOK (plumbing): rim rival bike `eid` for the given draft role — the SINGLE-rival
+ * convenience built on {@link fillDraftRimSignal}. The colour mapping + publish are
+ * done; the caller supplies the draft relationship.
  *
- * ⚠️ DEFERRED — no per-bike drafting STATE exists yet. The sim's wake-drafting
- * (hover.ts, gated behind the default-off `WAVE_FEEL.draft`) computes an
- * `inTrough` factor per bike per tick but does NOT persist who-drafts-whom in the
- * ECS, and that flag is itself a playtest prototype. Wiring this for real means
- * adding a small per-bike draft component (e.g. `DraftState { inDraftOfEid,
- * draftedByEid }`) written by the sim's drafting pass, then calling this from the
- * render layer with the local player's relationships. Do NOT invent that sim
- * mechanic here. Until then this is callable (e.g. from a dev harness or a future
- * driver) and a no-op while the master flag is off.
+ * ⚠️ SINGLE-RIVAL ONLY. This shares one module scratch and stores it BY REFERENCE,
+ * so calling it for MULTIPLE rivals in the same frame aliases them all to the last
+ * rival's colour. A multi-rival producer (e.g. the render-side draft detector in
+ * fx/index.ts, which lights at most one "you're drafting them" + one "they're
+ * drafting you" each frame) must instead own a `BikeRimSignal` per eid and fill it
+ * with {@link fillDraftRimSignal}, then publish via {@link setBikeSignal}.
+ *
+ * No-op while the master flag is off. Kept for a dev harness / single-rival caller.
  */
 export function signalRivalDraft(
   eid: number,
@@ -260,8 +282,7 @@ export function signalRivalDraft(
   strength = RIVAL_RIM_STRENGTH,
 ): void {
   if (!enabled) return
-  fillStateRimSignal(rivalScratch, DRAFT_ROLE_STATE[role], strength)
-  setBikeSignal(eid, rivalScratch)
+  setBikeSignal(eid, fillDraftRimSignal(rivalScratch, role, strength))
 }
 
 // ── Boot auto-init (browser only) ─────────────────────────────────────────────
