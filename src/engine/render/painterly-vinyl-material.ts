@@ -65,6 +65,7 @@ import { stampConvexityColor0 } from './edge-wear-convexity'
 import {
   buildIllustrativeRim,
   IllustrativeLightingModel,
+  type IllustrativeRim,
   sharedWarpRampTexture,
 } from './illustrative-lighting'
 import { applyWaterlineBands } from './waterline'
@@ -72,6 +73,22 @@ import { applyWaterlineBands } from './waterline'
 /** Marks a material we've already vinyl-converted, so conversion is idempotent
  *  and a source material shared by reference converts once. */
 const VINYL_MARKED = Symbol.for('hoverbike.painterlyVinyl')
+
+/** Material-userData key holding the additive-rim handle ({@link IllustrativeRim})
+ *  so a per-object consumer (the player bike) can drive the gameplay-signal rim
+ *  per frame. Symbol so it never collides with glTF/userData string keys. */
+const VINYL_RIM_HANDLE = Symbol.for('hoverbike.painterlyVinyl.rimHandle')
+
+/** Read the additive-rim handle off a vinyl material (or null if it isn't a vinyl
+ *  twin / predates the handle). The per-object signal driver uses this to paint a
+ *  rim signal into `.uStrength`/`.uColor` — see signal-state.ts. On a per-instance
+ *  (`rimColorAttribute`) material the handle's uniforms are inert (the rim reads
+ *  attributes), so this only does anything for single-mesh materials. */
+export function vinylRimHandle(m: THREE.Material | null | undefined): IllustrativeRim | null {
+  if (!m) return null
+  const h = (m.userData as Record<string | symbol, unknown> | undefined)?.[VINYL_RIM_HANDLE]
+  return (h as IllustrativeRim | undefined) ?? null
+}
 
 /** Per-object userData keys a size-shared (`sizePerObject`) vinyl material
  *  reads at render time — three `userData()` reference nodes, whose value is
@@ -223,6 +240,17 @@ export type VinylOptions = {
    *  shared material light only SOME instances, e.g. the "next" race gate glowing
    *  while every other gate stays dark. Takes precedence over `emissiveFromTint`. */
   emissiveAttribute?: string
+  /** Drive the TF2 ADDITIVE rim's COLOUR from a per-instance vec3 attribute of
+   *  this name (linear RGB) instead of the `rimColor` uniform — the per-instance
+   *  signal channel for an `InstancedMesh` field (the style-as-legibility rim, see
+   *  signal-state.ts). Pair with `rimStrengthAttribute`. Omit → the per-object
+   *  `rimColor` uniform (the normal path). */
+  rimColorAttribute?: string
+  /** Drive the additive rim's STRENGTH from a per-instance float attribute of this
+   *  name instead of the `rimEmissive` uniform. An unstamped / zeroed attribute
+   *  reads 0 ⇒ rim off ⇒ byte-identical to today (this is what keeps the
+   *  per-instance rim default-OFF). Pair with `rimColorAttribute`. */
+  rimStrengthAttribute?: string
   /** Share ONE material instance across meshes of every size: read the
    *  size-derived inputs (brush stroke frequency + scale-blend weights, the
    *  waterline band scale, the object-space stroke scale) from each MESH's
@@ -313,6 +341,8 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const tintAttribute = opts.tintAttribute
   const emissiveFromTint = opts.emissiveFromTint ?? false
   const emissiveAttribute = opts.emissiveAttribute
+  const rimColorAttribute = opts.rimColorAttribute
+  const rimStrengthAttribute = opts.rimStrengthAttribute
   const sizePerObject = opts.sizePerObject ?? false
 
   const next = new MeshStandardNodeMaterial({ metalness: 0, roughness })
@@ -408,9 +438,18 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   )
   ;(next as unknown as { setupLightingModel: () => IllustrativeLightingModel }).setupLightingModel =
     () => illumModel
-  // Additive rim — its own term, with a per-object colour uniform (the Track-B
-  // gameplay-signal channel) and a strength uniform defaulting to 0.
-  const illumRim = buildIllustrativeRim({ rimColor, rimEmissive })
+  // Additive rim — its own term. Default path: a per-OBJECT colour uniform (the
+  // Track-B gameplay-signal channel) + a strength uniform defaulting to 0. When
+  // the caller passes per-instance attribute names (instanced bike fields), the
+  // rim instead reads the signal colour + strength PER INSTANCE, so one shared
+  // material paints a different drift/charge rim on each bike. Either way it's
+  // additive-into-emissive and 0-strength by default = byte-identical to today.
+  const illumRim = buildIllustrativeRim({
+    rimColor,
+    rimEmissive,
+    ...(rimColorAttribute ? { colorAttribute: rimColorAttribute } : {}),
+    ...(rimStrengthAttribute ? { strengthAttribute: rimStrengthAttribute } : {}),
+  })
 
   // Apply the live-tunable illustrative dials shared by both brush-handle
   // branches (the dev tuner re-dials these with no recompile — uniform writes).
@@ -484,6 +523,17 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const brushFac = float(1).add(streak.sub(float(0.5)).mul(uBrush.mul(float(3.0))))
 
   next.userData.vinylBrushHandle = brushHandle
+  // Expose the additive-rim handle so a per-OBJECT consumer (the player's
+  // per-clone bike) can paint a gameplay signal into the rim per frame: read
+  // `material.userData.illumRimHandle` and set `.uStrength.value` / `.uColor.value`
+  // from `getBikeSignal(eid)` (signal-state.ts). On the per-INSTANCE path
+  // (`rimColorAttribute`/`rimStrengthAttribute`) these uniforms are inert stubs —
+  // the rim is driven by the instanced attributes instead — so this handle is only
+  // meaningful for the per-object (single-mesh) materials. Default-off either way
+  // (strength 0). A runtime handle on this freshly-built material (symbol-keyed,
+  // not serialized); the cast mirrors the vinylRimHandle reader above.
+  const rimUd = next.userData as Record<string | symbol, unknown>
+  rimUd[VINYL_RIM_HANDLE] = illumRim
 
   // World-space waterline trio FIRST, on the UN-brushed wash (opt-in; strength
   // 0 = no-op). The band height shrinks on small props (kept full on big ones)

@@ -21,9 +21,16 @@ import type { LoadedBike } from '@/game/assets/bike-loader'
 import { ExportedKind } from '../asset-kinds'
 import { stampConvexityColor0 } from './edge-wear-convexity'
 import { buildVinylMaterial } from './painterly-vinyl-material'
+import type { BikeRimSignal } from './signal-state'
 
 /** Per-instance livery/exhaust colour attribute the vinyl material samples. */
 const TINT_ATTR = 'aTint'
+/** Per-instance additive-rim signal attributes the vinyl material samples (the
+ *  style-as-legibility rim — see signal-state.ts). Colour is linear RGB; strength
+ *  0 = no rim (the default for every instance until a signal is pushed), so the
+ *  field reads byte-identical to today until `setRimSignal` lifts a strength. */
+const RIM_COLOR_ATTR = 'aRimColor'
+const RIM_STRENGTH_ATTR = 'aRimStrength'
 
 /** Cross-FIELD vinyl material cache (see `fieldMaterialKey`). The caller owns
  *  one map and passes it to every field it builds, so equivalent materials in
@@ -69,6 +76,12 @@ type FieldSubmesh = {
   tint: THREE.InstancedBufferAttribute | null
   /** Which colour drives this sub-mesh's tint. */
   tintKind: 'livery' | 'exhaust' | null
+  /** Per-instance additive-rim signal buffers (colour + strength). Present on
+   *  EVERY sub-mesh (the rim must paint the whole bike silhouette, not just the
+   *  tinted body), so a charge/rival signal rims the full bike. Strength starts 0
+   *  on every instance ⇒ rim off until a signal is pushed. */
+  rimColor: THREE.InstancedBufferAttribute
+  rimStrength: THREE.InstancedBufferAttribute
 }
 
 export type InstancedBikeField = {
@@ -79,6 +92,15 @@ export type InstancedBikeField = {
   setColors(i: number, liveryHex: number, exhaustHex: number): void
   /** Set instance `i`'s world transform for this frame. */
   setMatrix(i: number, m: THREE.Matrix4): void
+  /** Paint instance `i`'s additive-rim gameplay signal for this frame (the
+   *  style-as-legibility rim — drift/charge ladder, rival draft, …). Pass a
+   *  signal with `strength === 0` (e.g. the module's `NO_SIGNAL`) to clear it back
+   *  to today's look. Drives the per-instance `aRimColor`/`aRimStrength`
+   *  attributes the shared vinyl material reads; cheap to call every frame (only
+   *  flags the buffer dirty when a value actually changes). Wiring: the bike
+   *  render system, which owns the entity→instance index map, calls this with
+   *  `getBikeSignal(eid)` (see signal-state.ts). */
+  setRimSignal(i: number, signal: Readonly<BikeRimSignal>): void
   /** Park instance `i` (zero-scale → not visible) when its bike despawns. */
   park(i: number): void
   /** How many instances to draw (high-water mark of claimed indices). */
@@ -154,6 +176,19 @@ export function createInstancedBikeField(
       geom.setAttribute(TINT_ATTR, tint)
     }
 
+    // Per-instance additive-rim signal buffers on EVERY sub-mesh (the rim paints
+    // the whole bike silhouette). Strength defaults 0 ⇒ no rim, so the field is
+    // byte-identical to today until `setRimSignal` lifts a strength. Colour
+    // defaults black (irrelevant at strength 0).
+    const rimColorData = new Float32Array(capacity * 3) // 0,0,0
+    const rimColor = new THREE.InstancedBufferAttribute(rimColorData, 3)
+    rimColor.setUsage(THREE.DynamicDrawUsage)
+    geom.setAttribute(RIM_COLOR_ATTR, rimColor)
+    const rimStrengthData = new Float32Array(capacity) // all 0 = rim off
+    const rimStrength = new THREE.InstancedBufferAttribute(rimStrengthData, 1)
+    rimStrength.setUsage(THREE.DynamicDrawUsage)
+    geom.setAttribute(RIM_STRENGTH_ATTR, rimStrength)
+
     const shareKey = opts.sharedVinyl ? fieldMaterialKey(srcMat, tintKind) : null
     let vinyl = shareKey ? opts.sharedVinyl?.get(shareKey) : matCache.get(srcMat)
     if (!vinyl) {
@@ -163,6 +198,11 @@ export function createInstancedBikeField(
         brushObjectSpace: true,
         ...(tintKind ? { tintAttribute: TINT_ATTR } : {}),
         ...(tintKind === 'exhaust' ? { emissiveFromTint: true } : {}),
+        // Per-instance signal rim on every sub-mesh — one shared material, a
+        // distinct gameplay rim per bike. Always wired (the attributes always
+        // exist); default strength 0 keeps it off until a signal is pushed.
+        rimColorAttribute: RIM_COLOR_ATTR,
+        rimStrengthAttribute: RIM_STRENGTH_ATTR,
       })
       if (shareKey) opts.sharedVinyl?.set(shareKey, vinyl)
       else matCache.set(srcMat, vinyl)
@@ -185,6 +225,8 @@ export function createInstancedBikeField(
       rel: new THREE.Matrix4().multiplyMatrices(rootInv, mesh.matrixWorld),
       tint,
       tintKind,
+      rimColor,
+      rimStrength,
     })
     group.add(inst)
   })
@@ -218,8 +260,42 @@ export function createInstancedBikeField(
         sm.inst.setMatrixAt(i, subM)
       }
     },
+    setRimSignal(i, signal) {
+      // Write the per-instance rim colour + strength on every sub-mesh so the rim
+      // wraps the whole bike. Only flag the buffer dirty when a value actually
+      // moved, so an unsignalled / steady-state field uploads nothing each frame
+      // (strength stays 0 ⇒ rim off ⇒ today's look). `signal.strength === 0`
+      // (e.g. NO_SIGNAL) is the clear-to-default path.
+      const r = signal.color.r
+      const g = signal.color.g
+      const b = signal.color.b
+      const s = signal.strength
+      for (const sm of submeshes) {
+        const prevS = sm.rimStrength.getX(i)
+        if (prevS !== s) {
+          sm.rimStrength.setX(i, s)
+          sm.rimStrength.needsUpdate = true
+        }
+        // Colour only matters while the rim is visible; skip the write (and the
+        // upload) when both this and last frame are off.
+        if (s > 0 || prevS > 0) {
+          if (sm.rimColor.getX(i) !== r || sm.rimColor.getY(i) !== g || sm.rimColor.getZ(i) !== b) {
+            sm.rimColor.setXYZ(i, r, g, b)
+            sm.rimColor.needsUpdate = true
+          }
+        }
+      }
+    },
     park(i) {
-      for (const sm of submeshes) sm.inst.setMatrixAt(i, ZERO_MATRIX)
+      for (const sm of submeshes) {
+        sm.inst.setMatrixAt(i, ZERO_MATRIX)
+        // Clear any lingering signal so a reused slot doesn't inherit the previous
+        // bike's rim before the next setRimSignal.
+        if (sm.rimStrength.getX(i) !== 0) {
+          sm.rimStrength.setX(i, 0)
+          sm.rimStrength.needsUpdate = true
+        }
+      }
     },
     setDrawCount(n) {
       drawCount = Math.min(n, capacity)
