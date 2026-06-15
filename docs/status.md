@@ -32,6 +32,15 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-14** — **Painterly + style-as-legibility foundations
+> (branch `claude/painterly-legibility`, not yet merged).** Added a TF2-style
+> illustrative lighting model (diffuse warp ramp + additive rim), a scene-wide
+> colour grade (the contrast budget; per-track `sky.scenicGrade`), SoT crest
+> sub-surface glow, and a default-off gameplay-signal rim system (drift-charge
+> ladder + pickup pulse). All gated **default-off**, exposed in the dev palette
+> (Ctrl/⌘K), headed-verified on real WebGPU. Research + roadmap:
+> [painterly-legibility-plan.md](./painterly-legibility-plan.md).
+>
 > **Last updated: 2026-06-13 (b)** — **Quality preset ladder shipped — the
 > "various devices" knob.** The per-knob render levers the ablation measured
 > are now composed into **Auto / High / Medium / Low** at Settings → Video →

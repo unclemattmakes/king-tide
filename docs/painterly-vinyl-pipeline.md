@@ -13,8 +13,10 @@
 > conditioner mechanics; [vertex-attribute-spec.md](./vertex-attribute-spec.md)
 > for the `COLOR_0` contract.
 >
-> Status: **design locked, implementation starting** (2026-06-05). File/line refs
-> are pointers and will drift — grep the symbol, not the line.
+> Status: **runtime vinyl material + illustrative-lighting + grade layers built**
+> (2026-06-14; the multi-point intake auto-router / texture-budget routes below
+> are the remaining open work). File/line refs are pointers and will drift — grep
+> the symbol, not the line.
 
 ---
 
@@ -181,9 +183,10 @@ hand-painted texture is the hero upgrade.
 | No outlines | **correct by default** | Sobel pass exists but off (`post-pipeline.ts`) |
 | `keep_material` intake | **exists — hand-authored only** | `condition_ai_mesh.py` |
 | 63 Quaternius props conditioned | **exists, loadable** | `?track=prop-showcase` |
-| **Unified vinyl material on props** | **MISSING — core build** | new `painterly-vinyl-material.ts` |
-| Toon/gradient ramp | missing (infra exists) | `makeRampTexture` (`terrain-shader.ts`) |
-| Scene-wide colour grade | missing (grade is dome-only) | `post-pipeline.ts` final node |
+| **Unified vinyl material on props** | **built** | `painterly-vinyl-material.ts` |
+| Illustrative warp-ramp diffuse + additive rim | **built** (default-off `illum`/`rimEmissive`) | `illustrative-lighting.ts` ([plan](./painterly-legibility-plan.md)) |
+| Scene-wide colour grade | **built** (identity-default `setGrade`; per-track `sky.scenicGrade`) | `post-pipeline.ts` |
+| Rim-as-signal (style-as-legibility) | **built** (default-off; dev menu / `?signals=1`) | `signal-state.ts`, `signal-colors.ts` |
 | Readiness auto-router | missing | `condition_ai_mesh.py` |
 | Texture-budget pass | missing | new `tools/blender` step |
 
