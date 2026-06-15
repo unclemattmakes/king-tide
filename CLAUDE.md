@@ -94,6 +94,9 @@ builder checklists, concept-art `--sref` recipe). Per domain:
 in `index.html`, product name in `src/engine/branding.ts`, verify with
 `pnpm gen:ui-shots <label>`). The look in-engine + the
 mesh-intake pipeline: [painterly-vinyl-pipeline.md](docs/painterly-vinyl-pipeline.md).
+Deepening the render model (TF2 illustrative lighting, contrast-budget grade) +
+using style to make gameplay events legible at speed:
+[painterly-legibility-plan.md](docs/painterly-legibility-plan.md).
 
 **Track content** — [track-themes.md](docs/track-themes.md) (content bible) +
 canonical per-track design docs under [docs/tracks/](docs/tracks/README.md), which
