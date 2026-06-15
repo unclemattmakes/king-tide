@@ -448,6 +448,13 @@ export type Prop = {
    *  size; resting height is the authored `position.y`. Routed by
    *  `createPropColliders`; overrides any asset-level archetype. */
   waveRider?: PropWaveRider
+  /** Waterline trio (algae / barnacle / salt-bleach bands keyed to sea level)
+   *  opt-OUT. Props get the waterline by default — it's world-height gated, so
+   *  only props crossing the sea line actually show bands — so set `false` to
+   *  skip it on a prop that shouldn't bleach (an emissive sign, a high banner).
+   *  For instanced asset placements the opt-out is per-asset: a field drops the
+   *  waterline only when EVERY placement of that asset sets `false`. */
+  waterline?: boolean
 }
 
 export type PropType = 'box' | 'sphere' | 'cylinder' | 'pipe' | 'halfpipe' | 'asset'

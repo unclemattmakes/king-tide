@@ -427,6 +427,7 @@ export function trackToJson(track: Track): TrackJson {
       if (p.clip) out.clip = p.clip
       if (p.loop === false) out.loop = false
       if (p.waveRider) out.waveRider = { dof: p.waveRider.dof ?? 'locked' }
+      if (p.waterline === false) out.waterline = false
       return out
     }),
   }
@@ -708,6 +709,8 @@ function readProp(raw: unknown, i: number): Prop {
     const dof = (waveRiderRaw as { dof?: unknown }).dof === 'yaw' ? 'yaw' : 'locked'
     out.waveRider = { dof }
   }
+  // Waterline trio opt-out (default on). Only an explicit `false` is meaningful.
+  if ((raw as { waterline?: unknown }).waterline === false) out.waterline = false
   if (typeRaw === 'asset' && !out.assetId) {
     throw new Error(`track-json: props[${i}] type='asset' requires an assetId`)
   }

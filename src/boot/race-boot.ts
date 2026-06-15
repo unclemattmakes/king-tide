@@ -800,7 +800,7 @@ export async function bootRace(appEl: HTMLElement) {
   let animatedProps: ReturnType<typeof createAnimatedPropsSystem> | undefined
   let propsGroup: ReturnType<typeof createPropsMesh> | undefined
   if (track.props.length > 0) {
-    propsGroup = createPropsMesh(track.props, propAssets)
+    propsGroup = createPropsMesh(track.props, propAssets, { waterLevel: track.water?.height ?? 0 })
     scene.add(propsGroup)
     // Rigged props with `animated:true` (e.g. the swimming great white) are
     // hosted here, skeleton-cloned + mixer-driven, ticked from the game loop.
