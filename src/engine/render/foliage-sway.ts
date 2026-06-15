@@ -94,12 +94,18 @@ const SWAY_MESH_RECORDS: SwayMeshRecord[] = []
 
 /** Active renderer backend. Defaults to `'webgpu'` — the project's
  *  primary renderer — so foliage sways even if a boot path forgets to
- *  call `setFoliageSwayBackend`. Boot code that has the real backend
- *  (from `createRenderer`) should set it before the first track loads. */
+ *  call `setFoliageSwayBackend`. The live race boot wires the real backend
+ *  (from `createRenderer`) via `src/boot/race-boot.ts`, right after the
+ *  renderer is created and BEFORE the first track loads — so the WebGL2
+ *  fallback genuinely takes the `onBeforeCompile` path rather than relying
+ *  on this default. The default remains the safety net for standalone
+ *  scenes / tests that don't run the full race boot. */
 let activeBackend: 'webgpu' | 'webgl2' = 'webgpu'
 
 /** Tell the sway system which renderer backend is live. WebGPU uses the
- *  TSL node-material path; WebGL2 uses the `onBeforeCompile` path. */
+ *  TSL node-material path; WebGL2 uses the `onBeforeCompile` path (kept as
+ *  the real WebGL2 fallback so that backend doesn't swap each foliage mesh's
+ *  material). Wired at boot from `race-boot.ts`. */
 export function setFoliageSwayBackend(backend: 'webgpu' | 'webgl2'): void {
   activeBackend = backend
 }
