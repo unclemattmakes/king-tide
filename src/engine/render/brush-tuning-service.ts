@@ -68,8 +68,10 @@ export const VINYL_BRUSH_DEFAULTS: VinylBrushValues = {
   brush: 0.7,
   brushScale: 0.12,
   brushPropSizeCap: 6,
-  // Illustrative lighting + additive rim default OFF (today's look exactly).
-  illum: 0,
+  // Illustrative diffuse warp ON by default (the TF2 painterly read); the
+  // additive rim stays OFF here (0) — the rim is the gameplay-signal channel,
+  // driven on demand by the signal system, not a static surface treatment.
+  illum: 1,
   rimEmissive: 0,
   rimColorR: 1.0,
   rimColorG: 0.93,
