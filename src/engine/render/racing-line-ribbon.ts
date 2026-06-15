@@ -168,9 +168,9 @@ const CURV_TURN_HI = 0.72 // rad that's fully "brake"
 const CURV_SMOOTH = 3 // box-filter half-width (points) to de-speckle
 
 // Painted structure.
-const CHEVRON_SKEW = 0.35 // centre leads the flanks by this (the ▷ arrow read)
-const STREAK_SHARP = 1.6 // leading-edge sharpness of each forward stroke
-const STREAK_FLOOR = 0.45 // alpha kept between stroke fronts (band stays a line)
+const CHEVRON_SKEW = 0.4 // centre leads the flanks by this (the ▷ arrow read)
+const STREAK_SHARP = 1.8 // leading-edge sharpness of each forward stroke
+const STREAK_FLOOR = 0.42 // alpha kept between stroke fronts (band stays a line)
 const GRAIN_FLOOR = 0.5 // alpha kept where the brush sheet is dark (painterly)
 const EDGE_INNER = 0.45 // |across| where the soft edge feather starts
 
@@ -364,11 +364,17 @@ export function createRacingLineRibbon(input: RacingLineRibbonInput): RacingLine
   const brakeFac = clamp(brakeV.mul(uBrakeMix).add(uOffline), float(0), float(1))
   const baseHue = mix(coolN, warmN, brakeFac)
 
-  // Forward chevron streaks: a phase that scrolls toward +U (forward along the
-  // line) with the CENTRE leading the flanks (|across| skews the phase), so each
-  // stroke is a ▷ pointing the way. Bright leading edge, fading tail.
-  const phase = fract(uAlong.sub(across.abs().mul(CHEVRON_SKEW)).sub(uTime.mul(uFlow)))
-  const streak = pow(clamp(float(1).sub(phase), float(0), float(1)), float(STREAK_SHARP))
+  // Forward-pointing chevron arrowheads (►►►) scrolling toward +U — which IS the
+  // race direction, since the spline's point order is the racing line. `behind`
+  // measures distance BEHIND each arrow's tip: the bright crisp edge is the
+  // leading TIP and the fade trails behind it (back toward the bike), while
+  // subtracting `skew·|across|` sweeps the flanks BACK into the arrow's arms so
+  // the vertex leads at the centre. All three cues — vertex, crisp edge, scroll —
+  // come off this one term, so they can't disagree: the painted surface reads as
+  // an arrow pointing the way to go. (The earlier form put the vertex at the back
+  // and read as a backward arrow — fixed here.)
+  const behind = fract(uTime.mul(uFlow).sub(uAlong).sub(across.abs().mul(CHEVRON_SKEW)))
+  const streak = pow(clamp(float(1).sub(behind), float(0), float(1)), float(STREAK_SHARP))
 
   // Painterly grain from the shared brush sheet, flowing with the strokes — adds
   // bristle break-up so the band reads as paint, not a gel. Average the 3 packed
