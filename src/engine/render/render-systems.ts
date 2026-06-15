@@ -20,7 +20,7 @@ import {
   type InstancedBikeField,
   type SharedVinylCache,
 } from './instanced-bikes'
-import { applyVinylMaterialToScene } from './painterly-vinyl-material'
+import { applyVinylMaterialToScene, vinylRimHandle } from './painterly-vinyl-material'
 import { getBikeSignal } from './signal-state'
 
 const PLAYER_FALLBACK_COLOR = 0xff7733
@@ -102,6 +102,10 @@ export function createBikeRenderSystem(
   opts?: { instanced?: boolean },
 ) {
   const meshes = new Map<number, THREE.Object3D>()
+  // Per-eid additive-rim handles for single-mesh bikes (the player + TT-ghost /
+  // non-default-AI path) — drives the style-as-legibility rim from each bike's
+  // signal each frame (the instanced path uses per-instance attributes instead).
+  const rimHandles = new Map<number, NonNullable<ReturnType<typeof vinylRimHandle>>[]>()
   // Reused per-frame scratch for the live-eids reconciliation set.
   const live = new Set<number>()
   let aiColorCursor = 0
@@ -309,9 +313,33 @@ export function createBikeRenderSystem(
         mesh = createSingleBikeMesh(eid, isPlayer, isGhost)
         scene.add(mesh)
         meshes.set(eid, mesh)
+        // Cache the per-object rim handles once so the per-frame signal update is
+        // a couple of uniform writes (ghosts use a non-vinyl material → none).
+        const collected: NonNullable<ReturnType<typeof vinylRimHandle>>[] = []
+        mesh.traverse((obj) => {
+          const m = obj as THREE.Mesh
+          if (!m.isMesh || !m.material) return
+          const mats = Array.isArray(m.material) ? m.material : [m.material]
+          for (const mat of mats) {
+            const h = vinylRimHandle(mat)
+            if (h) collected.push(h)
+          }
+        })
+        rimHandles.set(eid, collected)
       }
       mesh.position.set(t.x, t.y, t.z)
       mesh.quaternion.copy(baseQuat)
+      // Style-as-legibility (B1/B5): drive this single-mesh bike's rim from its
+      // gameplay-state signal (the player's own drift-charge ladder). getBikeSignal
+      // returns strength 0 when the master flag is off, so this is a no-op then.
+      const sig = getBikeSignal(eid)
+      const handles = rimHandles.get(eid)
+      if (handles) {
+        for (const h of handles) {
+          h.uStrength.value = sig.strength
+          if (sig.strength > 0) h.uColor.value.copy(sig.color)
+        }
+      }
     }
 
     // Despawn — free instanced slots, drop single meshes.
@@ -328,6 +356,7 @@ export function createBikeRenderSystem(
       if (!live.has(eid)) {
         scene.remove(mesh)
         meshes.delete(eid)
+        rimHandles.delete(eid)
       }
     }
     for (const rec of fields.values()) {
