@@ -673,6 +673,33 @@ export type SkyConfig = {
     /** Sample count along the velocity vector. Default 16. */
     samples?: number
   }
+  /** Scene-wide colour GRADE — the contrast/saturation *budget* that holds the
+   *  whole frame in a muted band so gameplay events (boost, hazard, pickup)
+   *  read at race speed (docs/painterly-legibility-plan.md Part 3B / A2). This
+   *  is the SCENE grade (a final fullscreen post stage in scene-referred linear
+   *  space, before tone-map), distinct from `colorGrade` which only tints the
+   *  sky DOME. Every field is optional and defaults to its exact identity, so an
+   *  absent block (or an all-identity one) is byte-identical to today's look —
+   *  no track authors a grade yet. Applied in order: exposure → temperature
+   *  (white balance) → saturation → contrast. Maps 1:1 onto `GradeOptions` in
+   *  `engine/render/post-pipeline.ts`, where the per-field math + clamps live. */
+  scenicGrade?: {
+    /** Linear exposure multiplier on the composited HDR colour. 1 = identity;
+     *  <1 darkens the whole frame (the "muted band" lever), >1 lifts. Clamped
+     *  to >= 0. Default 1. */
+    exposure?: number
+    /** Warm/cool white-balance shift in [-1, 1]. 0 = identity (neutral).
+     *  Positive warms (lifts red, drops blue), negative cools; green held.
+     *  A full ±1 is a gentle ±15% channel skew. Clamped to [-1, 1]. Default 0. */
+    temperature?: number
+    /** Global saturation around Rec.709 luminance. 1 = identity, 0 = greyscale,
+     *  >1 = punchier. Holding the world <1 while gameplay FX stay saturated is
+     *  the core of the legibility budget. Clamped to >= 0. Default 1. */
+    saturation?: number
+    /** Contrast about a 0.5 pivot (linear). 1 = identity; <1 flattens toward
+     *  mid grey (mutes the world), >1 widens. Clamped to >= 0. Default 1. */
+    contrast?: number
+  }
 }
 
 /**
