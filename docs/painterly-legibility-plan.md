@@ -75,13 +75,15 @@ Foundations shipped default-off; then, per Matt's call, the **diffuse warp**, th
 - **B0 — signal-colour vocabulary** ([signal-colors.ts](../src/engine/render/signal-colors.ts)):
   the reserved, double-coded palette (blue/orange primary).
 - **B1 / B5 — rim-as-signal** ([signal-state.ts](../src/engine/render/signal-state.ts)):
-  drift-charge ladder on **every bike incl. the player's own** (the instanced path
-  + the single-mesh hop in render-systems.ts are both wired) + magenta pickup pulse,
-  behind a default-off master flag — toggle: dev palette → Toggles → **Gameplay
-  signals (rim)** (`?signals=1` / `window.__signals` still work for automation).
-  **Finding:** the charge signal only fires on a **human mini-turbo drift-charge** —
-  AI/autopilot don't drift-charge, so the ladder won't show on AI bikes in practice
-  (the broadly-visible rival cue is the draft rim — see Deferred).
+  three cues, all behind a default-off master flag (dev palette → Toggles →
+  **Gameplay signals (rim)**; `?signals=1` / `window.__signals` for automation):
+  (1) **drift-charge ladder** on every bike incl. the player's own (instanced +
+  single-mesh hops wired); (2) **magenta pickup pulse**; (3) **rival draft rim**
+  ([fx/index.ts](../src/engine/render/fx/index.ts)) — a rival you're drafting rims
+  cyan, one drafting you rims warm (render-only XZ cone, no sim component).
+  **Finding:** the charge ladder only fires on a **human mini-turbo drift-charge**
+  (AI don't drift-charge); the **rival draft rim is the broadly-visible cue** and is
+  headed-verified firing (warm on a drafting rival, eid 161, strength 0.7).
 - **A0a — foliage sway** backend wired at boot (WebGL2-fallback fix + verification
   harness); the TSL sway itself was already correct — the original "broken on
   WebGPU" item was stale doc drift (fixed in PR #260).
@@ -92,13 +94,15 @@ Foundations shipped default-off; then, per Matt's call, the **diffuse warp**, th
   default (world-height gated; sea level threaded from `track.water.height`); opt
   out per prop via `Prop.waterline = false` (per-asset for instanced placements).
 - **Foam oil-strokes** — already the default (`FOAM_BRUSH_DEFAULT = 1.0`); confirmed.
+- **Water readability layers** (contour lines / value ramp / rising-face strokes /
+  Langmuir) — found to be **already ON by default** (non-zero constants); confirmed
+  visible on open-ocean swell. The plan's earlier "default-off" note was wrong.
+- **Rival draft rim** — shipped this pass (render-only, default-off behind signals).
 
 **Deferred — precise next steps (feel-dependent; want a headed playtest, not blind code):**
-- Rival/draft rim (the broadly-visible "assess the threat" cue): needs a per-bike
-  `DraftState` component written in [hover.ts](../src/game/systems/hover.ts), then
-  call `signalRivalDraft` from the render layer.
-- **A4** painterly normals · **B2** event juice (anticipation + flash + hitstop) ·
-  **B3** racing/wave-line flow ribbon · **B4** turning the water readability layers on.
+- **A4** painterly normals (largely covered by the existing brush relief) ·
+  **B2** event juice (anticipation + flash + hitstop — touches sim timing) ·
+  **B3** racing/wave-line flow ribbon (the remaining big legibility piece).
 
 **How to evaluate:** run headed on your own server (`pnpm dev --port <N>
 --strictPort`, or `BASE=… node tools/verify-painterly.mjs` for an autopilot
@@ -135,7 +139,7 @@ foam**, with minimal post. This is an accurate inventory, not the aspirational d
 | Cel/ink **outline** (Sobel) | post-pipeline.ts (L31-35, `setOutline`) | Default-off; requires rebuild. *Should stay off* — see Part 6. |
 | Motion blur | post-pipeline.ts | Default-off. |
 | Scene-wide **colour grade** | — | Missing; grade is **dome-only** ([sky.ts](../src/engine/render/sky.ts)). |
-| Water **contour lines / value ramp / rising-face strokes / Langmuir lanes** | water.ts | Shipped as P1/P2 readability layers, **default-off, awaiting playtest** (see water-next-research §5). |
+| Water **contour lines / value ramp / rising-face strokes / Langmuir lanes** | water.ts | **ON by default** (`CONTOUR_STRENGTH` 0.55, `RAMP_STRENGTH` 0.45, `RISE_STROKE` 0.5, `LANGMUIR` 0.6) — read on open-ocean swell, subtle on calm lagoons; live-tune in the Water debug panel. *(An earlier "default-off" note was wrong.)* |
 | Waterline trio on **props** | [waterline.ts](../src/engine/render/waterline.ts) | Opt-in, mostly off; terrain ships it. |
 | Foam oil-strokes vs discs | water.ts (`foamBrush`) | Default `0` = round discs; oil-strokes off. |
 
