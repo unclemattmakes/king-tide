@@ -99,10 +99,15 @@ Foundations shipped default-off; then, per Matt's call, the **diffuse warp**, th
   visible on open-ocean swell. The plan's earlier "default-off" note was wrong.
 - **Rival draft rim** — shipped this pass (render-only, default-off behind signals).
 
-**Deferred — precise next steps (feel-dependent; want a headed playtest, not blind code):**
-- **A4** painterly normals + **B3** racing/wave-line flow ribbon — **handed to a
-  spawned session** (branch off `claude/painterly-legibility`). A4 is likely
-  already covered by the existing brush relief (assess first); B3 is the main piece.
+**Remaining work / resolutions:**
+- **B3** racing/wave-line flow ribbon — **delivered** by the spawned A4/B3 session
+  ([racing-line-ribbon.ts](../src/engine/render/racing-line-ribbon.ts) + a dev-menu
+  toggle + `tools/verify-raceline.mjs`): a Forza-grammar cool/warm ribbon along the
+  track's `aiSplines` line with scrolling brushstroke flow, default-off. *In the
+  working tree, pending commit + a playtest pass.*
+- **A4** painterly normals — assessed **already covered** by the existing brush
+  relief (`normalNode = bumpMap(streak, …)` in painterly-vinyl-material.ts); not
+  separately implemented.
 - **B2** event juice — **CUT** (2026-06-15, Matt's call): hitstop touches sim
   timing, which we won't risk in a multiplayer game. The render-only parts (event
   flash, anticipation telegraphs) remain possible later but are deprioritized.

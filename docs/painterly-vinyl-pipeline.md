@@ -176,7 +176,7 @@ hand-painted texture is the hero upgrade.
 | Look element | Status | Where |
 |---|---|---|
 | Bloom on emissives | **exists, wired** | `post-pipeline.ts` (threshold 0.85) |
-| World-space waterline trio | **exists — terrain only** | `terrain-shader.ts` → factor into `waterline.ts` |
+| World-space waterline trio | **exists — terrain + props (ON by default, opt-out) + buildings (opt-in)** | `terrain-shader.ts`, `waterline.ts`, `props-mesh.ts` |
 | Value-noise weathering | **exists — terrain only** | `terrain-shader.ts` → reuse in vinyl material |
 | GLB→node-material copy helper | **exists** | `toSwayNodeMaterial` (`foliage-sway.ts`) |
 | Rim / fresnel idiom | **exists — clouds/water only** | `clouds.ts` → reuse on opaque |
@@ -184,9 +184,9 @@ hand-painted texture is the hero upgrade.
 | `keep_material` intake | **exists — hand-authored only** | `condition_ai_mesh.py` |
 | 63 Quaternius props conditioned | **exists, loadable** | `?track=prop-showcase` |
 | **Unified vinyl material on props** | **built** | `painterly-vinyl-material.ts` |
-| Illustrative warp-ramp diffuse + additive rim | **built** (default-off `illum`/`rimEmissive`) | `illustrative-lighting.ts` ([plan](./painterly-legibility-plan.md)) |
+| Illustrative warp-ramp diffuse + additive rim | **built; warp ON by default** (`illum`=1; additive rim `rimEmissive` is the default-off signal channel) | `illustrative-lighting.ts` ([plan](./painterly-legibility-plan.md)) |
 | Scene-wide colour grade | **built** (identity-default `setGrade`; per-track `sky.scenicGrade`) | `post-pipeline.ts` |
-| Rim-as-signal (style-as-legibility) | **built** (default-off; dev menu / `?signals=1`) | `signal-state.ts`, `signal-colors.ts` |
+| Rim-as-signal: drift-charge ladder + pickup pulse + rival draft | **built** (default-off; dev menu / `?signals=1`) | `signal-state.ts`, `signal-colors.ts`, `fx/index.ts` |
 | Readiness auto-router | missing | `condition_ai_mesh.py` |
 | Texture-budget pass | missing | new `tools/blender` step |
 
