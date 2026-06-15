@@ -438,6 +438,22 @@ export function createSkySystem(deps: SkyDeps): SkySystem {
         // DEFAULT_SKY); a track only pays for them when its JSON opts in.
         outline: cfg.outline,
         motionBlur: cfg.motionBlur,
+        // NOTE: no `grade` is passed here on purpose. The pipeline now carries
+        // a scene-wide colour GRADE (the contrast/saturation budget), but it
+        // builds at IDENTITY by default so the shipping look is byte-unchanged.
+        // It is intentionally NOT yet wired to per-track JSON in this pass —
+        // that needs a new `sky.scenicGrade` (or similar) field on SkyConfig in
+        // `src/game/tracks/types.ts`, which is out of scope here. The existing
+        // `cfg.colorGrade` / SKY_GRADE_TABLE drives the DOME shader only (the
+        // `uGrade*` uniforms below); deliberately not reused for the scene-wide
+        // grade because (a) its tints are tuned for the dome and (b) feeding it
+        // here would change the look of every non-'neutral' track and
+        // double-apply on the sky. DEFERRED FOLLOW-UP: add the schema field +
+        // a CPU `SCENIC_GRADE_TABLE`, then seed via `grade: {...}` here (the
+        // construction-time push, exactly mirroring `bloomStrength: cfg.bloom`).
+        // Runtime access in the meantime: any caller can reach the live setter
+        // via `getActivePostPipeline()?.setGrade({...})` (e.g. a dev-palette
+        // dial or the per-lap weather system) with no rebuild.
       })
       setActivePostPipeline(postPipeline)
     } catch (e) {
