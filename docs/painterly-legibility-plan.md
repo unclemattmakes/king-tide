@@ -263,6 +263,31 @@ Forbid these exact hues in environment art (enforced via the A2 grade + art
 review). *Deliverable:* a short addition to art-direction.md + a `signalColors`
 constant. *Effort:* S (design) + the lockout discipline.
 
+### B0 — signal colour vocabulary (locked)
+
+Implemented as the single source of truth in
+[signal-colors.ts](../src/engine/render/signal-colors.ts) (`SIGNAL_COLORS`,
+`CHARGE_LADDER`, `linear()`). Later slices import these tokens, never raw hexes.
+
+| State | sRGB hex | Shape | Motion |
+|---|---|---|---|
+| boost / go | `#19E0FF` | chevron | lunge + streak |
+| pickup | `#FF2BD6` | ring → burst | pulse |
+| hazard / brake | `#FF5A2A` | angular | rear / telegraph |
+| racingLineIdeal | `#2EE66B` | flow ribbon | scrolls forward |
+| maxCharge | `#A24BFF` | dense sparks | glow ramp |
+
+Drift/charge ladder (`CHARGE_LADDER`, ascending): blue `#2A7BFF` → orange
+`#FF8A2A` → `maxCharge` violet — the deficiency-safe **blue/orange** axis, with
+spark *density* as the redundant grayscale cue.
+
+Rules baked into the module: (1) **forbid these exact hues in environment art**
+(world stays in the muted art-direction.md band); (2) **primary opposition is
+blue/orange, not red/green**; (3) **every token is double-coded colour + shape +
+motion** (survives grayscale / colourblindness / peripheral vision). Colour
+space: each token carries a linear `THREE.Color` (emissive/rim) **and** an sRGB
+hex (HUD/CSS). Hexes are playtest-tunable; the vocabulary itself is locked.
+
 **B1 — Rim-colour as a state channel (P1, cheapest high-value signal).**
 Reuse the A1 per-object `rimColor` uniform to **paint state into the lighting**: a
 rival bike rims **cyan** when you're in its slipstream, **warm** when it's drafting
