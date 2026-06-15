@@ -21,6 +21,7 @@ import {
   type SharedVinylCache,
 } from './instanced-bikes'
 import { applyVinylMaterialToScene } from './painterly-vinyl-material'
+import { getBikeSignal } from './signal-state'
 
 const PLAYER_FALLBACK_COLOR = 0xff7733
 const AI_BODY_COLORS = [0x33aaff, 0x44dd66, 0xcc55ff, 0xffcc33, 0xff5577]
@@ -292,6 +293,12 @@ export function createBikeRenderSystem(
           bikePos.set(t.x, t.y, t.z)
           bikeMat.compose(bikePos, baseQuat, ONE)
           rec.field.setMatrix(idx, bikeMat)
+          // Style-as-legibility (B1/B5): paint this bike's gameplay-state rim
+          // signal (drift-charge ladder, rival/draft) per instance. No-op while
+          // the master flag is off — getBikeSignal returns a strength-0 signal,
+          // so the rim contributes vec3(0). See signal-state.ts /
+          // docs/painterly-legibility-plan.md.
+          rec.field.setRimSignal(idx, getBikeSignal(eid))
           continue
         }
       }

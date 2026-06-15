@@ -27,6 +27,14 @@ import {
   MissileTag,
 } from '@/game/components/combat'
 import { slopeAwareSweetSpot, tuckFactor } from '@/game/systems/hover'
+import {
+  type BikeRimSignal,
+  clearBikeSignal,
+  fillChargeRimSignal,
+  makeRimSignal,
+  setBikeSignal,
+  signalsEnabled,
+} from '../signal-state'
 
 /**
  * Hand-rolled particle FX driven by TSL node materials.
@@ -663,6 +671,26 @@ export function createFxSystem(
   // lazily on first sight of each bike.
   const lastGrounded = new Map<number, boolean>()
 
+  // ── Style-as-legibility signal producer (B5 drift/charge rim) ──────────────
+  // FX is the natural producer: it already iterates every bike with its
+  // DriftStateStore read-only. Each frame (when the master flag is on) we map a
+  // bike's mini-turbo charge tier to its additive-rim signal colour/strength and
+  // publish it per-eid in signal-state.ts; the bike render system reads it back
+  // keyed by the eid it owns and drives the rim (per-instance for AI fields, the
+  // per-object uniform for the player) — see signal-state.ts for why this is the
+  // decoupled seam. One reusable BikeRimSignal per eid so the loop allocates
+  // nothing. Master flag OFF ⇒ setBikeSignal is a no-op and getBikeSignal returns
+  // NO_SIGNAL ⇒ rim strength 0 ⇒ byte-identical to today.
+  const rimSignals = new Map<number, BikeRimSignal>()
+  function bikeRimSignal(eid: number): BikeRimSignal {
+    let s = rimSignals.get(eid)
+    if (!s) {
+      s = makeRimSignal()
+      rimSignals.set(eid, s)
+    }
+    return s
+  }
+
   // Per-bike plunge state. The dive lifecycle is:
   //   above-water → (cross surface, vy < 0) plunge burst, start descent
   //   descending  → continuous bubble cloud while still sinking
@@ -946,6 +974,22 @@ export function createFxSystem(
         }
       }
       lastGrounded.set(eid, hover.isGrounded)
+
+      // Drift/charge rim signal (B5) — publish this bike's mini-turbo tier as an
+      // additive-rim colour/strength for the bike render layer to paint. Read the
+      // same DriftState the coloured drift sparks use; map tier→ladder colour +
+      // charge→strength in signal-state.ts so every surface agrees. Gated by the
+      // master flag (off ⇒ no-op, today's look). Cleared when not charging so the
+      // rim drops the instant the player releases / a tier resets.
+      if (signalsEnabled()) {
+        const driftSig = DriftStateStore.get(eid)
+        const sig = bikeRimSignal(eid)
+        if (driftSig && fillChargeRimSignal(sig, driftSig.highestTier, driftSig.chargeS)) {
+          setBikeSignal(eid, sig)
+        } else {
+          clearBikeSignal(eid)
+        }
+      }
 
       // Foam — turbulent spray plume springing from the *water surface*
       // behind the bike's stern, not from the bike body. Spawning at
@@ -1462,6 +1506,19 @@ export function createFxSystem(
         }
       } else {
         acc.tuck = 0
+      }
+    }
+
+    // Prune the per-eid rim-signal state for bikes that despawned this frame, so
+    // a reused eid never inherits a stale charge rim (and the store doesn't grow
+    // unbounded across a session). Cheap — the field is small.
+    if (rimSignals.size > 0) {
+      const liveBikes = new Set(eids)
+      for (const eid of rimSignals.keys()) {
+        if (!liveBikes.has(eid)) {
+          rimSignals.delete(eid)
+          clearBikeSignal(eid)
+        }
       }
     }
 

@@ -54,6 +54,7 @@
 import * as THREE from 'three'
 import type Node from 'three/src/nodes/core/Node.js'
 import {
+  attribute,
   BRDF_Lambert,
   cameraPosition,
   clamp,
@@ -270,12 +271,17 @@ export class IllustrativeLightingModel extends PhysicalLightingModel {
 
 export type IllustrativeRim = {
   /** The additive rim contribution (vec3) to fold into `emissiveNode`. At
-   *  `rimEmissive = 0` this is `vec3(0)` so it never moves the look until dialled. */
+   *  `rimEmissive = 0` (or a per-instance strength of 0) this is `vec3(0)` so it
+   *  never moves the look until dialled. */
   node: Node<'vec3'>
   /** Live-settable rim tint (linear RGB). Becomes a gameplay-signal channel for a
-   *  later slice (e.g. rival/hazard/pickup state painted into the lighting). */
+   *  later slice (e.g. rival/hazard/pickup state painted into the lighting).
+   *  In the PER-INSTANCE path (`colorAttribute`/`strengthAttribute` set) the rim
+   *  reads instanced attributes instead, so this uniform is an unwired stub — the
+   *  signal drives the rim per instance, not through this object-wide uniform. */
   uColor: { value: THREE.Color }
-  /** Live-settable additive strength (0 = off). */
+  /** Live-settable additive strength (0 = off). Unwired stub in the per-instance
+   *  path (see `uColor`). */
   uStrength: { value: number }
 }
 
@@ -291,15 +297,35 @@ export type IllustrativeRimOptions = {
    *  against sky/water even away from the key light (TF2's upward-biased ambient
    *  rim). 0 = pure view-fresnel, 1 = fully up-biased. Default 0.35. */
   upBias?: number
+  /** PER-INSTANCE rim colour: read the rim tint from a per-instance vec3 vertex
+   *  attribute of this name instead of the `rimColor` uniform. This is what lets
+   *  ONE shared material paint a DIFFERENT signal rim on each instance in an
+   *  `InstancedMesh` field (mirrors painterly-vinyl's `tintAttribute` livery
+   *  pattern — instanced-bikes.ts stamps the attribute per bike). Omit → the
+   *  per-object `uColor` uniform (the normal path). */
+  colorAttribute?: string
+  /** PER-INSTANCE rim strength: read the additive strength from a per-instance
+   *  float vertex attribute of this name instead of the `rimEmissive` uniform.
+   *  An unstamped / zeroed attribute reads 0 ⇒ rim off ⇒ byte-identical to today,
+   *  which is what keeps the per-instance path default-OFF. Usually paired with
+   *  `colorAttribute`. Omit → the per-object `uStrength` uniform. */
+  strengthAttribute?: string
 }
 
 /**
  * Build the additive rim term + its live uniforms. Pure view-dependent fresnel
  * (clouds.ts idiom) raised to `power`, optionally weighted toward up-facing
- * surfaces, tinted by a per-object colour uniform and scaled by an emissive
- * strength uniform. Returned as a node to ADD into the material's emissive (so it
- * survives shadow and pops the silhouette) — the caller composes it with any
- * existing per-instance exhaust emissive rather than replacing it.
+ * surfaces, tinted + scaled by EITHER per-object uniforms (`uColor`/`uStrength`,
+ * the default) OR per-instance vertex attributes (`colorAttribute`/
+ * `strengthAttribute`) so one shared instanced material can paint a distinct
+ * gameplay signal per instance. Returned as a node to ADD into the material's
+ * emissive (so it survives shadow and pops the silhouette) — the caller composes
+ * it with any existing per-instance exhaust emissive rather than replacing it.
+ *
+ * Default-OFF in BOTH paths: the uniform path defaults `rimEmissive` to 0, and
+ * the attribute path reads 0 from an unstamped/zeroed strength attribute — either
+ * way the rim term is `vec3(0)`, byte-identical to today, until something dials a
+ * strength > 0.
  */
 export function buildIllustrativeRim(opts: IllustrativeRimOptions = {}): IllustrativeRim {
   const rimColor = opts.rimColor ?? [1.0, 0.93, 0.82]
@@ -307,8 +333,21 @@ export function buildIllustrativeRim(opts: IllustrativeRimOptions = {}): Illustr
   const power = opts.power ?? 4
   const upBias = opts.upBias ?? 0.35
 
+  // Keep the uniforms around regardless (the return type promises them); they're
+  // only WIRED into the graph on the per-object path. On the per-instance path
+  // they're inert stubs so a caller that holds the handle never NaNs.
   const uColor = uniform(new THREE.Color(rimColor[0], rimColor[1], rimColor[2]))
   const uStrength = uniform(rimEmissive)
+
+  // Source the tint + strength from per-instance attributes when asked, else the
+  // per-object uniforms. The attribute path is the InstancedMesh signal channel;
+  // an absent/zeroed strength attribute reads 0 → rim off (default == today).
+  const colorTerm: Node<'vec3'> = opts.colorAttribute
+    ? (attribute(opts.colorAttribute, 'vec3') as Node<'vec3'>)
+    : (uColor as unknown as Node<'vec3'>)
+  const strengthTerm: Node<'float'> = opts.strengthAttribute
+    ? (attribute(opts.strengthAttribute, 'float') as Node<'float'>)
+    : (uStrength as unknown as Node<'float'>)
 
   const nrm = normalize(normalWorld)
   const view = normalize(cameraPosition.sub(positionWorld))
@@ -320,7 +359,7 @@ export function buildIllustrativeRim(opts: IllustrativeRimOptions = {}): Illustr
   const up = saturate(nrm.y)
   const biased = fresnel.mul(mix(float(1), up, float(upBias)))
 
-  const node = (uColor as unknown as Node<'vec3'>).mul(biased).mul(uStrength) as Node<'vec3'>
+  const node = colorTerm.mul(biased).mul(strengthTerm) as Node<'vec3'>
 
   return {
     node,
