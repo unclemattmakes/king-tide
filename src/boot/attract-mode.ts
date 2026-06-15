@@ -184,7 +184,9 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     let animatedProps: ReturnType<typeof createAnimatedPropsSystem> | undefined
     let propsGroup: ReturnType<typeof createPropsMesh> | undefined
     if (track.props.length > 0) {
-      propsGroup = createPropsMesh(track.props, propAssets)
+      propsGroup = createPropsMesh(track.props, propAssets, {
+        waterLevel: track.water?.height ?? 0,
+      })
       scene.add(propsGroup)
       animatedProps = createAnimatedPropsSystem(scene, track.props, propAssets, { camera })
       waveRiderSys = createWaveRiderSystem(sim, phys, waveField)
