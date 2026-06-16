@@ -188,16 +188,19 @@ capture sailed through both tracks; only the 8-wide field exposed the jams.**
      forward·chord ≈ 0.34, ~70° off) → **all 8 stuck at cp6** (none could
      trigger it). **Fixed** (lowered to `1.6`, reoriented to the chord). That
      alone took it from **0/8 → 7/8 reaching cp10+**.
-  2. **Residual (design call, NOT changed):** the harbour/slalom packs
-     **collidable shipping containers onto the racing line** — **21 within 2 m
-     of the centerline, 82 within 8 m**, many dead-centre. The no-avoidance AI
-     can't fully thread it, so 1–2 bikes still snag in the slalom. Relocating
-     dozens of containers would redesign the signature slalom/ruin-field, so I
-     left it for a designer decision: **re-space the containers to carve a clear
-     AI corridor, mark on-line containers non-collidable (visual flavour), or add
-     AI obstacle-avoidance.** This is the last gate to "Cape Town completes with
-     the full field."
+  2. **Containers → ramps (per design direction).** The slalom packs
+     **collidable shipping containers onto the racing line** (21 within 2 m of
+     the centerline, 82 within 8 m), and the no-avoidance AI can't thread that.
+     Per Matt's call, **tilted the 81 in-lane containers ~60° outward** (leaning
+     away from the line) so they read as tumbled wreckage *and* shift their mass
+     off the lane at hover height. This reads well (more drowned-ruin than neat
+     stacks) and improves flow (6–7/8 now reach cp10+), **but does not fully
+     close it** — 1–2 bikes still snag at the **cp6 lateral pinch**.
+  3. **Remaining (needs a call):** the cp6 pinch has containers dead on the
+     centerline that a tilt can't open. Closing it wants one of: a **targeted
+     relocation of the 2–3 centerline containers right at cp6**, marking those
+     **non-collidable**, or **AI obstacle-avoidance**. Small + bounded — flagged
+     rather than guessed.
 
 > **Note:** the field-completion spec currently *fails on Cape Town by design* —
-> it's the gate flagging the open container-corridor decision above, not a
-> regression.
+> it's the gate flagging the open cp6-pinch decision above, not a regression.
