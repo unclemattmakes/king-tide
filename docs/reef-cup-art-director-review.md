@@ -128,6 +128,76 @@ chase-cam/landmark framing pass; "alive" emitters (gulls, papel-picado, kelp swa
 ## P0 pass — results (2026-06-16)
 
 > Worked top-to-bottom through all four P0s in branch
-> `claude/reef-cup-vslice-p0`. Results recorded here as each lands.
+> `claude/reef-cup-vslice-p0`, each verified on real-GPU headed Chromium
+> (`gen:track-shots`). Before/after frames in `artifacts/track-clean/` (before)
+> and `artifacts/track-p0verify/` (after).
 
-_(in progress — see below)_
+### P0.1 — Mexico City water + sky rescue ✅ (verified)
+`public/tracks/mexico-city.json` sky: warm rosa-marigold dome tint
+(`#ffffff → #ffcdb0`), big low sun (`sunSize 1 → 1.6`), dramatic cumulus
+(`cloudTowering 0.35 → 0.65`, warmer `warmTop`), haze pulled in
+(`fogFar 2200 → 1800`), and a glassy lake (`seaStateBeaufort 2.4 → 1.3`). The
+`mexico_city_rosa` grade was already punchy — these were the suppressors.
+**After:** the washed-out hazy-pink sky now reads as a vibrant rosa→coral
+golden-hour, and the grey-murk water as a clean saturated teal; the painted
+buildings pop against it.
+
+### P0.3 — Mexico City wireframe-cube anomaly ✅ (verified, fixes all tracks)
+Root cause: `render/track-mesh.ts` `createBoostPadMesh` drew every boost pad
+in-race as a translucent cyan box **+ a `0x33ddff` `WireframeGeometry`** (a
+"placement-confirmation" placeholder that shipped into gameplay). Mexico City's
+3 boost pads each rendered that debug-looking wireframe volume. Replaced with a
+flat **painted amber speed-strip** on the water surface (clamped into the catch
+volume) + forward chevrons, `renderOrder` bumped past the camera-locked water.
+**After:** the cyan box is gone; the pad reads as intentional race furniture.
+
+### P0.2 — Cape Town landmark legibility ✅ (improved + verified; P1 remainder)
+Two findings: (a) `fogFar 3200`/`fogNear 700` washed the 3 km Table-Mountain
+ring (top 400 m, ~1500 m out) into the sky — raised to `1200`/`4500` (racing
+line is only ±300 m, so gameplay geometry stays crisp); (b) the horizon ring is
+a **sky-tinted silhouette** (`horizon-ring.ts`), and `silhouetteDark` defaulted
+to a pale 0.45 — added `horizon.silhouetteDark: 0.32` so the ridge darkens
+against the bright sky. **After:** the mountain now reads as a tangible darker
+ridge across the horizon (was invisible). **P1 remainder (geometry/shader, needs
+a Blender re-export):** the silhouette is still blue-grey not grey-green, and the
+**Cape Wheel sits at z=360 — just *behind* the start line** (racing line maxes at
+z≈300), so it's out of the forward sightline for most of the lap; repositioning
+it onto the race line is the remaining identity win.
+
+### P0.4 — full-field (8-bike) completion ⚠️ (2 of 3 fixed; Cape Town needs a design call)
+New gated spec `tests/e2e/field-completion.spec.ts` (`FIELD_CHECK=1`): spawns the
+full grid (`?ai=7`), drives all eight via autoplay, and requires every bike to
+advance a full lap of checkpoints (a jammed bike stalls and fails, naming the
+checkpoint). **The gate earned its keep — the single-bike `gen:track-shots`
+capture sailed through both tracks; only the 8-wide field exposed the jams.**
+
+- **Mayday Bay:** ✅ 8/8 lap, no jam (passed twice, reliably).
+- **Mexico City:** ❌→✅ **found + fixed a real jam.** 4–6 of 8 bikes piled up at
+  **speed 0 in the start→cp1 lane** (diagnosed via a position dump + side-on
+  capture: open water, but a **gauntlet of trees planted in the racing lane**).
+  Root cause: 8 **collidable** `mxc/ahuehuete`/`mxc/jacaranda` props (each GLB
+  has a `collider_body`) sat **5–10 m off the centerline, inside the 14 m gate
+  corridor**; the AI has no obstacle avoidance, so the field wedged into them
+  (the documented inline-collider jam class). **Fix:** relocated those 8 props
+  out to ~18 m perpendicular (still flanking flavor, clear of the lane). Now
+  **8/8 complete on a clean run.** ⚠️ A *flaky* single-bike stick at the **start
+  (cp0)** appears intermittently — almost certainly start-grid jostling (8 bikes
+  packed at the line), not the gauntlet; flag for a start-spacing look.
+- **Cape Town:** ⚠️ **partially fixed — found two issues at cp6.**
+  1. **cp6 gate was floating + crosswise** (`y 6.86` vs neighbours ~1.5; gate
+     forward·chord ≈ 0.34, ~70° off) → **all 8 stuck at cp6** (none could
+     trigger it). **Fixed** (lowered to `1.6`, reoriented to the chord). That
+     alone took it from **0/8 → 7/8 reaching cp10+**.
+  2. **Residual (design call, NOT changed):** the harbour/slalom packs
+     **collidable shipping containers onto the racing line** — **21 within 2 m
+     of the centerline, 82 within 8 m**, many dead-centre. The no-avoidance AI
+     can't fully thread it, so 1–2 bikes still snag in the slalom. Relocating
+     dozens of containers would redesign the signature slalom/ruin-field, so I
+     left it for a designer decision: **re-space the containers to carve a clear
+     AI corridor, mark on-line containers non-collidable (visual flavour), or add
+     AI obstacle-avoidance.** This is the last gate to "Cape Town completes with
+     the full field."
+
+> **Note:** the field-completion spec currently *fails on Cape Town by design* —
+> it's the gate flagging the open container-corridor decision above, not a
+> regression.
