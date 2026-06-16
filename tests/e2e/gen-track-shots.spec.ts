@@ -82,6 +82,7 @@ const HUD_HIDE_SELECTOR = [
   '#race-intro-ui', // pre-race splash card
   '#race-intro-skip', // "press any key" prompt
   '#hud-positions',
+  '#dev-dock', // dev palette dock rail/panel (right edge) — covers world art
   '#devsettings-toggle',
   '#water-debug-toggle',
   '#garage-toggle',
