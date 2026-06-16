@@ -60,7 +60,9 @@ test.describe('full-field completion', () => {
       // (delta ≥ N), or bail out at the timeout with diagnostics.
       let allLapped = false
       let last: ReturnType<typeof computeDeltas> | null = null
-      function computeDeltas(standings: Array<{ eid: number; lap: number; nextCheckpoint: number }>) {
+      function computeDeltas(
+        standings: Array<{ eid: number; lap: number; nextCheckpoint: number }>,
+      ) {
         return standings.map((s) => ({
           eid: s.eid,
           lap: s.lap,

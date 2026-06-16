@@ -317,7 +317,12 @@ function createBoostPadMesh(pad: BoostPad, waterHeight: number): THREE.Object3D 
   // defines the pad without ever reading as a debug wireframe.
   const border = new THREE.LineSegments(
     new THREE.EdgesGeometry(flat(w, d)),
-    new THREE.LineBasicMaterial({ color: WARM, transparent: true, opacity: 0.9, depthWrite: false }),
+    new THREE.LineBasicMaterial({
+      color: WARM,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+    }),
   )
   border.position.y = surfaceLocalY + 0.03
   root.add(border)
