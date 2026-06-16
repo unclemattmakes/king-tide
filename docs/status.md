@@ -39,8 +39,11 @@
 > contour/ramp/rising-stroke layers were found already on too). Added a
 > **rim-as-signal** system — rival **draft** rim + player/AI **drift-charge** ladder
 > + **pickup** pulse — render-only and **default-off** behind a dev-menu *Gameplay
-> signals* toggle. A **racing-line flow ribbon** (B3) landed in-tree. The
-> event-juice/hitstop item (B2) was **cut** (sim-timing risk in multiplayer).
+> signals* toggle. A **racing-line flow ribbon** (B3) — a painted cool/warm
+> wayfinding line on the water whose forward-flowing brushstroke chevrons ARE the
+> arrow, **default-off** behind a dev-menu *Racing-line ribbon* toggle
+> (`?raceline=1`) — landed in-tree. The event-juice/hitstop item (B2) was **cut**
+> (sim-timing risk in multiplayer).
 > Details: [painterly-legibility-plan.md](./painterly-legibility-plan.md).
 >
 > **Last updated: 2026-06-14** — **Painterly + style-as-legibility foundations

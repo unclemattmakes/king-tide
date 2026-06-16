@@ -110,9 +110,12 @@ Foundations shipped default-off; then, per Matt's call, the **diffuse warp**, th
   lead-fade keeps it brightest around + ahead of the bike. Master flag DEFAULTS OFF
   (frame byte-identical until enabled): dev palette → Toggles → **Racing-line
   ribbon**, `?raceline=1` for e2e, `window.__raceline` (enable + live width /
-  opacity / flow / brake dials). **Verified headed (real WebGPU, 0 console
-  errors):** reads as a green flow band tracing the line, fading ahead, warming to
-  amber on the curved approaches; clean on/off. *In the working tree on
+  opacity / flow / brake dials; the chevrons flow FORWARD along the race line — a
+  negative `flowSpeed` reverses the scroll). **Verified headed (real WebGPU, 0
+  console errors):** reads as a green flow band tracing the line, fading ahead,
+  warming to amber on the curved approaches; clean on/off. (A first pass had the
+  chevrons pointing backward — the arrow geometry was rebuilt from a single
+  "distance behind the tip" term so vertex + crisp edge + scroll can't disagree.) *In the working tree on
   `claude/painterly-a4b3`, pending a playtest pass.* **Open for the playtest:** over
   Mayday Bay's teal lagoon the ideal-green sits a touch close in hue (it pops more
   over deep-blue ocean + with the A2 muted grade on) — colour balance, width and
