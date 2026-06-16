@@ -31,7 +31,9 @@ test.describe('full-field completion', () => {
 
   for (const id of TRACKS) {
     test(`${id}: all 8 bikes complete a lap (no jam)`, async ({ page }) => {
-      test.setTimeout(240_000)
+      // Generous: the poll window is ~110×2s; a slow-but-completing field must
+      // not trip the test timeout before the early-exit (or the diagnostic fail).
+      test.setTimeout(300_000)
 
       await page.goto(`/?autostart=1&track=${id}&ai=7`)
       await waitForReady(page, { timeout: 60_000 })
