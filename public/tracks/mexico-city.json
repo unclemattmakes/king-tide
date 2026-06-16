@@ -437,17 +437,17 @@
     "waterline": 0.0
   },
   "sky": {
-    "tint": "#ffffff",
+    "tint": "#ffcdb0",
     "cloudiness": 0.44999998807907104,
-    "cloudTowering": 0.3499999940395355,
-    "sunSize": 1.0,
-    "sunIntensity": 1.0,
-    "fogNear": 500.0,
-    "fogFar": 2200.0,
+    "cloudTowering": 0.65,
+    "sunSize": 1.6,
+    "sunIntensity": 1.1,
+    "fogNear": 450.0,
+    "fogFar": 1800.0,
     "timeOfDay": 0.8500000238418579,
     "colorGrade": "mexico_city_rosa",
     "bloom": 0.3499999940395355,
-    "seaStateBeaufort": 2.4,
+    "seaStateBeaufort": 1.3,
     "clouds": {
       "count": 24,
       "altitude": 340.0,
@@ -465,7 +465,7 @@
       },
       "sunPop": 1.0,
       "coolBase": "#b4a8be",
-      "warmTop": "#ffe3d0",
+      "warmTop": "#ffdcb8",
       "seed": 1337
     }
   },
