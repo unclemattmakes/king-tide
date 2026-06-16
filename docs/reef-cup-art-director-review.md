@@ -188,19 +188,24 @@ capture sailed through both tracks; only the 8-wide field exposed the jams.**
      forward·chord ≈ 0.34, ~70° off) → **all 8 stuck at cp6** (none could
      trigger it). **Fixed** (lowered to `1.6`, reoriented to the chord). That
      alone took it from **0/8 → 7/8 reaching cp10+**.
-  2. **Containers → ramps (per design direction).** The slalom packs
-     **collidable shipping containers onto the racing line** (21 within 2 m of
-     the centerline, 82 within 8 m), and the no-avoidance AI can't thread that.
-     Per Matt's call, **tilted the 81 in-lane containers ~60° outward** (leaning
-     away from the line) so they read as tumbled wreckage *and* shift their mass
-     off the lane at hover height. This reads well (more drowned-ruin than neat
-     stacks) and improves flow (6–7/8 now reach cp10+), **but does not fully
-     close it** — 1–2 bikes still snag at the **cp6 lateral pinch**.
-  3. **Remaining (needs a call):** the cp6 pinch has containers dead on the
-     centerline that a tilt can't open. Closing it wants one of: a **targeted
-     relocation of the 2–3 centerline containers right at cp6**, marking those
-     **non-collidable**, or **AI obstacle-avoidance**. Small + bounded — flagged
-     rather than guessed.
+     Kept this fix.
+  2. **Containers → ramps (per design direction).** The slalom packs collidable
+     shipping containers onto the racing line; per Matt's call the in-lane
+     containers were tilted ~60° outward into tumbled-wreckage ramps. Reads well
+     (more drowned-ruin than neat stacks) — **kept** as an art improvement.
+  3. **The real residual is TERRAIN, not containers — needs a level pass.**
+     Chasing full 8/8, container fixes (ramps → nudge → widen to a **14 m-clear
+     corridor**) were tried and **all still left 2–5 bikes stuck at cp6**, which
+     *disproves* the container theory. A position+capture diagnostic shows why:
+     **cp6 sits on a raised sandbar / grounded-container landmass** (dry tan
+     terrain, water behind), and the field circles on the low water ~40 m short
+     of the gate, unable to climb/traverse the raised mass to reach cp6's
+     trigger. This is **level geometry** — re-grade/reroute the cp6 sandbar so the
+     hover-line stays on traversable water, or move cp6 onto navigable water +
+     retune the gate to the land's ride height. The container relocations were
+     reverted (they don't fix it and widen away the slalom); the **gate fix +
+     ramps are kept** (0/8 → 7/8 is the real win).
 
-> **Note:** the field-completion spec currently *fails on Cape Town by design* —
-> it's the gate flagging the open cp6-pinch decision above, not a regression.
+> **Note:** the field-completion spec *fails on Cape Town by design* — it's
+> flagging the open **cp6 terrain** rework above (a designer/level pass), not a
+> regression. Mayday Bay + Mexico City pass.
