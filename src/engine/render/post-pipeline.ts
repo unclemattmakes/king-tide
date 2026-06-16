@@ -2,7 +2,19 @@ import type * as THREE from 'three'
 import { bloom } from 'three/addons/tsl/display/BloomNode.js'
 import { motionBlur } from 'three/addons/tsl/display/MotionBlur.js'
 import { sobel } from 'three/addons/tsl/display/SobelOperatorNode.js'
-import { float, mix, mrt, output, pass, smoothstep, uniform, vec3, velocity } from 'three/tsl'
+import {
+  float,
+  mix,
+  mrt,
+  output,
+  pass,
+  saturation,
+  smoothstep,
+  uniform,
+  vec3,
+  vec4,
+  velocity,
+} from 'three/tsl'
 import { RenderPipeline } from 'three/webgpu'
 
 /**
@@ -12,7 +24,11 @@ import { RenderPipeline } from 'three/webgpu'
  * widened, so the rest of this file uses `as never` casts at the call
  * boundaries — the same style the original bloom wiring used.
  */
-type TslNode = { add: (n: unknown) => TslNode }
+type TslNode = {
+  add: (n: unknown) => TslNode
+  sub: (n: unknown) => TslNode
+  mul: (n: unknown) => TslNode
+}
 
 /**
  * WebGPU post-processing pipeline. Owns a `RenderPipeline` that
@@ -29,10 +45,26 @@ type TslNode = { add: (n: unknown) => TslNode }
  * without rebuilding the pipeline.
  *
  * Two further effects — a full-scene cel/ink outline and a velocity-buffer
- * motion blur — are available but DEFAULT-OFF. When both are disabled the
- * pipeline's `outputNode` is byte-for-byte today's `scenePassColor.add(bloom)`
- * with no extra nodes and no velocity MRT, so the shipping bloom-only look is
- * unchanged unless a track opts in.
+ * motion blur — are available but DEFAULT-OFF, and are GRAPH-gated: when both
+ * are disabled the beauty composite is byte-for-byte today's
+ * `scenePassColor.add(bloom)` with no extra nodes and no velocity MRT, so the
+ * shipping bloom-only look is unchanged unless a track opts in. (The colour
+ * grade below differs: its nodes are always present but identity-valued — see
+ * next paragraph.)
+ *
+ * A scene-wide colour GRADE is the final stage of the chain — the vehicle for
+ * the "hold the world in a muted band so gameplay events pop" contrast budget
+ * (docs/painterly-legibility-plan.md Part 3B / Part 5 A2). Like bloom, the
+ * grade nodes are ALWAYS present and CPU-mutable via `setGrade()` with no
+ * pipeline rebuild. Their uniforms default to an exact algebraic IDENTITY
+ * (exposure 1, temperature 0, saturation 1, contrast 1), so until a setter is
+ * called the graded output equals the ungraded composite term-for-term — the
+ * shipping look is unchanged. The grade sits in scene-referred LINEAR space,
+ * *before* the `RenderPipeline`'s tone-map + sRGB encode (which it applies to
+ * `outputNode` downstream when `outputColorTransform` is true — the default we
+ * keep): exposure + white-balance are the photographically correct "camera"
+ * stage ahead of the filmic curve, and bloom — which is also pre-tonemap —
+ * is graded along with the beauty image so halos sit in the same muted band.
  */
 
 export type PostPipeline = {
@@ -87,8 +119,52 @@ export type PostPipeline = {
    * mutes the ink contribution.
    */
   setOutline(strength: number, color?: THREE.ColorRepresentation): void
+  /**
+   * Live-set the scene-wide colour grade — the contrast/saturation budget knob.
+   * Always available (the grade nodes are always in the graph, like bloom) and
+   * mutates uniforms with no pipeline rebuild. Every field is optional and
+   * defaults to its IDENTITY value, so a bare `setGrade({})` (or the explicit
+   * all-identity / "neutral" call) restores today's ungraded look. Out-of-range
+   * inputs are clamped to safe bounds. See `GradeOptions`.
+   */
+  setGrade(grade: GradeOptions): void
   /** Drop GPU resources. */
   dispose(): void
+}
+
+/**
+ * Scene-wide colour-grade parameters. The grade is the final post stage and
+ * runs in scene-referred LINEAR space (before the pipeline's tone-map + sRGB
+ * encode). Every field is OPTIONAL and identity by default; an all-default
+ * grade is a no-op (output byte-identical to today). Applied in order:
+ * exposure → temperature (white balance) → saturation → contrast.
+ */
+export type GradeOptions = {
+  /**
+   * Linear exposure multiplier on the composited HDR colour. `1` = identity
+   * (no change). `<1` darkens the whole frame (the "muted band" lever), `>1`
+   * lifts it. Clamped to `>= 0`. Default `1`.
+   */
+  exposure?: number
+  /**
+   * Warm/cool white-balance shift in roughly `[-1, 1]`. `0` = identity (neutral,
+   * channel gain exactly `(1,1,1)`). Positive warms (lifts red, drops blue);
+   * negative cools (drops red, lifts blue); green is held. Clamped to `[-1, 1]`.
+   * Default `0`.
+   */
+  temperature?: number
+  /**
+   * Global saturation around Rec.709 luminance. `1` = identity, `0` = greyscale,
+   * `>1` = punchier. Holding the world `<1` while gameplay FX stay saturated is
+   * the core of the legibility budget. Clamped to `>= 0`. Default `1`.
+   */
+  saturation?: number
+  /**
+   * Contrast about a 0.5 pivot (in linear space). `1` = identity; `<1` flattens
+   * toward mid grey (mutes the world), `>1` widens. Clamped to `>= 0`.
+   * Default `1`.
+   */
+  contrast?: number
 }
 
 /** Per-track cel/ink outline look. All optional; effect is off unless `enabled`. */
@@ -133,6 +209,30 @@ export type PostPipelineDeps = {
   outline?: OutlineOptions
   /** Velocity-buffer motion blur. Off unless `motionBlur.enabled`. */
   motionBlur?: MotionBlurOptions
+  /**
+   * Initial scene-wide colour grade. Omitted / all-default → identity (today's
+   * look). Equivalent to building the pipeline and immediately calling
+   * `setGrade(grade)`; provided so a per-track grade can be seeded at
+   * construction the same way `bloomStrength` seeds bloom.
+   */
+  grade?: GradeOptions
+}
+
+/** Clamp helper local to the grade math (no allocation, inlinable). */
+function clampNum(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v
+}
+
+/**
+ * Resolve a `temperature` scalar in `[-1, 1]` to a per-channel linear gain
+ * vector. `0` → exactly `(1, 1, 1)` (identity), positive warms (R up, B down),
+ * negative cools (R down, B up); green is held at `1`. The `0.15` slope keeps a
+ * full ±1 push to a gentle ±15 % channel skew — a colour-temperature nudge, not
+ * a hard tint (the strong per-track tints belong to the dome grade in sky.ts).
+ */
+function temperatureGain(temperature: number): { r: number; g: number; b: number } {
+  const t = clampNum(temperature, -1, 1) * 0.15
+  return { r: 1 + t, g: 1, b: 1 - t }
 }
 
 export function createPostPipeline(deps: PostPipelineDeps): PostPipeline {
@@ -145,6 +245,7 @@ export function createPostPipeline(deps: PostPipelineDeps): PostPipeline {
     bloomThreshold = 0.85,
     outline: outlineOpts,
     motionBlur: motionBlurOpts,
+    grade: gradeOpts,
   } = deps
 
   const outlineEnabled = outlineOpts?.enabled === true
@@ -168,6 +269,21 @@ export function createPostPipeline(deps: PostPipelineDeps): PostPipeline {
   // mutator no-ops otherwise so callers don't have to branch.
   let outlineStrength: ReturnType<typeof uniform> | null = null
   let outlineColor: ReturnType<typeof uniform> | null = null
+
+  // Colour-grade uniforms — ALWAYS present (like bloom), so `setGrade()` can
+  // mutate them live with no rebuild. Seeded from `deps.grade` (or identity).
+  // Each default is an exact algebraic identity for the grade math below:
+  //   exposure 1 → ×1 ; tempGain (1,1,1) → ×1 ; saturation 1 → mix returns
+  //   the input ; contrast 1 → (c-0.5)*1+0.5 == c. So an unseeded grade leaves
+  //   the composited colour unchanged term-for-term (output == today).
+  const initExposure = Math.max(0, gradeOpts?.exposure ?? 1)
+  const initTemp = temperatureGain(gradeOpts?.temperature ?? 0)
+  const initSaturation = Math.max(0, gradeOpts?.saturation ?? 1)
+  const initContrast = Math.max(0, gradeOpts?.contrast ?? 1)
+  const gradeExposure = uniform(initExposure)
+  const gradeTempGain = uniform(vec3(initTemp.r, initTemp.g, initTemp.b))
+  const gradeSaturation = uniform(initSaturation)
+  const gradeContrast = uniform(initContrast)
 
   // The beauty image the rest of the chain (bloom, motion blur) composites
   // over. Defaults to the raw scene colour; the outline pass replaces it
@@ -205,16 +321,44 @@ export function createPostPipeline(deps: PostPipelineDeps): PostPipeline {
   // the shipping additive blend when the outline is off (beauty === scene).
   let composited: TslNode = beauty.add(bloomPass)
 
-  // Motion blur is the final stage — it smears the fully-composited image
-  // (beauty + bloom) along the velocity vectors so trails inherit bloom too.
+  // Motion blur is the final stage of the BEAUTY composite — it smears the
+  // fully-composited image (beauty + bloom) along the velocity vectors so
+  // trails inherit bloom too.
   if (motionBlurEnabled) {
     const samples = Math.max(1, Math.round(motionBlurOpts?.samples ?? 16))
     const velocityNode = scenePass.getTextureNode('velocity')
     composited = motionBlur(composited as never, velocityNode as never, samples as never) as TslNode
   }
 
+  // ── Colour grade — the final stage of the whole chain ───────────────────
+  // Runs in scene-referred LINEAR space; the RenderPipeline applies tone-map +
+  // sRGB encode to this `outputNode` downstream (outputColorTransform=true).
+  // Order: exposure → temperature (white balance) → saturation → contrast,
+  // operating on .rgb and re-packing the composite's original .a — the same
+  // `vec4(transformedRgb, src.a)` shape three's own output nodes use, so the
+  // pipeline still receives a vec4 with an unchanged alpha.
+  //
+  // Always built, but identity at the default uniforms, so the graded colour
+  // reduces to today's `composited` term-for-term when no grade is set:
+  //   • exposure  : scalar linear gain                 (×1       → identity)
+  //   • temp gain : per-channel linear gain vec3        (×(1,1,1) → identity)
+  //   • saturation: mix(luma, rgb) by amount           (amt 1    → returns rgb)
+  //   • contrast  : (rgb - 0.5) * amount + 0.5          (amt 1    → returns rgb)
+  // Exposure (scalar) and white-balance (vec3) are plain linear multiplies;
+  // saturation is the addon colour-adjustment node (widened return type → `as
+  // never`, same style as above). Contrast is applied inline as explicit vec3
+  // math — the same `(c-0.5)*k+0.5` the dome grade uses — rather than the
+  // `mx_contrast` node, whose internal `float(input)` cast would collapse the
+  // rgb vector to a scalar.
+  const compositedColor = composited as never as { rgb: unknown; a: unknown }
+  const balancedRgb = (compositedColor.rgb as TslNode).mul(gradeExposure).mul(gradeTempGain)
+  const saturatedRgb = saturation(balancedRgb as never, gradeSaturation as never) as TslNode
+  const half = vec3(0.5, 0.5, 0.5)
+  const gradedRgb = saturatedRgb.sub(half).mul(gradeContrast).add(half)
+  const graded = vec4(gradedRgb as never, compositedColor.a as never)
+
   const pipeline = new RenderPipeline(renderer as never)
-  pipeline.outputNode = composited as never
+  pipeline.outputNode = graded as never
 
   return {
     scene,
@@ -287,6 +431,26 @@ export function createPostPipeline(deps: PostPipelineDeps): PostPipeline {
         // `uniform(vec3(...))` carries a THREE.Vector3 value at runtime; its
         // static type is widened to `unknown`, hence the cast.
         ;(outlineColor.value as THREE.Vector3).set(c.r, c.g, c.b)
+      }
+    },
+    setGrade(grade: GradeOptions) {
+      // Each field is independent and only written when supplied, so callers
+      // can nudge one dial without resetting the rest. An omitted field keeps
+      // its current uniform; passing every field at its identity value (or a
+      // bare `{}`) restores the today's-look identity grade — the clean
+      // "neutral" call, no rebuild, same cost as any other write.
+      if (grade.exposure !== undefined) {
+        gradeExposure.value = Math.max(0, grade.exposure)
+      }
+      if (grade.temperature !== undefined) {
+        const g = temperatureGain(grade.temperature)
+        ;(gradeTempGain.value as THREE.Vector3).set(g.r, g.g, g.b)
+      }
+      if (grade.saturation !== undefined) {
+        gradeSaturation.value = Math.max(0, grade.saturation)
+      }
+      if (grade.contrast !== undefined) {
+        gradeContrast.value = Math.max(0, grade.contrast)
       }
     },
     dispose() {

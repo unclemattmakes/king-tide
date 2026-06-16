@@ -80,17 +80,22 @@ function collectPrototypeSubmeshes(loaded: LoadedProp): PrototypeSubmesh[] {
   return out
 }
 
-/** ONE painterly-vinyl material per source material, shared across every
- *  asset/placement/sub-mesh that references it (conversion runs once per
- *  source, not per placement or size). The size-derived inputs (brush stroke
- *  scale + waterline band) are per-OBJECT userData reads — each InstancedMesh
- *  is stamped with its asset's size below — so two differently-sized assets
- *  sharing a source material still read at the right scale while sharing the
- *  instance. Material COUNT is the shader pre-warm lever (one main-thread
- *  node-build + codegen per material), so the old per-size twins were paying
- *  for themselves in progressive-warm frame dips. Keyed weakly on the source
- *  so unloaded prop materials can be GC'd. */
-const vinylMaterialCache = new WeakMap<THREE.Material, THREE.Material>()
+/** ONE painterly-vinyl material per (source material, waterline-on?), shared
+ *  across every asset/placement/sub-mesh that references it (conversion runs once
+ *  per source, not per placement or size). The size-derived inputs (brush stroke
+ *  scale + waterline band scale) are per-OBJECT userData reads — each
+ *  InstancedMesh is stamped with its asset's size below — so two differently-sized
+ *  assets sharing a source material still read at the right scale while sharing
+ *  the instance. Material COUNT is the shader pre-warm lever (one main-thread
+ *  node-build + codegen per material). Reset per `createPropsMesh` call (per track
+ *  load) so the track's sea level baked into the waterline material can't go stale
+ *  across tracks; the waterline-on flag splits the rare asset that opts out. */
+let vinylMaterialCache = new Map<THREE.Material, Map<boolean, THREE.Material>>()
+
+/** Default waterline-trio strength for props. The trio is world-height gated, so
+ *  only props crossing the sea line actually show bands; opt out per prop via
+ *  `Prop.waterline = false` (per-asset for instanced placements). */
+const PROP_WATERLINE = 1.0
 
 /** The stamp config matching buildVinylMaterial's defaults — props don't
  *  override any brush dial. */
@@ -105,21 +110,41 @@ const PROP_STAMP_CFG = {
  *  docs/painterly-vinyl-pipeline.md. */
 function vinylizeMaterial(
   mat: THREE.Material | THREE.Material[],
+  waterLevel: number,
+  waterlineOn: boolean,
 ): THREE.Material | THREE.Material[] {
   const one = (m: THREE.Material): THREE.Material => {
-    let v = vinylMaterialCache.get(m)
+    let byFlag = vinylMaterialCache.get(m)
+    if (!byFlag) {
+      byFlag = new Map()
+      vinylMaterialCache.set(m, byFlag)
+    }
+    let v = byFlag.get(waterlineOn)
     if (!v) {
-      v = buildVinylMaterial(m, { sizePerObject: true })
-      vinylMaterialCache.set(m, v)
+      v = buildVinylMaterial(m, {
+        sizePerObject: true,
+        waterLevel,
+        waterline: waterlineOn ? PROP_WATERLINE : 0,
+      })
+      byFlag.set(waterlineOn, v)
     }
     return v
   }
   return Array.isArray(mat) ? mat.map(one) : one(mat)
 }
 
-export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THREE.Group {
+export function createPropsMesh(
+  props: Prop[],
+  assets?: PropAssetRegistry,
+  opts?: { waterLevel?: number },
+): THREE.Group {
   const group = new THREE.Group()
   group.name = 'track:props'
+
+  // The track's sea level for the prop waterline trio (default on). Fresh vinyl
+  // cache per call so this track's baked sea level can't leak into the next.
+  const waterLevel = opts?.waterLevel ?? 0
+  vinylMaterialCache = new Map()
 
   // Shadow-caster size gate threshold (`?shadowcast=<m>`, 0 = gate off) —
   // resolved once per build; see shadow-caster-gate.ts.
@@ -165,7 +190,14 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
       side: isRing ? THREE.DoubleSide : THREE.FrontSide,
     })
     const propSize = Math.max(p.size.x, p.size.y, p.size.z, 0.05) * 2
-    const mesh = new THREE.Mesh(geom, buildVinylMaterial(baseMat, { propSize }))
+    const mesh = new THREE.Mesh(
+      geom,
+      buildVinylMaterial(baseMat, {
+        propSize,
+        waterLevel,
+        waterline: p.waterline === false ? 0 : PROP_WATERLINE,
+      }),
+    )
     mesh.position.set(p.position.x, p.position.y, p.position.z)
     mesh.quaternion.set(p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w)
     mesh.castShadow = true
@@ -210,6 +242,9 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
       (mx, p) => Math.max(mx, p.size.x, p.size.y, p.size.z),
       0.01,
     )
+    // Waterline opt-out is per-asset (instanced placements share one material):
+    // drop the trio only when EVERY placement of this asset opts out.
+    const bucketWaterlineOn = !bucket.every((p) => p.waterline === false)
 
     for (const sm of submeshes) {
       // Safety net: every shipped prop GLB carries COLOR_0 (baked convexity), so
@@ -219,7 +254,7 @@ export function createPropsMesh(props: Prop[], assets?: PropAssetRegistry): THRE
       stampConvexityColor0(sm.geometry)
       const inst = new THREE.InstancedMesh(
         sm.geometry,
-        vinylizeMaterial(sm.material),
+        vinylizeMaterial(sm.material, waterLevel, bucketWaterlineOn),
         bucket.length,
       )
       inst.name = `track:props:${assetId}`

@@ -34,6 +34,7 @@ import { createCombatRenderSystem } from '@/engine/render/combat-render'
 import { type ContactSplashDriver, createContactSplashDriver } from '@/engine/render/contact-splash'
 import { createDirectionArrow } from '@/engine/render/direction-arrow'
 import { createEngineTrailSystem } from '@/engine/render/engine-trail'
+import { setFoliageSwayBackend } from '@/engine/render/foliage-sway'
 import { createFxSystem } from '@/engine/render/fx'
 import { loadGateProp } from '@/engine/render/gate-prop'
 import { createHorizonRing } from '@/engine/render/horizon-ring'
@@ -57,6 +58,7 @@ import {
   type RaceIntroUi,
   type RaceIntroUiRacer,
 } from '@/engine/render/race-intro-ui'
+import { createRacingLineRibbon } from '@/engine/render/racing-line-ribbon'
 import { createBikeRenderSystem } from '@/engine/render/render-systems'
 import { createRenderer } from '@/engine/render/renderer'
 import {
@@ -236,6 +238,16 @@ export async function bootRace(appEl: HTMLElement) {
   const { renderer, backend, gpuTimestampsTracked } = rendererBundle
   bootMark('renderer')
   setRenderer(renderer)
+  // Publish the resolved backend to the foliage-sway module BEFORE any track
+  // loads (`loadTrackForBoot` below → `glb-track.ts` calls
+  // `applyFoliageSwayToMesh`, the only production call site). The module
+  // defaults to 'webgpu', so on a real WebGL2 fallback (Safari/Firefox without
+  // WebGPU, or `?backend=webgl2`) this is what routes foliage to the
+  // `onBeforeCompile` patch path instead of swapping each mesh to a node
+  // material. Must run before track load — doing it later (e.g. in the game
+  // loop) would be too late: the foliage would already be applied with the
+  // default. Edit/replay paths share this same pre-track-load setup.
+  setFoliageSwayBackend(backend)
   // Apply the persisted pixel-ratio now that the renderer is alive.
   // `createRenderer` already calls `setPixelRatio(min(devicePixelRatio, 2))`,
   // so this is a no-op when the player kept the default; if they dropped
@@ -789,7 +801,7 @@ export async function bootRace(appEl: HTMLElement) {
   let animatedProps: ReturnType<typeof createAnimatedPropsSystem> | undefined
   let propsGroup: ReturnType<typeof createPropsMesh> | undefined
   if (track.props.length > 0) {
-    propsGroup = createPropsMesh(track.props, propAssets)
+    propsGroup = createPropsMesh(track.props, propAssets, { waterLevel: track.water?.height ?? 0 })
     scene.add(propsGroup)
     // Rigged props with `animated:true` (e.g. the swimming great white) are
     // hosted here, skeleton-cloned + mixer-driven, ticked from the game loop.
@@ -1492,6 +1504,20 @@ export async function bootRace(appEl: HTMLElement) {
   const dirArrow = createDirectionArrow()
   scene.add(dirArrow.mesh)
 
+  // B3 — racing-line flow ribbon (painterly wayfinding on the water along the
+  // racing line). Built from the `main` AI spline; null for tracks with no such
+  // spline. Default-off behind its master flag (dev palette → Toggles →
+  // "Racing-line ribbon" / `?raceline=1`), so it's hidden until a playtest.
+  const mainSpline = track.aiSplines.find((s) => s.id === 'main')
+  const racingLineRibbon = mainSpline
+    ? createRacingLineRibbon({
+        points: mainSpline.points,
+        ...(mainSpline.anchors ? { anchors: mainSpline.anchors } : {}),
+        waterHeight: track.water?.height ?? 0,
+      })
+    : null
+  if (racingLineRibbon) scene.add(racingLineRibbon.mesh)
+
   // Collision wireframe overlay — pulls `world.debugRender()` each frame
   // when enabled. Toggle: F2 key, `?debug=collision` URL param, or
   // `window.__hover.toggleCollisionDebug()`. Cheap when off (early-return
@@ -1922,6 +1948,7 @@ export async function bootRace(appEl: HTMLElement) {
     raceIntroUi,
     raceTick,
     dirArrow,
+    racingLineRibbon,
     physicsDebug,
     hoverDebug,
     bikeRender,

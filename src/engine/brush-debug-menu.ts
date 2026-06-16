@@ -91,6 +91,18 @@ const ROWS: Row[] = [
     fmt: x2,
   },
   { domain: 'vinyl', key: 'brush', label: 'Strength', min: 0, max: 1.5, step: 0.05, fmt: x2 },
+  // Illustrative (TF2) lighting dials (A1) — apply to every vinyl surface, not
+  // just rocks/props; live via setVinylBrush → illustrative-lighting.ts.
+  {
+    domain: 'vinyl',
+    key: 'illum',
+    label: 'Illustrative warp',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    fmt: x2,
+  },
+  { domain: 'vinyl', key: 'rimEmissive', label: 'Rim glow', min: 0, max: 1.5, step: 0.05, fmt: x2 },
 ]
 
 type Persisted = { terrain: TerrainBrushValues; vinyl: VinylBrushValues }

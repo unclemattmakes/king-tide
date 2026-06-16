@@ -106,7 +106,10 @@ silhouette.** Concretely:
   painted surface carry the silhouette off the sky and water. (v1's cel
   ink/edge-darkening is **dropped** — SoT and TF2 both read without line art.)
 - Warm key / cool shadow **illustrative** light; the hand-painted albedo tells
-  the material story, not microfacet PBR.
+  the material story, not microfacet PBR. *(Realized in-engine — a TF2-style
+  diffuse warp ramp (`illum`, **ON by default**) + an additive rim (`rimEmissive`,
+  the default-off gameplay-signal channel); see
+  [painterly-legibility-plan.md](./painterly-legibility-plan.md).)*
 - **Bloom is the "finished" lift.** It's wired (`sky.bloom`); author emissive so
   it blooms. Test against the worst-case sun angle per track (ACES + bloom +
   emissive can blow out `nyc_sunset` / `big_sur_golden`).
@@ -458,5 +461,8 @@ prop-kit + race-gate pass — so concept passes converge instead of drifting:
   contract the checklists assume.
 - [design-targets.md](./design-targets.md) — the 40-m/s / 60-fps perf contract
   framing the "reads at speed" pillar.
+- [painterly-legibility-plan.md](./painterly-legibility-plan.md) — deepening the
+  render model (illustrative lighting, contrast-budget grade) and using style to
+  make gameplay events legible at speed.
 </content>
 </invoke>

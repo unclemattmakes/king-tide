@@ -756,6 +756,27 @@ export function installWaterDebugMenu(
       const def = defByKey.get(key)
       if (def) buildSliderRow(def)
     }
+    // Crest sub-surface glow — a SoT lighting dial, so it rides with "Lighting
+    // & body". Built as a LIVE row (not a SLIDERS/persisted knob): it talks
+    // straight to the mesh debug surface, seeds at the shipped default (0 =
+    // off, today's look) every session, and a drag lasts only for the session
+    // — never persisted, so it can never silently bake a non-zero crest glow
+    // into a track's or the machine's shipped water look. Dial it in
+    // ?waterlab, eyeball it, then promote the chosen value to a real persisted
+    // knob if it survives playtest.
+    if (section.title === 'Lighting & body') {
+      liveRow({
+        id: 'crestSSSLive',
+        label: 'Crest SSS glow',
+        hint: 'SoT crest sub-surface glow: lerps wave PEAKS toward a brighter translucent tube-glow tint, gated by the choppiness peak mask × crest height — pinched crests read lit-from-within regardless of sun angle (deepens the shipped sun-backlit SSS). 0 = off (today’s look). Render-only; live session dial, NOT saved.',
+        min: 0,
+        max: 1,
+        step: 0.05,
+        get: () => water.debug.getCrestSSS(),
+        set: (v) => water.debug.setCrestSSS(v),
+        format: (n) => (n < 0.01 ? 'off' : n.toFixed(2)),
+      })
+    }
   })
 
   // Wireframe toggle row.

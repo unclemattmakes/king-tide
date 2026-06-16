@@ -14,6 +14,9 @@
 
 import * as THREE from 'three'
 import { resetDevSettings } from '../dev-settings'
+import { racingLineRibbonEnabled, setRacingLineRibbonEnabled } from '../render/racing-line-ribbon'
+import { getActivePostPipeline } from '../render/renderer-service'
+import { setSignalsEnabled, signalsEnabled } from '../render/signal-state'
 import { getSkySystem } from '../render/sky-service'
 import { getWaterMesh } from '../render/water-service'
 import { getWaterTuningScope } from '../water-debug-storage'
@@ -149,6 +152,9 @@ export function createDevTools(deps: DevToolDeps): DevTool[] {
   // reads correct on the rail.
   let wireOn = hasFlag('wire')
   let colorizeOn = false
+  // Scene-grade toggle is a coarse identity↔muted-preset flip (the contrast
+  // budget on/off); the post pipeline has no grade getter, so track state here.
+  let gradeMuted = false
 
   return [
     // ---- Scenes (navigate away / restart boot) ----
@@ -314,6 +320,26 @@ export function createDevTools(deps: DevToolDeps): DevTool[] {
         keywords: 'water buoyancy sim wavedots',
       },
     ),
+    toggle(
+      'toggle.signals',
+      'Gameplay signals (rim)',
+      () => setSignalsEnabled(!signalsEnabled()),
+      () => signalsEnabled(),
+      {
+        hint: 'Style-as-legibility rim signals — drift-charge ladder + pickup pulse (live)',
+        keywords: 'legibility rim signal charge drift pickup boost hazard slipstream',
+      },
+    ),
+    toggle(
+      'toggle.raceline',
+      'Racing-line ribbon',
+      () => setRacingLineRibbonEnabled(!racingLineRibbonEnabled()),
+      () => racingLineRibbonEnabled(),
+      {
+        hint: 'B3 painted flow ribbon on the water along the racing line — cool=hold, warm=brake/off-line (live)',
+        keywords: 'legibility racing line ribbon flow wayfinding forza wave brake guidance',
+      },
+    ),
 
     // ---- World (live scene state — no reload) ----
     {
@@ -357,6 +383,23 @@ export function createDevTools(deps: DevToolDeps): DevTool[] {
         if (d) d.setTimeScale(d.getTimeScale() === 0 ? 1 : 0)
       },
       isOn: () => (water()?.getTimeScale() ?? 1) === 0,
+    },
+    {
+      kind: 'toggle',
+      group: 'World',
+      id: 'world.scene-grade',
+      label: 'Scene grade (muted)',
+      hint: 'Pull the world into a muted band so gameplay signals pop — the contrast budget (live)',
+      keywords: 'grade colour color saturation contrast muted budget legibility post',
+      toggle: () => {
+        gradeMuted = !gradeMuted
+        getActivePostPipeline()?.setGrade(
+          gradeMuted
+            ? { exposure: 0.96, temperature: 0.08, saturation: 0.8, contrast: 0.92 }
+            : { exposure: 1, temperature: 0, saturation: 1, contrast: 1 },
+        )
+      },
+      isOn: () => gradeMuted,
     },
 
     // ---- Render (these genuinely need a map reload) ----

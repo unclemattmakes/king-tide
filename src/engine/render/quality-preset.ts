@@ -57,6 +57,26 @@ export interface QualityKnobs {
   waterSubdivisions: number
   /** Bloom / post pipeline built at all. */
   bloom: boolean
+  /**
+   * Scene-wide colour GRADE (the contrast/saturation budget — see
+   * post-pipeline.ts `setGrade` + docs/painterly-legibility-plan.md A2). Kept
+   * ON across ALL tiers (including Low): it's one fullscreen vec multiply/mix,
+   * negligible cost, and it's the lever that holds the world in a muted band so
+   * gameplay events read at speed — on-brand for the legibility thesis, not a
+   * fidelity frill, so we never want a tier to strip it.
+   *
+   * Caveat (current): the grade node lives INSIDE the post pipeline, which sky.ts
+   * only builds when `bloom` is true (or `?post=1`). So today the grade renders
+   * wherever bloom does (High/Medium) and is dormant on Low, where the whole
+   * post chain is shed for perf. That's intentional for now — the grade is
+   * identity by default and has no per-track values wired yet (deferred), so
+   * forcing a PassNode + extra fullscreen pass onto Low purely for an identity
+   * grade would add cost there for zero visible effect and break Low's
+   * byte-identical no-post-chain render path. When the per-track grade lands,
+   * widen sky.ts's build gate to `bloom || grade` so Low gets the muted-band
+   * grade (cheap) without bloom (expensive). This knob is the switch to read.
+   */
+  grade: boolean
 }
 
 const HIGH: QualityKnobs = {
@@ -66,6 +86,7 @@ const HIGH: QualityKnobs = {
   reflection: true,
   waterSubdivisions: 512,
   bloom: true,
+  grade: true,
 }
 
 // Medium sheds the cheap-to-lose GPU fill (MSAA, half-res shadow map) but
@@ -77,6 +98,7 @@ const MEDIUM: QualityKnobs = {
   reflection: true,
   waterSubdivisions: 512,
   bloom: true,
+  grade: true,
 }
 
 // Low sheds the big structural passes — the whole shadow pass (the measured
@@ -89,6 +111,11 @@ const LOW: QualityKnobs = {
   reflection: false,
   waterSubdivisions: 384,
   bloom: false,
+  // Grade stays ON in intent even on Low (cheap, on-brand). See the `grade`
+  // field doc: it only actually renders once sky.ts's post-pipeline build gate
+  // is widened to `bloom || grade`; today Low builds no post chain, so the
+  // grade is dormant here. Left `true` so the future gate enables it for free.
+  grade: true,
 }
 
 const TIERS: Record<Exclude<QualityPreset, 'auto'>, QualityKnobs> = {

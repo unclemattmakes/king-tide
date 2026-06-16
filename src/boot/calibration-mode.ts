@@ -152,7 +152,7 @@ export async function bootCalibrationMode(appEl: HTMLElement): Promise<Calibrati
   let waveRiderRender: ReturnType<typeof createWaveRiderRenderSystem> | undefined
   let animatedProps: ReturnType<typeof createAnimatedPropsSystem> | undefined
   if (track.props.length > 0) {
-    scene.add(createPropsMesh(track.props, propAssets))
+    scene.add(createPropsMesh(track.props, propAssets, { waterLevel: track.water?.height ?? 0 }))
     animatedProps = createAnimatedPropsSystem(scene, track.props, propAssets, { camera })
     waveRiderSys = createWaveRiderSystem(sim, phys, waveField)
     const bindings = createPropColliders(phys, track.props, propAssets, sim, {

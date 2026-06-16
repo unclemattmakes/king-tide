@@ -61,6 +61,11 @@ value-to-effort.
 
 ### P0 — Foliage sway is a no-op on the WebGPU path *(latent bug)* [look]
 
+> **✅ Resolved.** The TSL `positionNode` port shipped in PR #260, and the boot
+> wiring of `setFoliageSwayBackend(backend)` (so the WebGL2 fallback genuinely
+> takes the `onBeforeCompile` path) landed on the `claude/painterly-legibility`
+> branch. The original diagnosis is kept below for context.
+
 `foliage-sway.ts` is wired up and *is* called (`glb-track.ts`), but it works
 through **`onBeforeCompile`** — a WebGL2-only GLSL-injection hook that relies
 on `#include <begin_vertex>` / `USE_COLOR` chunk markers. Node materials under
@@ -96,9 +101,13 @@ track-authored, no settings-menu UI required):
 
 - **Per-object motion blur** — reuses a velocity buffer; directly serves the
   *speed sensation* of a racer. Keep subtle for the toy register. **[play]**
-- **Screen-space cel/ink outline** — `art-direction.md` explicitly wants
-  "light ink/edge darkening (cel-adjacent)." A depth+normal edge pass delivers
-  the Wind-Waker register more reliably than per-material tricks. **[look]**
+- ~~**Screen-space cel/ink outline**~~ — **superseded.** `art-direction.md` **v2
+  dropped outlines** ("No outlines… v1's cel ink/edge-darkening is dropped"); rim
+  + value separation carry the silhouette. Keep the Sobel pass off; if a line
+  accent is ever wanted, use **object-space** contours, not a screen-space pass
+  (it crawls under fast motion). The "more painterly" lever that *did* land is the
+  illustrative lighting model (warp ramp + additive rim), not an outline — see the
+  anti-plan in [painterly-legibility-plan.md](./painterly-legibility-plan.md). **[look]**
 
 More cautiously: **GTAO** would ground props on terrain but can muddy the flat
 "clean toy" shading — A/B it. Color grading via a **LUT node** could replace
