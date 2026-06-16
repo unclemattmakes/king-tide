@@ -58,6 +58,7 @@ import {
   type RaceIntroUi,
   type RaceIntroUiRacer,
 } from '@/engine/render/race-intro-ui'
+import { createRacingLineRibbon } from '@/engine/render/racing-line-ribbon'
 import { createBikeRenderSystem } from '@/engine/render/render-systems'
 import { createRenderer } from '@/engine/render/renderer'
 import {
@@ -1503,6 +1504,20 @@ export async function bootRace(appEl: HTMLElement) {
   const dirArrow = createDirectionArrow()
   scene.add(dirArrow.mesh)
 
+  // B3 — racing-line flow ribbon (painterly wayfinding on the water along the
+  // racing line). Built from the `main` AI spline; null for tracks with no such
+  // spline. Default-off behind its master flag (dev palette → Toggles →
+  // "Racing-line ribbon" / `?raceline=1`), so it's hidden until a playtest.
+  const mainSpline = track.aiSplines.find((s) => s.id === 'main')
+  const racingLineRibbon = mainSpline
+    ? createRacingLineRibbon({
+        points: mainSpline.points,
+        ...(mainSpline.anchors ? { anchors: mainSpline.anchors } : {}),
+        waterHeight: track.water?.height ?? 0,
+      })
+    : null
+  if (racingLineRibbon) scene.add(racingLineRibbon.mesh)
+
   // Collision wireframe overlay — pulls `world.debugRender()` each frame
   // when enabled. Toggle: F2 key, `?debug=collision` URL param, or
   // `window.__hover.toggleCollisionDebug()`. Cheap when off (early-return
@@ -1933,6 +1948,7 @@ export async function bootRace(appEl: HTMLElement) {
     raceIntroUi,
     raceTick,
     dirArrow,
+    racingLineRibbon,
     physicsDebug,
     hoverDebug,
     bikeRender,

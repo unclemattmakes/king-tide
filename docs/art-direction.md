@@ -106,8 +106,9 @@ silhouette.** Concretely:
   painted surface carry the silhouette off the sky and water. (v1's cel
   ink/edge-darkening is **dropped** — SoT and TF2 both read without line art.)
 - Warm key / cool shadow **illustrative** light; the hand-painted albedo tells
-  the material story, not microfacet PBR. *(Now realized in-engine — a TF2-style
-  diffuse warp ramp + additive rim, default-off behind `illum`/`rimEmissive`; see
+  the material story, not microfacet PBR. *(Realized in-engine — a TF2-style
+  diffuse warp ramp (`illum`, **ON by default**) + an additive rim (`rimEmissive`,
+  the default-off gameplay-signal channel); see
   [painterly-legibility-plan.md](./painterly-legibility-plan.md).)*
 - **Bloom is the "finished" lift.** It's wired (`sky.bloom`); author emissive so
   it blooms. Test against the worst-case sun angle per track (ACES + bloom +
