@@ -34,6 +34,20 @@ export type VinylBrushValues = {
   /** The brush stops treating a prop as "bigger" past this size in metres — the
    *  main lever against the big-rock straw (default 6). */
   brushPropSizeCap: number
+  // ── Illustrative lighting (TF2) — see illustrative-lighting.ts. All default to
+  //    the current look (knob 0 = today), so a track is unchanged until dialled. ──
+  /** Diffuse warp cross-fade: 0 = stock PBR diffuse EXACTLY, 1 = full Half-Lambert
+   *  warp ramp (cool shadow / warm terminator). Shadows + specular preserved.
+   *  Default 0. */
+  illum: number
+  /** Additive (shadow-surviving) rim strength for silhouette readability. 0 = off
+   *  (the legacy in-albedo rim is untouched). Default 0. */
+  rimEmissive: number
+  /** Additive rim tint, linear RGB (also the per-object gameplay-signal channel).
+   *  Default the warm tint the in-albedo rim already uses. */
+  rimColorR: number
+  rimColorG: number
+  rimColorB: number
 }
 
 export type TerrainBrushHandle = {
@@ -54,6 +68,14 @@ export const VINYL_BRUSH_DEFAULTS: VinylBrushValues = {
   brush: 0.7,
   brushScale: 0.12,
   brushPropSizeCap: 6,
+  // Illustrative diffuse warp ON by default (the TF2 painterly read); the
+  // additive rim stays OFF here (0) — the rim is the gameplay-signal channel,
+  // driven on demand by the signal system, not a static surface treatment.
+  illum: 1,
+  rimEmissive: 0,
+  rimColorR: 1.0,
+  rimColorG: 0.93,
+  rimColorB: 0.82,
 }
 
 const terrainHandles = new Set<TerrainBrushHandle>()

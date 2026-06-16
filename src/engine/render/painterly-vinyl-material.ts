@@ -31,6 +31,7 @@ import {
   dot,
   float,
   fract,
+  materialEmissive,
   mix,
   nodeObject,
   normalize,
@@ -58,13 +59,36 @@ import {
   registerVinylBrush,
   VINYL_BRUSH_DEFAULTS,
   type VinylBrushHandle,
+  type VinylBrushValues,
 } from './brush-tuning-service'
 import { stampConvexityColor0 } from './edge-wear-convexity'
+import {
+  buildIllustrativeRim,
+  IllustrativeLightingModel,
+  type IllustrativeRim,
+  sharedWarpRampTexture,
+} from './illustrative-lighting'
 import { applyWaterlineBands } from './waterline'
 
 /** Marks a material we've already vinyl-converted, so conversion is idempotent
  *  and a source material shared by reference converts once. */
 const VINYL_MARKED = Symbol.for('hoverbike.painterlyVinyl')
+
+/** Material-userData key holding the additive-rim handle ({@link IllustrativeRim})
+ *  so a per-object consumer (the player bike) can drive the gameplay-signal rim
+ *  per frame. Symbol so it never collides with glTF/userData string keys. */
+const VINYL_RIM_HANDLE = Symbol.for('hoverbike.painterlyVinyl.rimHandle')
+
+/** Read the additive-rim handle off a vinyl material (or null if it isn't a vinyl
+ *  twin / predates the handle). The per-object signal driver uses this to paint a
+ *  rim signal into `.uStrength`/`.uColor` — see signal-state.ts. On a per-instance
+ *  (`rimColorAttribute`) material the handle's uniforms are inert (the rim reads
+ *  attributes), so this only does anything for single-mesh materials. */
+export function vinylRimHandle(m: THREE.Material | null | undefined): IllustrativeRim | null {
+  if (!m) return null
+  const h = (m.userData as Record<string | symbol, unknown> | undefined)?.[VINYL_RIM_HANDLE]
+  return (h as IllustrativeRim | undefined) ?? null
+}
 
 /** Per-object userData keys a size-shared (`sizePerObject`) vinyl material
  *  reads at render time — three `userData()` reference nodes, whose value is
@@ -124,10 +148,25 @@ const BRUSH_PROP_SIZE_CAP = 6
 const WATERLINE_FULL_BAND_SIZE = 6
 
 export type VinylOptions = {
-  /** Mix toward the rim tint at the silhouette (0..~0.6). */
+  /** Mix toward the rim tint at the silhouette (0..~0.6). This is the legacy soft
+   *  rim mixed INTO albedo (so it gets lit + weakens in shadow). The TF2 additive
+   *  rim below is a separate, shadow-surviving silhouette channel. */
   rimStrength?: number
-  /** Warm rim tint (linear). */
+  /** Warm rim tint (linear) — shared by BOTH the in-albedo rim above and the
+   *  additive `rimEmissive` rim below (one tint, two compositing modes). */
   rimColor?: [number, number, number]
+  /** TF2 ADDITIVE rim strength (emissive-like): pops the silhouette off sky/water
+   *  and SURVIVES shadow (folded into emissive, added after lighting — never
+   *  clobbers the per-instance exhaust glow). DEFAULT 0 so the look is unchanged
+   *  until dialled. The rim colour is a live uniform (rimColor), set up as a
+   *  gameplay-signal channel for a later slice. Live-dialable via the dev tuner. */
+  rimEmissive?: number
+  /** Illustrative-lighting cross-fade (the TF2 diffuse warp ramp): 0 = today's
+   *  stock PBR diffuse EXACTLY, 1 = full Half-Lambert→warp-ramp response (cool
+   *  shadow, warm terminator, slight overbright). Shadows / ambient / specular are
+   *  preserved at every value (see illustrative-lighting.ts). DEFAULT 0.
+   *  Live-dialable via the dev tuner. */
+  illum?: number
   /** Procedural value-noise weathering wash amount (0 = off). */
   weathering?: number
   /** Brush-stroke amount layered over the weathering — modulates albedo and
@@ -201,6 +240,17 @@ export type VinylOptions = {
    *  shared material light only SOME instances, e.g. the "next" race gate glowing
    *  while every other gate stays dark. Takes precedence over `emissiveFromTint`. */
   emissiveAttribute?: string
+  /** Drive the TF2 ADDITIVE rim's COLOUR from a per-instance vec3 attribute of
+   *  this name (linear RGB) instead of the `rimColor` uniform — the per-instance
+   *  signal channel for an `InstancedMesh` field (the style-as-legibility rim, see
+   *  signal-state.ts). Pair with `rimStrengthAttribute`. Omit → the per-object
+   *  `rimColor` uniform (the normal path). */
+  rimColorAttribute?: string
+  /** Drive the additive rim's STRENGTH from a per-instance float attribute of this
+   *  name instead of the `rimEmissive` uniform. An unstamped / zeroed attribute
+   *  reads 0 ⇒ rim off ⇒ byte-identical to today (this is what keeps the
+   *  per-instance rim default-OFF). Pair with `rimColorAttribute`. */
+  rimStrengthAttribute?: string
   /** Share ONE material instance across meshes of every size: read the
    *  size-derived inputs (brush stroke frequency + scale-blend weights, the
    *  waterline band scale, the object-space stroke scale) from each MESH's
@@ -263,6 +313,8 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
 
   const rimStrength = opts.rimStrength ?? 0.5
   const rimColor = opts.rimColor ?? [1.0, 0.93, 0.82]
+  const rimEmissive = opts.rimEmissive ?? 0
+  const illum = opts.illum ?? VINYL_BRUSH_DEFAULTS.illum
   const weathering = opts.weathering ?? 0.12
   const brush = opts.brush ?? 0.7
   const brushScale = opts.brushScale ?? 0.12
@@ -289,6 +341,8 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const tintAttribute = opts.tintAttribute
   const emissiveFromTint = opts.emissiveFromTint ?? false
   const emissiveAttribute = opts.emissiveAttribute
+  const rimColorAttribute = opts.rimColorAttribute
+  const rimStrengthAttribute = opts.rimStrengthAttribute
   const sizePerObject = opts.sizePerObject ?? false
 
   const next = new MeshStandardNodeMaterial({ metalness: 0, roughness })
@@ -368,6 +422,50 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   // old baked frequency exactly at the defaults); the procedural fallback uses
   // the raw worldScale. The weights are unused on the procedural path
   // (harmless — not wired into that graph).
+  // ── Illustrative lighting (TF2 warp) + additive rim ──────────────────────────
+  // Both default OFF (illum 0, rimEmissive 0) so an unmodified material is
+  // byte-identical to today. The warp reshapes only the DIFFUSE light response
+  // (shadows/ambient/specular preserved — see illustrative-lighting.ts); the rim
+  // is additive (emissive-like) so it survives shadow and pops the silhouette.
+  const uIllum = uniform(illum)
+  // Swap the material's lighting model for the warp-ramp one via an instance-level
+  // override of setupLightingModel (the supported hook MeshToonNodeMaterial uses).
+  // At illum 0 the model cross-fades to the exact stock PhysicalLightingModel
+  // diffuse, so the WGSL differs but the shaded result matches the stock path.
+  const illumModel = new IllustrativeLightingModel(
+    uIllum as unknown as Node<'float'>,
+    sharedWarpRampTexture(),
+  )
+  ;(next as unknown as { setupLightingModel: () => IllustrativeLightingModel }).setupLightingModel =
+    () => illumModel
+  // Additive rim — its own term. Default path: a per-OBJECT colour uniform (the
+  // Track-B gameplay-signal channel) + a strength uniform defaulting to 0. When
+  // the caller passes per-instance attribute names (instanced bike fields), the
+  // rim instead reads the signal colour + strength PER INSTANCE, so one shared
+  // material paints a different drift/charge rim on each bike. Either way it's
+  // additive-into-emissive and 0-strength by default = byte-identical to today.
+  const illumRim = buildIllustrativeRim({
+    rimColor,
+    rimEmissive,
+    ...(rimColorAttribute ? { colorAttribute: rimColorAttribute } : {}),
+    ...(rimStrengthAttribute ? { strengthAttribute: rimStrengthAttribute } : {}),
+  })
+
+  // Apply the live-tunable illustrative dials shared by both brush-handle
+  // branches (the dev tuner re-dials these with no recompile — uniform writes).
+  const applyIllumRim = (v: VinylBrushValues): void => {
+    uIllum.value = v.illum
+    illumRim.uStrength.value = v.rimEmissive
+    illumRim.uColor.value.setRGB(v.rimColorR, v.rimColorG, v.rimColorB)
+  }
+  const illumRimInitial = {
+    illum,
+    rimEmissive,
+    rimColorR: rimColor[0],
+    rimColorG: rimColor[1],
+    rimColorB: rimColor[2],
+  }
+
   const uBrush = uniform(brush)
   let streakFreq: Node<'float'>
   let streakWeights: Node<'vec3'>
@@ -379,9 +477,10 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
     // handle that re-stamps every mesh (it knows each mesh's size); this
     // material-level handle owns only the strength uniform.
     brushHandle = {
-      initial: { brush, brushScale, brushPropSizeCap },
+      initial: { brush, brushScale, brushPropSizeCap, ...illumRimInitial },
       set(v) {
         uBrush.value = v.brush
+        applyIllumRim(v)
       },
     }
   } else {
@@ -391,7 +490,7 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
     streakWeights = uBrushWeights
     // Live-tuner handle — recompute freq + weights from (brushScale, cap, propSize).
     brushHandle = {
-      initial: { brush, brushScale, brushPropSizeCap },
+      initial: { brush, brushScale, brushPropSizeCap, ...illumRimInitial },
       set(v) {
         uBrush.value = v.brush
         const bp = Math.min(propSize, v.brushPropSizeCap)
@@ -402,6 +501,7 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
           const w = brushScaleWeights(bp)
           uBrushWeights.value.set(w[0], w[1], w[2])
         }
+        applyIllumRim(v)
       },
     }
   }
@@ -423,6 +523,17 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const brushFac = float(1).add(streak.sub(float(0.5)).mul(uBrush.mul(float(3.0))))
 
   next.userData.vinylBrushHandle = brushHandle
+  // Expose the additive-rim handle so a per-OBJECT consumer (the player's
+  // per-clone bike) can paint a gameplay signal into the rim per frame: read
+  // `material.userData.illumRimHandle` and set `.uStrength.value` / `.uColor.value`
+  // from `getBikeSignal(eid)` (signal-state.ts). On the per-INSTANCE path
+  // (`rimColorAttribute`/`rimStrengthAttribute`) these uniforms are inert stubs —
+  // the rim is driven by the instanced attributes instead — so this handle is only
+  // meaningful for the per-object (single-mesh) materials. Default-off either way
+  // (strength 0). A runtime handle on this freshly-built material (symbol-keyed,
+  // not serialized); the cast mirrors the vinylRimHandle reader above.
+  const rimUd = next.userData as Record<string | symbol, unknown>
+  rimUd[VINYL_RIM_HANDLE] = illumRim
 
   // World-space waterline trio FIRST, on the UN-brushed wash (opt-in; strength
   // 0 = no-op). The band height shrinks on small props (kept full on big ones)
@@ -467,14 +578,31 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   // Per-instance emissive (exhaust glow): emissiveNode replaces emissive directly
   // (three does NOT fold in emissiveIntensity once a node is set — three.webgpu
   // line ~21754), so bake the copied intensity into the node to match the flat
-  // path's `emissive × emissiveIntensity`.
+  // path's `emissive × emissiveIntensity`. The TF2 additive rim ADDS into this
+  // same channel (emissive is summed into the outgoing light after lighting, so
+  // the rim survives shadow) — it must COMPOSE WITH the exhaust glow, never
+  // replace it. At rimEmissive 0 the rim term is vec3(0), a true no-op.
+  //
+  // For the non-instanced path we add onto `materialEmissive` (the stock accessor
+  // = emissive × emissiveIntensity × emissiveMap), NOT a hand-rebuilt node, so a
+  // prop with a flat emissive or an emissiveMap keeps its exact stock value and
+  // only the (zero-by-default) rim rides on top. Setting emissiveNode here is safe
+  // for the rim-off case: stock already adds `materialEmissive` (black by default)
+  // to the outgoing light, so `materialEmissive + vec3(0)` is byte-identical.
+  let emissiveBase: Node<'vec3'>
   if (emissiveAttribute) {
     // The attribute value is the emissive colour directly (intensity baked in).
-    next.emissiveNode = attribute(emissiveAttribute, 'vec3') as Node<'vec3'>
+    emissiveBase = attribute(emissiveAttribute, 'vec3') as Node<'vec3'>
   } else if (tintAttribute && emissiveFromTint) {
     const emi = next.emissiveIntensity ?? 1
-    next.emissiveNode = (attribute(tintAttribute, 'vec3') as Node<'vec3'>).mul(float(emi))
+    emissiveBase = (attribute(tintAttribute, 'vec3') as Node<'vec3'>).mul(float(emi))
+  } else {
+    // Flat / default emissive (incl. any emissiveMap) via the stock accessor.
+    emissiveBase = materialEmissive as unknown as Node<'vec3'>
   }
+  // emissiveNode = exhaust/flat emissive + additive rim (rim is vec3(0) until
+  // dialled, so this stays a no-op against the stock emissive contribution).
+  next.emissiveNode = emissiveBase.add(illumRim.node)
 
   // Brush RELIEF — the impasto read. Stroke height modulates roughness (matte
   // sheen breaks up along strokes) and perturbs the shading normal (light
@@ -761,7 +889,12 @@ export function applyVinylMaterialToScene(
   // handles, so the tuner's initial-value seeding stays material-first.
   if (stamped.length > 0) {
     registerVinylBrush({
+      // This pass-level handle only re-stamps per-mesh size inputs; the
+      // illustrative-lighting dials are owned by the per-material handles. Seed
+      // its `initial` from the defaults for those fields so the type is complete
+      // and seeding (if this ever registers first) stays the current look.
       initial: {
+        ...VINYL_BRUSH_DEFAULTS,
         brush: opts.brush ?? VINYL_BRUSH_DEFAULTS.brush,
         brushScale: stampCfg.brushScale,
         brushPropSizeCap: stampCfg.brushPropSizeCap,
