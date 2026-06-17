@@ -247,6 +247,10 @@ export type WaterMesh = {
     /** Fresnel cap on the planar reflection (0..1). 0 disables the
      *  reflection entirely; 0.85 is the v2 default. */
     setReflectionStrength(s: number): void
+    /** Roughness→reflection coupling (0..1). How hard surface chop scatters the
+     *  planar reflection toward the sky tone — "reflections aren't perfect
+     *  mirrors". 0 = legacy perfect mirror. */
+    setReflRoughness(s: number): void
     /** Multiplier on the sun-backlight glow on tall crests. */
     setSunGlow(s: number): void
     /** Material base roughness (away from sparkle patches). */
@@ -258,6 +262,9 @@ export type WaterMesh = {
      *  detail (analytic-Gerstner only); 1 = the default cascade
      *  contribution that stands in for SoT-style FFT chop. */
     setDetailStrength(s: number): void
+    /** Painterly macro-normal strength (0..1). Broad low-freq normal tilt that
+     *  breaks specular + the planar reflection into hand-painted shapes. 0 = off. */
+    setPaintNormal(s: number): void
     /** Beer-Lambert body absorption rate. Scales the per-channel σ
      *  triplet that converts view-ray path-length into transmission.
      *  1.0 = the calibrated default (cyan body reads out to ~10 m of
@@ -340,6 +347,17 @@ export type WaterMesh = {
      *  LEADING (rising/front) face via ∂h/∂t. 0 = symmetric crest line; 1 =
      *  front-only ("breaking forward"). 1 default. */
     setWhitecapLeadBias(b: number): void
+    // ── Retirement candidates (v2 water-look pass, 2026-06-16) ───────────
+    // The look pass found the readability OVERLAYS were collectively noise and
+    // shipped them at/near zero by default. These now-dormant knobs are kept
+    // wired (per-track opt-in + the ?waterlab study) but are the first to delete
+    // if no shipped track adopts them:
+    //   • contourBreakup  (ships 0 — the dashed-contour tally-mark artifact)
+    //   • langmuir         (ships 0 — windrow tick rows, little legibility gain)
+    //   • riseStroke       (ships 0 — allover diagonal hatching on faces)
+    //   • whitecapHeight/Slope/Mode (below — already dead, curvature replaced)
+    // Adjacent contour knobs (contourRelief/Gate/Coherence/CalmAtRest) only
+    // matter while contourStrength > 0; revisit them together if contour goes.
     /** @deprecated Legacy height/slope/mode whitecap knobs — no longer affect
      *  the wave whitecap (curvature replaced them). Kept so persisted tuning +
      *  the foam-sweep harness keep loading; safe to retire in a cleanup pass. */
@@ -475,10 +493,13 @@ export type WaterDebugDefaults = {
   chopScale: number
   timeScale: number
   reflectionStrength: number
+  reflRoughness: number
   sunGlow: number
   roughBase: number
   roughSparkle: number
   detailStrength: number
+  /** Painterly macro-normal strength. 0.28 = baseline; 0 = off. */
+  paintNormal: number
   /** Beer-Lambert body absorption rate. 1 = calibrated default. */
   bodyAbsorption: number
   /** Karis sun-disc emissive strength. 1.4 = baseline. */
@@ -1249,10 +1270,24 @@ export function createWaterMesh(
   // for tracks that want the busier surface.
   const DETAIL_STRENGTH_DEFAULT = 0.5
   const reflStrengthUniform = uniform(REFLECTION_STRENGTH_DEFAULT)
+  // Roughness→reflection coupling (v2 water-look). How hard surface chop
+  // scatters the planar reflection toward the local sky tone — the "reflections
+  // aren't perfect mirrors" knob. 0 = legacy perfect mirror (reflection ignores
+  // roughness); 0.65 = choppy faces visibly break the reflection. Consumed at
+  // the albedo reflection mix below.
+  const REFL_ROUGHNESS_DEFAULT = 0.65
+  const reflRoughnessUniform = uniform(REFL_ROUGHNESS_DEFAULT)
   const sunGlowUniform = uniform(SUN_GLOW_DEFAULT)
   const roughBaseUniform = uniform(ROUGH_BASE_DEFAULT)
   const roughSparkleUniform = uniform(ROUGH_SPARKLE_DEFAULT)
   const detailStrengthUniform = uniform(DETAIL_STRENGTH_DEFAULT)
+  // Painterly macro-normal strength (v2 water-look). Broad, low-frequency tilt
+  // added to the surface normal (see the `paintSlope` block in the fragment)
+  // so specular + the planar reflection break into hand-painted shapes rather
+  // than a clean PBR mirror. 0 = off (clean). Reuses the 35 m domain-warp
+  // field — no extra texture taps.
+  const PAINT_NORMAL_DEFAULT = 0.28
+  const paintNormalUniform = uniform(PAINT_NORMAL_DEFAULT)
   // Debug colorize. When `debugColorizeMixUniform` is 1 each of the three
   // water layers is painted in a distinct flat color so the boundaries
   // between center mesh / outer LOD tile / horizon skirt are obvious —
@@ -3054,8 +3089,18 @@ export function createWaterMesh(
   // Combined heightfield gradient (analytic-flattened + detail). Used by
   // the normal, by the reflection distortion, and by the slope-driven foam
   // below.
-  const effDydx = analyticDydxFlat.add(detailSlope.x)
-  const effDydz = analyticDydzFlat.add(detailSlope.y)
+  // Painterly macro normal (v2 water-look, prototype const). A broad, soft,
+  // low-frequency tilt added to the surface normal so the specular + planar
+  // reflection break into hand-painted shapes instead of reading as a clean
+  // PBR mirror — the "painterly normals" lever, paired with the reflection
+  // roughness scatter. Reuses the already-sampled 35 m domain-warp field (zero
+  // extra texture taps); grazing-faded with the detail cascades so it doesn't
+  // striate the horizon. Peak slope ≈ 0.5·PAINT_NORMAL.
+  const paintSlope = vec2(warpSample.r.sub(float(0.5)), warpSample.g.sub(float(0.5)))
+    .mul(paintNormalUniform)
+    .mul(detailGrazeFade)
+  const effDydx = analyticDydxFlat.add(detailSlope.x).add(paintSlope.x)
+  const effDydz = analyticDydzFlat.add(detailSlope.y).add(paintSlope.y)
 
   // GPU Gems eq.13 normal: (-Σdy/dx, 1 - Σ Q·k·A·sin, -Σdy/dz).
   // The wake's gradients are folded into dydx/dydz; the wake has no
@@ -3401,11 +3446,7 @@ export function createWaterMesh(
   // rides the lighting model (shadowed crests don't self-illuminate).
   const crestSSSColor = vec3(0.55, 1.0, 0.92)
   const crestSSSMask = clamp(peakMaskScaled.mul(heightFactor), float(0), float(1))
-  const baseColor = mix(
-    baseColorScattered,
-    crestSSSColor,
-    crestSSSMask.mul(crestSSSUniform),
-  )
+  const baseColor = mix(baseColorScattered, crestSSSColor, crestSSSMask.mul(crestSSSUniform))
 
   // Sun glow emissive — additive on top of the scatter blend for the
   // unmistakable SoT "lit-from-behind" wave glow. Peaks on tall crests
@@ -3557,7 +3598,10 @@ export function createWaterMesh(
   // local crest line (the painterly streaks of the concept frames) vs the
   // isotropic round-bubble texture. 0 = bubbles only (legacy); 1 = baseline
   // streaks. See the foam-mask block below.
-  const FOAM_STREAK_DEFAULT = 1.0
+  // Pulled 1.0 → 0.4 (v2 water-look): at 1.0 the directional streaks covered
+  // every wave face as pencil hatching. 0.4 keeps a hint of brush direction on
+  // the steepest faces without the allover scribble.
+  const FOAM_STREAK_DEFAULT = 0.4
   const foamStreakUniform = uniform(FOAM_STREAK_DEFAULT)
   // Foam brush (oil-stroke rework): blends the foam BREAK-UP pattern from the
   // legacy round-disc bubble sheet (0) to tapered oil-paint brush strokes
@@ -3575,7 +3619,10 @@ export function createWaterMesh(
   // WITH the swell travel direction (real windrows align with the wind),
   // gated to calm low-slope water — the "which way is the sea moving"
   // prime on stretches where no crest/foam cue fires (§5's calm gap).
-  const LANGMUIR_DEFAULT = 0.6
+  // Langmuir windrow lanes ship OFF (was 0.6) — the travel-aligned brightness
+  // tick rows added clutter for little legibility gain. Kept wired for
+  // per-track opt-in; candidate for retirement.
+  const LANGMUIR_DEFAULT = 0.0
   const langmuirUniform = uniform(LANGMUIR_DEFAULT)
 
   // Wave-driven foam — two stacked layers via max():
@@ -4250,7 +4297,11 @@ export function createWaterMesh(
     // The 0.04 base is the gentlest setting that still reads as "moving
     // water" rather than "glass"; bump if the reflection feels too
     // perfect, drop if it smears.
-    const distortAmt = float(0.02).add(float(0.6).div(camDist.add(float(2.0))))
+    // v2 water-look: nudged up (0.02→0.024 base, 0.6→0.8 close term) so the
+    // close-range reflection rides the wave slopes more visibly — the first
+    // half of "less perfect reflections" (the rest is the roughness scatter at
+    // the albedo mix below).
+    const distortAmt = float(0.024).add(float(0.8).div(camDist.add(float(2.0))))
     // Use the combined (analytic + detail) slopes so the reflection ripples
     // with the fine wave chop the detail-normal cascades add. Without this,
     // close-range reflections look glassy under the visibly-bumpy surface.
@@ -4295,13 +4346,25 @@ export function createWaterMesh(
   // luminance field frequency-doubles against the surface and extra band
   // contrast reads as dirt, not shape (the cel session's auto-centering
   // lesson, simplified to a guard).
-  const RAMP_STRENGTH_DEFAULT = 0.45
+  // v2 water-look pass (2026-06-16): the readability OVERLAYS were all firing
+  // at full strength across the whole surface at once — the contour-breakup
+  // dashes read as printed tally-marks, the foam streaks + rise strokes as
+  // allover pencil hatching, the Langmuir lanes as tick rows. Stripped back so
+  // the curvature WHITECAP (concentrated on crests) does the foam work and the
+  // value RAMP carries shape, with only a whisper of solid contour relief. The
+  // cut layers stay wired (per-track opt-in + the ?waterlab study knobs) but
+  // ship at/near zero. See the "params to retire" note by the debug setters.
+  const RAMP_STRENGTH_DEFAULT = 0.6
   const RAMP_STEPS_DEFAULT = 3
-  const RAMP_POSTERIZE_DEFAULT = 0.7
-  const CONTOUR_STRENGTH_DEFAULT = 0.55
+  const RAMP_POSTERIZE_DEFAULT = 0.82
+  // Whisper of solid iso-height relief (was 0.55 + dashed). Low enough to read
+  // as gentle hand-drawn swell lines, not a topo map.
+  const CONTOUR_STRENGTH_DEFAULT = 0.16
   const CONTOUR_SPACING_DEFAULT = 0.45
-  const CONTOUR_RELIEF_DEFAULT = 0.6
-  const CONTOUR_BREAKUP_DEFAULT = 1.0
+  const CONTOUR_RELIEF_DEFAULT = 0.25
+  // Breakup OFF by default — the trough-biased dashes were the worst artifact
+  // (rows of white rectangles). Solid lines read clean; per-track can re-dash.
+  const CONTOUR_BREAKUP_DEFAULT = 0.0
   // Slope-gate raise (the iso-coherence knob's partner — `?waterlab`).
   // Iso-lines sweep at ∂h/∂t ÷ slope, so the FLATTEST faces that pass the
   // gate carry the fastest-sliding lines; raising the gate window from the
@@ -4323,7 +4386,10 @@ export function createWaterMesh(
   // climbing the wave coming at you" read. Same painterly foam-stroke language
   // as the face streaks, but oriented along the swell TRAVEL axis and gated to
   // the front face via ∂h/∂t. 0 = off.
-  const RISE_STROKE_DEFAULT = 0.5
+  // Rising-face strokes ship OFF (was 0.5) — they piled allover diagonal
+  // hatching onto wave faces with the foam streaks. Kept wired for per-track
+  // opt-in; candidate for retirement if no track adopts it.
+  const RISE_STROKE_DEFAULT = 0.0
   const riseStrokeUniform = uniform(RISE_STROKE_DEFAULT)
 
   // Normalised swell phase 0..1 across the LIVE swell envelope — the amps
@@ -4537,8 +4603,28 @@ export function createWaterMesh(
   // instead of stepping. This trades physical correctness for the
   // smoother horizon read users actually want at sunset.
   const reflDistFade = float(1).sub(smoothstep(float(200), float(500), camDist))
-  const reflectedOrBase = reflectionRgb
-    ? mix(baseColor, reflectionRgb, fresnel.mul(reflStrengthUniform).mul(reflDistFade))
+  // Roughness-coupled reflection scatter (v2 water-look). A planar mirror is
+  // perfect regardless of how rough the surface is — terrain/landmark
+  // silhouettes reflect crisp even off choppy faces, which reads as glass, not
+  // water. Rough/steep fragments scatter the reflected image toward the local
+  // sky/horizon tone (the cheap "blur to the average" that needs no extra
+  // taps); only calm faces keep a sharp mirror. `reflChop` rises with the
+  // combined slope magnitude; REFL_ROUGHNESS scales how hard roughness breaks
+  // the mirror (prototype constant — promoted to a per-track uniform once the
+  // look is locked). 0 = legacy perfect mirror.
+  const reflScattered = reflectionRgb
+    ? mix(
+        reflectionRgb,
+        horizonHazeUniform,
+        clamp(
+          smoothstep(float(0.025), float(0.16), pixelSlope).mul(reflRoughnessUniform),
+          float(0),
+          float(0.85),
+        ),
+      )
+    : null
+  const reflectedOrBase = reflScattered
+    ? mix(baseColor, reflScattered, fresnel.mul(reflStrengthUniform).mul(reflDistFade))
     : baseColor
 
   // Aerial perspective: distant water reads denser. Real ocean past
@@ -4781,10 +4867,12 @@ export function createWaterMesh(
     chopScale: DEFAULT_CHOP_TUNING_SCALE,
     timeScale: 0.85,
     reflectionStrength: REFLECTION_STRENGTH_DEFAULT,
+    reflRoughness: REFL_ROUGHNESS_DEFAULT,
     sunGlow: SUN_GLOW_DEFAULT,
     roughBase: ROUGH_BASE_DEFAULT,
     roughSparkle: ROUGH_SPARKLE_DEFAULT,
     detailStrength: DETAIL_STRENGTH_DEFAULT,
+    paintNormal: PAINT_NORMAL_DEFAULT,
     bodyAbsorption: BODY_ABSORPTION_DEFAULT,
     sunDiscStrength: SUN_DISC_STRENGTH_DEFAULT,
     sunStreakStrength: SUN_STREAK_STRENGTH_DEFAULT,
@@ -4861,6 +4949,9 @@ export function createWaterMesh(
     setReflectionStrength(s) {
       reflStrengthUniform.value = clamp01(s, 0, 1)
     },
+    setReflRoughness(s) {
+      reflRoughnessUniform.value = clamp01(s, 0, 1)
+    },
     setSunGlow(s) {
       sunGlowUniform.value = clamp01(s, 0, 3)
     },
@@ -4872,6 +4963,9 @@ export function createWaterMesh(
     },
     setDetailStrength(s) {
       detailStrengthUniform.value = clamp01(s, 0, 2)
+    },
+    setPaintNormal(s) {
+      paintNormalUniform.value = clamp01(s, 0, 1)
     },
     setBodyAbsorption(s) {
       // 0..3 — scales the per-channel Beer-Lambert sigmas. 1 =
