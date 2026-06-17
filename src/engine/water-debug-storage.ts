@@ -90,10 +90,12 @@ export type WaterDebugSettings = {
   chopScale: number
   timeScale: number
   reflectionStrength: number
+  reflRoughness: number
   sunGlow: number
   roughBase: number
   roughSparkle: number
   detailStrength: number
+  paintNormal: number
   bodyAbsorption: number
   sunDiscStrength: number
   sunStreakStrength: number
@@ -142,10 +144,12 @@ export const WATER_SETTERS: Record<WaterLookKey, (water: WaterMesh, v: number) =
   chopScale: (w, v) => w.debug.setChopScale(v),
   timeScale: (w, v) => w.debug.setTimeScale(v),
   reflectionStrength: (w, v) => w.debug.setReflectionStrength(v),
+  reflRoughness: (w, v) => w.debug.setReflRoughness(v),
   sunGlow: (w, v) => w.debug.setSunGlow(v),
   roughBase: (w, v) => w.debug.setRoughBase(v),
   roughSparkle: (w, v) => w.debug.setRoughSparkle(v),
   detailStrength: (w, v) => w.debug.setDetailStrength(v),
+  paintNormal: (w, v) => w.debug.setPaintNormal(v),
   bodyAbsorption: (w, v) => w.debug.setBodyAbsorption(v),
   sunDiscStrength: (w, v) => w.debug.setSunDiscStrength(v),
   sunStreakStrength: (w, v) => w.debug.setSunStreakStrength(v),
@@ -201,10 +205,12 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     chopScale: d.chopScale,
     timeScale: d.timeScale,
     reflectionStrength: d.reflectionStrength,
+    reflRoughness: d.reflRoughness,
     sunGlow: d.sunGlow,
     roughBase: d.roughBase,
     roughSparkle: d.roughSparkle,
     detailStrength: d.detailStrength,
+    paintNormal: d.paintNormal,
     bodyAbsorption: d.bodyAbsorption,
     sunDiscStrength: d.sunDiscStrength,
     sunStreakStrength: d.sunStreakStrength,

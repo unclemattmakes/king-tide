@@ -4,7 +4,11 @@
   "lapsToFinish": 3,
   "environmentGlb": "/assets/tracks/mexico-city.glb",
   "water": {
-    "height": 0.0
+    "height": 0.0,
+    "look": {
+      "whitecapCurvature": 2.3,
+      "foamWarmth": 1.3
+    }
   },
   "start": {
     "position": {

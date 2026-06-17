@@ -32,6 +32,30 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-16** — **Water look pass: overlay noise stripped to
+> new GLOBAL defaults + roughness-coupled reflections + painterly normals.**
+> Tuned on Cape Town via a new headed capture harness
+> ([`tests/e2e/water-look.spec.ts`](../tests/e2e/water-look.spec.ts) + a
+> `window.__watertune` hook in water-tune-mode), then baked as the global water
+> defaults so every track inherits. The P1 readability **overlays** were all
+> firing full-strength at once and reading as noise — contour-breakup *dashes*
+> (rows of white rectangles), foam-streak + rise-stroke *hatching*, Langmuir
+> *tick rows*; they now ship at/near zero, so the curvature **whitecap** +
+> value **ramp** carry the read, with a whisper of solid contour relief. Two
+> NEW per-track knobs (full `water.look` + tuner-slider plumbing):
+> **`reflRoughness`** (0.65 — surface chop scatters the planar reflection toward
+> the sky tone, so it's no longer a perfect mirror; self-adapts, calm water
+> stays mirror-like) and **`paintNormal`** (0.28 — a broad low-freq normal that
+> breaks specular + reflection into painted shapes; reuses an existing noise
+> field, zero extra texture taps). Per-track `water.look` deltas committed for
+> the calm Reef-slice maps: **Mayday Bay** `contourStrength:0` (calm lagoon —
+> lines read as rake-scratches), **Mexico City** `whitecapCurvature:2.3 +
+> foamWarmth:1.3` (thin the busy whitecap band, warm it for the rosa sunset).
+> Retirement candidates flagged in code: `contourBreakup`, `langmuir`,
+> `riseStroke` (all ship 0) + the dead `whitecapHeight/Slope/Mode`. All four
+> gates green (typecheck/test/lint/build); headed-verified on real WebGPU.
+> Detail: [water-next-research.md](./water-next-research.md).
+
 > **Last updated: 2026-06-15** — **Painterly/legibility: defaults flipped on +
 > legibility cues (branch `claude/painterly-legibility`, not yet merged).** The
 > illustrative diffuse **warp** (`illum`) and the **prop waterline trio** are now
