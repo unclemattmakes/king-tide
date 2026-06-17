@@ -92,7 +92,16 @@ const SLIDERS: SliderDef[] = [
     max: 1,
     step: 0.01,
     format: (n) => n.toFixed(2),
-    hint: '0 disables planar reflection · 0.85 = v2 default',
+    hint: '0 disables planar reflection · 0.55 = v2 default',
+  },
+  {
+    key: 'reflRoughness',
+    label: 'Reflection roughness',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    format: (n) => (n < 0.01 ? 'mirror' : n.toFixed(2)),
+    hint: 'How hard surface chop scatters the planar reflection toward the sky tone — “reflections aren’t perfect mirrors”. 0 = perfect mirror · 0.65 = v2 default',
   },
   {
     key: 'sunGlow',
@@ -129,6 +138,15 @@ const SLIDERS: SliderDef[] = [
     step: 0.05,
     format: (n) => `${n.toFixed(2)}×`,
     hint: 'FFT-lite detail normal cascades. 0 = bypass · 1 = default chop · 2 = punchy',
+  },
+  {
+    key: 'paintNormal',
+    label: 'Painterly normal',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    format: (n) => (n < 0.01 ? 'off' : n.toFixed(2)),
+    hint: 'Broad low-freq normal tilt that breaks specular + reflection into hand-painted shapes. 0 = off · 0.28 = v2 default',
   },
   {
     key: 'pinchDirection',

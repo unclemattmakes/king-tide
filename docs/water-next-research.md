@@ -11,6 +11,24 @@
 > exporter is queued in blender-wishlist.md). Per-item verdicts +
 > verification evidence live in §8's ✅ blocks.
 >
+> **Update (2026-06-16 — water LOOK pass).** The P1 knob defaults are now SET.
+> A critical look at the surface found the readability **overlays** were all
+> firing full-strength at once and reading as allover noise (contour-breakup
+> dashes, foam-streak + rise-stroke hatching, Langmuir tick rows), so they were
+> stripped to **near-zero global defaults** — the curvature whitecap + value ramp
+> carry the read, with a whisper of solid contour relief. Two new **render-only**
+> knobs were added and fully plumbed as `water.look` keys + tuner sliders:
+> **`reflRoughness`** (surface chop scatters the planar reflection toward the sky
+> tone — the "reflections aren't perfect mirrors" lever; self-adapting off chop,
+> so calm water keeps a mirror with no per-track value) and **`paintNormal`** (a
+> broad low-frequency normal that breaks specular + reflection into hand-painted
+> shapes; reuses the 35 m domain-warp field, zero extra texture taps). Per-track
+> `water.look` deltas were committed for the two calm Reef-slice maps (Mayday Bay
+> `contourStrength:0`; Mexico City `whitecapCurvature:2.3 + foamWarmth:1.3`).
+> Tuned on Cape Town via the headed harness `tests/e2e/water-look.spec.ts`.
+> Retirement candidates (ship 0, flagged in code by the legacy whitecap setters):
+> `contourBreakup`, `langmuir`, `riseStroke` + the dead `whitecapHeight/Slope/Mode`.
+>
 > Investigation of how the water system works
 > end-to-end, what other games/papers have done, and a recommended path to
 > **more nuance, less visible repetition, and a surface players can read** —
