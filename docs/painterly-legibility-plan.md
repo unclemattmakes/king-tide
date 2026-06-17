@@ -19,6 +19,18 @@
 > Status: **research complete; foundations + first wins implemented** (2026-06-14
 > — see [Implementation status](#implementation-status-2026-06-14)). File/line
 > refs are pointers and will drift — grep the symbol, not the line.
+>
+> **Update (2026-06-16 — water look pass).** The water P1 readability **overlays**
+> championed below (contour-line foam, the posterized value ramp, rising-face
+> strokes, Langmuir lanes) were found to be collectively reading as *allover
+> noise* when shipped at full strength, and were flipped to **near-zero global
+> defaults**: the curvature whitecap + value ramp carry the swell read, with only
+> a whisper of solid contour relief. `contourBreakup`, `langmuir` and `riseStroke`
+> now ship at 0 (retirement candidates). The look pass also added two render
+> knobs — `reflRoughness` (roughness-coupled reflections) + `paintNormal` (a
+> painterly macro-normal). The legibility *thesis* below stands; the water layers
+> are just dialled to a whisper rather than full. Detail:
+> [water-next-research.md](./water-next-research.md).
 
 ---
 

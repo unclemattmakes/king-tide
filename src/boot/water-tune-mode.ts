@@ -33,11 +33,7 @@ import { createScene } from '@/engine/render/scene'
 import { beaufortToAmplitudeScale, createSkySystem } from '@/engine/render/sky'
 import { setSkySystem } from '@/engine/render/sky-service'
 import { sampleTerrainHeightAtXZ } from '@/engine/render/terrain-heightmap'
-import {
-  createWaterMesh,
-  updateUnderwaterFog,
-  WAVE_BEARING_DEFAULT,
-} from '@/engine/render/water'
+import { createWaterMesh, updateUnderwaterFog, WAVE_BEARING_DEFAULT } from '@/engine/render/water'
 import {
   collectWaterContacts,
   gatePostWaterContacts,
@@ -58,6 +54,8 @@ import {
 import { installWaterDebugMenu } from '@/engine/water-debug-menu'
 import {
   applyLookOverrides,
+  applyWaterSettings,
+  defaultsToSettings,
   loadTrackOverrides,
   setWaterTuningScope,
 } from '@/engine/water-debug-storage'
@@ -136,7 +134,15 @@ export async function bootWaterTuneMode(
       : null
   const skyConfig =
     todOverride !== null ? { ...(track.sky ?? {}), timeOfDay: todOverride } : track.sky
-  const sky = createSkySystem({ scene, renderer, camera, sun, hemi, water: waterMesh, config: skyConfig })
+  const sky = createSkySystem({
+    scene,
+    renderer,
+    camera,
+    sun,
+    hemi,
+    water: waterMesh,
+    config: skyConfig,
+  })
   setSkySystem(sky)
 
   // ---- waterline contacts so contact foam has obstacles to bloom around ----
@@ -155,7 +161,11 @@ export async function bootWaterTuneMode(
   const seabedY = (x: number, z: number) =>
     (terrainHeightmap ? sampleTerrainHeightAtXZ(terrainHeightmap, x, z) : null) ?? -10000
   contacts.push(
-    ...gatePostWaterContacts(track.checkpoints, { waterY: waveField.baseY, reach, groundY: seabedY }),
+    ...gatePostWaterContacts(track.checkpoints, {
+      waterY: waveField.baseY,
+      reach,
+      groundY: seabedY,
+    }),
   )
   if (contacts.length > 0) waterMesh.setWaterContacts(contacts)
 
@@ -198,6 +208,10 @@ export async function bootWaterTuneMode(
 
   let frozen = false
   let todSeconds: number | null = null
+  // Posed-camera override for headed capture specs. When set, the frame loop
+  // parks the camera here and skips orbit.update() so screenshots are
+  // deterministic (no damping drift). Driven via window.__watertune.pose().
+  let posedCam: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null
   function updateHud(): void {
     hudEl.innerHTML = `
       <div style="font-weight:600;color:#6ad9c5;font-size:13px;margin-bottom:4px">WATER TUNE · ${trackId}</div>
@@ -230,7 +244,12 @@ export async function bootWaterTuneMode(
     const dt = Math.min((now - last) / 1000, 1 / 15)
     last = now
     if (!frozen) advanceWaveField(waveField, dt * waterMesh.debug.getTimeScale())
-    orbit.update()
+    if (posedCam) {
+      camera.position.copy(posedCam.pos)
+      camera.lookAt(posedCam.target)
+    } else {
+      orbit.update()
+    }
     // Camera-lock the water so its dense vertex region + coverage track the
     // free cam; shoaling reads the world-space heightmap so the shoreline
     // stays put against the fixed terrain.
@@ -247,6 +266,41 @@ export async function bootWaterTuneMode(
   }
   rafHandle = requestAnimationFrame(frame)
   hideLoadingScreen()
+
+  // Headed-capture test hook. Lets a Playwright spec pose the camera, freeze
+  // the wave clock, step the sky, and scrub water look knobs live — so the
+  // water art pass can A/B many values per boot instead of recompiling. Only
+  // the look knobs in WATER_SETTERS are honoured (validated in applyLookOverrides).
+  ;(window as unknown as { __watertune?: unknown }).__watertune = {
+    backend: () => backend,
+    pose(pos: [number, number, number], target: [number, number, number]) {
+      posedCam = {
+        pos: new THREE.Vector3(pos[0], pos[1], pos[2]),
+        target: new THREE.Vector3(target[0], target[1], target[2]),
+      }
+    },
+    clearPose() {
+      posedCam = null
+    },
+    freeze(v: boolean) {
+      frozen = v
+    },
+    setTimeOfDay(s: number) {
+      todSeconds = ((s % 360) + 360) % 360
+      sky.setTimeOfDay(todSeconds)
+    },
+    applyLook(o: Record<string, number>) {
+      applyLookOverrides(waterMesh, o)
+    },
+    // Restore the shipped baseline (constructor defaults + this track's
+    // committed look) so a capture spec can A/B several presets cleanly on
+    // one boot without earlier knobs bleeding into later ones.
+    resetLook() {
+      applyWaterSettings(waterMesh, defaultsToSettings(waterMesh.debug.defaults))
+      applyLookOverrides(waterMesh, committedLook)
+    },
+    water: waterMesh,
+  }
 
   return {
     dispose() {
