@@ -26,8 +26,15 @@
 > `water.look` deltas were committed for the two calm Reef-slice maps (Mayday Bay
 > `contourStrength:0`; Mexico City `whitecapCurvature:2.3 + foamWarmth:1.3`).
 > Tuned on Cape Town via the headed harness `tests/e2e/water-look.spec.ts`.
-> Retirement candidates (ship 0, flagged in code by the legacy whitecap setters):
-> `contourBreakup`, `langmuir`, `riseStroke` + the dead `whitecapHeight/Slope/Mode`.
+>
+> **Retired (perf follow-up, 2026-06-17).** `contourBreakup`, `langmuir` and
+> `riseStroke` were then DELETED outright: they shipped at 0 but TSL still
+> evaluated their nodes every fragment, each costing a TEXTURE SAMPLE + ALU
+> (langmuir → detail tex, contourBreakup → dash sheet, riseStroke → foam-streak
+> sheet), so removing them dropped 3 fetches per water fragment. Behaviour-
+> preserving (already 0). The dead `whitecapHeight/Slope/Mode` uniforms were
+> LEFT — not wired into the node graph (compiler-pruned), so removing them buys
+> no perf.
 >
 > Investigation of how the water system works
 > end-to-end, what other games/papers have done, and a recommended path to
