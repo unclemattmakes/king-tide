@@ -32,6 +32,21 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-17** — **Water perf: the three retired overlays
+> DELETED (not just defaulted off).** Follow-up to the look pass below: the
+> `contourBreakup`, `langmuir` and `riseStroke` layers shipped at 0 but TSL
+> still evaluated their nodes every fragment — each cost a **texture sample** +
+> ALU (langmuir → `detailTex`, contourBreakup → the dash sheet, riseStroke →
+> the foam-streak sheet). Physically removing them drops **3 texture fetches per
+> water fragment** from the near-fullscreen surface, plus the dash sheet's boot
+> gen. Behaviour-preserving (they were already 0 → headed Cape Town / Mexico
+> City / Mayday Bay captures are visually identical) and verified
+> typecheck/test/build. The dead `whitecapHeight/Slope/Mode` uniforms were LEFT:
+> they aren't wired into the node graph (compiler-pruned → zero GPU cost), so
+> removing them buys no perf. Knobs + sliders + per-track `look` keys + the
+> foam-sweep harness modes for the three are gone. Branch
+> `claude/water-perf-retire-overlays`, stacked on the look pass.
+
 > **Last updated: 2026-06-16** — **Water look pass: overlay noise stripped to
 > new GLOBAL defaults + roughness-coupled reflections + painterly normals.**
 > Tuned on Cape Town via a new headed capture harness

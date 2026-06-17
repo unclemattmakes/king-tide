@@ -48,21 +48,6 @@ const READABILITY_MODE = process.env.FOAM_SWEEP_READABILITY === '1'
 // legacy round-disc bubbles vs swell-combed oil-paint strokes, with the
 // face-streak layer off/on/strong around each.
 const BRUSH_MODE = process.env.FOAM_SWEEP_BRUSH === '1'
-// FOAM_SWEEP_CBREAK=1 A/Bs the contour-line break-up: solid unbroken iso
-// lines vs trough-biased brush dashes, at shipped and boosted contour
-// strength so the dash structure is legible in the captures.
-const CBREAK_MODE = process.env.FOAM_SWEEP_CBREAK === '1'
-// FOAM_SWEEP_RISE=1 sweeps the rising-face strokes — the crest-PERPENDICULAR
-// brush marks that climb the leading face of an approaching wave (the vertical
-// partner of the contour crest lines). off → default → strong → max, plus a
-// strokes-alone (contours off) frame for the orientation read and a
-// strokes+contours frame for the cross-hatch.
-const RISE_MODE = process.env.FOAM_SWEEP_RISE === '1'
-// FOAM_SWEEP_ISO=1 isolates the rising-face strokes: zeroes every other foam /
-// readability layer (whitecap, foam streaks, contours, brush, langmuir, ramp)
-// so the strokes show ALONE on bare swell — the decisive orientation read
-// (do they climb the face, perpendicular to the crest?).
-const ISO_MODE = process.env.FOAM_SWEEP_ISO === '1'
 
 type Pose = { pos: [number, number, number]; target: [number, number, number] }
 // Coverage pose: elevated over The Maw's mid-section, looking DOWN (~33°) and
@@ -97,13 +82,6 @@ type Variant = {
   cs?: number
   csp?: number
   rel?: number
-  /** contourBreakup — solid iso lines (0) ↔ trough-biased brush dashes (1). */
-  cb?: number
-  /** riseStroke — crest-perpendicular rising-face strokes, 0..2. */
-  rise?: number
-  /** Isolation: zero every other foam/readability layer so only the rising
-   *  strokes paint (decisive orientation read on bare swell). */
-  iso?: boolean
 }
 const COVERAGE_GRID: Variant[] = [
   { label: '0-legacy', h: 1.0, s: 0.3, m: 0.0 }, // the old glassy gate (sanity floor)
@@ -148,17 +126,6 @@ const BRUSH_GRID: Variant[] = [
   { label: '3-oil-full', br: 1, st: 1 },
   { label: '4-oil-strong-streaks', br: 1, st: 1.6 },
 ]
-// Contour break-up A/B: the same frozen wave with solid lines (pre-breakup
-// look), the shipped dash default, and the half setting — then the pair
-// again at boosted contour strength where the dash structure is easiest to
-// judge. Everything else stays at live defaults.
-const CBREAK_GRID: Variant[] = [
-  { label: '0-solid', cb: 0 },
-  { label: '1-half', cb: 0.5 },
-  { label: '2-default', cb: 1 },
-  { label: '3-strong-contours-solid', cs: 1.0, cb: 0 },
-  { label: '4-strong-contours-broken', cs: 1.0, cb: 1 },
-]
 // P1 readability A/B: layers off (pre-P1 look) → shipped defaults → each
 // layer isolated → strong. Foam knobs untouched (live defaults).
 const READABILITY_GRID: Variant[] = [
@@ -171,30 +138,8 @@ const READABILITY_GRID: Variant[] = [
   { label: '6-bands-2', ramp: 0.6, steps: 2, post: 1.0, cs: 0.55, csp: 0.45, rel: 0.6 },
   { label: '7-bands-4', ramp: 0.6, steps: 4, post: 1.0, cs: 0.55, csp: 0.45, rel: 0.6 },
 ]
-// Rising-face stroke sweep: off → default → strong → max on the live default
-// look (contours stay on, so default/strong frames show the cross-hatch of
-// crest lines × up-face strokes), then strokes-alone (contours off) to read
-// the orientation cleanly, then strokes + boosted contours for the full hatch.
-const RISE_GRID: Variant[] = [
-  { label: '0-off', rise: 0 },
-  { label: '1-default', rise: 0.5 },
-  { label: '2-strong', rise: 1.0 },
-  { label: '3-max', rise: 2.0 },
-  { label: '4-strong-no-contour', rise: 1.0, cs: 0 },
-  { label: '5-strong-with-contour', rise: 1.0, cs: 0.9 },
-]
-// Isolation grid: strokes alone on bare swell, off vs strong, so the diff is
-// purely the strokes and their up-the-face orientation is unambiguous.
-const ISO_GRID: Variant[] = [
-  { label: 'iso-off', iso: true, rise: 0 },
-  { label: 'iso-default', iso: true, rise: 0.5 },
-  { label: 'iso-strong', iso: true, rise: 1.5 },
-]
 // First mode whose flag is set wins; FOAM_SWEEP_GRID overrides everything.
 const MODE_GRIDS: ReadonlyArray<readonly [boolean, Variant[]]> = [
-  [ISO_MODE, ISO_GRID],
-  [RISE_MODE, RISE_GRID],
-  [CBREAK_MODE, CBREAK_GRID],
   [BRUSH_MODE, BRUSH_GRID],
   [READABILITY_MODE, READABILITY_GRID],
   [AB_MODE, AB_GRID],
@@ -248,17 +193,6 @@ test.describe('foam coverage sweep', () => {
       await page.evaluate((variant) => {
         const wd = window.__hover!.waterDebug()
         if (!wd) return
-        // Isolation: silence every other foam / readability layer so only the
-        // rising-face strokes paint (orientation read on bare swell).
-        if (variant.iso) {
-          wd.setWhitecapCurvature(0)
-          wd.setFoamStreak(0)
-          wd.setFoamBrush(0)
-          wd.setLangmuir(0)
-          wd.setContourStrength(0)
-          wd.setRampStrength(0)
-          wd.setShoreWaveStrength(0)
-        }
         // Only drive knobs the variant specifies — readability variants
         // leave the foam stack at its live defaults and vice versa.
         if (variant.h !== undefined) wd.setWhitecapHeight(variant.h)
@@ -273,8 +207,6 @@ test.describe('foam coverage sweep', () => {
         if (variant.cs !== undefined) wd.setContourStrength(variant.cs)
         if (variant.csp !== undefined) wd.setContourSpacing(variant.csp)
         if (variant.rel !== undefined) wd.setContourRelief(variant.rel)
-        if (variant.cb !== undefined) wd.setContourBreakup(variant.cb)
-        if (variant.rise !== undefined) wd.setRiseStroke(variant.rise)
       }, v)
       await page.waitForTimeout(400)
       const name = `${v.label}.jpg`

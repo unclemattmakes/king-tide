@@ -290,15 +290,6 @@ const SLIDERS: SliderDef[] = [
     hint: 'P2.3 tangential warp: wobbles the foam break-up pattern ALONG the crest axis (±4 m at 1×) so stroke/bubble rows bend organically instead of running straight forever. Never warps travel/height — those carry the steepness signal',
   },
   {
-    key: 'langmuir',
-    label: 'Langmuir lanes',
-    min: 0,
-    max: 1.5,
-    step: 0.05,
-    format: (n) => (n < 0.01 ? 'off' : `${n.toFixed(2)}×`),
-    hint: 'P2.3 windrow lanes: faint brightness streaks aligned WITH the swell travel direction, only on calm low-slope water — the "which way is the sea moving" prime where no crest/foam cue fires. Brightness-only (never displaces geometry)',
-  },
-  {
     key: 'wakeStrength',
     label: 'Bike wake',
     min: 0,
@@ -365,15 +356,6 @@ const SLIDERS: SliderDef[] = [
     hint: 'Wind-Waker light/dark pair: a dark-teal twin line offset away from the sun beside each light line — the cheap embossed-relief read. 0 = light lines only',
   },
   {
-    key: 'contourBreakup',
-    label: 'Contour breakup',
-    min: 0,
-    max: 1,
-    step: 0.05,
-    format: (n) => n.toFixed(2),
-    hint: 'Breaks the iso lines into crest-aligned brush dashes — gentle nicks near the crests, near-total in the troughs so lines cling to the crests instead of running the whole sea. 0 = solid unbroken lines',
-  },
-  {
     key: 'contourCoherence',
     label: 'Contour coherence',
     min: 0,
@@ -400,15 +382,6 @@ const SLIDERS: SliderDef[] = [
     format: (n) => n.toFixed(2),
     hint: 'Raises the minimum face slope where contour lines draw (0 = legacy 0.02..0.06 window → 1 = 0.06..0.14). Iso-lines sweep at ∂h/∂t ÷ slope, so the flattest faces carry the fastest-sliding lines — raising the gate trims those first while steep faces keep their density cue',
   },
-  {
-    key: 'riseStroke',
-    label: 'Rising strokes',
-    min: 0,
-    max: 2,
-    step: 0.05,
-    format: (n) => (n < 0.01 ? 'off' : `${n.toFixed(2)}×`),
-    hint: 'Crest-PERPENDICULAR brush strokes climbing the leading (rising) face of an approaching wave — the vertical partner of the contour crest lines. Front-face gated (∂h/∂t), steep swell faces only, building up toward the crest. 0 = off · 0.5 = baseline',
-  },
 ]
 
 /** Look layers that A/B cleanly: 0 means "off / absent", so mute (→ 0) and
@@ -424,12 +397,9 @@ const MUTABLE_KEYS = new Set<WaterLookKey>([
   'whitecapCurvature',
   'foamWarmth',
   'foamStreak',
-  'langmuir',
   'rampStrength',
   'contourStrength',
   'contourRelief',
-  'contourBreakup',
-  'riseStroke',
   'splashRings',
   'contactFoam',
   'wakeStrength',
@@ -475,7 +445,6 @@ const SECTIONS: { title: string; keys: WaterLookKey[] }[] = [
       'foamStreak',
       'foamBrush',
       'foamWarp',
-      'langmuir',
     ],
   },
   {
@@ -487,11 +456,9 @@ const SECTIONS: { title: string; keys: WaterLookKey[] }[] = [
       'contourStrength',
       'contourSpacing',
       'contourRelief',
-      'contourBreakup',
       'contourCoherence',
       'contourCalmAtRest',
       'contourGate',
-      'riseStroke',
     ],
   },
   {

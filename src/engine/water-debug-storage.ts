@@ -114,7 +114,6 @@ export type WaterDebugSettings = {
   foamStreak: number
   foamBrush: number
   foamWarp: number
-  langmuir: number
   wakeStrength: number
   rampStrength: number
   rampSteps: number
@@ -122,11 +121,9 @@ export type WaterDebugSettings = {
   contourStrength: number
   contourSpacing: number
   contourRelief: number
-  contourBreakup: number
   contourCoherence: number
   contourCalmAtRest: number
   contourGate: number
-  riseStroke: number
   wireframe: boolean
   colorize: boolean
 }
@@ -168,7 +165,6 @@ export const WATER_SETTERS: Record<WaterLookKey, (water: WaterMesh, v: number) =
   foamStreak: (w, v) => w.debug.setFoamStreak(v),
   foamBrush: (w, v) => w.debug.setFoamBrush(v),
   foamWarp: (w, v) => w.debug.setFoamWarp(v),
-  langmuir: (w, v) => w.debug.setLangmuir(v),
   wakeStrength: (w, v) => w.debug.setWakeStrength(v),
   rampStrength: (w, v) => w.debug.setRampStrength(v),
   rampSteps: (w, v) => w.debug.setRampSteps(v),
@@ -176,11 +172,9 @@ export const WATER_SETTERS: Record<WaterLookKey, (water: WaterMesh, v: number) =
   contourStrength: (w, v) => w.debug.setContourStrength(v),
   contourSpacing: (w, v) => w.debug.setContourSpacing(v),
   contourRelief: (w, v) => w.debug.setContourRelief(v),
-  contourBreakup: (w, v) => w.debug.setContourBreakup(v),
   contourCoherence: (w, v) => w.debug.setContourCoherence(v),
   contourCalmAtRest: (w, v) => w.debug.setContourCalmAtRest(v),
   contourGate: (w, v) => w.debug.setContourGate(v),
-  riseStroke: (w, v) => w.debug.setRiseStroke(v),
 }
 
 /** All look keys, in setter-declaration order. The JSON loader validates a
@@ -229,7 +223,6 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     foamStreak: d.foamStreak,
     foamBrush: d.foamBrush,
     foamWarp: d.foamWarp,
-    langmuir: d.langmuir,
     wakeStrength: d.wakeStrength,
     rampStrength: d.rampStrength,
     rampSteps: d.rampSteps,
@@ -237,11 +230,9 @@ export function defaultsToSettings(d: WaterDebugDefaults): WaterDebugSettings {
     contourStrength: d.contourStrength,
     contourSpacing: d.contourSpacing,
     contourRelief: d.contourRelief,
-    contourBreakup: d.contourBreakup,
     contourCoherence: d.contourCoherence,
     contourCalmAtRest: d.contourCalmAtRest,
     contourGate: d.contourGate,
-    riseStroke: d.riseStroke,
     wireframe: d.wireframe,
     colorize: d.colorize,
   }

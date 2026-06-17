@@ -41,11 +41,9 @@ import {
 } from 'three/tsl'
 import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
 import {
-  CONTOUR_DASH_SPEC,
   FOAM_STROKE_MASS_SPEC,
   FOAM_STROKE_STREAK_SPEC,
   packSheetRGBA8,
-  rasterizeContourDashRows,
   rasterizeOilStrokeSheet,
   WAKE_STROKE_SPEC,
 } from '@/engine/render/oil-stroke-texture'
@@ -347,17 +345,14 @@ export type WaterMesh = {
      *  LEADING (rising/front) face via ∂h/∂t. 0 = symmetric crest line; 1 =
      *  front-only ("breaking forward"). 1 default. */
     setWhitecapLeadBias(b: number): void
-    // ── Retirement candidates (v2 water-look pass, 2026-06-16) ───────────
-    // The look pass found the readability OVERLAYS were collectively noise and
-    // shipped them at/near zero by default. These now-dormant knobs are kept
-    // wired (per-track opt-in + the ?waterlab study) but are the first to delete
-    // if no shipped track adopts them:
-    //   • contourBreakup  (ships 0 — the dashed-contour tally-mark artifact)
-    //   • langmuir         (ships 0 — windrow tick rows, little legibility gain)
-    //   • riseStroke       (ships 0 — allover diagonal hatching on faces)
-    //   • whitecapHeight/Slope/Mode (below — already dead, curvature replaced)
-    // Adjacent contour knobs (contourRelief/Gate/Coherence/CalmAtRest) only
-    // matter while contourStrength > 0; revisit them together if contour goes.
+    // ── Retired (water perf pass, 2026-06-16) ────────────────────────────
+    // contourBreakup, langmuir and riseStroke were REMOVED here. They shipped at
+    // 0 after the look pass but still cost a per-fragment TEXTURE SAMPLE + ALU
+    // each — TSL evaluates the whole node graph regardless of the zero uniform —
+    // so deleting them dropped 3 texture fetches from the water fragment shader.
+    // The dead whitecapHeight/Slope/Mode uniforms below are NOT wired into the
+    // node graph (compiler-pruned → zero GPU cost), so they're left as-is:
+    // removing them would be pure code cleanup with no perf benefit.
     /** @deprecated Legacy height/slope/mode whitecap knobs — no longer affect
      *  the wave whitecap (curvature replaced them). Kept so persisted tuning +
      *  the foam-sweep harness keep loading; safe to retire in a cleanup pass. */
@@ -383,10 +378,6 @@ export type WaterMesh = {
      *  organically instead of running straight forever. Never warps the
      *  travel/height axes (those carry the steepness/timing signal). */
     setFoamWarp(s: number): void
-    /** P2.3 Langmuir streak lanes, 0..1.5. Faint travel-aligned windrow
-     *  brightness lanes on calm low-slope water — the "which way is the
-     *  sea moving" prime where no crest/foam cue fires. 0 = off. */
-    setLangmuir(s: number): void
     /** Crest sub-surface glow (SoT), 0..1. Lerps the wave-peak albedo toward a
      *  brighter translucent tube-glow tint, gated by the choppiness peak mask ×
      *  crest height — so pinched crests read as lit-from-within independent of
@@ -418,11 +409,6 @@ export type WaterMesh = {
     /** P1 readability — Wind-Waker dark-twin strength, 0..1 (§8 P1.3). Draws
      *  a dark teal line offset away from the sun beside each light line. */
     setContourRelief(s: number): void
-    /** P1 readability — contour-line break-up, 0..1. 0 = solid unbroken iso
-     *  lines; 1 = lines dissolve into crest-aligned brush dashes, gently
-     *  nicked near crests and hardest in the troughs (lines cling to the
-     *  crests instead of running the whole sea). */
-    setContourBreakup(s: number): void
     /** Iso-coherence for the readability field (ramp + contours + relief),
      *  0..1. Iso-lines of the legacy multi-train swell sum locally race far
      *  past any train's phase speed where the trains' slopes cancel (the
@@ -445,11 +431,6 @@ export type WaterMesh = {
      *  the window (0 = legacy 0.02..0.06 → 1 = 0.06..0.14) trims those
      *  first. */
     setContourGate(s: number): void
-    /** Rising-face strokes, 0..2. Tapered brush strokes pulled UP the leading
-     *  (rising) face of an approaching wave — perpendicular to the contour
-     *  crest lines (the "vertical strokes climbing the wave coming at you"
-     *  read). 0 = off, 0.5 = baseline. Front-face + steep-swell gated. */
-    setRiseStroke(s: number): void
     /** P2.1 wave sets — envelope period in seconds (0 = off). Writes the
      *  FIELD (the sim source of truth, like setWaveBearing); tick() mirrors
      *  to the GPU. Track-authored via `water.swellSets` — the menu rows are
@@ -547,8 +528,6 @@ export type WaterDebugDefaults = {
   contourSpacing: number
   /** P1 readability relief (dark twin) strength, 0..1. */
   contourRelief: number
-  /** P1 readability contour break-up, 0..1 (solid lines ↔ trough-biased dashes). */
-  contourBreakup: number
   /** Iso-coherence 0..1: legacy multi-train readability field (0) ↔ keyed to
    *  the dominant swell train only (1) — kills the iso-line "racing". */
   contourCoherence: number
@@ -558,9 +537,6 @@ export type WaterDebugDefaults = {
   contourCalmAtRest: number
   /** Contour slope-gate raise 0..1 (legacy 0.02..0.06 ↔ 0.06..0.14 window). */
   contourGate: number
-  /** Rising-face strokes, 0..2: crest-perpendicular brush marks climbing the
-   *  leading face of approaching waves. 0.5 = baseline, 0 = off. */
-  riseStroke: number
   /** Foam streaks 0..2: brushstroke bands on steep faces, along the local
    *  crest line. 1 = baseline, 0 = isotropic bubbles only (legacy). */
   foamStreak: number
@@ -569,9 +545,6 @@ export type WaterDebugDefaults = {
   /** P2.3 tangential foam warp 0..2: along-crest wobble of the foam
    *  break-up sample coords. 1 = baseline ±4 m. */
   foamWarp: number
-  /** P2.3 Langmuir lanes 0..1.5: travel-aligned windrow brightness lanes
-   *  on calm water. 0.6 = baseline. */
-  langmuir: number
   /** Bike-wake strength 0..2: trail-wake foam + ridge displacement. */
   wakeStrength: number
   wireframe: boolean
@@ -791,7 +764,6 @@ function getWaveDetailNormalTexture(): THREE.DataTexture {
 let sharedFoamBubbleTexture: THREE.DataTexture | null = null
 let sharedFoamStreakTexture: THREE.DataTexture | null = null
 let sharedFoamStrokeMassTexture: THREE.DataTexture | null = null
-let sharedContourDashTexture: THREE.DataTexture | null = null
 let sharedWakeStrokeTexture: THREE.DataTexture | null = null
 
 /** Wrap a procedural mask grid in a repeat-tiling DataTexture (grayscale in
@@ -1004,25 +976,6 @@ function hexTiledTap(tex: THREE.Texture, uv: any): any {
   // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle types
   const t3 = texture(tex, (uv as any).add(hashOffset(v3))) as any
   return t1.mul(w1).add(t2.mul(w2)).add(t3.mul(w3))
-}
-
-/**
- * Contour-dash sheet — a stack of independent 1-D dash rows the contour layer
- * uses as a KEEP mask so its iso-height lines dissolve into hand-pulled
- * dashes instead of running unbroken across the whole sea. Each iso line
- * samples one row at its V center (keyed to the line's level) — see the
- * contour-breakup block in the fragment stage for the phase-locking
- * rationale.
- */
-function getContourDashTexture(): THREE.DataTexture {
-  if (!sharedContourDashTexture) {
-    sharedContourDashTexture = buildStrokeMaskDataTexture(
-      rasterizeContourDashRows(CONTOUR_DASH_SPEC),
-      CONTOUR_DASH_SPEC.size,
-      'water:contourDash',
-    )
-  }
-  return sharedContourDashTexture
 }
 
 /**
@@ -3615,15 +3568,6 @@ export function createWaterMesh(
   // 1 = baseline ±4 m wobble at the 35 m warp-noise scale, 0 = off.
   const FOAM_WARP_DEFAULT = 1.0
   const foamWarpUniform = uniform(FOAM_WARP_DEFAULT)
-  // P2.3 Langmuir streak lanes: faint elongated brightness lanes aligned
-  // WITH the swell travel direction (real windrows align with the wind),
-  // gated to calm low-slope water — the "which way is the sea moving"
-  // prime on stretches where no crest/foam cue fires (§5's calm gap).
-  // Langmuir windrow lanes ship OFF (was 0.6) — the travel-aligned brightness
-  // tick rows added clutter for little legibility gain. Kept wired for
-  // per-track opt-in; candidate for retirement.
-  const LANGMUIR_DEFAULT = 0.0
-  const langmuirUniform = uniform(LANGMUIR_DEFAULT)
 
   // Wave-driven foam — two stacked layers via max():
   //   1. The vertex-stage accumulator (`foamAccumFrag`) — sampled at 4 past
@@ -4105,27 +4049,6 @@ export function createWaterMesh(
   // The break-up pattern every foam source inherits: disc bubbles ↔ strokes.
   const foamBreakupPattern = mix(foamBubblePattern, foamStrokeMassSample.r, foamBrushUniform)
 
-  // ── P2.3 Langmuir streak lanes ──────────────────────────────────────
-  // Real seas under sustained wind develop windrows — faint foam/slick
-  // lanes ALIGNED WITH the wind, tens of metres apart. They're the one
-  // natural cue that signals the sea's travel direction on water too calm
-  // for crest/foam cues to fire (§5's "nothing on calm stretches" gap).
-  // Implementation: the detail texture sampled in the swell frame with a
-  // strongly anisotropic tile (≈140 m along travel × 18 m across), gated
-  // to a sparse lane mask, faded out wherever the ANALYTIC swell slope
-  // says the sea already carries shape cues, and faded with distance
-  // (sub-pixel past ~300 m). Brightness-only modulation on the surface
-  // color — no vertex or foam-gate contribution, so it can't lie about
-  // the physics (it sits safely in §3's normal/shading-only band).
-  const laneUv = vec2(brushTravel.div(float(140)), brushCrest.div(float(18)))
-  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
-  const laneSample = texture(detailTex, laneUv) as any
-  const laneMask = smoothstep(float(0.58), float(0.82), laneSample.r)
-  const analyticSlopeMag = sqrt(dydx.mul(dydx).add(dydz.mul(dydz)))
-  const laneCalmGate = float(1).sub(smoothstep(float(0.1), float(0.22), analyticSlopeMag))
-  const laneDistFade = float(1).sub(smoothstep(float(160), float(300), camDist))
-  const langmuirLane = laneMask.mul(laneCalmGate).mul(laneDistFade).mul(langmuirUniform)
-
   // ── Directional foam streaks (step 3, reworked) ─────────────────────
   // Paint foam on the wave faces as long brushstrokes running ALONG the
   // local crest line (perpendicular to the surface gradient) — the on-face
@@ -4362,9 +4285,6 @@ export function createWaterMesh(
   const CONTOUR_STRENGTH_DEFAULT = 0.16
   const CONTOUR_SPACING_DEFAULT = 0.45
   const CONTOUR_RELIEF_DEFAULT = 0.25
-  // Breakup OFF by default — the trough-biased dashes were the worst artifact
-  // (rows of white rectangles). Solid lines read clean; per-track can re-dash.
-  const CONTOUR_BREAKUP_DEFAULT = 0.0
   // Slope-gate raise (the iso-coherence knob's partner — `?waterlab`).
   // Iso-lines sweep at ∂h/∂t ÷ slope, so the FLATTEST faces that pass the
   // gate carry the fastest-sliding lines; raising the gate window from the
@@ -4377,20 +4297,7 @@ export function createWaterMesh(
   const contourStrengthUniform = uniform(CONTOUR_STRENGTH_DEFAULT)
   const contourSpacingUniform = uniform(CONTOUR_SPACING_DEFAULT)
   const contourReliefUniform = uniform(CONTOUR_RELIEF_DEFAULT)
-  const contourBreakupUniform = uniform(CONTOUR_BREAKUP_DEFAULT)
   const contourGateUniform = uniform(CONTOUR_GATE_DEFAULT)
-  // Rising-face strokes (2026-06-10) — the perpendicular partner of the
-  // contour lines. Where contours trace iso-height bands ALONG each crest,
-  // these are tapered brush strokes pulled UP the leading (rising) face of an
-  // approaching wave — perpendicular to the crest, the "vertical strokes
-  // climbing the wave coming at you" read. Same painterly foam-stroke language
-  // as the face streaks, but oriented along the swell TRAVEL axis and gated to
-  // the front face via ∂h/∂t. 0 = off.
-  // Rising-face strokes ship OFF (was 0.5) — they piled allover diagonal
-  // hatching onto wave faces with the foam streaks. Kept wired for per-track
-  // opt-in; candidate for retirement if no track adopts it.
-  const RISE_STROKE_DEFAULT = 0.0
-  const riseStrokeUniform = uniform(RISE_STROKE_DEFAULT)
 
   // Normalised swell phase 0..1 across the LIVE swell envelope — the amps
   // come from the same mirrored uniform buoyancy uses, so Beaufort, the
@@ -4461,55 +4368,10 @@ export function createWaterMesh(
     smoothstep(contourSpacing.div(float(9)), contourSpacing.div(float(4.5)), swellHeightPx),
   )
   const contourDistFade = float(1).sub(smoothstep(float(160), float(300), camDist))
-  // Break-up: an iso-height mask is constant along its own line, so without
-  // help every contour runs unbroken across the whole sea — too clean for the
-  // painted read. The dash sheet is a stack of 1-D dash rows used as a KEEP
-  // mask, keyed to invariants that RIDE WITH the line: U is the crest-axis
-  // coordinate (a point on a travelling iso line keeps its crest-axis
-  // position — swell advances perpendicular to it) and V picks one row per
-  // iso LEVEL (a line is its level, forever; neighbouring lines cycle
-  // different rows; index lines coincide with every 3rd minor level so one id
-  // covers both, and the sub-metre relief shift never moves h across a band
-  // midpoint so the dark twin shares the row). The first cut sampled
-  // world-space instead and strobed: lines cross a ~0.4 m stroke footprint in
-  // 2–3 frames at swell phase speed (~10 m/s), blinking every dash. V is
-  // piecewise-constant; its derivative blows up only at band midpoints, where
-  // the line masks are zero by construction, so the garbage mip fetch there
-  // is always masked. The cut rides the swell phase (`rampT`, 0 = trough,
-  // 1 = crest — constant per line, so each line keeps one dash character):
-  // crest lines keep long confident dashes with generous negative space, and
-  // in the troughs the cut climbs into the per-dash gain range so only sparse
-  // stroke cores survive — lines cling to the crests and the trough floor
-  // reads clean. Both cut points are pinned against the sheet's rows in
-  // oil-stroke-texture.test.ts.
-  const CONTOUR_DASH_TILE_M = 11.0
-  const CONTOUR_DASH_ROWS = CONTOUR_DASH_SPEC.rows
-  const contourBandId = floor(swellHeightFrag.div(contourSpacing).add(float(0.5)))
-  const contourDashUV = vec2(
-    brushCrest.div(float(CONTOUR_DASH_TILE_M)),
-    // Row CENTER for level k (fract wraps negative levels into 0..rows-1).
-    fract(contourBandId.div(float(CONTOUR_DASH_ROWS))).add(float(0.5 / CONTOUR_DASH_ROWS)),
-  )
-  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
-  const contourDashSample = texture(getContourDashTexture(), contourDashUV) as any
-  const contourCrestBias = smoothstep(float(0.12), float(0.62), rampT)
-  const contourDashCut = mix(float(0.92), float(0.16), contourCrestBias)
-  const contourDashMask = smoothstep(
-    contourDashCut.sub(float(0.1)),
-    contourDashCut.add(float(0.1)),
-    contourDashSample.r,
-  )
-  // Surviving trough dashes also carry less paint — brush pressure easing off.
-  const contourBreakup = mix(
-    float(1),
-    contourDashMask.mul(mix(float(0.7), float(1), contourCrestBias)),
-    contourBreakupUniform,
-  )
   const contourBase = max(contourMinor.mul(float(0.75)), contourIndex)
     .mul(contourSlopeGate)
     .mul(contourCrowdFade)
     .mul(contourDistFade)
-    .mul(contourBreakup)
   const contourLight = clamp(contourBase.mul(contourStrengthUniform), float(0), float(1))
   // Relief twin: extrapolate the swell height a small step away from the
   // sun (horizontal), re-run the same line masks, draw dark where the
@@ -4533,53 +4395,9 @@ export function createWaterMesh(
       .mul(contourSlopeGate)
       .mul(contourCrowdFade)
       .mul(contourDistFade)
-      // Same break-up as the light line so the relief pair dashes together —
-      // a solid dark twin under a dashed light line reads as a glitch.
-      .mul(contourBreakup)
       .mul(contourReliefUniform)
       .mul(contourStrengthUniform)
       .mul(float(1).sub(contourLight)),
-    float(0),
-    float(1),
-  )
-
-  // ── Rising-face strokes (crest-perpendicular brush marks) ────────────
-  // The sibling of the contour lines: contours run ALONG the crests (iso
-  // height); these run UP the face, square to them. Reuses the face-streak
-  // oil sheet (tapered strokes along its +U axis) but samples it in the
-  // GLOBAL swell frame with U ← the TRAVEL axis (so each stroke's long axis
-  // climbs the face, perpendicular to the crest) and V ← the crest axis (so
-  // strokes sit side-by-side across the front). Gates:
-  //   • front/rising face only — `crestRiseFrag` is ∂h/∂t, > 0 on the
-  //     leading face of an approaching wave (the same signal the whitecap
-  //     lead-bias rides); strokes never paint the trailing/back face.
-  //   • steep SWELL faces only (no chop in the gate) — flat water stays clean
-  //     and the gate doesn't crawl with the sub-metre ripple.
-  //   • build UP the face toward the crest (`rampT`) so they read as climbing
-  //     strokes, faint at the trough.
-  //   • fade with distance (the strokes alias once sub-pixel).
-  // World-anchored like the face streaks: a stroke lights up smoothly as a
-  // wave front sweeps over it (∂h/∂t ramps across ~a second — no strobe) and
-  // fades as the crest passes. Folded into the foam paint so it inherits the
-  // foam colour / warmth / bloom — it IS foam, pulled into vertical strokes.
-  const RISE_STROKE_TILE_M = 8.0
-  const riseStrokeUV = vec2(brushTravel, brushCrest).div(float(RISE_STROKE_TILE_M))
-  // biome-ignore lint/suspicious/noExplicitAny: TSL texture sample swizzle
-  const riseStrokeSample = texture(getFoamStreakTexture(), riseStrokeUV) as any
-  // Crisp-ish stroke cores with negative space between (a painted read, not a
-  // smear). The swell-only slope keeps the gate off the chop.
-  const riseStrokeCore = smoothstep(float(0.25), float(0.7), riseStrokeSample.r)
-  const riseFrontFace = smoothstep(float(0), float(0.45), crestRiseFrag)
-  const riseSlopeGate = smoothstep(float(0.05), float(0.14), swellSlopeMag)
-  const risePhaseWeight = mix(float(0.35), float(1), smoothstep(float(0.2), float(0.85), rampT))
-  const riseDistFade = float(1).sub(smoothstep(float(60), float(150), camDist))
-  const riseStrokeLight = clamp(
-    riseStrokeCore
-      .mul(riseFrontFace)
-      .mul(riseSlopeGate)
-      .mul(risePhaseWeight)
-      .mul(riseDistFade)
-      .mul(riseStrokeUniform),
     float(0),
     float(1),
   )
@@ -4648,21 +4466,13 @@ export function createWaterMesh(
   // modulate the shaded surface, the dark relief twin carves its line, and
   // the light contour line joins the foam mask so it inherits the foam
   // color/warmth (it IS foam — the §4.3 layer re-landed inside the stack).
-  // The P2.3 Langmuir lanes ride the same multiplicative slot: a faint
-  // (≤ +7 %) brightness lift along the travel-aligned windrow lanes.
-  const surfaceReadable = surfaceColor
-    .mul(
-      float(1)
-        .add(rampDeviation)
-        .add(langmuirLane.mul(float(0.07))),
-    )
-    .mul(rampTint)
+  const surfaceReadable = surfaceColor.mul(float(1).add(rampDeviation)).mul(rampTint)
   const surfaceWithRelief = mix(
     surfaceReadable,
     deepColor.mul(float(0.7)),
     contourDark.mul(float(0.8)),
   )
-  const foamMaskWithContours = max(max(foamMask, contourLight), riseStrokeLight)
+  const foamMaskWithContours = max(foamMask, contourLight)
 
   const albedo = mix(
     mix(surfaceWithRelief, foamColorLit, foamMaskWithContours),
@@ -4755,10 +4565,7 @@ export function createWaterMesh(
   // foam readable; the bonus tops out at +0.5 on fully sun-raked crests.
   // Contour lines join at half weight — enough emissive lift to stay
   // readable in cliff shadow without blooming like a breaking crest.
-  const foamEmissiveMask = max(
-    max(foamMask, contourLight.mul(float(0.5))),
-    riseStrokeLight.mul(float(0.5)),
-  )
+  const foamEmissiveMask = max(foamMask, contourLight.mul(float(0.5)))
   const foamEmissive = foamColorLit
     .mul(foamEmissiveMask)
     .mul(float(0.5).add(foamWarmRake.mul(float(0.5))))
@@ -4891,7 +4698,6 @@ export function createWaterMesh(
     foamStreak: FOAM_STREAK_DEFAULT,
     foamBrush: FOAM_BRUSH_DEFAULT,
     foamWarp: FOAM_WARP_DEFAULT,
-    langmuir: LANGMUIR_DEFAULT,
     wakeStrength: WAKE_STRENGTH_DEFAULT,
     rampStrength: RAMP_STRENGTH_DEFAULT,
     rampSteps: RAMP_STEPS_DEFAULT,
@@ -4899,11 +4705,9 @@ export function createWaterMesh(
     contourStrength: CONTOUR_STRENGTH_DEFAULT,
     contourSpacing: CONTOUR_SPACING_DEFAULT,
     contourRelief: CONTOUR_RELIEF_DEFAULT,
-    contourBreakup: CONTOUR_BREAKUP_DEFAULT,
     contourCoherence: CONTOUR_COHERENCE_DEFAULT,
     contourCalmAtRest: CONTOUR_CALM_AT_REST_DEFAULT,
     contourGate: CONTOUR_GATE_DEFAULT,
-    riseStroke: RISE_STROKE_DEFAULT,
     wireframe: wireFlag,
     colorize: false,
   }
@@ -5036,10 +4840,6 @@ export function createWaterMesh(
       // 0..2 — along-crest wobble of the foam break-up sample coords.
       foamWarpUniform.value = clamp01(s, 0, 2)
     },
-    setLangmuir(s) {
-      // 0..1.5 — travel-aligned windrow lanes on calm water.
-      langmuirUniform.value = clamp01(s, 0, 1.5)
-    },
     setCrestSSS(s) {
       // 0..1 — crest sub-surface glow strength (peak-mask × height lerp to a
       // brighter translucent tint). 0 = off (today's look).
@@ -5082,9 +4882,6 @@ export function createWaterMesh(
     setContourRelief(s) {
       contourReliefUniform.value = clamp01(s, 0, 1)
     },
-    setContourBreakup(s) {
-      contourBreakupUniform.value = clamp01(s, 0, 1)
-    },
     setContourCoherence(s) {
       // Authored BASE — tick() blends it toward 1 by calmAtRest × rest
       // factor and writes the effective value to the uniform.
@@ -5096,9 +4893,6 @@ export function createWaterMesh(
     },
     setContourGate(s) {
       contourGateUniform.value = clamp01(s, 0, 1)
-    },
-    setRiseStroke(s) {
-      riseStrokeUniform.value = clamp01(s, 0, 2)
     },
     // P2.1 wave-set envelope — the field owns the params (CPU buoyancy reads
     // them via waveSetFactor); tick() mirrors them to the GPU uniforms.
