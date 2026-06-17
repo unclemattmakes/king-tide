@@ -437,17 +437,17 @@
     "waterline": 0.0
   },
   "sky": {
-    "tint": "#ffffff",
+    "tint": "#ffcdb0",
     "cloudiness": 0.44999998807907104,
-    "cloudTowering": 0.3499999940395355,
-    "sunSize": 1.0,
-    "sunIntensity": 1.0,
-    "fogNear": 500.0,
-    "fogFar": 2200.0,
+    "cloudTowering": 0.65,
+    "sunSize": 1.6,
+    "sunIntensity": 1.1,
+    "fogNear": 450.0,
+    "fogFar": 1800.0,
     "timeOfDay": 0.8500000238418579,
     "colorGrade": "mexico_city_rosa",
     "bloom": 0.3499999940395355,
-    "seaStateBeaufort": 2.4,
+    "seaStateBeaufort": 1.3,
     "clouds": {
       "count": 24,
       "altitude": 340.0,
@@ -465,7 +465,7 @@
       },
       "sunPop": 1.0,
       "coolBase": "#b4a8be",
-      "warmTop": "#ffe3d0",
+      "warmTop": "#ffdcb8",
       "seed": 1337
     }
   },
@@ -3040,9 +3040,9 @@
       "type": "asset",
       "assetId": "mxc/jacaranda",
       "position": {
-        "x": -26.102,
+        "x": -26.98,
         "y": -1.5,
-        "z": 180.909
+        "z": 188.74
       },
       "rotation": {
         "x": 0.0,
@@ -3060,9 +3060,9 @@
       "type": "asset",
       "assetId": "mxc/ahuehuete",
       "position": {
-        "x": 34.9,
+        "x": 34.26,
         "y": -1.5,
-        "z": 162.3
+        "z": 153.65
       },
       "rotation": {
         "x": 0.0,
@@ -3120,9 +3120,9 @@
       "type": "asset",
       "assetId": "mxc/jacaranda",
       "position": {
-        "x": 14.415,
+        "x": 13.61,
         "y": -1.5,
-        "z": 166.142
+        "z": 155.17
       },
       "rotation": {
         "x": 0.0,
@@ -3180,9 +3180,9 @@
       "type": "asset",
       "assetId": "mxc/ahuehuete",
       "position": {
-        "x": -14.43,
+        "x": -15.39,
         "y": -1.5,
-        "z": 181.507
+        "z": 190.05
       },
       "rotation": {
         "x": 0.0,
@@ -3220,9 +3220,9 @@
       "type": "asset",
       "assetId": "mxc/ahuehuete",
       "position": {
-        "x": -22.2,
+        "x": -21.17,
         "y": -1.5,
-        "z": 162.3
+        "z": 153.17
       },
       "rotation": {
         "x": 0.0,
@@ -3260,9 +3260,9 @@
       "type": "asset",
       "assetId": "mxc/ahuehuete",
       "position": {
-        "x": -95.941,
+        "x": -96.88,
         "y": -1.5,
-        "z": 172.568
+        "z": 180.89
       },
       "rotation": {
         "x": 0.0,
@@ -3320,9 +3320,9 @@
       "type": "asset",
       "assetId": "mxc/jacaranda",
       "position": {
-        "x": -76.385,
+        "x": -74.98,
         "y": -1.5,
-        "z": 159.619
+        "z": 147.12
       },
       "rotation": {
         "x": 0.0,
@@ -3340,9 +3340,9 @@
       "type": "asset",
       "assetId": "mxc/ahuehuete",
       "position": {
-        "x": -112.71,
+        "x": -113.82,
         "y": -1.5,
-        "z": 169.144
+        "z": 178.99
       },
       "rotation": {
         "x": 0.0,

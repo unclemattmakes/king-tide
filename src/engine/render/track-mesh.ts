@@ -83,7 +83,7 @@ export function createTrackVisuals(track: Track, options: TrackVisualsOptions = 
   }
 
   for (const pad of track.boostPads) {
-    group.add(createBoostPadMesh(pad))
+    group.add(createBoostPadMesh(pad, track.water?.height ?? 0))
   }
 
   for (const zone of track.antiGravZones) {
@@ -248,57 +248,98 @@ function createFinishExtras(cp: Checkpoint): THREE.Object3D {
 }
 
 /**
- * Boost pad placeholder visual — a flat cyan rectangle with directional
- * chevrons. The boost behaviour itself is not yet wired into the sim;
- * this is the editor's placement-confirmation rendering.
+ * Boost-pad visual — a flat painted "speed strip" sitting on the water
+ * surface with forward chevrons marking the boost direction. Replaces the
+ * old cyan wireframe placement-gizmo, which read as a stray debug volume in
+ * the actual race (it was authored as the editor's placement-confirmation
+ * box back when boost wasn't wired). The catch volume itself stays
+ * invisible; the strip just marks where to ride. `boostPadSystem` applies
+ * the speed-up on contact.
  */
-function createBoostPadMesh(pad: BoostPad): THREE.Object3D {
+function createBoostPadMesh(pad: BoostPad, waterHeight: number): THREE.Object3D {
   const root = new THREE.Group()
   root.name = 'boost_pad'
   root.position.set(pad.position.x, pad.position.y, pad.position.z)
   root.quaternion.set(pad.rotation.x, pad.rotation.y, pad.rotation.z, pad.rotation.w)
+  // Camera-locked water sorts last and overpaints depthWrite=false
+  // transparents — draw the strip after it (see ghost-over-water trap).
+  root.renderOrder = 3
 
   const w = pad.halfWidth * 2
-  const h = pad.halfHeight * 2
   const d = pad.halfDepth * 2
+  // Lay the strip just above the water surface, clamped inside the authored
+  // catch volume, so it reads as an on-water marking at a glancing racing
+  // angle rather than a box hanging in the air.
+  const surfaceLocalY = THREE.MathUtils.clamp(
+    waterHeight + 0.12 - pad.position.y,
+    -pad.halfHeight,
+    pad.halfHeight,
+  )
 
-  // Wireframe box matching the trigger volume. Faint cyan fill so it
-  // reads as a glowing volume head-on but doesn't drown the track when
-  // viewed at a glancing angle.
-  const boxGeom = new THREE.BoxGeometry(w, h, d)
-  const fillMat = new THREE.MeshBasicMaterial({
-    color: 0x33ddff,
-    transparent: true,
-    opacity: 0.08,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  })
-  root.add(new THREE.Mesh(boxGeom, fillMat))
+  const WARM = 0xff9a3c // energetic amber — distinct from the gold checkpoint gates
+  const BRIGHT = 0xffdca0
 
-  const wireMat = new THREE.LineBasicMaterial({
-    color: 0x33ddff,
-    transparent: true,
-    opacity: 0.85,
-    depthWrite: false,
-  })
-  root.add(new THREE.LineSegments(new THREE.WireframeGeometry(boxGeom), wireMat))
+  const flat = (gw: number, gd: number): THREE.PlaneGeometry => {
+    const g = new THREE.PlaneGeometry(gw, gd)
+    g.rotateX(-Math.PI / 2)
+    return g
+  }
 
-  // Chevron arrow on the bottom interior face, pointing +Z (boost
-  // direction). Slightly inset from the bottom so it doesn't z-fight
-  // with anything resting under the box.
-  const chevGeom = new THREE.PlaneGeometry(w * 0.6, d * 0.18)
-  chevGeom.rotateX(-Math.PI / 2)
+  // Outer glow pad.
+  const pad0 = new THREE.Mesh(
+    flat(w, d),
+    new THREE.MeshBasicMaterial({
+      color: WARM,
+      transparent: true,
+      opacity: 0.3,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  )
+  pad0.position.y = surfaceLocalY
+  root.add(pad0)
+
+  // Brighter core.
+  const core = new THREE.Mesh(
+    flat(w * 0.72, d * 0.88),
+    new THREE.MeshBasicMaterial({
+      color: BRIGHT,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  )
+  core.position.y = surfaceLocalY + 0.02
+  root.add(core)
+
+  // Clean border — 4 edges only (EdgesGeometry, no face diagonals), so it
+  // defines the pad without ever reading as a debug wireframe.
+  const border = new THREE.LineSegments(
+    new THREE.EdgesGeometry(flat(w, d)),
+    new THREE.LineBasicMaterial({
+      color: WARM,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+    }),
+  )
+  border.position.y = surfaceLocalY + 0.03
+  root.add(border)
+
+  // Forward bars (point +Z, the boost direction) — bright cream so the
+  // "ride this way, fast" read pops against the amber pad.
   const chevMat = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
+    color: 0xfff2dc,
     transparent: true,
-    opacity: 0.8,
+    opacity: 0.92,
     depthWrite: false,
     side: THREE.DoubleSide,
   })
-  const chevY = -pad.halfHeight + 0.05
-  for (const offsetZ of [-d * 0.3, 0, d * 0.3]) {
+  const chevGeom = flat(w * 0.5, d * 0.14)
+  for (const offsetZ of [-d * 0.28, 0, d * 0.28]) {
     const c = new THREE.Mesh(chevGeom, chevMat)
-    c.position.set(0, chevY, offsetZ)
+    c.position.set(0, surfaceLocalY + 0.04, offsetZ)
     root.add(c)
   }
   return root
