@@ -13,6 +13,7 @@
 import { query } from 'bitecs'
 import { RBHandle, RBHandleStore } from '@/game/components'
 import type { SimTuning } from '@/game/sim-step'
+import { serializeSimStores } from './ecs/store'
 import type { SimWorld } from './ecs/world'
 import type { PhysicsWorld } from './physics/rapier'
 import type { WaveFieldState } from './water/wave-field'
@@ -27,6 +28,19 @@ export type SimSnapshot = {
    *  thread tuning through (legacy harness paths). */
   tuning: SimTuning | null
   bodies: BodySnapshot[]
+  /**
+   * Every sim-carrying component store (render-only stores excluded), sorted by
+   * store name then eid. Captures the gameplay state the body snapshot misses —
+   * drift charge/tier, lap + checkpoint progress, boost/shield/stun timers,
+   * trick window + cooldowns, pickup slots + respawn timers, mine/missile
+   * state — so a divergence there is detected, not silent (§1.3).
+   *
+   * NOTE: this makes the snapshot a comprehensive DESYNC-DETECTION hash. It is
+   * deliberately NOT a rollback restore point — there is no `restoreSnapshot`,
+   * and rollback netcode is out of near-term scope. If rollback is taken on,
+   * this serialization is the basis for a typed restore path.
+   */
+  stores: [string, [number, unknown][]][]
 }
 
 type BodySnapshot = {
@@ -89,6 +103,7 @@ export function captureSnapshot(
     waveTime: waveField.time,
     tuning,
     bodies,
+    stores: serializeSimStores(),
   }
 }
 
