@@ -61,6 +61,16 @@ export type DifficultyTuning = Readonly<{
    *  next tier — Standard hits SMT (1.4 s threshold), Hard reaches UMT
    *  (2.4 s threshold) on the longest sweeps. */
   driftMaxHoldS: number
+  /** PD steering gains + line-blend, per difficulty so an over-correcting
+   *  Hard AI can be softened independently. Currently identical across
+   *  difficulties (the historical hardcoded values) — exposed here so the
+   *  numbers are data-driven and ready to diverge once headed-playtest
+   *  tuning lands. `steerKp` = proportional heading gain, `steerKd` = yaw-
+   *  rate damping, `lineBlend` = lookahead-vs-racing-line mix (0.55 = 55%
+   *  lookahead). */
+  steerKp: number
+  steerKd: number
+  lineBlend: number
 }>
 
 export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>> = Object.freeze({
@@ -80,6 +90,9 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     driftCurvatureThreshold: Number.POSITIVE_INFINITY,
     driftMinSpeed: Number.POSITIVE_INFINITY,
     driftMaxHoldS: 0,
+    steerKp: 0.85,
+    steerKd: 0.45,
+    lineBlend: 0.55,
   }),
   standard: Object.freeze({
     baselineTopSpeedFactor: 0.95,
@@ -97,6 +110,9 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     driftCurvatureThreshold: 0.033,
     driftMinSpeed: 14,
     driftMaxHoldS: 1.6,
+    steerKp: 0.85,
+    steerKd: 0.45,
+    lineBlend: 0.55,
   }),
   hard: Object.freeze({
     baselineTopSpeedFactor: 1.04,
@@ -114,6 +130,9 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     driftCurvatureThreshold: 0.02,
     driftMinSpeed: 10,
     driftMaxHoldS: 2.5,
+    steerKp: 0.85,
+    steerKd: 0.45,
+    lineBlend: 0.55,
   }),
 })
 

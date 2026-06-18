@@ -119,3 +119,48 @@ export function curvatureAheadLooped(
   }
   return { totalBend, scannedDist: scanned }
 }
+
+/**
+ * Like `curvatureAheadLooped`, but returns the **peak** local curvature over
+ * the scan rather than the average — the tightest single corner within range.
+ *
+ * Why: braking should plan for the sharpest upcoming point, not the mean. A
+ * scan containing one tight kink plus a long straight averages to a gentle
+ * radius — so an AI braking on the average under-brakes for the kink, enters
+ * hot, and saws the wheel. The peak metric brakes for the worst point. (Drift
+ * activation still uses the average — its thresholds are tuned to it.)
+ *
+ * Local curvature at each vertex is the heading change there divided by the
+ * mean of the two adjacent segment lengths (rad/m = 1/m). Robust to the
+ * spline's point spacing; callers cap the implied radius so a single noisy
+ * vertex can't produce a near-stop target.
+ */
+export function peakCurvatureAheadLooped(
+  points: readonly Vec3[],
+  startIndex: number,
+  maxScanDist: number,
+): { peakCurvature: number; scannedDist: number } {
+  const n = points.length
+  let scanned = 0
+  let peak = 0
+  for (let i = 0; i < n && scanned < maxScanDist; i++) {
+    const a = points[(startIndex + i) % n]!
+    const b = points[(startIndex + i + 1) % n]! // vertex at b
+    const c = points[(startIndex + i + 2) % n]!
+    const inDx = b.x - a.x
+    const inDz = b.z - a.z
+    const outDx = c.x - b.x
+    const outDz = c.z - b.z
+    const lenIn = Math.hypot(inDx, inDz)
+    const lenOut = Math.hypot(outDx, outDz)
+    if (lenIn > 1e-6 && lenOut > 1e-6) {
+      const cross = inDx * outDz - inDz * outDx
+      const dot = inDx * outDx + inDz * outDz
+      const bend = Math.abs(Math.atan2(cross, dot))
+      const local = bend / (0.5 * (lenIn + lenOut))
+      if (local > peak) peak = local
+    }
+    scanned += lenIn
+  }
+  return { peakCurvature: peak, scannedDist: scanned }
+}
