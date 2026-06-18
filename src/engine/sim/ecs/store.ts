@@ -16,9 +16,24 @@ export type Store<T> = {
   size: number
 }
 
+/**
+ * Every store registers here on creation so `destroyEntity` (see
+ * `ecs/destroy.ts`) can wipe an entity from ALL stores in one call.
+ * `removeEntity` from bitECS only clears tag membership — without this
+ * registry the Map-backed stores leak an entry for every despawned mine /
+ * missile / explosion, and a recycled entity id would inherit the previous
+ * tenant's stale data. Internal: consumers go through `destroyEntity`.
+ */
+const _allStores: { delete(eid: number): boolean }[] = []
+
+/** Delete `eid` from every registered store. Called by `destroyEntity`. */
+export function deleteFromAllStores(eid: number): void {
+  for (const s of _allStores) s.delete(eid)
+}
+
 export function createStore<T>(name: string): Store<T> {
   const m = new Map<number, T>()
-  return {
+  const store: Store<T> = {
     set: (eid, data) => {
       m.set(eid, data)
     },
@@ -37,4 +52,6 @@ export function createStore<T>(name: string): Store<T> {
       return m.size
     },
   }
+  _allStores.push(store)
+  return store
 }

@@ -23,7 +23,8 @@
  * missile detonation would leave its entity orphaned.
  */
 
-import { addComponent, addEntity, removeEntity } from 'bitecs'
+import { addComponent, addEntity } from 'bitecs'
+import { destroyEntity } from '@/engine/sim/ecs/destroy'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import {
   ExplosionState,
@@ -74,7 +75,7 @@ export function createCombatReplayDriver(opts: CreateCombatReplayDriverOpts): Co
 
   function clearAllSpawnedEntities() {
     for (const { eid } of activeMissiles.values()) {
-      removeEntity(sim, eid)
+      destroyEntity(sim, eid)
     }
     activeMissiles.clear()
   }
@@ -209,14 +210,14 @@ export function createCombatReplayDriver(opts: CreateCombatReplayDriverOpts): Co
           active.lingerUntil = track.endT + MISSILE_DETONATE_LINGER_S
         }
         if (active.lingerUntil !== null && time >= active.lingerUntil) {
-          removeEntity(sim, active.eid)
+          destroyEntity(sim, active.eid)
           activeMissiles.delete(track.id)
         }
       } else if (!alive && active) {
         // Seek pulled us back before this missile's spawn window —
         // tear it down so it'll respawn cleanly on the next forward
         // pass through `spawnT`.
-        removeEntity(sim, active.eid)
+        destroyEntity(sim, active.eid)
         activeMissiles.delete(track.id)
       }
     }

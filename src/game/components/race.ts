@@ -17,6 +17,12 @@ export type RacerData = {
   finished: boolean
   /** Wall-clock seconds since race start (advanced by RaceSystem). */
   raceTime: number
+  /** `raceTime` at the most recent checkpoint crossing. Used as the live
+   *  standings tie-break: among racers at equal progress, whoever reached
+   *  that progress earlier (smaller value) is ahead. Undefined until the
+   *  first crossing (start grid). NOT a substitute for `raceTime`, which is
+   *  identical for every un-finished racer and so can't break live ties. */
+  lastCheckpointTime?: number
   /** Set when the player left the course (crossed the out-of-bounds soft
    *  wall). The run no longer counts — the finish screen records a DNF and
    *  skips ghost / leaderboard saves. Sticky: getting back on course clears
