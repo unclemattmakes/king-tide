@@ -1,4 +1,5 @@
 import { query } from 'bitecs'
+import { DEFAULT_DEV_SETTINGS, devSettings } from '@/engine/dev-settings'
 import type { Intent } from '@/engine/input/intent'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
@@ -32,6 +33,64 @@ import { wakeUpdateSystem } from './systems/wake-update'
 import type { WaveRiderSystem } from './systems/wave-rider'
 
 export type RaceTick = (sim: SimWorld, phys: PhysicsWorld, dt: number) => void
+
+/**
+ * The sim-affecting dev-tunable knobs, snapshotted into world-step input so
+ * they can't leak from the mutable `devSettings` singleton straight into the
+ * deterministic sim path (docs/systems-review.md §1.2).
+ *
+ * `hover.ts` used to read `devSettings.hoverProbe*` every tick and
+ * `input-apply.ts` read `devSettings.steerReleaseTightness` — a silent
+ * multiplayer-desync source (one peer's localStorage tuning would diverge the
+ * sim). These four probe knobs + the steer-release knob are the ONLY
+ * `devSettings` fields the deterministic step consumed; they now flow in via
+ * `StepInputs.tuning`.
+ *
+ * Single-player passes `simTuningFromDevSettings()` so the dev sliders still
+ * tune feel live; multiplayer passes `defaultSimTuning()` (frozen) so peers
+ * agree — mirroring how `waveTimeScale` / `runAI` already distinguish SP vs MP.
+ */
+export type SimTuning = {
+  /** Bow/stern probe distance from the bike center along the up-plane
+   *  forward axis (metres). The actual probe extends by speed anticipation
+   *  (see `hoverProbeSpeedScale`). */
+  hoverProbeHalfLength: number
+  /** Port/starboard probe distance from the bike center (metres). */
+  hoverProbeHalfWidth: number
+  /** Origin lift along +up before each corner cast (metres). */
+  hoverProbeLift: number
+  /** Bow/stern probe speed anticipation, metres added per m/s of up-plane
+   *  speed (capped at 1.4 m extension inside the probe). */
+  hoverProbeSpeedScale: number
+  /** Steer release tightness 0..1 — how quickly steer collapses to zero
+   *  after the stick is released. Read by `input-apply.ts`. */
+  steerReleaseTightness: number
+}
+
+/** The shipped defaults — used by multiplayer (frozen, peer-agreed) and as
+ *  the fallback when a caller omits `StepInputs.tuning`. */
+export function defaultSimTuning(): SimTuning {
+  return {
+    hoverProbeHalfLength: DEFAULT_DEV_SETTINGS.hoverProbeHalfLength,
+    hoverProbeHalfWidth: DEFAULT_DEV_SETTINGS.hoverProbeHalfWidth,
+    hoverProbeLift: DEFAULT_DEV_SETTINGS.hoverProbeLift,
+    hoverProbeSpeedScale: DEFAULT_DEV_SETTINGS.hoverProbeSpeedScale,
+    steerReleaseTightness: DEFAULT_DEV_SETTINGS.steerReleaseTightness,
+  }
+}
+
+/** Snapshot the live `devSettings` singleton into a `SimTuning`. Single-player
+ *  call sites use this so the dev palette / F4 hover-debug sliders still tune
+ *  feel live without the sim reading the mutable singleton mid-tick. */
+export function simTuningFromDevSettings(): SimTuning {
+  return {
+    hoverProbeHalfLength: devSettings.hoverProbeHalfLength,
+    hoverProbeHalfWidth: devSettings.hoverProbeHalfWidth,
+    hoverProbeLift: devSettings.hoverProbeLift,
+    hoverProbeSpeedScale: devSettings.hoverProbeSpeedScale,
+    steerReleaseTightness: devSettings.steerReleaseTightness,
+  }
+}
 
 /** While the race is locked (pre-countdown + countdown), keep bikes
  *  glued to their spawn pose. Input was already zeroed at the start
@@ -85,13 +144,22 @@ export type StepInputs = {
    *  `enabled:false`) in modes that opt out — multiplayer, tutorial, attract.
    *  When present the boundary system runs after the race tick each step. */
   oob?: OobConfig
+  /** Sim-affecting dev-tunable knobs (probe geometry + steer release),
+   *  snapshotted out of the mutable `devSettings` singleton so they can't
+   *  leak into the deterministic step (docs/systems-review.md §1.2). Single-
+   *  player passes `simTuningFromDevSettings()` (live sliders); multiplayer
+   *  passes `defaultSimTuning()` (frozen, peer-agreed). Omitting it falls
+   *  back to `defaultSimTuning()`. */
+  tuning?: SimTuning
 }
 
 /**
  * One fixed-step tick of the simulation. Pure with respect to (sim, phys,
- * waveField, track, inputs) — no Math.random, no wall clock, no Three.js.
- * This is the entry point that multiplayer netcode (lockstep or rollback)
- * will drive on every peer.
+ * waveField, track, inputs) — no Math.random, no wall clock, no Three.js,
+ * and (since §1.2) no live `devSettings` read: the sim-affecting tuning
+ * knobs arrive via `inputs.tuning` so two peers with different localStorage
+ * tuning still step identically. This is the entry point that multiplayer
+ * netcode (lockstep or rollback) will drive on every peer.
  *
  * Order is load-bearing — wake-update must run before hoverSystem reads
  * the wave field (so trailing bikes feel the leader's wake, M9.26), and
@@ -114,10 +182,14 @@ export function simulateStep(
   inputs.waveRiders?.step(phys.fixedDt)
   wakeUpdateSystem(sim, phys, waveField)
 
+  // Snapshot tuning out of the mutable singleton ONCE per tick. Default-frozen
+  // when a (non-owned) caller omits it.
+  const tuning = inputs.tuning ?? defaultSimTuning()
+
   if (inputs.locked) {
-    applyPeerInputs(sim, EMPTY_PEER_INPUTS, phys.fixedDt)
+    applyPeerInputs(sim, EMPTY_PEER_INPUTS, phys.fixedDt, tuning)
   } else if (!inputs.autoPlay) {
-    applyPeerInputs(sim, inputs.peerInputs, phys.fixedDt)
+    applyPeerInputs(sim, inputs.peerInputs, phys.fixedDt, tuning)
   }
   const runAI = inputs.runAI ?? true
   if (!inputs.locked && runAI) aiControlSystem(sim, phys, track, waveField)
@@ -127,7 +199,7 @@ export function simulateStep(
   // Anti-grav resolution runs immediately before hover so the hover system
   // sees this tick's fresh up-vector override + gravity-scale state.
   antiGravSystem(sim, phys, track, phys.fixedDt)
-  hoverSystem(sim, phys, waveField)
+  hoverSystem(sim, phys, waveField, tuning)
   // Trick-hop runs immediately after hoverSystem so the fresh
   // `HoverState.isGrounded` from this tick gates the rising-edge press.
   // Applying the vertical impulse here (before `phys.step()` below)
