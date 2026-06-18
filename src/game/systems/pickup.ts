@@ -50,8 +50,12 @@ export function pickupSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): voi
       continue
     }
 
-    // Active — check for any bike in range with an empty slot.
+    // Active — the lowest-eid bike in range with an empty slot collects it.
+    // Picking by eid (rather than first in query order) keeps a contested box
+    // deterministic across peers, whose query order can diverge (review §1.4).
+    let winner = -1
     for (const bEid of bikeEids) {
+      if (winner !== -1 && bEid > winner) continue
       const slot = PickupSlotStore.must(bEid)
       if (slot.held) continue
 
@@ -61,12 +65,14 @@ export function pickupSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): voi
       const t = rb.translation()
       if (distanceSquared(t, spawn.position) > PICKUP_RADIUS_SQ) continue
 
-      // Collect.
-      PickupSlotStore.set(bEid, { held: spawn.nextType })
+      winner = bEid
+    }
+
+    if (winner !== -1) {
+      PickupSlotStore.set(winner, { held: spawn.nextType })
       spawn.active = false
       spawn.respawnIn = RESPAWN_DELAY
       PickupSpawnStateStore.set(sEid, spawn)
-      break
     }
   }
 }
