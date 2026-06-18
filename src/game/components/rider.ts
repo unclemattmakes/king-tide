@@ -19,6 +19,7 @@
 
 import { createStore } from '@/engine/sim/ecs/store'
 import type { Quat, Vec3 } from '@/engine/sim/physics/vec'
+import type { RiderTuning } from '@/game/systems/rider-pose-tuning'
 
 export const RiderTag = { name: 'RiderTag' as const }
 export const RiderBoneTag = { name: 'RiderBoneTag' as const }
@@ -199,6 +200,11 @@ export type RiderData = {
   /** Smoothed pose-response signals — bounce/flow/headYaw. Per-tick
    *  state owned by riderPoseSystem; reset by resetRider() on respawn. */
   poseResponse: RiderPoseResponse
+  /** Optional per-entity pose-tuning override. When unset, the pose system
+   *  falls back to the shared global `RIDER_POSE_TUNING` table (the default
+   *  every bike uses). Set this to give a bike its own deterministic tuning
+   *  that the live dev override can't perturb. */
+  tuning?: RiderTuning
 }
 
 export const Rider = { name: 'Rider' as const }
