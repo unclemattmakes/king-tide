@@ -3,6 +3,7 @@ import { playerSettings } from '@/engine/player-settings'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import { AIController, AIControllerStore, AITag } from '@/game/components/ai'
 import { Racer, RacerStore } from '@/game/components/race'
+import { raceProgress } from '@/game/systems/race'
 import type { Track } from '@/game/tracks/types'
 
 /**
@@ -35,18 +36,13 @@ const PENALTY_SATURATION_CP = 2
  *  a checkpoint boundary. */
 const SMOOTHING = 0.05
 
-function progress(lap: number, nextCheckpoint: number, totalCheckpoints: number): number {
-  return lap * totalCheckpoints + nextCheckpoint
-}
-
 export function rubberBandSystem(sim: SimWorld, track: Track): void {
   const racerEids = query(sim, [Racer])
   if (racerEids.length === 0) return
 
   let leaderProgress = -Infinity
   for (const eid of racerEids) {
-    const r = RacerStore.must(eid)
-    const p = progress(r.lap, r.nextCheckpoint, track.checkpoints.length)
+    const p = raceProgress(RacerStore.must(eid), track)
     if (p > leaderProgress) leaderProgress = p
   }
 
@@ -59,7 +55,7 @@ export function rubberBandSystem(sim: SimWorld, track: Track): void {
 
     let target: number
     if (assistOn) {
-      const p = progress(r.lap, r.nextCheckpoint, track.checkpoints.length)
+      const p = raceProgress(r, track)
       const delta = leaderProgress - p // 0 = tied, positive = behind
       const boostCap = ai.rubberBandBoostCap
       const penaltyFloor = ai.rubberBandPenaltyFloor

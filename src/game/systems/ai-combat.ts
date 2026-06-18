@@ -2,16 +2,12 @@ import { type QueryResult, query } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { quatRotate } from '@/engine/sim/physics/vec'
-import {
-  BikeTag,
-  ControlIntent,
-  ControlIntentStore,
-  RBHandle,
-  RBHandleStore,
-} from '@/game/components'
+import { BikeTag, ControlIntent, ControlIntentStore, RBHandle } from '@/game/components'
 import { AITag } from '@/game/components/ai'
 import { PickupSlot, PickupSlotStore, type PickupType } from '@/game/components/pickup'
+import { bikeBody, forEachBikeInRange } from '@/game/systems/bike-spatial'
 import { pickMissileTarget } from '@/game/systems/combat'
+import { PICKUP_REGISTRY } from '@/game/systems/pickup-registry'
 
 /**
  * Decide whether an AI should fire its currently-held pickup, and if so,
@@ -54,22 +50,7 @@ export function shouldAIFire(
   hasChaser: boolean,
   hasMissileTarget: boolean,
 ): boolean {
-  switch (held) {
-    case 'boost':
-      // Don't burn boost while ai-control has scaled us down for a turn.
-      return throttle > 0.85
-    case 'shield':
-      // Purely defensive; sitting on it can't help. Fire whenever held.
-      return true
-    case 'mine':
-      // Drop on a chaser, or on a corner apex (catches trailing bikes
-      // that follow the racing line).
-      return hasChaser || steerAbs > 0.4
-    case 'missile':
-      // Need a target inside the forward cone, AND a launch heading
-      // pointing roughly the right way (i.e. not mid-corner).
-      return throttle > 0.8 && hasMissileTarget
-  }
+  return PICKUP_REGISTRY[held].aiShouldFire({ throttle, steerAbs, hasChaser, hasMissileTarget })
 }
 
 export function aiCombatSystem(sim: SimWorld, phys: PhysicsWorld): void {
@@ -84,41 +65,53 @@ export function aiCombatSystem(sim: SimWorld, phys: PhysicsWorld): void {
     const intent = ControlIntentStore.must(eid)
     if (intent.fire) continue // someone (or something) already wants us to fire
 
-    const hasChaser = slot.held === 'mine' ? isChaserBehind(phys, eid, bikeEids) : false
-    const hasMissileTarget =
-      slot.held === 'missile' ? pickMissileTarget(sim, phys, eid, bikeEids) >= 0 : false
+    // Only run the (relatively expensive) spatial scans the held type needs.
+    const def = PICKUP_REGISTRY[slot.held]
+    const hasChaser = def.needsChaser ? isChaserBehind(sim, phys, eid, bikeEids) : false
+    const hasMissileTarget = def.needsMissileTarget
+      ? pickMissileTarget(sim, phys, eid, bikeEids) >= 0
+      : false
 
     if (
-      shouldAIFire(slot.held, intent.throttle, Math.abs(intent.steer), hasChaser, hasMissileTarget)
+      def.aiShouldFire({
+        throttle: intent.throttle,
+        steerAbs: Math.abs(intent.steer),
+        hasChaser,
+        hasMissileTarget,
+      })
     ) {
       ControlIntentStore.set(eid, { ...intent, fire: true })
     }
   }
 }
 
-function isChaserBehind(phys: PhysicsWorld, selfEid: number, bikeEids: QueryResult): boolean {
-  const handle = RBHandleStore.get(selfEid)
-  if (!handle) return false
-  const rb = phys.world.getRigidBody(handle.handle)
+function isChaserBehind(
+  sim: SimWorld,
+  phys: PhysicsWorld,
+  selfEid: number,
+  bikeEids: QueryResult,
+): boolean {
+  const rb = bikeBody(phys, selfEid)
   if (!rb) return false
   const t = rb.translation()
   const q = rb.rotation()
   const fwd = quatRotate(q, { x: 0, y: 0, z: 1 })
 
-  for (const otherEid of bikeEids) {
-    if (otherEid === selfEid) continue
-    const otherHandle = RBHandleStore.must(otherEid)
-    const otherRb = phys.world.getRigidBody(otherHandle.handle)
-    if (!otherRb) continue
-    const ot = otherRb.translation()
-    const dx = ot.x - t.x
-    const dy = ot.y - t.y
-    const dz = ot.z - t.z
-    const dist = Math.hypot(dx, dy, dz)
-    if (dist > MINE_CHASER_RANGE) continue
-    if (dist < 0.001) continue
-    const dot = (fwd.x * dx + fwd.y * dy + fwd.z * dz) / dist
-    if (dot < MINE_CHASER_DOT) return true
-  }
-  return false
+  let found = false
+  forEachBikeInRange(
+    sim,
+    phys,
+    t,
+    MINE_CHASER_RANGE,
+    ({ dx, dy, dz, dist }) => {
+      if (dist < 0.001) return
+      const dot = (fwd.x * dx + fwd.y * dy + fwd.z * dz) / dist
+      if (dot < MINE_CHASER_DOT) {
+        found = true
+        return true
+      }
+    },
+    { skipEid: selfEid, bikeEids },
+  )
+  return found
 }

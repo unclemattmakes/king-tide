@@ -48,7 +48,7 @@ export type TransformData = {
  * the bike mesh, rider bones, shield, wave-riders and every bike-attached
  * FX emitter render interpolated without per-system changes.
  */
-export const TransformStore = createStore<TransformData>('Transform')
+export const TransformStore = createStore<TransformData>('Transform', { renderOnly: true })
 
 /**
  * Latest committed fixed-step pose ("cur"), and the one before it ("prev"),
@@ -63,8 +63,10 @@ export const TransformStore = createStore<TransformData>('Transform')
  * reads Rapier bodies rather than stores (`engine/sim/snapshot.ts`), so they
  * carry no sim / replay / determinism obligations.
  */
-export const TickTransformStore = createStore<TransformData>('TickTransform')
-export const PrevTickTransformStore = createStore<TransformData>('PrevTickTransform')
+export const TickTransformStore = createStore<TransformData>('TickTransform', { renderOnly: true })
+export const PrevTickTransformStore = createStore<TransformData>('PrevTickTransform', {
+  renderOnly: true,
+})
 
 export const RBHandle = { name: 'RBHandle' as const }
 export type RBHandleData = { handle: number }
@@ -240,7 +242,7 @@ export type HoverDebugData = {
    *  at the bike's footprint when the user drags the slider. */
   probeLift: number
 }
-export const HoverDebugStore = createStore<HoverDebugData>('HoverDebug')
+export const HoverDebugStore = createStore<HoverDebugData>('HoverDebug', { renderOnly: true })
 
 /**
  * Per-bike airborne-gated trick state. Written by `trickHopSystem`

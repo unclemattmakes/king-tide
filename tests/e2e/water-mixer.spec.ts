@@ -100,9 +100,9 @@ test('lab: EXPORT copies a parseable water block', async ({ page }) => {
   page.on('console', (m) => logs.push(m.text()))
   await page.locator('#wd-export').click()
   await expect(page.locator('#wd-export')).toHaveText(/COPIED/)
-  await expect.poll(() => logs.some((l) => l.includes('[water] export')), { timeout: 5000 }).toBe(
-    true,
-  )
+  await expect
+    .poll(() => logs.some((l) => l.includes('[water] export')), { timeout: 5000 })
+    .toBe(true)
 
   const line = logs.find((l) => l.includes('[water] export'))!
   const parsed = JSON.parse(line.slice(line.indexOf('{')))
@@ -125,7 +125,9 @@ test('watertune: loads a real track free-cam, track-scoped tuner, no race', asyn
   await expect(page.locator('#watertune-hud')).toContainText('WATER TUNE')
   // Let the loading overlay fade + the water/scene render a few seconds before
   // the proof shot (the tuner builds a tick before hideLoadingScreen).
-  await page.waitForSelector('#loading-screen', { state: 'hidden', timeout: 15_000 }).catch(() => {})
+  await page
+    .waitForSelector('#loading-screen', { state: 'hidden', timeout: 15_000 })
+    .catch(() => {})
   await page.waitForTimeout(4000)
   await page.screenshot({ path: 'artifacts/water-mixer/watertune-sandbar.png' })
 })

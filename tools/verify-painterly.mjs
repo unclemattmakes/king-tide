@@ -101,5 +101,7 @@ await page.keyboard.press('Escape')
 console.log('console errors:', errors.length)
 for (const e of errors.slice(0, 20)) console.log('  ✗', e)
 console.log(`captures in ${OUT}/`)
-console.log(errors.length === 0 ? 'RESULT: no console errors ✅' : `RESULT: ${errors.length} error(s) ✗`)
+console.log(
+  errors.length === 0 ? 'RESULT: no console errors ✅' : `RESULT: ${errors.length} error(s) ✗`,
+)
 await browser.close()

@@ -1,4 +1,4 @@
-import { addComponent, query } from 'bitecs'
+import { query } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { distanceSquared } from '@/engine/sim/physics/vec'
@@ -9,7 +9,6 @@ import {
   RBHandle,
   RBHandleStore,
 } from '@/game/components'
-import { ShieldEffect, ShieldEffectStore } from '@/game/components/combat'
 import {
   BoostEffect,
   BoostEffectStore,
@@ -20,21 +19,12 @@ import {
   PickupSpawnTag,
   type PickupType,
 } from '@/game/components/pickup'
-import { createMine } from '@/game/entities/mine'
-import { createMissile } from '@/game/entities/missile'
 import { pickRandomPickupType } from '@/game/entities/pickup-spawn'
-import {
-  getMineDropPosition,
-  getMissileLaunchTransform,
-  pickMissileTarget,
-  SHIELD_DURATION,
-} from '@/game/systems/combat'
+import { PICKUP_REGISTRY } from '@/game/systems/pickup-registry'
 
 const PICKUP_RADIUS = 2.5 // bike center within this many meters of box → collect
 const PICKUP_RADIUS_SQ = PICKUP_RADIUS * PICKUP_RADIUS
 const RESPAWN_DELAY = 4 // seconds
-const BOOST_DURATION = 1.8
-const BOOST_MULTIPLIER = 1.6
 
 /**
  * Detect bikes overlapping active pickup boxes; fill the bike's slot if empty.
@@ -60,8 +50,12 @@ export function pickupSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): voi
       continue
     }
 
-    // Active — check for any bike in range with an empty slot.
+    // Active — the lowest-eid bike in range with an empty slot collects it.
+    // Picking by eid (rather than first in query order) keeps a contested box
+    // deterministic across peers, whose query order can diverge (review §1.4).
+    let winner = -1
     for (const bEid of bikeEids) {
+      if (winner !== -1 && bEid > winner) continue
       const slot = PickupSlotStore.must(bEid)
       if (slot.held) continue
 
@@ -71,12 +65,14 @@ export function pickupSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): voi
       const t = rb.translation()
       if (distanceSquared(t, spawn.position) > PICKUP_RADIUS_SQ) continue
 
-      // Collect.
-      PickupSlotStore.set(bEid, { held: spawn.nextType })
+      winner = bEid
+    }
+
+    if (winner !== -1) {
+      PickupSlotStore.set(winner, { held: spawn.nextType })
       spawn.active = false
       spawn.respawnIn = RESPAWN_DELAY
       PickupSpawnStateStore.set(sEid, spawn)
-      break
     }
   }
 }
@@ -97,35 +93,7 @@ export function pickupUseSystem(sim: SimWorld, phys: PhysicsWorld): void {
     const slot = PickupSlotStore.must(eid)
     if (!intent.fire || !slot.held) continue
 
-    switch (slot.held) {
-      case 'boost': {
-        if (!BoostEffectStore.has(eid)) addComponent(sim, eid, BoostEffect)
-        BoostEffectStore.set(eid, {
-          remaining: BOOST_DURATION,
-          multiplier: BOOST_MULTIPLIER,
-        })
-        break
-      }
-      case 'shield': {
-        if (!ShieldEffectStore.has(eid)) addComponent(sim, eid, ShieldEffect)
-        ShieldEffectStore.set(eid, { remaining: SHIELD_DURATION })
-        break
-      }
-      case 'mine': {
-        const dropPos = getMineDropPosition(phys, eid)
-        if (dropPos) createMine(sim, dropPos, eid)
-        break
-      }
-      case 'missile': {
-        const launch = getMissileLaunchTransform(phys, eid)
-        if (launch) {
-          const target = pickMissileTarget(sim, phys, eid)
-          createMissile(sim, launch.position, launch.velocity, eid, target)
-        }
-        break
-      }
-    }
-
+    PICKUP_REGISTRY[slot.held].use({ sim, phys, eid })
     PickupSlotStore.set(eid, { held: null })
   }
 }

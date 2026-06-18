@@ -1,5 +1,4 @@
 import { query } from 'bitecs'
-import { devSettings } from '@/engine/dev-settings'
 import type { Intent } from '@/engine/input/intent'
 import { emptyIntent } from '@/engine/input/intent'
 import type { SimWorld } from '@/engine/sim/ecs/world'
@@ -9,6 +8,7 @@ import {
   PeerControlled,
   PeerControlledStore,
 } from '@/game/components'
+import type { SimTuning } from '@/game/sim-step'
 
 // Player-only steer scale. The raw controller signal feels twitchy through
 // the chase camera, so the per-peer write attenuates steer before it hits
@@ -93,6 +93,7 @@ export function applyPeerInputs(
   sim: SimWorld,
   peerInputs: ReadonlyMap<number, Intent>,
   dt: number,
+  tuning: SimTuning,
 ): void {
   const eids = query(sim, [PeerControlled, ControlIntent])
   const seen = new Set<number>()
@@ -121,7 +122,7 @@ export function applyPeerInputs(
       // snap so the slider has a true "no decay" endpoint instead of
       // bottoming out at 60/s. Clamped so out-of-range persisted values
       // can't break the math.
-      const t = Math.max(0, Math.min(1, devSettings.steerReleaseTightness))
+      const t = Math.max(0, Math.min(1, tuning.steerReleaseTightness))
       if (t >= 0.999) {
         state.steer = 0
       } else {

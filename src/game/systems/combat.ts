@@ -1,14 +1,9 @@
-import { addComponent, type QueryResult, query, removeEntity } from 'bitecs'
+import { addComponent, hasComponent, type QueryResult, query, removeComponent } from 'bitecs'
+import { destroyEntity } from '@/engine/sim/ecs/destroy'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
-import { distanceSquared, quatRotate } from '@/engine/sim/physics/vec'
-import {
-  BikeTag,
-  ControlIntent,
-  ControlIntentStore,
-  RBHandle,
-  RBHandleStore,
-} from '@/game/components'
+import { quatRotate } from '@/engine/sim/physics/vec'
+import { BikeTag, ControlIntent, ControlIntentStore, RBHandle } from '@/game/components'
 import {
   ExplosionState,
   ExplosionStateStore,
@@ -25,6 +20,7 @@ import {
   StunStore,
 } from '@/game/components/combat'
 import { createExplosion } from '@/game/entities/explosion'
+import { bikeBody, forEachBikeInRange } from '@/game/systems/bike-spatial'
 
 // --- Tunables ----------------------------------------------------------------
 
@@ -32,13 +28,12 @@ export const SHIELD_DURATION = 6 // seconds of bubble protection
 const STUN_DURATION = 1.0 // seconds of forced-neutral input after a hit
 const MINE_ARMING_DELAY = 0.6 // seconds before a fresh mine triggers on its owner
 const MINE_TRIGGER_RADIUS = 2.4 // meters
-const MINE_TRIGGER_RADIUS_SQ = MINE_TRIGGER_RADIUS * MINE_TRIGGER_RADIUS
 const MINE_DETONATION_LIFETIME = 0.5 // seconds the despawned mine remains for visual fade
 const MISSILE_SPEED = 38 // m/s
 const MISSILE_TURN_RATE = 2.4 // rad/s — limits how sharply it can chase
 const MISSILE_LIFETIME = 5 // seconds of flight before self-destruct
 const MISSILE_HIT_RADIUS = 1.6 // meters — bike center within this radius = impact
-const MISSILE_HIT_RADIUS_SQ = MISSILE_HIT_RADIUS * MISSILE_HIT_RADIUS
+const MISSILE_OWNER_IMMUNITY_S = 0.15 // seconds after launch the firer can't be hit by its own missile
 const MISSILE_TARGET_CONE_DOT = 0.3 // dot(forward, dirToTarget) > this counts as "ahead"
 const MISSILE_TARGET_MAX_RANGE = 80 // meters — beyond this, no acquisition
 const MINE_DROP_OFFSET = -2.2 // meters along bike-fwd (negative = behind)
@@ -68,9 +63,8 @@ function applyHitReaction(
     return { hit: false, shielded: true }
   }
 
-  const handle = RBHandleStore.get(victimEid)
-  if (handle) {
-    const rb = phys.world.getRigidBody(handle.handle)
+  {
+    const rb = bikeBody(phys, victimEid)
     if (rb) {
       const v = rb.linvel()
       rb.setLinvel({ x: v.x * HIT_LINEAR_DAMPING, y: v.y, z: v.z * HIT_LINEAR_DAMPING }, true)
@@ -94,16 +88,28 @@ function applyHitReaction(
 export function shieldTickSystem(sim: SimWorld, dt: number): void {
   const eids = query(sim, [ShieldEffect])
   for (const eid of eids) {
-    const s = ShieldEffectStore.must(eid)
-    if (s.remaining > 0) ShieldEffectStore.set(eid, { remaining: s.remaining - dt })
+    const remaining = ShieldEffectStore.must(eid).remaining - dt
+    if (remaining > 0) {
+      ShieldEffectStore.set(eid, { remaining })
+      continue
+    }
+    // Expired (or consumed by a hit, which sets remaining 0). Detach the
+    // component + store entry instead of letting a dead timer tick forever.
+    removeComponent(sim, eid, ShieldEffect)
+    ShieldEffectStore.delete(eid)
   }
 }
 
 export function stunTickSystem(sim: SimWorld, dt: number): void {
   const eids = query(sim, [Stun])
   for (const eid of eids) {
-    const s = StunStore.must(eid)
-    if (s.remaining > 0) StunStore.set(eid, { remaining: s.remaining - dt })
+    const remaining = StunStore.must(eid).remaining - dt
+    if (remaining > 0) {
+      StunStore.set(eid, { remaining })
+      continue
+    }
+    removeComponent(sim, eid, Stun)
+    StunStore.delete(eid)
   }
 }
 
@@ -142,31 +148,33 @@ export function mineSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): void 
     if (mine.detonated) {
       // After detonation the mine lingers briefly so render can fade it.
       if (mine.ageSec - mine.detonatedAt > MINE_DETONATION_LIFETIME) {
-        removeEntity(sim, mEid)
+        destroyEntity(sim, mEid)
         continue
       }
       MineStateStore.set(mEid, mine)
       continue
     }
 
-    // Proximity check.
-    let triggered = false
-    for (const bEid of bikeEids) {
-      if (bEid === mine.ownerEid && mine.ageSec < MINE_ARMING_DELAY) continue
-      const handle = RBHandleStore.must(bEid)
-      const rb = phys.world.getRigidBody(handle.handle)
-      if (!rb) continue
-      const t = rb.translation()
-      if (distanceSquared(t, mine.position) > MINE_TRIGGER_RADIUS_SQ) continue
+    // Proximity check. Pick the lowest-eid bike in range (not first in query
+    // order) so the victim is deterministic across peers — see review §1.4.
+    let victim = -1
+    forEachBikeInRange(
+      sim,
+      phys,
+      mine.position,
+      MINE_TRIGGER_RADIUS,
+      ({ eid: bEid }) => {
+        // The dropper is immune until the mine arms.
+        if (bEid === mine.ownerEid && mine.ageSec < MINE_ARMING_DELAY) return
+        if (victim === -1 || bEid < victim) victim = bEid
+      },
+      { bikeEids },
+    )
 
-      const reaction = applyHitReaction(sim, phys, bEid)
+    if (victim !== -1) {
+      const reaction = applyHitReaction(sim, phys, victim)
       const color = reaction.shielded ? 0x66ff99 : 0xff7733
       createExplosion(sim, mine.position, color)
-      triggered = true
-      break
-    }
-
-    if (triggered) {
       mine.detonated = true
       mine.detonatedAt = mine.ageSec
     }
@@ -190,9 +198,7 @@ export function pickMissileTarget(
   firerEid: number,
   bikeEids?: QueryResult,
 ): number {
-  const handle = RBHandleStore.get(firerEid)
-  if (!handle) return -1
-  const rb = phys.world.getRigidBody(handle.handle)
+  const rb = bikeBody(phys, firerEid)
   if (!rb) return -1
   const t = rb.translation()
   const q = rb.rotation()
@@ -200,26 +206,24 @@ export function pickMissileTarget(
 
   let bestEid = -1
   let bestDist = MISSILE_TARGET_MAX_RANGE
-  const bikes = bikeEids ?? query(sim, [BikeTag, RBHandle])
-  for (const bEid of bikes) {
-    if (bEid === firerEid) continue
-    const otherHandle = RBHandleStore.must(bEid)
-    const otherRb = phys.world.getRigidBody(otherHandle.handle)
-    if (!otherRb) continue
-    const ot = otherRb.translation()
-    const dx = ot.x - t.x
-    const dy = ot.y - t.y
-    const dz = ot.z - t.z
-    const dist = Math.hypot(dx, dy, dz)
-    if (dist > MISSILE_TARGET_MAX_RANGE) continue
-    if (dist < 0.001) continue
-    const dot = (fwd.x * dx + fwd.y * dy + fwd.z * dz) / dist
-    if (dot < MISSILE_TARGET_CONE_DOT) continue
-    if (dist < bestDist) {
-      bestDist = dist
-      bestEid = bEid
-    }
-  }
+  forEachBikeInRange(
+    sim,
+    phys,
+    t,
+    MISSILE_TARGET_MAX_RANGE,
+    ({ eid: bEid, dx, dy, dz, dist }) => {
+      if (dist < 0.001) return
+      const dot = (fwd.x * dx + fwd.y * dy + fwd.z * dz) / dist
+      if (dot < MISSILE_TARGET_CONE_DOT) return
+      // Nearest wins; exact-distance ties broken by lowest eid so the choice
+      // is independent of (peer-divergent) query order — see review §1.4.
+      if (dist < bestDist || (dist === bestDist && bEid < bestEid)) {
+        bestDist = dist
+        bestEid = bEid
+      }
+    },
+    { skipEid: firerEid, bikeEids },
+  )
   return bestEid
 }
 
@@ -232,16 +236,19 @@ export function missileSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): vo
     m.ageSec += dt
     if (m.detonated || m.ageSec > MISSILE_LIFETIME) {
       // Despawn (lingering visual is via Explosion, not the missile itself).
-      removeEntity(sim, mEid)
+      destroyEntity(sim, mEid)
       continue
     }
 
+    // Drop a target that's no longer a live bike (entity despawned, or its id
+    // recycled into a non-bike) so we don't home on a stale rigid-body handle.
+    if (m.targetEid >= 0 && !hasComponent(sim, m.targetEid, BikeTag)) m.targetEid = -1
+
     // Steering toward target if one is acquired.
     if (m.targetEid >= 0) {
-      const handle = RBHandleStore.get(m.targetEid)
-      if (handle) {
-        const targetRb = phys.world.getRigidBody(handle.handle)
-        if (targetRb) {
+      const targetRb = bikeBody(phys, m.targetEid)
+      if (targetRb) {
+        {
           const tt = targetRb.translation()
           const toX = tt.x - m.position.x
           const toY = tt.y - m.position.y
@@ -277,19 +284,20 @@ export function missileSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): vo
     m.position.y += m.velocity.y * dt
     m.position.z += m.velocity.z * dt
 
-    // Hit detection — any bike but the owner within hit radius.
+    // Hit detection — lowest-eid bike (but the owner) within hit radius, so
+    // the victim is deterministic across peers when two overlap (review §1.4).
     let hitEid = -1
-    for (const bEid of bikeEids) {
-      if (bEid === m.ownerEid && m.ageSec < 0.15) continue
-      const handle = RBHandleStore.must(bEid)
-      const rb = phys.world.getRigidBody(handle.handle)
-      if (!rb) continue
-      const bt = rb.translation()
-      if (distanceSquared(bt, m.position) <= MISSILE_HIT_RADIUS_SQ) {
-        hitEid = bEid
-        break
-      }
-    }
+    forEachBikeInRange(
+      sim,
+      phys,
+      m.position,
+      MISSILE_HIT_RADIUS,
+      ({ eid: bEid }) => {
+        if (bEid === m.ownerEid && m.ageSec < MISSILE_OWNER_IMMUNITY_S) return
+        if (hitEid === -1 || bEid < hitEid) hitEid = bEid
+      },
+      { bikeEids },
+    )
 
     if (hitEid >= 0) {
       const reaction = applyHitReaction(sim, phys, hitEid)
@@ -310,7 +318,7 @@ export function explosionTickSystem(sim: SimWorld, dt: number): void {
     const e = ExplosionStateStore.must(eid)
     e.ageSec += dt
     if (e.ageSec >= e.lifetime) {
-      removeEntity(sim, eid)
+      destroyEntity(sim, eid)
       continue
     }
     ExplosionStateStore.set(eid, e)
@@ -327,9 +335,7 @@ export function getMineDropPosition(
   y: number
   z: number
 } | null {
-  const handle = RBHandleStore.get(ownerEid)
-  if (!handle) return null
-  const rb = phys.world.getRigidBody(handle.handle)
+  const rb = bikeBody(phys, ownerEid)
   if (!rb) return null
   const t = rb.translation()
   const q = rb.rotation()
@@ -348,9 +354,7 @@ export function getMissileLaunchTransform(
   position: { x: number; y: number; z: number }
   velocity: { x: number; y: number; z: number }
 } | null {
-  const handle = RBHandleStore.get(ownerEid)
-  if (!handle) return null
-  const rb = phys.world.getRigidBody(handle.handle)
+  const rb = bikeBody(phys, ownerEid)
   if (!rb) return null
   const t = rb.translation()
   const q = rb.rotation()
