@@ -7,6 +7,7 @@ import { AITag } from '@/game/components/ai'
 import { PickupSlot, PickupSlotStore, type PickupType } from '@/game/components/pickup'
 import { bikeBody, forEachBikeInRange } from '@/game/systems/bike-spatial'
 import { pickMissileTarget } from '@/game/systems/combat'
+import { PICKUP_REGISTRY } from '@/game/systems/pickup-registry'
 
 /**
  * Decide whether an AI should fire its currently-held pickup, and if so,
@@ -49,22 +50,7 @@ export function shouldAIFire(
   hasChaser: boolean,
   hasMissileTarget: boolean,
 ): boolean {
-  switch (held) {
-    case 'boost':
-      // Don't burn boost while ai-control has scaled us down for a turn.
-      return throttle > 0.85
-    case 'shield':
-      // Purely defensive; sitting on it can't help. Fire whenever held.
-      return true
-    case 'mine':
-      // Drop on a chaser, or on a corner apex (catches trailing bikes
-      // that follow the racing line).
-      return hasChaser || steerAbs > 0.4
-    case 'missile':
-      // Need a target inside the forward cone, AND a launch heading
-      // pointing roughly the right way (i.e. not mid-corner).
-      return throttle > 0.8 && hasMissileTarget
-  }
+  return PICKUP_REGISTRY[held].aiShouldFire({ throttle, steerAbs, hasChaser, hasMissileTarget })
 }
 
 export function aiCombatSystem(sim: SimWorld, phys: PhysicsWorld): void {
@@ -79,12 +65,20 @@ export function aiCombatSystem(sim: SimWorld, phys: PhysicsWorld): void {
     const intent = ControlIntentStore.must(eid)
     if (intent.fire) continue // someone (or something) already wants us to fire
 
-    const hasChaser = slot.held === 'mine' ? isChaserBehind(sim, phys, eid, bikeEids) : false
-    const hasMissileTarget =
-      slot.held === 'missile' ? pickMissileTarget(sim, phys, eid, bikeEids) >= 0 : false
+    // Only run the (relatively expensive) spatial scans the held type needs.
+    const def = PICKUP_REGISTRY[slot.held]
+    const hasChaser = def.needsChaser ? isChaserBehind(sim, phys, eid, bikeEids) : false
+    const hasMissileTarget = def.needsMissileTarget
+      ? pickMissileTarget(sim, phys, eid, bikeEids) >= 0
+      : false
 
     if (
-      shouldAIFire(slot.held, intent.throttle, Math.abs(intent.steer), hasChaser, hasMissileTarget)
+      def.aiShouldFire({
+        throttle: intent.throttle,
+        steerAbs: Math.abs(intent.steer),
+        hasChaser,
+        hasMissileTarget,
+      })
     ) {
       ControlIntentStore.set(eid, { ...intent, fire: true })
     }

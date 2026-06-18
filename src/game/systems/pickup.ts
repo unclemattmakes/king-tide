@@ -1,4 +1,4 @@
-import { addComponent, query } from 'bitecs'
+import { query } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { distanceSquared } from '@/engine/sim/physics/vec'
@@ -9,7 +9,6 @@ import {
   RBHandle,
   RBHandleStore,
 } from '@/game/components'
-import { ShieldEffect, ShieldEffectStore } from '@/game/components/combat'
 import {
   BoostEffect,
   BoostEffectStore,
@@ -20,21 +19,12 @@ import {
   PickupSpawnTag,
   type PickupType,
 } from '@/game/components/pickup'
-import { createMine } from '@/game/entities/mine'
-import { createMissile } from '@/game/entities/missile'
 import { pickRandomPickupType } from '@/game/entities/pickup-spawn'
-import {
-  getMineDropPosition,
-  getMissileLaunchTransform,
-  pickMissileTarget,
-  SHIELD_DURATION,
-} from '@/game/systems/combat'
+import { PICKUP_REGISTRY } from '@/game/systems/pickup-registry'
 
 const PICKUP_RADIUS = 2.5 // bike center within this many meters of box → collect
 const PICKUP_RADIUS_SQ = PICKUP_RADIUS * PICKUP_RADIUS
 const RESPAWN_DELAY = 4 // seconds
-const BOOST_DURATION = 1.8
-const BOOST_MULTIPLIER = 1.6
 
 /**
  * Detect bikes overlapping active pickup boxes; fill the bike's slot if empty.
@@ -97,35 +87,7 @@ export function pickupUseSystem(sim: SimWorld, phys: PhysicsWorld): void {
     const slot = PickupSlotStore.must(eid)
     if (!intent.fire || !slot.held) continue
 
-    switch (slot.held) {
-      case 'boost': {
-        if (!BoostEffectStore.has(eid)) addComponent(sim, eid, BoostEffect)
-        BoostEffectStore.set(eid, {
-          remaining: BOOST_DURATION,
-          multiplier: BOOST_MULTIPLIER,
-        })
-        break
-      }
-      case 'shield': {
-        if (!ShieldEffectStore.has(eid)) addComponent(sim, eid, ShieldEffect)
-        ShieldEffectStore.set(eid, { remaining: SHIELD_DURATION })
-        break
-      }
-      case 'mine': {
-        const dropPos = getMineDropPosition(phys, eid)
-        if (dropPos) createMine(sim, dropPos, eid)
-        break
-      }
-      case 'missile': {
-        const launch = getMissileLaunchTransform(phys, eid)
-        if (launch) {
-          const target = pickMissileTarget(sim, phys, eid)
-          createMissile(sim, launch.position, launch.velocity, eid, target)
-        }
-        break
-      }
-    }
-
+    PICKUP_REGISTRY[slot.held].use({ sim, phys, eid })
     PickupSlotStore.set(eid, { held: null })
   }
 }
