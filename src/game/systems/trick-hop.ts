@@ -18,8 +18,10 @@ import {
   RBHandle,
   RBHandleStore,
   TrickState,
+  type TrickStateData,
   TrickStateStore,
 } from '@/game/components'
+import { risingEdge, tickDown } from '@/game/systems/edge'
 
 /**
  * Geometric trick system. The window is armed by the bike's *pose*, not
@@ -116,6 +118,32 @@ const HOP_COOLDOWN_SEC = 0.35
  *  Tunable. */
 const TRICK_RAMP_SLOPE_MIN = 0.12
 
+/**
+ * The implicit lifecycle the boolean flags below encode, named explicitly.
+ * `TrickStateData` currently stores this as a spread of flags rather than one
+ * field (several are read directly by render / game-loop, so collapsing the
+ * storage is a cross-cutting change deferred to a headed-playtest pass — see
+ * docs/systems-review.md §6.1). `trickPhase()` derives the single source-of-
+ * truth view from those flags so callers and tests can reason about ONE state
+ * instead of recombining flags, and so invalid combinations are visible.
+ *
+ *  - `airborne`    — trick window open; a press fires the trick (once/airtime).
+ *  - `buffered`    — an early press is held, waiting for a pop (or expiry).
+ *  - `hop-lockout` — mid/after a self-induced courtesy hop; the window is
+ *                    suppressed so the bike's own lift can't arm a free trick.
+ *  - `grounded`    — planted & idle; a press buffers or fires a courtesy hop.
+ */
+export type TrickPhase = 'grounded' | 'buffered' | 'airborne' | 'hop-lockout'
+
+export function trickPhase(
+  trick: Pick<TrickStateData, 'trickWindowOpen' | 'bufferedPressTimerSec' | 'hopLockoutActive'>,
+): TrickPhase {
+  if (trick.trickWindowOpen) return 'airborne'
+  if (trick.bufferedPressTimerSec > 0) return 'buffered'
+  if (trick.hopLockoutActive) return 'hop-lockout'
+  return 'grounded'
+}
+
 export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
   const dt = phys.fixedDt
   const eids = query(sim, [BikeTag, RBHandle, ControlIntent, HoverState, TrickState])
@@ -131,10 +159,10 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
     trick.trickFiredThisTick = false
 
     // Cooldown + spin lifetime decay.
-    if (trick.cooldownSec > 0) trick.cooldownSec = Math.max(0, trick.cooldownSec - dt)
+    trick.cooldownSec = tickDown(trick.cooldownSec, dt)
     if (trick.spinPhase > 0) {
       const stepFrac = trick.spinDurationSec > 0 ? dt / trick.spinDurationSec : 1
-      trick.spinPhase = Math.max(0, trick.spinPhase - stepFrac)
+      trick.spinPhase = tickDown(trick.spinPhase, stepFrac)
       if (trick.spinPhase === 0) {
         trick.spinAxisX = 0
         trick.spinAxisY = 0
@@ -251,7 +279,7 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
     // re-arm. If the climb decayed (throttle released, slowed down) fall
     // back to the courtesy hop so the press still does something visible.
     if (trick.bufferedPressTimerSec > 0) {
-      trick.bufferedPressTimerSec = Math.max(0, trick.bufferedPressTimerSec - dt)
+      trick.bufferedPressTimerSec = tickDown(trick.bufferedPressTimerSec, dt)
       if (trick.bufferedPressTimerSec === 0 && trick.bufferedPressDir !== 0) {
         const stillCredible =
           !trick.hopLockoutActive && trick.vyPeak >= MIN_VY_PEAK && speedOK && throttleOK
@@ -273,8 +301,8 @@ export function trickHopSystem(sim: SimWorld, phys: PhysicsWorld): void {
 
     // Rising-edge detection on the trick buttons. Held-down doesn't
     // re-arm — released-and-re-pressed is the only valid input.
-    const leftEdge = intent.trickLeft && !trick.prevLeftDown
-    const rightEdge = intent.trickRight && !trick.prevRightDown
+    const leftEdge = risingEdge(intent.trickLeft, trick.prevLeftDown)
+    const rightEdge = risingEdge(intent.trickRight, trick.prevRightDown)
     trick.prevLeftDown = intent.trickLeft
     trick.prevRightDown = intent.trickRight
     const pressDir = leftEdge ? -1 : rightEdge ? +1 : 0
