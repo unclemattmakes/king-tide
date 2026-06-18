@@ -22,7 +22,7 @@
  * rules.
  */
 
-import { addComponent, hasComponent, removeComponent, removeEntity } from 'bitecs'
+import { addComponent, hasComponent, removeComponent } from 'bitecs'
 import { electHostSeat, isHostSeat } from '@/engine/net/host-election'
 import { type InputFrame, LOCAL_PEER_ID } from '@/engine/net/input-frame'
 import { onMpStatusChange } from '@/engine/net/mp-status'
@@ -34,6 +34,7 @@ import {
   type TransformSnapshot,
 } from '@/engine/net/transform-snapshot'
 import { playerSettings } from '@/engine/player-settings'
+import { destroyEntity } from '@/engine/sim/ecs/destroy'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { resolveBikeVariant } from '@/game/bikes/variants'
@@ -223,7 +224,7 @@ export function setupMultiplayer(opts: SetupMultiplayerOpts): MultiplayerHandle 
       if (rb) phys.world.removeRigidBody(rb)
     }
     clearRemoteInterp(eid)
-    removeEntity(sim, eid)
+    destroyEntity(sim, eid)
     remoteEids.delete(peerId)
   }
 
