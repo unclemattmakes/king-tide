@@ -124,7 +124,7 @@ import { OutOfBoundsStore } from '@/game/components/out-of-bounds'
 import type { PickupType } from '@/game/components/pickup'
 import { RacerStore } from '@/game/components/race'
 import type { RaceTick } from '@/game/sim-step'
-import { simulateStep } from '@/game/sim-step'
+import { defaultSimTuning, simTuningFromDevSettings, simulateStep } from '@/game/sim-step'
 import { chargeBoostMeter } from '@/game/systems/boost-meter'
 import { isOverBoostPad } from '@/game/systems/boost-pad'
 import type { GhostRunner } from '@/game/systems/ghost-runner'
@@ -1133,6 +1133,10 @@ export function startGameLoop(opts: GameLoopOpts): void {
           waveTimeScale: waterMesh.debug.getTimeScale(),
           runAI: iAmHost,
           oob: oobCfg,
+          // SP: live dev sliders still tune feel. MP (roomId set): frozen
+          // defaults so peers step identically — mirrors waveTimeScale /
+          // runAI pinning above (docs/systems-review.md §1.2).
+          tuning: roomId === null ? simTuningFromDevSettings() : defaultSimTuning(),
           ...(waveRiderSys ? { waveRiders: waveRiderSys } : {}),
         })
         // M10.11 — broadcast at 20 Hz. The send is gated on `net.ready &&

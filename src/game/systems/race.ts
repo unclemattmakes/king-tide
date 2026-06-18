@@ -24,6 +24,19 @@ export type RaceEvents = {
   onFinish?(eid: number): void
 }
 
+/**
+ * Monotonic race progress: `lap * checkpointCount + nextCheckpoint`. Higher
+ * = further along. The single source of truth for ordering — both
+ * `computeStandings` and `rubberBandSystem` consume it so the metric can
+ * never drift between the HUD and the AI catch-up logic.
+ */
+export function raceProgress(
+  racer: { lap: number; nextCheckpoint: number },
+  track: { checkpoints: { length: number } },
+): number {
+  return racer.lap * track.checkpoints.length + racer.nextCheckpoint
+}
+
 /** A bike can't travel this far in one 60 Hz tick under its own power
  *  (top speed ≈ 28 m/s → ~0.5 m/tick). Larger per-tick jumps are warps:
  *  respawn after out-of-bounds, a multiplayer snapshot catch-up sweep
@@ -121,6 +134,9 @@ export function createRaceSystem(track: Track, events: RaceEvents = {}) {
         const crossingFinishLine = cp.index === 0
         racer.checkpointsCrossed += 1
         racer.nextCheckpoint = (racer.nextCheckpoint + 1) % track.checkpoints.length
+        // Stamp arrival time at this new progress level for the standings
+        // tie-break (earlier arrival = ahead among equal-progress racers).
+        racer.lastCheckpointTime = racer.raceTime
 
         // Lap completes when crossing the start/finish line (cp 0) AFTER the
         // first one (the first cp 0 crossing simply *starts* lap 1).

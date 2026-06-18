@@ -8,6 +8,7 @@ import {
   ControlIntent,
   ControlIntentStore,
 } from '@/game/components'
+import { risingEdge } from '@/game/systems/edge'
 
 /**
  * Burnout-3-style boost meter.
@@ -50,7 +51,7 @@ export function boostMeterSystem(sim: SimWorld, phys: PhysicsWorld): void {
     const intent = ControlIntentStore.must(eid)
     const meter = BoostMeterStore.must(eid)
 
-    const pressed = intent.boost && !meter.prevBoostDown
+    const pressed = risingEdge(intent.boost, meter.prevBoostDown)
     meter.prevBoostDown = intent.boost
 
     if (meter.active) {
