@@ -35,6 +35,60 @@
 
 ---
 
+## Implementation status (2026-06-18)
+
+All three waves from the sequencing plan below have landed on
+`claude/game-systems-review-ax01to`. Gate after each: `pnpm typecheck` clean,
+`pnpm test` green except the 2 pre-existing asset-missing failures
+(`bike-loader`, `glb-loader` — gitignored GLBs), `biome` error-level clean,
+`pnpm build` succeeds.
+
+**Wave 1 — guards, cleanup, bug fixes, shared helpers**
+- §1.1 Sim-purity guard (`tests/unit/sim-purity-guard.test.ts`) bans
+  `three` / `@/engine/render` / `Math.random` / `Date.now` / `performance.now`
+  (and, after §1.2, `@/engine/dev-settings`) under the sim dirs. Deleted the
+  dead `sim/time/clock.ts`.
+- §3.1 `createStore` self-registers; `destroyEntity()` wipes all stores; all
+  `removeEntity` sites swapped. Shield/Stun detach on expiry.
+- §2.1 Standings tie-break fixed (`lastCheckpointTime` + shared `raceProgress`).
+  §2.2 missile-target liveness guard. §6.2 `bike-spatial` + `edge.ts` helpers.
+
+**Wave 2 — structural**
+- §1.2 `devSettings` removed from the sim path → `SimTuning` on `StepInputs`
+  (live in SP, frozen in MP), folded into the snapshot.
+- §4 `hover.ts` 2271 → ~495-LOC orchestrator over `hover-{types,tuning,probe,
+  spring,attitude,drive}.ts`; `rider-pose.ts` split into `rider-pose-{math,
+  tuning}.ts` + `rider-ik.ts` with per-entity tuning.
+- §6.3 pickup registry; §7 AI peak-curvature braking + data-driven steer gains.
+- §6.1 `trickPhase()` named view + `edge.ts` adoption (full storage collapse
+  deferred — see below).
+
+**Wave 3 — determinism**
+- §1.3 snapshot now hashes all sim-carrying stores (render-only excluded) via
+  the store registry. §1.4 eid-stable tie-breaks (missile target / mine /
+  missile hit / contested pickup). §6 dev warning when a snapshot position
+  exceeds the ±327 m wire range.
+
+**Deliberately deferred (with rationale)**
+- **Full `TrickState` field collapse (§6.1).** Several flags are read directly
+  by `game-loop` / render; collapsing storage is cross-cutting AND feel-
+  sensitive (the 344-line state machine can't be feel-verified headless here).
+  Shipped the safe subset: a tested, named `trickPhase()` view + `edge.ts`.
+- **Rollback restore (§1.3).** The snapshot is now a comprehensive *desync-
+  detection* hash; it is intentionally **not** a restore point. There is no
+  `restoreSnapshot` and rollback netcode is out of near-term scope — lockstep +
+  detection is the near-term target. The store serialization is the basis for a
+  typed restore path if rollback is taken on.
+- **Authoritative combat events (Wave 3 tail).** Designing combat as
+  authoritative result-broadcasts (not re-simulated intents) is a real
+  multiplayer feature that needs a 2-peer relay to verify and the M10.13
+  owner-authoritative-combat work to land first. Out of scope for an
+  unverifiable single-session change; the eid-stable tie-breaks (§1.4) and the
+  last-write-wins intent-buffer caveat (§ netcode findings) are the prerequisites
+  recorded for it.
+
+---
+
 ## 1. Determinism & the multiplayer goal (highest stakes)
 
 Lockstep + eventual rollback are stated goals (implementation-plan.md, ADR
