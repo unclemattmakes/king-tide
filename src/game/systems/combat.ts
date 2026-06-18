@@ -155,8 +155,9 @@ export function mineSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): void 
       continue
     }
 
-    // Proximity check.
-    let triggered = false
+    // Proximity check. Pick the lowest-eid bike in range (not first in query
+    // order) so the victim is deterministic across peers — see review §1.4.
+    let victim = -1
     forEachBikeInRange(
       sim,
       phys,
@@ -165,16 +166,15 @@ export function mineSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): void 
       ({ eid: bEid }) => {
         // The dropper is immune until the mine arms.
         if (bEid === mine.ownerEid && mine.ageSec < MINE_ARMING_DELAY) return
-        const reaction = applyHitReaction(sim, phys, bEid)
-        const color = reaction.shielded ? 0x66ff99 : 0xff7733
-        createExplosion(sim, mine.position, color)
-        triggered = true
-        return true
+        if (victim === -1 || bEid < victim) victim = bEid
       },
       { bikeEids },
     )
 
-    if (triggered) {
+    if (victim !== -1) {
+      const reaction = applyHitReaction(sim, phys, victim)
+      const color = reaction.shielded ? 0x66ff99 : 0xff7733
+      createExplosion(sim, mine.position, color)
       mine.detonated = true
       mine.detonatedAt = mine.ageSec
     }
@@ -215,7 +215,9 @@ export function pickMissileTarget(
       if (dist < 0.001) return
       const dot = (fwd.x * dx + fwd.y * dy + fwd.z * dz) / dist
       if (dot < MISSILE_TARGET_CONE_DOT) return
-      if (dist < bestDist) {
+      // Nearest wins; exact-distance ties broken by lowest eid so the choice
+      // is independent of (peer-divergent) query order — see review §1.4.
+      if (dist < bestDist || (dist === bestDist && bEid < bestEid)) {
         bestDist = dist
         bestEid = bEid
       }
@@ -282,7 +284,8 @@ export function missileSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): vo
     m.position.y += m.velocity.y * dt
     m.position.z += m.velocity.z * dt
 
-    // Hit detection — any bike but the owner within hit radius.
+    // Hit detection — lowest-eid bike (but the owner) within hit radius, so
+    // the victim is deterministic across peers when two overlap (review §1.4).
     let hitEid = -1
     forEachBikeInRange(
       sim,
@@ -291,8 +294,7 @@ export function missileSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): vo
       MISSILE_HIT_RADIUS,
       ({ eid: bEid }) => {
         if (bEid === m.ownerEid && m.ageSec < MISSILE_OWNER_IMMUNITY_S) return
-        hitEid = bEid
-        return true
+        if (hitEid === -1 || bEid < hitEid) hitEid = bEid
       },
       { bikeEids },
     )

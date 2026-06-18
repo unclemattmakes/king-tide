@@ -108,8 +108,25 @@ const ROT_SCALE = 32767 // quaternion component (already unit-norm)
 const VEL_SCALE = 256 // m/s → 1/256 m/s
 const VEL_MAX = 127.99 // = 32767 / 256 ≈ 127.996, rounded down for safety
 
+/** Set once we've warned about an out-of-range coordinate, so the 20 Hz
+ *  encode path doesn't spam the console. */
+let _warnedPosOutOfRange = false
+
 /** Quantize a position component (m) to int16. */
 function encPos(v: number): number {
+  if (import.meta.env.DEV && !_warnedPosOutOfRange && Math.abs(v) > POS_MAX) {
+    _warnedPosOutOfRange = true
+    // Clamping silently pins a remote bike to the world edge — fine for the
+    // ±150 m launch tracks, but larger dressed v2 maps (Mexico City, Cape
+    // Town) can exceed this. Surface it instead of letting the bike teleport
+    // to the boundary unnoticed. Widening needs an int32/larger-scale wire
+    // format (review §6 / multiplayer-review finding #6).
+    console.warn(
+      `[net] transform-snapshot: position ${v.toFixed(1)} m exceeds the ±${POS_MAX} m ` +
+        `wire range and is being clamped; remote bikes will pin to the world edge. ` +
+        `Larger tracks need a wider position format.`,
+    )
+  }
   return Math.round(clamp(v, -POS_MAX, POS_MAX) * POS_SCALE)
 }
 
