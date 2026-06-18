@@ -8,6 +8,11 @@
  *   - Three-free          → no `import … from 'three'`
  *   - render-free         → no `import … from '@/engine/render/…'`
  *   - deterministic       → no `Math.random()`, `Date.now()`, `performance.now()`
+ *   - devSettings-free    → no `import … from '@/engine/dev-settings'` (the
+ *                           mutable, localStorage-backed, dev-palette-tunable
+ *                           singleton is a silent multiplayer-desync source if
+ *                           read mid-tick; §1.2 routed its sim-affecting knobs
+ *                           through `StepInputs.tuning` instead)
  *
  * A single stray import in one of those layers would otherwise sail through
  * typecheck/lint/test/build and only surface as a multiplayer desync or a
@@ -47,6 +52,12 @@ const BANS: { label: string; re: RegExp }[] = [
   { label: 'Math.random()', re: /\bMath\.random\s*\(/ },
   { label: 'Date.now()', re: /\bDate\.now\s*\(/ },
   { label: 'performance.now()', re: /\bperformance\.now\s*\(/ },
+  // Matches both the alias import (`@/engine/dev-settings`) and any relative
+  // path that ends in `dev-settings` (e.g. `../../engine/dev-settings`).
+  {
+    label: "import from '@/engine/dev-settings'",
+    re: /\bfrom\s+['"](?:@\/engine\/dev-settings|(?:\.\.?\/)+(?:[^'"]*\/)?dev-settings)['"]/,
+  },
 ]
 
 describe('sim-purity guard', () => {

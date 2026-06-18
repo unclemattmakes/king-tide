@@ -75,6 +75,18 @@ world at race start so they ride the snapshot/seed. Keep only render/camera/
 keyboard-feel knobs live. Minimum bar: include them in `captureSnapshot` so
 divergence is at least *detectable*.
 
+**DONE.** A `SimTuning` type (`sim-step.ts`) now holds exactly the five
+sim-affecting knobs (`hoverProbe{HalfLength,HalfWidth,Lift,SpeedScale}` +
+`steerReleaseTightness`); it threads through `StepInputs.tuning` →
+`hoverSystem(…, tuning)` / `applyPeerInputs(…, tuning)`. `hover.ts` and
+`input-apply.ts` no longer import `dev-settings` at all (the sim-purity guard now
+bans that import in the guarded dirs). Single-player passes
+`simTuningFromDevSettings()` so dev sliders still tune live; multiplayer
+(`roomId !== null`) passes the frozen `defaultSimTuning()` — mirroring the
+existing `waveTimeScale`/`runAI` SP-vs-MP split. The tuning is folded into
+`captureSnapshot`/`SimSnapshot.tuning` so divergence is detectable in the
+determinism hash.
+
 ### 1.3 The determinism snapshot covers physics + RNG but not gameplay state
 `captureSnapshot` (`snapshot.ts:42-84`) serializes Rapier pose/velocity +
 `rng.state()` + `waveField.time`. It captures **no** Store: `HoverState`,
@@ -209,6 +221,15 @@ own too many concerns each. Concrete seams:
   `hover-tuning.ts` (constants). Keep `hover.ts` as the orchestrator. The two
   dev-flagged wave prototypes (`hover.ts:1615-1668`) should move behind their flag
   into one `applyWaveFeelPrototypes` so they ship or get deleted as a unit.
+  **DONE.** Split into `hover-types.ts` (the `HoverFrame`/`Footprint`/`SurfaceProbe`
+  shapes + `emptyFootprint`), `hover-tuning.ts`, `hover-probe.ts`, `hover-spring.ts`,
+  `hover-attitude.ts`, `hover-drive.ts`. `hover.ts` is now the orchestrator + a
+  facade that RE-EXPORTS every previously-imported symbol so no importer path
+  changed. The wave prototypes are behind one `applyWaveFeelPrototypes` in
+  `hover-drive.ts`. The per-tick `points` array in the spring is hoisted to a
+  module-level `_springPoints` scratch (the one hot-loop alloc). `resolveCornerGrounded`
+  is exported and the dive/release-kick timers are now a pure exported
+  `advanceDiveTimers(...)`; both are unit-pinned in `hover-state-machines.test.ts`.
 - **`game-loop.ts`** — `frame()` interleaves input sampling, the fixed-step
   accumulator (which is *correct* — clamps dt, drains on pause, computes
   `renderAlpha` after drain), OOB autopilot/respawn (~200 LOC), ~85 LOC of replay
@@ -235,7 +256,11 @@ The good pattern already exists: `wave-rider.ts`'s per-archetype
   declared **twice** in one function (`hover.ts:971-979` and `:1047-1048`) and the
   grounded-pitch coefficient `7` appears **three** times — genuine drift bugs
   waiting to happen. **Do:** hoist into the module constant block / a
-  `HoverTuning` object.
+  `HoverTuning` object. **DONE (for `hover.ts`).** All ~40 inline constants now
+  live in `hover-tuning.ts`; the buoyancy pair (`BUOYANCY_PER_M`/`BUOYANCY_CAP`)
+  is named once, and the grounded-pitch `7` is now a single `GROUND_PITCH_COEF`
+  used by the player torque, the release kick, and the dive baseline. (Trick/crash
+  per-bike tuning + AI gains below remain open.)
 - **Trick + crash feel is global, not per-bike.** `BikeStatsData` already carries
   `topSpeed`/`boostMul`/`surfaceFollow`/`driftStyle`, yet `trick-hop.ts`
   (`HOP_VELOCITY_SMALL`, slope-min, reward floor) and `rider-crash.ts`
@@ -349,10 +374,10 @@ sim phase functions can be tested cheaply — extend that pattern.
    (§6.2) — removes duplication and de-risks later edits.
 
 **Wave 2 — structural, medium-risk (a week+ each):**
-6. Get `devSettings` out of the sim path (§1.2); decide & document the
+6. Get `devSettings` out of the sim path (§1.2 — ✅ DONE); decide & document the
    snapshot/rollback scope (§1.3).
-7. Split `hover.ts` and `rider-pose.ts` along their existing seams; pull all
-   tuning into `*-tuning` modules (§4, §5).
+7. Split `hover.ts` (✅ DONE — §4/§5) and `rider-pose.ts` along their existing
+   seams; pull all tuning into `*-tuning` modules.
 8. Re-model `TrickState` as explicit phases (§6.1).
 9. Pickup registry (§6.3); per-difficulty AI gains + peak-curvature braking (§7).
 

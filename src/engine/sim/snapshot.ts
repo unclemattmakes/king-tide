@@ -12,6 +12,7 @@
  */
 import { query } from 'bitecs'
 import { RBHandle, RBHandleStore } from '@/game/components'
+import type { SimTuning } from '@/game/sim-step'
 import type { SimWorld } from './ecs/world'
 import type { PhysicsWorld } from './physics/rapier'
 import type { WaveFieldState } from './water/wave-field'
@@ -19,6 +20,12 @@ import type { WaveFieldState } from './water/wave-field'
 export type SimSnapshot = {
   rng: number
   waveTime: number
+  /** The sim-affecting dev-tunable knobs in force for this tick. Folded into
+   *  the determinism hash so a tuning divergence between peers (one peer's
+   *  live dev sliders vs another's frozen defaults — §1.2) surfaces as a
+   *  mismatch instead of a silent desync. `null` when the caller didn't
+   *  thread tuning through (legacy harness paths). */
+  tuning: SimTuning | null
   bodies: BodySnapshot[]
 }
 
@@ -43,6 +50,7 @@ export function captureSnapshot(
   sim: SimWorld,
   phys: PhysicsWorld,
   waveField: WaveFieldState,
+  tuning: SimTuning | null = null,
 ): SimSnapshot {
   const bodies: BodySnapshot[] = []
   // RBHandle covers every entity with a Rapier rigid body — bikes, mines,
@@ -79,6 +87,7 @@ export function captureSnapshot(
   return {
     rng: sim.rng.state(),
     waveTime: waveField.time,
+    tuning,
     bodies,
   }
 }
