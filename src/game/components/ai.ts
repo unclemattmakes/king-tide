@@ -82,6 +82,11 @@ export type AIControllerData = {
    *  drift.ts so the AI doesn't immediately re-trigger on the next
    *  micro-corner. */
   driftCooldownS: number
+  /** PD steering gains + lookahead/line blend, baked from difficulty.
+   *  See `DifficultyTuning.steerKp/steerKd/lineBlend`. */
+  steerKp: number
+  steerKd: number
+  lineBlend: number
 }
 export const AIControllerStore = createStore<AIControllerData>('AIController')
 
@@ -111,6 +116,9 @@ export function defaultAIController(
     driftDir: 0,
     driftHoldS: 0,
     driftCooldownS: 0,
+    steerKp: tuning.steerKp,
+    steerKd: tuning.steerKd,
+    lineBlend: tuning.lineBlend,
   }
 }
 

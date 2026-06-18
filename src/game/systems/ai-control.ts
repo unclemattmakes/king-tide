@@ -17,6 +17,7 @@ import {
   curvatureAheadLooped,
   findClosestIndexLooped,
   lookaheadIndexLooped,
+  peakCurvatureAheadLooped,
 } from '@/game/tracks/spline-query'
 import type { Track } from '@/game/tracks/types'
 
@@ -205,9 +206,10 @@ export function aiControlSystem(
     const lineTarget = spline.points[bestIdx]!
     const aheadOfLook = spline.points[(lookIdx + 1) % N]!
 
-    // 3. Blended target — 55% lookahead + 45% line. Pulls the AI back onto
-    // the racing line when it's drifting wide.
-    const blendT = 0.55
+    // 3. Blended target — lookahead vs racing line (data-driven per
+    // difficulty; default 55% lookahead). Pulls the AI back onto the
+    // racing line when it's drifting wide.
+    const blendT = ai.lineBlend
     let targetX = lookTarget.x * blendT + lineTarget.x * (1 - blendT)
     let targetZ = lookTarget.z * blendT + lineTarget.z * (1 - blendT)
 
@@ -244,10 +246,10 @@ export function aiControlSystem(
     // cam (the world rotates right under them). For the AI to drive toward a
     // target at +localX (right of the bike), it must therefore command a
     // *negative* steer. Hence the angle sign flip below.
-    const KP = 0.85
-    const KD = 0.45
-    const damp = angvel.y * KD
-    let steer = -angle * KP + damp
+    // Gains are per-difficulty (baked on the controller) so an over-
+    // correcting Hard AI can be softened without touching Casual.
+    const damp = angvel.y * ai.steerKd
+    let steer = -angle * ai.steerKp + damp
     steer = Math.max(-1, Math.min(1, steer))
 
     // 6. Curvature look-ahead. Walk ~1.5s ahead along the spline summing arc
@@ -257,10 +259,17 @@ export function aiControlSystem(
     // and plans for higher lateral G.
     const scanDist = Math.max(CURVATURE_LOOKAHEAD_MIN, speedHoriz * ai.curvatureLookaheadSec)
     const { totalBend, scannedDist } = curvatureAheadLooped(spline.points, bestIdx, scanDist)
-    // Implied corner radius: bend (rad) over arclength (m) → curvature (1/m).
-    // Cap min radius at 8m so missing data doesn't produce a near-stop target.
+    // Average curvature (1/m) over the whole scan — used for the drift
+    // decision, whose thresholds are tuned to the averaged metric.
     const curvature = scannedDist > 0 ? totalBend / scannedDist : 0
-    const impliedRadius = curvature > 1e-4 ? Math.max(8, 1 / curvature) : 1e6
+    // Braking plans for the PEAK upcoming curvature, not the average: a sharp
+    // kink hidden in a long straight averages out and the AI under-brakes for
+    // it. `peakCurvatureAheadLooped` returns the tightest window's curvature.
+    const { peakCurvature } = peakCurvatureAheadLooped(spline.points, bestIdx, scanDist)
+    // Implied corner radius: curvature (1/m) → radius (m).
+    // Cap min radius at 8m so a single sharp vertex doesn't produce a
+    // near-stop target.
+    const impliedRadius = peakCurvature > 1e-4 ? Math.max(8, 1 / peakCurvature) : 1e6
     const cornerSpeedCap = Math.sqrt(ai.maxLateralAccel * impliedRadius)
     // Soft straight-line target scaled by the bike's OWN top speed — not a
     // hard cap (physics enforces the real ceiling in hover.ts). Reading the
