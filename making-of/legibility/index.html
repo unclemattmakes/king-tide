@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>Style as Legibility — The Making of Hoverbike</title>
+    <meta
+      name="description"
+      content="How an arcade racer's painterly look doubles as its HUD: hold the whole world in a muted band so the brightest thing on screen is always a gameplay event — with a live demo wired to the real signal-colour vocabulary."
+    />
+    <style>
+      body {
+        margin: 0;
+        background: #050a14;
+        color: #f4f8ff;
+        font-family: "Inter", system-ui, sans-serif;
+      }
+    </style>
+    <script type="module" src="/src/making-of/legibility/main.ts"></script>
+  </head>
+  <body>
+    <header class="mo-topbar">
+      <a class="mo-brand" href="/making-of/">Making of <span>Hoverbike</span></a>
+      <nav>
+        <a href="/making-of/">All chapters</a>
+        <a href="/">Play the game</a>
+      </nav>
+    </header>
+
+    <main class="mo-shell">
+      <section class="mo-hero">
+        <p class="mo-eyebrow">Chapter 08 — Style as Legibility</p>
+        <h1>The look is the HUD.</h1>
+        <p>
+          At 40&nbsp;metres a second, a player has no time to read a cluttered screen. So the art
+          style isn't just decoration — it's a <em>readability system</em>. We hold the entire world
+          in a muted band of teal and slate, which leaves the brightest, most-saturated thing on
+          screen free to mean exactly one thing: <strong>a gameplay event you need to react to.</strong>
+          This chapter is how the paint became the interface.
+        </p>
+      </section>
+
+      <article class="mo-prose">
+        <h2>The one bet that made it possible</h2>
+        <p>
+          There are two ways to make a game look painted. The tempting one is a screen filter — run
+          the finished frame through a Kuwahara or oil-paint pass. It looks great in a screenshot and
+          falls apart in motion: smear a moving image and the brushstrokes <em>crawl</em>, swimming
+          across surfaces as the camera moves. At race speed that's nauseating.
+        </p>
+        <p>
+          The other way — the one Valve took for <strong>Team Fortress 2</strong> and Rare took for
+          <strong>Sea of Thieves</strong> — is to bake the paint into the <em>materials and surfaces</em>,
+          not the screen. A brushstroke that lives on a hull moves <em>with</em> the hull, so it's
+          rock-steady no matter how fast you fly past. We made that same bet early, and everything in
+          this chapter is only possible because of it: you can't spend a "contrast budget" on a screen
+          filter, because a filter doesn't know what's a boost pad and what's a wave.
+        </p>
+        <div class="mo-aside">
+          <strong>The illustrative re-light.</strong> On top of stock physically-based lighting we
+          run a TF2-style <em>diffuse warp</em> — cool shadows, a warm terminator, a touch of
+          overbright — plus a true additive rim. It's cheap, temporally bulletproof, and it's what
+          turns "a PBR scene with painted textures" into something that reads as illustration. That
+          additive rim is also the channel the gameplay signals below hijack.
+        </div>
+
+        <h2>A contrast budget</h2>
+        <p>
+          Painterly's superpower over photoreal is that <em>you</em> decide where the lights, the
+          darks, and the saturation go. So we treat contrast and saturation as a <strong>budget</strong>
+          and refuse to overspend it on scenery. The water, the drowned skyline, the props, the sky —
+          all of it is deliberately desaturated and held in a narrow value range. The world is
+          handsome but quiet.
+        </p>
+        <p>
+          That restraint is the whole trick. Because nothing in the environment is allowed to shout,
+          the moment something <em>does</em> — a saturated hue, a hard edge of light — your eye snaps
+          to it for free, before you've consciously parsed anything. We spend the entire saturated end
+          of the palette on a tiny, reserved set of gameplay signals, and forbid those exact hues in
+          environment art. A boost-cyan in a building's albedo would be a lie the eye has been trained
+          to chase.
+        </p>
+        <p>
+          Try it in the demo. The scene below is the muted world band — teal water, slate towers, two
+          dull bikes — with three gameplay tokens floating in it. Turn <strong>Light the signals</strong>
+          off and the tokens sink into the scenery; you have to <em>hunt</em> for them. Turn it back on
+          and your eye is yanked straight to them. That gap is the budget doing its job.
+        </p>
+
+        <figure class="mo-demo">
+          <figcaption class="mo-demo-caption">
+            Live demo — <strong>toggle the signals, then try grayscale</strong>. The token colours,
+            shapes, and motions are read straight from the game's
+            <code>signal-colors.ts</code> vocabulary.
+          </figcaption>
+          <div class="mo-demo-body">
+            <div class="mo-demo-stage" id="legibility-demo-stage"></div>
+            <div class="mo-demo-controls" id="legibility-demo-controls"></div>
+          </div>
+        </figure>
+
+        <h2>A small, sacred vocabulary</h2>
+        <p>
+          A budget is only worth holding if you spend it consistently. So the signals live in
+          <strong>one locked module</strong> — a handful of tokens the player learns once and then
+          parses everywhere. Boost is cyan. A pickup is magenta. A hazard is a red-leaning amber. The
+          ideal racing line is green. A full drift charge is violet. Every slice that draws a signal
+          — the bike rims, the racing-line ribbon, the HUD, the particle bursts — imports the
+          <em>same</em> frozen token rather than hard-coding a hex, so a colour means the same thing
+          no matter where it surfaces. The readouts in the demo are pulled live from that module; the
+          hexes you see are the hexes the game ships.
+        </p>
+
+        <h2>Colour is never the only cue</h2>
+        <p>
+          Leaning on colour alone breaks for a lot of players and in a lot of situations, so two rules
+          are baked into the vocabulary itself.
+        </p>
+        <ul>
+          <li>
+            <strong>Blue/orange, not red/green.</strong> Red-green is the most common form of
+            colour-blindness, so the load-bearing axis — the drift-charge ladder — runs
+            <em>blue&nbsp;→&nbsp;orange&nbsp;→&nbsp;violet</em>, and the green racing line is never the
+            sole cue against a red hazard.
+          </li>
+          <li>
+            <strong>Every signal is double-coded</strong> — colour <em>and</em> shape <em>and</em>
+            motion. Boost is a forward-lunging chevron; a pickup is a pulsing ring; a hazard is an
+            angular shape that telegraphs with a deliberate blink. That redundancy is what lets a
+            signal survive grayscale, colour-blindness, <em>and</em> peripheral vision — where colour
+            acuity collapses but motion does not.
+          </li>
+        </ul>
+        <p>
+          Flip the demo to <strong>Grayscale</strong> — the "peripheral vision" test. The hues are
+          gone, yet you can still tell the boost from the hazard from the pickup, because the shape and
+          the motion were doing half the work all along. A signal that only reads in colour isn't a
+          signal; it's a guess.
+        </p>
+
+        <h2>The drift ladder was the first customer</h2>
+        <p>
+          Back in <a href="/making-of/drift/">Chapter 04</a>, the drift charge built through coloured
+          rear sparks — blue, then orange, then a top-tier flash. Those colours started life as
+          ad-hoc hexes picked by eye. When the vocabulary got formalised, the ladder was the obvious
+          first thing to fold in: it already used the blue→orange axis, it just needed to ramp
+          <em>spark density</em> too so the stage reads in grayscale and in the corner of your eye.
+          Drive the <strong>Charge stage</strong> control in the demo and watch the player bike's
+          sparks climb the same ladder the HUD and the boost burst use.
+        </p>
+
+        <h2>Style becomes the HUD</h2>
+        <p>
+          Once the budget and the vocabulary exist, you can start deleting actual interface. Two
+          examples shipped on exactly this idea:
+        </p>
+        <ul>
+          <li>
+            <strong>Rim-as-signal.</strong> Drafting matters in a pack, but a number on the HUD is
+            something you have to <em>look away</em> to read. So a rival you're drafting rims cyan, and
+            a rival drafting <em>you</em> rims warm — the additive rim from the re-light, tinted by a
+            signal token. The threat is legible in your peripheral vision, on the very object it's
+            about, with no widget at all.
+          </li>
+          <li>
+            <strong>The flow ribbon.</strong> The ideal line down a track is painted onto the world as
+            a green ribbon with brushstrokes that scroll forward and a chevron in its silhouette — a
+            racing line that's part of the scenery instead of an overlay floating on top of it.
+          </li>
+        </ul>
+
+        <h2>The lesson</h2>
+        <p>
+          The portable idea here isn't "use cyan for boost." It's the discipline underneath:
+          <strong>decide what the player must read at speed, then engineer the entire frame so those
+          things — and only those things — are the loudest signal in it.</strong> That's a budget you
+          spend, an art rule you enforce on your own environment artists, and a tiny vocabulary you
+          never let grow. The payoff is a game you can read at a glance and a look that's doing two
+          jobs at once.
+        </p>
+
+        <h2>Read the code</h2>
+        <p>
+          The locked vocabulary — colours, shapes, motions, and the rules that govern them — is
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/engine/render/signal-colors.ts">
+            <code>src/engine/render/signal-colors.ts</code></a> (imported directly by this demo). The
+          rim-as-signal wiring lives in
+          <a href="https://github.com/occ-matt/hoverbike/blob/main/src/engine/render/signal-state.ts">
+            <code>signal-state.ts</code></a>, the racing line in
+          <code>racing-line-ribbon.ts</code>, and the illustrative re-light in
+          <code>illustrative-lighting.ts</code>. The full thesis and research is
+          <code>docs/painterly-legibility-plan.md</code>, sitting on top of the look bible in
+          <code>docs/art-direction.md</code>.
+        </p>
+      </article>
+
+      <footer class="mo-footer">
+        <p>
+          <a href="/making-of/">← Back to all chapters</a> &nbsp;·&nbsp; Previous:
+          <a href="/making-of/hoverbike/">Inside the Bike</a>.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

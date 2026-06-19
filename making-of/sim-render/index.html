@@ -76,6 +76,15 @@
           <em>"two sims advanced from the same seed and inputs MUST produce the same snapshot
           string."</em>
         </p>
+        <div class="mo-aside">
+          <strong>Determinism is a property you have to defend.</strong> It decays the moment a new
+          system stashes state the snapshot doesn't hash, or two entities are processed in an order
+          that isn't stable. A recent hardening pass widened the snapshot to cover
+          <em>every</em> sim-carrying store and made the tie-breaks entity-id-stable — so a draw
+          between two bikes resolves the same way on every machine. Each is the kind of bug that
+          would surface only as a rare multiplayer desync, which is exactly why the hash runs in the
+          test suite, not just in production.
+        </div>
         <p>
           That single property is what makes the hard features cheap. <strong>Multiplayer</strong>
           is lockstep: peers exchange button presses, not positions, and each simulates the same
@@ -91,7 +100,7 @@
           Three.js is a megabyte of code that wants a GPU and a DOM. If a hover or drift system
           imported it, every unit test would have to fake a graphics context. Because they don't,
           the entire simulation runs headless in plain Node — so the suite is
-          <strong>834 tests in about 8 seconds</strong>, no browser required. (Every demo on this
+          <strong>~1,300 tests in seconds</strong>, no browser required. (Every demo on this
           site was sanity-checked the same way: the sim math is just importable functions.) Fast,
           honest tests are a direct dividend of the boundary.
         </p>
