@@ -111,6 +111,16 @@
           dropped term would have added is faked back in on the GPU with scrolling detail-normal
           textures, purely cosmetic.
         </p>
+        <p>
+          That cosmetic layer has had its own long tuning arc. An early version piled on extra
+          readability overlays — contour-line foam, posterized value bands, rising-face strokes — and
+          at full strength they read as <em>allover noise</em> rather than a legible sea. The fix was
+          to dial almost all of them back to a whisper (and delete three outright once we measured
+          what each cost per fragment), letting a curvature-driven whitecap and a roughness-coupled
+          reflection carry the swell read instead. How the water spends its visual budget so the
+          <em>gameplay</em> stays the loudest thing on screen is its own story —
+          <a href="/making-of/legibility/">Chapter 08</a>.
+        </p>
         <div class="mo-aside">
           <strong>Why it matters for feel:</strong> because height is closed-form, the game can ask
           the sea "how high are you, right here, right now?" thousands of times per frame for almost
