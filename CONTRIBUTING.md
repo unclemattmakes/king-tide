@@ -27,6 +27,14 @@ commands. Prerequisites:
   [`docs/blender-pipeline-guide.md`](docs/blender-pipeline-guide.md).
   Skip this if you're only touching code, not assets.
 
+**First `pnpm dev` (cold cache):** the dev server pre-bundles the Three.js
+dependency graph at startup (terminal: `pre-bundling… → ready`, ~10–20 s) —
+the page stays blank until `ready`, so wait for it before opening the browser.
+This is `optimizeDeps.noDiscovery` in [`vite.config.ts`](vite.config.ts), which
+skips Vite's ~40 s cold dependency *scan*. **Gotcha: add any NEW bare browser
+import (`import 'some-pkg'`) to `optimizeDeps.include`** — with discovery off, a
+missed CJS dep fails loudly at dev start; a missed ESM one just serves unbundled.
+
 ## What's a good first PR?
 
 - Look at issues labelled `good first issue` or `help wanted`.

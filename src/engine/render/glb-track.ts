@@ -216,6 +216,33 @@ export function isUnderMechanicalRigArm(node: THREE.Object3D): boolean {
   return false
 }
 
+/**
+ * Load an optional decimated collision proxy (`<track>-collider.glb`, built by
+ * `tools/blender/build_track_collider.py`) and return its scene root for
+ * `attachTrackColliders` — or null when no proxy is shipped (legacy tracks; the
+ * caller falls back to colliding the render geometry). Rapier's trimesh BVH then
+ * builds over a fraction of the render mesh's triangles, the bulk of the
+ * `track+env` boot cost. Collision-only — never added to the render scene, so
+ * heightmap + water shoaling keep reading the high-poly mesh.
+ *
+ * The content-type guard sidesteps Vite's dev SPA fallback, which serves a
+ * missing static file as `200 + index.html` instead of a 404 (prod/R2 404s
+ * normally); without it GLTFLoader would try to parse HTML as a GLB.
+ */
+export async function loadColliderProxy(url: string): Promise<THREE.Object3D | null> {
+  try {
+    const head = await fetch(url, { method: 'HEAD' })
+    const ct = head.headers.get('content-type') ?? ''
+    const isGlb =
+      head.ok && (ct.includes('octet-stream') || ct.includes('gltf') || ct.includes('binary'))
+    if (!isGlb) return null
+    const gltf = await new GLTFLoader().loadAsync(url)
+    return gltf.scene as unknown as THREE.Object3D
+  } catch {
+    return null
+  }
+}
+
 export function attachTrackColliders(group: THREE.Object3D, phys: PhysicsWorld): number {
   group.updateMatrixWorld(true)
   let attached = 0

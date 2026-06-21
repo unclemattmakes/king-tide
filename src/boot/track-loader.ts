@@ -22,7 +22,11 @@ import * as THREE from 'three'
 import { assetUrl } from '@/engine/asset-url'
 import { createIslandMesh } from '@/engine/render/arena-mesh'
 import { createCliffsideMesh } from '@/engine/render/cliffside-mesh'
-import { attachTrackColliders, loadGlbTrackVisuals } from '@/engine/render/glb-track'
+import {
+  attachTrackColliders,
+  loadColliderProxy,
+  loadGlbTrackVisuals,
+} from '@/engine/render/glb-track'
 import { createRampMesh } from '@/engine/render/ramp-mesh'
 import { gateShadowCaster, resolveShadowCastMinRadius } from '@/engine/render/shadow-caster-gate'
 import { buildTerrainHeightmap, type TerrainHeightmap } from '@/engine/render/terrain-heightmap'
@@ -174,7 +178,16 @@ export async function loadTrackForBoot(opts: {
         terrainShader: { ...track.terrainShader, waterLevel: track.water?.height ?? 0 },
       })
       scene.add(env.scene)
-      attachTrackColliders(env.scene, phys)
+      // Collision: prefer a shipped decimated proxy (`<glb>-collider.glb`, built
+      // by tools/blender/build_track_collider.py) so Rapier's trimesh BVH builds
+      // over a fraction of the render mesh's triangles — the bulk of the
+      // `track+env` boot cost. Falls back to colliding the render geometry when
+      // no proxy is shipped. The heightmap below still bakes from the high-poly
+      // mesh, so water shoaling + the intro raycast are unchanged.
+      const colliderProxy = await loadColliderProxy(
+        assetUrl(track.environmentGlb.replace(/\.glb$/i, '-collider.glb')),
+      )
+      attachTrackColliders(colliderProxy ?? env.scene, phys)
       terrainRoots.push(env.scene)
       horizonGeometry = env.horizonGeometry
       environmentGlbRoot = env.scene
@@ -216,7 +229,9 @@ export async function loadTrackForBoot(opts: {
         terrainShader: { waterLevel: track.water?.height ?? 0 },
       })
       scene.add(env.scene)
-      attachTrackColliders(env.scene, phys)
+      // Same decimated-collision-proxy preference as the JSON-track path above.
+      const colliderProxy = await loadColliderProxy(glbUrl.replace(/\.glb$/i, '-collider.glb'))
+      attachTrackColliders(colliderProxy ?? env.scene, phys)
       terrainRoots.push(env.scene)
       horizonGeometry = env.horizonGeometry
       environmentGlbRoot = env.scene
